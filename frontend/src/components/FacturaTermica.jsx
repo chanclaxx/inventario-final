@@ -29,34 +29,42 @@ export function FacturaTermica({ factura, garantias = [], onClose }) {
   return (
     <>
       <style>{`
-        @media print {
-          body * { visibility: hidden; }
-          #factura-termica, #factura-termica * { visibility: visible; }
-          #factura-termica {
-            position: fixed;
-            top: 0; left: 0;
-            width: 80mm;
-            font-size: 11px;
-            font-family: 'Courier New', monospace;
-          }
-          .no-print { display: none !important; }
-        }
-        #factura-termica {
-          width: 80mm;
-          font-family: 'Courier New', monospace;
-          font-size: 11px;
-          color: #000;
-          padding: 4px;
-        }
-        .linea-divisor { border-top: 1px dashed #000; margin: 6px 0; }
-        .centrado      { text-align: center; }
-        .negrita       { font-weight: bold; }
-        .fila          { display: flex; justify-content: space-between; margin: 2px 0; }
-        .garantia-titulo { font-weight: bold; margin-top: 6px; font-size: 10px; }
-        .garantia-texto  { font-size: 9px; line-height: 1.3; white-space: pre-wrap; }
-        .retoma-bloque   { margin: 4px 0; }
-        .retoma-linea    { font-size: 10px; margin: 1px 0; }
-      `}</style>
+  @media print {
+    @page {
+      margin: 0;
+      size: 80mm auto;
+    }
+    body * { visibility: hidden; }
+    #factura-termica, #factura-termica * { visibility: visible; }
+    #factura-termica {
+      position: fixed;
+      top: 0; left: 0;
+      width: 76mm;
+      padding: 3mm 2mm;
+      font-size: 13px;
+      font-family: 'Courier New', monospace;
+    }
+    .no-print { display: none !important; }
+  }
+  #factura-termica {
+    width: 76mm;
+    font-family: 'Courier New', monospace;
+    font-size: 13px;
+    color: #000;
+    padding: 3mm 2mm;
+    box-sizing: border-box;
+  }
+  .linea-divisor { border-top: 1px dashed #000; margin: 5px 0; }
+  .centrado      { text-align: center; }
+  .negrita       { font-weight: bold; }
+  .fila          { display: flex; justify-content: space-between; margin: 3px 0; gap: 4px; }
+  .fila span:last-child { text-align: right; flex-shrink: 0; max-width: 45mm; word-break: break-word; }
+  .garantia-bloque  { margin: 4px 0; }
+  .garantia-titulo  { font-weight: bold; margin-top: 6px; font-size: 12px; text-align: center; }
+  .garantia-texto   { font-size: 11px; line-height: 1.4; white-space: pre-wrap; text-align: justify; word-break: break-word; width: 100%; display: block; }
+  .retoma-bloque    { margin: 4px 0; }
+  .retoma-linea     { font-size: 12px; margin: 2px 0; }
+`}</style>
 
       {/* Overlay pantalla */}
       <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center no-print">
