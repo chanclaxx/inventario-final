@@ -6,6 +6,13 @@ import { AuthProvider } from './context/AuthContext.jsx'
 import App from './App.jsx'
 import './index.css'
 
+// Deshabilitar scroll en inputs numéricos globalmente
+document.addEventListener('wheel', () => {
+  if (document.activeElement?.type === 'number') {
+    document.activeElement.blur();
+  }
+}, { passive: false });
+
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {

@@ -160,12 +160,15 @@ function ModalDetalle({ facturaId, onClose, onReimprimir }) {
         </div>
 
         <div className="bg-gray-50 rounded-xl p-3">
-          <p className="text-xs text-gray-400 mb-1">Cliente</p>
-          <p className="text-sm font-semibold text-gray-800">{f?.nombre_cliente}</p>
-          {f?.cedula !== 'COMPANERO' && (
+            <p className="text-xs text-gray-400 mb-1">Cliente</p>
+            <p className="text-sm font-semibold text-gray-800">{f?.nombre_cliente}</p>
+            {f?.cedula !== 'COMPANERO' && (
             <p className="text-xs text-gray-500">CC: {f?.cedula} · Tel: {f?.celular}</p>
+            )}
+          {f?.usuario_nombre && (
+          <p className="text-xs text-gray-400 mt-1">Atendido por: <span className="text-gray-600 font-medium">{f.usuario_nombre}</span></p>
           )}
-        </div>
+          </div>
 
         <div className="bg-gray-50 rounded-xl p-3 flex flex-col gap-2">
           <p className="text-xs text-gray-400 font-medium">Productos</p>
@@ -252,7 +255,12 @@ function FilaFactura({ factura, onVerDetalle, onInactivar }) {
         {factura.productos_nombres && (
           <p className="text-xs text-gray-400 truncate">{factura.productos_nombres}</p>
         )}
-        <p className="text-xs text-gray-400">{formatFechaHora(factura.fecha)}</p>
+        <p className="text-xs text-gray-400">
+  {formatFechaHora(factura.fecha)}
+  {factura.usuario_nombre && (
+    <span className="ml-2 text-gray-300">· {factura.usuario_nombre}</span>
+  )}
+</p>
       </div>
 
       <div className="flex items-center gap-2 flex-shrink-0">
