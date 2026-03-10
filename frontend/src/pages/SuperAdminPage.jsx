@@ -12,11 +12,17 @@ import { Spinner } from '../components/ui/Spinner';
 const BASE = import.meta.env.VITE_API_URL ? `${import.meta.env.VITE_API_URL}/api/superadmin` : '/api/superadmin';
 const saApi = axios.create({ baseURL: BASE });
 
-saApi.interceptors.request.use((config) => {
-  const token = sessionStorage.getItem('sa_token');
-  if (token) config.headers.Authorization = `Bearer ${token}`;
-  return config;
-});
+saApi.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401) {
+      sessionStorage.removeItem('sa_token');
+      sessionStorage.removeItem('sa_usuario');
+      window.location.reload();
+    }
+    return Promise.reject(error);
+  }
+);
 
 // ── Helpers ───────────────────────────────────────────
 const ESTADO_BADGE = {
