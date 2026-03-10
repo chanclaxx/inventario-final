@@ -9,7 +9,8 @@ import { Badge }   from '../components/ui/Badge';
 import { Spinner } from '../components/ui/Spinner';
 
 // ── API helper con token propio de superadmin ─────────
-const saApi = axios.create({ baseURL: '/api/superadmin' });
+const BASE = import.meta.env.VITE_API_URL ? `${import.meta.env.VITE_API_URL}/api/superadmin` : '/api/superadmin';
+const saApi = axios.create({ baseURL: BASE });
 
 saApi.interceptors.request.use((config) => {
   const token = sessionStorage.getItem('sa_token');
@@ -175,7 +176,7 @@ function LoginSuperadmin({ onLogin }) {
     setError('');
     setLoading(true);
     try {
-      const { data } = await axios.post('/api/superadmin/login', form);
+      const { data } = await saApi.post('/login', form);
       sessionStorage.setItem('sa_token',   data.accessToken);
       sessionStorage.setItem('sa_usuario', JSON.stringify(data.usuario));
       onLogin(data.usuario);
