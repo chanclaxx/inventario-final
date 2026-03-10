@@ -51,6 +51,44 @@ function formatPrecio(valor) {
   }).format(valor);
 }
 
+// ── Modal credenciales ────────────────────────────────
+function ModalCredenciales({ credenciales, onCerrar }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60">
+      <div className="bg-gray-800 border border-gray-700 rounded-2xl w-full max-w-sm p-6 flex flex-col gap-4">
+        <div className="flex items-center gap-2">
+          <CheckCircle size={20} className="text-green-500" />
+          <h2 className="text-white font-semibold">Negocio aprobado</h2>
+        </div>
+        <p className="text-sm text-gray-400">
+          Comparte estas credenciales con{' '}
+          <strong className="text-white">{credenciales.negocio}</strong>:
+        </p>
+        <div className="bg-gray-700 rounded-xl p-4 flex flex-col gap-3">
+          <div className="flex justify-between items-center gap-2">
+            <span className="text-xs text-gray-400 flex-shrink-0">Email</span>
+            <span className="text-sm text-white font-mono text-right break-all">{credenciales.email}</span>
+          </div>
+          <div className="flex justify-between items-center gap-2">
+            <span className="text-xs text-gray-400 flex-shrink-0">Contraseña temporal</span>
+            <span className="text-sm text-green-400 font-mono font-bold">{credenciales.password}</span>
+          </div>
+        </div>
+        <p className="text-xs text-gray-500">
+          Estas credenciales no se volverán a mostrar. Cópialas antes de cerrar.
+        </p>
+        <button
+          onClick={onCerrar}
+          className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white
+            text-sm font-medium rounded-xl transition-colors"
+        >
+          Entendido, ya las copié
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ── Modal renovar plan ────────────────────────────────
 function ModalRenovarPlan({ negocio, planes, onConfirmar, onCerrar, cargando }) {
   const [planSeleccionado, setPlanSeleccionado] = useState(negocio.plan || '');
@@ -64,7 +102,6 @@ function ModalRenovarPlan({ negocio, planes, onConfirmar, onCerrar, cargando }) 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60">
       <div className="bg-gray-800 border border-gray-700 rounded-2xl w-full max-w-md">
-        {/* Header */}
         <div className="flex items-center justify-between p-5 border-b border-gray-700">
           <div>
             <h2 className="text-white font-semibold">Renovar plan</h2>
@@ -78,9 +115,7 @@ function ModalRenovarPlan({ negocio, planes, onConfirmar, onCerrar, cargando }) 
           </button>
         </div>
 
-        {/* Body */}
         <div className="p-5 flex flex-col gap-4">
-          {/* Selección de plan */}
           <div className="flex flex-col gap-2">
             <label className="text-sm font-medium text-gray-300">Selecciona el plan</label>
             <div className="flex flex-col gap-2">
@@ -120,7 +155,6 @@ function ModalRenovarPlan({ negocio, planes, onConfirmar, onCerrar, cargando }) 
             </div>
           </div>
 
-          {/* Notas opcionales */}
           <div className="flex flex-col gap-1">
             <label className="text-sm font-medium text-gray-300">
               Notas <span className="text-gray-500 font-normal">(opcional)</span>
@@ -136,14 +170,12 @@ function ModalRenovarPlan({ negocio, planes, onConfirmar, onCerrar, cargando }) 
             />
           </div>
 
-          {/* Vencimiento actual */}
           <p className="text-xs text-gray-500">
             Vencimiento actual: <span className="text-gray-400">{formatFecha(negocio.fecha_vencimiento)}</span>
             {' '}→ se extenderá 1 mes desde esa fecha.
           </p>
         </div>
 
-        {/* Footer */}
         <div className="flex gap-3 p-5 border-t border-gray-700">
           <button
             onClick={onCerrar}
@@ -337,6 +369,7 @@ function Panel({ usuario, onLogout }) {
   const [filtroEstado,    setFiltroEstado]    = useState('');
   const [filtroBusqueda,  setFiltroBusqueda]  = useState('');
   const [negocioARenovar, setNegocioARenovar] = useState(null);
+  const [credenciales,    setCredenciales]    = useState(null);
 
   const { data: stats, isLoading: loadingStats } = useQuery({
     queryKey: ['sa_estadisticas'],
@@ -357,9 +390,15 @@ function Panel({ usuario, onLogout }) {
 
   const mutAprobar = useMutation({
     mutationFn: (id) => saApi.post(`/negocios/${id}/aprobar`),
-    onSuccess: () => {
+    onSuccess: (res, id) => {
       queryClient.invalidateQueries({ queryKey: ['sa_negocios'] });
       queryClient.invalidateQueries({ queryKey: ['sa_estadisticas'] });
+      const negocio = negocios.find((n) => n.id === id);
+      setCredenciales({
+        negocio:  negocio?.nombre || '',
+        email:    negocio?.email  || '',
+        password: res.data.data.password_temporal,
+      });
     },
   });
 
@@ -486,6 +525,14 @@ function Panel({ usuario, onLogout }) {
           onConfirmar={({ id, plan, notas }) => mutRenovar.mutate({ id, plan, notas })}
           onCerrar={() => setNegocioARenovar(null)}
           cargando={mutRenovar.isPending}
+        />
+      )}
+
+      {/* Modal credenciales */}
+      {credenciales && (
+        <ModalCredenciales
+          credenciales={credenciales}
+          onCerrar={() => setCredenciales(null)}
         />
       )}
     </div>

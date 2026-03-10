@@ -124,7 +124,7 @@ const aprobarNegocio = async (negocioId) => {
       password_temporal: passwordTemporal,
     }).catch((err) => console.error('Error enviando email de aprobación:', err.message));
 
-    return { ok: true };
+    return { ok: true, password_temporal: passwordTemporal };
   } catch (err) {
     await client.query('ROLLBACK');
     throw err;

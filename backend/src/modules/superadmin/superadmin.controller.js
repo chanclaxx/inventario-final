@@ -32,8 +32,8 @@ async function getNegocios(req, res, next) {
 
 async function aprobarNegocio(req, res, next) {
   try {
-    await svc.aprobarNegocio(Number(req.params.id));
-    res.json({ ok: true, message: 'Negocio aprobado correctamente' });
+    const data = await svc.aprobarNegocio(Number(req.params.id));
+    res.json({ ok: true, data });
   } catch (err) { next(err); }
 }
 
