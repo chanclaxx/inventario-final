@@ -24,30 +24,39 @@ export function ReciboAcreedor({ acreedor, movimiento, config = {}, onClose }) {
   return (
     <>
       <style>{`
-        @media print {
-          body * { visibility: hidden; }
-          #recibo-acreedor, #recibo-acreedor * { visibility: visible; }
-          #recibo-acreedor {
-            position: fixed;
-            top: 0; left: 0;
-            width: 80mm;
-            font-size: 11px;
-            font-family: 'Courier New', monospace;
-          }
-          .no-print { display: none !important; }
-        }
-        #recibo-acreedor {
-          width: 80mm;
-          font-family: 'Courier New', monospace;
-          font-size: 11px;
-          color: #000;
-          padding: 4px;
-        }
-        .linea-divisor { border-top: 1px dashed #000; margin: 6px 0; }
-        .centrado      { text-align: center; }
-        .negrita       { font-weight: bold; }
-        .fila          { display: flex; justify-content: space-between; margin: 2px 0; }
-      `}</style>
+  @media print {
+    @page {
+      margin: 0;
+      size: 80mm auto;
+    }
+    body * { visibility: hidden; }
+    #recibo-acreedor, #recibo-acreedor * { visibility: visible; }
+    #recibo-acreedor {
+      position: fixed;
+      top: 0; left: 0;
+      width: 80mm;
+      padding: 2mm;
+      font-size: 13px;
+      font-family: 'Courier New', monospace;
+      transform: scale(1.5);
+      transform-origin: top left;
+    }
+    .no-print { display: none !important; }
+  }
+  #recibo-acreedor {
+    width: 80mm;
+    font-family: 'Courier New', monospace;
+    font-size: 13px;
+    color: #000;
+    padding: 2mm;
+    box-sizing: border-box;
+  }
+  .linea-divisor { border-top: 1px dashed #000; margin: 5px 0; }
+  .centrado      { text-align: center; }
+  .negrita       { font-weight: bold; }
+  .fila          { display: flex; justify-content: space-between; margin: 3px 0; gap: 4px; }
+  .fila span:last-child { text-align: right; flex-shrink: 0; max-width: 45mm; word-break: break-word; }
+`}</style>
 
       {/* Overlay pantalla */}
       <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center no-print">
