@@ -18,7 +18,14 @@ const app = express();
 // ── Middlewares globales ──────────────────────────────
 app.use(helmet());
 app.use(cors({
-  origin: process.env.FRONTEND_URL,
+  origin: (origin, callback) => {
+    const allowed = [
+      process.env.FRONTEND_URL,
+      'http://localhost:5173',
+    ].filter(Boolean);
+    if (!origin || allowed.includes(origin)) return callback(null, true);
+    callback(new Error('No permitido por CORS'));
+  },
   credentials: true,
 }));
 app.use(express.json());
