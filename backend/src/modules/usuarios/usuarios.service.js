@@ -18,6 +18,22 @@ const crearUsuario = async (negocioId, { nombre, email, password, rol, sucursal_
     throw { status: 400, message: 'Supervisores y vendedores requieren sucursal asignada' };
   }
 
+  // Verificar límite de usuarios del plan
+  const { rows: [negocio] } = await pool.query(
+    'SELECT max_usuarios FROM negocios WHERE id = $1',
+    [negocioId]
+  );
+  const { rows: [conteo] } = await pool.query(
+    'SELECT COUNT(*) AS total FROM usuarios WHERE negocio_id = $1 AND activo = true',
+    [negocioId]
+  );
+  if (parseInt(conteo.total) >= negocio.max_usuarios) {
+    throw {
+      status: 400,
+      message: `Tu plan permite máximo ${negocio.max_usuarios} usuario(s)`,
+    };
+  }
+
   const existe = await usuariosRepo.findByEmail(email);
   if (existe) throw { status: 409, message: 'Ya existe un usuario con ese email' };
 
