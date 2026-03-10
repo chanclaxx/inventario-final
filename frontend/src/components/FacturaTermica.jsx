@@ -37,13 +37,13 @@ export function FacturaTermica({ factura, garantias = [], onClose }) {
     body * { visibility: hidden; }
     #factura-termica, #factura-termica * { visibility: visible; }
     #factura-termica {
-      position: fixed;
-      top: 0; left: 0;
-      width: 76mm;
-      padding: 3mm 2mm;
-      font-size: 13px;
-      font-family: 'Courier New', monospace;
-    }
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  width: 100%;
+  padding: 1mm 2mm;
+  font-size: 13px;
+  font-family: 'Courier New', monospace;
+}
     .no-print { display: none !important; }
   }
   #factura-termica {
