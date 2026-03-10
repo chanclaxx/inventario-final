@@ -30,30 +30,32 @@ export function FacturaTermica({ factura, garantias = [], onClose }) {
     <>
       <style>{`
   @media print {
-    @page {
-  margin: 0;
-  size: 72mm auto;
-}
-    body * { visibility: hidden; }
-    #factura-termica, #factura-termica * { visibility: visible; }
-    #factura-termica {
-  position: absolute;
-  top: 0; left: 0; right: 0;
-  width: 100%;
-  padding: 1mm 2mm;
-  font-size: 13px;
-  font-family: 'Courier New', monospace;
-}
-    .no-print { display: none !important; }
+  @page {
+    margin: 0;
+    size: 80mm auto;
   }
+  body * { visibility: hidden; }
+  #factura-termica, #factura-termica * { visibility: visible; }
   #factura-termica {
-    width: 72mm;
-    font-family: 'Courier New', monospace;
+    position: fixed;
+    top: 0; left: 0;
+    width: 80mm;
+    padding: 2mm;
     font-size: 13px;
-    color: #000;
-    padding: 1mm 1mm;
-    box-sizing: border-box;
+    font-family: 'Courier New', monospace;
+    transform: scale(1.5);
+    transform-origin: top left;
   }
+  .no-print { display: none !important; }
+}
+  #factura-termica {
+  width: 80mm;
+  font-family: 'Courier New', monospace;
+  font-size: 13px;
+  color: #000;
+  padding: 2mm;
+  box-sizing: border-box;
+}
   .linea-divisor { border-top: 1px dashed #000; margin: 5px 0; }
   .centrado      { text-align: center; }
   .negrita       { font-weight: bold; }
