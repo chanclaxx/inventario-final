@@ -7,6 +7,8 @@ const requiredEnvVars = [
   'JWT_SECRET',
   'JWT_REFRESH_SECRET',
   'PORT',
+  'JWT_SA_SECRET',
+  'JWT_SA_EXPIRES_IN',
 ];
 
 const validateEnv = () => {

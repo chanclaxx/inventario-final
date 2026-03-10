@@ -21,14 +21,14 @@ const loginSuperadmin = async (email, password) => {
 
   const payload = { id: sa.id, nombre: sa.nombre, email: sa.email, rol: 'superadmin' };
 
-  const accessToken = jwt.sign(payload, process.env.JWT_SECRET, {
-    expiresIn: process.env.JWT_EXPIRES_IN,
-  });
-  const refreshToken = jwt.sign(
-    { id: sa.id, rol: 'superadmin' },
-    process.env.JWT_REFRESH_SECRET,
-    { expiresIn: process.env.JWT_REFRESH_EXPIRES_IN }
-  );
+  const accessToken = jwt.sign(payload, process.env.JWT_SA_SECRET, {
+  expiresIn: process.env.JWT_SA_EXPIRES_IN || '2h',
+});
+const refreshToken = jwt.sign(
+  { id: sa.id, rol: 'superadmin' },
+  process.env.JWT_SA_SECRET,
+  { expiresIn: '8h' }
+);
 
   return { accessToken, refreshToken, usuario: payload };
 };
