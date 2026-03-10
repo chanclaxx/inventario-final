@@ -2,12 +2,10 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import axios from 'axios';
 import {
-  LayoutDashboard, Building2, CheckCircle, XCircle,
-  Ban, RefreshCw, LogOut, Search, Users, TrendingUp
+  LayoutDashboard, Building2, CheckCircle,
+  Ban, RefreshCw, LogOut, Search, TrendingUp, CreditCard, X
 } from 'lucide-react';
-import { Badge }  from '../components/ui/Badge';
-import { Button } from '../components/ui/Button';
-import { Input }  from '../components/ui/Input';
+import { Badge }   from '../components/ui/Badge';
 import { Spinner } from '../components/ui/Spinner';
 
 // ── API helper con token propio de superadmin ─────────
@@ -34,11 +32,137 @@ const ESTADO_LABEL = {
   suspendido: 'Suspendido',
 };
 
+const PLAN_LABEL = {
+  basico: 'Básico',
+  pro:    'Pro',
+};
+
 function formatFecha(fecha) {
   if (!fecha) return '—';
   return new Date(fecha).toLocaleDateString('es-CO', {
     day: 'numeric', month: 'short', year: 'numeric',
   });
+}
+
+function formatPrecio(valor) {
+  return new Intl.NumberFormat('es-CO', {
+    style: 'currency', currency: 'COP', maximumFractionDigits: 0,
+  }).format(valor);
+}
+
+// ── Modal renovar plan ────────────────────────────────
+function ModalRenovarPlan({ negocio, planes, onConfirmar, onCerrar, cargando }) {
+  const [planSeleccionado, setPlanSeleccionado] = useState(negocio.plan || '');
+  const [notas, setNotas] = useState('');
+
+  const handleConfirmar = () => {
+    if (!planSeleccionado) return;
+    onConfirmar({ id: negocio.id, plan: planSeleccionado, notas });
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60">
+      <div className="bg-gray-800 border border-gray-700 rounded-2xl w-full max-w-md">
+        {/* Header */}
+        <div className="flex items-center justify-between p-5 border-b border-gray-700">
+          <div>
+            <h2 className="text-white font-semibold">Renovar plan</h2>
+            <p className="text-xs text-gray-400 mt-0.5">{negocio.nombre}</p>
+          </div>
+          <button
+            onClick={onCerrar}
+            className="p-1.5 rounded-lg hover:bg-gray-700 text-gray-400 hover:text-white transition-colors"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="p-5 flex flex-col gap-4">
+          {/* Selección de plan */}
+          <div className="flex flex-col gap-2">
+            <label className="text-sm font-medium text-gray-300">Selecciona el plan</label>
+            <div className="flex flex-col gap-2">
+              {planes.map((plan) => {
+                const activo = planSeleccionado === plan.nombre;
+                return (
+                  <button
+                    key={plan.nombre}
+                    onClick={() => setPlanSeleccionado(plan.nombre)}
+                    className={`w-full text-left p-4 rounded-xl border transition-colors ${
+                      activo
+                        ? 'bg-indigo-600/20 border-indigo-500 text-white'
+                        : 'bg-gray-700/50 border-gray-600 text-gray-300 hover:border-gray-500'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="font-medium">{PLAN_LABEL[plan.nombre] || plan.nombre}</p>
+                        <p className="text-xs text-gray-400 mt-0.5">{plan.descripcion}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="font-semibold text-sm">{formatPrecio(plan.precio_mensual)}</p>
+                        <p className="text-xs text-gray-400">/mes</p>
+                      </div>
+                    </div>
+                    <div className="flex gap-3 mt-2">
+                      <span className="text-xs text-gray-400">
+                        {plan.max_sucursales} sucursal{plan.max_sucursales > 1 ? 'es' : ''}
+                      </span>
+                      <span className="text-xs text-gray-400">
+                        {plan.max_usuarios} usuarios
+                      </span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Notas opcionales */}
+          <div className="flex flex-col gap-1">
+            <label className="text-sm font-medium text-gray-300">
+              Notas <span className="text-gray-500 font-normal">(opcional)</span>
+            </label>
+            <textarea
+              value={notas}
+              onChange={(e) => setNotas(e.target.value)}
+              placeholder="Ej: Pago recibido en efectivo..."
+              rows={2}
+              className="w-full px-3 py-2.5 bg-gray-700 border border-gray-600 rounded-xl
+                text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2
+                focus:ring-indigo-500 resize-none"
+            />
+          </div>
+
+          {/* Vencimiento actual */}
+          <p className="text-xs text-gray-500">
+            Vencimiento actual: <span className="text-gray-400">{formatFecha(negocio.fecha_vencimiento)}</span>
+            {' '}→ se extenderá 1 mes desde esa fecha.
+          </p>
+        </div>
+
+        {/* Footer */}
+        <div className="flex gap-3 p-5 border-t border-gray-700">
+          <button
+            onClick={onCerrar}
+            className="flex-1 py-2.5 rounded-xl bg-gray-700 hover:bg-gray-600
+              text-gray-300 text-sm font-medium transition-colors"
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={handleConfirmar}
+            disabled={!planSeleccionado || cargando}
+            className="flex-1 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700
+              disabled:opacity-50 text-white text-sm font-medium transition-colors"
+          >
+            {cargando ? 'Renovando...' : 'Confirmar renovación'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // ── Pantalla de login superadmin ──────────────────────
@@ -127,7 +251,7 @@ function StatCard({ label, valor, icon, color }) {
 }
 
 // ── Fila de negocio ───────────────────────────────────
-function FilaNegocio({ negocio, onAprobar, onCambiarEstado, cargando }) {
+function FilaNegocio({ negocio, onAprobar, onCambiarEstado, onRenovar, cargando }) {
   return (
     <div className="bg-gray-800 border border-gray-700 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center gap-4">
       <div className="flex-1 min-w-0">
@@ -136,6 +260,11 @@ function FilaNegocio({ negocio, onAprobar, onCambiarEstado, cargando }) {
           <Badge variant={ESTADO_BADGE[negocio.estado_plan]}>
             {ESTADO_LABEL[negocio.estado_plan]}
           </Badge>
+          {negocio.plan && (
+            <span className="text-xs bg-gray-700 text-gray-300 px-2 py-0.5 rounded-full">
+              {PLAN_LABEL[negocio.plan] || negocio.plan}
+            </span>
+          )}
         </div>
         <p className="text-xs text-gray-400 mt-0.5">{negocio.email}</p>
         <div className="flex items-center gap-3 mt-1.5 flex-wrap">
@@ -185,6 +314,17 @@ function FilaNegocio({ negocio, onAprobar, onCambiarEstado, cargando }) {
             Reactivar
           </button>
         )}
+        {negocio.estado_plan !== 'pendiente' && (
+          <button
+            onClick={() => onRenovar(negocio)}
+            disabled={cargando}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-yellow-600 hover:bg-yellow-700
+              disabled:opacity-50 text-white text-xs font-medium rounded-lg transition-colors"
+          >
+            <CreditCard size={14} />
+            Renovar
+          </button>
+        )}
       </div>
     </div>
   );
@@ -193,8 +333,9 @@ function FilaNegocio({ negocio, onAprobar, onCambiarEstado, cargando }) {
 // ── Panel principal ───────────────────────────────────
 function Panel({ usuario, onLogout }) {
   const queryClient = useQueryClient();
-  const [filtroEstado,   setFiltroEstado]   = useState('');
-  const [filtroBusqueda, setFiltroBusqueda] = useState('');
+  const [filtroEstado,    setFiltroEstado]    = useState('');
+  const [filtroBusqueda,  setFiltroBusqueda]  = useState('');
+  const [negocioARenovar, setNegocioARenovar] = useState(null);
 
   const { data: stats, isLoading: loadingStats } = useQuery({
     queryKey: ['sa_estadisticas'],
@@ -206,6 +347,11 @@ function Panel({ usuario, onLogout }) {
     queryFn: () => saApi.get('/negocios', {
       params: { estado: filtroEstado || undefined, busqueda: filtroBusqueda || undefined },
     }).then((r) => r.data.data),
+  });
+
+  const { data: planes = [] } = useQuery({
+    queryKey: ['sa_planes'],
+    queryFn: () => saApi.get('/planes').then((r) => r.data.data),
   });
 
   const mutAprobar = useMutation({
@@ -224,13 +370,24 @@ function Panel({ usuario, onLogout }) {
     },
   });
 
+  const mutRenovar = useMutation({
+    mutationFn: ({ id, plan, notas }) => saApi.post(`/negocios/${id}/renovar-plan`, { plan, notas }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['sa_negocios'] });
+      queryClient.invalidateQueries({ queryKey: ['sa_estadisticas'] });
+      setNegocioARenovar(null);
+    },
+  });
+
   const FILTROS = [
-    { value: '',           label: 'Todos'      },
-    { value: 'pendiente',  label: 'Pendientes' },
-    { value: 'activo',     label: 'Activos'    },
-    { value: 'vencido',    label: 'Vencidos'   },
-    { value: 'suspendido', label: 'Suspendidos'},
+    { value: '',           label: 'Todos'       },
+    { value: 'pendiente',  label: 'Pendientes'  },
+    { value: 'activo',     label: 'Activos'     },
+    { value: 'vencido',    label: 'Vencidos'    },
+    { value: 'suspendido', label: 'Suspendidos' },
   ];
+
+  const cargando = mutAprobar.isPending || mutEstado.isPending || mutRenovar.isPending;
 
   return (
     <div className="min-h-screen bg-gray-900 text-white">
@@ -262,10 +419,10 @@ function Panel({ usuario, onLogout }) {
         {/* Estadísticas */}
         {loadingStats ? <Spinner /> : (
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <StatCard label="Total negocios"  valor={stats?.total}      icon={Building2}    color="bg-indigo-600" />
-            <StatCard label="Activos"         valor={stats?.activos}    icon={TrendingUp}   color="bg-green-600"  />
-            <StatCard label="Pendientes"      valor={stats?.pendientes} icon={LayoutDashboard} color="bg-yellow-600" />
-            <StatCard label="Suspendidos"     valor={stats?.suspendidos} icon={Ban}          color="bg-red-600"    />
+            <StatCard label="Total negocios" valor={stats?.total}       icon={Building2}       color="bg-indigo-600" />
+            <StatCard label="Activos"        valor={stats?.activos}     icon={TrendingUp}      color="bg-green-600"  />
+            <StatCard label="Pendientes"     valor={stats?.pendientes}  icon={LayoutDashboard} color="bg-yellow-600" />
+            <StatCard label="Suspendidos"    valor={stats?.suspendidos} icon={Ban}             color="bg-red-600"    />
           </div>
         )}
 
@@ -311,13 +468,25 @@ function Panel({ usuario, onLogout }) {
                   negocio={negocio}
                   onAprobar={(id) => mutAprobar.mutate(id)}
                   onCambiarEstado={(id, estado) => mutEstado.mutate({ id, estado })}
-                  cargando={mutAprobar.isPending || mutEstado.isPending}
+                  onRenovar={(n) => setNegocioARenovar(n)}
+                  cargando={cargando}
                 />
               ))
             )}
           </div>
         )}
       </div>
+
+      {/* Modal renovar plan */}
+      {negocioARenovar && (
+        <ModalRenovarPlan
+          negocio={negocioARenovar}
+          planes={planes}
+          onConfirmar={({ id, plan, notas }) => mutRenovar.mutate({ id, plan, notas })}
+          onCerrar={() => setNegocioARenovar(null)}
+          cargando={mutRenovar.isPending}
+        />
+      )}
     </div>
   );
 }
