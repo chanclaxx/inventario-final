@@ -1,0 +1,269 @@
+import * as XLSX from 'xlsx';
+
+// ─── Paleta de colores ────────────────────────────────────────────────────────
+const COLOR = {
+  headerSerial:    '1E40AF', // azul oscuro — encabezado hoja serial
+  headerCantidad:  '065F46', // verde oscuro — encabezado hoja cantidad
+  disponible:      'FFFFFF', // blanco — fila disponible
+  vendido:         'FEE2E2', // rojo claro — fila vendida
+  prestado:        'FEF9C3', // amarillo claro — fila prestada
+  textoHeader:     'FFFFFF', // blanco — texto de encabezado
+  resumenBg:       'EFF6FF', // azul muy claro — fila de resumen
+  bordeColor:      'D1D5DB', // gris claro — bordes
+};
+
+// ─── Helpers de estilo ────────────────────────────────────────────────────────
+function estiloHeader(bgColor) {
+  return {
+    font:      { bold: true, color: { rgb: COLOR.textoHeader }, name: 'Arial', sz: 10 },
+    fill:      { patternType: 'solid', fgColor: { rgb: bgColor } },
+    alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
+    border:    bordeDelgado(),
+  };
+}
+
+function bordeDelgado() {
+  const lado = { style: 'thin', color: { rgb: COLOR.bordeColor } };
+  return { top: lado, bottom: lado, left: lado, right: lado };
+}
+
+function estiloCelda(bgColor) {
+  return {
+    font:      { name: 'Arial', sz: 9 },
+    fill:      { patternType: 'solid', fgColor: { rgb: bgColor } },
+    alignment: { vertical: 'center' },
+    border:    bordeDelgado(),
+  };
+}
+
+function estiloCeldaCentrada(bgColor) {
+  return {
+    ...estiloCelda(bgColor),
+    alignment: { horizontal: 'center', vertical: 'center' },
+  };
+}
+
+function estiloResumen() {
+  return {
+    font:      { bold: true, name: 'Arial', sz: 9, color: { rgb: '1E3A5F' } },
+    fill:      { patternType: 'solid', fgColor: { rgb: COLOR.resumenBg } },
+    alignment: { horizontal: 'center', vertical: 'center' },
+    border:    bordeDelgado(),
+  };
+}
+
+// ─── Formatear fecha ──────────────────────────────────────────────────────────
+function fmtFecha(val) {
+  if (!val) return '';
+  const d = new Date(val);
+  if (isNaN(d)) return '';
+  return d.toLocaleDateString('es-CO', { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+
+// ─── Hoja de producto serial ──────────────────────────────────────────────────
+function crearHojaSerial(nombreProducto, seriales) {
+  const ws = {};
+
+  // Título del producto
+  ws['A1'] = {
+    t: 's', v: nombreProducto.toUpperCase(),
+    s: {
+      font:      { bold: true, name: 'Arial', sz: 13, color: { rgb: COLOR.headerSerial } },
+      alignment: { horizontal: 'left', vertical: 'center' },
+    },
+  };
+
+  // Separar disponibles y vendidos/prestados
+  const disponibles = seriales.filter((s) => !s.vendido && !s.prestado);
+  const prestados   = seriales.filter((s) =>  s.prestado && !s.vendido);
+  const vendidos    = seriales.filter((s) =>  s.vendido)
+    .sort((a, b) => new Date(b.fecha_salida) - new Date(a.fecha_salida));
+
+  const COLS = ['IMEI', 'Estado', 'Marca', 'Modelo', 'Proveedor', 'Fecha Entrada', 'Fecha Salida', 'Cliente'];
+  const COL_WIDTHS = [22, 12, 14, 14, 18, 14, 14, 22];
+
+  let fila = 2; // 0-indexed → fila 3 en Excel
+
+  // ── Sección disponibles ──
+  ws[XLSX.utils.encode_cell({ r: fila, c: 0 })] = {
+    t: 's', v: `✓ DISPONIBLES (${disponibles.length})`,
+    s: { font: { bold: true, name: 'Arial', sz: 10, color: { rgb: '065F46' } } },
+  };
+  fila++;
+
+  // Encabezados
+  COLS.forEach((col, c) => {
+    ws[XLSX.utils.encode_cell({ r: fila, c })] = { t: 's', v: col, s: estiloHeader(COLOR.headerSerial) };
+  });
+  fila++;
+
+  disponibles.forEach((s) => {
+    const bg = COLOR.disponible;
+    const vals = [s.imei, 'Disponible', s.marca || '', s.modelo || '', s.proveedor || '', fmtFecha(s.fecha_entrada), '', ''];
+    vals.forEach((v, c) => {
+      ws[XLSX.utils.encode_cell({ r: fila, c })] = { t: 's', v: String(v), s: estiloCelda(bg) };
+    });
+    fila++;
+  });
+
+  if (disponibles.length === 0) {
+    ws[XLSX.utils.encode_cell({ r: fila, c: 0 })] = { t: 's', v: 'Sin unidades disponibles', s: estiloCelda('F3F4F6') };
+    fila++;
+  }
+
+  // Resumen disponibles
+  ws[XLSX.utils.encode_cell({ r: fila, c: 0 })] = { t: 's', v: `Total disponibles: ${disponibles.length}`, s: estiloResumen() };
+  fila += 2;
+
+  // ── Sección prestados ──
+  if (prestados.length > 0) {
+    ws[XLSX.utils.encode_cell({ r: fila, c: 0 })] = {
+      t: 's', v: `⚠ PRESTADOS (${prestados.length})`,
+      s: { font: { bold: true, name: 'Arial', sz: 10, color: { rgb: '92400E' } } },
+    };
+    fila++;
+
+    COLS.forEach((col, c) => {
+      ws[XLSX.utils.encode_cell({ r: fila, c })] = { t: 's', v: col, s: estiloHeader('B45309') };
+    });
+    fila++;
+
+    prestados.forEach((s) => {
+      const vals = [s.imei, 'Prestado', s.marca || '', s.modelo || '', s.proveedor || '', fmtFecha(s.fecha_entrada), '', s.cliente_origen || ''];
+      vals.forEach((v, c) => {
+        ws[XLSX.utils.encode_cell({ r: fila, c })] = { t: 's', v: String(v), s: estiloCelda(COLOR.prestado) };
+      });
+      fila++;
+    });
+    fila++;
+  }
+
+  // ── Sección vendidos ──
+  ws[XLSX.utils.encode_cell({ r: fila, c: 0 })] = {
+    t: 's', v: `✗ VENDIDOS (${vendidos.length}) — ordenados por fecha de venta`,
+    s: { font: { bold: true, name: 'Arial', sz: 10, color: { rgb: '991B1B' } } },
+  };
+  fila++;
+
+  COLS.forEach((col, c) => {
+    ws[XLSX.utils.encode_cell({ r: fila, c })] = { t: 's', v: col, s: estiloHeader('991B1B') };
+  });
+  fila++;
+
+  vendidos.forEach((s) => {
+    const vals = [s.imei, 'Vendido', s.marca || '', s.modelo || '', s.proveedor || '', fmtFecha(s.fecha_entrada), fmtFecha(s.fecha_salida), s.cliente_origen || ''];
+    vals.forEach((v, c) => {
+      ws[XLSX.utils.encode_cell({ r: fila, c })] = { t: 's', v: String(v), s: estiloCelda(COLOR.vendido) };
+    });
+    fila++;
+  });
+
+  if (vendidos.length === 0) {
+    ws[XLSX.utils.encode_cell({ r: fila, c: 0 })] = { t: 's', v: 'Sin unidades vendidas', s: estiloCelda('F3F4F6') };
+    fila++;
+  }
+
+  // Rango total de la hoja
+  ws['!ref'] = XLSX.utils.encode_range({ r: 0, c: 0 }, { r: fila, c: COLS.length - 1 });
+
+  // Ancho de columnas
+  ws['!cols'] = COL_WIDTHS.map((w) => ({ wch: w }));
+
+  // Altura de filas (fila de título más alta)
+  ws['!rows'] = [{ hpt: 22 }];
+
+  return ws;
+}
+
+// ─── Hoja de productos por cantidad ──────────────────────────────────────────
+function crearHojaCantidad(productos) {
+  const ws = {};
+
+  ws['A1'] = {
+    t: 's', v: 'INVENTARIO — PRODUCTOS POR CANTIDAD',
+    s: {
+      font:      { bold: true, name: 'Arial', sz: 13, color: { rgb: COLOR.headerCantidad } },
+      alignment: { horizontal: 'left', vertical: 'center' },
+    },
+  };
+
+  const COLS       = ['Producto', 'Stock Actual', 'Stock Mínimo', 'Unidad', 'Proveedor', 'Estado Stock', 'Cliente Origen', 'Fecha Registro'];
+  const COL_WIDTHS = [28, 14, 14, 12, 20, 15, 22, 16];
+
+  let fila = 2;
+
+  // Encabezados
+  COLS.forEach((col, c) => {
+    ws[XLSX.utils.encode_cell({ r: fila, c })] = { t: 's', v: col, s: estiloHeader(COLOR.headerCantidad) };
+  });
+  fila++;
+
+  productos.forEach((p) => {
+    const stockBajo = p.stock <= p.stock_minimo;
+    const bg = !p.activo ? 'F3F4F6' : stockBajo ? 'FEF3C7' : COLOR.disponible;
+    const estadoStock = !p.activo ? 'Inactivo' : stockBajo ? 'Stock bajo' : 'OK';
+
+    const vals = [
+      p.nombre,
+      p.stock,
+      p.stock_minimo,
+      p.unidad_medida || 'unidad',
+      p.proveedor || '',
+      estadoStock,
+      p.cliente_origen || '',
+      fmtFecha(p.creado_en),
+    ];
+
+    vals.forEach((v, c) => {
+      const esNum = c === 1 || c === 2;
+      ws[XLSX.utils.encode_cell({ r: fila, c })] = {
+        t: esNum ? 'n' : 's',
+        v: esNum ? Number(v) : String(v),
+        s: c === 5 ? estiloCeldaCentrada(bg) : estiloCelda(bg),
+      };
+    });
+    fila++;
+  });
+
+  // Fila de totales
+  const totalStock = productos.reduce((s, p) => s + Number(p.stock || 0), 0);
+  ws[XLSX.utils.encode_cell({ r: fila, c: 0 })] = { t: 's', v: `Total productos: ${productos.length}`, s: estiloResumen() };
+  ws[XLSX.utils.encode_cell({ r: fila, c: 1 })] = { t: 'n', v: totalStock, s: estiloResumen() };
+  for (let c = 2; c < COLS.length; c++) {
+    ws[XLSX.utils.encode_cell({ r: fila, c })] = { t: 's', v: '', s: estiloResumen() };
+  }
+
+  ws['!ref']  = XLSX.utils.encode_range({ r: 0, c: 0 }, { r: fila, c: COLS.length - 1 });
+  ws['!cols'] = COL_WIDTHS.map((w) => ({ wch: w }));
+  ws['!rows'] = [{ hpt: 22 }];
+
+  return ws;
+}
+
+// ─── Función principal exportar ───────────────────────────────────────────────
+export function exportarInventarioExcel(porProducto, cantidad) {
+  const wb = XLSX.utils.book_new();
+
+  // Una hoja por cada producto serial
+  Object.entries(porProducto).forEach(([nombre, seriales]) => {
+    // Nombre de hoja: máx 31 chars, sin caracteres inválidos
+    const nombreHoja = nombre
+      .replace(/[:\\/?*[\]]/g, '')
+      .substring(0, 31);
+    const ws = crearHojaSerial(nombre, seriales);
+    XLSX.utils.book_append_sheet(wb, ws, nombreHoja);
+  });
+
+  // Hoja de cantidades al final
+  if (cantidad && cantidad.length > 0) {
+    const ws = crearHojaCantidad(cantidad);
+    XLSX.utils.book_append_sheet(wb, ws, 'Cantidades');
+  }
+
+  // Nombre del archivo con fecha
+  const hoy  = new Date();
+  const ddmm = `${String(hoy.getDate()).padStart(2,'0')}-${String(hoy.getMonth()+1).padStart(2,'0')}-${hoy.getFullYear()}`;
+  const nombre = `inventario_${ddmm}.xlsx`;
+
+  XLSX.writeFile(wb, nombre, { bookType: 'xlsx', bookSST: false });
+}
