@@ -13,8 +13,15 @@ const _buildPayload = (usuario) => ({
   sucursal_nombre:   usuario.sucursal_nombre,
   password_temporal: usuario.password_temporal ?? false,
 });
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const login = async (email, password) => {
+  if (!email || !EMAIL_REGEX.test(email)) {
+    throw { status: 400, message: 'Correo electrónico no válido' };
+  }
+  if (!password || password.length < 4) {
+    throw { status: 400, message: 'Contraseña inválida' };
+  }
   const { rows } = await pool.query(
     `SELECT
        u.id, u.nombre, u.email, u.password_hash, u.rol, u.activo,

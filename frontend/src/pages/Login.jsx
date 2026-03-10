@@ -12,19 +12,32 @@ export default function Login() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setError('');
-    setLoading(true);
-    try {
-      await login(form.email, form.password);
-      navigate('/');
-    } catch {
-      setError('Correo o contraseña incorrectos');
-    } finally {
-      setLoading(false);
-    }
-  };
+  const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+const handleSubmit = async (e) => {
+  e.preventDefault();
+  setError('');
+
+  if (!EMAIL_REGEX.test(form.email)) {
+    setError('Ingresa un correo electrónico válido');
+    return;
+  }
+  if (form.password.length < 4) {
+    setError('La contraseña es demasiado corta');
+    return;
+  }
+
+  setLoading(true);
+  try {
+    await login(form.email.trim().toLowerCase(), form.password);
+    navigate('/');
+  } catch (err) {
+    const msg = err?.response?.data?.message;
+    setError(msg || 'Correo o contraseña incorrectos');
+  } finally {
+    setLoading(false);
+  }
+};
 
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
