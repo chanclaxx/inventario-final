@@ -69,6 +69,14 @@ app.use('/api/superadmin', require('./modules/superadmin/superadmin.routes'));
 // ── Middleware de errores (siempre al final) ──────────
 app.use(errorHandler);
 
+process.on('uncaughtException', (err) => {
+  console.error('uncaughtException:', err.message, err.stack);
+});
+
+process.on('unhandledRejection', (reason) => {
+  console.error('unhandledRejection:', reason);
+});
+
 // ── Iniciar servidor ──────────────────────────────────
 const PORT = process.env.PORT || 3001;
 
