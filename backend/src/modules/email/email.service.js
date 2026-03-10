@@ -99,26 +99,9 @@ const ESPERA_MS    = 2000;
 const _esperar = (ms) => new Promise((res) => setTimeout(res, ms));
 
 async function enviar({ to, subject, html }) {
-  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
-    console.warn(`[email] Sin credenciales — email no enviado a ${to}: ${subject}`);
-    return;
-  }
-
-  let ultimoError;
-  for (let intento = 1; intento <= MAX_INTENTOS; intento++) {
-    try {
-      await transporter.sendMail({ from: FROM, to, subject, html });
-      console.log(`[email] Enviado a ${to} (intento ${intento})`);
-      return;
-    } catch (err) {
-      ultimoError = err;
-      console.warn(`[email] Intento ${intento}/${MAX_INTENTOS} fallido para ${to}: ${err.message}`);
-      if (intento < MAX_INTENTOS) await _esperar(ESPERA_MS * intento);
-    }
-  }
-
-  // Log final pero NO lanzar error — el flujo principal no debe fallar por el email
-  console.error(`[email] Falló definitivamente para ${to} tras ${MAX_INTENTOS} intentos:`, ultimoError.message);
+  // Email desactivado temporalmente - Railway bloquea SMTP
+  console.log(`[email] Skipped: ${subject} → ${to}`);
+  return;
 }
 
 async function enviarAprobacion({ email, nombre_negocio, password_temporal }) {
