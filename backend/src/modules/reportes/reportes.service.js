@@ -4,8 +4,8 @@ const { pool } = require('../../config/db');
 // HELPERS DE TIMEZONE
 // PostgreSQL guarda timestamps en UTC. Colombia es UTC-5.
 // ─────────────────────────────────────────────
-const HOY_F = `DATE(f.fecha AT TIME ZONE 'America/Bogota') = CURRENT_DATE AT TIME ZONE 'America/Bogota'`;
-const HOY   = `DATE(fecha   AT TIME ZONE 'America/Bogota') = CURRENT_DATE AT TIME ZONE 'America/Bogota'`;
+const HOY_F = `DATE(f.fecha AT TIME ZONE 'America/Bogota') = (NOW() AT TIME ZONE 'America/Bogota')::date`;
+const HOY   = `DATE(fecha   AT TIME ZONE 'America/Bogota') = (NOW() AT TIME ZONE 'America/Bogota')::date`;
 
 // ─────────────────────────────────────────────
 // DASHBOARD
