@@ -2,7 +2,7 @@ const bcrypt = require('bcryptjs');
 const { pool } = require('../../config/db');
 const { enviarConfirmacionRegistro } = require('../email/email.service');
 
-async function registrarNegocio({ nombre, nit, telefono, direccion, email }) {
+async function registrarNegocio({ nombre, nit, telefono, direccion, email, plan }) {
   // Verificar que el email no esté en uso
   const existe = await pool.query(
     'SELECT id FROM negocios WHERE email = $1',
@@ -20,11 +20,11 @@ async function registrarNegocio({ nombre, nit, telefono, direccion, email }) {
 
     // Crear negocio en estado pendiente
     const { rows: [negocio] } = await client.query(
-      `INSERT INTO negocios (nombre, nit, telefono, direccion, email, plan, estado_plan)
-       VALUES ($1, $2, $3, $4, $5, 'trial', 'pendiente')
-       RETURNING id, nombre, email`,
-      [nombre, nit, telefono, direccion, email]
-    );
+  `INSERT INTO negocios (nombre, nit, telefono, direccion, email, plan, estado_plan)
+   VALUES ($1, $2, $3, $4, $5, $6, 'pendiente')
+   RETURNING id, nombre, email`,
+  [nombre, nit, telefono, direccion, email, plan || 'basico']
+);
 
     // Crear sucursal principal automáticamente
     await client.query(
