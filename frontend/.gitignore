@@ -22,3 +22,22 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+.env
+.env.production
+
+
+node_modules/
+client/node_modules/
+
+# Variables de entorno (NUNCA subir esto)
+.env
+.env.local
+.env.production
+
+# Build
+dist/
+build/
+
+# Logs
+*.log
