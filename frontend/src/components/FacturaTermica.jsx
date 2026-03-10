@@ -51,7 +51,7 @@ export function FacturaTermica({ factura, garantias = [], onClose }) {
     font-family: 'Courier New', monospace;
     font-size: 13px;
     color: #000;
-    padding: 3mm 2mm;
+    padding: 1mm 1mm;
     box-sizing: border-box;
   }
   .linea-divisor { border-top: 1px dashed #000; margin: 5px 0; }
