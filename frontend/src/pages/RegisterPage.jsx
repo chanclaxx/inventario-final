@@ -41,24 +41,41 @@ export default function RegisterPage() {
 
   const set = (campo, valor) => setForm((f) => ({ ...f, [campo]: valor }));
 
-  const handleSubmit = async () => {
-    setError('');
-    if (!form.nombre.trim())   return setError('El nombre del negocio es requerido');
-    if (!form.email.trim())    return setError('El email es requerido');
-    if (!form.telefono.trim()) return setError('El teléfono es requerido');
-    if (!form.plan)            return setError('Selecciona un plan');
+  const EMAIL_REGEX   = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const TELEFONO_REGEX = /^[0-9]{7,15}$/;
 
-    setLoading(true);
-    try {
-      await api.post('/registro', form);
-      setExitoso(true);
-    } catch (e) {
-      setError(e.response?.data?.error || 'Error al registrar. Intenta de nuevo.');
-    } finally {
-      setLoading(false);
-    }
-  };
+const handleSubmit = async () => {
+  setError('');
 
+  if (!form.nombre.trim())
+    return setError('El nombre del negocio es requerido');
+
+  if (!form.email.trim() || !EMAIL_REGEX.test(form.email.trim()))
+    return setError('Ingresa un correo electrónico válido');
+
+  if (!form.telefono.trim() || !TELEFONO_REGEX.test(form.telefono.trim()))
+    return setError('Ingresa un teléfono válido (solo números, entre 7 y 15 dígitos)');
+
+  if (!form.plan)
+    return setError('Selecciona un plan');
+
+  setLoading(true);
+  try {
+    await api.post('/registro', {
+      ...form,
+      email:    form.email.trim().toLowerCase(),
+      nombre:   form.nombre.trim(),
+      telefono: form.telefono.trim(),
+      nit:      form.nit.trim(),
+      direccion: form.direccion.trim(),
+    });
+    setExitoso(true);
+  } catch (e) {
+    setError(e.response?.data?.error || 'Error al registrar. Intenta de nuevo.');
+  } finally {
+    setLoading(false);
+  }
+};
   if (exitoso) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
