@@ -33,11 +33,16 @@ const actualizarProducto = async (req, res, next) => {
 
 const ajustarStock = async (req, res, next) => {
   try {
-    const { cantidad } = req.body;
+    const { cantidad, costo_unitario, proveedor_id } = req.body;
     if (cantidad === undefined) {
       return res.status(400).json({ ok: false, error: 'La cantidad es requerida' });
     }
-    const data = await service.ajustarStock(req.user.negocio_id, req.params.id, cantidad);
+    const data = await service.ajustarStock(
+      req.user.negocio_id,
+      req.params.id,
+      cantidad,
+      { costo_unitario, proveedor_id }
+    );
     res.json({ ok: true, data, message: 'Stock actualizado correctamente' });
   } catch (err) { next(err); }
 };

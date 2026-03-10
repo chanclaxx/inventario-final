@@ -54,10 +54,23 @@ const update = async (id, { nombre, stock_minimo, unidad_medida, costo_unitario,
   return rows[0] || null;
 };
 
-const ajustarStock = async (id, cantidad) => {
-  const { rows } = await pool.query(`
-    UPDATE productos_cantidad SET stock = stock + $1 WHERE id = $2 RETURNING *
-  `, [cantidad, id]);
+const ajustarStock = async (id, cantidad, { costo_unitario, proveedor_id } = {}) => {
+  const sets = ['stock = stock + $1'];
+  const params = [cantidad, id];
+
+  if (costo_unitario !== undefined && costo_unitario !== null) {
+    sets.push(`costo_unitario = $${params.length + 1}`);
+    params.splice(params.length - 1, 0, costo_unitario);
+  }
+  if (proveedor_id !== undefined && proveedor_id !== null) {
+    sets.push(`proveedor_id = $${params.length + 1}`);
+    params.splice(params.length - 1, 0, proveedor_id);
+  }
+
+  const { rows } = await pool.query(
+    `UPDATE productos_cantidad SET ${sets.join(', ')} WHERE id = $${params.length} RETURNING *`,
+    params
+  );
   return rows[0] || null;
 };
 

@@ -5,11 +5,57 @@ import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { Badge } from '../../components/ui/Badge';
 import { SearchInput } from '../../components/ui/SearchInput';
+import { useAuth } from '../../context/useAuth';
 import {
   getProductosSerial, crearProductoSerial,
   getProductosCantidad, crearProductoCantidad,
 } from '../../api/productos.api';
-import { Package, ShoppingBag, ChevronRight, Trash2 } from 'lucide-react';
+import api from '../../api/axios.config';
+import { Package, ShoppingBag, ChevronRight, Trash2, ShoppingCart } from 'lucide-react';
+
+// ── Recuadro info compra (solo admin) ────────────────────────
+function InfoCompra({ proveedorId, setProveedorId, costoCompra, setCostoCompra }) {
+  const { data: proveedores = [] } = useQuery({
+    queryKey: ['proveedores'],
+    queryFn: () => api.get('/proveedores').then((r) => r.data.data),
+  });
+
+  return (
+    <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 flex flex-col gap-2">
+      <div className="flex items-center gap-1.5">
+        <ShoppingCart size={13} className="text-amber-600" />
+        <p className="text-xs font-semibold text-amber-700">Información de compra</p>
+      </div>
+      <div className="flex gap-2">
+        <div className="flex-1 flex flex-col gap-1">
+          <label className="text-xs text-amber-700 font-medium">Proveedor</label>
+          <select
+            value={proveedorId}
+            onChange={(e) => setProveedorId(e.target.value)}
+            className="w-full px-2.5 py-2 bg-white border border-amber-200 rounded-lg
+              text-xs text-gray-700 focus:outline-none focus:ring-2 focus:ring-amber-400"
+          >
+            <option value="">Sin proveedor</option>
+            {proveedores.map((p) => (
+              <option key={p.id} value={p.id}>{p.nombre}</option>
+            ))}
+          </select>
+        </div>
+        <div className="flex-1 flex flex-col gap-1">
+          <label className="text-xs text-amber-700 font-medium">Precio compra</label>
+          <input
+            type="number"
+            placeholder="0"
+            value={costoCompra}
+            onChange={(e) => setCostoCompra(e.target.value)}
+            className="w-full px-2.5 py-2 bg-white border border-amber-200 rounded-lg
+              text-xs text-gray-700 focus:outline-none focus:ring-2 focus:ring-amber-400"
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // ── Paso 1: Tipo ─────────────────────────────────────────────
 function PasoTipo({ onSelect }) {
@@ -42,14 +88,18 @@ function PasoTipo({ onSelect }) {
 
 // ── Serial: línea + IMEIs ────────────────────────────────────
 function PasoSerial({ onExito }) {
-  const queryClient                         = useQueryClient();
-  const [busqueda, setBusqueda]             = useState('');
-  const [lineaSeleccionada, setLinea]       = useState(null);
-  const [creandoLinea, setCreandoLinea]     = useState(false);
-  const [nuevaLinea, setNuevaLinea]         = useState({ nombre: '', marca: '', modelo: '', precio: '' });
-  const [imeis, setImeis]                   = useState(['']);
-  const [error, setError]                   = useState('');
-  const inputRefs                           = useRef([]);
+  const queryClient                     = useQueryClient();
+  const { esAdminNegocio }              = useAuth();
+  const esAdmin                         = esAdminNegocio();
+  const [busqueda, setBusqueda]         = useState('');
+  const [lineaSeleccionada, setLinea]   = useState(null);
+  const [creandoLinea, setCreandoLinea] = useState(false);
+  const [nuevaLinea, setNuevaLinea]     = useState({ nombre: '', marca: '', modelo: '', precio: '' });
+  const [imeis, setImeis]               = useState(['']);
+  const [proveedorId, setProveedorId]   = useState('');
+  const [costoCompra, setCostoCompra]   = useState('');
+  const [error, setError]               = useState('');
+  const inputRefs                       = useRef([]);
 
   const { data: productosData } = useQuery({
     queryKey: ['productos-serial'],
@@ -58,10 +108,11 @@ function PasoSerial({ onExito }) {
 
   const mutCrearLinea = useMutation({
     mutationFn: () => crearProductoSerial({
-      nombre:  nuevaLinea.nombre,
-      marca:   nuevaLinea.marca,
-      modelo:  nuevaLinea.modelo,
-      precio:  Number(nuevaLinea.precio),
+      nombre:       nuevaLinea.nombre,
+      marca:        nuevaLinea.marca,
+      modelo:       nuevaLinea.modelo,
+      precio:       Number(nuevaLinea.precio),
+      proveedor_id: proveedorId ? Number(proveedorId) : null,
     }),
     onSuccess: (res) => {
       queryClient.invalidateQueries(['productos-serial']);
@@ -75,13 +126,18 @@ function PasoSerial({ onExito }) {
   const mutAgregarSeriales = useMutation({
     mutationFn: () => {
       const imeisValidos = imeis.filter((i) => i.trim());
+      // Para no-admin usar costo_compra del producto si existe
+      const costo = esAdmin
+        ? (costoCompra ? Number(costoCompra) : null)
+        : (lineaSeleccionada?.ultimo_costo || null);
+
       return Promise.all(
         imeisValidos.map((imei) =>
           import('../../api/productos.api').then(({ agregarSerial }) =>
             agregarSerial(lineaSeleccionada.id, {
               imei,
               fecha_entrada: new Date().toISOString().split('T')[0],
-              costo_compra: 0,
+              costo_compra:  costo,
             })
           )
         )
@@ -116,13 +172,12 @@ function PasoSerial({ onExito }) {
   const handleConfirmar = () => {
     setError('');
     if (!lineaSeleccionada) return setError('Selecciona una línea de producto');
-    if (imeisValidos === 0) return setError('Ingresa al menos un IMEI');
+    if (imeisValidos === 0)  return setError('Ingresa al menos un IMEI');
     mutAgregarSeriales.mutate();
   };
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Seleccionar línea */}
       {!lineaSeleccionada ? (
         <div className="flex flex-col gap-2">
           <p className="text-sm font-medium text-gray-700">Seleccionar línea de producto</p>
@@ -139,7 +194,7 @@ function PasoSerial({ onExito }) {
                 <div>
                   <span className="font-medium text-gray-800">{p.nombre}</span>
                   <span className="text-xs text-gray-400 ml-2">
-                    {p.total_seriales ?? 0} en stock
+                    {p.disponibles ?? 0} en stock
                   </span>
                 </div>
                 <ChevronRight size={14} className="text-gray-400" />
@@ -199,7 +254,6 @@ function PasoSerial({ onExito }) {
           )}
         </div>
       ) : (
-        /* Línea seleccionada — ingresar IMEIs */
         <div className="flex flex-col gap-3">
           <div className="flex items-center justify-between bg-blue-50 rounded-xl px-3 py-2">
             <div>
@@ -255,6 +309,16 @@ function PasoSerial({ onExito }) {
           >
             + Agregar campo
           </button>
+
+          {/* Info compra solo para admin */}
+          {esAdmin && (
+            <InfoCompra
+              proveedorId={proveedorId}
+              setProveedorId={setProveedorId}
+              costoCompra={costoCompra}
+              setCostoCompra={setCostoCompra}
+            />
+          )}
         </div>
       )}
 
@@ -276,11 +340,15 @@ function PasoSerial({ onExito }) {
 // ── Cantidad: producto + stock ───────────────────────────────
 function PasoCantidad({ onExito }) {
   const queryClient                           = useQueryClient();
+  const { esAdminNegocio }                    = useAuth();
+  const esAdmin                               = esAdminNegocio();
   const [busqueda, setBusqueda]               = useState('');
   const [productoSel, setProductoSel]         = useState(null);
   const [creandoNuevo, setCreandoNuevo]       = useState(false);
   const [nuevoProducto, setNuevoProducto]     = useState({ nombre: '', unidad_medida: 'unidad', precio: '', costo_unitario: '' });
   const [cantidadAgregar, setCantidadAgregar] = useState(1);
+  const [proveedorId, setProveedorId]         = useState('');
+  const [costoCompra, setCostoCompra]         = useState('');
   const [error, setError]                     = useState('');
 
   const { data: productosData } = useQuery({
@@ -290,11 +358,12 @@ function PasoCantidad({ onExito }) {
 
   const mutCrear = useMutation({
     mutationFn: () => crearProductoCantidad({
-  nombre:         nuevoProducto.nombre,
-  unidad_medida:  nuevoProducto.unidad_medida,
-  costo_unitario: nuevoProducto.costo_unitario ? Number(nuevoProducto.costo_unitario) : null,
-  precio:         nuevoProducto.precio ? Number(nuevoProducto.precio) : null,
-}),
+      nombre:         nuevoProducto.nombre,
+      unidad_medida:  nuevoProducto.unidad_medida,
+      costo_unitario: nuevoProducto.costo_unitario ? Number(nuevoProducto.costo_unitario) : null,
+      precio:         nuevoProducto.precio ? Number(nuevoProducto.precio) : null,
+      proveedor_id:   proveedorId ? Number(proveedorId) : null,
+    }),
     onSuccess: (res) => {
       queryClient.invalidateQueries(['productos-cantidad']);
       setProductoSel(res.data.data);
@@ -306,7 +375,13 @@ function PasoCantidad({ onExito }) {
   const mutAjustar = useMutation({
     mutationFn: () =>
       import('../../api/productos.api').then(({ ajustarStockCantidad }) =>
-        ajustarStockCantidad(productoSel.id, { cantidad: Number(cantidadAgregar) })
+        ajustarStockCantidad(productoSel.id, {
+          cantidad:       Number(cantidadAgregar),
+          costo_unitario: esAdmin
+            ? (costoCompra ? Number(costoCompra) : null)
+            : (productoSel?.costo_unitario || null),
+          proveedor_id: esAdmin && proveedorId ? Number(proveedorId) : undefined,
+        })
       ),
     onSuccess: () => {
       queryClient.invalidateQueries(['productos-cantidad']);
@@ -336,7 +411,13 @@ function PasoCantidad({ onExito }) {
             {productos.map((p) => (
               <button
                 key={p.id}
-                onClick={() => { setProductoSel(p); setError(''); }}
+                onClick={() => {
+                  setProductoSel(p);
+                  setError('');
+                  // Pre-llenar precio compra con el último registrado
+                  if (esAdmin && p.costo_unitario) setCostoCompra(String(p.costo_unitario));
+                  if (esAdmin && p.proveedor_id)   setProveedorId(String(p.proveedor_id));
+                }}
                 className="flex items-center justify-between p-2.5 rounded-xl text-left
                   text-sm bg-white border border-gray-100 hover:border-green-200
                   hover:bg-green-50 transition-all"
@@ -397,7 +478,7 @@ function PasoCantidad({ onExito }) {
               <p className="text-xs text-green-500">Stock actual: {productoSel.stock ?? 0}</p>
             </div>
             <button
-              onClick={() => { setProductoSel(null); setCantidadAgregar(1); }}
+              onClick={() => { setProductoSel(null); setCantidadAgregar(1); setCostoCompra(''); setProveedorId(''); }}
               className="text-xs text-green-400 hover:text-green-600 underline"
             >
               Cambiar
@@ -412,6 +493,16 @@ function PasoCantidad({ onExito }) {
             onChange={(e) => setCantidadAgregar(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleConfirmar()}
           />
+
+          {/* Info compra solo para admin */}
+          {esAdmin && (
+            <InfoCompra
+              proveedorId={proveedorId}
+              setProveedorId={setProveedorId}
+              costoCompra={costoCompra}
+              setCostoCompra={setCostoCompra}
+            />
+          )}
         </div>
       )}
 
@@ -432,8 +523,8 @@ function PasoCantidad({ onExito }) {
 
 // ── Modal principal ──────────────────────────────────────────
 export function ModalAgregarProducto({ onClose }) {
-  const [tipo, setTipo]     = useState(null);
-  const [exito, setExito]   = useState(false);
+  const [tipo,  setTipo]  = useState(null);
+  const [exito, setExito] = useState(false);
 
   if (exito) {
     return (
