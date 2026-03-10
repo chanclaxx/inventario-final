@@ -57,6 +57,34 @@ function templateRegistroPendiente({ nombre_negocio }) {
   };
 }
 
+function templateAvisoVencimiento({ nombre_negocio, fecha_vencimiento }) {
+  const fecha = new Date(fecha_vencimiento).toLocaleDateString('es-CO', {
+    day: 'numeric', month: 'long', year: 'numeric'
+  });
+  return {
+    subject: 'Tu plan vence pronto — Inventario',
+    html: `
+      <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto; padding: 32px;">
+        <div style="background: #f59e0b; border-radius: 12px; padding: 24px; text-align: center; margin-bottom: 24px;">
+          <h1 style="color: white; margin: 0; font-size: 24px;">⚠️ Plan por vencer</h1>
+        </div>
+        <p style="color: #374151;">Hola, el plan de <strong>${nombre_negocio}</strong> vence el <strong>${fecha}</strong>.</p>
+        <p style="color: #374151;">
+          Para continuar usando el sistema sin interrupciones, comunícate con nosotros para renovar tu plan.
+        </p>
+        <p style="color: #6b7280; font-size: 14px;">
+          Si ya realizaste el pago, ignora este mensaje.
+        </p>
+      </div>
+    `,
+  };
+}
+
+async function enviarAvisoVencimiento({ email, nombre_negocio, fecha_vencimiento }) {
+  const { subject, html } = templateAvisoVencimiento({ nombre_negocio, fecha_vencimiento });
+  return enviar({ to: email, subject, html });
+}
+
 // ── Envío ─────────────────────────────────────────────
 
 async function enviar({ to, subject, html }) {
@@ -77,4 +105,4 @@ async function enviarConfirmacionRegistro({ email, nombre_negocio }) {
   return enviar({ to: email, subject, html });
 }
 
-module.exports = { enviarAprobacion, enviarConfirmacionRegistro };
+module.exports = { enviarAprobacion, enviarConfirmacionRegistro, enviarAvisoVencimiento };

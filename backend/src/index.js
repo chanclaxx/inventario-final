@@ -10,6 +10,7 @@ const { auth }             = require('./middlewares/auth.middleware');
 const { verificarPlan }    = require('./middlewares/plan.middleware');
 const { resolveSucursal }  = require('./middlewares/sucursal.middleware');
 const { errorHandler }     = require('./middlewares/error.middleware');
+const { ejecutar: verificarVencimientos } = require('./jobs/vencimientos.job');
 
 validateEnv();
 
@@ -73,6 +74,11 @@ const PORT = process.env.PORT || 3001;
 
 const start = async () => {
   await connectDB();
+
+  // Verificar vencimientos al iniciar y cada 24 horas
+  verificarVencimientos();
+  setInterval(verificarVencimientos, 24 * 60 * 60 * 1000);
+
   app.listen(PORT, () => {
     console.log(`🚀 Servidor corriendo en http://localhost:${PORT}`);
   });

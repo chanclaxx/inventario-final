@@ -18,5 +18,7 @@ router.get('/estadisticas',         auth, requireSuperadmin, ctrl.getEstadistica
 router.get('/negocios',             auth, requireSuperadmin, ctrl.getNegocios);
 router.post('/negocios/:id/aprobar', auth, requireSuperadmin, ctrl.aprobarNegocio);
 router.patch('/negocios/:id/estado', auth, requireSuperadmin, ctrl.cambiarEstado);
+router.get('/planes',                   auth, requireSuperadmin, ctrl.getPlanes);
+router.post('/negocios/:id/renovar-plan', auth, requireSuperadmin, ctrl.renovarPlan);
 
 module.exports = router;
