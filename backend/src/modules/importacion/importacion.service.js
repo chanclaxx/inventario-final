@@ -99,7 +99,7 @@ const importarSerial = async (hojas, sucursalId, negocioId) => {
         );
         console.log('INSERTANDO:', imei, '→ productoId:', productoId, 'sucursal:', sucursalId);
 
-        if (serialExiste.length) {
+       if (serialExiste.length) {
   await pool.query(
     `UPDATE seriales SET
        costo_compra   = COALESCE($1, costo_compra),
@@ -109,13 +109,15 @@ const importarSerial = async (hojas, sucursalId, negocioId) => {
   );
   resultado.actualizados++;
 } else {
-          try {
-            console.log('PRE-INSERT imei:', imei, 'productoId REAL:', productoId, 'sucursal:', sucursalId);
-            await pool.query(
-              `INSERT INTO seriales(producto_id, imei, fecha_entrada, costo_compra, cliente_origen)
-               VALUES($1,$2,$3,$4,$5)`,
+  try {
+    console.log('PRE-INSERT imei:', imei, 'productoId REAL:', productoId, 'sucursal:', sucursalId);
+    const insertResult = await pool.query(
+      `INSERT INTO seriales(producto_id, imei, fecha_entrada, costo_compra, cliente_origen)
+       VALUES($1,$2,$3,$4,$5)
+       RETURNING id`,
       [productoId, imei, fechaEntrada, costoCompra, clienteOrigen]
     );
+    console.log('INSERT OK, serial id:', insertResult.rows[0]?.id);
     resultado.insertados++;
   } catch (insertErr) {
     console.log('ERROR INSERT SERIAL:', insertErr.message, '| imei:', imei, '| productoId:', productoId);
