@@ -26,18 +26,15 @@ const findById = async (negocioId, id) => {
 };
 
 /**
- * Antes: findByEmail(email) — buscaba globalmente.
- * Ahora: findByEmailEnNegocio(email, negocioId) — scoped al negocio,
- * alineado con el constraint usuarios_negocio_email_unique.
+ * Búsqueda global por email — alineada con el constraint usuarios_email_key (único global).
  * Acepta excludeId para no colisionar consigo mismo al editar.
  */
-const findByEmailEnNegocio = async (email, negocioId, excludeId = null) => {
+const findByEmail = async (email, excludeId = null) => {
   const { rows } = await pool.query(
     `SELECT id FROM usuarios
      WHERE LOWER(email) = LOWER($1)
-       AND negocio_id   = $2
-       AND ($3::int IS NULL OR id <> $3)`,
-    [email, negocioId, excludeId]
+       AND ($2::int IS NULL OR id <> $2)`,
+    [email, excludeId]
   );
   return rows[0] || null;
 };
@@ -87,4 +84,4 @@ const updatePassword = async (negocioId, id, password_hash) => {
   return rowCount > 0;
 };
 
-module.exports = { findAll, findById, findByEmailEnNegocio, create, update, updatePassword };
+module.exports = { findAll, findById, findByEmail, create, update, updatePassword };
