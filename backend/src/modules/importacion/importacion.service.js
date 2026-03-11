@@ -100,26 +100,31 @@ const importarSerial = async (hojas, sucursalId, negocioId) => {
         console.log('INSERTANDO:', imei, '→ productoId:', productoId, 'sucursal:', sucursalId);
 
         if (serialExiste.length) {
-          await pool.query(
-            `UPDATE seriales SET
-               costo_compra   = COALESCE($1, costo_compra),
-               cliente_origen = COALESCE($2, cliente_origen)
-             WHERE imei = $3`,
-            [costoCompra, clienteOrigen, imei]
-          );
-          resultado.actualizados++;
-        } else {
-          await pool.query(
-            `INSERT INTO seriales(producto_id, imei, fecha_entrada, costo_compra, cliente_origen)
-             VALUES($1,$2,$3,$4,$5)`,
-            [productoId, imei, fechaEntrada, costoCompra, clienteOrigen]
-          );
-          resultado.insertados++;
-        }
-       } catch (err) {
-        console.log('ERROR fila', nFila, ':', err.message, err.stack);
-        resultado.errores.push({ fila: nFila, error: err.message || 'Error desconocido' });
-      }
+  await pool.query(
+    `UPDATE seriales SET
+       costo_compra   = COALESCE($1, costo_compra),
+       cliente_origen = COALESCE($2, cliente_origen)
+     WHERE imei = $3`,
+    [costoCompra, clienteOrigen, imei]
+  );
+  resultado.actualizados++;
+} else {
+  try {
+    await pool.query(
+      `INSERT INTO seriales(producto_id, imei, fecha_entrada, costo_compra, cliente_origen)
+       VALUES($1,$2,$3,$4,$5)`,
+      [productoId, imei, fechaEntrada, costoCompra, clienteOrigen]
+    );
+    resultado.insertados++;
+  } catch (insertErr) {
+    console.log('ERROR INSERT SERIAL:', insertErr.message, '| imei:', imei, '| productoId:', productoId);
+    throw insertErr;
+  }
+}
+} catch (err) {
+  console.log('ERROR fila', nFila, ':', err.message, err.stack);
+  resultado.errores.push({ fila: nFila, error: err.message || 'Error desconocido' });
+}
     }
 
     resumenPorProducto.push(resultado);
