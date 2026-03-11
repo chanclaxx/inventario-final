@@ -60,6 +60,7 @@ const _resolverProductoSerial = async ({ nombre, marca, modelo, sucursalId, prov
 // IMPORTAR SERIAL
 // ─────────────────────────────────────────────
 const importarSerial = async (hojas, sucursalId, negocioId) => {
+  console.log('IMPORTAR SERIAL v2 - negocioId:', negocioId, 'sucursalId:', sucursalId);
   const resumenPorProducto = [];
 
   for (const hoja of hojas) {
