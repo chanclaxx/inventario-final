@@ -11,7 +11,7 @@ import useCarritoStore from '../../store/carritoStore.js';
 const NAV_ITEMS = [
   { path: '/',            label: 'Inicio',      icon: LayoutDashboard, rol: 'supervisor'    },
   { path: '/inventario',  label: 'Inventario',  icon: Package                               },
-  { path: '/facturar',    label: 'Facturar',    icon: FileText                              },
+  { path: '/facturar', label: 'Facturar', icon: FileText, rol: 'supervisor' },
   { path: '/proveedores', label: 'Proveedores', icon: Truck,           rol: 'admin_negocio' },
   { path: '/prestamos',   label: 'Préstamos',   icon: Handshake                             },
   { path: '/caja',        label: 'Caja',        icon: Wallet,          rol: 'supervisor'    },

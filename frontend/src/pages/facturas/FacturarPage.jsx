@@ -11,6 +11,7 @@ import { Spinner } from '../../components/ui/Spinner';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { FacturaTermica } from '../../components/FacturaTermica';
 import api from '../../api/axios.config';
+
 import { FileText, ChevronDown, ChevronUp, Printer, XCircle, Eye, Search, X } from 'lucide-react';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -425,6 +426,8 @@ export default function FacturarPage() {
   }, [facturas, filtros]);
 
   const grupos = useMemo(() => agruparPorDia(facturasFiltradas), [facturasFiltradas]);
+
+  
 
   return (
     <div className="flex flex-col gap-4">
