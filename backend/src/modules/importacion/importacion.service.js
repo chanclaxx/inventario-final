@@ -97,6 +97,7 @@ const importarSerial = async (hojas, sucursalId, negocioId) => {
           `SELECT id FROM seriales WHERE imei = $1 LIMIT 1`,
           [imei]
         );
+        console.log('INSERTANDO:', imei, '→ productoId:', productoId, 'sucursal:', sucursalId);
 
         if (serialExiste.length) {
           await pool.query(
@@ -115,9 +116,9 @@ const importarSerial = async (hojas, sucursalId, negocioId) => {
           );
           resultado.insertados++;
         }
-      } catch (err) {
+       } catch (err) {
+        console.log('ERROR fila', nFila, ':', err.message, err.stack);
         resultado.errores.push({ fila: nFila, error: err.message || 'Error desconocido' });
-        resultado.omitidos++;
       }
     }
 
