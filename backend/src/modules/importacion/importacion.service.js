@@ -93,41 +93,36 @@ const importarSerial = async (hojas, sucursalId, negocioId) => {
         const costoCompra   = fila.costo_compra   ? Number(fila.costo_compra)   : null;
         const clienteOrigen = fila.cliente_origen?.toString().trim() || null;
 
+        // Buscar duplicado solo dentro del mismo negocio
         const { rows: serialExiste } = await pool.query(
-          `SELECT id FROM seriales WHERE imei = $1 LIMIT 1`,
-          [imei]
+          `SELECT s.id FROM seriales s
+           JOIN productos_serial ps ON ps.id = s.producto_id
+           JOIN sucursales su ON su.id = ps.sucursal_id
+           WHERE s.imei = $1 AND su.negocio_id = $2 LIMIT 1`,
+          [imei, negocioId]
         );
-        console.log('INSERTANDO:', imei, '→ productoId:', productoId, 'sucursal:', sucursalId);
 
-       if (serialExiste.length) {
-  await pool.query(
-    `UPDATE seriales SET
-       costo_compra   = COALESCE($1, costo_compra),
-       cliente_origen = COALESCE($2, cliente_origen)
-     WHERE imei = $3`,
-    [costoCompra, clienteOrigen, imei]
-  );
-  resultado.actualizados++;
-} else {
-  try {
-    console.log('PRE-INSERT imei:', imei, 'productoId REAL:', productoId, 'sucursal:', sucursalId);
-    const insertResult = await pool.query(
-      `INSERT INTO seriales(producto_id, imei, fecha_entrada, costo_compra, cliente_origen)
-       VALUES($1,$2,$3,$4,$5)
-       RETURNING id`,
-      [productoId, imei, fechaEntrada, costoCompra, clienteOrigen]
-    );
-    console.log('INSERT OK, serial id:', insertResult.rows[0]?.id);
-    resultado.insertados++;
-  } catch (insertErr) {
-    console.log('ERROR INSERT SERIAL:', insertErr.message, '| imei:', imei, '| productoId:', productoId);
-    throw insertErr;
-  }
-}
-} catch (err) {
-  console.log('ERROR fila', nFila, ':', err.message, err.stack);
-  resultado.errores.push({ fila: nFila, error: err.message || 'Error desconocido' });
-}
+        if (serialExiste.length) {
+          await pool.query(
+            `UPDATE seriales SET
+               costo_compra   = COALESCE($1, costo_compra),
+               cliente_origen = COALESCE($2, cliente_origen)
+             WHERE id = $3`,
+            [costoCompra, clienteOrigen, serialExiste[0].id]
+          );
+          resultado.actualizados++;
+        } else {
+          await pool.query(
+            `INSERT INTO seriales(producto_id, imei, fecha_entrada, costo_compra, cliente_origen)
+             VALUES($1,$2,$3,$4,$5)`,
+            [productoId, imei, fechaEntrada, costoCompra, clienteOrigen]
+          );
+          resultado.insertados++;
+        }
+      } catch (err) {
+        resultado.errores.push({ fila: nFila, error: err.message || 'Error desconocido' });
+        resultado.omitidos++;
+      }
     }
 
     resumenPorProducto.push(resultado);
