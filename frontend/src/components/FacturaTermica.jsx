@@ -18,10 +18,9 @@ export function FacturaTermica({ factura, garantias = [], onClose }) {
 
   const retoma = factura.retoma;
 
-  // Texto descriptivo del tipo de retoma para la factura
   const textoTipoRetoma = () => {
     if (!retoma) return '';
-    if (retoma.tipo_retoma === 'serial') return 'Equipo con serial';
+    if (retoma.tipo_retoma === 'serial')   return 'Equipo con serial';
     if (retoma.tipo_retoma === 'cantidad') return 'Producto por cantidad';
     return '';
   };
@@ -29,44 +28,67 @@ export function FacturaTermica({ factura, garantias = [], onClose }) {
   return (
     <>
       <style>{`
-  @media print {
-  @page {
-    margin: 0;
-    size: 80mm auto;
-  }
-  body * { visibility: hidden; }
-  #factura-termica, #factura-termica * { visibility: visible; }
-  #factura-termica {
-    position: fixed;
-    top: 0; left: 0;
-    width: 80mm;
-    padding: 2mm;
-    font-size: 13px;
-    font-family: 'Courier New', monospace;
-    transform: scale(1.5);
-    transform-origin: top left;
-  }
-  .no-print { display: none !important; }
-}
-  #factura-termica {
-  width: 80mm;
-  font-family: 'Courier New', monospace;
-  font-size: 13px;
-  color: #000;
-  padding: 2mm;
-  box-sizing: border-box;
-}
-  .linea-divisor { border-top: 1px dashed #000; margin: 5px 0; }
-  .centrado      { text-align: center; }
-  .negrita       { font-weight: bold; }
-  .fila          { display: flex; justify-content: space-between; margin: 3px 0; gap: 4px; }
-  .fila span:last-child { text-align: right; flex-shrink: 0; max-width: 45mm; word-break: break-word; }
-  .garantia-bloque  { margin: 4px 0; }
-  .garantia-titulo  { font-weight: bold; margin-top: 6px; font-size: 12px; text-align: center; }
-  .garantia-texto   { font-size: 11px; line-height: 1.4; white-space: pre-wrap; text-align: justify; word-break: break-word; width: 100%; display: block; }
-  .retoma-bloque    { margin: 4px 0; }
-  .retoma-linea     { font-size: 12px; margin: 2px 0; }
-`}</style>
+        /* ── BASE: todo el ticket fuerza negro y peso mínimo 600 ── */
+        #factura-termica,
+        #factura-termica * {
+          color: #000000 !important;
+          font-weight: 600;
+          -webkit-font-smoothing: none;
+          font-smoothing: none;
+          -webkit-print-color-adjust: exact;
+          print-color-adjust: exact;
+        }
+
+        #factura-termica {
+          width: 80mm;
+          font-family: 'Courier New', monospace;
+          font-size: 13px;
+          padding: 2mm;
+          box-sizing: border-box;
+        }
+
+        /* Títulos y etiquetas importantes */
+        #factura-termica .negrita {
+          font-weight: 900 !important;
+        }
+
+        /* Texto pequeño (IMEI, garantías) — sigue siendo 600 para que se vea */
+        #factura-termica .garantia-texto,
+        #factura-termica .retoma-linea {
+          font-weight: 600 !important;
+        }
+
+        .linea-divisor { border-top: 1.5px solid #000; margin: 5px 0; }
+        .centrado      { text-align: center; }
+        .fila          { display: flex; justify-content: space-between; margin: 3px 0; gap: 4px; }
+        .fila span:last-child { text-align: right; flex-shrink: 0; max-width: 45mm; word-break: break-word; }
+        .garantia-titulo { font-weight: 900 !important; margin-top: 6px; font-size: 12px; text-align: center; }
+        .garantia-texto  { font-size: 11px; line-height: 1.5; white-space: pre-wrap; text-align: justify; word-break: break-word; width: 100%; display: block; }
+        .retoma-bloque   { margin: 4px 0; }
+        .retoma-linea    { font-size: 12px; margin: 2px 0; }
+
+        /* ── IMPRESIÓN ── */
+        @media print {
+          @page {
+            margin: 0;
+            size: 80mm auto;
+          }
+          body * { visibility: hidden; }
+          #factura-termica,
+          #factura-termica * { visibility: visible; }
+          #factura-termica {
+            position: fixed;
+            top: 0; left: 0;
+            width: 80mm;
+            padding: 2mm;
+            font-size: 13px;
+            font-family: 'Courier New', monospace;
+            transform: scale(1.5);
+            transform-origin: top left;
+          }
+          .no-print { display: none !important; }
+        }
+      `}</style>
 
       {/* Overlay pantalla */}
       <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center no-print">
@@ -94,10 +116,10 @@ export function FacturaTermica({ factura, garantias = [], onClose }) {
       <div id="factura-termica">
 
         {/* Encabezado */}
-        <div className="centrado negrita" style={{ fontSize: '13px' }}>
+        <div className="centrado negrita" style={{ fontSize: '14px' }}>
           {factura.config?.nombre_negocio || 'MI TIENDA'}
         </div>
-        {factura.config?.nit      && <div className="centrado">NIT: {factura.config.nit}</div>}
+        {factura.config?.nit       && <div className="centrado">NIT: {factura.config.nit}</div>}
         {factura.config?.direccion && <div className="centrado">{factura.config.direccion}</div>}
         {factura.config?.telefono  && <div className="centrado">Tel: {factura.config.telefono}</div>}
 
@@ -134,7 +156,7 @@ export function FacturaTermica({ factura, garantias = [], onClose }) {
         <div className="negrita">PRODUCTOS</div>
         {factura.lineas?.map((l, i) => (
           <div key={i} style={{ marginBottom: '4px' }}>
-            <div style={{ fontWeight: 'bold' }}>{l.nombre_producto}</div>
+            <div className="negrita">{l.nombre_producto}</div>
             {l.imei && <div style={{ fontSize: '9px' }}>IMEI: {l.imei}</div>}
             <div className="fila">
               <span>{l.cantidad} x {formatCOP(l.precio)}</span>
@@ -178,7 +200,7 @@ export function FacturaTermica({ factura, garantias = [], onClose }) {
         )}
 
         {/* Totales */}
-        <div className="fila negrita" style={{ fontSize: '13px' }}>
+        <div className="fila negrita" style={{ fontSize: '14px' }}>
           <span>TOTAL:</span>
           <span>{formatCOP(total - valorRetoma)}</span>
         </div>
@@ -203,7 +225,7 @@ export function FacturaTermica({ factura, garantias = [], onClose }) {
         {/* Garantías */}
         {garantias.length > 0 && (
           <>
-            <div className="centrado negrita" style={{ fontSize: '10px' }}>
+            <div className="centrado negrita" style={{ fontSize: '11px' }}>
               TÉRMINOS Y GARANTÍAS
             </div>
             {garantias
@@ -219,10 +241,10 @@ export function FacturaTermica({ factura, garantias = [], onClose }) {
         )}
 
         {/* Pie */}
-        <div className="centrado" style={{ marginTop: '8px', fontSize: '10px' }}>
+        <div className="centrado" style={{ marginTop: '8px', fontSize: '11px' }}>
           ¡Gracias por su compra!
         </div>
-        <div style={{ marginTop: '20px', textAlign: 'center', fontSize: '9px' }}>
+        <div style={{ marginTop: '20px', textAlign: 'center', fontSize: '10px' }}>
           Firma: ___________________________
         </div>
         <div style={{ height: '10mm' }} />
