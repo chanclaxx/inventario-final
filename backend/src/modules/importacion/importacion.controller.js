@@ -29,26 +29,26 @@ const importarInventario = async (req, res, next) => {
     const hojasSerial = wb.SheetNames.filter(_esHojaSerial);
 
     if (hojasSerial.length > 0) {
-      const hojas = hojasSerial.map((nombreHoja) => {
-        const filas = XLSX.utils.sheet_to_json(wb.Sheets[nombreHoja], {
-  range: 1,
-  defval: '',
-});
-console.log('HOJA:', nombreHoja);
-console.log('FILAS RAW:', JSON.stringify(filas.slice(0, 4)));
-console.log('DATOS NORMALIZADOS:', JSON.stringify(filas.slice(1).map(_normalizarFila).slice(0, 3)));
-        const datos = filas
-          .slice(1)
-          .map(_normalizarFila)
-          .filter((f) => f.imei?.toString().trim());
+  const hojas = [];
+  for (const nombreHoja of hojasSerial) {
+    const filas = XLSX.utils.sheet_to_json(wb.Sheets[nombreHoja], {
+      range:  1,
+      defval: '',
+    });
+    const datos = filas
+      .slice(1)
+      .map(_normalizarFila)
+      .filter((f) => f.imei?.toString().trim());
 
-        return { nombreProducto: nombreHoja.trim(), filas: datos };
-      }).filter((h) => h.filas.length > 0);
-
-      if (hojas.length > 0) {
-        resultado.serial = await service.importarSerial(hojas, sucursalId, negocioId);
-      }
+    if (datos.length > 0) {
+      hojas.push({ nombreProducto: nombreHoja.trim(), filas: datos });
     }
+  }
+
+  if (hojas.length > 0) {
+    resultado.serial = await service.importarSerial(hojas, sucursalId, negocioId);
+  }
+}
 
     const hojaCantidad = wb.SheetNames.find((n) =>
       n.toLowerCase().includes('cantidad')
