@@ -109,10 +109,11 @@ const importarSerial = async (hojas, sucursalId, negocioId) => {
   );
   resultado.actualizados++;
 } else {
-  try {
-    await pool.query(
-      `INSERT INTO seriales(producto_id, imei, fecha_entrada, costo_compra, cliente_origen)
-       VALUES($1,$2,$3,$4,$5)`,
+          try {
+            console.log('PRE-INSERT imei:', imei, 'productoId REAL:', productoId, 'sucursal:', sucursalId);
+            await pool.query(
+              `INSERT INTO seriales(producto_id, imei, fecha_entrada, costo_compra, cliente_origen)
+               VALUES($1,$2,$3,$4,$5)`,
       [productoId, imei, fechaEntrada, costoCompra, clienteOrigen]
     );
     resultado.insertados++;
