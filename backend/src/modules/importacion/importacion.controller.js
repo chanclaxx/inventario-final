@@ -31,9 +31,12 @@ const importarInventario = async (req, res, next) => {
     if (hojasSerial.length > 0) {
       const hojas = hojasSerial.map((nombreHoja) => {
         const filas = XLSX.utils.sheet_to_json(wb.Sheets[nombreHoja], {
-          range:  1,
-          defval: '',
-        });
+  range: 1,
+  defval: '',
+});
+console.log('HOJA:', nombreHoja);
+console.log('FILAS RAW:', JSON.stringify(filas.slice(0, 4)));
+console.log('DATOS NORMALIZADOS:', JSON.stringify(filas.slice(1).map(_normalizarFila).slice(0, 3)));
         const datos = filas
           .slice(1)
           .map(_normalizarFila)
