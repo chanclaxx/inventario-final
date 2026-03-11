@@ -34,19 +34,36 @@ const crearUsuario = async (negocioId, { nombre, email, password, rol, sucursal_
     };
   }
 
-  const existe = await usuariosRepo.findByEmail(email);
-  if (existe) throw { status: 409, message: 'Ya existe un usuario con ese email' };
+  // Validar email único dentro del negocio (alineado con constraint usuarios_negocio_email_unique)
+  const existe = await usuariosRepo.findByEmailEnNegocio(email, negocioId);
+  if (existe) throw { status: 409, message: 'Ya existe un usuario con ese email en este negocio' };
 
   const password_hash = await bcrypt.hash(password, 10);
-  return usuariosRepo.create({
-    negocio_id: negocioId, nombre, email, password_hash, rol, sucursal_id,
-    password_temporal: false,
-  });
+
+  try {
+    return await usuariosRepo.create({
+      negocio_id: negocioId, nombre, email, password_hash, rol, sucursal_id,
+      password_temporal: false,
+    });
+  } catch (err) {
+    // Segunda línea de defensa ante race condition
+    if (err.constraint === 'usuarios_negocio_email_unique') {
+      throw { status: 409, message: 'Ya existe un usuario con ese email en este negocio' };
+    }
+    throw err;
+  }
 };
 
 const actualizarUsuario = async (negocioId, id, datos) => {
   const existe = await usuariosRepo.findById(negocioId, id);
   if (!existe) throw { status: 404, message: 'Usuario no encontrado' };
+
+  // Si viene email, validar que no colisione con otro usuario del mismo negocio
+  if (datos.email) {
+    const duplicado = await usuariosRepo.findByEmailEnNegocio(datos.email, negocioId, Number(id));
+    if (duplicado) throw { status: 409, message: 'Ya existe un usuario con ese email en este negocio' };
+  }
+
   return usuariosRepo.update(negocioId, id, datos);
 };
 

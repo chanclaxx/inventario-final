@@ -25,10 +25,19 @@ const findById = async (negocioId, id) => {
   return rows[0] || null;
 };
 
-const findByEmail = async (email) => {
+/**
+ * Antes: findByEmail(email) — buscaba globalmente.
+ * Ahora: findByEmailEnNegocio(email, negocioId) — scoped al negocio,
+ * alineado con el constraint usuarios_negocio_email_unique.
+ * Acepta excludeId para no colisionar consigo mismo al editar.
+ */
+const findByEmailEnNegocio = async (email, negocioId, excludeId = null) => {
   const { rows } = await pool.query(
-    'SELECT * FROM usuarios WHERE LOWER(email) = LOWER($1)',
-    [email]
+    `SELECT id FROM usuarios
+     WHERE LOWER(email) = LOWER($1)
+       AND negocio_id   = $2
+       AND ($3::int IS NULL OR id <> $3)`,
+    [email, negocioId, excludeId]
   );
   return rows[0] || null;
 };
@@ -44,7 +53,6 @@ const create = async ({ negocio_id, nombre, email, password_hash, rol, sucursal_
 
 const update = async (negocioId, id, datos) => {
   const { nombre, email, rol, sucursal_id } = datos;
-  // activo puede venir explícito o no — si no viene, lo mantenemos con COALESCE
   const activoExplicito = typeof datos.activo === 'boolean';
 
   let query, params;
@@ -79,4 +87,4 @@ const updatePassword = async (negocioId, id, password_hash) => {
   return rowCount > 0;
 };
 
-module.exports = { findAll, findById, findByEmail, create, update, updatePassword };
+module.exports = { findAll, findById, findByEmailEnNegocio, create, update, updatePassword };

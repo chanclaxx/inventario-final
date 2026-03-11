@@ -1,16 +1,33 @@
 const authService = require('./auth.service');
 
+// ─────────────────────────────────────────────
+// POST /auth/login
+// Body: { email, password, negocio_id? }
+//
+// Sin negocio_id → verifica credenciales.
+//   · 1 coincidencia  → responde con tokens directamente.
+//   · N coincidencias → responde { requiere_seleccion: true, negocios: [...] }
+//
+// Con negocio_id → login directo en ese negocio (paso 2 del selector).
+// ─────────────────────────────────────────────
 const login = async (req, res, next) => {
   try {
-    const { email, password } = req.body;
+    const { email, password, negocio_id } = req.body;
 
     if (!email || !password) {
       return res.status(400).json({ ok: false, error: 'Email y contraseña son requeridos' });
     }
 
-    const data = await authService.login(email, password);
+    const data = negocio_id
+      ? await authService.loginConNegocio(email, password, negocio_id)
+      : await authService.verificarCredenciales(email, password);
 
-    // Guardar refreshToken en cookie httpOnly (más seguro que localStorage)
+    // Si el backend pide selección de negocio, no emitimos cookie todavía
+    if (data.requiere_seleccion) {
+      return res.json({ ok: true, requiere_seleccion: true, negocios: data.negocios });
+    }
+
+    // Login completo — guardar refreshToken en cookie httpOnly
     res.cookie('refreshToken', data.refreshToken, {
       httpOnly: true,
       secure:   process.env.NODE_ENV === 'production',
@@ -28,6 +45,9 @@ const login = async (req, res, next) => {
   }
 };
 
+// ─────────────────────────────────────────────
+// POST /auth/refresh
+// ─────────────────────────────────────────────
 const refresh = async (req, res, next) => {
   try {
     const refreshToken = req.cookies?.refreshToken;
@@ -43,11 +63,17 @@ const refresh = async (req, res, next) => {
   }
 };
 
+// ─────────────────────────────────────────────
+// POST /auth/logout
+// ─────────────────────────────────────────────
 const logout = (req, res) => {
   res.clearCookie('refreshToken');
   res.json({ ok: true, message: 'Sesión cerrada correctamente' });
 };
 
+// ─────────────────────────────────────────────
+// GET /auth/me
+// ─────────────────────────────────────────────
 const me = (req, res) => {
   res.json({ ok: true, data: req.user });
 };
