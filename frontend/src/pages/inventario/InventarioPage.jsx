@@ -138,7 +138,7 @@ export default function InventarioPage() {
           <div className="flex items-center gap-2">
             {totalItems > 0 && (
               <span className="text-sm font-bold text-blue-600">
-                ${total.toLocaleString('es-CO')}
+                ${total.toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.')}
               </span>
             )}
             {carritoAbierto

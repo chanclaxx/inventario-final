@@ -54,7 +54,7 @@ export function ProductosCantidad() {
       tipo:        'cantidad',
       nombre:      producto.nombre,
       producto_id: producto.id,
-      precio:      producto.precio || producto.costo_unitario || 0,
+      precio: Math.round(Number(producto.precio || producto.costo_unitario || 0)),
       stock:       producto.stock,
       cantidad:    1,
     });

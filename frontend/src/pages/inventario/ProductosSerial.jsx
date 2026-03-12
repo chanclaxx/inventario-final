@@ -177,7 +177,7 @@ export function ProductosSerial({ onAgregarProducto }) {
       tipo:     'serial',
       nombre:   productoSeleccionado.nombre,
       imei:     serial.imei,
-      precio:   productoSeleccionado.precio || 0,
+      precio: Math.round(Number(productoSeleccionado.precio || 0)),
       cantidad: 1,
     });
   };
