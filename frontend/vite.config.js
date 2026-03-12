@@ -19,22 +19,24 @@ export default defineConfig({
         icons: [
           { src: 'icons/icon-192x192.png', sizes: '192x192', type: 'image/png' },
           { src: 'icons/icon-512x512.png', sizes: '512x512', type: 'image/png' },
-          { src: 'icons/icon-512x512.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' }
-        ]
+          { src: 'icons/icon-512x512.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' },
+        ],
       },
       workbox: {
+        // Activa el nuevo SW inmediatamente sin esperar a que se cierren todas las pestañas
+        skipWaiting: true,
+        // El nuevo SW toma control de todas las pestañas abiertas al instante
+        clientsClaim: true,
         globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
-        // Rutas de datos en tiempo real: NUNCA cachear
-        // Se listan primero con NetworkOnly para que tengan prioridad
         runtimeCaching: [
           {
-            // Reportes, facturas, dashboard — datos que cambian constantemente
-            urlPattern: /^https:\/\/inventario-final-production\.up\.railway\.app\/api\/(reportes|facturas|dashboard).*/i,
+            // Reportes, facturas, dashboard — datos en tiempo real: NUNCA cachear
+            urlPattern: /^https:\/\/inventario-final-production\.up\.railway\.app\/api\/(reportes|facturas|dashboard)/i,
             handler: 'NetworkOnly',
           },
           {
-            // El resto de la API: catálogos, config, productos — pueden cachearse brevemente
-            urlPattern: /^https:\/\/inventario-final-production\.up\.railway\.app\/api\/.*/i,
+            // El resto de la API: catálogos, productos, config — cacheo breve
+            urlPattern: /^https:\/\/inventario-final-production\.up\.railway\.app\/api\//i,
             handler: 'NetworkFirst',
             options: {
               cacheName: 'api-cache',
@@ -43,7 +45,7 @@ export default defineConfig({
           },
         ],
       },
-    })
+    }),
   ],
   server: {
     port: 5173,
@@ -51,7 +53,7 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:3001',
         changeOrigin: true,
-      }
-    }
-  }
+      },
+    },
+  },
 })
