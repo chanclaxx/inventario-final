@@ -1,31 +1,34 @@
-import { useState } from 'react';
+import { useState, useContext } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ShoppingBag, Plus, AlertTriangle, Trash2 } from 'lucide-react';
 import { getProductosCantidad, ajustarStockCantidad } from '../../api/productos.api';
-import { SearchInput }               from '../../components/ui/SearchInput';
-import { Badge }                     from '../../components/ui/Badge';
-import { Button }                    from '../../components/ui/Button';
-import { Input }                     from '../../components/ui/Input';
-import { Spinner }                   from '../../components/ui/Spinner';
-import { EmptyState }                from '../../components/ui/EmptyState';
-import { formatCOP }                 from '../../utils/formatters';
-import useCarritoStore               from '../../store/carritoStore';
-import { ModalPinEliminacion }       from './ModalPinEliminacion';
+import { SearchInput }                 from '../../components/ui/SearchInput';
+import { Badge }                       from '../../components/ui/Badge';
+import { Button }                      from '../../components/ui/Button';
+import { Input }                       from '../../components/ui/Input';
+import { Spinner }                     from '../../components/ui/Spinner';
+import { EmptyState }                  from '../../components/ui/EmptyState';
+import { formatCOP }                   from '../../utils/formatters';
+import useCarritoStore                 from '../../store/carritoStore';
+import { ModalPinEliminacion }         from './ModalPinEliminacion';
 import { ModalEditarProductoCantidad } from './ModalEditarProductoCantidad';
+import { AuthContext }                 from '../../context/AuthContext';
 
 export function ProductosCantidad() {
   const queryClient = useQueryClient();
+  const { esAdminNegocio } = useContext(AuthContext);
+
   const [busqueda,         setBusqueda]         = useState('');
   const [productoAReducir, setProductoAReducir] = useState(null);
   const [cantidadReducir,  setCantidadReducir]  = useState('1');
   const [productoAEditar,  setProductoAEditar]  = useState(null);
 
   const { data: productosData, isLoading } = useQuery({
-  queryKey: ['productos-cantidad'],
-  queryFn: () => getProductosCantidad().then((r) => r.data.data),
-  staleTime: 0,
-  gcTime: 0,
-});
+    queryKey: ['productos-cantidad'],
+    queryFn: () => getProductosCantidad().then((r) => r.data.data),
+    staleTime: 0,
+    gcTime: 0,
+  });
 
   const agregarItem = useCarritoStore((s) => s.agregarItem);
 
@@ -69,7 +72,14 @@ export function ProductosCantidad() {
     return mutReducir.mutateAsync({ productoId: productoAReducir.id, cantidad: cant });
   };
 
+  const handleDobleClick = (p) => {
+    if (!esAdminNegocio()) return;
+    setProductoAEditar(p);
+  };
+
   if (isLoading) return <Spinner className="py-20" />;
+
+  const esAdmin = esAdminNegocio();
 
   return (
     <>
@@ -84,18 +94,23 @@ export function ProductosCantidad() {
           <EmptyState icon={ShoppingBag} titulo="Sin productos" />
         ) : (
           <>
-            <p className="text-xs text-gray-400 px-1">
-              Doble click en una card para editar el producto
-            </p>
+            {esAdmin && (
+              <p className="text-xs text-gray-400 px-1">
+                Doble click en una card para editar el producto
+              </p>
+            )}
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
               {productosFiltrados.map((p) => (
                 <div
                   key={p.id}
-                  onDoubleClick={() => setProductoAEditar(p)}
-                  className="bg-white border border-gray-100 rounded-2xl p-4 flex flex-col gap-3
-                    cursor-pointer hover:border-blue-200 hover:bg-blue-50/20
-                    transition-colors select-none w-full"
-                  title="Doble click para editar"
+                  onDoubleClick={() => handleDobleClick(p)}
+                  className={`bg-white border border-gray-100 rounded-2xl p-4 flex flex-col gap-3
+                    transition-colors select-none w-full
+                    ${esAdmin
+                      ? 'cursor-pointer hover:border-blue-200 hover:bg-blue-50/20'
+                      : 'cursor-default'
+                    }`}
+                  title={esAdmin ? 'Doble click para editar' : undefined}
                 >
                   {/* Nombre y acciones */}
                   <div className="flex items-start justify-between gap-2">
@@ -130,7 +145,7 @@ export function ProductosCantidad() {
                       )}
                     </div>
                     <span className="text-sm font-semibold text-gray-700">
-                      {formatCOP(p.costo_unitario || 0)}
+                      {formatCOP(p.precio || 0)}
                     </span>
                   </div>
 

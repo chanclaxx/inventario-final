@@ -1,25 +1,29 @@
-import { useState } from 'react';
+import { useState, useContext } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Pencil } from 'lucide-react';
 import { actualizarProductoCantidad } from '../../api/productos.api';
 import { Modal } from '../../components/ui/Modal';
 import { Input } from '../../components/ui/Input';
 import { Button } from '../../components/ui/Button';
+import { AuthContext } from '../../context/AuthContext';
 
 /**
- * Modal para editar un producto por cantidad (nombre, unidad, stock mínimo, costo).
- * Se abre con doble click en la card del producto.
+ * Modal para editar un producto por cantidad (nombre, unidad, stock mínimo, precio, costo).
+ * Solo accesible para admin_negocio.
  *
  * Props:
- *  - producto: { id, nombre, unidad_medida, stock_minimo, costo_unitario }
+ *  - producto: { id, nombre, unidad_medida, stock_minimo, precio, costo_unitario }
  *  - onClose:  () => void
  */
 export function ModalEditarProductoCantidad({ producto, onClose }) {
+  const { esAdminNegocio } = useContext(AuthContext);
   const queryClient = useQueryClient();
+
   const [form, setForm] = useState({
-    nombre:        producto.nombre        || '',
-    unidad_medida: producto.unidad_medida || 'unidad',
-    stock_minimo:  producto.stock_minimo  != null ? String(producto.stock_minimo)  : '0',
+    nombre:         producto.nombre         || '',
+    unidad_medida:  producto.unidad_medida  || 'unidad',
+    stock_minimo:   producto.stock_minimo   != null ? String(producto.stock_minimo)   : '0',
+    precio:         producto.precio         != null ? String(producto.precio)         : '',
     costo_unitario: producto.costo_unitario != null ? String(producto.costo_unitario) : '',
   });
   const [error, setError] = useState('');
@@ -29,6 +33,7 @@ export function ModalEditarProductoCantidad({ producto, onClose }) {
       nombre:         form.nombre.trim(),
       unidad_medida:  form.unidad_medida.trim() || 'unidad',
       stock_minimo:   Number(form.stock_minimo)  || 0,
+      precio:         form.precio         !== '' ? Number(form.precio)         : null,
       costo_unitario: form.costo_unitario !== '' ? Number(form.costo_unitario) : null,
       proveedor_id:   producto.proveedor_id || null,
     }),
@@ -48,6 +53,10 @@ export function ModalEditarProductoCantidad({ producto, onClose }) {
       else mutation.mutate();
     }
   };
+
+  // Guarda de seguridad: el padre ya bloquea el doble click,
+  // pero el modal se defiende por su cuenta también.
+  if (!esAdminNegocio()) return null;
 
   return (
     <Modal open onClose={onClose} title="Editar producto" size="sm">
@@ -87,19 +96,30 @@ export function ModalEditarProductoCantidad({ producto, onClose }) {
             placeholder="0"
             value={form.stock_minimo}
             onChange={(e) => setForm({ ...form, stock_minimo: e.target.value })}
-            onKeyDown={(e) => handleKeyDown(e, 'edit-costo-cant')}
+            onKeyDown={(e) => handleKeyDown(e, 'edit-precio-cant')}
           />
           <Input
-            id="edit-costo-cant"
-            label="Costo unitario"
+            id="edit-precio-cant"
+            label="Precio de venta"
             type="number"
             min="0"
             placeholder="0"
-            value={form.costo_unitario}
-            onChange={(e) => setForm({ ...form, costo_unitario: e.target.value })}
-            onKeyDown={(e) => handleKeyDown(e, null)}
+            value={form.precio}
+            onChange={(e) => setForm({ ...form, precio: e.target.value })}
+            onKeyDown={(e) => handleKeyDown(e, 'edit-costo-cant')}
           />
         </div>
+
+        <Input
+          id="edit-costo-cant"
+          label="Costo unitario"
+          type="number"
+          min="0"
+          placeholder="0"
+          value={form.costo_unitario}
+          onChange={(e) => setForm({ ...form, costo_unitario: e.target.value })}
+          onKeyDown={(e) => handleKeyDown(e, null)}
+        />
 
         {error && <p className="text-sm text-red-500">{error}</p>}
 

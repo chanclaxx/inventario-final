@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useContext } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Package, Plus, ChevronRight, Trash2, Lock } from 'lucide-react';
 import { getProductosSerial, getSeriales, eliminarSerial } from '../../api/productos.api';
@@ -11,6 +11,7 @@ import { formatCOP }           from '../../utils/formatters';
 import useCarritoStore         from '../../store/carritoStore';
 import { ModalPinEliminacion } from './ModalPinEliminacion';
 import { ModalEditarSerial }   from './ModalEditarSerial';
+import { AuthContext }         from '../../context/AuthContext';
 
 // ─── Tarjeta individual de serial ─────────────────────────────────────────────
 function TarjetaSerial({ serial, precio, onAgregar, onEliminar, onEditar }) {
@@ -20,12 +21,19 @@ function TarjetaSerial({ serial, precio, onAgregar, onEliminar, onEditar }) {
     ? 'bg-blue-50 border-blue-200 hover:border-blue-300'
     : 'bg-white border-gray-100 hover:border-blue-200 hover:bg-blue-50/30';
 
+  const handleDobleClick = () => {
+    if (!onEditar) return;
+    onEditar(serial);
+  };
+
   return (
     <div
-      onDoubleClick={() => onEditar(serial)}
+      onDoubleClick={handleDobleClick}
       className={`border rounded-xl p-3 flex items-center justify-between
-        cursor-pointer transition-colors select-none ${estiloContenedor}`}
-      title="Doble click para editar"
+        transition-colors select-none
+        ${onEditar ? 'cursor-pointer' : 'cursor-default'}
+        ${estiloContenedor}`}
+      title={onEditar ? 'Doble click para editar' : undefined}
     >
       <div className="flex flex-col gap-0.5 min-w-0 flex-1 mr-2">
         <div className="flex items-center gap-2 flex-wrap">
@@ -109,6 +117,7 @@ function SelectorModelo({ productos, productoSeleccionado, onSeleccionar }) {
 // ─── Componente principal ─────────────────────────────────────────────────────
 export function ProductosSerial({ onAgregarProducto }) {
   const queryClient = useQueryClient();
+  const { esAdminNegocio } = useContext(AuthContext);
 
   const [productoSeleccionado, setProductoSeleccionado] = useState(null);
   const [busqueda,             setBusqueda]             = useState('');
@@ -117,11 +126,11 @@ export function ProductosSerial({ onAgregarProducto }) {
   const [serialAEditar,        setSerialAEditar]        = useState(null);
 
   const { data: productosData, isLoading } = useQuery({
-  queryKey: ['productos-serial'],
-  queryFn: () => getProductosSerial().then((r) => r.data.data),
-  staleTime: 0,
-  gcTime: 0,
-});
+    queryKey: ['productos-serial'],
+    queryFn: () => getProductosSerial().then((r) => r.data.data),
+    staleTime: 0,
+    gcTime: 0,
+  });
 
   const { data: serialesData, isLoading: loadingSeriales } = useQuery({
     queryKey: ['seriales', productoSeleccionado?.id],
@@ -173,6 +182,8 @@ export function ProductosSerial({ onAgregarProducto }) {
     });
   };
 
+  const esAdmin = esAdminNegocio();
+
   // ── Panel de seriales (compartido desktop y móvil) ─────────────────────────
   const PanelSeriales = productoSeleccionado ? (
     <div className="flex flex-col gap-3 flex-1">
@@ -211,7 +222,9 @@ export function ProductosSerial({ onAgregarProducto }) {
               · {prestados.length} prestado(s)
             </span>
           )}
-          <span className="text-xs text-gray-300 italic">· Doble click para editar</span>
+          {esAdmin && (
+            <span className="text-xs text-gray-300 italic">· Doble click para editar</span>
+          )}
         </div>
       )}
 
@@ -228,7 +241,7 @@ export function ProductosSerial({ onAgregarProducto }) {
               precio={productoSeleccionado.precio}
               onAgregar={handleAgregarSerial}
               onEliminar={(serial) => setSerialAEliminar({ id: serial.id, imei: serial.imei })}
-              onEditar={setSerialAEditar}
+              onEditar={esAdmin ? setSerialAEditar : null}
             />
           ))}
         </div>
