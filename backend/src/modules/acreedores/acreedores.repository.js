@@ -2,7 +2,7 @@ const { pool } = require('../../config/db');
 
 const findAll = async (negocioId, filtro) => {
   let query = `
-    SELECT a.id, a.nombre, a.cedula, a.telefono,
+    SELECT a.id, a.nombre, a.cedula, a.telefono, a.proveedor_id,
            COALESCE(SUM(CASE WHEN m.tipo = 'Cargo' THEN m.valor ELSE -m.valor END), 0) AS saldo
     FROM acreedores a
     LEFT JOIN movimientos_acreedor m ON m.acreedor_id = a.id

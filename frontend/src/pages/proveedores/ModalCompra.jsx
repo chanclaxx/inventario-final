@@ -750,8 +750,8 @@ function PasoPago({ proveedor, productos, tipo, onConfirmar, onVolver, loading }
   });
 
   const proveedorYaEsAcreedor = (acreedoresData || []).some(
-    (a) => a.nombre.toLowerCase() === proveedor.nombre.toLowerCase()
-  );
+  (a) => a.proveedor_id === proveedor.id
+);
 
   const handleConfirmar = () => {
     setError('');
