@@ -32,5 +32,9 @@ export const formatFechaHora = (fecha) => {
 
 export const formatFechaISO = (fecha) => {
   if (!fecha) return '';
-  return new Date(fecha).toISOString().split('T')[0];
+  const d = new Date(fecha);
+  const yyyy = d.getFullYear();
+  const mm   = String(d.getMonth() + 1).padStart(2, '0');
+  const dd   = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
 };
