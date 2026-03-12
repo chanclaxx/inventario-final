@@ -75,21 +75,37 @@ const crearFactura = async ({ sucursal_id, usuario_id, nombre_cliente, cedula, c
         imei:               retoma.imei               || null,
       });
 
-      if (retoma.ingreso_inventario && retoma.imei && retoma.producto_id) {
-        const existeSerial = await serialRepo.findSerialByIMEI(retoma.imei);
-        if (existeSerial) {
-          await client.query(
-            'UPDATE seriales SET vendido = false, fecha_salida = NULL, cliente_origen = $1 WHERE imei = $2',
-            [nombre_cliente, retoma.imei]
+      if (retoma.ingreso_inventario) {
+        console.log('🔍 RETOMA ingreso_inventario=true, tipo:', retoma.tipo_retoma);
+        console.log('🔍 RETOMA data:', JSON.stringify(retoma));
+
+        if (retoma.tipo_retoma === 'serial' && retoma.imei) {
+          const existeSerial = await serialRepo.findSerialByIMEI(retoma.imei);
+          if (retoma.producto_serial_id) {
+            if (existeSerial) {
+              await client.query(
+                `UPDATE seriales SET vendido = false, fecha_salida = NULL, cliente_origen = $1 WHERE imei = $2`,
+                [nombre_cliente, retoma.imei]
+              );
+            } else {
+              await serialRepo.insertarSerial({
+                producto_id:    retoma.producto_serial_id,
+                imei:           retoma.imei,
+                fecha_entrada:  new Date().toISOString().split('T')[0],
+                costo_compra:   retoma.valor_retoma,
+                cliente_origen: nombre_cliente,
+              });
+            }
+          } else {
+            console.log('⚠️ Sin producto_serial_id — retoma guardada pero no ingresa a seriales');
+          }
+        }
+
+        if (retoma.tipo_retoma === 'cantidad' && retoma.producto_cantidad_id) {
+          await cantidadRepo.ajustarStock(
+            retoma.producto_cantidad_id,
+            Number(retoma.cantidad_retoma || 1)
           );
-        } else {
-          await serialRepo.insertarSerial({
-            producto_id:    retoma.producto_id,
-            imei:           retoma.imei,
-            fecha_entrada:  new Date().toISOString().split('T')[0],
-            costo_compra:   retoma.valor_retoma,
-            cliente_origen: nombre_cliente,
-          });
         }
       }
     }
@@ -156,14 +172,12 @@ const editarFactura = async (negocioId, id, {
   try {
     await client.query('BEGIN');
 
-    // Actualizar datos del cliente
     await client.query(
       `UPDATE facturas SET nombre_cliente = $1, cedula = $2, celular = $3, notas = $4
        WHERE id = $5`,
       [nombre_cliente, cedula, celular, notas, id]
     );
 
-    // Actualizar precio de líneas (no agrega ni quita)
     for (const linea of lineas) {
       await client.query(
         `UPDATE lineas_factura SET precio = $1, cantidad = $2
@@ -172,7 +186,6 @@ const editarFactura = async (negocioId, id, {
       );
     }
 
-    // Reemplazar pagos completos
     await client.query('DELETE FROM pagos_factura WHERE factura_id = $1', [id]);
     for (const pago of pagos) {
       if (Number(pago.valor) > 0) {
@@ -184,57 +197,50 @@ const editarFactura = async (negocioId, id, {
       }
     }
 
-    // Manejar retoma
     if (retoma) {
-  await facturasRepo.insertarRetoma(client, {
-    factura_id:         factura.id,
-    descripcion:        retoma.descripcion,
-    valor_retoma:       retoma.valor_retoma,
-    ingreso_inventario: retoma.ingreso_inventario || false,
-    nombre_producto:    retoma.nombre_producto || null,
-    imei:               retoma.imei            || null,
-  });
+      await facturasRepo.insertarRetoma(client, {
+        factura_id:         id,          // ✅ fix: era factura.id
+        descripcion:        retoma.descripcion,
+        valor_retoma:       retoma.valor_retoma,
+        ingreso_inventario: retoma.ingreso_inventario || false,
+        nombre_producto:    retoma.nombre_producto    || null,
+        imei:               retoma.imei               || null,
+      });
 
-  if (retoma.ingreso_inventario) {
-  console.log('🔍 RETOMA ingreso_inventario=true, tipo:', retoma.tipo_retoma);
-  console.log('🔍 RETOMA data:', JSON.stringify(retoma));
+      if (retoma.ingreso_inventario) {
+        console.log('🔍 editarFactura RETOMA ingreso_inventario=true, tipo:', retoma.tipo_retoma);
+        console.log('🔍 RETOMA data:', JSON.stringify(retoma));
 
-  if (retoma.tipo_retoma === 'serial' && retoma.imei) {
-    console.log('🔍 Buscando serial por IMEI:', retoma.imei);
-    const existeSerial = await serialRepo.findSerialByIMEI(retoma.imei);
-    console.log('🔍 Serial encontrado:', existeSerial);
+        if (retoma.tipo_retoma === 'serial' && retoma.imei) {
+          const existeSerial = await serialRepo.findSerialByIMEI(retoma.imei);
+          if (retoma.producto_serial_id) {
+            if (existeSerial) {
+              await client.query(
+                `UPDATE seriales SET vendido = false, fecha_salida = NULL, cliente_origen = $1 WHERE imei = $2`,
+                [nombre_cliente, retoma.imei]
+              );
+            } else {
+              await serialRepo.insertarSerial({
+                producto_id:    retoma.producto_serial_id,
+                imei:           retoma.imei,
+                fecha_entrada:  new Date().toISOString().split('T')[0],
+                costo_compra:   retoma.valor_retoma,
+                cliente_origen: nombre_cliente,
+              });
+            }
+          } else {
+            console.log('⚠️ Sin producto_serial_id — retoma guardada pero no ingresa a seriales');
+          }
+        }
 
-    if (retoma.producto_serial_id) {
-      if (existeSerial) {
-        console.log('🔍 UPDATE serial existente');
-        await client.query(
-          `UPDATE seriales SET vendido = false, fecha_salida = NULL, cliente_origen = $1 WHERE imei = $2`,
-          [nombre_cliente, retoma.imei]
-        );
-      } else {
-        console.log('🔍 INSERT nuevo serial, producto_id:', retoma.producto_serial_id);
-        await serialRepo.insertarSerial({
-          producto_id:    retoma.producto_serial_id,
-          imei:           retoma.imei,
-          fecha_entrada:  new Date().toISOString().split('T')[0],
-          costo_compra:   retoma.valor_retoma,
-          cliente_origen: nombre_cliente,
-        });
+        if (retoma.tipo_retoma === 'cantidad' && retoma.producto_cantidad_id) {
+          await cantidadRepo.ajustarStock(
+            retoma.producto_cantidad_id,
+            Number(retoma.cantidad_retoma || 1)
+          );
+        }
       }
-    } else {
-      console.log('⚠️ Sin producto_serial_id, no se puede insertar en seriales');
     }
-  }
-
-  if (retoma.tipo_retoma === 'cantidad' && retoma.producto_cantidad_id) {
-    console.log('🔍 Ajustando stock cantidad, id:', retoma.producto_cantidad_id, 'cantidad:', retoma.cantidad_retoma);
-    await cantidadRepo.ajustarStock(
-      retoma.producto_cantidad_id,
-      Number(retoma.cantidad_retoma || 1)
-    );
-  }
-}
-}
 
     await client.query('COMMIT');
     return await facturasRepo.findById(id);
