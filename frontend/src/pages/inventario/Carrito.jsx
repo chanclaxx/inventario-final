@@ -1,6 +1,7 @@
 import { ShoppingCart, Trash2, Plus, Minus, FileText, Handshake } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
 import { EmptyState } from '../../components/ui/EmptyState';
+import { InputMoneda } from '../../components/ui/InputMoneda';
 import { formatCOP } from '../../utils/formatters';
 import useCarritoStore from '../../store/carritoStore';
 
@@ -81,13 +82,12 @@ export function Carrito({ onFacturar, onPrestar }) {
                   </div>
                 )}
 
-                {/* Precio editable */}
+                {/* Precio editable con formato de miles */}
                 <div className="flex items-center gap-1 ml-auto">
                   <span className="text-xs text-gray-400">$</span>
-                  <input
-                    type="number"
+                  <InputMoneda
                     value={item.precioFinal}
-                    onChange={(e) => actualizarPrecio(item.key, e.target.value)}
+                    onChange={(val) => actualizarPrecio(item.key, val)}
                     className="w-24 text-right text-sm font-semibold text-gray-800 bg-white
                       border border-gray-200 rounded-lg px-2 py-1 focus:outline-none
                       focus:ring-2 focus:ring-blue-500 focus:border-transparent"
