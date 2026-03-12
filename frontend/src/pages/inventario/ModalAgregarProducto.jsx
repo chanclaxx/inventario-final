@@ -17,8 +17,7 @@ import {
   ShoppingCart, CreditCard, Banknote,
 } from 'lucide-react';
 
-// --- Helper: construir payload de crearCompra -----------------------------------
-// El backend maneja en una sola transaccion: seriales/stock + compra + acreedor.
+// --- Helper: construir payload de crearCompra ----------------------------------
 function buildPayloadCompra({ proveedorId, monto, modoPago, lineas }) {
   return {
     proveedor_id:        Number(proveedorId),
@@ -34,10 +33,6 @@ function buildPayloadCompra({ proveedorId, monto, modoPago, lineas }) {
 }
 
 // --- Panel info de compra (solo admin) -----------------------------------------
-// Sin proveedor: muestra solo el campo precio de compra.
-// Con proveedor: muestra ademas los botones contado / credito.
-// Reemplaza solo el componente InfoCompra en ModalAgregarProducto.jsx
-
 function InfoCompra({
   proveedorId, setProveedorId,
   costoCompra, setCostoCompra,
@@ -59,15 +54,12 @@ function InfoCompra({
     if (!valor) setModoPago(null);
   };
 
-  // Detectar si el proveedor seleccionado ya tiene acreedor vinculado
   const proveedorIdNum = Number(proveedorId) || null;
   const yaEsAcreedor = proveedorIdNum
     ? acreedores.some((a) => a.proveedor_id === proveedorIdNum)
     : false;
 
-  const labelCredito = yaEsAcreedor
-    ? 'Registrar cargo'
-    : 'A crédito';
+  const labelCredito = yaEsAcreedor ? 'Registrar cargo' : 'A crédito';
 
   return (
     <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 flex flex-col gap-2">
@@ -133,7 +125,6 @@ function InfoCompra({
         </div>
       )}
 
-      {/* Indicador visual si ya es acreedor */}
       {Boolean(proveedorId) && yaEsAcreedor && (
         <p className="text-xs text-orange-600 font-medium">
           Este proveedor ya tiene cuenta como acreedor — se registrará el cargo directamente.
@@ -174,24 +165,34 @@ function PasoTipo({ onSelect }) {
 
 // --- Paso Serial ---------------------------------------------------------------
 function PasoSerial({ onExito }) {
-  const queryClient                       = useQueryClient();
-  const { esAdminNegocio }                = useAuth();
-  const esAdmin                           = esAdminNegocio();
-  const [busqueda,     setBusqueda]       = useState('');
-  const [lineaSel,     setLineaSel]       = useState(null);
-  const [creandoLinea, setCreandoLinea]   = useState(false);
-  const [nuevaLinea,   setNuevaLinea]     = useState({ nombre: '', marca: '', modelo: '', precio: '' });
-  const [imeis,        setImeis]          = useState(['']);
-  const [proveedorId,  setProveedorId]    = useState('');
-  const [costoCompra,  setCostoCompra]    = useState('');
-  const [modoPago,     setModoPago]       = useState(null);
-  const [error,        setError]          = useState('');
-  const inputRefs                         = useRef([]);
+  const queryClient                     = useQueryClient();
+  const { esAdminNegocio }              = useAuth();
+  const esAdmin                         = esAdminNegocio();
+  const [busqueda,     setBusqueda]     = useState('');
+  const [lineaSel,     setLineaSel]     = useState(null);
+  const [creandoLinea, setCreandoLinea] = useState(false);
+  const [nuevaLinea,   setNuevaLinea]   = useState({ nombre: '', marca: '', modelo: '', precio: '' });
+  const [imeis,        setImeis]        = useState(['']);
+  const [proveedorId,  setProveedorId]  = useState('');
+  const [costoCompra,  setCostoCompra]  = useState('');
+  const [modoPago,     setModoPago]     = useState(null);
+  const [error,        setError]        = useState('');
+  const inputRefs                       = useRef([]);
 
   const { data: productosData } = useQuery({
     queryKey: ['productos-serial'],
     queryFn: () => getProductosSerial().then((r) => r.data.data),
   });
+
+  // Al seleccionar una línea existente, pre-cargar su proveedor y costo
+  const handleSeleccionarLinea = (producto) => {
+    setLineaSel(producto);
+    setError('');
+    if (esAdmin) {
+      if (producto.proveedor_id) setProveedorId(String(producto.proveedor_id));
+      if (producto.ultimo_costo) setCostoCompra(String(producto.ultimo_costo));
+    }
+  };
 
   const mutCrearLinea = useMutation({
     mutationFn: () => crearProductoSerial({
@@ -232,7 +233,7 @@ function PasoSerial({ onExito }) {
           })),
         }));
       } else {
-        // Sin proveedor: solo insertar seriales al inventario
+        // Sin proveedor: insertar seriales y actualizar proveedor_id en el producto si se indicó
         await Promise.all(
           imeisValidos.map((imei) =>
             agregarSerial(lineaSel.id, {
@@ -242,6 +243,12 @@ function PasoSerial({ onExito }) {
             })
           )
         );
+        // Si se seleccionó proveedor pero sin modo pago, actualizar el proveedor del producto
+        if (esAdmin && proveedorId && !lineaSel.proveedor_id) {
+          await api.patch(`/productos/serial/${lineaSel.id}`, {
+            proveedor_id: Number(proveedorId),
+          });
+        }
       }
     },
     onSuccess: () => {
@@ -297,7 +304,7 @@ function PasoSerial({ onExito }) {
             {productos.map((p) => (
               <button
                 key={p.id}
-                onClick={() => { setLineaSel(p); setError(''); }}
+                onClick={() => handleSeleccionarLinea(p)}
                 className="flex items-center justify-between p-2.5 rounded-xl text-left
                   text-sm bg-white border border-gray-100 hover:border-blue-200
                   hover:bg-blue-50 transition-all"
@@ -370,7 +377,13 @@ function PasoSerial({ onExito }) {
               <p className="text-xs text-blue-500">Linea seleccionada</p>
             </div>
             <button
-              onClick={() => { setLineaSel(null); setImeis(['']); }}
+              onClick={() => {
+                setLineaSel(null);
+                setImeis(['']);
+                setProveedorId('');
+                setCostoCompra('');
+                setModoPago(null);
+              }}
               className="text-xs text-blue-400 hover:text-blue-600 underline"
             >
               Cambiar
@@ -445,23 +458,33 @@ function PasoSerial({ onExito }) {
 
 // --- Paso Cantidad -------------------------------------------------------------
 function PasoCantidad({ onExito }) {
-  const queryClient                         = useQueryClient();
-  const { esAdminNegocio }                  = useAuth();
-  const esAdmin                             = esAdminNegocio();
-  const [busqueda,     setBusqueda]         = useState('');
-  const [productoSel,  setProductoSel]      = useState(null);
-  const [creandoNuevo, setCreandoNuevo]     = useState(false);
-  const [nuevoProducto, setNuevoProducto]   = useState({ nombre: '', unidad_medida: 'unidad', precio: '', costo_unitario: '' });
-  const [cantidad,     setCantidad]         = useState(1);
-  const [proveedorId,  setProveedorId]      = useState('');
-  const [costoCompra,  setCostoCompra]      = useState('');
-  const [modoPago,     setModoPago]         = useState(null);
-  const [error,        setError]            = useState('');
+  const queryClient                       = useQueryClient();
+  const { esAdminNegocio }                = useAuth();
+  const esAdmin                           = esAdminNegocio();
+  const [busqueda,      setBusqueda]      = useState('');
+  const [productoSel,   setProductoSel]   = useState(null);
+  const [creandoNuevo,  setCreandoNuevo]  = useState(false);
+  const [nuevoProducto, setNuevoProducto] = useState({ nombre: '', unidad_medida: 'unidad', precio: '', costo_unitario: '' });
+  const [cantidad,      setCantidad]      = useState(1);
+  const [proveedorId,   setProveedorId]   = useState('');
+  const [costoCompra,   setCostoCompra]   = useState('');
+  const [modoPago,      setModoPago]      = useState(null);
+  const [error,         setError]         = useState('');
 
   const { data: productosData } = useQuery({
     queryKey: ['productos-cantidad'],
     queryFn: () => getProductosCantidad().then((r) => r.data.data),
   });
+
+  // Al seleccionar un producto existente, pre-cargar su proveedor y costo
+  const handleSeleccionarProducto = (producto) => {
+    setProductoSel(producto);
+    setError('');
+    if (esAdmin) {
+      if (producto.proveedor_id)   setProveedorId(String(producto.proveedor_id));
+      if (producto.costo_unitario) setCostoCompra(String(producto.costo_unitario));
+    }
+  };
 
   const mutCrear = useMutation({
     mutationFn: () => crearProductoCantidad({
@@ -500,7 +523,8 @@ function PasoCantidad({ onExito }) {
           }],
         }));
       } else {
-        // Sin proveedor: solo ajustar stock
+        // Sin proveedor: ajustar stock; si se indicó proveedor, pasarlo para que el backend
+        // actualice productos_cantidad.proveedor_id
         await ajustarStockCantidad(productoSel.id, {
           cantidad:       cantidadNum,
           costo_unitario: costo,
@@ -545,12 +569,7 @@ function PasoCantidad({ onExito }) {
             {productos.map((p) => (
               <button
                 key={p.id}
-                onClick={() => {
-                  setProductoSel(p);
-                  setError('');
-                  if (esAdmin && p.costo_unitario) setCostoCompra(String(p.costo_unitario));
-                  if (esAdmin && p.proveedor_id)   setProveedorId(String(p.proveedor_id));
-                }}
+                onClick={() => handleSeleccionarProducto(p)}
                 className="flex items-center justify-between p-2.5 rounded-xl text-left
                   text-sm bg-white border border-gray-100 hover:border-green-200
                   hover:bg-green-50 transition-all"
