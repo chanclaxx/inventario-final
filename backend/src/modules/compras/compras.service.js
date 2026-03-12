@@ -14,6 +14,8 @@ const getCompraById = async (negocioId, id) => {
 };
 
 const registrarCompra = async ({
+ 
+
   negocio_id, sucursal_id, usuario_id, proveedor_id,
   numero_factura, notas, lineas,
   total: totalRecibido, pagos = [], agregarComoAcreedor = false,
@@ -40,6 +42,7 @@ const registrarCompra = async ({
         factor_conversion: linea.factor_conversion || null,
         valor_traida:      linea.valor_traida      || null,
       });
+      console.log('registrarCompra payload:', JSON.stringify({ proveedor_id, agregarComoAcreedor, pagos, total }));
 
       if (linea.imei) {
         const { rows: existente } = await client.query(
