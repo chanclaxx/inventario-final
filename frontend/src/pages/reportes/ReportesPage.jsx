@@ -189,7 +189,7 @@ const CeldaCostoEditable = ({ linea, onGuardado }) => {
   }
 
   return (
-    <div className="flex items-center justify-end gap-1 group">
+    <div className="flex items-center justify-end gap-1">
       <span className="text-gray-500">
         {costoActual !== null
           ? formatCOP(costoActual)
@@ -199,7 +199,7 @@ const CeldaCostoEditable = ({ linea, onGuardado }) => {
       <button
         onClick={handleEditar}
         title="Editar costo de compra"
-        className="opacity-0 group-hover:opacity-100 transition-opacity text-blue-400 hover:text-blue-600"
+        className="text-blue-400 hover:text-blue-600 transition-colors"
       >
         <Pencil size={11} />
       </button>
