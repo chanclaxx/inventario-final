@@ -1,13 +1,11 @@
-/**
- * Formatea un número como moneda COP sin decimales.
- * Usa regex manual para evitar inconsistencias de Intl.NumberFormat entre navegadores/SO.
- * Ej: 1200000 → "$ 1.200.000"
- */
 export const formatCOP = (valor) => {
-  if (valor === null || valor === undefined) return '$ 0';
-  const numero = Math.round(Number(valor));
-  if (isNaN(numero)) return '$ 0';
-  return '$ ' + numero.toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  if (valor === null || valor === undefined) return '$0';
+  return new Intl.NumberFormat('es-CO', {
+    style: 'currency',
+    currency: 'COP',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }).format(valor);
 };
 
 export const formatFecha = (fecha) => {
@@ -32,9 +30,5 @@ export const formatFechaHora = (fecha) => {
 
 export const formatFechaISO = (fecha) => {
   if (!fecha) return '';
-  const d = new Date(fecha);
-  const yyyy = d.getFullYear();
-  const mm   = String(d.getMonth() + 1).padStart(2, '0');
-  const dd   = String(d.getDate()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd}`;
+  return new Date(fecha).toISOString().split('T')[0];
 };
