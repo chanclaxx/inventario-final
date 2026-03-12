@@ -10,7 +10,7 @@ import { Input }              from '../../components/ui/Input';
 import { Spinner }            from '../../components/ui/Spinner';
 import { EmptyState }         from '../../components/ui/EmptyState';
 import { FacturaTermica }     from '../../components/FacturaTermica';
-import { ModalEditarFactura } from '../../components/modals/ModalEditarFactura';
+import { ModalEditarFactura } from './ModalEditarFactura';
 import api from '../../api/axios.config';
 
 import {
