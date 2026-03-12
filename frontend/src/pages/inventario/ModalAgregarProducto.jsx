@@ -36,6 +36,8 @@ function buildPayloadCompra({ proveedorId, monto, modoPago, lineas }) {
 // --- Panel info de compra (solo admin) -----------------------------------------
 // Sin proveedor: muestra solo el campo precio de compra.
 // Con proveedor: muestra ademas los botones contado / credito.
+// Reemplaza solo el componente InfoCompra en ModalAgregarProducto.jsx
+
 function InfoCompra({
   proveedorId, setProveedorId,
   costoCompra, setCostoCompra,
@@ -46,10 +48,26 @@ function InfoCompra({
     queryFn: () => api.get('/proveedores').then((r) => r.data.data),
   });
 
+  const { data: acreedores = [] } = useQuery({
+    queryKey: ['acreedores'],
+    queryFn: () => api.get('/acreedores').then((r) => r.data.data),
+    enabled: Boolean(proveedorId),
+  });
+
   const handleCambiarProveedor = (valor) => {
     setProveedorId(valor);
     if (!valor) setModoPago(null);
   };
+
+  // Detectar si el proveedor seleccionado ya tiene acreedor vinculado
+  const proveedorIdNum = Number(proveedorId) || null;
+  const yaEsAcreedor = proveedorIdNum
+    ? acreedores.some((a) => a.proveedor_id === proveedorIdNum)
+    : false;
+
+  const labelCredito = yaEsAcreedor
+    ? 'Registrar cargo'
+    : 'A crédito';
 
   return (
     <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 flex flex-col gap-2">
@@ -110,9 +128,16 @@ function InfoCompra({
                 : 'bg-white border-amber-200 text-gray-600 hover:border-orange-300 hover:bg-orange-50'}`}
           >
             <CreditCard size={13} />
-            A credito
+            {labelCredito}
           </button>
         </div>
+      )}
+
+      {/* Indicador visual si ya es acreedor */}
+      {Boolean(proveedorId) && yaEsAcreedor && (
+        <p className="text-xs text-orange-600 font-medium">
+          Este proveedor ya tiene cuenta como acreedor — se registrará el cargo directamente.
+        </p>
       )}
     </div>
   );
