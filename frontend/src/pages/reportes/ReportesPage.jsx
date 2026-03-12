@@ -616,7 +616,7 @@ const PanelStock = () => {
             </p>
             {producto.costo_unitario !== null && (
               <p className="text-xs text-gray-400">
-                Costo: <span className="font-medium text-gray-600">{formatCOP(producto.costo_unitario)}</span>
+                Cost: <span className="font-medium text-gray-600">{formatCOP(producto.costo_unitario)}</span>
               </p>
             )}
           </div>
