@@ -325,12 +325,13 @@ export function ProductosSerial({ onAgregarProducto }) {
       )}
 
       {serialAEditar && (
-        <ModalEditarSerial
-          serial={serialAEditar}
-          productoId={productoSeleccionado?.id}
-          onClose={() => setSerialAEditar(null)}
-        />
-      )}
+  <ModalEditarSerial
+    serial={serialAEditar}
+    precioProducto={productoSeleccionado?.precio}
+    productoId={productoSeleccionado?.id}
+    onClose={() => setSerialAEditar(null)}
+  />
+)}
     </>
   );
 }

@@ -16,33 +16,40 @@ import { AuthContext } from '../../context/AuthContext';
  *  - productoId: number
  *  - onClose:    () => void
  */
-export function ModalEditarSerial({ serial, productoId, onClose }) {
+/**
+ * Props:
+ *  - serial:         { id, imei, costo_compra }
+ *  - precioProducto: number | null  — precio actual del producto padre
+ *  - productoId:     number
+ *  - onClose:        () => void
+ */
+export function ModalEditarSerial({ serial, precioProducto, productoId, onClose }) {
   const { esAdminNegocio } = useContext(AuthContext);
   const queryClient = useQueryClient();
 
   const [form, setForm] = useState({
     imei:         serial.imei         || '',
-    precio:       serial.precio       != null ? String(serial.precio)       : '',
+    precio:       precioProducto      != null ? String(precioProducto)      : '',
     costo_compra: serial.costo_compra != null ? String(serial.costo_compra) : '',
   });
   const [error, setError] = useState('');
 
   const mutation = useMutation({
-  mutationFn: () => actualizarSerial(serial.id, {
-    imei:         form.imei.trim(),
-    precio:       form.precio       !== '' ? Number(form.precio)       : undefined,
-    costo_compra: form.costo_compra !== '' ? Number(form.costo_compra) : null,
-    producto_id:  productoId,
-  }),
-  onSuccess: () => {
-    queryClient.invalidateQueries(['seriales', productoId]);
-    queryClient.invalidateQueries(['productos-serial']); // refresca precio en la lista
-    onClose();
-  },
-  onError: (err) => {
-    setError(err.response?.data?.error || 'Error al actualizar el serial');
-  },
-});
+    mutationFn: () => actualizarSerial(serial.id, {
+      imei:         form.imei.trim(),
+      precio:       form.precio       !== '' ? Number(form.precio)       : undefined,
+      costo_compra: form.costo_compra !== '' ? Number(form.costo_compra) : null,
+      producto_id:  productoId,
+    }),
+    onSuccess: () => {
+      queryClient.invalidateQueries(['seriales', productoId]);
+      queryClient.invalidateQueries(['productos-serial']);
+      onClose();
+    },
+    onError: (err) => {
+      setError(err.response?.data?.error || 'Error al actualizar el serial');
+    },
+  });
 
   const handleKeyDown = (e, siguienteId) => {
     if (e.key === 'Enter') {
@@ -52,8 +59,6 @@ export function ModalEditarSerial({ serial, productoId, onClose }) {
     }
   };
 
-  // Guarda de seguridad: aunque el padre ya bloquea el doble click,
-  // el modal no se renderiza si el usuario no es admin.
   if (!esAdminNegocio()) return null;
 
   return (
@@ -62,7 +67,7 @@ export function ModalEditarSerial({ serial, productoId, onClose }) {
         <div className="flex items-center gap-2 bg-blue-50 rounded-xl px-3 py-2">
           <Pencil size={15} className="text-blue-500 flex-shrink-0" />
           <p className="text-xs text-blue-700">
-            Edita el IMEI, precio de venta o costo de compra del serial seleccionado.
+            Edita el IMEI o costo de compra de este serial. El precio de venta aplica a todos los seriales del modelo.
           </p>
         </div>
 
@@ -78,7 +83,7 @@ export function ModalEditarSerial({ serial, productoId, onClose }) {
 
         <Input
           id="edit-precio-serial"
-          label="Precio de venta"
+          label="Precio de venta (aplica a todos los seriales del modelo)"
           type="number"
           min="0"
           placeholder="0"
