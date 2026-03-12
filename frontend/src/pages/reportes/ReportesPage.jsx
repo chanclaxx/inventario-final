@@ -680,4 +680,5 @@ export default function ReportesPage() {
       {tabActiva === 'stock'     && <PanelStock />}
     </div>
   );
-}
+}/ /   0 3 / 1 2 / 2 0 2 6   1 5 : 0 2 : 3 9  
+ 
