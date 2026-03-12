@@ -453,6 +453,7 @@ const PanelVentas = ({ desde, hasta, onDesde, onHasta, esAdmin }) => {
   });
 
   const facturas = ventasData?.facturas ?? [];
+  console.log('ventasData:', ventasData, 'isLoading:', isLoading, 'isError:', isError);
   const resumen  = ventasData?.resumen  ?? null;
 
   return (
