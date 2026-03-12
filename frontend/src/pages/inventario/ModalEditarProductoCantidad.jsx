@@ -1,18 +1,16 @@
 import { useState, useContext } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Pencil } from 'lucide-react';
 import { actualizarProductoCantidad } from '../../api/productos.api';
-import { Modal } from '../../components/ui/Modal';
-import { Input } from '../../components/ui/Input';
-import { Button } from '../../components/ui/Button';
+import { getProveedores } from '../../api/proveedores.api';
+import { Modal }   from '../../components/ui/Modal';
+import { Input }   from '../../components/ui/Input';
+import { Button }  from '../../components/ui/Button';
 import { AuthContext } from '../../context/AuthContext';
 
 /**
- * Modal para editar un producto por cantidad (nombre, unidad, stock mínimo, precio, costo).
- * Solo accesible para admin_negocio.
- *
  * Props:
- *  - producto: { id, nombre, unidad_medida, stock_minimo, precio, costo_unitario }
+ *  - producto: { id, nombre, unidad_medida, stock_minimo, precio, costo_unitario, proveedor_id }
  *  - onClose:  () => void
  */
 export function ModalEditarProductoCantidad({ producto, onClose }) {
@@ -25,8 +23,17 @@ export function ModalEditarProductoCantidad({ producto, onClose }) {
     stock_minimo:   producto.stock_minimo   != null ? String(producto.stock_minimo)   : '0',
     precio:         producto.precio         != null ? String(producto.precio)         : '',
     costo_unitario: producto.costo_unitario != null ? String(producto.costo_unitario) : '',
+    proveedor_id:   producto.proveedor_id   != null ? String(producto.proveedor_id)   : '',
   });
   const [error, setError] = useState('');
+
+  const { data: proveedoresData } = useQuery({
+    queryKey: ['proveedores'],
+    queryFn:  () => getProveedores().then((r) => r.data.data),
+    enabled:  esAdminNegocio(),
+  });
+
+  const proveedores = proveedoresData || [];
 
   const mutation = useMutation({
     mutationFn: () => actualizarProductoCantidad(producto.id, {
@@ -35,7 +42,7 @@ export function ModalEditarProductoCantidad({ producto, onClose }) {
       stock_minimo:   Number(form.stock_minimo)  || 0,
       precio:         form.precio         !== '' ? Number(form.precio)         : null,
       costo_unitario: form.costo_unitario !== '' ? Number(form.costo_unitario) : null,
-      proveedor_id:   producto.proveedor_id || null,
+      proveedor_id:   form.proveedor_id   !== '' ? Number(form.proveedor_id)   : null,
     }),
     onSuccess: () => {
       queryClient.invalidateQueries(['productos-cantidad']);
@@ -54,8 +61,6 @@ export function ModalEditarProductoCantidad({ producto, onClose }) {
     }
   };
 
-  // Guarda de seguridad: el padre ya bloquea el doble click,
-  // pero el modal se defiende por su cuenta también.
   if (!esAdminNegocio()) return null;
 
   return (
@@ -118,8 +123,30 @@ export function ModalEditarProductoCantidad({ producto, onClose }) {
           placeholder="0"
           value={form.costo_unitario}
           onChange={(e) => setForm({ ...form, costo_unitario: e.target.value })}
-          onKeyDown={(e) => handleKeyDown(e, null)}
+          onKeyDown={(e) => handleKeyDown(e, 'edit-proveedor-cant')}
         />
+
+        {/* Selector de proveedor */}
+        <div className="flex flex-col gap-1">
+          <label className="text-sm font-medium text-gray-700">
+            Proveedor <span className="text-gray-400 font-normal">(opcional)</span>
+          </label>
+          <select
+            id="edit-proveedor-cant"
+            value={form.proveedor_id}
+            onChange={(e) => setForm({ ...form, proveedor_id: e.target.value })}
+            className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-sm
+              focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-700"
+          >
+            <option value="">Sin proveedor</option>
+            {proveedores.map((p) => {
+              const nombre = p.nombre;
+              return (
+                <option key={p.id} value={p.id}>{nombre}</option>
+              );
+            })}
+          </select>
+        </div>
 
         {error && <p className="text-sm text-red-500">{error}</p>}
 
