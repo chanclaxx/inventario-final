@@ -468,7 +468,7 @@ const PanelVentas = ({ desde, hasta, onDesde, onHasta, esAdmin }) => {
       )}
 
       {!isLoading && !isError && facturas.length === 0 && (
-        <EmptyState icon={TrendingUp} titulo="Sin ventas en este período" />
+        <EmptyState icon={TrendingUp} titulo="Sin ventas en el período seleccionado" />
       )}
 
       {!isLoading && !isError && facturas.length > 0 && (
