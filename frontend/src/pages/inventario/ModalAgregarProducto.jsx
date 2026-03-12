@@ -12,15 +12,15 @@ import {
   getProductosCantidad, crearProductoCantidad, ajustarStockCantidad,
 } from '../../api/productos.api';
 import api from '../../api/axios.config';
-import { Package, ShoppingBag, ChevronRight, Trash2, ShoppingCart, CreditCard, Banknote } from 'lucide-react';
+import {
+  Package, ShoppingBag, ChevronRight, Trash2,
+  ShoppingCart, CreditCard, Banknote,
+} from 'lucide-react';
 
-// ─── Helper: registrar compra con los datos ya disponibles ───────────────────
-//
-// Se llama DESPUÉS de que el inventario ya fue actualizado.
-// modoPago: 'contado' | 'credito'
-//
-async function registrarCompra({ proveedorId, monto, modoPago, lineas }) {
-  await crearCompra({
+// --- Helper: construir payload de crearCompra -----------------------------------
+// El backend maneja en una sola transaccion: seriales/stock + compra + acreedor.
+function buildPayloadCompra({ proveedorId, monto, modoPago, lineas }) {
+  return {
     proveedor_id:        Number(proveedorId),
     total:               monto,
     estado:              'Completada',
@@ -30,14 +30,12 @@ async function registrarCompra({ proveedorId, monto, modoPago, lineas }) {
       metodo: modoPago === 'credito' ? 'Credito' : 'Contado',
       valor:  monto,
     }],
-  });
+  };
 }
 
-// ─── Panel de info de compra (solo admin) ────────────────────────────────────
-//
-// Siempre visible para admin. Si no hay proveedor → solo precio de compra.
-// Si hay proveedor → aparece selector de tipo de pago (contado / crédito).
-//
+// --- Panel info de compra (solo admin) -----------------------------------------
+// Sin proveedor: muestra solo el campo precio de compra.
+// Con proveedor: muestra ademas los botones contado / credito.
 function InfoCompra({
   proveedorId, setProveedorId,
   costoCompra, setCostoCompra,
@@ -48,11 +46,8 @@ function InfoCompra({
     queryFn: () => api.get('/proveedores').then((r) => r.data.data),
   });
 
-  const hayProveedor = Boolean(proveedorId);
-
   const handleCambiarProveedor = (valor) => {
     setProveedorId(valor);
-    // Al quitar proveedor limpiamos el modo pago
     if (!valor) setModoPago(null);
   };
 
@@ -60,11 +55,10 @@ function InfoCompra({
     <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 flex flex-col gap-2">
       <div className="flex items-center gap-1.5">
         <ShoppingCart size={13} className="text-amber-600" />
-        <p className="text-xs font-semibold text-amber-700">Información de compra</p>
+        <p className="text-xs font-semibold text-amber-700">Informacion de compra</p>
       </div>
 
       <div className="flex gap-2">
-        {/* Proveedor */}
         <div className="flex-1 flex flex-col gap-1">
           <label className="text-xs text-amber-700 font-medium">Proveedor</label>
           <select
@@ -80,7 +74,6 @@ function InfoCompra({
           </select>
         </div>
 
-        {/* Precio compra */}
         <div className="flex-1 flex flex-col gap-1">
           <label className="text-xs text-amber-700 font-medium">Precio compra</label>
           <input
@@ -95,8 +88,7 @@ function InfoCompra({
         </div>
       </div>
 
-      {/* Tipo de pago — solo si hay proveedor */}
-      {hayProveedor && (
+      {Boolean(proveedorId) && (
         <div className="flex gap-2 pt-1 border-t border-amber-200">
           <button
             onClick={() => setModoPago('contado')}
@@ -118,7 +110,7 @@ function InfoCompra({
                 : 'bg-white border-amber-200 text-gray-600 hover:border-orange-300 hover:bg-orange-50'}`}
           >
             <CreditCard size={13} />
-            A crédito
+            A credito
           </button>
         </div>
       )}
@@ -126,11 +118,11 @@ function InfoCompra({
   );
 }
 
-// ─── Paso 1: Tipo ─────────────────────────────────────────────────────────────
+// --- Paso 1: Tipo --------------------------------------------------------------
 function PasoTipo({ onSelect }) {
   return (
     <div className="flex flex-col gap-3">
-      <p className="text-sm text-gray-500">¿Qué tipo de producto vas a agregar?</p>
+      <p className="text-sm text-gray-500">Que tipo de producto vas a agregar?</p>
       <div className="flex gap-3">
         <button
           onClick={() => onSelect('serial')}
@@ -155,21 +147,21 @@ function PasoTipo({ onSelect }) {
   );
 }
 
-// ─── Paso Serial ──────────────────────────────────────────────────────────────
+// --- Paso Serial ---------------------------------------------------------------
 function PasoSerial({ onExito }) {
-  const queryClient                         = useQueryClient();
-  const { esAdminNegocio }                  = useAuth();
-  const esAdmin                             = esAdminNegocio();
-  const [busqueda,      setBusqueda]        = useState('');
-  const [lineaSel,      setLineaSel]        = useState(null);
-  const [creandoLinea,  setCreandoLinea]    = useState(false);
-  const [nuevaLinea,    setNuevaLinea]      = useState({ nombre: '', marca: '', modelo: '', precio: '' });
-  const [imeis,         setImeis]           = useState(['']);
-  const [proveedorId,   setProveedorId]     = useState('');
-  const [costoCompra,   setCostoCompra]     = useState('');
-  const [modoPago,      setModoPago]        = useState(null);
-  const [error,         setError]           = useState('');
-  const inputRefs                           = useRef([]);
+  const queryClient                       = useQueryClient();
+  const { esAdminNegocio }                = useAuth();
+  const esAdmin                           = esAdminNegocio();
+  const [busqueda,     setBusqueda]       = useState('');
+  const [lineaSel,     setLineaSel]       = useState(null);
+  const [creandoLinea, setCreandoLinea]   = useState(false);
+  const [nuevaLinea,   setNuevaLinea]     = useState({ nombre: '', marca: '', modelo: '', precio: '' });
+  const [imeis,        setImeis]          = useState(['']);
+  const [proveedorId,  setProveedorId]    = useState('');
+  const [costoCompra,  setCostoCompra]    = useState('');
+  const [modoPago,     setModoPago]       = useState(null);
+  const [error,        setError]          = useState('');
+  const inputRefs                         = useRef([]);
 
   const { data: productosData } = useQuery({
     queryKey: ['productos-serial'],
@@ -190,7 +182,7 @@ function PasoSerial({ onExito }) {
       setCreandoLinea(false);
       setNuevaLinea({ nombre: '', marca: '', modelo: '', precio: '' });
     },
-    onError: (e) => setError(e.response?.data?.error || 'Error al crear línea'),
+    onError: (e) => setError(e.response?.data?.error || 'Error al crear linea'),
   });
 
   const mutConfirmar = useMutation({
@@ -200,23 +192,11 @@ function PasoSerial({ onExito }) {
         ? (costoCompra ? Number(costoCompra) : null)
         : (lineaSel?.ultimo_costo || null);
 
-      // 1. Agregar seriales al inventario
-      await Promise.all(
-        imeisValidos.map((imei) =>
-          agregarSerial(lineaSel.id, {
-            imei,
-            fecha_entrada: new Date().toISOString().split('T')[0],
-            costo_compra:  costo,
-          })
-        )
-      );
-
-      // 2. Si hay proveedor y modo de pago → registrar compra
       if (proveedorId && modoPago) {
-        const monto = costo ? costo * imeisValidos.length : 0;
-        await registrarCompra({
+        // Con proveedor: el backend maneja serial + compra + acreedor en una sola transaccion
+        await crearCompra(buildPayloadCompra({
           proveedorId,
-          monto,
+          monto:  costo ? costo * imeisValidos.length : 0,
           modoPago,
           lineas: imeisValidos.map((imei) => ({
             nombre_producto: lineaSel.nombre,
@@ -225,7 +205,18 @@ function PasoSerial({ onExito }) {
             precio_unitario: costo || 0,
             producto_id:     lineaSel.id,
           })),
-        });
+        }));
+      } else {
+        // Sin proveedor: solo insertar seriales al inventario
+        await Promise.all(
+          imeisValidos.map((imei) =>
+            agregarSerial(lineaSel.id, {
+              imei,
+              fecha_entrada: new Date().toISOString().split('T')[0],
+              costo_compra:  costo,
+            })
+          )
+        );
       }
     },
     onSuccess: () => {
@@ -258,17 +249,16 @@ function PasoSerial({ onExito }) {
 
   const handleConfirmar = () => {
     setError('');
-    if (!lineaSel)          return setError('Selecciona una línea de producto');
+    if (!lineaSel)          return setError('Selecciona una linea de producto');
     if (imeisValidos === 0) return setError('Ingresa al menos un IMEI');
-    // Si hay proveedor es obligatorio elegir el tipo de pago
-    if (proveedorId && !modoPago) return setError('Selecciona si fue pagado o a crédito');
+    if (proveedorId && !modoPago) return setError('Selecciona si fue pagado o a credito');
     mutConfirmar.mutate();
   };
 
   const labelBoton = () => {
     const cant = imeisValidos > 0 ? `${imeisValidos} serial(es)` : 'al inventario';
     if (modoPago === 'contado') return `Agregar ${cant} — compra en contado`;
-    if (modoPago === 'credito') return `Agregar ${cant} — registrar como crédito`;
+    if (modoPago === 'credito') return `Agregar ${cant} — registrar como credito`;
     return `Agregar ${cant}`;
   };
 
@@ -276,9 +266,8 @@ function PasoSerial({ onExito }) {
     <div className="flex flex-col gap-4">
       {!lineaSel ? (
         <div className="flex flex-col gap-2">
-          <p className="text-sm font-medium text-gray-700">Seleccionar línea de producto</p>
+          <p className="text-sm font-medium text-gray-700">Seleccionar linea de producto</p>
           <SearchInput value={busqueda} onChange={setBusqueda} placeholder="Buscar modelo..." />
-
           <div className="max-h-40 overflow-y-auto flex flex-col gap-1">
             {productos.map((p) => (
               <button
@@ -296,17 +285,16 @@ function PasoSerial({ onExito }) {
               </button>
             ))}
           </div>
-
           <button
             onClick={() => setCreandoLinea(!creandoLinea)}
             className="text-xs text-blue-600 hover:text-blue-700 font-medium text-left"
           >
-            + Crear nueva línea
+            + Crear nueva linea
           </button>
 
           {creandoLinea && (
             <div className="bg-blue-50 rounded-xl p-3 flex flex-col gap-2">
-              <p className="text-xs font-semibold text-blue-700">Nueva línea</p>
+              <p className="text-xs font-semibold text-blue-700">Nueva linea</p>
               <Input
                 id="sl-nombre"
                 placeholder="Nombre (ej: iPhone 15 Pro Max)"
@@ -351,11 +339,10 @@ function PasoSerial({ onExito }) {
         </div>
       ) : (
         <div className="flex flex-col gap-3">
-          {/* Cabecera línea seleccionada */}
           <div className="flex items-center justify-between bg-blue-50 rounded-xl px-3 py-2">
             <div>
               <p className="text-sm font-semibold text-blue-800">{lineaSel.nombre}</p>
-              <p className="text-xs text-blue-500">Línea seleccionada</p>
+              <p className="text-xs text-blue-500">Linea seleccionada</p>
             </div>
             <button
               onClick={() => { setLineaSel(null); setImeis(['']); }}
@@ -365,7 +352,6 @@ function PasoSerial({ onExito }) {
             </button>
           </div>
 
-          {/* IMEIs */}
           <div className="flex items-center justify-between">
             <p className="text-sm font-medium text-gray-700">IMEIs / Seriales</p>
             <Badge variant="blue">{imeisValidos} ingresado(s)</Badge>
@@ -408,7 +394,6 @@ function PasoSerial({ onExito }) {
             + Agregar campo
           </button>
 
-          {/* Info compra — solo admin */}
           {esAdmin && (
             <InfoCompra
               proveedorId={proveedorId}
@@ -433,20 +418,20 @@ function PasoSerial({ onExito }) {
   );
 }
 
-// ─── Paso Cantidad ────────────────────────────────────────────────────────────
+// --- Paso Cantidad -------------------------------------------------------------
 function PasoCantidad({ onExito }) {
-  const queryClient                           = useQueryClient();
-  const { esAdminNegocio }                    = useAuth();
-  const esAdmin                               = esAdminNegocio();
-  const [busqueda,      setBusqueda]          = useState('');
-  const [productoSel,   setProductoSel]       = useState(null);
-  const [creandoNuevo,  setCreandoNuevo]      = useState(false);
-  const [nuevoProducto, setNuevoProducto]     = useState({ nombre: '', unidad_medida: 'unidad', precio: '', costo_unitario: '' });
-  const [cantidad,      setCantidad]          = useState(1);
-  const [proveedorId,   setProveedorId]       = useState('');
-  const [costoCompra,   setCostoCompra]       = useState('');
-  const [modoPago,      setModoPago]          = useState(null);
-  const [error,         setError]             = useState('');
+  const queryClient                         = useQueryClient();
+  const { esAdminNegocio }                  = useAuth();
+  const esAdmin                             = esAdminNegocio();
+  const [busqueda,     setBusqueda]         = useState('');
+  const [productoSel,  setProductoSel]      = useState(null);
+  const [creandoNuevo, setCreandoNuevo]     = useState(false);
+  const [nuevoProducto, setNuevoProducto]   = useState({ nombre: '', unidad_medida: 'unidad', precio: '', costo_unitario: '' });
+  const [cantidad,     setCantidad]         = useState(1);
+  const [proveedorId,  setProveedorId]      = useState('');
+  const [costoCompra,  setCostoCompra]      = useState('');
+  const [modoPago,     setModoPago]         = useState(null);
+  const [error,        setError]            = useState('');
 
   const { data: productosData } = useQuery({
     queryKey: ['productos-cantidad'],
@@ -471,24 +456,16 @@ function PasoCantidad({ onExito }) {
 
   const mutConfirmar = useMutation({
     mutationFn: async () => {
+      const cantidadNum = Number(cantidad);
       const costo = esAdmin
         ? (costoCompra ? Number(costoCompra) : null)
         : (productoSel?.costo_unitario || null);
-      const cantidadNum = Number(cantidad);
 
-      // 1. Ajustar stock
-      await ajustarStockCantidad(productoSel.id, {
-        cantidad:       cantidadNum,
-        costo_unitario: costo,
-        proveedor_id:   esAdmin && proveedorId ? Number(proveedorId) : undefined,
-      });
-
-      // 2. Si hay proveedor y modo de pago → registrar compra
       if (proveedorId && modoPago) {
-        const monto = costo ? costo * cantidadNum : 0;
-        await registrarCompra({
+        // Con proveedor: el backend maneja stock + compra + acreedor en una sola transaccion
+        await crearCompra(buildPayloadCompra({
           proveedorId,
-          monto,
+          monto:  costo ? costo * cantidadNum : 0,
           modoPago,
           lineas: [{
             nombre_producto: productoSel.nombre,
@@ -496,6 +473,13 @@ function PasoCantidad({ onExito }) {
             precio_unitario: costo || 0,
             producto_id:     productoSel.id,
           }],
+        }));
+      } else {
+        // Sin proveedor: solo ajustar stock
+        await ajustarStockCantidad(productoSel.id, {
+          cantidad:       cantidadNum,
+          costo_unitario: costo,
+          proveedor_id:   esAdmin && proveedorId ? Number(proveedorId) : undefined,
         });
       }
     },
@@ -514,15 +498,15 @@ function PasoCantidad({ onExito }) {
 
   const handleConfirmar = () => {
     setError('');
-    if (!productoSel)             return setError('Selecciona un producto');
+    if (!productoSel)              return setError('Selecciona un producto');
     if (!cantidad || cantidad < 1) return setError('La cantidad debe ser mayor a 0');
-    if (proveedorId && !modoPago) return setError('Selecciona si fue pagado o a crédito');
+    if (proveedorId && !modoPago)  return setError('Selecciona si fue pagado o a credito');
     mutConfirmar.mutate();
   };
 
   const labelBoton = () => {
     if (modoPago === 'contado') return `Agregar ${cantidad} unidad(es) — compra en contado`;
-    if (modoPago === 'credito') return `Agregar ${cantidad} unidad(es) — registrar como crédito`;
+    if (modoPago === 'credito') return `Agregar ${cantidad} unidad(es) — registrar como credito`;
     return `Agregar ${cantidad} unidad(es) al stock`;
   };
 
@@ -532,7 +516,6 @@ function PasoCantidad({ onExito }) {
         <div className="flex flex-col gap-2">
           <p className="text-sm font-medium text-gray-700">Seleccionar producto</p>
           <SearchInput value={busqueda} onChange={setBusqueda} placeholder="Buscar producto..." />
-
           <div className="max-h-40 overflow-y-auto flex flex-col gap-1">
             {productos.map((p) => (
               <button
@@ -555,7 +538,6 @@ function PasoCantidad({ onExito }) {
               </button>
             ))}
           </div>
-
           <button
             onClick={() => setCreandoNuevo(!creandoNuevo)}
             className="text-xs text-blue-600 hover:text-blue-700 font-medium text-left"
@@ -598,7 +580,6 @@ function PasoCantidad({ onExito }) {
         </div>
       ) : (
         <div className="flex flex-col gap-3">
-          {/* Cabecera producto seleccionado */}
           <div className="flex items-center justify-between bg-green-50 rounded-xl px-3 py-2">
             <div>
               <p className="text-sm font-semibold text-green-800">{productoSel.nombre}</p>
@@ -628,7 +609,6 @@ function PasoCantidad({ onExito }) {
             onKeyDown={(e) => e.key === 'Enter' && handleConfirmar()}
           />
 
-          {/* Info compra — solo admin */}
           {esAdmin && (
             <InfoCompra
               proveedorId={proveedorId}
@@ -653,7 +633,7 @@ function PasoCantidad({ onExito }) {
   );
 }
 
-// ─── Modal principal ──────────────────────────────────────────────────────────
+// --- Modal principal ----------------------------------------------------------
 export function ModalAgregarProducto({ onClose }) {
   const [tipo,  setTipo]  = useState(null);
   const [exito, setExito] = useState(false);
@@ -699,7 +679,7 @@ export function ModalAgregarProducto({ onClose }) {
           onClick={() => setTipo(null)}
           className="mt-3 text-xs text-gray-400 hover:text-gray-600 w-full text-center"
         >
-          ← Volver a selección de tipo
+          Volver a seleccion de tipo
         </button>
       )}
     </Modal>
