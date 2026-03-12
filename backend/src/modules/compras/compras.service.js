@@ -60,43 +60,56 @@ const registrarCompra = async ({
     }
 
     if (agregarComoAcreedor && proveedor_id) {
-      const totalPagado = pagos
-        .filter((p) => p.metodo !== 'Credito' && p.metodo !== 'Fiado')
-        .reduce((s, p) => s + Number(p.valor || 0), 0);
-      const montoCargo = total - totalPagado;
+  const totalPagado = pagos
+    .filter((p) => p.metodo !== 'Credito' && p.metodo !== 'Fiado')
+    .reduce((s, p) => s + Number(p.valor || 0), 0);
+  const montoCargo = total - totalPagado;
 
-      if (montoCargo > 0) {
-        const { rows: provRows } = await client.query(
-          'SELECT nombre, nit, telefono FROM proveedores WHERE id = $1',
-          [proveedor_id]
-        );
-        const prov = provRows[0];
+  if (montoCargo > 0) {
+    const { rows: provRows } = await client.query(
+      'SELECT nombre, nit, telefono FROM proveedores WHERE id = $1',
+      [proveedor_id]
+    );
+    const prov = provRows[0];
 
-        // Buscar acreedor dentro del mismo negocio
-        const { rows: acrRows } = await client.query(
-          'SELECT id FROM acreedores WHERE negocio_id = $1 AND LOWER(nombre) = LOWER($2) LIMIT 1',
-          [negocio_id, prov?.nombre || '']
-        );
+    // Buscar acreedor vinculado directamente por proveedor_id (más robusto)
+    // Si no existe, buscarlo por cedula/nit como fallback
+    // Si tampoco existe, crearlo y vincularlo
+    const { rows: acrRows } = await client.query(
+      `SELECT id FROM acreedores 
+       WHERE negocio_id = $1 
+         AND (proveedor_id = $2 OR cedula = $3)
+       LIMIT 1`,
+      [negocio_id, proveedor_id, prov?.nit || '000000']
+    );
 
-        let acreedorId;
-        if (acrRows.length > 0) {
-          acreedorId = acrRows[0].id;
-        } else {
-          const { rows: nuevoRows } = await client.query(
-            `INSERT INTO acreedores(negocio_id, nombre, cedula, telefono)
-             VALUES ($1, $2, $3, $4) RETURNING id`,
-            [negocio_id, prov?.nombre, prov?.nit || '000000', prov?.telefono || '']
-          );
-          acreedorId = nuevoRows[0].id;
-        }
+    let acreedorId;
+    if (acrRows.length > 0) {
+      acreedorId = acrRows[0].id;
 
-        await client.query(
-          `INSERT INTO movimientos_acreedor(acreedor_id, tipo, descripcion, valor)
-           VALUES ($1, 'Cargo', $2, $3)`,
-          [acreedorId, `Compra #${compra.id} — mercancía`, montoCargo]
-        );
-      }
+      // Si lo encontró por cedula pero sin proveedor_id vinculado, vincularlo ahora
+      await client.query(
+        `UPDATE acreedores SET proveedor_id = $1 
+         WHERE id = $2 AND proveedor_id IS NULL`,
+        [proveedor_id, acreedorId]
+      );
+    } else {
+      const cedulaFinal = prov?.nit || `prov-${proveedor_id}`;
+      const { rows: nuevoRows } = await client.query(
+        `INSERT INTO acreedores(negocio_id, nombre, cedula, telefono, proveedor_id)
+         VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+        [negocio_id, prov?.nombre, cedulaFinal, prov?.telefono || '', proveedor_id]
+      );
+      acreedorId = nuevoRows[0].id;
     }
+
+    await client.query(
+      `INSERT INTO movimientos_acreedor(acreedor_id, tipo, descripcion, valor)
+       VALUES ($1, 'Cargo', $2, $3)`,
+      [acreedorId, `Compra #${compra.id} — mercancía`, montoCargo]
+    );
+  }
+}
 
     await client.query('COMMIT');
     return compra;
