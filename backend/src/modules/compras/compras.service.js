@@ -78,33 +78,45 @@ const registrarCompra = async ({
     // Buscar acreedor vinculado directamente por proveedor_id (más robusto)
     // Si no existe, buscarlo por cedula/nit como fallback
     // Si tampoco existe, crearlo y vincularlo
-    const { rows: acrRows } = await client.query(
-      `SELECT id FROM acreedores 
-       WHERE negocio_id = $1 
-         AND (proveedor_id = $2 OR cedula = $3)
-       LIMIT 1`,
-      [negocio_id, proveedor_id, prov?.nit || '000000']
+    // PONER esto:
+// 1. Buscar por proveedor_id directo
+let { rows: acrRows } = await client.query(
+  `SELECT id FROM acreedores 
+   WHERE negocio_id = $1 AND proveedor_id = $2
+   LIMIT 1`,
+  [negocio_id, proveedor_id]
+);
+
+// 2. Fallback por nit solo si el proveedor tiene nit
+if (acrRows.length === 0 && prov?.nit) {
+  const { rows: acrPorCedula } = await client.query(
+    `SELECT id FROM acreedores 
+     WHERE negocio_id = $1 AND cedula = $2
+     LIMIT 1`,
+    [negocio_id, prov.nit]
+  );
+  if (acrPorCedula.length > 0) {
+    acrRows = acrPorCedula;
+    await client.query(
+      `UPDATE acreedores SET proveedor_id = $1 WHERE id = $2 AND proveedor_id IS NULL`,
+      [proveedor_id, acrPorCedula[0].id]
     );
+  }
+}
 
-    let acreedorId;
-    if (acrRows.length > 0) {
-      acreedorId = acrRows[0].id;
-
-      // Si lo encontró por cedula pero sin proveedor_id vinculado, vincularlo ahora
-      await client.query(
-        `UPDATE acreedores SET proveedor_id = $1 
-         WHERE id = $2 AND proveedor_id IS NULL`,
-        [proveedor_id, acreedorId]
-      );
-    } else {
-      const cedulaFinal = prov?.nit || `prov-${proveedor_id}`;
-      const { rows: nuevoRows } = await client.query(
-        `INSERT INTO acreedores(negocio_id, nombre, cedula, telefono, proveedor_id)
-         VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-        [negocio_id, prov?.nombre, cedulaFinal, prov?.telefono || '', proveedor_id]
-      );
-      acreedorId = nuevoRows[0].id;
-    }
+let acreedorId;
+if (acrRows.length > 0) {
+  acreedorId = acrRows[0].id;
+} else {
+  // 3. Crear nuevo con cédula única garantizada
+  const cedulaFinal = prov?.nit || `prov-${proveedor_id}`;
+  const { rows: nuevoRows } = await client.query(
+    `INSERT INTO acreedores(negocio_id, nombre, cedula, telefono, proveedor_id)
+     VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+    [negocio_id, prov?.nombre, cedulaFinal, prov?.telefono || '', proveedor_id]
+  );
+  acreedorId = nuevoRows[0].id;
+}
 
     await client.query(
       `INSERT INTO movimientos_acreedor(acreedor_id, tipo, descripcion, valor)
