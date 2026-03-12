@@ -24,17 +24,25 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
+        // Rutas de datos en tiempo real: NUNCA cachear
+        // Se listan primero con NetworkOnly para que tengan prioridad
         runtimeCaching: [
           {
+            // Reportes, facturas, dashboard — datos que cambian constantemente
+            urlPattern: /^https:\/\/inventario-final-production\.up\.railway\.app\/api\/(reportes|facturas|dashboard).*/i,
+            handler: 'NetworkOnly',
+          },
+          {
+            // El resto de la API: catálogos, config, productos — pueden cachearse brevemente
             urlPattern: /^https:\/\/inventario-final-production\.up\.railway\.app\/api\/.*/i,
             handler: 'NetworkFirst',
             options: {
               cacheName: 'api-cache',
-              expiration: { maxEntries: 50, maxAgeSeconds: 300 }
-            }
-          }
-        ]
-      }
+              expiration: { maxEntries: 50, maxAgeSeconds: 300 },
+            },
+          },
+        ],
+      },
     })
   ],
   server: {
