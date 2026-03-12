@@ -19,6 +19,7 @@ const getFacturaById = async (negocioId, id) => {
 };
 
 const crearFactura = async ({ sucursal_id, usuario_id, nombre_cliente, cedula, celular, notas, lineas, pagos, retoma }) => {
+  console.log('🚀 crearFactura ejecutado, retoma recibida:', JSON.stringify(retoma));
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
