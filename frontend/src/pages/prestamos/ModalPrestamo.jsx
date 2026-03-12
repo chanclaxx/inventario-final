@@ -15,6 +15,7 @@ import useCarritoStore from '../../store/carritoStore';
 import { User, Users, Plus, ChevronLeft } from 'lucide-react';
 
 // ── Selector con opción de crear ──────────────────────────────────────────
+// ── Selector genérico (para prestatarios y empleados) ─────────────────────
 function SelectorOCrear({ items, onSeleccionar, onCrear, placeholder, labelCrear, loading, renderItem }) {
   const [modo,   setModo]   = useState('seleccionar');
   const [nombre, setNombre] = useState('');
@@ -71,6 +72,106 @@ function SelectorOCrear({ items, onSeleccionar, onCrear, placeholder, labelCrear
         className="flex items-center gap-1 text-xs text-blue-500 hover:text-blue-700 w-fit"
       >
         <Plus size={13} /> {labelCrear}
+      </button>
+    </div>
+  );
+}
+
+// ── Selector de clientes con formulario completo ──────────────────────────
+function SelectorOCrearCliente({ items, onSeleccionar, onCrear, loading }) {
+  const [modo, setModo] = useState('seleccionar');
+  const [form, setForm] = useState({
+    nombre: '', cedula: '', celular: '', direccion: '', notas: '',
+  });
+
+  const handleCrear = () => {
+    if (!form.nombre.trim() || !form.cedula.trim()) return;
+    onCrear(form);
+    setForm({ nombre: '', cedula: '', celular: '', direccion: '', notas: '' });
+    setModo('seleccionar');
+  };
+
+  if (loading) return <Spinner className="py-4" />;
+
+  if (modo === 'crear') {
+    return (
+      <div className="flex flex-col gap-3">
+        <button
+          onClick={() => { setModo('seleccionar'); setForm({ nombre: '', cedula: '', celular: '', direccion: '', notas: '' }); }}
+          className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-600 w-fit"
+        >
+          <ChevronLeft size={13} /> Volver
+        </button>
+
+        <Input
+          label="Nombre completo *"
+          placeholder="Nombre del cliente"
+          value={form.nombre}
+          onChange={(e) => setForm({ ...form, nombre: e.target.value })}
+          autoFocus
+        />
+        <Input
+          label="Cédula *"
+          placeholder="123456789"
+          value={form.cedula}
+          onChange={(e) => setForm({ ...form, cedula: e.target.value })}
+        />
+        <Input
+          label="Celular"
+          placeholder="3001234567"
+          value={form.celular}
+          onChange={(e) => setForm({ ...form, celular: e.target.value })}
+        />
+        <Input
+          label="Dirección"
+          placeholder="Calle 123..."
+          value={form.direccion}
+          onChange={(e) => setForm({ ...form, direccion: e.target.value })}
+        />
+        <Input
+          label="Notas"
+          placeholder="Observaciones opcionales..."
+          value={form.notas}
+          onChange={(e) => setForm({ ...form, notas: e.target.value })}
+        />
+
+        <Button
+          size="sm"
+          disabled={!form.nombre.trim() || !form.cedula.trim()}
+          onClick={handleCrear}
+        >
+          Guardar cliente
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      {items.length > 0 ? (
+        <div className="flex flex-col gap-1 max-h-40 overflow-y-auto">
+          {items.map((item) => (
+            <button
+              key={item.id}
+              onClick={() => onSeleccionar(item)}
+              className="text-left px-3 py-2 rounded-xl border border-gray-100
+                hover:border-blue-200 hover:bg-blue-50/30 transition-colors text-sm text-gray-800"
+            >
+              {item.nombre}
+              {item.cedula && (
+                <span className="text-xs text-gray-400 ml-2">{item.cedula}</span>
+              )}
+            </button>
+          ))}
+        </div>
+      ) : (
+        <p className="text-xs text-gray-400 px-1">Sin clientes registrados</p>
+      )}
+      <button
+        onClick={() => setModo('crear')}
+        className="flex items-center gap-1 text-xs text-blue-500 hover:text-blue-700 w-fit"
+      >
+        <Plus size={13} /> Agregar cliente
       </button>
     </div>
   );
@@ -141,12 +242,18 @@ export function ModalPrestamo({ open, onClose }) {
   });
 
   const mutCrearCliente = useMutation({
-    mutationFn: (nombre) => crearCliente({ nombre, cedula: `TEMP-${Date.now()}`, celular: '' }),
-    onSuccess: (res) => {
-      queryClient.invalidateQueries(['clientes-prestamo']);
-      setClienteSel(res.data.data);
-    },
-  });
+  mutationFn: (datos) => crearCliente({
+    nombre:    datos.nombre,
+    cedula:    datos.cedula,
+    celular:   datos.celular   || '',
+    direccion: datos.direccion || '',
+    email:     '',
+  }),
+  onSuccess: (res) => {
+    queryClient.invalidateQueries(['clientes-prestamo']);
+    setClienteSel(res.data.data);
+  },
+});
 
   const mutPrestamo = useMutation({
     mutationFn: crearPrestamo,
@@ -311,35 +418,25 @@ export function ModalPrestamo({ open, onClose }) {
 
         {/* ── Flujo Cliente ── */}
         {tipoCliente === 'cliente' && (
-          <div className="flex flex-col gap-2">
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-              Cliente
-            </p>
-            {clienteSel ? (
-              <ChipSeleccionado
-                nombre={clienteSel.nombre}
-                onCambiar={() => setClienteSel(null)}
-              />
-            ) : (
-              <SelectorOCrear
-                items={clientes}
-                loading={loadingClientes}
-                placeholder="Sin clientes registrados"
-                labelCrear="Agregar cliente"
-                renderItem={(c) => (
-                  <span>
-                    {c.nombre}
-                    {c.cedula && (
-                      <span className="text-xs text-gray-400 ml-2">{c.cedula}</span>
-                    )}
-                  </span>
-                )}
-                onSeleccionar={(c) => setClienteSel(c)}
-                onCrear={(nombre) => mutCrearCliente.mutate(nombre)}
-              />
-            )}
-          </div>
-        )}
+  <div className="flex flex-col gap-2">
+    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+      Cliente
+    </p>
+    {clienteSel ? (
+      <ChipSeleccionado
+        nombre={clienteSel.nombre}
+        onCambiar={() => setClienteSel(null)}
+      />
+    ) : (
+      <SelectorOCrearCliente
+        items={clientes}
+        loading={loadingClientes}
+        onSeleccionar={(c) => setClienteSel(c)}
+        onCrear={(datos) => mutCrearCliente.mutate(datos)}
+      />
+    )}
+  </div>
+)}
 
         {/* Valor */}
         <div className="flex flex-col gap-2">
