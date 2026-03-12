@@ -31,5 +31,15 @@ const cancelarFactura = async (req, res, next) => {
     res.json({ ok: true, message: 'Factura cancelada correctamente' });
   } catch (err) { next(err); }
 };
+const editarFactura = async (req, res, next) => {
+  try {
+    const data = await service.editarFactura(
+      req.user.negocio_id,
+      req.params.id,
+      req.body,
+    );
+    res.json({ ok: true, data, message: 'Factura actualizada correctamente' });
+  } catch (err) { next(err); }
+};
 
-module.exports = { getFacturas, getFacturaById, crearFactura, cancelarFactura };
+module.exports = { getFacturas, getFacturaById, crearFactura, cancelarFactura, editarFactura };

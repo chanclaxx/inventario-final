@@ -140,4 +140,72 @@ const cancelarFactura = async (negocioId, id) => {
   }
 };
 
-module.exports = { getFacturas, getFacturaById, crearFactura, cancelarFactura };
+const editarFactura = async (negocioId, id, { nombre_cliente, cedula, celular, notas, lineas, pagos, retoma }) => {
+  const valida = await facturasRepo.perteneceAlNegocio(id, negocioId);
+  if (!valida) throw { status: 404, message: 'Factura no encontrada' };
+
+  const facturaActual = await facturasRepo.findById(id);
+  if (facturaActual.estado === 'Cancelada') {
+    throw { status: 400, message: 'No se puede editar una factura cancelada' };
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Actualizar datos del cliente y notas
+    await client.query(
+      `UPDATE facturas
+       SET nombre_cliente = $1, cedula = $2, celular = $3, notas = $4
+       WHERE id = $5`,
+      [nombre_cliente, cedula, celular, notas, id]
+    );
+
+    // Actualizar precios de líneas (solo precio, no agrega ni quita productos)
+    for (const linea of lineas) {
+      await client.query(
+        `UPDATE facturas_lineas SET precio = $1, cantidad = $2
+         WHERE id = $3 AND factura_id = $4`,
+        [linea.precio, linea.cantidad, linea.id, id]
+      );
+    }
+
+    // Reemplazar pagos completos
+    await client.query('DELETE FROM facturas_pagos WHERE factura_id = $1', [id]);
+    for (const pago of pagos) {
+      if (Number(pago.valor) > 0) {
+        await facturasRepo.insertarPago(client, {
+          factura_id: id,
+          metodo:     pago.metodo,
+          valor:      Number(pago.valor),
+        });
+      }
+    }
+
+    // Actualizar retoma si existe
+    if (retoma) {
+      const { rows: retomaExiste } = await client.query(
+        'SELECT id FROM retomas WHERE factura_id = $1',
+        [id]
+      );
+      if (retomaExiste.length > 0) {
+        await client.query(
+          `UPDATE retomas
+           SET descripcion = $1, valor_retoma = $2, ingreso_inventario = $3
+           WHERE factura_id = $4`,
+          [retoma.descripcion, retoma.valor_retoma, retoma.ingreso_inventario, id]
+        );
+      }
+    }
+
+    await client.query('COMMIT');
+    return await facturasRepo.findById(id);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+};
+
+module.exports = { getFacturas, getFacturaById, crearFactura, cancelarFactura, editarFactura };

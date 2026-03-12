@@ -3,16 +3,20 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getFacturas, getFacturaById, cancelarFactura } from '../../api/facturas.api';
 import { getGarantias } from '../../api/garantias.api';
 import { formatCOP, formatFecha, formatFechaHora } from '../../utils/formatters';
-import { Badge } from '../../components/ui/Badge';
-import { Button } from '../../components/ui/Button';
-import { Modal } from '../../components/ui/Modal';
-import { Input } from '../../components/ui/Input';
-import { Spinner } from '../../components/ui/Spinner';
-import { EmptyState } from '../../components/ui/EmptyState';
-import { FacturaTermica } from '../../components/FacturaTermica';
+import { Badge }              from '../../components/ui/Badge';
+import { Button }             from '../../components/ui/Button';
+import { Modal }              from '../../components/ui/Modal';
+import { Input }              from '../../components/ui/Input';
+import { Spinner }            from '../../components/ui/Spinner';
+import { EmptyState }         from '../../components/ui/EmptyState';
+import { FacturaTermica }     from '../../components/FacturaTermica';
+import { ModalEditarFactura } from '../../components/modals/ModalEditarFactura';
 import api from '../../api/axios.config';
 
-import { FileText, ChevronDown, ChevronUp, Printer, XCircle, Eye, Search, X } from 'lucide-react';
+import {
+  FileText, ChevronDown, ChevronUp,
+  Printer, XCircle, Eye, Search, X, Pencil,
+} from 'lucide-react';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -32,10 +36,8 @@ function labelTipoRetoma(tipo) {
   return tipo || '—';
 }
 
-// Compara fecha de factura contra rango seleccionado
 function dentroDeRango(fechaStr, desde, hasta) {
   if (!desde && !hasta) return true;
-  // Extraer solo YYYY-MM-DD ignorando zona horaria
   const fechaDia = fechaStr?.slice(0, 10);
   if (!fechaDia) return false;
   if (desde && fechaDia < desde) return false;
@@ -43,19 +45,18 @@ function dentroDeRango(fechaStr, desde, hasta) {
   return true;
 }
 
-// Filtra factura contra texto de búsqueda libre
 function coincideTexto(factura, texto) {
   if (!texto.trim()) return true;
   const q = texto.toLowerCase();
   return (
-    factura.nombre_cliente?.toLowerCase().includes(q)           ||
-    factura.cedula?.toLowerCase().includes(q)                   ||
-    factura.celular?.toLowerCase().includes(q)                  ||
-    factura.productos_nombres?.toLowerCase().includes(q)        ||
-    factura.productos_imeis?.toLowerCase().includes(q)          ||
-    factura.retoma_descripcion?.toLowerCase().includes(q)       ||
-    factura.retoma_nombre_producto?.toLowerCase().includes(q)   ||
-    factura.retoma_imei?.toLowerCase().includes(q)              ||
+    factura.nombre_cliente?.toLowerCase().includes(q)         ||
+    factura.cedula?.toLowerCase().includes(q)                 ||
+    factura.celular?.toLowerCase().includes(q)                ||
+    factura.productos_nombres?.toLowerCase().includes(q)      ||
+    factura.productos_imeis?.toLowerCase().includes(q)        ||
+    factura.retoma_descripcion?.toLowerCase().includes(q)     ||
+    factura.retoma_nombre_producto?.toLowerCase().includes(q) ||
+    factura.retoma_imei?.toLowerCase().includes(q)            ||
     String(factura.id).includes(q)
   );
 }
@@ -121,7 +122,7 @@ function SeccionRetoma({ retoma }) {
 
 // ─── Modal detalle ────────────────────────────────────────────────────────────
 
-function ModalDetalle({ facturaId, onClose, onReimprimir }) {
+function ModalDetalle({ facturaId, onClose, onReimprimir, onEditar }) {
   const { data, isLoading } = useQuery({
     queryKey: ['factura-detalle', facturaId],
     queryFn: () => getFacturaById(facturaId).then((r) => r.data.data),
@@ -143,7 +144,7 @@ function ModalDetalle({ facturaId, onClose, onReimprimir }) {
 
   const f           = data;
   const total       = f?.lineas?.reduce((s, l) => s + Number(l.subtotal || 0), 0) || 0;
-  const totalPagado = f?.pagos?.reduce((s, p) => s + Number(p.valor    || 0), 0) || 0;
+  const totalPagado = f?.pagos?.reduce((s, p)  => s + Number(p.valor    || 0), 0) || 0;
   const valorRetoma = f?.retoma ? Number(f.retoma.valor_retoma || 0) : 0;
 
   return (
@@ -161,15 +162,18 @@ function ModalDetalle({ facturaId, onClose, onReimprimir }) {
         </div>
 
         <div className="bg-gray-50 rounded-xl p-3">
-            <p className="text-xs text-gray-400 mb-1">Cliente</p>
-            <p className="text-sm font-semibold text-gray-800">{f?.nombre_cliente}</p>
-            {f?.cedula !== 'COMPANERO' && (
+          <p className="text-xs text-gray-400 mb-1">Cliente</p>
+          <p className="text-sm font-semibold text-gray-800">{f?.nombre_cliente}</p>
+          {f?.cedula !== 'COMPANERO' && (
             <p className="text-xs text-gray-500">CC: {f?.cedula} · Tel: {f?.celular}</p>
-            )}
-          {f?.usuario_nombre && (
-          <p className="text-xs text-gray-400 mt-1">Atendido por: <span className="text-gray-600 font-medium">{f.usuario_nombre}</span></p>
           )}
-          </div>
+          {f?.usuario_nombre && (
+            <p className="text-xs text-gray-400 mt-1">
+              Atendido por:{' '}
+              <span className="text-gray-600 font-medium">{f.usuario_nombre}</span>
+            </p>
+          )}
+        </div>
 
         <div className="bg-gray-50 rounded-xl p-3 flex flex-col gap-2">
           <p className="text-xs text-gray-400 font-medium">Productos</p>
@@ -219,6 +223,15 @@ function ModalDetalle({ facturaId, onClose, onReimprimir }) {
           >
             <Printer size={16} /> Reimprimir
           </Button>
+          {f?.estado !== 'Cancelada' && (
+            <Button
+              variant="secondary"
+              className="flex-1"
+              onClick={() => onEditar(facturaId)}
+            >
+              <Pencil size={16} /> Editar
+            </Button>
+          )}
           <Button variant="secondary" className="flex-1" onClick={onClose}>
             Cerrar
           </Button>
@@ -230,7 +243,7 @@ function ModalDetalle({ facturaId, onClose, onReimprimir }) {
 
 // ─── Fila factura ─────────────────────────────────────────────────────────────
 
-function FilaFactura({ factura, onVerDetalle, onInactivar }) {
+function FilaFactura({ factura, onVerDetalle, onInactivar, onEditar }) {
   const total = Number(factura.total || 0) - Number(factura.total_retoma || 0);
 
   return (
@@ -257,11 +270,11 @@ function FilaFactura({ factura, onVerDetalle, onInactivar }) {
           <p className="text-xs text-gray-400 truncate">{factura.productos_nombres}</p>
         )}
         <p className="text-xs text-gray-400">
-  {formatFechaHora(factura.fecha)}
-  {factura.usuario_nombre && (
-    <span className="ml-2 text-gray-300">· {factura.usuario_nombre}</span>
-  )}
-</p>
+          {formatFechaHora(factura.fecha)}
+          {factura.usuario_nombre && (
+            <span className="ml-2 text-gray-300">· {factura.usuario_nombre}</span>
+          )}
+        </p>
       </div>
 
       <div className="flex items-center gap-2 flex-shrink-0">
@@ -272,6 +285,14 @@ function FilaFactura({ factura, onVerDetalle, onInactivar }) {
         >
           <Eye size={16} />
         </button>
+        {factura.estado !== 'Cancelada' && (
+          <button
+            onClick={() => onEditar(factura.id)}
+            className="p-1.5 rounded-lg hover:bg-yellow-50 text-gray-400 hover:text-yellow-500 transition-colors"
+          >
+            <Pencil size={16} />
+          </button>
+        )}
         {factura.estado !== 'Cancelada' && (
           <button
             onClick={() => onInactivar(factura)}
@@ -287,7 +308,7 @@ function FilaFactura({ factura, onVerDetalle, onInactivar }) {
 
 // ─── Grupo por día ────────────────────────────────────────────────────────────
 
-function GrupoDia({ fecha, facturas, onVerDetalle, onInactivar }) {
+function GrupoDia({ fecha, facturas, onVerDetalle, onInactivar, onEditar }) {
   const [expandido, setExpandido] = useState(true);
   const totalDia = facturas
     .filter((f) => f.estado !== 'Cancelada')
@@ -317,6 +338,7 @@ function GrupoDia({ fecha, facturas, onVerDetalle, onInactivar }) {
               factura={f}
               onVerDetalle={onVerDetalle}
               onInactivar={onInactivar}
+              onEditar={onEditar}
             />
           ))}
         </div>
@@ -332,7 +354,6 @@ function PanelBusqueda({ filtros, onChange, onLimpiar, totalResultados, totalFac
 
   return (
     <div className="bg-white border border-gray-100 rounded-2xl p-4 flex flex-col gap-3 shadow-sm">
-      {/* Búsqueda libre */}
       <div className="relative">
         <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
         <input
@@ -345,7 +366,6 @@ function PanelBusqueda({ filtros, onChange, onLimpiar, totalResultados, totalFac
         />
       </div>
 
-      {/* Rango de fechas */}
       <div className="flex gap-2 items-center">
         <div className="flex-1">
           <Input
@@ -374,7 +394,6 @@ function PanelBusqueda({ filtros, onChange, onLimpiar, totalResultados, totalFac
         )}
       </div>
 
-      {/* Contador */}
       {hayFiltros && (
         <p className="text-xs text-gray-400">
           {totalResultados} resultado(s) de {totalFacturas} factura(s)
@@ -393,6 +412,7 @@ export default function FacturarPage() {
   const [facturaDetalle,   setFacturaDetalle]   = useState(null);
   const [facturaInactivar, setFacturaInactivar] = useState(null);
   const [facturaImprimir,  setFacturaImprimir]  = useState(null);
+  const [facturaEditar,    setFacturaEditar]    = useState(null);
   const [filtros,          setFiltros]          = useState(FILTROS_INICIALES);
 
   const { data: facturasData, isLoading } = useQuery({
@@ -415,9 +435,8 @@ export default function FacturarPage() {
     },
   });
 
- const facturas = useMemo(() => facturasData || [], [facturasData]);
+  const facturas = useMemo(() => facturasData || [], [facturasData]);
 
-  // Filtrado con useMemo para no recalcular en cada render
   const facturasFiltradas = useMemo(() => {
     return facturas.filter((f) =>
       coincideTexto(f, filtros.texto) &&
@@ -427,7 +446,10 @@ export default function FacturarPage() {
 
   const grupos = useMemo(() => agruparPorDia(facturasFiltradas), [facturasFiltradas]);
 
-  
+  const handleEditar = (id) => {
+    setFacturaDetalle(null);
+    setFacturaEditar(id);
+  };
 
   return (
     <div className="flex flex-col gap-4">
@@ -471,17 +493,20 @@ export default function FacturarPage() {
               facturas={facts}
               onVerDetalle={(id) => setFacturaDetalle(id)}
               onInactivar={(f) => setFacturaInactivar(f)}
+              onEditar={handleEditar}
             />
           ))}
         </div>
       )}
 
-      {/* Modales */}
+      {/* ── Modales ── */}
+
       {facturaDetalle && (
         <ModalDetalle
           facturaId={facturaDetalle}
           onClose={() => setFacturaDetalle(null)}
           onReimprimir={(f) => { setFacturaDetalle(null); setFacturaImprimir(f); }}
+          onEditar={handleEditar}
         />
       )}
 
@@ -515,6 +540,14 @@ export default function FacturarPage() {
             </div>
           </div>
         </Modal>
+      )}
+
+      {facturaEditar && (
+        <ModalEditarFactura
+          facturaId={facturaEditar}
+          onClose={() => setFacturaEditar(null)}
+          onGuardado={() => setFacturaEditar(null)}
+        />
       )}
 
       {facturaImprimir && (
