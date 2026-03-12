@@ -9,7 +9,8 @@ const formatearMiles = (valor) => {
   if (valor === '' || valor === null || valor === undefined) return '';
   const numero = parseInt(String(valor).replace(/\D/g, ''), 10);
   if (isNaN(numero)) return '';
-  return numero.toLocaleString('es-CO');
+  // Formateo manual: evita depender del locale del navegador
+  return numero.toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.');
 };
 
 /** Extrae el número entero limpio de un string formateado. Ej: "1.500.000" → 1500000 */
@@ -77,7 +78,7 @@ export function InputMoneda({
     }
 
     const entero = parseInt(soloDigitos, 10);
-    const formateado = entero.toLocaleString('es-CO');
+    const formateado = entero.toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.');
 
     // Preservar posición del cursor después del formateo
     const cursorAntes = e.target.selectionStart;
