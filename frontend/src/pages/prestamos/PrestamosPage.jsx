@@ -9,7 +9,10 @@ import { Modal }                        from '../../components/ui/Modal';
 import { Input }                        from '../../components/ui/Input';
 import { Spinner }                      from '../../components/ui/Spinner';
 import { EmptyState }                   from '../../components/ui/EmptyState';
-import { Handshake, CreditCard, Plus, CheckCircle, ChevronDown, ChevronUp } from 'lucide-react';
+import {
+  Handshake, CreditCard, Plus, CheckCircle,
+  ChevronDown, ChevronUp, Users, User,
+} from 'lucide-react';
 
 const TABS = [
   { id: 'prestamos', label: 'Préstamos', icon: Handshake },
@@ -173,10 +176,11 @@ function CardPrestamo({ prestamo, onAbonar, onDevolver }) {
   );
 }
 
-// ── Grupo de préstamos por prestatario ────────────────────────────────────
+// ── Grupo colapsable por persona/prestatario ──────────────────────────────
 function GrupoPrestatario({ nombre, prestamos, saldoTotal, onAbonar, onDevolver }) {
   const [abierto, setAbierto] = useState(true);
-  const activos = prestamos.filter((p) => p.estado === 'Activo');
+  const activos   = prestamos.filter((p) => p.estado === 'Activo');
+  const cerrados  = prestamos.filter((p) => p.estado !== 'Activo');
 
   return (
     <div className="border border-gray-100 rounded-2xl overflow-hidden">
@@ -219,14 +223,13 @@ function GrupoPrestatario({ nombre, prestamos, saldoTotal, onAbonar, onDevolver 
             ))
           )}
 
-          {/* Cerrados colapsables dentro del grupo */}
-          {prestamos.filter((p) => p.estado !== 'Activo').length > 0 && (
+          {cerrados.length > 0 && (
             <details>
               <summary className="text-xs text-gray-400 cursor-pointer select-none px-1">
-                Ver {prestamos.filter((p) => p.estado !== 'Activo').length} cerrado(s)
+                Ver {cerrados.length} cerrado(s)
               </summary>
               <div className="flex flex-col gap-2 mt-2">
-                {prestamos.filter((p) => p.estado !== 'Activo').map((p) => (
+                {cerrados.map((p) => (
                   <div key={p.id} className="bg-gray-50 border border-gray-100 rounded-xl p-3 flex justify-between items-center">
                     <div className="min-w-0">
                       <p className="text-sm font-medium text-gray-600 truncate">{p.nombre_producto}</p>
@@ -246,11 +249,40 @@ function GrupoPrestatario({ nombre, prestamos, saldoTotal, onAbonar, onDevolver 
   );
 }
 
+// ── Sección con título e ícono ────────────────────────────────────────────
+function SeccionPrestamos({ titulo, icono, grupos, emptyText, onAbonar, onDevolver }) {
+  const SeccionIcon = icono;
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center gap-2 px-1">
+        <SeccionIcon size={14} className="text-gray-400 flex-shrink-0" />
+        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+          {titulo}
+        </p>
+      </div>
+      {Object.keys(grupos).length === 0 ? (
+        <p className="text-xs text-gray-400 px-1">{emptyText}</p>
+      ) : (
+        Object.entries(grupos).map(([key, grupo]) => (
+          <GrupoPrestatario
+            key={key}
+            nombre={grupo.nombre}
+            prestamos={grupo.prestamos}
+            saldoTotal={grupo.saldoTotal}
+            onAbonar={onAbonar}
+            onDevolver={onDevolver}
+          />
+        ))
+      )}
+    </div>
+  );
+}
+
 // ── Página principal ──────────────────────────────────────────────────────
 export default function PrestamosPage() {
-  const [tabActiva,      setTabActiva]      = useState('prestamos');
-  const [prestamoAbono,  setPrestamoAbono]  = useState(null);
-  const [creditoAbono,   setCreditoAbono]   = useState(null);
+  const [tabActiva,     setTabActiva]     = useState('prestamos');
+  const [prestamoAbono, setPrestamoAbono] = useState(null);
+  const [creditoAbono,  setCreditoAbono]  = useState(null);
   const queryClient = useQueryClient();
 
   const { data: prestamosData, isLoading: loadingP } = useQuery({
@@ -271,18 +303,45 @@ export default function PrestamosPage() {
   const prestamos = prestamosData || [];
   const creditos  = creditosData  || [];
 
-  // Agrupar préstamos: compañeros por prestatario_id, clientes como grupo propio
-  const grupos = prestamos.reduce((acc, p) => {
-    const key = p.prestatario_id ? `prestatario_${p.prestatario_id}` : 'clientes';
-    const nombre = p.prestatario_id ? p.prestatario : 'Clientes';
-    if (!acc[key]) acc[key] = { nombre, prestamos: [], saldoTotal: 0 };
-    acc[key].prestamos.push(p);
-    if (p.estado === 'Activo') {
-      acc[key].saldoTotal += Number(p.valor_prestamo) - Number(p.total_abonado);
-    }
-    return acc;
-  }, {});
+  // Agrupar compañeros por prestatario_id
+  const gruposCompaneros = prestamos
+    .filter((p) => p.prestatario_id)
+    .reduce((acc, p) => {
+      const key = `prestatario_${p.prestatario_id}`;
+      if (!acc[key]) {
+        acc[key] = {
+          nombre: p.prestatario_nombre || p.prestatario,
+          prestamos: [],
+          saldoTotal: 0,
+        };
+      }
+      acc[key].prestamos.push(p);
+      if (p.estado === 'Activo') {
+        acc[key].saldoTotal += Number(p.valor_prestamo) - Number(p.total_abonado);
+      }
+      return acc;
+    }, {});
 
+  // Agrupar clientes por cliente_id
+  const gruposClientes = prestamos
+    .filter((p) => p.cliente_id)
+    .reduce((acc, p) => {
+      const key = `cliente_${p.cliente_id}`;
+      if (!acc[key]) {
+        acc[key] = {
+          nombre: p.cliente_nombre || p.prestatario,
+          prestamos: [],
+          saldoTotal: 0,
+        };
+      }
+      acc[key].prestamos.push(p);
+      if (p.estado === 'Activo') {
+        acc[key].saldoTotal += Number(p.valor_prestamo) - Number(p.total_abonado);
+      }
+      return acc;
+    }, {});
+
+  const hayPrestamos = prestamos.length > 0;
   const creditosActivos  = creditos.filter((c) => c.estado === 'Activo');
   const creditosSaldados = creditos.filter((c) => c.estado !== 'Activo');
 
@@ -311,22 +370,30 @@ export default function PrestamosPage() {
 
       {/* PRÉSTAMOS */}
       {tabActiva === 'prestamos' && (
-        <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-6">
           {loadingP ? (
             <Spinner className="py-20" />
-          ) : Object.keys(grupos).length === 0 ? (
-            <EmptyState icon={Handshake} titulo="Sin préstamos activos" />
+          ) : !hayPrestamos ? (
+            <EmptyState icon={Handshake} titulo="Sin préstamos registrados" />
           ) : (
-            Object.entries(grupos).map(([key, grupo]) => (
-              <GrupoPrestatario
-                key={key}
-                nombre={grupo.nombre}
-                prestamos={grupo.prestamos}
-                saldoTotal={grupo.saldoTotal}
+            <>
+              <SeccionPrestamos
+                titulo="Compañeros"
+                icono={User}
+                grupos={gruposCompaneros}
+                emptyText="Sin préstamos a compañeros"
                 onAbonar={setPrestamoAbono}
                 onDevolver={(id) => mutDevolver.mutate(id)}
               />
-            ))
+              <SeccionPrestamos
+                titulo="Clientes"
+                icono={Users}
+                grupos={gruposClientes}
+                emptyText="Sin préstamos a clientes"
+                onAbonar={setPrestamoAbono}
+                onDevolver={(id) => mutDevolver.mutate(id)}
+              />
+            </>
           )}
         </div>
       )}

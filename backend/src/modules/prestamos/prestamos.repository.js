@@ -5,15 +5,17 @@ const findAll = async (sucursalId) => {
     SELECT p.id, p.fecha, p.prestatario, p.cedula, p.telefono,
            p.nombre_producto, p.imei, p.cantidad_prestada,
            p.valor_prestamo, p.total_abonado, p.estado,
-           p.prestatario_id, p.empleado_id,
+           p.prestatario_id, p.empleado_id, p.cliente_id,
            (p.valor_prestamo - p.total_abonado) AS saldo_pendiente,
            u.nombre  AS usuario_nombre,
            pr.nombre AS prestatario_nombre,
-           e.nombre  AS empleado_nombre
+           e.nombre  AS empleado_nombre,
+           c.nombre  AS cliente_nombre
     FROM prestamos p
-    LEFT JOIN usuarios u                  ON u.id  = p.usuario_id
-    LEFT JOIN prestatarios pr             ON pr.id = p.prestatario_id
-    LEFT JOIN empleados_prestatario e     ON e.id  = p.empleado_id
+    LEFT JOIN usuarios u                ON u.id  = p.usuario_id
+    LEFT JOIN prestatarios pr           ON pr.id = p.prestatario_id
+    LEFT JOIN empleados_prestatario e   ON e.id  = p.empleado_id
+    LEFT JOIN clientes c                ON c.id  = p.cliente_id
     WHERE p.sucursal_id = $1
     ORDER BY
       CASE p.estado WHEN 'Activo' THEN 0 WHEN 'Saldado' THEN 1 ELSE 2 END,
@@ -47,20 +49,20 @@ const getAbonos = async (prestamoId) => {
 const create = async (client, {
   sucursal_id, usuario_id, prestatario, cedula, telefono,
   nombre_producto, imei, producto_id, cantidad_prestada, valor_prestamo,
-  prestatario_id, empleado_id,
+  prestatario_id, empleado_id, cliente_id,
 }) => {
   const { rows } = await client.query(`
     INSERT INTO prestamos(
       sucursal_id, usuario_id, prestatario, cedula, telefono,
       nombre_producto, imei, producto_id, cantidad_prestada, valor_prestamo,
-      prestatario_id, empleado_id
+      prestatario_id, empleado_id, cliente_id
     )
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
     RETURNING *
   `, [
     sucursal_id, usuario_id, prestatario, cedula, telefono,
     nombre_producto, imei, producto_id, cantidad_prestada, valor_prestamo,
-    prestatario_id || null, empleado_id || null,
+    prestatario_id || null, empleado_id || null, cliente_id || null,
   ]);
   return rows[0];
 };
