@@ -2,10 +2,12 @@ const { pool } = require('../../config/db');
 
 // ─────────────────────────────────────────────
 // HELPERS DE TIMEZONE
-// PostgreSQL guarda timestamps en UTC. Colombia es UTC-5.
+// La columna `fecha` se guarda como timestamp WITHOUT time zone en UTC.
+// Para convertir correctamente a hora Colombia se necesita el doble AT TIME ZONE:
+//   primero se declara que el valor está en UTC, luego se convierte a Bogotá.
 // ─────────────────────────────────────────────
-const HOY_F = `DATE(f.fecha AT TIME ZONE 'America/Bogota') = (NOW() AT TIME ZONE 'America/Bogota')::date`;
-const HOY   = `DATE(fecha   AT TIME ZONE 'America/Bogota') = (NOW() AT TIME ZONE 'America/Bogota')::date`;
+const HOY_F = `DATE(f.fecha AT TIME ZONE 'UTC' AT TIME ZONE 'America/Bogota') = (NOW() AT TIME ZONE 'America/Bogota')::date`;
+const HOY   = `DATE(fecha   AT TIME ZONE 'UTC' AT TIME ZONE 'America/Bogota') = (NOW() AT TIME ZONE 'America/Bogota')::date`;
 
 // ─────────────────────────────────────────────
 // DASHBOARD
@@ -64,7 +66,7 @@ const getDashboard = async (sucursalId) => {
       ORDER BY total DESC
     `, [sucursalId]),
 
-    // Utilidad facturas Activas: costo calculado por línea, retomas por LEFT JOIN agrupado
+    // Utilidad facturas Activas
     pool.query(`
       WITH retomas_por_factura AS (
         SELECT factura_id, COALESCE(SUM(valor_retoma), 0) AS total_retomas
@@ -102,8 +104,8 @@ const getDashboard = async (sucursalId) => {
         GROUP BY l.factura_id
       )
       SELECT
-        COALESCE(SUM(c.utilidad_bruta), 0)                                   AS utilidad_bruta,
-        COALESCE(SUM(COALESCE(r.total_retomas, 0)), 0)                       AS total_retomas
+        COALESCE(SUM(c.utilidad_bruta), 0)                 AS utilidad_bruta,
+        COALESCE(SUM(COALESCE(r.total_retomas, 0)), 0)     AS total_retomas
       FROM costo_por_linea c
       LEFT JOIN retomas_por_factura r ON r.factura_id = c.factura_id
     `, [sucursalId]),
@@ -193,7 +195,7 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
     LEFT JOIN lineas_factura l      ON l.factura_id = f.id
     LEFT JOIN retomas_por_factura r ON r.factura_id = f.id
     WHERE f.sucursal_id = $1
-      AND DATE(f.fecha AT TIME ZONE 'America/Bogota') BETWEEN $2 AND $3
+      AND DATE(f.fecha AT TIME ZONE 'UTC' AT TIME ZONE 'America/Bogota') BETWEEN $2 AND $3
       AND f.estado != 'Cancelada'
     GROUP BY f.id, r.total_retomas
     ORDER BY f.fecha DESC
@@ -325,7 +327,7 @@ const getProductosTop = async (sucursalId, desde, hasta) => {
           JOIN facturas ff ON ff.id = lf.factura_id
           WHERE lf.nombre_producto = l.nombre_producto
             AND ff.sucursal_id = $1
-            AND DATE(ff.fecha AT TIME ZONE 'America/Bogota') BETWEEN $2 AND $3
+            AND DATE(ff.fecha AT TIME ZONE 'UTC' AT TIME ZONE 'America/Bogota') BETWEEN $2 AND $3
             AND ff.estado != 'Cancelada'
           )
         ELSE
@@ -338,7 +340,7 @@ const getProductosTop = async (sucursalId, desde, hasta) => {
     FROM lineas_factura l
     JOIN facturas f ON f.id = l.factura_id
     WHERE f.sucursal_id = $1
-      AND DATE(f.fecha AT TIME ZONE 'America/Bogota') BETWEEN $2 AND $3
+      AND DATE(f.fecha AT TIME ZONE 'UTC' AT TIME ZONE 'America/Bogota') BETWEEN $2 AND $3
       AND f.estado != 'Cancelada'
     GROUP BY l.nombre_producto
     ORDER BY cantidad_vendida DESC
@@ -385,25 +387,10 @@ const getInventarioBajo = async (sucursalId) => {
 };
 
 // ─────────────────────────────────────────────
-// NUEVO MÉTODO: actualizarCostoCompra
-// Agrega este método al final de reportes.service.js
-// (antes del module.exports)
+// ACTUALIZAR COSTO DE COMPRA
 // ─────────────────────────────────────────────
-
-/**
- * Actualiza el costo de compra de un serial o producto por cantidad.
- * Afecta tanto la tabla de inventario (seriales / productos_cantidad)
- * como recalcula el reporte de utilidades en la siguiente consulta.
- *
- * @param {number} sucursalId  - ID de la sucursal del usuario autenticado
- * @param {'serial'|'cantidad'} tipo - Tipo de producto
- * @param {string|null} imei   - IMEI del serial (requerido si tipo === 'serial')
- * @param {string} nombreProducto - Nombre del producto (requerido si tipo === 'cantidad')
- * @param {number} nuevoCosto  - Nuevo valor del costo de compra
- */
 const actualizarCostoCompra = async (sucursalId, tipo, imei, nombreProducto, nuevoCosto) => {
   if (tipo === 'serial') {
-    // Validar que el serial pertenece a un producto de esta sucursal
     const { rows: check } = await pool.query(`
       SELECT s.id
       FROM seriales s
@@ -427,7 +414,6 @@ const actualizarCostoCompra = async (sucursalId, tipo, imei, nombreProducto, nue
   }
 
   if (tipo === 'cantidad') {
-    // Validar que el producto pertenece a esta sucursal
     const { rows: check } = await pool.query(`
       SELECT id
       FROM productos_cantidad
@@ -454,9 +440,10 @@ const actualizarCostoCompra = async (sucursalId, tipo, imei, nombreProducto, nue
   throw Object.assign(new Error('Tipo de producto inválido. Use "serial" o "cantidad"'), { status: 400 });
 };
 
-// ─────────────────────────────────────────────
-// ACTUALIZAR module.exports (reemplazar la línea existente):
-// module.exports = { getDashboard, getVentasRango, getProductosTop, getInventarioBajo, actualizarCostoCompra };
-// ─────────────────────────────────────────────
-
-module.exports = { getDashboard, getVentasRango, getProductosTop, getInventarioBajo, actualizarCostoCompra };
+module.exports = {
+  getDashboard,
+  getVentasRango,
+  getProductosTop,
+  getInventarioBajo,
+  actualizarCostoCompra,
+};
