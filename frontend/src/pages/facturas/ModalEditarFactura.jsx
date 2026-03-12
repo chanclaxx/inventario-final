@@ -1,13 +1,14 @@
 import { useState, useMemo } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Modal }              from '../../components/ui/Modal';
-import { Button }             from '../../components/ui/Button';
-import { Input }              from '../../components/ui/Input';
-import { Badge }              from '../../components/ui/Badge';
-import { Spinner }            from '../../components/ui/Spinner';
-import { formatCOP }          from '../../utils/formatters';
+import { Modal }          from '../../components/ui/Modal';
+import { Button }         from '../../components/ui/Button';
+import { Input }          from '../../components/ui/Input';
+import { Badge }          from '../../components/ui/Badge';
+import { Spinner }        from '../../components/ui/Spinner';
+import { formatCOP }      from '../../utils/formatters';
+import { getProductosSerial, getProductosCantidad } from '../../api/productos.api';
 import { getFacturaById, editarFactura } from '../../api/facturas.api';
-import { User, Users } from 'lucide-react';
+import { User, Users, Package, ShoppingBag } from 'lucide-react';
 
 const METODOS_PAGO = [
   { id: 'Efectivo'       },
@@ -17,7 +18,18 @@ const METODOS_PAGO = [
   { id: 'Tarjeta'       },
 ];
 
-// Construye mapa { Efectivo: 50000, Nequi: 0, ... } desde array de pagos
+const RETOMA_VACIA = {
+  descripcion:          '',
+  valor_retoma:         '',
+  ingreso_inventario:   false,
+  tipo_retoma:          'serial',
+  imei:                 '',
+  nombre_producto:      '',
+  producto_serial_id:   null,
+  producto_cantidad_id: null,
+  cantidad_retoma:      '1',
+};
+
 function pagosArrayAMapa(pagosArr) {
   const mapa = {};
   METODOS_PAGO.forEach(({ id }) => { mapa[id] = 0; });
@@ -25,7 +37,6 @@ function pagosArrayAMapa(pagosArr) {
   return mapa;
 }
 
-// Construye el estado inicial completo desde los datos de la factura
 function buildEstadoInicial(data) {
   if (!data) return null;
   const esCompanero = data.cedula === 'COMPANERO';
@@ -44,15 +55,255 @@ function buildEstadoInicial(data) {
       cantidad:        l.cantidad,
       precio:          Number(l.precio || 0),
     })),
-    pagos: pagosArrayAMapa(data.pagos),
+    pagos:  pagosArrayAMapa(data.pagos),
     retoma: data.retoma ? {
-      descripcion:        data.retoma.descripcion        || '',
-      valor_retoma:       data.retoma.valor_retoma        || 0,
-      ingreso_inventario: data.retoma.ingreso_inventario  || false,
+      descripcion:          data.retoma.descripcion        || '',
+      valor_retoma:         data.retoma.valor_retoma        || 0,
+      ingreso_inventario:   data.retoma.ingreso_inventario  || false,
+      tipo_retoma:          'serial',
+      imei:                 data.retoma.imei               || '',
+      nombre_producto:      data.retoma.nombre_producto    || '',
+      producto_serial_id:   null,
+      producto_cantidad_id: null,
+      cantidad_retoma:      '1',
     } : null,
   };
 }
 
+// ─── Sección retoma serial ────────────────────────────────────────────────────
+function RetomaSerial({ retoma, setRetomaField, productosSerial }) {
+  const [busqueda, setBusqueda] = useState('');
+
+  const filtrados = (productosSerial || []).filter((p) =>
+    p.nombre.toLowerCase().includes(busqueda.toLowerCase())
+  );
+
+  return (
+    <div className="flex flex-col gap-3">
+      <Input
+        label="IMEI del equipo retomado"
+        placeholder="Ej: 356789012345678"
+        value={retoma.imei}
+        onChange={(e) => setRetomaField('imei', e.target.value)}
+      />
+      <div>
+        <p className="text-xs font-medium text-gray-600 mb-1">
+          Línea de producto{' '}
+          <span className="text-gray-400 font-normal">
+            (elige existente o déjalo vacío para nueva línea)
+          </span>
+        </p>
+        <input
+          type="text"
+          placeholder="Buscar modelo..."
+          value={busqueda}
+          onChange={(e) => {
+            setBusqueda(e.target.value);
+            setRetomaField('producto_serial_id', null);
+            setRetomaField('nombre_producto', '');
+          }}
+          className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-sm
+            focus:outline-none focus:ring-2 focus:ring-purple-400 mb-1"
+        />
+        {busqueda.length > 0 && (
+          <div className="flex flex-col gap-1 max-h-36 overflow-y-auto rounded-xl border border-gray-100 bg-white">
+            {filtrados.length === 0 ? (
+              <p className="text-xs text-gray-400 px-3 py-2">
+                Sin resultados — se creará nueva línea con nombre "{busqueda}"
+              </p>
+            ) : (
+              filtrados.map((p) => (
+                <button
+                  key={p.id}
+                  onClick={() => {
+                    setRetomaField('producto_serial_id', p.id);
+                    setRetomaField('nombre_producto', p.nombre);
+                    setBusqueda(p.nombre);
+                  }}
+                  className={`text-left px-3 py-2 text-sm transition-all
+                    ${retoma.producto_serial_id === p.id
+                      ? 'bg-purple-100 text-purple-800'
+                      : 'hover:bg-gray-50 text-gray-700'}`}
+                >
+                  {p.nombre}
+                  <span className="text-xs text-gray-400 ml-2">{p.disponibles} disp.</span>
+                </button>
+              ))
+            )}
+          </div>
+        )}
+        {retoma.producto_serial_id && (
+          <p className="text-xs text-purple-600 mt-1">
+            ✓ Línea seleccionada: {retoma.nombre_producto}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Sección retoma cantidad ──────────────────────────────────────────────────
+function RetomaCantidad({ retoma, setRetomaField, productosCantidad }) {
+  const [busqueda, setBusqueda] = useState('');
+
+  const filtrados = (productosCantidad || []).filter((p) =>
+    p.nombre.toLowerCase().includes(busqueda.toLowerCase())
+  );
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div>
+        <p className="text-xs font-medium text-gray-600 mb-1">Producto en inventario</p>
+        <input
+          type="text"
+          placeholder="Buscar producto..."
+          value={busqueda}
+          onChange={(e) => {
+            setBusqueda(e.target.value);
+            setRetomaField('producto_cantidad_id', null);
+            setRetomaField('nombre_producto', '');
+          }}
+          className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-sm
+            focus:outline-none focus:ring-2 focus:ring-purple-400 mb-1"
+        />
+        {busqueda.length > 0 && (
+          <div className="flex flex-col gap-1 max-h-36 overflow-y-auto rounded-xl border border-gray-100 bg-white">
+            {filtrados.length === 0 ? (
+              <p className="text-xs text-gray-400 px-3 py-2">Sin resultados</p>
+            ) : (
+              filtrados.map((p) => (
+                <button
+                  key={p.id}
+                  onClick={() => {
+                    setRetomaField('producto_cantidad_id', p.id);
+                    setRetomaField('nombre_producto', p.nombre);
+                    setBusqueda(p.nombre);
+                  }}
+                  className={`text-left px-3 py-2 text-sm transition-all
+                    ${retoma.producto_cantidad_id === p.id
+                      ? 'bg-purple-100 text-purple-800'
+                      : 'hover:bg-gray-50 text-gray-700'}`}
+                >
+                  {p.nombre}
+                  <span className="text-xs text-gray-400 ml-2">Stock: {p.stock}</span>
+                </button>
+              ))
+            )}
+          </div>
+        )}
+        {retoma.producto_cantidad_id && (
+          <p className="text-xs text-purple-600 mt-1">
+            ✓ Producto seleccionado: {retoma.nombre_producto}
+          </p>
+        )}
+      </div>
+      <Input
+        label="Cantidad retomada"
+        type="number"
+        min="1"
+        placeholder="1"
+        value={retoma.cantidad_retoma}
+        onChange={(e) => setRetomaField('cantidad_retoma', e.target.value)}
+      />
+    </div>
+  );
+}
+
+// ─── Panel retoma ─────────────────────────────────────────────────────────────
+function PanelRetoma({ retoma, setRetoma, esNueva }) {
+  const setRetomaField = (campo, valor) =>
+    setRetoma((r) => ({ ...r, [campo]: valor }));
+
+  const { data: productosSerial } = useQuery({
+    queryKey: ['productos-serial'],
+    queryFn:  () => getProductosSerial().then((r) => r.data.data),
+    enabled:  retoma?.ingreso_inventario && retoma?.tipo_retoma === 'serial',
+  });
+
+  const { data: productosCantidad } = useQuery({
+    queryKey: ['productos-cantidad'],
+    queryFn:  () => getProductosCantidad().then((r) => r.data.data),
+    enabled:  retoma?.ingreso_inventario && retoma?.tipo_retoma === 'cantidad',
+  });
+
+  return (
+    <div className="bg-purple-50 rounded-xl p-3 flex flex-col gap-3 border border-purple-100">
+      <p className="text-xs font-medium text-purple-700">
+        {esNueva ? 'Nueva retoma' : 'Retoma'}
+      </p>
+
+      {esNueva && (
+        <div>
+          <p className="text-xs font-medium text-gray-600 mb-1.5">Tipo de producto retomado</p>
+          <div className="flex gap-2">
+            {[
+              { id: 'serial',   label: 'Con serial / IMEI', Icn: Package     },
+              { id: 'cantidad', label: 'Por cantidad',       Icn: ShoppingBag },
+            ].map((opt) => {
+              const OptIcon = opt.Icn;
+              return (
+                <button
+                  key={opt.id}
+                  onClick={() => setRetoma({ ...RETOMA_VACIA, tipo_retoma: opt.id })}
+                  className={`flex-1 flex items-center justify-center gap-1.5 py-2
+                    rounded-xl text-xs font-medium border transition-all
+                    ${retoma.tipo_retoma === opt.id
+                      ? 'bg-purple-100 border-purple-400 text-purple-800'
+                      : 'bg-white border-gray-200 text-gray-500'}`}
+                >
+                  <OptIcon size={13} /> {opt.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      <Input
+        label="Descripción de la retoma"
+        placeholder="Ej: iPhone 12 Pro en buen estado"
+        value={retoma.descripcion}
+        onChange={(e) => setRetomaField('descripcion', e.target.value)}
+      />
+
+      <Input
+        label="Valor retoma"
+        type="number"
+        placeholder="0"
+        value={retoma.valor_retoma}
+        onChange={(e) => setRetomaField('valor_retoma', e.target.value)}
+        onWheel={(e) => e.target.blur()}
+      />
+
+      <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={retoma.ingreso_inventario}
+          onChange={(e) => setRetomaField('ingreso_inventario', e.target.checked)}
+          className="rounded accent-purple-600"
+        />
+        Ingresa al inventario
+      </label>
+
+      {retoma.ingreso_inventario && retoma.tipo_retoma === 'serial' && (
+        <RetomaSerial
+          retoma={retoma}
+          setRetomaField={setRetomaField}
+          productosSerial={productosSerial}
+        />
+      )}
+      {retoma.ingreso_inventario && retoma.tipo_retoma === 'cantidad' && (
+        <RetomaCantidad
+          retoma={retoma}
+          setRetomaField={setRetomaField}
+          productosCantidad={productosCantidad}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── Modal principal ──────────────────────────────────────────────────────────
 export function ModalEditarFactura({ facturaId, onClose, onGuardado }) {
   const queryClient = useQueryClient();
 
@@ -62,22 +313,23 @@ export function ModalEditarFactura({ facturaId, onClose, onGuardado }) {
     enabled:  !!facturaId,
   });
 
-  // Estado inicial derivado de data — se calcula una sola vez cuando data llega
   const estadoInicial = useMemo(() => buildEstadoInicial(data), [data]);
 
   const [tipoCliente, setTipoCliente] = useState(null);
   const [form,        setForm]        = useState(null);
   const [lineas,      setLineas]      = useState(null);
   const [pagos,       setPagos]       = useState(null);
-  const [retoma,      setRetoma]      = useState(undefined); // undefined = no inicializado
+  const [retoma,      setRetoma]      = useState(undefined);
+  const [conRetoma,   setConRetoma]   = useState(null);
   const [error,       setError]       = useState('');
 
-  // Valores efectivos: usa estado local si ya fue modificado, si no usa el inicial
   const tipoClienteEfectivo = tipoCliente ?? estadoInicial?.tipoCliente ?? 'cliente';
   const formEfectivo        = form        ?? estadoInicial?.form        ?? {};
   const lineasEfectivas     = lineas      ?? estadoInicial?.lineas      ?? [];
   const pagosEfectivos      = pagos       ?? estadoInicial?.pagos       ?? {};
   const retomaEfectiva      = retoma !== undefined ? retoma : (estadoInicial?.retoma ?? null);
+  const conRetomaEfectivo   = conRetoma !== null    ? conRetoma : !!estadoInicial?.retoma;
+  const retomaEsNueva       = !estadoInicial?.retoma;
 
   const mutEditar = useMutation({
     mutationFn: () => editarFactura(facturaId, {
@@ -89,7 +341,8 @@ export function ModalEditarFactura({ facturaId, onClose, onGuardado }) {
       pagos: Object.entries(pagosEfectivos)
         .filter(([, v]) => Number(v) > 0)
         .map(([metodo, valor]) => ({ metodo, valor: Number(valor) })),
-      retoma: retomaEfectiva,
+      retoma:       conRetomaEfectivo ? retomaEfectiva : null,
+      esRetomaNueva: retomaEsNueva && conRetomaEfectivo,
     }),
     onSuccess: () => {
       queryClient.invalidateQueries(['facturas']);
@@ -100,16 +353,32 @@ export function ModalEditarFactura({ facturaId, onClose, onGuardado }) {
     onError: (e) => setError(e.response?.data?.error || 'Error al guardar los cambios'),
   });
 
+  const handleToggleRetoma = () => {
+    const nuevo = !conRetomaEfectivo;
+    setConRetoma(nuevo);
+    if (nuevo)  setRetoma({ ...RETOMA_VACIA });
+    if (!nuevo) setRetoma(null);
+  };
+
   const handleSubmit = () => {
     setError('');
     if (!formEfectivo.nombre?.trim()) return setError('El nombre es requerido');
-    if (tipoClienteEfectivo === 'cliente' && !formEfectivo.cedula?.trim())  return setError('La cédula es requerida');
-    if (tipoClienteEfectivo === 'cliente' && !formEfectivo.celular?.trim()) return setError('El celular es requerido');
+    if (tipoClienteEfectivo === 'cliente' && !formEfectivo.cedula?.trim())
+      return setError('La cédula es requerida');
+    if (tipoClienteEfectivo === 'cliente' && !formEfectivo.celular?.trim())
+      return setError('El celular es requerido');
+    if (conRetomaEfectivo && retomaEfectiva?.ingreso_inventario) {
+      if (retomaEfectiva.tipo_retoma === 'serial' && !retomaEfectiva.imei?.trim())
+        return setError('El IMEI es requerido para ingresar al inventario');
+      if (retomaEfectiva.tipo_retoma === 'cantidad' && !retomaEfectiva.producto_cantidad_id)
+        return setError('Selecciona el producto para ingresar al inventario');
+    }
     mutEditar.mutate();
   };
 
   const totalLineas = lineasEfectivas.reduce((s, l) => s + l.precio * l.cantidad, 0);
-  const valorRetoma = retomaEfectiva ? Number(retomaEfectiva.valor_retoma || 0) : 0;
+  const valorRetoma = conRetomaEfectivo && retomaEfectiva
+    ? Number(retomaEfectiva.valor_retoma || 0) : 0;
   const totalNeto   = totalLineas - valorRetoma;
   const totalPagado = Object.values(pagosEfectivos).reduce((s, v) => s + Number(v || 0), 0);
   const diferencia  = totalPagado - totalNeto;
@@ -224,26 +493,30 @@ export function ModalEditarFactura({ facturaId, onClose, onGuardado }) {
           </div>
         </div>
 
-        {/* ── Retoma (solo si existe) ── */}
-        {retomaEfectiva && (
-          <div className="bg-purple-50 rounded-xl p-3 flex flex-col gap-2 border border-purple-100">
-            <p className="text-xs font-medium text-purple-700">Retoma</p>
-            <Input
-              label="Descripción"
-              placeholder="Descripción de la retoma"
-              value={retomaEfectiva.descripcion}
-              onChange={(e) => setRetoma({ ...retomaEfectiva, descripcion: e.target.value })}
-            />
-            <Input
-              label="Valor retoma"
-              type="number"
-              placeholder="0"
-              value={retomaEfectiva.valor_retoma}
-              onChange={(e) => setRetoma({ ...retomaEfectiva, valor_retoma: e.target.value })}
-              onWheel={(e) => e.target.blur()}
-            />
-          </div>
-        )}
+        {/* ── Retoma ── */}
+        <div>
+          {retomaEsNueva && (
+            <button
+              onClick={handleToggleRetoma}
+              className={`w-full py-2.5 rounded-xl text-sm font-medium border transition-all
+                ${conRetomaEfectivo
+                  ? 'bg-purple-50 border-purple-300 text-purple-700'
+                  : 'bg-gray-50 border-gray-200 text-gray-600'}`}
+            >
+              {conRetomaEfectivo ? '✓ Con retoma' : '+ Agregar retoma'}
+            </button>
+          )}
+
+          {conRetomaEfectivo && retomaEfectiva && (
+            <div className={retomaEsNueva ? 'mt-3' : ''}>
+              <PanelRetoma
+                retoma={retomaEfectiva}
+                setRetoma={setRetoma}
+                esNueva={retomaEsNueva}
+              />
+            </div>
+          )}
+        </div>
 
         {/* ── Métodos de pago ── */}
         <div>
@@ -268,7 +541,7 @@ export function ModalEditarFactura({ facturaId, onClose, onGuardado }) {
 
         {/* ── Resumen financiero ── */}
         <div className="bg-gray-50 rounded-xl p-3 flex flex-col gap-1.5">
-          {retomaEfectiva && valorRetoma > 0 && (
+          {conRetomaEfectivo && valorRetoma > 0 && (
             <div className="flex justify-between text-sm">
               <span className="text-purple-600">Retoma</span>
               <span className="text-purple-600">- {formatCOP(valorRetoma)}</span>

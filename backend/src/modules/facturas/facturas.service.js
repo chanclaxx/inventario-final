@@ -140,38 +140,39 @@ const cancelarFactura = async (negocioId, id) => {
   }
 };
 
-const editarFactura = async (negocioId, id, { nombre_cliente, cedula, celular, notas, lineas, pagos, retoma }) => {
+const editarFactura = async (negocioId, id, {
+  nombre_cliente, cedula, celular, notas,
+  lineas, pagos, retoma, esRetomaNueva = false,
+}) => {
   const valida = await facturasRepo.perteneceAlNegocio(id, negocioId);
   if (!valida) throw { status: 404, message: 'Factura no encontrada' };
 
   const facturaActual = await facturasRepo.findById(id);
-  if (facturaActual.estado === 'Cancelada') {
+  if (facturaActual.estado === 'Cancelada')
     throw { status: 400, message: 'No se puede editar una factura cancelada' };
-  }
 
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
-    // Actualizar datos del cliente y notas
+    // Actualizar datos del cliente
     await client.query(
-      `UPDATE facturas
-       SET nombre_cliente = $1, cedula = $2, celular = $3, notas = $4
+      `UPDATE facturas SET nombre_cliente = $1, cedula = $2, celular = $3, notas = $4
        WHERE id = $5`,
       [nombre_cliente, cedula, celular, notas, id]
     );
 
-    // Actualizar precios de líneas (solo precio, no agrega ni quita productos)
+    // Actualizar precio de líneas (no agrega ni quita)
     for (const linea of lineas) {
       await client.query(
-        `UPDATE facturas_lineas SET precio = $1, cantidad = $2
+        `UPDATE lineas_factura SET precio = $1, cantidad = $2
          WHERE id = $3 AND factura_id = $4`,
         [linea.precio, linea.cantidad, linea.id, id]
       );
     }
 
     // Reemplazar pagos completos
-    await client.query('DELETE FROM facturas_pagos WHERE factura_id = $1', [id]);
+    await client.query('DELETE FROM pagos_factura WHERE factura_id = $1', [id]);
     for (const pago of pagos) {
       if (Number(pago.valor) > 0) {
         await facturasRepo.insertarPago(client, {
@@ -182,13 +183,46 @@ const editarFactura = async (negocioId, id, { nombre_cliente, cedula, celular, n
       }
     }
 
-    // Actualizar retoma si existe
-    if (retoma) {
+    // Manejar retoma
+    if (retoma !== undefined) {
       const { rows: retomaExiste } = await client.query(
-        'SELECT id FROM retomas WHERE factura_id = $1',
-        [id]
+        'SELECT id FROM retomas WHERE factura_id = $1', [id]
       );
-      if (retomaExiste.length > 0) {
+
+      if (esRetomaNueva && retoma) {
+        // Insertar retoma nueva
+        await facturasRepo.insertarRetoma(client, {
+          factura_id:         id,
+          descripcion:        retoma.descripcion,
+          valor_retoma:       retoma.valor_retoma,
+          ingreso_inventario: retoma.ingreso_inventario || false,
+          nombre_producto:    retoma.nombre_producto    || null,
+          imei:               retoma.imei               || null,
+        });
+
+        if (retoma.ingreso_inventario && retoma.imei && retoma.producto_serial_id) {
+          const existeSerial = await serialRepo.findSerialByIMEI(retoma.imei);
+          if (existeSerial) {
+            await client.query(
+              'UPDATE seriales SET vendido = false, fecha_salida = NULL WHERE imei = $1',
+              [retoma.imei]
+            );
+          } else {
+            await serialRepo.insertarSerial({
+              producto_id:   retoma.producto_serial_id,
+              imei:          retoma.imei,
+              fecha_entrada: new Date().toISOString().split('T')[0],
+              costo_compra:  retoma.valor_retoma,
+            });
+          }
+        } else if (retoma.ingreso_inventario && retoma.producto_cantidad_id) {
+          await cantidadRepo.ajustarStock(
+            retoma.producto_cantidad_id,
+            Number(retoma.cantidad_retoma || 1)
+          );
+        }
+      } else if (retomaExiste.length > 0 && retoma) {
+        // Actualizar retoma existente
         await client.query(
           `UPDATE retomas
            SET descripcion = $1, valor_retoma = $2, ingreso_inventario = $3

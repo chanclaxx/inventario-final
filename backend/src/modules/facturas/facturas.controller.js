@@ -41,5 +41,4 @@ const editarFactura = async (req, res, next) => {
     res.json({ ok: true, data, message: 'Factura actualizada correctamente' });
   } catch (err) { next(err); }
 };
-
 module.exports = { getFacturas, getFacturaById, crearFactura, cancelarFactura, editarFactura };
