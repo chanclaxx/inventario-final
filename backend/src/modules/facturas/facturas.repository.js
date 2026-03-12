@@ -16,7 +16,7 @@ const findAll = async (sucursalId) => {
       (SELECT ret.valor_retoma       FROM retomas ret WHERE ret.factura_id = f.id LIMIT 1) AS retoma_valor,
       -- Todos los proveedores distintos de la factura como string separado por comas
       (
-        SELECT NULLIF(STRING_AGG(DISTINCT prov_nombre ORDER BY prov_nombre, ', '), '')
+        SELECT NULLIF(STRING_AGG(DISTINCT prov_nombre, ', ' ORDER BY prov_nombre), '')
         FROM (
           SELECT p.nombre AS prov_nombre
           FROM lineas_factura lf2
@@ -53,7 +53,7 @@ const findById = async (id) => {
       u.nombre AS usuario_nombre,
       -- Todos los proveedores distintos de la factura como string separado por comas
       (
-        SELECT NULLIF(STRING_AGG(DISTINCT prov_nombre ORDER BY prov_nombre, ', '), '')
+        SELECT NULLIF(STRING_AGG(DISTINCT prov_nombre, ', ' ORDER BY prov_nombre), '')
         FROM (
           SELECT p.nombre AS prov_nombre
           FROM lineas_factura lf
