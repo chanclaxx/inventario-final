@@ -14,9 +14,14 @@ import {
   ChevronDown, ChevronUp, Users, User,
 } from 'lucide-react';
 
-const TABS = [
+const TABS_PRINCIPALES = [
   { id: 'prestamos', label: 'Préstamos', icon: Handshake },
   { id: 'creditos',  label: 'Créditos',  icon: CreditCard },
+];
+
+const TABS_PRESTAMOS = [
+  { id: 'companeros', label: 'Compañeros', icon: User  },
+  { id: 'clientes',   label: 'Clientes',   icon: Users },
 ];
 
 // ── Modal Abono Préstamo ───────────────────────────────────────────────────
@@ -128,8 +133,8 @@ function ModalAbonoCredito({ credito, onClose }) {
   );
 }
 
-// ── Card de un préstamo individual ────────────────────────────────────────
-function CardPrestamo({ prestamo, onAbonar, onDevolver }) {
+// ── Card préstamo — compañero ─────────────────────────────────────────────
+function CardPrestamoCompanero({ prestamo, onAbonar, onDevolver }) {
   const saldo    = Number(prestamo.valor_prestamo) - Number(prestamo.total_abonado);
   const progreso = (Number(prestamo.total_abonado) / Number(prestamo.valor_prestamo)) * 100;
 
@@ -176,11 +181,69 @@ function CardPrestamo({ prestamo, onAbonar, onDevolver }) {
   );
 }
 
-// ── Grupo colapsable por persona/prestatario ──────────────────────────────
-function GrupoPrestatario({ nombre, prestamos, saldoTotal, onAbonar, onDevolver }) {
+// ── Card préstamo — cliente ───────────────────────────────────────────────
+function CardPrestamoCliente({ prestamo, onAbonar, onDevolver }) {
+  const saldo    = Number(prestamo.valor_prestamo) - Number(prestamo.total_abonado);
+  const progreso = (Number(prestamo.total_abonado) / Number(prestamo.valor_prestamo)) * 100;
+
+  return (
+    <div className="bg-white border border-gray-100 rounded-2xl p-4 flex flex-col gap-3">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-gray-800 truncate">{prestamo.nombre_producto}</p>
+          {prestamo.imei && (
+            <p className="text-xs text-gray-400 font-mono">{prestamo.imei}</p>
+          )}
+          <p className="text-xs text-gray-400 mt-0.5">{formatFechaHora(prestamo.fecha)}</p>
+        </div>
+        <Badge variant={prestamo.estado === 'Activo' ? 'blue' : 'green'}>
+          {prestamo.estado}
+        </Badge>
+      </div>
+
+      {/* Info del cliente */}
+      {(prestamo.cedula || prestamo.telefono) && (
+        <div className="bg-gray-50 rounded-xl px-3 py-2 flex flex-col gap-0.5">
+          {prestamo.cedula && (
+            <p className="text-xs text-gray-500">CC: {prestamo.cedula}</p>
+          )}
+          {prestamo.telefono && (
+            <p className="text-xs text-gray-500">Tel: {prestamo.telefono}</p>
+          )}
+        </div>
+      )}
+
+      <div className="flex flex-col gap-1">
+        <div className="w-full bg-gray-100 rounded-full h-1.5">
+          <div
+            className="bg-blue-500 h-1.5 rounded-full transition-all"
+            style={{ width: `${Math.min(progreso, 100)}%` }}
+          />
+        </div>
+        <div className="flex justify-between text-xs">
+          <span className="text-gray-400">Abonado: {formatCOP(prestamo.total_abonado)}</span>
+          <span className="text-red-500 font-medium">Saldo: {formatCOP(saldo)}</span>
+        </div>
+      </div>
+
+      <div className="flex gap-2">
+        <Button size="sm" className="flex-1" onClick={() => onAbonar(prestamo)}>
+          <Plus size={14} /> Abonar
+        </Button>
+        <Button size="sm" variant="secondary" onClick={() => onDevolver(prestamo.id)}>
+          <CheckCircle size={14} /> Devuelto
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// ── Grupo colapsable por prestatario/cliente ──────────────────────────────
+function GrupoPrestatario({ nombre, prestamos, saldoTotal, onAbonar, onDevolver, CardItem }) {
   const [abierto, setAbierto] = useState(true);
-  const activos   = prestamos.filter((p) => p.estado === 'Activo');
-  const cerrados  = prestamos.filter((p) => p.estado !== 'Activo');
+  const activos  = prestamos.filter((p) => p.estado === 'Activo');
+  const cerrados = prestamos.filter((p) => p.estado !== 'Activo');
+  const Card = CardItem;
 
   return (
     <div className="border border-gray-100 rounded-2xl overflow-hidden">
@@ -214,13 +277,13 @@ function GrupoPrestatario({ nombre, prestamos, saldoTotal, onAbonar, onDevolver 
             <p className="text-xs text-gray-400 px-1 py-2">Sin préstamos activos</p>
           ) : (
             activos.map((p) => (
-              <CardPrestamo
-                key={p.id}
-                prestamo={p}
-                onAbonar={onAbonar}
-                onDevolver={onDevolver}
-              />
-            ))
+  <Card
+    key={p.id}
+    prestamo={p}
+    onAbonar={onAbonar}
+    onDevolver={onDevolver}
+  />
+))
           )}
 
           {cerrados.length > 0 && (
@@ -249,38 +312,10 @@ function GrupoPrestatario({ nombre, prestamos, saldoTotal, onAbonar, onDevolver 
   );
 }
 
-// ── Sección con título e ícono ────────────────────────────────────────────
-function SeccionPrestamos({ titulo, icono, grupos, emptyText, onAbonar, onDevolver }) {
-  const SeccionIcon = icono;
-  return (
-    <div className="flex flex-col gap-3">
-      <div className="flex items-center gap-2 px-1">
-        <SeccionIcon size={14} className="text-gray-400 flex-shrink-0" />
-        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-          {titulo}
-        </p>
-      </div>
-      {Object.keys(grupos).length === 0 ? (
-        <p className="text-xs text-gray-400 px-1">{emptyText}</p>
-      ) : (
-        Object.entries(grupos).map(([key, grupo]) => (
-          <GrupoPrestatario
-            key={key}
-            nombre={grupo.nombre}
-            prestamos={grupo.prestamos}
-            saldoTotal={grupo.saldoTotal}
-            onAbonar={onAbonar}
-            onDevolver={onDevolver}
-          />
-        ))
-      )}
-    </div>
-  );
-}
-
 // ── Página principal ──────────────────────────────────────────────────────
 export default function PrestamosPage() {
-  const [tabActiva,     setTabActiva]     = useState('prestamos');
+  const [tabPrincipal,  setTabPrincipal]  = useState('prestamos');
+  const [tabPrestamos,  setTabPrestamos]  = useState('companeros');
   const [prestamoAbono, setPrestamoAbono] = useState(null);
   const [creditoAbono,  setCreditoAbono]  = useState(null);
   const queryClient = useQueryClient();
@@ -303,18 +338,14 @@ export default function PrestamosPage() {
   const prestamos = prestamosData || [];
   const creditos  = creditosData  || [];
 
-  // Agrupar compañeros por prestatario_id
   const gruposCompaneros = prestamos
     .filter((p) => p.prestatario_id)
     .reduce((acc, p) => {
       const key = `prestatario_${p.prestatario_id}`;
-      if (!acc[key]) {
-        acc[key] = {
-          nombre: p.prestatario_nombre || p.prestatario,
-          prestamos: [],
-          saldoTotal: 0,
-        };
-      }
+      if (!acc[key]) acc[key] = {
+        nombre: p.prestatario_nombre || p.prestatario,
+        prestamos: [], saldoTotal: 0,
+      };
       acc[key].prestamos.push(p);
       if (p.estado === 'Activo') {
         acc[key].saldoTotal += Number(p.valor_prestamo) - Number(p.total_abonado);
@@ -322,18 +353,14 @@ export default function PrestamosPage() {
       return acc;
     }, {});
 
-  // Agrupar clientes por cliente_id
   const gruposClientes = prestamos
     .filter((p) => p.cliente_id)
     .reduce((acc, p) => {
       const key = `cliente_${p.cliente_id}`;
-      if (!acc[key]) {
-        acc[key] = {
-          nombre: p.cliente_nombre || p.prestatario,
-          prestamos: [],
-          saldoTotal: 0,
-        };
-      }
+      if (!acc[key]) acc[key] = {
+        nombre: p.cliente_nombre || p.prestatario,
+        prestamos: [], saldoTotal: 0,
+      };
       acc[key].prestamos.push(p);
       if (p.estado === 'Activo') {
         acc[key].saldoTotal += Number(p.valor_prestamo) - Number(p.total_abonado);
@@ -341,23 +368,22 @@ export default function PrestamosPage() {
       return acc;
     }, {});
 
-  const hayPrestamos = prestamos.length > 0;
   const creditosActivos  = creditos.filter((c) => c.estado === 'Activo');
   const creditosSaldados = creditos.filter((c) => c.estado !== 'Activo');
 
   return (
     <div className="flex flex-col gap-4">
 
-      {/* Tabs */}
+      {/* Tabs principales */}
       <div className="flex gap-1 bg-gray-100 p-1 rounded-xl w-fit">
-        {TABS.map((tab) => {
+        {TABS_PRINCIPALES.map((tab) => {
           const TabIcon = tab.icon;
           return (
             <button
               key={tab.id}
-              onClick={() => setTabActiva(tab.id)}
+              onClick={() => setTabPrincipal(tab.id)}
               className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all
-                ${tabActiva === tab.id
+                ${tabPrincipal === tab.id
                   ? 'bg-white text-gray-900 shadow-sm'
                   : 'text-gray-500 hover:text-gray-700'}`}
             >
@@ -369,37 +395,91 @@ export default function PrestamosPage() {
       </div>
 
       {/* PRÉSTAMOS */}
-      {tabActiva === 'prestamos' && (
-        <div className="flex flex-col gap-6">
+      {tabPrincipal === 'prestamos' && (
+        <div className="flex flex-col gap-4">
+
+          {/* Tabs secundarias */}
+          <div className="flex gap-1 bg-gray-100 p-1 rounded-xl w-fit">
+            {TABS_PRESTAMOS.map((tab) => {
+              const TabIcon = tab.icon;
+              const count = tab.id === 'companeros'
+                ? Object.keys(gruposCompaneros).length
+                : Object.keys(gruposClientes).length;
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => setTabPrestamos(tab.id)}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all
+                    ${tabPrestamos === tab.id
+                      ? 'bg-white text-gray-900 shadow-sm'
+                      : 'text-gray-500 hover:text-gray-700'}`}
+                >
+                  <TabIcon size={15} />
+                  {tab.label}
+                  {count > 0 && (
+                    <span className={`text-xs px-1.5 py-0.5 rounded-full font-semibold
+                      ${tabPrestamos === tab.id
+                        ? 'bg-blue-100 text-blue-600'
+                        : 'bg-gray-200 text-gray-500'}`}
+                    >
+                      {count}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+
           {loadingP ? (
             <Spinner className="py-20" />
-          ) : !hayPrestamos ? (
-            <EmptyState icon={Handshake} titulo="Sin préstamos registrados" />
           ) : (
             <>
-              <SeccionPrestamos
-                titulo="Compañeros"
-                icono={User}
-                grupos={gruposCompaneros}
-                emptyText="Sin préstamos a compañeros"
-                onAbonar={setPrestamoAbono}
-                onDevolver={(id) => mutDevolver.mutate(id)}
-              />
-              <SeccionPrestamos
-                titulo="Clientes"
-                icono={Users}
-                grupos={gruposClientes}
-                emptyText="Sin préstamos a clientes"
-                onAbonar={setPrestamoAbono}
-                onDevolver={(id) => mutDevolver.mutate(id)}
-              />
+              {tabPrestamos === 'companeros' && (
+                <div className="flex flex-col gap-3">
+                  {Object.keys(gruposCompaneros).length === 0 ? (
+                    <EmptyState icon={User} titulo="Sin préstamos a compañeros" />
+                  ) : (
+                    Object.entries(gruposCompaneros).map(([key, grupo]) => (
+                      <GrupoPrestatario
+                        key={key}
+                        nombre={grupo.nombre}
+                        prestamos={grupo.prestamos}
+                        saldoTotal={grupo.saldoTotal}
+                        onAbonar={setPrestamoAbono}
+                        onDevolver={(id) => mutDevolver.mutate(id)}
+                        CardItem={CardPrestamoCompanero}
+                      />
+                    ))
+                  )}
+                </div>
+              )}
+
+              {tabPrestamos === 'clientes' && (
+                <div className="flex flex-col gap-3">
+                  {Object.keys(gruposClientes).length === 0 ? (
+                    <EmptyState icon={Users} titulo="Sin préstamos a clientes" />
+                  ) : (
+                    Object.entries(gruposClientes).map(([key, grupo]) => (
+                      <GrupoPrestatario
+                        key={key}
+                        nombre={grupo.nombre}
+                        prestamos={grupo.prestamos}
+                        saldoTotal={grupo.saldoTotal}
+                        onAbonar={setPrestamoAbono}
+                        onDevolver={(id) => mutDevolver.mutate(id)}
+                        CardItem={CardPrestamoCliente}
+                      />
+                    ))
+                  )}
+                </div>
+              )}
             </>
           )}
         </div>
       )}
 
       {/* CRÉDITOS */}
-      {tabActiva === 'creditos' && (
+      {tabPrincipal === 'creditos' && (
         <div className="flex flex-col gap-3">
           {loadingC ? (
             <Spinner className="py-20" />
