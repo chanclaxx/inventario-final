@@ -57,7 +57,6 @@ const update = async (id, { nombre, marca, modelo, precio, proveedor_id }) => {
   return rows[0] || null;
 };
 
-// Actualiza solo el precio del producto padre (usado desde ModalEditarSerial)
 const updatePrecio = async (id, precio) => {
   const { rows } = await pool.query(`
     UPDATE productos_serial
@@ -70,17 +69,19 @@ const updatePrecio = async (id, precio) => {
 
 const getSeriales = async (productoId, vendido = null) => {
   let query = `
-    SELECT id, imei, fecha_entrada, vendido, fecha_salida,
-           cliente_origen, prestado, costo_compra
-    FROM seriales
-    WHERE producto_id = $1
+    SELECT s.id, s.imei, s.fecha_entrada, s.vendido, s.fecha_salida,
+           s.cliente_origen, s.prestado, s.costo_compra, s.proveedor_id,
+           p.nombre AS proveedor_nombre
+    FROM seriales s
+    LEFT JOIN proveedores p ON p.id = s.proveedor_id
+    WHERE s.producto_id = $1
   `;
   const params = [productoId];
   if (vendido !== null) {
     params.push(vendido);
-    query += ` AND vendido = $2`;
+    query += ` AND s.vendido = $2`;
   }
-  query += ` ORDER BY vendido ASC, fecha_entrada ASC`;
+  query += ` ORDER BY s.vendido ASC, s.fecha_entrada ASC`;
   const { rows } = await pool.query(query, params);
   return rows;
 };
@@ -93,17 +94,16 @@ const findSerialByIMEI = async (imei) => {
   return rows[0] || null;
 };
 
-const insertarSerial = async ({ producto_id, imei, fecha_entrada, costo_compra, cliente_origen }) => {
+// proveedor_id es opcional — se guarda cuando se conoce el origen del serial
+const insertarSerial = async ({ producto_id, imei, fecha_entrada, costo_compra, cliente_origen, proveedor_id }) => {
   const { rows } = await pool.query(`
-    INSERT INTO seriales(producto_id, imei, fecha_entrada, costo_compra, cliente_origen)
-    VALUES ($1, $2, $3, $4, $5)
+    INSERT INTO seriales(producto_id, imei, fecha_entrada, costo_compra, cliente_origen, proveedor_id)
+    VALUES ($1, $2, $3, $4, $5, $6)
     RETURNING *
-  `, [producto_id, imei, fecha_entrada, costo_compra, cliente_origen]);
+  `, [producto_id, imei, fecha_entrada, costo_compra, cliente_origen || null, proveedor_id || null]);
   return rows[0];
 };
 
-// Actualiza imei y costo_compra del serial. El precio vive en productos_serial,
-// se actualiza por separado con updatePrecio.
 const actualizarSerial = async (id, { imei, costo_compra }) => {
   const { rows } = await pool.query(`
     UPDATE seriales

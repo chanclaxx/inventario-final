@@ -14,26 +14,24 @@ const findAll = async (sucursalId) => {
       (SELECT ret.nombre_producto    FROM retomas ret WHERE ret.factura_id = f.id LIMIT 1) AS retoma_nombre_producto,
       (SELECT ret.ingreso_inventario FROM retomas ret WHERE ret.factura_id = f.id LIMIT 1) AS retoma_ingreso_inventario,
       (SELECT ret.valor_retoma       FROM retomas ret WHERE ret.factura_id = f.id LIMIT 1) AS retoma_valor,
-      -- Proveedor: se obtiene del primer producto serializado de la factura
-      -- (via imei -> seriales -> productos_serial -> proveedores)
-      -- Si no hay serial, se busca por nombre en productos_cantidad
+      -- Proveedor: para seriales se lee directo de seriales.proveedor_id (cada serial sabe su origen)
+      -- Para productos por cantidad se lee de productos_cantidad.proveedor_id
       (
         SELECT COALESCE(
           (
             SELECT p.nombre
             FROM lineas_factura lf2
             JOIN seriales       se ON se.imei = lf2.imei
-            JOIN productos_serial ps ON ps.id = se.producto_id
-            JOIN proveedores     p  ON p.id = ps.proveedor_id
-            WHERE lf2.factura_id = f.id AND lf2.imei IS NOT NULL AND ps.proveedor_id IS NOT NULL
+            JOIN proveedores    p  ON p.id = se.proveedor_id
+            WHERE lf2.factura_id = f.id AND lf2.imei IS NOT NULL AND se.proveedor_id IS NOT NULL
             LIMIT 1
           ),
           (
             SELECT p.nombre
-            FROM lineas_factura  lf3
+            FROM lineas_factura    lf3
             JOIN productos_cantidad pc ON pc.nombre ILIKE lf3.nombre_producto
                                       AND pc.sucursal_id = f.sucursal_id
-            JOIN proveedores     p  ON p.id = pc.proveedor_id
+            JOIN proveedores        p  ON p.id = pc.proveedor_id
             WHERE lf3.factura_id = f.id AND lf3.imei IS NULL AND pc.proveedor_id IS NOT NULL
             LIMIT 1
           )
@@ -54,15 +52,15 @@ const findById = async (id) => {
     SELECT
       f.*,
       u.nombre AS usuario_nombre,
-      -- Proveedor del primer producto serializado de la factura
+      -- Proveedor: para seriales se lee directo de seriales.proveedor_id
+      -- Para productos por cantidad se lee de productos_cantidad.proveedor_id
       COALESCE(
         (
           SELECT p.nombre
           FROM lineas_factura lf
           JOIN seriales        se ON se.imei = lf.imei
-          JOIN productos_serial ps ON ps.id = se.producto_id
-          JOIN proveedores      p  ON p.id = ps.proveedor_id
-          WHERE lf.factura_id = f.id AND lf.imei IS NOT NULL AND ps.proveedor_id IS NOT NULL
+          JOIN proveedores     p  ON p.id = se.proveedor_id
+          WHERE lf.factura_id = f.id AND lf.imei IS NOT NULL AND se.proveedor_id IS NOT NULL
           LIMIT 1
         ),
         (

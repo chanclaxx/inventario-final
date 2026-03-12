@@ -23,7 +23,8 @@ const getSeriales = async (productoId, vendido) => {
   return repo.getSeriales(productoId, vendido);
 };
 
-const agregarSerial = async (negocioId, productoId, { imei, fecha_entrada, costo_compra, cliente_origen }) => {
+// proveedor_id es opcional — se guarda cuando se conoce el origen del serial
+const agregarSerial = async (negocioId, productoId, { imei, fecha_entrada, costo_compra, cliente_origen, proveedor_id }) => {
   const valido = await repo.perteneceAlNegocio(productoId, negocioId);
   if (!valido) throw { status: 404, message: 'Producto no encontrado' };
 
@@ -33,9 +34,10 @@ const agregarSerial = async (negocioId, productoId, { imei, fecha_entrada, costo
   return repo.insertarSerial({
     producto_id:    productoId,
     imei,
-    fecha_entrada:  fecha_entrada || new Date().toISOString().split('T')[0],
-    costo_compra:   costo_compra  ?? null,
+    fecha_entrada:  fecha_entrada  || new Date().toISOString().split('T')[0],
+    costo_compra:   costo_compra   ?? null,
     cliente_origen: cliente_origen || null,
+    proveedor_id:   proveedor_id   || null,
   });
 };
 

@@ -42,7 +42,6 @@ const registrarCompra = async ({
       });
 
       if (linea.imei) {
-        // Verificar que el IMEI no exista ya
         const { rows: existente } = await client.query(
           'SELECT id FROM seriales WHERE imei = $1',
           [linea.imei]
@@ -51,28 +50,23 @@ const registrarCompra = async ({
           throw { status: 409, message: `El IMEI ${linea.imei} ya existe en el inventario` };
         }
 
-        // Insertar serial
+        // Insertar serial con proveedor_id propio — cada serial sabe de dónde vino
         await client.query(
-          `INSERT INTO seriales(producto_id, imei, fecha_entrada, costo_compra)
-           VALUES ($1, $2, $3, $4)`,
-          [linea.producto_id, linea.imei, new Date().toISOString().split('T')[0], linea.precio_unitario]
+          `INSERT INTO seriales(producto_id, imei, fecha_entrada, costo_compra, proveedor_id)
+           VALUES ($1, $2, $3, $4, $5)`,
+          [
+            linea.producto_id,
+            linea.imei,
+            new Date().toISOString().split('T')[0],
+            linea.precio_unitario,
+            proveedor_id || null,
+          ]
         );
 
-        // Actualizar proveedor_id en productos_serial si aún no tiene uno asignado
-        if (proveedor_id && linea.producto_id) {
-          await client.query(
-            `UPDATE productos_serial
-             SET proveedor_id = $1
-             WHERE id = $2 AND proveedor_id IS NULL`,
-            [proveedor_id, linea.producto_id]
-          );
-        }
-
       } else if (linea.producto_id) {
-        // Ajustar stock en productos_cantidad
         await cantidadRepo.ajustarStock(linea.producto_id, linea.cantidad);
 
-        // Actualizar proveedor_id en productos_cantidad si aún no tiene uno asignado
+        // Para productos por cantidad el proveedor vive en productos_cantidad
         if (proveedor_id) {
           await client.query(
             `UPDATE productos_cantidad
@@ -97,7 +91,6 @@ const registrarCompra = async ({
         );
         const prov = provRows[0];
 
-        // 1. Buscar acreedor vinculado por proveedor_id
         let { rows: acrRows } = await client.query(
           `SELECT id FROM acreedores
            WHERE negocio_id = $1 AND proveedor_id = $2
@@ -105,7 +98,6 @@ const registrarCompra = async ({
           [negocio_id, proveedor_id]
         );
 
-        // 2. Fallback por nit si el proveedor tiene nit
         if (acrRows.length === 0 && prov?.nit) {
           const { rows: acrPorCedula } = await client.query(
             `SELECT id FROM acreedores
@@ -126,7 +118,6 @@ const registrarCompra = async ({
         if (acrRows.length > 0) {
           acreedorId = acrRows[0].id;
         } else {
-          // 3. Crear nuevo acreedor vinculado al proveedor
           const cedulaFinal = prov?.nit || `prov-${proveedor_id}`;
           const { rows: nuevoRows } = await client.query(
             `INSERT INTO acreedores(negocio_id, nombre, cedula, telefono, proveedor_id)
