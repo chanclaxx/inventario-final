@@ -195,41 +195,44 @@ const editarFactura = async (negocioId, id, {
   });
 
   if (retoma.ingreso_inventario) {
+  console.log('🔍 RETOMA ingreso_inventario=true, tipo:', retoma.tipo_retoma);
+  console.log('🔍 RETOMA data:', JSON.stringify(retoma));
 
-    // ── Retoma SERIAL ──────────────────────────────────────────────
-    if (retoma.tipo_retoma === 'serial' && retoma.imei) {
-      // producto_serial_id es requerido para insertar en seriales (NOT NULL en BD)
-      if (retoma.producto_serial_id) {
-        const existeSerial = await serialRepo.findSerialByIMEI(retoma.imei);
-        if (existeSerial) {
-          await client.query(
-            `UPDATE seriales
-             SET vendido = false, fecha_salida = NULL, cliente_origen = $1
-             WHERE imei = $2`,
-            [nombre_cliente, retoma.imei]
-          );
-        } else {
-          await serialRepo.insertarSerial({
-            producto_id:    retoma.producto_serial_id,
-            imei:           retoma.imei,
-            fecha_entrada:  new Date().toISOString().split('T')[0],
-            costo_compra:   retoma.valor_retoma,
-            cliente_origen: nombre_cliente,
-          });
-        }
+  if (retoma.tipo_retoma === 'serial' && retoma.imei) {
+    console.log('🔍 Buscando serial por IMEI:', retoma.imei);
+    const existeSerial = await serialRepo.findSerialByIMEI(retoma.imei);
+    console.log('🔍 Serial encontrado:', existeSerial);
+
+    if (retoma.producto_serial_id) {
+      if (existeSerial) {
+        console.log('🔍 UPDATE serial existente');
+        await client.query(
+          `UPDATE seriales SET vendido = false, fecha_salida = NULL, cliente_origen = $1 WHERE imei = $2`,
+          [nombre_cliente, retoma.imei]
+        );
+      } else {
+        console.log('🔍 INSERT nuevo serial, producto_id:', retoma.producto_serial_id);
+        await serialRepo.insertarSerial({
+          producto_id:    retoma.producto_serial_id,
+          imei:           retoma.imei,
+          fecha_entrada:  new Date().toISOString().split('T')[0],
+          costo_compra:   retoma.valor_retoma,
+          cliente_origen: nombre_cliente,
+        });
       }
-      // Si no se seleccionó línea, la retoma se guarda pero no entra al inventario
-      // porque seriales.producto_id es NOT NULL
-    }
-
-    // ── Retoma CANTIDAD ────────────────────────────────────────────
-    if (retoma.tipo_retoma === 'cantidad' && retoma.producto_cantidad_id) {
-      await cantidadRepo.ajustarStock(
-        retoma.producto_cantidad_id,
-        Number(retoma.cantidad_retoma || 1)
-      );
+    } else {
+      console.log('⚠️ Sin producto_serial_id, no se puede insertar en seriales');
     }
   }
+
+  if (retoma.tipo_retoma === 'cantidad' && retoma.producto_cantidad_id) {
+    console.log('🔍 Ajustando stock cantidad, id:', retoma.producto_cantidad_id, 'cantidad:', retoma.cantidad_retoma);
+    await cantidadRepo.ajustarStock(
+      retoma.producto_cantidad_id,
+      Number(retoma.cantidad_retoma || 1)
+    );
+  }
+}
 }
 
     await client.query('COMMIT');
