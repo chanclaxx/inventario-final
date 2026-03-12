@@ -4,6 +4,7 @@ import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { Badge } from '../../components/ui/Badge';
+import { InputMoneda } from '../../components/ui/InputMoneda';
 import { formatCOP } from '../../utils/formatters';
 import { crearFactura, getFacturaById } from '../../api/facturas.api';
 import { buscarPorCedula } from '../../api/clientes.api';
@@ -47,7 +48,6 @@ function RetomaSerial({ retoma, setRetomaField, productosSerial }) {
 
   return (
     <div className="flex flex-col gap-3">
-      {/* IMEI */}
       <Input
         label="IMEI del equipo retomado"
         placeholder="Ej: 356789012345678"
@@ -55,7 +55,6 @@ function RetomaSerial({ retoma, setRetomaField, productosSerial }) {
         onChange={(e) => setRetomaField('imei', e.target.value)}
       />
 
-      {/* Buscar producto existente */}
       <div>
         <p className="text-xs font-medium text-gray-600 mb-1">
           Línea de producto{' '}
@@ -122,7 +121,6 @@ function RetomaCantidad({ retoma, setRetomaField, productosCantidad }) {
 
   return (
     <div className="flex flex-col gap-3">
-      {/* Buscar producto */}
       <div>
         <p className="text-xs font-medium text-gray-600 mb-1">Producto en inventario</p>
         <input
@@ -169,7 +167,6 @@ function RetomaCantidad({ retoma, setRetomaField, productosCantidad }) {
         )}
       </div>
 
-      {/* Cantidad */}
       <Input
         label="Cantidad retomada"
         type="number"
@@ -192,7 +189,7 @@ export function ModalFactura({ open, onClose }) {
   const [mostrarImpresion, setMostrarImpresion] = useState(false);
   const [tipoCliente,      setTipoCliente]      = useState('cliente');
   const [form,             setForm]             = useState({ nombre: '', cedula: '', celular: '', notas: '' });
-  const [pagos,            setPagos]            = useState({ Efectivo: 0 });
+  const [pagos,            setPagos]            = useState({ Efectivo: '' });
   const [conRetoma,        setConRetoma]        = useState(false);
   const [retoma,           setRetoma]           = useState(RETOMA_INICIAL);
   const [error,            setError]            = useState('');
@@ -243,7 +240,7 @@ export function ModalFactura({ open, onClose }) {
 
   const resetForm = () => {
     setForm({ nombre: '', cedula: '', celular: '', notas: '' });
-    setPagos({ Efectivo: 0 });
+    setPagos({ Efectivo: '' });
     setConRetoma(false);
     setRetoma(RETOMA_INICIAL);
     setError('');
@@ -316,11 +313,11 @@ export function ModalFactura({ open, onClose }) {
       descripcion:          retoma.descripcion,
       valor_retoma:         Number(retoma.valor_retoma || 0),
       ingreso_inventario:   retoma.ingreso_inventario,
-      imei:                 retoma.tipo_retoma === 'serial'   ? retoma.imei              : null,
-      nombre_producto:      retoma.tipo_retoma === 'serial'   ? (retoma.nombre_producto  || retoma.descripcion) : retoma.nombre_producto,
-      producto_serial_id:   retoma.tipo_retoma === 'serial'   ? retoma.producto_serial_id   : null,
-      producto_cantidad_id: retoma.tipo_retoma === 'cantidad' ? retoma.producto_cantidad_id : null,
-      cantidad_retoma:      retoma.tipo_retoma === 'cantidad' ? Number(retoma.cantidad_retoma || 1) : 1,
+      imei:                 retoma.tipo_retoma === 'serial'   ? retoma.imei                                    : null,
+      nombre_producto:      retoma.tipo_retoma === 'serial'   ? (retoma.nombre_producto || retoma.descripcion) : retoma.nombre_producto,
+      producto_serial_id:   retoma.tipo_retoma === 'serial'   ? retoma.producto_serial_id                      : null,
+      producto_cantidad_id: retoma.tipo_retoma === 'cantidad' ? retoma.producto_cantidad_id                    : null,
+      cantidad_retoma:      retoma.tipo_retoma === 'cantidad' ? Number(retoma.cantidad_retoma || 1)             : 1,
     } : null;
 
     mutation.mutate({
@@ -345,21 +342,21 @@ export function ModalFactura({ open, onClose }) {
               { id: 'companero', label: 'Compañero', Icn: User  },
               { id: 'cliente',   label: 'Cliente',   Icn: Users },
             ].map((item) => {
-  const ItemIcon = item.Icn;
-  return (
-    <button
-      key={item.id}
-      onClick={() => setTipoCliente(item.id)}
-      className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl
-        text-sm font-medium border transition-all
-        ${tipoCliente === item.id
-          ? 'bg-blue-50 border-blue-300 text-blue-700'
-          : 'bg-gray-50 border-gray-200 text-gray-600'}`}
-    >
-      <ItemIcon size={16} /> {item.label}
-    </button>
-  );
-})}
+              const ItemIcon = item.Icn;
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => setTipoCliente(item.id)}
+                  className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl
+                    text-sm font-medium border transition-all
+                    ${tipoCliente === item.id
+                      ? 'bg-blue-50 border-blue-300 text-blue-700'
+                      : 'bg-gray-50 border-gray-200 text-gray-600'}`}
+                >
+                  <ItemIcon size={16} /> {item.label}
+                </button>
+              );
+            })}
           </div>
 
           {/* ── Datos del cliente ── */}
@@ -411,10 +408,10 @@ export function ModalFactura({ open, onClose }) {
                 {item.imei && (
                   <span className="text-xs text-gray-400 font-mono">{item.imei}</span>
                 )}
-                <input
-                  type="number"
+                {/* ── CAMBIO: precio editable con formato de miles ── */}
+                <InputMoneda
                   value={item.precioFinal}
-                  onChange={(e) => actualizarPrecio(item.key, e.target.value)}
+                  onChange={(val) => actualizarPrecio(item.key, val)}
                   className="w-28 text-right text-sm font-semibold text-gray-900 bg-white
                     border border-gray-200 rounded-lg px-2 py-1 focus:outline-none
                     focus:ring-2 focus:ring-blue-500"
@@ -447,24 +444,24 @@ export function ModalFactura({ open, onClose }) {
                   <p className="text-xs font-medium text-gray-600 mb-1.5">Tipo de producto retomado</p>
                   <div className="flex gap-2">
                     {[
-                      { id: 'serial',   label: 'Con serial / IMEI', Icn: Package      },
-                      { id: 'cantidad', label: 'Por cantidad',       Icn: ShoppingBag  },
+                      { id: 'serial',   label: 'Con serial / IMEI', Icn: Package     },
+                      { id: 'cantidad', label: 'Por cantidad',       Icn: ShoppingBag },
                     ].map((opt) => {
-  const OptIcon = opt.Icn;
-  return (
-    <button
-      key={opt.id}
-      onClick={() => setRetoma({ ...RETOMA_INICIAL, tipo_retoma: opt.id })}
-      className={`flex-1 flex items-center justify-center gap-1.5 py-2
-        rounded-xl text-xs font-medium border transition-all
-        ${retoma.tipo_retoma === opt.id
-          ? 'bg-purple-100 border-purple-400 text-purple-800'
-          : 'bg-white border-gray-200 text-gray-500'}`}
-    >
-      <OptIcon size={13} /> {opt.label}
-    </button>
-  );
-})}
+                      const OptIcon = opt.Icn;
+                      return (
+                        <button
+                          key={opt.id}
+                          onClick={() => setRetoma({ ...RETOMA_INICIAL, tipo_retoma: opt.id })}
+                          className={`flex-1 flex items-center justify-center gap-1.5 py-2
+                            rounded-xl text-xs font-medium border transition-all
+                            ${retoma.tipo_retoma === opt.id
+                              ? 'bg-purple-100 border-purple-400 text-purple-800'
+                              : 'bg-white border-gray-200 text-gray-500'}`}
+                        >
+                          <OptIcon size={13} /> {opt.label}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
 
@@ -491,13 +488,18 @@ export function ModalFactura({ open, onClose }) {
                   value={retoma.descripcion}
                   onChange={(e) => setRetomaField('descripcion', e.target.value)}
                 />
-                <Input
-                  label="Valor retoma"
-                  type="number"
-                  placeholder="0"
-                  value={retoma.valor_retoma}
-                  onChange={(e) => setRetomaField('valor_retoma', e.target.value)}
-                />
+
+                {/* ── CAMBIO: valor retoma con formato de miles ── */}
+                <div className="flex flex-col gap-1">
+                  <label className="text-xs font-medium text-gray-600">Valor retoma</label>
+                  <InputMoneda
+                    value={retoma.valor_retoma}
+                    onChange={(val) => setRetomaField('valor_retoma', val)}
+                    placeholder="0"
+                    className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-sm
+                      focus:outline-none focus:ring-2 focus:ring-purple-400"
+                  />
+                </div>
 
                 {/* Checkbox ingreso inventario */}
                 <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
@@ -517,24 +519,24 @@ export function ModalFactura({ open, onClose }) {
           <div>
             <p className="text-sm font-medium text-gray-700 mb-2">Método de pago</p>
             <div className="flex flex-col gap-2">
-              {METODOS_PAGO.map(({ id, label }, index) => (
-                <div key={id} className="flex items-center gap-3">
-                  <span className="text-sm text-gray-600 w-28">{label}</span>
-                  <input
-                    id={id.toLowerCase()}
-                    type="number"
-                    placeholder="0"
-                    value={pagos[id] || ''}
-                    onChange={(e) => handlePago(id, e.target.value)}
-                    onKeyDown={(e) => {
-                      const siguiente = METODOS_PAGO[index + 1];
-                      handleKeyDown(e, siguiente ? siguiente.id.toLowerCase() : null);
-                    }}
-                    className="flex-1 px-3 py-2 bg-gray-100 rounded-xl text-sm
-                      focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"
-                  />
-                </div>
-              ))}
+              {METODOS_PAGO.map(({ id, label }, index) => {
+                const siguiente = METODOS_PAGO[index + 1];
+                return (
+                  <div key={id} className="flex items-center gap-3">
+                    <span className="text-sm text-gray-600 w-28">{label}</span>
+                    {/* ── CAMBIO: pago con formato de miles ── */}
+                    <InputMoneda
+                      id={id.toLowerCase()}
+                      value={pagos[id] || ''}
+                      onChange={(val) => handlePago(id, val)}
+                      onKeyDown={(e) => handleKeyDown(e, siguiente ? siguiente.id.toLowerCase() : null)}
+                      placeholder="0"
+                      className="flex-1 px-3 py-2 bg-gray-100 rounded-xl text-sm
+                        focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"
+                    />
+                  </div>
+                );
+              })}
             </div>
           </div>
 
