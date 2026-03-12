@@ -53,6 +53,7 @@ app.use('/api/prestamos',          protegida, require('./modules/prestamos/prest
 app.use('/api/creditos',           protegida, require('./modules/creditos/creditos.routes'));
 app.use('/api/caja',               protegida, require('./modules/caja/caja.routes'));
 app.use('/api/proveedores',        protegida, require('./modules/proveedores/proveedores.routes'));
+app.use('/api/prestatarios', protegida, require('./modules/prestatarios/prestatarios.routes'));
 app.use('/api/compras',            protegida, require('./modules/compras/compras.routes'));
 app.use('/api/acreedores',         protegida, require('./modules/acreedores/acreedores.routes'));
 app.use('/api/reportes',           protegida, require('./modules/reportes/reportes.routes'));
