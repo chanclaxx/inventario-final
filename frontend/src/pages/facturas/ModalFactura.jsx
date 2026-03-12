@@ -218,25 +218,32 @@ export function ModalFactura({ open, onClose }) {
   });
 
   const mutation = useMutation({
-    mutationFn: crearFactura,
-    onSuccess: async (res) => {
-      queryClient.invalidateQueries(['productos-serial']);
-      queryClient.invalidateQueries(['productos-cantidad']);
-      queryClient.invalidateQueries(['seriales']);
-      try {
-        const { data } = await getFacturaById(res.data.data.id);
-        setFacturaCreada({ ...data.data, config: configData });
-        setMostrarImpresion(true);
-      } catch {
-        limpiarCarrito();
-        onClose();
-        resetForm();
-      }
-    },
-    onError: (err) => {
-      setError(err.response?.data?.error || 'Error al crear la factura');
-    },
-  });
+  mutationFn: crearFactura,
+  onSuccess: async (res) => {
+    // Inventario
+    queryClient.invalidateQueries(['productos-serial']);
+    queryClient.invalidateQueries(['productos-cantidad']);
+    queryClient.invalidateQueries(['seriales']);
+ 
+    // ✅ Reportes: forzar recarga de ventas y dashboard
+    queryClient.invalidateQueries({ queryKey: ['ventas-rango'],  exact: false });
+    queryClient.invalidateQueries({ queryKey: ['productos-top'], exact: false });
+    queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+ 
+    try {
+      const { data } = await getFacturaById(res.data.data.id);
+      setFacturaCreada({ ...data.data, config: configData });
+      setMostrarImpresion(true);
+    } catch {
+      limpiarCarrito();
+      onClose();
+      resetForm();
+    }
+  },
+  onError: (err) => {
+    setError(err.response?.data?.error || 'Error al crear la factura');
+  },
+});
 
   const resetForm = () => {
     setForm({ nombre: '', cedula: '', celular: '', notas: '' });
