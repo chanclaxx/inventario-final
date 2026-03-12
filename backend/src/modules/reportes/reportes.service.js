@@ -384,4 +384,79 @@ const getInventarioBajo = async (sucursalId) => {
   return rows;
 };
 
-module.exports = { getDashboard, getVentasRango, getProductosTop, getInventarioBajo };
+// ─────────────────────────────────────────────
+// NUEVO MÉTODO: actualizarCostoCompra
+// Agrega este método al final de reportes.service.js
+// (antes del module.exports)
+// ─────────────────────────────────────────────
+
+/**
+ * Actualiza el costo de compra de un serial o producto por cantidad.
+ * Afecta tanto la tabla de inventario (seriales / productos_cantidad)
+ * como recalcula el reporte de utilidades en la siguiente consulta.
+ *
+ * @param {number} sucursalId  - ID de la sucursal del usuario autenticado
+ * @param {'serial'|'cantidad'} tipo - Tipo de producto
+ * @param {string|null} imei   - IMEI del serial (requerido si tipo === 'serial')
+ * @param {string} nombreProducto - Nombre del producto (requerido si tipo === 'cantidad')
+ * @param {number} nuevoCosto  - Nuevo valor del costo de compra
+ */
+const actualizarCostoCompra = async (sucursalId, tipo, imei, nombreProducto, nuevoCosto) => {
+  if (tipo === 'serial') {
+    // Validar que el serial pertenece a un producto de esta sucursal
+    const { rows: check } = await pool.query(`
+      SELECT s.id
+      FROM seriales s
+      JOIN productos_serial ps ON ps.id = s.producto_id
+      WHERE s.imei = $1
+        AND ps.sucursal_id = $2
+      LIMIT 1
+    `, [imei, sucursalId]);
+
+    if (!check.length) {
+      throw Object.assign(new Error('Serial no encontrado en esta sucursal'), { status: 404 });
+    }
+
+    await pool.query(`
+      UPDATE seriales
+      SET costo_compra = $1
+      WHERE imei = $2
+    `, [nuevoCosto, imei]);
+
+    return { tipo: 'serial', imei, nuevo_costo: nuevoCosto };
+  }
+
+  if (tipo === 'cantidad') {
+    // Validar que el producto pertenece a esta sucursal
+    const { rows: check } = await pool.query(`
+      SELECT id
+      FROM productos_cantidad
+      WHERE nombre = $1
+        AND sucursal_id = $2
+        AND activo = true
+      LIMIT 1
+    `, [nombreProducto, sucursalId]);
+
+    if (!check.length) {
+      throw Object.assign(new Error('Producto no encontrado en esta sucursal'), { status: 404 });
+    }
+
+    await pool.query(`
+      UPDATE productos_cantidad
+      SET costo_unitario = $1
+      WHERE nombre = $2
+        AND sucursal_id = $3
+    `, [nuevoCosto, nombreProducto, sucursalId]);
+
+    return { tipo: 'cantidad', nombre_producto: nombreProducto, nuevo_costo: nuevoCosto };
+  }
+
+  throw Object.assign(new Error('Tipo de producto inválido. Use "serial" o "cantidad"'), { status: 400 });
+};
+
+// ─────────────────────────────────────────────
+// ACTUALIZAR module.exports (reemplazar la línea existente):
+// module.exports = { getDashboard, getVentasRango, getProductosTop, getInventarioBajo, actualizarCostoCompra };
+// ─────────────────────────────────────────────
+
+module.exports = { getDashboard, getVentasRango, getProductosTop, getInventarioBajo, actualizarCostoCompra };
