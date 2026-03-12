@@ -64,7 +64,9 @@ function coincideTexto(factura, texto) {
 
 function coincideProveedor(factura, proveedor) {
   if (!proveedor) return true;
-  return factura.proveedor_nombre === proveedor;
+  if (!factura.proveedor_nombre) return false;
+  // proveedor_nombre puede ser "A, B" si hay varios — verificar si contiene el filtrado
+  return factura.proveedor_nombre.split(', ').includes(proveedor);
 }
 
 // ─── Sección retoma en modal detalle ─────────────────────────────────────────
@@ -211,6 +213,11 @@ function ModalDetalle({ facturaId, onClose, onReimprimir, onEditar }) {
               <div className="flex-1">
                 <p className="font-medium text-gray-800">{l.nombre_producto}</p>
                 {l.imei && <p className="text-xs text-gray-400 font-mono">{l.imei}</p>}
+                {esAdminNegocio() && l.proveedor_nombre && (
+                  <p className="text-xs text-amber-600 font-medium mt-0.5">
+                    {l.proveedor_nombre}
+                  </p>
+                )}
               </div>
               <div className="text-right flex-shrink-0">
                 <p className="text-xs text-gray-400">{l.cantidad} x {formatCOP(l.precio)}</p>
@@ -492,7 +499,7 @@ export default function FacturarPage() {
   const proveedores = useMemo(() => {
     if (!esAdmin) return [];
     const nombres = facturas
-      .map((f) => f.proveedor_nombre)
+      .flatMap((f) => f.proveedor_nombre ? f.proveedor_nombre.split(', ') : [])
       .filter(Boolean);
     return [...new Set(nombres)].sort();
   }, [facturas, esAdmin]);

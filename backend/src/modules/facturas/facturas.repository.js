@@ -14,28 +14,27 @@ const findAll = async (sucursalId) => {
       (SELECT ret.nombre_producto    FROM retomas ret WHERE ret.factura_id = f.id LIMIT 1) AS retoma_nombre_producto,
       (SELECT ret.ingreso_inventario FROM retomas ret WHERE ret.factura_id = f.id LIMIT 1) AS retoma_ingreso_inventario,
       (SELECT ret.valor_retoma       FROM retomas ret WHERE ret.factura_id = f.id LIMIT 1) AS retoma_valor,
-      -- Proveedor: para seriales se lee directo de seriales.proveedor_id (cada serial sabe su origen)
-      -- Para productos por cantidad se lee de productos_cantidad.proveedor_id
+      -- Todos los proveedores distintos de la factura como string separado por comas
       (
-        SELECT COALESCE(
-          (
-            SELECT p.nombre
-            FROM lineas_factura lf2
-            JOIN seriales       se ON se.imei = lf2.imei
-            JOIN proveedores    p  ON p.id = se.proveedor_id
-            WHERE lf2.factura_id = f.id AND lf2.imei IS NOT NULL AND se.proveedor_id IS NOT NULL
-            LIMIT 1
-          ),
-          (
-            SELECT p.nombre
-            FROM lineas_factura    lf3
-            JOIN productos_cantidad pc ON pc.nombre ILIKE lf3.nombre_producto
-                                      AND pc.sucursal_id = f.sucursal_id
-            JOIN proveedores        p  ON p.id = pc.proveedor_id
-            WHERE lf3.factura_id = f.id AND lf3.imei IS NULL AND pc.proveedor_id IS NOT NULL
-            LIMIT 1
-          )
-        )
+        SELECT NULLIF(STRING_AGG(DISTINCT prov_nombre ORDER BY prov_nombre, ', '), '')
+        FROM (
+          SELECT p.nombre AS prov_nombre
+          FROM lineas_factura lf2
+          JOIN seriales    se ON se.imei = lf2.imei
+          JOIN proveedores p  ON p.id = se.proveedor_id
+          WHERE lf2.factura_id = f.id
+            AND lf2.imei IS NOT NULL
+            AND se.proveedor_id IS NOT NULL
+          UNION
+          SELECT p.nombre AS prov_nombre
+          FROM lineas_factura    lf3
+          JOIN productos_cantidad pc ON pc.nombre ILIKE lf3.nombre_producto
+                                    AND pc.sucursal_id = f.sucursal_id
+          JOIN proveedores        p  ON p.id = pc.proveedor_id
+          WHERE lf3.factura_id = f.id
+            AND lf3.imei IS NULL
+            AND pc.proveedor_id IS NOT NULL
+        ) provs
       ) AS proveedor_nombre
     FROM facturas f
     LEFT JOIN lineas_factura l ON l.factura_id = f.id
@@ -52,26 +51,27 @@ const findById = async (id) => {
     SELECT
       f.*,
       u.nombre AS usuario_nombre,
-      -- Proveedor: para seriales se lee directo de seriales.proveedor_id
-      -- Para productos por cantidad se lee de productos_cantidad.proveedor_id
-      COALESCE(
-        (
-          SELECT p.nombre
+      -- Todos los proveedores distintos de la factura como string separado por comas
+      (
+        SELECT NULLIF(STRING_AGG(DISTINCT prov_nombre ORDER BY prov_nombre, ', '), '')
+        FROM (
+          SELECT p.nombre AS prov_nombre
           FROM lineas_factura lf
-          JOIN seriales        se ON se.imei = lf.imei
-          JOIN proveedores     p  ON p.id = se.proveedor_id
-          WHERE lf.factura_id = f.id AND lf.imei IS NOT NULL AND se.proveedor_id IS NOT NULL
-          LIMIT 1
-        ),
-        (
-          SELECT p.nombre
+          JOIN seriales    se ON se.imei = lf.imei
+          JOIN proveedores p  ON p.id = se.proveedor_id
+          WHERE lf.factura_id = f.id
+            AND lf.imei IS NOT NULL
+            AND se.proveedor_id IS NOT NULL
+          UNION
+          SELECT p.nombre AS prov_nombre
           FROM lineas_factura    lf2
           JOIN productos_cantidad pc ON pc.nombre ILIKE lf2.nombre_producto
                                     AND pc.sucursal_id = f.sucursal_id
           JOIN proveedores        p  ON p.id = pc.proveedor_id
-          WHERE lf2.factura_id = f.id AND lf2.imei IS NULL AND pc.proveedor_id IS NOT NULL
-          LIMIT 1
-        )
+          WHERE lf2.factura_id = f.id
+            AND lf2.imei IS NULL
+            AND pc.proveedor_id IS NOT NULL
+        ) provs
       ) AS proveedor_nombre
     FROM facturas f
     LEFT JOIN usuarios u ON u.id = f.usuario_id
@@ -90,10 +90,35 @@ const perteneceAlNegocio = async (id, negocioId) => {
 };
 
 const getLineas = async (facturaId) => {
-  const { rows } = await pool.query(
-    'SELECT * FROM lineas_factura WHERE factura_id = $1',
-    [facturaId]
-  );
+  const { rows } = await pool.query(`
+    SELECT
+      lf.*,
+      COALESCE(
+        (
+          SELECT p.nombre
+          FROM seriales    se
+          JOIN proveedores p ON p.id = se.proveedor_id
+          WHERE se.imei = lf.imei
+            AND lf.imei IS NOT NULL
+            AND se.proveedor_id IS NOT NULL
+          LIMIT 1
+        ),
+        (
+          SELECT p.nombre
+          FROM productos_cantidad pc
+          JOIN proveedores        p ON p.id = pc.proveedor_id
+          JOIN facturas           f ON f.id = lf.factura_id
+          WHERE pc.nombre ILIKE lf.nombre_producto
+            AND pc.sucursal_id = f.sucursal_id
+            AND lf.imei IS NULL
+            AND pc.proveedor_id IS NOT NULL
+          LIMIT 1
+        )
+      ) AS proveedor_nombre
+    FROM lineas_factura lf
+    WHERE lf.factura_id = $1
+    ORDER BY lf.id
+  `, [facturaId]);
   return rows;
 };
 
