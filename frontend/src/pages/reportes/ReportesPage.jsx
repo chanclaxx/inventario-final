@@ -11,7 +11,7 @@ import { formatCOP, formatFecha, formatFechaISO } from '../../utils/formatters';
 import { Spinner } from '../../components/ui/Spinner';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { Badge } from '../../components/ui/Badge';
-import { useAuth } from '../../hooks/useAuth';
+import { useAuth } from '../../context/useAuth';
 import {
   BarChart2,
   TrendingUp,
@@ -189,7 +189,7 @@ const CeldaCostoEditable = ({ linea, onGuardado }) => {
   }
 
   return (
-    <div className="flex items-center justify-end gap-1">
+    <div className="flex items-center justify-end gap-1 group">
       <span className="text-gray-500">
         {costoActual !== null
           ? formatCOP(costoActual)
@@ -199,7 +199,7 @@ const CeldaCostoEditable = ({ linea, onGuardado }) => {
       <button
         onClick={handleEditar}
         title="Editar costo de compra"
-        className="text-blue-400 hover:text-blue-600 transition-colors"
+        className="opacity-0 group-hover:opacity-100 transition-opacity text-blue-400 hover:text-blue-600"
       >
         <Pencil size={11} />
       </button>
