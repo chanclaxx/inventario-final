@@ -11,7 +11,7 @@ import { formatCOP, formatFecha, formatFechaISO } from '../../utils/formatters';
 import { Spinner } from '../../components/ui/Spinner';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { Badge } from '../../components/ui/Badge';
-import { useAuth } from '../../hooks/useAuth'; // ajusta el path según tu proyecto
+import { useAuth } from '../../hooks/useAuth';
 import {
   BarChart2,
   TrendingUp,
@@ -427,8 +427,8 @@ export default function ReportesPage() {
   const [desde, setDesde]         = useState(hoy);
   const [hasta, setHasta]         = useState(hoy);
 
-  const { usuario } = useAuth(); // { rol: 'admin_negocio' | 'supervisor' | 'vendedor', ... }
-  const esAdmin = usuario?.rol === 'admin_negocio';
+  const { esAdminNegocio } = useAuth();
+  const esAdmin = esAdminNegocio();
 
   const { data: dashboard, isLoading: loadingD } = useQuery({
     queryKey: ['dashboard'],
