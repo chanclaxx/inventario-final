@@ -1,8 +1,9 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useContext } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getFacturas, getFacturaById, cancelarFactura } from '../../api/facturas.api';
 import { getGarantias } from '../../api/garantias.api';
 import { formatCOP, formatFecha, formatFechaHora } from '../../utils/formatters';
+import { AuthContext }        from '../../context/AuthContext';
 import { Badge }              from '../../components/ui/Badge';
 import { Button }             from '../../components/ui/Button';
 import { Modal }              from '../../components/ui/Modal';
@@ -15,7 +16,7 @@ import api from '../../api/axios.config';
 
 import {
   FileText, ChevronDown, ChevronUp,
-  Printer, XCircle, Eye, Search, X, Pencil,
+  Printer, XCircle, Eye, Search, X, Pencil, Package,
 } from 'lucide-react';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -59,6 +60,11 @@ function coincideTexto(factura, texto) {
     factura.retoma_imei?.toLowerCase().includes(q)            ||
     String(factura.id).includes(q)
   );
+}
+
+function coincideProveedor(factura, proveedor) {
+  if (!proveedor) return true;
+  return factura.proveedor_nombre === proveedor;
 }
 
 // ─── Sección retoma en modal detalle ─────────────────────────────────────────
@@ -120,9 +126,27 @@ function SeccionRetoma({ retoma }) {
   );
 }
 
+// ─── Sección proveedor (solo admin_negocio) ───────────────────────────────────
+
+function SeccionProveedor({ proveedorNombre }) {
+  if (!proveedorNombre) return null;
+
+  return (
+    <div className="bg-amber-50 border border-amber-100 rounded-xl p-3 flex items-center gap-3">
+      <Package size={16} className="text-amber-500 flex-shrink-0" />
+      <div>
+        <p className="text-xs text-amber-500 font-medium">Proveedor</p>
+        <p className="text-sm font-semibold text-gray-800">{proveedorNombre}</p>
+      </div>
+    </div>
+  );
+}
+
 // ─── Modal detalle ────────────────────────────────────────────────────────────
 
 function ModalDetalle({ facturaId, onClose, onReimprimir, onEditar }) {
+  const { esAdminNegocio } = useContext(AuthContext);
+
   const { data, isLoading } = useQuery({
     queryKey: ['factura-detalle', facturaId],
     queryFn: () => getFacturaById(facturaId).then((r) => r.data.data),
@@ -174,6 +198,11 @@ function ModalDetalle({ facturaId, onClose, onReimprimir, onEditar }) {
             </p>
           )}
         </div>
+
+        {/* Proveedor — solo visible para admin_negocio */}
+        {esAdminNegocio() && (
+          <SeccionProveedor proveedorNombre={f?.proveedor_nombre} />
+        )}
 
         <div className="bg-gray-50 rounded-xl p-3 flex flex-col gap-2">
           <p className="text-xs text-gray-400 font-medium">Productos</p>
@@ -349,8 +378,8 @@ function GrupoDia({ fecha, facturas, onVerDetalle, onInactivar, onEditar }) {
 
 // ─── Buscador ─────────────────────────────────────────────────────────────────
 
-function PanelBusqueda({ filtros, onChange, onLimpiar, totalResultados, totalFacturas }) {
-  const hayFiltros = filtros.texto || filtros.desde || filtros.hasta;
+function PanelBusqueda({ filtros, onChange, onLimpiar, totalResultados, totalFacturas, proveedores, esAdmin }) {
+  const hayFiltros = filtros.texto || filtros.desde || filtros.hasta || filtros.proveedor;
 
   return (
     <div className="bg-white border border-gray-100 rounded-2xl p-4 flex flex-col gap-3 shadow-sm">
@@ -366,8 +395,8 @@ function PanelBusqueda({ filtros, onChange, onLimpiar, totalResultados, totalFac
         />
       </div>
 
-      <div className="flex gap-2 items-center">
-        <div className="flex-1">
+      <div className="flex gap-2 items-end flex-wrap">
+        <div className="flex-1 min-w-[120px]">
           <Input
             label="Desde"
             type="date"
@@ -375,7 +404,7 @@ function PanelBusqueda({ filtros, onChange, onLimpiar, totalResultados, totalFac
             onChange={(e) => onChange({ ...filtros, desde: e.target.value })}
           />
         </div>
-        <div className="flex-1">
+        <div className="flex-1 min-w-[120px]">
           <Input
             label="Hasta"
             type="date"
@@ -383,10 +412,30 @@ function PanelBusqueda({ filtros, onChange, onLimpiar, totalResultados, totalFac
             onChange={(e) => onChange({ ...filtros, hasta: e.target.value })}
           />
         </div>
+
+        {/* Dropdown proveedor — solo visible para admin_negocio */}
+        {esAdmin && proveedores.length > 0 && (
+          <div className="flex-1 min-w-[150px]">
+            <label className="block text-xs font-medium text-gray-500 mb-1">Proveedor</label>
+            <select
+              value={filtros.proveedor}
+              onChange={(e) => onChange({ ...filtros, proveedor: e.target.value })}
+              className="w-full py-2.5 px-3 bg-gray-50 border border-gray-200 rounded-xl
+                text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white
+                transition-all text-gray-700"
+            >
+              <option value="">Todos</option>
+              {proveedores.map((nombre) => (
+                <option key={nombre} value={nombre}>{nombre}</option>
+              ))}
+            </select>
+          </div>
+        )}
+
         {hayFiltros && (
           <button
             onClick={onLimpiar}
-            className="flex items-center gap-1 px-3 py-2 mt-5 text-xs text-gray-500
+            className="flex items-center gap-1 px-3 py-2.5 text-xs text-gray-500
               hover:text-red-500 bg-gray-100 hover:bg-red-50 rounded-xl transition-colors"
           >
             <X size={13} /> Limpiar
@@ -405,10 +454,12 @@ function PanelBusqueda({ filtros, onChange, onLimpiar, totalResultados, totalFac
 
 // ─── Page principal ───────────────────────────────────────────────────────────
 
-const FILTROS_INICIALES = { texto: '', desde: '', hasta: '' };
+const FILTROS_INICIALES = { texto: '', desde: '', hasta: '', proveedor: '' };
 
 export default function FacturarPage() {
   const queryClient                              = useQueryClient();
+  const { esAdminNegocio }                       = useContext(AuthContext);
+  const esAdmin                                  = esAdminNegocio();
   const [facturaDetalle,   setFacturaDetalle]   = useState(null);
   const [facturaInactivar, setFacturaInactivar] = useState(null);
   const [facturaImprimir,  setFacturaImprimir]  = useState(null);
@@ -437,10 +488,20 @@ export default function FacturarPage() {
 
   const facturas = useMemo(() => facturasData || [], [facturasData]);
 
+  // Lista de proveedores únicos extraída de las facturas (solo para admin)
+  const proveedores = useMemo(() => {
+    if (!esAdmin) return [];
+    const nombres = facturas
+      .map((f) => f.proveedor_nombre)
+      .filter(Boolean);
+    return [...new Set(nombres)].sort();
+  }, [facturas, esAdmin]);
+
   const facturasFiltradas = useMemo(() => {
     return facturas.filter((f) =>
       coincideTexto(f, filtros.texto) &&
-      dentroDeRango(f.fecha, filtros.desde, filtros.hasta)
+      dentroDeRango(f.fecha, filtros.desde, filtros.hasta) &&
+      coincideProveedor(f, filtros.proveedor)
     );
   }, [facturas, filtros]);
 
@@ -469,6 +530,8 @@ export default function FacturarPage() {
         onLimpiar={() => setFiltros(FILTROS_INICIALES)}
         totalResultados={facturasFiltradas.length}
         totalFacturas={facturas.length}
+        proveedores={proveedores}
+        esAdmin={esAdmin}
       />
 
       {/* Lista */}
