@@ -34,14 +34,21 @@ const agregarSerial = async (negocioId, productoId, { imei, fecha_entrada, costo
     producto_id:    productoId,
     imei,
     fecha_entrada:  fecha_entrada || new Date().toISOString().split('T')[0],
-    costo_compra:   costo_compra  || null,
+    costo_compra:   costo_compra  ?? null,
     cliente_origen: cliente_origen || null,
   });
 };
 
-const actualizarSerial = async (serialId, datos) => {
-  const serial = await repo.actualizarSerial(serialId, datos);
+// Actualiza el serial (imei, costo_compra) y si viene precio,
+// actualiza también el producto padre en productos_serial.
+const actualizarSerial = async (serialId, { imei, costo_compra, precio, producto_id }) => {
+  const serial = await repo.actualizarSerial(serialId, { imei, costo_compra });
   if (!serial) throw { status: 404, message: 'Serial no encontrado' };
+
+  if (precio !== undefined && producto_id) {
+    await repo.updatePrecio(producto_id, precio);
+  }
+
   return serial;
 };
 

@@ -28,19 +28,21 @@ export function ModalEditarSerial({ serial, productoId, onClose }) {
   const [error, setError] = useState('');
 
   const mutation = useMutation({
-    mutationFn: () => actualizarSerial(serial.id, {
-      imei:         form.imei.trim(),
-      precio:       form.precio       !== '' ? Number(form.precio)       : null,
-      costo_compra: form.costo_compra !== '' ? Number(form.costo_compra) : null,
-    }),
-    onSuccess: () => {
-      queryClient.invalidateQueries(['seriales', productoId]);
-      onClose();
-    },
-    onError: (err) => {
-      setError(err.response?.data?.error || 'Error al actualizar el serial');
-    },
-  });
+  mutationFn: () => actualizarSerial(serial.id, {
+    imei:         form.imei.trim(),
+    precio:       form.precio       !== '' ? Number(form.precio)       : undefined,
+    costo_compra: form.costo_compra !== '' ? Number(form.costo_compra) : null,
+    producto_id:  productoId,
+  }),
+  onSuccess: () => {
+    queryClient.invalidateQueries(['seriales', productoId]);
+    queryClient.invalidateQueries(['productos-serial']); // refresca precio en la lista
+    onClose();
+  },
+  onError: (err) => {
+    setError(err.response?.data?.error || 'Error al actualizar el serial');
+  },
+});
 
   const handleKeyDown = (e, siguienteId) => {
     if (e.key === 'Enter') {

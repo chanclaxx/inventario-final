@@ -53,7 +53,18 @@ const update = async (id, { nombre, marca, modelo, precio, proveedor_id }) => {
     SET nombre = $1, marca = $2, modelo = $3, precio = $4, proveedor_id = $5
     WHERE id = $6
     RETURNING *
-  `, [nombre, marca, modelo, precio || null, proveedor_id || null, id]);
+  `, [nombre, marca, modelo, precio ?? null, proveedor_id || null, id]);
+  return rows[0] || null;
+};
+
+// Actualiza solo el precio del producto padre (usado desde ModalEditarSerial)
+const updatePrecio = async (id, precio) => {
+  const { rows } = await pool.query(`
+    UPDATE productos_serial
+    SET precio = $1
+    WHERE id = $2
+    RETURNING *
+  `, [precio ?? null, id]);
   return rows[0] || null;
 };
 
@@ -91,12 +102,15 @@ const insertarSerial = async ({ producto_id, imei, fecha_entrada, costo_compra, 
   return rows[0];
 };
 
+// Actualiza imei y costo_compra del serial. El precio vive en productos_serial,
+// se actualiza por separado con updatePrecio.
 const actualizarSerial = async (id, { imei, costo_compra }) => {
   const { rows } = await pool.query(`
-    UPDATE seriales SET imei = $1, costo_compra = $2
+    UPDATE seriales
+    SET imei = $1, costo_compra = $2
     WHERE id = $3
     RETURNING *
-  `, [imei, costo_compra, id]);
+  `, [imei, costo_compra ?? null, id]);
   return rows[0] || null;
 };
 
@@ -109,6 +123,6 @@ const eliminarSerial = async (id) => {
 };
 
 module.exports = {
-  findAll, findById, perteneceAlNegocio, create, update,
+  findAll, findById, perteneceAlNegocio, create, update, updatePrecio,
   getSeriales, findSerialByIMEI, insertarSerial, actualizarSerial, eliminarSerial,
 };
