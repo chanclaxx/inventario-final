@@ -12,7 +12,11 @@ const getPrestamoById = async (negocioId, id) => {
   return { ...prestamo, abonos };
 };
 
-const crearPrestamo = async ({ sucursal_id, usuario_id, prestatario, cedula, telefono, nombre_producto, imei, producto_id, cantidad_prestada, valor_prestamo }) => {
+const crearPrestamo = async ({
+  sucursal_id, usuario_id, prestatario, cedula, telefono,
+  nombre_producto, imei, producto_id, cantidad_prestada, valor_prestamo,
+  prestatario_id, empleado_id,
+}) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -20,9 +24,11 @@ const crearPrestamo = async ({ sucursal_id, usuario_id, prestatario, cedula, tel
     const prestamo = await repo.create(client, {
       sucursal_id, usuario_id, prestatario, cedula, telefono,
       nombre_producto, imei: imei || null,
-      producto_id: producto_id || null,
+      producto_id:       producto_id    || null,
       cantidad_prestada: cantidad_prestada || 1,
       valor_prestamo,
+      prestatario_id:    prestatario_id || null,
+      empleado_id:       empleado_id    || null,
     });
 
     if (imei) {
