@@ -9,3 +9,5 @@ export const getInventarioBajo = () => api.get('/reportes/inventario-bajo');
 
 export const actualizarCostoCompra = (payload) =>
   api.patch('/reportes/costo-compra', payload)
+
+export const getValorInventario = () => api.get('/reportes/inventario/valor');

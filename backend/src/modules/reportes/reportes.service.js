@@ -440,10 +440,80 @@ const actualizarCostoCompra = async (sucursalId, tipo, imei, nombreProducto, nue
   throw Object.assign(new Error('Tipo de producto inválido. Use "serial" o "cantidad"'), { status: 400 });
 };
 
+// ─────────────────────────────────────────────
+// VALOR TOTAL DEL INVENTARIO
+// Calcula el valor actual en costo y en precio de venta
+// para productos serializados (disponibles) y por cantidad (en stock).
+// Solo accesible para admin_negocio (se controla en el router).
+// ─────────────────────────────────────────────
+const getValorInventario = async (negocioId) => {
+  const [serialResult, cantidadResult] = await Promise.all([
+
+    // Serializados disponibles: no vendidos, no prestados
+    pool.query(`
+      SELECT
+        COUNT(se.id)::int                                           AS unidades,
+        COALESCE(SUM(se.costo_compra),        0)::numeric          AS costo_total,
+        COALESCE(SUM(ps.precio),              0)::numeric          AS precio_venta_total,
+        COUNT(CASE WHEN se.costo_compra IS NULL THEN 1 END)::int   AS sin_costo
+      FROM seriales        se
+      JOIN productos_serial ps ON ps.id = se.producto_id
+      JOIN sucursales       su ON su.id = ps.sucursal_id
+      WHERE se.vendido    = false
+        AND se.prestado   = false
+        AND ps.activo     = true
+        AND su.negocio_id = $1
+    `, [negocioId]),
+
+    // Por cantidad: stock disponible
+    pool.query(`
+      SELECT
+        COALESCE(SUM(pc.stock),                                           0)::int     AS unidades,
+        COALESCE(SUM(pc.stock * pc.costo_unitario),                       0)::numeric AS costo_total,
+        COALESCE(SUM(pc.stock * pc.precio),                               0)::numeric AS precio_venta_total,
+        COALESCE(SUM(CASE WHEN pc.costo_unitario IS NULL THEN pc.stock ELSE 0 END), 0)::int AS sin_costo
+      FROM productos_cantidad pc
+      JOIN sucursales         su ON su.id = pc.sucursal_id
+      WHERE pc.activo     = true
+        AND pc.stock      > 0
+        AND su.negocio_id = $1
+    `, [negocioId]),
+  ]);
+
+  const serial   = serialResult.rows[0];
+  const cantidad = cantidadResult.rows[0];
+
+  const serialCosto    = Number(serial.costo_total);
+  const serialVenta    = Number(serial.precio_venta_total);
+  const cantidadCosto  = Number(cantidad.costo_total);
+  const cantidadVenta  = Number(cantidad.precio_venta_total);
+
+  return {
+    serial: {
+      unidades:           serial.unidades,
+      costo_total:        serialCosto,
+      precio_venta_total: serialVenta,
+      sin_costo:          serial.sin_costo,
+    },
+    cantidad: {
+      unidades:           cantidad.unidades,
+      costo_total:        cantidadCosto,
+      precio_venta_total: cantidadVenta,
+      sin_costo:          cantidad.sin_costo,
+    },
+    totales: {
+      unidades:           serial.unidades + cantidad.unidades,
+      costo_total:        serialCosto     + cantidadCosto,
+      precio_venta_total: serialVenta     + cantidadVenta,
+    },
+  };
+};
+
 module.exports = {
   getDashboard,
   getVentasRango,
   getProductosTop,
   getInventarioBajo,
   actualizarCostoCompra,
+  getValorInventario,
 };

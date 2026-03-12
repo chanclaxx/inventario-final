@@ -14,5 +14,6 @@ router.get('/inventario-bajo', ctrl.getInventarioBajo);
 
 // Solo admin_negocio puede corregir el costo de compra desde reportes
 router.patch('/costo-compra',  requireNivel('admin_negocio'), ctrl.actualizarCostoCompra);
+router.get('/inventario/valor', requireNivel('admin_negocio'), ctrl.getValorInventario);
 
 module.exports = router;

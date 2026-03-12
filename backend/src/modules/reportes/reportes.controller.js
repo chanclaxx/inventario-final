@@ -99,10 +99,13 @@ const actualizarCostoCompra = async (req, res, next) => {
     next(err);
   }
 };
+const getValorInventario = async (req, res, next) => {
+  try {
+    const data = await service.getValorInventario(req.user.negocio_id);
+    res.json({ ok: true, data });
+  } catch (err) { next(err); }
+};
 
 // ─────────────────────────────────────────────
-// ACTUALIZAR module.exports (reemplazar la línea existente):
-// module.exports = { getDashboard, getVentasRango, getProductosTop, getInventarioBajo, actualizarCostoCompra };
-// ─────────────────────────────────────────────
 
-module.exports = { getDashboard, getVentasRango, getProductosTop, getInventarioBajo, actualizarCostoCompra };
+module.exports = { getDashboard, getVentasRango, getProductosTop, getInventarioBajo, actualizarCostoCompra,getValorInventario };

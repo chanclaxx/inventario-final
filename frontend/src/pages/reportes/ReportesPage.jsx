@@ -5,47 +5,34 @@ import {
   getVentasRango,
   getProductosTop,
   getInventarioBajo,
+  getValorInventario,
   actualizarCostoCompra,
 } from '../../api/reportes.api';
 import { formatCOP, formatFecha, fechaHoyBogota } from '../../utils/formatters';
-import { Spinner } from '../../components/ui/Spinner';
+import { Spinner }    from '../../components/ui/Spinner';
 import { EmptyState } from '../../components/ui/EmptyState';
-import { Badge } from '../../components/ui/Badge';
-import { useAuth } from '../../context/useAuth';
+import { Badge }      from '../../components/ui/Badge';
+import { useAuth }    from '../../context/useAuth';
 import {
-  BarChart2,
-  TrendingUp,
-  Package,
-  AlertTriangle,
-  ChevronDown,
-  ChevronUp,
-  Info,
-  Pencil,
-  Check,
-  X,
+  BarChart2, TrendingUp, Package, AlertTriangle,
+  ChevronDown, ChevronUp, Info, Pencil, Check, X,
+  Warehouse,
 } from 'lucide-react';
 
 // ─────────────────────────────────────────────
 // CONSTANTES
 // ─────────────────────────────────────────────
 const TABS = [
-  { id: 'resumen',   label: 'Resumen',    icon: BarChart2    },
-  { id: 'ventas',    label: 'Ventas',     icon: TrendingUp   },
-  { id: 'productos', label: 'Productos',  icon: Package      },
-  { id: 'stock',     label: 'Stock Bajo', icon: AlertTriangle },
+  { id: 'resumen',    label: 'Resumen',    icon: BarChart2     },
+  { id: 'ventas',     label: 'Ventas',     icon: TrendingUp    },
+  { id: 'productos',  label: 'Productos',  icon: Package       },
+  { id: 'stock',      label: 'Stock Bajo', icon: AlertTriangle },
+  { id: 'inventario', label: 'Inventario', icon: Warehouse     },
 ];
 
 // ─────────────────────────────────────────────
 // HELPERS DE NEGOCIO
-// Separados del componente para mantener la lógica fuera del JSX
 // ─────────────────────────────────────────────
-
-/**
- * Calcula la utilidad neta de una factura a partir de sus líneas locales.
- * @param {Array}  lineas
- * @param {number} totalRetomas
- * @returns {number}
- */
 const calcularUtilidadNeta = (lineas, totalRetomas) => {
   const bruta = lineas.reduce(
     (acc, i) => (i.utilidad !== null ? acc + i.utilidad : acc),
@@ -54,12 +41,6 @@ const calcularUtilidadNeta = (lineas, totalRetomas) => {
   return bruta - Number(totalRetomas);
 };
 
-/**
- * Recalcula una línea con el nuevo costo unitario.
- * @param {object} linea
- * @param {number} nuevoCosto
- * @returns {object}
- */
 const recalcularLinea = (linea, nuevoCosto) => {
   const costoTotal = nuevoCosto * linea.cantidad;
   return {
@@ -70,12 +51,6 @@ const recalcularLinea = (linea, nuevoCosto) => {
   };
 };
 
-/**
- * Determina si una línea editada coincide con la original (por IMEI o nombre+tipo).
- * @param {object} lineaOriginal
- * @param {object} lineaEditada
- * @returns {boolean}
- */
 const esMismaLinea = (lineaOriginal, lineaEditada) => {
   if (lineaEditada.imei) return lineaOriginal.imei === lineaEditada.imei;
   return lineaOriginal.nombre_producto === lineaEditada.nombre_producto && !lineaOriginal.imei;
@@ -84,11 +59,11 @@ const esMismaLinea = (lineaOriginal, lineaEditada) => {
 // ─────────────────────────────────────────────
 // SUB-COMPONENTES GENÉRICOS
 // ─────────────────────────────────────────────
-
-const MetricCard = ({ label, valor, colorClass }) => (
+const MetricCard = ({ label, valor, colorClass, sub }) => (
   <div className={`rounded-2xl p-4 ${colorClass}`}>
     <p className="text-xs font-medium opacity-70">{label}</p>
     <p className="text-2xl font-bold mt-1">{valor}</p>
+    {sub && <p className="text-xs opacity-60 mt-1">{sub}</p>}
   </div>
 );
 
@@ -102,11 +77,9 @@ const UtilidadBadge = ({ valor, sinDato = false }) => {
   }
   const positivo = valor >= 0;
   return (
-    <span
-      className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
-        positivo ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
-      }`}
-    >
+    <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+      positivo ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+    }`}>
       {positivo ? '+' : ''}{formatCOP(valor)}
     </span>
   );
@@ -136,7 +109,7 @@ const RangoFechas = ({ desde, hasta, onDesde, onHasta }) => (
 );
 
 // ─────────────────────────────────────────────
-// CELDA EDITABLE DE COSTO (solo admin_negocio)
+// CELDA EDITABLE DE COSTO
 // ─────────────────────────────────────────────
 const CeldaCostoEditable = ({ linea, onGuardado }) => {
   const [editando,  setEditando]  = useState(false);
@@ -257,7 +230,6 @@ const FilaFactura = ({ factura, esAdmin }) => {
 
   return (
     <div className="bg-white border border-gray-100 rounded-xl overflow-hidden shadow-sm">
-      {/* Cabecera */}
       <button
         onClick={() => setExpandida((v) => !v)}
         className="w-full px-4 py-3 flex items-center justify-between hover:bg-gray-50 transition-colors text-left"
@@ -268,7 +240,6 @@ const FilaFactura = ({ factura, esAdmin }) => {
             <p className="text-xs text-gray-400">{formatFecha(factura.fecha)} · #{factura.id}</p>
           </div>
         </div>
-
         <div className="flex items-center gap-2 flex-shrink-0 ml-2">
           <Badge variant={estadoVariant}>{factura.estado}</Badge>
           <div className="text-right hidden sm:block">
@@ -290,7 +261,6 @@ const FilaFactura = ({ factura, esAdmin }) => {
         </div>
       </button>
 
-      {/* Totales en móvil */}
       <div className="flex items-center justify-between px-4 pb-2 sm:hidden">
         <span className="text-sm font-bold text-gray-900">{formatCOP(factura.total_venta)}</span>
         <UtilidadBadge
@@ -299,7 +269,6 @@ const FilaFactura = ({ factura, esAdmin }) => {
         />
       </div>
 
-      {/* Detalle de líneas */}
       {expandida && (
         <div className="border-t border-gray-100 px-4 py-3 flex flex-col gap-2 bg-gray-50">
           <div className="grid grid-cols-12 gap-1 text-xs font-medium text-gray-400 pb-1 border-b border-gray-200">
@@ -338,7 +307,6 @@ const FilaFactura = ({ factura, esAdmin }) => {
             );
           })}
 
-          {/* Totales de la factura */}
           <div className="border-t border-gray-200 pt-2 mt-1 flex flex-col gap-1">
             <div className="flex justify-between text-xs text-gray-600">
               <span>Total venta</span>
@@ -369,7 +337,6 @@ const FilaFactura = ({ factura, esAdmin }) => {
 // ─────────────────────────────────────────────
 const FilaProducto = ({ producto, posicion }) => {
   const sinCosto = producto.costo_unitario_promedio === null;
-
   return (
     <div className="bg-white border border-gray-100 rounded-xl p-3 flex items-center gap-3 shadow-sm">
       <span className="w-7 h-7 bg-blue-50 text-blue-600 rounded-lg flex items-center justify-center text-xs font-bold flex-shrink-0">
@@ -408,14 +375,14 @@ const PanelResumen = ({ dashboard, loading }) => {
   if (loading) return <Spinner className="py-20" />;
 
   const metricas = [
-    { label: 'Ventas hoy',        valor: formatCOP(dashboard?.ventas_hoy || 0),                         colorClass: 'bg-green-50 text-green-700'   },
-    { label: 'Utilidad hoy',      valor: formatCOP(dashboard?.utilidad_hoy || 0),                       colorClass: 'bg-emerald-50 text-emerald-700'},
-    { label: 'Utilidad pendiente',valor: formatCOP(dashboard?.utilidad_pendiente || 0),                 colorClass: 'bg-yellow-50 text-yellow-700'  },
-    { label: 'Facturas hoy',      valor: dashboard?.facturas_hoy || 0,                                  colorClass: 'bg-blue-50 text-blue-700'      },
-    { label: 'Préstamos activos', valor: dashboard?.prestamos_activos?.cantidad || 0,                   colorClass: 'bg-indigo-50 text-indigo-700'  },
-    { label: 'Deuda préstamos',   valor: formatCOP(dashboard?.prestamos_activos?.deuda_total || 0),     colorClass: 'bg-red-50 text-red-700'        },
-    { label: 'Créditos activos',  valor: dashboard?.creditos_activos?.cantidad || 0,                    colorClass: 'bg-purple-50 text-purple-700'  },
-    { label: 'Deuda créditos',    valor: formatCOP(dashboard?.creditos_activos?.deuda_total || 0),      colorClass: 'bg-rose-50 text-rose-700'      },
+    { label: 'Ventas hoy',         valor: formatCOP(dashboard?.ventas_hoy || 0),                     colorClass: 'bg-green-50 text-green-700'    },
+    { label: 'Utilidad hoy',       valor: formatCOP(dashboard?.utilidad_hoy || 0),                   colorClass: 'bg-emerald-50 text-emerald-700' },
+    { label: 'Utilidad pendiente', valor: formatCOP(dashboard?.utilidad_pendiente || 0),             colorClass: 'bg-yellow-50 text-yellow-700'   },
+    { label: 'Facturas hoy',       valor: dashboard?.facturas_hoy || 0,                              colorClass: 'bg-blue-50 text-blue-700'       },
+    { label: 'Préstamos activos',  valor: dashboard?.prestamos_activos?.cantidad || 0,               colorClass: 'bg-indigo-50 text-indigo-700'   },
+    { label: 'Deuda préstamos',    valor: formatCOP(dashboard?.prestamos_activos?.deuda_total || 0), colorClass: 'bg-red-50 text-red-700'         },
+    { label: 'Créditos activos',   valor: dashboard?.creditos_activos?.cantidad || 0,                colorClass: 'bg-purple-50 text-purple-700'   },
+    { label: 'Deuda créditos',     valor: formatCOP(dashboard?.creditos_activos?.deuda_total || 0),  colorClass: 'bg-rose-50 text-rose-700'       },
   ];
 
   return (
@@ -453,7 +420,6 @@ const PanelVentas = ({ desde, hasta, onDesde, onHasta, esAdmin }) => {
   });
 
   const facturas = ventasData?.facturas ?? [];
-  console.log('ventasData:', ventasData, 'isLoading:', isLoading, 'isError:', isError);
   const resumen  = ventasData?.resumen  ?? null;
 
   return (
@@ -475,9 +441,9 @@ const PanelVentas = ({ desde, hasta, onDesde, onHasta, esAdmin }) => {
       {!isLoading && !isError && facturas.length > 0 && (
         <div className="flex flex-col gap-3">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <MetricCard label="Total vendido"      valor={formatCOP(resumen.total_ventas)}         colorClass="bg-green-50 text-green-700"    />
-            <MetricCard label="Utilidad neta"      valor={formatCOP(resumen.utilidad_neta_total)}  colorClass="bg-emerald-50 text-emerald-700" />
-            <MetricCard label="Utilidad pendiente" valor={formatCOP(resumen.utilidad_pendiente)}   colorClass="bg-yellow-50 text-yellow-700"  />
+            <MetricCard label="Total vendido"      valor={formatCOP(resumen.total_ventas)}        colorClass="bg-green-50 text-green-700"     />
+            <MetricCard label="Utilidad neta"      valor={formatCOP(resumen.utilidad_neta_total)} colorClass="bg-emerald-50 text-emerald-700"  />
+            <MetricCard label="Utilidad pendiente" valor={formatCOP(resumen.utilidad_pendiente)}  colorClass="bg-yellow-50 text-yellow-700"   />
             <MetricCard
               label={`${resumen.total_facturas} factura(s)`}
               valor={`${resumen.facturas_activas} activas · ${resumen.facturas_credito} crédito`}
@@ -539,23 +505,14 @@ const PanelProductos = ({ desde, hasta, onDesde, onHasta }) => {
         const totalVentas   = topProductos.reduce((s, p) => s + p.total_ventas, 0);
         const totalUtilidad = topProductos.reduce((s, p) => p.utilidad !== null ? s + p.utilidad : s, 0);
         const conSinCosto   = topProductos.some((p) => p.costo_unitario_promedio === null);
-
         return (
           <div className="flex flex-col gap-3">
             <div className="grid grid-cols-2 gap-3">
-              <MetricCard
-                label="Total vendido (período)"
-                valor={formatCOP(totalVentas)}
-                colorClass="bg-blue-50 text-blue-700"
-              />
+              <MetricCard label="Total vendido (período)" valor={formatCOP(totalVentas)}   colorClass="bg-blue-50 text-blue-700" />
               <div className="bg-emerald-50 text-emerald-700 rounded-2xl p-4">
-                <p className="text-xs font-medium opacity-70">
-                  Utilidad productos{conSinCosto ? ' *' : ''}
-                </p>
+                <p className="text-xs font-medium opacity-70">Utilidad productos{conSinCosto ? ' *' : ''}</p>
                 <p className="text-2xl font-bold mt-1">{formatCOP(totalUtilidad)}</p>
-                {conSinCosto && (
-                  <p className="text-xs opacity-60 mt-1">* Excluye productos sin costo registrado</p>
-                )}
+                {conSinCosto && <p className="text-xs opacity-60 mt-1">* Excluye productos sin costo registrado</p>}
               </div>
             </div>
             <div className="flex flex-col gap-2">
@@ -617,7 +574,7 @@ const PanelStock = () => {
             </p>
             {producto.costo_unitario !== null && (
               <p className="text-xs text-gray-400">
-                Cost: <span className="font-medium text-gray-600">{formatCOP(producto.costo_unitario)}</span>
+                Costo: <span className="font-medium text-gray-600">{formatCOP(producto.costo_unitario)}</span>
               </p>
             )}
           </div>
@@ -631,11 +588,118 @@ const PanelStock = () => {
 };
 
 // ─────────────────────────────────────────────
+// PANEL INVENTARIO — valor total en costo y precio
+// Solo visible para admin_negocio
+// ─────────────────────────────────────────────
+const FilaInventario = ({ label, datos, colorCosto, colorVenta }) => (
+  <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm flex flex-col gap-3">
+    <p className="text-sm font-semibold text-gray-700">{label}</p>
+    <div className="grid grid-cols-2 gap-3">
+      <div className={`rounded-xl p-3 ${colorCosto}`}>
+        <p className="text-xs font-medium opacity-70">Valor en costo</p>
+        <p className="text-xl font-bold mt-1">{formatCOP(datos.costo_total)}</p>
+        {datos.sin_costo > 0 && (
+          <p className="text-xs opacity-60 mt-1 flex items-center gap-1">
+            <Info size={10} />
+            {datos.sin_costo} u. sin costo registrado
+          </p>
+        )}
+      </div>
+      <div className={`rounded-xl p-3 ${colorVenta}`}>
+        <p className="text-xs font-medium opacity-70">Valor en venta</p>
+        <p className="text-xl font-bold mt-1">{formatCOP(datos.precio_venta_total)}</p>
+      </div>
+    </div>
+    <p className="text-xs text-gray-400">{datos.unidades} unidad(es) en stock</p>
+  </div>
+);
+
+const PanelInventario = () => {
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ['valor-inventario'],
+    queryFn: () => getValorInventario().then((r) => r.data.data),
+  });
+
+  if (isLoading) return <Spinner className="py-20" />;
+
+  if (isError) {
+    return (
+      <div className="bg-red-50 border border-red-100 rounded-xl px-4 py-3 text-sm text-red-600">
+        Error al cargar el inventario. Intenta de nuevo.
+      </div>
+    );
+  }
+
+  if (!data) return null;
+
+  const margenTotal = data.totales.costo_total > 0
+    ? ((data.totales.precio_venta_total - data.totales.costo_total) / data.totales.costo_total * 100).toFixed(1)
+    : null;
+
+  return (
+    <div className="flex flex-col gap-4">
+      <p className="text-xs text-gray-400">
+        Valor del inventario disponible actualmente (excluye vendidos y prestados).
+      </p>
+
+      {/* Totales globales */}
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+        <MetricCard
+          label="Costo total inventario"
+          valor={formatCOP(data.totales.costo_total)}
+          colorClass="bg-orange-50 text-orange-700"
+          sub={`${data.totales.unidades} unidades en total`}
+        />
+        <MetricCard
+          label="Precio venta total"
+          valor={formatCOP(data.totales.precio_venta_total)}
+          colorClass="bg-green-50 text-green-700"
+          sub="Si se vendiera todo"
+        />
+        {margenTotal !== null && (
+          <MetricCard
+            label="Margen potencial"
+            valor={`${margenTotal}%`}
+            colorClass="bg-emerald-50 text-emerald-700"
+            sub={formatCOP(data.totales.precio_venta_total - data.totales.costo_total)}
+          />
+        )}
+      </div>
+
+      {/* Desglose por tipo */}
+      <div className="flex flex-col gap-3">
+        <FilaInventario
+          label="Productos con serial / IMEI"
+          datos={data.serial}
+          colorCosto="bg-blue-50 text-blue-700"
+          colorVenta="bg-blue-100 text-blue-800"
+        />
+        <FilaInventario
+          label="Productos por cantidad"
+          datos={data.cantidad}
+          colorCosto="bg-purple-50 text-purple-700"
+          colorVenta="bg-purple-100 text-purple-800"
+        />
+      </div>
+
+      {/* Aviso si hay productos sin costo */}
+      {(data.serial.sin_costo > 0 || data.cantidad.sin_costo > 0) && (
+        <div className="flex items-start gap-2 bg-yellow-50 border border-yellow-100 rounded-xl px-4 py-3 text-xs text-yellow-700">
+          <Info size={14} className="flex-shrink-0 mt-0.5" />
+          <span>
+            Algunos productos no tienen costo registrado — el valor en costo está subestimado.
+            Puedes corregirlo editando el costo desde el tab <strong>Ventas</strong> o en el módulo de Productos.
+          </span>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────
 // PÁGINA PRINCIPAL
 // ─────────────────────────────────────────────
 export default function ReportesPage() {
-  // fechaHoyBogota() se llama en el render, no al nivel de módulo,
-  // garantizando siempre la fecha correcta en zona horaria de Colombia
   const hoy = fechaHoyBogota();
 
   const [tabActiva, setTabActiva] = useState('resumen');
@@ -650,12 +714,15 @@ export default function ReportesPage() {
     queryFn: () => getDashboard().then((r) => r.data.data),
   });
 
+  // El tab inventario solo es visible para admin_negocio
+  const tabsVisibles = TABS.filter((t) => t.id !== 'inventario' || esAdmin);
+
   return (
     <div className="flex flex-col gap-4">
 
       {/* Tabs */}
       <div className="flex gap-1 bg-gray-100 p-1 rounded-xl w-fit overflow-x-auto max-w-full">
-        {TABS.map((tab) => {
+        {tabsVisibles.map((tab) => {
           const TabIcon = tab.icon;
           return (
             <button
@@ -675,10 +742,11 @@ export default function ReportesPage() {
         })}
       </div>
 
-      {tabActiva === 'resumen'   && <PanelResumen   dashboard={dashboard} loading={loadingD} />}
-      {tabActiva === 'ventas'    && <PanelVentas    desde={desde} hasta={hasta} onDesde={setDesde} onHasta={setHasta} esAdmin={esAdmin} />}
-      {tabActiva === 'productos' && <PanelProductos desde={desde} hasta={hasta} onDesde={setDesde} onHasta={setHasta} />}
-      {tabActiva === 'stock'     && <PanelStock />}
+      {tabActiva === 'resumen'    && <PanelResumen   dashboard={dashboard} loading={loadingD} />}
+      {tabActiva === 'ventas'     && <PanelVentas    desde={desde} hasta={hasta} onDesde={setDesde} onHasta={setHasta} esAdmin={esAdmin} />}
+      {tabActiva === 'productos'  && <PanelProductos desde={desde} hasta={hasta} onDesde={setDesde} onHasta={setHasta} />}
+      {tabActiva === 'stock'      && <PanelStock />}
+      {tabActiva === 'inventario' && esAdmin && <PanelInventario />}
     </div>
   );
 }
