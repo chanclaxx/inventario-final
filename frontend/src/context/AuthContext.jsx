@@ -16,6 +16,11 @@ export function AuthProvider({ children }) {
   const [usuario, setUsuario] = useState(getUsuarioInicial);
 
   const login = async (email, password) => {
+    // Limpiar sucursal persistida de sesiones anteriores antes de establecer
+    // la nueva sesión — evita que el interceptor inyecte un sucursal_id
+    // de otro negocio mientras se resuelve la nueva selección
+    useSucursalStore.getState().reset();
+
     const { data } = await loginApi(email, password);
     sessionStorage.setItem('accessToken', data.accessToken);
     sessionStorage.setItem('usuario', JSON.stringify(data.usuario));
@@ -31,7 +36,6 @@ export function AuthProvider({ children }) {
     }
     sessionStorage.removeItem('accessToken');
     sessionStorage.removeItem('usuario');
-    // Limpiar selección de sucursal al cerrar sesión
     useSucursalStore.getState().reset();
     setUsuario(null);
   };
