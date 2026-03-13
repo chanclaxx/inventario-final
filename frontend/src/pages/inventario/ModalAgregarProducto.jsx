@@ -55,76 +55,76 @@ async function verificarImeis(imeis) {
 
 // ─── Modal de reactivación múltiple ──────────────────────────────────────────
 
+// Filas de detalle reutilizables para los modales
+function FilasSerial({ seriales }) {
+  return (
+    <div className="w-full flex flex-col gap-2 max-h-52 overflow-y-auto">
+      {seriales.map((serial) => {
+        const estadoLabel = serial.vendido  ? 'Vendido'
+          : serial.prestado                 ? 'Prestado'
+          :                                   'En inventario';
+
+        const estadoColor = serial.vendido
+          ? 'text-red-600 bg-red-50 border-red-200'
+          : serial.prestado
+          ? 'text-yellow-700 bg-yellow-50 border-yellow-200'
+          : 'text-green-700 bg-green-50 border-green-200';
+
+        return (
+          <div
+            key={serial.id}
+            className="w-full rounded-xl border border-gray-100 bg-gray-50 p-3 flex flex-col gap-1.5"
+          >
+            <div className="flex justify-between text-sm">
+              <span className="text-gray-500">IMEI</span>
+              <span className="font-mono font-medium text-gray-900">{serial.imei}</span>
+            </div>
+            <div className="flex justify-between text-sm">
+              <span className="text-gray-500">Producto</span>
+              <span className="font-medium text-gray-900 text-right max-w-[60%]">
+                {serial.producto_nombre}
+                {serial.marca ? ` · ${serial.marca}` : ''}
+              </span>
+            </div>
+            <div className="flex justify-between text-sm items-center">
+              <span className="text-gray-500">Estado</span>
+              <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${estadoColor}`}>
+                {estadoLabel}
+              </span>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// Modal para seriales que requieren reactivación (vendido o prestado)
 function ModalReactivarSeriales({ open, seriales, onReactivar, onCancelar }) {
   if (!seriales || seriales.length === 0) return null;
-
   return (
     <Modal open={open} onClose={onCancelar} title="" size="sm">
       <div className="flex flex-col items-center gap-4 py-2">
-
         <div className="w-14 h-14 rounded-full bg-amber-50 border-2 border-amber-200
           flex items-center justify-center">
           <AlertTriangle size={26} className="text-amber-500" />
         </div>
-
         <div className="text-center">
           <h3 className="text-base font-semibold text-gray-900">
-            {seriales.length === 1
-              ? 'Este IMEI ya está registrado'
-              : `${seriales.length} IMEIs ya están registrados`}
+            {seriales.length === 1 ? 'IMEI ya registrado' : `${seriales.length} IMEIs ya registrados`}
           </h3>
           <p className="text-sm text-gray-500 mt-1">
             {seriales.length === 1
-              ? 'Este equipo aparece en el historial del inventario'
-              : 'Estos equipos aparecen en el historial del inventario'}
+              ? 'Este equipo fue vendido o prestado — puedes reactivarlo'
+              : 'Estos equipos fueron vendidos o prestados — puedes reactivarlos'}
           </p>
         </div>
-
-        <div className="w-full flex flex-col gap-2 max-h-52 overflow-y-auto">
-          {seriales.map((serial) => {
-            const estadoLabel = serial.vendido  ? 'Vendido'
-              : serial.prestado                 ? 'Prestado'
-              :                                   'En inventario';
-
-            const estadoColor = serial.vendido
-              ? 'text-red-600 bg-red-50 border-red-200'
-              : serial.prestado
-              ? 'text-yellow-700 bg-yellow-50 border-yellow-200'
-              : 'text-green-700 bg-green-50 border-green-200';
-
-            return (
-              <div
-                key={serial.id}
-                className="w-full rounded-xl border border-gray-100 bg-gray-50 p-3 flex flex-col gap-1.5"
-              >
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-500">IMEI</span>
-                  <span className="font-mono font-medium text-gray-900">{serial.imei}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-500">Producto</span>
-                  <span className="font-medium text-gray-900 text-right max-w-[60%]">
-                    {serial.producto_nombre}
-                    {serial.marca ? ` · ${serial.marca}` : ''}
-                  </span>
-                </div>
-                <div className="flex justify-between text-sm items-center">
-                  <span className="text-gray-500">Estado</span>
-                  <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${estadoColor}`}>
-                    {estadoLabel}
-                  </span>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-
+        <FilasSerial seriales={seriales} />
         <p className="text-sm text-center text-gray-700 leading-relaxed">
           ¿Deseas{' '}
           <span className="font-semibold text-purple-700">reactivar estos seriales</span>
           {' '}en el inventario? Se marcarán como disponibles nuevamente.
         </p>
-
         <div className="flex gap-2 w-full">
           <Button
             variant="secondary"
@@ -141,6 +141,38 @@ function ModalReactivarSeriales({ open, seriales, onReactivar, onCancelar }) {
             <RefreshCw size={14} /> Sí, reactivar
           </Button>
         </div>
+      </div>
+    </Modal>
+  );
+}
+
+// Modal para seriales que ya están disponibles en inventario (no requieren reactivación)
+function ModalYaEnInventario({ open, seriales, onCerrar }) {
+  if (!seriales || seriales.length === 0) return null;
+  return (
+    <Modal open={open} onClose={onCerrar} title="" size="sm">
+      <div className="flex flex-col items-center gap-4 py-2">
+        <div className="w-14 h-14 rounded-full bg-blue-50 border-2 border-blue-200
+          flex items-center justify-center">
+          <Package size={26} className="text-blue-500" />
+        </div>
+        <div className="text-center">
+          <h3 className="text-base font-semibold text-gray-900">
+            {seriales.length === 1 ? 'IMEI ya disponible' : `${seriales.length} IMEIs ya disponibles`}
+          </h3>
+          <p className="text-sm text-gray-500 mt-1">
+            {seriales.length === 1
+              ? 'Este equipo ya está en inventario como disponible'
+              : 'Estos equipos ya están en inventario como disponibles'}
+          </p>
+        </div>
+        <FilasSerial seriales={seriales} />
+        <p className="text-sm text-center text-gray-700 leading-relaxed">
+          No es necesario agregarlo nuevamente. Puedes continuar con los demás IMEIs o cancelar.
+        </p>
+        <Button className="w-full" onClick={onCerrar}>
+          Entendido
+        </Button>
       </div>
     </Modal>
   );
@@ -415,8 +447,10 @@ function PasoSerial({ onExito, onDuplicadosEncontrados }) {
     setVerificando(false);
 
     if (encontrados.length > 0) {
-      // Delegar al padre — él maneja el modal y llama confirmarConReactivacion
-      onDuplicadosEncontrados(encontrados, confirmarConReactivacion);
+      // Separar: disponibles (no necesitan reactivar) vs vendidos/prestados (sí)
+      const disponibles   = encontrados.filter((s) => !s.vendido && !s.prestado);
+      const paraReactivar = encontrados.filter((s) => s.vendido || s.prestado);
+      onDuplicadosEncontrados({ disponibles, paraReactivar }, confirmarConReactivacion);
       return;
     }
 
@@ -852,10 +886,26 @@ export function ModalAgregarProducto({ onClose }) {
   const [serialesDuplicados, setSerializesDuplicados] = useState([]);
   const confirmarReactivarRef = useRef(null);
 
-  const handleDuplicadosEncontrados = (seriales, confirmarFn) => {
+  const [serialesDisponibles,  setSerializesDisponibles]  = useState([]);
+  const [modalYaEnInventario,  setModalYaEnInventario]     = useState(false);
+
+  const handleDuplicadosEncontrados = ({ disponibles, paraReactivar }, confirmarFn) => {
     confirmarReactivarRef.current = confirmarFn;
-    setSerializesDuplicados(seriales);
-    setModalReactivar(true);
+
+    // Seriales disponibles — mostrar aviso, no reactivar
+    if (disponibles.length > 0) {
+      setSerializesDisponibles(disponibles);
+      setModalYaEnInventario(true);
+    }
+
+    // Seriales vendidos/prestados — mostrar modal de reactivación
+    if (paraReactivar.length > 0) {
+      setSerializesDuplicados(paraReactivar);
+      setModalReactivar(true);
+    }
+
+    // Si todos están disponibles (ninguno para reactivar), no llamar mutConfirmar
+    // El usuario verá el aviso y podrá corregir sus IMEIs
   };
 
   const handleReactivar = () => {
@@ -916,12 +966,20 @@ export function ModalAgregarProducto({ onClose }) {
         )}
       </Modal>
 
-      {/* ModalReactivarSeriales fuera del Modal principal — evita conflicto de z-index */}
+      {/* Modales fuera del Modal principal — evita conflicto de z-index */}
       <ModalReactivarSeriales
         open={modalReactivar}
         seriales={serialesDuplicados}
         onReactivar={handleReactivar}
         onCancelar={handleCancelarReactivar}
+      />
+      <ModalYaEnInventario
+        open={modalYaEnInventario}
+        seriales={serialesDisponibles}
+        onCerrar={() => {
+          setModalYaEnInventario(false);
+          setSerializesDisponibles([]);
+        }}
       />
     </>
   );
