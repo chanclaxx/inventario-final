@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
 import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
@@ -43,17 +43,14 @@ const RETOMA_INICIAL = {
 };
 
 const IMEI_MIN_LENGTH = 8;
-const DEBOUNCE_MS     = 600;
 
-// ─── Hook: verificación de IMEI en tiempo real ────────────────────────────────
+// ─── Hook: verificación puntual de IMEI ──────────────────────────────────────
+// Sin debounce — se dispara una sola vez al marcar el checkbox
 
 function useVerificarImei() {
   const [estado, setEstado] = useState({ tipo: 'idle' });
-  const timerRef = useRef(null);
 
-  const verificar = useCallback((imei, { onEncontrado } = {}) => {
-    if (timerRef.current) clearTimeout(timerRef.current);
-
+  const verificar = useCallback(async (imei, { onEncontrado } = {}) => {
     const imeiLimpio = imei?.trim() ?? '';
     if (imeiLimpio.length < IMEI_MIN_LENGTH) {
       setEstado({ tipo: 'idle' });
@@ -62,27 +59,24 @@ function useVerificarImei() {
 
     setEstado({ tipo: 'cargando' });
 
-    timerRef.current = setTimeout(async () => {
-      try {
-        const { data } = await verificarImeiApi(imeiLimpio);
-        if (data.data.existe) {
-          const serial = data.data.serial;
-          setEstado({ tipo: 'encontrado', serial });
-          onEncontrado?.(serial);
-        } else {
-          setEstado({ tipo: 'libre' });
-        }
-      } catch (err) {
-        setEstado({
-          tipo:    'error',
-          mensaje: err.response?.data?.error || 'Error al verificar IMEI',
-        });
+    try {
+      const { data } = await verificarImeiApi(imeiLimpio);
+      if (data.data.existe) {
+        const serial = data.data.serial;
+        setEstado({ tipo: 'encontrado', serial });
+        onEncontrado?.(serial);
+      } else {
+        setEstado({ tipo: 'libre' });
       }
-    }, DEBOUNCE_MS);
+    } catch (err) {
+      setEstado({
+        tipo:    'error',
+        mensaje: err.response?.data?.error || 'Error al verificar IMEI',
+      });
+    }
   }, []);
 
   const limpiar = useCallback(() => {
-    if (timerRef.current) clearTimeout(timerRef.current);
     setEstado({ tipo: 'idle' });
   }, []);
 
@@ -92,10 +86,10 @@ function useVerificarImei() {
 // ─── Sub-componentes: indicadores de estado del IMEI ─────────────────────────
 
 function ImeiEstadoIcono({ estado }) {
-  if (estado.tipo === 'cargando')  return <Loader2      size={15} className="text-gray-400 animate-spin" />;
-  if (estado.tipo === 'libre')     return <CheckCircle  size={15} className="text-green-500" />;
-  if (estado.tipo === 'encontrado') return <AlertCircle size={15} className="text-amber-500" />;
-  if (estado.tipo === 'error')     return <XCircle      size={15} className="text-red-400" />;
+  if (estado.tipo === 'cargando')   return <Loader2      size={15} className="text-gray-400 animate-spin" />;
+  if (estado.tipo === 'libre')      return <CheckCircle  size={15} className="text-green-500" />;
+  if (estado.tipo === 'encontrado') return <AlertCircle  size={15} className="text-amber-500" />;
+  if (estado.tipo === 'error')      return <XCircle      size={15} className="text-red-400" />;
   return null;
 }
 
@@ -214,11 +208,12 @@ function ModalReactivarSerial({ open, serial, onReactivar, onCancelar }) {
   );
 }
 
-// ─── Sección retoma serial (con verificación de IMEI) ────────────────────────
+// ─── Sección retoma serial ────────────────────────────────────────────────────
+// La verificación de IMEI se dispara desde el padre (checkbox ingreso_inventario)
+// a través de retomaSerialRef — no al escribir
 
-function RetomaSerial({ retoma, setRetomaField, productosSerial }) {
-  const [busqueda,       setBusqueda]       = useState('');
-  const [modalReactivar, setModalReactivar] = useState(false);
+function RetomaSerial({ retoma, setRetomaField, productosSerial, retomaSerialRef }) {
+  const [busqueda, setBusqueda] = useState('');
 
   const { estado, verificar, limpiar } = useVerificarImei();
 
@@ -226,129 +221,114 @@ function RetomaSerial({ retoma, setRetomaField, productosSerial }) {
     p.nombre.toLowerCase().includes(busqueda.toLowerCase())
   );
 
+  // Al escribir solo actualiza el campo — no verifica
   const handleImeiChange = (e) => {
     const valor = e.target.value;
     setRetomaField('imei', valor);
     setRetomaField('reactivar_serial_id', null);
     limpiar();
+  };
 
-    if (valor.trim().length >= IMEI_MIN_LENGTH) {
-      // El callback se pasa en cada llamada — siempre tiene la referencia
-      // fresca a setModalReactivar sin necesitar refs ni effects adicionales
-      verificar(valor, { onEncontrado: () => setModalReactivar(true) });
+  // Método expuesto al padre para que el checkbox lo dispare
+  const verificarImeiActual = useCallback(async (onEncontrado) => {
+    const imei = retoma.imei?.trim() ?? '';
+    if (imei.length >= IMEI_MIN_LENGTH) {
+      await verificar(imei, { onEncontrado });
     }
-  };
+  }, [retoma.imei, verificar]);
 
-  const handleReactivar = () => {
-    const serial = estado.serial;
-    setRetomaField('producto_serial_id',  serial.producto_id);
-    setRetomaField('nombre_producto',     serial.producto_nombre);
-    setRetomaField('reactivar_serial_id', serial.id);
-    setBusqueda(serial.producto_nombre);
-    setModalReactivar(false);
-  };
-
-  const handleCancelarReactivar = () => {
-    setRetomaField('imei', '');
-    setRetomaField('reactivar_serial_id', null);
-    limpiar();
-    setModalReactivar(false);
-  };
+  // Exponer al padre vía ref — dentro de useEffect para que React lo controle
+  useEffect(() => {
+    if (retomaSerialRef) {
+      retomaSerialRef.current = { verificarImeiActual };
+    }
+  }, [retomaSerialRef, verificarImeiActual]);
 
   return (
-    <>
-      <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-3">
 
-        {/* Campo IMEI con indicador de estado */}
-        <div className="flex flex-col gap-1">
-          <label className="text-xs font-medium text-gray-600">
-            IMEI del equipo retomado
-          </label>
-          <div className="relative">
-            <input
-              type="text"
-              placeholder="Ej: 356789012345678"
-              value={retoma.imei}
-              onChange={handleImeiChange}
-              className="w-full px-3 py-2 pr-9 bg-white border border-gray-200 rounded-xl
-                text-sm focus:outline-none focus:ring-2 focus:ring-purple-400 transition-all"
-            />
-            <span className="absolute right-2.5 top-1/2 -translate-y-1/2">
-              <ImeiEstadoIcono estado={estado} />
-            </span>
-          </div>
-          <ImeiEstadoMensaje
-            estado={estado}
-            onAbrirModal={() => setModalReactivar(true)}
-          />
-        </div>
-
-        {/* Selector de línea de producto */}
-        <div>
-          <p className="text-xs font-medium text-gray-600 mb-1">
-            Línea de producto{' '}
-            <span className="text-gray-400 font-normal">
-              (elige existente o déjalo vacío para nueva línea)
-            </span>
-          </p>
+      {/* Campo IMEI */}
+      <div className="flex flex-col gap-1">
+        <label className="text-xs font-medium text-gray-600">
+          IMEI del equipo retomado
+        </label>
+        <div className="relative">
           <input
             type="text"
-            placeholder="Buscar modelo..."
-            value={busqueda}
-            onChange={(e) => {
-              setBusqueda(e.target.value);
-              setRetomaField('producto_serial_id', null);
-              setRetomaField('nombre_producto', '');
-            }}
-            className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-sm
-              focus:outline-none focus:ring-2 focus:ring-purple-400 mb-1"
+            placeholder="Ej: 356789012345678"
+            value={retoma.imei}
+            onChange={handleImeiChange}
+            className="w-full px-3 py-2 pr-9 bg-white border border-gray-200 rounded-xl
+              text-sm focus:outline-none focus:ring-2 focus:ring-purple-400 transition-all"
           />
-          {busqueda.length > 0 && (
-            <div className="flex flex-col gap-1 max-h-36 overflow-y-auto rounded-xl
-              border border-gray-100 bg-white">
-              {filtrados.length === 0 ? (
-                <p className="text-xs text-gray-400 px-3 py-2">
-                  Sin resultados — se creará nueva línea con nombre "{busqueda}"
-                </p>
-              ) : (
-                filtrados.map((p) => {
-                  const productoId = p.id;
-                  return (
-                    <button
-                      key={productoId}
-                      onClick={() => {
-                        setRetomaField('producto_serial_id', productoId);
-                        setRetomaField('nombre_producto', p.nombre);
-                        setBusqueda(p.nombre);
-                      }}
-                      className={`text-left px-3 py-2 text-sm transition-all
-                        ${retoma.producto_serial_id === productoId
-                          ? 'bg-purple-100 text-purple-800'
-                          : 'hover:bg-gray-50 text-gray-700'}`}
-                    >
-                      {p.nombre}
-                      <span className="text-xs text-gray-400 ml-2">{p.disponibles} disp.</span>
-                    </button>
-                  );
-                })
-              )}
-            </div>
-          )}
-          {retoma.producto_serial_id && (
-            <p className="text-xs text-purple-600 mt-1">
-              ✓ Línea seleccionada: {retoma.nombre_producto}
-            </p>
-          )}
+          <span className="absolute right-2.5 top-1/2 -translate-y-1/2">
+            <ImeiEstadoIcono estado={estado} />
+          </span>
         </div>
+        {/* Indicador solo visible cuando ingreso_inventario está activo */}
+        {retoma.ingreso_inventario && (
+          <ImeiEstadoMensaje estado={estado} onAbrirModal={() => {}} />
+        )}
       </div>
 
-      <ModalReactivarSerial
-        open={modalReactivar}
-        serial={estado.tipo === 'encontrado' ? estado.serial : null}
-        onReactivar={handleReactivar}
-        onCancelar={handleCancelarReactivar}
-      />
-    </>
+      {/* Selector de línea de producto */}
+      <div>
+        <p className="text-xs font-medium text-gray-600 mb-1">
+          Línea de producto{' '}
+          <span className="text-gray-400 font-normal">
+            (elige existente o déjalo vacío para nueva línea)
+          </span>
+        </p>
+        <input
+          type="text"
+          placeholder="Buscar modelo..."
+          value={busqueda}
+          onChange={(e) => {
+            setBusqueda(e.target.value);
+            setRetomaField('producto_serial_id', null);
+            setRetomaField('nombre_producto', '');
+          }}
+          className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-sm
+            focus:outline-none focus:ring-2 focus:ring-purple-400 mb-1"
+        />
+        {busqueda.length > 0 && (
+          <div className="flex flex-col gap-1 max-h-36 overflow-y-auto rounded-xl
+            border border-gray-100 bg-white">
+            {filtrados.length === 0 ? (
+              <p className="text-xs text-gray-400 px-3 py-2">
+                Sin resultados — se creará nueva línea con nombre "{busqueda}"
+              </p>
+            ) : (
+              filtrados.map((p) => {
+                const productoId = p.id;
+                return (
+                  <button
+                    key={productoId}
+                    onClick={() => {
+                      setRetomaField('producto_serial_id', productoId);
+                      setRetomaField('nombre_producto', p.nombre);
+                      setBusqueda(p.nombre);
+                    }}
+                    className={`text-left px-3 py-2 text-sm transition-all
+                      ${retoma.producto_serial_id === productoId
+                        ? 'bg-purple-100 text-purple-800'
+                        : 'hover:bg-gray-50 text-gray-700'}`}
+                  >
+                    {p.nombre}
+                    <span className="text-xs text-gray-400 ml-2">{p.disponibles} disp.</span>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        )}
+        {retoma.producto_serial_id && (
+          <p className="text-xs text-purple-600 mt-1">
+            ✓ Línea seleccionada: {retoma.nombre_producto}
+          </p>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -442,6 +422,13 @@ export function ModalFactura({ open, onClose }) {
   const [error,            setError]            = useState('');
   const [buscandoCliente,  setBuscandoCliente]  = useState(false);
 
+  // Estados del modal de reactivación — viven en el padre para que el checkbox los controle
+  const [modalReactivar,   setModalReactivar]   = useState(false);
+  const [serialEncontrado, setSerialEncontrado] = useState(null);
+
+  // Ref para llamar verificarImeiActual desde el checkbox sin prop drilling
+  const retomaSerialRef = useRef(null);
+
   const { data: garantiasData } = useQuery({
     queryKey: ['garantias'],
     queryFn: () => getGarantias().then((r) => r.data.data),
@@ -496,6 +483,8 @@ export function ModalFactura({ open, onClose }) {
     setRetoma(RETOMA_INICIAL);
     setError('');
     setTipoCliente('cliente');
+    setModalReactivar(false);
+    setSerialEncontrado(null);
   };
 
   const setRetomaField = (campo, valor) =>
@@ -530,6 +519,42 @@ export function ModalFactura({ open, onClose }) {
       if (siguienteId) document.getElementById(siguienteId)?.focus();
       else handleSubmit();
     }
+  };
+
+  const handleCheckboxInventario = (marcado) => {
+    setRetomaField('ingreso_inventario', marcado);
+
+    // Al marcar y ser serial, verificar el IMEI actual
+    if (marcado && retoma.tipo_retoma === 'serial') {
+      retomaSerialRef.current?.verificarImeiActual((serial) => {
+        setSerialEncontrado(serial);
+        setModalReactivar(true);
+      });
+    }
+
+    // Al desmarcar, limpiar estado de reactivación
+    if (!marcado) {
+      setSerialEncontrado(null);
+      setRetomaField('reactivar_serial_id', null);
+    }
+  };
+
+  const handleReactivar = () => {
+    if (serialEncontrado) {
+      setRetomaField('producto_serial_id',  serialEncontrado.producto_id);
+      setRetomaField('nombre_producto',     serialEncontrado.producto_nombre);
+      setRetomaField('reactivar_serial_id', serialEncontrado.id);
+    }
+    setModalReactivar(false);
+    setSerialEncontrado(null);
+  };
+
+  const handleCancelarReactivar = () => {
+    // Desmarcar checkbox y limpiar si el usuario cancela
+    setRetomaField('ingreso_inventario',  false);
+    setRetomaField('reactivar_serial_id', null);
+    setModalReactivar(false);
+    setSerialEncontrado(null);
   };
 
   const handleSubmit = () => {
@@ -722,6 +747,7 @@ export function ModalFactura({ open, onClose }) {
                     retoma={retoma}
                     setRetomaField={setRetomaField}
                     productosSerial={productosSerial}
+                    retomaSerialRef={retomaSerialRef}
                   />
                 )}
                 {retoma.tipo_retoma === 'cantidad' && (
@@ -755,7 +781,7 @@ export function ModalFactura({ open, onClose }) {
                   <input
                     type="checkbox"
                     checked={retoma.ingreso_inventario}
-                    onChange={(e) => setRetomaField('ingreso_inventario', e.target.checked)}
+                    onChange={(e) => handleCheckboxInventario(e.target.checked)}
                     className="rounded accent-purple-600"
                   />
                   Ingresa al inventario
@@ -838,6 +864,15 @@ export function ModalFactura({ open, onClose }) {
           </div>
         </div>
       </Modal>
+
+      {/* ModalReactivarSerial vive fuera del Modal principal para evitar
+          conflictos de z-index — se monta en el mismo nivel del DOM */}
+      <ModalReactivarSerial
+        open={modalReactivar}
+        serial={serialEncontrado}
+        onReactivar={handleReactivar}
+        onCancelar={handleCancelarReactivar}
+      />
 
       {mostrarImpresion && facturaCreada && (
         <FacturaTermica
