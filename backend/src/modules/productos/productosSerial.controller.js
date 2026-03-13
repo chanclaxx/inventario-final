@@ -62,7 +62,19 @@ const eliminarSerial = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+const verificarImei = async (req, res, next) => {
+  try {
+    const { imei } = req.params;
+    if (!imei || imei.trim().length < 5) {
+      return res.status(400).json({ ok: false, error: 'IMEI inválido' });
+    }
+    const data = await service.verificarImei(imei.trim(), req.user.negocio_id);
+    res.json({ ok: true, data });
+  } catch (err) { next(err); }
+};
+
 module.exports = {
   getProductos, getProductoById, crearProducto, actualizarProducto,
   getSeriales, agregarSerial, actualizarSerial, eliminarSerial,
+  verificarImei,
 };

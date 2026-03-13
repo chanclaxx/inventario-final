@@ -9,7 +9,7 @@ import { formatCOP } from '../../utils/formatters';
 import { crearFactura, getFacturaById } from '../../api/facturas.api';
 import { buscarPorCedula } from '../../api/clientes.api';
 import { getGarantias } from '../../api/garantias.api';
-import { getProductosSerial, getProductosCantidad } from '../../api/productos.api';
+import { getProductosSerial, getProductosCantidad, verificarImei as verificarImeiApi } from '../../api/productos.api';
 import { FacturaTermica } from '../../components/FacturaTermica';
 import api from '../../api/axios.config';
 import useCarritoStore from '../../store/carritoStore';
@@ -70,7 +70,7 @@ function useVerificarImei({ onEncontrado } = {}) {
 
     timerRef.current = setTimeout(async () => {
       try {
-        const { data } = await api.get(`/productos-serial/verificar-imei/${imeiLimpio}`);
+        const { data } = await verificarImeiApi(imeiLimpio);
         if (data.data.existe) {
           const serial = data.data.serial;
           setEstado({ tipo: 'encontrado', serial });

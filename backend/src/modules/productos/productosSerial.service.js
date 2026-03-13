@@ -59,7 +59,36 @@ const eliminarSerial = async (serialId) => {
   if (!eliminado) throw { status: 404, message: 'Serial no encontrado' };
 };
 
+/**
+ * Verifica si un IMEI existe en cualquier sucursal del negocio.
+ * Retorna { existe: false } o { existe: true, serial: { ...datos } }
+ */
+const verificarImei = async (imei, negocioId) => {
+  const serial = await repo.findSerialByIMEIEnNegocio(imei, negocioId);
+  if (!serial) return { existe: false };
+
+  return {
+    existe: true,
+    serial: {
+      id:              serial.id,
+      imei:            serial.imei,
+      vendido:         serial.vendido,
+      prestado:        serial.prestado,
+      fecha_entrada:   serial.fecha_entrada,
+      fecha_salida:    serial.fecha_salida,
+      cliente_origen:  serial.cliente_origen,
+      producto_id:     serial.producto_id,
+      producto_nombre: serial.producto_nombre,
+      marca:           serial.marca,
+      modelo:          serial.modelo,
+      sucursal_id:     serial.sucursal_id,
+      sucursal_nombre: serial.sucursal_nombre,
+    },
+  };
+};
+
 module.exports = {
   getProductos, getProductoById, crearProducto, actualizarProducto,
   getSeriales, agregarSerial, actualizarSerial, eliminarSerial,
+  verificarImei,
 };
