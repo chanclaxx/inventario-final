@@ -12,12 +12,16 @@ import { persist } from 'zustand/middleware';
  *   null      → sin selección (estado inicial o tras logout)
  *   'todas'   → vista global (envía sucursal_id=todas al backend)
  *   number    → id de sucursal específica
+ *
+ * `negocioId` se persiste junto con `sucursalActiva` para invalidar la
+ * selección si el admin inicia sesión en un negocio diferente.
  */
 const useSucursalStore = create(
   persist(
     (set, get) => ({
       sucursalActiva : null,  // null | 'todas' | number
       sucursales     : [],    // sucursales activas del negocio (sin persistir)
+      negocioId      : null,  // negocio_id persistido para validación entre sesiones
 
       // ── Getters ──────────────────────────────────────────────
       esVistaGlobal   : () => get().sucursalActiva === 'todas',
@@ -28,33 +32,64 @@ const useSucursalStore = create(
       setSucursal : (valor) => set({ sucursalActiva: valor }),
 
       /**
-       * Recibe la lista fresca del backend.
-       * - 1 sucursal  → selección automática; selector no se muestra.
-       * - >1 sucursal → mantiene selección previa válida o toma la primera.
+       * Recibe la lista fresca del backend y el negocio_id del admin activo.
+       *
+       * Prioridad de selección:
+       *   1. Si solo hay 1 sucursal → selección automática.
+       *   2. Si el negocio cambió respecto al persistido → primera sucursal.
+       *   3. Si sucursalActiva es null (primer login / tras reset) → primera sucursal.
+       *   4. Si la selección previa ya no existe en la lista → primera sucursal.
+       *   5. Si la selección previa sigue siendo válida → mantenerla.
        */
-      setSucursales : (lista) => {
-        const { sucursalActiva } = get();
-        set({ sucursales: lista });
+      setSucursales : (lista, negocioIdActual) => {
+        const { sucursalActiva, negocioId: negocioIdPersistido } = get();
 
+        set({ sucursales: lista, negocioId: negocioIdActual ?? negocioIdPersistido });
+
+        if (lista.length === 0) return;
+
+        // Caso 1: única sucursal → auto-seleccionar siempre
         if (lista.length === 1) {
           set({ sucursalActiva: lista[0].id });
           return;
         }
 
+        // Caso 2: cambio de negocio → limpiar selección anterior
+        const negocioCambio =
+          negocioIdActual != null &&
+          negocioIdPersistido != null &&
+          negocioIdActual !== negocioIdPersistido;
+
+        if (negocioCambio) {
+          set({ sucursalActiva: lista[0].id });
+          return;
+        }
+
+        // Caso 3: sin selección previa (primer login o tras reset) → primera sucursal
+        if (sucursalActiva === null) {
+          set({ sucursalActiva: lista[0].id });
+          return;
+        }
+
+        // Caso 4: la selección previa ya no existe en este negocio → primera sucursal
         const seleccionValida =
           sucursalActiva === 'todas' ||
           lista.some((s) => s.id === sucursalActiva);
 
         if (!seleccionValida) {
-          set({ sucursalActiva: lista[0]?.id ?? null });
+          set({ sucursalActiva: lista[0].id });
         }
+        // Caso 5: selección previa válida → no tocar nada
       },
 
-      reset : () => set({ sucursalActiva: null, sucursales: [] }),
+      reset : () => set({ sucursalActiva: null, sucursales: [], negocioId: null }),
     }),
     {
       name       : 'sucursal-store',
-      partialize : (state) => ({ sucursalActiva: state.sucursalActiva }),
+      partialize : (state) => ({
+        sucursalActiva : state.sucursalActiva,
+        negocioId      : state.negocioId,
+      }),
     }
   )
 );

@@ -11,13 +11,16 @@ import { getSucursales } from '../../api/sucursales.api';
  *
  * Solo visible para admin_negocio Y cuando el negocio tiene más de una sucursal.
  *
+ * Al montar, auto-selecciona la primera sucursal si no hay selección previa
+ * válida — el usuario no necesita hacer clic para que los datos carguen.
+ *
  * Al cambiar de sucursal:
  *   1. Actualiza sucursalStore
  *   2. Limpia el carrito
  *   3. Invalida todas las queries de React Query → recarga automática de datos
  */
 export function SucursalSelector() {
-  const { esAdminNegocio } = useAuth();
+  const { usuario, esAdminNegocio } = useAuth();
   const queryClient = useQueryClient();
 
   const sucursalActiva  = useSucursalStore((s) => s.sucursalActiva);
@@ -36,19 +39,20 @@ export function SucursalSelector() {
     queryKey  : ['sucursales-selector'],
     queryFn   : async () => {
       const { data } = await getSucursales();
-      // El backend retorna { ok, data: [...] }
       return data.data ?? data;
     },
     enabled   : esAdminNegocio(),
     staleTime : 5 * 60 * 1000,
   });
 
-  // Sincronizar lista con el store (incluye lógica de única sucursal)
+  // Sincronizar lista con el store.
+  // Pasa el negocio_id actual para que setSucursales pueda detectar cambios
+  // de negocio y auto-seleccionar cuando sucursalActiva sea null.
   useEffect(() => {
     if (Array.isArray(listaSucursales) && listaSucursales.length > 0) {
-      setSucursales(listaSucursales);
+      setSucursales(listaSucursales, usuario?.negocio_id ?? null);
     }
-  }, [listaSucursales, setSucursales]);
+  }, [listaSucursales, setSucursales, usuario?.negocio_id]);
 
   // Cerrar dropdown al hacer clic fuera
   useEffect(() => {
