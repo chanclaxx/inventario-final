@@ -281,7 +281,7 @@ function PasoTipo({ onSelect }) {
 
 // ─── Paso Serial ──────────────────────────────────────────────────────────────
 
-function PasoSerial({ onExito }) {
+function PasoSerial({ onExito, onDuplicadosEncontrados }) {
   const queryClient                     = useQueryClient();
   const { esAdminNegocio }              = useAuth();
   const esAdmin                         = esAdminNegocio();
@@ -296,11 +296,8 @@ function PasoSerial({ onExito }) {
   const [error,        setError]        = useState('');
   const [verificando,  setVerificando]  = useState(false);
 
-  // Estado del modal de reactivación
-  const [serialesDuplicados, setSerializesDuplicados] = useState([]);
-  const [modalReactivar,     setModalReactivar]       = useState(false);
-
   // Map de imei → reactivar_serial_id para los que el usuario confirmó reactivar
+  // Se llena desde el padre cuando el usuario confirma reactivar en el modal
   const reactivarMapRef = useRef({});
 
   const inputRefs = useRef([]);
@@ -418,9 +415,8 @@ function PasoSerial({ onExito }) {
     setVerificando(false);
 
     if (encontrados.length > 0) {
-      // Hay duplicados — mostrar modal para que el usuario decida
-      setSerializesDuplicados(encontrados);
-      setModalReactivar(true);
+      // Delegar al padre — él maneja el modal y llama confirmarConReactivacion
+      onDuplicadosEncontrados(encontrados, confirmarConReactivacion);
       return;
     }
 
@@ -428,15 +424,15 @@ function PasoSerial({ onExito }) {
     mutConfirmar.mutate();
   };
 
-  const handleReactivar = () => {
+  // Llamado por el padre cuando el usuario confirma reactivar en el modal
+  const confirmarConReactivacion = (seriales) => {
     // Guardar el map imei → id para que mutConfirmar lo use
-    serialesDuplicados.forEach((serial) => {
+    seriales.forEach((serial) => {
       reactivarMapRef.current[serial.imei] = serial.id;
     });
 
-    // Auto-seleccionar la línea del primer serial encontrado si no hay una seleccionada
-    // o si la línea actual no coincide con la del serial
-    const primerSerial = serialesDuplicados[0];
+    // Auto-seleccionar la línea del primer serial si la actual no coincide
+    const primerSerial = seriales[0];
     if (primerSerial && (!lineaSel || lineaSel.id !== primerSerial.producto_id)) {
       const lineaEncontrada = (productosData || []).find(
         (p) => p.id === primerSerial.producto_id
@@ -446,14 +442,7 @@ function PasoSerial({ onExito }) {
       }
     }
 
-    setModalReactivar(false);
-    setSerializesDuplicados([]);
     mutConfirmar.mutate();
-  };
-
-  const handleCancelarReactivar = () => {
-    setModalReactivar(false);
-    setSerializesDuplicados([]);
   };
 
   const labelBoton = () => {
@@ -464,8 +453,7 @@ function PasoSerial({ onExito }) {
   };
 
   return (
-    <>
-      <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-4">
         {!lineaSel ? (
           <div className="flex flex-col gap-2">
             <p className="text-sm font-medium text-gray-700">Seleccionar linea de producto</p>
@@ -632,13 +620,6 @@ function PasoSerial({ onExito }) {
         )}
       </div>
 
-      <ModalReactivarSeriales
-        open={modalReactivar}
-        seriales={serialesDuplicados}
-        onReactivar={handleReactivar}
-        onCancelar={handleCancelarReactivar}
-      />
-    </>
   );
 }
 
@@ -866,6 +847,28 @@ export function ModalAgregarProducto({ onClose }) {
   const [tipo,  setTipo]  = useState(null);
   const [exito, setExito] = useState(false);
 
+  // Estado del modal de reactivación — vive aquí para renderizarlo fuera del Modal principal
+  const [modalReactivar,     setModalReactivar]     = useState(false);
+  const [serialesDuplicados, setSerializesDuplicados] = useState([]);
+  const confirmarReactivarRef = useRef(null);
+
+  const handleDuplicadosEncontrados = (seriales, confirmarFn) => {
+    confirmarReactivarRef.current = confirmarFn;
+    setSerializesDuplicados(seriales);
+    setModalReactivar(true);
+  };
+
+  const handleReactivar = () => {
+    confirmarReactivarRef.current?.(serialesDuplicados);
+    setModalReactivar(false);
+    setSerializesDuplicados([]);
+  };
+
+  const handleCancelarReactivar = () => {
+    setModalReactivar(false);
+    setSerializesDuplicados([]);
+  };
+
   if (exito) {
     return (
       <Modal open onClose={onClose} title="Producto agregado" size="sm">
@@ -888,28 +891,38 @@ export function ModalAgregarProducto({ onClose }) {
   }
 
   return (
-    <Modal
-      open
-      onClose={onClose}
-      title={
-        tipo === 'serial'   ? 'Agregar seriales' :
-        tipo === 'cantidad' ? 'Agregar stock'    :
-        'Agregar producto'
-      }
-      size="md"
-    >
-      {!tipo && <PasoTipo onSelect={setTipo} />}
-      {tipo === 'serial'   && <PasoSerial   onExito={() => setExito(true)} />}
-      {tipo === 'cantidad' && <PasoCantidad onExito={() => setExito(true)} />}
+    <>
+      <Modal
+        open
+        onClose={onClose}
+        title={
+          tipo === 'serial'   ? 'Agregar seriales' :
+          tipo === 'cantidad' ? 'Agregar stock'    :
+          'Agregar producto'
+        }
+        size="md"
+      >
+        {!tipo && <PasoTipo onSelect={setTipo} />}
+        {tipo === 'serial'   && <PasoSerial   onExito={() => setExito(true)} onDuplicadosEncontrados={handleDuplicadosEncontrados} />}
+        {tipo === 'cantidad' && <PasoCantidad onExito={() => setExito(true)} />}
 
-      {tipo && (
-        <button
-          onClick={() => setTipo(null)}
-          className="mt-3 text-xs text-gray-400 hover:text-gray-600 w-full text-center"
-        >
-          Volver a seleccion de tipo
-        </button>
-      )}
-    </Modal>
+        {tipo && (
+          <button
+            onClick={() => setTipo(null)}
+            className="mt-3 text-xs text-gray-400 hover:text-gray-600 w-full text-center"
+          >
+            Volver a seleccion de tipo
+          </button>
+        )}
+      </Modal>
+
+      {/* ModalReactivarSeriales fuera del Modal principal — evita conflicto de z-index */}
+      <ModalReactivarSeriales
+        open={modalReactivar}
+        seriales={serialesDuplicados}
+        onReactivar={handleReactivar}
+        onCancelar={handleCancelarReactivar}
+      />
+    </>
   );
 }
