@@ -13,7 +13,7 @@ import { Spinner }    from '../../components/ui/Spinner';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { useSucursalKey } from '../../hooks/useSucursalKey';
 import {
-  Wallet, Plus, Minus, Lock, ChevronDown, ChevronUp,
+  Wallet, Plus, Lock, ChevronDown, ChevronUp,
   ShoppingCart, CreditCard, ArrowDownCircle, ArrowUpCircle,
   Receipt, Sliders,
 } from 'lucide-react';
@@ -32,6 +32,7 @@ function ModalMovimiento({ cajaId, onClose }) {
       valor:    Number(form.valor),
     }),
     onSuccess: () => {
+      // caja-resumen es por ID de caja — exact:false cubre cualquier variante
       queryClient.invalidateQueries({ queryKey: ['caja-resumen', cajaId], exact: false });
       queryClient.invalidateQueries({ queryKey: ['caja-activa'],           exact: false });
       onClose();
@@ -246,7 +247,7 @@ function GrupoMovimientos({ grupoKey, grupo }) {
   if (!cfg || grupo.items.length === 0) return null;
 
   const GrupoIcono = cfg.icono;
-  const esMixto   = grupoKey === 'manuales';
+  const esMixto    = grupoKey === 'manuales';
   const esIngreso  = grupo.tipo === 'Ingreso';
 
   const totalMostrar = esMixto
@@ -321,19 +322,22 @@ function GrupoMovimientos({ grupoKey, grupo }) {
 // ─── Page principal ───────────────────────────────────────────────────────────
 
 export default function CajaPage() {
-  const queryClient                         = useQueryClient();
-  const sucursalKey                         = useSucursalKey();
-  const [modalMov,      setModalMov]        = useState(false);
-  const [modalCerrar,   setModalCerrar]     = useState(false);
-  const [montoApertura, setMontoApertura]   = useState('');
+  const queryClient                       = useQueryClient();
+  const { sucursalKey, sucursalLista }    = useSucursalKey();
+  const [modalMov,      setModalMov]      = useState(false);
+  const [modalCerrar,   setModalCerrar]   = useState(false);
+  const [montoApertura, setMontoApertura] = useState('');
 
-  // caja-activa es de sucursal → incluye sucursalKey
+  // caja-activa es por sucursal → incluye sucursalKey
+  // Solo se consulta cuando la sucursal está validada para evitar 403
   const { data: caja, isLoading } = useQuery({
     queryKey: ['caja-activa', ...sucursalKey],
     queryFn:  () => getCajaActiva().then((r) => r.data.data),
+    enabled:  sucursalLista,
   });
 
-  // caja-resumen es por ID único de caja abierta → sin sucursalKey
+  // caja-resumen es por ID único de la caja abierta, no depende de sucursal
+  // Una caja tiene un id irrepetible → no necesita sucursalKey en el queryKey
   const { data: resumenData, isLoading: loadingResumen } = useQuery({
     queryKey: ['caja-resumen', caja?.id],
     queryFn:  () => getResumenDia(caja.id).then((r) => r.data.data),
@@ -451,7 +455,7 @@ export default function CajaPage() {
             <GrupoMovimientos grupoKey="compras"        grupo={grupos.compras        || { items: [] }} />
             <GrupoMovimientos grupoKey="abonosAcreedor" grupo={grupos.abonosAcreedor || { items: [] }} />
 
-            {(grupos.manuales?.items?.length > 0) && (
+            {grupos.manuales?.items?.length > 0 && (
               <>
                 <p className="text-xs text-gray-400 font-medium px-1 mt-1">Manuales</p>
                 <GrupoMovimientos grupoKey="manuales" grupo={grupos.manuales} />
