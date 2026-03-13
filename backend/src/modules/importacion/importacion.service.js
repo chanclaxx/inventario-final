@@ -59,8 +59,19 @@ const _resolverProductoSerial = async ({ nombre, marca, modelo, sucursalId, prov
 // ─────────────────────────────────────────────
 // IMPORTAR SERIAL
 // ─────────────────────────────────────────────
+
+/**
+ * Importa seriales desde las hojas del Excel.
+ *
+ * Regla de unicidad: un IMEI es único DENTRO del negocio.
+ * Si el mismo IMEI ya existe en ese negocio (en cualquier sucursal),
+ * se actualiza en lugar de duplicar — sin importar en cuántos otros
+ * negocios exista ese mismo IMEI (datos legacy de importaciones previas).
+ *
+ * Esto evita que reimportar el mismo Excel en un negocio cree duplicados,
+ * y también que datos de otros negocios interfieran con la lógica.
+ */
 const importarSerial = async (hojas, sucursalId, negocioId) => {
-  console.log('IMPORTAR SERIAL v2 - negocioId:', negocioId, 'sucursalId:', sucursalId);
   const resumenPorProducto = [];
 
   for (const hoja of hojas) {
@@ -94,16 +105,18 @@ const importarSerial = async (hojas, sucursalId, negocioId) => {
         const costoCompra   = fila.costo_compra   ? Number(fila.costo_compra)   : null;
         const clienteOrigen = fila.cliente_origen?.toString().trim() || null;
 
-        // Buscar duplicado solo dentro del mismo negocio
+        // Buscar duplicado SOLO dentro del mismo negocio — ignora otros negocios
+        // intencionalmente para no cruzar datos entre clientes distintos
         const { rows: serialExiste } = await pool.query(
           `SELECT s.id FROM seriales s
            JOIN productos_serial ps ON ps.id = s.producto_id
-           JOIN sucursales su ON su.id = ps.sucursal_id
+           JOIN sucursales       su ON su.id = ps.sucursal_id
            WHERE s.imei = $1 AND su.negocio_id = $2 LIMIT 1`,
           [imei, negocioId]
         );
 
         if (serialExiste.length) {
+          // Actualizar solo campos opcionales — no sobreescribir datos de venta/estado
           await pool.query(
             `UPDATE seriales SET
                costo_compra   = COALESCE($1, costo_compra),
@@ -144,6 +157,14 @@ const importarSerial = async (hojas, sucursalId, negocioId) => {
 // ─────────────────────────────────────────────
 // IMPORTAR CANTIDAD
 // ─────────────────────────────────────────────
+
+/**
+ * Importa productos por cantidad.
+ *
+ * Regla de unicidad: nombre + sucursal_id.
+ * Si ya existe, acumula stock y actualiza campos opcionales.
+ * Si no existe, lo crea en la sucursal del usuario autenticado.
+ */
 const importarCantidad = async (filas, sucursalId, negocioId) => {
   const resultado = { insertados: 0, actualizados: 0, omitidos: 0, errores: [] };
 
@@ -157,9 +178,9 @@ const importarCantidad = async (filas, sucursalId, negocioId) => {
         continue;
       }
 
-      const stock       = fila.stock        !== undefined ? Number(fila.stock)          : 0;
-      const stockMinimo = fila.stock_minimo  !== undefined ? Number(fila.stock_minimo)   : 0;
-      const costoUnit   = fila.costo_unitario              ? Number(fila.costo_unitario)  : null;
+      const stock       = fila.stock         !== undefined ? Number(fila.stock)         : 0;
+      const stockMinimo = fila.stock_minimo   !== undefined ? Number(fila.stock_minimo)  : 0;
+      const costoUnit   = fila.costo_unitario              ? Number(fila.costo_unitario) : null;
       const unidad      = fila.unidad_medida?.toString().trim() || 'unidad';
       const clienteOrig = fila.cliente_origen?.toString().trim() || null;
       const proveedorId = await _resolverProveedor(fila.proveedor, negocioId);
