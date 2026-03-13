@@ -451,7 +451,7 @@ function LineaImeis({
 // ─── Paso 2 Serial ────────────────────────────────────────────────────────────
 function PasoLineaSerial({
   proveedorId, lineasIniciales, factorInicial, traidaInicial,
-  verificando, sucursalKey, onContinuar, onVolver,
+  verificando, sucursalKey, sucursalLista, onContinuar, onVolver,
 }) {
   const [busqueda,            setBusqueda]           = useState('');
   const [creandoNueva,        setCreandoNueva]        = useState(false);
@@ -463,9 +463,12 @@ function PasoLineaSerial({
   const [traida,              setTraida]             = useState(traidaInicial);
   const queryClient = useQueryClient();
 
+  // queryKey incluye sucursalKey → caché aislado por negocio + sucursal
+  // enabled: sucursalLista → evita fetch con sucursal_id inválido (403)
   const { data: productosData } = useQuery({
     queryKey: ['productos-serial', ...sucursalKey],
     queryFn:  () => getProductosSerial().then((r) => r.data.data),
+    enabled:  sucursalLista,
   });
 
   const mutCrearLinea = useMutation({
@@ -719,7 +722,7 @@ function PasoLineaSerial({
 // ─── Paso 2 Cantidad ──────────────────────────────────────────────────────────
 function PasoCantidad({
   proveedorId, productosIniciales, factorInicial, traidaInicial,
-  sucursalKey, onProductosListos, onVolver,
+  sucursalKey, sucursalLista, onProductosListos, onVolver,
 }) {
   const [busqueda,               setBusqueda]              = useState('');
   const [creandoNuevo,           setCreandoNuevo]          = useState(false);
@@ -730,9 +733,12 @@ function PasoCantidad({
   const [traida,                 setTraida]                = useState(traidaInicial);
   const queryClient = useQueryClient();
 
+  // queryKey incluye sucursalKey → caché aislado por negocio + sucursal
+  // enabled: sucursalLista → evita fetch con sucursal_id inválido (403)
   const { data: productosData } = useQuery({
     queryKey: ['productos-cantidad', ...sucursalKey],
     queryFn:  () => getProductosCantidad().then((r) => r.data.data),
+    enabled:  sucursalLista,
   });
 
   const mutCrear = useMutation({
@@ -1193,8 +1199,8 @@ function PasoPago({ proveedor, productos, tipo, onConfirmar, onVolver, loading }
 
 // ─── Modal principal ──────────────────────────────────────────────────────────
 export function ModalCompra({ proveedor, onClose }) {
-  const queryClient = useQueryClient();
-  const sucursalKey = useSucursalKey();
+  const queryClient                    = useQueryClient();
+  const { sucursalKey, sucursalLista } = useSucursalKey();
 
   const [paso,           setPaso]           = useState(1);
   const [tipo,           setTipo]           = useState(null);
@@ -1353,6 +1359,7 @@ export function ModalCompra({ proveedor, onClose }) {
             traidaInicial={traidaGuardada}
             verificando={verificando}
             sucursalKey={sucursalKey}
+            sucursalLista={sucursalLista}
             onContinuar={handleContinuarSerial}
             onVolver={handleVolverA1}
           />
@@ -1364,6 +1371,7 @@ export function ModalCompra({ proveedor, onClose }) {
             factorInicial={factorGuardado}
             traidaInicial={traidaGuardada}
             sucursalKey={sucursalKey}
+            sucursalLista={sucursalLista}
             onProductosListos={handleProductosListos}
             onVolver={handleVolverA1}
           />

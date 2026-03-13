@@ -105,13 +105,15 @@ function ModalDetalleCompra({ compraId, onClose }) {
 }
 
 // ── Vista historial de un proveedor ──────────────────────────
-function HistorialProveedor({ proveedor, sucursalKey, onVolver, onNuevaCompra }) {
+function HistorialProveedor({ proveedor, sucursalKey, sucursalLista, onVolver, onNuevaCompra }) {
   const [compraDetalle, setCompraDetalle] = useState(null);
 
-  // Compras son de sucursal → incluye sucursalKey
+  // queryKey incluye sucursalKey → caché aislado por negocio + sucursal
+  // enabled: sucursalLista → evita fetch con sucursal_id inválido (403)
   const { data: comprasData, isLoading } = useQuery({
     queryKey: ['compras-proveedor', proveedor.id, ...sucursalKey],
     queryFn:  () => getComprasByProveedor(proveedor.id).then((r) => r.data.data),
+    enabled:  sucursalLista,
   });
 
   const compras       = comprasData || [];
@@ -259,7 +261,7 @@ export default function ProveedoresPage() {
   const [proveedorVer,    setProveedorVer]    = useState(null);
   const [modalCompra,     setModalCompra]     = useState(null);
 
-  const sucursalKey = useSucursalKey();
+  const { sucursalKey, sucursalLista } = useSucursalKey();
 
   // Proveedores es del negocio (negocio_id) → sin sucursalKey
   const { data: proveedoresData, isLoading } = useQuery({
@@ -277,6 +279,7 @@ export default function ProveedoresPage() {
         <HistorialProveedor
           proveedor={proveedorVer}
           sucursalKey={sucursalKey}
+          sucursalLista={sucursalLista}
           onVolver={() => setProveedorVer(null)}
           onNuevaCompra={() => setModalCompra(proveedorVer)}
         />

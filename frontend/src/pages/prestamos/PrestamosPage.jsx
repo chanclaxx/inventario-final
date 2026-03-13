@@ -324,17 +324,21 @@ export default function PrestamosPage() {
   const [tabPrestamos,  setTabPrestamos]  = useState('companeros');
   const [prestamoAbono, setPrestamoAbono] = useState(null);
   const [creditoAbono,  setCreditoAbono]  = useState(null);
-  const queryClient  = useQueryClient();
-  const sucursalKey  = useSucursalKey();
+  const queryClient                        = useQueryClient();
+  const { sucursalKey, sucursalLista }     = useSucursalKey();
 
+  // queryKey incluye sucursalKey → caché aislado por negocio + sucursal
+  // enabled: sucursalLista → evita fetch con sucursal_id inválido (403)
   const { data: prestamosData, isLoading: loadingP } = useQuery({
     queryKey: ['prestamos', ...sucursalKey],
     queryFn:  () => getPrestamos().then((r) => r.data.data),
+    enabled:  sucursalLista,
   });
 
   const { data: creditosData, isLoading: loadingC } = useQuery({
     queryKey: ['creditos', ...sucursalKey],
     queryFn:  () => getCreditos().then((r) => r.data.data),
+    enabled:  sucursalLista,
   });
 
   const mutDevolver = useMutation({

@@ -1,9 +1,9 @@
-import { useState, useMemo, useContext } from 'react';
+import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getFacturas, getFacturaById, cancelarFactura } from '../../api/facturas.api';
 import { getGarantias } from '../../api/garantias.api';
 import { formatCOP, formatFecha, formatFechaHora } from '../../utils/formatters';
-import { AuthContext }        from '../../context/AuthContext';
+import { useAuth }            from '../../context/useAuth';
 import { Badge }              from '../../components/ui/Badge';
 import { Button }             from '../../components/ui/Button';
 import { Modal }              from '../../components/ui/Modal';
@@ -147,17 +147,17 @@ function SeccionProveedor({ proveedorNombre }) {
 // ─── Modal detalle ────────────────────────────────────────────────────────────
 
 function ModalDetalle({ facturaId, onClose, onReimprimir, onEditar }) {
-  const { esAdminNegocio } = useContext(AuthContext);
+  const { esAdminNegocio } = useAuth();
 
   const { data, isLoading } = useQuery({
     queryKey: ['factura-detalle', facturaId],
-    queryFn: () => getFacturaById(facturaId).then((r) => r.data.data),
-    enabled: !!facturaId,
+    queryFn:  () => getFacturaById(facturaId).then((r) => r.data.data),
+    enabled:  !!facturaId,
   });
 
   const { data: configData } = useQuery({
     queryKey: ['config'],
-    queryFn: () => api.get('/config').then((r) => r.data.data),
+    queryFn:  () => api.get('/config').then((r) => r.data.data),
   });
 
   if (isLoading) {
@@ -306,7 +306,6 @@ function FilaFactura({ factura, onVerDetalle, onInactivar, onEditar, mostrarSucu
           {factura.retoma_descripcion && (
             <Badge variant="purple">Retoma</Badge>
           )}
-          {/* Badge de sucursal en vista global */}
           {mostrarSucursal && factura.sucursal_nombre && (
             <span className="flex items-center gap-1 text-[10px] text-purple-600
               bg-purple-50 border border-purple-100 rounded-full px-2 py-0.5">
@@ -479,11 +478,11 @@ function PanelBusqueda({ filtros, onChange, onLimpiar, totalResultados, totalFac
 const FILTROS_INICIALES = { texto: '', desde: '', hasta: '', proveedor: '' };
 
 export default function FacturarPage() {
-  const queryClient                            = useQueryClient();
-  const { esAdminNegocio }                     = useContext(AuthContext);
-  const esAdmin                                = esAdminNegocio();
-  const sucursalKey                            = useSucursalKey();
-  const esVistaGlobal                          = useSucursalStore((s) => s.esVistaGlobal());
+  const queryClient                         = useQueryClient();
+  const { esAdminNegocio }                  = useAuth();
+  const esAdmin                             = esAdminNegocio();
+  const { sucursalKey, sucursalLista }      = useSucursalKey();
+  const esVistaGlobal                       = useSucursalStore((s) => s.esVistaGlobal());
 
   const [facturaDetalle,   setFacturaDetalle]   = useState(null);
   const [facturaInactivar, setFacturaInactivar] = useState(null);
@@ -491,23 +490,27 @@ export default function FacturarPage() {
   const [facturaEditar,    setFacturaEditar]    = useState(null);
   const [filtros,          setFiltros]          = useState(FILTROS_INICIALES);
 
-  // ── queryKey incluye sucursalKey → caché separado por sucursal ──────────────
+  // queryKey incluye sucursalKey → caché separado por negocio + sucursal
+  // enabled: sucursalLista → evita fetch con sucursal_id inválido (403)
   const { data: facturasData, isLoading } = useQuery({
     queryKey: ['facturas', ...sucursalKey],
-    queryFn: () => getFacturas().then((r) => r.data.data),
+    queryFn:  () => getFacturas().then((r) => r.data.data),
+    enabled:  sucursalLista,
   });
 
+  // garantias son configuración del negocio, no de sucursal
+  // el backend las filtra por negocio_id del token, sin sucursal_id
   const { data: garantiasData } = useQuery({
     queryKey: ['garantias'],
-    queryFn: () => getGarantias().then((r) => r.data.data),
+    queryFn:  () => getGarantias().then((r) => r.data.data),
   });
 
   const mutInactivar = useMutation({
     mutationFn: (id) => cancelarFactura(id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['facturas'] });
-      queryClient.invalidateQueries({ queryKey: ['productos-serial'] });
-      queryClient.invalidateQueries({ queryKey: ['productos-cantidad'] });
+      queryClient.invalidateQueries({ queryKey: ['facturas'],          exact: false });
+      queryClient.invalidateQueries({ queryKey: ['productos-serial'],  exact: false });
+      queryClient.invalidateQueries({ queryKey: ['productos-cantidad'], exact: false });
       setFacturaInactivar(null);
     },
   });

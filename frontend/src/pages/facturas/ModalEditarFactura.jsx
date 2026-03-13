@@ -14,11 +14,11 @@ import { User, Users, Package, ShoppingBag }         from 'lucide-react';
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
 const METODOS_PAGO = [
-  { id: 'Efectivo'       },
-  { id: 'Nequi'         },
-  { id: 'Daviplata'     },
-  { id: 'Transferencia' },
-  { id: 'Tarjeta'       },
+  { id: 'Efectivo'      },
+  { id: 'Nequi'        },
+  { id: 'Daviplata'    },
+  { id: 'Transferencia'},
+  { id: 'Tarjeta'      },
 ];
 
 const RETOMA_VACIA = {
@@ -218,21 +218,22 @@ function RetomaCantidad({ retoma, setRetomaField, productosCantidad }) {
 
 // ─── Panel retoma ─────────────────────────────────────────────────────────────
 
-function PanelRetoma({ retoma, setRetoma, esNueva, sucursalKey }) {
+function PanelRetoma({ retoma, setRetoma, esNueva, sucursalKey, sucursalLista }) {
   const setRetomaField = (campo, valor) =>
     setRetoma((r) => ({ ...r, [campo]: valor }));
 
-  // queryKey incluye sucursalKey para evitar caché cruzado entre sucursales
+  // queryKey incluye sucursalKey → caché separado por negocio + sucursal
+  // enabled incluye sucursalLista → evita fetch con sucursal_id inválido
   const { data: productosSerial } = useQuery({
     queryKey : ['productos-serial', ...sucursalKey],
     queryFn  : () => getProductosSerial().then((r) => r.data.data),
-    enabled  : retoma?.ingreso_inventario && retoma?.tipo_retoma === 'serial',
+    enabled  : sucursalLista && retoma?.ingreso_inventario && retoma?.tipo_retoma === 'serial',
   });
 
   const { data: productosCantidad } = useQuery({
     queryKey : ['productos-cantidad', ...sucursalKey],
     queryFn  : () => getProductosCantidad().then((r) => r.data.data),
-    enabled  : retoma?.ingreso_inventario && retoma?.tipo_retoma === 'cantidad',
+    enabled  : sucursalLista && retoma?.ingreso_inventario && retoma?.tipo_retoma === 'cantidad',
   });
 
   return (
@@ -315,8 +316,8 @@ function PanelRetoma({ retoma, setRetoma, esNueva, sucursalKey }) {
 // ─── Modal principal ──────────────────────────────────────────────────────────
 
 export function ModalEditarFactura({ facturaId, onClose, onGuardado }) {
-  const queryClient = useQueryClient();
-  const sucursalKey = useSucursalKey();
+  const queryClient                      = useQueryClient();
+  const { sucursalKey, sucursalLista }   = useSucursalKey();
 
   const { data, isLoading } = useQuery({
     queryKey : ['factura-detalle', facturaId],
@@ -346,8 +347,8 @@ export function ModalEditarFactura({ facturaId, onClose, onGuardado }) {
   const mutEditar = useMutation({
     mutationFn: () => editarFactura(facturaId, {
       nombre_cliente : formEfectivo.nombre,
-      cedula         : tipoClienteEfectivo === 'companero' ? 'COMPANERO'    : formEfectivo.cedula,
-      celular        : tipoClienteEfectivo === 'companero' ? '0000000000'   : formEfectivo.celular,
+      cedula         : tipoClienteEfectivo === 'companero' ? 'COMPANERO'  : formEfectivo.cedula,
+      celular        : tipoClienteEfectivo === 'companero' ? '0000000000' : formEfectivo.celular,
       notas          : formEfectivo.notas,
       lineas         : lineasEfectivas,
       pagos          : Object.entries(pagosEfectivos)
@@ -357,11 +358,10 @@ export function ModalEditarFactura({ facturaId, onClose, onGuardado }) {
       esRetomaNueva  : retomaEsNueva && conRetomaEfectivo,
     }),
     onSuccess: () => {
-      // Invalidar todas las variantes de sucursal
-      queryClient.invalidateQueries({ queryKey: ['facturas'],          exact: false });
-      queryClient.invalidateQueries({ queryKey: ['factura-detalle'],   exact: false });
-      queryClient.invalidateQueries({ queryKey: ['productos-serial'],  exact: false });
-      queryClient.invalidateQueries({ queryKey: ['productos-cantidad'], exact: false });
+      queryClient.invalidateQueries({ queryKey: ['facturas'],           exact: false });
+      queryClient.invalidateQueries({ queryKey: ['factura-detalle'],    exact: false });
+      queryClient.invalidateQueries({ queryKey: ['productos-serial'],   exact: false });
+      queryClient.invalidateQueries({ queryKey: ['productos-cantidad'],  exact: false });
       onGuardado?.();
       onClose();
     },
@@ -528,6 +528,7 @@ export function ModalEditarFactura({ facturaId, onClose, onGuardado }) {
                 setRetoma={setRetoma}
                 esNueva={retomaEsNueva}
                 sucursalKey={sucursalKey}
+                sucursalLista={sucursalLista}
               />
             </div>
           )}

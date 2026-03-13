@@ -117,9 +117,9 @@ function SelectorModelo({ productos, productoSeleccionado, onSeleccionar }) {
 
 // ─── Componente principal ─────────────────────────────────────────────────────
 export function ProductosSerial({ onAgregarProducto }) {
-  const queryClient = useQueryClient();
-  const { esAdminNegocio } = useAuth();
-  const sucursalKey = useSucursalKey();
+  const queryClient                    = useQueryClient();
+  const { esAdminNegocio }             = useAuth();
+  const { sucursalKey, sucursalLista } = useSucursalKey();
 
   const [productoSeleccionado, setProductoSeleccionado] = useState(null);
   const [busqueda,             setBusqueda]             = useState('');
@@ -128,18 +128,21 @@ export function ProductosSerial({ onAgregarProducto }) {
   const [serialAEditar,        setSerialAEditar]        = useState(null);
 
   // Caché por sucursal: al cambiar de sucursal los productos cambian
+  // enabled: sucursalLista → evita fetch con sucursal_id inválido (403)
   const { data: productosData, isLoading } = useQuery({
-    queryKey: ['productos-serial', ...sucursalKey],
-    queryFn:  () => getProductosSerial().then((r) => r.data.data),
+    queryKey:  ['productos-serial', ...sucursalKey],
+    queryFn:   () => getProductosSerial().then((r) => r.data.data),
+    enabled:   sucursalLista,
     staleTime: 0,
     gcTime:    0,
   });
 
   // Caché por producto + sucursal: seriales son distintos en cada combinación
+  // enabled: sucursalLista && !!productoSeleccionado → ambas condiciones deben cumplirse
   const { data: serialesData, isLoading: loadingSeriales } = useQuery({
     queryKey: ['seriales', productoSeleccionado?.id, ...sucursalKey],
     queryFn:  () => getSeriales(productoSeleccionado.id, false).then((r) => r.data.data),
-    enabled:  !!productoSeleccionado,
+    enabled:  sucursalLista && !!productoSeleccionado,
   });
 
   const agregarItem = useCarritoStore((s) => s.agregarItem);
@@ -148,8 +151,8 @@ export function ProductosSerial({ onAgregarProducto }) {
     mutationFn: (serialId) => eliminarSerial(serialId),
     onSuccess: () => {
       // exact: false invalida todas las variantes de sucursal y producto
-      queryClient.invalidateQueries({ queryKey: ['seriales'],          exact: false });
-      queryClient.invalidateQueries({ queryKey: ['productos-serial'],  exact: false });
+      queryClient.invalidateQueries({ queryKey: ['seriales'],         exact: false });
+      queryClient.invalidateQueries({ queryKey: ['productos-serial'], exact: false });
       setSerialAEliminar(null);
     },
   });

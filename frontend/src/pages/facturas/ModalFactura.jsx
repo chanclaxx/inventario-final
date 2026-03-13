@@ -371,7 +371,7 @@ function RetomaCantidad({ retoma, setRetomaField, productosCantidad }) {
 
 export function ModalFactura({ open, onClose }) {
   const queryClient = useQueryClient();
-  const sucursalKey = useSucursalKey();
+  const { sucursalKey, sucursalLista } = useSucursalKey();
 
   const { items, totalCarrito, limpiarCarrito, actualizarPrecio } = useCarritoStore();
   const total = totalCarrito();
@@ -404,7 +404,7 @@ export function ModalFactura({ open, onClose }) {
   const { data: productosSerial } = useQuery({
     queryKey: ['productos-serial', ...sucursalKey],
     queryFn: () => getProductosSerial().then((r) => r.data.data),
-    enabled: conRetoma && retoma.tipo_retoma === 'serial',
+    enabled: sucursalLista && conRetoma && retoma.tipo_retoma === 'serial',
   });
 
   const { data: productosCantidad } = useQuery({
