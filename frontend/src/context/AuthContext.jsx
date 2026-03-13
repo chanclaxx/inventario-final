@@ -16,14 +16,22 @@ export function AuthProvider({ children }) {
   const [usuario, setUsuario] = useState(getUsuarioInicial);
 
   const login = async (email, password) => {
-    // Limpiar sucursal persistida de sesiones anteriores antes de establecer
-    // la nueva sesión — evita que el interceptor inyecte un sucursal_id
-    // de otro negocio mientras se resuelve la nueva selección
+    // Reset completo antes del nuevo login — evita que sucursal_id de otra
+    // sesión se inyecte mientras se resuelve la nueva selección
     useSucursalStore.getState().reset();
 
     const { data } = await loginApi(email, password);
+
     sessionStorage.setItem('accessToken', data.accessToken);
     sessionStorage.setItem('usuario', JSON.stringify(data.usuario));
+
+    // Si el backend retorna sucursales (admin_negocio), las inyectamos
+    // inmediatamente en el store — sucursalActiva queda válida antes de
+    // que monte cualquier componente, sin necesidad de clic manual.
+    if (Array.isArray(data.sucursales) && data.sucursales.length > 0) {
+      useSucursalStore.getState().setSucursales(data.sucursales, data.usuario.negocio_id);
+    }
+
     setUsuario(data.usuario);
     return data.usuario;
   };

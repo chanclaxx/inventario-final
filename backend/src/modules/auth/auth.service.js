@@ -32,6 +32,14 @@ const QUERY_USUARIO_BASE = `
   LEFT JOIN sucursales s ON s.id = u.sucursal_id
 `;
 
+// Query reutilizada para obtener sucursales activas de un negocio
+const QUERY_SUCURSALES_NEGOCIO = `
+  SELECT id, nombre
+  FROM sucursales
+  WHERE negocio_id = $1 AND activa = true
+  ORDER BY id
+`;
+
 const _validarEstadoPlan = async (usuario) => {
   if (usuario.estado_plan === 'suspendido') {
     throw { status: 403, message: 'Cuenta suspendida. Contacta al soporte.', code: 'CUENTA_SUSPENDIDA' };
@@ -46,6 +54,16 @@ const _validarEstadoPlan = async (usuario) => {
   if (usuario.estado_plan === 'vencido') {
     throw { status: 403, message: 'Tu plan ha vencido.', code: 'PLAN_VENCIDO' };
   }
+};
+
+/**
+ * Retorna las sucursales activas del negocio solo para admin_negocio.
+ * Vendedor y supervisor tienen su sucursal fija en el token — no necesitan lista.
+ */
+const _getSucursalesParaAdmin = async (usuario) => {
+  if (usuario.rol !== 'admin_negocio') return null;
+  const { rows } = await pool.query(QUERY_SUCURSALES_NEGOCIO, [usuario.negocio_id]);
+  return rows;
 };
 
 // ─────────────────────────────────────────────
@@ -86,7 +104,9 @@ const login = async (email, password) => {
 
   await pool.query('UPDATE usuarios SET ultimo_acceso = NOW() WHERE id = $1', [usuario.id]);
 
-  return { accessToken, refreshToken, usuario: payload };
+  const sucursales = await _getSucursalesParaAdmin(usuario);
+
+  return { accessToken, refreshToken, usuario: payload, sucursales };
 };
 
 // ─────────────────────────────────────────────
@@ -109,7 +129,9 @@ const refreshAccessToken = async (refreshToken) => {
       expiresIn: process.env.JWT_EXPIRES_IN,
     });
 
-    return { accessToken, usuario: payload };
+    const sucursales = await _getSucursalesParaAdmin(usuario);
+
+    return { accessToken, usuario: payload, sucursales };
   } catch (err) {
     if (err.status) throw err;
     throw { status: 401, message: 'Refresh token inválido o expirado' };

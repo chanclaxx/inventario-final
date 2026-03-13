@@ -25,6 +25,7 @@ const login = async (req, res, next) => {
       ok:          true,
       accessToken: data.accessToken,
       usuario:     data.usuario,
+      sucursales:  data.sucursales, // null para vendedor/supervisor, array para admin_negocio
     });
   } catch (err) {
     next(err);
@@ -43,7 +44,13 @@ const refresh = async (req, res, next) => {
     }
 
     const data = await authService.refreshAccessToken(refreshToken);
-    res.json({ ok: true, accessToken: data.accessToken, usuario: data.usuario });
+
+    res.json({
+      ok:         true,
+      accessToken: data.accessToken,
+      usuario:     data.usuario,
+      sucursales:  data.sucursales, // null para vendedor/supervisor, array para admin_negocio
+    });
   } catch (err) {
     next(err);
   }
