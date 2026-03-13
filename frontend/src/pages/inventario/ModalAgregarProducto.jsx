@@ -10,14 +10,17 @@ import { crearCompra } from '../../api/compras.api';
 import {
   getProductosSerial,   crearProductoSerial,   agregarSerial,
   getProductosCantidad, crearProductoCantidad, ajustarStockCantidad,
+  verificarImei as verificarImeiApi,
 } from '../../api/productos.api';
 import api from '../../api/axios.config';
 import {
   Package, ShoppingBag, ChevronRight, Trash2,
   ShoppingCart, CreditCard, Banknote,
+  AlertTriangle, RefreshCw, X,
 } from 'lucide-react';
 
-// --- Helper: construir payload de crearCompra ----------------------------------
+// ─── Helper: payload de crearCompra ──────────────────────────────────────────
+
 function buildPayloadCompra({ proveedorId, monto, modoPago, lineas }) {
   return {
     proveedor_id:        Number(proveedorId),
@@ -32,7 +35,119 @@ function buildPayloadCompra({ proveedorId, monto, modoPago, lineas }) {
   };
 }
 
-// --- Panel info de compra (solo admin) -----------------------------------------
+// ─── Helper: verificar lista de IMEIs en paralelo ────────────────────────────
+// Retorna solo los que ya existen en el negocio
+
+async function verificarImeis(imeis) {
+  const resultados = await Promise.all(
+    imeis.map(async (imei) => {
+      try {
+        const { data } = await verificarImeiApi(imei.trim());
+        if (data.data.existe) return data.data.serial;
+        return null;
+      } catch {
+        return null;
+      }
+    })
+  );
+  return resultados.filter(Boolean);
+}
+
+// ─── Modal de reactivación múltiple ──────────────────────────────────────────
+
+function ModalReactivarSeriales({ open, seriales, onReactivar, onCancelar }) {
+  if (!seriales || seriales.length === 0) return null;
+
+  return (
+    <Modal open={open} onClose={onCancelar} title="" size="sm">
+      <div className="flex flex-col items-center gap-4 py-2">
+
+        <div className="w-14 h-14 rounded-full bg-amber-50 border-2 border-amber-200
+          flex items-center justify-center">
+          <AlertTriangle size={26} className="text-amber-500" />
+        </div>
+
+        <div className="text-center">
+          <h3 className="text-base font-semibold text-gray-900">
+            {seriales.length === 1
+              ? 'Este IMEI ya está registrado'
+              : `${seriales.length} IMEIs ya están registrados`}
+          </h3>
+          <p className="text-sm text-gray-500 mt-1">
+            {seriales.length === 1
+              ? 'Este equipo aparece en el historial del inventario'
+              : 'Estos equipos aparecen en el historial del inventario'}
+          </p>
+        </div>
+
+        <div className="w-full flex flex-col gap-2 max-h-52 overflow-y-auto">
+          {seriales.map((serial) => {
+            const estadoLabel = serial.vendido  ? 'Vendido'
+              : serial.prestado                 ? 'Prestado'
+              :                                   'En inventario';
+
+            const estadoColor = serial.vendido
+              ? 'text-red-600 bg-red-50 border-red-200'
+              : serial.prestado
+              ? 'text-yellow-700 bg-yellow-50 border-yellow-200'
+              : 'text-green-700 bg-green-50 border-green-200';
+
+            return (
+              <div
+                key={serial.id}
+                className="w-full rounded-xl border border-gray-100 bg-gray-50 p-3 flex flex-col gap-1.5"
+              >
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-500">IMEI</span>
+                  <span className="font-mono font-medium text-gray-900">{serial.imei}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-500">Producto</span>
+                  <span className="font-medium text-gray-900 text-right max-w-[60%]">
+                    {serial.producto_nombre}
+                    {serial.marca ? ` · ${serial.marca}` : ''}
+                  </span>
+                </div>
+                <div className="flex justify-between text-sm items-center">
+                  <span className="text-gray-500">Estado</span>
+                  <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${estadoColor}`}>
+                    {estadoLabel}
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <p className="text-sm text-center text-gray-700 leading-relaxed">
+          ¿Deseas{' '}
+          <span className="font-semibold text-purple-700">reactivar estos seriales</span>
+          {' '}en el inventario? Se marcarán como disponibles nuevamente.
+        </p>
+
+        <div className="flex gap-2 w-full">
+          <Button
+            variant="secondary"
+            className="flex-1 flex items-center justify-center gap-1.5"
+            onClick={onCancelar}
+          >
+            <X size={14} /> Cancelar
+          </Button>
+          <Button
+            className="flex-1 flex items-center justify-center gap-1.5
+              bg-purple-600 hover:bg-purple-700 text-white"
+            onClick={onReactivar}
+          >
+            <RefreshCw size={14} /> Sí, reactivar
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// ─── Panel info de compra (solo admin) ───────────────────────────────────────
+
 function InfoCompra({
   proveedorId, setProveedorId,
   costoCompra, setCostoCompra,
@@ -55,7 +170,7 @@ function InfoCompra({
   };
 
   const proveedorIdNum = Number(proveedorId) || null;
-  const yaEsAcreedor = proveedorIdNum
+  const yaEsAcreedor  = proveedorIdNum
     ? acreedores.some((a) => a.proveedor_id === proveedorIdNum)
     : false;
 
@@ -134,7 +249,8 @@ function InfoCompra({
   );
 }
 
-// --- Paso 1: Tipo --------------------------------------------------------------
+// ─── Paso 1: Tipo ─────────────────────────────────────────────────────────────
+
 function PasoTipo({ onSelect }) {
   return (
     <div className="flex flex-col gap-3">
@@ -163,7 +279,8 @@ function PasoTipo({ onSelect }) {
   );
 }
 
-// --- Paso Serial ---------------------------------------------------------------
+// ─── Paso Serial ──────────────────────────────────────────────────────────────
+
 function PasoSerial({ onExito }) {
   const queryClient                     = useQueryClient();
   const { esAdminNegocio }              = useAuth();
@@ -177,14 +294,22 @@ function PasoSerial({ onExito }) {
   const [costoCompra,  setCostoCompra]  = useState('');
   const [modoPago,     setModoPago]     = useState(null);
   const [error,        setError]        = useState('');
-  const inputRefs                       = useRef([]);
+  const [verificando,  setVerificando]  = useState(false);
+
+  // Estado del modal de reactivación
+  const [serialesDuplicados, setSerializesDuplicados] = useState([]);
+  const [modalReactivar,     setModalReactivar]       = useState(false);
+
+  // Map de imei → reactivar_serial_id para los que el usuario confirmó reactivar
+  const reactivarMapRef = useRef({});
+
+  const inputRefs = useRef([]);
 
   const { data: productosData } = useQuery({
     queryKey: ['productos-serial'],
     queryFn: () => getProductosSerial().then((r) => r.data.data),
   });
 
-  // Al seleccionar una línea existente, pre-cargar su proveedor y costo
   const handleSeleccionarLinea = (producto) => {
     setLineaSel(producto);
     setError('');
@@ -219,31 +344,31 @@ function PasoSerial({ onExito }) {
         : (lineaSel?.ultimo_costo || null);
 
       if (proveedorId && modoPago) {
-        // Con proveedor: el backend maneja serial + compra + acreedor en una sola transaccion
         await crearCompra(buildPayloadCompra({
           proveedorId,
           monto:  costo ? costo * imeisValidos.length : 0,
           modoPago,
           lineas: imeisValidos.map((imei) => ({
-            nombre_producto: lineaSel.nombre,
-            imei,
-            cantidad:        1,
-            precio_unitario: costo || 0,
-            producto_id:     lineaSel.id,
+            nombre_producto:  lineaSel.nombre,
+            imei:             imei.trim(),
+            cantidad:         1,
+            precio_unitario:  costo || 0,
+            producto_id:      lineaSel.id,
+            // Si este IMEI fue marcado para reactivar, enviarlo al backend
+            reactivar_serial_id: reactivarMapRef.current[imei.trim()] || null,
           })),
         }));
       } else {
-        // Sin proveedor: insertar seriales y actualizar proveedor_id en el producto si se indicó
         await Promise.all(
           imeisValidos.map((imei) =>
             agregarSerial(lineaSel.id, {
-              imei,
-              fecha_entrada: new Date().toISOString().split('T')[0],
-              costo_compra:  costo,
+              imei:                imei.trim(),
+              fecha_entrada:       new Date().toISOString().split('T')[0],
+              costo_compra:        costo,
+              reactivar_serial_id: reactivarMapRef.current[imei.trim()] || null,
             })
           )
         );
-        // Si se seleccionó proveedor pero sin modo pago, actualizar el proveedor del producto
         if (esAdmin && proveedorId && !lineaSel.proveedor_id) {
           await api.patch(`/productos/serial/${lineaSel.id}`, {
             proveedor_id: Number(proveedorId),
@@ -279,12 +404,56 @@ function PasoSerial({ onExito }) {
 
   const imeisValidos = imeis.filter((i) => i.trim()).length;
 
-  const handleConfirmar = () => {
+  // Al confirmar: primero verificar duplicados, luego proceder
+  const handleConfirmar = async () => {
     setError('');
     if (!lineaSel)          return setError('Selecciona una linea de producto');
     if (imeisValidos === 0) return setError('Ingresa al menos un IMEI');
     if (proveedorId && !modoPago) return setError('Selecciona si fue pagado o a credito');
+
+    const imeisLimpios = imeis.filter((i) => i.trim());
+
+    setVerificando(true);
+    const encontrados = await verificarImeis(imeisLimpios);
+    setVerificando(false);
+
+    if (encontrados.length > 0) {
+      // Hay duplicados — mostrar modal para que el usuario decida
+      setSerializesDuplicados(encontrados);
+      setModalReactivar(true);
+      return;
+    }
+
+    // Sin duplicados — proceder directo
     mutConfirmar.mutate();
+  };
+
+  const handleReactivar = () => {
+    // Guardar el map imei → id para que mutConfirmar lo use
+    serialesDuplicados.forEach((serial) => {
+      reactivarMapRef.current[serial.imei] = serial.id;
+    });
+
+    // Auto-seleccionar la línea del primer serial encontrado si no hay una seleccionada
+    // o si la línea actual no coincide con la del serial
+    const primerSerial = serialesDuplicados[0];
+    if (primerSerial && (!lineaSel || lineaSel.id !== primerSerial.producto_id)) {
+      const lineaEncontrada = (productosData || []).find(
+        (p) => p.id === primerSerial.producto_id
+      );
+      if (lineaEncontrada) {
+        handleSeleccionarLinea(lineaEncontrada);
+      }
+    }
+
+    setModalReactivar(false);
+    setSerializesDuplicados([]);
+    mutConfirmar.mutate();
+  };
+
+  const handleCancelarReactivar = () => {
+    setModalReactivar(false);
+    setSerializesDuplicados([]);
   };
 
   const labelBoton = () => {
@@ -295,168 +464,186 @@ function PasoSerial({ onExito }) {
   };
 
   return (
-    <div className="flex flex-col gap-4">
-      {!lineaSel ? (
-        <div className="flex flex-col gap-2">
-          <p className="text-sm font-medium text-gray-700">Seleccionar linea de producto</p>
-          <SearchInput value={busqueda} onChange={setBusqueda} placeholder="Buscar modelo..." />
-          <div className="max-h-40 overflow-y-auto flex flex-col gap-1">
-            {productos.map((p) => (
-              <button
-                key={p.id}
-                onClick={() => handleSeleccionarLinea(p)}
-                className="flex items-center justify-between p-2.5 rounded-xl text-left
-                  text-sm bg-white border border-gray-100 hover:border-blue-200
-                  hover:bg-blue-50 transition-all"
-              >
-                <div>
-                  <span className="font-medium text-gray-800">{p.nombre}</span>
-                  <span className="text-xs text-gray-400 ml-2">{p.disponibles ?? 0} en stock</span>
-                </div>
-                <ChevronRight size={14} className="text-gray-400" />
-              </button>
-            ))}
-          </div>
-          <button
-            onClick={() => setCreandoLinea(!creandoLinea)}
-            className="text-xs text-blue-600 hover:text-blue-700 font-medium text-left"
-          >
-            + Crear nueva linea
-          </button>
-
-          {creandoLinea && (
-            <div className="bg-blue-50 rounded-xl p-3 flex flex-col gap-2">
-              <p className="text-xs font-semibold text-blue-700">Nueva linea</p>
-              <Input
-                id="sl-nombre"
-                placeholder="Nombre (ej: iPhone 15 Pro Max)"
-                value={nuevaLinea.nombre}
-                onChange={(e) => setNuevaLinea({ ...nuevaLinea, nombre: e.target.value })}
-                onKeyDown={(e) => e.key === 'Enter' && document.getElementById('sl-marca')?.focus()}
-              />
-              <div className="flex gap-2">
-                <Input
-                  id="sl-marca"
-                  placeholder="Marca"
-                  value={nuevaLinea.marca}
-                  onChange={(e) => setNuevaLinea({ ...nuevaLinea, marca: e.target.value })}
-                  onKeyDown={(e) => e.key === 'Enter' && document.getElementById('sl-modelo')?.focus()}
-                />
-                <Input
-                  id="sl-modelo"
-                  placeholder="Modelo"
-                  value={nuevaLinea.modelo}
-                  onChange={(e) => setNuevaLinea({ ...nuevaLinea, modelo: e.target.value })}
-                  onKeyDown={(e) => e.key === 'Enter' && document.getElementById('sl-precio')?.focus()}
-                />
-              </div>
-              <Input
-                id="sl-precio"
-                type="number"
-                placeholder="Precio de venta"
-                value={nuevaLinea.precio}
-                onChange={(e) => setNuevaLinea({ ...nuevaLinea, precio: e.target.value })}
-                onKeyDown={(e) => e.key === 'Enter' && mutCrearLinea.mutate()}
-              />
-              <div className="flex gap-2">
-                <Button variant="secondary" size="sm" className="flex-1"
-                  onClick={() => setCreandoLinea(false)}>Cancelar</Button>
-                <Button size="sm" className="flex-1"
-                  loading={mutCrearLinea.isPending} onClick={() => mutCrearLinea.mutate()}>
-                  Crear y seleccionar
-                </Button>
-              </div>
-            </div>
-          )}
-        </div>
-      ) : (
-        <div className="flex flex-col gap-3">
-          <div className="flex items-center justify-between bg-blue-50 rounded-xl px-3 py-2">
-            <div>
-              <p className="text-sm font-semibold text-blue-800">{lineaSel.nombre}</p>
-              <p className="text-xs text-blue-500">Linea seleccionada</p>
+    <>
+      <div className="flex flex-col gap-4">
+        {!lineaSel ? (
+          <div className="flex flex-col gap-2">
+            <p className="text-sm font-medium text-gray-700">Seleccionar linea de producto</p>
+            <SearchInput value={busqueda} onChange={setBusqueda} placeholder="Buscar modelo..." />
+            <div className="max-h-40 overflow-y-auto flex flex-col gap-1">
+              {productos.map((p) => (
+                <button
+                  key={p.id}
+                  onClick={() => handleSeleccionarLinea(p)}
+                  className="flex items-center justify-between p-2.5 rounded-xl text-left
+                    text-sm bg-white border border-gray-100 hover:border-blue-200
+                    hover:bg-blue-50 transition-all"
+                >
+                  <div>
+                    <span className="font-medium text-gray-800">{p.nombre}</span>
+                    <span className="text-xs text-gray-400 ml-2">{p.disponibles ?? 0} en stock</span>
+                  </div>
+                  <ChevronRight size={14} className="text-gray-400" />
+                </button>
+              ))}
             </div>
             <button
-              onClick={() => {
-                setLineaSel(null);
-                setImeis(['']);
-                setProveedorId('');
-                setCostoCompra('');
-                setModoPago(null);
-              }}
-              className="text-xs text-blue-400 hover:text-blue-600 underline"
+              onClick={() => setCreandoLinea(!creandoLinea)}
+              className="text-xs text-blue-600 hover:text-blue-700 font-medium text-left"
             >
-              Cambiar
+              + Crear nueva linea
             </button>
-          </div>
 
-          <div className="flex items-center justify-between">
-            <p className="text-sm font-medium text-gray-700">IMEIs / Seriales</p>
-            <Badge variant="blue">{imeisValidos} ingresado(s)</Badge>
-          </div>
-
-          <div className="flex flex-col gap-1.5 max-h-52 overflow-y-auto">
-            {imeis.map((imei, index) => (
-              <div key={index} className="flex gap-1.5">
-                <input
-                  ref={(el) => { inputRefs.current[index] = el; }}
-                  type="text"
-                  value={imei}
-                  autoFocus={index === 0}
-                  onChange={(e) => {
-                    const next = [...imeis];
-                    next[index] = e.target.value;
-                    setImeis(next);
-                  }}
-                  onKeyDown={(e) => handleKeyDown(e, index)}
-                  placeholder={`IMEI ${index + 1} — Enter para siguiente`}
-                  className="flex-1 px-3 py-2 bg-white border border-gray-200 rounded-xl
-                    text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+            {creandoLinea && (
+              <div className="bg-blue-50 rounded-xl p-3 flex flex-col gap-2">
+                <p className="text-xs font-semibold text-blue-700">Nueva linea</p>
+                <Input
+                  id="sl-nombre"
+                  placeholder="Nombre (ej: iPhone 15 Pro Max)"
+                  value={nuevaLinea.nombre}
+                  onChange={(e) => setNuevaLinea({ ...nuevaLinea, nombre: e.target.value })}
+                  onKeyDown={(e) => e.key === 'Enter' && document.getElementById('sl-marca')?.focus()}
                 />
-                {imeis.length > 1 && (
-                  <button
-                    onClick={() => setImeis((prev) => prev.filter((_, i) => i !== index))}
-                    className="p-2 rounded-xl hover:bg-red-50 text-gray-300 hover:text-red-400"
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                )}
+                <div className="flex gap-2">
+                  <Input
+                    id="sl-marca"
+                    placeholder="Marca"
+                    value={nuevaLinea.marca}
+                    onChange={(e) => setNuevaLinea({ ...nuevaLinea, marca: e.target.value })}
+                    onKeyDown={(e) => e.key === 'Enter' && document.getElementById('sl-modelo')?.focus()}
+                  />
+                  <Input
+                    id="sl-modelo"
+                    placeholder="Modelo"
+                    value={nuevaLinea.modelo}
+                    onChange={(e) => setNuevaLinea({ ...nuevaLinea, modelo: e.target.value })}
+                    onKeyDown={(e) => e.key === 'Enter' && document.getElementById('sl-precio')?.focus()}
+                  />
+                </div>
+                <Input
+                  id="sl-precio"
+                  type="number"
+                  placeholder="Precio de venta"
+                  value={nuevaLinea.precio}
+                  onChange={(e) => setNuevaLinea({ ...nuevaLinea, precio: e.target.value })}
+                  onKeyDown={(e) => e.key === 'Enter' && mutCrearLinea.mutate()}
+                />
+                <div className="flex gap-2">
+                  <Button variant="secondary" size="sm" className="flex-1"
+                    onClick={() => setCreandoLinea(false)}>Cancelar</Button>
+                  <Button size="sm" className="flex-1"
+                    loading={mutCrearLinea.isPending} onClick={() => mutCrearLinea.mutate()}>
+                    Crear y seleccionar
+                  </Button>
+                </div>
               </div>
-            ))}
+            )}
           </div>
+        ) : (
+          <div className="flex flex-col gap-3">
+            <div className="flex items-center justify-between bg-blue-50 rounded-xl px-3 py-2">
+              <div>
+                <p className="text-sm font-semibold text-blue-800">{lineaSel.nombre}</p>
+                <p className="text-xs text-blue-500">Linea seleccionada</p>
+              </div>
+              <button
+                onClick={() => {
+                  setLineaSel(null);
+                  setImeis(['']);
+                  setProveedorId('');
+                  setCostoCompra('');
+                  setModoPago(null);
+                  reactivarMapRef.current = {};
+                }}
+                className="text-xs text-blue-400 hover:text-blue-600 underline"
+              >
+                Cambiar
+              </button>
+            </div>
 
-          <button
-            onClick={() => setImeis((prev) => [...prev, ''])}
-            className="text-xs text-blue-500 hover:text-blue-700 font-medium text-left"
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-medium text-gray-700">IMEIs / Seriales</p>
+              <Badge variant="blue">{imeisValidos} ingresado(s)</Badge>
+            </div>
+
+            <div className="flex flex-col gap-1.5 max-h-52 overflow-y-auto">
+              {imeis.map((imei, index) => {
+                const imeiVal = imei;
+                return (
+                  <div key={index} className="flex gap-1.5">
+                    <input
+                      ref={(el) => { inputRefs.current[index] = el; }}
+                      type="text"
+                      value={imeiVal}
+                      autoFocus={index === 0}
+                      onChange={(e) => {
+                        const next = [...imeis];
+                        next[index] = e.target.value;
+                        setImeis(next);
+                      }}
+                      onKeyDown={(e) => handleKeyDown(e, index)}
+                      placeholder={`IMEI ${index + 1} — Enter para siguiente`}
+                      className="flex-1 px-3 py-2 bg-white border border-gray-200 rounded-xl
+                        text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                    {imeis.length > 1 && (
+                      <button
+                        onClick={() => setImeis((prev) => prev.filter((_, i) => i !== index))}
+                        className="p-2 rounded-xl hover:bg-red-50 text-gray-300 hover:text-red-400"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            <button
+              onClick={() => setImeis((prev) => [...prev, ''])}
+              className="text-xs text-blue-500 hover:text-blue-700 font-medium text-left"
+            >
+              + Agregar campo
+            </button>
+
+            {esAdmin && (
+              <InfoCompra
+                proveedorId={proveedorId}
+                setProveedorId={setProveedorId}
+                costoCompra={costoCompra}
+                setCostoCompra={setCostoCompra}
+                modoPago={modoPago}
+                setModoPago={setModoPago}
+              />
+            )}
+          </div>
+        )}
+
+        {error && <p className="text-sm text-red-500">{error}</p>}
+
+        {lineaSel && (
+          <Button
+            className="w-full"
+            loading={mutConfirmar.isPending || verificando}
+            onClick={handleConfirmar}
           >
-            + Agregar campo
-          </button>
+            {verificando ? 'Verificando IMEIs...' : labelBoton()}
+          </Button>
+        )}
+      </div>
 
-          {esAdmin && (
-            <InfoCompra
-              proveedorId={proveedorId}
-              setProveedorId={setProveedorId}
-              costoCompra={costoCompra}
-              setCostoCompra={setCostoCompra}
-              modoPago={modoPago}
-              setModoPago={setModoPago}
-            />
-          )}
-        </div>
-      )}
-
-      {error && <p className="text-sm text-red-500">{error}</p>}
-
-      {lineaSel && (
-        <Button className="w-full" loading={mutConfirmar.isPending} onClick={handleConfirmar}>
-          {labelBoton()}
-        </Button>
-      )}
-    </div>
+      <ModalReactivarSeriales
+        open={modalReactivar}
+        seriales={serialesDuplicados}
+        onReactivar={handleReactivar}
+        onCancelar={handleCancelarReactivar}
+      />
+    </>
   );
 }
 
-// --- Paso Cantidad -------------------------------------------------------------
+// ─── Paso Cantidad ────────────────────────────────────────────────────────────
+
 function PasoCantidad({ onExito }) {
   const queryClient                       = useQueryClient();
   const { esAdminNegocio }                = useAuth();
@@ -476,7 +663,6 @@ function PasoCantidad({ onExito }) {
     queryFn: () => getProductosCantidad().then((r) => r.data.data),
   });
 
-  // Al seleccionar un producto existente, pre-cargar su proveedor y costo
   const handleSeleccionarProducto = (producto) => {
     setProductoSel(producto);
     setError('');
@@ -510,7 +696,6 @@ function PasoCantidad({ onExito }) {
         : (productoSel?.costo_unitario || null);
 
       if (proveedorId && modoPago) {
-        // Con proveedor: el backend maneja stock + compra + acreedor en una sola transaccion
         await crearCompra(buildPayloadCompra({
           proveedorId,
           monto:  costo ? costo * cantidadNum : 0,
@@ -523,8 +708,6 @@ function PasoCantidad({ onExito }) {
           }],
         }));
       } else {
-        // Sin proveedor: ajustar stock; si se indicó proveedor, pasarlo para que el backend
-        // actualice productos_cantidad.proveedor_id
         await ajustarStockCantidad(productoSel.id, {
           cantidad:       cantidadNum,
           costo_unitario: costo,
@@ -677,7 +860,8 @@ function PasoCantidad({ onExito }) {
   );
 }
 
-// --- Modal principal ----------------------------------------------------------
+// ─── Modal principal ──────────────────────────────────────────────────────────
+
 export function ModalAgregarProducto({ onClose }) {
   const [tipo,  setTipo]  = useState(null);
   const [exito, setExito] = useState(false);
