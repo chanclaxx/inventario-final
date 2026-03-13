@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { AuthContext } from './AuthContext.js';
 import { login as loginApi, logout as logoutApi } from '../api/auth.api';
+import useSucursalStore from '../store/sucursalStore';
 
 function getUsuarioInicial() {
   try {
@@ -30,17 +31,14 @@ export function AuthProvider({ children }) {
     }
     sessionStorage.removeItem('accessToken');
     sessionStorage.removeItem('usuario');
+    // Limpiar selección de sucursal al cerrar sesión
+    useSucursalStore.getState().reset();
     setUsuario(null);
   };
 
-  // admin_negocio es el único con acceso total al negocio
   const esAdminNegocio = () => usuario?.rol === 'admin_negocio';
-
-  // supervisor y admin_negocio pueden gestionar su sucursal
-  const esSupervisor = () => ['admin_negocio', 'supervisor'].includes(usuario?.rol);
-
-  // Cualquier usuario autenticado puede vender
-  const esVendedor = () => !!usuario;
+  const esSupervisor   = () => ['admin_negocio', 'supervisor'].includes(usuario?.rol);
+  const esVendedor     = () => !!usuario;
 
   return (
     <AuthContext.Provider value={{

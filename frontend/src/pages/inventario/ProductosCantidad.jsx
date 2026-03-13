@@ -1,22 +1,24 @@
-import { useState, useContext } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ShoppingBag, Plus, AlertTriangle, Trash2 } from 'lucide-react';
-import { getProductosCantidad, ajustarStockCantidad } from '../../api/productos.api';
-import { SearchInput }                 from '../../components/ui/SearchInput';
-import { Badge }                       from '../../components/ui/Badge';
-import { Button }                      from '../../components/ui/Button';
-import { Input }                       from '../../components/ui/Input';
-import { Spinner }                     from '../../components/ui/Spinner';
-import { EmptyState }                  from '../../components/ui/EmptyState';
-import { formatCOP }                   from '../../utils/formatters';
-import useCarritoStore                 from '../../store/carritoStore';
-import { ModalPinEliminacion }         from './ModalPinEliminacion';
-import { ModalEditarProductoCantidad } from './ModalEditarProductoCantidad';
-import { AuthContext }                 from '../../context/AuthContext';
+import { useState }                                      from 'react';
+import { useQuery, useMutation, useQueryClient }         from '@tanstack/react-query';
+import { ShoppingBag, Plus, AlertTriangle, Trash2 }      from 'lucide-react';
+import { getProductosCantidad, ajustarStockCantidad }    from '../../api/productos.api';
+import { SearchInput }                                   from '../../components/ui/SearchInput';
+import { Badge }                                         from '../../components/ui/Badge';
+import { Button }                                        from '../../components/ui/Button';
+import { Input }                                         from '../../components/ui/Input';
+import { Spinner }                                       from '../../components/ui/Spinner';
+import { EmptyState }                                    from '../../components/ui/EmptyState';
+import { formatCOP }                                     from '../../utils/formatters';
+import useCarritoStore                                   from '../../store/carritoStore';
+import { ModalPinEliminacion }                           from './ModalPinEliminacion';
+import { ModalEditarProductoCantidad }                   from './ModalEditarProductoCantidad';
+import { useAuth }                                       from '../../context/useAuth';
+import { useSucursalKey }                                from '../../hooks/useSucursalKey';
 
 export function ProductosCantidad() {
   const queryClient = useQueryClient();
-  const { esAdminNegocio } = useContext(AuthContext);
+  const { esAdminNegocio } = useAuth();
+  const sucursalKey = useSucursalKey();
 
   const [busqueda,         setBusqueda]         = useState('');
   const [productoAReducir, setProductoAReducir] = useState(null);
@@ -24,10 +26,10 @@ export function ProductosCantidad() {
   const [productoAEditar,  setProductoAEditar]  = useState(null);
 
   const { data: productosData, isLoading } = useQuery({
-    queryKey: ['productos-cantidad'],
-    queryFn: () => getProductosCantidad().then((r) => r.data.data),
+    queryKey: ['productos-cantidad', ...sucursalKey],
+    queryFn:  () => getProductosCantidad().then((r) => r.data.data),
     staleTime: 0,
-    gcTime: 0,
+    gcTime:    0,
   });
 
   const agregarItem = useCarritoStore((s) => s.agregarItem);
@@ -36,7 +38,7 @@ export function ProductosCantidad() {
     mutationFn: ({ productoId, cantidad }) =>
       ajustarStockCantidad(productoId, { cantidad: -Math.abs(cantidad) }),
     onSuccess: () => {
-      queryClient.invalidateQueries(['productos-cantidad']);
+      queryClient.invalidateQueries({ queryKey: ['productos-cantidad'], exact: false });
       setProductoAReducir(null);
       setCantidadReducir('1');
     },
@@ -54,7 +56,7 @@ export function ProductosCantidad() {
       tipo:        'cantidad',
       nombre:      producto.nombre,
       producto_id: producto.id,
-      precio: Math.round(Number(producto.precio || producto.costo_unitario || 0)),
+      precio:      Math.round(Number(producto.precio || producto.costo_unitario || 0)),
       stock:       producto.stock,
       cantidad:    1,
     });

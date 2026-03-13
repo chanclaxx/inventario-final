@@ -1,7 +1,8 @@
 const { pool } = require('../../config/db');
 const repo = require('./creditos.repository');
 
-const getCreditos = (sucursalId) => repo.findAll(sucursalId);
+// Recibe negocioId para la vista global
+const getCreditos = (sucursalId, negocioId) => repo.findAll(sucursalId, negocioId);
 
 const getCreditoById = async (negocioId, id) => {
   const valido = await repo.perteneceAlNegocio(id, negocioId);

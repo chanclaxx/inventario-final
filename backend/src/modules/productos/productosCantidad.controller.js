@@ -2,7 +2,9 @@ const service = require('./productosCantidad.service');
 
 const getProductos = async (req, res, next) => {
   try {
-    const data = await service.getProductos(req.sucursal_id);
+    // Vista global si admin pidió "todas", vista sucursal en cualquier otro caso
+    const sucursalId = req.todasSucursales ? null : req.sucursal_id;
+    const data = await service.getProductos(sucursalId, req.user.negocio_id);
     res.json({ ok: true, data });
   } catch (err) { next(err); }
 };
@@ -16,10 +18,19 @@ const getProductoById = async (req, res, next) => {
 
 const crearProducto = async (req, res, next) => {
   try {
-    const data = await service.crearProducto({
-      ...req.body,
-      sucursal_id: req.sucursal_id,
-    });
+    // En vista global el admin debe indicar la sucursal destino en el body
+    const sucursal_id = req.todasSucursales
+      ? req.body.sucursal_id
+      : req.sucursal_id;
+
+    if (!sucursal_id) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Debes indicar la sucursal destino del producto',
+      });
+    }
+
+    const data = await service.crearProducto({ ...req.body, sucursal_id });
     res.status(201).json({ ok: true, data, message: 'Producto creado correctamente' });
   } catch (err) { next(err); }
 };
@@ -41,7 +52,7 @@ const ajustarStock = async (req, res, next) => {
       req.user.negocio_id,
       req.params.id,
       cantidad,
-      { costo_unitario, proveedor_id }
+      { costo_unitario, proveedor_id },  // antes se perdía aquí — ahora llega al repo
     );
     res.json({ ok: true, data, message: 'Stock actualizado correctamente' });
   } catch (err) { next(err); }

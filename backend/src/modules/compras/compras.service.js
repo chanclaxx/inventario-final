@@ -2,8 +2,11 @@ const { pool } = require('../../config/db');
 const comprasRepo  = require('./compras.repository');
 const cantidadRepo = require('../productos/productosCantidad.repository');
 
-const getCompras            = (sucursalId) => comprasRepo.findAll(sucursalId);
-const getComprasByProveedor = (proveedorId, sucursalId) => comprasRepo.findByProveedor(proveedorId, sucursalId);
+const getCompras = (sucursalId, negocioId) =>
+  comprasRepo.findAll(sucursalId, negocioId);
+
+const getComprasByProveedor = (proveedorId, sucursalId, negocioId) =>
+  comprasRepo.findByProveedor(proveedorId, sucursalId, negocioId);
 
 const getCompraById = async (negocioId, id) => {
   const valida = await comprasRepo.perteneceAlNegocio(id, negocioId);
@@ -42,9 +45,17 @@ const registrarCompra = async ({
       });
 
       if (linea.imei) {
-        // ── Manejo de serial ──────────────────────────────────────────────────
-        // CASO A: el frontend confirmó reactivar un serial existente
         if (linea.reactivar_serial_id) {
+          // Reactivar serial existente — verificar que pertenezca a esta sucursal
+          const { rows } = await client.query(
+            `SELECT s.id FROM seriales s
+             JOIN productos_serial ps ON ps.id = s.producto_id
+             WHERE s.id = $1 AND ps.sucursal_id = $2`,
+            [linea.reactivar_serial_id, sucursal_id]
+          );
+          if (!rows.length) {
+            throw { status: 400, message: `El serial ${linea.imei} no pertenece a esta sucursal` };
+          }
           await client.query(
             `UPDATE seriales
              SET vendido      = false,
@@ -57,13 +68,27 @@ const registrarCompra = async ({
           );
 
         } else {
-          // CASO B: serial nuevo — verificar que no exista antes de insertar
+          // Serial nuevo — verificar que no exista antes de insertar
           const { rows: existente } = await client.query(
             'SELECT id FROM seriales WHERE imei = $1',
             [linea.imei]
           );
-          if (existente.length > 0) {
+          if (existente.length) {
             throw { status: 409, message: `El IMEI ${linea.imei} ya existe en el inventario` };
+          }
+
+          // ── FIX: verificar que producto_serial pertenezca a esta sucursal ──
+          if (linea.producto_id) {
+            const { rows: psRows } = await client.query(
+              'SELECT id FROM productos_serial WHERE id = $1 AND sucursal_id = $2',
+              [linea.producto_id, sucursal_id]
+            );
+            if (!psRows.length) {
+              throw {
+                status: 400,
+                message: `El producto ${linea.nombre_producto} no pertenece a esta sucursal`,
+              };
+            }
           }
 
           await client.query(
@@ -80,6 +105,18 @@ const registrarCompra = async ({
         }
 
       } else if (linea.producto_id) {
+        // ── FIX: verificar que producto_cantidad pertenezca a esta sucursal ──
+        const producto = await cantidadRepo.findById(linea.producto_id);
+        if (!producto) {
+          throw { status: 404, message: `Producto ${linea.nombre_producto} no encontrado` };
+        }
+        if (producto.sucursal_id !== sucursal_id) {
+          throw {
+            status: 400,
+            message: `El producto ${linea.nombre_producto} no pertenece a esta sucursal`,
+          };
+        }
+
         await cantidadRepo.ajustarStock(linea.producto_id, linea.cantidad);
 
         if (proveedor_id) {
@@ -95,7 +132,7 @@ const registrarCompra = async ({
 
     if (agregarComoAcreedor && proveedor_id) {
       const totalPagado = pagos
-        .filter((p) => p.metodo !== 'Credito' && p.metodo !== 'Fiado')
+        .filter(p => p.metodo !== 'Credito' && p.metodo !== 'Fiado')
         .reduce((s, p) => s + Number(p.valor || 0), 0);
       const montoCargo = total - totalPagado;
 
@@ -120,17 +157,18 @@ const registrarCompra = async ({
              LIMIT 1`,
             [negocio_id, prov.nit]
           );
-          if (acrPorCedula.length > 0) {
+          if (acrPorCedula.length) {
             acrRows = acrPorCedula;
             await client.query(
-              `UPDATE acreedores SET proveedor_id = $1 WHERE id = $2 AND proveedor_id IS NULL`,
+              `UPDATE acreedores SET proveedor_id = $1
+               WHERE id = $2 AND proveedor_id IS NULL`,
               [proveedor_id, acrPorCedula[0].id]
             );
           }
         }
 
         let acreedorId;
-        if (acrRows.length > 0) {
+        if (acrRows.length) {
           acreedorId = acrRows[0].id;
         } else {
           const cedulaFinal = prov?.nit || `prov-${proveedor_id}`;

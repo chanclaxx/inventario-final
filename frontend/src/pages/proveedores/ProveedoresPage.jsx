@@ -11,6 +11,7 @@ import { Spinner } from '../../components/ui/Spinner';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { SearchInput } from '../../components/ui/SearchInput';
 import { ModalCompra } from './ModalCompra';
+import { useSucursalKey } from '../../hooks/useSucursalKey';
 import {
   Truck, Plus, ShoppingCart, ChevronRight,
   ChevronLeft, Package, Hash
@@ -18,10 +19,11 @@ import {
 
 // ── Modal detalle de compra ───────────────────────────────────
 function ModalDetalleCompra({ compraId, onClose }) {
+  // Detalle por ID único — sin sucursalKey
   const { data, isLoading } = useQuery({
     queryKey: ['compra-detalle', compraId],
-    queryFn: () => getCompraById(compraId).then((r) => r.data.data),
-    enabled: !!compraId,
+    queryFn:  () => getCompraById(compraId).then((r) => r.data.data),
+    enabled:  !!compraId,
   });
 
   return (
@@ -29,7 +31,6 @@ function ModalDetalleCompra({ compraId, onClose }) {
       {isLoading ? <Spinner className="py-10" /> : (
         <div className="flex flex-col gap-4">
 
-          {/* Info general */}
           <div className="grid grid-cols-2 gap-3">
             <div className="bg-gray-50 rounded-xl p-3">
               <p className="text-xs text-gray-400 mb-0.5">Fecha</p>
@@ -53,7 +54,6 @@ function ModalDetalleCompra({ compraId, onClose }) {
             </div>
           </div>
 
-          {/* Productos */}
           <div className="flex flex-col gap-2">
             <p className="text-sm font-semibold text-gray-700">Productos recibidos</p>
             {(data?.lineas || []).length === 0 ? (
@@ -88,7 +88,6 @@ function ModalDetalleCompra({ compraId, onClose }) {
             )}
           </div>
 
-          {/* Total */}
           <div className="flex justify-between items-center bg-blue-50 rounded-xl px-4 py-3">
             <span className="text-sm font-semibold text-gray-700">Total de la compra</span>
             <span className="text-base font-bold text-blue-700">{formatCOP(data?.total)}</span>
@@ -106,21 +105,21 @@ function ModalDetalleCompra({ compraId, onClose }) {
 }
 
 // ── Vista historial de un proveedor ──────────────────────────
-function HistorialProveedor({ proveedor, onVolver, onNuevaCompra }) {
+function HistorialProveedor({ proveedor, sucursalKey, onVolver, onNuevaCompra }) {
   const [compraDetalle, setCompraDetalle] = useState(null);
 
+  // Compras son de sucursal → incluye sucursalKey
   const { data: comprasData, isLoading } = useQuery({
-    queryKey: ['compras-proveedor', proveedor.id],
-    queryFn: () => getComprasByProveedor(proveedor.id).then((r) => r.data.data),
+    queryKey: ['compras-proveedor', proveedor.id, ...sucursalKey],
+    queryFn:  () => getComprasByProveedor(proveedor.id).then((r) => r.data.data),
   });
 
-  const compras = comprasData || [];
+  const compras       = comprasData || [];
   const totalComprado = compras.reduce((s, c) => s + Number(c.total || 0), 0);
 
   return (
     <div className="flex flex-col gap-4">
 
-      {/* Header con back */}
       <div className="flex items-center gap-3">
         <button
           onClick={onVolver}
@@ -137,7 +136,6 @@ function HistorialProveedor({ proveedor, onVolver, onNuevaCompra }) {
         </Button>
       </div>
 
-      {/* Resumen */}
       <div className="grid grid-cols-2 gap-3">
         <div className="bg-blue-50 rounded-xl p-3">
           <p className="text-xs text-blue-400 mb-0.5">Total comprado</p>
@@ -149,7 +147,6 @@ function HistorialProveedor({ proveedor, onVolver, onNuevaCompra }) {
         </div>
       </div>
 
-      {/* Lista compras */}
       {isLoading ? <Spinner className="py-20" /> : compras.length === 0 ? (
         <EmptyState
           icon={ShoppingCart}
@@ -219,7 +216,8 @@ function ModalProveedor({ proveedor, onClose }) {
       ? actualizarProveedor(proveedor.id, form)
       : crearProveedor(form),
     onSuccess: () => {
-      queryClient.invalidateQueries(['proveedores']);
+      // Proveedores es del negocio (negocio_id) — sin sucursalKey, igual exact: false por consistencia
+      queryClient.invalidateQueries({ queryKey: ['proveedores'], exact: false });
       onClose();
     },
     onError: (e) => setError(e.response?.data?.error || 'Error'),
@@ -258,24 +256,27 @@ export default function ProveedoresPage() {
   const [busqueda,        setBusqueda]        = useState('');
   const [modalProveedor,  setModalProveedor]  = useState(null);
   const [proveedorEditar, setProveedorEditar] = useState(null);
-  const [proveedorVer,    setProveedorVer]    = useState(null); // historial
+  const [proveedorVer,    setProveedorVer]    = useState(null);
   const [modalCompra,     setModalCompra]     = useState(null);
 
+  const sucursalKey = useSucursalKey();
+
+  // Proveedores es del negocio (negocio_id) → sin sucursalKey
   const { data: proveedoresData, isLoading } = useQuery({
     queryKey: ['proveedores'],
-    queryFn: () => getProveedores().then((r) => r.data.data),
+    queryFn:  () => getProveedores().then((r) => r.data.data),
   });
 
   const proveedores = (proveedoresData || []).filter((p) =>
     p.nombre.toLowerCase().includes(busqueda.toLowerCase())
   );
 
-  // Vista historial de proveedor seleccionado
   if (proveedorVer) {
     return (
       <>
         <HistorialProveedor
           proveedor={proveedorVer}
+          sucursalKey={sucursalKey}
           onVolver={() => setProveedorVer(null)}
           onNuevaCompra={() => setModalCompra(proveedorVer)}
         />
@@ -292,7 +293,6 @@ export default function ProveedoresPage() {
   return (
     <div className="flex flex-col gap-4">
 
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-bold text-gray-900">Proveedores</h1>
@@ -305,7 +305,6 @@ export default function ProveedoresPage() {
 
       <SearchInput value={busqueda} onChange={setBusqueda} placeholder="Buscar proveedor..." />
 
-      {/* Lista */}
       {isLoading ? <Spinner className="py-20" /> : proveedores.length === 0 ? (
         <EmptyState icon={Truck} titulo="Sin proveedores" />
       ) : (
@@ -324,7 +323,7 @@ export default function ProveedoresPage() {
               </div>
             </button>
             <div className="flex items-center gap-2 flex-shrink-0">
-              <Button size="sm" onClick={() => { setModalCompra(p); }}>
+              <Button size="sm" onClick={() => setModalCompra(p)}>
                 <ShoppingCart size={14} /> Compra
               </Button>
               <button
@@ -338,7 +337,6 @@ export default function ProveedoresPage() {
         ))
       )}
 
-      {/* Modales */}
       {modalProveedor && (
         <ModalProveedor onClose={() => setModalProveedor(null)} />
       )}

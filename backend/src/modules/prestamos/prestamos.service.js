@@ -2,7 +2,7 @@ const { pool } = require('../../config/db');
 const repo         = require('./prestamos.repository');
 const cantidadRepo = require('../productos/productosCantidad.repository');
 
-const getPrestamos = (sucursalId) => repo.findAll(sucursalId);
+const getPrestamos = (sucursalId, negocioId) => repo.findAll(sucursalId, negocioId);
 
 const getPrestamoById = async (negocioId, id) => {
   const valido = await repo.perteneceAlNegocio(id, negocioId);
@@ -33,12 +33,29 @@ const crearPrestamo = async ({
     });
 
     if (imei) {
-      await client.query(
-        'UPDATE seriales SET prestado = true WHERE imei = $1', [imei]
+      // ── FIX: verificar que el serial pertenezca a esta sucursal ──────────
+      const { rows } = await client.query(
+        `SELECT s.id FROM seriales s
+         JOIN productos_serial ps ON ps.id = s.producto_id
+         WHERE s.imei = $1 AND ps.sucursal_id = $2`,
+        [imei, sucursal_id]
       );
+      if (!rows.length) {
+        throw { status: 400, message: `El producto ${nombre_producto} no pertenece a esta sucursal` };
+      }
+      await client.query(
+        'UPDATE seriales SET prestado = true WHERE imei = $1',
+        [imei]
+      );
+
     } else if (producto_id) {
       const producto = await cantidadRepo.findById(producto_id);
       if (!producto) throw { status: 404, message: 'Producto no encontrado' };
+
+      // ── FIX: verificar que el producto pertenezca a esta sucursal ────────
+      if (producto.sucursal_id !== sucursal_id) {
+        throw { status: 400, message: `El producto ${nombre_producto} no pertenece a esta sucursal` };
+      }
       if (producto.stock < cantidad_prestada) {
         throw { status: 400, message: 'Stock insuficiente para el préstamo' };
       }
@@ -67,11 +84,7 @@ const registrarAbono = async (negocioId, prestamoId, valor) => {
     await client.query('BEGIN');
     const resultado = await repo.insertarAbono(client, { prestamo_id: prestamoId, valor });
 
-    // Forzar Number para evitar comparación de strings de PostgreSQL
-    const totalAbonado  = Number(resultado.total_abonado);
-    const valorPrestamo = Number(resultado.valor_prestamo);
-
-    if (totalAbonado >= valorPrestamo) {
+    if (Number(resultado.total_abonado) >= Number(resultado.valor_prestamo)) {
       await repo.updateEstado(client, prestamoId, 'Saldado');
     }
 
@@ -97,7 +110,10 @@ const devolverPrestamo = async (negocioId, prestamoId) => {
     await client.query('BEGIN');
 
     if (prestamo.imei) {
-      await client.query('UPDATE seriales SET prestado = false WHERE imei = $1', [prestamo.imei]);
+      await client.query(
+        'UPDATE seriales SET prestado = false WHERE imei = $1',
+        [prestamo.imei]
+      );
     } else if (prestamo.producto_id) {
       await cantidadRepo.ajustarStock(prestamo.producto_id, prestamo.cantidad_prestada);
     }
@@ -112,4 +128,6 @@ const devolverPrestamo = async (negocioId, prestamoId) => {
   }
 };
 
-module.exports = { getPrestamos, getPrestamoById, crearPrestamo, registrarAbono, devolverPrestamo };
+module.exports = {
+  getPrestamos, getPrestamoById, crearPrestamo, registrarAbono, devolverPrestamo,
+};

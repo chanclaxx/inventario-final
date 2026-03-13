@@ -1,25 +1,64 @@
 const { pool } = require('../../config/db');
 
-const findAll = async (sucursalId) => {
+/**
+ * Vista sucursal: filtra por sucursal_id
+ * Vista global:   agrupa por nombre con SUM(stock), expandible por sucursal
+ */
+const findAll = async (sucursalId, negocioId) => {
+  if (sucursalId) {
+    const { rows } = await pool.query(`
+      SELECT
+        pc.id, pc.nombre, pc.stock, pc.stock_minimo,
+        pc.unidad_medida, pc.costo_unitario, pc.precio,
+        pc.cliente_origen, pc.activo, pc.sucursal_id, pc.proveedor_id,
+        p.nombre AS proveedor_nombre,
+        su.nombre AS sucursal_nombre,
+        CASE WHEN pc.stock <= pc.stock_minimo THEN true ELSE false END AS stock_bajo
+      FROM productos_cantidad pc
+      LEFT JOIN proveedores p  ON p.id  = pc.proveedor_id
+      JOIN  sucursales      su ON su.id = pc.sucursal_id
+      WHERE pc.sucursal_id = $1 AND pc.activo = true
+      ORDER BY pc.nombre
+    `, [sucursalId]);
+    return { modo: 'sucursal', items: rows };
+  }
+
+  // Vista global: stock consolidado agrupado por nombre + detalle por sucursal
   const { rows } = await pool.query(`
-    SELECT pc.id, pc.nombre, pc.stock, pc.stock_minimo,
-           pc.unidad_medida, pc.costo_unitario, pc.precio,
-           pc.cliente_origen, pc.activo, pc.sucursal_id, pc.proveedor_id,
-           p.nombre AS proveedor_nombre,
-           CASE WHEN pc.stock <= pc.stock_minimo THEN true ELSE false END AS stock_bajo
+    SELECT
+      pc.nombre,
+      SUM(pc.stock)                                                        AS stock_total,
+      BOOL_OR(pc.stock <= pc.stock_minimo)                                 AS stock_bajo,
+      JSON_AGG(
+        JSON_BUILD_OBJECT(
+          'id',             pc.id,
+          'sucursal_id',    pc.sucursal_id,
+          'sucursal_nombre',su.nombre,
+          'stock',          pc.stock,
+          'stock_minimo',   pc.stock_minimo,
+          'costo_unitario', pc.costo_unitario,
+          'precio',         pc.precio,
+          'proveedor_id',   pc.proveedor_id,
+          'proveedor_nombre', p.nombre,
+          'stock_bajo',     pc.stock <= pc.stock_minimo
+        ) ORDER BY su.nombre
+      ) AS sucursales
     FROM productos_cantidad pc
+    JOIN  sucursales su ON su.id = pc.sucursal_id
     LEFT JOIN proveedores p ON p.id = pc.proveedor_id
-    WHERE pc.sucursal_id = $1 AND pc.activo = true
+    WHERE su.negocio_id = $1 AND pc.activo = true
+    GROUP BY pc.nombre
     ORDER BY pc.nombre
-  `, [sucursalId]);
-  return rows;
+  `, [negocioId]);
+  return { modo: 'global', items: rows };
 };
 
 const findById = async (id) => {
   const { rows } = await pool.query(`
-    SELECT pc.*, p.nombre AS proveedor_nombre
+    SELECT pc.*, p.nombre AS proveedor_nombre, su.nombre AS sucursal_nombre
     FROM productos_cantidad pc
-    LEFT JOIN proveedores p ON p.id = pc.proveedor_id
+    LEFT JOIN proveedores p  ON p.id  = pc.proveedor_id
+    JOIN  sucursales      su ON su.id = pc.sucursal_id
     WHERE pc.id = $1
   `, [id]);
   return rows[0] || null;
@@ -36,18 +75,24 @@ const perteneceAlNegocio = async (id, negocioId) => {
 
 const create = async ({ nombre, stock, stock_minimo, unidad_medida, costo_unitario, precio, sucursal_id, proveedor_id }) => {
   const { rows } = await pool.query(`
-    INSERT INTO productos_cantidad(nombre, stock, stock_minimo, unidad_medida, costo_unitario, precio, sucursal_id, proveedor_id)
+    INSERT INTO productos_cantidad
+      (nombre, stock, stock_minimo, unidad_medida, costo_unitario, precio, sucursal_id, proveedor_id)
     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
     RETURNING *
-  `, [nombre, stock || 0, stock_minimo || 0, unidad_medida || 'unidad', costo_unitario || null, precio || null, sucursal_id, proveedor_id || null]);
+  `, [nombre, stock || 0, stock_minimo || 0, unidad_medida || 'unidad',
+      costo_unitario || null, precio || null, sucursal_id, proveedor_id || null]);
   return rows[0];
 };
 
 const update = async (id, { nombre, stock_minimo, unidad_medida, costo_unitario, precio, proveedor_id }) => {
   const { rows } = await pool.query(`
     UPDATE productos_cantidad
-    SET nombre = $1, stock_minimo = $2, unidad_medida = $3,
-        costo_unitario = $4, precio = $5, proveedor_id = $6
+    SET nombre         = $1,
+        stock_minimo   = $2,
+        unidad_medida  = $3,
+        costo_unitario = $4,
+        precio         = $5,
+        proveedor_id   = $6
     WHERE id = $7
     RETURNING *
   `, [nombre, stock_minimo, unidad_medida, costo_unitario || null, precio || null, proveedor_id || null, id]);
@@ -58,12 +103,12 @@ const ajustarStock = async (id, cantidad, { costo_unitario, proveedor_id } = {})
   const sets = ['stock = stock + $1'];
   const params = [cantidad, id];
 
-  if (costo_unitario !== undefined && costo_unitario !== null) {
-    sets.push(`costo_unitario = $${params.length + 1}`);
+  if (costo_unitario != null) {
+    sets.push(`costo_unitario = $${params.length}`);
     params.splice(params.length - 1, 0, costo_unitario);
   }
-  if (proveedor_id !== undefined && proveedor_id !== null) {
-    sets.push(`proveedor_id = $${params.length + 1}`);
+  if (proveedor_id != null) {
+    sets.push(`proveedor_id = $${params.length}`);
     params.splice(params.length - 1, 0, proveedor_id);
   }
 
@@ -82,4 +127,7 @@ const eliminar = async (id) => {
   return rowCount > 0;
 };
 
-module.exports = { findAll, findById, perteneceAlNegocio, create, update, ajustarStock, eliminar };
+module.exports = {
+  findAll, findById, perteneceAlNegocio,
+  create, update, ajustarStock, eliminar,
+};

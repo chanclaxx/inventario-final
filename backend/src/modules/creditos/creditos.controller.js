@@ -2,7 +2,8 @@ const service = require('./creditos.service');
 
 const getCreditos = async (req, res, next) => {
   try {
-    const data = await service.getCreditos(req.sucursal_id);
+    const sucursalId = req.todasSucursales ? null : req.sucursal_id;
+    const data = await service.getCreditos(sucursalId, req.user.negocio_id);
     res.json({ ok: true, data });
   } catch (err) { next(err); }
 };

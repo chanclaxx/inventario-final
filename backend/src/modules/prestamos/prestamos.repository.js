@@ -1,31 +1,42 @@
 const { pool } = require('../../config/db');
 
-const findAll = async (sucursalId) => {
+const findAll = async (sucursalId, negocioId) => {
+  const filtro = sucursalId ? 'p.sucursal_id = $1' : 'su.negocio_id = $1';
+  const param  = sucursalId ?? negocioId;
+
   const { rows } = await pool.query(`
-    SELECT p.id, p.fecha, p.prestatario, p.cedula, p.telefono,
-           p.nombre_producto, p.imei, p.cantidad_prestada,
-           p.valor_prestamo, p.total_abonado, p.estado,
-           p.prestatario_id, p.empleado_id, p.cliente_id,
-           (p.valor_prestamo - p.total_abonado) AS saldo_pendiente,
-           u.nombre  AS usuario_nombre,
-           pr.nombre AS prestatario_nombre,
-           e.nombre  AS empleado_nombre,
-           c.nombre  AS cliente_nombre
+    SELECT
+      p.id, p.fecha, p.prestatario, p.cedula, p.telefono,
+      p.nombre_producto, p.imei, p.cantidad_prestada,
+      p.valor_prestamo, p.total_abonado, p.estado,
+      p.prestatario_id, p.empleado_id, p.cliente_id, p.sucursal_id,
+      su.nombre AS sucursal_nombre,
+      (p.valor_prestamo - p.total_abonado) AS saldo_pendiente,
+      u.nombre  AS usuario_nombre,
+      pr.nombre AS prestatario_nombre,
+      e.nombre  AS empleado_nombre,
+      c.nombre  AS cliente_nombre
     FROM prestamos p
-    LEFT JOIN usuarios u                ON u.id  = p.usuario_id
-    LEFT JOIN prestatarios pr           ON pr.id = p.prestatario_id
-    LEFT JOIN empleados_prestatario e   ON e.id  = p.empleado_id
-    LEFT JOIN clientes c                ON c.id  = p.cliente_id
-    WHERE p.sucursal_id = $1
+    JOIN  sucursales            su ON su.id = p.sucursal_id
+    LEFT JOIN usuarios          u  ON u.id  = p.usuario_id
+    LEFT JOIN prestatarios      pr ON pr.id = p.prestatario_id
+    LEFT JOIN empleados_prestatario e ON e.id = p.empleado_id
+    LEFT JOIN clientes          c  ON c.id  = p.cliente_id
+    WHERE ${filtro}
     ORDER BY
       CASE p.estado WHEN 'Activo' THEN 0 WHEN 'Saldado' THEN 1 ELSE 2 END,
       p.fecha DESC
-  `, [sucursalId]);
+  `, [param]);
   return rows;
 };
 
 const findById = async (id) => {
-  const { rows } = await pool.query('SELECT * FROM prestamos WHERE id = $1', [id]);
+  const { rows } = await pool.query(`
+    SELECT p.*, su.nombre AS sucursal_nombre
+    FROM prestamos  p
+    JOIN sucursales su ON su.id = p.sucursal_id
+    WHERE p.id = $1
+  `, [id]);
   return rows[0] || null;
 };
 

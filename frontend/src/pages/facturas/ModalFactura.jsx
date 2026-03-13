@@ -1,18 +1,23 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
-import { Modal } from '../../components/ui/Modal';
-import { Button } from '../../components/ui/Button';
-import { Input } from '../../components/ui/Input';
-import { Badge } from '../../components/ui/Badge';
-import { InputMoneda } from '../../components/ui/InputMoneda';
-import { formatCOP } from '../../utils/formatters';
+import { Modal }          from '../../components/ui/Modal';
+import { Button }         from '../../components/ui/Button';
+import { Input }          from '../../components/ui/Input';
+import { Badge }          from '../../components/ui/Badge';
+import { InputMoneda }    from '../../components/ui/InputMoneda';
+import { formatCOP }      from '../../utils/formatters';
 import { crearFactura, getFacturaById } from '../../api/facturas.api';
-import { buscarPorCedula } from '../../api/clientes.api';
-import { getGarantias } from '../../api/garantias.api';
-import { getProductosSerial, getProductosCantidad, verificarImei as verificarImeiApi } from '../../api/productos.api';
+import { buscarPorCedula }              from '../../api/clientes.api';
+import { getGarantias }                 from '../../api/garantias.api';
+import {
+  getProductosSerial,
+  getProductosCantidad,
+  verificarImei as verificarImeiApi,
+} from '../../api/productos.api';
 import { FacturaTermica } from '../../components/FacturaTermica';
-import api from '../../api/axios.config';
-import useCarritoStore from '../../store/carritoStore';
+import { useSucursalKey } from '../../hooks/useSucursalKey';
+import api                from '../../api/axios.config';
+import useCarritoStore    from '../../store/carritoStore';
 import {
   User, Users, Package, ShoppingBag,
   Loader2, CheckCircle, XCircle, AlertCircle,
@@ -45,7 +50,6 @@ const RETOMA_INICIAL = {
 const IMEI_MIN_LENGTH = 8;
 
 // ─── Hook: verificación puntual de IMEI ──────────────────────────────────────
-// Sin debounce — se dispara una sola vez al marcar el checkbox
 
 function useVerificarImei() {
   const [estado, setEstado] = useState({ tipo: 'idle' });
@@ -56,9 +60,7 @@ function useVerificarImei() {
       setEstado({ tipo: 'idle' });
       return;
     }
-
     setEstado({ tipo: 'cargando' });
-
     try {
       const { data } = await verificarImeiApi(imeiLimpio);
       if (data.data.existe) {
@@ -76,30 +78,24 @@ function useVerificarImei() {
     }
   }, []);
 
-  const limpiar = useCallback(() => {
-    setEstado({ tipo: 'idle' });
-  }, []);
+  const limpiar = useCallback(() => setEstado({ tipo: 'idle' }), []);
 
   return { estado, verificar, limpiar };
 }
 
-// ─── Sub-componentes: indicadores de estado del IMEI ─────────────────────────
+// ─── Indicadores de IMEI ─────────────────────────────────────────────────────
 
 function ImeiEstadoIcono({ estado }) {
-  if (estado.tipo === 'cargando')   return <Loader2      size={15} className="text-gray-400 animate-spin" />;
-  if (estado.tipo === 'libre')      return <CheckCircle  size={15} className="text-green-500" />;
-  if (estado.tipo === 'encontrado') return <AlertCircle  size={15} className="text-amber-500" />;
-  if (estado.tipo === 'error')      return <XCircle      size={15} className="text-red-400" />;
+  if (estado.tipo === 'cargando')   return <Loader2     size={15} className="text-gray-400 animate-spin" />;
+  if (estado.tipo === 'libre')      return <CheckCircle size={15} className="text-green-500" />;
+  if (estado.tipo === 'encontrado') return <AlertCircle size={15} className="text-amber-500" />;
+  if (estado.tipo === 'error')      return <XCircle     size={15} className="text-red-400" />;
   return null;
 }
 
 function ImeiEstadoMensaje({ estado, onAbrirModal }) {
-  if (estado.tipo === 'cargando') {
-    return <p className="text-xs text-gray-400">Verificando IMEI...</p>;
-  }
-  if (estado.tipo === 'libre') {
-    return <p className="text-xs text-green-600">✓ IMEI disponible, no existe en el inventario</p>;
-  }
+  if (estado.tipo === 'cargando') return <p className="text-xs text-gray-400">Verificando IMEI...</p>;
+  if (estado.tipo === 'libre')    return <p className="text-xs text-green-600">✓ IMEI disponible</p>;
   if (estado.tipo === 'encontrado') {
     return (
       <button
@@ -112,21 +108,16 @@ function ImeiEstadoMensaje({ estado, onAbrirModal }) {
       </button>
     );
   }
-  if (estado.tipo === 'error') {
-    return <p className="text-xs text-red-500">{estado.mensaje}</p>;
-  }
+  if (estado.tipo === 'error') return <p className="text-xs text-red-500">{estado.mensaje}</p>;
   return null;
 }
 
-// ─── Modal de reactivación de serial ─────────────────────────────────────────
+// ─── Modal reactivar serial ───────────────────────────────────────────────────
 
 function ModalReactivarSerial({ open, serial, onReactivar, onCancelar }) {
   if (!serial) return null;
 
-  const estadoLabel = serial.vendido  ? 'Vendido'
-    : serial.prestado                 ? 'Prestado'
-    :                                   'En inventario';
-
+  const estadoLabel = serial.vendido ? 'Vendido' : serial.prestado ? 'Prestado' : 'En inventario';
   const estadoColor = serial.vendido
     ? 'text-red-600 bg-red-50 border-red-200'
     : serial.prestado
@@ -136,21 +127,14 @@ function ModalReactivarSerial({ open, serial, onReactivar, onCancelar }) {
   return (
     <Modal open={open} onClose={onCancelar} title="" size="sm">
       <div className="flex flex-col items-center gap-4 py-2">
-
         <div className="w-14 h-14 rounded-full bg-amber-50 border-2 border-amber-200
           flex items-center justify-center">
           <AlertTriangle size={26} className="text-amber-500" />
         </div>
-
         <div className="text-center">
-          <h3 className="text-base font-semibold text-gray-900">
-            IMEI ya registrado en el negocio
-          </h3>
-          <p className="text-sm text-gray-500 mt-1">
-            Este equipo aparece en el historial del inventario
-          </p>
+          <h3 className="text-base font-semibold text-gray-900">IMEI ya registrado en el negocio</h3>
+          <p className="text-sm text-gray-500 mt-1">Este equipo aparece en el historial del inventario</p>
         </div>
-
         <div className="w-full rounded-xl border border-gray-100 bg-gray-50 p-3 flex flex-col gap-2">
           <div className="flex justify-between text-sm">
             <span className="text-gray-500">IMEI</span>
@@ -159,8 +143,7 @@ function ModalReactivarSerial({ open, serial, onReactivar, onCancelar }) {
           <div className="flex justify-between text-sm">
             <span className="text-gray-500">Producto</span>
             <span className="font-medium text-gray-900 text-right max-w-[60%]">
-              {serial.producto_nombre}
-              {serial.marca ? ` · ${serial.marca}` : ''}
+              {serial.producto_nombre}{serial.marca ? ` · ${serial.marca}` : ''}
             </span>
           </div>
           <div className="flex justify-between text-sm">
@@ -180,13 +163,11 @@ function ModalReactivarSerial({ open, serial, onReactivar, onCancelar }) {
             </span>
           </div>
         </div>
-
         <p className="text-sm text-center text-gray-700 leading-relaxed">
           ¿Deseas{' '}
           <span className="font-semibold text-purple-700">reactivar este serial</span>
-          {' '}en el inventario? Se marcará como disponible nuevamente.
+          {' '}en el inventario?
         </p>
-
         <div className="flex gap-2 w-full">
           <Button
             variant="secondary"
@@ -208,20 +189,16 @@ function ModalReactivarSerial({ open, serial, onReactivar, onCancelar }) {
   );
 }
 
-// ─── Sección retoma serial ────────────────────────────────────────────────────
-// La verificación de IMEI se dispara desde el padre (checkbox ingreso_inventario)
-// a través de retomaSerialRef — no al escribir
+// ─── Retoma serial ────────────────────────────────────────────────────────────
 
 function RetomaSerial({ retoma, setRetomaField, productosSerial, retomaSerialRef }) {
   const [busqueda, setBusqueda] = useState('');
-
   const { estado, verificar, limpiar } = useVerificarImei();
 
   const filtrados = (productosSerial || []).filter((p) =>
     p.nombre.toLowerCase().includes(busqueda.toLowerCase())
   );
 
-  // Al escribir solo actualiza el campo — no verifica
   const handleImeiChange = (e) => {
     const valor = e.target.value;
     setRetomaField('imei', valor);
@@ -229,7 +206,6 @@ function RetomaSerial({ retoma, setRetomaField, productosSerial, retomaSerialRef
     limpiar();
   };
 
-  // Método expuesto al padre para que el checkbox lo dispare
   const verificarImeiActual = useCallback(async (onEncontrado) => {
     const imei = retoma.imei?.trim() ?? '';
     if (imei.length >= IMEI_MIN_LENGTH) {
@@ -237,7 +213,6 @@ function RetomaSerial({ retoma, setRetomaField, productosSerial, retomaSerialRef
     }
   }, [retoma.imei, verificar]);
 
-  // Exponer al padre vía ref — dentro de useEffect para que React lo controle
   useEffect(() => {
     if (retomaSerialRef) {
       retomaSerialRef.current = { verificarImeiActual };
@@ -246,12 +221,8 @@ function RetomaSerial({ retoma, setRetomaField, productosSerial, retomaSerialRef
 
   return (
     <div className="flex flex-col gap-3">
-
-      {/* Campo IMEI */}
       <div className="flex flex-col gap-1">
-        <label className="text-xs font-medium text-gray-600">
-          IMEI del equipo retomado
-        </label>
+        <label className="text-xs font-medium text-gray-600">IMEI del equipo retomado</label>
         <div className="relative">
           <input
             type="text"
@@ -265,19 +236,15 @@ function RetomaSerial({ retoma, setRetomaField, productosSerial, retomaSerialRef
             <ImeiEstadoIcono estado={estado} />
           </span>
         </div>
-        {/* Indicador solo visible cuando ingreso_inventario está activo */}
         {retoma.ingreso_inventario && (
           <ImeiEstadoMensaje estado={estado} onAbrirModal={() => {}} />
         )}
       </div>
 
-      {/* Selector de línea de producto */}
       <div>
         <p className="text-xs font-medium text-gray-600 mb-1">
           Línea de producto{' '}
-          <span className="text-gray-400 font-normal">
-            (elige existente o déjalo vacío para nueva línea)
-          </span>
+          <span className="text-gray-400 font-normal">(elige existente o déjalo vacío)</span>
         </p>
         <input
           type="text"
@@ -323,16 +290,14 @@ function RetomaSerial({ retoma, setRetomaField, productosSerial, retomaSerialRef
           </div>
         )}
         {retoma.producto_serial_id && (
-          <p className="text-xs text-purple-600 mt-1">
-            ✓ Línea seleccionada: {retoma.nombre_producto}
-          </p>
+          <p className="text-xs text-purple-600 mt-1">✓ Línea seleccionada: {retoma.nombre_producto}</p>
         )}
       </div>
     </div>
   );
 }
 
-// ─── Sección retoma cantidad ──────────────────────────────────────────────────
+// ─── Retoma cantidad ──────────────────────────────────────────────────────────
 
 function RetomaCantidad({ retoma, setRetomaField, productosCantidad }) {
   const [busqueda, setBusqueda] = useState('');
@@ -387,12 +352,9 @@ function RetomaCantidad({ retoma, setRetomaField, productosCantidad }) {
           </div>
         )}
         {retoma.producto_cantidad_id && (
-          <p className="text-xs text-purple-600 mt-1">
-            ✓ Producto seleccionado: {retoma.nombre_producto}
-          </p>
+          <p className="text-xs text-purple-600 mt-1">✓ Producto: {retoma.nombre_producto}</p>
         )}
       </div>
-
       <Input
         label="Cantidad retomada"
         type="number"
@@ -409,6 +371,8 @@ function RetomaCantidad({ retoma, setRetomaField, productosCantidad }) {
 
 export function ModalFactura({ open, onClose }) {
   const queryClient = useQueryClient();
+  const sucursalKey = useSucursalKey();
+
   const { items, totalCarrito, limpiarCarrito, actualizarPrecio } = useCarritoStore();
   const total = totalCarrito();
 
@@ -421,12 +385,9 @@ export function ModalFactura({ open, onClose }) {
   const [retoma,           setRetoma]           = useState(RETOMA_INICIAL);
   const [error,            setError]            = useState('');
   const [buscandoCliente,  setBuscandoCliente]  = useState(false);
-
-  // Estados del modal de reactivación — viven en el padre para que el checkbox los controle
   const [modalReactivar,   setModalReactivar]   = useState(false);
   const [serialEncontrado, setSerialEncontrado] = useState(null);
 
-  // Ref para llamar verificarImeiActual desde el checkbox sin prop drilling
   const retomaSerialRef = useRef(null);
 
   const { data: garantiasData } = useQuery({
@@ -439,14 +400,15 @@ export function ModalFactura({ open, onClose }) {
     queryFn: () => api.get('/config').then((r) => r.data.data),
   });
 
+  // ── queryKey incluye sucursalKey para que el caché sea por sucursal ─────────
   const { data: productosSerial } = useQuery({
-    queryKey: ['productos-serial'],
+    queryKey: ['productos-serial', ...sucursalKey],
     queryFn: () => getProductosSerial().then((r) => r.data.data),
     enabled: conRetoma && retoma.tipo_retoma === 'serial',
   });
 
   const { data: productosCantidad } = useQuery({
-    queryKey: ['productos-cantidad'],
+    queryKey: ['productos-cantidad', ...sucursalKey],
     queryFn: () => getProductosCantidad().then((r) => r.data.data),
     enabled: conRetoma && retoma.tipo_retoma === 'cantidad',
   });
@@ -454,12 +416,14 @@ export function ModalFactura({ open, onClose }) {
   const mutation = useMutation({
     mutationFn: crearFactura,
     onSuccess: async (res) => {
-      queryClient.invalidateQueries(['productos-serial']);
-      queryClient.invalidateQueries(['productos-cantidad']);
-      queryClient.invalidateQueries(['seriales']);
-      queryClient.invalidateQueries({ queryKey: ['ventas-rango'],  exact: false });
-      queryClient.invalidateQueries({ queryKey: ['productos-top'], exact: false });
-      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      // Invalidar todas las variantes (sin queryKey exacto) para limpiar caché de todas las sucursales
+      queryClient.invalidateQueries({ queryKey: ['productos-serial'],  exact: false });
+      queryClient.invalidateQueries({ queryKey: ['productos-cantidad'], exact: false });
+      queryClient.invalidateQueries({ queryKey: ['seriales'],          exact: false });
+      queryClient.invalidateQueries({ queryKey: ['facturas'],          exact: false });
+      queryClient.invalidateQueries({ queryKey: ['ventas-rango'],      exact: false });
+      queryClient.invalidateQueries({ queryKey: ['productos-top'],     exact: false });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'],         exact: false });
 
       try {
         const { data } = await getFacturaById(res.data.data.id);
@@ -499,7 +463,7 @@ export function ModalFactura({ open, onClose }) {
         setForm((f) => ({ ...f, nombre: data.data.nombre, celular: data.data.celular || '' }));
       }
     } catch {
-      // cliente no encontrado — se continúa normalmente
+      // cliente no encontrado — continuar normalmente
     } finally {
       setBuscandoCliente(false);
     }
@@ -523,16 +487,12 @@ export function ModalFactura({ open, onClose }) {
 
   const handleCheckboxInventario = (marcado) => {
     setRetomaField('ingreso_inventario', marcado);
-
-    // Al marcar y ser serial, verificar el IMEI actual
     if (marcado && retoma.tipo_retoma === 'serial') {
       retomaSerialRef.current?.verificarImeiActual((serial) => {
         setSerialEncontrado(serial);
         setModalReactivar(true);
       });
     }
-
-    // Al desmarcar, limpiar estado de reactivación
     if (!marcado) {
       setSerialEncontrado(null);
       setRetomaField('reactivar_serial_id', null);
@@ -550,7 +510,6 @@ export function ModalFactura({ open, onClose }) {
   };
 
   const handleCancelarReactivar = () => {
-    // Desmarcar checkbox y limpiar si el usuario cancela
     setRetomaField('ingreso_inventario',  false);
     setRetomaField('reactivar_serial_id', null);
     setModalReactivar(false);
@@ -714,8 +673,6 @@ export function ModalFactura({ open, onClose }) {
 
             {conRetoma && (
               <div className="mt-3 flex flex-col gap-3 p-3 bg-purple-50 rounded-xl border border-purple-100">
-
-                {/* Paso 1 — tipo */}
                 <div>
                   <p className="text-xs font-medium text-gray-600 mb-1.5">Tipo de producto retomado</p>
                   <div className="flex gap-2">
@@ -741,7 +698,6 @@ export function ModalFactura({ open, onClose }) {
                   </div>
                 </div>
 
-                {/* Paso 2 — datos según tipo */}
                 {retoma.tipo_retoma === 'serial' && (
                   <RetomaSerial
                     retoma={retoma}
@@ -758,7 +714,6 @@ export function ModalFactura({ open, onClose }) {
                   />
                 )}
 
-                {/* Paso 3 — descripción y valor */}
                 <Input
                   label="Descripción de la retoma"
                   placeholder="Ej: iPhone 12 Pro en buen estado"
@@ -865,8 +820,6 @@ export function ModalFactura({ open, onClose }) {
         </div>
       </Modal>
 
-      {/* ModalReactivarSerial vive fuera del Modal principal para evitar
-          conflictos de z-index — se monta en el mismo nivel del DOM */}
       <ModalReactivarSerial
         open={modalReactivar}
         serial={serialEncontrado}

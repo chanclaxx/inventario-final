@@ -1,7 +1,7 @@
-import { useState, useContext } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Package, Plus, ChevronRight, Trash2, Lock } from 'lucide-react';
-import { getProductosSerial, getSeriales, eliminarSerial } from '../../api/productos.api';
+import { useState }                                                  from 'react';
+import { useQuery, useMutation, useQueryClient }                     from '@tanstack/react-query';
+import { Package, Plus, ChevronRight, Trash2, Lock }                 from 'lucide-react';
+import { getProductosSerial, getSeriales, eliminarSerial }           from '../../api/productos.api';
 import { SearchInput }         from '../../components/ui/SearchInput';
 import { Badge }               from '../../components/ui/Badge';
 import { Button }              from '../../components/ui/Button';
@@ -11,7 +11,8 @@ import { formatCOP }           from '../../utils/formatters';
 import useCarritoStore         from '../../store/carritoStore';
 import { ModalPinEliminacion } from './ModalPinEliminacion';
 import { ModalEditarSerial }   from './ModalEditarSerial';
-import { AuthContext }         from '../../context/AuthContext';
+import { useAuth }             from '../../context/useAuth';
+import { useSucursalKey }      from '../../hooks/useSucursalKey';
 
 // ─── Tarjeta individual de serial ─────────────────────────────────────────────
 function TarjetaSerial({ serial, precio, onAgregar, onEliminar, onEditar }) {
@@ -117,7 +118,8 @@ function SelectorModelo({ productos, productoSeleccionado, onSeleccionar }) {
 // ─── Componente principal ─────────────────────────────────────────────────────
 export function ProductosSerial({ onAgregarProducto }) {
   const queryClient = useQueryClient();
-  const { esAdminNegocio } = useContext(AuthContext);
+  const { esAdminNegocio } = useAuth();
+  const sucursalKey = useSucursalKey();
 
   const [productoSeleccionado, setProductoSeleccionado] = useState(null);
   const [busqueda,             setBusqueda]             = useState('');
@@ -125,17 +127,19 @@ export function ProductosSerial({ onAgregarProducto }) {
   const [serialAEliminar,      setSerialAEliminar]      = useState(null);
   const [serialAEditar,        setSerialAEditar]        = useState(null);
 
+  // Caché por sucursal: al cambiar de sucursal los productos cambian
   const { data: productosData, isLoading } = useQuery({
-    queryKey: ['productos-serial'],
-    queryFn: () => getProductosSerial().then((r) => r.data.data),
+    queryKey: ['productos-serial', ...sucursalKey],
+    queryFn:  () => getProductosSerial().then((r) => r.data.data),
     staleTime: 0,
-    gcTime: 0,
+    gcTime:    0,
   });
 
+  // Caché por producto + sucursal: seriales son distintos en cada combinación
   const { data: serialesData, isLoading: loadingSeriales } = useQuery({
-    queryKey: ['seriales', productoSeleccionado?.id],
-    queryFn: () => getSeriales(productoSeleccionado.id, false).then((r) => r.data.data),
-    enabled: !!productoSeleccionado,
+    queryKey: ['seriales', productoSeleccionado?.id, ...sucursalKey],
+    queryFn:  () => getSeriales(productoSeleccionado.id, false).then((r) => r.data.data),
+    enabled:  !!productoSeleccionado,
   });
 
   const agregarItem = useCarritoStore((s) => s.agregarItem);
@@ -143,8 +147,9 @@ export function ProductosSerial({ onAgregarProducto }) {
   const mutEliminar = useMutation({
     mutationFn: (serialId) => eliminarSerial(serialId),
     onSuccess: () => {
-      queryClient.invalidateQueries(['seriales', productoSeleccionado?.id]);
-      queryClient.invalidateQueries(['productos-serial']);
+      // exact: false invalida todas las variantes de sucursal y producto
+      queryClient.invalidateQueries({ queryKey: ['seriales'],          exact: false });
+      queryClient.invalidateQueries({ queryKey: ['productos-serial'],  exact: false });
       setSerialAEliminar(null);
     },
   });
@@ -177,7 +182,7 @@ export function ProductosSerial({ onAgregarProducto }) {
       tipo:     'serial',
       nombre:   productoSeleccionado.nombre,
       imei:     serial.imei,
-      precio: Math.round(Number(productoSeleccionado.precio || 0)),
+      precio:   Math.round(Number(productoSeleccionado.precio || 0)),
       cantidad: 1,
     });
   };
@@ -325,13 +330,13 @@ export function ProductosSerial({ onAgregarProducto }) {
       )}
 
       {serialAEditar && (
-  <ModalEditarSerial
-    serial={serialAEditar}
-    precioProducto={productoSeleccionado?.precio}
-    productoId={productoSeleccionado?.id}
-    onClose={() => setSerialAEditar(null)}
-  />
-)}
+        <ModalEditarSerial
+          serial={serialAEditar}
+          precioProducto={productoSeleccionado?.precio}
+          productoId={productoSeleccionado?.id}
+          onClose={() => setSerialAEditar(null)}
+        />
+      )}
     </>
   );
 }

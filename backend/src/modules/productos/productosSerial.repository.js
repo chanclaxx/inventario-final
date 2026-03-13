@@ -2,7 +2,12 @@ const { pool } = require('../../config/db');
 
 // ── Productos ─────────────────────────────────────────────────────────────────
 
-const findAll = async (sucursalId) => {
+/**
+ * Retorna productos con conteo de seriales disponibles.
+ * - sucursalId = número  → filtra por sucursal
+ * - sucursalId = null    → todas las sucursales del negocio (vista global)
+ */
+const findAll = async (sucursalId, negocioId) => {
   const { rows } = await pool.query(`
     SELECT
       ps.id,
@@ -11,20 +16,26 @@ const findAll = async (sucursalId) => {
       ps.modelo,
       ps.precio,
       ps.sucursal_id,
+      su.nombre AS sucursal_nombre,
       ps.proveedor_id,
       COUNT(s.id) FILTER (WHERE s.vendido = false AND s.prestado = false) AS disponibles
     FROM productos_serial ps
+    JOIN sucursales su ON su.id = ps.sucursal_id
     LEFT JOIN seriales s ON s.producto_id = ps.id
-    WHERE ps.sucursal_id = $1
-    GROUP BY ps.id
+    WHERE su.negocio_id = $1
+      AND ($2::int IS NULL OR ps.sucursal_id = $2)
+    GROUP BY ps.id, su.nombre
     ORDER BY ps.nombre ASC
-  `, [sucursalId]);
+  `, [negocioId, sucursalId ?? null]);
   return rows;
 };
 
 const findById = async (id) => {
   const { rows } = await pool.query(
-    'SELECT * FROM productos_serial WHERE id = $1',
+    `SELECT ps.*, su.nombre AS sucursal_nombre
+     FROM productos_serial ps
+     JOIN sucursales su ON su.id = ps.sucursal_id
+     WHERE ps.id = $1`,
     [id]
   );
   return rows[0] || null;
@@ -72,16 +83,13 @@ const updatePrecio = async (productoId, precio) => {
 // ── Seriales ──────────────────────────────────────────────────────────────────
 
 const getSeriales = async (productoId, vendido) => {
-  const condicion = vendido === null
-    ? ''
-    : `AND s.vendido = ${vendido}`;
-
   const { rows } = await pool.query(`
     SELECT s.*
     FROM seriales s
-    WHERE s.producto_id = $1 ${condicion}
+    WHERE s.producto_id = $1
+      AND ($2::boolean IS NULL OR s.vendido = $2)
     ORDER BY s.fecha_entrada DESC
-  `, [productoId]);
+  `, [productoId, vendido ?? null]);
   return rows;
 };
 
@@ -93,10 +101,6 @@ const findSerialByIMEI = async (imei) => {
   return rows[0] || null;
 };
 
-/**
- * Busca un serial por IMEI dentro de cualquier sucursal del negocio.
- * Retorna el serial con datos del producto y sucursal, o null si no existe.
- */
 const findSerialByIMEIEnNegocio = async (imei, negocioId) => {
   const { rows } = await pool.query(`
     SELECT
@@ -132,11 +136,6 @@ const insertarSerial = async ({ producto_id, imei, fecha_entrada, costo_compra, 
   return rows[0];
 };
 
-/**
- * Reactiva un serial existente marcándolo como disponible nuevamente.
- * Usado cuando el usuario confirma reactivar un IMEI duplicado.
- * Actualiza costo_compra y proveedor_id solo si se proporcionan.
- */
 const reactivarSerial = async (serialId, { costo_compra, proveedor_id } = {}) => {
   const { rows } = await pool.query(`
     UPDATE seriales
@@ -148,7 +147,6 @@ const reactivarSerial = async (serialId, { costo_compra, proveedor_id } = {}) =>
     WHERE id = $3
     RETURNING *
   `, [costo_compra ?? null, proveedor_id || null, serialId]);
-
   if (!rows[0]) throw { status: 404, message: 'Serial no encontrado para reactivar' };
   return rows[0];
 };
@@ -173,9 +171,7 @@ const eliminarSerial = async (serialId) => {
 };
 
 module.exports = {
-  // Productos
   findAll, findById, perteneceAlNegocio, create, update, updatePrecio,
-  // Seriales
   getSeriales, findSerialByIMEI, findSerialByIMEIEnNegocio,
   insertarSerial, reactivarSerial, actualizarSerial, eliminarSerial,
 };

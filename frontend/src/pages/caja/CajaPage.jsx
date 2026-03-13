@@ -5,12 +5,13 @@ import {
   registrarMovimiento, getResumenDia,
 } from '../../api/caja.api';
 import { formatCOP, formatFechaHora } from '../../utils/formatters';
-import { Button }    from '../../components/ui/Button';
-import { Input }     from '../../components/ui/Input';
-import { Modal }     from '../../components/ui/Modal';
-import { Badge }     from '../../components/ui/Badge';
-import { Spinner }   from '../../components/ui/Spinner';
+import { Button }     from '../../components/ui/Button';
+import { Input }      from '../../components/ui/Input';
+import { Modal }      from '../../components/ui/Modal';
+import { Badge }      from '../../components/ui/Badge';
+import { Spinner }    from '../../components/ui/Spinner';
 import { EmptyState } from '../../components/ui/EmptyState';
+import { useSucursalKey } from '../../hooks/useSucursalKey';
 import {
   Wallet, Plus, Minus, Lock, ChevronDown, ChevronUp,
   ShoppingCart, CreditCard, ArrowDownCircle, ArrowUpCircle,
@@ -21,18 +22,18 @@ import {
 
 function ModalMovimiento({ cajaId, onClose }) {
   const queryClient = useQueryClient();
-  const [form, setForm] = useState({ tipo: 'Ingreso', concepto: '', valor: '' });
+  const [form,  setForm]  = useState({ tipo: 'Ingreso', concepto: '', valor: '' });
   const [error, setError] = useState('');
 
   const mutation = useMutation({
     mutationFn: () => registrarMovimiento(cajaId, {
-      tipo:    form.tipo,
+      tipo:     form.tipo,
       concepto: form.concepto,
-      valor:   Number(form.valor),
+      valor:    Number(form.valor),
     }),
     onSuccess: () => {
-      queryClient.invalidateQueries(['caja-resumen', cajaId]);
-      queryClient.invalidateQueries(['caja-activa']);
+      queryClient.invalidateQueries({ queryKey: ['caja-resumen', cajaId], exact: false });
+      queryClient.invalidateQueries({ queryKey: ['caja-activa'],           exact: false });
       onClose();
     },
     onError: (err) => setError(err.response?.data?.error || 'Error al registrar'),
@@ -101,12 +102,14 @@ function ModalCerrarCaja({ caja, resumenTotales, onClose }) {
   const [monto, setMonto] = useState('');
   const [error, setError] = useState('');
 
-  const saldoEsperado = Number(caja.monto_inicial) + Number(resumenTotales?.ingresos || 0) - Number(resumenTotales?.egresos || 0);
+  const saldoEsperado = Number(caja.monto_inicial)
+    + Number(resumenTotales?.ingresos || 0)
+    - Number(resumenTotales?.egresos  || 0);
 
   const mutation = useMutation({
     mutationFn: () => cerrarCaja(caja.id, { monto_cierre: Number(monto) }),
     onSuccess: () => {
-      queryClient.invalidateQueries(['caja-activa']);
+      queryClient.invalidateQueries({ queryKey: ['caja-activa'], exact: false });
       onClose();
     },
     onError: (err) => setError(err.response?.data?.error || 'Error al cerrar'),
@@ -243,8 +246,8 @@ function GrupoMovimientos({ grupoKey, grupo }) {
   if (!cfg || grupo.items.length === 0) return null;
 
   const GrupoIcono = cfg.icono;
-  const esMixto = grupoKey === 'manuales';
-  const esIngreso = grupo.tipo === 'Ingreso';
+  const esMixto   = grupoKey === 'manuales';
+  const esIngreso  = grupo.tipo === 'Ingreso';
 
   const totalMostrar = esMixto
     ? { ingreso: grupo.totalIngreso, egreso: grupo.totalEgreso }
@@ -252,7 +255,6 @@ function GrupoMovimientos({ grupoKey, grupo }) {
 
   return (
     <div className={`border ${cfg.borderColor} rounded-2xl overflow-hidden`}>
-      {/* Header del grupo */}
       <button
         onClick={() => setExpandido(!expandido)}
         className={`w-full flex items-center justify-between px-4 py-3 ${cfg.bgHeader} transition-colors hover:brightness-95`}
@@ -285,11 +287,10 @@ function GrupoMovimientos({ grupoKey, grupo }) {
         </div>
       </button>
 
-      {/* Items del grupo */}
       {expandido && (
         <div className="divide-y divide-gray-50">
           {grupo.items.map((item) => {
-            const rendered = cfg.renderItem(item);
+            const rendered      = cfg.renderItem(item);
             const esTipoIngreso = rendered.esMixto ? rendered.tipo === 'Ingreso' : esIngreso;
             return (
               <div key={item.id} className="flex items-center justify-between px-4 py-2.5 bg-white hover:bg-gray-50/50">
@@ -320,37 +321,42 @@ function GrupoMovimientos({ grupoKey, grupo }) {
 // ─── Page principal ───────────────────────────────────────────────────────────
 
 export default function CajaPage() {
-  const queryClient                       = useQueryClient();
-  const [modalMov,    setModalMov]        = useState(false);
-  const [modalCerrar, setModalCerrar]     = useState(false);
-  const [montoApertura, setMontoApertura] = useState('');
+  const queryClient                         = useQueryClient();
+  const sucursalKey                         = useSucursalKey();
+  const [modalMov,      setModalMov]        = useState(false);
+  const [modalCerrar,   setModalCerrar]     = useState(false);
+  const [montoApertura, setMontoApertura]   = useState('');
 
+  // caja-activa es de sucursal → incluye sucursalKey
   const { data: caja, isLoading } = useQuery({
-    queryKey: ['caja-activa'],
-    queryFn: () => getCajaActiva().then((r) => r.data.data),
+    queryKey: ['caja-activa', ...sucursalKey],
+    queryFn:  () => getCajaActiva().then((r) => r.data.data),
   });
 
+  // caja-resumen es por ID único de caja abierta → sin sucursalKey
   const { data: resumenData, isLoading: loadingResumen } = useQuery({
     queryKey: ['caja-resumen', caja?.id],
-    queryFn: () => getResumenDia(caja.id).then((r) => r.data.data),
-    enabled: !!caja?.id,
-    refetchInterval: 30000, // refresca cada 30s para capturar nuevas facturas/abonos
+    queryFn:  () => getResumenDia(caja.id).then((r) => r.data.data),
+    enabled:  !!caja?.id,
+    refetchInterval: 30000,
   });
 
   const mutAbrir = useMutation({
     mutationFn: () => abrirCaja({ monto_inicial: Number(montoApertura) }),
-    onSuccess: () => queryClient.invalidateQueries(['caja-activa']),
+    onSuccess:  () => queryClient.invalidateQueries({ queryKey: ['caja-activa'], exact: false }),
   });
 
   const grupos  = useMemo(() => resumenData?.grupos  || {}, [resumenData]);
-  const totales = useMemo(() => resumenData?.totales || { ingresos: 0, egresos: 0, saldo: 0 }, [resumenData]);
+  const totales = useMemo(
+    () => resumenData?.totales || { ingresos: 0, egresos: 0, saldo: 0 },
+    [resumenData]
+  );
 
   const saldoActual = useMemo(
     () => Number(caja?.monto_inicial || 0) + totales.ingresos - totales.egresos,
     [caja, totales]
   );
 
-  // Hay algún grupo con items
   const hayMovimientos = useMemo(
     () => Object.values(grupos).some((g) => g.items?.length > 0),
     [grupos]
@@ -358,7 +364,6 @@ export default function CajaPage() {
 
   if (isLoading) return <Spinner className="py-32" />;
 
-  // Sin caja abierta
   if (!caja) {
     return (
       <div className="flex flex-col items-center justify-center py-20 gap-6">
@@ -437,18 +442,15 @@ export default function CajaPage() {
           <EmptyState icon={Wallet} titulo="Sin movimientos aún" />
         ) : (
           <>
-            {/* Ingresos automáticos */}
             <p className="text-xs text-gray-400 font-medium px-1">Ingresos</p>
             <GrupoMovimientos grupoKey="facturas"       grupo={grupos.facturas       || { items: [] }} />
             <GrupoMovimientos grupoKey="abonosCredito"  grupo={grupos.abonosCredito  || { items: [] }} />
             <GrupoMovimientos grupoKey="abonosPrestamo" grupo={grupos.abonosPrestamo || { items: [] }} />
 
-            {/* Egresos automáticos */}
             <p className="text-xs text-gray-400 font-medium px-1 mt-1">Egresos</p>
             <GrupoMovimientos grupoKey="compras"        grupo={grupos.compras        || { items: [] }} />
             <GrupoMovimientos grupoKey="abonosAcreedor" grupo={grupos.abonosAcreedor || { items: [] }} />
 
-            {/* Manuales */}
             {(grupos.manuales?.items?.length > 0) && (
               <>
                 <p className="text-xs text-gray-400 font-medium px-1 mt-1">Manuales</p>

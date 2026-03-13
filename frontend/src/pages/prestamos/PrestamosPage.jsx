@@ -9,6 +9,7 @@ import { Modal }                        from '../../components/ui/Modal';
 import { Input }                        from '../../components/ui/Input';
 import { Spinner }                      from '../../components/ui/Spinner';
 import { EmptyState }                   from '../../components/ui/EmptyState';
+import { useSucursalKey }               from '../../hooks/useSucursalKey';
 import {
   Handshake, CreditCard, Plus, CheckCircle,
   ChevronDown, ChevronUp, Users, User,
@@ -32,8 +33,11 @@ function ModalAbonoPrestamo({ prestamo, onClose }) {
 
   const mutation = useMutation({
     mutationFn: () => registrarAbonoPrestamo(prestamo.id, Number(valor)),
-    onSuccess: () => { queryClient.invalidateQueries(['prestamos']); onClose(); },
-    onError:   (err) => setError(err.response?.data?.error || 'Error al registrar abono'),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['prestamos'], exact: false });
+      onClose();
+    },
+    onError: (err) => setError(err.response?.data?.error || 'Error al registrar abono'),
   });
 
   const saldoPendiente = Number(prestamo.valor_prestamo) - Number(prestamo.total_abonado);
@@ -82,8 +86,11 @@ function ModalAbonoCredito({ credito, onClose }) {
 
   const mutation = useMutation({
     mutationFn: () => registrarAbonoCredito(credito.id, { valor: Number(valor), metodo }),
-    onSuccess: () => { queryClient.invalidateQueries(['creditos']); onClose(); },
-    onError:   (err) => setError(err.response?.data?.error || 'Error al registrar abono'),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['creditos'], exact: false });
+      onClose();
+    },
+    onError: (err) => setError(err.response?.data?.error || 'Error al registrar abono'),
   });
 
   const saldoPendiente = Number(credito.valor_total) - Number(credito.total_abonado);
@@ -201,7 +208,6 @@ function CardPrestamoCliente({ prestamo, onAbonar, onDevolver }) {
         </Badge>
       </div>
 
-      {/* Info del cliente */}
       {(prestamo.cedula || prestamo.telefono) && (
         <div className="bg-gray-50 rounded-xl px-3 py-2 flex flex-col gap-0.5">
           {prestamo.cedula && (
@@ -277,13 +283,13 @@ function GrupoPrestatario({ nombre, prestamos, saldoTotal, onAbonar, onDevolver,
             <p className="text-xs text-gray-400 px-1 py-2">Sin préstamos activos</p>
           ) : (
             activos.map((p) => (
-  <Card
-    key={p.id}
-    prestamo={p}
-    onAbonar={onAbonar}
-    onDevolver={onDevolver}
-  />
-))
+              <Card
+                key={p.id}
+                prestamo={p}
+                onAbonar={onAbonar}
+                onDevolver={onDevolver}
+              />
+            ))
           )}
 
           {cerrados.length > 0 && (
@@ -318,21 +324,22 @@ export default function PrestamosPage() {
   const [tabPrestamos,  setTabPrestamos]  = useState('companeros');
   const [prestamoAbono, setPrestamoAbono] = useState(null);
   const [creditoAbono,  setCreditoAbono]  = useState(null);
-  const queryClient = useQueryClient();
+  const queryClient  = useQueryClient();
+  const sucursalKey  = useSucursalKey();
 
   const { data: prestamosData, isLoading: loadingP } = useQuery({
-    queryKey: ['prestamos'],
+    queryKey: ['prestamos', ...sucursalKey],
     queryFn:  () => getPrestamos().then((r) => r.data.data),
   });
 
   const { data: creditosData, isLoading: loadingC } = useQuery({
-    queryKey: ['creditos'],
+    queryKey: ['creditos', ...sucursalKey],
     queryFn:  () => getCreditos().then((r) => r.data.data),
   });
 
   const mutDevolver = useMutation({
     mutationFn: devolverPrestamo,
-    onSuccess:  () => queryClient.invalidateQueries(['prestamos']),
+    onSuccess:  () => queryClient.invalidateQueries({ queryKey: ['prestamos'], exact: false }),
   });
 
   const prestamos = prestamosData || [];

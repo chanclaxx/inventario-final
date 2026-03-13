@@ -44,8 +44,8 @@ export function ModalEditarSerial({ serial, precioProducto, productoId, onClose 
       producto_id:  productoId,
     }),
     onSuccess: () => {
-      queryClient.invalidateQueries(['seriales', productoId]);
-      queryClient.invalidateQueries(['productos-serial']);
+      queryClient.invalidateQueries({ queryKey: ['seriales', productoId], exact: false });
+queryClient.invalidateQueries({ queryKey: ['productos-serial'],     exact: false });
       onClose();
     },
     onError: (err) => {

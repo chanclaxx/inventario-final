@@ -1,12 +1,12 @@
-import { useState, useContext } from 'react';
+import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Pencil } from 'lucide-react';
 import { actualizarProductoCantidad } from '../../api/productos.api';
-import { getProveedores } from '../../api/proveedores.api';
-import { Modal }   from '../../components/ui/Modal';
-import { Input }   from '../../components/ui/Input';
-import { Button }  from '../../components/ui/Button';
-import { AuthContext } from '../../context/AuthContext';
+import { getProveedores }             from '../../api/proveedores.api';
+import { Modal }    from '../../components/ui/Modal';
+import { Input }    from '../../components/ui/Input';
+import { Button }   from '../../components/ui/Button';
+import { useAuth }  from '../../context/useAuth';
 
 /**
  * Props:
@@ -14,38 +14,38 @@ import { AuthContext } from '../../context/AuthContext';
  *  - onClose:  () => void
  */
 export function ModalEditarProductoCantidad({ producto, onClose }) {
-  const { esAdminNegocio } = useContext(AuthContext);
+  const { esAdminNegocio } = useAuth();
   const queryClient = useQueryClient();
 
   const [form, setForm] = useState({
-    nombre:         producto.nombre         || '',
-    unidad_medida:  producto.unidad_medida  || 'unidad',
-    stock_minimo:   producto.stock_minimo   != null ? String(producto.stock_minimo)   : '0',
-    precio:         producto.precio         != null ? String(producto.precio)         : '',
-    costo_unitario: producto.costo_unitario != null ? String(producto.costo_unitario) : '',
-    proveedor_id:   producto.proveedor_id   != null ? String(producto.proveedor_id)   : '',
+    nombre         : producto.nombre         || '',
+    unidad_medida  : producto.unidad_medida  || 'unidad',
+    stock_minimo   : producto.stock_minimo   != null ? String(producto.stock_minimo)   : '0',
+    precio         : producto.precio         != null ? String(producto.precio)         : '',
+    costo_unitario : producto.costo_unitario != null ? String(producto.costo_unitario) : '',
+    proveedor_id   : producto.proveedor_id   != null ? String(producto.proveedor_id)   : '',
   });
   const [error, setError] = useState('');
 
   const { data: proveedoresData } = useQuery({
-    queryKey: ['proveedores'],
-    queryFn:  () => getProveedores().then((r) => r.data.data),
-    enabled:  esAdminNegocio(),
+    queryKey : ['proveedores'],
+    queryFn  : () => getProveedores().then((r) => r.data.data),
+    enabled  : esAdminNegocio(),
   });
 
   const proveedores = proveedoresData || [];
 
   const mutation = useMutation({
     mutationFn: () => actualizarProductoCantidad(producto.id, {
-      nombre:         form.nombre.trim(),
-      unidad_medida:  form.unidad_medida.trim() || 'unidad',
-      stock_minimo:   Number(form.stock_minimo)  || 0,
-      precio:         form.precio         !== '' ? Number(form.precio)         : null,
-      costo_unitario: form.costo_unitario !== '' ? Number(form.costo_unitario) : null,
-      proveedor_id:   form.proveedor_id   !== '' ? Number(form.proveedor_id)   : null,
+      nombre         : form.nombre.trim(),
+      unidad_medida  : form.unidad_medida.trim() || 'unidad',
+      stock_minimo   : Number(form.stock_minimo)  || 0,
+      precio         : form.precio         !== '' ? Number(form.precio)         : null,
+      costo_unitario : form.costo_unitario !== '' ? Number(form.costo_unitario) : null,
+      proveedor_id   : form.proveedor_id   !== '' ? Number(form.proveedor_id)   : null,
     }),
     onSuccess: () => {
-      queryClient.invalidateQueries(['productos-cantidad']);
+      queryClient.invalidateQueries({ queryKey: ['productos-cantidad'], exact: false });
       onClose();
     },
     onError: (err) => {
@@ -126,7 +126,6 @@ export function ModalEditarProductoCantidad({ producto, onClose }) {
           onKeyDown={(e) => handleKeyDown(e, 'edit-proveedor-cant')}
         />
 
-        {/* Selector de proveedor */}
         <div className="flex flex-col gap-1">
           <label className="text-sm font-medium text-gray-700">
             Proveedor <span className="text-gray-400 font-normal">(opcional)</span>

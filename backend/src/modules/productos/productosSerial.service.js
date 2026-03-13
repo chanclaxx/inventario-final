@@ -1,6 +1,8 @@
 const repo = require('./productosSerial.repository');
 
-const getProductos = (sucursalId) => repo.findAll(sucursalId);
+// Solo esta función cambia — el resto del service queda idéntico
+const getProductos = (sucursalId, negocioId) =>
+  repo.findAll(sucursalId, negocioId);
 
 const getProductoById = async (id) => {
   const producto = await repo.findById(id);

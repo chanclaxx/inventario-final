@@ -2,7 +2,8 @@ const service = require('./prestamos.service');
 
 const getPrestamos = async (req, res, next) => {
   try {
-    const data = await service.getPrestamos(req.sucursal_id);
+    const sucursalId = req.todasSucursales ? null : req.sucursal_id;
+    const data = await service.getPrestamos(sucursalId, req.user.negocio_id);
     res.json({ ok: true, data });
   } catch (err) { next(err); }
 };
@@ -16,10 +17,21 @@ const getPrestamoById = async (req, res, next) => {
 
 const crearPrestamo = async (req, res, next) => {
   try {
+    const sucursal_id = req.todasSucursales
+      ? req.body.sucursal_id
+      : req.sucursal_id;
+
+    if (!sucursal_id) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Debes indicar la sucursal donde se registra el préstamo',
+      });
+    }
+
     const data = await service.crearPrestamo({
       ...req.body,
-      sucursal_id: req.sucursal_id,
-      usuario_id:  req.user.id,
+      sucursal_id,
+      usuario_id: req.user.id,
     });
     res.status(201).json({ ok: true, data, message: 'Préstamo registrado correctamente' });
   } catch (err) { next(err); }
@@ -43,4 +55,6 @@ const devolverPrestamo = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-module.exports = { getPrestamos, getPrestamoById, crearPrestamo, registrarAbono, devolverPrestamo };
+module.exports = {
+  getPrestamos, getPrestamoById, crearPrestamo, registrarAbono, devolverPrestamo,
+};

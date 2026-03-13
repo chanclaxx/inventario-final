@@ -1,5 +1,8 @@
 import { useState } from 'react';
-import { Package, ShoppingBag, Plus, Download, ShoppingCart, ChevronDown, ChevronUp, Upload } from 'lucide-react';
+import {
+  Package, ShoppingBag, Plus, Download,
+  ShoppingCart, ChevronDown, ChevronUp, Upload, AlertCircle,
+} from 'lucide-react';
 import { ProductosSerial }         from './ProductosSerial';
 import { ProductosCantidad }       from './ProductosCantidad';
 import { Carrito }                 from './Carrito';
@@ -9,28 +12,35 @@ import { ModalAgregarProducto }    from './ModalAgregarProducto';
 import { Button }                  from '../../components/ui/Button';
 import { exportarInventarioExcel } from '../../utils/exportarInventarioExcel';
 import useCarritoStore             from '../../store/carritoStore';
+import useSucursalStore            from '../../store/sucursalStore';
 import api                         from '../../api/axios.config';
 import { ModalImportarInventario } from './ModalImportarInventario';
 
-
 const TABS = [
-  { id: 'serial',   label: 'Con Serial',   icon: Package },
+  { id: 'serial',   label: 'Con Serial',   icon: Package    },
   { id: 'cantidad', label: 'Por Cantidad', icon: ShoppingBag },
-  
 ];
 
 export default function InventarioPage() {
-  const [tabActiva,     setTabActiva]    = useState('serial');
-  const [modalFactura,  setModalFactura] = useState(false);
-  const [modalPrestamo, setModalPrestamo] = useState(false);
-  const [modalAgregar,  setModalAgregar] = useState(false);
-  const [exportando,    setExportando]   = useState(false);
+  const [tabActiva,      setTabActiva]      = useState('serial');
+  const [modalFactura,   setModalFactura]   = useState(false);
+  const [modalPrestamo,  setModalPrestamo]  = useState(false);
+  const [modalAgregar,   setModalAgregar]   = useState(false);
+  const [exportando,     setExportando]     = useState(false);
   const [carritoAbierto, setCarritoAbierto] = useState(false);
-  const [modalImportar, setModalImportar] = useState(false);
+  const [modalImportar,  setModalImportar]  = useState(false);
 
   const { items, totalCarrito } = useCarritoStore();
   const totalItems = items.length;
-  const total = totalCarrito();
+  const total      = totalCarrito();
+
+  // Vista global: deshabilitar acciones que requieren sucursal específica
+  const esVistaGlobal   = useSucursalStore((s) => s.esVistaGlobal());
+  const esUnicaSucursal = useSucursalStore((s) => s.esUnicaSucursal());
+
+  // Bloquear creación solo cuando es vista global Y hay más de una sucursal
+  // (si hay una sola, nunca es vista global)
+  const bloquearCreacion = esVistaGlobal && !esUnicaSucursal;
 
   const handleExportar = async () => {
     setExportando(true);
@@ -51,6 +61,18 @@ export default function InventarioPage() {
       {/* ── Contenido principal ── */}
       <div className="flex-1 min-w-0">
 
+        {/* Aviso vista global */}
+        {bloquearCreacion && (
+          <div className="flex items-center gap-2 px-3 py-2.5 mb-3 bg-purple-50
+            border border-purple-200 rounded-xl text-sm text-purple-700">
+            <AlertCircle size={15} className="flex-shrink-0" />
+            <span>
+              Estás viendo todas las sucursales. Selecciona una sucursal específica
+              para agregar o importar productos.
+            </span>
+          </div>
+        )}
+
         {/* Header: tabs + botones */}
         <div className="flex items-center justify-between mb-4 gap-2 flex-wrap">
           <div className="flex gap-1 bg-gray-100 p-1 rounded-xl w-fit">
@@ -69,7 +91,6 @@ export default function InventarioPage() {
                   <TabIcon size={16} />
                   {tab.label}
                 </button>
-                
               );
             })}
           </div>
@@ -87,11 +108,24 @@ export default function InventarioPage() {
                 {exportando ? 'Generando...' : 'Exportar Excel'}
               </span>
             </Button>
-            <Button size="sm" variant="secondary" onClick={() => setModalImportar(true)}>
-            <Upload size={16} /> Importar Excel
+
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => setModalImportar(true)}
+              disabled={bloquearCreacion}
+              title={bloquearCreacion ? 'Selecciona una sucursal para importar' : undefined}
+            >
+              <Upload size={16} />
+              <span className="hidden sm:inline">Importar Excel</span>
             </Button>
 
-            <Button size="sm" onClick={() => setModalAgregar(true)}>
+            <Button
+              size="sm"
+              onClick={() => setModalAgregar(true)}
+              disabled={bloquearCreacion}
+              title={bloquearCreacion ? 'Selecciona una sucursal para agregar productos' : undefined}
+            >
               <Plus size={16} />
               <span className="hidden sm:inline">Agregar producto</span>
             </Button>
@@ -112,9 +146,8 @@ export default function InventarioPage() {
         </div>
       </div>
 
-      {/* ── Carrito móvil/tablet (colapsable en la parte inferior) ── */}
+      {/* ── Carrito móvil/tablet (colapsable) ── */}
       <div className="lg:hidden">
-        {/* Cabecera colapsable */}
         <button
           onClick={() => setCarritoAbierto((v) => !v)}
           className="w-full flex items-center justify-between px-4 py-3
@@ -148,7 +181,6 @@ export default function InventarioPage() {
           </div>
         </button>
 
-        {/* Contenido del carrito colapsable */}
         {carritoAbierto && (
           <div className="mt-2 bg-white border border-gray-100 rounded-2xl p-4 shadow-sm">
             <Carrito
@@ -162,10 +194,13 @@ export default function InventarioPage() {
       {/* ── Modales ── */}
       <ModalFactura  open={modalFactura}  onClose={() => setModalFactura(false)}  />
       <ModalPrestamo open={modalPrestamo} onClose={() => setModalPrestamo(false)} />
-      {modalAgregar && (
+
+      {modalAgregar && !bloquearCreacion && (
         <ModalAgregarProducto onClose={() => setModalAgregar(false)} />
       )}
-      {modalImportar && <ModalImportarInventario onClose={() => setModalImportar(false)} />}
+      {modalImportar && !bloquearCreacion && (
+        <ModalImportarInventario onClose={() => setModalImportar(false)} />
+      )}
     </div>
   );
 }

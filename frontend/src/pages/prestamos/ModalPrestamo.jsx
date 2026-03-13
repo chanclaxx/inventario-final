@@ -14,7 +14,6 @@ import { getClientes, crearCliente } from '../../api/clientes.api';
 import useCarritoStore from '../../store/carritoStore';
 import { User, Users, Plus, ChevronLeft } from 'lucide-react';
 
-// ── Selector con opción de crear ──────────────────────────────────────────
 // ── Selector genérico (para prestatarios y empleados) ─────────────────────
 function SelectorOCrear({ items, onSeleccionar, onCrear, placeholder, labelCrear, loading, renderItem }) {
   const [modo,   setModo]   = useState('seleccionar');
@@ -97,7 +96,10 @@ function SelectorOCrearCliente({ items, onSeleccionar, onCrear, loading }) {
     return (
       <div className="flex flex-col gap-3">
         <button
-          onClick={() => { setModo('seleccionar'); setForm({ nombre: '', cedula: '', celular: '', direccion: '', notas: '' }); }}
+          onClick={() => {
+            setModo('seleccionar');
+            setForm({ nombre: '', cedula: '', celular: '', direccion: '', notas: '' });
+          }}
           className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-600 w-fit"
         >
           <ChevronLeft size={13} /> Volver
@@ -206,6 +208,7 @@ export function ModalPrestamo({ open, onClose }) {
   const [error,          setError]          = useState('');
 
   // ── Queries ──
+  // prestatarios y clientes son de negocio (no sucursal) → sin sucursalKey
   const { data: prestatariosData, isLoading: loadingPrestatarios } = useQuery({
     queryKey: ['prestatarios'],
     queryFn:  () => getPrestatarios().then((r) => r.data.data),
@@ -228,7 +231,7 @@ export function ModalPrestamo({ open, onClose }) {
   const mutCrearPrestatario = useMutation({
     mutationFn: (nombre) => crearPrestatario({ nombre }),
     onSuccess: (res) => {
-      queryClient.invalidateQueries(['prestatarios']);
+      queryClient.invalidateQueries({ queryKey: ['prestatarios'], exact: false });
       setPrestatarioSel(res.data.data);
     },
   });
@@ -236,31 +239,31 @@ export function ModalPrestamo({ open, onClose }) {
   const mutCrearEmpleado = useMutation({
     mutationFn: (nombre) => crearEmpleado(prestatarioSel.id, { nombre }),
     onSuccess: (res) => {
-      queryClient.invalidateQueries(['empleados', prestatarioSel.id]);
+      queryClient.invalidateQueries({ queryKey: ['empleados', prestatarioSel.id], exact: false });
       setEmpleadoSel(res.data.data);
     },
   });
 
   const mutCrearCliente = useMutation({
-  mutationFn: (datos) => crearCliente({
-    nombre:    datos.nombre,
-    cedula:    datos.cedula,
-    celular:   datos.celular   || '',
-    direccion: datos.direccion || '',
-    email:     '',
-  }),
-  onSuccess: (res) => {
-    queryClient.invalidateQueries(['clientes-prestamo']);
-    setClienteSel(res.data.data);
-  },
-});
+    mutationFn: (datos) => crearCliente({
+      nombre:    datos.nombre,
+      cedula:    datos.cedula,
+      celular:   datos.celular   || '',
+      direccion: datos.direccion || '',
+      email:     '',
+    }),
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: ['clientes-prestamo'], exact: false });
+      setClienteSel(res.data.data);
+    },
+  });
 
   const mutPrestamo = useMutation({
     mutationFn: crearPrestamo,
     onSuccess: () => {
-      queryClient.invalidateQueries(['productos-serial']);
-      queryClient.invalidateQueries(['productos-cantidad']);
-      queryClient.invalidateQueries(['prestamos']);
+      queryClient.invalidateQueries({ queryKey: ['productos-serial'],  exact: false });
+      queryClient.invalidateQueries({ queryKey: ['productos-cantidad'], exact: false });
+      queryClient.invalidateQueries({ queryKey: ['prestamos'],          exact: false });
       limpiarCarrito();
       onClose();
       resetForm();
@@ -418,25 +421,25 @@ export function ModalPrestamo({ open, onClose }) {
 
         {/* ── Flujo Cliente ── */}
         {tipoCliente === 'cliente' && (
-  <div className="flex flex-col gap-2">
-    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-      Cliente
-    </p>
-    {clienteSel ? (
-      <ChipSeleccionado
-        nombre={clienteSel.nombre}
-        onCambiar={() => setClienteSel(null)}
-      />
-    ) : (
-      <SelectorOCrearCliente
-        items={clientes}
-        loading={loadingClientes}
-        onSeleccionar={(c) => setClienteSel(c)}
-        onCrear={(datos) => mutCrearCliente.mutate(datos)}
-      />
-    )}
-  </div>
-)}
+          <div className="flex flex-col gap-2">
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+              Cliente
+            </p>
+            {clienteSel ? (
+              <ChipSeleccionado
+                nombre={clienteSel.nombre}
+                onCambiar={() => setClienteSel(null)}
+              />
+            ) : (
+              <SelectorOCrearCliente
+                items={clientes}
+                loading={loadingClientes}
+                onSeleccionar={(c) => setClienteSel(c)}
+                onCrear={(datos) => mutCrearCliente.mutate(datos)}
+              />
+            )}
+          </div>
+        )}
 
         {/* Valor */}
         <div className="flex flex-col gap-2">

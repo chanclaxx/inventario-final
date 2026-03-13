@@ -1,24 +1,33 @@
 const { pool } = require('../../config/db');
 
-const findAll = async (sucursalId) => {
+const findAll = async (sucursalId, negocioId) => {
+  const filtro = sucursalId ? 'c.sucursal_id = $1' : 'su.negocio_id = $1';
+  const param  = sucursalId ?? negocioId;
+
   const { rows } = await pool.query(`
-    SELECT c.id, c.fecha, c.numero_factura, c.total, c.estado, c.notas,
-           p.nombre AS proveedor_nombre, u.nombre AS usuario_nombre
+    SELECT
+      c.id, c.fecha, c.numero_factura, c.total, c.estado, c.notas,
+      c.sucursal_id, su.nombre AS sucursal_nombre,
+      p.nombre AS proveedor_nombre,
+      u.nombre AS usuario_nombre
     FROM compras c
-    JOIN proveedores p ON p.id = c.proveedor_id
-    LEFT JOIN usuarios u ON u.id = c.usuario_id
-    WHERE c.sucursal_id = $1
+    JOIN  sucursales  su ON su.id = c.sucursal_id
+    JOIN  proveedores p  ON p.id  = c.proveedor_id
+    LEFT JOIN usuarios u ON u.id  = c.usuario_id
+    WHERE ${filtro}
     ORDER BY c.fecha DESC
-  `, [sucursalId]);
+  `, [param]);
   return rows;
 };
 
 const findById = async (id) => {
   const { rows } = await pool.query(`
-    SELECT c.*, p.nombre AS proveedor_nombre, u.nombre AS usuario_nombre
+    SELECT c.*, p.nombre AS proveedor_nombre,
+           u.nombre AS usuario_nombre, su.nombre AS sucursal_nombre
     FROM compras c
-    JOIN proveedores p ON p.id = c.proveedor_id
-    LEFT JOIN usuarios u ON u.id = c.usuario_id
+    JOIN  sucursales  su ON su.id = c.sucursal_id
+    JOIN  proveedores p  ON p.id  = c.proveedor_id
+    LEFT JOIN usuarios u ON u.id  = c.usuario_id
     WHERE c.id = $1
   `, [id]);
   return rows[0] || null;
@@ -41,15 +50,22 @@ const getLineas = async (compraId) => {
   return rows;
 };
 
-const findByProveedor = async (proveedorId, sucursalId) => {
+// Vista global: filtra por negocio a través del proveedor (que es del negocio)
+const findByProveedor = async (proveedorId, sucursalId, negocioId) => {
+  const filtro = sucursalId ? 'c.sucursal_id = $2' : 'su.negocio_id = $2';
+  const param  = sucursalId ?? negocioId;
+
   const { rows } = await pool.query(`
-    SELECT c.id, c.fecha, c.numero_factura, c.total, c.estado, c.notas,
-           u.nombre AS usuario_nombre
+    SELECT
+      c.id, c.fecha, c.numero_factura, c.total, c.estado, c.notas,
+      c.sucursal_id, su.nombre AS sucursal_nombre,
+      u.nombre AS usuario_nombre
     FROM compras c
-    LEFT JOIN usuarios u ON u.id = c.usuario_id
-    WHERE c.proveedor_id = $1 AND c.sucursal_id = $2
+    JOIN  sucursales  su ON su.id = c.sucursal_id
+    LEFT JOIN usuarios u ON u.id  = c.usuario_id
+    WHERE c.proveedor_id = $1 AND ${filtro}
     ORDER BY c.fecha DESC
-  `, [proveedorId, sucursalId]);
+  `, [proveedorId, param]);
   return rows;
 };
 
@@ -74,7 +90,7 @@ const insertarLinea = async (client, {
     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
     RETURNING *
   `, [
-    compra_id, nombre_producto, imei, cantidad, precio_unitario,
+    compra_id, nombre_producto, imei || null, cantidad, precio_unitario,
     precio_usd        || null,
     factor_conversion || null,
     valor_traida      || null,
@@ -82,4 +98,7 @@ const insertarLinea = async (client, {
   return rows[0];
 };
 
-module.exports = { findAll, findById, perteneceAlNegocio, findByProveedor, getLineas, create, insertarLinea };
+module.exports = {
+  findAll, findById, perteneceAlNegocio,
+  findByProveedor, getLineas, create, insertarLinea,
+};

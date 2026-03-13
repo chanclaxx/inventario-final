@@ -1,24 +1,33 @@
 const { pool } = require('../../config/db');
 
-const findAll = async (sucursalId) => {
+const findAll = async (sucursalId, negocioId) => {
+  const filtro = sucursalId ? 'c.sucursal_id = $1' : 'su.negocio_id = $1';
+  const param  = sucursalId ?? negocioId;
+
   const { rows } = await pool.query(`
-    SELECT c.id, c.valor_total, c.total_abonado, c.num_cuotas,
-           c.estado, c.fecha_limite, c.creado_en,
-           (c.valor_total - c.total_abonado) AS saldo_pendiente,
-           f.nombre_cliente, f.cedula, f.celular
+    SELECT
+      c.id, c.valor_total, c.total_abonado, c.num_cuotas,
+      c.estado, c.fecha_limite, c.creado_en, c.sucursal_id,
+      su.nombre AS sucursal_nombre,
+      (c.valor_total - c.total_abonado) AS saldo_pendiente,
+      f.nombre_cliente, f.cedula, f.celular
     FROM creditos c
-    JOIN facturas f ON f.id = c.factura_id
-    WHERE c.sucursal_id = $1
-    ORDER BY CASE c.estado WHEN 'Activo' THEN 0 WHEN 'Vencido' THEN 1 ELSE 2 END, c.creado_en DESC
-  `, [sucursalId]);
+    JOIN facturas   f  ON f.id  = c.factura_id
+    JOIN sucursales su ON su.id = c.sucursal_id
+    WHERE ${filtro}
+    ORDER BY
+      CASE c.estado WHEN 'Activo' THEN 0 WHEN 'Vencido' THEN 1 ELSE 2 END,
+      c.creado_en DESC
+  `, [param]);
   return rows;
 };
 
 const findById = async (id) => {
   const { rows } = await pool.query(`
-    SELECT c.*, f.nombre_cliente, f.cedula, f.celular
-    FROM creditos c
-    JOIN facturas f ON f.id = c.factura_id
+    SELECT c.*, f.nombre_cliente, f.cedula, f.celular, su.nombre AS sucursal_nombre
+    FROM creditos   c
+    JOIN facturas   f  ON f.id  = c.factura_id
+    JOIN sucursales su ON su.id = c.sucursal_id
     WHERE c.id = $1
   `, [id]);
   return rows[0] || null;
@@ -68,4 +77,7 @@ const updateEstado = async (client, id, estado) => {
   await client.query('UPDATE creditos SET estado = $1 WHERE id = $2', [estado, id]);
 };
 
-module.exports = { findAll, findById, perteneceAlNegocio, getAbonos, create, insertarAbono, updateEstado };
+module.exports = {
+  findAll, findById, perteneceAlNegocio,
+  getAbonos, create, insertarAbono, updateEstado,
+};

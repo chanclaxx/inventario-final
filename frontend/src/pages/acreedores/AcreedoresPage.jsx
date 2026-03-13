@@ -3,11 +3,11 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getAcreedores, getAcreedorById, crearAcreedor, registrarMovimiento } from '../../api/acreedores.api';
 import { getConfig } from '../../api/config.api';
 import { formatCOP, formatFechaHora } from '../../utils/formatters';
-import { Button } from '../../components/ui/Button';
-import { Input } from '../../components/ui/Input';
-import { Modal } from '../../components/ui/Modal';
-import { Badge } from '../../components/ui/Badge';
-import { Spinner } from '../../components/ui/Spinner';
+import { Button }     from '../../components/ui/Button';
+import { Input }      from '../../components/ui/Input';
+import { Modal }      from '../../components/ui/Modal';
+import { Badge }      from '../../components/ui/Badge';
+import { Spinner }    from '../../components/ui/Spinner';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { SearchInput } from '../../components/ui/SearchInput';
 import { ReciboAcreedor } from '../../components/Reciboacreedor';
@@ -17,12 +17,12 @@ import { Users, Plus, ChevronRight, ChevronLeft, PenLine, Printer } from 'lucide
 // CANVAS DE FIRMA
 // ─────────────────────────────────────────────
 function FirmaCanvas({ onFirma }) {
-  const canvasRef = useRef(null);
+  const canvasRef               = useRef(null);
   const [dibujando, setDibujando] = useState(false);
   const [tieneFirma, setTieneFirma] = useState(false);
 
   const getPos = (e, canvas) => {
-    const rect = canvas.getBoundingClientRect();
+    const rect   = canvas.getBoundingClientRect();
     const source = e.touches ? e.touches[0] : e;
     return {
       x: source.clientX - rect.left,
@@ -33,8 +33,8 @@ function FirmaCanvas({ onFirma }) {
   const iniciar = (e) => {
     e.preventDefault();
     const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
-    const pos = getPos(e, canvas);
+    const ctx    = canvas.getContext('2d');
+    const pos    = getPos(e, canvas);
     ctx.beginPath();
     ctx.moveTo(pos.x, pos.y);
     setDibujando(true);
@@ -44,12 +44,12 @@ function FirmaCanvas({ onFirma }) {
     e.preventDefault();
     if (!dibujando) return;
     const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
-    const pos = getPos(e, canvas);
+    const ctx    = canvas.getContext('2d');
+    const pos    = getPos(e, canvas);
     ctx.lineTo(pos.x, pos.y);
     ctx.strokeStyle = '#1d4ed8';
-    ctx.lineWidth = 2;
-    ctx.lineCap = 'round';
+    ctx.lineWidth   = 2;
+    ctx.lineCap     = 'round';
     ctx.stroke();
     setTieneFirma(true);
   };
@@ -102,10 +102,10 @@ function FirmaCanvas({ onFirma }) {
 // MODAL MOVIMIENTO
 // ─────────────────────────────────────────────
 function ModalMovimiento({ acreedor, onClose }) {
-  const queryClient = useQueryClient();
-  const [form, setForm]   = useState({ tipo: 'Cargo', descripcion: '', valor: '' });
-  const [firma, setFirma] = useState(null);
-  const [error, setError] = useState('');
+  const queryClient               = useQueryClient();
+  const [form,  setForm]          = useState({ tipo: 'Cargo', descripcion: '', valor: '' });
+  const [firma, setFirma]         = useState(null);
+  const [error, setError]         = useState('');
   const [movRegistrado, setMovRegistrado] = useState(null);
 
   const mutation = useMutation({
@@ -116,8 +116,9 @@ function ModalMovimiento({ acreedor, onClose }) {
       firma,
     }),
     onSuccess: (data) => {
-      queryClient.invalidateQueries(['acreedor', acreedor.id]);
-      queryClient.invalidateQueries(['acreedores']);
+      // Acreedores es de negocio (negocio_id) → sin sucursalKey, igual exact: false por consistencia
+      queryClient.invalidateQueries({ queryKey: ['acreedor',   acreedor.id], exact: false });
+      queryClient.invalidateQueries({ queryKey: ['acreedores'],              exact: false });
       setMovRegistrado(data?.data?.data ?? null);
     },
     onError: (err) => setError(err.response?.data?.error || 'Error al registrar'),
@@ -205,14 +206,14 @@ function ModalMovimiento({ acreedor, onClose }) {
 // MODAL NUEVO ACREEDOR
 // ─────────────────────────────────────────────
 function ModalNuevoAcreedor({ onClose }) {
-  const queryClient = useQueryClient();
-  const [form, setForm]   = useState({ nombre: '', cedula: '', telefono: '' });
-  const [error, setError] = useState('');
+  const queryClient               = useQueryClient();
+  const [form,  setForm]          = useState({ nombre: '', cedula: '', telefono: '' });
+  const [error, setError]         = useState('');
 
   const mutation = useMutation({
     mutationFn: () => crearAcreedor(form),
     onSuccess: () => {
-      queryClient.invalidateQueries(['acreedores']);
+      queryClient.invalidateQueries({ queryKey: ['acreedores'], exact: false });
       onClose();
     },
     onError: (err) => setError(err.response?.data?.error || 'Error al crear'),
@@ -324,7 +325,6 @@ function DetalleAcreedor({ detalle, loadingDetalle, movimientosUI, onRegistrar, 
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Botón volver — solo en mobile/tablet */}
       <button
         onClick={onVolver}
         className="flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800 transition-colors lg:hidden w-fit"
@@ -333,7 +333,6 @@ function DetalleAcreedor({ detalle, loadingDetalle, movimientosUI, onRegistrar, 
         Volver a lista
       </button>
 
-      {/* Cabecera */}
       <div className="bg-white border border-gray-100 rounded-2xl p-4 flex items-start justify-between shadow-sm">
         <div>
           <h2 className="font-bold text-gray-900">{detalle?.nombre}</h2>
@@ -347,7 +346,6 @@ function DetalleAcreedor({ detalle, loadingDetalle, movimientosUI, onRegistrar, 
         </Button>
       </div>
 
-      {/* Historial */}
       <div className="flex flex-col gap-2">
         <h3 className="text-sm font-semibold text-gray-600">Historial</h3>
         {movimientosUI.length === 0 ? (
@@ -366,13 +364,11 @@ function DetalleAcreedor({ detalle, loadingDetalle, movimientosUI, onRegistrar, 
                     <span className="text-sm text-gray-700">{m.descripcion}</span>
                   </div>
                   <p className="text-xs text-gray-400 mt-1">{formatFechaHora(m.fecha)}</p>
-
                   <div className="flex items-center gap-1 mt-1 text-xs text-gray-400">
                     <span>{formatCOP(m.saldo_antes)}</span>
                     <span>→</span>
                     <span className="font-semibold text-gray-600">{formatCOP(m.saldo_despues)}</span>
                   </div>
-
                   {m.firma && (
                     <img
                       src={m.firma}
@@ -408,26 +404,28 @@ function DetalleAcreedor({ detalle, loadingDetalle, movimientosUI, onRegistrar, 
 // PÁGINA PRINCIPAL
 // ─────────────────────────────────────────────
 export default function AcreedoresPage() {
-  const [busqueda, setBusqueda]       = useState('');
+  const [busqueda,    setBusqueda]    = useState('');
   const [acreedorSel, setAcreedorSel] = useState(null);
-  const [modalMov, setModalMov]       = useState(false);
-  const [modalNuevo, setModalNuevo]   = useState(false);
+  const [modalMov,    setModalMov]    = useState(false);
+  const [modalNuevo,  setModalNuevo]  = useState(false);
   const [movImprimir, setMovImprimir] = useState(null);
 
+  // Acreedores es de negocio (negocio_id) → sin sucursalKey
   const { data: acreedoresData, isLoading } = useQuery({
     queryKey: ['acreedores', busqueda],
-    queryFn: () => getAcreedores(busqueda).then((r) => r.data.data),
+    queryFn:  () => getAcreedores(busqueda).then((r) => r.data.data),
   });
 
+  // Detalle por ID único → sin sucursalKey
   const { data: detalle, isLoading: loadingDetalle } = useQuery({
     queryKey: ['acreedor', acreedorSel?.id],
-    queryFn: () => getAcreedorById(acreedorSel.id).then((r) => r.data.data),
-    enabled: !!acreedorSel,
+    queryFn:  () => getAcreedorById(acreedorSel.id).then((r) => r.data.data),
+    enabled:  !!acreedorSel,
   });
 
   const { data: configData } = useQuery({
     queryKey: ['config'],
-    queryFn: () => getConfig().then((r) => r.data.data),
+    queryFn:  () => getConfig().then((r) => r.data.data),
   });
 
   const acreedores    = acreedoresData || [];
@@ -475,7 +473,7 @@ export default function AcreedoresPage() {
         </div>
       </div>
 
-      {/* ── MOBILE / TABLET <lg: una columna, navega entre vistas ── */}
+      {/* ── MOBILE / TABLET <lg: una columna ── */}
       <div className="flex flex-col gap-4 lg:hidden">
         {!acreedorSel ? (
           <ListaAcreedores {...listaProps} />
@@ -484,7 +482,6 @@ export default function AcreedoresPage() {
         )}
       </div>
 
-      {/* Modales */}
       {modalMov && (
         <ModalMovimiento
           acreedor={acreedorSel}
@@ -494,8 +491,6 @@ export default function AcreedoresPage() {
       {modalNuevo && (
         <ModalNuevoAcreedor onClose={() => setModalNuevo(false)} />
       )}
-
-      {/* Recibo térmico */}
       {movImprimir && detalle && (
         <ReciboAcreedor
           acreedor={detalle}

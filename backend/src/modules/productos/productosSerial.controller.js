@@ -1,8 +1,10 @@
 const service = require('./productosSerial.service');
 
+// Solo esta función cambia — el resto del controller queda idéntico
 const getProductos = async (req, res, next) => {
   try {
-    const data = await service.getProductos(req.sucursal_id);
+    const sucursalId = req.todasSucursales ? null : req.sucursal_id;
+    const data = await service.getProductos(sucursalId, req.user.negocio_id);
     res.json({ ok: true, data });
   } catch (err) { next(err); }
 };

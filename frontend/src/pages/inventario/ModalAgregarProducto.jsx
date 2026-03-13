@@ -1,12 +1,13 @@
 import { useState, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Modal }       from '../../components/ui/Modal';
-import { Button }      from '../../components/ui/Button';
-import { Input }       from '../../components/ui/Input';
-import { Badge }       from '../../components/ui/Badge';
-import { SearchInput } from '../../components/ui/SearchInput';
-import { useAuth }     from '../../context/useAuth';
-import { crearCompra } from '../../api/compras.api';
+import { Modal }        from '../../components/ui/Modal';
+import { Button }       from '../../components/ui/Button';
+import { Input }        from '../../components/ui/Input';
+import { Badge }        from '../../components/ui/Badge';
+import { SearchInput }  from '../../components/ui/SearchInput';
+import { useAuth }      from '../../context/useAuth';
+import { useSucursalKey } from '../../hooks/useSucursalKey';
+import { crearCompra }  from '../../api/compras.api';
 import {
   getProductosSerial,   crearProductoSerial,   agregarSerial,
   getProductosCantidad, crearProductoCantidad, ajustarStockCantidad,
@@ -23,20 +24,19 @@ import {
 
 function buildPayloadCompra({ proveedorId, monto, modoPago, lineas }) {
   return {
-    proveedor_id:        Number(proveedorId),
-    total:               monto,
-    estado:              'Completada',
-    agregarComoAcreedor: modoPago === 'credito',
+    proveedor_id        : Number(proveedorId),
+    total               : monto,
+    estado              : 'Completada',
+    agregarComoAcreedor : modoPago === 'credito',
     lineas,
     pagos: [{
-      metodo: modoPago === 'credito' ? 'Credito' : 'Contado',
-      valor:  monto,
+      metodo : modoPago === 'credito' ? 'Credito' : 'Contado',
+      valor  : monto,
     }],
   };
 }
 
 // ─── Helper: verificar lista de IMEIs en paralelo ────────────────────────────
-// Retorna solo los que ya existen en el negocio
 
 async function verificarImeis(imeis) {
   const resultados = await Promise.all(
@@ -53,9 +53,8 @@ async function verificarImeis(imeis) {
   return resultados.filter(Boolean);
 }
 
-// ─── Modal de reactivación múltiple ──────────────────────────────────────────
+// ─── FilasSerial: detalle reutilizable ───────────────────────────────────────
 
-// Filas de detalle reutilizables para los modales
 function FilasSerial({ seriales }) {
   return (
     <div className="w-full flex flex-col gap-2 max-h-52 overflow-y-auto">
@@ -99,7 +98,8 @@ function FilasSerial({ seriales }) {
   );
 }
 
-// Modal para seriales que requieren reactivación (vendido o prestado)
+// ─── Modal reactivar seriales (vendidos/prestados) ────────────────────────────
+
 function ModalReactivarSeriales({ open, seriales, onReactivar, onCancelar }) {
   if (!seriales || seriales.length === 0) return null;
   return (
@@ -123,7 +123,7 @@ function ModalReactivarSeriales({ open, seriales, onReactivar, onCancelar }) {
         <p className="text-sm text-center text-gray-700 leading-relaxed">
           ¿Deseas{' '}
           <span className="font-semibold text-purple-700">reactivar estos seriales</span>
-          {' '}en el inventario? Se marcarán como disponibles nuevamente.
+          {' '}en el inventario?
         </p>
         <div className="flex gap-2 w-full">
           <Button
@@ -146,7 +146,8 @@ function ModalReactivarSeriales({ open, seriales, onReactivar, onCancelar }) {
   );
 }
 
-// Modal para seriales que ya están disponibles en inventario (no requieren reactivación)
+// ─── Modal ya en inventario (disponibles) ────────────────────────────────────
+
 function ModalYaEnInventario({ open, seriales, onCerrar }) {
   if (!seriales || seriales.length === 0) return null;
   return (
@@ -186,14 +187,14 @@ function InfoCompra({
   modoPago,    setModoPago,
 }) {
   const { data: proveedores = [] } = useQuery({
-    queryKey: ['proveedores'],
-    queryFn: () => api.get('/proveedores').then((r) => r.data.data),
+    queryKey : ['proveedores'],
+    queryFn  : () => api.get('/proveedores').then((r) => r.data.data),
   });
 
   const { data: acreedores = [] } = useQuery({
-    queryKey: ['acreedores'],
-    queryFn: () => api.get('/acreedores').then((r) => r.data.data),
-    enabled: Boolean(proveedorId),
+    queryKey : ['acreedores'],
+    queryFn  : () => api.get('/acreedores').then((r) => r.data.data),
+    enabled  : Boolean(proveedorId),
   });
 
   const handleCambiarProveedor = (valor) => {
@@ -212,7 +213,7 @@ function InfoCompra({
     <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 flex flex-col gap-2">
       <div className="flex items-center gap-1.5">
         <ShoppingCart size={13} className="text-amber-600" />
-        <p className="text-xs font-semibold text-amber-700">Informacion de compra</p>
+        <p className="text-xs font-semibold text-amber-700">Información de compra</p>
       </div>
 
       <div className="flex gap-2">
@@ -247,28 +248,30 @@ function InfoCompra({
 
       {Boolean(proveedorId) && (
         <div className="flex gap-2 pt-1 border-t border-amber-200">
-          <button
-            onClick={() => setModoPago('contado')}
-            className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg
-              border text-xs font-medium transition-all
-              ${modoPago === 'contado'
-                ? 'bg-green-100 border-green-400 text-green-700'
-                : 'bg-white border-amber-200 text-gray-600 hover:border-green-300 hover:bg-green-50'}`}
-          >
-            <Banknote size={13} />
-            Pagado / Contado
-          </button>
-          <button
-            onClick={() => setModoPago('credito')}
-            className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg
-              border text-xs font-medium transition-all
-              ${modoPago === 'credito'
-                ? 'bg-orange-100 border-orange-400 text-orange-700'
-                : 'bg-white border-amber-200 text-gray-600 hover:border-orange-300 hover:bg-orange-50'}`}
-          >
-            <CreditCard size={13} />
-            {labelCredito}
-          </button>
+          {[
+            { id: 'contado', label: 'Pagado / Contado', Icn: Banknote,   estilo: 'green'  },
+            { id: 'credito', label: labelCredito,        Icn: CreditCard, estilo: 'orange' },
+          ].map((opt) => {
+            const OptIcon = opt.Icn;
+            const activo  = modoPago === opt.id;
+            const claseActivo = opt.estilo === 'green'
+              ? 'bg-green-100 border-green-400 text-green-700'
+              : 'bg-orange-100 border-orange-400 text-orange-700';
+            const claseInactivo = opt.estilo === 'green'
+              ? 'bg-white border-amber-200 text-gray-600 hover:border-green-300 hover:bg-green-50'
+              : 'bg-white border-amber-200 text-gray-600 hover:border-orange-300 hover:bg-orange-50';
+            return (
+              <button
+                key={opt.id}
+                onClick={() => setModoPago(opt.id)}
+                className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg
+                  border text-xs font-medium transition-all
+                  ${activo ? claseActivo : claseInactivo}`}
+              >
+                <OptIcon size={13} /> {opt.label}
+              </button>
+            );
+          })}
         </div>
       )}
 
@@ -286,7 +289,7 @@ function InfoCompra({
 function PasoTipo({ onSelect }) {
   return (
     <div className="flex flex-col gap-3">
-      <p className="text-sm text-gray-500">Que tipo de producto vas a agregar?</p>
+      <p className="text-sm text-gray-500">¿Qué tipo de producto vas a agregar?</p>
       <div className="flex gap-3">
         <button
           onClick={() => onSelect('serial')}
@@ -313,7 +316,7 @@ function PasoTipo({ onSelect }) {
 
 // ─── Paso Serial ──────────────────────────────────────────────────────────────
 
-function PasoSerial({ onExito, onDuplicadosEncontrados }) {
+function PasoSerial({ sucursalKey, onExito, onDuplicadosEncontrados }) {
   const queryClient                     = useQueryClient();
   const { esAdminNegocio }              = useAuth();
   const esAdmin                         = esAdminNegocio();
@@ -328,36 +331,32 @@ function PasoSerial({ onExito, onDuplicadosEncontrados }) {
   const [error,        setError]        = useState('');
   const [verificando,  setVerificando]  = useState(false);
 
-  // Map de imei → reactivar_serial_id para los que el usuario confirmó reactivar
-  // Se llena desde el padre cuando el usuario confirma reactivar en el modal
   const reactivarMapRef = useRef({});
-
-  const inputRefs = useRef([]);
+  const inputRefs       = useRef([]);
 
   const { data: productosData } = useQuery({
-    queryKey: ['productos-serial'],
-    queryFn: () => getProductosSerial().then((r) => r.data.data),
+    queryKey : ['productos-serial', ...sucursalKey],
+    queryFn  : () => getProductosSerial().then((r) => r.data.data),
   });
 
   const handleSeleccionarLinea = (producto) => {
     setLineaSel(producto);
     setError('');
-    if (esAdmin) {
-      if (producto.proveedor_id) setProveedorId(String(producto.proveedor_id));
-      // ultimo_costo no existe en el schema — el admin ingresa el costo manualmente
+    if (esAdmin && producto.proveedor_id) {
+      setProveedorId(String(producto.proveedor_id));
     }
   };
 
   const mutCrearLinea = useMutation({
     mutationFn: () => crearProductoSerial({
-      nombre:       nuevaLinea.nombre,
-      marca:        nuevaLinea.marca,
-      modelo:       nuevaLinea.modelo,
-      precio:       Number(nuevaLinea.precio),
-      proveedor_id: proveedorId ? Number(proveedorId) : null,
+      nombre       : nuevaLinea.nombre,
+      marca        : nuevaLinea.marca,
+      modelo       : nuevaLinea.modelo,
+      precio       : Number(nuevaLinea.precio),
+      proveedor_id : proveedorId ? Number(proveedorId) : null,
     }),
     onSuccess: (res) => {
-      queryClient.invalidateQueries(['productos-serial']);
+      queryClient.invalidateQueries({ queryKey: ['productos-serial'], exact: false });
       setLineaSel(res.data.data);
       setCreandoLinea(false);
       setNuevaLinea({ nombre: '', marca: '', modelo: '', precio: '' });
@@ -368,33 +367,30 @@ function PasoSerial({ onExito, onDuplicadosEncontrados }) {
   const mutConfirmar = useMutation({
     mutationFn: async () => {
       const imeisValidos = imeis.filter((i) => i.trim());
-      const costo = esAdmin
-        ? (costoCompra ? Number(costoCompra) : null)
-        : null; // ultimo_costo no existe — sin admin el costo queda null
+      const costo = esAdmin && costoCompra ? Number(costoCompra) : null;
 
       if (proveedorId && modoPago) {
         await crearCompra(buildPayloadCompra({
           proveedorId,
-          monto:  costo ? costo * imeisValidos.length : 0,
+          monto  : costo ? costo * imeisValidos.length : 0,
           modoPago,
-          lineas: imeisValidos.map((imei) => ({
-            nombre_producto:  lineaSel.nombre,
-            imei:             imei.trim(),
-            cantidad:         1,
-            precio_unitario:  costo || 0,
-            producto_id:      lineaSel.id,
-            // Si este IMEI fue marcado para reactivar, enviarlo al backend
-            reactivar_serial_id: reactivarMapRef.current[imei.trim()] || null,
+          lineas : imeisValidos.map((imei) => ({
+            nombre_producto      : lineaSel.nombre,
+            imei                 : imei.trim(),
+            cantidad             : 1,
+            precio_unitario      : costo || 0,
+            producto_id          : lineaSel.id,
+            reactivar_serial_id  : reactivarMapRef.current[imei.trim()] || null,
           })),
         }));
       } else {
         await Promise.all(
           imeisValidos.map((imei) =>
             agregarSerial(lineaSel.id, {
-              imei:                imei.trim(),
-              fecha_entrada:       new Date().toISOString().split('T')[0],
-              costo_compra:        costo,
-              reactivar_serial_id: reactivarMapRef.current[imei.trim()] || null,
+              imei                 : imei.trim(),
+              fecha_entrada        : new Date().toISOString().split('T')[0],
+              costo_compra         : costo,
+              reactivar_serial_id  : reactivarMapRef.current[imei.trim()] || null,
             })
           )
         );
@@ -406,17 +402,18 @@ function PasoSerial({ onExito, onDuplicadosEncontrados }) {
       }
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['productos-serial']);
-      queryClient.invalidateQueries(['compras']);
-      queryClient.invalidateQueries(['acreedores']);
+      queryClient.invalidateQueries({ queryKey: ['productos-serial'], exact: false });
+      queryClient.invalidateQueries({ queryKey: ['compras'],          exact: false });
+      queryClient.invalidateQueries({ queryKey: ['acreedores'],       exact: false });
       onExito();
     },
     onError: (e) => setError(e.response?.data?.error || 'Error al agregar seriales'),
   });
 
-  const productos = (productosData || []).filter((p) =>
+  const productos    = (productosData || []).filter((p) =>
     p.nombre.toLowerCase().includes(busqueda.toLowerCase())
   );
+  const imeisValidos = imeis.filter((i) => i.trim()).length;
 
   const handleKeyDown = (e, index) => {
     if (e.key === 'Enter') {
@@ -431,9 +428,6 @@ function PasoSerial({ onExito, onDuplicadosEncontrados }) {
     }
   };
 
-  const imeisValidos = imeis.filter((i) => i.trim()).length;
-
-  // Al confirmar: primero verificar duplicados, luego proceder
   const handleConfirmar = async () => {
     setError('');
     if (!lineaSel)          return setError('Selecciona una linea de producto');
@@ -441,39 +435,31 @@ function PasoSerial({ onExito, onDuplicadosEncontrados }) {
     if (proveedorId && !modoPago) return setError('Selecciona si fue pagado o a credito');
 
     const imeisLimpios = imeis.filter((i) => i.trim());
-
     setVerificando(true);
     const encontrados = await verificarImeis(imeisLimpios);
     setVerificando(false);
 
     if (encontrados.length > 0) {
-      // Separar: disponibles (no necesitan reactivar) vs vendidos/prestados (sí)
       const disponibles   = encontrados.filter((s) => !s.vendido && !s.prestado);
-      const paraReactivar = encontrados.filter((s) => s.vendido || s.prestado);
+      const paraReactivar = encontrados.filter((s) => s.vendido  || s.prestado);
       onDuplicadosEncontrados({ disponibles, paraReactivar }, confirmarConReactivacion);
       return;
     }
 
-    // Sin duplicados — proceder directo
     mutConfirmar.mutate();
   };
 
-  // Llamado por el padre cuando el usuario confirma reactivar en el modal
   const confirmarConReactivacion = (seriales) => {
-    // Guardar el map imei → id para que mutConfirmar lo use
     seriales.forEach((serial) => {
       reactivarMapRef.current[serial.imei] = serial.id;
     });
 
-    // Auto-seleccionar la línea del primer serial si la actual no coincide
     const primerSerial = seriales[0];
     if (primerSerial && (!lineaSel || lineaSel.id !== primerSerial.producto_id)) {
       const lineaEncontrada = (productosData || []).find(
         (p) => p.id === primerSerial.producto_id
       );
-      if (lineaEncontrada) {
-        handleSeleccionarLinea(lineaEncontrada);
-      }
+      if (lineaEncontrada) handleSeleccionarLinea(lineaEncontrada);
     }
 
     mutConfirmar.mutate();
@@ -488,178 +474,174 @@ function PasoSerial({ onExito, onDuplicadosEncontrados }) {
 
   return (
     <div className="flex flex-col gap-4">
-        {!lineaSel ? (
-          <div className="flex flex-col gap-2">
-            <p className="text-sm font-medium text-gray-700">Seleccionar linea de producto</p>
-            <SearchInput value={busqueda} onChange={setBusqueda} placeholder="Buscar modelo..." />
-            <div className="max-h-40 overflow-y-auto flex flex-col gap-1">
-              {productos.map((p) => (
-                <button
-                  key={p.id}
-                  onClick={() => handleSeleccionarLinea(p)}
-                  className="flex items-center justify-between p-2.5 rounded-xl text-left
-                    text-sm bg-white border border-gray-100 hover:border-blue-200
-                    hover:bg-blue-50 transition-all"
-                >
-                  <div>
-                    <span className="font-medium text-gray-800">{p.nombre}</span>
-                    <span className="text-xs text-gray-400 ml-2">{p.disponibles ?? 0} en stock</span>
-                  </div>
-                  <ChevronRight size={14} className="text-gray-400" />
-                </button>
-              ))}
-            </div>
-            <button
-              onClick={() => setCreandoLinea(!creandoLinea)}
-              className="text-xs text-blue-600 hover:text-blue-700 font-medium text-left"
-            >
-              + Crear nueva linea
-            </button>
-
-            {creandoLinea && (
-              <div className="bg-blue-50 rounded-xl p-3 flex flex-col gap-2">
-                <p className="text-xs font-semibold text-blue-700">Nueva linea</p>
-                <Input
-                  id="sl-nombre"
-                  placeholder="Nombre (ej: iPhone 15 Pro Max)"
-                  value={nuevaLinea.nombre}
-                  onChange={(e) => setNuevaLinea({ ...nuevaLinea, nombre: e.target.value })}
-                  onKeyDown={(e) => e.key === 'Enter' && document.getElementById('sl-marca')?.focus()}
-                />
-                <div className="flex gap-2">
-                  <Input
-                    id="sl-marca"
-                    placeholder="Marca"
-                    value={nuevaLinea.marca}
-                    onChange={(e) => setNuevaLinea({ ...nuevaLinea, marca: e.target.value })}
-                    onKeyDown={(e) => e.key === 'Enter' && document.getElementById('sl-modelo')?.focus()}
-                  />
-                  <Input
-                    id="sl-modelo"
-                    placeholder="Modelo"
-                    value={nuevaLinea.modelo}
-                    onChange={(e) => setNuevaLinea({ ...nuevaLinea, modelo: e.target.value })}
-                    onKeyDown={(e) => e.key === 'Enter' && document.getElementById('sl-precio')?.focus()}
-                  />
-                </div>
-                <Input
-                  id="sl-precio"
-                  type="number"
-                  placeholder="Precio de venta"
-                  value={nuevaLinea.precio}
-                  onChange={(e) => setNuevaLinea({ ...nuevaLinea, precio: e.target.value })}
-                  onKeyDown={(e) => e.key === 'Enter' && mutCrearLinea.mutate()}
-                />
-                <div className="flex gap-2">
-                  <Button variant="secondary" size="sm" className="flex-1"
-                    onClick={() => setCreandoLinea(false)}>Cancelar</Button>
-                  <Button size="sm" className="flex-1"
-                    loading={mutCrearLinea.isPending} onClick={() => mutCrearLinea.mutate()}>
-                    Crear y seleccionar
-                  </Button>
-                </div>
-              </div>
-            )}
-          </div>
-        ) : (
-          <div className="flex flex-col gap-3">
-            <div className="flex items-center justify-between bg-blue-50 rounded-xl px-3 py-2">
-              <div>
-                <p className="text-sm font-semibold text-blue-800">{lineaSel.nombre}</p>
-                <p className="text-xs text-blue-500">Linea seleccionada</p>
-              </div>
+      {!lineaSel ? (
+        <div className="flex flex-col gap-2">
+          <p className="text-sm font-medium text-gray-700">Seleccionar linea de producto</p>
+          <SearchInput value={busqueda} onChange={setBusqueda} placeholder="Buscar modelo..." />
+          <div className="max-h-40 overflow-y-auto flex flex-col gap-1">
+            {productos.map((p) => (
               <button
-                onClick={() => {
-                  setLineaSel(null);
-                  setImeis(['']);
-                  setProveedorId('');
-                  setCostoCompra('');
-                  setModoPago(null);
-                  reactivarMapRef.current = {};
-                }}
-                className="text-xs text-blue-400 hover:text-blue-600 underline"
+                key={p.id}
+                onClick={() => handleSeleccionarLinea(p)}
+                className="flex items-center justify-between p-2.5 rounded-xl text-left
+                  text-sm bg-white border border-gray-100 hover:border-blue-200
+                  hover:bg-blue-50 transition-all"
               >
-                Cambiar
+                <div>
+                  <span className="font-medium text-gray-800">{p.nombre}</span>
+                  <span className="text-xs text-gray-400 ml-2">{p.disponibles ?? 0} en stock</span>
+                </div>
+                <ChevronRight size={14} className="text-gray-400" />
               </button>
-            </div>
-
-            <div className="flex items-center justify-between">
-              <p className="text-sm font-medium text-gray-700">IMEIs / Seriales</p>
-              <Badge variant="blue">{imeisValidos} ingresado(s)</Badge>
-            </div>
-
-            <div className="flex flex-col gap-1.5 max-h-52 overflow-y-auto">
-              {imeis.map((imei, index) => {
-                const imeiVal = imei;
-                return (
-                  <div key={index} className="flex gap-1.5">
-                    <input
-                      ref={(el) => { inputRefs.current[index] = el; }}
-                      type="text"
-                      value={imeiVal}
-                      autoFocus={index === 0}
-                      onChange={(e) => {
-                        const next = [...imeis];
-                        next[index] = e.target.value;
-                        setImeis(next);
-                      }}
-                      onKeyDown={(e) => handleKeyDown(e, index)}
-                      placeholder={`IMEI ${index + 1} — Enter para siguiente`}
-                      className="flex-1 px-3 py-2 bg-white border border-gray-200 rounded-xl
-                        text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                    {imeis.length > 1 && (
-                      <button
-                        onClick={() => setImeis((prev) => prev.filter((_, i) => i !== index))}
-                        className="p-2 rounded-xl hover:bg-red-50 text-gray-300 hover:text-red-400"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-
-            <button
-              onClick={() => setImeis((prev) => [...prev, ''])}
-              className="text-xs text-blue-500 hover:text-blue-700 font-medium text-left"
-            >
-              + Agregar campo
-            </button>
-
-            {esAdmin && (
-              <InfoCompra
-                proveedorId={proveedorId}
-                setProveedorId={setProveedorId}
-                costoCompra={costoCompra}
-                setCostoCompra={setCostoCompra}
-                modoPago={modoPago}
-                setModoPago={setModoPago}
-              />
-            )}
+            ))}
           </div>
-        )}
-
-        {error && <p className="text-sm text-red-500">{error}</p>}
-
-        {lineaSel && (
-          <Button
-            className="w-full"
-            loading={mutConfirmar.isPending || verificando}
-            onClick={handleConfirmar}
+          <button
+            onClick={() => setCreandoLinea(!creandoLinea)}
+            className="text-xs text-blue-600 hover:text-blue-700 font-medium text-left"
           >
-            {verificando ? 'Verificando IMEIs...' : labelBoton()}
-          </Button>
-        )}
-      </div>
+            + Crear nueva linea
+          </button>
 
+          {creandoLinea && (
+            <div className="bg-blue-50 rounded-xl p-3 flex flex-col gap-2">
+              <p className="text-xs font-semibold text-blue-700">Nueva linea</p>
+              <Input
+                id="sl-nombre"
+                placeholder="Nombre (ej: iPhone 15 Pro Max)"
+                value={nuevaLinea.nombre}
+                onChange={(e) => setNuevaLinea({ ...nuevaLinea, nombre: e.target.value })}
+                onKeyDown={(e) => e.key === 'Enter' && document.getElementById('sl-marca')?.focus()}
+              />
+              <div className="flex gap-2">
+                <Input
+                  id="sl-marca"
+                  placeholder="Marca"
+                  value={nuevaLinea.marca}
+                  onChange={(e) => setNuevaLinea({ ...nuevaLinea, marca: e.target.value })}
+                  onKeyDown={(e) => e.key === 'Enter' && document.getElementById('sl-modelo')?.focus()}
+                />
+                <Input
+                  id="sl-modelo"
+                  placeholder="Modelo"
+                  value={nuevaLinea.modelo}
+                  onChange={(e) => setNuevaLinea({ ...nuevaLinea, modelo: e.target.value })}
+                  onKeyDown={(e) => e.key === 'Enter' && document.getElementById('sl-precio')?.focus()}
+                />
+              </div>
+              <Input
+                id="sl-precio"
+                type="number"
+                placeholder="Precio de venta"
+                value={nuevaLinea.precio}
+                onChange={(e) => setNuevaLinea({ ...nuevaLinea, precio: e.target.value })}
+                onKeyDown={(e) => e.key === 'Enter' && mutCrearLinea.mutate()}
+              />
+              <div className="flex gap-2">
+                <Button variant="secondary" size="sm" className="flex-1"
+                  onClick={() => setCreandoLinea(false)}>Cancelar</Button>
+                <Button size="sm" className="flex-1"
+                  loading={mutCrearLinea.isPending} onClick={() => mutCrearLinea.mutate()}>
+                  Crear y seleccionar
+                </Button>
+              </div>
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center justify-between bg-blue-50 rounded-xl px-3 py-2">
+            <div>
+              <p className="text-sm font-semibold text-blue-800">{lineaSel.nombre}</p>
+              <p className="text-xs text-blue-500">Linea seleccionada</p>
+            </div>
+            <button
+              onClick={() => {
+                setLineaSel(null);
+                setImeis(['']);
+                setProveedorId('');
+                setCostoCompra('');
+                setModoPago(null);
+                reactivarMapRef.current = {};
+              }}
+              className="text-xs text-blue-400 hover:text-blue-600 underline"
+            >
+              Cambiar
+            </button>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-medium text-gray-700">IMEIs / Seriales</p>
+            <Badge variant="blue">{imeisValidos} ingresado(s)</Badge>
+          </div>
+
+          <div className="flex flex-col gap-1.5 max-h-52 overflow-y-auto">
+            {imeis.map((imeiVal, index) => (
+              <div key={index} className="flex gap-1.5">
+                <input
+                  ref={(el) => { inputRefs.current[index] = el; }}
+                  type="text"
+                  value={imeiVal}
+                  autoFocus={index === 0}
+                  onChange={(e) => {
+                    const next = [...imeis];
+                    next[index] = e.target.value;
+                    setImeis(next);
+                  }}
+                  onKeyDown={(e) => handleKeyDown(e, index)}
+                  placeholder={`IMEI ${index + 1} — Enter para siguiente`}
+                  className="flex-1 px-3 py-2 bg-white border border-gray-200 rounded-xl
+                    text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                {imeis.length > 1 && (
+                  <button
+                    onClick={() => setImeis((prev) => prev.filter((_, i) => i !== index))}
+                    className="p-2 rounded-xl hover:bg-red-50 text-gray-300 hover:text-red-400"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+
+          <button
+            onClick={() => setImeis((prev) => [...prev, ''])}
+            className="text-xs text-blue-500 hover:text-blue-700 font-medium text-left"
+          >
+            + Agregar campo
+          </button>
+
+          {esAdmin && (
+            <InfoCompra
+              proveedorId={proveedorId}
+              setProveedorId={setProveedorId}
+              costoCompra={costoCompra}
+              setCostoCompra={setCostoCompra}
+              modoPago={modoPago}
+              setModoPago={setModoPago}
+            />
+          )}
+        </div>
+      )}
+
+      {error && <p className="text-sm text-red-500">{error}</p>}
+
+      {lineaSel && (
+        <Button
+          className="w-full"
+          loading={mutConfirmar.isPending || verificando}
+          onClick={handleConfirmar}
+        >
+          {verificando ? 'Verificando IMEIs...' : labelBoton()}
+        </Button>
+      )}
+    </div>
   );
 }
 
 // ─── Paso Cantidad ────────────────────────────────────────────────────────────
 
-function PasoCantidad({ onExito }) {
+function PasoCantidad({ sucursalKey, onExito }) {
   const queryClient                       = useQueryClient();
   const { esAdminNegocio }                = useAuth();
   const esAdmin                           = esAdminNegocio();
@@ -674,8 +656,8 @@ function PasoCantidad({ onExito }) {
   const [error,         setError]         = useState('');
 
   const { data: productosData } = useQuery({
-    queryKey: ['productos-cantidad'],
-    queryFn: () => getProductosCantidad().then((r) => r.data.data),
+    queryKey : ['productos-cantidad', ...sucursalKey],
+    queryFn  : () => getProductosCantidad().then((r) => r.data.data),
   });
 
   const handleSeleccionarProducto = (producto) => {
@@ -689,14 +671,14 @@ function PasoCantidad({ onExito }) {
 
   const mutCrear = useMutation({
     mutationFn: () => crearProductoCantidad({
-      nombre:         nuevoProducto.nombre,
-      unidad_medida:  nuevoProducto.unidad_medida,
-      costo_unitario: nuevoProducto.costo_unitario ? Number(nuevoProducto.costo_unitario) : null,
-      precio:         nuevoProducto.precio ? Number(nuevoProducto.precio) : null,
-      proveedor_id:   proveedorId ? Number(proveedorId) : null,
+      nombre         : nuevoProducto.nombre,
+      unidad_medida  : nuevoProducto.unidad_medida,
+      costo_unitario : nuevoProducto.costo_unitario ? Number(nuevoProducto.costo_unitario) : null,
+      precio         : nuevoProducto.precio ? Number(nuevoProducto.precio) : null,
+      proveedor_id   : proveedorId ? Number(proveedorId) : null,
     }),
     onSuccess: (res) => {
-      queryClient.invalidateQueries(['productos-cantidad']);
+      queryClient.invalidateQueries({ queryKey: ['productos-cantidad'], exact: false });
       setProductoSel(res.data.data);
       setCreandoNuevo(false);
     },
@@ -713,27 +695,27 @@ function PasoCantidad({ onExito }) {
       if (proveedorId && modoPago) {
         await crearCompra(buildPayloadCompra({
           proveedorId,
-          monto:  costo ? costo * cantidadNum : 0,
+          monto  : costo ? costo * cantidadNum : 0,
           modoPago,
-          lineas: [{
-            nombre_producto: productoSel.nombre,
-            cantidad:        cantidadNum,
-            precio_unitario: costo || 0,
-            producto_id:     productoSel.id,
+          lineas : [{
+            nombre_producto : productoSel.nombre,
+            cantidad        : cantidadNum,
+            precio_unitario : costo || 0,
+            producto_id     : productoSel.id,
           }],
         }));
       } else {
         await ajustarStockCantidad(productoSel.id, {
-          cantidad:       cantidadNum,
-          costo_unitario: costo,
-          proveedor_id:   esAdmin && proveedorId ? Number(proveedorId) : undefined,
+          cantidad       : cantidadNum,
+          costo_unitario : costo,
+          proveedor_id   : esAdmin && proveedorId ? Number(proveedorId) : undefined,
         });
       }
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['productos-cantidad']);
-      queryClient.invalidateQueries(['compras']);
-      queryClient.invalidateQueries(['acreedores']);
+      queryClient.invalidateQueries({ queryKey: ['productos-cantidad'], exact: false });
+      queryClient.invalidateQueries({ queryKey: ['compras'],            exact: false });
+      queryClient.invalidateQueries({ queryKey: ['acreedores'],         exact: false });
       onExito();
     },
     onError: (e) => setError(e.response?.data?.error || 'Error al ajustar stock'),
@@ -878,45 +860,40 @@ function PasoCantidad({ onExito }) {
 // ─── Modal principal ──────────────────────────────────────────────────────────
 
 export function ModalAgregarProducto({ onClose }) {
+  const sucursalKey = useSucursalKey();
+
   const [tipo,  setTipo]  = useState(null);
   const [exito, setExito] = useState(false);
 
-  // Estado del modal de reactivación — vive aquí para renderizarlo fuera del Modal principal
-  const [modalReactivar,     setModalReactivar]     = useState(false);
-  const [serialesDuplicados, setSerializesDuplicados] = useState([]);
+  const [modalReactivar,      setModalReactivar]      = useState(false);
+  const [serialesDuplicados,  setSerializeDuplicados] = useState([]);
   const confirmarReactivarRef = useRef(null);
 
-  const [serialesDisponibles,  setSerializesDisponibles]  = useState([]);
-  const [modalYaEnInventario,  setModalYaEnInventario]     = useState(false);
+  const [serialesDisponibles, setSerializesDisponibles] = useState([]);
+  const [modalYaEnInventario, setModalYaEnInventario]   = useState(false);
 
   const handleDuplicadosEncontrados = ({ disponibles, paraReactivar }, confirmarFn) => {
     confirmarReactivarRef.current = confirmarFn;
 
-    // Seriales disponibles — mostrar aviso, no reactivar
     if (disponibles.length > 0) {
       setSerializesDisponibles(disponibles);
       setModalYaEnInventario(true);
     }
-
-    // Seriales vendidos/prestados — mostrar modal de reactivación
     if (paraReactivar.length > 0) {
-      setSerializesDuplicados(paraReactivar);
+      setSerializeDuplicados(paraReactivar);
       setModalReactivar(true);
     }
-
-    // Si todos están disponibles (ninguno para reactivar), no llamar mutConfirmar
-    // El usuario verá el aviso y podrá corregir sus IMEIs
   };
 
   const handleReactivar = () => {
     confirmarReactivarRef.current?.(serialesDuplicados);
     setModalReactivar(false);
-    setSerializesDuplicados([]);
+    setSerializeDuplicados([]);
   };
 
   const handleCancelarReactivar = () => {
     setModalReactivar(false);
-    setSerializesDuplicados([]);
+    setSerializeDuplicados([]);
   };
 
   if (exito) {
@@ -953,20 +930,30 @@ export function ModalAgregarProducto({ onClose }) {
         size="md"
       >
         {!tipo && <PasoTipo onSelect={setTipo} />}
-        {tipo === 'serial'   && <PasoSerial   onExito={() => setExito(true)} onDuplicadosEncontrados={handleDuplicadosEncontrados} />}
-        {tipo === 'cantidad' && <PasoCantidad onExito={() => setExito(true)} />}
+        {tipo === 'serial' && (
+          <PasoSerial
+            sucursalKey={sucursalKey}
+            onExito={() => setExito(true)}
+            onDuplicadosEncontrados={handleDuplicadosEncontrados}
+          />
+        )}
+        {tipo === 'cantidad' && (
+          <PasoCantidad
+            sucursalKey={sucursalKey}
+            onExito={() => setExito(true)}
+          />
+        )}
 
         {tipo && (
           <button
             onClick={() => setTipo(null)}
             className="mt-3 text-xs text-gray-400 hover:text-gray-600 w-full text-center"
           >
-            Volver a seleccion de tipo
+            Volver a selección de tipo
           </button>
         )}
       </Modal>
 
-      {/* Modales fuera del Modal principal — evita conflicto de z-index */}
       <ModalReactivarSeriales
         open={modalReactivar}
         seriales={serialesDuplicados}

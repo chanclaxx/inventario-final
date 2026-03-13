@@ -1,48 +1,68 @@
 const { pool } = require('../../config/db');
 
-const findAll = async (sucursalId) => {
+// ── subconsulta de proveedores reutilizable ───────────────────────────────────
+// Extraída como función para no duplicarla en findAll y findById
+const _subqueryProveedores = (facturaAlias = 'f') => `
+  (
+    SELECT NULLIF(STRING_AGG(DISTINCT prov_nombre, ', ' ORDER BY prov_nombre), '')
+    FROM (
+      SELECT p.nombre AS prov_nombre
+      FROM lineas_factura lf2
+      JOIN seriales    se ON se.imei = lf2.imei
+      JOIN proveedores p  ON p.id = se.proveedor_id
+      WHERE lf2.factura_id = ${facturaAlias}.id
+        AND lf2.imei IS NOT NULL
+        AND se.proveedor_id IS NOT NULL
+      UNION
+      SELECT p.nombre AS prov_nombre
+      FROM lineas_factura    lf3
+      JOIN productos_cantidad pc ON pc.nombre ILIKE lf3.nombre_producto
+                                AND pc.sucursal_id = ${facturaAlias}.sucursal_id
+      JOIN proveedores        p  ON p.id = pc.proveedor_id
+      WHERE lf3.factura_id = ${facturaAlias}.id
+        AND lf3.imei IS NULL
+        AND pc.proveedor_id IS NOT NULL
+    ) provs
+  ) AS proveedor_nombre
+`;
+
+/**
+ * Vista sucursal : filtra por sucursal_id
+ * Vista global   : todas las sucursales del negocio, incluye sucursal_nombre
+ */
+const findAll = async (sucursalId, negocioId) => {
+  const filtro = sucursalId
+    ? 'f.sucursal_id = $1'
+    : 'su.negocio_id = $1';
+
+  const param = sucursalId ?? negocioId;
+
   const { rows } = await pool.query(`
     SELECT
       f.id, f.fecha, f.nombre_cliente, f.cedula, f.celular,
-      f.estado, f.notas, u.nombre AS usuario_nombre,
+      f.estado, f.notas, f.sucursal_id,
+      su.nombre AS sucursal_nombre,
+      u.nombre  AS usuario_nombre,
       COALESCE(SUM(l.subtotal), 0) AS total,
-      COALESCE((SELECT SUM(r.valor_retoma) FROM retomas r WHERE r.factura_id = f.id), 0) AS total_retoma,
+      COALESCE(
+        (SELECT SUM(r.valor_retoma) FROM retomas r WHERE r.factura_id = f.id), 0
+      ) AS total_retoma,
       STRING_AGG(DISTINCT l.nombre_producto, ', ') AS productos_nombres,
-      STRING_AGG(DISTINCT l.imei, ', ')            AS productos_imeis,
+      STRING_AGG(DISTINCT l.imei,            ', ') AS productos_imeis,
       (SELECT ret.descripcion        FROM retomas ret WHERE ret.factura_id = f.id LIMIT 1) AS retoma_descripcion,
       (SELECT ret.imei               FROM retomas ret WHERE ret.factura_id = f.id LIMIT 1) AS retoma_imei,
       (SELECT ret.nombre_producto    FROM retomas ret WHERE ret.factura_id = f.id LIMIT 1) AS retoma_nombre_producto,
       (SELECT ret.ingreso_inventario FROM retomas ret WHERE ret.factura_id = f.id LIMIT 1) AS retoma_ingreso_inventario,
       (SELECT ret.valor_retoma       FROM retomas ret WHERE ret.factura_id = f.id LIMIT 1) AS retoma_valor,
-      -- Todos los proveedores distintos de la factura como string separado por comas
-      (
-        SELECT NULLIF(STRING_AGG(DISTINCT prov_nombre, ', ' ORDER BY prov_nombre), '')
-        FROM (
-          SELECT p.nombre AS prov_nombre
-          FROM lineas_factura lf2
-          JOIN seriales    se ON se.imei = lf2.imei
-          JOIN proveedores p  ON p.id = se.proveedor_id
-          WHERE lf2.factura_id = f.id
-            AND lf2.imei IS NOT NULL
-            AND se.proveedor_id IS NOT NULL
-          UNION
-          SELECT p.nombre AS prov_nombre
-          FROM lineas_factura    lf3
-          JOIN productos_cantidad pc ON pc.nombre ILIKE lf3.nombre_producto
-                                    AND pc.sucursal_id = f.sucursal_id
-          JOIN proveedores        p  ON p.id = pc.proveedor_id
-          WHERE lf3.factura_id = f.id
-            AND lf3.imei IS NULL
-            AND pc.proveedor_id IS NOT NULL
-        ) provs
-      ) AS proveedor_nombre
+      ${_subqueryProveedores('f')}
     FROM facturas f
-    LEFT JOIN lineas_factura l ON l.factura_id = f.id
-    LEFT JOIN usuarios u ON u.id = f.usuario_id
-    WHERE f.sucursal_id = $1
-    GROUP BY f.id, u.nombre
+    JOIN  sucursales      su ON su.id = f.sucursal_id
+    LEFT JOIN lineas_factura l  ON l.factura_id = f.id
+    LEFT JOIN usuarios       u  ON u.id = f.usuario_id
+    WHERE ${filtro}
+    GROUP BY f.id, u.nombre, su.nombre
     ORDER BY f.fecha DESC
-  `, [sucursalId]);
+  `, [param]);
   return rows;
 };
 
@@ -50,31 +70,12 @@ const findById = async (id) => {
   const { rows } = await pool.query(`
     SELECT
       f.*,
-      u.nombre AS usuario_nombre,
-      -- Todos los proveedores distintos de la factura como string separado por comas
-      (
-        SELECT NULLIF(STRING_AGG(DISTINCT prov_nombre, ', ' ORDER BY prov_nombre), '')
-        FROM (
-          SELECT p.nombre AS prov_nombre
-          FROM lineas_factura lf
-          JOIN seriales    se ON se.imei = lf.imei
-          JOIN proveedores p  ON p.id = se.proveedor_id
-          WHERE lf.factura_id = f.id
-            AND lf.imei IS NOT NULL
-            AND se.proveedor_id IS NOT NULL
-          UNION
-          SELECT p.nombre AS prov_nombre
-          FROM lineas_factura    lf2
-          JOIN productos_cantidad pc ON pc.nombre ILIKE lf2.nombre_producto
-                                    AND pc.sucursal_id = f.sucursal_id
-          JOIN proveedores        p  ON p.id = pc.proveedor_id
-          WHERE lf2.factura_id = f.id
-            AND lf2.imei IS NULL
-            AND pc.proveedor_id IS NOT NULL
-        ) provs
-      ) AS proveedor_nombre
+      u.nombre  AS usuario_nombre,
+      su.nombre AS sucursal_nombre,
+      ${_subqueryProveedores('f')}
     FROM facturas f
-    LEFT JOIN usuarios u ON u.id = f.usuario_id
+    LEFT JOIN usuarios   u  ON u.id  = f.usuario_id
+    JOIN  sucursales     su ON su.id = f.sucursal_id
     WHERE f.id = $1
   `, [id]);
   return rows[0] || null;
@@ -134,8 +135,7 @@ const getRetoma = async (facturaId) => {
   const { rows } = await pool.query(`
     SELECT id, factura_id, descripcion, valor_retoma,
            ingreso_inventario, nombre_producto, imei
-    FROM retomas
-    WHERE factura_id = $1
+    FROM retomas WHERE factura_id = $1
   `, [facturaId]);
   return rows[0] || null;
 };
@@ -167,23 +167,12 @@ const insertarPago = async (client, { factura_id, metodo, valor }) => {
   return rows[0];
 };
 
-const insertarRetoma = async (client, {
-  factura_id, descripcion, valor_retoma,
-  ingreso_inventario, nombre_producto, imei,
-}) => {
+const insertarRetoma = async (client, { factura_id, descripcion, valor_retoma, ingreso_inventario, nombre_producto, imei }) => {
   const { rows } = await client.query(`
-    INSERT INTO retomas(
-      factura_id, descripcion, valor_retoma,
-      ingreso_inventario, nombre_producto, imei
-    )
+    INSERT INTO retomas(factura_id, descripcion, valor_retoma, ingreso_inventario, nombre_producto, imei)
     VALUES ($1, $2, $3, $4, $5, $6)
     RETURNING *
-  `, [
-    factura_id, descripcion, valor_retoma,
-    ingreso_inventario || false,
-    nombre_producto || null,
-    imei || null,
-  ]);
+  `, [factura_id, descripcion, valor_retoma, ingreso_inventario || false, nombre_producto || null, imei || null]);
   return rows[0];
 };
 
@@ -195,6 +184,7 @@ const cancelar = async (client, id) => {
 };
 
 module.exports = {
-  findAll, findById, perteneceAlNegocio, getLineas, getPagos, getRetoma,
+  findAll, findById, perteneceAlNegocio,
+  getLineas, getPagos, getRetoma,
   create, insertarLinea, insertarPago, insertarRetoma, cancelar,
 };

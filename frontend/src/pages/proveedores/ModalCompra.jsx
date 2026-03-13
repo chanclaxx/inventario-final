@@ -13,6 +13,7 @@ import {
   verificarImei as verificarImeiApi,
 } from '../../api/productos.api';
 import { getAcreedores } from '../../api/acreedores.api';
+import { useSucursalKey } from '../../hooks/useSucursalKey';
 import {
   Trash2, Package, ShoppingBag, ChevronRight,
   RefreshCw, AlertTriangle, X,
@@ -31,8 +32,6 @@ function calcularPrecioCOP(precioUsd, factor, traida) {
 }
 
 // ─── Lógica de verificación de IMEIs duplicados ───────────────────────────────
-// Verifica en paralelo todos los IMEIs contra el backend.
-// Retorna { disponibles, paraReactivar } separados.
 async function verificarImeisDuplicados(imeis) {
   const resultados = await Promise.all(
     imeis.map(async (imei) => {
@@ -54,21 +53,16 @@ async function verificarImeisDuplicados(imeis) {
 }
 
 // ─── Hook: verificación de IMEIs con estado de modales ───────────────────────
-// Encapsula toda la lógica de duplicados para mantener ModalCompra limpio.
 function useVerificacionImeis() {
-  const [verificando,         setVerificando]         = useState(false);
-  const [modalReactivar,      setModalReactivar]      = useState(false);
-  const [modalYaEnInventario, setModalYaEnInventario] = useState(false);
-  const [serialesReactivar,   setSerializesReactivar] = useState([]);
+  const [verificando,         setVerificando]           = useState(false);
+  const [modalReactivar,      setModalReactivar]        = useState(false);
+  const [modalYaEnInventario, setModalYaEnInventario]   = useState(false);
+  const [serialesReactivar,   setSerializesReactivar]   = useState([]);
   const [serialesDisponibles, setSerializesDisponibles] = useState([]);
 
-  // Mapa imei → id para los seriales que el usuario autorizó reactivar
   const reactivarMapRef    = useRef({});
-  // Callback a ejecutar tras confirmar/cancelar en el modal
   const pendingCallbackRef = useRef(null);
 
-  // Verifica los IMEIs y, si hay duplicados, abre el modal correspondiente.
-  // Llama a onProceder({ reactivarMap }) solo cuando el camino está despejado.
   const verificarYProceder = useCallback(async (imeis, onProceder) => {
     reactivarMapRef.current = {};
     setVerificando(true);
@@ -79,7 +73,6 @@ function useVerificacionImeis() {
     if (disponibles.length > 0) {
       setSerializesDisponibles(disponibles);
       setModalYaEnInventario(true);
-      // IMEIs disponibles bloquean el avance — el usuario debe corregirlos
       return;
     }
 
@@ -90,7 +83,6 @@ function useVerificacionImeis() {
       return;
     }
 
-    // Sin duplicados — proceder directamente
     onProceder({ reactivarMap: {} });
   }, []);
 
@@ -379,7 +371,6 @@ function LineaImeis({
         </button>
       </div>
 
-      {/* Precios */}
       <div className="flex gap-2">
         {usandoConversion && (
           <div className="flex-1">
@@ -411,7 +402,6 @@ function LineaImeis({
         </div>
       </div>
 
-      {/* IMEIs */}
       <div className="flex flex-col gap-1.5">
         {linea.imeis.map((imei, index) => {
           const imeiVal     = imei;
@@ -461,7 +451,7 @@ function LineaImeis({
 // ─── Paso 2 Serial ────────────────────────────────────────────────────────────
 function PasoLineaSerial({
   proveedorId, lineasIniciales, factorInicial, traidaInicial,
-  verificando, onContinuar, onVolver,
+  verificando, sucursalKey, onContinuar, onVolver,
 }) {
   const [busqueda,            setBusqueda]           = useState('');
   const [creandoNueva,        setCreandoNueva]        = useState(false);
@@ -474,8 +464,8 @@ function PasoLineaSerial({
   const queryClient = useQueryClient();
 
   const { data: productosData } = useQuery({
-    queryKey: ['productos-serial'],
-    queryFn: () => getProductosSerial().then((r) => r.data.data),
+    queryKey: ['productos-serial', ...sucursalKey],
+    queryFn:  () => getProductosSerial().then((r) => r.data.data),
   });
 
   const mutCrearLinea = useMutation({
@@ -487,7 +477,7 @@ function PasoLineaSerial({
       proveedor_id: proveedorId,
     }),
     onSuccess: (res) => {
-      queryClient.invalidateQueries(['productos-serial']);
+      queryClient.invalidateQueries({ queryKey: ['productos-serial'], exact: false });
       agregarLinea(res.data.data);
       setCreandoNueva(false);
       setNuevaLinea({ nombre: '', marca: '', modelo: '', precio: '' });
@@ -560,14 +550,12 @@ function PasoLineaSerial({
     if (campo === 'traida') setTraida(valor);
   };
 
-  // Valida localmente y delega la verificación remota al padre via onContinuar
   const handleContinuar = () => {
     setError('');
     setImeisDuplicados(new Set());
 
     if (lineasSeleccionadas.length === 0) return setError('Agrega al menos una línea');
 
-    // Detectar duplicados locales entre líneas
     const todosImeis = [];
     for (const linea of lineasSeleccionadas) {
       for (const imei of linea.imeis) {
@@ -599,7 +587,6 @@ function PasoLineaSerial({
       valor_traida:      Number(traida) || null,
     }));
 
-    // Delegar al padre: verificación remota + avance al paso 3
     onContinuar(todosImeis, lineasPayload, factor, traida);
   };
 
@@ -730,7 +717,10 @@ function PasoLineaSerial({
 }
 
 // ─── Paso 2 Cantidad ──────────────────────────────────────────────────────────
-function PasoCantidad({ proveedorId, productosIniciales, factorInicial, traidaInicial, onProductosListos, onVolver }) {
+function PasoCantidad({
+  proveedorId, productosIniciales, factorInicial, traidaInicial,
+  sucursalKey, onProductosListos, onVolver,
+}) {
   const [busqueda,               setBusqueda]              = useState('');
   const [creandoNuevo,           setCreandoNuevo]          = useState(false);
   const [nuevoProducto,          setNuevoProducto]         = useState({ nombre: '', unidad_medida: 'unidad', precio: '', costo_unitario: '' });
@@ -741,8 +731,8 @@ function PasoCantidad({ proveedorId, productosIniciales, factorInicial, traidaIn
   const queryClient = useQueryClient();
 
   const { data: productosData } = useQuery({
-    queryKey: ['productos-cantidad'],
-    queryFn: () => getProductosCantidad().then((r) => r.data.data),
+    queryKey: ['productos-cantidad', ...sucursalKey],
+    queryFn:  () => getProductosCantidad().then((r) => r.data.data),
   });
 
   const mutCrear = useMutation({
@@ -754,7 +744,7 @@ function PasoCantidad({ proveedorId, productosIniciales, factorInicial, traidaIn
       proveedor_id:   proveedorId,
     }),
     onSuccess: (res) => {
-      queryClient.invalidateQueries(['productos-cantidad']);
+      queryClient.invalidateQueries({ queryKey: ['productos-cantidad'], exact: false });
       agregarProducto(res.data.data);
       setCreandoNuevo(false);
       setNuevoProducto({ nombre: '', unidad_medida: 'unidad', precio: '', costo_unitario: '' });
@@ -986,9 +976,10 @@ function PasoPago({ proveedor, productos, tipo, onConfirmar, onVolver, loading }
   const [notas,               setNotas]                = useState('');
   const [error,               setError]                = useState('');
 
+  // acreedores es del negocio (negocio_id) → sin sucursalKey
   const { data: acreedoresData } = useQuery({
     queryKey: ['acreedores'],
-    queryFn: () => getAcreedores('').then((r) => r.data.data),
+    queryFn:  () => getAcreedores('').then((r) => r.data.data),
   });
 
   const proveedorYaEsAcreedor = (acreedoresData || []).some(
@@ -1013,7 +1004,6 @@ function PasoPago({ proveedor, productos, tipo, onConfirmar, onVolver, loading }
     onConfirmar({ pagos: pagosFinales, totalCompra: Number(totalCompra), agregarComoAcreedor, numeroFactura, notas });
   };
 
-  // Normaliza imeis para el resumen (soporta string y objeto {valor, reactivar_serial_id})
   const contarImeisValidos = (linea) =>
     linea.imeis.filter((i) => {
       const valor = typeof i === 'string' ? i : i.valor;
@@ -1039,7 +1029,6 @@ function PasoPago({ proveedor, productos, tipo, onConfirmar, onVolver, loading }
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Resumen */}
       <div className="bg-gray-50 rounded-xl p-3 flex flex-col gap-1.5">
         <p className="text-xs font-medium text-gray-500 mb-1">Resumen de compra</p>
         {resumen.map((r, i) => {
@@ -1205,6 +1194,8 @@ function PasoPago({ proveedor, productos, tipo, onConfirmar, onVolver, loading }
 // ─── Modal principal ──────────────────────────────────────────────────────────
 export function ModalCompra({ proveedor, onClose }) {
   const queryClient = useQueryClient();
+  const sucursalKey = useSucursalKey();
+
   const [paso,           setPaso]           = useState(1);
   const [tipo,           setTipo]           = useState(null);
   const [productos,      setProductos]      = useState([]);
@@ -1226,10 +1217,10 @@ export function ModalCompra({ proveedor, onClose }) {
   const mutCompra = useMutation({
     mutationFn: (payload) => crearCompra(payload),
     onSuccess: () => {
-      queryClient.invalidateQueries(['productos-serial']);
-      queryClient.invalidateQueries(['productos-cantidad']);
-      queryClient.invalidateQueries(['compras']);
-      queryClient.invalidateQueries(['acreedores']);
+      queryClient.invalidateQueries({ queryKey: ['productos-serial'],  exact: false });
+      queryClient.invalidateQueries({ queryKey: ['productos-cantidad'], exact: false });
+      queryClient.invalidateQueries({ queryKey: ['compras'],            exact: false });
+      queryClient.invalidateQueries({ queryKey: ['acreedores'],         exact: false });
       onClose();
     },
   });
@@ -1242,8 +1233,6 @@ export function ModalCompra({ proveedor, onClose }) {
   const handleVolverA1 = () => setPaso(1);
   const handleVolverA2 = () => setPaso(2);
 
-  // Recibe los IMEIs a verificar y el payload ya construido.
-  // Una vez despejada la verificación, enriquece las líneas con reactivar_serial_id y avanza al paso 3.
   const handleContinuarSerial = (imeis, lineasPayload, factor, traida) => {
     verificarYProceder(imeis, ({ reactivarMap }) => {
       const lineasEnriquecidas = lineasPayload.map((linea) => ({
@@ -1316,7 +1305,6 @@ export function ModalCompra({ proveedor, onClose }) {
 
   const titulos = ['Tipo de producto', 'Productos e IMEIs', 'Pago y confirmación'];
 
-  // Normaliza imeis a strings simples al volver al paso 2 para que LineaImeis los maneje bien
   const lineasParaPaso2 = productos.map((l) => ({
     ...l,
     imeis: (l.imeis || []).map((i) => (typeof i === 'string' ? i : i.valor)),
@@ -1364,6 +1352,7 @@ export function ModalCompra({ proveedor, onClose }) {
             factorInicial={factorGuardado}
             traidaInicial={traidaGuardada}
             verificando={verificando}
+            sucursalKey={sucursalKey}
             onContinuar={handleContinuarSerial}
             onVolver={handleVolverA1}
           />
@@ -1374,6 +1363,7 @@ export function ModalCompra({ proveedor, onClose }) {
             productosIniciales={productos}
             factorInicial={factorGuardado}
             traidaInicial={traidaGuardada}
+            sucursalKey={sucursalKey}
             onProductosListos={handleProductosListos}
             onVolver={handleVolverA1}
           />
@@ -1391,7 +1381,6 @@ export function ModalCompra({ proveedor, onClose }) {
         )}
       </Modal>
 
-      {/* Modales de duplicados fuera del Modal principal para evitar conflictos de z-index */}
       <ModalReactivarSeriales
         open={modalReactivar}
         seriales={serialesReactivar}

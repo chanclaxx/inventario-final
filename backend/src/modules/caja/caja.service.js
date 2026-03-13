@@ -30,8 +30,12 @@ const getMovimientos = async (negocioId, cajaId) => {
 const getResumenDia = async (negocioId, cajaId, sucursalId) => {
   const valida = await repo.perteneceAlNegocio(cajaId, negocioId);
   if (!valida) throw { status: 404, message: 'Caja no encontrada' };
-  return repo.getResumenDia(cajaId, sucursalId);
+  // negocioId se pasa al repo para filtrar abonosAcreedor correctamente
+  return repo.getResumenDia(cajaId, sucursalId, negocioId);
 };
+
+// Vista global: resumen consolidado del día en todas las sucursales
+const getResumenGlobal = (negocioId) => repo.getResumenGlobal(negocioId);
 
 const registrarMovimiento = async (negocioId, cajaId, { usuario_id, tipo, concepto, valor, referencia_id, referencia_tipo }) => {
   const valida = await repo.perteneceAlNegocio(cajaId, negocioId);
@@ -43,4 +47,7 @@ const registrarMovimiento = async (negocioId, cajaId, { usuario_id, tipo, concep
   return repo.insertarMovimiento({ caja_id: cajaId, usuario_id, tipo, concepto, valor, referencia_id, referencia_tipo });
 };
 
-module.exports = { getCajaActiva, abrirCaja, cerrarCaja, getMovimientos, getResumenDia, registrarMovimiento };
+module.exports = {
+  getCajaActiva, abrirCaja, cerrarCaja,
+  getMovimientos, getResumenDia, getResumenGlobal, registrarMovimiento,
+};

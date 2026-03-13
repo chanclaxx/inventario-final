@@ -12,11 +12,13 @@ import { Spinner }            from '../../components/ui/Spinner';
 import { EmptyState }         from '../../components/ui/EmptyState';
 import { FacturaTermica }     from '../../components/FacturaTermica';
 import { ModalEditarFactura } from './ModalEditarFactura';
+import { useSucursalKey }     from '../../hooks/useSucursalKey';
+import useSucursalStore       from '../../store/sucursalStore';
 import api from '../../api/axios.config';
 
 import {
   FileText, ChevronDown, ChevronUp,
-  Printer, XCircle, Eye, Search, X, Pencil, Package,
+  Printer, XCircle, Eye, Search, X, Pencil, Package, Building2,
 } from 'lucide-react';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -65,11 +67,10 @@ function coincideTexto(factura, texto) {
 function coincideProveedor(factura, proveedor) {
   if (!proveedor) return true;
   if (!factura.proveedor_nombre) return false;
-  // proveedor_nombre puede ser "A, B" si hay varios — verificar si contiene el filtrado
   return factura.proveedor_nombre.split(', ').includes(proveedor);
 }
 
-// ─── Sección retoma en modal detalle ─────────────────────────────────────────
+// ─── Sección retoma ───────────────────────────────────────────────────────────
 
 function SeccionRetoma({ retoma }) {
   if (!retoma) return null;
@@ -128,11 +129,10 @@ function SeccionRetoma({ retoma }) {
   );
 }
 
-// ─── Sección proveedor (solo admin_negocio) ───────────────────────────────────
+// ─── Sección proveedor ────────────────────────────────────────────────────────
 
 function SeccionProveedor({ proveedorNombre }) {
   if (!proveedorNombre) return null;
-
   return (
     <div className="bg-amber-50 border border-amber-100 rounded-xl p-3 flex items-center gap-3">
       <Package size={16} className="text-amber-500 flex-shrink-0" />
@@ -187,6 +187,15 @@ function ModalDetalle({ facturaId, onClose, onReimprimir, onEditar }) {
           <span className="text-xs text-gray-400">{formatFechaHora(f?.fecha)}</span>
         </div>
 
+        {/* Sucursal — visible en vista global */}
+        {f?.sucursal_nombre && (
+          <div className="flex items-center gap-1.5 text-xs text-purple-600 bg-purple-50
+            border border-purple-100 rounded-lg px-2.5 py-1.5">
+            <Building2 size={12} />
+            <span>{f.sucursal_nombre}</span>
+          </div>
+        )}
+
         <div className="bg-gray-50 rounded-xl p-3">
           <p className="text-xs text-gray-400 mb-1">Cliente</p>
           <p className="text-sm font-semibold text-gray-800">{f?.nombre_cliente}</p>
@@ -201,10 +210,7 @@ function ModalDetalle({ facturaId, onClose, onReimprimir, onEditar }) {
           )}
         </div>
 
-        {/* Proveedor — solo visible para admin_negocio */}
-        {esAdminNegocio() && (
-          <SeccionProveedor proveedorNombre={f?.proveedor_nombre} />
-        )}
+        {esAdminNegocio() && <SeccionProveedor proveedorNombre={f?.proveedor_nombre} />}
 
         <div className="bg-gray-50 rounded-xl p-3 flex flex-col gap-2">
           <p className="text-xs text-gray-400 font-medium">Productos</p>
@@ -279,7 +285,7 @@ function ModalDetalle({ facturaId, onClose, onReimprimir, onEditar }) {
 
 // ─── Fila factura ─────────────────────────────────────────────────────────────
 
-function FilaFactura({ factura, onVerDetalle, onInactivar, onEditar }) {
+function FilaFactura({ factura, onVerDetalle, onInactivar, onEditar, mostrarSucursal }) {
   const total = Number(factura.total || 0) - Number(factura.total_retoma || 0);
 
   return (
@@ -299,6 +305,14 @@ function FilaFactura({ factura, onVerDetalle, onInactivar, onEditar }) {
           </Badge>
           {factura.retoma_descripcion && (
             <Badge variant="purple">Retoma</Badge>
+          )}
+          {/* Badge de sucursal en vista global */}
+          {mostrarSucursal && factura.sucursal_nombre && (
+            <span className="flex items-center gap-1 text-[10px] text-purple-600
+              bg-purple-50 border border-purple-100 rounded-full px-2 py-0.5">
+              <Building2 size={9} />
+              {factura.sucursal_nombre}
+            </span>
           )}
         </div>
         <p className="text-sm text-gray-600 truncate mt-0.5">{factura.nombre_cliente}</p>
@@ -344,7 +358,7 @@ function FilaFactura({ factura, onVerDetalle, onInactivar, onEditar }) {
 
 // ─── Grupo por día ────────────────────────────────────────────────────────────
 
-function GrupoDia({ fecha, facturas, onVerDetalle, onInactivar, onEditar }) {
+function GrupoDia({ fecha, facturas, onVerDetalle, onInactivar, onEditar, mostrarSucursal }) {
   const [expandido, setExpandido] = useState(true);
   const totalDia = facturas
     .filter((f) => f.estado !== 'Cancelada')
@@ -354,7 +368,8 @@ function GrupoDia({ fecha, facturas, onVerDetalle, onInactivar, onEditar }) {
     <div className="flex flex-col gap-2">
       <button
         onClick={() => setExpandido(!expandido)}
-        className="flex items-center justify-between bg-gray-50 rounded-xl px-4 py-2.5 hover:bg-gray-100 transition-colors"
+        className="flex items-center justify-between bg-gray-50 rounded-xl px-4 py-2.5
+          hover:bg-gray-100 transition-colors"
       >
         <div className="flex items-center gap-3">
           {expandido
@@ -375,6 +390,7 @@ function GrupoDia({ fecha, facturas, onVerDetalle, onInactivar, onEditar }) {
               onVerDetalle={onVerDetalle}
               onInactivar={onInactivar}
               onEditar={onEditar}
+              mostrarSucursal={mostrarSucursal}
             />
           ))}
         </div>
@@ -383,7 +399,7 @@ function GrupoDia({ fecha, facturas, onVerDetalle, onInactivar, onEditar }) {
   );
 }
 
-// ─── Buscador ─────────────────────────────────────────────────────────────────
+// ─── Panel búsqueda ───────────────────────────────────────────────────────────
 
 function PanelBusqueda({ filtros, onChange, onLimpiar, totalResultados, totalFacturas, proveedores, esAdmin }) {
   const hayFiltros = filtros.texto || filtros.desde || filtros.hasta || filtros.proveedor;
@@ -420,7 +436,6 @@ function PanelBusqueda({ filtros, onChange, onLimpiar, totalResultados, totalFac
           />
         </div>
 
-        {/* Dropdown proveedor — solo visible para admin_negocio */}
         {esAdmin && proveedores.length > 0 && (
           <div className="flex-1 min-w-[150px]">
             <label className="block text-xs font-medium text-gray-500 mb-1">Proveedor</label>
@@ -464,17 +479,21 @@ function PanelBusqueda({ filtros, onChange, onLimpiar, totalResultados, totalFac
 const FILTROS_INICIALES = { texto: '', desde: '', hasta: '', proveedor: '' };
 
 export default function FacturarPage() {
-  const queryClient                              = useQueryClient();
-  const { esAdminNegocio }                       = useContext(AuthContext);
-  const esAdmin                                  = esAdminNegocio();
+  const queryClient                            = useQueryClient();
+  const { esAdminNegocio }                     = useContext(AuthContext);
+  const esAdmin                                = esAdminNegocio();
+  const sucursalKey                            = useSucursalKey();
+  const esVistaGlobal                          = useSucursalStore((s) => s.esVistaGlobal());
+
   const [facturaDetalle,   setFacturaDetalle]   = useState(null);
   const [facturaInactivar, setFacturaInactivar] = useState(null);
   const [facturaImprimir,  setFacturaImprimir]  = useState(null);
   const [facturaEditar,    setFacturaEditar]    = useState(null);
   const [filtros,          setFiltros]          = useState(FILTROS_INICIALES);
 
+  // ── queryKey incluye sucursalKey → caché separado por sucursal ──────────────
   const { data: facturasData, isLoading } = useQuery({
-    queryKey: ['facturas'],
+    queryKey: ['facturas', ...sucursalKey],
     queryFn: () => getFacturas().then((r) => r.data.data),
   });
 
@@ -486,16 +505,15 @@ export default function FacturarPage() {
   const mutInactivar = useMutation({
     mutationFn: (id) => cancelarFactura(id),
     onSuccess: () => {
-      queryClient.invalidateQueries(['facturas']);
-      queryClient.invalidateQueries(['productos-serial']);
-      queryClient.invalidateQueries(['productos-cantidad']);
+      queryClient.invalidateQueries({ queryKey: ['facturas'] });
+      queryClient.invalidateQueries({ queryKey: ['productos-serial'] });
+      queryClient.invalidateQueries({ queryKey: ['productos-cantidad'] });
       setFacturaInactivar(null);
     },
   });
 
   const facturas = useMemo(() => facturasData || [], [facturasData]);
 
-  // Lista de proveedores únicos extraída de las facturas (solo para admin)
   const proveedores = useMemo(() => {
     if (!esAdmin) return [];
     const nombres = facturas
@@ -522,7 +540,6 @@ export default function FacturarPage() {
   return (
     <div className="flex flex-col gap-4">
 
-      {/* Header */}
       <div>
         <h1 className="text-xl font-bold text-gray-900">Historial de Facturas</h1>
         <p className="text-sm text-gray-400 mt-0.5">
@@ -530,7 +547,6 @@ export default function FacturarPage() {
         </p>
       </div>
 
-      {/* Buscador */}
       <PanelBusqueda
         filtros={filtros}
         onChange={setFiltros}
@@ -541,7 +557,6 @@ export default function FacturarPage() {
         esAdmin={esAdmin}
       />
 
-      {/* Lista */}
       {isLoading ? (
         <Spinner className="py-20" />
       ) : facturasFiltradas.length === 0 ? (
@@ -564,6 +579,7 @@ export default function FacturarPage() {
               onVerDetalle={(id) => setFacturaDetalle(id)}
               onInactivar={(f) => setFacturaInactivar(f)}
               onEditar={handleEditar}
+              mostrarSucursal={esVistaGlobal}
             />
           ))}
         </div>
@@ -596,7 +612,11 @@ export default function FacturarPage() {
               </p>
             </div>
             <div className="flex gap-2">
-              <Button variant="secondary" className="flex-1" onClick={() => setFacturaInactivar(null)}>
+              <Button
+                variant="secondary"
+                className="flex-1"
+                onClick={() => setFacturaInactivar(null)}
+              >
                 Cancelar
               </Button>
               <Button

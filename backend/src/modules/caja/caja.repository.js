@@ -80,7 +80,44 @@ const getResumenCaja = async (cajaId) => {
   return rows[0];
 };
 
-const getResumenDia = async (cajaId, sucursalId) => {
+// ── Helpers internos ──────────────────────────────────────────────────────────
+
+const _buildResumenDesdeDatos = ({ pf, ac, ap, cp, aa, mn }) => {
+  const sum = (arr) => arr.reduce((s, r) => s + Number(r.valor), 0);
+
+  const totalFacturas        = sum(pf);
+  const totalAbonosCredito   = sum(ac);
+  const totalAbonosPrestamo  = sum(ap);
+  const totalCompras         = sum(cp);
+  const totalAbonosAcreedor  = sum(aa);
+  const totalManualesIngreso = mn.filter(m => m.tipo === 'Ingreso').reduce((s, m) => s + Number(m.valor), 0);
+  const totalManualesEgreso  = mn.filter(m => m.tipo === 'Egreso').reduce((s, m) => s + Number(m.valor), 0);
+
+  const totalIngresos = totalFacturas + totalAbonosCredito + totalAbonosPrestamo + totalManualesIngreso;
+  const totalEgresos  = totalCompras + totalAbonosAcreedor + totalManualesEgreso;
+
+  return {
+    grupos: {
+      facturas:       { tipo: 'Ingreso', label: 'Facturas del día',      items: pf, total: totalFacturas },
+      abonosCredito:  { tipo: 'Ingreso', label: 'Abonos de créditos',    items: ac, total: totalAbonosCredito },
+      abonosPrestamo: { tipo: 'Ingreso', label: 'Abonos de préstamos',   items: ap, total: totalAbonosPrestamo },
+      compras:        { tipo: 'Egreso',  label: 'Compras a proveedores', items: cp, total: totalCompras },
+      abonosAcreedor: { tipo: 'Egreso',  label: 'Abonos a acreedores',   items: aa, total: totalAbonosAcreedor },
+      manuales:       { tipo: 'Mixto',   label: 'Movimientos manuales',  items: mn, totalIngreso: totalManualesIngreso, totalEgreso: totalManualesEgreso },
+    },
+    totales: {
+      ingresos: totalIngresos,
+      egresos:  totalEgresos,
+      saldo:    totalIngresos - totalEgresos,
+    },
+  };
+};
+
+/**
+ * Resumen del día para una sucursal específica.
+ * Usa la fecha_apertura de la caja como referencia del día.
+ */
+const getResumenDia = async (cajaId, sucursalId, negocioId) => {
   const { rows: cajaRows } = await pool.query(
     'SELECT fecha_apertura FROM aperturas_caja WHERE id = $1',
     [cajaId]
@@ -88,10 +125,8 @@ const getResumenDia = async (cajaId, sucursalId) => {
   const fechaApertura = cajaRows[0]?.fecha_apertura;
   if (!fechaApertura) return null;
 
-  const diaInicio = new Date(fechaApertura);
-  diaInicio.setHours(0, 0, 0, 0);
-  const diaFin = new Date(fechaApertura);
-  diaFin.setHours(23, 59, 59, 999);
+  const diaInicio = new Date(fechaApertura); diaInicio.setHours(0, 0, 0, 0);
+  const diaFin    = new Date(fechaApertura); diaFin.setHours(23, 59, 59, 999);
 
   const [pagosFactura, abonosCredito, abonosPrestamo, compras, abonosAcreedor, manuales] =
     await Promise.all([
@@ -131,15 +166,15 @@ const getResumenDia = async (cajaId, sucursalId) => {
         ORDER BY c.fecha ASC
       `, [sucursalId, diaInicio, diaFin]),
 
-      // Abonos a acreedores filtrados por negocio via JOIN
+      // FIX: acreedores son del negocio — filtrar por negocio_id directo, sin JOIN a sucursales
       pool.query(`
         SELECT ma.id, ma.valor, ma.fecha, ma.descripcion, a.nombre AS acreedor
         FROM movimientos_acreedor ma
         JOIN acreedores a ON a.id = ma.acreedor_id
-        JOIN sucursales s ON s.negocio_id = a.negocio_id
-        WHERE ma.tipo = 'Abono' AND s.id = $1
+        WHERE ma.tipo = 'Abono'
+          AND a.negocio_id = $1
           AND ma.fecha BETWEEN $2 AND $3
-      `, [sucursalId, diaInicio, diaFin]),
+      `, [negocioId, diaInicio, diaFin]),
 
       pool.query(`
         SELECT m.*, u.nombre AS usuario_nombre
@@ -150,44 +185,105 @@ const getResumenDia = async (cajaId, sucursalId) => {
       `, [cajaId]),
     ]);
 
-  const pf  = pagosFactura.rows;
-  const ac  = abonosCredito.rows;
-  const ap  = abonosPrestamo.rows;
-  const cp  = compras.rows;
-  const aa  = abonosAcreedor.rows;
-  const mn  = manuales.rows;
+  return _buildResumenDesdeDatos({
+    pf: pagosFactura.rows,
+    ac: abonosCredito.rows,
+    ap: abonosPrestamo.rows,
+    cp: compras.rows,
+    aa: abonosAcreedor.rows,
+    mn: manuales.rows,
+  });
+};
 
-  const sum = (arr) => arr.reduce((s, r) => s + Number(r.valor), 0);
+/**
+ * Resumen global del día para todas las sucursales del negocio.
+ * Solo para admin_negocio en vista general.
+ * Usa la fecha actual como referencia.
+ */
+const getResumenGlobal = async (negocioId) => {
+  const hoy       = new Date();
+  const diaInicio = new Date(hoy); diaInicio.setHours(0, 0, 0, 0);
+  const diaFin    = new Date(hoy); diaFin.setHours(23, 59, 59, 999);
 
-  const totalFacturas       = sum(pf);
-  const totalAbonosCredito  = sum(ac);
-  const totalAbonosPrestamo = sum(ap);
-  const totalCompras        = sum(cp);
-  const totalAbonosAcreedor = sum(aa);
-  const totalManualesIngreso = mn.filter((m) => m.tipo === 'Ingreso').reduce((s, m) => s + Number(m.valor), 0);
-  const totalManualesEgreso  = mn.filter((m) => m.tipo === 'Egreso').reduce((s, m) => s + Number(m.valor), 0);
+  const [pagosFactura, abonosCredito, abonosPrestamo, compras, abonosAcreedor, manuales] =
+    await Promise.all([
+      pool.query(`
+        SELECT pf.id, pf.metodo, pf.valor, f.nombre_cliente,
+               f.id AS factura_id, f.fecha, su.nombre AS sucursal_nombre
+        FROM pagos_factura pf
+        JOIN facturas   f  ON f.id  = pf.factura_id
+        JOIN sucursales su ON su.id = f.sucursal_id
+        WHERE su.negocio_id = $1 AND f.estado != 'Cancelada'
+          AND pf.metodo != 'Credito' AND f.fecha BETWEEN $2 AND $3
+        ORDER BY f.fecha ASC
+      `, [negocioId, diaInicio, diaFin]),
 
-  const totalIngresos = totalFacturas + totalAbonosCredito + totalAbonosPrestamo + totalManualesIngreso;
-  const totalEgresos  = totalCompras + totalAbonosAcreedor + totalManualesEgreso;
+      pool.query(`
+        SELECT ac.id, ac.valor, ac.metodo, ac.fecha,
+               f.nombre_cliente, c.id AS credito_id, f.id AS factura_id,
+               su.nombre AS sucursal_nombre
+        FROM abonos_credito ac
+        JOIN creditos   c  ON c.id  = ac.credito_id
+        JOIN facturas   f  ON f.id  = c.factura_id
+        JOIN sucursales su ON su.id = c.sucursal_id
+        WHERE su.negocio_id = $1 AND ac.fecha BETWEEN $2 AND $3
+        ORDER BY ac.fecha ASC
+      `, [negocioId, diaInicio, diaFin]),
 
-  return {
-    grupos: {
-      facturas:       { tipo: 'Ingreso', label: 'Facturas del día',      items: pf, total: totalFacturas },
-      abonosCredito:  { tipo: 'Ingreso', label: 'Abonos de créditos',    items: ac, total: totalAbonosCredito },
-      abonosPrestamo: { tipo: 'Ingreso', label: 'Abonos de préstamos',   items: ap, total: totalAbonosPrestamo },
-      compras:        { tipo: 'Egreso',  label: 'Compras a proveedores', items: cp, total: totalCompras },
-      abonosAcreedor: { tipo: 'Egreso',  label: 'Abonos a acreedores',   items: aa, total: totalAbonosAcreedor },
-      manuales:       { tipo: 'Mixto',   label: 'Movimientos manuales',  items: mn, totalIngreso: totalManualesIngreso, totalEgreso: totalManualesEgreso },
-    },
-    totales: {
-      ingresos: totalIngresos,
-      egresos:  totalEgresos,
-      saldo:    totalIngresos - totalEgresos,
-    },
-  };
+      pool.query(`
+        SELECT ab.id, ab.valor, ab.fecha, p.prestatario, p.id AS prestamo_id,
+               su.nombre AS sucursal_nombre
+        FROM abonos_prestamo ab
+        JOIN prestamos  p  ON p.id  = ab.prestamo_id
+        JOIN sucursales su ON su.id = p.sucursal_id
+        WHERE su.negocio_id = $1 AND ab.fecha BETWEEN $2 AND $3
+        ORDER BY ab.fecha ASC
+      `, [negocioId, diaInicio, diaFin]),
+
+      pool.query(`
+        SELECT c.id, c.total AS valor, c.fecha, c.numero_factura,
+               pr.nombre AS proveedor, su.nombre AS sucursal_nombre
+        FROM compras c
+        JOIN  sucursales  su ON su.id = c.sucursal_id
+        LEFT JOIN proveedores pr ON pr.id = c.proveedor_id
+        WHERE su.negocio_id = $1 AND c.estado != 'Cancelada'
+          AND c.fecha BETWEEN $2 AND $3
+        ORDER BY c.fecha ASC
+      `, [negocioId, diaInicio, diaFin]),
+
+      pool.query(`
+        SELECT ma.id, ma.valor, ma.fecha, ma.descripcion, a.nombre AS acreedor
+        FROM movimientos_acreedor ma
+        JOIN acreedores a ON a.id = ma.acreedor_id
+        WHERE ma.tipo = 'Abono'
+          AND a.negocio_id = $1
+          AND ma.fecha BETWEEN $2 AND $3
+      `, [negocioId, diaInicio, diaFin]),
+
+      pool.query(`
+        SELECT m.*, u.nombre AS usuario_nombre, su.nombre AS sucursal_nombre
+        FROM movimientos_caja m
+        JOIN aperturas_caja ac ON ac.id = m.caja_id
+        JOIN sucursales     su ON su.id = ac.sucursal_id
+        LEFT JOIN usuarios   u ON u.id  = m.usuario_id
+        WHERE su.negocio_id = $1
+          AND m.fecha BETWEEN $2 AND $3
+        ORDER BY m.fecha ASC
+      `, [negocioId, diaInicio, diaFin]),
+    ]);
+
+  return _buildResumenDesdeDatos({
+    pf: pagosFactura.rows,
+    ac: abonosCredito.rows,
+    ap: abonosPrestamo.rows,
+    cp: compras.rows,
+    aa: abonosAcreedor.rows,
+    mn: manuales.rows,
+  });
 };
 
 module.exports = {
   findCajaAbierta, findById, perteneceAlNegocio, getMovimientos,
-  abrirCaja, cerrarCaja, insertarMovimiento, getResumenCaja, getResumenDia,
+  abrirCaja, cerrarCaja, insertarMovimiento,
+  getResumenCaja, getResumenDia, getResumenGlobal,
 };
