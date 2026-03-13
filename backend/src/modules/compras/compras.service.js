@@ -42,31 +42,46 @@ const registrarCompra = async ({
       });
 
       if (linea.imei) {
-        const { rows: existente } = await client.query(
-          'SELECT id FROM seriales WHERE imei = $1',
-          [linea.imei]
-        );
-        if (existente.length > 0) {
-          throw { status: 409, message: `El IMEI ${linea.imei} ya existe en el inventario` };
-        }
+        // ── Manejo de serial ──────────────────────────────────────────────────
+        // CASO A: el frontend confirmó reactivar un serial existente
+        if (linea.reactivar_serial_id) {
+          await client.query(
+            `UPDATE seriales
+             SET vendido      = false,
+                 prestado     = false,
+                 fecha_salida = NULL,
+                 costo_compra = $1,
+                 proveedor_id = COALESCE($2, proveedor_id)
+             WHERE id = $3`,
+            [linea.precio_unitario, proveedor_id || null, linea.reactivar_serial_id]
+          );
 
-        // Insertar serial con proveedor_id propio — cada serial sabe de dónde vino
-        await client.query(
-          `INSERT INTO seriales(producto_id, imei, fecha_entrada, costo_compra, proveedor_id)
-           VALUES ($1, $2, $3, $4, $5)`,
-          [
-            linea.producto_id,
-            linea.imei,
-            new Date().toISOString().split('T')[0],
-            linea.precio_unitario,
-            proveedor_id || null,
-          ]
-        );
+        } else {
+          // CASO B: serial nuevo — verificar que no exista antes de insertar
+          const { rows: existente } = await client.query(
+            'SELECT id FROM seriales WHERE imei = $1',
+            [linea.imei]
+          );
+          if (existente.length > 0) {
+            throw { status: 409, message: `El IMEI ${linea.imei} ya existe en el inventario` };
+          }
+
+          await client.query(
+            `INSERT INTO seriales(producto_id, imei, fecha_entrada, costo_compra, proveedor_id)
+             VALUES ($1, $2, $3, $4, $5)`,
+            [
+              linea.producto_id,
+              linea.imei,
+              new Date().toISOString().split('T')[0],
+              linea.precio_unitario,
+              proveedor_id || null,
+            ]
+          );
+        }
 
       } else if (linea.producto_id) {
         await cantidadRepo.ajustarStock(linea.producto_id, linea.cantidad);
 
-        // Para productos por cantidad el proveedor vive en productos_cantidad
         if (proveedor_id) {
           await client.query(
             `UPDATE productos_cantidad

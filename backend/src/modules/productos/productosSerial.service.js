@@ -23,11 +23,30 @@ const getSeriales = async (productoId, vendido) => {
   return repo.getSeriales(productoId, vendido);
 };
 
-// proveedor_id es opcional — se guarda cuando se conoce el origen del serial
-const agregarSerial = async (negocioId, productoId, { imei, fecha_entrada, costo_compra, cliente_origen, proveedor_id }) => {
+/**
+ * Agrega un serial a un producto.
+ *
+ * Si viene reactivar_serial_id: reactiva el serial existente (UPDATE)
+ * en lugar de insertar uno nuevo. Esto ocurre cuando el frontend detectó
+ * que el IMEI ya existe y el usuario confirmó reactivarlo.
+ */
+const agregarSerial = async (
+  negocioId,
+  productoId,
+  { imei, fecha_entrada, costo_compra, cliente_origen, proveedor_id, reactivar_serial_id }
+) => {
   const valido = await repo.perteneceAlNegocio(productoId, negocioId);
   if (!valido) throw { status: 404, message: 'Producto no encontrado' };
 
+  // CASO A: usuario confirmó reactivar — UPDATE del serial existente
+  if (reactivar_serial_id) {
+    return repo.reactivarSerial(reactivar_serial_id, {
+      costo_compra: costo_compra ?? null,
+      proveedor_id: proveedor_id || null,
+    });
+  }
+
+  // CASO B: serial nuevo — verificar que no exista antes de insertar
   const existe = await repo.findSerialByIMEI(imei);
   if (existe) throw { status: 409, message: `El IMEI ${imei} ya está registrado` };
 
