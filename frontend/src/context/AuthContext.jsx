@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { AuthContext } from './AuthContext.js';
 import { login as loginApi, logout as logoutApi } from '../api/auth.api';
 import useSucursalStore from '../store/sucursalStore';
@@ -14,10 +15,15 @@ function getUsuarioInicial() {
 
 export function AuthProvider({ children }) {
   const [usuario, setUsuario] = useState(getUsuarioInicial);
+  const queryClient = useQueryClient();
 
   const login = async (email, password) => {
-    // Reset completo antes del nuevo login — evita que sucursal_id de otra
-    // sesión se inyecte mientras se resuelve la nueva selección
+    // Limpiar todo el caché de React Query — evita que datos de un negocio
+    // anterior aparezcan al entrar a otro negocio sin recargar la página
+    queryClient.clear();
+
+    // Reset del store de sucursal — evita que sucursal_id de otra sesión
+    // se inyecte en el interceptor mientras se resuelve la nueva selección
     useSucursalStore.getState().reset();
 
     const { data } = await loginApi(email, password);
@@ -42,6 +48,8 @@ export function AuthProvider({ children }) {
     } catch (e) {
       console.error(e);
     }
+    // Limpiar caché al cerrar sesión — misma razón que en login
+    queryClient.clear();
     sessionStorage.removeItem('accessToken');
     sessionStorage.removeItem('usuario');
     useSucursalStore.getState().reset();
