@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback } from 'react';
 import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
 import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
@@ -47,17 +47,11 @@ const DEBOUNCE_MS     = 600;
 
 // ─── Hook: verificación de IMEI en tiempo real ────────────────────────────────
 
-function useVerificarImei({ onEncontrado } = {}) {
+function useVerificarImei() {
   const [estado, setEstado] = useState({ tipo: 'idle' });
-  const timerRef       = useRef(null);
-  const onEncontradoRef = useRef(onEncontrado);
+  const timerRef = useRef(null);
 
-  // Mantener la referencia actualizada sin redefinir `verificar`
-  useEffect(() => {
-    onEncontradoRef.current = onEncontrado;
-  }, [onEncontrado]);
-
-  const verificar = useCallback((imei) => {
+  const verificar = useCallback((imei, { onEncontrado } = {}) => {
     if (timerRef.current) clearTimeout(timerRef.current);
 
     const imeiLimpio = imei?.trim() ?? '';
@@ -74,8 +68,7 @@ function useVerificarImei({ onEncontrado } = {}) {
         if (data.data.existe) {
           const serial = data.data.serial;
           setEstado({ tipo: 'encontrado', serial });
-          // Notificar al componente vía callback — evita useEffect con setState en el consumer
-          onEncontradoRef.current?.(serial);
+          onEncontrado?.(serial);
         } else {
           setEstado({ tipo: 'libre' });
         }
@@ -227,11 +220,7 @@ function RetomaSerial({ retoma, setRetomaField, productosSerial }) {
   const [busqueda,       setBusqueda]       = useState('');
   const [modalReactivar, setModalReactivar] = useState(false);
 
-  const { estado, verificar, limpiar } = useVerificarImei({
-    // El callback se invoca dentro del setTimeout del hook — equivalente a un
-    // event handler, fuera del ciclo de render. Sin cascada de renders.
-    onEncontrado: () => setModalReactivar(true),
-  });
+  const { estado, verificar, limpiar } = useVerificarImei();
 
   const filtrados = (productosSerial || []).filter((p) =>
     p.nombre.toLowerCase().includes(busqueda.toLowerCase())
@@ -244,7 +233,9 @@ function RetomaSerial({ retoma, setRetomaField, productosSerial }) {
     limpiar();
 
     if (valor.trim().length >= IMEI_MIN_LENGTH) {
-      verificar(valor);
+      // El callback se pasa en cada llamada — siempre tiene la referencia
+      // fresca a setModalReactivar sin necesitar refs ni effects adicionales
+      verificar(valor, { onEncontrado: () => setModalReactivar(true) });
     }
   };
 
