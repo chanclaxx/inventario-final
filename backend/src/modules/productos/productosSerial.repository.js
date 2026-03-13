@@ -121,8 +121,34 @@ const eliminarSerial = async (id) => {
   );
   return rowCount > 0;
 };
+const findSerialByIMEIEnNegocio = async (imei, negocioId) => {
+  const { rows } = await pool.query(`
+    SELECT
+      s.id,
+      s.imei,
+      s.vendido,
+      s.prestado,
+      s.fecha_entrada,
+      s.fecha_salida,
+      s.cliente_origen,
+      ps.id   AS producto_id,
+      ps.nombre AS producto_nombre,
+      ps.marca,
+      ps.modelo,
+      su.id   AS sucursal_id,
+      su.nombre AS sucursal_nombre
+    FROM seriales s
+    JOIN productos_serial ps ON ps.id = s.producto_id
+    JOIN sucursales        su ON su.id = ps.sucursal_id
+    WHERE s.imei = $1
+      AND su.negocio_id = $2
+    LIMIT 1
+  `, [imei, negocioId]);
+ 
+  return rows[0] || null;
+};
 
 module.exports = {
   findAll, findById, perteneceAlNegocio, create, update, updatePrecio,
-  getSeriales, findSerialByIMEI, insertarSerial, actualizarSerial, eliminarSerial,
+  getSeriales, findSerialByIMEI, insertarSerial, actualizarSerial, eliminarSerial,findSerialByIMEIEnNegocio
 };

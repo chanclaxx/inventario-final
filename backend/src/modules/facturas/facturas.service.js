@@ -80,33 +80,51 @@ const crearFactura = async ({ sucursal_id, usuario_id, nombre_cliente, cedula, c
         console.log('🔍 RETOMA data:', JSON.stringify(retoma));
 
         if (retoma.tipo_retoma === 'serial' && retoma.imei) {
-          const existeSerial = await serialRepo.findSerialByIMEI(retoma.imei);
-          if (retoma.producto_serial_id) {
-            if (existeSerial) {
-              await client.query(
-                `UPDATE seriales SET vendido = false, fecha_salida = NULL, cliente_origen = $1 WHERE imei = $2`,
-                [nombre_cliente, retoma.imei]
-              );
-            } else {
-              await serialRepo.insertarSerial({
-                producto_id:    retoma.producto_serial_id,
-                imei:           retoma.imei,
-                fecha_entrada:  new Date().toISOString().split('T')[0],
-                costo_compra:   retoma.valor_retoma,
-                cliente_origen: nombre_cliente,
-              });
-            }
-          } else {
-            console.log('⚠️ Sin producto_serial_id — retoma guardada pero no ingresa a seriales');
-          }
-        }
-
-        if (retoma.tipo_retoma === 'cantidad' && retoma.producto_cantidad_id) {
-          await cantidadRepo.ajustarStock(
-            retoma.producto_cantidad_id,
-            Number(retoma.cantidad_retoma || 1)
-          );
-        }
+  const existeSerial = await serialRepo.findSerialByIMEI(retoma.imei);
+ 
+  // CASO A: el frontend detectó que el serial ya existe y el usuario
+  // confirmó reactivarlo. Se envía reactivar_serial_id con el id del serial.
+  if (retoma.reactivar_serial_id) {
+    await client.query(
+      `UPDATE seriales
+       SET vendido        = false,
+           prestado       = false,
+           fecha_salida   = NULL,
+           cliente_origen = $1
+       WHERE id = $2`,
+      [nombre_cliente, retoma.reactivar_serial_id]
+    );
+ 
+  // CASO B: el serial existe en BD pero el frontend no envió
+  // reactivar_serial_id (compatibilidad con flujo anterior).
+  } else if (existeSerial) {
+    if (retoma.producto_serial_id) {
+      await client.query(
+        `UPDATE seriales
+         SET vendido        = false,
+             prestado       = false,
+             fecha_salida   = NULL,
+             cliente_origen = $1
+         WHERE imei = $2`,
+        [nombre_cliente, retoma.imei]
+      );
+    } else {
+      console.log('⚠️ IMEI ya existe pero sin producto_serial_id — serial no modificado');
+    }
+ 
+  // CASO C: el serial no existe → insertar nuevo.
+  } else if (retoma.producto_serial_id) {
+    await serialRepo.insertarSerial({
+      producto_id:    retoma.producto_serial_id,
+      imei:           retoma.imei,
+      fecha_entrada:  new Date().toISOString().split('T')[0],
+      costo_compra:   retoma.valor_retoma,
+      cliente_origen: nombre_cliente,
+    });
+  } else {
+    console.log('⚠️ Sin producto_serial_id — retoma guardada pero no ingresa a seriales');
+  }
+}
       }
     }
 
