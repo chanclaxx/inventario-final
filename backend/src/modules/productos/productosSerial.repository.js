@@ -12,7 +12,6 @@ const findAll = async (sucursalId) => {
       ps.precio,
       ps.sucursal_id,
       ps.proveedor_id,
-      ps.ultimo_costo,
       COUNT(s.id) FILTER (WHERE s.vendido = false AND s.prestado = false) AS disponibles
     FROM productos_serial ps
     LEFT JOIN seriales s ON s.producto_id = ps.id
@@ -78,9 +77,8 @@ const getSeriales = async (productoId, vendido) => {
     : `AND s.vendido = ${vendido}`;
 
   const { rows } = await pool.query(`
-    SELECT s.*, c.nombre AS cliente_nombre
+    SELECT s.*
     FROM seriales s
-    LEFT JOIN clientes c ON c.id = s.cliente_id
     WHERE s.producto_id = $1 ${condicion}
     ORDER BY s.fecha_entrada DESC
   `, [productoId]);

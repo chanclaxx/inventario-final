@@ -312,7 +312,7 @@ function PasoSerial({ onExito, onDuplicadosEncontrados }) {
     setError('');
     if (esAdmin) {
       if (producto.proveedor_id) setProveedorId(String(producto.proveedor_id));
-      if (producto.ultimo_costo) setCostoCompra(String(producto.ultimo_costo));
+      // ultimo_costo no existe en el schema — el admin ingresa el costo manualmente
     }
   };
 
@@ -338,7 +338,7 @@ function PasoSerial({ onExito, onDuplicadosEncontrados }) {
       const imeisValidos = imeis.filter((i) => i.trim());
       const costo = esAdmin
         ? (costoCompra ? Number(costoCompra) : null)
-        : (lineaSel?.ultimo_costo || null);
+        : null; // ultimo_costo no existe — sin admin el costo queda null
 
       if (proveedorId && modoPago) {
         await crearCompra(buildPayloadCompra({
