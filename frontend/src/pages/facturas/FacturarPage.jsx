@@ -144,6 +144,55 @@ function SeccionProveedor({ proveedorNombre }) {
   );
 }
 
+// ─── Bloque de datos del cliente en el detalle ────────────────────────────────
+// - Facturas nuevas (cliente_id presente): muestra datos desde JOIN clientes
+//   incluyendo email y dirección si existen
+// - Facturas antiguas (cliente_id null): muestra los campos propios de facturas
+//   (nombre_cliente, cedula, celular) tal como antes — sin email ni dirección
+
+function BloqueCliente({ factura }) {
+  const esCompanero   = factura?.cedula === 'COMPANERO';
+  const tieneCliente  = !!factura?.cliente_id;
+
+  // Datos siempre disponibles (columnas propias de facturas)
+  const nombre  = factura?.nombre_cliente;
+  const cedula  = factura?.cedula;
+  const celular = factura?.celular;
+
+  // Datos solo disponibles en facturas nuevas con cliente vinculado
+  const email     = tieneCliente ? (factura?.cliente_email     || null) : null;
+  const direccion = tieneCliente ? (factura?.cliente_direccion || null) : null;
+
+  return (
+    <div className="bg-gray-50 rounded-xl p-3 flex flex-col gap-1">
+      <p className="text-xs text-gray-400 mb-0.5">Cliente</p>
+      <p className="text-sm font-semibold text-gray-800">{nombre}</p>
+
+      {!esCompanero && (
+        <p className="text-xs text-gray-500">
+          CC: {cedula}
+          {celular ? ` · Tel: ${celular}` : ''}
+        </p>
+      )}
+
+      {email && (
+        <p className="text-xs text-gray-500">{email}</p>
+      )}
+
+      {direccion && (
+        <p className="text-xs text-gray-500">{direccion}</p>
+      )}
+
+      {factura?.usuario_nombre && (
+        <p className="text-xs text-gray-400 mt-1">
+          Atendido por:{' '}
+          <span className="text-gray-600 font-medium">{factura.usuario_nombre}</span>
+        </p>
+      )}
+    </div>
+  );
+}
+
 // ─── Modal detalle ────────────────────────────────────────────────────────────
 
 function ModalDetalle({ facturaId, onClose, onReimprimir, onEditar }) {
@@ -196,19 +245,8 @@ function ModalDetalle({ facturaId, onClose, onReimprimir, onEditar }) {
           </div>
         )}
 
-        <div className="bg-gray-50 rounded-xl p-3">
-          <p className="text-xs text-gray-400 mb-1">Cliente</p>
-          <p className="text-sm font-semibold text-gray-800">{f?.nombre_cliente}</p>
-          {f?.cedula !== 'COMPANERO' && (
-            <p className="text-xs text-gray-500">CC: {f?.cedula} · Tel: {f?.celular}</p>
-          )}
-          {f?.usuario_nombre && (
-            <p className="text-xs text-gray-400 mt-1">
-              Atendido por:{' '}
-              <span className="text-gray-600 font-medium">{f.usuario_nombre}</span>
-            </p>
-          )}
-        </div>
+        {/* Bloque cliente — maneja automáticamente datos nuevos vs antiguos */}
+        <BloqueCliente factura={f} />
 
         {esAdminNegocio() && <SeccionProveedor proveedorNombre={f?.proveedor_nombre} />}
 
@@ -254,7 +292,10 @@ function ModalDetalle({ facturaId, onClose, onReimprimir, onEditar }) {
         </div>
 
         {f?.notas && (
-          <p className="text-xs text-gray-400 italic">Notas: {f.notas}</p>
+          <div className="bg-gray-50 rounded-xl px-3 py-2">
+            <p className="text-xs text-gray-400 mb-0.5">Descripción</p>
+            <p className="text-sm text-gray-600">{f.notas}</p>
+          </div>
         )}
 
         <div className="flex gap-2">
@@ -478,11 +519,11 @@ function PanelBusqueda({ filtros, onChange, onLimpiar, totalResultados, totalFac
 const FILTROS_INICIALES = { texto: '', desde: '', hasta: '', proveedor: '' };
 
 export default function FacturarPage() {
-  const queryClient                         = useQueryClient();
-  const { esAdminNegocio }                  = useAuth();
-  const esAdmin                             = esAdminNegocio();
-  const { sucursalKey, sucursalLista }      = useSucursalKey();
-  const esVistaGlobal                       = useSucursalStore((s) => s.esVistaGlobal());
+  const queryClient                    = useQueryClient();
+  const { esAdminNegocio }             = useAuth();
+  const esAdmin                        = esAdminNegocio();
+  const { sucursalKey, sucursalLista } = useSucursalKey();
+  const esVistaGlobal                  = useSucursalStore((s) => s.esVistaGlobal());
 
   const [facturaDetalle,   setFacturaDetalle]   = useState(null);
   const [facturaInactivar, setFacturaInactivar] = useState(null);
@@ -490,16 +531,12 @@ export default function FacturarPage() {
   const [facturaEditar,    setFacturaEditar]    = useState(null);
   const [filtros,          setFiltros]          = useState(FILTROS_INICIALES);
 
-  // queryKey incluye sucursalKey → caché separado por negocio + sucursal
-  // enabled: sucursalLista → evita fetch con sucursal_id inválido (403)
   const { data: facturasData, isLoading } = useQuery({
     queryKey: ['facturas', ...sucursalKey],
     queryFn:  () => getFacturas().then((r) => r.data.data),
     enabled:  sucursalLista,
   });
 
-  // garantias son configuración del negocio, no de sucursal
-  // el backend las filtra por negocio_id del token, sin sucursal_id
   const { data: garantiasData } = useQuery({
     queryKey: ['garantias'],
     queryFn:  () => getGarantias().then((r) => r.data.data),
@@ -508,9 +545,9 @@ export default function FacturarPage() {
   const mutInactivar = useMutation({
     mutationFn: (id) => cancelarFactura(id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['facturas'],          exact: false });
-      queryClient.invalidateQueries({ queryKey: ['productos-serial'],  exact: false });
-      queryClient.invalidateQueries({ queryKey: ['productos-cantidad'], exact: false });
+      queryClient.invalidateQueries({ queryKey: ['facturas'],           exact: false });
+      queryClient.invalidateQueries({ queryKey: ['productos-serial'],   exact: false });
+      queryClient.invalidateQueries({ queryKey: ['productos-cantidad'],  exact: false });
       setFacturaInactivar(null);
     },
   });

@@ -1,7 +1,7 @@
 const { pool } = require('../../config/db');
 
-// ── subconsulta de proveedores reutilizable ───────────────────────────────────
-// Extraída como función para no duplicarla en findAll y findById
+// ── Subconsulta de proveedores reutilizable ───────────────────────────────────
+
 const _subqueryProveedores = (facturaAlias = 'f') => `
   (
     SELECT NULLIF(STRING_AGG(DISTINCT prov_nombre, ', ' ORDER BY prov_nombre), '')
@@ -26,10 +26,11 @@ const _subqueryProveedores = (facturaAlias = 'f') => `
   ) AS proveedor_nombre
 `;
 
-/**
- * Vista sucursal : filtra por sucursal_id
- * Vista global   : todas las sucursales del negocio, incluye sucursal_nombre
- */
+// ── findAll ───────────────────────────────────────────────────────────────────
+// Vista sucursal : filtra por sucursal_id
+// Vista global   : todas las sucursales del negocio, incluye sucursal_nombre
+// No necesita email/dirección — es la vista de lista, no de detalle
+
 const findAll = async (sucursalId, negocioId) => {
   const filtro = sucursalId
     ? 'f.sucursal_id = $1'
@@ -56,9 +57,9 @@ const findAll = async (sucursalId, negocioId) => {
       (SELECT ret.valor_retoma       FROM retomas ret WHERE ret.factura_id = f.id LIMIT 1) AS retoma_valor,
       ${_subqueryProveedores('f')}
     FROM facturas f
-    JOIN  sucursales      su ON su.id = f.sucursal_id
-    LEFT JOIN lineas_factura l  ON l.factura_id = f.id
-    LEFT JOIN usuarios       u  ON u.id = f.usuario_id
+    JOIN      sucursales      su ON su.id = f.sucursal_id
+    LEFT JOIN lineas_factura  l  ON l.factura_id = f.id
+    LEFT JOIN usuarios        u  ON u.id = f.usuario_id
     WHERE ${filtro}
     GROUP BY f.id, u.nombre, su.nombre
     ORDER BY f.fecha DESC
@@ -66,20 +67,32 @@ const findAll = async (sucursalId, negocioId) => {
   return rows;
 };
 
+// ── findById ──────────────────────────────────────────────────────────────────
+// Trae email y direccion desde la tabla clientes cuando existe cliente_id.
+// Facturas antiguas (cliente_id = null) usan los campos propios de facturas
+// para nombre_cliente, cedula y celular — que ya están en f.* — y retornan
+// null en email y direccion sin romper nada.
+
 const findById = async (id) => {
   const { rows } = await pool.query(`
     SELECT
       f.*,
       u.nombre  AS usuario_nombre,
       su.nombre AS sucursal_nombre,
+      -- Email y dirección solo disponibles si la factura tiene cliente vinculado
+      c.email     AS cliente_email,
+      c.direccion AS cliente_direccion,
       ${_subqueryProveedores('f')}
     FROM facturas f
     LEFT JOIN usuarios   u  ON u.id  = f.usuario_id
-    JOIN  sucursales     su ON su.id = f.sucursal_id
+    JOIN      sucursales su ON su.id = f.sucursal_id
+    LEFT JOIN clientes   c  ON c.id  = f.cliente_id
     WHERE f.id = $1
   `, [id]);
   return rows[0] || null;
 };
+
+// ── perteneceAlNegocio ────────────────────────────────────────────────────────
 
 const perteneceAlNegocio = async (id, negocioId) => {
   const { rows } = await pool.query(`
@@ -89,6 +102,8 @@ const perteneceAlNegocio = async (id, negocioId) => {
   `, [id, negocioId]);
   return rows.length > 0;
 };
+
+// ── getLineas ─────────────────────────────────────────────────────────────────
 
 const getLineas = async (facturaId) => {
   const { rows } = await pool.query(`
@@ -123,6 +138,8 @@ const getLineas = async (facturaId) => {
   return rows;
 };
 
+// ── getPagos ──────────────────────────────────────────────────────────────────
+
 const getPagos = async (facturaId) => {
   const { rows } = await pool.query(
     'SELECT * FROM pagos_factura WHERE factura_id = $1',
@@ -130,6 +147,8 @@ const getPagos = async (facturaId) => {
   );
   return rows;
 };
+
+// ── getRetoma ─────────────────────────────────────────────────────────────────
 
 const getRetoma = async (facturaId) => {
   const { rows } = await pool.query(`
@@ -140,7 +159,12 @@ const getRetoma = async (facturaId) => {
   return rows[0] || null;
 };
 
-const create = async (client, { sucursal_id, usuario_id, cliente_id, nombre_cliente, cedula, celular, notas, estado }) => {
+// ── create ────────────────────────────────────────────────────────────────────
+
+const create = async (client, {
+  sucursal_id, usuario_id, cliente_id,
+  nombre_cliente, cedula, celular, notas, estado,
+}) => {
   const { rows } = await client.query(`
     INSERT INTO facturas(sucursal_id, usuario_id, cliente_id, nombre_cliente, cedula, celular, notas, estado)
     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -148,6 +172,8 @@ const create = async (client, { sucursal_id, usuario_id, cliente_id, nombre_clie
   `, [sucursal_id, usuario_id, cliente_id, nombre_cliente, cedula, celular, notas, estado || 'Activa']);
   return rows[0];
 };
+
+// ── insertarLinea ─────────────────────────────────────────────────────────────
 
 const insertarLinea = async (client, { factura_id, nombre_producto, imei, cantidad, precio }) => {
   const { rows } = await client.query(`
@@ -158,6 +184,8 @@ const insertarLinea = async (client, { factura_id, nombre_producto, imei, cantid
   return rows[0];
 };
 
+// ── insertarPago ──────────────────────────────────────────────────────────────
+
 const insertarPago = async (client, { factura_id, metodo, valor }) => {
   const { rows } = await client.query(`
     INSERT INTO pagos_factura(factura_id, metodo, valor)
@@ -167,7 +195,12 @@ const insertarPago = async (client, { factura_id, metodo, valor }) => {
   return rows[0];
 };
 
-const insertarRetoma = async (client, { factura_id, descripcion, valor_retoma, ingreso_inventario, nombre_producto, imei }) => {
+// ── insertarRetoma ────────────────────────────────────────────────────────────
+
+const insertarRetoma = async (client, {
+  factura_id, descripcion, valor_retoma,
+  ingreso_inventario, nombre_producto, imei,
+}) => {
   const { rows } = await client.query(`
     INSERT INTO retomas(factura_id, descripcion, valor_retoma, ingreso_inventario, nombre_producto, imei)
     VALUES ($1, $2, $3, $4, $5, $6)
@@ -175,6 +208,8 @@ const insertarRetoma = async (client, { factura_id, descripcion, valor_retoma, i
   `, [factura_id, descripcion, valor_retoma, ingreso_inventario || false, nombre_producto || null, imei || null]);
   return rows[0];
 };
+
+// ── cancelar ──────────────────────────────────────────────────────────────────
 
 const cancelar = async (client, id) => {
   await client.query(

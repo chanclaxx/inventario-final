@@ -10,6 +10,7 @@ import { getProductosSerial, getProductosCantidad } from '../../api/productos.ap
 import { getFacturaById, editarFactura }             from '../../api/facturas.api';
 import { useSucursalKey } from '../../hooks/useSucursalKey';
 import { User, Users, Package, ShoppingBag }         from 'lucide-react';
+import api from '../../api/axios.config';
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
@@ -42,35 +43,46 @@ function pagosArrayAMapa(pagosArr) {
   return mapa;
 }
 
+/**
+ * Construye el estado inicial del form a partir de los datos del servidor.
+ * - email y direccion se toman desde el cliente vinculado (cliente_email /
+ *   cliente_direccion) si existe; en facturas antiguas quedan vacíos.
+ */
 function buildEstadoInicial(data) {
   if (!data) return null;
-  const esCompanero = data.cedula === 'COMPANERO';
+  const esCompanero  = data.cedula === 'COMPANERO';
+  const tieneCliente = !!data.cliente_id;
+
   return {
-    tipoCliente : esCompanero ? 'companero' : 'cliente',
+    tipoCliente: esCompanero ? 'companero' : 'cliente',
     form: {
-      nombre  : data.nombre_cliente || '',
-      cedula  : esCompanero ? '' : (data.cedula  || ''),
-      celular : esCompanero ? '' : (data.celular || ''),
-      notas   : data.notas || '',
+      nombre:    data.nombre_cliente || '',
+      cedula:    esCompanero ? '' : (data.cedula   || ''),
+      celular:   esCompanero ? '' : (data.celular  || ''),
+      // Solo disponibles en facturas nuevas con cliente vinculado
+      email:     tieneCliente ? (data.cliente_email     || '') : '',
+      direccion: tieneCliente ? (data.cliente_direccion || '') : '',
+      notas:     data.notas || '',
     },
+    tieneCliente,
     lineas: (data.lineas || []).map((l) => ({
-      id              : l.id,
-      nombre_producto : l.nombre_producto,
-      imei            : l.imei || null,
-      cantidad        : l.cantidad,
-      precio          : Number(l.precio || 0),
+      id:              l.id,
+      nombre_producto: l.nombre_producto,
+      imei:            l.imei || null,
+      cantidad:        l.cantidad,
+      precio:          Number(l.precio || 0),
     })),
-    pagos  : pagosArrayAMapa(data.pagos),
-    retoma : data.retoma ? {
-      descripcion          : data.retoma.descripcion       || '',
-      valor_retoma         : data.retoma.valor_retoma       || 0,
-      ingreso_inventario   : data.retoma.ingreso_inventario || false,
-      tipo_retoma          : 'serial',
-      imei                 : data.retoma.imei              || '',
-      nombre_producto      : data.retoma.nombre_producto   || '',
-      producto_serial_id   : null,
-      producto_cantidad_id : null,
-      cantidad_retoma      : '1',
+    pagos:  pagosArrayAMapa(data.pagos),
+    retoma: data.retoma ? {
+      descripcion:         data.retoma.descripcion       || '',
+      valor_retoma:        data.retoma.valor_retoma       || 0,
+      ingreso_inventario:  data.retoma.ingreso_inventario || false,
+      tipo_retoma:         'serial',
+      imei:                data.retoma.imei              || '',
+      nombre_producto:     data.retoma.nombre_producto   || '',
+      producto_serial_id:  null,
+      producto_cantidad_id: null,
+      cantidad_retoma:     '1',
     } : null,
   };
 }
@@ -117,23 +129,26 @@ function RetomaSerial({ retoma, setRetomaField, productosSerial }) {
                 Sin resultados — se creará nueva línea con nombre "{busqueda}"
               </p>
             ) : (
-              filtrados.map((p) => (
-                <button
-                  key={p.id}
-                  onClick={() => {
-                    setRetomaField('producto_serial_id', p.id);
-                    setRetomaField('nombre_producto', p.nombre);
-                    setBusqueda(p.nombre);
-                  }}
-                  className={`text-left px-3 py-2 text-sm transition-all
-                    ${retoma.producto_serial_id === p.id
-                      ? 'bg-purple-100 text-purple-800'
-                      : 'hover:bg-gray-50 text-gray-700'}`}
-                >
-                  {p.nombre}
-                  <span className="text-xs text-gray-400 ml-2">{p.disponibles} disp.</span>
-                </button>
-              ))
+              filtrados.map((p) => {
+                const productoId = p.id;
+                return (
+                  <button
+                    key={productoId}
+                    onClick={() => {
+                      setRetomaField('producto_serial_id', productoId);
+                      setRetomaField('nombre_producto', p.nombre);
+                      setBusqueda(p.nombre);
+                    }}
+                    className={`text-left px-3 py-2 text-sm transition-all
+                      ${retoma.producto_serial_id === productoId
+                        ? 'bg-purple-100 text-purple-800'
+                        : 'hover:bg-gray-50 text-gray-700'}`}
+                  >
+                    {p.nombre}
+                    <span className="text-xs text-gray-400 ml-2">{p.disponibles} disp.</span>
+                  </button>
+                );
+              })
             )}
           </div>
         )}
@@ -178,23 +193,26 @@ function RetomaCantidad({ retoma, setRetomaField, productosCantidad }) {
             {filtrados.length === 0 ? (
               <p className="text-xs text-gray-400 px-3 py-2">Sin resultados</p>
             ) : (
-              filtrados.map((p) => (
-                <button
-                  key={p.id}
-                  onClick={() => {
-                    setRetomaField('producto_cantidad_id', p.id);
-                    setRetomaField('nombre_producto', p.nombre);
-                    setBusqueda(p.nombre);
-                  }}
-                  className={`text-left px-3 py-2 text-sm transition-all
-                    ${retoma.producto_cantidad_id === p.id
-                      ? 'bg-purple-100 text-purple-800'
-                      : 'hover:bg-gray-50 text-gray-700'}`}
-                >
-                  {p.nombre}
-                  <span className="text-xs text-gray-400 ml-2">Stock: {p.stock}</span>
-                </button>
-              ))
+              filtrados.map((p) => {
+                const productoId = p.id;
+                return (
+                  <button
+                    key={productoId}
+                    onClick={() => {
+                      setRetomaField('producto_cantidad_id', productoId);
+                      setRetomaField('nombre_producto', p.nombre);
+                      setBusqueda(p.nombre);
+                    }}
+                    className={`text-left px-3 py-2 text-sm transition-all
+                      ${retoma.producto_cantidad_id === productoId
+                        ? 'bg-purple-100 text-purple-800'
+                        : 'hover:bg-gray-50 text-gray-700'}`}
+                  >
+                    {p.nombre}
+                    <span className="text-xs text-gray-400 ml-2">Stock: {p.stock}</span>
+                  </button>
+                );
+              })
             )}
           </div>
         )}
@@ -222,18 +240,16 @@ function PanelRetoma({ retoma, setRetoma, esNueva, sucursalKey, sucursalLista })
   const setRetomaField = (campo, valor) =>
     setRetoma((r) => ({ ...r, [campo]: valor }));
 
-  // queryKey incluye sucursalKey → caché separado por negocio + sucursal
-  // enabled incluye sucursalLista → evita fetch con sucursal_id inválido
   const { data: productosSerial } = useQuery({
-    queryKey : ['productos-serial', ...sucursalKey],
-    queryFn  : () => getProductosSerial().then((r) => r.data.data),
-    enabled  : sucursalLista && retoma?.ingreso_inventario && retoma?.tipo_retoma === 'serial',
+    queryKey: ['productos-serial', ...sucursalKey],
+    queryFn:  () => getProductosSerial().then((r) => r.data.data),
+    enabled:  sucursalLista && retoma?.ingreso_inventario && retoma?.tipo_retoma === 'serial',
   });
 
   const { data: productosCantidad } = useQuery({
-    queryKey : ['productos-cantidad', ...sucursalKey],
-    queryFn  : () => getProductosCantidad().then((r) => r.data.data),
-    enabled  : sucursalLista && retoma?.ingreso_inventario && retoma?.tipo_retoma === 'cantidad',
+    queryKey: ['productos-cantidad', ...sucursalKey],
+    queryFn:  () => getProductosCantidad().then((r) => r.data.data),
+    enabled:  sucursalLista && retoma?.ingreso_inventario && retoma?.tipo_retoma === 'cantidad',
   });
 
   return (
@@ -316,13 +332,19 @@ function PanelRetoma({ retoma, setRetoma, esNueva, sucursalKey, sucursalLista })
 // ─── Modal principal ──────────────────────────────────────────────────────────
 
 export function ModalEditarFactura({ facturaId, onClose, onGuardado }) {
-  const queryClient                      = useQueryClient();
-  const { sucursalKey, sucursalLista }   = useSucursalKey();
+  const queryClient                    = useQueryClient();
+  const { sucursalKey, sucursalLista } = useSucursalKey();
 
   const { data, isLoading } = useQuery({
-    queryKey : ['factura-detalle', facturaId],
-    queryFn  : () => getFacturaById(facturaId).then((r) => r.data.data),
-    enabled  : !!facturaId,
+    queryKey: ['factura-detalle', facturaId],
+    queryFn:  () => getFacturaById(facturaId).then((r) => r.data.data),
+    enabled:  !!facturaId,
+  });
+
+  // Config del negocio para saber qué campos opcionales mostrar
+  const { data: configData } = useQuery({
+    queryKey: ['config'],
+    queryFn:  () => api.get('/config').then((r) => r.data.data),
   });
 
   const estadoInicial = useMemo(() => buildEstadoInicial(data), [data]);
@@ -336,32 +358,42 @@ export function ModalEditarFactura({ facturaId, onClose, onGuardado }) {
   const [error,       setError]       = useState('');
 
   // Valores efectivos: estado local si fue modificado, sino el inicial del servidor
-  const tipoClienteEfectivo = tipoCliente ?? estadoInicial?.tipoCliente ?? 'cliente';
-  const formEfectivo        = form        ?? estadoInicial?.form        ?? {};
-  const lineasEfectivas     = lineas      ?? estadoInicial?.lineas      ?? [];
-  const pagosEfectivos      = pagos       ?? estadoInicial?.pagos       ?? {};
+  const tipoClienteEfectivo = tipoCliente ?? estadoInicial?.tipoCliente  ?? 'cliente';
+  const formEfectivo        = form        ?? estadoInicial?.form         ?? {};
+  const lineasEfectivas     = lineas      ?? estadoInicial?.lineas       ?? [];
+  const pagosEfectivos      = pagos       ?? estadoInicial?.pagos        ?? {};
   const retomaEfectiva      = retoma !== undefined ? retoma : (estadoInicial?.retoma ?? null);
   const conRetomaEfectivo   = conRetoma !== null   ? conRetoma : !!estadoInicial?.retoma;
   const retomaEsNueva       = !estadoInicial?.retoma;
 
+  // Campos opcionales habilitados según config del negocio
+  const mostrarEmail     = configData?.campo_email_cliente     === '1';
+  const mostrarDireccion = configData?.campo_direccion_cliente === '1';
+
+  // Una factura antigua (sin cliente_id) no tiene email/dirección para editar
+  const tieneClienteVinculado = estadoInicial?.tieneCliente ?? false;
+
   const mutEditar = useMutation({
     mutationFn: () => editarFactura(facturaId, {
-      nombre_cliente : formEfectivo.nombre,
-      cedula         : tipoClienteEfectivo === 'companero' ? 'COMPANERO'  : formEfectivo.cedula,
-      celular        : tipoClienteEfectivo === 'companero' ? '0000000000' : formEfectivo.celular,
-      notas          : formEfectivo.notas,
-      lineas         : lineasEfectivas,
-      pagos          : Object.entries(pagosEfectivos)
+      nombre_cliente: formEfectivo.nombre,
+      cedula:         tipoClienteEfectivo === 'companero' ? 'COMPANERO'   : formEfectivo.cedula,
+      celular:        tipoClienteEfectivo === 'companero' ? '0000000000'  : formEfectivo.celular,
+      email:          tipoClienteEfectivo === 'cliente'   ? (formEfectivo.email     || null) : null,
+      direccion:      tipoClienteEfectivo === 'cliente'   ? (formEfectivo.direccion || null) : null,
+      notas:          formEfectivo.notas || null,
+      lineas:         lineasEfectivas,
+      pagos:          Object.entries(pagosEfectivos)
         .filter(([, v]) => Number(v) > 0)
         .map(([metodo, valor]) => ({ metodo, valor: Number(valor) })),
-      retoma         : conRetomaEfectivo ? retomaEfectiva : null,
-      esRetomaNueva  : retomaEsNueva && conRetomaEfectivo,
+      retoma:        conRetomaEfectivo ? retomaEfectiva : null,
+      esRetomaNueva: retomaEsNueva && conRetomaEfectivo,
     }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['facturas'],           exact: false });
       queryClient.invalidateQueries({ queryKey: ['factura-detalle'],    exact: false });
       queryClient.invalidateQueries({ queryKey: ['productos-serial'],   exact: false });
       queryClient.invalidateQueries({ queryKey: ['productos-cantidad'],  exact: false });
+      queryClient.invalidateQueries({ queryKey: ['clientes'],           exact: false });
       onGuardado?.();
       onClose();
     },
@@ -448,12 +480,14 @@ export function ModalEditarFactura({ facturaId, onClose, onGuardado }) {
               onChange={(e) => setForm({ ...formEfectivo, cedula: e.target.value })}
             />
           )}
+
           <Input
             label="Nombre"
             placeholder="Nombre completo"
             value={formEfectivo.nombre}
             onChange={(e) => setForm({ ...formEfectivo, nombre: e.target.value })}
           />
+
           {tipoClienteEfectivo === 'cliente' && (
             <Input
               label="Celular"
@@ -462,11 +496,43 @@ export function ModalEditarFactura({ facturaId, onClose, onGuardado }) {
               onChange={(e) => setForm({ ...formEfectivo, celular: e.target.value })}
             />
           )}
-          <Input
-            label="Notas"
-            placeholder="Observaciones..."
+
+          {/* Email y dirección: solo si la config los habilita Y la factura
+              tiene cliente vinculado. Facturas antiguas no los muestran. */}
+          {tipoClienteEfectivo === 'cliente' && tieneClienteVinculado && mostrarEmail && (
+            <Input
+              label="Email"
+              type="email"
+              placeholder="correo@ejemplo.com"
+              value={formEfectivo.email}
+              onChange={(e) => setForm({ ...formEfectivo, email: e.target.value })}
+            />
+          )}
+
+          {tipoClienteEfectivo === 'cliente' && tieneClienteVinculado && mostrarDireccion && (
+            <Input
+              label="Dirección"
+              placeholder="Calle 10 # 5-20"
+              value={formEfectivo.direccion}
+              onChange={(e) => setForm({ ...formEfectivo, direccion: e.target.value })}
+            />
+          )}
+        </div>
+
+        {/* ── Descripción / Notas ── */}
+        <div className="flex flex-col gap-1">
+          <label className="text-sm font-medium text-gray-700">
+            Descripción{' '}
+            <span className="text-gray-400 font-normal text-xs">(opcional)</span>
+          </label>
+          <textarea
+            rows={2}
+            placeholder="Observaciones de la venta..."
             value={formEfectivo.notas}
             onChange={(e) => setForm({ ...formEfectivo, notas: e.target.value })}
+            className="w-full px-3 py-2 bg-gray-100 border-0 rounded-xl text-sm text-gray-900
+              placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500
+              focus:bg-white transition-all resize-none"
           />
         </div>
 
