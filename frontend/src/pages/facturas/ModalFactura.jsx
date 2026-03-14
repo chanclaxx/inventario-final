@@ -380,7 +380,6 @@ export function ModalFactura({ open, onClose }) {
   const [mostrarImpresion, setMostrarImpresion] = useState(false);
   const [tipoCliente,      setTipoCliente]      = useState('cliente');
   const [form,             setForm]             = useState({ nombre: '', cedula: '', celular: '', notas: '' });
-  const [clienteId,        setClienteId]        = useState(null); // id del cliente encontrado via cédula
   const [pagos,            setPagos]            = useState({ Efectivo: '' });
   const [conRetoma,        setConRetoma]        = useState(false);
   const [retoma,           setRetoma]           = useState(RETOMA_INICIAL);
@@ -442,7 +441,6 @@ export function ModalFactura({ open, onClose }) {
 
   const resetForm = () => {
     setForm({ nombre: '', cedula: '', celular: '', notas: '' });
-    setClienteId(null);
     setPagos({ Efectivo: '' });
     setConRetoma(false);
     setRetoma(RETOMA_INICIAL);
@@ -455,12 +453,6 @@ export function ModalFactura({ open, onClose }) {
   const setRetomaField = (campo, valor) =>
     setRetoma((r) => ({ ...r, [campo]: valor }));
 
-  // Al cambiar la cédula manualmente, limpiar el clienteId cacheado
-  const handleCedulaChange = (e) => {
-    setForm((f) => ({ ...f, cedula: e.target.value }));
-    setClienteId(null);
-  };
-
   const buscarCliente = async () => {
     if (!form.cedula) return;
     setBuscandoCliente(true);
@@ -468,12 +460,9 @@ export function ModalFactura({ open, onClose }) {
       const { data } = await buscarPorCedula(form.cedula);
       if (data.data) {
         setForm((f) => ({ ...f, nombre: data.data.nombre, celular: data.data.celular || '' }));
-        setClienteId(data.data.id); // guardar el id encontrado
-      } else {
-        setClienteId(null); // no existe, el backend lo creará
       }
     } catch {
-      setClienteId(null);
+      // cliente no encontrado — el backend lo creará al facturar
     } finally {
       setBuscandoCliente(false);
     }
@@ -615,7 +604,7 @@ export function ModalFactura({ open, onClose }) {
                     label="Cédula"
                     placeholder="123456789"
                     value={form.cedula}
-                    onChange={handleCedulaChange}
+                    onChange={(e) => setForm({ ...form, cedula: e.target.value })}
                     onBlur={buscarCliente}
                     onKeyDown={(e) => handleKeyDown(e, 'nombre')}
                   />
