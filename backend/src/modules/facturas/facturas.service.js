@@ -51,9 +51,9 @@ const getFacturaById = async (negocioId, id) => {
 const crearFactura = async ({
   negocio_id, sucursal_id, usuario_id,
   nombre_cliente, cedula, celular, email, direccion, notas,
-  lineas, pagos, retoma,
+  lineas, pagos,
+  retomas = [],   // ← array en vez de retoma singular
 }) => {
-  // ── Segunda capa: verificar que sucursal_id pertenece al negocio ──
   const { rows: sucRows } = await pool.query(
     `SELECT id FROM sucursales WHERE id = $1 AND negocio_id = $2 AND activa = true`,
     [sucursal_id, negocio_id]
@@ -75,12 +75,12 @@ const crearFactura = async ({
 
     for (const linea of lineas) {
       await facturasRepo.insertarLinea(client, {
-      factura_id:      factura.id,
-      nombre_producto: linea.nombre_producto,
-      imei:            linea.imei || null,
-      cantidad:        linea.cantidad,
-      precio:          linea.precio,
-      producto_id:     linea.producto_id || null,   // ← agregar
+        factura_id:      factura.id,
+        nombre_producto: linea.nombre_producto,
+        imei:            linea.imei       || null,
+        cantidad:        linea.cantidad,
+        precio:          linea.precio,
+        producto_id:     linea.producto_id || null,
       });
 
       if (linea.imei) {
@@ -97,7 +97,6 @@ const crearFactura = async ({
           'UPDATE seriales SET vendido = true, fecha_salida = CURRENT_DATE WHERE imei = $1',
           [linea.imei]
         );
-
       } else if (linea.producto_id) {
         const { rows: prodRows } = await client.query(
           `SELECT id, stock, sucursal_id FROM productos_cantidad WHERE id = $1`,
@@ -111,7 +110,6 @@ const crearFactura = async ({
         if (producto.stock < linea.cantidad) {
           throw { status: 400, message: `Stock insuficiente para ${linea.nombre_producto}` };
         }
-        // ── Dentro de la transacción ──
         await facturasRepo.ajustarStockCantidad(client, linea.producto_id, -linea.cantidad);
       }
     }
@@ -128,7 +126,8 @@ const crearFactura = async ({
       }
     }
 
-    if (retoma) {
+    // ── Procesar cada retoma del array ────────────────────────────────────
+    for (const retoma of retomas) {
       await facturasRepo.insertarRetoma(client, {
         factura_id:         factura.id,
         descripcion:        retoma.descripcion,
@@ -159,7 +158,6 @@ const crearFactura = async ({
             );
           }
         } else if (retoma.producto_serial_id) {
-          // ── Dentro de la transacción ──
           await client.query(
             `INSERT INTO seriales(producto_id, imei, fecha_entrada, costo_compra, cliente_origen)
              VALUES ($1, $2, $3, $4, $5)`,
@@ -171,7 +169,6 @@ const crearFactura = async ({
       }
 
       if (retoma.ingreso_inventario && retoma.tipo_retoma === 'cantidad' && retoma.producto_cantidad_id) {
-        // ── Dentro de la transacción ──
         await facturasRepo.ajustarStockCantidad(
           client, retoma.producto_cantidad_id, Number(retoma.cantidad_retoma || 1)
         );

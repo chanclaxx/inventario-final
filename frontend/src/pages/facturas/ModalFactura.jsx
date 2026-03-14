@@ -10,6 +10,7 @@ import { ModalConflictoCedula }     from '../../components/ui/ModalConflictoCedu
 import { useCedulaCliente }         from '../../hooks/useCedulaCliente';
 import { crearFactura, getFacturaById } from '../../api/facturas.api';
 import { getGarantias }             from '../../api/garantias.api';
+import { buscarPorCedula }          from '../../api/clientes.api';
 import {
   getProductosSerial,
   getProductosCantidad,
@@ -22,7 +23,7 @@ import useCarritoStore       from '../../store/carritoStore';
 import {
   User, Users, Package, ShoppingBag,
   Loader2, CheckCircle, XCircle, AlertCircle,
-  AlertTriangle, RefreshCw, X,
+  AlertTriangle, RefreshCw, X, Plus, Trash2,
 } from 'lucide-react';
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
@@ -35,22 +36,23 @@ const METODOS_PAGO = [
   { id: 'Tarjeta',       label: 'Tarjeta'       },
 ];
 
-const RETOMA_INICIAL = {
+const RETOMA_VACIA = () => ({
+  _key:                 crypto.randomUUID(),
   tipo_retoma:          'serial',
   descripcion:          '',
-  valor_retoma:         '',
+  valor_retoma:         '',        // precio unitario para cantidad, valor total para serial
+  cantidad_retoma:      '1',
   ingreso_inventario:   false,
   imei:                 '',
   producto_serial_id:   null,
   nombre_producto:      '',
   producto_cantidad_id: null,
-  cantidad_retoma:      '1',
   reactivar_serial_id:  null,
-};
+});
 
 const IMEI_MIN_LENGTH = 8;
 
-// ─── Utilidad: normalizar respuesta de productos a array ─────────────────────
+// ─── Utilidades ───────────────────────────────────────────────────────────────
 
 function normalizarProductos(data) {
   if (Array.isArray(data)) return data;
@@ -58,9 +60,15 @@ function normalizarProductos(data) {
   return [];
 }
 
-// ─── Utilidad: construir payload de factura ───────────────────────────────────
+// Calcula el valor total de una retoma
+function calcularValorRetoma(retoma) {
+  if (retoma.tipo_retoma === 'cantidad') {
+    return Number(retoma.valor_retoma || 0) * Number(retoma.cantidad_retoma || 1);
+  }
+  return Number(retoma.valor_retoma || 0);
+}
 
-function buildPayloadFactura({ tipoCliente, form, items, totalNeto, metodosSeleccionados, montos, conRetoma, retoma }) {
+function buildPayloadFactura({ tipoCliente, form, items, totalNeto, metodosSeleccionados, montos, retomas }) {
   const pagos = metodosSeleccionados.length === 1
     ? [{ metodo: metodosSeleccionados[0], valor: totalNeto }]
     : metodosSeleccionados
@@ -75,18 +83,19 @@ function buildPayloadFactura({ tipoCliente, form, items, totalNeto, metodosSelec
     precio:          item.precioFinal,
   }));
 
-  const retomaPayload = conRetoma ? {
-    tipo_retoma:          retoma.tipo_retoma,
-    descripcion:          retoma.descripcion,
-    valor_retoma:         Number(retoma.valor_retoma || 0),
-    ingreso_inventario:   retoma.ingreso_inventario,
-    imei:                 retoma.tipo_retoma === 'serial'   ? retoma.imei                                    : null,
-    nombre_producto:      retoma.tipo_retoma === 'serial'   ? (retoma.nombre_producto || retoma.descripcion) : retoma.nombre_producto,
-    producto_serial_id:   retoma.tipo_retoma === 'serial'   ? retoma.producto_serial_id                      : null,
-    producto_cantidad_id: retoma.tipo_retoma === 'cantidad' ? retoma.producto_cantidad_id                    : null,
-    cantidad_retoma:      retoma.tipo_retoma === 'cantidad' ? Number(retoma.cantidad_retoma || 1)             : 1,
-    reactivar_serial_id:  retoma.reactivar_serial_id || null,
-  } : null;
+  // ── Mapear todas las retomas al formato que espera el backend ──
+  const retomasPayload = retomas.map((r) => ({
+    tipo_retoma:          r.tipo_retoma,
+    descripcion:          r.descripcion,
+    valor_retoma:         calcularValorRetoma(r),   // precio unitario × cantidad
+    ingreso_inventario:   r.ingreso_inventario,
+    imei:                 r.tipo_retoma === 'serial'   ? r.imei                                : null,
+    nombre_producto:      r.tipo_retoma === 'serial'   ? (r.nombre_producto || r.descripcion)  : r.nombre_producto,
+    producto_serial_id:   r.tipo_retoma === 'serial'   ? r.producto_serial_id                  : null,
+    producto_cantidad_id: r.tipo_retoma === 'cantidad' ? r.producto_cantidad_id                : null,
+    cantidad_retoma:      r.tipo_retoma === 'cantidad' ? Number(r.cantidad_retoma || 1)         : 1,
+    reactivar_serial_id:  r.reactivar_serial_id || null,
+  }));
 
   return {
     nombre_cliente: form.nombre,
@@ -97,15 +106,14 @@ function buildPayloadFactura({ tipoCliente, form, items, totalNeto, metodosSelec
     notas:          form.notas || null,
     lineas,
     pagos,
-    retoma:         retomaPayload,
+    retomas: retomasPayload,   // ← array completo
   };
 }
 
-// ─── Hook: verificación puntual de IMEI ──────────────────────────────────────
+// ─── Hook verificar IMEI ──────────────────────────────────────────────────────
 
 function useVerificarImei() {
   const [estado, setEstado] = useState({ tipo: 'idle' });
-
   const verificar = useCallback(async (imei, { onEncontrado } = {}) => {
     const imeiLimpio = imei?.trim() ?? '';
     if (imeiLimpio.length < IMEI_MIN_LENGTH) { setEstado({ tipo: 'idle' }); return; }
@@ -113,9 +121,8 @@ function useVerificarImei() {
     try {
       const { data } = await verificarImeiApi(imeiLimpio);
       if (data.data.existe) {
-        const serial = data.data.serial;
-        setEstado({ tipo: 'encontrado', serial });
-        onEncontrado?.(serial);
+        setEstado({ tipo: 'encontrado', serial: data.data.serial });
+        onEncontrado?.(data.data.serial);
       } else {
         setEstado({ tipo: 'libre' });
       }
@@ -123,12 +130,11 @@ function useVerificarImei() {
       setEstado({ tipo: 'error', mensaje: err.response?.data?.error || 'Error al verificar IMEI' });
     }
   }, []);
-
   const limpiar = useCallback(() => setEstado({ tipo: 'idle' }), []);
   return { estado, verificar, limpiar };
 }
 
-// ─── Indicadores de IMEI ─────────────────────────────────────────────────────
+// ─── Indicadores IMEI ─────────────────────────────────────────────────────────
 
 function ImeiEstadoIcono({ estado }) {
   if (estado.tipo === 'cargando')   return <Loader2     size={15} className="text-gray-400 animate-spin" />;
@@ -141,14 +147,12 @@ function ImeiEstadoIcono({ estado }) {
 function ImeiEstadoMensaje({ estado, onAbrirModal }) {
   if (estado.tipo === 'cargando')   return <p className="text-xs text-gray-400">Verificando IMEI...</p>;
   if (estado.tipo === 'libre')      return <p className="text-xs text-green-600">✓ IMEI disponible</p>;
-  if (estado.tipo === 'encontrado') {
-    return (
-      <button type="button" onClick={onAbrirModal}
-        className="text-xs text-amber-700 underline underline-offset-2 text-left hover:text-amber-900 transition-colors">
-        ⚠ Este IMEI ya existe en el negocio — ver detalles y reactivar
-      </button>
-    );
-  }
+  if (estado.tipo === 'encontrado') return (
+    <button type="button" onClick={onAbrirModal}
+      className="text-xs text-amber-700 underline underline-offset-2 text-left hover:text-amber-900 transition-colors">
+      ⚠ Este IMEI ya existe — ver detalles y reactivar
+    </button>
+  );
   if (estado.tipo === 'error') return <p className="text-xs text-red-500">{estado.mensaje}</p>;
   return null;
 }
@@ -184,9 +188,6 @@ function ModalReactivarSerial({ open, serial, onReactivar, onCancelar }) {
             <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${estadoColor}`}>{estadoLabel}</span>
           </div>
         </div>
-        <p className="text-sm text-center text-gray-700 leading-relaxed">
-          ¿Deseas <span className="font-semibold text-purple-700">reactivar este serial</span> en el inventario?
-        </p>
         <div className="flex gap-2 w-full">
           <Button variant="secondary" className="flex-1 flex items-center justify-center gap-1.5" onClick={onCancelar}>
             <X size={14} /> Cancelar
@@ -200,18 +201,34 @@ function ModalReactivarSerial({ open, serial, onReactivar, onCancelar }) {
   );
 }
 
-// ─── Retoma serial ────────────────────────────────────────────────────────────
+// ─── Componente de una retoma individual ──────────────────────────────────────
 
-function RetomaSerial({ retoma, setRetomaField, productosSerial, retomaSerialRef }) {
-  const [busqueda, setBusqueda] = useState('');
-  const { estado, verificar, limpiar } = useVerificarImei();
+function ItemRetoma({ retoma, index, total, productosSerial, productosCantidad,
+  onChange, onRemove }) {
 
-  const lista     = normalizarProductos(productosSerial);
-  const filtrados = lista.filter((p) => p.nombre.toLowerCase().includes(busqueda.toLowerCase()));
+  const [busqueda, setBusqueda]           = useState('');
+  const { estado, verificar, limpiar }    = useVerificarImei();
+  const [modalReactivar, setModalReactivar] = useState(false);
+  const [serialEncontrado, setSerialEncontrado] = useState(null);
+  const retomaSerialRef = useRef(null);
+
+  const listaSerial   = normalizarProductos(productosSerial);
+  const listaCantidad = normalizarProductos(productosCantidad);
+
+  const filtradosSerial   = listaSerial.filter((p) =>
+    p.nombre.toLowerCase().includes(busqueda.toLowerCase())
+  );
+  const filtradosCantidad = listaCantidad.filter((p) =>
+    p.nombre.toLowerCase().includes(busqueda.toLowerCase())
+  );
+
+  const set = (campo, valor) => onChange(retoma._key, campo, valor);
+
+  const valorTotal = calcularValorRetoma(retoma);
 
   const handleImeiChange = (e) => {
-    setRetomaField('imei', e.target.value);
-    setRetomaField('reactivar_serial_id', null);
+    set('imei', e.target.value);
+    set('reactivar_serial_id', null);
     limpiar();
   };
 
@@ -222,102 +239,234 @@ function RetomaSerial({ retoma, setRetomaField, productosSerial, retomaSerialRef
 
   useEffect(() => {
     if (retomaSerialRef) retomaSerialRef.current = { verificarImeiActual };
-  }, [retomaSerialRef, verificarImeiActual]);
+  }, [verificarImeiActual]);
+
+  const handleCheckboxInventario = (marcado) => {
+    set('ingreso_inventario', marcado);
+    if (marcado && retoma.tipo_retoma === 'serial') {
+      retomaSerialRef.current?.verificarImeiActual((serial) => {
+        setSerialEncontrado(serial);
+        setModalReactivar(true);
+      });
+    }
+    if (!marcado) {
+      setSerialEncontrado(null);
+      set('reactivar_serial_id', null);
+    }
+  };
+
+  const handleReactivar = () => {
+    if (serialEncontrado) {
+      set('producto_serial_id',  serialEncontrado.producto_id);
+      set('nombre_producto',     serialEncontrado.producto_nombre);
+      set('reactivar_serial_id', serialEncontrado.id);
+    }
+    setModalReactivar(false);
+    setSerialEncontrado(null);
+  };
+
+  const handleCancelarReactivar = () => {
+    set('ingreso_inventario', false);
+    set('reactivar_serial_id', null);
+    setModalReactivar(false);
+    setSerialEncontrado(null);
+  };
 
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex flex-col gap-1">
-        <label className="text-xs font-medium text-gray-600">IMEI del equipo retomado</label>
-        <div className="relative">
-          <input
-            type="text"
-            placeholder="Ej: 356789012345678"
-            value={retoma.imei}
-            onChange={handleImeiChange}
-            className="w-full px-3 py-2 pr-9 bg-white border border-gray-200 rounded-xl
-              text-sm focus:outline-none focus:ring-2 focus:ring-purple-400 transition-all"
-          />
-          <span className="absolute right-2.5 top-1/2 -translate-y-1/2">
-            <ImeiEstadoIcono estado={estado} />
+    <>
+      <div className="flex flex-col gap-3 p-3 bg-purple-50 rounded-xl border border-purple-100">
+
+        {/* Cabecera retoma */}
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-semibold text-purple-700">
+            Retoma {index + 1}
           </span>
+          {total > 1 && (
+            <button onClick={() => onRemove(retoma._key)}
+              className="p-1 rounded-lg hover:bg-red-50 text-purple-300 hover:text-red-400 transition-colors">
+              <Trash2 size={13} />
+            </button>
+          )}
         </div>
-        {retoma.ingreso_inventario && <ImeiEstadoMensaje estado={estado} onAbrirModal={() => {}} />}
-      </div>
-      <div>
-        <p className="text-xs font-medium text-gray-600 mb-1">
-          Línea de producto <span className="text-gray-400 font-normal">(elige existente o déjalo vacío)</span>
-        </p>
-        <input
-          type="text"
-          placeholder="Buscar modelo..."
-          value={busqueda}
-          onChange={(e) => { setBusqueda(e.target.value); setRetomaField('producto_serial_id', null); setRetomaField('nombre_producto', ''); }}
-          className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-400 mb-1"
-        />
-        {busqueda.length > 0 && (
-          <div className="flex flex-col gap-1 max-h-36 overflow-y-auto rounded-xl border border-gray-100 bg-white">
-            {filtrados.length === 0
-              ? <p className="text-xs text-gray-400 px-3 py-2">Sin resultados — se creará nueva línea con nombre "{busqueda}"</p>
-              : filtrados.map((p) => {
-                  const productoId = p.id;
-                  return (
-                    <button key={productoId}
-                      onClick={() => { setRetomaField('producto_serial_id', productoId); setRetomaField('nombre_producto', p.nombre); setBusqueda(p.nombre); }}
-                      className={`text-left px-3 py-2 text-sm transition-all ${retoma.producto_serial_id === productoId ? 'bg-purple-100 text-purple-800' : 'hover:bg-gray-50 text-gray-700'}`}>
-                      {p.nombre}<span className="text-xs text-gray-400 ml-2">{p.disponibles} disp.</span>
-                    </button>
-                  );
-                })
-            }
+
+        {/* Tipo */}
+        <div className="flex gap-2">
+          {[
+            { id: 'serial',   label: 'Con serial / IMEI', Icn: Package     },
+            { id: 'cantidad', label: 'Por cantidad',       Icn: ShoppingBag },
+          ].map((opt) => {
+            const OptIcon = opt.Icn;
+            return (
+              <button key={opt.id}
+                onClick={() => {
+                  set('tipo_retoma', opt.id);
+                  set('imei', '');
+                  set('producto_serial_id', null);
+                  set('producto_cantidad_id', null);
+                  set('nombre_producto', '');
+                  set('ingreso_inventario', false);
+                  setBusqueda('');
+                }}
+                className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl
+                  text-xs font-medium border transition-all
+                  ${retoma.tipo_retoma === opt.id
+                    ? 'bg-purple-100 border-purple-400 text-purple-800'
+                    : 'bg-white border-gray-200 text-gray-500'}`}>
+                <OptIcon size={13} /> {opt.label}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* ── Flujo serial ── */}
+        {retoma.tipo_retoma === 'serial' && (
+          <div className="flex flex-col gap-2">
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-gray-600">IMEI del equipo retomado</label>
+              <div className="relative">
+                <input type="text" placeholder="Ej: 356789012345678"
+                  value={retoma.imei} onChange={handleImeiChange}
+                  className="w-full px-3 py-2 pr-9 bg-white border border-gray-200 rounded-xl
+                    text-sm focus:outline-none focus:ring-2 focus:ring-purple-400 transition-all" />
+                <span className="absolute right-2.5 top-1/2 -translate-y-1/2">
+                  <ImeiEstadoIcono estado={estado} />
+                </span>
+              </div>
+              {retoma.ingreso_inventario && (
+                <ImeiEstadoMensaje estado={estado} onAbrirModal={() => {
+                  if (estado.tipo === 'encontrado') {
+                    setSerialEncontrado(estado.serial);
+                    setModalReactivar(true);
+                  }
+                }} />
+              )}
+            </div>
+
+            {/* Línea de producto */}
+            <div>
+              <p className="text-xs font-medium text-gray-600 mb-1">
+                Línea de producto <span className="text-gray-400 font-normal">(opcional)</span>
+              </p>
+              <input type="text" placeholder="Buscar modelo..."
+                value={busqueda}
+                onChange={(e) => {
+                  setBusqueda(e.target.value);
+                  set('producto_serial_id', null);
+                  set('nombre_producto', '');
+                }}
+                className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl
+                  text-sm focus:outline-none focus:ring-2 focus:ring-purple-400 mb-1" />
+              {busqueda.length > 0 && (
+                <div className="flex flex-col gap-1 max-h-28 overflow-y-auto rounded-xl border border-gray-100 bg-white">
+                  {filtradosSerial.length === 0
+                    ? <p className="text-xs text-gray-400 px-3 py-2">Sin resultados</p>
+                    : filtradosSerial.map((p) => {
+                        const pid = p.id;
+                        return (
+                          <button key={pid}
+                            onClick={() => { set('producto_serial_id', pid); set('nombre_producto', p.nombre); setBusqueda(p.nombre); }}
+                            className={`text-left px-3 py-2 text-sm transition-all
+                              ${retoma.producto_serial_id === pid
+                                ? 'bg-purple-100 text-purple-800'
+                                : 'hover:bg-gray-50 text-gray-700'}`}>
+                            {p.nombre}<span className="text-xs text-gray-400 ml-2">{p.disponibles} disp.</span>
+                          </button>
+                        );
+                      })
+                  }
+                </div>
+              )}
+              {retoma.producto_serial_id && (
+                <p className="text-xs text-purple-600 mt-1">✓ {retoma.nombre_producto}</p>
+              )}
+            </div>
           </div>
         )}
-        {retoma.producto_serial_id && <p className="text-xs text-purple-600 mt-1">✓ Línea seleccionada: {retoma.nombre_producto}</p>}
-      </div>
-    </div>
-  );
-}
 
-// ─── Retoma cantidad ──────────────────────────────────────────────────────────
+        {/* ── Flujo cantidad ── */}
+        {retoma.tipo_retoma === 'cantidad' && (
+          <div className="flex flex-col gap-2">
+            <p className="text-xs font-medium text-gray-600">Producto en inventario</p>
+            <input type="text" placeholder="Buscar producto..."
+              value={busqueda}
+              onChange={(e) => {
+                setBusqueda(e.target.value);
+                set('producto_cantidad_id', null);
+                set('nombre_producto', '');
+              }}
+              className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl
+                text-sm focus:outline-none focus:ring-2 focus:ring-purple-400 mb-1" />
+            {busqueda.length > 0 && (
+              <div className="flex flex-col gap-1 max-h-28 overflow-y-auto rounded-xl border border-gray-100 bg-white">
+                {filtradosCantidad.length === 0
+                  ? <p className="text-xs text-gray-400 px-3 py-2">Sin resultados</p>
+                  : filtradosCantidad.map((p) => {
+                      const pid = p.id;
+                      return (
+                        <button key={pid}
+                          onClick={() => { set('producto_cantidad_id', pid); set('nombre_producto', p.nombre); setBusqueda(p.nombre); }}
+                          className={`text-left px-3 py-2 text-sm transition-all
+                            ${retoma.producto_cantidad_id === pid
+                              ? 'bg-purple-100 text-purple-800'
+                              : 'hover:bg-gray-50 text-gray-700'}`}>
+                          {p.nombre}<span className="text-xs text-gray-400 ml-2">Stock: {p.stock}</span>
+                        </button>
+                      );
+                    })
+                }
+              </div>
+            )}
+            {retoma.producto_cantidad_id && (
+              <p className="text-xs text-purple-600">✓ {retoma.nombre_producto}</p>
+            )}
 
-function RetomaCantidad({ retoma, setRetomaField, productosCantidad }) {
-  const [busqueda, setBusqueda] = useState('');
-  const lista     = normalizarProductos(productosCantidad);
-  const filtrados = lista.filter((p) => p.nombre.toLowerCase().includes(busqueda.toLowerCase()));
-
-  return (
-    <div className="flex flex-col gap-3">
-      <div>
-        <p className="text-xs font-medium text-gray-600 mb-1">Producto en inventario</p>
-        <input
-          type="text"
-          placeholder="Buscar producto..."
-          value={busqueda}
-          onChange={(e) => { setBusqueda(e.target.value); setRetomaField('producto_cantidad_id', null); setRetomaField('nombre_producto', ''); }}
-          className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-400 mb-1"
-        />
-        {busqueda.length > 0 && (
-          <div className="flex flex-col gap-1 max-h-36 overflow-y-auto rounded-xl border border-gray-100 bg-white">
-            {filtrados.length === 0
-              ? <p className="text-xs text-gray-400 px-3 py-2">Sin resultados</p>
-              : filtrados.map((p) => {
-                  const productoId = p.id;
-                  return (
-                    <button key={productoId}
-                      onClick={() => { setRetomaField('producto_cantidad_id', productoId); setRetomaField('nombre_producto', p.nombre); setBusqueda(p.nombre); }}
-                      className={`text-left px-3 py-2 text-sm transition-all ${retoma.producto_cantidad_id === productoId ? 'bg-purple-100 text-purple-800' : 'hover:bg-gray-50 text-gray-700'}`}>
-                      {p.nombre}<span className="text-xs text-gray-400 ml-2">Stock: {p.stock}</span>
-                    </button>
-                  );
-                })
-            }
+            {/* Cantidad */}
+            <Input label="Cantidad retomada" type="number" min="1" placeholder="1"
+              value={retoma.cantidad_retoma}
+              onChange={(e) => set('cantidad_retoma', e.target.value)} />
           </div>
         )}
-        {retoma.producto_cantidad_id && <p className="text-xs text-purple-600 mt-1">✓ Producto: {retoma.nombre_producto}</p>}
+
+        {/* Descripción */}
+        <Input label="Descripción" placeholder="Ej: iPhone 12 Pro en buen estado"
+          value={retoma.descripcion}
+          onChange={(e) => set('descripcion', e.target.value)} />
+
+        {/* Valor */}
+        <div className="flex flex-col gap-1">
+          <label className="text-xs font-medium text-gray-600">
+            {retoma.tipo_retoma === 'cantidad' ? 'Precio unitario' : 'Valor retoma'}
+          </label>
+          <InputMoneda value={retoma.valor_retoma}
+            onChange={(val) => set('valor_retoma', val)} placeholder="0"
+            className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl
+              text-sm focus:outline-none focus:ring-2 focus:ring-purple-400" />
+        </div>
+
+        {/* Total calculado para cantidad */}
+        {retoma.tipo_retoma === 'cantidad' && Number(retoma.cantidad_retoma) > 1 && Number(retoma.valor_retoma) > 0 && (
+          <div className="flex justify-between text-xs text-purple-700 bg-purple-100 rounded-lg px-3 py-1.5">
+            <span>{retoma.cantidad_retoma} × {formatCOP(Number(retoma.valor_retoma))}</span>
+            <span className="font-semibold">{formatCOP(valorTotal)}</span>
+          </div>
+        )}
+
+        {/* Ingreso inventario */}
+        <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+          <input type="checkbox" checked={retoma.ingreso_inventario}
+            onChange={(e) => handleCheckboxInventario(e.target.checked)}
+            className="rounded accent-purple-600" />
+          Ingresa al inventario
+        </label>
       </div>
-      <Input label="Cantidad retomada" type="number" min="1" placeholder="1"
-        value={retoma.cantidad_retoma}
-        onChange={(e) => setRetomaField('cantidad_retoma', e.target.value)} />
-    </div>
+
+      <ModalReactivarSerial
+        open={modalReactivar}
+        serial={serialEncontrado}
+        onReactivar={handleReactivar}
+        onCancelar={handleCancelarReactivar}
+      />
+    </>
   );
 }
 
@@ -336,7 +485,9 @@ function SelectorPagos({ metodosSeleccionados, montos, totalNeto, onToggleMetodo
           return (
             <button key={metodoId} type="button" onClick={() => onToggleMetodo(metodoId)}
               className={`px-3 py-1.5 rounded-xl text-sm font-medium border transition-all
-                ${seleccionado ? 'bg-blue-50 border-blue-300 text-blue-700' : 'bg-gray-50 border-gray-200 text-gray-500 hover:border-gray-300'}`}>
+                ${seleccionado
+                  ? 'bg-blue-50 border-blue-300 text-blue-700'
+                  : 'bg-gray-50 border-gray-200 text-gray-500 hover:border-gray-300'}`}>
               {metodoLabel}
             </button>
           );
@@ -351,16 +502,21 @@ function SelectorPagos({ metodosSeleccionados, montos, totalNeto, onToggleMetodo
               <div key={metodoId} className="flex items-center gap-3">
                 <span className="text-sm text-gray-600 w-28 flex-shrink-0">{metodoLabel}</span>
                 <InputMoneda value={montos[metodoId] || ''} onChange={(val) => onCambioMonto(metodoId, val)} placeholder="0"
-                  className="flex-1 px-3 py-2 bg-gray-100 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all" />
+                  className="flex-1 px-3 py-2 bg-gray-100 rounded-xl text-sm
+                    focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all" />
               </div>
             );
           })}
         </div>
       )}
       {cantidadSeleccionada === 1 && (
-        <p className="text-xs text-gray-400">Pago completo de <span className="font-semibold text-gray-600">{formatCOP(totalNeto)}</span> en {metodosSeleccionados[0]}</p>
+        <p className="text-xs text-gray-400">
+          Pago completo de <span className="font-semibold text-gray-600">{formatCOP(totalNeto)}</span> en {metodosSeleccionados[0]}
+        </p>
       )}
-      {cantidadSeleccionada === 0 && <p className="text-xs text-gray-400">Selecciona al menos un método de pago</p>}
+      {cantidadSeleccionada === 0 && (
+        <p className="text-xs text-gray-400">Selecciona al menos un método de pago</p>
+      )}
     </div>
   );
 }
@@ -380,42 +536,93 @@ export function ModalFactura({ open, onClose }) {
   const [metodosSeleccionados, setMetodosSeleccionados] = useState([]);
   const [montos,               setMontos]               = useState({});
   const [conRetoma,            setConRetoma]            = useState(false);
-  const [retoma,               setRetoma]               = useState(RETOMA_INICIAL);
+  const [retomas,              setRetomas]              = useState([RETOMA_VACIA()]);
   const [error,                setError]                = useState('');
   const [verificandoCedula,    setVerificandoCedula]    = useState(false);
-  const [modalReactivar,       setModalReactivar]       = useState(false);
-  const [serialEncontrado,     setSerialEncontrado]     = useState(null);
+  const [buscandoCedula,       setBuscandoCedula]       = useState(false);
 
-  const retomaSerialRef = useRef(null);
-
-  // ── Hook de cédula única ──────────────────────────────────────────────────
   const { conflictoCliente, verificarCedula, reescribirCliente, cancelarConflicto } = useCedulaCliente();
 
-  const { data: garantiasData } = useQuery({ queryKey: ['garantias'], queryFn: () => getGarantias().then((r) => r.data.data) });
-  const { data: configData }    = useQuery({ queryKey: ['config'],    queryFn: () => api.get('/config').then((r) => r.data.data) });
+  const { data: garantiasData } = useQuery({
+    queryKey: ['garantias'],
+    queryFn:  () => getGarantias().then((r) => r.data.data),
+  });
+  const { data: configData } = useQuery({
+    queryKey: ['config'],
+    queryFn:  () => api.get('/config').then((r) => r.data.data),
+  });
+
+  const conRetomaTieneSerial   = conRetoma && retomas.some((r) => r.tipo_retoma === 'serial');
+  const conRetomaTieneCantidad = conRetoma && retomas.some((r) => r.tipo_retoma === 'cantidad');
 
   const { data: productosSerialRaw } = useQuery({
     queryKey: ['productos-serial', ...sucursalKey],
     queryFn:  () => getProductosSerial().then((r) => normalizarProductos(r.data.data)),
-    enabled:  sucursalLista && conRetoma && retoma.tipo_retoma === 'serial',
+    enabled:  sucursalLista && conRetomaTieneSerial,
   });
   const { data: productosCantidadRaw } = useQuery({
     queryKey: ['productos-cantidad', ...sucursalKey],
     queryFn:  () => getProductosCantidad().then((r) => normalizarProductos(r.data.data)),
-    enabled:  conRetoma && retoma.tipo_retoma === 'cantidad',
+    enabled:  conRetomaTieneCantidad,
   });
 
   const productosSerial   = normalizarProductos(productosSerialRaw);
   const productosCantidad = normalizarProductos(productosCantidadRaw);
   const mostrarEmail      = configData?.campo_email_cliente     === '1';
   const mostrarDireccion  = configData?.campo_direccion_cliente === '1';
-  const valorRetoma       = conRetoma ? Number(retoma.valor_retoma || 0) : 0;
-  const totalNeto         = total - valorRetoma;
-  const totalPagado       = metodosSeleccionados.length === 1
+
+  // ── Totales ───────────────────────────────────────────────────────────────
+  const totalRetomas = conRetoma
+    ? retomas.reduce((s, r) => s + calcularValorRetoma(r), 0)
+    : 0;
+  const totalNeto  = total - totalRetomas;
+  const totalPagado = metodosSeleccionados.length === 1
     ? totalNeto
     : metodosSeleccionados.reduce((s, id) => s + Number(montos[id] || 0), 0);
   const diferencia = totalPagado - totalNeto;
 
+  // ── Autocompletado por cédula ─────────────────────────────────────────────
+  const handleBlurCedula = useCallback(async () => {
+    const cedula = form.cedula?.trim();
+    if (!cedula || tipoCliente !== 'cliente') return;
+
+    // Solo autocompletar si los campos están vacíos — no sobreescribir lo que el usuario ya escribió
+    const camposVacios = !form.nombre.trim() && !form.celular.trim();
+    if (!camposVacios) return;
+
+    setBuscandoCedula(true);
+    try {
+      const { data } = await buscarPorCedula(cedula);
+      const encontrado = data.data;
+      if (encontrado) {
+        setForm((f) => ({
+          ...f,
+          nombre:    encontrado.nombre    || f.nombre,
+          celular:   encontrado.celular   || f.celular,
+          email:     encontrado.email     || f.email,
+          direccion: encontrado.direccion || f.direccion,
+        }));
+      }
+    } catch {
+      // Si falla la búsqueda, no hacer nada — el usuario llena manual
+    } finally {
+      setBuscandoCedula(false);
+    }
+  }, [form.cedula, form.nombre, form.celular, tipoCliente]);
+
+  // ── Gestión de retomas ────────────────────────────────────────────────────
+  const handleChangeRetoma = useCallback((key, campo, valor) => {
+    setRetomas((prev) =>
+      prev.map((r) => r._key === key ? { ...r, [campo]: valor } : r)
+    );
+  }, []);
+
+  const handleAddRetoma = () => setRetomas((prev) => [...prev, RETOMA_VACIA()]);
+
+  const handleRemoveRetoma = (key) =>
+    setRetomas((prev) => prev.filter((r) => r._key !== key));
+
+  // ── Mutation ──────────────────────────────────────────────────────────────
   const mutation = useMutation({
     mutationFn: crearFactura,
     onSuccess: async (res) => {
@@ -441,13 +648,10 @@ export function ModalFactura({ open, onClose }) {
   const resetForm = () => {
     setForm({ nombre: '', cedula: '', celular: '', email: '', direccion: '', notas: '' });
     setMetodosSeleccionados([]); setMontos({});
-    setConRetoma(false); setRetoma(RETOMA_INICIAL);
+    setConRetoma(false); setRetomas([RETOMA_VACIA()]);
     setError(''); setTipoCliente('cliente');
     setVerificandoCedula(false);
-    setModalReactivar(false); setSerialEncontrado(null);
   };
-
-  const setRetomaField = (campo, valor) => setRetoma((r) => ({ ...r, [campo]: valor }));
 
   const handleToggleMetodo = (metodoId) => {
     setMetodosSeleccionados((prev) => {
@@ -459,7 +663,8 @@ export function ModalFactura({ open, onClose }) {
     });
   };
 
-  const handleCambioMonto = (metodoId, valor) => setMontos((m) => ({ ...m, [metodoId]: valor }));
+  const handleCambioMonto = (metodoId, valor) =>
+    setMontos((m) => ({ ...m, [metodoId]: valor }));
 
   const handleKeyDown = (e, siguienteId) => {
     if (e.key === 'Enter') {
@@ -469,63 +674,47 @@ export function ModalFactura({ open, onClose }) {
     }
   };
 
-  const handleCheckboxInventario = (marcado) => {
-    setRetomaField('ingreso_inventario', marcado);
-    if (marcado && retoma.tipo_retoma === 'serial') {
-      retomaSerialRef.current?.verificarImeiActual((serial) => { setSerialEncontrado(serial); setModalReactivar(true); });
-    }
-    if (!marcado) { setSerialEncontrado(null); setRetomaField('reactivar_serial_id', null); }
-  };
-
-  const handleReactivar = () => {
-    if (serialEncontrado) {
-      setRetomaField('producto_serial_id',  serialEncontrado.producto_id);
-      setRetomaField('nombre_producto',     serialEncontrado.producto_nombre);
-      setRetomaField('reactivar_serial_id', serialEncontrado.id);
-    }
-    setModalReactivar(false); setSerialEncontrado(null);
-  };
-
-  const handleCancelarReactivar = () => {
-    setRetomaField('ingreso_inventario', false); setRetomaField('reactivar_serial_id', null);
-    setModalReactivar(false); setSerialEncontrado(null);
-  };
-
-  // ── Construir y disparar la mutación ──────────────────────────────────────
   const ejecutarMutacion = () => {
-    mutation.mutate(buildPayloadFactura({ tipoCliente, form, items, totalNeto, metodosSeleccionados, montos, conRetoma, retoma }));
+    mutation.mutate(buildPayloadFactura({
+      tipoCliente, form, items, totalNeto,
+      metodosSeleccionados, montos,
+      retomas: conRetoma ? retomas : [],
+    }));
   };
 
-  // ── Confirmar factura ─────────────────────────────────────────────────────
   const handleSubmit = async () => {
     setError('');
-    if (!form.nombre.trim())                                       return setError('El nombre es requerido');
-    if (tipoCliente === 'cliente' && !form.cedula.trim())          return setError('La cédula es requerida');
-    if (tipoCliente === 'cliente' && !form.celular.trim())         return setError('El celular es requerido');
-    if (metodosSeleccionados.length === 0)                         return setError('Selecciona al menos un método de pago');
-    if (conRetoma && retoma.ingreso_inventario) {
-      if (retoma.tipo_retoma === 'serial'   && !retoma.imei.trim())          return setError('El IMEI es requerido para ingresar al inventario');
-      if (retoma.tipo_retoma === 'cantidad' && !retoma.producto_cantidad_id) return setError('Selecciona el producto para ingresar al inventario');
+    if (!form.nombre.trim())                              return setError('El nombre es requerido');
+    if (tipoCliente === 'cliente' && !form.cedula.trim()) return setError('La cédula es requerida');
+    if (tipoCliente === 'cliente' && !form.celular.trim()) return setError('El celular es requerido');
+    if (metodosSeleccionados.length === 0)                return setError('Selecciona al menos un método de pago');
+
+    if (conRetoma) {
+      for (const r of retomas) {
+        if (r.ingreso_inventario) {
+          if (r.tipo_retoma === 'serial' && !r.imei.trim())
+            return setError('El IMEI es requerido para ingresar al inventario');
+          if (r.tipo_retoma === 'cantidad' && !r.producto_cantidad_id)
+            return setError('Selecciona el producto para ingresar al inventario');
+        }
+      }
     }
 
-    // Verificar unicidad de cédula solo para clientes
     if (tipoCliente === 'cliente') {
       setVerificandoCedula(true);
       const puedeContin = await verificarCedula(form);
       setVerificandoCedula(false);
-      if (!puedeContin) return; // El modal de conflicto se activa automáticamente
+      if (!puedeContin) return;
     }
 
     ejecutarMutacion();
   };
 
-  // ── Reescribir datos del cliente y continuar con la factura ───────────────
   const handleReescribir = async () => {
     await reescribirCliente();
     ejecutarMutacion();
   };
 
-  // ── Cancelar: restaura datos originales, el usuario revisa y reintenta ───
   const handleCancelarConflicto = () => cancelarConflicto(setForm);
 
   return (
@@ -533,7 +722,7 @@ export function ModalFactura({ open, onClose }) {
       <Modal open={open} onClose={onClose} title="Nueva Factura" size="lg">
         <div className="flex flex-col gap-5">
 
-          {/* ── Tipo de cliente ── */}
+          {/* Tipo de cliente */}
           <div className="flex gap-2">
             {[
               { id: 'companero', label: 'Compañero', Icn: User  },
@@ -542,21 +731,30 @@ export function ModalFactura({ open, onClose }) {
               const ItemIcon = item.Icn;
               return (
                 <button key={item.id} onClick={() => setTipoCliente(item.id)}
-                  className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium border transition-all
-                    ${tipoCliente === item.id ? 'bg-blue-50 border-blue-300 text-blue-700' : 'bg-gray-50 border-gray-200 text-gray-600'}`}>
+                  className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl
+                    text-sm font-medium border transition-all
+                    ${tipoCliente === item.id
+                      ? 'bg-blue-50 border-blue-300 text-blue-700'
+                      : 'bg-gray-50 border-gray-200 text-gray-600'}`}>
                   <ItemIcon size={16} /> {item.label}
                 </button>
               );
             })}
           </div>
 
-          {/* ── Datos del cliente ── */}
+          {/* Datos del cliente */}
           <div className="flex flex-col gap-3">
             {tipoCliente === 'cliente' && (
-              <Input id="cedula" label="Cédula" placeholder="123456789"
-                value={form.cedula}
-                onChange={(e) => setForm({ ...form, cedula: e.target.value })}
-                onKeyDown={(e) => handleKeyDown(e, 'nombre')} />
+              <div className="relative">
+                <Input id="cedula" label="Cédula" placeholder="123456789"
+                  value={form.cedula}
+                  onChange={(e) => setForm({ ...form, cedula: e.target.value })}
+                  onBlur={handleBlurCedula}
+                  onKeyDown={(e) => handleKeyDown(e, 'nombre')} />
+                {buscandoCedula && (
+                  <Loader2 size={14} className="absolute right-3 top-9 text-gray-400 animate-spin" />
+                )}
+              </div>
             )}
             <Input id="nombre" label="Nombre"
               placeholder={tipoCliente === 'companero' ? 'Nombre del compañero' : 'Nombre completo'}
@@ -580,7 +778,7 @@ export function ModalFactura({ open, onClose }) {
             )}
           </div>
 
-          {/* ── Descripción / Notas ── */}
+          {/* Notas */}
           <div className="flex flex-col gap-1">
             <label className="text-sm font-medium text-gray-700">
               Descripción <span className="text-gray-400 font-normal text-xs">(opcional)</span>
@@ -589,18 +787,22 @@ export function ModalFactura({ open, onClose }) {
               value={form.notas}
               onChange={(e) => setForm({ ...form, notas: e.target.value })}
               className="w-full px-3 py-2 bg-gray-100 border-0 rounded-xl text-sm text-gray-900
-                placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all resize-none" />
+                placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500
+                focus:bg-white transition-all resize-none" />
           </div>
 
-          {/* ── Resumen de productos ── */}
+          {/* Resumen de productos */}
           <div className="bg-gray-50 rounded-xl p-3 flex flex-col gap-1.5">
             <p className="text-xs font-medium text-gray-500 mb-1">Productos ({items.length})</p>
             {items.map((item) => (
               <div key={item.key} className="flex items-center justify-between text-sm gap-2">
                 <span className="text-gray-700 truncate flex-1">{item.nombre}</span>
                 {item.imei && <span className="text-xs text-gray-400 font-mono">{item.imei}</span>}
-                <InputMoneda value={item.precioFinal} onChange={(val) => actualizarPrecio(item.key, val)}
-                  className="w-28 text-right text-sm font-semibold text-gray-900 bg-white border border-gray-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                <InputMoneda value={item.precioFinal}
+                  onChange={(val) => actualizarPrecio(item.key, val)}
+                  className="w-28 text-right text-sm font-semibold text-gray-900 bg-white
+                    border border-gray-200 rounded-lg px-2 py-1 focus:outline-none
+                    focus:ring-2 focus:ring-blue-500" />
               </div>
             ))}
             <div className="border-t border-gray-200 mt-2 pt-2 flex justify-between">
@@ -609,73 +811,80 @@ export function ModalFactura({ open, onClose }) {
             </div>
           </div>
 
-          {/* ── Retoma ── */}
-          <div>
+          {/* Retomas */}
+          <div className="flex flex-col gap-2">
             <button
-              onClick={() => { setConRetoma(!conRetoma); setRetoma(RETOMA_INICIAL); }}
+              onClick={() => { setConRetoma(!conRetoma); setRetomas([RETOMA_VACIA()]); }}
               className={`w-full py-2.5 rounded-xl text-sm font-medium border transition-all
-                ${conRetoma ? 'bg-purple-50 border-purple-300 text-purple-700' : 'bg-gray-50 border-gray-200 text-gray-600'}`}>
+                ${conRetoma
+                  ? 'bg-purple-50 border-purple-300 text-purple-700'
+                  : 'bg-gray-50 border-gray-200 text-gray-600'}`}>
               {conRetoma ? '✓ Con retoma' : '+ Agregar retoma'}
             </button>
 
             {conRetoma && (
-              <div className="mt-3 flex flex-col gap-3 p-3 bg-purple-50 rounded-xl border border-purple-100">
-                <div>
-                  <p className="text-xs font-medium text-gray-600 mb-1.5">Tipo de producto retomado</p>
-                  <div className="flex gap-2">
-                    {[
-                      { id: 'serial',   label: 'Con serial / IMEI', Icn: Package     },
-                      { id: 'cantidad', label: 'Por cantidad',       Icn: ShoppingBag },
-                    ].map((opt) => {
-                      const OptIcon = opt.Icn;
-                      return (
-                        <button key={opt.id}
-                          onClick={() => setRetoma({ ...RETOMA_INICIAL, tipo_retoma: opt.id })}
-                          className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-medium border transition-all
-                            ${retoma.tipo_retoma === opt.id ? 'bg-purple-100 border-purple-400 text-purple-800' : 'bg-white border-gray-200 text-gray-500'}`}>
-                          <OptIcon size={13} /> {opt.label}
-                        </button>
-                      );
-                    })}
+              <div className="flex flex-col gap-3">
+                {retomas.map((retoma, index) => (
+                  <ItemRetoma
+                    key={retoma._key}
+                    retoma={retoma}
+                    index={index}
+                    total={retomas.length}
+                    productosSerial={productosSerial}
+                    productosCantidad={productosCantidad}
+                    onChange={handleChangeRetoma}
+                    onRemove={handleRemoveRetoma}
+                  />
+                ))}
+
+                <button onClick={handleAddRetoma}
+                  className="flex items-center justify-center gap-2 py-2 rounded-xl
+                    text-sm text-purple-600 border border-dashed border-purple-300
+                    hover:bg-purple-50 transition-colors">
+                  <Plus size={14} /> Agregar otra retoma
+                </button>
+
+                {/* Total retomas */}
+                {retomas.length > 1 && totalRetomas > 0 && (
+                  <div className="flex justify-between text-sm font-medium text-purple-700
+                    bg-purple-50 rounded-xl px-3 py-2">
+                    <span>Total retomas ({retomas.length})</span>
+                    <span>{formatCOP(totalRetomas)}</span>
                   </div>
-                </div>
-
-                {retoma.tipo_retoma === 'serial' && (
-                  <RetomaSerial retoma={retoma} setRetomaField={setRetomaField} productosSerial={productosSerial} retomaSerialRef={retomaSerialRef} />
                 )}
-                {retoma.tipo_retoma === 'cantidad' && (
-                  <RetomaCantidad retoma={retoma} setRetomaField={setRetomaField} productosCantidad={productosCantidad} />
-                )}
-
-                <Input label="Descripción de la retoma" placeholder="Ej: iPhone 12 Pro en buen estado"
-                  value={retoma.descripcion} onChange={(e) => setRetomaField('descripcion', e.target.value)} />
-
-                <div className="flex flex-col gap-1">
-                  <label className="text-xs font-medium text-gray-600">Valor retoma</label>
-                  <InputMoneda value={retoma.valor_retoma} onChange={(val) => setRetomaField('valor_retoma', val)} placeholder="0"
-                    className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-400" />
-                </div>
-
-                <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
-                  <input type="checkbox" checked={retoma.ingreso_inventario}
-                    onChange={(e) => handleCheckboxInventario(e.target.checked)}
-                    className="rounded accent-purple-600" />
-                  Ingresa al inventario
-                </label>
               </div>
             )}
           </div>
 
-          {/* ── Métodos de pago ── */}
-          <SelectorPagos metodosSeleccionados={metodosSeleccionados} montos={montos}
-            totalNeto={totalNeto} onToggleMetodo={handleToggleMetodo} onCambioMonto={handleCambioMonto} />
+          {/* Métodos de pago */}
+          <SelectorPagos
+            metodosSeleccionados={metodosSeleccionados}
+            montos={montos}
+            totalNeto={totalNeto}
+            onToggleMetodo={handleToggleMetodo}
+            onCambioMonto={handleCambioMonto}
+          />
 
-          {/* ── Resumen financiero ── */}
+          {/* Resumen financiero */}
           <div className="bg-gray-50 rounded-xl p-3 flex flex-col gap-1.5">
-            {conRetoma && valorRetoma > 0 && (
-              <div className="flex justify-between text-sm">
-                <span className="text-purple-600">Retoma</span>
-                <span className="text-purple-600">- {formatCOP(valorRetoma)}</span>
+            {conRetoma && totalRetomas > 0 && retomas.map((r, i) => {
+              const vr = calcularValorRetoma(r);
+              if (!vr) return null;
+              return (
+                <div key={r._key} className="flex justify-between text-sm">
+                  <span className="text-purple-600">
+                    Retoma {retomas.length > 1 ? i + 1 : ''}
+                    {r.descripcion ? ` — ${r.descripcion}` : ''}
+                  </span>
+                  <span className="text-purple-600">- {formatCOP(vr)}</span>
+                </div>
+              );
+            })}
+            {conRetoma && retomas.length > 1 && totalRetomas > 0 && (
+              <div className="flex justify-between text-sm font-medium text-purple-700
+                border-t border-purple-100 pt-1">
+                <span>Total retomas</span>
+                <span>- {formatCOP(totalRetomas)}</span>
               </div>
             )}
             <div className="flex justify-between text-sm">
@@ -690,8 +899,12 @@ export function ModalFactura({ open, onClose }) {
             )}
             {diferencia !== 0 && metodosSeleccionados.length >= 2 && (
               <div className="flex justify-between text-sm border-t border-gray-200 pt-1.5 mt-1">
-                <span className={diferencia > 0 ? 'text-green-600' : 'text-red-500'}>{diferencia > 0 ? 'Cambio' : 'Falta'}</span>
-                <Badge variant={diferencia > 0 ? 'green' : 'red'}>{formatCOP(Math.abs(diferencia))}</Badge>
+                <span className={diferencia > 0 ? 'text-green-600' : 'text-red-500'}>
+                  {diferencia > 0 ? 'Cambio' : 'Falta'}
+                </span>
+                <Badge variant={diferencia > 0 ? 'green' : 'red'}>
+                  {formatCOP(Math.abs(diferencia))}
+                </Badge>
               </div>
             )}
           </div>
@@ -704,14 +917,14 @@ export function ModalFactura({ open, onClose }) {
 
           <div className="flex gap-2">
             <Button variant="secondary" className="flex-1" onClick={onClose}>Cancelar</Button>
-            <Button className="flex-1" loading={mutation.isPending || verificandoCedula} onClick={handleSubmit}>
+            <Button className="flex-1" loading={mutation.isPending || verificandoCedula || buscandoCedula}
+              onClick={handleSubmit}>
               Confirmar Factura
             </Button>
           </div>
         </div>
       </Modal>
 
-      {/* ── Modal conflicto cédula — bloqueante ── */}
       <ModalConflictoCedula
         open={!!conflictoCliente}
         conflicto={conflictoCliente}
@@ -720,13 +933,12 @@ export function ModalFactura({ open, onClose }) {
         guardando={mutation.isPending}
       />
 
-      {/* ── Modal reactivar serial ── */}
-      <ModalReactivarSerial open={modalReactivar} serial={serialEncontrado}
-        onReactivar={handleReactivar} onCancelar={handleCancelarReactivar} />
-
       {mostrarImpresion && facturaCreada && (
-        <FacturaTermica factura={facturaCreada} garantias={garantiasData || []}
-          onClose={() => { setMostrarImpresion(false); limpiarCarrito(); onClose(); resetForm(); }} />
+        <FacturaTermica
+          factura={facturaCreada}
+          garantias={garantiasData || []}
+          onClose={() => { setMostrarImpresion(false); limpiarCarrito(); onClose(); resetForm(); }}
+        />
       )}
     </>
   );
