@@ -17,7 +17,6 @@ const crearPrestamo = async ({
   nombre_producto, imei, producto_id, cantidad_prestada, valor_prestamo,
   prestatario_id, empleado_id, cliente_id,
 }) => {
-  // ── Verificar que sucursal_id pertenece al negocio (segunda capa) ──
   const { rows: sucRows } = await pool.query(
     `SELECT id FROM sucursales WHERE id = $1 AND negocio_id = $2 AND activa = true`,
     [sucursal_id, negocio_id]
@@ -49,7 +48,11 @@ const crearPrestamo = async ({
       if (!rows.length) {
         throw { status: 400, message: `El producto ${nombre_producto} no pertenece a esta sucursal` };
       }
-      await client.query('UPDATE seriales SET prestado = true WHERE imei = $1', [imei]);
+      // ── Usar id en vez de imei para no afectar otros negocios ──
+      await client.query(
+        'UPDATE seriales SET prestado = true WHERE id = $1',
+        [rows[0].id]
+      );
 
     } else if (producto_id) {
       const { rows: prodRows } = await client.query(
@@ -64,7 +67,6 @@ const crearPrestamo = async ({
       if (producto.stock < cantidad_prestada) {
         throw { status: 400, message: 'Stock insuficiente para el préstamo' };
       }
-      // ── Ajuste de stock dentro de la transacción ──
       await repo.ajustarStock(client, producto_id, -cantidad_prestada);
     }
 
@@ -79,12 +81,10 @@ const crearPrestamo = async ({
 };
 
 const registrarAbono = async (negocioId, prestamoId, valor) => {
-  // ── Una sola query: ownership + datos ──
   const prestamo = await repo.findByIdYNegocio(prestamoId, negocioId);
   if (!prestamo) throw { status: 404, message: 'Préstamo no encontrado' };
   if (prestamo.estado !== 'Activo') throw { status: 400, message: 'El préstamo no está activo' };
 
-  // ── Validar saldo pendiente ──
   const saldoPendiente = Number(prestamo.valor_prestamo) - Number(prestamo.total_abonado);
   if (valor > saldoPendiente) {
     throw { status: 400, message: `El abono supera el saldo pendiente (${saldoPendiente.toFixed(2)})` };
@@ -117,9 +117,21 @@ const devolverPrestamo = async (negocioId, prestamoId) => {
     await client.query('BEGIN');
 
     if (prestamo.imei) {
-      await client.query('UPDATE seriales SET prestado = false WHERE imei = $1', [prestamo.imei]);
+      // ── Buscar el serial por sucursal del préstamo, no por imei global ──
+      const { rows: serialRows } = await client.query(
+        `SELECT s.id FROM seriales s
+         JOIN productos_serial ps ON ps.id = s.producto_id
+         JOIN prestamos         p  ON p.sucursal_id = ps.sucursal_id
+         WHERE s.imei = $1 AND p.id = $2`,
+        [prestamo.imei, prestamoId]
+      );
+      if (serialRows.length) {
+        await client.query(
+          'UPDATE seriales SET prestado = false WHERE id = $1',
+          [serialRows[0].id]
+        );
+      }
     } else if (prestamo.producto_id) {
-      // ── Ajuste de stock dentro de la transacción ──
       await repo.ajustarStock(client, prestamo.producto_id, prestamo.cantidad_prestada);
     }
 
