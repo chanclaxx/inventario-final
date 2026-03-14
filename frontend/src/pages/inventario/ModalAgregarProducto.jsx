@@ -385,16 +385,21 @@ function PasoCompraCliente({ sucursalKey, sucursalLista, onExito, onDuplicadosEn
   });
 
   const mutConfirmarCantidad = useMutation({
-    mutationFn: async () => {
-      await ajustarStockCantidad(productoSel.id, {
-        cantidad: Number(cantidad),
-        costo_unitario: costo,
-        cliente_origen: nombreCliente,
-      });
-    },
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['productos-cantidad'], exact: false }); onExito(); },
-    onError: (e) => setError(e.response?.data?.error || 'Error al ajustar stock'),
-  });
+  mutationFn: async () => {
+    await ajustarStockCantidad(productoSel.id, {
+      cantidad:       Number(cantidad),
+      costo_unitario: costo,
+      cliente_origen: nombreCliente,
+      cedula_cliente: clienteSeleccionado?.cedula || null,  // ← AGREGAR
+      tipo:           'compra_cliente',                     // ← AGREGAR
+    });
+  },
+  onSuccess: () => {
+    queryClient.invalidateQueries({ queryKey: ['productos-cantidad'], exact: false });
+    onExito();
+  },
+  onError: (e) => setError(e.response?.data?.error || 'Error al ajustar stock'),
+});
 
   const handleKeyDown = (e, index) => {
     if (e.key === 'Enter') {

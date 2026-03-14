@@ -44,17 +44,22 @@ const actualizarProducto = async (req, res, next) => {
 
 const ajustarStock = async (req, res, next) => {
   try {
-    const { cantidad, costo_unitario, proveedor_id, cliente_origen } = req.body;
+    const {
+      cantidad, costo_unitario, proveedor_id,
+      cliente_origen, cedula_cliente, tipo, notas,
+    } = req.body;
+ 
     if (cantidad === undefined) {
-      return res.status(400).json({ ok: false, error: "La cantidad es requerida" });
+      return res.status(400).json({ ok: false, error: 'La cantidad es requerida' });
     }
+ 
     const data = await service.ajustarStock(
       req.user.negocio_id,
       req.params.id,
       cantidad,
-      { costo_unitario, proveedor_id, cliente_origen },
+      { costo_unitario, proveedor_id, cliente_origen, cedula_cliente, tipo, notas },
     );
-    res.json({ ok: true, data, message: "Stock actualizado correctamente" });
+    res.json({ ok: true, data, message: 'Stock actualizado correctamente' });
   } catch (err) { next(err); }
 };
  
@@ -65,8 +70,15 @@ const eliminarProducto = async (req, res, next) => {
     res.json({ ok: true, message: 'Producto eliminado correctamente' });
   } catch (err) { next(err); }
 };
+const getHistorialStock = async (req, res, next) => {
+  try {
+    const q    = req.query.q || '';
+    const data = await service.getHistorialStock(req.user.negocio_id, q);
+    res.json({ ok: true, data });
+  } catch (err) { next(err); }
+};
 
 module.exports = {
   getProductos, getProductoById, crearProducto,
-  actualizarProducto, ajustarStock, eliminarProducto,
+  actualizarProducto, ajustarStock, eliminarProducto,getHistorialStock
 };

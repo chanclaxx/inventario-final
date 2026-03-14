@@ -18,19 +18,43 @@ const actualizarProducto = async (negocioId, id, datos) => {
   return producto;
 };
 
-const ajustarStock = async (negocioId, id, cantidad, opciones = {}) => {
-  const producto = await repo.findById(id);
-  if (!producto) throw { status: 404, message: 'Producto no encontrado' };
-
+const ajustarStock = async (
+  negocioId, id, cantidad,
+  { costo_unitario, proveedor_id, cliente_origen, cedula_cliente, tipo, notas } = {}
+) => {
   const valido = await repo.perteneceAlNegocio(id, negocioId);
   if (!valido) throw { status: 404, message: 'Producto no encontrado' };
-
-  if (producto.stock + cantidad < 0) {
-    throw { status: 400, message: 'Stock insuficiente para realizar esta operación' };
-  }
-
-  // opciones = { costo_unitario, proveedor_id } — se pasan al repo
-  return repo.ajustarStock(id, cantidad, opciones);
+ 
+  const producto = await repo.findById(id);
+  if (!producto) throw { status: 404, message: 'Producto no encontrado' };
+ 
+  // Actualizar stock + campos opcionales
+  const actualizado = await repo.ajustarStock(id, cantidad, {
+    costo_unitario,
+    proveedor_id,
+    cliente_origen,
+  });
+ 
+  // Determinar tipo de movimiento automáticamente si no viene explícito
+  const tipoMovimiento = tipo
+    || (cliente_origen ? 'compra_cliente'
+    : proveedor_id     ? 'compra_proveedor'
+    :                    'ajuste');
+ 
+  // Registrar historial siempre
+  await repo.insertarHistorial({
+    producto_id:    id,
+    sucursal_id:    producto.sucursal_id,
+    cantidad,
+    costo_unitario: costo_unitario ?? null,
+    tipo:           tipoMovimiento,
+    cliente_origen: cliente_origen || null,
+    cedula_cliente: cedula_cliente || null,
+    proveedor_id:   proveedor_id   || null,
+    notas:          notas          || null,
+  });
+ 
+  return actualizado;
 };
 
 const eliminarProducto = async (negocioId, id) => {
@@ -39,8 +63,10 @@ const eliminarProducto = async (negocioId, id) => {
   const eliminado = await repo.eliminar(id);
   if (!eliminado) throw { status: 404, message: 'Producto no encontrado' };
 };
+const getHistorialStock = (negocioId, q) =>
+  repo.getHistorialStock(negocioId, q || '');
 
 module.exports = {
   getProductos, getProductoById, crearProducto,
-  actualizarProducto, ajustarStock, eliminarProducto,
+  actualizarProducto, ajustarStock, eliminarProducto,getHistorialStock
 };

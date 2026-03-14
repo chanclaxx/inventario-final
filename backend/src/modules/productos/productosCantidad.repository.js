@@ -130,8 +130,59 @@ const eliminar = async (id) => {
   );
   return rowCount > 0;
 };
+const insertarHistorial = async ({
+  producto_id, sucursal_id, cantidad, costo_unitario,
+  tipo, cliente_origen, cedula_cliente, proveedor_id, notas,
+}) => {
+  await pool.query(`
+    INSERT INTO historial_stock_cantidad
+      (producto_id, sucursal_id, cantidad, costo_unitario,
+       tipo, cliente_origen, cedula_cliente, proveedor_id, notas)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+  `, [
+    producto_id, sucursal_id, cantidad,
+    costo_unitario ?? null,
+    tipo || 'ajuste',
+    cliente_origen || null,
+    cedula_cliente || null,
+    proveedor_id   || null,
+    notas          || null,
+  ]);
+};
+ 
+const getHistorialStock = async (negocioId, q) => {
+  const filtro = q ? `%${q.toLowerCase()}%` : '%';
+  const { rows } = await pool.query(`
+    SELECT
+      h.id,
+      h.cantidad,
+      h.costo_unitario,
+      h.tipo,
+      h.cliente_origen,
+      h.cedula_cliente,
+      h.creado_en       AS fecha,
+      pc.nombre         AS nombre_producto,
+      pc.unidad_medida,
+      su.nombre         AS sucursal_nombre,
+      p.nombre          AS proveedor_nombre
+    FROM historial_stock_cantidad h
+    JOIN productos_cantidad pc ON pc.id = h.producto_id
+    JOIN sucursales         su ON su.id = h.sucursal_id
+    LEFT JOIN proveedores   p  ON p.id  = h.proveedor_id
+    WHERE su.negocio_id = $1
+      AND (
+        LOWER(COALESCE(h.cliente_origen, '')) LIKE $2
+        OR LOWER(COALESCE(h.cedula_cliente,'')) LIKE $2
+        OR LOWER(pc.nombre)                    LIKE $2
+        OR LOWER(h.tipo)                       LIKE $2
+      )
+    ORDER BY h.creado_en DESC
+    LIMIT 200
+  `, [negocioId, filtro]);
+  return rows;
+};
 
 module.exports = {
   findAll, findById, perteneceAlNegocio,
-  create, update, ajustarStock, eliminar,
+  create, update, ajustarStock, eliminar,insertarHistorial,getHistorialStock
 };
