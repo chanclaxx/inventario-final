@@ -11,6 +11,19 @@ const _fechaHoy = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 
+// ── Verifica que un producto_cantidad_id pertenece al negocio ─────────────────
+const _verificarProductoCantidadNegocio = async (client, productoId, negocioId) => {
+  const { rows } = await client.query(
+    `SELECT pc.id FROM productos_cantidad pc
+     JOIN sucursales su ON su.id = pc.sucursal_id
+     WHERE pc.id = $1 AND su.negocio_id = $2`,
+    [productoId, negocioId]
+  );
+  if (!rows.length) {
+    throw { status: 403, message: 'El producto de retoma no pertenece a este negocio' };
+  }
+};
+
 const resolverClienteId = async (client, negocioId, { cedula, nombre, celular, email, direccion }) => {
   if (ES_COMPANERO(cedula)) return null;
   const { rows } = await client.query(
@@ -183,6 +196,8 @@ const crearFactura = async ({
       }
 
       if (retoma.ingreso_inventario && retoma.tipo_retoma === 'cantidad' && retoma.producto_cantidad_id) {
+        // ── Verificar que el producto_cantidad_id pertenece al negocio ──
+        await _verificarProductoCantidadNegocio(client, retoma.producto_cantidad_id, negocio_id);
         await facturasRepo.ajustarStockCantidad(
           client, retoma.producto_cantidad_id, Number(retoma.cantidad_retoma || 1)
         );
@@ -334,6 +349,8 @@ const editarFactura = async (negocioId, id, {
         }
 
         if (retoma.tipo_retoma === 'cantidad' && retoma.producto_cantidad_id) {
+          // ── Verificar que el producto_cantidad_id pertenece al negocio ──
+          await _verificarProductoCantidadNegocio(client, retoma.producto_cantidad_id, negocioId);
           await facturasRepo.ajustarStockCantidad(
             client, retoma.producto_cantidad_id, Number(retoma.cantidad_retoma || 1)
           );

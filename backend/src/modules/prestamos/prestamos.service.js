@@ -17,11 +17,34 @@ const crearPrestamo = async ({
   nombre_producto, imei, producto_id, cantidad_prestada, valor_prestamo,
   prestatario_id, empleado_id, cliente_id,
 }) => {
+  // ── Verificar sucursal pertenece al negocio ──────────────────────────────
   const { rows: sucRows } = await pool.query(
     `SELECT id FROM sucursales WHERE id = $1 AND negocio_id = $2 AND activa = true`,
     [sucursal_id, negocio_id]
   );
   if (!sucRows.length) throw { status: 403, message: 'Sucursal no válida para este negocio' };
+
+  // ── Verificar que cliente_id pertenece al negocio si viene informado ──
+  if (cliente_id) {
+    const { rows: clienteRows } = await pool.query(
+      'SELECT id FROM clientes WHERE id = $1 AND negocio_id = $2',
+      [cliente_id, negocio_id]
+    );
+    if (!clienteRows.length) {
+      throw { status: 403, message: 'El cliente no pertenece a este negocio' };
+    }
+  }
+
+  // ── Verificar que prestatario_id pertenece al negocio si viene informado ──
+  if (prestatario_id) {
+    const { rows: prestatarioRows } = await pool.query(
+      'SELECT id FROM prestatarios WHERE id = $1 AND negocio_id = $2',
+      [prestatario_id, negocio_id]
+    );
+    if (!prestatarioRows.length) {
+      throw { status: 403, message: 'El prestatario no pertenece a este negocio' };
+    }
+  }
 
   const client = await pool.connect();
   try {
@@ -48,7 +71,6 @@ const crearPrestamo = async ({
       if (!rows.length) {
         throw { status: 400, message: `El producto ${nombre_producto} no pertenece a esta sucursal` };
       }
-      // ── Usar id en vez de imei para no afectar otros negocios ──
       await client.query(
         'UPDATE seriales SET prestado = true WHERE id = $1',
         [rows[0].id]
@@ -117,7 +139,6 @@ const devolverPrestamo = async (negocioId, prestamoId) => {
     await client.query('BEGIN');
 
     if (prestamo.imei) {
-      // ── Buscar el serial por sucursal del préstamo, no por imei global ──
       const { rows: serialRows } = await client.query(
         `SELECT s.id FROM seriales s
          JOIN productos_serial ps ON ps.id = s.producto_id
