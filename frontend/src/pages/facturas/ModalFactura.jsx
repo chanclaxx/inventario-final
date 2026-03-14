@@ -380,6 +380,7 @@ export function ModalFactura({ open, onClose }) {
   const [mostrarImpresion, setMostrarImpresion] = useState(false);
   const [tipoCliente,      setTipoCliente]      = useState('cliente');
   const [form,             setForm]             = useState({ nombre: '', cedula: '', celular: '', notas: '' });
+  const [clienteId,        setClienteId]        = useState(null); // id del cliente encontrado via cédula
   const [pagos,            setPagos]            = useState({ Efectivo: '' });
   const [conRetoma,        setConRetoma]        = useState(false);
   const [retoma,           setRetoma]           = useState(RETOMA_INICIAL);
@@ -400,7 +401,6 @@ export function ModalFactura({ open, onClose }) {
     queryFn: () => api.get('/config').then((r) => r.data.data),
   });
 
-  // ── queryKey incluye sucursalKey para que el caché sea por sucursal ─────────
   const { data: productosSerial } = useQuery({
     queryKey: ['productos-serial', ...sucursalKey],
     queryFn: () => getProductosSerial().then((r) => r.data.data),
@@ -416,7 +416,6 @@ export function ModalFactura({ open, onClose }) {
   const mutation = useMutation({
     mutationFn: crearFactura,
     onSuccess: async (res) => {
-      // Invalidar todas las variantes (sin queryKey exacto) para limpiar caché de todas las sucursales
       queryClient.invalidateQueries({ queryKey: ['productos-serial'],  exact: false });
       queryClient.invalidateQueries({ queryKey: ['productos-cantidad'], exact: false });
       queryClient.invalidateQueries({ queryKey: ['seriales'],          exact: false });
@@ -424,6 +423,7 @@ export function ModalFactura({ open, onClose }) {
       queryClient.invalidateQueries({ queryKey: ['ventas-rango'],      exact: false });
       queryClient.invalidateQueries({ queryKey: ['productos-top'],     exact: false });
       queryClient.invalidateQueries({ queryKey: ['dashboard'],         exact: false });
+      queryClient.invalidateQueries({ queryKey: ['clientes'],          exact: false });
 
       try {
         const { data } = await getFacturaById(res.data.data.id);
@@ -442,6 +442,7 @@ export function ModalFactura({ open, onClose }) {
 
   const resetForm = () => {
     setForm({ nombre: '', cedula: '', celular: '', notas: '' });
+    setClienteId(null);
     setPagos({ Efectivo: '' });
     setConRetoma(false);
     setRetoma(RETOMA_INICIAL);
@@ -454,6 +455,12 @@ export function ModalFactura({ open, onClose }) {
   const setRetomaField = (campo, valor) =>
     setRetoma((r) => ({ ...r, [campo]: valor }));
 
+  // Al cambiar la cédula manualmente, limpiar el clienteId cacheado
+  const handleCedulaChange = (e) => {
+    setForm((f) => ({ ...f, cedula: e.target.value }));
+    setClienteId(null);
+  };
+
   const buscarCliente = async () => {
     if (!form.cedula) return;
     setBuscandoCliente(true);
@@ -461,9 +468,12 @@ export function ModalFactura({ open, onClose }) {
       const { data } = await buscarPorCedula(form.cedula);
       if (data.data) {
         setForm((f) => ({ ...f, nombre: data.data.nombre, celular: data.data.celular || '' }));
+        setClienteId(data.data.id); // guardar el id encontrado
+      } else {
+        setClienteId(null); // no existe, el backend lo creará
       }
     } catch {
-      // cliente no encontrado — continuar normalmente
+      setClienteId(null);
     } finally {
       setBuscandoCliente(false);
     }
@@ -605,7 +615,7 @@ export function ModalFactura({ open, onClose }) {
                     label="Cédula"
                     placeholder="123456789"
                     value={form.cedula}
-                    onChange={(e) => setForm({ ...form, cedula: e.target.value })}
+                    onChange={handleCedulaChange}
                     onBlur={buscarCliente}
                     onKeyDown={(e) => handleKeyDown(e, 'nombre')}
                   />

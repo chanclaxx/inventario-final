@@ -17,7 +17,6 @@ const getFacturaById = async (req, res, next) => {
 
 const crearFactura = async (req, res, next) => {
   try {
-    // En vista global el admin debe indicar la sucursal en el body
     const sucursal_id = req.todasSucursales
       ? req.body.sucursal_id
       : req.sucursal_id;
@@ -33,6 +32,7 @@ const crearFactura = async (req, res, next) => {
       ...req.body,
       sucursal_id,
       usuario_id: req.user.id,
+      negocio_id: req.user.negocio_id, // necesario para resolver/crear cliente
     });
     res.status(201).json({ ok: true, data, message: 'Factura creada correctamente' });
   } catch (err) { next(err); }

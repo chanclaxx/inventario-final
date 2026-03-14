@@ -1,7 +1,38 @@
 const { pool } = require('../../config/db');
-const facturasRepo = require('./facturas.repository');
-const serialRepo   = require('../productos/productosSerial.repository');
-const cantidadRepo = require('../productos/productosCantidad.repository');
+const facturasRepo  = require('./facturas.repository');
+const serialRepo    = require('../productos/productosSerial.repository');
+const cantidadRepo  = require('../productos/productosCantidad.repository');
+const clientesRepo  = require('../clientes/clientes.repository');
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+const ES_COMPANERO = (cedula) => cedula === 'COMPANERO';
+
+/**
+ * Busca el cliente por cédula dentro de la transacción.
+ * Si no existe lo crea. Retorna siempre el cliente_id.
+ * Para compañeros retorna null sin consultar la DB.
+ */
+const resolverClienteId = async (client, negocioId, { cedula, nombre, celular }) => {
+  if (ES_COMPANERO(cedula)) return null;
+
+  const { rows } = await client.query(
+    `SELECT id FROM clientes WHERE cedula = $1 AND negocio_id = $2`,
+    [cedula, negocioId]
+  );
+
+  if (rows.length) return rows[0].id;
+
+  const { rows: nuevos } = await client.query(
+    `INSERT INTO clientes (negocio_id, nombre, cedula, celular)
+     VALUES ($1, $2, $3, $4)
+     RETURNING id`,
+    [negocioId, nombre, cedula, celular || null]
+  );
+  return nuevos[0].id;
+};
+
+// ─── Queries de solo lectura (sin transacción) ────────────────────────────────
 
 const getFacturas = (sucursalId, negocioId) =>
   facturasRepo.findAll(sucursalId, negocioId);
@@ -19,16 +50,26 @@ const getFacturaById = async (negocioId, id) => {
   return { ...factura, lineas, pagos, retoma };
 };
 
+// ─── Crear factura ────────────────────────────────────────────────────────────
+
 const crearFactura = async ({
-  sucursal_id, usuario_id, nombre_cliente,
-  cedula, celular, notas, lineas, pagos, retoma,
+  negocio_id, sucursal_id, usuario_id,
+  nombre_cliente, cedula, celular, notas,
+  lineas, pagos, retoma,
 }) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
+    // Resolver o crear cliente dentro de la misma transacción
+    const cliente_id = await resolverClienteId(client, negocio_id, {
+      cedula,
+      nombre: nombre_cliente,
+      celular,
+    });
+
     const factura = await facturasRepo.create(client, {
-      sucursal_id, usuario_id, cliente_id: null,
+      sucursal_id, usuario_id, cliente_id,
       nombre_cliente, cedula, celular, notas,
     });
 
@@ -42,7 +83,6 @@ const crearFactura = async ({
       });
 
       if (linea.imei) {
-        // ── FIX: verificar que el serial pertenezca a esta sucursal ──────
         const { rows: serialRows } = await client.query(
           `SELECT s.id FROM seriales s
            JOIN productos_serial ps ON ps.id = s.producto_id
@@ -65,7 +105,6 @@ const crearFactura = async ({
         if (!producto) {
           throw { status: 404, message: `Producto ${linea.nombre_producto} no encontrado` };
         }
-        // ── FIX: verificar que el producto pertenezca a esta sucursal ────
         if (producto.sucursal_id !== sucursal_id) {
           throw {
             status: 400,
@@ -142,6 +181,8 @@ const crearFactura = async ({
   }
 };
 
+// ─── Cancelar factura ─────────────────────────────────────────────────────────
+
 const cancelarFactura = async (negocioId, id) => {
   const valida = await facturasRepo.perteneceAlNegocio(id, negocioId);
   if (!valida) throw { status: 404, message: 'Factura no encontrada' };
@@ -163,7 +204,6 @@ const cancelarFactura = async (negocioId, id) => {
           [linea.imei]
         );
       } else {
-        // Busca el producto en la sucursal correcta de la factura
         const { rows } = await client.query(
           'SELECT id FROM productos_cantidad WHERE nombre ILIKE $1 AND sucursal_id = $2',
           [linea.nombre_producto, factura.sucursal_id]
@@ -182,6 +222,8 @@ const cancelarFactura = async (negocioId, id) => {
   }
 };
 
+// ─── Editar factura ───────────────────────────────────────────────────────────
+
 const editarFactura = async (negocioId, id, {
   nombre_cliente, cedula, celular, notas,
   lineas, pagos, retoma,
@@ -198,11 +240,18 @@ const editarFactura = async (negocioId, id, {
   try {
     await client.query('BEGIN');
 
+    // Resolver cliente_id igual que en creación
+    const cliente_id = await resolverClienteId(client, negocioId, {
+      cedula,
+      nombre: nombre_cliente,
+      celular,
+    });
+
     await client.query(
       `UPDATE facturas
-       SET nombre_cliente = $1, cedula = $2, celular = $3, notas = $4
-       WHERE id = $5`,
-      [nombre_cliente, cedula, celular, notas, id]
+       SET nombre_cliente = $1, cedula = $2, celular = $3, notas = $4, cliente_id = $5
+       WHERE id = $6`,
+      [nombre_cliente, cedula, celular, notas, cliente_id, id]
     );
 
     for (const linea of lineas) {
