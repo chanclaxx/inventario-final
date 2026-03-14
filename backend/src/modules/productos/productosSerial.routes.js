@@ -6,7 +6,7 @@ const ctrl = require('./productosSerial.controller');
 
 // ── Rutas estáticas primero (antes de /:id para evitar conflictos) ──
 router.get('/verificar-imei/:imei', ctrl.verificarImei);
-
+router.get('/compras-cliente', ctrl.getComprasCliente);
 // ── Rutas de producto ──
 router.get('/',    ctrl.getProductos);
 router.get('/:id', ctrl.getProductoById);
@@ -18,6 +18,6 @@ router.get('/:id/seriales',    ctrl.getSeriales);
 router.post('/:id/seriales',   requireNivel('supervisor'), ctrl.agregarSerial);
 router.put('/seriales/:id',    requireNivel('supervisor'), ctrl.actualizarSerial);
 router.delete('/seriales/:id', requireNivel('admin_negocio'), ctrl.eliminarSerial);
-router.get('/compras-cliente', ctrl.getComprasCliente);
+
 
 module.exports = router;
