@@ -240,17 +240,21 @@ function PanelRetoma({ retoma, setRetoma, esNueva, sucursalKey, sucursalLista })
   const setRetomaField = (campo, valor) =>
     setRetoma((r) => ({ ...r, [campo]: valor }));
 
-  const { data: productosSerial } = useQuery({
+  const { data: productosSerialRaw } = useQuery({
     queryKey: ['productos-serial', ...sucursalKey],
     queryFn:  () => getProductosSerial().then((r) => r.data.data?.items ?? r.data.data ?? []),
     enabled:  sucursalLista && retoma?.ingreso_inventario && retoma?.tipo_retoma === 'serial',
   });
 
-  const { data: productosCantidad } = useQuery({
+  const { data: productosCantidadRaw } = useQuery({
     queryKey: ['productos-cantidad', ...sucursalKey],
     queryFn:  () => getProductosCantidad().then((r) => r.data.data?.items ?? r.data.data ?? []),
     enabled:  sucursalLista && retoma?.ingreso_inventario && retoma?.tipo_retoma === 'cantidad',
   });
+
+  // Normalización defensiva: garantiza array aunque el caché tenga estructura antigua
+  const productosSerial   = Array.isArray(productosSerialRaw)   ? productosSerialRaw   : (productosSerialRaw?.items   ?? []);
+  const productosCantidad = Array.isArray(productosCantidadRaw) ? productosCantidadRaw : (productosCantidadRaw?.items ?? []);
 
   return (
     <div className="bg-purple-50 rounded-xl p-3 flex flex-col gap-3 border border-purple-100">

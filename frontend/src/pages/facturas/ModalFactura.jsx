@@ -476,17 +476,21 @@ export function ModalFactura({ open, onClose }) {
     queryFn: () => api.get('/config').then((r) => r.data.data),
   });
 
-  const { data: productosSerial } = useQuery({
+  const { data: productosSerialRaw } = useQuery({
     queryKey: ['productos-serial', ...sucursalKey],
     queryFn: () => getProductosSerial().then((r) => r.data.data?.items ?? r.data.data ?? []),
     enabled: sucursalLista && conRetoma && retoma.tipo_retoma === 'serial',
   });
 
-  const { data: productosCantidad } = useQuery({
+  const { data: productosCantidadRaw } = useQuery({
     queryKey: ['productos-cantidad', ...sucursalKey],
     queryFn: () => getProductosCantidad().then((r) => r.data.data?.items ?? r.data.data ?? []),
     enabled: conRetoma && retoma.tipo_retoma === 'cantidad',
   });
+
+  // Normalización defensiva: garantiza array aunque el caché tenga estructura antigua
+  const productosSerial   = Array.isArray(productosSerialRaw)   ? productosSerialRaw   : (productosSerialRaw?.items   ?? []);
+  const productosCantidad = Array.isArray(productosCantidadRaw) ? productosCantidadRaw : (productosCantidadRaw?.items ?? []);
 
   // Campos opcionales según config del negocio
   const mostrarEmail     = configData?.campo_email_cliente     === '1';
