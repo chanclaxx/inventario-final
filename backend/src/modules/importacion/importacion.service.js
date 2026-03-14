@@ -1,9 +1,7 @@
 const { pool } = require('../../config/db');
 
-// ── Límite de filas por importación ──────────────────────────────────────────
 const MAX_FILAS = 2000;
 
-// ── Mensajes de error de DB seguros (sin exponer internos) ───────────────────
 const _mensajeSeguro = (err) => {
   if (err.code === '23505') return 'Registro duplicado';
   if (err.code === '23503') return 'Referencia inválida';
@@ -11,7 +9,15 @@ const _mensajeSeguro = (err) => {
   return 'Error al procesar la fila';
 };
 
-// ── Helpers (dentro de transacción — reciben client) ─────────────────────────
+// ── Fix timezone: evita desfase UTC al convertir fechas de Excel ─────────────
+const _formatearFecha = (valor) => {
+  if (!valor) return new Date().toISOString().split('T')[0];
+  const d = valor instanceof Date ? valor : new Date(valor);
+  const year  = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day   = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
 
 const _resolverProveedor = async (client, nombre, negocioId) => {
   if (!nombre?.toString().trim()) return null;
@@ -69,7 +75,6 @@ const _resolverProductoSerial = async (client, { nombre, marca, modelo, sucursal
 // ─────────────────────────────────────────────
 
 const importarSerial = async (hojas, sucursalId, negocioId) => {
-  // ── Contar total de filas antes de procesar ──────────────────────────────
   const totalFilas = hojas.reduce((s, h) => s + h.filas.length, 0);
   if (totalFilas > MAX_FILAS) {
     throw {
@@ -80,7 +85,6 @@ const importarSerial = async (hojas, sucursalId, negocioId) => {
 
   const resumenPorProducto = [];
 
-  // ── Una transacción por hoja (producto) ─────────────────────────────────
   for (const hoja of hojas) {
     const resultado = {
       producto: hoja.nombreProducto,
@@ -110,9 +114,8 @@ const importarSerial = async (hojas, sucursalId, negocioId) => {
             proveedorId,
           });
 
-          const fechaEntrada  = fila.fecha_entrada
-            ? new Date(fila.fecha_entrada).toISOString().split('T')[0]
-            : new Date().toISOString().split('T')[0];
+          // ── Usar _formatearFecha para evitar desfase de timezone ──
+          const fechaEntrada  = _formatearFecha(fila.fecha_entrada);
           const costoCompra   = fila.costo_compra   ? Number(fila.costo_compra)   : null;
           const clienteOrigen = fila.cliente_origen?.toString().trim() || null;
 
@@ -142,7 +145,6 @@ const importarSerial = async (hojas, sucursalId, negocioId) => {
             resultado.insertados++;
           }
         } catch (err) {
-          // ── Error por fila: no aborta la hoja completa ──────────────────
           resultado.errores.push({ fila: nFila, error: _mensajeSeguro(err) });
           resultado.omitidos++;
         }
@@ -201,7 +203,8 @@ const importarCantidad = async (filas, sucursalId, negocioId) => {
 
         const stock       = fila.stock         !== undefined ? Number(fila.stock)         : 0;
         const stockMinimo = fila.stock_minimo   !== undefined ? Number(fila.stock_minimo)  : 0;
-        const costoUnit   = fila.costo_unitario              ? Number(fila.costo_unitario) : null;
+        const costoUnit   = fila.costo_unitario ? Number(fila.costo_unitario) : null;
+        const precioVenta = fila.precio_venta   ? Number(fila.precio_venta)   : null; // ← agregar
         const unidad      = fila.unidad_medida?.toString().trim() || 'unidad';
         const clienteOrig = fila.cliente_origen?.toString().trim() || null;
         const proveedorId = await _resolverProveedor(client, fila.proveedor, negocioId);
@@ -220,18 +223,20 @@ const importarCantidad = async (filas, sucursalId, negocioId) => {
                costo_unitario = COALESCE($3, costo_unitario),
                unidad_medida  = COALESCE(NULLIF($4,''), unidad_medida),
                cliente_origen = COALESCE($5, cliente_origen),
-               proveedor_id   = COALESCE($6, proveedor_id)
-             WHERE id = $7`,
-            [stock, stockMinimo, costoUnit, unidad, clienteOrig, proveedorId, existe[0].id]
+               proveedor_id   = COALESCE($6, proveedor_id),
+               precio         = COALESCE($7, precio)
+             WHERE id = $8`,
+            [stock, stockMinimo, costoUnit, unidad, clienteOrig, proveedorId, precioVenta, existe[0].id]
           );
           resultado.actualizados++;
         } else {
           await client.query(
             `INSERT INTO productos_cantidad
                (sucursal_id, proveedor_id, nombre, stock, stock_minimo,
-                costo_unitario, unidad_medida, cliente_origen)
-             VALUES($1,$2,$3,$4,$5,$6,$7,$8)`,
-            [sucursalId, proveedorId, nombre, stock, stockMinimo, costoUnit, unidad, clienteOrig]
+                costo_unitario, unidad_medida, cliente_origen, precio)
+             VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+            [sucursalId, proveedorId, nombre, stock, stockMinimo,
+             costoUnit, unidad, clienteOrig, precioVenta]
           );
           resultado.insertados++;
         }
