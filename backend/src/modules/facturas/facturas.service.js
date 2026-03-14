@@ -40,12 +40,12 @@ const getFacturas = (sucursalId, negocioId) =>
 const getFacturaById = async (negocioId, id) => {
   const factura = await facturasRepo.findByIdYNegocio(id, negocioId);
   if (!factura) throw { status: 404, message: 'Factura no encontrada' };
-  const [lineas, pagos, retoma] = await Promise.all([
+  const [lineas, pagos, retomas] = await Promise.all([
     facturasRepo.getLineas(id),
     facturasRepo.getPagos(id),
-    facturasRepo.getRetoma(id),
+    facturasRepo.getRetomas(id),   // ← array
   ]);
-  return { ...factura, lineas, pagos, retoma };
+  return { ...factura, lineas, pagos, retomas };  // ← retomas (plural)
 };
 
 const crearFactura = async ({

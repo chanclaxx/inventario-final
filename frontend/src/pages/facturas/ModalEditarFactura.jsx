@@ -17,11 +17,11 @@ import api from '../../api/axios.config';
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
 const METODOS_PAGO = [
-  { id: 'Efectivo'       },
-  { id: 'Nequi'         },
-  { id: 'Daviplata'     },
-  { id: 'Transferencia' },
-  { id: 'Tarjeta'       },
+  { id: 'Efectivo'      },
+  { id: 'Nequi'        },
+  { id: 'Daviplata'    },
+  { id: 'Transferencia'},
+  { id: 'Tarjeta'      },
 ];
 
 const RETOMA_VACIA = {
@@ -36,15 +36,13 @@ const RETOMA_VACIA = {
   cantidad_retoma:      '1',
 };
 
-// ─── Utilidad: normalizar respuesta de productos a array ─────────────────────
+// ─── Utilidades ───────────────────────────────────────────────────────────────
 
 function normalizarProductos(data) {
   if (Array.isArray(data)) return data;
   if (data?.items && Array.isArray(data.items)) return data.items;
   return [];
 }
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function pagosArrayAMapa(pagosArr) {
   const mapa = {};
@@ -77,24 +75,26 @@ function buildEstadoInicial(data) {
       precio:          Number(l.precio || 0),
     })),
     pagos: pagosArrayAMapa(data.pagos),
-    // La retoma existente se guarda para mostrarla en solo lectura
-    retomaExistente: data.retoma ? {
-      descripcion:        data.retoma.descripcion       || '',
-      valor_retoma:       data.retoma.valor_retoma       || 0,
-      ingreso_inventario: data.retoma.ingreso_inventario || false,
-      imei:               data.retoma.imei              || null,
-      nombre_producto:    data.retoma.nombre_producto   || '',
-    } : null,
+    // ← array de retomas existentes
+    retomasExistentes: (data.retomas || []).map((r) => ({
+      descripcion:        r.descripcion       || '',
+      valor_retoma:       r.valor_retoma       || 0,
+      ingreso_inventario: r.ingreso_inventario || false,
+      imei:               r.imei              || null,
+      nombre_producto:    r.nombre_producto   || '',
+    })),
   };
 }
 
 // ─── Retoma solo lectura ──────────────────────────────────────────────────────
 
-function RetomaLectura({ retoma }) {
+function RetomaLectura({ retoma, index, total }) {
   return (
     <div className="bg-purple-50 rounded-xl p-3 flex flex-col gap-2.5 border border-purple-100">
       <div className="flex items-center justify-between">
-        <p className="text-xs font-semibold text-purple-700">Retoma registrada</p>
+        <p className="text-xs font-semibold text-purple-700">
+          {total > 1 ? `Retoma ${index + 1}` : 'Retoma registrada'}
+        </p>
         <span className="flex items-center gap-1 text-xs text-gray-400">
           <Lock size={11} /> Solo lectura
         </span>
@@ -133,7 +133,7 @@ function RetomaLectura({ retoma }) {
   );
 }
 
-// ─── Retoma serial (nueva) ────────────────────────────────────────────────────
+// ─── Retoma serial nueva ──────────────────────────────────────────────────────
 
 function RetomaSerial({ retoma, setRetomaField, productosSerial }) {
   const [busqueda, setBusqueda] = useState('');
@@ -146,21 +146,23 @@ function RetomaSerial({ retoma, setRetomaField, productosSerial }) {
         value={retoma.imei} onChange={(e) => setRetomaField('imei', e.target.value)} />
       <div>
         <p className="text-xs font-medium text-gray-600 mb-1">
-          Línea de producto <span className="text-gray-400 font-normal">(elige existente o déjalo vacío)</span>
+          Línea de producto <span className="text-gray-400 font-normal">(opcional)</span>
         </p>
         <input type="text" placeholder="Buscar modelo..." value={busqueda}
           onChange={(e) => { setBusqueda(e.target.value); setRetomaField('producto_serial_id', null); setRetomaField('nombre_producto', ''); }}
-          className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-400 mb-1" />
+          className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-sm
+            focus:outline-none focus:ring-2 focus:ring-purple-400 mb-1" />
         {busqueda.length > 0 && (
-          <div className="flex flex-col gap-1 max-h-36 overflow-y-auto rounded-xl border border-gray-100 bg-white">
+          <div className="flex flex-col gap-1 max-h-28 overflow-y-auto rounded-xl border border-gray-100 bg-white">
             {filtrados.length === 0
-              ? <p className="text-xs text-gray-400 px-3 py-2">Sin resultados — se creará nueva línea con nombre "{busqueda}"</p>
+              ? <p className="text-xs text-gray-400 px-3 py-2">Sin resultados</p>
               : filtrados.map((p) => {
-                  const productoId = p.id;
+                  const pid = p.id;
                   return (
-                    <button key={productoId}
-                      onClick={() => { setRetomaField('producto_serial_id', productoId); setRetomaField('nombre_producto', p.nombre); setBusqueda(p.nombre); }}
-                      className={`text-left px-3 py-2 text-sm transition-all ${retoma.producto_serial_id === productoId ? 'bg-purple-100 text-purple-800' : 'hover:bg-gray-50 text-gray-700'}`}>
+                    <button key={pid}
+                      onClick={() => { setRetomaField('producto_serial_id', pid); setRetomaField('nombre_producto', p.nombre); setBusqueda(p.nombre); }}
+                      className={`text-left px-3 py-2 text-sm transition-all
+                        ${retoma.producto_serial_id === pid ? 'bg-purple-100 text-purple-800' : 'hover:bg-gray-50 text-gray-700'}`}>
                       {p.nombre}<span className="text-xs text-gray-400 ml-2">{p.disponibles} disp.</span>
                     </button>
                   );
@@ -168,13 +170,15 @@ function RetomaSerial({ retoma, setRetomaField, productosSerial }) {
             }
           </div>
         )}
-        {retoma.producto_serial_id && <p className="text-xs text-purple-600 mt-1">✓ Línea seleccionada: {retoma.nombre_producto}</p>}
+        {retoma.producto_serial_id && (
+          <p className="text-xs text-purple-600 mt-1">✓ {retoma.nombre_producto}</p>
+        )}
       </div>
     </div>
   );
 }
 
-// ─── Retoma cantidad (nueva) ──────────────────────────────────────────────────
+// ─── Retoma cantidad nueva ────────────────────────────────────────────────────
 
 function RetomaCantidad({ retoma, setRetomaField, productosCantidad }) {
   const [busqueda, setBusqueda] = useState('');
@@ -187,17 +191,19 @@ function RetomaCantidad({ retoma, setRetomaField, productosCantidad }) {
         <p className="text-xs font-medium text-gray-600 mb-1">Producto en inventario</p>
         <input type="text" placeholder="Buscar producto..." value={busqueda}
           onChange={(e) => { setBusqueda(e.target.value); setRetomaField('producto_cantidad_id', null); setRetomaField('nombre_producto', ''); }}
-          className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-400 mb-1" />
+          className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-sm
+            focus:outline-none focus:ring-2 focus:ring-purple-400 mb-1" />
         {busqueda.length > 0 && (
-          <div className="flex flex-col gap-1 max-h-36 overflow-y-auto rounded-xl border border-gray-100 bg-white">
+          <div className="flex flex-col gap-1 max-h-28 overflow-y-auto rounded-xl border border-gray-100 bg-white">
             {filtrados.length === 0
               ? <p className="text-xs text-gray-400 px-3 py-2">Sin resultados</p>
               : filtrados.map((p) => {
-                  const productoId = p.id;
+                  const pid = p.id;
                   return (
-                    <button key={productoId}
-                      onClick={() => { setRetomaField('producto_cantidad_id', productoId); setRetomaField('nombre_producto', p.nombre); setBusqueda(p.nombre); }}
-                      className={`text-left px-3 py-2 text-sm transition-all ${retoma.producto_cantidad_id === productoId ? 'bg-purple-100 text-purple-800' : 'hover:bg-gray-50 text-gray-700'}`}>
+                    <button key={pid}
+                      onClick={() => { setRetomaField('producto_cantidad_id', pid); setRetomaField('nombre_producto', p.nombre); setBusqueda(p.nombre); }}
+                      className={`text-left px-3 py-2 text-sm transition-all
+                        ${retoma.producto_cantidad_id === pid ? 'bg-purple-100 text-purple-800' : 'hover:bg-gray-50 text-gray-700'}`}>
                       {p.nombre}<span className="text-xs text-gray-400 ml-2">Stock: {p.stock}</span>
                     </button>
                   );
@@ -205,10 +211,13 @@ function RetomaCantidad({ retoma, setRetomaField, productosCantidad }) {
             }
           </div>
         )}
-        {retoma.producto_cantidad_id && <p className="text-xs text-purple-600 mt-1">✓ Producto: {retoma.nombre_producto}</p>}
+        {retoma.producto_cantidad_id && (
+          <p className="text-xs text-purple-600 mt-1">✓ {retoma.nombre_producto}</p>
+        )}
       </div>
       <Input label="Cantidad retomada" type="number" min="1" placeholder="1"
-        value={retoma.cantidad_retoma} onChange={(e) => setRetomaField('cantidad_retoma', e.target.value)} />
+        value={retoma.cantidad_retoma}
+        onChange={(e) => setRetomaField('cantidad_retoma', e.target.value)} />
     </div>
   );
 }
@@ -237,7 +246,7 @@ function PanelRetomaNueva({ retoma, setRetoma, sucursalKey, sucursalLista }) {
       <p className="text-xs font-semibold text-purple-700">Nueva retoma</p>
 
       <div>
-        <p className="text-xs font-medium text-gray-600 mb-1.5">Tipo de producto retomado</p>
+        <p className="text-xs font-medium text-gray-600 mb-1.5">Tipo</p>
         <div className="flex gap-2">
           {[
             { id: 'serial',   label: 'Con serial / IMEI', Icn: Package     },
@@ -247,8 +256,11 @@ function PanelRetomaNueva({ retoma, setRetoma, sucursalKey, sucursalLista }) {
             return (
               <button key={opt.id}
                 onClick={() => setRetoma({ ...RETOMA_VACIA, tipo_retoma: opt.id })}
-                className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-medium border transition-all
-                  ${retoma.tipo_retoma === opt.id ? 'bg-purple-100 border-purple-400 text-purple-800' : 'bg-white border-gray-200 text-gray-500'}`}>
+                className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl
+                  text-xs font-medium border transition-all
+                  ${retoma.tipo_retoma === opt.id
+                    ? 'bg-purple-100 border-purple-400 text-purple-800'
+                    : 'bg-white border-gray-200 text-gray-500'}`}>
                 <OptIcon size={13} /> {opt.label}
               </button>
             );
@@ -256,8 +268,9 @@ function PanelRetomaNueva({ retoma, setRetoma, sucursalKey, sucursalLista }) {
         </div>
       </div>
 
-      <Input label="Descripción de la retoma" placeholder="Ej: iPhone 12 Pro en buen estado"
-        value={retoma.descripcion} onChange={(e) => setRetomaField('descripcion', e.target.value)} />
+      <Input label="Descripción" placeholder="Ej: iPhone 12 Pro en buen estado"
+        value={retoma.descripcion}
+        onChange={(e) => setRetomaField('descripcion', e.target.value)} />
       <Input label="Valor retoma" type="number" placeholder="0"
         value={retoma.valor_retoma}
         onChange={(e) => setRetomaField('valor_retoma', e.target.value)}
@@ -299,37 +312,31 @@ export function ModalEditarFactura({ facturaId, onClose, onGuardado }) {
 
   const estadoInicial = useMemo(() => buildEstadoInicial(data), [data]);
 
-  const [tipoCliente,    setTipoCliente]    = useState(null);
-  const [form,           setForm]           = useState(null);
-  const [lineas,         setLineas]         = useState(null);
-  const [pagos,          setPagos]          = useState(null);
-  const [retomaNueva,    setRetomaNueva]    = useState(null);
-  const [agregarRetoma,  setAgregarRetoma]  = useState(false);
-  const [error,          setError]          = useState('');
+  const [tipoCliente,       setTipoCliente]       = useState(null);
+  const [form,              setForm]              = useState(null);
+  const [lineas,            setLineas]            = useState(null);
+  const [pagos,             setPagos]             = useState(null);
+  const [retomaNueva,       setRetomaNueva]       = useState(null);
+  const [agregarRetoma,     setAgregarRetoma]     = useState(false);
+  const [error,             setError]             = useState('');
   const [verificandoCedula, setVerificandoCedula] = useState(false);
 
-  // ── Hook de cédula única ──────────────────────────────────────────────────
   const { conflictoCliente, verificarCedula, reescribirCliente, cancelarConflicto } = useCedulaCliente();
 
-  // Valores efectivos: estado local si fue modificado, sino el inicial del servidor
-  const tipoClienteEfectivo = tipoCliente ?? estadoInicial?.tipoCliente  ?? 'cliente';
-  const formEfectivo        = form        ?? estadoInicial?.form         ?? {};
-  const lineasEfectivas     = lineas      ?? estadoInicial?.lineas       ?? [];
-  const pagosEfectivos      = pagos       ?? estadoInicial?.pagos        ?? {};
-
-  const retomaExistente    = estadoInicial?.retomaExistente ?? null;
-  const tieneRetomaGuardada = !!retomaExistente;
-  const puedeAgregarRetoma  = !tieneRetomaGuardada;
+  const tipoClienteEfectivo = tipoCliente ?? estadoInicial?.tipoCliente ?? 'cliente';
+  const formEfectivo        = form        ?? estadoInicial?.form        ?? {};
+  const lineasEfectivas     = lineas      ?? estadoInicial?.lineas      ?? [];
+  const pagosEfectivos      = pagos       ?? estadoInicial?.pagos       ?? {};
+  const retomasExistentes   = estadoInicial?.retomasExistentes          ?? [];
 
   const mostrarEmail          = configData?.campo_email_cliente     === '1';
   const mostrarDireccion      = configData?.campo_direccion_cliente === '1';
   const tieneClienteVinculado = estadoInicial?.tieneCliente ?? false;
 
-  // ── Construir y disparar la mutación ──────────────────────────────────────
   const buildPayload = () => ({
     nombre_cliente: formEfectivo.nombre,
-    cedula:         tipoClienteEfectivo === 'companero' ? 'COMPANERO'   : formEfectivo.cedula,
-    celular:        tipoClienteEfectivo === 'companero' ? '0000000000'  : formEfectivo.celular,
+    cedula:         tipoClienteEfectivo === 'companero' ? 'COMPANERO'  : formEfectivo.cedula,
+    celular:        tipoClienteEfectivo === 'companero' ? '0000000000' : formEfectivo.celular,
     email:          tipoClienteEfectivo === 'cliente'   ? (formEfectivo.email     || null) : null,
     direccion:      tipoClienteEfectivo === 'cliente'   ? (formEfectivo.direccion || null) : null,
     notas:          formEfectivo.notas || null,
@@ -344,11 +351,11 @@ export function ModalEditarFactura({ facturaId, onClose, onGuardado }) {
   const mutEditar = useMutation({
     mutationFn: () => editarFactura(facturaId, buildPayload()),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['facturas'],           exact: false });
-      queryClient.invalidateQueries({ queryKey: ['factura-detalle'],    exact: false });
-      queryClient.invalidateQueries({ queryKey: ['productos-serial'],   exact: false });
-      queryClient.invalidateQueries({ queryKey: ['productos-cantidad'],  exact: false });
-      queryClient.invalidateQueries({ queryKey: ['clientes'],           exact: false });
+      queryClient.invalidateQueries({ queryKey: ['facturas'],          exact: false });
+      queryClient.invalidateQueries({ queryKey: ['factura-detalle'],   exact: false });
+      queryClient.invalidateQueries({ queryKey: ['productos-serial'],  exact: false });
+      queryClient.invalidateQueries({ queryKey: ['productos-cantidad'], exact: false });
+      queryClient.invalidateQueries({ queryKey: ['clientes'],          exact: false });
       onGuardado?.();
       onClose();
     },
@@ -364,45 +371,41 @@ export function ModalEditarFactura({ facturaId, onClose, onGuardado }) {
     if (!nuevo) setRetomaNueva(null);
   };
 
-  // ── Confirmar edición ─────────────────────────────────────────────────────
   const handleSubmit = async () => {
     setError('');
-    if (!formEfectivo.nombre?.trim()) return setError('El nombre es requerido');
-    if (tipoClienteEfectivo === 'cliente' && !formEfectivo.cedula?.trim())  return setError('La cédula es requerida');
-    if (tipoClienteEfectivo === 'cliente' && !formEfectivo.celular?.trim()) return setError('El celular es requerido');
-
+    if (!formEfectivo.nombre?.trim())                                                      return setError('El nombre es requerido');
+    if (tipoClienteEfectivo === 'cliente' && !formEfectivo.cedula?.trim())                 return setError('La cédula es requerida');
+    if (tipoClienteEfectivo === 'cliente' && !formEfectivo.celular?.trim())                return setError('El celular es requerido');
     if (agregarRetoma && retomaNueva?.ingreso_inventario) {
-      if (retomaNueva.tipo_retoma === 'serial'   && !retomaNueva.imei?.trim())          return setError('El IMEI es requerido para ingresar al inventario');
-      if (retomaNueva.tipo_retoma === 'cantidad' && !retomaNueva.producto_cantidad_id)  return setError('Selecciona el producto para ingresar al inventario');
+      if (retomaNueva.tipo_retoma === 'serial'   && !retomaNueva.imei?.trim())             return setError('El IMEI es requerido para ingresar al inventario');
+      if (retomaNueva.tipo_retoma === 'cantidad' && !retomaNueva.producto_cantidad_id)     return setError('Selecciona el producto para ingresar al inventario');
     }
 
-    // Verificar unicidad de cédula solo para clientes
     if (tipoClienteEfectivo === 'cliente') {
       setVerificandoCedula(true);
       const puedeContin = await verificarCedula(formEfectivo);
       setVerificandoCedula(false);
-      if (!puedeContin) return; // El modal de conflicto se activa automáticamente
+      if (!puedeContin) return;
     }
 
     ejecutarMutacion();
   };
 
-  // ── Reescribir datos del cliente y guardar ────────────────────────────────
   const handleReescribir = async () => {
     await reescribirCliente();
     ejecutarMutacion();
   };
 
-  // ── Cancelar: restaura datos originales del cliente ───────────────────────
   const handleCancelarConflicto = () => cancelarConflicto(setForm);
 
-  const totalLineas = lineasEfectivas.reduce((s, l) => s + l.precio * l.cantidad, 0);
-  const valorRetoma = tieneRetomaGuardada
-    ? Number(retomaExistente.valor_retoma || 0)
-    : (agregarRetoma && retomaNueva) ? Number(retomaNueva.valor_retoma || 0) : 0;
-  const totalNeto   = totalLineas - valorRetoma;
-  const totalPagado = Object.values(pagosEfectivos).reduce((s, v) => s + Number(v || 0), 0);
-  const diferencia  = totalPagado - totalNeto;
+  // ── Totales ───────────────────────────────────────────────────────────────
+  const totalLineas           = lineasEfectivas.reduce((s, l) => s + l.precio * l.cantidad, 0);
+  const valorRetomasGuardadas = retomasExistentes.reduce((s, r) => s + Number(r.valor_retoma || 0), 0);
+  const valorRetomaNueva      = (agregarRetoma && retomaNueva) ? Number(retomaNueva.valor_retoma || 0) : 0;
+  const valorRetoma           = valorRetomasGuardadas + valorRetomaNueva;
+  const totalNeto             = totalLineas - valorRetoma;
+  const totalPagado           = Object.values(pagosEfectivos).reduce((s, v) => s + Number(v || 0), 0);
+  const diferencia            = totalPagado - totalNeto;
 
   if (isLoading || !estadoInicial) {
     return (
@@ -417,7 +420,7 @@ export function ModalEditarFactura({ facturaId, onClose, onGuardado }) {
       <Modal open onClose={onClose} title={`Editar Factura #${String(facturaId).padStart(6, '0')}`} size="lg">
         <div className="flex flex-col gap-5">
 
-          {/* ── Tipo de cliente ── */}
+          {/* Tipo de cliente */}
           <div className="flex gap-2">
             {[
               { id: 'companero', label: 'Compañero', Icn: User  },
@@ -426,15 +429,18 @@ export function ModalEditarFactura({ facturaId, onClose, onGuardado }) {
               const ItemIcon = item.Icn;
               return (
                 <button key={item.id} onClick={() => setTipoCliente(item.id)}
-                  className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium border transition-all
-                    ${tipoClienteEfectivo === item.id ? 'bg-blue-50 border-blue-300 text-blue-700' : 'bg-gray-50 border-gray-200 text-gray-600'}`}>
+                  className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl
+                    text-sm font-medium border transition-all
+                    ${tipoClienteEfectivo === item.id
+                      ? 'bg-blue-50 border-blue-300 text-blue-700'
+                      : 'bg-gray-50 border-gray-200 text-gray-600'}`}>
                   <ItemIcon size={16} /> {item.label}
                 </button>
               );
             })}
           </div>
 
-          {/* ── Datos del cliente ── */}
+          {/* Datos del cliente */}
           <div className="flex flex-col gap-3">
             {tipoClienteEfectivo === 'cliente' && (
               <Input label="Cédula" placeholder="123456789"
@@ -461,7 +467,7 @@ export function ModalEditarFactura({ facturaId, onClose, onGuardado }) {
             )}
           </div>
 
-          {/* ── Descripción / Notas ── */}
+          {/* Notas */}
           <div className="flex flex-col gap-1">
             <label className="text-sm font-medium text-gray-700">
               Descripción <span className="text-gray-400 font-normal text-xs">(opcional)</span>
@@ -470,10 +476,11 @@ export function ModalEditarFactura({ facturaId, onClose, onGuardado }) {
               value={formEfectivo.notas}
               onChange={(e) => setForm({ ...formEfectivo, notas: e.target.value })}
               className="w-full px-3 py-2 bg-gray-100 border-0 rounded-xl text-sm text-gray-900
-                placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all resize-none" />
+                placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500
+                focus:bg-white transition-all resize-none" />
           </div>
 
-          {/* ── Productos (solo precio editable) ── */}
+          {/* Productos */}
           <div className="bg-gray-50 rounded-xl p-3 flex flex-col gap-2">
             <p className="text-xs font-medium text-gray-500 mb-1">
               Productos <span className="text-gray-400 font-normal">(solo se puede editar el precio)</span>
@@ -493,7 +500,9 @@ export function ModalEditarFactura({ facturaId, onClose, onGuardado }) {
                       setLineas(next);
                     }}
                     onWheel={(e) => e.target.blur()}
-                    className="w-28 text-right text-sm font-semibold text-gray-900 bg-white border border-gray-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    className="w-28 text-right text-sm font-semibold text-gray-900 bg-white
+                      border border-gray-200 rounded-lg px-2 py-1 focus:outline-none
+                      focus:ring-2 focus:ring-blue-500" />
                 </div>
               </div>
             ))}
@@ -503,28 +512,37 @@ export function ModalEditarFactura({ facturaId, onClose, onGuardado }) {
             </div>
           </div>
 
-          {/* ── Retoma ── */}
+          {/* Retomas */}
           <div className="flex flex-col gap-3">
-            {/* Retoma existente: siempre solo lectura */}
-            {tieneRetomaGuardada && <RetomaLectura retoma={retomaExistente} />}
+            {/* Retomas existentes — solo lectura */}
+            {retomasExistentes.map((r, i) => (
+              <RetomaLectura key={i} retoma={r} index={i} total={retomasExistentes.length} />
+            ))}
 
-            {/* Agregar retoma nueva: solo si no había una */}
-            {puedeAgregarRetoma && (
-              <>
-                <button onClick={handleToggleAgregarRetoma}
-                  className={`w-full py-2.5 rounded-xl text-sm font-medium border transition-all
-                    ${agregarRetoma ? 'bg-purple-50 border-purple-300 text-purple-700' : 'bg-gray-50 border-gray-200 text-gray-600'}`}>
-                  {agregarRetoma ? '✓ Con retoma' : '+ Agregar retoma'}
-                </button>
-                {agregarRetoma && retomaNueva && (
-                  <PanelRetomaNueva retoma={retomaNueva} setRetoma={setRetomaNueva}
-                    sucursalKey={sucursalKey} sucursalLista={sucursalLista} />
-                )}
-              </>
+            {/* Resumen total retomas existentes si hay más de una */}
+            {retomasExistentes.length > 1 && (
+              <div className="flex justify-between text-sm font-medium text-purple-700
+                bg-purple-50 rounded-xl px-3 py-2 border border-purple-100">
+                <span>Total retomas guardadas ({retomasExistentes.length})</span>
+                <span>- {formatCOP(valorRetomasGuardadas)}</span>
+              </div>
+            )}
+
+            {/* Agregar nueva retoma — siempre disponible */}
+            <button onClick={handleToggleAgregarRetoma}
+              className={`w-full py-2.5 rounded-xl text-sm font-medium border transition-all
+                ${agregarRetoma
+                  ? 'bg-purple-50 border-purple-300 text-purple-700'
+                  : 'bg-gray-50 border-gray-200 text-gray-600'}`}>
+              {agregarRetoma ? '✓ Con retoma nueva' : '+ Agregar retoma'}
+            </button>
+            {agregarRetoma && retomaNueva && (
+              <PanelRetomaNueva retoma={retomaNueva} setRetoma={setRetomaNueva}
+                sucursalKey={sucursalKey} sucursalLista={sucursalLista} />
             )}
           </div>
 
-          {/* ── Métodos de pago ── */}
+          {/* Métodos de pago */}
           <div>
             <p className="text-sm font-medium text-gray-700 mb-2">Métodos de pago</p>
             <div className="flex flex-col gap-2">
@@ -535,17 +553,18 @@ export function ModalEditarFactura({ facturaId, onClose, onGuardado }) {
                     value={pagosEfectivos[id] || ''}
                     onChange={(e) => setPagos({ ...pagosEfectivos, [id]: e.target.value })}
                     onWheel={(e) => e.target.blur()}
-                    className="flex-1 px-3 py-2 bg-gray-100 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all" />
+                    className="flex-1 px-3 py-2 bg-gray-100 rounded-xl text-sm
+                      focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all" />
                 </div>
               ))}
             </div>
           </div>
 
-          {/* ── Resumen financiero ── */}
+          {/* Resumen financiero */}
           <div className="bg-gray-50 rounded-xl p-3 flex flex-col gap-1.5">
             {valorRetoma > 0 && (
               <div className="flex justify-between text-sm">
-                <span className="text-purple-600">Retoma</span>
+                <span className="text-purple-600">Total retomas</span>
                 <span className="text-purple-600">- {formatCOP(valorRetoma)}</span>
               </div>
             )}
@@ -559,8 +578,12 @@ export function ModalEditarFactura({ facturaId, onClose, onGuardado }) {
             </div>
             {diferencia !== 0 && (
               <div className="flex justify-between text-sm border-t border-gray-200 pt-1.5 mt-1">
-                <span className={diferencia > 0 ? 'text-green-600' : 'text-red-500'}>{diferencia > 0 ? 'Cambio' : 'Falta'}</span>
-                <Badge variant={diferencia > 0 ? 'green' : 'red'}>{formatCOP(Math.abs(diferencia))}</Badge>
+                <span className={diferencia > 0 ? 'text-green-600' : 'text-red-500'}>
+                  {diferencia > 0 ? 'Cambio' : 'Falta'}
+                </span>
+                <Badge variant={diferencia > 0 ? 'green' : 'red'}>
+                  {formatCOP(Math.abs(diferencia))}
+                </Badge>
               </div>
             )}
           </div>
@@ -573,14 +596,14 @@ export function ModalEditarFactura({ facturaId, onClose, onGuardado }) {
 
           <div className="flex gap-2">
             <Button variant="secondary" className="flex-1" onClick={onClose}>Cancelar</Button>
-            <Button className="flex-1" loading={mutEditar.isPending || verificandoCedula} onClick={handleSubmit}>
+            <Button className="flex-1" loading={mutEditar.isPending || verificandoCedula}
+              onClick={handleSubmit}>
               Guardar cambios
             </Button>
           </div>
         </div>
       </Modal>
 
-      {/* ── Modal conflicto cédula — bloqueante ── */}
       <ModalConflictoCedula
         open={!!conflictoCliente}
         conflicto={conflictoCliente}

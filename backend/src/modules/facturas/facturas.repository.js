@@ -150,13 +150,23 @@ const getPagos = async (facturaId) => {
 
 // ── getRetoma ─────────────────────────────────────────────────────────────────
 
-const getRetoma = async (facturaId) => {
+// Reemplazar getRetoma por getRetomas — devuelve array
+const getRetomas = async (facturaId) => {
   const { rows } = await pool.query(`
     SELECT id, factura_id, descripcion, valor_retoma,
            ingreso_inventario, nombre_producto, imei
     FROM retomas WHERE factura_id = $1
+    ORDER BY id
   `, [facturaId]);
-  return rows[0] || null;
+  return rows; // array vacío si no hay retomas
+};
+
+module.exports = {
+  findAll, findById, findByIdYNegocio,
+  perteneceAlNegocio,
+  getLineas, getPagos, getRetomas,   // ← getRetoma → getRetomas
+  create, insertarLinea, insertarPago, insertarRetoma, cancelar,
+  ajustarStockCantidad,
 };
 
 // ── create ────────────────────────────────────────────────────────────────────

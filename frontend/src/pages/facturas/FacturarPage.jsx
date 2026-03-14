@@ -144,49 +144,31 @@ function SeccionProveedor({ proveedorNombre }) {
   );
 }
 
-// ─── Bloque de datos del cliente en el detalle ────────────────────────────────
-// - Facturas nuevas (cliente_id presente): muestra datos desde JOIN clientes
-//   incluyendo email y dirección si existen
-// - Facturas antiguas (cliente_id null): muestra los campos propios de facturas
-//   (nombre_cliente, cedula, celular) tal como antes — sin email ni dirección
+// ─── Bloque cliente ───────────────────────────────────────────────────────────
 
 function BloqueCliente({ factura }) {
-  const esCompanero   = factura?.cedula === 'COMPANERO';
-  const tieneCliente  = !!factura?.cliente_id;
-
-  // Datos siempre disponibles (columnas propias de facturas)
-  const nombre  = factura?.nombre_cliente;
-  const cedula  = factura?.cedula;
-  const celular = factura?.celular;
-
-  // Datos solo disponibles en facturas nuevas con cliente vinculado
-  const email     = tieneCliente ? (factura?.cliente_email     || null) : null;
-  const direccion = tieneCliente ? (factura?.cliente_direccion || null) : null;
+  const esCompanero  = factura?.cedula === 'COMPANERO';
+  const tieneCliente = !!factura?.cliente_id;
+  const nombre       = factura?.nombre_cliente;
+  const cedula       = factura?.cedula;
+  const celular      = factura?.celular;
+  const email        = tieneCliente ? (factura?.cliente_email     || null) : null;
+  const direccion    = tieneCliente ? (factura?.cliente_direccion || null) : null;
 
   return (
     <div className="bg-gray-50 rounded-xl p-3 flex flex-col gap-1">
       <p className="text-xs text-gray-400 mb-0.5">Cliente</p>
       <p className="text-sm font-semibold text-gray-800">{nombre}</p>
-
       {!esCompanero && (
         <p className="text-xs text-gray-500">
-          CC: {cedula}
-          {celular ? ` · Tel: ${celular}` : ''}
+          CC: {cedula}{celular ? ` · Tel: ${celular}` : ''}
         </p>
       )}
-
-      {email && (
-        <p className="text-xs text-gray-500">{email}</p>
-      )}
-
-      {direccion && (
-        <p className="text-xs text-gray-500">{direccion}</p>
-      )}
-
+      {email     && <p className="text-xs text-gray-500">{email}</p>}
+      {direccion && <p className="text-xs text-gray-500">{direccion}</p>}
       {factura?.usuario_nombre && (
         <p className="text-xs text-gray-400 mt-1">
-          Atendido por:{' '}
-          <span className="text-gray-600 font-medium">{factura.usuario_nombre}</span>
+          Atendido por: <span className="text-gray-600 font-medium">{factura.usuario_nombre}</span>
         </p>
       )}
     </div>
@@ -220,7 +202,7 @@ function ModalDetalle({ facturaId, onClose, onReimprimir, onEditar }) {
   const f           = data;
   const total       = f?.lineas?.reduce((s, l) => s + Number(l.subtotal || 0), 0) || 0;
   const totalPagado = f?.pagos?.reduce((s, p)  => s + Number(p.valor    || 0), 0) || 0;
-  const valorRetoma = f?.retoma ? Number(f.retoma.valor_retoma || 0) : 0;
+  const valorRetoma = f?.retomas?.reduce((s, r) => s + Number(r.valor_retoma || 0), 0) || 0;
 
   return (
     <Modal open onClose={onClose} title={`Factura #${String(facturaId).padStart(6, '0')}`} size="lg">
@@ -236,7 +218,6 @@ function ModalDetalle({ facturaId, onClose, onReimprimir, onEditar }) {
           <span className="text-xs text-gray-400">{formatFechaHora(f?.fecha)}</span>
         </div>
 
-        {/* Sucursal — visible en vista global */}
         {f?.sucursal_nombre && (
           <div className="flex items-center gap-1.5 text-xs text-purple-600 bg-purple-50
             border border-purple-100 rounded-lg px-2.5 py-1.5">
@@ -245,7 +226,6 @@ function ModalDetalle({ facturaId, onClose, onReimprimir, onEditar }) {
           </div>
         )}
 
-        {/* Bloque cliente — maneja automáticamente datos nuevos vs antiguos */}
         <BloqueCliente factura={f} />
 
         {esAdminNegocio() && <SeccionProveedor proveedorNombre={f?.proveedor_nombre} />}
@@ -258,9 +238,7 @@ function ModalDetalle({ facturaId, onClose, onReimprimir, onEditar }) {
                 <p className="font-medium text-gray-800">{l.nombre_producto}</p>
                 {l.imei && <p className="text-xs text-gray-400 font-mono">{l.imei}</p>}
                 {esAdminNegocio() && l.proveedor_nombre && (
-                  <p className="text-xs text-amber-600 font-medium mt-0.5">
-                    {l.proveedor_nombre}
-                  </p>
+                  <p className="text-xs text-amber-600 font-medium mt-0.5">{l.proveedor_nombre}</p>
                 )}
               </div>
               <div className="text-right flex-shrink-0">
@@ -271,7 +249,21 @@ function ModalDetalle({ facturaId, onClose, onReimprimir, onEditar }) {
           ))}
         </div>
 
-        <SeccionRetoma retoma={f?.retoma} />
+        {/* ── Retomas — array ── */}
+        {f?.retomas?.length > 0 && (
+          <div className="flex flex-col gap-2">
+            {f.retomas.map((retoma) => (
+              <SeccionRetoma key={retoma.id} retoma={retoma} />
+            ))}
+            {f.retomas.length > 1 && (
+              <div className="flex justify-between text-sm font-medium text-purple-700
+                bg-purple-50 rounded-xl px-3 py-2 border border-purple-100">
+                <span>Total retomas ({f.retomas.length})</span>
+                <span>- {formatCOP(valorRetoma)}</span>
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="bg-gray-50 rounded-xl p-3 flex flex-col gap-1.5">
           <p className="text-xs text-gray-400 font-medium">Pagos</p>
@@ -299,19 +291,12 @@ function ModalDetalle({ facturaId, onClose, onReimprimir, onEditar }) {
         )}
 
         <div className="flex gap-2">
-          <Button
-            variant="secondary"
-            className="flex-1"
-            onClick={() => onReimprimir({ ...f, config: configData })}
-          >
+          <Button variant="secondary" className="flex-1"
+            onClick={() => onReimprimir({ ...f, config: configData })}>
             <Printer size={16} /> Reimprimir
           </Button>
           {f?.estado !== 'Cancelada' && (
-            <Button
-              variant="secondary"
-              className="flex-1"
-              onClick={() => onEditar(facturaId)}
-            >
+            <Button variant="secondary" className="flex-1" onClick={() => onEditar(facturaId)}>
               <Pencil size={16} /> Editar
             </Button>
           )}
@@ -331,8 +316,7 @@ function FilaFactura({ factura, onVerDetalle, onInactivar, onEditar, mostrarSucu
 
   return (
     <div className={`bg-white border rounded-xl p-3 flex items-center justify-between gap-3
-      ${factura.estado === 'Cancelada' ? 'opacity-50 border-gray-100' : 'border-gray-100'}`}
-    >
+      ${factura.estado === 'Cancelada' ? 'opacity-50 border-gray-100' : 'border-gray-100'}`}>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-sm font-semibold text-gray-800">
@@ -344,9 +328,7 @@ function FilaFactura({ factura, onVerDetalle, onInactivar, onEditar, mostrarSucu
           }>
             {factura.estado}
           </Badge>
-          {factura.retoma_descripcion && (
-            <Badge variant="purple">Retoma</Badge>
-          )}
+          {factura.retoma_descripcion && <Badge variant="purple">Retoma</Badge>}
           {mostrarSucursal && factura.sucursal_nombre && (
             <span className="flex items-center gap-1 text-[10px] text-purple-600
               bg-purple-50 border border-purple-100 rounded-full px-2 py-0.5">
@@ -369,25 +351,19 @@ function FilaFactura({ factura, onVerDetalle, onInactivar, onEditar, mostrarSucu
 
       <div className="flex items-center gap-2 flex-shrink-0">
         <span className="text-sm font-bold text-gray-900">{formatCOP(total)}</span>
-        <button
-          onClick={() => onVerDetalle(factura.id)}
-          className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-blue-600 transition-colors"
-        >
+        <button onClick={() => onVerDetalle(factura.id)}
+          className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-blue-600 transition-colors">
           <Eye size={16} />
         </button>
         {factura.estado !== 'Cancelada' && (
-          <button
-            onClick={() => onEditar(factura.id)}
-            className="p-1.5 rounded-lg hover:bg-yellow-50 text-gray-400 hover:text-yellow-500 transition-colors"
-          >
+          <button onClick={() => onEditar(factura.id)}
+            className="p-1.5 rounded-lg hover:bg-yellow-50 text-gray-400 hover:text-yellow-500 transition-colors">
             <Pencil size={16} />
           </button>
         )}
         {factura.estado !== 'Cancelada' && (
-          <button
-            onClick={() => onInactivar(factura)}
-            className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors"
-          >
+          <button onClick={() => onInactivar(factura)}
+            className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors">
             <XCircle size={16} />
           </button>
         )}
@@ -406,11 +382,9 @@ function GrupoDia({ fecha, facturas, onVerDetalle, onInactivar, onEditar, mostra
 
   return (
     <div className="flex flex-col gap-2">
-      <button
-        onClick={() => setExpandido(!expandido)}
+      <button onClick={() => setExpandido(!expandido)}
         className="flex items-center justify-between bg-gray-50 rounded-xl px-4 py-2.5
-          hover:bg-gray-100 transition-colors"
-      >
+          hover:bg-gray-100 transition-colors">
         <div className="flex items-center gap-3">
           {expandido
             ? <ChevronUp size={16} className="text-gray-400" />
@@ -424,14 +398,8 @@ function GrupoDia({ fecha, facturas, onVerDetalle, onInactivar, onEditar, mostra
       {expandido && (
         <div className="flex flex-col gap-2 pl-2">
           {facturas.map((f) => (
-            <FilaFactura
-              key={f.id}
-              factura={f}
-              onVerDetalle={onVerDetalle}
-              onInactivar={onInactivar}
-              onEditar={onEditar}
-              mostrarSucursal={mostrarSucursal}
-            />
+            <FilaFactura key={f.id} factura={f} onVerDetalle={onVerDetalle}
+              onInactivar={onInactivar} onEditar={onEditar} mostrarSucursal={mostrarSucursal} />
           ))}
         </div>
       )}
@@ -448,44 +416,30 @@ function PanelBusqueda({ filtros, onChange, onLimpiar, totalResultados, totalFac
     <div className="bg-white border border-gray-100 rounded-2xl p-4 flex flex-col gap-3 shadow-sm">
       <div className="relative">
         <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-        <input
-          type="text"
-          placeholder="Buscar por cliente, producto, IMEI, retoma..."
+        <input type="text" placeholder="Buscar por cliente, producto, IMEI, retoma..."
           value={filtros.texto}
           onChange={(e) => onChange({ ...filtros, texto: e.target.value })}
           className="w-full pl-9 pr-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl
-            text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"
-        />
+            text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all" />
       </div>
 
       <div className="flex gap-2 items-end flex-wrap">
         <div className="flex-1 min-w-[120px]">
-          <Input
-            label="Desde"
-            type="date"
-            value={filtros.desde}
-            onChange={(e) => onChange({ ...filtros, desde: e.target.value })}
-          />
+          <Input label="Desde" type="date" value={filtros.desde}
+            onChange={(e) => onChange({ ...filtros, desde: e.target.value })} />
         </div>
         <div className="flex-1 min-w-[120px]">
-          <Input
-            label="Hasta"
-            type="date"
-            value={filtros.hasta}
-            onChange={(e) => onChange({ ...filtros, hasta: e.target.value })}
-          />
+          <Input label="Hasta" type="date" value={filtros.hasta}
+            onChange={(e) => onChange({ ...filtros, hasta: e.target.value })} />
         </div>
-
         {esAdmin && proveedores.length > 0 && (
           <div className="flex-1 min-w-[150px]">
             <label className="block text-xs font-medium text-gray-500 mb-1">Proveedor</label>
-            <select
-              value={filtros.proveedor}
+            <select value={filtros.proveedor}
               onChange={(e) => onChange({ ...filtros, proveedor: e.target.value })}
               className="w-full py-2.5 px-3 bg-gray-50 border border-gray-200 rounded-xl
                 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white
-                transition-all text-gray-700"
-            >
+                transition-all text-gray-700">
               <option value="">Todos</option>
               {proveedores.map((nombre) => (
                 <option key={nombre} value={nombre}>{nombre}</option>
@@ -493,13 +447,10 @@ function PanelBusqueda({ filtros, onChange, onLimpiar, totalResultados, totalFac
             </select>
           </div>
         )}
-
         {hayFiltros && (
-          <button
-            onClick={onLimpiar}
+          <button onClick={onLimpiar}
             className="flex items-center gap-1 px-3 py-2.5 text-xs text-gray-500
-              hover:text-red-500 bg-gray-100 hover:bg-red-50 rounded-xl transition-colors"
-          >
+              hover:text-red-500 bg-gray-100 hover:bg-red-50 rounded-xl transition-colors">
             <X size={13} /> Limpiar
           </button>
         )}
@@ -545,9 +496,9 @@ export default function FacturarPage() {
   const mutInactivar = useMutation({
     mutationFn: (id) => cancelarFactura(id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['facturas'],           exact: false });
-      queryClient.invalidateQueries({ queryKey: ['productos-serial'],   exact: false });
-      queryClient.invalidateQueries({ queryKey: ['productos-cantidad'],  exact: false });
+      queryClient.invalidateQueries({ queryKey: ['facturas'],          exact: false });
+      queryClient.invalidateQueries({ queryKey: ['productos-serial'],  exact: false });
+      queryClient.invalidateQueries({ queryKey: ['productos-cantidad'], exact: false });
       setFacturaInactivar(null);
     },
   });
@@ -579,61 +530,45 @@ export default function FacturarPage() {
 
   return (
     <div className="flex flex-col gap-4">
-
       <div>
         <h1 className="text-xl font-bold text-gray-900">Historial de Facturas</h1>
-        <p className="text-sm text-gray-400 mt-0.5">
-          {facturas.length} factura(s) registrada(s)
-        </p>
+        <p className="text-sm text-gray-400 mt-0.5">{facturas.length} factura(s) registrada(s)</p>
       </div>
 
-      <PanelBusqueda
-        filtros={filtros}
-        onChange={setFiltros}
+      <PanelBusqueda filtros={filtros} onChange={setFiltros}
         onLimpiar={() => setFiltros(FILTROS_INICIALES)}
         totalResultados={facturasFiltradas.length}
         totalFacturas={facturas.length}
         proveedores={proveedores}
-        esAdmin={esAdmin}
-      />
+        esAdmin={esAdmin} />
 
       {isLoading ? (
         <Spinner className="py-20" />
       ) : facturasFiltradas.length === 0 ? (
-        <EmptyState
-          icon={FileText}
+        <EmptyState icon={FileText}
           titulo={facturas.length === 0 ? 'Sin facturas' : 'Sin resultados'}
           descripcion={
             facturas.length === 0
               ? 'Las facturas aparecerán aquí una vez realizadas'
               : 'Intenta con otros términos de búsqueda'
-          }
-        />
+          } />
       ) : (
         <div className="flex flex-col gap-4">
           {Object.entries(grupos).map(([fecha, facts]) => (
-            <GrupoDia
-              key={fecha}
-              fecha={fecha}
-              facturas={facts}
+            <GrupoDia key={fecha} fecha={fecha} facturas={facts}
               onVerDetalle={(id) => setFacturaDetalle(id)}
               onInactivar={(f) => setFacturaInactivar(f)}
               onEditar={handleEditar}
-              mostrarSucursal={esVistaGlobal}
-            />
+              mostrarSucursal={esVistaGlobal} />
           ))}
         </div>
       )}
 
-      {/* ── Modales ── */}
-
       {facturaDetalle && (
-        <ModalDetalle
-          facturaId={facturaDetalle}
+        <ModalDetalle facturaId={facturaDetalle}
           onClose={() => setFacturaDetalle(null)}
           onReimprimir={(f) => { setFacturaDetalle(null); setFacturaImprimir(f); }}
-          onEditar={handleEditar}
-        />
+          onEditar={handleEditar} />
       )}
 
       {facturaInactivar && (
@@ -642,9 +577,7 @@ export default function FacturarPage() {
             <div className="bg-red-50 rounded-xl p-3">
               <p className="text-sm text-gray-700">
                 ¿Seguro que quieres inactivar la factura{' '}
-                <span className="font-bold">
-                  #{String(facturaInactivar.id).padStart(6, '0')}
-                </span>{' '}
+                <span className="font-bold">#{String(facturaInactivar.id).padStart(6, '0')}</span>{' '}
                 de <span className="font-bold">{facturaInactivar.nombre_cliente}</span>?
               </p>
               <p className="text-xs text-red-500 mt-2">
@@ -652,19 +585,11 @@ export default function FacturarPage() {
               </p>
             </div>
             <div className="flex gap-2">
-              <Button
-                variant="secondary"
-                className="flex-1"
-                onClick={() => setFacturaInactivar(null)}
-              >
-                Cancelar
-              </Button>
-              <Button
-                variant="danger"
-                className="flex-1"
+              <Button variant="secondary" className="flex-1"
+                onClick={() => setFacturaInactivar(null)}>Cancelar</Button>
+              <Button variant="danger" className="flex-1"
                 loading={mutInactivar.isPending}
-                onClick={() => mutInactivar.mutate(facturaInactivar.id)}
-              >
+                onClick={() => mutInactivar.mutate(facturaInactivar.id)}>
                 Inactivar
               </Button>
             </div>
@@ -673,19 +598,14 @@ export default function FacturarPage() {
       )}
 
       {facturaEditar && (
-        <ModalEditarFactura
-          facturaId={facturaEditar}
+        <ModalEditarFactura facturaId={facturaEditar}
           onClose={() => setFacturaEditar(null)}
-          onGuardado={() => setFacturaEditar(null)}
-        />
+          onGuardado={() => setFacturaEditar(null)} />
       )}
 
       {facturaImprimir && (
-        <FacturaTermica
-          factura={facturaImprimir}
-          garantias={garantiasData || []}
-          onClose={() => setFacturaImprimir(null)}
-        />
+        <FacturaTermica factura={facturaImprimir} garantias={garantiasData || []}
+          onClose={() => setFacturaImprimir(null)} />
       )}
     </div>
   );
