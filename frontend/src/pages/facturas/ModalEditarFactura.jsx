@@ -92,7 +92,8 @@ function buildEstadoInicial(data) {
 function RetomaSerial({ retoma, setRetomaField, productosSerial }) {
   const [busqueda, setBusqueda] = useState('');
 
-  const filtrados = (productosSerial || []).filter((p) =>
+  const lista     = Array.isArray(productosSerial) ? productosSerial : (productosSerial?.items ?? []);
+  const filtrados = lista.filter((p) =>
     p.nombre.toLowerCase().includes(busqueda.toLowerCase())
   );
 
@@ -167,7 +168,8 @@ function RetomaSerial({ retoma, setRetomaField, productosSerial }) {
 function RetomaCantidad({ retoma, setRetomaField, productosCantidad }) {
   const [busqueda, setBusqueda] = useState('');
 
-  const filtrados = (productosCantidad || []).filter((p) =>
+  const lista     = Array.isArray(productosCantidad) ? productosCantidad : (productosCantidad?.items ?? []);
+  const filtrados = lista.filter((p) =>
     p.nombre.toLowerCase().includes(busqueda.toLowerCase())
   );
 

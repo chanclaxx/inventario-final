@@ -170,6 +170,13 @@ const crearFactura = async ({
           });
         }
       }
+
+      if (retoma.ingreso_inventario && retoma.tipo_retoma === 'cantidad' && retoma.producto_cantidad_id) {
+        await cantidadRepo.ajustarStock(
+          retoma.producto_cantidad_id,
+          Number(retoma.cantidad_retoma || 1)
+        );
+      }
     }
 
     await client.query('COMMIT');
