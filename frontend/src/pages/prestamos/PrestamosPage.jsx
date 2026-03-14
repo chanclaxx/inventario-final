@@ -10,7 +10,7 @@ import { Badge }       from '../../components/ui/Badge';
 import { Spinner }     from '../../components/ui/Spinner';
 import { EmptyState }  from '../../components/ui/EmptyState';
 import { SearchInput } from '../../components/ui/SearchInput';
-import { ModalCompra } from './ModalCompra';
+import { ModalCompra } from "../proveedores/ModalCompra";
 import { useSucursalKey } from '../../hooks/useSucursalKey';
 import api from '../../api/axios.config';
 import {
