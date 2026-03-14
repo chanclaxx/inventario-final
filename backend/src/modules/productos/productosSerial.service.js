@@ -1,17 +1,17 @@
 const repo = require('./productosSerial.repository');
 
-// Solo esta función cambia — el resto del service queda idéntico
 const getProductos = (sucursalId, negocioId) =>
   repo.findAll(sucursalId, negocioId);
 
+// ← CAMBIADA: ahora incluye negocio_id
 const getProductoById = async (negocioId, id) => {
   const producto = await repo.findByIdYNegocio(id, negocioId);
   if (!producto) throw { status: 404, message: 'Producto no encontrado' };
   return producto;
 };
 
+// ← CAMBIADA: ahora verifica sucursal
 const crearProducto = async (negocioId, datos) => {
-  // ── Segunda capa: verificar que sucursal_id pertenece al negocio ──
   const { pool } = require('../../config/db');
   const { rows } = await pool.query(
     `SELECT id FROM sucursales WHERE id = $1 AND negocio_id = $2 AND activa = true`,
@@ -29,15 +29,44 @@ const actualizarProducto = async (negocioId, id, datos) => {
   return actualizado;
 };
 
+// ← CAMBIADA: ahora verifica ownership del producto
 const getSeriales = async (negocioId, productoId, vendido) => {
-  // ── Verificar ownership del producto antes de listar sus seriales ──
   const producto = await repo.findByIdYNegocio(productoId, negocioId);
   if (!producto) throw { status: 404, message: 'Producto no encontrado' };
   return repo.getSeriales(productoId, vendido);
 };
 
+// ← SIN CAMBIOS — igual que el original
+const agregarSerial = async (
+  negocioId,
+  productoId,
+  { imei, fecha_entrada, costo_compra, cliente_origen, proveedor_id, reactivar_serial_id }
+) => {
+  const valido = await repo.perteneceAlNegocio(productoId, negocioId);
+  if (!valido) throw { status: 404, message: 'Producto no encontrado' };
+
+  if (reactivar_serial_id) {
+    return repo.reactivarSerial(reactivar_serial_id, {
+      costo_compra: costo_compra ?? null,
+      proveedor_id: proveedor_id || null,
+    });
+  }
+
+  const existe = await repo.findSerialByIMEI(imei);
+  if (existe) throw { status: 409, message: `El IMEI ${imei} ya está registrado` };
+
+  return repo.insertarSerial({
+    producto_id:    productoId,
+    imei,
+    fecha_entrada:  fecha_entrada  || new Date().toISOString().split('T')[0],
+    costo_compra:   costo_compra   ?? null,
+    cliente_origen: cliente_origen || null,
+    proveedor_id:   proveedor_id   || null,
+  });
+};
+
+// ← CAMBIADA: ahora verifica ownership del serial
 const actualizarSerial = async (negocioId, serialId, { imei, costo_compra, precio, producto_id }) => {
-  // ── Verificar que el serial pertenece al negocio ──
   const serial = await repo.findSerialByIdYNegocio(serialId, negocioId);
   if (!serial) throw { status: 404, message: 'Serial no encontrado' };
 
@@ -50,8 +79,8 @@ const actualizarSerial = async (negocioId, serialId, { imei, costo_compra, preci
   return actualizado;
 };
 
+// ← CAMBIADA: ahora verifica ownership del serial
 const eliminarSerial = async (negocioId, serialId) => {
-  // ── Verificar que el serial pertenece al negocio ──
   const serial = await repo.findSerialByIdYNegocio(serialId, negocioId);
   if (!serial) throw { status: 404, message: 'Serial no encontrado' };
 
@@ -59,14 +88,10 @@ const eliminarSerial = async (negocioId, serialId) => {
   if (!eliminado) throw { status: 404, message: 'Serial no encontrado' };
 };
 
-/**
- * Verifica si un IMEI existe en cualquier sucursal del negocio.
- * Retorna { existe: false } o { existe: true, serial: { ...datos } }
- */
+// ← SIN CAMBIOS — igual que el original
 const verificarImei = async (imei, negocioId) => {
   const serial = await repo.findSerialByIMEIEnNegocio(imei, negocioId);
   if (!serial) return { existe: false };
-
   return {
     existe: true,
     serial: {
@@ -86,12 +111,20 @@ const verificarImei = async (imei, negocioId) => {
     },
   };
 };
-const getComprasCliente = async (negocioId, q) => {
-  return repo.findComprasCliente(negocioId, q || '');
-};
+
+// ← SIN CAMBIOS — igual que el original
+const getComprasCliente = async (negocioId, q) =>
+  repo.findComprasCliente(negocioId, q || '');
 
 module.exports = {
-  getProductos, getProductoById, crearProducto, actualizarProducto,
-  getSeriales, agregarSerial, actualizarSerial, eliminarSerial,
-  verificarImei,getComprasCliente
+  getProductos,
+  getProductoById,
+  crearProducto,
+  actualizarProducto,
+  getSeriales,
+  agregarSerial,
+  actualizarSerial,
+  eliminarSerial,
+  verificarImei,
+  getComprasCliente,
 };
