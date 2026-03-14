@@ -26,12 +26,15 @@ export function ProductosCantidad() {
   const [productoAEditar,  setProductoAEditar]  = useState(null);
 
   const { data: productosData, isLoading } = useQuery({
-    queryKey:  ['productos-cantidad', ...sucursalKey],
-    queryFn:   () => getProductosCantidad().then((r) => r.data.data),
-    enabled:   sucursalLista,
-    staleTime: 0,
-    gcTime:    0,
-  });
+  queryKey:  ['productos-cantidad', ...sucursalKey],
+  queryFn:   () => getProductosCantidad().then((r) => {
+    console.log('raw response:', r.data);
+    return r.data.data;
+  }),
+  enabled:   sucursalLista,
+  staleTime: 0,
+  gcTime:    0,
+});
 
   const agregarItem = useCarritoStore((s) => s.agregarItem);
 
