@@ -12,7 +12,7 @@ import {
 } from '../../api/prestatarios.api';
 import { getClientes, crearCliente } from '../../api/clientes.api';
 import useCarritoStore from '../../store/carritoStore';
-import { User, Users, Plus, ChevronLeft } from 'lucide-react';
+import { User, Users, Plus, ChevronLeft, Search } from 'lucide-react';
 
 // ── Selector genérico (para prestatarios y empleados) ─────────────────────
 function SelectorOCrear({ items, onSeleccionar, onCrear, placeholder, labelCrear, loading, renderItem }) {
@@ -76,11 +76,21 @@ function SelectorOCrear({ items, onSeleccionar, onCrear, placeholder, labelCrear
   );
 }
 
-// ── Selector de clientes con formulario completo ──────────────────────────
+// ── Selector de clientes con búsqueda y formulario completo ──────────────
 function SelectorOCrearCliente({ items, onSeleccionar, onCrear, loading }) {
-  const [modo, setModo] = useState('seleccionar');
-  const [form, setForm] = useState({
+  const [modo,     setModo]     = useState('seleccionar');
+  const [busqueda, setBusqueda] = useState('');
+  const [form,     setForm]     = useState({
     nombre: '', cedula: '', celular: '', direccion: '', notas: '',
+  });
+
+  const clientesFiltrados = items.filter((c) => {
+    if (!busqueda.trim()) return true;
+    const q = busqueda.toLowerCase();
+    return (
+      c.nombre?.toLowerCase().includes(q) ||
+      c.cedula?.toLowerCase().includes(q)
+    );
   });
 
   const handleCrear = () => {
@@ -90,21 +100,22 @@ function SelectorOCrearCliente({ items, onSeleccionar, onCrear, loading }) {
     setModo('seleccionar');
   };
 
+  const volverASeleccionar = () => {
+    setModo('seleccionar');
+    setForm({ nombre: '', cedula: '', celular: '', direccion: '', notas: '' });
+  };
+
   if (loading) return <Spinner className="py-4" />;
 
   if (modo === 'crear') {
     return (
       <div className="flex flex-col gap-3">
         <button
-          onClick={() => {
-            setModo('seleccionar');
-            setForm({ nombre: '', cedula: '', celular: '', direccion: '', notas: '' });
-          }}
+          onClick={volverASeleccionar}
           className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-600 w-fit"
         >
           <ChevronLeft size={13} /> Volver
         </button>
-
         <Input
           label="Nombre completo *"
           placeholder="Nombre del cliente"
@@ -136,7 +147,6 @@ function SelectorOCrearCliente({ items, onSeleccionar, onCrear, loading }) {
           value={form.notas}
           onChange={(e) => setForm({ ...form, notas: e.target.value })}
         />
-
         <Button
           size="sm"
           disabled={!form.nombre.trim() || !form.cedula.trim()}
@@ -150,25 +160,47 @@ function SelectorOCrearCliente({ items, onSeleccionar, onCrear, loading }) {
 
   return (
     <div className="flex flex-col gap-2">
-      {items.length > 0 ? (
-        <div className="flex flex-col gap-1 max-h-40 overflow-y-auto">
-          {items.map((item) => (
+      {/* ── Buscador ── */}
+      <div className="relative">
+        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+        <input
+          type="text"
+          placeholder="Buscar por nombre o cédula..."
+          value={busqueda}
+          onChange={(e) => setBusqueda(e.target.value)}
+          className="w-full pl-8 pr-3 py-2 bg-gray-50 border border-gray-200 rounded-xl
+            text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"
+        />
+      </div>
+
+      {/* ── Lista filtrada ── */}
+      {clientesFiltrados.length > 0 ? (
+        <div className="flex flex-col gap-1 max-h-44 overflow-y-auto">
+          {clientesFiltrados.map((item) => (
             <button
               key={item.id}
               onClick={() => onSeleccionar(item)}
               className="text-left px-3 py-2 rounded-xl border border-gray-100
-                hover:border-blue-200 hover:bg-blue-50/30 transition-colors text-sm text-gray-800"
+                hover:border-blue-200 hover:bg-blue-50/30 transition-colors"
             >
-              {item.nombre}
+              <p className="text-sm font-medium text-gray-800">{item.nombre}</p>
               {item.cedula && (
-                <span className="text-xs text-gray-400 ml-2">{item.cedula}</span>
+                <p className="text-xs text-gray-400">CC: {item.cedula}</p>
+              )}
+              {item.celular && (
+                <p className="text-xs text-gray-400">Tel: {item.celular}</p>
               )}
             </button>
           ))}
         </div>
       ) : (
-        <p className="text-xs text-gray-400 px-1">Sin clientes registrados</p>
+        <p className="text-xs text-gray-400 px-1">
+          {busqueda.trim()
+            ? `Sin resultados para "${busqueda}"`
+            : 'Sin clientes registrados'}
+        </p>
       )}
+
       <button
         onClick={() => setModo('crear')}
         className="flex items-center gap-1 text-xs text-blue-500 hover:text-blue-700 w-fit"
@@ -207,8 +239,6 @@ export function ModalPrestamo({ open, onClose }) {
   const [valorPrestamo,  setValorPrestamo]  = useState(String(total));
   const [error,          setError]          = useState('');
 
-  // ── Queries ──
-  // prestatarios y clientes son de negocio (no sucursal) → sin sucursalKey
   const { data: prestatariosData, isLoading: loadingPrestatarios } = useQuery({
     queryKey: ['prestatarios'],
     queryFn:  () => getPrestatarios().then((r) => r.data.data),
@@ -227,7 +257,6 @@ export function ModalPrestamo({ open, onClose }) {
     enabled:  open && tipoCliente === 'cliente',
   });
 
-  // ── Mutations ──
   const mutCrearPrestatario = useMutation({
     mutationFn: (nombre) => crearPrestatario({ nombre }),
     onSuccess: (res) => {
@@ -309,8 +338,8 @@ export function ModalPrestamo({ open, onClose }) {
 
       mutPrestamo.mutate({
         prestatario:       clienteSel.nombre,
-        cedula:            clienteSel.cedula   || 'S/C',
-        telefono:          clienteSel.celular  || '0000000000',
+        cedula:            clienteSel.cedula  || 'S/C',
+        telefono:          clienteSel.celular || '0000000000',
         nombre_producto:   item.nombre,
         imei:              item.imei        || null,
         producto_id:       item.producto_id || null,
@@ -374,7 +403,6 @@ export function ModalPrestamo({ open, onClose }) {
         {/* ── Flujo Compañero ── */}
         {tipoCliente === 'companero' && (
           <div className="flex flex-col gap-4">
-
             <div className="flex flex-col gap-2">
               <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
                 1. Prestatario (negocio)
