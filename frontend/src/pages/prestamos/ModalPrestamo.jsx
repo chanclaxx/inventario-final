@@ -84,14 +84,17 @@ function SelectorOCrearCliente({ items, onSeleccionar, onCrear, loading }) {
     nombre: '', cedula: '', celular: '', direccion: '', notas: '',
   });
 
-  const clientesFiltrados = items.filter((c) => {
-    if (!busqueda.trim()) return true;
-    const q = busqueda.toLowerCase();
-    return (
-      c.nombre?.toLowerCase().includes(q) ||
-      c.cedula?.toLowerCase().includes(q)
-    );
-  });
+  // Solo mostrar resultados cuando el usuario haya escrito algo
+  const mostrarResultados = busqueda.trim().length > 0;
+  const clientesFiltrados = mostrarResultados
+    ? items.filter((c) => {
+        const q = busqueda.toLowerCase();
+        return (
+          c.nombre?.toLowerCase().includes(q) ||
+          c.cedula?.toLowerCase().includes(q)
+        );
+      })
+    : [];
 
   const handleCrear = () => {
     if (!form.nombre.trim() || !form.cedula.trim()) return;
@@ -102,6 +105,7 @@ function SelectorOCrearCliente({ items, onSeleccionar, onCrear, loading }) {
 
   const volverASeleccionar = () => {
     setModo('seleccionar');
+    setBusqueda('');
     setForm({ nombre: '', cedula: '', celular: '', direccion: '', notas: '' });
   };
 
@@ -116,42 +120,17 @@ function SelectorOCrearCliente({ items, onSeleccionar, onCrear, loading }) {
         >
           <ChevronLeft size={13} /> Volver
         </button>
-        <Input
-          label="Nombre completo *"
-          placeholder="Nombre del cliente"
-          value={form.nombre}
-          onChange={(e) => setForm({ ...form, nombre: e.target.value })}
-          autoFocus
-        />
-        <Input
-          label="Cédula *"
-          placeholder="123456789"
-          value={form.cedula}
-          onChange={(e) => setForm({ ...form, cedula: e.target.value })}
-        />
-        <Input
-          label="Celular"
-          placeholder="3001234567"
-          value={form.celular}
-          onChange={(e) => setForm({ ...form, celular: e.target.value })}
-        />
-        <Input
-          label="Dirección"
-          placeholder="Calle 123..."
-          value={form.direccion}
-          onChange={(e) => setForm({ ...form, direccion: e.target.value })}
-        />
-        <Input
-          label="Notas"
-          placeholder="Observaciones opcionales..."
-          value={form.notas}
-          onChange={(e) => setForm({ ...form, notas: e.target.value })}
-        />
-        <Button
-          size="sm"
-          disabled={!form.nombre.trim() || !form.cedula.trim()}
-          onClick={handleCrear}
-        >
+        <Input label="Nombre completo *" placeholder="Nombre del cliente"
+          value={form.nombre} onChange={(e) => setForm({ ...form, nombre: e.target.value })} autoFocus />
+        <Input label="Cédula *" placeholder="123456789"
+          value={form.cedula} onChange={(e) => setForm({ ...form, cedula: e.target.value })} />
+        <Input label="Celular" placeholder="3001234567"
+          value={form.celular} onChange={(e) => setForm({ ...form, celular: e.target.value })} />
+        <Input label="Dirección" placeholder="Calle 123..."
+          value={form.direccion} onChange={(e) => setForm({ ...form, direccion: e.target.value })} />
+        <Input label="Notas" placeholder="Observaciones opcionales..."
+          value={form.notas} onChange={(e) => setForm({ ...form, notas: e.target.value })} />
+        <Button size="sm" disabled={!form.nombre.trim() || !form.cedula.trim()} onClick={handleCrear}>
           Guardar cliente
         </Button>
       </div>
@@ -160,7 +139,7 @@ function SelectorOCrearCliente({ items, onSeleccionar, onCrear, loading }) {
 
   return (
     <div className="flex flex-col gap-2">
-      {/* ── Buscador ── */}
+      {/* ── Input de búsqueda ── */}
       <div className="relative">
         <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
         <input
@@ -173,32 +152,27 @@ function SelectorOCrearCliente({ items, onSeleccionar, onCrear, loading }) {
         />
       </div>
 
-      {/* ── Lista filtrada ── */}
-      {clientesFiltrados.length > 0 ? (
-        <div className="flex flex-col gap-1 max-h-44 overflow-y-auto">
-          {clientesFiltrados.map((item) => (
-            <button
-              key={item.id}
-              onClick={() => onSeleccionar(item)}
-              className="text-left px-3 py-2 rounded-xl border border-gray-100
-                hover:border-blue-200 hover:bg-blue-50/30 transition-colors"
-            >
-              <p className="text-sm font-medium text-gray-800">{item.nombre}</p>
-              {item.cedula && (
-                <p className="text-xs text-gray-400">CC: {item.cedula}</p>
-              )}
-              {item.celular && (
-                <p className="text-xs text-gray-400">Tel: {item.celular}</p>
-              )}
-            </button>
-          ))}
-        </div>
-      ) : (
-        <p className="text-xs text-gray-400 px-1">
-          {busqueda.trim()
-            ? `Sin resultados para "${busqueda}"`
-            : 'Sin clientes registrados'}
-        </p>
+      {/* ── Resultados — solo aparecen al escribir ── */}
+      {mostrarResultados && (
+        clientesFiltrados.length > 0 ? (
+          <div className="flex flex-col gap-1 max-h-44 overflow-y-auto rounded-xl border border-gray-100 bg-white">
+            {clientesFiltrados.map((item) => (
+              <button key={item.id} onClick={() => onSeleccionar(item)}
+                className="text-left px-3 py-2.5 hover:bg-blue-50 transition-colors border-b
+                  border-gray-50 last:border-0">
+                <p className="text-sm font-medium text-gray-800">{item.nombre}</p>
+                <p className="text-xs text-gray-400">
+                  CC: {item.cedula}
+                  {item.celular ? ` · Tel: ${item.celular}` : ''}
+                </p>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <p className="text-xs text-gray-400 px-1">
+            Sin resultados para "{busqueda}"
+          </p>
+        )
       )}
 
       <button
