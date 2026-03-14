@@ -38,10 +38,8 @@ const getFacturas = (sucursalId, negocioId) =>
   facturasRepo.findAll(sucursalId, negocioId);
 
 const getFacturaById = async (negocioId, id) => {
-  const valida = await facturasRepo.perteneceAlNegocio(id, negocioId);
-  if (!valida) throw { status: 404, message: 'Factura no encontrada' };
-
-  const factura = await facturasRepo.findById(id);
+  const factura = await facturasRepo.findByIdYNegocio(id, negocioId);
+  if (!factura) throw { status: 404, message: 'Factura no encontrada' };
   const [lineas, pagos, retoma] = await Promise.all([
     facturasRepo.getLineas(id),
     facturasRepo.getPagos(id),
@@ -50,23 +48,24 @@ const getFacturaById = async (negocioId, id) => {
   return { ...factura, lineas, pagos, retoma };
 };
 
-// ─── Crear factura ────────────────────────────────────────────────────────────
-
 const crearFactura = async ({
   negocio_id, sucursal_id, usuario_id,
   nombre_cliente, cedula, celular, email, direccion, notas,
   lineas, pagos, retoma,
 }) => {
+  // ── Segunda capa: verificar que sucursal_id pertenece al negocio ──
+  const { rows: sucRows } = await pool.query(
+    `SELECT id FROM sucursales WHERE id = $1 AND negocio_id = $2 AND activa = true`,
+    [sucursal_id, negocio_id]
+  );
+  if (!sucRows.length) throw { status: 403, message: 'Sucursal no válida para este negocio' };
+
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
     const cliente_id = await resolverClienteId(client, negocio_id, {
-      cedula,
-      nombre: nombre_cliente,
-      celular,
-      email,
-      direccion,
+      cedula, nombre: nombre_cliente, celular, email, direccion,
     });
 
     const factura = await facturasRepo.create(client, {
@@ -76,11 +75,12 @@ const crearFactura = async ({
 
     for (const linea of lineas) {
       await facturasRepo.insertarLinea(client, {
-        factura_id:      factura.id,
-        nombre_producto: linea.nombre_producto,
-        imei:            linea.imei || null,
-        cantidad:        linea.cantidad,
-        precio:          linea.precio,
+      factura_id:      factura.id,
+      nombre_producto: linea.nombre_producto,
+      imei:            linea.imei || null,
+      cantidad:        linea.cantidad,
+      precio:          linea.precio,
+      producto_id:     linea.producto_id || null,   // ← agregar
       });
 
       if (linea.imei) {
@@ -91,10 +91,7 @@ const crearFactura = async ({
           [linea.imei, sucursal_id]
         );
         if (!serialRows.length) {
-          throw {
-            status: 400,
-            message: `El producto ${linea.nombre_producto} no pertenece a esta sucursal`,
-          };
+          throw { status: 400, message: `El producto ${linea.nombre_producto} no pertenece a esta sucursal` };
         }
         await client.query(
           'UPDATE seriales SET vendido = true, fecha_salida = CURRENT_DATE WHERE imei = $1',
@@ -102,20 +99,20 @@ const crearFactura = async ({
         );
 
       } else if (linea.producto_id) {
-        const producto = await cantidadRepo.findById(linea.producto_id);
-        if (!producto) {
-          throw { status: 404, message: `Producto ${linea.nombre_producto} no encontrado` };
-        }
+        const { rows: prodRows } = await client.query(
+          `SELECT id, stock, sucursal_id FROM productos_cantidad WHERE id = $1`,
+          [linea.producto_id]
+        );
+        const producto = prodRows[0];
+        if (!producto) throw { status: 404, message: `Producto ${linea.nombre_producto} no encontrado` };
         if (producto.sucursal_id !== sucursal_id) {
-          throw {
-            status: 400,
-            message: `El producto ${linea.nombre_producto} no pertenece a esta sucursal`,
-          };
+          throw { status: 400, message: `El producto ${linea.nombre_producto} no pertenece a esta sucursal` };
         }
         if (producto.stock < linea.cantidad) {
           throw { status: 400, message: `Stock insuficiente para ${linea.nombre_producto}` };
         }
-        await cantidadRepo.ajustarStock(linea.producto_id, -linea.cantidad);
+        // ── Dentro de la transacción ──
+        await facturasRepo.ajustarStockCantidad(client, linea.producto_id, -linea.cantidad);
       }
     }
 
@@ -142,39 +139,41 @@ const crearFactura = async ({
       });
 
       if (retoma.ingreso_inventario && retoma.tipo_retoma === 'serial' && retoma.imei) {
-        const existeSerial = await serialRepo.findSerialByIMEI(retoma.imei);
+        const { rows: existeRows } = await client.query(
+          `SELECT id FROM seriales WHERE imei = $1`, [retoma.imei]
+        );
+        const existeSerial = existeRows[0] || null;
 
         if (retoma.reactivar_serial_id) {
           await client.query(
-            `UPDATE seriales
-             SET vendido = false, prestado = false, fecha_salida = NULL, cliente_origen = $1
-             WHERE id = $2`,
+            `UPDATE seriales SET vendido = false, prestado = false,
+             fecha_salida = NULL, cliente_origen = $1 WHERE id = $2`,
             [nombre_cliente, retoma.reactivar_serial_id]
           );
         } else if (existeSerial) {
           if (retoma.producto_serial_id) {
             await client.query(
-              `UPDATE seriales
-               SET vendido = false, prestado = false, fecha_salida = NULL, cliente_origen = $1
-               WHERE imei = $2`,
+              `UPDATE seriales SET vendido = false, prestado = false,
+               fecha_salida = NULL, cliente_origen = $1 WHERE imei = $2`,
               [nombre_cliente, retoma.imei]
             );
           }
         } else if (retoma.producto_serial_id) {
-          await serialRepo.insertarSerial({
-            producto_id:    retoma.producto_serial_id,
-            imei:           retoma.imei,
-            fecha_entrada:  new Date().toISOString().split('T')[0],
-            costo_compra:   retoma.valor_retoma,
-            cliente_origen: nombre_cliente,
-          });
+          // ── Dentro de la transacción ──
+          await client.query(
+            `INSERT INTO seriales(producto_id, imei, fecha_entrada, costo_compra, cliente_origen)
+             VALUES ($1, $2, $3, $4, $5)`,
+            [retoma.producto_serial_id, retoma.imei,
+             new Date().toISOString().split('T')[0],
+             retoma.valor_retoma, nombre_cliente]
+          );
         }
       }
 
       if (retoma.ingreso_inventario && retoma.tipo_retoma === 'cantidad' && retoma.producto_cantidad_id) {
-        await cantidadRepo.ajustarStock(
-          retoma.producto_cantidad_id,
-          Number(retoma.cantidad_retoma || 1)
+        // ── Dentro de la transacción ──
+        await facturasRepo.ajustarStockCantidad(
+          client, retoma.producto_cantidad_id, Number(retoma.cantidad_retoma || 1)
         );
       }
     }
@@ -192,13 +191,10 @@ const crearFactura = async ({
 // ─── Cancelar factura ─────────────────────────────────────────────────────────
 
 const cancelarFactura = async (negocioId, id) => {
-  const valida = await facturasRepo.perteneceAlNegocio(id, negocioId);
-  if (!valida) throw { status: 404, message: 'Factura no encontrada' };
-
-  const factura = await facturasRepo.findById(id);
-  if (factura.estado === 'Cancelada') {
-    throw { status: 400, message: 'La factura ya está cancelada' };
-  }
+  // ── Una sola query: ownership + datos ──
+  const factura = await facturasRepo.findByIdYNegocio(id, negocioId);
+  if (!factura) throw { status: 404, message: 'Factura no encontrada' };
+  if (factura.estado === 'Cancelada') throw { status: 400, message: 'La factura ya está cancelada' };
 
   const client = await pool.connect();
   try {
@@ -211,12 +207,9 @@ const cancelarFactura = async (negocioId, id) => {
           'UPDATE seriales SET vendido = false, fecha_salida = NULL WHERE imei = $1',
           [linea.imei]
         );
-      } else {
-        const { rows } = await client.query(
-          'SELECT id FROM productos_cantidad WHERE nombre ILIKE $1 AND sucursal_id = $2',
-          [linea.nombre_producto, factura.sucursal_id]
-        );
-        if (rows[0]) await cantidadRepo.ajustarStock(rows[0].id, linea.cantidad);
+      } else if (linea.producto_id) {
+        // ── Usar producto_id directo en vez de ILIKE por nombre ──
+        await facturasRepo.ajustarStockCantidad(client, linea.producto_id, linea.cantidad);
       }
     }
 
@@ -229,7 +222,6 @@ const cancelarFactura = async (negocioId, id) => {
     client.release();
   }
 };
-
 // ─── Editar factura ───────────────────────────────────────────────────────────
 
 const editarFactura = async (negocioId, id, {

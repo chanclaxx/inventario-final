@@ -11,26 +11,20 @@ const getProductos = async (req, res, next) => {
 
 const getProductoById = async (req, res, next) => {
   try {
-    const data = await service.getProductoById(req.params.id);
+    // ← agregar negocio_id
+    const data = await service.getProductoById(req.user.negocio_id, req.params.id);
     res.json({ ok: true, data });
   } catch (err) { next(err); }
 };
 
 const crearProducto = async (req, res, next) => {
   try {
-    // En vista global el admin debe indicar la sucursal destino en el body
-    const sucursal_id = req.todasSucursales
-      ? req.body.sucursal_id
-      : req.sucursal_id;
-
+    const sucursal_id = req.todasSucursales ? req.body.sucursal_id : req.sucursal_id;
     if (!sucursal_id) {
-      return res.status(400).json({
-        ok: false,
-        error: 'Debes indicar la sucursal destino del producto',
-      });
+      return res.status(400).json({ ok: false, error: 'Debes indicar la sucursal destino del producto' });
     }
-
-    const data = await service.crearProducto({ ...req.body, sucursal_id });
+    // ← agregar negocio_id al service
+    const data = await service.crearProducto(req.user.negocio_id, { ...req.body, sucursal_id });
     res.status(201).json({ ok: true, data, message: 'Producto creado correctamente' });
   } catch (err) { next(err); }
 };

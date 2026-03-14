@@ -11,14 +11,14 @@ const getProductos = async (req, res, next) => {
 
 const getProductoById = async (req, res, next) => {
   try {
-    const data = await service.getProductoById(req.params.id);
+    const data = await service.getProductoById(req.user.negocio_id, req.params.id); // ← agregar negocio_id
     res.json({ ok: true, data });
   } catch (err) { next(err); }
 };
 
 const crearProducto = async (req, res, next) => {
   try {
-    const data = await service.crearProducto({
+    const data = await service.crearProducto(req.user.negocio_id, { // ← agregar negocio_id
       ...req.body,
       sucursal_id: req.sucursal_id,
     });
@@ -33,12 +33,11 @@ const actualizarProducto = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+
 const getSeriales = async (req, res, next) => {
   try {
-    const vendido = req.query.vendido !== undefined
-      ? req.query.vendido === 'true'
-      : null;
-    const data = await service.getSeriales(req.params.id, vendido);
+    const vendido = req.query.vendido !== undefined ? req.query.vendido === 'true' : null;
+    const data = await service.getSeriales(req.user.negocio_id, req.params.id, vendido); // ← agregar negocio_id
     res.json({ ok: true, data });
   } catch (err) { next(err); }
 };
@@ -52,14 +51,14 @@ const agregarSerial = async (req, res, next) => {
 
 const actualizarSerial = async (req, res, next) => {
   try {
-    const data = await service.actualizarSerial(req.params.id, req.body);
+    const data = await service.actualizarSerial(req.user.negocio_id, req.params.id, req.body); // ← agregar negocio_id
     res.json({ ok: true, data, message: 'Serial actualizado correctamente' });
   } catch (err) { next(err); }
 };
 
 const eliminarSerial = async (req, res, next) => {
   try {
-    await service.eliminarSerial(req.params.id);
+    await service.eliminarSerial(req.user.negocio_id, req.params.id); // ← agregar negocio_id
     res.json({ ok: true, message: 'Serial eliminado correctamente' });
   } catch (err) { next(err); }
 };

@@ -281,9 +281,23 @@ const getResumenGlobal = async (negocioId) => {
     mn: manuales.rows,
   });
 };
-
-module.exports = {
-  findCajaAbierta, findById, perteneceAlNegocio, getMovimientos,
-  abrirCaja, cerrarCaja, insertarMovimiento,
-  getResumenCaja, getResumenDia, getResumenGlobal,
+const findByIdYNegocio = async (id, negocioId) => {
+  const { rows } = await pool.query(`
+    SELECT c.*, u.nombre AS usuario_nombre
+    FROM aperturas_caja c
+    JOIN sucursales s      ON s.id = c.sucursal_id
+    LEFT JOIN usuarios u   ON u.id = c.usuario_id
+    WHERE c.id = $1 AND s.negocio_id = $2
+  `, [id, negocioId]);
+  return rows[0] || null;
 };
+
+// También agregar al módulo exports
+module.exports = {
+  findCajaAbierta, findById, findByIdYNegocio,   // ← agregar findByIdYNegocio
+  perteneceAlNegocio,                             // ← mantener por compatibilidad
+  getMovimientos, abrirCaja, cerrarCaja,
+  insertarMovimiento, getResumenCaja,
+  getResumenDia, getResumenGlobal,
+};
+

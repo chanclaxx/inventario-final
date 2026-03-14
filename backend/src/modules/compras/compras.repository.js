@@ -98,7 +98,28 @@ const insertarLinea = async (client, {
   return rows[0];
 };
 
+const findByIdYNegocio = async (id, negocioId) => {
+  const { rows } = await pool.query(`
+    SELECT c.*, p.nombre AS proveedor_nombre,
+           u.nombre AS usuario_nombre, su.nombre AS sucursal_nombre
+    FROM compras c
+    JOIN  sucursales  su ON su.id = c.sucursal_id
+    JOIN  proveedores p  ON p.id  = c.proveedor_id
+    LEFT JOIN usuarios u ON u.id  = c.usuario_id
+    WHERE c.id = $1 AND su.negocio_id = $2
+  `, [id, negocioId]);
+  return rows[0] || null;
+};
+
+const ajustarStockCantidad = async (client, productoId, cantidad) => {
+  await client.query(
+    'UPDATE productos_cantidad SET stock = stock + $1 WHERE id = $2',
+    [cantidad, productoId]
+  );
+};
+
 module.exports = {
-  findAll, findById, perteneceAlNegocio,
-  findByProveedor, getLineas, create, insertarLinea,
+  findAll, findById, findByIdYNegocio,
+  perteneceAlNegocio, findByProveedor,
+  getLineas, create, insertarLinea, ajustarStockCantidad,
 };

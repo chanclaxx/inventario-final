@@ -1,22 +1,29 @@
-const { pool } = require('../../config/db');
+const { pool }     = require('../../config/db');
 const repo         = require('./prestamos.repository');
 const cantidadRepo = require('../productos/productosCantidad.repository');
 
-const getPrestamos = (sucursalId, negocioId) => repo.findAll(sucursalId, negocioId);
+const getPrestamos    = (sucursalId, negocioId) => repo.findAll(sucursalId, negocioId);
 
 const getPrestamoById = async (negocioId, id) => {
-  const valido = await repo.perteneceAlNegocio(id, negocioId);
-  if (!valido) throw { status: 404, message: 'Préstamo no encontrado' };
-  const prestamo = await repo.findById(id);
-  const abonos   = await repo.getAbonos(id);
+  const prestamo = await repo.findByIdYNegocio(id, negocioId);
+  if (!prestamo) throw { status: 404, message: 'Préstamo no encontrado' };
+  const abonos = await repo.getAbonos(id);
   return { ...prestamo, abonos };
 };
 
 const crearPrestamo = async ({
-  sucursal_id, usuario_id, prestatario, cedula, telefono,
+  sucursal_id, usuario_id, negocio_id,
+  prestatario, cedula, telefono,
   nombre_producto, imei, producto_id, cantidad_prestada, valor_prestamo,
   prestatario_id, empleado_id, cliente_id,
 }) => {
+  // ── Verificar que sucursal_id pertenece al negocio (segunda capa) ──
+  const { rows: sucRows } = await pool.query(
+    `SELECT id FROM sucursales WHERE id = $1 AND negocio_id = $2 AND activa = true`,
+    [sucursal_id, negocio_id]
+  );
+  if (!sucRows.length) throw { status: 403, message: 'Sucursal no válida para este negocio' };
+
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -33,7 +40,6 @@ const crearPrestamo = async ({
     });
 
     if (imei) {
-      // ── FIX: verificar que el serial pertenezca a esta sucursal ──────────
       const { rows } = await client.query(
         `SELECT s.id FROM seriales s
          JOIN productos_serial ps ON ps.id = s.producto_id
@@ -43,23 +49,23 @@ const crearPrestamo = async ({
       if (!rows.length) {
         throw { status: 400, message: `El producto ${nombre_producto} no pertenece a esta sucursal` };
       }
-      await client.query(
-        'UPDATE seriales SET prestado = true WHERE imei = $1',
-        [imei]
-      );
+      await client.query('UPDATE seriales SET prestado = true WHERE imei = $1', [imei]);
 
     } else if (producto_id) {
-      const producto = await cantidadRepo.findById(producto_id);
+      const { rows: prodRows } = await client.query(
+        `SELECT id, stock, sucursal_id FROM productos_cantidad WHERE id = $1`,
+        [producto_id]
+      );
+      const producto = prodRows[0];
       if (!producto) throw { status: 404, message: 'Producto no encontrado' };
-
-      // ── FIX: verificar que el producto pertenezca a esta sucursal ────────
       if (producto.sucursal_id !== sucursal_id) {
         throw { status: 400, message: `El producto ${nombre_producto} no pertenece a esta sucursal` };
       }
       if (producto.stock < cantidad_prestada) {
         throw { status: 400, message: 'Stock insuficiente para el préstamo' };
       }
-      await cantidadRepo.ajustarStock(producto_id, -cantidad_prestada);
+      // ── Ajuste de stock dentro de la transacción ──
+      await repo.ajustarStock(client, producto_id, -cantidad_prestada);
     }
 
     await client.query('COMMIT');
@@ -73,21 +79,24 @@ const crearPrestamo = async ({
 };
 
 const registrarAbono = async (negocioId, prestamoId, valor) => {
-  const valido = await repo.perteneceAlNegocio(prestamoId, negocioId);
-  if (!valido) throw { status: 404, message: 'Préstamo no encontrado' };
-
-  const prestamo = await repo.findById(prestamoId);
+  // ── Una sola query: ownership + datos ──
+  const prestamo = await repo.findByIdYNegocio(prestamoId, negocioId);
+  if (!prestamo) throw { status: 404, message: 'Préstamo no encontrado' };
   if (prestamo.estado !== 'Activo') throw { status: 400, message: 'El préstamo no está activo' };
+
+  // ── Validar saldo pendiente ──
+  const saldoPendiente = Number(prestamo.valor_prestamo) - Number(prestamo.total_abonado);
+  if (valor > saldoPendiente) {
+    throw { status: 400, message: `El abono supera el saldo pendiente (${saldoPendiente.toFixed(2)})` };
+  }
 
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     const resultado = await repo.insertarAbono(client, { prestamo_id: prestamoId, valor });
-
     if (Number(resultado.total_abonado) >= Number(resultado.valor_prestamo)) {
       await repo.updateEstado(client, prestamoId, 'Saldado');
     }
-
     await client.query('COMMIT');
     return resultado;
   } catch (err) {
@@ -99,10 +108,8 @@ const registrarAbono = async (negocioId, prestamoId, valor) => {
 };
 
 const devolverPrestamo = async (negocioId, prestamoId) => {
-  const valido = await repo.perteneceAlNegocio(prestamoId, negocioId);
-  if (!valido) throw { status: 404, message: 'Préstamo no encontrado' };
-
-  const prestamo = await repo.findById(prestamoId);
+  const prestamo = await repo.findByIdYNegocio(prestamoId, negocioId);
+  if (!prestamo) throw { status: 404, message: 'Préstamo no encontrado' };
   if (prestamo.estado === 'Devuelto') throw { status: 400, message: 'El préstamo ya fue devuelto' };
 
   const client = await pool.connect();
@@ -110,12 +117,10 @@ const devolverPrestamo = async (negocioId, prestamoId) => {
     await client.query('BEGIN');
 
     if (prestamo.imei) {
-      await client.query(
-        'UPDATE seriales SET prestado = false WHERE imei = $1',
-        [prestamo.imei]
-      );
+      await client.query('UPDATE seriales SET prestado = false WHERE imei = $1', [prestamo.imei]);
     } else if (prestamo.producto_id) {
-      await cantidadRepo.ajustarStock(prestamo.producto_id, prestamo.cantidad_prestada);
+      // ── Ajuste de stock dentro de la transacción ──
+      await repo.ajustarStock(client, prestamo.producto_id, prestamo.cantidad_prestada);
     }
 
     await repo.updateEstado(client, prestamoId, 'Devuelto');

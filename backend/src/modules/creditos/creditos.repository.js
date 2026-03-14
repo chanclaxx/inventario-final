@@ -76,8 +76,20 @@ const insertarAbono = async (client, { credito_id, usuario_id, valor, metodo, no
 const updateEstado = async (client, id, estado) => {
   await client.query('UPDATE creditos SET estado = $1 WHERE id = $2', [estado, id]);
 };
+const findByIdYNegocio = async (id, negocioId) => {
+  const { rows } = await pool.query(`
+    SELECT c.*, f.nombre_cliente, f.cedula, f.celular,
+           su.nombre AS sucursal_nombre
+    FROM creditos   c
+    JOIN facturas   f  ON f.id  = c.factura_id
+    JOIN sucursales su ON su.id = c.sucursal_id
+    WHERE c.id = $1 AND su.negocio_id = $2
+  `, [id, negocioId]);
+  return rows[0] || null;
+};
 
 module.exports = {
-  findAll, findById, perteneceAlNegocio,
+  findAll, findById, findByIdYNegocio,   // ← agregar
+  perteneceAlNegocio,
   getAbonos, create, insertarAbono, updateEstado,
 };

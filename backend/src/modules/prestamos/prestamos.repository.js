@@ -95,7 +95,26 @@ const updateEstado = async (client, id, estado) => {
   await client.query('UPDATE prestamos SET estado = $1 WHERE id = $2', [estado, id]);
 };
 
+const findByIdYNegocio = async (id, negocioId) => {
+  const { rows } = await pool.query(`
+    SELECT p.*, su.nombre AS sucursal_nombre
+    FROM prestamos  p
+    JOIN sucursales su ON su.id = p.sucursal_id
+    WHERE p.id = $1 AND su.negocio_id = $2
+  `, [id, negocioId]);
+  return rows[0] || null;
+};
+
+// Agregar también para usar dentro de transacciones
+const ajustarStock = async (client, productoId, cantidad) => {
+  await client.query(
+    'UPDATE productos_cantidad SET stock = stock + $1 WHERE id = $2',
+    [cantidad, productoId]
+  );
+};
+
 module.exports = {
-  findAll, findById, perteneceAlNegocio,
-  getAbonos, create, insertarAbono, updateEstado,
+  findAll, findById, findByIdYNegocio,
+  perteneceAlNegocio,
+  getAbonos, create, insertarAbono, updateEstado, ajustarStock,
 };

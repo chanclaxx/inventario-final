@@ -2,46 +2,57 @@ const repo = require('./productosCantidad.repository');
 
 const getProductos = (sucursalId, negocioId) => repo.findAll(sucursalId, negocioId);
 
-const getProductoById = async (id) => {
-  const producto = await repo.findById(id);
+const getProductoById = async (negocioId, id) => {
+  // ── Agregar negocio_id para verificar ownership ──
+  const producto = await repo.findByIdYNegocio(id, negocioId);
   if (!producto) throw { status: 404, message: 'Producto no encontrado' };
   return producto;
 };
 
-const crearProducto = (datos) => repo.create(datos);
+const crearProducto = async (negocioId, datos) => {
+  // ── Verificar que sucursal_id pertenece al negocio ──
+  const { pool } = require('../../config/db');
+  const { rows } = await pool.query(
+    `SELECT id FROM sucursales WHERE id = $1 AND negocio_id = $2 AND activa = true`,
+    [datos.sucursal_id, negocioId]
+  );
+  if (!rows.length) throw { status: 403, message: 'Sucursal no válida para este negocio' };
+  return repo.create(datos);
+};
 
 const actualizarProducto = async (negocioId, id, datos) => {
-  const valido = await repo.perteneceAlNegocio(id, negocioId);
-  if (!valido) throw { status: 404, message: 'Producto no encontrado' };
-  const producto = await repo.update(id, datos);
+  const producto = await repo.findByIdYNegocio(id, negocioId);
   if (!producto) throw { status: 404, message: 'Producto no encontrado' };
-  return producto;
+  const actualizado = await repo.update(id, datos);
+  if (!actualizado) throw { status: 404, message: 'Producto no encontrado' };
+  return actualizado;
 };
 
 const ajustarStock = async (
   negocioId, id, cantidad,
   { costo_unitario, proveedor_id, cliente_origen, cedula_cliente, tipo, notas } = {}
 ) => {
-  const valido = await repo.perteneceAlNegocio(id, negocioId);
-  if (!valido) throw { status: 404, message: 'Producto no encontrado' };
- 
-  const producto = await repo.findById(id);
+  // ── Una sola query: ownership + datos del producto ──
+  const producto = await repo.findByIdYNegocio(id, negocioId);
   if (!producto) throw { status: 404, message: 'Producto no encontrado' };
- 
-  // Actualizar stock + campos opcionales
+
+  // ── Validar que el stock no quede negativo ──
+  if (cantidad < 0 && (producto.stock + cantidad) < 0) {
+    throw {
+      status: 400,
+      message: `Stock insuficiente. Stock actual: ${producto.stock}`,
+    };
+  }
+
   const actualizado = await repo.ajustarStock(id, cantidad, {
-    costo_unitario,
-    proveedor_id,
-    cliente_origen,
+    costo_unitario, proveedor_id, cliente_origen,
   });
- 
-  // Determinar tipo de movimiento automáticamente si no viene explícito
+
   const tipoMovimiento = tipo
     || (cliente_origen ? 'compra_cliente'
     : proveedor_id     ? 'compra_proveedor'
     :                    'ajuste');
- 
-  // Registrar historial siempre
+
   await repo.insertarHistorial({
     producto_id:    id,
     sucursal_id:    producto.sucursal_id,
@@ -53,15 +64,14 @@ const ajustarStock = async (
     proveedor_id:   proveedor_id   || null,
     notas:          notas          || null,
   });
- 
+
   return actualizado;
 };
 
 const eliminarProducto = async (negocioId, id) => {
-  const valido = await repo.perteneceAlNegocio(id, negocioId);
-  if (!valido) throw { status: 404, message: 'Producto no encontrado' };
-  const eliminado = await repo.eliminar(id);
-  if (!eliminado) throw { status: 404, message: 'Producto no encontrado' };
+  const producto = await repo.findByIdYNegocio(id, negocioId);
+  if (!producto) throw { status: 404, message: 'Producto no encontrado' };
+  await repo.eliminar(id);
 };
 const getHistorialStock = (negocioId, q) =>
   repo.getHistorialStock(negocioId, q || '');

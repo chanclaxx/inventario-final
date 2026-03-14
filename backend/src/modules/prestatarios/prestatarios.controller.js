@@ -19,16 +19,18 @@ const crearPrestatario = async (req, res, next) => {
 
 const getEmpleados = async (req, res, next) => {
   try {
-    const data = await service.getEmpleados(req.params.id);
+    // ← agregar negocio_id
+    const data = await service.getEmpleados(req.user.negocio_id, req.params.id);
     res.json({ ok: true, data });
   } catch (err) { next(err); }
 };
 
 const crearEmpleado = async (req, res, next) => {
   try {
-    const data = await service.crearEmpleado({
+    // ← agregar negocio_id
+    const data = await service.crearEmpleado(req.user.negocio_id, {
       prestatario_id: req.params.id,
-      nombre: req.body.nombre,
+      nombre:         req.body.nombre,
     });
     res.status(201).json({ ok: true, data });
   } catch (err) { next(err); }

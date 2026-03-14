@@ -1,10 +1,26 @@
-const router = require('express').Router();
+const router   = require('express').Router();
+const { body } = require('express-validator');
+const { validate }     = require('../../middlewares/validate.middleware');
 const { requireNivel } = require('../../middlewares/role.middleware');
-const ctrl = require('./acreedores.controller');
+const ctrl     = require('./acreedores.controller');
+
+const validarMovimiento = [
+  body('tipo')
+    .isIn(['Abono', 'Cargo']).withMessage('Tipo debe ser Abono o Cargo'),
+  body('valor')
+    .isFloat({ gt: 0 }).withMessage('El valor debe ser mayor a 0'),
+  body('descripcion')
+    .optional().isString().trim().isLength({ max: 500 }),
+  body('firma')
+    .optional()
+    .isString()
+    .isLength({ max: 50000 })     // limitar tamaño (~37KB en base64)
+    .withMessage('Firma demasiado grande'),
+];
 
 router.get('/',                 ctrl.getAcreedores);
 router.get('/:id',              ctrl.getAcreedorById);
 router.post('/',                requireNivel('supervisor'), ctrl.crearAcreedor);
-router.post('/:id/movimientos', ctrl.registrarMovimiento);
+router.post('/:id/movimientos', validarMovimiento, validate, ctrl.registrarMovimiento);
 
 module.exports = router;

@@ -149,32 +149,43 @@ const insertarHistorial = async ({
     notas          || null,
   ]);
 };
+const findByIdYNegocio = async (id, negocioId) => {
+  const { rows } = await pool.query(`
+    SELECT pc.*, p.nombre AS proveedor_nombre, su.nombre AS sucursal_nombre
+    FROM productos_cantidad pc
+    LEFT JOIN proveedores p  ON p.id  = pc.proveedor_id
+    JOIN  sucursales      su ON su.id = pc.sucursal_id
+    WHERE pc.id = $1 AND su.negocio_id = $2
+  `, [id, negocioId]);
+  return rows[0] || null;
+};
+
  
 const getHistorialStock = async (negocioId, q) => {
-  const filtro = q ? `%${q.toLowerCase()}%` : '%';
+  // ── Escapar wildcards ──────────────────────────────────────────
+  const filtro = q
+    ? `%${q.toLowerCase().replace(/[%_\\]/g, '\\$&').slice(0, 100)}%`
+    : '%';
+
   const { rows } = await pool.query(`
     SELECT
-      h.id,
-      h.cantidad,
-      h.costo_unitario,
-      h.tipo,
-      h.cliente_origen,
-      h.cedula_cliente,
-      h.creado_en       AS fecha,
-      pc.nombre         AS nombre_producto,
+      h.id, h.cantidad, h.costo_unitario, h.tipo,
+      h.cliente_origen, h.cedula_cliente,
+      h.creado_en AS fecha,
+      pc.nombre   AS nombre_producto,
       pc.unidad_medida,
-      su.nombre         AS sucursal_nombre,
-      p.nombre          AS proveedor_nombre
+      su.nombre   AS sucursal_nombre,
+      p.nombre    AS proveedor_nombre
     FROM historial_stock_cantidad h
     JOIN productos_cantidad pc ON pc.id = h.producto_id
     JOIN sucursales         su ON su.id = h.sucursal_id
     LEFT JOIN proveedores   p  ON p.id  = h.proveedor_id
     WHERE su.negocio_id = $1
       AND (
-        LOWER(COALESCE(h.cliente_origen, '')) LIKE $2
-        OR LOWER(COALESCE(h.cedula_cliente,'')) LIKE $2
-        OR LOWER(pc.nombre)                    LIKE $2
-        OR LOWER(h.tipo)                       LIKE $2
+        LOWER(COALESCE(h.cliente_origen,  '')) LIKE $2 ESCAPE '\\'
+        OR LOWER(COALESCE(h.cedula_cliente,'')) LIKE $2 ESCAPE '\\'
+        OR LOWER(pc.nombre)                    LIKE $2 ESCAPE '\\'
+        OR LOWER(h.tipo)                       LIKE $2 ESCAPE '\\'
       )
     ORDER BY h.creado_en DESC
     LIMIT 200
@@ -183,6 +194,8 @@ const getHistorialStock = async (negocioId, q) => {
 };
 
 module.exports = {
-  findAll, findById, perteneceAlNegocio,
-  create, update, ajustarStock, eliminar,insertarHistorial,getHistorialStock
+  findAll, findById, findByIdYNegocio,
+  perteneceAlNegocio,
+  create, update, ajustarStock, eliminar,
+  insertarHistorial, getHistorialStock,
 };

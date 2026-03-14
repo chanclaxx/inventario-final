@@ -175,12 +175,12 @@ const create = async (client, {
 
 // ── insertarLinea ─────────────────────────────────────────────────────────────
 
-const insertarLinea = async (client, { factura_id, nombre_producto, imei, cantidad, precio }) => {
+const insertarLinea = async (client, { factura_id, nombre_producto, imei, cantidad, precio, producto_id }) => {
   const { rows } = await client.query(`
-    INSERT INTO lineas_factura(factura_id, nombre_producto, imei, cantidad, precio)
-    VALUES ($1, $2, $3, $4, $5)
+    INSERT INTO lineas_factura(factura_id, nombre_producto, imei, cantidad, precio, producto_id)
+    VALUES ($1, $2, $3, $4, $5, $6)
     RETURNING *
-  `, [factura_id, nombre_producto, imei, cantidad, precio]);
+  `, [factura_id, nombre_producto, imei || null, cantidad, precio, producto_id || null]);
   return rows[0];
 };
 
@@ -218,8 +218,36 @@ const cancelar = async (client, id) => {
   );
 };
 
+const findByIdYNegocio = async (id, negocioId) => {
+  const { rows } = await pool.query(`
+    SELECT
+      f.*,
+      u.nombre  AS usuario_nombre,
+      su.nombre AS sucursal_nombre,
+      c.email     AS cliente_email,
+      c.direccion AS cliente_direccion,
+      ${_subqueryProveedores('f')}
+    FROM facturas f
+    LEFT JOIN usuarios   u  ON u.id  = f.usuario_id
+    JOIN      sucursales su ON su.id = f.sucursal_id
+    LEFT JOIN clientes   c  ON c.id  = f.cliente_id
+    WHERE f.id = $1 AND su.negocio_id = $2
+  `, [id, negocioId]);
+  return rows[0] || null;
+};
+
+// Versión que acepta client de transacción para ajuste de stock
+const ajustarStockCantidad = async (client, productoId, cantidad) => {
+  await client.query(
+    'UPDATE productos_cantidad SET stock = stock + $1 WHERE id = $2',
+    [cantidad, productoId]
+  );
+};
+
 module.exports = {
-  findAll, findById, perteneceAlNegocio,
+  findAll, findById, findByIdYNegocio,
+  perteneceAlNegocio,
   getLineas, getPagos, getRetoma,
   create, insertarLinea, insertarPago, insertarRetoma, cancelar,
+  ajustarStockCantidad,
 };

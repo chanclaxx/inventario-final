@@ -15,7 +15,16 @@ const getAcreedorById = async (negocioId, id) => {
   return { ...acreedor, saldo, movimientos };
 };
 
-const crearAcreedor = (negocioId, datos) => repo.create(negocioId, datos);
+const crearAcreedor = async (negocioId, datos) => {
+  const { rows } = await pool.query(
+    `SELECT id FROM acreedores WHERE negocio_id = $1 AND cedula = $2 LIMIT 1`,
+    [negocioId, datos.cedula]
+  );
+  if (rows.length) {
+    throw { status: 409, message: `Ya existe un acreedor con la cédula ${datos.cedula}` };
+  }
+  return repo.create(negocioId, datos);
+};
 
 const registrarMovimiento = async (negocioId, acreedorId, datos) => {
   const acreedor = await repo.findById(negocioId, acreedorId);

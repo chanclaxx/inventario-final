@@ -9,10 +9,18 @@ const findAll = async (negocioId, filtro) => {
     WHERE a.negocio_id = $1
   `;
   const params = [negocioId];
+
   if (filtro) {
-    params.push(`%${filtro.toLowerCase()}%`);
-    query += ` AND (LOWER(a.nombre) LIKE $2 OR a.cedula LIKE $2)`;
+    // ── Sanitizar wildcards para evitar queries costosas ──
+    const filtroSeguro = filtro
+      .toLowerCase()
+      .replace(/[%_\\]/g, '\\$&')  // escapar caracteres especiales de LIKE
+      .slice(0, 100);               // limitar longitud del filtro
+
+    params.push(`%${filtroSeguro}%`);
+    query += ` AND (LOWER(a.nombre) LIKE $2 ESCAPE '\\' OR a.cedula LIKE $2 ESCAPE '\\')`;
   }
+
   query += ` GROUP BY a.id ORDER BY a.nombre`;
   const { rows } = await pool.query(query, params);
   return rows;

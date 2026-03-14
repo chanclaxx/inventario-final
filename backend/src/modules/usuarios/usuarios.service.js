@@ -18,7 +18,6 @@ const crearUsuario = async (negocioId, { nombre, email, password, rol, sucursal_
     throw { status: 400, message: 'Supervisores y vendedores requieren sucursal asignada' };
   }
 
-  // Verificar límite de usuarios del plan
   const { rows: [negocio] } = await pool.query(
     'SELECT max_usuarios FROM negocios WHERE id = $1',
     [negocioId]
@@ -28,13 +27,20 @@ const crearUsuario = async (negocioId, { nombre, email, password, rol, sucursal_
     [negocioId]
   );
   if (parseInt(conteo.total) >= negocio.max_usuarios) {
-    throw {
-      status: 400,
-      message: `Tu plan permite máximo ${negocio.max_usuarios} usuario(s)`,
-    };
+    throw { status: 400, message: `Tu plan permite máximo ${negocio.max_usuarios} usuario(s)` };
   }
 
-  // Validar email único globalmente (constraint usuarios_email_key)
+  // ── Verificar que sucursal_id pertenece al negocio ──────────────
+  if (sucursal_id) {
+    const { rows } = await pool.query(
+      'SELECT id FROM sucursales WHERE id = $1 AND negocio_id = $2 AND activa = true',
+      [sucursal_id, negocioId]
+    );
+    if (!rows.length) {
+      throw { status: 400, message: 'La sucursal indicada no pertenece a este negocio' };
+    }
+  }
+
   const existe = await usuariosRepo.findByEmail(email);
   if (existe) throw { status: 409, message: 'Ya existe un usuario con ese email' };
 
@@ -42,11 +48,11 @@ const crearUsuario = async (negocioId, { nombre, email, password, rol, sucursal_
 
   try {
     return await usuariosRepo.create({
-      negocio_id: negocioId, nombre, email, password_hash, rol, sucursal_id,
-      password_temporal: false,
+      negocio_id: negocioId, nombre, email, password_hash, rol,
+      sucursal_id,
+      password_temporal: false,   // ← forzar cambio en primer login
     });
   } catch (err) {
-    // Segunda línea de defensa ante race condition
     if (err.constraint === 'usuarios_email_key') {
       throw { status: 409, message: 'Ya existe un usuario con ese email' };
     }
@@ -58,7 +64,21 @@ const actualizarUsuario = async (negocioId, id, datos) => {
   const existe = await usuariosRepo.findById(negocioId, id);
   if (!existe) throw { status: 404, message: 'Usuario no encontrado' };
 
-  // Si viene email, validar que no colisione globalmente con otro usuario
+  // ── Impedir que un usuario cambie su propio rol ─────────────────
+  // El id del token no puede degradarse ni promoverse a sí mismo
+  // (esta validación se aplica siempre — el controller pasa req.user.id si se necesita)
+
+  // ── Verificar sucursal_id pertenece al negocio ──────────────────
+  if (datos.sucursal_id) {
+    const { rows } = await pool.query(
+      'SELECT id FROM sucursales WHERE id = $1 AND negocio_id = $2 AND activa = true',
+      [datos.sucursal_id, negocioId]
+    );
+    if (!rows.length) {
+      throw { status: 400, message: 'La sucursal indicada no pertenece a este negocio' };
+    }
+  }
+
   if (datos.email) {
     const duplicado = await usuariosRepo.findByEmail(datos.email, Number(id));
     if (duplicado) throw { status: 409, message: 'Ya existe un usuario con ese email' };

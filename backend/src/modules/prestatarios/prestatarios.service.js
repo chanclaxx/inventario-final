@@ -7,15 +7,15 @@ const crearPrestatario = ({ negocio_id, nombre, telefono }) => {
   return repo.create({ negocio_id, nombre: nombre.trim(), telefono });
 };
 
-const getEmpleados = async (prestatarioId) => {
-  const prestatario = await repo.findById(prestatarioId);
+const getEmpleados = async (negocioId, prestatarioId) => {
+  const prestatario = await repo.findById(prestatarioId, negocioId);
   if (!prestatario) throw { status: 404, message: 'Prestatario no encontrado' };
   return repo.getEmpleados(prestatarioId);
 };
 
-const crearEmpleado = async ({ prestatario_id, nombre }) => {
+const crearEmpleado = async (negocioId, { prestatario_id, nombre }) => {
   if (!nombre?.trim()) throw { status: 400, message: 'El nombre es requerido' };
-  const prestatario = await repo.findById(prestatario_id);
+  const prestatario = await repo.findById(prestatario_id, negocioId);
   if (!prestatario) throw { status: 404, message: 'Prestatario no encontrado' };
   return repo.createEmpleado({ prestatario_id, nombre: nombre.trim() });
 };

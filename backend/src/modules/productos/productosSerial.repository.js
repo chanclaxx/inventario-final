@@ -41,6 +41,28 @@ const findById = async (id) => {
   return rows[0] || null;
 };
 
+const findByIdYNegocio = async (id, negocioId) => {
+  const { rows } = await pool.query(`
+    SELECT ps.*, su.nombre AS sucursal_nombre
+    FROM productos_serial ps
+    JOIN sucursales su ON su.id = ps.sucursal_id
+    WHERE ps.id = $1 AND su.negocio_id = $2
+  `, [id, negocioId]);
+  return rows[0] || null;
+};
+
+// Verifica que un serial pertenece al negocio via su producto padre
+const findSerialByIdYNegocio = async (serialId, negocioId) => {
+  const { rows } = await pool.query(`
+    SELECT s.*, ps.sucursal_id, su.negocio_id
+    FROM seriales s
+    JOIN productos_serial ps ON ps.id = s.producto_id
+    JOIN sucursales        su ON su.id = ps.sucursal_id
+    WHERE s.id = $1 AND su.negocio_id = $2
+  `, [serialId, negocioId]);
+  return rows[0] || null;
+};
+
 const perteneceAlNegocio = async (productoId, negocioId) => {
   const { rows } = await pool.query(`
     SELECT ps.id FROM productos_serial ps
@@ -174,71 +196,53 @@ const eliminarSerial = async (serialId) => {
 // REEMPLAZAR findComprasCliente con esta versión corregida
 
 const findComprasCliente = async (negocioId, q) => {
-  const filtro = q ? `%${q.toLowerCase()}%` : '%';
+  const filtro = q
+    ? `%${q.toLowerCase().replace(/[%_\\]/g, '\\$&').slice(0, 100)}%`
+    : '%';
 
-  // Fuente 1: seriales con cliente_origen que NO vinieron de retoma de factura
-  // Se excluyen usando NOT EXISTS contra la tabla retomas por IMEI
   const { rows: seriales } = await pool.query(`
     SELECT
-      'compra'           AS tipo,
-      s.id,
-      s.imei,
-      s.cliente_origen    AS nombre_cliente,
-      NULL                AS cedula_cliente,
-      NULL                AS cliente_id,
-      ps.nombre           AS nombre_producto,
-      ps.marca,
-      ps.modelo,
-      s.fecha_entrada     AS fecha,
-      s.costo_compra      AS valor,
-      su.nombre           AS sucursal_nombre,
-      NULL                AS factura_id
+      'compra' AS tipo, s.id, s.imei,
+      s.cliente_origen AS nombre_cliente,
+      NULL AS cedula_cliente, NULL AS cliente_id,
+      ps.nombre AS nombre_producto, ps.marca, ps.modelo,
+      s.fecha_entrada AS fecha, s.costo_compra AS valor,
+      su.nombre AS sucursal_nombre, NULL AS factura_id
     FROM seriales s
     JOIN productos_serial ps ON ps.id = s.producto_id
     JOIN sucursales        su ON su.id = ps.sucursal_id
     WHERE su.negocio_id = $1
       AND s.cliente_origen IS NOT NULL
       AND NOT EXISTS (
-        SELECT 1
-        FROM retomas r
+        SELECT 1 FROM retomas r
         JOIN facturas f ON f.id = r.factura_id
         JOIN sucursales sf ON sf.id = f.sucursal_id
-        WHERE r.imei = s.imei
-          AND sf.negocio_id = $1
+        WHERE r.imei = s.imei AND sf.negocio_id = $1
       )
       AND (
-        LOWER(s.cliente_origen) LIKE $2
-        OR LOWER(ps.nombre)     LIKE $2
-        OR LOWER(s.imei)        LIKE $2
+        LOWER(s.cliente_origen) LIKE $2 ESCAPE '\\'
+        OR LOWER(ps.nombre)     LIKE $2 ESCAPE '\\'
+        OR LOWER(s.imei)        LIKE $2 ESCAPE '\\'
       )
     ORDER BY s.fecha_entrada DESC
   `, [negocioId, filtro]);
 
-  // Fuente 2: retomas de facturas (tabla retomas)
   const { rows: retomas } = await pool.query(`
     SELECT
-      'retoma'           AS tipo,
-      r.id,
-      r.imei,
-      f.nombre_cliente,
-      f.cedula            AS cedula_cliente,
-      f.cliente_id,
-      r.nombre_producto,
-      NULL                AS marca,
-      NULL                AS modelo,
-      f.fecha,
-      r.valor_retoma      AS valor,
-      su.nombre           AS sucursal_nombre,
-      f.id                AS factura_id
+      'retoma' AS tipo, r.id, r.imei,
+      f.nombre_cliente, f.cedula AS cedula_cliente, f.cliente_id,
+      r.nombre_producto, NULL AS marca, NULL AS modelo,
+      f.fecha, r.valor_retoma AS valor,
+      su.nombre AS sucursal_nombre, f.id AS factura_id
     FROM retomas r
     JOIN facturas   f  ON f.id  = r.factura_id
     JOIN sucursales su ON su.id = f.sucursal_id
     WHERE su.negocio_id = $1
       AND (
-        LOWER(f.nombre_cliente)      LIKE $2
-        OR LOWER(f.cedula)           LIKE $2
-        OR LOWER(r.nombre_producto)  LIKE $2
-        OR LOWER(COALESCE(r.imei,'')) LIKE $2
+        LOWER(f.nombre_cliente)        LIKE $2 ESCAPE '\\'
+        OR LOWER(f.cedula)             LIKE $2 ESCAPE '\\'
+        OR LOWER(r.nombre_producto)    LIKE $2 ESCAPE '\\'
+        OR LOWER(COALESCE(r.imei,''))  LIKE $2 ESCAPE '\\'
       )
     ORDER BY f.fecha DESC
   `, [negocioId, filtro]);
@@ -247,7 +251,11 @@ const findComprasCliente = async (negocioId, q) => {
 };
 
 module.exports = {
-  findAll, findById, perteneceAlNegocio, create, update, updatePrecio,
+  findAll, findById, findByIdYNegocio,
+  perteneceAlNegocio,
+  findSerialByIdYNegocio,
+  create, update, updatePrecio,
   getSeriales, findSerialByIMEI, findSerialByIMEIEnNegocio,
-  insertarSerial, reactivarSerial, actualizarSerial, eliminarSerial,findComprasCliente
+  insertarSerial, reactivarSerial, actualizarSerial, eliminarSerial,
+  findComprasCliente,
 };

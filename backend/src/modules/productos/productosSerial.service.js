@@ -4,78 +4,57 @@ const repo = require('./productosSerial.repository');
 const getProductos = (sucursalId, negocioId) =>
   repo.findAll(sucursalId, negocioId);
 
-const getProductoById = async (id) => {
-  const producto = await repo.findById(id);
+const getProductoById = async (negocioId, id) => {
+  const producto = await repo.findByIdYNegocio(id, negocioId);
   if (!producto) throw { status: 404, message: 'Producto no encontrado' };
   return producto;
 };
 
-const crearProducto = (datos) => repo.create(datos);
+const crearProducto = async (negocioId, datos) => {
+  // ── Segunda capa: verificar que sucursal_id pertenece al negocio ──
+  const { pool } = require('../../config/db');
+  const { rows } = await pool.query(
+    `SELECT id FROM sucursales WHERE id = $1 AND negocio_id = $2 AND activa = true`,
+    [datos.sucursal_id, negocioId]
+  );
+  if (!rows.length) throw { status: 403, message: 'Sucursal no válida para este negocio' };
+  return repo.create(datos);
+};
 
 const actualizarProducto = async (negocioId, id, datos) => {
-  const valido = await repo.perteneceAlNegocio(id, negocioId);
-  if (!valido) throw { status: 404, message: 'Producto no encontrado' };
-  const producto = await repo.update(id, datos);
+  const producto = await repo.findByIdYNegocio(id, negocioId);
   if (!producto) throw { status: 404, message: 'Producto no encontrado' };
-  return producto;
+  const actualizado = await repo.update(id, datos);
+  if (!actualizado) throw { status: 404, message: 'Producto no encontrado' };
+  return actualizado;
 };
 
-const getSeriales = async (productoId, vendido) => {
-  await getProductoById(productoId);
+const getSeriales = async (negocioId, productoId, vendido) => {
+  // ── Verificar ownership del producto antes de listar sus seriales ──
+  const producto = await repo.findByIdYNegocio(productoId, negocioId);
+  if (!producto) throw { status: 404, message: 'Producto no encontrado' };
   return repo.getSeriales(productoId, vendido);
 };
 
-/**
- * Agrega un serial a un producto.
- *
- * Si viene reactivar_serial_id: reactiva el serial existente (UPDATE)
- * en lugar de insertar uno nuevo. Esto ocurre cuando el frontend detectó
- * que el IMEI ya existe y el usuario confirmó reactivarlo.
- */
-const agregarSerial = async (
-  negocioId,
-  productoId,
-  { imei, fecha_entrada, costo_compra, cliente_origen, proveedor_id, reactivar_serial_id }
-) => {
-  const valido = await repo.perteneceAlNegocio(productoId, negocioId);
-  if (!valido) throw { status: 404, message: 'Producto no encontrado' };
-
-  // CASO A: usuario confirmó reactivar — UPDATE del serial existente
-  if (reactivar_serial_id) {
-    return repo.reactivarSerial(reactivar_serial_id, {
-      costo_compra: costo_compra ?? null,
-      proveedor_id: proveedor_id || null,
-    });
-  }
-
-  // CASO B: serial nuevo — verificar que no exista antes de insertar
-  const existe = await repo.findSerialByIMEI(imei);
-  if (existe) throw { status: 409, message: `El IMEI ${imei} ya está registrado` };
-
-  return repo.insertarSerial({
-    producto_id:    productoId,
-    imei,
-    fecha_entrada:  fecha_entrada  || new Date().toISOString().split('T')[0],
-    costo_compra:   costo_compra   ?? null,
-    cliente_origen: cliente_origen || null,
-    proveedor_id:   proveedor_id   || null,
-  });
-};
-
-// Actualiza el serial (imei, costo_compra) y si viene precio,
-// actualiza también el producto padre en productos_serial.
-const actualizarSerial = async (serialId, { imei, costo_compra, precio, producto_id }) => {
-  const serial = await repo.actualizarSerial(serialId, { imei, costo_compra });
+const actualizarSerial = async (negocioId, serialId, { imei, costo_compra, precio, producto_id }) => {
+  // ── Verificar que el serial pertenece al negocio ──
+  const serial = await repo.findSerialByIdYNegocio(serialId, negocioId);
   if (!serial) throw { status: 404, message: 'Serial no encontrado' };
+
+  const actualizado = await repo.actualizarSerial(serialId, { imei, costo_compra });
+  if (!actualizado) throw { status: 404, message: 'Serial no encontrado' };
 
   if (precio !== undefined && producto_id) {
     await repo.updatePrecio(producto_id, precio);
   }
-
-  return serial;
+  return actualizado;
 };
 
-const eliminarSerial = async (serialId) => {
+const eliminarSerial = async (negocioId, serialId) => {
+  // ── Verificar que el serial pertenece al negocio ──
+  const serial = await repo.findSerialByIdYNegocio(serialId, negocioId);
+  if (!serial) throw { status: 404, message: 'Serial no encontrado' };
+
   const eliminado = await repo.eliminarSerial(serialId);
   if (!eliminado) throw { status: 404, message: 'Serial no encontrado' };
 };

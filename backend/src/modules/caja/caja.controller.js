@@ -17,15 +17,13 @@ const getCajaActiva = async (req, res, next) => {
 const abrirCaja = async (req, res, next) => {
   try {
     if (req.todasSucursales) {
-      return res.status(400).json({
-        ok: false,
-        error: 'Selecciona una sucursal para abrir su caja',
-      });
+      return res.status(400).json({ ok: false, error: 'Selecciona una sucursal para abrir su caja' });
     }
     const data = await service.abrirCaja({
       ...req.body,
       sucursal_id: req.sucursal_id,
       usuario_id:  req.user.id,
+      negocio_id:  req.user.negocio_id,   // ← agregar
     });
     res.status(201).json({ ok: true, data, message: 'Caja abierta correctamente' });
   } catch (err) { next(err); }

@@ -50,4 +50,38 @@ const eliminar = async (negocioId, id) => {
   return rowCount > 0;
 };
 
-module.exports = { findAll, findById, create, update, eliminar };
+const findByNit = async (negocioId, nit) => {
+  const { rows } = await pool.query(
+    `SELECT id FROM proveedores WHERE nit = $1 AND negocio_id = $2 AND activo = TRUE LIMIT 1`,
+    [nit, negocioId]
+  );
+  return rows[0] || null;
+};
+
+const contarDependenciasActivas = async (negocioId, proveedorId) => {
+  // Verificar por negocio_id para no cruzar tenants
+  const { rows } = await pool.query(`
+    SELECT
+      COUNT(DISTINCT pc.id) FILTER (
+        WHERE pc.proveedor_id = $1 AND pc.activo = TRUE
+      ) AS productos_cantidad,
+      COUNT(DISTINCT ps.id) FILTER (
+        WHERE ps.proveedor_id = $1 AND ps.activo = TRUE
+      ) AS productos_serial
+    FROM sucursales su
+    LEFT JOIN productos_cantidad pc ON pc.sucursal_id = su.id
+    LEFT JOIN productos_serial   ps ON ps.sucursal_id = su.id
+    WHERE su.negocio_id = $2
+  `, [proveedorId, negocioId]);
+
+  const row = rows[0];
+  return {
+    productos: Number(row.productos_cantidad) + Number(row.productos_serial),
+  };
+};
+
+module.exports = {
+  findAll, findById, findByNit,
+  contarDependenciasActivas,
+  create, update, eliminar,
+};

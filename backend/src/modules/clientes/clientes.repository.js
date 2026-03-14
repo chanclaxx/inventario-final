@@ -7,15 +7,28 @@ const findAll = async (negocioId, filtro) => {
            COUNT(f.id) AS total_compras,
            COALESCE(SUM(l.subtotal), 0) AS total_gastado
     FROM clientes c
-    LEFT JOIN facturas f ON f.cedula = c.cedula AND f.estado != 'Cancelada'
+    LEFT JOIN facturas f
+      ON f.cedula = c.cedula
+      AND f.estado != 'Cancelada'
+      AND f.sucursal_id IN (
+        SELECT id FROM sucursales WHERE negocio_id = $1
+      )
     LEFT JOIN lineas_factura l ON l.factura_id = f.id
     WHERE c.negocio_id = $1
   `;
   const params = [negocioId];
+
   if (filtro) {
-    params.push(`%${filtro.toLowerCase()}%`);
-    query += ` AND (LOWER(c.nombre) LIKE $2 OR c.cedula LIKE $2 OR c.celular LIKE $2)`;
+    // ── Mismo escape que aplicamos en acreedores ──
+    const filtroSeguro = filtro
+      .toLowerCase()
+      .replace(/[%_\\]/g, '\\$&')
+      .slice(0, 100);
+
+    params.push(`%${filtroSeguro}%`);
+    query += ` AND (LOWER(c.nombre) LIKE $2 ESCAPE '\\' OR c.cedula LIKE $2 ESCAPE '\\' OR c.celular LIKE $2 ESCAPE '\\')`;
   }
+
   query += ` GROUP BY c.id ORDER BY c.nombre`;
   const { rows } = await pool.query(query, params);
   return rows;

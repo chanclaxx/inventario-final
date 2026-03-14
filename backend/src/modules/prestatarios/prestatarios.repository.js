@@ -16,10 +16,11 @@ const findAll = async (negocioId) => {
   return rows;
 };
 
-const findById = async (id) => {
+// Reemplaza el findById existente
+const findById = async (id, negocioId) => {
   const { rows } = await pool.query(
-    'SELECT * FROM prestatarios WHERE id = $1',
-    [id]
+    'SELECT * FROM prestatarios WHERE id = $1 AND negocio_id = $2',
+    [id, negocioId]
   );
   return rows[0] || null;
 };

@@ -17,9 +17,7 @@ const getPrestamoById = async (req, res, next) => {
 
 const crearPrestamo = async (req, res, next) => {
   try {
-    const sucursal_id = req.todasSucursales
-      ? req.body.sucursal_id
-      : req.sucursal_id;
+    const sucursal_id = req.todasSucursales ? req.body.sucursal_id : req.sucursal_id;
 
     if (!sucursal_id) {
       return res.status(400).json({
@@ -31,7 +29,8 @@ const crearPrestamo = async (req, res, next) => {
     const data = await service.crearPrestamo({
       ...req.body,
       sucursal_id,
-      usuario_id: req.user.id,
+      usuario_id:  req.user.id,
+      negocio_id:  req.user.negocio_id,   // ← agregar
     });
     res.status(201).json({ ok: true, data, message: 'Préstamo registrado correctamente' });
   } catch (err) { next(err); }
