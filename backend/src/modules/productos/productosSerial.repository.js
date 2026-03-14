@@ -170,13 +170,17 @@ const eliminarSerial = async (serialId) => {
   return rows[0] || null;
 };
 
+// ─── productosSerial.repository.js ───────────────────────────────────────────
+// REEMPLAZAR findComprasCliente con esta versión corregida
+
 const findComprasCliente = async (negocioId, q) => {
   const filtro = q ? `%${q.toLowerCase()}%` : '%';
- 
-  // Fuente 1: seriales con cliente_origen
+
+  // Fuente 1: seriales con cliente_origen que NO vinieron de retoma de factura
+  // Se excluyen usando NOT EXISTS contra la tabla retomas por IMEI
   const { rows: seriales } = await pool.query(`
     SELECT
-      'compra'            AS tipo,
+      'compra'           AS tipo,
       s.id,
       s.imei,
       s.cliente_origen    AS nombre_cliente,
@@ -194,18 +198,26 @@ const findComprasCliente = async (negocioId, q) => {
     JOIN sucursales        su ON su.id = ps.sucursal_id
     WHERE su.negocio_id = $1
       AND s.cliente_origen IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1
+        FROM retomas r
+        JOIN facturas f ON f.id = r.factura_id
+        JOIN sucursales sf ON sf.id = f.sucursal_id
+        WHERE r.imei = s.imei
+          AND sf.negocio_id = $1
+      )
       AND (
-        LOWER(s.cliente_origen)  LIKE $2
-        OR LOWER(ps.nombre)      LIKE $2
-        OR LOWER(s.imei)         LIKE $2
+        LOWER(s.cliente_origen) LIKE $2
+        OR LOWER(ps.nombre)     LIKE $2
+        OR LOWER(s.imei)        LIKE $2
       )
     ORDER BY s.fecha_entrada DESC
   `, [negocioId, filtro]);
- 
-  // Fuente 2: retomas de facturas
+
+  // Fuente 2: retomas de facturas (tabla retomas)
   const { rows: retomas } = await pool.query(`
     SELECT
-      'retoma'            AS tipo,
+      'retoma'           AS tipo,
       r.id,
       r.imei,
       f.nombre_cliente,
@@ -218,19 +230,19 @@ const findComprasCliente = async (negocioId, q) => {
       r.valor_retoma      AS valor,
       su.nombre           AS sucursal_nombre,
       f.id                AS factura_id
-    FROM retomas  r
-    JOIN facturas f  ON f.id  = r.factura_id
+    FROM retomas r
+    JOIN facturas   f  ON f.id  = r.factura_id
     JOIN sucursales su ON su.id = f.sucursal_id
     WHERE su.negocio_id = $1
       AND (
-        LOWER(f.nombre_cliente)  LIKE $2
-        OR f.cedula              LIKE $2
-        OR LOWER(r.nombre_producto) LIKE $2
-        OR LOWER(r.imei)         LIKE $2
+        LOWER(f.nombre_cliente)      LIKE $2
+        OR LOWER(f.cedula)           LIKE $2
+        OR LOWER(r.nombre_producto)  LIKE $2
+        OR LOWER(COALESCE(r.imei,'')) LIKE $2
       )
     ORDER BY f.fecha DESC
   `, [negocioId, filtro]);
- 
+
   return { seriales, retomas };
 };
 
