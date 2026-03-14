@@ -10,25 +10,32 @@ import { AlertTriangle } from 'lucide-react';
  * una de las dos opciones explícitas.
  *
  * Props:
- *   open              — boolean
- *   conflicto         — { clienteExistente, datosNuevos } | null
+ *   open       — boolean
+ *   conflicto  — { clienteExistente, datosNuevos } | null
  *   onReescribir      — async () => void
- *                       Actualiza el cliente en BD y reintenta la factura
  *   onCancelar        — () => void
- *                       Restaura el form con datos originales del cliente,
- *                       el usuario debe corregir y volver a confirmar
- *   guardando         — boolean  (muestra loading en el botón de reescribir)
+ *   guardando         — boolean
  */
 export function ModalConflictoCedula({ open, conflicto, onReescribir, onCancelar, guardando }) {
-  if (!conflicto) return null;
+  // NO hacer early return antes del Modal.
+  // El guard "if (!conflicto) return null" impedía el render cuando open
+  // cambiaba a true simultáneamente con el set del conflicto.
+  // Usamos optional chaining para acceder a los datos de forma segura.
+  const clienteExistente = conflicto?.clienteExistente;
+  const datosNuevos      = conflicto?.datosNuevos;
 
-  const { clienteExistente, datosNuevos } = conflicto;
-
-  // Detectar cuáles campos cambiaron para mostrarlos con énfasis
-  const nombreCambio   = clienteExistente.nombre    !== datosNuevos.nombre;
-  const celularCambio  = (clienteExistente.celular  || '') !== (datosNuevos.celular  || '');
-  const emailCambio    = (clienteExistente.email    || '') !== (datosNuevos.email    || '');
-  const direccionCambio= (clienteExistente.direccion|| '') !== (datosNuevos.direccion|| '');
+  const nombreCambio    = clienteExistente && datosNuevos
+    ? clienteExistente.nombre     !== datosNuevos.nombre
+    : false;
+  const celularCambio   = clienteExistente && datosNuevos
+    ? (clienteExistente.celular   || '') !== (datosNuevos.celular   || '')
+    : false;
+  const emailCambio     = clienteExistente && datosNuevos
+    ? (clienteExistente.email     || '') !== (datosNuevos.email     || '')
+    : false;
+  const direccionCambio = clienteExistente && datosNuevos
+    ? (clienteExistente.direccion || '') !== (datosNuevos.direccion || '')
+    : false;
 
   return (
     <Modal
@@ -37,116 +44,114 @@ export function ModalConflictoCedula({ open, conflicto, onReescribir, onCancelar
       title=""
       size="sm"
     >
-      <div className="flex flex-col items-center gap-4 py-2">
+      {/* Solo renderizar contenido cuando hay conflicto real */}
+      {clienteExistente && datosNuevos && (
+        <div className="flex flex-col items-center gap-4 py-2">
 
-        {/* Icono */}
-        <div className="w-14 h-14 rounded-full bg-amber-50 border-2 border-amber-200
-          flex items-center justify-center flex-shrink-0">
-          <AlertTriangle size={26} className="text-amber-500" />
-        </div>
-
-        {/* Título */}
-        <div className="text-center">
-          <h3 className="text-base font-semibold text-gray-900">
-            Esta cédula ya está registrada
-          </h3>
-          <p className="text-sm text-gray-500 mt-1">
-            Los datos que ingresaste son diferentes a los registrados.
-          </p>
-        </div>
-
-        {/* Tabla comparativa */}
-        <div className="w-full rounded-xl border border-gray-100 bg-gray-50 p-3 flex flex-col gap-2.5 text-sm">
-          <div className="flex justify-between items-center gap-2">
-            <span className="text-gray-400 text-xs uppercase tracking-wide w-20 flex-shrink-0">Campo</span>
-            <span className="text-gray-400 text-xs uppercase tracking-wide flex-1 text-center">Registrado</span>
-            <span className="text-gray-400 text-xs uppercase tracking-wide flex-1 text-center">Ingresado</span>
+          {/* Icono */}
+          <div className="w-14 h-14 rounded-full bg-amber-50 border-2 border-amber-200
+            flex items-center justify-center flex-shrink-0">
+            <AlertTriangle size={26} className="text-amber-500" />
           </div>
 
-          <div className="w-full h-px bg-gray-200" />
+          {/* Título */}
+          <div className="text-center">
+            <h3 className="text-base font-semibold text-gray-900">
+              Esta cédula ya está registrada
+            </h3>
+            <p className="text-sm text-gray-500 mt-1">
+              Los datos que ingresaste son diferentes a los registrados.
+            </p>
+          </div>
 
-          {/* Cédula — siempre igual, referencia */}
-          <FilaComparacion
-            label="Cédula"
-            original={clienteExistente.cedula}
-            nuevo={clienteExistente.cedula}
-            cambio={false}
-          />
+          {/* Tabla comparativa */}
+          <div className="w-full rounded-xl border border-gray-100 bg-gray-50 p-3 flex flex-col gap-2.5 text-sm">
+            <div className="flex justify-between items-center gap-2">
+              <span className="text-gray-400 text-xs uppercase tracking-wide w-20 flex-shrink-0">Campo</span>
+              <span className="text-gray-400 text-xs uppercase tracking-wide flex-1 text-center">Registrado</span>
+              <span className="text-gray-400 text-xs uppercase tracking-wide flex-1 text-center">Ingresado</span>
+            </div>
 
-          {/* Nombre */}
-          {nombreCambio && (
+            <div className="w-full h-px bg-gray-200" />
+
             <FilaComparacion
-              label="Nombre"
-              original={clienteExistente.nombre}
-              nuevo={datosNuevos.nombre}
-              cambio
+              label="Cédula"
+              original={clienteExistente.cedula}
+              nuevo={clienteExistente.cedula}
+              cambio={false}
             />
-          )}
 
-          {/* Celular */}
-          {celularCambio && (
-            <FilaComparacion
-              label="Celular"
-              original={clienteExistente.celular || '—'}
-              nuevo={datosNuevos.celular || '—'}
-              cambio
-            />
-          )}
+            {nombreCambio && (
+              <FilaComparacion
+                label="Nombre"
+                original={clienteExistente.nombre}
+                nuevo={datosNuevos.nombre}
+                cambio
+              />
+            )}
 
-          {/* Email */}
-          {emailCambio && (
-            <FilaComparacion
-              label="Email"
-              original={clienteExistente.email || '—'}
-              nuevo={datosNuevos.email || '—'}
-              cambio
-            />
-          )}
+            {celularCambio && (
+              <FilaComparacion
+                label="Celular"
+                original={clienteExistente.celular || '—'}
+                nuevo={datosNuevos.celular || '—'}
+                cambio
+              />
+            )}
 
-          {/* Dirección */}
-          {direccionCambio && (
-            <FilaComparacion
-              label="Dirección"
-              original={clienteExistente.direccion || '—'}
-              nuevo={datosNuevos.direccion || '—'}
-              cambio
-            />
-          )}
+            {emailCambio && (
+              <FilaComparacion
+                label="Email"
+                original={clienteExistente.email || '—'}
+                nuevo={datosNuevos.email || '—'}
+                cambio
+              />
+            )}
+
+            {direccionCambio && (
+              <FilaComparacion
+                label="Dirección"
+                original={clienteExistente.direccion || '—'}
+                nuevo={datosNuevos.direccion || '—'}
+                cambio
+              />
+            )}
+          </div>
+
+          {/* Explicación de acciones */}
+          <div className="w-full flex flex-col gap-1.5 text-xs text-gray-500 bg-gray-50
+            rounded-xl px-3 py-2.5 border border-gray-100">
+            <p>
+              <span className="font-semibold text-blue-700">Reescribir datos:</span>
+              {' '}actualiza el cliente con los datos que ingresaste y confirma la factura.
+            </p>
+            <p>
+              <span className="font-semibold text-gray-600">Cancelar:</span>
+              {' '}vuelve al formulario con los datos originales del cliente para que los revises.
+            </p>
+          </div>
+
+          {/* Botones */}
+          <div className="flex gap-2 w-full">
+            <Button
+              variant="secondary"
+              className="flex-1"
+              onClick={onCancelar}
+              disabled={guardando}
+            >
+              Cancelar
+            </Button>
+            <Button
+              className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
+              loading={guardando}
+              onClick={onReescribir}
+            >
+              Reescribir datos
+            </Button>
+          </div>
+
         </div>
-
-        {/* Explicación de acciones */}
-        <div className="w-full flex flex-col gap-1.5 text-xs text-gray-500 bg-gray-50
-          rounded-xl px-3 py-2.5 border border-gray-100">
-          <p>
-            <span className="font-semibold text-blue-700">Reescribir datos:</span>
-            {' '}actualiza el cliente con los datos que ingresaste y confirma la factura.
-          </p>
-          <p>
-            <span className="font-semibold text-gray-600">Cancelar:</span>
-            {' '}vuelve al formulario con los datos originales del cliente para que los revises.
-          </p>
-        </div>
-
-        {/* Botones */}
-        <div className="flex gap-2 w-full">
-          <Button
-            variant="secondary"
-            className="flex-1"
-            onClick={onCancelar}
-            disabled={guardando}
-          >
-            Cancelar
-          </Button>
-          <Button
-            className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
-            loading={guardando}
-            onClick={onReescribir}
-          >
-            Reescribir datos
-          </Button>
-        </div>
-
-      </div>
+      )}
     </Modal>
   );
 }
