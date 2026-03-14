@@ -170,8 +170,72 @@ const eliminarSerial = async (serialId) => {
   return rows[0] || null;
 };
 
+const findComprasCliente = async (negocioId, q) => {
+  const filtro = q ? `%${q.toLowerCase()}%` : '%';
+ 
+  // Fuente 1: seriales con cliente_origen
+  const { rows: seriales } = await pool.query(`
+    SELECT
+      'compra'            AS tipo,
+      s.id,
+      s.imei,
+      s.cliente_origen    AS nombre_cliente,
+      NULL                AS cedula_cliente,
+      NULL                AS cliente_id,
+      ps.nombre           AS nombre_producto,
+      ps.marca,
+      ps.modelo,
+      s.fecha_entrada     AS fecha,
+      s.costo_compra      AS valor,
+      su.nombre           AS sucursal_nombre,
+      NULL                AS factura_id
+    FROM seriales s
+    JOIN productos_serial ps ON ps.id = s.producto_id
+    JOIN sucursales        su ON su.id = ps.sucursal_id
+    WHERE su.negocio_id = $1
+      AND s.cliente_origen IS NOT NULL
+      AND (
+        LOWER(s.cliente_origen)  LIKE $2
+        OR LOWER(ps.nombre)      LIKE $2
+        OR LOWER(s.imei)         LIKE $2
+      )
+    ORDER BY s.fecha_entrada DESC
+  `, [negocioId, filtro]);
+ 
+  // Fuente 2: retomas de facturas
+  const { rows: retomas } = await pool.query(`
+    SELECT
+      'retoma'            AS tipo,
+      r.id,
+      r.imei,
+      f.nombre_cliente,
+      f.cedula            AS cedula_cliente,
+      f.cliente_id,
+      r.nombre_producto,
+      NULL                AS marca,
+      NULL                AS modelo,
+      f.fecha,
+      r.valor_retoma      AS valor,
+      su.nombre           AS sucursal_nombre,
+      f.id                AS factura_id
+    FROM retomas  r
+    JOIN facturas f  ON f.id  = r.factura_id
+    JOIN sucursales su ON su.id = f.sucursal_id
+    WHERE su.negocio_id = $1
+      AND (
+        LOWER(f.nombre_cliente)  LIKE $2
+        OR f.cedula              LIKE $2
+        OR LOWER(r.nombre_producto) LIKE $2
+        OR LOWER(r.imei)         LIKE $2
+      )
+    ORDER BY f.fecha DESC
+  `, [negocioId, filtro]);
+ 
+  return { seriales, retomas };
+};
+
 module.exports = {
   findAll, findById, perteneceAlNegocio, create, update, updatePrecio,
   getSeriales, findSerialByIMEI, findSerialByIMEIEnNegocio,
-  insertarSerial, reactivarSerial, actualizarSerial, eliminarSerial,
+  insertarSerial, reactivarSerial, actualizarSerial, eliminarSerial,findComprasCliente
 };

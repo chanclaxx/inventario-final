@@ -99,10 +99,10 @@ const update = async (id, { nombre, stock_minimo, unidad_medida, costo_unitario,
   return rows[0] || null;
 };
 
-const ajustarStock = async (id, cantidad, { costo_unitario, proveedor_id } = {}) => {
-  const sets = ['stock = stock + $1'];
+const ajustarStock = async (id, cantidad, { costo_unitario, proveedor_id, cliente_origen } = {}) => {
+  const sets   = ["stock = stock + $1"];
   const params = [cantidad, id];
-
+ 
   if (costo_unitario != null) {
     sets.push(`costo_unitario = $${params.length}`);
     params.splice(params.length - 1, 0, costo_unitario);
@@ -111,20 +111,16 @@ const ajustarStock = async (id, cantidad, { costo_unitario, proveedor_id } = {})
     sets.push(`proveedor_id = $${params.length}`);
     params.splice(params.length - 1, 0, proveedor_id);
   }
-
+  if (cliente_origen != null) {
+    sets.push(`cliente_origen = $${params.length}`);
+    params.splice(params.length - 1, 0, cliente_origen);
+  }
+ 
   const { rows } = await pool.query(
-    `UPDATE productos_cantidad SET ${sets.join(', ')} WHERE id = $${params.length} RETURNING *`,
+    `UPDATE productos_cantidad SET ${sets.join(", ")} WHERE id = $${params.length} RETURNING *`,
     params
   );
   return rows[0] || null;
-};
-
-const eliminar = async (id) => {
-  const { rowCount } = await pool.query(
-    'UPDATE productos_cantidad SET activo = false WHERE id = $1',
-    [id]
-  );
-  return rowCount > 0;
 };
 
 module.exports = {

@@ -107,9 +107,12 @@ const verificarImei = async (imei, negocioId) => {
     },
   };
 };
+const getComprasCliente = async (negocioId, q) => {
+  return repo.findComprasCliente(negocioId, q || '');
+};
 
 module.exports = {
   getProductos, getProductoById, crearProducto, actualizarProducto,
   getSeriales, agregarSerial, actualizarSerial, eliminarSerial,
-  verificarImei,
+  verificarImei,getComprasCliente
 };

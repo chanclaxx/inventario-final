@@ -74,9 +74,16 @@ const verificarImei = async (req, res, next) => {
     res.json({ ok: true, data });
   } catch (err) { next(err); }
 };
+const getComprasCliente = async (req, res, next) => {
+  try {
+    const q    = req.query.q || '';
+    const data = await service.getComprasCliente(req.user.negocio_id, q);
+    res.json({ ok: true, data });
+  } catch (err) { next(err); }
+};
 
 module.exports = {
   getProductos, getProductoById, crearProducto, actualizarProducto,
   getSeriales, agregarSerial, actualizarSerial, eliminarSerial,
-  verificarImei,
+  verificarImei,getComprasCliente
 };
