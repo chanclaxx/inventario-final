@@ -2,78 +2,84 @@ import { useState, useCallback } from 'react';
 import { buscarPorCedula, actualizarCliente } from '../api/clientes.api';
 
 /**
- * Hook compartido para la lógica de búsqueda de cliente por cédula.
+ * Hook compartido para la lógica de cédula única por cliente.
  *
- * Detecta si la cédula ingresada ya pertenece a otro cliente con
- * nombre diferente y expone el estado necesario para mostrar el
- * modal de conflicto.
+ * El flujo ocurre al momento de confirmar la factura (en handleSubmit),
+ * no al perder el foco del campo cédula.
+ *
+ * 1. verificarCedula(form) — llamar ANTES de ejecutar la mutación:
+ *    - Cédula no existe en BD   → retorna true  (el backend crea el cliente)
+ *    - Existe, mismos datos     → retorna true  (sin cambios necesarios)
+ *    - Existe, datos distintos  → guarda el conflicto, retorna false
+ *      → el componente detiene el submit y muestra <ModalConflictoCedula>
+ *
+ * 2. Usuario elige "Reescribir datos":
+ *    - reescribirCliente() actualiza el cliente en BD y libera el conflicto
+ *    - El componente reintenta el submit automáticamente
+ *
+ * 3. Usuario elige "Cancelar":
+ *    - cancelarConflicto(setForm) restaura el form con los datos del cliente
+ *      registrado en BD (el usuario debe revisar y volver a confirmar)
+ *    - No se hace ningún cambio en BD
  *
  * Uso:
  *   const {
- *     buscandoCliente,
- *     conflictoCliente,
- *     buscarCliente,
- *     resolverConflicto,
- *     descartarConflicto,
- *   } = useCedulaCliente({ form, setForm });
+ *     conflictoCliente,   // { clienteExistente, datosNuevos } | null
+ *     verificarCedula,    // async (form) => boolean
+ *     reescribirCliente,  // async () => void
+ *     cancelarConflicto,  // (setForm) => void
+ *   } = useCedulaCliente();
  */
-export function useCedulaCliente({ form, setForm }) {
-  const [buscandoCliente,  setBuscandoCliente]  = useState(false);
+export function useCedulaCliente() {
   const [conflictoCliente, setConflictoCliente] = useState(null);
   // conflictoCliente = { clienteExistente, datosNuevos } | null
 
   /**
-   * Busca un cliente por la cédula actual del form.
-   * - Si no existe: no hace nada (el backend lo crea al facturar).
-   * - Si existe con el mismo nombre: autocompleta campos vacíos silenciosamente.
-   * - Si existe con nombre diferente: guarda el conflicto para mostrar el modal.
+   * Verifica si la cédula del form colisiona con un cliente existente.
+   * Retorna true si el submit puede continuar, false si debe detenerse.
    */
-  const buscarCliente = useCallback(async () => {
+  const verificarCedula = useCallback(async (form) => {
     const cedula = form.cedula?.trim();
-    if (!cedula) return;
+    if (!cedula) return true;
 
-    setBuscandoCliente(true);
     try {
       const { data } = await buscarPorCedula(cedula);
       const encontrado = data.data;
-      if (!encontrado) return;
+      if (!encontrado) return true;
 
-      const mismoNombre =
-        encontrado.nombre.trim().toLowerCase() === form.nombre.trim().toLowerCase();
+      // Comparar todos los campos relevantes
+      const hayDiferencia =
+        encontrado.nombre.trim().toLowerCase() !== (form.nombre    || '').trim().toLowerCase() ||
+        (encontrado.celular  || '')             !== (form.celular   || '')                      ||
+        (encontrado.email    || '')             !== (form.email     || '')                      ||
+        (encontrado.direccion|| '')             !== (form.direccion || '');
 
-      if (mismoNombre || !form.nombre.trim()) {
-        // Autocompleta campos vacíos sin preguntar
-        setForm((f) => ({
-          ...f,
-          nombre:    f.nombre    || encontrado.nombre,
-          celular:   f.celular   || encontrado.celular   || '',
-          email:     f.email     || encontrado.email     || '',
-          direccion: f.direccion || encontrado.direccion || '',
-        }));
-      } else {
-        // Nombre diferente → expone el conflicto para el modal
-        setConflictoCliente({
-          clienteExistente: encontrado,
-          datosNuevos: {
-            nombre:    form.nombre,
-            celular:   form.celular,
-            email:     form.email,
-            direccion: form.direccion,
-          },
-        });
-      }
+      if (!hayDiferencia) return true;
+
+      // Hay diferencia → bloquear submit y guardar conflicto
+      setConflictoCliente({
+        clienteExistente: encontrado,
+        datosNuevos: {
+          nombre:    form.nombre    || '',
+          celular:   form.celular   || '',
+          email:     form.email     || '',
+          direccion: form.direccion || '',
+        },
+      });
+      return false;
+
     } catch {
-      // Cliente no encontrado — el backend lo creará al facturar
-    } finally {
-      setBuscandoCliente(false);
+      // Error de red o 404 → no bloqueamos, el backend decide
+      return true;
     }
-  }, [form, setForm]);
+  }, []);
 
   /**
-   * El usuario eligió "Renombrar y actualizar":
-   * actualiza el cliente en BD y pre-carga el form con los datos nuevos.
+   * El usuario eligió "Reescribir datos":
+   * actualiza el cliente en BD con los datos nuevos y libera el conflicto.
+   * El componente debe reintentar el submit después de llamar esto.
    */
-  const resolverConflicto = useCallback(async () => {
+  const reescribirCliente = useCallback(async () => {
     if (!conflictoCliente) return;
     const { clienteExistente, datosNuevos } = conflictoCliente;
 
@@ -85,26 +91,37 @@ export function useCedulaCliente({ form, setForm }) {
         direccion: datosNuevos.direccion || clienteExistente.direccion,
       });
     } catch {
-      // Si falla la actualización igual continuamos — el servidor
-      // manejará la reconciliación al guardar la factura.
+      // Si falla la actualización igual liberamos — el submit continúa
     } finally {
       setConflictoCliente(null);
     }
   }, [conflictoCliente]);
 
   /**
-   * El usuario eligió "Continuar sin actualizar":
-   * descarta el conflicto y deja el form como está.
+   * El usuario eligió "Cancelar":
+   * restaura el form con los datos originales del cliente en BD.
+   * No modifica nada en el servidor.
+   * El usuario debe revisar los datos y volver a confirmar.
    */
-  const descartarConflicto = useCallback(() => {
+  const cancelarConflicto = useCallback((setForm) => {
+    if (!conflictoCliente) return;
+    const { clienteExistente } = conflictoCliente;
+
+    setForm((f) => ({
+      ...f,
+      nombre:    clienteExistente.nombre    || '',
+      celular:   clienteExistente.celular   || '',
+      email:     clienteExistente.email     || '',
+      direccion: clienteExistente.direccion || '',
+    }));
+
     setConflictoCliente(null);
-  }, []);
+  }, [conflictoCliente]);
 
   return {
-    buscandoCliente,
     conflictoCliente,
-    buscarCliente,
-    resolverConflicto,
-    descartarConflicto,
+    verificarCedula,
+    reescribirCliente,
+    cancelarConflicto,
   };
 }
