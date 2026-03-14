@@ -367,6 +367,79 @@ function RetomaCantidad({ retoma, setRetomaField, productosCantidad }) {
   );
 }
 
+// ─── Selector de métodos de pago ──────────────────────────────────────────────
+
+/**
+ * - 1 método seleccionado: sin inputs, se asume pago total neto.
+ * - 2+ métodos: input de monto por cada uno seleccionado.
+ */
+function SelectorPagos({ metodosSeleccionados, montos, totalNeto, onToggleMetodo, onCambioMonto }) {
+  const cantidadSeleccionada = metodosSeleccionados.length;
+
+  return (
+    <div className="flex flex-col gap-3">
+      <p className="text-sm font-medium text-gray-700">Método de pago</p>
+
+      {/* Chips de selección */}
+      <div className="flex flex-wrap gap-2">
+        {METODOS_PAGO.map((metodo) => {
+          const metodoId     = metodo.id;
+          const metodoLabel  = metodo.label;
+          const seleccionado = metodosSeleccionados.includes(metodoId);
+          return (
+            <button
+              key={metodoId}
+              type="button"
+              onClick={() => onToggleMetodo(metodoId)}
+              className={`px-3 py-1.5 rounded-xl text-sm font-medium border transition-all
+                ${seleccionado
+                  ? 'bg-blue-50 border-blue-300 text-blue-700'
+                  : 'bg-gray-50 border-gray-200 text-gray-500 hover:border-gray-300'}`}
+            >
+              {metodoLabel}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Inputs de monto — solo cuando hay 2 o más métodos */}
+      {cantidadSeleccionada >= 2 && (
+        <div className="flex flex-col gap-2 pt-1">
+          {metodosSeleccionados.map((metodoId) => {
+            const metodo      = METODOS_PAGO.find((m) => m.id === metodoId);
+            const metodoLabel = metodo ? metodo.label : metodoId;
+            return (
+              <div key={metodoId} className="flex items-center gap-3">
+                <span className="text-sm text-gray-600 w-28 flex-shrink-0">{metodoLabel}</span>
+                <InputMoneda
+                  value={montos[metodoId] || ''}
+                  onChange={(val) => onCambioMonto(metodoId, val)}
+                  placeholder="0"
+                  className="flex-1 px-3 py-2 bg-gray-100 rounded-xl text-sm
+                    focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"
+                />
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Indicador de pago único */}
+      {cantidadSeleccionada === 1 && (
+        <p className="text-xs text-gray-400">
+          Pago completo de{' '}
+          <span className="font-semibold text-gray-600">{formatCOP(totalNeto)}</span>
+          {' '}en {metodosSeleccionados[0]}
+        </p>
+      )}
+
+      {cantidadSeleccionada === 0 && (
+        <p className="text-xs text-gray-400">Selecciona al menos un método de pago</p>
+      )}
+    </div>
+  );
+}
+
 // ─── Modal principal ──────────────────────────────────────────────────────────
 
 export function ModalFactura({ open, onClose }) {
@@ -376,17 +449,20 @@ export function ModalFactura({ open, onClose }) {
   const { items, totalCarrito, limpiarCarrito, actualizarPrecio } = useCarritoStore();
   const total = totalCarrito();
 
-  const [facturaCreada,    setFacturaCreada]    = useState(null);
-  const [mostrarImpresion, setMostrarImpresion] = useState(false);
-  const [tipoCliente,      setTipoCliente]      = useState('cliente');
-  const [form,             setForm]             = useState({ nombre: '', cedula: '', celular: '', notas: '' });
-  const [pagos,            setPagos]            = useState({ Efectivo: '' });
-  const [conRetoma,        setConRetoma]        = useState(false);
-  const [retoma,           setRetoma]           = useState(RETOMA_INICIAL);
-  const [error,            setError]            = useState('');
-  const [buscandoCliente,  setBuscandoCliente]  = useState(false);
-  const [modalReactivar,   setModalReactivar]   = useState(false);
-  const [serialEncontrado, setSerialEncontrado] = useState(null);
+  const [facturaCreada,        setFacturaCreada]        = useState(null);
+  const [mostrarImpresion,     setMostrarImpresion]     = useState(false);
+  const [tipoCliente,          setTipoCliente]          = useState('cliente');
+  const [form,                 setForm]                 = useState({
+    nombre: '', cedula: '', celular: '', email: '', direccion: '', notas: '',
+  });
+  const [metodosSeleccionados, setMetodosSeleccionados] = useState([]);
+  const [montos,               setMontos]               = useState({});
+  const [conRetoma,            setConRetoma]            = useState(false);
+  const [retoma,               setRetoma]               = useState(RETOMA_INICIAL);
+  const [error,                setError]                = useState('');
+  const [buscandoCliente,      setBuscandoCliente]      = useState(false);
+  const [modalReactivar,       setModalReactivar]       = useState(false);
+  const [serialEncontrado,     setSerialEncontrado]     = useState(null);
 
   const retomaSerialRef = useRef(null);
 
@@ -411,6 +487,10 @@ export function ModalFactura({ open, onClose }) {
     queryFn: () => getProductosCantidad().then((r) => r.data.data),
     enabled: conRetoma && retoma.tipo_retoma === 'cantidad',
   });
+
+  // Campos opcionales según config del negocio
+  const mostrarEmail     = configData?.campo_email_cliente     === '1';
+  const mostrarDireccion = configData?.campo_direccion_cliente === '1';
 
   const mutation = useMutation({
     mutationFn: crearFactura,
@@ -440,8 +520,9 @@ export function ModalFactura({ open, onClose }) {
   });
 
   const resetForm = () => {
-    setForm({ nombre: '', cedula: '', celular: '', notas: '' });
-    setPagos({ Efectivo: '' });
+    setForm({ nombre: '', cedula: '', celular: '', email: '', direccion: '', notas: '' });
+    setMetodosSeleccionados([]);
+    setMontos({});
     setConRetoma(false);
     setRetoma(RETOMA_INICIAL);
     setError('');
@@ -459,7 +540,13 @@ export function ModalFactura({ open, onClose }) {
     try {
       const { data } = await buscarPorCedula(form.cedula);
       if (data.data) {
-        setForm((f) => ({ ...f, nombre: data.data.nombre, celular: data.data.celular || '' }));
+        setForm((f) => ({
+          ...f,
+          nombre:    data.data.nombre,
+          celular:   data.data.celular   || '',
+          email:     data.data.email     || '',
+          direccion: data.data.direccion || '',
+        }));
       }
     } catch {
       // cliente no encontrado — el backend lo creará al facturar
@@ -468,13 +555,48 @@ export function ModalFactura({ open, onClose }) {
     }
   };
 
-  const totalPagado = Object.values(pagos).reduce((s, v) => s + Number(v || 0), 0);
+  // ── Lógica de pagos ───────────────────────────────────────────────────────
+
   const valorRetoma = conRetoma ? Number(retoma.valor_retoma || 0) : 0;
   const totalNeto   = total - valorRetoma;
-  const diferencia  = totalPagado - totalNeto;
 
-  const handlePago = (metodo, valor) =>
-    setPagos((p) => ({ ...p, [metodo]: valor }));
+  const handleToggleMetodo = (metodoId) => {
+    setMetodosSeleccionados((prev) => {
+      if (prev.includes(metodoId)) {
+        setMontos((m) => {
+          const copia = { ...m };
+          delete copia[metodoId];
+          return copia;
+        });
+        return prev.filter((id) => id !== metodoId);
+      }
+      return [...prev, metodoId];
+    });
+  };
+
+  const handleCambioMonto = (metodoId, valor) =>
+    setMontos((m) => ({ ...m, [metodoId]: valor }));
+
+  /**
+   * Construye el array de pagos para el payload:
+   * - 1 método: asume el total neto completo
+   * - 2+ métodos: usa los montos ingresados por el usuario
+   */
+  const construirPagos = () => {
+    if (metodosSeleccionados.length === 1) {
+      const metodoId = metodosSeleccionados[0];
+      return [{ metodo: metodoId, valor: totalNeto }];
+    }
+    return metodosSeleccionados
+      .filter((id) => Number(montos[id] || 0) > 0)
+      .map((id) => ({ metodo: id, valor: Number(montos[id]) }));
+  };
+
+  const totalPagado = metodosSeleccionados.length === 1
+    ? totalNeto
+    : metodosSeleccionados.reduce((s, id) => s + Number(montos[id] || 0), 0);
+
+  const diferencia = totalPagado - totalNeto;
 
   const handleKeyDown = (e, siguienteId) => {
     if (e.key === 'Enter') {
@@ -520,6 +642,7 @@ export function ModalFactura({ open, onClose }) {
     if (!form.nombre.trim()) return setError('El nombre es requerido');
     if (tipoCliente === 'cliente' && !form.cedula.trim())  return setError('La cédula es requerida');
     if (tipoCliente === 'cliente' && !form.celular.trim()) return setError('El celular es requerido');
+    if (metodosSeleccionados.length === 0) return setError('Selecciona al menos un método de pago');
 
     if (conRetoma && retoma.ingreso_inventario) {
       if (retoma.tipo_retoma === 'serial' && !retoma.imei.trim()) {
@@ -538,10 +661,6 @@ export function ModalFactura({ open, onClose }) {
       precio:          item.precioFinal,
     }));
 
-    const pagosArray = Object.entries(pagos)
-      .filter(([, v]) => Number(v) > 0)
-      .map(([metodo, valor]) => ({ metodo, valor: Number(valor) }));
-
     const retomaPayload = conRetoma ? {
       tipo_retoma:          retoma.tipo_retoma,
       descripcion:          retoma.descripcion,
@@ -559,9 +678,11 @@ export function ModalFactura({ open, onClose }) {
       nombre_cliente: form.nombre,
       cedula:         tipoCliente === 'cliente' ? form.cedula  : 'COMPANERO',
       celular:        tipoCliente === 'cliente' ? form.celular : '0000000000',
-      notas:          form.notas,
+      email:          tipoCliente === 'cliente' ? (form.email     || null) : null,
+      direccion:      tipoCliente === 'cliente' ? (form.direccion || null) : null,
+      notas:          form.notas || null,
       lineas,
-      pagos:          pagosArray,
+      pagos:          construirPagos(),
       retoma:         retomaPayload,
     });
   };
@@ -614,14 +735,16 @@ export function ModalFactura({ open, onClose }) {
                 )}
               </div>
             )}
+
             <Input
               id="nombre"
               label="Nombre"
               placeholder={tipoCliente === 'companero' ? 'Nombre del compañero' : 'Nombre completo'}
               value={form.nombre}
               onChange={(e) => setForm({ ...form, nombre: e.target.value })}
-              onKeyDown={(e) => handleKeyDown(e, tipoCliente === 'cliente' ? 'celular' : 'efectivo')}
+              onKeyDown={(e) => handleKeyDown(e, tipoCliente === 'cliente' ? 'celular' : null)}
             />
+
             {tipoCliente === 'cliente' && (
               <Input
                 id="celular"
@@ -629,9 +752,46 @@ export function ModalFactura({ open, onClose }) {
                 placeholder="3001234567"
                 value={form.celular}
                 onChange={(e) => setForm({ ...form, celular: e.target.value })}
-                onKeyDown={(e) => handleKeyDown(e, 'efectivo')}
               />
             )}
+
+            {tipoCliente === 'cliente' && mostrarEmail && (
+              <Input
+                id="email"
+                label="Email"
+                type="email"
+                placeholder="correo@ejemplo.com"
+                value={form.email}
+                onChange={(e) => setForm({ ...form, email: e.target.value })}
+              />
+            )}
+
+            {tipoCliente === 'cliente' && mostrarDireccion && (
+              <Input
+                id="direccion"
+                label="Dirección"
+                placeholder="Calle 10 # 5-20"
+                value={form.direccion}
+                onChange={(e) => setForm({ ...form, direccion: e.target.value })}
+              />
+            )}
+          </div>
+
+          {/* ── Descripción / Notas ── */}
+          <div className="flex flex-col gap-1">
+            <label className="text-sm font-medium text-gray-700">
+              Descripción{' '}
+              <span className="text-gray-400 font-normal text-xs">(opcional)</span>
+            </label>
+            <textarea
+              rows={2}
+              placeholder="Observaciones de la venta..."
+              value={form.notas}
+              onChange={(e) => setForm({ ...form, notas: e.target.value })}
+              className="w-full px-3 py-2 bg-gray-100 border-0 rounded-xl text-sm text-gray-900
+                placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500
+                focus:bg-white transition-all resize-none"
+            />
           </div>
 
           {/* ── Resumen de productos ── */}
@@ -745,30 +905,13 @@ export function ModalFactura({ open, onClose }) {
           </div>
 
           {/* ── Métodos de pago ── */}
-          <div>
-            <p className="text-sm font-medium text-gray-700 mb-2">Método de pago</p>
-            <div className="flex flex-col gap-2">
-              {METODOS_PAGO.map((metodo, index) => {
-                const metodoId    = metodo.id;
-                const metodoLabel = metodo.label;
-                const siguiente   = METODOS_PAGO[index + 1];
-                return (
-                  <div key={metodoId} className="flex items-center gap-3">
-                    <span className="text-sm text-gray-600 w-28">{metodoLabel}</span>
-                    <InputMoneda
-                      id={metodoId.toLowerCase()}
-                      value={pagos[metodoId] || ''}
-                      onChange={(val) => handlePago(metodoId, val)}
-                      onKeyDown={(e) => handleKeyDown(e, siguiente ? siguiente.id.toLowerCase() : null)}
-                      placeholder="0"
-                      className="flex-1 px-3 py-2 bg-gray-100 rounded-xl text-sm
-                        focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"
-                    />
-                  </div>
-                );
-              })}
-            </div>
-          </div>
+          <SelectorPagos
+            metodosSeleccionados={metodosSeleccionados}
+            montos={montos}
+            totalNeto={totalNeto}
+            onToggleMetodo={handleToggleMetodo}
+            onCambioMonto={handleCambioMonto}
+          />
 
           {/* ── Resumen financiero ── */}
           <div className="bg-gray-50 rounded-xl p-3 flex flex-col gap-1.5">
@@ -782,11 +925,13 @@ export function ModalFactura({ open, onClose }) {
               <span className="text-gray-600">Total a pagar</span>
               <span className="font-bold text-gray-900">{formatCOP(totalNeto)}</span>
             </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-600">Total pagado</span>
-              <span className="font-medium">{formatCOP(totalPagado)}</span>
-            </div>
-            {diferencia !== 0 && (
+            {metodosSeleccionados.length >= 2 && (
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-600">Total pagado</span>
+                <span className="font-medium">{formatCOP(totalPagado)}</span>
+              </div>
+            )}
+            {diferencia !== 0 && metodosSeleccionados.length >= 2 && (
               <div className="flex justify-between text-sm border-t border-gray-200 pt-1.5 mt-1">
                 <span className={diferencia > 0 ? 'text-green-600' : 'text-red-500'}>
                   {diferencia > 0 ? 'Cambio' : 'Falta'}

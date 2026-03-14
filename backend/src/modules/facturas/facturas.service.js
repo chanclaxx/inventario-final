@@ -13,7 +13,7 @@ const ES_COMPANERO = (cedula) => cedula === 'COMPANERO';
  * Si no existe lo crea. Retorna siempre el cliente_id.
  * Para compañeros retorna null sin consultar la DB.
  */
-const resolverClienteId = async (client, negocioId, { cedula, nombre, celular }) => {
+const resolverClienteId = async (client, negocioId, { cedula, nombre, celular, email, direccion }) => {
   if (ES_COMPANERO(cedula)) return null;
 
   const { rows } = await client.query(
@@ -24,10 +24,10 @@ const resolverClienteId = async (client, negocioId, { cedula, nombre, celular })
   if (rows.length) return rows[0].id;
 
   const { rows: nuevos } = await client.query(
-    `INSERT INTO clientes (negocio_id, nombre, cedula, celular)
-     VALUES ($1, $2, $3, $4)
+    `INSERT INTO clientes (negocio_id, nombre, cedula, celular, email, direccion)
+     VALUES ($1, $2, $3, $4, $5, $6)
      RETURNING id`,
-    [negocioId, nombre, cedula, celular || null]
+    [negocioId, nombre, cedula, celular || null, email || null, direccion || null]
   );
   return nuevos[0].id;
 };
@@ -54,18 +54,19 @@ const getFacturaById = async (negocioId, id) => {
 
 const crearFactura = async ({
   negocio_id, sucursal_id, usuario_id,
-  nombre_cliente, cedula, celular, notas,
+  nombre_cliente, cedula, celular, email, direccion, notas,
   lineas, pagos, retoma,
 }) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
-    // Resolver o crear cliente dentro de la misma transacción
     const cliente_id = await resolverClienteId(client, negocio_id, {
       cedula,
       nombre: nombre_cliente,
       celular,
+      email,
+      direccion,
     });
 
     const factura = await facturasRepo.create(client, {
@@ -225,7 +226,7 @@ const cancelarFactura = async (negocioId, id) => {
 // ─── Editar factura ───────────────────────────────────────────────────────────
 
 const editarFactura = async (negocioId, id, {
-  nombre_cliente, cedula, celular, notas,
+  nombre_cliente, cedula, celular, email, direccion, notas,
   lineas, pagos, retoma,
 }) => {
   const valida = await facturasRepo.perteneceAlNegocio(id, negocioId);
@@ -240,11 +241,12 @@ const editarFactura = async (negocioId, id, {
   try {
     await client.query('BEGIN');
 
-    // Resolver cliente_id igual que en creación
     const cliente_id = await resolverClienteId(client, negocioId, {
       cedula,
       nombre: nombre_cliente,
       celular,
+      email,
+      direccion,
     });
 
     await client.query(

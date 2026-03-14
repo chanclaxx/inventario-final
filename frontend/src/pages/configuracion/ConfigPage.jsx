@@ -10,7 +10,9 @@ import { Input }   from '../../components/ui/Input';
 import { Modal }   from '../../components/ui/Modal';
 import { Spinner } from '../../components/ui/Spinner';
 import { Badge }   from '../../components/ui/Badge';
-import { Settings, Save, Eye, EyeOff, Plus, Trash2, GripVertical } from 'lucide-react';
+import { Settings, Save, Eye, EyeOff, Plus, Trash2, GripVertical, ToggleLeft, ToggleRight } from 'lucide-react';
+
+// ─── Hook compartido de config ────────────────────────────────────────────────
 
 function useConfigQuery() {
   return useQuery({
@@ -18,6 +20,32 @@ function useConfigQuery() {
     queryFn:  () => api.get('/config').then((r) => r.data.data),
   });
 }
+
+// ─── Toggle reutilizable ──────────────────────────────────────────────────────
+
+function Toggle({ enabled, onChange, label, description }) {
+  return (
+    <div className="flex items-center justify-between gap-4">
+      <div className="flex flex-col gap-0.5">
+        <span className="text-sm font-medium text-gray-700">{label}</span>
+        {description && <span className="text-xs text-gray-400">{description}</span>}
+      </div>
+      <button
+        type="button"
+        onClick={() => onChange(!enabled)}
+        className="flex-shrink-0 transition-colors"
+        aria-pressed={enabled}
+      >
+        {enabled
+          ? <ToggleRight size={28} className="text-blue-600" />
+          : <ToggleLeft  size={28} className="text-gray-300" />
+        }
+      </button>
+    </div>
+  );
+}
+
+// ─── Garantías ────────────────────────────────────────────────────────────────
 
 function GarantiasConfig() {
   const queryClient               = useQueryClient();
@@ -54,7 +82,7 @@ function GarantiasConfig() {
     onSuccess:  () => queryClient.invalidateQueries({ queryKey: ['garantias'], exact: false }),
   });
 
-  const abrirNuevo = () => {
+  const abrirNuevo  = () => {
     setEditando(null);
     setForm({ titulo: '', texto: '', orden: garantias.length });
     setError('');
@@ -68,7 +96,7 @@ function GarantiasConfig() {
     setModalOpen(true);
   };
 
-  const cerrarModal  = () => { setModalOpen(false); setEditando(null); setError(''); };
+  const cerrarModal = () => { setModalOpen(false); setEditando(null); setError(''); };
 
   const handleGuardar = () => {
     if (!form.titulo.trim()) return setError('El título es requerido');
@@ -161,12 +189,57 @@ function GarantiasConfig() {
   );
 }
 
+// ─── Campos opcionales del formulario de venta ────────────────────────────────
+
+function CamposFormularioConfig({ valores, set }) {
+  const CAMPOS_OPCIONALES = [
+    {
+      clave:       'campo_email_cliente',
+      label:       'Email del cliente',
+      description: 'Muestra el campo de email al registrar una venta',
+    },
+    {
+      clave:       'campo_direccion_cliente',
+      label:       'Dirección del cliente',
+      description: 'Muestra el campo de dirección al registrar una venta',
+    },
+  ];
+
+  return (
+    <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm flex flex-col gap-4">
+      <h2 className="text-sm font-semibold text-gray-700">Campos del formulario de venta</h2>
+      <p className="text-xs text-gray-400 -mt-2">
+        Activa los campos adicionales que quieres recolectar al facturar
+      </p>
+      <div className="flex flex-col gap-4">
+        {CAMPOS_OPCIONALES.map((campo) => {
+          const clave   = campo.clave;
+          const label   = campo.label;
+          const desc    = campo.description;
+          const enabled = valores[clave] === '1';
+          return (
+            <Toggle
+              key={clave}
+              label={label}
+              description={desc}
+              enabled={enabled}
+              onChange={(val) => set(clave, val ? '1' : '0')}
+            />
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ─── Página principal ─────────────────────────────────────────────────────────
+
 export default function ConfigPage() {
-  const queryClient                   = useQueryClient();
-  const { data: config, isLoading }   = useConfigQuery();
-  const [form,     setForm]           = useState({});
-  const [verPin,   setVerPin]         = useState(false);
-  const [guardado, setGuardado]       = useState(false);
+  const queryClient                 = useQueryClient();
+  const { data: config, isLoading } = useConfigQuery();
+  const [form,     setForm]         = useState({});
+  const [verPin,   setVerPin]       = useState(false);
+  const [guardado, setGuardado]     = useState(false);
 
   const mutation = useMutation({
     mutationFn: (payload) => api.put('/config', payload),
@@ -182,7 +255,7 @@ export default function ConfigPage() {
   const valores = { ...config, ...form };
   const set     = (clave, valor) => setForm((f) => ({ ...f, [clave]: valor }));
 
-  const campos = [
+  const camposNegocio = [
     { clave: 'nombre_negocio', label: 'Nombre del negocio', placeholder: 'Mi Tienda' },
     { clave: 'nit',            label: 'NIT',                placeholder: '900123456-1' },
     { clave: 'direccion',      label: 'Dirección',          placeholder: 'Calle 10 # 5-20' },
@@ -203,11 +276,12 @@ export default function ConfigPage() {
 
       <div className="flex flex-col lg:flex-row gap-6 items-start">
 
-        {/* Columna izquierda */}
+        {/* ── Columna izquierda ── */}
         <div className="w-full lg:max-w-sm flex flex-col gap-6">
+
           <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm flex flex-col gap-4">
             <h2 className="text-sm font-semibold text-gray-700">Datos del negocio</h2>
-            {campos.map(({ clave, label, placeholder }) => (
+            {camposNegocio.map(({ clave, label, placeholder }) => (
               <Input
                 key={clave}
                 label={label}
@@ -237,8 +311,15 @@ export default function ConfigPage() {
             </div>
           </div>
 
+          {/* Campos opcionales del formulario de venta */}
+          <CamposFormularioConfig valores={valores} set={set} />
+
           <div className="flex items-center gap-3">
-            <Button className="flex-1" loading={mutation.isPending} onClick={() => mutation.mutate(form)}>
+            <Button
+              className="flex-1"
+              loading={mutation.isPending}
+              onClick={() => mutation.mutate(form)}
+            >
               <Save size={16} />
               Guardar cambios
             </Button>
@@ -248,7 +329,7 @@ export default function ConfigPage() {
           <PasswordConfig />
         </div>
 
-        {/* Columna derecha */}
+        {/* ── Columna derecha ── */}
         <div className="w-full lg:flex-1 flex flex-col gap-6">
           <SucursalesConfig />
           <GarantiasConfig />
