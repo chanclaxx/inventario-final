@@ -45,7 +45,7 @@ gcTime:    0,
     },
   });
 
-  const productos = productosData || [];
+  const productos = Array.isArray(productosData) ? productosData : [];
 
   const productosFiltrados = productos.filter((p) =>
     p.nombre.toLowerCase().includes(busqueda.toLowerCase())
