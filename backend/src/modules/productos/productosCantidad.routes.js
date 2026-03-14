@@ -2,6 +2,8 @@ const router = require('express').Router();
 const { requireNivel } = require('../../middlewares/role.middleware');
 const ctrl = require('./productosCantidad.controller');
 
+router.get('/historial-stock', ctrl.getHistorialStock);
+
 router.get('/',            ctrl.getProductos);
 router.get('/:id',         ctrl.getProductoById);
 router.post('/',           requireNivel('supervisor'), ctrl.crearProducto);
