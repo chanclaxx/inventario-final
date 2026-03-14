@@ -1,3 +1,5 @@
+
+const { pool } = require('../../config/db');  // ← agregar esta línea
 const repo = require('./acreedores.repository');
 
 const getAcreedores = (negocioId, filtro) => repo.findAll(negocioId, filtro);

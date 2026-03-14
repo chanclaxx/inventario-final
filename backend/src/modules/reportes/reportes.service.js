@@ -404,11 +404,11 @@ const actualizarCostoCompra = async (sucursalId, tipo, imei, nombreProducto, nue
       throw Object.assign(new Error('Serial no encontrado en esta sucursal'), { status: 404 });
     }
 
-    await pool.query(`
-      UPDATE seriales
-      SET costo_compra = $1
-      WHERE imei = $2
-    `, [nuevoCosto, imei]);
+    // ── Usar id verificado en vez de imei para no afectar otros negocios ──
+    await pool.query(
+      'UPDATE seriales SET costo_compra = $1 WHERE id = $2',
+      [nuevoCosto, check[0].id]
+    );
 
     return { tipo: 'serial', imei, nuevo_costo: nuevoCosto };
   }
@@ -427,12 +427,11 @@ const actualizarCostoCompra = async (sucursalId, tipo, imei, nombreProducto, nue
       throw Object.assign(new Error('Producto no encontrado en esta sucursal'), { status: 404 });
     }
 
-    await pool.query(`
-      UPDATE productos_cantidad
-      SET costo_unitario = $1
-      WHERE nombre = $2
-        AND sucursal_id = $3
-    `, [nuevoCosto, nombreProducto, sucursalId]);
+    // ── Usar id verificado en vez de nombre + sucursal_id ──
+    await pool.query(
+      'UPDATE productos_cantidad SET costo_unitario = $1 WHERE id = $2',
+      [nuevoCosto, check[0].id]
+    );
 
     return { tipo: 'cantidad', nombre_producto: nombreProducto, nuevo_costo: nuevoCosto };
   }

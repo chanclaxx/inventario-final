@@ -15,6 +15,12 @@ const getCompraById = async (negocioId, id) => {
   return { ...compra, lineas };
 };
 
+// ── Helper: fecha local sin desfase UTC ───────────────────────────────────
+const _fechaHoy = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
 const registrarCompra = async ({
   negocio_id, sucursal_id, usuario_id, proveedor_id,
   numero_factura, notas, lineas,
@@ -61,6 +67,7 @@ const registrarCompra = async ({
 
       if (linea.imei) {
         if (linea.reactivar_serial_id) {
+          // ── Verificar que el serial pertenece a esta sucursal ──
           const { rows } = await client.query(
             `SELECT s.id FROM seriales s
              JOIN productos_serial ps ON ps.id = s.producto_id
@@ -70,6 +77,7 @@ const registrarCompra = async ({
           if (!rows.length) {
             throw { status: 400, message: `El serial ${linea.imei} no pertenece a esta sucursal` };
           }
+          // ── UPDATE por id — no afecta otros negocios ──
           await client.query(
             `UPDATE seriales
              SET vendido = false, prestado = false, fecha_salida = NULL,
@@ -78,16 +86,18 @@ const registrarCompra = async ({
             [linea.precio_unitario, proveedor_id || null, linea.reactivar_serial_id]
           );
         } else {
+          // ── Verificar duplicado solo dentro del mismo negocio ──
           const { rows: existente } = await client.query(
-  `SELECT s.id FROM seriales s
-   JOIN productos_serial ps ON ps.id = s.producto_id
-   JOIN sucursales       su ON su.id = ps.sucursal_id
-   WHERE s.imei = $1 AND su.negocio_id = $2`,
-  [linea.imei, negocio_id]
-);
-if (existente.length) {
-  throw { status: 409, message: `El IMEI ${linea.imei} ya existe en el inventario` };
-}
+            `SELECT s.id FROM seriales s
+             JOIN productos_serial ps ON ps.id = s.producto_id
+             JOIN sucursales       su ON su.id = ps.sucursal_id
+             WHERE s.imei = $1 AND su.negocio_id = $2`,
+            [linea.imei, negocio_id]
+          );
+          if (existente.length) {
+            throw { status: 409, message: `El IMEI ${linea.imei} ya existe en el inventario` };
+          }
+
           if (linea.producto_id) {
             const { rows: psRows } = await client.query(
               'SELECT id FROM productos_serial WHERE id = $1 AND sucursal_id = $2',
@@ -97,12 +107,12 @@ if (existente.length) {
               throw { status: 400, message: `El producto ${linea.nombre_producto} no pertenece a esta sucursal` };
             }
           }
+
+          // ── Usar fecha local para evitar desfase UTC ──
           await client.query(
             `INSERT INTO seriales(producto_id, imei, fecha_entrada, costo_compra, proveedor_id)
              VALUES ($1, $2, $3, $4, $5)`,
-            [linea.producto_id, linea.imei,
-             new Date().toISOString().split('T')[0],
-             linea.precio_unitario, proveedor_id || null]
+            [linea.producto_id, linea.imei, _fechaHoy(), linea.precio_unitario, proveedor_id || null]
           );
         }
 
@@ -116,7 +126,6 @@ if (existente.length) {
         if (producto.sucursal_id !== sucursal_id) {
           throw { status: 400, message: `El producto ${linea.nombre_producto} no pertenece a esta sucursal` };
         }
-        // ── Dentro de la transacción ──
         await comprasRepo.ajustarStockCantidad(client, linea.producto_id, linea.cantidad);
 
         if (proveedor_id) {
@@ -131,7 +140,7 @@ if (existente.length) {
 
     if (agregarComoAcreedor && proveedor_id) {
       const totalPagado = pagos
-        .filter(p => p.metodo !== 'Credito' && p.metodo !== 'Fiado')
+        .filter((p) => p.metodo !== 'Credito' && p.metodo !== 'Fiado')
         .reduce((s, p) => s + Number(p.valor || 0), 0);
       const montoCargo = total - totalPagado;
 
@@ -168,7 +177,6 @@ if (existente.length) {
           acreedorId = nuevoRows[0].id;
         }
 
-        // ── Agregar usuario_id para trazabilidad ──
         await client.query(
           `INSERT INTO movimientos_acreedor(acreedor_id, usuario_id, tipo, descripcion, valor)
            VALUES ($1, $2, 'Cargo', $3, $4)`,

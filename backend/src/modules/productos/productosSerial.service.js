@@ -1,18 +1,23 @@
+const { pool } = require('../../config/db');  // ← mover al tope
 const repo = require('./productosSerial.repository');
+
+// ── Fecha local sin desfase UTC ───────────────────────────────────────────────
+const _fechaHoy = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
 
 const getProductos = (sucursalId, negocioId) =>
   repo.findAll(sucursalId, negocioId);
 
-// ← CAMBIADA: ahora incluye negocio_id
 const getProductoById = async (negocioId, id) => {
   const producto = await repo.findByIdYNegocio(id, negocioId);
   if (!producto) throw { status: 404, message: 'Producto no encontrado' };
   return producto;
 };
 
-// ← CAMBIADA: ahora verifica sucursal
 const crearProducto = async (negocioId, datos) => {
-  const { pool } = require('../../config/db');
+  // ── pool ya importado al tope — no inline ──
   const { rows } = await pool.query(
     `SELECT id FROM sucursales WHERE id = $1 AND negocio_id = $2 AND activa = true`,
     [datos.sucursal_id, negocioId]
@@ -29,14 +34,12 @@ const actualizarProducto = async (negocioId, id, datos) => {
   return actualizado;
 };
 
-// ← CAMBIADA: ahora verifica ownership del producto
 const getSeriales = async (negocioId, productoId, vendido) => {
   const producto = await repo.findByIdYNegocio(productoId, negocioId);
   if (!producto) throw { status: 404, message: 'Producto no encontrado' };
   return repo.getSeriales(productoId, vendido);
 };
 
-// ← SIN CAMBIOS — igual que el original
 const agregarSerial = async (
   negocioId,
   productoId,
@@ -52,20 +55,20 @@ const agregarSerial = async (
     });
   }
 
-  const existe = await repo.findSerialByIMEI(imei);
+  const existe = await repo.findSerialByIMEIEnNegocio(imei, negocioId);
   if (existe) throw { status: 409, message: `El IMEI ${imei} ya está registrado` };
 
   return repo.insertarSerial({
     producto_id:    productoId,
     imei,
-    fecha_entrada:  fecha_entrada  || new Date().toISOString().split('T')[0],
+    // ── _fechaHoy() en vez de toISOString para evitar desfase UTC ──
+    fecha_entrada:  fecha_entrada  || _fechaHoy(),
     costo_compra:   costo_compra   ?? null,
     cliente_origen: cliente_origen || null,
     proveedor_id:   proveedor_id   || null,
   });
 };
 
-// ← CAMBIADA: ahora verifica ownership del serial
 const actualizarSerial = async (negocioId, serialId, { imei, costo_compra, precio, producto_id }) => {
   const serial = await repo.findSerialByIdYNegocio(serialId, negocioId);
   if (!serial) throw { status: 404, message: 'Serial no encontrado' };
@@ -79,7 +82,6 @@ const actualizarSerial = async (negocioId, serialId, { imei, costo_compra, preci
   return actualizado;
 };
 
-// ← CAMBIADA: ahora verifica ownership del serial
 const eliminarSerial = async (negocioId, serialId) => {
   const serial = await repo.findSerialByIdYNegocio(serialId, negocioId);
   if (!serial) throw { status: 404, message: 'Serial no encontrado' };
@@ -88,7 +90,6 @@ const eliminarSerial = async (negocioId, serialId) => {
   if (!eliminado) throw { status: 404, message: 'Serial no encontrado' };
 };
 
-// ← SIN CAMBIOS — igual que el original
 const verificarImei = async (imei, negocioId) => {
   const serial = await repo.findSerialByIMEIEnNegocio(imei, negocioId);
   if (!serial) return { existe: false };
@@ -112,19 +113,11 @@ const verificarImei = async (imei, negocioId) => {
   };
 };
 
-// ← SIN CAMBIOS — igual que el original
 const getComprasCliente = async (negocioId, q) =>
   repo.findComprasCliente(negocioId, q || '');
 
 module.exports = {
-  getProductos,
-  getProductoById,
-  crearProducto,
-  actualizarProducto,
-  getSeriales,
-  agregarSerial,
-  actualizarSerial,
-  eliminarSerial,
-  verificarImei,
-  getComprasCliente,
+  getProductos, getProductoById, crearProducto, actualizarProducto,
+  getSeriales, agregarSerial, actualizarSerial, eliminarSerial,
+  verificarImei, getComprasCliente,
 };

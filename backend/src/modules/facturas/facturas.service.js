@@ -6,6 +6,12 @@ const clientesRepo  = require('../clientes/clientes.repository');
 
 const ES_COMPANERO = (cedula) => cedula === 'COMPANERO';
 
+// ── Fecha local sin desfase UTC ───────────────────────────────────────────────
+const _fechaHoy = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
 const resolverClienteId = async (client, negocioId, { cedula, nombre, celular, email, direccion }) => {
   if (ES_COMPANERO(cedula)) return null;
 
@@ -83,7 +89,6 @@ const crearFactura = async ({
         if (!serialRows.length) {
           throw { status: 400, message: `El producto ${linea.nombre_producto} no pertenece a esta sucursal` };
         }
-        // ── Usar id en vez de imei para no afectar otros negocios ──
         await client.query(
           'UPDATE seriales SET vendido = true, fecha_salida = CURRENT_DATE WHERE id = $1',
           [serialRows[0].id]
@@ -146,7 +151,6 @@ const crearFactura = async ({
           );
         } else if (existeSerial) {
           if (retoma.producto_serial_id) {
-            // ── Usar id en vez de imei para no afectar otros negocios ──
             await client.query(
               `UPDATE seriales SET vendido = false, prestado = false,
                fecha_salida = NULL, cliente_origen = $1 WHERE id = $2`,
@@ -154,12 +158,12 @@ const crearFactura = async ({
             );
           }
         } else if (retoma.producto_serial_id) {
+          // ── _fechaHoy() en vez de toISOString para evitar desfase UTC ──
           await client.query(
             `INSERT INTO seriales(producto_id, imei, fecha_entrada, costo_compra, cliente_origen)
              VALUES ($1, $2, $3, $4, $5)`,
             [retoma.producto_serial_id, retoma.imei,
-             new Date().toISOString().split('T')[0],
-             retoma.valor_retoma, nombre_cliente]
+             _fechaHoy(), retoma.valor_retoma, nombre_cliente]
           );
         }
       }
@@ -193,7 +197,6 @@ const cancelarFactura = async (negocioId, id) => {
     const lineas = await facturasRepo.getLineas(id);
     for (const linea of lineas) {
       if (linea.imei) {
-        // ── Buscar el serial por sucursal de la factura, no por imei global ──
         const { rows: serialRows } = await client.query(
           `SELECT s.id FROM seriales s
            JOIN productos_serial ps ON ps.id = s.producto_id
@@ -289,7 +292,6 @@ const editarFactura = async (negocioId, id, {
 
           if (retoma.producto_serial_id) {
             if (existeSerial) {
-              // ── Usar id en vez de imei para no afectar otros negocios ──
               await client.query(
                 `UPDATE seriales
                  SET vendido = false, fecha_salida = NULL, cliente_origen = $1
@@ -297,12 +299,12 @@ const editarFactura = async (negocioId, id, {
                 [nombre_cliente, existeSerial.id]
               );
             } else {
+              // ── _fechaHoy() en vez de toISOString para evitar desfase UTC ──
               await client.query(
                 `INSERT INTO seriales(producto_id, imei, fecha_entrada, costo_compra, cliente_origen)
                  VALUES ($1, $2, $3, $4, $5)`,
                 [retoma.producto_serial_id, retoma.imei,
-                 new Date().toISOString().split('T')[0],
-                 retoma.valor_retoma, nombre_cliente]
+                 _fechaHoy(), retoma.valor_retoma, nombre_cliente]
               );
             }
           }

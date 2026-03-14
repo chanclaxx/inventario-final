@@ -1,17 +1,16 @@
+const { pool } = require('../../config/db');  // ← mover al tope
 const repo = require('./productosCantidad.repository');
 
 const getProductos = (sucursalId, negocioId) => repo.findAll(sucursalId, negocioId);
 
 const getProductoById = async (negocioId, id) => {
-  // ── Agregar negocio_id para verificar ownership ──
   const producto = await repo.findByIdYNegocio(id, negocioId);
   if (!producto) throw { status: 404, message: 'Producto no encontrado' };
   return producto;
 };
 
 const crearProducto = async (negocioId, datos) => {
-  // ── Verificar que sucursal_id pertenece al negocio ──
-  const { pool } = require('../../config/db');
+  // ── pool ya importado al tope — no inline ──
   const { rows } = await pool.query(
     `SELECT id FROM sucursales WHERE id = $1 AND negocio_id = $2 AND activa = true`,
     [datos.sucursal_id, negocioId]
@@ -32,16 +31,11 @@ const ajustarStock = async (
   negocioId, id, cantidad,
   { costo_unitario, proveedor_id, cliente_origen, cedula_cliente, tipo, notas } = {}
 ) => {
-  // ── Una sola query: ownership + datos del producto ──
   const producto = await repo.findByIdYNegocio(id, negocioId);
   if (!producto) throw { status: 404, message: 'Producto no encontrado' };
 
-  // ── Validar que el stock no quede negativo ──
   if (cantidad < 0 && (producto.stock + cantidad) < 0) {
-    throw {
-      status: 400,
-      message: `Stock insuficiente. Stock actual: ${producto.stock}`,
-    };
+    throw { status: 400, message: `Stock insuficiente. Stock actual: ${producto.stock}` };
   }
 
   const actualizado = await repo.ajustarStock(id, cantidad, {
@@ -73,10 +67,11 @@ const eliminarProducto = async (negocioId, id) => {
   if (!producto) throw { status: 404, message: 'Producto no encontrado' };
   await repo.eliminar(id);
 };
+
 const getHistorialStock = (negocioId, q) =>
   repo.getHistorialStock(negocioId, q || '');
 
 module.exports = {
   getProductos, getProductoById, crearProducto,
-  actualizarProducto, ajustarStock, eliminarProducto,getHistorialStock
+  actualizarProducto, ajustarStock, eliminarProducto, getHistorialStock,
 };
