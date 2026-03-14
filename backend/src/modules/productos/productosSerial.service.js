@@ -1,7 +1,6 @@
-const { pool } = require('../../config/db');  // ← mover al tope
+const { pool } = require('../../config/db');
 const repo = require('./productosSerial.repository');
 
-// ── Fecha local sin desfase UTC ───────────────────────────────────────────────
 const _fechaHoy = () => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -17,7 +16,6 @@ const getProductoById = async (negocioId, id) => {
 };
 
 const crearProducto = async (negocioId, datos) => {
-  // ── pool ya importado al tope — no inline ──
   const { rows } = await pool.query(
     `SELECT id FROM sucursales WHERE id = $1 AND negocio_id = $2 AND activa = true`,
     [datos.sucursal_id, negocioId]
@@ -61,23 +59,24 @@ const agregarSerial = async (
   return repo.insertarSerial({
     producto_id:    productoId,
     imei,
-    // ── _fechaHoy() en vez de toISOString para evitar desfase UTC ──
-    fecha_entrada:  fecha_entrada  || _fechaHoy(),
-    costo_compra:   costo_compra   ?? null,
+    fecha_entrada:  fecha_entrada || _fechaHoy(),
+    costo_compra:   costo_compra  ?? null,
     cliente_origen: cliente_origen || null,
     proveedor_id:   proveedor_id   || null,
   });
 };
 
-const actualizarSerial = async (negocioId, serialId, { imei, costo_compra, precio, producto_id }) => {
+const actualizarSerial = async (negocioId, serialId, { imei, costo_compra, precio }) => {
+  // ── serial verificado contra negocio — su producto_id es de confianza ──
   const serial = await repo.findSerialByIdYNegocio(serialId, negocioId);
   if (!serial) throw { status: 404, message: 'Serial no encontrado' };
 
   const actualizado = await repo.actualizarSerial(serialId, { imei, costo_compra });
   if (!actualizado) throw { status: 404, message: 'Serial no encontrado' };
 
-  if (precio !== undefined && producto_id) {
-    await repo.updatePrecio(producto_id, precio);
+  if (precio !== undefined) {
+    // ── usar producto_id del serial verificado, no del body ──
+    await repo.updatePrecio(serial.producto_id, precio);
   }
   return actualizado;
 };
