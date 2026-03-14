@@ -123,6 +123,14 @@ const ajustarStock = async (id, cantidad, { costo_unitario, proveedor_id, client
   return rows[0] || null;
 };
 
+const eliminar = async (id) => {
+  const { rowCount } = await pool.query(
+    'UPDATE productos_cantidad SET activo = false WHERE id = $1',
+    [id]
+  );
+  return rowCount > 0;
+};
+
 module.exports = {
   findAll, findById, perteneceAlNegocio,
   create, update, ajustarStock, eliminar,
