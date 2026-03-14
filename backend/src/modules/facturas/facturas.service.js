@@ -1,12 +1,11 @@
 const { pool } = require('../../config/db');
-const facturasRepo  = require('./facturas.repository');
-const serialRepo    = require('../productos/productosSerial.repository');
-const cantidadRepo  = require('../productos/productosCantidad.repository');
-const clientesRepo  = require('../clientes/clientes.repository');
+const facturasRepo = require('./facturas.repository');
+const serialRepo   = require('../productos/productosSerial.repository');
+const cantidadRepo = require('../productos/productosCantidad.repository');
+const clientesRepo = require('../clientes/clientes.repository');
 
 const ES_COMPANERO = (cedula) => cedula === 'COMPANERO';
 
-// ── Fecha local sin desfase UTC ───────────────────────────────────────────────
 const _fechaHoy = () => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -14,17 +13,14 @@ const _fechaHoy = () => {
 
 const resolverClienteId = async (client, negocioId, { cedula, nombre, celular, email, direccion }) => {
   if (ES_COMPANERO(cedula)) return null;
-
   const { rows } = await client.query(
     `SELECT id FROM clientes WHERE cedula = $1 AND negocio_id = $2`,
     [cedula, negocioId]
   );
   if (rows.length) return rows[0].id;
-
   const { rows: nuevos } = await client.query(
     `INSERT INTO clientes (negocio_id, nombre, cedula, celular, email, direccion)
-     VALUES ($1, $2, $3, $4, $5, $6)
-     RETURNING id`,
+     VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
     [negocioId, nombre, cedula, celular || null, email || null, direccion || null]
   );
   return nuevos[0].id;
@@ -47,8 +43,7 @@ const getFacturaById = async (negocioId, id) => {
 const crearFactura = async ({
   negocio_id, sucursal_id, usuario_id,
   nombre_cliente, cedula, celular, email, direccion, notas,
-  lineas, pagos,
-  retomas = [],
+  lineas, pagos, retomas = [],
 }) => {
   const { rows: sucRows } = await pool.query(
     `SELECT id FROM sucursales WHERE id = $1 AND negocio_id = $2 AND activa = true`,
@@ -73,7 +68,7 @@ const crearFactura = async ({
       await facturasRepo.insertarLinea(client, {
         factura_id:      factura.id,
         nombre_producto: linea.nombre_producto,
-        imei:            linea.imei       || null,
+        imei:            linea.imei        || null,
         cantidad:        linea.cantidad,
         precio:          linea.precio,
         producto_id:     linea.producto_id || null,
@@ -93,7 +88,6 @@ const crearFactura = async ({
           'UPDATE seriales SET vendido = true, fecha_salida = CURRENT_DATE WHERE id = $1',
           [serialRows[0].id]
         );
-
       } else if (linea.producto_id) {
         const { rows: prodRows } = await client.query(
           `SELECT id, stock, sucursal_id FROM productos_cantidad WHERE id = $1`,
@@ -144,6 +138,17 @@ const crearFactura = async ({
         const existeSerial = existeRows[0] || null;
 
         if (retoma.reactivar_serial_id) {
+          // ── Verificar que el serial a reactivar pertenece al negocio ──
+          const { rows: serialCheck } = await client.query(
+            `SELECT s.id FROM seriales s
+             JOIN productos_serial ps ON ps.id = s.producto_id
+             JOIN sucursales       su ON su.id = ps.sucursal_id
+             WHERE s.id = $1 AND su.negocio_id = $2`,
+            [retoma.reactivar_serial_id, negocio_id]
+          );
+          if (!serialCheck.length) {
+            throw { status: 403, message: 'El serial a reactivar no pertenece a este negocio' };
+          }
           await client.query(
             `UPDATE seriales SET vendido = false, prestado = false,
              fecha_salida = NULL, cliente_origen = $1 WHERE id = $2`,
@@ -158,7 +163,16 @@ const crearFactura = async ({
             );
           }
         } else if (retoma.producto_serial_id) {
-          // ── _fechaHoy() en vez de toISOString para evitar desfase UTC ──
+          // ── Verificar que el producto_serial_id pertenece al negocio ──
+          const { rows: psCheck } = await client.query(
+            `SELECT ps.id FROM productos_serial ps
+             JOIN sucursales su ON su.id = ps.sucursal_id
+             WHERE ps.id = $1 AND su.negocio_id = $2`,
+            [retoma.producto_serial_id, negocio_id]
+          );
+          if (!psCheck.length) {
+            throw { status: 403, message: 'El producto de retoma no pertenece a este negocio' };
+          }
           await client.query(
             `INSERT INTO seriales(producto_id, imei, fecha_entrada, costo_compra, cliente_origen)
              VALUES ($1, $2, $3, $4, $5)`,
@@ -299,7 +313,16 @@ const editarFactura = async (negocioId, id, {
                 [nombre_cliente, existeSerial.id]
               );
             } else {
-              // ── _fechaHoy() en vez de toISOString para evitar desfase UTC ──
+              // ── Verificar que el producto_serial_id pertenece al negocio ──
+              const { rows: psCheck } = await client.query(
+                `SELECT ps.id FROM productos_serial ps
+                 JOIN sucursales su ON su.id = ps.sucursal_id
+                 WHERE ps.id = $1 AND su.negocio_id = $2`,
+                [retoma.producto_serial_id, negocioId]
+              );
+              if (!psCheck.length) {
+                throw { status: 403, message: 'El producto de retoma no pertenece a este negocio' };
+              }
               await client.query(
                 `INSERT INTO seriales(producto_id, imei, fecha_entrada, costo_compra, cliente_origen)
                  VALUES ($1, $2, $3, $4, $5)`,
@@ -312,9 +335,7 @@ const editarFactura = async (negocioId, id, {
 
         if (retoma.tipo_retoma === 'cantidad' && retoma.producto_cantidad_id) {
           await facturasRepo.ajustarStockCantidad(
-            client,
-            retoma.producto_cantidad_id,
-            Number(retoma.cantidad_retoma || 1)
+            client, retoma.producto_cantidad_id, Number(retoma.cantidad_retoma || 1)
           );
         }
       }
