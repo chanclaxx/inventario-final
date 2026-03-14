@@ -161,14 +161,6 @@ const getRetomas = async (facturaId) => {
   return rows; // array vacío si no hay retomas
 };
 
-module.exports = {
-  findAll, findById, findByIdYNegocio,
-  perteneceAlNegocio,
-  getLineas, getPagos, getRetomas,   // ← getRetoma → getRetomas
-  create, insertarLinea, insertarPago, insertarRetoma, cancelar,
-  ajustarStockCantidad,
-};
-
 // ── create ────────────────────────────────────────────────────────────────────
 
 const create = async (client, {
@@ -257,7 +249,7 @@ const ajustarStockCantidad = async (client, productoId, cantidad) => {
 module.exports = {
   findAll, findById, findByIdYNegocio,
   perteneceAlNegocio,
-  getLineas, getPagos, getRetoma,
+  getLineas, getPagos, getRetomas,
   create, insertarLinea, insertarPago, insertarRetoma, cancelar,
   ajustarStockCantidad,
 };
