@@ -79,12 +79,15 @@ const registrarCompra = async ({
           );
         } else {
           const { rows: existente } = await client.query(
-            'SELECT id FROM seriales WHERE imei = $1',
-            [linea.imei]
-          );
-          if (existente.length) {
-            throw { status: 409, message: `El IMEI ${linea.imei} ya existe en el inventario` };
-          }
+  `SELECT s.id FROM seriales s
+   JOIN productos_serial ps ON ps.id = s.producto_id
+   JOIN sucursales       su ON su.id = ps.sucursal_id
+   WHERE s.imei = $1 AND su.negocio_id = $2`,
+  [linea.imei, negocio_id]
+);
+if (existente.length) {
+  throw { status: 409, message: `El IMEI ${linea.imei} ya existe en el inventario` };
+}
           if (linea.producto_id) {
             const { rows: psRows } = await client.query(
               'SELECT id FROM productos_serial WHERE id = $1 AND sucursal_id = $2',
