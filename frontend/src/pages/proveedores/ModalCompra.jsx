@@ -19,6 +19,14 @@ import {
   RefreshCw, AlertTriangle, X,
 } from 'lucide-react';
 
+// ─── Utilidad: normalizar respuesta de productos a array ─────────────────────
+
+function normalizarProductos(data) {
+  if (Array.isArray(data)) return data;
+  if (data?.items && Array.isArray(data.items)) return data.items;
+  return [];
+}
+
 // ─── Utilidad: bloquear ruedita en inputs numéricos ───────────────────────────
 const noWheel = (e) => e.target.blur();
 
@@ -54,10 +62,10 @@ async function verificarImeisDuplicados(imeis) {
 
 // ─── Hook: verificación de IMEIs con estado de modales ───────────────────────
 function useVerificacionImeis() {
-  const [verificando,         setVerificando]           = useState(false);
-  const [modalReactivar,      setModalReactivar]        = useState(false);
-  const [modalYaEnInventario, setModalYaEnInventario]   = useState(false);
-  const [serialesReactivar,   setSerializesReactivar]   = useState([]);
+  const [verificando,         setVerificando]          = useState(false);
+  const [modalReactivar,      setModalReactivar]       = useState(false);
+  const [modalYaEnInventario, setModalYaEnInventario]  = useState(false);
+  const [serialesReactivar,   setSerializesReactivar]  = useState([]);
   const [serialesDisponibles, setSerializesDisponibles] = useState([]);
 
   const reactivarMapRef    = useRef({});
@@ -463,13 +471,18 @@ function PasoLineaSerial({
   const [traida,              setTraida]             = useState(traidaInicial);
   const queryClient = useQueryClient();
 
-  // queryKey incluye sucursalKey → caché aislado por negocio + sucursal
-  // enabled: sucursalLista → evita fetch con sucursal_id inválido (403)
+  // ── CORRECCIÓN: normalizar r.data.data → array antes de cachear ──────────
   const { data: productosData } = useQuery({
     queryKey: ['productos-serial', ...sucursalKey],
-    queryFn:  () => getProductosSerial().then((r) => r.data.data),
+    queryFn:  () =>
+      getProductosSerial().then((r) => normalizarProductos(r.data.data)),
     enabled:  sucursalLista,
   });
+
+  // Garantiza array aunque el caché haya guardado estructura antigua
+  const productos = normalizarProductos(productosData).filter((p) =>
+    p.nombre.toLowerCase().includes(busqueda.toLowerCase())
+  );
 
   const mutCrearLinea = useMutation({
     mutationFn: () => crearProductoSerial({
@@ -487,10 +500,6 @@ function PasoLineaSerial({
     },
     onError: (e) => setError(e.response?.data?.error || 'Error al crear línea'),
   });
-
-  const productos = (productosData || []).filter((p) =>
-    p.nombre.toLowerCase().includes(busqueda.toLowerCase())
-  );
 
   const agregarLinea = (producto) => {
     if (lineasSeleccionadas.find((l) => l.id === producto.id)) return;
@@ -733,13 +742,18 @@ function PasoCantidad({
   const [traida,                 setTraida]                = useState(traidaInicial);
   const queryClient = useQueryClient();
 
-  // queryKey incluye sucursalKey → caché aislado por negocio + sucursal
-  // enabled: sucursalLista → evita fetch con sucursal_id inválido (403)
+  // ── CORRECCIÓN: normalizar r.data.data → array antes de cachear ──────────
   const { data: productosData } = useQuery({
     queryKey: ['productos-cantidad', ...sucursalKey],
-    queryFn:  () => getProductosCantidad().then((r) => r.data.data),
+    queryFn:  () =>
+      getProductosCantidad().then((r) => normalizarProductos(r.data.data)),
     enabled:  sucursalLista,
   });
+
+  // Garantiza array aunque el caché haya guardado estructura antigua
+  const productos = normalizarProductos(productosData).filter((p) =>
+    p.nombre.toLowerCase().includes(busqueda.toLowerCase())
+  );
 
   const mutCrear = useMutation({
     mutationFn: () => crearProductoCantidad({
@@ -757,10 +771,6 @@ function PasoCantidad({
     },
     onError: (e) => setError(e.response?.data?.error || 'Error'),
   });
-
-  const productos = (productosData || []).filter((p) =>
-    p.nombre.toLowerCase().includes(busqueda.toLowerCase())
-  );
 
   const agregarProducto = (producto) => {
     if (productosSeleccionados.find((p) => p.id === producto.id)) return;
@@ -983,12 +993,13 @@ function PasoPago({ proveedor, productos, tipo, onConfirmar, onVolver, loading }
   const [error,               setError]                = useState('');
 
   // acreedores es del negocio (negocio_id) → sin sucursalKey
-  const { data: acreedoresData } = useQuery({
+  const { data: acreedoresRaw } = useQuery({
     queryKey: ['acreedores'],
     queryFn:  () => getAcreedores('').then((r) => r.data.data),
   });
+  const acreedoresData = normalizarProductos(acreedoresRaw);
 
-  const proveedorYaEsAcreedor = (acreedoresData || []).some(
+  const proveedorYaEsAcreedor = acreedoresData.some(
     (a) => a.proveedor_id === proveedor.id
   );
 

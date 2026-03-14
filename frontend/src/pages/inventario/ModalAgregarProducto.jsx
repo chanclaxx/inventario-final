@@ -20,6 +20,14 @@ import {
   AlertTriangle, RefreshCw, X,
 } from 'lucide-react';
 
+// ─── Utilidad: normalizar respuesta de productos a array ─────────────────────
+
+function normalizarProductos(data) {
+  if (Array.isArray(data)) return data;
+  if (data?.items && Array.isArray(data.items)) return data.items;
+  return [];
+}
+
 // ─── Helper: payload de crearCompra ──────────────────────────────────────────
 
 function buildPayloadCompra({ proveedorId, monto, modoPago, lineas }) {
@@ -186,16 +194,18 @@ function InfoCompra({
   costoCompra, setCostoCompra,
   modoPago,    setModoPago,
 }) {
-  const { data: proveedores = [] } = useQuery({
+  const { data: proveedoresRaw } = useQuery({
     queryKey: ['proveedores'],
-    queryFn: () => api.get('/proveedores').then((r) => r.data.data),
+    queryFn:  () => api.get('/proveedores').then((r) => r.data.data),
   });
+  const proveedores = normalizarProductos(proveedoresRaw);
 
-  const { data: acreedores = [] } = useQuery({
+  const { data: acreedoresRaw } = useQuery({
     queryKey: ['acreedores'],
-    queryFn: () => api.get('/acreedores').then((r) => r.data.data),
-    enabled: Boolean(proveedorId),
+    queryFn:  () => api.get('/acreedores').then((r) => r.data.data),
+    enabled:  Boolean(proveedorId),
   });
+  const acreedores = normalizarProductos(acreedoresRaw);
 
   const handleCambiarProveedor = (valor) => {
     setProveedorId(valor);
@@ -332,10 +342,17 @@ function PasoSerial({ sucursalKey, onExito, onDuplicadosEncontrados }) {
   const reactivarMapRef = useRef({});
   const inputRefs       = useRef([]);
 
+  // ── CORRECCIÓN: normalizar r.data.data → array antes de cachear ──────────
   const { data: productosData } = useQuery({
-    queryKey : ['productos-serial', ...sucursalKey],
-    queryFn  : () => getProductosSerial().then((r) => r.data.data),
+    queryKey: ['productos-serial', ...sucursalKey],
+    queryFn:  () =>
+      getProductosSerial().then((r) => normalizarProductos(r.data.data)),
   });
+
+  // Garantiza array aunque el caché haya guardado estructura antigua
+  const productos = normalizarProductos(productosData).filter((p) =>
+    p.nombre.toLowerCase().includes(busqueda.toLowerCase())
+  );
 
   const handleSeleccionarLinea = (producto) => {
     setLineaSel(producto);
@@ -408,9 +425,6 @@ function PasoSerial({ sucursalKey, onExito, onDuplicadosEncontrados }) {
     onError: (e) => setError(e.response?.data?.error || 'Error al agregar seriales'),
   });
 
-  const productos    = (productosData || []).filter((p) =>
-    p.nombre.toLowerCase().includes(busqueda.toLowerCase())
-  );
   const imeisValidos = imeis.filter((i) => i.trim()).length;
 
   const handleKeyDown = (e, index) => {
@@ -454,7 +468,7 @@ function PasoSerial({ sucursalKey, onExito, onDuplicadosEncontrados }) {
 
     const primerSerial = seriales[0];
     if (primerSerial && (!lineaSel || lineaSel.id !== primerSerial.producto_id)) {
-      const lineaEncontrada = (productosData || []).find(
+      const lineaEncontrada = normalizarProductos(productosData).find(
         (p) => p.id === primerSerial.producto_id
       );
       if (lineaEncontrada) handleSeleccionarLinea(lineaEncontrada);
@@ -656,10 +670,17 @@ function PasoCantidad({ sucursalKey, onExito }) {
   const [modoPago,      setModoPago]      = useState(null);
   const [error,         setError]         = useState('');
 
+  // ── CORRECCIÓN: normalizar r.data.data → array antes de cachear ──────────
   const { data: productosData } = useQuery({
-    queryKey : ['productos-cantidad', ...sucursalKey],
-    queryFn  : () => getProductosCantidad().then((r) => r.data.data),
+    queryKey: ['productos-cantidad', ...sucursalKey],
+    queryFn:  () =>
+      getProductosCantidad().then((r) => normalizarProductos(r.data.data)),
   });
+
+  // Garantiza array aunque el caché haya guardado estructura antigua
+  const productos = normalizarProductos(productosData).filter((p) =>
+    p.nombre.toLowerCase().includes(busqueda.toLowerCase())
+  );
 
   const handleSeleccionarProducto = (producto) => {
     setProductoSel(producto);
@@ -721,10 +742,6 @@ function PasoCantidad({ sucursalKey, onExito }) {
     },
     onError: (e) => setError(e.response?.data?.error || 'Error al ajustar stock'),
   });
-
-  const productos = (productosData || []).filter((p) =>
-    p.nombre.toLowerCase().includes(busqueda.toLowerCase())
-  );
 
   const handleConfirmar = () => {
     setError('');
@@ -866,7 +883,7 @@ export function ModalAgregarProducto({ onClose }) {
   const [tipo,  setTipo]  = useState(null);
   const [exito, setExito] = useState(false);
 
-  const [modalReactivar,      setModalReactivar]      = useState(false);
+  const [modalReactivar,      setModalReactivar]       = useState(false);
   const [serialesDuplicados,  setSerializesDuplicados] = useState([]);
   const confirmarReactivarRef = useRef(null);
 
