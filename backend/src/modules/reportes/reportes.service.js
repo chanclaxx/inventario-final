@@ -1,17 +1,34 @@
 const { pool } = require('../../config/db');
 
-// ─────────────────────────────────────────────
-// HELPERS DE TIMEZONE
-// La columna `fecha` se guarda como timestamp WITHOUT time zone en UTC.
-// Para convertir correctamente a hora Colombia se necesita el doble AT TIME ZONE:
-//   primero se declara que el valor está en UTC, luego se convierte a Bogotá.
-// ─────────────────────────────────────────────
 const HOY_F = `DATE(f.fecha AT TIME ZONE 'UTC' AT TIME ZONE 'America/Bogota') = (NOW() AT TIME ZONE 'America/Bogota')::date`;
 const HOY   = `DATE(fecha   AT TIME ZONE 'UTC' AT TIME ZONE 'America/Bogota') = (NOW() AT TIME ZONE 'America/Bogota')::date`;
 
-// ─────────────────────────────────────────────
-// DASHBOARD
-// ─────────────────────────────────────────────
+// ── Helper: subquery de costo de serial anclada al negocio ───────────────────
+// Busca el costo del serial dentro del mismo negocio de la factura,
+// evitando tomar el costo de otro negocio que tenga el mismo IMEI.
+const _costoPorImei = (imeiAlias, sucursalAlias) => `
+  COALESCE(
+    (
+      SELECT s.costo_compra
+      FROM seriales s
+      JOIN productos_serial ps ON ps.id = s.producto_id
+      WHERE s.imei = ${imeiAlias}
+        AND ps.sucursal_id = ${sucursalAlias}
+      LIMIT 1
+    ),
+    (
+      SELECT AVG(s2.costo_compra)
+      FROM seriales s2
+      JOIN productos_serial ps2 ON ps2.id = s2.producto_id
+      JOIN seriales s3 ON s3.imei = ${imeiAlias}
+      WHERE s2.producto_id = s3.producto_id
+        AND ps2.sucursal_id = ${sucursalAlias}
+        AND s2.costo_compra IS NOT NULL
+    ),
+    0
+  )
+`;
+
 const getDashboard = async (sucursalId) => {
   const [
     ventasHoy,
@@ -66,7 +83,7 @@ const getDashboard = async (sucursalId) => {
       ORDER BY total DESC
     `, [sucursalId]),
 
-    // Utilidad facturas Activas
+    // ── Utilidad facturas Activas — costo anclado al negocio ──
     pool.query(`
       WITH retomas_por_factura AS (
         SELECT factura_id, COALESCE(SUM(valor_retoma), 0) AS total_retomas
@@ -80,19 +97,13 @@ const getDashboard = async (sucursalId) => {
             l.subtotal
             - CASE
                 WHEN l.imei IS NOT NULL THEN
-                  COALESCE(
-                    (SELECT s.costo_compra FROM seriales s WHERE s.imei = l.imei LIMIT 1),
-                    (SELECT AVG(s2.costo_compra)
-                     FROM seriales s2
-                     JOIN seriales s3 ON s3.imei = l.imei
-                     WHERE s2.producto_id = s3.producto_id AND s2.costo_compra IS NOT NULL),
-                    0
-                  )
+                  ${_costoPorImei('l.imei', 'f.sucursal_id')}
                 ELSE
                   COALESCE(
                     (SELECT pc.costo_unitario
                      FROM productos_cantidad pc
-                     WHERE pc.nombre = l.nombre_producto AND pc.sucursal_id = f.sucursal_id
+                     WHERE pc.nombre = l.nombre_producto
+                       AND pc.sucursal_id = f.sucursal_id
                      LIMIT 1),
                     0
                   ) * l.cantidad
@@ -104,13 +115,13 @@ const getDashboard = async (sucursalId) => {
         GROUP BY l.factura_id
       )
       SELECT
-        COALESCE(SUM(c.utilidad_bruta), 0)                 AS utilidad_bruta,
-        COALESCE(SUM(COALESCE(r.total_retomas, 0)), 0)     AS total_retomas
+        COALESCE(SUM(c.utilidad_bruta), 0)             AS utilidad_bruta,
+        COALESCE(SUM(COALESCE(r.total_retomas, 0)), 0) AS total_retomas
       FROM costo_por_linea c
       LEFT JOIN retomas_por_factura r ON r.factura_id = c.factura_id
     `, [sucursalId]),
 
-    // Utilidad pendiente créditos
+    // ── Utilidad pendiente créditos — costo anclado al negocio ──
     pool.query(`
       WITH retomas_por_factura AS (
         SELECT factura_id, COALESCE(SUM(valor_retoma), 0) AS total_retomas
@@ -124,19 +135,13 @@ const getDashboard = async (sucursalId) => {
             l.subtotal
             - CASE
                 WHEN l.imei IS NOT NULL THEN
-                  COALESCE(
-                    (SELECT s.costo_compra FROM seriales s WHERE s.imei = l.imei LIMIT 1),
-                    (SELECT AVG(s2.costo_compra)
-                     FROM seriales s2
-                     JOIN seriales s3 ON s3.imei = l.imei
-                     WHERE s2.producto_id = s3.producto_id AND s2.costo_compra IS NOT NULL),
-                    0
-                  )
+                  ${_costoPorImei('l.imei', 'f.sucursal_id')}
                 ELSE
                   COALESCE(
                     (SELECT pc.costo_unitario
                      FROM productos_cantidad pc
-                     WHERE pc.nombre = l.nombre_producto AND pc.sucursal_id = f.sucursal_id
+                     WHERE pc.nombre = l.nombre_producto
+                       AND pc.sucursal_id = f.sucursal_id
                      LIMIT 1),
                     0
                   ) * l.cantidad
@@ -176,9 +181,6 @@ const getDashboard = async (sucursalId) => {
   };
 };
 
-// ─────────────────────────────────────────────
-// VENTAS CON DETALLE Y UTILIDAD POR RANGO
-// ─────────────────────────────────────────────
 const getVentasRango = async (sucursalId, desde, hasta) => {
   const { rows: facturas } = await pool.query(`
     WITH retomas_por_factura AS (
@@ -189,8 +191,8 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
     SELECT
       f.id, f.nombre_cliente, f.cedula, f.celular,
       f.fecha, f.estado, f.notas,
-      COALESCE(SUM(l.subtotal), 0)               AS total_venta,
-      COALESCE(r.total_retomas, 0)               AS total_retomas
+      COALESCE(SUM(l.subtotal), 0) AS total_venta,
+      COALESCE(r.total_retomas, 0) AS total_retomas
     FROM facturas f
     LEFT JOIN lineas_factura l      ON l.factura_id = f.id
     LEFT JOIN retomas_por_factura r ON r.factura_id = f.id
@@ -205,6 +207,7 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
 
   const facturaIds = facturas.map((f) => f.id);
 
+  // ── Costo anclado a la sucursal de la factura ──
   const { rows: lineas } = await pool.query(`
     SELECT
       l.factura_id,
@@ -215,17 +218,12 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
       l.subtotal,
       CASE
         WHEN l.imei IS NOT NULL THEN
-          COALESCE(
-            (SELECT s.costo_compra FROM seriales s WHERE s.imei = l.imei LIMIT 1),
-            (SELECT AVG(s2.costo_compra)
-             FROM seriales s2
-             JOIN seriales s3 ON s3.imei = l.imei
-             WHERE s2.producto_id = s3.producto_id AND s2.costo_compra IS NOT NULL)
-          )
+          ${_costoPorImei('l.imei', 'f.sucursal_id')}
         ELSE
           (SELECT pc.costo_unitario
            FROM productos_cantidad pc
-           WHERE pc.nombre = l.nombre_producto AND pc.sucursal_id = f.sucursal_id
+           WHERE pc.nombre = l.nombre_producto
+             AND pc.sucursal_id = f.sucursal_id
            LIMIT 1)
       END AS costo_unitario_compra,
       CASE WHEN l.imei IS NOT NULL THEN 'serial' ELSE 'cantidad' END AS tipo_producto
@@ -235,13 +233,11 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
     ORDER BY l.id ASC
   `, [facturaIds]);
 
-  // Agrupar líneas por factura con utilidad calculada
   const lineasPorFactura = {};
   for (const linea of lineas) {
     const costoTotal = linea.costo_unitario_compra !== null
       ? Number(linea.costo_unitario_compra) * Number(linea.cantidad)
       : null;
-
     const utilidad = costoTotal !== null
       ? Number(linea.subtotal) - costoTotal
       : null;
@@ -266,10 +262,8 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
     const items         = lineasPorFactura[f.id] || [];
     const totalRetomas  = Number(f.total_retomas);
     const utilidadBruta = items.reduce(
-      (acc, i) => (i.utilidad !== null ? acc + i.utilidad : acc),
-      0
+      (acc, i) => (i.utilidad !== null ? acc + i.utilidad : acc), 0
     );
-
     return {
       id:                     f.id,
       nombre_cliente:         f.nombre_cliente,
@@ -303,38 +297,43 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
   return { facturas: facturasCompletas, resumen };
 };
 
-// ─────────────────────────────────────────────
-// PRODUCTOS TOP CON COSTO Y UTILIDAD
-// ─────────────────────────────────────────────
 const getProductosTop = async (sucursalId, desde, hasta) => {
+  // ── Costo anclado a la sucursal — no toma costo de otro negocio ──
   const { rows } = await pool.query(`
     SELECT
       l.nombre_producto,
-      SUM(l.cantidad)  AS cantidad_vendida,
-      SUM(l.subtotal)  AS total_ventas,
+      SUM(l.cantidad) AS cantidad_vendida,
+      SUM(l.subtotal) AS total_ventas,
       CASE
-        WHEN MAX(l.imei) IS NOT NULL THEN
-          (SELECT AVG(
+        WHEN MAX(l.imei) IS NOT NULL THEN (
+          SELECT AVG(
             COALESCE(
               s.costo_compra,
               (SELECT AVG(s2.costo_compra)
                FROM seriales s2
-               WHERE s2.producto_id = s.producto_id AND s2.costo_compra IS NOT NULL)
+               JOIN productos_serial ps2 ON ps2.id = s2.producto_id
+               WHERE s2.producto_id = s.producto_id
+                 AND ps2.sucursal_id = $1
+                 AND s2.costo_compra IS NOT NULL)
             )
           )
           FROM seriales s
-          JOIN lineas_factura lf ON lf.imei = s.imei
-          JOIN facturas ff ON ff.id = lf.factura_id
+          JOIN productos_serial ps ON ps.id = s.producto_id
+          JOIN lineas_factura lf  ON lf.imei = s.imei
+          JOIN facturas ff        ON ff.id = lf.factura_id
           WHERE lf.nombre_producto = l.nombre_producto
             AND ff.sucursal_id = $1
+            AND ps.sucursal_id = $1
             AND DATE(ff.fecha AT TIME ZONE 'UTC' AT TIME ZONE 'America/Bogota') BETWEEN $2 AND $3
             AND ff.estado != 'Cancelada'
-          )
-        ELSE
-          (SELECT pc.costo_unitario
-           FROM productos_cantidad pc
-           WHERE pc.nombre = l.nombre_producto AND pc.sucursal_id = $1
-           LIMIT 1)
+        )
+        ELSE (
+          SELECT pc.costo_unitario
+          FROM productos_cantidad pc
+          WHERE pc.nombre = l.nombre_producto
+            AND pc.sucursal_id = $1
+          LIMIT 1
+        )
       END AS costo_unitario_promedio,
       CASE WHEN MAX(l.imei) IS NOT NULL THEN 'serial' ELSE 'cantidad' END AS tipo_producto
     FROM lineas_factura l
@@ -351,15 +350,12 @@ const getProductosTop = async (sucursalId, desde, hasta) => {
     const costoTotal = p.costo_unitario_promedio !== null
       ? Number(p.costo_unitario_promedio) * Number(p.cantidad_vendida)
       : null;
-
     const utilidad = costoTotal !== null
       ? Number(p.total_ventas) - costoTotal
       : null;
-
     const margen = utilidad !== null && Number(p.total_ventas) > 0
       ? (utilidad / Number(p.total_ventas)) * 100
       : null;
-
     return {
       nombre_producto:         p.nombre_producto,
       tipo_producto:           p.tipo_producto,
@@ -373,9 +369,6 @@ const getProductosTop = async (sucursalId, desde, hasta) => {
   });
 };
 
-// ─────────────────────────────────────────────
-// INVENTARIO BAJO
-// ─────────────────────────────────────────────
 const getInventarioBajo = async (sucursalId) => {
   const { rows } = await pool.query(`
     SELECT id, nombre, stock, stock_minimo, unidad_medida, costo_unitario
@@ -386,75 +379,54 @@ const getInventarioBajo = async (sucursalId) => {
   return rows;
 };
 
-// ─────────────────────────────────────────────
-// ACTUALIZAR COSTO DE COMPRA
-// ─────────────────────────────────────────────
 const actualizarCostoCompra = async (sucursalId, tipo, imei, nombreProducto, nuevoCosto) => {
   if (tipo === 'serial') {
     const { rows: check } = await pool.query(`
       SELECT s.id
       FROM seriales s
       JOIN productos_serial ps ON ps.id = s.producto_id
-      WHERE s.imei = $1
-        AND ps.sucursal_id = $2
+      WHERE s.imei = $1 AND ps.sucursal_id = $2
       LIMIT 1
     `, [imei, sucursalId]);
 
     if (!check.length) {
       throw Object.assign(new Error('Serial no encontrado en esta sucursal'), { status: 404 });
     }
-
-    // ── Usar id verificado en vez de imei para no afectar otros negocios ──
     await pool.query(
       'UPDATE seriales SET costo_compra = $1 WHERE id = $2',
       [nuevoCosto, check[0].id]
     );
-
     return { tipo: 'serial', imei, nuevo_costo: nuevoCosto };
   }
 
   if (tipo === 'cantidad') {
     const { rows: check } = await pool.query(`
-      SELECT id
-      FROM productos_cantidad
-      WHERE nombre = $1
-        AND sucursal_id = $2
-        AND activo = true
+      SELECT id FROM productos_cantidad
+      WHERE nombre = $1 AND sucursal_id = $2 AND activo = true
       LIMIT 1
     `, [nombreProducto, sucursalId]);
 
     if (!check.length) {
       throw Object.assign(new Error('Producto no encontrado en esta sucursal'), { status: 404 });
     }
-
-    // ── Usar id verificado en vez de nombre + sucursal_id ──
     await pool.query(
       'UPDATE productos_cantidad SET costo_unitario = $1 WHERE id = $2',
       [nuevoCosto, check[0].id]
     );
-
     return { tipo: 'cantidad', nombre_producto: nombreProducto, nuevo_costo: nuevoCosto };
   }
 
   throw Object.assign(new Error('Tipo de producto inválido. Use "serial" o "cantidad"'), { status: 400 });
 };
 
-// ─────────────────────────────────────────────
-// VALOR TOTAL DEL INVENTARIO
-// Calcula el valor actual en costo y en precio de venta
-// para productos serializados (disponibles) y por cantidad (en stock).
-// Solo accesible para admin_negocio (se controla en el router).
-// ─────────────────────────────────────────────
 const getValorInventario = async (negocioId) => {
   const [serialResult, cantidadResult] = await Promise.all([
-
-    // Serializados disponibles: no vendidos, no prestados
     pool.query(`
       SELECT
-        COUNT(se.id)::int                                           AS unidades,
-        COALESCE(SUM(se.costo_compra),        0)::numeric          AS costo_total,
-        COALESCE(SUM(ps.precio),              0)::numeric          AS precio_venta_total,
-        COUNT(CASE WHEN se.costo_compra IS NULL THEN 1 END)::int   AS sin_costo
+        COUNT(se.id)::int                                         AS unidades,
+        COALESCE(SUM(se.costo_compra),   0)::numeric             AS costo_total,
+        COALESCE(SUM(ps.precio),         0)::numeric             AS precio_venta_total,
+        COUNT(CASE WHEN se.costo_compra IS NULL THEN 1 END)::int AS sin_costo
       FROM seriales        se
       JOIN productos_serial ps ON ps.id = se.producto_id
       JOIN sucursales       su ON su.id = ps.sucursal_id
@@ -464,13 +436,12 @@ const getValorInventario = async (negocioId) => {
         AND su.negocio_id = $1
     `, [negocioId]),
 
-    // Por cantidad: stock disponible
     pool.query(`
       SELECT
-        COALESCE(SUM(pc.stock),                                           0)::int     AS unidades,
-        COALESCE(SUM(pc.stock * pc.costo_unitario),                       0)::numeric AS costo_total,
-        COALESCE(SUM(pc.stock * pc.precio),                               0)::numeric AS precio_venta_total,
-        COALESCE(SUM(CASE WHEN pc.costo_unitario IS NULL THEN pc.stock ELSE 0 END), 0)::int AS sin_costo
+        COALESCE(SUM(pc.stock),                                                       0)::int     AS unidades,
+        COALESCE(SUM(pc.stock * pc.costo_unitario),                                   0)::numeric AS costo_total,
+        COALESCE(SUM(pc.stock * pc.precio),                                           0)::numeric AS precio_venta_total,
+        COALESCE(SUM(CASE WHEN pc.costo_unitario IS NULL THEN pc.stock ELSE 0 END),   0)::int     AS sin_costo
       FROM productos_cantidad pc
       JOIN sucursales         su ON su.id = pc.sucursal_id
       WHERE pc.activo     = true
@@ -482,10 +453,10 @@ const getValorInventario = async (negocioId) => {
   const serial   = serialResult.rows[0];
   const cantidad = cantidadResult.rows[0];
 
-  const serialCosto    = Number(serial.costo_total);
-  const serialVenta    = Number(serial.precio_venta_total);
-  const cantidadCosto  = Number(cantidad.costo_total);
-  const cantidadVenta  = Number(cantidad.precio_venta_total);
+  const serialCosto   = Number(serial.costo_total);
+  const serialVenta   = Number(serial.precio_venta_total);
+  const cantidadCosto = Number(cantidad.costo_total);
+  const cantidadVenta = Number(cantidad.precio_venta_total);
 
   return {
     serial: {
@@ -501,9 +472,9 @@ const getValorInventario = async (negocioId) => {
       sin_costo:          cantidad.sin_costo,
     },
     totales: {
-      unidades:           serial.unidades + cantidad.unidades,
-      costo_total:        serialCosto     + cantidadCosto,
-      precio_venta_total: serialVenta     + cantidadVenta,
+      unidades:           serial.unidades   + cantidad.unidades,
+      costo_total:        serialCosto       + cantidadCosto,
+      precio_venta_total: serialVenta       + cantidadVenta,
     },
   };
 };
