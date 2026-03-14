@@ -242,13 +242,13 @@ function PanelRetoma({ retoma, setRetoma, esNueva, sucursalKey, sucursalLista })
 
   const { data: productosSerial } = useQuery({
     queryKey: ['productos-serial', ...sucursalKey],
-    queryFn:  () => getProductosSerial().then((r) => r.data.data),
+    queryFn:  () => getProductosSerial().then((r) => r.data.data?.items ?? r.data.data ?? []),
     enabled:  sucursalLista && retoma?.ingreso_inventario && retoma?.tipo_retoma === 'serial',
   });
 
   const { data: productosCantidad } = useQuery({
     queryKey: ['productos-cantidad', ...sucursalKey],
-    queryFn:  () => getProductosCantidad().then((r) => r.data.data),
+    queryFn:  () => getProductosCantidad().then((r) => r.data.data?.items ?? r.data.data ?? []),
     enabled:  sucursalLista && retoma?.ingreso_inventario && retoma?.tipo_retoma === 'cantidad',
   });
 
