@@ -26,11 +26,11 @@ export function ProductosCantidad() {
   const [productoAEditar,  setProductoAEditar]  = useState(null);
 
   const { data: productosData, isLoading } = useQuery({
-    queryKey: ['productos-cantidad', ...sucursalKey],
-queryFn:  () => getProductosCantidad().then((r) => r.data.data),
-enabled:  sucursalLista,
-staleTime: 0,
-gcTime:    0,
+    queryKey:  ['productos-cantidad', ...sucursalKey],
+    queryFn:   () => getProductosCantidad().then((r) => r.data.data),
+    enabled:   sucursalLista,
+    staleTime: 0,
+    gcTime:    0,
   });
 
   const agregarItem = useCarritoStore((s) => s.agregarItem);
@@ -45,7 +45,11 @@ gcTime:    0,
     },
   });
 
-  const productos = Array.isArray(productosData) ? productosData : [];
+  // El backend retorna { modo: 'sucursal'|'global', items: [...] }
+  // Se extrae .items para obtener siempre un array plano
+  const productos = Array.isArray(productosData?.items)
+    ? productosData.items
+    : [];
 
   const productosFiltrados = productos.filter((p) =>
     p.nombre.toLowerCase().includes(busqueda.toLowerCase())
