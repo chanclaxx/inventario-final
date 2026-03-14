@@ -1,23 +1,24 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
-import { Modal }          from '../../components/ui/Modal';
-import { Button }         from '../../components/ui/Button';
-import { Input }          from '../../components/ui/Input';
-import { Badge }          from '../../components/ui/Badge';
-import { InputMoneda }    from '../../components/ui/InputMoneda';
-import { formatCOP }      from '../../utils/formatters';
+import { Modal }                    from '../../components/ui/Modal';
+import { Button }                   from '../../components/ui/Button';
+import { Input }                    from '../../components/ui/Input';
+import { Badge }                    from '../../components/ui/Badge';
+import { InputMoneda }              from '../../components/ui/InputMoneda';
+import { formatCOP }                from '../../utils/formatters';
+import { ModalConflictoCedula }     from '../../components/ui/ModalConflictoCedula';
+import { useCedulaCliente }         from '../../hooks/useCedulaCliente';
 import { crearFactura, getFacturaById } from '../../api/facturas.api';
-import { buscarPorCedula }              from '../../api/clientes.api';
-import { getGarantias }                 from '../../api/garantias.api';
+import { getGarantias }             from '../../api/garantias.api';
 import {
   getProductosSerial,
   getProductosCantidad,
   verificarImei as verificarImeiApi,
 } from '../../api/productos.api';
-import { FacturaTermica } from '../../components/FacturaTermica';
-import { useSucursalKey } from '../../hooks/useSucursalKey';
-import api                from '../../api/axios.config';
-import useCarritoStore    from '../../store/carritoStore';
+import { FacturaTermica }    from '../../components/FacturaTermica';
+import { useSucursalKey }    from '../../hooks/useSucursalKey';
+import api                   from '../../api/axios.config';
+import useCarritoStore       from '../../store/carritoStore';
 import {
   User, Users, Package, ShoppingBag,
   Loader2, CheckCircle, XCircle, AlertCircle,
@@ -48,6 +49,14 @@ const RETOMA_INICIAL = {
 };
 
 const IMEI_MIN_LENGTH = 8;
+
+// ─── Utilidad: normalizar respuesta de productos a array ─────────────────────
+
+function normalizarProductos(data) {
+  if (Array.isArray(data)) return data;
+  if (data?.items && Array.isArray(data.items)) return data.items;
+  return [];
+}
 
 // ─── Hook: verificación puntual de IMEI ──────────────────────────────────────
 
@@ -94,8 +103,8 @@ function ImeiEstadoIcono({ estado }) {
 }
 
 function ImeiEstadoMensaje({ estado, onAbrirModal }) {
-  if (estado.tipo === 'cargando') return <p className="text-xs text-gray-400">Verificando IMEI...</p>;
-  if (estado.tipo === 'libre')    return <p className="text-xs text-green-600">✓ IMEI disponible</p>;
+  if (estado.tipo === 'cargando')   return <p className="text-xs text-gray-400">Verificando IMEI...</p>;
+  if (estado.tipo === 'libre')      return <p className="text-xs text-green-600">✓ IMEI disponible</p>;
   if (estado.tipo === 'encontrado') {
     return (
       <button
@@ -195,7 +204,7 @@ function RetomaSerial({ retoma, setRetomaField, productosSerial, retomaSerialRef
   const [busqueda, setBusqueda] = useState('');
   const { estado, verificar, limpiar } = useVerificarImei();
 
-  const lista     = Array.isArray(productosSerial) ? productosSerial : (productosSerial?.items ?? []);
+  const lista     = normalizarProductos(productosSerial);
   const filtrados = lista.filter((p) =>
     p.nombre.toLowerCase().includes(busqueda.toLowerCase())
   );
@@ -303,7 +312,7 @@ function RetomaSerial({ retoma, setRetomaField, productosSerial, retomaSerialRef
 function RetomaCantidad({ retoma, setRetomaField, productosCantidad }) {
   const [busqueda, setBusqueda] = useState('');
 
-  const lista     = Array.isArray(productosCantidad) ? productosCantidad : (productosCantidad?.items ?? []);
+  const lista     = normalizarProductos(productosCantidad);
   const filtrados = lista.filter((p) =>
     p.nombre.toLowerCase().includes(busqueda.toLowerCase())
   );
@@ -371,18 +380,12 @@ function RetomaCantidad({ retoma, setRetomaField, productosCantidad }) {
 
 // ─── Selector de métodos de pago ──────────────────────────────────────────────
 
-/**
- * - 1 método seleccionado: sin inputs, se asume pago total neto.
- * - 2+ métodos: input de monto por cada uno seleccionado.
- */
 function SelectorPagos({ metodosSeleccionados, montos, totalNeto, onToggleMetodo, onCambioMonto }) {
   const cantidadSeleccionada = metodosSeleccionados.length;
 
   return (
     <div className="flex flex-col gap-3">
       <p className="text-sm font-medium text-gray-700">Método de pago</p>
-
-      {/* Chips de selección */}
       <div className="flex flex-wrap gap-2">
         {METODOS_PAGO.map((metodo) => {
           const metodoId     = metodo.id;
@@ -404,7 +407,6 @@ function SelectorPagos({ metodosSeleccionados, montos, totalNeto, onToggleMetodo
         })}
       </div>
 
-      {/* Inputs de monto — solo cuando hay 2 o más métodos */}
       {cantidadSeleccionada >= 2 && (
         <div className="flex flex-col gap-2 pt-1">
           {metodosSeleccionados.map((metodoId) => {
@@ -426,7 +428,6 @@ function SelectorPagos({ metodosSeleccionados, montos, totalNeto, onToggleMetodo
         </div>
       )}
 
-      {/* Indicador de pago único */}
       {cantidadSeleccionada === 1 && (
         <p className="text-xs text-gray-400">
           Pago completo de{' '}
@@ -462,39 +463,45 @@ export function ModalFactura({ open, onClose }) {
   const [conRetoma,            setConRetoma]            = useState(false);
   const [retoma,               setRetoma]               = useState(RETOMA_INICIAL);
   const [error,                setError]                = useState('');
-  const [buscandoCliente,      setBuscandoCliente]      = useState(false);
   const [modalReactivar,       setModalReactivar]       = useState(false);
   const [serialEncontrado,     setSerialEncontrado]     = useState(null);
 
   const retomaSerialRef = useRef(null);
 
+  // ── Hook compartido de búsqueda por cédula ────────────────────────────────
+  const {
+    buscandoCliente,
+    conflictoCliente,
+    buscarCliente,
+    resolverConflicto,
+    descartarConflicto,
+  } = useCedulaCliente({ form, setForm });
+
   const { data: garantiasData } = useQuery({
     queryKey: ['garantias'],
-    queryFn: () => getGarantias().then((r) => r.data.data),
+    queryFn:  () => getGarantias().then((r) => r.data.data),
   });
 
   const { data: configData } = useQuery({
     queryKey: ['config'],
-    queryFn: () => api.get('/config').then((r) => r.data.data),
+    queryFn:  () => api.get('/config').then((r) => r.data.data),
   });
 
   const { data: productosSerialRaw } = useQuery({
     queryKey: ['productos-serial', ...sucursalKey],
-    queryFn: () => getProductosSerial().then((r) => r.data.data?.items ?? r.data.data ?? []),
-    enabled: sucursalLista && conRetoma && retoma.tipo_retoma === 'serial',
+    queryFn:  () => getProductosSerial().then((r) => normalizarProductos(r.data.data)),
+    enabled:  sucursalLista && conRetoma && retoma.tipo_retoma === 'serial',
   });
 
   const { data: productosCantidadRaw } = useQuery({
     queryKey: ['productos-cantidad', ...sucursalKey],
-    queryFn: () => getProductosCantidad().then((r) => r.data.data?.items ?? r.data.data ?? []),
-    enabled: conRetoma && retoma.tipo_retoma === 'cantidad',
+    queryFn:  () => getProductosCantidad().then((r) => normalizarProductos(r.data.data)),
+    enabled:  conRetoma && retoma.tipo_retoma === 'cantidad',
   });
 
-  // Normalización defensiva: garantiza array aunque el caché tenga estructura antigua
-  const productosSerial   = Array.isArray(productosSerialRaw)   ? productosSerialRaw   : (productosSerialRaw?.items   ?? []);
-  const productosCantidad = Array.isArray(productosCantidadRaw) ? productosCantidadRaw : (productosCantidadRaw?.items ?? []);
+  const productosSerial   = normalizarProductos(productosSerialRaw);
+  const productosCantidad = normalizarProductos(productosCantidadRaw);
 
-  // Campos opcionales según config del negocio
   const mostrarEmail     = configData?.campo_email_cliente     === '1';
   const mostrarDireccion = configData?.campo_direccion_cliente === '1';
 
@@ -540,27 +547,6 @@ export function ModalFactura({ open, onClose }) {
   const setRetomaField = (campo, valor) =>
     setRetoma((r) => ({ ...r, [campo]: valor }));
 
-  const buscarCliente = async () => {
-    if (!form.cedula) return;
-    setBuscandoCliente(true);
-    try {
-      const { data } = await buscarPorCedula(form.cedula);
-      if (data.data) {
-        setForm((f) => ({
-          ...f,
-          nombre:    data.data.nombre,
-          celular:   data.data.celular   || '',
-          email:     data.data.email     || '',
-          direccion: data.data.direccion || '',
-        }));
-      }
-    } catch {
-      // cliente no encontrado — el backend lo creará al facturar
-    } finally {
-      setBuscandoCliente(false);
-    }
-  };
-
   // ── Lógica de pagos ───────────────────────────────────────────────────────
 
   const valorRetoma = conRetoma ? Number(retoma.valor_retoma || 0) : 0;
@@ -583,11 +569,6 @@ export function ModalFactura({ open, onClose }) {
   const handleCambioMonto = (metodoId, valor) =>
     setMontos((m) => ({ ...m, [metodoId]: valor }));
 
-  /**
-   * Construye el array de pagos para el payload:
-   * - 1 método: asume el total neto completo
-   * - 2+ métodos: usa los montos ingresados por el usuario
-   */
   const construirPagos = () => {
     if (metodosSeleccionados.length === 1) {
       const metodoId = metodosSeleccionados[0];
@@ -970,6 +951,15 @@ export function ModalFactura({ open, onClose }) {
         </div>
       </Modal>
 
+      {/* ── Modal conflicto cédula ── */}
+      <ModalConflictoCedula
+        open={!!conflictoCliente}
+        conflicto={conflictoCliente}
+        onRenombrar={resolverConflicto}
+        onContinuarSinActualizar={descartarConflicto}
+      />
+
+      {/* ── Modal reactivar serial ── */}
       <ModalReactivarSerial
         open={modalReactivar}
         serial={serialEncontrado}
