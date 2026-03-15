@@ -3,23 +3,21 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import axios from 'axios';
 import {
   LayoutDashboard, Building2, CheckCircle,
-  Ban, RefreshCw, LogOut, Search, TrendingUp, CreditCard, X
+  Ban, RefreshCw, LogOut, Search, TrendingUp, CreditCard, X,
+  DatabaseBackup, History, CheckCircle2,
 } from 'lucide-react';
 import { Badge }   from '../components/ui/Badge';
 import { Spinner } from '../components/ui/Spinner';
 
-// ── API helper con token propio de superadmin ─────────
 const BASE = import.meta.env.VITE_API_URL ? `${import.meta.env.VITE_API_URL}/api/superadmin` : '/api/superadmin';
 const saApi = axios.create({ baseURL: BASE });
 
-// ── Agregar token en cada request ─────────────────────
 saApi.interceptors.request.use((config) => {
   const token = sessionStorage.getItem('sa_token');
   if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;
 });
 
-// ── 401 → volver al login ─────────────────────────────
 saApi.interceptors.response.use(
   (response) => response,
   (error) => {
@@ -32,7 +30,6 @@ saApi.interceptors.response.use(
   }
 );
 
-// ── Helpers ───────────────────────────────────────────
 const ESTADO_BADGE = {
   activo:     'green',
   pendiente:  'yellow',
@@ -65,6 +62,14 @@ function formatPrecio(valor) {
   }).format(valor);
 }
 
+function formatBytes(bytes) {
+  if (!bytes) return '—';
+  const b = Number(bytes);
+  if (b < 1024)       return `${b} B`;
+  if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`;
+  return `${(b / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 // ── Modal credenciales ────────────────────────────────
 function ModalCredenciales({ credenciales, onCerrar }) {
   return (
@@ -91,11 +96,9 @@ function ModalCredenciales({ credenciales, onCerrar }) {
         <p className="text-xs text-gray-500">
           Estas credenciales no se volverán a mostrar. Cópialas antes de cerrar.
         </p>
-        <button
-          onClick={onCerrar}
+        <button onClick={onCerrar}
           className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white
-            text-sm font-medium rounded-xl transition-colors"
-        >
+            text-sm font-medium rounded-xl transition-colors">
           Entendido, ya las copié
         </button>
       </div>
@@ -108,11 +111,6 @@ function ModalRenovarPlan({ negocio, planes, onConfirmar, onCerrar, cargando }) 
   const [planSeleccionado, setPlanSeleccionado] = useState(negocio.plan || '');
   const [notas, setNotas] = useState('');
 
-  const handleConfirmar = () => {
-    if (!planSeleccionado) return;
-    onConfirmar({ id: negocio.id, plan: planSeleccionado, notas });
-  };
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60">
       <div className="bg-gray-800 border border-gray-700 rounded-2xl w-full max-w-md">
@@ -121,14 +119,11 @@ function ModalRenovarPlan({ negocio, planes, onConfirmar, onCerrar, cargando }) 
             <h2 className="text-white font-semibold">Renovar plan</h2>
             <p className="text-xs text-gray-400 mt-0.5">{negocio.nombre}</p>
           </div>
-          <button
-            onClick={onCerrar}
-            className="p-1.5 rounded-lg hover:bg-gray-700 text-gray-400 hover:text-white transition-colors"
-          >
+          <button onClick={onCerrar}
+            className="p-1.5 rounded-lg hover:bg-gray-700 text-gray-400 hover:text-white transition-colors">
             <X size={18} />
           </button>
         </div>
-
         <div className="p-5 flex flex-col gap-4">
           <div className="flex flex-col gap-2">
             <label className="text-sm font-medium text-gray-300">Selecciona el plan</label>
@@ -136,15 +131,12 @@ function ModalRenovarPlan({ negocio, planes, onConfirmar, onCerrar, cargando }) 
               {planes.map((plan) => {
                 const activo = planSeleccionado === plan.nombre;
                 return (
-                  <button
-                    key={plan.nombre}
-                    onClick={() => setPlanSeleccionado(plan.nombre)}
+                  <button key={plan.nombre} onClick={() => setPlanSeleccionado(plan.nombre)}
                     className={`w-full text-left p-4 rounded-xl border transition-colors ${
                       activo
                         ? 'bg-indigo-600/20 border-indigo-500 text-white'
                         : 'bg-gray-700/50 border-gray-600 text-gray-300 hover:border-gray-500'
-                    }`}
-                  >
+                    }`}>
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="font-medium">{PLAN_LABEL[plan.nombre] || plan.nombre}</p>
@@ -159,55 +151,150 @@ function ModalRenovarPlan({ negocio, planes, onConfirmar, onCerrar, cargando }) 
                       <span className="text-xs text-gray-400">
                         {plan.max_sucursales} sucursal{plan.max_sucursales > 1 ? 'es' : ''}
                       </span>
-                      <span className="text-xs text-gray-400">
-                        {plan.max_usuarios} usuarios
-                      </span>
+                      <span className="text-xs text-gray-400">{plan.max_usuarios} usuarios</span>
                     </div>
                   </button>
                 );
               })}
             </div>
           </div>
-
           <div className="flex flex-col gap-1">
             <label className="text-sm font-medium text-gray-300">
               Notas <span className="text-gray-500 font-normal">(opcional)</span>
             </label>
-            <textarea
-              value={notas}
-              onChange={(e) => setNotas(e.target.value)}
-              placeholder="Ej: Pago recibido en efectivo..."
-              rows={2}
+            <textarea value={notas} onChange={(e) => setNotas(e.target.value)}
+              placeholder="Ej: Pago recibido en efectivo..." rows={2}
               className="w-full px-3 py-2.5 bg-gray-700 border border-gray-600 rounded-xl
                 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2
-                focus:ring-indigo-500 resize-none"
-            />
+                focus:ring-indigo-500 resize-none" />
           </div>
-
           <p className="text-xs text-gray-500">
             Vencimiento actual: <span className="text-gray-400">{formatFecha(negocio.fecha_vencimiento)}</span>
             {' '}→ se extenderá 1 mes desde esa fecha.
           </p>
         </div>
-
         <div className="flex gap-3 p-5 border-t border-gray-700">
-          <button
-            onClick={onCerrar}
+          <button onClick={onCerrar}
             className="flex-1 py-2.5 rounded-xl bg-gray-700 hover:bg-gray-600
-              text-gray-300 text-sm font-medium transition-colors"
-          >
+              text-gray-300 text-sm font-medium transition-colors">
             Cancelar
           </button>
           <button
-            onClick={handleConfirmar}
+            onClick={() => onConfirmar({ id: negocio.id, plan: planSeleccionado, notas })}
             disabled={!planSeleccionado || cargando}
             className="flex-1 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700
-              disabled:opacity-50 text-white text-sm font-medium transition-colors"
-          >
+              disabled:opacity-50 text-white text-sm font-medium transition-colors">
             {cargando ? 'Renovando...' : 'Confirmar renovación'}
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ── Sección de backup ─────────────────────────────────
+function SeccionBackup() {
+  const [mostrarHistorial, setMostrarHistorial] = useState(false);
+  const [ultimoBackup,     setUltimoBackup]     = useState(null);
+
+  const { data: historial = [], isLoading: loadingHistorial, refetch: refetchHistorial } = useQuery({
+    queryKey: ['sa_backups'],
+    queryFn:  () => saApi.get('/backup/historial').then((r) => r.data.data),
+    enabled:  mostrarHistorial,
+  });
+
+  const mutBackup = useMutation({
+    mutationFn: () => saApi.post('/backup'),
+    onSuccess: (res) => {
+      setUltimoBackup(res.data.data);
+      if (mostrarHistorial) refetchHistorial();
+    },
+  });
+
+  return (
+    <div className="bg-gray-800 border border-gray-700 rounded-2xl p-5 flex flex-col gap-4">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 bg-emerald-600 rounded-xl flex items-center justify-center">
+            <DatabaseBackup size={18} className="text-white" />
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-white">Backup de base de datos</p>
+            <p className="text-xs text-gray-400">Se guarda en Google Drive · Retiene los últimos 30</p>
+          </div>
+        </div>
+        <button
+          onClick={() => mutBackup.mutate()}
+          disabled={mutBackup.isPending}
+          className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700
+            disabled:opacity-50 text-white text-sm font-medium rounded-xl transition-colors"
+        >
+          {mutBackup.isPending ? (
+            <><RefreshCw size={14} className="animate-spin" /> Generando...</>
+          ) : (
+            <><DatabaseBackup size={14} /> Hacer backup</>
+          )}
+        </button>
+      </div>
+
+      {/* Resultado del último backup ejecutado */}
+      {ultimoBackup && (
+        <div className="bg-emerald-900/30 border border-emerald-700/50 rounded-xl p-3 flex items-start gap-3">
+          <CheckCircle2 size={16} className="text-emerald-400 flex-shrink-0 mt-0.5" />
+          <div className="flex flex-col gap-0.5">
+            <p className="text-sm font-medium text-emerald-400">Backup completado</p>
+            <p className="text-xs text-gray-400 font-mono">{ultimoBackup.archivo}</p>
+            <p className="text-xs text-gray-500">
+              {formatBytes(ultimoBackup.size)}
+              {ultimoBackup.eliminados_antiguos > 0 && (
+                <span className="ml-2">· {ultimoBackup.eliminados_antiguos} backup(s) antiguo(s) eliminado(s)</span>
+              )}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {mutBackup.isError && (
+        <div className="bg-red-900/30 border border-red-700/50 rounded-xl px-3 py-2">
+          <p className="text-sm text-red-400">
+            {mutBackup.error?.response?.data?.error || 'Error al generar el backup'}
+          </p>
+        </div>
+      )}
+
+      {/* Historial */}
+      <button
+        onClick={() => setMostrarHistorial((v) => !v)}
+        className="flex items-center gap-2 text-xs text-gray-400 hover:text-gray-200 transition-colors w-fit"
+      >
+        <History size={13} />
+        {mostrarHistorial ? 'Ocultar historial' : 'Ver historial de backups'}
+      </button>
+
+      {mostrarHistorial && (
+        loadingHistorial ? <Spinner className="py-4" /> : (
+          <div className="flex flex-col gap-1.5 max-h-64 overflow-y-auto">
+            {historial.length === 0 ? (
+              <p className="text-xs text-gray-500 px-1">Sin backups registrados aún</p>
+            ) : (
+              historial.map((b) => (
+                <div key={b.id}
+                  className="flex items-center justify-between bg-gray-700/50 rounded-xl px-3 py-2.5">
+                  <div className="min-w-0">
+                    <p className="text-xs font-mono text-gray-300 truncate">{b.name}</p>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      {formatFecha(b.createdTime)}
+                    </p>
+                  </div>
+                  <span className="text-xs text-gray-400 flex-shrink-0 ml-3">
+                    {formatBytes(b.size)}
+                  </span>
+                </div>
+              ))
+            )}
+          </div>
+        )
+      )}
     </div>
   );
 }
@@ -246,33 +333,22 @@ function LoginSuperadmin({ onLogin }) {
         <div className="bg-gray-800 rounded-2xl border border-gray-700 p-6 flex flex-col gap-4">
           <div className="flex flex-col gap-1">
             <label className="text-sm font-medium text-gray-300">Email</label>
-            <input
-              type="email"
-              placeholder="super@admin.com"
-              value={form.email}
+            <input type="email" placeholder="super@admin.com" value={form.email}
               onChange={(e) => setForm({ ...form, email: e.target.value })}
               className="w-full px-3 py-2.5 bg-gray-700 border-0 rounded-xl text-sm
-                text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            />
+                text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
           </div>
           <div className="flex flex-col gap-1">
             <label className="text-sm font-medium text-gray-300">Contraseña</label>
-            <input
-              type="password"
-              placeholder="••••••••"
-              value={form.password}
+            <input type="password" placeholder="••••••••" value={form.password}
               onChange={(e) => setForm({ ...form, password: e.target.value })}
               className="w-full px-3 py-2.5 bg-gray-700 border-0 rounded-xl text-sm
-                text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            />
+                text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
           </div>
           {error && <p className="text-sm text-red-400">{error}</p>}
-          <button
-            onClick={handleLogin}
-            disabled={loading}
+          <button onClick={handleLogin} disabled={loading}
             className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50
-              text-white font-medium py-2.5 rounded-xl transition-colors mt-2"
-          >
+              text-white font-medium py-2.5 rounded-xl transition-colors mt-2">
             {loading ? 'Entrando...' : 'Iniciar sesión'}
           </button>
         </div>
@@ -321,55 +397,36 @@ function FilaNegocio({ negocio, onAprobar, onCambiarEstado, onRenovar, cargando 
           <span className="text-xs text-gray-500">
             {negocio.total_usuarios} usuario{negocio.total_usuarios !== '1' ? 's' : ''}
           </span>
-          <span className="text-xs text-gray-500">
-            Vence: {formatFecha(negocio.fecha_vencimiento)}
-          </span>
+          <span className="text-xs text-gray-500">Vence: {formatFecha(negocio.fecha_vencimiento)}</span>
         </div>
       </div>
-
       <div className="flex gap-2 flex-shrink-0 flex-wrap">
         {negocio.estado_plan === 'pendiente' && (
-          <button
-            onClick={() => onAprobar(negocio.id)}
-            disabled={cargando}
+          <button onClick={() => onAprobar(negocio.id)} disabled={cargando}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-green-600 hover:bg-green-700
-              disabled:opacity-50 text-white text-xs font-medium rounded-lg transition-colors"
-          >
-            <CheckCircle size={14} />
-            Aprobar
+              disabled:opacity-50 text-white text-xs font-medium rounded-lg transition-colors">
+            <CheckCircle size={14} /> Aprobar
           </button>
         )}
         {negocio.estado_plan === 'activo' && (
-          <button
-            onClick={() => onCambiarEstado(negocio.id, 'suspendido')}
-            disabled={cargando}
+          <button onClick={() => onCambiarEstado(negocio.id, 'suspendido')} disabled={cargando}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-red-600 hover:bg-red-700
-              disabled:opacity-50 text-white text-xs font-medium rounded-lg transition-colors"
-          >
-            <Ban size={14} />
-            Suspender
+              disabled:opacity-50 text-white text-xs font-medium rounded-lg transition-colors">
+            <Ban size={14} /> Suspender
           </button>
         )}
         {(negocio.estado_plan === 'suspendido' || negocio.estado_plan === 'vencido') && (
-          <button
-            onClick={() => onCambiarEstado(negocio.id, 'activo')}
-            disabled={cargando}
+          <button onClick={() => onCambiarEstado(negocio.id, 'activo')} disabled={cargando}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700
-              disabled:opacity-50 text-white text-xs font-medium rounded-lg transition-colors"
-          >
-            <RefreshCw size={14} />
-            Reactivar
+              disabled:opacity-50 text-white text-xs font-medium rounded-lg transition-colors">
+            <RefreshCw size={14} /> Reactivar
           </button>
         )}
         {negocio.estado_plan !== 'pendiente' && (
-          <button
-            onClick={() => onRenovar(negocio)}
-            disabled={cargando}
+          <button onClick={() => onRenovar(negocio)} disabled={cargando}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-yellow-600 hover:bg-yellow-700
-              disabled:opacity-50 text-white text-xs font-medium rounded-lg transition-colors"
-          >
-            <CreditCard size={14} />
-            Renovar
+              disabled:opacity-50 text-white text-xs font-medium rounded-lg transition-colors">
+            <CreditCard size={14} /> Renovar
           </button>
         )}
       </div>
@@ -387,19 +444,19 @@ function Panel({ usuario, onLogout }) {
 
   const { data: stats, isLoading: loadingStats } = useQuery({
     queryKey: ['sa_estadisticas'],
-    queryFn: () => saApi.get('/estadisticas').then((r) => r.data.data),
+    queryFn:  () => saApi.get('/estadisticas').then((r) => r.data.data),
   });
 
   const { data: negocios = [], isLoading: loadingNegocios } = useQuery({
     queryKey: ['sa_negocios', filtroEstado, filtroBusqueda],
-    queryFn: () => saApi.get('/negocios', {
+    queryFn:  () => saApi.get('/negocios', {
       params: { estado: filtroEstado || undefined, busqueda: filtroBusqueda || undefined },
     }).then((r) => r.data.data),
   });
 
   const { data: planes = [] } = useQuery({
     queryKey: ['sa_planes'],
-    queryFn: () => saApi.get('/planes').then((r) => r.data.data),
+    queryFn:  () => saApi.get('/planes').then((r) => r.data.data),
   });
 
   const mutAprobar = useMutation({
@@ -418,7 +475,7 @@ function Panel({ usuario, onLogout }) {
 
   const mutEstado = useMutation({
     mutationFn: ({ id, estado }) => saApi.patch(`/negocios/${id}/estado`, { estado }),
-    onSuccess: () => {
+    onSuccess:  () => {
       queryClient.invalidateQueries({ queryKey: ['sa_negocios'] });
       queryClient.invalidateQueries({ queryKey: ['sa_estadisticas'] });
     },
@@ -457,13 +514,10 @@ function Panel({ usuario, onLogout }) {
               <p className="text-xs text-gray-400">{usuario.nombre}</p>
             </div>
           </div>
-          <button
-            onClick={onLogout}
+          <button onClick={onLogout}
             className="flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-gray-700
-              text-gray-400 hover:text-white text-sm transition-colors"
-          >
-            <LogOut size={16} />
-            Salir
+              text-gray-400 hover:text-white text-sm transition-colors">
+            <LogOut size={16} /> Salir
           </button>
         </div>
       </div>
@@ -480,30 +534,27 @@ function Panel({ usuario, onLogout }) {
           </div>
         )}
 
+        {/* ── Sección Backup ── */}
+        <SeccionBackup />
+
         {/* Filtros */}
         <div className="flex flex-col sm:flex-row gap-3">
           <div className="relative flex-1">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
-            <input
-              type="text"
-              placeholder="Buscar por nombre o email..."
+            <input type="text" placeholder="Buscar por nombre o email..."
               value={filtroBusqueda}
               onChange={(e) => setFiltroBusqueda(e.target.value)}
               className="w-full pl-9 pr-4 py-2.5 bg-gray-800 border border-gray-700 rounded-xl
-                text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            />
+                text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
           </div>
           <div className="flex gap-1 flex-wrap">
             {FILTROS.map((f) => (
-              <button
-                key={f.value}
-                onClick={() => setFiltroEstado(f.value)}
+              <button key={f.value} onClick={() => setFiltroEstado(f.value)}
                 className={`px-3 py-2 rounded-xl text-xs font-medium transition-colors ${
                   filtroEstado === f.value
                     ? 'bg-indigo-600 text-white'
                     : 'bg-gray-800 border border-gray-700 text-gray-400 hover:text-white'
-                }`}
-              >
+                }`}>
                 {f.label}
               </button>
             ))}
@@ -517,37 +568,26 @@ function Panel({ usuario, onLogout }) {
               <p className="text-center text-gray-500 py-12">No hay negocios que mostrar</p>
             ) : (
               negocios.map((negocio) => (
-                <FilaNegocio
-                  key={negocio.id}
-                  negocio={negocio}
+                <FilaNegocio key={negocio.id} negocio={negocio}
                   onAprobar={(id) => mutAprobar.mutate(id)}
                   onCambiarEstado={(id, estado) => mutEstado.mutate({ id, estado })}
                   onRenovar={(n) => setNegocioARenovar(n)}
-                  cargando={cargando}
-                />
+                  cargando={cargando} />
               ))
             )}
           </div>
         )}
       </div>
 
-      {/* Modal renovar plan */}
       {negocioARenovar && (
-        <ModalRenovarPlan
-          negocio={negocioARenovar}
-          planes={planes}
+        <ModalRenovarPlan negocio={negocioARenovar} planes={planes}
           onConfirmar={({ id, plan, notas }) => mutRenovar.mutate({ id, plan, notas })}
           onCerrar={() => setNegocioARenovar(null)}
-          cargando={mutRenovar.isPending}
-        />
+          cargando={mutRenovar.isPending} />
       )}
 
-      {/* Modal credenciales */}
       {credenciales && (
-        <ModalCredenciales
-          credenciales={credenciales}
-          onCerrar={() => setCredenciales(null)}
-        />
+        <ModalCredenciales credenciales={credenciales} onCerrar={() => setCredenciales(null)} />
       )}
     </div>
   );
