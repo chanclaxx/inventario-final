@@ -1,6 +1,58 @@
 import { useEffect } from 'react';
 import { formatCOP, formatFechaHora } from '../utils/formatters';
 
+// ─── Utilidades ───────────────────────────────────────────────────────────────
+
+function textoTipoRetoma(retoma) {
+  if (!retoma) return '';
+  if (retoma.tipo_retoma === 'serial')   return 'Equipo con serial';
+  if (retoma.tipo_retoma === 'cantidad') return 'Producto por cantidad';
+  return '';
+}
+
+function calcularValorRetoma(retoma) {
+  return Number(retoma?.valor_retoma || 0);
+}
+
+// ─── Subcomponente: bloque de una retoma individual ──────────────────────────
+
+function BloqueRetoma({ retoma }) {
+  const tipoLabel    = textoTipoRetoma(retoma);
+  const nombreProd   = retoma.nombre_producto_serial
+    || retoma.nombre_producto_cantidad
+    || retoma.nombre_producto
+    || null;
+
+  return (
+    <div className="retoma-bloque">
+      {retoma.descripcion && (
+        <div className="retoma-linea">{retoma.descripcion}</div>
+      )}
+      {tipoLabel && (
+        <div className="retoma-linea">Tipo: {tipoLabel}</div>
+      )}
+      {retoma.imei && (
+        <div className="retoma-linea">IMEI: {retoma.imei}</div>
+      )}
+      {nombreProd && (
+        <div className="retoma-linea">Producto: {nombreProd}</div>
+      )}
+      {retoma.tipo_retoma === 'cantidad' && Number(retoma.cantidad_retoma) > 0 && (
+        <div className="retoma-linea">Cantidad: {retoma.cantidad_retoma}</div>
+      )}
+      {retoma.ingreso_inventario && (
+        <div className="retoma-linea">✓ Ingresado al inventario</div>
+      )}
+      <div className="fila negrita" style={{ marginTop: '2px' }}>
+        <span>Valor retoma:</span>
+        <span>- {formatCOP(calcularValorRetoma(retoma))}</span>
+      </div>
+    </div>
+  );
+}
+
+// ─── Componente principal ─────────────────────────────────────────────────────
+
 export function FacturaTermica({ factura, garantias = [], onClose }) {
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -11,24 +63,24 @@ export function FacturaTermica({ factura, garantias = [], onClose }) {
 
   if (!factura) return null;
 
-  const total       = factura.lineas?.reduce((s, l) => s + Number(l.subtotal || 0), 0) || 0;
-  const totalPagado = factura.pagos?.reduce((s, p) => s + Number(p.valor   || 0), 0) || 0;
-  const valorRetoma = factura.retoma ? Number(factura.retoma.valor_retoma || 0) : 0;
-  const cambio      = totalPagado - (total - valorRetoma);
+  // El backend retorna "retomas" (array). Se normaliza siempre a array.
+  const retomas = Array.isArray(factura.retomas)
+    ? factura.retomas
+    : factura.retoma
+      ? [factura.retoma]   // compatibilidad con respuestas antiguas que usen singular
+      : [];
 
-  const retoma = factura.retoma;
+  const hayRetomas = retomas.length > 0;
 
-  const textoTipoRetoma = () => {
-    if (!retoma) return '';
-    if (retoma.tipo_retoma === 'serial')   return 'Equipo con serial';
-    if (retoma.tipo_retoma === 'cantidad') return 'Producto por cantidad';
-    return '';
-  };
+  const total         = factura.lineas?.reduce((s, l) => s + Number(l.subtotal || 0), 0) || 0;
+  const totalPagado   = factura.pagos?.reduce((s, p) => s + Number(p.valor    || 0), 0) || 0;
+  const totalRetomas  = retomas.reduce((s, r) => s + calcularValorRetoma(r), 0);
+  const cambio        = totalPagado - (total - totalRetomas);
 
   return (
     <>
       <style>{`
-        /* ── BASE: todo el ticket fuerza negro y peso mínimo 600 ── */
+        /* ── BASE ── */
         #factura-termica,
         #factura-termica * {
           color: #000000 !important;
@@ -47,12 +99,10 @@ export function FacturaTermica({ factura, garantias = [], onClose }) {
           box-sizing: border-box;
         }
 
-        /* Títulos y etiquetas importantes */
         #factura-termica .negrita {
           font-weight: 900 !important;
         }
 
-        /* Texto pequeño (IMEI, garantías) — sigue siendo 600 para que se vea */
         #factura-termica .garantia-texto,
         #factura-termica .retoma-linea {
           font-weight: 600 !important;
@@ -66,8 +116,8 @@ export function FacturaTermica({ factura, garantias = [], onClose }) {
         .garantia-texto  { font-size: 11px; line-height: 1.5; white-space: pre-wrap; text-align: justify; word-break: break-word; width: 100%; display: block; }
         .retoma-bloque   { margin: 4px 0; }
         .retoma-linea    { font-size: 12px; margin: 2px 0; }
+        .retoma-separador { border-top: 1px dashed #000; margin: 4px 0; }
 
-        /* ── IMPRESIÓN ── */
         @media print {
           @page {
             margin: 0;
@@ -90,7 +140,7 @@ export function FacturaTermica({ factura, garantias = [], onClose }) {
         }
       `}</style>
 
-      {/* Overlay pantalla */}
+      {/* ── Overlay pantalla ── */}
       <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center no-print">
         <div className="bg-white rounded-2xl p-6 max-w-sm w-full mx-4 flex flex-col gap-4">
           <h2 className="font-bold text-gray-900">Factura lista para imprimir</h2>
@@ -112,7 +162,7 @@ export function FacturaTermica({ factura, garantias = [], onClose }) {
         </div>
       </div>
 
-      {/* Contenido factura */}
+      {/* ── Contenido factura ── */}
       <div id="factura-termica">
 
         {/* Encabezado */}
@@ -167,34 +217,21 @@ export function FacturaTermica({ factura, garantias = [], onClose }) {
 
         <div className="linea-divisor" />
 
-        {/* Retoma */}
-        {retoma && (
+        {/* Retomas — se renderizan todas las del array */}
+        {hayRetomas && (
           <>
-            <div className="negrita">RETOMA</div>
-            <div className="retoma-bloque">
-              <div className="retoma-linea">{retoma.descripcion}</div>
-              {retoma.tipo_retoma && (
-                <div className="retoma-linea">Tipo: {textoTipoRetoma()}</div>
-              )}
-              {retoma.imei && (
-                <div className="retoma-linea">IMEI: {retoma.imei}</div>
-              )}
-              {(retoma.nombre_producto_serial || retoma.nombre_producto_cantidad || retoma.nombre_producto) && (
-                <div className="retoma-linea">
-                  Producto: {retoma.nombre_producto_serial || retoma.nombre_producto_cantidad || retoma.nombre_producto}
-                </div>
-              )}
-              {retoma.tipo_retoma === 'cantidad' && retoma.cantidad_retoma > 0 && (
-                <div className="retoma-linea">Cantidad: {retoma.cantidad_retoma}</div>
-              )}
-              {retoma.ingreso_inventario && (
-                <div className="retoma-linea">✓ Ingresado al inventario</div>
-              )}
-              <div className="fila negrita" style={{ marginTop: '2px' }}>
-                <span>Valor retoma:</span>
-                <span>- {formatCOP(retoma.valor_retoma)}</span>
-              </div>
+            <div className="negrita">
+              {retomas.length === 1 ? 'RETOMA' : `RETOMAS (${retomas.length})`}
             </div>
+            {retomas.map((retoma, i) => (
+              <div key={retoma.id ?? i}>
+                {retomas.length > 1 && (
+                  <div className="retoma-linea negrita">Retoma {i + 1}</div>
+                )}
+                <BloqueRetoma retoma={retoma} />
+                {i < retomas.length - 1 && <div className="retoma-separador" />}
+              </div>
+            ))}
             <div className="linea-divisor" />
           </>
         )}
@@ -202,7 +239,7 @@ export function FacturaTermica({ factura, garantias = [], onClose }) {
         {/* Totales */}
         <div className="fila negrita" style={{ fontSize: '14px' }}>
           <span>TOTAL:</span>
-          <span>{formatCOP(total - valorRetoma)}</span>
+          <span>{formatCOP(total - totalRetomas)}</span>
         </div>
 
         {/* Pagos */}
