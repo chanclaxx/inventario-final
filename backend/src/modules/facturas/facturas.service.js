@@ -3,6 +3,7 @@ const facturasRepo = require('./facturas.repository');
 const serialRepo   = require('../productos/productosSerial.repository');
 const cantidadRepo = require('../productos/productosCantidad.repository');
 const clientesRepo = require('../clientes/clientes.repository');
+const { enviarFactura } = require('../email/email.service');
 
 const ES_COMPANERO = (cedula) => cedula === 'COMPANERO';
 
@@ -151,7 +152,6 @@ const crearFactura = async ({
         const existeSerial = existeRows[0] || null;
 
         if (retoma.reactivar_serial_id) {
-          // ── Verificar que el serial a reactivar pertenece al negocio ──
           const { rows: serialCheck } = await client.query(
             `SELECT s.id FROM seriales s
              JOIN productos_serial ps ON ps.id = s.producto_id
@@ -176,7 +176,6 @@ const crearFactura = async ({
             );
           }
         } else if (retoma.producto_serial_id) {
-          // ── Verificar que el producto_serial_id pertenece al negocio ──
           const { rows: psCheck } = await client.query(
             `SELECT ps.id FROM productos_serial ps
              JOIN sucursales su ON su.id = ps.sucursal_id
@@ -196,7 +195,6 @@ const crearFactura = async ({
       }
 
       if (retoma.ingreso_inventario && retoma.tipo_retoma === 'cantidad' && retoma.producto_cantidad_id) {
-        // ── Verificar que el producto_cantidad_id pertenece al negocio ──
         await _verificarProductoCantidadNegocio(client, retoma.producto_cantidad_id, negocio_id);
         await facturasRepo.ajustarStockCantidad(
           client, retoma.producto_cantidad_id, Number(retoma.cantidad_retoma || 1)
@@ -205,6 +203,36 @@ const crearFactura = async ({
     }
 
     await client.query('COMMIT');
+
+    // ── Enviar factura por email — fire and forget, nunca bloquea ────────────
+    if (email) {
+      (async () => {
+        try {
+          const { rows: configRows } = await pool.query(
+            `SELECT clave, valor FROM config_negocio WHERE negocio_id = $1`,
+            [negocio_id]
+          );
+          const configMap = {};
+          for (const row of configRows) configMap[row.clave] = row.valor;
+
+          // ── Solo enviar si el campo email está activado en config ──
+          if (configMap.campo_email_cliente === '1') {
+            const [lineasEmail, pagosEmail, retomasEmail] = await Promise.all([
+              facturasRepo.getLineas(factura.id),
+              facturasRepo.getPagos(factura.id),
+              facturasRepo.getRetomas(factura.id),
+            ]);
+            await enviarFactura(
+              { ...factura, lineas: lineasEmail, pagos: pagosEmail, retomas: retomasEmail, email },
+              configMap
+            );
+          }
+        } catch (err) {
+          console.warn('[email] Error al enviar factura:', err?.message || err);
+        }
+      })();
+    }
+
     return factura;
   } catch (err) {
     await client.query('ROLLBACK');
