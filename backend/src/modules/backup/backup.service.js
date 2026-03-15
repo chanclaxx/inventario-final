@@ -1,15 +1,11 @@
-const { pool } = require('../../config/db');
-const { google } = require('googleapis');
-const { Readable } = require('stream');
+const { pool }                = require('../../config/db');
+const { createClient }        = require('@supabase/supabase-js');
 
-// ── Autenticación con Google Drive ────────────────────────────────────────
-const _getAuthClient = () => {
-  return new google.auth.JWT({
-    email:  process.env.GOOGLE_CLIENT_EMAIL,
-    key:    process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n'),
-    scopes: ['https://www.googleapis.com/auth/drive.file'],
-  });
-};
+// ── Cliente Supabase ──────────────────────────────────────────────────────
+const _getSupabase = () => createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_KEY
+);
 
 // ── Exportar todas las tablas como JSON ───────────────────────────────────
 const _generarDumpJSON = async () => {
@@ -30,9 +26,9 @@ const _generarDumpJSON = async () => {
   ];
 
   const dump = {
-    version:   '1.0',
-    fecha:     new Date().toISOString(),
-    tablas:    {},
+    version: '1.0',
+    fecha:   new Date().toISOString(),
+    tablas:  {},
   };
 
   const client = await pool.connect();
@@ -42,7 +38,6 @@ const _generarDumpJSON = async () => {
         const { rows } = await client.query(`SELECT * FROM ${tabla} ORDER BY id`);
         dump.tablas[tabla] = rows;
       } catch {
-        // Tabla no existe en este schema — omitir sin error
         dump.tablas[tabla] = [];
       }
     }
@@ -53,93 +48,84 @@ const _generarDumpJSON = async () => {
   return dump;
 };
 
-// ── Subir JSON a Google Drive ─────────────────────────────────────────────
-const _subirADrive = async (contenido, nombre) => {
-  const auth  = _getAuthClient();
-  const drive = google.drive({ version: 'v3', auth });
-
+// ── Subir a Supabase Storage ──────────────────────────────────────────────
+const _subirASupabase = async (contenido, nombre) => {
+  const supabase = _getSupabase();
   const buffer   = Buffer.from(JSON.stringify(contenido, null, 2), 'utf-8');
-  const readable = Readable.from(buffer);
 
-  const res = await drive.files.create({
-    requestBody: {
-      name:    nombre,
-      parents: [process.env.GOOGLE_DRIVE_FOLDER_ID],
-    },
-    media: {
-      mimeType: 'application/json',
-      body:     readable,
-    },
-    fields: 'id, name, size, createdTime',
-  });
+  const { data, error } = await supabase.storage
+    .from('backups')
+    .upload(nombre, buffer, {
+      contentType: 'application/json',
+      upsert:      false,
+    });
 
-  return res.data;
+  if (error) throw { status: 500, message: `Error subiendo backup: ${error.message}` };
+  return data;
 };
 
 // ── Listar backups ────────────────────────────────────────────────────────
 const listarBackups = async () => {
-  const auth  = _getAuthClient();
-  const drive = google.drive({ version: 'v3', auth });
+  const supabase = _getSupabase();
 
-  const res = await drive.files.list({
-    q:        `'${process.env.GOOGLE_DRIVE_FOLDER_ID}' in parents and trashed = false`,
-    fields:   'files(id, name, size, createdTime)',
-    orderBy:  'createdTime desc',
-    pageSize: 30,
-  });
+  const { data, error } = await supabase.storage
+    .from('backups')
+    .list('', {
+      limit:  50,
+      offset: 0,
+      sortBy: { column: 'created_at', order: 'desc' },
+    });
 
-  return res.data.files;
+  if (error) throw { status: 500, message: `Error listando backups: ${error.message}` };
+  return data || [];
 };
 
-// ── Eliminar backups antiguos ─────────────────────────────────────────────
+// ── Eliminar backups antiguos — mantener los últimos N ────────────────────
 const _limpiarBackupsAntiguos = async (mantener = 30) => {
-  const auth  = _getAuthClient();
-  const drive = google.drive({ version: 'v3', auth });
+  const supabase = _getSupabase();
 
-  const res = await drive.files.list({
-    q:        `'${process.env.GOOGLE_DRIVE_FOLDER_ID}' in parents and trashed = false`,
-    fields:   'files(id, name, createdTime)',
-    orderBy:  'createdTime desc',
-  });
+  const { data, error } = await supabase.storage
+    .from('backups')
+    .list('', {
+      limit:  1000,
+      sortBy: { column: 'created_at', order: 'desc' },
+    });
 
-  const archivos  = res.data.files || [];
-  const aEliminar = archivos.slice(mantener);
+  if (error || !data) return 0;
 
-  for (const archivo of aEliminar) {
-    await drive.files.delete({ fileId: archivo.id });
-  }
+  const aEliminar = data.slice(mantener).map((f) => f.name);
+  if (!aEliminar.length) return 0;
 
+  await supabase.storage.from('backups').remove(aEliminar);
   return aEliminar.length;
 };
 
 // ── Función principal ─────────────────────────────────────────────────────
 const ejecutarBackup = async () => {
-  const d     = new Date();
-  const fecha = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-  const hora  = `${String(d.getHours()).padStart(2,'0')}-${String(d.getMinutes()).padStart(2,'0')}`;
+  const d      = new Date();
+  const fecha  = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  const hora   = `${String(d.getHours()).padStart(2,'0')}-${String(d.getMinutes()).padStart(2,'0')}`;
   const nombre = `backup_${fecha}_${hora}.json`;
 
-  // 1. Generar dump como JSON
+  // 1. Generar dump
   const dump = await _generarDumpJSON();
 
-  // Contar total de registros
   const totalRegistros = Object.values(dump.tablas)
     .reduce((s, rows) => s + rows.length, 0);
 
-  // 2. Subir a Drive
-  const archivo = await _subirADrive(dump, nombre);
+  // 2. Subir a Supabase
+  const archivo = await _subirASupabase(dump, nombre);
 
   // 3. Limpiar antiguos
   const eliminados = await _limpiarBackupsAntiguos(30);
 
   return {
-    ok:               true,
-    archivo:          archivo.name,
-    id_drive:         archivo.id,
-    size:             archivo.size,
-    fecha:            archivo.createdTime,
-    total_registros:  totalRegistros,
-    tablas:           Object.keys(dump.tablas).length,
+    ok:                  true,
+    archivo:             nombre,
+    path:                archivo.path,
+    fecha:               d.toISOString(),
+    total_registros:     totalRegistros,
+    tablas:              Object.keys(dump.tablas).length,
     eliminados_antiguos: eliminados,
   };
 };
