@@ -11,8 +11,9 @@ import { Spinner }    from '../../components/ui/Spinner';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { SearchInput } from '../../components/ui/SearchInput';
 import { ReciboAcreedor } from '../../components/Reciboacreedor';
-import { Users, Plus, ChevronRight, ChevronLeft, PenLine, Printer } from 'lucide-react';
+import { Users, Plus, ChevronRight, ChevronLeft,ChevronUp, PenLine, Printer } from 'lucide-react';
 import api from '../../api/axios.config';
+import { getCompraById } from '../../api/compras.api';
 
 const normalizarProductos = (data) => {
   if (Array.isArray(data)) return data;
@@ -102,6 +103,82 @@ function FirmaCanvas({ onFirma }) {
       <p className="text-xs text-gray-400 text-center">
         {tieneFirma ? '✓ Firma capturada' : 'Dibuja la firma aquí'}
       </p>
+    </div>
+  );
+}
+function DetalleCompraInline({ compraId, }) {
+  const [expandido, setExpandido] = useState(false);
+
+  const { data: compra, isLoading } = useQuery({
+    queryKey: ['compra-detalle', compraId],
+    queryFn:  () => getCompraById(compraId).then((r) => r.data.data),
+    enabled:  expandido && !!compraId,
+  });
+
+  return (
+    <div className="mt-2">
+      <button
+        onClick={() => setExpandido((v) => !v)}
+        className="flex items-center gap-1.5 text-xs text-blue-500 hover:text-blue-700
+          font-medium transition-colors"
+      >
+        {expandido
+          ? <ChevronUp size={13} />
+          : <ChevronRight size={13} />}
+        {expandido ? 'Ocultar compra' : `Ver compra #${String(compraId).padStart(6, '0')}`}
+      </button>
+
+      {expandido && (
+        <div className="mt-2 bg-amber-50 border border-amber-100 rounded-xl p-3 flex flex-col gap-2">
+          {isLoading ? (
+            <Spinner className="py-4" />
+          ) : !compra ? (
+            <p className="text-xs text-gray-400">No se pudo cargar la compra</p>
+          ) : (
+            <>
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-semibold text-amber-700">
+                  Compra #{String(compra.id).padStart(6, '0')}
+                </p>
+                <span className="text-xs text-gray-400">
+                  {formatFechaHora(compra.fecha)}
+                </span>
+              </div>
+
+              {compra.proveedor_nombre && (
+                <p className="text-xs text-gray-600">
+                  Proveedor: <span className="font-medium">{compra.proveedor_nombre}</span>
+                </p>
+              )}
+
+              {/* Líneas de la compra */}
+              <div className="flex flex-col gap-1.5 mt-1">
+                {compra.lineas?.map((l) => (
+                  <div key={l.id}
+                    className="flex items-start justify-between text-xs gap-2
+                      bg-white rounded-lg px-2.5 py-2 border border-amber-100">
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-gray-800 truncate">{l.nombre_producto}</p>
+                      {l.imei && (
+                        <p className="text-gray-400 font-mono">{l.imei}</p>
+                      )}
+                    </div>
+                    <div className="text-right flex-shrink-0">
+                      <p className="text-gray-500">{l.cantidad} × {formatCOP(l.precio_unitario)}</p>
+                      <p className="font-semibold text-gray-800">{formatCOP(l.cantidad * l.precio_unitario)}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex justify-between items-center border-t border-amber-200 pt-2 mt-1">
+                <span className="text-xs text-gray-500">Total compra</span>
+                <span className="text-sm font-bold text-amber-700">{formatCOP(compra.total)}</span>
+              </div>
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -433,49 +510,50 @@ function DetalleAcreedor({ detalle, loadingDetalle, movimientosUI, onRegistrar, 
         {movimientosUI.length === 0 ? (
           <EmptyState icon={PenLine} titulo="Sin movimientos" />
         ) : (
-          movimientosUI.map((m) => {
-            const PrintIcon = Printer;
-            return (
-              <div
-                key={m.id}
-                className="bg-white border border-gray-100 rounded-xl p-3 flex items-start justify-between gap-3"
-              >
-                <div className="flex-1">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <Badge variant={m.tipo === 'Cargo' ? 'red' : 'green'}>{m.tipo}</Badge>
-                    <span className="text-sm text-gray-700">{m.descripcion}</span>
-                  </div>
-                  <p className="text-xs text-gray-400 mt-1">{formatFechaHora(m.fecha)}</p>
-                  <div className="flex items-center gap-1 mt-1 text-xs text-gray-400">
-                    <span>{formatCOP(m.saldo_antes)}</span>
-                    <span>→</span>
-                    <span className="font-semibold text-gray-600">{formatCOP(m.saldo_despues)}</span>
-                  </div>
-                  {m.firma && (
-                    <img
-                      src={m.firma}
-                      alt="firma"
-                      className="mt-2 h-12 border border-gray-100 rounded-lg"
-                    />
-                  )}
+          movimientosUI.map((m) => (
+            <div
+              key={m.id}
+              className="bg-white border border-gray-100 rounded-xl p-3 flex items-start justify-between gap-3"
+            >
+              <div className="flex-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Badge variant={m.tipo === 'Cargo' ? 'red' : 'green'}>{m.tipo}</Badge>
+                  <span className="text-sm text-gray-700">{m.descripcion}</span>
                 </div>
-
-                <div className="flex flex-col items-end gap-2 flex-shrink-0">
-                  <span className={`text-sm font-bold ${m.tipo === 'Cargo' ? 'text-red-500' : 'text-green-600'}`}>
-                    {m.tipo === 'Cargo' ? '+' : '-'}{formatCOP(m.valor)}
-                  </span>
-                  <button
-                    onClick={() => onImprimir(m)}
-                    className="flex items-center gap-1 text-xs text-gray-400 hover:text-blue-600 transition-colors"
-                    title="Imprimir recibo"
-                  >
-                    <PrintIcon size={14} />
-                    <span className="hidden sm:inline">Recibo</span>
-                  </button>
+                <p className="text-xs text-gray-400 mt-1">{formatFechaHora(m.fecha)}</p>
+                <div className="flex items-center gap-1 mt-1 text-xs text-gray-400">
+                  <span>{formatCOP(m.saldo_antes)}</span>
+                  <span>→</span>
+                  <span className="font-semibold text-gray-600">{formatCOP(m.saldo_despues)}</span>
                 </div>
+                {m.firma && (
+                  <img
+                    src={m.firma}
+                    alt="firma"
+                    className="mt-2 h-12 border border-gray-100 rounded-lg"
+                  />
+                )}
+                {/* ── Detalle expandible si el movimiento proviene de una compra ── */}
+                {m.compra_id && (
+                  <DetalleCompraInline compraId={m.compra_id} />
+                )}
               </div>
-            );
-          })
+
+              <div className="flex flex-col items-end gap-2 flex-shrink-0">
+                <span className={`text-sm font-bold ${m.tipo === 'Cargo' ? 'text-red-500' : 'text-green-600'}`}>
+                  {m.tipo === 'Cargo' ? '+' : '-'}{formatCOP(m.valor)}
+                </span>
+                <button
+                  onClick={() => onImprimir(m)}
+                  className="flex items-center gap-1 text-xs text-gray-400 hover:text-blue-600 transition-colors"
+                  title="Imprimir recibo"
+                >
+                  <Printer size={14} />
+                  <span className="hidden sm:inline">Recibo</span>
+                </button>
+              </div>
+            </div>
+          ))
         )}
       </div>
     </div>

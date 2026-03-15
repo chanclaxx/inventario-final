@@ -11,12 +11,10 @@ const findAll = async (negocioId, filtro) => {
   const params = [negocioId];
 
   if (filtro) {
-    // ── Sanitizar wildcards para evitar queries costosas ──
     const filtroSeguro = filtro
       .toLowerCase()
-      .replace(/[%_\\]/g, '\\$&')  // escapar caracteres especiales de LIKE
-      .slice(0, 100);               // limitar longitud del filtro
-
+      .replace(/[%_\\]/g, '\\$&')
+      .slice(0, 100);
     params.push(`%${filtroSeguro}%`);
     query += ` AND (LOWER(a.nombre) LIKE $2 ESCAPE '\\' OR a.cedula LIKE $2 ESCAPE '\\')`;
   }
@@ -34,10 +32,12 @@ const findById = async (negocioId, id) => {
   return rows[0] || null;
 };
 
+// ── compra_id incluido en getMovimientos — anclado al negocio ─────────────────
 const getMovimientos = async (negocioId, acreedorId) => {
   const { rows } = await pool.query(`
     SELECT
-      m.*,
+      m.id, m.acreedor_id, m.usuario_id, m.tipo, m.valor,
+      m.descripcion, m.firma, m.fecha, m.compra_id,
       COALESCE(
         SUM(CASE WHEN m.tipo = 'Cargo' THEN m.valor ELSE -m.valor END)
         OVER (
@@ -60,21 +60,24 @@ const getMovimientos = async (negocioId, acreedorId) => {
   return rows;
 };
 
-const create = async (negocioId, { nombre, cedula, telefono }) => {
+const create = async (negocioId, { nombre, cedula, telefono, proveedor_id }) => {
   const { rows } = await pool.query(`
-    INSERT INTO acreedores(negocio_id, nombre, cedula, telefono)
-    VALUES ($1, $2, $3, $4)
+    INSERT INTO acreedores(negocio_id, nombre, cedula, telefono, proveedor_id)
+    VALUES ($1, $2, $3, $4, $5)
     RETURNING *
-  `, [negocioId, nombre, cedula, telefono]);
+  `, [negocioId, nombre, cedula, telefono, proveedor_id || null]);
   return rows[0];
 };
 
-const insertarMovimiento = async ({ acreedor_id, usuario_id, tipo, valor, descripcion, firma }) => {
+// ── compra_id incluido en insertarMovimiento ──────────────────────────────────
+const insertarMovimiento = async ({
+  acreedor_id, usuario_id, tipo, valor, descripcion, firma, compra_id,
+}) => {
   const { rows } = await pool.query(`
-    INSERT INTO movimientos_acreedor(acreedor_id, usuario_id, tipo, valor, descripcion, firma)
-    VALUES ($1, $2, $3, $4, $5, $6)
+    INSERT INTO movimientos_acreedor(acreedor_id, usuario_id, tipo, valor, descripcion, firma, compra_id)
+    VALUES ($1, $2, $3, $4, $5, $6, $7)
     RETURNING *
-  `, [acreedor_id, usuario_id, tipo, valor, descripcion, firma ?? null]);
+  `, [acreedor_id, usuario_id, tipo, valor, descripcion, firma ?? null, compra_id || null]);
   return rows[0];
 };
 

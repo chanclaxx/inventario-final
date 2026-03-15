@@ -178,10 +178,10 @@ const registrarCompra = async ({
         }
 
         await client.query(
-          `INSERT INTO movimientos_acreedor(acreedor_id, usuario_id, tipo, descripcion, valor)
-           VALUES ($1, $2, 'Cargo', $3, $4)`,
-          [acreedorId, usuario_id, `Compra #${compra.id} — mercancía`, montoCargo]
-        );
+  `INSERT INTO movimientos_acreedor(acreedor_id, usuario_id, tipo, descripcion, valor, compra_id)
+   VALUES ($1, $2, 'Cargo', $3, $4, $5)`,
+  [acreedorId, usuario_id, `Compra #${compra.id} — mercancía`, montoCargo, compra.id]
+);
       }
     }
 
