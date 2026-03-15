@@ -730,10 +730,13 @@ function PasoCompraCliente({ sucursalKey, sucursalLista, onExito, onDuplicadosEn
                 <div className="bg-emerald-50 rounded-xl p-3 flex flex-col gap-2 border border-emerald-100">
                   <p className="text-xs font-semibold text-emerald-700">Nuevo producto</p>
                   <Input placeholder="Nombre del producto" value={nuevoProducto.nombre} onChange={(e) => setNuevoProducto({ ...nuevoProducto, nombre: e.target.value })} />
-                  <div className="flex gap-2">
-                    <Input type="number" placeholder="Precio compra" value={nuevoProducto.costo_unitario} onChange={(e) => setNuevoProducto({ ...nuevoProducto, costo_unitario: e.target.value })} />
-                    <Input type="number" placeholder="Precio venta" value={nuevoProducto.precio} onChange={(e) => setNuevoProducto({ ...nuevoProducto, precio: e.target.value })} />
-                  </div>
+                  {/* ── CAMBIO: precios solo visibles para admin_negocio ─────── */}
+                  {puedeVerCosto && (
+                    <div className="flex gap-2">
+                      <Input type="number" placeholder="Precio compra" value={nuevoProducto.costo_unitario} onChange={(e) => setNuevoProducto({ ...nuevoProducto, costo_unitario: e.target.value })} />
+                      <Input type="number" placeholder="Precio venta" value={nuevoProducto.precio} onChange={(e) => setNuevoProducto({ ...nuevoProducto, precio: e.target.value })} />
+                    </div>
+                  )}
                   <SelectLinea value={nuevoProducto.linea_id} onChange={(val) => setNuevoProducto({ ...nuevoProducto, linea_id: val })} />
                   <div className="flex gap-2">
                     <Button variant="secondary" size="sm" className="flex-1" onClick={() => setCreandoProducto(false)}>Cancelar</Button>
@@ -754,8 +757,8 @@ function PasoCompraCliente({ sucursalKey, sucursalLista, onExito, onDuplicadosEn
         </div>
       )}
 
-      {/* 4. Precio pagado al cliente (solo admin_negocio) */}
-      {esAdmin && hayProducto && (
+      {/* 4. Precio pagado al cliente (visible para todos los roles) */}
+      {hayProducto && (
         <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-3 flex flex-col gap-1.5">
           <div className="flex items-center gap-1.5"><CheckCircle size={13} className="text-emerald-600" /><p className="text-xs font-semibold text-emerald-700">Precio pagado al cliente</p></div>
           <input type="number" placeholder="0" value={costoCompra} onChange={(e) => setCostoCompra(e.target.value)} onWheel={(e) => e.target.blur()}
