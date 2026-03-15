@@ -59,7 +59,7 @@ const crearFactura = async ({
   nombre_cliente, cedula, celular, email, direccion, notas,
   lineas, pagos, retomas = [],
 }) => {
-   console.log('[crearFactura] body.retomas:', JSON.stringify(req.body.retomas, null, 2));
+   
   const { rows: sucRows } = await pool.query(
     `SELECT id FROM sucursales WHERE id = $1 AND negocio_id = $2 AND activa = true`,
     [sucursal_id, negocio_id]
