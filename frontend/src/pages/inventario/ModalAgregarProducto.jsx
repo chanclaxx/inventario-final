@@ -471,6 +471,8 @@ function PasoCompraCliente({ sucursalKey, sucursalLista, onExito, onDuplicadosEn
   const queryClient        = useQueryClient();
   const { esAdminNegocio } = useAuth();
   const esAdmin            = esAdminNegocio();
+  // ── CAMBIO: solo admin_negocio ve campos de costo al crear productos ─────────
+  const puedeVerCosto      = esAdmin;
 
   const [clienteSeleccionado, setClienteSeleccionado] = useState(null);
   const [tipoProducto,        setTipoProducto]        = useState('serial');
@@ -670,7 +672,10 @@ function PasoCompraCliente({ sucursalKey, sucursalLista, onExito, onDuplicadosEn
                     <Input placeholder="Marca" value={nuevaLinea.marca} onChange={(e) => setNuevaLinea({ ...nuevaLinea, marca: e.target.value })} />
                     <Input placeholder="Modelo" value={nuevaLinea.modelo} onChange={(e) => setNuevaLinea({ ...nuevaLinea, modelo: e.target.value })} />
                   </div>
-                  <Input type="number" placeholder="Precio de venta" value={nuevaLinea.precio} onChange={(e) => setNuevaLinea({ ...nuevaLinea, precio: e.target.value })} />
+                  {/* ── CAMBIO: precio de venta solo visible para admin_negocio ── */}
+                  {puedeVerCosto && (
+                    <Input type="number" placeholder="Precio de venta" value={nuevaLinea.precio} onChange={(e) => setNuevaLinea({ ...nuevaLinea, precio: e.target.value })} />
+                  )}
                   <SelectLinea value={nuevaLinea.linea_id} onChange={(val) => setNuevaLinea({ ...nuevaLinea, linea_id: val })} />
                   <div className="flex gap-2">
                     <Button variant="secondary" size="sm" className="flex-1" onClick={() => setCreandoLinea(false)}>Cancelar</Button>
@@ -781,6 +786,8 @@ function PasoSerial({ sucursalKey, onExito, onDuplicadosEncontrados }) {
   const esAdmin            = esAdminNegocio();
   // ── CAMBIO: supervisores y vendedores no ven información de proveedor ────────
   const puedeVerProveedor  = esAdmin;
+  // ── CAMBIO: solo admin_negocio ve campos de costo al crear productos ─────────
+  const puedeVerCosto      = esAdmin;
 
   const [busqueda,     setBusqueda]     = useState('');
   const [lineaSel,     setLineaSel]     = useState(null);
@@ -902,7 +909,10 @@ function PasoSerial({ sucursalKey, onExito, onDuplicadosEncontrados }) {
                 <Input id="sl-marca" placeholder="Marca" value={nuevaLinea.marca} onChange={(e) => setNuevaLinea({ ...nuevaLinea, marca: e.target.value })} onKeyDown={(e) => e.key === 'Enter' && document.getElementById('sl-modelo')?.focus()} />
                 <Input id="sl-modelo" placeholder="Modelo" value={nuevaLinea.modelo} onChange={(e) => setNuevaLinea({ ...nuevaLinea, modelo: e.target.value })} onKeyDown={(e) => e.key === 'Enter' && document.getElementById('sl-precio')?.focus()} />
               </div>
-              <Input id="sl-precio" type="number" placeholder="Precio de venta" value={nuevaLinea.precio} onChange={(e) => setNuevaLinea({ ...nuevaLinea, precio: e.target.value })} />
+              {/* ── CAMBIO: precio de venta solo visible para admin_negocio ── */}
+              {puedeVerCosto && (
+                <Input id="sl-precio" type="number" placeholder="Precio de venta" value={nuevaLinea.precio} onChange={(e) => setNuevaLinea({ ...nuevaLinea, precio: e.target.value })} />
+              )}
               <SelectLinea value={nuevaLinea.linea_id} onChange={(val) => setNuevaLinea({ ...nuevaLinea, linea_id: val })} />
               <div className="flex gap-2">
                 <Button variant="secondary" size="sm" className="flex-1" onClick={() => setCreandoLinea(false)}>Cancelar</Button>
@@ -956,6 +966,8 @@ function PasoCantidad({ sucursalKey, onExito }) {
   const esAdmin            = esAdminNegocio();
   // ── CAMBIO: supervisores y vendedores no ven información de proveedor ────────
   const puedeVerProveedor  = esAdmin;
+  // ── CAMBIO: solo admin_negocio ve campos de costo al crear productos ─────────
+  const puedeVerCosto      = esAdmin;
 
   const [busqueda,      setBusqueda]      = useState('');
   const [productoSel,   setProductoSel]   = useState(null);
@@ -1045,10 +1057,13 @@ function PasoCantidad({ sucursalKey, onExito }) {
             <div className="bg-green-50 rounded-xl p-3 flex flex-col gap-2">
               <p className="text-xs font-semibold text-green-700">Nuevo producto</p>
               <Input placeholder="Nombre del producto" value={nuevoProducto.nombre} onChange={(e) => setNuevoProducto({ ...nuevoProducto, nombre: e.target.value })} />
-              <div className="flex gap-2">
-                <Input type="number" placeholder="Precio compra" value={nuevoProducto.costo_unitario} onChange={(e) => setNuevoProducto({ ...nuevoProducto, costo_unitario: e.target.value })} />
-                <Input type="number" placeholder="Precio venta" value={nuevoProducto.precio} onChange={(e) => setNuevoProducto({ ...nuevoProducto, precio: e.target.value })} />
-              </div>
+              {/* ── CAMBIO: precios solo visibles para admin_negocio ─────────── */}
+              {puedeVerCosto && (
+                <div className="flex gap-2">
+                  <Input type="number" placeholder="Precio compra" value={nuevoProducto.costo_unitario} onChange={(e) => setNuevoProducto({ ...nuevoProducto, costo_unitario: e.target.value })} />
+                  <Input type="number" placeholder="Precio venta" value={nuevoProducto.precio} onChange={(e) => setNuevoProducto({ ...nuevoProducto, precio: e.target.value })} />
+                </div>
+              )}
               <SelectLinea value={nuevoProducto.linea_id} onChange={(val) => setNuevoProducto({ ...nuevoProducto, linea_id: val })} />
               <div className="flex gap-2">
                 <Button variant="secondary" size="sm" className="flex-1" onClick={() => setCreandoNuevo(false)}>Cancelar</Button>
