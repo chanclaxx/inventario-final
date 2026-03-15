@@ -2,16 +2,16 @@ const service = require('./productosCantidad.service');
 
 const getProductos = async (req, res, next) => {
   try {
-    // Vista global si admin pidió "todas", vista sucursal en cualquier otro caso
     const sucursalId = req.todasSucursales ? null : req.sucursal_id;
-    const data = await service.getProductos(sucursalId, req.user.negocio_id);
+    // ── lineaId opcional desde query param ──
+    const lineaId = req.query.linea_id ? Number(req.query.linea_id) : null;
+    const data = await service.getProductos(sucursalId, req.user.negocio_id, lineaId);
     res.json({ ok: true, data });
   } catch (err) { next(err); }
 };
 
 const getProductoById = async (req, res, next) => {
   try {
-    // ← agregar negocio_id
     const data = await service.getProductoById(req.user.negocio_id, req.params.id);
     res.json({ ok: true, data });
   } catch (err) { next(err); }
@@ -23,7 +23,6 @@ const crearProducto = async (req, res, next) => {
     if (!sucursal_id) {
       return res.status(400).json({ ok: false, error: 'Debes indicar la sucursal destino del producto' });
     }
-    // ← agregar negocio_id al service
     const data = await service.crearProducto(req.user.negocio_id, { ...req.body, sucursal_id });
     res.status(201).json({ ok: true, data, message: 'Producto creado correctamente' });
   } catch (err) { next(err); }
@@ -42,21 +41,18 @@ const ajustarStock = async (req, res, next) => {
       cantidad, costo_unitario, proveedor_id,
       cliente_origen, cedula_cliente, tipo, notas,
     } = req.body;
- 
+
     if (cantidad === undefined) {
       return res.status(400).json({ ok: false, error: 'La cantidad es requerida' });
     }
- 
+
     const data = await service.ajustarStock(
-      req.user.negocio_id,
-      req.params.id,
-      cantidad,
+      req.user.negocio_id, req.params.id, cantidad,
       { costo_unitario, proveedor_id, cliente_origen, cedula_cliente, tipo, notas },
     );
     res.json({ ok: true, data, message: 'Stock actualizado correctamente' });
   } catch (err) { next(err); }
 };
- 
 
 const eliminarProducto = async (req, res, next) => {
   try {
@@ -64,6 +60,7 @@ const eliminarProducto = async (req, res, next) => {
     res.json({ ok: true, message: 'Producto eliminado correctamente' });
   } catch (err) { next(err); }
 };
+
 const getHistorialStock = async (req, res, next) => {
   try {
     const q    = req.query.q || '';
@@ -74,5 +71,5 @@ const getHistorialStock = async (req, res, next) => {
 
 module.exports = {
   getProductos, getProductoById, crearProducto,
-  actualizarProducto, ajustarStock, eliminarProducto,getHistorialStock
+  actualizarProducto, ajustarStock, eliminarProducto, getHistorialStock,
 };

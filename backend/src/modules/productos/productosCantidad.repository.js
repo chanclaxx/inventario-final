@@ -1,64 +1,72 @@
 const { pool } = require('../../config/db');
 
-/**
- * Vista sucursal: filtra por sucursal_id
- * Vista global:   agrupa por nombre con SUM(stock), expandible por sucursal
- */
-const findAll = async (sucursalId, negocioId) => {
+const findAll = async (sucursalId, negocioId, lineaId) => {
   if (sucursalId) {
     const { rows } = await pool.query(`
       SELECT
         pc.id, pc.nombre, pc.stock, pc.stock_minimo,
         pc.unidad_medida, pc.costo_unitario, pc.precio,
         pc.cliente_origen, pc.activo, pc.sucursal_id, pc.proveedor_id,
-        p.nombre AS proveedor_nombre,
+        pc.linea_id,
+        lp.nombre AS linea_nombre,
+        p.nombre  AS proveedor_nombre,
         su.nombre AS sucursal_nombre,
         CASE WHEN pc.stock <= pc.stock_minimo THEN true ELSE false END AS stock_bajo
       FROM productos_cantidad pc
-      LEFT JOIN proveedores p  ON p.id  = pc.proveedor_id
-      JOIN  sucursales      su ON su.id = pc.sucursal_id
-      WHERE pc.sucursal_id = $1 AND pc.activo = true
+      LEFT JOIN proveedores    p  ON p.id  = pc.proveedor_id
+      LEFT JOIN lineas_producto lp ON lp.id = pc.linea_id
+      JOIN  sucursales         su ON su.id = pc.sucursal_id
+      WHERE pc.sucursal_id = $1
+        AND pc.activo = true
+        AND ($2::int IS NULL OR pc.linea_id = $2)
       ORDER BY pc.nombre
-    `, [sucursalId]);
+    `, [sucursalId, lineaId ?? null]);
     return { modo: 'sucursal', items: rows };
   }
 
-  // Vista global: stock consolidado agrupado por nombre + detalle por sucursal
+  // Vista global
   const { rows } = await pool.query(`
     SELECT
       pc.nombre,
-      SUM(pc.stock)                                                        AS stock_total,
-      BOOL_OR(pc.stock <= pc.stock_minimo)                                 AS stock_bajo,
+      pc.linea_id,
+      lp.nombre AS linea_nombre,
+      SUM(pc.stock)                        AS stock_total,
+      BOOL_OR(pc.stock <= pc.stock_minimo) AS stock_bajo,
       JSON_AGG(
         JSON_BUILD_OBJECT(
-          'id',             pc.id,
-          'sucursal_id',    pc.sucursal_id,
-          'sucursal_nombre',su.nombre,
-          'stock',          pc.stock,
-          'stock_minimo',   pc.stock_minimo,
-          'costo_unitario', pc.costo_unitario,
-          'precio',         pc.precio,
-          'proveedor_id',   pc.proveedor_id,
+          'id',               pc.id,
+          'sucursal_id',      pc.sucursal_id,
+          'sucursal_nombre',  su.nombre,
+          'stock',            pc.stock,
+          'stock_minimo',     pc.stock_minimo,
+          'costo_unitario',   pc.costo_unitario,
+          'precio',           pc.precio,
+          'proveedor_id',     pc.proveedor_id,
           'proveedor_nombre', p.nombre,
-          'stock_bajo',     pc.stock <= pc.stock_minimo
+          'stock_bajo',       pc.stock <= pc.stock_minimo
         ) ORDER BY su.nombre
       ) AS sucursales
     FROM productos_cantidad pc
-    JOIN  sucursales su ON su.id = pc.sucursal_id
-    LEFT JOIN proveedores p ON p.id = pc.proveedor_id
-    WHERE su.negocio_id = $1 AND pc.activo = true
-    GROUP BY pc.nombre
+    JOIN  sucursales         su ON su.id = pc.sucursal_id
+    LEFT JOIN proveedores    p  ON p.id  = pc.proveedor_id
+    LEFT JOIN lineas_producto lp ON lp.id = pc.linea_id
+    WHERE su.negocio_id = $1
+      AND pc.activo = true
+      AND ($2::int IS NULL OR pc.linea_id = $2)
+    GROUP BY pc.nombre, pc.linea_id, lp.nombre
     ORDER BY pc.nombre
-  `, [negocioId]);
+  `, [negocioId, lineaId ?? null]);
   return { modo: 'global', items: rows };
 };
 
 const findById = async (id) => {
   const { rows } = await pool.query(`
-    SELECT pc.*, p.nombre AS proveedor_nombre, su.nombre AS sucursal_nombre
+    SELECT pc.*, p.nombre AS proveedor_nombre, su.nombre AS sucursal_nombre,
+           lp.nombre AS linea_nombre
     FROM productos_cantidad pc
-    LEFT JOIN proveedores p  ON p.id  = pc.proveedor_id
-    JOIN  sucursales      su ON su.id = pc.sucursal_id
+    LEFT JOIN proveedores    p  ON p.id  = pc.proveedor_id
+    LEFT JOIN lineas_producto lp ON lp.id = pc.linea_id
+    JOIN  sucursales         su ON su.id = pc.sucursal_id
     WHERE pc.id = $1
   `, [id]);
   return rows[0] || null;
@@ -73,18 +81,30 @@ const perteneceAlNegocio = async (id, negocioId) => {
   return rows.length > 0;
 };
 
-const create = async ({ nombre, stock, stock_minimo, unidad_medida, costo_unitario, precio, sucursal_id, proveedor_id }) => {
+// ── linea_id incluido en create ───────────────────────────────────────────
+const create = async ({
+  nombre, stock, stock_minimo, unidad_medida,
+  costo_unitario, precio, sucursal_id, proveedor_id, linea_id,
+}) => {
   const { rows } = await pool.query(`
     INSERT INTO productos_cantidad
-      (nombre, stock, stock_minimo, unidad_medida, costo_unitario, precio, sucursal_id, proveedor_id)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      (nombre, stock, stock_minimo, unidad_medida,
+       costo_unitario, precio, sucursal_id, proveedor_id, linea_id)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
     RETURNING *
-  `, [nombre, stock || 0, stock_minimo || 0, unidad_medida || 'unidad',
-      costo_unitario || null, precio || null, sucursal_id, proveedor_id || null]);
+  `, [
+    nombre, stock || 0, stock_minimo || 0, unidad_medida || 'unidad',
+    costo_unitario || null, precio || null,
+    sucursal_id, proveedor_id || null, linea_id || null,
+  ]);
   return rows[0];
 };
 
-const update = async (id, { nombre, stock_minimo, unidad_medida, costo_unitario, precio, proveedor_id }) => {
+// ── linea_id incluido en update ───────────────────────────────────────────
+const update = async (id, {
+  nombre, stock_minimo, unidad_medida,
+  costo_unitario, precio, proveedor_id, linea_id,
+}) => {
   const { rows } = await pool.query(`
     UPDATE productos_cantidad
     SET nombre         = $1,
@@ -92,17 +112,22 @@ const update = async (id, { nombre, stock_minimo, unidad_medida, costo_unitario,
         unidad_medida  = $3,
         costo_unitario = $4,
         precio         = $5,
-        proveedor_id   = $6
-    WHERE id = $7
+        proveedor_id   = $6,
+        linea_id       = $7
+    WHERE id = $8
     RETURNING *
-  `, [nombre, stock_minimo, unidad_medida, costo_unitario || null, precio || null, proveedor_id || null, id]);
+  `, [
+    nombre, stock_minimo, unidad_medida,
+    costo_unitario || null, precio || null,
+    proveedor_id || null, linea_id || null, id,
+  ]);
   return rows[0] || null;
 };
 
 const ajustarStock = async (id, cantidad, { costo_unitario, proveedor_id, cliente_origen } = {}) => {
-  const sets   = ["stock = stock + $1"];
+  const sets   = ['stock = stock + $1'];
   const params = [cantidad, id];
- 
+
   if (costo_unitario != null) {
     sets.push(`costo_unitario = $${params.length}`);
     params.splice(params.length - 1, 0, costo_unitario);
@@ -115,9 +140,9 @@ const ajustarStock = async (id, cantidad, { costo_unitario, proveedor_id, client
     sets.push(`cliente_origen = $${params.length}`);
     params.splice(params.length - 1, 0, cliente_origen);
   }
- 
+
   const { rows } = await pool.query(
-    `UPDATE productos_cantidad SET ${sets.join(", ")} WHERE id = $${params.length} RETURNING *`,
+    `UPDATE productos_cantidad SET ${sets.join(', ')} WHERE id = $${params.length} RETURNING *`,
     params
   );
   return rows[0] || null;
@@ -130,6 +155,7 @@ const eliminar = async (id) => {
   );
   return rowCount > 0;
 };
+
 const insertarHistorial = async ({
   producto_id, sucursal_id, cantidad, costo_unitario,
   tipo, cliente_origen, cedula_cliente, proveedor_id, notas,
@@ -142,27 +168,28 @@ const insertarHistorial = async ({
   `, [
     producto_id, sucursal_id, cantidad,
     costo_unitario ?? null,
-    tipo || 'ajuste',
+    tipo           || 'ajuste',
     cliente_origen || null,
     cedula_cliente || null,
     proveedor_id   || null,
     notas          || null,
   ]);
 };
+
 const findByIdYNegocio = async (id, negocioId) => {
   const { rows } = await pool.query(`
-    SELECT pc.*, p.nombre AS proveedor_nombre, su.nombre AS sucursal_nombre
+    SELECT pc.*, p.nombre AS proveedor_nombre, su.nombre AS sucursal_nombre,
+           lp.nombre AS linea_nombre
     FROM productos_cantidad pc
-    LEFT JOIN proveedores p  ON p.id  = pc.proveedor_id
-    JOIN  sucursales      su ON su.id = pc.sucursal_id
+    LEFT JOIN proveedores    p  ON p.id  = pc.proveedor_id
+    LEFT JOIN lineas_producto lp ON lp.id = pc.linea_id
+    JOIN  sucursales         su ON su.id = pc.sucursal_id
     WHERE pc.id = $1 AND su.negocio_id = $2
   `, [id, negocioId]);
   return rows[0] || null;
 };
 
- 
 const getHistorialStock = async (negocioId, q) => {
-  // ── Escapar wildcards ──────────────────────────────────────────
   const filtro = q
     ? `%${q.toLowerCase().replace(/[%_\\]/g, '\\$&').slice(0, 100)}%`
     : '%';
@@ -182,10 +209,10 @@ const getHistorialStock = async (negocioId, q) => {
     LEFT JOIN proveedores   p  ON p.id  = h.proveedor_id
     WHERE su.negocio_id = $1
       AND (
-        LOWER(COALESCE(h.cliente_origen,  '')) LIKE $2 ESCAPE '\\'
+        LOWER(COALESCE(h.cliente_origen,   '')) LIKE $2 ESCAPE '\\'
         OR LOWER(COALESCE(h.cedula_cliente,'')) LIKE $2 ESCAPE '\\'
-        OR LOWER(pc.nombre)                    LIKE $2 ESCAPE '\\'
-        OR LOWER(h.tipo)                       LIKE $2 ESCAPE '\\'
+        OR LOWER(pc.nombre)                     LIKE $2 ESCAPE '\\'
+        OR LOWER(h.tipo)                        LIKE $2 ESCAPE '\\'
       )
     ORDER BY h.creado_en DESC
     LIMIT 200

@@ -1,7 +1,17 @@
-const { pool } = require('../../config/db');  // ← mover al tope
-const repo = require('./productosCantidad.repository');
+const { pool } = require('../../config/db');
+const repo     = require('./productosCantidad.repository');
 
-const getProductos = (sucursalId, negocioId) => repo.findAll(sucursalId, negocioId);
+// ── Verifica que linea_id pertenece al negocio ────────────────────────────
+const _verificarLineaNegocio = async (lineaId, negocioId) => {
+  const { rows } = await pool.query(
+    `SELECT id FROM lineas_producto WHERE id = $1 AND negocio_id = $2`,
+    [lineaId, negocioId]
+  );
+  if (!rows.length) throw { status: 403, message: 'La línea no pertenece a este negocio' };
+};
+
+const getProductos = (sucursalId, negocioId, lineaId) =>
+  repo.findAll(sucursalId, negocioId, lineaId);
 
 const getProductoById = async (negocioId, id) => {
   const producto = await repo.findByIdYNegocio(id, negocioId);
@@ -10,18 +20,28 @@ const getProductoById = async (negocioId, id) => {
 };
 
 const crearProducto = async (negocioId, datos) => {
-  // ── pool ya importado al tope — no inline ──
   const { rows } = await pool.query(
     `SELECT id FROM sucursales WHERE id = $1 AND negocio_id = $2 AND activa = true`,
     [datos.sucursal_id, negocioId]
   );
   if (!rows.length) throw { status: 403, message: 'Sucursal no válida para este negocio' };
+
+  // ── linea_id requerido y verificado contra el negocio ──
+  if (!datos.linea_id) throw { status: 400, message: 'La línea es requerida' };
+  await _verificarLineaNegocio(datos.linea_id, negocioId);
+
   return repo.create(datos);
 };
 
 const actualizarProducto = async (negocioId, id, datos) => {
   const producto = await repo.findByIdYNegocio(id, negocioId);
   if (!producto) throw { status: 404, message: 'Producto no encontrado' };
+
+  // ── Si viene linea_id verificar que pertenece al negocio ──
+  if (datos.linea_id) {
+    await _verificarLineaNegocio(datos.linea_id, negocioId);
+  }
+
   const actualizado = await repo.update(id, datos);
   if (!actualizado) throw { status: 404, message: 'Producto no encontrado' };
   return actualizado;

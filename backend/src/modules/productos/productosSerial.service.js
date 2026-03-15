@@ -1,13 +1,22 @@
 const { pool } = require('../../config/db');
-const repo = require('./productosSerial.repository');
+const repo     = require('./productosSerial.repository');
 
 const _fechaHoy = () => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 
-const getProductos = (sucursalId, negocioId) =>
-  repo.findAll(sucursalId, negocioId);
+// ── Verifica que linea_id pertenece al negocio ────────────────────────────
+const _verificarLineaNegocio = async (lineaId, negocioId) => {
+  const { rows } = await pool.query(
+    `SELECT id FROM lineas_producto WHERE id = $1 AND negocio_id = $2`,
+    [lineaId, negocioId]
+  );
+  if (!rows.length) throw { status: 403, message: 'La línea no pertenece a este negocio' };
+};
+
+const getProductos = (sucursalId, negocioId, lineaId) =>
+  repo.findAll(sucursalId, negocioId, lineaId);
 
 const getProductoById = async (negocioId, id) => {
   const producto = await repo.findByIdYNegocio(id, negocioId);
@@ -21,12 +30,23 @@ const crearProducto = async (negocioId, datos) => {
     [datos.sucursal_id, negocioId]
   );
   if (!rows.length) throw { status: 403, message: 'Sucursal no válida para este negocio' };
+
+  // ── linea_id requerido y verificado contra el negocio ──
+  if (!datos.linea_id) throw { status: 400, message: 'La línea es requerida' };
+  await _verificarLineaNegocio(datos.linea_id, negocioId);
+
   return repo.create(datos);
 };
 
 const actualizarProducto = async (negocioId, id, datos) => {
   const producto = await repo.findByIdYNegocio(id, negocioId);
   if (!producto) throw { status: 404, message: 'Producto no encontrado' };
+
+  // ── Si viene linea_id verificar que pertenece al negocio ──
+  if (datos.linea_id) {
+    await _verificarLineaNegocio(datos.linea_id, negocioId);
+  }
+
   const actualizado = await repo.update(id, datos);
   if (!actualizado) throw { status: 404, message: 'Producto no encontrado' };
   return actualizado;
@@ -67,7 +87,6 @@ const agregarSerial = async (
 };
 
 const actualizarSerial = async (negocioId, serialId, { imei, costo_compra, precio }) => {
-  // ── serial verificado contra negocio — su producto_id es de confianza ──
   const serial = await repo.findSerialByIdYNegocio(serialId, negocioId);
   if (!serial) throw { status: 404, message: 'Serial no encontrado' };
 
@@ -75,7 +94,6 @@ const actualizarSerial = async (negocioId, serialId, { imei, costo_compra, preci
   if (!actualizado) throw { status: 404, message: 'Serial no encontrado' };
 
   if (precio !== undefined) {
-    // ── usar producto_id del serial verificado, no del body ──
     await repo.updatePrecio(serial.producto_id, precio);
   }
   return actualizado;
@@ -84,7 +102,6 @@ const actualizarSerial = async (negocioId, serialId, { imei, costo_compra, preci
 const eliminarSerial = async (negocioId, serialId) => {
   const serial = await repo.findSerialByIdYNegocio(serialId, negocioId);
   if (!serial) throw { status: 404, message: 'Serial no encontrado' };
-
   const eliminado = await repo.eliminarSerial(serialId);
   if (!eliminado) throw { status: 404, message: 'Serial no encontrado' };
 };

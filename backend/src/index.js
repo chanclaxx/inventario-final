@@ -64,6 +64,7 @@ app.use('/api/config',             protegida, require('./modules/config/config.r
 app.use('/api/importacion',        protegida, require('./modules/importacion/importacion.routes'));
 app.use('/api/inventario',         protegida, require('./modules/inventario/inventario.export.routes'));
 app.use('/api/sucursales',         protegida, require('./modules/sucursales/sucursales.routes'));
+app.use('/api/lineas', protegida, require('./modules/lineas/lineas.routes'));
 
 // ── Rutas de superadmin (sin protegida) ───────────────
 app.use('/api/superadmin', require('./modules/superadmin/superadmin.routes'));

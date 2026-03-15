@@ -1,24 +1,25 @@
 const service = require('./productosSerial.service');
 
-// Solo esta función cambia — el resto del controller queda idéntico
 const getProductos = async (req, res, next) => {
   try {
     const sucursalId = req.todasSucursales ? null : req.sucursal_id;
-    const data = await service.getProductos(sucursalId, req.user.negocio_id);
+    // ── lineaId opcional desde query param ──
+    const lineaId = req.query.linea_id ? Number(req.query.linea_id) : null;
+    const data = await service.getProductos(sucursalId, req.user.negocio_id, lineaId);
     res.json({ ok: true, data });
   } catch (err) { next(err); }
 };
 
 const getProductoById = async (req, res, next) => {
   try {
-    const data = await service.getProductoById(req.user.negocio_id, req.params.id); // ← agregar negocio_id
+    const data = await service.getProductoById(req.user.negocio_id, req.params.id);
     res.json({ ok: true, data });
   } catch (err) { next(err); }
 };
 
 const crearProducto = async (req, res, next) => {
   try {
-    const data = await service.crearProducto(req.user.negocio_id, { // ← agregar negocio_id
+    const data = await service.crearProducto(req.user.negocio_id, {
       ...req.body,
       sucursal_id: req.sucursal_id,
     });
@@ -33,11 +34,10 @@ const actualizarProducto = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-
 const getSeriales = async (req, res, next) => {
   try {
     const vendido = req.query.vendido !== undefined ? req.query.vendido === 'true' : null;
-    const data = await service.getSeriales(req.user.negocio_id, req.params.id, vendido); // ← agregar negocio_id
+    const data = await service.getSeriales(req.user.negocio_id, req.params.id, vendido);
     res.json({ ok: true, data });
   } catch (err) { next(err); }
 };
@@ -51,14 +51,14 @@ const agregarSerial = async (req, res, next) => {
 
 const actualizarSerial = async (req, res, next) => {
   try {
-    const data = await service.actualizarSerial(req.user.negocio_id, req.params.id, req.body); // ← agregar negocio_id
+    const data = await service.actualizarSerial(req.user.negocio_id, req.params.id, req.body);
     res.json({ ok: true, data, message: 'Serial actualizado correctamente' });
   } catch (err) { next(err); }
 };
 
 const eliminarSerial = async (req, res, next) => {
   try {
-    await service.eliminarSerial(req.user.negocio_id, req.params.id); // ← agregar negocio_id
+    await service.eliminarSerial(req.user.negocio_id, req.params.id);
     res.json({ ok: true, message: 'Serial eliminado correctamente' });
   } catch (err) { next(err); }
 };
@@ -73,6 +73,7 @@ const verificarImei = async (req, res, next) => {
     res.json({ ok: true, data });
   } catch (err) { next(err); }
 };
+
 const getComprasCliente = async (req, res, next) => {
   try {
     const q    = req.query.q || '';
@@ -84,5 +85,5 @@ const getComprasCliente = async (req, res, next) => {
 module.exports = {
   getProductos, getProductoById, crearProducto, actualizarProducto,
   getSeriales, agregarSerial, actualizarSerial, eliminarSerial,
-  verificarImei,getComprasCliente
+  verificarImei, getComprasCliente,
 };

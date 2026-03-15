@@ -1,57 +1,49 @@
 const { pool } = require('../../config/db');
 
-// ── Productos ─────────────────────────────────────────────────────────────────
-
-/**
- * Retorna productos con conteo de seriales disponibles.
- * - sucursalId = número  → filtra por sucursal
- * - sucursalId = null    → todas las sucursales del negocio (vista global)
- */
-const findAll = async (sucursalId, negocioId) => {
+// ── linea_id incluido en findAll con filtro opcional ─────────────────────
+const findAll = async (sucursalId, negocioId, lineaId) => {
   const { rows } = await pool.query(`
     SELECT
-      ps.id,
-      ps.nombre,
-      ps.marca,
-      ps.modelo,
-      ps.precio,
-      ps.sucursal_id,
-      su.nombre AS sucursal_nombre,
-      ps.proveedor_id,
+      ps.id, ps.nombre, ps.marca, ps.modelo, ps.precio,
+      ps.sucursal_id, ps.proveedor_id, ps.linea_id,
+      su.nombre  AS sucursal_nombre,
+      lp.nombre  AS linea_nombre,
       COUNT(s.id) FILTER (WHERE s.vendido = false AND s.prestado = false) AS disponibles
     FROM productos_serial ps
-    JOIN sucursales su ON su.id = ps.sucursal_id
-    LEFT JOIN seriales s ON s.producto_id = ps.id
+    JOIN  sucursales         su ON su.id  = ps.sucursal_id
+    LEFT JOIN lineas_producto lp ON lp.id = ps.linea_id
+    LEFT JOIN seriales        s  ON s.producto_id = ps.id
     WHERE su.negocio_id = $1
       AND ($2::int IS NULL OR ps.sucursal_id = $2)
-    GROUP BY ps.id, su.nombre
+      AND ($3::int IS NULL OR ps.linea_id    = $3)
+    GROUP BY ps.id, su.nombre, lp.nombre
     ORDER BY ps.nombre ASC
-  `, [negocioId, sucursalId ?? null]);
+  `, [negocioId, sucursalId ?? null, lineaId ?? null]);
   return rows;
 };
 
 const findById = async (id) => {
-  const { rows } = await pool.query(
-    `SELECT ps.*, su.nombre AS sucursal_nombre
-     FROM productos_serial ps
-     JOIN sucursales su ON su.id = ps.sucursal_id
-     WHERE ps.id = $1`,
-    [id]
-  );
+  const { rows } = await pool.query(`
+    SELECT ps.*, su.nombre AS sucursal_nombre, lp.nombre AS linea_nombre
+    FROM productos_serial ps
+    JOIN  sucursales         su ON su.id  = ps.sucursal_id
+    LEFT JOIN lineas_producto lp ON lp.id = ps.linea_id
+    WHERE ps.id = $1
+  `, [id]);
   return rows[0] || null;
 };
 
 const findByIdYNegocio = async (id, negocioId) => {
   const { rows } = await pool.query(`
-    SELECT ps.*, su.nombre AS sucursal_nombre
+    SELECT ps.*, su.nombre AS sucursal_nombre, lp.nombre AS linea_nombre
     FROM productos_serial ps
-    JOIN sucursales su ON su.id = ps.sucursal_id
+    JOIN  sucursales         su ON su.id  = ps.sucursal_id
+    LEFT JOIN lineas_producto lp ON lp.id = ps.linea_id
     WHERE ps.id = $1 AND su.negocio_id = $2
   `, [id, negocioId]);
   return rows[0] || null;
 };
 
-// Verifica que un serial pertenece al negocio via su producto padre
 const findSerialByIdYNegocio = async (serialId, negocioId) => {
   const { rows } = await pool.query(`
     SELECT s.*, ps.sucursal_id, su.negocio_id
@@ -72,15 +64,17 @@ const perteneceAlNegocio = async (productoId, negocioId) => {
   return rows.length > 0;
 };
 
-const create = async ({ nombre, marca, modelo, precio, sucursal_id, proveedor_id }) => {
+// ── linea_id incluido en create ───────────────────────────────────────────
+const create = async ({ nombre, marca, modelo, precio, sucursal_id, proveedor_id, linea_id }) => {
   const { rows } = await pool.query(`
-    INSERT INTO productos_serial(nombre, marca, modelo, precio, sucursal_id, proveedor_id)
-    VALUES ($1, $2, $3, $4, $5, $6)
+    INSERT INTO productos_serial(nombre, marca, modelo, precio, sucursal_id, proveedor_id, linea_id)
+    VALUES ($1, $2, $3, $4, $5, $6, $7)
     RETURNING *
-  `, [nombre, marca || null, modelo || null, precio, sucursal_id, proveedor_id || null]);
+  `, [nombre, marca || null, modelo || null, precio, sucursal_id, proveedor_id || null, linea_id || null]);
   return rows[0];
 };
 
+// ── linea_id incluido en update ───────────────────────────────────────────
 const update = async (id, datos) => {
   const { rows } = await pool.query(`
     UPDATE productos_serial
@@ -88,10 +82,11 @@ const update = async (id, datos) => {
         marca        = COALESCE($2, marca),
         modelo       = COALESCE($3, modelo),
         precio       = COALESCE($4, precio),
-        proveedor_id = COALESCE($5, proveedor_id)
-    WHERE id = $6
+        proveedor_id = COALESCE($5, proveedor_id),
+        linea_id     = $6
+    WHERE id = $7
     RETURNING *
-  `, [datos.nombre, datos.marca, datos.modelo, datos.precio, datos.proveedor_id, id]);
+  `, [datos.nombre, datos.marca, datos.modelo, datos.precio, datos.proveedor_id, datos.linea_id || null, id]);
   return rows[0] || null;
 };
 
@@ -101,8 +96,6 @@ const updatePrecio = async (productoId, precio) => {
     [precio, productoId]
   );
 };
-
-// ── Seriales ──────────────────────────────────────────────────────────────────
 
 const getSeriales = async (productoId, vendido) => {
   const { rows } = await pool.query(`
@@ -126,30 +119,25 @@ const findSerialByIMEI = async (imei) => {
 const findSerialByIMEIEnNegocio = async (imei, negocioId) => {
   const { rows } = await pool.query(`
     SELECT
-      s.id,
-      s.imei,
-      s.vendido,
-      s.prestado,
-      s.fecha_entrada,
-      s.fecha_salida,
-      s.cliente_origen,
+      s.id, s.imei, s.vendido, s.prestado,
+      s.fecha_entrada, s.fecha_salida, s.cliente_origen,
       ps.id     AS producto_id,
       ps.nombre AS producto_nombre,
-      ps.marca,
-      ps.modelo,
+      ps.marca,  ps.modelo,
       su.id     AS sucursal_id,
       su.nombre AS sucursal_nombre
     FROM seriales s
     JOIN productos_serial ps ON ps.id = s.producto_id
     JOIN sucursales        su ON su.id = ps.sucursal_id
-    WHERE s.imei = $1
-      AND su.negocio_id = $2
+    WHERE s.imei = $1 AND su.negocio_id = $2
     LIMIT 1
   `, [imei, negocioId]);
   return rows[0] || null;
 };
 
-const insertarSerial = async ({ producto_id, imei, fecha_entrada, costo_compra, cliente_origen, proveedor_id }) => {
+const insertarSerial = async ({
+  producto_id, imei, fecha_entrada, costo_compra, cliente_origen, proveedor_id,
+}) => {
   const { rows } = await pool.query(`
     INSERT INTO seriales(producto_id, imei, fecha_entrada, costo_compra, cliente_origen, proveedor_id)
     VALUES ($1, $2, $3, $4, $5, $6)
@@ -191,9 +179,6 @@ const eliminarSerial = async (serialId) => {
   );
   return rows[0] || null;
 };
-
-// ─── productosSerial.repository.js ───────────────────────────────────────────
-// REEMPLAZAR findComprasCliente con esta versión corregida
 
 const findComprasCliente = async (negocioId, q) => {
   const filtro = q
@@ -239,10 +224,10 @@ const findComprasCliente = async (negocioId, q) => {
     JOIN sucursales su ON su.id = f.sucursal_id
     WHERE su.negocio_id = $1
       AND (
-        LOWER(f.nombre_cliente)        LIKE $2 ESCAPE '\\'
-        OR LOWER(f.cedula)             LIKE $2 ESCAPE '\\'
-        OR LOWER(r.nombre_producto)    LIKE $2 ESCAPE '\\'
-        OR LOWER(COALESCE(r.imei,''))  LIKE $2 ESCAPE '\\'
+        LOWER(f.nombre_cliente)       LIKE $2 ESCAPE '\\'
+        OR LOWER(f.cedula)            LIKE $2 ESCAPE '\\'
+        OR LOWER(r.nombre_producto)   LIKE $2 ESCAPE '\\'
+        OR LOWER(COALESCE(r.imei,'')) LIKE $2 ESCAPE '\\'
       )
     ORDER BY f.fecha DESC
   `, [negocioId, filtro]);
@@ -252,8 +237,7 @@ const findComprasCliente = async (negocioId, q) => {
 
 module.exports = {
   findAll, findById, findByIdYNegocio,
-  perteneceAlNegocio,
-  findSerialByIdYNegocio,
+  perteneceAlNegocio, findSerialByIdYNegocio,
   create, update, updatePrecio,
   getSeriales, findSerialByIMEI, findSerialByIMEIEnNegocio,
   insertarSerial, reactivarSerial, actualizarSerial, eliminarSerial,
