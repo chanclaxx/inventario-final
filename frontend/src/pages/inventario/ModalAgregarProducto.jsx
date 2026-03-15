@@ -123,7 +123,7 @@ function ModalYaEnInventario({ open, seriales, onCerrar }) {
   );
 }
 
-// ─── Panel info de compra por proveedor (solo admin) ──────────────────────────
+// ─── Panel info de compra por proveedor (solo admin_negocio) ──────────────────
 function InfoCompra({ proveedorId, setProveedorId, costoCompra, setCostoCompra, modoPago, setModoPago }) {
   const queryClient = useQueryClient();
 
@@ -415,13 +415,13 @@ function PasoTipo({ onSelect }) {
           className="flex-1 flex flex-col items-center gap-2 p-4 bg-gray-50 border border-gray-200 rounded-2xl hover:bg-blue-50 hover:border-blue-300 transition-all">
           <Package size={24} className="text-blue-600" />
           <span className="text-sm font-medium text-gray-700">Con Serial / IMEI</span>
-          <span className="text-xs text-gray-400 text-center">Proveedor · Celulares, tablets</span>
+          <span className="text-xs text-gray-400 text-center">Celulares, tablets</span>
         </button>
         <button onClick={() => onSelect('cantidad')}
           className="flex-1 flex flex-col items-center gap-2 p-4 bg-gray-50 border border-gray-200 rounded-2xl hover:bg-green-50 hover:border-green-300 transition-all">
           <ShoppingBag size={24} className="text-green-600" />
           <span className="text-sm font-medium text-gray-700">Por Cantidad</span>
-          <span className="text-xs text-gray-400 text-center">Proveedor · Accesorios</span>
+          <span className="text-xs text-gray-400 text-center">Accesorios</span>
         </button>
       </div>
       <button onClick={() => onSelect('cliente')}
@@ -671,7 +671,6 @@ function PasoCompraCliente({ sucursalKey, sucursalLista, onExito, onDuplicadosEn
                     <Input placeholder="Modelo" value={nuevaLinea.modelo} onChange={(e) => setNuevaLinea({ ...nuevaLinea, modelo: e.target.value })} />
                   </div>
                   <Input type="number" placeholder="Precio de venta" value={nuevaLinea.precio} onChange={(e) => setNuevaLinea({ ...nuevaLinea, precio: e.target.value })} />
-                  {/* ── NUEVO: selector de línea ── */}
                   <SelectLinea value={nuevaLinea.linea_id} onChange={(val) => setNuevaLinea({ ...nuevaLinea, linea_id: val })} />
                   <div className="flex gap-2">
                     <Button variant="secondary" size="sm" className="flex-1" onClick={() => setCreandoLinea(false)}>Cancelar</Button>
@@ -730,7 +729,6 @@ function PasoCompraCliente({ sucursalKey, sucursalLista, onExito, onDuplicadosEn
                     <Input type="number" placeholder="Precio compra" value={nuevoProducto.costo_unitario} onChange={(e) => setNuevoProducto({ ...nuevoProducto, costo_unitario: e.target.value })} />
                     <Input type="number" placeholder="Precio venta" value={nuevoProducto.precio} onChange={(e) => setNuevoProducto({ ...nuevoProducto, precio: e.target.value })} />
                   </div>
-                  {/* ── NUEVO: selector de línea ── */}
                   <SelectLinea value={nuevoProducto.linea_id} onChange={(val) => setNuevoProducto({ ...nuevoProducto, linea_id: val })} />
                   <div className="flex gap-2">
                     <Button variant="secondary" size="sm" className="flex-1" onClick={() => setCreandoProducto(false)}>Cancelar</Button>
@@ -751,7 +749,7 @@ function PasoCompraCliente({ sucursalKey, sucursalLista, onExito, onDuplicadosEn
         </div>
       )}
 
-      {/* 4. Precio pagado al cliente (solo admin) */}
+      {/* 4. Precio pagado al cliente (solo admin_negocio) */}
       {esAdmin && hayProducto && (
         <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-3 flex flex-col gap-1.5">
           <div className="flex items-center gap-1.5"><CheckCircle size={13} className="text-emerald-600" /><p className="text-xs font-semibold text-emerald-700">Precio pagado al cliente</p></div>
@@ -778,9 +776,12 @@ function PasoCompraCliente({ sucursalKey, sucursalLista, onExito, onDuplicadosEn
 
 // ─── Paso Serial (proveedor) ───────────────────────────────────────────────────
 function PasoSerial({ sucursalKey, onExito, onDuplicadosEncontrados }) {
-  const queryClient    = useQueryClient();
+  const queryClient        = useQueryClient();
   const { esAdminNegocio } = useAuth();
-  const esAdmin        = esAdminNegocio();
+  const esAdmin            = esAdminNegocio();
+  // ── CAMBIO: supervisores y vendedores no ven información de proveedor ────────
+  const puedeVerProveedor  = esAdmin;
+
   const [busqueda,     setBusqueda]     = useState('');
   const [lineaSel,     setLineaSel]     = useState(null);
   const [creandoLinea, setCreandoLinea] = useState(false);
@@ -800,7 +801,12 @@ function PasoSerial({ sucursalKey, onExito, onDuplicadosEncontrados }) {
   });
   const productos = normalizarProductos(productosData).filter((p) => p.nombre.toLowerCase().includes(busqueda.toLowerCase()));
 
-  const handleSeleccionarLinea = (producto) => { setLineaSel(producto); setError(''); if (esAdmin && producto.proveedor_id) setProveedorId(String(producto.proveedor_id)); };
+  // ── CAMBIO: solo pre-carga proveedor si el rol lo permite ────────────────────
+  const handleSeleccionarLinea = (producto) => {
+    setLineaSel(producto);
+    setError('');
+    if (puedeVerProveedor && producto.proveedor_id) setProveedorId(String(producto.proveedor_id));
+  };
 
   const mutCrearLinea = useMutation({
     mutationFn: () => crearProductoSerial({
@@ -823,12 +829,13 @@ function PasoSerial({ sucursalKey, onExito, onDuplicadosEncontrados }) {
   const mutConfirmar = useMutation({
     mutationFn: async () => {
       const imeisValidos = imeis.filter((i) => i.trim());
-      const costo = esAdmin && costoCompra ? Number(costoCompra) : null;
-      if (proveedorId && modoPago) {
+      // ── CAMBIO: costo y proveedor solo aplican para admin_negocio ────────────
+      const costo = puedeVerProveedor && costoCompra ? Number(costoCompra) : null;
+      if (puedeVerProveedor && proveedorId && modoPago) {
         await crearCompra(buildPayloadCompra({ proveedorId, monto: costo ? costo * imeisValidos.length : 0, modoPago, lineas: imeisValidos.map((imei) => ({ nombre_producto: lineaSel.nombre, imei: imei.trim(), cantidad: 1, precio_unitario: costo || 0, producto_id: lineaSel.id, reactivar_serial_id: reactivarMapRef.current[imei.trim()] || null })) }));
       } else {
         await Promise.all(imeisValidos.map((imei) => agregarSerial(lineaSel.id, { imei: imei.trim(), fecha_entrada: new Date().toISOString().split('T')[0], costo_compra: costo, reactivar_serial_id: reactivarMapRef.current[imei.trim()] || null })));
-        if (esAdmin && proveedorId && !lineaSel.proveedor_id) await api.patch(`/productos/serial/${lineaSel.id}`, { proveedor_id: Number(proveedorId) });
+        if (puedeVerProveedor && proveedorId && !lineaSel.proveedor_id) await api.patch(`/productos/serial/${lineaSel.id}`, { proveedor_id: Number(proveedorId) });
       }
     },
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['productos-serial'], exact: false }); queryClient.invalidateQueries({ queryKey: ['compras'], exact: false }); queryClient.invalidateQueries({ queryKey: ['acreedores'], exact: false }); onExito(); },
@@ -855,7 +862,8 @@ function PasoSerial({ sucursalKey, onExito, onDuplicadosEncontrados }) {
     setError('');
     if (!lineaSel) return setError('Selecciona una linea de producto');
     if (imeisValidos === 0) return setError('Ingresa al menos un IMEI');
-    if (proveedorId && !modoPago) return setError('Selecciona si fue pagado o a credito');
+    // ── CAMBIO: validación de modo pago solo aplica si puede ver proveedor ─────
+    if (puedeVerProveedor && proveedorId && !modoPago) return setError('Selecciona si fue pagado o a credito');
     const imeisLimpios = imeis.filter((i) => i.trim());
     setVerificando(true);
     const encontrados = await verificarImeis(imeisLimpios);
@@ -895,7 +903,6 @@ function PasoSerial({ sucursalKey, onExito, onDuplicadosEncontrados }) {
                 <Input id="sl-modelo" placeholder="Modelo" value={nuevaLinea.modelo} onChange={(e) => setNuevaLinea({ ...nuevaLinea, modelo: e.target.value })} onKeyDown={(e) => e.key === 'Enter' && document.getElementById('sl-precio')?.focus()} />
               </div>
               <Input id="sl-precio" type="number" placeholder="Precio de venta" value={nuevaLinea.precio} onChange={(e) => setNuevaLinea({ ...nuevaLinea, precio: e.target.value })} />
-              {/* ── NUEVO: selector de línea ── */}
               <SelectLinea value={nuevaLinea.linea_id} onChange={(val) => setNuevaLinea({ ...nuevaLinea, linea_id: val })} />
               <div className="flex gap-2">
                 <Button variant="secondary" size="sm" className="flex-1" onClick={() => setCreandoLinea(false)}>Cancelar</Button>
@@ -923,7 +930,17 @@ function PasoSerial({ sucursalKey, onExito, onDuplicadosEncontrados }) {
             ))}
           </div>
           <button onClick={() => setImeis((prev) => [...prev, ''])} className="text-xs text-blue-500 hover:text-blue-700 font-medium text-left">+ Agregar campo</button>
-          {esAdmin && <InfoCompra proveedorId={proveedorId} setProveedorId={setProveedorId} costoCompra={costoCompra} setCostoCompra={setCostoCompra} modoPago={modoPago} setModoPago={setModoPago} />}
+          {/* ── CAMBIO: InfoCompra solo visible para admin_negocio ───────────── */}
+          {puedeVerProveedor && (
+            <InfoCompra
+              proveedorId={proveedorId}
+              setProveedorId={setProveedorId}
+              costoCompra={costoCompra}
+              setCostoCompra={setCostoCompra}
+              modoPago={modoPago}
+              setModoPago={setModoPago}
+            />
+          )}
         </div>
       )}
       {error && <p className="text-sm text-red-500">{error}</p>}
@@ -934,9 +951,12 @@ function PasoSerial({ sucursalKey, onExito, onDuplicadosEncontrados }) {
 
 // ─── Paso Cantidad (proveedor) ─────────────────────────────────────────────────
 function PasoCantidad({ sucursalKey, onExito }) {
-  const queryClient    = useQueryClient();
+  const queryClient        = useQueryClient();
   const { esAdminNegocio } = useAuth();
-  const esAdmin        = esAdminNegocio();
+  const esAdmin            = esAdminNegocio();
+  // ── CAMBIO: supervisores y vendedores no ven información de proveedor ────────
+  const puedeVerProveedor  = esAdmin;
+
   const [busqueda,      setBusqueda]      = useState('');
   const [productoSel,   setProductoSel]   = useState(null);
   const [creandoNuevo,  setCreandoNuevo]  = useState(false);
@@ -953,7 +973,15 @@ function PasoCantidad({ sucursalKey, onExito }) {
   });
   const productos = normalizarProductos(productosData).filter((p) => p.nombre.toLowerCase().includes(busqueda.toLowerCase()));
 
-  const handleSeleccionarProducto = (producto) => { setProductoSel(producto); setError(''); if (esAdmin) { if (producto.proveedor_id) setProveedorId(String(producto.proveedor_id)); if (producto.costo_unitario) setCostoCompra(String(producto.costo_unitario)); } };
+  // ── CAMBIO: solo pre-carga proveedor/costo si el rol lo permite ──────────────
+  const handleSeleccionarProducto = (producto) => {
+    setProductoSel(producto);
+    setError('');
+    if (puedeVerProveedor) {
+      if (producto.proveedor_id) setProveedorId(String(producto.proveedor_id));
+      if (producto.costo_unitario) setCostoCompra(String(producto.costo_unitario));
+    }
+  };
 
   const mutCrear = useMutation({
     mutationFn: () => crearProductoCantidad({
@@ -971,11 +999,12 @@ function PasoCantidad({ sucursalKey, onExito }) {
   const mutConfirmar = useMutation({
     mutationFn: async () => {
       const cantidadNum = Number(cantidad);
-      const costo = esAdmin ? (costoCompra ? Number(costoCompra) : null) : (productoSel?.costo_unitario || null);
-      if (proveedorId && modoPago) {
+      // ── CAMBIO: costo y proveedor solo aplican para admin_negocio ────────────
+      const costo = puedeVerProveedor ? (costoCompra ? Number(costoCompra) : null) : null;
+      if (puedeVerProveedor && proveedorId && modoPago) {
         await crearCompra(buildPayloadCompra({ proveedorId, monto: costo ? costo * cantidadNum : 0, modoPago, lineas: [{ nombre_producto: productoSel.nombre, cantidad: cantidadNum, precio_unitario: costo || 0, producto_id: productoSel.id }] }));
       } else {
-        await ajustarStockCantidad(productoSel.id, { cantidad: cantidadNum, costo_unitario: costo, proveedor_id: esAdmin && proveedorId ? Number(proveedorId) : undefined });
+        await ajustarStockCantidad(productoSel.id, { cantidad: cantidadNum, costo_unitario: costo, proveedor_id: puedeVerProveedor && proveedorId ? Number(proveedorId) : undefined });
       }
     },
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['productos-cantidad'], exact: false }); queryClient.invalidateQueries({ queryKey: ['compras'], exact: false }); queryClient.invalidateQueries({ queryKey: ['acreedores'], exact: false }); onExito(); },
@@ -986,7 +1015,8 @@ function PasoCantidad({ sucursalKey, onExito }) {
     setError('');
     if (!productoSel) return setError('Selecciona un producto');
     if (!cantidad || cantidad < 1) return setError('La cantidad debe ser mayor a 0');
-    if (proveedorId && !modoPago) return setError('Selecciona si fue pagado o a credito');
+    // ── CAMBIO: validación de modo pago solo aplica si puede ver proveedor ─────
+    if (puedeVerProveedor && proveedorId && !modoPago) return setError('Selecciona si fue pagado o a credito');
     mutConfirmar.mutate();
   };
 
@@ -1019,7 +1049,6 @@ function PasoCantidad({ sucursalKey, onExito }) {
                 <Input type="number" placeholder="Precio compra" value={nuevoProducto.costo_unitario} onChange={(e) => setNuevoProducto({ ...nuevoProducto, costo_unitario: e.target.value })} />
                 <Input type="number" placeholder="Precio venta" value={nuevoProducto.precio} onChange={(e) => setNuevoProducto({ ...nuevoProducto, precio: e.target.value })} />
               </div>
-              {/* ── NUEVO: selector de línea ── */}
               <SelectLinea value={nuevoProducto.linea_id} onChange={(val) => setNuevoProducto({ ...nuevoProducto, linea_id: val })} />
               <div className="flex gap-2">
                 <Button variant="secondary" size="sm" className="flex-1" onClick={() => setCreandoNuevo(false)}>Cancelar</Button>
@@ -1035,7 +1064,17 @@ function PasoCantidad({ sucursalKey, onExito }) {
             <button onClick={() => { setProductoSel(null); setCantidad(1); setCostoCompra(''); setProveedorId(''); setModoPago(null); }} className="text-xs text-green-400 hover:text-green-600 underline">Cambiar</button>
           </div>
           <Input label="Cantidad a agregar" type="number" autoFocus value={cantidad} onChange={(e) => setCantidad(e.target.value)} onWheel={(e) => e.target.blur()} onKeyDown={(e) => e.key === 'Enter' && handleConfirmar()} />
-          {esAdmin && <InfoCompra proveedorId={proveedorId} setProveedorId={setProveedorId} costoCompra={costoCompra} setCostoCompra={setCostoCompra} modoPago={modoPago} setModoPago={setModoPago} />}
+          {/* ── CAMBIO: InfoCompra solo visible para admin_negocio ───────────── */}
+          {puedeVerProveedor && (
+            <InfoCompra
+              proveedorId={proveedorId}
+              setProveedorId={setProveedorId}
+              costoCompra={costoCompra}
+              setCostoCompra={setCostoCompra}
+              modoPago={modoPago}
+              setModoPago={setModoPago}
+            />
+          )}
         </div>
       )}
       {error && <p className="text-sm text-red-500">{error}</p>}
