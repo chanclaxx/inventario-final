@@ -206,12 +206,18 @@ function GarantiasConfig() {
   const queryClient               = useQueryClient();
   const [modalOpen, setModalOpen] = useState(false);
   const [editando,  setEditando]  = useState(null);
-  const [form,      setForm]      = useState({ titulo: '', texto: '', orden: 0 });
+  const [form,      setForm]      = useState({ titulo: '', texto: '', orden: 0, lineas: [] });
   const [error,     setError]     = useState('');
 
   const { data: garantias = [] } = useQuery({
     queryKey: ['garantias'],
     queryFn:  () => getGarantias().then((r) => r.data.data),
+  });
+
+  // ── Líneas disponibles para asignar ──
+  const { data: lineas = [] } = useQuery({
+    queryKey: ['lineas'],
+    queryFn:  () => getLineas().then((r) => r.data.data),
   });
 
   const mutCrear = useMutation({
@@ -239,24 +245,47 @@ function GarantiasConfig() {
 
   const abrirNuevo = () => {
     setEditando(null);
-    setForm({ titulo: '', texto: '', orden: garantias.length });
+    setForm({ titulo: '', texto: '', orden: garantias.length, lineas: [] });
     setError('');
     setModalOpen(true);
   };
 
   const abrirEditar = (g) => {
     setEditando(g);
-    setForm({ titulo: g.titulo, texto: g.texto, orden: g.orden });
+    setForm({
+      titulo: g.titulo,
+      texto:  g.texto,
+      orden:  g.orden,
+      lineas: g.lineas || [],   // ← array de linea_id que ya vienen del backend
+    });
     setError('');
     setModalOpen(true);
   };
 
-  const cerrarModal = () => { setModalOpen(false); setEditando(null); setError(''); };
+  const cerrarModal = () => {
+    setModalOpen(false);
+    setEditando(null);
+    setError('');
+  };
 
   const handleGuardar = () => {
     if (!form.titulo.trim()) return setError('El título es requerido');
     if (!form.texto.trim())  return setError('El texto es requerido');
+    if (!form.lineas.length) return setError('Selecciona al menos una línea');
     editando ? mutEditar.mutate() : mutCrear.mutate();
+  };
+
+  // ── Toggle de línea en el checkbox ──
+  const toggleLinea = (lineaId) => {
+    setForm((f) => {
+      const yaEsta = f.lineas.includes(lineaId);
+      return {
+        ...f,
+        lineas: yaEsta
+          ? f.lineas.filter((id) => id !== lineaId)
+          : [...f.lineas, lineaId],
+      };
+    });
   };
 
   return (
@@ -276,31 +305,53 @@ function GarantiasConfig() {
         <p className="text-sm text-gray-400 text-center py-4">Sin garantías configuradas</p>
       ) : (
         <div className="flex flex-col gap-2">
-          {[...garantias].sort((a, b) => a.orden - b.orden).map((g) => (
-            <div key={g.id} className="flex items-start gap-3 p-3 bg-gray-50 rounded-xl">
-              <GripVertical size={16} className="text-gray-300 mt-0.5 flex-shrink-0" />
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-gray-800">{g.titulo}</p>
-                <p className="text-xs text-gray-400 mt-0.5 line-clamp-2">{g.texto}</p>
+          {[...garantias].sort((a, b) => a.orden - b.orden).map((g) => {
+            // Nombres de las líneas asignadas
+            const lineasAsignadas = lineas
+              .filter((l) => g.lineas?.includes(l.id))
+              .map((l) => l.nombre);
+
+            return (
+              <div key={g.id} className="flex items-start gap-3 p-3 bg-gray-50 rounded-xl">
+                <GripVertical size={16} className="text-gray-300 mt-0.5 flex-shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-gray-800">{g.titulo}</p>
+                  <p className="text-xs text-gray-400 mt-0.5 line-clamp-2">{g.texto}</p>
+                  {/* Líneas asignadas como chips */}
+                  {lineasAsignadas.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-1.5">
+                      {lineasAsignadas.map((nombre) => (
+                        <span key={nombre}
+                          className="text-xs bg-blue-50 text-blue-600 border border-blue-100
+                            px-2 py-0.5 rounded-full">
+                          {nombre}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {!lineasAsignadas.length && (
+                    <p className="text-xs text-yellow-500 mt-1">Sin líneas asignadas</p>
+                  )}
+                </div>
+                <div className="flex gap-1 flex-shrink-0">
+                  <button
+                    onClick={() => abrirEditar(g)}
+                    className="p-1.5 rounded-lg hover:bg-gray-200 text-gray-400
+                      hover:text-gray-600 transition-colors"
+                  >
+                    <Settings size={14} />
+                  </button>
+                  <button
+                    onClick={() => mutEliminar.mutate(g.id)}
+                    className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400
+                      hover:text-red-500 transition-colors"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
               </div>
-              <div className="flex gap-1 flex-shrink-0">
-                <button
-                  onClick={() => abrirEditar(g)}
-                  className="p-1.5 rounded-lg hover:bg-gray-200 text-gray-400
-                    hover:text-gray-600 transition-colors"
-                >
-                  <Settings size={14} />
-                </button>
-                <button
-                  onClick={() => mutEliminar.mutate(g.id)}
-                  className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400
-                    hover:text-red-500 transition-colors"
-                >
-                  <Trash2 size={14} />
-                </button>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -335,6 +386,50 @@ function GarantiasConfig() {
             value={form.orden}
             onChange={(e) => setForm({ ...form, orden: Number(e.target.value) })}
           />
+
+          {/* ── Líneas asociadas ── */}
+          <div className="flex flex-col gap-2">
+            <label className="text-sm font-medium text-gray-700">
+              Líneas que aplican
+              <span className="text-gray-400 font-normal text-xs ml-1">
+                (la garantía aparecerá en facturas con productos de estas líneas)
+              </span>
+            </label>
+            {lineas.length === 0 ? (
+              <p className="text-xs text-gray-400">
+                No hay líneas configuradas. Crea líneas primero en la sección anterior.
+              </p>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {lineas.map((l) => {
+                  const lineaId   = l.id;
+                  const lineaNombre = l.nombre;
+                  const marcada   = form.lineas.includes(lineaId);
+                  return (
+                    <label
+                      key={lineaId}
+                      className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer
+                        transition-colors
+                        ${marcada
+                          ? 'bg-blue-50 border-blue-200'
+                          : 'bg-gray-50 border-gray-100 hover:border-gray-200'}`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={marcada}
+                        onChange={() => toggleLinea(lineaId)}
+                        className="accent-blue-600 w-4 h-4 flex-shrink-0"
+                      />
+                      <span className={`text-sm font-medium ${marcada ? 'text-blue-700' : 'text-gray-700'}`}>
+                        {lineaNombre}
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
           {error && <p className="text-sm text-red-500">{error}</p>}
           <div className="flex gap-2">
             <Button variant="secondary" className="flex-1" onClick={cerrarModal}>Cancelar</Button>
