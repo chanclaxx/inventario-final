@@ -83,8 +83,10 @@ function ModalDevolucion({ prestamo, onClose }) {
   const [cantidad,  setCantidad]  = useState('');
   const [error,     setError]     = useState('');
 
-  const esPorCantidad = !prestamo.imei && !!prestamo.producto_id;
-  const cantidadMax   = Number(prestamo.cantidad_prestada);
+  // Un préstamo es "por cantidad" cuando no tiene IMEI. producto_id puede llegar null
+  // en la vista de lista, así que no es fiable como único discriminador.
+  const esPorCantidad = !prestamo.imei;
+  const cantidadMax   = Number(prestamo.cantidad_prestada) || 1;
 
   const mutDevolver = useMutation({
     mutationFn: () => devolverPrestamo(prestamo.id),
