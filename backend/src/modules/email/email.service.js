@@ -13,6 +13,7 @@ const _getBrevoClient = () => {
   return client;
 };
 
+
 // ── Envío silencioso — nunca lanza error al caller ───────────────────────────
 const _enviarSilencioso = async (payload) => {
   try {
@@ -21,21 +22,27 @@ const _enviarSilencioso = async (payload) => {
       return { ok: false, razon: 'sin_config' };
     }
 
-    const SibApiV3Sdk = require('@getbrevo/brevo');
-    const client      = _getBrevoClient();
-    const sendEmail   = new SibApiV3Sdk.SendSmtpEmail();
+    const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+      method:  'POST',
+      headers: {
+        'accept':       'application/json',
+        'content-type': 'application/json',
+        'api-key':      process.env.BREVO_API_KEY,
+      },
+      body: JSON.stringify(payload),
+    });
 
-    Object.assign(sendEmail, payload);
+    if (!response.ok) {
+      const texto = await response.text().catch(() => 'sin detalle');
+      console.warn(`[email] ✗ No se pudo enviar (${response.status}): ${texto}`);
+      return { ok: false, razon: texto };
+    }
 
-    await client.sendTransacEmail(sendEmail);
     console.info(`[email] ✓ Enviado a ${payload.to?.[0]?.email}`);
     return { ok: true };
   } catch (err) {
-    // ── Nunca propagar el error — solo loguear ──
-    const status  = err?.response?.status || 'desconocido';
-    const mensaje = err?.response?.text   || err?.message || 'Error desconocido';
-    console.warn(`[email] ✗ No se pudo enviar (${status}): ${mensaje}`);
-    return { ok: false, razon: mensaje };
+    console.warn(`[email] ✗ No se pudo enviar (desconocido): ${err?.message || err}`);
+    return { ok: false, razon: err?.message || 'Error desconocido' };
   }
 };
 
