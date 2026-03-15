@@ -15,7 +15,7 @@ router.put('/:id', requireNivel('supervisor'), ctrl.actualizarProducto);
 
 // ── Rutas de seriales ──
 router.get('/:id/seriales',    ctrl.getSeriales);
-router.post('/:id/seriales',   requireNivel('supervisor'), ctrl.agregarSerial);
+router.post('/:id/seriales', requireNivel('vendedor'), ctrl.agregarSerial);
 router.put('/seriales/:id',    requireNivel('supervisor'), ctrl.actualizarSerial);
 router.delete('/seriales/:id', requireNivel('admin_negocio'), ctrl.eliminarSerial);
 
