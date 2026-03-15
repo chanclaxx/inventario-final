@@ -1,42 +1,65 @@
-const { exec }   = require('child_process');
+const { pool } = require('../../config/db');
 const { google } = require('googleapis');
-const path       = require('path');
-const fs         = require('fs');
-const os         = require('os');
+const { Readable } = require('stream');
 
 // ── Autenticación con Google Drive ────────────────────────────────────────
 const _getAuthClient = () => {
   return new google.auth.JWT({
-    email:      process.env.GOOGLE_CLIENT_EMAIL,
-    key:        process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n'),
-    scopes:     ['https://www.googleapis.com/auth/drive.file'],
+    email:  process.env.GOOGLE_CLIENT_EMAIL,
+    key:    process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+    scopes: ['https://www.googleapis.com/auth/drive.file'],
   });
 };
 
-// ── Ejecutar pg_dump y guardar en archivo temporal ────────────────────────
-const _generarDump = () => {
-  return new Promise((resolve, reject) => {
-    const fecha     = new Date().toISOString().slice(0, 10);
-    const hora      = new Date().toTimeString().slice(0, 8).replace(/:/g, '-');
-    const nombre    = `backup_${fecha}_${hora}.dump`;
-    const rutaTemp  = path.join(os.tmpdir(), nombre);
+// ── Exportar todas las tablas como JSON ───────────────────────────────────
+const _generarDumpJSON = async () => {
+  const tablas = [
+    'negocios', 'planes', 'sucursales', 'usuarios',
+    'proveedores', 'clientes', 'acreedores', 'prestatarios',
+    'empleados_prestatario',
+    'productos_serial', 'productos_cantidad',
+    'seriales', 'historial_stock_cantidad',
+    'facturas', 'lineas_factura', 'pagos_factura', 'retomas',
+    'creditos', 'abonos_credito',
+    'prestamos', 'abonos_prestamo',
+    'compras', 'lineas_compra',
+    'aperturas_caja', 'movimientos_caja',
+    'movimientos_acreedor',
+    'garantias', 'config_negocio',
+    'pagos_plan',
+  ];
 
-    const cmd = `pg_dump "${process.env.DATABASE_URL}" --format=custom --no-password --file="${rutaTemp}"`;
+  const dump = {
+    version:   '1.0',
+    fecha:     new Date().toISOString(),
+    tablas:    {},
+  };
 
-    exec(cmd, (err, stdout, stderr) => {
-      if (err) {
-        reject({ message: `Error generando dump: ${stderr || err.message}` });
-        return;
+  const client = await pool.connect();
+  try {
+    for (const tabla of tablas) {
+      try {
+        const { rows } = await client.query(`SELECT * FROM ${tabla} ORDER BY id`);
+        dump.tablas[tabla] = rows;
+      } catch {
+        // Tabla no existe en este schema — omitir sin error
+        dump.tablas[tabla] = [];
       }
-      resolve({ rutaTemp, nombre });
-    });
-  });
+    }
+  } finally {
+    client.release();
+  }
+
+  return dump;
 };
 
-// ── Subir archivo a Google Drive ──────────────────────────────────────────
-const _subirADrive = async (rutaTemp, nombre) => {
+// ── Subir JSON a Google Drive ─────────────────────────────────────────────
+const _subirADrive = async (contenido, nombre) => {
   const auth  = _getAuthClient();
   const drive = google.drive({ version: 'v3', auth });
+
+  const buffer   = Buffer.from(JSON.stringify(contenido, null, 2), 'utf-8');
+  const readable = Readable.from(buffer);
 
   const res = await drive.files.create({
     requestBody: {
@@ -44,8 +67,8 @@ const _subirADrive = async (rutaTemp, nombre) => {
       parents: [process.env.GOOGLE_DRIVE_FOLDER_ID],
     },
     media: {
-      mimeType: 'application/octet-stream',
-      body:     fs.createReadStream(rutaTemp),
+      mimeType: 'application/json',
+      body:     readable,
     },
     fields: 'id, name, size, createdTime',
   });
@@ -53,16 +76,7 @@ const _subirADrive = async (rutaTemp, nombre) => {
   return res.data;
 };
 
-// ── Limpiar archivo temporal ──────────────────────────────────────────────
-const _limpiarTemp = (rutaTemp) => {
-  try {
-    fs.unlinkSync(rutaTemp);
-  } catch {
-    // Si falla no es crítico
-  }
-};
-
-// ── Listar backups existentes en Drive ────────────────────────────────────
+// ── Listar backups ────────────────────────────────────────────────────────
 const listarBackups = async () => {
   const auth  = _getAuthClient();
   const drive = google.drive({ version: 'v3', auth });
@@ -77,7 +91,7 @@ const listarBackups = async () => {
   return res.data.files;
 };
 
-// ── Eliminar backups antiguos — mantener solo los últimos N ───────────────
+// ── Eliminar backups antiguos ─────────────────────────────────────────────
 const _limpiarBackupsAntiguos = async (mantener = 30) => {
   const auth  = _getAuthClient();
   const drive = google.drive({ version: 'v3', auth });
@@ -88,7 +102,7 @@ const _limpiarBackupsAntiguos = async (mantener = 30) => {
     orderBy:  'createdTime desc',
   });
 
-  const archivos = res.data.files || [];
+  const archivos  = res.data.files || [];
   const aEliminar = archivos.slice(mantener);
 
   for (const archivo of aEliminar) {
@@ -100,34 +114,34 @@ const _limpiarBackupsAntiguos = async (mantener = 30) => {
 
 // ── Función principal ─────────────────────────────────────────────────────
 const ejecutarBackup = async () => {
-  let rutaTemp = null;
+  const d     = new Date();
+  const fecha = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  const hora  = `${String(d.getHours()).padStart(2,'0')}-${String(d.getMinutes()).padStart(2,'0')}`;
+  const nombre = `backup_${fecha}_${hora}.json`;
 
-  try {
-    // 1. Generar dump
-    const { rutaTemp: rt, nombre } = await _generarDump();
-    rutaTemp = rt;
+  // 1. Generar dump como JSON
+  const dump = await _generarDumpJSON();
 
-    // 2. Subir a Drive
-    const archivo = await _subirADrive(rutaTemp, nombre);
+  // Contar total de registros
+  const totalRegistros = Object.values(dump.tablas)
+    .reduce((s, rows) => s + rows.length, 0);
 
-    // 3. Limpiar temp
-    _limpiarTemp(rutaTemp);
+  // 2. Subir a Drive
+  const archivo = await _subirADrive(dump, nombre);
 
-    // 4. Eliminar backups antiguos — mantiene los últimos 30
-    const eliminados = await _limpiarBackupsAntiguos(30);
+  // 3. Limpiar antiguos
+  const eliminados = await _limpiarBackupsAntiguos(30);
 
-    return {
-      ok:        true,
-      archivo:   archivo.name,
-      id_drive:  archivo.id,
-      size:      archivo.size,
-      fecha:     archivo.createdTime,
-      eliminados_antiguos: eliminados,
-    };
-  } catch (err) {
-    if (rutaTemp) _limpiarTemp(rutaTemp);
-    throw err;
-  }
+  return {
+    ok:               true,
+    archivo:          archivo.name,
+    id_drive:         archivo.id,
+    size:             archivo.size,
+    fecha:            archivo.createdTime,
+    total_registros:  totalRegistros,
+    tablas:           Object.keys(dump.tablas).length,
+    eliminados_antiguos: eliminados,
+  };
 };
 
 module.exports = { ejecutarBackup, listarBackups };
