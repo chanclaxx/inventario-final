@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '../../api/axios.config';
 import { getGarantias, crearGarantia, actualizarGarantia, eliminarGarantia } from '../../api/garantias.api';
+import { getLineas, crearLinea, actualizarLinea, eliminarLinea }             from '../../api/productos.api';
 import { UsuariosConfig }   from './UsuariosConfig';
 import { SucursalesConfig } from './SucursalesConfig';
 import { PasswordConfig }   from './PasswordConfig';
@@ -10,10 +11,12 @@ import { Input }   from '../../components/ui/Input';
 import { Modal }   from '../../components/ui/Modal';
 import { Spinner } from '../../components/ui/Spinner';
 import { Badge }   from '../../components/ui/Badge';
-import { Settings, Save, Eye, EyeOff, Plus, Trash2, GripVertical, ToggleLeft, ToggleRight } from 'lucide-react';
+import {
+  Settings, Save, Eye, EyeOff, Plus, Trash2,
+  GripVertical, ToggleLeft, ToggleRight, Tag,
+} from 'lucide-react';
 
 // ─── Hook compartido de config ────────────────────────────────────────────────
-
 function useConfigQuery() {
   return useQuery({
     queryKey: ['config'],
@@ -22,7 +25,6 @@ function useConfigQuery() {
 }
 
 // ─── Toggle reutilizable ──────────────────────────────────────────────────────
-
 function Toggle({ enabled, onChange, label, description }) {
   return (
     <div className="flex items-center justify-between gap-4">
@@ -38,15 +40,168 @@ function Toggle({ enabled, onChange, label, description }) {
       >
         {enabled
           ? <ToggleRight size={28} className="text-blue-600" />
-          : <ToggleLeft  size={28} className="text-gray-300" />
-        }
+          : <ToggleLeft  size={28} className="text-gray-300" />}
       </button>
     </div>
   );
 }
 
-// ─── Garantías ────────────────────────────────────────────────────────────────
+// ─── Líneas de producto ───────────────────────────────────────────────────────
+function LineasConfig() {
+  const queryClient               = useQueryClient();
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editando,  setEditando]  = useState(null);
+  const [nombre,    setNombre]    = useState('');
+  const [error,     setError]     = useState('');
 
+  const { data: lineas = [] } = useQuery({
+    queryKey: ['lineas'],
+    queryFn:  () => getLineas().then((r) => r.data.data),
+  });
+
+  const mutCrear = useMutation({
+    mutationFn: () => crearLinea(nombre),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['lineas'], exact: false });
+      cerrarModal();
+    },
+    onError: (e) => setError(e.response?.data?.error || 'Error al crear la línea'),
+  });
+
+  const mutEditar = useMutation({
+    mutationFn: () => actualizarLinea(editando.id, nombre),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['lineas'], exact: false });
+      cerrarModal();
+    },
+    onError: (e) => setError(e.response?.data?.error || 'Error al actualizar la línea'),
+  });
+
+  const mutEliminar = useMutation({
+    mutationFn: (id) => eliminarLinea(id),
+    onSuccess:  () => queryClient.invalidateQueries({ queryKey: ['lineas'], exact: false }),
+    onError:    (e) => alert(e.response?.data?.error || 'Error al eliminar la línea'),
+  });
+
+  const abrirNuevo = () => {
+    setEditando(null);
+    setNombre('');
+    setError('');
+    setModalOpen(true);
+  };
+
+  const abrirEditar = (l) => {
+    setEditando(l);
+    setNombre(l.nombre);
+    setError('');
+    setModalOpen(true);
+  };
+
+  const cerrarModal = () => {
+    setModalOpen(false);
+    setEditando(null);
+    setNombre('');
+    setError('');
+  };
+
+  const handleGuardar = () => {
+    if (!nombre.trim()) return setError('El nombre es requerido');
+    editando ? mutEditar.mutate() : mutCrear.mutate();
+  };
+
+  return (
+    <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm flex flex-col gap-4">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Tag size={16} className="text-gray-400" />
+          <h2 className="text-sm font-semibold text-gray-700">Líneas de producto</h2>
+        </div>
+        <button
+          onClick={abrirNuevo}
+          className="w-8 h-8 bg-blue-600 rounded-xl flex items-center justify-center
+            hover:bg-blue-700 transition-colors"
+        >
+          <Plus size={16} className="text-white" />
+        </button>
+      </div>
+
+      <p className="text-xs text-gray-400 -mt-2">
+        Agrupa tus productos por línea. Ej: Consolas, Videojuegos, Accesorios.
+      </p>
+
+      {lineas.length === 0 ? (
+        <p className="text-sm text-gray-400 text-center py-4">Sin líneas configuradas</p>
+      ) : (
+        <div className="flex flex-col gap-2">
+          {lineas.map((l) => (
+            <div
+              key={l.id}
+              className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl"
+            >
+              <GripVertical size={15} className="text-gray-300 flex-shrink-0" />
+              <p className="text-sm font-medium text-gray-800 flex-1 min-w-0 truncate">
+                {l.nombre}
+              </p>
+              <div className="flex gap-1 flex-shrink-0">
+                <button
+                  onClick={() => abrirEditar(l)}
+                  className="p-1.5 rounded-lg hover:bg-gray-200 text-gray-400
+                    hover:text-gray-600 transition-colors"
+                  title="Editar línea"
+                >
+                  <Settings size={14} />
+                </button>
+                <button
+                  onClick={() => mutEliminar.mutate(l.id)}
+                  disabled={mutEliminar.isPending}
+                  className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400
+                    hover:text-red-500 transition-colors disabled:opacity-50"
+                  title="Eliminar línea"
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <Modal
+        open={modalOpen}
+        onClose={cerrarModal}
+        title={editando ? 'Editar línea' : 'Nueva línea'}
+        size="sm"
+      >
+        <div className="flex flex-col gap-4">
+          <Input
+            label="Nombre de la línea"
+            placeholder="Ej: Consolas, Videojuegos, Accesorios..."
+            value={nombre}
+            onChange={(e) => setNombre(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') handleGuardar(); }}
+            autoFocus
+          />
+          {error && <p className="text-sm text-red-500">{error}</p>}
+          <div className="flex gap-2">
+            <Button variant="secondary" className="flex-1" onClick={cerrarModal}>
+              Cancelar
+            </Button>
+            <Button
+              className="flex-1"
+              loading={mutCrear.isPending || mutEditar.isPending}
+              onClick={handleGuardar}
+              disabled={!nombre.trim()}
+            >
+              {editando ? 'Guardar cambios' : 'Crear línea'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+    </div>
+  );
+}
+
+// ─── Garantías ────────────────────────────────────────────────────────────────
 function GarantiasConfig() {
   const queryClient               = useQueryClient();
   const [modalOpen, setModalOpen] = useState(false);
@@ -82,7 +237,7 @@ function GarantiasConfig() {
     onSuccess:  () => queryClient.invalidateQueries({ queryKey: ['garantias'], exact: false }),
   });
 
-  const abrirNuevo  = () => {
+  const abrirNuevo = () => {
     setEditando(null);
     setForm({ titulo: '', texto: '', orden: garantias.length });
     setError('');
@@ -110,7 +265,8 @@ function GarantiasConfig() {
         <h2 className="text-sm font-semibold text-gray-700">Garantías y Términos</h2>
         <button
           onClick={abrirNuevo}
-          className="w-8 h-8 bg-blue-600 rounded-xl flex items-center justify-center hover:bg-blue-700 transition-colors"
+          className="w-8 h-8 bg-blue-600 rounded-xl flex items-center justify-center
+            hover:bg-blue-700 transition-colors"
         >
           <Plus size={16} className="text-white" />
         </button>
@@ -130,13 +286,15 @@ function GarantiasConfig() {
               <div className="flex gap-1 flex-shrink-0">
                 <button
                   onClick={() => abrirEditar(g)}
-                  className="p-1.5 rounded-lg hover:bg-gray-200 text-gray-400 hover:text-gray-600 transition-colors"
+                  className="p-1.5 rounded-lg hover:bg-gray-200 text-gray-400
+                    hover:text-gray-600 transition-colors"
                 >
                   <Settings size={14} />
                 </button>
                 <button
                   onClick={() => mutEliminar.mutate(g.id)}
-                  className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors"
+                  className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400
+                    hover:text-red-500 transition-colors"
                 >
                   <Trash2 size={14} />
                 </button>
@@ -146,7 +304,12 @@ function GarantiasConfig() {
         </div>
       )}
 
-      <Modal open={modalOpen} onClose={cerrarModal} title={editando ? 'Editar Garantía' : 'Nueva Garantía'} size="md">
+      <Modal
+        open={modalOpen}
+        onClose={cerrarModal}
+        title={editando ? 'Editar Garantía' : 'Nueva Garantía'}
+        size="md"
+      >
         <div className="flex flex-col gap-4">
           <Input
             label="Título"
@@ -190,7 +353,6 @@ function GarantiasConfig() {
 }
 
 // ─── Campos opcionales del formulario de venta ────────────────────────────────
-
 function CamposFormularioConfig({ valores, set }) {
   const CAMPOS_OPCIONALES = [
     {
@@ -233,7 +395,6 @@ function CamposFormularioConfig({ valores, set }) {
 }
 
 // ─── Página principal ─────────────────────────────────────────────────────────
-
 export default function ConfigPage() {
   const queryClient                 = useQueryClient();
   const { data: config, isLoading } = useConfigQuery();
@@ -278,7 +439,6 @@ export default function ConfigPage() {
 
         {/* ── Columna izquierda ── */}
         <div className="w-full lg:max-w-sm flex flex-col gap-6">
-
           <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm flex flex-col gap-4">
             <h2 className="text-sm font-semibold text-gray-700">Datos del negocio</h2>
             {camposNegocio.map(({ clave, label, placeholder }) => (
@@ -311,7 +471,6 @@ export default function ConfigPage() {
             </div>
           </div>
 
-          {/* Campos opcionales del formulario de venta */}
           <CamposFormularioConfig valores={valores} set={set} />
 
           <div className="flex items-center gap-3">
@@ -332,6 +491,7 @@ export default function ConfigPage() {
         {/* ── Columna derecha ── */}
         <div className="w-full lg:flex-1 flex flex-col gap-6">
           <SucursalesConfig />
+          <LineasConfig />   {/* ← líneas justo después de sucursales */}
           <GarantiasConfig />
           <UsuariosConfig />
         </div>
