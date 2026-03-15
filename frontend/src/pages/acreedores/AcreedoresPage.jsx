@@ -226,19 +226,37 @@ function ModalNuevoAcreedor({ onClose }) {
   const proveedores = normalizarProductos(proveedoresRaw);
 
   // ── Al seleccionar proveedor, autocompletar nombre si está vacío ──
-  const handleSeleccionarProveedor = (id) => {
-    setProveedorId(id);
-    if (!id) return;
-    const prov = proveedores.find((p) => String(p.id) === id);
-    if (prov) {
-      setForm((f) => ({
-        ...f,
-        nombre:   f.nombre   || prov.nombre   || '',
-        cedula:   f.cedula   || prov.nit       || '',
-        telefono: f.telefono || prov.telefono  || '',
-      }));
-    }
-  };
+  // ── Query para verificar si el proveedor ya tiene acreedor ──
+const { data: acreedoresData } = useQuery({
+  queryKey: ['acreedores'],
+  queryFn:  () => api.get('/acreedores').then((r) => r.data.data),
+});
+const acreedores = normalizarProductos(acreedoresData);
+
+const handleSeleccionarProveedor = (id) => {
+  setProveedorId(id);
+  setError('');
+  if (!id) return;
+
+  // ── Verificar si ya existe un acreedor vinculado a este proveedor ──
+  const yaVinculado = acreedores.some((a) => String(a.proveedor_id) === id);
+  if (yaVinculado) {
+    const acreedor = acreedores.find((a) => String(a.proveedor_id) === id);
+    setError(`Este proveedor ya está vinculado al acreedor "${acreedor.nombre}"`);
+    setProveedorId('');
+    return;
+  }
+
+  const prov = proveedores.find((p) => String(p.id) === id);
+  if (prov) {
+    setForm((f) => ({
+      ...f,
+      nombre:   f.nombre   || prov.nombre  || '',
+      cedula:   f.cedula   || prov.nit      || '',
+      telefono: f.telefono || prov.telefono || '',
+    }));
+  }
+};
 
   const mutation = useMutation({
     mutationFn: () => crearAcreedor({
