@@ -100,8 +100,8 @@ function ModalDevolucion({ prestamo, onClose }) {
 
   const handleConfirmar = () => {
     setError('');
-    if (!esPorCantidad) {
-      // Serial: devolución simple, sin preguntar cantidad
+    // Serial o cantidad = 1: devolución total directa sin pedir input
+    if (!esPorCantidad || cantidadMax === 1) {
       mutDevolver.mutate();
       return;
     }
@@ -136,8 +136,8 @@ function ModalDevolucion({ prestamo, onClose }) {
           )}
         </div>
 
-        {/* Para serial: solo confirmar. Para cantidad: pedir cuántos devuelve */}
-        {esPorCantidad ? (
+        {/* Por cantidad con más de 1 unidad: pedir cuántas devuelve */}
+        {esPorCantidad && cantidadMax > 1 ? (
           <div className="flex flex-col gap-1">
             <Input
               label={`¿Cuántas unidades devuelve? (máx. ${cantidadMax})`}

@@ -12,7 +12,8 @@ import {
 } from '../../api/prestatarios.api';
 import { getClientes, crearCliente } from '../../api/clientes.api';
 import useCarritoStore from '../../store/carritoStore';
-import { User, Users, Plus, ChevronLeft, Search } from 'lucide-react';
+import { User, Users, Plus, Minus, ChevronLeft, Search } from 'lucide-react';
+import { InputMoneda } from '../../components/ui/InputMoneda';
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
@@ -196,28 +197,56 @@ function ChipSeleccionado({ nombre, onCambiar }) {
   );
 }
 
-// ─── ResumenCarrito — muestra los ítems que se van a prestar ──────────────────
+// ─── ResumenCarrito — ítems editables (precio y cantidad) ────────────────────
 
-function ResumenCarrito({ items }) {
+function ResumenCarrito({ items, onActualizarPrecio, onActualizarCantidad }) {
   return (
-    <div className="bg-gray-50 rounded-xl p-3 flex flex-col gap-2">
+    <div className="bg-gray-50 rounded-xl p-3 flex flex-col gap-3">
       <p className="text-xs font-medium text-gray-500">
         Producto{items.length > 1 ? `s a prestar (${items.length})` : ' a prestar'}
       </p>
       {items.map((item) => (
-        <div key={item.key} className="flex items-center justify-between gap-2">
-          <div className="min-w-0 flex-1">
-            <p className="text-sm font-medium text-gray-800 truncate">{item.nombre}</p>
-            {item.imei && (
-              <p className="text-xs text-gray-400 font-mono">{item.imei}</p>
-            )}
+        <div key={item.key} className="flex flex-col gap-1.5">
+          <p className="text-sm font-medium text-gray-800 truncate">{item.nombre}</p>
+          {item.imei && (
+            <p className="text-xs text-gray-400 font-mono">{item.imei}</p>
+          )}
+
+          <div className="flex items-center gap-2">
+            {/* Cantidad — solo para productos por cantidad */}
             {item.tipo === 'cantidad' && (
-              <p className="text-xs text-gray-400">Cantidad: {item.cantidad || 1}</p>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => onActualizarCantidad(item.key, (item.cantidad || 1) - 1)}
+                  className="w-6 h-6 rounded-lg bg-gray-200 hover:bg-gray-300
+                    flex items-center justify-center transition-colors"
+                >
+                  <Minus size={11} />
+                </button>
+                <span className="text-sm font-medium w-6 text-center">{item.cantidad || 1}</span>
+                <button
+                  onClick={() => onActualizarCantidad(item.key, (item.cantidad || 1) + 1)}
+                  disabled={(item.cantidad || 1) >= item.stock}
+                  className="w-6 h-6 rounded-lg bg-gray-200 hover:bg-gray-300
+                    flex items-center justify-center transition-colors disabled:opacity-40"
+                >
+                  <Plus size={11} />
+                </button>
+              </div>
             )}
+
+            {/* Precio editable */}
+            <div className="flex items-center gap-1 ml-auto">
+              <span className="text-xs text-gray-400">$</span>
+              <InputMoneda
+                value={item.precioFinal}
+                onChange={(val) => onActualizarPrecio(item.key, val)}
+                className="w-28 text-right text-sm font-semibold text-gray-800 bg-white
+                  border border-gray-200 rounded-lg px-2 py-1 focus:outline-none
+                  focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+            </div>
           </div>
-          <span className="text-sm font-semibold text-gray-700 flex-shrink-0">
-            {formatCOP(item.precioFinal)}
-          </span>
         </div>
       ))}
     </div>
@@ -228,7 +257,7 @@ function ResumenCarrito({ items }) {
 
 export function ModalPrestamo({ open, onClose }) {
   const queryClient = useQueryClient();
-  const { items, totalCarrito, limpiarCarrito } = useCarritoStore();
+  const { items, totalCarrito, limpiarCarrito, actualizarPrecio, actualizarCantidad } = useCarritoStore();
   const total = totalCarrito();
 
   const [tipoCliente,    setTipoCliente]    = useState('companero');
@@ -385,8 +414,13 @@ export function ModalPrestamo({ open, onClose }) {
           })}
         </div>
 
-        {/* Resumen de productos del carrito */}
-        {items.length > 0 && <ResumenCarrito items={items} />}
+        {items.length > 0 && (
+          <ResumenCarrito
+            items={items}
+            onActualizarPrecio={actualizarPrecio}
+            onActualizarCantidad={actualizarCantidad}
+          />
+        )}
 
         {/* ── Flujo Compañero ── */}
         {tipoCliente === 'companero' && (
