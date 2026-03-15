@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getFacturas, getFacturaById, cancelarFactura } from '../../api/facturas.api';
-import { getGarantias } from '../../api/garantias.api';
+import { getGarantiasPorFactura } from '../../api/garantias.api';
 import { formatCOP, formatFecha, formatFechaHora } from '../../utils/formatters';
 import { useAuth }            from '../../context/useAuth';
 import { Badge }              from '../../components/ui/Badge';
@@ -191,6 +191,14 @@ function ModalDetalle({ facturaId, onClose, onReimprimir, onEditar }) {
     queryFn:  () => api.get('/config').then((r) => r.data.data),
   });
 
+  // ── Garantías filtradas por las líneas de esta factura ──
+  const { data: garantiasFactura = [] } = useQuery({
+    queryKey: ['garantias-factura', facturaId],
+    queryFn:  () => getGarantiasPorFactura(facturaId).then((r) => r.data.data),
+    enabled:  !!facturaId,
+    staleTime: 0,
+  });
+
   if (isLoading) {
     return (
       <Modal open onClose={onClose} title="Detalle de Factura" size="lg">
@@ -292,9 +300,9 @@ function ModalDetalle({ facturaId, onClose, onReimprimir, onEditar }) {
 
         <div className="flex gap-2">
           <Button variant="secondary" className="flex-1"
-            onClick={() => onReimprimir({ ...f, config: configData })}>
-            <Printer size={16} /> Reimprimir
-          </Button>
+  onClick={() => onReimprimir({ ...f, config: configData }, garantiasFactura)}>
+  <Printer size={16} /> Reimprimir
+</Button>
           {f?.estado !== 'Cancelada' && (
             <Button variant="secondary" className="flex-1" onClick={() => onEditar(facturaId)}>
               <Pencil size={16} /> Editar
@@ -488,10 +496,7 @@ export default function FacturarPage() {
     enabled:  sucursalLista,
   });
 
-  const { data: garantiasData } = useQuery({
-    queryKey: ['garantias'],
-    queryFn:  () => getGarantias().then((r) => r.data.data),
-  });
+  
 
   const mutInactivar = useMutation({
     mutationFn: (id) => cancelarFactura(id),
@@ -567,7 +572,10 @@ export default function FacturarPage() {
       {facturaDetalle && (
         <ModalDetalle facturaId={facturaDetalle}
           onClose={() => setFacturaDetalle(null)}
-          onReimprimir={(f) => { setFacturaDetalle(null); setFacturaImprimir(f); }}
+          onReimprimir={(f, garantias) => {
+  setFacturaDetalle(null);
+  setFacturaImprimir({ factura: f, garantias });
+}}
           onEditar={handleEditar} />
       )}
 
@@ -603,10 +611,16 @@ export default function FacturarPage() {
           onGuardado={() => setFacturaEditar(null)} />
       )}
 
-      {facturaImprimir && (
-        <FacturaTermica factura={facturaImprimir} garantias={garantiasData || []}
-          onClose={() => setFacturaImprimir(null)} />
-      )}
+      const [facturaImprimir, setFacturaImprimir] = useState(null);
+
+// Al renderizar
+{facturaImprimir && (
+  <FacturaTermica
+    factura={facturaImprimir.factura}
+    garantias={facturaImprimir.garantias}
+    onClose={() => setFacturaImprimir(null)}
+  />
+)}
     </div>
   );
 }

@@ -547,6 +547,7 @@ export function ModalFactura({ open, onClose }) {
   queryKey: ['garantias-factura', facturaCreada?.id],
   queryFn:  () => getGarantiasPorFactura(facturaCreada.id).then((r) => r.data.data),
   enabled:  !!facturaCreada?.id,
+  staleTime: 0,
 });
   const { data: configData } = useQuery({
     queryKey: ['config'],
@@ -934,10 +935,10 @@ export function ModalFactura({ open, onClose }) {
         guardando={mutation.isPending}
       />
 
-      {mostrarImpresion && facturaCreada && (
+     {mostrarImpresion && facturaCreada && garantiasFactura !== undefined && (
   <FacturaTermica
     factura={facturaCreada}
-    garantias={garantiasFactura || []}   // ← filtradas por línea
+    garantias={garantiasFactura}
     onClose={() => { setMostrarImpresion(false); limpiarCarrito(); onClose(); resetForm(); }}
   />
 )}
