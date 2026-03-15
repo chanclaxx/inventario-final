@@ -33,12 +33,10 @@ const TABS = [
 // ─────────────────────────────────────────────
 // HELPERS DE NEGOCIO
 // ─────────────────────────────────────────────
-const calcularUtilidadNeta = (lineas, totalRetomas) => {
-  const bruta = lineas.reduce(
-    (acc, i) => (i.utilidad !== null ? acc + i.utilidad : acc),
-    0,
+const calcularUtilidadNeta = (lineas) => {
+  return lineas.reduce(
+    (acc, i) => (i.utilidad !== null ? acc + i.utilidad : acc), 0,
   );
-  return bruta - Number(totalRetomas);
 };
 
 const recalcularLinea = (linea, nuevoCosto) => {
@@ -215,7 +213,7 @@ const FilaFactura = ({ factura, esAdmin }) => {
   const [expandida, setExpandida] = useState(false);
   const [lineas,    setLineas]    = useState(factura.lineas);
 
-  const utilidadNeta         = calcularUtilidadNeta(lineas, factura.total_retomas);
+  const utilidadNeta = calcularUtilidadNeta(lineas);
   const tieneCostoIncompleto = lineas.some((i) => i.costo_unitario_compra === null);
 
   const handleCostoGuardado = useCallback((lineaEditada, nuevoCosto) => {
@@ -229,108 +227,112 @@ const FilaFactura = ({ factura, esAdmin }) => {
     factura.estado === 'Credito' ? 'yellow' : 'red';
 
   return (
-    <div className="bg-white border border-gray-100 rounded-xl overflow-hidden shadow-sm">
-      <button
-        onClick={() => setExpandida((v) => !v)}
-        className="w-full px-4 py-3 flex items-center justify-between hover:bg-gray-50 transition-colors text-left"
-      >
-        <div className="flex items-center gap-3 min-w-0">
-          <div className="min-w-0">
-            <p className="text-sm font-semibold text-gray-800 truncate">{factura.nombre_cliente}</p>
-            <p className="text-xs text-gray-400">{formatFecha(factura.fecha)} · #{factura.id}</p>
-          </div>
+  <div className="bg-white border border-gray-100 rounded-xl overflow-hidden shadow-sm">
+    <button
+      onClick={() => setExpandida((v) => !v)}
+      className="w-full px-4 py-3 flex items-center justify-between hover:bg-gray-50 transition-colors text-left"
+    >
+      <div className="flex items-center gap-3 min-w-0">
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-gray-800 truncate">{factura.nombre_cliente}</p>
+          <p className="text-xs text-gray-400">{formatFecha(factura.fecha)} · #{factura.id}</p>
         </div>
-        <div className="flex items-center gap-2 flex-shrink-0 ml-2">
-          <Badge variant={estadoVariant}>{factura.estado}</Badge>
-          <div className="text-right hidden sm:block">
-            <p className="text-sm font-bold text-gray-900">{formatCOP(factura.total_venta)}</p>
-            {factura.total_retomas > 0 && (
-              <p className="text-xs text-orange-500">-{formatCOP(factura.total_retomas)} retoma</p>
-            )}
+      </div>
+      <div className="flex items-center gap-2 flex-shrink-0 ml-2">
+        <Badge variant={estadoVariant}>{factura.estado}</Badge>
+        <div className="text-right hidden sm:block">
+          <p className="text-sm font-bold text-gray-900">{formatCOP(factura.total_venta)}</p>
+          {/* ── Retoma como info, no como descuento ── */}
+          {factura.total_retomas > 0 && (
+            <p className="text-xs text-gray-400">retoma: {formatCOP(factura.total_retomas)}</p>
+          )}
+        </div>
+        <div className="text-right hidden sm:block">
+          <UtilidadBadge
+            valor={utilidadNeta}
+            sinDato={tieneCostoIncompleto && utilidadNeta === 0}
+          />
+        </div>
+        {expandida
+          ? <ChevronUp size={16} className="text-gray-400" />
+          : <ChevronDown size={16} className="text-gray-400" />
+        }
+      </div>
+    </button>
+
+    <div className="flex items-center justify-between px-4 pb-2 sm:hidden">
+      <span className="text-sm font-bold text-gray-900">{formatCOP(factura.total_venta)}</span>
+      <UtilidadBadge
+        valor={utilidadNeta}
+        sinDato={tieneCostoIncompleto && utilidadNeta === 0}
+      />
+    </div>
+
+    {expandida && (
+      <div className="border-t border-gray-100 px-4 py-3 flex flex-col gap-2 bg-gray-50">
+        <div className="grid grid-cols-12 gap-1 text-xs font-medium text-gray-400 pb-1 border-b border-gray-200">
+          <span className="col-span-4">Producto</span>
+          <span className="col-span-2 text-center">Cant.</span>
+          <span className="col-span-2 text-right">Precio</span>
+          <span className="col-span-2 text-right">
+            Costo{esAdmin && <span className="text-blue-400 ml-0.5" title="Editable">✎</span>}
+          </span>
+          <span className="col-span-2 text-right">Utilidad</span>
+        </div>
+
+        {lineas.map((linea, idx) => {
+          const sinCosto = linea.costo_unitario_compra === null;
+          return (
+            <div key={idx} className="grid grid-cols-12 gap-1 text-xs items-center py-1">
+              <div className="col-span-4 min-w-0">
+                <p className="font-medium text-gray-700 truncate">{linea.nombre_producto}</p>
+                {linea.imei && <p className="text-gray-400 font-mono truncate">{linea.imei}</p>}
+              </div>
+              <span className="col-span-2 text-center text-gray-600">{linea.cantidad}</span>
+              <span className="col-span-2 text-right text-gray-700">{formatCOP(linea.precio_venta)}</span>
+              <span className="col-span-2 text-right">
+                {esAdmin ? (
+                  <CeldaCostoEditable linea={linea} onGuardado={handleCostoGuardado} />
+                ) : (
+                  sinCosto
+                    ? <span className="text-gray-300 italic">N/A</span>
+                    : formatCOP(linea.costo_unitario_compra)
+                )}
+              </span>
+              <span className="col-span-2 text-right">
+                <UtilidadBadge valor={linea.utilidad} sinDato={sinCosto} />
+              </span>
+            </div>
+          );
+        })}
+
+        <div className="border-t border-gray-200 pt-2 mt-1 flex flex-col gap-1">
+          <div className="flex justify-between text-xs text-gray-600">
+            <span>Total venta</span>
+            <span className="font-semibold">{formatCOP(factura.total_venta)}</span>
           </div>
-          <div className="text-right hidden sm:block">
+          {/* ── Retoma como información, sin descontar de la utilidad ── */}
+          {factura.total_retomas > 0 && (
+            <div className="flex justify-between text-xs text-gray-400">
+              <span className="flex items-center gap-1">
+                <Info size={10} /> Retoma (informativo)
+              </span>
+              <span>{formatCOP(factura.total_retomas)}</span>
+            </div>
+          )}
+          <div className="flex justify-between text-xs font-bold text-gray-800">
+            <span>Utilidad productos</span>
             <UtilidadBadge
               valor={utilidadNeta}
               sinDato={tieneCostoIncompleto && utilidadNeta === 0}
             />
           </div>
-          {expandida
-            ? <ChevronUp size={16} className="text-gray-400" />
-            : <ChevronDown size={16} className="text-gray-400" />
-          }
         </div>
-      </button>
-
-      <div className="flex items-center justify-between px-4 pb-2 sm:hidden">
-        <span className="text-sm font-bold text-gray-900">{formatCOP(factura.total_venta)}</span>
-        <UtilidadBadge
-          valor={utilidadNeta}
-          sinDato={tieneCostoIncompleto && utilidadNeta === 0}
-        />
       </div>
-
-      {expandida && (
-        <div className="border-t border-gray-100 px-4 py-3 flex flex-col gap-2 bg-gray-50">
-          <div className="grid grid-cols-12 gap-1 text-xs font-medium text-gray-400 pb-1 border-b border-gray-200">
-            <span className="col-span-4">Producto</span>
-            <span className="col-span-2 text-center">Cant.</span>
-            <span className="col-span-2 text-right">Precio</span>
-            <span className="col-span-2 text-right">
-              Costo{esAdmin && <span className="text-blue-400 ml-0.5" title="Editable">✎</span>}
-            </span>
-            <span className="col-span-2 text-right">Utilidad</span>
-          </div>
-
-          {lineas.map((linea, idx) => {
-            const sinCosto = linea.costo_unitario_compra === null;
-            return (
-              <div key={idx} className="grid grid-cols-12 gap-1 text-xs items-center py-1">
-                <div className="col-span-4 min-w-0">
-                  <p className="font-medium text-gray-700 truncate">{linea.nombre_producto}</p>
-                  {linea.imei && <p className="text-gray-400 font-mono truncate">{linea.imei}</p>}
-                </div>
-                <span className="col-span-2 text-center text-gray-600">{linea.cantidad}</span>
-                <span className="col-span-2 text-right text-gray-700">{formatCOP(linea.precio_venta)}</span>
-                <span className="col-span-2 text-right">
-                  {esAdmin ? (
-                    <CeldaCostoEditable linea={linea} onGuardado={handleCostoGuardado} />
-                  ) : (
-                    sinCosto
-                      ? <span className="text-gray-300 italic">N/A</span>
-                      : formatCOP(linea.costo_unitario_compra)
-                  )}
-                </span>
-                <span className="col-span-2 text-right">
-                  <UtilidadBadge valor={linea.utilidad} sinDato={sinCosto} />
-                </span>
-              </div>
-            );
-          })}
-
-          <div className="border-t border-gray-200 pt-2 mt-1 flex flex-col gap-1">
-            <div className="flex justify-between text-xs text-gray-600">
-              <span>Total venta</span>
-              <span className="font-semibold">{formatCOP(factura.total_venta)}</span>
-            </div>
-            {factura.total_retomas > 0 && (
-              <div className="flex justify-between text-xs text-orange-600">
-                <span>Retoma descontada</span>
-                <span className="font-semibold">-{formatCOP(factura.total_retomas)}</span>
-              </div>
-            )}
-            <div className="flex justify-between text-xs font-bold text-gray-800">
-              <span>Utilidad neta</span>
-              <UtilidadBadge
-                valor={utilidadNeta}
-                sinDato={tieneCostoIncompleto && utilidadNeta === 0}
-              />
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-};
+    )}
+  </div>
+);
+}
 
 // ─────────────────────────────────────────────
 // FILA DE PRODUCTO TOP
@@ -442,7 +444,11 @@ const PanelVentas = ({ desde, hasta, onDesde, onHasta, esAdmin }) => {
         <div className="flex flex-col gap-3">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <MetricCard label="Total vendido"      valor={formatCOP(resumen.total_ventas)}        colorClass="bg-green-50 text-green-700"     />
-            <MetricCard label="Utilidad neta"      valor={formatCOP(resumen.utilidad_neta_total)} colorClass="bg-emerald-50 text-emerald-700"  />
+           <MetricCard
+  label="Utilidad neta"
+  valor={formatCOP(facturas.reduce((s, f) => s + calcularUtilidadNeta(f.lineas), 0))}
+  colorClass="bg-emerald-50 text-emerald-700"
+/>
             <MetricCard label="Utilidad pendiente" valor={formatCOP(resumen.utilidad_pendiente)}  colorClass="bg-yellow-50 text-yellow-700"   />
             <MetricCard
               label={`${resumen.total_facturas} factura(s)`}
