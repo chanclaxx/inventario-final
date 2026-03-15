@@ -124,42 +124,169 @@ function ModalYaEnInventario({ open, seriales, onCerrar }) {
 
 // ─── Panel info de compra por proveedor (solo admin) ──────────────────────────
 function InfoCompra({ proveedorId, setProveedorId, costoCompra, setCostoCompra, modoPago, setModoPago }) {
-  const { data: proveedoresRaw } = useQuery({ queryKey: ['proveedores'], queryFn: () => api.get('/proveedores').then((r) => r.data.data) });
-  const proveedores = normalizarProductos(proveedoresRaw);
-  const { data: acreedoresRaw } = useQuery({ queryKey: ['acreedores'], queryFn: () => api.get('/acreedores').then((r) => r.data.data), enabled: Boolean(proveedorId) });
-  const acreedores    = normalizarProductos(acreedoresRaw);
-  const proveedorNum  = Number(proveedorId) || null;
-  const yaEsAcreedor  = proveedorNum ? acreedores.some((a) => a.proveedor_id === proveedorNum) : false;
+  const queryClient = useQueryClient();
+
+  const [creandoProveedor, setCreandoProveedor] = useState(false);
+  const [nuevoProveedor,   setNuevoProveedor]   = useState({ nombre: '', nit: '', telefono: '', direccion: '' });
+  const [errorProveedor,   setErrorProveedor]   = useState('');
+
+  const { data: proveedoresRaw } = useQuery({
+    queryKey: ['proveedores'],
+    queryFn:  () => api.get('/proveedores').then((r) => r.data.data),
+  });
+  const { data: acreedoresRaw } = useQuery({
+    queryKey: ['acreedores'],
+    queryFn:  () => api.get('/acreedores').then((r) => r.data.data),
+    enabled:  Boolean(proveedorId),
+  });
+
+  const proveedores  = normalizarProductos(proveedoresRaw);
+  const acreedores   = normalizarProductos(acreedoresRaw);
+  const proveedorNum = Number(proveedorId) || null;
+  const yaEsAcreedor = proveedorNum ? acreedores.some((a) => a.proveedor_id === proveedorNum) : false;
+
+  const mutCrearProveedor = useMutation({
+    mutationFn: () => api.post('/proveedores', {
+      nombre:    nuevoProveedor.nombre.trim(),
+      nit:       nuevoProveedor.nit.trim()       || null,
+      telefono:  nuevoProveedor.telefono.trim()  || null,
+      direccion: nuevoProveedor.direccion.trim() || null,
+    }),
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: ['proveedores'], exact: false });
+      setProveedorId(String(res.data.data.id));
+      setNuevoProveedor({ nombre: '', nit: '', telefono: '', direccion: '' });
+      setErrorProveedor('');
+      setCreandoProveedor(false);
+    },
+    onError: (e) => setErrorProveedor(e.response?.data?.error || 'Error al crear el proveedor'),
+  });
+
+  const handleCrearProveedor = () => {
+    setErrorProveedor('');
+    if (!nuevoProveedor.nombre.trim()) return setErrorProveedor('El nombre es requerido');
+    mutCrearProveedor.mutate();
+  };
 
   return (
     <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 flex flex-col gap-2">
-      <div className="flex items-center gap-1.5"><ShoppingCart size={13} className="text-amber-600" /><p className="text-xs font-semibold text-amber-700">Informaci\xf3n de compra</p></div>
+      <div className="flex items-center gap-1.5">
+        <ShoppingCart size={13} className="text-amber-600" />
+        <p className="text-xs font-semibold text-amber-700">Información de compra</p>
+      </div>
+
       <div className="flex gap-2">
         <div className="flex-1 flex flex-col gap-1">
           <label className="text-xs text-amber-700 font-medium">Proveedor</label>
-          <select value={proveedorId} onChange={(e) => { setProveedorId(e.target.value); if (!e.target.value) setModoPago(null); }}
-            className="w-full px-2.5 py-2 bg-white border border-amber-200 rounded-lg text-xs text-gray-700 focus:outline-none focus:ring-2 focus:ring-amber-400">
+          <select
+            value={proveedorId}
+            onChange={(e) => { setProveedorId(e.target.value); if (!e.target.value) setModoPago(null); }}
+            className="w-full px-2.5 py-2 bg-white border border-amber-200 rounded-lg text-xs
+              text-gray-700 focus:outline-none focus:ring-2 focus:ring-amber-400"
+          >
             <option value="">Sin proveedor</option>
-            {proveedores.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+            {proveedores.map((p) => (
+              <option key={p.id} value={p.id}>{p.nombre}</option>
+            ))}
           </select>
         </div>
         <div className="flex-1 flex flex-col gap-1">
           <label className="text-xs text-amber-700 font-medium">Precio compra</label>
-          <input type="number" placeholder="0" value={costoCompra} onChange={(e) => setCostoCompra(e.target.value)} onWheel={(e) => e.target.blur()}
-            className="w-full px-2.5 py-2 bg-white border border-amber-200 rounded-lg text-xs text-gray-700 focus:outline-none focus:ring-2 focus:ring-amber-400" />
+          <input
+            type="number" placeholder="0"
+            value={costoCompra}
+            onChange={(e) => setCostoCompra(e.target.value)}
+            onWheel={(e) => e.target.blur()}
+            className="w-full px-2.5 py-2 bg-white border border-amber-200 rounded-lg text-xs
+              text-gray-700 focus:outline-none focus:ring-2 focus:ring-amber-400"
+          />
         </div>
       </div>
+
+      {/* ── Crear proveedor ── */}
+      {!creandoProveedor ? (
+        <button
+          onClick={() => setCreandoProveedor(true)}
+          className="text-xs text-amber-600 hover:text-amber-800 font-medium text-left w-fit"
+        >
+          + Crear nuevo proveedor
+        </button>
+      ) : (
+        <div className="bg-white border border-amber-200 rounded-xl p-3 flex flex-col gap-2">
+          <p className="text-xs font-semibold text-amber-700">Nuevo proveedor</p>
+          <Input
+            placeholder="Nombre *"
+            value={nuevoProveedor.nombre}
+            onChange={(e) => setNuevoProveedor({ ...nuevoProveedor, nombre: e.target.value })}
+            autoFocus
+          />
+          <div className="flex gap-2">
+            <Input
+              placeholder="NIT (opcional)"
+              value={nuevoProveedor.nit}
+              onChange={(e) => setNuevoProveedor({ ...nuevoProveedor, nit: e.target.value })}
+            />
+            <Input
+              placeholder="Teléfono (opcional)"
+              value={nuevoProveedor.telefono}
+              onChange={(e) => setNuevoProveedor({ ...nuevoProveedor, telefono: e.target.value })}
+            />
+          </div>
+          <Input
+            placeholder="Dirección (opcional)"
+            value={nuevoProveedor.direccion}
+            onChange={(e) => setNuevoProveedor({ ...nuevoProveedor, direccion: e.target.value })}
+          />
+          {errorProveedor && <p className="text-xs text-red-500">{errorProveedor}</p>}
+          <div className="flex gap-2">
+            <Button
+              variant="secondary" size="sm" className="flex-1"
+              onClick={() => { setCreandoProveedor(false); setNuevoProveedor({ nombre: '', nit: '', telefono: '', direccion: '' }); setErrorProveedor(''); }}
+            >
+              Cancelar
+            </Button>
+            <Button
+              size="sm" className="flex-1"
+              loading={mutCrearProveedor.isPending}
+              onClick={handleCrearProveedor}
+              disabled={!nuevoProveedor.nombre.trim()}
+            >
+              Crear y seleccionar
+            </Button>
+          </div>
+        </div>
+      )}
+
       {Boolean(proveedorId) && (
         <div className="flex gap-2 pt-1 border-t border-amber-200">
-          <button onClick={() => setModoPago('contado')} className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg border text-xs font-medium transition-all ${modoPago === 'contado' ? 'bg-green-100 border-green-400 text-green-700' : 'bg-white border-amber-200 text-gray-600 hover:border-green-300 hover:bg-green-50'}`}>
+          <button
+            onClick={() => setModoPago('contado')}
+            className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg border
+              text-xs font-medium transition-all
+              ${modoPago === 'contado'
+                ? 'bg-green-100 border-green-400 text-green-700'
+                : 'bg-white border-amber-200 text-gray-600 hover:border-green-300 hover:bg-green-50'}`}
+          >
             <Banknote size={13} /> Pagado / Contado
           </button>
-          <button onClick={() => setModoPago('credito')} className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg border text-xs font-medium transition-all ${modoPago === 'credito' ? 'bg-orange-100 border-orange-400 text-orange-700' : 'bg-white border-amber-200 text-gray-600 hover:border-orange-300 hover:bg-orange-50'}`}>
-            <CreditCard size={13} /> {yaEsAcreedor ? 'Registrar cargo' : 'A cr\xe9dito'}
+          <button
+            onClick={() => setModoPago('credito')}
+            className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg border
+              text-xs font-medium transition-all
+              ${modoPago === 'credito'
+                ? 'bg-orange-100 border-orange-400 text-orange-700'
+                : 'bg-white border-amber-200 text-gray-600 hover:border-orange-300 hover:bg-orange-50'}`}
+          >
+            <CreditCard size={13} /> {yaEsAcreedor ? 'Registrar cargo' : 'A crédito'}
           </button>
         </div>
       )}
-      {Boolean(proveedorId) && yaEsAcreedor && <p className="text-xs text-orange-600 font-medium">Este proveedor ya tiene cuenta como acreedor \u2014 se registrar\xe1 el cargo directamente.</p>}
+
+      {Boolean(proveedorId) && yaEsAcreedor && (
+        <p className="text-xs text-orange-600 font-medium">
+          Este proveedor ya tiene cuenta como acreedor — se registrará el cargo directamente.
+        </p>
+      )}
     </div>
   );
 }

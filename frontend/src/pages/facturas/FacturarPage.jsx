@@ -611,9 +611,7 @@ export default function FacturarPage() {
           onGuardado={() => setFacturaEditar(null)} />
       )}
 
-      const [facturaImprimir, setFacturaImprimir] = useState(null);
-
-// Al renderizar
+      
 {facturaImprimir && (
   <FacturaTermica
     factura={facturaImprimir.factura}
