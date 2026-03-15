@@ -13,6 +13,7 @@ import {
   verificarImei as verificarImeiApi,
 } from '../../api/productos.api';
 import { getAcreedores } from '../../api/acreedores.api';
+import { getLineas } from '../../api/lineas.api';
 import { useSucursalKey } from '../../hooks/useSucursalKey';
 import {
   Trash2, Package, ShoppingBag, ChevronRight,
@@ -332,6 +333,36 @@ function PasoTipo({ onSelect }) {
   );
 }
 
+// ─── Hook: carga las líneas de producto del negocio ───────────────────────────
+function useLineas() {
+  const { data } = useQuery({
+    queryKey: ['lineas'],
+    queryFn:  () => getLineas().then((r) => r.data.data),
+  });
+  return Array.isArray(data) ? data : [];
+}
+
+// ─── Select de línea reutilizable ─────────────────────────────────────────────
+function SelectLinea({ value, onChange }) {
+  const lineas = useLineas();
+  return (
+    <div className="flex flex-col gap-1">
+      <label className="text-xs text-gray-600 font-medium">Línea de producto *</label>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full px-2.5 py-2 bg-white border border-gray-200 rounded-lg text-xs
+          text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
+      >
+        <option value="">Seleccionar línea...</option>
+        {lineas.map((l) => (
+          <option key={l.id} value={l.id}>{l.nombre}</option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
 // ─── Componente línea con IMEIs ───────────────────────────────────────────────
 function LineaImeis({
   linea, factor, traida, imeisDuplicados,
@@ -463,7 +494,7 @@ function PasoLineaSerial({
 }) {
   const [busqueda,            setBusqueda]           = useState('');
   const [creandoNueva,        setCreandoNueva]        = useState(false);
-  const [nuevaLinea,          setNuevaLinea]          = useState({ nombre: '', marca: '', modelo: '', precio: '' });
+  const [nuevaLinea,          setNuevaLinea]          = useState({ nombre: '', marca: '', modelo: '', precio: '', linea_id: '' });
   const [lineasSeleccionadas, setLineasSeleccionadas] = useState(lineasIniciales);
   const [error,               setError]              = useState('');
   const [imeisDuplicados,     setImeisDuplicados]    = useState(new Set());
@@ -471,7 +502,6 @@ function PasoLineaSerial({
   const [traida,              setTraida]             = useState(traidaInicial);
   const queryClient = useQueryClient();
 
-  // ── CORRECCIÓN: normalizar r.data.data → array antes de cachear ──────────
   const { data: productosData } = useQuery({
     queryKey: ['productos-serial', ...sucursalKey],
     queryFn:  () =>
@@ -479,7 +509,6 @@ function PasoLineaSerial({
     enabled:  sucursalLista,
   });
 
-  // Garantiza array aunque el caché haya guardado estructura antigua
   const productos = normalizarProductos(productosData).filter((p) =>
     p.nombre.toLowerCase().includes(busqueda.toLowerCase())
   );
@@ -491,12 +520,13 @@ function PasoLineaSerial({
       modelo:       nuevaLinea.modelo,
       precio:       nuevaLinea.precio ? Number(nuevaLinea.precio) : null,
       proveedor_id: proveedorId,
+      linea_id:     nuevaLinea.linea_id ? Number(nuevaLinea.linea_id) : null,
     }),
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ['productos-serial'], exact: false });
       agregarLinea(res.data.data);
       setCreandoNueva(false);
-      setNuevaLinea({ nombre: '', marca: '', modelo: '', precio: '' });
+      setNuevaLinea({ nombre: '', marca: '', modelo: '', precio: '', linea_id: '' });
     },
     onError: (e) => setError(e.response?.data?.error || 'Error al crear línea'),
   });
@@ -674,13 +704,22 @@ function PasoLineaSerial({
             placeholder="Precio de venta"
             value={nuevaLinea.precio}
             onChange={(e) => setNuevaLinea({ ...nuevaLinea, precio: e.target.value })}
-            onKeyDown={(e) => e.key === 'Enter' && mutCrearLinea.mutate()}
+          />
+          {/* ── NUEVO: selector de línea ── */}
+          <SelectLinea
+            value={nuevaLinea.linea_id}
+            onChange={(val) => setNuevaLinea({ ...nuevaLinea, linea_id: val })}
           />
           <div className="flex gap-2">
             <Button variant="secondary" size="sm" className="flex-1" onClick={() => setCreandoNueva(false)}>
               Cancelar
             </Button>
-            <Button size="sm" className="flex-1" loading={mutCrearLinea.isPending} onClick={() => mutCrearLinea.mutate()}>
+            <Button
+              size="sm" className="flex-1"
+              loading={mutCrearLinea.isPending}
+              disabled={!nuevaLinea.linea_id}
+              onClick={() => mutCrearLinea.mutate()}
+            >
               Crear y agregar
             </Button>
           </div>
@@ -735,14 +774,13 @@ function PasoCantidad({
 }) {
   const [busqueda,               setBusqueda]              = useState('');
   const [creandoNuevo,           setCreandoNuevo]          = useState(false);
-  const [nuevoProducto,          setNuevoProducto]         = useState({ nombre: '', unidad_medida: 'unidad', precio: '', costo_unitario: '' });
+  const [nuevoProducto,          setNuevoProducto]         = useState({ nombre: '', unidad_medida: 'unidad', precio: '', costo_unitario: '', linea_id: '' });
   const [productosSeleccionados, setProductosSeleccionados] = useState(productosIniciales);
   const [error,                  setError]                 = useState('');
   const [factor,                 setFactor]                = useState(factorInicial);
   const [traida,                 setTraida]                = useState(traidaInicial);
   const queryClient = useQueryClient();
 
-  // ── CORRECCIÓN: normalizar r.data.data → array antes de cachear ──────────
   const { data: productosData } = useQuery({
     queryKey: ['productos-cantidad', ...sucursalKey],
     queryFn:  () =>
@@ -750,7 +788,6 @@ function PasoCantidad({
     enabled:  sucursalLista,
   });
 
-  // Garantiza array aunque el caché haya guardado estructura antigua
   const productos = normalizarProductos(productosData).filter((p) =>
     p.nombre.toLowerCase().includes(busqueda.toLowerCase())
   );
@@ -762,12 +799,13 @@ function PasoCantidad({
       costo_unitario: nuevoProducto.costo_unitario ? Number(nuevoProducto.costo_unitario) : null,
       precio:         nuevoProducto.precio ? Number(nuevoProducto.precio) : null,
       proveedor_id:   proveedorId,
+      linea_id:       nuevoProducto.linea_id ? Number(nuevoProducto.linea_id) : null,
     }),
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ['productos-cantidad'], exact: false });
       agregarProducto(res.data.data);
       setCreandoNuevo(false);
-      setNuevoProducto({ nombre: '', unidad_medida: 'unidad', precio: '', costo_unitario: '' });
+      setNuevoProducto({ nombre: '', unidad_medida: 'unidad', precio: '', costo_unitario: '', linea_id: '' });
     },
     onError: (e) => setError(e.response?.data?.error || 'Error'),
   });
@@ -892,9 +930,21 @@ function PasoCantidad({
               onChange={(e) => setNuevoProducto({ ...nuevoProducto, precio: e.target.value })}
             />
           </div>
+          {/* ── NUEVO: selector de línea ── */}
+          <SelectLinea
+            value={nuevoProducto.linea_id}
+            onChange={(val) => setNuevoProducto({ ...nuevoProducto, linea_id: val })}
+          />
           <div className="flex gap-2">
             <Button variant="secondary" size="sm" className="flex-1" onClick={() => setCreandoNuevo(false)}>Cancelar</Button>
-            <Button size="sm" className="flex-1" loading={mutCrear.isPending} onClick={() => mutCrear.mutate()}>Crear y agregar</Button>
+            <Button
+              size="sm" className="flex-1"
+              loading={mutCrear.isPending}
+              disabled={!nuevoProducto.linea_id}
+              onClick={() => mutCrear.mutate()}
+            >
+              Crear y agregar
+            </Button>
           </div>
         </div>
       )}
@@ -992,7 +1042,6 @@ function PasoPago({ proveedor, productos, tipo, onConfirmar, onVolver, loading }
   const [notas,               setNotas]                = useState('');
   const [error,               setError]                = useState('');
 
-  // acreedores es del negocio (negocio_id) → sin sucursalKey
   const { data: acreedoresRaw } = useQuery({
     queryKey: ['acreedores'],
     queryFn:  () => getAcreedores('').then((r) => r.data.data),
