@@ -5,7 +5,7 @@ import { Button }        from '../../components/ui/Button';
 import { Input }         from '../../components/ui/Input';
 import { Spinner }       from '../../components/ui/Spinner';
 import { formatCOP }     from '../../utils/formatters';
-import { crearPrestamo } from '../../api/prestamos.api';
+import { crearPrestamos } from '../../api/prestamos.api';
 import {
   getPrestatarios, crearPrestatario,
   getEmpleados,    crearEmpleado,
@@ -14,7 +14,15 @@ import { getClientes, crearCliente } from '../../api/clientes.api';
 import useCarritoStore from '../../store/carritoStore';
 import { User, Users, Plus, ChevronLeft, Search } from 'lucide-react';
 
-// ── Selector genérico (para prestatarios y empleados) ─────────────────────
+// ─── Constantes ───────────────────────────────────────────────────────────────
+
+const TIPOS_CLIENTE = [
+  { id: 'companero', label: 'Compañero', icon: User  },
+  { id: 'cliente',   label: 'Cliente',   icon: Users },
+];
+
+// ─── SelectorOCrear — selector genérico con lista + formulario simple ─────────
+
 function SelectorOCrear({ items, onSeleccionar, onCrear, placeholder, labelCrear, loading, renderItem }) {
   const [modo,   setModo]   = useState('seleccionar');
   const [nombre, setNombre] = useState('');
@@ -76,7 +84,8 @@ function SelectorOCrear({ items, onSeleccionar, onCrear, placeholder, labelCrear
   );
 }
 
-// ── Selector de clientes con búsqueda y formulario completo ──────────────
+// ─── SelectorOCrearCliente — búsqueda por nombre/cédula + formulario completo ──
+
 function SelectorOCrearCliente({ items, onSeleccionar, onCrear, loading }) {
   const [modo,     setModo]     = useState('seleccionar');
   const [busqueda, setBusqueda] = useState('');
@@ -84,15 +93,11 @@ function SelectorOCrearCliente({ items, onSeleccionar, onCrear, loading }) {
     nombre: '', cedula: '', celular: '', direccion: '', notas: '',
   });
 
-  // Solo mostrar resultados cuando el usuario haya escrito algo
-  const mostrarResultados = busqueda.trim().length > 0;
-  const clientesFiltrados = mostrarResultados
+  const mostrarResultados  = busqueda.trim().length > 0;
+  const clientesFiltrados  = mostrarResultados
     ? items.filter((c) => {
         const q = busqueda.toLowerCase();
-        return (
-          c.nombre?.toLowerCase().includes(q) ||
-          c.cedula?.toLowerCase().includes(q)
-        );
+        return c.nombre?.toLowerCase().includes(q) || c.cedula?.toLowerCase().includes(q);
       })
     : [];
 
@@ -139,7 +144,6 @@ function SelectorOCrearCliente({ items, onSeleccionar, onCrear, loading }) {
 
   return (
     <div className="flex flex-col gap-2">
-      {/* ── Input de búsqueda ── */}
       <div className="relative">
         <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
         <input
@@ -151,30 +155,24 @@ function SelectorOCrearCliente({ items, onSeleccionar, onCrear, loading }) {
             text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"
         />
       </div>
-
-      {/* ── Resultados — solo aparecen al escribir ── */}
       {mostrarResultados && (
         clientesFiltrados.length > 0 ? (
           <div className="flex flex-col gap-1 max-h-44 overflow-y-auto rounded-xl border border-gray-100 bg-white">
             {clientesFiltrados.map((item) => (
               <button key={item.id} onClick={() => onSeleccionar(item)}
-                className="text-left px-3 py-2.5 hover:bg-blue-50 transition-colors border-b
-                  border-gray-50 last:border-0">
+                className="text-left px-3 py-2.5 hover:bg-blue-50 transition-colors
+                  border-b border-gray-50 last:border-0">
                 <p className="text-sm font-medium text-gray-800">{item.nombre}</p>
                 <p className="text-xs text-gray-400">
-                  CC: {item.cedula}
-                  {item.celular ? ` · Tel: ${item.celular}` : ''}
+                  CC: {item.cedula}{item.celular ? ` · Tel: ${item.celular}` : ''}
                 </p>
               </button>
             ))}
           </div>
         ) : (
-          <p className="text-xs text-gray-400 px-1">
-            Sin resultados para "{busqueda}"
-          </p>
+          <p className="text-xs text-gray-400 px-1">Sin resultados para "{busqueda}"</p>
         )
       )}
-
       <button
         onClick={() => setModo('crear')}
         className="flex items-center gap-1 text-xs text-blue-500 hover:text-blue-700 w-fit"
@@ -185,22 +183,49 @@ function SelectorOCrearCliente({ items, onSeleccionar, onCrear, loading }) {
   );
 }
 
-// ── Chip de selección confirmada ──────────────────────────────────────────
+// ─── ChipSeleccionado ─────────────────────────────────────────────────────────
+
 function ChipSeleccionado({ nombre, onCambiar }) {
   return (
     <div className="flex items-center justify-between bg-blue-50 border border-blue-200 rounded-xl px-3 py-2">
       <span className="text-sm font-medium text-blue-800">{nombre}</span>
-      <button
-        onClick={onCambiar}
-        className="text-xs text-blue-400 hover:text-blue-600"
-      >
+      <button onClick={onCambiar} className="text-xs text-blue-400 hover:text-blue-600">
         Cambiar
       </button>
     </div>
   );
 }
 
-// ── Modal principal ───────────────────────────────────────────────────────
+// ─── ResumenCarrito — muestra los ítems que se van a prestar ──────────────────
+
+function ResumenCarrito({ items }) {
+  return (
+    <div className="bg-gray-50 rounded-xl p-3 flex flex-col gap-2">
+      <p className="text-xs font-medium text-gray-500">
+        Producto{items.length > 1 ? `s a prestar (${items.length})` : ' a prestar'}
+      </p>
+      {items.map((item) => (
+        <div key={item.key} className="flex items-center justify-between gap-2">
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium text-gray-800 truncate">{item.nombre}</p>
+            {item.imei && (
+              <p className="text-xs text-gray-400 font-mono">{item.imei}</p>
+            )}
+            {item.tipo === 'cantidad' && (
+              <p className="text-xs text-gray-400">Cantidad: {item.cantidad || 1}</p>
+            )}
+          </div>
+          <span className="text-sm font-semibold text-gray-700 flex-shrink-0">
+            {formatCOP(item.precioFinal)}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ─── Modal principal ──────────────────────────────────────────────────────────
+
 export function ModalPrestamo({ open, onClose }) {
   const queryClient = useQueryClient();
   const { items, totalCarrito, limpiarCarrito } = useCarritoStore();
@@ -210,9 +235,9 @@ export function ModalPrestamo({ open, onClose }) {
   const [prestatarioSel, setPrestatarioSel] = useState(null);
   const [empleadoSel,    setEmpleadoSel]    = useState(null);
   const [clienteSel,     setClienteSel]     = useState(null);
-  const [valorPrestamo,  setValorPrestamo]  = useState(String(total));
   const [error,          setError]          = useState('');
 
+  // ── Queries ────────────────────────────────────────────────────────────────
   const { data: prestatariosData, isLoading: loadingPrestatarios } = useQuery({
     queryKey: ['prestatarios'],
     queryFn:  () => getPrestatarios().then((r) => r.data.data),
@@ -231,6 +256,7 @@ export function ModalPrestamo({ open, onClose }) {
     enabled:  open && tipoCliente === 'cliente',
   });
 
+  // ── Mutations auxiliares ───────────────────────────────────────────────────
   const mutCrearPrestatario = useMutation({
     mutationFn: (nombre) => crearPrestatario({ nombre }),
     onSuccess: (res) => {
@@ -261,12 +287,13 @@ export function ModalPrestamo({ open, onClose }) {
     },
   });
 
-  const mutPrestamo = useMutation({
-    mutationFn: crearPrestamo,
+  // ── Mutation principal — crea N préstamos en batch ────────────────────────
+  const mutPrestamos = useMutation({
+    mutationFn: crearPrestamos,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['productos-serial'],  exact: false });
-      queryClient.invalidateQueries({ queryKey: ['productos-cantidad'], exact: false });
-      queryClient.invalidateQueries({ queryKey: ['prestamos'],          exact: false });
+      queryClient.invalidateQueries({ queryKey: ['productos-serial'],   exact: false });
+      queryClient.invalidateQueries({ queryKey: ['productos-cantidad'],  exact: false });
+      queryClient.invalidateQueries({ queryKey: ['prestamos'],           exact: false });
       limpiarCarrito();
       onClose();
       resetForm();
@@ -279,49 +306,47 @@ export function ModalPrestamo({ open, onClose }) {
     setPrestatarioSel(null);
     setEmpleadoSel(null);
     setClienteSel(null);
-    setValorPrestamo(String(total));
     setError('');
   };
+
+  // ── Construir array de ítems para el payload ───────────────────────────────
+  const buildItems = () =>
+    items.map((item) => ({
+      nombre_producto:   item.nombre,
+      imei:              item.imei        || null,
+      producto_id:       item.producto_id || null,
+      cantidad_prestada: item.cantidad    || 1,
+      valor_prestamo:    item.precioFinal,
+    }));
 
   const handleSubmit = () => {
     setError('');
     if (items.length === 0) return setError('El carrito está vacío');
-    if (items.length > 1)   return setError('Solo se puede prestar un producto a la vez');
-
-    const item = items[0];
 
     if (tipoCliente === 'companero') {
       if (!prestatarioSel) return setError('Selecciona o crea un prestatario');
       if (!empleadoSel)    return setError('Selecciona o agrega un empleado');
 
-      mutPrestamo.mutate({
-        prestatario:       prestatarioSel.nombre,
-        cedula:            'COMPANERO',
-        telefono:          '0000000000',
-        nombre_producto:   item.nombre,
-        imei:              item.imei        || null,
-        producto_id:       item.producto_id || null,
-        cantidad_prestada: item.cantidad    || 1,
-        valor_prestamo:    Number(valorPrestamo || total),
-        prestatario_id:    prestatarioSel.id,
-        empleado_id:       empleadoSel.id,
-        cliente_id:        null,
+      mutPrestamos.mutate({
+        prestatario:    prestatarioSel.nombre,
+        cedula:         'COMPANERO',
+        telefono:       '0000000000',
+        prestatario_id: prestatarioSel.id,
+        empleado_id:    empleadoSel.id,
+        cliente_id:     null,
+        items:          buildItems(),
       });
     } else {
       if (!clienteSel) return setError('Selecciona o crea un cliente');
 
-      mutPrestamo.mutate({
-        prestatario:       clienteSel.nombre,
-        cedula:            clienteSel.cedula  || 'S/C',
-        telefono:          clienteSel.celular || '0000000000',
-        nombre_producto:   item.nombre,
-        imei:              item.imei        || null,
-        producto_id:       item.producto_id || null,
-        cantidad_prestada: item.cantidad    || 1,
-        valor_prestamo:    Number(valorPrestamo || total),
-        prestatario_id:    null,
-        empleado_id:       null,
-        cliente_id:        clienteSel.id,
+      mutPrestamos.mutate({
+        prestatario: clienteSel.nombre,
+        cedula:      clienteSel.cedula  || 'S/C',
+        telefono:    clienteSel.celular || '0000000000',
+        prestatario_id: null,
+        empleado_id:    null,
+        cliente_id:     clienteSel.id,
+        items:          buildItems(),
       });
     }
   };
@@ -334,12 +359,9 @@ export function ModalPrestamo({ open, onClose }) {
     <Modal open={open} onClose={onClose} title="Registrar Préstamo" size="md">
       <div className="flex flex-col gap-5">
 
-        {/* Tipo */}
+        {/* Tipo de destinatario */}
         <div className="flex gap-2">
-          {[
-            { id: 'companero', label: 'Compañero', icon: User  },
-            { id: 'cliente',   label: 'Cliente',   icon: Users },
-          ].map((tab) => {
+          {TIPOS_CLIENTE.map((tab) => {
             const TabIcon = tab.icon;
             return (
               <button
@@ -363,16 +385,8 @@ export function ModalPrestamo({ open, onClose }) {
           })}
         </div>
 
-        {/* Producto */}
-        {items.length > 0 && (
-          <div className="bg-gray-50 rounded-xl p-3">
-            <p className="text-xs font-medium text-gray-500 mb-1">Producto a prestar</p>
-            <p className="text-sm font-medium text-gray-800">{items[0].nombre}</p>
-            {items[0].imei && (
-              <p className="text-xs text-gray-400 font-mono">{items[0].imei}</p>
-            )}
-          </div>
-        )}
+        {/* Resumen de productos del carrito */}
+        {items.length > 0 && <ResumenCarrito items={items} />}
 
         {/* ── Flujo Compañero ── */}
         {tipoCliente === 'companero' && (
@@ -424,9 +438,7 @@ export function ModalPrestamo({ open, onClose }) {
         {/* ── Flujo Cliente ── */}
         {tipoCliente === 'cliente' && (
           <div className="flex flex-col gap-2">
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-              Cliente
-            </p>
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Cliente</p>
             {clienteSel ? (
               <ChipSeleccionado
                 nombre={clienteSel.nombre}
@@ -443,18 +455,12 @@ export function ModalPrestamo({ open, onClose }) {
           </div>
         )}
 
-        {/* Valor */}
-        <div className="flex flex-col gap-2">
-          <Input
-            label="Valor del préstamo"
-            type="number"
-            value={valorPrestamo}
-            onChange={(e) => setValorPrestamo(e.target.value)}
-          />
-          <div className="bg-gray-50 rounded-xl p-3 flex justify-between">
-            <span className="text-sm text-gray-600">Valor sugerido</span>
-            <span className="text-sm font-bold text-gray-900">{formatCOP(total)}</span>
-          </div>
+        {/* Total */}
+        <div className="bg-gray-50 rounded-xl px-3 py-2.5 flex justify-between items-center">
+          <span className="text-sm text-gray-600">
+            Total{items.length > 1 ? ` (${items.length} productos)` : ''}
+          </span>
+          <span className="text-sm font-bold text-gray-900">{formatCOP(total)}</span>
         </div>
 
         {error && (
@@ -464,15 +470,9 @@ export function ModalPrestamo({ open, onClose }) {
         )}
 
         <div className="flex gap-2">
-          <Button variant="secondary" className="flex-1" onClick={onClose}>
-            Cancelar
-          </Button>
-          <Button
-            className="flex-1"
-            loading={mutPrestamo.isPending}
-            onClick={handleSubmit}
-          >
-            Registrar Préstamo
+          <Button variant="secondary" className="flex-1" onClick={onClose}>Cancelar</Button>
+          <Button className="flex-1" loading={mutPrestamos.isPending} onClick={handleSubmit}>
+            Registrar Préstamo{items.length > 1 ? `s (${items.length})` : ''}
           </Button>
         </div>
       </div>

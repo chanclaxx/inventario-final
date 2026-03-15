@@ -1,18 +1,20 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getPrestamos, registrarAbonoPrestamo, devolverPrestamo } from '../../api/prestamos.api';
-import { getCreditos, registrarAbonoCredito }                     from '../../api/creditos.api';
-import { formatCOP, formatFechaHora }   from '../../utils/formatters';
-import { Badge }                        from '../../components/ui/Badge';
-import { Button }                       from '../../components/ui/Button';
-import { Modal }                        from '../../components/ui/Modal';
-import { Input }                        from '../../components/ui/Input';
-import { Spinner }                      from '../../components/ui/Spinner';
-import { EmptyState }                   from '../../components/ui/EmptyState';
+import { getPrestamos, registrarAbonoPrestamo, devolverPrestamo, devolverParcialPrestamo } from '../../api/prestamos.api';
+import { getCreditos, registrarAbonoCredito }   from '../../api/creditos.api';
+import { formatCOP, formatFechaHora }           from '../../utils/formatters';
+import { Badge }                                from '../../components/ui/Badge';
+import { Button }                               from '../../components/ui/Button';
+import { Modal }                                from '../../components/ui/Modal';
+import { Input }                                from '../../components/ui/Input';
+import { Spinner }                              from '../../components/ui/Spinner';
+import { EmptyState }                           from '../../components/ui/EmptyState';
 import {
   Handshake, CreditCard, Plus, CheckCircle,
   ChevronDown, ChevronUp, Users, User,
 } from 'lucide-react';
+
+// ─── Constantes ───────────────────────────────────────────────────────────────
 
 const TABS_PRINCIPALES = [
   { id: 'prestamos', label: 'Préstamos', icon: Handshake },
@@ -24,7 +26,8 @@ const TABS_PRESTAMOS = [
   { id: 'clientes',   label: 'Clientes',   icon: Users },
 ];
 
-// ── Modal Abono Préstamo ───────────────────────────────────────────────────
+// ─── Modal Abono Préstamo ─────────────────────────────────────────────────────
+
 function ModalAbonoPrestamo({ prestamo, onClose }) {
   const queryClient = useQueryClient();
   const [valor, setValor] = useState('');
@@ -73,7 +76,106 @@ function ModalAbonoPrestamo({ prestamo, onClose }) {
   );
 }
 
-// ── Modal Abono Crédito ───────────────────────────────────────────────────
+// ─── Modal Devolución (serial → confirmar / cantidad → pedir cuántos) ─────────
+
+function ModalDevolucion({ prestamo, onClose }) {
+  const queryClient = useQueryClient();
+  const [cantidad,  setCantidad]  = useState('');
+  const [error,     setError]     = useState('');
+
+  const esPorCantidad = !prestamo.imei && !!prestamo.producto_id;
+  const cantidadMax   = Number(prestamo.cantidad_prestada);
+
+  const mutDevolver = useMutation({
+    mutationFn: () => devolverPrestamo(prestamo.id),
+    onSuccess:  () => { queryClient.invalidateQueries(['prestamos']); onClose(); },
+    onError:    (err) => setError(err.response?.data?.error || 'Error al registrar devolución'),
+  });
+
+  const mutDevolverParcial = useMutation({
+    mutationFn: (cant) => devolverParcialPrestamo(prestamo.id, cant),
+    onSuccess:  () => { queryClient.invalidateQueries(['prestamos']); onClose(); },
+    onError:    (err) => setError(err.response?.data?.error || 'Error al registrar devolución'),
+  });
+
+  const handleConfirmar = () => {
+    setError('');
+    if (!esPorCantidad) {
+      // Serial: devolución simple, sin preguntar cantidad
+      mutDevolver.mutate();
+      return;
+    }
+    const cant = Number(cantidad);
+    if (!cantidad || cant < 1 || cant > cantidadMax) {
+      return setError(`Ingresa una cantidad entre 1 y ${cantidadMax}`);
+    }
+    if (cant === cantidadMax) {
+      mutDevolver.mutate();
+    } else {
+      mutDevolverParcial.mutate(cant);
+    }
+  };
+
+  const isPending = mutDevolver.isPending || mutDevolverParcial.isPending;
+
+  return (
+    <Modal open={!!prestamo} onClose={onClose} title="Registrar Devolución" size="sm">
+      <div className="flex flex-col gap-4">
+
+        {/* Resumen del préstamo */}
+        <div className="bg-gray-50 rounded-xl p-3 flex flex-col gap-1">
+          <p className="text-xs text-gray-400">{prestamo.prestatario}</p>
+          <p className="text-sm font-medium text-gray-800">{prestamo.nombre_producto}</p>
+          {prestamo.imei && (
+            <p className="text-xs text-gray-400 font-mono">IMEI: {prestamo.imei}</p>
+          )}
+          {esPorCantidad && (
+            <p className="text-xs text-gray-500">
+              Cantidad prestada: <span className="font-semibold">{cantidadMax}</span>
+            </p>
+          )}
+        </div>
+
+        {/* Para serial: solo confirmar. Para cantidad: pedir cuántos devuelve */}
+        {esPorCantidad ? (
+          <div className="flex flex-col gap-1">
+            <Input
+              label={`¿Cuántas unidades devuelve? (máx. ${cantidadMax})`}
+              type="number"
+              min="1"
+              max={cantidadMax}
+              placeholder={String(cantidadMax)}
+              value={cantidad}
+              onChange={(e) => setCantidad(e.target.value)}
+              autoFocus
+            />
+            {cantidad && Number(cantidad) < cantidadMax && Number(cantidad) > 0 && (
+              <p className="text-xs text-amber-600 bg-amber-50 rounded-lg px-3 py-1.5">
+                Quedarán <strong>{cantidadMax - Number(cantidad)}</strong> unidad(es) pendiente(s) de devolución.
+              </p>
+            )}
+          </div>
+        ) : (
+          <p className="text-sm text-gray-600">
+            ¿Confirmas que el equipo fue devuelto?
+          </p>
+        )}
+
+        {error && <p className="text-sm text-red-500">{error}</p>}
+
+        <div className="flex gap-2">
+          <Button variant="secondary" className="flex-1" onClick={onClose}>Cancelar</Button>
+          <Button className="flex-1" loading={isPending} onClick={handleConfirmar}>
+            <CheckCircle size={15} /> Confirmar devolución
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// ─── Modal Abono Crédito ──────────────────────────────────────────────────────
+
 function ModalAbonoCredito({ credito, onClose }) {
   const queryClient = useQueryClient();
   const [valor,  setValor]  = useState('');
@@ -87,6 +189,7 @@ function ModalAbonoCredito({ credito, onClose }) {
   });
 
   const saldoPendiente = Number(credito.valor_total) - Number(credito.total_abonado);
+  const METODOS_PAGO   = ['Efectivo', 'Nequi', 'Transferencia'];
 
   return (
     <Modal open={!!credito} onClose={onClose} title="Registrar Abono" size="sm">
@@ -99,7 +202,7 @@ function ModalAbonoCredito({ credito, onClose }) {
           </div>
         </div>
         <div className="flex gap-2">
-          {['Efectivo', 'Nequi', 'Transferencia'].map((m) => (
+          {METODOS_PAGO.map((m) => (
             <button
               key={m}
               onClick={() => setMetodo(m)}
@@ -133,7 +236,8 @@ function ModalAbonoCredito({ credito, onClose }) {
   );
 }
 
-// ── Card préstamo — compañero ─────────────────────────────────────────────
+// ─── Card préstamo — compañero ────────────────────────────────────────────────
+
 function CardPrestamoCompanero({ prestamo, onAbonar, onDevolver }) {
   const saldo    = Number(prestamo.valor_prestamo) - Number(prestamo.total_abonado);
   const progreso = (Number(prestamo.total_abonado) / Number(prestamo.valor_prestamo)) * 100;
@@ -145,6 +249,9 @@ function CardPrestamoCompanero({ prestamo, onAbonar, onDevolver }) {
           <p className="text-sm font-medium text-gray-800 truncate">{prestamo.nombre_producto}</p>
           {prestamo.imei && (
             <p className="text-xs text-gray-400 font-mono">{prestamo.imei}</p>
+          )}
+          {!prestamo.imei && prestamo.cantidad_prestada > 1 && (
+            <p className="text-xs text-gray-400">Cantidad: {prestamo.cantidad_prestada}</p>
           )}
           {prestamo.empleado_nombre && (
             <p className="text-xs text-blue-500 mt-0.5">→ {prestamo.empleado_nombre}</p>
@@ -173,7 +280,7 @@ function CardPrestamoCompanero({ prestamo, onAbonar, onDevolver }) {
         <Button size="sm" className="flex-1" onClick={() => onAbonar(prestamo)}>
           <Plus size={14} /> Abonar
         </Button>
-        <Button size="sm" variant="secondary" onClick={() => onDevolver(prestamo.id)}>
+        <Button size="sm" variant="secondary" onClick={() => onDevolver(prestamo)}>
           <CheckCircle size={14} /> Devuelto
         </Button>
       </div>
@@ -181,7 +288,8 @@ function CardPrestamoCompanero({ prestamo, onAbonar, onDevolver }) {
   );
 }
 
-// ── Card préstamo — cliente ───────────────────────────────────────────────
+// ─── Card préstamo — cliente ──────────────────────────────────────────────────
+
 function CardPrestamoCliente({ prestamo, onAbonar, onDevolver }) {
   const saldo    = Number(prestamo.valor_prestamo) - Number(prestamo.total_abonado);
   const progreso = (Number(prestamo.total_abonado) / Number(prestamo.valor_prestamo)) * 100;
@@ -194,6 +302,9 @@ function CardPrestamoCliente({ prestamo, onAbonar, onDevolver }) {
           {prestamo.imei && (
             <p className="text-xs text-gray-400 font-mono">{prestamo.imei}</p>
           )}
+          {!prestamo.imei && prestamo.cantidad_prestada > 1 && (
+            <p className="text-xs text-gray-400">Cantidad: {prestamo.cantidad_prestada}</p>
+          )}
           <p className="text-xs text-gray-400 mt-0.5">{formatFechaHora(prestamo.fecha)}</p>
         </div>
         <Badge variant={prestamo.estado === 'Activo' ? 'blue' : 'green'}>
@@ -201,15 +312,10 @@ function CardPrestamoCliente({ prestamo, onAbonar, onDevolver }) {
         </Badge>
       </div>
 
-      {/* Info del cliente */}
       {(prestamo.cedula || prestamo.telefono) && (
         <div className="bg-gray-50 rounded-xl px-3 py-2 flex flex-col gap-0.5">
-          {prestamo.cedula && (
-            <p className="text-xs text-gray-500">CC: {prestamo.cedula}</p>
-          )}
-          {prestamo.telefono && (
-            <p className="text-xs text-gray-500">Tel: {prestamo.telefono}</p>
-          )}
+          {prestamo.cedula && <p className="text-xs text-gray-500">CC: {prestamo.cedula}</p>}
+          {prestamo.telefono && <p className="text-xs text-gray-500">Tel: {prestamo.telefono}</p>}
         </div>
       )}
 
@@ -230,7 +336,7 @@ function CardPrestamoCliente({ prestamo, onAbonar, onDevolver }) {
         <Button size="sm" className="flex-1" onClick={() => onAbonar(prestamo)}>
           <Plus size={14} /> Abonar
         </Button>
-        <Button size="sm" variant="secondary" onClick={() => onDevolver(prestamo.id)}>
+        <Button size="sm" variant="secondary" onClick={() => onDevolver(prestamo)}>
           <CheckCircle size={14} /> Devuelto
         </Button>
       </div>
@@ -238,11 +344,14 @@ function CardPrestamoCliente({ prestamo, onAbonar, onDevolver }) {
   );
 }
 
-// ── Grupo colapsable por prestatario/cliente ──────────────────────────────
+// ─── Grupo colapsable por prestatario/cliente ─────────────────────────────────
+
 function GrupoPrestatario({ nombre, prestamos, saldoTotal, onAbonar, onDevolver, CardItem }) {
   const [abierto, setAbierto] = useState(true);
+
   const activos  = prestamos.filter((p) => p.estado === 'Activo');
   const cerrados = prestamos.filter((p) => p.estado !== 'Activo');
+
   const Card = CardItem;
 
   return (
@@ -260,9 +369,7 @@ function GrupoPrestatario({ nombre, prestamos, saldoTotal, onAbonar, onDevolver,
         </div>
         <div className="flex items-center gap-3 flex-shrink-0">
           {saldoTotal > 0 && (
-            <span className="text-sm font-bold text-red-500">
-              {formatCOP(saldoTotal)}
-            </span>
+            <span className="text-sm font-bold text-red-500">{formatCOP(saldoTotal)}</span>
           )}
           {abierto
             ? <ChevronUp size={16} className="text-gray-400" />
@@ -277,13 +384,13 @@ function GrupoPrestatario({ nombre, prestamos, saldoTotal, onAbonar, onDevolver,
             <p className="text-xs text-gray-400 px-1 py-2">Sin préstamos activos</p>
           ) : (
             activos.map((p) => (
-  <Card
-    key={p.id}
-    prestamo={p}
-    onAbonar={onAbonar}
-    onDevolver={onDevolver}
-  />
-))
+              <Card
+                key={p.id}
+                prestamo={p}
+                onAbonar={onAbonar}
+                onDevolver={onDevolver}
+              />
+            ))
           )}
 
           {cerrados.length > 0 && (
@@ -293,7 +400,8 @@ function GrupoPrestatario({ nombre, prestamos, saldoTotal, onAbonar, onDevolver,
               </summary>
               <div className="flex flex-col gap-2 mt-2">
                 {cerrados.map((p) => (
-                  <div key={p.id} className="bg-gray-50 border border-gray-100 rounded-xl p-3 flex justify-between items-center">
+                  <div key={p.id}
+                    className="bg-gray-50 border border-gray-100 rounded-xl p-3 flex justify-between items-center">
                     <div className="min-w-0">
                       <p className="text-sm font-medium text-gray-600 truncate">{p.nombre_producto}</p>
                       {p.empleado_nombre && (
@@ -312,13 +420,14 @@ function GrupoPrestatario({ nombre, prestamos, saldoTotal, onAbonar, onDevolver,
   );
 }
 
-// ── Página principal ──────────────────────────────────────────────────────
+// ─── Página principal ─────────────────────────────────────────────────────────
+
 export default function PrestamosPage() {
-  const [tabPrincipal,  setTabPrincipal]  = useState('prestamos');
-  const [tabPrestamos,  setTabPrestamos]  = useState('companeros');
-  const [prestamoAbono, setPrestamoAbono] = useState(null);
-  const [creditoAbono,  setCreditoAbono]  = useState(null);
-  const queryClient = useQueryClient();
+  const [tabPrincipal,   setTabPrincipal]   = useState('prestamos');
+  const [tabPrestamos,   setTabPrestamos]   = useState('companeros');
+  const [prestamoAbono,  setPrestamoAbono]  = useState(null);
+  const [prestamoDevol,  setPrestamoDevol]  = useState(null); // modal devolución
+  const [creditoAbono,   setCreditoAbono]   = useState(null);
 
   const { data: prestamosData, isLoading: loadingP } = useQuery({
     queryKey: ['prestamos'],
@@ -330,14 +439,10 @@ export default function PrestamosPage() {
     queryFn:  () => getCreditos().then((r) => r.data.data),
   });
 
-  const mutDevolver = useMutation({
-    mutationFn: devolverPrestamo,
-    onSuccess:  () => queryClient.invalidateQueries(['prestamos']),
-  });
-
   const prestamos = prestamosData || [];
   const creditos  = creditosData  || [];
 
+  // Agrupar por prestatario (compañero)
   const gruposCompaneros = prestamos
     .filter((p) => p.prestatario_id)
     .reduce((acc, p) => {
@@ -353,6 +458,7 @@ export default function PrestamosPage() {
       return acc;
     }, {});
 
+  // Agrupar por cliente
   const gruposClientes = prestamos
     .filter((p) => p.cliente_id)
     .reduce((acc, p) => {
@@ -394,7 +500,7 @@ export default function PrestamosPage() {
         })}
       </div>
 
-      {/* PRÉSTAMOS */}
+      {/* ── PRÉSTAMOS ── */}
       {tabPrincipal === 'prestamos' && (
         <div className="flex flex-col gap-4">
 
@@ -446,7 +552,7 @@ export default function PrestamosPage() {
                         prestamos={grupo.prestamos}
                         saldoTotal={grupo.saldoTotal}
                         onAbonar={setPrestamoAbono}
-                        onDevolver={(id) => mutDevolver.mutate(id)}
+                        onDevolver={setPrestamoDevol}
                         CardItem={CardPrestamoCompanero}
                       />
                     ))
@@ -466,7 +572,7 @@ export default function PrestamosPage() {
                         prestamos={grupo.prestamos}
                         saldoTotal={grupo.saldoTotal}
                         onAbonar={setPrestamoAbono}
-                        onDevolver={(id) => mutDevolver.mutate(id)}
+                        onDevolver={setPrestamoDevol}
                         CardItem={CardPrestamoCliente}
                       />
                     ))
@@ -478,7 +584,7 @@ export default function PrestamosPage() {
         </div>
       )}
 
-      {/* CRÉDITOS */}
+      {/* ── CRÉDITOS ── */}
       {tabPrincipal === 'creditos' && (
         <div className="flex flex-col gap-3">
           {loadingC ? (
@@ -492,7 +598,8 @@ export default function PrestamosPage() {
                   const saldo    = Number(c.valor_total) - Number(c.total_abonado);
                   const progreso = (Number(c.total_abonado) / Number(c.valor_total)) * 100;
                   return (
-                    <div key={c.id} className="bg-white border border-gray-100 rounded-2xl p-4 flex flex-col gap-3">
+                    <div key={c.id}
+                      className="bg-white border border-gray-100 rounded-2xl p-4 flex flex-col gap-3">
                       <div className="flex items-start justify-between">
                         <div>
                           <p className="font-semibold text-gray-900">{c.nombre_cliente}</p>
@@ -532,7 +639,8 @@ export default function PrestamosPage() {
                   </summary>
                   <div className="flex flex-col gap-2 mt-2">
                     {creditosSaldados.map((c) => (
-                      <div key={c.id} className="bg-gray-50 border border-gray-100 rounded-xl p-3 flex justify-between items-center">
+                      <div key={c.id}
+                        className="bg-gray-50 border border-gray-100 rounded-xl p-3 flex justify-between items-center">
                         <div>
                           <p className="text-sm font-medium text-gray-600">{c.nombre_cliente}</p>
                           <p className="text-xs text-gray-400">Factura #{c.factura_id}</p>
@@ -548,8 +656,12 @@ export default function PrestamosPage() {
         </div>
       )}
 
+      {/* ── Modales ── */}
       {prestamoAbono && (
         <ModalAbonoPrestamo prestamo={prestamoAbono} onClose={() => setPrestamoAbono(null)} />
+      )}
+      {prestamoDevol && (
+        <ModalDevolucion prestamo={prestamoDevol} onClose={() => setPrestamoDevol(null)} />
       )}
       {creditoAbono && (
         <ModalAbonoCredito credito={creditoAbono} onClose={() => setCreditoAbono(null)} />

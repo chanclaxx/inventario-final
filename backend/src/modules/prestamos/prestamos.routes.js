@@ -1,4 +1,3 @@
-// prestamos.routes.js
 const router   = require('express').Router();
 const { body } = require('express-validator');
 const { validate } = require('../../middlewares/validate.middleware');
@@ -9,14 +8,26 @@ const validarPrestamo = [
   body('cantidad_prestada').optional().isInt({ min: 1 }).withMessage('Cantidad inválida'),
 ];
 
+const validarPrestamos = [
+  body('items').isArray({ min: 1 }).withMessage('Se requiere al menos un ítem'),
+  body('items.*.valor_prestamo').isFloat({ gt: 0 }).withMessage('Valor del préstamo debe ser mayor a 0'),
+  body('items.*.cantidad_prestada').optional().isInt({ min: 1 }).withMessage('Cantidad inválida'),
+];
+
 const validarAbono = [
   body('valor').isFloat({ gt: 0 }).withMessage('El valor del abono debe ser mayor a 0'),
 ];
 
-router.get('/',               ctrl.getPrestamos);
-router.get('/:id',            ctrl.getPrestamoById);
-router.post('/',              validarPrestamo, validate, ctrl.crearPrestamo);
-router.post('/:id/abonos',    validarAbono,   validate, ctrl.registrarAbono);
-router.patch('/:id/devolver', ctrl.devolverPrestamo);
+const validarDevolucionParcial = [
+  body('cantidad_devuelta').isInt({ min: 1 }).withMessage('La cantidad a devolver debe ser mayor a 0'),
+];
+
+router.get('/',                       ctrl.getPrestamos);
+router.get('/:id',                    ctrl.getPrestamoById);
+router.post('/',                      validarPrestamo,         validate, ctrl.crearPrestamo);
+router.post('/batch',                 validarPrestamos,        validate, ctrl.crearPrestamos);
+router.post('/:id/abonos',            validarAbono,            validate, ctrl.registrarAbono);
+router.patch('/:id/devolver',                                            ctrl.devolverPrestamo);
+router.patch('/:id/devolver-parcial', validarDevolucionParcial, validate, ctrl.devolverParcial);
 
 module.exports = router;

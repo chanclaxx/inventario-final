@@ -6,3 +6,6 @@ export const crearPrestamo = (data) => api.post('/prestamos', data);
 export const registrarAbonoPrestamo = (id, valor) =>
   api.post(`/prestamos/${id}/abonos`, { valor });
 export const devolverPrestamo = (id) => api.patch(`/prestamos/${id}/devolver`);
+export const crearPrestamos         = (data) => api.post('/prestamos/batch', data);
+export const devolverParcialPrestamo = (id, cantidad_devuelta) =>
+  api.patch(`/prestamos/${id}/devolver-parcial`, { cantidad_devuelta });
