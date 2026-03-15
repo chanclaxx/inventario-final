@@ -15,6 +15,7 @@ const { ejecutar: verificarVencimientos } = require('./jobs/vencimientos.job');
 validateEnv();
 
 const app = express();
+app.set('trust proxy', 1); // ← agregar después de crear app
 
 // ── Middlewares globales ──────────────────────────────
 app.use(helmet());
