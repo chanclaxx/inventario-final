@@ -9,7 +9,7 @@ import { formatCOP }                from '../../utils/formatters';
 import { ModalConflictoCedula }     from '../../components/ui/ModalConflictoCedula';
 import { useCedulaCliente }         from '../../hooks/useCedulaCliente';
 import { crearFactura, getFacturaById } from '../../api/facturas.api';
-import { getGarantias }             from '../../api/garantias.api';
+import { getGarantiasPorFactura } from '../../api/garantias.api';
 import { buscarPorCedula }          from '../../api/clientes.api';
 import {
   getProductosSerial,
@@ -543,10 +543,11 @@ export function ModalFactura({ open, onClose }) {
 
   const { conflictoCliente, verificarCedula, reescribirCliente, cancelarConflicto } = useCedulaCliente();
 
-  const { data: garantiasData } = useQuery({
-    queryKey: ['garantias'],
-    queryFn:  () => getGarantias().then((r) => r.data.data),
-  });
+  const { data: garantiasFactura } = useQuery({
+  queryKey: ['garantias-factura', facturaCreada?.id],
+  queryFn:  () => getGarantiasPorFactura(facturaCreada.id).then((r) => r.data.data),
+  enabled:  !!facturaCreada?.id,
+});
   const { data: configData } = useQuery({
     queryKey: ['config'],
     queryFn:  () => api.get('/config').then((r) => r.data.data),
@@ -934,12 +935,12 @@ export function ModalFactura({ open, onClose }) {
       />
 
       {mostrarImpresion && facturaCreada && (
-        <FacturaTermica
-          factura={facturaCreada}
-          garantias={garantiasData || []}
-          onClose={() => { setMostrarImpresion(false); limpiarCarrito(); onClose(); resetForm(); }}
-        />
-      )}
+  <FacturaTermica
+    factura={facturaCreada}
+    garantias={garantiasFactura || []}   // ← filtradas por línea
+    onClose={() => { setMostrarImpresion(false); limpiarCarrito(); onClose(); resetForm(); }}
+  />
+)}
     </>
   );
 }

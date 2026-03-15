@@ -10,8 +10,9 @@ const validarGarantia = [
   body('orden').optional().isInt({ min: 0 }).withMessage('El orden debe ser un número positivo'),
 ];
 
-router.get('/',       ctrl.getGarantias);
-router.get('/:id',   ctrl.getGarantiaById);
+router.get('/',                          ctrl.getGarantias);
+router.get('/factura/:facturaId',        ctrl.getGarantiasPorFactura); // ← nueva
+router.get('/:id',                       ctrl.getGarantiaById);
 router.post('/',     requireNivel('admin_negocio'), validarGarantia, validate, ctrl.crearGarantia);
 router.put('/:id',   requireNivel('admin_negocio'), validarGarantia, validate, ctrl.actualizarGarantia);
 router.delete('/:id',requireNivel('admin_negocio'), ctrl.eliminarGarantia);

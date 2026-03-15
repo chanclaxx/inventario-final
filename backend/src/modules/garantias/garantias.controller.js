@@ -35,4 +35,16 @@ const eliminarGarantia = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-module.exports = { getGarantias, getGarantiaById, crearGarantia, actualizarGarantia, eliminarGarantia };
+// ── Garantías aplicables a una factura específica ─────────────────────────────
+const getGarantiasPorFactura = async (req, res, next) => {
+  try {
+    const data = await service.getGarantiasPorFactura(req.user.negocio_id, req.params.facturaId);
+    res.json({ ok: true, data });
+  } catch (err) { next(err); }
+};
+
+module.exports = {
+  getGarantias, getGarantiaById,
+  crearGarantia, actualizarGarantia, eliminarGarantia,
+  getGarantiasPorFactura,
+};
