@@ -10,7 +10,7 @@ router.get('/compras-cliente', ctrl.getComprasCliente);
 // ── Rutas de producto ──
 router.get('/',    ctrl.getProductos);
 router.get('/:id', ctrl.getProductoById);
-router.post('/',   requireNivel('supervisor'), ctrl.crearProducto);
+router.post('/',           requireNivel('vendedor'), ctrl.crearProducto);
 router.put('/:id', requireNivel('supervisor'), ctrl.actualizarProducto);
 
 // ── Rutas de seriales ──
