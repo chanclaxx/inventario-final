@@ -12,6 +12,13 @@ import { EmptyState } from '../../components/ui/EmptyState';
 import { SearchInput } from '../../components/ui/SearchInput';
 import { ReciboAcreedor } from '../../components/Reciboacreedor';
 import { Users, Plus, ChevronRight, ChevronLeft, PenLine, Printer } from 'lucide-react';
+import api from '../../api/axios.config';
+
+const normalizarProductos = (data) => {
+  if (Array.isArray(data)) return data;
+  if (data?.items && Array.isArray(data.items)) return data.items;
+  return [];
+};
 
 // ─────────────────────────────────────────────
 // CANVAS DE FIRMA
@@ -67,6 +74,7 @@ function FirmaCanvas({ onFirma }) {
     setTieneFirma(false);
     onFirma(null);
   };
+
 
   return (
     <div className="flex flex-col gap-2">
@@ -208,10 +216,35 @@ function ModalMovimiento({ acreedor, onClose }) {
 function ModalNuevoAcreedor({ onClose }) {
   const queryClient               = useQueryClient();
   const [form,  setForm]          = useState({ nombre: '', cedula: '', telefono: '' });
+  const [proveedorId, setProveedorId] = useState('');
   const [error, setError]         = useState('');
 
+  const { data: proveedoresRaw } = useQuery({
+    queryKey: ['proveedores'],
+    queryFn:  () => api.get('/proveedores').then((r) => r.data.data),
+  });
+  const proveedores = normalizarProductos(proveedoresRaw);
+
+  // ── Al seleccionar proveedor, autocompletar nombre si está vacío ──
+  const handleSeleccionarProveedor = (id) => {
+    setProveedorId(id);
+    if (!id) return;
+    const prov = proveedores.find((p) => String(p.id) === id);
+    if (prov) {
+      setForm((f) => ({
+        ...f,
+        nombre:   f.nombre   || prov.nombre   || '',
+        cedula:   f.cedula   || prov.nit       || '',
+        telefono: f.telefono || prov.telefono  || '',
+      }));
+    }
+  };
+
   const mutation = useMutation({
-    mutationFn: () => crearAcreedor(form),
+    mutationFn: () => crearAcreedor({
+      ...form,
+      proveedor_id: proveedorId ? Number(proveedorId) : undefined,
+    }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['acreedores'], exact: false });
       onClose();
@@ -230,6 +263,30 @@ function ModalNuevoAcreedor({ onClose }) {
   return (
     <Modal open onClose={onClose} title="Nuevo Acreedor" size="sm">
       <div className="flex flex-col gap-4">
+
+        {/* ── Vincular a proveedor existente (opcional) ── */}
+        <div className="flex flex-col gap-1">
+          <label className="text-sm font-medium text-gray-700">
+            Proveedor <span className="text-gray-400 font-normal text-xs">(opcional)</span>
+          </label>
+          <select
+            value={proveedorId}
+            onChange={(e) => handleSeleccionarProveedor(e.target.value)}
+            className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-sm
+              text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="">Sin proveedor vinculado</option>
+            {proveedores.map((p) => (
+              <option key={p.id} value={p.id}>{p.nombre}</option>
+            ))}
+          </select>
+          {proveedorId && (
+            <p className="text-xs text-blue-600">
+              Los datos del proveedor se usarán como referencia en los movimientos.
+            </p>
+          )}
+        </div>
+
         <Input
           id="nombre-acreedor"
           label="Nombre"
@@ -237,10 +294,11 @@ function ModalNuevoAcreedor({ onClose }) {
           value={form.nombre}
           onChange={(e) => setForm({ ...form, nombre: e.target.value })}
           onKeyDown={(e) => handleKeyDown(e, 'cedula-acreedor')}
+          autoFocus
         />
         <Input
           id="cedula-acreedor"
-          label="Cédula"
+          label="Cédula / NIT"
           placeholder="123456789"
           value={form.cedula}
           onChange={(e) => setForm({ ...form, cedula: e.target.value })}
@@ -254,10 +312,16 @@ function ModalNuevoAcreedor({ onClose }) {
           onChange={(e) => setForm({ ...form, telefono: e.target.value })}
           onKeyDown={(e) => handleKeyDown(e, null)}
         />
+
         {error && <p className="text-sm text-red-500">{error}</p>}
         <div className="flex gap-2">
           <Button variant="secondary" className="flex-1" onClick={onClose}>Cancelar</Button>
-          <Button className="flex-1" loading={mutation.isPending} onClick={() => mutation.mutate()}>
+          <Button
+            className="flex-1"
+            loading={mutation.isPending}
+            onClick={() => mutation.mutate()}
+            disabled={!form.nombre.trim() || !form.cedula.trim()}
+          >
             Guardar
           </Button>
         </div>
