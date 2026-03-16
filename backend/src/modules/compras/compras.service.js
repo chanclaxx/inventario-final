@@ -1,6 +1,6 @@
-const { pool } = require('../../config/db');
+const { pool }     = require('../../config/db');
 const comprasRepo  = require('./compras.repository');
-const cantidadRepo = require('../productos/productosCantidad.repository');
+const cajaRepo     = require('../caja/caja.repository');
 
 const getCompras = (sucursalId, negocioId) =>
   comprasRepo.findAll(sucursalId, negocioId);
@@ -15,10 +15,43 @@ const getCompraById = async (negocioId, id) => {
   return { ...compra, lineas };
 };
 
-// ── Helper: fecha local sin desfase UTC ───────────────────────────────────
+// ── Helper: fecha local sin desfase UTC ───────────────────────────────────────
 const _fechaHoy = () => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
+// ── Helper: registra el egreso de la compra en la caja activa si existe ───────
+// Solo registra los métodos que mueven caja física (no Crédito/Fiado).
+// Es fire-and-forget desde la transacción principal: si falla no cancela la compra.
+
+const _registrarEgresoEnCaja = async (sucursalId, usuario_id, compraId, proveedor, pagos, total) => {
+  try {
+    const caja = await cajaRepo.findCajaAbierta(sucursalId);
+    if (!caja) return; // No hay caja abierta — no registrar
+
+    // Calcular el monto que realmente sale de caja (excluye crédito/fiado)
+    const METODOS_CAJA = ['Efectivo', 'Nequi', 'Daviplata', 'Transferencia', 'Tarjeta'];
+    const pagosCaja = pagos.filter((p) => METODOS_CAJA.includes(p.metodo));
+    const totalCaja = pagosCaja.length > 0
+      ? pagosCaja.reduce((s, p) => s + Number(p.valor || 0), 0)
+      : total; // Si no hay pagos detallados, asumir que todo salió de caja
+
+    if (totalCaja <= 0) return;
+
+    await cajaRepo.insertarMovimiento({
+      caja_id:          caja.id,
+      usuario_id,
+      tipo:             'Egreso',
+      concepto:         `Compra a ${proveedor}${compraId ? ` #${compraId}` : ''}`,
+      valor:            totalCaja,
+      referencia_id:    compraId   || null,
+      referencia_tipo:  'compra',
+    });
+  } catch (err) {
+    // No propagar el error — la compra ya se registró correctamente
+    console.warn('[caja] Error al registrar egreso de compra en caja:', err?.message || err);
+  }
 };
 
 const registrarCompra = async ({
@@ -67,7 +100,6 @@ const registrarCompra = async ({
 
       if (linea.imei) {
         if (linea.reactivar_serial_id) {
-          // ── Verificar que el serial pertenece a esta sucursal ──
           const { rows } = await client.query(
             `SELECT s.id FROM seriales s
              JOIN productos_serial ps ON ps.id = s.producto_id
@@ -77,7 +109,6 @@ const registrarCompra = async ({
           if (!rows.length) {
             throw { status: 400, message: `El serial ${linea.imei} no pertenece a esta sucursal` };
           }
-          // ── UPDATE por id — no afecta otros negocios ──
           await client.query(
             `UPDATE seriales
              SET vendido = false, prestado = false, fecha_salida = NULL,
@@ -86,7 +117,6 @@ const registrarCompra = async ({
             [linea.precio_unitario, proveedor_id || null, linea.reactivar_serial_id]
           );
         } else {
-          // ── Verificar duplicado solo dentro del mismo negocio ──
           const { rows: existente } = await client.query(
             `SELECT s.id FROM seriales s
              JOIN productos_serial ps ON ps.id = s.producto_id
@@ -108,7 +138,6 @@ const registrarCompra = async ({
             }
           }
 
-          // ── Usar fecha local para evitar desfase UTC ──
           await client.query(
             `INSERT INTO seriales(producto_id, imei, fecha_entrada, costo_compra, proveedor_id)
              VALUES ($1, $2, $3, $4, $5)`,
@@ -178,14 +207,19 @@ const registrarCompra = async ({
         }
 
         await client.query(
-  `INSERT INTO movimientos_acreedor(acreedor_id, usuario_id, tipo, descripcion, valor, compra_id)
-   VALUES ($1, $2, 'Cargo', $3, $4, $5)`,
-  [acreedorId, usuario_id, `Compra #${compra.id} — mercancía`, montoCargo, compra.id]
-);
+          `INSERT INTO movimientos_acreedor(acreedor_id, usuario_id, tipo, descripcion, valor, compra_id)
+           VALUES ($1, $2, 'Cargo', $3, $4, $5)`,
+          [acreedorId, usuario_id, `Compra #${compra.id} — mercancía`, montoCargo, compra.id]
+        );
       }
     }
 
     await client.query('COMMIT');
+
+    // ── Registrar egreso en caja activa — fuera de la transacción principal ──
+    // Si la caja falla no se hace rollback de la compra (ya está committed).
+    await _registrarEgresoEnCaja(sucursal_id, usuario_id, compra.id, prov.nombre, pagos, total);
+
     return compra;
   } catch (err) {
     await client.query('ROLLBACK');

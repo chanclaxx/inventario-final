@@ -15,8 +15,101 @@ import { useSucursalKey } from '../../hooks/useSucursalKey';
 import {
   Wallet, Plus, Lock, ChevronDown, ChevronUp,
   ShoppingCart, CreditCard, ArrowDownCircle, ArrowUpCircle,
-  Receipt, Sliders,
+  Receipt, Sliders, RefreshCw,
 } from 'lucide-react';
+
+// ─── Constantes ───────────────────────────────────────────────────────────────
+
+const METODOS_PAGO_ORDEN = ['Efectivo', 'Nequi', 'Daviplata', 'Transferencia', 'Tarjeta'];
+
+const CONFIG_GRUPOS = {
+  facturas: {
+    icono:      Receipt,
+    color:      'green',
+    bgHeader:   'bg-green-50',
+    textHeader: 'text-green-700',
+    borderColor:'border-green-100',
+    renderItem: (item) => ({
+      descripcion: `Factura #${String(item.factura_id).padStart(6, '0')} — ${item.nombre_cliente}`,
+      detalle:     item.metodo,
+      fecha:       item.fecha,
+    }),
+  },
+  abonosCredito: {
+    icono:      CreditCard,
+    color:      'blue',
+    bgHeader:   'bg-blue-50',
+    textHeader: 'text-blue-700',
+    borderColor:'border-blue-100',
+    renderItem: (item) => ({
+      descripcion: `Crédito Factura #${String(item.factura_id).padStart(6, '0')} — ${item.nombre_cliente}`,
+      detalle:     item.metodo,
+      fecha:       item.fecha,
+    }),
+  },
+  abonosPrestamo: {
+    icono:      ArrowDownCircle,
+    color:      'purple',
+    bgHeader:   'bg-purple-50',
+    textHeader: 'text-purple-700',
+    borderColor:'border-purple-100',
+    renderItem: (item) => ({
+      descripcion: `Préstamo — ${item.prestatario}`,
+      detalle:     null,
+      fecha:       item.fecha,
+    }),
+  },
+  retomas: {
+    icono:      RefreshCw,
+    color:      'orange',
+    bgHeader:   'bg-orange-50',
+    textHeader: 'text-orange-700',
+    borderColor:'border-orange-100',
+    renderItem: (item) => ({
+      descripcion: item.descripcion || item.nombre_producto || 'Retoma',
+      detalle:     item.imei ? `IMEI: ${item.imei}` : null,
+      fecha:       item.fecha,
+    }),
+  },
+  compras: {
+    icono:      ShoppingCart,
+    color:      'red',
+    bgHeader:   'bg-red-50',
+    textHeader: 'text-red-700',
+    borderColor:'border-red-100',
+    renderItem: (item) => ({
+      descripcion: `Compra — ${item.proveedor}`,
+      detalle:     item.numero_factura ? `Fact. ${item.numero_factura}` : null,
+      fecha:       item.fecha,
+    }),
+  },
+  abonosAcreedor: {
+    icono:      ArrowUpCircle,
+    color:      'yellow',
+    bgHeader:   'bg-yellow-50',
+    textHeader: 'text-yellow-700',
+    borderColor:'border-yellow-100',
+    renderItem: (item) => ({
+      descripcion: `Abono a ${item.acreedor}`,
+      detalle:     item.descripcion,
+      fecha:       item.fecha,
+    }),
+  },
+  manuales: {
+    icono:      Sliders,
+    color:      'gray',
+    bgHeader:   'bg-gray-50',
+    textHeader: 'text-gray-700',
+    borderColor:'border-gray-100',
+    renderItem: (item) => ({
+      descripcion: item.concepto,
+      detalle:     item.usuario_nombre || null,
+      fecha:       item.fecha,
+      esMixto:     true,
+      tipo:        item.tipo,
+    }),
+  },
+};
 
 // ─── Modal: registrar movimiento manual ──────────────────────────────────────
 
@@ -32,7 +125,6 @@ function ModalMovimiento({ cajaId, onClose }) {
       valor:    Number(form.valor),
     }),
     onSuccess: () => {
-      // caja-resumen es por ID de caja — exact:false cubre cualquier variante
       queryClient.invalidateQueries({ queryKey: ['caja-resumen', cajaId], exact: false });
       queryClient.invalidateQueries({ queryKey: ['caja-activa'],           exact: false });
       onClose();
@@ -162,84 +254,32 @@ function ModalCerrarCaja({ caja, resumenTotales, onClose }) {
   );
 }
 
-// ─── Tarjeta de grupo de movimientos ─────────────────────────────────────────
+// ─── Tarjeta resumen por método de pago ──────────────────────────────────────
 
-const CONFIG_GRUPOS = {
-  facturas: {
-    icono: Receipt,
-    color: 'green',
-    bgHeader: 'bg-green-50',
-    textHeader: 'text-green-700',
-    borderColor: 'border-green-100',
-    renderItem: (item) => ({
-      descripcion: `Factura #${String(item.factura_id).padStart(6,'0')} — ${item.nombre_cliente}`,
-      detalle:     item.metodo,
-      fecha:       item.fecha,
-    }),
-  },
-  abonosCredito: {
-    icono: CreditCard,
-    color: 'blue',
-    bgHeader: 'bg-blue-50',
-    textHeader: 'text-blue-700',
-    borderColor: 'border-blue-100',
-    renderItem: (item) => ({
-      descripcion: `Crédito Factura #${String(item.factura_id).padStart(6,'0')} — ${item.nombre_cliente}`,
-      detalle:     item.metodo,
-      fecha:       item.fecha,
-    }),
-  },
-  abonosPrestamo: {
-    icono: ArrowDownCircle,
-    color: 'purple',
-    bgHeader: 'bg-purple-50',
-    textHeader: 'text-purple-700',
-    borderColor: 'border-purple-100',
-    renderItem: (item) => ({
-      descripcion: `Préstamo — ${item.prestatario}`,
-      detalle:     null,
-      fecha:       item.fecha,
-    }),
-  },
-  compras: {
-    icono: ShoppingCart,
-    color: 'red',
-    bgHeader: 'bg-red-50',
-    textHeader: 'text-red-700',
-    borderColor: 'border-red-100',
-    renderItem: (item) => ({
-      descripcion: `Compra — ${item.proveedor}`,
-      detalle:     item.numero_factura ? `Fact. ${item.numero_factura}` : null,
-      fecha:       item.fecha,
-    }),
-  },
-  abonosAcreedor: {
-    icono: ArrowUpCircle,
-    color: 'yellow',
-    bgHeader: 'bg-yellow-50',
-    textHeader: 'text-yellow-700',
-    borderColor: 'border-yellow-100',
-    renderItem: (item) => ({
-      descripcion: `Abono a ${item.acreedor}`,
-      detalle:     item.descripcion,
-      fecha:       item.fecha,
-    }),
-  },
-  manuales: {
-    icono: Sliders,
-    color: 'gray',
-    bgHeader: 'bg-gray-50',
-    textHeader: 'text-gray-700',
-    borderColor: 'border-gray-100',
-    renderItem: (item) => ({
-      descripcion: item.concepto,
-      detalle:     item.usuario_nombre || null,
-      fecha:       item.fecha,
-      esMixto:     true,
-      tipo:        item.tipo,
-    }),
-  },
-};
+function ResumenMetodosPago({ metodosPago }) {
+  const metodosConValor = METODOS_PAGO_ORDEN.filter((m) => metodosPago[m] > 0);
+  if (metodosConValor.length === 0) return null;
+
+  return (
+    <div className="bg-white border border-gray-100 rounded-2xl p-4 flex flex-col gap-3">
+      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+        Ingresos por método de pago
+      </p>
+      <div className="flex flex-col gap-2">
+        {metodosConValor.map((metodo) => (
+          <div key={metodo} className="flex items-center justify-between">
+            <span className="text-sm text-gray-600">{metodo}</span>
+            <span className="text-sm font-semibold text-gray-900">
+              {formatCOP(metodosPago[metodo])}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── Grupo de movimientos colapsable ─────────────────────────────────────────
 
 function GrupoMovimientos({ grupoKey, grupo }) {
   const [expandido, setExpandido] = useState(false);
@@ -249,10 +289,7 @@ function GrupoMovimientos({ grupoKey, grupo }) {
   const GrupoIcono = cfg.icono;
   const esMixto    = grupoKey === 'manuales';
   const esIngreso  = grupo.tipo === 'Ingreso';
-
-  const totalMostrar = esMixto
-    ? { ingreso: grupo.totalIngreso, egreso: grupo.totalEgreso }
-    : { valor: grupo.total };
+  // Retomas son egreso (reducen ingreso neto)
 
   return (
     <div className={`border ${cfg.borderColor} rounded-2xl overflow-hidden`}>
@@ -279,12 +316,13 @@ function GrupoMovimientos({ grupoKey, grupo }) {
             </div>
           ) : (
             <span className={`text-sm font-bold ${esIngreso ? 'text-green-600' : 'text-red-500'}`}>
-              {esIngreso ? '+' : '-'}{formatCOP(totalMostrar.valor)}
+              {esIngreso ? '+' : '-'}{formatCOP(grupo.total)}
             </span>
           )}
           {expandido
             ? <ChevronUp size={15} className={cfg.textHeader} />
-            : <ChevronDown size={15} className={cfg.textHeader} />}
+            : <ChevronDown size={15} className={cfg.textHeader} />
+          }
         </div>
       </button>
 
@@ -292,9 +330,12 @@ function GrupoMovimientos({ grupoKey, grupo }) {
         <div className="divide-y divide-gray-50">
           {grupo.items.map((item) => {
             const rendered      = cfg.renderItem(item);
-            const esTipoIngreso = rendered.esMixto ? rendered.tipo === 'Ingreso' : esIngreso;
+            const esTipoIngreso = rendered.esMixto
+              ? rendered.tipo === 'Ingreso'
+              : esIngreso;
             return (
-              <div key={item.id} className="flex items-center justify-between px-4 py-2.5 bg-white hover:bg-gray-50/50">
+              <div key={item.id}
+                className="flex items-center justify-between px-4 py-2.5 bg-white hover:bg-gray-50/50">
                 <div className="flex-1 min-w-0">
                   <p className="text-sm text-gray-800 truncate">{rendered.descripcion}</p>
                   <div className="flex items-center gap-2">
@@ -319,7 +360,7 @@ function GrupoMovimientos({ grupoKey, grupo }) {
   );
 }
 
-// ─── Page principal ───────────────────────────────────────────────────────────
+// ─── Página principal ─────────────────────────────────────────────────────────
 
 export default function CajaPage() {
   const queryClient                       = useQueryClient();
@@ -328,16 +369,12 @@ export default function CajaPage() {
   const [modalCerrar,   setModalCerrar]   = useState(false);
   const [montoApertura, setMontoApertura] = useState('');
 
-  // caja-activa es por sucursal → incluye sucursalKey
-  // Solo se consulta cuando la sucursal está validada para evitar 403
   const { data: caja, isLoading } = useQuery({
     queryKey: ['caja-activa', ...sucursalKey],
     queryFn:  () => getCajaActiva().then((r) => r.data.data),
     enabled:  sucursalLista,
   });
 
-  // caja-resumen es por ID único de la caja abierta, no depende de sucursal
-  // Una caja tiene un id irrepetible → no necesita sucursalKey en el queryKey
   const { data: resumenData, isLoading: loadingResumen } = useQuery({
     queryKey: ['caja-resumen', caja?.id],
     queryFn:  () => getResumenDia(caja.id).then((r) => r.data.data),
@@ -350,11 +387,12 @@ export default function CajaPage() {
     onSuccess:  () => queryClient.invalidateQueries({ queryKey: ['caja-activa'], exact: false }),
   });
 
-  const grupos  = useMemo(() => resumenData?.grupos  || {}, [resumenData]);
-  const totales = useMemo(
-    () => resumenData?.totales || { ingresos: 0, egresos: 0, saldo: 0 },
+  const grupos      = useMemo(() => resumenData?.grupos      || {}, [resumenData]);
+  const totales     = useMemo(
+    () => resumenData?.totales || { ingresosBruto: 0, retomas: 0, ingresos: 0, egresos: 0, saldo: 0 },
     [resumenData]
   );
+  const metodosPago = useMemo(() => resumenData?.metodosPago || {}, [resumenData]);
 
   const saldoActual = useMemo(
     () => Number(caja?.monto_inicial || 0) + totales.ingresos - totales.egresos,
@@ -410,15 +448,22 @@ export default function CajaPage() {
           <Badge variant="green">Abierta</Badge>
         </div>
 
-        <div className="grid grid-cols-3 gap-3 mt-4">
+        {/* Resumen numérico */}
+        <div className="grid grid-cols-2 gap-2 mt-4 sm:grid-cols-4">
           <div className="bg-gray-50 rounded-xl p-3 text-center">
             <p className="text-xs text-gray-400">Inicial</p>
             <p className="text-sm font-bold text-gray-700">{formatCOP(caja.monto_inicial)}</p>
           </div>
           <div className="bg-green-50 rounded-xl p-3 text-center">
-            <p className="text-xs text-green-500">Ingresos</p>
+            <p className="text-xs text-green-500">Ingresos netos</p>
             <p className="text-sm font-bold text-green-700">+{formatCOP(totales.ingresos)}</p>
           </div>
+          {totales.retomas > 0 && (
+            <div className="bg-orange-50 rounded-xl p-3 text-center">
+              <p className="text-xs text-orange-500">Retomas</p>
+              <p className="text-sm font-bold text-orange-700">-{formatCOP(totales.retomas)}</p>
+            </div>
+          )}
           <div className="bg-red-50 rounded-xl p-3 text-center">
             <p className="text-xs text-red-400">Egresos</p>
             <p className="text-sm font-bold text-red-600">-{formatCOP(totales.egresos)}</p>
@@ -435,10 +480,13 @@ export default function CajaPage() {
         </div>
       </div>
 
+      {/* ── Resumen por método de pago ── */}
+      <ResumenMetodosPago metodosPago={metodosPago} />
+
       {/* ── Movimientos del día agrupados ── */}
       <div className="flex flex-col gap-3">
         <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-gray-700">Movimientos del día</h2>
+          <h2 className="text-sm font-semibold text-gray-700">Movimientos del período</h2>
           {loadingResumen && <Spinner className="py-0 scale-75" />}
         </div>
 
@@ -452,6 +500,7 @@ export default function CajaPage() {
             <GrupoMovimientos grupoKey="abonosPrestamo" grupo={grupos.abonosPrestamo || { items: [] }} />
 
             <p className="text-xs text-gray-400 font-medium px-1 mt-1">Egresos</p>
+            <GrupoMovimientos grupoKey="retomas"        grupo={grupos.retomas        || { items: [] }} />
             <GrupoMovimientos grupoKey="compras"        grupo={grupos.compras        || { items: [] }} />
             <GrupoMovimientos grupoKey="abonosAcreedor" grupo={grupos.abonosAcreedor || { items: [] }} />
 
