@@ -65,22 +65,20 @@ function FilaUsuario({ usuario, onEditar, onToggleActivo }) {
 
 // ── Sub-componente: formulario modal ─────────────────
 function ModalUsuario({ open, onClose, editando, sucursales, onGuardar, cargando, error }) {
-  const [form, setForm] = useState(FORM_INICIAL);
-
-  // Sincronizar form cuando cambia el usuario a editar
-  useState(() => {
-    if (editando) {
-      setForm({
-        nombre:      editando.nombre,
-        email:       editando.email,
-        password:    '',
-        rol:         editando.rol,
-        sucursal_id: editando.sucursal_id ?? '',
-      });
-    } else {
-      setForm(FORM_INICIAL);
-    }
-  });
+  // El form se inicializa directo desde editando cada vez que el modal se monta.
+  // Como el padre desmonta/monta el modal cambiando `open`, esto es suficiente
+  // para prellenar los campos sin necesitar useEffect.
+  const [form, setForm] = useState(() =>
+    editando
+      ? {
+          nombre:      editando.nombre      || '',
+          email:       editando.email       || '',
+          password:    '',
+          rol:         editando.rol         || 'vendedor',
+          sucursal_id: editando.sucursal_id ?? '',
+        }
+      : FORM_INICIAL
+  );
 
   const set = (campo, valor) => setForm((f) => ({ ...f, [campo]: valor }));
 
@@ -88,6 +86,7 @@ function ModalUsuario({ open, onClose, editando, sucursales, onGuardar, cargando
 
   const handleGuardar = () => {
     const payload = { ...form };
+    // Si no escribió contraseña nueva, no la enviamos para no sobreescribir la existente
     if (!payload.password) delete payload.password;
     if (!requiereSucursal) payload.sucursal_id = null;
     onGuardar(payload);
@@ -115,7 +114,9 @@ function ModalUsuario({ open, onClose, editando, sucursales, onGuardar, cargando
           onChange={(e) => set('email', e.target.value)}
         />
         <Input
-          label={editando ? 'Nueva contraseña (dejar vacío para no cambiar)' : 'Contraseña inicial'}
+          label={editando
+            ? 'Nueva contraseña (dejar vacío para no cambiar)'
+            : 'Contraseña inicial'}
           type="password"
           placeholder="••••••••"
           value={form.password}
@@ -224,8 +225,8 @@ export function UsuariosConfig() {
 
   const handleGuardar = (payload) => {
     setError('');
-    if (!payload.nombre?.trim())  return setError('El nombre es requerido');
-    if (!payload.email?.trim())   return setError('El email es requerido');
+    if (!payload.nombre?.trim()) return setError('El nombre es requerido');
+    if (!payload.email?.trim())  return setError('El email es requerido');
     if (!editando && !payload.password?.trim()) return setError('La contraseña es requerida');
     if (payload.rol !== 'admin_negocio' && !payload.sucursal_id) {
       return setError('Debes asignar una sucursal');
@@ -286,6 +287,7 @@ export function UsuariosConfig() {
       )}
 
       <ModalUsuario
+        key={editando?.id ?? 'nuevo'}
         open={modalOpen}
         onClose={cerrarModal}
         editando={editando}
