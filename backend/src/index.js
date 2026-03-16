@@ -11,11 +11,12 @@ const { verificarPlan }    = require('./middlewares/plan.middleware');
 const { resolveSucursal }  = require('./middlewares/sucursal.middleware');
 const { errorHandler }     = require('./middlewares/error.middleware');
 const { ejecutar: verificarVencimientos } = require('./jobs/vencimientos.job');
+const { iniciarCronBackup } = require('./modules/backup/backup.cron');
 
 validateEnv();
 
 const app = express();
-app.set('trust proxy', 1); // ← agregar después de crear app
+app.set('trust proxy', 1);
 
 // ── Middlewares globales ──────────────────────────────
 app.use(helmet());
@@ -54,7 +55,7 @@ app.use('/api/prestamos',          protegida, require('./modules/prestamos/prest
 app.use('/api/creditos',           protegida, require('./modules/creditos/creditos.routes'));
 app.use('/api/caja',               protegida, require('./modules/caja/caja.routes'));
 app.use('/api/proveedores',        protegida, require('./modules/proveedores/proveedores.routes'));
-app.use('/api/prestatarios', protegida, require('./modules/prestatarios/prestatarios.routes'));
+app.use('/api/prestatarios',       protegida, require('./modules/prestatarios/prestatarios.routes'));
 app.use('/api/compras',            protegida, require('./modules/compras/compras.routes'));
 app.use('/api/acreedores',         protegida, require('./modules/acreedores/acreedores.routes'));
 app.use('/api/reportes',           protegida, require('./modules/reportes/reportes.routes'));
@@ -64,7 +65,7 @@ app.use('/api/config',             protegida, require('./modules/config/config.r
 app.use('/api/importacion',        protegida, require('./modules/importacion/importacion.routes'));
 app.use('/api/inventario',         protegida, require('./modules/inventario/inventario.export.routes'));
 app.use('/api/sucursales',         protegida, require('./modules/sucursales/sucursales.routes'));
-app.use('/api/lineas', protegida, require('./modules/lineas/lineas.routes'));
+app.use('/api/lineas',             protegida, require('./modules/lineas/lineas.routes'));
 
 // ── Rutas de superadmin (sin protegida) ───────────────
 app.use('/api/superadmin', require('./modules/superadmin/superadmin.routes'));
@@ -93,6 +94,9 @@ const start = async () => {
   app.listen(PORT, () => {
     console.log(`🚀 Servidor corriendo en http://localhost:${PORT}`);
   });
+
+  // Backup automático diario a las 2:00 AM (America/Bogota)
+  iniciarCronBackup();
 };
 
 start();
