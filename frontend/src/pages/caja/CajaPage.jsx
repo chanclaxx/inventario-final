@@ -71,6 +71,18 @@ const CONFIG_GRUPOS = {
       fecha:       item.fecha,
     }),
   },
+  devoluciones: {
+    icono:      RefreshCw,
+    color:      'red',
+    bgHeader:   'bg-red-50',
+    textHeader: 'text-red-700',
+    borderColor:'border-red-100',
+    renderItem: (item) => ({
+      descripcion: item.concepto,
+      detalle:     null,
+      fecha:       item.fecha,
+    }),
+  },
   compras: {
     icono:      ShoppingCart,
     color:      'red',
@@ -501,6 +513,7 @@ export default function CajaPage() {
 
             <p className="text-xs text-gray-400 font-medium px-1 mt-1">Egresos</p>
             <GrupoMovimientos grupoKey="retomas"        grupo={grupos.retomas        || { items: [] }} />
+            <GrupoMovimientos grupoKey="devoluciones"   grupo={grupos.devoluciones   || { items: [] }} />
             <GrupoMovimientos grupoKey="compras"        grupo={grupos.compras        || { items: [] }} />
             <GrupoMovimientos grupoKey="abonosAcreedor" grupo={grupos.abonosAcreedor || { items: [] }} />
 

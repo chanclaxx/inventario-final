@@ -98,7 +98,7 @@ const getResumenCaja = async (cajaId) => {
 // ─── Helper: construye el resumen desde los datos crudos ─────────────────────
 // Recibe arrays de filas y devuelve grupos + totales + métodos de pago + retomas
 
-const _buildResumen = ({ pf, ac, ap, cp, aa, mn, rt }) => {
+const _buildResumen = ({ pf, ac, ap, cp, aa, mn, rt, dv }) => {
   const sum = (arr) => arr.reduce((s, r) => s + Number(r.valor || 0), 0);
 
   const totalFacturas       = sum(pf);
@@ -107,6 +107,8 @@ const _buildResumen = ({ pf, ac, ap, cp, aa, mn, rt }) => {
   const totalCompras        = sum(cp);
   const totalAbonosAcreedor = sum(aa);
   const totalRetomas        = sum(rt);
+
+  const totalDevoluciones = dv.reduce((s, d) => s + Number(d.valor || 0), 0);
 
   const totalManualesIngreso = mn
     .filter((m) => m.tipo === 'Ingreso')
@@ -118,7 +120,7 @@ const _buildResumen = ({ pf, ac, ap, cp, aa, mn, rt }) => {
   // ── Ingresos brutos y netos ───────────────────────────────────────────────
   const totalIngresosBruto = totalFacturas + totalAbonosCredito + totalAbonosPrestamo + totalManualesIngreso;
   const totalIngresos      = totalIngresosBruto - totalRetomas; // retomas reducen ingreso neto
-  const totalEgresos       = totalCompras + totalAbonosAcreedor + totalManualesEgreso;
+  const totalEgresos       = totalCompras + totalAbonosAcreedor + totalManualesEgreso + totalDevoluciones;
 
   // ── Resumen por método de pago ────────────────────────────────────────────
   // Agrupa pagos_factura + abonos_credito por método
@@ -169,6 +171,12 @@ const _buildResumen = ({ pf, ac, ap, cp, aa, mn, rt }) => {
         items: aa,
         total: totalAbonosAcreedor,
       },
+      devoluciones: {
+        tipo:  'Egreso',
+        label: 'Devoluciones por cancelación',
+        items: dv,
+        total: totalDevoluciones,
+      },
       manuales: {
         tipo:         'Mixto',
         label:        'Movimientos manuales',
@@ -212,7 +220,7 @@ const getResumenDia = async (cajaId, sucursalId, negocioId) => {
   if (!rango) return null;
   const { inicio, fin } = rango;
 
-  const [pagosFactura, abonosCredito, abonosPrestamo, compras, abonosAcreedor, manuales, retomas] =
+  const [pagosFactura, abonosCredito, abonosPrestamo, compras, abonosAcreedor, manuales, devoluciones, retomas] =
     await Promise.all([
       // Pagos de facturas en el rango de la caja
       pool.query(`
@@ -248,7 +256,7 @@ const getResumenDia = async (cajaId, sucursalId, negocioId) => {
         ORDER BY ab.fecha ASC
       `, [sucursalId, inicio, fin]),
 
-      // Compras en el rango
+      // Compras en el rango — excluye las que fueron 100% a crédito (cargo en acreedores por el total)
       pool.query(`
         SELECT c.id, c.total AS valor, c.fecha, c.numero_factura, pr.nombre AS proveedor
         FROM compras c
@@ -256,6 +264,12 @@ const getResumenDia = async (cajaId, sucursalId, negocioId) => {
         WHERE c.sucursal_id = $1
           AND c.estado != 'Cancelada'
           AND c.fecha BETWEEN $2 AND $3
+          AND NOT EXISTS (
+            SELECT 1 FROM movimientos_acreedor ma
+            WHERE ma.compra_id = c.id
+              AND ma.tipo = 'Cargo'
+              AND ma.valor >= c.total
+          )
         ORDER BY c.fecha ASC
       `, [sucursalId, inicio, fin]),
 
@@ -269,12 +283,23 @@ const getResumenDia = async (cajaId, sucursalId, negocioId) => {
           AND ma.fecha BETWEEN $2 AND $3
       `, [negocioId, inicio, fin]),
 
-      // Movimientos manuales de esta caja (ya están acotados por la caja)
+      // Movimientos manuales — excluye devoluciones por cancelación (tienen su propio grupo)
       pool.query(`
         SELECT m.*, u.nombre AS usuario_nombre
         FROM movimientos_caja m
         LEFT JOIN usuarios u ON u.id = m.usuario_id
         WHERE m.caja_id = $1
+          AND (m.referencia_tipo IS NULL OR m.referencia_tipo != 'factura_cancelada')
+        ORDER BY m.fecha ASC
+      `, [cajaId]),
+
+      // Devoluciones por facturas canceladas
+      pool.query(`
+        SELECT m.*, u.nombre AS usuario_nombre
+        FROM movimientos_caja m
+        LEFT JOIN usuarios u ON u.id = m.usuario_id
+        WHERE m.caja_id = $1
+          AND m.referencia_tipo = 'factura_cancelada'
         ORDER BY m.fecha ASC
       `, [cajaId]),
 
@@ -299,6 +324,7 @@ const getResumenDia = async (cajaId, sucursalId, negocioId) => {
     cp: compras.rows,
     aa: abonosAcreedor.rows,
     mn: manuales.rows,
+    dv: devoluciones.rows,
     rt: retomas.rows,
   });
 };
@@ -311,7 +337,7 @@ const getResumenGlobal = async (negocioId) => {
   const inicio = new Date(hoy); inicio.setHours(0, 0, 0, 0);
   const fin    = new Date(hoy); fin.setHours(23, 59, 59, 999);
 
-  const [pagosFactura, abonosCredito, abonosPrestamo, compras, abonosAcreedor, manuales, retomas] =
+  const [pagosFactura, abonosCredito, abonosPrestamo, compras, abonosAcreedor, manuales, devoluciones, retomas] =
     await Promise.all([
       pool.query(`
         SELECT pf.id, pf.metodo, pf.valor, f.nombre_cliente,
@@ -359,6 +385,12 @@ const getResumenGlobal = async (negocioId) => {
         WHERE su.negocio_id = $1
           AND c.estado != 'Cancelada'
           AND c.fecha BETWEEN $2 AND $3
+          AND NOT EXISTS (
+            SELECT 1 FROM movimientos_acreedor ma
+            WHERE ma.compra_id = c.id
+              AND ma.tipo = 'Cargo'
+              AND ma.valor >= c.total
+          )
         ORDER BY c.fecha ASC
       `, [negocioId, inicio, fin]),
 
@@ -379,6 +411,19 @@ const getResumenGlobal = async (negocioId) => {
         LEFT JOIN usuarios   u ON u.id  = m.usuario_id
         WHERE su.negocio_id = $1
           AND m.fecha BETWEEN $2 AND $3
+          AND (m.referencia_tipo IS NULL OR m.referencia_tipo != 'factura_cancelada')
+        ORDER BY m.fecha ASC
+      `, [negocioId, inicio, fin]),
+
+      pool.query(`
+        SELECT m.*, u.nombre AS usuario_nombre, su.nombre AS sucursal_nombre
+        FROM movimientos_caja m
+        JOIN aperturas_caja ac ON ac.id = m.caja_id
+        JOIN sucursales     su ON su.id = ac.sucursal_id
+        LEFT JOIN usuarios   u ON u.id  = m.usuario_id
+        WHERE su.negocio_id = $1
+          AND m.fecha BETWEEN $2 AND $3
+          AND m.referencia_tipo = 'factura_cancelada'
         ORDER BY m.fecha ASC
       `, [negocioId, inicio, fin]),
 
@@ -404,6 +449,7 @@ const getResumenGlobal = async (negocioId) => {
     cp: compras.rows,
     aa: abonosAcreedor.rows,
     mn: manuales.rows,
+    dv: devoluciones.rows,
     rt: retomas.rows,
   });
 };

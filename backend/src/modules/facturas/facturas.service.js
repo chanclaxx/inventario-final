@@ -3,6 +3,7 @@ const facturasRepo = require('./facturas.repository');
 const serialRepo   = require('../productos/productosSerial.repository');
 const cantidadRepo = require('../productos/productosCantidad.repository');
 const clientesRepo = require('../clientes/clientes.repository');
+const cajaRepo     = require('../caja/caja.repository');
 const { enviarFactura } = require('../email/email.service');
 
 const ES_COMPANERO = (cedula) => cedula === 'COMPANERO';
@@ -59,7 +60,6 @@ const crearFactura = async ({
   nombre_cliente, cedula, celular, email, direccion, notas,
   lineas, pagos, retomas = [],
 }) => {
-   
   const { rows: sucRows } = await pool.query(
     `SELECT id FROM sucursales WHERE id = $1 AND negocio_id = $2 AND activa = true`,
     [sucursal_id, negocio_id]
@@ -216,7 +216,6 @@ const crearFactura = async ({
           const configMap = {};
           for (const row of configRows) configMap[row.clave] = row.valor;
 
-          // ── Solo enviar si el campo email está activado en config ──
           if (configMap.campo_email_cliente === '1') {
             const [lineasEmail, pagosEmail, retomasEmail] = await Promise.all([
               facturasRepo.getLineas(factura.id),
@@ -248,6 +247,9 @@ const cancelarFactura = async (negocioId, id) => {
   if (!factura) throw { status: 404, message: 'Factura no encontrada' };
   if (factura.estado === 'Cancelada') throw { status: 400, message: 'La factura ya está cancelada' };
 
+  // ── Obtener pagos antes de cancelar para saber cuánto devolver en caja ───
+  const pagos = await facturasRepo.getPagos(id);
+
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -274,6 +276,31 @@ const cancelarFactura = async (negocioId, id) => {
     }
 
     await facturasRepo.cancelar(client, id);
+
+    // ── Registrar egreso en caja si hay caja abierta ─────────────────────────
+    // Solo se devuelven los métodos que movieron caja física (excluye Crédito).
+    // Se hace dentro de la transacción para que si falla la caja, se revierta todo.
+    const METODOS_NO_CAJA = ['Credito'];
+    const totalDevolucion = pagos
+      .filter((p) => !METODOS_NO_CAJA.includes(p.metodo))
+      .reduce((s, p) => s + Number(p.valor || 0), 0);
+
+    if (totalDevolucion > 0) {
+      const caja = await cajaRepo.findCajaAbierta(factura.sucursal_id);
+      if (caja) {
+        await client.query(
+          `INSERT INTO movimientos_caja(caja_id, tipo, concepto, valor, referencia_id, referencia_tipo)
+           VALUES ($1, 'Egreso', $2, $3, $4, 'factura_cancelada')`,
+          [
+            caja.id,
+            `Devolución factura #${String(id).padStart(6, '0')} — ${factura.nombre_cliente}`,
+            totalDevolucion,
+            id,
+          ]
+        );
+      }
+    }
+
     await client.query('COMMIT');
   } catch (err) {
     await client.query('ROLLBACK');
@@ -357,7 +384,6 @@ const editarFactura = async (negocioId, id, {
                 [nombre_cliente, existeSerial.id]
               );
             } else {
-              // ── Verificar que el producto_serial_id pertenece al negocio ──
               const { rows: psCheck } = await client.query(
                 `SELECT ps.id FROM productos_serial ps
                  JOIN sucursales su ON su.id = ps.sucursal_id
@@ -378,7 +404,6 @@ const editarFactura = async (negocioId, id, {
         }
 
         if (retoma.tipo_retoma === 'cantidad' && retoma.producto_cantidad_id) {
-          // ── Verificar que el producto_cantidad_id pertenece al negocio ──
           await _verificarProductoCantidadNegocio(client, retoma.producto_cantidad_id, negocioId);
           await facturasRepo.ajustarStockCantidad(
             client, retoma.producto_cantidad_id, Number(retoma.cantidad_retoma || 1)
