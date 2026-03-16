@@ -22,13 +22,13 @@ const loginSuperadmin = async (email, password) => {
   const payload = { id: sa.id, nombre: sa.nombre, email: sa.email, rol: 'superadmin' };
 
   const accessToken = jwt.sign(payload, process.env.JWT_SA_SECRET, {
-  expiresIn: process.env.JWT_SA_EXPIRES_IN || '2h',
-});
-const refreshToken = jwt.sign(
-  { id: sa.id, rol: 'superadmin' },
-  process.env.JWT_SA_SECRET,
-  { expiresIn: '8h' }
-);
+    expiresIn: process.env.JWT_SA_EXPIRES_IN || '2h',
+  });
+  const refreshToken = jwt.sign(
+    { id: sa.id, rol: 'superadmin' },
+    process.env.JWT_SA_SECRET,
+    { expiresIn: '8h' }
+  );
 
   return { accessToken, refreshToken, usuario: payload };
 };
@@ -38,10 +38,10 @@ const refreshToken = jwt.sign(
 const getEstadisticas = async () => {
   const { rows } = await pool.query(`
     SELECT
-      COUNT(*)                                           AS total,
-      COUNT(*) FILTER (WHERE estado_plan = 'activo')    AS activos,
-      COUNT(*) FILTER (WHERE estado_plan = 'pendiente') AS pendientes,
-      COUNT(*) FILTER (WHERE estado_plan = 'vencido')   AS vencidos,
+      COUNT(*)                                            AS total,
+      COUNT(*) FILTER (WHERE estado_plan = 'activo')     AS activos,
+      COUNT(*) FILTER (WHERE estado_plan = 'pendiente')  AS pendientes,
+      COUNT(*) FILTER (WHERE estado_plan = 'vencido')    AS vencidos,
       COUNT(*) FILTER (WHERE estado_plan = 'suspendido') AS suspendidos
     FROM negocios
   `);
@@ -49,6 +49,7 @@ const getEstadisticas = async () => {
 };
 
 // ── Listar negocios ───────────────────────────────────
+// Incluye el flag de email_facturas para cada negocio
 
 const getNegocios = async ({ estado, busqueda }) => {
   let query = `
@@ -56,7 +57,13 @@ const getNegocios = async ({ estado, busqueda }) => {
       n.id, n.nombre, n.nit, n.email, n.telefono, n.plan,
       n.estado_plan, n.fecha_vencimiento, n.creado_en,
       COUNT(DISTINCT s.id) AS total_sucursales,
-      COUNT(DISTINCT u.id) AS total_usuarios
+      COUNT(DISTINCT u.id) AS total_usuarios,
+      COALESCE(
+        (SELECT cn.valor FROM config_negocio cn
+         WHERE cn.negocio_id = n.id AND cn.clave = 'campo_email_cliente'
+         LIMIT 1),
+        '0'
+      ) AS email_facturas_activo
     FROM negocios n
     LEFT JOIN sucursales s ON s.negocio_id = n.id
     LEFT JOIN usuarios   u ON u.negocio_id = n.id
@@ -149,6 +156,35 @@ const cambiarEstadoNegocio = async (negocioId, nuevoEstado) => {
   return negocio;
 };
 
+// ── Activar / desactivar envío de facturas por email ─────────────────────────
+// Usa UPSERT sobre config_negocio con la clave 'campo_email_cliente'.
+// activo = true  → valor '1'
+// activo = false → valor '0'
+
+const toggleEmailFacturas = async (negocioId, activo) => {
+  const { rows: [negocio] } = await pool.query(
+    `SELECT id, nombre FROM negocios WHERE id = $1`,
+    [negocioId]
+  );
+  if (!negocio) throw { status: 404, message: 'Negocio no encontrado' };
+
+  const valor = activo ? '1' : '0';
+
+  await pool.query(
+    `INSERT INTO config_negocio (negocio_id, clave, valor, descripcion)
+     VALUES ($1, 'campo_email_cliente', $2, 'Envío de facturas por email')
+     ON CONFLICT (negocio_id, clave)
+     DO UPDATE SET valor = EXCLUDED.valor`,
+    [negocioId, valor]
+  );
+
+  return {
+    negocio_id: negocioId,
+    nombre:     negocio.nombre,
+    email_facturas_activo: valor,
+  };
+};
+
 // ── Listar planes disponibles ─────────────────────────
 
 const getPlanes = async () => {
@@ -239,6 +275,7 @@ module.exports = {
   getNegocios,
   aprobarNegocio,
   cambiarEstadoNegocio,
+  toggleEmailFacturas,
   getPlanes,
   renovarPlan,
   verificarVencimientos,

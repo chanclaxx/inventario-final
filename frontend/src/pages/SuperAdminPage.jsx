@@ -4,7 +4,7 @@ import axios from 'axios';
 import {
   LayoutDashboard, Building2, CheckCircle,
   Ban, RefreshCw, LogOut, Search, TrendingUp, CreditCard, X,
-  DatabaseBackup, History, CheckCircle2,
+  DatabaseBackup, History, CheckCircle2, Mail, MailX,
 } from 'lucide-react';
 import { Badge }   from '../components/ui/Badge';
 import { Spinner } from '../components/ui/Spinner';
@@ -65,7 +65,7 @@ function formatPrecio(valor) {
 function formatBytes(bytes) {
   if (!bytes) return '—';
   const b = Number(bytes);
-  if (b < 1024)       return `${b} B`;
+  if (b < 1024)        return `${b} B`;
   if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`;
   return `${(b / (1024 * 1024)).toFixed(1)} MB`;
 }
@@ -220,7 +220,7 @@ function SeccionBackup() {
           </div>
           <div>
             <p className="text-sm font-semibold text-white">Backup de base de datos</p>
-            <p className="text-xs text-gray-400">Se guarda en Google Drive · Retiene los últimos 30</p>
+            <p className="text-xs text-gray-400">Se guarda en Supabase Storage · Retiene los últimos 30</p>
           </div>
         </div>
         <button
@@ -237,7 +237,6 @@ function SeccionBackup() {
         </button>
       </div>
 
-      {/* Resultado del último backup ejecutado */}
       {ultimoBackup && (
         <div className="bg-emerald-900/30 border border-emerald-700/50 rounded-xl p-3 flex items-start gap-3">
           <CheckCircle2 size={16} className="text-emerald-400 flex-shrink-0 mt-0.5" />
@@ -262,7 +261,6 @@ function SeccionBackup() {
         </div>
       )}
 
-      {/* Historial */}
       <button
         onClick={() => setMostrarHistorial((v) => !v)}
         className="flex items-center gap-2 text-xs text-gray-400 hover:text-gray-200 transition-colors w-fit"
@@ -282,9 +280,7 @@ function SeccionBackup() {
                   className="flex items-center justify-between bg-gray-700/50 rounded-xl px-3 py-2.5">
                   <div className="min-w-0">
                     <p className="text-xs font-mono text-gray-300 truncate">{b.name}</p>
-                    <p className="text-xs text-gray-500 mt-0.5">
-                      {formatFecha(b.createdTime)}
-                    </p>
+                    <p className="text-xs text-gray-500 mt-0.5">{formatFecha(b.createdTime)}</p>
                   </div>
                   <span className="text-xs text-gray-400 flex-shrink-0 ml-3">
                     {formatBytes(b.size)}
@@ -342,6 +338,7 @@ function LoginSuperadmin({ onLogin }) {
             <label className="text-sm font-medium text-gray-300">Contraseña</label>
             <input type="password" placeholder="••••••••" value={form.password}
               onChange={(e) => setForm({ ...form, password: e.target.value })}
+              onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
               className="w-full px-3 py-2.5 bg-gray-700 border-0 rounded-xl text-sm
                 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
           </div>
@@ -373,63 +370,120 @@ function StatCard({ label, valor, icon, color }) {
   );
 }
 
+// ── Toggle email facturas ─────────────────────────────
+// Botón independiente que maneja su propio estado de carga
+// para no bloquear los demás botones de la fila.
+
+function ToggleEmailFacturas({ negocioId, activo }) {
+  const queryClient = useQueryClient();
+
+  const mutation = useMutation({
+    mutationFn: (nuevoEstado) =>
+      saApi.patch(`/negocios/${negocioId}/email-facturas`, { activo: nuevoEstado }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['sa_negocios'] });
+    },
+  });
+
+  const estaActivo = activo === '1';
+
+  return (
+    <button
+      onClick={() => mutation.mutate(!estaActivo)}
+      disabled={mutation.isPending}
+      title={estaActivo ? 'Desactivar envío de facturas por email' : 'Activar envío de facturas por email'}
+      className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg
+        transition-colors disabled:opacity-50
+        ${estaActivo
+          ? 'bg-blue-600 hover:bg-blue-700 text-white'
+          : 'bg-gray-700 hover:bg-gray-600 text-gray-300 border border-gray-600'
+        }`}
+    >
+      {mutation.isPending ? (
+        <RefreshCw size={13} className="animate-spin" />
+      ) : estaActivo ? (
+        <Mail size={13} />
+      ) : (
+        <MailX size={13} />
+      )}
+      {estaActivo ? 'Email activo' : 'Email inactivo'}
+    </button>
+  );
+}
+
 // ── Fila de negocio ───────────────────────────────────
 function FilaNegocio({ negocio, onAprobar, onCambiarEstado, onRenovar, cargando }) {
   return (
-    <div className="bg-gray-800 border border-gray-700 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center gap-4">
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 flex-wrap">
-          <p className="text-sm font-semibold text-white truncate">{negocio.nombre}</p>
-          <Badge variant={ESTADO_BADGE[negocio.estado_plan]}>
-            {ESTADO_LABEL[negocio.estado_plan]}
-          </Badge>
-          {negocio.plan && (
-            <span className="text-xs bg-gray-700 text-gray-300 px-2 py-0.5 rounded-full">
-              {PLAN_LABEL[negocio.plan] || negocio.plan}
+    <div className="bg-gray-800 border border-gray-700 rounded-2xl p-4 flex flex-col gap-3">
+      {/* Info del negocio */}
+      <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <p className="text-sm font-semibold text-white truncate">{negocio.nombre}</p>
+            <Badge variant={ESTADO_BADGE[negocio.estado_plan]}>
+              {ESTADO_LABEL[negocio.estado_plan]}
+            </Badge>
+            {negocio.plan && (
+              <span className="text-xs bg-gray-700 text-gray-300 px-2 py-0.5 rounded-full">
+                {PLAN_LABEL[negocio.plan] || negocio.plan}
+              </span>
+            )}
+          </div>
+          <p className="text-xs text-gray-400 mt-0.5">{negocio.email}</p>
+          <div className="flex items-center gap-3 mt-1.5 flex-wrap">
+            <span className="text-xs text-gray-500">
+              {negocio.total_sucursales} sucursal{negocio.total_sucursales !== '1' ? 'es' : ''}
             </span>
+            <span className="text-xs text-gray-500">
+              {negocio.total_usuarios} usuario{negocio.total_usuarios !== '1' ? 's' : ''}
+            </span>
+            <span className="text-xs text-gray-500">Vence: {formatFecha(negocio.fecha_vencimiento)}</span>
+          </div>
+        </div>
+
+        {/* Acciones principales */}
+        <div className="flex gap-2 flex-shrink-0 flex-wrap">
+          {negocio.estado_plan === 'pendiente' && (
+            <button onClick={() => onAprobar(negocio.id)} disabled={cargando}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-green-600 hover:bg-green-700
+                disabled:opacity-50 text-white text-xs font-medium rounded-lg transition-colors">
+              <CheckCircle size={14} /> Aprobar
+            </button>
+          )}
+          {negocio.estado_plan === 'activo' && (
+            <button onClick={() => onCambiarEstado(negocio.id, 'suspendido')} disabled={cargando}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-red-600 hover:bg-red-700
+                disabled:opacity-50 text-white text-xs font-medium rounded-lg transition-colors">
+              <Ban size={14} /> Suspender
+            </button>
+          )}
+          {(negocio.estado_plan === 'suspendido' || negocio.estado_plan === 'vencido') && (
+            <button onClick={() => onCambiarEstado(negocio.id, 'activo')} disabled={cargando}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700
+                disabled:opacity-50 text-white text-xs font-medium rounded-lg transition-colors">
+              <RefreshCw size={14} /> Reactivar
+            </button>
+          )}
+          {negocio.estado_plan !== 'pendiente' && (
+            <button onClick={() => onRenovar(negocio)} disabled={cargando}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-yellow-600 hover:bg-yellow-700
+                disabled:opacity-50 text-white text-xs font-medium rounded-lg transition-colors">
+              <CreditCard size={14} /> Renovar
+            </button>
           )}
         </div>
-        <p className="text-xs text-gray-400 mt-0.5">{negocio.email}</p>
-        <div className="flex items-center gap-3 mt-1.5 flex-wrap">
-          <span className="text-xs text-gray-500">
-            {negocio.total_sucursales} sucursal{negocio.total_sucursales !== '1' ? 'es' : ''}
-          </span>
-          <span className="text-xs text-gray-500">
-            {negocio.total_usuarios} usuario{negocio.total_usuarios !== '1' ? 's' : ''}
-          </span>
-          <span className="text-xs text-gray-500">Vence: {formatFecha(negocio.fecha_vencimiento)}</span>
+      </div>
+
+      {/* Servicios adicionales — separados visualmente */}
+      {negocio.estado_plan !== 'pendiente' && (
+        <div className="flex items-center gap-2 pt-2 border-t border-gray-700/50">
+          <span className="text-xs text-gray-500">Servicios:</span>
+          <ToggleEmailFacturas
+            negocioId={negocio.id}
+            activo={negocio.email_facturas_activo}
+          />
         </div>
-      </div>
-      <div className="flex gap-2 flex-shrink-0 flex-wrap">
-        {negocio.estado_plan === 'pendiente' && (
-          <button onClick={() => onAprobar(negocio.id)} disabled={cargando}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-green-600 hover:bg-green-700
-              disabled:opacity-50 text-white text-xs font-medium rounded-lg transition-colors">
-            <CheckCircle size={14} /> Aprobar
-          </button>
-        )}
-        {negocio.estado_plan === 'activo' && (
-          <button onClick={() => onCambiarEstado(negocio.id, 'suspendido')} disabled={cargando}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-red-600 hover:bg-red-700
-              disabled:opacity-50 text-white text-xs font-medium rounded-lg transition-colors">
-            <Ban size={14} /> Suspender
-          </button>
-        )}
-        {(negocio.estado_plan === 'suspendido' || negocio.estado_plan === 'vencido') && (
-          <button onClick={() => onCambiarEstado(negocio.id, 'activo')} disabled={cargando}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700
-              disabled:opacity-50 text-white text-xs font-medium rounded-lg transition-colors">
-            <RefreshCw size={14} /> Reactivar
-          </button>
-        )}
-        {negocio.estado_plan !== 'pendiente' && (
-          <button onClick={() => onRenovar(negocio)} disabled={cargando}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-yellow-600 hover:bg-yellow-700
-              disabled:opacity-50 text-white text-xs font-medium rounded-lg transition-colors">
-            <CreditCard size={14} /> Renovar
-          </button>
-        )}
-      </div>
+      )}
     </div>
   );
 }
@@ -475,7 +529,7 @@ function Panel({ usuario, onLogout }) {
 
   const mutEstado = useMutation({
     mutationFn: ({ id, estado }) => saApi.patch(`/negocios/${id}/estado`, { estado }),
-    onSuccess:  () => {
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['sa_negocios'] });
       queryClient.invalidateQueries({ queryKey: ['sa_estadisticas'] });
     },
@@ -534,7 +588,7 @@ function Panel({ usuario, onLogout }) {
           </div>
         )}
 
-        {/* ── Sección Backup ── */}
+        {/* Backup */}
         <SeccionBackup />
 
         {/* Filtros */}

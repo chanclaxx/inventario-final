@@ -44,6 +44,18 @@ async function cambiarEstado(req, res, next) {
   } catch (err) { next(err); }
 }
 
+// Activa o desactiva el envío de facturas por email para un negocio específico
+async function toggleEmailFacturas(req, res, next) {
+  try {
+    const { activo } = req.body;
+    if (typeof activo !== 'boolean') {
+      return res.status(400).json({ ok: false, error: 'El campo activo debe ser true o false' });
+    }
+    const data = await svc.toggleEmailFacturas(Number(req.params.id), activo);
+    res.json({ ok: true, data });
+  } catch (err) { next(err); }
+}
+
 async function getPlanes(req, res, next) {
   try {
     const data = await svc.getPlanes();
@@ -71,6 +83,7 @@ module.exports = {
   getNegocios,
   aprobarNegocio,
   cambiarEstado,
+  toggleEmailFacturas,
   getPlanes,
   renovarPlan,
 };
