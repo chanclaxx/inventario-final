@@ -1,6 +1,5 @@
 const { pool }     = require('../../config/db');
 const comprasRepo  = require('./compras.repository');
-const cajaRepo     = require('../caja/caja.repository');
 
 const getCompras = (sucursalId, negocioId) =>
   comprasRepo.findAll(sucursalId, negocioId);
@@ -19,39 +18,6 @@ const getCompraById = async (negocioId, id) => {
 const _fechaHoy = () => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-};
-
-// ── Helper: registra el egreso de la compra en la caja activa si existe ───────
-// Solo registra los métodos que mueven caja física (no Crédito/Fiado).
-// Es fire-and-forget desde la transacción principal: si falla no cancela la compra.
-
-const _registrarEgresoEnCaja = async (sucursalId, usuario_id, compraId, proveedor, pagos, total) => {
-  try {
-    const caja = await cajaRepo.findCajaAbierta(sucursalId);
-    if (!caja) return; // No hay caja abierta — no registrar
-
-    // Calcular el monto que realmente sale de caja (excluye crédito/fiado)
-    const METODOS_CAJA = ['Efectivo', 'Nequi', 'Daviplata', 'Transferencia', 'Tarjeta'];
-    const pagosCaja = pagos.filter((p) => METODOS_CAJA.includes(p.metodo));
-    const totalCaja = pagosCaja.length > 0
-      ? pagosCaja.reduce((s, p) => s + Number(p.valor || 0), 0)
-      : total; // Si no hay pagos detallados, asumir que todo salió de caja
-
-    if (totalCaja <= 0) return;
-
-    await cajaRepo.insertarMovimiento({
-      caja_id:          caja.id,
-      usuario_id,
-      tipo:             'Egreso',
-      concepto:         `Compra a ${proveedor}${compraId ? ` #${compraId}` : ''}`,
-      valor:            totalCaja,
-      referencia_id:    compraId   || null,
-      referencia_tipo:  'compra',
-    });
-  } catch (err) {
-    // No propagar el error — la compra ya se registró correctamente
-    console.warn('[caja] Error al registrar egreso de compra en caja:', err?.message || err);
-  }
 };
 
 const registrarCompra = async ({
@@ -215,11 +181,6 @@ const registrarCompra = async ({
     }
 
     await client.query('COMMIT');
-
-    // ── Registrar egreso en caja activa — fuera de la transacción principal ──
-    // Si la caja falla no se hace rollback de la compra (ya está committed).
-    await _registrarEgresoEnCaja(sucursal_id, usuario_id, compra.id, prov.nombre, pagos, total);
-
     return compra;
   } catch (err) {
     await client.query('ROLLBACK');
