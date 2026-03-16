@@ -13,7 +13,7 @@ import { Spinner } from '../../components/ui/Spinner';
 import { Badge }   from '../../components/ui/Badge';
 import {
   Settings, Save, Eye, EyeOff, Plus, Trash2,
-  GripVertical, ToggleLeft, ToggleRight, Tag,
+  GripVertical, ToggleLeft, ToggleRight, Tag, Lock,
 } from 'lucide-react';
 
 // ─── Hook compartido de config ────────────────────────────────────────────────
@@ -42,6 +42,32 @@ function Toggle({ enabled, onChange, label, description }) {
           ? <ToggleRight size={28} className="text-blue-600" />
           : <ToggleLeft  size={28} className="text-gray-300" />}
       </button>
+    </div>
+  );
+}
+
+// ─── Toggle solo lectura — no interactivo ─────────────────────────────────────
+// Muestra el estado actual pero no permite modificarlo.
+// Usado para features controladas exclusivamente por el superadmin.
+
+function ToggleReadOnly({ enabled, label, description }) {
+  return (
+    <div className="flex items-center justify-between gap-4">
+      <div className="flex flex-col gap-0.5">
+        <div className="flex items-center gap-1.5">
+          <span className="text-sm font-medium text-gray-700">{label}</span>
+          <Lock size={11} className="text-gray-300" />
+        </div>
+        {description && <span className="text-xs text-gray-400">{description}</span>}
+        <span className="text-xs text-gray-300 mt-0.5">
+          Solo puede ser modificado por el administrador del sistema
+        </span>
+      </div>
+      <div className="flex-shrink-0 cursor-not-allowed opacity-60">
+        {enabled
+          ? <ToggleRight size={28} className="text-blue-400" />
+          : <ToggleLeft  size={28} className="text-gray-300" />}
+      </div>
     </div>
   );
 }
@@ -134,10 +160,7 @@ function LineasConfig() {
       ) : (
         <div className="flex flex-col gap-2">
           {lineas.map((l) => (
-            <div
-              key={l.id}
-              className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl"
-            >
+            <div key={l.id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl">
               <GripVertical size={15} className="text-gray-300 flex-shrink-0" />
               <p className="text-sm font-medium text-gray-800 flex-1 min-w-0 truncate">
                 {l.nombre}
@@ -214,7 +237,6 @@ function GarantiasConfig() {
     queryFn:  () => getGarantias().then((r) => r.data.data),
   });
 
-  // ── Líneas disponibles para asignar ──
   const { data: lineas = [] } = useQuery({
     queryKey: ['lineas'],
     queryFn:  () => getLineas().then((r) => r.data.data),
@@ -256,7 +278,7 @@ function GarantiasConfig() {
       titulo: g.titulo,
       texto:  g.texto,
       orden:  g.orden,
-      lineas: g.lineas || [],   // ← array de linea_id que ya vienen del backend
+      lineas: g.lineas || [],
     });
     setError('');
     setModalOpen(true);
@@ -275,7 +297,6 @@ function GarantiasConfig() {
     editando ? mutEditar.mutate() : mutCrear.mutate();
   };
 
-  // ── Toggle de línea en el checkbox ──
   const toggleLinea = (lineaId) => {
     setForm((f) => {
       const yaEsta = f.lineas.includes(lineaId);
@@ -306,7 +327,6 @@ function GarantiasConfig() {
       ) : (
         <div className="flex flex-col gap-2">
           {[...garantias].sort((a, b) => a.orden - b.orden).map((g) => {
-            // Nombres de las líneas asignadas
             const lineasAsignadas = lineas
               .filter((l) => g.lineas?.includes(l.id))
               .map((l) => l.nombre);
@@ -317,7 +337,6 @@ function GarantiasConfig() {
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-gray-800">{g.titulo}</p>
                   <p className="text-xs text-gray-400 mt-0.5 line-clamp-2">{g.texto}</p>
-                  {/* Líneas asignadas como chips */}
                   {lineasAsignadas.length > 0 && (
                     <div className="flex flex-wrap gap-1 mt-1.5">
                       {lineasAsignadas.map((nombre) => (
@@ -387,7 +406,6 @@ function GarantiasConfig() {
             onChange={(e) => setForm({ ...form, orden: Number(e.target.value) })}
           />
 
-          {/* ── Líneas asociadas ── */}
           <div className="flex flex-col gap-2">
             <label className="text-sm font-medium text-gray-700">
               Líneas que aplican
@@ -402,9 +420,9 @@ function GarantiasConfig() {
             ) : (
               <div className="flex flex-col gap-2">
                 {lineas.map((l) => {
-                  const lineaId   = l.id;
+                  const lineaId     = l.id;
                   const lineaNombre = l.nombre;
-                  const marcada   = form.lineas.includes(lineaId);
+                  const marcada     = form.lineas.includes(lineaId);
                   return (
                     <label
                       key={lineaId}
@@ -448,20 +466,27 @@ function GarantiasConfig() {
 }
 
 // ─── Campos opcionales del formulario de venta ────────────────────────────────
-function CamposFormularioConfig({ valores, set }) {
-  const CAMPOS_OPCIONALES = [
-    {
-      clave:       'campo_email_cliente',
-      label:       'Email del cliente',
-      description: 'Muestra el campo de email al registrar una venta',
-    },
-    {
-      clave:       'campo_direccion_cliente',
-      label:       'Dirección del cliente',
-      description: 'Muestra el campo de dirección al registrar una venta',
-    },
-  ];
+// campo_email_cliente es controlado exclusivamente por el superadmin como
+// servicio de pago — se muestra en solo lectura con ToggleReadOnly.
+// Los demás campos siguen siendo configurables por el negocio.
 
+const CAMPOS_EDITABLES = [
+  {
+    clave:       'campo_direccion_cliente',
+    label:       'Dirección del cliente',
+    description: 'Muestra el campo de dirección al registrar una venta',
+  },
+];
+
+const CAMPOS_READONLY = [
+  {
+    clave:       'campo_email_cliente',
+    label:       'Envío de facturas por email',
+    description: 'Envía automáticamente la factura al correo del cliente',
+  },
+];
+
+function CamposFormularioConfig({ valores, set }) {
   return (
     <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm flex flex-col gap-4">
       <h2 className="text-sm font-semibold text-gray-700">Campos del formulario de venta</h2>
@@ -469,21 +494,38 @@ function CamposFormularioConfig({ valores, set }) {
         Activa los campos adicionales que quieres recolectar al facturar
       </p>
       <div className="flex flex-col gap-4">
-        {CAMPOS_OPCIONALES.map((campo) => {
+        {/* Campos editables por el negocio */}
+        {CAMPOS_EDITABLES.map((campo) => {
           const clave   = campo.clave;
-          const label   = campo.label;
-          const desc    = campo.description;
           const enabled = valores[clave] === '1';
           return (
             <Toggle
               key={clave}
-              label={label}
-              description={desc}
+              label={campo.label}
+              description={campo.description}
               enabled={enabled}
               onChange={(val) => set(clave, val ? '1' : '0')}
             />
           );
         })}
+
+        {/* Campos controlados por superadmin — solo lectura */}
+        {CAMPOS_READONLY.length > 0 && (
+          <div className="border-t border-gray-100 pt-4 flex flex-col gap-4">
+            {CAMPOS_READONLY.map((campo) => {
+              const clave   = campo.clave;
+              const enabled = valores[clave] === '1';
+              return (
+                <ToggleReadOnly
+                  key={clave}
+                  label={campo.label}
+                  description={campo.description}
+                  enabled={enabled}
+                />
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -586,7 +628,7 @@ export default function ConfigPage() {
         {/* ── Columna derecha ── */}
         <div className="w-full lg:flex-1 flex flex-col gap-6">
           <SucursalesConfig />
-          <LineasConfig />   {/* ← líneas justo después de sucursales */}
+          <LineasConfig />
           <GarantiasConfig />
           <UsuariosConfig />
         </div>
