@@ -81,19 +81,41 @@ const listarBackups = async () => {
 };
 
 // ── Eliminar backups antiguos — mantener los últimos N ────────────────────
-const _limpiarBackupsAntiguos = async (mantener = 30) => {
+const _limpiarBackupsInteligente = async () => {
   const supabase = _getSupabase();
-
-  const { data, error } = await supabase.storage
+  const { data } = await supabase.storage
     .from('backups')
-    .list('', {
-      limit:  1000,
-      sortBy: { column: 'created_at', order: 'desc' },
-    });
+    .list('', { limit: 1000, sortBy: { column: 'created_at', order: 'desc' } });
 
-  if (error || !data) return 0;
+  if (!data?.length) return 0;
 
-  const aEliminar = data.slice(mantener).map((f) => f.name);
+  const ahora      = new Date();
+  const aConservar = new Set();
+
+  for (const archivo of data) {
+    const fecha     = new Date(archivo.created_at);
+    const diasAtras = (ahora - fecha) / (1000 * 60 * 60 * 24);
+
+    // Últimos 7 días — conservar todos
+    if (diasAtras <= 7) { aConservar.add(archivo.name); continue; }
+
+    // Últimas 4 semanas — conservar uno por semana (el domingo)
+    if (diasAtras <= 28) {
+      if (fecha.getDay() === 0) aConservar.add(archivo.name);
+      continue;
+    }
+
+    // Últimos 6 meses — conservar uno por mes (el día 1)
+    if (diasAtras <= 180) {
+      if (fecha.getDate() === 1) aConservar.add(archivo.name);
+    }
+    // Más de 6 meses — eliminar
+  }
+
+  const aEliminar = data
+    .filter((f) => !aConservar.has(f.name))
+    .map((f) => f.name);
+
   if (!aEliminar.length) return 0;
 
   await supabase.storage.from('backups').remove(aEliminar);
@@ -117,7 +139,7 @@ const ejecutarBackup = async () => {
   const archivo = await _subirASupabase(dump, nombre);
 
   // 3. Limpiar antiguos
-  const eliminados = await _limpiarBackupsAntiguos(30);
+  const eliminados = await _limpiarBackupsInteligente();
 
   return {
     ok:                  true,
