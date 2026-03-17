@@ -4,7 +4,8 @@ const serialRepo   = require('../productos/productosSerial.repository');
 const cantidadRepo = require('../productos/productosCantidad.repository');
 const clientesRepo = require('../clientes/clientes.repository');
 const cajaRepo     = require('../caja/caja.repository');
-const { enviarFactura } = require('../email/email.service');
+const { enviarFactura }  = require('../email/email.service');
+const garantiasRepo      = require('../garantias/garantias.repository');
 
 const ES_COMPANERO = (cedula) => cedula === 'COMPANERO';
 
@@ -217,13 +218,14 @@ const crearFactura = async ({
           for (const row of configRows) configMap[row.clave] = row.valor;
 
           if (configMap.campo_email_cliente === '1') {
-            const [lineasEmail, pagosEmail, retomasEmail] = await Promise.all([
+            const [lineasEmail, pagosEmail, retomasEmail, garantiasEmail] = await Promise.all([
               facturasRepo.getLineas(factura.id),
               facturasRepo.getPagos(factura.id),
               facturasRepo.getRetomas(factura.id),
+              garantiasRepo.findPorFactura(factura.id),
             ]);
             await enviarFactura(
-              { ...factura, lineas: lineasEmail, pagos: pagosEmail, retomas: retomasEmail, email },
+              { ...factura, lineas: lineasEmail, pagos: pagosEmail, retomas: retomasEmail, garantias: garantiasEmail, email },
               configMap
             );
           }
