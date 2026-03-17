@@ -13,6 +13,7 @@ import { Button }                  from '../../components/ui/Button';
 import { exportarInventarioExcel } from '../../utils/exportarInventarioExcel';
 import useCarritoStore             from '../../store/carritoStore';
 import useSucursalStore            from '../../store/sucursalStore';
+import { useAuth }                 from '../../context/useAuth';
 import api                         from '../../api/axios.config';
 import { ModalImportarInventario } from './ModalImportarInventario';
 
@@ -30,17 +31,19 @@ export default function InventarioPage() {
   const [carritoAbierto, setCarritoAbierto] = useState(false);
   const [modalImportar,  setModalImportar]  = useState(false);
 
+  const { esSupervisor } = useAuth();
+
   const { items, totalCarrito } = useCarritoStore();
   const totalItems = items.length;
   const total      = totalCarrito();
 
-  // Vista global: deshabilitar acciones que requieren sucursal específica
   const esVistaGlobal   = useSucursalStore((s) => s.esVistaGlobal());
   const esUnicaSucursal = useSucursalStore((s) => s.esUnicaSucursal());
 
-  // Bloquear creación solo cuando es vista global Y hay más de una sucursal
-  // (si hay una sola, nunca es vista global)
   const bloquearCreacion = esVistaGlobal && !esUnicaSucursal;
+
+  // Exportar solo disponible para admin_negocio y supervisor
+  const puedeExportar = esSupervisor();
 
   const handleExportar = async () => {
     setExportando(true);
@@ -96,18 +99,21 @@ export default function InventarioPage() {
           </div>
 
           <div className="flex items-center gap-2">
-            <Button
-              size="sm"
-              variant="secondary"
-              onClick={handleExportar}
-              loading={exportando}
-              title="Descargar inventario completo en Excel"
-            >
-              <Download size={16} />
-              <span className="hidden sm:inline">
-                {exportando ? 'Generando...' : 'Exportar Excel'}
-              </span>
-            </Button>
+            {/* Solo visible para supervisor y admin — vendedores no ven costos */}
+            {puedeExportar && (
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={handleExportar}
+                loading={exportando}
+                title="Descargar inventario completo en Excel"
+              >
+                <Download size={16} />
+                <span className="hidden sm:inline">
+                  {exportando ? 'Generando...' : 'Exportar Excel'}
+                </span>
+              </Button>
+            )}
 
             <Button
               size="sm"
