@@ -3,6 +3,7 @@ const express      = require('express');
 const cors         = require('cors');
 const helmet       = require('helmet');
 const cookieParser = require('cookie-parser');
+const rateLimit    = require('express-rate-limit');
 
 const { validateEnv }      = require('./config/env');
 const { connectDB }        = require('./config/db');
@@ -31,9 +32,19 @@ app.use(cors({
   },
   credentials: true,
 }));
-app.use(express.json());
+app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 app.use(cookieParser());
-app.use(express.urlencoded({ extended: true }));
+
+// ── Rate limiting global ──────────────────────────────
+app.use('/api/', rateLimit({
+  windowMs:        60 * 1000,
+  max:             60,
+  standardHeaders: true,
+  legacyHeaders:   false,
+  message:         { ok: false, error: 'Demasiadas solicitudes. Intenta más tarde.' },
+  skip:            (req) => req.path === '/health',
+}));
 
 // ── Ruta de salud ─────────────────────────────────────
 app.get('/api/health', (req, res) => {
@@ -87,7 +98,6 @@ const PORT = process.env.PORT || 3001;
 const start = async () => {
   await connectDB();
 
-  // Verificar vencimientos al iniciar y cada 24 horas
   verificarVencimientos();
   setInterval(verificarVencimientos, 24 * 60 * 60 * 1000);
 
@@ -95,7 +105,6 @@ const start = async () => {
     console.log(`🚀 Servidor corriendo en http://localhost:${PORT}`);
   });
 
-  // Backup automático diario a las 2:00 AM (America/Bogota)
   iniciarCronBackup();
 };
 
