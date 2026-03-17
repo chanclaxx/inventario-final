@@ -11,8 +11,15 @@ const loginLimiter = rateLimit({
   message: { ok: false, error: 'Demasiados intentos. Espera 15 minutos.' },
 });
 
+const refreshLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30, // más permisivo que login — uso legítimo frecuente
+  message: { ok: false, error: 'Demasiadas solicitudes. Espera unos minutos.' },
+});
+
+router.post('/refresh', refreshLimiter, ctrl.refresh);
+
 router.post('/login',   loginLimiter, ctrl.login);
-router.post('/refresh', ctrl.refresh);
 router.post('/logout',  ctrl.logout);
 router.get('/me',       auth, ctrl.me);
 
