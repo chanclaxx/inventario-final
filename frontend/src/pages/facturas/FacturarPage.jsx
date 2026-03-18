@@ -1,20 +1,21 @@
-import { useState, useMemo } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getFacturas, getFacturaById, cancelarFactura } from '../../api/facturas.api';
-import { getGarantiasPorFactura } from '../../api/garantias.api';
+import { useState, useMemo }                      from 'react';
+import { useQuery }                               from '@tanstack/react-query';
+import { getFacturas, getFacturaById }            from '../../api/facturas.api';
+import { getGarantiasPorFactura }                 from '../../api/garantias.api';
 import { formatCOP, formatFecha, formatFechaHora } from '../../utils/formatters';
-import { useAuth }            from '../../context/useAuth';
-import { Badge }              from '../../components/ui/Badge';
-import { Button }             from '../../components/ui/Button';
-import { Modal }              from '../../components/ui/Modal';
-import { Input }              from '../../components/ui/Input';
-import { Spinner }            from '../../components/ui/Spinner';
-import { EmptyState }         from '../../components/ui/EmptyState';
-import { FacturaTermica }     from '../../components/FacturaTermica';
-import { ModalEditarFactura } from './ModalEditarFactura';
-import { useSucursalKey }     from '../../hooks/useSucursalKey';
-import useSucursalStore       from '../../store/sucursalStore';
-import api from '../../api/axios.config';
+import { useAuth }              from '../../context/useAuth';
+import { Badge }                from '../../components/ui/Badge';
+import { Button }               from '../../components/ui/Button';
+import { Modal }                from '../../components/ui/Modal';
+import { Input }                from '../../components/ui/Input';
+import { Spinner }              from '../../components/ui/Spinner';
+import { EmptyState }           from '../../components/ui/EmptyState';
+import { FacturaTermica }       from '../../components/FacturaTermica';
+import { ModalEditarFactura }   from './ModalEditarFactura';
+import { ModalCancelarFactura } from './ModalCancelarFactura';
+import { useSucursalKey }       from '../../hooks/useSucursalKey';
+import useSucursalStore         from '../../store/sucursalStore';
+import api                      from '../../api/axios.config';
 
 import {
   FileText, ChevronDown, ChevronUp,
@@ -191,7 +192,6 @@ function ModalDetalle({ facturaId, onClose, onReimprimir, onEditar }) {
     queryFn:  () => api.get('/config').then((r) => r.data.data),
   });
 
-  // ── Garantías filtradas por las líneas de esta factura ──
   const { data: garantiasFactura = [] } = useQuery({
     queryKey: ['garantias-factura', facturaId],
     queryFn:  () => getGarantiasPorFactura(facturaId).then((r) => r.data.data),
@@ -240,29 +240,32 @@ function ModalDetalle({ facturaId, onClose, onReimprimir, onEditar }) {
 
         <div className="bg-gray-50 rounded-xl p-3 flex flex-col gap-2">
           <p className="text-xs text-gray-400 font-medium">Productos</p>
-          {f?.lineas?.map((l) => (
-            <div key={l.id} className="flex items-start justify-between text-sm gap-2">
-              <div className="flex-1">
-                <p className="font-medium text-gray-800">{l.nombre_producto}</p>
-                {l.imei && <p className="text-xs text-gray-400 font-mono">{l.imei}</p>}
-                {esAdminNegocio() && l.proveedor_nombre && (
-                  <p className="text-xs text-amber-600 font-medium mt-0.5">{l.proveedor_nombre}</p>
-                )}
+          {f?.lineas?.map((l) => {
+            const lineaId = l.id;
+            return (
+              <div key={lineaId} className="flex items-start justify-between text-sm gap-2">
+                <div className="flex-1">
+                  <p className="font-medium text-gray-800">{l.nombre_producto}</p>
+                  {l.imei && <p className="text-xs text-gray-400 font-mono">{l.imei}</p>}
+                  {esAdminNegocio() && l.proveedor_nombre && (
+                    <p className="text-xs text-amber-600 font-medium mt-0.5">{l.proveedor_nombre}</p>
+                  )}
+                </div>
+                <div className="text-right flex-shrink-0">
+                  <p className="text-xs text-gray-400">{l.cantidad} x {formatCOP(l.precio)}</p>
+                  <p className="font-semibold text-gray-900">{formatCOP(l.subtotal)}</p>
+                </div>
               </div>
-              <div className="text-right flex-shrink-0">
-                <p className="text-xs text-gray-400">{l.cantidad} x {formatCOP(l.precio)}</p>
-                <p className="font-semibold text-gray-900">{formatCOP(l.subtotal)}</p>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
-        {/* ── Retomas — array ── */}
         {f?.retomas?.length > 0 && (
           <div className="flex flex-col gap-2">
-            {f.retomas.map((retoma) => (
-              <SeccionRetoma key={retoma.id} retoma={retoma} />
-            ))}
+            {f.retomas.map((retoma) => {
+              const retomaId = retoma.id;
+              return <SeccionRetoma key={retomaId} retoma={retoma} />;
+            })}
             {f.retomas.length > 1 && (
               <div className="flex justify-between text-sm font-medium text-purple-700
                 bg-purple-50 rounded-xl px-3 py-2 border border-purple-100">
@@ -275,12 +278,15 @@ function ModalDetalle({ facturaId, onClose, onReimprimir, onEditar }) {
 
         <div className="bg-gray-50 rounded-xl p-3 flex flex-col gap-1.5">
           <p className="text-xs text-gray-400 font-medium">Pagos</p>
-          {f?.pagos?.map((p) => (
-            <div key={p.id} className="flex justify-between text-sm">
-              <span className="text-gray-600">{p.metodo}</span>
-              <span className="font-medium text-gray-800">{formatCOP(p.valor)}</span>
-            </div>
-          ))}
+          {f?.pagos?.map((p) => {
+            const pagoId = p.id;
+            return (
+              <div key={pagoId} className="flex justify-between text-sm">
+                <span className="text-gray-600">{p.metodo}</span>
+                <span className="font-medium text-gray-800">{formatCOP(p.valor)}</span>
+              </div>
+            );
+          })}
           <div className="border-t border-gray-200 mt-1 pt-1.5 flex justify-between">
             <span className="text-sm font-semibold text-gray-700">Total neto</span>
             <span className="text-sm font-bold text-gray-900">{formatCOP(total - valorRetoma)}</span>
@@ -300,9 +306,9 @@ function ModalDetalle({ facturaId, onClose, onReimprimir, onEditar }) {
 
         <div className="flex gap-2">
           <Button variant="secondary" className="flex-1"
-  onClick={() => onReimprimir({ ...f, config: configData }, garantiasFactura)}>
-  <Printer size={16} /> Reimprimir
-</Button>
+            onClick={() => onReimprimir({ ...f, config: configData }, garantiasFactura)}>
+            <Printer size={16} /> Reimprimir
+          </Button>
           {f?.estado !== 'Cancelada' && (
             <Button variant="secondary" className="flex-1" onClick={() => onEditar(facturaId)}>
               <Pencil size={16} /> Editar
@@ -395,7 +401,7 @@ function GrupoDia({ fecha, facturas, onVerDetalle, onInactivar, onEditar, mostra
           hover:bg-gray-100 transition-colors">
         <div className="flex items-center gap-3">
           {expandido
-            ? <ChevronUp size={16} className="text-gray-400" />
+            ? <ChevronUp   size={16} className="text-gray-400" />
             : <ChevronDown size={16} className="text-gray-400" />}
           <span className="text-sm font-semibold text-gray-700">{fecha}</span>
           <span className="text-xs text-gray-400">{facturas.length} factura(s)</span>
@@ -405,10 +411,19 @@ function GrupoDia({ fecha, facturas, onVerDetalle, onInactivar, onEditar, mostra
 
       {expandido && (
         <div className="flex flex-col gap-2 pl-2">
-          {facturas.map((f) => (
-            <FilaFactura key={f.id} factura={f} onVerDetalle={onVerDetalle}
-              onInactivar={onInactivar} onEditar={onEditar} mostrarSucursal={mostrarSucursal} />
-          ))}
+          {facturas.map((f) => {
+            const facturaId = f.id;
+            return (
+              <FilaFactura
+                key={facturaId}
+                factura={f}
+                onVerDetalle={onVerDetalle}
+                onInactivar={onInactivar}
+                onEditar={onEditar}
+                mostrarSucursal={mostrarSucursal}
+              />
+            );
+          })}
         </div>
       )}
     </div>
@@ -478,7 +493,6 @@ function PanelBusqueda({ filtros, onChange, onLimpiar, totalResultados, totalFac
 const FILTROS_INICIALES = { texto: '', desde: '', hasta: '', proveedor: '' };
 
 export default function FacturarPage() {
-  const queryClient                    = useQueryClient();
   const { esAdminNegocio }             = useAuth();
   const esAdmin                        = esAdminNegocio();
   const { sucursalKey, sucursalLista } = useSucursalKey();
@@ -494,18 +508,6 @@ export default function FacturarPage() {
     queryKey: ['facturas', ...sucursalKey],
     queryFn:  () => getFacturas().then((r) => r.data.data),
     enabled:  sucursalLista,
-  });
-
-  
-
-  const mutInactivar = useMutation({
-    mutationFn: (id) => cancelarFactura(id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['facturas'],          exact: false });
-      queryClient.invalidateQueries({ queryKey: ['productos-serial'],  exact: false });
-      queryClient.invalidateQueries({ queryKey: ['productos-cantidad'], exact: false });
-      setFacturaInactivar(null);
-    },
   });
 
   const facturas = useMemo(() => facturasData || [], [facturasData]);
@@ -559,66 +561,59 @@ export default function FacturarPage() {
           } />
       ) : (
         <div className="flex flex-col gap-4">
-          {Object.entries(grupos).map(([fecha, facts]) => (
-            <GrupoDia key={fecha} fecha={fecha} facturas={facts}
-              onVerDetalle={(id) => setFacturaDetalle(id)}
-              onInactivar={(f) => setFacturaInactivar(f)}
-              onEditar={handleEditar}
-              mostrarSucursal={esVistaGlobal} />
-          ))}
+          {Object.entries(grupos).map(([fecha, facts]) => {
+            const grupoKey = fecha;
+            return (
+              <GrupoDia
+                key={grupoKey}
+                fecha={fecha}
+                facturas={facts}
+                onVerDetalle={(id) => setFacturaDetalle(id)}
+                onInactivar={(f) => setFacturaInactivar(f)}
+                onEditar={handleEditar}
+                mostrarSucursal={esVistaGlobal}
+              />
+            );
+          })}
         </div>
       )}
 
       {facturaDetalle && (
-        <ModalDetalle facturaId={facturaDetalle}
+        <ModalDetalle
+          facturaId={facturaDetalle}
           onClose={() => setFacturaDetalle(null)}
           onReimprimir={(f, garantias) => {
-  setFacturaDetalle(null);
-  setFacturaImprimir({ factura: f, garantias });
-}}
-          onEditar={handleEditar} />
+            setFacturaDetalle(null);
+            setFacturaImprimir({ factura: f, garantias });
+          }}
+          onEditar={handleEditar}
+        />
       )}
 
+      {/* ── Modal cancelar con lógica de retoma y PIN ── */}
       {facturaInactivar && (
-        <Modal open onClose={() => setFacturaInactivar(null)} title="Inactivar Factura" size="sm">
-          <div className="flex flex-col gap-4">
-            <div className="bg-red-50 rounded-xl p-3">
-              <p className="text-sm text-gray-700">
-                ¿Seguro que quieres inactivar la factura{' '}
-                <span className="font-bold">#{String(facturaInactivar.id).padStart(6, '0')}</span>{' '}
-                de <span className="font-bold">{facturaInactivar.nombre_cliente}</span>?
-              </p>
-              <p className="text-xs text-red-500 mt-2">
-                Los productos volverán al inventario y la factura quedará cancelada.
-              </p>
-            </div>
-            <div className="flex gap-2">
-              <Button variant="secondary" className="flex-1"
-                onClick={() => setFacturaInactivar(null)}>Cancelar</Button>
-              <Button variant="danger" className="flex-1"
-                loading={mutInactivar.isPending}
-                onClick={() => mutInactivar.mutate(facturaInactivar.id)}>
-                Inactivar
-              </Button>
-            </div>
-          </div>
-        </Modal>
+        <ModalCancelarFactura
+          factura={facturaInactivar}
+          onClose={() => setFacturaInactivar(null)}
+          onSuccess={() => setFacturaInactivar(null)}
+        />
       )}
 
       {facturaEditar && (
-        <ModalEditarFactura facturaId={facturaEditar}
+        <ModalEditarFactura
+          facturaId={facturaEditar}
           onClose={() => setFacturaEditar(null)}
-          onGuardado={() => setFacturaEditar(null)} />
+          onGuardado={() => setFacturaEditar(null)}
+        />
       )}
 
-      
-{facturaImprimir && (
-  <FacturaTermica
-    factura={facturaImprimir.factura}
-    garantias={facturaImprimir.garantias}
-    onClose={() => setFacturaImprimir(null)}
-  />
-)}
+      {facturaImprimir && (
+        <FacturaTermica
+          factura={facturaImprimir.factura}
+          garantias={facturaImprimir.garantias}
+          onClose={() => setFacturaImprimir(null)}
+        />
+      )}
     </div>
   );
 }

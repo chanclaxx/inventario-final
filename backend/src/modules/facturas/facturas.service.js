@@ -244,18 +244,18 @@ const crearFactura = async ({
   }
 };
 
-const cancelarFactura = async (negocioId, id) => {
+const cancelarFactura = async (negocioId, id, eliminarRetoma = false) => {
   const factura = await facturasRepo.findByIdYNegocio(id, negocioId);
   if (!factura) throw { status: 404, message: 'Factura no encontrada' };
   if (factura.estado === 'Cancelada') throw { status: 400, message: 'La factura ya está cancelada' };
-
-  // ── Obtener pagos antes de cancelar para saber cuánto devolver en caja ───
+ 
   const pagos = await facturasRepo.getPagos(id);
-
+ 
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-
+ 
+    // ── Revertir productos vendidos (lógica original intacta) ─────────────────
     const lineas = await facturasRepo.getLineas(id);
     for (const linea of lineas) {
       if (linea.imei) {
@@ -276,17 +276,61 @@ const cancelarFactura = async (negocioId, id) => {
         await facturasRepo.ajustarStockCantidad(client, linea.producto_id, linea.cantidad);
       }
     }
-
+ 
+    // ── Revertir retomas si se solicitó eliminarlas del inventario ────────────
+    // La tabla retomas NO tiene columna tipo_retoma persistida.
+    // Distinción por presencia de imei:
+    //   con imei       → retoma de serial  → eliminar el serial del inventario
+    //   sin imei       → retoma de cantidad → reducir stock por nombre de producto
+    if (eliminarRetoma) {
+      const retomas = await facturasRepo.getRetomas(id);
+ 
+      for (const retoma of retomas) {
+        if (!retoma.ingreso_inventario) continue;
+ 
+        if (retoma.imei) {
+          // Serial: buscar por IMEI en el negocio y eliminar si no está vendido
+          const { rows: serialRows } = await client.query(
+            `SELECT s.id FROM seriales s
+             JOIN productos_serial ps ON ps.id = s.producto_id
+             JOIN sucursales       su ON su.id = ps.sucursal_id
+             WHERE s.imei = $1
+               AND su.negocio_id = $2
+               AND s.vendido = false
+             LIMIT 1`,
+            [retoma.imei, negocioId]
+          );
+          if (serialRows.length) {
+            await client.query(
+              'DELETE FROM seriales WHERE id = $1',
+              [serialRows[0].id]
+            );
+          }
+        } else if (retoma.nombre_producto) {
+          // Cantidad: buscar producto por nombre en la sucursal y reducir stock
+          const { rows: prodRows } = await client.query(
+            `SELECT pc.id FROM productos_cantidad pc
+             WHERE pc.nombre ILIKE $1
+               AND pc.sucursal_id = $2
+             LIMIT 1`,
+            [retoma.nombre_producto, factura.sucursal_id]
+          );
+          if (prodRows.length) {
+            await _verificarProductoCantidadNegocio(client, prodRows[0].id, negocioId);
+            await facturasRepo.ajustarStockCantidad(client, prodRows[0].id, -1);
+          }
+        }
+      }
+    }
+ 
     await facturasRepo.cancelar(client, id);
-
-    // ── Registrar egreso en caja si hay caja abierta ─────────────────────────
-    // Solo se devuelven los métodos que movieron caja física (excluye Crédito).
-    // Se hace dentro de la transacción para que si falla la caja, se revierta todo.
+ 
+    // ── Registrar egreso en caja si hay caja abierta (lógica original intacta) ─
     const METODOS_NO_CAJA = ['Credito'];
     const totalDevolucion = pagos
       .filter((p) => !METODOS_NO_CAJA.includes(p.metodo))
       .reduce((s, p) => s + Number(p.valor || 0), 0);
-
+ 
     if (totalDevolucion > 0) {
       const caja = await cajaRepo.findCajaAbierta(factura.sucursal_id);
       if (caja) {
@@ -302,7 +346,7 @@ const cancelarFactura = async (negocioId, id) => {
         );
       }
     }
-
+ 
     await client.query('COMMIT');
   } catch (err) {
     await client.query('ROLLBACK');

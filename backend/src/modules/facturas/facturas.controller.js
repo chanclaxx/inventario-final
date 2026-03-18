@@ -40,11 +40,11 @@ const crearFactura = async (req, res, next) => {
 
 const cancelarFactura = async (req, res, next) => {
   try {
-    await service.cancelarFactura(req.user.negocio_id, req.params.id);
+    const eliminarRetoma = req.body?.eliminarRetoma === true;
+    await service.cancelarFactura(req.user.negocio_id, req.params.id, eliminarRetoma);
     res.json({ ok: true, message: 'Factura cancelada correctamente' });
   } catch (err) { next(err); }
 };
-
 const editarFactura = async (req, res, next) => {
   try {
     const data = await service.editarFactura(
