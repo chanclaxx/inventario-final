@@ -1,4 +1,4 @@
-const bcrypt = require('bcrypt');
+const bcrypt = require('bcryptjs')
 const repo   = require('./config.repository');
 
 const SALT_ROUNDS = 10;
