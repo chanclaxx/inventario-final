@@ -3,18 +3,21 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getAcreedores, getAcreedorById, crearAcreedor, registrarMovimiento } from '../../api/acreedores.api';
 import { getConfig } from '../../api/config.api';
 import { formatCOP, formatFechaHora } from '../../utils/formatters';
-import { Button }     from '../../components/ui/Button';
-import { Input }      from '../../components/ui/Input';
-import { Modal }      from '../../components/ui/Modal';
-import { Badge }      from '../../components/ui/Badge';
-import { Spinner }    from '../../components/ui/Spinner';
-import { EmptyState } from '../../components/ui/EmptyState';
+import { Button }      from '../../components/ui/Button';
+import { Input }       from '../../components/ui/Input';
+import { Modal }       from '../../components/ui/Modal';
+import { Badge }       from '../../components/ui/Badge';
+import { Spinner }     from '../../components/ui/Spinner';
+import { EmptyState }  from '../../components/ui/EmptyState';
 import { SearchInput } from '../../components/ui/SearchInput';
 import { ReciboAcreedor } from '../../components/Reciboacreedor';
-import { Users, Plus, ChevronRight, ChevronLeft,ChevronUp, PenLine, Printer } from 'lucide-react';
+import { Users, Plus, ChevronRight, ChevronLeft, ChevronUp, PenLine, Printer } from 'lucide-react';
 import api from '../../api/axios.config';
 import { getCompraById } from '../../api/compras.api';
 
+// ─────────────────────────────────────────────
+// UTILS
+// ─────────────────────────────────────────────
 const normalizarProductos = (data) => {
   if (Array.isArray(data)) return data;
   if (data?.items && Array.isArray(data.items)) return data.items;
@@ -25,8 +28,8 @@ const normalizarProductos = (data) => {
 // CANVAS DE FIRMA
 // ─────────────────────────────────────────────
 function FirmaCanvas({ onFirma }) {
-  const canvasRef               = useRef(null);
-  const [dibujando, setDibujando] = useState(false);
+  const canvasRef                   = useRef(null);
+  const [dibujando, setDibujando]   = useState(false);
   const [tieneFirma, setTieneFirma] = useState(false);
 
   const getPos = (e, canvas) => {
@@ -64,9 +67,7 @@ function FirmaCanvas({ onFirma }) {
 
   const terminar = () => {
     setDibujando(false);
-    if (tieneFirma) {
-      onFirma(canvasRef.current.toDataURL());
-    }
+    if (tieneFirma) onFirma(canvasRef.current.toDataURL());
   };
 
   const limpiar = () => {
@@ -75,7 +76,6 @@ function FirmaCanvas({ onFirma }) {
     setTieneFirma(false);
     onFirma(null);
   };
-
 
   return (
     <div className="flex flex-col gap-2">
@@ -106,7 +106,11 @@ function FirmaCanvas({ onFirma }) {
     </div>
   );
 }
-function DetalleCompraInline({ compraId, }) {
+
+// ─────────────────────────────────────────────
+// DETALLE EXPANDIBLE DE COMPRA
+// ─────────────────────────────────────────────
+function DetalleCompraInline({ compraId }) {
   const [expandido, setExpandido] = useState(false);
 
   const { data: compra, isLoading } = useQuery({
@@ -119,12 +123,9 @@ function DetalleCompraInline({ compraId, }) {
     <div className="mt-2">
       <button
         onClick={() => setExpandido((v) => !v)}
-        className="flex items-center gap-1.5 text-xs text-blue-500 hover:text-blue-700
-          font-medium transition-colors"
+        className="flex items-center gap-1.5 text-xs text-blue-500 hover:text-blue-700 font-medium transition-colors"
       >
-        {expandido
-          ? <ChevronUp size={13} />
-          : <ChevronRight size={13} />}
+        {expandido ? <ChevronUp size={13} /> : <ChevronRight size={13} />}
         {expandido ? 'Ocultar compra' : `Ver compra #${String(compraId).padStart(6, '0')}`}
       </button>
 
@@ -140,9 +141,7 @@ function DetalleCompraInline({ compraId, }) {
                 <p className="text-xs font-semibold text-amber-700">
                   Compra #{String(compra.id).padStart(6, '0')}
                 </p>
-                <span className="text-xs text-gray-400">
-                  {formatFechaHora(compra.fecha)}
-                </span>
+                <span className="text-xs text-gray-400">{formatFechaHora(compra.fecha)}</span>
               </div>
 
               {compra.proveedor_nombre && (
@@ -151,17 +150,15 @@ function DetalleCompraInline({ compraId, }) {
                 </p>
               )}
 
-              {/* Líneas de la compra */}
               <div className="flex flex-col gap-1.5 mt-1">
                 {compra.lineas?.map((l) => (
-                  <div key={l.id}
-                    className="flex items-start justify-between text-xs gap-2
-                      bg-white rounded-lg px-2.5 py-2 border border-amber-100">
+                  <div
+                    key={l.id}
+                    className="flex items-start justify-between text-xs gap-2 bg-white rounded-lg px-2.5 py-2 border border-amber-100"
+                  >
                     <div className="flex-1 min-w-0">
                       <p className="font-medium text-gray-800 truncate">{l.nombre_producto}</p>
-                      {l.imei && (
-                        <p className="text-gray-400 font-mono">{l.imei}</p>
-                      )}
+                      {l.imei && <p className="text-gray-400 font-mono">{l.imei}</p>}
                     </div>
                     <div className="text-right flex-shrink-0">
                       <p className="text-gray-500">{l.cantidad} × {formatCOP(l.precio_unitario)}</p>
@@ -186,12 +183,11 @@ function DetalleCompraInline({ compraId, }) {
 // ─────────────────────────────────────────────
 // MODAL MOVIMIENTO
 // ─────────────────────────────────────────────
-function ModalMovimiento({ acreedor, onClose }) {
-  const queryClient               = useQueryClient();
-  const [form,  setForm]          = useState({ tipo: 'Cargo', descripcion: '', valor: '' });
-  const [firma, setFirma]         = useState(null);
-  const [error, setError]         = useState('');
-  const [movRegistrado, setMovRegistrado] = useState(null);
+function ModalMovimiento({ acreedor, onClose, onImprimir }) {
+  const queryClient             = useQueryClient();
+  const [form,  setForm]        = useState({ tipo: 'Cargo', descripcion: '', valor: '' });
+  const [firma, setFirma]       = useState(null);
+  const [error, setError]       = useState('');
 
   const mutation = useMutation({
     mutationFn: () => registrarMovimiento(acreedor.id, {
@@ -201,10 +197,11 @@ function ModalMovimiento({ acreedor, onClose }) {
       firma,
     }),
     onSuccess: (data) => {
-      // Acreedores es de negocio (negocio_id) → sin sucursalKey, igual exact: false por consistencia
       queryClient.invalidateQueries({ queryKey: ['acreedor',   acreedor.id], exact: false });
       queryClient.invalidateQueries({ queryKey: ['acreedores'],              exact: false });
-      setMovRegistrado(data?.data?.data ?? null);
+      const mov = data?.data?.data ?? null;
+      onImprimir(mov); // ← notifica al padre con el movimiento registrado
+      onClose();
     },
     onError: (err) => setError(err.response?.data?.error || 'Error al registrar'),
   });
@@ -215,26 +212,6 @@ function ModalMovimiento({ acreedor, onClose }) {
       if (siguienteId) document.getElementById(siguienteId)?.focus();
     }
   };
-
-  if (movRegistrado) {
-    return (
-      <Modal open onClose={onClose} title="Movimiento registrado" size="sm">
-        <div className="flex flex-col gap-4">
-          <p className="text-sm text-gray-600">
-            El movimiento fue registrado correctamente. ¿Deseas imprimir el recibo?
-          </p>
-          <div className="flex gap-2">
-            <Button variant="secondary" className="flex-1" onClick={onClose}>
-              No, cerrar
-            </Button>
-            <Button className="flex-1" onClick={onClose}>
-              <Printer size={15} /> Imprimir recibo
-            </Button>
-          </div>
-        </div>
-      </Modal>
-    );
-  }
 
   return (
     <Modal open onClose={onClose} title={`Movimiento — ${acreedor.nombre}`} size="md">
@@ -276,9 +253,16 @@ function ModalMovimiento({ acreedor, onClose }) {
         <FirmaCanvas onFirma={setFirma} />
 
         {error && <p className="text-sm text-red-500">{error}</p>}
+
         <div className="flex gap-2">
-          <Button variant="secondary" className="flex-1" onClick={onClose}>Cancelar</Button>
-          <Button className="flex-1" loading={mutation.isPending} onClick={() => mutation.mutate()}>
+          <Button variant="secondary" className="flex-1" onClick={onClose}>
+            Cancelar
+          </Button>
+          <Button
+            className="flex-1"
+            loading={mutation.isPending}
+            onClick={() => mutation.mutate()}
+          >
             Registrar
           </Button>
         </div>
@@ -291,10 +275,10 @@ function ModalMovimiento({ acreedor, onClose }) {
 // MODAL NUEVO ACREEDOR
 // ─────────────────────────────────────────────
 function ModalNuevoAcreedor({ onClose }) {
-  const queryClient               = useQueryClient();
-  const [form,  setForm]          = useState({ nombre: '', cedula: '', telefono: '' });
+  const queryClient                  = useQueryClient();
+  const [form, setForm]              = useState({ nombre: '', cedula: '', telefono: '' });
   const [proveedorId, setProveedorId] = useState('');
-  const [error, setError]         = useState('');
+  const [error, setError]            = useState('');
 
   const { data: proveedoresRaw } = useQuery({
     queryKey: ['proveedores'],
@@ -302,38 +286,35 @@ function ModalNuevoAcreedor({ onClose }) {
   });
   const proveedores = normalizarProductos(proveedoresRaw);
 
-  // ── Al seleccionar proveedor, autocompletar nombre si está vacío ──
-  // ── Query para verificar si el proveedor ya tiene acreedor ──
-const { data: acreedoresData } = useQuery({
-  queryKey: ['acreedores'],
-  queryFn:  () => api.get('/acreedores').then((r) => r.data.data),
-});
-const acreedores = normalizarProductos(acreedoresData);
+  const { data: acreedoresData } = useQuery({
+    queryKey: ['acreedores'],
+    queryFn:  () => api.get('/acreedores').then((r) => r.data.data),
+  });
+  const acreedores = normalizarProductos(acreedoresData);
 
-const handleSeleccionarProveedor = (id) => {
-  setProveedorId(id);
-  setError('');
-  if (!id) return;
+  const handleSeleccionarProveedor = (id) => {
+    setProveedorId(id);
+    setError('');
+    if (!id) return;
 
-  // ── Verificar si ya existe un acreedor vinculado a este proveedor ──
-  const yaVinculado = acreedores.some((a) => String(a.proveedor_id) === id);
-  if (yaVinculado) {
-    const acreedor = acreedores.find((a) => String(a.proveedor_id) === id);
-    setError(`Este proveedor ya está vinculado al acreedor "${acreedor.nombre}"`);
-    setProveedorId('');
-    return;
-  }
+    const yaVinculado = acreedores.some((a) => String(a.proveedor_id) === id);
+    if (yaVinculado) {
+      const acreedor = acreedores.find((a) => String(a.proveedor_id) === id);
+      setError(`Este proveedor ya está vinculado al acreedor "${acreedor.nombre}"`);
+      setProveedorId('');
+      return;
+    }
 
-  const prov = proveedores.find((p) => String(p.id) === id);
-  if (prov) {
-    setForm((f) => ({
-      ...f,
-      nombre:   f.nombre   || prov.nombre  || '',
-      cedula:   f.cedula   || prov.nit      || '',
-      telefono: f.telefono || prov.telefono || '',
-    }));
-  }
-};
+    const prov = proveedores.find((p) => String(p.id) === id);
+    if (prov) {
+      setForm((f) => ({
+        ...f,
+        nombre:   f.nombre   || prov.nombre   || '',
+        cedula:   f.cedula   || prov.nit       || '',
+        telefono: f.telefono || prov.telefono  || '',
+      }));
+    }
+  };
 
   const mutation = useMutation({
     mutationFn: () => crearAcreedor({
@@ -358,8 +339,6 @@ const handleSeleccionarProveedor = (id) => {
   return (
     <Modal open onClose={onClose} title="Nuevo Acreedor" size="sm">
       <div className="flex flex-col gap-4">
-
-        {/* ── Vincular a proveedor existente (opcional) ── */}
         <div className="flex flex-col gap-1">
           <label className="text-sm font-medium text-gray-700">
             Proveedor <span className="text-gray-400 font-normal text-xs">(opcional)</span>
@@ -409,6 +388,7 @@ const handleSeleccionarProveedor = (id) => {
         />
 
         {error && <p className="text-sm text-red-500">{error}</p>}
+
         <div className="flex gap-2">
           <Button variant="secondary" className="flex-1" onClick={onClose}>Cancelar</Button>
           <Button
@@ -426,7 +406,7 @@ const handleSeleccionarProveedor = (id) => {
 }
 
 // ─────────────────────────────────────────────
-// LISTA DE ACREEDORES (componente extraído)
+// LISTA DE ACREEDORES
 // ─────────────────────────────────────────────
 function ListaAcreedores({ acreedores, acreedorSel, isLoading, busqueda, setBusqueda, onSeleccionar, onNuevo }) {
   return (
@@ -477,7 +457,7 @@ function ListaAcreedores({ acreedores, acreedorSel, isLoading, busqueda, setBusq
 }
 
 // ─────────────────────────────────────────────
-// DETALLE ACREEDOR (componente extraído)
+// DETALLE ACREEDOR
 // ─────────────────────────────────────────────
 function DetalleAcreedor({ detalle, loadingDetalle, movimientosUI, onRegistrar, onImprimir, onVolver }) {
   if (loadingDetalle) return <Spinner className="py-20" />;
@@ -533,10 +513,7 @@ function DetalleAcreedor({ detalle, loadingDetalle, movimientosUI, onRegistrar, 
                     className="mt-2 h-12 border border-gray-100 rounded-lg"
                   />
                 )}
-                {/* ── Detalle expandible si el movimiento proviene de una compra ── */}
-                {m.compra_id && (
-                  <DetalleCompraInline compraId={m.compra_id} />
-                )}
+                {m.compra_id && <DetalleCompraInline compraId={m.compra_id} />}
               </div>
 
               <div className="flex flex-col items-end gap-2 flex-shrink-0">
@@ -570,13 +547,11 @@ export default function AcreedoresPage() {
   const [modalNuevo,  setModalNuevo]  = useState(false);
   const [movImprimir, setMovImprimir] = useState(null);
 
-  // Acreedores es de negocio (negocio_id) → sin sucursalKey
   const { data: acreedoresData, isLoading } = useQuery({
     queryKey: ['acreedores', busqueda],
     queryFn:  () => getAcreedores(busqueda).then((r) => r.data.data),
   });
 
-  // Detalle por ID único → sin sucursalKey
   const { data: detalle, isLoading: loadingDetalle } = useQuery({
     queryKey: ['acreedor', acreedorSel?.id],
     queryFn:  () => getAcreedorById(acreedorSel.id).then((r) => r.data.data),
@@ -594,6 +569,12 @@ export default function AcreedoresPage() {
   const handleSeleccionar = (a) => setAcreedorSel(a);
   const handleVolver      = () => setAcreedorSel(null);
 
+  // Abre el recibo: se usa tanto desde el historial como desde el modal de registro
+  const handleImprimir = (mov) => {
+    setModalMov(false);
+    setMovImprimir(mov);
+  };
+
   const listaProps = {
     acreedores,
     acreedorSel,
@@ -609,7 +590,7 @@ export default function AcreedoresPage() {
     loadingDetalle,
     movimientosUI,
     onRegistrar: () => setModalMov(true),
-    onImprimir:  setMovImprimir,
+    onImprimir:  handleImprimir,
     onVolver:    handleVolver,
   };
 
@@ -642,10 +623,12 @@ export default function AcreedoresPage() {
         )}
       </div>
 
+      {/* ── MODALES ── */}
       {modalMov && (
         <ModalMovimiento
           acreedor={acreedorSel}
           onClose={() => setModalMov(false)}
+          onImprimir={handleImprimir}
         />
       )}
       {modalNuevo && (
