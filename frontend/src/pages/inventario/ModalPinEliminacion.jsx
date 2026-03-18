@@ -1,45 +1,46 @@
-import { useState } from 'react';
+import { useState }    from 'react';
 import { ShieldAlert } from 'lucide-react';
-import { Modal } from '../../components/ui/Modal';
-import { Input } from '../../components/ui/Input';
+import { Modal }  from '../../components/ui/Modal';
+import { Input }  from '../../components/ui/Input';
 import { Button } from '../../components/ui/Button';
-import { getConfig } from '../../api/config.api';
+import { verificarPin } from '../../api/config.api';
 
 /**
  * Modal de confirmación con PIN de administrador.
  *
+ * El PIN se verifica contra el backend (bcrypt) — nunca se expone su valor.
+ *
  * Props:
- *  - titulo:      string  — título del modal
- *  - descripcion: string  — texto de advertencia
- *  - onConfirm:   (pin) => Promise<void>  — se llama cuando el PIN es correcto
- *  - onClose:     () => void
- *  - extraContent: ReactNode — contenido adicional antes del PIN (ej: input cantidad)
- *  - loading:     boolean
+ *  - titulo:       string       — título del modal
+ *  - descripcion:  string       — texto de advertencia
+ *  - onConfirm:    () => Promise<void>  — se llama solo cuando el PIN es correcto
+ *  - onClose:      () => void
+ *  - extraContent: ReactNode    — contenido adicional antes del PIN (ej: input cantidad)
+ *  - loading:      boolean      — estado de carga de la acción posterior
  */
 export function ModalPinEliminacion({ titulo, descripcion, onConfirm, onClose, extraContent, loading }) {
-  const [pin, setPin]       = useState('');
-  const [error, setError]   = useState('');
+  const [pin,         setPin]         = useState('');
+  const [error,       setError]       = useState('');
   const [verificando, setVerificando] = useState(false);
 
   const handleConfirmar = async () => {
-    if (!pin) {
+    if (!pin.trim()) {
       setError('Ingresa el PIN');
       return;
     }
+
     setVerificando(true);
     setError('');
+
     try {
-      const res = await getConfig();
-      const config = res.data.data;
-      const pinCorrecto = config?.pin_eliminacion || '1234';
-      if (pin !== pinCorrecto) {
+      const res = await verificarPin(pin.trim());
+      if (!res.data.valido) {
         setError('PIN incorrecto');
-        setVerificando(false);
         return;
       }
-      await onConfirm(pin);
+      await onConfirm();
     } catch {
-      setError('Error al verificar el PIN');
+      setError('Error al verificar el PIN. Intenta de nuevo.');
     } finally {
       setVerificando(false);
     }
@@ -60,7 +61,7 @@ export function ModalPinEliminacion({ titulo, descripcion, onConfirm, onClose, e
           type="password"
           placeholder="••••"
           value={pin}
-          onChange={(e) => setPin(e.target.value)}
+          onChange={(e) => { setPin(e.target.value); setError(''); }}
           onKeyDown={(e) => e.key === 'Enter' && handleConfirmar()}
           autoFocus
         />

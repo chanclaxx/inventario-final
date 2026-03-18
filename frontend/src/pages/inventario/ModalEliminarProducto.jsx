@@ -1,9 +1,10 @@
 import { useState }                    from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, Trash2, Eye, EyeOff, ShieldAlert } from 'lucide-react';
+import { AlertTriangle, Trash2, Eye, EyeOff } from 'lucide-react';
 import { Modal }  from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
-import { Input }  from '../../context/../components/ui/Input';
+import { Input }  from '../../components/ui/Input';
+import { verificarPin }                from '../../api/config.api';
 import { eliminarProductoSerial, eliminarProductoCantidad } from '../../api/productos.api';
 
 // ─── Tipos soportados ─────────────────────────────────────────────────────────
@@ -26,21 +27,21 @@ const _queryKeysPorTipo = (tipo) => {
 // ─── Props ────────────────────────────────────────────────────────────────────
 // producto  : { id, nombre, stock? }  — stock solo aplica para tipo cantidad
 // tipo      : TIPO_PRODUCTO_SERIAL | TIPO_PRODUCTO_CANTIDAD
-// pinConfig : string — valor de pin_eliminacion guardado en config_negocio
 // onClose   : () => void
-// onSuccess : () => void  — callback opcional tras eliminar (ej: cerrar modal padre)
+// onSuccess : () => void — callback opcional tras eliminar (ej: cerrar modal padre)
 
-export function ModalEliminarProducto({ producto, tipo, pinConfig, onClose, onSuccess }) {
+export function ModalEliminarProducto({ producto, tipo, onClose, onSuccess }) {
   const queryClient         = useQueryClient();
   const [pin, setPin]       = useState('');
   const [verPin, setVerPin] = useState(false);
   const [error, setError]   = useState('');
+  const [verificando, setVerificando] = useState(false);
 
   // ── Advertencia de stock para tipo cantidad ────────────────────────────────
-  const stockActual    = Number(producto.stock ?? 0);
-  const tieneStock     = tipo === TIPO_PRODUCTO_CANTIDAD && stockActual > 0;
+  const stockActual = Number(producto.stock ?? 0);
+  const tieneStock  = tipo === TIPO_PRODUCTO_CANTIDAD && stockActual > 0;
 
-  // ── Mutación ──────────────────────────────────────────────────────────────
+  // ── Mutación de eliminación ────────────────────────────────────────────────
   const mutation = useMutation({
     mutationFn: () => _mutationFnPorTipo(tipo, producto.id),
     onSuccess: () => {
@@ -53,21 +54,28 @@ export function ModalEliminarProducto({ producto, tipo, pinConfig, onClose, onSu
     },
   });
 
-  // ── Validación del PIN ────────────────────────────────────────────────────
-  const handleConfirmar = () => {
+  // ── Verificar PIN contra el backend y luego eliminar ──────────────────────
+  const handleConfirmar = async () => {
+    if (!pin.trim()) {
+      setError('Ingresa el PIN');
+      return;
+    }
+
+    setVerificando(true);
     setError('');
 
-    if (!pinConfig) {
-      setError('No hay PIN de eliminación configurado. Configúralo en Ajustes → Seguridad.');
-      return;
+    try {
+      const res = await verificarPin(pin.trim());
+      if (!res.data.valido) {
+        setError('PIN incorrecto');
+        return;
+      }
+      mutation.mutate();
+    } catch {
+      setError('Error al verificar el PIN. Intenta de nuevo.');
+    } finally {
+      setVerificando(false);
     }
-
-    if (pin.trim() !== String(pinConfig).trim()) {
-      setError('PIN incorrecto. Inténtalo de nuevo.');
-      return;
-    }
-
-    mutation.mutate();
   };
 
   const handleKeyDown = (e) => {
@@ -95,48 +103,36 @@ export function ModalEliminarProducto({ producto, tipo, pinConfig, onClose, onSu
             <AlertTriangle size={16} className="text-yellow-600 flex-shrink-0 mt-0.5" />
             <p className="text-xs text-yellow-700">
               Este producto tiene{' '}
-              <span className="font-semibold">{stockActual} unidad{stockActual !== 1 ? 'es' : ''}</span>{' '}
+              <span className="font-semibold">
+                {stockActual} unidad{stockActual !== 1 ? 'es' : ''}
+              </span>{' '}
               en stock. Al eliminarlo se perderá todo el inventario asociado.
             </p>
           </div>
         )}
 
         {/* ── PIN de seguridad ── */}
-        <div className="flex flex-col gap-1">
-          <div className="relative">
-            <Input
-              label="PIN de seguridad"
-              type={verPin ? 'text' : 'password'}
-              placeholder="••••"
-              value={pin}
-              onChange={(e) => { setPin(e.target.value); setError(''); }}
-              onKeyDown={handleKeyDown}
-              autoFocus
-            />
-            <button
-              type="button"
-              onClick={() => setVerPin((v) => !v)}
-              className="absolute right-3 top-8 text-gray-400 hover:text-gray-600 transition-colors"
-              tabIndex={-1}
-            >
-              {verPin ? <EyeOff size={16} /> : <Eye size={16} />}
-            </button>
-          </div>
-
-          {!pinConfig && (
-            <div className="flex items-center gap-1.5 mt-1">
-              <ShieldAlert size={13} className="text-yellow-500 flex-shrink-0" />
-              <p className="text-xs text-yellow-600">
-                Sin PIN configurado — ve a Ajustes → Seguridad para activarlo.
-              </p>
-            </div>
-          )}
+        <div className="relative">
+          <Input
+            label="PIN de seguridad"
+            type={verPin ? 'text' : 'password'}
+            placeholder="••••"
+            value={pin}
+            onChange={(e) => { setPin(e.target.value); setError(''); }}
+            onKeyDown={handleKeyDown}
+            autoFocus
+          />
+          <button
+            type="button"
+            onClick={() => setVerPin((v) => !v)}
+            className="absolute right-3 top-8 text-gray-400 hover:text-gray-600 transition-colors"
+            tabIndex={-1}
+          >
+            {verPin ? <EyeOff size={16} /> : <Eye size={16} />}
+          </button>
         </div>
 
-        {/* ── Error de validación o del backend ── */}
-        {error && (
-          <p className="text-sm text-red-500 -mt-1">{error}</p>
-        )}
+        {error && <p className="text-sm text-red-500 -mt-1">{error}</p>}
 
         {/* ── Acciones ── */}
         <div className="flex gap-2">
@@ -144,14 +140,14 @@ export function ModalEliminarProducto({ producto, tipo, pinConfig, onClose, onSu
             variant="secondary"
             className="flex-1"
             onClick={onClose}
-            disabled={mutation.isPending}
+            disabled={verificando || mutation.isPending}
           >
             Cancelar
           </Button>
           <Button
             variant="danger"
             className="flex-1"
-            loading={mutation.isPending}
+            loading={verificando || mutation.isPending}
             onClick={handleConfirmar}
             disabled={!pin.trim()}
           >
