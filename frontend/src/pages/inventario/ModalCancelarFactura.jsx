@@ -231,7 +231,7 @@ export function ModalCancelarFactura({ factura, onClose, onSuccess }) {
             onClick={handleConfirmar}
             disabled={!pin.trim()}
           >
-            Confirmar
+            Confirma
           </Button>
         </div>
 
