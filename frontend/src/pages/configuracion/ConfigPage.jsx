@@ -47,9 +47,6 @@ function Toggle({ enabled, onChange, label, description }) {
 }
 
 // ─── Toggle solo lectura — no interactivo ─────────────────────────────────────
-// Muestra el estado actual pero no permite modificarlo.
-// Usado para features controladas exclusivamente por el superadmin.
-
 function ToggleReadOnly({ enabled, label, description }) {
   return (
     <div className="flex items-center justify-between gap-4">
@@ -159,33 +156,37 @@ function LineasConfig() {
         <p className="text-sm text-gray-400 text-center py-4">Sin líneas configuradas</p>
       ) : (
         <div className="flex flex-col gap-2">
-          {lineas.map((l) => (
-            <div key={l.id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl">
-              <GripVertical size={15} className="text-gray-300 flex-shrink-0" />
-              <p className="text-sm font-medium text-gray-800 flex-1 min-w-0 truncate">
-                {l.nombre}
-              </p>
-              <div className="flex gap-1 flex-shrink-0">
-                <button
-                  onClick={() => abrirEditar(l)}
-                  className="p-1.5 rounded-lg hover:bg-gray-200 text-gray-400
-                    hover:text-gray-600 transition-colors"
-                  title="Editar línea"
-                >
-                  <Settings size={14} />
-                </button>
-                <button
-                  onClick={() => mutEliminar.mutate(l.id)}
-                  disabled={mutEliminar.isPending}
-                  className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400
-                    hover:text-red-500 transition-colors disabled:opacity-50"
-                  title="Eliminar línea"
-                >
-                  <Trash2 size={14} />
-                </button>
+          {lineas.map((l) => {
+            const lineaId     = l.id;
+            const lineaNombre = l.nombre;
+            return (
+              <div key={lineaId} className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl">
+                <GripVertical size={15} className="text-gray-300 flex-shrink-0" />
+                <p className="text-sm font-medium text-gray-800 flex-1 min-w-0 truncate">
+                  {lineaNombre}
+                </p>
+                <div className="flex gap-1 flex-shrink-0">
+                  <button
+                    onClick={() => abrirEditar(l)}
+                    className="p-1.5 rounded-lg hover:bg-gray-200 text-gray-400
+                      hover:text-gray-600 transition-colors"
+                    title="Editar línea"
+                  >
+                    <Settings size={14} />
+                  </button>
+                  <button
+                    onClick={() => mutEliminar.mutate(lineaId)}
+                    disabled={mutEliminar.isPending}
+                    className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400
+                      hover:text-red-500 transition-colors disabled:opacity-50"
+                    title="Eliminar línea"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -327,12 +328,13 @@ function GarantiasConfig() {
       ) : (
         <div className="flex flex-col gap-2">
           {[...garantias].sort((a, b) => a.orden - b.orden).map((g) => {
+            const garantiaId      = g.id;
             const lineasAsignadas = lineas
               .filter((l) => g.lineas?.includes(l.id))
               .map((l) => l.nombre);
 
             return (
-              <div key={g.id} className="flex items-start gap-3 p-3 bg-gray-50 rounded-xl">
+              <div key={garantiaId} className="flex items-start gap-3 p-3 bg-gray-50 rounded-xl">
                 <GripVertical size={16} className="text-gray-300 mt-0.5 flex-shrink-0" />
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-gray-800">{g.titulo}</p>
@@ -361,7 +363,7 @@ function GarantiasConfig() {
                     <Settings size={14} />
                   </button>
                   <button
-                    onClick={() => mutEliminar.mutate(g.id)}
+                    onClick={() => mutEliminar.mutate(garantiaId)}
                     className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400
                       hover:text-red-500 transition-colors"
                   >
@@ -466,10 +468,6 @@ function GarantiasConfig() {
 }
 
 // ─── Campos opcionales del formulario de venta ────────────────────────────────
-// campo_email_cliente es controlado exclusivamente por el superadmin como
-// servicio de pago — se muestra en solo lectura con ToggleReadOnly.
-// Los demás campos siguen siendo configurables por el negocio.
-
 const CAMPOS_EDITABLES = [
   {
     clave:       'campo_direccion_cliente',
@@ -494,7 +492,6 @@ function CamposFormularioConfig({ valores, set }) {
         Activa los campos adicionales que quieres recolectar al facturar
       </p>
       <div className="flex flex-col gap-4">
-        {/* Campos editables por el negocio */}
         {CAMPOS_EDITABLES.map((campo) => {
           const clave   = campo.clave;
           const enabled = valores[clave] === '1';
@@ -509,7 +506,6 @@ function CamposFormularioConfig({ valores, set }) {
           );
         })}
 
-        {/* Campos controlados por superadmin — solo lectura */}
         {CAMPOS_READONLY.length > 0 && (
           <div className="border-t border-gray-100 pt-4 flex flex-col gap-4">
             {CAMPOS_READONLY.map((campo) => {
@@ -531,18 +527,59 @@ function CamposFormularioConfig({ valores, set }) {
   );
 }
 
+// ─── Sección de seguridad con PIN ─────────────────────────────────────────────
+// El PIN se guarda hasheado en el backend — nunca se devuelve al frontend.
+// El input siempre empieza vacío: si el usuario no escribe nada al guardar,
+// el campo se omite del payload y el hash existente no se sobreescribe.
+function SeguridadConfig({ form, set }) {
+  const [verPin, setVerPin] = useState(false);
+  const pinNuevo            = form['pin_eliminacion'] || '';
+
+  return (
+    <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm flex flex-col gap-4">
+      <h2 className="text-sm font-semibold text-gray-700">Seguridad</h2>
+      <div className="relative">
+        <Input
+          label="PIN de eliminación"
+          type={verPin ? 'text' : 'password'}
+          placeholder="Dejar vacío para mantener el actual"
+          value={pinNuevo}
+          onChange={(e) => set('pin_eliminacion', e.target.value)}
+        />
+        <button
+          type="button"
+          onClick={() => setVerPin((v) => !v)}
+          className="absolute right-3 top-8 text-gray-400 hover:text-gray-600 transition-colors"
+        >
+          {verPin ? <EyeOff size={16} /> : <Eye size={16} />}
+        </button>
+      </div>
+      <p className="text-xs text-gray-400 -mt-2">
+        {pinNuevo
+          ? 'Se guardará un nuevo PIN al hacer clic en Guardar cambios.'
+          : 'Escribe un nuevo PIN solo si quieres cambiarlo. Vacío mantiene el actual.'}
+      </p>
+    </div>
+  );
+}
+
 // ─── Página principal ─────────────────────────────────────────────────────────
 export default function ConfigPage() {
   const queryClient                 = useQueryClient();
   const { data: config, isLoading } = useConfigQuery();
   const [form,     setForm]         = useState({});
-  const [verPin,   setVerPin]       = useState(false);
   const [guardado, setGuardado]     = useState(false);
 
   const mutation = useMutation({
     mutationFn: (payload) => api.put('/config', payload),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['config'], exact: false });
+      // Limpiar el PIN del form local tras guardar para que el input vuelva a vacío
+      setForm((f) => {
+        const siguiente = { ...f };
+        delete siguiente['pin_eliminacion'];
+        return siguiente;
+      });
       setGuardado(true);
       setTimeout(() => setGuardado(false), 2000);
     },
@@ -589,24 +626,8 @@ export default function ConfigPage() {
             ))}
           </div>
 
-          <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm flex flex-col gap-4">
-            <h2 className="text-sm font-semibold text-gray-700">Seguridad</h2>
-            <div className="relative">
-              <Input
-                label="PIN de eliminación"
-                type={verPin ? 'text' : 'password'}
-                placeholder="••••"
-                value={valores['pin_eliminacion'] || ''}
-                onChange={(e) => set('pin_eliminacion', e.target.value)}
-              />
-              <button
-                onClick={() => setVerPin(!verPin)}
-                className="absolute right-3 top-8 text-gray-400 hover:text-gray-600"
-              >
-                {verPin ? <EyeOff size={16} /> : <Eye size={16} />}
-              </button>
-            </div>
-          </div>
+          {/* ── Sección de seguridad extraída como componente ── */}
+          <SeguridadConfig form={form} set={set} />
 
           <CamposFormularioConfig valores={valores} set={set} />
 
