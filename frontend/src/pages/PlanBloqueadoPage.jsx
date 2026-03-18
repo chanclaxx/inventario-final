@@ -26,7 +26,7 @@ const CONFIG_POR_CODIGO = {
   },
 };
 
-const WHATSAPP_SOPORTE = '573001234567';
+const WHATSAPP_SOPORTE = '57315284181';
 
 export default function PlanBloqueadoPage() {
   const navigate = useNavigate();
