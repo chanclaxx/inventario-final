@@ -240,34 +240,27 @@ function ItemRetoma({ retoma, index, total, productosSerial, productosCantidad,
   };
 
   // ── Al marcar "Ingresa al inventario" — verificar automáticamente ─────────
-  const handleCheckboxInventario = useCallback(async (marcado) => {
+  const handleCheckboxInventario = async (marcado) => {
     set('ingreso_inventario', marcado);
 
     if (!marcado) {
-      // Al desmarcar limpiar el estado de verificación y reactivar_serial_id
       set('reactivar_serial_id', null);
       limpiar();
       return;
     }
 
-    // Solo verificar si hay IMEI válido
     const imeiActual = retoma.imei?.trim() ?? '';
     if (retoma.tipo_retoma !== 'serial' || imeiActual.length < IMEI_MIN_LENGTH) return;
 
     const serial = await verificar(imeiActual);
+    if (!serial) return;
 
-    if (!serial) return; // no existe → flujo normal, sin reactivar_serial_id
-
-    // Existe — setear reactivar_serial_id automáticamente en ambos casos
-    // (disponible o vendido/prestado) para que el backend lo procese
     set('reactivar_serial_id', serial.id);
-
-    // Si el serial tiene producto asociado, preseleccionarlo
     if (serial.producto_id) {
       set('producto_serial_id', serial.producto_id);
       set('nombre_producto',    serial.producto_nombre || '');
     }
-  }, [retoma.imei, retoma.tipo_retoma, verificar, limpiar]);
+  };
 
   // ── Si el IMEI cambia mientras inventario está marcado — re-verificar ─────
   useEffect(() => {
