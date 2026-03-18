@@ -14,6 +14,7 @@ import { ModalPinEliminacion }                           from './ModalPinElimina
 import { ModalEditarProductoCantidad }                   from './ModalEditarProductoCantidad';
 import { useAuth }                                       from '../../context/useAuth';
 import { useSucursalKey }                                from '../../hooks/useSucursalKey';
+import api                                               from '../../api/axios.config';
 
 // ── Tarjeta de producto cantidad ──────────────────────────────────────────────
 function TarjetaProducto({ p, esAdmin, onAgregar, onReducir, onEditar }) {
@@ -72,7 +73,7 @@ function AcordeonLinea({ nombre, productos, esAdmin, onAgregar, onReducir, onEdi
           bg-gray-50 hover:bg-gray-100 transition-colors text-left w-full"
       >
         {abierto
-          ? <ChevronDown size={14} className="text-gray-400" />
+          ? <ChevronDown  size={14} className="text-gray-400" />
           : <ChevronRight size={14} className="text-gray-400" />}
         <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{nombre}</span>
         <span className="text-xs text-gray-400">({productos.length})</span>
@@ -80,16 +81,19 @@ function AcordeonLinea({ nombre, productos, esAdmin, onAgregar, onReducir, onEdi
 
       {abierto && (
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 pl-2">
-          {productos.map((p) => (
-            <TarjetaProducto
-              key={p.id}
-              p={p}
-              esAdmin={esAdmin}
-              onAgregar={onAgregar}
-              onReducir={onReducir}
-              onEditar={onEditar}
-            />
-          ))}
+          {productos.map((p) => {
+            const productoId = p.id;
+            return (
+              <TarjetaProducto
+                key={productoId}
+                p={p}
+                esAdmin={esAdmin}
+                onAgregar={onAgregar}
+                onReducir={onReducir}
+                onEditar={onEditar}
+              />
+            );
+          })}
         </div>
       )}
     </div>
@@ -121,6 +125,14 @@ export function ProductosCantidad() {
     enabled:  sucursalLista,
   });
 
+  // ── Config: solo se carga si el usuario es admin (PIN de eliminación) ──────
+  const { data: configData } = useQuery({
+    queryKey: ['config'],
+    queryFn:  () => api.get('/config').then((r) => r.data.data),
+    enabled:  sucursalLista && esAdminNegocio(),
+  });
+  const pinEliminacion = configData?.pin_eliminacion ?? '';
+
   const agregarItem = useCarritoStore((s) => s.agregarItem);
 
   const mutReducir = useMutation({
@@ -141,12 +153,14 @@ export function ProductosCantidad() {
     p.nombre.toLowerCase().includes(busqueda.toLowerCase())
   );
 
-  // ── Agrupar por línea ──
+  // ── Agrupar por línea ──────────────────────────────────────────────────────
   const sinLinea = productosFiltrados.filter((p) => !p.linea_id);
-  const porLinea = lineas.map((l) => ({
-    linea:     l,
-    productos: productosFiltrados.filter((p) => p.linea_id === l.id),
-  })).filter((g) => g.productos.length > 0);
+  const porLinea = lineas
+    .map((l) => ({
+      linea:     l,
+      productos: productosFiltrados.filter((p) => p.linea_id === l.id),
+    }))
+    .filter((g) => g.productos.length > 0);
 
   const handleAgregar = (producto) => {
     agregarItem({
@@ -188,17 +202,20 @@ export function ProductosCantidad() {
         ) : (
           <div className="flex flex-col gap-4">
             {/* Productos con línea — acordeón */}
-            {porLinea.map(({ linea, productos: prods }) => (
-              <AcordeonLinea
-                key={linea.id}
-                nombre={linea.nombre}
-                productos={prods}
-                esAdmin={esAdmin}
-                onAgregar={handleAgregar}
-                onReducir={handleAbrirReducir}
-                onEditar={setProductoAEditar}
-              />
-            ))}
+            {porLinea.map(({ linea, productos: prods }) => {
+              const lineaId = linea.id;
+              return (
+                <AcordeonLinea
+                  key={lineaId}
+                  nombre={linea.nombre}
+                  productos={prods}
+                  esAdmin={esAdmin}
+                  onAgregar={handleAgregar}
+                  onReducir={handleAbrirReducir}
+                  onEditar={setProductoAEditar}
+                />
+              );
+            })}
 
             {/* Sin línea */}
             {sinLinea.length > 0 && (
@@ -237,6 +254,7 @@ export function ProductosCantidad() {
       {productoAEditar && (
         <ModalEditarProductoCantidad
           producto={productoAEditar}
+          pinEliminacion={pinEliminacion}
           onClose={() => setProductoAEditar(null)}
         />
       )}
