@@ -154,11 +154,11 @@ const getPagos = async (facturaId) => {
 const getRetomas = async (facturaId) => {
   const { rows } = await pool.query(`
     SELECT id, factura_id, descripcion, valor_retoma,
-           ingreso_inventario, nombre_producto, imei
+           ingreso_inventario, nombre_producto, imei, cantidad_retoma
     FROM retomas WHERE factura_id = $1
     ORDER BY id
   `, [facturaId]);
-  return rows; // array vacío si no hay retomas
+  return rows;
 };
 
 // ── create ────────────────────────────────────────────────────────────────────
@@ -201,13 +201,19 @@ const insertarPago = async (client, { factura_id, metodo, valor }) => {
 
 const insertarRetoma = async (client, {
   factura_id, descripcion, valor_retoma,
-  ingreso_inventario, nombre_producto, imei,
+  ingreso_inventario, nombre_producto, imei, cantidad_retoma,
 }) => {
   const { rows } = await client.query(`
-    INSERT INTO retomas(factura_id, descripcion, valor_retoma, ingreso_inventario, nombre_producto, imei)
-    VALUES ($1, $2, $3, $4, $5, $6)
+    INSERT INTO retomas(factura_id, descripcion, valor_retoma, ingreso_inventario, nombre_producto, imei, cantidad_retoma)
+    VALUES ($1, $2, $3, $4, $5, $6, $7)
     RETURNING *
-  `, [factura_id, descripcion, valor_retoma, ingreso_inventario || false, nombre_producto || null, imei || null]);
+  `, [
+    factura_id, descripcion, valor_retoma,
+    ingreso_inventario || false,
+    nombre_producto    || null,
+    imei               || null,
+    Number(cantidad_retoma) || 1,
+  ]);
   return rows[0];
 };
 

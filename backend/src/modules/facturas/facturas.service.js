@@ -307,7 +307,8 @@ const cancelarFactura = async (negocioId, id, eliminarRetoma = false) => {
             );
           }
         } else if (retoma.nombre_producto) {
-          // Cantidad: buscar producto por nombre en la sucursal y reducir stock
+          // Cantidad: buscar producto por nombre en la sucursal y reducir el stock
+          // que se añadió al momento de crear la retoma
           const { rows: prodRows } = await client.query(
             `SELECT pc.id FROM productos_cantidad pc
              WHERE pc.nombre ILIKE $1
@@ -317,11 +318,13 @@ const cancelarFactura = async (negocioId, id, eliminarRetoma = false) => {
           );
           if (prodRows.length) {
             await _verificarProductoCantidadNegocio(client, prodRows[0].id, negocioId);
-            await facturasRepo.ajustarStockCantidad(client, prodRows[0].id, -1);
+            const cantidadRevertir = -Math.abs(Number(retoma.cantidad_retoma) || 1);
+            await facturasRepo.ajustarStockCantidad(client, prodRows[0].id, cantidadRevertir);
           }
         }
       }
     }
+ 
  
     await facturasRepo.cancelar(client, id);
  
