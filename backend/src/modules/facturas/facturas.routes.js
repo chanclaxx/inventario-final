@@ -14,13 +14,15 @@ const validarFactura = [
   body('pagos').isArray({ min: 1 }).withMessage('Debe incluir al menos un método de pago'),
   body('pagos.*.metodo').isIn(['Efectivo','Nequi','Daviplata','Transferencia','Tarjeta','Credito'])
     .withMessage('Método de pago inválido'),
-  body('pagos.*.valor').isFloat({ gt: 0 }).withMessage('Valor de pago inválido'),
+  // ── Permite 0 y negativos: una retoma puede superar el valor de los productos,
+  // en cuyo caso el neto es negativo (el negocio le debe al cliente).
+  body('pagos.*.valor').isFloat().withMessage('Valor de pago inválido'),
 ];
 
 router.get('/',               ctrl.getFacturas);
 router.get('/:id',            ctrl.getFacturaById);
 router.post('/', validarFactura, validate, ctrl.crearFactura);
 router.patch('/:id/cancelar', requireNivel('supervisor'), ctrl.cancelarFactura);
-router.patch('/:id', requireNivel('supervisor'), ctrl.editarFactura);
+router.patch('/:id',          requireNivel('supervisor'), ctrl.editarFactura);
 
 module.exports = router;

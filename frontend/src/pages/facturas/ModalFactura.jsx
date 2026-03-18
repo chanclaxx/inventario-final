@@ -68,11 +68,19 @@ function calcularValorRetoma(retoma) {
 }
 
 function buildPayloadFactura({ tipoCliente, form, items, totalNeto, metodosSeleccionados, montos, retomas }) {
-  const pagos = metodosSeleccionados.length === 1
-    ? [{ metodo: metodosSeleccionados[0], valor: totalNeto }]
-    : metodosSeleccionados
-        .filter((id) => Number(montos[id] || 0) > 0)
-        .map((id) => ({ metodo: id, valor: Number(montos[id]) }));
+  // Si el neto es <= 0 (retoma supera el total) se envía un pago en Efectivo con
+  // el valor neto (negativo o cero) para registrar que el negocio le debe al cliente.
+  const pagosPorDefecto = totalNeto <= 0
+    ? [{ metodo: metodosSeleccionados[0] || 'Efectivo', valor: totalNeto }]
+    : null;
+
+  const pagos = pagosPorDefecto ?? (
+    metodosSeleccionados.length === 1
+      ? [{ metodo: metodosSeleccionados[0], valor: totalNeto }]
+      : metodosSeleccionados
+          .filter((id) => Number(montos[id] || 0) > 0)
+          .map((id) => ({ metodo: id, valor: Number(montos[id]) }))
+  );
 
   const lineas = items.map((item) => ({
     nombre_producto: item.nombre,
@@ -704,7 +712,7 @@ export function ModalFactura({ open, onClose }) {
     if (!form.nombre.trim())                               return setError('El nombre es requerido');
     if (tipoCliente === 'cliente' && !form.cedula.trim())  return setError('La cédula es requerida');
     if (tipoCliente === 'cliente' && !form.celular.trim()) return setError('El celular es requerido');
-    if (metodosSeleccionados.length === 0)                 return setError('Selecciona al menos un método de pago');
+    if (metodosSeleccionados.length === 0 && totalNeto > 0) return setError('Selecciona al menos un método de pago');
 
     if (conRetoma) {
       for (const r of retomas) {
@@ -906,10 +914,26 @@ export function ModalFactura({ open, onClose }) {
                 <span>- {formatCOP(totalRetomas)}</span>
               </div>
             )}
-            <div className="flex justify-between text-sm">
+            <div className="flex justify-between text-sm border-t border-gray-200 mt-1 pt-1.5">
               <span className="text-gray-600">Total a pagar</span>
-              <span className="font-bold text-gray-900">{formatCOP(totalNeto)}</span>
+              <span className={`font-bold ${totalNeto < 0 ? 'text-green-700' : 'text-gray-900'}`}>
+                {totalNeto < 0 ? `+ ${formatCOP(Math.abs(totalNeto))}` : formatCOP(totalNeto)}
+              </span>
             </div>
+            {/* Aviso cuando la retoma supera el total — el negocio le debe al cliente */}
+            {totalNeto < 0 && (
+              <div className="flex items-start gap-2 bg-green-50 border border-green-200 rounded-lg px-3 py-2 mt-1">
+                <span className="text-green-600 text-xs font-medium">
+                  La retoma supera el valor de los productos. El negocio debe devolver{' '}
+                  <span className="font-bold">{formatCOP(Math.abs(totalNeto))}</span> al cliente.
+                </span>
+              </div>
+            )}
+            {totalNeto === 0 && totalRetomas > 0 && (
+              <p className="text-xs text-gray-400 text-center mt-1">
+                La retoma cubre exactamente el valor — sin cobro al cliente.
+              </p>
+            )}
             {metodosSeleccionados.length >= 2 && (
               <div className="flex justify-between text-sm">
                 <span className="text-gray-600">Total pagado</span>
