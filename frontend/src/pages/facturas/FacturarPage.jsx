@@ -22,8 +22,6 @@ import {
   Printer, XCircle, Eye, Search, X, Pencil, Package, Building2,
 } from 'lucide-react';
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
 function agruparPorDia(facturas) {
   const grupos = {};
   facturas.forEach((f) => {
@@ -34,10 +32,10 @@ function agruparPorDia(facturas) {
   return grupos;
 }
 
-function labelTipoRetoma(tipo) {
-  if (tipo === 'serial')   return 'Equipo con serial / IMEI';
-  if (tipo === 'cantidad') return 'Producto por cantidad';
-  return tipo || '—';
+// tipo_retoma no se persiste en BD — se infiere desde imei igual que en el backend
+function labelTipoRetoma(retoma) {
+  if (retoma.imei) return 'Equipo con serial / IMEI';
+  return 'Producto por cantidad';
 }
 
 function dentroDeRango(fechaStr, desde, hasta) {
@@ -71,8 +69,6 @@ function coincideProveedor(factura, proveedor) {
   return factura.proveedor_nombre.split(', ').includes(proveedor);
 }
 
-// ─── Sección retoma ───────────────────────────────────────────────────────────
-
 function SeccionRetoma({ retoma }) {
   if (!retoma) return null;
 
@@ -82,18 +78,18 @@ function SeccionRetoma({ retoma }) {
     retoma.nombre_producto          ||
     null;
 
+  // tipo inferido: imei presente → serial, sin imei → cantidad
+  const esCantidad = !retoma.imei;
+
   return (
     <div className="bg-purple-50 rounded-xl p-3 flex flex-col gap-1.5">
       <p className="text-xs text-purple-500 font-medium">Retoma</p>
       <p className="text-sm text-gray-700">{retoma.descripcion}</p>
 
       <div className="grid grid-cols-2 gap-x-4 gap-y-1 mt-1">
-        {retoma.tipo_retoma && (
-          <>
-            <span className="text-xs text-gray-400">Tipo</span>
-            <span className="text-xs text-gray-700">{labelTipoRetoma(retoma.tipo_retoma)}</span>
-          </>
-        )}
+        <span className="text-xs text-gray-400">Tipo</span>
+        <span className="text-xs text-gray-700">{labelTipoRetoma(retoma)}</span>
+
         {retoma.imei && (
           <>
             <span className="text-xs text-gray-400">IMEI</span>
@@ -106,10 +102,12 @@ function SeccionRetoma({ retoma }) {
             <span className="text-xs text-gray-700">{nombreProducto}</span>
           </>
         )}
-        {retoma.tipo_retoma === 'cantidad' && retoma.cantidad_retoma > 0 && (
+        {esCantidad && Number(retoma.cantidad_retoma) > 0 && (
           <>
-            <span className="text-xs text-gray-400">Cantidad</span>
-            <span className="text-xs text-gray-700">{retoma.cantidad_retoma}</span>
+            <span className="text-xs text-gray-400">Cantidad retomada</span>
+            <span className="text-xs text-gray-700">
+              {retoma.cantidad_retoma} unidad{Number(retoma.cantidad_retoma) !== 1 ? 'es' : ''}
+            </span>
           </>
         )}
         <span className="text-xs text-gray-400">Inventario</span>
@@ -130,8 +128,6 @@ function SeccionRetoma({ retoma }) {
   );
 }
 
-// ─── Sección proveedor ────────────────────────────────────────────────────────
-
 function SeccionProveedor({ proveedorNombre }) {
   if (!proveedorNombre) return null;
   return (
@@ -144,8 +140,6 @@ function SeccionProveedor({ proveedorNombre }) {
     </div>
   );
 }
-
-// ─── Bloque cliente ───────────────────────────────────────────────────────────
 
 function BloqueCliente({ factura }) {
   const esCompanero  = factura?.cedula === 'COMPANERO';
@@ -175,8 +169,6 @@ function BloqueCliente({ factura }) {
     </div>
   );
 }
-
-// ─── Modal detalle ────────────────────────────────────────────────────────────
 
 function ModalDetalle({ facturaId, onClose, onReimprimir, onEditar }) {
   const { esAdminNegocio } = useAuth();
@@ -323,8 +315,6 @@ function ModalDetalle({ facturaId, onClose, onReimprimir, onEditar }) {
   );
 }
 
-// ─── Fila factura ─────────────────────────────────────────────────────────────
-
 function FilaFactura({ factura, onVerDetalle, onInactivar, onEditar, mostrarSucursal }) {
   const total = Number(factura.total || 0) - Number(factura.total_retoma || 0);
 
@@ -386,8 +376,6 @@ function FilaFactura({ factura, onVerDetalle, onInactivar, onEditar, mostrarSucu
   );
 }
 
-// ─── Grupo por día ────────────────────────────────────────────────────────────
-
 function GrupoDia({ fecha, facturas, onVerDetalle, onInactivar, onEditar, mostrarSucursal }) {
   const [expandido, setExpandido] = useState(true);
   const totalDia = facturas
@@ -429,8 +417,6 @@ function GrupoDia({ fecha, facturas, onVerDetalle, onInactivar, onEditar, mostra
     </div>
   );
 }
-
-// ─── Panel búsqueda ───────────────────────────────────────────────────────────
 
 function PanelBusqueda({ filtros, onChange, onLimpiar, totalResultados, totalFacturas, proveedores, esAdmin }) {
   const hayFiltros = filtros.texto || filtros.desde || filtros.hasta || filtros.proveedor;
@@ -487,8 +473,6 @@ function PanelBusqueda({ filtros, onChange, onLimpiar, totalResultados, totalFac
     </div>
   );
 }
-
-// ─── Page principal ───────────────────────────────────────────────────────────
 
 const FILTROS_INICIALES = { texto: '', desde: '', hasta: '', proveedor: '' };
 
@@ -590,7 +574,6 @@ export default function FacturarPage() {
         />
       )}
 
-      {/* ── Modal cancelar con lógica de retoma y PIN ── */}
       {facturaInactivar && (
         <ModalCancelarFactura
           factura={facturaInactivar}
