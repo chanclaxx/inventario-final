@@ -238,7 +238,7 @@ const findComprasCliente = async (negocioId, q) => {
 
 const contarSeriales = async (productoId) => {
   const { rows } = await pool.query(
-    'SELECT COUNT(*) AS total FROM seriales WHERE producto_id = $1',
+    'SELECT COUNT(*) AS total FROM seriales WHERE producto_id = $1 AND vendido = false',
     [productoId]
   );
   return Number(rows[0].total);
