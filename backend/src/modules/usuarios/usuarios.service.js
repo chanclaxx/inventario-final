@@ -1,6 +1,8 @@
 const bcrypt       = require('bcryptjs');
 const { pool }     = require('../../config/db');
 const usuariosRepo = require('./usuarios.repository');
+const crypto = require('crypto');
+const { enviarRecuperacionPassword } = require('../email/email.service');
 
 const getUsuarios = (negocioId) => usuariosRepo.findAll(negocioId);
 
@@ -121,8 +123,61 @@ const cambiarPasswordTemporal = async (negocioId, id, { password_nueva }) => {
     [password_hash, id, negocioId]
   );
 };
+const solicitarRecuperacion = async (email) => {
+  const usuario = await usuariosRepo.findAdminByEmail(email);
+ 
+  // Si no existe o no es admin_negocio, salir silenciosamente
+  if (!usuario) return;
+ 
+  // Generar token aleatorio seguro (32 bytes = 64 chars hex)
+  const tokenPlano = crypto.randomBytes(32).toString('hex');
+ 
+  // Guardar el hash SHA-256 — nunca el token plano en la BD
+  const tokenHash = crypto.createHash('sha256').update(tokenPlano).digest('hex');
+ 
+  // Token válido por 1 hora
+  const expiraEn = new Date(Date.now() + 60 * 60 * 1000);
+ 
+  await usuariosRepo.crearTokenRecuperacion(usuario.id, tokenHash, expiraEn);
+ 
+  // Enviar email — fire and forget igual que el resto del sistema
+  enviarRecuperacionPassword({
+    email:   usuario.email,
+    nombre:  usuario.nombre,
+    token:   tokenPlano,
+  }).catch((err) => {
+    console.warn('[recuperacion] Error al enviar email:', err?.message || err);
+  });
+};
+ 
+// Paso 2 — El usuario envía el token y la nueva contraseña.
+const resetearPassword = async (tokenPlano, passwordNueva) => {
+  if (!passwordNueva || passwordNueva.length < 6) {
+    throw { status: 400, message: 'La contraseña debe tener al menos 6 caracteres' };
+  }
+ 
+  // Hashear el token recibido para comparar con la BD
+  const tokenHash = crypto.createHash('sha256').update(tokenPlano).digest('hex');
+ 
+  const tokenData = await usuariosRepo.findTokenRecuperacion(tokenHash);
+  if (!tokenData) {
+    throw { status: 400, message: 'El enlace es inválido o ya expiró. Solicita uno nuevo.' };
+  }
+ 
+  // Actualizar contraseña y limpiar password_temporal si aplica
+  const passwordHash = await bcrypt.hash(passwordNueva, 10);
+  await pool.query(
+    `UPDATE usuarios
+     SET password_hash = $1, password_temporal = false
+     WHERE id = $2 AND negocio_id = $3`,
+    [passwordHash, tokenData.usuario_id, tokenData.negocio_id]
+  );
+ 
+  // Invalidar el token — no se puede reutilizar
+  await usuariosRepo.invalidarTokenRecuperacion(tokenData.id);
+};
 
 module.exports = {
   getUsuarios, getUsuarioById, crearUsuario,
-  actualizarUsuario, cambiarPassword, cambiarPasswordTemporal,
+  actualizarUsuario, cambiarPassword, cambiarPasswordTemporal,resetearPassword,solicitarRecuperacion
 };

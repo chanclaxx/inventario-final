@@ -83,5 +83,59 @@ const updatePassword = async (negocioId, id, password_hash) => {
   );
   return rowCount > 0;
 };
+const findAdminByEmail = async (email) => {
+  const { rows } = await pool.query(
+    `SELECT id, nombre, email, negocio_id
+     FROM usuarios
+     WHERE LOWER(email) = LOWER($1)
+       AND rol = 'admin_negocio'
+       AND activo = true
+     LIMIT 1`,
+    [email]
+  );
+  return rows[0] || null;
+};
+ 
+// Guarda el hash del token de recuperación.
+// Invalida tokens anteriores del mismo usuario antes de insertar el nuevo.
+const crearTokenRecuperacion = async (usuarioId, tokenHash, expiraEn) => {
+  // Invalidar tokens previos no usados del mismo usuario
+  await pool.query(
+    `UPDATE tokens_recuperacion SET usado = true
+     WHERE usuario_id = $1 AND usado = false`,
+    [usuarioId]
+  );
+  const { rows } = await pool.query(
+    `INSERT INTO tokens_recuperacion(usuario_id, token_hash, expira_en)
+     VALUES ($1, $2, $3)
+     RETURNING id`,
+    [usuarioId, tokenHash, expiraEn]
+  );
+  return rows[0];
+};
+ 
+// Busca un token válido (no usado, no expirado) por su hash.
+const findTokenRecuperacion = async (tokenHash) => {
+  const { rows } = await pool.query(
+    `SELECT tr.id, tr.usuario_id, tr.expira_en, tr.usado,
+            u.email, u.negocio_id
+     FROM tokens_recuperacion tr
+     JOIN usuarios u ON u.id = tr.usuario_id
+     WHERE tr.token_hash = $1
+       AND tr.usado = false
+       AND tr.expira_en > now()
+     LIMIT 1`,
+    [tokenHash]
+  );
+  return rows[0] || null;
+};
+ 
+// Marca el token como usado — se llama justo después de cambiar la contraseña.
+const invalidarTokenRecuperacion = async (tokenId) => {
+  await pool.query(
+    'UPDATE tokens_recuperacion SET usado = true WHERE id = $1',
+    [tokenId]
+  );
+};
 
-module.exports = { findAll, findById, findByEmail, create, update, updatePassword };
+module.exports = { findAll, findById, findByEmail, create, update, updatePassword,invalidarTokenRecuperacion,crearTokenRecuperacion,findAdminByEmail,findTokenRecuperacion };

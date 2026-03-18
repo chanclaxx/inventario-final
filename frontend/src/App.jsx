@@ -2,10 +2,12 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { PrivateRoute } from './components/layout/PrivateRoute';
 import { MainLayout }   from './components/layout/MainLayout';
 
-import Login             from './pages/Login';
-import PlanBloqueadoPage from './pages/PlanBloqueadoPage';
-import RegisterPage      from './pages/RegisterPage';
-import SuperAdminPage    from './pages/SuperAdminPage';
+import Login                from './pages/Login';
+import PlanBloqueadoPage    from './pages/PlanBloqueadoPage';
+import RegisterPage         from './pages/RegisterPage';
+import SuperAdminPage       from './pages/SuperAdminPage';
+import RecuperarPassword    from './pages/RecuperarPassword';
+import NuevaPassword        from './pages/NuevaPassword';
 
 import Dashboard       from './pages/Dashboard';
 import InventarioPage  from './pages/inventario/InventarioPage';
@@ -21,10 +23,12 @@ export default function App() {
   return (
     <Routes>
       {/* Rutas públicas */}
-      <Route path="/login"          element={<Login />} />
-      <Route path="/registro"       element={<RegisterPage />} />
-      <Route path="/plan-bloqueado" element={<PlanBloqueadoPage />} />
-      <Route path="/superadmin"     element={<SuperAdminPage />} />
+      <Route path="/login"                 element={<Login />} />
+      <Route path="/registro"              element={<RegisterPage />} />
+      <Route path="/plan-bloqueado"        element={<PlanBloqueadoPage />} />
+      <Route path="/superadmin"            element={<SuperAdminPage />} />
+      <Route path="/recuperar-contrasena"  element={<RecuperarPassword />} />
+      <Route path="/nueva-contrasena"      element={<NuevaPassword />} />
 
       {/* Rutas privadas */}
       <Route path="/*" element={
@@ -34,9 +38,9 @@ export default function App() {
               {/* Todos los roles */}
               <Route path="/"           element={<PrivateRoute rol="supervisor"><Dashboard /></PrivateRoute>} />
               <Route path="/inventario" element={<InventarioPage />} />
-              <Route path="/facturar" element={
-              <PrivateRoute rol="supervisor"><FacturarPage /></PrivateRoute>
-} />
+              <Route path="/facturar"   element={
+                <PrivateRoute rol="supervisor"><FacturarPage /></PrivateRoute>
+              } />
               <Route path="/prestamos"  element={<PrestamosPage />} />
 
               {/* Supervisor + admin_negocio */}

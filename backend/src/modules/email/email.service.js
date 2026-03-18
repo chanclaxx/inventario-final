@@ -265,5 +265,57 @@ const enviarConfirmacionRegistro = async ({ email, nombre_negocio }) => {
     `,
   });
 };
+const enviarRecuperacionPassword = async ({ email, nombre, token }) => {
+  const urlBase = process.env.FRONTEND_URL || 'http://localhost:5173';
+  const enlace  = `${urlBase}/nueva-contrasena?token=${token}`;
+ 
+  return _enviarSilencioso({
+    to:     [{ email, name: nombre }],
+    sender: {
+      email: process.env.BREVO_FROM_EMAIL,
+      name:  process.env.BREVO_FROM_NAME || 'Sistema de Inventario',
+    },
+    subject: 'Recuperación de contraseña',
+    htmlContent: `
+      <div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:32px;">
+        <div style="text-align:center;margin-bottom:24px;">
+          <div style="width:56px;height:56px;background:#2563eb;border-radius:14px;
+            display:inline-flex;align-items:center;justify-content:center;">
+            <span style="color:#fff;font-size:24px;font-weight:700;">I</span>
+          </div>
+        </div>
+ 
+        <h2 style="margin:0 0 8px;color:#1a1a1a;font-size:20px;">
+          Recuperación de contraseña
+        </h2>
+        <p style="margin:0 0 20px;color:#6b7280;font-size:14px;">
+          Hola <strong>${nombre}</strong>, recibimos una solicitud para restablecer
+          la contraseña de tu cuenta.
+        </p>
+ 
+        <a href="${enlace}"
+          style="display:block;background:#2563eb;color:#fff;text-align:center;
+            padding:14px 24px;border-radius:10px;font-size:15px;font-weight:600;
+            text-decoration:none;margin-bottom:20px;">
+          Restablecer contraseña
+        </a>
+ 
+        <div style="background:#f9fafb;border-radius:8px;padding:12px 16px;margin-bottom:20px;">
+          <p style="margin:0;font-size:12px;color:#6b7280;">
+            Si el botón no funciona, copia y pega este enlace en tu navegador:
+          </p>
+          <p style="margin:6px 0 0;font-size:11px;color:#2563eb;word-break:break-all;">
+            ${enlace}
+          </p>
+        </div>
+ 
+        <p style="margin:0;font-size:12px;color:#9ca3af;text-align:center;">
+          Este enlace expira en <strong>1 hora</strong>. Si no solicitaste
+          este cambio, ignora este mensaje — tu contraseña no será modificada.
+        </p>
+      </div>
+    `,
+  });
+};
 
-module.exports = { enviarFactura, enviarAprobacion, enviarConfirmacionRegistro };
+module.exports = { enviarFactura, enviarAprobacion, enviarConfirmacionRegistro,enviarRecuperacionPassword };

@@ -1,43 +1,42 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../context/useAuth.js';
-import { Button } from '../components/ui/Button';
-import { Input } from '../components/ui/Input';
-import { Link } from 'react-router-dom';
+import { useState }       from 'react';
+import { useNavigate, Link } from 'react-router-dom';
+import { useAuth }        from '../context/useAuth.js';
+import { Button }         from '../components/ui/Button';
+import { Input }          from '../components/ui/Input';
+
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function Login() {
-  const { login } = useAuth();
-  const navigate = useNavigate();
-  const [form, setForm] = useState({ email: '', password: '' });
-  const [error, setError] = useState('');
+  const { login }    = useAuth();
+  const navigate     = useNavigate();
+  const [form,    setForm]    = useState({ email: '', password: '' });
+  const [error,   setError]   = useState('');
   const [loading, setLoading] = useState(false);
 
-  const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError('');
 
-const handleSubmit = async (e) => {
-  e.preventDefault();
-  setError('');
+    if (!EMAIL_REGEX.test(form.email)) {
+      setError('Ingresa un correo electrónico válido');
+      return;
+    }
+    if (form.password.length < 4) {
+      setError('La contraseña es demasiado corta');
+      return;
+    }
 
-  if (!EMAIL_REGEX.test(form.email)) {
-    setError('Ingresa un correo electrónico válido');
-    return;
-  }
-  if (form.password.length < 4) {
-    setError('La contraseña es demasiado corta');
-    return;
-  }
-
-  setLoading(true);
-  try {
-    await login(form.email.trim().toLowerCase(), form.password);
-    navigate('/');
-  } catch (err) {
-    const msg = err?.response?.data?.message;
-    setError(msg || 'Correo o contraseña incorrectos');
-  } finally {
-    setLoading(false);
-  }
-};
+    setLoading(true);
+    try {
+      await login(form.email.trim().toLowerCase(), form.password);
+      navigate('/');
+    } catch (err) {
+      const msg = err?.response?.data?.message;
+      setError(msg || 'Correo o contraseña incorrectos');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
@@ -60,28 +59,43 @@ const handleSubmit = async (e) => {
               onChange={(e) => setForm({ ...form, email: e.target.value })}
               required
             />
-            <Input
-              label="Contraseña"
-              type="password"
-              placeholder="••••••••"
-              value={form.password}
-              onChange={(e) => setForm({ ...form, password: e.target.value })}
-              required
-            />
+
+            <div className="flex flex-col gap-1">
+              <Input
+                label="Contraseña"
+                type="password"
+                placeholder="••••••••"
+                value={form.password}
+                onChange={(e) => setForm({ ...form, password: e.target.value })}
+                required
+              />
+              {/* Link de recuperación — alineado a la derecha bajo el input */}
+              <div className="flex justify-end">
+                <Link
+                  to="/recuperar-contrasena"
+                  className="text-xs text-blue-600 hover:underline"
+                >
+                  ¿Olvidaste tu contraseña?
+                </Link>
+              </div>
+            </div>
+
             {error && (
               <div className="bg-red-50 border border-red-100 rounded-xl px-3 py-2">
                 <p className="text-sm text-red-600">{error}</p>
               </div>
             )}
+
             <Button type="submit" loading={loading} className="w-full mt-2" size="lg">
               Iniciar sesión
             </Button>
+
             <p className="text-center text-sm text-gray-500 mt-4">
               ¿No tienes cuenta?{' '}
               <Link to="/registro" className="text-blue-600 font-medium hover:underline">
-              Registrar negocio
+                Registrar negocio
               </Link>
-              </p>
+            </p>
           </form>
         </div>
       </div>
