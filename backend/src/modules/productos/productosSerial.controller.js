@@ -3,8 +3,7 @@ const service = require('./productosSerial.service');
 const getProductos = async (req, res, next) => {
   try {
     const sucursalId = req.todasSucursales ? null : req.sucursal_id;
-    // ── lineaId opcional desde query param ──
-    const lineaId = req.query.linea_id ? Number(req.query.linea_id) : null;
+    const lineaId    = req.query.linea_id ? Number(req.query.linea_id) : null;
     const data = await service.getProductos(sucursalId, req.user.negocio_id, lineaId);
     res.json({ ok: true, data });
   } catch (err) { next(err); }
@@ -34,10 +33,17 @@ const actualizarProducto = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+const eliminarProductoSerial = async (req, res, next) => {
+  try {
+    await service.eliminarProductoSerial(req.user.negocio_id, Number(req.params.id));
+    res.json({ ok: true, message: 'Producto eliminado correctamente' });
+  } catch (err) { next(err); }
+};
+
 const getSeriales = async (req, res, next) => {
   try {
     const vendido = req.query.vendido !== undefined ? req.query.vendido === 'true' : null;
-    const data = await service.getSeriales(req.user.negocio_id, req.params.id, vendido);
+    const data    = await service.getSeriales(req.user.negocio_id, req.params.id, vendido);
     res.json({ ok: true, data });
   } catch (err) { next(err); }
 };
@@ -84,6 +90,7 @@ const getComprasCliente = async (req, res, next) => {
 
 module.exports = {
   getProductos, getProductoById, crearProducto, actualizarProducto,
+  eliminarProductoSerial,
   getSeriales, agregarSerial, actualizarSerial, eliminarSerial,
   verificarImei, getComprasCliente,
 };

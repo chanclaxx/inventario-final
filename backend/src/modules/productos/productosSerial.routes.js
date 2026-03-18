@@ -6,30 +6,19 @@ const ctrl = require('./productosSerial.controller');
 
 // ── Rutas estáticas primero (antes de /:id para evitar conflictos) ──
 router.get('/verificar-imei/:imei', ctrl.verificarImei);
-router.get('/compras-cliente', ctrl.getComprasCliente);
+router.get('/compras-cliente',      ctrl.getComprasCliente);
+
 // ── Rutas de producto ──
 router.get('/',    ctrl.getProductos);
 router.get('/:id', ctrl.getProductoById);
-router.post('/',           requireNivel('vendedor'), ctrl.crearProducto);
-router.put('/:id', requireNivel('supervisor'), ctrl.actualizarProducto);
-
-
-router.delete('/:id', soloAdmin, async (req, res) => {
-  try {
-    await service.eliminarProductoSerial(req.negocioId, Number(req.params.id));
-    res.json({ ok: true });
-  } catch (err) {
-    res.status(err.status || 500).json({ error: err.message || 'Error interno' });
-  }
-});
-
-
+router.post('/',   requireNivel('vendedor'),       ctrl.crearProducto);
+router.put('/:id', requireNivel('supervisor'),     ctrl.actualizarProducto);
+router.delete('/:id', requireNivel('admin_negocio'), ctrl.eliminarProductoSerial);
 
 // ── Rutas de seriales ──
 router.get('/:id/seriales',    ctrl.getSeriales);
-router.post('/:id/seriales', requireNivel('vendedor'), ctrl.agregarSerial);
-router.put('/seriales/:id',    requireNivel('supervisor'), ctrl.actualizarSerial);
-router.delete('/seriales/:id', requireNivel('admin_negocio'), ctrl.eliminarSerial);
-
+router.post('/:id/seriales',   requireNivel('vendedor'),       ctrl.agregarSerial);
+router.put('/seriales/:id',    requireNivel('supervisor'),     ctrl.actualizarSerial);
+router.delete('/seriales/:id', requireNivel('admin_negocio'),  ctrl.eliminarSerial);
 
 module.exports = router;
