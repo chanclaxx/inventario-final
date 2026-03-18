@@ -36,7 +36,7 @@ export default function App() {
           <MainLayout>
             <Routes>
               {/* Todos los roles */}
-              <Route path="/"           element={<PrivateRoute rol="supervisor"><Dashboard /></PrivateRoute>} />
+              <Route path="/"           element={<PrivateRoute rol="admin_negocio"><Dashboard /></PrivateRoute>} />
               <Route path="/inventario" element={<InventarioPage />} />
               <Route path="/facturar"   element={
                 <PrivateRoute rol="supervisor"><FacturarPage /></PrivateRoute>
