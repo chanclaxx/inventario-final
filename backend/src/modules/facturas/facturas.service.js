@@ -134,6 +134,7 @@ const crearFactura = async ({
     }
 
     for (const retoma of retomas) {
+      // ── cantidad_retoma persistida para poder revertirla al cancelar ────────
       await facturasRepo.insertarRetoma(client, {
         factura_id:         factura.id,
         descripcion:        retoma.descripcion,
@@ -141,6 +142,7 @@ const crearFactura = async ({
         ingreso_inventario: retoma.ingreso_inventario || false,
         nombre_producto:    retoma.nombre_producto    || null,
         imei:               retoma.imei               || null,
+        cantidad_retoma:    retoma.cantidad_retoma     || 1,
       });
 
       if (retoma.ingreso_inventario && retoma.tipo_retoma === 'serial' && retoma.imei) {
@@ -248,14 +250,14 @@ const cancelarFactura = async (negocioId, id, eliminarRetoma = false) => {
   const factura = await facturasRepo.findByIdYNegocio(id, negocioId);
   if (!factura) throw { status: 404, message: 'Factura no encontrada' };
   if (factura.estado === 'Cancelada') throw { status: 400, message: 'La factura ya está cancelada' };
- 
+
   const pagos = await facturasRepo.getPagos(id);
- 
+
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
- 
-    // ── Revertir productos vendidos (lógica original intacta) ─────────────────
+
+    // ── Revertir productos vendidos ───────────────────────────────────────────
     const lineas = await facturasRepo.getLineas(id);
     for (const linea of lineas) {
       if (linea.imei) {
@@ -276,20 +278,18 @@ const cancelarFactura = async (negocioId, id, eliminarRetoma = false) => {
         await facturasRepo.ajustarStockCantidad(client, linea.producto_id, linea.cantidad);
       }
     }
- 
+
     // ── Revertir retomas si se solicitó eliminarlas del inventario ────────────
-    // La tabla retomas NO tiene columna tipo_retoma persistida.
     // Distinción por presencia de imei:
-    //   con imei       → retoma de serial  → eliminar el serial del inventario
-    //   sin imei       → retoma de cantidad → reducir stock por nombre de producto
+    //   con imei  → serial   → eliminar el serial del inventario
+    //   sin imei  → cantidad → reducir stock usando cantidad_retoma persistida
     if (eliminarRetoma) {
       const retomas = await facturasRepo.getRetomas(id);
- 
+
       for (const retoma of retomas) {
         if (!retoma.ingreso_inventario) continue;
- 
+
         if (retoma.imei) {
-          // Serial: buscar por IMEI en el negocio y eliminar si no está vendido
           const { rows: serialRows } = await client.query(
             `SELECT s.id FROM seriales s
              JOIN productos_serial ps ON ps.id = s.producto_id
@@ -307,8 +307,6 @@ const cancelarFactura = async (negocioId, id, eliminarRetoma = false) => {
             );
           }
         } else if (retoma.nombre_producto) {
-          // Cantidad: buscar producto por nombre en la sucursal y reducir el stock
-          // que se añadió al momento de crear la retoma
           const { rows: prodRows } = await client.query(
             `SELECT pc.id FROM productos_cantidad pc
              WHERE pc.nombre ILIKE $1
@@ -324,16 +322,15 @@ const cancelarFactura = async (negocioId, id, eliminarRetoma = false) => {
         }
       }
     }
- 
- 
+
     await facturasRepo.cancelar(client, id);
- 
-    // ── Registrar egreso en caja si hay caja abierta (lógica original intacta) ─
+
+    // ── Registrar egreso en caja si hay caja abierta ──────────────────────────
     const METODOS_NO_CAJA = ['Credito'];
     const totalDevolucion = pagos
       .filter((p) => !METODOS_NO_CAJA.includes(p.metodo))
       .reduce((s, p) => s + Number(p.valor || 0), 0);
- 
+
     if (totalDevolucion > 0) {
       const caja = await cajaRepo.findCajaAbierta(factura.sucursal_id);
       if (caja) {
@@ -349,7 +346,7 @@ const cancelarFactura = async (negocioId, id, eliminarRetoma = false) => {
         );
       }
     }
- 
+
     await client.query('COMMIT');
   } catch (err) {
     await client.query('ROLLBACK');
@@ -404,6 +401,7 @@ const editarFactura = async (negocioId, id, {
     }
 
     if (retoma) {
+      // ── cantidad_retoma persistida para poder revertirla al cancelar ────────
       await facturasRepo.insertarRetoma(client, {
         factura_id:         id,
         descripcion:        retoma.descripcion,
@@ -411,6 +409,7 @@ const editarFactura = async (negocioId, id, {
         ingreso_inventario: retoma.ingreso_inventario || false,
         nombre_producto:    retoma.nombre_producto    || null,
         imei:               retoma.imei               || null,
+        cantidad_retoma:    retoma.cantidad_retoma     || 1,
       });
 
       if (retoma.ingreso_inventario) {
