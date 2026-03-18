@@ -128,6 +128,32 @@ const verificarImei = async (imei, negocioId) => {
     },
   };
 };
+// ─────────────────────────────────────────────────────────────────────────────
+// AÑADIR esta función al final de productosSerial.service.js,
+// ANTES de module.exports, y exportarla junto a las existentes.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const eliminarProductoSerial = async (negocioId, id) => {
+  // 1. Verificar que el producto existe y pertenece al negocio
+  const producto = await repo.findByIdYNegocio(id, negocioId);
+  if (!producto) throw { status: 404, message: 'Producto no encontrado' };
+
+  // 2. Bloquear si tiene seriales asociados (de cualquier estado)
+  const totalSeriales = await repo.contarSeriales(id);
+  if (totalSeriales > 0) {
+    throw {
+      status: 409,
+      message: `No se puede eliminar: el producto tiene ${totalSeriales} serial${totalSeriales !== 1 ? 'es' : ''} registrado${totalSeriales !== 1 ? 's' : ''}. Elimínalos primero.`,
+    };
+  }
+
+  // 3. Eliminar
+  const eliminado = await repo.eliminarProductoSerial(id);
+  if (!eliminado) throw { status: 404, message: 'Producto no encontrado' };
+};
+
+// ── Añadir al module.exports existente: ──────────────────────────────────────
+// eliminarProductoSerial
 
 const getComprasCliente = async (negocioId, q) =>
   repo.findComprasCliente(negocioId, q || '');
@@ -135,5 +161,5 @@ const getComprasCliente = async (negocioId, q) =>
 module.exports = {
   getProductos, getProductoById, crearProducto, actualizarProducto,
   getSeriales, agregarSerial, actualizarSerial, eliminarSerial,
-  verificarImei, getComprasCliente,
+  verificarImei, getComprasCliente,eliminarProductoSerial
 };

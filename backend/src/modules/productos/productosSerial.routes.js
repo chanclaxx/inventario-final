@@ -13,6 +13,18 @@ router.get('/:id', ctrl.getProductoById);
 router.post('/',           requireNivel('vendedor'), ctrl.crearProducto);
 router.put('/:id', requireNivel('supervisor'), ctrl.actualizarProducto);
 
+
+router.delete('/:id', soloAdmin, async (req, res) => {
+  try {
+    await service.eliminarProductoSerial(req.negocioId, Number(req.params.id));
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message || 'Error interno' });
+  }
+});
+
+
+
 // ── Rutas de seriales ──
 router.get('/:id/seriales',    ctrl.getSeriales);
 router.post('/:id/seriales', requireNivel('vendedor'), ctrl.agregarSerial);

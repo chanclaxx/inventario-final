@@ -19,6 +19,8 @@ export const actualizarSerial         = (id, data)    => api.put(`/productos-ser
 export const eliminarSerial           = (id)          => api.delete(`/productos-serial/seriales/${id}`);
 export const verificarImei            = (imei)        => api.get(`/productos-serial/verificar-imei/${imei}`);
 
+export const eliminarProductoSerial = (id) => api.delete(`/productos-serial/${id}`);
+
 // ── Cantidad ──────────────────────────────────────────────────────────────────
 // ── linea_id opcional como query param para filtrar ──
 export const getProductosCantidad       = (lineaId)      => api.get('/productos-cantidad', { params: { linea_id: lineaId || undefined } });

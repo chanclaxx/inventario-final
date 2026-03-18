@@ -235,11 +235,32 @@ const findComprasCliente = async (negocioId, q) => {
   return { seriales, retomas };
 };
 
+
+const contarSeriales = async (productoId) => {
+  const { rows } = await pool.query(
+    'SELECT COUNT(*) AS total FROM seriales WHERE producto_id = $1',
+    [productoId]
+  );
+  return Number(rows[0].total);
+};
+
+// Elimina el producto serial. Solo se llama si contarSeriales devuelve 0.
+const eliminarProductoSerial = async (id) => {
+  const { rows } = await pool.query(
+    'DELETE FROM productos_serial WHERE id = $1 RETURNING id',
+    [id]
+  );
+  return rows[0] || null;
+};
+
+// ── Añadir al module.exports existente: ──────────────────────────────────────
+// contarSeriales, eliminarProductoSerial
+
 module.exports = {
   findAll, findById, findByIdYNegocio,
   perteneceAlNegocio, findSerialByIdYNegocio,
   create, update, updatePrecio,
   getSeriales, findSerialByIMEI, findSerialByIMEIEnNegocio,
   insertarSerial, reactivarSerial, actualizarSerial, eliminarSerial,
-  findComprasCliente,
+  findComprasCliente,eliminarProductoSerial,contarSeriales
 };

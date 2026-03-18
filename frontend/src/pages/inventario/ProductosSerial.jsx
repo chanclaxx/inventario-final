@@ -14,6 +14,7 @@ import { ModalEditarSerial }         from './ModalEditarSerial';
 import { ModalEditarProductoSerial } from './ModalEditarProductoSerial';
 import { useAuth }                   from '../../context/useAuth';
 import { useSucursalKey }            from '../../hooks/useSucursalKey';
+import api                           from '../../api/axios.config';
 
 // ─── Tarjeta individual de serial ─────────────────────────────────────────────
 function TarjetaSerial({ serial, precio, onAgregar, onEliminar, onEditar }) {
@@ -200,6 +201,14 @@ export function ProductosSerial({ onAgregarProducto }) {
     queryFn:  () => getSeriales(productoSeleccionado.id, false).then((r) => r.data.data),
     enabled:  sucursalLista && !!productoSeleccionado,
   });
+
+  // ── Config: solo se carga si el usuario es admin (PIN de eliminación) ──────
+  const { data: configData } = useQuery({
+    queryKey: ['config'],
+    queryFn:  () => api.get('/config').then((r) => r.data.data),
+    enabled:  sucursalLista && esAdminNegocio(),
+  });
+  const pinEliminacion = configData?.pin_eliminacion ?? '';
 
   const agregarItem = useCarritoStore((s) => s.agregarItem);
 
@@ -427,6 +436,7 @@ export function ProductosSerial({ onAgregarProducto }) {
       {productoAEditar && (
         <ModalEditarProductoSerial
           producto={productoAEditar}
+          pinEliminacion={pinEliminacion}
           onClose={() => setProductoAEditar(null)}
         />
       )}
