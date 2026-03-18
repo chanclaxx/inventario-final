@@ -11,7 +11,7 @@ import { SucursalSelector } from './SucursalSelector.jsx';
 
 // rol: undefined = todos | 'supervisor' = supervisor+admin | 'admin_negocio' = solo admin
 const NAV_ITEMS = [
-  { path: '/',            label: 'Inicio',      icon: LayoutDashboard, rol: 'supervisor'    },
+  { path: '/',            label: 'Inicio',      icon: LayoutDashboard, rol: 'admin_negocio'    },
   { path: '/inventario',  label: 'Inventario',  icon: Package                               },
   { path: '/facturar',    label: 'Facturar',    icon: FileText,        rol: 'supervisor'    },
   { path: '/proveedores', label: 'Proveedores', icon: Truck,           rol: 'admin_negocio' },
