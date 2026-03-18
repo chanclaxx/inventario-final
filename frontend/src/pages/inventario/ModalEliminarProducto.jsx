@@ -152,7 +152,7 @@ export function ModalEliminarProducto({ producto, tipo, onClose, onSuccess }) {
             disabled={!pin.trim()}
           >
             <Trash2 size={14} />
-            Elimina
+            Eliminar
           </Button>
         </div>
 
