@@ -18,7 +18,6 @@ import ReportesPage         from './pages/reportes/ReportesPage';
 import ConfigPage           from './pages/configuracion/ConfigPage';
 import AcreedoresPage       from './pages/acreedores/AcreedoresPage';
 import ProveedoresPage      from './pages/proveedores/ProveedoresPage';
-import DomiciliariosPage    from './pages/domiciliarios/DomiciliariosPage';
 
 export default function App() {
   return (
@@ -44,9 +43,6 @@ export default function App() {
                 <PrivateRoute rol="supervisor"><FacturarPage /></PrivateRoute>
               } />
               <Route path="/prestamos"  element={<PrestamosPage />} />
-
-              {/* Domiciliarios — todos los roles */}
-              <Route path="/domiciliarios" element={<DomiciliariosPage />} />
 
               <Route path="/caja" element={
                 <PrivateRoute rol="supervisor"><CajaPage /></PrivateRoute>

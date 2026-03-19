@@ -1,7 +1,7 @@
 const { pool }          = require('../../config/db');
 const repo              = require('./domiciliarios.repository');
 const facturasRepo      = require('../facturas/facturas.repository');
-const facturasService   = require('../facturas/facturas.service');
+
 
 // ── _validarDomiciliario ──────────────────────────────────────────────────────
 // Centraliza la validación de pertenencia al negocio.

@@ -2,6 +2,13 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getPrestamos, registrarAbonoPrestamo, devolverPrestamo, devolverParcialPrestamo } from '../../api/prestamos.api';
 import { getCreditos, registrarAbonoCredito }   from '../../api/creditos.api';
+import {
+  getDomiciliarios,
+  getEntregas,
+  getEntregaById,
+  registrarAbono    as registrarAbonoDomicilio,
+  marcarDevolucion,
+} from '../../api/domiciliarios.api';
 import { formatCOP, formatFechaHora }           from '../../utils/formatters';
 import { Badge }                                from '../../components/ui/Badge';
 import { Button }                               from '../../components/ui/Button';
@@ -9,22 +16,37 @@ import { Modal }                                from '../../components/ui/Modal'
 import { Input }                                from '../../components/ui/Input';
 import { Spinner }                              from '../../components/ui/Spinner';
 import { EmptyState }                           from '../../components/ui/EmptyState';
+import { InputMoneda }                          from '../../components/ui/InputMoneda';
 import {
-  Handshake, CreditCard, Plus, CheckCircle,
-  ChevronDown, ChevronUp, Users, User,
+  Handshake, CreditCard, Bike, Plus, CheckCircle,
+  ChevronDown, ChevronUp, ChevronLeft, ChevronRight,
+  Users, User, AlertTriangle,
 } from 'lucide-react';
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
 const TABS_PRINCIPALES = [
-  { id: 'prestamos', label: 'Préstamos', icon: Handshake },
-  { id: 'creditos',  label: 'Créditos',  icon: CreditCard },
+  { id: 'prestamos',     label: 'Préstamos',     Icn: Handshake },
+  { id: 'creditos',      label: 'Créditos',      Icn: CreditCard },
+  { id: 'domiciliarios', label: 'Domiciliarios', Icn: Bike },
 ];
 
 const TABS_PRESTAMOS = [
-  { id: 'companeros', label: 'Compañeros', icon: User  },
-  { id: 'clientes',   label: 'Clientes',   icon: Users },
+  { id: 'companeros', label: 'Compañeros', Icn: User  },
+  { id: 'clientes',   label: 'Clientes',   Icn: Users },
 ];
+
+const ESTADO_BADGE_DOM = {
+  Pendiente:    'yellow',
+  Entregado:    'green',
+  No_entregado: 'red',
+};
+
+const ESTADO_LABEL_DOM = {
+  Pendiente:    'Pendiente',
+  Entregado:    'Entregado',
+  No_entregado: 'No entregado',
+};
 
 // ─── Modal Abono Préstamo ─────────────────────────────────────────────────────
 
@@ -55,15 +77,9 @@ function ModalAbonoPrestamo({ prestamo, onClose }) {
             <span className="text-sm font-bold text-red-500">{formatCOP(saldoPendiente)}</span>
           </div>
         </div>
-        <Input
-          label="Valor del abono"
-          type="number"
-          placeholder="0"
-          value={valor}
-          onChange={(e) => setValor(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && mutation.mutate()}
-          autoFocus
-        />
+        <Input label="Valor del abono" type="number" placeholder="0"
+          value={valor} onChange={(e) => setValor(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && mutation.mutate()} autoFocus />
         {error && <p className="text-sm text-red-500">{error}</p>}
         <div className="flex gap-2">
           <Button variant="secondary" className="flex-1" onClick={onClose}>Cancelar</Button>
@@ -76,15 +92,13 @@ function ModalAbonoPrestamo({ prestamo, onClose }) {
   );
 }
 
-// ─── Modal Devolución (serial → confirmar / cantidad → pedir cuántos) ─────────
+// ─── Modal Devolución préstamo ────────────────────────────────────────────────
 
 function ModalDevolucion({ prestamo, onClose }) {
   const queryClient = useQueryClient();
-  const [cantidad,  setCantidad]  = useState('');
-  const [error,     setError]     = useState('');
+  const [cantidad, setCantidad] = useState('');
+  const [error,    setError]    = useState('');
 
-  // Un préstamo es "por cantidad" cuando no tiene IMEI. producto_id puede llegar null
-  // en la vista de lista, así que no es fiable como único discriminador.
   const esPorCantidad = !prestamo.imei;
   const cantidadMax   = Number(prestamo.cantidad_prestada) || 1;
 
@@ -102,20 +116,11 @@ function ModalDevolucion({ prestamo, onClose }) {
 
   const handleConfirmar = () => {
     setError('');
-    // Serial o cantidad = 1: devolución total directa sin pedir input
-    if (!esPorCantidad || cantidadMax === 1) {
-      mutDevolver.mutate();
-      return;
-    }
+    if (!esPorCantidad || cantidadMax === 1) { mutDevolver.mutate(); return; }
     const cant = Number(cantidad);
-    if (!cantidad || cant < 1 || cant > cantidadMax) {
+    if (!cantidad || cant < 1 || cant > cantidadMax)
       return setError(`Ingresa una cantidad entre 1 y ${cantidadMax}`);
-    }
-    if (cant === cantidadMax) {
-      mutDevolver.mutate();
-    } else {
-      mutDevolverParcial.mutate(cant);
-    }
+    cant === cantidadMax ? mutDevolver.mutate() : mutDevolverParcial.mutate(cant);
   };
 
   const isPending = mutDevolver.isPending || mutDevolverParcial.isPending;
@@ -123,14 +128,10 @@ function ModalDevolucion({ prestamo, onClose }) {
   return (
     <Modal open={!!prestamo} onClose={onClose} title="Registrar Devolución" size="sm">
       <div className="flex flex-col gap-4">
-
-        {/* Resumen del préstamo */}
         <div className="bg-gray-50 rounded-xl p-3 flex flex-col gap-1">
           <p className="text-xs text-gray-400">{prestamo.prestatario}</p>
           <p className="text-sm font-medium text-gray-800">{prestamo.nombre_producto}</p>
-          {prestamo.imei && (
-            <p className="text-xs text-gray-400 font-mono">IMEI: {prestamo.imei}</p>
-          )}
+          {prestamo.imei && <p className="text-xs text-gray-400 font-mono">IMEI: {prestamo.imei}</p>}
           {esPorCantidad && (
             <p className="text-xs text-gray-500">
               Cantidad prestada: <span className="font-semibold">{cantidadMax}</span>
@@ -138,33 +139,22 @@ function ModalDevolucion({ prestamo, onClose }) {
           )}
         </div>
 
-        {/* Por cantidad con más de 1 unidad: pedir cuántas devuelve */}
         {esPorCantidad && cantidadMax > 1 ? (
           <div className="flex flex-col gap-1">
-            <Input
-              label={`¿Cuántas unidades devuelve? (máx. ${cantidadMax})`}
-              type="number"
-              min="1"
-              max={cantidadMax}
-              placeholder={String(cantidadMax)}
-              value={cantidad}
-              onChange={(e) => setCantidad(e.target.value)}
-              autoFocus
-            />
+            <Input label={`¿Cuántas unidades devuelve? (máx. ${cantidadMax})`}
+              type="number" min="1" max={cantidadMax} placeholder={String(cantidadMax)}
+              value={cantidad} onChange={(e) => setCantidad(e.target.value)} autoFocus />
             {cantidad && Number(cantidad) < cantidadMax && Number(cantidad) > 0 && (
               <p className="text-xs text-amber-600 bg-amber-50 rounded-lg px-3 py-1.5">
-                Quedarán <strong>{cantidadMax - Number(cantidad)}</strong> unidad(es) pendiente(s) de devolución.
+                Quedarán <strong>{cantidadMax - Number(cantidad)}</strong> unidad(es) pendiente(s).
               </p>
             )}
           </div>
         ) : (
-          <p className="text-sm text-gray-600">
-            ¿Confirmas que el equipo fue devuelto?
-          </p>
+          <p className="text-sm text-gray-600">¿Confirmas que el equipo fue devuelto?</p>
         )}
 
         {error && <p className="text-sm text-red-500">{error}</p>}
-
         <div className="flex gap-2">
           <Button variant="secondary" className="flex-1" onClick={onClose}>Cancelar</Button>
           <Button className="flex-1" loading={isPending} onClick={handleConfirmar}>
@@ -205,27 +195,18 @@ function ModalAbonoCredito({ credito, onClose }) {
         </div>
         <div className="flex gap-2">
           {METODOS_PAGO.map((m) => (
-            <button
-              key={m}
-              onClick={() => setMetodo(m)}
+            <button key={m} onClick={() => setMetodo(m)}
               className={`flex-1 py-2 rounded-xl text-xs font-medium border transition-all
                 ${metodo === m
                   ? 'bg-blue-50 border-blue-300 text-blue-700'
-                  : 'bg-gray-50 border-gray-200 text-gray-600'}`}
-            >
+                  : 'bg-gray-50 border-gray-200 text-gray-600'}`}>
               {m}
             </button>
           ))}
         </div>
-        <Input
-          label="Valor del abono"
-          type="number"
-          placeholder="0"
-          value={valor}
-          onChange={(e) => setValor(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && mutation.mutate()}
-          autoFocus
-        />
+        <Input label="Valor del abono" type="number" placeholder="0"
+          value={valor} onChange={(e) => setValor(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && mutation.mutate()} autoFocus />
         {error && <p className="text-sm text-red-500">{error}</p>}
         <div className="flex gap-2">
           <Button variant="secondary" className="flex-1" onClick={onClose}>Cancelar</Button>
@@ -238,7 +219,7 @@ function ModalAbonoCredito({ credito, onClose }) {
   );
 }
 
-// ─── Card préstamo — compañero ────────────────────────────────────────────────
+// ─── Cards préstamos ──────────────────────────────────────────────────────────
 
 function CardPrestamoCompanero({ prestamo, onAbonar, onDevolver }) {
   const saldo    = Number(prestamo.valor_prestamo) - Number(prestamo.total_abonado);
@@ -249,9 +230,7 @@ function CardPrestamoCompanero({ prestamo, onAbonar, onDevolver }) {
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <p className="text-sm font-medium text-gray-800 truncate">{prestamo.nombre_producto}</p>
-          {prestamo.imei && (
-            <p className="text-xs text-gray-400 font-mono">{prestamo.imei}</p>
-          )}
+          {prestamo.imei && <p className="text-xs text-gray-400 font-mono">{prestamo.imei}</p>}
           {!prestamo.imei && prestamo.cantidad_prestada > 1 && (
             <p className="text-xs text-gray-400">Cantidad: {prestamo.cantidad_prestada}</p>
           )}
@@ -260,24 +239,18 @@ function CardPrestamoCompanero({ prestamo, onAbonar, onDevolver }) {
           )}
           <p className="text-xs text-gray-400 mt-0.5">{formatFechaHora(prestamo.fecha)}</p>
         </div>
-        <Badge variant={prestamo.estado === 'Activo' ? 'blue' : 'green'}>
-          {prestamo.estado}
-        </Badge>
+        <Badge variant={prestamo.estado === 'Activo' ? 'blue' : 'green'}>{prestamo.estado}</Badge>
       </div>
-
       <div className="flex flex-col gap-1">
         <div className="w-full bg-gray-100 rounded-full h-1.5">
-          <div
-            className="bg-blue-500 h-1.5 rounded-full transition-all"
-            style={{ width: `${Math.min(progreso, 100)}%` }}
-          />
+          <div className="bg-blue-500 h-1.5 rounded-full transition-all"
+            style={{ width: `${Math.min(progreso, 100)}%` }} />
         </div>
         <div className="flex justify-between text-xs">
           <span className="text-gray-400">Abonado: {formatCOP(prestamo.total_abonado)}</span>
           <span className="text-red-500 font-medium">Saldo: {formatCOP(saldo)}</span>
         </div>
       </div>
-
       <div className="flex gap-2">
         <Button size="sm" className="flex-1" onClick={() => onAbonar(prestamo)}>
           <Plus size={14} /> Abonar
@@ -290,8 +263,6 @@ function CardPrestamoCompanero({ prestamo, onAbonar, onDevolver }) {
   );
 }
 
-// ─── Card préstamo — cliente ──────────────────────────────────────────────────
-
 function CardPrestamoCliente({ prestamo, onAbonar, onDevolver }) {
   const saldo    = Number(prestamo.valor_prestamo) - Number(prestamo.total_abonado);
   const progreso = (Number(prestamo.total_abonado) / Number(prestamo.valor_prestamo)) * 100;
@@ -301,39 +272,30 @@ function CardPrestamoCliente({ prestamo, onAbonar, onDevolver }) {
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <p className="text-sm font-medium text-gray-800 truncate">{prestamo.nombre_producto}</p>
-          {prestamo.imei && (
-            <p className="text-xs text-gray-400 font-mono">{prestamo.imei}</p>
-          )}
+          {prestamo.imei && <p className="text-xs text-gray-400 font-mono">{prestamo.imei}</p>}
           {!prestamo.imei && prestamo.cantidad_prestada > 1 && (
             <p className="text-xs text-gray-400">Cantidad: {prestamo.cantidad_prestada}</p>
           )}
           <p className="text-xs text-gray-400 mt-0.5">{formatFechaHora(prestamo.fecha)}</p>
         </div>
-        <Badge variant={prestamo.estado === 'Activo' ? 'blue' : 'green'}>
-          {prestamo.estado}
-        </Badge>
+        <Badge variant={prestamo.estado === 'Activo' ? 'blue' : 'green'}>{prestamo.estado}</Badge>
       </div>
-
       {(prestamo.cedula || prestamo.telefono) && (
         <div className="bg-gray-50 rounded-xl px-3 py-2 flex flex-col gap-0.5">
-          {prestamo.cedula && <p className="text-xs text-gray-500">CC: {prestamo.cedula}</p>}
+          {prestamo.cedula   && <p className="text-xs text-gray-500">CC: {prestamo.cedula}</p>}
           {prestamo.telefono && <p className="text-xs text-gray-500">Tel: {prestamo.telefono}</p>}
         </div>
       )}
-
       <div className="flex flex-col gap-1">
         <div className="w-full bg-gray-100 rounded-full h-1.5">
-          <div
-            className="bg-blue-500 h-1.5 rounded-full transition-all"
-            style={{ width: `${Math.min(progreso, 100)}%` }}
-          />
+          <div className="bg-blue-500 h-1.5 rounded-full transition-all"
+            style={{ width: `${Math.min(progreso, 100)}%` }} />
         </div>
         <div className="flex justify-between text-xs">
           <span className="text-gray-400">Abonado: {formatCOP(prestamo.total_abonado)}</span>
           <span className="text-red-500 font-medium">Saldo: {formatCOP(saldo)}</span>
         </div>
       </div>
-
       <div className="flex gap-2">
         <Button size="sm" className="flex-1" onClick={() => onAbonar(prestamo)}>
           <Plus size={14} /> Abonar
@@ -350,33 +312,26 @@ function CardPrestamoCliente({ prestamo, onAbonar, onDevolver }) {
 
 function GrupoPrestatario({ nombre, prestamos, saldoTotal, onAbonar, onDevolver, CardItem }) {
   const [abierto, setAbierto] = useState(true);
-
   const activos  = prestamos.filter((p) => p.estado === 'Activo');
   const cerrados = prestamos.filter((p) => p.estado !== 'Activo');
-
   const Card = CardItem;
 
   return (
     <div className="border border-gray-100 rounded-2xl overflow-hidden">
-      <button
-        onClick={() => setAbierto((v) => !v)}
+      <button onClick={() => setAbierto((v) => !v)}
         className="w-full flex items-center justify-between px-4 py-3
-          bg-gray-50 hover:bg-gray-100 transition-colors"
-      >
+          bg-gray-50 hover:bg-gray-100 transition-colors">
         <div className="flex items-center gap-3 min-w-0">
           <span className="font-semibold text-gray-800 truncate">{nombre}</span>
-          <span className="text-xs text-gray-400 flex-shrink-0">
-            {activos.length} activo(s)
-          </span>
+          <span className="text-xs text-gray-400 flex-shrink-0">{activos.length} activo(s)</span>
         </div>
         <div className="flex items-center gap-3 flex-shrink-0">
           {saldoTotal > 0 && (
             <span className="text-sm font-bold text-red-500">{formatCOP(saldoTotal)}</span>
           )}
           {abierto
-            ? <ChevronUp size={16} className="text-gray-400" />
-            : <ChevronDown size={16} className="text-gray-400" />
-          }
+            ? <ChevronUp   size={16} className="text-gray-400" />
+            : <ChevronDown size={16} className="text-gray-400" />}
         </div>
       </button>
 
@@ -386,15 +341,9 @@ function GrupoPrestatario({ nombre, prestamos, saldoTotal, onAbonar, onDevolver,
             <p className="text-xs text-gray-400 px-1 py-2">Sin préstamos activos</p>
           ) : (
             activos.map((p) => (
-              <Card
-                key={p.id}
-                prestamo={p}
-                onAbonar={onAbonar}
-                onDevolver={onDevolver}
-              />
+              <Card key={p.id} prestamo={p} onAbonar={onAbonar} onDevolver={onDevolver} />
             ))
           )}
-
           {cerrados.length > 0 && (
             <details>
               <summary className="text-xs text-gray-400 cursor-pointer select-none px-1">
@@ -422,14 +371,338 @@ function GrupoPrestatario({ nombre, prestamos, saldoTotal, onAbonar, onDevolver,
   );
 }
 
+// ─── Tab domiciliarios ────────────────────────────────────────────────────────
+
+function BarraProgreso({ abonado, total }) {
+  const pct = total > 0 ? Math.min(100, Math.round((abonado / total) * 100)) : 0;
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex justify-between text-xs text-gray-500">
+        <span>Abonado: {formatCOP(abonado)}</span>
+        <span>{pct}%</span>
+      </div>
+      <div className="h-1.5 bg-gray-200 rounded-full overflow-hidden">
+        <div className="h-full bg-orange-400 rounded-full transition-all duration-300"
+          style={{ width: `${pct}%` }} />
+      </div>
+      <div className="flex justify-between text-xs text-gray-400">
+        <span>Pendiente: {formatCOP(Math.max(0, total - abonado))}</span>
+        <span>Total: {formatCOP(total)}</span>
+      </div>
+    </div>
+  );
+}
+
+function TarjetaEntrega({ entrega, onSeleccionar }) {
+  const estadoBadge = ESTADO_BADGE_DOM[entrega.estado] || 'gray';
+  const estadoLabel = ESTADO_LABEL_DOM[entrega.estado] || entrega.estado;
+
+  return (
+    <button onClick={() => onSeleccionar(entrega.id)}
+      className="w-full text-left bg-white border border-gray-100 rounded-xl p-3
+        hover:border-orange-200 hover:bg-orange-50/20 transition-colors flex flex-col gap-2">
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold text-gray-800 truncate">{entrega.nombre_cliente}</p>
+          <p className="text-xs text-gray-400">
+            Factura #{String(entrega.factura_id).padStart(6, '0')}
+          </p>
+          {entrega.direccion_entrega && (
+            <p className="text-xs text-gray-500 truncate mt-0.5">{entrega.direccion_entrega}</p>
+          )}
+        </div>
+        <div className="flex flex-col items-end gap-1 flex-shrink-0">
+          <Badge variant={estadoBadge}>{estadoLabel}</Badge>
+          <span className="text-xs text-gray-400">{formatFechaHora(entrega.fecha_asignacion)}</span>
+        </div>
+      </div>
+
+      {entrega.estado === 'Pendiente' && (
+        <BarraProgreso
+          abonado={Number(entrega.total_abonado)}
+          total={Number(entrega.valor_total)}
+        />
+      )}
+
+      <div className="flex items-center justify-between">
+        <span className="text-xs text-orange-600 font-medium">{entrega.domiciliario_nombre}</span>
+        <ChevronRight size={14} className="text-gray-300" />
+      </div>
+    </button>
+  );
+}
+
+function PanelDetalleEntrega({ entregaId, onVolver }) {
+  const queryClient = useQueryClient();
+  const [valorAbono,    setValorAbono]    = useState('');
+  const [notasAbono,    setNotasAbono]    = useState('');
+  const [errorLocal,    setErrorLocal]    = useState('');
+  const [confirmarDev,  setConfirmarDev]  = useState(false);
+
+  const { data, isLoading, refetch } = useQuery({
+    queryKey: ['entrega-detalle', entregaId],
+    queryFn:  () => getEntregaById(entregaId).then((r) => r.data.data),
+    enabled:  !!entregaId,
+  });
+
+  const mutAbono = useMutation({
+    mutationFn: (datos) => registrarAbonoDomicilio(entregaId, datos),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['entregas-domicilio'], exact: false });
+      refetch();
+      setValorAbono('');
+      setNotasAbono('');
+      setErrorLocal('');
+    },
+    onError: (err) => setErrorLocal(err.response?.data?.error || 'Error al registrar abono'),
+  });
+
+  const mutDevolucion = useMutation({
+    mutationFn: () => marcarDevolucion(entregaId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['entregas-domicilio'], exact: false });
+      queryClient.invalidateQueries({ queryKey: ['facturas'],           exact: false });
+      queryClient.invalidateQueries({ queryKey: ['productos-serial'],   exact: false });
+      queryClient.invalidateQueries({ queryKey: ['productos-cantidad'],  exact: false });
+      refetch();
+      setConfirmarDev(false);
+    },
+    onError: (err) => setErrorLocal(err.response?.data?.error || 'Error al procesar devolución'),
+  });
+
+  const handleAbono = () => {
+    setErrorLocal('');
+    const val = Number(valorAbono);
+    if (!val || val <= 0) return setErrorLocal('El valor debe ser mayor a 0');
+    mutAbono.mutate({ valor: val, notas: notasAbono || null });
+  };
+
+  if (isLoading) return <Spinner className="py-10" />;
+
+  const e              = data;
+  const saldoPendiente = Math.max(0, Number(e?.valor_total || 0) - Number(e?.total_abonado || 0));
+  const esPendiente    = e?.estado === 'Pendiente';
+
+  return (
+    <div className="flex flex-col gap-4">
+      <button onClick={onVolver}
+        className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-600 w-fit">
+        <ChevronLeft size={13} /> Volver a la lista
+      </button>
+
+      {/* Cabecera */}
+      <div className="bg-orange-50 border border-orange-100 rounded-xl p-3 flex flex-col gap-1.5">
+        <div className="flex items-center justify-between">
+          <p className="text-sm font-semibold text-gray-800">{e?.nombre_cliente}</p>
+          <Badge variant={ESTADO_BADGE_DOM[e?.estado] || 'gray'}>
+            {ESTADO_LABEL_DOM[e?.estado] || e?.estado}
+          </Badge>
+        </div>
+        <p className="text-xs text-gray-500">
+          Factura #{String(e?.factura_id || 0).padStart(6, '0')}
+          {e?.cliente_celular ? ` · ${e.cliente_celular}` : ''}
+        </p>
+        <p className="text-xs text-orange-600 font-medium">
+          Domiciliario: {e?.domiciliario_nombre}
+          {e?.domiciliario_telefono ? ` · ${e.domiciliario_telefono}` : ''}
+        </p>
+        {e?.direccion_entrega && (
+          <p className="text-xs text-gray-500">{e.direccion_entrega}</p>
+        )}
+        {e?.notas && <p className="text-xs text-gray-400 italic">{e.notas}</p>}
+        <p className="text-xs text-gray-400">{formatFechaHora(e?.fecha_asignacion)}</p>
+      </div>
+
+      <BarraProgreso
+        abonado={Number(e?.total_abonado || 0)}
+        total={Number(e?.valor_total || 0)}
+      />
+
+      {/* Historial de abonos */}
+      {e?.abonos?.length > 0 && (
+        <div className="flex flex-col gap-1.5">
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+            Historial de abonos
+          </p>
+          <div className="flex flex-col gap-1 max-h-36 overflow-y-auto">
+            {e.abonos.map((abono) => {
+              const abonoId = abono.id;
+              return (
+                <div key={abonoId}
+                  className="flex items-center justify-between bg-gray-50 rounded-xl px-3 py-2">
+                  <div>
+                    <p className="text-xs text-gray-500">{formatFechaHora(abono.fecha)}</p>
+                    {abono.notas && <p className="text-xs text-gray-400 italic">{abono.notas}</p>}
+                    {abono.usuario_nombre && (
+                      <p className="text-xs text-gray-400">por {abono.usuario_nombre}</p>
+                    )}
+                  </div>
+                  <span className="text-sm font-semibold text-green-600">
+                    + {formatCOP(abono.valor)}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Formulario abono */}
+      {esPendiente && (
+        <div className="flex flex-col gap-2 p-3 bg-green-50 border border-green-100 rounded-xl">
+          <p className="text-xs font-semibold text-green-700 uppercase tracking-wide">
+            Registrar abono
+          </p>
+          <div className="flex flex-col gap-1">
+            <label className="text-xs font-medium text-gray-600">
+              Valor (máx. {formatCOP(saldoPendiente)})
+            </label>
+            <InputMoneda value={valorAbono} onChange={setValorAbono} placeholder="0"
+              className="w-full px-3 py-2 bg-white border border-green-200 rounded-xl text-sm
+                focus:outline-none focus:ring-2 focus:ring-green-400 transition-all" />
+          </div>
+          <Input label="Notas (opcional)" placeholder="Observaciones del abono..."
+            value={notasAbono} onChange={(e) => setNotasAbono(e.target.value)} />
+          <Button size="sm" loading={mutAbono.isPending}
+            disabled={!valorAbono || Number(valorAbono) <= 0}
+            onClick={handleAbono}>
+            Registrar abono
+          </Button>
+        </div>
+      )}
+
+      {/* Botón devolución */}
+      {esPendiente && !confirmarDev && (
+        <button onClick={() => setConfirmarDev(true)}
+          className="w-full py-2.5 rounded-xl text-sm font-medium border border-red-200
+            text-red-500 bg-red-50 hover:bg-red-100 transition-colors">
+          Marcar como no entregado (devolución)
+        </button>
+      )}
+
+      {esPendiente && confirmarDev && (
+        <div className="flex flex-col gap-2 p-3 bg-red-50 border border-red-200 rounded-xl">
+          <div className="flex items-start gap-2">
+            <AlertTriangle size={14} className="text-red-500 flex-shrink-0 mt-0.5" />
+            <p className="text-xs text-red-700">
+              Esto cancelará la factura y revertirá el stock al inventario. No se puede deshacer.
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <Button variant="secondary" size="sm" className="flex-1"
+              onClick={() => setConfirmarDev(false)}>
+              Cancelar
+            </Button>
+            <Button size="sm" className="flex-1 bg-red-500 hover:bg-red-600"
+              loading={mutDevolucion.isPending}
+              onClick={() => mutDevolucion.mutate()}>
+              Confirmar devolución
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {errorLocal && (
+        <div className="bg-red-50 border border-red-100 rounded-xl px-3 py-2">
+          <p className="text-sm text-red-600">{errorLocal}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TabDomiciliarios() {
+  const [filtroDomiciliario,  setFiltroDomiciliario]  = useState('');
+  const [filtroEstado,        setFiltroEstado]        = useState('');
+  const [entregaSeleccionada, setEntregaSeleccionada] = useState(null);
+
+  const { data: domiciliariosData } = useQuery({
+    queryKey: ['domiciliarios'],
+    queryFn:  () => getDomiciliarios().then((r) => r.data.data),
+  });
+
+  const { data: entregasData, isLoading } = useQuery({
+    queryKey: ['entregas-domicilio', filtroDomiciliario, filtroEstado],
+    queryFn:  () => getEntregas({
+      domiciliario_id: filtroDomiciliario || undefined,
+      estado:          filtroEstado       || undefined,
+    }).then((r) => r.data.data),
+  });
+
+  const domiciliarios = domiciliariosData || [];
+  const entregas      = entregasData      || [];
+
+  if (entregaSeleccionada) {
+    return (
+      <PanelDetalleEntrega
+        entregaId={entregaSeleccionada}
+        onVolver={() => setEntregaSeleccionada(null)}
+      />
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      {/* Filtros */}
+      <div className="flex gap-2 flex-wrap">
+        {domiciliarios.length > 0 && (
+          <select value={filtroDomiciliario}
+            onChange={(e) => setFiltroDomiciliario(e.target.value)}
+            className="flex-1 min-w-[140px] py-2 px-3 bg-gray-50 border border-gray-200
+              rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-400
+              focus:bg-white transition-all text-gray-700">
+            <option value="">Todos los domiciliarios</option>
+            {domiciliarios.map((d) => {
+              const domId = d.id;
+              return <option key={domId} value={domId}>{d.nombre}</option>;
+            })}
+          </select>
+        )}
+        <select value={filtroEstado}
+          onChange={(e) => setFiltroEstado(e.target.value)}
+          className="flex-1 min-w-[120px] py-2 px-3 bg-gray-50 border border-gray-200
+            rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-400
+            focus:bg-white transition-all text-gray-700">
+          <option value="">Todos los estados</option>
+          <option value="Pendiente">Pendiente</option>
+          <option value="Entregado">Entregado</option>
+          <option value="No_entregado">No entregado</option>
+        </select>
+      </div>
+
+      {/* Lista */}
+      {isLoading ? (
+        <Spinner className="py-8" />
+      ) : entregas.length === 0 ? (
+        <EmptyState icon={Bike}
+          titulo="Sin pedidos domiciliarios"
+          descripcion="Los pedidos aparecen al crear facturas con domicilio" />
+      ) : (
+        <div className="flex flex-col gap-2">
+          {entregas.map((entrega) => {
+            const entregaId = entrega.id;
+            return (
+              <TarjetaEntrega
+                key={entregaId}
+                entrega={entrega}
+                onSeleccionar={setEntregaSeleccionada}
+              />
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Página principal ─────────────────────────────────────────────────────────
 
 export default function PrestamosPage() {
-  const [tabPrincipal,   setTabPrincipal]   = useState('prestamos');
-  const [tabPrestamos,   setTabPrestamos]   = useState('companeros');
-  const [prestamoAbono,  setPrestamoAbono]  = useState(null);
-  const [prestamoDevol,  setPrestamoDevol]  = useState(null); // modal devolución
-  const [creditoAbono,   setCreditoAbono]   = useState(null);
+  const [tabPrincipal,  setTabPrincipal]  = useState('prestamos');
+  const [tabPrestamos,  setTabPrestamos]  = useState('companeros');
+  const [prestamoAbono, setPrestamoAbono] = useState(null);
+  const [prestamoDevol, setPrestamoDevol] = useState(null);
+  const [creditoAbono,  setCreditoAbono]  = useState(null);
 
   const { data: prestamosData, isLoading: loadingP } = useQuery({
     queryKey: ['prestamos'],
@@ -444,35 +717,25 @@ export default function PrestamosPage() {
   const prestamos = prestamosData || [];
   const creditos  = creditosData  || [];
 
-  // Agrupar por prestatario (compañero)
   const gruposCompaneros = prestamos
     .filter((p) => p.prestatario_id)
     .reduce((acc, p) => {
       const key = `prestatario_${p.prestatario_id}`;
-      if (!acc[key]) acc[key] = {
-        nombre: p.prestatario_nombre || p.prestatario,
-        prestamos: [], saldoTotal: 0,
-      };
+      if (!acc[key]) acc[key] = { nombre: p.prestatario_nombre || p.prestatario, prestamos: [], saldoTotal: 0 };
       acc[key].prestamos.push(p);
-      if (p.estado === 'Activo') {
+      if (p.estado === 'Activo')
         acc[key].saldoTotal += Number(p.valor_prestamo) - Number(p.total_abonado);
-      }
       return acc;
     }, {});
 
-  // Agrupar por cliente
   const gruposClientes = prestamos
     .filter((p) => p.cliente_id)
     .reduce((acc, p) => {
       const key = `cliente_${p.cliente_id}`;
-      if (!acc[key]) acc[key] = {
-        nombre: p.cliente_nombre || p.prestatario,
-        prestamos: [], saldoTotal: 0,
-      };
+      if (!acc[key]) acc[key] = { nombre: p.cliente_nombre || p.prestatario, prestamos: [], saldoTotal: 0 };
       acc[key].prestamos.push(p);
-      if (p.estado === 'Activo') {
+      if (p.estado === 'Activo')
         acc[key].saldoTotal += Number(p.valor_prestamo) - Number(p.total_abonado);
-      }
       return acc;
     }, {});
 
@@ -485,18 +748,17 @@ export default function PrestamosPage() {
       {/* Tabs principales */}
       <div className="flex gap-1 bg-gray-100 p-1 rounded-xl w-fit">
         {TABS_PRINCIPALES.map((tab) => {
-          const TabIcon = tab.icon;
+          const tabId    = tab.id;
+          const tabLabel = tab.label;
+          const TabIcon  = tab.Icn;
           return (
-            <button
-              key={tab.id}
-              onClick={() => setTabPrincipal(tab.id)}
+            <button key={tabId} onClick={() => setTabPrincipal(tabId)}
               className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all
-                ${tabPrincipal === tab.id
+                ${tabPrincipal === tabId
                   ? 'bg-white text-gray-900 shadow-sm'
-                  : 'text-gray-500 hover:text-gray-700'}`}
-            >
+                  : 'text-gray-500 hover:text-gray-700'}`}>
               <TabIcon size={16} />
-              {tab.label}
+              {tabLabel}
             </button>
           );
         })}
@@ -505,31 +767,27 @@ export default function PrestamosPage() {
       {/* ── PRÉSTAMOS ── */}
       {tabPrincipal === 'prestamos' && (
         <div className="flex flex-col gap-4">
-
-          {/* Tabs secundarias */}
           <div className="flex gap-1 bg-gray-100 p-1 rounded-xl w-fit">
             {TABS_PRESTAMOS.map((tab) => {
-              const TabIcon = tab.icon;
-              const count = tab.id === 'companeros'
+              const tabId    = tab.id;
+              const tabLabel = tab.label;
+              const TabIcon  = tab.Icn;
+              const count = tabId === 'companeros'
                 ? Object.keys(gruposCompaneros).length
                 : Object.keys(gruposClientes).length;
               return (
-                <button
-                  key={tab.id}
-                  onClick={() => setTabPrestamos(tab.id)}
+                <button key={tabId} onClick={() => setTabPrestamos(tabId)}
                   className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all
-                    ${tabPrestamos === tab.id
+                    ${tabPrestamos === tabId
                       ? 'bg-white text-gray-900 shadow-sm'
-                      : 'text-gray-500 hover:text-gray-700'}`}
-                >
+                      : 'text-gray-500 hover:text-gray-700'}`}>
                   <TabIcon size={15} />
-                  {tab.label}
+                  {tabLabel}
                   {count > 0 && (
                     <span className={`text-xs px-1.5 py-0.5 rounded-full font-semibold
-                      ${tabPrestamos === tab.id
+                      ${tabPrestamos === tabId
                         ? 'bg-blue-100 text-blue-600'
-                        : 'bg-gray-200 text-gray-500'}`}
-                    >
+                        : 'bg-gray-200 text-gray-500'}`}>
                       {count}
                     </span>
                   )}
@@ -538,9 +796,7 @@ export default function PrestamosPage() {
             })}
           </div>
 
-          {loadingP ? (
-            <Spinner className="py-20" />
-          ) : (
+          {loadingP ? <Spinner className="py-20" /> : (
             <>
               {tabPrestamos === 'companeros' && (
                 <div className="flex flex-col gap-3">
@@ -548,35 +804,24 @@ export default function PrestamosPage() {
                     <EmptyState icon={User} titulo="Sin préstamos a compañeros" />
                   ) : (
                     Object.entries(gruposCompaneros).map(([key, grupo]) => (
-                      <GrupoPrestatario
-                        key={key}
-                        nombre={grupo.nombre}
-                        prestamos={grupo.prestamos}
-                        saldoTotal={grupo.saldoTotal}
-                        onAbonar={setPrestamoAbono}
-                        onDevolver={setPrestamoDevol}
-                        CardItem={CardPrestamoCompanero}
-                      />
+                      <GrupoPrestatario key={key} nombre={grupo.nombre}
+                        prestamos={grupo.prestamos} saldoTotal={grupo.saldoTotal}
+                        onAbonar={setPrestamoAbono} onDevolver={setPrestamoDevol}
+                        CardItem={CardPrestamoCompanero} />
                     ))
                   )}
                 </div>
               )}
-
               {tabPrestamos === 'clientes' && (
                 <div className="flex flex-col gap-3">
                   {Object.keys(gruposClientes).length === 0 ? (
                     <EmptyState icon={Users} titulo="Sin préstamos a clientes" />
                   ) : (
                     Object.entries(gruposClientes).map(([key, grupo]) => (
-                      <GrupoPrestatario
-                        key={key}
-                        nombre={grupo.nombre}
-                        prestamos={grupo.prestamos}
-                        saldoTotal={grupo.saldoTotal}
-                        onAbonar={setPrestamoAbono}
-                        onDevolver={setPrestamoDevol}
-                        CardItem={CardPrestamoCliente}
-                      />
+                      <GrupoPrestatario key={key} nombre={grupo.nombre}
+                        prestamos={grupo.prestamos} saldoTotal={grupo.saldoTotal}
+                        onAbonar={setPrestamoAbono} onDevolver={setPrestamoDevol}
+                        CardItem={CardPrestamoCliente} />
                     ))
                   )}
                 </div>
@@ -589,18 +834,17 @@ export default function PrestamosPage() {
       {/* ── CRÉDITOS ── */}
       {tabPrincipal === 'creditos' && (
         <div className="flex flex-col gap-3">
-          {loadingC ? (
-            <Spinner className="py-20" />
-          ) : (
+          {loadingC ? <Spinner className="py-20" /> : (
             <>
               {creditosActivos.length === 0 ? (
                 <EmptyState icon={CreditCard} titulo="Sin créditos activos" />
               ) : (
                 creditosActivos.map((c) => {
-                  const saldo    = Number(c.valor_total) - Number(c.total_abonado);
-                  const progreso = (Number(c.total_abonado) / Number(c.valor_total)) * 100;
+                  const creditoId = c.id;
+                  const saldo     = Number(c.valor_total) - Number(c.total_abonado);
+                  const progreso  = (Number(c.total_abonado) / Number(c.valor_total)) * 100;
                   return (
-                    <div key={c.id}
+                    <div key={creditoId}
                       className="bg-white border border-gray-100 rounded-2xl p-4 flex flex-col gap-3">
                       <div className="flex items-start justify-between">
                         <div>
@@ -610,16 +854,12 @@ export default function PrestamosPage() {
                             <p className="text-xs text-gray-400">Vence: {c.fecha_limite}</p>
                           )}
                         </div>
-                        <Badge variant={c.estado === 'Activo' ? 'yellow' : 'green'}>
-                          {c.estado}
-                        </Badge>
+                        <Badge variant={c.estado === 'Activo' ? 'yellow' : 'green'}>{c.estado}</Badge>
                       </div>
                       <div className="flex flex-col gap-1">
                         <div className="w-full bg-gray-100 rounded-full h-1.5">
-                          <div
-                            className="bg-yellow-400 h-1.5 rounded-full transition-all"
-                            style={{ width: `${Math.min(progreso, 100)}%` }}
-                          />
+                          <div className="bg-yellow-400 h-1.5 rounded-full transition-all"
+                            style={{ width: `${Math.min(progreso, 100)}%` }} />
                         </div>
                         <div className="flex justify-between text-xs">
                           <span className="text-gray-400">Abonado: {formatCOP(c.total_abonado)}</span>
@@ -633,23 +873,25 @@ export default function PrestamosPage() {
                   );
                 })
               )}
-
               {creditosSaldados.length > 0 && (
                 <details className="mt-2">
                   <summary className="text-xs text-gray-400 cursor-pointer select-none">
                     Ver {creditosSaldados.length} crédito(s) cerrado(s)
                   </summary>
                   <div className="flex flex-col gap-2 mt-2">
-                    {creditosSaldados.map((c) => (
-                      <div key={c.id}
-                        className="bg-gray-50 border border-gray-100 rounded-xl p-3 flex justify-between items-center">
-                        <div>
-                          <p className="text-sm font-medium text-gray-600">{c.nombre_cliente}</p>
-                          <p className="text-xs text-gray-400">Factura #{c.factura_id}</p>
+                    {creditosSaldados.map((c) => {
+                      const creditoId = c.id;
+                      return (
+                        <div key={creditoId}
+                          className="bg-gray-50 border border-gray-100 rounded-xl p-3 flex justify-between items-center">
+                          <div>
+                            <p className="text-sm font-medium text-gray-600">{c.nombre_cliente}</p>
+                            <p className="text-xs text-gray-400">Factura #{c.factura_id}</p>
+                          </div>
+                          <Badge variant="green">{c.estado}</Badge>
                         </div>
-                        <Badge variant="green">{c.estado}</Badge>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </details>
               )}
@@ -658,7 +900,10 @@ export default function PrestamosPage() {
         </div>
       )}
 
-      {/* ── Modales ── */}
+      {/* ── DOMICILIARIOS ── */}
+      {tabPrincipal === 'domiciliarios' && <TabDomiciliarios />}
+
+      {/* Modales */}
       {prestamoAbono && (
         <ModalAbonoPrestamo prestamo={prestamoAbono} onClose={() => setPrestamoAbono(null)} />
       )}
