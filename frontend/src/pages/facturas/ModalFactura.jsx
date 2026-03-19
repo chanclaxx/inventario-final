@@ -16,6 +16,7 @@ import {
   getProductosCantidad,
   verificarImei as verificarImeiApi,
 } from '../../api/productos.api';
+import { getDomiciliarios, crearDomiciliario } from '../../api/domiciliarios.api';
 import { FacturaTermica }    from '../../components/FacturaTermica';
 import { useSucursalKey }    from '../../hooks/useSucursalKey';
 import api                   from '../../api/axios.config';
@@ -24,6 +25,7 @@ import {
   User, Users, Package, ShoppingBag,
   Loader2, CheckCircle, XCircle, AlertCircle,
   AlertTriangle, X, Plus, Trash2, RefreshCw,
+  Bike, ChevronLeft,
 } from 'lucide-react';
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
@@ -50,6 +52,13 @@ const RETOMA_VACIA = () => ({
   reactivar_serial_id:  null,
 });
 
+const DOMICILIO_VACIO = () => ({
+  activo:            false,
+  domiciliario_id:   null,
+  direccion_entrega: '',
+  notas:             '',
+});
+
 const IMEI_MIN_LENGTH = 8;
 
 // ─── Utilidades ───────────────────────────────────────────────────────────────
@@ -67,9 +76,7 @@ function calcularValorRetoma(retoma) {
   return Number(retoma.valor_retoma || 0);
 }
 
-function buildPayloadFactura({ tipoCliente, form, items, totalNeto, metodosSeleccionados, montos, retomas }) {
-  // Si el neto es <= 0 (retoma supera el total) se envía un pago en Efectivo con
-  // el valor neto (negativo o cero) para registrar que el negocio le debe al cliente.
+function buildPayloadFactura({ tipoCliente, form, items, totalNeto, metodosSeleccionados, montos, retomas, domicilio }) {
   const pagosPorDefecto = totalNeto <= 0
     ? [{ metodo: metodosSeleccionados[0] || 'Efectivo', valor: totalNeto }]
     : null;
@@ -103,6 +110,15 @@ function buildPayloadFactura({ tipoCliente, form, items, totalNeto, metodosSelec
     reactivar_serial_id:  r.reactivar_serial_id || null,
   }));
 
+  // Solo envía domicilio si está activo y tiene domiciliario seleccionado
+  const domicilioPayload = (domicilio.activo && domicilio.domiciliario_id)
+    ? {
+        domiciliario_id:   domicilio.domiciliario_id,
+        direccion_entrega: domicilio.direccion_entrega || null,
+        notas:             domicilio.notas             || null,
+      }
+    : undefined;
+
   return {
     nombre_cliente: form.nombre,
     cedula:         tipoCliente === 'cliente' ? form.cedula  : 'COMPANERO',
@@ -112,7 +128,8 @@ function buildPayloadFactura({ tipoCliente, form, items, totalNeto, metodosSelec
     notas:          form.notas || null,
     lineas,
     pagos,
-    retomas: retomasPayload,
+    retomas:  retomasPayload,
+    domicilio: domicilioPayload,
   };
 }
 
@@ -143,7 +160,7 @@ function useVerificarImei() {
   return { estado, verificar, limpiar };
 }
 
-// ─── Indicadores IMEI (para el input en sí) ───────────────────────────────────
+// ─── Indicadores IMEI ─────────────────────────────────────────────────────────
 
 function ImeiEstadoIcono({ estado }) {
   if (estado.tipo === 'cargando')   return <Loader2     size={15} className="text-gray-400 animate-spin" />;
@@ -153,71 +170,217 @@ function ImeiEstadoIcono({ estado }) {
   return null;
 }
 
-// ─── Aviso de estado del IMEI en retoma ───────────────────────────────────────
-// Muestra el resultado de la verificación de forma informativa y automática.
-// Ya no hay modales de confirmación — la acción se toma sin preguntar.
-
 function AvisoImeiRetoma({ estado, nombreCliente }) {
-  if (estado.tipo === 'cargando') {
-    return <p className="text-xs text-gray-400">Verificando IMEI...</p>;
-  }
-
-  if (estado.tipo === 'libre') {
-    return <p className="text-xs text-green-600">✓ IMEI disponible — se creará en el inventario</p>;
-  }
-
-  if (estado.tipo === 'error') {
-    return <p className="text-xs text-red-500">{estado.mensaje}</p>;
-  }
+  if (estado.tipo === 'cargando') return <p className="text-xs text-gray-400">Verificando IMEI...</p>;
+  if (estado.tipo === 'libre')    return <p className="text-xs text-green-600">✓ IMEI disponible — se creará en el inventario</p>;
+  if (estado.tipo === 'error')    return <p className="text-xs text-red-500">{estado.mensaje}</p>;
 
   if (estado.tipo === 'encontrado') {
     const serial = estado.serial;
     const estaDisponible = !serial.vendido && !serial.prestado;
-
     if (estaDisponible) {
-      // Ya está en inventario disponible — se actualiza el cliente origen
       return (
         <div className="flex items-start gap-2 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2">
           <Package size={13} className="text-blue-500 flex-shrink-0 mt-0.5" />
           <div className="flex flex-col gap-0.5">
-            <p className="text-xs font-medium text-blue-700">
-              Ya está en inventario como disponible
-            </p>
+            <p className="text-xs font-medium text-blue-700">Ya está en inventario como disponible</p>
             <p className="text-xs text-blue-500">
-              Se actualizará el cliente origen a{' '}
-              <span className="font-semibold">{nombreCliente || 'el cliente de la retoma'}</span>.
+              Se actualizará el cliente origen a <span className="font-semibold">{nombreCliente || 'el cliente de la retoma'}</span>.
             </p>
           </div>
         </div>
       );
     }
-
-    // Está vendido o prestado — se reactivará automáticamente
     const estadoLabel = serial.vendido ? 'vendido' : 'prestado';
     return (
       <div className="flex items-start gap-2 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
         <RefreshCw size={13} className="text-amber-500 flex-shrink-0 mt-0.5" />
         <div className="flex flex-col gap-0.5">
-          <p className="text-xs font-medium text-amber-700">
-            IMEI {estadoLabel} — se reactivará automáticamente
-          </p>
+          <p className="text-xs font-medium text-amber-700">IMEI {estadoLabel} — se reactivará automáticamente</p>
           <p className="text-xs text-amber-600">
             Producto: <span className="font-medium">{serial.producto_nombre}</span>
             {serial.marca ? ` · ${serial.marca}` : ''}
           </p>
           <p className="text-xs text-amber-500">
-            Se registrará a nombre de{' '}
-            <span className="font-semibold">{nombreCliente || 'el cliente de la retoma'}</span>.
+            Se registrará a nombre de <span className="font-semibold">{nombreCliente || 'el cliente de la retoma'}</span>.
           </p>
         </div>
       </div>
     );
   }
-
   return null;
 }
 
-// ─── Componente de una retoma individual ──────────────────────────────────────
+// ─── Sección domicilio ────────────────────────────────────────────────────────
+// Selector de domiciliario con opción de crear uno nuevo desde el mismo modal.
+
+function SeccionDomicilio({ domicilio, onChange }) {
+  const [modoCrear, setModoCrear] = useState(false);
+  const [nombreNuevo, setNombreNuevo] = useState('');
+  const [telefonoNuevo, setTelefonoNuevo] = useState('');
+  const queryClient = useQueryClient();
+
+  const { data: domiciliariosData, isLoading } = useQuery({
+    queryKey: ['domiciliarios'],
+    queryFn:  () => getDomiciliarios().then((r) => r.data.data),
+    enabled:  domicilio.activo,
+  });
+
+  const mutCrear = useMutation({
+    mutationFn: (datos) => crearDomiciliario(datos),
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: ['domiciliarios'], exact: false });
+      onChange({ ...domicilio, domiciliario_id: res.data.data.id });
+      setModoCrear(false);
+      setNombreNuevo('');
+      setTelefonoNuevo('');
+    },
+  });
+
+  const domiciliarios = domiciliariosData || [];
+  const seleccionado  = domiciliarios.find((d) => d.id === domicilio.domiciliario_id) || null;
+
+  const set = (campo, valor) => onChange({ ...domicilio, [campo]: valor });
+
+  return (
+    <div className="flex flex-col gap-2">
+      {/* Toggle principal */}
+      <button
+        type="button"
+        onClick={() => onChange({ ...DOMICILIO_VACIO(), activo: !domicilio.activo })}
+        className={`w-full flex items-center gap-2 py-2.5 rounded-xl text-sm font-medium
+          border transition-all
+          ${domicilio.activo
+            ? 'bg-orange-50 border-orange-300 text-orange-700'
+            : 'bg-gray-50 border-gray-200 text-gray-600'}`}
+      >
+        <Bike size={15} className="ml-3" />
+        {domicilio.activo ? '✓ Pedido a domicilio' : '+ Es domicilio'}
+      </button>
+
+      {domicilio.activo && (
+        <div className="flex flex-col gap-3 p-3 bg-orange-50 rounded-xl border border-orange-100">
+
+          <p className="text-xs font-semibold text-orange-700 uppercase tracking-wide">
+            Domiciliario
+          </p>
+
+          {/* Chip del seleccionado */}
+          {seleccionado ? (
+            <div className="flex items-center justify-between bg-white border border-orange-200 rounded-xl px-3 py-2">
+              <div>
+                <p className="text-sm font-medium text-orange-800">{seleccionado.nombre}</p>
+                {seleccionado.telefono && (
+                  <p className="text-xs text-orange-500">{seleccionado.telefono}</p>
+                )}
+              </div>
+              <button
+                onClick={() => set('domiciliario_id', null)}
+                className="text-xs text-orange-400 hover:text-orange-600"
+              >
+                Cambiar
+              </button>
+            </div>
+          ) : modoCrear ? (
+            /* Formulario crear */
+            <div className="flex flex-col gap-2">
+              <button
+                onClick={() => { setModoCrear(false); setNombreNuevo(''); setTelefonoNuevo(''); }}
+                className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-600 w-fit"
+              >
+                <ChevronLeft size={13} /> Volver
+              </button>
+              <Input
+                label="Nombre del domiciliario"
+                placeholder="Nombre..."
+                value={nombreNuevo}
+                onChange={(e) => setNombreNuevo(e.target.value)}
+                autoFocus
+              />
+              <Input
+                label="Teléfono (opcional)"
+                placeholder="3001234567"
+                value={telefonoNuevo}
+                onChange={(e) => setTelefonoNuevo(e.target.value)}
+              />
+              <Button
+                size="sm"
+                loading={mutCrear.isPending}
+                disabled={!nombreNuevo.trim()}
+                onClick={() => mutCrear.mutate({ nombre: nombreNuevo.trim(), telefono: telefonoNuevo || null })}
+              >
+                Guardar domiciliario
+              </Button>
+            </div>
+          ) : (
+            /* Lista de domiciliarios */
+            <div className="flex flex-col gap-1">
+              {isLoading ? (
+                <p className="text-xs text-gray-400 py-2">Cargando...</p>
+              ) : domiciliarios.length === 0 ? (
+                <p className="text-xs text-gray-400 px-1">Sin domiciliarios registrados</p>
+              ) : (
+                <div className="flex flex-col gap-1 max-h-36 overflow-y-auto">
+                  {domiciliarios.filter((d) => d.activo).map((d) => {
+                    const domId = d.id;
+                    return (
+                      <button
+                        key={domId}
+                        onClick={() => set('domiciliario_id', domId)}
+                        className="text-left px-3 py-2 rounded-xl border border-orange-100
+                          bg-white hover:border-orange-300 hover:bg-orange-50/40
+                          transition-colors text-sm text-gray-800"
+                      >
+                        <span className="font-medium">{d.nombre}</span>
+                        {d.telefono && (
+                          <span className="text-xs text-gray-400 ml-2">{d.telefono}</span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              <button
+                onClick={() => setModoCrear(true)}
+                className="flex items-center gap-1 text-xs text-orange-500 hover:text-orange-700 w-fit mt-1"
+              >
+                <Plus size={13} /> Agregar domiciliario
+              </button>
+            </div>
+          )}
+
+          {/* Campos opcionales — solo visibles cuando hay domiciliario seleccionado */}
+          {seleccionado && (
+            <>
+              <Input
+                label="Dirección de entrega"
+                placeholder="Calle 10 # 5-20 (opcional)"
+                value={domicilio.direccion_entrega}
+                onChange={(e) => set('direccion_entrega', e.target.value)}
+              />
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-gray-600">
+                  Notas para el domiciliario <span className="text-gray-400 font-normal">(opcional)</span>
+                </label>
+                <textarea
+                  rows={2}
+                  placeholder="Instrucciones de entrega..."
+                  value={domicilio.notas}
+                  onChange={(e) => set('notas', e.target.value)}
+                  className="w-full px-3 py-2 bg-white border border-orange-200 rounded-xl
+                    text-sm placeholder-gray-400 focus:outline-none focus:ring-2
+                    focus:ring-orange-400 focus:bg-white transition-all resize-none"
+                />
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── ItemRetoma ───────────────────────────────────────────────────────────────
 
 function ItemRetoma({ retoma, index, total, productosSerial, productosCantidad,
   onChange, onRemove, nombreCliente }) {
@@ -236,50 +399,35 @@ function ItemRetoma({ retoma, index, total, productosSerial, productosCantidad,
   );
 
   const set = (campo, valor) => onChange(retoma._key, campo, valor);
-
   const valorTotal = calcularValorRetoma(retoma);
 
-  // ── Al cambiar el IMEI — limpiar estado y reactivar_serial_id ────────────
   const handleImeiChange = (e) => {
     set('imei', e.target.value);
     set('reactivar_serial_id', null);
-    set('producto_serial_id', retoma.producto_serial_id); // mantener si ya había
+    set('producto_serial_id', retoma.producto_serial_id);
     limpiar();
   };
 
-  // ── Al marcar "Ingresa al inventario" — verificar automáticamente ─────────
   const handleCheckboxInventario = async (marcado) => {
     set('ingreso_inventario', marcado);
-
-    if (!marcado) {
-      set('reactivar_serial_id', null);
-      limpiar();
-      return;
-    }
-
+    if (!marcado) { set('reactivar_serial_id', null); limpiar(); return; }
     const imeiActual = retoma.imei?.trim() ?? '';
     if (retoma.tipo_retoma !== 'serial' || imeiActual.length < IMEI_MIN_LENGTH) return;
-
     const serial = await verificar(imeiActual);
     if (!serial) return;
-
     set('reactivar_serial_id', serial.id);
     if (serial.producto_id) {
       set('producto_serial_id', serial.producto_id);
-      set('nombre_producto',    serial.producto_nombre || '');
+      set('nombre_producto', serial.producto_nombre || '');
     }
   };
 
-  // ── Si el IMEI cambia mientras inventario está marcado — re-verificar ─────
   useEffect(() => {
     if (!retoma.ingreso_inventario) return;
     const imeiActual = retoma.imei?.trim() ?? '';
     if (retoma.tipo_retoma !== 'serial' || imeiActual.length < IMEI_MIN_LENGTH) {
-      limpiar();
-      set('reactivar_serial_id', null);
-      return;
+      limpiar(); set('reactivar_serial_id', null); return;
     }
-    // Debounce implícito: solo verificar cuando el IMEI tiene longitud suficiente
     let activo = true;
     verificar(imeiActual).then((serial) => {
       if (!activo) return;
@@ -287,7 +435,7 @@ function ItemRetoma({ retoma, index, total, productosSerial, productosCantidad,
         set('reactivar_serial_id', serial.id);
         if (serial.producto_id) {
           set('producto_serial_id', serial.producto_id);
-          set('nombre_producto',    serial.producto_nombre || '');
+          set('nombre_producto', serial.producto_nombre || '');
         }
       } else {
         set('reactivar_serial_id', null);
@@ -299,12 +447,8 @@ function ItemRetoma({ retoma, index, total, productosSerial, productosCantidad,
 
   return (
     <div className="flex flex-col gap-3 p-3 bg-purple-50 rounded-xl border border-purple-100">
-
-      {/* Cabecera retoma */}
       <div className="flex items-center justify-between">
-        <span className="text-xs font-semibold text-purple-700">
-          Retoma {index + 1}
-        </span>
+        <span className="text-xs font-semibold text-purple-700">Retoma {index + 1}</span>
         {total > 1 && (
           <button onClick={() => onRemove(retoma._key)}
             className="p-1 rounded-lg hover:bg-red-50 text-purple-300 hover:text-red-400 transition-colors">
@@ -313,7 +457,6 @@ function ItemRetoma({ retoma, index, total, productosSerial, productosCantidad,
         )}
       </div>
 
-      {/* Tipo */}
       <div className="flex gap-2">
         {[
           { id: 'serial',   label: 'Con serial / IMEI', Icn: Package     },
@@ -344,7 +487,6 @@ function ItemRetoma({ retoma, index, total, productosSerial, productosCantidad,
         })}
       </div>
 
-      {/* ── Flujo serial ── */}
       {retoma.tipo_retoma === 'serial' && (
         <div className="flex flex-col gap-2">
           <div className="flex flex-col gap-1">
@@ -358,13 +500,11 @@ function ItemRetoma({ retoma, index, total, productosSerial, productosCantidad,
                 <ImeiEstadoIcono estado={estado} />
               </span>
             </div>
-            {/* Aviso automático — solo visible cuando inventario está marcado */}
             {retoma.ingreso_inventario && (
               <AvisoImeiRetoma estado={estado} nombreCliente={nombreCliente} />
             )}
           </div>
 
-          {/* Línea de producto */}
           <div>
             <p className="text-xs font-medium text-gray-600 mb-1">
               Línea de producto <span className="text-gray-400 font-normal">(opcional)</span>
@@ -410,7 +550,6 @@ function ItemRetoma({ retoma, index, total, productosSerial, productosCantidad,
         </div>
       )}
 
-      {/* ── Flujo cantidad ── */}
       {retoma.tipo_retoma === 'cantidad' && (
         <div className="flex flex-col gap-2">
           <p className="text-xs font-medium text-gray-600">Producto en inventario</p>
@@ -451,19 +590,16 @@ function ItemRetoma({ retoma, index, total, productosSerial, productosCantidad,
           {retoma.producto_cantidad_id && (
             <p className="text-xs text-purple-600">✓ {retoma.nombre_producto}</p>
           )}
-
           <Input label="Cantidad retomada" type="number" min="1" placeholder="1"
             value={retoma.cantidad_retoma}
             onChange={(e) => set('cantidad_retoma', e.target.value)} />
         </div>
       )}
 
-      {/* Descripción */}
       <Input label="Descripción" placeholder="Ej: iPhone 12 Pro en buen estado"
         value={retoma.descripcion}
         onChange={(e) => set('descripcion', e.target.value)} />
 
-      {/* Valor */}
       <div className="flex flex-col gap-1">
         <label className="text-xs font-medium text-gray-600">
           {retoma.tipo_retoma === 'cantidad' ? 'Precio unitario' : 'Valor retoma'}
@@ -474,7 +610,6 @@ function ItemRetoma({ retoma, index, total, productosSerial, productosCantidad,
             text-sm focus:outline-none focus:ring-2 focus:ring-purple-400" />
       </div>
 
-      {/* Total calculado para cantidad */}
       {retoma.tipo_retoma === 'cantidad' && Number(retoma.cantidad_retoma) > 1 && Number(retoma.valor_retoma) > 0 && (
         <div className="flex justify-between text-xs text-purple-700 bg-purple-100 rounded-lg px-3 py-1.5">
           <span>{retoma.cantidad_retoma} × {formatCOP(Number(retoma.valor_retoma))}</span>
@@ -482,7 +617,6 @@ function ItemRetoma({ retoma, index, total, productosSerial, productosCantidad,
         </div>
       )}
 
-      {/* Ingreso inventario */}
       <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
         <input type="checkbox" checked={retoma.ingreso_inventario}
           onChange={(e) => handleCheckboxInventario(e.target.checked)}
@@ -493,7 +627,7 @@ function ItemRetoma({ retoma, index, total, productosSerial, productosCantidad,
   );
 }
 
-// ─── Selector de métodos de pago ──────────────────────────────────────────────
+// ─── SelectorPagos ────────────────────────────────────────────────────────────
 
 function SelectorPagos({ metodosSeleccionados, montos, totalNeto, onToggleMetodo, onCambioMonto }) {
   const cantidadSeleccionada = metodosSeleccionados.length;
@@ -560,6 +694,7 @@ export function ModalFactura({ open, onClose }) {
   const [montos,               setMontos]               = useState({});
   const [conRetoma,            setConRetoma]            = useState(false);
   const [retomas,              setRetomas]              = useState([RETOMA_VACIA()]);
+  const [domicilio,            setDomicilio]            = useState(DOMICILIO_VACIO());
   const [error,                setError]                = useState('');
   const [verificandoCedula,    setVerificandoCedula]    = useState(false);
   const [buscandoCedula,       setBuscandoCedula]       = useState(false);
@@ -597,21 +732,14 @@ export function ModalFactura({ open, onClose }) {
   const mostrarEmail      = configData?.campo_email_cliente     === '1';
   const mostrarDireccion  = configData?.campo_direccion_cliente === '1';
 
-  // ── Totales ───────────────────────────────────────────────────────────────
-  const totalRetomas = conRetoma
-    ? retomas.reduce((s, r) => s + calcularValorRetoma(r), 0)
-    : 0;
-  const totalNeto   = total - totalRetomas;
-  const totalPagado = metodosSeleccionados.length === 1
+  const totalRetomas = conRetoma ? retomas.reduce((s, r) => s + calcularValorRetoma(r), 0) : 0;
+  const totalNeto    = total - totalRetomas;
+  const totalPagado  = metodosSeleccionados.length === 1
     ? totalNeto
     : metodosSeleccionados.reduce((s, id) => s + Number(montos[id] || 0), 0);
-  const diferencia  = totalPagado - totalNeto;
-
-  // ── Nombre del cliente para los avisos de retoma ──────────────────────────
-  // Se usa el nombre que el usuario ya escribió en el formulario
+  const diferencia   = totalPagado - totalNeto;
   const nombreClienteRetoma = form.nombre.trim() || '';
 
-  // ── Autocompletado por cédula ─────────────────────────────────────────────
   const handleBlurCedula = useCallback(async () => {
     const cedula = form.cedula?.trim();
     if (!cedula || tipoCliente !== 'cliente') return;
@@ -630,24 +758,17 @@ export function ModalFactura({ open, onClose }) {
           direccion: encontrado.direccion || f.direccion,
         }));
       }
-    } catch {
-      // si falla la búsqueda el usuario llena manual
-    } finally {
-      setBuscandoCedula(false);
-    }
+    } catch { /* usuario llena manual */ }
+    finally { setBuscandoCedula(false); }
   }, [form.cedula, form.nombre, form.celular, tipoCliente]);
 
-  // ── Gestión de retomas ────────────────────────────────────────────────────
   const handleChangeRetoma = useCallback((key, campo, valor) => {
-    setRetomas((prev) =>
-      prev.map((r) => r._key === key ? { ...r, [campo]: valor } : r)
-    );
+    setRetomas((prev) => prev.map((r) => r._key === key ? { ...r, [campo]: valor } : r));
   }, []);
 
   const handleAddRetoma    = () => setRetomas((prev) => [...prev, RETOMA_VACIA()]);
   const handleRemoveRetoma = (key) => setRetomas((prev) => prev.filter((r) => r._key !== key));
 
-  // ── Mutation ──────────────────────────────────────────────────────────────
   const mutation = useMutation({
     mutationFn: crearFactura,
     onSuccess: async (res) => {
@@ -659,6 +780,7 @@ export function ModalFactura({ open, onClose }) {
       queryClient.invalidateQueries({ queryKey: ['productos-top'],       exact: false });
       queryClient.invalidateQueries({ queryKey: ['dashboard'],           exact: false });
       queryClient.invalidateQueries({ queryKey: ['clientes'],            exact: false });
+      queryClient.invalidateQueries({ queryKey: ['domiciliarios'],       exact: false });
       try {
         const { data } = await getFacturaById(res.data.data.id);
         setFacturaCreada({ ...data.data, config: configData });
@@ -674,6 +796,7 @@ export function ModalFactura({ open, onClose }) {
     setForm({ nombre: '', cedula: '', celular: '', email: '', direccion: '', notas: '' });
     setMetodosSeleccionados([]); setMontos({});
     setConRetoma(false); setRetomas([RETOMA_VACIA()]);
+    setDomicilio(DOMICILIO_VACIO());
     setError(''); setTipoCliente('cliente');
     setVerificandoCedula(false);
   };
@@ -704,15 +827,20 @@ export function ModalFactura({ open, onClose }) {
       tipoCliente, form, items, totalNeto,
       metodosSeleccionados, montos,
       retomas: conRetoma ? retomas : [],
+      domicilio,
     }));
   };
 
   const handleSubmit = async () => {
     setError('');
-    if (!form.nombre.trim())                               return setError('El nombre es requerido');
-    if (tipoCliente === 'cliente' && !form.cedula.trim())  return setError('La cédula es requerida');
-    if (tipoCliente === 'cliente' && !form.celular.trim()) return setError('El celular es requerido');
+    if (!form.nombre.trim())                                return setError('El nombre es requerido');
+    if (tipoCliente === 'cliente' && !form.cedula.trim())   return setError('La cédula es requerida');
+    if (tipoCliente === 'cliente' && !form.celular.trim())  return setError('El celular es requerido');
     if (metodosSeleccionados.length === 0 && totalNeto > 0) return setError('Selecciona al menos un método de pago');
+
+    if (domicilio.activo && !domicilio.domiciliario_id) {
+      return setError('Selecciona o crea un domiciliario para el pedido');
+    }
 
     if (conRetoma) {
       for (const r of retomas) {
@@ -864,14 +992,12 @@ export function ModalFactura({ open, onClose }) {
                     nombreCliente={nombreClienteRetoma}
                   />
                 ))}
-
                 <button onClick={handleAddRetoma}
                   className="flex items-center justify-center gap-2 py-2 rounded-xl
                     text-sm text-purple-600 border border-dashed border-purple-300
                     hover:bg-purple-50 transition-colors">
                   <Plus size={14} /> Agregar otra retoma
                 </button>
-
                 {retomas.length > 1 && totalRetomas > 0 && (
                   <div className="flex justify-between text-sm font-medium text-purple-700
                     bg-purple-50 rounded-xl px-3 py-2">
@@ -882,6 +1008,12 @@ export function ModalFactura({ open, onClose }) {
               </div>
             )}
           </div>
+
+          {/* Domicilio */}
+          <SeccionDomicilio
+            domicilio={domicilio}
+            onChange={setDomicilio}
+          />
 
           {/* Métodos de pago */}
           <SelectorPagos
@@ -920,7 +1052,6 @@ export function ModalFactura({ open, onClose }) {
                 {totalNeto < 0 ? `+ ${formatCOP(Math.abs(totalNeto))}` : formatCOP(totalNeto)}
               </span>
             </div>
-            {/* Aviso cuando la retoma supera el total — el negocio le debe al cliente */}
             {totalNeto < 0 && (
               <div className="flex items-start gap-2 bg-green-50 border border-green-200 rounded-lg px-3 py-2 mt-1">
                 <span className="text-green-600 text-xs font-medium">
