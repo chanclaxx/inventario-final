@@ -300,7 +300,7 @@ function ItemMovimiento({ item, rendered, esTipoIngreso, cajaId }) {
 
   return (
     <div className={`flex items-center justify-between px-4 py-2.5 bg-white
-      hover:bg-gray-50/50 transition-colors group
+      hover:bg-gray-50/50 transition-colors
       ${!estaActivo ? 'bg-red-50/30' : ''}`}>
       <div className="flex-1 min-w-0">
         <p className={`text-sm truncate ${!estaActivo ? 'line-through text-gray-400' : 'text-gray-800'}`}>
@@ -330,16 +330,14 @@ function ItemMovimiento({ item, rendered, esTipoIngreso, cajaId }) {
 
         {tieneToggle && (
           estaActivo ? (
-            // Botón anular — visible siempre en items de movimientos_caja,
-            // más prominente al hover para que el usuario lo note
+            // Botón anular — siempre visible
             <button
               onClick={(e) => { e.stopPropagation(); mutation.mutate(); }}
               disabled={mutation.isPending}
               title="Anular movimiento"
               className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium
-                text-gray-400 border border-transparent
-                hover:text-red-600 hover:bg-red-50 hover:border-red-200
-                opacity-0 group-hover:opacity-100
+                text-red-400 bg-red-50 border border-red-200
+                hover:text-red-600 hover:bg-red-100 hover:border-red-300
                 transition-all disabled:opacity-30"
             >
               <Ban size={12} />
