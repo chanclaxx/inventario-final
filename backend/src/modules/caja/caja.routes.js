@@ -19,5 +19,6 @@ router.patch('/:id/cerrar',     validarCierre,    validate, ctrl.cerrarCaja);
 router.get('/:id/movimientos',  ctrl.getMovimientos);
 router.post('/:id/movimientos', validarMovimiento, validate, ctrl.registrarMovimiento);
 router.get('/:id/resumen-dia',  ctrl.getResumenDia);
+router.patch('/movimientos/:movimientoId/toggle', ctrl.toggleMovimiento);
 
 module.exports = router;

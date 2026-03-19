@@ -83,6 +83,30 @@ const insertarMovimiento = async ({
   return rows[0];
 };
 
+// ─── toggleMovimiento ────────────────────────────────────────────────────────
+// Activa o inactiva un movimiento de caja. Recibe el negocioId para verificar
+// que el movimiento pertenece a una caja del negocio antes de modificarlo.
+
+const toggleMovimiento = async (movimientoId, negocioId) => {
+  // Verificar pertenencia al negocio antes de modificar
+  const { rows: check } = await pool.query(`
+    SELECT m.id, m.activo
+    FROM movimientos_caja m
+    JOIN aperturas_caja   ac ON ac.id = m.caja_id
+    JOIN sucursales       su ON su.id = ac.sucursal_id
+    WHERE m.id = $1 AND su.negocio_id = $2
+  `, [movimientoId, negocioId]);
+
+  if (!check.length) throw { status: 404, message: 'Movimiento no encontrado' };
+
+  const nuevoEstado = !check[0].activo;
+  const { rows } = await pool.query(
+    'UPDATE movimientos_caja SET activo = $1 WHERE id = $2 RETURNING *',
+    [nuevoEstado, movimientoId]
+  );
+  return rows[0];
+};
+
 const getResumenCaja = async (cajaId) => {
   const { rows } = await pool.query(`
     SELECT
@@ -131,7 +155,12 @@ const getResumenCaja = async (cajaId) => {
 //   PARA facturas Entregado: aparecen en pf (total de la venta), ad es informativo.
 
 const _buildResumen = ({ pf, ac, ap, cp, aa, mn, rt, dv, ad }) => {
-  const sum = (arr) => arr.reduce((s, r) => s + Number(r.valor || 0), 0);
+  // sum solo suma los ítems activos (activo !== false).
+  // Los movimientos de otras tablas (pagos_factura, etc.) no tienen campo activo
+  // y siempre cuentan. Solo movimientos_caja tiene el campo activo.
+  const sum = (arr) => arr
+    .filter((r) => r.activo !== false)
+    .reduce((s, r) => s + Number(r.valor || 0), 0);
 
   const totalFacturas          = sum(pf);
   const totalAbonosCredito     = sum(ac);
@@ -139,13 +168,15 @@ const _buildResumen = ({ pf, ac, ap, cp, aa, mn, rt, dv, ad }) => {
   const totalCompras           = sum(cp);
   const totalAbonosAcreedor    = sum(aa);
   const totalRetomas           = sum(rt);
-  const totalDevoluciones      = dv.reduce((s, d) => s + Number(d.valor || 0), 0);
+  const totalDevoluciones      = dv
+    .filter((d) => d.activo !== false)
+    .reduce((s, d) => s + Number(d.valor || 0), 0);
 
   const totalManualesIngreso = mn
-    .filter((m) => m.tipo === 'Ingreso')
+    .filter((m) => m.activo !== false && m.tipo === 'Ingreso')
     .reduce((s, m) => s + Number(m.valor || 0), 0);
   const totalManualesEgreso = mn
-    .filter((m) => m.tipo === 'Egreso')
+    .filter((m) => m.activo !== false && m.tipo === 'Egreso')
     .reduce((s, m) => s + Number(m.valor || 0), 0);
 
   // ad es SOLO informativo — no suma a ingresos para evitar doble suma con pf
@@ -506,5 +537,6 @@ module.exports = {
   perteneceAlNegocio,
   getMovimientos, abrirCaja, cerrarCaja,
   insertarMovimiento, getResumenCaja,
+  toggleMovimiento,
   getResumenDia, getResumenGlobal,
 };

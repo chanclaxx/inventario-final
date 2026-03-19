@@ -52,8 +52,10 @@ const registrarMovimiento = async (negocioId, cajaId, { usuario_id, tipo, concep
   if (valor <= 0) throw { status: 400, message: 'El valor debe ser mayor a 0' };
   return repo.insertarMovimiento({ caja_id: cajaId, usuario_id, tipo, concepto, valor, referencia_id, referencia_tipo });
 };
-
+const toggleMovimiento = async (negocioId, movimientoId) => {
+  return repo.toggleMovimiento(movimientoId, negocioId);
+};
 module.exports = {
   getCajaActiva, abrirCaja, cerrarCaja,
-  getMovimientos, getResumenDia, getResumenGlobal, registrarMovimiento,
+  getMovimientos, getResumenDia, getResumenGlobal, registrarMovimiento,toggleMovimiento
 };

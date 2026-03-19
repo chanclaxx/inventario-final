@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   getCajaActiva, abrirCaja, cerrarCaja,
-  registrarMovimiento, getResumenDia,
+  registrarMovimiento, getResumenDia, toggleMovimiento,
 } from '../../api/caja.api';
 import { formatCOP, formatFechaHora } from '../../utils/formatters';
 import { Button }     from '../../components/ui/Button';
@@ -15,7 +15,7 @@ import { useSucursalKey } from '../../hooks/useSucursalKey';
 import {
   Wallet, Plus, Lock, ChevronDown, ChevronUp,
   ShoppingCart, CreditCard, ArrowDownCircle, ArrowUpCircle,
-  Receipt, Sliders, RefreshCw, Bike,
+  Receipt, Sliders, RefreshCw, Bike, Ban, RotateCcw,
 } from 'lucide-react';
 
 const METODOS_PAGO_ORDEN = ['Efectivo', 'Nequi', 'Daviplata', 'Transferencia', 'Tarjeta'];
@@ -283,7 +283,65 @@ function ResumenMetodosPago({ metodosPago }) {
 
 // ─── GrupoMovimientos — grupos de ingreso/egreso normales ────────────────────
 
-function GrupoMovimientos({ grupoKey, grupo }) {
+function ItemMovimiento({ item, rendered, esTipoIngreso, cajaId }) {
+  const queryClient = useQueryClient();
+
+  const mutation = useMutation({
+    mutationFn: () => toggleMovimiento(item.id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['caja-resumen', cajaId], exact: false });
+    },
+  });
+
+  // Solo los movimientos de movimientos_caja tienen campo 'activo' (id numérico en esa tabla).
+  // pagos_factura, abonos_credito, etc. no tienen ese campo — para ellos activo es undefined.
+  const tieneToggle = item.activo !== undefined;
+  const estaActivo  = item.activo !== false; // undefined = activo (movimientos sin columna)
+
+  return (
+    <div className={`flex items-center justify-between px-4 py-2.5 bg-white hover:bg-gray-50/50
+      ${!estaActivo ? 'opacity-50' : ''}`}>
+      <div className="flex-1 min-w-0">
+        <p className={`text-sm truncate ${!estaActivo ? 'line-through text-gray-400' : 'text-gray-800'}`}>
+          {rendered.descripcion}
+        </p>
+        <div className="flex items-center gap-2">
+          {rendered.detalle && (
+            <span className="text-xs text-gray-400">{rendered.detalle}</span>
+          )}
+          {rendered.fecha && (
+            <span className="text-xs text-gray-300">{formatFechaHora(rendered.fecha)}</span>
+          )}
+          {!estaActivo && (
+            <span className="text-xs text-red-400 font-medium">Anulado</span>
+          )}
+        </div>
+      </div>
+      <div className="flex items-center gap-2 flex-shrink-0 ml-3">
+        <span className={`text-sm font-semibold ${!estaActivo ? 'line-through text-gray-300' : esTipoIngreso ? 'text-green-600' : 'text-red-500'}`}>
+          {esTipoIngreso ? '+' : '-'}{formatCOP(item.valor)}
+        </span>
+        {tieneToggle && (
+          <button
+            onClick={(e) => { e.stopPropagation(); mutation.mutate(); }}
+            disabled={mutation.isPending}
+            title={estaActivo ? 'Anular movimiento' : 'Reactivar movimiento'}
+            className={`p-1 rounded-lg transition-colors disabled:opacity-40
+              ${estaActivo
+                ? 'text-gray-300 hover:text-red-400 hover:bg-red-50'
+                : 'text-gray-300 hover:text-green-500 hover:bg-green-50'}`}
+          >
+            {estaActivo
+              ? <Ban size={13} />
+              : <RotateCcw size={13} />}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function GrupoMovimientos({ grupoKey, grupo, cajaId }) {
   const [expandido, setExpandido] = useState(false);
   const cfg = CONFIG_GRUPOS[grupoKey];
   if (!cfg || grupo.items.length === 0) return null;
@@ -291,6 +349,9 @@ function GrupoMovimientos({ grupoKey, grupo }) {
   const GrupoIcono = cfg.icono;
   const esMixto    = grupoKey === 'manuales';
   const esIngreso  = grupo.tipo === 'Ingreso';
+
+  // Contar anulados para mostrar en el badge
+  const anulados = grupo.items.filter((i) => i.activo === false).length;
 
   return (
     <div className={`border ${cfg.borderColor} rounded-2xl overflow-hidden`}>
@@ -302,6 +363,11 @@ function GrupoMovimientos({ grupoKey, grupo }) {
           <span className={`text-xs px-2 py-0.5 rounded-full bg-white/60 ${cfg.textHeader}`}>
             {grupo.items.length}
           </span>
+          {anulados > 0 && (
+            <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-500">
+              {anulados} anulado{anulados !== 1 ? 's' : ''}
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-3">
           {esMixto ? (
@@ -329,20 +395,13 @@ function GrupoMovimientos({ grupoKey, grupo }) {
             const rendered      = cfg.renderItem(item);
             const esTipoIngreso = rendered.esMixto ? rendered.tipo === 'Ingreso' : esIngreso;
             return (
-              <div key={item.id}
-                className="flex items-center justify-between px-4 py-2.5 bg-white hover:bg-gray-50/50">
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm text-gray-800 truncate">{rendered.descripcion}</p>
-                  <div className="flex items-center gap-2">
-                    {rendered.detalle && <span className="text-xs text-gray-400">{rendered.detalle}</span>}
-                    {rendered.fecha   && <span className="text-xs text-gray-300">{formatFechaHora(rendered.fecha)}</span>}
-                  </div>
-                </div>
-                <span className={`text-sm font-semibold flex-shrink-0 ml-3
-                  ${esTipoIngreso ? 'text-green-600' : 'text-red-500'}`}>
-                  {esTipoIngreso ? '+' : '-'}{formatCOP(item.valor)}
-                </span>
-              </div>
+              <ItemMovimiento
+                key={item.id}
+                item={item}
+                rendered={rendered}
+                esTipoIngreso={esTipoIngreso}
+                cajaId={cajaId}
+              />
             );
           })}
         </div>
@@ -531,10 +590,10 @@ export default function CajaPage() {
         ) : (
           <>
             <p className="text-xs text-gray-400 font-medium px-1">Ingresos</p>
-            <GrupoMovimientos grupoKey="facturas"       grupo={grupos.facturas       || { items: [] }} />
-            <GrupoMovimientos grupoKey="abonosCredito"  grupo={grupos.abonosCredito  || { items: [] }} />
-            <GrupoMovimientos grupoKey="abonosPrestamo" grupo={grupos.abonosPrestamo || { items: [] }} />
-            <GrupoMovimientos grupoKey="abonosDomicilio" grupo={grupos.abonosDomicilio || { items: [] }} />
+            <GrupoMovimientos grupoKey="facturas"        grupo={grupos.facturas        || { items: [] }} cajaId={caja.id} />
+            <GrupoMovimientos grupoKey="abonosCredito"   grupo={grupos.abonosCredito   || { items: [] }} cajaId={caja.id} />
+            <GrupoMovimientos grupoKey="abonosPrestamo"  grupo={grupos.abonosPrestamo  || { items: [] }} cajaId={caja.id} />
+            <GrupoMovimientos grupoKey="abonosDomicilio" grupo={grupos.abonosDomicilio || { items: [] }} cajaId={caja.id} />
 
             {grupos.facturasDomicilio?.items?.length > 0 && (
               <>
@@ -544,15 +603,15 @@ export default function CajaPage() {
             )}
 
             <p className="text-xs text-gray-400 font-medium px-1 mt-1">Egresos</p>
-            <GrupoMovimientos grupoKey="retomas"        grupo={grupos.retomas        || { items: [] }} />
-            <GrupoMovimientos grupoKey="devoluciones"   grupo={grupos.devoluciones   || { items: [] }} />
-            <GrupoMovimientos grupoKey="compras"        grupo={grupos.compras        || { items: [] }} />
-            <GrupoMovimientos grupoKey="abonosAcreedor" grupo={grupos.abonosAcreedor || { items: [] }} />
+            <GrupoMovimientos grupoKey="retomas"        grupo={grupos.retomas        || { items: [] }} cajaId={caja.id} />
+            <GrupoMovimientos grupoKey="devoluciones"   grupo={grupos.devoluciones   || { items: [] }} cajaId={caja.id} />
+            <GrupoMovimientos grupoKey="compras"        grupo={grupos.compras        || { items: [] }} cajaId={caja.id} />
+            <GrupoMovimientos grupoKey="abonosAcreedor" grupo={grupos.abonosAcreedor || { items: [] }} cajaId={caja.id} />
 
             {grupos.manuales?.items?.length > 0 && (
               <>
                 <p className="text-xs text-gray-400 font-medium px-1 mt-1">Manuales</p>
-                <GrupoMovimientos grupoKey="manuales" grupo={grupos.manuales} />
+                <GrupoMovimientos grupoKey="manuales" grupo={grupos.manuales} cajaId={caja.id} />
               </>
             )}
           </>

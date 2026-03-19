@@ -28,7 +28,12 @@ const abrirCaja = async (req, res, next) => {
     res.status(201).json({ ok: true, data, message: 'Caja abierta correctamente' });
   } catch (err) { next(err); }
 };
-
+const toggleMovimiento = async (req, res, next) => {
+  try {
+    const data = await service.toggleMovimiento(req.user.negocio_id, req.params.movimientoId);
+    res.json({ ok: true, data, message: `Movimiento ${data.activo ? 'activado' : 'anulado'}` });
+  } catch (err) { next(err); }
+};
 const cerrarCaja = async (req, res, next) => {
   try {
     const data = await service.cerrarCaja(req.user.negocio_id, req.params.id, req.body);
@@ -73,5 +78,5 @@ const registrarMovimiento = async (req, res, next) => {
 
 module.exports = {
   getCajaActiva, abrirCaja, cerrarCaja,
-  getMovimientos, getResumenDia, registrarMovimiento,
+  getMovimientos, getResumenDia, registrarMovimiento,toggleMovimiento
 };
