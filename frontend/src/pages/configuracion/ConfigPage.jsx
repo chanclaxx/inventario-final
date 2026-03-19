@@ -14,7 +14,18 @@ import { Badge }   from '../../components/ui/Badge';
 import {
   Settings, Save, Eye, EyeOff, Plus, Trash2,
   GripVertical, ToggleLeft, ToggleRight, Tag, Lock,
+  Building2, ShieldCheck, FileSliders, BookOpen, Users,
 } from 'lucide-react';
+
+// ─── Secciones del sidebar ────────────────────────────────────────────────────
+
+const SECCIONES = [
+  { id: 'negocio',    label: 'Negocio',          Icn: Building2   },
+  { id: 'seguridad',  label: 'Seguridad',         Icn: ShieldCheck },
+  { id: 'formulario', label: 'Formulario venta',  Icn: FileSliders },
+  { id: 'catalogo',   label: 'Catálogo',          Icn: BookOpen    },
+  { id: 'equipo',     label: 'Equipo',            Icn: Users       },
+];
 
 // ─── Hook compartido de config ────────────────────────────────────────────────
 function useConfigQuery() {
@@ -46,7 +57,7 @@ function Toggle({ enabled, onChange, label, description }) {
   );
 }
 
-// ─── Toggle solo lectura — no interactivo ─────────────────────────────────────
+// ─── Toggle solo lectura ──────────────────────────────────────────────────────
 function ToggleReadOnly({ enabled, label, description }) {
   return (
     <div className="flex items-center justify-between gap-4">
@@ -106,26 +117,9 @@ function LineasConfig() {
     onError:    (e) => alert(e.response?.data?.error || 'Error al eliminar la línea'),
   });
 
-  const abrirNuevo = () => {
-    setEditando(null);
-    setNombre('');
-    setError('');
-    setModalOpen(true);
-  };
-
-  const abrirEditar = (l) => {
-    setEditando(l);
-    setNombre(l.nombre);
-    setError('');
-    setModalOpen(true);
-  };
-
-  const cerrarModal = () => {
-    setModalOpen(false);
-    setEditando(null);
-    setNombre('');
-    setError('');
-  };
+  const abrirNuevo = () => { setEditando(null); setNombre(''); setError(''); setModalOpen(true); };
+  const abrirEditar = (l) => { setEditando(l); setNombre(l.nombre); setError(''); setModalOpen(true); };
+  const cerrarModal = () => { setModalOpen(false); setEditando(null); setNombre(''); setError(''); };
 
   const handleGuardar = () => {
     if (!nombre.trim()) return setError('El nombre es requerido');
@@ -133,21 +127,20 @@ function LineasConfig() {
   };
 
   return (
-    <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm flex flex-col gap-4">
+    <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <Tag size={16} className="text-gray-400" />
-          <h2 className="text-sm font-semibold text-gray-700">Líneas de producto</h2>
+          <Tag size={15} className="text-gray-400" />
+          <h3 className="text-sm font-semibold text-gray-700">Líneas de producto</h3>
         </div>
         <button
           onClick={abrirNuevo}
           className="w-8 h-8 bg-blue-600 rounded-xl flex items-center justify-center
             hover:bg-blue-700 transition-colors"
         >
-          <Plus size={16} className="text-white" />
+          <Plus size={15} className="text-white" />
         </button>
       </div>
-
       <p className="text-xs text-gray-400 -mt-2">
         Agrupa tus productos por línea. Ej: Consolas, Videojuegos, Accesorios.
       </p>
@@ -166,21 +159,13 @@ function LineasConfig() {
                   {lineaNombre}
                 </p>
                 <div className="flex gap-1 flex-shrink-0">
-                  <button
-                    onClick={() => abrirEditar(l)}
-                    className="p-1.5 rounded-lg hover:bg-gray-200 text-gray-400
-                      hover:text-gray-600 transition-colors"
-                    title="Editar línea"
-                  >
+                  <button onClick={() => abrirEditar(l)}
+                    className="p-1.5 rounded-lg hover:bg-gray-200 text-gray-400 hover:text-gray-600 transition-colors">
                     <Settings size={14} />
                   </button>
-                  <button
-                    onClick={() => mutEliminar.mutate(lineaId)}
+                  <button onClick={() => mutEliminar.mutate(lineaId)}
                     disabled={mutEliminar.isPending}
-                    className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400
-                      hover:text-red-500 transition-colors disabled:opacity-50"
-                    title="Eliminar línea"
-                  >
+                    className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors disabled:opacity-50">
                     <Trash2 size={14} />
                   </button>
                 </div>
@@ -190,32 +175,17 @@ function LineasConfig() {
         </div>
       )}
 
-      <Modal
-        open={modalOpen}
-        onClose={cerrarModal}
-        title={editando ? 'Editar línea' : 'Nueva línea'}
-        size="sm"
-      >
+      <Modal open={modalOpen} onClose={cerrarModal}
+        title={editando ? 'Editar línea' : 'Nueva línea'} size="sm">
         <div className="flex flex-col gap-4">
-          <Input
-            label="Nombre de la línea"
-            placeholder="Ej: Consolas, Videojuegos, Accesorios..."
-            value={nombre}
-            onChange={(e) => setNombre(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') handleGuardar(); }}
-            autoFocus
-          />
+          <Input label="Nombre de la línea" placeholder="Ej: Consolas, Videojuegos..."
+            value={nombre} onChange={(e) => setNombre(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') handleGuardar(); }} autoFocus />
           {error && <p className="text-sm text-red-500">{error}</p>}
           <div className="flex gap-2">
-            <Button variant="secondary" className="flex-1" onClick={cerrarModal}>
-              Cancelar
-            </Button>
-            <Button
-              className="flex-1"
-              loading={mutCrear.isPending || mutEditar.isPending}
-              onClick={handleGuardar}
-              disabled={!nombre.trim()}
-            >
+            <Button variant="secondary" className="flex-1" onClick={cerrarModal}>Cancelar</Button>
+            <Button className="flex-1" loading={mutCrear.isPending || mutEditar.isPending}
+              onClick={handleGuardar} disabled={!nombre.trim()}>
               {editando ? 'Guardar cambios' : 'Crear línea'}
             </Button>
           </div>
@@ -245,19 +215,13 @@ function GarantiasConfig() {
 
   const mutCrear = useMutation({
     mutationFn: () => crearGarantia(form),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['garantias'], exact: false });
-      cerrarModal();
-    },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['garantias'], exact: false }); cerrarModal(); },
     onError: (e) => setError(e.response?.data?.error || 'Error'),
   });
 
   const mutEditar = useMutation({
     mutationFn: () => actualizarGarantia(editando.id, form),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['garantias'], exact: false });
-      cerrarModal();
-    },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['garantias'], exact: false }); cerrarModal(); },
     onError: (e) => setError(e.response?.data?.error || 'Error'),
   });
 
@@ -266,30 +230,9 @@ function GarantiasConfig() {
     onSuccess:  () => queryClient.invalidateQueries({ queryKey: ['garantias'], exact: false }),
   });
 
-  const abrirNuevo = () => {
-    setEditando(null);
-    setForm({ titulo: '', texto: '', orden: garantias.length, lineas: [] });
-    setError('');
-    setModalOpen(true);
-  };
-
-  const abrirEditar = (g) => {
-    setEditando(g);
-    setForm({
-      titulo: g.titulo,
-      texto:  g.texto,
-      orden:  g.orden,
-      lineas: g.lineas || [],
-    });
-    setError('');
-    setModalOpen(true);
-  };
-
-  const cerrarModal = () => {
-    setModalOpen(false);
-    setEditando(null);
-    setError('');
-  };
+  const abrirNuevo  = () => { setEditando(null); setForm({ titulo: '', texto: '', orden: garantias.length, lineas: [] }); setError(''); setModalOpen(true); };
+  const abrirEditar = (g) => { setEditando(g); setForm({ titulo: g.titulo, texto: g.texto, orden: g.orden, lineas: g.lineas || [] }); setError(''); setModalOpen(true); };
+  const cerrarModal = () => { setModalOpen(false); setEditando(null); setError(''); };
 
   const handleGuardar = () => {
     if (!form.titulo.trim()) return setError('El título es requerido');
@@ -299,27 +242,21 @@ function GarantiasConfig() {
   };
 
   const toggleLinea = (lineaId) => {
-    setForm((f) => {
-      const yaEsta = f.lineas.includes(lineaId);
-      return {
-        ...f,
-        lineas: yaEsta
-          ? f.lineas.filter((id) => id !== lineaId)
-          : [...f.lineas, lineaId],
-      };
-    });
+    setForm((f) => ({
+      ...f,
+      lineas: f.lineas.includes(lineaId)
+        ? f.lineas.filter((id) => id !== lineaId)
+        : [...f.lineas, lineaId],
+    }));
   };
 
   return (
-    <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm flex flex-col gap-4">
+    <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-gray-700">Garantías y Términos</h2>
-        <button
-          onClick={abrirNuevo}
-          className="w-8 h-8 bg-blue-600 rounded-xl flex items-center justify-center
-            hover:bg-blue-700 transition-colors"
-        >
-          <Plus size={16} className="text-white" />
+        <h3 className="text-sm font-semibold text-gray-700">Garantías y Términos</h3>
+        <button onClick={abrirNuevo}
+          className="w-8 h-8 bg-blue-600 rounded-xl flex items-center justify-center hover:bg-blue-700 transition-colors">
+          <Plus size={15} className="text-white" />
         </button>
       </div>
 
@@ -329,44 +266,33 @@ function GarantiasConfig() {
         <div className="flex flex-col gap-2">
           {[...garantias].sort((a, b) => a.orden - b.orden).map((g) => {
             const garantiaId      = g.id;
-            const lineasAsignadas = lineas
-              .filter((l) => g.lineas?.includes(l.id))
-              .map((l) => l.nombre);
-
+            const lineasAsignadas = lineas.filter((l) => g.lineas?.includes(l.id)).map((l) => l.nombre);
             return (
               <div key={garantiaId} className="flex items-start gap-3 p-3 bg-gray-50 rounded-xl">
                 <GripVertical size={16} className="text-gray-300 mt-0.5 flex-shrink-0" />
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-gray-800">{g.titulo}</p>
                   <p className="text-xs text-gray-400 mt-0.5 line-clamp-2">{g.texto}</p>
-                  {lineasAsignadas.length > 0 && (
+                  {lineasAsignadas.length > 0 ? (
                     <div className="flex flex-wrap gap-1 mt-1.5">
                       {lineasAsignadas.map((nombre) => (
                         <span key={nombre}
-                          className="text-xs bg-blue-50 text-blue-600 border border-blue-100
-                            px-2 py-0.5 rounded-full">
+                          className="text-xs bg-blue-50 text-blue-600 border border-blue-100 px-2 py-0.5 rounded-full">
                           {nombre}
                         </span>
                       ))}
                     </div>
-                  )}
-                  {!lineasAsignadas.length && (
+                  ) : (
                     <p className="text-xs text-yellow-500 mt-1">Sin líneas asignadas</p>
                   )}
                 </div>
                 <div className="flex gap-1 flex-shrink-0">
-                  <button
-                    onClick={() => abrirEditar(g)}
-                    className="p-1.5 rounded-lg hover:bg-gray-200 text-gray-400
-                      hover:text-gray-600 transition-colors"
-                  >
+                  <button onClick={() => abrirEditar(g)}
+                    className="p-1.5 rounded-lg hover:bg-gray-200 text-gray-400 hover:text-gray-600 transition-colors">
                     <Settings size={14} />
                   </button>
-                  <button
-                    onClick={() => mutEliminar.mutate(garantiaId)}
-                    className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400
-                      hover:text-red-500 transition-colors"
-                  >
+                  <button onClick={() => mutEliminar.mutate(garantiaId)}
+                    className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors">
                     <Trash2 size={14} />
                   </button>
                 </div>
@@ -376,49 +302,30 @@ function GarantiasConfig() {
         </div>
       )}
 
-      <Modal
-        open={modalOpen}
-        onClose={cerrarModal}
-        title={editando ? 'Editar Garantía' : 'Nueva Garantía'}
-        size="md"
-      >
+      <Modal open={modalOpen} onClose={cerrarModal}
+        title={editando ? 'Editar Garantía' : 'Nueva Garantía'} size="md">
         <div className="flex flex-col gap-4">
-          <Input
-            label="Título"
-            placeholder="Ej: Garantía de Celulares"
-            value={form.titulo}
-            onChange={(e) => setForm({ ...form, titulo: e.target.value })}
-          />
+          <Input label="Título" placeholder="Ej: Garantía de Celulares"
+            value={form.titulo} onChange={(e) => setForm({ ...form, titulo: e.target.value })} />
           <div className="flex flex-col gap-1">
             <label className="text-sm font-medium text-gray-700">Texto de garantía</label>
-            <textarea
-              rows={6}
-              placeholder="Escribe los términos y condiciones..."
-              value={form.texto}
-              onChange={(e) => setForm({ ...form, texto: e.target.value })}
+            <textarea rows={6} placeholder="Escribe los términos y condiciones..."
+              value={form.texto} onChange={(e) => setForm({ ...form, texto: e.target.value })}
               className="w-full px-3 py-2.5 bg-gray-100 border-0 rounded-xl text-sm text-gray-900
                 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500
-                focus:bg-white transition-all resize-none"
-            />
+                focus:bg-white transition-all resize-none" />
           </div>
-          <Input
-            label="Orden (número)"
-            type="number"
-            value={form.orden}
-            onChange={(e) => setForm({ ...form, orden: Number(e.target.value) })}
-          />
-
+          <Input label="Orden (número)" type="number" value={form.orden}
+            onChange={(e) => setForm({ ...form, orden: Number(e.target.value) })} />
           <div className="flex flex-col gap-2">
             <label className="text-sm font-medium text-gray-700">
               Líneas que aplican
               <span className="text-gray-400 font-normal text-xs ml-1">
-                (la garantía aparecerá en facturas con productos de estas líneas)
+                (aparece en facturas con productos de estas líneas)
               </span>
             </label>
             {lineas.length === 0 ? (
-              <p className="text-xs text-gray-400">
-                No hay líneas configuradas. Crea líneas primero en la sección anterior.
-              </p>
+              <p className="text-xs text-gray-400">No hay líneas configuradas. Créalas primero.</p>
             ) : (
               <div className="flex flex-col gap-2">
                 {lineas.map((l) => {
@@ -426,20 +333,11 @@ function GarantiasConfig() {
                   const lineaNombre = l.nombre;
                   const marcada     = form.lineas.includes(lineaId);
                   return (
-                    <label
-                      key={lineaId}
-                      className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer
-                        transition-colors
-                        ${marcada
-                          ? 'bg-blue-50 border-blue-200'
-                          : 'bg-gray-50 border-gray-100 hover:border-gray-200'}`}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={marcada}
-                        onChange={() => toggleLinea(lineaId)}
-                        className="accent-blue-600 w-4 h-4 flex-shrink-0"
-                      />
+                    <label key={lineaId}
+                      className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-colors
+                        ${marcada ? 'bg-blue-50 border-blue-200' : 'bg-gray-50 border-gray-100 hover:border-gray-200'}`}>
+                      <input type="checkbox" checked={marcada} onChange={() => toggleLinea(lineaId)}
+                        className="accent-blue-600 w-4 h-4 flex-shrink-0" />
                       <span className={`text-sm font-medium ${marcada ? 'text-blue-700' : 'text-gray-700'}`}>
                         {lineaNombre}
                       </span>
@@ -449,15 +347,10 @@ function GarantiasConfig() {
               </div>
             )}
           </div>
-
           {error && <p className="text-sm text-red-500">{error}</p>}
           <div className="flex gap-2">
             <Button variant="secondary" className="flex-1" onClick={cerrarModal}>Cancelar</Button>
-            <Button
-              className="flex-1"
-              loading={mutCrear.isPending || mutEditar.isPending}
-              onClick={handleGuardar}
-            >
+            <Button className="flex-1" loading={mutCrear.isPending || mutEditar.isPending} onClick={handleGuardar}>
               {editando ? 'Guardar cambios' : 'Crear garantía'}
             </Button>
           </div>
@@ -469,40 +362,112 @@ function GarantiasConfig() {
 
 // ─── Campos opcionales del formulario de venta ────────────────────────────────
 const CAMPOS_EDITABLES = [
-  {
-    clave:       'campo_direccion_cliente',
-    label:       'Dirección del cliente',
-    description: 'Muestra el campo de dirección al registrar una venta',
-  },
+  { clave: 'campo_direccion_cliente', label: 'Dirección del cliente', description: 'Muestra el campo de dirección al registrar una venta' },
 ];
 
 const CAMPOS_READONLY = [
-  {
-    clave:       'campo_email_cliente',
-    label:       'Envío de facturas por email',
-    description: 'Envía automáticamente la factura al correo del cliente',
-  },
+  { clave: 'campo_email_cliente', label: 'Envío de facturas por email', description: 'Envía automáticamente la factura al correo del cliente' },
 ];
 
-function CamposFormularioConfig({ valores, set }) {
+// ─── Contenido por sección ────────────────────────────────────────────────────
+
+function SeccionNegocio({ valores, set, form, mutation, guardado }) {
+  const camposNegocio = [
+    { clave: 'nombre_negocio', label: 'Nombre del negocio', placeholder: 'Mi Tienda' },
+    { clave: 'nit',            label: 'NIT',                placeholder: '900123456-1' },
+    { clave: 'direccion',      label: 'Dirección',          placeholder: 'Calle 10 # 5-20' },
+    { clave: 'telefono',       label: 'Teléfono',           placeholder: '3001234567' },
+  ];
+
   return (
-    <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm flex flex-col gap-4">
-      <h2 className="text-sm font-semibold text-gray-700">Campos del formulario de venta</h2>
-      <p className="text-xs text-gray-400 -mt-2">
-        Activa los campos adicionales que quieres recolectar al facturar
-      </p>
-      <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-5">
+      <div>
+        <h2 className="text-base font-semibold text-gray-900">Datos del negocio</h2>
+        <p className="text-xs text-gray-400 mt-0.5">
+          Esta información aparece en las facturas impresas.
+        </p>
+      </div>
+
+      <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm flex flex-col gap-4">
+        {camposNegocio.map(({ clave, label, placeholder }) => (
+          <Input key={clave} label={label} placeholder={placeholder}
+            value={valores[clave] || ''} onChange={(e) => set(clave, e.target.value)} />
+        ))}
+      </div>
+
+      <div className="flex items-center gap-3">
+        <Button className="flex-1" loading={mutation.isPending} onClick={() => mutation.mutate(form)}>
+          <Save size={16} /> Guardar cambios
+        </Button>
+        {guardado && <Badge variant="green">✓ Guardado</Badge>}
+      </div>
+    </div>
+  );
+}
+
+function SeccionSeguridad({ form, set, mutation, guardado }) {
+  const [verPin, setVerPin] = useState(false);
+  const pinNuevo = form['pin_eliminacion'] || '';
+
+  return (
+    <div className="flex flex-col gap-5">
+      <div>
+        <h2 className="text-base font-semibold text-gray-900">Seguridad</h2>
+        <p className="text-xs text-gray-400 mt-0.5">
+          Controla el acceso a acciones sensibles del sistema.
+        </p>
+      </div>
+
+      <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm flex flex-col gap-4">
+        <div className="relative">
+          <Input label="PIN de eliminación / cancelación"
+            type={verPin ? 'text' : 'password'}
+            placeholder="Dejar vacío para mantener el actual"
+            value={pinNuevo}
+            onChange={(e) => set('pin_eliminacion', e.target.value)} />
+          <button type="button" onClick={() => setVerPin((v) => !v)}
+            className="absolute right-3 top-8 text-gray-400 hover:text-gray-600 transition-colors">
+            {verPin ? <EyeOff size={16} /> : <Eye size={16} />}
+          </button>
+        </div>
+        <p className="text-xs text-gray-400 -mt-2">
+          {pinNuevo
+            ? 'Se guardará un nuevo PIN al hacer clic en Guardar cambios.'
+            : 'Escribe un nuevo PIN solo si quieres cambiarlo. Vacío mantiene el actual.'}
+        </p>
+      </div>
+
+      <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
+        <PasswordConfig />
+      </div>
+
+      <div className="flex items-center gap-3">
+        <Button className="flex-1" loading={mutation.isPending} onClick={() => mutation.mutate(form)}>
+          <Save size={16} /> Guardar cambios
+        </Button>
+        {guardado && <Badge variant="green">✓ Guardado</Badge>}
+      </div>
+    </div>
+  );
+}
+
+function SeccionFormulario({ valores, set, form, mutation, guardado }) {
+  return (
+    <div className="flex flex-col gap-5">
+      <div>
+        <h2 className="text-base font-semibold text-gray-900">Formulario de venta</h2>
+        <p className="text-xs text-gray-400 mt-0.5">
+          Activa los campos adicionales que quieres recolectar al facturar.
+        </p>
+      </div>
+
+      <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm flex flex-col gap-4">
         {CAMPOS_EDITABLES.map((campo) => {
           const clave   = campo.clave;
           const enabled = valores[clave] === '1';
           return (
-            <Toggle
-              key={clave}
-              label={campo.label}
-              description={campo.description}
-              enabled={enabled}
-              onChange={(val) => set(clave, val ? '1' : '0')}
-            />
+            <Toggle key={clave} label={campo.label} description={campo.description}
+              enabled={enabled} onChange={(val) => set(clave, val ? '1' : '0')} />
           );
         })}
 
@@ -512,53 +477,62 @@ function CamposFormularioConfig({ valores, set }) {
               const clave   = campo.clave;
               const enabled = valores[clave] === '1';
               return (
-                <ToggleReadOnly
-                  key={clave}
-                  label={campo.label}
-                  description={campo.description}
-                  enabled={enabled}
-                />
+                <ToggleReadOnly key={clave} label={campo.label}
+                  description={campo.description} enabled={enabled} />
               );
             })}
           </div>
         )}
       </div>
+
+      <div className="flex items-center gap-3">
+        <Button className="flex-1" loading={mutation.isPending} onClick={() => mutation.mutate(form)}>
+          <Save size={16} /> Guardar cambios
+        </Button>
+        {guardado && <Badge variant="green">✓ Guardado</Badge>}
+      </div>
     </div>
   );
 }
 
-// ─── Sección de seguridad con PIN ─────────────────────────────────────────────
-// El PIN se guarda hasheado en el backend — nunca se devuelve al frontend.
-// El input siempre empieza vacío: si el usuario no escribe nada al guardar,
-// el campo se omite del payload y el hash existente no se sobreescribe.
-function SeguridadConfig({ form, set }) {
-  const [verPin, setVerPin] = useState(false);
-  const pinNuevo            = form['pin_eliminacion'] || '';
-
+function SeccionCatalogo() {
   return (
-    <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm flex flex-col gap-4">
-      <h2 className="text-sm font-semibold text-gray-700">Seguridad</h2>
-      <div className="relative">
-        <Input
-          label="PIN de eliminación"
-          type={verPin ? 'text' : 'password'}
-          placeholder="Dejar vacío para mantener el actual"
-          value={pinNuevo}
-          onChange={(e) => set('pin_eliminacion', e.target.value)}
-        />
-        <button
-          type="button"
-          onClick={() => setVerPin((v) => !v)}
-          className="absolute right-3 top-8 text-gray-400 hover:text-gray-600 transition-colors"
-        >
-          {verPin ? <EyeOff size={16} /> : <Eye size={16} />}
-        </button>
+    <div className="flex flex-col gap-5">
+      <div>
+        <h2 className="text-base font-semibold text-gray-900">Catálogo</h2>
+        <p className="text-xs text-gray-400 mt-0.5">
+          Organiza tus productos en líneas y configura las garantías por categoría.
+        </p>
       </div>
-      <p className="text-xs text-gray-400 -mt-2">
-        {pinNuevo
-          ? 'Se guardará un nuevo PIN al hacer clic en Guardar cambios.'
-          : 'Escribe un nuevo PIN solo si quieres cambiarlo. Vacío mantiene el actual.'}
-      </p>
+
+      <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
+        <LineasConfig />
+      </div>
+
+      <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
+        <GarantiasConfig />
+      </div>
+    </div>
+  );
+}
+
+function SeccionEquipo() {
+  return (
+    <div className="flex flex-col gap-5">
+      <div>
+        <h2 className="text-base font-semibold text-gray-900">Equipo</h2>
+        <p className="text-xs text-gray-400 mt-0.5">
+          Gestiona los usuarios y sucursales de tu negocio.
+        </p>
+      </div>
+
+      <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
+        <SucursalesConfig />
+      </div>
+
+      <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
+        <UsuariosConfig />
+      </div>
     </div>
   );
 }
@@ -567,14 +541,14 @@ function SeguridadConfig({ form, set }) {
 export default function ConfigPage() {
   const queryClient                 = useQueryClient();
   const { data: config, isLoading } = useConfigQuery();
-  const [form,     setForm]         = useState({});
-  const [guardado, setGuardado]     = useState(false);
+  const [form,          setForm]    = useState({});
+  const [guardado,      setGuardado] = useState(false);
+  const [seccionActiva, setSeccionActiva] = useState('negocio');
 
   const mutation = useMutation({
     mutationFn: (payload) => api.put('/config', payload),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['config'], exact: false });
-      // Limpiar el PIN del form local tras guardar para que el input vuelva a vacío
       setForm((f) => {
         const siguiente = { ...f };
         delete siguiente['pin_eliminacion'];
@@ -590,68 +564,59 @@ export default function ConfigPage() {
   const valores = { ...config, ...form };
   const set     = (clave, valor) => setForm((f) => ({ ...f, [clave]: valor }));
 
-  const camposNegocio = [
-    { clave: 'nombre_negocio', label: 'Nombre del negocio', placeholder: 'Mi Tienda' },
-    { clave: 'nit',            label: 'NIT',                placeholder: '900123456-1' },
-    { clave: 'direccion',      label: 'Dirección',          placeholder: 'Calle 10 # 5-20' },
-    { clave: 'telefono',       label: 'Teléfono',           placeholder: '3001234567' },
-  ];
-
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-4">
+
+      {/* ── Encabezado ── */}
       <div className="flex items-center gap-3">
         <div className="w-10 h-10 bg-gray-100 rounded-xl flex items-center justify-center">
           <Settings size={20} className="text-gray-500" />
         </div>
         <div>
           <h1 className="text-lg font-bold text-gray-900">Configuración</h1>
-          <p className="text-xs text-gray-400">Datos del negocio y preferencias</p>
+          <p className="text-xs text-gray-400">Administra tu negocio y preferencias</p>
         </div>
       </div>
 
-      <div className="flex flex-col lg:flex-row gap-6 items-start">
+      <div className="flex gap-5 items-start">
 
-        {/* ── Columna izquierda ── */}
-        <div className="w-full lg:max-w-sm flex flex-col gap-6">
-          <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm flex flex-col gap-4">
-            <h2 className="text-sm font-semibold text-gray-700">Datos del negocio</h2>
-            {camposNegocio.map(({ clave, label, placeholder }) => (
-              <Input
-                key={clave}
-                label={label}
-                placeholder={placeholder}
-                value={valores[clave] || ''}
-                onChange={(e) => set(clave, e.target.value)}
-              />
-            ))}
-          </div>
+        {/* ── Sidebar ── */}
+        <nav className="flex-shrink-0 w-12 sm:w-44 flex flex-col gap-1">
+          {SECCIONES.map((sec) => {
+            const secId    = sec.id;
+            const secLabel = sec.label;
+            const SecIcn   = sec.Icn;
+            const activa   = seccionActiva === secId;
+            return (
+              <button
+                key={secId}
+                onClick={() => setSeccionActiva(secId)}
+                className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-left
+                  transition-all w-full
+                  ${activa
+                    ? 'bg-blue-50 text-blue-700'
+                    : 'text-gray-500 hover:bg-gray-100 hover:text-gray-700'}`}
+              >
+                <SecIcn size={17} className="flex-shrink-0" />
+                <span className="hidden sm:block text-sm font-medium truncate">{secLabel}</span>
+              </button>
+            );
+          })}
+        </nav>
 
-          {/* ── Sección de seguridad extraída como componente ── */}
-          <SeguridadConfig form={form} set={set} />
-
-          <CamposFormularioConfig valores={valores} set={set} />
-
-          <div className="flex items-center gap-3">
-            <Button
-              className="flex-1"
-              loading={mutation.isPending}
-              onClick={() => mutation.mutate(form)}
-            >
-              <Save size={16} />
-              Guardar cambios
-            </Button>
-            {guardado && <Badge variant="green">✓ Guardado</Badge>}
-          </div>
-
-          <PasswordConfig />
-        </div>
-
-        {/* ── Columna derecha ── */}
-        <div className="w-full lg:flex-1 flex flex-col gap-6">
-          <SucursalesConfig />
-          <LineasConfig />
-          <GarantiasConfig />
-          <UsuariosConfig />
+        {/* ── Contenido ── */}
+        <div className="flex-1 min-w-0">
+          {seccionActiva === 'negocio'    && (
+            <SeccionNegocio    valores={valores} set={set} form={form} mutation={mutation} guardado={guardado} />
+          )}
+          {seccionActiva === 'seguridad'  && (
+            <SeccionSeguridad  form={form} set={set} mutation={mutation} guardado={guardado} />
+          )}
+          {seccionActiva === 'formulario' && (
+            <SeccionFormulario valores={valores} set={set} form={form} mutation={mutation} guardado={guardado} />
+          )}
+          {seccionActiva === 'catalogo'   && <SeccionCatalogo />}
+          {seccionActiva === 'equipo'     && <SeccionEquipo />}
         </div>
 
       </div>
