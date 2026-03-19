@@ -48,12 +48,18 @@ const getFacturas = (sucursalId, negocioId) =>
 const getFacturaById = async (negocioId, id) => {
   const factura = await facturasRepo.findByIdYNegocio(id, negocioId);
   if (!factura) throw { status: 404, message: 'Factura no encontrada' };
-  const [lineas, pagos, retomas] = await Promise.all([
+ 
+  // Importación diferida para evitar dependencia circular con domiciliarios.
+  const domiciliariosRepo = require('../domiciliarios/domiciliarios.repository');
+ 
+  const [lineas, pagos, retomas, entrega] = await Promise.all([
     facturasRepo.getLineas(id),
     facturasRepo.getPagos(id),
     facturasRepo.getRetomas(id),
+    domiciliariosRepo.findEntregaByFacturaId(id, negocioId),
   ]);
-  return { ...factura, lineas, pagos, retomas };
+ 
+  return { ...factura, lineas, pagos, retomas, domicilio: entrega || null };
 };
 
 const crearFactura = async ({

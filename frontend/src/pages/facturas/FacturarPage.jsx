@@ -2,6 +2,7 @@ import { useState, useMemo }                      from 'react';
 import { useQuery }                               from '@tanstack/react-query';
 import { getFacturas, getFacturaById }            from '../../api/facturas.api';
 import { getGarantiasPorFactura }                 from '../../api/garantias.api';
+import { getEntregas }                            from '../../api/domiciliarios.api';
 import { formatCOP, formatFecha, formatFechaHora } from '../../utils/formatters';
 import { useAuth }              from '../../context/useAuth';
 import { Badge }                from '../../components/ui/Badge';
@@ -19,7 +20,7 @@ import api                      from '../../api/axios.config';
 
 import {
   FileText, ChevronDown, ChevronUp,
-  Printer, XCircle, Eye, Search, X, Pencil, Package, Building2,
+  Printer, XCircle, Eye, Search, X, Pencil, Package, Building2, Bike,
 } from 'lucide-react';
 
 function agruparPorDia(facturas) {
@@ -68,6 +69,8 @@ function coincideProveedor(factura, proveedor) {
   if (!factura.proveedor_nombre) return false;
   return factura.proveedor_nombre.split(', ').includes(proveedor);
 }
+
+// ─── Secciones del detalle ────────────────────────────────────────────────────
 
 function SeccionRetoma({ retoma }) {
   if (!retoma) return null;
@@ -170,6 +173,89 @@ function BloqueCliente({ factura }) {
   );
 }
 
+// ─── NUEVO: bloque de domicilio en el detalle ─────────────────────────────────
+
+const ESTADO_BADGE_DOM = {
+  Pendiente:    'yellow',
+  Entregado:    'green',
+  No_entregado: 'red',
+};
+
+const ESTADO_LABEL_DOM = {
+  Pendiente:    'Pendiente',
+  Entregado:    'Entregado',
+  No_entregado: 'No entregado',
+};
+
+function SeccionDomicilio({ facturaId }) {
+  const { data: entregasData, isLoading } = useQuery({
+    queryKey: ['entrega-por-factura', facturaId],
+    queryFn:  () => getEntregas({ factura_id: facturaId }).then((r) => r.data.data),
+    enabled:  !!facturaId,
+    staleTime: 0,
+  });
+
+  const entrega = entregasData?.[0] || null;
+  if (isLoading || !entrega) return null;
+
+  const estadoBadge = ESTADO_BADGE_DOM[entrega.estado] || 'gray';
+  const estadoLabel = ESTADO_LABEL_DOM[entrega.estado] || entrega.estado;
+  const pct = Number(entrega.valor_total) > 0
+    ? Math.min(100, Math.round((Number(entrega.total_abonado) / Number(entrega.valor_total)) * 100))
+    : 0;
+
+  return (
+    <div className="bg-orange-50 border border-orange-100 rounded-xl p-3 flex flex-col gap-2">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <Bike size={14} className="text-orange-500 flex-shrink-0" />
+          <p className="text-xs font-semibold text-orange-700">Pedido a domicilio</p>
+        </div>
+        <Badge variant={estadoBadge}>{estadoLabel}</Badge>
+      </div>
+
+      <div className="flex flex-col gap-1">
+        <p className="text-sm font-medium text-gray-800">
+          {entrega.domiciliario_nombre}
+          {entrega.domiciliario_telefono && (
+            <span className="text-xs text-gray-400 font-normal ml-2">
+              · {entrega.domiciliario_telefono}
+            </span>
+          )}
+        </p>
+        {entrega.direccion_entrega && (
+          <p className="text-xs text-gray-500">{entrega.direccion_entrega}</p>
+        )}
+        {entrega.notas && (
+          <p className="text-xs text-gray-400 italic">{entrega.notas}</p>
+        )}
+        <div className="flex justify-between text-xs text-gray-400 mt-0.5">
+          <span>Asignado: {formatFechaHora(entrega.fecha_asignacion)}</span>
+          {entrega.fecha_entrega && (
+            <span>Cerrado: {formatFechaHora(entrega.fecha_entrega)}</span>
+          )}
+        </div>
+        {entrega.estado !== 'No_entregado' && (
+          <div className="flex flex-col gap-1 mt-1">
+            <div className="flex justify-between text-xs text-gray-500">
+              <span>Rendido: {formatCOP(Number(entrega.total_abonado))}</span>
+              <span>Total: {formatCOP(Number(entrega.valor_total))}</span>
+            </div>
+            <div className="h-1.5 bg-orange-100 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-orange-400 rounded-full transition-all"
+                style={{ width: `${pct}%` }}
+              />
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── ModalDetalle ─────────────────────────────────────────────────────────────
+
 function ModalDetalle({ facturaId, onClose, onReimprimir, onEditar }) {
   const { esAdminNegocio } = useAuth();
 
@@ -227,6 +313,9 @@ function ModalDetalle({ facturaId, onClose, onReimprimir, onEditar }) {
         )}
 
         <BloqueCliente factura={f} />
+
+        {/* NUEVO: bloque de domicilio — solo aparece si la factura tiene entrega asignada */}
+        <SeccionDomicilio facturaId={facturaId} />
 
         {esAdminNegocio() && <SeccionProveedor proveedorNombre={f?.proveedor_nombre} />}
 
