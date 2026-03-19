@@ -15,10 +15,8 @@ import { useSucursalKey } from '../../hooks/useSucursalKey';
 import {
   Wallet, Plus, Lock, ChevronDown, ChevronUp,
   ShoppingCart, CreditCard, ArrowDownCircle, ArrowUpCircle,
-  Receipt, Sliders, RefreshCw,
+  Receipt, Sliders, RefreshCw, Bike,
 } from 'lucide-react';
-
-// ─── Constantes ───────────────────────────────────────────────────────────────
 
 const METODOS_PAGO_ORDEN = ['Efectivo', 'Nequi', 'Daviplata', 'Transferencia', 'Tarjeta'];
 
@@ -30,7 +28,7 @@ const CONFIG_GRUPOS = {
     textHeader: 'text-green-700',
     borderColor:'border-green-100',
     renderItem: (item) => ({
-      descripcion: `Factura #${String(item.factura_id).padStart(6, '0')} — ${item.nombre_cliente}`,
+      descripcion: `Factura #${String(item.factura_id).padStart(6, '0')} \u2014 ${item.nombre_cliente}`,
       detalle:     item.metodo,
       fecha:       item.fecha,
     }),
@@ -42,7 +40,7 @@ const CONFIG_GRUPOS = {
     textHeader: 'text-blue-700',
     borderColor:'border-blue-100',
     renderItem: (item) => ({
-      descripcion: `Crédito Factura #${String(item.factura_id).padStart(6, '0')} — ${item.nombre_cliente}`,
+      descripcion: `Cr\u00e9dito Factura #${String(item.factura_id).padStart(6, '0')} \u2014 ${item.nombre_cliente}`,
       detalle:     item.metodo,
       fecha:       item.fecha,
     }),
@@ -54,11 +52,12 @@ const CONFIG_GRUPOS = {
     textHeader: 'text-purple-700',
     borderColor:'border-purple-100',
     renderItem: (item) => ({
-      descripcion: `Préstamo — ${item.prestatario}`,
+      descripcion: `Pr\u00e9stamo \u2014 ${item.prestatario}`,
       detalle:     null,
       fecha:       item.fecha,
     }),
   },
+  // Abonos rendidos por domiciliarios — ingreso real confirmado
   retomas: {
     icono:      RefreshCw,
     color:      'orange',
@@ -90,7 +89,7 @@ const CONFIG_GRUPOS = {
     textHeader: 'text-red-700',
     borderColor:'border-red-100',
     renderItem: (item) => ({
-      descripcion: `Compra — ${item.proveedor}`,
+      descripcion: `Compra \u2014 ${item.proveedor}`,
       detalle:     item.numero_factura ? `Fact. ${item.numero_factura}` : null,
       fecha:       item.fecha,
     }),
@@ -104,6 +103,18 @@ const CONFIG_GRUPOS = {
     renderItem: (item) => ({
       descripcion: `Abono a ${item.acreedor}`,
       detalle:     item.descripcion,
+      fecha:       item.fecha,
+    }),
+  },
+  abonosDomicilio: {
+    icono:      Bike,
+    color:      'orange',
+    bgHeader:   'bg-orange-50',
+    textHeader: 'text-orange-700',
+    borderColor:'border-orange-200',
+    renderItem: (item) => ({
+      descripcion: item.concepto,
+      detalle:     null,
       fecha:       item.fecha,
     }),
   },
@@ -122,8 +133,6 @@ const CONFIG_GRUPOS = {
     }),
   },
 };
-
-// ─── Modal: registrar movimiento manual ──────────────────────────────────────
 
 function ModalMovimiento({ cajaId, onClose }) {
   const queryClient = useQueryClient();
@@ -157,37 +166,22 @@ function ModalMovimiento({ cajaId, onClose }) {
       <div className="flex flex-col gap-4">
         <div className="flex gap-2">
           {['Ingreso', 'Egreso'].map((t) => (
-            <button
-              key={t}
-              onClick={() => setForm({ ...form, tipo: t })}
+            <button key={t} onClick={() => setForm({ ...form, tipo: t })}
               className={`flex-1 py-2.5 rounded-xl text-sm font-medium border transition-all
                 ${form.tipo === t
-                  ? t === 'Ingreso'
-                    ? 'bg-green-50 border-green-300 text-green-700'
-                    : 'bg-red-50 border-red-300 text-red-700'
-                  : 'bg-gray-50 border-gray-200 text-gray-600'}`}
-            >
+                  ? t === 'Ingreso' ? 'bg-green-50 border-green-300 text-green-700'
+                                    : 'bg-red-50 border-red-300 text-red-700'
+                  : 'bg-gray-50 border-gray-200 text-gray-600'}`}>
               {t}
             </button>
           ))}
         </div>
-        <Input
-          id="concepto"
-          label="Concepto"
-          placeholder="Ej: Pago servicios"
-          value={form.concepto}
-          onChange={(e) => setForm({ ...form, concepto: e.target.value })}
-          onKeyDown={(e) => handleKeyDown(e, 'valor-mov')}
-        />
-        <Input
-          id="valor-mov"
-          label="Valor"
-          type="number"
-          placeholder="0"
-          value={form.valor}
-          onChange={(e) => setForm({ ...form, valor: e.target.value })}
-          onKeyDown={(e) => handleKeyDown(e, null)}
-        />
+        <Input id="concepto" label="Concepto" placeholder="Ej: Pago servicios"
+          value={form.concepto} onChange={(e) => setForm({ ...form, concepto: e.target.value })}
+          onKeyDown={(e) => handleKeyDown(e, 'valor-mov')} />
+        <Input id="valor-mov" label="Valor" type="number" placeholder="0"
+          value={form.valor} onChange={(e) => setForm({ ...form, valor: e.target.value })}
+          onKeyDown={(e) => handleKeyDown(e, null)} />
         {error && <p className="text-sm text-red-500">{error}</p>}
         <div className="flex gap-2">
           <Button variant="secondary" className="flex-1" onClick={onClose}>Cancelar</Button>
@@ -199,8 +193,6 @@ function ModalMovimiento({ cajaId, onClose }) {
     </Modal>
   );
 }
-
-// ─── Modal: cerrar caja ───────────────────────────────────────────────────────
 
 function ModalCerrarCaja({ caja, resumenTotales, onClose }) {
   const queryClient = useQueryClient();
@@ -235,21 +227,24 @@ function ModalCerrarCaja({ caja, resumenTotales, onClose }) {
             <p className="text-base font-bold text-blue-700">{formatCOP(saldoEsperado)}</p>
           </div>
         </div>
-        <Input
-          label="Monto de cierre (conteo físico)"
-          type="number"
-          placeholder="0"
-          value={monto}
-          onChange={(e) => setMonto(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && mutation.mutate()}
-        />
+        {resumenTotales?.pendienteDomicilios > 0 && (
+          <div className="flex items-center gap-2 bg-orange-50 border border-orange-100 rounded-xl px-3 py-2">
+            <Bike size={14} className="text-orange-500 flex-shrink-0" />
+            <p className="text-xs text-orange-700">
+              Hay <span className="font-semibold">{formatCOP(resumenTotales.pendienteDomicilios)}</span> pendientes
+              de rendir por domiciliarios. Ese monto no est\u00e1 incluido en el saldo esperado.
+            </p>
+          </div>
+        )}
+        <Input label="Monto de cierre (conteo f\u00edsico)" type="number" placeholder="0"
+          value={monto} onChange={(e) => setMonto(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && mutation.mutate()} />
         {diferencia !== null && (
           <div className={`rounded-xl p-3 text-sm font-medium text-center
             ${diferencia === 0 ? 'bg-green-50 text-green-700' :
               diferencia > 0  ? 'bg-blue-50 text-blue-700'   :
-                                'bg-red-50 text-red-600'}`}
-          >
-            {diferencia === 0 && '✓ Caja cuadrada perfectamente'}
+                                'bg-red-50 text-red-600'}`}>
+            {diferencia === 0 && '\u2713 Caja cuadrada perfectamente'}
             {diferencia > 0  && `Sobrante: +${formatCOP(diferencia)}`}
             {diferencia < 0  && `Faltante: ${formatCOP(diferencia)}`}
           </div>
@@ -266,24 +261,19 @@ function ModalCerrarCaja({ caja, resumenTotales, onClose }) {
   );
 }
 
-// ─── Tarjeta resumen por método de pago ──────────────────────────────────────
-
 function ResumenMetodosPago({ metodosPago }) {
   const metodosConValor = METODOS_PAGO_ORDEN.filter((m) => metodosPago[m] > 0);
   if (metodosConValor.length === 0) return null;
-
   return (
     <div className="bg-white border border-gray-100 rounded-2xl p-4 flex flex-col gap-3">
       <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-        Ingresos por método de pago
+        Ingresos por m\u00e9todo de pago
       </p>
       <div className="flex flex-col gap-2">
         {metodosConValor.map((metodo) => (
           <div key={metodo} className="flex items-center justify-between">
             <span className="text-sm text-gray-600">{metodo}</span>
-            <span className="text-sm font-semibold text-gray-900">
-              {formatCOP(metodosPago[metodo])}
-            </span>
+            <span className="text-sm font-semibold text-gray-900">{formatCOP(metodosPago[metodo])}</span>
           </div>
         ))}
       </div>
@@ -291,7 +281,7 @@ function ResumenMetodosPago({ metodosPago }) {
   );
 }
 
-// ─── Grupo de movimientos colapsable ─────────────────────────────────────────
+// ─── GrupoMovimientos — grupos de ingreso/egreso normales ────────────────────
 
 function GrupoMovimientos({ grupoKey, grupo }) {
   const [expandido, setExpandido] = useState(false);
@@ -301,14 +291,11 @@ function GrupoMovimientos({ grupoKey, grupo }) {
   const GrupoIcono = cfg.icono;
   const esMixto    = grupoKey === 'manuales';
   const esIngreso  = grupo.tipo === 'Ingreso';
-  // Retomas son egreso (reducen ingreso neto)
 
   return (
     <div className={`border ${cfg.borderColor} rounded-2xl overflow-hidden`}>
-      <button
-        onClick={() => setExpandido(!expandido)}
-        className={`w-full flex items-center justify-between px-4 py-3 ${cfg.bgHeader} transition-colors hover:brightness-95`}
-      >
+      <button onClick={() => setExpandido(!expandido)}
+        className={`w-full flex items-center justify-between px-4 py-3 ${cfg.bgHeader} transition-colors hover:brightness-95`}>
         <div className="flex items-center gap-2">
           <GrupoIcono size={16} className={cfg.textHeader} />
           <span className={`text-sm font-semibold ${cfg.textHeader}`}>{grupo.label}</span>
@@ -333,30 +320,22 @@ function GrupoMovimientos({ grupoKey, grupo }) {
           )}
           {expandido
             ? <ChevronUp size={15} className={cfg.textHeader} />
-            : <ChevronDown size={15} className={cfg.textHeader} />
-          }
+            : <ChevronDown size={15} className={cfg.textHeader} />}
         </div>
       </button>
-
       {expandido && (
         <div className="divide-y divide-gray-50">
           {grupo.items.map((item) => {
             const rendered      = cfg.renderItem(item);
-            const esTipoIngreso = rendered.esMixto
-              ? rendered.tipo === 'Ingreso'
-              : esIngreso;
+            const esTipoIngreso = rendered.esMixto ? rendered.tipo === 'Ingreso' : esIngreso;
             return (
               <div key={item.id}
                 className="flex items-center justify-between px-4 py-2.5 bg-white hover:bg-gray-50/50">
                 <div className="flex-1 min-w-0">
                   <p className="text-sm text-gray-800 truncate">{rendered.descripcion}</p>
                   <div className="flex items-center gap-2">
-                    {rendered.detalle && (
-                      <span className="text-xs text-gray-400">{rendered.detalle}</span>
-                    )}
-                    {rendered.fecha && (
-                      <span className="text-xs text-gray-300">{formatFechaHora(rendered.fecha)}</span>
-                    )}
+                    {rendered.detalle && <span className="text-xs text-gray-400">{rendered.detalle}</span>}
+                    {rendered.fecha   && <span className="text-xs text-gray-300">{formatFechaHora(rendered.fecha)}</span>}
                   </div>
                 </div>
                 <span className={`text-sm font-semibold flex-shrink-0 ml-3
@@ -372,7 +351,58 @@ function GrupoMovimientos({ grupoKey, grupo }) {
   );
 }
 
-// ─── Página principal ─────────────────────────────────────────────────────────
+// ─── GrupoMovimientosInformativo — facturas en poder del domiciliario ─────────
+// No suman a ingresos. Se muestran con estilo neutro y etiqueta "pendiente".
+
+function GrupoMovimientosInformativo({ grupo }) {
+  const [expandido, setExpandido] = useState(false);
+  if (!grupo || grupo.items.length === 0) return null;
+
+  return (
+    <div className="border border-gray-200 border-dashed rounded-2xl overflow-hidden">
+      <button onClick={() => setExpandido(!expandido)}
+        className="w-full flex items-center justify-between px-4 py-3 bg-gray-50 hover:bg-gray-100 transition-colors">
+        <div className="flex items-center gap-2">
+          <Bike size={16} className="text-gray-400" />
+          <span className="text-sm font-semibold text-gray-500">{grupo.label}</span>
+          <span className="text-xs px-2 py-0.5 rounded-full bg-white/80 text-gray-400">
+            {grupo.items.length}
+          </span>
+        </div>
+        <div className="flex items-center gap-3">
+          <span className="text-sm font-medium text-gray-400">{formatCOP(grupo.total)}</span>
+          <span className="text-xs text-gray-400 bg-gray-200 px-2 py-0.5 rounded-full">
+            por rendir
+          </span>
+          {expandido
+            ? <ChevronUp size={15} className="text-gray-400" />
+            : <ChevronDown size={15} className="text-gray-400" />}
+        </div>
+      </button>
+      {expandido && (
+        <div className="divide-y divide-gray-50">
+          {grupo.items.map((item) => (
+            <div key={item.id}
+              className="flex items-center justify-between px-4 py-2.5 bg-white hover:bg-gray-50/50">
+              <div className="flex-1 min-w-0">
+                <p className="text-sm text-gray-600 truncate">
+                  Factura #{String(item.factura_id).padStart(6,'0')} \u2014 {item.nombre_cliente}
+                </p>
+                <div className="flex items-center gap-2">
+                  {item.metodo && <span className="text-xs text-gray-400">{item.metodo}</span>}
+                  {item.fecha  && <span className="text-xs text-gray-300">{formatFechaHora(item.fecha)}</span>}
+                </div>
+              </div>
+              <span className="text-sm font-medium text-gray-400 flex-shrink-0 ml-3">
+                {formatCOP(item.valor)}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function CajaPage() {
   const queryClient                       = useQueryClient();
@@ -401,7 +431,7 @@ export default function CajaPage() {
 
   const grupos      = useMemo(() => resumenData?.grupos      || {}, [resumenData]);
   const totales     = useMemo(
-    () => resumenData?.totales || { ingresosBruto: 0, retomas: 0, ingresos: 0, egresos: 0, saldo: 0 },
+    () => resumenData?.totales || { ingresosBruto: 0, retomas: 0, ingresos: 0, egresos: 0, saldo: 0, pendienteDomicilios: 0 },
     [resumenData]
   );
   const metodosPago = useMemo(() => resumenData?.metodosPago || {}, [resumenData]);
@@ -429,16 +459,10 @@ export default function CajaPage() {
           <p className="text-sm text-gray-400 mt-1">Ingresa el monto inicial para comenzar</p>
         </div>
         <div className="flex gap-3 w-full max-w-xs">
-          <Input
-            placeholder="Monto inicial"
-            type="number"
-            value={montoApertura}
+          <Input placeholder="Monto inicial" type="number" value={montoApertura}
             onChange={(e) => setMontoApertura(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && mutAbrir.mutate()}
-          />
-          <Button loading={mutAbrir.isPending} onClick={() => mutAbrir.mutate()}>
-            Abrir
-          </Button>
+            onKeyDown={(e) => e.key === 'Enter' && mutAbrir.mutate()} />
+          <Button loading={mutAbrir.isPending} onClick={() => mutAbrir.mutate()}>Abrir</Button>
         </div>
       </div>
     );
@@ -447,20 +471,16 @@ export default function CajaPage() {
   return (
     <div className="flex flex-col gap-5">
 
-      {/* ── Cabecera de caja ── */}
       <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
         <div className="flex items-start justify-between">
           <div>
             <p className="text-xs text-gray-400">Saldo actual</p>
             <p className="text-3xl font-bold text-gray-900 mt-1">{formatCOP(saldoActual)}</p>
-            <p className="text-xs text-gray-400 mt-1">
-              Desde: {formatFechaHora(caja.fecha_apertura)}
-            </p>
+            <p className="text-xs text-gray-400 mt-1">Desde: {formatFechaHora(caja.fecha_apertura)}</p>
           </div>
           <Badge variant="green">Abierta</Badge>
         </div>
 
-        {/* Resumen numérico */}
         <div className="grid grid-cols-2 gap-2 mt-4 sm:grid-cols-4">
           <div className="bg-gray-50 rounded-xl p-3 text-center">
             <p className="text-xs text-gray-400">Inicial</p>
@@ -474,6 +494,12 @@ export default function CajaPage() {
             <div className="bg-orange-50 rounded-xl p-3 text-center">
               <p className="text-xs text-orange-500">Retomas</p>
               <p className="text-sm font-bold text-orange-700">-{formatCOP(totales.retomas)}</p>
+            </div>
+          )}
+          {totales.pendienteDomicilios > 0 && (
+            <div className="bg-gray-100 rounded-xl p-3 text-center">
+              <p className="text-xs text-gray-400">En domiciliarios</p>
+              <p className="text-sm font-bold text-gray-500">{formatCOP(totales.pendienteDomicilios)}</p>
             </div>
           )}
           <div className="bg-red-50 rounded-xl p-3 text-center">
@@ -492,24 +518,30 @@ export default function CajaPage() {
         </div>
       </div>
 
-      {/* ── Resumen por método de pago ── */}
       <ResumenMetodosPago metodosPago={metodosPago} />
 
-      {/* ── Movimientos del día agrupados ── */}
       <div className="flex flex-col gap-3">
         <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-gray-700">Movimientos del período</h2>
+          <h2 className="text-sm font-semibold text-gray-700">Movimientos del per\u00edodo</h2>
           {loadingResumen && <Spinner className="py-0 scale-75" />}
         </div>
 
         {!hayMovimientos ? (
-          <EmptyState icon={Wallet} titulo="Sin movimientos aún" />
+          <EmptyState icon={Wallet} titulo="Sin movimientos a\u00fan" />
         ) : (
           <>
             <p className="text-xs text-gray-400 font-medium px-1">Ingresos</p>
             <GrupoMovimientos grupoKey="facturas"       grupo={grupos.facturas       || { items: [] }} />
             <GrupoMovimientos grupoKey="abonosCredito"  grupo={grupos.abonosCredito  || { items: [] }} />
             <GrupoMovimientos grupoKey="abonosPrestamo" grupo={grupos.abonosPrestamo || { items: [] }} />
+            <GrupoMovimientos grupoKey="abonosDomicilio" grupo={grupos.abonosDomicilio || { items: [] }} />
+
+            {grupos.facturasDomicilio?.items?.length > 0 && (
+              <>
+                <p className="text-xs text-gray-400 font-medium px-1 mt-1">En poder del domiciliario</p>
+                <GrupoMovimientosInformativo grupo={grupos.facturasDomicilio} />
+              </>
+            )}
 
             <p className="text-xs text-gray-400 font-medium px-1 mt-1">Egresos</p>
             <GrupoMovimientos grupoKey="retomas"        grupo={grupos.retomas        || { items: [] }} />
@@ -527,14 +559,9 @@ export default function CajaPage() {
         )}
       </div>
 
-      {/* ── Modales ── */}
       {modalMov    && <ModalMovimiento cajaId={caja.id} onClose={() => setModalMov(false)} />}
       {modalCerrar && (
-        <ModalCerrarCaja
-          caja={caja}
-          resumenTotales={totales}
-          onClose={() => setModalCerrar(false)}
-        />
+        <ModalCerrarCaja caja={caja} resumenTotales={totales} onClose={() => setModalCerrar(false)} />
       )}
     </div>
   );
