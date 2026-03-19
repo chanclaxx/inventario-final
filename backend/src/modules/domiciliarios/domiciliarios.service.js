@@ -166,7 +166,9 @@ const marcarDevolucion = async (negocioId, entregaId) => {
 
   // Paso 1: cancelar la factura (stock + caja + estado factura).
   // eliminarRetoma = false: no revertimos retomas de la factura original.
-  await facturasService.cancelarFactura(negocioId, entrega.factura_id, false);
+  // _desdeDevolucion = true: indica que esta cancelación es iniciada por el
+  // módulo de domiciliarios — se salta el bloqueo de entrega pendiente.
+  await facturasService.cancelarFactura(negocioId, entrega.factura_id, false, true);
 
   // Paso 2: marcar la entrega como No_entregado.
   // Solo se ejecuta si cancelarFactura tuvo éxito — sin estado inconsistente.

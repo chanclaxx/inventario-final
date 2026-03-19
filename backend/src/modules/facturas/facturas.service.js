@@ -287,26 +287,24 @@ const crearFactura = async ({
   }
 };
 
-const cancelarFactura = async (negocioId, id, eliminarRetoma = false) => {
+const cancelarFactura = async (negocioId, id, eliminarRetoma = false, _desdeDevolucion = false) => {
   const factura = await facturasRepo.findByIdYNegocio(id, negocioId);
   if (!factura) throw { status: 404, message: 'Factura no encontrada' };
   if (factura.estado === 'Cancelada') throw { status: 400, message: 'La factura ya está cancelada' };
  
-  // ── NUEVO: bloquear cancelación manual si hay domicilio pendiente ────────────
-  // La única vía para cancelar una factura con domicilio activo es desde el
-  // módulo de domiciliarios (Devolución), que llama a esta misma función
-  // internamente con el contexto correcto.
-  // Usamos require() diferido para no crear dependencia circular en el top-level.
-  const domiciliariosRepo = require('../domiciliarios/domiciliarios.repository');
-  const entregaPendiente  = await domiciliariosRepo.findEntregaByFacturaId(id, negocioId);
- 
-  if (entregaPendiente && entregaPendiente.estado === 'Pendiente') {
-    throw {
-      status: 400,
-      message: `Esta factura tiene un pedido a domicilio activo asignado a "${entregaPendiente.domiciliario_nombre}". Para cancelarla, primero registra la devolución desde el módulo de Domiciliarios.`,
-    };
+  // Bloquear cancelación manual si hay domicilio pendiente.
+  // Se omite cuando la llamada viene desde marcarDevolucion() del módulo de domiciliarios,
+  // que es el único flujo legítimo para cancelar una factura con entrega activa.
+  if (!_desdeDevolucion) {
+    const domiciliariosRepo = require('../domiciliarios/domiciliarios.repository');
+    const entregaPendiente  = await domiciliariosRepo.findEntregaByFacturaId(id, negocioId);
+    if (entregaPendiente && entregaPendiente.estado === 'Pendiente') {
+      throw {
+        status: 400,
+        message: `Esta factura tiene un pedido a domicilio activo asignado a "${entregaPendiente.domiciliario_nombre}". Para cancelarla, primero registra la devolución desde el módulo de Domiciliarios.`,
+      };
+    }
   }
-  // ── FIN NUEVO ────────────────────────────────────────────────────────────────
  
   const pagos = await facturasRepo.getPagos(id);
  
