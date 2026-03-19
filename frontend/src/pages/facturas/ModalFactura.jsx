@@ -969,12 +969,21 @@ export function ModalFactura({ open, onClose }) {
           {/* Retomas */}
           <div className="flex flex-col gap-2">
             <button
-              onClick={() => { setConRetoma(!conRetoma); setRetomas([RETOMA_VACIA()]); }}
+              disabled={domicilio.activo}
+              onClick={() => {
+                if (domicilio.activo) return;
+                setConRetoma(!conRetoma);
+                setRetomas([RETOMA_VACIA()]);
+              }}
               className={`w-full py-2.5 rounded-xl text-sm font-medium border transition-all
-                ${conRetoma
-                  ? 'bg-purple-50 border-purple-300 text-purple-700'
-                  : 'bg-gray-50 border-gray-200 text-gray-600'}`}>
-              {conRetoma ? '✓ Con retoma' : '+ Agregar retoma'}
+                ${domicilio.activo
+                  ? 'bg-gray-50 border-gray-200 text-gray-300 cursor-not-allowed'
+                  : conRetoma
+                    ? 'bg-purple-50 border-purple-300 text-purple-700'
+                    : 'bg-gray-50 border-gray-200 text-gray-600'}`}>
+              {domicilio.activo
+                ? 'Retoma no disponible con domicilio'
+                : conRetoma ? '✓ Con retoma' : '+ Agregar retoma'}
             </button>
 
             {conRetoma && (
@@ -1012,7 +1021,14 @@ export function ModalFactura({ open, onClose }) {
           {/* Domicilio */}
           <SeccionDomicilio
             domicilio={domicilio}
-            onChange={setDomicilio}
+            onChange={(nuevoDomicilio) => {
+              setDomicilio(nuevoDomicilio);
+              // Si se activa domicilio, desactivar retoma para evitar interferencias
+              if (nuevoDomicilio.activo && !domicilio.activo) {
+                setConRetoma(false);
+                setRetomas([RETOMA_VACIA()]);
+              }
+            }}
           />
 
           {/* Métodos de pago */}
