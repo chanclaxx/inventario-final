@@ -7,7 +7,7 @@ import {
   getEntregas,
   getEntregaById,
   registrarAbono    as registrarAbonoDomicilio,
-  marcarDevolucion,
+  marcarDevolucion  as marcarDevolucionDomicilio,
 } from '../../api/domiciliarios.api';
 import { formatCOP, formatFechaHora }           from '../../utils/formatters';
 import { Badge }                                from '../../components/ui/Badge';
@@ -36,13 +36,13 @@ const TABS_PRESTAMOS = [
   { id: 'clientes',   label: 'Clientes',   Icn: Users },
 ];
 
-const ESTADO_BADGE_DOM = {
+const ESTADO_ENTREGA_BADGE = {
   Pendiente:    'yellow',
   Entregado:    'green',
   No_entregado: 'red',
 };
 
-const ESTADO_LABEL_DOM = {
+const ESTADO_ENTREGA_LABEL = {
   Pendiente:    'Pendiente',
   Entregado:    'Entregado',
   No_entregado: 'No entregado',
@@ -138,7 +138,6 @@ function ModalDevolucion({ prestamo, onClose }) {
             </p>
           )}
         </div>
-
         {esPorCantidad && cantidadMax > 1 ? (
           <div className="flex flex-col gap-1">
             <Input label={`¿Cuántas unidades devuelve? (máx. ${cantidadMax})`}
@@ -153,7 +152,6 @@ function ModalDevolucion({ prestamo, onClose }) {
         ) : (
           <p className="text-sm text-gray-600">¿Confirmas que el equipo fue devuelto?</p>
         )}
-
         {error && <p className="text-sm text-red-500">{error}</p>}
         <div className="flex gap-2">
           <Button variant="secondary" className="flex-1" onClick={onClose}>Cancelar</Button>
@@ -308,7 +306,7 @@ function CardPrestamoCliente({ prestamo, onAbonar, onDevolver }) {
   );
 }
 
-// ─── Grupo colapsable por prestatario/cliente ─────────────────────────────────
+// ─── Grupo colapsable ─────────────────────────────────────────────────────────
 
 function GrupoPrestatario({ nombre, prestamos, saldoTotal, onAbonar, onDevolver, CardItem }) {
   const [abierto, setAbierto] = useState(true);
@@ -334,7 +332,6 @@ function GrupoPrestatario({ nombre, prestamos, saldoTotal, onAbonar, onDevolver,
             : <ChevronDown size={16} className="text-gray-400" />}
         </div>
       </button>
-
       {abierto && (
         <div className="flex flex-col gap-3 p-3">
           {activos.length === 0 ? (
@@ -393,51 +390,130 @@ function BarraProgreso({ abonado, total }) {
   );
 }
 
-function TarjetaEntrega({ entrega, onSeleccionar }) {
-  const estadoBadge = ESTADO_BADGE_DOM[entrega.estado] || 'gray';
-  const estadoLabel = ESTADO_LABEL_DOM[entrega.estado] || entrega.estado;
-
+// ── Tarjeta prominente — Pendiente ───────────────────────────────────────────
+function TarjetaEntregaPendiente({ entrega, onSeleccionar }) {
   return (
     <button onClick={() => onSeleccionar(entrega.id)}
-      className="w-full text-left bg-white border border-gray-100 rounded-xl p-3
-        hover:border-orange-200 hover:bg-orange-50/20 transition-colors flex flex-col gap-2">
+      className="w-full text-left bg-white border border-orange-200 rounded-xl p-3
+        hover:border-orange-400 hover:bg-orange-50/30 transition-colors flex flex-col gap-2.5 shadow-sm">
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold text-gray-800 truncate">{entrega.nombre_cliente}</p>
-          <p className="text-xs text-gray-400">
+          <p className="text-xs text-gray-500">
             Factura #{String(entrega.factura_id).padStart(6, '0')}
+            {entrega.cliente_celular ? ` · ${entrega.cliente_celular}` : ''}
           </p>
           {entrega.direccion_entrega && (
-            <p className="text-xs text-gray-500 truncate mt-0.5">{entrega.direccion_entrega}</p>
+            <p className="text-xs text-gray-400 truncate mt-0.5">{entrega.direccion_entrega}</p>
           )}
         </div>
         <div className="flex flex-col items-end gap-1 flex-shrink-0">
-          <Badge variant={estadoBadge}>{estadoLabel}</Badge>
+          <Badge variant="yellow">Pendiente</Badge>
           <span className="text-xs text-gray-400">{formatFechaHora(entrega.fecha_asignacion)}</span>
         </div>
       </div>
-
-      {entrega.estado === 'Pendiente' && (
-        <BarraProgreso
-          abonado={Number(entrega.total_abonado)}
-          total={Number(entrega.valor_total)}
-        />
-      )}
-
-      <div className="flex items-center justify-between">
+      <BarraProgreso
+        abonado={Number(entrega.total_abonado)}
+        total={Number(entrega.valor_total)}
+      />
+      <div className="flex items-center justify-between pt-0.5">
         <span className="text-xs text-orange-600 font-medium">{entrega.domiciliario_nombre}</span>
-        <ChevronRight size={14} className="text-gray-300" />
+        <ChevronRight size={14} className="text-orange-300" />
       </div>
     </button>
   );
 }
 
+// ── Fila compacta — Entregado / No_entregado ──────────────────────────────────
+function FilaEntregaCompacta({ entrega, onSeleccionar }) {
+  const estadoBadge = ESTADO_ENTREGA_BADGE[entrega.estado] || 'gray';
+  const estadoLabel = ESTADO_ENTREGA_LABEL[entrega.estado] || entrega.estado;
+
+  return (
+    <button onClick={() => onSeleccionar(entrega.id)}
+      className="w-full text-left flex items-center justify-between gap-3 px-3 py-2.5
+        hover:bg-gray-50 transition-colors">
+      <div className="flex-1 min-w-0">
+        <p className="text-sm text-gray-700 truncate">{entrega.nombre_cliente}</p>
+        <p className="text-xs text-gray-400">
+          #{String(entrega.factura_id).padStart(6, '0')} · {entrega.domiciliario_nombre}
+        </p>
+      </div>
+      <div className="flex items-center gap-2 flex-shrink-0">
+        <span className="text-xs text-gray-400 hidden sm:block">
+          {formatFechaHora(entrega.fecha_asignacion)}
+        </span>
+        <Badge variant={estadoBadge}>{estadoLabel}</Badge>
+        <ChevronRight size={13} className="text-gray-300" />
+      </div>
+    </button>
+  );
+}
+
+// ── Desplegable de historial ──────────────────────────────────────────────────
+function DesplegableHistorial({ entregas, onSeleccionar }) {
+  const [abierto, setAbierto] = useState(false);
+  if (entregas.length === 0) return null;
+
+  const entregados   = entregas.filter((e) => e.estado === 'Entregado');
+  const noEntregados = entregas.filter((e) => e.estado === 'No_entregado');
+
+  return (
+    <div className="border border-gray-100 rounded-xl overflow-hidden">
+      <button
+        onClick={() => setAbierto((v) => !v)}
+        className="w-full flex items-center justify-between px-4 py-2.5
+          bg-gray-50 hover:bg-gray-100 transition-colors">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-xs font-semibold text-gray-500">Historial</span>
+          {entregados.length > 0 && (
+            <span className="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700 font-medium">
+              {entregados.length} entregado{entregados.length !== 1 ? 's' : ''}
+            </span>
+          )}
+          {noEntregados.length > 0 && (
+            <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-600 font-medium">
+              {noEntregados.length} devuelto{noEntregados.length !== 1 ? 's' : ''}
+            </span>
+          )}
+        </div>
+        {abierto
+          ? <ChevronUp   size={15} className="text-gray-400" />
+          : <ChevronDown size={15} className="text-gray-400" />}
+      </button>
+
+      {abierto && (
+        <div className="flex flex-col divide-y divide-gray-50 bg-white">
+          {entregas.map((entrega) => {
+            const entregaId = entrega.id;
+            return (
+              <FilaEntregaCompacta
+                key={entregaId}
+                entrega={entrega}
+                onSeleccionar={onSeleccionar}
+              />
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── TarjetaEntrega — alias para compatibilidad ────────────────────────────────
+function TarjetaEntrega({ entrega, onSeleccionar }) {
+  if (entrega.estado === 'Pendiente') {
+    return <TarjetaEntregaPendiente entrega={entrega} onSeleccionar={onSeleccionar} />;
+  }
+  return <FilaEntregaCompacta entrega={entrega} onSeleccionar={onSeleccionar} />;
+}
+
 function PanelDetalleEntrega({ entregaId, onVolver }) {
   const queryClient = useQueryClient();
-  const [valorAbono,    setValorAbono]    = useState('');
-  const [notasAbono,    setNotasAbono]    = useState('');
-  const [errorLocal,    setErrorLocal]    = useState('');
-  const [confirmarDev,  setConfirmarDev]  = useState(false);
+  const [valorAbono,   setValorAbono]   = useState('');
+  const [notasAbono,   setNotasAbono]   = useState('');
+  const [errorLocal,   setErrorLocal]   = useState('');
+  const [confirmarDev, setConfirmarDev] = useState(false);
 
   const { data, isLoading, refetch } = useQuery({
     queryKey: ['entrega-detalle', entregaId],
@@ -458,7 +534,7 @@ function PanelDetalleEntrega({ entregaId, onVolver }) {
   });
 
   const mutDevolucion = useMutation({
-    mutationFn: () => marcarDevolucion(entregaId),
+    mutationFn: () => marcarDevolucionDomicilio(entregaId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['entregas-domicilio'], exact: false });
       queryClient.invalidateQueries({ queryKey: ['facturas'],           exact: false });
@@ -490,12 +566,11 @@ function PanelDetalleEntrega({ entregaId, onVolver }) {
         <ChevronLeft size={13} /> Volver a la lista
       </button>
 
-      {/* Cabecera */}
       <div className="bg-orange-50 border border-orange-100 rounded-xl p-3 flex flex-col gap-1.5">
         <div className="flex items-center justify-between">
           <p className="text-sm font-semibold text-gray-800">{e?.nombre_cliente}</p>
-          <Badge variant={ESTADO_BADGE_DOM[e?.estado] || 'gray'}>
-            {ESTADO_LABEL_DOM[e?.estado] || e?.estado}
+          <Badge variant={ESTADO_ENTREGA_BADGE[e?.estado] || 'gray'}>
+            {ESTADO_ENTREGA_LABEL[e?.estado] || e?.estado}
           </Badge>
         </div>
         <p className="text-xs text-gray-500">
@@ -506,9 +581,7 @@ function PanelDetalleEntrega({ entregaId, onVolver }) {
           Domiciliario: {e?.domiciliario_nombre}
           {e?.domiciliario_telefono ? ` · ${e.domiciliario_telefono}` : ''}
         </p>
-        {e?.direccion_entrega && (
-          <p className="text-xs text-gray-500">{e.direccion_entrega}</p>
-        )}
+        {e?.direccion_entrega && <p className="text-xs text-gray-500">{e.direccion_entrega}</p>}
         {e?.notas && <p className="text-xs text-gray-400 italic">{e.notas}</p>}
         <p className="text-xs text-gray-400">{formatFechaHora(e?.fecha_asignacion)}</p>
       </div>
@@ -518,7 +591,6 @@ function PanelDetalleEntrega({ entregaId, onVolver }) {
         total={Number(e?.valor_total || 0)}
       />
 
-      {/* Historial de abonos */}
       {e?.abonos?.length > 0 && (
         <div className="flex flex-col gap-1.5">
           <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
@@ -547,7 +619,6 @@ function PanelDetalleEntrega({ entregaId, onVolver }) {
         </div>
       )}
 
-      {/* Formulario abono */}
       {esPendiente && (
         <div className="flex flex-col gap-2 p-3 bg-green-50 border border-green-100 rounded-xl">
           <p className="text-xs font-semibold text-green-700 uppercase tracking-wide">
@@ -571,7 +642,6 @@ function PanelDetalleEntrega({ entregaId, onVolver }) {
         </div>
       )}
 
-      {/* Botón devolución */}
       {esPendiente && !confirmarDev && (
         <button onClick={() => setConfirmarDev(true)}
           className="w-full py-2.5 rounded-xl text-sm font-medium border border-red-200
@@ -585,7 +655,7 @@ function PanelDetalleEntrega({ entregaId, onVolver }) {
           <div className="flex items-start gap-2">
             <AlertTriangle size={14} className="text-red-500 flex-shrink-0 mt-0.5" />
             <p className="text-xs text-red-700">
-              Esto cancelará la factura y revertirá el stock al inventario. No se puede deshacer.
+              Esto cancelará la factura y revertirá el stock al inventario. Esta acción no se puede deshacer.
             </p>
           </div>
           <div className="flex gap-2">
@@ -613,7 +683,6 @@ function PanelDetalleEntrega({ entregaId, onVolver }) {
 
 function TabDomiciliarios() {
   const [filtroDomiciliario,  setFiltroDomiciliario]  = useState('');
-  const [filtroEstado,        setFiltroEstado]        = useState('');
   const [entregaSeleccionada, setEntregaSeleccionada] = useState(null);
 
   const { data: domiciliariosData } = useQuery({
@@ -622,15 +691,16 @@ function TabDomiciliarios() {
   });
 
   const { data: entregasData, isLoading } = useQuery({
-    queryKey: ['entregas-domicilio', filtroDomiciliario, filtroEstado],
+    queryKey: ['entregas-domicilio', filtroDomiciliario],
     queryFn:  () => getEntregas({
       domiciliario_id: filtroDomiciliario || undefined,
-      estado:          filtroEstado       || undefined,
     }).then((r) => r.data.data),
   });
 
   const domiciliarios = domiciliariosData || [];
   const entregas      = entregasData      || [];
+  const pendientes    = entregas.filter((e) => e.estado === 'Pendiente');
+  const historial     = entregas.filter((e) => e.estado !== 'Pendiente');
 
   if (entregaSeleccionada) {
     return (
@@ -643,34 +713,21 @@ function TabDomiciliarios() {
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Filtros */}
-      <div className="flex gap-2 flex-wrap">
-        {domiciliarios.length > 0 && (
-          <select value={filtroDomiciliario}
-            onChange={(e) => setFiltroDomiciliario(e.target.value)}
-            className="flex-1 min-w-[140px] py-2 px-3 bg-gray-50 border border-gray-200
-              rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-400
-              focus:bg-white transition-all text-gray-700">
-            <option value="">Todos los domiciliarios</option>
-            {domiciliarios.map((d) => {
-              const domId = d.id;
-              return <option key={domId} value={domId}>{d.nombre}</option>;
-            })}
-          </select>
-        )}
-        <select value={filtroEstado}
-          onChange={(e) => setFiltroEstado(e.target.value)}
-          className="flex-1 min-w-[120px] py-2 px-3 bg-gray-50 border border-gray-200
+
+      {domiciliarios.length > 0 && (
+        <select value={filtroDomiciliario}
+          onChange={(e) => setFiltroDomiciliario(e.target.value)}
+          className="w-full py-2 px-3 bg-gray-50 border border-gray-200
             rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-400
             focus:bg-white transition-all text-gray-700">
-          <option value="">Todos los estados</option>
-          <option value="Pendiente">Pendiente</option>
-          <option value="Entregado">Entregado</option>
-          <option value="No_entregado">No entregado</option>
+          <option value="">Todos los domiciliarios</option>
+          {domiciliarios.map((d) => {
+            const domId = d.id;
+            return <option key={domId} value={domId}>{d.nombre}</option>;
+          })}
         </select>
-      </div>
+      )}
 
-      {/* Lista */}
       {isLoading ? (
         <Spinner className="py-8" />
       ) : entregas.length === 0 ? (
@@ -678,17 +735,33 @@ function TabDomiciliarios() {
           titulo="Sin pedidos domiciliarios"
           descripcion="Los pedidos aparecen al crear facturas con domicilio" />
       ) : (
-        <div className="flex flex-col gap-2">
-          {entregas.map((entrega) => {
-            const entregaId = entrega.id;
-            return (
-              <TarjetaEntrega
-                key={entregaId}
-                entrega={entrega}
-                onSeleccionar={setEntregaSeleccionada}
-              />
-            );
-          })}
+        <div className="flex flex-col gap-3">
+
+          {pendientes.length === 0 ? (
+            <p className="text-xs text-gray-400 px-1">Sin pedidos pendientes</p>
+          ) : (
+            <div className="flex flex-col gap-2">
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide px-1">
+                Pendientes ({pendientes.length})
+              </p>
+              {pendientes.map((entrega) => {
+                const entregaId = entrega.id;
+                return (
+                  <TarjetaEntregaPendiente
+                    key={entregaId}
+                    entrega={entrega}
+                    onSeleccionar={setEntregaSeleccionada}
+                  />
+                );
+              })}
+            </div>
+          )}
+
+          <DesplegableHistorial
+            entregas={historial}
+            onSeleccionar={setEntregaSeleccionada}
+          />
+
         </div>
       )}
     </div>
@@ -723,8 +796,7 @@ export default function PrestamosPage() {
       const key = `prestatario_${p.prestatario_id}`;
       if (!acc[key]) acc[key] = { nombre: p.prestatario_nombre || p.prestatario, prestamos: [], saldoTotal: 0 };
       acc[key].prestamos.push(p);
-      if (p.estado === 'Activo')
-        acc[key].saldoTotal += Number(p.valor_prestamo) - Number(p.total_abonado);
+      if (p.estado === 'Activo') acc[key].saldoTotal += Number(p.valor_prestamo) - Number(p.total_abonado);
       return acc;
     }, {});
 
@@ -734,8 +806,7 @@ export default function PrestamosPage() {
       const key = `cliente_${p.cliente_id}`;
       if (!acc[key]) acc[key] = { nombre: p.cliente_nombre || p.prestatario, prestamos: [], saldoTotal: 0 };
       acc[key].prestamos.push(p);
-      if (p.estado === 'Activo')
-        acc[key].saldoTotal += Number(p.valor_prestamo) - Number(p.total_abonado);
+      if (p.estado === 'Activo') acc[key].saldoTotal += Number(p.valor_prestamo) - Number(p.total_abonado);
       return acc;
     }, {});
 
@@ -796,7 +867,9 @@ export default function PrestamosPage() {
             })}
           </div>
 
-          {loadingP ? <Spinner className="py-20" /> : (
+          {loadingP ? (
+            <Spinner className="py-20" />
+          ) : (
             <>
               {tabPrestamos === 'companeros' && (
                 <div className="flex flex-col gap-3">
@@ -804,10 +877,9 @@ export default function PrestamosPage() {
                     <EmptyState icon={User} titulo="Sin préstamos a compañeros" />
                   ) : (
                     Object.entries(gruposCompaneros).map(([key, grupo]) => (
-                      <GrupoPrestatario key={key} nombre={grupo.nombre}
-                        prestamos={grupo.prestamos} saldoTotal={grupo.saldoTotal}
-                        onAbonar={setPrestamoAbono} onDevolver={setPrestamoDevol}
-                        CardItem={CardPrestamoCompanero} />
+                      <GrupoPrestatario key={key} nombre={grupo.nombre} prestamos={grupo.prestamos}
+                        saldoTotal={grupo.saldoTotal} onAbonar={setPrestamoAbono}
+                        onDevolver={setPrestamoDevol} CardItem={CardPrestamoCompanero} />
                     ))
                   )}
                 </div>
@@ -818,10 +890,9 @@ export default function PrestamosPage() {
                     <EmptyState icon={Users} titulo="Sin préstamos a clientes" />
                   ) : (
                     Object.entries(gruposClientes).map(([key, grupo]) => (
-                      <GrupoPrestatario key={key} nombre={grupo.nombre}
-                        prestamos={grupo.prestamos} saldoTotal={grupo.saldoTotal}
-                        onAbonar={setPrestamoAbono} onDevolver={setPrestamoDevol}
-                        CardItem={CardPrestamoCliente} />
+                      <GrupoPrestatario key={key} nombre={grupo.nombre} prestamos={grupo.prestamos}
+                        saldoTotal={grupo.saldoTotal} onAbonar={setPrestamoAbono}
+                        onDevolver={setPrestamoDevol} CardItem={CardPrestamoCliente} />
                     ))
                   )}
                 </div>
@@ -834,7 +905,9 @@ export default function PrestamosPage() {
       {/* ── CRÉDITOS ── */}
       {tabPrincipal === 'creditos' && (
         <div className="flex flex-col gap-3">
-          {loadingC ? <Spinner className="py-20" /> : (
+          {loadingC ? (
+            <Spinner className="py-20" />
+          ) : (
             <>
               {creditosActivos.length === 0 ? (
                 <EmptyState icon={CreditCard} titulo="Sin créditos activos" />
