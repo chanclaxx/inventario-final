@@ -111,12 +111,42 @@ const registrarAbono = async (negocioId, entregaId, { usuarioId, valor, notas })
     throw { status: 400, message: `El abono (${valorNumerico}) supera el saldo pendiente (${saldoPendiente})` };
   }
 
+  // Necesitamos la sucursal de la factura para buscar la caja abierta.
+  const { rows: facturaRows } = await pool.query(
+    'SELECT sucursal_id FROM facturas WHERE id = $1',
+    [entrega.factura_id]
+  );
+  const sucursalId = facturaRows[0]?.sucursal_id || null;
+
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+
     const entregaActualizada = await repo.registrarAbono(client, {
       entregaId, negocioId, usuarioId, valor: valorNumerico, notas,
     });
+
+    // Registrar el abono como ingreso en caja si hay una caja abierta en la sucursal.
+    // Esto es el momento real en que el dinero entra a caja — no al crear la factura.
+    // La query de caja excluye pagos de facturas con domicilio pendiente,
+    // así que este movimiento manual es la única forma en que ese dinero aparece.
+    if (sucursalId) {
+      const cajaRepo = require('../caja/caja.repository');
+      const caja = await cajaRepo.findCajaAbierta(sucursalId);
+      if (caja) {
+        const facturaRef = String(entrega.factura_id).padStart(6, '0');
+        await cajaRepo.insertarMovimiento({
+          caja_id:        caja.id,
+          usuario_id:     usuarioId || null,
+          tipo:           'Ingreso',
+          concepto:       `Abono domicilio #${facturaRef} — ${entrega.nombre_cliente || ''} (${entrega.domiciliario_nombre || ''})`,
+          valor:          valorNumerico,
+          referencia_id:  entregaId,
+          referencia_tipo: 'abono_domicilio',
+        });
+      }
+    }
+
     await client.query('COMMIT');
     return entregaActualizada;
   } catch (err) {
