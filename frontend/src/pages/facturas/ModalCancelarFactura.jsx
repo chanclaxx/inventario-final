@@ -1,6 +1,6 @@
 import { useState }  from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ShieldAlert, AlertTriangle, PackageX, Package } from 'lucide-react';
+import { ShieldAlert, AlertTriangle, PackageX, Package, Bike } from 'lucide-react';
 import { Modal }   from '../../components/ui/Modal';
 import { Button }  from '../../components/ui/Button';
 import { Input }   from '../../components/ui/Input';
@@ -8,29 +8,79 @@ import { Spinner } from '../../components/ui/Spinner';
 import { cancelarFactura } from '../../api/facturas.api';
 import { getFacturaById }  from '../../api/facturas.api';
 import { verificarPin }    from '../../api/config.api';
+import { getEntregas }     from '../../api/domiciliarios.api';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-// La tabla retomas no persiste tipo_retoma.
-// Se distingue igual que en el backend: imei presente → serial, sin imei → cantidad.
 const _labelTipoRetoma = (retoma) => retoma.imei ? 'Serial / IMEI' : 'Cantidad';
 
-// ─── Props ────────────────────────────────────────────────────────────────────
-// factura   : { id, nombre_cliente }
-// onClose   : () => void
-// onSuccess : () => void
+// ─── Pantalla de bloqueo por domicilio pendiente ──────────────────────────────
+
+function PantallaBloqueo({ facturaId, entrega, onClose }) {
+  return (
+    <Modal open onClose={onClose} title="No se puede cancelar" size="sm">
+      <div className="flex flex-col gap-4">
+
+        <div className="flex items-start gap-3 bg-orange-50 border border-orange-200 rounded-xl p-3">
+          <Bike size={18} className="text-orange-500 flex-shrink-0 mt-0.5" />
+          <div className="flex flex-col gap-1">
+            <p className="text-sm font-semibold text-orange-800">
+              Factura #{String(facturaId).padStart(6, '0')} tiene un domicilio activo
+            </p>
+            <p className="text-xs text-orange-600">
+              Esta factura está asignada a{' '}
+              <span className="font-semibold">{entrega.domiciliario_nombre}</span>{' '}
+              y aún no ha sido entregada.
+            </p>
+          </div>
+        </div>
+
+        <div className="bg-gray-50 rounded-xl px-4 py-3 flex flex-col gap-1.5">
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+            Para cancelar esta factura
+          </p>
+          <p className="text-sm text-gray-700">
+            Ve a <span className="font-semibold">Préstamos → Domiciliarios</span>, abre
+            el pedido y usa el botón{' '}
+            <span className="font-semibold text-red-600">Marcar como no entregado</span>.
+          </p>
+          <p className="text-xs text-gray-400 mt-1">
+            Eso cancelará la factura, revertirá el stock y registrará la
+            devolución correctamente en caja.
+          </p>
+        </div>
+
+        <Button variant="secondary" onClick={onClose}>Entendido</Button>
+      </div>
+    </Modal>
+  );
+}
+
+// ─── Modal principal ──────────────────────────────────────────────────────────
 
 export function ModalCancelarFactura({ factura, onClose, onSuccess }) {
   const queryClient = useQueryClient();
 
-  // Cargar detalle completo para obtener el array de retomas con ingreso_inventario
-  const { data: detalle, isLoading } = useQuery({
+  // Cargar detalle completo (retomas) y entrega de domicilio en paralelo
+  const { data: detalle, isLoading: loadingDetalle } = useQuery({
     queryKey: ['factura-detalle-cancelar', factura.id],
     queryFn:  () => getFacturaById(factura.id).then((r) => r.data.data),
     staleTime: 0,
   });
 
-  // Retomas que ingresaron al inventario — las únicas relevantes para la decisión
+  const { data: entregasData, isLoading: loadingEntrega } = useQuery({
+    queryKey: ['entregas-domicilio-factura', factura.id],
+    queryFn:  () => getEntregas({ factura_id: factura.id }).then((r) => r.data.data),
+    staleTime: 0,
+  });
+
+  const isLoading = loadingDetalle || loadingEntrega;
+
+  // Buscar si hay una entrega Pendiente para esta factura
+  const entregaPendiente = (entregasData || []).find(
+    (e) => e.factura_id === factura.id && e.estado === 'Pendiente'
+  ) || null;
+
   const retomasEnInventario = (detalle?.retomas || []).filter(
     (r) => r.ingreso_inventario
   );
@@ -41,7 +91,6 @@ export function ModalCancelarFactura({ factura, onClose, onSuccess }) {
   const [error,          setError]          = useState('');
   const [verificando,    setVerificando]    = useState(false);
 
-  // Paso: 'decision' si hay retomas con inventario y aún no decidió | 'pin'
   const paso = !isLoading && tieneRetomaEnInventario && eliminarRetoma === null
     ? 'decision'
     : 'pin';
@@ -84,6 +133,19 @@ export function ModalCancelarFactura({ factura, onClose, onSuccess }) {
     );
   }
 
+  // ── Bloqueo: domicilio pendiente ──────────────────────────────────────────
+  // Se muestra antes de cualquier otro paso. El backend también lo rechaza,
+  // pero este bloqueo evita que el usuario llegue hasta el PIN innecesariamente.
+  if (entregaPendiente) {
+    return (
+      <PantallaBloqueo
+        facturaId={factura.id}
+        entrega={entregaPendiente}
+        onClose={onClose}
+      />
+    );
+  }
+
   // ── Paso 1: decisión sobre la retoma ─────────────────────────────────────
   if (paso === 'decision') {
     return (
@@ -106,7 +168,6 @@ export function ModalCancelarFactura({ factura, onClose, onSuccess }) {
             </div>
           </div>
 
-          {/* Detalle de retomas con inventario */}
           <div className="flex flex-col gap-2">
             {retomasEnInventario.map((r) => {
               const retomaId = r.id;
@@ -123,7 +184,6 @@ export function ModalCancelarFactura({ factura, onClose, onSuccess }) {
             })}
           </div>
 
-          {/* Opciones de decisión */}
           <div className="flex flex-col gap-2">
             <button
               type="button"
@@ -231,10 +291,9 @@ export function ModalCancelarFactura({ factura, onClose, onSuccess }) {
             onClick={handleConfirmar}
             disabled={!pin.trim()}
           >
-            Confirma
+            Confirmar
           </Button>
         </div>
-
       </div>
     </Modal>
   );

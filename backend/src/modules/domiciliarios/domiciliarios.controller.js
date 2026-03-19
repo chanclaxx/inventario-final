@@ -28,10 +28,11 @@ const actualizarDomiciliario = async (req, res, next) => {
 
 const getEntregas = async (req, res, next) => {
   try {
-    const { domiciliario_id, estado } = req.query;
+    const { domiciliario_id, estado, factura_id } = req.query;
     const data = await service.getEntregas(req.user.negocio_id, {
       domiciliarioId: domiciliario_id ? Number(domiciliario_id) : undefined,
-      estado:         estado || undefined,
+      estado:         estado          || undefined,
+      facturaId:      factura_id      ? Number(factura_id)      : undefined,
     });
     res.json({ ok: true, data });
   } catch (err) { next(err); }

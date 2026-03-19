@@ -94,7 +94,7 @@ const findEntregaByFacturaId = async (facturaId, negocioId) => {
 // ── findAllEntregas ───────────────────────────────────────────────────────────
 // Vista de todas las entregas del negocio con filtro opcional por domiciliario.
 
-const findAllEntregas = async (negocioId, { domiciliarioId, estado } = {}) => {
+const findAllEntregas = async (negocioId, { domiciliarioId, estado, facturaId } = {}) => {
   const condiciones = ['e.negocio_id = $1'];
   const params = [negocioId];
 
@@ -105,6 +105,10 @@ const findAllEntregas = async (negocioId, { domiciliarioId, estado } = {}) => {
   if (estado) {
     params.push(estado);
     condiciones.push(`e.estado = $${params.length}`);
+  }
+  if (facturaId) {
+    params.push(facturaId);
+    condiciones.push(`e.factura_id = $${params.length}`);
   }
 
   const { rows } = await pool.query(

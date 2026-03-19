@@ -1,11 +1,10 @@
-const { pool }          = require('../../config/db');
-const repo              = require('./domiciliarios.repository');
-const facturasRepo      = require('../facturas/facturas.repository');
-
+const { pool }        = require('../../config/db');
+const repo            = require('./domiciliarios.repository');
+const facturasRepo    = require('../facturas/facturas.repository');
+// Importación de facturasService se hace de forma diferida en marcarDevolucion
+// para evitar dependencia circular (ver comentario en esa función).
 
 // ── _validarDomiciliario ──────────────────────────────────────────────────────
-// Centraliza la validación de pertenencia al negocio.
-// Lanza 403 si el domiciliario no pertenece al negocio del usuario.
 
 const _validarDomiciliario = async (domiciliarioId, negocioId) => {
   const domiciliario = await repo.findById(domiciliarioId, negocioId);
@@ -16,7 +15,6 @@ const _validarDomiciliario = async (domiciliarioId, negocioId) => {
 };
 
 // ── _validarEntrega ───────────────────────────────────────────────────────────
-// Centraliza la validación de pertenencia de una entrega al negocio.
 
 const _validarEntrega = async (entregaId, negocioId) => {
   const entrega = await repo.findEntregaById(entregaId, negocioId);
@@ -39,9 +37,7 @@ const crearDomiciliario = async (negocioId, { nombre, telefono }) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const domiciliario = await repo.create(client, {
-      negocioId, nombre: nombre.trim(), telefono,
-    });
+    const domiciliario = await repo.create(client, { negocioId, nombre: nombre.trim(), telefono });
     await client.query('COMMIT');
     return domiciliario;
   } catch (err) {
@@ -77,8 +73,7 @@ const getEntregaById = async (entregaId, negocioId) => {
 };
 
 // ── crearEntregaEnTransaccion ─────────────────────────────────────────────────
-// Llamado DESDE facturas.service dentro de su propia transacción.
-// No abre transacción propia — recibe el client existente.
+// Llamado desde facturas.service dentro de su propia transacción.
 
 const crearEntregaEnTransaccion = async (client, {
   facturaId, domiciliarioId, negocioId, usuarioId,
@@ -91,7 +86,6 @@ const crearEntregaEnTransaccion = async (client, {
   if (!domRows.length) {
     throw { status: 403, message: 'El domiciliario no pertenece a este negocio o está inactivo' };
   }
-
   return repo.createEntrega(client, {
     facturaId, domiciliarioId, negocioId, usuarioId,
     valorTotal, direccionEntrega, notas,
@@ -99,8 +93,6 @@ const crearEntregaEnTransaccion = async (client, {
 };
 
 // ── registrarAbono ────────────────────────────────────────────────────────────
-// Cualquier rol puede registrar abonos.
-// Valida que el abono no supere el saldo pendiente (protege contra doble pago).
 
 const registrarAbono = async (negocioId, entregaId, { usuarioId, valor, notas }) => {
   const entrega = await _validarEntrega(entregaId, negocioId);
@@ -116,10 +108,7 @@ const registrarAbono = async (negocioId, entregaId, { usuarioId, valor, notas })
 
   const saldoPendiente = Number(entrega.valor_total) - Number(entrega.total_abonado);
   if (valorNumerico > saldoPendiente) {
-    throw {
-      status: 400,
-      message: `El abono (${valorNumerico}) supera el saldo pendiente (${saldoPendiente})`,
-    };
+    throw { status: 400, message: `El abono (${valorNumerico}) supera el saldo pendiente (${saldoPendiente})` };
   }
 
   const client = await pool.connect();
@@ -139,12 +128,28 @@ const registrarAbono = async (negocioId, entregaId, { usuarioId, valor, notas })
 };
 
 // ── marcarDevolucion ──────────────────────────────────────────────────────────
-// Devolución = el domiciliario no entregó el pedido.
-// Flujo:
-//   1. Valida que la entrega esté Pendiente.
-//   2. Cancela la factura (revierte stock de seriales y cantidades).
-//   3. Marca la entrega como No_entregado.
-// Todo en una sola transacción para garantizar atomicidad.
+// El domiciliario no entregó el pedido. Se cancela la factura completa.
+//
+// DISEÑO DELIBERADO — delegación a cancelarFactura():
+//   Esta función NO reimplementa la lógica de cancelación. La delega
+//   íntegramente a facturasService.cancelarFactura(), que ya maneja:
+//     • Reversión de stock (seriales y cantidades)
+//     • Egreso en caja (devolución del dinero al cliente si la caja está abierta)
+//     • Cambio de estado de la factura a 'Cancelada'
+//   Esto garantiza que caja y reportes se comportan exactamente igual
+//   que una cancelación manual — sin doble reversión ni caja huérfana.
+//
+// IMPORTACIÓN DIFERIDA para romper dependencia circular:
+//   facturas.service → domiciliarios.service (crearEntregaEnTransaccion)
+//   domiciliarios.service → facturas.service (cancelarFactura)
+//   Si ambos se importan en el top-level, Node.js resuelve uno de ellos
+//   como un objeto vacío {} al arrancar. El require() dentro de la función
+//   se evalúa en tiempo de ejecución, cuando ambos módulos ya están cargados.
+//
+// PROTECCIÓN ANTI-DOBLE-CANCELACIÓN:
+//   Si la factura ya fue cancelada manualmente, cancelarFactura() lanza 400.
+//   En ese caso la entrega permanece Pendiente — sin estado inconsistente.
+//   El admin puede entonces marcar la entrega manualmente o investigar.
 
 const marcarDevolucion = async (negocioId, entregaId) => {
   const entrega = await _validarEntrega(entregaId, negocioId);
@@ -156,43 +161,19 @@ const marcarDevolucion = async (negocioId, entregaId) => {
     };
   }
 
-  const factura = await facturasRepo.findByIdYNegocio(entrega.factura_id, negocioId);
-  if (!factura) {
-    throw { status: 404, message: 'Factura asociada no encontrada' };
-  }
+  // Importación diferida — ver comentario arriba.
+  const facturasService = require('../facturas/facturas.service');
 
-  if (factura.estado === 'Cancelada') {
-    throw { status: 400, message: 'La factura ya está cancelada' };
-  }
+  // Paso 1: cancelar la factura (stock + caja + estado factura).
+  // eliminarRetoma = false: no revertimos retomas de la factura original.
+  await facturasService.cancelarFactura(negocioId, entrega.factura_id, false);
 
+  // Paso 2: marcar la entrega como No_entregado.
+  // Solo se ejecuta si cancelarFactura tuvo éxito — sin estado inconsistente.
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-
-    const lineas = await facturasRepo.getLineas(entrega.factura_id);
-    for (const linea of lineas) {
-      if (linea.imei) {
-        const { rows: serialRows } = await client.query(
-          `SELECT s.id FROM seriales s
-           JOIN productos_serial ps ON ps.id = s.producto_id
-           JOIN facturas          f  ON f.sucursal_id = ps.sucursal_id
-           WHERE s.imei = $1 AND f.id = $2`,
-          [linea.imei, entrega.factura_id]
-        );
-        if (serialRows.length) {
-          await client.query(
-            'UPDATE seriales SET vendido = false, fecha_salida = NULL WHERE id = $1',
-            [serialRows[0].id]
-          );
-        }
-      } else if (linea.producto_id) {
-        await facturasRepo.ajustarStockCantidad(client, linea.producto_id, linea.cantidad);
-      }
-    }
-
-    await facturasRepo.cancelar(client, entrega.factura_id);
     await repo.marcarNoEntregado(client, entregaId, negocioId);
-
     await client.query('COMMIT');
   } catch (err) {
     await client.query('ROLLBACK');

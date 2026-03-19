@@ -31,6 +31,7 @@ const validarAbono = [
 const validarFiltroEntregas = [
   query('domiciliario_id').optional().isInt({ gt: 0 }),
   query('estado').optional().isIn(['Pendiente', 'Entregado', 'No_entregado']),
+  query('factura_id').optional().isInt({ gt: 0 }),
 ];
 
 // ── Domiciliarios (CRUD) ──────────────────────────────────────────────────────

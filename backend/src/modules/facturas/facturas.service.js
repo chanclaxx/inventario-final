@@ -291,14 +291,29 @@ const cancelarFactura = async (negocioId, id, eliminarRetoma = false) => {
   const factura = await facturasRepo.findByIdYNegocio(id, negocioId);
   if (!factura) throw { status: 404, message: 'Factura no encontrada' };
   if (factura.estado === 'Cancelada') throw { status: 400, message: 'La factura ya está cancelada' };
-
+ 
+  // ── NUEVO: bloquear cancelación manual si hay domicilio pendiente ────────────
+  // La única vía para cancelar una factura con domicilio activo es desde el
+  // módulo de domiciliarios (Devolución), que llama a esta misma función
+  // internamente con el contexto correcto.
+  // Usamos require() diferido para no crear dependencia circular en el top-level.
+  const domiciliariosRepo = require('../domiciliarios/domiciliarios.repository');
+  const entregaPendiente  = await domiciliariosRepo.findEntregaByFacturaId(id, negocioId);
+ 
+  if (entregaPendiente && entregaPendiente.estado === 'Pendiente') {
+    throw {
+      status: 400,
+      message: `Esta factura tiene un pedido a domicilio activo asignado a "${entregaPendiente.domiciliario_nombre}". Para cancelarla, primero registra la devolución desde el módulo de Domiciliarios.`,
+    };
+  }
+  // ── FIN NUEVO ────────────────────────────────────────────────────────────────
+ 
   const pagos = await facturasRepo.getPagos(id);
-
+ 
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-
-    // ── Revertir productos vendidos ───────────────────────────────────────────
+ 
     const lineas = await facturasRepo.getLineas(id);
     for (const linea of lineas) {
       if (linea.imei) {
@@ -319,59 +334,43 @@ const cancelarFactura = async (negocioId, id, eliminarRetoma = false) => {
         await facturasRepo.ajustarStockCantidad(client, linea.producto_id, linea.cantidad);
       }
     }
-
-    // ── Revertir retomas si se solicitó eliminarlas del inventario ────────────
-    // Distinción por presencia de imei:
-    //   con imei  → serial   → eliminar el serial del inventario
-    //   sin imei  → cantidad → reducir stock usando cantidad_retoma persistida
+ 
     if (eliminarRetoma) {
       const retomas = await facturasRepo.getRetomas(id);
-
       for (const retoma of retomas) {
         if (!retoma.ingreso_inventario) continue;
-
         if (retoma.imei) {
           const { rows: serialRows } = await client.query(
             `SELECT s.id FROM seriales s
              JOIN productos_serial ps ON ps.id = s.producto_id
              JOIN sucursales       su ON su.id = ps.sucursal_id
-             WHERE s.imei = $1
-               AND su.negocio_id = $2
-               AND s.vendido = false
-             LIMIT 1`,
+             WHERE s.imei = $1 AND su.negocio_id = $2 AND s.vendido = false LIMIT 1`,
             [retoma.imei, negocioId]
           );
           if (serialRows.length) {
-            await client.query(
-              'DELETE FROM seriales WHERE id = $1',
-              [serialRows[0].id]
-            );
+            await client.query('DELETE FROM seriales WHERE id = $1', [serialRows[0].id]);
           }
         } else if (retoma.nombre_producto) {
           const { rows: prodRows } = await client.query(
             `SELECT pc.id FROM productos_cantidad pc
-             WHERE pc.nombre ILIKE $1
-               AND pc.sucursal_id = $2
-             LIMIT 1`,
+             WHERE pc.nombre ILIKE $1 AND pc.sucursal_id = $2 LIMIT 1`,
             [retoma.nombre_producto, factura.sucursal_id]
           );
           if (prodRows.length) {
-            await _verificarProductoCantidadNegocio(client, prodRows[0].id, negocioId);
             const cantidadRevertir = -Math.abs(Number(retoma.cantidad_retoma) || 1);
             await facturasRepo.ajustarStockCantidad(client, prodRows[0].id, cantidadRevertir);
           }
         }
       }
     }
-
+ 
     await facturasRepo.cancelar(client, id);
-
-    // ── Registrar egreso en caja si hay caja abierta ──────────────────────────
-    const METODOS_NO_CAJA = ['Credito'];
-    const totalDevolucion = pagos
+ 
+    const METODOS_NO_CAJA    = ['Credito'];
+    const totalDevolucion    = pagos
       .filter((p) => !METODOS_NO_CAJA.includes(p.metodo))
       .reduce((s, p) => s + Number(p.valor || 0), 0);
-
+ 
     if (totalDevolucion > 0) {
       const caja = await cajaRepo.findCajaAbierta(factura.sucursal_id);
       if (caja) {
@@ -387,7 +386,7 @@ const cancelarFactura = async (negocioId, id, eliminarRetoma = false) => {
         );
       }
     }
-
+ 
     await client.query('COMMIT');
   } catch (err) {
     await client.query('ROLLBACK');
