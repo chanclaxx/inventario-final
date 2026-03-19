@@ -102,6 +102,20 @@ const crearFactura = async ({
   );
   if (!sucRows.length) throw { status: 403, message: 'Sucursal no válida para este negocio' };
  
+  // Domicilio y retomas son mutuamente excluyentes.
+  // Una factura con domicilio no puede tener retomas porque si el pedido
+  // se devuelve, la cancelación revierte el stock de los productos vendidos
+  // pero no tiene forma de saber qué hacer con las retomas (si revertirlas
+  // o no), lo que podría corromper el inventario.
+  const tieneRetomas   = Array.isArray(retomas) && retomas.length > 0;
+  const tieneDomicilio = !!(domicilio?.domiciliario_id);
+  if (tieneRetomas && tieneDomicilio) {
+    throw {
+      status: 400,
+      message: 'Una factura no puede tener retoma y pedido a domicilio al mismo tiempo.',
+    };
+  }
+ 
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
