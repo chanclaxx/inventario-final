@@ -293,19 +293,20 @@ function ItemMovimiento({ item, rendered, esTipoIngreso, cajaId }) {
     },
   });
 
-  // Solo los movimientos de movimientos_caja tienen campo 'activo' (id numérico en esa tabla).
-  // pagos_factura, abonos_credito, etc. no tienen ese campo — para ellos activo es undefined.
+  // Solo movimientos_caja tiene campo 'activo'.
+  // Para filas de otras tablas (pagos_factura, etc.) activo es undefined → no tienen toggle.
   const tieneToggle = item.activo !== undefined;
-  const estaActivo  = item.activo !== false; // undefined = activo (movimientos sin columna)
+  const estaActivo  = item.activo !== false;
 
   return (
-    <div className={`flex items-center justify-between px-4 py-2.5 bg-white hover:bg-gray-50/50
-      ${!estaActivo ? 'opacity-50' : ''}`}>
+    <div className={`flex items-center justify-between px-4 py-2.5 bg-white
+      hover:bg-gray-50/50 transition-colors group
+      ${!estaActivo ? 'bg-red-50/30' : ''}`}>
       <div className="flex-1 min-w-0">
         <p className={`text-sm truncate ${!estaActivo ? 'line-through text-gray-400' : 'text-gray-800'}`}>
           {rendered.descripcion}
         </p>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           {rendered.detalle && (
             <span className="text-xs text-gray-400">{rendered.detalle}</span>
           )}
@@ -313,28 +314,51 @@ function ItemMovimiento({ item, rendered, esTipoIngreso, cajaId }) {
             <span className="text-xs text-gray-300">{formatFechaHora(rendered.fecha)}</span>
           )}
           {!estaActivo && (
-            <span className="text-xs text-red-400 font-medium">Anulado</span>
+            <span className="text-xs bg-red-100 text-red-500 font-semibold
+              px-1.5 py-0.5 rounded-full">
+              Anulado
+            </span>
           )}
         </div>
       </div>
+
       <div className="flex items-center gap-2 flex-shrink-0 ml-3">
-        <span className={`text-sm font-semibold ${!estaActivo ? 'line-through text-gray-300' : esTipoIngreso ? 'text-green-600' : 'text-red-500'}`}>
+        <span className={`text-sm font-semibold
+          ${!estaActivo ? 'line-through text-gray-300' : esTipoIngreso ? 'text-green-600' : 'text-red-500'}`}>
           {esTipoIngreso ? '+' : '-'}{formatCOP(item.valor)}
         </span>
+
         {tieneToggle && (
-          <button
-            onClick={(e) => { e.stopPropagation(); mutation.mutate(); }}
-            disabled={mutation.isPending}
-            title={estaActivo ? 'Anular movimiento' : 'Reactivar movimiento'}
-            className={`p-1 rounded-lg transition-colors disabled:opacity-40
-              ${estaActivo
-                ? 'text-gray-300 hover:text-red-400 hover:bg-red-50'
-                : 'text-gray-300 hover:text-green-500 hover:bg-green-50'}`}
-          >
-            {estaActivo
-              ? <Ban size={13} />
-              : <RotateCcw size={13} />}
-          </button>
+          estaActivo ? (
+            // Botón anular — visible siempre en items de movimientos_caja,
+            // más prominente al hover para que el usuario lo note
+            <button
+              onClick={(e) => { e.stopPropagation(); mutation.mutate(); }}
+              disabled={mutation.isPending}
+              title="Anular movimiento"
+              className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium
+                text-gray-400 border border-transparent
+                hover:text-red-600 hover:bg-red-50 hover:border-red-200
+                opacity-0 group-hover:opacity-100
+                transition-all disabled:opacity-30"
+            >
+              <Ban size={12} />
+              <span className="hidden sm:inline">Anular</span>
+            </button>
+          ) : (
+            // Botón reactivar — siempre visible cuando está anulado
+            <button
+              onClick={(e) => { e.stopPropagation(); mutation.mutate(); }}
+              disabled={mutation.isPending}
+              title="Reactivar movimiento"
+              className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium
+                text-green-600 bg-green-50 border border-green-200
+                hover:bg-green-100 transition-all disabled:opacity-40"
+            >
+              <RotateCcw size={12} />
+              <span className="hidden sm:inline">Reactivar</span>
+            </button>
+          )
         )}
       </div>
     </div>
