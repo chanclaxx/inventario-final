@@ -5,6 +5,7 @@ import { Button }       from '../../components/ui/Button';
 import { Input }        from '../../components/ui/Input';
 import { Badge }        from '../../components/ui/Badge';
 import { SearchInput }  from '../../components/ui/SearchInput';
+import { InputMoneda }  from '../../components/ui/InputMoneda';
 import { useAuth }      from '../../context/useAuth';
 import { useSucursalKey } from '../../hooks/useSucursalKey';
 import { crearCompra }  from '../../api/compras.api';
@@ -193,11 +194,11 @@ function InfoCompra({ proveedorId, setProveedorId, costoCompra, setCostoCompra, 
         </div>
         <div className="flex-1 flex flex-col gap-1">
           <label className="text-xs text-amber-700 font-medium">Precio compra</label>
-          <input
-            type="number" placeholder="0"
+          {/* CAMBIO: input number → InputMoneda */}
+          <InputMoneda
             value={costoCompra}
-            onChange={(e) => setCostoCompra(e.target.value)}
-            onWheel={(e) => e.target.blur()}
+            onChange={setCostoCompra}
+            placeholder="0"
             className="w-full px-2.5 py-2 bg-white border border-amber-200 rounded-lg text-xs
               text-gray-700 focus:outline-none focus:ring-2 focus:ring-amber-400"
           />
@@ -293,10 +294,6 @@ function InfoCompra({ proveedorId, setProveedorId, costoCompra, setCostoCompra, 
 }
 
 // ─── Buscador de cliente ───────────────────────────────────────────────────────
-/**
- * Busca por nombre (≥15 chars) o cédula (solo dígitos, con Enter/botón).
- * Permite crear un cliente nuevo con nombre, cédula y celular.
- */
 function BuscadorCliente({ clienteSeleccionado, onClienteSeleccionado }) {
   const [busqueda,     setBusqueda]     = useState('');
   const [creandoNuevo, setCreandoNuevo] = useState(false);
@@ -471,13 +468,11 @@ function PasoCompraCliente({ sucursalKey, sucursalLista, onExito, onDuplicadosEn
   const queryClient        = useQueryClient();
   const { esAdminNegocio } = useAuth();
   const esAdmin            = esAdminNegocio();
-  // ── CAMBIO: solo admin_negocio ve campos de costo al crear productos ─────────
   const puedeVerCosto      = esAdmin;
 
   const [clienteSeleccionado, setClienteSeleccionado] = useState(null);
   const [tipoProducto,        setTipoProducto]        = useState('serial');
 
-  // Serial state
   const [busquedaSerial, setBusquedaSerial] = useState('');
   const [lineaSel,       setLineaSel]       = useState(null);
   const [creandoLinea,   setCreandoLinea]   = useState(false);
@@ -485,14 +480,12 @@ function PasoCompraCliente({ sucursalKey, sucursalLista, onExito, onDuplicadosEn
   const [imeis,          setImeis]          = useState(['']);
   const [verificando,    setVerificando]    = useState(false);
 
-  // Cantidad state
   const [busquedaCantidad, setBusquedaCantidad] = useState('');
   const [productoSel,      setProductoSel]      = useState(null);
   const [creandoProducto,  setCreandoProducto]  = useState(false);
   const [nuevoProducto,    setNuevoProducto]    = useState({ nombre: '', unidad_medida: 'unidad', precio: '', costo_unitario: '', linea_id: '' });
   const [cantidad,         setCantidad]         = useState(1);
 
-  // Shared state
   const [costoCompra, setCostoCompra] = useState('');
   const [error,       setError]       = useState('');
 
@@ -513,7 +506,8 @@ function PasoCompraCliente({ sucursalKey, sucursalLista, onExito, onDuplicadosEn
   const productosSerial   = normalizarProductos(productosSerialRaw).filter((p) => p.nombre.toLowerCase().includes(busquedaSerial.toLowerCase()));
   const productosCantidad = normalizarProductos(productosCantidadRaw).filter((p) => p.nombre.toLowerCase().includes(busquedaCantidad.toLowerCase()));
   const imeisValidos      = imeis.filter((i) => i.trim()).length;
-  const costo             = costoCompra ? Number(costoCompra) : null;
+  // IMPORTANTE: costoCompra ya es number (viene de InputMoneda), convertir con Number() es seguro
+  const costo             = costoCompra !== '' ? Number(costoCompra) : null;
   const nombreCliente     = clienteSeleccionado?.nombre || '';
 
   const mutCrearLinea = useMutation({
@@ -521,7 +515,7 @@ function PasoCompraCliente({ sucursalKey, sucursalLista, onExito, onDuplicadosEn
       nombre:   nuevaLinea.nombre,
       marca:    nuevaLinea.marca,
       modelo:   nuevaLinea.modelo,
-      precio:   nuevaLinea.precio ? Number(nuevaLinea.precio) : null,
+      precio:   nuevaLinea.precio !== '' ? Number(nuevaLinea.precio) : null,
       linea_id: nuevaLinea.linea_id ? Number(nuevaLinea.linea_id) : null,
     }),
     onSuccess: (res) => {
@@ -537,8 +531,8 @@ function PasoCompraCliente({ sucursalKey, sucursalLista, onExito, onDuplicadosEn
     mutationFn: () => crearProductoCantidad({
       nombre:         nuevoProducto.nombre,
       unidad_medida:  nuevoProducto.unidad_medida,
-      costo_unitario: nuevoProducto.costo_unitario ? Number(nuevoProducto.costo_unitario) : null,
-      precio:         nuevoProducto.precio         ? Number(nuevoProducto.precio)         : null,
+      costo_unitario: nuevoProducto.costo_unitario !== '' ? Number(nuevoProducto.costo_unitario) : null,
+      precio:         nuevoProducto.precio         !== '' ? Number(nuevoProducto.precio)         : null,
       cliente_origen: nombreCliente,
       linea_id:       nuevoProducto.linea_id ? Number(nuevoProducto.linea_id) : null,
     }),
@@ -627,10 +621,8 @@ function PasoCompraCliente({ sucursalKey, sucursalLista, onExito, onDuplicadosEn
   return (
     <div className="flex flex-col gap-4">
 
-      {/* 1. Cliente */}
       <BuscadorCliente clienteSeleccionado={clienteSeleccionado} onClienteSeleccionado={setClienteSeleccionado} />
 
-      {/* 2. Tipo de producto */}
       <div>
         <p className="text-xs font-medium text-gray-600 mb-1.5">Tipo de producto</p>
         <div className="flex gap-2">
@@ -647,7 +639,6 @@ function PasoCompraCliente({ sucursalKey, sucursalLista, onExito, onDuplicadosEn
         </div>
       </div>
 
-      {/* 3a. Producto serial */}
       {tipoProducto === 'serial' && (
         <div className="flex flex-col gap-3">
           {!lineaSel ? (
@@ -672,9 +663,18 @@ function PasoCompraCliente({ sucursalKey, sucursalLista, onExito, onDuplicadosEn
                     <Input placeholder="Marca" value={nuevaLinea.marca} onChange={(e) => setNuevaLinea({ ...nuevaLinea, marca: e.target.value })} />
                     <Input placeholder="Modelo" value={nuevaLinea.modelo} onChange={(e) => setNuevaLinea({ ...nuevaLinea, modelo: e.target.value })} />
                   </div>
-                  {/* ── CAMBIO: precio de venta solo visible para admin_negocio ── */}
                   {puedeVerCosto && (
-                    <Input type="number" placeholder="Precio de venta" value={nuevaLinea.precio} onChange={(e) => setNuevaLinea({ ...nuevaLinea, precio: e.target.value })} />
+                    // CAMBIO: input number → InputMoneda
+                    <div className="flex flex-col gap-1">
+                      <label className="text-xs text-gray-600 font-medium">Precio de venta</label>
+                      <InputMoneda
+                        value={nuevaLinea.precio}
+                        onChange={(val) => setNuevaLinea({ ...nuevaLinea, precio: val })}
+                        placeholder="0"
+                        className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-sm
+                          focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                      />
+                    </div>
                   )}
                   <SelectLinea value={nuevaLinea.linea_id} onChange={(val) => setNuevaLinea({ ...nuevaLinea, linea_id: val })} />
                   <div className="flex gap-2">
@@ -709,7 +709,6 @@ function PasoCompraCliente({ sucursalKey, sucursalLista, onExito, onDuplicadosEn
         </div>
       )}
 
-      {/* 3b. Producto cantidad */}
       {tipoProducto === 'cantidad' && (
         <div className="flex flex-col gap-3">
           {!productoSel ? (
@@ -730,11 +729,29 @@ function PasoCompraCliente({ sucursalKey, sucursalLista, onExito, onDuplicadosEn
                 <div className="bg-emerald-50 rounded-xl p-3 flex flex-col gap-2 border border-emerald-100">
                   <p className="text-xs font-semibold text-emerald-700">Nuevo producto</p>
                   <Input placeholder="Nombre del producto" value={nuevoProducto.nombre} onChange={(e) => setNuevoProducto({ ...nuevoProducto, nombre: e.target.value })} />
-                  {/* ── CAMBIO: precios solo visibles para admin_negocio ─────── */}
                   {puedeVerCosto && (
+                    // CAMBIO: inputs number → InputMoneda
                     <div className="flex gap-2">
-                      <Input type="number" placeholder="Precio compra" value={nuevoProducto.costo_unitario} onChange={(e) => setNuevoProducto({ ...nuevoProducto, costo_unitario: e.target.value })} />
-                      <Input type="number" placeholder="Precio venta" value={nuevoProducto.precio} onChange={(e) => setNuevoProducto({ ...nuevoProducto, precio: e.target.value })} />
+                      <div className="flex-1 flex flex-col gap-1">
+                        <label className="text-xs text-gray-600 font-medium">Precio compra</label>
+                        <InputMoneda
+                          value={nuevoProducto.costo_unitario}
+                          onChange={(val) => setNuevoProducto({ ...nuevoProducto, costo_unitario: val })}
+                          placeholder="0"
+                          className="w-full px-2.5 py-2 bg-white border border-gray-200 rounded-lg text-xs
+                            focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                        />
+                      </div>
+                      <div className="flex-1 flex flex-col gap-1">
+                        <label className="text-xs text-gray-600 font-medium">Precio venta</label>
+                        <InputMoneda
+                          value={nuevoProducto.precio}
+                          onChange={(val) => setNuevoProducto({ ...nuevoProducto, precio: val })}
+                          placeholder="0"
+                          className="w-full px-2.5 py-2 bg-white border border-gray-200 rounded-lg text-xs
+                            focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                        />
+                      </div>
                     </div>
                   )}
                   <SelectLinea value={nuevoProducto.linea_id} onChange={(val) => setNuevoProducto({ ...nuevoProducto, linea_id: val })} />
@@ -757,12 +774,18 @@ function PasoCompraCliente({ sucursalKey, sucursalLista, onExito, onDuplicadosEn
         </div>
       )}
 
-      {/* 4. Precio pagado al cliente (visible para todos los roles) */}
+      {/* Precio pagado al cliente */}
       {hayProducto && (
         <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-3 flex flex-col gap-1.5">
           <div className="flex items-center gap-1.5"><CheckCircle size={13} className="text-emerald-600" /><p className="text-xs font-semibold text-emerald-700">Precio pagado al cliente</p></div>
-          <input type="number" placeholder="0" value={costoCompra} onChange={(e) => setCostoCompra(e.target.value)} onWheel={(e) => e.target.blur()}
-            className="w-full px-2.5 py-2 bg-white border border-emerald-200 rounded-lg text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-emerald-400" />
+          {/* CAMBIO: input number → InputMoneda */}
+          <InputMoneda
+            value={costoCompra}
+            onChange={setCostoCompra}
+            placeholder="0"
+            className="w-full px-2.5 py-2 bg-white border border-emerald-200 rounded-lg text-sm
+              text-gray-700 focus:outline-none focus:ring-2 focus:ring-emerald-400"
+          />
           <p className="text-xs text-emerald-600">Se registrará en el costo del producto como referencia.</p>
         </div>
       )}
@@ -787,9 +810,7 @@ function PasoSerial({ sucursalKey, onExito, onDuplicadosEncontrados }) {
   const queryClient        = useQueryClient();
   const { esAdminNegocio } = useAuth();
   const esAdmin            = esAdminNegocio();
-  // ── CAMBIO: supervisores y vendedores no ven información de proveedor ────────
   const puedeVerProveedor  = esAdmin;
-  // ── CAMBIO: solo admin_negocio ve campos de costo al crear productos ─────────
   const puedeVerCosto      = esAdmin;
 
   const [busqueda,     setBusqueda]     = useState('');
@@ -811,7 +832,6 @@ function PasoSerial({ sucursalKey, onExito, onDuplicadosEncontrados }) {
   });
   const productos = normalizarProductos(productosData).filter((p) => p.nombre.toLowerCase().includes(busqueda.toLowerCase()));
 
-  // ── CAMBIO: solo pre-carga proveedor si el rol lo permite ────────────────────
   const handleSeleccionarLinea = (producto) => {
     setLineaSel(producto);
     setError('');
@@ -820,12 +840,12 @@ function PasoSerial({ sucursalKey, onExito, onDuplicadosEncontrados }) {
 
   const mutCrearLinea = useMutation({
     mutationFn: () => crearProductoSerial({
-      nombre:      nuevaLinea.nombre,
-      marca:       nuevaLinea.marca,
-      modelo:      nuevaLinea.modelo,
-      precio:      Number(nuevaLinea.precio),
+      nombre:       nuevaLinea.nombre,
+      marca:        nuevaLinea.marca,
+      modelo:       nuevaLinea.modelo,
+      precio:       nuevaLinea.precio !== '' ? Number(nuevaLinea.precio) : null,
       proveedor_id: proveedorId ? Number(proveedorId) : null,
-      linea_id:    nuevaLinea.linea_id ? Number(nuevaLinea.linea_id) : null,
+      linea_id:     nuevaLinea.linea_id ? Number(nuevaLinea.linea_id) : null,
     }),
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ['productos-serial'], exact: false });
@@ -839,8 +859,7 @@ function PasoSerial({ sucursalKey, onExito, onDuplicadosEncontrados }) {
   const mutConfirmar = useMutation({
     mutationFn: async () => {
       const imeisValidos = imeis.filter((i) => i.trim());
-      // ── CAMBIO: costo y proveedor solo aplican para admin_negocio ────────────
-      const costo = puedeVerProveedor && costoCompra ? Number(costoCompra) : null;
+      const costo = puedeVerProveedor && costoCompra !== '' ? Number(costoCompra) : null;
       if (puedeVerProveedor && proveedorId && modoPago) {
         await crearCompra(buildPayloadCompra({ proveedorId, monto: costo ? costo * imeisValidos.length : 0, modoPago, lineas: imeisValidos.map((imei) => ({ nombre_producto: lineaSel.nombre, imei: imei.trim(), cantidad: 1, precio_unitario: costo || 0, producto_id: lineaSel.id, reactivar_serial_id: reactivarMapRef.current[imei.trim()] || null })) }));
       } else {
@@ -872,7 +891,6 @@ function PasoSerial({ sucursalKey, onExito, onDuplicadosEncontrados }) {
     setError('');
     if (!lineaSel) return setError('Selecciona una linea de producto');
     if (imeisValidos === 0) return setError('Ingresa al menos un IMEI');
-    // ── CAMBIO: validación de modo pago solo aplica si puede ver proveedor ─────
     if (puedeVerProveedor && proveedorId && !modoPago) return setError('Selecciona si fue pagado o a credito');
     const imeisLimpios = imeis.filter((i) => i.trim());
     setVerificando(true);
@@ -912,9 +930,19 @@ function PasoSerial({ sucursalKey, onExito, onDuplicadosEncontrados }) {
                 <Input id="sl-marca" placeholder="Marca" value={nuevaLinea.marca} onChange={(e) => setNuevaLinea({ ...nuevaLinea, marca: e.target.value })} onKeyDown={(e) => e.key === 'Enter' && document.getElementById('sl-modelo')?.focus()} />
                 <Input id="sl-modelo" placeholder="Modelo" value={nuevaLinea.modelo} onChange={(e) => setNuevaLinea({ ...nuevaLinea, modelo: e.target.value })} onKeyDown={(e) => e.key === 'Enter' && document.getElementById('sl-precio')?.focus()} />
               </div>
-              {/* ── CAMBIO: precio de venta solo visible para admin_negocio ── */}
               {puedeVerCosto && (
-                <Input id="sl-precio" type="number" placeholder="Precio de venta" value={nuevaLinea.precio} onChange={(e) => setNuevaLinea({ ...nuevaLinea, precio: e.target.value })} />
+                // CAMBIO: input number → InputMoneda
+                <div className="flex flex-col gap-1">
+                  <label className="text-xs text-gray-600 font-medium">Precio de venta</label>
+                  <InputMoneda
+                    id="sl-precio"
+                    value={nuevaLinea.precio}
+                    onChange={(val) => setNuevaLinea({ ...nuevaLinea, precio: val })}
+                    placeholder="0"
+                    className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-sm
+                      focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
               )}
               <SelectLinea value={nuevaLinea.linea_id} onChange={(val) => setNuevaLinea({ ...nuevaLinea, linea_id: val })} />
               <div className="flex gap-2">
@@ -943,7 +971,6 @@ function PasoSerial({ sucursalKey, onExito, onDuplicadosEncontrados }) {
             ))}
           </div>
           <button onClick={() => setImeis((prev) => [...prev, ''])} className="text-xs text-blue-500 hover:text-blue-700 font-medium text-left">+ Agregar campo</button>
-          {/* ── CAMBIO: InfoCompra solo visible para admin_negocio ───────────── */}
           {puedeVerProveedor && (
             <InfoCompra
               proveedorId={proveedorId}
@@ -967,9 +994,7 @@ function PasoCantidad({ sucursalKey, onExito }) {
   const queryClient        = useQueryClient();
   const { esAdminNegocio } = useAuth();
   const esAdmin            = esAdminNegocio();
-  // ── CAMBIO: supervisores y vendedores no ven información de proveedor ────────
   const puedeVerProveedor  = esAdmin;
-  // ── CAMBIO: solo admin_negocio ve campos de costo al crear productos ─────────
   const puedeVerCosto      = esAdmin;
 
   const [busqueda,      setBusqueda]      = useState('');
@@ -988,13 +1013,13 @@ function PasoCantidad({ sucursalKey, onExito }) {
   });
   const productos = normalizarProductos(productosData).filter((p) => p.nombre.toLowerCase().includes(busqueda.toLowerCase()));
 
-  // ── CAMBIO: solo pre-carga proveedor/costo si el rol lo permite ──────────────
   const handleSeleccionarProducto = (producto) => {
     setProductoSel(producto);
     setError('');
     if (puedeVerProveedor) {
       if (producto.proveedor_id) setProveedorId(String(producto.proveedor_id));
-      if (producto.costo_unitario) setCostoCompra(String(producto.costo_unitario));
+      // costoCompra ya espera number, no string
+      if (producto.costo_unitario) setCostoCompra(Number(producto.costo_unitario));
     }
   };
 
@@ -1002,10 +1027,10 @@ function PasoCantidad({ sucursalKey, onExito }) {
     mutationFn: () => crearProductoCantidad({
       nombre:         nuevoProducto.nombre,
       unidad_medida:  nuevoProducto.unidad_medida,
-      costo_unitario: nuevoProducto.costo_unitario ? Number(nuevoProducto.costo_unitario) : null,
-      precio:         nuevoProducto.precio         ? Number(nuevoProducto.precio)         : null,
-      proveedor_id:   proveedorId                  ? Number(proveedorId)                  : null,
-      linea_id:       nuevoProducto.linea_id        ? Number(nuevoProducto.linea_id)       : null,
+      costo_unitario: nuevoProducto.costo_unitario !== '' ? Number(nuevoProducto.costo_unitario) : null,
+      precio:         nuevoProducto.precio         !== '' ? Number(nuevoProducto.precio)         : null,
+      proveedor_id:   proveedorId                  ? Number(proveedorId)                          : null,
+      linea_id:       nuevoProducto.linea_id       ? Number(nuevoProducto.linea_id)               : null,
     }),
     onSuccess: (res) => { queryClient.invalidateQueries({ queryKey: ['productos-cantidad'], exact: false }); setProductoSel(res.data.data); setCreandoNuevo(false); },
     onError: (e) => setError(e.response?.data?.error || 'Error'),
@@ -1014,8 +1039,7 @@ function PasoCantidad({ sucursalKey, onExito }) {
   const mutConfirmar = useMutation({
     mutationFn: async () => {
       const cantidadNum = Number(cantidad);
-      // ── CAMBIO: costo y proveedor solo aplican para admin_negocio ────────────
-      const costo = puedeVerProveedor ? (costoCompra ? Number(costoCompra) : null) : null;
+      const costo = puedeVerProveedor ? (costoCompra !== '' ? Number(costoCompra) : null) : null;
       if (puedeVerProveedor && proveedorId && modoPago) {
         await crearCompra(buildPayloadCompra({ proveedorId, monto: costo ? costo * cantidadNum : 0, modoPago, lineas: [{ nombre_producto: productoSel.nombre, cantidad: cantidadNum, precio_unitario: costo || 0, producto_id: productoSel.id }] }));
       } else {
@@ -1030,7 +1054,6 @@ function PasoCantidad({ sucursalKey, onExito }) {
     setError('');
     if (!productoSel) return setError('Selecciona un producto');
     if (!cantidad || cantidad < 1) return setError('La cantidad debe ser mayor a 0');
-    // ── CAMBIO: validación de modo pago solo aplica si puede ver proveedor ─────
     if (puedeVerProveedor && proveedorId && !modoPago) return setError('Selecciona si fue pagado o a credito');
     mutConfirmar.mutate();
   };
@@ -1060,11 +1083,29 @@ function PasoCantidad({ sucursalKey, onExito }) {
             <div className="bg-green-50 rounded-xl p-3 flex flex-col gap-2">
               <p className="text-xs font-semibold text-green-700">Nuevo producto</p>
               <Input placeholder="Nombre del producto" value={nuevoProducto.nombre} onChange={(e) => setNuevoProducto({ ...nuevoProducto, nombre: e.target.value })} />
-              {/* ── CAMBIO: precios solo visibles para admin_negocio ─────────── */}
               {puedeVerCosto && (
+                // CAMBIO: inputs number → InputMoneda
                 <div className="flex gap-2">
-                  <Input type="number" placeholder="Precio compra" value={nuevoProducto.costo_unitario} onChange={(e) => setNuevoProducto({ ...nuevoProducto, costo_unitario: e.target.value })} />
-                  <Input type="number" placeholder="Precio venta" value={nuevoProducto.precio} onChange={(e) => setNuevoProducto({ ...nuevoProducto, precio: e.target.value })} />
+                  <div className="flex-1 flex flex-col gap-1">
+                    <label className="text-xs text-gray-600 font-medium">Precio compra</label>
+                    <InputMoneda
+                      value={nuevoProducto.costo_unitario}
+                      onChange={(val) => setNuevoProducto({ ...nuevoProducto, costo_unitario: val })}
+                      placeholder="0"
+                      className="w-full px-2.5 py-2 bg-white border border-gray-200 rounded-lg text-xs
+                        focus:outline-none focus:ring-2 focus:ring-green-400"
+                    />
+                  </div>
+                  <div className="flex-1 flex flex-col gap-1">
+                    <label className="text-xs text-gray-600 font-medium">Precio venta</label>
+                    <InputMoneda
+                      value={nuevoProducto.precio}
+                      onChange={(val) => setNuevoProducto({ ...nuevoProducto, precio: val })}
+                      placeholder="0"
+                      className="w-full px-2.5 py-2 bg-white border border-gray-200 rounded-lg text-xs
+                        focus:outline-none focus:ring-2 focus:ring-green-400"
+                    />
+                  </div>
                 </div>
               )}
               <SelectLinea value={nuevoProducto.linea_id} onChange={(val) => setNuevoProducto({ ...nuevoProducto, linea_id: val })} />
@@ -1082,7 +1123,6 @@ function PasoCantidad({ sucursalKey, onExito }) {
             <button onClick={() => { setProductoSel(null); setCantidad(1); setCostoCompra(''); setProveedorId(''); setModoPago(null); }} className="text-xs text-green-400 hover:text-green-600 underline">Cambiar</button>
           </div>
           <Input label="Cantidad a agregar" type="number" autoFocus value={cantidad} onChange={(e) => setCantidad(e.target.value)} onWheel={(e) => e.target.blur()} onKeyDown={(e) => e.key === 'Enter' && handleConfirmar()} />
-          {/* ── CAMBIO: InfoCompra solo visible para admin_negocio ───────────── */}
           {puedeVerProveedor && (
             <InfoCompra
               proveedorId={proveedorId}
@@ -1119,7 +1159,7 @@ export function ModalAgregarProducto({ onClose }) {
     if (paraReactivar.length > 0) { setSerializesDuplicados(paraReactivar); setModalReactivar(true); }
   };
 
-  const handleReactivar       = () => { confirmarReactivarRef.current?.(serialesDuplicados); setModalReactivar(false); setSerializesDuplicados([]); };
+  const handleReactivar         = () => { confirmarReactivarRef.current?.(serialesDuplicados); setModalReactivar(false); setSerializesDuplicados([]); };
   const handleCancelarReactivar = () => { setModalReactivar(false); setSerializesDuplicados([]); };
 
   const tituloModal = tipo === 'serial' ? 'Agregar seriales' : tipo === 'cantidad' ? 'Agregar stock' : tipo === 'cliente' ? 'Compra a cliente' : 'Agregar producto';
