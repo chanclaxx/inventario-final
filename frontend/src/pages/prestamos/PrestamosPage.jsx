@@ -373,18 +373,55 @@ function GrupoPrestatario({ nombre, prestamos, saldoTotal, onAbonar, onDevolver,
                 Ver {cerrados.length} cerrado(s)
               </summary>
               <div className="flex flex-col gap-2 mt-2">
-                {cerrados.map((p) => (
-                  <div key={p.id}
-                    className="bg-gray-50 border border-gray-100 rounded-xl p-3 flex justify-between items-center">
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-gray-600 truncate">{p.nombre_producto}</p>
-                      {p.empleado_nombre && (
-                        <p className="text-xs text-gray-400">→ {p.empleado_nombre}</p>
-                      )}
+                {cerrados.map((p) => {
+                  const prestamoCerradoId = p.id;
+                  const esSaldado         = p.estado === 'Saldado';
+                  return (
+                    <div key={prestamoCerradoId}
+                      className="bg-gray-50 border border-gray-100 rounded-xl p-3 flex flex-col gap-2">
+
+                      {/* Fila superior: nombre + badge */}
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-gray-600 truncate">{p.nombre_producto}</p>
+                          {p.imei && (
+                            <p className="text-xs text-gray-400 font-mono">{p.imei}</p>
+                          )}
+                          {!p.imei && p.cantidad_prestada > 1 && (
+                            <p className="text-xs text-gray-400">Cantidad: {p.cantidad_prestada}</p>
+                          )}
+                          {p.empleado_nombre && (
+                            <p className="text-xs text-gray-400">→ {p.empleado_nombre}</p>
+                          )}
+                        </div>
+                        <Badge variant={esSaldado ? 'green' : 'gray'} className="flex-shrink-0">
+                          {p.estado}
+                        </Badge>
+                      </div>
+
+                      {/* Fila inferior: montos + fecha */}
+                      <div className="flex items-center justify-between text-xs border-t border-gray-100 pt-2">
+                        <div className="flex flex-col gap-0.5">
+                          <span className="text-gray-400">
+                            Valor: <span className="text-gray-600 font-medium">{formatCOP(Number(p.valor_prestamo))}</span>
+                          </span>
+                          {esSaldado && (
+                            <span className="text-green-600 font-medium">
+                              ✓ Abonado: {formatCOP(Number(p.total_abonado))}
+                            </span>
+                          )}
+                          {!esSaldado && (
+                            <span className="text-gray-400">
+                              Abonado: <span className="text-gray-600">{formatCOP(Number(p.total_abonado))}</span>
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-gray-400">{formatFechaHora(p.fecha)}</span>
+                      </div>
+
                     </div>
-                    <Badge variant={p.estado === 'Saldado' ? 'green' : 'gray'}>{p.estado}</Badge>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </details>
           )}
