@@ -50,7 +50,6 @@ const getLineas = async (compraId) => {
   return rows;
 };
 
-// Vista global: filtra por negocio a través del proveedor (que es del negocio)
 const findByProveedor = async (proveedorId, sucursalId, negocioId) => {
   const filtro = sucursalId ? 'c.sucursal_id = $2' : 'su.negocio_id = $2';
   const param  = sucursalId ?? negocioId;
@@ -111,6 +110,7 @@ const findByIdYNegocio = async (id, negocioId) => {
   return rows[0] || null;
 };
 
+// Incrementa el stock — se usa dentro de transacciones de compra
 const ajustarStockCantidad = async (client, productoId, cantidad) => {
   await client.query(
     'UPDATE productos_cantidad SET stock = stock + $1 WHERE id = $2',
@@ -118,8 +118,18 @@ const ajustarStockCantidad = async (client, productoId, cantidad) => {
   );
 };
 
+// NUEVO: actualiza costo_unitario con el promedio ponderado dentro de la transacción.
+// Se llama inmediatamente después de ajustarStockCantidad en compras.service.
+const actualizarCostoPromedio = async (client, productoId, costoPromedio) => {
+  await client.query(
+    'UPDATE productos_cantidad SET costo_unitario = $1 WHERE id = $2',
+    [costoPromedio, productoId]
+  );
+};
+
 module.exports = {
   findAll, findById, findByIdYNegocio,
   perteneceAlNegocio, findByProveedor,
-  getLineas, create, insertarLinea, ajustarStockCantidad,
+  getLineas, create, insertarLinea,
+  ajustarStockCantidad, actualizarCostoPromedio,
 };
