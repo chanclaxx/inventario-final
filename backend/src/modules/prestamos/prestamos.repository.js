@@ -125,5 +125,5 @@ const actualizarCantidadYValor = async (client, id, nuevaCantidad, nuevoValor) =
 module.exports = {
   findAll, findById, findByIdYNegocio,
   perteneceAlNegocio,
-  getAbonos, create, insertarAbono, updateEstado, ajustarStock,
+  getAbonos, create, insertarAbono, updateEstado, ajustarStock,actualizarCantidadYValor
 };
