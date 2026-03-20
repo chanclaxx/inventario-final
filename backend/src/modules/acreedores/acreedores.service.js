@@ -33,5 +33,29 @@ const registrarMovimiento = async (negocioId, acreedorId, datos) => {
   if (!acreedor) throw { status: 404, message: 'Acreedor no encontrado' };
   return repo.insertarMovimiento({ ...datos, acreedor_id: acreedorId });
 };
+// ─── PARCHE: acreedores.service.js ───────────────────────────────────────────
+// Agregar esta función al final del archivo, antes de module.exports,
+// y agregarla al module.exports existente.
 
-module.exports = { getAcreedores, getAcreedorById, crearAcreedor, registrarMovimiento };
+const eliminarAcreedor = async (negocioId, acreedorId) => {
+  try {
+    await repo.eliminarSeguro(negocioId, acreedorId);
+  } catch (err) {
+    // Error 23503: foreign_key_violation de Postgres.
+    // Red de seguridad por si hay FKs hacia acreedores que no chequeamos
+    // explícitamente (ej: tablas futuras, migraciones que agreguen referencias).
+    if (err.code === '23503') {
+      throw {
+        status: 409,
+        message: 'Este acreedor tiene registros vinculados en el sistema y no puede eliminarse.',
+      };
+    }
+    // Errores propios del repo (404, 409 con mensaje descriptivo) — relanzar tal cual
+    throw err;
+  }
+};
+
+// ── module.exports actualizado ────────────────────────────────────────────────
+// module.exports = { getAcreedores, getAcreedorById, crearAcreedor, registrarMovimiento, eliminarAcreedor };
+
+module.exports = { getAcreedores, getAcreedorById, crearAcreedor, registrarMovimiento,eliminarAcreedor };

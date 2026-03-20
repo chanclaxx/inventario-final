@@ -80,5 +80,60 @@ const insertarMovimiento = async ({
   `, [acreedor_id, usuario_id, tipo, valor, descripcion, firma ?? null, compra_id || null]);
   return rows[0];
 };
+const eliminarSeguro = async (negocioId, acreedorId) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+ 
+    // Bloquear la fila del acreedor durante toda la transacción.
+    // Si otro proceso intenta tocar este acreedor simultáneamente, esperará.
+    // Además verifica que pertenezca al negocio — seguridad entre negocios.
+    const { rows: own } = await client.query(
+      `SELECT id, proveedor_id
+       FROM acreedores
+       WHERE id = $1 AND negocio_id = $2
+       FOR UPDATE`,
+      [acreedorId, negocioId]
+    );
+    if (!own.length) {
+      throw { status: 404, message: 'Acreedor no encontrado' };
+    }
+ 
+    // Bloquear si está vinculado a un proveedor
+    if (own[0].proveedor_id) {
+      throw {
+        status: 409,
+        message: 'Este acreedor está vinculado a un proveedor. Desvincúlalo primero desde Proveedores.',
+      };
+    }
+ 
+    // Contar movimientos DENTRO de la transacción (con el lock activo).
+    // Así aunque otro proceso intente insertar un movimiento en paralelo,
+    // tendrá que esperar a que esta transacción termine → no hay race condition.
+    const { rows: movs } = await client.query(
+      `SELECT COUNT(*) AS total FROM movimientos_acreedor WHERE acreedor_id = $1`,
+      [acreedorId]
+    );
+    if (Number(movs[0].total) > 0) {
+      throw {
+        status: 409,
+        message: `Este acreedor tiene ${movs[0].total} movimiento(s) registrado(s). No se puede eliminar.`,
+      };
+    }
+ 
+    // Eliminar — negocio_id en WHERE como doble protección
+    await client.query(
+      `DELETE FROM acreedores WHERE id = $1 AND negocio_id = $2`,
+      [acreedorId, negocioId]
+    );
+ 
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+};
 
-module.exports = { findAll, findById, getMovimientos, create, insertarMovimiento };
+module.exports = { findAll, findById, getMovimientos, create, insertarMovimiento,eliminarSeguro };

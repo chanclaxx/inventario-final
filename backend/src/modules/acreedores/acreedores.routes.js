@@ -22,5 +22,7 @@ router.get('/',                 ctrl.getAcreedores);
 router.get('/:id',              ctrl.getAcreedorById);
 router.post('/',                requireNivel('supervisor'), ctrl.crearAcreedor);
 router.post('/:id/movimientos', validarMovimiento, validate, ctrl.registrarMovimiento);
+router.delete('/:id', requireNivel('admin_negocio'), ctrl.eliminarAcreedor);
+
 
 module.exports = router;

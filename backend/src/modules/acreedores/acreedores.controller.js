@@ -30,5 +30,17 @@ const registrarMovimiento = async (req, res, next) => {
     res.json({ ok: true, data, message: 'Movimiento registrado correctamente' });
   } catch (err) { next(err); }
 };
+// ─── PARCHE: acreedores.controller.js ────────────────────────────────────────
+// Agregar este handler al final del archivo, antes de module.exports,
+// y agregarlo al module.exports existente.
 
-module.exports = { getAcreedores, getAcreedorById, crearAcreedor, registrarMovimiento };
+const eliminarAcreedor = async (req, res, next) => {
+  try {
+    await service.eliminarAcreedor(req.user.negocio_id, req.params.id);
+    res.json({ ok: true, message: 'Acreedor eliminado correctamente' });
+  } catch (err) { next(err); }
+};
+
+// ── module.exports actualizado ────────────────────────────────────────────────
+// module.exports = { getAcreedores, getAcreedorById, crearAcreedor, registrarMovimiento, eliminarAcreedor };
+module.exports = { getAcreedores, getAcreedorById, crearAcreedor, registrarMovimiento,eliminarAcreedor };

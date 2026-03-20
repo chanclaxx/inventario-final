@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getAcreedores, getAcreedorById, crearAcreedor, registrarMovimiento } from '../../api/acreedores.api';
-import { getConfig } from '../../api/config.api';
+import { getAcreedores, getAcreedorById, crearAcreedor, registrarMovimiento, eliminarAcreedor } from '../../api/acreedores.api';
+import { getConfig, verificarPin } from '../../api/config.api';
 import { formatCOP, formatFechaHora } from '../../utils/formatters';
 import { Button }      from '../../components/ui/Button';
 import { Input }       from '../../components/ui/Input';
@@ -12,7 +12,7 @@ import { Spinner }     from '../../components/ui/Spinner';
 import { EmptyState }  from '../../components/ui/EmptyState';
 import { SearchInput } from '../../components/ui/SearchInput';
 import { ReciboAcreedor } from '../../components/Reciboacreedor';
-import { Users, Plus, ChevronRight, ChevronLeft, ChevronUp, PenLine, Printer } from 'lucide-react';
+import { Users, Plus, ChevronRight, ChevronLeft, ChevronUp, PenLine, Printer, Trash2, AlertTriangle } from 'lucide-react';
 import api from '../../api/axios.config';
 import { getCompraById } from '../../api/compras.api';
 
@@ -441,7 +441,87 @@ function ListaAcreedores({ acreedores, acreedorSel, isLoading, busqueda, setBusq
 // ─────────────────────────────────────────────
 // DETALLE ACREEDOR
 // ─────────────────────────────────────────────
-function DetalleAcreedor({ detalle, loadingDetalle, movimientosUI, onRegistrar, onImprimir, onVolver }) {
+// ─────────────────────────────────────────────
+// MODAL ELIMINAR ACREEDOR
+// ─────────────────────────────────────────────
+function ModalEliminarAcreedor({ acreedor, onClose, onEliminar }) {
+  const [pin,         setPin]         = useState('');
+  const [error,       setError]       = useState('');
+  const [verificando, setVerificando] = useState(false);
+
+  const handleConfirmar = async () => {
+    if (!pin.trim()) { setError('Ingresa el PIN de administrador'); return; }
+    setVerificando(true);
+    setError('');
+    try {
+      const res = await verificarPin(pin.trim());
+      if (!res.data.valido) { setError('PIN incorrecto'); return; }
+      onEliminar();
+    } catch {
+      setError('Error al verificar el PIN. Intenta de nuevo.');
+    } finally {
+      setVerificando(false);
+    }
+  };
+
+  return (
+    <Modal open onClose={onClose} title="Eliminar acreedor" size="sm">
+      <div className="flex flex-col gap-4">
+
+        <div className="flex flex-col items-center gap-3 py-2">
+          <div className="w-14 h-14 rounded-full bg-red-50 border-2 border-red-200
+            flex items-center justify-center">
+            <AlertTriangle size={26} className="text-red-500" />
+          </div>
+          <div className="text-center">
+            <p className="text-base font-semibold text-gray-900">{acreedor.nombre}</p>
+            <p className="text-sm text-gray-500 mt-1">Esta acción no se puede deshacer</p>
+          </div>
+        </div>
+
+        <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 flex flex-col gap-1">
+          <p className="text-sm font-semibold text-red-700">¿Estás seguro?</p>
+          <p className="text-xs text-red-600 leading-relaxed">
+            Se eliminarán permanentemente todos los datos de este acreedor.
+            Esta operación no se puede revertir.
+          </p>
+        </div>
+
+        <Input
+          label="PIN de administrador"
+          type="password"
+          placeholder="••••"
+          value={pin}
+          onChange={(e) => { setPin(e.target.value); setError(''); }}
+          onKeyDown={(e) => { if (e.key === 'Enter') handleConfirmar(); }}
+          autoFocus
+        />
+
+        {error && <p className="text-sm text-red-500">{error}</p>}
+
+        <div className="flex gap-2 pt-1">
+          <button
+            onClick={onClose}
+            className="flex-1 py-2 rounded-xl text-sm font-medium border border-gray-200
+              bg-gray-50 text-gray-600 hover:bg-gray-100 transition-colors"
+          >
+            Cancelar
+          </button>
+          <Button
+            className="flex-1 bg-red-600 hover:bg-red-700 text-white"
+            loading={verificando}
+            onClick={handleConfirmar}
+          >
+            <Trash2 size={14} /> Eliminar
+          </Button>
+        </div>
+
+      </div>
+    </Modal>
+  );
+}
+
+function DetalleAcreedor({ detalle, loadingDetalle, movimientosUI, onRegistrar, onImprimir, onVolver, onEliminar }) {
   if (loadingDetalle) return <Spinner className="py-20" />;
 
   return (
@@ -460,9 +540,19 @@ function DetalleAcreedor({ detalle, loadingDetalle, movimientosUI, onRegistrar, 
             {Number(detalle?.saldo) > 0 ? `Debemos: ${formatCOP(detalle?.saldo)}` : 'Sin deuda'}
           </p>
         </div>
-        <Button onClick={onRegistrar}>
-          <PenLine size={16} /> Registrar
-        </Button>
+        <div className="flex gap-2">
+          <Button onClick={onRegistrar}>
+            <PenLine size={16} /> Registrar
+          </Button>
+          <button
+            onClick={onEliminar}
+            className="p-2 rounded-xl border border-dashed border-red-200 text-red-400
+              hover:text-red-600 hover:bg-red-50 hover:border-red-300 transition-colors"
+            title="Eliminar acreedor"
+          >
+            <Trash2 size={16} />
+          </button>
+        </div>
       </div>
 
       <div className="flex flex-col gap-2">
@@ -512,11 +602,27 @@ function DetalleAcreedor({ detalle, loadingDetalle, movimientosUI, onRegistrar, 
 // PÁGINA PRINCIPAL
 // ─────────────────────────────────────────────
 export default function AcreedoresPage() {
-  const [busqueda,    setBusqueda]    = useState('');
-  const [acreedorSel, setAcreedorSel] = useState(null);
-  const [modalMov,    setModalMov]    = useState(false);
-  const [modalNuevo,  setModalNuevo]  = useState(false);
-  const [movImprimir, setMovImprimir] = useState(null);
+  const [busqueda,      setBusqueda]      = useState('');
+  const [acreedorSel,   setAcreedorSel]   = useState(null);
+  const [modalMov,      setModalMov]      = useState(false);
+  const [modalNuevo,    setModalNuevo]    = useState(false);
+  const [movImprimir,   setMovImprimir]   = useState(null);
+  const [modalEliminar, setModalEliminar] = useState(false);
+
+  const queryClient = useQueryClient();
+
+  const mutEliminar = useMutation({
+    mutationFn: () => eliminarAcreedor(acreedorSel.id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['acreedores'], exact: false });
+      setModalEliminar(false);
+      setAcreedorSel(null);
+    },
+    onError: (err) => {
+      setModalEliminar(false);
+      alert(err.response?.data?.error || 'No se puede eliminar este acreedor');
+    },
+  });
 
   const { data: acreedoresData, isLoading } = useQuery({
     queryKey: ['acreedores', busqueda],
@@ -556,6 +662,7 @@ export default function AcreedoresPage() {
     onRegistrar: () => setModalMov(true),
     onImprimir:  handleImprimir,
     onVolver:    handleVolver,
+    onEliminar:  () => setModalEliminar(true),
   };
 
   return (
@@ -591,6 +698,13 @@ export default function AcreedoresPage() {
       )}
       {modalNuevo && (
         <ModalNuevoAcreedor onClose={() => setModalNuevo(false)} />
+      )}
+      {modalEliminar && acreedorSel && (
+        <ModalEliminarAcreedor
+          acreedor={acreedorSel}
+          onClose={() => setModalEliminar(false)}
+          onEliminar={() => mutEliminar.mutate()}
+        />
       )}
       {movImprimir && detalle && (
         <ReciboAcreedor
