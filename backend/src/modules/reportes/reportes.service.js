@@ -238,8 +238,17 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
     END
   `;
 
-  // Query 1: Saldados cuya fecha de saldo (último abono) cae en el rango
+  // Query 1: Saldados cuya fecha de saldo (último abono) cae en el rango.
+  // Se usa CTE para calcular MAX(fecha) por préstamo primero y luego filtrar —
+  // las window functions no están permitidas en WHERE/HAVING directo en PostgreSQL.
   const { rows: saldadosRaw } = await pool.query(`
+    WITH ultimo_abono AS (
+      SELECT
+        prestamo_id,
+        MAX(fecha AT TIME ZONE 'UTC' AT TIME ZONE 'America/Bogota') AS fecha_saldo
+      FROM abonos_prestamo
+      GROUP BY prestamo_id
+    )
     SELECT
       p.id,
       p.nombre_producto,
@@ -248,25 +257,15 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
       p.valor_prestamo,
       p.total_abonado,
       p.estado,
-      p.fecha        AS fecha_prestamo,
-      -- Fecha del último abono = cuándo se saldó efectivamente
-      MAX(
-        ab.fecha AT TIME ZONE 'UTC' AT TIME ZONE 'America/Bogota'
-      ) AS fecha_saldo,
-      ${costoProductoCase} AS costo_producto
+      p.fecha                AS fecha_prestamo,
+      ua.fecha_saldo,
+      ${costoProductoCase}   AS costo_producto
     FROM prestamos p
-    JOIN abonos_prestamo ab ON ab.prestamo_id = p.id
+    JOIN ultimo_abono ua ON ua.prestamo_id = p.id
     WHERE p.sucursal_id = $1
-      AND p.estado = 'Saldado'
-      AND DATE(
-        MAX(ab.fecha AT TIME ZONE 'UTC' AT TIME ZONE 'America/Bogota')
-        OVER (PARTITION BY p.id)
-      ) BETWEEN $2 AND $3
-    GROUP BY p.id
-    HAVING DATE(
-      MAX(ab.fecha AT TIME ZONE 'UTC' AT TIME ZONE 'America/Bogota')
-    ) BETWEEN $2 AND $3
-    ORDER BY fecha_saldo DESC
+      AND p.estado      = 'Saldado'
+      AND DATE(ua.fecha_saldo) BETWEEN $2 AND $3
+    ORDER BY ua.fecha_saldo DESC
   `, [sucursalId, desde, hasta]);
 
   // Query 2: Activos — todos, sin filtro de fecha (siempre visibles como pendientes)
