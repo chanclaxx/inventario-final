@@ -2,14 +2,19 @@ import { useEffect } from 'react';
 import { formatCOP, formatFechaHora } from '../utils/formatters';
 
 /**
- * ReciboAcreedor — recibo térmico 80mm para movimientos de acreedores.
+ * ReciboAcreedor — recibo térmico para movimientos de acreedores.
  *
  * Props:
  *   acreedor  { nombre, cedula, telefono }
  *   movimiento { id, tipo, descripcion, valor, fecha, firma,
  *                saldo_antes, saldo_despues }
- *   config    { nombre_negocio, nit, direccion, telefono }
+ *   config    { nombre_negocio, nit, direccion, telefono,
+ *               impresion_escala, impresion_ancho_papel,
+ *               impresion_fuente_size, impresion_padding }
  *   onClose   () => void
+ *
+ * Los 4 parámetros de impresión se leen de config_negocio,
+ * misma fuente que usa FacturaTermica. Fallback = valores originales.
  */
 export function ReciboAcreedor({ acreedor, movimiento, config = {}, onClose }) {
   useEffect(() => {
@@ -18,6 +23,16 @@ export function ReciboAcreedor({ acreedor, movimiento, config = {}, onClose }) {
   }, []);
 
   if (!acreedor || !movimiento) return null;
+
+  // ── Configuración dinámica de impresora — idéntico a FacturaTermica ───────
+  const escala     = Number(config.impresion_escala      || 1.5);
+  const anchoPapel = Number(config.impresion_ancho_papel || 80);
+  const fuenteSize = Number(config.impresion_fuente_size || 13);
+  const padding    = Number(config.impresion_padding     || 2);
+
+  const anchoPapelStr = `${anchoPapel}mm`;
+  const fuenteSizeStr = `${fuenteSize}px`;
+  const paddingStr    = `${padding}mm`;
 
   const esCargo = movimiento.tipo === 'Cargo';
 
@@ -36,10 +51,10 @@ export function ReciboAcreedor({ acreedor, movimiento, config = {}, onClose }) {
         }
 
         #recibo-acreedor {
-          width: 80mm;
+          width: ${anchoPapelStr};
           font-family: 'Courier New', monospace;
-          font-size: 13px;
-          padding: 2mm;
+          font-size: ${fuenteSizeStr};
+          padding: ${paddingStr};
           box-sizing: border-box;
         }
 
@@ -54,7 +69,7 @@ export function ReciboAcreedor({ acreedor, movimiento, config = {}, onClose }) {
         @media print {
           @page {
             margin: 0;
-            size: 80mm auto;
+            size: ${anchoPapelStr} auto;
           }
           body * { visibility: hidden; }
           #recibo-acreedor,
@@ -62,11 +77,11 @@ export function ReciboAcreedor({ acreedor, movimiento, config = {}, onClose }) {
           #recibo-acreedor {
             position: fixed;
             top: 0; left: 0;
-            width: 80mm;
-            padding: 2mm;
-            font-size: 13px;
+            width: ${anchoPapelStr};
+            padding: ${paddingStr};
+            font-size: ${fuenteSizeStr};
             font-family: 'Courier New', monospace;
-            transform: scale(1.5);
+            transform: scale(${escala});
             transform-origin: top left;
           }
           .no-print { display: none !important; }
@@ -99,7 +114,7 @@ export function ReciboAcreedor({ acreedor, movimiento, config = {}, onClose }) {
       <div id="recibo-acreedor">
 
         {/* Encabezado negocio */}
-        <div className="centrado negrita" style={{ fontSize: '14px' }}>
+        <div className="centrado negrita" style={{ fontSize: `${fuenteSize + 1}px` }}>
           {config.nombre_negocio || 'MI TIENDA'}
         </div>
         {config.nit       && <div className="centrado">NIT: {config.nit}</div>}
@@ -157,7 +172,7 @@ export function ReciboAcreedor({ acreedor, movimiento, config = {}, onClose }) {
           <span>Saldo anterior:</span>
           <span>{formatCOP(movimiento.saldo_antes)}</span>
         </div>
-        <div className="fila negrita" style={{ fontSize: '14px' }}>
+        <div className="fila negrita" style={{ fontSize: `${fuenteSize + 1}px` }}>
           <span>{esCargo ? 'Cargo:' : 'Abono:'}</span>
           <span>{esCargo ? '+' : '-'}{formatCOP(movimiento.valor)}</span>
         </div>
@@ -171,7 +186,7 @@ export function ReciboAcreedor({ acreedor, movimiento, config = {}, onClose }) {
         {/* Firma si existe */}
         {movimiento.firma && (
           <>
-            <div className="centrado" style={{ fontSize: '11px', marginBottom: '4px' }}>
+            <div className="centrado" style={{ fontSize: `${fuenteSize - 2}px`, marginBottom: '4px' }}>
               Firma
             </div>
             <div className="centrado">
@@ -186,7 +201,7 @@ export function ReciboAcreedor({ acreedor, movimiento, config = {}, onClose }) {
         )}
 
         {/* Pie */}
-        <div className="centrado" style={{ marginTop: '6px', fontSize: '11px' }}>
+        <div className="centrado" style={{ marginTop: '6px', fontSize: `${fuenteSize - 2}px` }}>
           Este recibo es válido como comprobante de {movimiento.tipo.toLowerCase()}.
         </div>
         <div style={{ height: '10mm' }} />
