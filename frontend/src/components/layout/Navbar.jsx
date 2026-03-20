@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/useAuth.js';
 import {
   LayoutDashboard, Package, FileText, Handshake,
-  Wallet, BarChart2, Settings, LogOut, ShoppingCart, Users, Truck,
+  Wallet, BarChart2, Settings, LogOut, ShoppingCart, Users, Truck, Wrench,
 } from 'lucide-react';
 import useCarritoStore from '../../store/carritoStore.js';
 import useSucursalStore from '../../store/sucursalStore.js';
@@ -11,15 +11,16 @@ import { SucursalSelector } from './SucursalSelector.jsx';
 
 // rol: undefined = todos | 'supervisor' = supervisor+admin | 'admin_negocio' = solo admin
 const NAV_ITEMS = [
-  { path: '/',            label: 'Inicio',      icon: LayoutDashboard, rol: 'admin_negocio'    },
-  { path: '/inventario',  label: 'Inventario',  icon: Package                               },
-  { path: '/facturar',    label: 'Facturar',    icon: FileText,        rol: 'supervisor'    },
-  { path: '/proveedores', label: 'Proveedores', icon: Truck,           rol: 'admin_negocio' },
-  { path: '/prestamos',   label: 'Préstamos',   icon: Handshake                             },
-  { path: '/caja',        label: 'Caja',        icon: Wallet,          rol: 'supervisor'    },
-  { path: '/reportes',    label: 'Reportes',    icon: BarChart2,       rol: 'admin_negocio' },
-  { path: '/acreedores',  label: 'Acreedores',  icon: Users,           rol: 'admin_negocio' },
-  { path: '/config',      label: 'Config',      icon: Settings,        rol: 'admin_negocio' },
+  { path: '/',            label: 'Inicio',      icon: LayoutDashboard, rol: 'admin_negocio' },
+  { path: '/inventario',  label: 'Inventario',  icon: Package                              },
+  { path: '/facturar',    label: 'Facturar',    icon: FileText,        rol: 'supervisor'   },
+  { path: '/proveedores', label: 'Proveedores', icon: Truck,           rol: 'admin_negocio'},
+  { path: '/prestamos',   label: 'Préstamos',   icon: Handshake                            },
+  { path: '/servicios',   label: 'Servicios',   icon: Wrench                               },
+  { path: '/caja',        label: 'Caja',        icon: Wallet,          rol: 'supervisor'   },
+  { path: '/reportes',    label: 'Reportes',    icon: BarChart2,       rol: 'admin_negocio'},
+  { path: '/acreedores',  label: 'Acreedores',  icon: Users,           rol: 'admin_negocio'},
+  { path: '/config',      label: 'Config',      icon: Settings,        rol: 'admin_negocio'},
 ];
 
 function puedeVerItem(item, usuario) {
@@ -104,7 +105,7 @@ export function Navbar() {
             {/* Derecha: selector + carrito + usuario */}
             <div className="flex items-center gap-2">
 
-              {/* Selector de sucursal (se oculta solo si no aplica) */}
+              {/* Selector de sucursal */}
               <SucursalSelector />
 
               {/* Carrito */}
