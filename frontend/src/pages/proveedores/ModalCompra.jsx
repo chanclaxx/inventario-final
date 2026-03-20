@@ -1,19 +1,20 @@
 import { useState, useRef, useCallback } from 'react';
 import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
-import { Modal }       from '../../components/ui/Modal';
-import { Button }      from '../../components/ui/Button';
-import { Input }       from '../../components/ui/Input';
-import { Badge }       from '../../components/ui/Badge';
-import { SearchInput } from '../../components/ui/SearchInput';
-import { formatCOP }   from '../../utils/formatters';
-import { crearCompra } from '../../api/compras.api';
+import { Modal }        from '../../components/ui/Modal';
+import { Button }       from '../../components/ui/Button';
+import { Input }        from '../../components/ui/Input';
+import { Badge }        from '../../components/ui/Badge';
+import { SearchInput }  from '../../components/ui/SearchInput';
+import { InputMoneda }  from '../../components/ui/InputMoneda';
+import { formatCOP }    from '../../utils/formatters';
+import { crearCompra }  from '../../api/compras.api';
 import {
   getProductosSerial, crearProductoSerial,
   getProductosCantidad, crearProductoCantidad,
   verificarImei as verificarImeiApi,
 } from '../../api/productos.api';
 import { getAcreedores } from '../../api/acreedores.api';
-import { getLineas } from '../../api/lineas.api';
+import { getLineas }     from '../../api/lineas.api';
 import { useSucursalKey } from '../../hooks/useSucursalKey';
 import {
   Trash2, Package, ShoppingBag, ChevronRight,
@@ -21,17 +22,16 @@ import {
 } from 'lucide-react';
 
 // ─── Utilidad: normalizar respuesta de productos a array ─────────────────────
-
 function normalizarProductos(data) {
   if (Array.isArray(data)) return data;
   if (data?.items && Array.isArray(data.items)) return data.items;
   return [];
 }
 
-// ─── Utilidad: bloquear ruedita en inputs numéricos ───────────────────────────
+// ─── Utilidad: bloquear ruedita en inputs numéricos ──────────────────────────
 const noWheel = (e) => e.target.blur();
 
-// ─── Utilidad: calcular precio COP desde USD ──────────────────────────────────
+// ─── Utilidad: calcular precio COP desde USD ─────────────────────────────────
 function calcularPrecioCOP(precioUsd, factor, traida) {
   const f = Number(factor) || 0;
   const t = Number(traida) || 0;
@@ -40,7 +40,7 @@ function calcularPrecioCOP(precioUsd, factor, traida) {
   return Math.round((u * f) + t);
 }
 
-// ─── Lógica de verificación de IMEIs duplicados ───────────────────────────────
+// ─── Lógica de verificación de IMEIs duplicados ──────────────────────────────
 async function verificarImeisDuplicados(imeis) {
   const resultados = await Promise.all(
     imeis.map(async (imei) => {
@@ -48,12 +48,9 @@ async function verificarImeisDuplicados(imeis) {
         const { data } = await verificarImeiApi(imei.trim());
         if (data.data.existe) return data.data.serial;
         return null;
-      } catch {
-        return null;
-      }
+      } catch { return null; }
     })
   );
-
   const encontrados = resultados.filter(Boolean);
   return {
     disponibles:   encontrados.filter((s) => !s.vendido && !s.prestado),
@@ -75,7 +72,6 @@ function useVerificacionImeis() {
   const verificarYProceder = useCallback(async (imeis, onProceder) => {
     reactivarMapRef.current = {};
     setVerificando(true);
-
     const { disponibles, paraReactivar } = await verificarImeisDuplicados(imeis);
     setVerificando(false);
 
@@ -84,14 +80,12 @@ function useVerificacionImeis() {
       setModalYaEnInventario(true);
       return;
     }
-
     if (paraReactivar.length > 0) {
       setSerializesReactivar(paraReactivar);
       pendingCallbackRef.current = onProceder;
       setModalReactivar(true);
       return;
     }
-
     onProceder({ reactivarMap: {} });
   }, []);
 
@@ -117,15 +111,9 @@ function useVerificacionImeis() {
   }, []);
 
   return {
-    verificando,
-    verificarYProceder,
-    modalReactivar,
-    serialesReactivar,
-    handleConfirmarReactivar,
-    handleCancelarReactivar,
-    modalYaEnInventario,
-    serialesDisponibles,
-    handleCerrarDisponibles,
+    verificando, verificarYProceder,
+    modalReactivar, serialesReactivar, handleConfirmarReactivar, handleCancelarReactivar,
+    modalYaEnInventario, serialesDisponibles, handleCerrarDisponibles,
   };
 }
 
@@ -138,32 +126,16 @@ function FilasSerial({ seriales }) {
         const estadoLabel = serialItem.vendido  ? 'Vendido'
           : serialItem.prestado                 ? 'Prestado'
           :                                       'En inventario';
-
         const estadoColor = serialItem.vendido
           ? 'text-red-600 bg-red-50 border-red-200'
           : serialItem.prestado
           ? 'text-yellow-700 bg-yellow-50 border-yellow-200'
           : 'text-green-700 bg-green-50 border-green-200';
-
         return (
           <div key={serialItem.id} className="w-full rounded-xl border border-gray-100 bg-gray-50 p-3 flex flex-col gap-1.5">
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-500">IMEI</span>
-              <span className="font-mono font-medium text-gray-900">{serialItem.imei}</span>
-            </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-500">Producto</span>
-              <span className="font-medium text-gray-900 text-right max-w-[60%]">
-                {serialItem.producto_nombre}
-                {serialItem.marca ? ` · ${serialItem.marca}` : ''}
-              </span>
-            </div>
-            <div className="flex justify-between text-sm items-center">
-              <span className="text-gray-500">Estado</span>
-              <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${estadoColor}`}>
-                {estadoLabel}
-              </span>
-            </div>
+            <div className="flex justify-between text-sm"><span className="text-gray-500">IMEI</span><span className="font-mono font-medium text-gray-900">{serialItem.imei}</span></div>
+            <div className="flex justify-between text-sm"><span className="text-gray-500">Producto</span><span className="font-medium text-gray-900 text-right max-w-[60%]">{serialItem.producto_nombre}{serialItem.marca ? ` · ${serialItem.marca}` : ''}</span></div>
+            <div className="flex justify-between text-sm items-center"><span className="text-gray-500">Estado</span><span className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${estadoColor}`}>{estadoLabel}</span></div>
           </div>
         );
       })}
@@ -171,45 +143,22 @@ function FilasSerial({ seriales }) {
   );
 }
 
-// ─── Modal: IMEIs que requieren reactivación ──────────────────────────────────
+// ─── Modal: IMEIs que requieren reactivación ─────────────────────────────────
 function ModalReactivarSeriales({ open, seriales, onReactivar, onCancelar }) {
   if (!seriales || seriales.length === 0) return null;
   return (
     <Modal open={open} onClose={onCancelar} title="" size="sm">
       <div className="flex flex-col items-center gap-4 py-2">
-        <div className="w-14 h-14 rounded-full bg-amber-50 border-2 border-amber-200 flex items-center justify-center">
-          <AlertTriangle size={26} className="text-amber-500" />
-        </div>
+        <div className="w-14 h-14 rounded-full bg-amber-50 border-2 border-amber-200 flex items-center justify-center"><AlertTriangle size={26} className="text-amber-500" /></div>
         <div className="text-center">
-          <h3 className="text-base font-semibold text-gray-900">
-            {seriales.length === 1 ? 'IMEI ya registrado' : `${seriales.length} IMEIs ya registrados`}
-          </h3>
-          <p className="text-sm text-gray-500 mt-1">
-            {seriales.length === 1
-              ? 'Este equipo fue vendido o prestado — puedes reactivarlo con esta compra'
-              : 'Estos equipos fueron vendidos o prestados — puedes reactivarlos con esta compra'}
-          </p>
+          <h3 className="text-base font-semibold text-gray-900">{seriales.length === 1 ? 'IMEI ya registrado' : `${seriales.length} IMEIs ya registrados`}</h3>
+          <p className="text-sm text-gray-500 mt-1">{seriales.length === 1 ? 'Este equipo fue vendido o prestado — puedes reactivarlo con esta compra' : 'Estos equipos fueron vendidos o prestados — puedes reactivarlos con esta compra'}</p>
         </div>
         <FilasSerial seriales={seriales} />
-        <p className="text-sm text-center text-gray-700 leading-relaxed">
-          ¿Deseas{' '}
-          <span className="font-semibold text-purple-700">reactivar estos seriales</span>
-          {' '}y registrarlos en esta compra? Se marcarán como disponibles nuevamente.
-        </p>
+        <p className="text-sm text-center text-gray-700 leading-relaxed">¿Deseas <span className="font-semibold text-purple-700">reactivar estos seriales</span> y registrarlos en esta compra? Se marcarán como disponibles nuevamente.</p>
         <div className="flex gap-2 w-full">
-          <Button
-            variant="secondary"
-            className="flex-1 flex items-center justify-center gap-1.5"
-            onClick={onCancelar}
-          >
-            <X size={14} /> Cancelar
-          </Button>
-          <Button
-            className="flex-1 flex items-center justify-center gap-1.5 bg-purple-600 hover:bg-purple-700 text-white"
-            onClick={onReactivar}
-          >
-            <RefreshCw size={14} /> Sí, reactivar
-          </Button>
+          <Button variant="secondary" className="flex-1 flex items-center justify-center gap-1.5" onClick={onCancelar}><X size={14} /> Cancelar</Button>
+          <Button className="flex-1 flex items-center justify-center gap-1.5 bg-purple-600 hover:bg-purple-700 text-white" onClick={onReactivar}><RefreshCw size={14} /> Sí, reactivar</Button>
         </div>
       </div>
     </Modal>
@@ -222,46 +171,35 @@ function ModalYaEnInventario({ open, seriales, onCerrar }) {
   return (
     <Modal open={open} onClose={onCerrar} title="" size="sm">
       <div className="flex flex-col items-center gap-4 py-2">
-        <div className="w-14 h-14 rounded-full bg-blue-50 border-2 border-blue-200 flex items-center justify-center">
-          <Package size={26} className="text-blue-500" />
-        </div>
+        <div className="w-14 h-14 rounded-full bg-blue-50 border-2 border-blue-200 flex items-center justify-center"><Package size={26} className="text-blue-500" /></div>
         <div className="text-center">
-          <h3 className="text-base font-semibold text-gray-900">
-            {seriales.length === 1 ? 'IMEI ya disponible' : `${seriales.length} IMEIs ya disponibles`}
-          </h3>
-          <p className="text-sm text-gray-500 mt-1">
-            {seriales.length === 1
-              ? 'Este equipo ya está en inventario como disponible'
-              : 'Estos equipos ya están en inventario como disponibles'}
-          </p>
+          <h3 className="text-base font-semibold text-gray-900">{seriales.length === 1 ? 'IMEI ya disponible' : `${seriales.length} IMEIs ya disponibles`}</h3>
+          <p className="text-sm text-gray-500 mt-1">{seriales.length === 1 ? 'Este equipo ya está en inventario como disponible' : 'Estos equipos ya están en inventario como disponibles'}</p>
         </div>
         <FilasSerial seriales={seriales} />
-        <p className="text-sm text-center text-gray-700 leading-relaxed">
-          Corrige los IMEIs marcados antes de continuar con la compra.
-        </p>
-        <Button className="w-full" onClick={onCerrar}>
-          Entendido
-        </Button>
+        <p className="text-sm text-center text-gray-700 leading-relaxed">Corrige los IMEIs marcados antes de continuar con la compra.</p>
+        <Button className="w-full" onClick={onCerrar}>Entendido</Button>
       </div>
     </Modal>
   );
 }
 
 // ─── Panel de factor de conversión ───────────────────────────────────────────
+// factor (TRM) mantiene type=number: es un multiplicador que puede tener decimales (ej: 4200.5)
+// traida → InputMoneda: es un valor COP entero (ej: 50000)
 function PanelConversion({ factor, traida, onChange, onAplicarATodos }) {
-  const precioEjemplo = factor > 0 ? (10 * factor) + Number(traida || 0) : null;
+  const precioEjemplo = factor > 0 ? (10 * Number(factor)) + Number(traida || 0) : null;
 
   return (
     <div className="bg-blue-50 border border-blue-100 rounded-2xl p-3 flex flex-col gap-2">
       <div className="flex items-center justify-between">
         <p className="text-xs font-semibold text-blue-700">Factor de conversión USD → COP</p>
         {precioEjemplo && (
-          <span className="text-xs text-blue-400">
-            Ej: $10 USD = {formatCOP(precioEjemplo)}
-          </span>
+          <span className="text-xs text-blue-400">Ej: $10 USD = {formatCOP(precioEjemplo)}</span>
         )}
       </div>
       <div className="flex gap-2">
+        {/* factor: type=number porque puede tener decimales (TRM) */}
         <div className="flex-1">
           <label className="text-xs text-gray-500 mb-1 block">TRM / Factor</label>
           <input
@@ -274,20 +212,19 @@ function PanelConversion({ factor, traida, onChange, onAplicarATodos }) {
               focus:outline-none focus:ring-2 focus:ring-blue-400"
           />
         </div>
+        {/* traida: InputMoneda — es un valor COP entero */}
         <div className="flex-1">
           <label className="text-xs text-gray-500 mb-1 block">Valor traída (COP)</label>
-          <input
-            type="number"
+          <InputMoneda
             value={traida}
-            onChange={(e) => onChange('traida', e.target.value)}
-            onWheel={noWheel}
+            onChange={(val) => onChange('traida', val)}
             placeholder="0"
             className="w-full px-2.5 py-1.5 bg-white border border-blue-200 rounded-xl text-sm
               focus:outline-none focus:ring-2 focus:ring-blue-400"
           />
         </div>
       </div>
-      {factor > 0 && (
+      {Number(factor) > 0 && (
         <button
           onClick={onAplicarATodos}
           className="flex items-center gap-1.5 text-xs text-blue-600 font-medium
@@ -297,9 +234,7 @@ function PanelConversion({ factor, traida, onChange, onAplicarATodos }) {
           Recalcular todos los precios
         </button>
       )}
-      <p className="text-xs text-gray-400">
-        Fórmula: precio COP = (precio USD × factor) + traída
-      </p>
+      <p className="text-xs text-gray-400">Fórmula: precio COP = (precio USD × factor) + traída</p>
     </div>
   );
 }
@@ -310,20 +245,14 @@ function PasoTipo({ onSelect }) {
     <div className="flex flex-col gap-3">
       <p className="text-sm text-gray-500">¿Qué tipo de productos estás comprando?</p>
       <div className="flex gap-3">
-        <button
-          onClick={() => onSelect('serial')}
-          className="flex-1 flex flex-col items-center gap-2 p-4 bg-gray-50 border border-gray-200
-            rounded-2xl hover:bg-blue-50 hover:border-blue-300 transition-all"
-        >
+        <button onClick={() => onSelect('serial')}
+          className="flex-1 flex flex-col items-center gap-2 p-4 bg-gray-50 border border-gray-200 rounded-2xl hover:bg-blue-50 hover:border-blue-300 transition-all">
           <Package size={24} className="text-blue-600" />
           <span className="text-sm font-medium text-gray-700">Con Serial / IMEI</span>
           <span className="text-xs text-gray-400 text-center">Celulares, tablets, etc.</span>
         </button>
-        <button
-          onClick={() => onSelect('cantidad')}
-          className="flex-1 flex flex-col items-center gap-2 p-4 bg-gray-50 border border-gray-200
-            rounded-2xl hover:bg-blue-50 hover:border-blue-300 transition-all"
-        >
+        <button onClick={() => onSelect('cantidad')}
+          className="flex-1 flex flex-col items-center gap-2 p-4 bg-gray-50 border border-gray-200 rounded-2xl hover:bg-blue-50 hover:border-blue-300 transition-all">
           <ShoppingBag size={24} className="text-green-600" />
           <span className="text-sm font-medium text-gray-700">Por Cantidad</span>
           <span className="text-xs text-gray-400 text-center">Accesorios, repuestos, etc.</span>
@@ -333,7 +262,7 @@ function PasoTipo({ onSelect }) {
   );
 }
 
-// ─── Hook: carga las líneas de producto del negocio ───────────────────────────
+// ─── Hook: carga las líneas de producto del negocio ──────────────────────────
 function useLineas() {
   const { data } = useQuery({
     queryKey: ['lineas'],
@@ -342,18 +271,15 @@ function useLineas() {
   return Array.isArray(data) ? data : [];
 }
 
-// ─── Select de línea reutilizable ─────────────────────────────────────────────
+// ─── Select de línea reutilizable ────────────────────────────────────────────
 function SelectLinea({ value, onChange }) {
   const lineas = useLineas();
   return (
     <div className="flex flex-col gap-1">
       <label className="text-xs text-gray-600 font-medium">Línea de producto *</label>
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
+      <select value={value} onChange={(e) => onChange(e.target.value)}
         className="w-full px-2.5 py-2 bg-white border border-gray-200 rounded-lg text-xs
-          text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
-      >
+          text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-400">
         <option value="">Seleccionar línea...</option>
         {lineas.map((l) => (
           <option key={l.id} value={l.id}>{l.nombre}</option>
@@ -402,15 +328,14 @@ function LineaImeis({
           <p className="text-sm font-semibold text-gray-800">{linea.nombre}</p>
           <Badge variant="blue">{imeisValidos} IMEI(s)</Badge>
         </div>
-        <button
-          onClick={() => onEliminarLinea(linea.id)}
-          className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-500"
-        >
+        <button onClick={() => onEliminarLinea(linea.id)}
+          className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-500">
           <Trash2 size={14} />
         </button>
       </div>
 
       <div className="flex gap-2">
+        {/* precio_usd: type=number porque puede tener decimales */}
         {usandoConversion && (
           <div className="flex-1">
             <label className="text-xs text-gray-400 mb-1 block">Precio USD</label>
@@ -425,18 +350,17 @@ function LineaImeis({
             />
           </div>
         )}
+        {/* precio_compra (COP): InputMoneda */}
         <div className="flex-1">
           <label className="text-xs text-gray-400 mb-1 block">
             {usandoConversion ? 'Precio COP (calculado)' : 'Precio compra (COP)'}
           </label>
-          <input
-            type="number"
+          <InputMoneda
             value={linea.precio_compra}
-            onChange={(e) => onActualizarPrecioCOP(linea.id, e.target.value)}
-            onWheel={noWheel}
+            onChange={(val) => onActualizarPrecioCOP(linea.id, val)}
+            placeholder="0"
             className="w-full px-2 py-1.5 bg-white border border-gray-200 rounded-lg text-sm
               focus:outline-none focus:ring-2 focus:ring-blue-500"
-            placeholder="0"
           />
         </div>
       </div>
@@ -461,10 +385,8 @@ function LineaImeis({
                     : 'bg-white border-gray-200 focus:ring-blue-500'}`}
               />
               {linea.imeis.length > 1 && (
-                <button
-                  onClick={() => onEliminarImei(linea.id, index)}
-                  className="p-1.5 rounded-lg hover:bg-red-50 text-gray-300 hover:text-red-400"
-                >
+                <button onClick={() => onEliminarImei(linea.id, index)}
+                  className="p-1.5 rounded-lg hover:bg-red-50 text-gray-300 hover:text-red-400">
                   <Trash2 size={12} />
                 </button>
               )}
@@ -472,14 +394,10 @@ function LineaImeis({
           );
         })}
         {linea.imeis.some((i) => i.trim() && imeisDuplicados.has(i.trim())) && (
-          <p className="text-xs text-red-500 font-medium">
-            ⚠ Algunos IMEIs están duplicados (marcados en rojo)
-          </p>
+          <p className="text-xs text-red-500 font-medium">⚠ Algunos IMEIs están duplicados (marcados en rojo)</p>
         )}
-        <button
-          onClick={() => onAgregarCampo(linea.id)}
-          className="text-xs text-blue-500 hover:text-blue-700 font-medium text-left mt-1"
-        >
+        <button onClick={() => onAgregarCampo(linea.id)}
+          className="text-xs text-blue-500 hover:text-blue-700 font-medium text-left mt-1">
           + Agregar IMEI
         </button>
       </div>
@@ -494,6 +412,7 @@ function PasoLineaSerial({
 }) {
   const [busqueda,            setBusqueda]           = useState('');
   const [creandoNueva,        setCreandoNueva]        = useState(false);
+  // nuevaLinea.precio: empieza en '' → InputMoneda trata vacío como ''
   const [nuevaLinea,          setNuevaLinea]          = useState({ nombre: '', marca: '', modelo: '', precio: '', linea_id: '' });
   const [lineasSeleccionadas, setLineasSeleccionadas] = useState(lineasIniciales);
   const [error,               setError]              = useState('');
@@ -504,8 +423,7 @@ function PasoLineaSerial({
 
   const { data: productosData } = useQuery({
     queryKey: ['productos-serial', ...sucursalKey],
-    queryFn:  () =>
-      getProductosSerial().then((r) => normalizarProductos(r.data.data)),
+    queryFn:  () => getProductosSerial().then((r) => normalizarProductos(r.data.data)),
     enabled:  sucursalLista,
   });
 
@@ -518,7 +436,8 @@ function PasoLineaSerial({
       nombre:       nuevaLinea.nombre,
       marca:        nuevaLinea.marca,
       modelo:       nuevaLinea.modelo,
-      precio:       nuevaLinea.precio ? Number(nuevaLinea.precio) : null,
+      // nuevaLinea.precio ya es number (viene de InputMoneda) o '' → conversión segura
+      precio:       nuevaLinea.precio !== '' ? Number(nuevaLinea.precio) : null,
       proveedor_id: proveedorId,
       linea_id:     nuevaLinea.linea_id ? Number(nuevaLinea.linea_id) : null,
     }),
@@ -535,48 +454,19 @@ function PasoLineaSerial({
     if (lineasSeleccionadas.find((l) => l.id === producto.id)) return;
     setLineasSeleccionadas((prev) => [...prev, {
       ...producto,
-      imeis:         [''],
-      precio_usd:    '',
-      precio_compra: producto.precio || 0,
+      imeis: [''],
+      precio_usd: '',
+      // Number() limpia posibles decimales de Postgres ('850000.00' → 850000)
+      precio_compra: Number(producto.precio) || 0,
     }]);
   };
 
-  const eliminarLinea = (id) =>
-    setLineasSeleccionadas((prev) => prev.filter((l) => l.id !== id));
-
-  const actualizarPrecioUsd = (id, valor) =>
-    setLineasSeleccionadas((prev) =>
-      prev.map((l) => l.id === id ? { ...l, precio_usd: valor } : l)
-    );
-
-  const actualizarPrecioCOP = (id, valor) =>
-    setLineasSeleccionadas((prev) =>
-      prev.map((l) => l.id === id ? { ...l, precio_compra: valor } : l)
-    );
-
-  const actualizarImei = (lineaId, index, valor) =>
-    setLineasSeleccionadas((prev) =>
-      prev.map((l) => {
-        if (l.id !== lineaId) return l;
-        const imeis  = [...l.imeis];
-        imeis[index] = valor;
-        return { ...l, imeis };
-      })
-    );
-
-  const agregarCampoImei = (lineaId) =>
-    setLineasSeleccionadas((prev) =>
-      prev.map((l) => l.id === lineaId ? { ...l, imeis: [...l.imeis, ''] } : l)
-    );
-
-  const eliminarImei = (lineaId, index) =>
-    setLineasSeleccionadas((prev) =>
-      prev.map((l) => {
-        if (l.id !== lineaId) return l;
-        const imeis = l.imeis.filter((_, i) => i !== index);
-        return { ...l, imeis: imeis.length === 0 ? [''] : imeis };
-      })
-    );
+  const eliminarLinea        = (id) => setLineasSeleccionadas((prev) => prev.filter((l) => l.id !== id));
+  const actualizarPrecioUsd  = (id, valor) => setLineasSeleccionadas((prev) => prev.map((l) => l.id === id ? { ...l, precio_usd: valor } : l));
+  const actualizarPrecioCOP  = (id, valor) => setLineasSeleccionadas((prev) => prev.map((l) => l.id === id ? { ...l, precio_compra: valor } : l));
+  const actualizarImei       = (lineaId, index, valor) => setLineasSeleccionadas((prev) => prev.map((l) => { if (l.id !== lineaId) return l; const imeis = [...l.imeis]; imeis[index] = valor; return { ...l, imeis }; }));
+  const agregarCampoImei     = (lineaId) => setLineasSeleccionadas((prev) => prev.map((l) => l.id === lineaId ? { ...l, imeis: [...l.imeis, ''] } : l));
+  const eliminarImei         = (lineaId, index) => setLineasSeleccionadas((prev) => prev.map((l) => { if (l.id !== lineaId) return l; const imeis = l.imeis.filter((_, i) => i !== index); return { ...l, imeis: imeis.length === 0 ? [''] : imeis }; }));
 
   const handleAplicarATodos = useCallback(() => {
     setLineasSeleccionadas((prev) =>
@@ -595,7 +485,6 @@ function PasoLineaSerial({
   const handleContinuar = () => {
     setError('');
     setImeisDuplicados(new Set());
-
     if (lineasSeleccionadas.length === 0) return setError('Agrega al menos una línea');
 
     const todosImeis = [];
@@ -605,22 +494,16 @@ function PasoLineaSerial({
       }
     }
 
-    const vistos     = new Set();
-    const duplicados = new Set();
+    const vistos = new Set(); const duplicados = new Set();
     for (const imei of todosImeis) {
       if (vistos.has(imei)) duplicados.add(imei);
       else vistos.add(imei);
     }
-
-    if (duplicados.size > 0) {
-      setImeisDuplicados(duplicados);
-      return setError(`IMEIs duplicados detectados: ${[...duplicados].join(', ')}`);
-    }
+    if (duplicados.size > 0) { setImeisDuplicados(duplicados); return setError(`IMEIs duplicados detectados: ${[...duplicados].join(', ')}`); }
 
     for (const linea of lineasSeleccionadas) {
       const imeisValidos = linea.imeis.filter((i) => i.trim());
-      if (imeisValidos.length === 0)
-        return setError(`La línea "${linea.nombre}" debe tener al menos un IMEI`);
+      if (imeisValidos.length === 0) return setError(`La línea "${linea.nombre}" debe tener al menos un IMEI`);
     }
 
     const lineasPayload = lineasSeleccionadas.map((l) => ({
@@ -634,12 +517,7 @@ function PasoLineaSerial({
 
   return (
     <div className="flex flex-col gap-4">
-      <PanelConversion
-        factor={factor}
-        traida={traida}
-        onChange={handleConversionChange}
-        onAplicarATodos={handleAplicarATodos}
-      />
+      <PanelConversion factor={factor} traida={traida} onChange={handleConversionChange} onAplicarATodos={handleAplicarATodos} />
 
       <div className="flex flex-col gap-2">
         <p className="text-sm font-medium text-gray-700">Seleccionar línea de producto</p>
@@ -648,80 +526,51 @@ function PasoLineaSerial({
           {productos.map((p) => {
             const productoItem = p;
             return (
-              <button
-                key={productoItem.id}
-                onClick={() => agregarLinea(productoItem)}
+              <button key={productoItem.id} onClick={() => agregarLinea(productoItem)}
                 disabled={!!lineasSeleccionadas.find((l) => l.id === productoItem.id)}
-                className={`flex items-center justify-between p-2.5 rounded-xl text-left text-sm
-                  border transition-all
+                className={`flex items-center justify-between p-2.5 rounded-xl text-left text-sm border transition-all
                   ${lineasSeleccionadas.find((l) => l.id === productoItem.id)
                     ? 'bg-blue-50 border-blue-200 text-blue-600 opacity-60 cursor-not-allowed'
-                    : 'bg-white border-gray-100 hover:border-blue-200 hover:bg-blue-50'}`}
-              >
+                    : 'bg-white border-gray-100 hover:border-blue-200 hover:bg-blue-50'}`}>
                 <span className="font-medium">{productoItem.nombre}</span>
                 <ChevronRight size={14} className="text-gray-400" />
               </button>
             );
           })}
         </div>
-        <button
-          onClick={() => setCreandoNueva(!creandoNueva)}
-          className="text-xs text-blue-600 hover:text-blue-700 font-medium text-left"
-        >
-          + Crear nueva línea
-        </button>
+        <button onClick={() => setCreandoNueva(!creandoNueva)} className="text-xs text-blue-600 hover:text-blue-700 font-medium text-left">+ Crear nueva línea</button>
       </div>
 
       {creandoNueva && (
         <div className="bg-blue-50 rounded-xl p-3 flex flex-col gap-2">
           <p className="text-xs font-semibold text-blue-700">Nueva línea de producto</p>
-          <Input
-            id="nueva-nombre"
-            placeholder="Nombre (ej: iPhone 15 Pro Max)"
-            value={nuevaLinea.nombre}
+          <Input id="nueva-nombre" placeholder="Nombre (ej: iPhone 15 Pro Max)" value={nuevaLinea.nombre}
             onChange={(e) => setNuevaLinea({ ...nuevaLinea, nombre: e.target.value })}
-            onKeyDown={(e) => e.key === 'Enter' && document.getElementById('nueva-marca')?.focus()}
-          />
+            onKeyDown={(e) => e.key === 'Enter' && document.getElementById('nueva-marca')?.focus()} />
           <div className="flex gap-2">
-            <Input
-              id="nueva-marca"
-              placeholder="Marca"
-              value={nuevaLinea.marca}
+            <Input id="nueva-marca" placeholder="Marca" value={nuevaLinea.marca}
               onChange={(e) => setNuevaLinea({ ...nuevaLinea, marca: e.target.value })}
-              onKeyDown={(e) => e.key === 'Enter' && document.getElementById('nueva-modelo')?.focus()}
-            />
-            <Input
-              id="nueva-modelo"
-              placeholder="Modelo"
-              value={nuevaLinea.modelo}
+              onKeyDown={(e) => e.key === 'Enter' && document.getElementById('nueva-modelo')?.focus()} />
+            <Input id="nueva-modelo" placeholder="Modelo" value={nuevaLinea.modelo}
               onChange={(e) => setNuevaLinea({ ...nuevaLinea, modelo: e.target.value })}
-              onKeyDown={(e) => e.key === 'Enter' && document.getElementById('nueva-precio')?.focus()}
+              onKeyDown={(e) => e.key === 'Enter' && document.getElementById('nueva-precio')?.focus()} />
+          </div>
+          {/* CAMBIO: Input type=number → InputMoneda para precio de venta COP */}
+          <div className="flex flex-col gap-1">
+            <label className="text-xs text-gray-600 font-medium">Precio de venta</label>
+            <InputMoneda
+              id="nueva-precio"
+              value={nuevaLinea.precio}
+              onChange={(val) => setNuevaLinea({ ...nuevaLinea, precio: val })}
+              placeholder="0"
+              className="w-full px-2.5 py-2 bg-white border border-gray-200 rounded-xl text-sm
+                focus:outline-none focus:ring-2 focus:ring-blue-400"
             />
           </div>
-          <Input
-            id="nueva-precio"
-            type="number"
-            placeholder="Precio de venta"
-            value={nuevaLinea.precio}
-            onChange={(e) => setNuevaLinea({ ...nuevaLinea, precio: e.target.value })}
-          />
-          {/* ── NUEVO: selector de línea ── */}
-          <SelectLinea
-            value={nuevaLinea.linea_id}
-            onChange={(val) => setNuevaLinea({ ...nuevaLinea, linea_id: val })}
-          />
+          <SelectLinea value={nuevaLinea.linea_id} onChange={(val) => setNuevaLinea({ ...nuevaLinea, linea_id: val })} />
           <div className="flex gap-2">
-            <Button variant="secondary" size="sm" className="flex-1" onClick={() => setCreandoNueva(false)}>
-              Cancelar
-            </Button>
-            <Button
-              size="sm" className="flex-1"
-              loading={mutCrearLinea.isPending}
-              disabled={!nuevaLinea.linea_id}
-              onClick={() => mutCrearLinea.mutate()}
-            >
-              Crear y agregar
-            </Button>
+            <Button variant="secondary" size="sm" className="flex-1" onClick={() => setCreandoNueva(false)}>Cancelar</Button>
+            <Button size="sm" className="flex-1" loading={mutCrearLinea.isPending} disabled={!nuevaLinea.linea_id} onClick={() => mutCrearLinea.mutate()}>Crear y agregar</Button>
           </div>
         </div>
       )}
@@ -754,12 +603,7 @@ function PasoLineaSerial({
 
       <div className="flex gap-2">
         <Button variant="secondary" onClick={onVolver}>← Volver</Button>
-        <Button
-          className="flex-1"
-          loading={verificando}
-          onClick={handleContinuar}
-          disabled={lineasSeleccionadas.length === 0}
-        >
+        <Button className="flex-1" loading={verificando} onClick={handleContinuar} disabled={lineasSeleccionadas.length === 0}>
           {verificando ? 'Verificando IMEIs...' : <>Continuar <ChevronRight size={16} /></>}
         </Button>
       </div>
@@ -774,6 +618,7 @@ function PasoCantidad({
 }) {
   const [busqueda,               setBusqueda]              = useState('');
   const [creandoNuevo,           setCreandoNuevo]          = useState(false);
+  // nuevoProducto precios: '' inicial → InputMoneda trata vacío como ''
   const [nuevoProducto,          setNuevoProducto]         = useState({ nombre: '', unidad_medida: 'unidad', precio: '', costo_unitario: '', linea_id: '' });
   const [productosSeleccionados, setProductosSeleccionados] = useState(productosIniciales);
   const [error,                  setError]                 = useState('');
@@ -783,8 +628,7 @@ function PasoCantidad({
 
   const { data: productosData } = useQuery({
     queryKey: ['productos-cantidad', ...sucursalKey],
-    queryFn:  () =>
-      getProductosCantidad().then((r) => normalizarProductos(r.data.data)),
+    queryFn:  () => getProductosCantidad().then((r) => normalizarProductos(r.data.data)),
     enabled:  sucursalLista,
   });
 
@@ -796,8 +640,9 @@ function PasoCantidad({
     mutationFn: () => crearProductoCantidad({
       nombre:         nuevoProducto.nombre,
       unidad_medida:  nuevoProducto.unidad_medida,
-      costo_unitario: nuevoProducto.costo_unitario ? Number(nuevoProducto.costo_unitario) : null,
-      precio:         nuevoProducto.precio ? Number(nuevoProducto.precio) : null,
+      // ya son number (de InputMoneda) o '' → Number('') = 0, condición !== '' lo filtra
+      costo_unitario: nuevoProducto.costo_unitario !== '' ? Number(nuevoProducto.costo_unitario) : null,
+      precio:         nuevoProducto.precio         !== '' ? Number(nuevoProducto.precio)         : null,
       proveedor_id:   proveedorId,
       linea_id:       nuevoProducto.linea_id ? Number(nuevoProducto.linea_id) : null,
     }),
@@ -816,14 +661,13 @@ function PasoCantidad({
       ...producto,
       cantidad_comprada: 1,
       precio_usd:        '',
-      precio_compra:     producto.costo_unitario || 0,
+      // Number() limpia posibles decimales de Postgres ('150000.00' → 150000)
+      precio_compra:     Number(producto.costo_unitario) || 0,
     }]);
   };
 
   const actualizarCampo = (id, campo, valor) =>
-    setProductosSeleccionados((prev) =>
-      prev.map((p) => p.id === id ? { ...p, [campo]: valor } : p)
-    );
+    setProductosSeleccionados((prev) => prev.map((p) => p.id === id ? { ...p, [campo]: valor } : p));
 
   const actualizarPrecioUsd = (id, valor) =>
     setProductosSeleccionados((prev) =>
@@ -861,8 +705,7 @@ function PasoCantidad({
         factor_conversion: Number(factor) || null,
         valor_traida:      Number(traida) || null,
       })),
-      factor,
-      traida,
+      factor, traida,
     );
   };
 
@@ -870,12 +713,7 @@ function PasoCantidad({
 
   return (
     <div className="flex flex-col gap-4">
-      <PanelConversion
-        factor={factor}
-        traida={traida}
-        onChange={handleConversionChange}
-        onAplicarATodos={handleAplicarATodos}
-      />
+      <PanelConversion factor={factor} traida={traida} onChange={handleConversionChange} onAplicarATodos={handleAplicarATodos} />
 
       <div className="flex flex-col gap-2">
         <p className="text-sm font-medium text-gray-700">Seleccionar producto</p>
@@ -884,67 +722,53 @@ function PasoCantidad({
           {productos.map((p) => {
             const productoItem = p;
             return (
-              <button
-                key={productoItem.id}
-                onClick={() => agregarProducto(productoItem)}
+              <button key={productoItem.id} onClick={() => agregarProducto(productoItem)}
                 disabled={!!productosSeleccionados.find((s) => s.id === productoItem.id)}
-                className={`flex items-center justify-between p-2.5 rounded-xl text-left text-sm
-                  border transition-all
+                className={`flex items-center justify-between p-2.5 rounded-xl text-left text-sm border transition-all
                   ${productosSeleccionados.find((s) => s.id === productoItem.id)
                     ? 'bg-green-50 border-green-200 opacity-60 cursor-not-allowed'
-                    : 'bg-white border-gray-100 hover:border-green-200 hover:bg-green-50'}`}
-              >
+                    : 'bg-white border-gray-100 hover:border-green-200 hover:bg-green-50'}`}>
                 <span className="font-medium">{productoItem.nombre}</span>
                 <span className="text-xs text-gray-400">Stock: {productoItem.stock}</span>
               </button>
             );
           })}
         </div>
-        <button
-          onClick={() => setCreandoNuevo(!creandoNuevo)}
-          className="text-xs text-blue-600 hover:text-blue-700 font-medium text-left"
-        >
-          + Crear nuevo producto
-        </button>
+        <button onClick={() => setCreandoNuevo(!creandoNuevo)} className="text-xs text-blue-600 hover:text-blue-700 font-medium text-left">+ Crear nuevo producto</button>
       </div>
 
       {creandoNuevo && (
         <div className="bg-green-50 rounded-xl p-3 flex flex-col gap-2">
           <p className="text-xs font-semibold text-green-700">Nuevo producto</p>
-          <Input
-            placeholder="Nombre del producto"
-            value={nuevoProducto.nombre}
-            onChange={(e) => setNuevoProducto({ ...nuevoProducto, nombre: e.target.value })}
-          />
+          <Input placeholder="Nombre del producto" value={nuevoProducto.nombre}
+            onChange={(e) => setNuevoProducto({ ...nuevoProducto, nombre: e.target.value })} />
+          {/* CAMBIO: Inputs type=number → InputMoneda para precios COP */}
           <div className="flex gap-2">
-            <Input
-              type="number"
-              placeholder="Precio compra"
-              value={nuevoProducto.costo_unitario}
-              onChange={(e) => setNuevoProducto({ ...nuevoProducto, costo_unitario: e.target.value })}
-            />
-            <Input
-              type="number"
-              placeholder="Precio venta"
-              value={nuevoProducto.precio}
-              onChange={(e) => setNuevoProducto({ ...nuevoProducto, precio: e.target.value })}
-            />
+            <div className="flex-1 flex flex-col gap-1">
+              <label className="text-xs text-gray-600 font-medium">Precio compra</label>
+              <InputMoneda
+                value={nuevoProducto.costo_unitario}
+                onChange={(val) => setNuevoProducto({ ...nuevoProducto, costo_unitario: val })}
+                placeholder="0"
+                className="w-full px-2.5 py-2 bg-white border border-gray-200 rounded-lg text-xs
+                  focus:outline-none focus:ring-2 focus:ring-green-400"
+              />
+            </div>
+            <div className="flex-1 flex flex-col gap-1">
+              <label className="text-xs text-gray-600 font-medium">Precio venta</label>
+              <InputMoneda
+                value={nuevoProducto.precio}
+                onChange={(val) => setNuevoProducto({ ...nuevoProducto, precio: val })}
+                placeholder="0"
+                className="w-full px-2.5 py-2 bg-white border border-gray-200 rounded-lg text-xs
+                  focus:outline-none focus:ring-2 focus:ring-green-400"
+              />
+            </div>
           </div>
-          {/* ── NUEVO: selector de línea ── */}
-          <SelectLinea
-            value={nuevoProducto.linea_id}
-            onChange={(val) => setNuevoProducto({ ...nuevoProducto, linea_id: val })}
-          />
+          <SelectLinea value={nuevoProducto.linea_id} onChange={(val) => setNuevoProducto({ ...nuevoProducto, linea_id: val })} />
           <div className="flex gap-2">
             <Button variant="secondary" size="sm" className="flex-1" onClick={() => setCreandoNuevo(false)}>Cancelar</Button>
-            <Button
-              size="sm" className="flex-1"
-              loading={mutCrear.isPending}
-              disabled={!nuevoProducto.linea_id}
-              onClick={() => mutCrear.mutate()}
-            >
-              Crear y agregar
-            </Button>
+            <Button size="sm" className="flex-1" loading={mutCrear.isPending} disabled={!nuevoProducto.linea_id} onClick={() => mutCrear.mutate()}>Crear y agregar</Button>
           </div>
         </div>
       )}
@@ -958,47 +782,41 @@ function PasoCantidad({
               <div key={productoSel.id} className="bg-gray-50 rounded-xl p-3 flex flex-col gap-2">
                 <div className="flex items-center justify-between">
                   <p className="text-sm font-semibold text-gray-800">{productoSel.nombre}</p>
-                  <button
-                    onClick={() => setProductosSeleccionados((prev) => prev.filter((s) => s.id !== productoSel.id))}
-                    className="p-1 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-500"
-                  >
+                  <button onClick={() => setProductosSeleccionados((prev) => prev.filter((s) => s.id !== productoSel.id))}
+                    className="p-1 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-500">
                     <Trash2 size={14} />
                   </button>
                 </div>
                 <div className="flex gap-2">
+                  {/* cantidad_comprada: type=number (es conteo, no precio) */}
                   <div className="flex-1">
                     <label className="text-xs text-gray-500 mb-1 block">Cantidad</label>
-                    <input
-                      type="number"
-                      value={productoSel.cantidad_comprada}
+                    <input type="number" value={productoSel.cantidad_comprada}
                       onChange={(e) => actualizarCampo(productoSel.id, 'cantidad_comprada', Number(e.target.value))}
                       onWheel={noWheel}
                       className="w-full px-2 py-1.5 bg-white border border-gray-200 rounded-lg text-sm
-                        focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
+                        focus:outline-none focus:ring-2 focus:ring-blue-500" />
                   </div>
+                  {/* precio_usd: type=number (puede tener decimales) */}
                   {usandoConversion && (
                     <div className="flex-1">
                       <label className="text-xs text-gray-500 mb-1 block">Precio USD</label>
-                      <input
-                        type="number"
-                        value={productoSel.precio_usd}
+                      <input type="number" value={productoSel.precio_usd}
                         onChange={(e) => actualizarPrecioUsd(productoSel.id, e.target.value)}
                         onWheel={noWheel}
                         className="w-full px-2 py-1.5 bg-white border border-gray-200 rounded-lg text-sm
-                          focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      />
+                          focus:outline-none focus:ring-2 focus:ring-blue-500" />
                     </div>
                   )}
+                  {/* precio_compra (COP): InputMoneda */}
                   <div className="flex-1">
                     <label className="text-xs text-gray-500 mb-1 block">
                       {usandoConversion ? 'Precio COP' : 'Precio compra'}
                     </label>
-                    <input
-                      type="number"
+                    <InputMoneda
                       value={productoSel.precio_compra}
-                      onChange={(e) => actualizarCampo(productoSel.id, 'precio_compra', Number(e.target.value))}
-                      onWheel={noWheel}
+                      onChange={(val) => actualizarCampo(productoSel.id, 'precio_compra', val)}
+                      placeholder="0"
                       className="w-full px-2 py-1.5 bg-white border border-gray-200 rounded-lg text-sm
                         focus:outline-none focus:ring-2 focus:ring-blue-500"
                     />
@@ -1047,10 +865,7 @@ function PasoPago({ proveedor, productos, tipo, onConfirmar, onVolver, loading }
     queryFn:  () => getAcreedores('').then((r) => r.data.data),
   });
   const acreedoresData = normalizarProductos(acreedoresRaw);
-
-  const proveedorYaEsAcreedor = acreedoresData.some(
-    (a) => a.proveedor_id === proveedor.id
-  );
+  const proveedorYaEsAcreedor = acreedoresData.some((a) => a.proveedor_id === proveedor.id);
 
   const handleConfirmar = () => {
     setError('');
@@ -1061,34 +876,18 @@ function PasoPago({ proveedor, productos, tipo, onConfirmar, onVolver, loading }
     if (pagos.length > 1) {
       const pagado = pagosFinales.reduce((s, p) => s + (Number(p.valor) || 0), 0);
       if (pagado !== Number(totalCompra)) {
-        return setError(
-          `El total asignado (${formatCOP(pagado)}) no coincide con el total (${formatCOP(totalCompra)})`
-        );
+        return setError(`El total asignado (${formatCOP(pagado)}) no coincide con el total (${formatCOP(totalCompra)})`);
       }
     }
-
     onConfirmar({ pagos: pagosFinales, totalCompra: Number(totalCompra), agregarComoAcreedor, numeroFactura, notas });
   };
 
   const contarImeisValidos = (linea) =>
-    linea.imeis.filter((i) => {
-      const valor = typeof i === 'string' ? i : i.valor;
-      return valor.trim();
-    }).length;
+    linea.imeis.filter((i) => { const valor = typeof i === 'string' ? i : i.valor; return valor.trim(); }).length;
 
   const resumen = tipo === 'serial'
-    ? productos.map((l) => ({
-        nombre:          l.nombre,
-        cantidad:        contarImeisValidos(l),
-        precio_unitario: Number(l.precio_compra),
-        precio_usd:      l.precio_usd || null,
-      }))
-    : productos.map((p) => ({
-        nombre:          p.nombre,
-        cantidad:        p.cantidad_comprada,
-        precio_unitario: Number(p.precio_compra),
-        precio_usd:      p.precio_usd || null,
-      }));
+    ? productos.map((l) => ({ nombre: l.nombre, cantidad: contarImeisValidos(l), precio_unitario: Number(l.precio_compra), precio_usd: l.precio_usd || null }))
+    : productos.map((p) => ({ nombre: p.nombre, cantidad: p.cantidad_comprada, precio_unitario: Number(p.precio_compra), precio_usd: p.precio_usd || null }));
 
   const pagadoParcial = pagos.reduce((s, p) => s + (Number(p.valor) || 0), 0);
   const diferencia    = Number(totalCompra) - pagadoParcial;
@@ -1103,9 +902,7 @@ function PasoPago({ proveedor, productos, tipo, onConfirmar, onVolver, loading }
             <div key={i} className="flex justify-between text-sm">
               <span className="text-gray-700">
                 {resumenItem.nombre} x{resumenItem.cantidad}
-                {resumenItem.precio_usd && (
-                  <span className="text-xs text-gray-400 ml-1">(${resumenItem.precio_usd} USD)</span>
-                )}
+                {resumenItem.precio_usd && <span className="text-xs text-gray-400 ml-1">(${resumenItem.precio_usd} USD)</span>}
               </span>
               <span className="font-medium">{formatCOP(resumenItem.precio_unitario * resumenItem.cantidad)}</span>
             </div>
@@ -1119,13 +916,13 @@ function PasoPago({ proveedor, productos, tipo, onConfirmar, onVolver, loading }
         </div>
       </div>
 
-      <div>
-        <label className="text-sm font-medium text-gray-700 mb-1 block">Total de la compra</label>
-        <input
-          type="number"
+      {/* CAMBIO: input type=number → InputMoneda para total COP */}
+      <div className="flex flex-col gap-1">
+        <label className="text-sm font-medium text-gray-700">Total de la compra</label>
+        <InputMoneda
           value={totalCompra}
-          onChange={(e) => setTotalCompra(e.target.value)}
-          onWheel={noWheel}
+          onChange={(val) => setTotalCompra(val)}
+          placeholder="0"
           className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-sm
             focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
@@ -1145,8 +942,7 @@ function PasoPago({ proveedor, productos, tipo, onConfirmar, onVolver, loading }
             const metodo       = m;
             const seleccionado = pagos.find((p) => p.metodo === metodo);
             return (
-              <button
-                key={metodo}
+              <button key={metodo}
                 onClick={() => {
                   if (seleccionado) {
                     setPagos((prev) => prev.filter((p) => p.metodo !== metodo));
@@ -1156,10 +952,7 @@ function PasoPago({ proveedor, productos, tipo, onConfirmar, onVolver, loading }
                   }
                 }}
                 className={`py-2.5 rounded-xl text-sm font-medium border transition-all
-                  ${seleccionado
-                    ? 'bg-blue-50 border-blue-300 text-blue-700'
-                    : 'bg-gray-50 border-gray-200 text-gray-600'}`}
-              >
+                  ${seleccionado ? 'bg-blue-50 border-blue-300 text-blue-700' : 'bg-gray-50 border-gray-200 text-gray-600'}`}>
                 {metodo}
               </button>
             );
@@ -1173,13 +966,12 @@ function PasoPago({ proveedor, productos, tipo, onConfirmar, onVolver, loading }
               return (
                 <div key={pagoItem.metodo} className="flex items-center gap-2">
                   <span className="text-xs text-gray-500 w-28 flex-shrink-0">{pagoItem.metodo}:</span>
-                  <input
-                    type="number"
+                  {/* CAMBIO: input type=number → InputMoneda para montos de pago COP */}
+                  <InputMoneda
                     value={pagoItem.valor}
-                    onChange={(e) => setPagos((prev) =>
-                      prev.map((x) => x.metodo === pagoItem.metodo ? { ...x, valor: e.target.value } : x)
+                    onChange={(val) => setPagos((prev) =>
+                      prev.map((x) => x.metodo === pagoItem.metodo ? { ...x, valor: val } : x)
                     )}
-                    onWheel={noWheel}
                     placeholder="0"
                     className="flex-1 px-2 py-1.5 bg-white border border-gray-200 rounded-lg text-sm
                       focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -1214,44 +1006,29 @@ function PasoPago({ proveedor, productos, tipo, onConfirmar, onVolver, loading }
         )}
       </div>
 
-      <div className={`rounded-xl p-3 border transition-all
-        ${agregarComoAcreedor ? 'bg-orange-50 border-orange-200' : 'bg-gray-50 border-gray-200'}`}>
+      <div className={`rounded-xl p-3 border transition-all ${agregarComoAcreedor ? 'bg-orange-50 border-orange-200' : 'bg-gray-50 border-gray-200'}`}>
         <label className="flex items-center gap-3 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={agregarComoAcreedor}
-            onChange={(e) => setAgregarComoAcreedor(e.target.checked)}
-            className="rounded"
-          />
+          <input type="checkbox" checked={agregarComoAcreedor}
+            onChange={(e) => setAgregarComoAcreedor(e.target.checked)} className="rounded" />
           <div>
             <p className="text-sm font-medium text-gray-700">
-              {proveedorYaEsAcreedor
-                ? `Registrar cargo a ${proveedor.nombre}`
-                : `Agregar ${proveedor.nombre} como acreedor`}
+              {proveedorYaEsAcreedor ? `Registrar cargo a ${proveedor.nombre}` : `Agregar ${proveedor.nombre} como acreedor`}
             </p>
             <p className="text-xs text-gray-400">
-              {proveedorYaEsAcreedor
-                ? 'Se registrará el monto pendiente en su cuenta'
-                : 'Se creará un acreedor con el monto pendiente de esta compra'}
+              {proveedorYaEsAcreedor ? 'Se registrará el monto pendiente en su cuenta' : 'Se creará un acreedor con el monto pendiente de esta compra'}
             </p>
           </div>
         </label>
       </div>
 
-      <Input
-        label="Notas (opcional)"
-        placeholder="Observaciones de la compra"
-        value={notas}
-        onChange={(e) => setNotas(e.target.value)}
-      />
+      <Input label="Notas (opcional)" placeholder="Observaciones de la compra"
+        value={notas} onChange={(e) => setNotas(e.target.value)} />
 
       {error && <p className="text-sm text-red-500">{error}</p>}
 
       <div className="flex gap-2">
         <Button variant="secondary" onClick={onVolver}>← Volver</Button>
-        <Button className="flex-1" loading={loading} onClick={handleConfirmar}>
-          Confirmar Compra
-        </Button>
+        <Button className="flex-1" loading={loading} onClick={handleConfirmar}>Confirmar Compra</Button>
       </div>
     </div>
   );
@@ -1269,35 +1046,25 @@ export function ModalCompra({ proveedor, onClose }) {
   const [traidaGuardada, setTraidaGuardada] = useState('');
 
   const {
-    verificando,
-    verificarYProceder,
-    modalReactivar,
-    serialesReactivar,
-    handleConfirmarReactivar,
-    handleCancelarReactivar,
-    modalYaEnInventario,
-    serialesDisponibles,
-    handleCerrarDisponibles,
+    verificando, verificarYProceder,
+    modalReactivar, serialesReactivar, handleConfirmarReactivar, handleCancelarReactivar,
+    modalYaEnInventario, serialesDisponibles, handleCerrarDisponibles,
   } = useVerificacionImeis();
 
   const mutCompra = useMutation({
     mutationFn: (payload) => crearCompra(payload),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['productos-serial'],  exact: false });
-      queryClient.invalidateQueries({ queryKey: ['productos-cantidad'], exact: false });
-      queryClient.invalidateQueries({ queryKey: ['compras'],            exact: false });
-      queryClient.invalidateQueries({ queryKey: ['acreedores'],         exact: false });
+      queryClient.invalidateQueries({ queryKey: ['productos-serial'],   exact: false });
+      queryClient.invalidateQueries({ queryKey: ['productos-cantidad'],  exact: false });
+      queryClient.invalidateQueries({ queryKey: ['compras'],             exact: false });
+      queryClient.invalidateQueries({ queryKey: ['acreedores'],          exact: false });
       onClose();
     },
   });
 
-  const handleTipo = (t) => {
-    setTipo(t);
-    setPaso(2);
-  };
-
-  const handleVolverA1 = () => setPaso(1);
-  const handleVolverA2 = () => setPaso(2);
+  const handleTipo       = (t) => { setTipo(t); setPaso(2); };
+  const handleVolverA1   = () => setPaso(1);
+  const handleVolverA2   = () => setPaso(2);
 
   const handleContinuarSerial = (imeis, lineasPayload, factor, traida) => {
     verificarYProceder(imeis, ({ reactivarMap }) => {
@@ -1326,13 +1093,10 @@ export function ModalCompra({ proveedor, onClose }) {
     const lineas = tipo === 'serial'
       ? productos.flatMap((linea) =>
           linea.imeis
-            .filter((i) => {
-              const valor = typeof i === 'string' ? i : i.valor;
-              return valor.trim();
-            })
+            .filter((i) => { const valor = typeof i === 'string' ? i : i.valor; return valor.trim(); })
             .map((i) => {
               const esObjeto          = typeof i !== 'string';
-              const imeiValor         = esObjeto ? i.valor         : i;
+              const imeiValor         = esObjeto ? i.valor          : i;
               const reactivarSerialId = esObjeto ? i.reactivar_serial_id : null;
               return {
                 nombre_producto:     linea.nombre,
@@ -1379,31 +1143,17 @@ export function ModalCompra({ proveedor, onClose }) {
   return (
     <>
       <Modal open onClose={onClose} title={`Compra a ${proveedor.nombre}`} size="lg">
-        {/* Indicador de pasos */}
         <div className="flex items-center gap-2 mb-5">
           {[1, 2, 3].map((n) => (
             <div key={n} className="flex items-center gap-2 flex-1">
               <button
-                onClick={() => {
-                  if (n < paso) {
-                    if (n === 1) handleVolverA1();
-                    if (n === 2) handleVolverA2();
-                  }
-                }}
+                onClick={() => { if (n < paso) { if (n === 1) handleVolverA1(); if (n === 2) handleVolverA2(); } }}
                 disabled={n >= paso}
-                className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold
-                  flex-shrink-0 transition-all
-                  ${paso > n
-                    ? 'bg-blue-100 text-blue-600 hover:bg-blue-200 cursor-pointer'
-                    : paso === n
-                      ? 'bg-blue-600 text-white cursor-default'
-                      : 'bg-gray-100 text-gray-400 cursor-default'}`}
-              >
+                className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 transition-all
+                  ${paso > n ? 'bg-blue-100 text-blue-600 hover:bg-blue-200 cursor-pointer' : paso === n ? 'bg-blue-600 text-white cursor-default' : 'bg-gray-100 text-gray-400 cursor-default'}`}>
                 {n}
               </button>
-              <span className={`text-xs hidden sm:block ${paso >= n ? 'text-blue-600 font-medium' : 'text-gray-400'}`}>
-                {titulos[n - 1]}
-              </span>
+              <span className={`text-xs hidden sm:block ${paso >= n ? 'text-blue-600 font-medium' : 'text-gray-400'}`}>{titulos[n - 1]}</span>
               {n < 3 && <div className={`flex-1 h-px ${paso > n ? 'bg-blue-300' : 'bg-gray-200'}`} />}
             </div>
           ))}
@@ -1449,17 +1199,8 @@ export function ModalCompra({ proveedor, onClose }) {
         )}
       </Modal>
 
-      <ModalReactivarSeriales
-        open={modalReactivar}
-        seriales={serialesReactivar}
-        onReactivar={handleConfirmarReactivar}
-        onCancelar={handleCancelarReactivar}
-      />
-      <ModalYaEnInventario
-        open={modalYaEnInventario}
-        seriales={serialesDisponibles}
-        onCerrar={handleCerrarDisponibles}
-      />
+      <ModalReactivarSeriales open={modalReactivar} seriales={serialesReactivar} onReactivar={handleConfirmarReactivar} onCancelar={handleCancelarReactivar} />
+      <ModalYaEnInventario open={modalYaEnInventario} seriales={serialesDisponibles} onCerrar={handleCerrarDisponibles} />
     </>
   );
 }
