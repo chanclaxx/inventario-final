@@ -5,6 +5,7 @@ import { getConfig } from '../../api/config.api';
 import { formatCOP, formatFechaHora } from '../../utils/formatters';
 import { Button }      from '../../components/ui/Button';
 import { Input }       from '../../components/ui/Input';
+import { InputMoneda } from '../../components/ui/InputMoneda';
 import { Modal }       from '../../components/ui/Modal';
 import { Badge }       from '../../components/ui/Badge';
 import { Spinner }     from '../../components/ui/Spinner';
@@ -143,19 +144,15 @@ function DetalleCompraInline({ compraId }) {
                 </p>
                 <span className="text-xs text-gray-400">{formatFechaHora(compra.fecha)}</span>
               </div>
-
               {compra.proveedor_nombre && (
                 <p className="text-xs text-gray-600">
                   Proveedor: <span className="font-medium">{compra.proveedor_nombre}</span>
                 </p>
               )}
-
               <div className="flex flex-col gap-1.5 mt-1">
                 {compra.lineas?.map((l) => (
-                  <div
-                    key={l.id}
-                    className="flex items-start justify-between text-xs gap-2 bg-white rounded-lg px-2.5 py-2 border border-amber-100"
-                  >
+                  <div key={l.id}
+                    className="flex items-start justify-between text-xs gap-2 bg-white rounded-lg px-2.5 py-2 border border-amber-100">
                     <div className="flex-1 min-w-0">
                       <p className="font-medium text-gray-800 truncate">{l.nombre_producto}</p>
                       {l.imei && <p className="text-gray-400 font-mono">{l.imei}</p>}
@@ -167,7 +164,6 @@ function DetalleCompraInline({ compraId }) {
                   </div>
                 ))}
               </div>
-
               <div className="flex justify-between items-center border-t border-amber-200 pt-2 mt-1">
                 <span className="text-xs text-gray-500">Total compra</span>
                 <span className="text-sm font-bold text-amber-700">{formatCOP(compra.total)}</span>
@@ -183,6 +179,11 @@ function DetalleCompraInline({ compraId }) {
 // ─────────────────────────────────────────────
 // MODAL MOVIMIENTO
 // ─────────────────────────────────────────────
+// CAMBIO: Input type=number → InputMoneda para el campo valor.
+// form.valor inicia en '' → InputMoneda trata '' como vacío.
+// mutación: Number(form.valor) → Number(850000) = 850000 ✓
+// handleKeyDown foca 'valor-acreedor' por id → InputMoneda acepta prop id ✓
+
 function ModalMovimiento({ acreedor, onClose, onImprimir }) {
   const queryClient             = useQueryClient();
   const [form,  setForm]        = useState({ tipo: 'Cargo', descripcion: '', valor: '' });
@@ -200,7 +201,7 @@ function ModalMovimiento({ acreedor, onClose, onImprimir }) {
       queryClient.invalidateQueries({ queryKey: ['acreedor',   acreedor.id], exact: false });
       queryClient.invalidateQueries({ queryKey: ['acreedores'],              exact: false });
       const mov = data?.data?.data ?? null;
-      onImprimir(mov); // ← notifica al padre con el movimiento registrado
+      onImprimir(mov);
       onClose();
     },
     onError: (err) => setError(err.response?.data?.error || 'Error al registrar'),
@@ -241,14 +242,19 @@ function ModalMovimiento({ acreedor, onClose, onImprimir }) {
           onChange={(e) => setForm({ ...form, descripcion: e.target.value })}
           onKeyDown={(e) => handleKeyDown(e, 'valor-acreedor')}
         />
-        <Input
-          id="valor-acreedor"
-          label="Valor"
-          type="number"
-          placeholder="0"
-          value={form.valor}
-          onChange={(e) => setForm({ ...form, valor: e.target.value })}
-        />
+
+        {/* CAMBIO: Input type=number → InputMoneda */}
+        <div className="flex flex-col gap-1">
+          <label className="text-sm font-medium text-gray-700">Valor</label>
+          <InputMoneda
+            id="valor-acreedor"
+            value={form.valor}
+            onChange={(val) => setForm({ ...form, valor: val })}
+            placeholder="0"
+            className="w-full px-3 py-2 bg-gray-100 rounded-xl text-sm
+              focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"
+          />
+        </div>
 
         <FirmaCanvas onFirma={setFirma} />
 
@@ -274,6 +280,8 @@ function ModalMovimiento({ acreedor, onClose, onImprimir }) {
 // ─────────────────────────────────────────────
 // MODAL NUEVO ACREEDOR
 // ─────────────────────────────────────────────
+// Sin cambios — solo tiene campos de texto (nombre, cedula, telefono)
+
 function ModalNuevoAcreedor({ onClose }) {
   const queryClient                  = useQueryClient();
   const [form, setForm]              = useState({ nombre: '', cedula: '', telefono: '' });
@@ -361,42 +369,22 @@ function ModalNuevoAcreedor({ onClose }) {
           )}
         </div>
 
-        <Input
-          id="nombre-acreedor"
-          label="Nombre"
-          placeholder="Nombre completo"
-          value={form.nombre}
-          onChange={(e) => setForm({ ...form, nombre: e.target.value })}
-          onKeyDown={(e) => handleKeyDown(e, 'cedula-acreedor')}
-          autoFocus
-        />
-        <Input
-          id="cedula-acreedor"
-          label="Cédula / NIT"
-          placeholder="123456789"
-          value={form.cedula}
-          onChange={(e) => setForm({ ...form, cedula: e.target.value })}
-          onKeyDown={(e) => handleKeyDown(e, 'tel-acreedor')}
-        />
-        <Input
-          id="tel-acreedor"
-          label="Teléfono"
-          placeholder="3001234567"
-          value={form.telefono}
-          onChange={(e) => setForm({ ...form, telefono: e.target.value })}
-          onKeyDown={(e) => handleKeyDown(e, null)}
-        />
+        <Input id="nombre-acreedor" label="Nombre" placeholder="Nombre completo"
+          value={form.nombre} onChange={(e) => setForm({ ...form, nombre: e.target.value })}
+          onKeyDown={(e) => handleKeyDown(e, 'cedula-acreedor')} autoFocus />
+        <Input id="cedula-acreedor" label="Cédula / NIT" placeholder="123456789"
+          value={form.cedula} onChange={(e) => setForm({ ...form, cedula: e.target.value })}
+          onKeyDown={(e) => handleKeyDown(e, 'tel-acreedor')} />
+        <Input id="tel-acreedor" label="Teléfono" placeholder="3001234567"
+          value={form.telefono} onChange={(e) => setForm({ ...form, telefono: e.target.value })}
+          onKeyDown={(e) => handleKeyDown(e, null)} />
 
         {error && <p className="text-sm text-red-500">{error}</p>}
 
         <div className="flex gap-2">
           <Button variant="secondary" className="flex-1" onClick={onClose}>Cancelar</Button>
-          <Button
-            className="flex-1"
-            loading={mutation.isPending}
-            onClick={() => mutation.mutate()}
-            disabled={!form.nombre.trim() || !form.cedula.trim()}
-          >
+          <Button className="flex-1" loading={mutation.isPending} onClick={() => mutation.mutate()}
+            disabled={!form.nombre.trim() || !form.cedula.trim()}>
             Guardar
           </Button>
         </div>
@@ -413,14 +401,11 @@ function ListaAcreedores({ acreedores, acreedorSel, isLoading, busqueda, setBusq
     <div className="flex flex-col gap-3">
       <div className="flex items-center gap-2">
         <SearchInput value={busqueda} onChange={setBusqueda} placeholder="Buscar acreedor..." />
-        <button
-          onClick={onNuevo}
-          className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center flex-shrink-0 hover:bg-blue-700 transition-colors"
-        >
+        <button onClick={onNuevo}
+          className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center flex-shrink-0 hover:bg-blue-700 transition-colors">
           <Plus size={18} className="text-white" />
         </button>
       </div>
-
       {isLoading ? (
         <Spinner className="py-10" />
       ) : (
@@ -431,14 +416,11 @@ function ListaAcreedores({ acreedores, acreedorSel, isLoading, busqueda, setBusq
             acreedores.map((a) => {
               const saldo = Number(a.saldo || 0);
               return (
-                <button
-                  key={a.id}
-                  onClick={() => onSeleccionar(a)}
+                <button key={a.id} onClick={() => onSeleccionar(a)}
                   className={`flex items-center justify-between p-3 rounded-xl text-left transition-all border
                     ${acreedorSel?.id === a.id
                       ? 'bg-blue-50 border-blue-200 text-blue-700'
-                      : 'bg-white border-gray-100 hover:border-gray-200 hover:bg-gray-50'}`}
-                >
+                      : 'bg-white border-gray-100 hover:border-gray-200 hover:bg-gray-50'}`}>
                   <div>
                     <p className="text-sm font-medium text-gray-800">{a.nombre}</p>
                     <p className={`text-xs font-semibold mt-0.5 ${saldo > 0 ? 'text-red-500' : 'text-green-600'}`}>
@@ -464,10 +446,8 @@ function DetalleAcreedor({ detalle, loadingDetalle, movimientosUI, onRegistrar, 
 
   return (
     <div className="flex flex-col gap-4">
-      <button
-        onClick={onVolver}
-        className="flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800 transition-colors lg:hidden w-fit"
-      >
+      <button onClick={onVolver}
+        className="flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800 transition-colors lg:hidden w-fit">
         <ChevronLeft size={16} />
         Volver a lista
       </button>
@@ -491,10 +471,8 @@ function DetalleAcreedor({ detalle, loadingDetalle, movimientosUI, onRegistrar, 
           <EmptyState icon={PenLine} titulo="Sin movimientos" />
         ) : (
           movimientosUI.map((m) => (
-            <div
-              key={m.id}
-              className="bg-white border border-gray-100 rounded-xl p-3 flex items-start justify-between gap-3"
-            >
+            <div key={m.id}
+              className="bg-white border border-gray-100 rounded-xl p-3 flex items-start justify-between gap-3">
               <div className="flex-1">
                 <div className="flex items-center gap-2 flex-wrap">
                   <Badge variant={m.tipo === 'Cargo' ? 'red' : 'green'}>{m.tipo}</Badge>
@@ -507,24 +485,17 @@ function DetalleAcreedor({ detalle, loadingDetalle, movimientosUI, onRegistrar, 
                   <span className="font-semibold text-gray-600">{formatCOP(m.saldo_despues)}</span>
                 </div>
                 {m.firma && (
-                  <img
-                    src={m.firma}
-                    alt="firma"
-                    className="mt-2 h-12 border border-gray-100 rounded-lg"
-                  />
+                  <img src={m.firma} alt="firma" className="mt-2 h-12 border border-gray-100 rounded-lg" />
                 )}
                 {m.compra_id && <DetalleCompraInline compraId={m.compra_id} />}
               </div>
-
               <div className="flex flex-col items-end gap-2 flex-shrink-0">
                 <span className={`text-sm font-bold ${m.tipo === 'Cargo' ? 'text-red-500' : 'text-green-600'}`}>
                   {m.tipo === 'Cargo' ? '+' : '-'}{formatCOP(m.valor)}
                 </span>
-                <button
-                  onClick={() => onImprimir(m)}
+                <button onClick={() => onImprimir(m)}
                   className="flex items-center gap-1 text-xs text-gray-400 hover:text-blue-600 transition-colors"
-                  title="Imprimir recibo"
-                >
+                  title="Imprimir recibo">
                   <Printer size={14} />
                   <span className="hidden sm:inline">Recibo</span>
                 </button>
@@ -569,26 +540,19 @@ export default function AcreedoresPage() {
   const handleSeleccionar = (a) => setAcreedorSel(a);
   const handleVolver      = () => setAcreedorSel(null);
 
-  // Abre el recibo: se usa tanto desde el historial como desde el modal de registro
   const handleImprimir = (mov) => {
     setModalMov(false);
     setMovImprimir(mov);
   };
 
   const listaProps = {
-    acreedores,
-    acreedorSel,
-    isLoading,
-    busqueda,
-    setBusqueda,
+    acreedores, acreedorSel, isLoading, busqueda, setBusqueda,
     onSeleccionar: handleSeleccionar,
     onNuevo: () => setModalNuevo(true),
   };
 
   const detalleProps = {
-    detalle,
-    loadingDetalle,
-    movimientosUI,
+    detalle, loadingDetalle, movimientosUI,
     onRegistrar: () => setModalMov(true),
     onImprimir:  handleImprimir,
     onVolver:    handleVolver,
@@ -596,25 +560,20 @@ export default function AcreedoresPage() {
 
   return (
     <>
-      {/* ── DESKTOP lg+: layout lado a lado ── */}
       <div className="hidden lg:flex gap-4">
         <div className="w-64 flex-shrink-0">
           <ListaAcreedores {...listaProps} />
         </div>
         <div className="flex-1">
           {!acreedorSel ? (
-            <EmptyState
-              icon={Users}
-              titulo="Selecciona un acreedor"
-              descripcion="Elige un acreedor para ver su historial"
-            />
+            <EmptyState icon={Users} titulo="Selecciona un acreedor"
+              descripcion="Elige un acreedor para ver su historial" />
           ) : (
             <DetalleAcreedor {...detalleProps} />
           )}
         </div>
       </div>
 
-      {/* ── MOBILE / TABLET <lg: una columna ── */}
       <div className="flex flex-col gap-4 lg:hidden">
         {!acreedorSel ? (
           <ListaAcreedores {...listaProps} />
@@ -623,7 +582,6 @@ export default function AcreedoresPage() {
         )}
       </div>
 
-      {/* ── MODALES ── */}
       {modalMov && (
         <ModalMovimiento
           acreedor={acreedorSel}

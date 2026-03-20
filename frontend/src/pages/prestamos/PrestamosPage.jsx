@@ -14,9 +14,9 @@ import { Badge }                                from '../../components/ui/Badge'
 import { Button }                               from '../../components/ui/Button';
 import { Modal }                                from '../../components/ui/Modal';
 import { Input }                                from '../../components/ui/Input';
+import { InputMoneda }                          from '../../components/ui/InputMoneda';
 import { Spinner }                              from '../../components/ui/Spinner';
 import { EmptyState }                           from '../../components/ui/EmptyState';
-import { InputMoneda }                          from '../../components/ui/InputMoneda';
 import {
   Handshake, CreditCard, Bike, Plus, CheckCircle,
   ChevronDown, ChevronUp, ChevronLeft, ChevronRight,
@@ -49,6 +49,10 @@ const ESTADO_ENTREGA_LABEL = {
 };
 
 // ─── Modal Abono Préstamo ─────────────────────────────────────────────────────
+// CAMBIO: Input type=number → InputMoneda
+// valor inicia en '' → InputMoneda trata '' como vacío
+// mutación recibe Number(valor): Number(850000) = 850000 ✓
+// onKeyDown Enter se pasa como prop a InputMoneda → funciona igual
 
 function ModalAbonoPrestamo({ prestamo, onClose }) {
   const queryClient = useQueryClient();
@@ -77,9 +81,18 @@ function ModalAbonoPrestamo({ prestamo, onClose }) {
             <span className="text-sm font-bold text-red-500">{formatCOP(saldoPendiente)}</span>
           </div>
         </div>
-        <Input label="Valor del abono" type="number" placeholder="0"
-          value={valor} onChange={(e) => setValor(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && mutation.mutate()} autoFocus />
+        <div className="flex flex-col gap-1">
+          <label className="text-sm font-medium text-gray-700">Valor del abono</label>
+          <InputMoneda
+            value={valor}
+            onChange={setValor}
+            placeholder="0"
+            onKeyDown={(e) => e.key === 'Enter' && mutation.mutate()}
+            autoFocus
+            className="w-full px-3 py-2 bg-gray-100 rounded-xl text-sm
+              focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"
+          />
+        </div>
         {error && <p className="text-sm text-red-500">{error}</p>}
         <div className="flex gap-2">
           <Button variant="secondary" className="flex-1" onClick={onClose}>Cancelar</Button>
@@ -93,6 +106,7 @@ function ModalAbonoPrestamo({ prestamo, onClose }) {
 }
 
 // ─── Modal Devolución préstamo ────────────────────────────────────────────────
+// Sin cambios — cantidad es conteo (type=number correcto), no es precio
 
 function ModalDevolucion({ prestamo, onClose }) {
   const queryClient = useQueryClient();
@@ -165,6 +179,9 @@ function ModalDevolucion({ prestamo, onClose }) {
 }
 
 // ─── Modal Abono Crédito ──────────────────────────────────────────────────────
+// CAMBIO: Input type=number → InputMoneda
+// valor inicia en '' → InputMoneda trata '' como vacío
+// mutación recibe Number(valor): Number(850000) = 850000 ✓
 
 function ModalAbonoCredito({ credito, onClose }) {
   const queryClient = useQueryClient();
@@ -202,9 +219,18 @@ function ModalAbonoCredito({ credito, onClose }) {
             </button>
           ))}
         </div>
-        <Input label="Valor del abono" type="number" placeholder="0"
-          value={valor} onChange={(e) => setValor(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && mutation.mutate()} autoFocus />
+        <div className="flex flex-col gap-1">
+          <label className="text-sm font-medium text-gray-700">Valor del abono</label>
+          <InputMoneda
+            value={valor}
+            onChange={setValor}
+            placeholder="0"
+            onKeyDown={(e) => e.key === 'Enter' && mutation.mutate()}
+            autoFocus
+            className="w-full px-3 py-2 bg-gray-100 rounded-xl text-sm
+              focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"
+          />
+        </div>
         {error && <p className="text-sm text-red-500">{error}</p>}
         <div className="flex gap-2">
           <Button variant="secondary" className="flex-1" onClick={onClose}>Cancelar</Button>
@@ -390,7 +416,6 @@ function BarraProgreso({ abonado, total }) {
   );
 }
 
-// ── Tarjeta prominente — Pendiente ───────────────────────────────────────────
 function TarjetaEntregaPendiente({ entrega, onSeleccionar }) {
   return (
     <button onClick={() => onSeleccionar(entrega.id)}
@@ -424,7 +449,6 @@ function TarjetaEntregaPendiente({ entrega, onSeleccionar }) {
   );
 }
 
-// ── Fila compacta — Entregado / No_entregado ──────────────────────────────────
 function FilaEntregaCompacta({ entrega, onSeleccionar }) {
   const estadoBadge = ESTADO_ENTREGA_BADGE[entrega.estado] || 'gray';
   const estadoLabel = ESTADO_ENTREGA_LABEL[entrega.estado] || entrega.estado;
@@ -450,7 +474,6 @@ function FilaEntregaCompacta({ entrega, onSeleccionar }) {
   );
 }
 
-// ── Desplegable de historial ──────────────────────────────────────────────────
 function DesplegableHistorial({ entregas, onSeleccionar }) {
   const [abierto, setAbierto] = useState(false);
   if (entregas.length === 0) return null;
@@ -460,8 +483,7 @@ function DesplegableHistorial({ entregas, onSeleccionar }) {
 
   return (
     <div className="border border-gray-100 rounded-xl overflow-hidden">
-      <button
-        onClick={() => setAbierto((v) => !v)}
+      <button onClick={() => setAbierto((v) => !v)}
         className="w-full flex items-center justify-between px-4 py-2.5
           bg-gray-50 hover:bg-gray-100 transition-colors">
         <div className="flex items-center gap-2 flex-wrap">
@@ -481,31 +503,18 @@ function DesplegableHistorial({ entregas, onSeleccionar }) {
           ? <ChevronUp   size={15} className="text-gray-400" />
           : <ChevronDown size={15} className="text-gray-400" />}
       </button>
-
       {abierto && (
         <div className="flex flex-col divide-y divide-gray-50 bg-white">
           {entregas.map((entrega) => {
             const entregaId = entrega.id;
             return (
-              <FilaEntregaCompacta
-                key={entregaId}
-                entrega={entrega}
-                onSeleccionar={onSeleccionar}
-              />
+              <FilaEntregaCompacta key={entregaId} entrega={entrega} onSeleccionar={onSeleccionar} />
             );
           })}
         </div>
       )}
     </div>
   );
-}
-
-// ── TarjetaEntrega — alias para compatibilidad ────────────────────────────────
-function TarjetaEntrega({ entrega, onSeleccionar }) {
-  if (entrega.estado === 'Pendiente') {
-    return <TarjetaEntregaPendiente entrega={entrega} onSeleccionar={onSeleccionar} />;
-  }
-  return <FilaEntregaCompacta entrega={entrega} onSeleccionar={onSeleccionar} />;
 }
 
 function PanelDetalleEntrega({ entregaId, onVolver }) {
@@ -619,6 +628,7 @@ function PanelDetalleEntrega({ entregaId, onVolver }) {
         </div>
       )}
 
+      {/* InputMoneda ya estaba — sin cambios */}
       {esPendiente && (
         <div className="flex flex-col gap-2 p-3 bg-green-50 border border-green-100 rounded-xl">
           <p className="text-xs font-semibold text-green-700 uppercase tracking-wide">
@@ -713,7 +723,6 @@ function TabDomiciliarios() {
 
   return (
     <div className="flex flex-col gap-4">
-
       {domiciliarios.length > 0 && (
         <select value={filtroDomiciliario}
           onChange={(e) => setFiltroDomiciliario(e.target.value)}
@@ -736,7 +745,6 @@ function TabDomiciliarios() {
           descripcion="Los pedidos aparecen al crear facturas con domicilio" />
       ) : (
         <div className="flex flex-col gap-3">
-
           {pendientes.length === 0 ? (
             <p className="text-xs text-gray-400 px-1">Sin pedidos pendientes</p>
           ) : (
@@ -756,12 +764,10 @@ function TabDomiciliarios() {
               })}
             </div>
           )}
-
           <DesplegableHistorial
             entregas={historial}
             onSeleccionar={setEntregaSeleccionada}
           />
-
         </div>
       )}
     </div>
@@ -816,7 +822,6 @@ export default function PrestamosPage() {
   return (
     <div className="flex flex-col gap-4">
 
-      {/* Tabs principales */}
       <div className="flex gap-1 bg-gray-100 p-1 rounded-xl w-fit">
         {TABS_PRINCIPALES.map((tab) => {
           const tabId    = tab.id;
@@ -835,7 +840,6 @@ export default function PrestamosPage() {
         })}
       </div>
 
-      {/* ── PRÉSTAMOS ── */}
       {tabPrincipal === 'prestamos' && (
         <div className="flex flex-col gap-4">
           <div className="flex gap-1 bg-gray-100 p-1 rounded-xl w-fit">
@@ -902,7 +906,6 @@ export default function PrestamosPage() {
         </div>
       )}
 
-      {/* ── CRÉDITOS ── */}
       {tabPrincipal === 'creditos' && (
         <div className="flex flex-col gap-3">
           {loadingC ? (
@@ -973,10 +976,8 @@ export default function PrestamosPage() {
         </div>
       )}
 
-      {/* ── DOMICILIARIOS ── */}
       {tabPrincipal === 'domiciliarios' && <TabDomiciliarios />}
 
-      {/* Modales */}
       {prestamoAbono && (
         <ModalAbonoPrestamo prestamo={prestamoAbono} onClose={() => setPrestamoAbono(null)} />
       )}
