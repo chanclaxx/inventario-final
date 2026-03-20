@@ -1,28 +1,26 @@
-import { useState }                        from 'react';
+import { useState }                          from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Pencil, Trash2 }                  from 'lucide-react';
-import { actualizarProductoCantidad }      from '../../api/productos.api';
-import { getProveedores }                  from '../../api/proveedores.api';
-import { getLineas }                       from '../../api/productos.api';
-import { Modal }   from '../../components/ui/Modal';
-import { Input }   from '../../components/ui/Input';
-import { Button }  from '../../components/ui/Button';
-import { useAuth } from '../../context/useAuth';
+import { Pencil, Trash2 }                    from 'lucide-react';
+import { actualizarProductoCantidad }        from '../../api/productos.api';
+import { getProveedores }                    from '../../api/proveedores.api';
+import { getLineas }                         from '../../api/productos.api';
+import { Modal }        from '../../components/ui/Modal';
+import { Input }        from '../../components/ui/Input';
+import { InputMoneda }  from '../../components/ui/InputMoneda';
+import { Button }       from '../../components/ui/Button';
+import { useAuth }      from '../../context/useAuth';
 import { ModalEliminarProducto, TIPO_PRODUCTO_CANTIDAD } from './ModalEliminarProducto';
-
-// PIN de eliminación viene de config_negocio → se pasa como prop desde el padre.
 
 export function ModalEditarProductoCantidad({ producto, pinEliminacion, onClose }) {
   const { esAdminNegocio } = useAuth();
   const queryClient = useQueryClient();
 
-  // ── Estado del formulario de edición (lógica original intacta) ────────────
   const [form, setForm] = useState({
     nombre        : producto.nombre         || '',
     unidad_medida : producto.unidad_medida  || 'unidad',
     stock_minimo  : producto.stock_minimo   != null ? String(producto.stock_minimo)   : '0',
-    precio        : producto.precio         != null ? String(producto.precio)         : '',
-    costo_unitario: producto.costo_unitario != null ? String(producto.costo_unitario) : '',
+    precio        : producto.precio         != null ? Number(producto.precio)         : '',
+    costo_unitario: producto.costo_unitario != null ? Number(producto.costo_unitario) : '',
     proveedor_id  : producto.proveedor_id   != null ? String(producto.proveedor_id)   : '',
     linea_id      : producto.linea_id       != null ? String(producto.linea_id)       : '',
   });
@@ -44,7 +42,6 @@ export function ModalEditarProductoCantidad({ producto, pinEliminacion, onClose 
   const proveedores = proveedoresData || [];
   const lineas      = lineasData      || [];
 
-  // ── Mutación de edición (lógica original intacta) ─────────────────────────
   const mutation = useMutation({
     mutationFn: () => actualizarProductoCantidad(producto.id, {
       nombre        : form.nombre.trim(),
@@ -62,7 +59,6 @@ export function ModalEditarProductoCantidad({ producto, pinEliminacion, onClose 
     onError: (err) => setError(err.response?.data?.error || 'Error al actualizar el producto'),
   });
 
-  // ── Navegación entre campos con Enter (original intacta) ──────────────────
   const handleKeyDown = (e, siguienteId) => {
     if (e.key === 'Enter') {
       e.preventDefault();
@@ -78,7 +74,6 @@ export function ModalEditarProductoCantidad({ producto, pinEliminacion, onClose 
       <Modal open onClose={onClose} title="Editar producto" size="sm">
         <div className="flex flex-col gap-4">
 
-          {/* ── Aviso informativo (original) ── */}
           <div className="flex items-center gap-2 bg-blue-50 rounded-xl px-3 py-2">
             <Pencil size={15} className="text-blue-500 flex-shrink-0" />
             <p className="text-xs text-blue-700">
@@ -86,7 +81,6 @@ export function ModalEditarProductoCantidad({ producto, pinEliminacion, onClose 
             </p>
           </div>
 
-          {/* ── Campos del formulario (originales) ── */}
           <Input
             id="edit-nombre-cant"
             label="Nombre"
@@ -115,26 +109,36 @@ export function ModalEditarProductoCantidad({ producto, pinEliminacion, onClose 
               onChange={(e) => setForm({ ...form, stock_minimo: e.target.value })}
               onKeyDown={(e) => handleKeyDown(e, 'edit-precio-cant')}
             />
-            <Input
-              id="edit-precio-cant"
-              label="Precio de venta"
-              type="number" min="0" placeholder="0"
-              value={form.precio}
-              onChange={(e) => setForm({ ...form, precio: e.target.value })}
-              onKeyDown={(e) => handleKeyDown(e, 'edit-costo-cant')}
+
+            <div className="flex flex-col gap-1">
+              <label className="text-sm font-medium text-gray-700">Precio de venta</label>
+              <InputMoneda
+                id="edit-precio-cant"
+                value={form.precio}
+                onChange={(val) => setForm({ ...form, precio: val })}
+                placeholder="0"
+                onKeyDown={(e) => handleKeyDown(e, 'edit-costo-cant')}
+                className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl
+                  text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500
+                  transition-all"
+              />
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-1">
+            <label className="text-sm font-medium text-gray-700">Costo unitario</label>
+            <InputMoneda
+              id="edit-costo-cant"
+              value={form.costo_unitario}
+              onChange={(val) => setForm({ ...form, costo_unitario: val })}
+              placeholder="0"
+              onKeyDown={(e) => handleKeyDown(e, null)}
+              className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl
+                text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500
+                transition-all"
             />
           </div>
 
-          <Input
-            id="edit-costo-cant"
-            label="Costo unitario"
-            type="number" min="0" placeholder="0"
-            value={form.costo_unitario}
-            onChange={(e) => setForm({ ...form, costo_unitario: e.target.value })}
-            onKeyDown={(e) => handleKeyDown(e, 'edit-proveedor-cant')}
-          />
-
-          {/* Línea */}
           <div className="flex flex-col gap-1">
             <label className="text-sm font-medium text-gray-700">Línea</label>
             <select
@@ -151,7 +155,6 @@ export function ModalEditarProductoCantidad({ producto, pinEliminacion, onClose 
             </select>
           </div>
 
-          {/* Proveedor */}
           <div className="flex flex-col gap-1">
             <label className="text-sm font-medium text-gray-700">
               Proveedor <span className="text-gray-400 font-normal">(opcional)</span>
@@ -172,7 +175,6 @@ export function ModalEditarProductoCantidad({ producto, pinEliminacion, onClose 
 
           {error && <p className="text-sm text-red-500">{error}</p>}
 
-          {/* ── Acciones: separador visual + botón eliminar ── */}
           <div className="border-t border-gray-100 pt-3 flex flex-col gap-2">
             <div className="flex gap-2">
               <Button variant="secondary" className="flex-1" onClick={onClose}>
@@ -188,7 +190,6 @@ export function ModalEditarProductoCantidad({ producto, pinEliminacion, onClose 
               </Button>
             </div>
 
-            {/* Botón eliminar — solo admin, separado visualmente */}
             <button
               type="button"
               onClick={() => setModalEliminar(true)}
@@ -205,7 +206,6 @@ export function ModalEditarProductoCantidad({ producto, pinEliminacion, onClose 
         </div>
       </Modal>
 
-      {/* ── Modal de eliminación — se monta encima del modal de edición ── */}
       {modalEliminar && (
         <ModalEliminarProducto
           producto={producto}
