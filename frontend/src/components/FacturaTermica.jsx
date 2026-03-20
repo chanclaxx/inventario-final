@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { formatCOP, formatFechaHora } from '../utils/formatters';
 
 // ─── Utilidades ───────────────────────────────────────────────────────────────
@@ -17,8 +17,8 @@ function calcularValorRetoma(retoma) {
 // ─── Subcomponente: bloque de una retoma individual ──────────────────────────
 
 function BloqueRetoma({ retoma }) {
-  const tipoLabel    = textoTipoRetoma(retoma);
-  const nombreProd   = retoma.nombre_producto_serial
+  const tipoLabel  = textoTipoRetoma(retoma);
+  const nombreProd = retoma.nombre_producto_serial
     || retoma.nombre_producto_cantidad
     || retoma.nombre_producto
     || null;
@@ -54,7 +54,13 @@ function BloqueRetoma({ retoma }) {
 // ─── Componente principal ─────────────────────────────────────────────────────
 
 export function FacturaTermica({ factura, garantias = [], onClose }) {
+  // yaImprimio evita que window.print() se dispare más de una vez aunque
+  // el componente se remonte (por refetches de TanStack Query u otros efectos).
+  const yaImprimio = useRef(false);
+
   useEffect(() => {
+    if (yaImprimio.current) return;
+    yaImprimio.current = true;
     const timer = setTimeout(() => {
       window.print();
     }, 300);
@@ -63,19 +69,28 @@ export function FacturaTermica({ factura, garantias = [], onClose }) {
 
   if (!factura) return null;
 
-  // El backend retorna "retomas" (array). Se normaliza siempre a array.
   const retomas = Array.isArray(factura.retomas)
     ? factura.retomas
     : factura.retoma
-      ? [factura.retoma]   // compatibilidad con respuestas antiguas que usen singular
+      ? [factura.retoma]
       : [];
 
-  const hayRetomas = retomas.length > 0;
+  const hayRetomas   = retomas.length > 0;
+  const total        = factura.lineas?.reduce((s, l) => s + Number(l.subtotal || 0), 0) || 0;
+  const totalPagado  = factura.pagos?.reduce((s, p) => s + Number(p.valor    || 0), 0) || 0;
+  const totalRetomas = retomas.reduce((s, r) => s + calcularValorRetoma(r), 0);
+  const cambio       = totalPagado - (total - totalRetomas);
 
-  const total         = factura.lineas?.reduce((s, l) => s + Number(l.subtotal || 0), 0) || 0;
-  const totalPagado   = factura.pagos?.reduce((s, p) => s + Number(p.valor    || 0), 0) || 0;
-  const totalRetomas  = retomas.reduce((s, r) => s + calcularValorRetoma(r), 0);
-  const cambio        = totalPagado - (total - totalRetomas);
+  // ── Leer configuración de impresora desde config del negocio ──────────────
+  // Valores por defecto = comportamiento original hardcodeado
+  const escala     = Number(factura.config?.impresion_escala      || 1.5);
+  const anchoPapel = Number(factura.config?.impresion_ancho_papel || 80);
+  const fuenteSize = Number(factura.config?.impresion_fuente_size || 13);
+  const padding    = Number(factura.config?.impresion_padding     || 2);
+
+  const anchoPapelStr = `${anchoPapel}mm`;
+  const fuenteSizeStr = `${fuenteSize}px`;
+  const paddingStr    = `${padding}mm`;
 
   return (
     <>
@@ -92,10 +107,10 @@ export function FacturaTermica({ factura, garantias = [], onClose }) {
         }
 
         #factura-termica {
-          width: 80mm;
+          width: ${anchoPapelStr};
           font-family: 'Courier New', monospace;
-          font-size: 13px;
-          padding: 2mm;
+          font-size: ${fuenteSizeStr};
+          padding: ${paddingStr};
           box-sizing: border-box;
         }
 
@@ -121,7 +136,7 @@ export function FacturaTermica({ factura, garantias = [], onClose }) {
         @media print {
           @page {
             margin: 0;
-            size: 80mm auto;
+            size: ${anchoPapelStr} auto;
           }
           body * { visibility: hidden; }
           #factura-termica,
@@ -129,11 +144,11 @@ export function FacturaTermica({ factura, garantias = [], onClose }) {
           #factura-termica {
             position: fixed;
             top: 0; left: 0;
-            width: 80mm;
-            padding: 2mm;
-            font-size: 13px;
+            width: ${anchoPapelStr};
+            padding: ${paddingStr};
+            font-size: ${fuenteSizeStr};
             font-family: 'Courier New', monospace;
-            transform: scale(1.5);
+            transform: scale(${escala});
             transform-origin: top left;
           }
           .no-print { display: none !important; }
@@ -217,7 +232,7 @@ export function FacturaTermica({ factura, garantias = [], onClose }) {
 
         <div className="linea-divisor" />
 
-        {/* Retomas — se renderizan todas las del array */}
+        {/* Retomas */}
         {hayRetomas && (
           <>
             <div className="negrita">

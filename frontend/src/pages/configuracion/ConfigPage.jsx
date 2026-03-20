@@ -14,7 +14,7 @@ import { Badge }   from '../../components/ui/Badge';
 import {
   Settings, Save, Eye, EyeOff, Plus, Trash2,
   GripVertical, ToggleLeft, ToggleRight, Tag, Lock,
-  Building2, ShieldCheck, FileSliders, BookOpen, Users,
+  Building2, ShieldCheck, FileSliders, BookOpen, Users, Printer,
 } from 'lucide-react';
 
 // ─── Secciones del sidebar ────────────────────────────────────────────────────
@@ -371,6 +371,167 @@ const CAMPOS_READONLY = [
 
 // ─── Contenido por sección ────────────────────────────────────────────────────
 
+// ─── Configuración de impresora ──────────────────────────────────────────────
+// Controla los parámetros CSS de @media print que afectan la salida térmica.
+// Cada campo corresponde a una clave en config_negocio.
+
+const PRESETS_PAPEL = [
+  { label: '80mm (estándar)', valor: '80' },
+  { label: '58mm (compacto)', valor: '58' },
+];
+
+function ImpresoraConfig({ valores, set }) {
+  const escala     = valores['impresion_escala']      || '1.5';
+  const anchoPapel = valores['impresion_ancho_papel'] || '80';
+  const fuenteSize = valores['impresion_fuente_size'] || '13';
+  const padding    = valores['impresion_padding']     || '2';
+
+  return (
+    <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm flex flex-col gap-5">
+      <div className="flex items-center gap-2">
+        <Printer size={15} className="text-gray-400" />
+        <h3 className="text-sm font-semibold text-gray-700">Configuración de impresora</h3>
+      </div>
+
+      <div className="flex flex-col gap-4">
+
+        {/* Ancho del papel */}
+        <div className="flex flex-col gap-1.5">
+          <label className="text-xs font-medium text-gray-600">Ancho del papel</label>
+          <div className="flex gap-2">
+            {PRESETS_PAPEL.map((p) => (
+              <button
+                key={p.valor}
+                type="button"
+                onClick={() => set('impresion_ancho_papel', p.valor)}
+                className={`flex-1 py-2 rounded-xl text-xs font-medium border transition-all
+                  ${anchoPapel === p.valor
+                    ? 'bg-blue-50 border-blue-300 text-blue-700'
+                    : 'bg-gray-50 border-gray-200 text-gray-600 hover:border-gray-300'}`}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Escala de impresión */}
+        <div className="flex flex-col gap-1.5">
+          <div className="flex items-center justify-between">
+            <label className="text-xs font-medium text-gray-600">
+              Escala de impresión
+            </label>
+            <span className="text-sm font-bold text-gray-800 tabular-nums">
+              {Number(escala).toFixed(2)}×
+            </span>
+          </div>
+          <input
+            type="range"
+            min="0.5" max="3.0" step="0.05"
+            value={escala}
+            onChange={(e) => set('impresion_escala', e.target.value)}
+            className="w-full accent-blue-600 h-2 rounded-full"
+          />
+          <div className="flex justify-between text-xs text-gray-400">
+            <span>0.5× (pequeño)</span>
+            <span>3.0× (grande)</span>
+          </div>
+          <p className="text-xs text-gray-400">
+            Equivale al valor de "Escala" en el diálogo de impresión del navegador.
+            Ajusta hasta que la factura llene bien el papel sin cortarse.
+          </p>
+        </div>
+
+        {/* Tamaño de fuente */}
+        <div className="flex flex-col gap-1.5">
+          <div className="flex items-center justify-between">
+            <label className="text-xs font-medium text-gray-600">Tamaño de fuente</label>
+            <span className="text-sm font-bold text-gray-800 tabular-nums">{fuenteSize}px</span>
+          </div>
+          <input
+            type="range"
+            min="9" max="18" step="1"
+            value={fuenteSize}
+            onChange={(e) => set('impresion_fuente_size', e.target.value)}
+            className="w-full accent-blue-600 h-2 rounded-full"
+          />
+          <div className="flex justify-between text-xs text-gray-400">
+            <span>9px (compacto)</span>
+            <span>18px (grande)</span>
+          </div>
+        </div>
+
+        {/* Padding */}
+        <div className="flex flex-col gap-1.5">
+          <div className="flex items-center justify-between">
+            <label className="text-xs font-medium text-gray-600">Margen interno (padding)</label>
+            <span className="text-sm font-bold text-gray-800 tabular-nums">{padding}mm</span>
+          </div>
+          <input
+            type="range"
+            min="0" max="8" step="0.5"
+            value={padding}
+            onChange={(e) => set('impresion_padding', e.target.value)}
+            className="w-full accent-blue-600 h-2 rounded-full"
+          />
+          <div className="flex justify-between text-xs text-gray-400">
+            <span>0mm (sin margen)</span>
+            <span>8mm (amplio)</span>
+          </div>
+        </div>
+
+        {/* Preview visual */}
+        <div className="flex flex-col gap-1.5">
+          <p className="text-xs font-medium text-gray-600">Vista previa (pantalla)</p>
+          <div className="flex justify-center bg-gray-100 rounded-xl p-4 overflow-hidden">
+            <div
+              style={{
+                width:      `${anchoPapel}mm`,
+                fontSize:   `${fuenteSize}px`,
+                padding:    `${padding}mm`,
+                fontFamily: "'Courier New', monospace",
+                background: 'white',
+                border:     '1px solid #e5e7eb',
+                boxSizing:  'border-box',
+                transform:  `scale(${Math.min(Number(escala), 1.2)})`,
+                transformOrigin: 'top center',
+              }}
+            >
+              <p style={{ textAlign: 'center', fontWeight: 900, marginBottom: 4 }}>
+                FACTURA DE VENTA
+              </p>
+              <p style={{ textAlign: 'center', marginBottom: 4 }}>
+                Vista previa · {anchoPapel}mm
+              </p>
+              <div style={{ borderTop: '1.5px solid #000', margin: '4px 0' }} />
+              <div style={{ display: 'flex', justifyContent: 'space-between', margin: '2px 0' }}>
+                <span>Producto ejemplo</span>
+                <span>$50.000</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', margin: '2px 0' }}>
+                <span>Producto 2</span>
+                <span>$30.000</span>
+              </div>
+              <div style={{ borderTop: '1.5px solid #000', margin: '4px 0' }} />
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 900, fontSize: `${Number(fuenteSize) + 1}px` }}>
+                <span>TOTAL:</span>
+                <span>$80.000</span>
+              </div>
+              <p style={{ textAlign: 'center', marginTop: 6, fontSize: `${Number(fuenteSize) - 2}px` }}>
+                ¡Gracias por su compra!
+              </p>
+            </div>
+          </div>
+          <p className="text-xs text-gray-400 text-center">
+            La escala real en impresión puede verse diferente al preview
+          </p>
+        </div>
+
+      </div>
+    </div>
+  );
+}
+
 function SeccionNegocio({ valores, set, form, mutation, guardado }) {
   const camposNegocio = [
     { clave: 'nombre_negocio', label: 'Nombre del negocio', placeholder: 'Mi Tienda' },
@@ -394,6 +555,8 @@ function SeccionNegocio({ valores, set, form, mutation, guardado }) {
             value={valores[clave] || ''} onChange={(e) => set(clave, e.target.value)} />
         ))}
       </div>
+
+      <ImpresoraConfig valores={valores} set={set} />
 
       <div className="flex items-center gap-3">
         <Button className="flex-1" loading={mutation.isPending} onClick={() => mutation.mutate(form)}>

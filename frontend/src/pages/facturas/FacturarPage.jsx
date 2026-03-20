@@ -192,7 +192,7 @@ function SeccionDomicilio({ facturaId }) {
     queryKey: ['entrega-por-factura', facturaId],
     queryFn:  () => getEntregas({ factura_id: facturaId }).then((r) => r.data.data),
     enabled:  !!facturaId,
-    staleTime: 0,
+    staleTime: 30_000,
   });
 
   const entrega = entregasData?.[0] || null;
