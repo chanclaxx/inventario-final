@@ -4,8 +4,6 @@ const HOY_F = `DATE(f.fecha AT TIME ZONE 'UTC' AT TIME ZONE 'America/Bogota') = 
 const HOY   = `DATE(fecha   AT TIME ZONE 'UTC' AT TIME ZONE 'America/Bogota') = (NOW() AT TIME ZONE 'America/Bogota')::date`;
 
 // ── Helper: subquery de costo de serial anclada al negocio ───────────────────
-// Busca el costo del serial dentro del mismo negocio de la factura,
-// evitando tomar el costo de otro negocio que tenga el mismo IMEI.
 const _costoPorImei = (imeiAlias, sucursalAlias) => `
   COALESCE(
     (
@@ -181,7 +179,14 @@ const getDashboard = async (sucursalId) => {
   };
 };
 
+// ─── getVentasRango ───────────────────────────────────────────────────────────
+// CAMBIO vs original: agrega query de préstamos del período y retorna
+// el campo `prestamos` con utilidad confirmada (Saldados) y en proceso (Activos).
+// Los Devueltos se excluyen — el producto volvió al inventario, no generó utilidad.
+
 const getVentasRango = async (sucursalId, desde, hasta) => {
+
+  // ── Query original de facturas ─────────────────────────────────────────────
   const { rows: facturas } = await pool.query(`
     WITH retomas_por_factura AS (
       SELECT factura_id, COALESCE(SUM(valor_retoma), 0) AS total_retomas
@@ -203,11 +208,102 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
     ORDER BY f.fecha DESC
   `, [sucursalId, desde, hasta]);
 
-  if (!facturas.length) return { facturas: [], resumen: null };
+  // ── NUEVO: query de préstamos con utilidad ────────────────────────────────
+  // Excluye Devueltos (producto regresó al inventario, no genera utilidad).
+  // Costo: serial → seriales.costo_compra | cantidad → pc.costo_unitario * cantidad_prestada
+  const { rows: prestamosRaw } = await pool.query(`
+    SELECT
+      p.id,
+      p.nombre_producto,
+      p.imei,
+      p.prestatario,
+      p.valor_prestamo,
+      p.total_abonado,
+      p.estado,
+      p.fecha,
+      p.cantidad_prestada,
+      CASE
+        WHEN p.imei IS NOT NULL THEN
+          (SELECT s.costo_compra
+           FROM seriales s
+           JOIN productos_serial ps ON ps.id = s.producto_id
+           WHERE s.imei = p.imei AND ps.sucursal_id = p.sucursal_id
+           LIMIT 1)
+        WHEN p.producto_id IS NOT NULL THEN
+          (SELECT pc.costo_unitario * p.cantidad_prestada
+           FROM productos_cantidad pc
+           WHERE pc.id = p.producto_id
+           LIMIT 1)
+        ELSE NULL
+      END AS costo_producto
+    FROM prestamos p
+    WHERE p.sucursal_id = $1
+      AND DATE(p.fecha AT TIME ZONE 'UTC' AT TIME ZONE 'America/Bogota') BETWEEN $2 AND $3
+      AND p.estado != 'Devuelto'
+    ORDER BY p.fecha DESC
+  `, [sucursalId, desde, hasta]);
+
+  // ── Procesar préstamos ────────────────────────────────────────────────────
+  const saldados = [];
+  const activos  = [];
+
+  for (const p of prestamosRaw) {
+    const costo         = p.costo_producto !== null ? Number(p.costo_producto) : null;
+    const totalAbonado  = Number(p.total_abonado);
+    const valorPrestamo = Number(p.valor_prestamo);
+
+    const base = {
+      id:             p.id,
+      nombre_producto: p.nombre_producto,
+      imei:            p.imei,
+      prestatario:     p.prestatario,
+      valor_prestamo:  valorPrestamo,
+      total_abonado:   totalAbonado,
+      costo_producto:  costo,
+      fecha:           p.fecha,
+    };
+
+    if (p.estado === 'Saldado') {
+      saldados.push({
+        ...base,
+        // Utilidad confirmada: lo que pagó la persona menos el costo del producto
+        utilidad: costo !== null ? totalAbonado - costo : null,
+      });
+    } else {
+      // Activo: puede haber abonado algo pero aún no saldó
+      const utilidadParcial = costo !== null ? totalAbonado - costo : null;
+      const faltaParaCubrir = costo !== null ? Math.max(0, costo - totalAbonado) : null;
+      activos.push({
+        ...base,
+        saldo_pendiente:   valorPrestamo - totalAbonado,
+        utilidad_parcial:  utilidadParcial,
+        falta_para_cubrir: faltaParaCubrir,
+      });
+    }
+  }
+
+  const utilidadConfirmada   = saldados.reduce((s, p) => p.utilidad      !== null ? s + p.utilidad      : s, 0);
+  const utilidadParcialTotal = activos.reduce( (s, p) => p.utilidad_parcial !== null ? s + p.utilidad_parcial : s, 0);
+  const porCubrirTotal       = activos.reduce( (s, p) => p.falta_para_cubrir !== null ? s + p.falta_para_cubrir : s, 0);
+
+  const prestamos = {
+    saldados,
+    activos,
+    resumen: {
+      utilidad_confirmada:  utilidadConfirmada,
+      utilidad_parcial:     utilidadParcialTotal,
+      por_cubrir:           porCubrirTotal,
+      total_prestamos:      prestamosRaw.length,
+    },
+  };
+
+  // ── Lógica original de facturas (sin cambios) ─────────────────────────────
+  if (!facturas.length) {
+    return { facturas: [], resumen: null, prestamos };
+  }
 
   const facturaIds = facturas.map((f) => f.id);
 
-  // ── Costo anclado a la sucursal de la factura ──
   const { rows: lineas } = await pool.query(`
     SELECT
       l.factura_id,
@@ -294,11 +390,10 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
     utilidad_pendiente:  soloCreditos.reduce((s, f) => s + f.utilidad_neta, 0),
   };
 
-  return { facturas: facturasCompletas, resumen };
+  return { facturas: facturasCompletas, resumen, prestamos };
 };
 
 const getProductosTop = async (sucursalId, desde, hasta) => {
-  // ── Costo anclado a la sucursal — no toma costo de otro negocio ──
   const { rows } = await pool.query(`
     SELECT
       l.nombre_producto,
