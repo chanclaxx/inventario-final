@@ -399,8 +399,6 @@ const FilaPrestamo = ({ prestamo, tipo }) => {
 };
 
 const SeccionPrestamos = ({ prestamos }) => {
-  const [expandido, setExpandido] = useState(false);
-
   if (!prestamos || (prestamos.saldados.length === 0 && prestamos.activos.length === 0)) {
     return null;
   }
@@ -409,24 +407,15 @@ const SeccionPrestamos = ({ prestamos }) => {
 
   return (
     <div className="flex flex-col gap-3 border-t border-gray-100 pt-4">
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
-          <Handshake size={15} className="text-indigo-500" />
-          Utilidad de préstamos
-          {resumen.total_saldados > 0 && (
-            <span className="text-xs font-normal text-gray-400">
-              {resumen.total_saldados} saldado{resumen.total_saldados !== 1 ? 's' : ''} hoy
-            </span>
-          )}
-        </h3>
-        <button
-          onClick={() => setExpandido((v) => !v)}
-          className="text-xs text-gray-400 hover:text-gray-600 flex items-center gap-1 transition-colors"
-        >
-          {expandido ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-          {expandido ? 'Colapsar' : 'Ver detalle'}
-        </button>
-      </div>
+      <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+        <Handshake size={15} className="text-indigo-500" />
+        Utilidad de préstamos
+        {resumen.total_saldados > 0 && (
+          <span className="text-xs font-normal text-gray-400">
+            {resumen.total_saldados} saldado{resumen.total_saldados !== 1 ? 's' : ''} hoy
+          </span>
+        )}
+      </h3>
 
       {/* Resumen numérico */}
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
@@ -457,33 +446,31 @@ const SeccionPrestamos = ({ prestamos }) => {
         )}
       </div>
 
-      {/* Detalle colapsable */}
-      {expandido && (
-        <div className="flex flex-col gap-3">
-          {saldados.length > 0 && (
-            <div className="flex flex-col gap-2">
-              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                Saldados hoy — utilidad confirmada
-              </p>
-              {saldados.map((p) => {
-                const prestamoId = p.id;
-                return <FilaPrestamo key={prestamoId} prestamo={p} tipo="saldado" />;
-              })}
-            </div>
-          )}
-          {activos.length > 0 && (
-            <div className="flex flex-col gap-2">
-              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                Pendientes — todos los activos
-              </p>
-              {activos.map((p) => {
-                const prestamoId = p.id;
-                return <FilaPrestamo key={prestamoId} prestamo={p} tipo="activo" />;
-              })}
-            </div>
-          )}
-        </div>
-      )}
+      {/* Detalle siempre visible */}
+      <div className="flex flex-col gap-3">
+        {saldados.length > 0 && (
+          <div className="flex flex-col gap-2">
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+              Saldados hoy — utilidad confirmada
+            </p>
+            {saldados.map((p) => {
+              const prestamoId = p.id;
+              return <FilaPrestamo key={prestamoId} prestamo={p} tipo="saldado" />;
+            })}
+          </div>
+        )}
+        {activos.length > 0 && (
+          <div className="flex flex-col gap-2">
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+              Pendientes — todos los activos
+            </p>
+            {activos.map((p) => {
+              const prestamoId = p.id;
+              return <FilaPrestamo key={prestamoId} prestamo={p} tipo="activo" />;
+            })}
+          </div>
+        )}
+      </div>
     </div>
   );
 };
