@@ -1,30 +1,31 @@
-import { useState }                        from 'react';
+import { useState }                          from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Pencil, Trash2 }                  from 'lucide-react';
-import { actualizarProductoSerial }        from '../../api/productos.api';
-import { getLineas }                       from '../../api/productos.api';
-import { Modal }  from '../../components/ui/Modal';
-import { Input }  from '../../components/ui/Input';
-import { Button } from '../../components/ui/Button';
-import { useAuth } from '../../context/useAuth';
+import { Pencil, Trash2 }                    from 'lucide-react';
+import { actualizarProductoSerial }          from '../../api/productos.api';
+import { getLineas }                         from '../../api/productos.api';
+import { Modal }       from '../../components/ui/Modal';
+import { Input }       from '../../components/ui/Input';
+import { InputMoneda } from '../../components/ui/InputMoneda';
+import { Button }      from '../../components/ui/Button';
+import { useAuth }     from '../../context/useAuth';
 import { ModalEliminarProducto, TIPO_PRODUCTO_SERIAL } from './ModalEliminarProducto';
-
-// PIN de eliminación viene de config_negocio → se pasa como prop desde el padre
-// para no duplicar la query. Si el padre no lo tiene, se pasa undefined y el
-// modal de eliminación mostrará el aviso correspondiente.
 
 export function ModalEditarProductoSerial({ producto, pinEliminacion, onClose }) {
   const { esAdminNegocio } = useAuth();
   const queryClient = useQueryClient();
 
-  // ── Estado del formulario de edición (lógica original intacta) ────────────
+  // ── Estado del formulario ─────────────────────────────────────────────────
+  // CAMBIO: precio se inicializa como NUMBER en vez de String.
+  //   • Postgres devuelve '850000.00' — Number('850000.00') → 850000 ✓
+  //   • InputMoneda espera number o '' (vacío = sin valor)
+  //   • La mutación hace Number(form.precio): Number(850000) = 850000 ✓
   const [form, setForm] = useState({
     nombre:   producto.nombre   || '',
-    precio:   producto.precio   != null ? String(producto.precio)   : '',
+    precio:   producto.precio   != null ? Number(producto.precio)   : '',
     linea_id: producto.linea_id != null ? String(producto.linea_id) : '',
   });
-  const [error,          setError]          = useState('');
-  const [modalEliminar,  setModalEliminar]  = useState(false);
+  const [error,         setError]         = useState('');
+  const [modalEliminar, setModalEliminar] = useState(false);
 
   const { data: lineasData } = useQuery({
     queryKey: ['lineas'],
@@ -54,7 +55,6 @@ export function ModalEditarProductoSerial({ producto, pinEliminacion, onClose })
       <Modal open onClose={onClose} title="Editar producto" size="sm">
         <div className="flex flex-col gap-4">
 
-          {/* ── Aviso informativo (original) ── */}
           <div className="flex items-center gap-2 bg-blue-50 rounded-xl px-3 py-2">
             <Pencil size={15} className="text-blue-500 flex-shrink-0" />
             <p className="text-xs text-blue-700">
@@ -62,7 +62,6 @@ export function ModalEditarProductoSerial({ producto, pinEliminacion, onClose })
             </p>
           </div>
 
-          {/* ── Campos del formulario (originales) ── */}
           <Input
             label="Nombre"
             placeholder="Ej: iPhone 15 Pro"
@@ -71,14 +70,18 @@ export function ModalEditarProductoSerial({ producto, pinEliminacion, onClose })
             autoFocus
           />
 
-          <Input
-            label="Precio de venta"
-            type="number"
-            min="0"
-            placeholder="0"
-            value={form.precio}
-            onChange={(e) => setForm({ ...form, precio: e.target.value })}
-          />
+          {/* CAMBIO: Input type=number → InputMoneda */}
+          <div className="flex flex-col gap-1">
+            <label className="text-sm font-medium text-gray-700">Precio de venta</label>
+            <InputMoneda
+              value={form.precio}
+              onChange={(val) => setForm({ ...form, precio: val })}
+              placeholder="0"
+              className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl
+                text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500
+                transition-all"
+            />
+          </div>
 
           <div className="flex flex-col gap-1">
             <label className="text-sm font-medium text-gray-700">Línea</label>
@@ -97,7 +100,6 @@ export function ModalEditarProductoSerial({ producto, pinEliminacion, onClose })
 
           {error && <p className="text-sm text-red-500">{error}</p>}
 
-          {/* ── Acciones: separador visual + botón eliminar ── */}
           <div className="border-t border-gray-100 pt-3 flex flex-col gap-2">
             <div className="flex gap-2">
               <Button variant="secondary" className="flex-1" onClick={onClose}>
@@ -113,7 +115,6 @@ export function ModalEditarProductoSerial({ producto, pinEliminacion, onClose })
               </Button>
             </div>
 
-            {/* Botón eliminar — solo admin, separado visualmente */}
             <button
               type="button"
               onClick={() => setModalEliminar(true)}
@@ -130,7 +131,6 @@ export function ModalEditarProductoSerial({ producto, pinEliminacion, onClose })
         </div>
       </Modal>
 
-      {/* ── Modal de eliminación — se monta encima del modal de edición ── */}
       {modalEliminar && (
         <ModalEliminarProducto
           producto={producto}
