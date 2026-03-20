@@ -256,7 +256,7 @@ const devolverParcial = async (negocioId, prestamoId, cantidad_devuelta) => {
   if (prestamo.estado === 'Devuelto') throw { status: 400, message: 'El préstamo ya fue devuelto' };
   if (prestamo.imei) throw { status: 400, message: 'La devolución parcial solo aplica a productos por cantidad' };
   if (!prestamo.producto_id) throw { status: 400, message: 'El préstamo no tiene producto asociado' };
-
+ 
   const cantidadActual = Number(prestamo.cantidad_prestada);
   if (cantidad_devuelta < 1 || cantidad_devuelta > cantidadActual) {
     throw {
@@ -264,27 +264,43 @@ const devolverParcial = async (negocioId, prestamoId, cantidad_devuelta) => {
       message: `La cantidad a devolver debe estar entre 1 y ${cantidadActual}`,
     };
   }
-
+ 
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-
-    // Siempre reintegrar al stock la cantidad devuelta
+ 
+    // Reintegrar stock de las unidades devueltas
     await repo.ajustarStock(client, prestamo.producto_id, cantidad_devuelta);
-
+ 
     if (cantidad_devuelta === cantidadActual) {
-      // Devolución total → marcar como Devuelto
+      // ── Devolución total → marcar Devuelto, valor_prestamo no cambia (es histórico)
       await repo.updateEstado(client, prestamoId, 'Devuelto');
     } else {
-      // Devolución parcial → reducir cantidad prestada, préstamo sigue Activo
-      await client.query(
-        'UPDATE prestamos SET cantidad_prestada = cantidad_prestada - $1 WHERE id = $2',
-        [cantidad_devuelta, prestamoId]
-      );
+      // ── Devolución parcial → ajustar cantidad Y valor proporcional
+      //
+      // precio_unitario = valor_prestamo / cantidad_original
+      // nuevo_valor     = precio_unitario * cantidad_restante
+      //
+      // Math.round() evita decimales flotantes en COP (moneda entera).
+      const valorTotal      = Number(prestamo.valor_prestamo);
+      const cantidadRestante = cantidadActual - cantidad_devuelta;
+      const precioUnitario  = valorTotal / cantidadActual;
+      const nuevoValor      = Math.round(precioUnitario * cantidadRestante);
+ 
+      await repo.actualizarCantidadYValor(client, prestamoId, cantidadRestante, nuevoValor);
+ 
+      // Si los abonos ya cubren el nuevo valor reducido → marcar Saldado
+      // Ejemplo: abonó 400k, devuelve parcial, nuevo valor = 300k → Saldado automático
+      if (Number(prestamo.total_abonado) >= nuevoValor) {
+        await repo.updateEstado(client, prestamoId, 'Saldado');
+      }
     }
-
+ 
     await client.query('COMMIT');
-    return { devuelto: cantidad_devuelta, pendiente: cantidadActual - cantidad_devuelta };
+    return {
+      devuelto:  cantidad_devuelta,
+      pendiente: cantidadActual - cantidad_devuelta,
+    };
   } catch (err) {
     await client.query('ROLLBACK');
     throw err;

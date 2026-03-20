@@ -18,11 +18,11 @@ import { InputMoneda } from '../../components/ui/InputMoneda';
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
 const TIPOS_CLIENTE = [
-  { id: 'companero', label: 'Compañero', icon: User  },
-  { id: 'cliente',   label: 'Cliente',   icon: Users },
+  { id: 'companero', label: 'Compañero', Icn: User  },
+  { id: 'cliente',   label: 'Cliente',   Icn: Users },
 ];
 
-// ─── SelectorOCrear — selector genérico con lista + formulario simple ─────────
+// ─── SelectorOCrear ───────────────────────────────────────────────────────────
 
 function SelectorOCrear({ items, onSeleccionar, onCrear, placeholder, labelCrear, loading, renderItem }) {
   const [modo,   setModo]   = useState('seleccionar');
@@ -61,16 +61,19 @@ function SelectorOCrear({ items, onSeleccionar, onCrear, placeholder, labelCrear
     <div className="flex flex-col gap-2">
       {items.length > 0 ? (
         <div className="flex flex-col gap-1 max-h-40 overflow-y-auto">
-          {items.map((item) => (
-            <button
-              key={item.id}
-              onClick={() => onSeleccionar(item)}
-              className="text-left px-3 py-2 rounded-xl border border-gray-100
-                hover:border-blue-200 hover:bg-blue-50/30 transition-colors text-sm text-gray-800"
-            >
-              {renderItem ? renderItem(item) : item.nombre}
-            </button>
-          ))}
+          {items.map((item) => {
+            const itemId = item.id;
+            return (
+              <button
+                key={itemId}
+                onClick={() => onSeleccionar(item)}
+                className="text-left px-3 py-2 rounded-xl border border-gray-100
+                  hover:border-blue-200 hover:bg-blue-50/30 transition-colors text-sm text-gray-800"
+              >
+                {renderItem ? renderItem(item) : item.nombre}
+              </button>
+            );
+          })}
         </div>
       ) : (
         <p className="text-xs text-gray-400 px-1">{placeholder}</p>
@@ -85,7 +88,7 @@ function SelectorOCrear({ items, onSeleccionar, onCrear, placeholder, labelCrear
   );
 }
 
-// ─── SelectorOCrearCliente — búsqueda por nombre/cédula + formulario completo ──
+// ─── SelectorOCrearCliente ────────────────────────────────────────────────────
 
 function SelectorOCrearCliente({ items, onSeleccionar, onCrear, loading }) {
   const [modo,     setModo]     = useState('seleccionar');
@@ -94,8 +97,8 @@ function SelectorOCrearCliente({ items, onSeleccionar, onCrear, loading }) {
     nombre: '', cedula: '', celular: '', direccion: '', notas: '',
   });
 
-  const mostrarResultados  = busqueda.trim().length > 0;
-  const clientesFiltrados  = mostrarResultados
+  const mostrarResultados = busqueda.trim().length > 0;
+  const clientesFiltrados = mostrarResultados
     ? items.filter((c) => {
         const q = busqueda.toLowerCase();
         return c.nombre?.toLowerCase().includes(q) || c.cedula?.toLowerCase().includes(q);
@@ -159,16 +162,19 @@ function SelectorOCrearCliente({ items, onSeleccionar, onCrear, loading }) {
       {mostrarResultados && (
         clientesFiltrados.length > 0 ? (
           <div className="flex flex-col gap-1 max-h-44 overflow-y-auto rounded-xl border border-gray-100 bg-white">
-            {clientesFiltrados.map((item) => (
-              <button key={item.id} onClick={() => onSeleccionar(item)}
-                className="text-left px-3 py-2.5 hover:bg-blue-50 transition-colors
-                  border-b border-gray-50 last:border-0">
-                <p className="text-sm font-medium text-gray-800">{item.nombre}</p>
-                <p className="text-xs text-gray-400">
-                  CC: {item.cedula}{item.celular ? ` · Tel: ${item.celular}` : ''}
-                </p>
-              </button>
-            ))}
+            {clientesFiltrados.map((item) => {
+              const itemId = item.id;
+              return (
+                <button key={itemId} onClick={() => onSeleccionar(item)}
+                  className="text-left px-3 py-2.5 hover:bg-blue-50 transition-colors
+                    border-b border-gray-50 last:border-0">
+                  <p className="text-sm font-medium text-gray-800">{item.nombre}</p>
+                  <p className="text-xs text-gray-400">
+                    CC: {item.cedula}{item.celular ? ` · Tel: ${item.celular}` : ''}
+                  </p>
+                </button>
+              );
+            })}
           </div>
         ) : (
           <p className="text-xs text-gray-400 px-1">Sin resultados para "{busqueda}"</p>
@@ -197,7 +203,7 @@ function ChipSeleccionado({ nombre, onCambiar }) {
   );
 }
 
-// ─── ResumenCarrito — ítems editables (precio y cantidad) ────────────────────
+// ─── ResumenCarrito ───────────────────────────────────────────────────────────
 
 function ResumenCarrito({ items, onActualizarPrecio, onActualizarCantidad }) {
   return (
@@ -211,9 +217,7 @@ function ResumenCarrito({ items, onActualizarPrecio, onActualizarCantidad }) {
           {item.imei && (
             <p className="text-xs text-gray-400 font-mono">{item.imei}</p>
           )}
-
           <div className="flex items-center gap-2">
-            {/* Cantidad — solo para productos por cantidad */}
             {item.tipo === 'cantidad' && (
               <div className="flex items-center gap-1">
                 <button
@@ -234,8 +238,6 @@ function ResumenCarrito({ items, onActualizarPrecio, onActualizarCantidad }) {
                 </button>
               </div>
             )}
-
-            {/* Precio editable */}
             <div className="flex items-center gap-1 ml-auto">
               <span className="text-xs text-gray-400">$</span>
               <InputMoneda
@@ -266,7 +268,6 @@ export function ModalPrestamo({ open, onClose }) {
   const [clienteSel,     setClienteSel]     = useState(null);
   const [error,          setError]          = useState('');
 
-  // ── Queries ────────────────────────────────────────────────────────────────
   const { data: prestatariosData, isLoading: loadingPrestatarios } = useQuery({
     queryKey: ['prestatarios'],
     queryFn:  () => getPrestatarios().then((r) => r.data.data),
@@ -285,7 +286,6 @@ export function ModalPrestamo({ open, onClose }) {
     enabled:  open && tipoCliente === 'cliente',
   });
 
-  // ── Mutations auxiliares ───────────────────────────────────────────────────
   const mutCrearPrestatario = useMutation({
     mutationFn: (nombre) => crearPrestatario({ nombre }),
     onSuccess: (res) => {
@@ -316,7 +316,6 @@ export function ModalPrestamo({ open, onClose }) {
     },
   });
 
-  // ── Mutation principal — crea N préstamos en batch ────────────────────────
   const mutPrestamos = useMutation({
     mutationFn: crearPrestamos,
     onSuccess: () => {
@@ -338,14 +337,13 @@ export function ModalPrestamo({ open, onClose }) {
     setError('');
   };
 
-  // ── Construir array de ítems para el payload ───────────────────────────────
   const buildItems = () =>
     items.map((item) => ({
       nombre_producto:   item.nombre,
       imei:              item.imei        || null,
       producto_id:       item.producto_id || null,
       cantidad_prestada: item.cantidad    || 1,
-      valor_prestamo:    item.precioFinal,
+      valor_prestamo:    item.precioFinal * (item.cantidad || 1),
     }));
 
   const handleSubmit = () => {
@@ -355,7 +353,6 @@ export function ModalPrestamo({ open, onClose }) {
     if (tipoCliente === 'companero') {
       if (!prestatarioSel) return setError('Selecciona o crea un prestatario');
       if (!empleadoSel)    return setError('Selecciona o agrega un empleado');
-
       mutPrestamos.mutate({
         prestatario:    prestatarioSel.nombre,
         cedula:         'COMPANERO',
@@ -367,11 +364,10 @@ export function ModalPrestamo({ open, onClose }) {
       });
     } else {
       if (!clienteSel) return setError('Selecciona o crea un cliente');
-
       mutPrestamos.mutate({
-        prestatario: clienteSel.nombre,
-        cedula:      clienteSel.cedula  || 'S/C',
-        telefono:    clienteSel.celular || '0000000000',
+        prestatario:    clienteSel.nombre,
+        cedula:         clienteSel.cedula  || 'S/C',
+        telefono:       clienteSel.celular || '0000000000',
         prestatario_id: null,
         empleado_id:    null,
         cliente_id:     clienteSel.id,
@@ -388,15 +384,16 @@ export function ModalPrestamo({ open, onClose }) {
     <Modal open={open} onClose={onClose} title="Registrar Préstamo" size="md">
       <div className="flex flex-col gap-5">
 
-        {/* Tipo de destinatario */}
         <div className="flex gap-2">
           {TIPOS_CLIENTE.map((tab) => {
-            const TabIcon = tab.icon;
+            const tabId    = tab.id;
+            const tabLabel = tab.label;
+            const TabIcon  = tab.Icn;
             return (
               <button
-                key={tab.id}
+                key={tabId}
                 onClick={() => {
-                  setTipoCliente(tab.id);
+                  setTipoCliente(tabId);
                   setPrestatarioSel(null);
                   setEmpleadoSel(null);
                   setClienteSel(null);
@@ -404,11 +401,11 @@ export function ModalPrestamo({ open, onClose }) {
                 }}
                 className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl
                   text-sm font-medium border transition-all
-                  ${tipoCliente === tab.id
+                  ${tipoCliente === tabId
                     ? 'bg-blue-50 border-blue-300 text-blue-700'
                     : 'bg-gray-50 border-gray-200 text-gray-600'}`}
               >
-                <TabIcon size={16} /> {tab.label}
+                <TabIcon size={16} /> {tabLabel}
               </button>
             );
           })}
@@ -422,7 +419,6 @@ export function ModalPrestamo({ open, onClose }) {
           />
         )}
 
-        {/* ── Flujo Compañero ── */}
         {tipoCliente === 'companero' && (
           <div className="flex flex-col gap-4">
             <div className="flex flex-col gap-2">
@@ -469,7 +465,6 @@ export function ModalPrestamo({ open, onClose }) {
           </div>
         )}
 
-        {/* ── Flujo Cliente ── */}
         {tipoCliente === 'cliente' && (
           <div className="flex flex-col gap-2">
             <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Cliente</p>
@@ -489,7 +484,6 @@ export function ModalPrestamo({ open, onClose }) {
           </div>
         )}
 
-        {/* Total */}
         <div className="bg-gray-50 rounded-xl px-3 py-2.5 flex justify-between items-center">
           <span className="text-sm text-gray-600">
             Total{items.length > 1 ? ` (${items.length} productos)` : ''}

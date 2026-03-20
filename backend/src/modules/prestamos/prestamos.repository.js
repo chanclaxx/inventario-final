@@ -112,6 +112,15 @@ const ajustarStock = async (client, productoId, cantidad) => {
     [cantidad, productoId]
   );
 };
+const actualizarCantidadYValor = async (client, id, nuevaCantidad, nuevoValor) => {
+  await client.query(
+    `UPDATE prestamos
+     SET cantidad_prestada = $1,
+         valor_prestamo    = $2
+     WHERE id = $3`,
+    [nuevaCantidad, nuevoValor, id]
+  );
+};
 
 module.exports = {
   findAll, findById, findByIdYNegocio,
