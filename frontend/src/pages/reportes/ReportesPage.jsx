@@ -358,7 +358,11 @@ const FilaPrestamo = ({ prestamo, tipo }) => {
             <p className="text-xs text-gray-400 font-mono truncate">{prestamo.imei}</p>
           )}
           <p className="text-xs text-gray-500 mt-0.5">{prestamo.prestatario}</p>
-          <p className="text-xs text-gray-400">{formatFecha(prestamo.fecha)}</p>
+          <p className="text-xs text-gray-400">
+            {esSaldado && prestamo.fecha_saldo
+              ? `Saldado: ${formatFecha(prestamo.fecha_saldo)}`
+              : `Creado: ${formatFecha(prestamo.fecha)}`}
+          </p>
         </div>
         <div className="flex flex-col items-end gap-1 flex-shrink-0">
           <Badge variant={esSaldado ? 'green' : 'yellow'}>
@@ -409,9 +413,11 @@ const SeccionPrestamos = ({ prestamos }) => {
         <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
           <Handshake size={15} className="text-indigo-500" />
           Utilidad de préstamos
-          <span className="text-xs font-normal text-gray-400">
-            ({resumen.total_prestamos} préstamo{resumen.total_prestamos !== 1 ? 's' : ''} en el período)
-          </span>
+          {resumen.total_saldados > 0 && (
+            <span className="text-xs font-normal text-gray-400">
+              {resumen.total_saldados} saldado{resumen.total_saldados !== 1 ? 's' : ''} hoy
+            </span>
+          )}
         </h3>
         <button
           onClick={() => setExpandido((v) => !v)}
@@ -432,14 +438,14 @@ const SeccionPrestamos = ({ prestamos }) => {
           </p>
         </div>
         <div className="bg-amber-50 text-amber-700 rounded-xl p-3">
-          <p className="text-xs font-medium opacity-70">En proceso</p>
+          <p className="text-xs font-medium opacity-70">Pendientes por cobrar</p>
           <p className="text-lg font-bold mt-0.5">
             {resumen.utilidad_parcial >= 0
               ? `+${formatCOP(resumen.utilidad_parcial)}`
               : `-${formatCOP(Math.abs(resumen.utilidad_parcial))}`}
           </p>
           <p className="text-xs opacity-60 mt-0.5">
-            {activos.length} activo{activos.length !== 1 ? 's' : ''}
+            {resumen.total_activos} activo{resumen.total_activos !== 1 ? 's' : ''}
           </p>
         </div>
         {resumen.por_cubrir > 0 && (
@@ -457,7 +463,7 @@ const SeccionPrestamos = ({ prestamos }) => {
           {saldados.length > 0 && (
             <div className="flex flex-col gap-2">
               <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                Saldados — utilidad confirmada
+                Saldados hoy — utilidad confirmada
               </p>
               {saldados.map((p) => {
                 const prestamoId = p.id;
@@ -468,7 +474,7 @@ const SeccionPrestamos = ({ prestamos }) => {
           {activos.length > 0 && (
             <div className="flex flex-col gap-2">
               <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                Activos — en proceso
+                Pendientes — todos los activos
               </p>
               {activos.map((p) => {
                 const prestamoId = p.id;

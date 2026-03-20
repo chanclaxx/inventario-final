@@ -209,9 +209,37 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
   `, [sucursalId, desde, hasta]);
 
   // ── NUEVO: query de préstamos con utilidad ────────────────────────────────
-  // Excluye Devueltos (producto regresó al inventario, no genera utilidad).
-  // Costo: serial → seriales.costo_compra | cantidad → pc.costo_unitario * cantidad_prestada
-  const { rows: prestamosRaw } = await pool.query(`
+  //
+  // DOS queries separadas con lógica de fechas diferente:
+  //
+  // 1. SALDADOS en el rango: la fecha relevante es cuándo se saldó (fecha del
+  //    último abono), NO cuándo se creó el préstamo. Así un préstamo creado hace
+  //    un mes que se salda hoy aparece en la utilidad de hoy, y mañana ya no.
+  //    Se filtra: fecha del último abono de ese préstamo BETWEEN $2 AND $3.
+  //
+  // 2. ACTIVOS: todos los préstamos activos de la sucursal, sin filtro de fecha.
+  //    Siempre aparecen como pendientes independientemente del rango seleccionado.
+  //    Devueltos se excluyen (el producto regresó, no generó utilidad).
+
+  const costoProductoCase = `
+    CASE
+      WHEN p.imei IS NOT NULL THEN
+        (SELECT s.costo_compra
+         FROM seriales s
+         JOIN productos_serial ps ON ps.id = s.producto_id
+         WHERE s.imei = p.imei AND ps.sucursal_id = p.sucursal_id
+         LIMIT 1)
+      WHEN p.producto_id IS NOT NULL THEN
+        (SELECT pc.costo_unitario * p.cantidad_prestada
+         FROM productos_cantidad pc
+         WHERE pc.id = p.producto_id
+         LIMIT 1)
+      ELSE NULL
+    END
+  `;
+
+  // Query 1: Saldados cuya fecha de saldo (último abono) cae en el rango
+  const { rows: saldadosRaw } = await pool.query(`
     SELECT
       p.id,
       p.nombre_producto,
@@ -220,69 +248,84 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
       p.valor_prestamo,
       p.total_abonado,
       p.estado,
-      p.fecha,
-      p.cantidad_prestada,
-      CASE
-        WHEN p.imei IS NOT NULL THEN
-          (SELECT s.costo_compra
-           FROM seriales s
-           JOIN productos_serial ps ON ps.id = s.producto_id
-           WHERE s.imei = p.imei AND ps.sucursal_id = p.sucursal_id
-           LIMIT 1)
-        WHEN p.producto_id IS NOT NULL THEN
-          (SELECT pc.costo_unitario * p.cantidad_prestada
-           FROM productos_cantidad pc
-           WHERE pc.id = p.producto_id
-           LIMIT 1)
-        ELSE NULL
-      END AS costo_producto
+      p.fecha        AS fecha_prestamo,
+      -- Fecha del último abono = cuándo se saldó efectivamente
+      MAX(
+        ab.fecha AT TIME ZONE 'UTC' AT TIME ZONE 'America/Bogota'
+      ) AS fecha_saldo,
+      ${costoProductoCase} AS costo_producto
     FROM prestamos p
+    JOIN abonos_prestamo ab ON ab.prestamo_id = p.id
     WHERE p.sucursal_id = $1
-      AND DATE(p.fecha AT TIME ZONE 'UTC' AT TIME ZONE 'America/Bogota') BETWEEN $2 AND $3
-      AND p.estado != 'Devuelto'
-    ORDER BY p.fecha DESC
+      AND p.estado = 'Saldado'
+      AND DATE(
+        MAX(ab.fecha AT TIME ZONE 'UTC' AT TIME ZONE 'America/Bogota')
+        OVER (PARTITION BY p.id)
+      ) BETWEEN $2 AND $3
+    GROUP BY p.id
+    HAVING DATE(
+      MAX(ab.fecha AT TIME ZONE 'UTC' AT TIME ZONE 'America/Bogota')
+    ) BETWEEN $2 AND $3
+    ORDER BY fecha_saldo DESC
   `, [sucursalId, desde, hasta]);
 
-  // ── Procesar préstamos ────────────────────────────────────────────────────
-  const saldados = [];
-  const activos  = [];
+  // Query 2: Activos — todos, sin filtro de fecha (siempre visibles como pendientes)
+  const { rows: activosRaw } = await pool.query(`
+    SELECT
+      p.id,
+      p.nombre_producto,
+      p.imei,
+      p.prestatario,
+      p.valor_prestamo,
+      p.total_abonado,
+      p.estado,
+      p.fecha AS fecha_prestamo,
+      ${costoProductoCase} AS costo_producto
+    FROM prestamos p
+    WHERE p.sucursal_id = $1
+      AND p.estado = 'Activo'
+    ORDER BY p.fecha ASC
+  `, [sucursalId]);
 
-  for (const p of prestamosRaw) {
-    const costo         = p.costo_producto !== null ? Number(p.costo_producto) : null;
-    const totalAbonado  = Number(p.total_abonado);
-    const valorPrestamo = Number(p.valor_prestamo);
-
-    const base = {
-      id:             p.id,
+  // ── Procesar saldados ─────────────────────────────────────────────────────
+  const saldados = saldadosRaw.map((p) => {
+    const costo        = p.costo_producto !== null ? Number(p.costo_producto) : null;
+    const totalAbonado = Number(p.total_abonado);
+    return {
+      id:              p.id,
       nombre_producto: p.nombre_producto,
       imei:            p.imei,
       prestatario:     p.prestatario,
-      valor_prestamo:  valorPrestamo,
+      valor_prestamo:  Number(p.valor_prestamo),
       total_abonado:   totalAbonado,
       costo_producto:  costo,
-      fecha:           p.fecha,
+      fecha:           p.fecha_prestamo,
+      fecha_saldo:     p.fecha_saldo,
+      utilidad:        costo !== null ? totalAbonado - costo : null,
     };
+  });
 
-    if (p.estado === 'Saldado') {
-      saldados.push({
-        ...base,
-        // Utilidad confirmada: lo que pagó la persona menos el costo del producto
-        utilidad: costo !== null ? totalAbonado - costo : null,
-      });
-    } else {
-      // Activo: puede haber abonado algo pero aún no saldó
-      const utilidadParcial = costo !== null ? totalAbonado - costo : null;
-      const faltaParaCubrir = costo !== null ? Math.max(0, costo - totalAbonado) : null;
-      activos.push({
-        ...base,
-        saldo_pendiente:   valorPrestamo - totalAbonado,
-        utilidad_parcial:  utilidadParcial,
-        falta_para_cubrir: faltaParaCubrir,
-      });
-    }
-  }
+  // ── Procesar activos ──────────────────────────────────────────────────────
+  const activos = activosRaw.map((p) => {
+    const costo        = p.costo_producto !== null ? Number(p.costo_producto) : null;
+    const totalAbonado = Number(p.total_abonado);
+    const valorPrestamo = Number(p.valor_prestamo);
+    return {
+      id:                p.id,
+      nombre_producto:   p.nombre_producto,
+      imei:              p.imei,
+      prestatario:       p.prestatario,
+      valor_prestamo:    valorPrestamo,
+      total_abonado:     totalAbonado,
+      costo_producto:    costo,
+      fecha:             p.fecha_prestamo,
+      saldo_pendiente:   valorPrestamo - totalAbonado,
+      utilidad_parcial:  costo !== null ? totalAbonado - costo : null,
+      falta_para_cubrir: costo !== null ? Math.max(0, costo - totalAbonado) : null,
+    };
+  });
 
-  const utilidadConfirmada   = saldados.reduce((s, p) => p.utilidad      !== null ? s + p.utilidad      : s, 0);
+  const utilidadConfirmada   = saldados.reduce((s, p) => p.utilidad         !== null ? s + p.utilidad         : s, 0);
   const utilidadParcialTotal = activos.reduce( (s, p) => p.utilidad_parcial !== null ? s + p.utilidad_parcial : s, 0);
   const porCubrirTotal       = activos.reduce( (s, p) => p.falta_para_cubrir !== null ? s + p.falta_para_cubrir : s, 0);
 
@@ -293,7 +336,8 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
       utilidad_confirmada:  utilidadConfirmada,
       utilidad_parcial:     utilidadParcialTotal,
       por_cubrir:           porCubrirTotal,
-      total_prestamos:      prestamosRaw.length,
+      total_saldados:       saldados.length,
+      total_activos:        activos.length,
     },
   };
 
