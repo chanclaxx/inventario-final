@@ -233,21 +233,28 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
         (SELECT pc.costo_unitario * p.cantidad_prestada
          FROM productos_cantidad pc
          WHERE pc.id = p.producto_id
+           AND pc.sucursal_id = p.sucursal_id
          LIMIT 1)
       ELSE NULL
     END
   `;
 
   // Query 1: Saldados cuya fecha de saldo (último abono) cae en el rango.
-  // Se usa CTE para calcular MAX(fecha) por préstamo primero y luego filtrar —
-  // las window functions no están permitidas en WHERE/HAVING directo en PostgreSQL.
+  // CTE filtrado por sucursal desde el inicio para no escanear abonos de otros negocios.
+  // costoProducto para cantidad también verifica sucursal_id para evitar cross-negocio.
   const { rows: saldadosRaw } = await pool.query(`
-    WITH ultimo_abono AS (
+    WITH prestamos_sucursal AS (
+      -- Limitar primero al conjunto de préstamos de esta sucursal
+      SELECT id FROM prestamos WHERE sucursal_id = $1 AND estado = 'Saldado'
+    ),
+    ultimo_abono AS (
+      -- MAX fecha solo de abonos de préstamos de ESTA sucursal
       SELECT
-        prestamo_id,
-        MAX(fecha AT TIME ZONE 'UTC' AT TIME ZONE 'America/Bogota') AS fecha_saldo
-      FROM abonos_prestamo
-      GROUP BY prestamo_id
+        ab.prestamo_id,
+        MAX(ab.fecha AT TIME ZONE 'UTC' AT TIME ZONE 'America/Bogota') AS fecha_saldo
+      FROM abonos_prestamo ab
+      JOIN prestamos_sucursal ps ON ps.id = ab.prestamo_id
+      GROUP BY ab.prestamo_id
     )
     SELECT
       p.id,
