@@ -26,17 +26,9 @@ const _subqueryProveedores = (facturaAlias = 'f') => `
   ) AS proveedor_nombre
 `;
 
-// ── findAll ───────────────────────────────────────────────────────────────────
-// Vista sucursal : filtra por sucursal_id
-// Vista global   : todas las sucursales del negocio, incluye sucursal_nombre
-// No necesita email/dirección — es la vista de lista, no de detalle
-
 const findAll = async (sucursalId, negocioId) => {
-  const filtro = sucursalId
-    ? 'f.sucursal_id = $1'
-    : 'su.negocio_id = $1';
-
-  const param = sucursalId ?? negocioId;
+  const filtro = sucursalId ? 'f.sucursal_id = $1' : 'su.negocio_id = $1';
+  const param  = sucursalId ?? negocioId;
 
   const { rows } = await pool.query(`
     SELECT
@@ -67,19 +59,12 @@ const findAll = async (sucursalId, negocioId) => {
   return rows;
 };
 
-// ── findById ──────────────────────────────────────────────────────────────────
-// Trae email y direccion desde la tabla clientes cuando existe cliente_id.
-// Facturas antiguas (cliente_id = null) usan los campos propios de facturas
-// para nombre_cliente, cedula y celular — que ya están en f.* — y retornan
-// null en email y direccion sin romper nada.
-
 const findById = async (id) => {
   const { rows } = await pool.query(`
     SELECT
       f.*,
       u.nombre  AS usuario_nombre,
       su.nombre AS sucursal_nombre,
-      -- Email y dirección solo disponibles si la factura tiene cliente vinculado
       c.email     AS cliente_email,
       c.direccion AS cliente_direccion,
       ${_subqueryProveedores('f')}
@@ -92,8 +77,6 @@ const findById = async (id) => {
   return rows[0] || null;
 };
 
-// ── perteneceAlNegocio ────────────────────────────────────────────────────────
-
 const perteneceAlNegocio = async (id, negocioId) => {
   const { rows } = await pool.query(`
     SELECT f.id FROM facturas f
@@ -102,8 +85,6 @@ const perteneceAlNegocio = async (id, negocioId) => {
   `, [id, negocioId]);
   return rows.length > 0;
 };
-
-// ── getLineas ─────────────────────────────────────────────────────────────────
 
 const getLineas = async (facturaId) => {
   const { rows } = await pool.query(`
@@ -138,8 +119,6 @@ const getLineas = async (facturaId) => {
   return rows;
 };
 
-// ── getPagos ──────────────────────────────────────────────────────────────────
-
 const getPagos = async (facturaId) => {
   const { rows } = await pool.query(
     'SELECT * FROM pagos_factura WHERE factura_id = $1',
@@ -148,9 +127,6 @@ const getPagos = async (facturaId) => {
   return rows;
 };
 
-// ── getRetoma ─────────────────────────────────────────────────────────────────
-
-// Reemplazar getRetoma por getRetomas — devuelve array
 const getRetomas = async (facturaId) => {
   const { rows } = await pool.query(`
     SELECT id, factura_id, descripcion, valor_retoma,
@@ -160,8 +136,6 @@ const getRetomas = async (facturaId) => {
   `, [facturaId]);
   return rows;
 };
-
-// ── create ────────────────────────────────────────────────────────────────────
 
 const create = async (client, {
   sucursal_id, usuario_id, cliente_id,
@@ -175,8 +149,6 @@ const create = async (client, {
   return rows[0];
 };
 
-// ── insertarLinea ─────────────────────────────────────────────────────────────
-
 const insertarLinea = async (client, { factura_id, nombre_producto, imei, cantidad, precio, producto_id }) => {
   const { rows } = await client.query(`
     INSERT INTO lineas_factura(factura_id, nombre_producto, imei, cantidad, precio, producto_id)
@@ -186,8 +158,6 @@ const insertarLinea = async (client, { factura_id, nombre_producto, imei, cantid
   return rows[0];
 };
 
-// ── insertarPago ──────────────────────────────────────────────────────────────
-
 const insertarPago = async (client, { factura_id, metodo, valor }) => {
   const { rows } = await client.query(`
     INSERT INTO pagos_factura(factura_id, metodo, valor)
@@ -196,8 +166,6 @@ const insertarPago = async (client, { factura_id, metodo, valor }) => {
   `, [factura_id, metodo, valor]);
   return rows[0];
 };
-
-// ── insertarRetoma ────────────────────────────────────────────────────────────
 
 const insertarRetoma = async (client, {
   factura_id, descripcion, valor_retoma,
@@ -216,8 +184,6 @@ const insertarRetoma = async (client, {
   ]);
   return rows[0];
 };
-
-// ── cancelar ──────────────────────────────────────────────────────────────────
 
 const cancelar = async (client, id) => {
   await client.query(
@@ -244,11 +210,20 @@ const findByIdYNegocio = async (id, negocioId) => {
   return rows[0] || null;
 };
 
-// Versión que acepta client de transacción para ajuste de stock
+// Ajusta stock dentro de una transacción — solo modifica stock, nunca costo
 const ajustarStockCantidad = async (client, productoId, cantidad) => {
   await client.query(
     'UPDATE productos_cantidad SET stock = stock + $1 WHERE id = $2',
     [cantidad, productoId]
+  );
+};
+
+// NUEVO: actualiza costo_unitario con el promedio ponderado dentro de la transacción.
+// Se llama después de ajustarStockCantidad en retomas de tipo 'cantidad'.
+const actualizarCostoPromedio = async (client, productoId, costoPromedio) => {
+  await client.query(
+    'UPDATE productos_cantidad SET costo_unitario = $1 WHERE id = $2',
+    [costoPromedio, productoId]
   );
 };
 
@@ -257,5 +232,5 @@ module.exports = {
   perteneceAlNegocio,
   getLineas, getPagos, getRetomas,
   create, insertarLinea, insertarPago, insertarRetoma, cancelar,
-  ajustarStockCantidad,
+  ajustarStockCantidad, actualizarCostoPromedio,
 };

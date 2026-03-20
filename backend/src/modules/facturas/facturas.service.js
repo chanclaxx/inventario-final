@@ -4,8 +4,9 @@ const serialRepo   = require('../productos/productosSerial.repository');
 const cantidadRepo = require('../productos/productosCantidad.repository');
 const clientesRepo = require('../clientes/clientes.repository');
 const cajaRepo     = require('../caja/caja.repository');
-const { enviarFactura }  = require('../email/email.service');
-const garantiasRepo      = require('../garantias/garantias.repository');
+const { enviarFactura }      = require('../email/email.service');
+const garantiasRepo          = require('../garantias/garantias.repository');
+const { calcularCostoPromedio } = require('../../utils/costoPromedio.util');
 
 const ES_COMPANERO = (cedula) => cedula === 'COMPANERO';
 
@@ -14,7 +15,6 @@ const _fechaHoy = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 
-// ── Verifica que un producto_cantidad_id pertenece al negocio ─────────────────
 const _verificarProductoCantidadNegocio = async (client, productoId, negocioId) => {
   const { rows } = await client.query(
     `SELECT pc.id FROM productos_cantidad pc
@@ -42,23 +42,32 @@ const resolverClienteId = async (client, negocioId, { cedula, nombre, celular, e
   return nuevos[0].id;
 };
 
+// ── Helper: lee stock y costo actual de un producto_cantidad dentro de la TX ──
+// Se necesita ANTES de ajustarStockCantidad para calcular el promedio correcto.
+const _leerStockYCosto = async (client, productoId) => {
+  const { rows } = await client.query(
+    'SELECT stock, costo_unitario FROM productos_cantidad WHERE id = $1',
+    [productoId]
+  );
+  return rows[0] || null;
+};
+
 const getFacturas = (sucursalId, negocioId) =>
   facturasRepo.findAll(sucursalId, negocioId);
 
 const getFacturaById = async (negocioId, id) => {
   const factura = await facturasRepo.findByIdYNegocio(id, negocioId);
   if (!factura) throw { status: 404, message: 'Factura no encontrada' };
- 
-  // Importación diferida para evitar dependencia circular con domiciliarios.
+
   const domiciliariosRepo = require('../domiciliarios/domiciliarios.repository');
- 
+
   const [lineas, pagos, retomas, entrega] = await Promise.all([
     facturasRepo.getLineas(id),
     facturasRepo.getPagos(id),
     facturasRepo.getRetomas(id),
     domiciliariosRepo.findEntregaByFacturaId(id, negocioId),
   ]);
- 
+
   return { ...factura, lineas, pagos, retomas, domicilio: entrega || null };
 };
 
@@ -66,14 +75,14 @@ const crearFactura = async ({
   negocio_id, sucursal_id, usuario_id,
   nombre_cliente, cedula, celular, email, direccion, notas,
   lineas, pagos, retomas = [],
-  domicilio,          // <── NUEVO: { domiciliario_id, direccion_entrega, notas }
+  domicilio,
 }) => {
-  const { pool }           = require('../../config/db');
-  const facturasRepo       = require('./facturas.repository');
-  const { enviarFactura }  = require('../email/email.service');
-  const garantiasRepo      = require('../garantias/garantias.repository');
+  const { pool }             = require('../../config/db');
+  const facturasRepo         = require('./facturas.repository');
+  const { enviarFactura }    = require('../email/email.service');
+  const garantiasRepo        = require('../garantias/garantias.repository');
   const domiciliariosService = require('../domiciliarios/domiciliarios.service');
- 
+
   const ES_COMPANERO = (c) => c === 'COMPANERO';
   const _fechaHoy = () => {
     const d = new Date();
@@ -101,18 +110,13 @@ const crearFactura = async ({
     );
     return nuevos[0].id;
   };
- 
+
   const { rows: sucRows } = await pool.query(
     `SELECT id FROM sucursales WHERE id = $1 AND negocio_id = $2 AND activa = true`,
     [sucursal_id, negocio_id]
   );
   if (!sucRows.length) throw { status: 403, message: 'Sucursal no válida para este negocio' };
- 
-  // Domicilio y retomas son mutuamente excluyentes.
-  // Una factura con domicilio no puede tener retomas porque si el pedido
-  // se devuelve, la cancelación revierte el stock de los productos vendidos
-  // pero no tiene forma de saber qué hacer con las retomas (si revertirlas
-  // o no), lo que podría corromper el inventario.
+
   const tieneRetomas   = Array.isArray(retomas) && retomas.length > 0;
   const tieneDomicilio = !!(domicilio?.domiciliario_id);
   if (tieneRetomas && tieneDomicilio) {
@@ -121,22 +125,22 @@ const crearFactura = async ({
       message: 'Una factura no puede tener retoma y pedido a domicilio al mismo tiempo.',
     };
   }
- 
+
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
- 
+
     const cliente_id = await resolverClienteId(client, negocio_id, {
       cedula, nombre: nombre_cliente, celular, email, direccion,
     });
- 
+
     const factura = await facturasRepo.create(client, {
       sucursal_id, usuario_id, cliente_id,
       nombre_cliente, cedula, celular, notas,
     });
- 
+
     let totalLineas = 0;
- 
+
     for (const linea of lineas) {
       const lineaInsertada = await facturasRepo.insertarLinea(client, {
         factura_id:      factura.id,
@@ -147,7 +151,7 @@ const crearFactura = async ({
         producto_id:     linea.producto_id || null,
       });
       totalLineas += Number(lineaInsertada.subtotal || 0);
- 
+
       if (linea.imei) {
         const { rows: serialRows } = await client.query(
           `SELECT s.id FROM seriales s
@@ -176,9 +180,10 @@ const crearFactura = async ({
           throw { status: 400, message: `Stock insuficiente para ${linea.nombre_producto}` };
         }
         await facturasRepo.ajustarStockCantidad(client, linea.producto_id, -linea.cantidad);
+        // Venta: cantidad negativa → el promedio NO se recalcula ✓
       }
     }
- 
+
     if (pagos?.length) {
       for (const pago of pagos) {
         if (pago.valor > 0) {
@@ -190,7 +195,7 @@ const crearFactura = async ({
         }
       }
     }
- 
+
     for (const retoma of retomas) {
       await facturasRepo.insertarRetoma(client, {
         factura_id:         factura.id,
@@ -201,8 +206,9 @@ const crearFactura = async ({
         imei:               retoma.imei               || null,
         cantidad_retoma:    retoma.cantidad_retoma     || 1,
       });
- 
+
       if (retoma.ingreso_inventario && retoma.tipo_retoma === 'serial' && retoma.imei) {
+        // ── Retoma serial — sin cambios ──────────────────────────────────────
         const { rows: existeRows } = await client.query(
           `SELECT s.id FROM seriales s
            JOIN productos_serial ps ON ps.id = s.producto_id
@@ -211,7 +217,7 @@ const crearFactura = async ({
           [retoma.imei, negocio_id]
         );
         const existeSerial = existeRows[0] || null;
- 
+
         if (retoma.reactivar_serial_id) {
           const { rows: serialCheck } = await client.query(
             `SELECT s.id FROM seriales s
@@ -249,14 +255,29 @@ const crearFactura = async ({
           );
         }
       }
- 
+
       if (retoma.ingreso_inventario && retoma.tipo_retoma === 'cantidad' && retoma.producto_cantidad_id) {
         await _verificarProductoCantidadNegocio(client, retoma.producto_cantidad_id, negocio_id);
+
+        // NUEVO: leer stock y costo ANTES de ajustar para calcular promedio correcto
+        const productoActual = await _leerStockYCosto(client, retoma.producto_cantidad_id);
+
         await facturasRepo.ajustarStockCantidad(client, retoma.producto_cantidad_id, Number(retoma.cantidad_retoma || 1));
+
+        // Promedio ponderado: la retoma entra con valor_retoma como costo
+        // Solo si hay valor conocido (>0) — retomas sin valorar no modifican el costo
+        if (productoActual && Number(retoma.valor_retoma) > 0) {
+          const costoPromedio = calcularCostoPromedio(
+            productoActual.stock,
+            productoActual.costo_unitario,
+            Number(retoma.cantidad_retoma || 1),
+            Number(retoma.valor_retoma),
+          );
+          await facturasRepo.actualizarCostoPromedio(client, retoma.producto_cantidad_id, costoPromedio);
+        }
       }
     }
- 
-    // ── NUEVO: crear entrega de domicilio si viene el campo ──────────────────
+
     if (domicilio?.domiciliario_id) {
       await domiciliariosService.crearEntregaEnTransaccion(client, {
         facturaId:        factura.id,
@@ -268,10 +289,9 @@ const crearFactura = async ({
         notas:            domicilio.notas             || null,
       });
     }
- 
+
     await client.query('COMMIT');
- 
-    // ── Enviar factura por email — fire and forget ────────────────────────────
+
     if (email) {
       (async () => {
         try {
@@ -297,7 +317,7 @@ const crearFactura = async ({
         }
       })();
     }
- 
+
     return factura;
   } catch (err) {
     await client.query('ROLLBACK');
@@ -311,10 +331,7 @@ const cancelarFactura = async (negocioId, id, eliminarRetoma = false, _desdeDevo
   const factura = await facturasRepo.findByIdYNegocio(id, negocioId);
   if (!factura) throw { status: 404, message: 'Factura no encontrada' };
   if (factura.estado === 'Cancelada') throw { status: 400, message: 'La factura ya está cancelada' };
- 
-  // Bloquear cancelación manual si hay domicilio pendiente.
-  // Se omite cuando la llamada viene desde marcarDevolucion() del módulo de domiciliarios,
-  // que es el único flujo legítimo para cancelar una factura con entrega activa.
+
   if (!_desdeDevolucion) {
     const domiciliariosRepo = require('../domiciliarios/domiciliarios.repository');
     const entregaPendiente  = await domiciliariosRepo.findEntregaByFacturaId(id, negocioId);
@@ -325,13 +342,13 @@ const cancelarFactura = async (negocioId, id, eliminarRetoma = false, _desdeDevo
       };
     }
   }
- 
+
   const pagos = await facturasRepo.getPagos(id);
- 
+
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
- 
+
     const lineas = await facturasRepo.getLineas(id);
     for (const linea of lineas) {
       if (linea.imei) {
@@ -349,10 +366,12 @@ const cancelarFactura = async (negocioId, id, eliminarRetoma = false, _desdeDevo
           );
         }
       } else if (linea.producto_id) {
+        // Devolución de venta: stock sube, cantidad > 0 pero NO se recalcula costo
+        // porque no tenemos el costo original al que salió → mantener el promedio actual
         await facturasRepo.ajustarStockCantidad(client, linea.producto_id, linea.cantidad);
       }
     }
- 
+
     if (eliminarRetoma) {
       const retomas = await facturasRepo.getRetomas(id);
       for (const retoma of retomas) {
@@ -375,20 +394,21 @@ const cancelarFactura = async (negocioId, id, eliminarRetoma = false, _desdeDevo
             [retoma.nombre_producto, factura.sucursal_id]
           );
           if (prodRows.length) {
+            // Reversa de retoma: sale del inventario (cantidad negativa) → sin promedio ✓
             const cantidadRevertir = -Math.abs(Number(retoma.cantidad_retoma) || 1);
             await facturasRepo.ajustarStockCantidad(client, prodRows[0].id, cantidadRevertir);
           }
         }
       }
     }
- 
+
     await facturasRepo.cancelar(client, id);
- 
-    const METODOS_NO_CAJA    = ['Credito'];
-    const totalDevolucion    = pagos
+
+    const METODOS_NO_CAJA = ['Credito'];
+    const totalDevolucion = pagos
       .filter((p) => !METODOS_NO_CAJA.includes(p.metodo))
       .reduce((s, p) => s + Number(p.valor || 0), 0);
- 
+
     if (totalDevolucion > 0) {
       const caja = await cajaRepo.findCajaAbierta(factura.sucursal_id);
       if (caja) {
@@ -404,7 +424,7 @@ const cancelarFactura = async (negocioId, id, eliminarRetoma = false, _desdeDevo
         );
       }
     }
- 
+
     await client.query('COMMIT');
   } catch (err) {
     await client.query('ROLLBACK');
@@ -459,7 +479,6 @@ const editarFactura = async (negocioId, id, {
     }
 
     if (retoma) {
-      // ── cantidad_retoma persistida para poder revertirla al cancelar ────────
       await facturasRepo.insertarRetoma(client, {
         factura_id:         id,
         descripcion:        retoma.descripcion,
@@ -472,6 +491,7 @@ const editarFactura = async (negocioId, id, {
 
       if (retoma.ingreso_inventario) {
         if (retoma.tipo_retoma === 'serial' && retoma.imei) {
+          // ── Retoma serial — sin cambios ────────────────────────────────────
           const { rows: existeRows } = await client.query(
             `SELECT s.id FROM seriales s
              JOIN productos_serial ps ON ps.id = s.producto_id
@@ -511,9 +531,24 @@ const editarFactura = async (negocioId, id, {
 
         if (retoma.tipo_retoma === 'cantidad' && retoma.producto_cantidad_id) {
           await _verificarProductoCantidadNegocio(client, retoma.producto_cantidad_id, negocioId);
+
+          // NUEVO: leer stock y costo ANTES de ajustar para calcular promedio correcto
+          const productoActual = await _leerStockYCosto(client, retoma.producto_cantidad_id);
+
           await facturasRepo.ajustarStockCantidad(
             client, retoma.producto_cantidad_id, Number(retoma.cantidad_retoma || 1)
           );
+
+          // Promedio ponderado: la retoma entra con valor_retoma como costo
+          if (productoActual && Number(retoma.valor_retoma) > 0) {
+            const costoPromedio = calcularCostoPromedio(
+              productoActual.stock,
+              productoActual.costo_unitario,
+              Number(retoma.cantidad_retoma || 1),
+              Number(retoma.valor_retoma),
+            );
+            await facturasRepo.actualizarCostoPromedio(client, retoma.producto_cantidad_id, costoPromedio);
+          }
         }
       }
     }
