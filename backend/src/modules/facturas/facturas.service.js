@@ -267,11 +267,14 @@ const crearFactura = async ({
         // Promedio ponderado: la retoma entra con valor_retoma como costo
         // Solo si hay valor conocido (>0) — retomas sin valorar no modifican el costo
         if (productoActual && Number(retoma.valor_retoma) > 0) {
+          const cantRetoma = Number(retoma.cantidad_retoma || 1);
+          // valor_retoma es el total pagado al cliente — convertir a costo unitario
+          const costoUnitarioRetoma = Number(retoma.valor_retoma) / cantRetoma;
           const costoPromedio = calcularCostoPromedio(
             productoActual.stock,
             productoActual.costo_unitario,
-            Number(retoma.cantidad_retoma || 1),
-            Number(retoma.valor_retoma),
+            cantRetoma,
+            costoUnitarioRetoma,
           );
           await facturasRepo.actualizarCostoPromedio(client, retoma.producto_cantidad_id, costoPromedio);
         }
@@ -541,11 +544,14 @@ const editarFactura = async (negocioId, id, {
 
           // Promedio ponderado: la retoma entra con valor_retoma como costo
           if (productoActual && Number(retoma.valor_retoma) > 0) {
+            const cantRetoma = Number(retoma.cantidad_retoma || 1);
+            // valor_retoma es el total pagado al cliente — convertir a costo unitario
+            const costoUnitarioRetoma = Number(retoma.valor_retoma) / cantRetoma;
             const costoPromedio = calcularCostoPromedio(
               productoActual.stock,
               productoActual.costo_unitario,
-              Number(retoma.cantidad_retoma || 1),
-              Number(retoma.valor_retoma),
+              cantRetoma,
+              costoUnitarioRetoma,
             );
             await facturasRepo.actualizarCostoPromedio(client, retoma.producto_cantidad_id, costoPromedio);
           }
