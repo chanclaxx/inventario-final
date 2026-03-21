@@ -30,11 +30,9 @@ const COLS_CALCULADAS = `
     ELSE NULL
   END AS utilidad_garantia`;
 
-// ─── Helper: fecha hoy en Bogotá como string YYYY-MM-DD ──────────────────────
+// ─── Helper: fecha hoy en Bogotá calculada en SQL ────────────────────────────
 // Evita pasar un Date de JS como parámetro (node-pg lo serializa en UTC,
 // causando desfase de zona al comparar con fechas AT TIME ZONE 'America/Bogota').
-// Al usar TEXT, PostgreSQL recibe el string literal y lo castea correctamente.
-
 const HOY_BOGOTA_EXPR = `(NOW() AT TIME ZONE 'America/Bogota')::date`;
 
 // ─── Lectura ──────────────────────────────────────────────────────────────────
@@ -119,10 +117,8 @@ const getAbonos = async (negocioId, ordenId) => {
 };
 
 // ─── Resumen del día ──────────────────────────────────────────────────────────
-// FIX: Se calcula la fecha de hoy directamente en cada query SQL usando
-// (NOW() AT TIME ZONE 'America/Bogota')::date en lugar de pasar un Date de JS.
-// Esto evita el desfase de zona que ocurre cuando node-pg serializa un Date
-// en UTC y PostgreSQL lo compara contra timestamps en zona Bogotá.
+// FIX: Fecha hoy calculada inline en SQL para evitar desfase de timezone
+// cuando node-pg serializa Date objects en UTC.
 
 const getResumenHoy = async (sucursalId, negocioId) => {
   const param       = sucursalId ?? negocioId;
@@ -272,13 +268,16 @@ const marcarListo = async (negocioId, id, { costo_real, precio_final, notas_tecn
   return rows[0] || null;
 };
 
-// Garantía gratis: marcar listo directamente sin precio, entrega sin cobro
+// FIX: Garantía gratis — el SQL original usaba $3 tanto para costo_garantia (numeric)
+// como para notas_tecnico (text), causando error de tipo en PostgreSQL → 500.
+// Ahora costo_garantia se hardcodea a 0 (no hay costo en garantía gratis)
+// y $3 se usa exclusivamente para notas_tecnico.
 const marcarListoGarantiaGratis = async (negocioId, id, notas_tecnico) => {
   const { rows } = await pool.query(`
     UPDATE ordenes_servicio
     SET estado          = 'Listo',
         precio_garantia = 0,
-        costo_garantia  = $3,
+        costo_garantia  = 0,
         notas_tecnico   = COALESCE($3, notas_tecnico)
     WHERE id = $1 AND negocio_id = $2
       AND estado = 'Garantia' AND garantia_cobrable = false

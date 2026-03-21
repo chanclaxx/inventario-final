@@ -13,8 +13,7 @@ const validarOrden = [
 // FIX: validarListo ahora contempla los 3 escenarios:
 // 1. Reparación normal     → precio_final obligatorio
 // 2. Garantía cobrable     → precio_garantia obligatorio (es_garantia = true)
-// 3. Garantía gratis       → sin precio (es_garantia_gratis = true)
-// Antes solo exigía precio_final siempre, lo que causaba 400 en garantías.
+// 3. Garantía gratis       → sin precio requerido (es_garantia_gratis = true)
 const validarListo = [
   body('precio_final')
     .if((value, { req }) => !req.body.es_garantia && !req.body.es_garantia_gratis)
