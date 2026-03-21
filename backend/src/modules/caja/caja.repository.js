@@ -83,12 +83,7 @@ const insertarMovimiento = async ({
   return rows[0];
 };
 
-// ─── toggleMovimiento ────────────────────────────────────────────────────────
-// Activa o inactiva un movimiento de caja. Recibe el negocioId para verificar
-// que el movimiento pertenece a una caja del negocio antes de modificarlo.
-
 const toggleMovimiento = async (movimientoId, negocioId) => {
-  // Verificar pertenencia al negocio antes de modificar
   const { rows: check } = await pool.query(`
     SELECT m.id, m.activo
     FROM movimientos_caja m
@@ -121,43 +116,9 @@ const getResumenCaja = async (cajaId) => {
 
 // ─── _buildResumen ────────────────────────────────────────────────────────────
 // Recibe arrays de filas y devuelve grupos + totales + metodosPago.
-//
-// CAMBIOS vs versión anterior:
-//   • pf ya NO incluye pagos de facturas con domicilio Pendiente — esos se
-//     excluyen en la query, no aquí.
-//   • ad = abonos_domicilio: movimientos_caja con referencia_tipo='abono_domicilio'.
-//     Representan el dinero real que el domiciliario entrega en caja, abono a abono.
-//   • manuales excluye 'abono_domicilio' para no duplicar en el grupo genérico.
-//
-// Flujo de caja para una factura con domicilio:
-//   1. Factura creada  → pago NO aparece en pf (entrega Pendiente)
-//   2. Domiciliario abona → registrarAbono() inserta un movimiento_caja 'abono_domicilio'
-//      → ese valor aparece en ad y suma a totalIngresos
-//   3. Domiciliario salda → entrega pasa a Entregado → el pago de la factura
-//      AHORA sí aparece en pf (ya no hay entrega Pendiente)
-//      PERO los abonos en ad ya contabilizan ese dinero → doble suma posible.
-//
-// SOLUCIÓN anti-doble-suma:
-//   Cuando la entrega se marca Entregado, el pago de la factura vuelve a pf.
-//   Para evitar doble suma, al saldar completamente se deja ad y se excluye pf
-//   para esa factura. La exclusión en pf ya la hace el NOT EXISTS solo para
-//   estado='Pendiente', así que cuando pasa a Entregado el pago reaparece en pf.
-//
-// DISEÑO FINAL ELEGIDO — simplicidad sobre perfección contable:
-//   Los abonos de domiciliarios se registran en movimientos_caja como ingresos.
-//   Los pagos de facturas con domicilio Entregado SÍ aparecen en pf (son la
-//   "confirmación" contable de que la venta se completó).
-//   Para evitar doble suma, los abonos_domicilio NO se suman en totalIngresos —
-//   se muestran como grupo informativo de cuánto ha rendido cada domiciliario,
-//   pero el ingreso real de la venta ya está en pf cuando la entrega se completa.
-//
-//   PARA facturas Pendiente: aparecen solo en ad (lo que el domiciliario ha rendido).
-//   PARA facturas Entregado: aparecen en pf (total de la venta), ad es informativo.
+// CAMBIO: sv = abonos/cobros de servicios técnicos (referencia_tipo='servicio').
 
-const _buildResumen = ({ pf, ac, ap, cp, aa, mn, rt, dv, ad }) => {
-  // sum solo suma los ítems activos (activo !== false).
-  // Los movimientos de otras tablas (pagos_factura, etc.) no tienen campo activo
-  // y siempre cuentan. Solo movimientos_caja tiene el campo activo.
+const _buildResumen = ({ pf, ac, ap, cp, aa, mn, rt, dv, ad, sv }) => {
   const sum = (arr) => arr
     .filter((r) => r.activo !== false)
     .reduce((s, r) => s + Number(r.valor || 0), 0);
@@ -168,6 +129,7 @@ const _buildResumen = ({ pf, ac, ap, cp, aa, mn, rt, dv, ad }) => {
   const totalCompras           = sum(cp);
   const totalAbonosAcreedor    = sum(aa);
   const totalRetomas           = sum(rt);
+  const totalAbonosServicio    = sum(sv);
   const totalDevoluciones      = dv
     .filter((d) => d.activo !== false)
     .reduce((s, d) => s + Number(d.valor || 0), 0);
@@ -179,24 +141,10 @@ const _buildResumen = ({ pf, ac, ap, cp, aa, mn, rt, dv, ad }) => {
     .filter((m) => m.activo !== false && m.tipo === 'Egreso')
     .reduce((s, m) => s + Number(m.valor || 0), 0);
 
-  // ad es SOLO informativo — no suma a ingresos para evitar doble suma con pf
-  // cuando la entrega se completa (el pago ya estará en pf).
-  // Para entregas todavía Pendiente, pf no las incluye, así que ad representa
-  // el único ingreso real de esas facturas hasta que se salden.
   const totalAbonosDomicilio = sum(ad);
 
-  // El total real de ingresos de domicilios pendientes ya viene como movimiento_caja
-  // porque registrarAbono() lo inseró. Lo que necesitamos es NO sumar dos veces.
-  // Solución: pf excluye facturas Pendiente → no hay overlap entre pf y ad en el día.
-  // Cuando la entrega se completa, pf incluye el pago completo de la factura.
-  // Los abonos previos en ad son movimientos de caja reales insertados por registrarAbono.
-  // El saldo real de caja = movimientos_caja (ingresos - egresos), que incluye los ad.
-  // Para el resumen agrupado optamos por mostrar ad como grupo separado y
-  // sumar solo los ad al totalIngresos cuando la entrega sigue Pendiente.
-  // Dado que pf ya excluye las Pendiente, no hay riesgo de doble suma.
-
   const totalIngresosBruto = totalFacturas + totalAbonosCredito + totalAbonosPrestamo
-    + totalAbonosDomicilio + totalManualesIngreso;
+    + totalAbonosDomicilio + totalAbonosServicio + totalManualesIngreso;
   const totalIngresos      = totalIngresosBruto - totalRetomas;
   const totalEgresos       = totalCompras + totalAbonosAcreedor + totalManualesEgreso + totalDevoluciones;
 
@@ -228,6 +176,12 @@ const _buildResumen = ({ pf, ac, ap, cp, aa, mn, rt, dv, ad }) => {
         label: 'Abonos de préstamos',
         items: ap,
         total: totalAbonosPrestamo,
+      },
+      abonosServicio: {
+        tipo:  'Ingreso',
+        label: 'Servicio técnico',
+        items: sv,
+        total: totalAbonosServicio,
       },
       abonosDomicilio: {
         tipo:  'Ingreso',
@@ -300,7 +254,7 @@ const getResumenDia = async (cajaId, sucursalId, negocioId) => {
   if (!rango) return null;
   const { inicio, fin } = rango;
 
-  const [pf, ac, ap, cp, aa, mn, dv, rt, ad] = await Promise.all([
+  const [pf, ac, ap, cp, aa, mn, dv, rt, ad, sv] = await Promise.all([
 
     pool.query(`
       SELECT pf.id, pf.metodo, pf.valor, f.nombre_cliente, f.id AS factura_id, f.fecha
@@ -356,14 +310,14 @@ const getResumenDia = async (cajaId, sucursalId, negocioId) => {
       WHERE ma.tipo = 'Abono' AND a.negocio_id = $1 AND ma.fecha BETWEEN $2 AND $3
     `, [negocioId, inicio, fin]),
 
+    // Manuales: excluir 'factura_cancelada', 'abono_domicilio' y 'servicio'
     pool.query(`
       SELECT m.*, u.nombre AS usuario_nombre
       FROM movimientos_caja m
       LEFT JOIN usuarios u ON u.id = m.usuario_id
       WHERE m.caja_id = $1
         AND (m.referencia_tipo IS NULL
-          OR (m.referencia_tipo != 'factura_cancelada'
-          AND m.referencia_tipo != 'abono_domicilio'))
+          OR m.referencia_tipo NOT IN ('factura_cancelada', 'abono_domicilio', 'servicio'))
       ORDER BY m.fecha ASC
     `, [cajaId]),
 
@@ -394,11 +348,26 @@ const getResumenDia = async (cajaId, sucursalId, negocioId) => {
       WHERE m.caja_id = $1 AND m.referencia_tipo = 'abono_domicilio'
       ORDER BY m.fecha ASC
     `, [cajaId]),
+
+    // Servicios técnicos: movimientos_caja con referencia_tipo='servicio',
+    // enriquecidos con datos de la orden
+    pool.query(`
+      SELECT m.id, m.valor, m.concepto, m.fecha, m.activo, m.tipo,
+             m.referencia_id AS orden_id,
+             os.cliente_nombre, os.equipo_nombre, os.equipo_tipo,
+             u.nombre AS usuario_nombre
+      FROM movimientos_caja m
+      LEFT JOIN ordenes_servicio os ON os.id = m.referencia_id
+      LEFT JOIN usuarios u ON u.id = m.usuario_id
+      WHERE m.caja_id = $1 AND m.referencia_tipo = 'servicio'
+      ORDER BY m.fecha ASC
+    `, [cajaId]),
   ]);
 
   return _buildResumen({
     pf: pf.rows, ac: ac.rows, ap: ap.rows, cp: cp.rows,
-    aa: aa.rows, mn: mn.rows, dv: dv.rows, rt: rt.rows, ad: ad.rows,
+    aa: aa.rows, mn: mn.rows, dv: dv.rows, rt: rt.rows,
+    ad: ad.rows, sv: sv.rows,
   });
 };
 
@@ -409,7 +378,7 @@ const getResumenGlobal = async (negocioId) => {
   const inicio = new Date(hoy); inicio.setHours(0, 0, 0, 0);
   const fin    = new Date(hoy); fin.setHours(23, 59, 59, 999);
 
-  const [pf, ac, ap, cp, aa, mn, dv, rt, ad] = await Promise.all([
+  const [pf, ac, ap, cp, aa, mn, dv, rt, ad, sv] = await Promise.all([
 
     pool.query(`
       SELECT pf.id, pf.metodo, pf.valor, f.nombre_cliente,
@@ -473,6 +442,7 @@ const getResumenGlobal = async (negocioId) => {
       WHERE ma.tipo = 'Abono' AND a.negocio_id = $1 AND ma.fecha BETWEEN $2 AND $3
     `, [negocioId, inicio, fin]),
 
+    // Manuales: excluir 'servicio' también en global
     pool.query(`
       SELECT m.*, u.nombre AS usuario_nombre, su.nombre AS sucursal_nombre
       FROM movimientos_caja m
@@ -482,8 +452,7 @@ const getResumenGlobal = async (negocioId) => {
       WHERE su.negocio_id = $1
         AND m.fecha BETWEEN $2 AND $3
         AND (m.referencia_tipo IS NULL
-          OR (m.referencia_tipo != 'factura_cancelada'
-          AND m.referencia_tipo != 'abono_domicilio'))
+          OR m.referencia_tipo NOT IN ('factura_cancelada', 'abono_domicilio', 'servicio'))
       ORDER BY m.fecha ASC
     `, [negocioId, inicio, fin]),
 
@@ -524,11 +493,29 @@ const getResumenGlobal = async (negocioId) => {
         AND m.referencia_tipo = 'abono_domicilio'
       ORDER BY m.fecha ASC
     `, [negocioId, inicio, fin]),
+
+    // Servicios técnicos global
+    pool.query(`
+      SELECT m.id, m.valor, m.concepto, m.fecha, m.activo, m.tipo,
+             m.referencia_id AS orden_id,
+             os.cliente_nombre, os.equipo_nombre, os.equipo_tipo,
+             u.nombre AS usuario_nombre, su.nombre AS sucursal_nombre
+      FROM movimientos_caja m
+      JOIN aperturas_caja ac ON ac.id = m.caja_id
+      JOIN sucursales     su ON su.id = ac.sucursal_id
+      LEFT JOIN ordenes_servicio os ON os.id = m.referencia_id
+      LEFT JOIN usuarios u ON u.id = m.usuario_id
+      WHERE su.negocio_id = $1
+        AND m.fecha BETWEEN $2 AND $3
+        AND m.referencia_tipo = 'servicio'
+      ORDER BY m.fecha ASC
+    `, [negocioId, inicio, fin]),
   ]);
 
   return _buildResumen({
     pf: pf.rows, ac: ac.rows, ap: ap.rows, cp: cp.rows,
-    aa: aa.rows, mn: mn.rows, dv: dv.rows, rt: rt.rows, ad: ad.rows,
+    aa: aa.rows, mn: mn.rows, dv: dv.rows, rt: rt.rows,
+    ad: ad.rows, sv: sv.rows,
   });
 };
 

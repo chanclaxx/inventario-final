@@ -2,7 +2,6 @@ const service = require('./caja.service');
 
 const getCajaActiva = async (req, res, next) => {
   try {
-    // En vista global no hay "caja activa" — requiere sucursal específica
     if (req.todasSucursales) {
       return res.status(400).json({
         ok: false,
@@ -23,17 +22,19 @@ const abrirCaja = async (req, res, next) => {
       ...req.body,
       sucursal_id: req.sucursal_id,
       usuario_id:  req.user.id,
-      negocio_id:  req.user.negocio_id,   // ← agregar
+      negocio_id:  req.user.negocio_id,
     });
     res.status(201).json({ ok: true, data, message: 'Caja abierta correctamente' });
   } catch (err) { next(err); }
 };
+
 const toggleMovimiento = async (req, res, next) => {
   try {
     const data = await service.toggleMovimiento(req.user.negocio_id, req.params.movimientoId);
     res.json({ ok: true, data, message: `Movimiento ${data.activo ? 'activado' : 'anulado'}` });
   } catch (err) { next(err); }
 };
+
 const cerrarCaja = async (req, res, next) => {
   try {
     const data = await service.cerrarCaja(req.user.negocio_id, req.params.id, req.body);
@@ -50,13 +51,12 @@ const getMovimientos = async (req, res, next) => {
 
 const getResumenDia = async (req, res, next) => {
   try {
-    // Vista global: resumen consolidado del negocio completo
     if (req.todasSucursales) {
       const data = await service.getResumenGlobal(req.user.negocio_id);
-      return res.json({ ok: true, data, modo: 'global' });
+      return res.json({ ok: true, data, modo: 'global', nivel: req.user.nivel });
     }
     const data = await service.getResumenDia(req.user.negocio_id, req.params.id, req.sucursal_id);
-    res.json({ ok: true, data, modo: 'sucursal' });
+    res.json({ ok: true, data, modo: 'sucursal', nivel: req.user.nivel });
   } catch (err) { next(err); }
 };
 
@@ -78,5 +78,5 @@ const registrarMovimiento = async (req, res, next) => {
 
 module.exports = {
   getCajaActiva, abrirCaja, cerrarCaja,
-  getMovimientos, getResumenDia, registrarMovimiento,toggleMovimiento
+  getMovimientos, getResumenDia, registrarMovimiento, toggleMovimiento,
 };
