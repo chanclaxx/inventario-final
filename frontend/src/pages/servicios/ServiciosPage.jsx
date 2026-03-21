@@ -394,6 +394,7 @@ function ModalNuevaOrden({ onClose, onCreada }) {
   const [paso, setPaso] = useState(1);
   const [form, setForm] = useState({
     cliente_cedula: '', cliente_nombre: '', cliente_telefono: '', cliente_id: '',
+    cliente_email: '', cliente_direccion: '',          // internos — no se muestran en UI
     equipo_tipo: '', equipo_nombre: '', equipo_serial: '',
     falla_reportada: '', contrasena_equipo: '', notas_tecnico: '', costo_estimado: '',
   });
@@ -414,9 +415,13 @@ function ModalNuevaOrden({ onClose, onCreada }) {
       if (encontrado) {
         setForm((f) => ({
           ...f,
-          cliente_nombre:   encontrado.nombre  || f.cliente_nombre,
-          cliente_telefono: encontrado.celular  || f.cliente_telefono,
-          cliente_id:       String(encontrado.id),
+          cliente_nombre:    encontrado.nombre    || f.cliente_nombre,
+          cliente_telefono:  encontrado.celular   || f.cliente_telefono,
+          cliente_id:        String(encontrado.id),
+          // Guardar email/direccion del BD aunque no se muestren,
+          // para que verificarCedula no detecte diferencia si no los cambió el técnico
+          cliente_email:     encontrado.email     || '',
+          cliente_direccion: encontrado.direccion || '',
         }));
       }
     } catch { /* usuario llena manual */ }
@@ -460,8 +465,8 @@ function ModalNuevaOrden({ onClose, onCreada }) {
           cedula:    form.cliente_cedula,
           nombre:    form.cliente_nombre,
           celular:   form.cliente_telefono,
-          email:     '',
-          direccion: '',
+          email:     form.cliente_email,
+          direccion: form.cliente_direccion,
         });
         if (!ok) return;
       }
@@ -1301,7 +1306,7 @@ export default function ServiciosPage() {
                     En proceso ({activas.length})
                   </p>
                 )}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="flex flex-col gap-3">
                   {grupos.map((g) => {
                     const gKey = g.nombre;
                     return (
