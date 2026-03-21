@@ -299,8 +299,8 @@ const marcarSinReparar = async (negocioId, id, { motivo, precio_diagnostico, caj
       UPDATE ordenes_servicio
       SET estado             = 'Sin_reparar',
           motivo_sin_reparar = $3,
-          precio_final       = $4,
-          total_abonado      = COALESCE($4, 0),
+          precio_final       = $4::numeric,
+          total_abonado      = COALESCE($4::numeric, 0),
           fecha_entrega      = now()
       WHERE id = $1
       RETURNING *
