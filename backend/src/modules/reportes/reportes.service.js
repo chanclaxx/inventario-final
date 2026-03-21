@@ -181,19 +181,9 @@ const getDashboard = async (sucursalId) => {
 };
 
 // ─── getServiciosRango ────────────────────────────────────────────────────────
-// Obtiene la utilidad de servicios técnicos para el reporte de ventas.
-//
-// Lógica:
-// - CERRADOS: órdenes con fecha_entrega en el rango (Entregado, Pendiente_pago, Sin_reparar)
-//   · Entregado pagado completo → utilidad confirmada
-//   · Pendiente_pago → utilidad parcial (lo abonado - costo)
-//   · Sin_reparar con diagnóstico → ingreso confirmado
-//   · Garantía cobrable entregada → utilidad de garantía
-// - ACTIVOS: resumen de órdenes en proceso (count + saldo pendiente)
 
 const getServiciosRango = async (sucursalId, desde, hasta) => {
 
-  // 1. Servicios cerrados en el rango (por fecha_entrega en Bogotá)
   const { rows: cerradosRaw } = await pool.query(`
     SELECT
       os.id, os.estado, os.cliente_nombre,
@@ -209,7 +199,6 @@ const getServiciosRango = async (sucursalId, desde, hasta) => {
     ORDER BY os.fecha_entrega DESC
   `, [sucursalId, desde, hasta]);
 
-  // 2. Servicios activos — resumen (sin filtro de fecha)
   const { rows: activosResumen } = await pool.query(`
     SELECT
       os.estado,
@@ -229,7 +218,6 @@ const getServiciosRango = async (sucursalId, desde, hasta) => {
     GROUP BY os.estado
   `, [sucursalId]);
 
-  // Procesar cerrados
   const cerrados = cerradosRaw.map((os) => {
     const precioFinal    = Number(os.precio_final    || 0);
     const costoReal      = Number(os.costo_real      || 0);
@@ -240,28 +228,24 @@ const getServiciosRango = async (sucursalId, desde, hasta) => {
     let categoria, ingresos, costo, utilidad, saldoPendiente;
 
     if (os.estado === 'Sin_reparar') {
-      // Diagnóstico cobrado
       categoria      = 'diagnostico';
       ingresos       = precioFinal;
       costo          = 0;
       utilidad       = precioFinal;
       saldoPendiente = 0;
     } else if (precioGarantia > 0 && os.garantia_cobrable) {
-      // Garantía cobrable entregada
       categoria      = 'garantia';
       ingresos       = totalAbonado;
       costo          = costoGarantia;
       utilidad       = costoGarantia > 0 ? precioGarantia - costoGarantia : null;
       saldoPendiente = precioGarantia - totalAbonado;
     } else if (os.estado === 'Pendiente_pago') {
-      // Entregado con saldo pendiente
       categoria      = 'pendiente';
       ingresos       = totalAbonado;
       costo          = costoReal;
       utilidad       = costoReal > 0 ? precioFinal - costoReal : null;
       saldoPendiente = precioFinal - totalAbonado;
     } else {
-      // Entregado pagado completo
       categoria      = 'pagado';
       ingresos       = totalAbonado;
       costo          = costoReal;
@@ -292,7 +276,6 @@ const getServiciosRango = async (sucursalId, desde, hasta) => {
     };
   });
 
-  // Calcular resumen de cerrados
   const pagados      = cerrados.filter((s) => s.categoria === 'pagado');
   const pendientes   = cerrados.filter((s) => s.categoria === 'pendiente');
   const diagnosticos = cerrados.filter((s) => s.categoria === 'diagnostico');
@@ -302,7 +285,6 @@ const getServiciosRango = async (sucursalId, desde, hasta) => {
   const sumarIngresos = (arr) => arr.reduce((s, o) => s + o.ingresos, 0);
   const sumarSaldo    = (arr) => arr.reduce((s, o) => s + o.saldo_pendiente, 0);
 
-  // Resumen activos
   const totalActivos      = activosResumen.reduce((s, r) => s + r.cantidad, 0);
   const saldoTotalActivos = activosResumen.reduce((s, r) => s + Number(r.saldo_pendiente), 0);
   const activosPorEstado  = {};
@@ -474,7 +456,6 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
     },
   };
 
-  // ── Servicios técnicos del rango ──────────────────────────────────────────
   const servicios = await getServiciosRango(sucursalId, desde, hasta);
 
   if (!facturas.length) {
@@ -693,7 +674,9 @@ const actualizarCostoCompra = async (sucursalId, tipo, imei, nombreProducto, nue
   throw Object.assign(new Error('Tipo de producto inválido. Use "serial" o "cantidad"'), { status: 400 });
 };
 
-const getValorInventario = async (negocioId) => {
+// CAMBIO: ahora filtra por sucursal_id en vez de negocio_id
+// Cada sucursal ve solo su propio inventario
+const getValorInventario = async (sucursalId) => {
   const [serialResult, cantidadResult] = await Promise.all([
     pool.query(`
       SELECT
@@ -703,12 +686,11 @@ const getValorInventario = async (negocioId) => {
         COUNT(CASE WHEN se.costo_compra IS NULL THEN 1 END)::int AS sin_costo
       FROM seriales        se
       JOIN productos_serial ps ON ps.id = se.producto_id
-      JOIN sucursales       su ON su.id = ps.sucursal_id
       WHERE se.vendido    = false
         AND se.prestado   = false
         AND ps.activo     = true
-        AND su.negocio_id = $1
-    `, [negocioId]),
+        AND ps.sucursal_id = $1
+    `, [sucursalId]),
 
     pool.query(`
       SELECT
@@ -717,11 +699,10 @@ const getValorInventario = async (negocioId) => {
         COALESCE(SUM(pc.stock * pc.precio),                                           0)::numeric AS precio_venta_total,
         COALESCE(SUM(CASE WHEN pc.costo_unitario IS NULL THEN pc.stock ELSE 0 END),   0)::int     AS sin_costo
       FROM productos_cantidad pc
-      JOIN sucursales         su ON su.id = pc.sucursal_id
-      WHERE pc.activo     = true
-        AND pc.stock      > 0
-        AND su.negocio_id = $1
-    `, [negocioId]),
+      WHERE pc.activo      = true
+        AND pc.stock       > 0
+        AND pc.sucursal_id = $1
+    `, [sucursalId]),
   ]);
 
   const serial   = serialResult.rows[0];

@@ -35,29 +35,11 @@ const getInventarioBajo = async (req, res, next) => {
     res.json({ ok: true, data });
   } catch (err) { next(err); }
 };
-// ─────────────────────────────────────────────
-// NUEVO HANDLER: actualizarCostoCompra
-// Agrega este método al final de reportes.controller.js
-// (antes del module.exports)
-// ─────────────────────────────────────────────
 
-/**
- * PATCH /api/reportes/costo-compra
- * Solo accesible por admin_negocio (protegido en el router)
- *
- * Body esperado:
- * {
- *   tipo:            'serial' | 'cantidad',
- *   imei:            string (solo si tipo === 'serial'),
- *   nombre_producto: string (solo si tipo === 'cantidad'),
- *   nuevo_costo:     number
- * }
- */
 const actualizarCostoCompra = async (req, res, next) => {
   try {
     const { tipo, imei, nombre_producto, nuevo_costo } = req.body;
 
-    // Validaciones básicas
     if (!tipo || nuevo_costo === undefined || nuevo_costo === null) {
       return res.status(400).json({
         ok: false,
@@ -99,13 +81,17 @@ const actualizarCostoCompra = async (req, res, next) => {
     next(err);
   }
 };
+
+// CAMBIO: ahora usa req.sucursal_id en vez de req.user.negocio_id
+// para que el inventario se filtre por sucursal, no por todo el negocio
 const getValorInventario = async (req, res, next) => {
   try {
-    const data = await service.getValorInventario(req.user.negocio_id);
+    const data = await service.getValorInventario(req.sucursal_id);
     res.json({ ok: true, data });
   } catch (err) { next(err); }
 };
 
-// ─────────────────────────────────────────────
-
-module.exports = { getDashboard, getVentasRango, getProductosTop, getInventarioBajo, actualizarCostoCompra,getValorInventario };
+module.exports = {
+  getDashboard, getVentasRango, getProductosTop,
+  getInventarioBajo, actualizarCostoCompra, getValorInventario,
+};
