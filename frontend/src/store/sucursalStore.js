@@ -23,6 +23,9 @@ const useSucursalStore = create(
       negocioId      : null,  // negocio_id persistido para validación entre sesiones
 
       // ── Getters ──────────────────────────────────────────────
+      // esVistaGlobal se mantiene por compatibilidad con componentes que lo usan,
+      // pero siempre retorna false (ya no existe vista global).
+      esVistaGlobal   : () => false,
       sucursalParam   : () => get().sucursalActiva ?? null,
       esUnicaSucursal : () => get().sucursales.length === 1,
 
