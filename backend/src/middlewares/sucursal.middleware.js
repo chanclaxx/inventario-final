@@ -8,11 +8,11 @@ const { pool } = require('../config/db');
  *
  * Lógica por rol:
  *   vendedor / supervisor → siempre su sucursal asignada del token
- *   admin_negocio         → sucursal_id explícita | fallback primera activa
+ *   admin_negocio         → sucursal_id del query param | fallback primera activa
  *
- * NOTA: Se eliminó la opción "todas" — el admin siempre opera
- * en una sucursal específica. Puede cambiar entre sucursales
- * desde el selector del frontend.
+ * IMPORTANTE: Solo lee sucursal_id del query param (?sucursal_id=X),
+ * NO del body. El interceptor de axios inyecta sucursal_id como query param
+ * en todas las requests automáticamente.
  */
 const resolveSucursal = async (req, res, next) => {
   try {
@@ -30,11 +30,8 @@ const resolveSucursal = async (req, res, next) => {
       return next();
     }
 
-    // ── Admin: leer sucursal_id del query param o body ────────────────────
-    const param = req.query.sucursal_id ?? req.body?.sucursal_id;
-
-    // Sucursal numérica explícita — validar que pertenezca al negocio
-    const sucursalExplicita = Number(param);
+    // ── Admin: leer sucursal_id SOLO del query param ─────────────────────
+    const sucursalExplicita = Number(req.query.sucursal_id);
     if (sucursalExplicita) {
       const { rows } = await pool.query(
         `SELECT id FROM sucursales

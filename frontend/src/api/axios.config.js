@@ -15,9 +15,6 @@ const CODIGOS_PLAN = new Set(['PLAN_VENCIDO', 'CUENTA_PENDIENTE', 'CUENTA_SUSPEN
  * Rutas que NO necesitan sucursal_id.
  * Config es por negocio; sucursales es la propia query de lista;
  * auth y registro son públicas.
- *
- * NOTA: '/reportes' se QUITÓ de esta lista — ahora los reportes
- * reciben sucursal_id para filtrar por la sucursal seleccionada.
  */
 const PREFIJOS_SIN_SUCURSAL = [
   '/auth/',
@@ -26,6 +23,7 @@ const PREFIJOS_SIN_SUCURSAL = [
   '/sucursales',
   '/config',
   '/email',
+  '/usuarios',
 ];
 
 const requiereSucursal = (url = '') =>
@@ -56,16 +54,10 @@ api.interceptors.request.use((config) => {
     const param = useSucursalStore.getState().sucursalParam();
 
     if (param !== null) {
-      const metodo = config.method?.toLowerCase();
-
-      if (metodo === 'get' || !metodo) {
-        config.params = { ...config.params, sucursal_id: param };
-      } else if (['post', 'put', 'patch'].includes(metodo)) {
-        // No inyectar en FormData; esos endpoints manejan el contexto por token
-        if (config.data && !(config.data instanceof FormData)) {
-          config.data = { ...config.data, sucursal_id: param };
-        }
-      }
+      // SIEMPRE como query param, NUNCA en el body.
+      // Inyectar en el body sobrescribía campos como sucursal_id
+      // en payloads de edición de usuarios, compras, etc.
+      config.params = { ...config.params, sucursal_id: param };
     }
   }
 
