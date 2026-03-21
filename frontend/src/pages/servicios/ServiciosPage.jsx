@@ -10,6 +10,7 @@ import { buscarPorCedula, crearCliente } from '../../api/clientes.api';
 import { useCedulaCliente }            from '../../hooks/useCedulaCliente';
 import { ModalConflictoCedula }        from '../../components/ui/ModalConflictoCedula';
 import { formatCOP, formatFechaHora }  from '../../utils/formatters';
+import { ComprobanteServicio }         from './ComprobanteServicio';
 import { Badge }       from '../../components/ui/Badge';
 import { Button }      from '../../components/ui/Button';
 import { Modal }       from '../../components/ui/Modal';
@@ -19,6 +20,7 @@ import { Spinner }     from '../../components/ui/Spinner';
 import { EmptyState }  from '../../components/ui/EmptyState';
 import { SearchInput } from '../../components/ui/SearchInput';
 import { useAuth }     from '../../context/useAuth';
+import api             from '../../api/axios.config';
 import {
   Wrench, Plus, ChevronRight, ChevronLeft,
   AlertTriangle, CheckCircle, RefreshCw,
@@ -54,7 +56,6 @@ const ESTADOS_CERRADOS = ['Entregado', 'Sin_reparar'];
 const cfg          = (e) => ESTADOS_CONFIG[e] || { badge: 'gray', label: e, border: 'border-l-gray-200' };
 const nombreEquipo = (o) => o.equipo_nombre || o.equipo_tipo || 'Equipo';
 
-// Agrupa un array de órdenes por cliente_nombre
 const agruparPorCliente = (ordenes) => {
   const map = new Map();
   ordenes.forEach((o) => {
@@ -64,6 +65,16 @@ const agruparPorCliente = (ordenes) => {
   });
   return Array.from(map.entries()).map(([nombre, items]) => ({ nombre, items }));
 };
+
+// ─── Hook: config del negocio ─────────────────────────────────────────────────
+
+function useConfig() {
+  const { data } = useQuery({
+    queryKey: ['config'],
+    queryFn:  () => api.get('/config').then((r) => r.data.data),
+  });
+  return data || {};
+}
 
 // ─── MetricCard ───────────────────────────────────────────────────────────────
 
@@ -95,7 +106,7 @@ function BarraCobro({ abonado, total }) {
   );
 }
 
-// ─── Card de orden activa — botones siempre visibles ─────────────────────────
+// ─── Card de orden activa ────────────────────────────────────────────────────
 
 function CardOrden({ orden, onAccion, esAdmin = false }) {
   const [expandida, setExpandida] = useState(false);
@@ -106,10 +117,8 @@ function CardOrden({ orden, onAccion, esAdmin = false }) {
     <div className={`bg-white border border-gray-100 border-l-4 ${estado.border}
       rounded-xl overflow-hidden shadow-sm`}>
 
-      {/* Cabecera — siempre visible */}
       <div className="px-4 pt-3 pb-2 flex items-start gap-3">
         <div className="flex-1 min-w-0">
-          {/* Equipo + estado — nombre del cliente lo muestra GrupoCliente */}
           <div className="flex items-center gap-2 flex-wrap">
             <Badge variant={estado.badge}>{estado.label}</Badge>
             <span className="text-sm font-semibold text-gray-700 truncate">{nombreEquipo(orden)}</span>
@@ -124,7 +133,6 @@ function CardOrden({ orden, onAccion, esAdmin = false }) {
           </div>
         </div>
 
-        {/* Precio + saldo + botón expandir */}
         <div className="flex flex-col items-end gap-1 flex-shrink-0">
           {(orden.estado === 'Garantia' && orden.garantia_cobrable && orden.precio_garantia)
             ? <p className="text-sm font-bold text-purple-700">{formatCOP(Number(orden.precio_garantia))}</p>
@@ -144,7 +152,6 @@ function CardOrden({ orden, onAccion, esAdmin = false }) {
         </div>
       </div>
 
-      {/* Acciones — siempre visibles en la card */}
       <div className="px-4 pb-3 flex items-center gap-2 flex-wrap border-t border-gray-50 pt-2">
         <button onClick={() => onAccion('detalle', orden)}
           className="text-xs text-blue-500 hover:text-blue-700 underline underline-offset-2">
@@ -153,7 +160,6 @@ function CardOrden({ orden, onAccion, esAdmin = false }) {
         <AccionesOrden orden={orden} onAccion={onAccion} />
       </div>
 
-      {/* Detalle expandido */}
       {expandida && (
         <div className="px-4 pb-4 flex flex-col gap-2 bg-gray-50 border-t border-gray-100">
           <p className="text-sm text-gray-600 pt-3 italic">{orden.falla_reportada}</p>
@@ -244,7 +250,6 @@ function GrupoCliente({ nombre, items, onAccion, esAdmin = false }) {
 
   return (
     <div className="border border-gray-100 rounded-xl overflow-hidden shadow-sm">
-      {/* Cabecera del grupo */}
       <button
         onClick={() => setExpandido((v) => !v)}
         className="w-full px-4 py-3 flex items-center gap-3 bg-white hover:bg-gray-50
@@ -264,7 +269,6 @@ function GrupoCliente({ nombre, items, onAccion, esAdmin = false }) {
         </div>
       </button>
 
-      {/* Cards del grupo */}
       {expandido && (
         <div className="flex flex-col gap-px bg-gray-100">
           {items.map((o) => {
@@ -281,7 +285,7 @@ function GrupoCliente({ nombre, items, onAccion, esAdmin = false }) {
   );
 }
 
-// ─── Card de orden cerrada — compacta y desplegable ──────────────────────────
+// ─── Card de orden cerrada ───────────────────────────────────────────────────
 
 function CardOrdenCerrada({ orden, onAccion, esAdmin = false }) {
   const [expandida, setExpandida] = useState(false);
@@ -311,7 +315,6 @@ function CardOrdenCerrada({ orden, onAccion, esAdmin = false }) {
 
       {expandida && (
         <div className="px-4 pb-3 flex flex-col gap-2 border-t border-gray-50 bg-gray-50">
-          {/* Info básica */}
           <div className="grid grid-cols-2 gap-2 pt-2">
             <div>
               <p className="text-xs text-gray-400">Cliente</p>
@@ -400,7 +403,7 @@ function ModalNuevaOrden({ onClose, onCreada }) {
   const [paso, setPaso] = useState(1);
   const [form, setForm] = useState({
     cliente_cedula: '', cliente_nombre: '', cliente_telefono: '', cliente_id: '',
-    cliente_email: '', cliente_direccion: '',          // internos — no se muestran en UI
+    cliente_email: '', cliente_direccion: '',
     equipo_tipo: '', equipo_nombre: '', equipo_serial: '',
     falla_reportada: '', contrasena_equipo: '', notas_tecnico: '', costo_estimado: '',
   });
@@ -424,8 +427,6 @@ function ModalNuevaOrden({ onClose, onCreada }) {
           cliente_nombre:    encontrado.nombre    || f.cliente_nombre,
           cliente_telefono:  encontrado.celular   || f.cliente_telefono,
           cliente_id:        String(encontrado.id),
-          // Guardar email/direccion del BD aunque no se muestren,
-          // para que verificarCedula no detecte diferencia si no los cambió el técnico
           cliente_email:     encontrado.email     || '',
           cliente_direccion: encontrado.direccion || '',
         }));
@@ -436,7 +437,6 @@ function ModalNuevaOrden({ onClose, onCreada }) {
 
   const mutCrear = useMutation({
     mutationFn: async () => {
-      // Si el técnico ingresó cédula pero no es cliente registrado → crearlo ahora
       let clienteId = form.cliente_id || null;
       if (form.cliente_cedula.trim() && !clienteId) {
         try {
@@ -447,14 +447,12 @@ function ModalNuevaOrden({ onClose, onCreada }) {
           });
           clienteId = String(res.data.data.id);
         } catch (e) {
-          // Si ya existe (409) → buscar el id existente
           if (e.response?.status === 409) {
             try {
               const { data } = await buscarPorCedula(form.cliente_cedula.trim());
               if (data.data) clienteId = String(data.data.id);
-            } catch { /* continuar sin cliente_id */ }
+            } catch { /* continuar */ }
           }
-          // Otros errores → continuar de todas formas (la orden se crea sin cliente_id)
         }
       }
       return crearOrden({
@@ -511,7 +509,6 @@ function ModalNuevaOrden({ onClose, onCreada }) {
       <Modal open onClose={onClose} title="Nueva orden de servicio" size="md">
         <PasoIndicador paso={paso} total={3} labels={['Cliente', 'Equipo', 'Falla']} />
 
-        {/* ── Paso 1: Cliente ── */}
         {paso === 1 && (
           <div className="flex flex-col gap-3">
             <div className="relative">
@@ -557,7 +554,6 @@ function ModalNuevaOrden({ onClose, onCreada }) {
           </div>
         )}
 
-        {/* ── Paso 2: Equipo ── */}
         {paso === 2 && (
           <div className="flex flex-col gap-3">
             <div className="bg-blue-50 rounded-xl px-3 py-2">
@@ -603,7 +599,6 @@ function ModalNuevaOrden({ onClose, onCreada }) {
           </div>
         )}
 
-        {/* ── Paso 3: Falla ── */}
         {paso === 3 && (
           <div className="flex flex-col gap-3">
             <div className="grid grid-cols-2 gap-2">
@@ -690,7 +685,6 @@ function ModalNuevaOrden({ onClose, onCreada }) {
 // ─── Modal: Marcar listo ──────────────────────────────────────────────────────
 
 function ModalMarcarListo({ orden, onClose, onExito }) {
-  // Detectar contexto: ¿es garantía cobrable o no cobrable?
   const esGarantia      = orden.estado === 'Garantia';
   const esGarantiaCobr  = esGarantia && orden.garantia_cobrable;
   const esGarantiaGratis= esGarantia && !orden.garantia_cobrable;
@@ -744,8 +738,6 @@ function ModalMarcarListo({ orden, onClose, onExito }) {
   return (
     <Modal open onClose={onClose} title="Marcar como listo" size="sm">
       <div className="flex flex-col gap-4">
-
-        {/* Contexto */}
         <div className={`border rounded-xl px-3 py-2.5
           ${esGarantia ? 'bg-purple-50 border-purple-200' : 'bg-green-50 border-green-200'}`}>
           <p className={`text-sm font-semibold ${esGarantia ? 'text-purple-800' : 'text-green-800'}`}>
@@ -766,7 +758,6 @@ function ModalMarcarListo({ orden, onClose, onExito }) {
           )}
         </div>
 
-        {/* Garantía gratis — solo notas */}
         {esGarantiaGratis && (
           <div className="bg-blue-50 border border-blue-200 rounded-xl px-3 py-2.5">
             <p className="text-sm text-blue-700">
@@ -775,7 +766,6 @@ function ModalMarcarListo({ orden, onClose, onExito }) {
           </div>
         )}
 
-        {/* Garantía cobrable — precio_garantia y costo_garantia */}
         {esGarantiaCobr && (
           <>
             <div className="flex flex-col gap-1">
@@ -801,7 +791,6 @@ function ModalMarcarListo({ orden, onClose, onExito }) {
           </>
         )}
 
-        {/* Reparación normal */}
         {!esGarantia && (
           <>
             <div className="flex flex-col gap-1">
@@ -932,23 +921,46 @@ function ModalAbono({ orden, onClose, onExito }) {
   );
 }
 
-// ─── Modal: Entregar ──────────────────────────────────────────────────────────
+// ─── Modal: Entregar (con comprobante automático) ─────────────────────────────
 
 function ModalEntregar({ orden, onClose, onExito }) {
   const [error, setError] = useState('');
+  const [ordenEntregada, setOrdenEntregada] = useState(null);
+  const config = useConfig();
 
-  // Calcular el total a cobrar según el ciclo activo
   const esGarantia = orden.estado === 'Garantia' && orden.garantia_cobrable;
   const totalCobro = esGarantia
     ? Number(orden.precio_garantia || 0)
     : Number(orden.precio_final   || 0);
   const saldo = totalCobro - Number(orden.total_abonado || 0);
 
+  // Traer detalle completo de la orden para el comprobante (incluye abonos)
+  const { data: ordenDetalle } = useQuery({
+    queryKey: ['orden-detalle-comprobante', orden.id],
+    queryFn:  () => getOrdenById(orden.id).then((r) => r.data.data),
+    enabled:  !!ordenEntregada,
+  });
+
   const mutEntregar = useMutation({
     mutationFn: () => entregarOrden(orden.id),
-    onSuccess:  () => { onExito(); onClose(); },
-    onError:    (err) => setError(err.response?.data?.error || 'Error al entregar'),
+    onSuccess:  () => {
+      onExito();
+      setOrdenEntregada(orden);
+    },
+    onError: (err) => setError(err.response?.data?.error || 'Error al entregar'),
   });
+
+  // Si ya se entregó y tenemos el detalle, mostrar comprobante
+  if (ordenEntregada && ordenDetalle) {
+    return (
+      <ComprobanteServicio
+        orden={ordenDetalle}
+        config={config}
+        garantias={[]}
+        onClose={onClose}
+      />
+    );
+  }
 
   return (
     <Modal open onClose={onClose} title="Entregar equipo" size="sm">
@@ -1150,7 +1162,6 @@ function ModalDetalleOrden({ ordenId, onClose }) {
           <Badge variant={estado.badge}>{estado.label}</Badge>
         </div>
 
-        {/* Cliente */}
         <div className="bg-gray-50 rounded-xl px-3 py-2.5">
           <p className="text-sm font-medium text-gray-800">{data.cliente_nombre}</p>
           {data.cliente_telefono && (
@@ -1161,7 +1172,6 @@ function ModalDetalleOrden({ ordenId, onClose }) {
           )}
         </div>
 
-        {/* PIN del equipo — visible en detalle */}
         {data.contrasena_equipo && (
           <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5">
             <Lock size={14} className="text-amber-500 flex-shrink-0" />
@@ -1175,7 +1185,6 @@ function ModalDetalleOrden({ ordenId, onClose }) {
           </div>
         )}
 
-        {/* Falla */}
         <div>
           <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">
             Falla reportada
@@ -1192,7 +1201,6 @@ function ModalDetalleOrden({ ordenId, onClose }) {
           </div>
         )}
 
-        {/* Precios */}
         <div className="grid grid-cols-2 gap-2">
           {data.costo_estimado && (
             <div className="bg-gray-50 rounded-xl px-3 py-2.5">
@@ -1240,7 +1248,6 @@ function ModalDetalleOrden({ ordenId, onClose }) {
           )}
         </div>
 
-        {/* Cobro */}
         {data.precio_final && (
           <div>
             <BarraCobro
@@ -1255,7 +1262,6 @@ function ModalDetalleOrden({ ordenId, onClose }) {
           </div>
         )}
 
-        {/* Historial abonos */}
         {data.abonos?.length > 0 && (
           <div>
             <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
@@ -1281,7 +1287,6 @@ function ModalDetalleOrden({ ordenId, onClose }) {
           </div>
         )}
 
-        {/* Motivo sin reparar */}
         {data.motivo_sin_reparar && (
           <div className="bg-orange-50 border border-orange-200 rounded-xl px-3 py-2.5">
             <p className="text-xs font-semibold text-orange-600">Motivo de devolución</p>
@@ -1365,7 +1370,6 @@ export default function ServiciosPage() {
     <>
       <div className="flex flex-col gap-5 max-w-5xl mx-auto">
 
-        {/* Métricas */}
         {loadingResumen ? (
           <div className="h-20 flex items-center"><Spinner /></div>
         ) : resumen && (
@@ -1390,7 +1394,6 @@ export default function ServiciosPage() {
           </div>
         )}
 
-        {/* Barra de herramientas */}
         <div className="flex flex-col gap-2">
           <div className="flex gap-2">
             <div className="flex-1">
@@ -1417,7 +1420,6 @@ export default function ServiciosPage() {
           </div>
         </div>
 
-        {/* Lista */}
         {loadingOrdenes ? (
           <Spinner className="py-12" />
         ) : ordenes.length === 0 ? (
@@ -1427,8 +1429,6 @@ export default function ServiciosPage() {
               : 'Crea la primera orden de servicio'} />
         ) : (
           <div className="flex flex-col gap-6">
-
-            {/* Activas — agrupadas por cliente, grid en desktop */}
             {activas.length > 0 && (
               <div className="flex flex-col gap-2">
                 {!filtroEstado && (
@@ -1448,7 +1448,6 @@ export default function ServiciosPage() {
               </div>
             )}
 
-            {/* Cerradas — colapsadas por defecto, compactas */}
             {cerradas.length > 0 && (
               <div className="flex flex-col gap-2">
                 <button
@@ -1473,12 +1472,10 @@ export default function ServiciosPage() {
                 )}
               </div>
             )}
-
           </div>
         )}
       </div>
 
-      {/* Modales */}
       {modalNueva && (
         <ModalNuevaOrden onClose={() => setModalNueva(false)} onCreada={invalidar} />
       )}
