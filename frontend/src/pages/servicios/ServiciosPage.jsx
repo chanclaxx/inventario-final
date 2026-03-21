@@ -6,7 +6,7 @@ import {
   registrarAbono, entregarOrden, sinReparar,
   abrirGarantia,
 } from '../../api/servicios.api';
-import { buscarPorCedula }              from '../../api/clientes.api';
+import { buscarPorCedula, crearCliente } from '../../api/clientes.api';
 import { useCedulaCliente }            from '../../hooks/useCedulaCliente';
 import { ModalConflictoCedula }        from '../../components/ui/ModalConflictoCedula';
 import { formatCOP, formatFechaHora }  from '../../utils/formatters';
@@ -435,19 +435,42 @@ function ModalNuevaOrden({ onClose, onCreada }) {
   };
 
   const mutCrear = useMutation({
-    mutationFn: () => crearOrden({
-      cliente_nombre:    form.cliente_nombre.trim(),
-      cliente_telefono:  form.cliente_telefono  || null,
-      cliente_id:        form.cliente_id        || null,
-      cliente_cedula:    form.cliente_cedula    || null,
-      equipo_tipo:       form.equipo_tipo        || null,
-      equipo_nombre:     form.equipo_nombre      || null,
-      equipo_serial:     form.equipo_serial      || null,
-      falla_reportada:   form.falla_reportada.trim(),
-      contrasena_equipo: form.contrasena_equipo  || null,
-      notas_tecnico:     form.notas_tecnico      || null,
-      costo_estimado:    form.costo_estimado !== '' ? Number(form.costo_estimado) : null,
-    }),
+    mutationFn: async () => {
+      // Si el técnico ingresó cédula pero no es cliente registrado → crearlo ahora
+      let clienteId = form.cliente_id || null;
+      if (form.cliente_cedula.trim() && !clienteId) {
+        try {
+          const res = await crearCliente({
+            nombre:  form.cliente_nombre.trim(),
+            cedula:  form.cliente_cedula.trim(),
+            celular: form.cliente_telefono || null,
+          });
+          clienteId = String(res.data.data.id);
+        } catch (e) {
+          // Si ya existe (409) → buscar el id existente
+          if (e.response?.status === 409) {
+            try {
+              const { data } = await buscarPorCedula(form.cliente_cedula.trim());
+              if (data.data) clienteId = String(data.data.id);
+            } catch { /* continuar sin cliente_id */ }
+          }
+          // Otros errores → continuar de todas formas (la orden se crea sin cliente_id)
+        }
+      }
+      return crearOrden({
+        cliente_nombre:    form.cliente_nombre.trim(),
+        cliente_telefono:  form.cliente_telefono  || null,
+        cliente_id:        clienteId,
+        cliente_cedula:    form.cliente_cedula    || null,
+        equipo_tipo:       form.equipo_tipo        || null,
+        equipo_nombre:     form.equipo_nombre      || null,
+        equipo_serial:     form.equipo_serial      || null,
+        falla_reportada:   form.falla_reportada.trim(),
+        contrasena_equipo: form.contrasena_equipo  || null,
+        notas_tecnico:     form.notas_tecnico      || null,
+        costo_estimado:    form.costo_estimado !== '' ? Number(form.costo_estimado) : null,
+      });
+    },
     onSuccess: (res) => { onCreada(res.data.data); onClose(); },
     onError:   (err) => setError(err.response?.data?.error || 'Error al crear la orden'),
   });

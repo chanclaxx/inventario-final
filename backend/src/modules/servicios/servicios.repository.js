@@ -114,59 +114,74 @@ const getAbonos = async (negocioId, ordenId) => {
 // ─── Resumen del día ──────────────────────────────────────────────────────────
 
 const getResumenHoy = async (sucursalId, negocioId) => {
-  const filtroOS = sucursalId ? `os.sucursal_id = $1` : `os.negocio_id = $1`;
-  const param    = sucursalId ?? negocioId;
+  const param       = sucursalId ?? negocioId;
+  const campoFiltro = sucursalId ? 'sucursal_id' : 'negocio_id';
 
-  const { rows } = await pool.query(`
-    SELECT
-      (SELECT COUNT(*)
-       FROM ordenes_servicio os
-       WHERE ${filtroOS} AND ${HOY_OS}
-      ) AS ordenes_hoy,
+  // Fecha de hoy en Bogotá como string YYYY-MM-DD — evita ambigüedades de zona
+  const { rows: fechaRows } = await pool.query(
+    `SELECT (NOW() AT TIME ZONE 'America/Bogota')::date AS hoy`
+  );
+  const hoy = fechaRows[0].hoy; // objeto Date con la fecha correcta en Bogotá
 
-      -- Ingresos = abonos registrados hoy (fecha del abono)
-      (SELECT COALESCE(SUM(ab.valor), 0)
-       FROM abonos_servicio ab
-       JOIN ordenes_servicio os ON os.id = ab.orden_id
-       WHERE ${filtroOS} AND ${HOY_AB}
-      ) AS ingresos_hoy,
+  // 1. Órdenes recibidas hoy
+  const { rows: r1 } = await pool.query(`
+    SELECT COUNT(*) AS ordenes_hoy
+    FROM ordenes_servicio
+    WHERE ${campoFiltro} = $1
+      AND (fecha_recepcion AT TIME ZONE 'America/Bogota')::date = $2
+  `, [param, hoy]);
 
-      -- Utilidad = órdenes cerradas hoy (fecha_entrega hoy)
-      -- Suma utilidad reparación + utilidad garantía (si aplica)
-      (SELECT COALESCE(SUM(
-         COALESCE(os.precio_final, 0)    - COALESCE(os.costo_real, 0) +
-         COALESCE(os.precio_garantia, 0) - COALESCE(os.costo_garantia, 0)
-       ), 0)
-       FROM ordenes_servicio os
-       WHERE ${filtroOS}
-         AND os.estado IN ('Entregado','Sin_reparar')
-         AND os.precio_final IS NOT NULL
-         AND os.costo_real   IS NOT NULL
-         AND DATE(os.fecha_entrega ${ZONA}) = (NOW() ${ZONA})::date
-      ) AS utilidad_hoy,
+  // 2. Ingresos hoy = suma de abonos cuya fecha (en Bogotá) es hoy
+  const { rows: r2 } = await pool.query(`
+    SELECT COALESCE(SUM(ab.valor), 0) AS ingresos_hoy
+    FROM abonos_servicio ab
+    JOIN ordenes_servicio os ON os.id = ab.orden_id
+    WHERE os.${campoFiltro} = $1
+      AND (ab.fecha AT TIME ZONE 'America/Bogota')::date = $2
+  `, [param, hoy]);
 
-      -- Pendiente cobro = órdenes activas con saldo > 0
-      (SELECT COALESCE(SUM(
-         CASE
-           WHEN os.estado = 'Garantia' AND os.garantia_cobrable AND os.precio_garantia IS NOT NULL
-           THEN os.precio_garantia - os.total_abonado
-           WHEN os.estado IN ('Listo','Pendiente_pago')
-           THEN os.precio_final - os.total_abonado
-           ELSE 0
-         END
-       ), 0)
-       FROM ordenes_servicio os
-       WHERE ${filtroOS}
-         AND os.estado IN ('Listo','Pendiente_pago','Garantia')
-         AND (
-           (os.estado IN ('Listo','Pendiente_pago') AND os.precio_final > os.total_abonado)
-           OR (os.estado = 'Garantia' AND os.garantia_cobrable
-               AND os.precio_garantia IS NOT NULL
-               AND os.precio_garantia > os.total_abonado)
-         )
-      ) AS pendiente_cobro
+  // 3. Utilidad hoy = órdenes entregadas hoy con costo_real registrado
+  const { rows: r3 } = await pool.query(`
+    SELECT COALESCE(SUM(
+      COALESCE(precio_final, 0)    - COALESCE(costo_real, 0) +
+      COALESCE(precio_garantia, 0) - COALESCE(costo_garantia, 0)
+    ), 0) AS utilidad_hoy
+    FROM ordenes_servicio
+    WHERE ${campoFiltro} = $1
+      AND estado IN ('Entregado', 'Sin_reparar')
+      AND precio_final IS NOT NULL
+      AND costo_real   IS NOT NULL
+      AND (fecha_entrega AT TIME ZONE 'America/Bogota')::date = $2
+  `, [param, hoy]);
+
+  // 4. Pendiente cobro = órdenes activas con saldo > 0
+  const { rows: r4 } = await pool.query(`
+    SELECT COALESCE(SUM(
+      CASE
+        WHEN estado = 'Garantia' AND garantia_cobrable AND precio_garantia IS NOT NULL
+        THEN precio_garantia - total_abonado
+        WHEN estado IN ('Listo', 'Pendiente_pago')
+        THEN precio_final - total_abonado
+        ELSE 0
+      END
+    ), 0) AS pendiente_cobro
+    FROM ordenes_servicio
+    WHERE ${campoFiltro} = $1
+      AND estado IN ('Listo', 'Pendiente_pago', 'Garantia')
+      AND (
+        (estado IN ('Listo','Pendiente_pago') AND precio_final > total_abonado)
+        OR (estado = 'Garantia' AND garantia_cobrable
+            AND precio_garantia IS NOT NULL
+            AND precio_garantia > total_abonado)
+      )
   `, [param]);
-  return rows[0];
+
+  return {
+    ordenes_hoy:     r1[0].ordenes_hoy,
+    ingresos_hoy:    r2[0].ingresos_hoy,
+    utilidad_hoy:    r3[0].utilidad_hoy,
+    pendiente_cobro: r4[0].pendiente_cobro,
+  };
 };
 
 // ─── Escritura ────────────────────────────────────────────────────────────────
