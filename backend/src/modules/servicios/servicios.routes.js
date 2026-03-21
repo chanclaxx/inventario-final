@@ -10,7 +10,7 @@ const validarOrden = [
   body('costo_estimado').optional({ nullable: true }).isFloat({ min: 0 }),
 ];
 
-// FIX: validarListo ahora contempla los 3 escenarios:
+// validarListo contempla los 3 escenarios:
 // 1. Reparación normal     → precio_final obligatorio
 // 2. Garantía cobrable     → precio_garantia obligatorio (es_garantia = true)
 // 3. Garantía gratis       → sin precio requerido (es_garantia_gratis = true)
