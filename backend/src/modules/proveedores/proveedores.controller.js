@@ -2,7 +2,10 @@ const service = require('./proveedores.service');
 
 const getProveedores = async (req, res, next) => {
   try {
-    const data = await service.getProveedores(req.user.negocio_id);
+    // Sanitizar: solo valores válidos de tipo
+    const tiposPermitidos = ['proveedor', 'cruce'];
+    const tipo = tiposPermitidos.includes(req.query.tipo) ? req.query.tipo : null;
+    const data = await service.getProveedores(req.user.negocio_id, tipo);
     res.json({ ok: true, data });
   } catch (err) { next(err); }
 };

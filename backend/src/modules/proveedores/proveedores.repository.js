@@ -1,16 +1,26 @@
 const { pool } = require('../../config/db');
 
-const findAll = async (negocioId) => {
+// ─── Consultas ────────────────────────────────────────────────────────────────
+
+const findAll = async (negocioId, tipo = null) => {
+  const params = [negocioId];
+  let filtroTipo = '';
+
+  if (tipo) {
+    params.push(tipo);
+    filtroTipo = `AND p.tipo = $${params.length}`;
+  }
+
   const { rows } = await pool.query(`
     SELECT p.id, p.nombre, p.nit, p.telefono, p.email,
-           p.direccion, p.contacto, p.activo, p.creado_en,
+           p.direccion, p.contacto, p.tipo, p.activo, p.creado_en,
            COUNT(c.id) AS total_compras
     FROM proveedores p
     LEFT JOIN compras c ON c.proveedor_id = p.id
-    WHERE p.negocio_id = $1 AND p.activo = TRUE
+    WHERE p.negocio_id = $1 AND p.activo = TRUE ${filtroTipo}
     GROUP BY p.id
     ORDER BY p.nombre
-  `, [negocioId]);
+  `, params);
   return rows;
 };
 
@@ -22,23 +32,38 @@ const findById = async (negocioId, id) => {
   return rows[0] || null;
 };
 
-const create = async (negocioId, { nombre, nit, telefono, email, direccion, contacto }) => {
+const create = async (negocioId, { nombre, nit, telefono, email, direccion, contacto, tipo = 'proveedor' }) => {
   const { rows } = await pool.query(`
-    INSERT INTO proveedores(negocio_id, nombre, nit, telefono, email, direccion, contacto)
-    VALUES ($1, $2, $3, $4, $5, $6, $7)
+    INSERT INTO proveedores(negocio_id, nombre, nit, telefono, email, direccion, contacto, tipo)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
     RETURNING *
-  `, [negocioId, nombre, nit, telefono, email, direccion, contacto]);
+  `, [negocioId, nombre, nit, telefono, email, direccion, contacto, tipo]);
   return rows[0];
 };
 
-const update = async (negocioId, id, { nombre, nit, telefono, email, direccion, contacto }) => {
+const update = async (negocioId, id, { nombre, nit, telefono, email, direccion, contacto, tipo }) => {
+  // Si no viene tipo, no lo modificamos (mantiene el actual)
+  const setClauses = [
+    'nombre = $1', 'nit = $2', 'telefono = $3',
+    'email = $4', 'direccion = $5', 'contacto = $6',
+  ];
+  const params = [nombre, nit, telefono, email, direccion, contacto];
+
+  if (tipo) {
+    params.push(tipo);
+    setClauses.push(`tipo = $${params.length}`);
+  }
+
+  params.push(id, negocioId);
+  const idIdx = params.length - 1;
+  const negIdx = params.length;
+
   const { rows } = await pool.query(`
     UPDATE proveedores
-    SET nombre = $1, nit = $2, telefono = $3,
-        email = $4, direccion = $5, contacto = $6
-    WHERE id = $7 AND negocio_id = $8
+    SET ${setClauses.join(', ')}
+    WHERE id = $${idIdx} AND negocio_id = $${negIdx}
     RETURNING *
-  `, [nombre, nit, telefono, email, direccion, contacto, id, negocioId]);
+  `, params);
   return rows[0] || null;
 };
 
@@ -59,7 +84,6 @@ const findByNit = async (negocioId, nit) => {
 };
 
 const contarDependenciasActivas = async (negocioId, proveedorId) => {
-  // Verificar por negocio_id para no cruzar tenants
   const { rows } = await pool.query(`
     SELECT
       COUNT(DISTINCT pc.id) FILTER (

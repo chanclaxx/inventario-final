@@ -1,15 +1,14 @@
 const repo = require('./proveedores.repository');
 
-const getProveedores    = (negocioId) => repo.findAll(negocioId);
+const getProveedores = (negocioId, tipo = null) => repo.findAll(negocioId, tipo);
 
-const getProveedorById  = async (negocioId, id) => {
+const getProveedorById = async (negocioId, id) => {
   const p = await repo.findById(negocioId, id);
   if (!p) throw { status: 404, message: 'Proveedor no encontrado' };
   return p;
 };
 
 const crearProveedor = async (negocioId, datos) => {
-  // ── Verificar NIT duplicado dentro del negocio ──
   if (datos.nit) {
     const existe = await repo.findByNit(negocioId, datos.nit);
     if (existe) throw { status: 409, message: `Ya existe un proveedor con el NIT ${datos.nit}` };
@@ -24,7 +23,6 @@ const actualizarProveedor = async (negocioId, id, datos) => {
 };
 
 const eliminarProveedor = async (negocioId, id) => {
-  // ── Verificar que no tenga productos activos vinculados ──
   const dependencias = await repo.contarDependenciasActivas(negocioId, id);
   if (dependencias.productos > 0) {
     throw {

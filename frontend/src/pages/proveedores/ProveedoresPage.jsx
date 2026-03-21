@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getProveedores, crearProveedor, actualizarProveedor } from '../../api/proveedores.api';
+import { getCruces, crearCruce } from '../../api/cruces.api';
 import { getComprasByProveedor, getCompraById } from '../../api/compras.api';
 import { formatCOP, formatFechaHora } from '../../utils/formatters';
 import { Button }      from '../../components/ui/Button';
@@ -15,7 +16,7 @@ import { useSucursalKey } from '../../hooks/useSucursalKey';
 import api from '../../api/axios.config';
 import {
   Truck, Plus, ShoppingCart, ChevronRight, ChevronLeft,
-  Package, Hash, User, RefreshCw, ArrowLeftRight, ShoppingBag,
+  Package, Hash, User, RefreshCw, ArrowLeftRight, ShoppingBag, Repeat,
 } from 'lucide-react';
 
 // ─── API helpers ──────────────────────────────────────────────────────────────
@@ -36,22 +37,46 @@ function norm(data) {
   return [];
 }
 
+// ─── Opciones de tipo para el select ──────────────────────────────────────────
+
+const OPCIONES_TIPO = [
+  { value: 'proveedor', label: 'Proveedor' },
+  { value: 'cruce',     label: 'Cruce'     },
+];
+
 // ─── Badge tipo ───────────────────────────────────────────────────────────────
 
 function TipoBadge({ tipo }) {
   const cfg = {
-    compra:           { label: 'Compra a cliente',   cls: 'bg-emerald-100 text-emerald-700 border-emerald-200', Icn: Package      },
-    retoma:           { label: 'Retoma de factura',  cls: 'bg-purple-100  text-purple-700  border-purple-200',  Icn: ArrowLeftRight},
-    compra_cliente:   { label: 'Compra a cliente',   cls: 'bg-emerald-100 text-emerald-700 border-emerald-200', Icn: Package      },
-    compra_proveedor: { label: 'Compra a proveedor', cls: 'bg-blue-100    text-blue-700    border-blue-200',    Icn: Truck        },
-    ajuste:           { label: 'Ajuste de stock',    cls: 'bg-gray-100    text-gray-600    border-gray-200',    Icn: ShoppingBag  },
-    venta:            { label: 'Venta',              cls: 'bg-red-100     text-red-700     border-red-200',     Icn: ShoppingCart },
+    compra:           { label: 'Compra a cliente',   cls: 'bg-emerald-100 text-emerald-700 border-emerald-200', Icn: Package       },
+    retoma:           { label: 'Retoma de factura',  cls: 'bg-purple-100  text-purple-700  border-purple-200',  Icn: ArrowLeftRight },
+    compra_cliente:   { label: 'Compra a cliente',   cls: 'bg-emerald-100 text-emerald-700 border-emerald-200', Icn: Package       },
+    compra_proveedor: { label: 'Compra a proveedor', cls: 'bg-blue-100    text-blue-700    border-blue-200',    Icn: Truck         },
+    ajuste:           { label: 'Ajuste de stock',    cls: 'bg-gray-100    text-gray-600    border-gray-200',    Icn: ShoppingBag   },
+    venta:            { label: 'Venta',              cls: 'bg-red-100     text-red-700     border-red-200',     Icn: ShoppingCart  },
   };
   const c   = cfg[tipo] || cfg.ajuste;
   const Icn = c.Icn;
   return (
     <span className={`inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full border ${c.cls}`}>
       <Icn size={10} /> {c.label}
+    </span>
+  );
+}
+
+// ─── ProveedorTipoBadge ───────────────────────────────────────────────────────
+
+function ProveedorTipoBadge({ tipo }) {
+  const esCruce = tipo === 'cruce';
+  return (
+    <span className={`inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full border
+      ${esCruce
+        ? 'bg-amber-50 text-amber-700 border-amber-200'
+        : 'bg-blue-50 text-blue-700 border-blue-200'
+      }`}
+    >
+      {esCruce ? <Repeat size={10} /> : <Truck size={10} />}
+      {esCruce ? 'Cruce' : 'Proveedor'}
     </span>
   );
 }
@@ -68,11 +93,11 @@ function ModalDetalleSerial({ item, historial, onClose }) {
           <p className="text-xs font-semibold text-emerald-700 mb-0.5">Cliente</p>
           <div className="flex justify-between text-sm">
             <span className="text-gray-500">Nombre</span>
-            <span className="font-medium text-gray-900">{item.nombre_cliente || '\u2014'}</span>
+            <span className="font-medium text-gray-900">{item.nombre_cliente || '—'}</span>
           </div>
           {item.cedula_cliente && (
             <div className="flex justify-between text-sm">
-              <span className="text-gray-500">C\xe9dula</span>
+              <span className="text-gray-500">Cédula</span>
               <span className="font-mono text-gray-900">{item.cedula_cliente}</span>
             </div>
           )}
@@ -83,8 +108,8 @@ function ModalDetalleSerial({ item, historial, onClose }) {
           <div className="flex justify-between text-sm">
             <span className="text-gray-500">Nombre</span>
             <span className="font-medium text-gray-900 text-right max-w-[60%]">
-              {item.nombre_producto || '\u2014'}
-              {item.marca  ? ` \xb7 ${item.marca}`  : ''}
+              {item.nombre_producto || '—'}
+              {item.marca  ? ` · ${item.marca}`  : ''}
               {item.modelo ? ` ${item.modelo}` : ''}
             </span>
           </div>
@@ -165,7 +190,7 @@ function ModalDetalleCantidad({ item, historial, onClose }) {
             )}
             {item.cedula_cliente && (
               <div className="flex justify-between text-sm">
-                <span className="text-gray-500">C\xe9dula</span>
+                <span className="text-gray-500">Cédula</span>
                 <span className="font-mono text-gray-900">{item.cedula_cliente}</span>
               </div>
             )}
@@ -255,15 +280,12 @@ function TabRetomas() {
   const [busqueda,    setBusqueda]    = useState('');
   const [itemDetalle, setItemDetalle] = useState(null);
   const [tabFuente,   setTabFuente]   = useState('todas');
-  // tabFuente: 'todas' | 'serial' | 'cantidad'
 
-  // Query 1: seriales con cliente_origen + retomas de facturas
   const { data: dataSerial, isLoading: loadingSerial } = useQuery({
     queryKey: ['compras-cliente-serial', busqueda],
     queryFn:  () => getComprasClienteSerial(busqueda),
   });
 
-  // Query 2: historial de stock de productos por cantidad
   const { data: dataCantidad, isLoading: loadingCantidad } = useQuery({
     queryKey: ['historial-stock-cantidad', busqueda],
     queryFn:  () => getHistorialStockCantidad(busqueda),
@@ -271,11 +293,8 @@ function TabRetomas() {
 
   const isLoading = loadingSerial || loadingCantidad;
 
-  // Seriales: compras directas + retomas de factura
   const serialesCompra = norm(dataSerial?.seriales).map((s) => ({ ...s, tipo: 'compra',  fuente: 'serial' }));
   const serialesRetoma = norm(dataSerial?.retomas).map((r)  => ({ ...r, tipo: 'retoma',  fuente: 'serial' }));
-
-  // Cantidad: todos los movimientos de historial
   const movimientosCantidad = norm(dataCantidad).map((m) => ({ ...m, fuente: 'cantidad' }));
 
   const todasSerial   = [...serialesCompra, ...serialesRetoma]
@@ -288,7 +307,6 @@ function TabRetomas() {
     ? todasSerial
     : todasCantidad;
 
-  // Historial del mismo cliente para el modal
   const historialCliente = (item) => {
     if (!item) return [];
     if (item.fuente === 'serial') {
@@ -296,7 +314,6 @@ function TabRetomas() {
         (i.nombre_cliente || '').toLowerCase() === (item.nombre_cliente || '').toLowerCase()
       );
     }
-    // cantidad: historial por cliente_origen del mismo producto
     return todasCantidad.filter((i) =>
       i.cliente_origen &&
       (i.cliente_origen || '').toLowerCase() === (item.cliente_origen || '').toLowerCase()
@@ -308,14 +325,12 @@ function TabRetomas() {
 
   return (
     <div className="flex flex-col gap-4">
-
       <SearchInput
         value={busqueda}
         onChange={setBusqueda}
-        placeholder="Buscar por nombre, c\xe9dula, producto o IMEI..."
+        placeholder="Buscar por nombre, cédula, producto o IMEI..."
       />
 
-      {/* Sub-tabs */}
       <div className="flex gap-2 flex-wrap">
         {[
           { id: 'todas',    label: `Todas (${totalSerial + totalCantidad})` },
@@ -336,15 +351,15 @@ function TabRetomas() {
         <EmptyState
           icon={RefreshCw}
           titulo="Sin registros"
-          descripcion={busqueda ? `Sin resultados para "${busqueda}"` : 'A\xfan no hay retomas ni compras a clientes'}
+          descripcion={busqueda ? `Sin resultados para "${busqueda}"` : 'Aún no hay retomas ni compras a clientes'}
         />
       ) : (
         <div className="flex flex-col gap-2">
           {lista.map((item, i) => {
-            const esSerial   = item.fuente === 'serial';
+            const esSerial = item.fuente === 'serial';
             const nombreMostrar = esSerial
-              ? (item.nombre_cliente || '\u2014')
-              : (item.cliente_origen || item.proveedor_nombre || '\u2014');
+              ? (item.nombre_cliente || '—')
+              : (item.cliente_origen || item.proveedor_nombre || '—');
             const cedulaMostrar = esSerial ? item.cedula_cliente : item.cedula_cliente;
 
             return (
@@ -364,8 +379,8 @@ function TabRetomas() {
                     )}
                   </div>
                   <p className="text-sm text-gray-700 truncate mt-0.5">
-                    {item.nombre_producto || '\u2014'}
-                    {item.marca ? ` \xb7 ${item.marca}` : ''}
+                    {item.nombre_producto || '—'}
+                    {item.marca ? ` · ${item.marca}` : ''}
                     {!esSerial && item.unidad_medida ? ` (${item.unidad_medida})` : ''}
                   </p>
                   {item.imei && (
@@ -382,7 +397,7 @@ function TabRetomas() {
                     </p>
                   )}
                   <p className="text-xs text-gray-400 mt-0.5">
-                    {formatFechaHora(item.fecha)} \xb7 {item.sucursal_nombre}
+                    {formatFechaHora(item.fecha)} · {item.sucursal_nombre}
                   </p>
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
@@ -444,19 +459,19 @@ function ModalDetalleCompra({ compraId, onClose }) {
             </div>
             {data?.numero_factura && (
               <div className="bg-gray-50 rounded-xl p-3">
-                <p className="text-xs text-gray-400 mb-0.5">N\xb0 Factura</p>
+                <p className="text-xs text-gray-400 mb-0.5">N° Factura</p>
                 <p className="text-sm font-medium text-gray-800">{data.numero_factura}</p>
               </div>
             )}
             <div className="bg-gray-50 rounded-xl p-3">
               <p className="text-xs text-gray-400 mb-0.5">Registrado por</p>
-              <p className="text-sm font-medium text-gray-800">{data?.usuario_nombre || '\u2014'}</p>
+              <p className="text-sm font-medium text-gray-800">{data?.usuario_nombre || '—'}</p>
             </div>
           </div>
           <div className="flex flex-col gap-2">
             <p className="text-sm font-semibold text-gray-700">Productos recibidos</p>
             {(data?.lineas || []).length === 0
-              ? <p className="text-sm text-gray-400 italic">Sin l\xedneas registradas</p>
+              ? <p className="text-sm text-gray-400 italic">Sin líneas registradas</p>
               : (data?.lineas || []).map((l) => (
                   <div key={l.id} className="bg-gray-50 rounded-xl p-3 flex items-start justify-between gap-2">
                     <div className="flex-1">
@@ -467,7 +482,7 @@ function ModalDetalleCompra({ compraId, onClose }) {
                       }
                     </div>
                     <div className="text-right flex-shrink-0">
-                      <p className="text-xs text-gray-400">{l.cantidad} \xd7 {formatCOP(l.precio_unitario)}</p>
+                      <p className="text-xs text-gray-400">{l.cantidad} × {formatCOP(l.precio_unitario)}</p>
                       <p className="text-sm font-semibold text-gray-900">{formatCOP(l.cantidad * l.precio_unitario)}</p>
                     </div>
                   </div>
@@ -507,7 +522,10 @@ function HistorialProveedor({ proveedor, sucursalKey, sucursalLista, onVolver, o
           <ChevronLeft size={18} />
         </button>
         <div className="flex-1">
-          <h2 className="text-base font-bold text-gray-900">{proveedor.nombre}</h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-base font-bold text-gray-900">{proveedor.nombre}</h2>
+            <ProveedorTipoBadge tipo={proveedor.tipo} />
+          </div>
           <p className="text-xs text-gray-400">Historial de compras</p>
         </div>
         <Button size="sm" onClick={onNuevaCompra}><ShoppingCart size={14} /> Nueva compra</Button>
@@ -518,12 +536,12 @@ function HistorialProveedor({ proveedor, sucursalKey, sucursalLista, onVolver, o
           <p className="text-base font-bold text-blue-700">{formatCOP(totalComprado)}</p>
         </div>
         <div className="bg-gray-50 rounded-xl p-3">
-          <p className="text-xs text-gray-400 mb-0.5">N\xb0 compras</p>
+          <p className="text-xs text-gray-400 mb-0.5">N° compras</p>
           <p className="text-base font-bold text-gray-800">{compras.length}</p>
         </div>
       </div>
       {isLoading ? <Spinner className="py-20" /> : compras.length === 0 ? (
-        <EmptyState icon={ShoppingCart} titulo="Sin compras" descripcion="A\xfan no hay compras registradas a este proveedor" />
+        <EmptyState icon={ShoppingCart} titulo="Sin compras" descripcion="Aún no hay compras registradas a este proveedor" />
       ) : (
         <div className="flex flex-col gap-2">
           {compras.map((c) => (
@@ -550,10 +568,14 @@ function HistorialProveedor({ proveedor, sucursalKey, sucursalLista, onVolver, o
   );
 }
 
-// ─── Modal proveedor ───────────────────────────────────────────────────────────
+// ─── Modal proveedor (crear/editar) ────────────────────────────────────────────
+// tipoForzado: si se pasa, el campo tipo se fija y no se puede cambiar
+// (ej: desde el tab Cruces se fuerza 'cruce')
 
-function ModalProveedor({ proveedor, onClose }) {
+function ModalProveedor({ proveedor, tipoForzado, onClose }) {
   const queryClient = useQueryClient();
+  const tipoInicial = tipoForzado || proveedor?.tipo || 'proveedor';
+
   const [form, setForm] = useState({
     nombre:    proveedor?.nombre    || '',
     nit:       proveedor?.nit       || '',
@@ -561,27 +583,69 @@ function ModalProveedor({ proveedor, onClose }) {
     email:     proveedor?.email     || '',
     contacto:  proveedor?.contacto  || '',
     direccion: proveedor?.direccion || '',
+    tipo:      tipoInicial,
   });
   const [error, setError] = useState('');
 
   const mutation = useMutation({
-    mutationFn: () => proveedor ? actualizarProveedor(proveedor.id, form) : crearProveedor(form),
-    onSuccess:  () => { queryClient.invalidateQueries({ queryKey: ['proveedores'], exact: false }); onClose(); },
-    onError:    (e) => setError(e.response?.data?.error || 'Error'),
+    mutationFn: () => proveedor
+      ? actualizarProveedor(proveedor.id, form)
+      : tipoForzado === 'cruce'
+        ? crearCruce(form)
+        : crearProveedor(form),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['proveedores'], exact: false });
+      queryClient.invalidateQueries({ queryKey: ['cruces'],      exact: false });
+      onClose();
+    },
+    onError: (e) => setError(e.response?.data?.error || e.response?.data?.message || 'Error'),
   });
 
   const handleKeyDown = (e, sig) => {
-    if (e.key === 'Enter') { e.preventDefault(); if (sig) document.getElementById(sig)?.focus(); else mutation.mutate(); }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (sig) document.getElementById(sig)?.focus();
+      else mutation.mutate();
+    }
   };
 
+  const puedeEditarTipo = !tipoForzado;
+
   return (
-    <Modal open onClose={onClose} title={proveedor ? 'Editar Proveedor' : 'Nuevo Proveedor'} size="md">
+    <Modal open onClose={onClose} title={proveedor ? 'Editar Proveedor' : tipoForzado === 'cruce' ? 'Nuevo Cruce' : 'Nuevo Proveedor'} size="md">
       <div className="flex flex-col gap-3">
-        <Input id="prov-nombre"   label="Nombre *"    value={form.nombre}   onChange={(e) => setForm({ ...form, nombre:   e.target.value })} onKeyDown={(e) => handleKeyDown(e, 'prov-nit')} />
-        <Input id="prov-nit"      label="NIT"         value={form.nit}      onChange={(e) => setForm({ ...form, nit:      e.target.value })} onKeyDown={(e) => handleKeyDown(e, 'prov-tel')} />
-        <Input id="prov-tel"      label="Tel\xe9fono" value={form.telefono} onChange={(e) => setForm({ ...form, telefono: e.target.value })} onKeyDown={(e) => handleKeyDown(e, 'prov-email')} />
+        <Input id="prov-nombre"   label="Nombre *"  value={form.nombre}   onChange={(e) => setForm({ ...form, nombre:   e.target.value })} onKeyDown={(e) => handleKeyDown(e, 'prov-nit')} />
+        <Input id="prov-nit"      label="NIT"        value={form.nit}      onChange={(e) => setForm({ ...form, nit:      e.target.value })} onKeyDown={(e) => handleKeyDown(e, 'prov-tel')} />
+        <Input id="prov-tel"      label="Teléfono"   value={form.telefono} onChange={(e) => setForm({ ...form, telefono: e.target.value })} onKeyDown={(e) => handleKeyDown(e, 'prov-email')} />
         <Input id="prov-email"    label="Email"       value={form.email}    onChange={(e) => setForm({ ...form, email:    e.target.value })} onKeyDown={(e) => handleKeyDown(e, 'prov-contacto')} />
         <Input id="prov-contacto" label="Contacto"    value={form.contacto} onChange={(e) => setForm({ ...form, contacto: e.target.value })} onKeyDown={(e) => handleKeyDown(e, null)} />
+
+        {/* Selector de tipo: solo editable si no está forzado */}
+        <div className="flex flex-col gap-1">
+          <label className="text-sm font-medium text-gray-700">Tipo</label>
+          {puedeEditarTipo ? (
+            <div className="flex gap-2">
+              {OPCIONES_TIPO.map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => setForm({ ...form, tipo: opt.value })}
+                  className={`flex-1 py-2 rounded-xl text-sm font-medium border transition-all
+                    ${form.tipo === opt.value
+                      ? 'bg-blue-50 border-blue-300 text-blue-700'
+                      : 'bg-gray-50 border-gray-200 text-gray-500 hover:border-gray-300'}`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="py-2 px-3 bg-gray-50 rounded-xl text-sm text-gray-600 border border-gray-200">
+              {tipoForzado === 'cruce' ? 'Cruce' : 'Proveedor'}
+            </div>
+          )}
+        </div>
+
         {error && <p className="text-sm text-red-500">{error}</p>}
         <div className="flex gap-2 mt-2">
           <Button variant="secondary" className="flex-1" onClick={onClose}>Cancelar</Button>
@@ -594,7 +658,7 @@ function ModalProveedor({ proveedor, onClose }) {
   );
 }
 
-// ─── Tab Proveedores ───────────────────────────────────────────────────────────
+// ─── Tab Proveedores (tipo = proveedor) ────────────────────────────────────────
 
 function TabProveedores({ sucursalKey, sucursalLista }) {
   const [busqueda,        setBusqueda]        = useState('');
@@ -604,8 +668,8 @@ function TabProveedores({ sucursalKey, sucursalLista }) {
   const [modalCompra,     setModalCompra]     = useState(null);
 
   const { data: proveedoresData, isLoading } = useQuery({
-    queryKey: ['proveedores'],
-    queryFn:  () => getProveedores().then((r) => r.data.data),
+    queryKey: ['proveedores', 'tipo-proveedor'],
+    queryFn:  () => getProveedores('proveedor').then((r) => r.data.data),
   });
 
   const proveedores = (proveedoresData || []).filter((p) =>
@@ -640,7 +704,10 @@ function TabProveedores({ sucursalKey, sucursalLista }) {
         proveedores.map((p) => (
           <div key={p.id} className="bg-white border border-gray-100 rounded-2xl p-4 flex items-center justify-between gap-3">
             <button onClick={() => setProveedorVer(p)} className="flex-1 text-left min-w-0">
-              <p className="font-semibold text-gray-900">{p.nombre}</p>
+              <div className="flex items-center gap-2">
+                <p className="font-semibold text-gray-900">{p.nombre}</p>
+                <ProveedorTipoBadge tipo={p.tipo} />
+              </div>
               <div className="flex items-center gap-3 mt-0.5 flex-wrap">
                 {p.nit      && <span className="text-xs text-gray-400">NIT: {p.nit}</span>}
                 {p.telefono && <span className="text-xs text-gray-400">Tel: {p.telefono}</span>}
@@ -663,22 +730,97 @@ function TabProveedores({ sucursalKey, sucursalLista }) {
   );
 }
 
-// ─── P\xe1gina principal ────────────────────────────────────────────────────────
+// ─── Tab Cruces (tipo = cruce) ─────────────────────────────────────────────────
+
+function TabCruces({ sucursalKey, sucursalLista }) {
+  const [busqueda,     setBusqueda]     = useState('');
+  const [modalCruce,   setModalCruce]   = useState(false);
+  const [cruceEditar,  setCruceEditar]  = useState(null);
+  const [cruceVer,     setCruceVer]     = useState(null);
+  const [modalCompra,  setModalCompra]  = useState(null);
+
+  const { data: crucesData, isLoading } = useQuery({
+    queryKey: ['cruces'],
+    queryFn:  () => getCruces().then((r) => r.data.data),
+  });
+
+  const cruces = (crucesData || []).filter((c) =>
+    c.nombre.toLowerCase().includes(busqueda.toLowerCase())
+  );
+
+  if (cruceVer) {
+    return (
+      <>
+        <HistorialProveedor
+          proveedor={cruceVer}
+          sucursalKey={sucursalKey}
+          sucursalLista={sucursalLista}
+          onVolver={() => setCruceVer(null)}
+          onNuevaCompra={() => setModalCompra(cruceVer)}
+        />
+        {modalCompra && <ModalCompra proveedor={modalCompra} onClose={() => setModalCompra(null)} />}
+      </>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-gray-400">{cruces.length} cruce(s)</p>
+        <Button size="sm" onClick={() => setModalCruce(true)}><Plus size={16} /> Nuevo cruce</Button>
+      </div>
+      <SearchInput value={busqueda} onChange={setBusqueda} placeholder="Buscar cruce..." />
+      {isLoading ? <Spinner className="py-20" /> : cruces.length === 0 ? (
+        <EmptyState icon={Repeat} titulo="Sin cruces" descripcion="Aún no hay cruces registrados" />
+      ) : (
+        cruces.map((c) => (
+          <div key={c.id} className="bg-white border border-gray-100 rounded-2xl p-4 flex items-center justify-between gap-3">
+            <button onClick={() => setCruceVer(c)} className="flex-1 text-left min-w-0">
+              <div className="flex items-center gap-2">
+                <p className="font-semibold text-gray-900">{c.nombre}</p>
+                <ProveedorTipoBadge tipo="cruce" />
+              </div>
+              <div className="flex items-center gap-3 mt-0.5 flex-wrap">
+                {c.nit      && <span className="text-xs text-gray-400">NIT: {c.nit}</span>}
+                {c.telefono && <span className="text-xs text-gray-400">Tel: {c.telefono}</span>}
+                {c.contacto && <span className="text-xs text-gray-400">{c.contacto}</span>}
+              </div>
+            </button>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <Button size="sm" onClick={() => setModalCompra(c)}><ShoppingCart size={14} /> Compra</Button>
+              <button onClick={() => setCruceEditar(c)} className="p-2 rounded-xl hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors">
+                <Package size={16} />
+              </button>
+            </div>
+          </div>
+        ))
+      )}
+      {/* Crear cruce: tipo forzado a 'cruce' */}
+      {modalCruce  && <ModalProveedor tipoForzado="cruce" onClose={() => setModalCruce(false)} />}
+      {/* Editar cruce: admin puede cambiar tipo si quiere */}
+      {cruceEditar && <ModalProveedor proveedor={cruceEditar} onClose={() => setCruceEditar(null)} />}
+      {modalCompra && <ModalCompra proveedor={modalCompra} onClose={() => setModalCompra(null)} />}
+    </div>
+  );
+}
+
+// ─── Página principal ────────────────────────────────────────────────────────
 
 export default function ProveedoresPage() {
   const { sucursalKey, sucursalLista } = useSucursalKey();
   const [tabActivo, setTabActivo] = useState('proveedores');
 
   const tabs = [
-    { id: 'proveedores', label: 'Proveedores',        Icn: Truck      },
-    { id: 'retomas',     label: 'Retomas de clientes', Icn: RefreshCw  },
+    { id: 'proveedores', label: 'Proveedores',        Icn: Truck     },
+    { id: 'cruces',      label: 'Cruces',              Icn: Repeat    },
+    { id: 'retomas',     label: 'Retomas de clientes', Icn: RefreshCw },
   ];
 
   return (
     <div className="flex flex-col gap-4">
       <div>
         <h1 className="text-xl font-bold text-gray-900">Proveedores</h1>
-        <p className="text-sm text-gray-400 mt-0.5">Gestiona tus proveedores y retomas de clientes</p>
+        <p className="text-sm text-gray-400 mt-0.5">Gestiona tus proveedores, cruces y retomas de clientes</p>
       </div>
 
       <div className="flex gap-1 bg-gray-100 p-1 rounded-xl">
@@ -700,6 +842,9 @@ export default function ProveedoresPage() {
 
       {tabActivo === 'proveedores' && (
         <TabProveedores sucursalKey={sucursalKey} sucursalLista={sucursalLista} />
+      )}
+      {tabActivo === 'cruces' && (
+        <TabCruces sucursalKey={sucursalKey} sucursalLista={sucursalLista} />
       )}
       {tabActivo === 'retomas' && <TabRetomas />}
     </div>
