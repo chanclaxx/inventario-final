@@ -3,6 +3,9 @@ const { pool } = require('../../config/db');
 const HOY_F = `DATE(f.fecha AT TIME ZONE 'UTC' AT TIME ZONE 'America/Bogota') = (NOW() AT TIME ZONE 'America/Bogota')::date`;
 const HOY   = `DATE(fecha   AT TIME ZONE 'UTC' AT TIME ZONE 'America/Bogota') = (NOW() AT TIME ZONE 'America/Bogota')::date`;
 
+// Helper timezone: columnas "timestamp without time zone" almacenadas en UTC
+const fechaBogota = (col) => `(${col} AT TIME ZONE 'UTC' AT TIME ZONE 'America/Bogota')::date`;
+
 // ── Helper: subquery de costo de serial anclada al negocio ───────────────────
 const _costoPorImei = (imeiAlias, sucursalAlias) => `
   COALESCE(
@@ -81,7 +84,6 @@ const getDashboard = async (sucursalId) => {
       ORDER BY total DESC
     `, [sucursalId]),
 
-    // ── Utilidad facturas Activas — costo anclado al negocio ──
     pool.query(`
       WITH retomas_por_factura AS (
         SELECT factura_id, COALESCE(SUM(valor_retoma), 0) AS total_retomas
@@ -119,7 +121,6 @@ const getDashboard = async (sucursalId) => {
       LEFT JOIN retomas_por_factura r ON r.factura_id = c.factura_id
     `, [sucursalId]),
 
-    // ── Utilidad pendiente créditos — costo anclado al negocio ──
     pool.query(`
       WITH retomas_por_factura AS (
         SELECT factura_id, COALESCE(SUM(valor_retoma), 0) AS total_retomas
@@ -179,14 +180,161 @@ const getDashboard = async (sucursalId) => {
   };
 };
 
+// ─── getServiciosRango ────────────────────────────────────────────────────────
+// Obtiene la utilidad de servicios técnicos para el reporte de ventas.
+//
+// Lógica:
+// - CERRADOS: órdenes con fecha_entrega en el rango (Entregado, Pendiente_pago, Sin_reparar)
+//   · Entregado pagado completo → utilidad confirmada
+//   · Pendiente_pago → utilidad parcial (lo abonado - costo)
+//   · Sin_reparar con diagnóstico → ingreso confirmado
+//   · Garantía cobrable entregada → utilidad de garantía
+// - ACTIVOS: resumen de órdenes en proceso (count + saldo pendiente)
+
+const getServiciosRango = async (sucursalId, desde, hasta) => {
+
+  // 1. Servicios cerrados en el rango (por fecha_entrega en Bogotá)
+  const { rows: cerradosRaw } = await pool.query(`
+    SELECT
+      os.id, os.estado, os.cliente_nombre,
+      os.equipo_tipo, os.equipo_nombre, os.equipo_serial,
+      os.falla_reportada, os.notas_tecnico, os.motivo_sin_reparar,
+      os.precio_final, os.costo_real, os.total_abonado,
+      os.precio_garantia, os.costo_garantia, os.garantia_cobrable,
+      os.fecha_recepcion, os.fecha_entrega
+    FROM ordenes_servicio os
+    WHERE os.sucursal_id = $1
+      AND os.estado IN ('Entregado', 'Pendiente_pago', 'Sin_reparar')
+      AND ${fechaBogota('os.fecha_entrega')} BETWEEN $2 AND $3
+    ORDER BY os.fecha_entrega DESC
+  `, [sucursalId, desde, hasta]);
+
+  // 2. Servicios activos — resumen (sin filtro de fecha)
+  const { rows: activosResumen } = await pool.query(`
+    SELECT
+      os.estado,
+      COUNT(*)::int AS cantidad,
+      COALESCE(SUM(
+        CASE
+          WHEN os.estado = 'Garantia' AND os.garantia_cobrable AND os.precio_garantia IS NOT NULL
+          THEN os.precio_garantia - os.total_abonado
+          WHEN os.estado IN ('Listo', 'Pendiente_pago')
+          THEN COALESCE(os.precio_final, 0) - os.total_abonado
+          ELSE 0
+        END
+      ), 0) AS saldo_pendiente
+    FROM ordenes_servicio os
+    WHERE os.sucursal_id = $1
+      AND os.estado IN ('Recibido', 'En_reparacion', 'Listo', 'Garantia')
+    GROUP BY os.estado
+  `, [sucursalId]);
+
+  // Procesar cerrados
+  const cerrados = cerradosRaw.map((os) => {
+    const precioFinal    = Number(os.precio_final    || 0);
+    const costoReal      = Number(os.costo_real      || 0);
+    const totalAbonado   = Number(os.total_abonado   || 0);
+    const precioGarantia = Number(os.precio_garantia || 0);
+    const costoGarantia  = Number(os.costo_garantia  || 0);
+
+    let categoria, ingresos, costo, utilidad, saldoPendiente;
+
+    if (os.estado === 'Sin_reparar') {
+      // Diagnóstico cobrado
+      categoria      = 'diagnostico';
+      ingresos       = precioFinal;
+      costo          = 0;
+      utilidad       = precioFinal;
+      saldoPendiente = 0;
+    } else if (precioGarantia > 0 && os.garantia_cobrable) {
+      // Garantía cobrable entregada
+      categoria      = 'garantia';
+      ingresos       = totalAbonado;
+      costo          = costoGarantia;
+      utilidad       = costoGarantia > 0 ? precioGarantia - costoGarantia : null;
+      saldoPendiente = precioGarantia - totalAbonado;
+    } else if (os.estado === 'Pendiente_pago') {
+      // Entregado con saldo pendiente
+      categoria      = 'pendiente';
+      ingresos       = totalAbonado;
+      costo          = costoReal;
+      utilidad       = costoReal > 0 ? precioFinal - costoReal : null;
+      saldoPendiente = precioFinal - totalAbonado;
+    } else {
+      // Entregado pagado completo
+      categoria      = 'pagado';
+      ingresos       = totalAbonado;
+      costo          = costoReal;
+      utilidad       = costoReal > 0 ? precioFinal - costoReal : null;
+      saldoPendiente = 0;
+    }
+
+    return {
+      id:               os.id,
+      estado:           os.estado,
+      categoria,
+      cliente_nombre:   os.cliente_nombre,
+      equipo_nombre:    os.equipo_nombre || os.equipo_tipo || 'Equipo',
+      falla_reportada:  os.falla_reportada,
+      notas_tecnico:    os.notas_tecnico,
+      motivo_sin_reparar: os.motivo_sin_reparar,
+      precio_final:     precioFinal,
+      costo_real:       costoReal,
+      total_abonado:    totalAbonado,
+      precio_garantia:  precioGarantia,
+      costo_garantia:   costoGarantia,
+      ingresos,
+      costo,
+      utilidad,
+      saldo_pendiente:  saldoPendiente > 0 ? saldoPendiente : 0,
+      fecha_recepcion:  os.fecha_recepcion,
+      fecha_entrega:    os.fecha_entrega,
+    };
+  });
+
+  // Calcular resumen de cerrados
+  const pagados      = cerrados.filter((s) => s.categoria === 'pagado');
+  const pendientes   = cerrados.filter((s) => s.categoria === 'pendiente');
+  const diagnosticos = cerrados.filter((s) => s.categoria === 'diagnostico');
+  const garantias    = cerrados.filter((s) => s.categoria === 'garantia');
+
+  const sumarUtilidad = (arr) => arr.reduce((s, o) => o.utilidad !== null ? s + o.utilidad : s, 0);
+  const sumarIngresos = (arr) => arr.reduce((s, o) => s + o.ingresos, 0);
+  const sumarSaldo    = (arr) => arr.reduce((s, o) => s + o.saldo_pendiente, 0);
+
+  // Resumen activos
+  const totalActivos      = activosResumen.reduce((s, r) => s + r.cantidad, 0);
+  const saldoTotalActivos = activosResumen.reduce((s, r) => s + Number(r.saldo_pendiente), 0);
+  const activosPorEstado  = {};
+  activosResumen.forEach((r) => { activosPorEstado[r.estado] = r.cantidad; });
+
+  return {
+    cerrados,
+    resumen: {
+      total_cerrados:        cerrados.length,
+      utilidad_confirmada:   sumarUtilidad(pagados),
+      utilidad_garantias:    sumarUtilidad(garantias),
+      ingresos_diagnostico:  sumarIngresos(diagnosticos),
+      utilidad_pendiente:    sumarUtilidad(pendientes),
+      saldo_por_cobrar:      sumarSaldo(pendientes) + sumarSaldo(garantias),
+      total_ingresos:        sumarIngresos(cerrados),
+      pagados:               pagados.length,
+      pendientes_pago:       pendientes.length,
+      diagnosticos:          diagnosticos.length,
+      garantias_cobrables:   garantias.length,
+    },
+    activos: {
+      total:           totalActivos,
+      saldo_pendiente: saldoTotalActivos,
+      por_estado:      activosPorEstado,
+    },
+  };
+};
+
 // ─── getVentasRango ───────────────────────────────────────────────────────────
-// CAMBIO vs original: agrega query de préstamos del período y retorna
-// el campo `prestamos` con utilidad confirmada (Saldados) y en proceso (Activos).
-// Los Devueltos se excluyen — el producto volvió al inventario, no generó utilidad.
 
 const getVentasRango = async (sucursalId, desde, hasta) => {
 
-  // ── Query original de facturas ─────────────────────────────────────────────
   const { rows: facturas } = await pool.query(`
     WITH retomas_por_factura AS (
       SELECT factura_id, COALESCE(SUM(valor_retoma), 0) AS total_retomas
@@ -208,19 +356,6 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
     ORDER BY f.fecha DESC
   `, [sucursalId, desde, hasta]);
 
-  // ── NUEVO: query de préstamos con utilidad ────────────────────────────────
-  //
-  // DOS queries separadas con lógica de fechas diferente:
-  //
-  // 1. SALDADOS en el rango: la fecha relevante es cuándo se saldó (fecha del
-  //    último abono), NO cuándo se creó el préstamo. Así un préstamo creado hace
-  //    un mes que se salda hoy aparece en la utilidad de hoy, y mañana ya no.
-  //    Se filtra: fecha del último abono de ese préstamo BETWEEN $2 AND $3.
-  //
-  // 2. ACTIVOS: todos los préstamos activos de la sucursal, sin filtro de fecha.
-  //    Siempre aparecen como pendientes independientemente del rango seleccionado.
-  //    Devueltos se excluyen (el producto regresó, no generó utilidad).
-
   const costoProductoCase = `
     CASE
       WHEN p.imei IS NOT NULL THEN
@@ -239,16 +374,11 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
     END
   `;
 
-  // Query 1: Saldados cuya fecha de saldo (último abono) cae en el rango.
-  // CTE filtrado por sucursal desde el inicio para no escanear abonos de otros negocios.
-  // costoProducto para cantidad también verifica sucursal_id para evitar cross-negocio.
   const { rows: saldadosRaw } = await pool.query(`
     WITH prestamos_sucursal AS (
-      -- Limitar primero al conjunto de préstamos de esta sucursal
       SELECT id FROM prestamos WHERE sucursal_id = $1 AND estado = 'Saldado'
     ),
     ultimo_abono AS (
-      -- MAX fecha solo de abonos de préstamos de ESTA sucursal
       SELECT
         ab.prestamo_id,
         MAX(ab.fecha AT TIME ZONE 'UTC' AT TIME ZONE 'America/Bogota') AS fecha_saldo
@@ -275,7 +405,6 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
     ORDER BY ua.fecha_saldo DESC
   `, [sucursalId, desde, hasta]);
 
-  // Query 2: Activos — todos, sin filtro de fecha (siempre visibles como pendientes)
   const { rows: activosRaw } = await pool.query(`
     SELECT
       p.id,
@@ -293,7 +422,6 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
     ORDER BY p.fecha ASC
   `, [sucursalId]);
 
-  // ── Procesar saldados ─────────────────────────────────────────────────────
   const saldados = saldadosRaw.map((p) => {
     const costo        = p.costo_producto !== null ? Number(p.costo_producto) : null;
     const totalAbonado = Number(p.total_abonado);
@@ -311,7 +439,6 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
     };
   });
 
-  // ── Procesar activos ──────────────────────────────────────────────────────
   const activos = activosRaw.map((p) => {
     const costo        = p.costo_producto !== null ? Number(p.costo_producto) : null;
     const totalAbonado = Number(p.total_abonado);
@@ -347,9 +474,11 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
     },
   };
 
-  // ── Lógica original de facturas (sin cambios) ─────────────────────────────
+  // ── Servicios técnicos del rango ──────────────────────────────────────────
+  const servicios = await getServiciosRango(sucursalId, desde, hasta);
+
   if (!facturas.length) {
-    return { facturas: [], resumen: null, prestamos };
+    return { facturas: [], resumen: null, prestamos, servicios };
   }
 
   const facturaIds = facturas.map((f) => f.id);
@@ -440,7 +569,7 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
     utilidad_pendiente:  soloCreditos.reduce((s, f) => s + f.utilidad_neta, 0),
   };
 
-  return { facturas: facturasCompletas, resumen, prestamos };
+  return { facturas: facturasCompletas, resumen, prestamos, servicios };
 };
 
 const getProductosTop = async (sucursalId, desde, hasta) => {
@@ -627,6 +756,7 @@ const getValorInventario = async (negocioId) => {
 module.exports = {
   getDashboard,
   getVentasRango,
+  getServiciosRango,
   getProductosTop,
   getInventarioBajo,
   actualizarCostoCompra,

@@ -8,7 +8,7 @@ import {
   getValorInventario,
   actualizarCostoCompra,
 } from '../../api/reportes.api';
-import { formatCOP, formatFecha, fechaHoyBogota } from '../../utils/formatters';
+import { formatCOP, formatFecha, formatFechaHora, fechaHoyBogota } from '../../utils/formatters';
 import { Spinner }    from '../../components/ui/Spinner';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { Badge }      from '../../components/ui/Badge';
@@ -16,7 +16,7 @@ import { useAuth }    from '../../context/useAuth';
 import {
   BarChart2, TrendingUp, Package, AlertTriangle,
   ChevronDown, ChevronUp, Info, Pencil, Check, X,
-  Warehouse, Handshake,
+  Warehouse, Handshake, Wrench,
 } from 'lucide-react';
 
 // ─────────────────────────────────────────────
@@ -29,6 +29,20 @@ const TABS = [
   { id: 'stock',      label: 'Stock Bajo', icon: AlertTriangle },
   { id: 'inventario', label: 'Inventario', icon: Warehouse     },
 ];
+
+const CATEGORIA_CONFIG = {
+  pagado:      { badge: 'green',  label: 'Pagado',       desc: 'Entregado y pagado completo' },
+  pendiente:   { badge: 'yellow', label: 'Pendiente',    desc: 'Entregado con saldo pendiente' },
+  diagnostico: { badge: 'gray',   label: 'Diagnóstico',  desc: 'Sin reparar — cobro diagnóstico' },
+  garantia:    { badge: 'purple', label: 'Garantía',     desc: 'Garantía cobrable entregada' },
+};
+
+const ESTADO_LABEL = {
+  Recibido:       'Recibidos',
+  En_reparacion:  'En reparación',
+  Listo:          'Listos',
+  Garantia:       'En garantía',
+};
 
 // ─────────────────────────────────────────────
 // HELPERS DE NEGOCIO
@@ -417,7 +431,6 @@ const SeccionPrestamos = ({ prestamos }) => {
         )}
       </h3>
 
-      {/* Resumen numérico */}
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
         <div className="bg-green-50 text-green-700 rounded-xl p-3">
           <p className="text-xs font-medium opacity-70">Utilidad confirmada</p>
@@ -446,7 +459,6 @@ const SeccionPrestamos = ({ prestamos }) => {
         )}
       </div>
 
-      {/* Detalle siempre visible */}
       <div className="flex flex-col gap-3">
         {saldados.length > 0 && (
           <div className="flex flex-col gap-2">
@@ -471,6 +483,219 @@ const SeccionPrestamos = ({ prestamos }) => {
           </div>
         )}
       </div>
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────
+// UTILIDAD DE SERVICIOS TÉCNICOS — componentes
+// ─────────────────────────────────────────────
+
+const FilaServicio = ({ servicio }) => {
+  const [expandida, setExpandida] = useState(false);
+  const catCfg = CATEGORIA_CONFIG[servicio.categoria] || CATEGORIA_CONFIG.pagado;
+  const sinCosto = servicio.utilidad === null;
+
+  return (
+    <div className="bg-white border border-gray-100 rounded-xl overflow-hidden shadow-sm">
+      <button
+        onClick={() => setExpandida((v) => !v)}
+        className="w-full px-4 py-3 flex items-center justify-between hover:bg-gray-50 transition-colors text-left"
+      >
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs text-gray-300 font-mono">#OS-{String(servicio.id).padStart(4, '0')}</span>
+            <Badge variant={catCfg.badge}>{catCfg.label}</Badge>
+          </div>
+          <p className="text-sm font-semibold text-gray-800 truncate mt-0.5">{servicio.equipo_nombre}</p>
+          <p className="text-xs text-gray-500 truncate">{servicio.cliente_nombre}</p>
+        </div>
+        <div className="flex items-center gap-3 flex-shrink-0 ml-2">
+          <div className="text-right">
+            <p className="text-sm font-bold text-gray-900">{formatCOP(servicio.ingresos)}</p>
+            {servicio.saldo_pendiente > 0 && (
+              <p className="text-xs text-red-500 font-medium">
+                Saldo: {formatCOP(servicio.saldo_pendiente)}
+              </p>
+            )}
+          </div>
+          <div className="text-right hidden sm:block">
+            {sinCosto ? (
+              <span className="text-xs text-gray-400 italic">Sin costo</span>
+            ) : (
+              <UtilidadBadge valor={servicio.utilidad} />
+            )}
+          </div>
+          {expandida
+            ? <ChevronUp size={14} className="text-gray-400" />
+            : <ChevronDown size={14} className="text-gray-400" />}
+        </div>
+      </button>
+
+      {/* Mobile: utilidad visible debajo */}
+      <div className="flex items-center justify-between px-4 pb-2 sm:hidden">
+        {sinCosto
+          ? <span className="text-xs text-gray-400 italic">Sin costo registrado</span>
+          : <UtilidadBadge valor={servicio.utilidad} />}
+      </div>
+
+      {expandida && (
+        <div className="border-t border-gray-100 px-4 py-3 flex flex-col gap-2 bg-gray-50">
+          <p className="text-xs text-gray-500 italic">{servicio.falla_reportada}</p>
+
+          <div className="grid grid-cols-2 gap-2 text-xs">
+            {servicio.categoria === 'garantia' ? (
+              <>
+                <div>
+                  <span className="text-gray-400">Precio garantía:</span>
+                  <span className="ml-1 font-medium text-gray-700">{formatCOP(servicio.precio_garantia)}</span>
+                </div>
+                <div>
+                  <span className="text-gray-400">Costo garantía:</span>
+                  <span className="ml-1 font-medium text-gray-700">
+                    {servicio.costo_garantia > 0 ? formatCOP(servicio.costo_garantia) : 'N/A'}
+                  </span>
+                </div>
+              </>
+            ) : servicio.categoria === 'diagnostico' ? (
+              <div className="col-span-2">
+                <span className="text-gray-400">Cobro diagnóstico:</span>
+                <span className="ml-1 font-medium text-gray-700">{formatCOP(servicio.precio_final)}</span>
+              </div>
+            ) : (
+              <>
+                <div>
+                  <span className="text-gray-400">Precio final:</span>
+                  <span className="ml-1 font-medium text-gray-700">{formatCOP(servicio.precio_final)}</span>
+                </div>
+                <div>
+                  <span className="text-gray-400">Costo reparación:</span>
+                  <span className="ml-1 font-medium text-gray-700">
+                    {servicio.costo_real > 0 ? formatCOP(servicio.costo_real) : 'N/A'}
+                  </span>
+                </div>
+              </>
+            )}
+            <div>
+              <span className="text-gray-400">Abonado:</span>
+              <span className="ml-1 font-medium text-green-700">{formatCOP(servicio.total_abonado)}</span>
+            </div>
+            {servicio.fecha_entrega && (
+              <div>
+                <span className="text-gray-400">Entregado:</span>
+                <span className="ml-1 text-gray-600">{formatFechaHora(servicio.fecha_entrega)}</span>
+              </div>
+            )}
+          </div>
+
+          {servicio.notas_tecnico && (
+            <p className="text-xs text-gray-500">Notas: {servicio.notas_tecnico}</p>
+          )}
+          {servicio.motivo_sin_reparar && (
+            <p className="text-xs text-orange-600">Motivo: {servicio.motivo_sin_reparar}</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+const SeccionServicios = ({ servicios }) => {
+  if (!servicios) return null;
+
+  const { cerrados, resumen, activos } = servicios;
+  const hayCerrados = cerrados.length > 0;
+  const hayActivos  = activos.total > 0;
+
+  if (!hayCerrados && !hayActivos) return null;
+
+  return (
+    <div className="flex flex-col gap-3 border-t border-gray-100 pt-4">
+      <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+        <Wrench size={15} className="text-blue-500" />
+        Servicios técnicos
+        {resumen.total_cerrados > 0 && (
+          <span className="text-xs font-normal text-gray-400">
+            {resumen.total_cerrados} cerrado{resumen.total_cerrados !== 1 ? 's' : ''} en el período
+          </span>
+        )}
+      </h3>
+
+      {/* Métricas de servicios */}
+      {hayCerrados && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="bg-green-50 text-green-700 rounded-xl p-3">
+            <p className="text-xs font-medium opacity-70">Utilidad confirmada</p>
+            <p className="text-lg font-bold mt-0.5">{formatCOP(resumen.utilidad_confirmada)}</p>
+            <p className="text-xs opacity-60 mt-0.5">
+              {resumen.pagados} pagado{resumen.pagados !== 1 ? 's' : ''}
+            </p>
+          </div>
+
+          {resumen.utilidad_garantias > 0 && (
+            <div className="bg-purple-50 text-purple-700 rounded-xl p-3">
+              <p className="text-xs font-medium opacity-70">Utilidad garantías</p>
+              <p className="text-lg font-bold mt-0.5">{formatCOP(resumen.utilidad_garantias)}</p>
+              <p className="text-xs opacity-60 mt-0.5">
+                {resumen.garantias_cobrables} garantía{resumen.garantias_cobrables !== 1 ? 's' : ''}
+              </p>
+            </div>
+          )}
+
+          {resumen.ingresos_diagnostico > 0 && (
+            <div className="bg-gray-100 text-gray-700 rounded-xl p-3">
+              <p className="text-xs font-medium opacity-70">Diagnósticos</p>
+              <p className="text-lg font-bold mt-0.5">{formatCOP(resumen.ingresos_diagnostico)}</p>
+              <p className="text-xs opacity-60 mt-0.5">
+                {resumen.diagnosticos} servicio{resumen.diagnosticos !== 1 ? 's' : ''} sin reparar
+              </p>
+            </div>
+          )}
+
+          {resumen.saldo_por_cobrar > 0 && (
+            <div className="bg-amber-50 text-amber-700 rounded-xl p-3">
+              <p className="text-xs font-medium opacity-70">Saldo por cobrar</p>
+              <p className="text-lg font-bold mt-0.5">{formatCOP(resumen.saldo_por_cobrar)}</p>
+              <p className="text-xs opacity-60 mt-0.5">
+                {resumen.pendientes_pago} pendiente{resumen.pendientes_pago !== 1 ? 's' : ''}
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Resumen de activos — compacto */}
+      {hayActivos && (
+        <div className="flex items-center gap-3 bg-blue-50 border border-blue-100 rounded-xl px-4 py-2.5 flex-wrap">
+          <Wrench size={14} className="text-blue-500 flex-shrink-0" />
+          <p className="text-xs text-blue-700">
+            <span className="font-semibold">{activos.total}</span> servicio{activos.total !== 1 ? 's' : ''} en proceso
+          </p>
+          {Object.entries(activos.por_estado).map(([estado, cant]) => {
+            const label = ESTADO_LABEL[estado] || estado;
+            return (
+              <span key={estado} className="text-xs text-blue-500">
+                {cant} {label.toLowerCase()}
+              </span>
+            );
+          })}
+          {activos.saldo_pendiente > 0 && (
+            <span className="text-xs font-medium text-blue-700">
+              · {formatCOP(activos.saldo_pendiente)} por cobrar
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Lista de servicios cerrados */}
+      {hayCerrados && (
+        <div className="flex flex-col gap-2">
+          {cerrados.map((s) => {
+            const sKey = s.id;
+            return <FilaServicio key={sKey} servicio={s} />;
+          })}
+        </div>
+      )}
     </div>
   );
 };
@@ -517,7 +742,7 @@ const PanelResumen = ({ dashboard, loading }) => {
 };
 
 // ─────────────────────────────────────────────
-// PANEL VENTAS — incluye utilidad de préstamos
+// PANEL VENTAS — incluye préstamos y servicios
 // ─────────────────────────────────────────────
 const PanelVentas = ({ desde, hasta, onDesde, onHasta, esAdmin }) => {
   const { data: ventasData, isLoading, isError } = useQuery({
@@ -528,8 +753,11 @@ const PanelVentas = ({ desde, hasta, onDesde, onHasta, esAdmin }) => {
   const facturas  = ventasData?.facturas  ?? [];
   const resumen   = ventasData?.resumen   ?? null;
   const prestamos = ventasData?.prestamos ?? null;
+  const servicios = ventasData?.servicios ?? null;
 
-  const hayContenido = facturas.length > 0 || (prestamos && (prestamos.saldados.length > 0 || prestamos.activos.length > 0));
+  const hayContenido = facturas.length > 0
+    || (prestamos && (prestamos.saldados.length > 0 || prestamos.activos.length > 0))
+    || (servicios && (servicios.cerrados.length > 0 || servicios.activos.total > 0));
 
   return (
     <div className="flex flex-col gap-4">
@@ -544,7 +772,7 @@ const PanelVentas = ({ desde, hasta, onDesde, onHasta, esAdmin }) => {
       )}
 
       {!isLoading && !isError && !hayContenido && (
-        <EmptyState icon={TrendingUp} titulo="Sin ventas ni préstamos en el período seleccionado" />
+        <EmptyState icon={TrendingUp} titulo="Sin ventas, préstamos ni servicios en el período seleccionado" />
       )}
 
       {!isLoading && !isError && hayContenido && (
@@ -590,8 +818,11 @@ const PanelVentas = ({ desde, hasta, onDesde, onHasta, esAdmin }) => {
             </>
           )}
 
-          {/* Utilidad de préstamos — solo si hay datos */}
+          {/* Utilidad de préstamos */}
           <SeccionPrestamos prestamos={prestamos} />
+
+          {/* Utilidad de servicios técnicos */}
+          <SeccionServicios servicios={servicios} />
 
         </div>
       )}
