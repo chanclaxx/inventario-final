@@ -18,6 +18,7 @@ import { InputMoneda } from '../../components/ui/InputMoneda';
 import { Spinner }     from '../../components/ui/Spinner';
 import { EmptyState }  from '../../components/ui/EmptyState';
 import { SearchInput } from '../../components/ui/SearchInput';
+import { useAuth }     from '../../context/useAuth';
 import {
   Wrench, Plus, ChevronRight, ChevronLeft,
   AlertTriangle, CheckCircle, RefreshCw,
@@ -95,7 +96,7 @@ function BarraCobro({ abonado, total }) {
 
 // ─── Card de orden activa — botones siempre visibles ─────────────────────────
 
-function CardOrden({ orden, onAccion }) {
+function CardOrden({ orden, onAccion, esAdmin = false }) {
   const [expandida, setExpandida] = useState(false);
   const estado = cfg(orden.estado);
   const saldo  = Number(orden.saldo_pendiente) || 0;
@@ -117,6 +118,14 @@ function CardOrden({ orden, onAccion }) {
           <p className="text-sm font-semibold text-gray-800 mt-0.5 truncate">
             {nombreEquipo(orden)}
           </p>
+          {/* Cliente siempre visible */}
+          <div className="flex items-center gap-1 mt-0.5">
+            <User size={11} className="text-gray-400 flex-shrink-0" />
+            <span className="text-xs font-medium text-gray-600 truncate">{orden.cliente_nombre}</span>
+            {orden.cliente_telefono && (
+              <span className="text-xs text-gray-400">· {orden.cliente_telefono}</span>
+            )}
+          </div>
           <div className="flex items-center gap-3 mt-0.5 flex-wrap">
             <span className="flex items-center gap-1 text-xs text-gray-400">
               <Clock size={10} /> {formatFechaHora(orden.fecha_recepcion)}
@@ -166,7 +175,7 @@ function CardOrden({ orden, onAccion }) {
             {orden.equipo_serial    && <p className="text-xs text-gray-400 font-mono">Serial: {orden.equipo_serial}</p>}
             {orden.notas_tecnico    && <p className="text-xs text-gray-500">Notas: {orden.notas_tecnico}</p>}
             {orden.motivo_sin_reparar && <p className="text-xs text-orange-600">Motivo: {orden.motivo_sin_reparar}</p>}
-            {orden.utilidad != null && (
+            {esAdmin && orden.utilidad != null && (
               <p className={`text-xs font-semibold ${Number(orden.utilidad) >= 0 ? 'text-green-600' : 'text-red-500'}`}>
                 Utilidad: {formatCOP(Number(orden.utilidad))}
               </p>
@@ -225,7 +234,7 @@ function AccionesOrden({ orden, onAccion }) {
 
 // ─── Grupo de órdenes por cliente ────────────────────────────────────────────
 
-function GrupoCliente({ nombre, items, onAccion }) {
+function GrupoCliente({ nombre, items, onAccion, esAdmin = false }) {
   const [expandido, setExpandido] = useState(true);
   const tieneAlerta = items.some((o) => {
     const s = Number(o.saldo_pendiente) || 0;
@@ -265,7 +274,7 @@ function GrupoCliente({ nombre, items, onAccion }) {
             const oKey = o.id;
             return (
               <div key={oKey} className="bg-white">
-                <CardOrden orden={o} onAccion={onAccion} />
+                <CardOrden orden={o} onAccion={onAccion} esAdmin={esAdmin} />
               </div>
             );
           })}
@@ -277,7 +286,7 @@ function GrupoCliente({ nombre, items, onAccion }) {
 
 // ─── Card de orden cerrada — compacta y desplegable ──────────────────────────
 
-function CardOrdenCerrada({ orden, onAccion }) {
+function CardOrdenCerrada({ orden, onAccion, esAdmin = false }) {
   const [expandida, setExpandida] = useState(false);
   const estado = cfg(orden.estado);
 
@@ -339,7 +348,7 @@ function CardOrdenCerrada({ orden, onAccion }) {
             />
           )}
 
-          {orden.utilidad != null && (
+          {esAdmin && orden.utilidad != null && (
             <p className={`text-xs font-semibold ${Number(orden.utilidad) >= 0 ? 'text-green-600' : 'text-red-500'}`}>
               Utilidad: {formatCOP(Number(orden.utilidad))}
             </p>
@@ -1184,6 +1193,8 @@ function ModalDetalleOrden({ ordenId, onClose }) {
 
 export default function ServiciosPage() {
   const queryClient = useQueryClient();
+  const { esAdminNegocio } = useAuth();
+  const esAdmin = esAdminNegocio();
 
   const [busqueda,        setBusqueda]        = useState('');
   const [filtroEstado,    setFiltroEstado]    = useState('');
@@ -1245,18 +1256,24 @@ export default function ServiciosPage() {
         {loadingResumen ? (
           <div className="h-20 flex items-center"><Spinner /></div>
         ) : resumen && (
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className={`grid gap-3 ${esAdmin ? 'grid-cols-2 lg:grid-cols-4' : 'grid-cols-2'}`}>
             <MetricCard label="Órdenes hoy"  valor={resumen.ordenes_hoy}
               colorClass="bg-blue-50 text-blue-700" />
-            <MetricCard label="Ingresos hoy" valor={formatCOP(Number(resumen.ingresos_hoy) || 0)}
-              colorClass="bg-green-50 text-green-700" />
-            <MetricCard label="Utilidad hoy" valor={formatCOP(Number(resumen.utilidad_hoy) || 0)}
-              colorClass="bg-emerald-50 text-emerald-700" />
-            <MetricCard label="Por cobrar"   valor={formatCOP(Number(resumen.pendiente_cobro) || 0)}
-              colorClass="bg-orange-50 text-orange-700"
-              sub={activas.filter((o) => ['Listo','Garantia'].includes(o.estado)).length > 0
-                ? `${activas.filter((o) => ['Listo','Garantia'].includes(o.estado)).length} lista(s)`
-                : undefined} />
+            {esAdmin && (
+              <MetricCard label="Ingresos hoy" valor={formatCOP(Number(resumen.ingresos_hoy) || 0)}
+                colorClass="bg-green-50 text-green-700" />
+            )}
+            {esAdmin && (
+              <MetricCard label="Utilidad hoy" valor={formatCOP(Number(resumen.utilidad_hoy) || 0)}
+                colorClass="bg-emerald-50 text-emerald-700" />
+            )}
+            {esAdmin && (
+              <MetricCard label="Por cobrar"   valor={formatCOP(Number(resumen.pendiente_cobro) || 0)}
+                colorClass="bg-orange-50 text-orange-700"
+                sub={activas.filter((o) => ['Listo','Garantia'].includes(o.estado)).length > 0
+                  ? `${activas.filter((o) => ['Listo','Garantia'].includes(o.estado)).length} lista(s)`
+                  : undefined} />
+            )}
           </div>
         )}
 
@@ -1311,7 +1328,7 @@ export default function ServiciosPage() {
                     const gKey = g.nombre;
                     return (
                       <GrupoCliente key={gKey} nombre={g.nombre}
-                        items={g.items} onAccion={handleAccion} />
+                        items={g.items} onAccion={handleAccion} esAdmin={esAdmin} />
                     );
                   })}
                 </div>
@@ -1336,7 +1353,7 @@ export default function ServiciosPage() {
                     {cerradas.map((o) => {
                       const oKey = o.id;
                       return (
-                        <CardOrdenCerrada key={oKey} orden={o} onAccion={handleAccion} />
+                        <CardOrdenCerrada key={oKey} orden={o} onAccion={handleAccion} esAdmin={esAdmin} />
                       );
                     })}
                   </div>
