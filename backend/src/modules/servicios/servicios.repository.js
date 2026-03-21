@@ -2,11 +2,10 @@ const { pool } = require('../../config/db');
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
-const ZONA    = `AT TIME ZONE 'UTC' AT TIME ZONE 'America/Bogota'`;
-const HOY_OS  = `DATE(os.fecha_recepcion ${ZONA}) = (NOW() ${ZONA})::date`;
-const HOY_AB  = `DATE(ab.fecha           ${ZONA}) = (NOW() ${ZONA})::date`;
+const ZONA   = `AT TIME ZONE 'UTC' AT TIME ZONE 'America/Bogota'`;
+const HOY_OS = `DATE(os.fecha_recepcion ${ZONA}) = (NOW() ${ZONA})::date`;
+const HOY_AB = `DATE(ab.fecha           ${ZONA}) = (NOW() ${ZONA})::date`;
 
-// Columnas calculadas reutilizadas en múltiples queries
 const COLS_CALCULADAS = `
   (os.precio_final - os.total_abonado) AS saldo_pendiente,
   CASE
@@ -21,7 +20,6 @@ const findAll = async (sucursalId, negocioId, filtros = {}) => {
   const { estado, busqueda } = filtros;
   const params = [];
 
-  // FIX: un solo param para el filtro principal (sucursal o negocio)
   const filtroPrincipal = sucursalId
     ? `os.sucursal_id = $${params.push(sucursalId)}`
     : `os.negocio_id  = $${params.push(negocioId)}`;
@@ -30,15 +28,13 @@ const findAll = async (sucursalId, negocioId, filtros = {}) => {
 
   if (estado) where += ` AND os.estado = $${params.push(estado)}`;
 
-  // FIX: busqueda usa un solo param ($N) referenciado 4 veces en la misma query
-  // pg acepta el mismo $N múltiples veces en la misma sentencia
   if (busqueda) {
     const q = `%${busqueda.toLowerCase().slice(0, 100)}%`;
-    const n = params.push(q);   // un solo push → un solo $N
+    const n = params.push(q);
     where += ` AND (
         LOWER(os.cliente_nombre) LIKE $${n}
-     OR LOWER(os.equipo_marca)   LIKE $${n}
-     OR LOWER(os.equipo_modelo)  LIKE $${n}
+     OR LOWER(os.equipo_nombre)  LIKE $${n}
+     OR os.cliente_cedula        LIKE $${n}
      OR CAST(os.id AS TEXT)      LIKE $${n}
     )`;
   }
@@ -46,9 +42,8 @@ const findAll = async (sucursalId, negocioId, filtros = {}) => {
   const { rows } = await pool.query(`
     SELECT
       os.id, os.estado,
-      os.cliente_nombre, os.cliente_telefono, os.cliente_id,
-      os.equipo_tipo, os.equipo_marca, os.equipo_modelo,
-      os.equipo_color, os.equipo_serial,
+      os.cliente_nombre, os.cliente_telefono, os.cliente_cedula, os.cliente_id,
+      os.equipo_tipo, os.equipo_nombre, os.equipo_serial,
       os.falla_reportada, os.notas_tecnico,
       os.costo_estimado, os.costo_real, os.precio_final, os.total_abonado,
       os.motivo_sin_reparar, os.garantia_cobrable, os.orden_origen_id,
@@ -99,53 +94,40 @@ const getAbonos = async (negocioId, ordenId) => {
   return rows;
 };
 
-// ─── Dashboard / resumen ──────────────────────────────────────────────────────
-// FIX 1: getResumenHoy ahora acepta negocioId además de sucursalId para admin
-// FIX 2: ingresos_hoy usa subquery separada para abonos de HOY (sin importar
-//         cuándo se creó la orden) — semántica correcta: ¿cuánto cobré hoy?
+// ─── Resumen del día ──────────────────────────────────────────────────────────
+
 const getResumenHoy = async (sucursalId, negocioId) => {
-  // Admin sin sucursal específica → agrega por negocio
-  const filtroOS = sucursalId
-    ? `os.sucursal_id = $1`
-    : `os.negocio_id  = $1`;
-  const param = sucursalId ?? negocioId;
+  const filtroOS = sucursalId ? `os.sucursal_id = $1` : `os.negocio_id = $1`;
+  const param    = sucursalId ?? negocioId;
 
   const { rows } = await pool.query(`
     SELECT
-      -- Órdenes recibidas HOY
-      (
-        SELECT COUNT(*)
-        FROM ordenes_servicio os
-        WHERE ${filtroOS} AND ${HOY_OS}
+      (SELECT COUNT(*)
+       FROM ordenes_servicio os
+       WHERE ${filtroOS} AND ${HOY_OS}
       ) AS ordenes_hoy,
 
-      -- Ingresos HOY = abonos registrados hoy en cualquier orden de esta sucursal
-      (
-        SELECT COALESCE(SUM(ab.valor), 0)
-        FROM abonos_servicio ab
-        JOIN ordenes_servicio os ON os.id = ab.orden_id
-        WHERE ${filtroOS} AND ${HOY_AB}
+      (SELECT COALESCE(SUM(ab.valor), 0)
+       FROM abonos_servicio ab
+       JOIN ordenes_servicio os ON os.id = ab.orden_id
+       WHERE ${filtroOS} AND ${HOY_AB}
       ) AS ingresos_hoy,
 
-      -- Utilidad HOY = órdenes entregadas hoy con costo_real conocido
-      (
-        SELECT COALESCE(SUM(os.precio_final - os.costo_real), 0)
-        FROM ordenes_servicio os
-        WHERE ${filtroOS}
-          AND os.estado IN ('Entregado','Sin_reparar')
-          AND os.precio_final IS NOT NULL
-          AND os.costo_real   IS NOT NULL
-          AND DATE(os.fecha_entrega ${ZONA}) = (NOW() ${ZONA})::date
+      (SELECT COALESCE(SUM(os.precio_final - os.costo_real), 0)
+       FROM ordenes_servicio os
+       WHERE ${filtroOS}
+         AND os.estado IN ('Entregado','Sin_reparar')
+         AND os.precio_final IS NOT NULL
+         AND os.costo_real   IS NOT NULL
+         AND DATE(os.fecha_entrega ${ZONA}) = (NOW() ${ZONA})::date
       ) AS utilidad_hoy,
 
-      -- Pendiente cobro = órdenes activas con saldo > 0
-      (
-        SELECT COALESCE(SUM(os.precio_final - os.total_abonado), 0)
-        FROM ordenes_servicio os
-        WHERE ${filtroOS}
-          AND os.estado IN ('Listo','Garantia')
-          AND os.precio_final IS NOT NULL
-          AND os.precio_final > os.total_abonado
+      (SELECT COALESCE(SUM(os.precio_final - os.total_abonado), 0)
+       FROM ordenes_servicio os
+       WHERE ${filtroOS}
+         AND os.estado IN ('Listo','Garantia')
+         AND os.precio_final IS NOT NULL
+         AND os.precio_final > os.total_abonado
       ) AS pendiente_cobro
   `, [param]);
   return rows[0];
@@ -155,8 +137,8 @@ const getResumenHoy = async (sucursalId, negocioId) => {
 
 const create = async (negocioId, sucursalId, usuarioId, datos) => {
   const {
-    cliente_nombre, cliente_telefono, cliente_id,
-    equipo_tipo, equipo_marca, equipo_modelo, equipo_color, equipo_serial,
+    cliente_nombre, cliente_telefono, cliente_cedula, cliente_id,
+    equipo_tipo, equipo_nombre, equipo_serial,
     falla_reportada, contrasena_equipo, notas_tecnico,
     costo_estimado,
   } = datos;
@@ -164,22 +146,21 @@ const create = async (negocioId, sucursalId, usuarioId, datos) => {
   const { rows } = await pool.query(`
     INSERT INTO ordenes_servicio (
       negocio_id, sucursal_id, usuario_id,
-      cliente_nombre, cliente_telefono, cliente_id,
-      equipo_tipo, equipo_marca, equipo_modelo, equipo_color, equipo_serial,
+      cliente_nombre, cliente_telefono, cliente_cedula, cliente_id,
+      equipo_tipo, equipo_nombre, equipo_serial,
       falla_reportada, contrasena_equipo, notas_tecnico,
       costo_estimado
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
     RETURNING *
   `, [
     negocioId, sucursalId, usuarioId,
     cliente_nombre.trim(),
-    cliente_telefono  || null,
-    cliente_id        || null,
-    equipo_tipo       || null,
-    equipo_marca      || null,
-    equipo_modelo     || null,
-    equipo_color      || null,
-    equipo_serial     || null,
+    cliente_telefono || null,
+    cliente_cedula   || null,
+    cliente_id       || null,
+    equipo_tipo      || null,
+    equipo_nombre    || null,
+    equipo_serial    || null,
     falla_reportada.trim(),
     contrasena_equipo || null,
     notas_tecnico     || null,
@@ -212,13 +193,12 @@ const marcarListo = async (negocioId, id, { costo_real, precio_final, notas_tecn
   return rows[0] || null;
 };
 
-// Registra abono dentro de transacción + genera movimiento_caja si hay caja
+// Abono dentro de transacción + movimiento_caja automático
 const registrarAbono = async (negocioId, ordenId, { valor, metodo, notas, usuarioId, cajaId }) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
-    // Verificar orden pertenece al negocio y está en estado cobrable
     const { rows: orden } = await client.query(`
       SELECT id, estado, precio_final, total_abonado, sucursal_id
       FROM ordenes_servicio
@@ -240,18 +220,15 @@ const registrarAbono = async (negocioId, ordenId, { valor, metodo, notas, usuari
       RETURNING total_abonado, precio_final, estado
     `, [valor, ordenId]);
 
-    // Movimiento de caja — solo si hay caja abierta
     if (cajaId) {
       await client.query(`
         INSERT INTO movimientos_caja
           (caja_id, usuario_id, tipo, concepto, valor, referencia_id, referencia_tipo)
         VALUES ($1, $2, 'Ingreso', $3, $4, $5, 'servicio')
       `, [
-        cajaId,
-        usuarioId || null,
+        cajaId, usuarioId || null,
         `Servicio técnico #OS-${String(ordenId).padStart(4, '0')}`,
-        valor,
-        ordenId,
+        valor, ordenId,
       ]);
     }
 
@@ -271,7 +248,7 @@ const marcarEntregado = async (negocioId, id, { forzar = false } = {}) => {
     await client.query('BEGIN');
 
     const { rows } = await client.query(`
-      SELECT id, precio_final, total_abonado, garantia_cobrable
+      SELECT id, precio_final, total_abonado, garantia_cobrable, estado
       FROM ordenes_servicio
       WHERE id = $1 AND negocio_id = $2
         AND estado IN ('Listo','Garantia')
@@ -279,9 +256,9 @@ const marcarEntregado = async (negocioId, id, { forzar = false } = {}) => {
     `, [id, negocioId]);
     if (!rows.length) throw { status: 400, message: 'Orden no disponible para entrega' };
 
-    const saldo = Number(rows[0].precio_final || 0) - Number(rows[0].total_abonado);
-    // Garantía no cobrable siempre puede entregarse sin pago
     const esGratisGarantia = rows[0].estado === 'Garantia' && !rows[0].garantia_cobrable;
+    const saldo = Number(rows[0].precio_final || 0) - Number(rows[0].total_abonado);
+
     if (saldo > 0 && !forzar && !esGratisGarantia) {
       throw { status: 409, message: `Hay saldo pendiente de $${Math.round(saldo).toLocaleString('es-CO')}`, saldo };
     }
@@ -303,9 +280,6 @@ const marcarEntregado = async (negocioId, id, { forzar = false } = {}) => {
   }
 };
 
-// FIX menor: marcarSinReparar — si hay precio_diagnostico se trata como ingreso
-// directo (no como deuda), por eso total_abonado = precio_diagnostico para que
-// saldo_pendiente = 0 y no aparezca como deuda del cliente en la UI
 const marcarSinReparar = async (negocioId, id, { motivo, precio_diagnostico, cajaId, usuarioId }) => {
   const client = await pool.connect();
   try {
@@ -332,18 +306,15 @@ const marcarSinReparar = async (negocioId, id, { motivo, precio_diagnostico, caj
       RETURNING *
     `, [id, negocioId, motivo || null, pd]);
 
-    // Si cobró diagnóstico → ingreso directo a caja
     if (pd && pd > 0 && cajaId) {
       await client.query(`
         INSERT INTO movimientos_caja
           (caja_id, usuario_id, tipo, concepto, valor, referencia_id, referencia_tipo)
         VALUES ($1, $2, 'Ingreso', $3, $4, $5, 'servicio')
       `, [
-        cajaId,
-        usuarioId || null,
+        cajaId, usuarioId || null,
         `Diagnóstico #OS-${String(id).padStart(4, '0')}`,
-        pd,
-        id,
+        pd, id,
       ]);
     }
 
@@ -362,8 +333,6 @@ const abrirGarantia = async (negocioId, id, { cobrable, notas_tecnico }) => {
     UPDATE ordenes_servicio
     SET estado            = 'Garantia',
         garantia_cobrable = $3,
-        -- Si es cobrable (falla diferente): reinicia ciclo de cobro
-        -- Si es gratis (misma falla): mantiene precio_final como referencia histórica
         precio_final      = CASE WHEN $3 THEN NULL       ELSE precio_final  END,
         total_abonado     = CASE WHEN $3 THEN 0          ELSE total_abonado END,
         fecha_entrega     = NULL,

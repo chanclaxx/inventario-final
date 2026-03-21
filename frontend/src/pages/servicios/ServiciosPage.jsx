@@ -6,7 +6,10 @@ import {
   registrarAbono, entregarOrden, sinReparar,
   abrirGarantia,
 } from '../../api/servicios.api';
-import { getClientes }                from '../../api/clientes.api';
+import { buscarPorCedula }              from '../../api/clientes.api';
+import { useCedulaCliente }            from '../../hooks/useCedulaCliente';
+import { ModalConflictoCedula }        from '../../components/ui/ModalConflictoCedula';
+import { Loader2 }                     from 'lucide-react';
 import { formatCOP, formatFechaHora } from '../../utils/formatters';
 import { Badge }       from '../../components/ui/Badge';
 import { Button }      from '../../components/ui/Button';
@@ -48,7 +51,7 @@ const ESTADOS_CERRADOS = ['Entregado', 'Sin_reparar'];
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const cfg         = (estado) => ESTADOS_CONFIG[estado] || { badge: 'gray', label: estado, border: 'border-l-gray-300' };
-const nombreEquipo = (o) => [o.equipo_marca, o.equipo_modelo].filter(Boolean).join(' ') || o.equipo_tipo || 'Equipo';
+const nombreEquipo = (o) => o.equipo_nombre || o.equipo_tipo || 'Equipo';
 
 // ─── MetricCard (mismo estilo que ReportesPage) ───────────────────────────────
 
@@ -256,33 +259,48 @@ function PasoIndicador({ paso, total, labels }) {
 function ModalNuevaOrden({ onClose, onCreada }) {
   const [paso, setPaso] = useState(1);
   const [form, setForm] = useState({
-    cliente_nombre: '', cliente_telefono: '', cliente_id: '',
-    equipo_tipo: '', equipo_marca: '', equipo_modelo: '',
-    equipo_color: '', equipo_serial: '',
+    cliente_cedula: '', cliente_nombre: '', cliente_telefono: '', cliente_id: '',
+    equipo_tipo: '', equipo_nombre: '', equipo_serial: '',
     falla_reportada: '', contrasena_equipo: '', notas_tecnico: '', costo_estimado: '',
   });
-  const [busquedaCliente, setBusquedaCliente] = useState('');
+  const [buscandoCedula, setBuscandoCedula] = useState(false);
   const [error, setError] = useState('');
+
+  const { conflictoCliente, verificarCedula, reescribirCliente, cancelarConflicto } = useCedulaCliente();
 
   const set = (campo, val) => setForm((f) => ({ ...f, [campo]: val }));
 
-  const { data: clientesData } = useQuery({
-    queryKey: ['clientes-servicio', busquedaCliente],
-    queryFn:  () => getClientes(busquedaCliente).then((r) => r.data.data),
-    enabled:  busquedaCliente.trim().length > 1,
-  });
-  const clientes = clientesData || [];
+  // Igual que ModalFactura: al salir del campo cédula autocompleta si nombre/tel están vacíos
+  const handleBlurCedula = async () => {
+    const cedula = form.cliente_cedula?.trim();
+    if (!cedula) return;
+    const camposVacios = !form.cliente_nombre.trim() && !form.cliente_telefono.trim();
+    if (!camposVacios) return;
+    setBuscandoCedula(true);
+    try {
+      const { data } = await buscarPorCedula(cedula);
+      const encontrado = data.data;
+      if (encontrado) {
+        setForm((f) => ({
+          ...f,
+          cliente_nombre:   encontrado.nombre   || f.cliente_nombre,
+          cliente_telefono: encontrado.celular   || f.cliente_telefono,
+          cliente_id:       String(encontrado.id),
+        }));
+      }
+    } catch { /* usuario llena manual */ }
+    finally { setBuscandoCedula(false); }
+  };
 
   const mutCrear = useMutation({
     mutationFn: () => crearOrden({
       cliente_nombre:    form.cliente_nombre.trim(),
       cliente_telefono:  form.cliente_telefono  || null,
       cliente_id:        form.cliente_id        || null,
-      equipo_tipo:       form.equipo_tipo        || null,
-      equipo_marca:      form.equipo_marca       || null,
-      equipo_modelo:     form.equipo_modelo      || null,
-      equipo_color:      form.equipo_color       || null,
-      equipo_serial:     form.equipo_serial      || null,
+      equipo_tipo:    form.equipo_tipo    || null,
+      equipo_nombre:  form.equipo_nombre  || null,
+      equipo_serial:  form.equipo_serial  || null,
+      cliente_cedula: form.cliente_cedula || null,
       falla_reportada:   form.falla_reportada.trim(),
       contrasena_equipo: form.contrasena_equipo  || null,
       notas_tecnico:     form.notas_tecnico      || null,
@@ -291,16 +309,6 @@ function ModalNuevaOrden({ onClose, onCreada }) {
     onSuccess: (res) => { onCreada(res.data.data); onClose(); },
     onError:   (err) => setError(err.response?.data?.error || 'Error al crear la orden'),
   });
-
-  const seleccionarCliente = (c) => {
-    setForm((f) => ({
-      ...f,
-      cliente_nombre:   c.nombre,
-      cliente_telefono: c.celular || f.cliente_telefono,
-      cliente_id:       String(c.id),
-    }));
-    setBusquedaCliente('');
-  };
 
   const validarPaso1 = () => {
     if (!form.cliente_nombre.trim()) { setError('El nombre del cliente es requerido'); return false; }
@@ -312,66 +320,79 @@ function ModalNuevaOrden({ onClose, onCreada }) {
   };
 
   const irPaso = (n) => { setError(''); setPaso(n); };
-  const siguiente = () => {
-    if (paso === 1 && !validarPaso1()) return;
+  const siguiente = async () => {
+    if (paso === 1) {
+      if (!validarPaso1()) return;
+      // Verificar conflicto de cédula igual que ModalFactura
+      if (form.cliente_cedula.trim()) {
+        const puedeContin = await verificarCedula({
+          cedula:   form.cliente_cedula,
+          nombre:   form.cliente_nombre,
+          celular:  form.cliente_telefono,
+          email:    '',
+          direccion: '',
+        });
+        if (!puedeContin) return;
+      }
+    }
     irPaso(paso + 1);
   };
 
+  const handleReescribir = async () => {
+    await reescribirCliente();
+    irPaso(2);
+  };
+
+  const handleCancelarConflicto = () => cancelarConflicto(setForm);
+
   return (
+    <>
     <Modal open onClose={onClose} title="Nueva orden de servicio" size="md">
       <PasoIndicador paso={paso} total={3} labels={['Cliente', 'Equipo', 'Falla']} />
 
-      {/* ── Paso 1: Cliente ── */}
+      {/* ── Paso 1: Cliente — igual que ModalFactura ── */}
       {paso === 1 && (
         <div className="flex flex-col gap-3">
-          {/* Buscador cliente registrado */}
-          <div className="flex flex-col gap-1">
-            <label className="text-sm font-medium text-gray-700">
-              Buscar cliente registrado <span className="text-gray-400 font-normal">(opcional)</span>
-            </label>
-            <div className="relative">
-              <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-              <input type="text" placeholder="Nombre o cédula..."
-                value={busquedaCliente}
-                onChange={(e) => setBusquedaCliente(e.target.value)}
-                className="w-full pl-8 pr-3 py-2 bg-gray-50 border border-gray-200 rounded-xl
-                  text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
-            </div>
-            {clientes.length > 0 && busquedaCliente.trim().length > 1 && (
-              <div className="border border-gray-100 rounded-xl overflow-hidden">
-                {clientes.slice(0, 4).map((c) => {
-                  const cId = c.id;
-                  return (
-                    <button key={cId} onClick={() => seleccionarCliente(c)}
-                      className="w-full text-left px-3 py-2.5 hover:bg-blue-50 border-b border-gray-50 last:border-0 text-sm">
-                      <p className="font-medium text-gray-800">{c.nombre}</p>
-                      {c.cedula && <p className="text-xs text-gray-400">CC: {c.cedula}</p>}
-                    </button>
-                  );
-                })}
-              </div>
+
+          {/* Cédula con autocompletado al blur */}
+          <div className="relative">
+            <Input
+              label="Cédula / Documento"
+              placeholder="123456789 (opcional)"
+              value={form.cliente_cedula}
+              onChange={(e) => set('cliente_cedula', e.target.value)}
+              onBlur={handleBlurCedula}
+              autoFocus
+            />
+            {buscandoCedula && (
+              <Loader2 size={14} className="absolute right-3 top-9 text-gray-400 animate-spin" />
             )}
           </div>
 
+          {/* Chip si ya se encontró en BD */}
           {form.cliente_id && (
             <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-xl px-3 py-2">
-              <User size={14} className="text-blue-500" />
-              <p className="text-sm text-blue-700 font-medium flex-1">{form.cliente_nombre}</p>
-              <button onClick={() => setForm((f) => ({ ...f, cliente_id: '', cliente_nombre: '', cliente_telefono: '' }))}
-                className="text-xs text-blue-400 hover:text-blue-600">Cambiar</button>
+              <User size={14} className="text-blue-500 flex-shrink-0" />
+              <p className="text-sm text-blue-700 font-medium flex-1 truncate">{form.cliente_nombre}</p>
+              <button
+                onClick={() => setForm((f) => ({
+                  ...f, cliente_id: '', cliente_cedula: '',
+                  cliente_nombre: '', cliente_telefono: '',
+                }))}
+                className="text-xs text-blue-400 hover:text-blue-600 flex-shrink-0">
+                Cambiar
+              </button>
             </div>
           )}
 
-          {!form.cliente_id && (
-            <div className="grid grid-cols-2 gap-3">
-              <Input label="Nombre *" placeholder="Nombre del cliente"
-                value={form.cliente_nombre}
-                onChange={(e) => set('cliente_nombre', e.target.value)} autoFocus />
-              <Input label="Teléfono" placeholder="3001234567"
-                value={form.cliente_telefono}
-                onChange={(e) => set('cliente_telefono', e.target.value)} />
-            </div>
-          )}
+          <div className="grid grid-cols-2 gap-3">
+            <Input label="Nombre *" placeholder="Nombre del cliente"
+              value={form.cliente_nombre}
+              onChange={(e) => set('cliente_nombre', e.target.value)} />
+            <Input label="Teléfono" placeholder="3001234567"
+              value={form.cliente_telefono}
+              onChange={(e) => set('cliente_telefono', e.target.value)} />
+          </div>
 
           {error && <p className="text-sm text-red-500">{error}</p>}
 
@@ -410,20 +431,22 @@ function ModalNuevaOrden({ onClose, onCreada }) {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <Input label="Marca" placeholder="Samsung, Apple..."
-              value={form.equipo_marca} onChange={(e) => set('equipo_marca', e.target.value)} autoFocus />
-            <Input label="Modelo" placeholder="Galaxy A32..."
-              value={form.equipo_modelo} onChange={(e) => set('equipo_modelo', e.target.value)} />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <Input label="Color" placeholder="Negro, blanco..."
-              value={form.equipo_color} onChange={(e) => set('equipo_color', e.target.value)} />
-            <Input label="Serial / IMEI" placeholder="Opcional"
-              value={form.equipo_serial} onChange={(e) => set('equipo_serial', e.target.value)} />
-          </div>
+          <Input
+            label="Producto"
+            placeholder="Ej: iPhone 12 Pro negro, Samsung A32 azul..."
+            value={form.equipo_nombre}
+            onChange={(e) => set('equipo_nombre', e.target.value)}
+            autoFocus
+          />
 
-          <div className="flex gap-2 pt-2">
+          <Input
+            label="Serial / IMEI"
+            placeholder="Opcional"
+            value={form.equipo_serial}
+            onChange={(e) => set('equipo_serial', e.target.value)}
+          />
+
+                    <div className="flex gap-2 pt-2">
             <Button variant="secondary" onClick={() => irPaso(1)}>
               <ChevronLeft size={15} /> Volver
             </Button>
@@ -445,7 +468,7 @@ function ModalNuevaOrden({ onClose, onCreada }) {
             <div className="bg-gray-50 rounded-xl px-3 py-2">
               <p className="text-xs text-gray-400">Equipo</p>
               <p className="text-sm font-semibold text-gray-700 truncate">
-                {[form.equipo_marca, form.equipo_modelo].filter(Boolean).join(' ') || form.equipo_tipo || '—'}
+                {form.equipo_nombre || form.equipo_tipo || '—'}
               </p>
             </div>
           </div>
@@ -507,6 +530,15 @@ function ModalNuevaOrden({ onClose, onCreada }) {
         </div>
       )}
     </Modal>
+
+    <ModalConflictoCedula
+      open={!!conflictoCliente}
+      conflicto={conflictoCliente}
+      onReescribir={handleReescribir}
+      onCancelar={handleCancelarConflicto}
+      guardando={false}
+    />
+    </>
   );
 }
 
