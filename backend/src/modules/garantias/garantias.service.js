@@ -8,7 +8,7 @@ const getGarantiaById = async (negocioId, id) => {
   return g;
 };
 
-// ── lineas[] viene del body — verificar que pertenecen al negocio ─────────────
+// ── lineas[] viene del body — verificar que pertenecen al negocio ────────────
 const _verificarLineas = async (lineas, negocioId) => {
   if (!lineas?.length) return;
   const { pool } = require('../../config/db');
