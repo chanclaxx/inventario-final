@@ -307,7 +307,7 @@ function ModalNuevaOrden({ onClose, onCreada }) {
 
   const { data: clientesData } = useQuery({
     queryKey: ['clientes-servicio', busquedaCliente],
-    queryFn:  () => getClientes({ busqueda: busquedaCliente }).then((r) => r.data.data),
+    queryFn:  () => getClientes(busquedaCliente).then((r) => r.data.data),
     enabled:  busquedaCliente.trim().length > 1,
   });
   const clientes = clientesData || [];
