@@ -15,13 +15,27 @@ const getOrdenById = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+// ─── DEBUG TEMPORAL — eliminar después de diagnosticar ────────────────────────
 const getResumenHoy = async (req, res, next) => {
   try {
     const sucursalId = req.todasSucursales ? null : req.sucursal_id;
+
+    console.log('[DEBUG resumen-hoy] todasSucursales:', req.todasSucursales);
+    console.log('[DEBUG resumen-hoy] sucursal_id del req:', req.sucursal_id);
+    console.log('[DEBUG resumen-hoy] sucursalId enviado al service:', sucursalId);
+    console.log('[DEBUG resumen-hoy] negocio_id:', req.user.negocio_id);
+
     const data = await service.getResumenHoy(sucursalId, req.user.negocio_id);
+
+    console.log('[DEBUG resumen-hoy] Resultado:', JSON.stringify(data));
+
     res.json({ ok: true, data });
-  } catch (err) { next(err); }
+  } catch (err) {
+    console.error('[DEBUG resumen-hoy] ERROR:', err);
+    next(err);
+  }
 };
+// ─── FIN DEBUG ────────────────────────────────────────────────────────────────
 
 const crearOrden = async (req, res, next) => {
   try {
