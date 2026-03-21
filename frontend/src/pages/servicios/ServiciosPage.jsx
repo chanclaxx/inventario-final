@@ -109,23 +109,10 @@ function CardOrden({ orden, onAccion, esAdmin = false }) {
       {/* Cabecera — siempre visible */}
       <div className="px-4 pt-3 pb-2 flex items-start gap-3">
         <div className="flex-1 min-w-0">
-          {/* Nombre del cliente — grande e identificable */}
-          <p className="text-base font-bold text-gray-900 truncate leading-tight">
-            {orden.cliente_nombre}
-          </p>
-          {orden.cliente_cedula && (
-            <p className="text-xs text-gray-400">CC: {orden.cliente_cedula}</p>
-          )}
-          {orden.cliente_telefono && !orden.cliente_cedula && (
-            <p className="text-xs text-gray-400">{orden.cliente_telefono}</p>
-          )}
-          {orden.cliente_cedula && orden.cliente_telefono && (
-            <p className="text-xs text-gray-400">{orden.cliente_telefono}</p>
-          )}
-          {/* Equipo + estado */}
-          <div className="flex items-center gap-2 flex-wrap mt-1">
+          {/* Equipo + estado — nombre del cliente lo muestra GrupoCliente */}
+          <div className="flex items-center gap-2 flex-wrap">
             <Badge variant={estado.badge}>{estado.label}</Badge>
-            <span className="text-xs text-gray-500 truncate">{nombreEquipo(orden)}</span>
+            <span className="text-sm font-semibold text-gray-700 truncate">{nombreEquipo(orden)}</span>
           </div>
           <div className="flex items-center gap-3 mt-0.5 flex-wrap">
             <span className="text-xs text-gray-400 font-mono">
@@ -255,10 +242,6 @@ function GrupoCliente({ nombre, items, onAccion, esAdmin = false }) {
     return s > 0 && ['Listo','Garantia'].includes(o.estado);
   });
 
-  if (items.length === 1) {
-    return <CardOrden orden={items[0]} onAccion={onAccion} />;
-  }
-
   return (
     <div className="border border-gray-100 rounded-xl overflow-hidden shadow-sm">
       {/* Cabecera del grupo */}
@@ -271,7 +254,7 @@ function GrupoCliente({ nombre, items, onAccion, esAdmin = false }) {
         </div>
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold text-gray-800 truncate">{nombre}</p>
-          <p className="text-xs text-gray-400">{items.length} equipos en servicio</p>
+          <p className="text-xs text-gray-400">{items.length} {items.length === 1 ? 'equipo' : 'equipos'} en servicio</p>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
           {tieneAlerta && (
