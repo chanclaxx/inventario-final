@@ -179,7 +179,7 @@ function CardOrden({ orden, onAccion, esAdmin = false }) {
             {orden.motivo_sin_reparar && <p className="text-xs text-orange-600">Motivo: {orden.motivo_sin_reparar}</p>}
             {esAdmin && orden.utilidad != null && (
               <p className={`text-xs font-semibold ${Number(orden.utilidad) >= 0 ? 'text-green-600' : 'text-red-500'}`}>
-                Utiliad: {formatCOP(Number(orden.utilidad))}
+                Utilidad: {formatCOP(Number(orden.utilidad))}
               </p>
             )}
           </div>

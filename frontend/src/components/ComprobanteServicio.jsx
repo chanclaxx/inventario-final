@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { formatCOP, formatFechaHora } from '../../utils/formatters';
+import { formatCOP, formatFechaHora } from '../utils/formatters';
 
 // ─── Componente principal ─────────────────────────────────────────────────────
 
