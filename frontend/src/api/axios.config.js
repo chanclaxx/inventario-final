@@ -14,7 +14,10 @@ const CODIGOS_PLAN = new Set(['PLAN_VENCIDO', 'CUENTA_PENDIENTE', 'CUENTA_SUSPEN
 /**
  * Rutas que NO necesitan sucursal_id.
  * Config es por negocio; sucursales es la propia query de lista;
- * auth y registro son públicas; reportes manejan su propio scope.
+ * auth y registro son públicas.
+ *
+ * NOTA: '/reportes' se QUITÓ de esta lista — ahora los reportes
+ * reciben sucursal_id para filtrar por la sucursal seleccionada.
  */
 const PREFIJOS_SIN_SUCURSAL = [
   '/auth/',
@@ -22,7 +25,6 @@ const PREFIJOS_SIN_SUCURSAL = [
   '/superadmin',
   '/sucursales',
   '/config',
-  '/reportes',
   '/email',
 ];
 
