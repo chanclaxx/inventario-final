@@ -10,7 +10,7 @@ import { buscarPorCedula, crearCliente } from '../../api/clientes.api';
 import { useCedulaCliente }            from '../../hooks/useCedulaCliente';
 import { ModalConflictoCedula }        from '../../components/ui/ModalConflictoCedula';
 import { formatCOP, formatFechaHora }  from '../../utils/formatters';
-import { ComprobanteServicio }         from './ComprobanteServicio';
+import { ComprobanteServicio }         from '../../components/ComprobanteServicio';
 import { Badge }       from '../../components/ui/Badge';
 import { Button }      from '../../components/ui/Button';
 import { Modal }       from '../../components/ui/Modal';
@@ -179,7 +179,7 @@ function CardOrden({ orden, onAccion, esAdmin = false }) {
             {orden.motivo_sin_reparar && <p className="text-xs text-orange-600">Motivo: {orden.motivo_sin_reparar}</p>}
             {esAdmin && orden.utilidad != null && (
               <p className={`text-xs font-semibold ${Number(orden.utilidad) >= 0 ? 'text-green-600' : 'text-red-500'}`}>
-                Utilidad: {formatCOP(Number(orden.utilidad))}
+                Utiliad: {formatCOP(Number(orden.utilidad))}
               </p>
             )}
           </div>
