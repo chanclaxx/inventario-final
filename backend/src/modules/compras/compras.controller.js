@@ -1,53 +1,82 @@
-const service = require('./compras.service');
+const service = require('./caja.service');
 
-const getCompras = async (req, res, next) => {
+const getCajaActiva = async (req, res, next) => {
   try {
-    const sucursalId = req.todasSucursales ? null : req.sucursal_id;
-    const data = await service.getCompras(sucursalId, req.user.negocio_id);
-    res.json({ ok: true, data });
-  } catch (err) { next(err); }
-};
-
-const getCompraById = async (req, res, next) => {
-  try {
-    const data = await service.getCompraById(req.user.negocio_id, req.params.id);
-    res.json({ ok: true, data });
-  } catch (err) { next(err); }
-};
-
-const registrarCompra = async (req, res, next) => {
-  try {
-    const sucursal_id = req.todasSucursales
-      ? req.body.sucursal_id
-      : req.sucursal_id;
-
-    if (!sucursal_id) {
+    if (req.todasSucursales) {
       return res.status(400).json({
         ok: false,
-        error: 'Debes indicar la sucursal donde se registra la compra',
+        error: 'Selecciona una sucursal para ver su caja activa',
       });
     }
-
-    const data = await service.registrarCompra({
-      ...req.body,
-      negocio_id:  req.user.negocio_id,
-      sucursal_id,
-      usuario_id:  req.user.id,
-    });
-    res.status(201).json({ ok: true, data, message: 'Compra registrada correctamente' });
-  } catch (err) { next(err); }
-};
-
-const getComprasByProveedor = async (req, res, next) => {
-  try {
-    const sucursalId = req.todasSucursales ? null : req.sucursal_id;
-    const data = await service.getComprasByProveedor(
-      req.params.proveedorId,
-      sucursalId,
-      req.user.negocio_id,
-    );
+    const data = await service.getCajaActiva(req.sucursal_id);
     res.json({ ok: true, data });
   } catch (err) { next(err); }
 };
 
-module.exports = { getCompras, getCompraById, getComprasByProveedor, registrarCompra };
+const abrirCaja = async (req, res, next) => {
+  try {
+    if (req.todasSucursales) {
+      return res.status(400).json({ ok: false, error: 'Selecciona una sucursal para abrir su caja' });
+    }
+    const data = await service.abrirCaja({
+      ...req.body,
+      sucursal_id: req.sucursal_id,
+      usuario_id:  req.user.id,
+      negocio_id:  req.user.negocio_id,
+    });
+    res.status(201).json({ ok: true, data, message: 'Caja abierta correctamente' });
+  } catch (err) { next(err); }
+};
+
+const toggleMovimiento = async (req, res, next) => {
+  try {
+    const data = await service.toggleMovimiento(req.user.negocio_id, req.params.movimientoId);
+    res.json({ ok: true, data, message: `Movimiento ${data.activo ? 'activado' : 'anulado'}` });
+  } catch (err) { next(err); }
+};
+
+const cerrarCaja = async (req, res, next) => {
+  try {
+    const data = await service.cerrarCaja(req.user.negocio_id, req.params.id, req.body);
+    res.json({ ok: true, data, message: 'Caja cerrada correctamente' });
+  } catch (err) { next(err); }
+};
+
+const getMovimientos = async (req, res, next) => {
+  try {
+    const data = await service.getMovimientos(req.user.negocio_id, req.params.id);
+    res.json({ ok: true, data });
+  } catch (err) { next(err); }
+};
+
+const getResumenDia = async (req, res, next) => {
+  try {
+    if (req.todasSucursales) {
+      const data = await service.getResumenGlobal(req.user.negocio_id);
+      return res.json({ ok: true, data, modo: 'global', nivel: req.user.nivel });
+    }
+    const data = await service.getResumenDia(req.user.negocio_id, req.params.id, req.sucursal_id);
+    res.json({ ok: true, data, modo: 'sucursal', nivel: req.user.nivel });
+  } catch (err) { next(err); }
+};
+
+const registrarMovimiento = async (req, res, next) => {
+  try {
+    if (req.todasSucursales) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Selecciona una sucursal para registrar un movimiento',
+      });
+    }
+    const data = await service.registrarMovimiento(req.user.negocio_id, req.params.id, {
+      ...req.body,
+      usuario_id: req.user.id,
+    });
+    res.status(201).json({ ok: true, data, message: 'Movimiento registrado' });
+  } catch (err) { next(err); }
+};
+
+module.exports = {
+  getCajaActiva, abrirCaja, cerrarCaja,
+  getMovimientos, getResumenDia, registrarMovimiento, toggleMovimiento,
+};

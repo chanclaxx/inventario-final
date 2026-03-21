@@ -15,7 +15,7 @@ import { useSucursalKey } from '../../hooks/useSucursalKey';
 import {
   Wallet, Plus, Lock, ChevronDown, ChevronUp,
   ShoppingCart, CreditCard, ArrowDownCircle, ArrowUpCircle,
-  Receipt, Sliders, RefreshCw, Bike, Ban, RotateCcw,
+  Receipt, Sliders, RefreshCw, Bike, Ban, RotateCcw, Wrench,
 } from 'lucide-react';
 
 const METODOS_PAGO_ORDEN = ['Efectivo', 'Nequi', 'Daviplata', 'Transferencia', 'Tarjeta'];
@@ -28,7 +28,7 @@ const CONFIG_GRUPOS = {
     textHeader: 'text-green-700',
     borderColor:'border-green-100',
     renderItem: (item) => ({
-      descripcion: `Factura #${String(item.factura_id).padStart(6, '0')} \u2014 ${item.nombre_cliente}`,
+      descripcion: `Factura #${String(item.factura_id).padStart(6, '0')} — ${item.nombre_cliente}`,
       detalle:     item.metodo,
       fecha:       item.fecha,
     }),
@@ -40,7 +40,7 @@ const CONFIG_GRUPOS = {
     textHeader: 'text-blue-700',
     borderColor:'border-blue-100',
     renderItem: (item) => ({
-      descripcion: `Cr\u00e9dito Factura #${String(item.factura_id).padStart(6, '0')} \u2014 ${item.nombre_cliente}`,
+      descripcion: `Crédito Factura #${String(item.factura_id).padStart(6, '0')} — ${item.nombre_cliente}`,
       detalle:     item.metodo,
       fecha:       item.fecha,
     }),
@@ -52,12 +52,29 @@ const CONFIG_GRUPOS = {
     textHeader: 'text-purple-700',
     borderColor:'border-purple-100',
     renderItem: (item) => ({
-      descripcion: `Pr\u00e9stamo \u2014 ${item.prestatario}`,
+      descripcion: `Préstamo — ${item.prestatario}`,
       detalle:     null,
       fecha:       item.fecha,
     }),
   },
-  // Abonos rendidos por domiciliarios — ingreso real confirmado
+  abonosServicio: {
+    icono:      Wrench,
+    color:      'blue',
+    bgHeader:   'bg-blue-50',
+    textHeader: 'text-blue-700',
+    borderColor:'border-blue-100',
+    renderItem: (item) => {
+      const equipo = item.equipo_nombre || item.equipo_tipo || '';
+      const cliente = item.cliente_nombre || '';
+      const ordenNum = item.orden_id ? `#OS-${String(item.orden_id).padStart(4, '0')}` : '';
+      const partes = [ordenNum, equipo, cliente].filter(Boolean).join(' — ');
+      return {
+        descripcion: partes || item.concepto || 'Servicio técnico',
+        detalle:     null,
+        fecha:       item.fecha,
+      };
+    },
+  },
   retomas: {
     icono:      RefreshCw,
     color:      'orange',
@@ -88,11 +105,14 @@ const CONFIG_GRUPOS = {
     bgHeader:   'bg-red-50',
     textHeader: 'text-red-700',
     borderColor:'border-red-100',
-    renderItem: (item) => ({
-      descripcion: `Compra \u2014 ${item.proveedor}`,
-      detalle:     item.numero_factura ? `Fact. ${item.numero_factura}` : null,
-      fecha:       item.fecha,
-    }),
+    renderItem: (item, opciones) => {
+      const nombre = opciones?.ocultarProveedor ? 'Proveedor' : item.proveedor;
+      return {
+        descripcion: `Compra — ${nombre}`,
+        detalle:     item.numero_factura ? `Fact. ${item.numero_factura}` : null,
+        fecha:       item.fecha,
+      };
+    },
   },
   abonosAcreedor: {
     icono:      ArrowUpCircle,
@@ -100,11 +120,14 @@ const CONFIG_GRUPOS = {
     bgHeader:   'bg-yellow-50',
     textHeader: 'text-yellow-700',
     borderColor:'border-yellow-100',
-    renderItem: (item) => ({
-      descripcion: `Abono a ${item.acreedor}`,
-      detalle:     item.descripcion,
-      fecha:       item.fecha,
-    }),
+    renderItem: (item, opciones) => {
+      const nombre = opciones?.ocultarProveedor ? 'Proveedor' : item.acreedor;
+      return {
+        descripcion: `Abono a ${nombre}`,
+        detalle:     opciones?.ocultarProveedor ? null : item.descripcion,
+        fecha:       item.fecha,
+      };
+    },
   },
   abonosDomicilio: {
     icono:      Bike,
@@ -232,11 +255,11 @@ function ModalCerrarCaja({ caja, resumenTotales, onClose }) {
             <Bike size={14} className="text-orange-500 flex-shrink-0" />
             <p className="text-xs text-orange-700">
               Hay <span className="font-semibold">{formatCOP(resumenTotales.pendienteDomicilios)}</span> pendientes
-              de rendir por domiciliarios. Ese monto no est\u00e1 incluido en el saldo esperado.
+              de rendir por domiciliarios. Ese monto no está incluido en el saldo esperado.
             </p>
           </div>
         )}
-        <Input label="Monto de cierre (conteo f\u00edsico)" type="number" placeholder="0"
+        <Input label="Monto de cierre (conteo físico)" type="number" placeholder="0"
           value={monto} onChange={(e) => setMonto(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && mutation.mutate()} />
         {diferencia !== null && (
@@ -244,7 +267,7 @@ function ModalCerrarCaja({ caja, resumenTotales, onClose }) {
             ${diferencia === 0 ? 'bg-green-50 text-green-700' :
               diferencia > 0  ? 'bg-blue-50 text-blue-700'   :
                                 'bg-red-50 text-red-600'}`}>
-            {diferencia === 0 && '\u2713 Caja cuadrada perfectamente'}
+            {diferencia === 0 && '✓ Caja cuadrada perfectamente'}
             {diferencia > 0  && `Sobrante: +${formatCOP(diferencia)}`}
             {diferencia < 0  && `Faltante: ${formatCOP(diferencia)}`}
           </div>
@@ -267,7 +290,7 @@ function ResumenMetodosPago({ metodosPago }) {
   return (
     <div className="bg-white border border-gray-100 rounded-2xl p-4 flex flex-col gap-3">
       <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-        Ingresos por m\u00e9todo de pago
+        Ingresos por método de pago
       </p>
       <div className="flex flex-col gap-2">
         {metodosConValor.map((metodo) => (
@@ -281,7 +304,7 @@ function ResumenMetodosPago({ metodosPago }) {
   );
 }
 
-// ─── GrupoMovimientos — grupos de ingreso/egreso normales ────────────────────
+// ─── GrupoMovimientos ────────────────────────────────────────────────────────
 
 function ItemMovimiento({ item, rendered, esTipoIngreso, cajaId }) {
   const queryClient = useQueryClient();
@@ -293,8 +316,6 @@ function ItemMovimiento({ item, rendered, esTipoIngreso, cajaId }) {
     },
   });
 
-  // Solo movimientos_caja tiene campo 'activo'.
-  // Para filas de otras tablas (pagos_factura, etc.) activo es undefined → no tienen toggle.
   const tieneToggle = item.activo !== undefined;
   const estaActivo  = item.activo !== false;
 
@@ -330,7 +351,6 @@ function ItemMovimiento({ item, rendered, esTipoIngreso, cajaId }) {
 
         {tieneToggle && (
           estaActivo ? (
-            // Botón anular — siempre visible
             <button
               onClick={(e) => { e.stopPropagation(); mutation.mutate(); }}
               disabled={mutation.isPending}
@@ -344,7 +364,6 @@ function ItemMovimiento({ item, rendered, esTipoIngreso, cajaId }) {
               <span className="hidden sm:inline">Anular</span>
             </button>
           ) : (
-            // Botón reactivar — siempre visible cuando está anulado
             <button
               onClick={(e) => { e.stopPropagation(); mutation.mutate(); }}
               disabled={mutation.isPending}
@@ -363,7 +382,7 @@ function ItemMovimiento({ item, rendered, esTipoIngreso, cajaId }) {
   );
 }
 
-function GrupoMovimientos({ grupoKey, grupo, cajaId }) {
+function GrupoMovimientos({ grupoKey, grupo, cajaId, opciones }) {
   const [expandido, setExpandido] = useState(false);
   const cfg = CONFIG_GRUPOS[grupoKey];
   if (!cfg || grupo.items.length === 0) return null;
@@ -372,7 +391,6 @@ function GrupoMovimientos({ grupoKey, grupo, cajaId }) {
   const esMixto    = grupoKey === 'manuales';
   const esIngreso  = grupo.tipo === 'Ingreso';
 
-  // Contar anulados para mostrar en el badge
   const anulados = grupo.items.filter((i) => i.activo === false).length;
 
   return (
@@ -414,7 +432,7 @@ function GrupoMovimientos({ grupoKey, grupo, cajaId }) {
       {expandido && (
         <div className="divide-y divide-gray-50">
           {grupo.items.map((item) => {
-            const rendered      = cfg.renderItem(item);
+            const rendered      = cfg.renderItem(item, opciones);
             const esTipoIngreso = rendered.esMixto ? rendered.tipo === 'Ingreso' : esIngreso;
             return (
               <ItemMovimiento
@@ -431,9 +449,6 @@ function GrupoMovimientos({ grupoKey, grupo, cajaId }) {
     </div>
   );
 }
-
-// ─── GrupoMovimientosInformativo — facturas en poder del domiciliario ─────────
-// No suman a ingresos. Se muestran con estilo neutro y etiqueta "pendiente".
 
 function GrupoMovimientosInformativo({ grupo }) {
   const [expandido, setExpandido] = useState(false);
@@ -467,7 +482,7 @@ function GrupoMovimientosInformativo({ grupo }) {
               className="flex items-center justify-between px-4 py-2.5 bg-white hover:bg-gray-50/50">
               <div className="flex-1 min-w-0">
                 <p className="text-sm text-gray-600 truncate">
-                  Factura #{String(item.factura_id).padStart(6,'0')} \u2014 {item.nombre_cliente}
+                  Factura #{String(item.factura_id).padStart(6,'0')} — {item.nombre_cliente}
                 </p>
                 <div className="flex items-center gap-2">
                   {item.metodo && <span className="text-xs text-gray-400">{item.metodo}</span>}
@@ -498,12 +513,19 @@ export default function CajaPage() {
     enabled:  sucursalLista,
   });
 
-  const { data: resumenData, isLoading: loadingResumen } = useQuery({
+  const { data: resumenRaw, isLoading: loadingResumen } = useQuery({
     queryKey: ['caja-resumen', caja?.id],
-    queryFn:  () => getResumenDia(caja.id).then((r) => r.data.data),
+    queryFn:  () => getResumenDia(caja.id).then((r) => r.data),
     enabled:  !!caja?.id,
     refetchInterval: 30000,
   });
+
+  const resumenData = resumenRaw?.data ?? null;
+  const nivelUsuario = resumenRaw?.nivel ?? null;
+
+  // Determinar si se debe ocultar el nombre de proveedores
+  // Solo admin_negocio puede ver los nombres reales
+  const ocultarProveedor = nivelUsuario && nivelUsuario !== 'admin_negocio';
 
   const mutAbrir = useMutation({
     mutationFn: () => abrirCaja({ monto_inicial: Number(montoApertura) }),
@@ -516,6 +538,10 @@ export default function CajaPage() {
     [resumenData]
   );
   const metodosPago = useMemo(() => resumenData?.metodosPago || {}, [resumenData]);
+
+  const opcionesGrupo = useMemo(() => ({
+    ocultarProveedor,
+  }), [ocultarProveedor]);
 
   const saldoActual = useMemo(
     () => Number(caja?.monto_inicial || 0) + totales.ingresos - totales.egresos,
@@ -603,19 +629,20 @@ export default function CajaPage() {
 
       <div className="flex flex-col gap-3">
         <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-gray-700">Movimientos del per\u00edodo</h2>
+          <h2 className="text-sm font-semibold text-gray-700">Movimientos del período</h2>
           {loadingResumen && <Spinner className="py-0 scale-75" />}
         </div>
 
         {!hayMovimientos ? (
-          <EmptyState icon={Wallet} titulo="Sin movimientos a\u00fan" />
+          <EmptyState icon={Wallet} titulo="Sin movimientos aún" />
         ) : (
           <>
             <p className="text-xs text-gray-400 font-medium px-1">Ingresos</p>
-            <GrupoMovimientos grupoKey="facturas"        grupo={grupos.facturas        || { items: [] }} cajaId={caja.id} />
-            <GrupoMovimientos grupoKey="abonosCredito"   grupo={grupos.abonosCredito   || { items: [] }} cajaId={caja.id} />
-            <GrupoMovimientos grupoKey="abonosPrestamo"  grupo={grupos.abonosPrestamo  || { items: [] }} cajaId={caja.id} />
-            <GrupoMovimientos grupoKey="abonosDomicilio" grupo={grupos.abonosDomicilio || { items: [] }} cajaId={caja.id} />
+            <GrupoMovimientos grupoKey="facturas"        grupo={grupos.facturas        || { items: [] }} cajaId={caja.id} opciones={opcionesGrupo} />
+            <GrupoMovimientos grupoKey="abonosCredito"   grupo={grupos.abonosCredito   || { items: [] }} cajaId={caja.id} opciones={opcionesGrupo} />
+            <GrupoMovimientos grupoKey="abonosPrestamo"  grupo={grupos.abonosPrestamo  || { items: [] }} cajaId={caja.id} opciones={opcionesGrupo} />
+            <GrupoMovimientos grupoKey="abonosServicio"  grupo={grupos.abonosServicio  || { items: [] }} cajaId={caja.id} opciones={opcionesGrupo} />
+            <GrupoMovimientos grupoKey="abonosDomicilio" grupo={grupos.abonosDomicilio || { items: [] }} cajaId={caja.id} opciones={opcionesGrupo} />
 
             {grupos.facturasDomicilio?.items?.length > 0 && (
               <>
@@ -625,15 +652,15 @@ export default function CajaPage() {
             )}
 
             <p className="text-xs text-gray-400 font-medium px-1 mt-1">Egresos</p>
-            <GrupoMovimientos grupoKey="retomas"        grupo={grupos.retomas        || { items: [] }} cajaId={caja.id} />
-            <GrupoMovimientos grupoKey="devoluciones"   grupo={grupos.devoluciones   || { items: [] }} cajaId={caja.id} />
-            <GrupoMovimientos grupoKey="compras"        grupo={grupos.compras        || { items: [] }} cajaId={caja.id} />
-            <GrupoMovimientos grupoKey="abonosAcreedor" grupo={grupos.abonosAcreedor || { items: [] }} cajaId={caja.id} />
+            <GrupoMovimientos grupoKey="retomas"        grupo={grupos.retomas        || { items: [] }} cajaId={caja.id} opciones={opcionesGrupo} />
+            <GrupoMovimientos grupoKey="devoluciones"   grupo={grupos.devoluciones   || { items: [] }} cajaId={caja.id} opciones={opcionesGrupo} />
+            <GrupoMovimientos grupoKey="compras"        grupo={grupos.compras        || { items: [] }} cajaId={caja.id} opciones={opcionesGrupo} />
+            <GrupoMovimientos grupoKey="abonosAcreedor" grupo={grupos.abonosAcreedor || { items: [] }} cajaId={caja.id} opciones={opcionesGrupo} />
 
             {grupos.manuales?.items?.length > 0 && (
               <>
                 <p className="text-xs text-gray-400 font-medium px-1 mt-1">Manuales</p>
-                <GrupoMovimientos grupoKey="manuales" grupo={grupos.manuales} cajaId={caja.id} />
+                <GrupoMovimientos grupoKey="manuales" grupo={grupos.manuales} cajaId={caja.id} opciones={opcionesGrupo} />
               </>
             )}
           </>
