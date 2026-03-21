@@ -4,12 +4,15 @@ const { pool } = require('../config/db');
  * Resuelve el contexto de sucursal para cada request.
  *
  * Resultado en req:
- *   req.sucursal_id       → número (operación en una sucursal específica)
- *   req.todasSucursales   → true (admin pidió vista global del negocio)
+ *   req.sucursal_id → número (siempre una sucursal específica)
  *
  * Lógica por rol:
  *   vendedor / supervisor → siempre su sucursal asignada del token
- *   admin_negocio         → sucursal_id explícita | "todas" | fallback primera activa
+ *   admin_negocio         → sucursal_id explícita | fallback primera activa
+ *
+ * NOTA: Se eliminó la opción "todas" — el admin siempre opera
+ * en una sucursal específica. Puede cambiar entre sucursales
+ * desde el selector del frontend.
  */
 const resolveSucursal = async (req, res, next) => {
   try {
@@ -29,12 +32,6 @@ const resolveSucursal = async (req, res, next) => {
 
     // ── Admin: leer sucursal_id del query param o body ────────────────────
     const param = req.query.sucursal_id ?? req.body?.sucursal_id;
-
-    // Vista global solicitada explícitamente
-    if (param === 'todas') {
-      req.todasSucursales = true;
-      return next();
-    }
 
     // Sucursal numérica explícita — validar que pertenezca al negocio
     const sucursalExplicita = Number(param);
