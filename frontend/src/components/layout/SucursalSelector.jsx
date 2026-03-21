@@ -10,17 +10,7 @@ import { getSucursales } from '../../api/sucursales.api';
  * SucursalSelector
  *
  * Solo visible para admin_negocio Y cuando el negocio tiene más de una sucursal.
- *
- * Al montar, auto-selecciona la primera sucursal si no hay selección previa
- * válida — el usuario no necesita hacer clic para que los datos carguen.
- *
- * Al cambiar de sucursal:
- *   1. Actualiza sucursalStore
- *   2. Limpia el carrito
- *   3. Invalida todas las queries de React Query → recarga automática de datos
- *
- * NOTA: Se eliminó la opción "Todas las sucursales". El admin siempre
- * opera en una sucursal específica y puede cambiar entre ellas.
+ * El admin siempre opera en una sucursal específica.
  */
 export function SucursalSelector() {
   const { usuario, esAdminNegocio } = useAuth();
@@ -48,18 +38,12 @@ export function SucursalSelector() {
   });
 
   // Sincronizar lista con el store.
+  // setSucursales internamente maneja la auto-selección si es necesario.
   useEffect(() => {
     if (Array.isArray(listaSucursales) && listaSucursales.length > 0) {
       setSucursales(listaSucursales, usuario?.negocio_id ?? null);
-
-      // Si la sucursal activa es 'todas' o no es válida, seleccionar la primera
-      const idsValidos = listaSucursales.map((s) => s.id);
-      if (sucursalActiva === 'todas' || !idsValidos.includes(sucursalActiva)) {
-        setSucursal(listaSucursales[0].id);
-        queryClient.invalidateQueries();
-      }
     }
-  }, [listaSucursales, setSucursales, setSucursal, sucursalActiva, usuario?.negocio_id, queryClient]);
+  }, [listaSucursales, setSucursales, usuario?.negocio_id]);
 
   // Cerrar dropdown al hacer clic fuera
   useEffect(() => {
@@ -91,7 +75,6 @@ export function SucursalSelector() {
 
   return (
     <div ref={ref} className="relative">
-      {/* Botón disparador */}
       <button
         onClick={() => setAbierto((v) => !v)}
         className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-medium
@@ -108,7 +91,6 @@ export function SucursalSelector() {
         />
       </button>
 
-      {/* Dropdown — solo sucursales individuales */}
       {abierto && (
         <div className="absolute right-0 top-full mt-1.5 w-56 bg-white rounded-xl
           border border-gray-200 shadow-lg z-50 overflow-hidden
