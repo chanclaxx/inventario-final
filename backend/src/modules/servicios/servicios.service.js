@@ -1,5 +1,3 @@
-// FIX: eliminado require('../../config/db') y _verificarSucursal (función muerta)
-// La seguridad entre negocios la garantiza el repository en cada query
 const repo = require('./servicios.repository');
 
 // ─── Lectura ──────────────────────────────────────────────────────────────────
@@ -14,11 +12,10 @@ const getOrdenById = async (negocioId, id) => {
   return { ...orden, abonos };
 };
 
-// FIX: pasa negocioId al repository para el caso de admin sin sucursal específica
 const getResumenHoy = (sucursalId, negocioId) =>
   repo.getResumenHoy(sucursalId, negocioId);
 
-// ─── Crear orden ──────────────────────────────────────────────────────────────
+// ─── Crear ────────────────────────────────────────────────────────────────────
 
 const crearOrden = ({ sucursal_id, negocio_id, usuario_id, ...datos }) => {
   if (!datos.cliente_nombre?.trim())  throw { status: 400, message: 'El nombre del cliente es requerido' };
@@ -35,17 +32,45 @@ const enReparacion = async (negocioId, id) => {
 };
 
 const marcarListo = async (negocioId, id, datos) => {
+  const esGarantia = datos.es_garantia === true;
+
+  if (esGarantia) {
+    // Garantía cobrable: necesita precio_garantia
+    if (!datos.precio_garantia && datos.precio_garantia !== 0)
+      throw { status: 400, message: 'El precio de la garantía es requerido' };
+    if (Number(datos.precio_garantia) < 0)
+      throw { status: 400, message: 'El precio no puede ser negativo' };
+
+    const orden = await repo.marcarListo(negocioId, id, {
+      esGarantia:      true,
+      precio_garantia: Number(datos.precio_garantia),
+      costo_garantia:  datos.costo_garantia != null ? Number(datos.costo_garantia) : null,
+      notas_tecnico:   datos.notas_tecnico || null,
+    });
+    if (!orden) throw { status: 400, message: 'No se puede marcar como lista. Verifica el estado.' };
+    return orden;
+  }
+
+  // Garantía gratis
+  if (datos.es_garantia_gratis === true) {
+    const orden = await repo.marcarListoGarantiaGratis(negocioId, id, datos.notas_tecnico || null);
+    if (!orden) throw { status: 400, message: 'No se puede marcar como lista. Verifica el estado.' };
+    return orden;
+  }
+
+  // Reparación normal
   if (datos.precio_final === undefined || datos.precio_final === null || datos.precio_final === '')
     throw { status: 400, message: 'El precio final es requerido' };
   if (Number(datos.precio_final) < 0)
     throw { status: 400, message: 'El precio final no puede ser negativo' };
 
   const orden = await repo.marcarListo(negocioId, id, {
+    esGarantia:    false,
     costo_real:    datos.costo_real != null ? Number(datos.costo_real) : null,
     precio_final:  Number(datos.precio_final),
     notas_tecnico: datos.notas_tecnico || null,
   });
-  if (!orden) throw { status: 400, message: 'No se puede marcar como lista. Verifica el estado actual.' };
+  if (!orden) throw { status: 400, message: 'No se puede marcar como lista. Verifica el estado.' };
   return orden;
 };
 
@@ -55,9 +80,9 @@ const registrarAbono = (negocioId, ordenId, datos) => {
   return repo.registrarAbono(negocioId, ordenId, { ...datos, valor });
 };
 
-// entregar relanza el error 409 (saldo pendiente) — el controller lo convierte en respuesta HTTP
-const entregar = (negocioId, id, { forzar = false } = {}) =>
-  repo.marcarEntregado(negocioId, id, { forzar });
+// Entrega: sin forzar — el repo decide si va a Entregado o Pendiente_pago
+const entregar = (negocioId, id) =>
+  repo.marcarEntregado(negocioId, id);
 
 const sinReparar = (negocioId, id, datos) => {
   if (!datos.motivo) throw { status: 400, message: 'El motivo es requerido' };
@@ -76,7 +101,7 @@ const abrirGarantia = async (negocioId, id, datos) => {
     cobrable:      Boolean(datos.cobrable),
     notas_tecnico: datos.notas_tecnico || null,
   });
-  if (!orden) throw { status: 400, message: 'Solo se puede abrir garantía en órdenes Entregadas' };
+  if (!orden) throw { status: 400, message: 'Solo se puede abrir garantía en órdenes Entregadas o Pendiente_pago' };
   return orden;
 };
 

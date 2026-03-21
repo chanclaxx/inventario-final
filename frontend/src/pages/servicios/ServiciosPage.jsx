@@ -29,12 +29,13 @@ import {
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
 const ESTADOS_CONFIG = {
-  Recibido:      { badge: 'blue',   label: 'Recibido',      border: 'border-l-blue-400'   },
-  En_reparacion: { badge: 'yellow', label: 'En reparación', border: 'border-l-amber-400'  },
-  Listo:         { badge: 'green',  label: 'Listo',         border: 'border-l-green-400'  },
-  Entregado:     { badge: 'gray',   label: 'Entregado',     border: 'border-l-gray-200'   },
-  Sin_reparar:   { badge: 'red',    label: 'Sin reparar',   border: 'border-l-red-200'    },
-  Garantia:      { badge: 'purple', label: 'Garantía',      border: 'border-l-purple-400' },
+  Recibido:       { badge: 'blue',   label: 'Recibido',         border: 'border-l-blue-400'   },
+  En_reparacion:  { badge: 'yellow', label: 'En reparación',    border: 'border-l-amber-400'  },
+  Listo:          { badge: 'green',  label: 'Listo',            border: 'border-l-green-400'  },
+  Pendiente_pago: { badge: 'orange', label: 'Pendiente de pago',border: 'border-l-orange-400' },
+  Entregado:      { badge: 'gray',   label: 'Entregado',        border: 'border-l-gray-200'   },
+  Sin_reparar:    { badge: 'red',    label: 'Sin reparar',      border: 'border-l-red-200'    },
+  Garantia:       { badge: 'purple', label: 'Garantía',         border: 'border-l-purple-400' },
 };
 
 const METODOS_PAGO        = ['Efectivo', 'Transferencia', 'Nequi', 'Daviplata', 'Otro'];
@@ -45,7 +46,7 @@ const MOTIVOS_SIN_REPARAR = [
   'Falta de repuestos',
   'Otro',
 ];
-const ESTADOS_ACTIVOS  = ['Recibido', 'En_reparacion', 'Listo', 'Garantia'];
+const ESTADOS_ACTIVOS  = ['Recibido', 'En_reparacion', 'Listo', 'Pendiente_pago', 'Garantia'];
 const ESTADOS_CERRADOS = ['Entregado', 'Sin_reparar'];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -108,46 +109,52 @@ function CardOrden({ orden, onAccion, esAdmin = false }) {
       {/* Cabecera — siempre visible */}
       <div className="px-4 pt-3 pb-2 flex items-start gap-3">
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-xs text-gray-400 font-mono">#OS-{String(orden.id).padStart(4,'0')}</span>
-            <Badge variant={estado.badge}>{estado.label}</Badge>
-            {saldo > 0 && ['Listo','Garantia'].includes(orden.estado) && (
-              <span className="text-xs font-semibold text-red-500">Saldo {formatCOP(saldo)}</span>
-            )}
-          </div>
-          <p className="text-sm font-semibold text-gray-800 mt-0.5 truncate">
-            {nombreEquipo(orden)}
+          {/* Nombre del cliente — grande e identificable */}
+          <p className="text-base font-bold text-gray-900 truncate leading-tight">
+            {orden.cliente_nombre}
           </p>
-          {/* Cliente siempre visible */}
-          <div className="flex items-center gap-1 mt-0.5">
-            <User size={11} className="text-gray-400 flex-shrink-0" />
-            <span className="text-xs font-medium text-gray-600 truncate">{orden.cliente_nombre}</span>
-            {orden.cliente_telefono && (
-              <span className="text-xs text-gray-400">· {orden.cliente_telefono}</span>
-            )}
+          {orden.cliente_cedula && (
+            <p className="text-xs text-gray-400">CC: {orden.cliente_cedula}</p>
+          )}
+          {orden.cliente_telefono && !orden.cliente_cedula && (
+            <p className="text-xs text-gray-400">{orden.cliente_telefono}</p>
+          )}
+          {orden.cliente_cedula && orden.cliente_telefono && (
+            <p className="text-xs text-gray-400">{orden.cliente_telefono}</p>
+          )}
+          {/* Equipo + estado */}
+          <div className="flex items-center gap-2 flex-wrap mt-1">
+            <Badge variant={estado.badge}>{estado.label}</Badge>
+            <span className="text-xs text-gray-500 truncate">{nombreEquipo(orden)}</span>
           </div>
           <div className="flex items-center gap-3 mt-0.5 flex-wrap">
+            <span className="text-xs text-gray-400 font-mono">
+              #OS-{String(orden.id).padStart(4,'0')}
+            </span>
             <span className="flex items-center gap-1 text-xs text-gray-400">
               <Clock size={10} /> {formatFechaHora(orden.fecha_recepcion)}
             </span>
-            {orden.precio_final && (
-              <span className="text-xs font-bold text-gray-700">
-                {formatCOP(Number(orden.precio_final))}
-              </span>
-            )}
-            {!orden.precio_final && orden.costo_estimado && (
-              <span className="text-xs text-gray-400">
-                Est. {formatCOP(Number(orden.costo_estimado))}
-              </span>
-            )}
           </div>
         </div>
 
-        {/* Botón expandir */}
-        <button onClick={() => setExpandida((v) => !v)}
-          className="p-1 rounded-lg text-gray-300 hover:text-gray-500 hover:bg-gray-50 flex-shrink-0 mt-0.5">
-          {expandida ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-        </button>
+        {/* Precio + saldo + botón expandir */}
+        <div className="flex flex-col items-end gap-1 flex-shrink-0">
+          {(orden.estado === 'Garantia' && orden.garantia_cobrable && orden.precio_garantia)
+            ? <p className="text-sm font-bold text-purple-700">{formatCOP(Number(orden.precio_garantia))}</p>
+            : orden.precio_final
+              ? <p className="text-sm font-bold text-gray-900">{formatCOP(Number(orden.precio_final))}</p>
+              : orden.costo_estimado
+                ? <p className="text-xs text-gray-400">Est. {formatCOP(Number(orden.costo_estimado))}</p>
+                : null
+          }
+          {saldo > 0 && ['Listo','Pendiente_pago','Garantia'].includes(orden.estado) && (
+            <span className="text-xs font-semibold text-red-500">{formatCOP(saldo)}</span>
+          )}
+          <button onClick={() => setExpandida((v) => !v)}
+            className="p-1 rounded-lg text-gray-300 hover:text-gray-500 hover:bg-gray-50 mt-0.5">
+            {expandida ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+          </button>
+        </div>
       </div>
 
       {/* Acciones — siempre visibles en la card */}
@@ -164,12 +171,14 @@ function CardOrden({ orden, onAccion, esAdmin = false }) {
         <div className="px-4 pb-4 flex flex-col gap-2 bg-gray-50 border-t border-gray-100">
           <p className="text-sm text-gray-600 pt-3 italic">{orden.falla_reportada}</p>
 
-          {orden.precio_final && orden.estado !== 'Sin_reparar' && (
-            <BarraCobro
-              abonado={Number(orden.total_abonado) || 0}
-              total={Number(orden.precio_final)}
-            />
-          )}
+          {(() => {
+            const totalBarra = (orden.estado === 'Garantia' && orden.garantia_cobrable && orden.precio_garantia)
+              ? Number(orden.precio_garantia)
+              : Number(orden.precio_final || 0);
+            return totalBarra > 0 && orden.estado !== 'Sin_reparar' ? (
+              <BarraCobro abonado={Number(orden.total_abonado) || 0} total={totalBarra} />
+            ) : null;
+          })()}
 
           <div className="flex flex-col gap-1">
             {orden.equipo_serial    && <p className="text-xs text-gray-400 font-mono">Serial: {orden.equipo_serial}</p>}
@@ -213,6 +222,11 @@ function AccionesOrden({ orden, onAccion }) {
           </Button>
         </>
       )}
+      {estado === 'Pendiente_pago' && (
+        <Button size="sm" onClick={() => onAccion('abono', orden)}>
+          <Plus size={13} /> Registrar pago
+        </Button>
+      )}
       {estado === 'Garantia' && (
         <>
           <Button size="sm" onClick={() => onAccion('listo', orden)}>Marcar listo</Button>
@@ -223,7 +237,7 @@ function AccionesOrden({ orden, onAccion }) {
           )}
         </>
       )}
-      {estado === 'Entregado' && (
+      {(estado === 'Entregado' || estado === 'Pendiente_pago') && (
         <Button size="sm" variant="secondary" onClick={() => onAccion('garantia', orden)}>
           <RefreshCw size={13} /> Garantía
         </Button>
@@ -670,61 +684,147 @@ function ModalNuevaOrden({ onClose, onCreada }) {
 // ─── Modal: Marcar listo ──────────────────────────────────────────────────────
 
 function ModalMarcarListo({ orden, onClose, onExito }) {
-  const [costoReal,   setCostoReal]   = useState('');
-  const [precioFinal, setPrecioFinal] = useState(
-    orden.costo_estimado ? Number(orden.costo_estimado) : ''
+  // Detectar contexto: ¿es garantía cobrable o no cobrable?
+  const esGarantia      = orden.estado === 'Garantia';
+  const esGarantiaCobr  = esGarantia && orden.garantia_cobrable;
+  const esGarantiaGratis= esGarantia && !orden.garantia_cobrable;
+
+  const [costoReal,      setCostoReal]      = useState('');
+  const [precioFinal,    setPrecioFinal]    = useState(
+    !esGarantia && orden.costo_estimado ? Number(orden.costo_estimado) : ''
   );
+  const [costoGarantia,  setCostoGarantia]  = useState('');
+  const [precioGarantia, setPrecioGarantia] = useState('');
   const [notas, setNotas] = useState(orden.notas_tecnico || '');
   const [error, setError] = useState('');
 
   const mutListo = useMutation({
-    mutationFn: () => marcarListo(orden.id, {
-      costo_real:    costoReal   !== '' ? Number(costoReal)   : null,
-      precio_final:  precioFinal !== '' ? Number(precioFinal) : null,
-      notas_tecnico: notas || null,
-    }),
+    mutationFn: () => {
+      if (esGarantiaCobr) {
+        return marcarListo(orden.id, {
+          es_garantia:     true,
+          precio_garantia: Number(precioGarantia),
+          costo_garantia:  costoGarantia !== '' ? Number(costoGarantia) : null,
+          notas_tecnico:   notas || null,
+        });
+      }
+      if (esGarantiaGratis) {
+        return marcarListo(orden.id, {
+          es_garantia_gratis: true,
+          notas_tecnico:      notas || null,
+        });
+      }
+      return marcarListo(orden.id, {
+        costo_real:    costoReal   !== '' ? Number(costoReal)   : null,
+        precio_final:  precioFinal !== '' ? Number(precioFinal) : null,
+        notas_tecnico: notas || null,
+      });
+    },
     onSuccess: () => { onExito(); onClose(); },
     onError:   (err) => setError(err.response?.data?.error || 'Error'),
   });
 
   const utilidad = costoReal !== '' && precioFinal !== ''
     ? Number(precioFinal) - Number(costoReal) : null;
+  const utilGarantia = costoGarantia !== '' && precioGarantia !== ''
+    ? Number(precioGarantia) - Number(costoGarantia) : null;
+
+  const puedeGuardar = esGarantiaCobr
+    ? precioGarantia !== ''
+    : esGarantiaGratis
+      ? true
+      : precioFinal !== '';
 
   return (
     <Modal open onClose={onClose} title="Marcar como listo" size="sm">
       <div className="flex flex-col gap-4">
-        <div className="bg-green-50 border border-green-200 rounded-xl px-3 py-2.5">
-          <p className="text-sm font-semibold text-green-800">{nombreEquipo(orden)}</p>
-          <p className="text-xs text-green-600">{orden.cliente_nombre}</p>
-        </div>
 
-        <div className="flex flex-col gap-1">
-          <label className="text-sm font-medium text-gray-700">
-            Costo del arreglo <span className="text-gray-400 font-normal">(repuestos + mano de obra)</span>
-          </label>
-          <InputMoneda value={costoReal} onChange={setCostoReal} placeholder="0"
-            className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl
-              text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500" />
-          <p className="text-xs text-gray-400">Se usa para calcular tu utilidad.</p>
-        </div>
-
-        <div className="flex flex-col gap-1">
-          <label className="text-sm font-medium text-gray-700">¿Cuánto le cobras al cliente? *</label>
-          <InputMoneda value={precioFinal} onChange={setPrecioFinal} placeholder="0"
-            className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl
-              text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500" />
-          {orden.costo_estimado && (
-            <p className="text-xs text-gray-400">
-              Estimado original: {formatCOP(Number(orden.costo_estimado))}
+        {/* Contexto */}
+        <div className={`border rounded-xl px-3 py-2.5
+          ${esGarantia ? 'bg-purple-50 border-purple-200' : 'bg-green-50 border-green-200'}`}>
+          <p className={`text-sm font-semibold ${esGarantia ? 'text-purple-800' : 'text-green-800'}`}>
+            {nombreEquipo(orden)}
+          </p>
+          <p className={`text-xs ${esGarantia ? 'text-purple-600' : 'text-green-600'}`}>
+            {orden.cliente_nombre}
+          </p>
+          {esGarantia && (
+            <p className="text-xs text-purple-400 mt-1">
+              {esGarantiaCobr ? 'Garantía cobrable — falla diferente' : 'Garantía gratis — misma falla'}
+            </p>
+          )}
+          {esGarantia && orden.precio_final && (
+            <p className="text-xs text-purple-400">
+              Reparación original: {formatCOP(Number(orden.precio_final))} (no se modifica)
             </p>
           )}
         </div>
 
-        {utilidad !== null && (
-          <div className={`rounded-xl px-3 py-2.5 text-sm font-semibold
-            ${utilidad >= 0 ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'}`}>
-            Utilidad estimada: {formatCOP(utilidad)}
+        {/* Garantía gratis — solo notas */}
+        {esGarantiaGratis && (
+          <div className="bg-blue-50 border border-blue-200 rounded-xl px-3 py-2.5">
+            <p className="text-sm text-blue-700">
+              No se genera ningún cobro. El equipo se entrega sin costo adicional.
+            </p>
           </div>
+        )}
+
+        {/* Garantía cobrable — precio_garantia y costo_garantia */}
+        {esGarantiaCobr && (
+          <>
+            <div className="flex flex-col gap-1">
+              <label className="text-sm font-medium text-gray-700">
+                Costo de la garantía <span className="text-gray-400 font-normal">(repuestos + trabajo)</span>
+              </label>
+              <InputMoneda value={costoGarantia} onChange={setCostoGarantia} placeholder="0"
+                className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl
+                  text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-sm font-medium text-gray-700">¿Cuánto le cobras al cliente? *</label>
+              <InputMoneda value={precioGarantia} onChange={setPrecioGarantia} placeholder="0"
+                className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl
+                  text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+            {utilGarantia !== null && (
+              <div className={`rounded-xl px-3 py-2.5 text-sm font-semibold
+                ${utilGarantia >= 0 ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'}`}>
+                Utilidad garantía: {formatCOP(utilGarantia)}
+              </div>
+            )}
+          </>
+        )}
+
+        {/* Reparación normal */}
+        {!esGarantia && (
+          <>
+            <div className="flex flex-col gap-1">
+              <label className="text-sm font-medium text-gray-700">
+                Costo del arreglo <span className="text-gray-400 font-normal">(repuestos + mano de obra)</span>
+              </label>
+              <InputMoneda value={costoReal} onChange={setCostoReal} placeholder="0"
+                className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl
+                  text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              <p className="text-xs text-gray-400">Se usa para calcular tu utilidad.</p>
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-sm font-medium text-gray-700">¿Cuánto le cobras al cliente? *</label>
+              <InputMoneda value={precioFinal} onChange={setPrecioFinal} placeholder="0"
+                className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl
+                  text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              {orden.costo_estimado && (
+                <p className="text-xs text-gray-400">
+                  Estimado original: {formatCOP(Number(orden.costo_estimado))}
+                </p>
+              )}
+            </div>
+            {utilidad !== null && (
+              <div className={`rounded-xl px-3 py-2.5 text-sm font-semibold
+                ${utilidad >= 0 ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'}`}>
+                Utilidad estimada: {formatCOP(utilidad)}
+              </div>
+            )}
+          </>
         )}
 
         <div className="flex flex-col gap-1">
@@ -742,7 +842,7 @@ function ModalMarcarListo({ orden, onClose, onExito }) {
         <div className="flex gap-2">
           <Button variant="secondary" className="flex-1" onClick={onClose}>Cancelar</Button>
           <Button className="flex-1" loading={mutListo.isPending}
-            disabled={precioFinal === ''} onClick={() => mutListo.mutate()}>
+            disabled={!puedeGuardar} onClick={() => mutListo.mutate()}>
             Marcar listo
           </Button>
         </div>
@@ -829,18 +929,19 @@ function ModalAbono({ orden, onClose, onExito }) {
 // ─── Modal: Entregar ──────────────────────────────────────────────────────────
 
 function ModalEntregar({ orden, onClose, onExito }) {
-  const [forzar,      setForzar]      = useState(false);
-  const [saldoAlerta, setSaldoAlerta] = useState(null);
-  const [error,       setError]       = useState('');
-  const saldo = Number(orden.precio_final || 0) - Number(orden.total_abonado || 0);
+  const [error, setError] = useState('');
+
+  // Calcular el total a cobrar según el ciclo activo
+  const esGarantia = orden.estado === 'Garantia' && orden.garantia_cobrable;
+  const totalCobro = esGarantia
+    ? Number(orden.precio_garantia || 0)
+    : Number(orden.precio_final   || 0);
+  const saldo = totalCobro - Number(orden.total_abonado || 0);
 
   const mutEntregar = useMutation({
-    mutationFn: () => entregarOrden(orden.id, forzar),
+    mutationFn: () => entregarOrden(orden.id),
     onSuccess:  () => { onExito(); onClose(); },
-    onError:    (err) => {
-      if (err.response?.status === 409) setSaldoAlerta(err.response.data.saldo);
-      else setError(err.response?.data?.error || 'Error al entregar');
-    },
+    onError:    (err) => setError(err.response?.data?.error || 'Error al entregar'),
   });
 
   return (
@@ -849,37 +950,28 @@ function ModalEntregar({ orden, onClose, onExito }) {
         <div className="bg-gray-50 rounded-xl px-3 py-2.5">
           <p className="text-sm font-semibold text-gray-800">{nombreEquipo(orden)}</p>
           <p className="text-xs text-gray-500">{orden.cliente_nombre}</p>
-          {orden.precio_final && (
+          {totalCobro > 0 && (
             <p className="text-xs text-gray-400 mt-1">
-              Total: {formatCOP(Number(orden.precio_final))} ·
-              Abonado: {formatCOP(Number(orden.total_abonado))}
+              Total: {formatCOP(totalCobro)} · Abonado: {formatCOP(Number(orden.total_abonado))}
             </p>
           )}
         </div>
 
-        {!saldoAlerta && saldo <= 0 && (
+        {saldo <= 0 ? (
           <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-xl px-3 py-2.5">
             <CheckCircle size={16} className="text-green-600 flex-shrink-0" />
             <p className="text-sm text-green-700 font-medium">Pago completo — listo para entregar</p>
           </div>
-        )}
-
-        {(saldoAlerta || saldo > 0) && (
-          <div className="flex flex-col gap-3">
-            <div className="flex items-start gap-2 bg-orange-50 border border-orange-200 rounded-xl px-3 py-3">
-              <AlertTriangle size={16} className="text-orange-500 flex-shrink-0 mt-0.5" />
-              <div>
-                <p className="text-sm font-semibold text-orange-700">Saldo pendiente</p>
-                <p className="text-xs text-orange-600 mt-0.5">
-                  El cliente debe {formatCOP(saldoAlerta || saldo)}. ¿Entregar igual?
-                </p>
-              </div>
+        ) : (
+          <div className="flex items-start gap-2 bg-orange-50 border border-orange-200 rounded-xl px-3 py-3">
+            <AlertTriangle size={16} className="text-orange-500 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm font-semibold text-orange-700">Queda saldo pendiente</p>
+              <p className="text-xs text-orange-600 mt-0.5">
+                El cliente debe {formatCOP(saldo)}. El equipo se entrega
+                y quedará como <strong>Pendiente de pago</strong> hasta saldar.
+              </p>
             </div>
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input type="checkbox" checked={forzar}
-                onChange={(e) => setForzar(e.target.checked)} className="rounded" />
-              <span className="text-sm text-gray-700">Sí, entregar aunque quede saldo pendiente</span>
-            </label>
           </div>
         )}
 
@@ -888,9 +980,8 @@ function ModalEntregar({ orden, onClose, onExito }) {
         <div className="flex gap-2">
           <Button variant="secondary" className="flex-1" onClick={onClose}>Cancelar</Button>
           <Button className="flex-1" loading={mutEntregar.isPending}
-            disabled={saldoAlerta !== null && !forzar && saldo > 0}
             onClick={() => mutEntregar.mutate()}>
-            Confirmar entrega
+            {saldo > 0 ? 'Entregar con saldo pendiente' : 'Confirmar entrega'}
           </Button>
         </div>
       </div>
@@ -1105,8 +1196,14 @@ function ModalDetalleOrden({ ordenId, onClose }) {
           )}
           {data.precio_final && (
             <div className="bg-blue-50 rounded-xl px-3 py-2.5">
-              <p className="text-xs text-blue-400">Precio final</p>
+              <p className="text-xs text-blue-400">Precio reparación</p>
               <p className="text-sm font-bold text-blue-800">{formatCOP(Number(data.precio_final))}</p>
+            </div>
+          )}
+          {data.precio_garantia > 0 && (
+            <div className="bg-purple-50 rounded-xl px-3 py-2.5">
+              <p className="text-xs text-purple-400">Precio garantía</p>
+              <p className="text-sm font-bold text-purple-800">{formatCOP(Number(data.precio_garantia))}</p>
             </div>
           )}
           {data.costo_real && (
@@ -1118,10 +1215,20 @@ function ModalDetalleOrden({ ordenId, onClose }) {
           {data.utilidad != null && (
             <div className={`rounded-xl px-3 py-2.5 ${Number(data.utilidad) >= 0 ? 'bg-green-50' : 'bg-red-50'}`}>
               <p className={`text-xs ${Number(data.utilidad) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                Utilidad
+                Utilidad reparación
               </p>
               <p className={`text-sm font-bold ${Number(data.utilidad) >= 0 ? 'text-green-700' : 'text-red-600'}`}>
                 {formatCOP(Number(data.utilidad))}
+              </p>
+            </div>
+          )}
+          {data.utilidad_garantia != null && (
+            <div className={`rounded-xl px-3 py-2.5 ${Number(data.utilidad_garantia) >= 0 ? 'bg-green-50' : 'bg-red-50'}`}>
+              <p className={`text-xs ${Number(data.utilidad_garantia) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                Utilidad garantía
+              </p>
+              <p className={`text-sm font-bold ${Number(data.utilidad_garantia) >= 0 ? 'text-green-700' : 'text-red-600'}`}>
+                {formatCOP(Number(data.utilidad_garantia))}
               </p>
             </div>
           )}

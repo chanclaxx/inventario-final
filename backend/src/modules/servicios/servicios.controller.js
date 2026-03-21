@@ -15,7 +15,6 @@ const getOrdenById = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-// FIX: pasa negocioId para el caso de admin sin sucursal específica
 const getResumenHoy = async (req, res, next) => {
   try {
     const sucursalId = req.todasSucursales ? null : req.sucursal_id;
@@ -65,19 +64,13 @@ const registrarAbono = async (req, res, next) => {
 
 const entregar = async (req, res, next) => {
   try {
-    const data = await service.entregar(
-      req.user.negocio_id,
-      req.params.id,
-      { forzar: req.body.forzar === true }
-    );
-    res.json({ ok: true, data, message: 'Equipo entregado correctamente' });
-  } catch (err) {
-    // 409 = saldo pendiente → devolver el monto al frontend para la advertencia
-    if (err.status === 409) {
-      return res.status(409).json({ ok: false, error: err.message, saldo: err.saldo });
-    }
-    next(err);
-  }
+    const data = await service.entregar(req.user.negocio_id, req.params.id);
+    // Informar al frontend si quedó Pendiente_pago
+    const msg = data.estado === 'Pendiente_pago'
+      ? `Equipo entregado con saldo pendiente de $${Number(data.saldo_al_entregar || 0).toLocaleString('es-CO')}`
+      : 'Equipo entregado correctamente';
+    res.json({ ok: true, data, message: msg });
+  } catch (err) { next(err); }
 };
 
 const sinReparar = async (req, res, next) => {
@@ -101,9 +94,7 @@ const abrirGarantia = async (req, res, next) => {
 const actualizarNotas = async (req, res, next) => {
   try {
     const data = await service.actualizarNotas(
-      req.user.negocio_id,
-      req.params.id,
-      req.body.notas_tecnico
+      req.user.negocio_id, req.params.id, req.body.notas_tecnico
     );
     res.json({ ok: true, data });
   } catch (err) { next(err); }
