@@ -10,9 +10,24 @@ const validarOrden = [
   body('costo_estimado').optional({ nullable: true }).isFloat({ min: 0 }),
 ];
 
+// FIX: validarListo ahora contempla los 3 escenarios:
+// 1. Reparación normal     → precio_final obligatorio
+// 2. Garantía cobrable     → precio_garantia obligatorio (es_garantia = true)
+// 3. Garantía gratis       → sin precio (es_garantia_gratis = true)
+// Antes solo exigía precio_final siempre, lo que causaba 400 en garantías.
 const validarListo = [
-  body('precio_final').isFloat({ min: 0 }).withMessage('Precio final requerido'),
-  body('costo_real').optional({ nullable: true }).isFloat({ min: 0 }),
+  body('precio_final')
+    .if((value, { req }) => !req.body.es_garantia && !req.body.es_garantia_gratis)
+    .isFloat({ min: 0 }).withMessage('Precio final requerido'),
+  body('costo_real')
+    .optional({ nullable: true }).isFloat({ min: 0 }),
+  body('precio_garantia')
+    .if((value, { req }) => req.body.es_garantia === true)
+    .isFloat({ min: 0 }).withMessage('Precio de garantía requerido'),
+  body('costo_garantia')
+    .optional({ nullable: true }).isFloat({ min: 0 }),
+  body('notas_tecnico')
+    .optional({ nullable: true }).isString().trim(),
 ];
 
 const validarAbono = [

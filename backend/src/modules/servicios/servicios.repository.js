@@ -30,6 +30,13 @@ const COLS_CALCULADAS = `
     ELSE NULL
   END AS utilidad_garantia`;
 
+// ─── Helper: fecha hoy en Bogotá como string YYYY-MM-DD ──────────────────────
+// Evita pasar un Date de JS como parámetro (node-pg lo serializa en UTC,
+// causando desfase de zona al comparar con fechas AT TIME ZONE 'America/Bogota').
+// Al usar TEXT, PostgreSQL recibe el string literal y lo castea correctamente.
+
+const HOY_BOGOTA_EXPR = `(NOW() AT TIME ZONE 'America/Bogota')::date`;
+
 // ─── Lectura ──────────────────────────────────────────────────────────────────
 
 const findAll = async (sucursalId, negocioId, filtros = {}) => {
@@ -112,24 +119,22 @@ const getAbonos = async (negocioId, ordenId) => {
 };
 
 // ─── Resumen del día ──────────────────────────────────────────────────────────
+// FIX: Se calcula la fecha de hoy directamente en cada query SQL usando
+// (NOW() AT TIME ZONE 'America/Bogota')::date en lugar de pasar un Date de JS.
+// Esto evita el desfase de zona que ocurre cuando node-pg serializa un Date
+// en UTC y PostgreSQL lo compara contra timestamps en zona Bogotá.
 
 const getResumenHoy = async (sucursalId, negocioId) => {
   const param       = sucursalId ?? negocioId;
   const campoFiltro = sucursalId ? 'sucursal_id' : 'negocio_id';
-
-  // Fecha de hoy en Bogotá como string YYYY-MM-DD — evita ambigüedades de zona
-  const { rows: fechaRows } = await pool.query(
-    `SELECT (NOW() AT TIME ZONE 'America/Bogota')::date AS hoy`
-  );
-  const hoy = fechaRows[0].hoy; // objeto Date con la fecha correcta en Bogotá
 
   // 1. Órdenes recibidas hoy
   const { rows: r1 } = await pool.query(`
     SELECT COUNT(*) AS ordenes_hoy
     FROM ordenes_servicio
     WHERE ${campoFiltro} = $1
-      AND (fecha_recepcion AT TIME ZONE 'America/Bogota')::date = $2
-  `, [param, hoy]);
+      AND (fecha_recepcion AT TIME ZONE 'America/Bogota')::date = ${HOY_BOGOTA_EXPR}
+  `, [param]);
 
   // 2. Ingresos hoy = suma de abonos cuya fecha (en Bogotá) es hoy
   const { rows: r2 } = await pool.query(`
@@ -137,8 +142,8 @@ const getResumenHoy = async (sucursalId, negocioId) => {
     FROM abonos_servicio ab
     JOIN ordenes_servicio os ON os.id = ab.orden_id
     WHERE os.${campoFiltro} = $1
-      AND (ab.fecha AT TIME ZONE 'America/Bogota')::date = $2
-  `, [param, hoy]);
+      AND (ab.fecha AT TIME ZONE 'America/Bogota')::date = ${HOY_BOGOTA_EXPR}
+  `, [param]);
 
   // 3. Utilidad hoy = órdenes entregadas hoy con costo_real registrado
   const { rows: r3 } = await pool.query(`
@@ -151,8 +156,8 @@ const getResumenHoy = async (sucursalId, negocioId) => {
       AND estado IN ('Entregado', 'Sin_reparar')
       AND precio_final IS NOT NULL
       AND costo_real   IS NOT NULL
-      AND (fecha_entrega AT TIME ZONE 'America/Bogota')::date = $2
-  `, [param, hoy]);
+      AND (fecha_entrega AT TIME ZONE 'America/Bogota')::date = ${HOY_BOGOTA_EXPR}
+  `, [param]);
 
   // 4. Pendiente cobro = órdenes activas con saldo > 0
   const { rows: r4 } = await pool.query(`
