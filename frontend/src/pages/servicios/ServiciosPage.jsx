@@ -925,7 +925,8 @@ function ModalAbono({ orden, onClose, onExito }) {
 
 function ModalEntregar({ orden, onClose, onExito }) {
   const [error, setError] = useState('');
-  const [ordenEntregada, setOrdenEntregada] = useState(null);
+  const [entregado, setEntregado] = useState(false);
+  const [mostrarComprobante, setMostrarComprobante] = useState(false);
   const config = useConfig();
 
   const esGarantia = orden.estado === 'Garantia' && orden.garantia_cobrable;
@@ -934,24 +935,24 @@ function ModalEntregar({ orden, onClose, onExito }) {
     : Number(orden.precio_final   || 0);
   const saldo = totalCobro - Number(orden.total_abonado || 0);
 
-  // Traer detalle completo de la orden para el comprobante (incluye abonos)
+  // Traer detalle completo (con abonos) para el comprobante
   const { data: ordenDetalle } = useQuery({
     queryKey: ['orden-detalle-comprobante', orden.id],
     queryFn:  () => getOrdenById(orden.id).then((r) => r.data.data),
-    enabled:  !!ordenEntregada,
+    enabled:  entregado,
   });
 
   const mutEntregar = useMutation({
     mutationFn: () => entregarOrden(orden.id),
     onSuccess:  () => {
       onExito();
-      setOrdenEntregada(orden);
+      setEntregado(true);
     },
     onError: (err) => setError(err.response?.data?.error || 'Error al entregar'),
   });
 
-  // Si ya se entregó y tenemos el detalle, mostrar comprobante
-  if (ordenEntregada && ordenDetalle) {
+  // Si el usuario pidió imprimir y ya tenemos el detalle
+  if (mostrarComprobante && ordenDetalle) {
     return (
       <ComprobanteServicio
         orden={ordenDetalle}
@@ -959,6 +960,37 @@ function ModalEntregar({ orden, onClose, onExito }) {
         garantias={[]}
         onClose={onClose}
       />
+    );
+  }
+
+  // Modal de éxito después de entregar
+  if (entregado) {
+    return (
+      <Modal open onClose={onClose} title="Equipo entregado" size="sm">
+        <div className="flex flex-col items-center gap-4 py-4">
+          <div className="w-14 h-14 bg-green-100 rounded-full flex items-center justify-center">
+            <CheckCircle size={28} className="text-green-600" />
+          </div>
+          <div className="text-center">
+            <p className="text-sm font-semibold text-gray-900">
+              {nombreEquipo(orden)} entregado correctamente
+            </p>
+            <p className="text-xs text-gray-400 mt-1">{orden.cliente_nombre}</p>
+          </div>
+          <div className="flex gap-2 w-full">
+            <Button variant="secondary" className="flex-1" onClick={onClose}>
+              Cerrar
+            </Button>
+            <Button
+              className="flex-1"
+              loading={!ordenDetalle}
+              onClick={() => setMostrarComprobante(true)}
+            >
+              Imprimir comprobante
+            </Button>
+          </div>
+        </div>
+      </Modal>
     );
   }
 
