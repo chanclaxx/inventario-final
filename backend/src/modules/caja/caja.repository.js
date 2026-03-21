@@ -115,8 +115,8 @@ const getResumenCaja = async (cajaId) => {
 };
 
 // ─── _buildResumen ────────────────────────────────────────────────────────────
-// Recibe arrays de filas y devuelve grupos + totales + metodosPago.
-// CAMBIO: sv = abonos/cobros de servicios técnicos (referencia_tipo='servicio').
+// sv = abonos de servicios técnicos (query directa a abonos_servicio,
+// igual que préstamos usa abonos_prestamo — no depende de movimientos_caja).
 
 const _buildResumen = ({ pf, ac, ap, cp, aa, mn, rt, dv, ad, sv }) => {
   const sum = (arr) => arr
@@ -310,7 +310,7 @@ const getResumenDia = async (cajaId, sucursalId, negocioId) => {
       WHERE ma.tipo = 'Abono' AND a.negocio_id = $1 AND ma.fecha BETWEEN $2 AND $3
     `, [negocioId, inicio, fin]),
 
-    // Manuales: excluir 'factura_cancelada', 'abono_domicilio' y 'servicio'
+    // Manuales: excluir tipos con grupo propio
     pool.query(`
       SELECT m.*, u.nombre AS usuario_nombre
       FROM movimientos_caja m
@@ -349,19 +349,19 @@ const getResumenDia = async (cajaId, sucursalId, negocioId) => {
       ORDER BY m.fecha ASC
     `, [cajaId]),
 
-    // Servicios técnicos: movimientos_caja con referencia_tipo='servicio',
-    // enriquecidos con datos de la orden
+    // Servicios técnicos: query directa a abonos_servicio
+    // (mismo patrón que préstamos — no depende de movimientos_caja)
     pool.query(`
-      SELECT m.id, m.valor, m.concepto, m.fecha, m.activo, m.tipo,
-             m.referencia_id AS orden_id,
-             os.cliente_nombre, os.equipo_nombre, os.equipo_tipo,
+      SELECT ab.id, ab.valor, ab.metodo, ab.fecha,
+             os.id AS orden_id, os.cliente_nombre,
+             os.equipo_nombre, os.equipo_tipo,
              u.nombre AS usuario_nombre
-      FROM movimientos_caja m
-      LEFT JOIN ordenes_servicio os ON os.id = m.referencia_id
-      LEFT JOIN usuarios u ON u.id = m.usuario_id
-      WHERE m.caja_id = $1 AND m.referencia_tipo = 'servicio'
-      ORDER BY m.fecha ASC
-    `, [cajaId]),
+      FROM abonos_servicio ab
+      JOIN ordenes_servicio os ON os.id = ab.orden_id
+      LEFT JOIN usuarios u ON u.id = ab.usuario_id
+      WHERE os.sucursal_id = $1 AND ab.fecha BETWEEN $2 AND $3
+      ORDER BY ab.fecha ASC
+    `, [sucursalId, inicio, fin]),
   ]);
 
   return _buildResumen({
@@ -442,7 +442,6 @@ const getResumenGlobal = async (negocioId) => {
       WHERE ma.tipo = 'Abono' AND a.negocio_id = $1 AND ma.fecha BETWEEN $2 AND $3
     `, [negocioId, inicio, fin]),
 
-    // Manuales: excluir 'servicio' también en global
     pool.query(`
       SELECT m.*, u.nombre AS usuario_nombre, su.nombre AS sucursal_nombre
       FROM movimientos_caja m
@@ -494,21 +493,18 @@ const getResumenGlobal = async (negocioId) => {
       ORDER BY m.fecha ASC
     `, [negocioId, inicio, fin]),
 
-    // Servicios técnicos global
+    // Servicios técnicos global: query directa a abonos_servicio
     pool.query(`
-      SELECT m.id, m.valor, m.concepto, m.fecha, m.activo, m.tipo,
-             m.referencia_id AS orden_id,
-             os.cliente_nombre, os.equipo_nombre, os.equipo_tipo,
+      SELECT ab.id, ab.valor, ab.metodo, ab.fecha,
+             os.id AS orden_id, os.cliente_nombre,
+             os.equipo_nombre, os.equipo_tipo,
              u.nombre AS usuario_nombre, su.nombre AS sucursal_nombre
-      FROM movimientos_caja m
-      JOIN aperturas_caja ac ON ac.id = m.caja_id
-      JOIN sucursales     su ON su.id = ac.sucursal_id
-      LEFT JOIN ordenes_servicio os ON os.id = m.referencia_id
-      LEFT JOIN usuarios u ON u.id = m.usuario_id
-      WHERE su.negocio_id = $1
-        AND m.fecha BETWEEN $2 AND $3
-        AND m.referencia_tipo = 'servicio'
-      ORDER BY m.fecha ASC
+      FROM abonos_servicio ab
+      JOIN ordenes_servicio os ON os.id = ab.orden_id
+      JOIN sucursales       su ON su.id = os.sucursal_id
+      LEFT JOIN usuarios     u ON u.id  = ab.usuario_id
+      WHERE su.negocio_id = $1 AND ab.fecha BETWEEN $2 AND $3
+      ORDER BY ab.fecha ASC
     `, [negocioId, inicio, fin]),
   ]);
 
