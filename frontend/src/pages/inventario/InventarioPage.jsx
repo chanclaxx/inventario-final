@@ -3,6 +3,7 @@ import {
   Package, ShoppingBag, Plus, Download,
   ShoppingCart, ChevronDown, ChevronUp, Upload, AlertCircle,
 } from 'lucide-react';
+import { useQueryClient }          from '@tanstack/react-query';
 import { ProductosSerial }         from './ProductosSerial';
 import { ProductosCantidad }       from './ProductosCantidad';
 import { Carrito }                 from './Carrito';
@@ -23,6 +24,8 @@ const TABS = [
 ];
 
 export default function InventarioPage() {
+  const queryClient = useQueryClient();
+
   const [tabActiva,      setTabActiva]      = useState('serial');
   const [modalFactura,   setModalFactura]   = useState(false);
   const [modalPrestamo,  setModalPrestamo]  = useState(false);
@@ -42,7 +45,6 @@ export default function InventarioPage() {
 
   const bloquearCreacion = esVistaGlobal && !esUnicaSucursal;
 
-  // Exportar solo disponible para admin_negocio y supervisor
   const puedeExportar = esSupervisor();
 
   const handleExportar = async () => {
@@ -58,13 +60,25 @@ export default function InventarioPage() {
     }
   };
 
+  // Al cerrar el modal de agregar producto, invalidar todas las queries de inventario
+  // para que la lista se actualice inmediatamente sin necesidad de F5
+  const handleCerrarModalAgregar = () => {
+    setModalAgregar(false);
+    queryClient.invalidateQueries({ queryKey: ['productos-serial'],   exact: false });
+    queryClient.invalidateQueries({ queryKey: ['productos-cantidad'], exact: false });
+  };
+
+  const handleCerrarModalImportar = () => {
+    setModalImportar(false);
+    queryClient.invalidateQueries({ queryKey: ['productos-serial'],   exact: false });
+    queryClient.invalidateQueries({ queryKey: ['productos-cantidad'], exact: false });
+  };
+
   return (
     <div className="flex flex-col gap-4 lg:flex-row lg:gap-6">
 
-      {/* ── Contenido principal ── */}
       <div className="flex-1 min-w-0">
 
-        {/* Aviso vista global */}
         {bloquearCreacion && (
           <div className="flex items-center gap-2 px-3 py-2.5 mb-3 bg-purple-50
             border border-purple-200 rounded-xl text-sm text-purple-700">
@@ -76,7 +90,6 @@ export default function InventarioPage() {
           </div>
         )}
 
-        {/* Header: tabs + botones */}
         <div className="flex items-center justify-between mb-4 gap-2 flex-wrap">
           <div className="flex gap-1 bg-gray-100 p-1 rounded-xl w-fit">
             {TABS.map((tab) => {
@@ -99,7 +112,6 @@ export default function InventarioPage() {
           </div>
 
           <div className="flex items-center gap-2">
-            {/* Solo visible para supervisor y admin — vendedores no ven costos */}
             {puedeExportar && (
               <Button
                 size="sm"
@@ -142,7 +154,6 @@ export default function InventarioPage() {
         {tabActiva === 'cantidad' && <ProductosCantidad />}
       </div>
 
-      {/* ── Carrito desktop (lateral, solo lg+) ── */}
       <div className="hidden lg:block w-72 flex-shrink-0">
         <div className="sticky top-28 bg-white border border-gray-100 rounded-2xl p-4 shadow-sm">
           <Carrito
@@ -152,7 +163,6 @@ export default function InventarioPage() {
         </div>
       </div>
 
-      {/* ── Carrito móvil/tablet (colapsable) ── */}
       <div className="lg:hidden">
         <button
           onClick={() => setCarritoAbierto((v) => !v)}
@@ -197,15 +207,14 @@ export default function InventarioPage() {
         )}
       </div>
 
-      {/* ── Modales ── */}
       <ModalFactura  open={modalFactura}  onClose={() => setModalFactura(false)}  />
       <ModalPrestamo open={modalPrestamo} onClose={() => setModalPrestamo(false)} />
 
       {modalAgregar && !bloquearCreacion && (
-        <ModalAgregarProducto onClose={() => setModalAgregar(false)} />
+        <ModalAgregarProducto onClose={handleCerrarModalAgregar} />
       )}
       {modalImportar && !bloquearCreacion && (
-        <ModalImportarInventario onClose={() => setModalImportar(false)} />
+        <ModalImportarInventario onClose={handleCerrarModalImportar} />
       )}
     </div>
   );
