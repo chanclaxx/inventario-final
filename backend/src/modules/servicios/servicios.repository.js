@@ -302,7 +302,7 @@ const marcarSinReparar = async (negocioId, id, { motivo, precio_diagnostico, caj
           precio_final       = $4::numeric,
           total_abonado      = COALESCE($4::numeric, 0),
           fecha_entrega      = now()
-      WHERE id = $1
+      WHERE id = $1 AND negocio_id = $2::integer
       RETURNING *
     `, [id, negocioId, motivo || null, pd]);
 
