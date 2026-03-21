@@ -2,15 +2,23 @@ const { pool } = require('../../config/db');
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
-const ZONA   = `AT TIME ZONE 'UTC' AT TIME ZONE 'America/Bogota'`;
-const HOY_OS = `DATE(os.fecha_recepcion ${ZONA}) = (NOW() ${ZONA})::date`;
-const HOY_AB = `DATE(ab.fecha           ${ZONA}) = (NOW() ${ZONA})::date`;
+// FIX TIMEZONE: Las columnas fecha_recepcion, fecha_entrega y abonos.fecha son
+// "timestamp without time zone" pero almacenan valores en UTC.
+// Para convertir correctamente a Bogotá hay que:
+//   1. Decirle a PG que el valor está en UTC:  col AT TIME ZONE 'UTC'
+//      → esto produce un "timestamp with time zone" interpretado como UTC
+//   2. Convertir a Bogotá:  ... AT TIME ZONE 'America/Bogota'
+//      → esto produce un "timestamp without time zone" en hora local Bogotá
+//   3. Extraer la fecha:  (...)::date
+//
+// Expresión reutilizable para "fecha hoy en Bogotá":
+const HOY_BOGOTA = `(NOW() AT TIME ZONE 'America/Bogota')::date`;
 
-// saldo_pendiente y utilidad:
-// - precio_final = lo que costó la reparación original
-// - precio_garantia = lo que se cobra en ciclo de garantía (cobrable)
-// - Para cobro activo: si hay garantia_cobrable activa → usar precio_garantia
-// - Utilidad por ciclo: separada para no mezclar fechas en reportes
+// Helper: convierte una columna "timestamp without time zone" (guardada en UTC)
+// a fecha en Bogotá. Uso: fechaBogota('os.fecha_recepcion')
+const fechaBogota = (col) =>
+  `(${col} AT TIME ZONE 'UTC' AT TIME ZONE 'America/Bogota')::date`;
+
 const COLS_CALCULADAS = `
   CASE
     WHEN os.estado = 'Garantia' AND os.garantia_cobrable AND os.precio_garantia IS NOT NULL
@@ -29,11 +37,6 @@ const COLS_CALCULADAS = `
     THEN os.precio_garantia - os.costo_garantia
     ELSE NULL
   END AS utilidad_garantia`;
-
-// ─── Helper: fecha hoy en Bogotá calculada en SQL ────────────────────────────
-// Evita pasar un Date de JS como parámetro (node-pg lo serializa en UTC,
-// causando desfase de zona al comparar con fechas AT TIME ZONE 'America/Bogota').
-const HOY_BOGOTA_EXPR = `(NOW() AT TIME ZONE 'America/Bogota')::date`;
 
 // ─── Lectura ──────────────────────────────────────────────────────────────────
 
@@ -117,8 +120,6 @@ const getAbonos = async (negocioId, ordenId) => {
 };
 
 // ─── Resumen del día ──────────────────────────────────────────────────────────
-// FIX: Fecha hoy calculada inline en SQL para evitar desfase de timezone
-// cuando node-pg serializa Date objects en UTC.
 
 const getResumenHoy = async (sucursalId, negocioId) => {
   const param       = sucursalId ?? negocioId;
@@ -129,7 +130,7 @@ const getResumenHoy = async (sucursalId, negocioId) => {
     SELECT COUNT(*) AS ordenes_hoy
     FROM ordenes_servicio
     WHERE ${campoFiltro} = $1
-      AND (fecha_recepcion AT TIME ZONE 'America/Bogota')::date = ${HOY_BOGOTA_EXPR}
+      AND ${fechaBogota('fecha_recepcion')} = ${HOY_BOGOTA}
   `, [param]);
 
   // 2. Ingresos hoy = suma de abonos cuya fecha (en Bogotá) es hoy
@@ -138,7 +139,7 @@ const getResumenHoy = async (sucursalId, negocioId) => {
     FROM abonos_servicio ab
     JOIN ordenes_servicio os ON os.id = ab.orden_id
     WHERE os.${campoFiltro} = $1
-      AND (ab.fecha AT TIME ZONE 'America/Bogota')::date = ${HOY_BOGOTA_EXPR}
+      AND ${fechaBogota('ab.fecha')} = ${HOY_BOGOTA}
   `, [param]);
 
   // 3. Utilidad hoy = órdenes entregadas hoy con costo_real registrado
@@ -152,7 +153,7 @@ const getResumenHoy = async (sucursalId, negocioId) => {
       AND estado IN ('Entregado', 'Sin_reparar')
       AND precio_final IS NOT NULL
       AND costo_real   IS NOT NULL
-      AND (fecha_entrega AT TIME ZONE 'America/Bogota')::date = ${HOY_BOGOTA_EXPR}
+      AND ${fechaBogota('fecha_entrega')} = ${HOY_BOGOTA}
   `, [param]);
 
   // 4. Pendiente cobro = órdenes activas con saldo > 0
@@ -231,15 +232,11 @@ const marcarEnReparacion = async (negocioId, id) => {
   return rows[0] || null;
 };
 
-// marcarListo maneja dos casos:
-// - Estado normal (Recibido/En_reparacion): actualiza precio_final y costo_real
-// - Estado Garantia cobrable: actualiza precio_garantia y costo_garantia (NO toca precio_final)
 const marcarListo = async (negocioId, id, { costo_real, precio_final, notas_tecnico,
   precio_garantia, costo_garantia, esGarantia }) => {
   let query, params;
 
   if (esGarantia) {
-    // Garantía cobrable: guardar en campos separados, NO tocar precio_final original
     query = `
       UPDATE ordenes_servicio
       SET estado          = 'Listo',
@@ -251,7 +248,6 @@ const marcarListo = async (negocioId, id, { costo_real, precio_final, notas_tecn
       RETURNING *`;
     params = [id, negocioId, precio_garantia, costo_garantia || null, notas_tecnico || null];
   } else {
-    // Reparación normal: actualizar precio_final y costo_real
     query = `
       UPDATE ordenes_servicio
       SET estado        = 'Listo',
@@ -268,10 +264,7 @@ const marcarListo = async (negocioId, id, { costo_real, precio_final, notas_tecn
   return rows[0] || null;
 };
 
-// FIX: Garantía gratis — el SQL original usaba $3 tanto para costo_garantia (numeric)
-// como para notas_tecnico (text), causando error de tipo en PostgreSQL → 500.
-// Ahora costo_garantia se hardcodea a 0 (no hay costo en garantía gratis)
-// y $3 se usa exclusivamente para notas_tecnico.
+// FIX: Garantía gratis — costo_garantia ahora es 0 (valor fijo, no $3 que era texto)
 const marcarListoGarantiaGratis = async (negocioId, id, notas_tecnico) => {
   const { rows } = await pool.query(`
     UPDATE ordenes_servicio
@@ -286,8 +279,6 @@ const marcarListoGarantiaGratis = async (negocioId, id, notas_tecnico) => {
   return rows[0] || null;
 };
 
-// Abono dentro de transacción + movimiento_caja automático
-// El cobro activo puede ser precio_final o precio_garantia según el estado
 const registrarAbono = async (negocioId, ordenId, { valor, metodo, notas, usuarioId, cajaId }) => {
   const client = await pool.connect();
   try {
@@ -304,7 +295,6 @@ const registrarAbono = async (negocioId, ordenId, { valor, metodo, notas, usuari
     if (!orden.length) throw { status: 400, message: 'Orden no encontrada o no permite abonos en este estado' };
 
     const o = orden[0];
-    // Determinar el total a cobrar según el ciclo activo
     const totalCobro = (o.estado === 'Garantia' && o.garantia_cobrable && o.precio_garantia)
       ? Number(o.precio_garantia)
       : Number(o.precio_final || 0);
@@ -316,7 +306,6 @@ const registrarAbono = async (negocioId, ordenId, { valor, metodo, notas, usuari
 
     const nuevoAbonado = Number(o.total_abonado) + valor;
 
-    // Si quedó saldado y estaba Pendiente_pago → pasar a Entregado
     const nuevoEstado = (o.estado === 'Pendiente_pago' && nuevoAbonado >= totalCobro)
       ? 'Entregado'
       : o.estado;
@@ -354,9 +343,6 @@ const registrarAbono = async (negocioId, ordenId, { valor, metodo, notas, usuari
   }
 };
 
-// Entregar:
-// - Pago completo → estado Entregado
-// - Con saldo → estado Pendiente_pago (equipo va pero sigue debiendo)
 const marcarEntregado = async (negocioId, id) => {
   const client = await pool.connect();
   try {
@@ -375,16 +361,12 @@ const marcarEntregado = async (negocioId, id) => {
     const o = rows[0];
     const esGarantiaGratis = o.estado === 'Garantia' && !o.garantia_cobrable;
 
-    // Total a cobrar: garantía cobrable usa precio_garantia, resto usa precio_final
     const totalCobro = (o.estado === 'Garantia' && o.garantia_cobrable && o.precio_garantia)
       ? Number(o.precio_garantia)
       : Number(o.precio_final || 0);
 
     const saldo = totalCobro - Number(o.total_abonado);
 
-    // Garantía gratis → siempre Entregado sin cobro
-    // Pago completo → Entregado
-    // Con saldo → Pendiente_pago (equipo va pero debe)
     const nuevoEstado = (esGarantiaGratis || saldo <= 0) ? 'Entregado' : 'Pendiente_pago';
 
     const { rows: updated } = await client.query(`
@@ -453,7 +435,6 @@ const marcarSinReparar = async (negocioId, id, { motivo, precio_diagnostico, caj
   }
 };
 
-// Al abrir garantía: preservar precio_final histórico, resetear total_abonado y precio_garantia
 const abrirGarantia = async (negocioId, id, { cobrable, notas_tecnico }) => {
   const { rows } = await pool.query(`
     UPDATE ordenes_servicio
