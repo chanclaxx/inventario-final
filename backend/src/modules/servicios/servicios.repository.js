@@ -284,7 +284,7 @@ const registrarAbono = async (negocioId, ordenId, { valor, metodo, notas, usuari
     `, [ordenId, negocioId]);
     if (!orden.length) throw { status: 400, message: 'Orden no encontrada o no permite abonos en este estado' };
 
-    const o = rows[0];
+    const o = orden[0];
     // Determinar el total a cobrar según el ciclo activo
     const totalCobro = (o.estado === 'Garantia' && o.garantia_cobrable && o.precio_garantia)
       ? Number(o.precio_garantia)
