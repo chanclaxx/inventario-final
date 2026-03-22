@@ -421,7 +421,7 @@ function ModalNuevaOrden({ onClose, onCreada }) {
     cliente_cedula: '', cliente_nombre: '', cliente_telefono: '', cliente_id: '',
     cliente_email: '', cliente_direccion: '',
     equipo_tipo: '', equipo_nombre: '', equipo_serial: '',
-    falla_reportada: '', contrasena_equipo: '', notas_tecnico: '', costo_estimado: '',
+    falla_reportada: '', contrasena_equipo: '', tipo_contrasena: '', notas_tecnico: '', costo_estimado: '',
     checklist_equipo: [], patron_desbloqueo: [],
   });
   const [buscandoCedula, setBuscandoCedula] = useState(false);
@@ -663,14 +663,6 @@ function ModalNuevaOrden({ onClose, onCreada }) {
               />
             )}
 
-            {/* Patrón de desbloqueo — útil para celulares y tablets */}
-            {(form.equipo_tipo === 'Celular' || form.equipo_tipo === 'Tablet') && (
-              <PatronGrid
-                value={form.patron_desbloqueo}
-                onChange={(val) => set('patron_desbloqueo', val)}
-              />
-            )}
-
             <div className="flex gap-2 pt-2">
               <Button variant="secondary" onClick={() => irPaso(1)}>
                 <ChevronLeft size={15} /> Volver
@@ -715,15 +707,52 @@ function ModalNuevaOrden({ onClose, onCreada }) {
                   className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl
                     text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500" />
               </div>
-              <Input label="Contraseña / patrón" placeholder="Solo para técnico"
-                value={form.contrasena_equipo}
-                onChange={(e) => set('contrasena_equipo', e.target.value)} />
+              <div className="flex flex-col gap-1">
+                <label className="text-sm font-medium text-gray-700">Contraseña del equipo</label>
+                <div className="flex gap-1.5">
+                  {[
+                    { id: '',       label: 'Ninguna' },
+                    { id: 'pin',    label: 'PIN / Clave' },
+                    { id: 'patron', label: 'Patrón' },
+                  ].map((opt) => (
+                    <button key={opt.id} type="button"
+                      onClick={() => {
+                        set('tipo_contrasena', opt.id);
+                        if (opt.id !== 'pin') set('contrasena_equipo', '');
+                        if (opt.id !== 'patron') set('patron_desbloqueo', []);
+                      }}
+                      className={`flex-1 py-1.5 rounded-lg text-xs font-medium border transition-all
+                        ${form.tipo_contrasena === opt.id
+                          ? 'bg-amber-50 border-amber-300 text-amber-700'
+                          : 'bg-gray-50 border-gray-200 text-gray-500 hover:border-gray-300'}`}>
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
 
-            {form.contrasena_equipo && (
-              <p className="text-xs text-orange-500 -mt-1">
-                Solo visible internamente. No aparece en comprobantes.
-              </p>
+            {form.tipo_contrasena === 'pin' && (
+              <div className="flex flex-col gap-1">
+                <Input label="PIN / Clave numérica" placeholder="1234 o clave alfanumérica"
+                  value={form.contrasena_equipo}
+                  onChange={(e) => set('contrasena_equipo', e.target.value)} />
+                <p className="text-xs text-orange-500">
+                  Solo visible internamente. No aparece en comprobantes.
+                </p>
+              </div>
+            )}
+
+            {form.tipo_contrasena === 'patron' && (
+              <div className="flex flex-col gap-1">
+                <PatronGrid
+                  value={form.patron_desbloqueo}
+                  onChange={(val) => set('patron_desbloqueo', val)}
+                />
+                <p className="text-xs text-orange-500">
+                  Solo visible internamente. No aparece en comprobantes.
+                </p>
+              </div>
             )}
 
             <div className="flex flex-col gap-1">
@@ -1287,16 +1316,29 @@ function ModalDetalleOrden({ ordenId, onClose }) {
           )}
         </div>
 
+        {/* PIN numérico */}
         {data.contrasena_equipo && (
           <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5">
             <Lock size={14} className="text-amber-500 flex-shrink-0" />
             <div>
-              <p className="text-xs text-amber-600 font-medium">Contraseña / patrón del equipo</p>
+              <p className="text-xs text-amber-600 font-medium">PIN / Clave del equipo</p>
               <p className="text-sm font-mono font-bold text-amber-800 tracking-widest">
                 {data.contrasena_equipo}
               </p>
               <p className="text-xs text-amber-500 mt-0.5">Solo para uso del técnico</p>
             </div>
+          </div>
+        )}
+
+        {/* Patrón de desbloqueo */}
+        {data.patron_desbloqueo && Array.isArray(data.patron_desbloqueo) && data.patron_desbloqueo.length > 0 && (
+          <div className="bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5">
+            <div className="flex items-center gap-2 mb-2">
+              <Lock size={14} className="text-amber-500 flex-shrink-0" />
+              <p className="text-xs text-amber-600 font-medium">Patrón de desbloqueo</p>
+            </div>
+            <PatronGrid value={data.patron_desbloqueo} readOnly />
+            <p className="text-xs text-amber-500 mt-1.5">Solo para uso del técnico</p>
           </div>
         )}
 
