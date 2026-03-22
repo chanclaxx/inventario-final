@@ -6,3 +6,11 @@ export const getClienteById = (id) => api.get(`/clientes/${id}`);
 export const buscarPorCedula = (cedula) => api.get(`/clientes/cedula/${cedula}`);
 export const crearCliente = (data) => api.post('/clientes', data);
 export const actualizarCliente = (id, data) => api.put(`/clientes/${id}`, data);
+export const getFrecuentes = () =>
+  api.get('/clientes/frecuentes');
+ 
+export const agregarFrecuente = (clienteId) =>
+  api.post(`/clientes/frecuentes/${clienteId}`);
+ 
+export const quitarFrecuente = (clienteId) =>
+  api.delete(`/clientes/frecuentes/${clienteId}`);

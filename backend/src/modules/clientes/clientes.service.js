@@ -22,5 +22,15 @@ const actualizarCliente = async (negocioId, id, datos) => {
   if (!cliente) throw { status: 404, message: 'Cliente no encontrado' };
   return cliente;
 };
+const getFrecuentes = (sucursalId) => repo.findFrecuentes(sucursalId);
+ 
+const agregarFrecuente = async (negocioId, sucursalId, clienteId) => {
+  const cliente = await repo.findById(negocioId, clienteId);
+  if (!cliente) throw { status: 404, message: 'Cliente no encontrado' };
+  return repo.agregarFrecuente(sucursalId, clienteId);
+};
+ 
+const quitarFrecuente = (sucursalId, clienteId) =>
+  repo.quitarFrecuente(sucursalId, clienteId);
 
-module.exports = { getClientes, getClienteById, buscarPorCedula, crearCliente, actualizarCliente };
+module.exports = { getClientes, getClienteById, buscarPorCedula, crearCliente, actualizarCliente,agregarFrecuente,quitarFrecuente };

@@ -84,4 +84,34 @@ const update = async (negocioId, id, { nombre, celular, email, direccion }) => {
   return rows[0] || null;
 };
 
-module.exports = { findAll, findById, findByCedula, getHistorialCompras, create, update };
+const findFrecuentes = async (sucursalId) => {
+  const { rows } = await pool.query(`
+    SELECT c.id, c.nombre, c.cedula, c.celular, c.email, c.direccion
+    FROM clientes_frecuentes cf
+    JOIN clientes c ON c.id = cf.cliente_id
+    WHERE cf.sucursal_id = $1
+    ORDER BY c.nombre
+  `, [sucursalId]);
+  return rows;
+};
+ 
+const agregarFrecuente = async (sucursalId, clienteId) => {
+  const { rows } = await pool.query(`
+    INSERT INTO clientes_frecuentes(sucursal_id, cliente_id)
+    VALUES ($1, $2)
+    ON CONFLICT (sucursal_id, cliente_id) DO NOTHING
+    RETURNING *
+  `, [sucursalId, clienteId]);
+  return rows[0] || null;
+};
+ 
+const quitarFrecuente = async (sucursalId, clienteId) => {
+  const { rows } = await pool.query(`
+    DELETE FROM clientes_frecuentes
+    WHERE sucursal_id = $1 AND cliente_id = $2
+    RETURNING id
+  `, [sucursalId, clienteId]);
+  return rows[0] || null;
+};
+
+module.exports = { findAll, findById, findByCedula, getHistorialCompras, create, update,findFrecuentes,agregarFrecuente,quitarFrecuente };

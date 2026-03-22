@@ -6,7 +6,7 @@ import {
   registrarAbono, entregarOrden, sinReparar,
   abrirGarantia,
 } from '../../api/servicios.api';
-import { buscarPorCedula, crearCliente } from '../../api/clientes.api';
+import { buscarPorCedula, crearCliente, getFrecuentes, agregarFrecuente } from '../../api/clientes.api';
 import { useCedulaCliente }            from '../../hooks/useCedulaCliente';
 import { ModalConflictoCedula }        from '../../components/ui/ModalConflictoCedula';
 import { formatCOP, formatFechaHora }  from '../../utils/formatters';
@@ -23,12 +23,13 @@ import { Spinner }     from '../../components/ui/Spinner';
 import { EmptyState }  from '../../components/ui/EmptyState';
 import { SearchInput } from '../../components/ui/SearchInput';
 import { useAuth }     from '../../context/useAuth';
+import useSucursalStore from '../../store/sucursalStore';
 import api             from '../../api/axios.config';
 import {
   Wrench, Plus, ChevronRight, ChevronLeft,
   AlertTriangle, CheckCircle, RefreshCw,
   ChevronDown, ChevronUp, User, Clock, Lock,
-  Loader2, Printer,
+  Loader2, Printer, Star, Search, X,
 } from 'lucide-react';
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
@@ -410,10 +411,33 @@ function PasoIndicador({ paso, total, labels }) {
 // ─── Modal: Nueva orden (wizard 3 pasos) ─────────────────────────────────────
 
 function ModalNuevaOrden({ onClose, onCreada }) {
+  const queryClient = useQueryClient();
   const [paso, setPaso] = useState(1);
   const [ordenCreada, setOrdenCreada] = useState(null);
   const [mostrarRecibo, setMostrarRecibo] = useState(false);
+  const [guardarFrecuente, setGuardarFrecuente] = useState(false);
+  const [busquedaFrec, setBusquedaFrec] = useState('');
   const config = useConfig();
+  const { esSupervisor } = useAuth();
+  const sucursalActiva = useSucursalStore((s) => s.sucursalActiva);
+  const sucursalUsuario = useAuth().usuario?.sucursal_id;
+  const sucursalId = sucursalActiva || sucursalUsuario;
+  const puedeMarcarFrecuente = esSupervisor();
+
+  // Cargar clientes frecuentes de la sucursal
+  const { data: frecuentesRaw } = useQuery({
+    queryKey: ['clientes-frecuentes', sucursalId],
+    queryFn:  () => getFrecuentes().then((r) => r.data.data),
+    enabled:  !!sucursalId,
+    staleTime: 30_000,
+  });
+  const frecuentes = frecuentesRaw || [];
+
+  // Mutation para guardar como frecuente
+  const mutFrecuente = useMutation({
+    mutationFn: (clienteId) => agregarFrecuente(clienteId),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['clientes-frecuentes'], exact: false }),
+  });
   const [form, setForm] = useState({
     cliente_cedula: '', cliente_nombre: '', cliente_telefono: '', cliente_id: '',
     cliente_email: '', cliente_direccion: '',
@@ -488,6 +512,10 @@ function ModalNuevaOrden({ onClose, onCreada }) {
     onSuccess: (res) => {
       onCreada(res.data.data);
       setOrdenCreada(res.data.data);
+      // Guardar como frecuente si el checkbox estaba marcado y hay cliente_id
+      if (guardarFrecuente && form.cliente_id) {
+        mutFrecuente.mutate(Number(form.cliente_id));
+      }
     },
     onError:   (err) => setError(err.response?.data?.error || 'Error al crear la orden'),
   });
@@ -570,6 +598,73 @@ function ModalNuevaOrden({ onClose, onCreada }) {
 
         {paso === 1 && (
           <div className="flex flex-col gap-3">
+
+            {/* Lista de clientes frecuentes */}
+            {frecuentes.length > 0 && !form.cliente_id && (
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center gap-2">
+                  <Star size={13} className="text-amber-400" />
+                  <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                    Clientes frecuentes
+                  </span>
+                </div>
+
+                {frecuentes.length > 6 && (
+                  <div className="relative">
+                    <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-300" />
+                    <input type="text" placeholder="Buscar frecuente..."
+                      value={busquedaFrec} onChange={(e) => setBusquedaFrec(e.target.value)}
+                      className="w-full pl-8 pr-7 py-1.5 bg-gray-50 border border-gray-200 rounded-lg
+                        text-xs focus:outline-none focus:ring-1 focus:ring-blue-400 transition-all" />
+                    {busquedaFrec && (
+                      <button onClick={() => setBusquedaFrec('')}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-300 hover:text-gray-500">
+                        <X size={12} />
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                <div className={`flex flex-wrap gap-1.5 ${frecuentes.length > 12 ? 'max-h-28 overflow-y-auto' : ''}`}>
+                  {frecuentes
+                    .filter((c) => !busquedaFrec.trim() || c.nombre.toLowerCase().includes(busquedaFrec.toLowerCase()))
+                    .map((cliente) => (
+                      <button key={cliente.id}
+                        onClick={() => {
+                          setForm((f) => ({
+                            ...f,
+                            cliente_id:       String(cliente.id),
+                            cliente_cedula:   cliente.cedula   || '',
+                            cliente_nombre:   cliente.nombre   || '',
+                            cliente_telefono: cliente.celular  || '',
+                            cliente_email:    cliente.email    || '',
+                            cliente_direccion: cliente.direccion || '',
+                          }));
+                          setBusquedaFrec('');
+                        }}
+                        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border
+                          border-amber-200 bg-amber-50 hover:bg-amber-100 hover:border-amber-300
+                          transition-all text-left group">
+                        <div className="w-5 h-5 rounded-full bg-amber-200 flex items-center justify-center flex-shrink-0">
+                          <User size={10} className="text-amber-700" />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-xs font-medium text-amber-800 truncate max-w-[120px]">
+                            {cliente.nombre}
+                          </p>
+                          {cliente.celular && (
+                            <p className="text-[10px] text-amber-500 truncate">{cliente.celular}</p>
+                          )}
+                        </div>
+                      </button>
+                    ))}
+                  {busquedaFrec.trim() && frecuentes.filter((c) => c.nombre.toLowerCase().includes(busquedaFrec.toLowerCase())).length === 0 && (
+                    <p className="text-xs text-gray-400 py-1">Sin coincidencias</p>
+                  )}
+                </div>
+              </div>
+            )}
+
             <div className="relative">
               <Input label="Cédula / Documento" placeholder="123456789 (opcional)"
                 value={form.cliente_cedula}
@@ -601,6 +696,19 @@ function ModalNuevaOrden({ onClose, onCreada }) {
                 value={form.cliente_telefono}
                 onChange={(e) => set('cliente_telefono', e.target.value)} />
             </div>
+
+            {/* Checkbox guardar como frecuente — solo si hay datos y el usuario puede */}
+            {puedeMarcarFrecuente && form.cliente_nombre.trim() && !frecuentes.some((c) => String(c.id) === form.cliente_id) && (
+              <label className="flex items-center gap-2 cursor-pointer px-1">
+                <input type="checkbox" checked={guardarFrecuente}
+                  onChange={(e) => setGuardarFrecuente(e.target.checked)}
+                  className="rounded accent-amber-500 w-3.5 h-3.5" />
+                <span className="text-xs text-gray-500">
+                  <Star size={11} className="inline text-amber-400 mr-0.5 -mt-0.5" />
+                  Guardar como cliente frecuente
+                </span>
+              </label>
+            )}
 
             {error && <p className="text-sm text-red-500">{error}</p>}
 
