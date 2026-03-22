@@ -56,7 +56,7 @@ export default function App() {
                 <PrivateRoute rol="admin_negocio"><ProveedoresPage /></PrivateRoute>
               } />
               <Route path="/acreedores" element={
-                <PrivateRoute rol="admin_negocio"><AcreedoresPage /></PrivateRoute>
+                <PrivateRoute rol="supervisor"><AcreedoresPage /></PrivateRoute>
               } />
               <Route path="/config" element={
                 <PrivateRoute rol="admin_negocio"><ConfigPage /></PrivateRoute>
