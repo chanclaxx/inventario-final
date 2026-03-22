@@ -1342,6 +1342,47 @@ function ModalDetalleOrden({ ordenId, onClose }) {
           </div>
         )}
 
+        {/* Checklist estado del equipo */}
+        {data.checklist_equipo && Array.isArray(data.checklist_equipo) && data.checklist_equipo.length > 0 && (
+          <div className="flex flex-col gap-2">
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">
+              Estado del equipo al recibir
+            </p>
+            <div className="bg-gray-50 rounded-xl border border-gray-100 px-3 divide-y divide-gray-100">
+              {data.checklist_equipo.map((item) => {
+                const compKey = item.componente;
+                const estadoColor = item.estado === 'bien'
+                  ? 'text-green-600'
+                  : item.estado === 'detalle'
+                    ? 'text-amber-500'
+                    : 'text-red-500';
+                const estadoIcon = item.estado === 'bien'
+                  ? <CheckCircle size={13} />
+                  : item.estado === 'detalle'
+                    ? <AlertTriangle size={13} />
+                    : <span className="inline-flex"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg></span>;
+                const estadoLabel = item.estado === 'bien' ? 'Bien'
+                  : item.estado === 'detalle' ? 'Detalle' : 'Dañado';
+
+                return (
+                  <div key={compKey} className="flex items-center gap-2 py-2">
+                    <span className={`flex-shrink-0 ${estadoColor}`}>
+                      {estadoIcon}
+                    </span>
+                    <span className="text-sm text-gray-700 flex-1">{item.componente}</span>
+                    <span className={`text-xs font-medium ${estadoColor}`}>{estadoLabel}</span>
+                    {item.nota && (
+                      <span className="text-xs text-gray-400 italic max-w-[40%] truncate" title={item.nota}>
+                        {item.nota}
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         <div>
           <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">
             Falla reportada
