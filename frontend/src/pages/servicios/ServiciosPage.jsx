@@ -963,13 +963,22 @@ function ModalAbono({ orden, onClose, onExito }) {
   const [notas,  setNotas]  = useState('');
   const [error,  setError]  = useState('');
 
-  const saldo = Number(orden.precio_final || 0) - Number(orden.total_abonado || 0);
+  const saldo      = Number(orden.precio_final || 0) - Number(orden.total_abonado || 0);
+  const valorNum   = Number(valor || 0);
+  const excedeSaldo = valorNum > saldo;
 
   const mutAbono = useMutation({
-    mutationFn: () => registrarAbono(orden.id, { valor: Number(valor), metodo, notas: notas || null }),
+    mutationFn: () => registrarAbono(orden.id, { valor: valorNum, metodo, notas: notas || null }),
     onSuccess:  () => { onExito(); onClose(); },
     onError:    (err) => setError(err.response?.data?.error || 'Error'),
   });
+
+  const handleRegistrar = () => {
+    setError('');
+    if (!valor || valorNum <= 0) return setError('El valor debe ser mayor a 0');
+    if (excedeSaldo) return setError(`El abono no puede superar el saldo pendiente de ${formatCOP(saldo)}`);
+    mutAbono.mutate();
+  };
 
   return (
     <Modal open onClose={onClose} title="Registrar abono" size="sm">
@@ -992,8 +1001,16 @@ function ModalAbono({ orden, onClose, onExito }) {
         <div className="flex flex-col gap-1">
           <label className="text-sm font-medium text-gray-700">Valor del abono *</label>
           <InputMoneda value={valor} onChange={setValor} placeholder="0"
-            className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl
-              text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            className={`w-full px-3 py-2 bg-white border rounded-xl text-sm text-gray-700
+              focus:outline-none focus:ring-2 transition-all
+              ${excedeSaldo
+                ? 'border-red-300 focus:ring-red-400'
+                : 'border-gray-200 focus:ring-blue-500'}`} />
+          {excedeSaldo && (
+            <p className="text-xs text-red-500">
+              El abono no puede superar {formatCOP(saldo)}
+            </p>
+          )}
         </div>
 
         <div className="flex flex-col gap-1">
@@ -1021,7 +1038,8 @@ function ModalAbono({ orden, onClose, onExito }) {
         <div className="flex gap-2">
           <Button variant="secondary" className="flex-1" onClick={onClose}>Cancelar</Button>
           <Button className="flex-1" loading={mutAbono.isPending}
-            disabled={!valor || Number(valor) <= 0} onClick={() => mutAbono.mutate()}>
+            disabled={!valor || valorNum <= 0 || excedeSaldo}
+            onClick={handleRegistrar}>
             Registrar
           </Button>
         </div>
