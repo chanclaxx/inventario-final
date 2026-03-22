@@ -260,15 +260,20 @@ export function ProductosSerial({ onAgregarProducto }) {
 
   const handleSeleccionar = (p) => { setProductoSeleccionado(p); setBusquedaSerial(''); };
 
-  const handleAgregarSerial = (serial) => {
+   const handleAgregarSerial = (serial) => {
     if (serial.prestado) return;
     agregarItem({
-      key:      serial.imei,
-      tipo:     'serial',
-      nombre:   productoSeleccionado.nombre,
-      imei:     serial.imei,
-      precio:   Math.round(Number(productoSeleccionado.precio || 0)),
-      cantidad: 1,
+      key:         serial.imei,
+      tipo:        'serial',
+      nombre:      productoSeleccionado.nombre,
+      imei:        serial.imei,
+      precio:      Math.round(Number(productoSeleccionado.precio || 0)),
+      cantidad:    1,
+      serial_id:   serial.id,
+      producto_id: productoSeleccionado.id,
+      marca:       productoSeleccionado.marca    || null,
+      modelo:      productoSeleccionado.modelo   || null,
+      linea_id:    productoSeleccionado.linea_id || null,
     });
   };
 

@@ -78,8 +78,9 @@ app.use('/api/importacion',        protegida, require('./modules/importacion/imp
 app.use('/api/inventario',         protegida, require('./modules/inventario/inventario.export.routes'));
 app.use('/api/sucursales',         protegida, require('./modules/sucursales/sucursales.routes'));
 app.use('/api/lineas',             protegida, require('./modules/lineas/lineas.routes'));
-app.use('/api/domiciliarios', protegida, require('./modules/domiciliarios/domiciliarios.routes'));
-app.use('/api/servicios', protegida, require('./modules/servicios/servicios.routes'));
+app.use('/api/domiciliarios',      protegida, require('./modules/domiciliarios/domiciliarios.routes'));
+app.use('/api/servicios',          protegida, require('./modules/servicios/servicios.routes'));
+app.use('/api/traslados',          protegida, require('./modules/traslados/traslados.routes'));
 
 // ── Rutas de superadmin (sin protegida) ───────────────
 app.use('/api/superadmin', require('./modules/superadmin/superadmin.routes'));

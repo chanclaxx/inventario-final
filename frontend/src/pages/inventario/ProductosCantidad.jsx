@@ -162,7 +162,7 @@ export function ProductosCantidad() {
     }))
     .filter((g) => g.productos.length > 0);
 
-  const handleAgregar = (producto) => {
+   const handleAgregar = (producto) => {
     agregarItem({
       key:         `cant-${producto.id}`,
       tipo:        'cantidad',
@@ -171,6 +171,7 @@ export function ProductosCantidad() {
       precio:      Math.round(Number(producto.precio || producto.costo_unitario || 0)),
       stock:       producto.stock,
       cantidad:    1,
+      linea_id:    producto.linea_id || null,
     });
   };
 
