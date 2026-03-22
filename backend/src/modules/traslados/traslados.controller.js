@@ -51,4 +51,11 @@ const getTrasladoById = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-module.exports = { buscarEquivalentes, ejecutarTraslado, getTraslados, getTrasladoById };
+const revertirTraslado = async (req, res, next) => {
+  try {
+    const data = await service.revertirTraslado(req.user.negocio_id, Number(req.params.id), req.user.id);
+    res.json({ ok: true, data, message: 'Traslado revertido correctamente' });
+  } catch (err) { next(err); }
+};
+
+module.exports = { buscarEquivalentes, ejecutarTraslado, getTraslados, getTrasladoById, revertirTraslado };

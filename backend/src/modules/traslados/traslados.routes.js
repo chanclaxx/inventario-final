@@ -12,4 +12,7 @@ router.post('/', requireNivel('supervisor'), ctrl.ejecutarTraslado);
 router.get('/',    requireNivel('supervisor'), ctrl.getTraslados);
 router.get('/:id', requireNivel('supervisor'), ctrl.getTrasladoById);
 
+// Revertir un traslado
+router.post('/:id/revertir', requireNivel('supervisor'), ctrl.revertirTraslado);
+
 module.exports = router;

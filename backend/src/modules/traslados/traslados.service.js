@@ -238,7 +238,92 @@ const getTrasladoById = async (negocioId, id) => {
   return { ...traslado, lineas: lineasData };
 };
 
+// ─── Revertir traslado ────────────────────────────────────────────────────────
+
+const revertirTraslado = async (negocioId, trasladoId, usuarioId) => {
+  const traslado = await repo.findById(negocioId, trasladoId);
+  if (!traslado) throw { status: 404, message: 'Traslado no encontrado' };
+  if (traslado.estado === 'Cancelado') throw { status: 400, message: 'Este traslado ya fue revertido' };
+
+  const lineasData = await repo.getLineas(trasladoId);
+  if (!lineasData.length) throw { status: 400, message: 'El traslado no tiene líneas para revertir' };
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    for (const linea of lineasData) {
+      if (linea.tipo === 'serial') {
+        // Verificar que el serial sigue en la sucursal destino y está disponible
+        const { rows } = await client.query(`
+          SELECT s.id, s.vendido, s.prestado, s.producto_id
+          FROM seriales s
+          JOIN productos_serial ps ON ps.id = s.producto_id
+          WHERE s.id = $1 AND ps.id = $2
+          FOR UPDATE OF s
+        `, [linea.serial_id, linea.producto_serial_destino_id]);
+
+        if (!rows.length) throw { status: 400, message: `El serial ${linea.imei || linea.serial_id} ya no está en el producto destino` };
+        if (rows[0].vendido) throw { status: 400, message: `El serial ${linea.imei} fue vendido, no se puede revertir` };
+        if (rows[0].prestado) throw { status: 400, message: `El serial ${linea.imei} está prestado, no se puede revertir` };
+
+        // Mover serial de vuelta al producto origen
+        await repo.moverSerial(client, linea.serial_id, linea.producto_serial_origen_id);
+
+      } else if (linea.tipo === 'cantidad') {
+        const cant = Number(linea.cantidad);
+
+        // Verificar stock suficiente en destino para devolver
+        const { rows: destRows } = await client.query(`
+          SELECT id, stock, costo_unitario FROM productos_cantidad
+          WHERE id = $1 FOR UPDATE
+        `, [linea.producto_cantidad_destino_id]);
+
+        if (!destRows.length) throw { status: 400, message: `Producto destino "${linea.nombre_producto}" ya no existe` };
+        if (destRows[0].stock < cant) {
+          throw { status: 400, message: `Stock insuficiente en destino para revertir "${linea.nombre_producto}". Disponible: ${destRows[0].stock}, necesario: ${cant}` };
+        }
+
+        // Restar del destino
+        await repo.ajustarStockEnTransaccion(client, linea.producto_cantidad_destino_id, -cant);
+        // Sumar al origen
+        await repo.ajustarStockEnTransaccion(client, linea.producto_cantidad_origen_id, cant);
+
+        // Historial
+        await repo.insertarHistorialEnTransaccion(client, {
+          producto_id:    linea.producto_cantidad_destino_id,
+          sucursal_id:    traslado.sucursal_destino_id,
+          cantidad:       -cant,
+          costo_unitario: destRows[0].costo_unitario,
+          notas:          `Reversión traslado #${trasladoId}`,
+        });
+        await repo.insertarHistorialEnTransaccion(client, {
+          producto_id:    linea.producto_cantidad_origen_id,
+          sucursal_id:    traslado.sucursal_origen_id,
+          cantidad:       cant,
+          costo_unitario: destRows[0].costo_unitario,
+          notas:          `Reversión traslado #${trasladoId}`,
+        });
+      }
+    }
+
+    // Marcar traslado como cancelado
+    await client.query(
+      `UPDATE traslados SET estado = 'Cancelado' WHERE id = $1`,
+      [trasladoId]
+    );
+
+    await client.query('COMMIT');
+    return { ...traslado, estado: 'Cancelado' };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+};
+
 module.exports = {
   buscarEquivalentes, ejecutarTraslado,
-  getTraslados, getTrasladoById,
+  getTraslados, getTrasladoById, revertirTraslado,
 };

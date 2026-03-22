@@ -11,3 +11,6 @@ export const getTraslados = () =>
 
 export const getTrasladoById = (id) =>
   api.get(`/traslados/${id}`);
+
+export const revertirTraslado = (id) =>
+  api.post(`/traslados/${id}/revertir`);

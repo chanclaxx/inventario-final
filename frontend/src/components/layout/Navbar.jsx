@@ -1,15 +1,19 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../../context/useAuth.js';
 import {
   LayoutDashboard, Package, FileText, Handshake,
-  Wallet, BarChart2, Settings, LogOut, ShoppingCart, Users, Truck, Wrench,
+  Wallet, BarChart2, Settings, LogOut, ShoppingCart,
+  Users, Truck, Wrench, ArrowRightLeft,
 } from 'lucide-react';
+import { getSucursales } from '../../api/sucursales.api.js';
 import useCarritoStore from '../../store/carritoStore.js';
 import useSucursalStore from '../../store/sucursalStore.js';
 import { SucursalSelector } from './SucursalSelector.jsx';
 
 // rol: undefined = todos | 'supervisor' = supervisor+admin | 'admin_negocio' = solo admin
+// multiSucursal: true = solo visible si hay 2+ sucursales
 const NAV_ITEMS = [
   { path: '/',            label: 'Inicio',      icon: LayoutDashboard, rol: 'admin_negocio' },
   { path: '/inventario',  label: 'Inventario',  icon: Package                              },
@@ -18,12 +22,14 @@ const NAV_ITEMS = [
   { path: '/proveedores', label: 'Proveedores', icon: Truck,           rol: 'admin_negocio'},
   { path: '/prestamos',   label: 'Préstamos',   icon: Handshake                            },
   { path: '/caja',        label: 'Caja',        icon: Wallet,          rol: 'supervisor'   },
+  { path: '/traslados',   label: 'Traslados',   icon: ArrowRightLeft,  rol: 'supervisor',  multiSucursal: true },
   { path: '/reportes',    label: 'Reportes',    icon: BarChart2,       rol: 'admin_negocio'},
-  { path: '/acreedores',  label: 'Acreedores',  icon: Users,           rol: 'supervisor'},
+  { path: '/acreedores',  label: 'Acreedores',  icon: Users,           rol: 'supervisor'   },
   { path: '/config',      label: 'Config',      icon: Settings,        rol: 'admin_negocio'},
 ];
 
-function puedeVerItem(item, usuario) {
+function puedeVerItem(item, usuario, totalSucursales) {
+  if (item.multiSucursal && totalSucursales < 2) return false;
   if (!item.rol) return true;
   if (item.rol === 'supervisor')    return ['supervisor', 'admin_negocio'].includes(usuario?.rol);
   if (item.rol === 'admin_negocio') return usuario?.rol === 'admin_negocio';
@@ -41,6 +47,14 @@ export function Navbar() {
   const [visible,    setVisible]    = useState(true);
   const [lastScroll, setLastScroll] = useState(0);
 
+  // Cargar sucursales para saber si mostrar Traslados
+  const { data: sucursalesRaw } = useQuery({
+    queryKey: ['sucursales'],
+    queryFn:  () => getSucursales().then((r) => r.data.data),
+    staleTime: 5 * 60 * 1000,
+  });
+  const totalSucursales = (sucursalesRaw || []).length;
+
   useEffect(() => {
     const handleScroll = () => {
       const current = window.scrollY;
@@ -57,7 +71,7 @@ export function Navbar() {
     navigate('/login');
   };
 
-  const itemsVisibles = NAV_ITEMS.filter((item) => puedeVerItem(item, usuario));
+  const itemsVisibles = NAV_ITEMS.filter((item) => puedeVerItem(item, usuario, totalSucursales));
 
   return (
     <header className={`
@@ -104,11 +118,8 @@ export function Navbar() {
 
             {/* Derecha: selector + carrito + usuario */}
             <div className="flex items-center gap-2">
-
-              {/* Selector de sucursal */}
               <SucursalSelector />
 
-              {/* Carrito */}
               <button
                 onClick={() => navigate('/inventario')}
                 className="relative p-2 rounded-xl hover:bg-gray-100 transition-colors"
@@ -122,7 +133,6 @@ export function Navbar() {
                 )}
               </button>
 
-              {/* Usuario + logout */}
               <div className="flex items-center gap-2 pl-2 border-l border-gray-200">
                 <div className="hidden sm:flex flex-col items-end">
                   <span className="text-xs font-medium text-gray-700">{usuario?.nombre}</span>
@@ -137,7 +147,6 @@ export function Navbar() {
                   <LogOut size={18} />
                 </button>
               </div>
-
             </div>
           </div>
         </div>
@@ -167,7 +176,6 @@ export function Navbar() {
             );
           })}
 
-          {/* Selector al final del scroll horizontal en mobile */}
           <div className="flex-shrink-0 pl-2 border-l border-gray-200 ml-1 flex items-center">
             <SucursalSelector />
           </div>
