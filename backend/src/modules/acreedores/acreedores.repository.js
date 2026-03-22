@@ -24,6 +24,34 @@ const findAll = async (negocioId, filtro) => {
   return rows;
 };
 
+// Solo acreedores vinculados a proveedores tipo 'cruce'
+const findByCruces = async (negocioId, filtro) => {
+  let query = `
+    SELECT a.id, a.nombre, a.cedula, a.telefono, a.proveedor_id,
+           COALESCE(SUM(CASE WHEN m.tipo = 'Cargo' THEN m.valor ELSE -m.valor END), 0) AS saldo
+    FROM acreedores a
+    JOIN proveedores p ON p.id = a.proveedor_id
+    LEFT JOIN movimientos_acreedor m ON m.acreedor_id = a.id
+    WHERE a.negocio_id = $1
+      AND p.tipo = 'cruce'
+      AND p.activo = TRUE
+  `;
+  const params = [negocioId];
+
+  if (filtro) {
+    const filtroSeguro = filtro
+      .toLowerCase()
+      .replace(/[%_\\]/g, '\\$&')
+      .slice(0, 100);
+    params.push(`%${filtroSeguro}%`);
+    query += ` AND (LOWER(a.nombre) LIKE $2 ESCAPE '\\' OR a.cedula LIKE $2 ESCAPE '\\')`;
+  }
+
+  query += ` GROUP BY a.id ORDER BY a.nombre`;
+  const { rows } = await pool.query(query, params);
+  return rows;
+};
+
 const findById = async (negocioId, id) => {
   const { rows } = await pool.query(
     `SELECT * FROM acreedores WHERE id = $1 AND negocio_id = $2`,
@@ -32,12 +60,11 @@ const findById = async (negocioId, id) => {
   return rows[0] || null;
 };
 
-// ── compra_id incluido en getMovimientos — anclado al negocio ─────────────────
 const getMovimientos = async (negocioId, acreedorId) => {
   const { rows } = await pool.query(`
     SELECT
       m.id, m.acreedor_id, m.usuario_id, m.tipo, m.valor,
-      m.descripcion, m.firma, m.fecha, m.compra_id,
+      m.descripcion, m.firma, m.fecha, m.compra_id, m.registrar_en_caja,
       COALESCE(
         SUM(CASE WHEN m.tipo = 'Cargo' THEN m.valor ELSE -m.valor END)
         OVER (
@@ -69,25 +96,22 @@ const create = async (negocioId, { nombre, cedula, telefono, proveedor_id }) => 
   return rows[0];
 };
 
-// ── compra_id incluido en insertarMovimiento ──────────────────────────────────
 const insertarMovimiento = async ({
-  acreedor_id, usuario_id, tipo, valor, descripcion, firma, compra_id,
+  acreedor_id, usuario_id, tipo, valor, descripcion, firma, compra_id, registrar_en_caja,
 }) => {
   const { rows } = await pool.query(`
-    INSERT INTO movimientos_acreedor(acreedor_id, usuario_id, tipo, valor, descripcion, firma, compra_id)
-    VALUES ($1, $2, $3, $4, $5, $6, $7)
+    INSERT INTO movimientos_acreedor(acreedor_id, usuario_id, tipo, valor, descripcion, firma, compra_id, registrar_en_caja)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
     RETURNING *
-  `, [acreedor_id, usuario_id, tipo, valor, descripcion, firma ?? null, compra_id || null]);
+  `, [acreedor_id, usuario_id, tipo, valor, descripcion, firma ?? null, compra_id || null, registrar_en_caja !== false]);
   return rows[0];
 };
+
 const eliminarSeguro = async (negocioId, acreedorId) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
- 
-    // Bloquear la fila del acreedor durante toda la transacción.
-    // Si otro proceso intenta tocar este acreedor simultáneamente, esperará.
-    // Además verifica que pertenezca al negocio — seguridad entre negocios.
+
     const { rows: own } = await client.query(
       `SELECT id, proveedor_id
        FROM acreedores
@@ -98,18 +122,14 @@ const eliminarSeguro = async (negocioId, acreedorId) => {
     if (!own.length) {
       throw { status: 404, message: 'Acreedor no encontrado' };
     }
- 
-    // Bloquear si está vinculado a un proveedor
+
     if (own[0].proveedor_id) {
       throw {
         status: 409,
         message: 'Este acreedor está vinculado a un proveedor. Desvincúlalo primero desde Proveedores.',
       };
     }
- 
-    // Contar movimientos DENTRO de la transacción (con el lock activo).
-    // Así aunque otro proceso intente insertar un movimiento en paralelo,
-    // tendrá que esperar a que esta transacción termine → no hay race condition.
+
     const { rows: movs } = await client.query(
       `SELECT COUNT(*) AS total FROM movimientos_acreedor WHERE acreedor_id = $1`,
       [acreedorId]
@@ -120,13 +140,12 @@ const eliminarSeguro = async (negocioId, acreedorId) => {
         message: `Este acreedor tiene ${movs[0].total} movimiento(s) registrado(s). No se puede eliminar.`,
       };
     }
- 
-    // Eliminar — negocio_id en WHERE como doble protección
+
     await client.query(
       `DELETE FROM acreedores WHERE id = $1 AND negocio_id = $2`,
       [acreedorId, negocioId]
     );
- 
+
     await client.query('COMMIT');
   } catch (err) {
     await client.query('ROLLBACK');
@@ -136,4 +155,4 @@ const eliminarSeguro = async (negocioId, acreedorId) => {
   }
 };
 
-module.exports = { findAll, findById, getMovimientos, create, insertarMovimiento,eliminarSeguro };
+module.exports = { findAll, findByCruces, findById, getMovimientos, create, insertarMovimiento, eliminarSeguro };

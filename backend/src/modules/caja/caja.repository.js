@@ -308,6 +308,7 @@ const getResumenDia = async (cajaId, sucursalId, negocioId) => {
       FROM movimientos_acreedor ma
       JOIN acreedores a ON a.id = ma.acreedor_id
       WHERE ma.tipo = 'Abono' AND a.negocio_id = $1 AND ma.fecha BETWEEN $2 AND $3
+        AND ma.registrar_en_caja = TRUE
     `, [negocioId, inicio, fin]),
 
     // Manuales: excluir tipos con grupo propio
@@ -441,6 +442,7 @@ const getResumenGlobal = async (negocioId) => {
       FROM movimientos_acreedor ma
       JOIN acreedores a ON a.id = ma.acreedor_id
       WHERE ma.tipo = 'Abono' AND a.negocio_id = $1 AND ma.fecha BETWEEN $2 AND $3
+        AND ma.registrar_en_caja = TRUE
     `, [negocioId, inicio, fin]),
 
     pool.query(`

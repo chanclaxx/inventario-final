@@ -7,6 +7,14 @@ const getAcreedores = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+// Solo acreedores vinculados a cruces — para supervisores
+const getAcreedoresCruces = async (req, res, next) => {
+  try {
+    const data = await service.getAcreedoresCruces(req.user.negocio_id, req.query.filtro);
+    res.json({ ok: true, data });
+  } catch (err) { next(err); }
+};
+
 const getAcreedorById = async (req, res, next) => {
   try {
     const data = await service.getAcreedorById(req.user.negocio_id, req.params.id);
@@ -30,9 +38,6 @@ const registrarMovimiento = async (req, res, next) => {
     res.json({ ok: true, data, message: 'Movimiento registrado correctamente' });
   } catch (err) { next(err); }
 };
-// ─── PARCHE: acreedores.controller.js ────────────────────────────────────────
-// Agregar este handler al final del archivo, antes de module.exports,
-// y agregarlo al module.exports existente.
 
 const eliminarAcreedor = async (req, res, next) => {
   try {
@@ -41,6 +46,7 @@ const eliminarAcreedor = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-// ── module.exports actualizado ────────────────────────────────────────────────
-// module.exports = { getAcreedores, getAcreedorById, crearAcreedor, registrarMovimiento, eliminarAcreedor };
-module.exports = { getAcreedores, getAcreedorById, crearAcreedor, registrarMovimiento,eliminarAcreedor };
+module.exports = {
+  getAcreedores, getAcreedoresCruces, getAcreedorById,
+  crearAcreedor, registrarMovimiento, eliminarAcreedor,
+};

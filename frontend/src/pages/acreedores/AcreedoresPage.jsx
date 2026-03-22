@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getAcreedores, getAcreedorById, crearAcreedor, registrarMovimiento, eliminarAcreedor } from '../../api/acreedores.api';
 import { getConfig, verificarPin } from '../../api/config.api';
 import { formatCOP, formatFechaHora } from '../../utils/formatters';
+import { useAuth }     from '../../context/useAuth';
 import { Button }      from '../../components/ui/Button';
 import { Input }       from '../../components/ui/Input';
 import { InputMoneda } from '../../components/ui/InputMoneda';
@@ -36,10 +37,7 @@ function FirmaCanvas({ onFirma }) {
   const getPos = (e, canvas) => {
     const rect   = canvas.getBoundingClientRect();
     const source = e.touches ? e.touches[0] : e;
-    return {
-      x: source.clientX - rect.left,
-      y: source.clientY - rect.top,
-    };
+    return { x: source.clientX - rect.left, y: source.clientY - rect.top };
   };
 
   const iniciar = (e) => {
@@ -83,23 +81,14 @@ function FirmaCanvas({ onFirma }) {
       <div className="flex items-center justify-between">
         <label className="text-sm font-medium text-gray-700">Firma</label>
         {tieneFirma && (
-          <button onClick={limpiar} className="text-xs text-red-400 hover:text-red-600">
-            Limpiar
-          </button>
+          <button onClick={limpiar} className="text-xs text-red-400 hover:text-red-600">Limpiar</button>
         )}
       </div>
       <canvas
-        ref={canvasRef}
-        width={340}
-        height={120}
+        ref={canvasRef} width={340} height={120}
         className="border-2 border-dashed border-gray-200 rounded-xl bg-gray-50 touch-none cursor-crosshair w-full"
-        onMouseDown={iniciar}
-        onMouseMove={dibujar}
-        onMouseUp={terminar}
-        onMouseLeave={terminar}
-        onTouchStart={iniciar}
-        onTouchMove={dibujar}
-        onTouchEnd={terminar}
+        onMouseDown={iniciar} onMouseMove={dibujar} onMouseUp={terminar} onMouseLeave={terminar}
+        onTouchStart={iniciar} onTouchMove={dibujar} onTouchEnd={terminar}
       />
       <p className="text-xs text-gray-400 text-center">
         {tieneFirma ? '✓ Firma capturada' : 'Dibuja la firma aquí'}
@@ -122,10 +111,8 @@ function DetalleCompraInline({ compraId }) {
 
   return (
     <div className="mt-2">
-      <button
-        onClick={() => setExpandido((v) => !v)}
-        className="flex items-center gap-1.5 text-xs text-blue-500 hover:text-blue-700 font-medium transition-colors"
-      >
+      <button onClick={() => setExpandido((v) => !v)}
+        className="flex items-center gap-1.5 text-xs text-blue-500 hover:text-blue-700 font-medium transition-colors">
         {expandido ? <ChevronUp size={13} /> : <ChevronRight size={13} />}
         {expandido ? 'Ocultar compra' : `Ver compra #${String(compraId).padStart(6, '0')}`}
       </button>
@@ -139,20 +126,15 @@ function DetalleCompraInline({ compraId }) {
           ) : (
             <>
               <div className="flex items-center justify-between">
-                <p className="text-xs font-semibold text-amber-700">
-                  Compra #{String(compra.id).padStart(6, '0')}
-                </p>
+                <p className="text-xs font-semibold text-amber-700">Compra #{String(compra.id).padStart(6, '0')}</p>
                 <span className="text-xs text-gray-400">{formatFechaHora(compra.fecha)}</span>
               </div>
               {compra.proveedor_nombre && (
-                <p className="text-xs text-gray-600">
-                  Proveedor: <span className="font-medium">{compra.proveedor_nombre}</span>
-                </p>
+                <p className="text-xs text-gray-600">Proveedor: <span className="font-medium">{compra.proveedor_nombre}</span></p>
               )}
               <div className="flex flex-col gap-1.5 mt-1">
                 {compra.lineas?.map((l) => (
-                  <div key={l.id}
-                    className="flex items-start justify-between text-xs gap-2 bg-white rounded-lg px-2.5 py-2 border border-amber-100">
+                  <div key={l.id} className="flex items-start justify-between text-xs gap-2 bg-white rounded-lg px-2.5 py-2 border border-amber-100">
                     <div className="flex-1 min-w-0">
                       <p className="font-medium text-gray-800 truncate">{l.nombre_producto}</p>
                       {l.imei && <p className="text-gray-400 font-mono">{l.imei}</p>}
@@ -177,25 +159,28 @@ function DetalleCompraInline({ compraId }) {
 }
 
 // ─────────────────────────────────────────────
-// MODAL MOVIMIENTO
+// MODAL MOVIMIENTO (con checkbox registrar en caja)
 // ─────────────────────────────────────────────
-// CAMBIO: Input type=number → InputMoneda para el campo valor.
-// form.valor inicia en '' → InputMoneda trata '' como vacío.
-// mutación: Number(form.valor) → Number(850000) = 850000 ✓
-// handleKeyDown foca 'valor-acreedor' por id → InputMoneda acepta prop id ✓
-
-function ModalMovimiento({ acreedor, onClose, onImprimir }) {
+function ModalMovimiento({ acreedor, proveedorTipo, onClose, onImprimir }) {
   const queryClient             = useQueryClient();
   const [form,  setForm]        = useState({ tipo: 'Cargo', descripcion: '', valor: '' });
   const [firma, setFirma]       = useState(null);
+  const [registrarEnCaja, setRegistrarEnCaja] = useState(proveedorTipo !== 'proveedor');
   const [error, setError]       = useState('');
+
+  // Si es crédito (tipo Cargo), nunca afecta caja
+  // Si es abono y es tipo proveedor, el usuario decide con checkbox
+  const esAbono       = form.tipo === 'Abono';
+  const esProveedor   = proveedorTipo === 'proveedor';
+  const mostrarCheckbox = esProveedor;
 
   const mutation = useMutation({
     mutationFn: () => registrarMovimiento(acreedor.id, {
-      tipo:        form.tipo,
-      descripcion: form.descripcion,
-      valor:       Number(form.valor),
+      tipo:              form.tipo,
+      descripcion:       form.descripcion,
+      valor:             Number(form.valor),
       firma,
+      registrar_en_caja: esAbono ? registrarEnCaja : false,
     }),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['acreedor',   acreedor.id], exact: false });
@@ -219,56 +204,61 @@ function ModalMovimiento({ acreedor, onClose, onImprimir }) {
       <div className="flex flex-col gap-4">
         <div className="flex gap-2">
           {['Cargo', 'Abono'].map((t) => (
-            <button
-              key={t}
-              onClick={() => setForm({ ...form, tipo: t })}
+            <button key={t}
+              onClick={() => {
+                setForm({ ...form, tipo: t });
+                // Si cambia a Cargo, no afecta caja nunca
+                if (t === 'Cargo') setRegistrarEnCaja(false);
+                // Si cambia a Abono, resetear según tipo proveedor
+                if (t === 'Abono') setRegistrarEnCaja(proveedorTipo !== 'proveedor');
+              }}
               className={`flex-1 py-2.5 rounded-xl text-sm font-medium border transition-all
                 ${form.tipo === t
                   ? t === 'Cargo'
                     ? 'bg-red-50 border-red-300 text-red-700'
                     : 'bg-green-50 border-green-300 text-green-700'
-                  : 'bg-gray-50 border-gray-200 text-gray-600'}`}
-            >
+                  : 'bg-gray-50 border-gray-200 text-gray-600'}`}>
               {t}
             </button>
           ))}
         </div>
 
-        <Input
-          id="descripcion-mov"
-          label="Descripción"
-          placeholder="Ej: Compra mercancía"
+        <Input id="descripcion-mov" label="Descripción" placeholder="Ej: Compra mercancía"
           value={form.descripcion}
           onChange={(e) => setForm({ ...form, descripcion: e.target.value })}
-          onKeyDown={(e) => handleKeyDown(e, 'valor-acreedor')}
-        />
+          onKeyDown={(e) => handleKeyDown(e, 'valor-acreedor')} />
 
-        {/* CAMBIO: Input type=number → InputMoneda */}
         <div className="flex flex-col gap-1">
           <label className="text-sm font-medium text-gray-700">Valor</label>
-          <InputMoneda
-            id="valor-acreedor"
-            value={form.valor}
-            onChange={(val) => setForm({ ...form, valor: val })}
-            placeholder="0"
+          <InputMoneda id="valor-acreedor" value={form.valor}
+            onChange={(val) => setForm({ ...form, valor: val })} placeholder="0"
             className="w-full px-3 py-2 bg-gray-100 rounded-xl text-sm
-              focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"
-          />
+              focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all" />
         </div>
+
+        {/* Checkbox registrar en caja — solo para abonos a proveedores tipo 'proveedor' */}
+        {mostrarCheckbox && esAbono && (
+          <div className={`rounded-xl p-3 border transition-all
+            ${registrarEnCaja ? 'bg-blue-50 border-blue-200' : 'bg-gray-50 border-gray-200'}`}>
+            <label className="flex items-center gap-3 cursor-pointer">
+              <input type="checkbox" checked={registrarEnCaja}
+                onChange={(e) => setRegistrarEnCaja(e.target.checked)}
+                className="rounded accent-blue-600 w-4 h-4 flex-shrink-0" />
+              <div>
+                <p className="text-sm font-medium text-gray-700">Registrar en caja</p>
+                <p className="text-xs text-gray-400">Si no se marca, el abono no aparecerá en el resumen de caja</p>
+              </div>
+            </label>
+          </div>
+        )}
 
         <FirmaCanvas onFirma={setFirma} />
 
         {error && <p className="text-sm text-red-500">{error}</p>}
 
         <div className="flex gap-2">
-          <Button variant="secondary" className="flex-1" onClick={onClose}>
-            Cancelar
-          </Button>
-          <Button
-            className="flex-1"
-            loading={mutation.isPending}
-            onClick={() => mutation.mutate()}
-          >
+          <Button variant="secondary" className="flex-1" onClick={onClose}>Cancelar</Button>
+          <Button className="flex-1" loading={mutation.isPending} onClick={() => mutation.mutate()}>
             Registrar
           </Button>
         </div>
@@ -280,8 +270,6 @@ function ModalMovimiento({ acreedor, onClose, onImprimir }) {
 // ─────────────────────────────────────────────
 // MODAL NUEVO ACREEDOR
 // ─────────────────────────────────────────────
-// Sin cambios — solo tiene campos de texto (nombre, cedula, telefono)
-
 function ModalNuevoAcreedor({ onClose }) {
   const queryClient                  = useQueryClient();
   const [form, setForm]              = useState({ nombre: '', cedula: '', telefono: '' });
@@ -307,8 +295,8 @@ function ModalNuevoAcreedor({ onClose }) {
 
     const yaVinculado = acreedores.some((a) => String(a.proveedor_id) === id);
     if (yaVinculado) {
-      const acreedor = acreedores.find((a) => String(a.proveedor_id) === id);
-      setError(`Este proveedor ya está vinculado al acreedor "${acreedor.nombre}"`);
+      const acreedorExistente = acreedores.find((a) => String(a.proveedor_id) === id);
+      setError(`Este proveedor ya está vinculado al acreedor "${acreedorExistente.nombre}"`);
       setProveedorId('');
       return;
     }
@@ -351,21 +339,15 @@ function ModalNuevoAcreedor({ onClose }) {
           <label className="text-sm font-medium text-gray-700">
             Proveedor <span className="text-gray-400 font-normal text-xs">(opcional)</span>
           </label>
-          <select
-            value={proveedorId}
+          <select value={proveedorId}
             onChange={(e) => handleSeleccionarProveedor(e.target.value)}
             className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-sm
-              text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
-          >
+              text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
             <option value="">Sin proveedor vinculado</option>
-            {proveedores.map((p) => (
-              <option key={p.id} value={p.id}>{p.nombre}</option>
-            ))}
+            {proveedores.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
           </select>
           {proveedorId && (
-            <p className="text-xs text-blue-600">
-              Los datos del proveedor se usarán como referencia en los movimientos.
-            </p>
+            <p className="text-xs text-blue-600">Los datos del proveedor se usarán como referencia.</p>
           )}
         </div>
 
@@ -396,22 +378,25 @@ function ModalNuevoAcreedor({ onClose }) {
 // ─────────────────────────────────────────────
 // LISTA DE ACREEDORES
 // ─────────────────────────────────────────────
-function ListaAcreedores({ acreedores, acreedorSel, isLoading, busqueda, setBusqueda, onSeleccionar, onNuevo }) {
+function ListaAcreedores({ acreedores, acreedorSel, isLoading, busqueda, setBusqueda, onSeleccionar, onNuevo, esAdmin }) {
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center gap-2">
         <SearchInput value={busqueda} onChange={setBusqueda} placeholder="Buscar acreedor..." />
-        <button onClick={onNuevo}
-          className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center flex-shrink-0 hover:bg-blue-700 transition-colors">
-          <Plus size={18} className="text-white" />
-        </button>
+        {esAdmin && (
+          <button onClick={onNuevo}
+            className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center flex-shrink-0 hover:bg-blue-700 transition-colors">
+            <Plus size={18} className="text-white" />
+          </button>
+        )}
       </div>
       {isLoading ? (
         <Spinner className="py-10" />
       ) : (
         <div className="flex flex-col gap-1 overflow-y-auto max-h-[65vh]">
           {acreedores.length === 0 ? (
-            <EmptyState icon={Users} titulo="Sin acreedores" />
+            <EmptyState icon={Users} titulo="Sin acreedores"
+              descripcion={esAdmin ? undefined : 'No hay acreedores vinculados a cruces'} />
           ) : (
             acreedores.map((a) => {
               const saldo = Number(a.saldo || 0);
@@ -439,9 +424,6 @@ function ListaAcreedores({ acreedores, acreedorSel, isLoading, busqueda, setBusq
 }
 
 // ─────────────────────────────────────────────
-// DETALLE ACREEDOR
-// ─────────────────────────────────────────────
-// ─────────────────────────────────────────────
 // MODAL ELIMINAR ACREEDOR
 // ─────────────────────────────────────────────
 function ModalEliminarAcreedor({ acreedor, onClose, onEliminar }) {
@@ -467,10 +449,8 @@ function ModalEliminarAcreedor({ acreedor, onClose, onEliminar }) {
   return (
     <Modal open onClose={onClose} title="Eliminar acreedor" size="sm">
       <div className="flex flex-col gap-4">
-
         <div className="flex flex-col items-center gap-3 py-2">
-          <div className="w-14 h-14 rounded-full bg-red-50 border-2 border-red-200
-            flex items-center justify-center">
+          <div className="w-14 h-14 rounded-full bg-red-50 border-2 border-red-200 flex items-center justify-center">
             <AlertTriangle size={26} className="text-red-500" />
           </div>
           <div className="text-center">
@@ -482,54 +462,41 @@ function ModalEliminarAcreedor({ acreedor, onClose, onEliminar }) {
         <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 flex flex-col gap-1">
           <p className="text-sm font-semibold text-red-700">¿Estás seguro?</p>
           <p className="text-xs text-red-600 leading-relaxed">
-            Se eliminarán permanentemente todos los datos de este acreedor.
-            Esta operación no se puede revertir.
+            Se eliminarán permanentemente todos los datos de este acreedor. Esta operación no se puede revertir.
           </p>
         </div>
 
-        <Input
-          label="PIN de administrador"
-          type="password"
-          placeholder="••••"
-          value={pin}
-          onChange={(e) => { setPin(e.target.value); setError(''); }}
-          onKeyDown={(e) => { if (e.key === 'Enter') handleConfirmar(); }}
-          autoFocus
-        />
+        <Input label="PIN de administrador" type="password" placeholder="••••"
+          value={pin} onChange={(e) => { setPin(e.target.value); setError(''); }}
+          onKeyDown={(e) => { if (e.key === 'Enter') handleConfirmar(); }} autoFocus />
 
         {error && <p className="text-sm text-red-500">{error}</p>}
 
         <div className="flex gap-2 pt-1">
-          <button
-            onClick={onClose}
-            className="flex-1 py-2 rounded-xl text-sm font-medium border border-gray-200
-              bg-gray-50 text-gray-600 hover:bg-gray-100 transition-colors"
-          >
+          <button onClick={onClose}
+            className="flex-1 py-2 rounded-xl text-sm font-medium border border-gray-200 bg-gray-50 text-gray-600 hover:bg-gray-100 transition-colors">
             Cancelar
           </button>
-          <Button
-            className="flex-1 bg-red-600 hover:bg-red-700 text-white"
-            loading={verificando}
-            onClick={handleConfirmar}
-          >
+          <Button className="flex-1 bg-red-600 hover:bg-red-700 text-white" loading={verificando} onClick={handleConfirmar}>
             <Trash2 size={14} /> Eliminar
           </Button>
         </div>
-
       </div>
     </Modal>
   );
 }
 
-function DetalleAcreedor({ detalle, loadingDetalle, movimientosUI, onRegistrar, onImprimir, onVolver, onEliminar }) {
+// ─────────────────────────────────────────────
+// DETALLE ACREEDOR
+// ─────────────────────────────────────────────
+function DetalleAcreedor({ detalle, loadingDetalle, movimientosUI, onRegistrar, onImprimir, onVolver, onEliminar, esAdmin }) {
   if (loadingDetalle) return <Spinner className="py-20" />;
 
   return (
     <div className="flex flex-col gap-4">
       <button onClick={onVolver}
         className="flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800 transition-colors lg:hidden w-fit">
-        <ChevronLeft size={16} />
-        Volver a lista
+        <ChevronLeft size={16} /> Volver a lista
       </button>
 
       <div className="bg-white border border-gray-100 rounded-2xl p-4 flex items-start justify-between shadow-sm">
@@ -541,17 +508,15 @@ function DetalleAcreedor({ detalle, loadingDetalle, movimientosUI, onRegistrar, 
           </p>
         </div>
         <div className="flex gap-2">
-          <Button onClick={onRegistrar}>
-            <PenLine size={16} /> Registrar
-          </Button>
-          <button
-            onClick={onEliminar}
-            className="p-2 rounded-xl border border-dashed border-red-200 text-red-400
-              hover:text-red-600 hover:bg-red-50 hover:border-red-300 transition-colors"
-            title="Eliminar acreedor"
-          >
-            <Trash2 size={16} />
-          </button>
+          <Button onClick={onRegistrar}><PenLine size={16} /> Registrar</Button>
+          {esAdmin && (
+            <button onClick={onEliminar}
+              className="p-2 rounded-xl border border-dashed border-red-200 text-red-400
+                hover:text-red-600 hover:bg-red-50 hover:border-red-300 transition-colors"
+              title="Eliminar acreedor">
+              <Trash2 size={16} />
+            </button>
+          )}
         </div>
       </div>
 
@@ -561,12 +526,14 @@ function DetalleAcreedor({ detalle, loadingDetalle, movimientosUI, onRegistrar, 
           <EmptyState icon={PenLine} titulo="Sin movimientos" />
         ) : (
           movimientosUI.map((m) => (
-            <div key={m.id}
-              className="bg-white border border-gray-100 rounded-xl p-3 flex items-start justify-between gap-3">
+            <div key={m.id} className="bg-white border border-gray-100 rounded-xl p-3 flex items-start justify-between gap-3">
               <div className="flex-1">
                 <div className="flex items-center gap-2 flex-wrap">
                   <Badge variant={m.tipo === 'Cargo' ? 'red' : 'green'}>{m.tipo}</Badge>
                   <span className="text-sm text-gray-700">{m.descripcion}</span>
+                  {m.registrar_en_caja === false && (
+                    <span className="text-xs text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">Sin caja</span>
+                  )}
                 </div>
                 <p className="text-xs text-gray-400 mt-1">{formatFechaHora(m.fecha)}</p>
                 <div className="flex items-center gap-1 mt-1 text-xs text-gray-400">
@@ -574,9 +541,7 @@ function DetalleAcreedor({ detalle, loadingDetalle, movimientosUI, onRegistrar, 
                   <span>→</span>
                   <span className="font-semibold text-gray-600">{formatCOP(m.saldo_despues)}</span>
                 </div>
-                {m.firma && (
-                  <img src={m.firma} alt="firma" className="mt-2 h-12 border border-gray-100 rounded-lg" />
-                )}
+                {m.firma && <img src={m.firma} alt="firma" className="mt-2 h-12 border border-gray-100 rounded-lg" />}
                 {m.compra_id && <DetalleCompraInline compraId={m.compra_id} />}
               </div>
               <div className="flex flex-col items-end gap-2 flex-shrink-0">
@@ -602,6 +567,9 @@ function DetalleAcreedor({ detalle, loadingDetalle, movimientosUI, onRegistrar, 
 // PÁGINA PRINCIPAL
 // ─────────────────────────────────────────────
 export default function AcreedoresPage() {
+  const { esAdminNegocio } = useAuth();
+  const esAdmin            = esAdminNegocio();
+
   const [busqueda,      setBusqueda]      = useState('');
   const [acreedorSel,   setAcreedorSel]   = useState(null);
   const [modalMov,      setModalMov]      = useState(false);
@@ -624,9 +592,12 @@ export default function AcreedoresPage() {
     },
   });
 
+  // Admin ve todos los acreedores, supervisor ve solo los de cruces
   const { data: acreedoresData, isLoading } = useQuery({
-    queryKey: ['acreedores', busqueda],
-    queryFn:  () => getAcreedores(busqueda).then((r) => r.data.data),
+    queryKey: esAdmin ? ['acreedores', busqueda] : ['acreedores-cruces', busqueda],
+    queryFn:  () => esAdmin
+      ? getAcreedores(busqueda).then((r) => r.data.data)
+      : api.get('/acreedores/cruces', { params: { filtro: busqueda || undefined } }).then((r) => r.data.data),
   });
 
   const { data: detalle, isLoading: loadingDetalle } = useQuery({
@@ -645,20 +616,16 @@ export default function AcreedoresPage() {
 
   const handleSeleccionar = (a) => setAcreedorSel(a);
   const handleVolver      = () => setAcreedorSel(null);
-
-  const handleImprimir = (mov) => {
-    setModalMov(false);
-    setMovImprimir(mov);
-  };
+  const handleImprimir    = (mov) => { setModalMov(false); setMovImprimir(mov); };
 
   const listaProps = {
-    acreedores, acreedorSel, isLoading, busqueda, setBusqueda,
+    acreedores, acreedorSel, isLoading, busqueda, setBusqueda, esAdmin,
     onSeleccionar: handleSeleccionar,
     onNuevo: () => setModalNuevo(true),
   };
 
   const detalleProps = {
-    detalle, loadingDetalle, movimientosUI,
+    detalle, loadingDetalle, movimientosUI, esAdmin,
     onRegistrar: () => setModalMov(true),
     onImprimir:  handleImprimir,
     onVolver:    handleVolver,
@@ -689,30 +656,20 @@ export default function AcreedoresPage() {
         )}
       </div>
 
-      {modalMov && (
+      {modalMov && acreedorSel && (
         <ModalMovimiento
           acreedor={acreedorSel}
+          proveedorTipo={esAdmin ? 'proveedor' : 'cruce'}
           onClose={() => setModalMov(false)}
           onImprimir={handleImprimir}
         />
       )}
-      {modalNuevo && (
-        <ModalNuevoAcreedor onClose={() => setModalNuevo(false)} />
-      )}
+      {modalNuevo && <ModalNuevoAcreedor onClose={() => setModalNuevo(false)} />}
       {modalEliminar && acreedorSel && (
-        <ModalEliminarAcreedor
-          acreedor={acreedorSel}
-          onClose={() => setModalEliminar(false)}
-          onEliminar={() => mutEliminar.mutate()}
-        />
+        <ModalEliminarAcreedor acreedor={acreedorSel} onClose={() => setModalEliminar(false)} onEliminar={() => mutEliminar.mutate()} />
       )}
       {movImprimir && detalle && (
-        <ReciboAcreedor
-          acreedor={detalle}
-          movimiento={movImprimir}
-          config={configData}
-          onClose={() => setMovImprimir(null)}
-        />
+        <ReciboAcreedor acreedor={detalle} movimiento={movImprimir} config={configData} onClose={() => setMovImprimir(null)} />
       )}
     </>
   );
