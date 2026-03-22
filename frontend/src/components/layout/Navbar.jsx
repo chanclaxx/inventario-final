@@ -19,7 +19,7 @@ const NAV_ITEMS = [
   { path: '/prestamos',   label: 'Préstamos',   icon: Handshake                            },
   { path: '/caja',        label: 'Caja',        icon: Wallet,          rol: 'supervisor'   },
   { path: '/reportes',    label: 'Reportes',    icon: BarChart2,       rol: 'admin_negocio'},
-  { path: '/acreedores',  label: 'Acreedores',  icon: Users,           rol: 'admin_negocio'},
+  { path: '/acreedores',  label: 'Acreedores',  icon: Users,           rol: 'supervisor'},
   { path: '/config',      label: 'Config',      icon: Settings,        rol: 'admin_negocio'},
 ];
 
