@@ -363,6 +363,7 @@ function GarantiasConfig() {
 // ─── Campos opcionales del formulario de venta ────────────────────────────────
 const CAMPOS_EDITABLES = [
   { clave: 'campo_direccion_cliente', label: 'Dirección del cliente', description: 'Muestra el campo de dirección al registrar una venta' },
+   { clave: 'campo_color_serial', label: 'Color en productos serial', description: 'Muestra el campo de color al crear o editar productos con serial / IMEI' },
 ];
 
 const CAMPOS_READONLY = [
