@@ -11,6 +11,7 @@ import { useCedulaCliente }            from '../../hooks/useCedulaCliente';
 import { ModalConflictoCedula }        from '../../components/ui/ModalConflictoCedula';
 import { formatCOP, formatFechaHora }  from '../../utils/formatters';
 import { ComprobanteServicio }         from '../../components/ComprobanteServicio';
+import { ReciboRecepcion }            from '../../components/ReciboRecepcion';
 import { Badge }       from '../../components/ui/Badge';
 import { Button }      from '../../components/ui/Button';
 import { Modal }       from '../../components/ui/Modal';
@@ -401,6 +402,9 @@ function PasoIndicador({ paso, total, labels }) {
 
 function ModalNuevaOrden({ onClose, onCreada }) {
   const [paso, setPaso] = useState(1);
+  const [ordenCreada, setOrdenCreada] = useState(null);
+  const [mostrarRecibo, setMostrarRecibo] = useState(false);
+  const config = useConfig();
   const [form, setForm] = useState({
     cliente_cedula: '', cliente_nombre: '', cliente_telefono: '', cliente_id: '',
     cliente_email: '', cliente_direccion: '',
@@ -469,7 +473,10 @@ function ModalNuevaOrden({ onClose, onCreada }) {
         costo_estimado:    form.costo_estimado !== '' ? Number(form.costo_estimado) : null,
       });
     },
-    onSuccess: (res) => { onCreada(res.data.data); onClose(); },
+    onSuccess: (res) => {
+      onCreada(res.data.data);
+      setOrdenCreada(res.data.data);
+    },
     onError:   (err) => setError(err.response?.data?.error || 'Error al crear la orden'),
   });
 
@@ -503,6 +510,46 @@ function ModalNuevaOrden({ onClose, onCreada }) {
 
   const handleReescribir    = async () => { await reescribirCliente(); irPaso(2); };
   const handleCancelarConflicto = () => cancelarConflicto(setForm);
+
+  // Si se pidió imprimir recibo
+  if (mostrarRecibo && ordenCreada) {
+    return (
+      <ReciboRecepcion
+        orden={ordenCreada}
+        config={config}
+        onClose={onClose}
+      />
+    );
+  }
+
+  // Modal de éxito después de crear
+  if (ordenCreada) {
+    return (
+      <Modal open onClose={onClose} title="Orden creada" size="sm">
+        <div className="flex flex-col items-center gap-4 py-4">
+          <div className="w-14 h-14 bg-green-100 rounded-full flex items-center justify-center">
+            <CheckCircle size={28} className="text-green-600" />
+          </div>
+          <div className="text-center">
+            <p className="text-sm font-semibold text-gray-900">
+              Orden #OS-{String(ordenCreada.id).padStart(4, '0')} creada
+            </p>
+            <p className="text-xs text-gray-400 mt-1">
+              {ordenCreada.cliente_nombre} — {ordenCreada.equipo_nombre || ordenCreada.equipo_tipo || 'Equipo'}
+            </p>
+          </div>
+          <div className="flex gap-2 w-full">
+            <Button variant="secondary" className="flex-1" onClick={onClose}>
+              Cerrar
+            </Button>
+            <Button className="flex-1" onClick={() => setMostrarRecibo(true)}>
+              Imprimir recibo
+            </Button>
+          </div>
+        </div>
+      </Modal>
+    );
+  }
 
   return (
     <>
