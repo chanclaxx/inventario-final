@@ -95,7 +95,7 @@ function ModalReactivarSeriales({ open, seriales, onReactivar, onCancelar }) {
           <p className="text-sm text-gray-500 mt-1">{seriales.length === 1 ? 'Este equipo fue vendido o prestado — puedes reactivarlo' : 'Estos equipos fueron vendidos o prestados — puedes reactivarlos'}</p>
         </div>
         <FilasSerial seriales={seriales} />
-        <p className="text-sm text-center text-gray-700 leading-relaxed">¿Deseas <span className="font-semibold text-purple-700">reactivar estos seriales</span> en el inventario? Se marcarán como disponibles nuevamente.</p>
+        <p className="text-sm text-center text-gray-700 leading-relaxed">¿Desea <span className="font-semibold text-purple-700">reactivar estos seriales</span> en el inventario? Se marcarán como disponibles nuevamente.</p>
         <div className="flex gap-2 w-full">
           <Button variant="secondary" className="flex-1 flex items-center justify-center gap-1.5" onClick={onCancelar}><X size={14} /> Cancelar</Button>
           <Button className="flex-1 flex items-center justify-center gap-1.5 bg-purple-600 hover:bg-purple-700 text-white" onClick={onReactivar}><RefreshCw size={14} /> Sí, reactivar</Button>
