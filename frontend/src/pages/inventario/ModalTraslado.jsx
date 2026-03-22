@@ -8,6 +8,7 @@ import { Spinner }       from '../../components/ui/Spinner';
 import { SearchInput }   from '../../components/ui/SearchInput';
 import useCarritoStore   from '../../store/carritoStore';
 import useSucursalStore  from '../../store/sucursalStore';
+import { useAuth }       from '../../context/useAuth';
 import {
   ArrowRightLeft, ChevronRight, CheckCircle, AlertTriangle,
   Package, ShoppingBag,
@@ -210,7 +211,11 @@ function PasoMapeo({ items, equivalencias, selecciones, onSeleccionar }) {
 export function ModalTraslado({ open, onClose }) {
   const queryClient = useQueryClient();
   const { items, limpiarCarrito } = useCarritoStore();
-  const sucursalActiva = useSucursalStore((s) => s.sucursalActiva);
+  const { usuario } = useAuth();
+  const sucursalStore = useSucursalStore((s) => s.sucursalActiva);
+
+  // Admin usa el store, supervisor usa su sucursal del token
+  const sucursalOrigenId = sucursalStore || usuario?.sucursal_id || null;
 
   const [paso, setPaso]                         = useState(1);
   const [sucursalDestinoId, setSucursalDestinoId] = useState(null);
@@ -277,7 +282,7 @@ export function ModalTraslado({ open, onClose }) {
       });
 
       return ejecutarTraslado({
-        sucursal_origen_id:  sucursalActiva,
+        sucursal_origen_id:  sucursalOrigenId,
         sucursal_destino_id: sucursalDestinoId,
         notas:               notas || null,
         lineas,
@@ -312,7 +317,7 @@ export function ModalTraslado({ open, onClose }) {
     mutEjecutar.mutate();
   };
 
-  const sucursalOrigenNombre = sucursales.find((s) => s.id === sucursalActiva)?.nombre || '';
+  const sucursalOrigenNombre = sucursales.find((s) => s.id === sucursalOrigenId)?.nombre || '';
   const sucursalDestinoNombre = sucursales.find((s) => s.id === sucursalDestinoId)?.nombre || '';
   const todosMapeados = items.length > 0 && items.every((item) => selecciones[item.key]);
 
@@ -368,7 +373,7 @@ export function ModalTraslado({ open, onClose }) {
           <>
             <PasoSucursal
               sucursales={sucursales}
-              sucursalOrigenId={sucursalActiva}
+              sucursalOrigenId={sucursalOrigenId}
               sucursalDestinoId={sucursalDestinoId}
               onSeleccionar={handleSeleccionarSucursal}
             />

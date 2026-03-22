@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getTraslados, getTrasladoById, revertirTraslado } from '../../api/traslados.api';
 import { getSucursales } from '../../api/sucursales.api';
-import { formatCOP, formatFechaHora } from '../../utils/formatters';
+import { formatFechaHora } from '../../utils/formatters';
 import { Button }     from '../../components/ui/Button';
 import { Modal }      from '../../components/ui/Modal';
 import { Badge }      from '../../components/ui/Badge';
