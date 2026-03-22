@@ -221,12 +221,9 @@ function AccionesOrden({ orden, onAccion }) {
         </>
       )}
       {estado === 'Listo' && (
-        <>
-          <Button size="sm" onClick={() => onAccion('abono', orden)}><Plus size={13} /> Abono</Button>
-          <Button size="sm" variant="secondary" onClick={() => onAccion('entregar', orden)}>
-            <CheckCircle size={13} /> Entregar
-          </Button>
-        </>
+        <Button size="sm" onClick={() => onAccion('entregar', orden)}>
+          <CheckCircle size={13} /> Entregar
+        </Button>
       )}
       {estado === 'Pendiente_pago' && (
         <Button size="sm" onClick={() => onAccion('abono', orden)}>
@@ -1036,34 +1033,48 @@ function ModalAbono({ orden, onClose, onExito }) {
 // ─── Modal: Entregar (con comprobante automático) ─────────────────────────────
 
 function ModalEntregar({ orden, onClose, onExito }) {
-  const [error, setError] = useState('');
-  const [entregado, setEntregado] = useState(false);
+  const [error, setError]                       = useState('');
+  const [entregado, setEntregado]               = useState(false);
   const [mostrarComprobante, setMostrarComprobante] = useState(false);
+  const [clientePago, setClientePago]           = useState(false);
+  const [metodoPago, setMetodoPago]             = useState('Efectivo');
   const config = useConfig();
 
   const esGarantia = orden.estado === 'Garantia' && orden.garantia_cobrable;
   const totalCobro = esGarantia
     ? Number(orden.precio_garantia || 0)
     : Number(orden.precio_final   || 0);
-  const saldo = totalCobro - Number(orden.total_abonado || 0);
+  const abonado = Number(orden.total_abonado || 0);
+  const saldo   = totalCobro - abonado;
+  const yaPagado = saldo <= 0;
 
-  // Traer detalle completo (con abonos) para el comprobante
+  // Traer detalle completo para el comprobante
   const { data: ordenDetalle } = useQuery({
     queryKey: ['orden-detalle-comprobante', orden.id],
     queryFn:  () => getOrdenById(orden.id).then((r) => r.data.data),
     enabled:  entregado,
   });
 
+  // Si marcó que pagó y hay saldo, primero registra abono del saldo completo, luego entrega
   const mutEntregar = useMutation({
-    mutationFn: () => entregarOrden(orden.id),
-    onSuccess:  () => {
+    mutationFn: async () => {
+      if (clientePago && saldo > 0) {
+        await registrarAbono(orden.id, {
+          valor:  saldo,
+          metodo: metodoPago,
+          notas:  'Pago al entregar',
+        });
+      }
+      return entregarOrden(orden.id);
+    },
+    onSuccess: () => {
       onExito();
       setEntregado(true);
     },
     onError: (err) => setError(err.response?.data?.error || 'Error al entregar'),
   });
 
-  // Si el usuario pidió imprimir y ya tenemos el detalle
+  // Comprobante
   if (mostrarComprobante && ordenDetalle) {
     return (
       <ComprobanteServicio
@@ -1075,7 +1086,7 @@ function ModalEntregar({ orden, onClose, onExito }) {
     );
   }
 
-  // Modal de éxito después de entregar
+  // Modal de éxito
   if (entregado) {
     return (
       <Modal open onClose={onClose} title="Equipo entregado" size="sm">
@@ -1109,31 +1120,96 @@ function ModalEntregar({ orden, onClose, onExito }) {
   return (
     <Modal open onClose={onClose} title="Entregar equipo" size="sm">
       <div className="flex flex-col gap-4">
+
+        {/* Info del equipo */}
         <div className="bg-gray-50 rounded-xl px-3 py-2.5">
           <p className="text-sm font-semibold text-gray-800">{nombreEquipo(orden)}</p>
           <p className="text-xs text-gray-500">{orden.cliente_nombre}</p>
-          {totalCobro > 0 && (
-            <p className="text-xs text-gray-400 mt-1">
-              Total: {formatCOP(totalCobro)} · Abonado: {formatCOP(Number(orden.total_abonado))}
-            </p>
-          )}
         </div>
 
-        {saldo <= 0 ? (
+        {/* Resumen de cobro */}
+        {totalCobro > 0 && (
+          <div className="grid grid-cols-3 gap-2">
+            <div className="bg-blue-50 rounded-xl px-3 py-2">
+              <p className="text-xs text-blue-400">Total</p>
+              <p className="text-sm font-bold text-blue-700">{formatCOP(totalCobro)}</p>
+            </div>
+            <div className="bg-green-50 rounded-xl px-3 py-2">
+              <p className="text-xs text-green-500">Abonado</p>
+              <p className="text-sm font-bold text-green-700">{formatCOP(abonado)}</p>
+            </div>
+            <div className={`rounded-xl px-3 py-2 ${saldo > 0 ? 'bg-red-50' : 'bg-green-50'}`}>
+              <p className={`text-xs ${saldo > 0 ? 'text-red-400' : 'text-green-500'}`}>Saldo</p>
+              <p className={`text-sm font-bold ${saldo > 0 ? 'text-red-600' : 'text-green-700'}`}>
+                {formatCOP(saldo > 0 ? saldo : 0)}
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Si ya está pagado, mensaje de confirmación */}
+        {yaPagado && (
           <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-xl px-3 py-2.5">
             <CheckCircle size={16} className="text-green-600 flex-shrink-0" />
             <p className="text-sm text-green-700 font-medium">Pago completo — listo para entregar</p>
           </div>
-        ) : (
-          <div className="flex items-start gap-2 bg-orange-50 border border-orange-200 rounded-xl px-3 py-3">
-            <AlertTriangle size={16} className="text-orange-500 flex-shrink-0 mt-0.5" />
-            <div>
-              <p className="text-sm font-semibold text-orange-700">Queda saldo pendiente</p>
-              <p className="text-xs text-orange-600 mt-0.5">
-                El cliente debe {formatCOP(saldo)}. El equipo se entrega
-                y quedará como <strong>Pendiente de pago</strong> hasta saldar.
-              </p>
-            </div>
+        )}
+
+        {/* Si hay saldo pendiente, preguntar si ya pagó */}
+        {!yaPagado && (
+          <div className="flex flex-col gap-3">
+            <label
+              className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-all
+                ${clientePago
+                  ? 'bg-green-50 border-green-300'
+                  : 'bg-gray-50 border-gray-200 hover:border-gray-300'}`}
+            >
+              <input
+                type="checkbox"
+                checked={clientePago}
+                onChange={(e) => setClientePago(e.target.checked)}
+                className="rounded accent-green-600 w-4 h-4 flex-shrink-0"
+              />
+              <div>
+                <p className={`text-sm font-medium ${clientePago ? 'text-green-700' : 'text-gray-700'}`}>
+                  El cliente ya pagó {formatCOP(saldo)}
+                </p>
+                <p className="text-xs text-gray-400">
+                  Se registrará el pago automáticamente al entregar
+                </p>
+              </div>
+            </label>
+
+            {/* Método de pago — solo si marcó que pagó */}
+            {clientePago && (
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-medium text-gray-600">Método de pago</label>
+                <div className="flex gap-2 flex-wrap">
+                  {METODOS_PAGO.map((m) => {
+                    const mKey = m;
+                    return (
+                      <button key={mKey} type="button" onClick={() => setMetodoPago(m)}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition-all
+                          ${metodoPago === m
+                            ? 'bg-blue-50 border-blue-300 text-blue-700'
+                            : 'bg-gray-50 border-gray-200 text-gray-600 hover:border-gray-300'}`}>
+                        {m}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Aviso si no marcó que pagó */}
+            {!clientePago && (
+              <div className="flex items-start gap-2 bg-orange-50 border border-orange-200 rounded-xl px-3 py-2.5">
+                <AlertTriangle size={14} className="text-orange-500 flex-shrink-0 mt-0.5" />
+                <p className="text-xs text-orange-600">
+                  Se entregará el equipo y quedará como <strong>Pendiente de pago</strong> hasta que el cliente salde.
+                </p>
+              </div>
+            )}
           </div>
         )}
 
@@ -1143,7 +1219,7 @@ function ModalEntregar({ orden, onClose, onExito }) {
           <Button variant="secondary" className="flex-1" onClick={onClose}>Cancelar</Button>
           <Button className="flex-1" loading={mutEntregar.isPending}
             onClick={() => mutEntregar.mutate()}>
-            {saldo > 0 ? 'Entregar con saldo pendiente' : 'Confirmar entrega'}
+            {yaPagado || clientePago ? 'Confirmar entrega' : 'Entregar sin cobrar'}
           </Button>
         </div>
       </div>
