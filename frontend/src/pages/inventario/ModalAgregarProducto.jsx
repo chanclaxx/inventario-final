@@ -294,7 +294,7 @@ function InfoCompra({ proveedorId, setProveedorId, costoCompra, setCostoCompra, 
       {Boolean(proveedorId) && (
         <div className="flex gap-2 pt-1 border-t border-amber-200">
           <button
-            onClick={() => setModoPago('contado')}
+            onClick={() => { setModoPago('contado'); if (esProveedor) setRegistrarEnCaja(false); }}
             className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg border
               text-xs font-medium transition-all
               ${modoPago === 'contado'
@@ -304,7 +304,7 @@ function InfoCompra({ proveedorId, setProveedorId, costoCompra, setCostoCompra, 
             <Banknote size={13} /> Pagado / Contado
           </button>
           <button
-            onClick={() => setModoPago('credito')}
+            onClick={() => { setModoPago('credito'); setRegistrarEnCaja(false); }}
             className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg border
               text-xs font-medium transition-all
               ${modoPago === 'credito'
@@ -322,8 +322,8 @@ function InfoCompra({ proveedorId, setProveedorId, costoCompra, setCostoCompra, 
         </p>
       )}
 
-      {/* Checkbox: Registrar en caja — solo visible para tipo 'proveedor' */}
-      {Boolean(proveedorId) && esProveedor && (
+      {/* Checkbox: Registrar en caja — solo para tipo 'proveedor' y pago contado */}
+      {Boolean(proveedorId) && esProveedor && modoPago === 'contado' && (
         <div className={`rounded-lg p-2.5 border transition-all
           ${registrarEnCaja ? 'bg-blue-50 border-blue-200' : 'bg-white border-amber-200'}`}>
           <label className="flex items-center gap-2.5 cursor-pointer">
