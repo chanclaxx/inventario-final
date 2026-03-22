@@ -33,4 +33,4 @@ const agregarFrecuente = async (negocioId, sucursalId, clienteId) => {
 const quitarFrecuente = (sucursalId, clienteId) =>
   repo.quitarFrecuente(sucursalId, clienteId);
 
-module.exports = { getClientes, getClienteById, buscarPorCedula, crearCliente, actualizarCliente,agregarFrecuente,quitarFrecuente };
+module.exports = { getClientes, getClienteById, buscarPorCedula, crearCliente, actualizarCliente,agregarFrecuente,quitarFrecuente,getFrecuentes };
