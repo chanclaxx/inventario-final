@@ -12,6 +12,8 @@ import { ModalConflictoCedula }        from '../../components/ui/ModalConflictoC
 import { formatCOP, formatFechaHora }  from '../../utils/formatters';
 import { ComprobanteServicio }         from '../../components/ComprobanteServicio';
 import { ReciboRecepcion }            from '../../components/ReciboRecepcion';
+import { ChecklistEquipo }            from '../../components/ChecklistEquipo';
+import { PatronGrid }                 from '../../components/PatronGrid';
 import { Badge }       from '../../components/ui/Badge';
 import { Button }      from '../../components/ui/Button';
 import { Modal }       from '../../components/ui/Modal';
@@ -26,7 +28,7 @@ import {
   Wrench, Plus, ChevronRight, ChevronLeft,
   AlertTriangle, CheckCircle, RefreshCw,
   ChevronDown, ChevronUp, User, Clock, Lock,
-  Loader2,
+  Loader2, Printer,
 } from 'lucide-react';
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
@@ -200,12 +202,22 @@ function AccionesOrden({ orden, onAccion }) {
         <>
           <Button size="sm" onClick={() => onAccion('en-reparacion', orden)}>En reparación</Button>
           <Button size="sm" variant="secondary" onClick={() => onAccion('sin-reparar', orden)}>Sin reparar</Button>
+          <button onClick={() => onAccion('reimprimir-recepcion', orden)}
+            className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-blue-500 transition-colors"
+            title="Reimprimir recibo de recepción">
+            <Printer size={14} />
+          </button>
         </>
       )}
       {estado === 'En_reparacion' && (
         <>
           <Button size="sm" onClick={() => onAccion('listo', orden)}>Marcar listo</Button>
           <Button size="sm" variant="secondary" onClick={() => onAccion('sin-reparar', orden)}>Sin reparar</Button>
+          <button onClick={() => onAccion('reimprimir-recepcion', orden)}
+            className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-blue-500 transition-colors"
+            title="Reimprimir recibo de recepción">
+            <Printer size={14} />
+          </button>
         </>
       )}
       {estado === 'Listo' && (
@@ -410,6 +422,7 @@ function ModalNuevaOrden({ onClose, onCreada }) {
     cliente_email: '', cliente_direccion: '',
     equipo_tipo: '', equipo_nombre: '', equipo_serial: '',
     falla_reportada: '', contrasena_equipo: '', notas_tecnico: '', costo_estimado: '',
+    checklist_equipo: [], patron_desbloqueo: [],
   });
   const [buscandoCedula, setBuscandoCedula] = useState(false);
   const [error, setError] = useState('');
@@ -471,6 +484,8 @@ function ModalNuevaOrden({ onClose, onCreada }) {
         contrasena_equipo: form.contrasena_equipo  || null,
         notas_tecnico:     form.notas_tecnico      || null,
         costo_estimado:    form.costo_estimado !== '' ? Number(form.costo_estimado) : null,
+        checklist_equipo:  form.checklist_equipo.length > 0 ? form.checklist_equipo : null,
+        patron_desbloqueo: form.patron_desbloqueo.length > 0 ? form.patron_desbloqueo : null,
       });
     },
     onSuccess: (res) => {
@@ -614,7 +629,11 @@ function ModalNuevaOrden({ onClose, onCreada }) {
                 {TIPOS_EQUIPO.map((t) => {
                   const tipoKey = t;
                   return (
-                    <button key={tipoKey} onClick={() => set('equipo_tipo', t)}
+                    <button key={tipoKey} onClick={() => {
+                      set('equipo_tipo', t);
+                      // Limpiar checklist al cambiar tipo
+                      set('checklist_equipo', []);
+                    }}
                       className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition-all
                         ${form.equipo_tipo === t
                           ? 'bg-blue-50 border-blue-300 text-blue-700'
@@ -634,6 +653,23 @@ function ModalNuevaOrden({ onClose, onCreada }) {
             <Input label="Serial / IMEI" placeholder="Opcional"
               value={form.equipo_serial}
               onChange={(e) => set('equipo_serial', e.target.value)} />
+
+            {/* Checklist de estado — aparece al seleccionar tipo */}
+            {form.equipo_tipo && (
+              <ChecklistEquipo
+                tipoEquipo={form.equipo_tipo}
+                value={form.checklist_equipo}
+                onChange={(val) => set('checklist_equipo', val)}
+              />
+            )}
+
+            {/* Patrón de desbloqueo — útil para celulares y tablets */}
+            {(form.equipo_tipo === 'Celular' || form.equipo_tipo === 'Tablet') && (
+              <PatronGrid
+                value={form.patron_desbloqueo}
+                onChange={(val) => set('patron_desbloqueo', val)}
+              />
+            )}
 
             <div className="flex gap-2 pt-2">
               <Button variant="secondary" onClick={() => irPaso(1)}>
@@ -1386,6 +1422,33 @@ function ModalDetalleOrden({ ordenId, onClose }) {
   );
 }
 
+// ─── Reimprimir recibo de recepción ───────────────────────────────────────────
+
+function ReimprimirRecepcion({ orden, onClose }) {
+  const config = useConfig();
+
+  const { data: ordenDetalle } = useQuery({
+    queryKey: ['orden-detalle-recepcion', orden.id],
+    queryFn:  () => getOrdenById(orden.id).then((r) => r.data.data),
+  });
+
+  if (!ordenDetalle) {
+    return (
+      <Modal open onClose={onClose} title="Cargando..." size="sm">
+        <Spinner className="py-10" />
+      </Modal>
+    );
+  }
+
+  return (
+    <ReciboRecepcion
+      orden={ordenDetalle}
+      config={config}
+      onClose={onClose}
+    />
+  );
+}
+
 // ─── Página principal ─────────────────────────────────────────────────────────
 
 export default function ServiciosPage() {
@@ -1575,6 +1638,9 @@ export default function ServiciosPage() {
       )}
       {accion?.tipo === 'detalle' && (
         <ModalDetalleOrden ordenId={accion.orden.id} onClose={cerrar} />
+      )}
+      {accion?.tipo === 'reimprimir-recepcion' && (
+        <ReimprimirRecepcion orden={accion.orden} onClose={cerrar} />
       )}
     </>
   );

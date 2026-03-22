@@ -2,20 +2,8 @@ const { pool } = require('../../config/db');
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
-// FIX TIMEZONE: Las columnas fecha_recepcion, fecha_entrega y abonos.fecha son
-// "timestamp without time zone" pero almacenan valores en UTC.
-// Para convertir correctamente a Bogotá hay que:
-//   1. Decirle a PG que el valor está en UTC:  col AT TIME ZONE 'UTC'
-//      → esto produce un "timestamp with time zone" interpretado como UTC
-//   2. Convertir a Bogotá:  ... AT TIME ZONE 'America/Bogota'
-//      → esto produce un "timestamp without time zone" en hora local Bogotá
-//   3. Extraer la fecha:  (...)::date
-//
-// Expresión reutilizable para "fecha hoy en Bogotá":
 const HOY_BOGOTA = `(NOW() AT TIME ZONE 'America/Bogota')::date`;
 
-// Helper: convierte una columna "timestamp without time zone" (guardada en UTC)
-// a fecha en Bogotá. Uso: fechaBogota('os.fecha_recepcion')
 const fechaBogota = (col) =>
   `(${col} AT TIME ZONE 'UTC' AT TIME ZONE 'America/Bogota')::date`;
 
@@ -125,7 +113,6 @@ const getResumenHoy = async (sucursalId, negocioId) => {
   const param       = sucursalId ?? negocioId;
   const campoFiltro = sucursalId ? 'sucursal_id' : 'negocio_id';
 
-  // 1. Órdenes recibidas hoy
   const { rows: r1 } = await pool.query(`
     SELECT COUNT(*) AS ordenes_hoy
     FROM ordenes_servicio
@@ -133,7 +120,6 @@ const getResumenHoy = async (sucursalId, negocioId) => {
       AND ${fechaBogota('fecha_recepcion')} = ${HOY_BOGOTA}
   `, [param]);
 
-  // 2. Ingresos hoy = suma de abonos cuya fecha (en Bogotá) es hoy
   const { rows: r2 } = await pool.query(`
     SELECT COALESCE(SUM(ab.valor), 0) AS ingresos_hoy
     FROM abonos_servicio ab
@@ -142,7 +128,6 @@ const getResumenHoy = async (sucursalId, negocioId) => {
       AND ${fechaBogota('ab.fecha')} = ${HOY_BOGOTA}
   `, [param]);
 
-  // 3. Utilidad hoy = órdenes entregadas hoy con costo_real registrado
   const { rows: r3 } = await pool.query(`
     SELECT COALESCE(SUM(
       COALESCE(precio_final, 0)    - COALESCE(costo_real, 0) +
@@ -156,7 +141,6 @@ const getResumenHoy = async (sucursalId, negocioId) => {
       AND ${fechaBogota('fecha_entrega')} = ${HOY_BOGOTA}
   `, [param]);
 
-  // 4. Pendiente cobro = órdenes activas con saldo > 0
   const { rows: r4 } = await pool.query(`
     SELECT COALESCE(SUM(
       CASE
@@ -193,7 +177,7 @@ const create = async (negocioId, sucursalId, usuarioId, datos) => {
     cliente_nombre, cliente_telefono, cliente_cedula, cliente_id,
     equipo_tipo, equipo_nombre, equipo_serial,
     falla_reportada, contrasena_equipo, notas_tecnico,
-    costo_estimado,
+    costo_estimado, checklist_equipo, patron_desbloqueo,
   } = datos;
 
   const { rows } = await pool.query(`
@@ -202,8 +186,8 @@ const create = async (negocioId, sucursalId, usuarioId, datos) => {
       cliente_nombre, cliente_telefono, cliente_cedula, cliente_id,
       equipo_tipo, equipo_nombre, equipo_serial,
       falla_reportada, contrasena_equipo, notas_tecnico,
-      costo_estimado
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+      costo_estimado, checklist_equipo, patron_desbloqueo
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,$16::jsonb)
     RETURNING *
   `, [
     negocioId, sucursalId, usuarioId,
@@ -218,6 +202,8 @@ const create = async (negocioId, sucursalId, usuarioId, datos) => {
     contrasena_equipo || null,
     notas_tecnico     || null,
     costo_estimado    || null,
+    checklist_equipo  ? JSON.stringify(checklist_equipo)  : null,
+    patron_desbloqueo ? JSON.stringify(patron_desbloqueo) : null,
   ]);
   return rows[0];
 };
@@ -264,7 +250,6 @@ const marcarListo = async (negocioId, id, { costo_real, precio_final, notas_tecn
   return rows[0] || null;
 };
 
-// FIX: Garantía gratis — costo_garantia ahora es 0 (valor fijo, no $3 que era texto)
 const marcarListoGarantiaGratis = async (negocioId, id, notas_tecnico) => {
   const { rows } = await pool.query(`
     UPDATE ordenes_servicio
