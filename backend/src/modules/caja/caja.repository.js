@@ -289,7 +289,8 @@ const getResumenDia = async (cajaId, sucursalId, negocioId) => {
 
     // Compras: solo las marcadas como registrar_en_caja = TRUE
     pool.query(`
-      SELECT c.id, c.total AS valor, c.fecha, c.numero_factura, pr.nombre AS proveedor
+      SELECT c.id, c.total AS valor, c.fecha, c.numero_factura,
+             pr.nombre AS proveedor, pr.tipo AS tipo_proveedor
       FROM compras c
       LEFT JOIN proveedores pr ON pr.id = c.proveedor_id
       WHERE c.sucursal_id = $1
@@ -304,9 +305,11 @@ const getResumenDia = async (cajaId, sucursalId, negocioId) => {
     `, [sucursalId, inicio, fin]),
 
     pool.query(`
-      SELECT ma.id, ma.valor, ma.fecha, ma.descripcion, a.nombre AS acreedor
+      SELECT ma.id, ma.valor, ma.fecha, ma.descripcion,
+             a.nombre AS acreedor, pr.tipo AS tipo_proveedor
       FROM movimientos_acreedor ma
       JOIN acreedores a ON a.id = ma.acreedor_id
+      LEFT JOIN proveedores pr ON pr.id = a.proveedor_id
       WHERE ma.tipo = 'Abono' AND a.negocio_id = $1 AND ma.fecha BETWEEN $2 AND $3
         AND ma.registrar_en_caja = TRUE
     `, [negocioId, inicio, fin]),
@@ -422,7 +425,8 @@ const getResumenGlobal = async (negocioId) => {
     // Compras global: solo las marcadas como registrar_en_caja = TRUE
     pool.query(`
       SELECT c.id, c.total AS valor, c.fecha, c.numero_factura,
-             pr.nombre AS proveedor, su.nombre AS sucursal_nombre
+             pr.nombre AS proveedor, pr.tipo AS tipo_proveedor,
+             su.nombre AS sucursal_nombre
       FROM compras c
       JOIN      sucursales  su ON su.id = c.sucursal_id
       LEFT JOIN proveedores pr ON pr.id = c.proveedor_id
@@ -438,9 +442,20 @@ const getResumenGlobal = async (negocioId) => {
     `, [negocioId, inicio, fin]),
 
     pool.query(`
-      SELECT ma.id, ma.valor, ma.fecha, ma.descripcion, a.nombre AS acreedor
+      SELECT ma.id, ma.valor, ma.fecha, ma.descripcion,
+             a.nombre AS acreedor, pr.tipo AS tipo_proveedor,
+             su_a.nombre AS sucursal_nombre
       FROM movimientos_acreedor ma
       JOIN acreedores a ON a.id = ma.acreedor_id
+      LEFT JOIN proveedores pr ON pr.id = a.proveedor_id
+      LEFT JOIN (
+        SELECT DISTINCT ON (prv.id) prv.id AS prov_id, su.nombre
+        FROM proveedores prv
+        JOIN compras c2 ON c2.proveedor_id = prv.id
+        JOIN sucursales su ON su.id = c2.sucursal_id
+        WHERE prv.negocio_id = $1
+        ORDER BY prv.id, c2.fecha DESC
+      ) su_a ON su_a.prov_id = a.proveedor_id
       WHERE ma.tipo = 'Abono' AND a.negocio_id = $1 AND ma.fecha BETWEEN $2 AND $3
         AND ma.registrar_en_caja = TRUE
     `, [negocioId, inicio, fin]),

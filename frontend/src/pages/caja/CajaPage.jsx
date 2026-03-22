@@ -20,6 +20,14 @@ import {
 
 const METODOS_PAGO_ORDEN = ['Efectivo', 'Nequi', 'Daviplata', 'Transferencia', 'Tarjeta'];
 
+// ─── Helper: nombre visible según rol y tipo_proveedor ───────────────────────
+// Admin ve todo. Supervisores ven nombre solo si es cruce; proveedores → "Proveedor".
+function nombreVisible(nombreReal, tipoProveedor, esAdmin) {
+  if (esAdmin) return nombreReal || 'Proveedor';
+  if (tipoProveedor === 'cruce') return nombreReal || 'Cruce';
+  return 'Proveedor';
+}
+
 const CONFIG_GRUPOS = {
   facturas: {
     icono:      Receipt,
@@ -106,7 +114,7 @@ const CONFIG_GRUPOS = {
     textHeader: 'text-red-700',
     borderColor:'border-red-100',
     renderItem: (item, opciones) => {
-      const nombre = opciones?.ocultarProveedor ? 'Proveedor' : item.proveedor;
+      const nombre = nombreVisible(item.proveedor, item.tipo_proveedor, opciones?.esAdmin);
       return {
         descripcion: `Compra — ${nombre}`,
         detalle:     item.numero_factura ? `Fact. ${item.numero_factura}` : null,
@@ -121,10 +129,10 @@ const CONFIG_GRUPOS = {
     textHeader: 'text-yellow-700',
     borderColor:'border-yellow-100',
     renderItem: (item, opciones) => {
-      const nombre = opciones?.ocultarProveedor ? 'Proveedor' : item.acreedor;
+      const nombre = nombreVisible(item.acreedor, item.tipo_proveedor, opciones?.esAdmin);
       return {
         descripcion: `Abono a ${nombre}`,
-        detalle:     opciones?.ocultarProveedor ? null : item.descripcion,
+        detalle:     opciones?.esAdmin ? item.descripcion : null,
         fecha:       item.fecha,
       };
     },
@@ -335,10 +343,7 @@ function ItemMovimiento({ item, rendered, esTipoIngreso, cajaId }) {
             <span className="text-xs text-gray-300">{formatFechaHora(rendered.fecha)}</span>
           )}
           {!estaActivo && (
-            <span className="text-xs bg-red-100 text-red-500 font-semibold
-              px-1.5 py-0.5 rounded-full">
-              Anulado
-            </span>
+            <span className="text-xs bg-red-100 text-red-500 font-semibold px-1.5 py-0.5 rounded-full">Anulado</span>
           )}
         </div>
       </div>
@@ -351,27 +356,21 @@ function ItemMovimiento({ item, rendered, esTipoIngreso, cajaId }) {
 
         {tieneToggle && (
           estaActivo ? (
-            <button
-              onClick={(e) => { e.stopPropagation(); mutation.mutate(); }}
-              disabled={mutation.isPending}
-              title="Anular movimiento"
+            <button onClick={(e) => { e.stopPropagation(); mutation.mutate(); }}
+              disabled={mutation.isPending} title="Anular movimiento"
               className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium
                 text-red-400 bg-red-50 border border-red-200
                 hover:text-red-600 hover:bg-red-100 hover:border-red-300
-                transition-all disabled:opacity-30"
-            >
+                transition-all disabled:opacity-30">
               <Ban size={12} />
               <span className="hidden sm:inline">Anular</span>
             </button>
           ) : (
-            <button
-              onClick={(e) => { e.stopPropagation(); mutation.mutate(); }}
-              disabled={mutation.isPending}
-              title="Reactivar movimiento"
+            <button onClick={(e) => { e.stopPropagation(); mutation.mutate(); }}
+              disabled={mutation.isPending} title="Reactivar movimiento"
               className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium
                 text-green-600 bg-green-50 border border-green-200
-                hover:bg-green-100 transition-all disabled:opacity-40"
-            >
+                hover:bg-green-100 transition-all disabled:opacity-40">
               <RotateCcw size={12} />
               <span className="hidden sm:inline">Reactivar</span>
             </button>
@@ -390,8 +389,7 @@ function GrupoMovimientos({ grupoKey, grupo, cajaId, opciones }) {
   const GrupoIcono = cfg.icono;
   const esMixto    = grupoKey === 'manuales';
   const esIngreso  = grupo.tipo === 'Ingreso';
-
-  const anulados = grupo.items.filter((i) => i.activo === false).length;
+  const anulados   = grupo.items.filter((i) => i.activo === false).length;
 
   return (
     <div className={`border ${cfg.borderColor} rounded-2xl overflow-hidden`}>
@@ -435,13 +433,8 @@ function GrupoMovimientos({ grupoKey, grupo, cajaId, opciones }) {
             const rendered      = cfg.renderItem(item, opciones);
             const esTipoIngreso = rendered.esMixto ? rendered.tipo === 'Ingreso' : esIngreso;
             return (
-              <ItemMovimiento
-                key={item.id}
-                item={item}
-                rendered={rendered}
-                esTipoIngreso={esTipoIngreso}
-                cajaId={cajaId}
-              />
+              <ItemMovimiento key={item.id} item={item} rendered={rendered}
+                esTipoIngreso={esTipoIngreso} cajaId={cajaId} />
             );
           })}
         </div>
@@ -467,9 +460,7 @@ function GrupoMovimientosInformativo({ grupo }) {
         </div>
         <div className="flex items-center gap-3">
           <span className="text-sm font-medium text-gray-400">{formatCOP(grupo.total)}</span>
-          <span className="text-xs text-gray-400 bg-gray-200 px-2 py-0.5 rounded-full">
-            por rendir
-          </span>
+          <span className="text-xs text-gray-400 bg-gray-200 px-2 py-0.5 rounded-full">por rendir</span>
           {expandido
             ? <ChevronUp size={15} className="text-gray-400" />
             : <ChevronDown size={15} className="text-gray-400" />}
@@ -520,12 +511,9 @@ export default function CajaPage() {
     refetchInterval: 30000,
   });
 
-  const resumenData = resumenRaw?.data ?? null;
-  const nivelUsuario = resumenRaw?.nivel ?? null;
-
-  // Determinar si se debe ocultar el nombre de proveedores
-  // Solo admin_negocio puede ver los nombres reales
-  const ocultarProveedor = nivelUsuario && nivelUsuario !== 'admin_negocio';
+  const resumenData    = resumenRaw?.data ?? null;
+  const nivelUsuario   = resumenRaw?.nivel ?? null;
+  const esAdmin        = nivelUsuario === 'admin_negocio';
 
   const mutAbrir = useMutation({
     mutationFn: () => abrirCaja({ monto_inicial: Number(montoApertura) }),
@@ -539,9 +527,8 @@ export default function CajaPage() {
   );
   const metodosPago = useMemo(() => resumenData?.metodosPago || {}, [resumenData]);
 
-  const opcionesGrupo = useMemo(() => ({
-    ocultarProveedor,
-  }), [ocultarProveedor]);
+  // Opciones para renderItem: esAdmin determina si se muestra el nombre real
+  const opcionesGrupo = useMemo(() => ({ esAdmin }), [esAdmin]);
 
   const saldoActual = useMemo(
     () => Number(caja?.monto_inicial || 0) + totales.ingresos - totales.egresos,
