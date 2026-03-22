@@ -8,6 +8,27 @@ const getFacturas = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+const getFacturasRecientes = async (req, res, next) => {
+  try {
+    const sucursalId = req.todasSucursales ? null : req.sucursal_id;
+    const cursor     = req.query.cursor || null;
+    const dias       = req.query.dias ? Number(req.query.dias) : 5;
+    const data = await service.getFacturasRecientes(sucursalId, req.user.negocio_id, { cursor, dias });
+    res.json({ ok: true, data });
+  } catch (err) { next(err); }
+};
+
+const buscarFacturas = async (req, res, next) => {
+  try {
+    const sucursalId = req.todasSucursales ? null : req.sucursal_id;
+    const { q, desde, hasta } = req.query;
+    const limit  = req.query.limit  ? Math.min(Number(req.query.limit), 200) : 100;
+    const offset = req.query.offset ? Number(req.query.offset) : 0;
+    const data = await service.buscarFacturas(sucursalId, req.user.negocio_id, { q, desde, hasta, limit, offset });
+    res.json({ ok: true, data });
+  } catch (err) { next(err); }
+};
+
 const getFacturaById = async (req, res, next) => {
   try {
     const data = await service.getFacturaById(req.user.negocio_id, req.params.id);
@@ -32,7 +53,7 @@ const crearFactura = async (req, res, next) => {
       ...req.body,
       sucursal_id,
       usuario_id: req.user.id,
-      negocio_id: req.user.negocio_id, // necesario para resolver/crear cliente
+      negocio_id: req.user.negocio_id,
     });
     res.status(201).json({ ok: true, data, message: 'Factura creada correctamente' });
   } catch (err) { next(err); }
@@ -45,6 +66,7 @@ const cancelarFactura = async (req, res, next) => {
     res.json({ ok: true, message: 'Factura cancelada correctamente' });
   } catch (err) { next(err); }
 };
+
 const editarFactura = async (req, res, next) => {
   try {
     const data = await service.editarFactura(
@@ -56,4 +78,7 @@ const editarFactura = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-module.exports = { getFacturas, getFacturaById, crearFactura, cancelarFactura, editarFactura };
+module.exports = {
+  getFacturas, getFacturasRecientes, buscarFacturas,
+  getFacturaById, crearFactura, cancelarFactura, editarFactura,
+};

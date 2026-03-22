@@ -42,8 +42,6 @@ const resolverClienteId = async (client, negocioId, { cedula, nombre, celular, e
   return nuevos[0].id;
 };
 
-// ── Helper: lee stock y costo actual de un producto_cantidad dentro de la TX ──
-// Se necesita ANTES de ajustarStockCantidad para calcular el promedio correcto.
 const _leerStockYCosto = async (client, productoId) => {
   const { rows } = await client.query(
     'SELECT stock, costo_unitario FROM productos_cantidad WHERE id = $1',
@@ -52,8 +50,16 @@ const _leerStockYCosto = async (client, productoId) => {
   return rows[0] || null;
 };
 
+// ── Consultas ─────────────────────────────────────────────────────────────────
+
 const getFacturas = (sucursalId, negocioId) =>
   facturasRepo.findAll(sucursalId, negocioId);
+
+const getFacturasRecientes = (sucursalId, negocioId, { cursor, dias }) =>
+  facturasRepo.findRecientes(sucursalId, negocioId, { cursor, dias });
+
+const buscarFacturas = (sucursalId, negocioId, { q, desde, hasta, limit, offset }) =>
+  facturasRepo.buscar(sucursalId, negocioId, { q, desde, hasta, limit, offset });
 
 const getFacturaById = async (negocioId, id) => {
   const factura = await facturasRepo.findByIdYNegocio(id, negocioId);
@@ -70,6 +76,8 @@ const getFacturaById = async (negocioId, id) => {
 
   return { ...factura, lineas, pagos, retomas, domicilio: entrega || null };
 };
+
+// ── Crear factura ─────────────────────────────────────────────────────────────
 
 const crearFactura = async ({
   negocio_id, sucursal_id, usuario_id,
@@ -180,7 +188,6 @@ const crearFactura = async ({
           throw { status: 400, message: `Stock insuficiente para ${linea.nombre_producto}` };
         }
         await facturasRepo.ajustarStockCantidad(client, linea.producto_id, -linea.cantidad);
-        // Venta: cantidad negativa → el promedio NO se recalcula ✓
       }
     }
 
@@ -208,7 +215,6 @@ const crearFactura = async ({
       });
 
       if (retoma.ingreso_inventario && retoma.tipo_retoma === 'serial' && retoma.imei) {
-        // ── Retoma serial — sin cambios ──────────────────────────────────────
         const { rows: existeRows } = await client.query(
           `SELECT s.id FROM seriales s
            JOIN productos_serial ps ON ps.id = s.producto_id
@@ -258,23 +264,14 @@ const crearFactura = async ({
 
       if (retoma.ingreso_inventario && retoma.tipo_retoma === 'cantidad' && retoma.producto_cantidad_id) {
         await _verificarProductoCantidadNegocio(client, retoma.producto_cantidad_id, negocio_id);
-
-        // NUEVO: leer stock y costo ANTES de ajustar para calcular promedio correcto
         const productoActual = await _leerStockYCosto(client, retoma.producto_cantidad_id);
-
         await facturasRepo.ajustarStockCantidad(client, retoma.producto_cantidad_id, Number(retoma.cantidad_retoma || 1));
 
-        // Promedio ponderado: la retoma entra con valor_retoma como costo
-        // Solo si hay valor conocido (>0) — retomas sin valorar no modifican el costo
         if (productoActual && Number(retoma.valor_retoma) > 0) {
           const cantRetoma = Number(retoma.cantidad_retoma || 1);
-          // valor_retoma es el total pagado al cliente — convertir a costo unitario
           const costoUnitarioRetoma = Number(retoma.valor_retoma) / cantRetoma;
           const costoPromedio = calcularCostoPromedio(
-            productoActual.stock,
-            productoActual.costo_unitario,
-            cantRetoma,
-            costoUnitarioRetoma,
+            productoActual.stock, productoActual.costo_unitario, cantRetoma, costoUnitarioRetoma,
           );
           await facturasRepo.actualizarCostoPromedio(client, retoma.producto_cantidad_id, costoPromedio);
         }
@@ -330,6 +327,8 @@ const crearFactura = async ({
   }
 };
 
+// ── Cancelar factura ──────────────────────────────────────────────────────────
+
 const cancelarFactura = async (negocioId, id, eliminarRetoma = false, _desdeDevolucion = false) => {
   const factura = await facturasRepo.findByIdYNegocio(id, negocioId);
   if (!factura) throw { status: 404, message: 'Factura no encontrada' };
@@ -369,8 +368,6 @@ const cancelarFactura = async (negocioId, id, eliminarRetoma = false, _desdeDevo
           );
         }
       } else if (linea.producto_id) {
-        // Devolución de venta: stock sube, cantidad > 0 pero NO se recalcula costo
-        // porque no tenemos el costo original al que salió → mantener el promedio actual
         await facturasRepo.ajustarStockCantidad(client, linea.producto_id, linea.cantidad);
       }
     }
@@ -397,7 +394,6 @@ const cancelarFactura = async (negocioId, id, eliminarRetoma = false, _desdeDevo
             [retoma.nombre_producto, factura.sucursal_id]
           );
           if (prodRows.length) {
-            // Reversa de retoma: sale del inventario (cantidad negativa) → sin promedio ✓
             const cantidadRevertir = -Math.abs(Number(retoma.cantidad_retoma) || 1);
             await facturasRepo.ajustarStockCantidad(client, prodRows[0].id, cantidadRevertir);
           }
@@ -436,6 +432,8 @@ const cancelarFactura = async (negocioId, id, eliminarRetoma = false, _desdeDevo
     client.release();
   }
 };
+
+// ── Editar factura ────────────────────────────────────────────────────────────
 
 const editarFactura = async (negocioId, id, {
   nombre_cliente, cedula, celular, email, direccion, notas,
@@ -494,7 +492,6 @@ const editarFactura = async (negocioId, id, {
 
       if (retoma.ingreso_inventario) {
         if (retoma.tipo_retoma === 'serial' && retoma.imei) {
-          // ── Retoma serial — sin cambios ────────────────────────────────────
           const { rows: existeRows } = await client.query(
             `SELECT s.id FROM seriales s
              JOIN productos_serial ps ON ps.id = s.producto_id
@@ -534,24 +531,17 @@ const editarFactura = async (negocioId, id, {
 
         if (retoma.tipo_retoma === 'cantidad' && retoma.producto_cantidad_id) {
           await _verificarProductoCantidadNegocio(client, retoma.producto_cantidad_id, negocioId);
-
-          // NUEVO: leer stock y costo ANTES de ajustar para calcular promedio correcto
           const productoActual = await _leerStockYCosto(client, retoma.producto_cantidad_id);
 
           await facturasRepo.ajustarStockCantidad(
             client, retoma.producto_cantidad_id, Number(retoma.cantidad_retoma || 1)
           );
 
-          // Promedio ponderado: la retoma entra con valor_retoma como costo
           if (productoActual && Number(retoma.valor_retoma) > 0) {
             const cantRetoma = Number(retoma.cantidad_retoma || 1);
-            // valor_retoma es el total pagado al cliente — convertir a costo unitario
             const costoUnitarioRetoma = Number(retoma.valor_retoma) / cantRetoma;
             const costoPromedio = calcularCostoPromedio(
-              productoActual.stock,
-              productoActual.costo_unitario,
-              cantRetoma,
-              costoUnitarioRetoma,
+              productoActual.stock, productoActual.costo_unitario, cantRetoma, costoUnitarioRetoma,
             );
             await facturasRepo.actualizarCostoPromedio(client, retoma.producto_cantidad_id, costoPromedio);
           }
@@ -570,5 +560,6 @@ const editarFactura = async (negocioId, id, {
 };
 
 module.exports = {
-  getFacturas, getFacturaById, crearFactura, cancelarFactura, editarFactura,
+  getFacturas, getFacturasRecientes, buscarFacturas,
+  getFacturaById, crearFactura, cancelarFactura, editarFactura,
 };

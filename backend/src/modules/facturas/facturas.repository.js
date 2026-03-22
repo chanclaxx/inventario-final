@@ -26,38 +26,153 @@ const _subqueryProveedores = (facturaAlias = 'f') => `
   ) AS proveedor_nombre
 `;
 
+// ── Columnas SELECT compartidas ───────────────────────────────────────────────
+
+const _selectColumnas = () => `
+  f.id, f.fecha, f.nombre_cliente, f.cedula, f.celular,
+  f.estado, f.notas, f.sucursal_id,
+  su.nombre AS sucursal_nombre,
+  u.nombre  AS usuario_nombre,
+  COALESCE(SUM(l.subtotal), 0) AS total,
+  COALESCE(
+    (SELECT SUM(r.valor_retoma) FROM retomas r WHERE r.factura_id = f.id), 0
+  ) AS total_retoma,
+  STRING_AGG(DISTINCT l.nombre_producto, ', ') AS productos_nombres,
+  STRING_AGG(DISTINCT l.imei,            ', ') AS productos_imeis,
+  (SELECT ret.descripcion        FROM retomas ret WHERE ret.factura_id = f.id LIMIT 1) AS retoma_descripcion,
+  (SELECT ret.imei               FROM retomas ret WHERE ret.factura_id = f.id LIMIT 1) AS retoma_imei,
+  (SELECT ret.nombre_producto    FROM retomas ret WHERE ret.factura_id = f.id LIMIT 1) AS retoma_nombre_producto,
+  (SELECT ret.ingreso_inventario FROM retomas ret WHERE ret.factura_id = f.id LIMIT 1) AS retoma_ingreso_inventario,
+  (SELECT ret.valor_retoma       FROM retomas ret WHERE ret.factura_id = f.id LIMIT 1) AS retoma_valor,
+  ${_subqueryProveedores('f')}
+`;
+
+const _fromJoins = () => `
+  FROM facturas f
+  JOIN      sucursales      su ON su.id = f.sucursal_id
+  LEFT JOIN lineas_factura  l  ON l.factura_id = f.id
+  LEFT JOIN usuarios        u  ON u.id = f.usuario_id
+`;
+
+// ── findAll original (se mantiene por compatibilidad) ─────────────────────────
+
 const findAll = async (sucursalId, negocioId) => {
   const filtro = sucursalId ? 'f.sucursal_id = $1' : 'su.negocio_id = $1';
   const param  = sucursalId ?? negocioId;
 
   const { rows } = await pool.query(`
-    SELECT
-      f.id, f.fecha, f.nombre_cliente, f.cedula, f.celular,
-      f.estado, f.notas, f.sucursal_id,
-      su.nombre AS sucursal_nombre,
-      u.nombre  AS usuario_nombre,
-      COALESCE(SUM(l.subtotal), 0) AS total,
-      COALESCE(
-        (SELECT SUM(r.valor_retoma) FROM retomas r WHERE r.factura_id = f.id), 0
-      ) AS total_retoma,
-      STRING_AGG(DISTINCT l.nombre_producto, ', ') AS productos_nombres,
-      STRING_AGG(DISTINCT l.imei,            ', ') AS productos_imeis,
-      (SELECT ret.descripcion        FROM retomas ret WHERE ret.factura_id = f.id LIMIT 1) AS retoma_descripcion,
-      (SELECT ret.imei               FROM retomas ret WHERE ret.factura_id = f.id LIMIT 1) AS retoma_imei,
-      (SELECT ret.nombre_producto    FROM retomas ret WHERE ret.factura_id = f.id LIMIT 1) AS retoma_nombre_producto,
-      (SELECT ret.ingreso_inventario FROM retomas ret WHERE ret.factura_id = f.id LIMIT 1) AS retoma_ingreso_inventario,
-      (SELECT ret.valor_retoma       FROM retomas ret WHERE ret.factura_id = f.id LIMIT 1) AS retoma_valor,
-      ${_subqueryProveedores('f')}
-    FROM facturas f
-    JOIN      sucursales      su ON su.id = f.sucursal_id
-    LEFT JOIN lineas_factura  l  ON l.factura_id = f.id
-    LEFT JOIN usuarios        u  ON u.id = f.usuario_id
+    SELECT ${_selectColumnas()}
+    ${_fromJoins()}
     WHERE ${filtro}
     GROUP BY f.id, u.nombre, su.nombre
     ORDER BY f.fecha DESC
   `, [param]);
   return rows;
 };
+
+// ── findRecientes: últimos N días con cursor para scroll infinito ─────────────
+
+const findRecientes = async (sucursalId, negocioId, { cursor, dias = 5 }) => {
+  const filtroSucursal = sucursalId ? 'f.sucursal_id = $1' : 'su.negocio_id = $1';
+  const param          = sucursalId ?? negocioId;
+
+  // cursor es la fecha más antigua ya cargada (ISO string)
+  // Si no hay cursor, partimos desde ahora
+  const fechaHasta = cursor ? new Date(cursor) : new Date();
+  const fechaDesde = new Date(fechaHasta);
+  fechaDesde.setDate(fechaDesde.getDate() - dias);
+
+  const { rows } = await pool.query(`
+    SELECT ${_selectColumnas()}
+    ${_fromJoins()}
+    WHERE ${filtroSucursal}
+      AND f.fecha >= $2 AND f.fecha < $3
+    GROUP BY f.id, u.nombre, su.nombre
+    ORDER BY f.fecha DESC
+  `, [param, fechaDesde, fechaHasta]);
+
+  // Calcular siguiente cursor
+  const siguienteCursor = fechaDesde.toISOString();
+
+  // Verificar si hay facturas más antiguas
+  const { rows: hayMas } = await pool.query(`
+    SELECT 1 FROM facturas f
+    JOIN sucursales su ON su.id = f.sucursal_id
+    WHERE ${filtroSucursal} AND f.fecha < $2
+    LIMIT 1
+  `, [param, fechaDesde]);
+
+  return {
+    items:            rows,
+    siguienteCursor:  hayMas.length > 0 ? siguienteCursor : null,
+  };
+};
+
+// ── buscar: búsqueda de texto en TODA la historia con limit ───────────────────
+
+const buscar = async (sucursalId, negocioId, { q, desde, hasta, limit = 100, offset = 0 }) => {
+  const filtroSucursal = sucursalId ? 'f.sucursal_id = $1' : 'su.negocio_id = $1';
+  const param          = sucursalId ?? negocioId;
+
+  const condiciones = [filtroSucursal];
+  const params      = [param];
+  let paramIndex    = 2;
+
+  // Búsqueda de texto
+  if (q && q.trim()) {
+    const textoSeguro = q.toLowerCase().replace(/[%_\\]/g, '\\$&').slice(0, 100);
+    params.push(`%${textoSeguro}%`);
+    condiciones.push(`(
+      LOWER(f.nombre_cliente) LIKE $${paramIndex} ESCAPE '\\'
+      OR f.cedula LIKE $${paramIndex} ESCAPE '\\'
+      OR f.celular LIKE $${paramIndex} ESCAPE '\\'
+      OR CAST(f.id AS TEXT) LIKE $${paramIndex} ESCAPE '\\'
+      OR EXISTS (
+        SELECT 1 FROM lineas_factura lf_s
+        WHERE lf_s.factura_id = f.id
+          AND (LOWER(lf_s.nombre_producto) LIKE $${paramIndex} ESCAPE '\\'
+               OR LOWER(lf_s.imei) LIKE $${paramIndex} ESCAPE '\\')
+      )
+      OR EXISTS (
+        SELECT 1 FROM retomas rt_s
+        WHERE rt_s.factura_id = f.id
+          AND (LOWER(rt_s.descripcion) LIKE $${paramIndex} ESCAPE '\\'
+               OR LOWER(rt_s.nombre_producto) LIKE $${paramIndex} ESCAPE '\\'
+               OR LOWER(rt_s.imei) LIKE $${paramIndex} ESCAPE '\\')
+      )
+    )`);
+    paramIndex++;
+  }
+
+  // Filtro de fecha desde
+  if (desde) {
+    params.push(desde);
+    condiciones.push(`f.fecha >= $${paramIndex}::date`);
+    paramIndex++;
+  }
+
+  // Filtro de fecha hasta (hasta fin del día)
+  if (hasta) {
+    params.push(hasta);
+    condiciones.push(`f.fecha < ($${paramIndex}::date + INTERVAL '1 day')`);
+    paramIndex++;
+  }
+
+  params.push(limit, offset);
+
+  const { rows } = await pool.query(`
+    SELECT ${_selectColumnas()}
+    ${_fromJoins()}
+    WHERE ${condiciones.join(' AND ')}
+    GROUP BY f.id, u.nombre, su.nombre
+    ORDER BY f.fecha DESC
+    LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
+  `, params);
+
+  return rows;
+};
+
+// ── Resto de funciones sin cambios ────────────────────────────────────────────
 
 const findById = async (id) => {
   const { rows } = await pool.query(`
@@ -210,7 +325,6 @@ const findByIdYNegocio = async (id, negocioId) => {
   return rows[0] || null;
 };
 
-// Ajusta stock dentro de una transacción — solo modifica stock, nunca costo
 const ajustarStockCantidad = async (client, productoId, cantidad) => {
   await client.query(
     'UPDATE productos_cantidad SET stock = stock + $1 WHERE id = $2',
@@ -218,8 +332,6 @@ const ajustarStockCantidad = async (client, productoId, cantidad) => {
   );
 };
 
-// NUEVO: actualiza costo_unitario con el promedio ponderado dentro de la transacción.
-// Se llama después de ajustarStockCantidad en retomas de tipo 'cantidad'.
 const actualizarCostoPromedio = async (client, productoId, costoPromedio) => {
   await client.query(
     'UPDATE productos_cantidad SET costo_unitario = $1 WHERE id = $2',
@@ -228,7 +340,8 @@ const actualizarCostoPromedio = async (client, productoId, costoPromedio) => {
 };
 
 module.exports = {
-  findAll, findById, findByIdYNegocio,
+  findAll, findRecientes, buscar,
+  findById, findByIdYNegocio,
   perteneceAlNegocio,
   getLineas, getPagos, getRetomas,
   create, insertarLinea, insertarPago, insertarRetoma, cancelar,

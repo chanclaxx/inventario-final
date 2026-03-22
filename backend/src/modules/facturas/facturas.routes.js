@@ -14,10 +14,12 @@ const validarFactura = [
   body('pagos').isArray({ min: 1 }).withMessage('Debe incluir al menos un método de pago'),
   body('pagos.*.metodo').isIn(['Efectivo','Nequi','Daviplata','Transferencia','Tarjeta','Credito'])
     .withMessage('Método de pago inválido'),
-  // ── Permite 0 y negativos: una retoma puede superar el valor de los productos,
-  // en cuyo caso el neto es negativo (el negocio le debe al cliente).
   body('pagos.*.valor').isFloat().withMessage('Valor de pago inválido'),
 ];
+
+// Rutas estáticas ANTES de /:id para evitar conflictos
+router.get('/recientes', ctrl.getFacturasRecientes);
+router.get('/buscar',    ctrl.buscarFacturas);
 
 router.get('/',               ctrl.getFacturas);
 router.get('/:id',            ctrl.getFacturaById);
