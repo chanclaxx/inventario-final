@@ -60,18 +60,18 @@ export default function InventarioPage() {
     }
   };
 
-  // Al cerrar el modal de agregar producto, invalidar todas las queries de inventario
-  // para que la lista se actualice inmediatamente sin necesidad de F5
   const handleCerrarModalAgregar = () => {
     setModalAgregar(false);
     queryClient.invalidateQueries({ queryKey: ['productos-serial'],   exact: false });
     queryClient.invalidateQueries({ queryKey: ['productos-cantidad'], exact: false });
+    queryClient.invalidateQueries({ queryKey: ['seriales'],           exact: false });
   };
 
   const handleCerrarModalImportar = () => {
     setModalImportar(false);
     queryClient.invalidateQueries({ queryKey: ['productos-serial'],   exact: false });
     queryClient.invalidateQueries({ queryKey: ['productos-cantidad'], exact: false });
+    queryClient.invalidateQueries({ queryKey: ['seriales'],           exact: false });
   };
 
   return (
@@ -113,13 +113,8 @@ export default function InventarioPage() {
 
           <div className="flex items-center gap-2">
             {puedeExportar && (
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={handleExportar}
-                loading={exportando}
-                title="Descargar inventario completo en Excel"
-              >
+              <Button size="sm" variant="secondary" onClick={handleExportar} loading={exportando}
+                title="Descargar inventario completo en Excel">
                 <Download size={16} />
                 <span className="hidden sm:inline">
                   {exportando ? 'Generando...' : 'Exportar Excel'}
@@ -127,23 +122,16 @@ export default function InventarioPage() {
               </Button>
             )}
 
-            <Button
-              size="sm"
-              variant="secondary"
-              onClick={() => setModalImportar(true)}
+            <Button size="sm" variant="secondary" onClick={() => setModalImportar(true)}
               disabled={bloquearCreacion}
-              title={bloquearCreacion ? 'Selecciona una sucursal para importar' : undefined}
-            >
+              title={bloquearCreacion ? 'Selecciona una sucursal para importar' : undefined}>
               <Upload size={16} />
               <span className="hidden sm:inline">Importar Excel</span>
             </Button>
 
-            <Button
-              size="sm"
-              onClick={() => setModalAgregar(true)}
+            <Button size="sm" onClick={() => setModalAgregar(true)}
               disabled={bloquearCreacion}
-              title={bloquearCreacion ? 'Selecciona una sucursal para agregar productos' : undefined}
-            >
+              title={bloquearCreacion ? 'Selecciona una sucursal para agregar productos' : undefined}>
               <Plus size={16} />
               <span className="hidden sm:inline">Agregar producto</span>
             </Button>

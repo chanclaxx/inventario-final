@@ -116,7 +116,6 @@ function GrupoLinea({ nombre, productos, productoSeleccionado, onSeleccionar, on
 
   return (
     <div className="flex flex-col gap-1">
-      {/* Cabecera del grupo */}
       <button
         onClick={() => setAbierto((v) => !v)}
         className="flex items-center gap-2 px-2 py-1.5 rounded-lg
@@ -131,7 +130,6 @@ function GrupoLinea({ nombre, productos, productoSeleccionado, onSeleccionar, on
         <span className="text-xs text-gray-300 ml-auto">({productos.length})</span>
       </button>
 
-      {/* Productos del grupo */}
       {abierto && (
         <div className="flex flex-col gap-1 ml-1 border-l-2 border-gray-100 pl-2">
           {productos.map((p) => (
@@ -197,12 +195,13 @@ export function ProductosSerial({ onAgregarProducto }) {
   });
 
   const { data: serialesData, isLoading: loadingSeriales } = useQuery({
-    queryKey: ['seriales', productoSeleccionado?.id, ...sucursalKey],
-    queryFn:  () => getSeriales(productoSeleccionado.id, false).then((r) => r.data.data),
-    enabled:  sucursalLista && !!productoSeleccionado,
+    queryKey:  ['seriales', productoSeleccionado?.id, ...sucursalKey],
+    queryFn:   () => getSeriales(productoSeleccionado.id, false).then((r) => r.data.data),
+    enabled:   sucursalLista && !!productoSeleccionado,
+    staleTime: 0,
+    gcTime:    0,
   });
 
-  // ── Config: solo se carga si el usuario es admin (PIN de eliminación) ──────
   const { data: configData } = useQuery({
     queryKey: ['config'],
     queryFn:  () => api.get('/config').then((r) => r.data.data),
@@ -226,7 +225,6 @@ export function ProductosSerial({ onAgregarProducto }) {
   const seriales  = serialesData  || [];
   const esAdmin   = esAdminNegocio();
 
-  // ── Filtrar y agrupar ──────────────────────────────────────────────────────
   const productosFiltrados = productos.filter((p) =>
     p.nombre.toLowerCase().includes(busqueda.toLowerCase())
   );
@@ -239,7 +237,6 @@ export function ProductosSerial({ onAgregarProducto }) {
         productos: productosFiltrados.filter((p) => p.linea_id === l.id),
       }))
       .filter((g) => g.productos.length > 0),
-    // Sin línea al final
     ...(productosFiltrados.filter((p) => !p.linea_id).length > 0
       ? [{
           key:       'sin-linea',
@@ -249,7 +246,6 @@ export function ProductosSerial({ onAgregarProducto }) {
       : []),
   ];
 
-  // ── Seriales ───────────────────────────────────────────────────────────────
   const serialesFiltrados = seriales.filter((s) =>
     s.imei.toLowerCase().includes(busquedaSerial.toLowerCase())
   );
@@ -260,7 +256,7 @@ export function ProductosSerial({ onAgregarProducto }) {
 
   const handleSeleccionar = (p) => { setProductoSeleccionado(p); setBusquedaSerial(''); };
 
-   const handleAgregarSerial = (serial) => {
+  const handleAgregarSerial = (serial) => {
     if (serial.prestado) return;
     agregarItem({
       key:         serial.imei,
@@ -277,7 +273,6 @@ export function ProductosSerial({ onAgregarProducto }) {
     });
   };
 
-  // ── Panel de seriales ──────────────────────────────────────────────────────
   const PanelSeriales = productoSeleccionado ? (
     <div className="flex flex-col gap-3 flex-1">
       <div className="flex items-center justify-between gap-2">
@@ -340,7 +335,6 @@ export function ProductosSerial({ onAgregarProducto }) {
       descripcion="Elige un producto de la lista para ver sus seriales" />
   );
 
-  // ── Lista lateral con grupos ───────────────────────────────────────────────
   const ListaProductos = (
     <div className="w-64 flex-shrink-0 flex flex-col gap-3">
       <SearchInput value={busqueda} onChange={setBusqueda} placeholder="Buscar modelo..." />
@@ -355,7 +349,6 @@ export function ProductosSerial({ onAgregarProducto }) {
         {productosFiltrados.length === 0 ? (
           <EmptyState icon={Package} titulo="Sin productos" />
         ) : grupos.length === 0 ? (
-          // Fallback: sin líneas configuradas, lista plana
           productosFiltrados.map((p) => (
             <button
               key={p.id}
@@ -400,13 +393,11 @@ export function ProductosSerial({ onAgregarProducto }) {
 
   return (
     <>
-      {/* Desktop */}
       <div className="hidden lg:flex gap-4 h-full">
         {ListaProductos}
         <div className="flex-1 min-w-0">{PanelSeriales}</div>
       </div>
 
-      {/* Móvil */}
       <div className="flex flex-col gap-4 lg:hidden">
         <SelectorModelo
           productos={productos}
