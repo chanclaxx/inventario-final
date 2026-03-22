@@ -68,12 +68,12 @@ const findByProveedor = async (proveedorId, sucursalId, negocioId) => {
   return rows;
 };
 
-const create = async (client, { sucursal_id, proveedor_id, usuario_id, numero_factura, total, notas }) => {
+const create = async (client, { sucursal_id, proveedor_id, usuario_id, numero_factura, total, notas, registrar_en_caja }) => {
   const { rows } = await client.query(`
-    INSERT INTO compras(sucursal_id, proveedor_id, usuario_id, numero_factura, total, notas)
-    VALUES ($1, $2, $3, $4, $5, $6)
+    INSERT INTO compras(sucursal_id, proveedor_id, usuario_id, numero_factura, total, notas, registrar_en_caja)
+    VALUES ($1, $2, $3, $4, $5, $6, $7)
     RETURNING *
-  `, [sucursal_id, proveedor_id, usuario_id, numero_factura, total, notas]);
+  `, [sucursal_id, proveedor_id, usuario_id, numero_factura, total, notas, registrar_en_caja !== false]);
   return rows[0];
 };
 
@@ -110,7 +110,6 @@ const findByIdYNegocio = async (id, negocioId) => {
   return rows[0] || null;
 };
 
-// Incrementa el stock — se usa dentro de transacciones de compra
 const ajustarStockCantidad = async (client, productoId, cantidad) => {
   await client.query(
     'UPDATE productos_cantidad SET stock = stock + $1 WHERE id = $2',
@@ -118,8 +117,6 @@ const ajustarStockCantidad = async (client, productoId, cantidad) => {
   );
 };
 
-// NUEVO: actualiza costo_unitario con el promedio ponderado dentro de la transacción.
-// Se llama inmediatamente después de ajustarStockCantidad en compras.service.
 const actualizarCostoPromedio = async (client, productoId, costoPromedio) => {
   await client.query(
     'UPDATE productos_cantidad SET costo_unitario = $1 WHERE id = $2',

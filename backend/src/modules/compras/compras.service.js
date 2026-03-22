@@ -25,6 +25,7 @@ const registrarCompra = async ({
   negocio_id, sucursal_id, usuario_id, proveedor_id,
   numero_factura, notas, lineas,
   total: totalRecibido, pagos = [], agregarComoAcreedor = false,
+  registrar_en_caja = true,
 }) => {
   // ── Verificar sucursal pertenece al negocio ──────────────────────────────
   const { rows: sucRows } = await pool.query(
@@ -51,6 +52,7 @@ const registrarCompra = async ({
 
     const compra = await comprasRepo.create(client, {
       sucursal_id, proveedor_id, usuario_id, numero_factura, total, notas,
+      registrar_en_caja,
     });
 
     for (const linea of lineas) {
@@ -66,7 +68,6 @@ const registrarCompra = async ({
       });
 
       if (linea.imei) {
-        // ── Productos con serial/IMEI — sin cambios ──────────────────────
         if (linea.reactivar_serial_id) {
           const { rows } = await client.query(
             `SELECT s.id FROM seriales s
@@ -114,7 +115,6 @@ const registrarCompra = async ({
         }
 
       } else if (linea.producto_id) {
-        // ── Productos por cantidad ────────────────────────────────────────
         const { rows: prodRows } = await client.query(
           `SELECT id, stock, costo_unitario, sucursal_id FROM productos_cantidad WHERE id = $1`,
           [linea.producto_id]
@@ -125,10 +125,8 @@ const registrarCompra = async ({
           throw { status: 400, message: `El producto ${linea.nombre_producto} no pertenece a esta sucursal` };
         }
 
-        // Actualiza el stock
         await comprasRepo.ajustarStockCantidad(client, linea.producto_id, linea.cantidad);
 
-        // NUEVO: Promedio ponderado móvil — se calcula con el stock ANTES de la compra
         if (linea.precio_unitario != null) {
           const costoPromedio = calcularCostoPromedio(
             producto.stock,
@@ -149,7 +147,7 @@ const registrarCompra = async ({
       }
     }
 
-    // ── Acreedor — sin cambios ─────────────────────────────────────────────
+    // ── Acreedor ───────────────────────────────────────────────────────────
     if (agregarComoAcreedor && proveedor_id) {
       const totalPagado = pagos
         .filter((p) => p.metodo !== 'Credito' && p.metodo !== 'Fiado')

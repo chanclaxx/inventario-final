@@ -856,6 +856,7 @@ function PasoPago({ proveedor, productos, tipo, onConfirmar, onVolver, loading }
     return productos.reduce((s, p) => s + (Number(p.precio_compra) * p.cantidad_comprada), 0);
   });
   const [agregarComoAcreedor, setAgregarComoAcreedor] = useState(false);
+  const [registrarEnCaja,     setRegistrarEnCaja]     = useState(proveedor.tipo !== 'proveedor');
   const [numeroFactura,       setNumeroFactura]        = useState('');
   const [notas,               setNotas]                = useState('');
   const [error,               setError]                = useState('');
@@ -879,7 +880,7 @@ function PasoPago({ proveedor, productos, tipo, onConfirmar, onVolver, loading }
         return setError(`El total asignado (${formatCOP(pagado)}) no coincide con el total (${formatCOP(totalCompra)})`);
       }
     }
-    onConfirmar({ pagos: pagosFinales, totalCompra: Number(totalCompra), agregarComoAcreedor, numeroFactura, notas });
+    onConfirmar({ pagos: pagosFinales, totalCompra: Number(totalCompra), agregarComoAcreedor, registrarEnCaja, numeroFactura, notas });
   };
 
   const contarImeisValidos = (linea) =>
@@ -1006,6 +1007,23 @@ function PasoPago({ proveedor, productos, tipo, onConfirmar, onVolver, loading }
         )}
       </div>
 
+      {proveedor.tipo === 'proveedor' && (
+        <div className={`rounded-xl p-3 border transition-all
+          ${registrarEnCaja ? 'bg-blue-50 border-blue-200' : 'bg-gray-50 border-gray-200'}`}>
+          <label className="flex items-center gap-3 cursor-pointer">
+            <input type="checkbox" checked={registrarEnCaja}
+              onChange={(e) => setRegistrarEnCaja(e.target.checked)}
+              className="rounded accent-blue-600 w-4 h-4 flex-shrink-0" />
+            <div>
+              <p className="text-sm font-medium text-gray-700">Registrar en caja</p>
+              <p className="text-xs text-gray-400">
+                Si no se marca, la compra no aparecerá en el resumen de caja del día
+              </p>
+            </div>
+          </label>
+        </div>
+      )}
+
       <div className={`rounded-xl p-3 border transition-all ${agregarComoAcreedor ? 'bg-orange-50 border-orange-200' : 'bg-gray-50 border-gray-200'}`}>
         <label className="flex items-center gap-3 cursor-pointer">
           <input type="checkbox" checked={agregarComoAcreedor}
@@ -1130,6 +1148,7 @@ export function ModalCompra({ proveedor, onClose }) {
       lineas,
       pagos:               pagoData.pagos,
       agregarComoAcreedor: pagoData.agregarComoAcreedor,
+      registrar_en_caja:   pagoData.registrarEnCaja,
     });
   };
 

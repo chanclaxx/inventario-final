@@ -115,8 +115,6 @@ const getResumenCaja = async (cajaId) => {
 };
 
 // ─── _buildResumen ────────────────────────────────────────────────────────────
-// sv = abonos de servicios técnicos (query directa a abonos_servicio,
-// igual que préstamos usa abonos_prestamo — no depende de movimientos_caja).
 
 const _buildResumen = ({ pf, ac, ap, cp, aa, mn, rt, dv, ad, sv }) => {
   const sum = (arr) => arr
@@ -289,6 +287,7 @@ const getResumenDia = async (cajaId, sucursalId, negocioId) => {
       ORDER BY ab.fecha ASC
     `, [sucursalId, inicio, fin]),
 
+    // Compras: solo las marcadas como registrar_en_caja = TRUE
     pool.query(`
       SELECT c.id, c.total AS valor, c.fecha, c.numero_factura, pr.nombre AS proveedor
       FROM compras c
@@ -296,6 +295,7 @@ const getResumenDia = async (cajaId, sucursalId, negocioId) => {
       WHERE c.sucursal_id = $1
         AND c.estado != 'Cancelada'
         AND c.fecha BETWEEN $2 AND $3
+        AND c.registrar_en_caja = TRUE
         AND NOT EXISTS (
           SELECT 1 FROM movimientos_acreedor ma
           WHERE ma.compra_id = c.id AND ma.tipo = 'Cargo' AND ma.valor >= c.total
@@ -350,7 +350,6 @@ const getResumenDia = async (cajaId, sucursalId, negocioId) => {
     `, [cajaId]),
 
     // Servicios técnicos: query directa a abonos_servicio
-    // (mismo patrón que préstamos — no depende de movimientos_caja)
     pool.query(`
       SELECT ab.id, ab.valor, ab.metodo, ab.fecha,
              os.id AS orden_id, os.cliente_nombre,
@@ -419,6 +418,7 @@ const getResumenGlobal = async (negocioId) => {
       ORDER BY ab.fecha ASC
     `, [negocioId, inicio, fin]),
 
+    // Compras global: solo las marcadas como registrar_en_caja = TRUE
     pool.query(`
       SELECT c.id, c.total AS valor, c.fecha, c.numero_factura,
              pr.nombre AS proveedor, su.nombre AS sucursal_nombre
@@ -428,6 +428,7 @@ const getResumenGlobal = async (negocioId) => {
       WHERE su.negocio_id = $1
         AND c.estado != 'Cancelada'
         AND c.fecha BETWEEN $2 AND $3
+        AND c.registrar_en_caja = TRUE
         AND NOT EXISTS (
           SELECT 1 FROM movimientos_acreedor ma
           WHERE ma.compra_id = c.id AND ma.tipo = 'Cargo' AND ma.valor >= c.total

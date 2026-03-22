@@ -32,12 +32,13 @@ function normalizarProductos(data) {
 }
 
 // ─── Helper: payload de crearCompra ───────────────────────────────────────────
-function buildPayloadCompra({ proveedorId, monto, modoPago, lineas }) {
+function buildPayloadCompra({ proveedorId, monto, modoPago, lineas, registrarEnCaja = true }) {
   return {
     proveedor_id:        Number(proveedorId),
     total:               monto,
     estado:              'Completada',
     agregarComoAcreedor: modoPago === 'credito',
+    registrar_en_caja:   registrarEnCaja,
     lineas,
     pagos: [{ metodo: modoPago === 'credito' ? 'Credito' : 'Contado', valor: monto }],
   };
@@ -126,7 +127,7 @@ function ModalYaEnInventario({ open, seriales, onCerrar }) {
 }
 
 // ─── Panel info de compra (admin ve todos, supervisor ve cruces) ──────────────
-function InfoCompra({ proveedorId, setProveedorId, costoCompra, setCostoCompra, modoPago, setModoPago }) {
+function InfoCompra({ proveedorId, setProveedorId, costoCompra, setCostoCompra, modoPago, setModoPago, onProveedorTipoChange }) {
   const queryClient = useQueryClient();
   const { esAdminNegocio } = useAuth();
   const esAdmin = esAdminNegocio();
@@ -170,6 +171,7 @@ function InfoCompra({ proveedorId, setProveedorId, costoCompra, setCostoCompra, 
       queryClient.invalidateQueries({ queryKey: ['proveedores'], exact: false });
       queryClient.invalidateQueries({ queryKey: ['cruces'],      exact: false });
       setProveedorId(String(res.data.data.id));
+      onProveedorTipoChange?.(res.data.data.tipo || (esAdmin ? 'proveedor' : 'cruce'));
       setNuevoProveedor({ nombre: '', nit: '', telefono: '', direccion: '' });
       setErrorProveedor('');
       setCreandoProveedor(false);
@@ -199,7 +201,14 @@ function InfoCompra({ proveedorId, setProveedorId, costoCompra, setCostoCompra, 
           </label>
           <select
             value={proveedorId}
-            onChange={(e) => { setProveedorId(e.target.value); if (!e.target.value) setModoPago(null); }}
+            onChange={(e) => {
+              setProveedorId(e.target.value);
+              if (!e.target.value) { setModoPago(null); onProveedorTipoChange?.(null); }
+              else {
+                const prov = proveedores.find((p) => String(p.id) === e.target.value);
+                onProveedorTipoChange?.(prov?.tipo || null);
+              }
+            }}
             className="w-full px-2.5 py-2 bg-white border border-amber-200 rounded-lg text-xs
               text-gray-700 focus:outline-none focus:ring-2 focus:ring-amber-400"
           >
@@ -831,7 +840,8 @@ function PasoSerial({ sucursalKey, onExito, onDuplicadosEncontrados }) {
   const [creandoLinea, setCreandoLinea] = useState(false);
   const [nuevaLinea,   setNuevaLinea]   = useState({ nombre: '', marca: '', modelo: '', precio: '', linea_id: '' });
   const [imeis,        setImeis]        = useState(['']);
-  const [proveedorId,  setProveedorId]  = useState('');
+  const [proveedorId,   setProveedorId]   = useState('');
+  const [proveedorTipo, setProveedorTipo] = useState(null);
   const [costoCompra,  setCostoCompra]  = useState('');
   const [modoPago,     setModoPago]     = useState(null);
   const [error,        setError]        = useState('');
@@ -874,7 +884,7 @@ function PasoSerial({ sucursalKey, onExito, onDuplicadosEncontrados }) {
       const imeisValidos = imeis.filter((i) => i.trim());
       const costo = costoCompra !== '' ? Number(costoCompra) : null;
       if (proveedorId && modoPago) {
-        await crearCompra(buildPayloadCompra({ proveedorId, monto: costo ? costo * imeisValidos.length : 0, modoPago, lineas: imeisValidos.map((imei) => ({ nombre_producto: lineaSel.nombre, imei: imei.trim(), cantidad: 1, precio_unitario: costo || 0, producto_id: lineaSel.id, reactivar_serial_id: reactivarMapRef.current[imei.trim()] || null })) }));
+        await crearCompra(buildPayloadCompra({ proveedorId, monto: costo ? costo * imeisValidos.length : 0, modoPago, registrarEnCaja: proveedorTipo !== 'proveedor', lineas: imeisValidos.map((imei) => ({ nombre_producto: lineaSel.nombre, imei: imei.trim(), cantidad: 1, precio_unitario: costo || 0, producto_id: lineaSel.id, reactivar_serial_id: reactivarMapRef.current[imei.trim()] || null })) }));
       } else {
         await Promise.all(imeisValidos.map((imei) => agregarSerial(lineaSel.id, { imei: imei.trim(), fecha_entrada: new Date().toISOString().split('T')[0], costo_compra: costo, reactivar_serial_id: reactivarMapRef.current[imei.trim()] || null })));
         if (proveedorId && !lineaSel.proveedor_id) await api.patch(`/productos/serial/${lineaSel.id}`, { proveedor_id: Number(proveedorId) });
@@ -991,6 +1001,7 @@ function PasoSerial({ sucursalKey, onExito, onDuplicadosEncontrados }) {
               setCostoCompra={setCostoCompra}
               modoPago={modoPago}
               setModoPago={setModoPago}
+              onProveedorTipoChange={setProveedorTipo}
             />
           )}
         </div>
@@ -1014,6 +1025,7 @@ function PasoCantidad({ sucursalKey, onExito }) {
   const [nuevoProducto, setNuevoProducto] = useState({ nombre: '', unidad_medida: 'unidad', precio: '', costo_unitario: '', linea_id: '' });
   const [cantidad,      setCantidad]      = useState(1);
   const [proveedorId,   setProveedorId]   = useState('');
+  const [proveedorTipo, setProveedorTipo] = useState(null);
   const [costoCompra,   setCostoCompra]   = useState('');
   const [modoPago,      setModoPago]      = useState(null);
   const [error,         setError]         = useState('');
@@ -1049,7 +1061,7 @@ function PasoCantidad({ sucursalKey, onExito }) {
       const cantidadNum = Number(cantidad);
       const costo = costoCompra !== '' ? Number(costoCompra) : null;
       if (proveedorId && modoPago) {
-        await crearCompra(buildPayloadCompra({ proveedorId, monto: costo ? costo * cantidadNum : 0, modoPago, lineas: [{ nombre_producto: productoSel.nombre, cantidad: cantidadNum, precio_unitario: costo || 0, producto_id: productoSel.id }] }));
+        await crearCompra(buildPayloadCompra({ proveedorId, monto: costo ? costo * cantidadNum : 0, modoPago, registrarEnCaja: proveedorTipo !== 'proveedor', lineas: [{ nombre_producto: productoSel.nombre, cantidad: cantidadNum, precio_unitario: costo || 0, producto_id: productoSel.id }] }));
       } else {
         await ajustarStockCantidad(productoSel.id, { cantidad: cantidadNum, costo_unitario: costo, proveedor_id: proveedorId ? Number(proveedorId) : undefined });
       }
@@ -1138,6 +1150,7 @@ function PasoCantidad({ sucursalKey, onExito }) {
               setCostoCompra={setCostoCompra}
               modoPago={modoPago}
               setModoPago={setModoPago}
+              onProveedorTipoChange={setProveedorTipo}
             />
           )}
         </div>
