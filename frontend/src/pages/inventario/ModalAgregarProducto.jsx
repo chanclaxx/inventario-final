@@ -127,7 +127,7 @@ function ModalYaEnInventario({ open, seriales, onCerrar }) {
 }
 
 // ─── Panel info de compra (admin ve todos, supervisor ve cruces) ──────────────
-function InfoCompra({ proveedorId, setProveedorId, costoCompra, setCostoCompra, modoPago, setModoPago, onProveedorTipoChange }) {
+function InfoCompra({ proveedorId, setProveedorId, costoCompra, setCostoCompra, modoPago, setModoPago, onProveedorTipoChange, registrarEnCaja, setRegistrarEnCaja }) {
   const queryClient = useQueryClient();
   const { esAdminNegocio } = useAuth();
   const esAdmin = esAdminNegocio();
@@ -153,6 +153,11 @@ function InfoCompra({ proveedorId, setProveedorId, costoCompra, setCostoCompra, 
   const acreedores   = normalizarProductos(acreedoresRaw);
   const proveedorNum = Number(proveedorId) || null;
   const yaEsAcreedor = proveedorNum ? acreedores.some((a) => a.proveedor_id === proveedorNum) : false;
+
+  // Tipo del proveedor seleccionado actualmente
+  const provSeleccionado = proveedorNum ? proveedores.find((p) => p.id === proveedorNum) : null;
+  const tipoActual       = provSeleccionado?.tipo || null;
+  const esProveedor      = tipoActual === 'proveedor';
 
   // Admin crea vía /proveedores, supervisor crea vía /cruces (forzado tipo cruce)
   const mutCrearProveedor = useMutation({
@@ -315,6 +320,22 @@ function InfoCompra({ proveedorId, setProveedorId, costoCompra, setCostoCompra, 
         <p className="text-xs text-orange-600 font-medium">
           Este proveedor ya tiene cuenta como acreedor — se registrará el cargo directamente.
         </p>
+      )}
+
+      {/* Checkbox: Registrar en caja — solo visible para tipo 'proveedor' */}
+      {Boolean(proveedorId) && esProveedor && (
+        <div className={`rounded-lg p-2.5 border transition-all
+          ${registrarEnCaja ? 'bg-blue-50 border-blue-200' : 'bg-white border-amber-200'}`}>
+          <label className="flex items-center gap-2.5 cursor-pointer">
+            <input type="checkbox" checked={registrarEnCaja}
+              onChange={(e) => setRegistrarEnCaja(e.target.checked)}
+              className="rounded accent-blue-600 w-3.5 h-3.5 flex-shrink-0" />
+            <div>
+              <p className="text-xs font-medium text-gray-700">Registrar en caja</p>
+              <p className="text-[10px] text-gray-400">Si no se marca, no aparecerá en el resumen de caja</p>
+            </div>
+          </label>
+        </div>
       )}
     </div>
   );
@@ -840,8 +861,8 @@ function PasoSerial({ sucursalKey, onExito, onDuplicadosEncontrados }) {
   const [creandoLinea, setCreandoLinea] = useState(false);
   const [nuevaLinea,   setNuevaLinea]   = useState({ nombre: '', marca: '', modelo: '', precio: '', linea_id: '' });
   const [imeis,        setImeis]        = useState(['']);
-  const [proveedorId,   setProveedorId]   = useState('');
-  const [proveedorTipo, setProveedorTipo] = useState(null);
+  const [proveedorId,     setProveedorId]     = useState('');
+  const [registrarEnCaja, setRegistrarEnCaja] = useState(true);
   const [costoCompra,  setCostoCompra]  = useState('');
   const [modoPago,     setModoPago]     = useState(null);
   const [error,        setError]        = useState('');
@@ -884,7 +905,7 @@ function PasoSerial({ sucursalKey, onExito, onDuplicadosEncontrados }) {
       const imeisValidos = imeis.filter((i) => i.trim());
       const costo = costoCompra !== '' ? Number(costoCompra) : null;
       if (proveedorId && modoPago) {
-        await crearCompra(buildPayloadCompra({ proveedorId, monto: costo ? costo * imeisValidos.length : 0, modoPago, registrarEnCaja: proveedorTipo !== 'proveedor', lineas: imeisValidos.map((imei) => ({ nombre_producto: lineaSel.nombre, imei: imei.trim(), cantidad: 1, precio_unitario: costo || 0, producto_id: lineaSel.id, reactivar_serial_id: reactivarMapRef.current[imei.trim()] || null })) }));
+        await crearCompra(buildPayloadCompra({ proveedorId, monto: costo ? costo * imeisValidos.length : 0, modoPago, registrarEnCaja, lineas: imeisValidos.map((imei) => ({ nombre_producto: lineaSel.nombre, imei: imei.trim(), cantidad: 1, precio_unitario: costo || 0, producto_id: lineaSel.id, reactivar_serial_id: reactivarMapRef.current[imei.trim()] || null })) }));
       } else {
         await Promise.all(imeisValidos.map((imei) => agregarSerial(lineaSel.id, { imei: imei.trim(), fecha_entrada: new Date().toISOString().split('T')[0], costo_compra: costo, reactivar_serial_id: reactivarMapRef.current[imei.trim()] || null })));
         if (proveedorId && !lineaSel.proveedor_id) await api.patch(`/productos/serial/${lineaSel.id}`, { proveedor_id: Number(proveedorId) });
@@ -1001,7 +1022,11 @@ function PasoSerial({ sucursalKey, onExito, onDuplicadosEncontrados }) {
               setCostoCompra={setCostoCompra}
               modoPago={modoPago}
               setModoPago={setModoPago}
-              onProveedorTipoChange={setProveedorTipo}
+              registrarEnCaja={registrarEnCaja}
+              setRegistrarEnCaja={setRegistrarEnCaja}
+              onProveedorTipoChange={(tipo) => {
+                setRegistrarEnCaja(tipo !== 'proveedor');
+              }}
             />
           )}
         </div>
@@ -1024,8 +1049,8 @@ function PasoCantidad({ sucursalKey, onExito }) {
   const [creandoNuevo,  setCreandoNuevo]  = useState(false);
   const [nuevoProducto, setNuevoProducto] = useState({ nombre: '', unidad_medida: 'unidad', precio: '', costo_unitario: '', linea_id: '' });
   const [cantidad,      setCantidad]      = useState(1);
-  const [proveedorId,   setProveedorId]   = useState('');
-  const [proveedorTipo, setProveedorTipo] = useState(null);
+  const [proveedorId,     setProveedorId]     = useState('');
+  const [registrarEnCaja, setRegistrarEnCaja] = useState(true);
   const [costoCompra,   setCostoCompra]   = useState('');
   const [modoPago,      setModoPago]      = useState(null);
   const [error,         setError]         = useState('');
@@ -1061,7 +1086,7 @@ function PasoCantidad({ sucursalKey, onExito }) {
       const cantidadNum = Number(cantidad);
       const costo = costoCompra !== '' ? Number(costoCompra) : null;
       if (proveedorId && modoPago) {
-        await crearCompra(buildPayloadCompra({ proveedorId, monto: costo ? costo * cantidadNum : 0, modoPago, registrarEnCaja: proveedorTipo !== 'proveedor', lineas: [{ nombre_producto: productoSel.nombre, cantidad: cantidadNum, precio_unitario: costo || 0, producto_id: productoSel.id }] }));
+        await crearCompra(buildPayloadCompra({ proveedorId, monto: costo ? costo * cantidadNum : 0, modoPago, registrarEnCaja, lineas: [{ nombre_producto: productoSel.nombre, cantidad: cantidadNum, precio_unitario: costo || 0, producto_id: productoSel.id }] }));
       } else {
         await ajustarStockCantidad(productoSel.id, { cantidad: cantidadNum, costo_unitario: costo, proveedor_id: proveedorId ? Number(proveedorId) : undefined });
       }
@@ -1150,7 +1175,11 @@ function PasoCantidad({ sucursalKey, onExito }) {
               setCostoCompra={setCostoCompra}
               modoPago={modoPago}
               setModoPago={setModoPago}
-              onProveedorTipoChange={setProveedorTipo}
+              registrarEnCaja={registrarEnCaja}
+              setRegistrarEnCaja={setRegistrarEnCaja}
+              onProveedorTipoChange={(tipo) => {
+                setRegistrarEnCaja(tipo !== 'proveedor');
+              }}
             />
           )}
         </div>
