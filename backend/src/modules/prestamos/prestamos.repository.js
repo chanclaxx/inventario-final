@@ -15,13 +15,16 @@ const findAll = async (sucursalId, negocioId) => {
       u.nombre  AS usuario_nombre,
       pr.nombre AS prestatario_nombre,
       e.nombre  AS empleado_nombre,
-      c.nombre  AS cliente_nombre
+      c.nombre  AS cliente_nombre,
+      s.color   AS serial_color
     FROM prestamos p
-    JOIN  sucursales            su ON su.id = p.sucursal_id
-    LEFT JOIN usuarios          u  ON u.id  = p.usuario_id
-    LEFT JOIN prestatarios      pr ON pr.id = p.prestatario_id
-    LEFT JOIN empleados_prestatario e ON e.id = p.empleado_id
-    LEFT JOIN clientes          c  ON c.id  = p.cliente_id
+    JOIN  sucursales                su ON su.id = p.sucursal_id
+    LEFT JOIN usuarios               u  ON u.id  = p.usuario_id
+    LEFT JOIN prestatarios           pr ON pr.id = p.prestatario_id
+    LEFT JOIN empleados_prestatario  e  ON e.id  = p.empleado_id
+    LEFT JOIN clientes               c  ON c.id  = p.cliente_id
+    -- JOIN a seriales para traer el color — solo aplica a préstamos con IMEI
+    LEFT JOIN seriales               s  ON s.imei = p.imei
     WHERE ${filtro}
     ORDER BY
       CASE p.estado WHEN 'Activo' THEN 0 WHEN 'Saldado' THEN 1 ELSE 2 END,
@@ -105,13 +108,13 @@ const findByIdYNegocio = async (id, negocioId) => {
   return rows[0] || null;
 };
 
-// Agregar también para usar dentro de transacciones
 const ajustarStock = async (client, productoId, cantidad) => {
   await client.query(
     'UPDATE productos_cantidad SET stock = stock + $1 WHERE id = $2',
     [cantidad, productoId]
   );
 };
+
 const actualizarCantidadYValor = async (client, id, nuevaCantidad, nuevoValor) => {
   await client.query(
     `UPDATE prestamos
@@ -125,5 +128,5 @@ const actualizarCantidadYValor = async (client, id, nuevaCantidad, nuevoValor) =
 module.exports = {
   findAll, findById, findByIdYNegocio,
   perteneceAlNegocio,
-  getAbonos, create, insertarAbono, updateEstado, ajustarStock,actualizarCantidadYValor
+  getAbonos, create, insertarAbono, updateEstado, ajustarStock, actualizarCantidadYValor,
 };

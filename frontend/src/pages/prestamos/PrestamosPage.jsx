@@ -17,6 +17,7 @@ import { Input }                                from '../../components/ui/Input'
 import { InputMoneda }                          from '../../components/ui/InputMoneda';
 import { Spinner }                              from '../../components/ui/Spinner';
 import { EmptyState }                           from '../../components/ui/EmptyState';
+import api                                      from '../../api/axios.config';
 import {
   Handshake, CreditCard, Bike, Plus, CheckCircle,
   ChevronDown, ChevronUp, ChevronLeft, ChevronRight,
@@ -48,12 +49,43 @@ const ESTADO_ENTREGA_LABEL = {
   No_entregado: 'No entregado',
 };
 
-// ─── Modal Abono Préstamo ─────────────────────────────────────────────────────
-// CAMBIO: Input type=number → InputMoneda
-// valor inicia en '' → InputMoneda trata '' como vacío
-// mutación recibe Number(valor): Number(850000) = 850000 ✓
-// onKeyDown Enter se pasa como prop a InputMoneda → funciona igual
+// ─── Helper: parsear lista de colores desde config ────────────────────────────
+function parsearColoresConfig(configData) {
+  try {
+    const lista = JSON.parse(configData?.colores_serial_lista || '[]');
+    return Array.isArray(lista) ? lista : [];
+  } catch {
+    return [];
+  }
+}
 
+// ─── Hook: config de colores ──────────────────────────────────────────────────
+function useColoresConfig() {
+  const { data: configData } = useQuery({
+    queryKey: ['config'],
+    queryFn:  () => api.get('/config').then((r) => r.data.data),
+  });
+  return {
+    coloresActivo: configData?.colores_serial_activo === '1',
+    coloresConfig: parsearColoresConfig(configData),
+  };
+}
+
+// ─── Chip de color — círculo + nombre ────────────────────────────────────────
+// Solo se renderiza si coloresActivo === true y color tiene valor.
+// El círculo usa un color CSS genérico gris ya que los colores son texto libre
+// (no valores CSS), así que mostramos solo el nombre con un círculo decorativo.
+function ChipColor({ color }) {
+  if (!color) return null;
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span className="w-2.5 h-2.5 rounded-full bg-gray-400 flex-shrink-0 border border-gray-300" />
+      <span className="text-xs text-gray-500">{color}</span>
+    </span>
+  );
+}
+
+// ─── Modal Abono Préstamo ─────────────────────────────────────────────────────
 function ModalAbonoPrestamo({ prestamo, onClose }) {
   const queryClient = useQueryClient();
   const [valor, setValor] = useState('');
@@ -106,8 +138,6 @@ function ModalAbonoPrestamo({ prestamo, onClose }) {
 }
 
 // ─── Modal Devolución préstamo ────────────────────────────────────────────────
-// Sin cambios — cantidad es conteo (type=number correcto), no es precio
-
 function ModalDevolucion({ prestamo, onClose }) {
   const queryClient = useQueryClient();
   const [cantidad, setCantidad] = useState('');
@@ -179,10 +209,6 @@ function ModalDevolucion({ prestamo, onClose }) {
 }
 
 // ─── Modal Abono Crédito ──────────────────────────────────────────────────────
-// CAMBIO: Input type=number → InputMoneda
-// valor inicia en '' → InputMoneda trata '' como vacío
-// mutación recibe Number(valor): Number(850000) = 850000 ✓
-
 function ModalAbonoCredito({ credito, onClose }) {
   const queryClient = useQueryClient();
   const [valor,  setValor]  = useState('');
@@ -245,7 +271,8 @@ function ModalAbonoCredito({ credito, onClose }) {
 
 // ─── Cards préstamos ──────────────────────────────────────────────────────────
 
-function CardPrestamoCompanero({ prestamo, onAbonar, onDevolver }) {
+// coloresActivo se recibe como prop para evitar múltiples queries en cada card
+function CardPrestamoCompanero({ prestamo, onAbonar, onDevolver, coloresActivo }) {
   const saldo    = Number(prestamo.valor_prestamo) - Number(prestamo.total_abonado);
   const progreso = (Number(prestamo.total_abonado) / Number(prestamo.valor_prestamo)) * 100;
 
@@ -257,6 +284,10 @@ function CardPrestamoCompanero({ prestamo, onAbonar, onDevolver }) {
           {prestamo.imei && <p className="text-xs text-gray-400 font-mono">{prestamo.imei}</p>}
           {!prestamo.imei && prestamo.cantidad_prestada > 1 && (
             <p className="text-xs text-gray-400">Cantidad: {prestamo.cantidad_prestada}</p>
+          )}
+          {/* Color del serial — solo si coloresActivo y el serial tiene color */}
+          {coloresActivo && prestamo.serial_color && (
+            <ChipColor color={prestamo.serial_color} />
           )}
           {prestamo.empleado_nombre && (
             <p className="text-xs text-blue-500 mt-0.5">→ {prestamo.empleado_nombre}</p>
@@ -334,7 +365,7 @@ function CardPrestamoCliente({ prestamo, onAbonar, onDevolver }) {
 
 // ─── Grupo colapsable ─────────────────────────────────────────────────────────
 
-function GrupoPrestatario({ nombre, prestamos, saldoTotal, onAbonar, onDevolver, CardItem }) {
+function GrupoPrestatario({ nombre, prestamos, saldoTotal, onAbonar, onDevolver, CardItem, coloresActivo }) {
   const [abierto, setAbierto] = useState(true);
   const activos  = prestamos.filter((p) => p.estado === 'Activo');
   const cerrados = prestamos.filter((p) => p.estado !== 'Activo');
@@ -364,7 +395,13 @@ function GrupoPrestatario({ nombre, prestamos, saldoTotal, onAbonar, onDevolver,
             <p className="text-xs text-gray-400 px-1 py-2">Sin préstamos activos</p>
           ) : (
             activos.map((p) => (
-              <Card key={p.id} prestamo={p} onAbonar={onAbonar} onDevolver={onDevolver} />
+              <Card
+                key={p.id}
+                prestamo={p}
+                onAbonar={onAbonar}
+                onDevolver={onDevolver}
+                coloresActivo={coloresActivo}
+              />
             ))
           )}
           {cerrados.length > 0 && (
@@ -379,8 +416,6 @@ function GrupoPrestatario({ nombre, prestamos, saldoTotal, onAbonar, onDevolver,
                   return (
                     <div key={prestamoCerradoId}
                       className="bg-gray-50 border border-gray-100 rounded-xl p-3 flex flex-col gap-2">
-
-                      {/* Fila superior: nombre + badge */}
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
                           <p className="text-sm font-medium text-gray-600 truncate">{p.nombre_producto}</p>
@@ -398,8 +433,6 @@ function GrupoPrestatario({ nombre, prestamos, saldoTotal, onAbonar, onDevolver,
                           {p.estado}
                         </Badge>
                       </div>
-
-                      {/* Fila inferior: montos + fecha */}
                       <div className="flex items-center justify-between text-xs border-t border-gray-100 pt-2">
                         <div className="flex flex-col gap-0.5">
                           <span className="text-gray-400">
@@ -418,7 +451,6 @@ function GrupoPrestatario({ nombre, prestamos, saldoTotal, onAbonar, onDevolver,
                         </div>
                         <span className="text-gray-400">{formatFechaHora(p.fecha)}</span>
                       </div>
-
                     </div>
                   );
                 })}
@@ -665,7 +697,6 @@ function PanelDetalleEntrega({ entregaId, onVolver }) {
         </div>
       )}
 
-      {/* InputMoneda ya estaba — sin cambios */}
       {esPendiente && (
         <div className="flex flex-col gap-2 p-3 bg-green-50 border border-green-100 rounded-xl">
           <p className="text-xs font-semibold text-green-700 uppercase tracking-wide">
@@ -820,6 +851,9 @@ export default function PrestamosPage() {
   const [prestamoDevol, setPrestamoDevol] = useState(null);
   const [creditoAbono,  setCreditoAbono]  = useState(null);
 
+  // ── Config de colores — una sola query para toda la página ────────────────
+  const { coloresActivo } = useColoresConfig();
+
   const { data: prestamosData, isLoading: loadingP } = useQuery({
     queryKey: ['prestamos'],
     queryFn:  () => getPrestamos().then((r) => r.data.data),
@@ -918,9 +952,16 @@ export default function PrestamosPage() {
                     <EmptyState icon={User} titulo="Sin préstamos a compañeros" />
                   ) : (
                     Object.entries(gruposCompaneros).map(([key, grupo]) => (
-                      <GrupoPrestatario key={key} nombre={grupo.nombre} prestamos={grupo.prestamos}
-                        saldoTotal={grupo.saldoTotal} onAbonar={setPrestamoAbono}
-                        onDevolver={setPrestamoDevol} CardItem={CardPrestamoCompanero} />
+                      <GrupoPrestatario
+                        key={key}
+                        nombre={grupo.nombre}
+                        prestamos={grupo.prestamos}
+                        saldoTotal={grupo.saldoTotal}
+                        onAbonar={setPrestamoAbono}
+                        onDevolver={setPrestamoDevol}
+                        CardItem={CardPrestamoCompanero}
+                        coloresActivo={coloresActivo}
+                      />
                     ))
                   )}
                 </div>
@@ -931,9 +972,16 @@ export default function PrestamosPage() {
                     <EmptyState icon={Users} titulo="Sin préstamos a clientes" />
                   ) : (
                     Object.entries(gruposClientes).map(([key, grupo]) => (
-                      <GrupoPrestatario key={key} nombre={grupo.nombre} prestamos={grupo.prestamos}
-                        saldoTotal={grupo.saldoTotal} onAbonar={setPrestamoAbono}
-                        onDevolver={setPrestamoDevol} CardItem={CardPrestamoCliente} />
+                      <GrupoPrestatario
+                        key={key}
+                        nombre={grupo.nombre}
+                        prestamos={grupo.prestamos}
+                        saldoTotal={grupo.saldoTotal}
+                        onAbonar={setPrestamoAbono}
+                        onDevolver={setPrestamoDevol}
+                        CardItem={CardPrestamoCliente}
+                        coloresActivo={coloresActivo}
+                      />
                     ))
                   )}
                 </div>
