@@ -279,7 +279,7 @@ export function ProductosSerial({ onAgregarProducto }) {
         <div className="min-w-0">
           <h3 className="font-semibold text-gray-900 truncate">{productoSeleccionado.nombre}</h3>
           <p className="text-xs text-gray-400">
-            {[productoSeleccionado.marca, productoSeleccionado.modelo, productoSeleccionado.color]
+            {[productoSeleccionado.marca, productoSeleccionado.modelo]
               .filter(Boolean).join(' · ')}
             {productoSeleccionado.linea_nombre && (
               <span className="ml-2 text-blue-500 font-medium">

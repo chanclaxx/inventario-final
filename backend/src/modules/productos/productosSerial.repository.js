@@ -1,10 +1,10 @@
 const { pool } = require('../../config/db');
 
-// ── findAll — color incluido ─────────────────────────────────────────────────
+// ── linea_id incluido en findAll con filtro opcional ─────────────────────
 const findAll = async (sucursalId, negocioId, lineaId) => {
   const { rows } = await pool.query(`
     SELECT
-      ps.id, ps.nombre, ps.marca, ps.modelo, ps.color, ps.precio,
+      ps.id, ps.nombre, ps.marca, ps.modelo, ps.precio,
       ps.sucursal_id, ps.proveedor_id, ps.linea_id,
       su.nombre  AS sucursal_nombre,
       lp.nombre  AS linea_nombre,
@@ -64,30 +64,29 @@ const perteneceAlNegocio = async (productoId, negocioId) => {
   return rows.length > 0;
 };
 
-// ── create — color incluido ──────────────────────────────────────────────────
-const create = async ({ nombre, marca, modelo, color, precio, sucursal_id, proveedor_id, linea_id }) => {
+// ── linea_id incluido en create ───────────────────────────────────────────
+const create = async ({ nombre, marca, modelo, precio, sucursal_id, proveedor_id, linea_id }) => {
   const { rows } = await pool.query(`
-    INSERT INTO productos_serial(nombre, marca, modelo, color, precio, sucursal_id, proveedor_id, linea_id)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    INSERT INTO productos_serial(nombre, marca, modelo, precio, sucursal_id, proveedor_id, linea_id)
+    VALUES ($1, $2, $3, $4, $5, $6, $7)
     RETURNING *
-  `, [nombre, marca || null, modelo || null, color || null, precio, sucursal_id, proveedor_id || null, linea_id || null]);
+  `, [nombre, marca || null, modelo || null, precio, sucursal_id, proveedor_id || null, linea_id || null]);
   return rows[0];
 };
 
-// ── update — color incluido ──────────────────────────────────────────────────
+// ── linea_id incluido en update ───────────────────────────────────────────
 const update = async (id, datos) => {
   const { rows } = await pool.query(`
     UPDATE productos_serial
     SET nombre       = COALESCE($1, nombre),
         marca        = COALESCE($2, marca),
         modelo       = COALESCE($3, modelo),
-        color        = $4,
-        precio       = COALESCE($5, precio),
-        proveedor_id = COALESCE($6, proveedor_id),
-        linea_id     = $7
-    WHERE id = $8
+        precio       = COALESCE($4, precio),
+        proveedor_id = COALESCE($5, proveedor_id),
+        linea_id     = $6
+    WHERE id = $7
     RETURNING *
-  `, [datos.nombre, datos.marca, datos.modelo, datos.color || null, datos.precio, datos.proveedor_id, datos.linea_id || null, id]);
+  `, [datos.nombre, datos.marca, datos.modelo, datos.precio, datos.proveedor_id, datos.linea_id || null, id]);
   return rows[0] || null;
 };
 
@@ -236,6 +235,7 @@ const findComprasCliente = async (negocioId, q) => {
   return { seriales, retomas };
 };
 
+
 const contarSeriales = async (productoId) => {
   const { rows } = await pool.query(
     'SELECT COUNT(*) AS total FROM seriales WHERE producto_id = $1 AND vendido = false',
@@ -244,6 +244,7 @@ const contarSeriales = async (productoId) => {
   return Number(rows[0].total);
 };
 
+// Elimina el producto serial. Solo se llama si contarSeriales devuelve 0.
 const eliminarProductoSerial = async (id) => {
   const { rows } = await pool.query(
     'DELETE FROM productos_serial WHERE id = $1 RETURNING id',
@@ -252,11 +253,14 @@ const eliminarProductoSerial = async (id) => {
   return rows[0] || null;
 };
 
+// ── Añadir al module.exports existente: ──────────────────────────────────────
+// contarSeriales, eliminarProductoSerial
+
 module.exports = {
   findAll, findById, findByIdYNegocio,
   perteneceAlNegocio, findSerialByIdYNegocio,
   create, update, updatePrecio,
   getSeriales, findSerialByIMEI, findSerialByIMEIEnNegocio,
   insertarSerial, reactivarSerial, actualizarSerial, eliminarSerial,
-  findComprasCliente, eliminarProductoSerial, contarSeriales,
+  findComprasCliente,eliminarProductoSerial,contarSeriales
 };

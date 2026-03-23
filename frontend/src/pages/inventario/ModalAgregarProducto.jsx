@@ -95,7 +95,7 @@ function ModalReactivarSeriales({ open, seriales, onReactivar, onCancelar }) {
           <p className="text-sm text-gray-500 mt-1">{seriales.length === 1 ? 'Este equipo fue vendido o prestado — puedes reactivarlo' : 'Estos equipos fueron vendidos o prestados — puedes reactivarlos'}</p>
         </div>
         <FilasSerial seriales={seriales} />
-        <p className="text-sm text-center text-gray-700 leading-relaxed">¿Desea <span className="font-semibold text-purple-700">reactivar estos seriales</span> en el inventario? Se marcarán como disponibles nuevamente.</p>
+        <p className="text-sm text-center text-gray-700 leading-relaxed">¿Deseas <span className="font-semibold text-purple-700">reactivar estos seriales</span> en el inventario? Se marcarán como disponibles nuevamente.</p>
         <div className="flex gap-2 w-full">
           <Button variant="secondary" className="flex-1 flex items-center justify-center gap-1.5" onClick={onCancelar}><X size={14} /> Cancelar</Button>
           <Button className="flex-1 flex items-center justify-center gap-1.5 bg-purple-600 hover:bg-purple-700 text-white" onClick={onReactivar}><RefreshCw size={14} /> Sí, reactivar</Button>
@@ -524,7 +524,7 @@ function PasoCompraCliente({ sucursalKey, sucursalLista, onExito, onDuplicadosEn
   const [busquedaSerial, setBusquedaSerial] = useState('');
   const [lineaSel,       setLineaSel]       = useState(null);
   const [creandoLinea,   setCreandoLinea]   = useState(false);
-  const [nuevaLinea,     setNuevaLinea]     = useState({ nombre: '', marca: '', modelo: '', color: '', precio: '', linea_id: '' });
+  const [nuevaLinea,     setNuevaLinea]     = useState({ nombre: '', marca: '', modelo: '', precio: '', linea_id: '' });
   const [imeis,          setImeis]          = useState(['']);
   const [verificando,    setVerificando]    = useState(false);
 
@@ -539,13 +539,6 @@ function PasoCompraCliente({ sucursalKey, sucursalLista, onExito, onDuplicadosEn
 
   const reactivarMapRef = useRef({});
   const inputRefs       = useRef([]);
-
-  // Config: campo color
-  const { data: configColorData } = useQuery({
-    queryKey: ['config'],
-    queryFn:  () => api.get('/config').then((r) => r.data.data),
-  });
-  const mostrarColor = configColorData?.campo_color_serial === '1';
 
   const { data: productosSerialRaw } = useQuery({
     queryKey: ['productos-serial', ...sucursalKey],
@@ -569,7 +562,6 @@ function PasoCompraCliente({ sucursalKey, sucursalLista, onExito, onDuplicadosEn
       nombre:   nuevaLinea.nombre,
       marca:    nuevaLinea.marca,
       modelo:   nuevaLinea.modelo,
-      color:    nuevaLinea.color || null,
       precio:   nuevaLinea.precio !== '' ? Number(nuevaLinea.precio) : null,
       linea_id: nuevaLinea.linea_id ? Number(nuevaLinea.linea_id) : null,
     }),
@@ -577,7 +569,7 @@ function PasoCompraCliente({ sucursalKey, sucursalLista, onExito, onDuplicadosEn
       queryClient.invalidateQueries({ queryKey: ['productos-serial'], exact: false });
       setLineaSel(res.data.data);
       setCreandoLinea(false);
-      setNuevaLinea({ nombre: '', marca: '', modelo: '', color: '', precio: '', linea_id: '' });
+      setNuevaLinea({ nombre: '', marca: '', modelo: '', precio: '', linea_id: '' });
     },
     onError: (e) => setError(e.response?.data?.error || 'Error al crear línea'),
   });
@@ -718,11 +710,6 @@ function PasoCompraCliente({ sucursalKey, sucursalLista, onExito, onDuplicadosEn
                     <Input placeholder="Marca" value={nuevaLinea.marca} onChange={(e) => setNuevaLinea({ ...nuevaLinea, marca: e.target.value })} />
                     <Input placeholder="Modelo" value={nuevaLinea.modelo} onChange={(e) => setNuevaLinea({ ...nuevaLinea, modelo: e.target.value })} />
                   </div>
-                  {mostrarColor && (
-                    <Input placeholder="Color (ej: Negro, Azul...)"
-                      value={nuevaLinea.color}
-                      onChange={(e) => setNuevaLinea({ ...nuevaLinea, color: e.target.value })} />
-                  )}
                   {puedeVerCosto && (
                     <div className="flex flex-col gap-1">
                       <label className="text-xs text-gray-600 font-medium">Precio de venta</label>
@@ -872,7 +859,7 @@ function PasoSerial({ sucursalKey, onExito, onDuplicadosEncontrados }) {
   const [busqueda,     setBusqueda]     = useState('');
   const [lineaSel,     setLineaSel]     = useState(null);
   const [creandoLinea, setCreandoLinea] = useState(false);
-  const [nuevaLinea,   setNuevaLinea]   = useState({ nombre: '', marca: '', modelo: '', color: '', precio: '', linea_id: '' });
+  const [nuevaLinea,   setNuevaLinea]   = useState({ nombre: '', marca: '', modelo: '', precio: '', linea_id: '' });
   const [imeis,        setImeis]        = useState(['']);
   const [proveedorId,     setProveedorId]     = useState('');
   const [registrarEnCaja, setRegistrarEnCaja] = useState(true);
@@ -882,13 +869,6 @@ function PasoSerial({ sucursalKey, onExito, onDuplicadosEncontrados }) {
   const [verificando,  setVerificando]  = useState(false);
   const reactivarMapRef = useRef({});
   const inputRefs       = useRef([]);
-
-  // Config: campo color
-  const { data: configData } = useQuery({
-    queryKey: ['config'],
-    queryFn:  () => api.get('/config').then((r) => r.data.data),
-  });
-  const mostrarColor = configData?.campo_color_serial === '1';
 
   const { data: productosData } = useQuery({
     queryKey: ['productos-serial', ...sucursalKey],
@@ -907,7 +887,6 @@ function PasoSerial({ sucursalKey, onExito, onDuplicadosEncontrados }) {
       nombre:       nuevaLinea.nombre,
       marca:        nuevaLinea.marca,
       modelo:       nuevaLinea.modelo,
-      color:        nuevaLinea.color || null,
       precio:       nuevaLinea.precio !== '' ? Number(nuevaLinea.precio) : null,
       proveedor_id: proveedorId ? Number(proveedorId) : null,
       linea_id:     nuevaLinea.linea_id ? Number(nuevaLinea.linea_id) : null,
@@ -916,7 +895,7 @@ function PasoSerial({ sucursalKey, onExito, onDuplicadosEncontrados }) {
       queryClient.invalidateQueries({ queryKey: ['productos-serial'], exact: false });
       setLineaSel(res.data.data);
       setCreandoLinea(false);
-      setNuevaLinea({ nombre: '', marca: '', modelo: '', color: '', precio: '', linea_id: '' });
+      setNuevaLinea({ nombre: '', marca: '', modelo: '', precio: '', linea_id: '' });
     },
     onError: (e) => setError(e.response?.data?.error || 'Error al crear linea'),
   });
@@ -995,11 +974,6 @@ function PasoSerial({ sucursalKey, onExito, onDuplicadosEncontrados }) {
                 <Input id="sl-marca" placeholder="Marca" value={nuevaLinea.marca} onChange={(e) => setNuevaLinea({ ...nuevaLinea, marca: e.target.value })} onKeyDown={(e) => e.key === 'Enter' && document.getElementById('sl-modelo')?.focus()} />
                 <Input id="sl-modelo" placeholder="Modelo" value={nuevaLinea.modelo} onChange={(e) => setNuevaLinea({ ...nuevaLinea, modelo: e.target.value })} onKeyDown={(e) => e.key === 'Enter' && document.getElementById('sl-precio')?.focus()} />
               </div>
-              {mostrarColor && (
-                <Input placeholder="Color (ej: Negro, Azul...)"
-                  value={nuevaLinea.color}
-                  onChange={(e) => setNuevaLinea({ ...nuevaLinea, color: e.target.value })} />
-              )}
               {puedeVerCosto && (
                 <div className="flex flex-col gap-1">
                   <label className="text-xs text-gray-600 font-medium">Precio de venta</label>
