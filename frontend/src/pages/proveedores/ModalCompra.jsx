@@ -16,6 +16,7 @@ import {
 import { getAcreedores } from '../../api/acreedores.api';
 import { getLineas }     from '../../api/lineas.api';
 import { useSucursalKey } from '../../hooks/useSucursalKey';
+import api from '../../api/axios.config';
 import {
   Trash2, Package, ShoppingBag, ChevronRight,
   RefreshCw, AlertTriangle, X,
@@ -26,6 +27,28 @@ function normalizarProductos(data) {
   if (Array.isArray(data)) return data;
   if (data?.items && Array.isArray(data.items)) return data.items;
   return [];
+}
+
+// ─── Helper: parsear lista de colores desde config ────────────────────────────
+function parsearColoresConfig(configData) {
+  try {
+    const lista = JSON.parse(configData?.colores_serial_lista || '[]');
+    return Array.isArray(lista) ? lista : [];
+  } catch {
+    return [];
+  }
+}
+
+// ─── Helper: extraer string de imei desde item (string o { imei, color }) ────
+function extraerImei(item) {
+  if (typeof item === 'string') return item;
+  return item.imei || '';
+}
+
+// ─── Helper: extraer color desde item ────────────────────────────────────────
+function extraerColor(item) {
+  if (typeof item === 'string') return null;
+  return item.color?.trim() || null;
 }
 
 // ─── Utilidad: bloquear ruedita en inputs numéricos ──────────────────────────
@@ -185,8 +208,6 @@ function ModalYaEnInventario({ open, seriales, onCerrar }) {
 }
 
 // ─── Panel de factor de conversión ───────────────────────────────────────────
-// factor (TRM) mantiene type=number: es un multiplicador que puede tener decimales (ej: 4200.5)
-// traida → InputMoneda: es un valor COP entero (ej: 50000)
 function PanelConversion({ factor, traida, onChange, onAplicarATodos }) {
   const precioEjemplo = factor > 0 ? (10 * Number(factor)) + Number(traida || 0) : null;
 
@@ -199,37 +220,25 @@ function PanelConversion({ factor, traida, onChange, onAplicarATodos }) {
         )}
       </div>
       <div className="flex gap-2">
-        {/* factor: type=number porque puede tener decimales (TRM) */}
         <div className="flex-1">
           <label className="text-xs text-gray-500 mb-1 block">TRM / Factor</label>
-          <input
-            type="number"
-            value={factor}
+          <input type="number" value={factor}
             onChange={(e) => onChange('factor', e.target.value)}
-            onWheel={noWheel}
-            placeholder="4200"
+            onWheel={noWheel} placeholder="4200"
             className="w-full px-2.5 py-1.5 bg-white border border-blue-200 rounded-xl text-sm
-              focus:outline-none focus:ring-2 focus:ring-blue-400"
-          />
+              focus:outline-none focus:ring-2 focus:ring-blue-400" />
         </div>
-        {/* traida: InputMoneda — es un valor COP entero */}
         <div className="flex-1">
           <label className="text-xs text-gray-500 mb-1 block">Valor traída (COP)</label>
-          <InputMoneda
-            value={traida}
-            onChange={(val) => onChange('traida', val)}
-            placeholder="0"
+          <InputMoneda value={traida} onChange={(val) => onChange('traida', val)} placeholder="0"
             className="w-full px-2.5 py-1.5 bg-white border border-blue-200 rounded-xl text-sm
-              focus:outline-none focus:ring-2 focus:ring-blue-400"
-          />
+              focus:outline-none focus:ring-2 focus:ring-blue-400" />
         </div>
       </div>
       {Number(factor) > 0 && (
-        <button
-          onClick={onAplicarATodos}
+        <button onClick={onAplicarATodos}
           className="flex items-center gap-1.5 text-xs text-blue-600 font-medium
-            hover:text-blue-800 transition-colors w-fit"
-        >
+            hover:text-blue-800 transition-colors w-fit">
           <RefreshCw size={11} />
           Recalcular todos los precios
         </button>
@@ -290,10 +299,14 @@ function SelectLinea({ value, onChange }) {
 }
 
 // ─── Componente línea con IMEIs ───────────────────────────────────────────────
+// coloresActivo y coloresConfig se reciben como props.
+// Si coloresActivo es false, linea.imeis es string[] y el render es idéntico al original.
+// Si coloresActivo es true, linea.imeis es { imei, color }[] y cada fila muestra un select de color.
 function LineaImeis({
   linea, factor, traida, imeisDuplicados,
   onActualizarPrecioUsd, onActualizarPrecioCOP,
   onActualizarImei, onAgregarCampo, onEliminarImei, onEliminarLinea,
+  coloresActivo, coloresConfig,
 }) {
   const inputRefs        = useRef([]);
   const usandoConversion = Number(factor) > 0;
@@ -319,7 +332,24 @@ function LineaImeis({
     }
   };
 
-  const imeisValidos = linea.imeis.filter((i) => i.trim()).length;
+  // ── Helpers locales para manejar cambio de imei/color por item ───────────
+  const handleImeiChange = (index, nuevoImei) => {
+    if (!coloresActivo) {
+      onActualizarImei(linea.id, index, nuevoImei);
+    } else {
+      const itemActual = linea.imeis[index];
+      const colorActual = extraerColor(itemActual) || '';
+      onActualizarImei(linea.id, index, { imei: nuevoImei, color: colorActual });
+    }
+  };
+
+  const handleColorChange = (index, nuevoColor) => {
+    const itemActual = linea.imeis[index];
+    const imeiActual = extraerImei(itemActual);
+    onActualizarImei(linea.id, index, { imei: imeiActual, color: nuevoColor });
+  };
+
+  const imeisValidos = linea.imeis.filter((i) => extraerImei(i).trim()).length;
 
   return (
     <div className="bg-gray-50 rounded-xl p-3 flex flex-col gap-2">
@@ -335,47 +365,39 @@ function LineaImeis({
       </div>
 
       <div className="flex gap-2">
-        {/* precio_usd: type=number porque puede tener decimales */}
         {usandoConversion && (
           <div className="flex-1">
             <label className="text-xs text-gray-400 mb-1 block">Precio USD</label>
-            <input
-              type="number"
-              value={linea.precio_usd || ''}
+            <input type="number" value={linea.precio_usd || ''}
               onChange={(e) => handlePrecioUsdChange(e.target.value)}
               onWheel={noWheel}
               className="w-full px-2 py-1.5 bg-white border border-gray-200 rounded-lg text-sm
-                focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="0"
-            />
+                focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="0" />
           </div>
         )}
-        {/* precio_compra (COP): InputMoneda */}
         <div className="flex-1">
           <label className="text-xs text-gray-400 mb-1 block">
             {usandoConversion ? 'Precio COP (calculado)' : 'Precio compra (COP)'}
           </label>
-          <InputMoneda
-            value={linea.precio_compra}
-            onChange={(val) => onActualizarPrecioCOP(linea.id, val)}
-            placeholder="0"
+          <InputMoneda value={linea.precio_compra}
+            onChange={(val) => onActualizarPrecioCOP(linea.id, val)} placeholder="0"
             className="w-full px-2 py-1.5 bg-white border border-gray-200 rounded-lg text-sm
-              focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
+              focus:outline-none focus:ring-2 focus:ring-blue-500" />
         </div>
       </div>
 
       <div className="flex flex-col gap-1.5">
-        {linea.imeis.map((imei, index) => {
-          const imeiVal     = imei;
+        {linea.imeis.map((item, index) => {
+          const imeiVal     = extraerImei(item);
+          const colorVal    = extraerColor(item) || '';
           const esDuplicado = imeiVal.trim() && imeisDuplicados.has(imeiVal.trim());
           return (
-            <div key={index} className="flex gap-1.5">
+            <div key={index} className="flex gap-1.5 items-center">
               <input
                 ref={(el) => { inputRefs.current[index] = el; }}
                 type="text"
                 value={imeiVal}
-                onChange={(e) => onActualizarImei(linea.id, index, e.target.value)}
+                onChange={(e) => handleImeiChange(index, e.target.value)}
                 onKeyDown={(e) => handleKeyDown(e, index)}
                 placeholder={`IMEI ${index + 1}`}
                 className={`flex-1 px-2 py-1.5 border rounded-lg text-sm font-mono
@@ -384,16 +406,33 @@ function LineaImeis({
                     ? 'bg-red-50 border-red-400 text-red-700 focus:ring-red-400'
                     : 'bg-white border-gray-200 focus:ring-blue-500'}`}
               />
+              {/* Selector de color — solo visible si coloresActivo */}
+              {coloresActivo && coloresConfig.length > 0 && (
+                <select
+                  value={colorVal}
+                  onChange={(e) => handleColorChange(index, e.target.value)}
+                  className="w-24 px-2 py-1.5 bg-white border border-gray-200 rounded-lg text-xs
+                    text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-400 flex-shrink-0"
+                >
+                  <option value="">Color...</option>
+                  {coloresConfig.map((color) => {
+                    const colorNombre = color;
+                    return (
+                      <option key={colorNombre} value={colorNombre}>{colorNombre}</option>
+                    );
+                  })}
+                </select>
+              )}
               {linea.imeis.length > 1 && (
                 <button onClick={() => onEliminarImei(linea.id, index)}
-                  className="p-1.5 rounded-lg hover:bg-red-50 text-gray-300 hover:text-red-400">
+                  className="p-1.5 rounded-lg hover:bg-red-50 text-gray-300 hover:text-red-400 flex-shrink-0">
                   <Trash2 size={12} />
                 </button>
               )}
             </div>
           );
         })}
-        {linea.imeis.some((i) => i.trim() && imeisDuplicados.has(i.trim())) && (
+        {linea.imeis.some((i) => extraerImei(i).trim() && imeisDuplicados.has(extraerImei(i).trim())) && (
           <p className="text-xs text-red-500 font-medium">⚠ Algunos IMEIs están duplicados (marcados en rojo)</p>
         )}
         <button onClick={() => onAgregarCampo(linea.id)}
@@ -409,10 +448,10 @@ function LineaImeis({
 function PasoLineaSerial({
   proveedorId, lineasIniciales, factorInicial, traidaInicial,
   verificando, sucursalKey, sucursalLista, onContinuar, onVolver,
+  coloresActivo, coloresConfig,
 }) {
   const [busqueda,            setBusqueda]           = useState('');
   const [creandoNueva,        setCreandoNueva]        = useState(false);
-  // nuevaLinea.precio: empieza en '' → InputMoneda trata vacío como ''
   const [nuevaLinea,          setNuevaLinea]          = useState({ nombre: '', marca: '', modelo: '', precio: '', linea_id: '' });
   const [lineasSeleccionadas, setLineasSeleccionadas] = useState(lineasIniciales);
   const [error,               setError]              = useState('');
@@ -420,6 +459,9 @@ function PasoLineaSerial({
   const [factor,              setFactor]             = useState(factorInicial);
   const [traida,              setTraida]             = useState(traidaInicial);
   const queryClient = useQueryClient();
+
+  // item vacío según si colores está activo
+  const itemVacio = () => coloresActivo ? { imei: '', color: '' } : '';
 
   const { data: productosData } = useQuery({
     queryKey: ['productos-serial', ...sucursalKey],
@@ -436,7 +478,6 @@ function PasoLineaSerial({
       nombre:       nuevaLinea.nombre,
       marca:        nuevaLinea.marca,
       modelo:       nuevaLinea.modelo,
-      // nuevaLinea.precio ya es number (viene de InputMoneda) o '' → conversión segura
       precio:       nuevaLinea.precio !== '' ? Number(nuevaLinea.precio) : null,
       proveedor_id: proveedorId,
       linea_id:     nuevaLinea.linea_id ? Number(nuevaLinea.linea_id) : null,
@@ -454,9 +495,8 @@ function PasoLineaSerial({
     if (lineasSeleccionadas.find((l) => l.id === producto.id)) return;
     setLineasSeleccionadas((prev) => [...prev, {
       ...producto,
-      imeis: [''],
-      precio_usd: '',
-      // Number() limpia posibles decimales de Postgres ('850000.00' → 850000)
+      imeis:         [itemVacio()],
+      precio_usd:    '',
       precio_compra: Number(producto.precio) || 0,
     }]);
   };
@@ -464,9 +504,26 @@ function PasoLineaSerial({
   const eliminarLinea        = (id) => setLineasSeleccionadas((prev) => prev.filter((l) => l.id !== id));
   const actualizarPrecioUsd  = (id, valor) => setLineasSeleccionadas((prev) => prev.map((l) => l.id === id ? { ...l, precio_usd: valor } : l));
   const actualizarPrecioCOP  = (id, valor) => setLineasSeleccionadas((prev) => prev.map((l) => l.id === id ? { ...l, precio_compra: valor } : l));
-  const actualizarImei       = (lineaId, index, valor) => setLineasSeleccionadas((prev) => prev.map((l) => { if (l.id !== lineaId) return l; const imeis = [...l.imeis]; imeis[index] = valor; return { ...l, imeis }; }));
-  const agregarCampoImei     = (lineaId) => setLineasSeleccionadas((prev) => prev.map((l) => l.id === lineaId ? { ...l, imeis: [...l.imeis, ''] } : l));
-  const eliminarImei         = (lineaId, index) => setLineasSeleccionadas((prev) => prev.map((l) => { if (l.id !== lineaId) return l; const imeis = l.imeis.filter((_, i) => i !== index); return { ...l, imeis: imeis.length === 0 ? [''] : imeis }; }));
+
+  const actualizarImei = (lineaId, index, valor) =>
+    setLineasSeleccionadas((prev) => prev.map((l) => {
+      if (l.id !== lineaId) return l;
+      const imeis = [...l.imeis];
+      imeis[index] = valor;
+      return { ...l, imeis };
+    }));
+
+  const agregarCampoImei = (lineaId) =>
+    setLineasSeleccionadas((prev) => prev.map((l) =>
+      l.id === lineaId ? { ...l, imeis: [...l.imeis, itemVacio()] } : l
+    ));
+
+  const eliminarImei = (lineaId, index) =>
+    setLineasSeleccionadas((prev) => prev.map((l) => {
+      if (l.id !== lineaId) return l;
+      const imeis = l.imeis.filter((_, i) => i !== index);
+      return { ...l, imeis: imeis.length === 0 ? [itemVacio()] : imeis };
+    }));
 
   const handleAplicarATodos = useCallback(() => {
     setLineasSeleccionadas((prev) =>
@@ -489,20 +546,25 @@ function PasoLineaSerial({
 
     const todosImeis = [];
     for (const linea of lineasSeleccionadas) {
-      for (const imei of linea.imeis) {
-        if (imei.trim()) todosImeis.push(imei.trim());
+      for (const item of linea.imeis) {
+        const imei = extraerImei(item).trim();
+        if (imei) todosImeis.push(imei);
       }
     }
 
-    const vistos = new Set(); const duplicados = new Set();
+    const vistos = new Set();
+    const duplicados = new Set();
     for (const imei of todosImeis) {
       if (vistos.has(imei)) duplicados.add(imei);
       else vistos.add(imei);
     }
-    if (duplicados.size > 0) { setImeisDuplicados(duplicados); return setError(`IMEIs duplicados detectados: ${[...duplicados].join(', ')}`); }
+    if (duplicados.size > 0) {
+      setImeisDuplicados(duplicados);
+      return setError(`IMEIs duplicados detectados: ${[...duplicados].join(', ')}`);
+    }
 
     for (const linea of lineasSeleccionadas) {
-      const imeisValidos = linea.imeis.filter((i) => i.trim());
+      const imeisValidos = linea.imeis.filter((i) => extraerImei(i).trim());
       if (imeisValidos.length === 0) return setError(`La línea "${linea.nombre}" debe tener al menos un IMEI`);
     }
 
@@ -555,17 +617,12 @@ function PasoLineaSerial({
               onChange={(e) => setNuevaLinea({ ...nuevaLinea, modelo: e.target.value })}
               onKeyDown={(e) => e.key === 'Enter' && document.getElementById('nueva-precio')?.focus()} />
           </div>
-          {/* CAMBIO: Input type=number → InputMoneda para precio de venta COP */}
           <div className="flex flex-col gap-1">
             <label className="text-xs text-gray-600 font-medium">Precio de venta</label>
-            <InputMoneda
-              id="nueva-precio"
-              value={nuevaLinea.precio}
-              onChange={(val) => setNuevaLinea({ ...nuevaLinea, precio: val })}
-              placeholder="0"
+            <InputMoneda id="nueva-precio" value={nuevaLinea.precio}
+              onChange={(val) => setNuevaLinea({ ...nuevaLinea, precio: val })} placeholder="0"
               className="w-full px-2.5 py-2 bg-white border border-gray-200 rounded-xl text-sm
-                focus:outline-none focus:ring-2 focus:ring-blue-400"
-            />
+                focus:outline-none focus:ring-2 focus:ring-blue-400" />
           </div>
           <SelectLinea value={nuevaLinea.linea_id} onChange={(val) => setNuevaLinea({ ...nuevaLinea, linea_id: val })} />
           <div className="flex gap-2">
@@ -593,6 +650,8 @@ function PasoLineaSerial({
                 onAgregarCampo={agregarCampoImei}
                 onEliminarImei={eliminarImei}
                 onEliminarLinea={eliminarLinea}
+                coloresActivo={coloresActivo}
+                coloresConfig={coloresConfig}
               />
             );
           })}
@@ -612,13 +671,13 @@ function PasoLineaSerial({
 }
 
 // ─── Paso 2 Cantidad ──────────────────────────────────────────────────────────
+// Sin cambios — cantidad no maneja colores
 function PasoCantidad({
   proveedorId, productosIniciales, factorInicial, traidaInicial,
   sucursalKey, sucursalLista, onProductosListos, onVolver,
 }) {
   const [busqueda,               setBusqueda]              = useState('');
   const [creandoNuevo,           setCreandoNuevo]          = useState(false);
-  // nuevoProducto precios: '' inicial → InputMoneda trata vacío como ''
   const [nuevoProducto,          setNuevoProducto]         = useState({ nombre: '', unidad_medida: 'unidad', precio: '', costo_unitario: '', linea_id: '' });
   const [productosSeleccionados, setProductosSeleccionados] = useState(productosIniciales);
   const [error,                  setError]                 = useState('');
@@ -640,7 +699,6 @@ function PasoCantidad({
     mutationFn: () => crearProductoCantidad({
       nombre:         nuevoProducto.nombre,
       unidad_medida:  nuevoProducto.unidad_medida,
-      // ya son number (de InputMoneda) o '' → Number('') = 0, condición !== '' lo filtra
       costo_unitario: nuevoProducto.costo_unitario !== '' ? Number(nuevoProducto.costo_unitario) : null,
       precio:         nuevoProducto.precio         !== '' ? Number(nuevoProducto.precio)         : null,
       proveedor_id:   proveedorId,
@@ -661,7 +719,6 @@ function PasoCantidad({
       ...producto,
       cantidad_comprada: 1,
       precio_usd:        '',
-      // Number() limpia posibles decimales de Postgres ('150000.00' → 150000)
       precio_compra:     Number(producto.costo_unitario) || 0,
     }]);
   };
@@ -742,27 +799,16 @@ function PasoCantidad({
           <p className="text-xs font-semibold text-green-700">Nuevo producto</p>
           <Input placeholder="Nombre del producto" value={nuevoProducto.nombre}
             onChange={(e) => setNuevoProducto({ ...nuevoProducto, nombre: e.target.value })} />
-          {/* CAMBIO: Inputs type=number → InputMoneda para precios COP */}
           <div className="flex gap-2">
             <div className="flex-1 flex flex-col gap-1">
               <label className="text-xs text-gray-600 font-medium">Precio compra</label>
-              <InputMoneda
-                value={nuevoProducto.costo_unitario}
-                onChange={(val) => setNuevoProducto({ ...nuevoProducto, costo_unitario: val })}
-                placeholder="0"
-                className="w-full px-2.5 py-2 bg-white border border-gray-200 rounded-lg text-xs
-                  focus:outline-none focus:ring-2 focus:ring-green-400"
-              />
+              <InputMoneda value={nuevoProducto.costo_unitario} onChange={(val) => setNuevoProducto({ ...nuevoProducto, costo_unitario: val })} placeholder="0"
+                className="w-full px-2.5 py-2 bg-white border border-gray-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-green-400" />
             </div>
             <div className="flex-1 flex flex-col gap-1">
               <label className="text-xs text-gray-600 font-medium">Precio venta</label>
-              <InputMoneda
-                value={nuevoProducto.precio}
-                onChange={(val) => setNuevoProducto({ ...nuevoProducto, precio: val })}
-                placeholder="0"
-                className="w-full px-2.5 py-2 bg-white border border-gray-200 rounded-lg text-xs
-                  focus:outline-none focus:ring-2 focus:ring-green-400"
-              />
+              <InputMoneda value={nuevoProducto.precio} onChange={(val) => setNuevoProducto({ ...nuevoProducto, precio: val })} placeholder="0"
+                className="w-full px-2.5 py-2 bg-white border border-gray-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-green-400" />
             </div>
           </div>
           <SelectLinea value={nuevoProducto.linea_id} onChange={(val) => setNuevoProducto({ ...nuevoProducto, linea_id: val })} />
@@ -788,7 +834,6 @@ function PasoCantidad({
                   </button>
                 </div>
                 <div className="flex gap-2">
-                  {/* cantidad_comprada: type=number (es conteo, no precio) */}
                   <div className="flex-1">
                     <label className="text-xs text-gray-500 mb-1 block">Cantidad</label>
                     <input type="number" value={productoSel.cantidad_comprada}
@@ -797,7 +842,6 @@ function PasoCantidad({
                       className="w-full px-2 py-1.5 bg-white border border-gray-200 rounded-lg text-sm
                         focus:outline-none focus:ring-2 focus:ring-blue-500" />
                   </div>
-                  {/* precio_usd: type=number (puede tener decimales) */}
                   {usandoConversion && (
                     <div className="flex-1">
                       <label className="text-xs text-gray-500 mb-1 block">Precio USD</label>
@@ -808,18 +852,14 @@ function PasoCantidad({
                           focus:outline-none focus:ring-2 focus:ring-blue-500" />
                     </div>
                   )}
-                  {/* precio_compra (COP): InputMoneda */}
                   <div className="flex-1">
                     <label className="text-xs text-gray-500 mb-1 block">
                       {usandoConversion ? 'Precio COP' : 'Precio compra'}
                     </label>
-                    <InputMoneda
-                      value={productoSel.precio_compra}
-                      onChange={(val) => actualizarCampo(productoSel.id, 'precio_compra', val)}
-                      placeholder="0"
+                    <InputMoneda value={productoSel.precio_compra}
+                      onChange={(val) => actualizarCampo(productoSel.id, 'precio_compra', val)} placeholder="0"
                       className="w-full px-2 py-1.5 bg-white border border-gray-200 rounded-lg text-sm
-                        focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
+                        focus:outline-none focus:ring-2 focus:ring-blue-500" />
                   </div>
                 </div>
               </div>
@@ -846,10 +886,7 @@ function PasoPago({ proveedor, productos, tipo, onConfirmar, onVolver, loading }
   const [totalCompra,         setTotalCompra]          = useState(() => {
     if (tipo === 'serial') {
       return productos.reduce((s, l) => {
-        const imeisValidos = l.imeis.filter((i) => {
-          const valor = typeof i === 'string' ? i : i.valor;
-          return valor.trim();
-        }).length;
+        const imeisValidos = l.imeis.filter((i) => extraerImei(i).trim()).length;
         return s + (Number(l.precio_compra) * imeisValidos);
       }, 0);
     }
@@ -883,12 +920,19 @@ function PasoPago({ proveedor, productos, tipo, onConfirmar, onVolver, loading }
     onConfirmar({ pagos: pagosFinales, totalCompra: Number(totalCompra), agregarComoAcreedor, registrarEnCaja, numeroFactura, notas });
   };
 
-  const contarImeisValidos = (linea) =>
-    linea.imeis.filter((i) => { const valor = typeof i === 'string' ? i : i.valor; return valor.trim(); }).length;
-
   const resumen = tipo === 'serial'
-    ? productos.map((l) => ({ nombre: l.nombre, cantidad: contarImeisValidos(l), precio_unitario: Number(l.precio_compra), precio_usd: l.precio_usd || null }))
-    : productos.map((p) => ({ nombre: p.nombre, cantidad: p.cantidad_comprada, precio_unitario: Number(p.precio_compra), precio_usd: p.precio_usd || null }));
+    ? productos.map((l) => ({
+        nombre:          l.nombre,
+        cantidad:        l.imeis.filter((i) => extraerImei(i).trim()).length,
+        precio_unitario: Number(l.precio_compra),
+        precio_usd:      l.precio_usd || null,
+      }))
+    : productos.map((p) => ({
+        nombre:          p.nombre,
+        cantidad:        p.cantidad_comprada,
+        precio_unitario: Number(p.precio_compra),
+        precio_usd:      p.precio_usd || null,
+      }));
 
   const pagadoParcial = pagos.reduce((s, p) => s + (Number(p.valor) || 0), 0);
   const diferencia    = Number(totalCompra) - pagadoParcial;
@@ -917,24 +961,15 @@ function PasoPago({ proveedor, productos, tipo, onConfirmar, onVolver, loading }
         </div>
       </div>
 
-      {/* CAMBIO: input type=number → InputMoneda para total COP */}
       <div className="flex flex-col gap-1">
         <label className="text-sm font-medium text-gray-700">Total de la compra</label>
-        <InputMoneda
-          value={totalCompra}
-          onChange={(val) => setTotalCompra(val)}
-          placeholder="0"
+        <InputMoneda value={totalCompra} onChange={(val) => setTotalCompra(val)} placeholder="0"
           className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-sm
-            focus:outline-none focus:ring-2 focus:ring-blue-500"
-        />
+            focus:outline-none focus:ring-2 focus:ring-blue-500" />
       </div>
 
-      <Input
-        label="N° Factura proveedor (opcional)"
-        placeholder="FAC-001"
-        value={numeroFactura}
-        onChange={(e) => setNumeroFactura(e.target.value)}
-      />
+      <Input label="N° Factura proveedor (opcional)" placeholder="FAC-001"
+        value={numeroFactura} onChange={(e) => setNumeroFactura(e.target.value)} />
 
       <div>
         <p className="text-sm font-medium text-gray-700 mb-2">Método de pago</p>
@@ -967,16 +1002,12 @@ function PasoPago({ proveedor, productos, tipo, onConfirmar, onVolver, loading }
               return (
                 <div key={pagoItem.metodo} className="flex items-center gap-2">
                   <span className="text-xs text-gray-500 w-28 flex-shrink-0">{pagoItem.metodo}:</span>
-                  {/* CAMBIO: input type=number → InputMoneda para montos de pago COP */}
-                  <InputMoneda
-                    value={pagoItem.valor}
+                  <InputMoneda value={pagoItem.valor}
                     onChange={(val) => setPagos((prev) =>
                       prev.map((x) => x.metodo === pagoItem.metodo ? { ...x, valor: val } : x)
-                    )}
-                    placeholder="0"
+                    )} placeholder="0"
                     className="flex-1 px-2 py-1.5 bg-white border border-gray-200 rounded-lg text-sm
-                      focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
+                      focus:outline-none focus:ring-2 focus:ring-blue-500" />
                 </div>
               );
             })}
@@ -1016,9 +1047,7 @@ function PasoPago({ proveedor, productos, tipo, onConfirmar, onVolver, loading }
               className="rounded accent-blue-600 w-4 h-4 flex-shrink-0" />
             <div>
               <p className="text-sm font-medium text-gray-700">Registrar en caja</p>
-              <p className="text-xs text-gray-400">
-                Si no se marca, la compra no aparecerá en el resumen de caja del día
-              </p>
+              <p className="text-xs text-gray-400">Si no se marca, la compra no aparecerá en el resumen de caja del día</p>
             </div>
           </label>
         </div>
@@ -1063,6 +1092,16 @@ export function ModalCompra({ proveedor, onClose }) {
   const [factorGuardado, setFactorGuardado] = useState('');
   const [traidaGuardada, setTraidaGuardada] = useState('');
 
+  // ── Config: colores de serial ─────────────────────────────────────────────
+  const { data: configData } = useQuery({
+    queryKey: ['config'],
+    queryFn:  () => api.get('/config').then((r) => r.data.data),
+    enabled:  sucursalLista,
+  });
+
+  const coloresActivo = configData?.colores_serial_activo === '1';
+  const coloresConfig = parsearColoresConfig(configData);
+
   const {
     verificando, verificarYProceder,
     modalReactivar, serialesReactivar, handleConfirmarReactivar, handleCancelarReactivar,
@@ -1072,26 +1111,32 @@ export function ModalCompra({ proveedor, onClose }) {
   const mutCompra = useMutation({
     mutationFn: (payload) => crearCompra(payload),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['productos-serial'],   exact: false });
-      queryClient.invalidateQueries({ queryKey: ['productos-cantidad'],  exact: false });
-      queryClient.invalidateQueries({ queryKey: ['compras'],             exact: false });
-      queryClient.invalidateQueries({ queryKey: ['acreedores'],          exact: false });
+      queryClient.invalidateQueries({ queryKey: ['productos-serial'],  exact: false });
+      queryClient.invalidateQueries({ queryKey: ['productos-cantidad'], exact: false });
+      queryClient.invalidateQueries({ queryKey: ['compras'],            exact: false });
+      queryClient.invalidateQueries({ queryKey: ['acreedores'],         exact: false });
       onClose();
     },
   });
 
-  const handleTipo       = (t) => { setTipo(t); setPaso(2); };
-  const handleVolverA1   = () => setPaso(1);
-  const handleVolverA2   = () => setPaso(2);
+  const handleTipo     = (t) => { setTipo(t); setPaso(2); };
+  const handleVolverA1 = () => setPaso(1);
+  const handleVolverA2 = () => setPaso(2);
 
   const handleContinuarSerial = (imeis, lineasPayload, factor, traida) => {
     verificarYProceder(imeis, ({ reactivarMap }) => {
+      // Enriquecer cada item con reactivar_serial_id preservando el color si existe
       const lineasEnriquecidas = lineasPayload.map((linea) => ({
         ...linea,
-        imeis: linea.imeis.map((imei) => ({
-          valor:               imei,
-          reactivar_serial_id: reactivarMap[imei.trim()] || null,
-        })),
+        imeis: linea.imeis.map((item) => {
+          const imeiStr = extraerImei(item).trim();
+          const color   = extraerColor(item);
+          return {
+            valor:               imeiStr,
+            color:               color || null,
+            reactivar_serial_id: reactivarMap[imeiStr] || null,
+          };
+        }),
       }));
       setProductos(lineasEnriquecidas);
       setFactorGuardado(factor);
@@ -1111,11 +1156,15 @@ export function ModalCompra({ proveedor, onClose }) {
     const lineas = tipo === 'serial'
       ? productos.flatMap((linea) =>
           linea.imeis
-            .filter((i) => { const valor = typeof i === 'string' ? i : i.valor; return valor.trim(); })
+            .filter((i) => {
+              const val = typeof i === 'string' ? i : i.valor;
+              return val?.trim();
+            })
             .map((i) => {
               const esObjeto          = typeof i !== 'string';
               const imeiValor         = esObjeto ? i.valor          : i;
               const reactivarSerialId = esObjeto ? i.reactivar_serial_id : null;
+              const color             = esObjeto ? (i.color || null) : null;
               return {
                 nombre_producto:     linea.nombre,
                 imei:                imeiValor.trim(),
@@ -1126,6 +1175,7 @@ export function ModalCompra({ proveedor, onClose }) {
                 valor_traida:        linea.valor_traida      || null,
                 producto_id:         linea.id,
                 reactivar_serial_id: reactivarSerialId,
+                color,
               };
             })
         )
@@ -1156,7 +1206,11 @@ export function ModalCompra({ proveedor, onClose }) {
 
   const lineasParaPaso2 = productos.map((l) => ({
     ...l,
-    imeis: (l.imeis || []).map((i) => (typeof i === 'string' ? i : i.valor)),
+    imeis: (l.imeis || []).map((i) => {
+      if (typeof i === 'string') return i;
+      // Preservar color al volver al paso 2
+      return coloresActivo ? { imei: i.valor || '', color: i.color || '' } : (i.valor || '');
+    }),
   }));
 
   return (
@@ -1191,6 +1245,8 @@ export function ModalCompra({ proveedor, onClose }) {
             sucursalLista={sucursalLista}
             onContinuar={handleContinuarSerial}
             onVolver={handleVolverA1}
+            coloresActivo={coloresActivo}
+            coloresConfig={coloresConfig}
           />
         )}
         {paso === 2 && tipo === 'cantidad' && (

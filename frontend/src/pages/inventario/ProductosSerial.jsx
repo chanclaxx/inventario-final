@@ -1,6 +1,6 @@
 import { useState }                                                  from 'react';
 import { useQuery, useMutation, useQueryClient }                     from '@tanstack/react-query';
-import { Package, Plus, ChevronRight, ChevronDown, Trash2, Lock }   from 'lucide-react';
+import { Package, Plus, ChevronRight, ChevronDown, Trash2, Lock, Palette } from 'lucide-react';
 import { getProductosSerial, getSeriales, eliminarSerial, getLineas } from '../../api/productos.api';
 import { SearchInput }               from '../../components/ui/SearchInput';
 import { Badge }                     from '../../components/ui/Badge';
@@ -15,6 +15,52 @@ import { ModalEditarProductoSerial } from './ModalEditarProductoSerial';
 import { useAuth }                   from '../../context/useAuth';
 import { useSucursalKey }            from '../../hooks/useSucursalKey';
 import api                           from '../../api/axios.config';
+
+// ─── Helper: leer lista de colores desde config ───────────────────────────────
+function parsearColoresConfig(configData) {
+  try {
+    const lista = JSON.parse(configData?.colores_serial_lista || '[]');
+    return Array.isArray(lista) ? lista : [];
+  } catch {
+    return [];
+  }
+}
+
+// ─── Helper: agrupar seriales por color ──────────────────────────────────────
+// Recibe los seriales ya ordenados (disponibles → prestados → vendidos)
+// y la lista de colores configurados en el negocio.
+// Devuelve array de { color: string | null, seriales: [] }
+// Los grupos siguen el orden de la lista de config; "Sin color" siempre al final.
+function agruparPorColor(seriales, coloresConfig) {
+  const grupos = coloresConfig
+    .map((color) => ({
+      color,
+      seriales: seriales.filter((s) => s.color === color),
+    }))
+    .filter((g) => g.seriales.length > 0);
+
+  const sinColor = seriales.filter(
+    (s) => !s.color || !coloresConfig.includes(s.color)
+  );
+  if (sinColor.length > 0) {
+    grupos.push({ color: null, seriales: sinColor });
+  }
+
+  return grupos;
+}
+
+// ─── Cabecera de grupo de color ───────────────────────────────────────────────
+function CabeceraGrupoColor({ color, cantidad }) {
+  return (
+    <div className="flex items-center gap-2 px-1 py-1.5">
+      <Palette size={13} className="text-gray-400 flex-shrink-0" />
+      <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
+        {color ?? 'Sin color'}
+      </span>
+      <span className="text-xs text-gray-300 ml-auto">({cantidad})</span>
+    </div>
+  );
+}
 
 // ─── Tarjeta individual de serial ─────────────────────────────────────────────
 function TarjetaSerial({ serial, precio, onAgregar, onEliminar, onEditar }) {
@@ -122,7 +168,7 @@ function GrupoLinea({ nombre, productos, productoSeleccionado, onSeleccionar, on
           hover:bg-gray-100 transition-colors text-left w-full group"
       >
         {abierto
-          ? <ChevronDown size={13} className="text-gray-400 flex-shrink-0" />
+          ? <ChevronDown  size={13} className="text-gray-400 flex-shrink-0" />
           : <ChevronRight size={13} className="text-gray-400 flex-shrink-0" />}
         <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
           {nombre}
@@ -167,6 +213,54 @@ function GrupoLinea({ nombre, productos, productoSeleccionado, onSeleccionar, on
   );
 }
 
+// ─── Panel de seriales agrupados por color ────────────────────────────────────
+function ListaSeriales({ seriales, precio, onAgregar, onEliminar, onEditar, coloresActivo, coloresConfig }) {
+  if (!coloresActivo) {
+    // Vista original sin agrupación
+    return (
+      <div className="flex flex-col gap-2">
+        {seriales.map((s) => (
+          <TarjetaSerial
+            key={s.id}
+            serial={s}
+            precio={precio}
+            onAgregar={onAgregar}
+            onEliminar={onEliminar}
+            onEditar={onEditar}
+          />
+        ))}
+      </div>
+    );
+  }
+
+  const grupos = agruparPorColor(seriales, coloresConfig);
+
+  return (
+    <div className="flex flex-col gap-3">
+      {grupos.map((grupo) => {
+        const grupoColor = grupo.color;
+        return (
+          <div key={grupoColor ?? '__sin_color__'} className="flex flex-col gap-1.5">
+            <CabeceraGrupoColor color={grupoColor} cantidad={grupo.seriales.length} />
+            <div className="flex flex-col gap-2 ml-1 border-l-2 border-gray-100 pl-2">
+              {grupo.seriales.map((s) => (
+                <TarjetaSerial
+                  key={s.id}
+                  serial={s}
+                  precio={precio}
+                  onAgregar={onAgregar}
+                  onEliminar={onEliminar}
+                  onEditar={onEditar}
+                />
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ─── Componente principal ─────────────────────────────────────────────────────
 export function ProductosSerial({ onAgregarProducto }) {
   const queryClient                    = useQueryClient();
@@ -202,11 +296,15 @@ export function ProductosSerial({ onAgregarProducto }) {
     gcTime:    0,
   });
 
+  // ── Config: colores de serial ─────────────────────────────────────────────
   const { data: configData } = useQuery({
     queryKey: ['config'],
     queryFn:  () => api.get('/config').then((r) => r.data.data),
-    enabled:  sucursalLista && esAdminNegocio(),
+    enabled:  sucursalLista,
   });
+
+  const coloresActivo  = configData?.colores_serial_activo === '1';
+  const coloresConfig  = parsearColoresConfig(configData);
   const pinEliminacion = configData?.pin_eliminacion ?? '';
 
   const agregarItem = useCarritoStore((s) => s.agregarItem);
@@ -316,17 +414,16 @@ export function ProductosSerial({ onAgregarProducto }) {
       ) : serialesOrdenados.length === 0 ? (
         <EmptyState icon={Package} titulo="Sin seriales disponibles" />
       ) : (
-        <div className="flex flex-col gap-2 overflow-y-auto max-h-[55vh]">
-          {serialesOrdenados.map((s) => (
-            <TarjetaSerial
-              key={s.id}
-              serial={s}
-              precio={productoSeleccionado.precio}
-              onAgregar={handleAgregarSerial}
-              onEliminar={(serial) => setSerialAEliminar({ id: serial.id, imei: serial.imei })}
-              onEditar={esAdmin ? setSerialAEditar : null}
-            />
-          ))}
+        <div className="overflow-y-auto max-h-[55vh]">
+          <ListaSeriales
+            seriales={serialesOrdenados}
+            precio={productoSeleccionado.precio}
+            onAgregar={handleAgregarSerial}
+            onEliminar={(serial) => setSerialAEliminar({ id: serial.id, imei: serial.imei })}
+            onEditar={esAdmin ? setSerialAEditar : null}
+            coloresActivo={coloresActivo}
+            coloresConfig={coloresConfig}
+          />
         </div>
       )}
     </div>

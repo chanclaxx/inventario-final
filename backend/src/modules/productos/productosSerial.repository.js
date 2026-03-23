@@ -136,13 +136,13 @@ const findSerialByIMEIEnNegocio = async (imei, negocioId) => {
 };
 
 const insertarSerial = async ({
-  producto_id, imei, fecha_entrada, costo_compra, cliente_origen, proveedor_id,
+  producto_id, imei, fecha_entrada, costo_compra, cliente_origen, proveedor_id, color,
 }) => {
   const { rows } = await pool.query(`
-    INSERT INTO seriales(producto_id, imei, fecha_entrada, costo_compra, cliente_origen, proveedor_id)
-    VALUES ($1, $2, $3, $4, $5, $6)
+    INSERT INTO seriales(producto_id, imei, fecha_entrada, costo_compra, cliente_origen, proveedor_id, color)
+    VALUES ($1, $2, $3, $4, $5, $6, $7)
     RETURNING *
-  `, [producto_id, imei, fecha_entrada, costo_compra ?? null, cliente_origen || null, proveedor_id || null]);
+  `, [producto_id, imei, fecha_entrada, costo_compra ?? null, cliente_origen || null, proveedor_id || null, color || null]);
   return rows[0];
 };
 
@@ -161,14 +161,15 @@ const reactivarSerial = async (serialId, { costo_compra, proveedor_id } = {}) =>
   return rows[0];
 };
 
-const actualizarSerial = async (serialId, { imei, costo_compra }) => {
+const actualizarSerial = async (serialId, { imei, costo_compra, color }) => {
   const { rows } = await pool.query(`
     UPDATE seriales
     SET imei         = COALESCE($1, imei),
-        costo_compra = COALESCE($2, costo_compra)
-    WHERE id = $3
+        costo_compra = COALESCE($2, costo_compra),
+        color        = $3
+    WHERE id = $4
     RETURNING *
-  `, [imei || null, costo_compra ?? null, serialId]);
+  `, [imei || null, costo_compra ?? null, color || null, serialId]);
   return rows[0] || null;
 };
 

@@ -61,7 +61,7 @@ const getSeriales = async (negocioId, productoId, vendido) => {
 const agregarSerial = async (
   negocioId,
   productoId,
-  { imei, fecha_entrada, costo_compra, cliente_origen, proveedor_id, reactivar_serial_id }
+  { imei, fecha_entrada, costo_compra, cliente_origen, proveedor_id, reactivar_serial_id, color }
 ) => {
   const valido = await repo.perteneceAlNegocio(productoId, negocioId);
   if (!valido) throw { status: 404, message: 'Producto no encontrado' };
@@ -83,14 +83,15 @@ const agregarSerial = async (
     costo_compra:   costo_compra  ?? null,
     cliente_origen: cliente_origen || null,
     proveedor_id:   proveedor_id   || null,
+    color:          color          || null,
   });
 };
 
-const actualizarSerial = async (negocioId, serialId, { imei, costo_compra, precio }) => {
+const actualizarSerial = async (negocioId, serialId, { imei, costo_compra, precio, color }) => {
   const serial = await repo.findSerialByIdYNegocio(serialId, negocioId);
   if (!serial) throw { status: 404, message: 'Serial no encontrado' };
 
-  const actualizado = await repo.actualizarSerial(serialId, { imei, costo_compra });
+  const actualizado = await repo.actualizarSerial(serialId, { imei, costo_compra, color });
   if (!actualizado) throw { status: 404, message: 'Serial no encontrado' };
 
   if (precio !== undefined) {

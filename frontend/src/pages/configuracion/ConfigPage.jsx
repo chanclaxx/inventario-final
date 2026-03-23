@@ -14,7 +14,7 @@ import { Badge }   from '../../components/ui/Badge';
 import {
   Settings, Save, Eye, EyeOff, Plus, Trash2,
   GripVertical, ToggleLeft, ToggleRight, Tag, Lock,
-  Building2, ShieldCheck, FileSliders, BookOpen, Users, Printer,
+  Building2, ShieldCheck, FileSliders, BookOpen, Users, Printer, Palette,
 } from 'lucide-react';
 
 // ─── Secciones del sidebar ────────────────────────────────────────────────────
@@ -117,7 +117,7 @@ function LineasConfig() {
     onError:    (e) => alert(e.response?.data?.error || 'Error al eliminar la línea'),
   });
 
-  const abrirNuevo = () => { setEditando(null); setNombre(''); setError(''); setModalOpen(true); };
+  const abrirNuevo  = () => { setEditando(null); setNombre(''); setError(''); setModalOpen(true); };
   const abrirEditar = (l) => { setEditando(l); setNombre(l.nombre); setError(''); setModalOpen(true); };
   const cerrarModal = () => { setModalOpen(false); setEditando(null); setNombre(''); setError(''); };
 
@@ -369,12 +369,7 @@ const CAMPOS_READONLY = [
   { clave: 'campo_email_cliente', label: 'Envío de facturas por email', description: 'Envía automáticamente la factura al correo del cliente' },
 ];
 
-// ─── Contenido por sección ────────────────────────────────────────────────────
-
 // ─── Configuración de impresora ──────────────────────────────────────────────
-// Controla los parámetros CSS de @media print que afectan la salida térmica.
-// Cada campo corresponde a una clave en config_negocio.
-
 const PRESETS_PAPEL = [
   { label: '80mm (estándar)', valor: '80' },
   { label: '58mm (compacto)', valor: '58' },
@@ -399,35 +394,36 @@ function ImpresoraConfig({ valores, set }) {
         <div className="flex flex-col gap-1.5">
           <label className="text-xs font-medium text-gray-600">Ancho del papel</label>
           <div className="flex gap-2">
-            {PRESETS_PAPEL.map((p) => (
-              <button
-                key={p.valor}
-                type="button"
-                onClick={() => set('impresion_ancho_papel', p.valor)}
-                className={`flex-1 py-2 rounded-xl text-xs font-medium border transition-all
-                  ${anchoPapel === p.valor
-                    ? 'bg-blue-50 border-blue-300 text-blue-700'
-                    : 'bg-gray-50 border-gray-200 text-gray-600 hover:border-gray-300'}`}
-              >
-                {p.label}
-              </button>
-            ))}
+            {PRESETS_PAPEL.map((p) => {
+              const presetValor = p.valor;
+              const presetLabel = p.label;
+              return (
+                <button
+                  key={presetValor}
+                  type="button"
+                  onClick={() => set('impresion_ancho_papel', presetValor)}
+                  className={`flex-1 py-2 rounded-xl text-xs font-medium border transition-all
+                    ${anchoPapel === presetValor
+                      ? 'bg-blue-50 border-blue-300 text-blue-700'
+                      : 'bg-gray-50 border-gray-200 text-gray-600 hover:border-gray-300'}`}
+                >
+                  {presetLabel}
+                </button>
+              );
+            })}
           </div>
         </div>
 
         {/* Escala de impresión */}
         <div className="flex flex-col gap-1.5">
           <div className="flex items-center justify-between">
-            <label className="text-xs font-medium text-gray-600">
-              Escala de impresión
-            </label>
+            <label className="text-xs font-medium text-gray-600">Escala de impresión</label>
             <span className="text-sm font-bold text-gray-800 tabular-nums">
               {Number(escala).toFixed(2)}×
             </span>
           </div>
           <input
-            type="range"
-            min="0.5" max="3.0" step="0.05"
+            type="range" min="0.5" max="3.0" step="0.05"
             value={escala}
             onChange={(e) => set('impresion_escala', e.target.value)}
             className="w-full accent-blue-600 h-2 rounded-full"
@@ -449,8 +445,7 @@ function ImpresoraConfig({ valores, set }) {
             <span className="text-sm font-bold text-gray-800 tabular-nums">{fuenteSize}px</span>
           </div>
           <input
-            type="range"
-            min="9" max="18" step="1"
+            type="range" min="9" max="18" step="1"
             value={fuenteSize}
             onChange={(e) => set('impresion_fuente_size', e.target.value)}
             className="w-full accent-blue-600 h-2 rounded-full"
@@ -468,8 +463,7 @@ function ImpresoraConfig({ valores, set }) {
             <span className="text-sm font-bold text-gray-800 tabular-nums">{padding}mm</span>
           </div>
           <input
-            type="range"
-            min="0" max="8" step="0.5"
+            type="range" min="0" max="8" step="0.5"
             value={padding}
             onChange={(e) => set('impresion_padding', e.target.value)}
             className="w-full accent-blue-600 h-2 rounded-full"
@@ -486,36 +480,29 @@ function ImpresoraConfig({ valores, set }) {
           <div className="flex justify-center bg-gray-100 rounded-xl p-4 overflow-hidden">
             <div
               style={{
-                width:      `${anchoPapel}mm`,
-                fontSize:   `${fuenteSize}px`,
-                padding:    `${padding}mm`,
-                fontFamily: "'Courier New', monospace",
-                background: 'white',
-                border:     '1px solid #e5e7eb',
-                boxSizing:  'border-box',
-                transform:  `scale(${Math.min(Number(escala), 1.2)})`,
+                width:           `${anchoPapel}mm`,
+                fontSize:        `${fuenteSize}px`,
+                padding:         `${padding}mm`,
+                fontFamily:      "'Courier New', monospace",
+                background:      'white',
+                border:          '1px solid #e5e7eb',
+                boxSizing:       'border-box',
+                transform:       `scale(${Math.min(Number(escala), 1.2)})`,
                 transformOrigin: 'top center',
               }}
             >
-              <p style={{ textAlign: 'center', fontWeight: 900, marginBottom: 4 }}>
-                FACTURA DE VENTA
-              </p>
-              <p style={{ textAlign: 'center', marginBottom: 4 }}>
-                Vista previa · {anchoPapel}mm
-              </p>
+              <p style={{ textAlign: 'center', fontWeight: 900, marginBottom: 4 }}>FACTURA DE VENTA</p>
+              <p style={{ textAlign: 'center', marginBottom: 4 }}>Vista previa · {anchoPapel}mm</p>
               <div style={{ borderTop: '1.5px solid #000', margin: '4px 0' }} />
               <div style={{ display: 'flex', justifyContent: 'space-between', margin: '2px 0' }}>
-                <span>Producto ejemplo</span>
-                <span>$50.000</span>
+                <span>Producto ejemplo</span><span>$50.000</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', margin: '2px 0' }}>
-                <span>Producto 2</span>
-                <span>$30.000</span>
+                <span>Producto 2</span><span>$30.000</span>
               </div>
               <div style={{ borderTop: '1.5px solid #000', margin: '4px 0' }} />
               <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 900, fontSize: `${Number(fuenteSize) + 1}px` }}>
-                <span>TOTAL:</span>
-                <span>$80.000</span>
+                <span>TOTAL:</span><span>$80.000</span>
               </div>
               <p style={{ textAlign: 'center', marginTop: 6, fontSize: `${Number(fuenteSize) - 2}px` }}>
                 ¡Gracias por su compra!
@@ -532,6 +519,110 @@ function ImpresoraConfig({ valores, set }) {
   );
 }
 
+// ─── Colores de serial ────────────────────────────────────────────────────────
+function ColoresSerialConfig({ valores, set }) {
+  const activo   = valores['colores_serial_activo'] === '1';
+  const listaRaw = valores['colores_serial_lista'];
+  const colores  = (() => {
+    try { return JSON.parse(listaRaw || '[]'); }
+    catch { return []; }
+  })();
+
+  const [nuevoColor, setNuevoColor] = useState('');
+  const [error,      setError]      = useState('');
+
+  const setColores = (nuevaLista) => {
+    set('colores_serial_lista', JSON.stringify(nuevaLista));
+  };
+
+  const handleAgregar = () => {
+    const limpio = nuevoColor.trim();
+    if (!limpio)               return setError('El nombre del color es requerido');
+    if (colores.includes(limpio)) return setError('Este color ya existe');
+    setColores([...colores, limpio]);
+    setNuevoColor('');
+    setError('');
+  };
+
+  const handleEliminar = (color) => {
+    setColores(colores.filter((c) => c !== color));
+  };
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex items-center gap-2">
+        <Palette size={15} className="text-gray-400" />
+        <h3 className="text-sm font-semibold text-gray-700">Colores de serial</h3>
+      </div>
+      <p className="text-xs text-gray-400 -mt-2">
+        Al activar esta opción, podrás asignar un color a cada serial registrado.
+      </p>
+
+      <Toggle
+        label="Activar colores por serial"
+        description="Muestra un selector de color al agregar o editar un serial"
+        enabled={activo}
+        onChange={(val) => set('colores_serial_activo', val ? '1' : '0')}
+      />
+
+      {activo && (
+        <div className="flex flex-col gap-3">
+          {colores.length === 0 ? (
+            <p className="text-sm text-gray-400 text-center py-2">
+              Sin colores configurados
+            </p>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {colores.map((color) => {
+                const colorNombre = color;
+                return (
+                  <div key={colorNombre}
+                    className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl">
+                    <GripVertical size={15} className="text-gray-300 flex-shrink-0" />
+                    <p className="text-sm font-medium text-gray-800 flex-1 min-w-0 truncate">
+                      {colorNombre}
+                    </p>
+                    <button
+                      onClick={() => handleEliminar(colorNombre)}
+                      className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400
+                        hover:text-red-500 transition-colors flex-shrink-0"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={nuevoColor}
+              onChange={(e) => { setNuevoColor(e.target.value); setError(''); }}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleAgregar(); }}
+              placeholder="Ej: Negro, Azul, Rojo..."
+              className="flex-1 px-3 py-2 bg-gray-100 border-0 rounded-xl text-sm
+                text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2
+                focus:ring-blue-500 focus:bg-white transition-all"
+            />
+            <button
+              onClick={handleAgregar}
+              className="w-9 h-9 bg-blue-600 rounded-xl flex items-center justify-center
+                hover:bg-blue-700 transition-colors flex-shrink-0"
+            >
+              <Plus size={15} className="text-white" />
+            </button>
+          </div>
+          {error && <p className="text-xs text-red-500">{error}</p>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Secciones ────────────────────────────────────────────────────────────────
+
 function SeccionNegocio({ valores, set, form, mutation, guardado }) {
   const camposNegocio = [
     { clave: 'nombre_negocio', label: 'Nombre del negocio', placeholder: 'Mi Tienda' },
@@ -544,9 +635,7 @@ function SeccionNegocio({ valores, set, form, mutation, guardado }) {
     <div className="flex flex-col gap-5">
       <div>
         <h2 className="text-base font-semibold text-gray-900">Datos del negocio</h2>
-        <p className="text-xs text-gray-400 mt-0.5">
-          Esta información aparece en las facturas impresas.
-        </p>
+        <p className="text-xs text-gray-400 mt-0.5">Esta información aparece en las facturas impresas.</p>
       </div>
 
       <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm flex flex-col gap-4">
@@ -576,9 +665,7 @@ function SeccionSeguridad({ form, set, mutation, guardado }) {
     <div className="flex flex-col gap-5">
       <div>
         <h2 className="text-base font-semibold text-gray-900">Seguridad</h2>
-        <p className="text-xs text-gray-400 mt-0.5">
-          Controla el acceso a acciones sensibles del sistema.
-        </p>
+        <p className="text-xs text-gray-400 mt-0.5">Controla el acceso a acciones sensibles del sistema.</p>
       </div>
 
       <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm flex flex-col gap-4">
@@ -658,7 +745,8 @@ function SeccionFormulario({ valores, set, form, mutation, guardado }) {
   );
 }
 
-function SeccionCatalogo() {
+// ─── SeccionCatalogo — recibe props para ColoresSerialConfig y botón guardar ──
+function SeccionCatalogo({ valores, set, form, mutation, guardado }) {
   return (
     <div className="flex flex-col gap-5">
       <div>
@@ -675,6 +763,17 @@ function SeccionCatalogo() {
       <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
         <GarantiasConfig />
       </div>
+
+      <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
+        <ColoresSerialConfig valores={valores} set={set} />
+      </div>
+
+      <div className="flex items-center gap-3">
+        <Button className="flex-1" loading={mutation.isPending} onClick={() => mutation.mutate(form)}>
+          <Save size={16} /> Guardar cambios
+        </Button>
+        {guardado && <Badge variant="green">✓ Guardado</Badge>}
+      </div>
     </div>
   );
 }
@@ -684,9 +783,7 @@ function SeccionEquipo() {
     <div className="flex flex-col gap-5">
       <div>
         <h2 className="text-base font-semibold text-gray-900">Equipo</h2>
-        <p className="text-xs text-gray-400 mt-0.5">
-          Gestiona los usuarios y sucursales de tu negocio.
-        </p>
+        <p className="text-xs text-gray-400 mt-0.5">Gestiona los usuarios y sucursales de tu negocio.</p>
       </div>
 
       <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
@@ -770,15 +867,17 @@ export default function ConfigPage() {
         {/* ── Contenido ── */}
         <div className="flex-1 min-w-0">
           {seccionActiva === 'negocio'    && (
-            <SeccionNegocio    valores={valores} set={set} form={form} mutation={mutation} guardado={guardado} />
+            <SeccionNegocio valores={valores} set={set} form={form} mutation={mutation} guardado={guardado} />
           )}
           {seccionActiva === 'seguridad'  && (
-            <SeccionSeguridad  form={form} set={set} mutation={mutation} guardado={guardado} />
+            <SeccionSeguridad form={form} set={set} mutation={mutation} guardado={guardado} />
           )}
           {seccionActiva === 'formulario' && (
             <SeccionFormulario valores={valores} set={set} form={form} mutation={mutation} guardado={guardado} />
           )}
-          {seccionActiva === 'catalogo'   && <SeccionCatalogo />}
+          {seccionActiva === 'catalogo'   && (
+            <SeccionCatalogo valores={valores} set={set} form={form} mutation={mutation} guardado={guardado} />
+          )}
           {seccionActiva === 'equipo'     && <SeccionEquipo />}
         </div>
 
