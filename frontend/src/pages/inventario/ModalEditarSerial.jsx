@@ -62,15 +62,22 @@ export function ModalEditarSerial({ serial, precioProducto, productoId, onClose 
 
   // ── Mutación de edición ───────────────────────────────────────────────────
   const mutation = useMutation({
-    mutationFn: () => actualizarSerial(serial.id, {
-      imei:         form.imei.trim(),
-      precio:       form.precio       !== '' ? Number(form.precio)       : undefined,
-      costo_compra: form.costo_compra !== '' ? Number(form.costo_compra) : null,
-      proveedor_id: form.proveedor_id !== '' ? Number(form.proveedor_id) : null,
-      producto_id:  productoId,
-      // color: null si viene vacío (sin color seleccionado)
-      color:        form.color.trim() !== '' ? form.color.trim() : null,
-    }),
+    mutationFn: () => {
+      const payload = {
+        imei:         form.imei.trim(),
+        precio:       form.precio       !== '' ? Number(form.precio)       : undefined,
+        costo_compra: form.costo_compra !== '' ? Number(form.costo_compra) : null,
+        proveedor_id: form.proveedor_id !== '' ? Number(form.proveedor_id) : null,
+        producto_id:  productoId,
+      };
+      // Solo incluir color si la opción está activa.
+      // Si está desactivada no lo enviamos — el backend preserva el valor existente
+      // en lugar de sobreescribirlo con null.
+      if (coloresActivo) {
+        payload.color = form.color.trim() !== '' ? form.color.trim() : null;
+      }
+      return actualizarSerial(serial.id, payload);
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['seriales', productoId], exact: false });
       queryClient.invalidateQueries({ queryKey: ['productos-serial'],     exact: false });

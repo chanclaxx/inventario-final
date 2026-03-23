@@ -162,14 +162,27 @@ const reactivarSerial = async (serialId, { costo_compra, proveedor_id } = {}) =>
 };
 
 const actualizarSerial = async (serialId, { imei, costo_compra, color }) => {
-  const { rows } = await pool.query(`
-    UPDATE seriales
-    SET imei         = COALESCE($1, imei),
-        costo_compra = COALESCE($2, costo_compra),
-        color        = $3
-    WHERE id = $4
-    RETURNING *
-  `, [imei || null, costo_compra ?? null, color || null, serialId]);
+  // Si color es undefined (no vino en el payload), no lo tocamos en BD.
+  // Si color es null o string, lo actualizamos.
+  const colorVino = color !== undefined;
+ 
+  const { rows } = colorVino
+    ? await pool.query(`
+        UPDATE seriales
+        SET imei         = COALESCE($1, imei),
+            costo_compra = COALESCE($2, costo_compra),
+            color        = $3
+        WHERE id = $4
+        RETURNING *
+      `, [imei || null, costo_compra ?? null, color, serialId])
+    : await pool.query(`
+        UPDATE seriales
+        SET imei         = COALESCE($1, imei),
+            costo_compra = COALESCE($2, costo_compra)
+        WHERE id = $3
+        RETURNING *
+      `, [imei || null, costo_compra ?? null, serialId]);
+ 
   return rows[0] || null;
 };
 

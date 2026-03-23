@@ -7,6 +7,7 @@ const getSeriales = async (sucursalId) => {
       ps.marca,
       ps.modelo,
       s.imei,
+      s.color,
       s.fecha_entrada,
       s.vendido,
       s.prestado,
