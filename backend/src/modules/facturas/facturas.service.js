@@ -156,7 +156,7 @@ const crearFactura = async ({
         imei:            linea.imei        || null,
         cantidad:        linea.cantidad,
         precio:          linea.precio,
-        producto_id:     linea.producto_id || null,
+        producto_id:     linea.imei ? null : (linea.producto_id || null),
       });
       totalLineas += Number(lineaInsertada.subtotal || 0);
 
