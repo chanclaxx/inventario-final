@@ -9,6 +9,9 @@ const errorHandler = (err, req, res, next) => {
   }
 
   if (err.code === '23503') {
+    console.error('[FK 23503] table:', err.table);
+  console.error('[FK 23503] constraint:', err.constraint);
+  console.error('[FK 23503] detail:', err.detail);
     return res.status(400).json({ ok: false, error: 'El registro referenciado no existe' });
   }
 
