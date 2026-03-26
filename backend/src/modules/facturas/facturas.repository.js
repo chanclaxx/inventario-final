@@ -12,43 +12,37 @@ const _subqueryProveedores = (facturaAlias = 'f') => `
     SELECT NULLIF(STRING_AGG(DISTINCT prov_nombre, ', ' ORDER BY prov_nombre), '')
     FROM (
       SELECT p.nombre AS prov_nombre
-      FROM lineas_factura lf2
-      JOIN seriales         se ON se.imei      = lf2.imei
-      JOIN productos_serial ps ON ps.id         = se.producto_id
-      JOIN sucursales       su ON su.id         = ps.sucursal_id
-      JOIN proveedores      p  ON p.id          = se.proveedor_id
+      FROM lineas_factura   lf2
+      JOIN seriales         se  ON se.imei  = lf2.imei
+      JOIN productos_serial ps  ON ps.id    = se.producto_id
+      JOIN sucursales       su2 ON su2.id   = ps.sucursal_id
+      JOIN proveedores      p   ON p.id     = se.proveedor_id
       WHERE lf2.factura_id = ${facturaAlias}.id
         AND lf2.imei IS NOT NULL
         AND se.proveedor_id IS NOT NULL
-        AND su.negocio_id = ${facturaAlias}.negocio_id_resuelto
+        AND su2.negocio_id = (SELECT negocio_id FROM sucursales WHERE id = ${facturaAlias}.sucursal_id)
       UNION
       SELECT p.nombre AS prov_nombre
       FROM lineas_factura    lf3
-      JOIN productos_cantidad pc ON pc.nombre ILIKE lf3.nombre_producto
-                                AND pc.sucursal_id = ${facturaAlias}.sucursal_id
-      JOIN sucursales         su ON su.id = pc.sucursal_id
-      JOIN proveedores        p  ON p.id  = pc.proveedor_id
+      JOIN productos_cantidad pc  ON pc.nombre ILIKE lf3.nombre_producto
+                                 AND pc.sucursal_id = ${facturaAlias}.sucursal_id
+      JOIN sucursales         su3 ON su3.id = pc.sucursal_id
+      JOIN proveedores        p   ON p.id   = pc.proveedor_id
       WHERE lf3.factura_id = ${facturaAlias}.id
         AND lf3.imei IS NULL
         AND pc.proveedor_id IS NOT NULL
-        AND su.negocio_id = ${facturaAlias}.negocio_id_resuelto
+        AND su3.negocio_id = (SELECT negocio_id FROM sucursales WHERE id = ${facturaAlias}.sucursal_id)
     ) provs
   ) AS proveedor_nombre
 `;
-
-// Nota: negocio_id_resuelto es un alias que se expone en el SELECT principal
-// de cada query que usa _subqueryProveedores, así:
-//   su.negocio_id AS negocio_id_resuelto
-// Esto evita pasar un parámetro posicional extra a la subquery inline.
 
 // ── Columnas SELECT compartidas ───────────────────────────────────────────────
 
 const _selectColumnas = () => `
   f.id, f.fecha, f.nombre_cliente, f.cedula, f.celular,
   f.estado, f.notas, f.sucursal_id,
-  su.nombre    AS sucursal_nombre,
-  su.negocio_id AS negocio_id_resuelto,
-  u.nombre     AS usuario_nombre,
+  su.nombre AS sucursal_nombre,
+  u.nombre  AS usuario_nombre,
   COALESCE(SUM(l.subtotal), 0) AS total,
   COALESCE(
     (SELECT SUM(r.valor_retoma) FROM retomas r WHERE r.factura_id = f.id), 0
@@ -80,7 +74,7 @@ const findAll = async (sucursalId, negocioId) => {
     SELECT ${_selectColumnas()}
     ${_fromJoins()}
     WHERE ${filtro}
-    GROUP BY f.id, u.nombre, su.nombre, su.negocio_id
+    GROUP BY f.id, u.nombre, su.nombre
     ORDER BY f.fecha DESC
   `, [param]);
   return rows;
@@ -101,7 +95,7 @@ const findRecientes = async (sucursalId, negocioId, { cursor, dias = 5 }) => {
     ${_fromJoins()}
     WHERE ${filtroSucursal}
       AND f.fecha >= $2 AND f.fecha < $3
-    GROUP BY f.id, u.nombre, su.nombre, su.negocio_id
+    GROUP BY f.id, u.nombre, su.nombre
     ORDER BY f.fecha DESC
   `, [param, fechaDesde, fechaHasta]);
 
@@ -173,7 +167,7 @@ const buscar = async (sucursalId, negocioId, { q, desde, hasta, limit = 100, off
     SELECT ${_selectColumnas()}
     ${_fromJoins()}
     WHERE ${condiciones.join(' AND ')}
-    GROUP BY f.id, u.nombre, su.nombre, su.negocio_id
+    GROUP BY f.id, u.nombre, su.nombre
     ORDER BY f.fecha DESC
     LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
   `, params);
@@ -191,9 +185,8 @@ const _findById = async (id) => {
   const { rows } = await pool.query(`
     SELECT
       f.*,
-      u.nombre     AS usuario_nombre,
-      su.nombre    AS sucursal_nombre,
-      su.negocio_id AS negocio_id_resuelto,
+      u.nombre  AS usuario_nombre,
+      su.nombre AS sucursal_nombre,
       c.email     AS cliente_email,
       c.direccion AS cliente_direccion,
       ${_subqueryProveedores('f')}
@@ -331,9 +324,8 @@ const findByIdYNegocio = async (id, negocioId) => {
   const { rows } = await pool.query(`
     SELECT
       f.*,
-      u.nombre     AS usuario_nombre,
-      su.nombre    AS sucursal_nombre,
-      su.negocio_id AS negocio_id_resuelto,
+      u.nombre  AS usuario_nombre,
+      su.nombre AS sucursal_nombre,
       c.email     AS cliente_email,
       c.direccion AS cliente_direccion,
       ${_subqueryProveedores('f')}
