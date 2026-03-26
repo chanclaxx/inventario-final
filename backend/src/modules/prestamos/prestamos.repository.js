@@ -27,6 +27,7 @@ const findAll = async (sucursalId, negocioId) => {
     LEFT JOIN productos_serial       ps2 ON ps2.id = s.producto_id
                                         AND ps2.sucursal_id = p.sucursal_id
     WHERE ${filtro}
+      AND (p.imei IS NULL OR ps2.sucursal_id IS NOT NULL)  -- ← filtra duplicados
     ORDER BY
       CASE p.estado WHEN 'Activo' THEN 0 WHEN 'Saldado' THEN 1 ELSE 2 END,
       p.fecha DESC
