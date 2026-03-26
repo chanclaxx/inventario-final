@@ -201,7 +201,8 @@ const perteneceAlNegocio = async (id, negocioId) => {
   return rows.length > 0;
 };
 
-const getLineas = async (facturaId) => {
+// DESPUÉS
+const getLineas = async (facturaId, negocioId) => {
   const { rows } = await pool.query(`
     SELECT
       lf.*,
@@ -209,28 +210,33 @@ const getLineas = async (facturaId) => {
         (
           SELECT p.nombre
           FROM seriales    se
-          JOIN proveedores p ON p.id = se.proveedor_id
+          JOIN productos_serial ps ON ps.id = se.producto_id
+          JOIN sucursales       su ON su.id = ps.sucursal_id
+          JOIN proveedores      p  ON p.id  = se.proveedor_id
           WHERE se.imei = lf.imei
             AND lf.imei IS NOT NULL
             AND se.proveedor_id IS NOT NULL
+            AND su.negocio_id = $2
           LIMIT 1
         ),
         (
           SELECT p.nombre
           FROM productos_cantidad pc
-          JOIN proveedores        p ON p.id = pc.proveedor_id
-          JOIN facturas           f ON f.id = lf.factura_id
+          JOIN sucursales         su ON su.id = pc.sucursal_id
+          JOIN proveedores        p  ON p.id  = pc.proveedor_id
+          JOIN facturas           f  ON f.id  = lf.factura_id
           WHERE pc.nombre ILIKE lf.nombre_producto
             AND pc.sucursal_id = f.sucursal_id
             AND lf.imei IS NULL
             AND pc.proveedor_id IS NOT NULL
+            AND su.negocio_id = $2
           LIMIT 1
         )
       ) AS proveedor_nombre
     FROM lineas_factura lf
     WHERE lf.factura_id = $1
     ORDER BY lf.id
-  `, [facturaId]);
+  `, [facturaId, negocioId]);
   return rows;
 };
 

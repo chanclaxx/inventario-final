@@ -68,7 +68,7 @@ const getFacturaById = async (negocioId, id) => {
   const domiciliariosRepo = require('../domiciliarios/domiciliarios.repository');
 
   const [lineas, pagos, retomas, entrega] = await Promise.all([
-    facturasRepo.getLineas(id),
+  facturasRepo.getLineas(id, negocioId),
     facturasRepo.getPagos(id),
     facturasRepo.getRetomas(id),
     domiciliariosRepo.findEntregaByFacturaId(id, negocioId),
