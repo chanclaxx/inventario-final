@@ -1,5 +1,7 @@
 const { pool } = require('../../config/db');
 
+const { pool } = require('../../config/db');
+
 const findAll = async (sucursalId, negocioId) => {
   const filtro = sucursalId ? 'p.sucursal_id = $1' : 'su.negocio_id = $1';
   const param  = sucursalId ?? negocioId;
@@ -18,13 +20,14 @@ const findAll = async (sucursalId, negocioId) => {
       c.nombre  AS cliente_nombre,
       s.color   AS serial_color
     FROM prestamos p
-    JOIN  sucursales                su ON su.id = p.sucursal_id
-    LEFT JOIN usuarios               u  ON u.id  = p.usuario_id
-    LEFT JOIN prestatarios           pr ON pr.id = p.prestatario_id
-    LEFT JOIN empleados_prestatario  e  ON e.id  = p.empleado_id
-    LEFT JOIN clientes               c  ON c.id  = p.cliente_id
-    -- JOIN a seriales para traer el color — solo aplica a préstamos con IMEI
-    LEFT JOIN seriales               s  ON s.imei = p.imei
+    JOIN  sucursales                su  ON su.id  = p.sucursal_id
+    LEFT JOIN usuarios               u   ON u.id   = p.usuario_id
+    LEFT JOIN prestatarios           pr  ON pr.id  = p.prestatario_id
+    LEFT JOIN empleados_prestatario  e   ON e.id   = p.empleado_id
+    LEFT JOIN clientes               c   ON c.id   = p.cliente_id
+    LEFT JOIN seriales               s   ON s.imei = p.imei
+    LEFT JOIN productos_serial       ps2 ON ps2.id = s.producto_id
+                                        AND ps2.sucursal_id = p.sucursal_id
     WHERE ${filtro}
     ORDER BY
       CASE p.estado WHEN 'Activo' THEN 0 WHEN 'Saldado' THEN 1 ELSE 2 END,
