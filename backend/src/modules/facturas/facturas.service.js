@@ -68,7 +68,8 @@ const getFacturaById = async (negocioId, id) => {
   const domiciliariosRepo = require('../domiciliarios/domiciliarios.repository');
 
   const [lineas, pagos, retomas, entrega] = await Promise.all([
-  facturasRepo.getLineas(id, negocioId),
+    // FIX: se pasa negocioId para que getLineas filtre proveedores al negocio correcto
+    facturasRepo.getLineas(id, negocioId),
     facturasRepo.getPagos(id),
     facturasRepo.getRetomas(id),
     domiciliariosRepo.findEntregaByFacturaId(id, negocioId),
@@ -302,7 +303,8 @@ const crearFactura = async ({
           for (const row of configRows) configMap[row.clave] = row.valor;
           if (configMap.campo_email_cliente === '1') {
             const [lineasEmail, pagosEmail, retomasEmail, garantiasEmail] = await Promise.all([
-              facturasRepo.getLineas(factura.id),
+              // FIX: se pasa negocio_id para aislar proveedores correctamente en el email
+              facturasRepo.getLineas(factura.id, negocio_id),
               facturasRepo.getPagos(factura.id),
               facturasRepo.getRetomas(factura.id),
               garantiasRepo.findPorFactura(factura.id),
@@ -351,7 +353,9 @@ const cancelarFactura = async (negocioId, id, eliminarRetoma = false, _desdeDevo
   try {
     await client.query('BEGIN');
 
-    const lineas = await facturasRepo.getLineas(id);
+    // FIX: se pasa negocioId para consistencia (aunque en cancelación solo se
+    // usan imei/producto_id para revertir stock, no el proveedor_nombre)
+    const lineas = await facturasRepo.getLineas(id, negocioId);
     for (const linea of lineas) {
       if (linea.imei) {
         const { rows: serialRows } = await client.query(

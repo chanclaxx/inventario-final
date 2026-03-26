@@ -1,6 +1,11 @@
 const { pool } = require('../../config/db');
 
 // ── Subconsulta de proveedores reutilizable ───────────────────────────────────
+//
+// FIX: Se agrega filtro de negocio_id en ambas ramas de la UNION para evitar
+// que se muestren proveedores de otros negocios que tengan el mismo IMEI
+// o el mismo nombre de producto.
+// Se resuelve via JOIN a sucursales de la propia factura (sin parámetro extra).
 
 const _subqueryProveedores = (facturaAlias = 'f') => `
   (
@@ -8,31 +13,42 @@ const _subqueryProveedores = (facturaAlias = 'f') => `
     FROM (
       SELECT p.nombre AS prov_nombre
       FROM lineas_factura lf2
-      JOIN seriales    se ON se.imei = lf2.imei
-      JOIN proveedores p  ON p.id = se.proveedor_id
+      JOIN seriales         se ON se.imei      = lf2.imei
+      JOIN productos_serial ps ON ps.id         = se.producto_id
+      JOIN sucursales       su ON su.id         = ps.sucursal_id
+      JOIN proveedores      p  ON p.id          = se.proveedor_id
       WHERE lf2.factura_id = ${facturaAlias}.id
         AND lf2.imei IS NOT NULL
         AND se.proveedor_id IS NOT NULL
+        AND su.negocio_id = ${facturaAlias}.negocio_id_resuelto
       UNION
       SELECT p.nombre AS prov_nombre
       FROM lineas_factura    lf3
       JOIN productos_cantidad pc ON pc.nombre ILIKE lf3.nombre_producto
                                 AND pc.sucursal_id = ${facturaAlias}.sucursal_id
-      JOIN proveedores        p  ON p.id = pc.proveedor_id
+      JOIN sucursales         su ON su.id = pc.sucursal_id
+      JOIN proveedores        p  ON p.id  = pc.proveedor_id
       WHERE lf3.factura_id = ${facturaAlias}.id
         AND lf3.imei IS NULL
         AND pc.proveedor_id IS NOT NULL
+        AND su.negocio_id = ${facturaAlias}.negocio_id_resuelto
     ) provs
   ) AS proveedor_nombre
 `;
+
+// Nota: negocio_id_resuelto es un alias que se expone en el SELECT principal
+// de cada query que usa _subqueryProveedores, así:
+//   su.negocio_id AS negocio_id_resuelto
+// Esto evita pasar un parámetro posicional extra a la subquery inline.
 
 // ── Columnas SELECT compartidas ───────────────────────────────────────────────
 
 const _selectColumnas = () => `
   f.id, f.fecha, f.nombre_cliente, f.cedula, f.celular,
   f.estado, f.notas, f.sucursal_id,
-  su.nombre AS sucursal_nombre,
-  u.nombre  AS usuario_nombre,
+  su.nombre    AS sucursal_nombre,
+  su.negocio_id AS negocio_id_resuelto,
+  u.nombre     AS usuario_nombre,
   COALESCE(SUM(l.subtotal), 0) AS total,
   COALESCE(
     (SELECT SUM(r.valor_retoma) FROM retomas r WHERE r.factura_id = f.id), 0
@@ -64,7 +80,7 @@ const findAll = async (sucursalId, negocioId) => {
     SELECT ${_selectColumnas()}
     ${_fromJoins()}
     WHERE ${filtro}
-    GROUP BY f.id, u.nombre, su.nombre
+    GROUP BY f.id, u.nombre, su.nombre, su.negocio_id
     ORDER BY f.fecha DESC
   `, [param]);
   return rows;
@@ -76,8 +92,6 @@ const findRecientes = async (sucursalId, negocioId, { cursor, dias = 5 }) => {
   const filtroSucursal = sucursalId ? 'f.sucursal_id = $1' : 'su.negocio_id = $1';
   const param          = sucursalId ?? negocioId;
 
-  // cursor es la fecha más antigua ya cargada (ISO string)
-  // Si no hay cursor, partimos desde ahora
   const fechaHasta = cursor ? new Date(cursor) : new Date();
   const fechaDesde = new Date(fechaHasta);
   fechaDesde.setDate(fechaDesde.getDate() - dias);
@@ -87,14 +101,12 @@ const findRecientes = async (sucursalId, negocioId, { cursor, dias = 5 }) => {
     ${_fromJoins()}
     WHERE ${filtroSucursal}
       AND f.fecha >= $2 AND f.fecha < $3
-    GROUP BY f.id, u.nombre, su.nombre
+    GROUP BY f.id, u.nombre, su.nombre, su.negocio_id
     ORDER BY f.fecha DESC
   `, [param, fechaDesde, fechaHasta]);
 
-  // Calcular siguiente cursor
   const siguienteCursor = fechaDesde.toISOString();
 
-  // Verificar si hay facturas más antiguas
   const { rows: hayMas } = await pool.query(`
     SELECT 1 FROM facturas f
     JOIN sucursales su ON su.id = f.sucursal_id
@@ -103,8 +115,8 @@ const findRecientes = async (sucursalId, negocioId, { cursor, dias = 5 }) => {
   `, [param, fechaDesde]);
 
   return {
-    items:            rows,
-    siguienteCursor:  hayMas.length > 0 ? siguienteCursor : null,
+    items:           rows,
+    siguienteCursor: hayMas.length > 0 ? siguienteCursor : null,
   };
 };
 
@@ -118,7 +130,6 @@ const buscar = async (sucursalId, negocioId, { q, desde, hasta, limit = 100, off
   const params      = [param];
   let paramIndex    = 2;
 
-  // Búsqueda de texto
   if (q && q.trim()) {
     const textoSeguro = q.toLowerCase().replace(/[%_\\]/g, '\\$&').slice(0, 100);
     params.push(`%${textoSeguro}%`);
@@ -144,14 +155,12 @@ const buscar = async (sucursalId, negocioId, { q, desde, hasta, limit = 100, off
     paramIndex++;
   }
 
-  // Filtro de fecha desde
   if (desde) {
     params.push(desde);
     condiciones.push(`f.fecha >= $${paramIndex}::date`);
     paramIndex++;
   }
 
-  // Filtro de fecha hasta (hasta fin del día)
   if (hasta) {
     params.push(hasta);
     condiciones.push(`f.fecha < ($${paramIndex}::date + INTERVAL '1 day')`);
@@ -164,7 +173,7 @@ const buscar = async (sucursalId, negocioId, { q, desde, hasta, limit = 100, off
     SELECT ${_selectColumnas()}
     ${_fromJoins()}
     WHERE ${condiciones.join(' AND ')}
-    GROUP BY f.id, u.nombre, su.nombre
+    GROUP BY f.id, u.nombre, su.nombre, su.negocio_id
     ORDER BY f.fecha DESC
     LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
   `, params);
@@ -172,14 +181,19 @@ const buscar = async (sucursalId, negocioId, { q, desde, hasta, limit = 100, off
   return rows;
 };
 
-// ── Resto de funciones sin cambios ────────────────────────────────────────────
+// ── Resto de funciones ────────────────────────────────────────────────────────
 
-const findById = async (id) => {
+// FIX: findById eliminada del export — era insegura (sin negocio_id).
+// Toda consulta de detalle debe pasar por findByIdYNegocio.
+// Se mantiene internamente por si algún módulo interno la necesita con cuidado,
+// pero NO se exporta.
+const _findById = async (id) => {
   const { rows } = await pool.query(`
     SELECT
       f.*,
-      u.nombre  AS usuario_nombre,
-      su.nombre AS sucursal_nombre,
+      u.nombre     AS usuario_nombre,
+      su.nombre    AS sucursal_nombre,
+      su.negocio_id AS negocio_id_resuelto,
       c.email     AS cliente_email,
       c.direccion AS cliente_direccion,
       ${_subqueryProveedores('f')}
@@ -201,7 +215,7 @@ const perteneceAlNegocio = async (id, negocioId) => {
   return rows.length > 0;
 };
 
-// DESPUÉS
+// FIX: negocioId es ahora obligatorio para filtrar proveedores al negocio correcto.
 const getLineas = async (facturaId, negocioId) => {
   const { rows } = await pool.query(`
     SELECT
@@ -209,10 +223,10 @@ const getLineas = async (facturaId, negocioId) => {
       COALESCE(
         (
           SELECT p.nombre
-          FROM seriales    se
-          JOIN productos_serial ps ON ps.id = se.producto_id
-          JOIN sucursales       su ON su.id = ps.sucursal_id
-          JOIN proveedores      p  ON p.id  = se.proveedor_id
+          FROM seriales         se
+          JOIN productos_serial ps ON ps.id  = se.producto_id
+          JOIN sucursales       su ON su.id  = ps.sucursal_id
+          JOIN proveedores      p  ON p.id   = se.proveedor_id
           WHERE se.imei = lf.imei
             AND lf.imei IS NOT NULL
             AND se.proveedor_id IS NOT NULL
@@ -317,8 +331,9 @@ const findByIdYNegocio = async (id, negocioId) => {
   const { rows } = await pool.query(`
     SELECT
       f.*,
-      u.nombre  AS usuario_nombre,
-      su.nombre AS sucursal_nombre,
+      u.nombre     AS usuario_nombre,
+      su.nombre    AS sucursal_nombre,
+      su.negocio_id AS negocio_id_resuelto,
       c.email     AS cliente_email,
       c.direccion AS cliente_direccion,
       ${_subqueryProveedores('f')}
@@ -347,7 +362,8 @@ const actualizarCostoPromedio = async (client, productoId, costoPromedio) => {
 
 module.exports = {
   findAll, findRecientes, buscar,
-  findById, findByIdYNegocio,
+  // findById ya NO se exporta — usar findByIdYNegocio siempre
+  findByIdYNegocio,
   perteneceAlNegocio,
   getLineas, getPagos, getRetomas,
   create, insertarLinea, insertarPago, insertarRetoma, cancelar,
