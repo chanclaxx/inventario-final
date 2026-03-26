@@ -1,7 +1,5 @@
 const { pool } = require('../../config/db');
 
-const { pool } = require('../../config/db');
-
 const findAll = async (sucursalId, negocioId) => {
   const filtro = sucursalId ? 'p.sucursal_id = $1' : 'su.negocio_id = $1';
   const param  = sucursalId ?? negocioId;
