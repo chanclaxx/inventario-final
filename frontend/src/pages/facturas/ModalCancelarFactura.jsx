@@ -25,7 +25,7 @@ function PantallaBloqueo({ facturaId, entrega, onClose }) {
           <Bike size={18} className="text-orange-500 flex-shrink-0 mt-0.5" />
           <div className="flex flex-col gap-1">
             <p className="text-sm font-semibold text-orange-800">
-              Factura #{String(facturaId).padStart(6, '0')} tiene un domicilio activo
+              Factura #{String(facturaId).padStart(6, '0')} tiene un domicilio activ
             </p>
             <p className="text-xs text-orange-600">
               Esta factura está asignada a{' '}
