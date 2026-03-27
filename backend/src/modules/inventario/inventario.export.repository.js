@@ -13,16 +13,33 @@ const getSeriales = async (sucursalId) => {
       s.prestado,
       s.fecha_salida,
       s.cliente_origen,
-      pr.nombre       AS proveedor,
+      COALESCE(
+        pr_serial.nombre,     -- 1. proveedor del serial
+        pr_producto.nombre,   -- 2. proveedor del producto
+        pr_compra.nombre      -- 3. proveedor de la compra donde se registró
+      ) AS proveedor,
       f.nombre_cliente AS cliente_venta,
       f.cedula         AS cedula_cliente_venta,
       f.celular        AS celular_cliente_venta
     FROM seriales s
     JOIN productos_serial ps ON ps.id = s.producto_id
-    LEFT JOIN proveedores  pr ON pr.id = ps.proveedor_id
+
+    -- Proveedor directo del serial
+    LEFT JOIN proveedores pr_serial  ON pr_serial.id  = s.proveedor_id
+
+    -- Proveedor del producto
+    LEFT JOIN proveedores pr_producto ON pr_producto.id = ps.proveedor_id
+
+    -- Proveedor via compra (por IMEI en lineas_compra)
+    LEFT JOIN lineas_compra lc  ON lc.imei = s.imei
+    LEFT JOIN compras        co ON co.id   = lc.compra_id
+    LEFT JOIN proveedores pr_compra ON pr_compra.id = co.proveedor_id
+
+    -- Cliente de venta (por IMEI en lineas_factura)
     LEFT JOIN lineas_factura lf ON lf.imei = s.imei
-    LEFT JOIN facturas       f  ON f.id = lf.factura_id
+    LEFT JOIN facturas       f  ON f.id    = lf.factura_id
                                 AND f.estado != 'Cancelada'
+
     WHERE ps.sucursal_id = $1
     ORDER BY ps.nombre, s.vendido ASC, s.fecha_salida DESC
   `, [sucursalId]);
