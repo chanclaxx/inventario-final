@@ -13,10 +13,16 @@ const getSeriales = async (sucursalId) => {
       s.prestado,
       s.fecha_salida,
       s.cliente_origen,
-      pr.nombre       AS proveedor
+      pr.nombre       AS proveedor,
+      f.nombre_cliente AS cliente_venta,
+      f.cedula         AS cedula_cliente_venta,
+      f.celular        AS celular_cliente_venta
     FROM seriales s
     JOIN productos_serial ps ON ps.id = s.producto_id
-    LEFT JOIN proveedores pr ON pr.id = ps.proveedor_id
+    LEFT JOIN proveedores  pr ON pr.id = ps.proveedor_id
+    LEFT JOIN lineas_factura lf ON lf.imei = s.imei
+    LEFT JOIN facturas       f  ON f.id = lf.factura_id
+                                AND f.estado != 'Cancelada'
     WHERE ps.sucursal_id = $1
     ORDER BY ps.nombre, s.vendido ASC, s.fecha_salida DESC
   `, [sucursalId]);
