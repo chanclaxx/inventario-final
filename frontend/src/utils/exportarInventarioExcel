@@ -2,14 +2,14 @@ import * as XLSX from 'xlsx';
 
 // ─── Paleta de colores ────────────────────────────────────────────────────────
 const COLOR = {
-  headerSerial:    '1E40AF', // azul oscuro — encabezado hoja serial
-  headerCantidad:  '065F46', // verde oscuro — encabezado hoja cantidad
-  disponible:      'FFFFFF', // blanco — fila disponible
-  vendido:         'FEE2E2', // rojo claro — fila vendida
-  prestado:        'FEF9C3', // amarillo claro — fila prestada
-  textoHeader:     'FFFFFF', // blanco — texto de encabezado
-  resumenBg:       'EFF6FF', // azul muy claro — fila de resumen
-  bordeColor:      'D1D5DB', // gris claro — bordes
+  headerSerial:    '1E40AF',
+  headerCantidad:  '065F46',
+  disponible:      'FFFFFF',
+  vendido:         'FEE2E2',
+  prestado:        'FEF9C3',
+  textoHeader:     'FFFFFF',
+  resumenBg:       'EFF6FF',
+  bordeColor:      'D1D5DB',
 };
 
 // ─── Helpers de estilo ────────────────────────────────────────────────────────
@@ -64,7 +64,6 @@ function fmtFecha(val) {
 function crearHojaSerial(nombreProducto, seriales) {
   const ws = {};
 
-  // Título del producto
   ws['A1'] = {
     t: 's', v: nombreProducto.toUpperCase(),
     s: {
@@ -73,103 +72,98 @@ function crearHojaSerial(nombreProducto, seriales) {
     },
   };
 
-  // Separar disponibles y vendidos/prestados
   const disponibles = seriales.filter((s) => !s.vendido && !s.prestado);
   const prestados   = seriales.filter((s) =>  s.prestado && !s.vendido);
   const vendidos    = seriales.filter((s) =>  s.vendido)
     .sort((a, b) => new Date(b.fecha_salida) - new Date(a.fecha_salida));
 
-  const COLS = ['IMEI', 'Estado', 'Marca', 'Modelo', 'Proveedor', 'Fecha Entrada', 'Fecha Salida', 'Cliente'];
-  const COL_WIDTHS = [22, 12, 14, 14, 18, 14, 14, 22];
+  const COLS = [
+    'IMEI', 'Estado', 'Marca', 'Modelo',
+    'Proveedor', 'Cliente Origen',
+    'Fecha Entrada', 'Fecha Salida',
+    'Cliente Venta', 'Cédula Cliente', 'Celular Cliente',
+  ];
+  const COL_WIDTHS = [22, 12, 14, 14, 20, 22, 14, 14, 24, 16, 16];
 
-  let fila = 2; // 0-indexed → fila 3 en Excel
+  let fila = 2;
 
-  // ── Sección disponibles ──
-  ws[XLSX.utils.encode_cell({ r: fila, c: 0 })] = {
-    t: 's', v: `✓ DISPONIBLES (${disponibles.length})`,
-    s: { font: { bold: true, name: 'Arial', sz: 10, color: { rgb: '065F46' } } },
-  };
-  fila++;
-
-  // Encabezados
-  COLS.forEach((col, c) => {
-    ws[XLSX.utils.encode_cell({ r: fila, c })] = { t: 's', v: col, s: estiloHeader(COLOR.headerSerial) };
-  });
-  fila++;
-
-  disponibles.forEach((s) => {
-    const bg = COLOR.disponible;
-    const vals = [s.imei, 'Disponible', s.marca || '', s.modelo || '', s.proveedor || '', fmtFecha(s.fecha_entrada), '', ''];
-    vals.forEach((v, c) => {
-      ws[XLSX.utils.encode_cell({ r: fila, c })] = { t: 's', v: String(v), s: estiloCelda(bg) };
-    });
-    fila++;
-  });
-
-  if (disponibles.length === 0) {
-    ws[XLSX.utils.encode_cell({ r: fila, c: 0 })] = { t: 's', v: 'Sin unidades disponibles', s: estiloCelda('F3F4F6') };
-    fila++;
-  }
-
-  // Resumen disponibles
-  ws[XLSX.utils.encode_cell({ r: fila, c: 0 })] = { t: 's', v: `Total disponibles: ${disponibles.length}`, s: estiloResumen() };
-  fila += 2;
-
-  // ── Sección prestados ──
-  if (prestados.length > 0) {
+  // ── Helper interno para escribir una sección ──────────────────────────────
+  const escribirSeccion = (lista, titulo, colorTitulo, colorHeader, bgColor, estadoLabel, mostrarVacio) => {
     ws[XLSX.utils.encode_cell({ r: fila, c: 0 })] = {
-      t: 's', v: `⚠ PRESTADOS (${prestados.length})`,
-      s: { font: { bold: true, name: 'Arial', sz: 10, color: { rgb: '92400E' } } },
+      t: 's', v: titulo,
+      s: { font: { bold: true, name: 'Arial', sz: 10, color: { rgb: colorTitulo } } },
     };
     fila++;
 
     COLS.forEach((col, c) => {
-      ws[XLSX.utils.encode_cell({ r: fila, c })] = { t: 's', v: col, s: estiloHeader('B45309') };
+      ws[XLSX.utils.encode_cell({ r: fila, c })] = { t: 's', v: col, s: estiloHeader(colorHeader) };
     });
     fila++;
 
-    prestados.forEach((s) => {
-      const vals = [s.imei, 'Prestado', s.marca || '', s.modelo || '', s.proveedor || '', fmtFecha(s.fecha_entrada), '', s.cliente_origen || ''];
+    if (lista.length === 0 && mostrarVacio) {
+      ws[XLSX.utils.encode_cell({ r: fila, c: 0 })] = {
+        t: 's', v: `Sin unidades ${estadoLabel}`, s: estiloCelda('F3F4F6'),
+      };
+      fila++;
+      return;
+    }
+
+    lista.forEach((s) => {
+      const vals = [
+        s.imei,
+        estadoLabel.charAt(0).toUpperCase() + estadoLabel.slice(1),
+        s.marca                  || '',
+        s.modelo                 || '',
+        s.proveedor              || '',
+        s.cliente_origen         || '',   // retoma / quien lo trajo
+        fmtFecha(s.fecha_entrada),
+        fmtFecha(s.fecha_salida),
+        s.cliente_venta          || '',   // a quién se vendió
+        s.cedula_cliente_venta   || '',
+        s.celular_cliente_venta  || '',
+      ];
       vals.forEach((v, c) => {
-        ws[XLSX.utils.encode_cell({ r: fila, c })] = { t: 's', v: String(v), s: estiloCelda(COLOR.prestado) };
+        ws[XLSX.utils.encode_cell({ r: fila, c })] = {
+          t: 's', v: String(v), s: estiloCelda(bgColor),
+        };
       });
       fila++;
     });
-    fila++;
-  }
-
-  // ── Sección vendidos ──
-  ws[XLSX.utils.encode_cell({ r: fila, c: 0 })] = {
-    t: 's', v: `✗ VENDIDOS (${vendidos.length}) — ordenados por fecha de venta`,
-    s: { font: { bold: true, name: 'Arial', sz: 10, color: { rgb: '991B1B' } } },
   };
-  fila++;
 
-  COLS.forEach((col, c) => {
-    ws[XLSX.utils.encode_cell({ r: fila, c })] = { t: 's', v: col, s: estiloHeader('991B1B') };
-  });
-  fila++;
+  // ── Disponibles ───────────────────────────────────────────────────────────
+  escribirSeccion(
+    disponibles,
+    `✓ DISPONIBLES (${disponibles.length})`,
+    '065F46', COLOR.headerSerial, COLOR.disponible,
+    'disponible', true,
+  );
+  ws[XLSX.utils.encode_cell({ r: fila, c: 0 })] = {
+    t: 's', v: `Total disponibles: ${disponibles.length}`, s: estiloResumen(),
+  };
+  fila += 2;
 
-  vendidos.forEach((s) => {
-    const vals = [s.imei, 'Vendido', s.marca || '', s.modelo || '', s.proveedor || '', fmtFecha(s.fecha_entrada), fmtFecha(s.fecha_salida), s.cliente_origen || ''];
-    vals.forEach((v, c) => {
-      ws[XLSX.utils.encode_cell({ r: fila, c })] = { t: 's', v: String(v), s: estiloCelda(COLOR.vendido) };
-    });
-    fila++;
-  });
-
-  if (vendidos.length === 0) {
-    ws[XLSX.utils.encode_cell({ r: fila, c: 0 })] = { t: 's', v: 'Sin unidades vendidas', s: estiloCelda('F3F4F6') };
+  // ── Prestados ─────────────────────────────────────────────────────────────
+  if (prestados.length > 0) {
+    escribirSeccion(
+      prestados,
+      `⚠ PRESTADOS (${prestados.length})`,
+      '92400E', 'B45309', COLOR.prestado,
+      'prestado', false,
+    );
     fila++;
   }
 
-  // Rango total de la hoja
-  ws['!ref'] = XLSX.utils.encode_range({ r: 0, c: 0 }, { r: fila, c: COLS.length - 1 });
+  // ── Vendidos ──────────────────────────────────────────────────────────────
+  escribirSeccion(
+    vendidos,
+    `✗ VENDIDOS (${vendidos.length}) — ordenados por fecha de venta`,
+    '991B1B', '991B1B', COLOR.vendido,
+    'vendido', true,
+  );
 
-  // Ancho de columnas
+  ws['!ref']  = XLSX.utils.encode_range({ r: 0, c: 0 }, { r: fila, c: COLS.length - 1 });
   ws['!cols'] = COL_WIDTHS.map((w) => ({ wch: w }));
-
-  // Altura de filas (fila de título más alta)
   ws['!rows'] = [{ hpt: 22 }];
 
   return ws;
@@ -192,23 +186,22 @@ function crearHojaCantidad(productos) {
 
   let fila = 2;
 
-  // Encabezados
   COLS.forEach((col, c) => {
     ws[XLSX.utils.encode_cell({ r: fila, c })] = { t: 's', v: col, s: estiloHeader(COLOR.headerCantidad) };
   });
   fila++;
 
   productos.forEach((p) => {
-    const stockBajo = p.stock <= p.stock_minimo;
-    const bg = !p.activo ? 'F3F4F6' : stockBajo ? 'FEF3C7' : COLOR.disponible;
+    const stockBajo   = p.stock <= p.stock_minimo;
+    const bg          = !p.activo ? 'F3F4F6' : stockBajo ? 'FEF3C7' : COLOR.disponible;
     const estadoStock = !p.activo ? 'Inactivo' : stockBajo ? 'Stock bajo' : 'OK';
 
     const vals = [
       p.nombre,
       p.stock,
       p.stock_minimo,
-      p.unidad_medida || 'unidad',
-      p.proveedor || '',
+      p.unidad_medida  || 'unidad',
+      p.proveedor      || '',
       estadoStock,
       p.cliente_origen || '',
       fmtFecha(p.creado_en),
@@ -225,7 +218,6 @@ function crearHojaCantidad(productos) {
     fila++;
   });
 
-  // Fila de totales
   const totalStock = productos.reduce((s, p) => s + Number(p.stock || 0), 0);
   ws[XLSX.utils.encode_cell({ r: fila, c: 0 })] = { t: 's', v: `Total productos: ${productos.length}`, s: estiloResumen() };
   ws[XLSX.utils.encode_cell({ r: fila, c: 1 })] = { t: 'n', v: totalStock, s: estiloResumen() };
@@ -244,9 +236,7 @@ function crearHojaCantidad(productos) {
 export function exportarInventarioExcel(porProducto, cantidad) {
   const wb = XLSX.utils.book_new();
 
-  // Una hoja por cada producto serial
   Object.entries(porProducto).forEach(([nombre, seriales]) => {
-    // Nombre de hoja: máx 31 chars, sin caracteres inválidos
     const nombreHoja = nombre
       .replace(/[:\\/?*[\]]/g, '')
       .substring(0, 31);
@@ -254,15 +244,13 @@ export function exportarInventarioExcel(porProducto, cantidad) {
     XLSX.utils.book_append_sheet(wb, ws, nombreHoja);
   });
 
-  // Hoja de cantidades al final
   if (cantidad && cantidad.length > 0) {
     const ws = crearHojaCantidad(cantidad);
     XLSX.utils.book_append_sheet(wb, ws, 'Cantidades');
   }
 
-  // Nombre del archivo con fecha
-  const hoy  = new Date();
-  const ddmm = `${String(hoy.getDate()).padStart(2,'0')}-${String(hoy.getMonth()+1).padStart(2,'0')}-${hoy.getFullYear()}`;
+  const hoy   = new Date();
+  const ddmm  = `${String(hoy.getDate()).padStart(2,'0')}-${String(hoy.getMonth()+1).padStart(2,'0')}-${hoy.getFullYear()}`;
   const nombre = `inventario_${ddmm}.xlsx`;
 
   XLSX.writeFile(wb, nombre, { bookType: 'xlsx', bookSST: false });
