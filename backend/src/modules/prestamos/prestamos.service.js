@@ -85,6 +85,10 @@ const crearPrestamo = async ({
   await _verificarCliente(cliente_id, negocio_id);
   await _verificarPrestatario(prestatario_id, negocio_id);
 
+  // ── FIX: si hay imei es serial, producto_id debe ser null ──
+  const esSerial   = !!imei;
+  const productoId = esSerial ? null : (producto_id || null);
+
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -92,17 +96,18 @@ const crearPrestamo = async ({
     const prestamo = await repo.create(client, {
       sucursal_id, usuario_id, prestatario, cedula, telefono,
       nombre_producto, imei: imei || null,
-      producto_id:       producto_id       || null,
-      cantidad_prestada: cantidad_prestada || 1,
+      producto_id:       productoId,
+      cantidad_prestada: esSerial ? 1 : (cantidad_prestada || 1),
       valor_prestamo,
-      prestatario_id:    prestatario_id    || null,
-      empleado_id:       empleado_id       || null,
-      cliente_id:        cliente_id        || null,
+      prestatario_id:    prestatario_id || null,
+      empleado_id:       empleado_id   || null,
+      cliente_id:        cliente_id    || null,
     });
 
     await _procesarItemPrestamo(client, {
-      imei, producto_id, nombre_producto,
-      cantidad_prestada: cantidad_prestada || 1,
+      imei, producto_id: productoId,
+      nombre_producto,
+      cantidad_prestada: esSerial ? 1 : (cantidad_prestada || 1),
       sucursal_id,
       prestatario,
     });
@@ -138,6 +143,10 @@ const crearPrestamos = async ({
     const prestamosCreados = [];
 
     for (const item of items) {
+      // ── FIX: si hay imei es serial, producto_id debe ser null ──
+      const esSerial   = !!item.imei;
+      const productoId = esSerial ? null : (item.producto_id || null);
+
       const prestamo = await repo.create(client, {
         sucursal_id,
         usuario_id,
@@ -145,20 +154,20 @@ const crearPrestamos = async ({
         cedula,
         telefono,
         nombre_producto:   item.nombre_producto,
-        imei:              item.imei              || null,
-        producto_id:       item.producto_id       || null,
-        cantidad_prestada: item.cantidad_prestada || 1,
+        imei:              item.imei || null,
+        producto_id:       productoId,
+        cantidad_prestada: esSerial ? 1 : (item.cantidad_prestada || 1),
         valor_prestamo:    item.valor_prestamo,
-        prestatario_id:    prestatario_id         || null,
-        empleado_id:       empleado_id            || null,
-        cliente_id:        cliente_id             || null,
+        prestatario_id:    prestatario_id || null,
+        empleado_id:       empleado_id   || null,
+        cliente_id:        cliente_id    || null,
       });
 
       await _procesarItemPrestamo(client, {
         imei:              item.imei,
-        producto_id:       item.producto_id,
+        producto_id:       productoId,
         nombre_producto:   item.nombre_producto,
-        cantidad_prestada: item.cantidad_prestada || 1,
+        cantidad_prestada: esSerial ? 1 : (item.cantidad_prestada || 1),
         sucursal_id,
         prestatario,
       });

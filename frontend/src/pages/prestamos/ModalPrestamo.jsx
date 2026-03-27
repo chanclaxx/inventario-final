@@ -341,7 +341,7 @@ export function ModalPrestamo({ open, onClose }) {
     items.map((item) => ({
       nombre_producto:   item.nombre,
       imei:              item.imei        || null,
-      producto_id:       item.producto_id || null,
+      producto_id:       item.imei ? null : (item.producto_id || null),
       cantidad_prestada: item.cantidad    || 1,
       valor_prestamo:    item.precioFinal * (item.cantidad || 1),
     }));

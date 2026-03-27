@@ -364,7 +364,6 @@ export function ProductosSerial({ onAgregarProducto }) {
       precio:      Math.round(Number(productoSeleccionado.precio || 0)),
       cantidad:    1,
       serial_id:   serial.id,
-      producto_id: productoSeleccionado.id,
       marca:       productoSeleccionado.marca    || null,
       modelo:      productoSeleccionado.modelo   || null,
       linea_id:    productoSeleccionado.linea_id || null,
