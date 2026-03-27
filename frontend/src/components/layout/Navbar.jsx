@@ -17,7 +17,7 @@ import { SucursalSelector } from './SucursalSelector.jsx';
 const NAV_ITEMS = [
   { path: '/',            label: 'Inicio',      icon: LayoutDashboard, rol: 'admin_negocio' },
   { path: '/inventario',  label: 'Inventario',  icon: Package                              },
-  { path: '/facturar',    label: 'Facturar',    icon: FileText,        rol: 'supervisor'   },
+  { path: '/facturar',    label: 'Facturas',    icon: FileText,        rol: 'supervisor'   },
   { path: '/servicios',   label: 'Servicios',   icon: Wrench                               },
   { path: '/proveedores', label: 'Proveedores', icon: Truck,           rol: 'admin_negocio'},
   { path: '/prestamos',   label: 'Préstamos',   icon: Handshake                            },
