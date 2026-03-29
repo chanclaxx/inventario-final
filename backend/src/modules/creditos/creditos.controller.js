@@ -10,14 +10,14 @@ const getCreditos = async (req, res, next) => {
 
 const getCreditoById = async (req, res, next) => {
   try {
-    const data = await service.getCreditoById(req.user.negocio_id, req.params.id);
+    const data = await service.getCreditoById(req.user.negocio_id, Number(req.params.id));
     res.json({ ok: true, data });
   } catch (err) { next(err); }
 };
 
 const registrarAbono = async (req, res, next) => {
   try {
-    const data = await service.registrarAbono(req.user.negocio_id, req.params.id, {
+    const data = await service.registrarAbono(req.user.negocio_id, Number(req.params.id), {
       ...req.body,
       usuario_id: req.user.id,
     });
@@ -25,4 +25,11 @@ const registrarAbono = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-module.exports = { getCreditos, getCreditoById, registrarAbono };
+const saldarCredito = async (req, res, next) => {
+  try {
+    await service.saldarCredito(req.user.negocio_id, Number(req.params.id));
+    res.json({ ok: true, message: 'Crédito saldado correctamente' });
+  } catch (err) { next(err); }
+};
+
+module.exports = { getCreditos, getCreditoById, registrarAbono, saldarCredito };

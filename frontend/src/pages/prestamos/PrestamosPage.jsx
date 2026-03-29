@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getPrestamos, registrarAbonoPrestamo, devolverPrestamo, devolverParcialPrestamo } from '../../api/prestamos.api';
-import { getCreditos, registrarAbonoCredito }   from '../../api/creditos.api';
 import {
   getDomiciliarios,
   getEntregas,
@@ -17,6 +16,7 @@ import { Input }                                from '../../components/ui/Input'
 import { InputMoneda }                          from '../../components/ui/InputMoneda';
 import { Spinner }                              from '../../components/ui/Spinner';
 import { EmptyState }                           from '../../components/ui/EmptyState';
+import { TabCreditos }                          from './TabCreditos';
 import api                                      from '../../api/axios.config';
 import {
   Handshake, CreditCard, Bike, Plus, CheckCircle,
@@ -71,10 +71,7 @@ function useColoresConfig() {
   };
 }
 
-// ─── Chip de color — círculo + nombre ────────────────────────────────────────
-// Solo se renderiza si coloresActivo === true y color tiene valor.
-// El círculo usa un color CSS genérico gris ya que los colores son texto libre
-// (no valores CSS), así que mostramos solo el nombre con un círculo decorativo.
+// ─── Chip de color ───────────────────────────────────────────────────────────
 function ChipColor({ color }) {
   if (!color) return null;
   return (
@@ -208,70 +205,8 @@ function ModalDevolucion({ prestamo, onClose }) {
   );
 }
 
-// ─── Modal Abono Crédito ──────────────────────────────────────────────────────
-function ModalAbonoCredito({ credito, onClose }) {
-  const queryClient = useQueryClient();
-  const [valor,  setValor]  = useState('');
-  const [metodo, setMetodo] = useState('Efectivo');
-  const [error,  setError]  = useState('');
-
-  const mutation = useMutation({
-    mutationFn: () => registrarAbonoCredito(credito.id, { valor: Number(valor), metodo }),
-    onSuccess: () => { queryClient.invalidateQueries(['creditos']); onClose(); },
-    onError:   (err) => setError(err.response?.data?.error || 'Error al registrar abono'),
-  });
-
-  const saldoPendiente = Number(credito.valor_total) - Number(credito.total_abonado);
-  const METODOS_PAGO   = ['Efectivo', 'Nequi', 'Transferencia'];
-
-  return (
-    <Modal open={!!credito} onClose={onClose} title="Registrar Abono" size="sm">
-      <div className="flex flex-col gap-4">
-        <div className="bg-gray-50 rounded-xl p-3">
-          <p className="text-xs text-gray-400">Crédito — {credito.nombre_cliente}</p>
-          <div className="flex justify-between mt-2">
-            <span className="text-xs text-gray-400">Saldo pendiente</span>
-            <span className="text-sm font-bold text-red-500">{formatCOP(saldoPendiente)}</span>
-          </div>
-        </div>
-        <div className="flex gap-2">
-          {METODOS_PAGO.map((m) => (
-            <button key={m} onClick={() => setMetodo(m)}
-              className={`flex-1 py-2 rounded-xl text-xs font-medium border transition-all
-                ${metodo === m
-                  ? 'bg-blue-50 border-blue-300 text-blue-700'
-                  : 'bg-gray-50 border-gray-200 text-gray-600'}`}>
-              {m}
-            </button>
-          ))}
-        </div>
-        <div className="flex flex-col gap-1">
-          <label className="text-sm font-medium text-gray-700">Valor del abono</label>
-          <InputMoneda
-            value={valor}
-            onChange={setValor}
-            placeholder="0"
-            onKeyDown={(e) => e.key === 'Enter' && mutation.mutate()}
-            autoFocus
-            className="w-full px-3 py-2 bg-gray-100 rounded-xl text-sm
-              focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"
-          />
-        </div>
-        {error && <p className="text-sm text-red-500">{error}</p>}
-        <div className="flex gap-2">
-          <Button variant="secondary" className="flex-1" onClick={onClose}>Cancelar</Button>
-          <Button className="flex-1" loading={mutation.isPending} onClick={() => mutation.mutate()}>
-            Registrar
-          </Button>
-        </div>
-      </div>
-    </Modal>
-  );
-}
-
 // ─── Cards préstamos ──────────────────────────────────────────────────────────
 
-// coloresActivo se recibe como prop para evitar múltiples queries en cada card
 function CardPrestamoCompanero({ prestamo, onAbonar, onDevolver, coloresActivo }) {
   const saldo    = Number(prestamo.valor_prestamo) - Number(prestamo.total_abonado);
   const progreso = (Number(prestamo.total_abonado) / Number(prestamo.valor_prestamo)) * 100;
@@ -285,7 +220,6 @@ function CardPrestamoCompanero({ prestamo, onAbonar, onDevolver, coloresActivo }
           {!prestamo.imei && prestamo.cantidad_prestada > 1 && (
             <p className="text-xs text-gray-400">Cantidad: {prestamo.cantidad_prestada}</p>
           )}
-          {/* Color del serial — solo si coloresActivo y el serial tiene color */}
           {coloresActivo && prestamo.serial_color && (
             <ChipColor color={prestamo.serial_color} />
           )}
@@ -849,9 +783,7 @@ export default function PrestamosPage() {
   const [tabPrestamos,  setTabPrestamos]  = useState('companeros');
   const [prestamoAbono, setPrestamoAbono] = useState(null);
   const [prestamoDevol, setPrestamoDevol] = useState(null);
-  const [creditoAbono,  setCreditoAbono]  = useState(null);
 
-  // ── Config de colores — una sola query para toda la página ────────────────
   const { coloresActivo } = useColoresConfig();
 
   const { data: prestamosData, isLoading: loadingP } = useQuery({
@@ -859,13 +791,7 @@ export default function PrestamosPage() {
     queryFn:  () => getPrestamos().then((r) => r.data.data),
   });
 
-  const { data: creditosData, isLoading: loadingC } = useQuery({
-    queryKey: ['creditos'],
-    queryFn:  () => getCreditos().then((r) => r.data.data),
-  });
-
   const prestamos = prestamosData || [];
-  const creditos  = creditosData  || [];
 
   const gruposCompaneros = prestamos
     .filter((p) => p.prestatario_id)
@@ -886,9 +812,6 @@ export default function PrestamosPage() {
       if (p.estado === 'Activo') acc[key].saldoTotal += Number(p.valor_prestamo) - Number(p.total_abonado);
       return acc;
     }, {});
-
-  const creditosActivos  = creditos.filter((c) => c.estado === 'Activo');
-  const creditosSaldados = creditos.filter((c) => c.estado !== 'Activo');
 
   return (
     <div className="flex flex-col gap-4">
@@ -991,75 +914,7 @@ export default function PrestamosPage() {
         </div>
       )}
 
-      {tabPrincipal === 'creditos' && (
-        <div className="flex flex-col gap-3">
-          {loadingC ? (
-            <Spinner className="py-20" />
-          ) : (
-            <>
-              {creditosActivos.length === 0 ? (
-                <EmptyState icon={CreditCard} titulo="Sin créditos activos" />
-              ) : (
-                creditosActivos.map((c) => {
-                  const creditoId = c.id;
-                  const saldo     = Number(c.valor_total) - Number(c.total_abonado);
-                  const progreso  = (Number(c.total_abonado) / Number(c.valor_total)) * 100;
-                  return (
-                    <div key={creditoId}
-                      className="bg-white border border-gray-100 rounded-2xl p-4 flex flex-col gap-3">
-                      <div className="flex items-start justify-between">
-                        <div>
-                          <p className="font-semibold text-gray-900">{c.nombre_cliente}</p>
-                          <p className="text-xs text-gray-400 mt-0.5">Factura #{c.factura_id}</p>
-                          {c.fecha_limite && (
-                            <p className="text-xs text-gray-400">Vence: {c.fecha_limite}</p>
-                          )}
-                        </div>
-                        <Badge variant={c.estado === 'Activo' ? 'yellow' : 'green'}>{c.estado}</Badge>
-                      </div>
-                      <div className="flex flex-col gap-1">
-                        <div className="w-full bg-gray-100 rounded-full h-1.5">
-                          <div className="bg-yellow-400 h-1.5 rounded-full transition-all"
-                            style={{ width: `${Math.min(progreso, 100)}%` }} />
-                        </div>
-                        <div className="flex justify-between text-xs">
-                          <span className="text-gray-400">Abonado: {formatCOP(c.total_abonado)}</span>
-                          <span className="text-red-500 font-medium">Saldo: {formatCOP(saldo)}</span>
-                        </div>
-                      </div>
-                      <Button size="sm" className="w-full" onClick={() => setCreditoAbono(c)}>
-                        <Plus size={14} /> Registrar abono
-                      </Button>
-                    </div>
-                  );
-                })
-              )}
-              {creditosSaldados.length > 0 && (
-                <details className="mt-2">
-                  <summary className="text-xs text-gray-400 cursor-pointer select-none">
-                    Ver {creditosSaldados.length} crédito(s) cerrado(s)
-                  </summary>
-                  <div className="flex flex-col gap-2 mt-2">
-                    {creditosSaldados.map((c) => {
-                      const creditoId = c.id;
-                      return (
-                        <div key={creditoId}
-                          className="bg-gray-50 border border-gray-100 rounded-xl p-3 flex justify-between items-center">
-                          <div>
-                            <p className="text-sm font-medium text-gray-600">{c.nombre_cliente}</p>
-                            <p className="text-xs text-gray-400">Factura #{c.factura_id}</p>
-                          </div>
-                          <Badge variant="green">{c.estado}</Badge>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </details>
-              )}
-            </>
-          )}
-        </div>
-      )}
+      {tabPrincipal === 'creditos' && <TabCreditos />}
 
       {tabPrincipal === 'domiciliarios' && <TabDomiciliarios />}
 
@@ -1068,9 +923,6 @@ export default function PrestamosPage() {
       )}
       {prestamoDevol && (
         <ModalDevolucion prestamo={prestamoDevol} onClose={() => setPrestamoDevol(null)} />
-      )}
-      {creditoAbono && (
-        <ModalAbonoCredito credito={creditoAbono} onClose={() => setCreditoAbono(null)} />
       )}
     </div>
   );

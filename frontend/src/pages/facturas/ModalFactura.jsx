@@ -21,6 +21,7 @@ import { FacturaTermica }    from '../../components/FacturaTermica';
 import { useSucursalKey }    from '../../hooks/useSucursalKey';
 import api                   from '../../api/axios.config';
 import useCarritoStore       from '../../store/carritoStore';
+import { SeccionCredito, CREDITO_VACIO } from './SeccionCredito';
 import {
   User, Users, Package, ShoppingBag,
   Loader2, CheckCircle, XCircle, AlertCircle,
@@ -76,14 +77,14 @@ function calcularValorRetoma(retoma) {
   return Number(retoma.valor_retoma || 0);
 }
 
-function buildPayloadFactura({ tipoCliente, form, items, totalNeto, metodosSeleccionados, montos, retomas, domicilio }) {
+function buildPayloadFactura({ tipoCliente, form, items, totalNeto, metodosSeleccionados, montos, retomas, domicilio, credito }) {
   const pagosPorDefecto = totalNeto <= 0
     ? [{ metodo: metodosSeleccionados[0] || 'Efectivo', valor: totalNeto }]
     : null;
 
   const pagos = pagosPorDefecto ?? (
     metodosSeleccionados.length === 1
-      ? [{ metodo: metodosSeleccionados[0], valor: totalNeto }]
+      ? [{ metodo: metodosSeleccionados[0], valor: credito.activo ? Number(credito.cuota_inicial || 0) : totalNeto }]
       : metodosSeleccionados
           .filter((id) => Number(montos[id] || 0) > 0)
           .map((id) => ({ metodo: id, valor: Number(montos[id]) }))
@@ -92,7 +93,7 @@ function buildPayloadFactura({ tipoCliente, form, items, totalNeto, metodosSelec
   const lineas = items.map((item) => ({
     nombre_producto: item.nombre,
     imei:            item.imei        || null,
-     producto_id:     item.imei ? null : (item.producto_id || null),
+    producto_id:     item.imei ? null : (item.producto_id || null),
     cantidad:        item.cantidad    || 1,
     precio:          item.precioFinal,
   }));
@@ -110,7 +111,6 @@ function buildPayloadFactura({ tipoCliente, form, items, totalNeto, metodosSelec
     reactivar_serial_id:  r.reactivar_serial_id || null,
   }));
 
-  // Solo envía domicilio si está activo y tiene domiciliario seleccionado
   const domicilioPayload = (domicilio.activo && domicilio.domiciliario_id)
     ? {
         domiciliario_id:   domicilio.domiciliario_id,
@@ -128,8 +128,10 @@ function buildPayloadFactura({ tipoCliente, form, items, totalNeto, metodosSelec
     notas:          form.notas || null,
     lineas,
     pagos,
-    retomas:  retomasPayload,
-    domicilio: domicilioPayload,
+    retomas:        retomasPayload,
+    domicilio:      domicilioPayload,
+    es_credito:     credito.activo || false,
+    cuota_inicial:  credito.activo ? Number(credito.cuota_inicial || 0) : 0,
   };
 }
 
@@ -212,7 +214,6 @@ function AvisoImeiRetoma({ estado, nombreCliente }) {
 }
 
 // ─── Sección domicilio ────────────────────────────────────────────────────────
-// Selector de domiciliario con opción de crear uno nuevo desde el mismo modal.
 
 function SeccionDomicilio({ domicilio, onChange }) {
   const [modoCrear, setModoCrear] = useState(false);
@@ -244,7 +245,6 @@ function SeccionDomicilio({ domicilio, onChange }) {
 
   return (
     <div className="flex flex-col gap-2">
-      {/* Toggle principal */}
       <button
         type="button"
         onClick={() => onChange({ ...DOMICILIO_VACIO(), activo: !domicilio.activo })}
@@ -265,7 +265,6 @@ function SeccionDomicilio({ domicilio, onChange }) {
             Domiciliario
           </p>
 
-          {/* Chip del seleccionado */}
           {seleccionado ? (
             <div className="flex items-center justify-between bg-white border border-orange-200 rounded-xl px-3 py-2">
               <div>
@@ -282,7 +281,6 @@ function SeccionDomicilio({ domicilio, onChange }) {
               </button>
             </div>
           ) : modoCrear ? (
-            /* Formulario crear */
             <div className="flex flex-col gap-2">
               <button
                 onClick={() => { setModoCrear(false); setNombreNuevo(''); setTelefonoNuevo(''); }}
@@ -313,7 +311,6 @@ function SeccionDomicilio({ domicilio, onChange }) {
               </Button>
             </div>
           ) : (
-            /* Lista de domiciliarios */
             <div className="flex flex-col gap-1">
               {isLoading ? (
                 <p className="text-xs text-gray-400 py-2">Cargando...</p>
@@ -349,7 +346,6 @@ function SeccionDomicilio({ domicilio, onChange }) {
             </div>
           )}
 
-          {/* Campos opcionales — solo visibles cuando hay domiciliario seleccionado */}
           {seleccionado && (
             <>
               <Input
@@ -695,6 +691,7 @@ export function ModalFactura({ open, onClose }) {
   const [conRetoma,            setConRetoma]            = useState(false);
   const [retomas,              setRetomas]              = useState([RETOMA_VACIA()]);
   const [domicilio,            setDomicilio]            = useState(DOMICILIO_VACIO());
+  const [credito,              setCredito]              = useState(CREDITO_VACIO());
   const [error,                setError]                = useState('');
   const [verificandoCedula,    setVerificandoCedula]    = useState(false);
   const [buscandoCedula,       setBuscandoCedula]       = useState(false);
@@ -735,9 +732,9 @@ export function ModalFactura({ open, onClose }) {
   const totalRetomas = conRetoma ? retomas.reduce((s, r) => s + calcularValorRetoma(r), 0) : 0;
   const totalNeto    = total - totalRetomas;
   const totalPagado  = metodosSeleccionados.length === 1
-    ? totalNeto
+    ? (credito.activo ? Number(credito.cuota_inicial || 0) : totalNeto)
     : metodosSeleccionados.reduce((s, id) => s + Number(montos[id] || 0), 0);
-  const diferencia   = totalPagado - totalNeto;
+  const diferencia   = totalPagado - (credito.activo ? Number(credito.cuota_inicial || 0) : totalNeto);
   const nombreClienteRetoma = form.nombre.trim() || '';
 
   const handleBlurCedula = useCallback(async () => {
@@ -781,6 +778,7 @@ export function ModalFactura({ open, onClose }) {
       queryClient.invalidateQueries({ queryKey: ['dashboard'],           exact: false });
       queryClient.invalidateQueries({ queryKey: ['clientes'],            exact: false });
       queryClient.invalidateQueries({ queryKey: ['domiciliarios'],       exact: false });
+      queryClient.invalidateQueries({ queryKey: ['creditos'],            exact: false });
       try {
         const { data } = await getFacturaById(res.data.data.id);
         setFacturaCreada({ ...data.data, config: configData });
@@ -797,6 +795,7 @@ export function ModalFactura({ open, onClose }) {
     setMetodosSeleccionados([]); setMontos({});
     setConRetoma(false); setRetomas([RETOMA_VACIA()]);
     setDomicilio(DOMICILIO_VACIO());
+    setCredito(CREDITO_VACIO());
     setError(''); setTipoCliente('cliente');
     setVerificandoCedula(false);
   };
@@ -828,6 +827,7 @@ export function ModalFactura({ open, onClose }) {
       metodosSeleccionados, montos,
       retomas: conRetoma ? retomas : [],
       domicilio,
+      credito,
     }));
   };
 
@@ -836,7 +836,21 @@ export function ModalFactura({ open, onClose }) {
     if (!form.nombre.trim())                                return setError('El nombre es requerido');
     if (tipoCliente === 'cliente' && !form.cedula.trim())   return setError('La cédula es requerida');
     if (tipoCliente === 'cliente' && !form.celular.trim())  return setError('El celular es requerido');
-    if (metodosSeleccionados.length === 0 && totalNeto > 0) return setError('Selecciona al menos un método de pago');
+
+    // Validaciones de crédito
+    if (credito.activo) {
+      const cuotaInicial = Number(credito.cuota_inicial || 0);
+      if (cuotaInicial > totalNeto && totalNeto > 0) {
+        return setError('La cuota inicial no puede superar el total de la venta');
+      }
+      if (cuotaInicial > 0 && metodosSeleccionados.length === 0) {
+        return setError('Selecciona un método de pago para la cuota inicial');
+      }
+    } else {
+      if (metodosSeleccionados.length === 0 && totalNeto > 0) {
+        return setError('Selecciona al menos un método de pago');
+      }
+    }
 
     if (domicilio.activo && !domicilio.domiciliario_id) {
       return setError('Selecciona o crea un domiciliario para el pedido');
@@ -885,7 +899,11 @@ export function ModalFactura({ open, onClose }) {
               const itemLabel = item.label;
               const ItemIcon  = item.Icn;
               return (
-                <button key={itemId} onClick={() => setTipoCliente(itemId)}
+                <button key={itemId} onClick={() => {
+                  setTipoCliente(itemId);
+                  // Si cambia a compañero, desactivar crédito
+                  if (itemId === 'companero') setCredito(CREDITO_VACIO());
+                }}
                   className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl
                     text-sm font-medium border transition-all
                     ${tipoCliente === itemId
@@ -969,21 +987,23 @@ export function ModalFactura({ open, onClose }) {
           {/* Retomas */}
           <div className="flex flex-col gap-2">
             <button
-              disabled={domicilio.activo}
+              disabled={domicilio.activo || credito.activo}
               onClick={() => {
-                if (domicilio.activo) return;
+                if (domicilio.activo || credito.activo) return;
                 setConRetoma(!conRetoma);
                 setRetomas([RETOMA_VACIA()]);
               }}
               className={`w-full py-2.5 rounded-xl text-sm font-medium border transition-all
-                ${domicilio.activo
+                ${domicilio.activo || credito.activo
                   ? 'bg-gray-50 border-gray-200 text-gray-300 cursor-not-allowed'
                   : conRetoma
                     ? 'bg-purple-50 border-purple-300 text-purple-700'
                     : 'bg-gray-50 border-gray-200 text-gray-600'}`}>
               {domicilio.activo
                 ? 'Retoma no disponible con domicilio'
-                : conRetoma ? '✓ Con retoma' : '+ Agregar retoma'}
+                : credito.activo
+                  ? 'Retoma no disponible con crédito'
+                  : conRetoma ? '✓ Con retoma' : '+ Agregar retoma'}
             </button>
 
             {conRetoma && (
@@ -1023,22 +1043,47 @@ export function ModalFactura({ open, onClose }) {
             domicilio={domicilio}
             onChange={(nuevoDomicilio) => {
               setDomicilio(nuevoDomicilio);
-              // Si se activa domicilio, desactivar retoma para evitar interferencias
               if (nuevoDomicilio.activo && !domicilio.activo) {
                 setConRetoma(false);
                 setRetomas([RETOMA_VACIA()]);
+                setCredito(CREDITO_VACIO());
               }
             }}
           />
 
-          {/* Métodos de pago */}
-          <SelectorPagos
-            metodosSeleccionados={metodosSeleccionados}
-            montos={montos}
+          {/* Venta a crédito */}
+          <SeccionCredito
+            credito={credito}
             totalNeto={totalNeto}
-            onToggleMetodo={handleToggleMetodo}
-            onCambioMonto={handleCambioMonto}
+            onChange={(nuevoCredito) => {
+              setCredito(nuevoCredito);
+              if (nuevoCredito.activo && !credito.activo) {
+                setMetodosSeleccionados([]);
+                setMontos({});
+                setConRetoma(false);
+                setRetomas([RETOMA_VACIA()]);
+                setDomicilio(DOMICILIO_VACIO());
+              }
+            }}
+            disabled={domicilio.activo || tipoCliente === 'companero'}
           />
+
+          {/* Métodos de pago */}
+          {(!credito.activo || Number(credito.cuota_inicial || 0) > 0) && (
+            <SelectorPagos
+              metodosSeleccionados={metodosSeleccionados}
+              montos={montos}
+              totalNeto={credito.activo ? Number(credito.cuota_inicial || 0) : totalNeto}
+              onToggleMetodo={handleToggleMetodo}
+              onCambioMonto={handleCambioMonto}
+            />
+          )}
+
+          {credito.activo && Number(credito.cuota_inicial || 0) === 0 && (
+            <p className="text-xs text-yellow-600 bg-yellow-50 rounded-xl px-3 py-2 text-center">
+              Sin cuota inicial — el total queda como saldo a crédito.
+            </p>
+          )}
 
           {/* Resumen financiero */}
           <div className="bg-gray-50 rounded-xl p-3 flex flex-col gap-1.5">
@@ -1081,13 +1126,13 @@ export function ModalFactura({ open, onClose }) {
                 La retoma cubre exactamente el valor — sin cobro al cliente.
               </p>
             )}
-            {metodosSeleccionados.length >= 2 && (
+            {!credito.activo && metodosSeleccionados.length >= 2 && (
               <div className="flex justify-between text-sm">
                 <span className="text-gray-600">Total pagado</span>
                 <span className="font-medium">{formatCOP(totalPagado)}</span>
               </div>
             )}
-            {diferencia !== 0 && metodosSeleccionados.length >= 2 && (
+            {!credito.activo && diferencia !== 0 && metodosSeleccionados.length >= 2 && (
               <div className="flex justify-between text-sm border-t border-gray-200 pt-1.5 mt-1">
                 <span className={diferencia > 0 ? 'text-green-600' : 'text-red-500'}>
                   {diferencia > 0 ? 'Cambio' : 'Falta'}
@@ -1110,7 +1155,7 @@ export function ModalFactura({ open, onClose }) {
             <Button className="flex-1"
               loading={mutation.isPending || verificandoCedula || buscandoCedula}
               onClick={handleSubmit}>
-              Confirmar Factura
+              {credito.activo ? 'Confirmar Venta a Crédito' : 'Confirmar Factura'}
             </Button>
           </div>
         </div>
