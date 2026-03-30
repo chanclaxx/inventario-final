@@ -435,8 +435,8 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
   });
 
   const activos = activosRaw.map((p) => {
-    const costo        = p.costo_producto !== null ? Number(p.costo_producto) : null;
-    const totalAbonado = Number(p.total_abonado);
+    const costo         = p.costo_producto !== null ? Number(p.costo_producto) : null;
+    const totalAbonado  = Number(p.total_abonado);
     const valorPrestamo = Number(p.valor_prestamo);
     return {
       id:                p.id,
@@ -472,7 +472,17 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
   const servicios = await getServiciosRango(sucursalId, desde, hasta);
 
   if (!facturas.length) {
-    return { facturas: [], resumen: null, prestamos, servicios, creditos: { saldados: [], activos: { total: 0, saldo_pendiente: 0 }, resumen: { utilidad_confirmada: 0, total_saldados: 0 } } };
+    return {
+      facturas: [],
+      resumen: null,
+      prestamos,
+      servicios,
+      creditos: {
+        saldados: [],
+        activos: { total: 0, saldo_pendiente: 0 },
+        resumen: { utilidad_confirmada: 0, total_saldados: 0 },
+      },
+    };
   }
 
   const facturaIds = facturas.map((f) => f.id);
@@ -588,8 +598,8 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
   const idsSaldados = new Set(creditosSaldadosRango.map((r) => r.factura_id));
 
   const creditosSaldados = creditosSaldadosRango.map((cr) => {
-    const lineasOrig = lineasPorFactura[cr.factura_id] || [];
-    const fc = facturasCompletas.find((f) => f.id === cr.factura_id);
+    const lineasOrig   = lineasPorFactura[cr.factura_id] || [];
+    const fc           = facturasCompletas.find((f) => f.id === cr.factura_id);
     const totalRetomas = fc ? fc.total_retomas : 0;
 
     const utilidadBruta = lineasOrig.reduce(
@@ -598,16 +608,16 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
     const utilidadNeta = utilidadBruta - totalRetomas;
 
     return {
-      credito_id:      cr.credito_id,
-      factura_id:      cr.factura_id,
-      nombre_cliente:  cr.nombre_cliente,
-      cedula:          cr.cedula,
-      valor_total:     Number(cr.valor_total),
-      cuota_inicial:   Number(cr.cuota_inicial),
-      total_abonado:   Number(cr.total_abonado),
-      fecha_factura:   cr.fecha_factura,
-      fecha_saldo:     cr.fecha_saldo,
-      utilidad:        utilidadNeta,
+      credito_id:             cr.credito_id,
+      factura_id:             cr.factura_id,
+      nombre_cliente:         cr.nombre_cliente,
+      cedula:                 cr.cedula,
+      valor_total:            Number(cr.valor_total),
+      cuota_inicial:          Number(cr.cuota_inicial),
+      total_abonado:          Number(cr.total_abonado),
+      fecha_factura:          cr.fecha_factura,
+      fecha_saldo:            cr.fecha_saldo,
+      utilidad:               utilidadNeta,
       tiene_costo_incompleto: lineasOrig.some((i) => i.costo_unitario_compra === null),
       productos: lineasOrig.map((l) => ({
         nombre: l.nombre_producto,
@@ -629,11 +639,12 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
     WHERE sucursal_id = $1 AND estado = 'Activo'
   `, [sucursalId]);
 
+  // ── FIX: creditosActivosResumen ya ES el array (rows fue destructurado) ──
   const creditosData = {
     saldados: creditosSaldados,
     activos: {
-      total:           Number(creditosActivosResumen.rows[0]?.total || 0),
-      saldo_pendiente: Number(creditosActivosResumen.rows[0]?.saldo_pendiente || 0),
+      total:           Number(creditosActivosResumen[0]?.total || 0),
+      saldo_pendiente: Number(creditosActivosResumen[0]?.saldo_pendiente || 0),
     },
     resumen: {
       utilidad_confirmada:  utilidadCreditosSaldados,
