@@ -127,8 +127,27 @@ const actualizarCantidadYValor = async (client, id, nuevaCantidad, nuevoValor) =
   );
 };
 
+// ── Marca el serial como vendido al saldarse el préstamo ─────────────────────
+// Solo actúa sobre el serial de la sucursal del préstamo para evitar
+// colisiones si el mismo IMEI existiera en otra sucursal (no debería, pero
+// es una salvaguarda extra dentro de la transacción).
+const salarSerial = async (client, imei, sucursalId) => {
+  await client.query(`
+    UPDATE seriales s
+    SET vendido      = true,
+        prestado     = false,
+        fecha_salida = CURRENT_DATE
+    FROM productos_serial ps
+    WHERE s.imei         = $1
+      AND ps.id          = s.producto_id
+      AND ps.sucursal_id = $2
+  `, [imei, sucursalId]);
+};
+
 module.exports = {
   findAll, findById, findByIdYNegocio,
   perteneceAlNegocio,
-  getAbonos, create, insertarAbono, updateEstado, ajustarStock, actualizarCantidadYValor,
+  getAbonos, create, insertarAbono, updateEstado,
+  ajustarStock, actualizarCantidadYValor,
+  salarSerial,
 };

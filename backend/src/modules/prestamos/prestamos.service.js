@@ -200,10 +200,19 @@ const registrarAbono = async (negocioId, prestamoId, valor) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+
     const resultado = await repo.insertarAbono(client, { prestamo_id: prestamoId, valor });
+
     if (Number(resultado.total_abonado) >= Number(resultado.valor_prestamo)) {
       await repo.updateEstado(client, prestamoId, 'Saldado');
+
+      // ── Si el préstamo tenía un serial, marcarlo como vendido al saldarse.
+      // Solo aplica cuando hay imei; los productos por cantidad no tienen este flujo.
+      if (prestamo.imei) {
+        await repo.salarSerial(client, prestamo.imei, prestamo.sucursal_id);
+      }
     }
+
     await client.query('COMMIT');
     return resultado;
   } catch (err) {
