@@ -9,12 +9,12 @@ const validarFactura = [
   body('cedula').isString().trim().notEmpty().withMessage('Cédula requerida'),
   body('celular').isString().trim().notEmpty().withMessage('Celular requerido'),
   body('lineas').isArray({ min: 1 }).withMessage('Debe incluir al menos un producto'),
-  body('lineas.*.precio').isFloat({ gt: 0 }).withMessage('Precio inválido'),
+  body('lineas.*.precio').isFloat({ min: -999999999 }).withMessage('Precio inválido'),
   body('lineas.*.cantidad').isInt({ gt: 0 }).withMessage('Cantidad inválida'),
   body('pagos').isArray({ min: 1 }).withMessage('Debe incluir al menos un método de pago'),
   body('pagos.*.metodo').isIn(['Efectivo','Nequi','Daviplata','Transferencia','Tarjeta','Credito'])
     .withMessage('Método de pago inválido'),
-  body('pagos.*.valor').isFloat().withMessage('Valor de pago inválido'),
+  body('pagos.*.valor').isFloat({ min: -999999999 }).withMessage('Valor de pago inválido'),
 ];
 
 // Rutas estáticas ANTES de /:id para evitar conflictos
