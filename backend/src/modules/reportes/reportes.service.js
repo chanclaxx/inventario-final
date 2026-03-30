@@ -70,7 +70,7 @@ const getDashboard = async (sucursalId) => {
 
     pool.query(`
       SELECT COUNT(*) AS total,
-             COALESCE(SUM(valor_total - total_abonado), 0) AS deuda_total
+             COALESCE(SUM(valor_total - cuota_inicial - total_abonado), 0) AS deuda_total
       FROM creditos
       WHERE estado = 'Activo' AND sucursal_id = $1
     `, [sucursalId]),
@@ -121,11 +121,25 @@ const getDashboard = async (sucursalId) => {
       LEFT JOIN retomas_por_factura r ON r.factura_id = c.factura_id
     `, [sucursalId]),
 
+    // ── Utilidad de créditos saldados HOY (no creados hoy) ──────────────────
     pool.query(`
-      WITH retomas_por_factura AS (
+      WITH ultimo_abono_credito AS (
+        SELECT ac.credito_id, MAX(ac.fecha) AS fecha_ultimo_abono
+        FROM abonos_credito ac
+        GROUP BY ac.credito_id
+      ),
+      creditos_saldados_hoy AS (
+        SELECT cr.factura_id
+        FROM creditos cr
+        JOIN ultimo_abono_credito ua ON ua.credito_id = cr.id
+        WHERE cr.sucursal_id = $1
+          AND cr.estado = 'Saldado'
+          AND DATE(ua.fecha_ultimo_abono AT TIME ZONE 'UTC' AT TIME ZONE 'America/Bogota')
+              = (NOW() AT TIME ZONE 'America/Bogota')::date
+      ),
+      retomas_por_factura AS (
         SELECT factura_id, COALESCE(SUM(valor_retoma), 0) AS total_retomas
-        FROM retomas
-        GROUP BY factura_id
+        FROM retomas GROUP BY factura_id
       ),
       costo_por_linea AS (
         SELECT
@@ -141,14 +155,13 @@ const getDashboard = async (sucursalId) => {
                      FROM productos_cantidad pc
                      WHERE pc.nombre = l.nombre_producto
                        AND pc.sucursal_id = f.sucursal_id
-                     LIMIT 1),
-                    0
+                     LIMIT 1), 0
                   ) * l.cantidad
               END
           ) AS utilidad_bruta
         FROM lineas_factura l
         JOIN facturas f ON f.id = l.factura_id
-        WHERE ${HOY_F} AND f.sucursal_id = $1 AND f.estado = 'Credito'
+        WHERE f.id IN (SELECT factura_id FROM creditos_saldados_hoy)
         GROUP BY l.factura_id
       )
       SELECT
@@ -540,14 +553,54 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
   const soloActivas  = facturasCompletas.filter((f) => f.estado === 'Activa');
   const soloCreditos = facturasCompletas.filter((f) => f.estado === 'Credito');
 
+  // ── Créditos activos: utilidad = $0 (no se ha cobrado aún) ────────────────
+  for (const fc of soloCreditos) {
+    fc.utilidad_bruta = 0;
+    fc.utilidad_neta  = 0;
+    fc.tiene_costo_incompleto = false;
+    for (const linea of fc.lineas) {
+      linea.utilidad = 0;
+    }
+  }
+
+  // ── Créditos saldados en el rango: calcular utilidad real ─────────────────
+  const { rows: creditosSaldadosRango } = await pool.query(`
+    WITH ultimo_abono_credito AS (
+      SELECT ac.credito_id, MAX(ac.fecha) AS fecha_ultimo_abono
+      FROM abonos_credito ac
+      GROUP BY ac.credito_id
+    )
+    SELECT cr.factura_id
+    FROM creditos cr
+    JOIN ultimo_abono_credito ua ON ua.credito_id = cr.id
+    WHERE cr.sucursal_id = $1
+      AND cr.estado = 'Saldado'
+      AND DATE(ua.fecha_ultimo_abono AT TIME ZONE 'UTC' AT TIME ZONE 'America/Bogota')
+          BETWEEN $2 AND $3
+  `, [sucursalId, desde, hasta]);
+
+  const idsSaldados = new Set(creditosSaldadosRango.map((r) => r.factura_id));
+
+  let utilidadCreditosSaldados = 0;
+  for (const fc of facturasCompletas) {
+    if (idsSaldados.has(fc.id)) {
+      const lineasOriginales = lineasPorFactura[fc.id] || [];
+      const utilReal = lineasOriginales.reduce(
+        (acc, i) => (i.utilidad !== null ? acc + i.utilidad : acc), 0
+      ) - fc.total_retomas;
+      utilidadCreditosSaldados += utilReal;
+    }
+  }
+
   const resumen = {
-    total_ventas:        facturasCompletas.reduce((s, f) => s + f.total_venta, 0),
-    total_facturas:      facturasCompletas.length,
-    total_retomas:       facturasCompletas.reduce((s, f) => s + f.total_retomas, 0),
-    utilidad_neta_total: soloActivas.reduce((s, f) => s + f.utilidad_neta, 0),
-    facturas_activas:    soloActivas.length,
-    facturas_credito:    soloCreditos.length,
-    utilidad_pendiente:  soloCreditos.reduce((s, f) => s + f.utilidad_neta, 0),
+    total_ventas:               facturasCompletas.reduce((s, f) => s + f.total_venta, 0),
+    total_facturas:             facturasCompletas.length,
+    total_retomas:              facturasCompletas.reduce((s, f) => s + f.total_retomas, 0),
+    utilidad_neta_total:        soloActivas.reduce((s, f) => s + f.utilidad_neta, 0),
+    facturas_activas:           soloActivas.length,
+    facturas_credito:           soloCreditos.length,
+    utilidad_pendiente:         0,
+    utilidad_creditos_saldados: utilidadCreditosSaldados,
   };
 
   return { facturas: facturasCompletas, resumen, prestamos, servicios };
@@ -674,8 +727,6 @@ const actualizarCostoCompra = async (sucursalId, tipo, imei, nombreProducto, nue
   throw Object.assign(new Error('Tipo de producto inválido. Use "serial" o "cantidad"'), { status: 400 });
 };
 
-// CAMBIO: ahora filtra por sucursal_id en vez de negocio_id
-// Cada sucursal ve solo su propio inventario
 const getValorInventario = async (sucursalId) => {
   const [serialResult, cantidadResult] = await Promise.all([
     pool.query(`
