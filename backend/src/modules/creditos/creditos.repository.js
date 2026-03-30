@@ -12,7 +12,12 @@ const findAll = async (sucursalId, negocioId) => {
       su.nombre  AS sucursal_nombre,
       f.id       AS factura_id,
       f.nombre_cliente, f.cedula, f.celular,
-      (c.valor_total - c.cuota_inicial - c.total_abonado) AS saldo_pendiente
+      (c.valor_total - c.cuota_inicial - c.total_abonado) AS saldo_pendiente,
+      (
+        SELECT STRING_AGG(DISTINCT lf.nombre_producto, ', ')
+        FROM lineas_factura lf
+        WHERE lf.factura_id = f.id
+      ) AS productos_nombres
     FROM creditos c
     JOIN facturas   f  ON f.id  = c.factura_id
     JOIN sucursales su ON su.id = c.sucursal_id

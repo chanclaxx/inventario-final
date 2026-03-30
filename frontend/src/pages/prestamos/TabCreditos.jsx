@@ -313,7 +313,7 @@ function PanelDetalleCredito({ creditoId, onVolver, onAbonar, onSaldar, onCancel
 
 // ─── Card de crédito ──────────────────────────────────────────────────────────
 
-function CardCredito({ credito, onAbonar, onSaldar, onVerDetalle }) {
+function CardCredito({ credito, onAbonar, onSaldar, onCancelar, onVerDetalle }) {
   const cuotaInicial   = Number(credito.cuota_inicial || 0);
   const totalAbonado   = Number(credito.total_abonado || 0);
   const valorTotal     = Number(credito.valor_total);
@@ -338,6 +338,14 @@ function CardCredito({ credito, onAbonar, onSaldar, onVerDetalle }) {
         </Badge>
       </div>
 
+      {/* Productos */}
+      {credito.productos_nombres && (
+        <p className="text-xs text-gray-500 bg-gray-50 rounded-lg px-3 py-1.5 truncate">
+          {credito.productos_nombres}
+        </p>
+      )}
+
+      {/* Barra de progreso */}
       <div className="flex flex-col gap-1">
         <div className="w-full bg-gray-100 rounded-full h-1.5">
           <div className="bg-yellow-400 h-1.5 rounded-full transition-all"
@@ -349,6 +357,7 @@ function CardCredito({ credito, onAbonar, onSaldar, onVerDetalle }) {
         </div>
       </div>
 
+      {/* Acciones */}
       <div className="flex gap-2">
         <Button size="sm" className="flex-1" onClick={() => onAbonar(credito)}>
           <Plus size={14} /> Abonar
@@ -358,10 +367,16 @@ function CardCredito({ credito, onAbonar, onSaldar, onVerDetalle }) {
         </Button>
       </div>
 
-      <button onClick={() => onVerDetalle(credito.id)}
-        className="text-xs text-yellow-600 hover:text-yellow-700 text-center transition-colors">
-        Ver detalle y abonos →
-      </button>
+      <div className="flex items-center justify-between">
+        <button onClick={() => onVerDetalle(credito.id)}
+          className="text-xs text-yellow-600 hover:text-yellow-700 transition-colors">
+          Ver detalle y abonos →
+        </button>
+        <button onClick={() => onCancelar(credito)}
+          className="text-xs text-red-400 hover:text-red-600 transition-colors">
+          Cancelar crédito
+        </button>
+      </div>
     </div>
   );
 }
@@ -470,6 +485,7 @@ export function TabCreditos() {
                 credito={c}
                 onAbonar={setCreditoAbono}
                 onSaldar={setCreditoSaldar}
+                onCancelar={setCreditoCancelar}
                 onVerDetalle={setCreditoDetalle}
               />
             );
