@@ -319,6 +319,7 @@ function CardCredito({ credito, onAbonar, onSaldar, onCancelar, onVerDetalle }) 
   const valorTotal     = Number(credito.valor_total);
   const saldoPendiente = Number(credito.saldo_pendiente ?? (valorTotal - cuotaInicial - totalAbonado));
   const progreso       = ((cuotaInicial + totalAbonado) / valorTotal) * 100;
+  const productos      = credito.productos || [];
 
   return (
     <div className="bg-white border border-gray-100 rounded-2xl p-4 flex flex-col gap-3">
@@ -338,11 +339,31 @@ function CardCredito({ credito, onAbonar, onSaldar, onCancelar, onVerDetalle }) 
         </Badge>
       </div>
 
-      {/* Productos */}
-      {credito.productos_nombres && (
-        <p className="text-xs text-gray-500 bg-gray-50 rounded-lg px-3 py-1.5 truncate">
-          {credito.productos_nombres}
-        </p>
+      {/* Productos con detalle */}
+      {productos.length > 0 && (
+        <div className="bg-gray-50 rounded-xl p-2.5 flex flex-col gap-1.5">
+          {productos.map((prod, idx) => {
+            const prodKey = `${credito.id}-${idx}`;
+            return (
+              <div key={prodKey} className="flex items-start justify-between gap-2">
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-medium text-gray-700 truncate">{prod.nombre}</p>
+                  {prod.imei && (
+                    <p className="text-[11px] text-gray-400 font-mono">{prod.imei}</p>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  {Number(prod.cantidad) > 1 && (
+                    <span className="text-[11px] text-gray-400">x{prod.cantidad}</span>
+                  )}
+                  <span className="text-xs font-semibold text-gray-600">
+                    {formatCOP(prod.precio)}
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
       )}
 
       {/* Barra de progreso */}

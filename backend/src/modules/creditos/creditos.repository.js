@@ -14,10 +14,17 @@ const findAll = async (sucursalId, negocioId) => {
       f.nombre_cliente, f.cedula, f.celular,
       (c.valor_total - c.cuota_inicial - c.total_abonado) AS saldo_pendiente,
       (
-        SELECT STRING_AGG(DISTINCT lf.nombre_producto, ', ')
+        SELECT JSON_AGG(
+          JSON_BUILD_OBJECT(
+            'nombre', lf.nombre_producto,
+            'imei',   lf.imei,
+            'cantidad', lf.cantidad,
+            'precio',   lf.precio
+          ) ORDER BY lf.id
+        )
         FROM lineas_factura lf
         WHERE lf.factura_id = f.id
-      ) AS productos_nombres
+      ) AS productos
     FROM creditos c
     JOIN facturas   f  ON f.id  = c.factura_id
     JOIN sucursales su ON su.id = c.sucursal_id
