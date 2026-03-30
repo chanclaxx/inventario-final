@@ -472,7 +472,7 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
   const servicios = await getServiciosRango(sucursalId, desde, hasta);
 
   if (!facturas.length) {
-    return { facturas: [], resumen: null, prestamos, servicios };
+    return { facturas: [], resumen: null, prestamos, servicios, creditos: { saldados: [], activos: { total: 0, saldo_pendiente: 0 }, resumen: { utilidad_confirmada: 0, total_saldados: 0 } } };
   }
 
   const facturaIds = facturas.map((f) => f.id);
@@ -563,34 +563,83 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
     }
   }
 
-  // ── Créditos saldados en el rango: calcular utilidad real ─────────────────
+  // ── Créditos saldados en el rango: detalle completo ─────────────────────
   const { rows: creditosSaldadosRango } = await pool.query(`
     WITH ultimo_abono_credito AS (
       SELECT ac.credito_id, MAX(ac.fecha) AS fecha_ultimo_abono
       FROM abonos_credito ac
       GROUP BY ac.credito_id
     )
-    SELECT cr.factura_id
+    SELECT
+      cr.id AS credito_id, cr.factura_id, cr.valor_total,
+      cr.cuota_inicial, cr.total_abonado,
+      f.nombre_cliente, f.cedula, f.fecha AS fecha_factura,
+      ua.fecha_ultimo_abono AS fecha_saldo
     FROM creditos cr
     JOIN ultimo_abono_credito ua ON ua.credito_id = cr.id
+    JOIN facturas f ON f.id = cr.factura_id
     WHERE cr.sucursal_id = $1
       AND cr.estado = 'Saldado'
       AND DATE(ua.fecha_ultimo_abono AT TIME ZONE 'UTC' AT TIME ZONE 'America/Bogota')
           BETWEEN $2 AND $3
+    ORDER BY ua.fecha_ultimo_abono DESC
   `, [sucursalId, desde, hasta]);
 
   const idsSaldados = new Set(creditosSaldadosRango.map((r) => r.factura_id));
 
-  let utilidadCreditosSaldados = 0;
-  for (const fc of facturasCompletas) {
-    if (idsSaldados.has(fc.id)) {
-      const lineasOriginales = lineasPorFactura[fc.id] || [];
-      const utilReal = lineasOriginales.reduce(
-        (acc, i) => (i.utilidad !== null ? acc + i.utilidad : acc), 0
-      ) - fc.total_retomas;
-      utilidadCreditosSaldados += utilReal;
-    }
-  }
+  const creditosSaldados = creditosSaldadosRango.map((cr) => {
+    const lineasOrig = lineasPorFactura[cr.factura_id] || [];
+    const fc = facturasCompletas.find((f) => f.id === cr.factura_id);
+    const totalRetomas = fc ? fc.total_retomas : 0;
+
+    const utilidadBruta = lineasOrig.reduce(
+      (acc, i) => (i.utilidad !== null ? acc + i.utilidad : acc), 0
+    );
+    const utilidadNeta = utilidadBruta - totalRetomas;
+
+    return {
+      credito_id:      cr.credito_id,
+      factura_id:      cr.factura_id,
+      nombre_cliente:  cr.nombre_cliente,
+      cedula:          cr.cedula,
+      valor_total:     Number(cr.valor_total),
+      cuota_inicial:   Number(cr.cuota_inicial),
+      total_abonado:   Number(cr.total_abonado),
+      fecha_factura:   cr.fecha_factura,
+      fecha_saldo:     cr.fecha_saldo,
+      utilidad:        utilidadNeta,
+      tiene_costo_incompleto: lineasOrig.some((i) => i.costo_unitario_compra === null),
+      productos: lineasOrig.map((l) => ({
+        nombre: l.nombre_producto,
+        imei:   l.imei,
+        precio: l.precio_venta,
+        costo:  l.costo_unitario_compra,
+      })),
+    };
+  });
+
+  const utilidadCreditosSaldados = creditosSaldados.reduce((s, c) => s + c.utilidad, 0);
+
+  // ── Créditos activos: resumen compacto ────────────────────────────────────
+  const { rows: creditosActivosResumen } = await pool.query(`
+    SELECT
+      COUNT(*)::int AS total,
+      COALESCE(SUM(valor_total - cuota_inicial - total_abonado), 0) AS saldo_pendiente
+    FROM creditos
+    WHERE sucursal_id = $1 AND estado = 'Activo'
+  `, [sucursalId]);
+
+  const creditosData = {
+    saldados: creditosSaldados,
+    activos: {
+      total:           Number(creditosActivosResumen.rows[0]?.total || 0),
+      saldo_pendiente: Number(creditosActivosResumen.rows[0]?.saldo_pendiente || 0),
+    },
+    resumen: {
+      utilidad_confirmada:  utilidadCreditosSaldados,
+      total_saldados:       creditosSaldados.length,
+    },
+  };
 
   const resumen = {
     total_ventas:               facturasCompletas.reduce((s, f) => s + f.total_venta, 0),
@@ -603,7 +652,7 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
     utilidad_creditos_saldados: utilidadCreditosSaldados,
   };
 
-  return { facturas: facturasCompletas, resumen, prestamos, servicios };
+  return { facturas: facturasCompletas, resumen, prestamos, servicios, creditos: creditosData };
 };
 
 const getProductosTop = async (sucursalId, desde, hasta) => {

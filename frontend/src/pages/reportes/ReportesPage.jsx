@@ -16,7 +16,7 @@ import { useAuth }    from '../../context/useAuth';
 import {
   BarChart2, TrendingUp, Package, AlertTriangle,
   ChevronDown, ChevronUp, Info, Pencil, Check, X,
-  Warehouse, Handshake, Wrench,
+  Warehouse, Handshake, Wrench, CreditCard,
 } from 'lucide-react';
 
 // ─────────────────────────────────────────────
@@ -532,7 +532,6 @@ const FilaServicio = ({ servicio }) => {
         </div>
       </button>
 
-      {/* Mobile: utilidad visible debajo */}
       <div className="flex items-center justify-between px-4 pb-2 sm:hidden">
         {sinCosto
           ? <span className="text-xs text-gray-400 italic">Sin costo registrado</span>
@@ -621,7 +620,6 @@ const SeccionServicios = ({ servicios }) => {
         )}
       </h3>
 
-      {/* Métricas de servicios */}
       {hayCerrados && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <div className="bg-green-50 text-green-700 rounded-xl p-3">
@@ -664,7 +662,6 @@ const SeccionServicios = ({ servicios }) => {
         </div>
       )}
 
-      {/* Resumen de activos — compacto */}
       {hayActivos && (
         <div className="flex items-center gap-3 bg-blue-50 border border-blue-100 rounded-xl px-4 py-2.5 flex-wrap">
           <Wrench size={14} className="text-blue-500 flex-shrink-0" />
@@ -687,12 +684,142 @@ const SeccionServicios = ({ servicios }) => {
         </div>
       )}
 
-      {/* Lista de servicios cerrados */}
       {hayCerrados && (
         <div className="flex flex-col gap-2">
           {cerrados.map((s) => {
             const sKey = s.id;
             return <FilaServicio key={sKey} servicio={s} />;
+          })}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────
+// UTILIDAD DE CRÉDITOS — componentes
+// ─────────────────────────────────────────────
+
+const FilaCreditoSaldado = ({ credito }) => {
+  const [expandida, setExpandida] = useState(false);
+  const sinCosto = credito.tiene_costo_incompleto;
+
+  return (
+    <div className="bg-white border border-gray-100 rounded-xl overflow-hidden shadow-sm">
+      <button
+        onClick={() => setExpandida((v) => !v)}
+        className="w-full px-4 py-3 flex items-center justify-between hover:bg-gray-50 transition-colors text-left"
+      >
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold text-gray-800 truncate">{credito.nombre_cliente}</p>
+          <p className="text-xs text-gray-400">
+            Factura #{String(credito.factura_id).padStart(6, '0')}
+            {credito.cedula ? ` · CC: ${credito.cedula}` : ''}
+          </p>
+          <p className="text-xs text-gray-400">
+            Saldado: {formatFecha(credito.fecha_saldo)}
+          </p>
+        </div>
+        <div className="flex items-center gap-3 flex-shrink-0 ml-2">
+          <div className="text-right">
+            <p className="text-sm font-bold text-gray-900">{formatCOP(credito.valor_total)}</p>
+          </div>
+          <div className="text-right hidden sm:block">
+            <UtilidadBadge valor={credito.utilidad} sinDato={sinCosto} />
+          </div>
+          {expandida
+            ? <ChevronUp size={14} className="text-gray-400" />
+            : <ChevronDown size={14} className="text-gray-400" />}
+        </div>
+      </button>
+
+      <div className="flex items-center justify-between px-4 pb-2 sm:hidden">
+        <UtilidadBadge valor={credito.utilidad} sinDato={sinCosto} />
+      </div>
+
+      {expandida && (
+        <div className="border-t border-gray-100 px-4 py-3 flex flex-col gap-2 bg-gray-50">
+          <div className="flex flex-col gap-1.5">
+            {credito.productos.map((prod, idx) => {
+              const prodKey = `${credito.credito_id}-${idx}`;
+              return (
+                <div key={prodKey} className="flex items-start justify-between text-xs gap-2">
+                  <div className="min-w-0 flex-1">
+                    <p className="font-medium text-gray-700 truncate">{prod.nombre}</p>
+                    {prod.imei && <p className="text-gray-400 font-mono">{prod.imei}</p>}
+                  </div>
+                  <div className="flex items-center gap-3 flex-shrink-0">
+                    <span className="text-gray-600">Venta: {formatCOP(prod.precio)}</span>
+                    <span className="text-gray-500">
+                      Costo: {prod.costo !== null ? formatCOP(prod.costo) : <span className="italic text-gray-300">N/A</span>}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <div className="border-t border-gray-200 pt-2 mt-1 grid grid-cols-2 gap-2 text-xs text-gray-500">
+            <span>Cuota inicial: {formatCOP(credito.cuota_inicial)}</span>
+            <span className="text-right">Total abonado: {formatCOP(credito.total_abonado)}</span>
+            <span>Creado: {formatFecha(credito.fecha_factura)}</span>
+            <span className="text-right font-semibold text-gray-700">
+              Utilidad: <UtilidadBadge valor={credito.utilidad} sinDato={sinCosto} />
+            </span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const SeccionCreditos = ({ creditos }) => {
+  if (!creditos || (creditos.saldados.length === 0 && creditos.activos.total === 0)) {
+    return null;
+  }
+
+  const { saldados, activos, resumen } = creditos;
+
+  return (
+    <div className="flex flex-col gap-3 border-t border-gray-100 pt-4">
+      <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+        <CreditCard size={15} className="text-yellow-500" />
+        Utilidad de créditos
+        {resumen.total_saldados > 0 && (
+          <span className="text-xs font-normal text-gray-400">
+            {resumen.total_saldados} saldado{resumen.total_saldados !== 1 ? 's' : ''} en el período
+          </span>
+        )}
+      </h3>
+
+      <div className="grid grid-cols-2 gap-3">
+        {resumen.total_saldados > 0 && (
+          <div className="bg-green-50 text-green-700 rounded-xl p-3">
+            <p className="text-xs font-medium opacity-70">Utilidad confirmada</p>
+            <p className="text-lg font-bold mt-0.5">{formatCOP(resumen.utilidad_confirmada)}</p>
+            <p className="text-xs opacity-60 mt-0.5">
+              {saldados.length} crédito{saldados.length !== 1 ? 's' : ''} saldado{saldados.length !== 1 ? 's' : ''}
+            </p>
+          </div>
+        )}
+        {activos.total > 0 && (
+          <div className="bg-yellow-50 text-yellow-700 rounded-xl p-3">
+            <p className="text-xs font-medium opacity-70">Créditos activos</p>
+            <p className="text-lg font-bold mt-0.5">{activos.total}</p>
+            <p className="text-xs opacity-60 mt-0.5">
+              Saldo por cobrar: {formatCOP(activos.saldo_pendiente)}
+            </p>
+          </div>
+        )}
+      </div>
+
+      {saldados.length > 0 && (
+        <div className="flex flex-col gap-2">
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+            Saldados en el período — utilidad confirmada
+          </p>
+          {saldados.map((c) => {
+            const cKey = c.credito_id;
+            return <FilaCreditoSaldado key={cKey} credito={c} />;
           })}
         </div>
       )}
@@ -709,7 +836,7 @@ const PanelResumen = ({ dashboard, loading }) => {
   const metricas = [
     { label: 'Ventas hoy',         valor: formatCOP(dashboard?.ventas_hoy || 0),                     colorClass: 'bg-green-50 text-green-700'    },
     { label: 'Utilidad hoy',       valor: formatCOP(dashboard?.utilidad_hoy || 0),                   colorClass: 'bg-emerald-50 text-emerald-700' },
-    { label: 'Utilidad pendiente', valor: formatCOP(dashboard?.utilidad_pendiente || 0),             colorClass: 'bg-yellow-50 text-yellow-700'   },
+    { label: 'Utilidad créditos saldados', valor: formatCOP(dashboard?.utilidad_pendiente || 0),      colorClass: 'bg-yellow-50 text-yellow-700'   },
     { label: 'Facturas hoy',       valor: dashboard?.facturas_hoy || 0,                              colorClass: 'bg-blue-50 text-blue-700'       },
     { label: 'Préstamos activos',  valor: dashboard?.prestamos_activos?.cantidad || 0,               colorClass: 'bg-indigo-50 text-indigo-700'   },
     { label: 'Deuda préstamos',    valor: formatCOP(dashboard?.prestamos_activos?.deuda_total || 0), colorClass: 'bg-red-50 text-red-700'         },
@@ -742,7 +869,7 @@ const PanelResumen = ({ dashboard, loading }) => {
 };
 
 // ─────────────────────────────────────────────
-// PANEL VENTAS — incluye préstamos y servicios
+// PANEL VENTAS — incluye préstamos, servicios y créditos
 // ─────────────────────────────────────────────
 const PanelVentas = ({ desde, hasta, onDesde, onHasta, esAdmin }) => {
   const { data: ventasData, isLoading, isError } = useQuery({
@@ -754,10 +881,12 @@ const PanelVentas = ({ desde, hasta, onDesde, onHasta, esAdmin }) => {
   const resumen   = ventasData?.resumen   ?? null;
   const prestamos = ventasData?.prestamos ?? null;
   const servicios = ventasData?.servicios ?? null;
+  const creditos  = ventasData?.creditos  ?? null;
 
   const hayContenido = facturas.length > 0
     || (prestamos && (prestamos.saldados.length > 0 || prestamos.activos.length > 0))
-    || (servicios && (servicios.cerrados.length > 0 || servicios.activos.total > 0));
+    || (servicios && (servicios.cerrados.length > 0 || servicios.activos.total > 0))
+    || (creditos && (creditos.saldados.length > 0 || creditos.activos.total > 0));
 
   return (
     <div className="flex flex-col gap-4">
@@ -788,7 +917,7 @@ const PanelVentas = ({ desde, hasta, onDesde, onHasta, esAdmin }) => {
                   valor={formatCOP(facturas.reduce((s, f) => s + calcularUtilidadNeta(f.lineas), 0))}
                   colorClass="bg-emerald-50 text-emerald-700"
                 />
-                <MetricCard label="Utilidad pendiente" valor={formatCOP(resumen.utilidad_pendiente)} colorClass="bg-yellow-50 text-yellow-700" />
+                <MetricCard label="Utilidad créditos saldados" valor={formatCOP(resumen.utilidad_creditos_saldados)} colorClass="bg-yellow-50 text-yellow-700" />
                 <MetricCard
                   label={`${resumen.total_facturas} factura(s)`}
                   valor={`${resumen.facturas_activas} activas · ${resumen.facturas_credito} crédito`}
@@ -823,6 +952,9 @@ const PanelVentas = ({ desde, hasta, onDesde, onHasta, esAdmin }) => {
 
           {/* Utilidad de servicios técnicos */}
           <SeccionServicios servicios={servicios} />
+
+          {/* Utilidad de créditos */}
+          <SeccionCreditos creditos={creditos} />
 
         </div>
       )}
