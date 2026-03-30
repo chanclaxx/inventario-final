@@ -71,4 +71,28 @@ const saldarCredito = async (negocioId, creditoId) => {
   }
 };
 
-module.exports = { getCreditos, getCreditoById, registrarAbono, saldarCredito };
+// ── Cancelar crédito (cancela crédito + factura + devuelve stock) ─────────────
+const cancelarCredito = async (negocioId, creditoId) => {
+  const credito = await repo.findByIdYNegocio(creditoId, negocioId);
+  if (!credito) throw { status: 404, message: 'Crédito no encontrado' };
+  if (credito.estado === 'Cancelado') throw { status: 400, message: 'El crédito ya está cancelado' };
+
+  // Reutilizar la lógica existente de cancelar factura
+  const facturasService = require('../facturas/facturas.service');
+  await facturasService.cancelarFactura(negocioId, credito.factura_id, false);
+
+  // Marcar el crédito como cancelado
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await repo.updateEstado(client, creditoId, 'Cancelado');
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+};
+
+module.exports = { getCreditos, getCreditoById, registrarAbono, saldarCredito, cancelarCredito };

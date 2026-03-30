@@ -32,4 +32,11 @@ const saldarCredito = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-module.exports = { getCreditos, getCreditoById, registrarAbono, saldarCredito };
+const cancelarCredito = async (req, res, next) => {
+  try {
+    await service.cancelarCredito(req.user.negocio_id, Number(req.params.id));
+    res.json({ ok: true, message: 'Crédito cancelado correctamente' });
+  } catch (err) { next(err); }
+};
+
+module.exports = { getCreditos, getCreditoById, registrarAbono, saldarCredito, cancelarCredito };

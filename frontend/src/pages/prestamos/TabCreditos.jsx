@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getCreditos, getCreditoById, registrarAbonoCredito, saldarCredito } from '../../api/creditos.api';
+import { getCreditos, getCreditoById, registrarAbonoCredito, saldarCredito, cancelarCredito } from '../../api/creditos.api';
 import { formatCOP, formatFechaHora } from '../../utils/formatters';
 import { Badge }       from '../../components/ui/Badge';
 import { Button }      from '../../components/ui/Button';
@@ -9,7 +9,7 @@ import { InputMoneda } from '../../components/ui/InputMoneda';
 import { Spinner }     from '../../components/ui/Spinner';
 import { EmptyState }  from '../../components/ui/EmptyState';
 import {
-  CreditCard, Plus, CheckCircle,
+  CreditCard, Plus, CheckCircle, XCircle, AlertTriangle,
   ChevronLeft, ChevronDown, ChevronUp,
 } from 'lucide-react';
 
@@ -152,9 +152,61 @@ function ModalSaldarCredito({ credito, onClose }) {
   );
 }
 
+// ─── Modal cancelar crédito ───────────────────────────────────────────────────
+
+function ModalCancelarCredito({ credito, onClose }) {
+  const queryClient = useQueryClient();
+  const [error, setError] = useState('');
+
+  const mutation = useMutation({
+    mutationFn: () => cancelarCredito(credito.id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['creditos'], exact: false });
+      queryClient.invalidateQueries({ queryKey: ['credito-detalle'], exact: false });
+      queryClient.invalidateQueries({ queryKey: ['facturas'], exact: false });
+      queryClient.invalidateQueries({ queryKey: ['productos-serial'], exact: false });
+      queryClient.invalidateQueries({ queryKey: ['productos-cantidad'], exact: false });
+      queryClient.invalidateQueries({ queryKey: ['seriales'], exact: false });
+      onClose();
+    },
+    onError: (err) => setError(err.response?.data?.error || 'Error al cancelar crédito'),
+  });
+
+  return (
+    <Modal open onClose={onClose} title="Cancelar Crédito" size="sm">
+      <div className="flex flex-col gap-4">
+        <div className="bg-red-50 border border-red-100 rounded-xl p-3 flex flex-col gap-2">
+          <div className="flex items-start gap-2">
+            <AlertTriangle size={15} className="text-red-500 flex-shrink-0 mt-0.5" />
+            <div className="flex flex-col gap-1">
+              <p className="text-sm font-medium text-red-700">
+                ¿Cancelar el crédito de {credito.nombre_cliente}?
+              </p>
+              <p className="text-xs text-red-600">
+                Esto cancelará la factura asociada y devolverá los productos al inventario.
+                Esta acción no se puede deshacer.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {error && <p className="text-sm text-red-500">{error}</p>}
+
+        <div className="flex gap-2">
+          <Button variant="secondary" className="flex-1" onClick={onClose}>No, volver</Button>
+          <Button className="flex-1 bg-red-500 hover:bg-red-600" loading={mutation.isPending}
+            onClick={() => mutation.mutate()}>
+            <XCircle size={15} /> Sí, cancelar
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 // ─── Panel detalle crédito ────────────────────────────────────────────────────
 
-function PanelDetalleCredito({ creditoId, onVolver, onAbonar, onSaldar }) {
+function PanelDetalleCredito({ creditoId, onVolver, onAbonar, onSaldar, onCancelar }) {
   const { data, isLoading } = useQuery({
     queryKey: ['credito-detalle', creditoId],
     queryFn:  () => getCreditoById(creditoId).then((r) => r.data.data),
@@ -238,13 +290,21 @@ function PanelDetalleCredito({ creditoId, onVolver, onAbonar, onSaldar }) {
       )}
 
       {esActivo && (
-        <div className="flex gap-2">
-          <Button size="sm" className="flex-1" onClick={() => onAbonar(c)}>
-            <Plus size={14} /> Abonar
-          </Button>
-          <Button size="sm" variant="secondary" className="flex-1" onClick={() => onSaldar(c)}>
-            <CheckCircle size={14} /> Saldado
-          </Button>
+        <div className="flex flex-col gap-2">
+          <div className="flex gap-2">
+            <Button size="sm" className="flex-1" onClick={() => onAbonar(c)}>
+              <Plus size={14} /> Abonar
+            </Button>
+            <Button size="sm" variant="secondary" className="flex-1" onClick={() => onSaldar(c)}>
+              <CheckCircle size={14} /> Saldado
+            </Button>
+          </div>
+          <button onClick={() => onCancelar(c)}
+            className="w-full py-2 rounded-xl text-xs font-medium border border-red-200
+              text-red-500 bg-red-50 hover:bg-red-100 transition-colors">
+            <XCircle size={13} className="inline mr-1" />
+            Cancelar crédito y devolver productos
+          </button>
         </div>
       )}
     </div>
@@ -317,7 +377,7 @@ function CreditosSaldados({ creditos }) {
         className="w-full flex items-center justify-between px-4 py-2.5
           bg-gray-50 hover:bg-gray-100 transition-colors">
         <span className="text-xs font-semibold text-gray-500">
-          {creditos.length} crédito{creditos.length !== 1 ? 's' : ''} saldado{creditos.length !== 1 ? 's' : ''}
+          {creditos.length} crédito{creditos.length !== 1 ? 's' : ''} cerrado{creditos.length !== 1 ? 's' : ''}
         </span>
         {abierto
           ? <ChevronUp   size={15} className="text-gray-400" />
@@ -327,7 +387,8 @@ function CreditosSaldados({ creditos }) {
       {abierto && (
         <div className="flex flex-col gap-2 p-3">
           {creditos.map((c) => {
-            const creditoId = c.id;
+            const creditoId   = c.id;
+            const esCancelado = c.estado === 'Cancelado';
             return (
               <div key={creditoId}
                 className="bg-gray-50 border border-gray-100 rounded-xl p-3
@@ -339,7 +400,7 @@ function CreditosSaldados({ creditos }) {
                     {' · '}{formatCOP(c.valor_total)}
                   </p>
                 </div>
-                <Badge variant="green">{c.estado}</Badge>
+                <Badge variant={esCancelado ? 'red' : 'green'}>{c.estado}</Badge>
               </div>
             );
           })}
@@ -352,9 +413,10 @@ function CreditosSaldados({ creditos }) {
 // ─── Componente principal del tab ─────────────────────────────────────────────
 
 export function TabCreditos() {
-  const [creditoAbono,   setCreditoAbono]   = useState(null);
-  const [creditoSaldar,  setCreditoSaldar]  = useState(null);
-  const [creditoDetalle, setCreditoDetalle] = useState(null);
+  const [creditoAbono,    setCreditoAbono]    = useState(null);
+  const [creditoSaldar,   setCreditoSaldar]   = useState(null);
+  const [creditoCancelar, setCreditoCancelar] = useState(null);
+  const [creditoDetalle,  setCreditoDetalle]  = useState(null);
 
   const { data: creditosData, isLoading } = useQuery({
     queryKey: ['creditos'],
@@ -363,7 +425,7 @@ export function TabCreditos() {
 
   const creditos         = creditosData || [];
   const creditosActivos  = creditos.filter((c) => c.estado === 'Activo');
-  const creditosSaldados = creditos.filter((c) => c.estado !== 'Activo');
+  const creditosCerrados = creditos.filter((c) => c.estado !== 'Activo');
 
   // ── Vista detalle ──────────────────────────────────────────────────────────
   if (creditoDetalle) {
@@ -374,6 +436,7 @@ export function TabCreditos() {
           onVolver={() => setCreditoDetalle(null)}
           onAbonar={setCreditoAbono}
           onSaldar={setCreditoSaldar}
+          onCancelar={setCreditoCancelar}
         />
 
         {creditoAbono && (
@@ -381,6 +444,9 @@ export function TabCreditos() {
         )}
         {creditoSaldar && (
           <ModalSaldarCredito credito={creditoSaldar} onClose={() => setCreditoSaldar(null)} />
+        )}
+        {creditoCancelar && (
+          <ModalCancelarCredito credito={creditoCancelar} onClose={() => { setCreditoCancelar(null); setCreditoDetalle(null); }} />
         )}
       </>
     );
@@ -410,8 +476,8 @@ export function TabCreditos() {
           })
         )}
 
-        {creditosSaldados.length > 0 && (
-          <CreditosSaldados creditos={creditosSaldados} />
+        {creditosCerrados.length > 0 && (
+          <CreditosSaldados creditos={creditosCerrados} />
         )}
       </div>
 
@@ -420,6 +486,9 @@ export function TabCreditos() {
       )}
       {creditoSaldar && (
         <ModalSaldarCredito credito={creditoSaldar} onClose={() => setCreditoSaldar(null)} />
+      )}
+      {creditoCancelar && (
+        <ModalCancelarCredito credito={creditoCancelar} onClose={() => setCreditoCancelar(null)} />
       )}
     </>
   );

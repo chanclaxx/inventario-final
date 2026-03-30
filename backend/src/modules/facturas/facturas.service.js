@@ -145,9 +145,10 @@ const crearFactura = async ({
     });
 
     const factura = await facturasRepo.create(client, {
-      sucursal_id, usuario_id, cliente_id,
-      nombre_cliente, cedula, celular, notas,
-    });
+  sucursal_id, usuario_id, cliente_id,
+  nombre_cliente, cedula, celular, notas,
+  estado: es_credito ? 'Credito' : 'Activa',
+});
 
     let totalLineas = 0;
 
