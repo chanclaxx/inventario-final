@@ -121,7 +121,8 @@ const getDashboard = async (sucursalId) => {
       LEFT JOIN retomas_por_factura r ON r.factura_id = c.factura_id
     `, [sucursalId]),
 
-    // ── Utilidad de créditos saldados HOY (no creados hoy) ──────────────────
+    // ── Utilidad de créditos saldados HOY ───────────────────────────────────
+    // Fórmula: (cuota_inicial + total_abonado) - costo_productos
     pool.query(`
       WITH ultimo_abono_credito AS (
         SELECT ac.credito_id, MAX(ac.fecha) AS fecha_ultimo_abono
@@ -129,7 +130,10 @@ const getDashboard = async (sucursalId) => {
         GROUP BY ac.credito_id
       ),
       creditos_saldados_hoy AS (
-        SELECT cr.factura_id
+        SELECT
+          cr.id          AS credito_id,
+          cr.factura_id,
+          (cr.cuota_inicial + cr.total_abonado) AS total_cobrado
         FROM creditos cr
         JOIN ultimo_abono_credito ua ON ua.credito_id = cr.id
         WHERE cr.sucursal_id = $1
@@ -137,38 +141,33 @@ const getDashboard = async (sucursalId) => {
           AND DATE(ua.fecha_ultimo_abono AT TIME ZONE 'UTC' AT TIME ZONE 'America/Bogota')
               = (NOW() AT TIME ZONE 'America/Bogota')::date
       ),
-      retomas_por_factura AS (
-        SELECT factura_id, COALESCE(SUM(valor_retoma), 0) AS total_retomas
-        FROM retomas GROUP BY factura_id
-      ),
-      costo_por_linea AS (
+      costo_por_factura AS (
         SELECT
           l.factura_id,
           SUM(
-            l.subtotal
-            - CASE
-                WHEN l.imei IS NOT NULL THEN
-                  ${_costoPorImei('l.imei', 'f.sucursal_id')}
-                ELSE
-                  COALESCE(
-                    (SELECT pc.costo_unitario
-                     FROM productos_cantidad pc
-                     WHERE pc.nombre = l.nombre_producto
-                       AND pc.sucursal_id = f.sucursal_id
-                     LIMIT 1), 0
-                  ) * l.cantidad
-              END
-          ) AS utilidad_bruta
+            CASE
+              WHEN l.imei IS NOT NULL THEN
+                ${_costoPorImei('l.imei', 'f.sucursal_id')}
+              ELSE
+                COALESCE(
+                  (SELECT pc.costo_unitario
+                   FROM productos_cantidad pc
+                   WHERE pc.nombre = l.nombre_producto
+                     AND pc.sucursal_id = f.sucursal_id
+                   LIMIT 1), 0
+                ) * l.cantidad
+            END
+          ) AS costo_total
         FROM lineas_factura l
         JOIN facturas f ON f.id = l.factura_id
         WHERE f.id IN (SELECT factura_id FROM creditos_saldados_hoy)
         GROUP BY l.factura_id
       )
       SELECT
-        COALESCE(SUM(c.utilidad_bruta), 0)             AS utilidad_bruta,
-        COALESCE(SUM(COALESCE(r.total_retomas, 0)), 0) AS total_retomas
-      FROM costo_por_linea c
-      LEFT JOIN retomas_por_factura r ON r.factura_id = c.factura_id
+        COALESCE(SUM(cs.total_cobrado - COALESCE(cp.costo_total, 0)), 0) AS utilidad_bruta,
+        0 AS total_retomas
+      FROM creditos_saldados_hoy cs
+      LEFT JOIN costo_por_factura cp ON cp.factura_id = cs.factura_id
     `, [sucursalId]),
   ]);
 
@@ -267,25 +266,25 @@ const getServiciosRango = async (sucursalId, desde, hasta) => {
     }
 
     return {
-      id:               os.id,
-      estado:           os.estado,
+      id:                 os.id,
+      estado:             os.estado,
       categoria,
-      cliente_nombre:   os.cliente_nombre,
-      equipo_nombre:    os.equipo_nombre || os.equipo_tipo || 'Equipo',
-      falla_reportada:  os.falla_reportada,
-      notas_tecnico:    os.notas_tecnico,
+      cliente_nombre:     os.cliente_nombre,
+      equipo_nombre:      os.equipo_nombre || os.equipo_tipo || 'Equipo',
+      falla_reportada:    os.falla_reportada,
+      notas_tecnico:      os.notas_tecnico,
       motivo_sin_reparar: os.motivo_sin_reparar,
-      precio_final:     precioFinal,
-      costo_real:       costoReal,
-      total_abonado:    totalAbonado,
-      precio_garantia:  precioGarantia,
-      costo_garantia:   costoGarantia,
+      precio_final:       precioFinal,
+      costo_real:         costoReal,
+      total_abonado:      totalAbonado,
+      precio_garantia:    precioGarantia,
+      costo_garantia:     costoGarantia,
       ingresos,
       costo,
       utilidad,
-      saldo_pendiente:  saldoPendiente > 0 ? saldoPendiente : 0,
-      fecha_recepcion:  os.fecha_recepcion,
-      fecha_entrega:    os.fecha_entrega,
+      saldo_pendiente:    saldoPendiente > 0 ? saldoPendiente : 0,
+      fecha_recepcion:    os.fecha_recepcion,
+      fecha_entrega:      os.fecha_entrega,
     };
   });
 
@@ -306,17 +305,17 @@ const getServiciosRango = async (sucursalId, desde, hasta) => {
   return {
     cerrados,
     resumen: {
-      total_cerrados:        cerrados.length,
-      utilidad_confirmada:   sumarUtilidad(pagados),
-      utilidad_garantias:    sumarUtilidad(garantias),
-      ingresos_diagnostico:  sumarIngresos(diagnosticos),
-      utilidad_pendiente:    sumarUtilidad(pendientes),
-      saldo_por_cobrar:      sumarSaldo(pendientes) + sumarSaldo(garantias),
-      total_ingresos:        sumarIngresos(cerrados),
-      pagados:               pagados.length,
-      pendientes_pago:       pendientes.length,
-      diagnosticos:          diagnosticos.length,
-      garantias_cobrables:   garantias.length,
+      total_cerrados:       cerrados.length,
+      utilidad_confirmada:  sumarUtilidad(pagados),
+      utilidad_garantias:   sumarUtilidad(garantias),
+      ingresos_diagnostico: sumarIngresos(diagnosticos),
+      utilidad_pendiente:   sumarUtilidad(pendientes),
+      saldo_por_cobrar:     sumarSaldo(pendientes) + sumarSaldo(garantias),
+      total_ingresos:       sumarIngresos(cerrados),
+      pagados:              pagados.length,
+      pendientes_pago:      pendientes.length,
+      diagnosticos:         diagnosticos.length,
+      garantias_cobrables:  garantias.length,
     },
     activos: {
       total:           totalActivos,
@@ -474,13 +473,13 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
   if (!facturas.length) {
     return {
       facturas: [],
-      resumen: null,
+      resumen:  null,
       prestamos,
       servicios,
       creditos: {
         saldados: [],
-        activos: { total: 0, saldo_pendiente: 0 },
-        resumen: { utilidad_confirmada: 0, total_saldados: 0 },
+        activos:  { total: 0, saldo_pendiente: 0 },
+        resumen:  { utilidad_confirmada: 0, total_saldados: 0 },
       },
     };
   }
@@ -514,12 +513,9 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
 
   const lineasPorFactura = {};
   for (const linea of lineas) {
-    const costoTotal = linea.costo_unitario_compra !== null
-      ? Number(linea.costo_unitario_compra) * Number(linea.cantidad)
-      : null;
-    const utilidad = costoTotal !== null
-      ? Number(linea.subtotal) - costoTotal
-      : null;
+    const costoUnitario = linea.costo_unitario_compra !== null ? Number(linea.costo_unitario_compra) : null;
+    const costoTotal    = costoUnitario !== null ? costoUnitario * Number(linea.cantidad) : null;
+    const utilidad      = costoTotal   !== null ? Number(linea.subtotal) - costoTotal : null;
 
     const item = {
       nombre_producto:       linea.nombre_producto,
@@ -527,7 +523,7 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
       cantidad:              Number(linea.cantidad),
       precio_venta:          Number(linea.precio),
       subtotal:              Number(linea.subtotal),
-      costo_unitario_compra: linea.costo_unitario_compra !== null ? Number(linea.costo_unitario_compra) : null,
+      costo_unitario_compra: costoUnitario,
       costo_total:           costoTotal,
       utilidad,
       tipo_producto:         linea.tipo_producto,
@@ -541,7 +537,7 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
     const items         = lineasPorFactura[f.id] || [];
     const totalRetomas  = Number(f.total_retomas);
     const utilidadBruta = items.reduce(
-      (acc, i) => (i.utilidad !== null ? acc + i.utilidad : acc), 0
+      (acc, i) => (i.utilidad !== null ? acc + i.utilidad : acc), 0,
     );
     return {
       id:                     f.id,
@@ -563,17 +559,20 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
   const soloActivas  = facturasCompletas.filter((f) => f.estado === 'Activa');
   const soloCreditos = facturasCompletas.filter((f) => f.estado === 'Credito');
 
-  // ── Créditos activos: utilidad = $0 (no se ha cobrado aún) ────────────────
+  // ── Créditos activos en lista de facturas: utilidad = 0 ───────────────────
+  // No se reconoce utilidad hasta que el crédito esté 100% saldado
   for (const fc of soloCreditos) {
-    fc.utilidad_bruta = 0;
-    fc.utilidad_neta  = 0;
+    fc.utilidad_bruta         = 0;
+    fc.utilidad_neta          = 0;
     fc.tiene_costo_incompleto = false;
     for (const linea of fc.lineas) {
       linea.utilidad = 0;
     }
   }
 
-  // ── Créditos saldados en el rango: detalle completo ─────────────────────
+  // ── Créditos saldados en el rango ─────────────────────────────────────────
+  // Utilidad = (cuota_inicial + total_abonado) - costo_total_productos
+  // Se usa lo realmente cobrado, NO el precio de factura original
   const { rows: creditosSaldadosRango } = await pool.query(`
     WITH ultimo_abono_credito AS (
       SELECT ac.credito_id, MAX(ac.fecha) AS fecha_ultimo_abono
@@ -581,13 +580,19 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
       GROUP BY ac.credito_id
     )
     SELECT
-      cr.id AS credito_id, cr.factura_id, cr.valor_total,
-      cr.cuota_inicial, cr.total_abonado,
-      f.nombre_cliente, f.cedula, f.fecha AS fecha_factura,
+      cr.id            AS credito_id,
+      cr.factura_id,
+      cr.valor_total,
+      cr.cuota_inicial,
+      cr.total_abonado,
+      (cr.cuota_inicial + cr.total_abonado) AS total_cobrado,
+      f.nombre_cliente,
+      f.cedula,
+      f.fecha          AS fecha_factura,
       ua.fecha_ultimo_abono AS fecha_saldo
     FROM creditos cr
     JOIN ultimo_abono_credito ua ON ua.credito_id = cr.id
-    JOIN facturas f ON f.id = cr.factura_id
+    JOIN facturas f              ON f.id = cr.factura_id
     WHERE cr.sucursal_id = $1
       AND cr.estado = 'Saldado'
       AND DATE(ua.fecha_ultimo_abono AT TIME ZONE 'UTC' AT TIME ZONE 'America/Bogota')
@@ -595,17 +600,26 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
     ORDER BY ua.fecha_ultimo_abono DESC
   `, [sucursalId, desde, hasta]);
 
-  const idsSaldados = new Set(creditosSaldadosRango.map((r) => r.factura_id));
-
   const creditosSaldados = creditosSaldadosRango.map((cr) => {
     const lineasOrig   = lineasPorFactura[cr.factura_id] || [];
-    const fc           = facturasCompletas.find((f) => f.id === cr.factura_id);
-    const totalRetomas = fc ? fc.total_retomas : 0;
+    const totalCobrado = Number(cr.total_cobrado);
 
-    const utilidadBruta = lineasOrig.reduce(
-      (acc, i) => (i.utilidad !== null ? acc + i.utilidad : acc), 0
-    );
-    const utilidadNeta = utilidadBruta - totalRetomas;
+    // Suma el costo de todos los productos; si alguno no tiene costo → dato incompleto
+    let costoTotalProductos  = 0;
+    let tieneCostoIncompleto = false;
+    for (const linea of lineasOrig) {
+      if (linea.costo_unitario_compra === null) {
+        tieneCostoIncompleto = true;
+      } else {
+        costoTotalProductos += linea.costo_unitario_compra * linea.cantidad;
+      }
+    }
+
+    // Si no hay ningún costo registrado → utilidad null (sin dato)
+    // Si hay costo parcial → se calcula con lo disponible y se marca incompleto
+    const utilidad = tieneCostoIncompleto && costoTotalProductos === 0
+      ? null
+      : totalCobrado - costoTotalProductos;
 
     return {
       credito_id:             cr.credito_id,
@@ -615,10 +629,11 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
       valor_total:            Number(cr.valor_total),
       cuota_inicial:          Number(cr.cuota_inicial),
       total_abonado:          Number(cr.total_abonado),
+      total_cobrado:          totalCobrado,
       fecha_factura:          cr.fecha_factura,
       fecha_saldo:            cr.fecha_saldo,
-      utilidad:               utilidadNeta,
-      tiene_costo_incompleto: lineasOrig.some((i) => i.costo_unitario_compra === null),
+      utilidad,
+      tiene_costo_incompleto: tieneCostoIncompleto,
       productos: lineasOrig.map((l) => ({
         nombre: l.nombre_producto,
         imei:   l.imei,
@@ -628,7 +643,9 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
     };
   });
 
-  const utilidadCreditosSaldados = creditosSaldados.reduce((s, c) => s + c.utilidad, 0);
+  const utilidadCreditosSaldados = creditosSaldados.reduce(
+    (s, c) => c.utilidad !== null ? s + c.utilidad : s, 0,
+  );
 
   // ── Créditos activos: resumen compacto ────────────────────────────────────
   const { rows: creditosActivosResumen } = await pool.query(`
@@ -639,16 +656,16 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
     WHERE sucursal_id = $1 AND estado = 'Activo'
   `, [sucursalId]);
 
-  // ── FIX: creditosActivosResumen ya ES el array (rows fue destructurado) ──
+  // FIX: creditosActivosResumen ya ES el array (rows fue destructurado arriba)
   const creditosData = {
     saldados: creditosSaldados,
     activos: {
-      total:           Number(creditosActivosResumen[0]?.total || 0),
+      total:           Number(creditosActivosResumen[0]?.total           || 0),
       saldo_pendiente: Number(creditosActivosResumen[0]?.saldo_pendiente || 0),
     },
     resumen: {
-      utilidad_confirmada:  utilidadCreditosSaldados,
-      total_saldados:       creditosSaldados.length,
+      utilidad_confirmada: utilidadCreditosSaldados,
+      total_saldados:      creditosSaldados.length,
     },
   };
 
@@ -665,6 +682,8 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
 
   return { facturas: facturasCompletas, resumen, prestamos, servicios, creditos: creditosData };
 };
+
+// ─── getProductosTop ──────────────────────────────────────────────────────────
 
 const getProductosTop = async (sucursalId, desde, hasta) => {
   const { rows } = await pool.query(`
@@ -737,6 +756,8 @@ const getProductosTop = async (sucursalId, desde, hasta) => {
   });
 };
 
+// ─── getInventarioBajo ────────────────────────────────────────────────────────
+
 const getInventarioBajo = async (sucursalId) => {
   const { rows } = await pool.query(`
     SELECT id, nombre, stock, stock_minimo, unidad_medida, costo_unitario
@@ -746,6 +767,8 @@ const getInventarioBajo = async (sucursalId) => {
   `, [sucursalId]);
   return rows;
 };
+
+// ─── actualizarCostoCompra ────────────────────────────────────────────────────
 
 const actualizarCostoCompra = async (sucursalId, tipo, imei, nombreProducto, nuevoCosto) => {
   if (tipo === 'serial') {
@@ -762,7 +785,7 @@ const actualizarCostoCompra = async (sucursalId, tipo, imei, nombreProducto, nue
     }
     await pool.query(
       'UPDATE seriales SET costo_compra = $1 WHERE id = $2',
-      [nuevoCosto, check[0].id]
+      [nuevoCosto, check[0].id],
     );
     return { tipo: 'serial', imei, nuevo_costo: nuevoCosto };
   }
@@ -779,13 +802,18 @@ const actualizarCostoCompra = async (sucursalId, tipo, imei, nombreProducto, nue
     }
     await pool.query(
       'UPDATE productos_cantidad SET costo_unitario = $1 WHERE id = $2',
-      [nuevoCosto, check[0].id]
+      [nuevoCosto, check[0].id],
     );
     return { tipo: 'cantidad', nombre_producto: nombreProducto, nuevo_costo: nuevoCosto };
   }
 
-  throw Object.assign(new Error('Tipo de producto inválido. Use "serial" o "cantidad"'), { status: 400 });
+  throw Object.assign(
+    new Error('Tipo de producto inválido. Use "serial" o "cantidad"'),
+    { status: 400 },
+  );
 };
+
+// ─── getValorInventario ───────────────────────────────────────────────────────
 
 const getValorInventario = async (sucursalId) => {
   const [serialResult, cantidadResult] = await Promise.all([
@@ -797,18 +825,18 @@ const getValorInventario = async (sucursalId) => {
         COUNT(CASE WHEN se.costo_compra IS NULL THEN 1 END)::int AS sin_costo
       FROM seriales        se
       JOIN productos_serial ps ON ps.id = se.producto_id
-      WHERE se.vendido    = false
-        AND se.prestado   = false
-        AND ps.activo     = true
+      WHERE se.vendido     = false
+        AND se.prestado    = false
+        AND ps.activo      = true
         AND ps.sucursal_id = $1
     `, [sucursalId]),
 
     pool.query(`
       SELECT
-        COALESCE(SUM(pc.stock),                                                       0)::int     AS unidades,
-        COALESCE(SUM(pc.stock * pc.costo_unitario),                                   0)::numeric AS costo_total,
-        COALESCE(SUM(pc.stock * pc.precio),                                           0)::numeric AS precio_venta_total,
-        COALESCE(SUM(CASE WHEN pc.costo_unitario IS NULL THEN pc.stock ELSE 0 END),   0)::int     AS sin_costo
+        COALESCE(SUM(pc.stock),                                                     0)::int     AS unidades,
+        COALESCE(SUM(pc.stock * pc.costo_unitario),                                 0)::numeric AS costo_total,
+        COALESCE(SUM(pc.stock * pc.precio),                                         0)::numeric AS precio_venta_total,
+        COALESCE(SUM(CASE WHEN pc.costo_unitario IS NULL THEN pc.stock ELSE 0 END), 0)::int     AS sin_costo
       FROM productos_cantidad pc
       WHERE pc.activo      = true
         AND pc.stock       > 0
