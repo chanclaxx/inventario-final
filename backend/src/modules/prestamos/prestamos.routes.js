@@ -27,6 +27,8 @@ router.get('/',       ctrl.getPrestamos);
 router.post('/',      validarPrestamo,  validate, ctrl.crearPrestamo);
 router.post('/batch', validarPrestamos, validate, ctrl.crearPrestamos); // ← antes de /:id
 
+router.get('/pdf/:tipo/:personaId', ctrl.exportarPdfPorPersona);
+
 router.get('/:id',                    ctrl.getPrestamoById);
 router.post('/:id/abonos',            validarAbono,             validate, ctrl.registrarAbono);
 router.patch('/:id/devolver',                                             ctrl.devolverPrestamo);

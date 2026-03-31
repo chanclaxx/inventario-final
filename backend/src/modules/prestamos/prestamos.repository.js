@@ -143,11 +143,95 @@ const salarSerial = async (client, imei, sucursalId) => {
       AND ps.sucursal_id = $2
   `, [imei, sucursalId]);
 };
+const findActivosPorPrestatario = async (prestatarioId, negocioId) => {
+  const { rows } = await pool.query(`
+    SELECT
+      p.id,
+      p.fecha,
+      p.nombre_producto,
+      p.imei,
+      p.cantidad_prestada,
+      p.valor_prestamo,
+      p.total_abonado,
+      (p.valor_prestamo - p.total_abonado) AS saldo_pendiente,
+      p.estado,
+      pr.nombre  AS prestatario_nombre,
+      e.nombre   AS empleado_nombre,
+      su.nombre  AS sucursal_nombre
+    FROM prestamos p
+    JOIN  sucursales               su  ON su.id  = p.sucursal_id
+    JOIN  prestatarios             pr  ON pr.id  = p.prestatario_id
+    LEFT JOIN empleados_prestatario e  ON e.id   = p.empleado_id
+    WHERE p.prestatario_id = $1
+      AND su.negocio_id    = $2
+      AND p.estado         = 'Activo'
+    ORDER BY p.fecha DESC
+  `, [prestatarioId, negocioId]);
+ 
+  return rows;
+};
+ 
+/**
+ * Devuelve todos los préstamos Activos de un cliente externo
+ * con sus abonos, para generar el PDF de estado de cuenta.
+ *
+ * @param {number} clienteId
+ * @param {number} negocioId
+ */
+const findActivosPorCliente = async (clienteId, negocioId) => {
+  const { rows } = await pool.query(`
+    SELECT
+      p.id,
+      p.fecha,
+      p.nombre_producto,
+      p.imei,
+      p.cantidad_prestada,
+      p.valor_prestamo,
+      p.total_abonado,
+      (p.valor_prestamo - p.total_abonado) AS saldo_pendiente,
+      p.estado,
+      c.nombre   AS cliente_nombre,
+      c.cedula   AS cliente_cedula,
+      c.celular  AS cliente_celular,
+      su.nombre  AS sucursal_nombre
+    FROM prestamos p
+    JOIN  sucursales su ON su.id = p.sucursal_id
+    JOIN  clientes   c  ON c.id  = p.cliente_id
+    WHERE p.cliente_id = $1
+      AND su.negocio_id = $2
+      AND p.estado      = 'Activo'
+    ORDER BY p.fecha DESC
+  `, [clienteId, negocioId]);
+ 
+  return rows;
+};
+ 
+/**
+ * Devuelve los abonos de un conjunto de préstamos en un solo query.
+ * Útil para enriquecer el PDF sin N+1 queries.
+ *
+ * @param {number[]} prestamoIds
+ */
+const findAbonosPorPrestamos = async (prestamoIds) => {
+  if (!prestamoIds.length) return [];
+ 
+  // Genera $1,$2,$3... dinámicamente
+  const placeholders = prestamoIds.map((_, i) => `$${i + 1}`).join(',');
+ 
+  const { rows } = await pool.query(`
+    SELECT prestamo_id, fecha, valor
+    FROM abonos_prestamo
+    WHERE prestamo_id IN (${placeholders})
+    ORDER BY prestamo_id, fecha
+  `, prestamoIds);
+ 
+  return rows;
+};
 
 module.exports = {
   findAll, findById, findByIdYNegocio,
   perteneceAlNegocio,
   getAbonos, create, insertarAbono, updateEstado,
   ajustarStock, actualizarCantidadYValor,
-  salarSerial,
+  salarSerial,findAbonosPorPrestamos,findActivosPorCliente,findActivosPorPrestatario
 };

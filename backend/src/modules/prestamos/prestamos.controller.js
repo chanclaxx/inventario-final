@@ -1,4 +1,5 @@
 const service = require('./prestamos.service');
+const pdfService = require('./prestamos.pdf.service');
 
 const getPrestamos = async (req, res, next) => {
   try {
@@ -88,10 +89,49 @@ const devolverParcial = async (req, res, next) => {
     res.json({ ok: true, data, message: 'Devolución registrada correctamente' });
   } catch (err) { next(err); }
 };
+const exportarPdfPorPersona = async (req, res, next) => {
+  try {
+    const { tipo, personaId } = req.params;
+ 
+    if (!['prestatario', 'cliente'].includes(tipo)) {
+      return res.status(400).json({
+        ok:    false,
+        error: "El parámetro 'tipo' debe ser 'prestatario' o 'cliente'",
+      });
+    }
+ 
+    const id = parseInt(personaId, 10);
+    if (isNaN(id) || id < 1) {
+      return res.status(400).json({ ok: false, error: 'ID de persona inválido' });
+    }
+ 
+    // negocio_nombre puede venir del middleware de autenticación
+    // Si tu middleware popula req.user.negocio_nombre úsalo;
+    // de lo contrario deja cadena vacía y el PDF usará 'Mi Negocio'.
+    const negocioNombre = req.user?.negocio_nombre || '';
+ 
+    const pdfStream = await pdfService.generarPdfPrestamosActivos({
+      tipo,
+      personaId:    id,
+      negocioId:    req.user.negocio_id,
+      negocioNombre,
+    });
+ 
+    // Nombre de archivo sugerido para el navegador
+    const filename = `prestamos-activos-${tipo}-${id}-${Date.now()}.pdf`;
+ 
+    res.setHeader('Content-Type',        'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+ 
+    pdfStream.pipe(res);
+  } catch (err) {
+    next(err);
+  }
+};
 
 module.exports = {
   getPrestamos, getPrestamoById,
   crearPrestamo, crearPrestamos,
   registrarAbono,
-  devolverPrestamo, devolverParcial,
+  devolverPrestamo, devolverParcial,exportarPdfPorPersona
 };
