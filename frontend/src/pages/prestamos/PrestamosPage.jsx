@@ -17,6 +17,7 @@ import { InputMoneda }                          from '../../components/ui/InputM
 import { Spinner }                              from '../../components/ui/Spinner';
 import { EmptyState }                           from '../../components/ui/EmptyState';
 import { TabCreditos }                          from './TabCreditos';
+import { NombrePersonaPrestamo }                from './NombrePersonaPrestamo';
 import api                                      from '../../api/axios.config';
 import {
   Handshake, CreditCard, Bike, Plus, CheckCircle,
@@ -71,7 +72,7 @@ function useColoresConfig() {
   };
 }
 
-// ─── Chip de color ───────────────────────────────────────────────────────────
+// ─── Chip de color ────────────────────────────────────────────────────────────
 function ChipColor({ color }) {
   if (!color) return null;
   return (
@@ -299,19 +300,26 @@ function CardPrestamoCliente({ prestamo, onAbonar, onDevolver }) {
 
 // ─── Grupo colapsable ─────────────────────────────────────────────────────────
 
-function GrupoPrestatario({ nombre, prestamos, saldoTotal, onAbonar, onDevolver, CardItem, coloresActivo }) {
+function GrupoPrestatario({ prestamos, saldoTotal, onAbonar, onDevolver, CardItem, coloresActivo }) {
   const [abierto, setAbierto] = useState(true);
   const activos  = prestamos.filter((p) => p.estado === 'Activo');
   const cerrados = prestamos.filter((p) => p.estado !== 'Activo');
-  const Card = CardItem;
+  const Card     = CardItem;
+
+  // Primer préstamo del grupo como referencia de persona para NombrePersonaPrestamo
+  const primerPrestamo = prestamos[0];
 
   return (
     <div className="border border-gray-100 rounded-2xl overflow-hidden">
-      <button onClick={() => setAbierto((v) => !v)}
+      <button
+        onClick={() => setAbierto((v) => !v)}
         className="w-full flex items-center justify-between px-4 py-3
-          bg-gray-50 hover:bg-gray-100 transition-colors">
+          bg-gray-50 hover:bg-gray-100 transition-colors"
+      >
         <div className="flex items-center gap-3 min-w-0">
-          <span className="font-semibold text-gray-800 truncate">{nombre}</span>
+          {/* NombrePersonaPrestamo detiene la propagación internamente
+              para que el clic en el nombre no colapse/expanda el grupo */}
+          <NombrePersonaPrestamo prestamo={primerPrestamo} />
           <span className="text-xs text-gray-400 flex-shrink-0">{activos.length} activo(s)</span>
         </div>
         <div className="flex items-center gap-3 flex-shrink-0">
@@ -323,6 +331,7 @@ function GrupoPrestatario({ nombre, prestamos, saldoTotal, onAbonar, onDevolver,
             : <ChevronDown size={16} className="text-gray-400" />}
         </div>
       </button>
+
       {abierto && (
         <div className="flex flex-col gap-3 p-3">
           {activos.length === 0 ? (
@@ -797,7 +806,7 @@ export default function PrestamosPage() {
     .filter((p) => p.prestatario_id)
     .reduce((acc, p) => {
       const key = `prestatario_${p.prestatario_id}`;
-      if (!acc[key]) acc[key] = { nombre: p.prestatario_nombre || p.prestatario, prestamos: [], saldoTotal: 0 };
+      if (!acc[key]) acc[key] = { prestamos: [], saldoTotal: 0 };
       acc[key].prestamos.push(p);
       if (p.estado === 'Activo') acc[key].saldoTotal += Number(p.valor_prestamo) - Number(p.total_abonado);
       return acc;
@@ -807,7 +816,7 @@ export default function PrestamosPage() {
     .filter((p) => p.cliente_id)
     .reduce((acc, p) => {
       const key = `cliente_${p.cliente_id}`;
-      if (!acc[key]) acc[key] = { nombre: p.cliente_nombre || p.prestatario, prestamos: [], saldoTotal: 0 };
+      if (!acc[key]) acc[key] = { prestamos: [], saldoTotal: 0 };
       acc[key].prestamos.push(p);
       if (p.estado === 'Activo') acc[key].saldoTotal += Number(p.valor_prestamo) - Number(p.total_abonado);
       return acc;
@@ -877,7 +886,6 @@ export default function PrestamosPage() {
                     Object.entries(gruposCompaneros).map(([key, grupo]) => (
                       <GrupoPrestatario
                         key={key}
-                        nombre={grupo.nombre}
                         prestamos={grupo.prestamos}
                         saldoTotal={grupo.saldoTotal}
                         onAbonar={setPrestamoAbono}
@@ -897,7 +905,6 @@ export default function PrestamosPage() {
                     Object.entries(gruposClientes).map(([key, grupo]) => (
                       <GrupoPrestatario
                         key={key}
-                        nombre={grupo.nombre}
                         prestamos={grupo.prestamos}
                         saldoTotal={grupo.saldoTotal}
                         onAbonar={setPrestamoAbono}
