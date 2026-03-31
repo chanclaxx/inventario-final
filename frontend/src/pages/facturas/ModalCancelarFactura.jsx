@@ -1,6 +1,6 @@
 import { useState }  from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ShieldAlert, AlertTriangle, PackageX, Package, Bike } from 'lucide-react';
+import { ShieldAlert, AlertTriangle, PackageX, Package, Bike, CreditCard } from 'lucide-react';
 import { Modal }   from '../../components/ui/Modal';
 import { Button }  from '../../components/ui/Button';
 import { Input }   from '../../components/ui/Input';
@@ -20,7 +20,6 @@ function PantallaBloqueo({ facturaId, entrega, onClose }) {
   return (
     <Modal open onClose={onClose} title="No se puede cancelar" size="sm">
       <div className="flex flex-col gap-4">
-
         <div className="flex items-start gap-3 bg-orange-50 border border-orange-200 rounded-xl p-3">
           <Bike size={18} className="text-orange-500 flex-shrink-0 mt-0.5" />
           <div className="flex flex-col gap-1">
@@ -56,12 +55,52 @@ function PantallaBloqueo({ facturaId, entrega, onClose }) {
   );
 }
 
+// ─── Pantalla de bloqueo por crédito ──────────────────────────────────────────
+
+function PantallaBloqueoCredito({ facturaId, nombreCliente, onClose }) {
+  return (
+    <Modal open onClose={onClose} title="No se puede cancelar" size="sm">
+      <div className="flex flex-col gap-4">
+        <div className="flex items-start gap-3 bg-yellow-50 border border-yellow-200 rounded-xl p-3">
+          <CreditCard size={18} className="text-yellow-600 flex-shrink-0 mt-0.5" />
+          <div className="flex flex-col gap-1">
+            <p className="text-sm font-semibold text-yellow-800">
+              Factura #{String(facturaId).padStart(6, '0')} es una venta a crédito
+            </p>
+            <p className="text-xs text-yellow-700">
+              La factura de <span className="font-semibold">{nombreCliente}</span> está
+              asociada a un crédito. No se puede cancelar directamente desde aquí
+              porque podría descuadrar los abonos y el saldo del crédito.
+            </p>
+          </div>
+        </div>
+
+        <div className="bg-gray-50 rounded-xl px-4 py-3 flex flex-col gap-1.5">
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+            Para cancelar esta factura
+          </p>
+          <p className="text-sm text-gray-700">
+            Ve a <span className="font-semibold">Préstamos → Créditos</span>, busca
+            el crédito del cliente y usa el botón{' '}
+            <span className="font-semibold text-red-600">Cancelar crédito</span>.
+          </p>
+          <p className="text-xs text-gray-400 mt-1">
+            Eso cancelará el crédito, cancelará la factura y devolverá los productos
+            al inventario de forma segura.
+          </p>
+        </div>
+
+        <Button variant="secondary" onClick={onClose}>Entendido</Button>
+      </div>
+    </Modal>
+  );
+}
+
 // ─── Modal principal ──────────────────────────────────────────────────────────
 
 export function ModalCancelarFactura({ factura, onClose, onSuccess }) {
   const queryClient = useQueryClient();
 
-  // Cargar detalle completo (retomas) y entrega de domicilio en paralelo
   const { data: detalle, isLoading: loadingDetalle } = useQuery({
     queryKey: ['factura-detalle-cancelar', factura.id],
     queryFn:  () => getFacturaById(factura.id).then((r) => r.data.data),
@@ -76,10 +115,11 @@ export function ModalCancelarFactura({ factura, onClose, onSuccess }) {
 
   const isLoading = loadingDetalle || loadingEntrega;
 
-  // Buscar si hay una entrega Pendiente para esta factura
   const entregaPendiente = (entregasData || []).find(
     (e) => e.factura_id === factura.id && e.estado === 'Pendiente'
   ) || null;
+
+  const esCredito = detalle?.estado === 'Credito' || factura?.estado === 'Credito';
 
   const retomasEnInventario = (detalle?.retomas || []).filter(
     (r) => r.ingreso_inventario
@@ -133,9 +173,18 @@ export function ModalCancelarFactura({ factura, onClose, onSuccess }) {
     );
   }
 
+  // ── Bloqueo: factura de crédito ───────────────────────────────────────────
+  if (esCredito) {
+    return (
+      <PantallaBloqueoCredito
+        facturaId={factura.id}
+        nombreCliente={factura.nombre_cliente}
+        onClose={onClose}
+      />
+    );
+  }
+
   // ── Bloqueo: domicilio pendiente ──────────────────────────────────────────
-  // Se muestra antes de cualquier otro paso. El backend también lo rechaza,
-  // pero este bloqueo evita que el usuario llegue hasta el PIN innecesariamente.
   if (entregaPendiente) {
     return (
       <PantallaBloqueo
