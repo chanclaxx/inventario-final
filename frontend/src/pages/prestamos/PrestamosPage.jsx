@@ -17,12 +17,12 @@ import { InputMoneda }                          from '../../components/ui/InputM
 import { Spinner }                              from '../../components/ui/Spinner';
 import { EmptyState }                           from '../../components/ui/EmptyState';
 import { TabCreditos }                          from './TabCreditos';
-import { NombrePersonaPrestamo }                from './NombrePersonaPrestamo';
+import useExportarPdfPrestamos                  from '../../hooks/useExportarPdfPrestamos';
 import api                                      from '../../api/axios.config';
 import {
   Handshake, CreditCard, Bike, Plus, CheckCircle,
   ChevronDown, ChevronUp, ChevronLeft, ChevronRight,
-  Users, User, AlertTriangle,
+  Users, User, AlertTriangle, FileDown, Loader2,
 } from 'lucide-react';
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
@@ -80,6 +80,39 @@ function ChipColor({ color }) {
       <span className="w-2.5 h-2.5 rounded-full bg-gray-400 flex-shrink-0 border border-gray-300" />
       <span className="text-xs text-gray-500">{color}</span>
     </span>
+  );
+}
+
+// ─── Botón exportar PDF ───────────────────────────────────────────────────────
+
+function BotonExportarPdf({ tipo, personaId, nombrePersona }) {
+  const { exportando, exportarPdf } = useExportarPdfPrestamos();
+
+  const handleClick = async (e) => {
+    e.stopPropagation(); // evita colapsar/expandir el grupo
+    try {
+      const nombreArchivo = `prestamos-activos-${nombrePersona.replace(/\s+/g, '-').toLowerCase()}`;
+      await exportarPdf(tipo, personaId, nombreArchivo);
+    } catch (err) {
+      alert(err.message || 'Error al generar el PDF');
+    }
+  };
+
+  return (
+    <button
+      onClick={handleClick}
+      disabled={exportando}
+      title="Exportar préstamos activos en PDF"
+      className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium
+        border border-blue-200 text-blue-600 bg-blue-50
+        hover:bg-blue-100 hover:border-blue-300 transition-colors
+        disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0"
+    >
+      {exportando
+        ? <Loader2 size={12} className="animate-spin" />
+        : <FileDown size={12} />}
+      Exportar PDF
+    </button>
   );
 }
 
@@ -300,14 +333,11 @@ function CardPrestamoCliente({ prestamo, onAbonar, onDevolver }) {
 
 // ─── Grupo colapsable ─────────────────────────────────────────────────────────
 
-function GrupoPrestatario({ prestamos, saldoTotal, onAbonar, onDevolver, CardItem, coloresActivo }) {
+function GrupoPrestatario({ nombre, tipo, personaId, prestamos, saldoTotal, onAbonar, onDevolver, CardItem, coloresActivo }) {
   const [abierto, setAbierto] = useState(true);
   const activos  = prestamos.filter((p) => p.estado === 'Activo');
   const cerrados = prestamos.filter((p) => p.estado !== 'Activo');
   const Card     = CardItem;
-
-  // Primer préstamo del grupo como referencia de persona para NombrePersonaPrestamo
-  const primerPrestamo = prestamos[0];
 
   return (
     <div className="border border-gray-100 rounded-2xl overflow-hidden">
@@ -317,14 +347,19 @@ function GrupoPrestatario({ prestamos, saldoTotal, onAbonar, onDevolver, CardIte
           bg-gray-50 hover:bg-gray-100 transition-colors"
       >
         <div className="flex items-center gap-3 min-w-0">
-          {/* NombrePersonaPrestamo detiene la propagación internamente
-              para que el clic en el nombre no colapse/expanda el grupo */}
-          <NombrePersonaPrestamo prestamo={primerPrestamo} />
+          <span className="font-semibold text-gray-800 truncate">{nombre}</span>
           <span className="text-xs text-gray-400 flex-shrink-0">{activos.length} activo(s)</span>
         </div>
-        <div className="flex items-center gap-3 flex-shrink-0">
+        <div className="flex items-center gap-2 flex-shrink-0">
           {saldoTotal > 0 && (
             <span className="text-sm font-bold text-red-500">{formatCOP(saldoTotal)}</span>
+          )}
+          {activos.length > 0 && (
+            <BotonExportarPdf
+              tipo={tipo}
+              personaId={personaId}
+              nombrePersona={nombre}
+            />
           )}
           {abierto
             ? <ChevronUp   size={16} className="text-gray-400" />
@@ -806,7 +841,14 @@ export default function PrestamosPage() {
     .filter((p) => p.prestatario_id)
     .reduce((acc, p) => {
       const key = `prestatario_${p.prestatario_id}`;
-      if (!acc[key]) acc[key] = { prestamos: [], saldoTotal: 0 };
+      if (!acc[key]) {
+        acc[key] = {
+          nombre:    p.prestatario_nombre || p.prestatario,
+          personaId: p.prestatario_id,
+          prestamos:  [],
+          saldoTotal: 0,
+        };
+      }
       acc[key].prestamos.push(p);
       if (p.estado === 'Activo') acc[key].saldoTotal += Number(p.valor_prestamo) - Number(p.total_abonado);
       return acc;
@@ -816,7 +858,14 @@ export default function PrestamosPage() {
     .filter((p) => p.cliente_id)
     .reduce((acc, p) => {
       const key = `cliente_${p.cliente_id}`;
-      if (!acc[key]) acc[key] = { prestamos: [], saldoTotal: 0 };
+      if (!acc[key]) {
+        acc[key] = {
+          nombre:    p.cliente_nombre || p.prestatario,
+          personaId: p.cliente_id,
+          prestamos:  [],
+          saldoTotal: 0,
+        };
+      }
       acc[key].prestamos.push(p);
       if (p.estado === 'Activo') acc[key].saldoTotal += Number(p.valor_prestamo) - Number(p.total_abonado);
       return acc;
@@ -886,6 +935,9 @@ export default function PrestamosPage() {
                     Object.entries(gruposCompaneros).map(([key, grupo]) => (
                       <GrupoPrestatario
                         key={key}
+                        tipo="prestatario"
+                        nombre={grupo.nombre}
+                        personaId={grupo.personaId}
                         prestamos={grupo.prestamos}
                         saldoTotal={grupo.saldoTotal}
                         onAbonar={setPrestamoAbono}
@@ -905,6 +957,9 @@ export default function PrestamosPage() {
                     Object.entries(gruposClientes).map(([key, grupo]) => (
                       <GrupoPrestatario
                         key={key}
+                        tipo="cliente"
+                        nombre={grupo.nombre}
+                        personaId={grupo.personaId}
                         prestamos={grupo.prestamos}
                         saldoTotal={grupo.saldoTotal}
                         onAbonar={setPrestamoAbono}
