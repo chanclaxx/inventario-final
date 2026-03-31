@@ -162,12 +162,16 @@ const findActivosPorPrestatario = async (prestatarioId, negocioId) => {
     JOIN  sucursales               su  ON su.id  = p.sucursal_id
     JOIN  prestatarios             pr  ON pr.id  = p.prestatario_id
     LEFT JOIN empleados_prestatario e  ON e.id   = p.empleado_id
+    LEFT JOIN seriales              s  ON s.imei = p.imei
+    LEFT JOIN productos_serial      ps ON ps.id  = s.producto_id
+                                      AND ps.sucursal_id = p.sucursal_id
     WHERE p.prestatario_id = $1
       AND su.negocio_id    = $2
       AND p.estado         = 'Activo'
+      AND (p.imei IS NULL OR ps.sucursal_id IS NOT NULL)
     ORDER BY p.fecha DESC
   `, [prestatarioId, negocioId]);
- 
+
   return rows;
 };
  
@@ -197,12 +201,16 @@ const findActivosPorCliente = async (clienteId, negocioId) => {
     FROM prestamos p
     JOIN  sucursales su ON su.id = p.sucursal_id
     JOIN  clientes   c  ON c.id  = p.cliente_id
+    LEFT JOIN seriales              s  ON s.imei = p.imei
+    LEFT JOIN productos_serial      ps ON ps.id  = s.producto_id
+                                      AND ps.sucursal_id = p.sucursal_id
     WHERE p.cliente_id = $1
       AND su.negocio_id = $2
       AND p.estado      = 'Activo'
+      AND (p.imei IS NULL OR ps.sucursal_id IS NOT NULL)
     ORDER BY p.fecha DESC
   `, [clienteId, negocioId]);
- 
+
   return rows;
 };
  

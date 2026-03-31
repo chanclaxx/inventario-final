@@ -367,8 +367,12 @@ const generarPdfPrestamosActivos = async ({ tipo, personaId, negocioId, negocioN
   });
 
   // 4. Crear documento PDF
+  // ⚠️ bufferPages: true es OBLIGATORIO para poder usar switchToPage() en el
+  //    pie de página. Sin esto PDFKit hace flush de cada página al terminarla
+  //    y switchToPage(i) lanza "out of bounds" en cualquier página ya cerrada.
   const doc = new PDFDocument({
-    size:    'A4',
+    size:        'A4',
+    bufferPages: true, // ← fix: mantiene todas las páginas en memoria hasta doc.end()
     margins: { top: MARGIN, bottom: MARGIN, left: MARGIN, right: MARGIN },
     info: {
       Title:   `Estado de cuenta — ${personaNombre}`,
@@ -404,9 +408,11 @@ const generarPdfPrestamosActivos = async ({ tipo, personaId, negocioId, negocioN
   });
 
   // 7. Resumen global
-  drawResumenGlobal(doc, prestamos, y);
+  y = drawResumenGlobal(doc, prestamos, y);
 
   // 8. Pie de página en cada página
+  // Debe ir ANTES de doc.end() y DESPUÉS de todo el contenido,
+  // ya que bufferedPageRange().count solo es exacto en este punto.
   const totalPages = doc.bufferedPageRange().count;
   for (let i = 0; i < totalPages; i++) {
     doc.switchToPage(i);
@@ -431,6 +437,7 @@ const generarPdfPrestamosActivos = async ({ tipo, personaId, negocioId, negocioN
       );
   }
 
+  // 9. Cerrar documento — siempre al final, después del loop del pie
   doc.end();
   return doc;
 };
