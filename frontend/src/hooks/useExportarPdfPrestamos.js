@@ -5,7 +5,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { useState } from 'react';
-import api from '../api/axios'; // tu instancia Axios con baseURL y auth
+import api from '../api/axios.config'; // tu instancia Axios con baseURL y auth
 
 /**
  * @typedef {'prestatario'|'cliente'} TipoPersona
