@@ -6,6 +6,7 @@ import { getLineas, crearLinea, actualizarLinea, eliminarLinea }             fro
 import { UsuariosConfig }   from './UsuariosConfig';
 import { SucursalesConfig } from './SucursalesConfig';
 import { PasswordConfig }   from './PasswordConfig';
+import { MetodosPagoConfig } from './MetodosPagoConfig';
 import { Button }  from '../../components/ui/Button';
 import { Input }   from '../../components/ui/Input';
 import { Modal }   from '../../components/ui/Modal';
@@ -766,6 +767,10 @@ function SeccionCatalogo({ valores, set, form, mutation, guardado }) {
 
       <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
         <ColoresSerialConfig valores={valores} set={set} />
+      </div>
+
+      <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
+        <MetodosPagoConfig valores={valores} set={set} />
       </div>
 
       <div className="flex items-center gap-3">
