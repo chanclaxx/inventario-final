@@ -53,7 +53,7 @@ const CONFIG_GRUPOS = {
       fecha:       item.fecha,
     }),
   },
-  abonosPrestamo: {
+ abonosPrestamo: {
     icono:      ArrowDownCircle,
     color:      'purple',
     bgHeader:   'bg-purple-50',
@@ -66,20 +66,20 @@ const CONFIG_GRUPOS = {
     }),
   },
   abonosServicio: {
-    icono:      Wrench,
-    color:      'blue',
-    bgHeader:   'bg-blue-50',
-    textHeader: 'text-blue-700',
-    borderColor:'border-blue-100',
-    renderItem: (item) => {
-      const equipo = item.equipo_nombre || item.equipo_tipo || '';
-      const cliente = item.cliente_nombre || '';
-      const ordenNum = item.orden_id ? `#OS-${String(item.orden_id).padStart(4, '0')}` : '';
-      const partes = [ordenNum, equipo, cliente].filter(Boolean).join(' — ');
-      return {
-        descripcion: partes || item.concepto || 'Servicio técnico',
-        detalle:     null,
-        fecha:       item.fecha,
+  icono:      Wrench,
+  color:      'blue',
+  bgHeader:   'bg-blue-50',
+  textHeader: 'text-blue-700',
+  borderColor:'border-blue-100',
+  renderItem: (item) => {
+    const equipo   = item.equipo_nombre || item.equipo_tipo || '';
+    const cliente  = item.cliente_nombre || '';
+    const ordenNum = item.orden_id ? `#OS-${String(item.orden_id).padStart(4, '0')}` : '';
+    const partes   = [ordenNum, equipo, cliente].filter(Boolean).join(' — ');
+    return {
+      descripcion: partes || item.concepto || 'Servicio técnico',
+      detalle:     item.metodo || null,   // ← agregar método
+      fecha:       item.fecha,
       };
     },
   },
