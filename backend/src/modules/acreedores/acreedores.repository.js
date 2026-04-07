@@ -97,13 +97,13 @@ const create = async (negocioId, { nombre, cedula, telefono, proveedor_id }) => 
 };
 
 const insertarMovimiento = async ({
-  acreedor_id, usuario_id, tipo, valor, descripcion, firma, compra_id, registrar_en_caja,
+  acreedor_id, usuario_id, tipo, valor, descripcion, firma, compra_id, registrar_en_caja, metodo,
 }) => {
   const { rows } = await pool.query(`
-    INSERT INTO movimientos_acreedor(acreedor_id, usuario_id, tipo, valor, descripcion, firma, compra_id, registrar_en_caja)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    INSERT INTO movimientos_acreedor(acreedor_id, usuario_id, tipo, valor, descripcion, firma, compra_id, registrar_en_caja, metodo)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
     RETURNING *
-  `, [acreedor_id, usuario_id, tipo, valor, descripcion, firma ?? null, compra_id || null, registrar_en_caja !== false]);
+  `, [acreedor_id, usuario_id, tipo, valor, descripcion, firma ?? null, compra_id || null, registrar_en_caja !== false, metodo || null]);
   return rows[0];
 };
 
