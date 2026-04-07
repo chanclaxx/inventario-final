@@ -54,17 +54,17 @@ const CONFIG_GRUPOS = {
     }),
   },
  abonosPrestamo: {
-    icono:      ArrowDownCircle,
-    color:      'purple',
-    bgHeader:   'bg-purple-50',
-    textHeader: 'text-purple-700',
-    borderColor:'border-purple-100',
-    renderItem: (item) => ({
-      descripcion: `Préstamo — ${item.prestatario}`,
-      detalle:     null,
-      fecha:       item.fecha,
-    }),
-  },
+  icono:      ArrowDownCircle,
+  color:      'purple',
+  bgHeader:   'bg-purple-50',
+  textHeader: 'text-purple-700',
+  borderColor:'border-purple-100',
+  renderItem: (item) => ({
+    descripcion: `Préstamo — ${item.prestatario}`,
+    detalle:     item.metodo || null,   // ← agregar método
+    fecha:       item.fecha,
+  }),
+},
   abonosServicio: {
   icono:      Wrench,
   color:      'blue',
