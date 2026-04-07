@@ -7,6 +7,7 @@ import { Badge }        from '../../components/ui/Badge';
 import { SearchInput }  from '../../components/ui/SearchInput';
 import { InputMoneda }  from '../../components/ui/InputMoneda';
 import { useAuth }      from '../../context/useAuth';
+import { useMetodosPago } from '../../hooks/useMetodosPago';
 import { useSucursalKey } from '../../hooks/useSucursalKey';
 import { crearCompra }  from '../../api/compras.api';
 import { getCruces, crearCruce } from '../../api/cruces.api';
@@ -42,7 +43,7 @@ function parsearColoresConfig(configData) {
 }
 
 // ─── Helper: payload de crearCompra ───────────────────────────────────────────
-function buildPayloadCompra({ proveedorId, monto, modoPago, lineas, registrarEnCaja = true }) {
+function buildPayloadCompra({ proveedorId, monto, modoPago, lineas, registrarEnCaja = true, metodoPagoContado }) {
   return {
     proveedor_id:        Number(proveedorId),
     total:               monto,
@@ -50,7 +51,7 @@ function buildPayloadCompra({ proveedorId, monto, modoPago, lineas, registrarEnC
     agregarComoAcreedor: modoPago === 'credito',
     registrar_en_caja:   registrarEnCaja,
     lineas,
-    pagos: [{ metodo: modoPago === 'credito' ? 'Credito' : 'Contado', valor: monto }],
+    pagos: [{ metodo: modoPago === 'credito' ? 'Credito' : (metodoPagoContado || 'Efectivo'), valor: monto }],
   };
 }
 
@@ -149,10 +150,11 @@ function ModalYaEnInventario({ open, seriales, onCerrar }) {
 }
 
 // ─── Panel info de compra ─────────────────────────────────────────────────────
-function InfoCompra({ proveedorId, setProveedorId, costoCompra, setCostoCompra, modoPago, setModoPago, onProveedorTipoChange, registrarEnCaja, setRegistrarEnCaja }) {
+function InfoCompra({ proveedorId, setProveedorId, costoCompra, setCostoCompra, modoPago, setModoPago, onProveedorTipoChange, registrarEnCaja, setRegistrarEnCaja, metodoPagoContado, setMetodoPagoContado }) {
   const queryClient = useQueryClient();
   const { esAdminNegocio } = useAuth();
   const esAdmin = esAdminNegocio();
+  const metodosPago = useMetodosPago();
 
   const [creandoProveedor, setCreandoProveedor] = useState(false);
   const [nuevoProveedor,   setNuevoProveedor]   = useState({ nombre: '', nit: '', telefono: '', direccion: '' });
@@ -333,6 +335,27 @@ function InfoCompra({ proveedorId, setProveedorId, costoCompra, setCostoCompra, 
               <p className="text-[10px] text-gray-400">Si no se marca, no aparecerá en el resumen de caja</p>
             </div>
           </label>
+        </div>
+      )}
+
+      {Boolean(proveedorId) && modoPago === 'contado' && (
+        <div className="flex flex-col gap-1.5 pt-1 border-t border-amber-200">
+          <label className="text-xs text-amber-700 font-medium">Método de pago</label>
+          <div className="flex gap-2 flex-wrap">
+            {metodosPago.map((m) => {
+              const mId    = m.id;
+              const mLabel = m.label;
+              return (
+                <button key={mId} type="button" onClick={() => setMetodoPagoContado(mId)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition-all
+                    ${metodoPagoContado === mId
+                      ? 'bg-green-100 border-green-400 text-green-700'
+                      : 'bg-white border-amber-200 text-gray-600 hover:border-green-300'}`}>
+                  {mLabel}
+                </button>
+              );
+            })}
+          </div>
         </div>
       )}
     </div>
@@ -946,6 +969,7 @@ function PasoSerial({ sucursalKey, onExito, onDuplicadosEncontrados, coloresActi
   const [registrarEnCaja, setRegistrarEnCaja] = useState(true);
   const [costoCompra,     setCostoCompra]     = useState('');
   const [modoPago,        setModoPago]        = useState(null);
+  const [metodoPagoContado, setMetodoPagoContado] = useState('Efectivo');
   const [error,           setError]           = useState('');
   const [verificando,     setVerificando]     = useState(false);
   const reactivarMapRef = useRef({});
@@ -996,6 +1020,7 @@ function PasoSerial({ sucursalKey, onExito, onDuplicadosEncontrados, coloresActi
           monto: costo ? costo * itemsValidos.length : 0,
           modoPago,
           registrarEnCaja,
+          metodoPagoContado,
           lineas: itemsValidos.map((item) => ({
             nombre_producto:     lineaSel.nombre,
             imei:                extraerImei(item).trim(),
@@ -1172,6 +1197,8 @@ function PasoSerial({ sucursalKey, onExito, onDuplicadosEncontrados, coloresActi
               setModoPago={setModoPago}
               registrarEnCaja={registrarEnCaja}
               setRegistrarEnCaja={setRegistrarEnCaja}
+              metodoPagoContado={metodoPagoContado}
+              setMetodoPagoContado={setMetodoPagoContado}
               onProveedorTipoChange={(tipo) => { setRegistrarEnCaja(tipo !== 'proveedor'); }}
             />
           )}
@@ -1203,6 +1230,7 @@ function PasoCantidad({ sucursalKey, onExito }) {
   const [registrarEnCaja, setRegistrarEnCaja] = useState(true);
   const [costoCompra,   setCostoCompra]   = useState('');
   const [modoPago,      setModoPago]      = useState(null);
+  const [metodoPagoContado, setMetodoPagoContado] = useState('Efectivo');
   const [error,         setError]         = useState('');
 
   const { data: productosData } = useQuery({
@@ -1236,7 +1264,7 @@ function PasoCantidad({ sucursalKey, onExito }) {
       const cantidadNum = Number(cantidad);
       const costo = costoCompra !== '' ? Number(costoCompra) : null;
       if (proveedorId && modoPago) {
-        await crearCompra(buildPayloadCompra({ proveedorId, monto: costo ? costo * cantidadNum : 0, modoPago, registrarEnCaja, lineas: [{ nombre_producto: productoSel.nombre, cantidad: cantidadNum, precio_unitario: costo || 0, producto_id: productoSel.id }] }));
+        await crearCompra(buildPayloadCompra({ proveedorId, monto: costo ? costo * cantidadNum : 0, modoPago,metodoPagoContado, registrarEnCaja, lineas: [{ nombre_producto: productoSel.nombre, cantidad: cantidadNum, precio_unitario: costo || 0, producto_id: productoSel.id }] }));
       } else {
         await ajustarStockCantidad(productoSel.id, { cantidad: cantidadNum, costo_unitario: costo, proveedor_id: proveedorId ? Number(proveedorId) : undefined });
       }
@@ -1314,6 +1342,8 @@ function PasoCantidad({ sucursalKey, onExito }) {
               costoCompra={costoCompra} setCostoCompra={setCostoCompra}
               modoPago={modoPago} setModoPago={setModoPago}
               registrarEnCaja={registrarEnCaja} setRegistrarEnCaja={setRegistrarEnCaja}
+              metodoPagoContado={metodoPagoContado}
+              setMetodoPagoContado={setMetodoPagoContado}
               onProveedorTipoChange={(tipo) => { setRegistrarEnCaja(tipo !== 'proveedor'); }}
             />
           )}
