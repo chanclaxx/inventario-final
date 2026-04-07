@@ -16,6 +16,10 @@ const validarMovimiento = [
     .isString()
     .isLength({ max: 50000 })
     .withMessage('Firma demasiado grande'),
+  body('metodo')
+    .optional().isString().withMessage('Método de pago inválido'),
+  body('registrar_en_caja')
+    .optional().isBoolean().withMessage('Valor inválido para registrar en caja'),
 ];
 
 // Acreedores de cruces — accesible para supervisores
