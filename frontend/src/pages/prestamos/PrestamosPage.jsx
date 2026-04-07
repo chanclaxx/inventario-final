@@ -17,6 +17,7 @@ import { InputMoneda }                          from '../../components/ui/InputM
 import { Spinner }                              from '../../components/ui/Spinner';
 import { EmptyState }                           from '../../components/ui/EmptyState';
 import { TabCreditos }                          from './TabCreditos';
+import { useMetodosPago } from '../../hooks/useMetodosPago';
 import useExportarPdfPrestamos                  from '../../hooks/useExportarPdfPrestamos';
 import api                                      from '../../api/axios.config';
 import {
@@ -121,9 +122,11 @@ function ModalAbonoPrestamo({ prestamo, onClose }) {
   const queryClient = useQueryClient();
   const [valor, setValor] = useState('');
   const [error, setError] = useState('');
+  const metodosPago = useMetodosPago();
+  const [metodo, setMetodo] = useState('Efectivo');
 
   const mutation = useMutation({
-    mutationFn: () => registrarAbonoPrestamo(prestamo.id, Number(valor)),
+    mutationFn: () => registrarAbonoPrestamo(prestamo.id, Number(valor), metodo),
     onSuccess: () => { queryClient.invalidateQueries(['prestamos']); onClose(); },
     onError:   (err) => setError(err.response?.data?.error || 'Error al registrar abono'),
   });
@@ -155,6 +158,24 @@ function ModalAbonoPrestamo({ prestamo, onClose }) {
             className="w-full px-3 py-2 bg-gray-100 rounded-xl text-sm
               focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"
           />
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <label className="text-sm font-medium text-gray-700">Método de pago</label>
+          <div className="flex flex-wrap gap-2">
+            {metodosPago.map((m) => {
+              const mId    = m.id;
+              const mLabel = m.label;
+              return (
+                <button key={mId} type="button" onClick={() => setMetodo(mId)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition-all
+                    ${metodo === mId
+                      ? 'bg-blue-50 border-blue-300 text-blue-700'
+                      : 'bg-gray-50 border-gray-200 text-gray-600 hover:border-gray-300'}`}>
+                  {mLabel}
+                </button>
+              );
+            })}
+          </div>
         </div>
         {error && <p className="text-sm text-red-500">{error}</p>}
         <div className="flex gap-2">

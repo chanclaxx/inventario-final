@@ -161,6 +161,7 @@ const _buildResumen = ({ pf, ac, ap, cp, aa, mn, rt, dv, ad, sv }) => {
   // Ingresos por método
   pf.filter((r) => r.activo !== false).forEach((r) => sumarAlMetodo(r.metodo, r.valor, 'ingreso'));
   ac.filter((r) => r.activo !== false).forEach((r) => sumarAlMetodo(r.metodo, r.valor, 'ingreso'));
+  ap.filter((r) => r.activo !== false).forEach((r) => sumarAlMetodo(r.metodo, r.valor, 'ingreso'));
   sv.filter((r) => r.activo !== false).forEach((r) => sumarAlMetodo(r.metodo, r.valor, 'ingreso'));
   ad.filter((r) => r.activo !== false).forEach((r) => sumarAlMetodo(r.metodo, r.valor, 'ingreso'));
 
@@ -300,7 +301,7 @@ const getResumenDia = async (cajaId, sucursalId, negocioId) => {
     `, [sucursalId, inicio, fin]),
 
     pool.query(`
-      SELECT ab.id, ab.valor, ab.fecha, p.prestatario, p.id AS prestamo_id
+      SELECT ab.id, ab.valor, ab.metodo, ab.fecha, p.prestatario, p.id AS prestamo_id
       FROM abonos_prestamo ab
       JOIN prestamos p ON p.id = ab.prestamo_id
       WHERE p.sucursal_id = $1 AND ab.fecha BETWEEN $2 AND $3
@@ -430,8 +431,8 @@ const getResumenGlobal = async (negocioId) => {
     `, [negocioId, inicio, fin]),
 
     pool.query(`
-      SELECT ab.id, ab.valor, ab.fecha, p.prestatario, p.id AS prestamo_id,
-             su.nombre AS sucursal_nombre
+      SELECT ab.id, ab.valor, ab.metodo, ab.fecha, p.prestatario, p.id AS prestamo_id,
+              su.nombre AS sucursal_nombre
       FROM abonos_prestamo ab
       JOIN prestamos  p  ON p.id  = ab.prestamo_id
       JOIN sucursales su ON su.id = p.sucursal_id

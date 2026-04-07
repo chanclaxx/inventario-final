@@ -187,7 +187,7 @@ const crearPrestamos = async ({
 
 // ─── Servicio: registrar abono ────────────────────────────────────────────────
 
-const registrarAbono = async (negocioId, prestamoId, valor) => {
+const registrarAbono = async (negocioId, prestamoId, valor, metodo) => {
   const prestamo = await repo.findByIdYNegocio(prestamoId, negocioId);
   if (!prestamo) throw { status: 404, message: 'Préstamo no encontrado' };
   if (prestamo.estado !== 'Activo') throw { status: 400, message: 'El préstamo no está activo' };
@@ -201,7 +201,7 @@ const registrarAbono = async (negocioId, prestamoId, valor) => {
   try {
     await client.query('BEGIN');
 
-    const resultado = await repo.insertarAbono(client, { prestamo_id: prestamoId, valor });
+   const resultado = await repo.insertarAbono(client, { prestamo_id: prestamoId, valor, metodo });
 
     if (Number(resultado.total_abonado) >= Number(resultado.valor_prestamo)) {
       await repo.updateEstado(client, prestamoId, 'Saldado');

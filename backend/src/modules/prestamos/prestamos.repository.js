@@ -83,10 +83,10 @@ const create = async (client, {
   return rows[0];
 };
 
-const insertarAbono = async (client, { prestamo_id, valor }) => {
+const insertarAbono = async (client, { prestamo_id, valor, metodo }) => {
   await client.query(
-    'INSERT INTO abonos_prestamo(prestamo_id, valor) VALUES ($1, $2)',
-    [prestamo_id, valor]
+    'INSERT INTO abonos_prestamo(prestamo_id, valor, metodo) VALUES ($1, $2, $3)',
+    [prestamo_id, valor, metodo || 'Efectivo']
   );
   const { rows } = await client.query(`
     UPDATE prestamos SET total_abonado = total_abonado + $1

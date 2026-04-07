@@ -58,11 +58,11 @@ const crearPrestamos = async (req, res, next) => {
 
 const registrarAbono = async (req, res, next) => {
   try {
-    const { valor } = req.body;
+    const { valor, metodo } = req.body;
     if (!valor || valor <= 0) {
       return res.status(400).json({ ok: false, error: 'El valor del abono debe ser mayor a 0' });
     }
-    const data = await service.registrarAbono(req.user.negocio_id, req.params.id, valor);
+    const data = await service.registrarAbono(req.user.negocio_id, req.params.id, valor, metodo);
     res.json({ ok: true, data, message: 'Abono registrado correctamente' });
   } catch (err) { next(err); }
 };
