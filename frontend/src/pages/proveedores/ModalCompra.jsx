@@ -887,7 +887,10 @@ function PasoPago({ proveedor, productos, tipo, onConfirmar, onVolver, loading }
   const [totalCompra,         setTotalCompra]          = useState(() => {
     if (tipo === 'serial') {
       return productos.reduce((s, l) => {
-        const imeisValidos = l.imeis.filter((i) => extraerImei(i).trim()).length;
+        const imeisValidos = l.imeis.filter((i) => {
+          const val = typeof i === 'string' ? i : (i.valor || i.imei || '');
+          return val.trim();
+        }).length;
         return s + (Number(l.precio_compra) * imeisValidos);
       }, 0);
     }
@@ -927,10 +930,13 @@ function PasoPago({ proveedor, productos, tipo, onConfirmar, onVolver, loading }
     onConfirmar({ pagos: pagosFinales, totalCompra: Number(totalCompra), agregarComoAcreedor, registrarEnCaja, numeroFactura, notas });
   };
 
-  const resumen = tipo === 'serial'
+   const resumen = tipo === 'serial'
     ? productos.map((l) => ({
         nombre:          l.nombre,
-        cantidad:        l.imeis.filter((i) => extraerImei(i).trim()).length,
+        cantidad:        l.imeis.filter((i) => {
+          const val = typeof i === 'string' ? i : (i.valor || i.imei || '');
+          return val.trim();
+        }).length,
         precio_unitario: Number(l.precio_compra),
         precio_usd:      l.precio_usd || null,
       }))
