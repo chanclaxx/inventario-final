@@ -8,6 +8,7 @@ import { SearchInput }  from '../../components/ui/SearchInput';
 import { InputMoneda }  from '../../components/ui/InputMoneda';
 import { formatCOP }    from '../../utils/formatters';
 import { crearCompra }  from '../../api/compras.api';
+import { useMetodosPago } from '../../hooks/useMetodosPago';
 import {
   getProductosSerial, crearProductoSerial,
   getProductosCantidad, crearProductoCantidad,
@@ -897,6 +898,8 @@ function PasoPago({ proveedor, productos, tipo, onConfirmar, onVolver, loading }
   const [numeroFactura,       setNumeroFactura]        = useState('');
   const [notas,               setNotas]                = useState('');
   const [error,               setError]                = useState('');
+  const metodosPago = useMetodosPago();
+  const [metodoPagoDetalle, setMetodoPagoDetalle] = useState('Efectivo');
 
   const { data: acreedoresRaw } = useQuery({
     queryKey: ['acreedores'],
@@ -907,9 +910,13 @@ function PasoPago({ proveedor, productos, tipo, onConfirmar, onVolver, loading }
 
   const handleConfirmar = () => {
     setError('');
+    const esMetodoPagoFisico = (metodo) => metodo === 'Contado' || metodo === 'Transferencia';
     const pagosFinales = pagos.length === 1
-      ? [{ ...pagos[0], valor: totalCompra }]
-      : pagos;
+      ? [{ ...pagos[0], metodo: esMetodoPagoFisico(pagos[0].metodo) ? metodoPagoDetalle : pagos[0].metodo, valor: totalCompra }]
+      : pagos.map((p) => ({
+          ...p,
+          metodo: esMetodoPagoFisico(p.metodo) ? metodoPagoDetalle : p.metodo,
+        }));
 
     if (pagos.length > 1) {
       const pagado = pagosFinales.reduce((s, p) => s + (Number(p.valor) || 0), 0);
@@ -1031,10 +1038,31 @@ function PasoPago({ proveedor, productos, tipo, onConfirmar, onVolver, loading }
             )}
           </div>
         )}
-        {pagos.length === 1 && (
+         {pagos.length === 1 && (
           <p className="text-xs text-gray-400 mt-2 px-1">
             Se registrará el total completo ({formatCOP(totalCompra)}) como {pagos[0].metodo}
           </p>
+        )}
+
+        {pagos.some((p) => p.metodo === 'Contado' || p.metodo === 'Transferencia') && (
+          <div className="flex flex-col gap-1.5 mt-3 pt-3 border-t border-gray-200">
+            <label className="text-xs text-gray-500 font-medium">¿Con qué método se pagó?</label>
+            <div className="flex gap-2 flex-wrap">
+              {metodosPago.map((m) => {
+                const mId    = m.id;
+                const mLabel = m.label;
+                return (
+                  <button key={mId} type="button" onClick={() => setMetodoPagoDetalle(mId)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition-all
+                      ${metodoPagoDetalle === mId
+                        ? 'bg-blue-50 border-blue-300 text-blue-700'
+                        : 'bg-gray-50 border-gray-200 text-gray-600 hover:border-gray-300'}`}>
+                    {mLabel}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
         )}
       </div>
 
