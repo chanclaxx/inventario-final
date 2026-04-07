@@ -182,7 +182,7 @@ function ModalMovimiento({ acreedor, proveedorTipo, onClose, onImprimir }) {
       valor:             Number(form.valor),
       firma,
       registrar_en_caja: esAbono ? registrarEnCaja : false,
-      metodo:            esAbono ? metodoPago : null,
+      metodo:            metodoPago,
     }),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['acreedor',   acreedor.id], exact: false });
@@ -251,26 +251,24 @@ function ModalMovimiento({ acreedor, proveedorTipo, onClose, onImprimir }) {
           </div>
         )}
 
-        {esAbono && (
-          <div className="flex flex-col gap-1.5">
-            <label className="text-sm font-medium text-gray-700">Método de pago</label>
-            <div className="flex gap-2 flex-wrap">
-              {metodosPago.map((m) => {
-                const mId    = m.id;
-                const mLabel = m.label;
-                return (
-                  <button key={mId} type="button" onClick={() => setMetodoPago(mId)}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition-all
-                      ${metodoPago === mId
-                        ? 'bg-blue-50 border-blue-300 text-blue-700'
-                        : 'bg-gray-50 border-gray-200 text-gray-600 hover:border-gray-300'}`}>
-                    {mLabel}
-                  </button>
-                );
-              })}
-            </div>
+        <div className="flex flex-col gap-1.5">
+          <label className="text-sm font-medium text-gray-700">Método de pago</label>
+          <div className="flex gap-2 flex-wrap">
+            {metodosPago.map((m) => {
+              const mId    = m.id;
+              const mLabel = m.label;
+              return (
+                <button key={mId} type="button" onClick={() => setMetodoPago(mId)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition-all
+                    ${metodoPago === mId
+                      ? 'bg-blue-50 border-blue-300 text-blue-700'
+                      : 'bg-gray-50 border-gray-200 text-gray-600 hover:border-gray-300'}`}>
+                  {mLabel}
+                </button>
+              );
+            })}
           </div>
-        )}
+        </div>
 
         <FirmaCanvas onFirma={setFirma} />
 
