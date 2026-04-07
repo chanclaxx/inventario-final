@@ -23,6 +23,7 @@ import { Spinner }     from '../../components/ui/Spinner';
 import { EmptyState }  from '../../components/ui/EmptyState';
 import { SearchInput } from '../../components/ui/SearchInput';
 import { useAuth }     from '../../context/useAuth';
+import { useMetodosPago } from '../../hooks/useMetodosPago';
 import useSucursalStore from '../../store/sucursalStore';
 import api             from '../../api/axios.config';
 import {
@@ -44,7 +45,7 @@ const ESTADOS_CONFIG = {
   Garantia:       { badge: 'purple', label: 'Garantía',         border: 'border-l-purple-400' },
 };
 
-const METODOS_PAGO        = ['Efectivo', 'Transferencia', 'Nequi', 'Daviplata', 'Otro'];
+
 const TIPOS_EQUIPO        = ['Celular', 'Tablet', 'Computador', 'Portátil', 'Consola', 'Otro'];
 const MOTIVOS_SIN_REPARAR = [
   'No fue posible reparar',
@@ -1070,6 +1071,7 @@ function ModalAbono({ orden, onClose, onExito }) {
   const [metodo, setMetodo] = useState('Efectivo');
   const [notas,  setNotas]  = useState('');
   const [error,  setError]  = useState('');
+  const metodosPago = useMetodosPago();
 
   const saldo      = Number(orden.precio_final || 0) - Number(orden.total_abonado || 0);
   const valorNum   = Number(valor || 0);
@@ -1124,14 +1126,15 @@ function ModalAbono({ orden, onClose, onExito }) {
         <div className="flex flex-col gap-1">
           <label className="text-sm font-medium text-gray-700">Método</label>
           <div className="flex gap-2 flex-wrap">
-            {METODOS_PAGO.map((m) => {
-              const mKey = m;
+            {metodosPago.map((m) => {
+              const mId    = m.id;
+              const mLabel = m.label;
               return (
-                <button key={mKey} onClick={() => setMetodo(m)}
+                <button key={mId} onClick={() => setMetodo(mId)}
                   className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition-all
-                    ${metodo === m ? 'bg-blue-50 border-blue-300 text-blue-700'
+                    ${metodo === mId ? 'bg-blue-50 border-blue-300 text-blue-700'
                       : 'bg-gray-50 border-gray-200 text-gray-600'}`}>
-                  {m}
+                  {mLabel}
                 </button>
               );
             })}
@@ -1165,6 +1168,7 @@ function ModalEntregar({ orden, onClose, onExito }) {
   const [clientePago, setClientePago]           = useState(false);
   const [metodoPago, setMetodoPago]             = useState('Efectivo');
   const config = useConfig();
+  const metodosPago = useMetodosPago();
 
   const esGarantia = orden.estado === 'Garantia' && orden.garantia_cobrable;
   const totalCobro = esGarantia
@@ -1311,15 +1315,16 @@ function ModalEntregar({ orden, onClose, onExito }) {
               <div className="flex flex-col gap-1.5">
                 <label className="text-xs font-medium text-gray-600">Método de pago</label>
                 <div className="flex gap-2 flex-wrap">
-                  {METODOS_PAGO.map((m) => {
-                    const mKey = m;
+                  {metodosPago.map((m) => {
+                    const mId    = m.id;
+                    const mLabel = m.label;
                     return (
-                      <button key={mKey} type="button" onClick={() => setMetodoPago(m)}
+                      <button key={mId} type="button" onClick={() => setMetodoPago(mId)}
                         className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition-all
-                          ${metodoPago === m
+                          ${metodoPago === mId
                             ? 'bg-blue-50 border-blue-300 text-blue-700'
                             : 'bg-gray-50 border-gray-200 text-gray-600 hover:border-gray-300'}`}>
-                        {m}
+                        {mLabel}
                       </button>
                     );
                   })}
