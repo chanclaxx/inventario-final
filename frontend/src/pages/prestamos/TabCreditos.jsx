@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getCreditos, getCreditoById, registrarAbonoCredito, saldarCredito, cancelarCredito } from '../../api/creditos.api';
 import { formatCOP, formatFechaHora } from '../../utils/formatters';
+import { useMetodosPago } from '../../hooks/useMetodosPago';
 import { Badge }       from '../../components/ui/Badge';
 import { Button }      from '../../components/ui/Button';
 import { Modal }       from '../../components/ui/Modal';
@@ -27,7 +28,7 @@ function ModalAbonoCredito({ credito, onClose }) {
   const valorTotal     = Number(credito.valor_total);
   const saldoPendiente = Number(credito.saldo_pendiente ?? (valorTotal - cuotaInicial - totalAbonado));
 
-  const METODOS = ['Efectivo', 'Nequi', 'Daviplata', 'Transferencia', 'Tarjeta'];
+const metodosPago = useMetodosPago();
 
   const mutation = useMutation({
     mutationFn: () => registrarAbonoCredito(credito.id, {
@@ -53,15 +54,19 @@ function ModalAbonoCredito({ credito, onClose }) {
         </div>
 
         <div className="flex flex-wrap gap-2">
-          {METODOS.map((m) => (
-            <button key={m} onClick={() => setMetodo(m)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition-all
-                ${metodo === m
-                  ? 'bg-blue-50 border-blue-300 text-blue-700'
-                  : 'bg-gray-50 border-gray-200 text-gray-600'}`}>
-              {m}
-            </button>
-          ))}
+          {metodosPago.map((m) => {
+            const mId    = m.id;
+            const mLabel = m.label;
+            return (
+              <button key={mId} onClick={() => setMetodo(mId)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition-all
+                  ${metodo === mId
+                    ? 'bg-blue-50 border-blue-300 text-blue-700'
+                    : 'bg-gray-50 border-gray-200 text-gray-600'}`}>
+                {mLabel}
+              </button>
+            );
+          })}
         </div>
 
         <div className="flex flex-col gap-1">
