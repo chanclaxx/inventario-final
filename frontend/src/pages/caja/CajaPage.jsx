@@ -108,35 +108,37 @@ const CONFIG_GRUPOS = {
     }),
   },
   compras: {
-    icono:      ShoppingCart,
-    color:      'red',
-    bgHeader:   'bg-red-50',
-    textHeader: 'text-red-700',
-    borderColor:'border-red-100',
-    renderItem: (item, opciones) => {
-      const nombre = nombreVisible(item.proveedor, item.tipo_proveedor, opciones?.esAdmin);
-      return {
-        descripcion: `Compra — ${nombre}`,
-        detalle:     item.numero_factura ? `Fact. ${item.numero_factura}` : null,
-        fecha:       item.fecha,
-      };
-    },
+  icono:      ShoppingCart,
+  color:      'red',
+  bgHeader:   'bg-red-50',
+  textHeader: 'text-red-700',
+  borderColor:'border-red-100',
+  renderItem: (item, opciones) => {
+    const nombre = nombreVisible(item.proveedor, item.tipo_proveedor, opciones?.esAdmin);
+    return {
+      descripcion: `Compra — ${nombre}`,
+      detalle:     [item.numero_factura ? `Fact. ${item.numero_factura}` : null, item.metodo || null]
+                     .filter(Boolean).join(' · ') || null,
+      fecha:       item.fecha,
+    };
   },
+},
   abonosAcreedor: {
-    icono:      ArrowUpCircle,
-    color:      'yellow',
-    bgHeader:   'bg-yellow-50',
-    textHeader: 'text-yellow-700',
-    borderColor:'border-yellow-100',
-    renderItem: (item, opciones) => {
-      const nombre = nombreVisible(item.acreedor, item.tipo_proveedor, opciones?.esAdmin);
-      return {
-        descripcion: `Abono a ${nombre}`,
-        detalle:     opciones?.esAdmin ? item.descripcion : null,
-        fecha:       item.fecha,
-      };
-    },
+  icono:      ArrowUpCircle,
+  color:      'yellow',
+  bgHeader:   'bg-yellow-50',
+  textHeader: 'text-yellow-700',
+  borderColor:'border-yellow-100',
+  renderItem: (item, opciones) => {
+    const nombre = nombreVisible(item.acreedor, item.tipo_proveedor, opciones?.esAdmin);
+    return {
+      descripcion: `Abono a ${nombre}`,
+      detalle:     [opciones?.esAdmin ? item.descripcion : null, item.metodo || null]
+                     .filter(Boolean).join(' · ') || null,
+      fecha:       item.fecha,
+    };
   },
+},
   abonosDomicilio: {
     icono:      Bike,
     color:      'orange',
