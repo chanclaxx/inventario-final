@@ -146,13 +146,32 @@ const _buildResumen = ({ pf, ac, ap, cp, aa, mn, rt, dv, ad, sv }) => {
   const totalIngresos      = totalIngresosBruto - totalRetomas;
   const totalEgresos       = totalCompras + totalAbonosAcreedor + totalManualesEgreso + totalDevoluciones;
 
-  const METODOS = ['Efectivo', 'Nequi', 'Daviplata', 'Transferencia', 'Tarjeta'];
+  // ── Resumen por método de pago (entradas + salidas) ────────────────────
+  const metodoMap = {};
+
+  const sumarAlMetodo = (metodo, valor, tipo) => {
+    if (!metodo || !valor) return;
+    const v = Number(valor);
+    if (v <= 0) return;
+    if (!metodoMap[metodo]) metodoMap[metodo] = { ingresos: 0, egresos: 0 };
+    if (tipo === 'ingreso') metodoMap[metodo].ingresos += v;
+    if (tipo === 'egreso')  metodoMap[metodo].egresos  += v;
+  };
+
+  // Ingresos por método
+  pf.filter((r) => r.activo !== false).forEach((r) => sumarAlMetodo(r.metodo, r.valor, 'ingreso'));
+  ac.filter((r) => r.activo !== false).forEach((r) => sumarAlMetodo(r.metodo, r.valor, 'ingreso'));
+  sv.filter((r) => r.activo !== false).forEach((r) => sumarAlMetodo(r.metodo, r.valor, 'ingreso'));
+  ad.filter((r) => r.activo !== false).forEach((r) => sumarAlMetodo(r.metodo, r.valor, 'ingreso'));
+
+  // Egresos por método
+  cp.filter((r) => r.activo !== false).forEach((r) => sumarAlMetodo(r.metodo, r.valor, 'egreso'));
+  aa.filter((r) => r.activo !== false).forEach((r) => sumarAlMetodo(r.metodo, r.valor, 'egreso'));
+
+  // Compatibilidad: metodosPago plano (solo ingresos) para no romper nada existente
   const metodosPago = {};
-  for (const metodo of METODOS) {
-    const totalMetodo =
-      pf.filter((p) => p.metodo === metodo).reduce((s, p) => s + Number(p.valor || 0), 0) +
-      ac.filter((a) => a.metodo === metodo).reduce((s, a) => s + Number(a.valor || 0), 0);
-    if (totalMetodo > 0) metodosPago[metodo] = totalMetodo;
+  for (const [metodo, datos] of Object.entries(metodoMap)) {
+    if (datos.ingresos > 0) metodosPago[metodo] = datos.ingresos;
   }
 
   return {
@@ -220,6 +239,7 @@ const _buildResumen = ({ pf, ac, ap, cp, aa, mn, rt, dv, ad, sv }) => {
       },
     },
     metodosPago,
+    metodosPagoDetalle: metodoMap,
     totales: {
       ingresosBruto: totalIngresosBruto,
       retomas:       totalRetomas,
@@ -287,9 +307,8 @@ const getResumenDia = async (cajaId, sucursalId, negocioId) => {
       ORDER BY ab.fecha ASC
     `, [sucursalId, inicio, fin]),
 
-    // Compras: solo las marcadas como registrar_en_caja = TRUE
     pool.query(`
-      SELECT c.id, c.total AS valor, c.fecha, c.numero_factura,
+      SELECT c.id, c.total AS valor, c.fecha, c.numero_factura, c.metodo,
              pr.nombre AS proveedor, pr.tipo AS tipo_proveedor
       FROM compras c
       LEFT JOIN proveedores pr ON pr.id = c.proveedor_id
@@ -305,7 +324,7 @@ const getResumenDia = async (cajaId, sucursalId, negocioId) => {
     `, [sucursalId, inicio, fin]),
 
     pool.query(`
-      SELECT ma.id, ma.valor, ma.fecha, ma.descripcion,
+      SELECT ma.id, ma.valor, ma.fecha, ma.descripcion, ma.metodo,
              a.nombre AS acreedor, pr.tipo AS tipo_proveedor
       FROM movimientos_acreedor ma
       JOIN acreedores a ON a.id = ma.acreedor_id
@@ -314,7 +333,6 @@ const getResumenDia = async (cajaId, sucursalId, negocioId) => {
         AND ma.registrar_en_caja = TRUE
     `, [negocioId, inicio, fin]),
 
-    // Manuales: excluir tipos con grupo propio
     pool.query(`
       SELECT m.*, u.nombre AS usuario_nombre
       FROM movimientos_caja m
@@ -353,7 +371,6 @@ const getResumenDia = async (cajaId, sucursalId, negocioId) => {
       ORDER BY m.fecha ASC
     `, [cajaId]),
 
-    // Servicios técnicos: query directa a abonos_servicio
     pool.query(`
       SELECT ab.id, ab.valor, ab.metodo, ab.fecha,
              os.id AS orden_id, os.cliente_nombre,
@@ -422,9 +439,8 @@ const getResumenGlobal = async (negocioId) => {
       ORDER BY ab.fecha ASC
     `, [negocioId, inicio, fin]),
 
-    // Compras global: solo las marcadas como registrar_en_caja = TRUE
     pool.query(`
-      SELECT c.id, c.total AS valor, c.fecha, c.numero_factura,
+      SELECT c.id, c.total AS valor, c.fecha, c.numero_factura, c.metodo,
              pr.nombre AS proveedor, pr.tipo AS tipo_proveedor,
              su.nombre AS sucursal_nombre
       FROM compras c
@@ -442,7 +458,7 @@ const getResumenGlobal = async (negocioId) => {
     `, [negocioId, inicio, fin]),
 
     pool.query(`
-      SELECT ma.id, ma.valor, ma.fecha, ma.descripcion,
+      SELECT ma.id, ma.valor, ma.fecha, ma.descripcion, ma.metodo,
              a.nombre AS acreedor, pr.tipo AS tipo_proveedor,
              su_a.nombre AS sucursal_nombre
       FROM movimientos_acreedor ma
@@ -511,7 +527,6 @@ const getResumenGlobal = async (negocioId) => {
       ORDER BY m.fecha ASC
     `, [negocioId, inicio, fin]),
 
-    // Servicios técnicos global: query directa a abonos_servicio
     pool.query(`
       SELECT ab.id, ab.valor, ab.metodo, ab.fecha,
              os.id AS orden_id, os.cliente_nombre,

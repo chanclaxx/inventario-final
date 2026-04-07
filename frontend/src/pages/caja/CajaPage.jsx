@@ -292,21 +292,80 @@ function ModalCerrarCaja({ caja, resumenTotales, onClose }) {
   );
 }
 
-function ResumenMetodosPago({ metodosPago }) {
-  const metodosConValor = METODOS_PAGO_ORDEN.filter((m) => metodosPago[m] > 0);
-  if (metodosConValor.length === 0) return null;
+function ResumenMetodosPago({ metodosPagoDetalle }) {
+  const detalle = metodosPagoDetalle || {};
+  const metodos = Object.keys(detalle);
+  if (metodos.length === 0) return null;
+
   return (
-    <div className="bg-white border border-gray-100 rounded-2xl p-4 flex flex-col gap-3">
-      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-        Ingresos por método de pago
-      </p>
-      <div className="flex flex-col gap-2">
-        {metodosConValor.map((metodo) => (
-          <div key={metodo} className="flex items-center justify-between">
-            <span className="text-sm text-gray-600">{metodo}</span>
-            <span className="text-sm font-semibold text-gray-900">{formatCOP(metodosPago[metodo])}</span>
+    <div className="flex flex-col gap-4">
+      {/* Cards por método */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+        {metodos.map((metodo) => {
+          const datos = detalle[metodo];
+          const saldo = datos.ingresos - datos.egresos;
+          return (
+            <div key={metodo} className="bg-white border border-gray-100 rounded-2xl p-3 flex flex-col gap-1.5 shadow-sm">
+              <p className="text-xs font-semibold text-gray-500">{metodo}</p>
+              <div className="flex items-baseline justify-between">
+                <span className={`text-lg font-bold ${saldo >= 0 ? 'text-gray-900' : 'text-red-600'}`}>
+                  {formatCOP(saldo)}
+                </span>
+              </div>
+              <div className="flex justify-between text-xs">
+                <span className="text-green-600">+{formatCOP(datos.ingresos)}</span>
+                {datos.egresos > 0 && (
+                  <span className="text-red-500">-{formatCOP(datos.egresos)}</span>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Tabla resumen */}
+      <div className="bg-white border border-gray-100 rounded-2xl overflow-hidden shadow-sm">
+        <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-100">
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+            Resumen por método de pago
+          </p>
+        </div>
+        <div className="divide-y divide-gray-50">
+          <div className="grid grid-cols-4 px-4 py-2 text-xs font-medium text-gray-400">
+            <span>Método</span>
+            <span className="text-right">Entradas</span>
+            <span className="text-right">Salidas</span>
+            <span className="text-right">Saldo</span>
           </div>
-        ))}
+          {metodos.map((metodo) => {
+            const datos = detalle[metodo];
+            const saldo = datos.ingresos - datos.egresos;
+            return (
+              <div key={metodo} className="grid grid-cols-4 px-4 py-2.5 text-sm items-center">
+                <span className="font-medium text-gray-700">{metodo}</span>
+                <span className="text-right text-green-600">+{formatCOP(datos.ingresos)}</span>
+                <span className="text-right text-red-500">
+                  {datos.egresos > 0 ? `-${formatCOP(datos.egresos)}` : '—'}
+                </span>
+                <span className={`text-right font-semibold ${saldo >= 0 ? 'text-gray-900' : 'text-red-600'}`}>
+                  {formatCOP(saldo)}
+                </span>
+              </div>
+            );
+          })}
+          <div className="grid grid-cols-4 px-4 py-2.5 text-sm font-bold bg-gray-50 border-t border-gray-200">
+            <span className="text-gray-700">Total</span>
+            <span className="text-right text-green-600">
+              +{formatCOP(metodos.reduce((s, m) => s + detalle[m].ingresos, 0))}
+            </span>
+            <span className="text-right text-red-500">
+              -{formatCOP(metodos.reduce((s, m) => s + detalle[m].egresos, 0))}
+            </span>
+            <span className="text-right text-gray-900">
+              {formatCOP(metodos.reduce((s, m) => s + detalle[m].ingresos - detalle[m].egresos, 0))}
+            </span>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -525,7 +584,7 @@ export default function CajaPage() {
     () => resumenData?.totales || { ingresosBruto: 0, retomas: 0, ingresos: 0, egresos: 0, saldo: 0, pendienteDomicilios: 0 },
     [resumenData]
   );
-  const metodosPago = useMemo(() => resumenData?.metodosPago || {}, [resumenData]);
+  
 
   // Opciones para renderItem: esAdmin determina si se muestra el nombre real
   const opcionesGrupo = useMemo(() => ({ esAdmin }), [esAdmin]);
@@ -612,7 +671,7 @@ export default function CajaPage() {
         </div>
       </div>
 
-      <ResumenMetodosPago metodosPago={metodosPago} />
+      <ResumenMetodosPago metodosPagoDetalle={resumenData?.metodosPagoDetalle} />
 
       <div className="flex flex-col gap-3">
         <div className="flex items-center justify-between">

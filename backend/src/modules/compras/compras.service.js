@@ -50,9 +50,11 @@ const registrarCompra = async ({
     const total = totalRecibido ||
       lineas.reduce((sum, l) => sum + l.cantidad * l.precio_unitario, 0);
 
+      const metodoPago = pagos.length > 0 ? pagos[0].metodo : null;
+
     const compra = await comprasRepo.create(client, {
       sucursal_id, proveedor_id, usuario_id, numero_factura, total, notas,
-      registrar_en_caja,
+      registrar_en_caja, metodo: metodoPago,
     });
 
     for (const linea of lineas) {
