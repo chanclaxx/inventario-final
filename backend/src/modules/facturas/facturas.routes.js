@@ -4,8 +4,6 @@ const ctrl = require('./facturas.controller');
 const { body } = require('express-validator');
 const { validate } = require('../../middlewares/validate.middleware');
 
-const METODOS_VALIDOS = ['Efectivo', 'Nequi', 'Daviplata', 'Transferencia', 'Tarjeta', 'Credito'];
-
 const validarFactura = [
   body('nombre_cliente')
     .isString().trim().notEmpty()
@@ -37,9 +35,9 @@ const validarFactura = [
     .withMessage('Pagos debe ser un arreglo'),
 
   // Solo validar metodo y valor cuando el array no está vacío
-  body('pagos.*.metodo')
+   body('pagos.*.metodo')
     .if(body('pagos').isArray({ min: 1 }))
-    .isIn(METODOS_VALIDOS)
+    .isString()
     .withMessage('Método de pago inválido'),
 
   // Permite 0 y negativos (retoma que supera el total)

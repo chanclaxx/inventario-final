@@ -8,6 +8,7 @@ import { InputMoneda }              from '../../components/ui/InputMoneda';
 import { formatCOP }                from '../../utils/formatters';
 import { ModalConflictoCedula }     from '../../components/ui/ModalConflictoCedula';
 import { useCedulaCliente }         from '../../hooks/useCedulaCliente';
+import { useMetodosPago }           from '../../hooks/useMetodosPago';
 import { crearFactura, getFacturaById } from '../../api/facturas.api';
 import { getGarantiasPorFactura }   from '../../api/garantias.api';
 import { buscarPorCedula }          from '../../api/clientes.api';
@@ -30,14 +31,6 @@ import {
 } from 'lucide-react';
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
-
-const METODOS_PAGO = [
-  { id: 'Efectivo',      label: 'Efectivo'      },
-  { id: 'Nequi',         label: 'Nequi'         },
-  { id: 'Daviplata',     label: 'Daviplata'     },
-  { id: 'Transferencia', label: 'Transferencia' },
-  { id: 'Tarjeta',       label: 'Tarjeta'       },
-];
 
 const RETOMA_VACIA = () => ({
   _key:                 crypto.randomUUID(),
@@ -625,13 +618,13 @@ function ItemRetoma({ retoma, index, total, productosSerial, productosCantidad,
 
 // ─── SelectorPagos ────────────────────────────────────────────────────────────
 
-function SelectorPagos({ metodosSeleccionados, montos, totalNeto, onToggleMetodo, onCambioMonto }) {
+function SelectorPagos({ metodosPago, metodosSeleccionados, montos, totalNeto, onToggleMetodo, onCambioMonto }) {
   const cantidadSeleccionada = metodosSeleccionados.length;
   return (
     <div className="flex flex-col gap-3">
       <p className="text-sm font-medium text-gray-700">Método de pago</p>
       <div className="flex flex-wrap gap-2">
-        {METODOS_PAGO.map((metodo) => {
+        {metodosPago.map((metodo) => {
           const metodoId     = metodo.id;
           const metodoLabel  = metodo.label;
           const seleccionado = metodosSeleccionados.includes(metodoId);
@@ -649,7 +642,7 @@ function SelectorPagos({ metodosSeleccionados, montos, totalNeto, onToggleMetodo
       {cantidadSeleccionada >= 2 && (
         <div className="flex flex-col gap-2 pt-1">
           {metodosSeleccionados.map((metodoId) => {
-            const metodo      = METODOS_PAGO.find((m) => m.id === metodoId);
+            const metodo = metodosPago.find((m) => m.id === metodoId);
             const metodoLabel = metodo ? metodo.label : metodoId;
             return (
               <div key={metodoId} className="flex items-center gap-3">
@@ -695,6 +688,7 @@ export function ModalFactura({ open, onClose }) {
   const [error,                setError]                = useState('');
   const [verificandoCedula,    setVerificandoCedula]    = useState(false);
   const [buscandoCedula,       setBuscandoCedula]       = useState(false);
+  const metodosPago = useMetodosPago();
 
   const { conflictoCliente, verificarCedula, reescribirCliente, cancelarConflicto } = useCedulaCliente();
 
@@ -1071,6 +1065,7 @@ export function ModalFactura({ open, onClose }) {
           {/* Métodos de pago */}
           {(!credito.activo || Number(credito.cuota_inicial || 0) > 0) && (
             <SelectorPagos
+              metodosPago={metodosPago}
               metodosSeleccionados={metodosSeleccionados}
               montos={montos}
               totalNeto={credito.activo ? Number(credito.cuota_inicial || 0) : totalNeto}
