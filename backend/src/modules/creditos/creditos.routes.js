@@ -6,10 +6,7 @@ const ctrl = require('./creditos.controller');
 
 const validarAbono = [
   body('valor').isFloat({ gt: 0 }).withMessage('El valor debe ser mayor a 0'),
-  body('metodo')
-    .optional()
-    .isIn(['Efectivo', 'Transferencia', 'Tarjeta', 'Nequi', 'Daviplata', 'Otro'])
-    .withMessage('Método de pago no válido'),
+  body('metodo').optional().isString().withMessage('Método de pago inválido'),
 ];
 
 router.get('/',              ctrl.getCreditos);
