@@ -2,14 +2,14 @@ import * as XLSX from 'xlsx';
 
 // ─── Paleta de colores ────────────────────────────────────────────────────────
 const COLOR = {
-  headerSerial:    '1E40AF',
-  headerCantidad:  '065F46',
-  disponible:      'FFFFFF',
-  vendido:         'FEE2E2',
-  prestado:        'FEF9C3',
-  textoHeader:     'FFFFFF',
-  resumenBg:       'EFF6FF',
-  bordeColor:      'D1D5DB',
+  headerSerial:   '1E40AF',
+  headerCantidad: '065F46',
+  disponible:     'FFFFFF',
+  vendido:        'FEE2E2',
+  prestado:       'FEF9C3',
+  textoHeader:    'FFFFFF',
+  resumenBg:      'EFF6FF',
+  bordeColor:     'D1D5DB',
 };
 
 // ─── Helpers de estilo ────────────────────────────────────────────────────────
@@ -77,13 +77,15 @@ function crearHojaSerial(nombreProducto, seriales) {
   const vendidos    = seriales.filter((s) =>  s.vendido)
     .sort((a, b) => new Date(b.fecha_salida) - new Date(a.fecha_salida));
 
+  // Columnas: Cliente Origen ahora tiene Cédula Origen y Celular Origen al lado
   const COLS = [
     'IMEI', 'Estado', 'Marca', 'Modelo',
-    'Proveedor', 'Cliente Origen',
+    'Proveedor',
+    'Cliente Origen', 'Cédula Origen', 'Celular Origen',
     'Fecha Entrada', 'Fecha Salida',
     'Cliente Venta', 'Cédula Cliente', 'Celular Cliente',
   ];
-  const COL_WIDTHS = [22, 12, 14, 14, 20, 22, 14, 14, 24, 16, 16];
+  const COL_WIDTHS = [22, 12, 14, 14, 20, 22, 16, 16, 14, 14, 24, 16, 16];
 
   let fila = 2;
 
@@ -112,15 +114,17 @@ function crearHojaSerial(nombreProducto, seriales) {
       const vals = [
         s.imei,
         estadoLabel.charAt(0).toUpperCase() + estadoLabel.slice(1),
-        s.marca                  || '',
-        s.modelo                 || '',
-        s.proveedor              || '',
-        s.cliente_origen         || '',   // retoma / quien lo trajo
+        s.marca                   || '',
+        s.modelo                  || '',
+        s.proveedor               || '',
+        s.cliente_origen          || '',
+        s.cedula_cliente_origen   || '',   // ← nuevo
+        s.celular_cliente_origen  || '',   // ← nuevo
         fmtFecha(s.fecha_entrada),
         fmtFecha(s.fecha_salida),
-        s.cliente_venta          || '',   // a quién se vendió
-        s.cedula_cliente_venta   || '',
-        s.celular_cliente_venta  || '',
+        s.cliente_venta           || '',
+        s.cedula_cliente_venta    || '',
+        s.celular_cliente_venta   || '',
       ];
       vals.forEach((v, c) => {
         ws[XLSX.utils.encode_cell({ r: fila, c })] = {
@@ -249,9 +253,8 @@ export function exportarInventarioExcel(porProducto, cantidad) {
     XLSX.utils.book_append_sheet(wb, ws, 'Cantidades');
   }
 
-  const hoy   = new Date();
-  const ddmm  = `${String(hoy.getDate()).padStart(2,'0')}-${String(hoy.getMonth()+1).padStart(2,'0')}-${hoy.getFullYear()}`;
-  const nombre = `inventario_${ddmm}.xlsx`;
+  const hoy  = new Date();
+  const ddmm = `${String(hoy.getDate()).padStart(2,'0')}-${String(hoy.getMonth()+1).padStart(2,'0')}-${hoy.getFullYear()}`;
 
-  XLSX.writeFile(wb, nombre, { bookType: 'xlsx', bookSST: false });
+  XLSX.writeFile(wb, `inventario_${ddmm}.xlsx`, { bookType: 'xlsx', bookSST: false });
 }

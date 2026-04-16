@@ -13,6 +13,11 @@ const getSeriales = async (sucursalId) => {
       s.prestado,
       s.fecha_salida,
       s.cliente_origen,
+
+      -- Cédula y celular del cliente origen (si está registrado en el sistema)
+      c_origen.cedula  AS cedula_cliente_origen,
+      c_origen.celular AS celular_cliente_origen,
+
       COALESCE(
         pr_serial.nombre,
         pr_producto.nombre,
@@ -40,13 +45,19 @@ const getSeriales = async (sucursalId) => {
     LEFT JOIN compras        co       ON co.id             = lc.compra_id
     LEFT JOIN proveedores pr_compra   ON pr_compra.id      = co.proveedor_id
 
+    -- Cliente origen registrado en el sistema (match por nombre)
+    LEFT JOIN clientes c_origen
+      ON LOWER(TRIM(c_origen.nombre)) = LOWER(TRIM(s.cliente_origen))
+      AND c_origen.negocio_id = (
+        SELECT negocio_id FROM sucursales WHERE id = $1
+      )
+
     -- Cliente de venta normal (por IMEI en lineas_factura)
     LEFT JOIN lineas_factura lf       ON lf.imei           = s.imei
     LEFT JOIN facturas       f        ON f.id              = lf.factura_id
                                      AND f.estado         != 'Cancelada'
 
-    -- Préstamo saldado más reciente por IMEI (subquery para evitar duplicados
-    -- cuando el mismo IMEI tuvo varios préstamos saldados a lo largo del tiempo)
+    -- Préstamo saldado más reciente por IMEI
     LEFT JOIN (
       SELECT DISTINCT ON (imei)
         imei,
