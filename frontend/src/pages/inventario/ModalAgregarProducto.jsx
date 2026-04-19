@@ -842,8 +842,8 @@ function PasoCompraCliente({ sucursalKey, sucursalLista, onExito, onDuplicadosEn
             <div className="flex flex-col gap-2">
               <p className="text-sm font-medium text-gray-700">Línea de producto</p>
               {/* ── FILTRO POR LÍNEA ── */}
-              <SelectFiltroLinea value={filtroLineaSerial} onChange={setFiltroLineaSerial} accentColor="emerald" />
-              <SearchInput value={busquedaSerial} onChange={setBusquedaSerial} placeholder="Buscar modelo..." />
+              <SearchInput value={busqueda} onChange={setBusqueda} placeholder="Buscar modelo..." />
+              <SelectFiltroLinea value={filtroLineaId} onChange={setFiltroLineaId} />
               <div className="max-h-36 overflow-y-auto flex flex-col gap-1">
                 {productosSerial.length === 0 ? (
                   <p className="text-xs text-gray-400 px-2 py-1.5">Sin resultados</p>
@@ -935,8 +935,8 @@ function PasoCompraCliente({ sucursalKey, sucursalLista, onExito, onDuplicadosEn
             <div className="flex flex-col gap-2">
               <p className="text-sm font-medium text-gray-700">Producto</p>
               {/* ── FILTRO POR LÍNEA ── */}
-              <SelectFiltroLinea value={filtroLineaCantidad} onChange={setFiltroLineaCantidad} accentColor="emerald" />
-              <SearchInput value={busquedaCantidad} onChange={setBusquedaCantidad} placeholder="Buscar producto..." />
+              <SearchInput value={busqueda} onChange={setBusqueda} placeholder="Buscar modelo..." />
+              <SelectFiltroLinea value={filtroLineaId} onChange={setFiltroLineaId} />
               <div className="max-h-36 overflow-y-auto flex flex-col gap-1">
                 {productosCantidad.length === 0 ? (
                   <p className="text-xs text-gray-400 px-2 py-1.5">Sin resultados</p>
@@ -1187,8 +1187,8 @@ function PasoSerial({ sucursalKey, onExito, onDuplicadosEncontrados, coloresActi
         <div className="flex flex-col gap-2">
           <p className="text-sm font-medium text-gray-700">Seleccionar linea de producto</p>
           {/* ── FILTRO POR LÍNEA ── */}
-          <SelectFiltroLinea value={filtroLineaId} onChange={setFiltroLineaId} />
-          <SearchInput value={busqueda} onChange={setBusqueda} placeholder="Buscar modelo..." />
+          <SearchInput value={busqueda} onChange={setBusqueda} placeholder="Buscar producto..." />
+<SelectFiltroLinea value={filtroLineaId} onChange={setFiltroLineaId} />
           <div className="max-h-40 overflow-y-auto flex flex-col gap-1">
             {productos.length === 0 ? (
               <p className="text-xs text-gray-400 px-2 py-1.5">Sin resultados</p>
@@ -1397,8 +1397,8 @@ function PasoCantidad({ sucursalKey, onExito }) {
         <div className="flex flex-col gap-2">
           <p className="text-sm font-medium text-gray-700">Seleccionar producto</p>
           {/* ── FILTRO POR LÍNEA ── */}
-          <SelectFiltroLinea value={filtroLineaId} onChange={setFiltroLineaId} />
-          <SearchInput value={busqueda} onChange={setBusqueda} placeholder="Buscar producto..." />
+          <SearchInput value={busquedaCantidad} onChange={setBusquedaCantidad} placeholder="Buscar producto..." />
+<SelectFiltroLinea value={filtroLineaCantidad} onChange={setFiltroLineaCantidad} accentColor="emerald" />
           <div className="max-h-40 overflow-y-auto flex flex-col gap-1">
             {productos.length === 0 ? (
               <p className="text-xs text-gray-400 px-2 py-1.5">Sin resultados</p>
