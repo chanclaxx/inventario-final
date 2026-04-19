@@ -1398,7 +1398,7 @@ function PasoCantidad({ sucursalKey, onExito }) {
           <p className="text-sm font-medium text-gray-700">Seleccionar producto</p>
           {/* ── FILTRO POR LÍNEA ── */}
           <SearchInput value={busquedaCantidad} onChange={setBusquedaCantidad} placeholder="Buscar producto..." />
-<SelectFiltroLinea value={filtroLineaCantidad} onChange={setFiltroLineaCantidad} accentColor="emerald" />
+          <SelectFiltroLinea value={filtroLineaCantidad} onChange={setFiltroLineaCantidad} accentColor="emerald" />
           <div className="max-h-40 overflow-y-auto flex flex-col gap-1">
             {productos.length === 0 ? (
               <p className="text-xs text-gray-400 px-2 py-1.5">Sin resultados</p>
