@@ -1,6 +1,7 @@
 const router = require('express').Router();
 const { requireNivel } = require('../../middlewares/role.middleware');
 const ctrl = require('./facturas.controller');
+const { getPdfFactura } = require('./facturas.pdf.controller');
 const { body } = require('express-validator');
 const { validate } = require('../../middlewares/validate.middleware');
 
@@ -52,6 +53,7 @@ router.get('/recientes', ctrl.getFacturasRecientes);
 router.get('/buscar',    ctrl.buscarFacturas);
 
 router.get('/',               ctrl.getFacturas);
+router.get('/:id/pdf', getPdfFactura);
 router.get('/:id',            ctrl.getFacturaById);
 router.post('/', validarFactura, validate, ctrl.crearFactura);
 router.patch('/:id/cancelar', requireNivel('supervisor'), ctrl.cancelarFactura);

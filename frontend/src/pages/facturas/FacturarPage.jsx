@@ -15,12 +15,13 @@ import { FacturaTermica }       from '../../components/FacturaTermica';
 import { ModalEditarFactura }   from './ModalEditarFactura';
 import { ModalCancelarFactura } from './ModalCancelarFactura';
 import { useSucursalKey }       from '../../hooks/useSucursalKey';
+import { ModalImprimirFactura }   from '../../components/ui/ModalImprimirFactura';
 import useSucursalStore         from '../../store/sucursalStore';
 import api                      from '../../api/axios.config';
 
 import {
   FileText, ChevronDown, ChevronUp,
-  Printer, XCircle, Eye, Search, X, Pencil, Package, Building2, Bike,
+  Printer, XCircle, Eye, Search, X, Pencil, Package, Building2, Bike, FileDown,
 } from 'lucide-react';
 
 // ─── Utilidades ───────────────────────────────────────────────────────────────
@@ -140,7 +141,7 @@ function SeccionDomicilio({ facturaId }) {
 
 // ─── ModalDetalle ─────────────────────────────────────────────────────────────
 
-function ModalDetalle({ facturaId, onClose, onReimprimir, onEditar }) {
+function ModalDetalle({ facturaId, onClose, onAbrirImprimir, onEditar }) {
   const { esAdminNegocio } = useAuth();
   const { data, isLoading } = useQuery({ queryKey: ['factura-detalle', facturaId], queryFn: () => getFacturaById(facturaId).then((r) => r.data.data), enabled: !!facturaId });
   const { data: configData } = useQuery({ queryKey: ['config'], queryFn: () => api.get('/config').then((r) => r.data.data) });
@@ -152,6 +153,7 @@ function ModalDetalle({ facturaId, onClose, onReimprimir, onEditar }) {
   const total = f?.lineas?.reduce((s, l) => s + Number(l.subtotal || 0), 0) || 0;
   const totalPagado = f?.pagos?.reduce((s, p) => s + Number(p.valor || 0), 0) || 0;
   const valorRetoma = f?.retomas?.reduce((s, r) => s + Number(r.valor_retoma || 0), 0) || 0;
+  const facturaConConfig = { ...f, config: configData };
 
   return (
     <Modal open onClose={onClose} title={`Factura #${String(facturaId).padStart(6, '0')}`} size="lg">
@@ -187,7 +189,9 @@ function ModalDetalle({ facturaId, onClose, onReimprimir, onEditar }) {
         </div>
         {f?.notas && <div className="bg-gray-50 rounded-xl px-3 py-2"><p className="text-xs text-gray-400 mb-0.5">Descripción</p><p className="text-sm text-gray-600">{f.notas}</p></div>}
         <div className="flex gap-2">
-          <Button variant="secondary" className="flex-1" onClick={() => onReimprimir({ ...f, config: configData }, garantiasFactura)}><Printer size={16} /> Reimprimir</Button>
+          <Button variant="secondary" className="flex-1" onClick={() => onAbrirImprimir(facturaConConfig, garantiasFactura)}>
+  <Printer size={16} /> Imprimir
+</Button>
           {f?.estado !== 'Cancelada' && <Button variant="secondary" className="flex-1" onClick={() => onEditar(facturaId)}><Pencil size={16} /> Editar</Button>}
           <Button variant="secondary" className="flex-1" onClick={onClose}>Cerrar</Button>
         </div>
@@ -198,7 +202,7 @@ function ModalDetalle({ facturaId, onClose, onReimprimir, onEditar }) {
 
 // ─── Fila y Grupo (sin cambios) ───────────────────────────────────────────────
 
-function FilaFactura({ factura, onVerDetalle, onInactivar, onEditar, mostrarSucursal }) {
+function FilaFactura({ factura, onVerDetalle, onInactivar, onEditar, onAbrirPdf, mostrarSucursal }) {
   const total = Number(factura.total || 0) - Number(factura.total_retoma || 0);
   return (
     <div className={`bg-white border rounded-xl p-3 flex items-center justify-between gap-3 ${factura.estado === 'Cancelada' ? 'opacity-50 border-gray-100' : 'border-gray-100'}`}>
@@ -216,6 +220,14 @@ function FilaFactura({ factura, onVerDetalle, onInactivar, onEditar, mostrarSucu
       <div className="flex items-center gap-2 flex-shrink-0">
         <span className="text-sm font-bold text-gray-900">{formatCOP(total)}</span>
         <button onClick={() => onVerDetalle(factura.id)} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-blue-600 transition-colors"><Eye size={16} /></button>
+        <button
+  onClick={(e) => { e.stopPropagation(); onAbrirPdf(factura.id); }}
+  title="Descargar / compartir PDF"
+  className="p-1.5 rounded-lg hover:bg-purple-50 text-gray-400
+    hover:text-purple-600 transition-colors"
+>
+  <FileDown size={16} />
+</button>
         {factura.estado !== 'Cancelada' && <button onClick={() => onEditar(factura.id)} className="p-1.5 rounded-lg hover:bg-yellow-50 text-gray-400 hover:text-yellow-500 transition-colors"><Pencil size={16} /></button>}
         {factura.estado !== 'Cancelada' && <button onClick={() => onInactivar(factura)} className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors"><XCircle size={16} /></button>}
       </div>
@@ -223,7 +235,7 @@ function FilaFactura({ factura, onVerDetalle, onInactivar, onEditar, mostrarSucu
   );
 }
 
-function GrupoDia({ fecha, facturas, onVerDetalle, onInactivar, onEditar, mostrarSucursal }) {
+function GrupoDia({ fecha, facturas, onVerDetalle, onInactivar, onEditar, onAbrirPdf, mostrarSucursal }) {
   const [expandido, setExpandido] = useState(true);
   const totalDia = facturas.filter((f) => f.estado !== 'Cancelada').reduce((s, f) => s + Number(f.total || 0) - Number(f.total_retoma || 0), 0);
 
@@ -237,7 +249,7 @@ function GrupoDia({ fecha, facturas, onVerDetalle, onInactivar, onEditar, mostra
         </div>
         <span className="text-sm font-bold text-green-600">{formatCOP(totalDia)}</span>
       </button>
-      {expandido && <div className="flex flex-col gap-2 pl-2">{facturas.map((f) => <FilaFactura key={f.id} factura={f} onVerDetalle={onVerDetalle} onInactivar={onInactivar} onEditar={onEditar} mostrarSucursal={mostrarSucursal} />)}</div>}
+      {expandido && <div className="flex flex-col gap-2 pl-2">{facturas.map((f) => <FilaFactura key={f.id} factura={f} onVerDetalle={onVerDetalle} onInactivar={onInactivar} onEditar={onEditar} onAbrirPdf={onAbrirPdf} mostrarSucursal={mostrarSucursal} />)}</div>}
     </div>
   );
 }
@@ -305,6 +317,7 @@ export default function FacturarPage() {
   const [facturaDetalle,   setFacturaDetalle]   = useState(null);
   const [facturaInactivar, setFacturaInactivar] = useState(null);
   const [facturaImprimir,  setFacturaImprimir]  = useState(null);
+  const [pdfRapido, setPdfRapido] = useState(null);
   const [facturaEditar,    setFacturaEditar]    = useState(null);
   const [filtros,          setFiltros]          = useState(FILTROS_INICIALES);
   const [debouncedTexto,   setDebouncedTexto]   = useState('');
@@ -316,6 +329,24 @@ export default function FacturarPage() {
   }, [filtros.texto]);
 
   const hayBusqueda = !!(debouncedTexto.trim() || filtros.desde || filtros.hasta);
+
+  const { data: configData } = useQuery({
+  queryKey: ['config'],
+  queryFn:  () => api.get('/config').then((r) => r.data.data),
+});
+
+const { data: facturaRapidaData } = useQuery({
+  queryKey: ['factura-detalle', pdfRapido?.facturaId],
+  queryFn:  () => getFacturaById(pdfRapido.facturaId).then((r) => r.data.data),
+  enabled:  !!pdfRapido?.facturaId,
+});
+
+const { data: garantiasRapidas = [] } = useQuery({
+  queryKey: ['garantias-factura', pdfRapido?.facturaId],
+  queryFn:  () => getGarantiasPorFactura(pdfRapido.facturaId).then((r) => r.data.data),
+  enabled:  !!pdfRapido?.facturaId,
+  staleTime: 0,
+});
 
   // ── Modo scroll infinito (sin búsqueda) ─────────────────────────────────
   const infiniteQuery = useInfiniteQuery({
@@ -353,6 +384,10 @@ export default function FacturarPage() {
 
   const grupos = useMemo(() => agruparPorDia(facturas), [facturas]);
 
+  const facturaParaModalRapido = pdfRapido && facturaRapidaData
+  ? { ...facturaRapidaData, config: configData }
+  : null;
+
   // Observer para scroll infinito
   const cargarMas = useCallback(() => {
     if (!hayBusqueda && infiniteQuery.hasNextPage && !infiniteQuery.isFetchingNextPage) {
@@ -366,6 +401,14 @@ export default function FacturarPage() {
     setFacturaDetalle(null);
     setFacturaEditar(id);
   };
+  const handleAbrirImprimir = (facturaConConfig, garantias) => {
+  setFacturaDetalle(null);
+  setFacturaImprimir({ factura: facturaConConfig, garantias });
+};
+
+const handleAbrirPdfRapido = (facturaId) => {
+  setPdfRapido({ facturaId });
+};
 
   const handleLimpiar = () => {
     setFiltros(FILTROS_INICIALES);
@@ -404,6 +447,7 @@ export default function FacturarPage() {
               onVerDetalle={(id) => setFacturaDetalle(id)}
               onInactivar={(f) => setFacturaInactivar(f)}
               onEditar={handleEditar}
+              onAbrirPdf={handleAbrirPdfRapido}
               mostrarSucursal={esVistaGlobal} />
           ))}
 
@@ -421,12 +465,43 @@ export default function FacturarPage() {
 
       {facturaDetalle && (
         <ModalDetalle facturaId={facturaDetalle} onClose={() => setFacturaDetalle(null)}
-          onReimprimir={(f, garantias) => { setFacturaDetalle(null); setFacturaImprimir({ factura: f, garantias }); }}
+          onAbrirImprimir={handleAbrirImprimir}
           onEditar={handleEditar} />
       )}
       {facturaInactivar && <ModalCancelarFactura factura={facturaInactivar} onClose={() => setFacturaInactivar(null)} onSuccess={() => setFacturaInactivar(null)} />}
       {facturaEditar && <ModalEditarFactura facturaId={facturaEditar} onClose={() => setFacturaEditar(null)} onGuardado={() => setFacturaEditar(null)} />}
-      {facturaImprimir && <FacturaTermica factura={facturaImprimir.factura} garantias={facturaImprimir.garantias} onClose={() => setFacturaImprimir(null)} />}
+      {facturaImprimir && !facturaImprimir._posMode && (
+  <ModalImprimirFactura
+    open
+    onClose={() => setFacturaImprimir(null)}
+    factura={facturaImprimir.factura}
+    garantias={facturaImprimir.garantias}
+    onImprimirPos={(f, g) => {
+      setFacturaImprimir({ _posMode: true, factura: f, garantias: g });
+    }}
+  />
+)}
+
+{facturaImprimir?._posMode && (
+  <FacturaTermica
+    factura={facturaImprimir.factura}
+    garantias={facturaImprimir.garantias}
+    onClose={() => setFacturaImprimir(null)}
+  />
+)}
+
+{pdfRapido && (
+  <ModalImprimirFactura
+    open
+    onClose={() => setPdfRapido(null)}
+    factura={facturaParaModalRapido}
+    garantias={garantiasRapidas}
+    onImprimirPos={(f, g) => {
+      setPdfRapido(null);
+      setFacturaImprimir({ _posMode: true, factura: f, garantias: g });
+    }}
+  />
+)}
     </div>
   );
 }
