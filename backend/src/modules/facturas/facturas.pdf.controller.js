@@ -9,12 +9,7 @@ const { generarPdfFactura } = require('./facturas.pdf');
 const garantiasRepo         = require('../garantias/garantias.repository');
 const { pool }              = require('../../config/db');
 
-/**
- * GET /facturas/:id/pdf
- *
- * Genera y descarga el PDF de una factura en formato A4.
- * Requiere que el usuario tenga acceso al negocio al que pertenece la factura.
- */
+
 const getPdfFactura = async (req, res, next) => {
   try {
     // Reutiliza el mismo servicio que ya tienes
