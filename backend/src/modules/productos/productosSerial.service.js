@@ -1,10 +1,6 @@
 const { pool } = require('../../config/db');
 const repo     = require('./productosSerial.repository');
-
-const _fechaHoy = () => {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-};
+const { fechaHoyColombia } = require('../../utils/fecha.util');
 
 // ── Verifica que linea_id pertenece al negocio ────────────────────────────
 const _verificarLineaNegocio = async (lineaId, negocioId) => {
@@ -31,7 +27,6 @@ const crearProducto = async (negocioId, datos) => {
   );
   if (!rows.length) throw { status: 403, message: 'Sucursal no válida para este negocio' };
 
-  // ── linea_id requerido y verificado contra el negocio ──
   if (!datos.linea_id) throw { status: 400, message: 'La línea es requerida' };
   await _verificarLineaNegocio(datos.linea_id, negocioId);
 
@@ -42,7 +37,6 @@ const actualizarProducto = async (negocioId, id, datos) => {
   const producto = await repo.findByIdYNegocio(id, negocioId);
   if (!producto) throw { status: 404, message: 'Producto no encontrado' };
 
-  // ── Si viene linea_id verificar que pertenece al negocio ──
   if (datos.linea_id) {
     await _verificarLineaNegocio(datos.linea_id, negocioId);
   }
@@ -79,7 +73,7 @@ const agregarSerial = async (
   return repo.insertarSerial({
     producto_id:    productoId,
     imei,
-    fecha_entrada:  fecha_entrada || _fechaHoy(),
+    fecha_entrada:  fecha_entrada || fechaHoyColombia(),
     costo_compra:   costo_compra  ?? null,
     cliente_origen: cliente_origen || null,
     proveedor_id:   proveedor_id   || null,
@@ -129,17 +123,11 @@ const verificarImei = async (imei, negocioId) => {
     },
   };
 };
-// ─────────────────────────────────────────────────────────────────────────────
-// AÑADIR esta función al final de productosSerial.service.js,
-// ANTES de module.exports, y exportarla junto a las existentes.
-// ─────────────────────────────────────────────────────────────────────────────
 
 const eliminarProductoSerial = async (negocioId, id) => {
-  // 1. Verificar que el producto existe y pertenece al negocio
   const producto = await repo.findByIdYNegocio(id, negocioId);
   if (!producto) throw { status: 404, message: 'Producto no encontrado' };
 
-  // 2. Bloquear si tiene seriales asociados (de cualquier estado)
   const totalSeriales = await repo.contarSeriales(id);
   if (totalSeriales > 0) {
     throw {
@@ -148,13 +136,9 @@ const eliminarProductoSerial = async (negocioId, id) => {
     };
   }
 
-  // 3. Eliminar
   const eliminado = await repo.eliminarProductoSerial(id);
   if (!eliminado) throw { status: 404, message: 'Producto no encontrado' };
 };
-
-// ── Añadir al module.exports existente: ──────────────────────────────────────
-// eliminarProductoSerial
 
 const getComprasCliente = async (negocioId, q) =>
   repo.findComprasCliente(negocioId, q || '');
@@ -162,5 +146,5 @@ const getComprasCliente = async (negocioId, q) =>
 module.exports = {
   getProductos, getProductoById, crearProducto, actualizarProducto,
   getSeriales, agregarSerial, actualizarSerial, eliminarSerial,
-  verificarImei, getComprasCliente,eliminarProductoSerial
+  verificarImei, getComprasCliente, eliminarProductoSerial,
 };

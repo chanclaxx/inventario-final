@@ -9,6 +9,12 @@ const pool = new Pool({
   ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
 });
 
+// Forzar zona horaria de Colombia en todas las conexiones del pool.
+// Esto corrige fechas generadas con NOW(), CURRENT_DATE y CURRENT_TIMESTAMP en SQL.
+pool.on('connect', (client) => {
+  client.query("SET TIME ZONE 'America/Bogota'");
+});
+
 pool.on('error', (err) => {
   console.error('Error inesperado en el pool de PostgreSQL:', err);
   process.exit(-1);
