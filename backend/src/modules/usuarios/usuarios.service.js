@@ -73,7 +73,7 @@ const crearUsuario = async (negocioId, {
 const actualizarUsuario = async (negocioId, id, datos) => {
   const existe = await usuariosRepo.findById(negocioId, id);
   if (!existe) throw { status: 404, message: 'Usuario no encontrado' };
- 
+
   if (datos.sucursal_id) {
     const { rows } = await pool.query(
       'SELECT id FROM sucursales WHERE id = $1 AND negocio_id = $2 AND activa = true',
@@ -83,22 +83,26 @@ const actualizarUsuario = async (negocioId, id, datos) => {
       throw { status: 400, message: 'La sucursal indicada no pertenece a este negocio' };
     }
   }
- 
+
   if (datos.email) {
     const duplicado = await usuariosRepo.findByEmail(datos.email, Number(id));
     if (duplicado) throw { status: 409, message: 'Ya existe un usuario con ese email' };
   }
- 
-  // Calcular módulos a guardar
-  // Si viene modulos_permitidos en el payload → usar ese valor
-  // Si es admin_negocio → siempre null (acceso total)
+
+  // ── NUEVO: cambiar contraseña si viene en el payload ─────────────
+  if (datos.password && datos.password.trim().length >= 6) {
+    const password_hash = await bcrypt.hash(datos.password.trim(), 10);
+    await usuariosRepo.updatePassword(negocioId, id, password_hash);
+  }
+  // ─────────────────────────────────────────────────────────────────
+
   const rolFinal = datos.rol || existe.rol;
   const modulosAGuardar = (rolFinal === 'admin_negocio')
     ? null
     : (datos.modulos_permitidos !== undefined
         ? datos.modulos_permitidos
-        : existe.modulos_permitidos);  // mantener los que ya tenía
- 
+        : existe.modulos_permitidos);
+
   return usuariosRepo.update(negocioId, id, {
     ...datos,
     modulos_permitidos: modulosAGuardar,
