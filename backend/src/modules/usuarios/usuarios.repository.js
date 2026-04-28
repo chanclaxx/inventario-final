@@ -4,6 +4,7 @@ const findAll = async (negocioId) => {
   const { rows } = await pool.query(`
     SELECT u.id, u.nombre, u.email, u.rol, u.activo,
            u.sucursal_id, u.creado_en, u.ultimo_acceso,
+           u.modulos_permitidos,
            s.nombre AS sucursal_nombre
     FROM usuarios u
     LEFT JOIN sucursales s ON s.id = u.sucursal_id
@@ -17,6 +18,7 @@ const findById = async (negocioId, id) => {
   const { rows } = await pool.query(`
     SELECT u.id, u.nombre, u.email, u.rol, u.activo,
            u.sucursal_id, u.creado_en, u.ultimo_acceso,
+           u.modulos_permitidos,
            s.nombre AS sucursal_nombre
     FROM usuarios u
     LEFT JOIN sucursales s ON s.id = u.sucursal_id
@@ -55,7 +57,7 @@ const create = async ({
     negocio_id, nombre, email, password_hash, rol,
     sucursal_id || null,
     password_temporal ?? false,
-    modulos_permitidos || null,   // NULL = usar permisos base del rol
+    modulos_permitidos || null,
   ]);
   return rows[0];
 };
@@ -63,38 +65,42 @@ const create = async ({
 const update = async (negocioId, id, datos) => {
   const { nombre, email, rol, sucursal_id, modulos_permitidos } = datos;
   const activoExplicito = typeof datos.activo === 'boolean';
- 
+
   let query, params;
- 
+
   if (activoExplicito) {
     query = `
       UPDATE usuarios
       SET nombre = $1, email = $2, rol = $3, sucursal_id = $4,
-          activo = $5, modulos_permitidos = $6
+          activo = $5, modulos_permitidos = $6::text[]
       WHERE id = $7 AND negocio_id = $8
       RETURNING id, nombre, email, rol, activo, sucursal_id, modulos_permitidos
     `;
     params = [
       nombre, email, rol, sucursal_id || null,
       datos.activo,
-      modulos_permitidos !== undefined ? modulos_permitidos : null,
+      modulos_permitidos !== undefined && modulos_permitidos !== null
+        ? modulos_permitidos
+        : null,
       id, negocioId,
     ];
   } else {
     query = `
       UPDATE usuarios
       SET nombre = $1, email = $2, rol = $3,
-          sucursal_id = $4, modulos_permitidos = $5
+          sucursal_id = $4, modulos_permitidos = $5::text[]
       WHERE id = $6 AND negocio_id = $7
       RETURNING id, nombre, email, rol, activo, sucursal_id, modulos_permitidos
     `;
     params = [
       nombre, email, rol, sucursal_id || null,
-      modulos_permitidos !== undefined ? modulos_permitidos : null,
+      modulos_permitidos !== undefined && modulos_permitidos !== null
+        ? modulos_permitidos
+        : null,
       id, negocioId,
     ];
   }
- 
+
   const { rows } = await pool.query(query, params);
   return rows[0] || null;
 };
@@ -106,6 +112,7 @@ const updatePassword = async (negocioId, id, password_hash) => {
   );
   return rowCount > 0;
 };
+
 const findAdminByEmail = async (email) => {
   const { rows } = await pool.query(
     `SELECT id, nombre, email, negocio_id
@@ -118,11 +125,8 @@ const findAdminByEmail = async (email) => {
   );
   return rows[0] || null;
 };
- 
-// Guarda el hash del token de recuperación.
-// Invalida tokens anteriores del mismo usuario antes de insertar el nuevo.
+
 const crearTokenRecuperacion = async (usuarioId, tokenHash, expiraEn) => {
-  // Invalidar tokens previos no usados del mismo usuario
   await pool.query(
     `UPDATE tokens_recuperacion SET usado = true
      WHERE usuario_id = $1 AND usado = false`,
@@ -136,8 +140,7 @@ const crearTokenRecuperacion = async (usuarioId, tokenHash, expiraEn) => {
   );
   return rows[0];
 };
- 
-// Busca un token válido (no usado, no expirado) por su hash.
+
 const findTokenRecuperacion = async (tokenHash) => {
   const { rows } = await pool.query(
     `SELECT tr.id, tr.usuario_id, tr.expira_en, tr.usado,
@@ -152,8 +155,7 @@ const findTokenRecuperacion = async (tokenHash) => {
   );
   return rows[0] || null;
 };
- 
-// Marca el token como usado — se llama justo después de cambiar la contraseña.
+
 const invalidarTokenRecuperacion = async (tokenId) => {
   await pool.query(
     'UPDATE tokens_recuperacion SET usado = true WHERE id = $1',
@@ -161,4 +163,9 @@ const invalidarTokenRecuperacion = async (tokenId) => {
   );
 };
 
-module.exports = { findAll, findById, findByEmail, create, update, updatePassword,invalidarTokenRecuperacion,crearTokenRecuperacion,findAdminByEmail,findTokenRecuperacion };
+module.exports = {
+  findAll, findById, findByEmail,
+  create, update, updatePassword,
+  crearTokenRecuperacion, findAdminByEmail,
+  findTokenRecuperacion, invalidarTokenRecuperacion,
+};
