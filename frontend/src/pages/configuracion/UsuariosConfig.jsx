@@ -1,3 +1,9 @@
+// src/pages/config/UsuariosConfig.jsx
+// ─────────────────────────────────────────────────────────────────────────────
+// Gestión de usuarios con permisos por módulo personalizables.
+// El admin puede marcar qué módulos puede ver cada usuario.
+// ─────────────────────────────────────────────────────────────────────────────
+
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '../../api/axios.config';
@@ -6,54 +12,211 @@ import { Modal }   from '../../components/ui/Modal';
 import { Button }  from '../../components/ui/Button';
 import { Input }   from '../../components/ui/Input';
 import { Badge }   from '../../components/ui/Badge';
-import { Plus, Pencil, UserX, UserCheck, Users } from 'lucide-react';
+import { Plus, Pencil, UserX, UserCheck, Users, ShieldCheck } from 'lucide-react';
 
-// ── Constantes ────────────────────────────────────────
+// ─── Constantes ───────────────────────────────────────────────────────────────
+
 const ROLES = [
   { value: 'admin_negocio', label: 'Admin negocio' },
   { value: 'supervisor',    label: 'Supervisor'    },
   { value: 'vendedor',      label: 'Vendedor'      },
 ];
 
-const FORM_INICIAL = {
-  nombre:      '',
-  email:       '',
-  password:    '',
-  rol:         'vendedor',
-  sucursal_id: '',
+// Debe coincidir con src/config/modulos.js del backend
+const MODULOS = [
+  { key: 'inventario',  label: 'Inventario'  },
+  { key: 'facturar',    label: 'Facturas'    },
+  { key: 'servicios',   label: 'Servicios'   },
+  { key: 'proveedores', label: 'Proveedores' },
+  { key: 'prestamos',   label: 'Préstamos'   },
+  { key: 'caja',        label: 'Caja'        },
+  { key: 'traslados',   label: 'Traslados'   },
+  { key: 'reportes',    label: 'Reportes'    },
+  { key: 'acreedores',  label: 'Acreedores'  },
+];
+
+// Permisos base por rol (espejo del backend)
+const PERMISOS_BASE = {
+  supervisor: ['inventario','facturar','servicios','proveedores',
+               'prestamos','caja','traslados','reportes','acreedores'],
+  vendedor:   ['inventario','facturar','servicios','prestamos'],
 };
 
-// ── Queries / mutations ───────────────────────────────
-const fetchUsuarios   = () => api.get('/usuarios').then((r) => r.data.data);
+const FORM_INICIAL = {
+  nombre:             '',
+  email:              '',
+  password:           '',
+  rol:                'vendedor',
+  sucursal_id:        '',
+  modulos_permitidos: null, // null = usar base del rol
+};
+
+// ─── Queries ──────────────────────────────────────────────────────────────────
+
+const fetchUsuarios   = () => api.get('/usuarios').then((r)   => r.data.data);
 const fetchSucursales = () => api.get('/sucursales').then((r) => r.data.data);
 
-// ── Sub-componente: fila de usuario ──────────────────
-function FilaUsuario({ usuario, onEditar, onToggleActivo }) {
-  const rolLabel = ROLES.find((r) => r.value === usuario.rol)?.label ?? usuario.rol;
+// ─── SelectorModulos ──────────────────────────────────────────────────────────
+
+/**
+ * Checkboxes para seleccionar módulos permitidos.
+ * Cuando el usuario no ha personalizado, muestra los del rol como marcados
+ * pero en estado "base" (badge distinto). Al tocar cualquiera, se guarda
+ * una copia personalizada.
+ */
+function SelectorModulos({ rol, modulosPermitidos, onChange }) {
+  if (rol === 'admin_negocio') {
+    return (
+      <div className="flex items-center gap-2 bg-blue-50 border border-blue-100
+        rounded-xl px-3 py-2.5">
+        <ShieldCheck size={14} className="text-blue-500 flex-shrink-0" />
+        <p className="text-xs text-blue-700 font-medium">
+          Admin negocio — acceso total a todos los módulos
+        </p>
+      </div>
+    );
+  }
+
+  // Si modulosPermitidos es null → mostrar los del rol como base
+  const estaPersonalizado = modulosPermitidos !== null;
+  const activos = estaPersonalizado
+    ? modulosPermitidos
+    : (PERMISOS_BASE[rol] || []);
+
+  const handleToggle = (key) => {
+    const base = estaPersonalizado ? modulosPermitidos : (PERMISOS_BASE[rol] || []);
+    const siguiente = base.includes(key)
+      ? base.filter((k) => k !== key)
+      : [...base, key];
+    onChange(siguiente);
+  };
+
+  const handleResetear = () => onChange(null);
 
   return (
-    <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl">
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center justify-between">
+        <label className="text-sm font-medium text-gray-700">
+          Acceso a módulos
+        </label>
+        {estaPersonalizado && (
+          <button
+            type="button"
+            onClick={handleResetear}
+            className="text-xs text-blue-500 hover:text-blue-700 transition-colors"
+          >
+            Restablecer por rol
+          </button>
+        )}
+      </div>
+
+      {!estaPersonalizado && (
+        <p className="text-xs text-gray-400 bg-gray-50 rounded-lg px-3 py-1.5">
+          Usando permisos base del rol. Toca un módulo para personalizar.
+        </p>
+      )}
+
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+        {MODULOS.map((modulo) => {
+          const moduloKey    = modulo.key;
+          const moduloLabel  = modulo.label;
+          const estaActivo   = activos.includes(moduloKey);
+          const esBase       = !estaPersonalizado && (PERMISOS_BASE[rol] || []).includes(moduloKey);
+
+          return (
+            <button
+              key={moduloKey}
+              type="button"
+              onClick={() => handleToggle(moduloKey)}
+              className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-sm
+                font-medium transition-all text-left
+                ${estaActivo
+                  ? esBase
+                    ? 'bg-green-50 border-green-200 text-green-700'
+                    : 'bg-blue-50 border-blue-300 text-blue-700'
+                  : 'bg-gray-50 border-gray-200 text-gray-400 hover:border-gray-300'}`}
+            >
+              <span className={`w-3 h-3 rounded-sm border flex-shrink-0 flex items-center
+                justify-center transition-all
+                ${estaActivo
+                  ? 'bg-current border-current'
+                  : 'border-gray-300 bg-white'}`}
+              >
+                {estaActivo && (
+                  <svg viewBox="0 0 8 8" className="w-2 h-2 text-white fill-current">
+                    <path d="M1 4l2 2 4-4" stroke="currentColor" strokeWidth="1.5"
+                      fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                )}
+              </span>
+              {moduloLabel}
+            </button>
+          );
+        })}
+      </div>
+
+      {estaPersonalizado && (
+        <p className="text-xs text-blue-500">
+          {activos.length} de {MODULOS.length} módulos habilitados — personalizado
+        </p>
+      )}
+    </div>
+  );
+}
+
+// ─── FilaUsuario ──────────────────────────────────────────────────────────────
+
+function FilaUsuario({ usuario, onEditar, onToggleActivo }) {
+  const rolLabel = ROLES.find((r) => r.value === usuario.rol)?.label ?? usuario.rol;
+  const esAdmin  = usuario.rol === 'admin_negocio';
+
+  const modulosActivos = esAdmin
+    ? null
+    : (usuario.modulos_permitidos ?? PERMISOS_BASE[usuario.rol] ?? []);
+
+  return (
+    <div className={`flex items-center gap-3 p-3 rounded-xl border transition-all
+      ${usuario.activo ? 'bg-gray-50 border-gray-100' : 'bg-gray-50/50 border-gray-100 opacity-60'}`}
+    >
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium text-gray-800 truncate">{usuario.nombre}</p>
+        <div className="flex items-center gap-2 flex-wrap">
+          <p className="text-sm font-medium text-gray-800 truncate">{usuario.nombre}</p>
+          {!usuario.activo && <Badge variant="red">Inactivo</Badge>}
+        </div>
         <p className="text-xs text-gray-400 truncate">{usuario.email}</p>
-        <div className="flex items-center gap-2 mt-1 flex-wrap">
+        <div className="flex items-center gap-2 mt-1.5 flex-wrap">
           <Badge variant="blue">{rolLabel}</Badge>
           {usuario.sucursal_nombre && (
             <Badge variant="gray">{usuario.sucursal_nombre}</Badge>
           )}
-          {!usuario.activo && <Badge variant="red">Inactivo</Badge>}
+          {esAdmin ? (
+            <span className="text-xs text-blue-500 flex items-center gap-1">
+              <ShieldCheck size={11} /> Acceso total
+            </span>
+          ) : usuario.modulos_permitidos !== null ? (
+            <span className="text-xs text-purple-600 font-medium">
+              {modulosActivos.length} módulos personalizados
+            </span>
+          ) : (
+            <span className="text-xs text-gray-400">
+              Permisos base del rol
+            </span>
+          )}
         </div>
       </div>
       <div className="flex gap-1 flex-shrink-0">
         <button
           onClick={() => onEditar(usuario)}
-          className="p-1.5 rounded-lg hover:bg-gray-200 text-gray-400 hover:text-gray-600 transition-colors"
+          className="p-1.5 rounded-lg hover:bg-gray-200 text-gray-400
+            hover:text-gray-600 transition-colors"
+          title="Editar usuario"
         >
           <Pencil size={14} />
         </button>
         <button
           onClick={() => onToggleActivo(usuario)}
-          className="p-1.5 rounded-lg hover:bg-gray-200 text-gray-400 hover:text-gray-600 transition-colors"
+          className="p-1.5 rounded-lg hover:bg-gray-200 text-gray-400
+            hover:text-gray-600 transition-colors"
           title={usuario.activo ? 'Desactivar' : 'Activar'}
         >
           {usuario.activo ? <UserX size={14} /> : <UserCheck size={14} />}
@@ -63,19 +226,18 @@ function FilaUsuario({ usuario, onEditar, onToggleActivo }) {
   );
 }
 
-// ── Sub-componente: formulario modal ─────────────────
+// ─── ModalUsuario ─────────────────────────────────────────────────────────────
+
 function ModalUsuario({ open, onClose, editando, sucursales, onGuardar, cargando, error }) {
-  // El form se inicializa directo desde editando cada vez que el modal se monta.
-  // Como el padre desmonta/monta el modal cambiando `open`, esto es suficiente
-  // para prellenar los campos sin necesitar useEffect.
   const [form, setForm] = useState(() =>
     editando
       ? {
-          nombre:      editando.nombre      || '',
-          email:       editando.email       || '',
-          password:    '',
-          rol:         editando.rol         || 'vendedor',
-          sucursal_id: editando.sucursal_id ?? '',
+          nombre:             editando.nombre      || '',
+          email:              editando.email       || '',
+          password:           '',
+          rol:                editando.rol         || 'vendedor',
+          sucursal_id:        editando.sucursal_id ?? '',
+          modulos_permitidos: editando.modulos_permitidos ?? null,
         }
       : FORM_INICIAL
   );
@@ -84,9 +246,13 @@ function ModalUsuario({ open, onClose, editando, sucursales, onGuardar, cargando
 
   const requiereSucursal = form.rol !== 'admin_negocio';
 
+  // Cuando cambia el rol, resetear módulos a null (base del nuevo rol)
+  const handleRolChange = (nuevoRol) => {
+    setForm((f) => ({ ...f, rol: nuevoRol, modulos_permitidos: null }));
+  };
+
   const handleGuardar = () => {
     const payload = { ...form };
-    // Si no escribió contraseña nueva, no la enviamos para no sobreescribir la existente
     if (!payload.password) delete payload.password;
     if (!requiereSucursal) payload.sucursal_id = null;
     onGuardar(payload);
@@ -127,14 +293,16 @@ function ModalUsuario({ open, onClose, editando, sucursales, onGuardar, cargando
           <label className="text-sm font-medium text-gray-700">Rol</label>
           <select
             value={form.rol}
-            onChange={(e) => set('rol', e.target.value)}
+            onChange={(e) => handleRolChange(e.target.value)}
             className="w-full px-3 py-2.5 bg-gray-100 border-0 rounded-xl text-sm
               text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500
               focus:bg-white transition-all"
           >
-            {ROLES.map((r) => (
-              <option key={r.value} value={r.value}>{r.label}</option>
-            ))}
+            {ROLES.map((r) => {
+              const rVal   = r.value;
+              const rLabel = r.label;
+              return <option key={rVal} value={rVal}>{rLabel}</option>;
+            })}
           </select>
         </div>
 
@@ -149,14 +317,27 @@ function ModalUsuario({ open, onClose, editando, sucursales, onGuardar, cargando
                 focus:bg-white transition-all"
             >
               <option value="">Selecciona una sucursal</option>
-              {sucursales.map((s) => (
-                <option key={s.id} value={s.id}>{s.nombre}</option>
-              ))}
+              {sucursales.map((s) => {
+                const sId     = s.id;
+                const sNombre = s.nombre;
+                return <option key={sId} value={sId}>{sNombre}</option>;
+              })}
             </select>
           </div>
         )}
 
-        {error && <p className="text-sm text-red-500">{error}</p>}
+        {/* Selector de módulos */}
+        <SelectorModulos
+          rol={form.rol}
+          modulosPermitidos={form.modulos_permitidos}
+          onChange={(modulos) => set('modulos_permitidos', modulos)}
+        />
+
+        {error && (
+          <div className="bg-red-50 border border-red-100 rounded-xl px-3 py-2">
+            <p className="text-sm text-red-600">{error}</p>
+          </div>
+        )}
 
         <div className="flex gap-2">
           <Button variant="secondary" className="flex-1" onClick={onClose}>
@@ -171,7 +352,8 @@ function ModalUsuario({ open, onClose, editando, sucursales, onGuardar, cargando
   );
 }
 
-// ── Componente principal ──────────────────────────────
+// ─── Componente principal ─────────────────────────────────────────────────────
+
 export function UsuariosConfig() {
   const { esAdminNegocio } = useAuth();
   const queryClient        = useQueryClient();
@@ -184,44 +366,31 @@ export function UsuariosConfig() {
 
   const mutCrear = useMutation({
     mutationFn: (payload) => api.post('/usuarios', payload),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['usuarios'] }); cerrarModal(); },
-    onError: (e) => setError(e.response?.data?.error || 'Error al crear usuario'),
+    onSuccess:  () => { queryClient.invalidateQueries({ queryKey: ['usuarios'] }); cerrarModal(); },
+    onError:    (e) => setError(e.response?.data?.error || 'Error al crear usuario'),
   });
 
   const mutEditar = useMutation({
     mutationFn: (payload) => api.put(`/usuarios/${editando.id}`, payload),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['usuarios'] }); cerrarModal(); },
-    onError: (e) => setError(e.response?.data?.error || 'Error al actualizar usuario'),
+    onSuccess:  () => { queryClient.invalidateQueries({ queryKey: ['usuarios'] }); cerrarModal(); },
+    onError:    (e) => setError(e.response?.data?.error || 'Error al actualizar usuario'),
   });
 
   const mutToggleActivo = useMutation({
     mutationFn: (usuario) => api.put(`/usuarios/${usuario.id}`, {
-      nombre:      usuario.nombre,
-      email:       usuario.email,
-      rol:         usuario.rol,
-      sucursal_id: usuario.sucursal_id,
-      activo:      !usuario.activo,
+      nombre:             usuario.nombre,
+      email:              usuario.email,
+      rol:                usuario.rol,
+      sucursal_id:        usuario.sucursal_id,
+      modulos_permitidos: usuario.modulos_permitidos,
+      activo:             !usuario.activo,
     }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['usuarios'] }),
   });
 
-  const abrirNuevo = () => {
-    setEditando(null);
-    setError('');
-    setModalOpen(true);
-  };
-
-  const abrirEditar = (usuario) => {
-    setEditando(usuario);
-    setError('');
-    setModalOpen(true);
-  };
-
-  const cerrarModal = () => {
-    setModalOpen(false);
-    setEditando(null);
-    setError('');
-  };
+  const abrirNuevo = () => { setEditando(null); setError(''); setModalOpen(true); };
+  const abrirEditar = (usuario) => { setEditando(usuario); setError(''); setModalOpen(true); };
+  const cerrarModal = () => { setModalOpen(false); setEditando(null); setError(''); };
 
   const handleGuardar = (payload) => {
     setError('');
@@ -248,7 +417,8 @@ export function UsuariosConfig() {
         </div>
         <button
           onClick={abrirNuevo}
-          className="w-8 h-8 bg-blue-600 rounded-xl flex items-center justify-center hover:bg-blue-700 transition-colors"
+          className="w-8 h-8 bg-blue-600 rounded-xl flex items-center justify-center
+            hover:bg-blue-700 transition-colors"
         >
           <Plus size={16} className="text-white" />
         </button>
@@ -262,24 +432,17 @@ export function UsuariosConfig() {
       ) : (
         <div className="flex flex-col gap-2">
           {activos.map((u) => (
-            <FilaUsuario
-              key={u.id}
-              usuario={u}
+            <FilaUsuario key={u.id} usuario={u}
               onEditar={abrirEditar}
-              onToggleActivo={(usr) => mutToggleActivo.mutate(usr)}
-            />
+              onToggleActivo={(usr) => mutToggleActivo.mutate(usr)} />
           ))}
-
           {inactivos.length > 0 && (
             <>
               <p className="text-xs text-gray-400 mt-2 px-1">Inactivos</p>
               {inactivos.map((u) => (
-                <FilaUsuario
-                  key={u.id}
-                  usuario={u}
+                <FilaUsuario key={u.id} usuario={u}
                   onEditar={abrirEditar}
-                  onToggleActivo={(usr) => mutToggleActivo.mutate(usr)}
-                />
+                  onToggleActivo={(usr) => mutToggleActivo.mutate(usr)} />
               ))}
             </>
           )}

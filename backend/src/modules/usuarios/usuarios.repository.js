@@ -39,39 +39,62 @@ const findByEmail = async (email, excludeId = null) => {
   return rows[0] || null;
 };
 
-const create = async ({ negocio_id, nombre, email, password_hash, rol, sucursal_id, password_temporal }) => {
+const create = async ({
+  negocio_id, nombre, email, password_hash, rol,
+  sucursal_id, password_temporal, modulos_permitidos,
+}) => {
   const { rows } = await pool.query(`
-    INSERT INTO usuarios(negocio_id, nombre, email, password_hash, rol, sucursal_id, password_temporal)
-    VALUES ($1, $2, $3, $4, $5, $6, $7)
-    RETURNING id, nombre, email, rol, activo, sucursal_id, creado_en
-  `, [negocio_id, nombre, email, password_hash, rol, sucursal_id || null, password_temporal ?? false]);
+    INSERT INTO usuarios(
+      negocio_id, nombre, email, password_hash, rol,
+      sucursal_id, password_temporal, modulos_permitidos
+    )
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    RETURNING id, nombre, email, rol, activo, sucursal_id,
+              creado_en, modulos_permitidos
+  `, [
+    negocio_id, nombre, email, password_hash, rol,
+    sucursal_id || null,
+    password_temporal ?? false,
+    modulos_permitidos || null,   // NULL = usar permisos base del rol
+  ]);
   return rows[0];
 };
 
 const update = async (negocioId, id, datos) => {
-  const { nombre, email, rol, sucursal_id } = datos;
+  const { nombre, email, rol, sucursal_id, modulos_permitidos } = datos;
   const activoExplicito = typeof datos.activo === 'boolean';
-
+ 
   let query, params;
-
+ 
   if (activoExplicito) {
     query = `
       UPDATE usuarios
-      SET nombre = $1, email = $2, rol = $3, sucursal_id = $4, activo = $5
-      WHERE id = $6 AND negocio_id = $7
-      RETURNING id, nombre, email, rol, activo, sucursal_id
+      SET nombre = $1, email = $2, rol = $3, sucursal_id = $4,
+          activo = $5, modulos_permitidos = $6
+      WHERE id = $7 AND negocio_id = $8
+      RETURNING id, nombre, email, rol, activo, sucursal_id, modulos_permitidos
     `;
-    params = [nombre, email, rol, sucursal_id || null, datos.activo, id, negocioId];
+    params = [
+      nombre, email, rol, sucursal_id || null,
+      datos.activo,
+      modulos_permitidos !== undefined ? modulos_permitidos : null,
+      id, negocioId,
+    ];
   } else {
     query = `
       UPDATE usuarios
-      SET nombre = $1, email = $2, rol = $3, sucursal_id = $4
-      WHERE id = $5 AND negocio_id = $6
-      RETURNING id, nombre, email, rol, activo, sucursal_id
+      SET nombre = $1, email = $2, rol = $3,
+          sucursal_id = $4, modulos_permitidos = $5
+      WHERE id = $6 AND negocio_id = $7
+      RETURNING id, nombre, email, rol, activo, sucursal_id, modulos_permitidos
     `;
-    params = [nombre, email, rol, sucursal_id || null, id, negocioId];
+    params = [
+      nombre, email, rol, sucursal_id || null,
+      modulos_permitidos !== undefined ? modulos_permitidos : null,
+      id, negocioId,
+    ];
   }
-
+ 
   const { rows } = await pool.query(query, params);
   return rows[0] || null;
 };

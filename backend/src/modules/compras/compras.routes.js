@@ -1,7 +1,8 @@
 const router   = require('express').Router();
 const { body } = require('express-validator');
-const { validate }    = require('../../middlewares/validate.middleware');
-const { requireNivel } = require('../../middlewares/role.middleware');
+const { validate }      = require('../../middlewares/validate.middleware');
+const { requireNivel }  = require('../../middlewares/role.middleware');
+const { requireModulo } = require('../../middlewares/modulo.middleware');
 const ctrl     = require('./compras.controller');
 
 const validarCompra = [
@@ -11,9 +12,10 @@ const validarCompra = [
   body('lineas.*.cantidad').isInt({ gt: 0 }).withMessage('Cantidad inválida'),
 ];
 
-router.get('/',                       ctrl.getCompras);
-router.get('/proveedor/:proveedorId', ctrl.getComprasByProveedor);
-router.get('/:id',                    ctrl.getCompraById);
-router.post('/', requireNivel('supervisor'), validarCompra, validate, ctrl.registrarCompra);
+// Compras viven dentro del módulo de proveedores
+router.get('/',                       requireModulo('proveedores'), ctrl.getCompras);
+router.get('/proveedor/:proveedorId', requireModulo('proveedores'), ctrl.getComprasByProveedor);
+router.get('/:id',                    requireModulo('proveedores'), ctrl.getCompraById);
+router.post('/', requireModulo('proveedores'), requireNivel('supervisor'), validarCompra, validate, ctrl.registrarCompra);
 
 module.exports = router;

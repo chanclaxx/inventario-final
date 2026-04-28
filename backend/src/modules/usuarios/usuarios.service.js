@@ -1,6 +1,7 @@
 const bcrypt       = require('bcryptjs');
 const { pool }     = require('../../config/db');
 const usuariosRepo = require('./usuarios.repository');
+const { PERMISOS_BASE } = require('../../config/modulos');
 const crypto = require('crypto');
 const { enviarRecuperacionPassword } = require('../email/email.service');
 
@@ -12,17 +13,18 @@ const getUsuarioById = async (negocioId, id) => {
   return usuario;
 };
 
-const crearUsuario = async (negocioId, { nombre, email, password, rol, sucursal_id }) => {
+const crearUsuario = async (negocioId, {
+  nombre, email, password, rol, sucursal_id, modulos_permitidos,
+}) => {
   if (rol === 'admin_negocio' && sucursal_id) {
     throw { status: 400, message: 'El admin de negocio no puede tener sucursal asignada' };
   }
   if (rol !== 'admin_negocio' && !sucursal_id) {
     throw { status: 400, message: 'Supervisores y vendedores requieren sucursal asignada' };
   }
-
+ 
   const { rows: [negocio] } = await pool.query(
-    'SELECT max_usuarios FROM negocios WHERE id = $1',
-    [negocioId]
+    'SELECT max_usuarios FROM negocios WHERE id = $1', [negocioId]
   );
   const { rows: [conteo] } = await pool.query(
     'SELECT COUNT(*) AS total FROM usuarios WHERE negocio_id = $1 AND activo = true',
@@ -31,8 +33,7 @@ const crearUsuario = async (negocioId, { nombre, email, password, rol, sucursal_
   if (parseInt(conteo.total) >= negocio.max_usuarios) {
     throw { status: 400, message: `Tu plan permite máximo ${negocio.max_usuarios} usuario(s)` };
   }
-
-  // ── Verificar que sucursal_id pertenece al negocio ──────────────
+ 
   if (sucursal_id) {
     const { rows } = await pool.query(
       'SELECT id FROM sucursales WHERE id = $1 AND negocio_id = $2 AND activa = true',
@@ -42,17 +43,24 @@ const crearUsuario = async (negocioId, { nombre, email, password, rol, sucursal_
       throw { status: 400, message: 'La sucursal indicada no pertenece a este negocio' };
     }
   }
-
+ 
   const existe = await usuariosRepo.findByEmail(email);
   if (existe) throw { status: 409, message: 'Ya existe un usuario con ese email' };
-
+ 
   const password_hash = await bcrypt.hash(password, 10);
-
+ 
+  // Si el admin envió módulos personalizados los usa; si no, guarda NULL
+  // para que el sistema use los permisos base del rol automáticamente.
+  const modulosAGuardar = (modulos_permitidos && rol !== 'admin_negocio')
+    ? modulos_permitidos
+    : null;
+ 
   try {
     return await usuariosRepo.create({
-      negocio_id: negocioId, nombre, email, password_hash, rol,
-      sucursal_id,
-      password_temporal: false,   // ← forzar cambio en primer login
+      negocio_id:         negocioId,
+      nombre, email, password_hash, rol, sucursal_id,
+      password_temporal:  false,
+      modulos_permitidos: modulosAGuardar,
     });
   } catch (err) {
     if (err.constraint === 'usuarios_email_key') {
@@ -65,12 +73,7 @@ const crearUsuario = async (negocioId, { nombre, email, password, rol, sucursal_
 const actualizarUsuario = async (negocioId, id, datos) => {
   const existe = await usuariosRepo.findById(negocioId, id);
   if (!existe) throw { status: 404, message: 'Usuario no encontrado' };
-
-  // ── Impedir que un usuario cambie su propio rol ─────────────────
-  // El id del token no puede degradarse ni promoverse a sí mismo
-  // (esta validación se aplica siempre — el controller pasa req.user.id si se necesita)
-
-  // ── Verificar sucursal_id pertenece al negocio ──────────────────
+ 
   if (datos.sucursal_id) {
     const { rows } = await pool.query(
       'SELECT id FROM sucursales WHERE id = $1 AND negocio_id = $2 AND activa = true',
@@ -80,13 +83,26 @@ const actualizarUsuario = async (negocioId, id, datos) => {
       throw { status: 400, message: 'La sucursal indicada no pertenece a este negocio' };
     }
   }
-
+ 
   if (datos.email) {
     const duplicado = await usuariosRepo.findByEmail(datos.email, Number(id));
     if (duplicado) throw { status: 409, message: 'Ya existe un usuario con ese email' };
   }
-
-  return usuariosRepo.update(negocioId, id, datos);
+ 
+  // Calcular módulos a guardar
+  // Si viene modulos_permitidos en el payload → usar ese valor
+  // Si es admin_negocio → siempre null (acceso total)
+  const rolFinal = datos.rol || existe.rol;
+  const modulosAGuardar = (rolFinal === 'admin_negocio')
+    ? null
+    : (datos.modulos_permitidos !== undefined
+        ? datos.modulos_permitidos
+        : existe.modulos_permitidos);  // mantener los que ya tenía
+ 
+  return usuariosRepo.update(negocioId, id, {
+    ...datos,
+    modulos_permitidos: modulosAGuardar,
+  });
 };
 
 // Cambiar contraseña — usado por el propio usuario desde Config

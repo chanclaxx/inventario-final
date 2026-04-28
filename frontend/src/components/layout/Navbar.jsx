@@ -1,43 +1,57 @@
+// src/components/layout/Navbar.jsx
+// ─────────────────────────────────────────────────────────────────────────────
+// Navbar actualizado: filtra ítems según permisos del usuario autenticado.
+// Los módulos que el usuario no puede ver no aparecen en la navegación.
+// ─────────────────────────────────────────────────────────────────────────────
+
 import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../../context/useAuth.js';
+import { usePermisos } from '../../hooks/usePermisos.js';
 import {
   LayoutDashboard, Package, FileText, Handshake,
   Wallet, BarChart2, Settings, LogOut, ShoppingCart,
   Users, Truck, Wrench, ArrowRightLeft,
 } from 'lucide-react';
 import { getSucursales } from '../../api/sucursales.api.js';
-import useCarritoStore from '../../store/carritoStore.js';
+import useCarritoStore  from '../../store/carritoStore.js';
 import useSucursalStore from '../../store/sucursalStore.js';
 import { SucursalSelector } from './SucursalSelector.jsx';
 
-// rol: undefined = todos | 'supervisor' = supervisor+admin | 'admin_negocio' = solo admin
-// multiSucursal: true = solo visible si hay 2+ sucursales
+// ─── Definición de ítems ──────────────────────────────────────────────────────
+// `modulo`: clave que se verifica contra usePermisos().puedeVer()
+// `soloAdmin`: true = solo admin_negocio, sin importar módulos
+// `multiSucursal`: true = solo visible si hay 2+ sucursales
+
 const NAV_ITEMS = [
-  { path: '/',            label: 'Inicio',      icon: LayoutDashboard, rol: 'admin_negocio' },
-  { path: '/inventario',  label: 'Inventario',  icon: Package                              },
-  { path: '/facturar',    label: 'Facturas',    icon: FileText,        rol: 'supervisor'   },
-  { path: '/servicios',   label: 'Servicios',   icon: Wrench                               },
-  { path: '/proveedores', label: 'Proveedores', icon: Truck,           rol: 'admin_negocio'},
-  { path: '/prestamos',   label: 'Préstamos',   icon: Handshake                            },
-  { path: '/caja',        label: 'Caja',        icon: Wallet,          rol: 'supervisor'   },
-  { path: '/traslados',   label: 'Traslados',   icon: ArrowRightLeft,  rol: 'supervisor',  multiSucursal: true },
-  { path: '/reportes',    label: 'Reportes',    icon: BarChart2,       rol: 'admin_negocio'},
-  { path: '/acreedores',  label: 'Acreedores',  icon: Users,           rol: 'supervisor'   },
-  { path: '/config',      label: 'Config',      icon: Settings,        rol: 'admin_negocio'},
+  { path: '/',            label: 'Inicio',      Icn: LayoutDashboard, soloAdmin: true                    },
+  { path: '/inventario',  label: 'Inventario',  Icn: Package,         modulo: 'inventario'               },
+  { path: '/facturar',    label: 'Facturas',    Icn: FileText,        modulo: 'facturar'                 },
+  { path: '/servicios',   label: 'Servicios',   Icn: Wrench,          modulo: 'servicios'                },
+  { path: '/proveedores', label: 'Proveedores', Icn: Truck,           modulo: 'proveedores'              },
+  { path: '/prestamos',   label: 'Préstamos',   Icn: Handshake,       modulo: 'prestamos'                },
+  { path: '/caja',        label: 'Caja',        Icn: Wallet,          modulo: 'caja'                     },
+  { path: '/traslados',   label: 'Traslados',   Icn: ArrowRightLeft,  modulo: 'traslados', multiSucursal: true },
+  { path: '/reportes',    label: 'Reportes',    Icn: BarChart2,       modulo: 'reportes'                 },
+  { path: '/acreedores',  label: 'Acreedores',  Icn: Users,           modulo: 'acreedores'               },
+  { path: '/config',      label: 'Config',      Icn: Settings,        soloAdmin: true                    },
 ];
 
-function puedeVerItem(item, usuario, totalSucursales) {
+// ─── Helper de visibilidad ────────────────────────────────────────────────────
+
+function esItemVisible(item, puedeVer, esAdmin, totalSucursales) {
   if (item.multiSucursal && totalSucursales < 2) return false;
-  if (!item.rol) return true;
-  if (item.rol === 'supervisor')    return ['supervisor', 'admin_negocio'].includes(usuario?.rol);
-  if (item.rol === 'admin_negocio') return usuario?.rol === 'admin_negocio';
-  return false;
+  if (item.soloAdmin) return esAdmin;
+  if (item.modulo)    return puedeVer(item.modulo);
+  return true;
 }
+
+// ─── Navbar ───────────────────────────────────────────────────────────────────
 
 export function Navbar() {
   const { usuario, logout } = useAuth();
+  const { puedeVer, esAdmin } = usePermisos();
   const navigate  = useNavigate();
   const location  = useLocation();
 
@@ -47,7 +61,6 @@ export function Navbar() {
   const [visible,    setVisible]    = useState(true);
   const [lastScroll, setLastScroll] = useState(0);
 
-  // Cargar sucursales para saber si mostrar Traslados
   const { data: sucursalesRaw } = useQuery({
     queryKey: ['sucursales'],
     queryFn:  () => getSucursales().then((r) => r.data.data),
@@ -71,7 +84,9 @@ export function Navbar() {
     navigate('/login');
   };
 
-  const itemsVisibles = NAV_ITEMS.filter((item) => puedeVerItem(item, usuario, totalSucursales));
+  const itemsVisibles = NAV_ITEMS.filter((item) =>
+    esItemVisible(item, puedeVer, esAdmin, totalSucursales)
+  );
 
   return (
     <header className={`
@@ -79,7 +94,7 @@ export function Navbar() {
       ${visible ? 'translate-y-0' : '-translate-y-full'}
     `}>
 
-      {/* ── Barra principal ────────────────────────────────────── */}
+      {/* ── Barra principal ── */}
       <div className="bg-white/80 backdrop-blur-xl border-b border-gray-200/50 shadow-sm">
         <div className="max-w-screen-xl mx-auto px-4">
           <div className="flex items-center justify-between h-14">
@@ -92,22 +107,20 @@ export function Navbar() {
               <span className="font-semibold text-gray-900 hidden sm:block">Inventario</span>
             </div>
 
-            {/* Nav — desktop */}
+            {/* Nav desktop */}
             <nav className="hidden md:flex items-center gap-1">
               {itemsVisibles.map((item) => {
                 const active   = location.pathname === item.path;
-                const ItemIcon = item.icon;
+                const ItemIcon = item.Icn;
                 return (
                   <button
                     key={item.path}
                     onClick={() => navigate(item.path)}
-                    className={`
-                      flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-xl
+                    className={`flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-xl
                       transition-all duration-150 text-xs font-medium
                       ${active
                         ? 'bg-blue-50 text-blue-600'
-                        : 'text-gray-500 hover:bg-gray-100 hover:text-gray-700'}
-                    `}
+                        : 'text-gray-500 hover:bg-gray-100 hover:text-gray-700'}`}
                   >
                     <ItemIcon size={18} />
                     <span>{item.label}</span>
@@ -116,7 +129,7 @@ export function Navbar() {
               })}
             </nav>
 
-            {/* Derecha: selector + carrito + usuario */}
+            {/* Derecha */}
             <div className="flex items-center gap-2">
               <SucursalSelector />
 
@@ -142,7 +155,8 @@ export function Navbar() {
                 </div>
                 <button
                   onClick={handleLogout}
-                  className="p-2 rounded-xl hover:bg-red-50 hover:text-red-500 text-gray-500 transition-colors"
+                  className="p-2 rounded-xl hover:bg-red-50 hover:text-red-500
+                    text-gray-500 transition-colors"
                 >
                   <LogOut size={18} />
                 </button>
@@ -152,23 +166,21 @@ export function Navbar() {
         </div>
       </div>
 
-      {/* ── Nav mobile ─────────────────────────────────────────── */}
+      {/* ── Nav mobile ── */}
       <div className="md:hidden bg-white/90 backdrop-blur-xl border-b border-gray-200/50">
         <div className="flex items-center overflow-x-auto px-2 py-1 gap-1 no-scrollbar">
           {itemsVisibles.map((item) => {
             const active   = location.pathname === item.path;
-            const ItemIcon = item.icon;
+            const ItemIcon = item.Icn;
             return (
               <button
                 key={item.path}
                 onClick={() => navigate(item.path)}
-                className={`
-                  flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-xl
+                className={`flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-xl
                   transition-all duration-150 text-xs font-medium whitespace-nowrap flex-shrink-0
                   ${active
                     ? 'bg-blue-50 text-blue-600'
-                    : 'text-gray-500 hover:bg-gray-100'}
-                `}
+                    : 'text-gray-500 hover:bg-gray-100'}`}
               >
                 <ItemIcon size={16} />
                 <span>{item.label}</span>

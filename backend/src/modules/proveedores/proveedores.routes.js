@@ -1,8 +1,10 @@
 const router = require('express').Router();
-const { requireNivel } = require('../../middlewares/role.middleware');
+const { requireNivel }  = require('../../middlewares/role.middleware');
+const { requireModulo } = require('../../middlewares/modulo.middleware');
 const ctrl = require('./proveedores.controller');
 
-// Todas las rutas de /proveedores requieren admin_negocio
+// requireModulo va antes que requireNivel
+router.use(requireModulo('proveedores'));
 router.use(requireNivel('admin_negocio'));
 
 router.get('/',       ctrl.getProveedores);

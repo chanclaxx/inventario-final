@@ -1,6 +1,7 @@
 const bcrypt = require('bcryptjs');
 const jwt    = require('jsonwebtoken');
 const { pool } = require('../../config/db');
+const { resolverModulos } = require('../../config/modulos');
 
 // ─────────────────────────────────────────────
 // HELPERS PRIVADOS
@@ -8,15 +9,16 @@ const { pool } = require('../../config/db');
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const _buildPayload = (usuario) => ({
-  id:                usuario.id,
-  nombre:            usuario.nombre,
-  email:             usuario.email,
-  rol:               usuario.rol,
-  negocio_id:        usuario.negocio_id,
-  negocio_nombre:    usuario.negocio_nombre,
-  sucursal_id:       usuario.sucursal_id,
-  sucursal_nombre:   usuario.sucursal_nombre,
-  password_temporal: usuario.password_temporal ?? false,
+  id:                 usuario.id,
+  nombre:             usuario.nombre,
+  email:              usuario.email,
+  rol:                usuario.rol,
+  negocio_id:         usuario.negocio_id,
+  negocio_nombre:     usuario.negocio_nombre,
+  sucursal_id:        usuario.sucursal_id,
+  sucursal_nombre:    usuario.sucursal_nombre,
+  password_temporal:  usuario.password_temporal ?? false,
+  modulos_permitidos: resolverModulos(usuario.rol, usuario.modulos_permitidos),
 });
 
 // Query reutilizada en login y refreshAccessToken
@@ -26,7 +28,8 @@ const QUERY_USUARIO_BASE = `
     u.negocio_id, n.nombre AS negocio_nombre,
     n.estado_plan, n.fecha_vencimiento,
     u.sucursal_id, s.nombre AS sucursal_nombre,
-    u.password_temporal
+    u.password_temporal,
+    u.modulos_permitidos
   FROM usuarios u
   JOIN negocios n ON n.id = u.negocio_id
   LEFT JOIN sucursales s ON s.id = u.sucursal_id

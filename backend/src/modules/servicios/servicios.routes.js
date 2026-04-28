@@ -1,7 +1,8 @@
 const router   = require('express').Router();
 const { body } = require('express-validator');
-const { validate }     = require('../../middlewares/validate.middleware');
-const { requireNivel } = require('../../middlewares/role.middleware');
+const { validate }      = require('../../middlewares/validate.middleware');
+const { requireNivel }  = require('../../middlewares/role.middleware');
+const { requireModulo } = require('../../middlewares/modulo.middleware');
 const ctrl = require('./servicios.controller');
 
 const validarOrden = [
@@ -10,10 +11,6 @@ const validarOrden = [
   body('costo_estimado').optional({ nullable: true }).isFloat({ min: 0 }),
 ];
 
-// validarListo contempla los 3 escenarios:
-// 1. Reparación normal     → precio_final obligatorio
-// 2. Garantía cobrable     → precio_garantia obligatorio (es_garantia = true)
-// 3. Garantía gratis       → sin precio requerido (es_garantia_gratis = true)
 const validarListo = [
   body('precio_final')
     .if((value, { req }) => !req.body.es_garantia && !req.body.es_garantia_gratis)
@@ -43,17 +40,17 @@ const validarGarantia = [
   body('cobrable').isBoolean().withMessage('Indica si la garantía es cobrable'),
 ];
 
-router.get('/',            ctrl.getOrdenes);
-router.get('/resumen-hoy', ctrl.getResumenHoy);
-router.get('/:id',         ctrl.getOrdenById);
+router.get('/',            requireModulo('servicios'), ctrl.getOrdenes);
+router.get('/resumen-hoy', requireModulo('servicios'), ctrl.getResumenHoy);
+router.get('/:id',         requireModulo('servicios'), ctrl.getOrdenById);
 
-router.post('/',                        validarOrden,      validate, ctrl.crearOrden);
-router.patch('/:id/en-reparacion',                                   ctrl.enReparacion);
-router.patch('/:id/listo',              validarListo,      validate, ctrl.marcarListo);
-router.post('/:id/abonos',              validarAbono,      validate, ctrl.registrarAbono);
-router.patch('/:id/entregar',                                         ctrl.entregar);
-router.patch('/:id/sin-reparar',        validarSinReparar, validate, ctrl.sinReparar);
-router.patch('/:id/garantia',           validarGarantia,   validate, ctrl.abrirGarantia);
-router.patch('/:id/notas',                                            ctrl.actualizarNotas);
+router.post('/',                    requireModulo('servicios'), validarOrden,      validate, ctrl.crearOrden);
+router.patch('/:id/en-reparacion',  requireModulo('servicios'),                             ctrl.enReparacion);
+router.patch('/:id/listo',          requireModulo('servicios'), validarListo,      validate, ctrl.marcarListo);
+router.post('/:id/abonos',          requireModulo('servicios'), validarAbono,      validate, ctrl.registrarAbono);
+router.patch('/:id/entregar',       requireModulo('servicios'),                             ctrl.entregar);
+router.patch('/:id/sin-reparar',    requireModulo('servicios'), validarSinReparar, validate, ctrl.sinReparar);
+router.patch('/:id/garantia',       requireModulo('servicios'), validarGarantia,   validate, ctrl.abrirGarantia);
+router.patch('/:id/notas',          requireModulo('servicios'),                             ctrl.actualizarNotas);
 
 module.exports = router;

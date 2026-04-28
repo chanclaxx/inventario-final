@@ -1,6 +1,7 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { PrivateRoute } from './components/layout/PrivateRoute';
 import { MainLayout }   from './components/layout/MainLayout';
+import { ModuloGuard }  from './components/ModuloGuard';
 
 import Login                from './pages/Login';
 import PlanBloqueadoPage    from './pages/PlanBloqueadoPage';
@@ -8,6 +9,7 @@ import RegisterPage         from './pages/RegisterPage';
 import SuperAdminPage       from './pages/SuperAdminPage';
 import RecuperarPassword    from './pages/RecuperarPassword';
 import NuevaPassword        from './pages/NuevaPassword';
+import SinAccesoPage        from './pages/SinAccesoPage';
 
 import Dashboard            from './pages/Dashboard';
 import InventarioPage       from './pages/inventario/InventarioPage';
@@ -37,34 +39,47 @@ export default function App() {
         <PrivateRoute>
           <MainLayout>
             <Routes>
+              {/* Solo admin_negocio */}
               <Route path="/" element={
                 <PrivateRoute rol="admin_negocio"><Dashboard /></PrivateRoute>
               } />
-              <Route path="/inventario" element={<InventarioPage />} />
-              <Route path="/facturar"   element={
-                <PrivateRoute rol="supervisor"><FacturarPage /></PrivateRoute>
-              } />
-              <Route path="/prestamos"  element={<PrestamosPage />} />
-              <Route path="/servicios"  element={<ServiciosPage />} />
 
+              {/* Módulos con guard de permisos */}
+              <Route path="/inventario" element={
+                <ModuloGuard modulo="inventario"><InventarioPage /></ModuloGuard>
+              } />
+              <Route path="/facturar" element={
+                <ModuloGuard modulo="facturar"><FacturarPage /></ModuloGuard>
+              } />
+              <Route path="/prestamos" element={
+                <ModuloGuard modulo="prestamos"><PrestamosPage /></ModuloGuard>
+              } />
+              <Route path="/servicios" element={
+                <ModuloGuard modulo="servicios"><ServiciosPage /></ModuloGuard>
+              } />
               <Route path="/caja" element={
-                <PrivateRoute rol="supervisor"><CajaPage /></PrivateRoute>
+                <ModuloGuard modulo="caja"><CajaPage /></ModuloGuard>
               } />
               <Route path="/traslados" element={
-                <PrivateRoute rol="supervisor"><TrasladosPage /></PrivateRoute>
+                <ModuloGuard modulo="traslados"><TrasladosPage /></ModuloGuard>
               } />
               <Route path="/reportes" element={
-                <PrivateRoute rol="admin_negocio"><ReportesPage /></PrivateRoute>
+                <ModuloGuard modulo="reportes"><ReportesPage /></ModuloGuard>
               } />
               <Route path="/proveedores" element={
-                <PrivateRoute rol="admin_negocio"><ProveedoresPage /></PrivateRoute>
+                <ModuloGuard modulo="proveedores"><ProveedoresPage /></ModuloGuard>
               } />
               <Route path="/acreedores" element={
-                <PrivateRoute rol="supervisor"><AcreedoresPage /></PrivateRoute>
+                <ModuloGuard modulo="acreedores"><AcreedoresPage /></ModuloGuard>
               } />
+
+              {/* Solo admin_negocio — sin ModuloGuard */}
               <Route path="/config" element={
                 <PrivateRoute rol="admin_negocio"><ConfigPage /></PrivateRoute>
               } />
+
+              {/* Página sin acceso */}
+              <Route path="/sin-acceso" element={<SinAccesoPage />} />
 
               <Route path="*" element={<Navigate to="/inventario" replace />} />
             </Routes>
