@@ -29,7 +29,6 @@ const _verificarPrestatario = async (prestatario_id, negocio_id) => {
   if (!rows.length) throw { status: 403, message: 'El prestatario no pertenece a este negocio' };
 };
 
-// Procesa un ítem dentro de una transacción ya abierta: marca serial o descuenta stock
 const _procesarItemPrestamo = async (client, { imei, producto_id, nombre_producto, cantidad_prestada, sucursal_id, prestatario }) => {
   if (imei) {
     const { rows } = await client.query(
@@ -62,6 +61,84 @@ const _procesarItemPrestamo = async (client, { imei, producto_id, nombre_product
   }
 };
 
+// ─── Helper: crear factura desde un préstamo saldado ─────────────────────────
+// Se ejecuta dentro de la transacción del abono para garantizar atomicidad.
+
+const _crearFacturaDesdePrestamo = async (client, prestamo, metodo, negocioId) => {
+  // Cedula: si es compañero o no tiene cédula real → 'COMPANERO'
+  const esCompanero = !prestamo.cedula || prestamo.cedula === 'COMPANERO';
+  const cedula      = esCompanero ? 'COMPANERO' : prestamo.cedula;
+  const celular     = !prestamo.telefono || prestamo.telefono === '0000000000'
+    ? '0000000000'
+    : prestamo.telefono;
+
+  // Resolver cliente_id si existe
+  const clienteId = prestamo.cliente_id || null;
+
+  // Insertar factura
+  const { rows: facturaRows } = await client.query(`
+    INSERT INTO facturas(
+      sucursal_id, usuario_id, cliente_id,
+      nombre_cliente, cedula, celular,
+      notas, estado
+    )
+    VALUES ($1, $2, $3, $4, $5, $6, $7, 'Activa')
+    RETURNING id
+  `, [
+    prestamo.sucursal_id,
+    null,                        // no hay usuario en este contexto, se deja null
+    clienteId,
+    prestamo.prestatario || '',
+    cedula,
+    celular,
+    `Factura generada por saldo de préstamo #${prestamo.id}`,
+  ]);
+
+  const facturaId = facturaRows[0].id;
+
+  // Insertar línea del producto
+  await client.query(`
+    INSERT INTO lineas_factura(
+      factura_id, nombre_producto, imei,
+      cantidad, precio, producto_id
+    )
+    VALUES ($1, $2, $3, $4, $5, $6)
+  `, [
+    facturaId,
+    prestamo.nombre_producto,
+    prestamo.imei     || null,
+    prestamo.imei ? 1 : Number(prestamo.cantidad_prestada || 1),
+    Number(prestamo.valor_prestamo),
+    prestamo.imei ? null : (prestamo.producto_id || null),
+  ]);
+
+  // Insertar pago con el método del abono
+  await client.query(`
+    INSERT INTO pagos_factura(factura_id, metodo, valor)
+    VALUES ($1, $2, $3)
+  `, [
+    facturaId,
+    metodo || 'Efectivo',
+    Number(prestamo.valor_prestamo),
+  ]);
+
+  // Marcar serial como vendido si aplica
+  if (prestamo.imei) {
+    await client.query(`
+      UPDATE seriales s
+      SET vendido      = true,
+          prestado     = false,
+          fecha_salida = CURRENT_DATE
+      FROM productos_serial ps
+      WHERE s.imei         = $1
+        AND ps.id          = s.producto_id
+        AND ps.sucursal_id = $2
+    `, [prestamo.imei, prestamo.sucursal_id]);
+  }
+
+  return facturaId;
+};
+
 // ─── Servicio: obtener ────────────────────────────────────────────────────────
 
 const getPrestamos = (sucursalId, negocioId) => repo.findAll(sucursalId, negocioId);
@@ -73,7 +150,7 @@ const getPrestamoById = async (negocioId, id) => {
   return { ...prestamo, abonos };
 };
 
-// ─── Servicio: crear un préstamo (mantiene compatibilidad) ────────────────────
+// ─── Servicio: crear un préstamo ──────────────────────────────────────────────
 
 const crearPrestamo = async ({
   sucursal_id, usuario_id, negocio_id,
@@ -85,7 +162,6 @@ const crearPrestamo = async ({
   await _verificarCliente(cliente_id, negocio_id);
   await _verificarPrestatario(prestatario_id, negocio_id);
 
-  // ── FIX: si hay imei es serial, producto_id debe ser null ──
   const esSerial   = !!imei;
   const productoId = esSerial ? null : (producto_id || null);
 
@@ -122,7 +198,7 @@ const crearPrestamo = async ({
   }
 };
 
-// ─── Servicio: crear múltiples préstamos desde el carrito ────────────────────
+// ─── Servicio: crear múltiples préstamos ──────────────────────────────────────
 
 const crearPrestamos = async ({
   sucursal_id, usuario_id, negocio_id,
@@ -143,16 +219,11 @@ const crearPrestamos = async ({
     const prestamosCreados = [];
 
     for (const item of items) {
-      // ── FIX: si hay imei es serial, producto_id debe ser null ──
       const esSerial   = !!item.imei;
       const productoId = esSerial ? null : (item.producto_id || null);
 
       const prestamo = await repo.create(client, {
-        sucursal_id,
-        usuario_id,
-        prestatario,
-        cedula,
-        telefono,
+        sucursal_id, usuario_id, prestatario, cedula, telefono,
         nombre_producto:   item.nombre_producto,
         imei:              item.imei || null,
         producto_id:       productoId,
@@ -201,20 +272,26 @@ const registrarAbono = async (negocioId, prestamoId, valor, metodo) => {
   try {
     await client.query('BEGIN');
 
-   const resultado = await repo.insertarAbono(client, { prestamo_id: prestamoId, valor, metodo });
+    const resultado = await repo.insertarAbono(client, { prestamo_id: prestamoId, valor, metodo });
+
+    let saldado    = false;
+    let factura_id = null;
 
     if (Number(resultado.total_abonado) >= Number(resultado.valor_prestamo)) {
+      saldado = true;
       await repo.updateEstado(client, prestamoId, 'Saldado');
 
-      // ── Si el préstamo tenía un serial, marcarlo como vendido al saldarse.
-      // Solo aplica cuando hay imei; los productos por cantidad no tienen este flujo.
-      if (prestamo.imei) {
-        await repo.salarSerial(client, prestamo.imei, prestamo.sucursal_id);
-      }
+      // Crear factura automáticamente al saldar
+      factura_id = await _crearFacturaDesdePrestamo(client, prestamo, metodo, negocioId);
     }
 
     await client.query('COMMIT');
-    return resultado;
+
+    return {
+      ...resultado,
+      saldado,
+      factura_id,
+    };
   } catch (err) {
     await client.query('ROLLBACK');
     throw err;
@@ -262,7 +339,7 @@ const devolverPrestamo = async (negocioId, prestamoId) => {
   }
 };
 
-// ─── Servicio: devolución parcial (solo para productos por cantidad) ──────────
+// ─── Servicio: devolución parcial ─────────────────────────────────────────────
 
 const devolverParcial = async (negocioId, prestamoId, cantidad_devuelta) => {
   const prestamo = await repo.findByIdYNegocio(prestamoId, negocioId);

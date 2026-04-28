@@ -8,6 +8,8 @@ import {
   registrarAbono    as registrarAbonoDomicilio,
   marcarDevolucion  as marcarDevolucionDomicilio,
 } from '../../api/domiciliarios.api';
+import { getFacturaById }         from '../../api/facturas.api';
+import { getGarantiasPorFactura } from '../../api/garantias.api';
 import { formatCOP, formatFechaHora }           from '../../utils/formatters';
 import { Badge }                                from '../../components/ui/Badge';
 import { Button }                               from '../../components/ui/Button';
@@ -16,8 +18,10 @@ import { Input }                                from '../../components/ui/Input'
 import { InputMoneda }                          from '../../components/ui/InputMoneda';
 import { Spinner }                              from '../../components/ui/Spinner';
 import { EmptyState }                           from '../../components/ui/EmptyState';
+import { FacturaTermica }                       from '../../components/FacturaTermica';
+import { ModalImprimirFactura }                 from '../../components/ui/ModalImprimirFactura';
 import { TabCreditos }                          from './TabCreditos';
-import { useMetodosPago } from '../../hooks/useMetodosPago';
+import { useMetodosPago }                       from '../../hooks/useMetodosPago';
 import useExportarPdfPrestamos                  from '../../hooks/useExportarPdfPrestamos';
 import api                                      from '../../api/axios.config';
 import {
@@ -90,7 +94,7 @@ function BotonExportarPdf({ tipo, personaId, nombrePersona }) {
   const { exportando, exportarPdf } = useExportarPdfPrestamos();
 
   const handleClick = async (e) => {
-    e.stopPropagation(); // evita colapsar/expandir el grupo
+    e.stopPropagation();
     try {
       const nombreArchivo = `prestamos-activos-${nombrePersona.replace(/\s+/g, '-').toLowerCase()}`;
       await exportarPdf(tipo, personaId, nombreArchivo);
@@ -117,22 +121,143 @@ function BotonExportarPdf({ tipo, personaId, nombrePersona }) {
   );
 }
 
+// ─── Hook interno: carga factura recién creada al saldar ─────────────────────
+
+function useFacturaSaldada(facturaId) {
+  const { data: configData } = useQuery({
+    queryKey: ['config'],
+    queryFn:  () => api.get('/config').then((r) => r.data.data),
+    enabled:  !!facturaId,
+  });
+
+  const { data: facturaData } = useQuery({
+    queryKey: ['factura-detalle', facturaId],
+    queryFn:  () => getFacturaById(facturaId).then((r) => r.data.data),
+    enabled:  !!facturaId,
+    staleTime: 0,
+  });
+
+  const { data: garantiasData = [] } = useQuery({
+    queryKey: ['garantias-factura', facturaId],
+    queryFn:  () => getGarantiasPorFactura(facturaId).then((r) => r.data.data),
+    enabled:  !!facturaId,
+    staleTime: 0,
+  });
+
+  const facturaConConfig = facturaData && configData
+    ? { ...facturaData, config: configData }
+    : null;
+
+  return { facturaConConfig, garantias: garantiasData };
+}
+
 // ─── Modal Abono Préstamo ─────────────────────────────────────────────────────
+
 function ModalAbonoPrestamo({ prestamo, onClose }) {
   const queryClient = useQueryClient();
-  const [valor, setValor] = useState('');
-  const [error, setError] = useState('');
   const metodosPago = useMetodosPago();
-  const [metodo, setMetodo] = useState('Efectivo');
 
-  const mutation = useMutation({
-    mutationFn: () => registrarAbonoPrestamo(prestamo.id, Number(valor), metodo),
-    onSuccess: () => { queryClient.invalidateQueries(['prestamos']); onClose(); },
-    onError:   (err) => setError(err.response?.data?.error || 'Error al registrar abono'),
-  });
+  const [valor,             setValor]             = useState('');
+  const [metodo,            setMetodo]            = useState('Efectivo');
+  const [error,             setError]             = useState('');
+  const [facturaId,         setFacturaId]         = useState(null);
+  const [mostrarOpcionFact, setMostrarOpcionFact] = useState(false);
+  const [modalImprimir,     setModalImprimir]     = useState(null);
+  const [facturaTermica,    setFacturaTermica]    = useState(null);
+
+  const { facturaConConfig, garantias } = useFacturaSaldada(facturaId);
 
   const saldoPendiente = Number(prestamo.valor_prestamo) - Number(prestamo.total_abonado);
 
+  const mutation = useMutation({
+    mutationFn: () => registrarAbonoPrestamo(prestamo.id, Number(valor), metodo),
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: ['prestamos'],  exact: false });
+      queryClient.invalidateQueries({ queryKey: ['facturas'],   exact: false });
+
+      const data = res.data?.data;
+      if (data?.saldado && data?.factura_id) {
+        setFacturaId(data.factura_id);
+        setMostrarOpcionFact(true);
+      } else {
+        onClose();
+      }
+    },
+    onError: (err) => setError(err.response?.data?.error || 'Error al registrar abono'),
+  });
+
+  const handleRegistrar = () => {
+    setError('');
+    if (!valor || Number(valor) <= 0) return setError('El valor debe ser mayor a 0');
+    mutation.mutate();
+  };
+
+  const handleNoFactura = () => onClose();
+
+  const handleSiFactura = () => {
+    if (!facturaConConfig) return;
+    setMostrarOpcionFact(false);
+    setModalImprimir({ factura: facturaConConfig, garantias });
+  };
+
+  // Pantalla post-saldo: preguntar si genera factura
+  if (mostrarOpcionFact) {
+    return (
+      <>
+        <Modal open onClose={handleNoFactura} title="Préstamo saldado" size="sm">
+          <div className="flex flex-col gap-5">
+            <div className="bg-green-50 border border-green-200 rounded-xl px-4 py-3 text-center">
+              <p className="text-green-700 font-semibold text-sm">
+                ✓ El préstamo quedó completamente saldado
+              </p>
+              <p className="text-green-600 text-xs mt-1">
+                {prestamo.nombre_producto} — {prestamo.prestatario}
+              </p>
+            </div>
+            <p className="text-sm text-gray-600 text-center">
+              ¿Deseas generar una factura por este pago?
+            </p>
+            <div className="flex gap-2">
+              <Button variant="secondary" className="flex-1" onClick={handleNoFactura}>
+                No, cerrar
+              </Button>
+              <Button
+                className="flex-1"
+                disabled={!facturaConConfig}
+                loading={!facturaConConfig}
+                onClick={handleSiFactura}
+              >
+                Sí, generar factura
+              </Button>
+            </div>
+          </div>
+        </Modal>
+
+        {modalImprimir && (
+          <ModalImprimirFactura
+            open
+            onClose={() => { setModalImprimir(null); onClose(); }}
+            factura={modalImprimir.factura}
+            garantias={modalImprimir.garantias}
+            onImprimirPos={(f, g) => {
+              setModalImprimir(null);
+              setFacturaTermica({ factura: f, garantias: g });
+            }}
+          />
+        )}
+
+        {facturaTermica && (
+          <FacturaTermica
+            factura={facturaTermica.factura}
+            garantias={facturaTermica.garantias}
+            onClose={() => { setFacturaTermica(null); onClose(); }}
+          />
+        )}
+      </>
+    );
+  }
+
+  // Pantalla normal de abono
   return (
     <Modal open={!!prestamo} onClose={onClose} title="Registrar Abono" size="sm">
       <div className="flex flex-col gap-4">
@@ -153,7 +278,7 @@ function ModalAbonoPrestamo({ prestamo, onClose }) {
             value={valor}
             onChange={setValor}
             placeholder="0"
-            onKeyDown={(e) => e.key === 'Enter' && mutation.mutate()}
+            onKeyDown={(e) => e.key === 'Enter' && handleRegistrar()}
             autoFocus
             className="w-full px-3 py-2 bg-gray-100 rounded-xl text-sm
               focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"
@@ -180,7 +305,7 @@ function ModalAbonoPrestamo({ prestamo, onClose }) {
         {error && <p className="text-sm text-red-500">{error}</p>}
         <div className="flex gap-2">
           <Button variant="secondary" className="flex-1" onClick={onClose}>Cancelar</Button>
-          <Button className="flex-1" loading={mutation.isPending} onClick={() => mutation.mutate()}>
+          <Button className="flex-1" loading={mutation.isPending} onClick={handleRegistrar}>
             Registrar
           </Button>
         </div>
@@ -376,11 +501,7 @@ function GrupoPrestatario({ nombre, tipo, personaId, prestamos, saldoTotal, onAb
             <span className="text-sm font-bold text-red-500">{formatCOP(saldoTotal)}</span>
           )}
           {activos.length > 0 && (
-            <BotonExportarPdf
-              tipo={tipo}
-              personaId={personaId}
-              nombrePersona={nombre}
-            />
+            <BotonExportarPdf tipo={tipo} personaId={personaId} nombrePersona={nombre} />
           )}
           {abierto
             ? <ChevronUp   size={16} className="text-gray-400" />
@@ -418,9 +539,7 @@ function GrupoPrestatario({ nombre, tipo, personaId, prestamos, saldoTotal, onAb
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
                           <p className="text-sm font-medium text-gray-600 truncate">{p.nombre_producto}</p>
-                          {p.imei && (
-                            <p className="text-xs text-gray-400 font-mono">{p.imei}</p>
-                          )}
+                          {p.imei && <p className="text-xs text-gray-400 font-mono">{p.imei}</p>}
                           {!p.imei && p.cantidad_prestada > 1 && (
                             <p className="text-xs text-gray-400">Cantidad: {p.cantidad_prestada}</p>
                           )}
@@ -998,14 +1117,19 @@ export default function PrestamosPage() {
       )}
 
       {tabPrincipal === 'creditos' && <TabCreditos />}
-
       {tabPrincipal === 'domiciliarios' && <TabDomiciliarios />}
 
       {prestamoAbono && (
-        <ModalAbonoPrestamo prestamo={prestamoAbono} onClose={() => setPrestamoAbono(null)} />
+        <ModalAbonoPrestamo
+          prestamo={prestamoAbono}
+          onClose={() => setPrestamoAbono(null)}
+        />
       )}
       {prestamoDevol && (
-        <ModalDevolucion prestamo={prestamoDevol} onClose={() => setPrestamoDevol(null)} />
+        <ModalDevolucion
+          prestamo={prestamoDevol}
+          onClose={() => setPrestamoDevol(null)}
+        />
       )}
     </div>
   );
