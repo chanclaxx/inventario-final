@@ -55,17 +55,13 @@ const ESTADO_ENTREGA_LABEL = {
   No_entregado: 'No entregado',
 };
 
-// ─── Helper: parsear lista de colores desde config ────────────────────────────
 function parsearColoresConfig(configData) {
   try {
     const lista = JSON.parse(configData?.colores_serial_lista || '[]');
     return Array.isArray(lista) ? lista : [];
-  } catch {
-    return [];
-  }
+  } catch { return []; }
 }
 
-// ─── Hook: config de colores ──────────────────────────────────────────────────
 function useColoresConfig() {
   const { data: configData } = useQuery({
     queryKey: ['config'],
@@ -77,7 +73,6 @@ function useColoresConfig() {
   };
 }
 
-// ─── Chip de color ────────────────────────────────────────────────────────────
 function ChipColor({ color }) {
   if (!color) return null;
   return (
@@ -88,97 +83,45 @@ function ChipColor({ color }) {
   );
 }
 
-// ─── Botón exportar PDF ───────────────────────────────────────────────────────
-
 function BotonExportarPdf({ tipo, personaId, nombrePersona }) {
   const { exportando, exportarPdf } = useExportarPdfPrestamos();
-
   const handleClick = async (e) => {
     e.stopPropagation();
     try {
-      const nombreArchivo = `prestamos-activos-${nombrePersona.replace(/\s+/g, '-').toLowerCase()}`;
-      await exportarPdf(tipo, personaId, nombreArchivo);
-    } catch (err) {
-      alert(err.message || 'Error al generar el PDF');
-    }
+      await exportarPdf(tipo, personaId, `prestamos-activos-${nombrePersona.replace(/\s+/g, '-').toLowerCase()}`);
+    } catch (err) { alert(err.message || 'Error al generar el PDF'); }
   };
-
   return (
-    <button
-      onClick={handleClick}
-      disabled={exportando}
-      title="Exportar préstamos activos en PDF"
+    <button onClick={handleClick} disabled={exportando}
       className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium
-        border border-blue-200 text-blue-600 bg-blue-50
-        hover:bg-blue-100 hover:border-blue-300 transition-colors
-        disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0"
-    >
-      {exportando
-        ? <Loader2 size={12} className="animate-spin" />
-        : <FileDown size={12} />}
+        border border-blue-200 text-blue-600 bg-blue-50 hover:bg-blue-100
+        hover:border-blue-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0">
+      {exportando ? <Loader2 size={12} className="animate-spin" /> : <FileDown size={12} />}
       Exportar PDF
     </button>
   );
 }
 
-// ─── Hook interno: carga factura recién creada al saldar ─────────────────────
+// ─── Modal Abono Préstamo (sin lógica post-saldo) ─────────────────────────────
 
-function useFacturaSaldada(facturaId) {
-  const { data: configData } = useQuery({
-    queryKey: ['config'],
-    queryFn:  () => api.get('/config').then((r) => r.data.data),
-    enabled:  !!facturaId,
-  });
-
-  const { data: facturaData } = useQuery({
-    queryKey: ['factura-detalle', facturaId],
-    queryFn:  () => getFacturaById(facturaId).then((r) => r.data.data),
-    enabled:  !!facturaId,
-    staleTime: 0,
-  });
-
-  const { data: garantiasData = [] } = useQuery({
-    queryKey: ['garantias-factura', facturaId],
-    queryFn:  () => getGarantiasPorFactura(facturaId).then((r) => r.data.data),
-    enabled:  !!facturaId,
-    staleTime: 0,
-  });
-
-  const facturaConConfig = facturaData && configData
-    ? { ...facturaData, config: configData }
-    : null;
-
-  return { facturaConConfig, garantias: garantiasData };
-}
-
-// ─── Modal Abono Préstamo ─────────────────────────────────────────────────────
-
-function ModalAbonoPrestamo({ prestamo, onClose }) {
+function ModalAbonoPrestamo({ prestamo, onClose, onSaldado }) {
   const queryClient = useQueryClient();
   const metodosPago = useMetodosPago();
-
-  const [valor,             setValor]             = useState('');
-  const [metodo,            setMetodo]            = useState('Efectivo');
-  const [error,             setError]             = useState('');
-  const [facturaId,         setFacturaId]         = useState(null);
-  const [mostrarOpcionFact, setMostrarOpcionFact] = useState(false);
-  const [modalImprimir,     setModalImprimir]     = useState(null);
-  const [facturaTermica,    setFacturaTermica]    = useState(null);
-
-  const { facturaConConfig, garantias } = useFacturaSaldada(facturaId);
+  const [valor,  setValor]  = useState('');
+  const [metodo, setMetodo] = useState('Efectivo');
+  const [error,  setError]  = useState('');
 
   const saldoPendiente = Number(prestamo.valor_prestamo) - Number(prestamo.total_abonado);
 
   const mutation = useMutation({
     mutationFn: () => registrarAbonoPrestamo(prestamo.id, Number(valor), metodo),
     onSuccess: (res) => {
-      queryClient.invalidateQueries({ queryKey: ['prestamos'],  exact: false });
-      queryClient.invalidateQueries({ queryKey: ['facturas'],   exact: false });
-
+      queryClient.invalidateQueries({ queryKey: ['prestamos'], exact: false });
+      queryClient.invalidateQueries({ queryKey: ['facturas'],  exact: false });
       const data = res.data?.data;
       if (data?.saldado && data?.factura_id) {
-        setFacturaId(data.factura_id);
-        setMostrarOpcionFact(true);
+        // Notificar al padre con el facturaId — NO llamar onClose aquí
+        onSaldado(data.factura_id, prestamo);
       } else {
         onClose();
       }
@@ -192,74 +135,8 @@ function ModalAbonoPrestamo({ prestamo, onClose }) {
     mutation.mutate();
   };
 
-  const handleNoFactura = () => onClose();
-
-  const handleSiFactura = () => {
-    if (!facturaConConfig) return;
-    setMostrarOpcionFact(false);
-    setModalImprimir({ factura: facturaConConfig, garantias });
-  };
-
-  // Pantalla post-saldo: preguntar si genera factura
-  if (mostrarOpcionFact) {
-    return (
-      <>
-        <Modal open onClose={handleNoFactura} title="Préstamo saldado" size="sm">
-          <div className="flex flex-col gap-5">
-            <div className="bg-green-50 border border-green-200 rounded-xl px-4 py-3 text-center">
-              <p className="text-green-700 font-semibold text-sm">
-                ✓ El préstamo quedó completamente saldado
-              </p>
-              <p className="text-green-600 text-xs mt-1">
-                {prestamo.nombre_producto} — {prestamo.prestatario}
-              </p>
-            </div>
-            <p className="text-sm text-gray-600 text-center">
-              ¿Deseas generar una factura por este pago?
-            </p>
-            <div className="flex gap-2">
-              <Button variant="secondary" className="flex-1" onClick={handleNoFactura}>
-                No, cerrar
-              </Button>
-              <Button
-                className="flex-1"
-                disabled={!facturaConConfig}
-                loading={!facturaConConfig}
-                onClick={handleSiFactura}
-              >
-                Sí, generar factura
-              </Button>
-            </div>
-          </div>
-        </Modal>
-
-        {modalImprimir && (
-          <ModalImprimirFactura
-            open
-            onClose={() => { setModalImprimir(null); onClose(); }}
-            factura={modalImprimir.factura}
-            garantias={modalImprimir.garantias}
-            onImprimirPos={(f, g) => {
-              setModalImprimir(null);
-              setFacturaTermica({ factura: f, garantias: g });
-            }}
-          />
-        )}
-
-        {facturaTermica && (
-          <FacturaTermica
-            factura={facturaTermica.factura}
-            garantias={facturaTermica.garantias}
-            onClose={() => { setFacturaTermica(null); onClose(); }}
-          />
-        )}
-      </>
-    );
-  }
-
-  // Pantalla normal de abono
   return (
-    <Modal open={!!prestamo} onClose={onClose} title="Registrar Abono" size="sm">
+    <Modal open onClose={onClose} title="Registrar Abono" size="sm">
       <div className="flex flex-col gap-4">
         <div className="bg-gray-50 rounded-xl p-3">
           <p className="text-xs text-gray-400">Préstamo — {prestamo.prestatario}</p>
@@ -274,15 +151,10 @@ function ModalAbonoPrestamo({ prestamo, onClose }) {
         </div>
         <div className="flex flex-col gap-1">
           <label className="text-sm font-medium text-gray-700">Valor del abono</label>
-          <InputMoneda
-            value={valor}
-            onChange={setValor}
-            placeholder="0"
-            onKeyDown={(e) => e.key === 'Enter' && handleRegistrar()}
-            autoFocus
+          <InputMoneda value={valor} onChange={setValor} placeholder="0"
+            onKeyDown={(e) => e.key === 'Enter' && handleRegistrar()} autoFocus
             className="w-full px-3 py-2 bg-gray-100 rounded-xl text-sm
-              focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"
-          />
+              focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all" />
         </div>
         <div className="flex flex-col gap-1.5">
           <label className="text-sm font-medium text-gray-700">Método de pago</label>
@@ -314,7 +186,43 @@ function ModalAbonoPrestamo({ prestamo, onClose }) {
   );
 }
 
-// ─── Modal Devolución préstamo ────────────────────────────────────────────────
+// ─── Modal confirmar factura post-saldo ───────────────────────────────────────
+
+function ModalConfirmarFactura({ prestamo, facturaConConfig, garantias, onNo, onSi }) {
+  return (
+    <Modal open onClose={onNo} title="Préstamo saldado" size="sm">
+      <div className="flex flex-col gap-5">
+        <div className="bg-green-50 border border-green-200 rounded-xl px-4 py-3 text-center">
+          <p className="text-green-700 font-semibold text-sm">
+            ✓ El préstamo quedó completamente saldado
+          </p>
+          <p className="text-green-600 text-xs mt-1">
+            {prestamo?.nombre_producto} — {prestamo?.prestatario}
+          </p>
+        </div>
+        <p className="text-sm text-gray-600 text-center">
+          ¿Deseas generar una factura por este pago?
+        </p>
+        <div className="flex gap-2">
+          <Button variant="secondary" className="flex-1" onClick={onNo}>
+            No, cerrar
+          </Button>
+          <Button
+            className="flex-1"
+            disabled={!facturaConConfig}
+            loading={!facturaConConfig}
+            onClick={() => facturaConConfig && onSi(facturaConConfig, garantias)}
+          >
+            {facturaConConfig ? 'Sí, generar factura' : 'Cargando...'}
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// ─── Modal Devolución ─────────────────────────────────────────────────────────
+
 function ModalDevolucion({ prestamo, onClose }) {
   const queryClient = useQueryClient();
   const [cantidad, setCantidad] = useState('');
@@ -385,12 +293,11 @@ function ModalDevolucion({ prestamo, onClose }) {
   );
 }
 
-// ─── Cards préstamos ──────────────────────────────────────────────────────────
+// ─── Cards ────────────────────────────────────────────────────────────────────
 
 function CardPrestamoCompanero({ prestamo, onAbonar, onDevolver, coloresActivo }) {
   const saldo    = Number(prestamo.valor_prestamo) - Number(prestamo.total_abonado);
   const progreso = (Number(prestamo.total_abonado) / Number(prestamo.valor_prestamo)) * 100;
-
   return (
     <div className="bg-white border border-gray-100 rounded-2xl p-4 flex flex-col gap-3">
       <div className="flex items-start justify-between gap-2">
@@ -400,9 +307,7 @@ function CardPrestamoCompanero({ prestamo, onAbonar, onDevolver, coloresActivo }
           {!prestamo.imei && prestamo.cantidad_prestada > 1 && (
             <p className="text-xs text-gray-400">Cantidad: {prestamo.cantidad_prestada}</p>
           )}
-          {coloresActivo && prestamo.serial_color && (
-            <ChipColor color={prestamo.serial_color} />
-          )}
+          {coloresActivo && prestamo.serial_color && <ChipColor color={prestamo.serial_color} />}
           {prestamo.empleado_nombre && (
             <p className="text-xs text-blue-500 mt-0.5">→ {prestamo.empleado_nombre}</p>
           )}
@@ -435,7 +340,6 @@ function CardPrestamoCompanero({ prestamo, onAbonar, onDevolver, coloresActivo }
 function CardPrestamoCliente({ prestamo, onAbonar, onDevolver }) {
   const saldo    = Number(prestamo.valor_prestamo) - Number(prestamo.total_abonado);
   const progreso = (Number(prestamo.total_abonado) / Number(prestamo.valor_prestamo)) * 100;
-
   return (
     <div className="bg-white border border-gray-100 rounded-2xl p-4 flex flex-col gap-3">
       <div className="flex items-start justify-between gap-2">
@@ -487,41 +391,25 @@ function GrupoPrestatario({ nombre, tipo, personaId, prestamos, saldoTotal, onAb
 
   return (
     <div className="border border-gray-100 rounded-2xl overflow-hidden">
-      <button
-        onClick={() => setAbierto((v) => !v)}
-        className="w-full flex items-center justify-between px-4 py-3
-          bg-gray-50 hover:bg-gray-100 transition-colors"
-      >
+      <button onClick={() => setAbierto((v) => !v)}
+        className="w-full flex items-center justify-between px-4 py-3 bg-gray-50 hover:bg-gray-100 transition-colors">
         <div className="flex items-center gap-3 min-w-0">
           <span className="font-semibold text-gray-800 truncate">{nombre}</span>
           <span className="text-xs text-gray-400 flex-shrink-0">{activos.length} activo(s)</span>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
-          {saldoTotal > 0 && (
-            <span className="text-sm font-bold text-red-500">{formatCOP(saldoTotal)}</span>
-          )}
-          {activos.length > 0 && (
-            <BotonExportarPdf tipo={tipo} personaId={personaId} nombrePersona={nombre} />
-          )}
-          {abierto
-            ? <ChevronUp   size={16} className="text-gray-400" />
-            : <ChevronDown size={16} className="text-gray-400" />}
+          {saldoTotal > 0 && <span className="text-sm font-bold text-red-500">{formatCOP(saldoTotal)}</span>}
+          {activos.length > 0 && <BotonExportarPdf tipo={tipo} personaId={personaId} nombrePersona={nombre} />}
+          {abierto ? <ChevronUp size={16} className="text-gray-400" /> : <ChevronDown size={16} className="text-gray-400" />}
         </div>
       </button>
-
       {abierto && (
         <div className="flex flex-col gap-3 p-3">
           {activos.length === 0 ? (
             <p className="text-xs text-gray-400 px-1 py-2">Sin préstamos activos</p>
           ) : (
             activos.map((p) => (
-              <Card
-                key={p.id}
-                prestamo={p}
-                onAbonar={onAbonar}
-                onDevolver={onDevolver}
-                coloresActivo={coloresActivo}
-              />
+              <Card key={p.id} prestamo={p} onAbonar={onAbonar} onDevolver={onDevolver} coloresActivo={coloresActivo} />
             ))
           )}
           {cerrados.length > 0 && (
@@ -543,29 +431,16 @@ function GrupoPrestatario({ nombre, tipo, personaId, prestamos, saldoTotal, onAb
                           {!p.imei && p.cantidad_prestada > 1 && (
                             <p className="text-xs text-gray-400">Cantidad: {p.cantidad_prestada}</p>
                           )}
-                          {p.empleado_nombre && (
-                            <p className="text-xs text-gray-400">→ {p.empleado_nombre}</p>
-                          )}
+                          {p.empleado_nombre && <p className="text-xs text-gray-400">→ {p.empleado_nombre}</p>}
                         </div>
-                        <Badge variant={esSaldado ? 'green' : 'gray'} className="flex-shrink-0">
-                          {p.estado}
-                        </Badge>
+                        <Badge variant={esSaldado ? 'green' : 'gray'} className="flex-shrink-0">{p.estado}</Badge>
                       </div>
                       <div className="flex items-center justify-between text-xs border-t border-gray-100 pt-2">
                         <div className="flex flex-col gap-0.5">
-                          <span className="text-gray-400">
-                            Valor: <span className="text-gray-600 font-medium">{formatCOP(Number(p.valor_prestamo))}</span>
-                          </span>
-                          {esSaldado && (
-                            <span className="text-green-600 font-medium">
-                              ✓ Abonado: {formatCOP(Number(p.total_abonado))}
-                            </span>
-                          )}
-                          {!esSaldado && (
-                            <span className="text-gray-400">
-                              Abonado: <span className="text-gray-600">{formatCOP(Number(p.total_abonado))}</span>
-                            </span>
-                          )}
+                          <span className="text-gray-400">Valor: <span className="text-gray-600 font-medium">{formatCOP(Number(p.valor_prestamo))}</span></span>
+                          {esSaldado
+                            ? <span className="text-green-600 font-medium">✓ Abonado: {formatCOP(Number(p.total_abonado))}</span>
+                            : <span className="text-gray-400">Abonado: <span className="text-gray-600">{formatCOP(Number(p.total_abonado))}</span></span>}
                         </div>
                         <span className="text-gray-400">{formatFechaHora(p.fecha)}</span>
                       </div>
@@ -588,12 +463,10 @@ function BarraProgreso({ abonado, total }) {
   return (
     <div className="flex flex-col gap-1">
       <div className="flex justify-between text-xs text-gray-500">
-        <span>Abonado: {formatCOP(abonado)}</span>
-        <span>{pct}%</span>
+        <span>Abonado: {formatCOP(abonado)}</span><span>{pct}%</span>
       </div>
       <div className="h-1.5 bg-gray-200 rounded-full overflow-hidden">
-        <div className="h-full bg-orange-400 rounded-full transition-all duration-300"
-          style={{ width: `${pct}%` }} />
+        <div className="h-full bg-orange-400 rounded-full transition-all duration-300" style={{ width: `${pct}%` }} />
       </div>
       <div className="flex justify-between text-xs text-gray-400">
         <span>Pendiente: {formatCOP(Math.max(0, total - abonado))}</span>
@@ -615,19 +488,14 @@ function TarjetaEntregaPendiente({ entrega, onSeleccionar }) {
             Factura #{String(entrega.factura_id).padStart(6, '0')}
             {entrega.cliente_celular ? ` · ${entrega.cliente_celular}` : ''}
           </p>
-          {entrega.direccion_entrega && (
-            <p className="text-xs text-gray-400 truncate mt-0.5">{entrega.direccion_entrega}</p>
-          )}
+          {entrega.direccion_entrega && <p className="text-xs text-gray-400 truncate mt-0.5">{entrega.direccion_entrega}</p>}
         </div>
         <div className="flex flex-col items-end gap-1 flex-shrink-0">
           <Badge variant="yellow">Pendiente</Badge>
           <span className="text-xs text-gray-400">{formatFechaHora(entrega.fecha_asignacion)}</span>
         </div>
       </div>
-      <BarraProgreso
-        abonado={Number(entrega.total_abonado)}
-        total={Number(entrega.valor_total)}
-      />
+      <BarraProgreso abonado={Number(entrega.total_abonado)} total={Number(entrega.valor_total)} />
       <div className="flex items-center justify-between pt-0.5">
         <span className="text-xs text-orange-600 font-medium">{entrega.domiciliario_nombre}</span>
         <ChevronRight size={14} className="text-orange-300" />
@@ -639,21 +507,15 @@ function TarjetaEntregaPendiente({ entrega, onSeleccionar }) {
 function FilaEntregaCompacta({ entrega, onSeleccionar }) {
   const estadoBadge = ESTADO_ENTREGA_BADGE[entrega.estado] || 'gray';
   const estadoLabel = ESTADO_ENTREGA_LABEL[entrega.estado] || entrega.estado;
-
   return (
     <button onClick={() => onSeleccionar(entrega.id)}
-      className="w-full text-left flex items-center justify-between gap-3 px-3 py-2.5
-        hover:bg-gray-50 transition-colors">
+      className="w-full text-left flex items-center justify-between gap-3 px-3 py-2.5 hover:bg-gray-50 transition-colors">
       <div className="flex-1 min-w-0">
         <p className="text-sm text-gray-700 truncate">{entrega.nombre_cliente}</p>
-        <p className="text-xs text-gray-400">
-          #{String(entrega.factura_id).padStart(6, '0')} · {entrega.domiciliario_nombre}
-        </p>
+        <p className="text-xs text-gray-400">#{String(entrega.factura_id).padStart(6, '0')} · {entrega.domiciliario_nombre}</p>
       </div>
       <div className="flex items-center gap-2 flex-shrink-0">
-        <span className="text-xs text-gray-400 hidden sm:block">
-          {formatFechaHora(entrega.fecha_asignacion)}
-        </span>
+        <span className="text-xs text-gray-400 hidden sm:block">{formatFechaHora(entrega.fecha_asignacion)}</span>
         <Badge variant={estadoBadge}>{estadoLabel}</Badge>
         <ChevronRight size={13} className="text-gray-300" />
       </div>
@@ -664,15 +526,12 @@ function FilaEntregaCompacta({ entrega, onSeleccionar }) {
 function DesplegableHistorial({ entregas, onSeleccionar }) {
   const [abierto, setAbierto] = useState(false);
   if (entregas.length === 0) return null;
-
   const entregados   = entregas.filter((e) => e.estado === 'Entregado');
   const noEntregados = entregas.filter((e) => e.estado === 'No_entregado');
-
   return (
     <div className="border border-gray-100 rounded-xl overflow-hidden">
       <button onClick={() => setAbierto((v) => !v)}
-        className="w-full flex items-center justify-between px-4 py-2.5
-          bg-gray-50 hover:bg-gray-100 transition-colors">
+        className="w-full flex items-center justify-between px-4 py-2.5 bg-gray-50 hover:bg-gray-100 transition-colors">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-xs font-semibold text-gray-500">Historial</span>
           {entregados.length > 0 && (
@@ -686,17 +545,13 @@ function DesplegableHistorial({ entregas, onSeleccionar }) {
             </span>
           )}
         </div>
-        {abierto
-          ? <ChevronUp   size={15} className="text-gray-400" />
-          : <ChevronDown size={15} className="text-gray-400" />}
+        {abierto ? <ChevronUp size={15} className="text-gray-400" /> : <ChevronDown size={15} className="text-gray-400" />}
       </button>
       {abierto && (
         <div className="flex flex-col divide-y divide-gray-50 bg-white">
           {entregas.map((entrega) => {
             const entregaId = entrega.id;
-            return (
-              <FilaEntregaCompacta key={entregaId} entrega={entrega} onSeleccionar={onSeleccionar} />
-            );
+            return <FilaEntregaCompacta key={entregaId} entrega={entrega} onSeleccionar={onSeleccionar} />;
           })}
         </div>
       )}
@@ -721,10 +576,7 @@ function PanelDetalleEntrega({ entregaId, onVolver }) {
     mutationFn: (datos) => registrarAbonoDomicilio(entregaId, datos),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['entregas-domicilio'], exact: false });
-      refetch();
-      setValorAbono('');
-      setNotasAbono('');
-      setErrorLocal('');
+      refetch(); setValorAbono(''); setNotasAbono(''); setErrorLocal('');
     },
     onError: (err) => setErrorLocal(err.response?.data?.error || 'Error al registrar abono'),
   });
@@ -736,8 +588,7 @@ function PanelDetalleEntrega({ entregaId, onVolver }) {
       queryClient.invalidateQueries({ queryKey: ['facturas'],           exact: false });
       queryClient.invalidateQueries({ queryKey: ['productos-serial'],   exact: false });
       queryClient.invalidateQueries({ queryKey: ['productos-cantidad'],  exact: false });
-      refetch();
-      setConfirmarDev(false);
+      refetch(); setConfirmarDev(false);
     },
     onError: (err) => setErrorLocal(err.response?.data?.error || 'Error al procesar devolución'),
   });
@@ -757,117 +608,77 @@ function PanelDetalleEntrega({ entregaId, onVolver }) {
 
   return (
     <div className="flex flex-col gap-4">
-      <button onClick={onVolver}
-        className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-600 w-fit">
+      <button onClick={onVolver} className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-600 w-fit">
         <ChevronLeft size={13} /> Volver a la lista
       </button>
-
       <div className="bg-orange-50 border border-orange-100 rounded-xl p-3 flex flex-col gap-1.5">
         <div className="flex items-center justify-between">
           <p className="text-sm font-semibold text-gray-800">{e?.nombre_cliente}</p>
-          <Badge variant={ESTADO_ENTREGA_BADGE[e?.estado] || 'gray'}>
-            {ESTADO_ENTREGA_LABEL[e?.estado] || e?.estado}
-          </Badge>
+          <Badge variant={ESTADO_ENTREGA_BADGE[e?.estado] || 'gray'}>{ESTADO_ENTREGA_LABEL[e?.estado] || e?.estado}</Badge>
         </div>
-        <p className="text-xs text-gray-500">
-          Factura #{String(e?.factura_id || 0).padStart(6, '0')}
-          {e?.cliente_celular ? ` · ${e.cliente_celular}` : ''}
-        </p>
-        <p className="text-xs text-orange-600 font-medium">
-          Domiciliario: {e?.domiciliario_nombre}
-          {e?.domiciliario_telefono ? ` · ${e.domiciliario_telefono}` : ''}
-        </p>
+        <p className="text-xs text-gray-500">Factura #{String(e?.factura_id || 0).padStart(6, '0')}{e?.cliente_celular ? ` · ${e.cliente_celular}` : ''}</p>
+        <p className="text-xs text-orange-600 font-medium">Domiciliario: {e?.domiciliario_nombre}{e?.domiciliario_telefono ? ` · ${e.domiciliario_telefono}` : ''}</p>
         {e?.direccion_entrega && <p className="text-xs text-gray-500">{e.direccion_entrega}</p>}
         {e?.notas && <p className="text-xs text-gray-400 italic">{e.notas}</p>}
         <p className="text-xs text-gray-400">{formatFechaHora(e?.fecha_asignacion)}</p>
       </div>
-
-      <BarraProgreso
-        abonado={Number(e?.total_abonado || 0)}
-        total={Number(e?.valor_total || 0)}
-      />
-
+      <BarraProgreso abonado={Number(e?.total_abonado || 0)} total={Number(e?.valor_total || 0)} />
       {e?.abonos?.length > 0 && (
         <div className="flex flex-col gap-1.5">
-          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-            Historial de abonos
-          </p>
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Historial de abonos</p>
           <div className="flex flex-col gap-1 max-h-36 overflow-y-auto">
             {e.abonos.map((abono) => {
               const abonoId = abono.id;
               return (
-                <div key={abonoId}
-                  className="flex items-center justify-between bg-gray-50 rounded-xl px-3 py-2">
+                <div key={abonoId} className="flex items-center justify-between bg-gray-50 rounded-xl px-3 py-2">
                   <div>
                     <p className="text-xs text-gray-500">{formatFechaHora(abono.fecha)}</p>
                     {abono.notas && <p className="text-xs text-gray-400 italic">{abono.notas}</p>}
-                    {abono.usuario_nombre && (
-                      <p className="text-xs text-gray-400">por {abono.usuario_nombre}</p>
-                    )}
+                    {abono.usuario_nombre && <p className="text-xs text-gray-400">por {abono.usuario_nombre}</p>}
                   </div>
-                  <span className="text-sm font-semibold text-green-600">
-                    + {formatCOP(abono.valor)}
-                  </span>
+                  <span className="text-sm font-semibold text-green-600">+ {formatCOP(abono.valor)}</span>
                 </div>
               );
             })}
           </div>
         </div>
       )}
-
       {esPendiente && (
         <div className="flex flex-col gap-2 p-3 bg-green-50 border border-green-100 rounded-xl">
-          <p className="text-xs font-semibold text-green-700 uppercase tracking-wide">
-            Registrar abono
-          </p>
+          <p className="text-xs font-semibold text-green-700 uppercase tracking-wide">Registrar abono</p>
           <div className="flex flex-col gap-1">
-            <label className="text-xs font-medium text-gray-600">
-              Valor (máx. {formatCOP(saldoPendiente)})
-            </label>
+            <label className="text-xs font-medium text-gray-600">Valor (máx. {formatCOP(saldoPendiente)})</label>
             <InputMoneda value={valorAbono} onChange={setValorAbono} placeholder="0"
               className="w-full px-3 py-2 bg-white border border-green-200 rounded-xl text-sm
                 focus:outline-none focus:ring-2 focus:ring-green-400 transition-all" />
           </div>
           <Input label="Notas (opcional)" placeholder="Observaciones del abono..."
             value={notasAbono} onChange={(e) => setNotasAbono(e.target.value)} />
-          <Button size="sm" loading={mutAbono.isPending}
-            disabled={!valorAbono || Number(valorAbono) <= 0}
-            onClick={handleAbono}>
+          <Button size="sm" loading={mutAbono.isPending} disabled={!valorAbono || Number(valorAbono) <= 0} onClick={handleAbono}>
             Registrar abono
           </Button>
         </div>
       )}
-
       {esPendiente && !confirmarDev && (
         <button onClick={() => setConfirmarDev(true)}
-          className="w-full py-2.5 rounded-xl text-sm font-medium border border-red-200
-            text-red-500 bg-red-50 hover:bg-red-100 transition-colors">
+          className="w-full py-2.5 rounded-xl text-sm font-medium border border-red-200 text-red-500 bg-red-50 hover:bg-red-100 transition-colors">
           Marcar como no entregado (devolución)
         </button>
       )}
-
       {esPendiente && confirmarDev && (
         <div className="flex flex-col gap-2 p-3 bg-red-50 border border-red-200 rounded-xl">
           <div className="flex items-start gap-2">
             <AlertTriangle size={14} className="text-red-500 flex-shrink-0 mt-0.5" />
-            <p className="text-xs text-red-700">
-              Esto cancelará la factura y revertirá el stock al inventario. Esta acción no se puede deshacer.
-            </p>
+            <p className="text-xs text-red-700">Esto cancelará la factura y revertirá el stock al inventario. Esta acción no se puede deshacer.</p>
           </div>
           <div className="flex gap-2">
-            <Button variant="secondary" size="sm" className="flex-1"
-              onClick={() => setConfirmarDev(false)}>
-              Cancelar
-            </Button>
-            <Button size="sm" className="flex-1 bg-red-500 hover:bg-red-600"
-              loading={mutDevolucion.isPending}
-              onClick={() => mutDevolucion.mutate()}>
+            <Button variant="secondary" size="sm" className="flex-1" onClick={() => setConfirmarDev(false)}>Cancelar</Button>
+            <Button size="sm" className="flex-1 bg-red-500 hover:bg-red-600" loading={mutDevolucion.isPending} onClick={() => mutDevolucion.mutate()}>
               Confirmar devolución
             </Button>
           </div>
         </div>
       )}
-
       {errorLocal && (
         <div className="bg-red-50 border border-red-100 rounded-xl px-3 py-2">
           <p className="text-sm text-red-600">{errorLocal}</p>
@@ -881,16 +692,10 @@ function TabDomiciliarios() {
   const [filtroDomiciliario,  setFiltroDomiciliario]  = useState('');
   const [entregaSeleccionada, setEntregaSeleccionada] = useState(null);
 
-  const { data: domiciliariosData } = useQuery({
-    queryKey: ['domiciliarios'],
-    queryFn:  () => getDomiciliarios().then((r) => r.data.data),
-  });
-
+  const { data: domiciliariosData } = useQuery({ queryKey: ['domiciliarios'], queryFn: () => getDomiciliarios().then((r) => r.data.data) });
   const { data: entregasData, isLoading } = useQuery({
     queryKey: ['entregas-domicilio', filtroDomiciliario],
-    queryFn:  () => getEntregas({
-      domiciliario_id: filtroDomiciliario || undefined,
-    }).then((r) => r.data.data),
+    queryFn:  () => getEntregas({ domiciliario_id: filtroDomiciliario || undefined }).then((r) => r.data.data),
   });
 
   const domiciliarios = domiciliariosData || [];
@@ -899,61 +704,32 @@ function TabDomiciliarios() {
   const historial     = entregas.filter((e) => e.estado !== 'Pendiente');
 
   if (entregaSeleccionada) {
-    return (
-      <PanelDetalleEntrega
-        entregaId={entregaSeleccionada}
-        onVolver={() => setEntregaSeleccionada(null)}
-      />
-    );
+    return <PanelDetalleEntrega entregaId={entregaSeleccionada} onVolver={() => setEntregaSeleccionada(null)} />;
   }
 
   return (
     <div className="flex flex-col gap-4">
       {domiciliarios.length > 0 && (
-        <select value={filtroDomiciliario}
-          onChange={(e) => setFiltroDomiciliario(e.target.value)}
-          className="w-full py-2 px-3 bg-gray-50 border border-gray-200
-            rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-400
-            focus:bg-white transition-all text-gray-700">
+        <select value={filtroDomiciliario} onChange={(e) => setFiltroDomiciliario(e.target.value)}
+          className="w-full py-2 px-3 bg-gray-50 border border-gray-200 rounded-xl text-sm
+            focus:outline-none focus:ring-2 focus:ring-orange-400 focus:bg-white transition-all text-gray-700">
           <option value="">Todos los domiciliarios</option>
-          {domiciliarios.map((d) => {
-            const domId = d.id;
-            return <option key={domId} value={domId}>{d.nombre}</option>;
-          })}
+          {domiciliarios.map((d) => { const domId = d.id; return <option key={domId} value={domId}>{d.nombre}</option>; })}
         </select>
       )}
-
-      {isLoading ? (
-        <Spinner className="py-8" />
-      ) : entregas.length === 0 ? (
-        <EmptyState icon={Bike}
-          titulo="Sin pedidos domiciliarios"
-          descripcion="Los pedidos aparecen al crear facturas con domicilio" />
+      {isLoading ? <Spinner className="py-8" /> : entregas.length === 0 ? (
+        <EmptyState icon={Bike} titulo="Sin pedidos domiciliarios" descripcion="Los pedidos aparecen al crear facturas con domicilio" />
       ) : (
         <div className="flex flex-col gap-3">
           {pendientes.length === 0 ? (
             <p className="text-xs text-gray-400 px-1">Sin pedidos pendientes</p>
           ) : (
             <div className="flex flex-col gap-2">
-              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide px-1">
-                Pendientes ({pendientes.length})
-              </p>
-              {pendientes.map((entrega) => {
-                const entregaId = entrega.id;
-                return (
-                  <TarjetaEntregaPendiente
-                    key={entregaId}
-                    entrega={entrega}
-                    onSeleccionar={setEntregaSeleccionada}
-                  />
-                );
-              })}
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide px-1">Pendientes ({pendientes.length})</p>
+              {pendientes.map((entrega) => { const entregaId = entrega.id; return <TarjetaEntregaPendiente key={entregaId} entrega={entrega} onSeleccionar={setEntregaSeleccionada} />; })}
             </div>
           )}
-          <DesplegableHistorial
-            entregas={historial}
-            onSeleccionar={setEntregaSeleccionada}
-          />
+          <DesplegableHistorial entregas={historial} onSeleccionar={setEntregaSeleccionada} />
         </div>
       )}
     </div>
@@ -963,13 +739,46 @@ function TabDomiciliarios() {
 // ─── Página principal ─────────────────────────────────────────────────────────
 
 export default function PrestamosPage() {
+  const { coloresActivo } = useColoresConfig();
+
+  // ── Estado UI ──────────────────────────────────────────────────────────────
   const [tabPrincipal,  setTabPrincipal]  = useState('prestamos');
   const [tabPrestamos,  setTabPrestamos]  = useState('companeros');
   const [prestamoAbono, setPrestamoAbono] = useState(null);
   const [prestamoDevol, setPrestamoDevol] = useState(null);
 
-  const { coloresActivo } = useColoresConfig();
+  // ── Estado flujo post-saldo (vive en el padre para no perderse) ────────────
+  const [saldadoFacturaId,   setSaldadoFacturaId]   = useState(null); // id de la factura creada
+  const [saldadoPrestamo,    setSaldadoPrestamo]     = useState(null); // datos del préstamo saldado
+  const [modalImprimir,      setModalImprimir]       = useState(null); // { factura, garantias }
+  const [facturaTermicaData, setFacturaTermicaData]  = useState(null); // { factura, garantias }
 
+  // ── Queries de la factura saldada ──────────────────────────────────────────
+  const { data: configDataSaldado } = useQuery({
+    queryKey: ['config'],
+    queryFn:  () => api.get('/config').then((r) => r.data.data),
+    enabled:  !!saldadoFacturaId,
+  });
+
+  const { data: facturaDataSaldada } = useQuery({
+    queryKey: ['factura-detalle', saldadoFacturaId],
+    queryFn:  () => getFacturaById(saldadoFacturaId).then((r) => r.data.data),
+    enabled:  !!saldadoFacturaId,
+    staleTime: 0,
+  });
+
+  const { data: garantiasSaldadas = [] } = useQuery({
+    queryKey: ['garantias-factura', saldadoFacturaId],
+    queryFn:  () => getGarantiasPorFactura(saldadoFacturaId).then((r) => r.data.data),
+    enabled:  !!saldadoFacturaId,
+    staleTime: 0,
+  });
+
+  const facturaConConfigSaldada = facturaDataSaldada && configDataSaldado
+    ? { ...facturaDataSaldada, config: configDataSaldado }
+    : null;
+
+  // ── Queries de préstamos ───────────────────────────────────────────────────
   const { data: prestamosData, isLoading: loadingP } = useQuery({
     queryKey: ['prestamos'],
     queryFn:  () => getPrestamos().then((r) => r.data.data),
@@ -977,39 +786,36 @@ export default function PrestamosPage() {
 
   const prestamos = prestamosData || [];
 
-  const gruposCompaneros = prestamos
-    .filter((p) => p.prestatario_id)
-    .reduce((acc, p) => {
-      const key = `prestatario_${p.prestatario_id}`;
-      if (!acc[key]) {
-        acc[key] = {
-          nombre:    p.prestatario_nombre || p.prestatario,
-          personaId: p.prestatario_id,
-          prestamos:  [],
-          saldoTotal: 0,
-        };
-      }
-      acc[key].prestamos.push(p);
-      if (p.estado === 'Activo') acc[key].saldoTotal += Number(p.valor_prestamo) - Number(p.total_abonado);
-      return acc;
-    }, {});
+  const gruposCompaneros = prestamos.filter((p) => p.prestatario_id).reduce((acc, p) => {
+    const key = `prestatario_${p.prestatario_id}`;
+    if (!acc[key]) acc[key] = { nombre: p.prestatario_nombre || p.prestatario, personaId: p.prestatario_id, prestamos: [], saldoTotal: 0 };
+    acc[key].prestamos.push(p);
+    if (p.estado === 'Activo') acc[key].saldoTotal += Number(p.valor_prestamo) - Number(p.total_abonado);
+    return acc;
+  }, {});
 
-  const gruposClientes = prestamos
-    .filter((p) => p.cliente_id)
-    .reduce((acc, p) => {
-      const key = `cliente_${p.cliente_id}`;
-      if (!acc[key]) {
-        acc[key] = {
-          nombre:    p.cliente_nombre || p.prestatario,
-          personaId: p.cliente_id,
-          prestamos:  [],
-          saldoTotal: 0,
-        };
-      }
-      acc[key].prestamos.push(p);
-      if (p.estado === 'Activo') acc[key].saldoTotal += Number(p.valor_prestamo) - Number(p.total_abonado);
-      return acc;
-    }, {});
+  const gruposClientes = prestamos.filter((p) => p.cliente_id).reduce((acc, p) => {
+    const key = `cliente_${p.cliente_id}`;
+    if (!acc[key]) acc[key] = { nombre: p.cliente_nombre || p.prestatario, personaId: p.cliente_id, prestamos: [], saldoTotal: 0 };
+    acc[key].prestamos.push(p);
+    if (p.estado === 'Activo') acc[key].saldoTotal += Number(p.valor_prestamo) - Number(p.total_abonado);
+    return acc;
+  }, {});
+
+  // ── Handler: abono saldó el préstamo ──────────────────────────────────────
+  const handleSaldado = (facturaId, prestamo) => {
+    setPrestamoAbono(null);       // cerrar modal de abono
+    setSaldadoFacturaId(facturaId);
+    setSaldadoPrestamo(prestamo);
+  };
+
+  // ── Handler: limpiar todo el flujo post-saldo ────────────────────────────
+  const limpiarSaldado = () => {
+    setSaldadoFacturaId(null);
+    setSaldadoPrestamo(null);
+    setModalImprimir(null);
+    setFacturaTermicaData(null);
+  };
 
   return (
     <div className="flex flex-col gap-4">
@@ -1022,11 +828,8 @@ export default function PrestamosPage() {
           return (
             <button key={tabId} onClick={() => setTabPrincipal(tabId)}
               className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all
-                ${tabPrincipal === tabId
-                  ? 'bg-white text-gray-900 shadow-sm'
-                  : 'text-gray-500 hover:text-gray-700'}`}>
-              <TabIcon size={16} />
-              {tabLabel}
+                ${tabPrincipal === tabId ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+              <TabIcon size={16} />{tabLabel}
             </button>
           );
         })}
@@ -1039,22 +842,15 @@ export default function PrestamosPage() {
               const tabId    = tab.id;
               const tabLabel = tab.label;
               const TabIcon  = tab.Icn;
-              const count = tabId === 'companeros'
-                ? Object.keys(gruposCompaneros).length
-                : Object.keys(gruposClientes).length;
+              const count = tabId === 'companeros' ? Object.keys(gruposCompaneros).length : Object.keys(gruposClientes).length;
               return (
                 <button key={tabId} onClick={() => setTabPrestamos(tabId)}
                   className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all
-                    ${tabPrestamos === tabId
-                      ? 'bg-white text-gray-900 shadow-sm'
-                      : 'text-gray-500 hover:text-gray-700'}`}>
-                  <TabIcon size={15} />
-                  {tabLabel}
+                    ${tabPrestamos === tabId ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+                  <TabIcon size={15} />{tabLabel}
                   {count > 0 && (
                     <span className={`text-xs px-1.5 py-0.5 rounded-full font-semibold
-                      ${tabPrestamos === tabId
-                        ? 'bg-blue-100 text-blue-600'
-                        : 'bg-gray-200 text-gray-500'}`}>
+                      ${tabPrestamos === tabId ? 'bg-blue-100 text-blue-600' : 'bg-gray-200 text-gray-500'}`}>
                       {count}
                     </span>
                   )}
@@ -1063,52 +859,30 @@ export default function PrestamosPage() {
             })}
           </div>
 
-          {loadingP ? (
-            <Spinner className="py-20" />
-          ) : (
+          {loadingP ? <Spinner className="py-20" /> : (
             <>
               {tabPrestamos === 'companeros' && (
                 <div className="flex flex-col gap-3">
                   {Object.keys(gruposCompaneros).length === 0 ? (
                     <EmptyState icon={User} titulo="Sin préstamos a compañeros" />
-                  ) : (
-                    Object.entries(gruposCompaneros).map(([key, grupo]) => (
-                      <GrupoPrestatario
-                        key={key}
-                        tipo="prestatario"
-                        nombre={grupo.nombre}
-                        personaId={grupo.personaId}
-                        prestamos={grupo.prestamos}
-                        saldoTotal={grupo.saldoTotal}
-                        onAbonar={setPrestamoAbono}
-                        onDevolver={setPrestamoDevol}
-                        CardItem={CardPrestamoCompanero}
-                        coloresActivo={coloresActivo}
-                      />
-                    ))
-                  )}
+                  ) : Object.entries(gruposCompaneros).map(([key, grupo]) => (
+                    <GrupoPrestatario key={key} tipo="prestatario" nombre={grupo.nombre}
+                      personaId={grupo.personaId} prestamos={grupo.prestamos} saldoTotal={grupo.saldoTotal}
+                      onAbonar={setPrestamoAbono} onDevolver={setPrestamoDevol}
+                      CardItem={CardPrestamoCompanero} coloresActivo={coloresActivo} />
+                  ))}
                 </div>
               )}
               {tabPrestamos === 'clientes' && (
                 <div className="flex flex-col gap-3">
                   {Object.keys(gruposClientes).length === 0 ? (
                     <EmptyState icon={Users} titulo="Sin préstamos a clientes" />
-                  ) : (
-                    Object.entries(gruposClientes).map(([key, grupo]) => (
-                      <GrupoPrestatario
-                        key={key}
-                        tipo="cliente"
-                        nombre={grupo.nombre}
-                        personaId={grupo.personaId}
-                        prestamos={grupo.prestamos}
-                        saldoTotal={grupo.saldoTotal}
-                        onAbonar={setPrestamoAbono}
-                        onDevolver={setPrestamoDevol}
-                        CardItem={CardPrestamoCliente}
-                        coloresActivo={coloresActivo}
-                      />
-                    ))
-                  )}
+                  ) : Object.entries(gruposClientes).map(([key, grupo]) => (
+                    <GrupoPrestatario key={key} tipo="cliente" nombre={grupo.nombre}
+                      personaId={grupo.personaId} prestamos={grupo.prestamos} saldoTotal={grupo.saldoTotal}
+                      onAbonar={setPrestamoAbono} onDevolver={setPrestamoDevol}
+                      CardItem={CardPrestamoCliente} coloresActivo={coloresActivo} />
+                  ))}
                 </div>
               )}
             </>
@@ -1116,19 +890,54 @@ export default function PrestamosPage() {
         </div>
       )}
 
-      {tabPrincipal === 'creditos' && <TabCreditos />}
+      {tabPrincipal === 'creditos'      && <TabCreditos />}
       {tabPrincipal === 'domiciliarios' && <TabDomiciliarios />}
 
+      {/* ── Modal abono normal ── */}
       {prestamoAbono && (
         <ModalAbonoPrestamo
           prestamo={prestamoAbono}
           onClose={() => setPrestamoAbono(null)}
+          onSaldado={handleSaldado}
         />
       )}
+
+      {/* ── Modal devolución ── */}
       {prestamoDevol && (
-        <ModalDevolucion
-          prestamo={prestamoDevol}
-          onClose={() => setPrestamoDevol(null)}
+        <ModalDevolucion prestamo={prestamoDevol} onClose={() => setPrestamoDevol(null)} />
+      )}
+
+      {/* ── Flujo post-saldo: confirmar factura ── */}
+      {saldadoFacturaId && !modalImprimir && !facturaTermicaData && (
+        <ModalConfirmarFactura
+          prestamo={saldadoPrestamo}
+          facturaConConfig={facturaConConfigSaldada}
+          garantias={garantiasSaldadas}
+          onNo={limpiarSaldado}
+          onSi={(f, g) => setModalImprimir({ factura: f, garantias: g })}
+        />
+      )}
+
+      {/* ── Flujo post-saldo: selector POS / PDF ── */}
+      {modalImprimir && !facturaTermicaData && (
+        <ModalImprimirFactura
+          open
+          onClose={limpiarSaldado}
+          factura={modalImprimir.factura}
+          garantias={modalImprimir.garantias}
+          onImprimirPos={(f, g) => {
+            setModalImprimir(null);
+            setFacturaTermicaData({ factura: f, garantias: g });
+          }}
+        />
+      )}
+
+      {/* ── Flujo post-saldo: impresión POS ── */}
+      {facturaTermicaData && (
+        <FacturaTermica
+          factura={facturaTermicaData.factura}
+          garantias={facturaTermicaData.garantias}
+          onClose={limpiarSaldado}
         />
       )}
     </div>
