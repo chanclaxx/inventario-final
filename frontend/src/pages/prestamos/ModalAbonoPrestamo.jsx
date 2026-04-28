@@ -72,8 +72,10 @@ export function ModalAbonoPrestamo({ prestamo, onClose }) {
       queryClient.invalidateQueries({ queryKey: ['facturas'],  exact: false });
       const data = res.data?.data;
       if (data?.saldado && data?.factura_id) {
+        // Primero seteamos el id para que las queries arranquen inmediatamente
         setFacturaId(data.factura_id);
-        setPantalla('confirmar');
+        // Pequeño delay para que React procese el estado antes de cambiar pantalla
+        setTimeout(() => setPantalla('confirmar'), 0);
       } else {
         onClose();
       }
@@ -169,9 +171,12 @@ export function ModalAbonoPrestamo({ prestamo, onClose }) {
               className="flex-1"
               disabled={!facturaConConfig}
               loading={!facturaConConfig}
-              onClick={() => setPantalla('imprimir')}
+              onClick={() => {
+                if (!facturaConConfig) return;
+                setPantalla('imprimir');
+              }}
             >
-              Sí, generar factura
+              {facturaConConfig ? 'Sí, generar factura' : 'Cargando...'}
             </Button>
           </div>
         </div>
@@ -180,7 +185,12 @@ export function ModalAbonoPrestamo({ prestamo, onClose }) {
   }
 
   // ── Pantalla: selector POS / PDF ──────────────────────────────────────────
+  // Doble guard: si por alguna razón facturaConConfig aún es null, no renderizar
   if (pantalla === 'imprimir') {
+    if (!facturaConConfig) {
+      setPantalla('confirmar');
+      return null;
+    }
     return (
       <ModalImprimirFactura
         open
