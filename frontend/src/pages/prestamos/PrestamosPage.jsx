@@ -8,8 +8,8 @@ import {
   registrarAbono    as registrarAbonoDomicilio,
   marcarDevolucion  as marcarDevolucionDomicilio,
 } from '../../api/domiciliarios.api';
-import { getFacturaById }         from '../../api/facturas.api';
-import { getGarantiasPorFactura } from '../../api/garantias.api';
+import { getFacturaById }           from '../../api/facturas.api';
+import { getGarantiasPorFactura }   from '../../api/garantias.api';
 import { formatCOP, formatFechaHora }           from '../../utils/formatters';
 import { Badge }                                from '../../components/ui/Badge';
 import { Button }                               from '../../components/ui/Button';
@@ -20,6 +20,7 @@ import { Spinner }                              from '../../components/ui/Spinne
 import { EmptyState }                           from '../../components/ui/EmptyState';
 import { FacturaTermica }                       from '../../components/FacturaTermica';
 import { ModalImprimirFactura }                 from '../../components/ui/ModalImprimirFactura';
+import { ModalImprimirPrestamo }                from '../../components/ui/ModalImprimirPrestamo';
 import { TabCreditos }                          from './TabCreditos';
 import { useMetodosPago }                       from '../../hooks/useMetodosPago';
 import useExportarPdfPrestamos                  from '../../hooks/useExportarPdfPrestamos';
@@ -27,7 +28,7 @@ import api                                      from '../../api/axios.config';
 import {
   Handshake, CreditCard, Bike, Plus, CheckCircle,
   ChevronDown, ChevronUp, ChevronLeft, ChevronRight,
-  Users, User, AlertTriangle, FileDown, Loader2,
+  Users, User, AlertTriangle, FileDown, Loader2, Printer,
 } from 'lucide-react';
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
@@ -102,7 +103,24 @@ function BotonExportarPdf({ tipo, personaId, nombrePersona }) {
   );
 }
 
-// ─── Modal Abono Préstamo (sin lógica post-saldo) ─────────────────────────────
+// ─── Botón imprimir préstamo individual ───────────────────────────────────────
+
+function BotonImprimirPrestamo({ prestamo, onClick }) {
+  // Solo para Activo y Saldado — Devuelto no imprime
+  if (prestamo.estado === 'Devuelto') return null;
+  return (
+    <button
+      onClick={(e) => { e.stopPropagation(); onClick(prestamo); }}
+      title="Imprimir comprobante"
+      className="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50
+        transition-colors flex-shrink-0"
+    >
+      <Printer size={14} />
+    </button>
+  );
+}
+
+// ─── Modal Abono Préstamo ─────────────────────────────────────────────────────
 
 function ModalAbonoPrestamo({ prestamo, onClose, onSaldado }) {
   const queryClient = useQueryClient();
@@ -120,7 +138,6 @@ function ModalAbonoPrestamo({ prestamo, onClose, onSaldado }) {
       queryClient.invalidateQueries({ queryKey: ['facturas'],  exact: false });
       const data = res.data?.data;
       if (data?.saldado && data?.factura_id) {
-        // Notificar al padre con el facturaId — NO llamar onClose aquí
         onSaldado(data.factura_id, prestamo);
       } else {
         onClose();
@@ -193,26 +210,14 @@ function ModalConfirmarFactura({ prestamo, facturaConConfig, garantias, onNo, on
     <Modal open onClose={onNo} title="Préstamo saldado" size="sm">
       <div className="flex flex-col gap-5">
         <div className="bg-green-50 border border-green-200 rounded-xl px-4 py-3 text-center">
-          <p className="text-green-700 font-semibold text-sm">
-            ✓ El préstamo quedó completamente saldado
-          </p>
-          <p className="text-green-600 text-xs mt-1">
-            {prestamo?.nombre_producto} — {prestamo?.prestatario}
-          </p>
+          <p className="text-green-700 font-semibold text-sm">✓ El préstamo quedó completamente saldado</p>
+          <p className="text-green-600 text-xs mt-1">{prestamo?.nombre_producto} — {prestamo?.prestatario}</p>
         </div>
-        <p className="text-sm text-gray-600 text-center">
-          ¿Deseas generar una factura por este pago?
-        </p>
+        <p className="text-sm text-gray-600 text-center">¿Deseas generar una factura por este pago?</p>
         <div className="flex gap-2">
-          <Button variant="secondary" className="flex-1" onClick={onNo}>
-            No, cerrar
-          </Button>
-          <Button
-            className="flex-1"
-            disabled={!facturaConConfig}
-            loading={!facturaConConfig}
-            onClick={() => facturaConConfig && onSi(facturaConConfig, garantias)}
-          >
+          <Button variant="secondary" className="flex-1" onClick={onNo}>No, cerrar</Button>
+          <Button className="flex-1" disabled={!facturaConConfig} loading={!facturaConConfig}
+            onClick={() => facturaConConfig && onSi(facturaConConfig, garantias)}>
             {facturaConConfig ? 'Sí, generar factura' : 'Cargando...'}
           </Button>
         </div>
@@ -262,9 +267,7 @@ function ModalDevolucion({ prestamo, onClose }) {
           <p className="text-sm font-medium text-gray-800">{prestamo.nombre_producto}</p>
           {prestamo.imei && <p className="text-xs text-gray-400 font-mono">IMEI: {prestamo.imei}</p>}
           {esPorCantidad && (
-            <p className="text-xs text-gray-500">
-              Cantidad prestada: <span className="font-semibold">{cantidadMax}</span>
-            </p>
+            <p className="text-xs text-gray-500">Cantidad prestada: <span className="font-semibold">{cantidadMax}</span></p>
           )}
         </div>
         {esPorCantidad && cantidadMax > 1 ? (
@@ -295,7 +298,7 @@ function ModalDevolucion({ prestamo, onClose }) {
 
 // ─── Cards ────────────────────────────────────────────────────────────────────
 
-function CardPrestamoCompanero({ prestamo, onAbonar, onDevolver, coloresActivo }) {
+function CardPrestamoCompanero({ prestamo, onAbonar, onDevolver, onImprimir, coloresActivo }) {
   const saldo    = Number(prestamo.valor_prestamo) - Number(prestamo.total_abonado);
   const progreso = (Number(prestamo.total_abonado) / Number(prestamo.valor_prestamo)) * 100;
   return (
@@ -313,7 +316,10 @@ function CardPrestamoCompanero({ prestamo, onAbonar, onDevolver, coloresActivo }
           )}
           <p className="text-xs text-gray-400 mt-0.5">{formatFechaHora(prestamo.fecha)}</p>
         </div>
-        <Badge variant={prestamo.estado === 'Activo' ? 'blue' : 'green'}>{prestamo.estado}</Badge>
+        <div className="flex items-center gap-1 flex-shrink-0">
+          <BotonImprimirPrestamo prestamo={prestamo} onClick={onImprimir} />
+          <Badge variant={prestamo.estado === 'Activo' ? 'blue' : 'green'}>{prestamo.estado}</Badge>
+        </div>
       </div>
       <div className="flex flex-col gap-1">
         <div className="w-full bg-gray-100 rounded-full h-1.5">
@@ -325,19 +331,21 @@ function CardPrestamoCompanero({ prestamo, onAbonar, onDevolver, coloresActivo }
           <span className="text-red-500 font-medium">Saldo: {formatCOP(saldo)}</span>
         </div>
       </div>
-      <div className="flex gap-2">
-        <Button size="sm" className="flex-1" onClick={() => onAbonar(prestamo)}>
-          <Plus size={14} /> Abonar
-        </Button>
-        <Button size="sm" variant="secondary" onClick={() => onDevolver(prestamo)}>
-          <CheckCircle size={14} /> Devuelto
-        </Button>
-      </div>
+      {prestamo.estado === 'Activo' && (
+        <div className="flex gap-2">
+          <Button size="sm" className="flex-1" onClick={() => onAbonar(prestamo)}>
+            <Plus size={14} /> Abonar
+          </Button>
+          <Button size="sm" variant="secondary" onClick={() => onDevolver(prestamo)}>
+            <CheckCircle size={14} /> Devuelto
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
 
-function CardPrestamoCliente({ prestamo, onAbonar, onDevolver }) {
+function CardPrestamoCliente({ prestamo, onAbonar, onDevolver, onImprimir }) {
   const saldo    = Number(prestamo.valor_prestamo) - Number(prestamo.total_abonado);
   const progreso = (Number(prestamo.total_abonado) / Number(prestamo.valor_prestamo)) * 100;
   return (
@@ -351,7 +359,10 @@ function CardPrestamoCliente({ prestamo, onAbonar, onDevolver }) {
           )}
           <p className="text-xs text-gray-400 mt-0.5">{formatFechaHora(prestamo.fecha)}</p>
         </div>
-        <Badge variant={prestamo.estado === 'Activo' ? 'blue' : 'green'}>{prestamo.estado}</Badge>
+        <div className="flex items-center gap-1 flex-shrink-0">
+          <BotonImprimirPrestamo prestamo={prestamo} onClick={onImprimir} />
+          <Badge variant={prestamo.estado === 'Activo' ? 'blue' : 'green'}>{prestamo.estado}</Badge>
+        </div>
       </div>
       {(prestamo.cedula || prestamo.telefono) && (
         <div className="bg-gray-50 rounded-xl px-3 py-2 flex flex-col gap-0.5">
@@ -369,21 +380,23 @@ function CardPrestamoCliente({ prestamo, onAbonar, onDevolver }) {
           <span className="text-red-500 font-medium">Saldo: {formatCOP(saldo)}</span>
         </div>
       </div>
-      <div className="flex gap-2">
-        <Button size="sm" className="flex-1" onClick={() => onAbonar(prestamo)}>
-          <Plus size={14} /> Abonar
-        </Button>
-        <Button size="sm" variant="secondary" onClick={() => onDevolver(prestamo)}>
-          <CheckCircle size={14} /> Devuelto
-        </Button>
-      </div>
+      {prestamo.estado === 'Activo' && (
+        <div className="flex gap-2">
+          <Button size="sm" className="flex-1" onClick={() => onAbonar(prestamo)}>
+            <Plus size={14} /> Abonar
+          </Button>
+          <Button size="sm" variant="secondary" onClick={() => onDevolver(prestamo)}>
+            <CheckCircle size={14} /> Devuelto
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
 
 // ─── Grupo colapsable ─────────────────────────────────────────────────────────
 
-function GrupoPrestatario({ nombre, tipo, personaId, prestamos, saldoTotal, onAbonar, onDevolver, CardItem, coloresActivo }) {
+function GrupoPrestatario({ nombre, tipo, personaId, prestamos, saldoTotal, onAbonar, onDevolver, onImprimir, CardItem, coloresActivo }) {
   const [abierto, setAbierto] = useState(true);
   const activos  = prestamos.filter((p) => p.estado === 'Activo');
   const cerrados = prestamos.filter((p) => p.estado !== 'Activo');
@@ -403,13 +416,15 @@ function GrupoPrestatario({ nombre, tipo, personaId, prestamos, saldoTotal, onAb
           {abierto ? <ChevronUp size={16} className="text-gray-400" /> : <ChevronDown size={16} className="text-gray-400" />}
         </div>
       </button>
+
       {abierto && (
         <div className="flex flex-col gap-3 p-3">
           {activos.length === 0 ? (
             <p className="text-xs text-gray-400 px-1 py-2">Sin préstamos activos</p>
           ) : (
             activos.map((p) => (
-              <Card key={p.id} prestamo={p} onAbonar={onAbonar} onDevolver={onDevolver} coloresActivo={coloresActivo} />
+              <Card key={p.id} prestamo={p} onAbonar={onAbonar} onDevolver={onDevolver}
+                onImprimir={onImprimir} coloresActivo={coloresActivo} />
             ))
           )}
           {cerrados.length > 0 && (
@@ -433,7 +448,11 @@ function GrupoPrestatario({ nombre, tipo, personaId, prestamos, saldoTotal, onAb
                           )}
                           {p.empleado_nombre && <p className="text-xs text-gray-400">→ {p.empleado_nombre}</p>}
                         </div>
-                        <Badge variant={esSaldado ? 'green' : 'gray'} className="flex-shrink-0">{p.estado}</Badge>
+                        <div className="flex items-center gap-1 flex-shrink-0">
+                          {/* Botón imprimir solo en saldados, no en devueltos */}
+                          <BotonImprimirPrestamo prestamo={p} onClick={onImprimir} />
+                          <Badge variant={esSaldado ? 'green' : 'gray'}>{p.estado}</Badge>
+                        </div>
                       </div>
                       <div className="flex items-center justify-between text-xs border-t border-gray-100 pt-2">
                         <div className="flex flex-col gap-0.5">
@@ -736,24 +755,38 @@ function TabDomiciliarios() {
   );
 }
 
+// ─── Hook: obtener abonos de un préstamo para impresión ───────────────────────
+
+function useAbonosPrestamo(prestamoId) {
+  const { data = [] } = useQuery({
+    queryKey: ['abonos-prestamo', prestamoId],
+    queryFn:  () => api.get(`/prestamos/${prestamoId}`).then((r) => r.data.data?.abonos || []),
+    enabled:  !!prestamoId,
+    staleTime: 0,
+  });
+  return data;
+}
+
 // ─── Página principal ─────────────────────────────────────────────────────────
 
 export default function PrestamosPage() {
   const { coloresActivo } = useColoresConfig();
 
-  // ── Estado UI ──────────────────────────────────────────────────────────────
   const [tabPrincipal,  setTabPrincipal]  = useState('prestamos');
   const [tabPrestamos,  setTabPrestamos]  = useState('companeros');
   const [prestamoAbono, setPrestamoAbono] = useState(null);
   const [prestamoDevol, setPrestamoDevol] = useState(null);
 
-  // ── Estado flujo post-saldo (vive en el padre para no perderse) ────────────
-  const [saldadoFacturaId,   setSaldadoFacturaId]   = useState(null); // id de la factura creada
-  const [saldadoPrestamo,    setSaldadoPrestamo]     = useState(null); // datos del préstamo saldado
-  const [modalImprimir,      setModalImprimir]       = useState(null); // { factura, garantias }
-  const [facturaTermicaData, setFacturaTermicaData]  = useState(null); // { factura, garantias }
+  // ── Estado impresión individual ────────────────────────────────────────────
+  const [prestamoImprimir, setPrestamoImprimir] = useState(null);
+  const abonosImprimir = useAbonosPrestamo(prestamoImprimir?.id);
 
-  // ── Queries de la factura saldada ──────────────────────────────────────────
+  // ── Estado flujo post-saldo ────────────────────────────────────────────────
+  const [saldadoFacturaId,   setSaldadoFacturaId]   = useState(null);
+  const [saldadoPrestamo,    setSaldadoPrestamo]     = useState(null);
+  const [modalImprimir,      setModalImprimir]       = useState(null);
+  const [facturaTermicaData, setFacturaTermicaData]  = useState(null);
+
   const { data: configDataSaldado } = useQuery({
     queryKey: ['config'],
     queryFn:  () => api.get('/config').then((r) => r.data.data),
@@ -778,7 +811,6 @@ export default function PrestamosPage() {
     ? { ...facturaDataSaldada, config: configDataSaldado }
     : null;
 
-  // ── Queries de préstamos ───────────────────────────────────────────────────
   const { data: prestamosData, isLoading: loadingP } = useQuery({
     queryKey: ['prestamos'],
     queryFn:  () => getPrestamos().then((r) => r.data.data),
@@ -802,14 +834,12 @@ export default function PrestamosPage() {
     return acc;
   }, {});
 
-  // ── Handler: abono saldó el préstamo ──────────────────────────────────────
   const handleSaldado = (facturaId, prestamo) => {
-    setPrestamoAbono(null);       // cerrar modal de abono
+    setPrestamoAbono(null);
     setSaldadoFacturaId(facturaId);
     setSaldadoPrestamo(prestamo);
   };
 
-  // ── Handler: limpiar todo el flujo post-saldo ────────────────────────────
   const limpiarSaldado = () => {
     setSaldadoFacturaId(null);
     setSaldadoPrestamo(null);
@@ -869,6 +899,7 @@ export default function PrestamosPage() {
                     <GrupoPrestatario key={key} tipo="prestatario" nombre={grupo.nombre}
                       personaId={grupo.personaId} prestamos={grupo.prestamos} saldoTotal={grupo.saldoTotal}
                       onAbonar={setPrestamoAbono} onDevolver={setPrestamoDevol}
+                      onImprimir={setPrestamoImprimir}
                       CardItem={CardPrestamoCompanero} coloresActivo={coloresActivo} />
                   ))}
                 </div>
@@ -881,6 +912,7 @@ export default function PrestamosPage() {
                     <GrupoPrestatario key={key} tipo="cliente" nombre={grupo.nombre}
                       personaId={grupo.personaId} prestamos={grupo.prestamos} saldoTotal={grupo.saldoTotal}
                       onAbonar={setPrestamoAbono} onDevolver={setPrestamoDevol}
+                      onImprimir={setPrestamoImprimir}
                       CardItem={CardPrestamoCliente} coloresActivo={coloresActivo} />
                   ))}
                 </div>
@@ -893,21 +925,25 @@ export default function PrestamosPage() {
       {tabPrincipal === 'creditos'      && <TabCreditos />}
       {tabPrincipal === 'domiciliarios' && <TabDomiciliarios />}
 
-      {/* ── Modal abono normal ── */}
       {prestamoAbono && (
-        <ModalAbonoPrestamo
-          prestamo={prestamoAbono}
-          onClose={() => setPrestamoAbono(null)}
-          onSaldado={handleSaldado}
-        />
+        <ModalAbonoPrestamo prestamo={prestamoAbono}
+          onClose={() => setPrestamoAbono(null)} onSaldado={handleSaldado} />
       )}
 
-      {/* ── Modal devolución ── */}
       {prestamoDevol && (
         <ModalDevolucion prestamo={prestamoDevol} onClose={() => setPrestamoDevol(null)} />
       )}
 
-      {/* ── Flujo post-saldo: confirmar factura ── */}
+      {/* ── Impresión individual de préstamo ── */}
+      {prestamoImprimir && (
+        <ModalImprimirPrestamo
+          prestamo={prestamoImprimir}
+          abonos={abonosImprimir}
+          onClose={() => setPrestamoImprimir(null)}
+        />
+      )}
+
+      {/* ── Flujo post-saldo ── */}
       {saldadoFacturaId && !modalImprimir && !facturaTermicaData && (
         <ModalConfirmarFactura
           prestamo={saldadoPrestamo}
@@ -918,27 +954,16 @@ export default function PrestamosPage() {
         />
       )}
 
-      {/* ── Flujo post-saldo: selector POS / PDF ── */}
       {modalImprimir && !facturaTermicaData && (
-        <ModalImprimirFactura
-          open
-          onClose={limpiarSaldado}
-          factura={modalImprimir.factura}
-          garantias={modalImprimir.garantias}
-          onImprimirPos={(f, g) => {
-            setModalImprimir(null);
-            setFacturaTermicaData({ factura: f, garantias: g });
-          }}
+        <ModalImprimirFactura open onClose={limpiarSaldado}
+          factura={modalImprimir.factura} garantias={modalImprimir.garantias}
+          onImprimirPos={(f, g) => { setModalImprimir(null); setFacturaTermicaData({ factura: f, garantias: g }); }}
         />
       )}
 
-      {/* ── Flujo post-saldo: impresión POS ── */}
       {facturaTermicaData && (
-        <FacturaTermica
-          factura={facturaTermicaData.factura}
-          garantias={facturaTermicaData.garantias}
-          onClose={limpiarSaldado}
-        />
+        <FacturaTermica factura={facturaTermicaData.factura}
+          garantias={facturaTermicaData.garantias} onClose={limpiarSaldado} />
       )}
     </div>
   );

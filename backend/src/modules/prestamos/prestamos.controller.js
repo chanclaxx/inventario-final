@@ -55,7 +55,29 @@ const crearPrestamos = async (req, res, next) => {
     res.status(201).json({ ok: true, data, message: `${data.length} préstamo(s) registrado(s) correctamente` });
   } catch (err) { next(err); }
 };
-
+const exportarPdfPrestamoIndividual = async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id) || id < 1) {
+      return res.status(400).json({ ok: false, error: 'ID de préstamo inválido' });
+    }
+ 
+    const negocioNombre = req.user?.negocio_nombre || '';
+ 
+    const pdfStream = await pdfService.generarPdfPrestamoIndividual({
+      prestamoId:   id,
+      negocioId:    req.user.negocio_id,
+      negocioNombre,
+    });
+ 
+    const filename = `prestamo-${id}-${Date.now()}.pdf`;
+    res.setHeader('Content-Type',        'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    pdfStream.pipe(res);
+  } catch (err) {
+    next(err);
+  }
+};
 const registrarAbono = async (req, res, next) => {
   try {
     const { valor, metodo } = req.body;
@@ -133,5 +155,5 @@ module.exports = {
   getPrestamos, getPrestamoById,
   crearPrestamo, crearPrestamos,
   registrarAbono,
-  devolverPrestamo, devolverParcial,exportarPdfPorPersona
+  devolverPrestamo, devolverParcial,exportarPdfPorPersona,exportarPdfPrestamoIndividual
 };

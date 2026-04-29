@@ -28,6 +28,7 @@ router.post('/',      requireModulo('prestamos'), validarPrestamo,  validate, ct
 router.post('/batch', requireModulo('prestamos'), validarPrestamos, validate, ctrl.crearPrestamos);
 
 router.get('/pdf/:tipo/:personaId', requireModulo('prestamos'), ctrl.exportarPdfPorPersona);
+router.get('/:id/pdf', requireModulo('prestamos'), ctrl.exportarPdfPrestamoIndividual);
 
 router.get('/:id',                    requireModulo('prestamos'), ctrl.getPrestamoById);
 router.post('/:id/abonos',            requireModulo('prestamos'), validarAbono,             validate, ctrl.registrarAbono);
