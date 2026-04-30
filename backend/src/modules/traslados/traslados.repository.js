@@ -251,8 +251,17 @@ const findById = async (negocioId, id) => {
 
 const getLineas = async (trasladoId) => {
   const { rows } = await pool.query(`
-    SELECT lt.*
+    SELECT
+      lt.*,
+      -- Nombre del producto destino (serial)
+      ps_dest.nombre  AS nombre_producto_destino,
+      ps_dest.marca   AS marca_destino,
+      ps_dest.modelo  AS modelo_destino,
+      -- Nombre del producto destino (cantidad)
+      pc_dest.nombre  AS nombre_cantidad_destino
     FROM lineas_traslado lt
+    LEFT JOIN productos_serial   ps_dest ON ps_dest.id = lt.producto_serial_destino_id
+    LEFT JOIN productos_cantidad pc_dest ON pc_dest.id = lt.producto_cantidad_destino_id
     WHERE lt.traslado_id = $1
     ORDER BY lt.id
   `, [trasladoId]);

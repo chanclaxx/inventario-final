@@ -4,6 +4,11 @@ const { requireModulo }  = require('../../middlewares/modulo.middleware');
 const ctrl = require('./traslados.controller');
 
 router.post('/buscar-equivalentes', requireModulo('traslados'), requireNivel('supervisor'), ctrl.buscarEquivalentes);
+router.post('/:id/lineas/:lineaId/revertir',
+  requireModulo('traslados'),
+  requireNivel('supervisor'),
+  ctrl.revertirLineaTraslado
+);
 router.post('/',                    requireModulo('traslados'), requireNivel('supervisor'), ctrl.ejecutarTraslado);
 router.get('/',                     requireModulo('traslados'), requireNivel('supervisor'), ctrl.getTraslados);
 router.get('/:id',                  requireModulo('traslados'), requireNivel('supervisor'), ctrl.getTrasladoById);

@@ -17,6 +17,18 @@ const buscarEquivalentes = async (req, res, next) => {
     res.json({ ok: true, data });
   } catch (err) { next(err); }
 };
+const revertirLineaTraslado = async (req, res, next) => {
+  try {
+    await service.revertirLineaTraslado(
+      req.user.negocio_id,
+      Number(req.params.id),
+      Number(req.params.lineaId),
+      req.user.id,
+    );
+    res.json({ ok: true, message: 'Línea revertida correctamente' });
+  } catch (err) { next(err); }
+};
+
 
 const ejecutarTraslado = async (req, res, next) => {
   try {
@@ -58,4 +70,4 @@ const revertirTraslado = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-module.exports = { buscarEquivalentes, ejecutarTraslado, getTraslados, getTrasladoById, revertirTraslado };
+module.exports = { buscarEquivalentes, ejecutarTraslado, getTraslados, getTrasladoById, revertirTraslado,revertirLineaTraslado };

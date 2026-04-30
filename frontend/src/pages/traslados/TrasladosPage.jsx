@@ -8,15 +8,32 @@ import { Modal }      from '../../components/ui/Modal';
 import { Badge }      from '../../components/ui/Badge';
 import { Spinner }    from '../../components/ui/Spinner';
 import { EmptyState } from '../../components/ui/EmptyState';
+import api from '../../api/axios.config';
 import {
   ArrowRightLeft, ChevronLeft, Package, ShoppingBag,
-  RotateCcw, AlertTriangle, CheckCircle, XCircle, Clock,
+  RotateCcw, AlertTriangle, CheckCircle, XCircle, Clock, ArrowRight,
 } from 'lucide-react';
 
-// ─── Modal de confirmación para revertir ──────────────────────────────────────
-function ModalRevertir({ traslado, onConfirmar, onCerrar, loading }) {
+// ─── API call reversión individual ───────────────────────────────────────────
+
+const revertirLineaApi = (trasladoId, lineaId) =>
+  api.post(`/traslados/${trasladoId}/lineas/${lineaId}/revertir`);
+
+// ─── Helper: nombre del producto destino ─────────────────────────────────────
+
+function nombreDestino(linea) {
+  if (linea.tipo === 'serial') {
+    return [linea.nombre_producto_destino, linea.marca_destino, linea.modelo_destino]
+      .filter(Boolean).join(' ') || null;
+  }
+  return linea.nombre_cantidad_destino || null;
+}
+
+// ─── Modal confirmación reversión total ──────────────────────────────────────
+
+function ModalRevertirTotal({ traslado, onConfirmar, onCerrar, loading }) {
   return (
-    <Modal open onClose={onCerrar} title="Revertir traslado" size="sm">
+    <Modal open onClose={onCerrar} title="Revertir traslado completo" size="sm">
       <div className="flex flex-col gap-4">
         <div className="flex flex-col items-center gap-3 py-2">
           <div className="w-14 h-14 rounded-full bg-amber-50 border-2 border-amber-200 flex items-center justify-center">
@@ -31,18 +48,17 @@ function ModalRevertir({ traslado, onConfirmar, onCerrar, loading }) {
             </p>
           </div>
         </div>
-
         <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
           <p className="text-sm text-amber-700 leading-relaxed">
-            Todos los productos serán devueltos a la sucursal origen.
+            Todos los productos disponibles serán devueltos a la sucursal origen.
             Los seriales vendidos o prestados no podrán revertirse.
           </p>
         </div>
-
         <div className="flex gap-2">
           <Button variant="secondary" className="flex-1" onClick={onCerrar}>Cancelar</Button>
-          <Button className="flex-1 bg-amber-600 hover:bg-amber-700 text-white" loading={loading} onClick={onConfirmar}>
-            <RotateCcw size={14} /> Revertir
+          <Button className="flex-1 bg-amber-600 hover:bg-amber-700 text-white"
+            loading={loading} onClick={onConfirmar}>
+            <RotateCcw size={14} /> Revertir todo
           </Button>
         </div>
       </div>
@@ -50,11 +66,124 @@ function ModalRevertir({ traslado, onConfirmar, onCerrar, loading }) {
   );
 }
 
+// ─── Modal confirmación reversión individual ──────────────────────────────────
+
+function ModalRevertirLinea({ linea, traslado, onConfirmar, onCerrar, loading }) {
+  const destino = nombreDestino(linea);
+  return (
+    <Modal open onClose={onCerrar} title="Revertir producto" size="sm">
+      <div className="flex flex-col gap-4">
+        <div className="bg-gray-50 rounded-xl p-4 flex flex-col gap-2">
+          <p className="text-xs text-gray-400">Producto a revertir</p>
+          <p className="text-sm font-semibold text-gray-800">{linea.nombre_producto}</p>
+          {linea.imei && <p className="text-xs font-mono text-gray-400">{linea.imei}</p>}
+          {linea.cantidad && <p className="text-xs text-gray-400">Cantidad: {linea.cantidad}</p>}
+          {destino && destino !== linea.nombre_producto && (
+            <div className="flex items-center gap-1.5 mt-1">
+              <ArrowRight size={11} className="text-gray-300" />
+              <p className="text-xs text-gray-400">Estaba en destino como: <span className="font-medium text-gray-600">{destino}</span></p>
+            </div>
+          )}
+        </div>
+        <div className="bg-blue-50 border border-blue-100 rounded-xl px-4 py-3">
+          <p className="text-sm text-blue-700">
+            Este producto volverá a <span className="font-semibold">{traslado.sucursal_origen_nombre}</span>.
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <Button variant="secondary" className="flex-1" onClick={onCerrar}>Cancelar</Button>
+          <Button className="flex-1" loading={loading} onClick={onConfirmar}>
+            <RotateCcw size={14} /> Revertir producto
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// ─── Tarjeta de línea individual ─────────────────────────────────────────────
+
+function TarjetaLinea({ linea, esCancelado, onRevertir }) {
+  const esSerial  = linea.tipo === 'serial';
+  const LineaIcon = esSerial ? Package : ShoppingBag;
+  const revertida = linea.revertida;
+  const destino   = nombreDestino(linea);
+  const mismaNombre = !destino || destino === linea.nombre_producto;
+
+  return (
+    <div className={`bg-white border rounded-xl p-4 flex gap-3 transition-all
+      ${revertida
+        ? 'border-red-100 bg-red-50/20 opacity-60'
+        : esCancelado
+        ? 'border-gray-100 opacity-60'
+        : 'border-gray-100'}`}>
+
+      {/* Ícono tipo */}
+      <div className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5
+        ${esSerial ? 'bg-blue-50' : 'bg-green-50'}`}>
+        <LineaIcon size={16} className={esSerial ? 'text-blue-500' : 'text-green-500'} />
+      </div>
+
+      {/* Contenido */}
+      <div className="flex-1 min-w-0">
+        {/* Nombre origen → destino */}
+        <div className="flex items-start gap-1.5 flex-wrap">
+          <p className={`text-sm font-semibold ${revertida ? 'line-through text-gray-400' : 'text-gray-900'}`}>
+            {linea.nombre_producto}
+          </p>
+          {!mismaNombre && (
+            <>
+              <ArrowRight size={13} className="text-gray-300 flex-shrink-0 mt-0.5" />
+              <p className={`text-sm font-medium ${revertida ? 'line-through text-gray-400' : 'text-blue-700'}`}>
+                {destino}
+              </p>
+            </>
+          )}
+        </div>
+
+        {/* Detalles secundarios */}
+        <div className="flex items-center gap-2 flex-wrap mt-0.5">
+          {linea.imei && (
+            <span className="text-xs text-gray-400 font-mono">{linea.imei}</span>
+          )}
+          {linea.cantidad && (
+            <span className="text-xs text-gray-400">×{linea.cantidad} unidades</span>
+          )}
+          <Badge variant={esSerial ? 'blue' : 'green'}>
+            {esSerial ? 'Serial' : 'Cantidad'}
+          </Badge>
+          {revertida && (
+            <Badge variant="red">Revertido</Badge>
+          )}
+        </div>
+      </div>
+
+      {/* Acción */}
+      <div className="flex-shrink-0 flex items-center">
+        {revertida ? (
+          <XCircle size={16} className="text-red-300" />
+        ) : !esCancelado && (
+          <button
+            onClick={() => onRevertir(linea)}
+            title="Revertir este producto"
+            className="p-1.5 rounded-lg text-gray-400 hover:text-amber-600 hover:bg-amber-50
+              transition-colors"
+          >
+            <RotateCcw size={15} />
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Detalle de un traslado ───────────────────────────────────────────────────
+
 function DetalleTraslado({ trasladoId, onVolver }) {
   const queryClient = useQueryClient();
-  const [modalRevertir, setModalRevertir] = useState(false);
-  const [error, setError]                 = useState('');
+  const [modalRevertirTotal,  setModalRevertirTotal]  = useState(false);
+  const [lineaARevertir,      setLineaARevertir]      = useState(null);
+  const [error,               setError]               = useState('');
 
   const { data: detalle, isLoading } = useQuery({
     queryKey: ['traslado', trasladoId],
@@ -62,27 +191,32 @@ function DetalleTraslado({ trasladoId, onVolver }) {
     enabled:  !!trasladoId,
   });
 
-  const mutRevertir = useMutation({
+  const invalidar = () => {
+    queryClient.invalidateQueries({ queryKey: ['traslados'],              exact: false });
+    queryClient.invalidateQueries({ queryKey: ['traslado', trasladoId],  exact: false });
+    queryClient.invalidateQueries({ queryKey: ['productos-serial'],       exact: false });
+    queryClient.invalidateQueries({ queryKey: ['productos-cantidad'],     exact: false });
+  };
+
+  const mutRevertirTotal = useMutation({
     mutationFn: () => revertirTraslado(trasladoId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['traslados'],  exact: false });
-      queryClient.invalidateQueries({ queryKey: ['traslado', trasladoId], exact: false });
-      queryClient.invalidateQueries({ queryKey: ['productos-serial'],     exact: false });
-      queryClient.invalidateQueries({ queryKey: ['productos-cantidad'],   exact: false });
-      setModalRevertir(false);
-      setError('');
-    },
-    onError: (err) => {
-      setModalRevertir(false);
-      setError(err.response?.data?.error || 'Error al revertir el traslado');
-    },
+    onSuccess: () => { invalidar(); setModalRevertirTotal(false); setError(''); },
+    onError:   (err) => { setModalRevertirTotal(false); setError(err.response?.data?.error || 'Error al revertir'); },
+  });
+
+  const mutRevertirLinea = useMutation({
+    mutationFn: (lineaId) => revertirLineaApi(trasladoId, lineaId),
+    onSuccess: () => { invalidar(); setLineaARevertir(null); setError(''); },
+    onError:   (err) => { setLineaARevertir(null); setError(err.response?.data?.error || 'Error al revertir la línea'); },
   });
 
   if (isLoading) return <Spinner className="py-20" />;
-  if (!detalle) return <EmptyState icon={ArrowRightLeft} titulo="Traslado no encontrado" />;
+  if (!detalle)  return <EmptyState icon={ArrowRightLeft} titulo="Traslado no encontrado" />;
 
-  const esCancelado = detalle.estado === 'Cancelado';
-  const lineas      = detalle.lineas || [];
+  const esCancelado    = detalle.estado === 'Cancelado';
+  const lineas         = detalle.lineas || [];
+  const lineasActivas  = lineas.filter((l) => !l.revertida);
+  const lineasRevertidas = lineas.filter((l) => l.revertida);
 
   return (
     <div className="flex flex-col gap-4">
@@ -100,7 +234,7 @@ function DetalleTraslado({ trasladoId, onVolver }) {
                 Traslado #{String(detalle.id).padStart(4, '0')}
               </h2>
               <Badge variant={esCancelado ? 'red' : 'green'}>
-                {esCancelado ? 'Revertido' : 'Completado'}
+                {esCancelado ? 'Revertido' : lineasRevertidas.length > 0 ? 'Parcialmente revertido' : 'Completado'}
               </Badge>
             </div>
             <p className="text-sm text-gray-400 mt-1">{formatFechaHora(detalle.fecha)}</p>
@@ -108,14 +242,15 @@ function DetalleTraslado({ trasladoId, onVolver }) {
               <p className="text-xs text-gray-400 mt-0.5">Por: {detalle.usuario_nombre}</p>
             )}
           </div>
-          {!esCancelado && (
-            <Button variant="secondary" onClick={() => setModalRevertir(true)}>
-              <RotateCcw size={14} /> Revertir
+          {/* Revertir todo solo si hay líneas activas */}
+          {!esCancelado && lineasActivas.length > 0 && (
+            <Button variant="secondary" onClick={() => setModalRevertirTotal(true)}>
+              <RotateCcw size={14} /> Revertir todo
             </Button>
           )}
         </div>
 
-        {/* Flujo visual */}
+        {/* Flujo visual origen → destino */}
         <div className="flex items-center gap-3 mt-4 bg-gray-50 rounded-xl px-4 py-3">
           <div className="flex-1 text-center">
             <p className="text-xs text-gray-400">Origen</p>
@@ -142,53 +277,72 @@ function DetalleTraslado({ trasladoId, onVolver }) {
         </div>
       )}
 
-      {/* Líneas */}
-      <div className="flex flex-col gap-2">
-        <h3 className="text-sm font-semibold text-gray-600">
-          Productos trasladados ({lineas.length})
-        </h3>
-        {lineas.map((linea) => {
-          const esSerial = linea.tipo === 'serial';
-          const LineaIcon = esSerial ? Package : ShoppingBag;
-          return (
-            <div key={linea.id}
-              className={`bg-white border rounded-xl p-4 flex items-center gap-3 transition-all
-                ${esCancelado ? 'border-red-100 bg-red-50/20 opacity-70' : 'border-gray-100'}`}>
-              <div className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0
-                ${esSerial ? 'bg-blue-50' : 'bg-green-50'}`}>
-                <LineaIcon size={16} className={esSerial ? 'text-blue-500' : 'text-green-500'} />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className={`text-sm font-medium ${esCancelado ? 'line-through text-gray-400' : 'text-gray-900'}`}>
-                  {linea.nombre_producto}
-                </p>
-                <div className="flex items-center gap-2 flex-wrap mt-0.5">
-                  {linea.imei && (
-                    <span className="text-xs text-gray-400 font-mono">{linea.imei}</span>
-                  )}
-                  {linea.cantidad && (
-                    <span className="text-xs text-gray-400">×{linea.cantidad} unidades</span>
-                  )}
-                  <Badge variant={esSerial ? 'blue' : 'green'}>
-                    {esSerial ? 'Serial' : 'Cantidad'}
-                  </Badge>
-                </div>
-              </div>
-              {esCancelado && <XCircle size={16} className="text-red-300 flex-shrink-0" />}
-            </div>
-          );
-        })}
-      </div>
+      {/* Líneas activas */}
+      {lineasActivas.length > 0 && (
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-gray-600">
+              Productos trasladados ({lineasActivas.length})
+            </h3>
+            <p className="text-xs text-gray-400">
+              Toca <RotateCcw size={11} className="inline" /> para revertir uno
+            </p>
+          </div>
+          {lineasActivas.map((linea) => (
+            <TarjetaLinea
+              key={linea.id}
+              linea={linea}
+              traslado={detalle}
+              esCancelado={esCancelado}
+              onRevertir={setLineaARevertir}
+            />
+          ))}
+        </div>
+      )}
 
-      {modalRevertir && detalle && (
-        <ModalRevertir traslado={detalle} loading={mutRevertir.isPending}
-          onConfirmar={() => mutRevertir.mutate()} onCerrar={() => setModalRevertir(false)} />
+      {/* Líneas revertidas */}
+      {lineasRevertidas.length > 0 && (
+        <div className="flex flex-col gap-2">
+          <h3 className="text-sm font-semibold text-gray-400">
+            Revertidos ({lineasRevertidas.length})
+          </h3>
+          {lineasRevertidas.map((linea) => (
+            <TarjetaLinea
+              key={linea.id}
+              linea={linea}
+              traslado={detalle}
+              esCancelado={true}
+              onRevertir={() => {}}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* Modales */}
+      {modalRevertirTotal && detalle && (
+        <ModalRevertirTotal
+          traslado={detalle}
+          loading={mutRevertirTotal.isPending}
+          onConfirmar={() => mutRevertirTotal.mutate()}
+          onCerrar={() => setModalRevertirTotal(false)}
+        />
+      )}
+
+      {lineaARevertir && (
+        <ModalRevertirLinea
+          linea={lineaARevertir}
+          traslado={detalle}
+          loading={mutRevertirLinea.isPending}
+          onConfirmar={() => mutRevertirLinea.mutate(lineaARevertir.id)}
+          onCerrar={() => setLineaARevertir(null)}
+        />
       )}
     </div>
   );
 }
 
 // ─── Lista de traslados ───────────────────────────────────────────────────────
+
 function ListaTraslados({ traslados, isLoading, onSeleccionar }) {
   if (isLoading) return <Spinner className="py-20" />;
 
@@ -242,6 +396,7 @@ function ListaTraslados({ traslados, isLoading, onSeleccionar }) {
 }
 
 // ─── Página principal ─────────────────────────────────────────────────────────
+
 export default function TrasladosPage() {
   const [trasladoSelId, setTrasladoSelId] = useState(null);
 
@@ -257,7 +412,6 @@ export default function TrasladosPage() {
     enabled:  sucursales.length > 1,
   });
 
-  // Si solo hay 1 sucursal, no mostrar la página
   if (sucursales.length <= 1) {
     return (
       <EmptyState icon={ArrowRightLeft} titulo="Traslados no disponibles"
@@ -266,9 +420,7 @@ export default function TrasladosPage() {
   }
 
   if (trasladoSelId) {
-    return (
-      <DetalleTraslado trasladoId={trasladoSelId} onVolver={() => setTrasladoSelId(null)} />
-    );
+    return <DetalleTraslado trasladoId={trasladoSelId} onVolver={() => setTrasladoSelId(null)} />;
   }
 
   return (
