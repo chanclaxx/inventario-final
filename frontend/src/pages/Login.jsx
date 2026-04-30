@@ -90,6 +90,8 @@ export default function Login() {
     setLoading(true);
     try {
       const resultado = await login(form.email.trim().toLowerCase(), form.password);
+console.log('RESULTADO LOGIN:', resultado);
+console.log('FECHA VENC:', resultado?.fecha_vencimiento);
 const fechaVenc = resultado?.fecha_vencimiento;
       if (fechaVenc) {
         const dias = calcularDiasRestantes(fechaVenc);
