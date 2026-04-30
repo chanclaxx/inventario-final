@@ -323,7 +323,97 @@ const revertirTraslado = async (negocioId, trasladoId, usuarioId) => {
   }
 };
 
+const revertirLineaTraslado = async (negocioId, trasladoId, lineaId, usuarioId) => {
+  const traslado = await repo.findById(negocioId, trasladoId);
+  if (!traslado) throw { status: 404, message: 'Traslado no encontrado' };
+  if (traslado.estado === 'Cancelado') throw { status: 400, message: 'El traslado ya fue revertido completamente' };
+ 
+  const lineas = await repo.getLineas(trasladoId);
+  const linea  = lineas.find((l) => l.id === lineaId);
+  if (!linea) throw { status: 404, message: 'Línea de traslado no encontrada' };
+  if (linea.revertida) throw { status: 400, message: 'Esta línea ya fue revertida' };
+ 
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+ 
+    if (linea.tipo === 'serial') {
+      // Verificar que el serial sigue en producto destino y está disponible
+      const { rows } = await client.query(`
+        SELECT s.id, s.vendido, s.prestado, s.imei
+        FROM seriales s
+        JOIN productos_serial ps ON ps.id = s.producto_id
+        WHERE s.id = $1 AND ps.id = $2
+        FOR UPDATE OF s
+      `, [linea.serial_id, linea.producto_serial_destino_id]);
+ 
+      if (!rows.length) throw { status: 400, message: `El serial ya no está en el producto destino` };
+      if (rows[0].vendido)  throw { status: 400, message: `El serial ${rows[0].imei} fue vendido, no se puede revertir` };
+      if (rows[0].prestado) throw { status: 400, message: `El serial ${rows[0].imei} está prestado, no se puede revertir` };
+ 
+      // Mover serial de vuelta al producto origen
+      await repo.moverSerial(client, linea.serial_id, linea.producto_serial_origen_id);
+ 
+    } else if (linea.tipo === 'cantidad') {
+      const cant = Number(linea.cantidad);
+ 
+      // Verificar stock en destino
+      const { rows: destRows } = await client.query(`
+        SELECT id, stock, costo_unitario FROM productos_cantidad WHERE id = $1 FOR UPDATE
+      `, [linea.producto_cantidad_destino_id]);
+ 
+      if (!destRows.length) throw { status: 400, message: `Producto destino ya no existe` };
+      if (destRows[0].stock < cant) {
+        throw { status: 400, message: `Stock insuficiente en destino para revertir. Disponible: ${destRows[0].stock}, necesario: ${cant}` };
+      }
+ 
+      // Restar del destino y sumar al origen
+      await repo.ajustarStockEnTransaccion(client, linea.producto_cantidad_destino_id, -cant);
+      await repo.ajustarStockEnTransaccion(client, linea.producto_cantidad_origen_id,   cant);
+ 
+      // Historial
+      await repo.insertarHistorialEnTransaccion(client, {
+        producto_id:    linea.producto_cantidad_destino_id,
+        sucursal_id:    traslado.sucursal_destino_id,
+        cantidad:       -cant,
+        costo_unitario: destRows[0].costo_unitario,
+        notas:          `Reversión parcial traslado #${trasladoId} — línea #${lineaId}`,
+      });
+      await repo.insertarHistorialEnTransaccion(client, {
+        producto_id:    linea.producto_cantidad_origen_id,
+        sucursal_id:    traslado.sucursal_origen_id,
+        cantidad:       cant,
+        costo_unitario: destRows[0].costo_unitario,
+        notas:          `Reversión parcial traslado #${trasladoId} — línea #${lineaId}`,
+      });
+    }
+ 
+    // Marcar la línea como revertida
+    await client.query(
+      `UPDATE lineas_traslado SET revertida = true WHERE id = $1`,
+      [lineaId]
+    );
+ 
+    // Si todas las líneas quedan revertidas, marcar el traslado como Cancelado
+    const { rows: pendientes } = await client.query(
+      `SELECT COUNT(*) AS total FROM lineas_traslado WHERE traslado_id = $1 AND revertida = false`,
+      [trasladoId]
+    );
+    if (Number(pendientes[0].total) === 0) {
+      await client.query(`UPDATE traslados SET estado = 'Cancelado' WHERE id = $1`, [trasladoId]);
+    }
+ 
+    await client.query('COMMIT');
+    return { ok: true };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+};
+
 module.exports = {
   buscarEquivalentes, ejecutarTraslado,
-  getTraslados, getTrasladoById, revertirTraslado,
+  getTraslados, getTrasladoById, revertirTraslado,revertirLineaTraslado
 };
