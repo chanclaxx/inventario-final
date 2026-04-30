@@ -96,7 +96,7 @@ const fechaVenc = resultado?.fecha_vencimiento;
       if (fechaVenc) {
         const dias = calcularDiasRestantes(fechaVenc);
         // Mostrar aviso si quedan 7 días o menos
-        if (dias !== null && dias <= 7) {
+        if (dias !== null && dias <= 20) {
           setDiasRestantes(dias);
           return; // no navegar todavía — esperar que cierren el modal
         }
