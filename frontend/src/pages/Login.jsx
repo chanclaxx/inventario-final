@@ -90,9 +90,7 @@ export default function Login() {
     setLoading(true);
     try {
       const resultado = await login(form.email.trim().toLowerCase(), form.password);
-
-      // Calcular días restantes si el backend los retorna en el usuario
-      const fechaVenc = resultado?.usuario?.fecha_vencimiento;
+const fechaVenc = resultado?.fecha_vencimiento;
       if (fechaVenc) {
         const dias = calcularDiasRestantes(fechaVenc);
         // Mostrar aviso si quedan 7 días o menos
