@@ -97,6 +97,14 @@ const actualizarSerial = async (negocioId, serialId, { imei, costo_compra, preci
 const eliminarSerial = async (negocioId, serialId) => {
   const serial = await repo.findSerialByIdYNegocio(serialId, negocioId);
   if (!serial) throw { status: 404, message: 'Serial no encontrado' };
+
+  if (serial.vendido) {
+    throw { status: 400, message: 'No se puede eliminar un serial que ya fue vendido' };
+  }
+  if (serial.prestado) {
+    throw { status: 400, message: 'No se puede eliminar un serial que está prestado' };
+  }
+
   const eliminado = await repo.eliminarSerial(serialId);
   if (!eliminado) throw { status: 404, message: 'Serial no encontrado' };
 };
@@ -124,20 +132,50 @@ const verificarImei = async (imei, negocioId) => {
   };
 };
 
-const eliminarProductoSerial = async (negocioId, id) => {
+const eliminarProductoSerial = async (negocioId, id, forzar = false) => {
   const producto = await repo.findByIdYNegocio(id, negocioId);
   if (!producto) throw { status: 404, message: 'Producto no encontrado' };
-
-  const totalSeriales = await repo.contarSeriales(id);
-  if (totalSeriales > 0) {
+ 
+  const detalle = await repo.contarSerialesDetalle(id);
+ 
+  // Si hay seriales comprometidos y NO se forzó la eliminación,
+  // retornar advertencia con código especial para que el frontend muestre el modal
+  if ((detalle.vendidos > 0 || detalle.prestados > 0) && !forzar) {
     throw {
-      status: 409,
-      message: `No se puede eliminar: el producto tiene ${totalSeriales} serial${totalSeriales !== 1 ? 'es' : ''} registrado${totalSeriales !== 1 ? 's' : ''}. Elimínalos primero.`,
+      status:   409,
+      code:     'SERIALES_COMPROMETIDOS',
+      message:  'El producto tiene seriales vendidos o prestados',
+      detalle,
     };
   }
-
-  const eliminado = await repo.eliminarProductoSerial(id);
-  if (!eliminado) throw { status: 404, message: 'Producto no encontrado' };
+ 
+  // Si solo hay disponibles (sin comprometidos) y no se forzó, también bloquear
+  // a menos que no haya ninguno
+  if (detalle.disponibles > 0 && !forzar) {
+    throw {
+      status:  409,
+      code:    'SERIALES_DISPONIBLES',
+      message: `El producto tiene ${detalle.disponibles} serial${detalle.disponibles !== 1 ? 'es' : ''} disponible${detalle.disponibles !== 1 ? 's' : ''}. Elimínalos primero o confirma la eliminación forzada.`,
+      detalle,
+    };
+  }
+ 
+  // Eliminar — si forzar=true, borrar todos los seriales primero
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    if (detalle.total > 0) {
+      await repo.eliminarSerialesDeProducto(client, id);
+    }
+    const eliminado = await repo.eliminarProductoSerial(id);
+    if (!eliminado) throw { status: 404, message: 'Producto no encontrado' };
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
 };
 
 const getComprasCliente = async (negocioId, q) =>

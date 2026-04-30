@@ -35,9 +35,23 @@ const actualizarProducto = async (req, res, next) => {
 
 const eliminarProductoSerial = async (req, res, next) => {
   try {
-    await service.eliminarProductoSerial(req.user.negocio_id, Number(req.params.id));
+    // forzar=true viene en el body cuando el usuario confirmó la advertencia
+    const forzar = req.body?.forzar === true;
+    await service.eliminarProductoSerial(req.user.negocio_id, Number(req.params.id), forzar);
     res.json({ ok: true, message: 'Producto eliminado correctamente' });
-  } catch (err) { next(err); }
+  } catch (err) {
+    // Si es advertencia de seriales comprometidos, retornar 409 con detalle
+    // para que el frontend pueda mostrar el modal de confirmación
+    if (err.code === 'SERIALES_COMPROMETIDOS' || err.code === 'SERIALES_DISPONIBLES') {
+      return res.status(409).json({
+        ok:      false,
+        code:    err.code,
+        error:   err.message,
+        detalle: err.detalle,
+      });
+    }
+    next(err);
+  }
 };
 
 const getSeriales = async (req, res, next) => {

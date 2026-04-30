@@ -250,12 +250,26 @@ const findComprasCliente = async (negocioId, q) => {
 };
 
 
-const contarSeriales = async (productoId) => {
-  const { rows } = await pool.query(
-    'SELECT COUNT(*) AS total FROM seriales WHERE producto_id = $1 AND vendido = false',
-    [productoId]
-  );
-  return Number(rows[0].total);
+const contarSerialesDetalle = async (productoId) => {
+  const { rows } = await pool.query(`
+    SELECT
+      COUNT(*) FILTER (WHERE vendido = false AND prestado = false) AS disponibles,
+      COUNT(*) FILTER (WHERE prestado = true  AND vendido = false) AS prestados,
+      COUNT(*) FILTER (WHERE vendido = true)                       AS vendidos,
+      COUNT(*)                                                      AS total
+    FROM seriales
+    WHERE producto_id = $1
+  `, [productoId]);
+  return {
+    disponibles: Number(rows[0].disponibles),
+    prestados:   Number(rows[0].prestados),
+    vendidos:    Number(rows[0].vendidos),
+    total:       Number(rows[0].total),
+  };
+};
+
+const eliminarSerialesDeProducto = async (client, productoId) => {
+  await client.query('DELETE FROM seriales WHERE producto_id = $1', [productoId]);
 };
 
 // Elimina el producto serial. Solo se llama si contarSeriales devuelve 0.
@@ -276,5 +290,5 @@ module.exports = {
   create, update, updatePrecio,
   getSeriales, findSerialByIMEI, findSerialByIMEIEnNegocio,
   insertarSerial, reactivarSerial, actualizarSerial, eliminarSerial,
-  findComprasCliente,eliminarProductoSerial,contarSeriales
+  findComprasCliente,eliminarProductoSerial,contarSerialesDetalle,eliminarSerialesDeProducto
 };
