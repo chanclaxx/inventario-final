@@ -9,16 +9,17 @@ const { resolverModulos } = require('../../config/modulos');
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const _buildPayload = (usuario) => ({
-  id:                 usuario.id,
-  nombre:             usuario.nombre,
-  email:              usuario.email,
-  rol:                usuario.rol,
-  negocio_id:         usuario.negocio_id,
-  negocio_nombre:     usuario.negocio_nombre,
-  sucursal_id:        usuario.sucursal_id,
-  sucursal_nombre:    usuario.sucursal_nombre,
-  password_temporal:  usuario.password_temporal ?? false,
-  modulos_permitidos: resolverModulos(usuario.rol, usuario.modulos_permitidos),
+  id:                  usuario.id,
+  nombre:              usuario.nombre,
+  email:               usuario.email,
+  rol:                 usuario.rol,
+  negocio_id:          usuario.negocio_id,
+  negocio_nombre:      usuario.negocio_nombre,
+  sucursal_id:         usuario.sucursal_id,
+  sucursal_nombre:     usuario.sucursal_nombre,
+  password_temporal:   usuario.password_temporal ?? false,
+  modulos_permitidos:  resolverModulos(usuario.rol, usuario.modulos_permitidos),
+  fecha_vencimiento:   usuario.fecha_vencimiento ?? null,   // ← LÍNEA NUEVA
 });
 
 // Query reutilizada en login y refreshAccessToken
