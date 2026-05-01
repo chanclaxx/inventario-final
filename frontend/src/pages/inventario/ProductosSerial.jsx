@@ -1,6 +1,9 @@
-import { useState }                                                  from 'react';
+import { useState, useEffect, useRef }                                from 'react';
 import { useQuery, useMutation, useQueryClient }                     from '@tanstack/react-query';
-import { Package, Plus, ChevronRight, ChevronDown, Trash2, Lock, Palette } from 'lucide-react';
+import {
+  Package, Plus, ChevronRight, ChevronDown, Trash2, Lock,
+  Palette, Search, CheckCircle, X, SlidersHorizontal,
+} from 'lucide-react';
 import { getProductosSerial, getSeriales, eliminarSerial, getLineas } from '../../api/productos.api';
 import { SearchInput }               from '../../components/ui/SearchInput';
 import { Badge }                     from '../../components/ui/Badge';
@@ -27,10 +30,6 @@ function parsearColoresConfig(configData) {
 }
 
 // ─── Helper: agrupar seriales por color ──────────────────────────────────────
-// Recibe los seriales ya ordenados (disponibles → prestados → vendidos)
-// y la lista de colores configurados en el negocio.
-// Devuelve array de { color: string | null, seriales: [] }
-// Los grupos siguen el orden de la lista de config; "Sin color" siempre al final.
 function agruparPorColor(seriales, coloresConfig) {
   const grupos = coloresConfig
     .map((color) => ({
@@ -132,27 +131,191 @@ function TarjetaSerial({ serial, precio, onAgregar, onEliminar, onEditar }) {
   );
 }
 
-// ─── Selector dropdown móvil ──────────────────────────────────────────────────
-function SelectorModelo({ productos, productoSeleccionado, onSeleccionar }) {
+// ─── Bottom sheet buscable para móvil ─────────────────────────────────────────
+function SelectorModeloMovil({ productos, lineas, productoSeleccionado, onSeleccionar }) {
+  const [abierto,  setAbierto]  = useState(false);
+  const [busqueda, setBusqueda] = useState('');
+  const inputRef               = useRef(null);
+
+  // Enfocar input al abrir
+  useEffect(() => {
+    if (abierto) setTimeout(() => inputRef.current?.focus(), 80);
+  }, [abierto]);
+
+  // Bloquear scroll del body mientras el sheet está abierto
+  useEffect(() => {
+    document.body.style.overflow = abierto ? 'hidden' : '';
+    return () => { document.body.style.overflow = ''; };
+  }, [abierto]);
+
+  const cerrar = () => { setAbierto(false); setBusqueda(''); };
+
+  const filtrados = productos.filter((p) =>
+    p.nombre.toLowerCase().includes(busqueda.toLowerCase()) ||
+    (p.marca  ?? '').toLowerCase().includes(busqueda.toLowerCase()) ||
+    (p.modelo ?? '').toLowerCase().includes(busqueda.toLowerCase())
+  );
+
+  // Agrupar por línea respetando el orden de lineas
+  const grupos = [
+    ...lineas
+      .map((l) => ({ nombre: l.nombre, prods: filtrados.filter((p) => p.linea_id === l.id) }))
+      .filter((g) => g.prods.length > 0),
+    ...(filtrados.filter((p) => !p.linea_id).length > 0
+      ? [{ nombre: 'Sin línea', prods: filtrados.filter((p) => !p.linea_id) }]
+      : []),
+  ];
+
+  const mostrarEncabezadoGrupo = grupos.length > 1 || (grupos.length === 1 && grupos[0].nombre !== 'Sin línea');
+
   return (
-    <select
-      value={productoSeleccionado?.id || ''}
-      onChange={(e) => {
-        const p = productos.find((x) => x.id === Number(e.target.value));
-        if (p) onSeleccionar(p);
-      }}
-      className="w-full px-3 py-2.5 bg-gray-100 border-0 rounded-xl text-sm
-        text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500
-        focus:bg-white transition-all appearance-none cursor-pointer"
-    >
-      <option value="">Seleccionar modelo...</option>
-      {productos.map((p) => (
-        <option key={p.id} value={p.id}>
-          {p.nombre} — {p.disponibles} disp.
-          {Number(p.prestados) > 0 ? ` · ${p.prestados} prest.` : ''}
-        </option>
-      ))}
-    </select>
+    <>
+      {/* Botón disparador */}
+      <button
+        onClick={() => setAbierto(true)}
+        className="w-full flex items-center gap-3 px-4 py-3
+          bg-white border border-gray-200 rounded-2xl text-left
+          hover:border-blue-300 active:scale-[0.99] transition-all shadow-sm"
+      >
+        <SlidersHorizontal size={17} className="text-gray-400 flex-shrink-0" />
+        <div className="flex-1 min-w-0">
+          {productoSeleccionado ? (
+            <>
+              <p className="text-sm font-semibold text-gray-900 leading-tight line-clamp-2">
+                {productoSeleccionado.nombre}
+              </p>
+              <p className="text-xs text-gray-400 mt-0.5">
+                {productoSeleccionado.disponibles} disponible(s)
+                {Number(productoSeleccionado.prestados) > 0 &&
+                  ` · ${productoSeleccionado.prestados} prestado(s)`}
+              </p>
+            </>
+          ) : (
+            <p className="text-sm text-gray-400">Seleccionar modelo...</p>
+          )}
+        </div>
+        <ChevronDown size={16} className="text-gray-300 flex-shrink-0" />
+      </button>
+
+      {/* Bottom sheet */}
+      {abierto && (
+        <div className="fixed inset-0 z-50 flex flex-col justify-end">
+          {/* Backdrop */}
+          <div
+            className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+            onClick={cerrar}
+          />
+
+          {/* Sheet */}
+          <div className="relative bg-white rounded-t-3xl flex flex-col"
+            style={{ maxHeight: '85dvh' }}>
+
+            {/* Handle + Cabecera */}
+            <div className="flex-shrink-0 px-4 pt-3 pb-4">
+              <div className="flex justify-center mb-3">
+                <div className="w-10 h-1 bg-gray-200 rounded-full" />
+              </div>
+              <div className="flex items-center justify-between">
+                <p className="text-base font-bold text-gray-900">Seleccionar modelo</p>
+                <button onClick={cerrar}
+                  className="p-1.5 rounded-xl hover:bg-gray-100 transition-colors text-gray-400">
+                  <X size={18} />
+                </button>
+              </div>
+              <p className="text-xs text-gray-400 mt-0.5">
+                {productos.length} modelo{productos.length !== 1 ? 's' : ''} disponibles
+              </p>
+
+              {/* Buscador */}
+              <div className="relative mt-3">
+                <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input
+                  ref={inputRef}
+                  type="text"
+                  placeholder="Buscar por nombre, marca..."
+                  value={busqueda}
+                  onChange={(e) => setBusqueda(e.target.value)}
+                  className="w-full pl-9 pr-3 py-2.5 bg-gray-100 rounded-xl text-sm
+                    focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"
+                />
+                {busqueda && (
+                  <button onClick={() => setBusqueda('')}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400">
+                    <X size={14} />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Lista scrollable */}
+            <div className="overflow-y-auto flex-1 px-4 pb-8">
+              {filtrados.length === 0 ? (
+                <div className="flex flex-col items-center gap-2 py-12 text-center">
+                  <Package size={32} className="text-gray-200" />
+                  <p className="text-sm text-gray-400">Sin resultados para "{busqueda}"</p>
+                </div>
+              ) : (
+                <div className="flex flex-col gap-1">
+                  {grupos.map((grupo) => (
+                    <div key={grupo.nombre}>
+                      {mostrarEncabezadoGrupo && (
+                        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide
+                          px-2 pt-3 pb-1.5 first:pt-0">
+                          {grupo.nombre}
+                        </p>
+                      )}
+                      <div className="flex flex-col gap-1">
+                        {grupo.prods.map((p) => {
+                          const seleccionado = productoSeleccionado?.id === p.id;
+                          return (
+                            <button
+                              key={p.id}
+                              onClick={() => { onSeleccionar(p); cerrar(); }}
+                              className={`w-full flex items-center gap-3 p-3.5 rounded-xl text-left
+                                border transition-all active:scale-[0.98]
+                                ${seleccionado
+                                  ? 'bg-blue-50 border-blue-200'
+                                  : 'bg-gray-50 border-transparent hover:bg-gray-100'}`}
+                            >
+                              <div className="flex-1 min-w-0">
+                                {/* Nombre completo sin truncar */}
+                                <p className={`text-sm font-medium leading-snug
+                                  ${seleccionado ? 'text-blue-800' : 'text-gray-800'}`}>
+                                  {p.nombre}
+                                </p>
+                                {(p.marca || p.modelo) && (
+                                  <p className="text-xs text-gray-400 mt-0.5">
+                                    {[p.marca, p.modelo].filter(Boolean).join(' · ')}
+                                  </p>
+                                )}
+                                <div className="flex items-center gap-2 mt-1">
+                                  <span className={`text-xs font-medium
+                                    ${p.disponibles > 0 ? 'text-green-600' : 'text-gray-400'}`}>
+                                    {p.disponibles} disp.
+                                  </span>
+                                  {Number(p.prestados) > 0 && (
+                                    <span className="text-xs text-blue-500 font-medium">
+                                      · {p.prestados} prest.
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                              {seleccionado && (
+                                <CheckCircle size={18} className="text-blue-500 flex-shrink-0" />
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -191,12 +354,15 @@ function GrupoLinea({ nombre, productos, productoSeleccionado, onSeleccionar, on
                 ${productoSeleccionado?.id === p.id
                   ? 'bg-blue-50 border-blue-200 text-blue-700'
                   : 'bg-white border-gray-100 hover:border-gray-200 hover:bg-gray-50 text-gray-700'}`}
-              title={esAdmin ? 'Click para ver seriales · Doble click para editar' : undefined}
+              title={p.nombre + (esAdmin ? ' · Doble click para editar' : '')}
             >
               <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium truncate">{p.nombre}</p>
+                {/* Nombre con wrap a 2 líneas en el sidebar */}
+                <p className="text-sm font-medium line-clamp-2 leading-snug">{p.nombre}</p>
                 <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-                  <span className="text-xs text-gray-400">{p.disponibles} disp.</span>
+                  <span className={`text-xs ${p.disponibles > 0 ? 'text-gray-400' : 'text-red-400'}`}>
+                    {p.disponibles} disp.
+                  </span>
                   {Number(p.prestados) > 0 && (
                     <span className="text-xs text-blue-500 font-medium">
                       · {p.prestados} prest.
@@ -216,7 +382,6 @@ function GrupoLinea({ nombre, productos, productoSeleccionado, onSeleccionar, on
 // ─── Panel de seriales agrupados por color ────────────────────────────────────
 function ListaSeriales({ seriales, precio, onAgregar, onEliminar, onEditar, coloresActivo, coloresConfig }) {
   if (!coloresActivo) {
-    // Vista original sin agrupación
     return (
       <div className="flex flex-col gap-2">
         {seriales.map((s) => (
@@ -296,7 +461,6 @@ export function ProductosSerial({ onAgregarProducto }) {
     gcTime:    0,
   });
 
-  // ── Config: colores de serial ─────────────────────────────────────────────
   const { data: configData } = useQuery({
     queryKey: ['config'],
     queryFn:  () => api.get('/config').then((r) => r.data.data),
@@ -370,12 +534,16 @@ export function ProductosSerial({ onAgregarProducto }) {
     });
   };
 
+  // ─── Panel de seriales (shared entre desktop y móvil) ────────────────────
   const PanelSeriales = productoSeleccionado ? (
     <div className="flex flex-col gap-3 flex-1">
-      <div className="flex items-center justify-between gap-2">
-        <div className="min-w-0">
-          <h3 className="font-semibold text-gray-900 truncate">{productoSeleccionado.nombre}</h3>
-          <p className="text-xs text-gray-400">
+      {/* Cabecera del producto seleccionado */}
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <h3 className="font-semibold text-gray-900 leading-snug line-clamp-3">
+            {productoSeleccionado.nombre}
+          </h3>
+          <p className="text-xs text-gray-400 mt-0.5">
             {[productoSeleccionado.marca, productoSeleccionado.modelo]
               .filter(Boolean).join(' · ')}
             {productoSeleccionado.linea_nombre && (
@@ -398,12 +566,16 @@ export function ProductosSerial({ onAgregarProducto }) {
 
       {serialesOrdenados.length > 0 && (
         <div className="flex items-center gap-3 px-1 flex-wrap">
-          <span className="text-xs text-gray-400">{disponibles.length} disponible(s)</span>
+          <span className={`text-xs font-medium ${disponibles.length > 0 ? 'text-green-600' : 'text-gray-400'}`}>
+            {disponibles.length} disponible(s)
+          </span>
           {prestados.length > 0 && (
             <span className="text-xs text-blue-500 font-medium">· {prestados.length} prestado(s)</span>
           )}
           {esAdmin && (
-            <span className="text-xs text-gray-300 italic">· Doble click en IMEI para editar serial</span>
+            <span className="text-xs text-gray-300 italic hidden sm:inline">
+              · Doble click en IMEI para editar
+            </span>
           )}
         </div>
       )}
@@ -431,6 +603,7 @@ export function ProductosSerial({ onAgregarProducto }) {
       descripcion="Elige un producto de la lista para ver sus seriales" />
   );
 
+  // ─── Lista de productos para desktop ─────────────────────────────────────
   const ListaProductos = (
     <div className="w-64 flex-shrink-0 flex flex-col gap-3">
       <SearchInput value={busqueda} onChange={setBusqueda} placeholder="Buscar modelo..." />
@@ -455,9 +628,10 @@ export function ProductosSerial({ onAgregarProducto }) {
                 ${productoSeleccionado?.id === p.id
                   ? 'bg-blue-50 border-blue-200 text-blue-700'
                   : 'bg-white border-gray-100 hover:border-gray-200 hover:bg-gray-50 text-gray-700'}`}
+              title={p.nombre}
             >
               <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium truncate">{p.nombre}</p>
+                <p className="text-sm font-medium line-clamp-2 leading-snug">{p.nombre}</p>
                 <div className="flex items-center gap-1.5 mt-0.5">
                   <span className="text-xs text-gray-400">{p.disponibles} disp.</span>
                   {Number(p.prestados) > 0 && (
@@ -489,21 +663,47 @@ export function ProductosSerial({ onAgregarProducto }) {
 
   return (
     <>
+      {/* ── Desktop: columna lista + panel seriales ── */}
       <div className="hidden lg:flex gap-4 h-full">
         {ListaProductos}
         <div className="flex-1 min-w-0">{PanelSeriales}</div>
       </div>
 
-      <div className="flex flex-col gap-4 lg:hidden">
-        <SelectorModelo
+      {/* ── Móvil: bottom sheet selector + panel seriales ── */}
+      <div className="flex flex-col gap-3 lg:hidden">
+        {/* Selector con bottom sheet */}
+        <SelectorModeloMovil
           productos={productos}
+          lineas={lineas}
           productoSeleccionado={productoSeleccionado}
           onSeleccionar={handleSeleccionar}
         />
+
+        {/* Chip "cambiar modelo" cuando hay uno seleccionado */}
+        {productoSeleccionado && (
+          <div className="flex items-center justify-between gap-2
+            bg-blue-50 border border-blue-100 rounded-xl px-3 py-2">
+            <p className="text-xs text-blue-700 font-medium leading-snug line-clamp-2 flex-1">
+              {productoSeleccionado.nombre}
+            </p>
+            <button
+              onClick={() => setProductoSeleccionado(null)}
+              className="text-xs text-blue-400 hover:text-blue-600 flex-shrink-0 underline"
+            >
+              Cambiar
+            </button>
+          </div>
+        )}
+
+        {/* Panel de seriales o empty state */}
         {productoSeleccionado
           ? PanelSeriales
-          : <EmptyState icon={Package} titulo="Selecciona un modelo"
-              descripcion="Usa el selector para ver los seriales" />}
+          : (
+            <div className="py-8">
+              <EmptyState icon={Package} titulo="Selecciona un modelo"
+                descripcion="Toca el selector para ver los seriales disponibles" />
+            </div>
+          )}
       </div>
 
       {serialAEliminar && (
