@@ -66,21 +66,22 @@ function TarjetaSerial({ serial, precio, onAgregar, onEliminar, onEditar }) {
   const prestado = serial.prestado && !serial.vendido;
 
   const estiloContenedor = prestado
-    ? 'bg-blue-50 border-blue-200 hover:border-blue-300'
-    : 'bg-white border-gray-100 hover:border-blue-200 hover:bg-blue-50/30';
+    ? 'bg-blue-50 border-blue-200'
+    : 'bg-white border-gray-100 hover:border-blue-200 hover:bg-blue-50/20';
 
   return (
     <div
       onDoubleClick={() => onEditar?.(serial)}
-      className={`border rounded-xl p-3 flex items-center justify-between
+      className={`border rounded-xl p-3.5 flex flex-col gap-3
         transition-colors select-none
         ${onEditar ? 'cursor-pointer' : 'cursor-default'}
         ${estiloContenedor}`}
       title={onEditar ? 'Doble click para editar serial' : undefined}
     >
-      <div className="flex flex-col gap-0.5 min-w-0 flex-1 mr-2">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-sm font-mono font-medium text-gray-800 break-all">
+      {/* IMEI + precio + info */}
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex flex-col gap-1 min-w-0 flex-1">
+          <span className="text-sm font-mono font-semibold text-gray-800 break-all leading-snug">
             {serial.imei}
           </span>
           {prestado && (
@@ -88,27 +89,28 @@ function TarjetaSerial({ serial, precio, onAgregar, onEliminar, onEditar }) {
               <Lock size={10} className="inline mr-0.5" /> Prestado
             </Badge>
           )}
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-xs text-gray-400">Entrada: {serial.fecha_entrada}</span>
-          {serial.cliente_origen && !prestado && (
-            <Badge variant="purple">Retoma: {serial.cliente_origen}</Badge>
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs text-gray-400">Entrada: {serial.fecha_entrada}</span>
+            {serial.cliente_origen && !prestado && (
+              <Badge variant="purple">Retoma: {serial.cliente_origen}</Badge>
+            )}
+            {prestado && serial.cliente_origen && (
+              <span className="text-xs text-blue-500">Prestado a: {serial.cliente_origen}</span>
+            )}
+          </div>
+          {prestado && (
+            <p className="text-xs text-blue-400">Debe ser devuelto antes de poder venderse</p>
           )}
-          {prestado && serial.cliente_origen && (
-            <span className="text-xs text-blue-500">Prestado a: {serial.cliente_origen}</span>
-          )}
         </div>
-        {prestado && (
-          <p className="text-xs text-blue-400 mt-0.5">
-            Debe ser devuelto antes de poder venderse
-          </p>
-        )}
-      </div>
-
-      <div className="flex items-center gap-2 flex-shrink-0">
-        <span className={`text-sm font-semibold ${prestado ? 'text-blue-400' : 'text-gray-700'}`}>
+        <span className={`text-sm font-bold flex-shrink-0 tabular-nums
+          ${prestado ? 'text-blue-400' : 'text-gray-800'}`}>
           {formatCOP(precio || 0)}
         </span>
+      </div>
+
+      {/* Acciones en su propia fila */}
+      <div className={`flex items-center justify-end gap-2 pt-1.5 border-t
+        ${prestado ? 'border-blue-100' : 'border-gray-100'}`}>
         <button
           onClick={(e) => { e.stopPropagation(); onEliminar(serial); }}
           className="p-1.5 rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50 transition-colors"
@@ -324,23 +326,23 @@ function GrupoLinea({ nombre, productos, productoSeleccionado, onSeleccionar, on
   const [abierto, setAbierto] = useState(true);
 
   return (
-    <div className="flex flex-col gap-1">
+    <div className="flex flex-col gap-0.5">
       <button
         onClick={() => setAbierto((v) => !v)}
         className="flex items-center gap-2 px-2 py-1.5 rounded-lg
-          hover:bg-gray-100 transition-colors text-left w-full group"
+          hover:bg-gray-100 transition-colors text-left w-full"
       >
         {abierto
           ? <ChevronDown  size={13} className="text-gray-400 flex-shrink-0" />
           : <ChevronRight size={13} className="text-gray-400 flex-shrink-0" />}
-        <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
+        <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex-1">
           {nombre}
         </span>
-        <span className="text-xs text-gray-300 ml-auto">({productos.length})</span>
+        <span className="text-xs text-gray-300">({productos.length})</span>
       </button>
 
       {abierto && (
-        <div className="flex flex-col gap-1 ml-1 border-l-2 border-gray-100 pl-2">
+        <div className="flex flex-col ml-1 border-l-2 border-gray-100 pl-1">
           {productos.map((p) => (
             <button
               key={p.id}
@@ -349,18 +351,18 @@ function GrupoLinea({ nombre, productos, productoSeleccionado, onSeleccionar, on
                 e.stopPropagation();
                 if (esAdmin) onEditarProducto(p);
               }}
-              className={`flex items-center justify-between p-3 rounded-xl text-left
-                transition-all duration-150 border
+              className={`flex items-center justify-between px-2 py-2.5 rounded-lg text-left
+                transition-all duration-150
                 ${productoSeleccionado?.id === p.id
-                  ? 'bg-blue-50 border-blue-200 text-blue-700'
-                  : 'bg-white border-gray-100 hover:border-gray-200 hover:bg-gray-50 text-gray-700'}`}
+                  ? 'bg-blue-50 text-blue-700'
+                  : 'hover:bg-gray-50 text-gray-700'}`}
               title={p.nombre + (esAdmin ? ' · Doble click para editar' : '')}
             >
               <div className="min-w-0 flex-1">
-                {/* Nombre con wrap a 2 líneas en el sidebar */}
                 <p className="text-sm font-medium line-clamp-2 leading-snug">{p.nombre}</p>
                 <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-                  <span className={`text-xs ${p.disponibles > 0 ? 'text-gray-400' : 'text-red-400'}`}>
+                  <span className={`text-xs font-medium
+                    ${p.disponibles > 0 ? 'text-green-600' : 'text-red-400'}`}>
                     {p.disponibles} disp.
                   </span>
                   {Number(p.prestados) > 0 && (
@@ -537,48 +539,68 @@ export function ProductosSerial({ onAgregarProducto }) {
   // ─── Panel de seriales (shared entre desktop y móvil) ────────────────────
   const PanelSeriales = productoSeleccionado ? (
     <div className="flex flex-col gap-3 flex-1">
-      {/* Cabecera del producto seleccionado */}
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0 flex-1">
-          <h3 className="font-semibold text-gray-900 leading-snug line-clamp-3">
-            {productoSeleccionado.nombre}
-          </h3>
-          <p className="text-xs text-gray-400 mt-0.5">
-            {[productoSeleccionado.marca, productoSeleccionado.modelo]
-              .filter(Boolean).join(' · ')}
-            {productoSeleccionado.linea_nombre && (
-              <span className="ml-2 text-blue-500 font-medium">
-                {productoSeleccionado.linea_nombre}
+      {/* Cabecera del producto seleccionado — card */}
+      <div className="bg-white border border-gray-100 rounded-2xl p-4 flex flex-col gap-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <h3 className="font-bold text-base text-gray-900 leading-snug line-clamp-3">
+              {productoSeleccionado.nombre}
+            </h3>
+            {([productoSeleccionado.marca, productoSeleccionado.modelo].filter(Boolean).length > 0
+              || productoSeleccionado.linea_nombre) && (
+              <p className="text-xs text-gray-400 mt-1">
+                {[productoSeleccionado.marca, productoSeleccionado.modelo]
+                  .filter(Boolean).join(' · ')}
+                {productoSeleccionado.linea_nombre && (
+                  <span className="ml-2 text-blue-500 font-medium">
+                    {productoSeleccionado.linea_nombre}
+                  </span>
+                )}
+              </p>
+            )}
+          </div>
+          <div className="flex flex-col items-end gap-2 flex-shrink-0">
+            <span className="text-lg font-bold text-gray-900 tabular-nums">
+              {formatCOP(productoSeleccionado.precio || 0)}
+            </span>
+            {onAgregarProducto && (
+              <Button size="sm" onClick={() => onAgregarProducto(productoSeleccionado)}>
+                <Plus size={14} />
+                <span className="hidden sm:inline">Agregar IMEI</span>
+              </Button>
+            )}
+          </div>
+        </div>
+
+        {/* Stats como chips de color */}
+        {serialesOrdenados.length > 0 && (
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className={`inline-flex items-center text-xs font-medium px-2.5 py-1 rounded-full
+              ${disponibles.length > 0 ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-400'}`}>
+              {disponibles.length} disponible{disponibles.length !== 1 ? 's' : ''}
+            </span>
+            {prestados.length > 0 && (
+              <span className="inline-flex items-center text-xs font-medium px-2.5 py-1 rounded-full
+                bg-blue-100 text-blue-700">
+                {prestados.length} prestado{prestados.length !== 1 ? 's' : ''}
               </span>
             )}
-          </p>
-        </div>
-        {onAgregarProducto && (
-          <Button size="sm" className="flex-shrink-0"
-            onClick={() => onAgregarProducto(productoSeleccionado)}>
-            <Plus size={14} />
-            <span className="hidden sm:inline">Agregar IMEI</span>
-          </Button>
+            {vendidos.length > 0 && (
+              <span className="inline-flex items-center text-xs font-medium px-2.5 py-1 rounded-full
+                bg-gray-100 text-gray-500">
+                {vendidos.length} vendido{vendidos.length !== 1 ? 's' : ''}
+              </span>
+            )}
+            {esAdmin && (
+              <span className="text-xs text-gray-300 italic hidden sm:inline ml-1">
+                Doble click para editar
+              </span>
+            )}
+          </div>
         )}
       </div>
 
       <SearchInput value={busquedaSerial} onChange={setBusquedaSerial} placeholder="Buscar IMEI..." />
-
-      {serialesOrdenados.length > 0 && (
-        <div className="flex items-center gap-3 px-1 flex-wrap">
-          <span className={`text-xs font-medium ${disponibles.length > 0 ? 'text-green-600' : 'text-gray-400'}`}>
-            {disponibles.length} disponible(s)
-          </span>
-          {prestados.length > 0 && (
-            <span className="text-xs text-blue-500 font-medium">· {prestados.length} prestado(s)</span>
-          )}
-          {esAdmin && (
-            <span className="text-xs text-gray-300 italic hidden sm:inline">
-              · Doble click en IMEI para editar
-            </span>
-          )}
-        </div>
-      )}
 
       {loadingSeriales ? (
         <Spinner className="py-10" />
@@ -614,46 +636,56 @@ export function ProductosSerial({ onAgregarProducto }) {
         </p>
       )}
 
-      <div className="flex flex-col gap-3 overflow-y-auto max-h-[60vh]">
+      <div className="bg-white border border-gray-100 rounded-2xl overflow-hidden
+        flex flex-col overflow-y-auto max-h-[60vh]">
         {productosFiltrados.length === 0 ? (
-          <EmptyState icon={Package} titulo="Sin productos" />
+          <div className="p-4">
+            <EmptyState icon={Package} titulo="Sin productos" />
+          </div>
         ) : grupos.length === 0 ? (
-          productosFiltrados.map((p) => (
-            <button
-              key={p.id}
-              onClick={() => handleSeleccionar(p)}
-              onDoubleClick={(e) => { e.stopPropagation(); if (esAdmin) setProductoAEditar(p); }}
-              className={`flex items-center justify-between p-3 rounded-xl text-left
-                transition-all duration-150 border
-                ${productoSeleccionado?.id === p.id
-                  ? 'bg-blue-50 border-blue-200 text-blue-700'
-                  : 'bg-white border-gray-100 hover:border-gray-200 hover:bg-gray-50 text-gray-700'}`}
-              title={p.nombre}
-            >
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium line-clamp-2 leading-snug">{p.nombre}</p>
-                <div className="flex items-center gap-1.5 mt-0.5">
-                  <span className="text-xs text-gray-400">{p.disponibles} disp.</span>
-                  {Number(p.prestados) > 0 && (
-                    <span className="text-xs text-blue-500 font-medium">· {p.prestados} prest.</span>
-                  )}
+          <div className="flex flex-col divide-y divide-gray-50">
+            {productosFiltrados.map((p) => (
+              <button
+                key={p.id}
+                onClick={() => handleSeleccionar(p)}
+                onDoubleClick={(e) => { e.stopPropagation(); if (esAdmin) setProductoAEditar(p); }}
+                className={`flex items-center justify-between px-4 py-3 text-left
+                  transition-all duration-150
+                  ${productoSeleccionado?.id === p.id
+                    ? 'bg-blue-50 text-blue-700'
+                    : 'hover:bg-gray-50 text-gray-700'}`}
+                title={p.nombre}
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium line-clamp-2 leading-snug">{p.nombre}</p>
+                  <div className="flex items-center gap-1.5 mt-0.5">
+                    <span className={`text-xs font-medium
+                      ${p.disponibles > 0 ? 'text-green-600' : 'text-red-400'}`}>
+                      {p.disponibles} disp.
+                    </span>
+                    {Number(p.prestados) > 0 && (
+                      <span className="text-xs text-blue-500 font-medium">· {p.prestados} prest.</span>
+                    )}
+                  </div>
                 </div>
-              </div>
-              <ChevronRight size={14} className="text-gray-300 flex-shrink-0 ml-2" />
-            </button>
-          ))
+                <ChevronRight size={14} className="text-gray-300 flex-shrink-0 ml-2" />
+              </button>
+            ))}
+          </div>
         ) : (
-          grupos.map((g) => (
-            <GrupoLinea
-              key={g.key}
-              nombre={g.nombre}
-              productos={g.productos}
-              productoSeleccionado={productoSeleccionado}
-              onSeleccionar={handleSeleccionar}
-              onEditarProducto={setProductoAEditar}
-              esAdmin={esAdmin}
-            />
-          ))
+          <div className="flex flex-col gap-1 p-2">
+            {grupos.map((g) => (
+              <GrupoLinea
+                key={g.key}
+                nombre={g.nombre}
+                productos={g.productos}
+                productoSeleccionado={productoSeleccionado}
+                onSeleccionar={handleSeleccionar}
+                onEditarProducto={setProductoAEditar}
+                esAdmin={esAdmin}
+              />
+            ))}
+          </div>
         )}
       </div>
     </div>

@@ -16,7 +16,6 @@ export function Carrito({ onFacturar, onPrestar, sinHeader = false }) {
 
   const [modalTraslado, setModalTraslado] = useState(false);
 
-  // Cargar sucursales para saber si hay más de 1
   const { data: sucursalesRaw } = useQuery({
     queryKey: ['sucursales'],
     queryFn:  () => getSucursales().then((r) => r.data.data),
@@ -47,50 +46,95 @@ export function Carrito({ onFacturar, onPrestar, sinHeader = false }) {
         )}
 
         {/* Items */}
-        <div className="flex-1 overflow-y-auto flex flex-col gap-2">
+        <div className="flex-1 overflow-y-auto flex flex-col gap-2.5">
           {items.length === 0 ? (
             <EmptyState icon={ShoppingCart} titulo="Carrito vacío"
               descripcion="Agrega productos desde el inventario" />
           ) : (
-            items.map((item) => (
-              <div key={item.key} className="bg-gray-50 rounded-xl p-3 flex flex-col gap-2">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-800 truncate">{item.nombre}</p>
-                    {item.imei && <p className="text-xs text-gray-400 font-mono">{item.imei}</p>}
-                  </div>
-                  <button onClick={() => eliminarItem(item.key)}
-                    className="text-gray-300 hover:text-red-400 transition-colors flex-shrink-0">
-                    <Trash2 size={14} />
+            <>
+              {sinHeader && (
+                <div className="flex justify-end mb-1">
+                  <button onClick={limpiarCarrito}
+                    className="text-xs text-red-400 hover:text-red-600 transition-colors">
+                    Vaciar todo
                   </button>
                 </div>
+              )}
+              {items.map((item) => (
+                <div key={item.key} className="bg-gray-50 rounded-xl p-3.5 flex flex-col gap-2.5">
+                  {/* Nombre + eliminar */}
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-800 line-clamp-2 leading-snug">
+                        {item.nombre}
+                      </p>
+                      {item.imei && (
+                        <span className="inline-flex items-center font-mono text-xs
+                          bg-white border border-gray-200 rounded-md px-1.5 py-0.5
+                          text-gray-500 mt-1">
+                          {item.imei}
+                        </span>
+                      )}
+                    </div>
+                    <button onClick={() => eliminarItem(item.key)}
+                      className="text-gray-300 hover:text-red-400 transition-colors flex-shrink-0 p-0.5">
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
 
-                <div className="flex items-center justify-between gap-2">
-                  {item.tipo === 'cantidad' && (
-                    <div className="flex items-center gap-1">
-                      <button onClick={() => actualizarCantidad(item.key, (item.cantidad || 1) - 1)}
-                        className="w-6 h-6 rounded-lg bg-gray-200 hover:bg-gray-300 flex items-center justify-center transition-colors">
-                        <Minus size={12} />
-                      </button>
-                      <span className="text-sm font-medium w-6 text-center">{item.cantidad || 1}</span>
-                      <button onClick={() => actualizarCantidad(item.key, (item.cantidad || 1) + 1)}
-                        disabled={(item.cantidad || 1) >= item.stock}
-                        className="w-6 h-6 rounded-lg bg-gray-200 hover:bg-gray-300 flex items-center justify-center transition-colors disabled:opacity-40">
-                        <Plus size={12} />
-                      </button>
+                  {/* Controles cantidad + precio */}
+                  <div className="flex items-center justify-between gap-2">
+                    {item.tipo === 'cantidad' ? (
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          onClick={() => actualizarCantidad(item.key, (item.cantidad || 1) - 1)}
+                          className="w-7 h-7 rounded-lg bg-white border border-gray-200
+                            hover:bg-gray-100 flex items-center justify-center
+                            transition-colors shadow-sm">
+                          <Minus size={12} />
+                        </button>
+                        <span className="text-sm font-semibold w-7 text-center tabular-nums">
+                          {item.cantidad || 1}
+                        </span>
+                        <button
+                          onClick={() => actualizarCantidad(item.key, (item.cantidad || 1) + 1)}
+                          disabled={(item.cantidad || 1) >= item.stock}
+                          className="w-7 h-7 rounded-lg bg-white border border-gray-200
+                            hover:bg-gray-100 flex items-center justify-center transition-colors
+                            shadow-sm disabled:opacity-40 disabled:cursor-not-allowed">
+                          <Plus size={12} />
+                        </button>
+                        <span className="text-xs text-gray-400 ml-0.5">/ {item.stock}</span>
+                      </div>
+                    ) : (
+                      <div />
+                    )}
+                    <div className="flex items-center gap-1 ml-auto">
+                      <span className="text-xs text-gray-400">$</span>
+                      <InputMoneda
+                        value={item.precioFinal}
+                        onChange={(val) => actualizarPrecio(item.key, val)}
+                        className="w-28 text-right text-sm font-semibold text-gray-800 bg-white
+                          border border-gray-200 rounded-lg px-2 py-1.5 focus:outline-none
+                          focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Subtotal cuando hay más de 1 unidad */}
+                  {item.tipo === 'cantidad' && (item.cantidad || 1) > 1 && (
+                    <div className="flex justify-between items-center pt-1.5 border-t border-gray-200">
+                      <span className="text-xs text-gray-400">
+                        {item.cantidad} × {formatCOP(item.precioFinal)}
+                      </span>
+                      <span className="text-xs font-semibold text-gray-700">
+                        {formatCOP((item.cantidad || 1) * (item.precioFinal || 0))}
+                      </span>
                     </div>
                   )}
-                  <div className="flex items-center gap-1 ml-auto">
-                    <span className="text-xs text-gray-400">$</span>
-                    <InputMoneda value={item.precioFinal}
-                      onChange={(val) => actualizarPrecio(item.key, val)}
-                      className="w-24 text-right text-sm font-semibold text-gray-800 bg-white
-                        border border-gray-200 rounded-lg px-2 py-1 focus:outline-none
-                        focus:ring-2 focus:ring-blue-500 focus:border-transparent" />
-                  </div>
                 </div>
-              </div>
-            ))
+              ))}
+            </>
           )}
         </div>
 
@@ -99,7 +143,7 @@ export function Carrito({ onFacturar, onPrestar, sinHeader = false }) {
           <div className="border-t border-gray-100 pt-4 mt-4 flex flex-col gap-3">
             <div className="flex items-center justify-between">
               <span className="text-sm text-gray-500">Total</span>
-              <span className="text-lg font-bold text-gray-900">{formatCOP(total)}</span>
+              <span className="text-xl font-bold text-gray-900">{formatCOP(total)}</span>
             </div>
             <Button className="w-full" onClick={onFacturar}>
               <FileText size={16} /> Hacer Factura
