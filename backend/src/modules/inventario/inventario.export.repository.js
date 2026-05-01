@@ -24,12 +24,13 @@ const getSeriales = async (sucursalId) => {
         pr_compra.nombre
       ) AS proveedor,
 
-      -- Cliente final: factura normal tiene prioridad;
-      -- si no hay factura pero el serial fue saldado vía préstamo,
-      -- se usa el nombre del prestatario del préstamo más reciente saldado.
+      -- Venta más reciente (LATERAL → siempre una fila por serial, sin duplicados por retoma)
       COALESCE(f.nombre_cliente, p_saldado.prestatario) AS cliente_venta,
       f.cedula   AS cedula_cliente_venta,
-      f.celular  AS celular_cliente_venta
+      f.celular  AS celular_cliente_venta,
+
+      -- Historial completo de ventas para trazabilidad en el Excel (más antigua primero)
+      COALESCE(hist.historial, '[]'::json) AS historial_ventas
 
     FROM seriales s
     JOIN productos_serial ps ON ps.id = s.producto_id
@@ -40,10 +41,16 @@ const getSeriales = async (sucursalId) => {
     -- Proveedor del producto
     LEFT JOIN proveedores pr_producto ON pr_producto.id  = ps.proveedor_id
 
-    -- Proveedor via compra (por IMEI en lineas_compra)
-    LEFT JOIN lineas_compra lc        ON lc.imei          = s.imei
-    LEFT JOIN compras        co       ON co.id             = lc.compra_id
-    LEFT JOIN proveedores pr_compra   ON pr_compra.id      = co.proveedor_id
+    -- Proveedor via compra: LATERAL para evitar duplicados si el IMEI aparece en varias compras
+    LEFT JOIN LATERAL (
+      SELECT pr_c.nombre
+      FROM lineas_compra lc2
+      JOIN compras        co2 ON co2.id      = lc2.compra_id
+      JOIN proveedores    pr_c ON pr_c.id    = co2.proveedor_id
+      WHERE lc2.imei = s.imei
+      ORDER BY co2.fecha DESC
+      LIMIT 1
+    ) pr_compra ON true
 
     -- Cliente origen registrado en el sistema (match por nombre)
     LEFT JOIN clientes c_origen
@@ -52,10 +59,30 @@ const getSeriales = async (sucursalId) => {
         SELECT negocio_id FROM sucursales WHERE id = $1
       )
 
-    -- Cliente de venta normal (por IMEI en lineas_factura)
-    LEFT JOIN lineas_factura lf       ON lf.imei           = s.imei
-    LEFT JOIN facturas       f        ON f.id              = lf.factura_id
-                                     AND f.estado         != 'Cancelada'
+    -- Venta más reciente por IMEI (LIMIT 1 → exactamente una fila por serial)
+    LEFT JOIN LATERAL (
+      SELECT f2.nombre_cliente, f2.cedula, f2.celular
+      FROM lineas_factura lf2
+      JOIN facturas f2 ON f2.id = lf2.factura_id AND f2.estado != 'Cancelada'
+      WHERE lf2.imei = s.imei
+      ORDER BY f2.fecha DESC
+      LIMIT 1
+    ) f ON true
+
+    -- Historial completo de ventas por IMEI (todas las facturas, más antigua primero)
+    LEFT JOIN LATERAL (
+      SELECT JSON_AGG(
+        JSON_BUILD_OBJECT(
+          'cliente', f3.nombre_cliente,
+          'cedula',  f3.cedula,
+          'celular', f3.celular,
+          'fecha',   f3.fecha
+        ) ORDER BY f3.fecha ASC
+      ) AS historial
+      FROM lineas_factura lf3
+      JOIN facturas f3 ON f3.id = lf3.factura_id AND f3.estado != 'Cancelada'
+      WHERE lf3.imei = s.imei
+    ) hist ON true
 
     -- Préstamo saldado más reciente por IMEI
     LEFT JOIN (

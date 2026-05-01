@@ -36,6 +36,15 @@ function estiloCelda(bgColor) {
   };
 }
 
+function estiloCeldaHistorial() {
+  return {
+    font:      { name: 'Arial', sz: 8, italic: true, color: { rgb: '9CA3AF' } },
+    fill:      { patternType: 'solid', fgColor: { rgb: 'FEF2F2' } },
+    alignment: { vertical: 'center' },
+    border:    bordeDelgado(),
+  };
+}
+
 function estiloCeldaCentrada(bgColor) {
   return {
     ...estiloCelda(bgColor),
@@ -90,7 +99,9 @@ function crearHojaSerial(nombreProducto, seriales) {
   let fila = 2;
 
   // ── Helper interno para escribir una sección ──────────────────────────────
-  const escribirSeccion = (lista, titulo, colorTitulo, colorHeader, bgColor, estadoLabel, mostrarVacio) => {
+  // mostrarHistorial: si true, agrega sub-filas con ventas anteriores del IMEI
+  // esVendido: true cuando la última entrada de historial_ventas ya está en la fila principal
+  const escribirSeccion = (lista, titulo, colorTitulo, colorHeader, bgColor, estadoLabel, mostrarVacio, mostrarHistorial = false, esVendido = false) => {
     ws[XLSX.utils.encode_cell({ r: fila, c: 0 })] = {
       t: 's', v: titulo,
       s: { font: { bold: true, name: 'Arial', sz: 10, color: { rgb: colorTitulo } } },
@@ -118,8 +129,8 @@ function crearHojaSerial(nombreProducto, seriales) {
         s.modelo                  || '',
         s.proveedor               || '',
         s.cliente_origen          || '',
-        s.cedula_cliente_origen   || '',   // ← nuevo
-        s.celular_cliente_origen  || '',   // ← nuevo
+        s.cedula_cliente_origen   || '',
+        s.celular_cliente_origen  || '',
         fmtFecha(s.fecha_entrada),
         fmtFecha(s.fecha_salida),
         s.cliente_venta           || '',
@@ -132,6 +143,36 @@ function crearHojaSerial(nombreProducto, seriales) {
         };
       });
       fila++;
+
+      // Sub-filas de ventas anteriores para trazabilidad
+      if (mostrarHistorial) {
+        const historial = Array.isArray(s.historial_ventas) ? s.historial_ventas : [];
+        // Si el item está vendido, la última entrada del historial ES la venta actual (ya mostrada arriba)
+        const previas = esVendido ? historial.slice(0, -1) : historial;
+        previas.forEach((h) => {
+          const histVals = [
+            `↩ ${s.imei}`,
+            'Venta anterior',
+            s.marca  || '',
+            s.modelo || '',
+            '',
+            '',
+            '',
+            '',
+            '',
+            fmtFecha(h.fecha),
+            h.cliente || '',
+            h.cedula  || '',
+            h.celular || '',
+          ];
+          histVals.forEach((v, c) => {
+            ws[XLSX.utils.encode_cell({ r: fila, c })] = {
+              t: 's', v: String(v), s: estiloCeldaHistorial(),
+            };
+          });
+          fila++;
+        });
+      }
     });
   };
 
@@ -140,7 +181,7 @@ function crearHojaSerial(nombreProducto, seriales) {
     disponibles,
     `✓ DISPONIBLES (${disponibles.length})`,
     '065F46', COLOR.headerSerial, COLOR.disponible,
-    'disponible', true,
+    'disponible', true, true, false,
   );
   ws[XLSX.utils.encode_cell({ r: fila, c: 0 })] = {
     t: 's', v: `Total disponibles: ${disponibles.length}`, s: estiloResumen(),
@@ -153,7 +194,7 @@ function crearHojaSerial(nombreProducto, seriales) {
       prestados,
       `⚠ PRESTADOS (${prestados.length})`,
       '92400E', 'B45309', COLOR.prestado,
-      'prestado', false,
+      'prestado', false, true, false,
     );
     fila++;
   }
@@ -163,7 +204,7 @@ function crearHojaSerial(nombreProducto, seriales) {
     vendidos,
     `✗ VENDIDOS (${vendidos.length}) — ordenados por fecha de venta`,
     '991B1B', '991B1B', COLOR.vendido,
-    'vendido', true,
+    'vendido', true, true, true,
   );
 
   ws['!ref']  = XLSX.utils.encode_range({ r: 0, c: 0 }, { r: fila, c: COLS.length - 1 });
