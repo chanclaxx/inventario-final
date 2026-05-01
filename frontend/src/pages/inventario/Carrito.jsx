@@ -9,7 +9,7 @@ import { getSucursales } from '../../api/sucursales.api';
 import useCarritoStore from '../../store/carritoStore';
 import { ModalTraslado } from './ModalTraslado';
 
-export function Carrito({ onFacturar, onPrestar }) {
+export function Carrito({ onFacturar, onPrestar, sinHeader = false }) {
   const { items, eliminarItem, actualizarPrecio, actualizarCantidad, limpiarCarrito, totalCarrito } =
     useCarritoStore();
   const total = totalCarrito();
@@ -28,21 +28,23 @@ export function Carrito({ onFacturar, onPrestar }) {
     <>
       <div className="flex flex-col h-full">
         {/* Header */}
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-2">
-            <ShoppingCart size={18} className="text-blue-600" />
-            <span className="font-semibold text-gray-900">Carrito</span>
-            <span className="bg-blue-100 text-blue-600 text-xs font-medium px-2 py-0.5 rounded-full">
-              {items.length}
-            </span>
+        {!sinHeader && (
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <ShoppingCart size={18} className="text-blue-600" />
+              <span className="font-semibold text-gray-900">Carrito</span>
+              <span className="bg-blue-100 text-blue-600 text-xs font-medium px-2 py-0.5 rounded-full">
+                {items.length}
+              </span>
+            </div>
+            {items.length > 0 && (
+              <button onClick={limpiarCarrito}
+                className="text-xs text-red-400 hover:text-red-600 transition-colors">
+                Limpiar
+              </button>
+            )}
           </div>
-          {items.length > 0 && (
-            <button onClick={limpiarCarrito}
-              className="text-xs text-red-400 hover:text-red-600 transition-colors">
-              Limpiar
-            </button>
-          )}
-        </div>
+        )}
 
         {/* Items */}
         <div className="flex-1 overflow-y-auto flex flex-col gap-2">
