@@ -10,48 +10,42 @@ import { Button }      from '../../components/ui/Button';
 import { AuthContext } from '../../context/AuthContext';
 import api             from '../../api/axios.config';
 
-// ─── Helper: parsear lista de colores desde config ────────────────────────────
-function parsearColoresConfig(configData) {
+function parsearLista(raw) {
   try {
-    const lista = JSON.parse(configData?.colores_serial_lista || '[]');
+    const lista = JSON.parse(raw || '[]');
     return Array.isArray(lista) ? lista : [];
   } catch {
     return [];
   }
 }
 
-/**
- * Props:
- *  - serial:         { id, imei, costo_compra, proveedor_id, color }
- *  - precioProducto: number | null  — precio actual del producto padre
- *  - productoId:     number
- *  - onClose:        () => void
- */
 export function ModalEditarSerial({ serial, precioProducto, productoId, onClose }) {
   const { esAdminNegocio } = useContext(AuthContext);
   const queryClient = useQueryClient();
 
-  // ── Estado del formulario ─────────────────────────────────────────────────
   const [form, setForm] = useState({
-    imei:         serial.imei         || '',
-    precio:       precioProducto      != null ? Number(precioProducto)      : '',
-    costo_compra: serial.costo_compra != null ? Number(serial.costo_compra) : '',
-    proveedor_id: serial.proveedor_id != null ? String(serial.proveedor_id) : '',
-    color:        serial.color        || '',
+    imei:            serial.imei         || '',
+    precio:          precioProducto      != null ? Number(precioProducto)      : '',
+    costo_compra:    serial.costo_compra != null ? Number(serial.costo_compra) : '',
+    proveedor_id:    serial.proveedor_id != null ? String(serial.proveedor_id) : '',
+    color:           serial.color        || '',
+    caracteristicas: (serial.caracteristicas && typeof serial.caracteristicas === 'object')
+      ? serial.caracteristicas
+      : {},
   });
   const [error, setError] = useState('');
 
-  // ── Config: colores de serial ─────────────────────────────────────────────
   const { data: configData } = useQuery({
     queryKey: ['config'],
     queryFn:  () => api.get('/config').then((r) => r.data.data),
     enabled:  esAdminNegocio(),
   });
 
-  const coloresActivo = configData?.colores_serial_activo === '1';
-  const coloresConfig = parsearColoresConfig(configData);
+  const coloresActivo          = configData?.colores_serial_activo === '1';
+  const coloresConfig          = parsearLista(configData?.colores_serial_lista);
+  const caracteristicasActivo  = configData?.caracteristicas_serial_activo === '1';
+  const caracteristicasLista   = parsearLista(configData?.caracteristicas_serial_lista);
 
-  // ── Proveedores ───────────────────────────────────────────────────────────
   const { data: proveedoresData } = useQuery({
     queryKey: ['proveedores'],
     queryFn:  () => getProveedores().then((r) => r.data.data),
@@ -60,7 +54,6 @@ export function ModalEditarSerial({ serial, precioProducto, productoId, onClose 
 
   const proveedores = proveedoresData || [];
 
-  // ── Mutación de edición ───────────────────────────────────────────────────
   const mutation = useMutation({
     mutationFn: () => {
       const payload = {
@@ -70,11 +63,14 @@ export function ModalEditarSerial({ serial, precioProducto, productoId, onClose 
         proveedor_id: form.proveedor_id !== '' ? Number(form.proveedor_id) : null,
         producto_id:  productoId,
       };
-      // Solo incluir color si la opción está activa.
-      // Si está desactivada no lo enviamos — el backend preserva el valor existente
-      // en lugar de sobreescribirlo con null.
       if (coloresActivo) {
         payload.color = form.color.trim() !== '' ? form.color.trim() : null;
+      }
+      if (caracteristicasActivo) {
+        const noVacias = Object.fromEntries(
+          Object.entries(form.caracteristicas).filter(([, v]) => String(v).trim())
+        );
+        payload.caracteristicas = Object.keys(noVacias).length > 0 ? noVacias : null;
       }
       return actualizarSerial(serial.id, payload);
     },
@@ -88,7 +84,6 @@ export function ModalEditarSerial({ serial, precioProducto, productoId, onClose 
     },
   });
 
-  // ── Navegación Enter ──────────────────────────────────────────────────────
   const handleKeyDown = (e, siguienteId) => {
     if (e.key === 'Enter') {
       e.preventDefault();
@@ -96,6 +91,9 @@ export function ModalEditarSerial({ serial, precioProducto, productoId, onClose 
       else mutation.mutate();
     }
   };
+
+  const setCaracteristica = (nombre, valor) =>
+    setForm((f) => ({ ...f, caracteristicas: { ...f.caracteristicas, [nombre]: valor } }));
 
   if (!esAdminNegocio()) return null;
 
@@ -109,7 +107,6 @@ export function ModalEditarSerial({ serial, precioProducto, productoId, onClose 
           </p>
         </div>
 
-        {/* IMEI — sin cambios */}
         <Input
           id="edit-imei"
           label="IMEI / Serial"
@@ -120,7 +117,6 @@ export function ModalEditarSerial({ serial, precioProducto, productoId, onClose 
           autoFocus
         />
 
-        {/* Precio de venta — sin cambios */}
         <div className="flex flex-col gap-1">
           <label className="text-sm font-medium text-gray-700">
             Precio de venta{' '}
@@ -140,7 +136,6 @@ export function ModalEditarSerial({ serial, precioProducto, productoId, onClose 
           />
         </div>
 
-        {/* Costo de compra — sin cambios */}
         <div className="flex flex-col gap-1">
           <label className="text-sm font-medium text-gray-700">
             Costo de compra{' '}
@@ -158,7 +153,6 @@ export function ModalEditarSerial({ serial, precioProducto, productoId, onClose 
           />
         </div>
 
-        {/* Proveedor — sin cambios */}
         <div className="flex flex-col gap-1">
           <label className="text-sm font-medium text-gray-700">
             Proveedor{' '}
@@ -172,16 +166,12 @@ export function ModalEditarSerial({ serial, precioProducto, productoId, onClose 
               focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-700"
           >
             <option value="">Sin proveedor</option>
-            {proveedores.map((p) => {
-              const nombre = p.nombre;
-              return (
-                <option key={p.id} value={p.id}>{nombre}</option>
-              );
-            })}
+            {proveedores.map((p) => (
+              <option key={p.id} value={p.id}>{p.nombre}</option>
+            ))}
           </select>
         </div>
 
-        {/* Color — solo visible si el negocio tiene la opción activada */}
         {coloresActivo && coloresConfig.length > 0 && (
           <div className="flex flex-col gap-1">
             <label className="text-sm font-medium text-gray-700">
@@ -196,13 +186,33 @@ export function ModalEditarSerial({ serial, precioProducto, productoId, onClose 
                 focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-700"
             >
               <option value="">Sin color</option>
-              {coloresConfig.map((color) => {
-                const colorNombre = color;
-                return (
-                  <option key={colorNombre} value={colorNombre}>{colorNombre}</option>
-                );
-              })}
+              {coloresConfig.map((color) => (
+                <option key={color} value={color}>{color}</option>
+              ))}
             </select>
+          </div>
+        )}
+
+        {caracteristicasActivo && caracteristicasLista.length > 0 && (
+          <div className="flex flex-col gap-2">
+            <label className="text-sm font-medium text-gray-700">Características</label>
+            <div className="flex flex-col gap-2 bg-gray-50 rounded-xl p-3">
+              {caracteristicasLista.map((nombre) => (
+                <div key={nombre} className="flex items-center gap-2">
+                  <span className="text-xs text-gray-500 w-28 flex-shrink-0 truncate">
+                    {nombre}
+                  </span>
+                  <input
+                    type="text"
+                    value={form.caracteristicas[nombre] || ''}
+                    onChange={(e) => setCaracteristica(nombre, e.target.value)}
+                    placeholder={`${nombre}...`}
+                    className="flex-1 px-2 py-1.5 bg-white border border-gray-200 rounded-lg
+                      text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-700"
+                  />
+                </div>
+              ))}
+            </div>
           </div>
         )}
 

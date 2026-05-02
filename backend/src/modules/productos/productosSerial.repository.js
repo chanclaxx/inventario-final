@@ -136,13 +136,17 @@ const findSerialByIMEIEnNegocio = async (imei, negocioId) => {
 };
 
 const insertarSerial = async ({
-  producto_id, imei, fecha_entrada, costo_compra, cliente_origen, proveedor_id, color,
+  producto_id, imei, fecha_entrada, costo_compra, cliente_origen, proveedor_id, color, caracteristicas,
 }) => {
   const { rows } = await pool.query(`
-    INSERT INTO seriales(producto_id, imei, fecha_entrada, costo_compra, cliente_origen, proveedor_id, color)
-    VALUES ($1, $2, $3, $4, $5, $6, $7)
+    INSERT INTO seriales(producto_id, imei, fecha_entrada, costo_compra, cliente_origen, proveedor_id, color, caracteristicas)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
     RETURNING *
-  `, [producto_id, imei, fecha_entrada, costo_compra ?? null, cliente_origen || null, proveedor_id || null, color || null]);
+  `, [
+    producto_id, imei, fecha_entrada,
+    costo_compra ?? null, cliente_origen || null, proveedor_id || null, color || null,
+    caracteristicas != null ? JSON.stringify(caracteristicas) : null,
+  ]);
   return rows[0];
 };
 
@@ -161,28 +165,27 @@ const reactivarSerial = async (serialId, { costo_compra, proveedor_id } = {}) =>
   return rows[0];
 };
 
-const actualizarSerial = async (serialId, { imei, costo_compra, color }) => {
-  // Si color es undefined (no vino en el payload), no lo tocamos en BD.
-  // Si color es null o string, lo actualizamos.
-  const colorVino = color !== undefined;
- 
-  const { rows } = colorVino
-    ? await pool.query(`
-        UPDATE seriales
-        SET imei         = COALESCE($1, imei),
-            costo_compra = COALESCE($2, costo_compra),
-            color        = $3
-        WHERE id = $4
-        RETURNING *
-      `, [imei || null, costo_compra ?? null, color, serialId])
-    : await pool.query(`
-        UPDATE seriales
-        SET imei         = COALESCE($1, imei),
-            costo_compra = COALESCE($2, costo_compra)
-        WHERE id = $3
-        RETURNING *
-      `, [imei || null, costo_compra ?? null, serialId]);
- 
+const actualizarSerial = async (serialId, datos) => {
+  const { imei, costo_compra, color, caracteristicas } = datos;
+
+  // Build SET clause dynamically — only touch optional columns when explicitly sent
+  const sets   = ['imei = COALESCE($1, imei)', 'costo_compra = COALESCE($2, costo_compra)'];
+  const params = [imei || null, costo_compra ?? null];
+
+  if (color !== undefined) {
+    params.push(color);
+    sets.push(`color = $${params.length}`);
+  }
+  if (caracteristicas !== undefined) {
+    params.push(caracteristicas != null ? JSON.stringify(caracteristicas) : null);
+    sets.push(`caracteristicas = $${params.length}`);
+  }
+  params.push(serialId);
+
+  const { rows } = await pool.query(
+    `UPDATE seriales SET ${sets.join(', ')} WHERE id = $${params.length} RETURNING *`,
+    params,
+  );
   return rows[0] || null;
 };
 

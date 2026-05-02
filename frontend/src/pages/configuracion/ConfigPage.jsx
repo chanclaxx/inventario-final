@@ -15,7 +15,7 @@ import { Badge }   from '../../components/ui/Badge';
 import {
   Settings, Save, Eye, EyeOff, Plus, Trash2,
   GripVertical, ToggleLeft, ToggleRight, Tag, Lock,
-  Building2, ShieldCheck, FileSliders, BookOpen, Users, Printer, Palette,
+  Building2, ShieldCheck, FileSliders, BookOpen, Users, Printer, Palette, ListChecks,
 } from 'lucide-react';
 
 // ─── Secciones del sidebar ────────────────────────────────────────────────────
@@ -746,6 +746,99 @@ function SeccionFormulario({ valores, set, form, mutation, guardado }) {
   );
 }
 
+// ─── Características de serial ───────────────────────────────────────────────
+function CaracteristicasSerialConfig({ valores, set }) {
+  const activo   = valores['caracteristicas_serial_activo'] === '1';
+  const listaRaw = valores['caracteristicas_serial_lista'];
+  const lista    = (() => {
+    try { return JSON.parse(listaRaw || '[]'); }
+    catch { return []; }
+  })();
+
+  const [nueva, setNueva] = useState('');
+  const [error, setError] = useState('');
+
+  const setLista = (nuevaLista) =>
+    set('caracteristicas_serial_lista', JSON.stringify(nuevaLista));
+
+  const handleAgregar = () => {
+    const limpio = nueva.trim();
+    if (!limpio)              return setError('El nombre es requerido');
+    if (lista.includes(limpio)) return setError('Esta característica ya existe');
+    setLista([...lista, limpio]);
+    setNueva('');
+    setError('');
+  };
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex items-center gap-2">
+        <ListChecks size={15} className="text-gray-400" />
+        <h3 className="text-sm font-semibold text-gray-700">Características de serial</h3>
+      </div>
+      <p className="text-xs text-gray-400 -mt-2">
+        Define campos adicionales para cada serial: batería, capacidad, estado, etc.
+      </p>
+
+      <Toggle
+        label="Activar características por serial"
+        description="Muestra campos extra al agregar o editar un serial"
+        enabled={activo}
+        onChange={(val) => set('caracteristicas_serial_activo', val ? '1' : '0')}
+      />
+
+      {activo && (
+        <div className="flex flex-col gap-3">
+          {lista.length === 0 ? (
+            <p className="text-sm text-gray-400 text-center py-2">
+              Sin características configuradas
+            </p>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {lista.map((nombre) => (
+                <div key={nombre} className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl">
+                  <GripVertical size={15} className="text-gray-300 flex-shrink-0" />
+                  <p className="text-sm font-medium text-gray-800 flex-1 min-w-0 truncate">
+                    {nombre}
+                  </p>
+                  <button
+                    onClick={() => setLista(lista.filter((c) => c !== nombre))}
+                    className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400
+                      hover:text-red-500 transition-colors flex-shrink-0"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={nueva}
+              onChange={(e) => { setNueva(e.target.value); setError(''); }}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleAgregar(); }}
+              placeholder="Ej: Batería, Capacidad, Estado pantalla..."
+              className="flex-1 px-3 py-2 bg-gray-100 border-0 rounded-xl text-sm
+                text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2
+                focus:ring-blue-500 focus:bg-white transition-all"
+            />
+            <button
+              onClick={handleAgregar}
+              className="w-9 h-9 bg-blue-600 rounded-xl flex items-center justify-center
+                hover:bg-blue-700 transition-colors flex-shrink-0"
+            >
+              <Plus size={15} className="text-white" />
+            </button>
+          </div>
+          {error && <p className="text-xs text-red-500">{error}</p>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── SeccionCatalogo — recibe props para ColoresSerialConfig y botón guardar ──
 function SeccionCatalogo({ valores, set, form, mutation, guardado }) {
   return (
@@ -767,6 +860,10 @@ function SeccionCatalogo({ valores, set, form, mutation, guardado }) {
 
       <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
         <ColoresSerialConfig valores={valores} set={set} />
+      </div>
+
+      <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
+        <CaracteristicasSerialConfig valores={valores} set={set} />
       </div>
 
       <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">

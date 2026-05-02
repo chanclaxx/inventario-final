@@ -98,6 +98,17 @@ function TarjetaSerial({ serial, precio, onAgregar, onEliminar, onEditar }) {
             <span className="text-xs text-blue-500">Prestado a: {serial.cliente_origen}</span>
           )}
         </div>
+        {serial.caracteristicas && Object.keys(serial.caracteristicas).length > 0 && (
+          <div className="flex flex-wrap gap-1 mt-0.5">
+            {Object.entries(serial.caracteristicas).map(([k, v]) => (
+              <span key={k}
+                className="inline-flex items-center gap-1 text-xs bg-gray-100
+                  text-gray-600 px-2 py-0.5 rounded-md">
+                <span className="font-medium">{k}:</span>{v}
+              </span>
+            ))}
+          </div>
+        )}
         {prestado && (
           <p className="text-xs text-blue-400 mt-0.5">
             Debe ser devuelto antes de poder venderse

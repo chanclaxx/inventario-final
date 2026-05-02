@@ -20,7 +20,7 @@ import {
 import api from '../../api/axios.config';
 import { getLineas } from '../../api/lineas.api';
 import {
-  Package, ShoppingBag, ChevronRight, Trash2,
+  Package, ShoppingBag, ChevronRight, ChevronDown, Trash2,
   ShoppingCart, CreditCard, Banknote,
   AlertTriangle, RefreshCw, X, User, Search, CheckCircle,
 } from 'lucide-react';
@@ -32,7 +32,6 @@ function normalizarProductos(data) {
   return [];
 }
 
-// ─── Helper: parsear lista de colores desde config ────────────────────────────
 function parsearColoresConfig(configData) {
   try {
     const lista = JSON.parse(configData?.colores_serial_lista || '[]');
@@ -40,6 +39,22 @@ function parsearColoresConfig(configData) {
   } catch {
     return [];
   }
+}
+
+function parsearCaracteristicasConfig(configData) {
+  try {
+    const lista = JSON.parse(configData?.caracteristicas_serial_lista || '[]');
+    return Array.isArray(lista) ? lista : [];
+  } catch {
+    return [];
+  }
+}
+
+function extraerCaracteristicas(item) {
+  if (typeof item === 'string') return {};
+  return (item.caracteristicas && typeof item.caracteristicas === 'object')
+    ? item.caracteristicas
+    : {};
 }
 
 // ─── Helper: payload de crearCompra ───────────────────────────────────────────
@@ -562,66 +577,103 @@ function SelectFiltroLinea({ value, onChange, accentColor = 'blue' }) {
   );
 }
 
-// ─── Fila de IMEI con selector de color opcional ──────────────────────────────
-function FilaImei({ index, item, coloresActivo, coloresConfig, inputRef, onChange, onKeyDown, onEliminar, mostrarEliminar, autoFocus, placeholder }) {
-  const imeiValor  = extraerImei(item);
-  const colorValor = extraerColor(item) || '';
+// ─── Fila de IMEI con selector de color y características opcionales ──────────
+function FilaImei({ index, item, coloresActivo, coloresConfig, caracteristicasActivo, caracteristicasLista, inputRef, onChange, onKeyDown, onEliminar, mostrarEliminar, autoFocus, placeholder }) {
+  const [expandido, setExpandido] = useState(false);
+
+  const imeiValor      = extraerImei(item);
+  const colorValor     = extraerColor(item) || '';
+  const caracteristicas = extraerCaracteristicas(item);
+
+  const usaObjeto = coloresActivo || (caracteristicasActivo && caracteristicasLista?.length > 0);
 
   const handleImeiChange = (valor) => {
-    if (!coloresActivo) {
-      onChange(valor);
-    } else {
-      onChange({ imei: valor, color: colorValor });
-    }
+    if (!usaObjeto) { onChange(valor); return; }
+    onChange({ imei: valor, color: colorValor, caracteristicas });
   };
 
   const handleColorChange = (valor) => {
-    onChange({ imei: imeiValor, color: valor });
+    onChange({ imei: imeiValor, color: valor, caracteristicas });
   };
 
+  const handleCaracteristicaChange = (nombre, valor) => {
+    onChange({ imei: imeiValor, color: colorValor, caracteristicas: { ...caracteristicas, [nombre]: valor } });
+  };
+
+  const tieneCaracteristicas = caracteristicasActivo && caracteristicasLista?.length > 0;
+
   return (
-    <div className="flex gap-1.5 items-center">
-      <input
-        ref={inputRef}
-        type="text"
-        value={imeiValor}
-        autoFocus={autoFocus}
-        onChange={(e) => handleImeiChange(e.target.value)}
-        onKeyDown={onKeyDown}
-        placeholder={placeholder || `IMEI ${index + 1} — Enter para siguiente`}
-        className="flex-1 px-3 py-2 bg-white border border-gray-200 rounded-xl text-sm font-mono
-          focus:outline-none focus:ring-2 focus:ring-blue-500"
-      />
-      {coloresActivo && coloresConfig.length > 0 && (
-        <select
-          value={colorValor}
-          onChange={(e) => handleColorChange(e.target.value)}
-          className="w-28 px-2 py-2 bg-white border border-gray-200 rounded-xl text-xs
-            text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-400 flex-shrink-0"
-        >
-          <option value="">Color...</option>
-          {coloresConfig.map((color) => {
-            const colorNombre = color;
-            return (
-              <option key={colorNombre} value={colorNombre}>{colorNombre}</option>
-            );
-          })}
-        </select>
-      )}
-      {mostrarEliminar && (
-        <button
-          onClick={onEliminar}
-          className="p-2 rounded-xl hover:bg-red-50 text-gray-300 hover:text-red-400 flex-shrink-0"
-        >
-          <Trash2 size={14} />
-        </button>
+    <div className="flex flex-col gap-1">
+      <div className="flex gap-1.5 items-center">
+        <input
+          ref={inputRef}
+          type="text"
+          value={imeiValor}
+          autoFocus={autoFocus}
+          onChange={(e) => handleImeiChange(e.target.value)}
+          onKeyDown={onKeyDown}
+          placeholder={placeholder || `IMEI ${index + 1} — Enter para siguiente`}
+          className="flex-1 px-3 py-2 bg-white border border-gray-200 rounded-xl text-sm font-mono
+            focus:outline-none focus:ring-2 focus:ring-blue-500"
+        />
+        {coloresActivo && coloresConfig.length > 0 && (
+          <select
+            value={colorValor}
+            onChange={(e) => handleColorChange(e.target.value)}
+            className="w-28 px-2 py-2 bg-white border border-gray-200 rounded-xl text-xs
+              text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-400 flex-shrink-0"
+          >
+            <option value="">Color...</option>
+            {coloresConfig.map((c) => (
+              <option key={c} value={c}>{c}</option>
+            ))}
+          </select>
+        )}
+        {tieneCaracteristicas && (
+          <button
+            type="button"
+            onClick={() => setExpandido((v) => !v)}
+            title="Características del serial"
+            className={`p-2 rounded-xl border transition-colors flex-shrink-0
+              ${expandido
+                ? 'bg-blue-50 border-blue-200 text-blue-600'
+                : 'bg-white border-gray-200 text-gray-400 hover:text-gray-600'}`}
+          >
+            <ChevronDown size={13} className={`transition-transform ${expandido ? 'rotate-180' : ''}`} />
+          </button>
+        )}
+        {mostrarEliminar && (
+          <button
+            onClick={onEliminar}
+            className="p-2 rounded-xl hover:bg-red-50 text-gray-300 hover:text-red-400 flex-shrink-0"
+          >
+            <Trash2 size={14} />
+          </button>
+        )}
+      </div>
+      {expandido && tieneCaracteristicas && (
+        <div className="flex flex-col gap-1.5 pl-3 border-l-2 border-blue-100 ml-1">
+          {caracteristicasLista.map((nombre) => (
+            <div key={nombre} className="flex items-center gap-2">
+              <span className="text-xs text-gray-500 w-24 flex-shrink-0 truncate">{nombre}</span>
+              <input
+                type="text"
+                value={caracteristicas[nombre] || ''}
+                onChange={(e) => handleCaracteristicaChange(nombre, e.target.value)}
+                placeholder={`${nombre}...`}
+                className="flex-1 px-2 py-1.5 bg-white border border-gray-200 rounded-lg
+                  text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-700"
+              />
+            </div>
+          ))}
+        </div>
       )}
     </div>
   );
 }
 
 // ─── Paso Compra a Cliente ─────────────────────────────────────────────────────
-function PasoCompraCliente({ sucursalKey, sucursalLista, onExito, onDuplicadosEncontrados, coloresActivo, coloresConfig }) {
+function PasoCompraCliente({ sucursalKey, sucursalLista, onExito, onDuplicadosEncontrados, coloresActivo, coloresConfig, caracteristicasActivo, caracteristicasLista }) {
   const queryClient        = useQueryClient();
   const { esAdminNegocio } = useAuth();
   const esAdmin            = esAdminNegocio();
@@ -675,7 +727,10 @@ function PasoCompraCliente({ sucursalKey, sucursalLista, onExito, onDuplicadosEn
   const costo         = costoCompra !== '' ? Number(costoCompra) : null;
   const nombreCliente = clienteSeleccionado?.nombre || '';
 
-  const itemVacio = () => coloresActivo ? { imei: '', color: '' } : '';
+  const itemVacio = () =>
+    (coloresActivo || (caracteristicasActivo && caracteristicasLista?.length > 0))
+      ? { imei: '', color: '', caracteristicas: {} }
+      : '';
 
   const handleCambiarTipo = (tipo) => {
     setTipoProducto(tipo);
@@ -729,14 +784,17 @@ function PasoCompraCliente({ sucursalKey, sucursalLista, onExito, onDuplicadosEn
         items
           .filter((i) => extraerImei(i).trim())
           .map((item) => {
-            const imei  = extraerImei(item).trim();
-            const color = extraerColor(item);
+            const imei            = extraerImei(item).trim();
+            const color           = extraerColor(item);
+            const caract          = extraerCaracteristicas(item);
+            const caracteristicasPayload = Object.keys(caract).some((k) => caract[k]?.trim?.()) ? caract : null;
             return agregarSerial(lineaSel.id, {
               imei,
               fecha_entrada:       new Date().toISOString().split('T')[0],
               costo_compra:        costo,
               cliente_origen:      nombreCliente,
               color:               color || null,
+              caracteristicas:     caracteristicasPayload,
               reactivar_serial_id: reactivarMapRef.current[imei] || null,
             });
           })
@@ -910,6 +968,8 @@ function PasoCompraCliente({ sucursalKey, sucursalLista, onExito, onDuplicadosEn
                     item={item}
                     coloresActivo={coloresActivo}
                     coloresConfig={coloresConfig}
+                    caracteristicasActivo={caracteristicasActivo}
+                    caracteristicasLista={caracteristicasLista}
                     inputRef={(el) => { inputRefs.current[index] = el; }}
                     onChange={(val) => {
                       const next = [...items];
@@ -1026,7 +1086,7 @@ function PasoCompraCliente({ sucursalKey, sucursalLista, onExito, onDuplicadosEn
 }
 
 // ─── Paso Serial (proveedor) ───────────────────────────────────────────────────
-function PasoSerial({ sucursalKey, onExito, onDuplicadosEncontrados, coloresActivo, coloresConfig }) {
+function PasoSerial({ sucursalKey, onExito, onDuplicadosEncontrados, coloresActivo, coloresConfig, caracteristicasActivo, caracteristicasLista }) {
   const queryClient   = useQueryClient();
   const puedeVerCosto = true;
 
@@ -1056,7 +1116,10 @@ function PasoSerial({ sucursalKey, onExito, onDuplicadosEncontrados, coloresActi
     .filter((p) => p.nombre.toLowerCase().includes(busqueda.toLowerCase()))
     .filter((p) => !filtroLineaId || String(p.linea_id) === filtroLineaId);
 
-  const itemVacio = () => coloresActivo ? { imei: '', color: '' } : '';
+  const itemVacio = () =>
+    (coloresActivo || (caracteristicasActivo && caracteristicasLista?.length > 0))
+      ? { imei: '', color: '', caracteristicas: {} }
+      : '';
 
   const handleSeleccionarLinea = (producto) => {
     setLineaSel(producto);
@@ -1106,15 +1169,18 @@ function PasoSerial({ sucursalKey, onExito, onDuplicadosEncontrados, coloresActi
         }));
       } else {
         await Promise.all(
-          itemsValidos.map((item) =>
-            agregarSerial(lineaSel.id, {
+          itemsValidos.map((item) => {
+            const caract = extraerCaracteristicas(item);
+            const caracteristicasPayload = Object.keys(caract).some((k) => caract[k]?.trim?.()) ? caract : null;
+            return agregarSerial(lineaSel.id, {
               imei:                extraerImei(item).trim(),
               fecha_entrada:       new Date().toISOString().split('T')[0],
               costo_compra:        costo,
               color:               extraerColor(item) || null,
+              caracteristicas:     caracteristicasPayload,
               reactivar_serial_id: reactivarMapRef.current[extraerImei(item).trim()] || null,
-            })
-          )
+            });
+          })
         );
         if (proveedorId && !lineaSel.proveedor_id) {
           await api.patch(`/productos/serial/${lineaSel.id}`, { proveedor_id: Number(proveedorId) });
@@ -1267,6 +1333,8 @@ function PasoSerial({ sucursalKey, onExito, onDuplicadosEncontrados, coloresActi
                 item={item}
                 coloresActivo={coloresActivo}
                 coloresConfig={coloresConfig}
+                caracteristicasActivo={caracteristicasActivo}
+                caracteristicasLista={caracteristicasLista}
                 inputRef={(el) => { inputRefs.current[index] = el; }}
                 onChange={(val) => {
                   const next = [...items];
@@ -1502,8 +1570,10 @@ export function ModalAgregarProducto({ onClose }) {
     enabled:  sucursalLista,
   });
 
-  const coloresActivo = configData?.colores_serial_activo === '1';
-  const coloresConfig = parsearColoresConfig(configData);
+  const coloresActivo         = configData?.colores_serial_activo === '1';
+  const coloresConfig         = parsearColoresConfig(configData);
+  const caracteristicasActivo = configData?.caracteristicas_serial_activo === '1';
+  const caracteristicasLista  = parsearCaracteristicasConfig(configData);
 
   const handleDuplicadosEncontrados = ({ disponibles, paraReactivar }, confirmarFn) => {
     confirmarReactivarRef.current = confirmarFn;
@@ -1543,6 +1613,8 @@ export function ModalAgregarProducto({ onClose }) {
             onDuplicadosEncontrados={handleDuplicadosEncontrados}
             coloresActivo={coloresActivo}
             coloresConfig={coloresConfig}
+            caracteristicasActivo={caracteristicasActivo}
+            caracteristicasLista={caracteristicasLista}
           />
         )}
         {tipo === 'cantidad' && (
@@ -1560,6 +1632,8 @@ export function ModalAgregarProducto({ onClose }) {
             onDuplicadosEncontrados={handleDuplicadosEncontrados}
             coloresActivo={coloresActivo}
             coloresConfig={coloresConfig}
+            caracteristicasActivo={caracteristicasActivo}
+            caracteristicasLista={caracteristicasLista}
           />
         )}
         {tipo && (
