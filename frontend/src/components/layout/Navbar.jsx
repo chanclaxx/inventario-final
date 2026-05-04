@@ -1,9 +1,3 @@
-// src/components/layout/Navbar.jsx
-// ─────────────────────────────────────────────────────────────────────────────
-// Navbar actualizado: filtra ítems según permisos del usuario autenticado.
-// Los módulos que el usuario no puede ver no aparecen en la navegación.
-// ─────────────────────────────────────────────────────────────────────────────
-
 import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
@@ -19,26 +13,19 @@ import useCarritoStore  from '../../store/carritoStore.js';
 import useSucursalStore from '../../store/sucursalStore.js';
 import { SucursalSelector } from './SucursalSelector.jsx';
 
-// ─── Definición de ítems ──────────────────────────────────────────────────────
-// `modulo`: clave que se verifica contra usePermisos().puedeVer()
-// `soloAdmin`: true = solo admin_negocio, sin importar módulos
-// `multiSucursal`: true = solo visible si hay 2+ sucursales
-
 const NAV_ITEMS = [
-  { path: '/',            label: 'Inicio',      Icn: LayoutDashboard, soloAdmin: true                    },
-  { path: '/inventario',  label: 'Inventario',  Icn: Package,         modulo: 'inventario'               },
-  { path: '/facturar',    label: 'Facturas',    Icn: FileText,        modulo: 'facturar'                 },
-  { path: '/servicios',   label: 'Servicios',   Icn: Wrench,          modulo: 'servicios'                },
-  { path: '/proveedores', label: 'Proveedores', Icn: Truck,           modulo: 'proveedores'              },
-  { path: '/prestamos',   label: 'Préstamos',   Icn: Handshake,       modulo: 'prestamos'                },
-  { path: '/caja',        label: 'Caja',        Icn: Wallet,          modulo: 'caja'                     },
+  { path: '/',            label: 'Inicio',      Icn: LayoutDashboard, soloAdmin: true                         },
+  { path: '/inventario',  label: 'Inventario',  Icn: Package,         modulo: 'inventario'                    },
+  { path: '/facturar',    label: 'Facturas',    Icn: FileText,        modulo: 'facturar'                      },
+  { path: '/servicios',   label: 'Servicios',   Icn: Wrench,          modulo: 'servicios'                     },
+  { path: '/proveedores', label: 'Proveedores', Icn: Truck,           modulo: 'proveedores'                   },
+  { path: '/prestamos',   label: 'Préstamos',   Icn: Handshake,       modulo: 'prestamos'                     },
+  { path: '/caja',        label: 'Caja',        Icn: Wallet,          modulo: 'caja'                          },
   { path: '/traslados',   label: 'Traslados',   Icn: ArrowRightLeft,  modulo: 'traslados', multiSucursal: true },
-  { path: '/reportes',    label: 'Reportes',    Icn: BarChart2,       modulo: 'reportes'                 },
-  { path: '/acreedores',  label: 'Acreedores',  Icn: Users,           modulo: 'acreedores'               },
-  { path: '/config',      label: 'Config',      Icn: Settings,        soloAdmin: true                    },
+  { path: '/reportes',    label: 'Reportes',    Icn: BarChart2,       modulo: 'reportes'                      },
+  { path: '/acreedores',  label: 'Acreedores',  Icn: Users,           modulo: 'acreedores'                    },
+  { path: '/config',      label: 'Config',      Icn: Settings,        soloAdmin: true                         },
 ];
-
-// ─── Helper de visibilidad ────────────────────────────────────────────────────
 
 function esItemVisible(item, puedeVer, esAdmin, totalSucursales) {
   if (item.multiSucursal && totalSucursales < 2) return false;
@@ -47,7 +34,20 @@ function esItemVisible(item, puedeVer, esAdmin, totalSucursales) {
   return true;
 }
 
-// ─── Navbar ───────────────────────────────────────────────────────────────────
+function AvatarUsuario({ nombre }) {
+  const initials = (nombre || '?')
+    .split(' ')
+    .map((w) => w[0])
+    .join('')
+    .slice(0, 2)
+    .toUpperCase();
+  return (
+    <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-blue-700 rounded-xl
+      flex items-center justify-center shadow-sm flex-shrink-0">
+      <span className="text-white text-xs font-bold">{initials}</span>
+    </div>
+  );
+}
 
 export function Navbar() {
   const { usuario, logout } = useAuth();
@@ -89,86 +89,126 @@ export function Navbar() {
   );
 
   return (
-    <header className={`
-      fixed top-0 left-0 right-0 z-40 transition-transform duration-300
-      ${visible ? 'translate-y-0' : '-translate-y-full'}
-    `}>
+    <>
+      {/* ── Barra superior ── */}
+      <header className={`
+        fixed top-0 left-0 right-0 z-40 transition-transform duration-300
+        ${visible ? 'translate-y-0' : '-translate-y-full'}
+      `}>
+        <div className="bg-white/90 backdrop-blur-xl border-b border-gray-200/60 shadow-sm">
+          <div className="max-w-screen-xl mx-auto px-4">
+            <div className="flex items-center h-14 gap-3">
 
-      {/* ── Barra principal ── */}
-      <div className="bg-white/80 backdrop-blur-xl border-b border-gray-200/50 shadow-sm">
-        <div className="max-w-screen-xl mx-auto px-4">
-          <div className="flex items-center justify-between h-14">
-
-            {/* Logo */}
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 bg-blue-600 rounded-xl flex items-center justify-center shadow">
-                <span className="text-white text-sm font-bold">I</span>
-              </div>
-              <span className="font-semibold text-gray-900 hidden sm:block">Inventario</span>
-            </div>
-
-            {/* Nav desktop */}
-            <nav className="hidden md:flex items-center gap-1">
-              {itemsVisibles.map((item) => {
-                const active   = location.pathname === item.path;
-                const ItemIcon = item.Icn;
-                return (
-                  <button
-                    key={item.path}
-                    onClick={() => navigate(item.path)}
-                    className={`flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-xl
-                      transition-all duration-150 text-xs font-medium
-                      ${active
-                        ? 'bg-blue-50 text-blue-600'
-                        : 'text-gray-500 hover:bg-gray-100 hover:text-gray-700'}`}
-                  >
-                    <ItemIcon size={18} />
-                    <span>{item.label}</span>
-                  </button>
-                );
-              })}
-            </nav>
-
-            {/* Derecha */}
-            <div className="flex items-center gap-2">
-              <SucursalSelector />
-
-              <button
-                onClick={() => navigate('/inventario')}
-                className="relative p-2 rounded-xl hover:bg-gray-100 transition-colors"
-              >
-                <ShoppingCart size={20} className="text-gray-600" />
-                {cantidadItems > 0 && (
-                  <span className="absolute -top-1 -right-1 w-5 h-5 bg-blue-600 text-white
-                    text-xs rounded-full flex items-center justify-center font-medium">
-                    {cantidadItems}
-                  </span>
-                )}
-              </button>
-
-              <div className="flex items-center gap-2 pl-2 border-l border-gray-200">
-                <div className="hidden sm:flex flex-col items-end">
-                  <span className="text-xs font-medium text-gray-700">{usuario?.nombre}</span>
-                  <span className="text-xs text-gray-400 capitalize">
-                    {usuario?.rol?.replace('_', ' ')}
-                  </span>
+              {/* Logo */}
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <div className="w-8 h-8 bg-blue-600 rounded-xl flex items-center justify-center shadow">
+                  <span className="text-white text-sm font-bold">I</span>
                 </div>
-                <button
-                  onClick={handleLogout}
-                  className="p-2 rounded-xl hover:bg-red-50 hover:text-red-500
-                    text-gray-500 transition-colors"
-                >
-                  <LogOut size={18} />
-                </button>
+                <span className="font-semibold text-gray-900 hidden sm:block">Inventario</span>
               </div>
+
+              {/* Nav desktop — icon+label en lg, solo icono en md */}
+              <nav className="hidden md:flex items-center gap-0.5 flex-1 justify-center">
+                {itemsVisibles.map((item) => {
+                  const active   = location.pathname === item.path;
+                  const ItemIcon = item.Icn;
+                  return (
+                    <button
+                      key={item.path}
+                      onClick={() => navigate(item.path)}
+                      title={item.label}
+                      className={`flex items-center gap-1.5 rounded-xl transition-all duration-150
+                        text-sm font-medium px-2.5 py-2
+                        ${active
+                          ? 'bg-blue-600 text-white shadow-sm shadow-blue-200'
+                          : 'text-gray-500 hover:bg-gray-100 hover:text-gray-800'}`}
+                    >
+                      <ItemIcon size={17} />
+                      <span className="hidden lg:block">{item.label}</span>
+                    </button>
+                  );
+                })}
+              </nav>
+
+              {/* Derecha desktop */}
+              <div className="hidden md:flex items-center gap-2 flex-shrink-0 ml-auto">
+                <SucursalSelector />
+
+                <button
+                  onClick={() => navigate('/inventario')}
+                  className="relative p-2 rounded-xl hover:bg-gray-100 transition-colors"
+                  title="Carrito"
+                >
+                  <ShoppingCart size={20} className="text-gray-600" />
+                  {cantidadItems > 0 && (
+                    <span className="absolute -top-1 -right-1 w-5 h-5 bg-blue-600 text-white
+                      text-xs rounded-full flex items-center justify-center font-medium leading-none">
+                      {cantidadItems}
+                    </span>
+                  )}
+                </button>
+
+                <div className="flex items-center gap-2 pl-2 border-l border-gray-200">
+                  <AvatarUsuario nombre={usuario?.nombre} />
+                  <div className="hidden lg:flex flex-col items-start">
+                    <span className="text-xs font-semibold text-gray-700 leading-tight">
+                      {usuario?.nombre}
+                    </span>
+                    <span className="text-xs text-gray-400 capitalize leading-tight">
+                      {usuario?.rol?.replace('_', ' ')}
+                    </span>
+                  </div>
+                  <button
+                    onClick={handleLogout}
+                    title="Cerrar sesión"
+                    className="p-2 rounded-xl hover:bg-red-50 hover:text-red-500
+                      text-gray-400 transition-colors"
+                  >
+                    <LogOut size={18} />
+                  </button>
+                </div>
+              </div>
+
+              {/* Derecha mobile */}
+              <div className="flex md:hidden items-center gap-1 ml-auto">
+                <SucursalSelector />
+
+                <button
+                  onClick={() => navigate('/inventario')}
+                  className="relative p-2 rounded-xl hover:bg-gray-100 transition-colors"
+                  title="Carrito"
+                >
+                  <ShoppingCart size={20} className="text-gray-600" />
+                  {cantidadItems > 0 && (
+                    <span className="absolute -top-1 -right-1 w-5 h-5 bg-blue-600 text-white
+                      text-xs rounded-full flex items-center justify-center font-medium leading-none">
+                      {cantidadItems}
+                    </span>
+                  )}
+                </button>
+
+                <div className="flex items-center gap-1 pl-1 border-l border-gray-200">
+                  <AvatarUsuario nombre={usuario?.nombre} />
+                  <button
+                    onClick={handleLogout}
+                    title="Cerrar sesión"
+                    className="p-2 rounded-xl hover:bg-red-50 hover:text-red-500
+                      text-gray-400 transition-colors"
+                  >
+                    <LogOut size={18} />
+                  </button>
+                </div>
+              </div>
+
             </div>
           </div>
         </div>
-      </div>
+      </header>
 
-      {/* ── Nav mobile ── */}
-      <div className="md:hidden bg-white/90 backdrop-blur-xl border-b border-gray-200/50">
-        <div className="flex items-center overflow-x-auto px-2 py-1 gap-1 no-scrollbar">
+      {/* ── Nav inferior mobile ── */}
+      <nav className="fixed bottom-0 left-0 right-0 z-40 md:hidden
+        bg-white/95 backdrop-blur-xl border-t border-gray-200/70 shadow-[0_-2px_12px_rgba(0,0,0,0.06)]">
+        <div className="flex items-stretch overflow-x-auto no-scrollbar px-1 py-1 gap-0.5">
           {itemsVisibles.map((item) => {
             const active   = location.pathname === item.path;
             const ItemIcon = item.Icn;
@@ -176,23 +216,23 @@ export function Navbar() {
               <button
                 key={item.path}
                 onClick={() => navigate(item.path)}
-                className={`flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-xl
-                  transition-all duration-150 text-xs font-medium whitespace-nowrap flex-shrink-0
-                  ${active
-                    ? 'bg-blue-50 text-blue-600'
-                    : 'text-gray-500 hover:bg-gray-100'}`}
+                className={`flex flex-col items-center justify-center gap-0.5
+                  flex-1 min-w-[52px] px-1 py-1.5 rounded-xl
+                  transition-all duration-150 select-none
+                  ${active ? 'text-blue-600' : 'text-gray-400 active:scale-95'}`}
               >
-                <ItemIcon size={16} />
-                <span>{item.label}</span>
+                <div className={`p-1.5 rounded-xl transition-all duration-150
+                  ${active ? 'bg-blue-50 scale-110' : ''}`}>
+                  <ItemIcon size={19} strokeWidth={active ? 2.25 : 1.75} />
+                </div>
+                <span className="text-[10px] font-medium leading-none truncate max-w-full px-0.5">
+                  {item.label}
+                </span>
               </button>
             );
           })}
-
-          <div className="flex-shrink-0 pl-2 border-l border-gray-200 ml-1 flex items-center">
-            <SucursalSelector />
-          </div>
         </div>
-      </div>
-    </header>
+      </nav>
+    </>
   );
 }
