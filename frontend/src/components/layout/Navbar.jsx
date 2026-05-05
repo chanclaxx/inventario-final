@@ -114,10 +114,10 @@ export function Navbar() {
       `}
     >
 
-      {/* ── Barra superior — logo + controles ── */}
+      {/* ── Barra superior — logo + controles (todas las pantallas) ── */}
       <div className="bg-white/90 backdrop-blur-xl border-b border-gray-200/60 shadow-sm">
         <div className="max-w-screen-xl mx-auto px-4">
-          <div className="flex items-center h-11 gap-3">
+          <div className="flex items-center h-12 gap-3">
 
             {/* Logo */}
             <div className="flex items-center gap-2 flex-shrink-0">
@@ -174,8 +174,8 @@ export function Navbar() {
         </div>
       </div>
 
-      {/* ── Barra inferior — nav distribuida en todo el ancho ── */}
-      <div className="bg-white/95 backdrop-blur-xl border-b border-gray-200/50">
+      {/* ── Barra inferior DESKTOP — nav distribuida en todo el ancho ── */}
+      <div className="hidden md:block bg-white/95 backdrop-blur-xl border-b border-gray-200/50">
         <div className="max-w-screen-xl mx-auto">
           <div className="flex items-stretch">
             {itemsVisibles.map((item) => {
@@ -200,6 +200,34 @@ export function Navbar() {
                 </button>
               );
             })}
+          </div>
+        </div>
+      </div>
+
+      {/* ── Barra inferior MOBILE — scroll horizontal ── */}
+      <div className="md:hidden bg-white/90 backdrop-blur-xl border-b border-gray-200/50">
+        <div className="flex items-center overflow-x-auto no-scrollbar px-3 py-1.5 gap-1">
+          {itemsVisibles.map((item) => {
+            const active   = location.pathname === item.path;
+            const ItemIcon = item.Icn;
+            return (
+              <button
+                key={item.path}
+                onClick={() => navigate(item.path)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl
+                  transition-all duration-150 text-xs font-medium whitespace-nowrap flex-shrink-0
+                  ${active
+                    ? 'bg-blue-600 text-white shadow-sm shadow-blue-200'
+                    : 'text-gray-500 hover:bg-gray-100 hover:text-gray-700'}`}
+              >
+                <ItemIcon size={14} />
+                <span>{item.label}</span>
+              </button>
+            );
+          })}
+
+          <div className="flex-shrink-0 pl-2 border-l border-gray-200 ml-1 flex items-center">
+            <SucursalSelector />
           </div>
         </div>
       </div>
