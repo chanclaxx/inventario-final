@@ -1,0 +1,4 @@
+import api from './axios.config';
+
+export const buscarPorIMEI    = (imei) => api.get(`/busqueda/serial/${encodeURIComponent(imei)}`);
+export const buscarProductos  = (q)    => api.get('/busqueda/productos', { params: { q } });

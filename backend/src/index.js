@@ -81,6 +81,7 @@ app.use('/api/lineas',             protegida, require('./modules/lineas/lineas.r
 app.use('/api/domiciliarios',      protegida, require('./modules/domiciliarios/domiciliarios.routes'));
 app.use('/api/servicios',          protegida, require('./modules/servicios/servicios.routes'));
 app.use('/api/traslados',          protegida, require('./modules/traslados/traslados.routes'));
+app.use('/api/busqueda',           protegida, require('./modules/busqueda/busqueda.routes'));
 
 // ── Rutas de superadmin (sin protegida) ───────────────
 app.use('/api/superadmin', require('./modules/superadmin/superadmin.routes'));

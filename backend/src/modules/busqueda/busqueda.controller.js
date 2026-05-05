@@ -1,0 +1,35 @@
+const service = require('./busqueda.service');
+
+const buscarPorIMEI = async (req, res, next) => {
+  try {
+    const imei = req.params.imei?.trim();
+    if (!imei) return res.status(400).json({ ok: false, error: 'IMEI requerido' });
+
+    const { negocio_id, rol } = req.user;
+    const resultado = await service.buscarPorIMEI(imei, negocio_id, rol);
+
+    if (!resultado) {
+      return res.status(404).json({ ok: false, error: 'IMEI no encontrado en este negocio' });
+    }
+    res.json({ ok: true, data: resultado });
+  } catch (err) {
+    next(err);
+  }
+};
+
+const buscarProductos = async (req, res, next) => {
+  try {
+    const q = req.query.q?.trim();
+    if (!q || q.length < 2) {
+      return res.status(400).json({ ok: false, error: 'Ingresa al menos 2 caracteres' });
+    }
+
+    const { negocio_id, rol } = req.user;
+    const resultado = await service.buscarProductos(q, negocio_id, req.sucursal_id, rol);
+    res.json({ ok: true, data: resultado });
+  } catch (err) {
+    next(err);
+  }
+};
+
+module.exports = { buscarPorIMEI, buscarProductos };

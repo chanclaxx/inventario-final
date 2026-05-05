@@ -6,7 +6,7 @@ import { usePermisos } from '../../hooks/usePermisos.js';
 import {
   LayoutDashboard, Package, FileText, Handshake,
   Wallet, BarChart2, Settings, LogOut, ShoppingCart,
-  Users, Truck, Wrench, ArrowRightLeft,
+  Users, Truck, Wrench, ArrowRightLeft, Search,
 } from 'lucide-react';
 import { getSucursales } from '../../api/sucursales.api.js';
 import useCarritoStore  from '../../store/carritoStore.js';
@@ -24,6 +24,7 @@ const NAV_ITEMS = [
   { path: '/traslados',   label: 'Traslados',   Icn: ArrowRightLeft,  modulo: 'traslados', multiSucursal: true },
   { path: '/reportes',    label: 'Reportes',    Icn: BarChart2,       modulo: 'reportes'                      },
   { path: '/acreedores',  label: 'Acreedores',  Icn: Users,           modulo: 'acreedores'                    },
+  { path: '/busqueda',    label: 'Búsqueda',    Icn: Search                                                   },
   { path: '/config',      label: 'Config',      Icn: Settings,        soloAdmin: true                         },
 ];
 
