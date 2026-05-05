@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { buscarPrestamos as buscarPrestamosApi } from '../../api/busqueda.api';
 import { getPrestamos, registrarAbonoPrestamo, devolverPrestamo, devolverParcialPrestamo } from '../../api/prestamos.api';
 import {
   getDomiciliarios,
@@ -28,15 +29,16 @@ import api                                      from '../../api/axios.config';
 import {
   Handshake, CreditCard, Bike, Plus, CheckCircle,
   ChevronDown, ChevronUp, ChevronLeft, ChevronRight,
-  Users, User, AlertTriangle, FileDown, Loader2, Printer,
+  Users, User, AlertTriangle, FileDown, Loader2, Printer, Search,
 } from 'lucide-react';
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
 const TABS_PRINCIPALES = [
-  { id: 'prestamos',     label: 'Préstamos',     Icn: Handshake },
+  { id: 'prestamos',     label: 'Préstamos',     Icn: Handshake  },
   { id: 'creditos',      label: 'Créditos',      Icn: CreditCard },
-  { id: 'domiciliarios', label: 'Domiciliarios', Icn: Bike },
+  { id: 'domiciliarios', label: 'Domiciliarios', Icn: Bike       },
+  { id: 'busqueda',      label: 'Búsqueda',      Icn: Search     },
 ];
 
 const TABS_PRESTAMOS = [
@@ -833,6 +835,252 @@ function useAbonosPrestamo(prestamoId) {
   return data;
 }
 
+// ─── Tab: Búsqueda de préstamos ──────────────────────────────────────────────
+
+const ESTADOS_FILTRO = [
+  { v: '',         label: 'Todos'    },
+  { v: 'Activo',   label: 'Activo'   },
+  { v: 'Saldado',  label: 'Saldado'  },
+  { v: 'Devuelto', label: 'Devuelto' },
+];
+
+const TIPOS_FILTRO = [
+  { v: '',          label: 'Todos',      Icn: Users },
+  { v: 'companero', label: 'Compañeros', Icn: User  },
+  { v: 'cliente',   label: 'Clientes',   Icn: Users },
+];
+
+function TipoPrestamoBadge({ prestatarioId }) {
+  if (prestatarioId) {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5
+        rounded-full border bg-blue-50 text-blue-700 border-blue-200">
+        <User size={9} /> Compañero
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5
+      rounded-full border bg-violet-50 text-violet-700 border-violet-200">
+      <Users size={9} /> Cliente
+    </span>
+  );
+}
+
+function TarjetaResultadoPrestamo({ prestamo, onAbonar, onDevolver }) {
+  const saldo    = Number(prestamo.saldo_pendiente);
+  const progreso = Number(prestamo.valor_prestamo) > 0
+    ? Math.min(100, (Number(prestamo.total_abonado) / Number(prestamo.valor_prestamo)) * 100)
+    : 0;
+  const esSaldado = prestamo.estado === 'Saldado';
+  const nombre    = prestamo.prestatario_nombre || prestamo.cliente_nombre || prestamo.prestatario;
+
+  return (
+    <div className="bg-white border border-gray-100 rounded-2xl p-4 flex flex-col gap-3">
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5 flex-wrap mb-1">
+            <TipoPrestamoBadge prestatarioId={prestamo.prestatario_id} />
+            <Badge variant={prestamo.estado === 'Activo' ? 'blue' : esSaldado ? 'green' : 'gray'}>
+              {prestamo.estado}
+            </Badge>
+          </div>
+          <p className="text-sm font-semibold text-gray-900 truncate">{nombre}</p>
+          {prestamo.empleado_nombre && (
+            <p className="text-xs text-blue-500 mt-0.5">→ {prestamo.empleado_nombre}</p>
+          )}
+          <p className="text-sm text-gray-700 truncate mt-0.5">{prestamo.nombre_producto}</p>
+          {prestamo.imei && (
+            <p className="text-xs text-gray-400 font-mono mt-0.5">{prestamo.imei}</p>
+          )}
+          {!prestamo.imei && Number(prestamo.cantidad_prestada) > 1 && (
+            <p className="text-xs text-gray-400 mt-0.5">Cantidad: {prestamo.cantidad_prestada}</p>
+          )}
+          <p className="text-xs text-gray-400 mt-0.5">
+            {formatFechaHora(prestamo.fecha)} · {prestamo.sucursal_nombre}
+          </p>
+        </div>
+        <div className="text-right flex-shrink-0">
+          <p className="text-sm font-bold text-gray-900">{formatCOP(Number(prestamo.valor_prestamo))}</p>
+          {prestamo.estado === 'Activo' && saldo > 0 && (
+            <p className="text-xs text-red-500 mt-0.5">Saldo: {formatCOP(saldo)}</p>
+          )}
+          {esSaldado && <p className="text-xs text-green-600 mt-0.5">✓ Saldado</p>}
+        </div>
+      </div>
+
+      <div className="w-full bg-gray-100 rounded-full h-1">
+        <div
+          className={`h-1 rounded-full transition-all ${esSaldado ? 'bg-green-400' : 'bg-blue-500'}`}
+          style={{ width: `${progreso}%` }}
+        />
+      </div>
+
+      {prestamo.estado === 'Activo' && (
+        <div className="flex gap-2">
+          <Button size="sm" className="flex-1" onClick={() => onAbonar(prestamo)}>
+            <Plus size={14} /> Abonar
+          </Button>
+          <Button size="sm" variant="secondary" onClick={() => onDevolver(prestamo)}>
+            <CheckCircle size={14} /> Devuelto
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TabBusquedaPrestamos() {
+  const [q,          setQ]          = useState('');
+  const [estado,     setEstado]     = useState('');
+  const [tipo,       setTipo]       = useState('');
+  const [fechaDesde, setFechaDesde] = useState('');
+  const [fechaHasta, setFechaHasta] = useState('');
+
+  const [prestamoAbono, setPrestamoAbono] = useState(null);
+  const [prestamoDevol, setPrestamoDevol] = useState(null);
+
+  const hasFilter = q.trim().length >= 2 || estado || tipo || fechaDesde || fechaHasta;
+
+  const { data: resultados = [], isLoading } = useQuery({
+    queryKey: ['busqueda-prestamos', q, estado, tipo, fechaDesde, fechaHasta],
+    queryFn:  () => buscarPrestamosApi({ q: q.trim(), estado, tipo, fechaDesde, fechaHasta })
+      .then((r) => r.data.data),
+    enabled:  hasFilter,
+    staleTime: 30 * 1000,
+  });
+
+  const totalSaldo = resultados
+    .filter((p) => p.estado === 'Activo')
+    .reduce((s, p) => s + Number(p.saldo_pendiente || 0), 0);
+
+  const limpiar = () => {
+    setQ(''); setEstado(''); setTipo(''); setFechaDesde(''); setFechaHasta('');
+  };
+
+  return (
+    <div className="flex flex-col gap-4">
+
+      {/* Buscador de texto */}
+      <div className="relative">
+        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+        <input
+          type="text"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="Buscar por nombre, IMEI, cédula o producto…"
+          className="w-full pl-9 pr-3 py-2.5 bg-gray-50 border border-gray-200 rounded-xl
+            text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"
+        />
+      </div>
+
+      {/* Filtro estado */}
+      <div className="flex flex-wrap gap-2">
+        {ESTADOS_FILTRO.map((opt) => (
+          <button key={opt.v} type="button" onClick={() => setEstado(opt.v)}
+            className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition-all
+              ${estado === opt.v
+                ? 'bg-blue-50 border-blue-300 text-blue-700'
+                : 'bg-gray-50 border-gray-200 text-gray-500 hover:border-gray-300'}`}>
+            {opt.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Filtro tipo */}
+      <div className="flex flex-wrap gap-2">
+        {TIPOS_FILTRO.map((opt) => {
+          const OptIcon = opt.Icn;
+          return (
+            <button key={opt.v} type="button" onClick={() => setTipo(opt.v)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium
+                border transition-all
+                ${tipo === opt.v
+                  ? 'bg-blue-50 border-blue-300 text-blue-700'
+                  : 'bg-gray-50 border-gray-200 text-gray-500 hover:border-gray-300'}`}>
+              <OptIcon size={11} />
+              {opt.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Rango de fechas */}
+      <div className="grid grid-cols-2 gap-2">
+        <div className="flex flex-col gap-1">
+          <label className="text-xs font-medium text-gray-500">Desde</label>
+          <input type="date" value={fechaDesde} onChange={(e) => setFechaDesde(e.target.value)}
+            className="px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm text-gray-700
+              focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all" />
+        </div>
+        <div className="flex flex-col gap-1">
+          <label className="text-xs font-medium text-gray-500">Hasta</label>
+          <input type="date" value={fechaHasta} onChange={(e) => setFechaHasta(e.target.value)}
+            className="px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm text-gray-700
+              focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all" />
+        </div>
+      </div>
+
+      {/* Limpiar */}
+      {hasFilter && (
+        <button type="button" onClick={limpiar}
+          className="text-xs text-gray-400 hover:text-gray-600 w-fit transition-colors">
+          Limpiar filtros
+        </button>
+      )}
+
+      {/* Estado vacío inicial */}
+      {!hasFilter && (
+        <p className="text-sm text-gray-400 text-center py-10">
+          Filtra por texto, estado, tipo o rango de fechas para buscar préstamos
+        </p>
+      )}
+
+      {hasFilter && isLoading && <Spinner className="py-10" />}
+
+      {hasFilter && !isLoading && resultados.length === 0 && (
+        <EmptyState icon={Search} titulo="Sin resultados"
+          descripcion="No se encontraron préstamos con esos filtros" />
+      )}
+
+      {/* Resumen y resultados */}
+      {resultados.length > 0 && (
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-gray-400">
+              {resultados.length} resultado{resultados.length !== 1 ? 's' : ''}
+            </p>
+            {totalSaldo > 0 && (
+              <p className="text-xs font-semibold text-red-500">
+                Saldo activo total: {formatCOP(totalSaldo)}
+              </p>
+            )}
+          </div>
+          {resultados.map((p) => (
+            <TarjetaResultadoPrestamo
+              key={p.id}
+              prestamo={p}
+              onAbonar={setPrestamoAbono}
+              onDevolver={setPrestamoDevol}
+            />
+          ))}
+        </div>
+      )}
+
+      {prestamoAbono && (
+        <ModalAbonoPrestamo
+          prestamo={prestamoAbono}
+          onClose={() => setPrestamoAbono(null)}
+          onSaldado={() => setPrestamoAbono(null)}
+        />
+      )}
+      {prestamoDevol && (
+        <ModalDevolucion prestamo={prestamoDevol} onClose={() => setPrestamoDevol(null)} />
+      )}
+    </div>
+  );
+}
+
 // ─── Página principal ─────────────────────────────────────────────────────────
 
 export default function PrestamosPage() {
@@ -1024,6 +1272,7 @@ export default function PrestamosPage() {
 
       {tabPrincipal === 'creditos'      && <TabCreditos />}
       {tabPrincipal === 'domiciliarios' && <TabDomiciliarios />}
+      {tabPrincipal === 'busqueda'      && <TabBusquedaPrestamos />}
 
       {prestamoAbono && (
         <ModalAbonoPrestamo prestamo={prestamoAbono}

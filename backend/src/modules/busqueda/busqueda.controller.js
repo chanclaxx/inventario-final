@@ -47,4 +47,22 @@ const buscarCompras = async (req, res, next) => {
   }
 };
 
-module.exports = { buscarPorIMEI, buscarProductos, buscarCompras };
+const buscarPrestamos = async (req, res, next) => {
+  try {
+    const { q = '', estado = '', tipo = '', fechaDesde = '', fechaHasta = '' } = req.query;
+
+    const tieneAlgunFiltro = q.trim() || estado || tipo || fechaDesde || fechaHasta;
+    if (!tieneAlgunFiltro) return res.json({ ok: true, data: [] });
+
+    const { negocio_id, rol } = req.user;
+    const data = await service.buscarPrestamos(
+      { q, estado, tipo, fechaDesde, fechaHasta },
+      negocio_id, req.sucursal_id, rol,
+    );
+    res.json({ ok: true, data });
+  } catch (err) {
+    next(err);
+  }
+};
+
+module.exports = { buscarPorIMEI, buscarProductos, buscarCompras, buscarPrestamos };

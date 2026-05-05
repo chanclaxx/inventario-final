@@ -133,4 +133,12 @@ const buscarCompras = async (q, modo, negocioId, sucursalId, rol) => {
   return { lineas, retomas: [] };
 };
 
-module.exports = { buscarPorIMEI, buscarProductos, buscarCompras };
+// ─── Búsqueda de préstamos ────────────────────────────────────────────────────
+
+const buscarPrestamos = async (filtros, negocioId, sucursalId, rol) => {
+  const admin = _esAdmin(rol);
+  const filtroSucursal = admin ? null : sucursalId;
+  return repo.buscarPrestamos(filtros, negocioId, filtroSucursal);
+};
+
+module.exports = { buscarPorIMEI, buscarProductos, buscarCompras, buscarPrestamos };

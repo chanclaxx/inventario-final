@@ -226,9 +226,78 @@ const buscarComprasPorTexto = async (q, negocioId, sucursalId) => {
   return rows;
 };
 
+// ─── Búsqueda de préstamos con filtros ───────────────────────────────────────
+
+const buscarPrestamos = async ({ q, estado, tipo, fechaDesde, fechaHasta }, negocioId, sucursalId) => {
+  const params     = [negocioId];
+  const conditions = ['su.negocio_id = $1'];
+  let   i          = 2;
+
+  if (sucursalId) {
+    conditions.push(`p.sucursal_id = $${i}`);
+    params.push(sucursalId);
+    i++;
+  }
+
+  if (q && q.trim()) {
+    conditions.push(`(
+      LOWER(p.prestatario)             LIKE $${i}
+      OR LOWER(p.nombre_producto)      LIKE $${i}
+      OR LOWER(COALESCE(p.imei,  ''))  LIKE $${i}
+      OR LOWER(COALESCE(p.cedula,''))  LIKE $${i}
+    )`);
+    params.push(`%${q.toLowerCase().trim()}%`);
+    i++;
+  }
+
+  if (estado) {
+    conditions.push(`p.estado = $${i}`);
+    params.push(estado);
+    i++;
+  }
+
+  if (tipo === 'companero') conditions.push('p.prestatario_id IS NOT NULL');
+  if (tipo === 'cliente')   conditions.push('p.cliente_id IS NOT NULL');
+
+  if (fechaDesde) {
+    conditions.push(`p.fecha::date >= $${i}`);
+    params.push(fechaDesde);
+    i++;
+  }
+
+  if (fechaHasta) {
+    conditions.push(`p.fecha::date <= $${i}`);
+    params.push(fechaHasta);
+    i++;
+  }
+
+  const { rows } = await pool.query(`
+    SELECT
+      p.id, p.fecha, p.prestatario, p.cedula, p.telefono,
+      p.nombre_producto, p.imei, p.cantidad_prestada,
+      p.valor_prestamo, p.total_abonado, p.estado,
+      p.prestatario_id, p.empleado_id, p.cliente_id, p.sucursal_id,
+      su.nombre AS sucursal_nombre,
+      (p.valor_prestamo - p.total_abonado) AS saldo_pendiente,
+      pr.nombre AS prestatario_nombre,
+      e.nombre  AS empleado_nombre,
+      c.nombre  AS cliente_nombre
+    FROM prestamos p
+    JOIN  sucursales                su ON su.id = p.sucursal_id
+    LEFT JOIN prestatarios          pr ON pr.id = p.prestatario_id
+    LEFT JOIN empleados_prestatario e  ON e.id  = p.empleado_id
+    LEFT JOIN clientes              c  ON c.id  = p.cliente_id
+    WHERE ${conditions.join(' AND ')}
+    ORDER BY p.fecha DESC
+    LIMIT 100
+  `, params);
+  return rows;
+};
+
 module.exports = {
   getSerialPorIMEI, getVentasPorIMEI, getRetomasPorIMEI,
   getPrestamosPorIMEI, getTrasladosPorIMEI,
   buscarSeriales, buscarCantidad,
   buscarComprasPorIMEI, buscarComprasPorTexto,
+  buscarPrestamos,
 };
