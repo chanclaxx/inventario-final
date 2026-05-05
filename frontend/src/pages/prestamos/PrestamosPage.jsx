@@ -946,7 +946,8 @@ function TabBusquedaPrestamos() {
     queryKey: ['busqueda-prestamos', q, estado, tipo, fechaDesde, fechaHasta],
     queryFn:  () => buscarPrestamosApi({ q: q.trim(), estado, tipo, fechaDesde, fechaHasta })
       .then((r) => r.data.data),
-    enabled:  hasFilter,
+    // ✅ Después
+enabled: !!hasFilter,
     staleTime: 30 * 1000,
   });
 
