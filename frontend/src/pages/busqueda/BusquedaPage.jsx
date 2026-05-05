@@ -4,15 +4,11 @@ import {
   Search, Package, Hash, ArrowRight, Handshake,
   ShoppingCart, RotateCcw, CheckCircle2, XCircle,
   MapPin, User, Phone, CreditCard, Tag, Loader2,
-  AlertCircle, Box, Layers,
+  AlertCircle, Box, Layers, ScanLine,
 } from 'lucide-react';
 import { buscarPorIMEI, buscarProductos } from '../../api/busqueda.api';
 import { formatCOP, formatFecha } from '../../utils/formatters';
 import { useAuth } from '../../context/useAuth';
-
-// ─── Detección automática ─────────────────────────────────────────────────────
-
-const detectarModo = (q) => (/^\d{6,}$/.test(q.trim()) ? 'imei' : 'nombre');
 
 // ─── Componentes de soporte ───────────────────────────────────────────────────
 
@@ -359,18 +355,22 @@ function TarjetaProductoCantidad({ p }) {
 
 // ─── Página principal ─────────────────────────────────────────────────────────
 
+const MODOS = [
+  { key: 'imei',   label: 'IMEI / Serial',     Icon: ScanLine, placeholder: 'Ingresa el IMEI o número de serie…' },
+  { key: 'nombre', label: 'Nombre de producto', Icon: Package,  placeholder: 'Nombre del producto…'               },
+];
+
 export default function BusquedaPage() {
   const { usuario } = useAuth();
+  const [modo,     setModo]     = useState('imei');
   const [input,    setInput]    = useState('');
   const [busqueda, setBusqueda] = useState('');
   const inputRef = useRef(null);
 
-  const modo = busqueda ? detectarModo(busqueda) : null;
-
   const queryIMEI = useQuery({
     queryKey: ['busqueda-imei', busqueda],
     queryFn:  () => buscarPorIMEI(busqueda).then((r) => r.data.data),
-    enabled:  modo === 'imei',
+    enabled:  modo === 'imei' && busqueda.length >= 2,
     retry:    false,
     staleTime: 30_000,
   });
@@ -378,7 +378,7 @@ export default function BusquedaPage() {
   const queryNombre = useQuery({
     queryKey: ['busqueda-nombre', busqueda],
     queryFn:  () => buscarProductos(busqueda).then((r) => r.data.data),
-    enabled:  modo === 'nombre',
+    enabled:  modo === 'nombre' && busqueda.length >= 2,
     retry:    false,
     staleTime: 30_000,
   });
@@ -387,6 +387,13 @@ export default function BusquedaPage() {
     e.preventDefault();
     const q = input.trim();
     if (q.length >= 2) setBusqueda(q);
+  };
+
+  const handleCambiarModo = (nuevoModo) => {
+    setModo(nuevoModo);
+    setBusqueda('');
+    setInput('');
+    inputRef.current?.focus();
   };
 
   const handleLimpiar = () => {
@@ -403,19 +410,43 @@ export default function BusquedaPage() {
     (modo === 'nombre' && queryNombre.isSuccess &&
       !queryNombre.data?.seriales?.length && !queryNombre.data?.cantidad?.length);
 
+  const modoActual = MODOS.find((m) => m.key === modo);
+
   return (
     <div className="max-w-3xl mx-auto">
 
       {/* ── Encabezado ── */}
-      <div className="mb-6">
+      <div className="mb-5">
         <h1 className="text-2xl font-bold text-gray-900">Búsqueda de productos</h1>
         <p className="text-sm text-gray-400 mt-0.5">
-          Ingresa un IMEI o número de serie para ver el historial completo, o busca por nombre.
+          Selecciona el tipo de búsqueda e ingresa el término para ver el historial o el stock.
         </p>
       </div>
 
+      {/* ── Selector de modo ── */}
+      <div className="flex gap-2 mb-4">
+        {MODOS.map((m) => {
+          const ModoIcon = m.Icon;
+          return (
+            <button
+              key={m.key}
+              type="button"
+              onClick={() => handleCambiarModo(m.key)}
+              className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium
+                transition-all border
+                ${modo === m.key
+                  ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                  : 'bg-white text-gray-500 border-gray-200 hover:border-gray-300 hover:text-gray-700'}`}
+            >
+              <ModoIcon size={14} />
+              {m.label}
+            </button>
+          );
+        })}
+      </div>
+
       {/* ── Barra de búsqueda ── */}
-      <form onSubmit={handleSubmit} className="flex gap-2 mb-3">
+      <form onSubmit={handleSubmit} className="flex gap-2">
         <div className="flex-1 relative">
           <Search size={17} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
           <input
@@ -423,7 +454,7 @@ export default function BusquedaPage() {
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="IMEI, número de serie o nombre de producto…"
+            placeholder={modoActual.placeholder}
             autoFocus
             className="w-full pl-10 pr-10 py-2.5 bg-white border border-gray-200 rounded-xl
               text-sm text-gray-800 placeholder-gray-400
@@ -452,14 +483,7 @@ export default function BusquedaPage() {
         </button>
       </form>
 
-      {/* Hint de modo */}
-      {input.trim().length >= 2 && (
-        <p className="text-xs text-gray-400 mb-5">
-          {detectarModo(input) === 'imei'
-            ? '🔢 Se buscará por IMEI / número de serie'
-            : '📦 Se buscará por nombre de producto'}
-        </p>
-      )}
+      <div className="mb-5" />
 
       {/* ── Estado de carga ── */}
       {loading && (
