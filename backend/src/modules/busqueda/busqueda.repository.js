@@ -157,8 +157,78 @@ const buscarCantidad = async (q, negocioId, sucursalId) => {
   return rows;
 };
 
+// ─── Búsqueda de compras a proveedores ───────────────────────────────────────
+
+const buscarComprasPorIMEI = async (imei, negocioId) => {
+  const { rows } = await pool.query(`
+    SELECT
+      lc.id           AS linea_id,
+      lc.nombre_producto,
+      lc.imei,
+      lc.cantidad,
+      lc.precio_unitario,
+      c.id            AS compra_id,
+      c.fecha,
+      c.numero_factura,
+      c.estado,
+      p.nombre        AS proveedor_nombre,
+      p.tipo          AS proveedor_tipo,
+      su.nombre       AS sucursal_nombre,
+      u.nombre        AS usuario_nombre
+    FROM lineas_compra lc
+    JOIN compras     c  ON c.id  = lc.compra_id
+    JOIN sucursales  su ON su.id = c.sucursal_id
+    JOIN proveedores p  ON p.id  = c.proveedor_id
+    LEFT JOIN usuarios u ON u.id = c.usuario_id
+    WHERE lc.imei = $1 AND su.negocio_id = $2
+    ORDER BY c.fecha DESC
+  `, [imei, negocioId]);
+  return rows;
+};
+
+const buscarComprasPorTexto = async (q, negocioId, sucursalId) => {
+  const filtro = sucursalId ? 'AND c.sucursal_id = $3' : '';
+  const params = sucursalId
+    ? [negocioId, `%${q.toLowerCase()}%`, sucursalId]
+    : [negocioId, `%${q.toLowerCase()}%`];
+
+  const { rows } = await pool.query(`
+    SELECT
+      lc.id           AS linea_id,
+      lc.nombre_producto,
+      lc.imei,
+      lc.cantidad,
+      lc.precio_unitario,
+      c.id            AS compra_id,
+      c.fecha,
+      c.numero_factura,
+      c.estado,
+      p.nombre        AS proveedor_nombre,
+      p.tipo          AS proveedor_tipo,
+      su.nombre       AS sucursal_nombre,
+      u.nombre        AS usuario_nombre
+    FROM lineas_compra lc
+    JOIN compras     c  ON c.id  = lc.compra_id
+    JOIN sucursales  su ON su.id = c.sucursal_id
+    JOIN proveedores p  ON p.id  = c.proveedor_id
+    LEFT JOIN usuarios u ON u.id = c.usuario_id
+    WHERE su.negocio_id = $1
+      AND (
+        LOWER(lc.nombre_producto)               LIKE $2
+        OR LOWER(COALESCE(lc.imei, ''))         LIKE $2
+        OR LOWER(p.nombre)                       LIKE $2
+        OR LOWER(COALESCE(c.numero_factura, '')) LIKE $2
+      )
+      ${filtro}
+    ORDER BY c.fecha DESC
+    LIMIT 60
+  `, params);
+  return rows;
+};
+
 module.exports = {
   getSerialPorIMEI, getVentasPorIMEI, getRetomasPorIMEI,
   getPrestamosPorIMEI, getTrasladosPorIMEI,
   buscarSeriales, buscarCantidad,
+  buscarComprasPorIMEI, buscarComprasPorTexto,
 };

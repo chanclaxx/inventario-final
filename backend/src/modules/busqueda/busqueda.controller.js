@@ -32,4 +32,19 @@ const buscarProductos = async (req, res, next) => {
   }
 };
 
-module.exports = { buscarPorIMEI, buscarProductos };
+const buscarCompras = async (req, res, next) => {
+  try {
+    const q    = req.query.q?.trim();
+    const modo = req.query.modo || 'nombre';
+    if (!q || q.length < 2) {
+      return res.status(400).json({ ok: false, error: 'Ingresa al menos 2 caracteres' });
+    }
+    const { negocio_id, rol } = req.user;
+    const data = await service.buscarCompras(q, modo, negocio_id, req.sucursal_id, rol);
+    res.json({ ok: true, data });
+  } catch (err) {
+    next(err);
+  }
+};
+
+module.exports = { buscarPorIMEI, buscarProductos, buscarCompras };

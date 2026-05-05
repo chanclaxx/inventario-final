@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { buscarCompras as buscarComprasApi } from '../../api/busqueda.api';
 import { getProveedores, crearProveedor, actualizarProveedor } from '../../api/proveedores.api';
 import { getCruces, crearCruce } from '../../api/cruces.api';
 import { getComprasByProveedor, getCompraById } from '../../api/compras.api';
@@ -17,6 +18,7 @@ import api from '../../api/axios.config';
 import {
   Truck, Plus, ShoppingCart, ChevronRight, ChevronLeft,
   Package, Hash, User, RefreshCw, ArrowLeftRight, ShoppingBag, Repeat,
+  Search, ScanLine,
 } from 'lucide-react';
 
 // ─── API helpers ──────────────────────────────────────────────────────────────
@@ -804,6 +806,187 @@ function TabCruces({ sucursalKey, sucursalLista }) {
   );
 }
 
+// ─── Tab: Búsqueda de compras ─────────────────────────────────────────────────
+
+const MODOS_BUSQUEDA = [
+  { key: 'imei',   label: 'IMEI / Serial',       Icon: ScanLine, placeholder: 'Ingresa el IMEI o número de serie…'      },
+  { key: 'nombre', label: 'Nombre / Proveedor',   Icon: Search,   placeholder: 'Nombre, proveedor o N° de factura…'     },
+];
+
+function TabBusquedaCompras() {
+  const [modo,          setModo]          = useState('imei');
+  const [input,         setInput]         = useState('');
+  const [busqueda,      setBusqueda]      = useState('');
+  const [compraDetalle, setCompraDetalle] = useState(null);
+
+  const modoActual = MODOS_BUSQUEDA.find((m) => m.key === modo);
+
+  const handleCambiarModo = (nuevoModo) => {
+    setModo(nuevoModo);
+    setInput('');
+    setBusqueda('');
+  };
+
+  const handleBuscar = () => {
+    if (input.trim().length >= 2) setBusqueda(input.trim());
+  };
+
+  const { data, isLoading, isFetching } = useQuery({
+    queryKey: ['busqueda-compras', modo, busqueda],
+    queryFn:  () => buscarComprasApi(busqueda, modo).then((r) => r.data.data),
+    enabled:  busqueda.length >= 2,
+    staleTime: 30 * 1000,
+  });
+
+  const lineas  = data?.lineas  || [];
+  const retomas = data?.retomas || [];
+  const cargando = isLoading || isFetching;
+
+  return (
+    <div className="flex flex-col gap-4">
+
+      {/* Selector de modo */}
+      <div className="flex gap-2 flex-wrap">
+        {MODOS_BUSQUEDA.map((m) => {
+          const ModoIcon = m.Icon;
+          return (
+            <button key={m.key} type="button" onClick={() => handleCambiarModo(m.key)}
+              className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium
+                transition-all border
+                ${modo === m.key
+                  ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                  : 'bg-white text-gray-500 border-gray-200 hover:border-gray-300 hover:text-gray-700'}`}>
+              <ModoIcon size={14} />
+              {m.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Buscador */}
+      <form
+        onSubmit={(e) => { e.preventDefault(); handleBuscar(); }}
+        className="flex gap-2"
+      >
+        <div className="flex-1">
+          <SearchInput
+            value={input}
+            onChange={setInput}
+            placeholder={modoActual.placeholder}
+          />
+        </div>
+        <Button type="submit" disabled={input.trim().length < 2}>
+          <Search size={15} /> Buscar
+        </Button>
+      </form>
+
+      {/* Estado vacío inicial */}
+      {!busqueda && (
+        <p className="text-sm text-gray-400 text-center py-10">
+          {modo === 'imei'
+            ? 'Ingresa un IMEI para ver de qué compra proviene el producto'
+            : 'Busca por nombre de producto, proveedor o número de factura de compra'}
+        </p>
+      )}
+
+      {busqueda && cargando && <Spinner className="py-10" />}
+
+      {busqueda && !cargando && lineas.length === 0 && retomas.length === 0 && (
+        <EmptyState
+          icon={Search}
+          titulo="Sin resultados"
+          descripcion={`No se encontraron compras para "${busqueda}"`}
+        />
+      )}
+
+      {/* Retomas encontradas (solo aparece en modo IMEI) */}
+      {retomas.length > 0 && (
+        <div className="flex flex-col gap-2">
+          <p className="text-xs font-semibold text-purple-700 uppercase tracking-wide">
+            Retomada en facturas ({retomas.length})
+          </p>
+          {retomas.map((r) => (
+            <div key={r.id} className="bg-purple-50 border border-purple-100 rounded-xl p-3 flex items-start gap-3">
+              <TipoBadge tipo="retoma" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-gray-900">{r.nombre_producto || r.descripcion || '—'}</p>
+                <p className="text-xs text-gray-600 mt-0.5">{r.nombre_cliente}</p>
+                <p className="text-xs text-gray-400">{formatFechaHora(r.fecha)} · {r.sucursal_nombre}</p>
+              </div>
+              {r.valor_retoma && Number(r.valor_retoma) > 0 && (
+                <span className="text-sm font-bold text-purple-700 flex-shrink-0">
+                  {formatCOP(r.valor_retoma)}
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Lineas de compra encontradas */}
+      {lineas.length > 0 && (
+        <div className="flex flex-col gap-2">
+          {retomas.length > 0 && (
+            <p className="text-xs font-semibold text-blue-700 uppercase tracking-wide">
+              Compras a proveedores ({lineas.length})
+            </p>
+          )}
+          {lineas.map((l, i) => (
+            <button
+              key={`${l.linea_id}-${i}`}
+              onClick={() => setCompraDetalle(l.compra_id)}
+              className="bg-white border border-gray-100 rounded-2xl p-3 flex items-start
+                justify-between gap-3 hover:border-blue-200 hover:bg-blue-50 transition-all text-left"
+            >
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap mb-1">
+                  <ProveedorTipoBadge tipo={l.proveedor_tipo} />
+                  <Badge
+                    variant={l.estado === 'Completada' ? 'green' : l.estado === 'Pendiente' ? 'yellow' : 'red'}
+                  >
+                    {l.estado}
+                  </Badge>
+                </div>
+                <p className="text-sm font-semibold text-gray-900 truncate">{l.nombre_producto}</p>
+                {l.imei ? (
+                  <div className="flex items-center gap-1 mt-0.5">
+                    <Hash size={10} className="text-gray-400" />
+                    <span className="text-xs text-gray-400 font-mono">{l.imei}</span>
+                  </div>
+                ) : (
+                  <p className="text-xs text-gray-500 mt-0.5">Cantidad: {l.cantidad}</p>
+                )}
+                <div className="flex items-center gap-2 flex-wrap mt-0.5">
+                  <Truck size={11} className="text-gray-400" />
+                  <span className="text-xs text-gray-700 font-medium">{l.proveedor_nombre}</span>
+                  {l.numero_factura && (
+                    <span className="text-xs text-gray-400">· Fact. {l.numero_factura}</span>
+                  )}
+                </div>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  {formatFechaHora(l.fecha)} · {l.sucursal_nombre}
+                </p>
+              </div>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                {l.precio_unitario && Number(l.precio_unitario) > 0 && (
+                  <span className="text-sm font-bold text-emerald-700">
+                    {formatCOP(l.precio_unitario)}
+                  </span>
+                )}
+                <ChevronRight size={14} className="text-gray-400" />
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {compraDetalle && (
+        <ModalDetalleCompra compraId={compraDetalle} onClose={() => setCompraDetalle(null)} />
+      )}
+    </div>
+  );
+}
+
 // ─── Página principal ────────────────────────────────────────────────────────
 
 export default function ProveedoresPage() {
@@ -811,9 +994,10 @@ export default function ProveedoresPage() {
   const [tabActivo, setTabActivo] = useState('proveedores');
 
   const tabs = [
-    { id: 'proveedores', label: 'Proveedores',        Icn: Truck     },
-    { id: 'cruces',      label: 'Cruces',              Icn: Repeat    },
-    { id: 'retomas',     label: 'Retomas de clientes', Icn: RefreshCw },
+    { id: 'proveedores', label: 'Proveedores', Icn: Truck     },
+    { id: 'cruces',      label: 'Cruces',      Icn: Repeat    },
+    { id: 'retomas',     label: 'Retomas',     Icn: RefreshCw },
+    { id: 'busqueda',    label: 'Búsqueda',    Icn: Search    },
   ];
 
   return (
@@ -846,7 +1030,8 @@ export default function ProveedoresPage() {
       {tabActivo === 'cruces' && (
         <TabCruces sucursalKey={sucursalKey} sucursalLista={sucursalLista} />
       )}
-      {tabActivo === 'retomas' && <TabRetomas />}
+      {tabActivo === 'retomas'    && <TabRetomas />}
+      {tabActivo === 'busqueda'   && <TabBusquedaCompras />}
     </div>
   );
 }

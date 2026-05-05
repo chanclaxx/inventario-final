@@ -115,4 +115,22 @@ const buscarProductos = async (q, negocioId, sucursalId, rol) => {
   return { seriales, cantidad };
 };
 
-module.exports = { buscarPorIMEI, buscarProductos };
+// ─── Búsqueda de compras a proveedores ───────────────────────────────────────
+
+const buscarCompras = async (q, modo, negocioId, sucursalId, rol) => {
+  const admin = _esAdmin(rol);
+  const filtroSucursal = admin ? null : sucursalId;
+
+  if (modo === 'imei') {
+    const [lineas, retomas] = await Promise.all([
+      repo.buscarComprasPorIMEI(q, negocioId),
+      repo.getRetomasPorIMEI(q, negocioId),
+    ]);
+    return { lineas, retomas };
+  }
+
+  const lineas = await repo.buscarComprasPorTexto(q, negocioId, filtroSucursal);
+  return { lineas, retomas: [] };
+};
+
+module.exports = { buscarPorIMEI, buscarProductos, buscarCompras };
