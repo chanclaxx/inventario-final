@@ -94,10 +94,10 @@ export function Navbar() {
       ${visible ? 'translate-y-0' : '-translate-y-full'}
     `}>
 
-      {/* ── Barra principal — logo + controles ── */}
+      {/* ── Barra única ── */}
       <div className="bg-white/90 backdrop-blur-xl border-b border-gray-200/60 shadow-sm">
         <div className="max-w-screen-xl mx-auto px-4">
-          <div className="flex items-center h-14 gap-3">
+          <div className="flex items-center h-14 gap-4">
 
             {/* Logo */}
             <div className="flex items-center gap-2 flex-shrink-0">
@@ -107,12 +107,73 @@ export function Navbar() {
               <span className="font-semibold text-gray-900 hidden sm:block">Inventario</span>
             </div>
 
-            <div className="flex-1" />
+            {/* Separador visual */}
+            <div className="hidden md:block w-px h-5 bg-gray-200 flex-shrink-0" />
 
-            {/* Controles — todas las pantallas */}
-            <div className="flex items-center gap-2 flex-shrink-0">
+            {/* Nav desktop — scrollable si no entra todo */}
+            <nav className="hidden md:flex items-center gap-0.5 flex-1 overflow-x-auto no-scrollbar">
+              {itemsVisibles.map((item) => {
+                const active   = location.pathname === item.path;
+                const ItemIcon = item.Icn;
+                return (
+                  <button
+                    key={item.path}
+                    onClick={() => navigate(item.path)}
+                    title={item.label}
+                    className={`flex items-center gap-1.5 rounded-xl transition-all duration-150
+                      text-sm font-medium px-3 py-1.5 flex-shrink-0
+                      ${active
+                        ? 'bg-blue-600 text-white shadow-sm shadow-blue-200'
+                        : 'text-gray-500 hover:bg-gray-100 hover:text-gray-800'}`}
+                  >
+                    <ItemIcon size={16} />
+                    <span className="hidden lg:block">{item.label}</span>
+                  </button>
+                );
+              })}
+            </nav>
+
+            {/* Controles desktop */}
+            <div className="hidden md:flex items-center gap-1 flex-shrink-0 pl-2 border-l border-gray-200">
               <SucursalSelector />
 
+              <button
+                onClick={() => navigate('/inventario')}
+                className="relative p-2 rounded-xl hover:bg-gray-100 transition-colors"
+                title="Carrito"
+              >
+                <ShoppingCart size={18} className="text-gray-600" />
+                {cantidadItems > 0 && (
+                  <span className="absolute -top-1 -right-1 w-4 h-4 bg-blue-600 text-white
+                    text-xs rounded-full flex items-center justify-center font-medium leading-none">
+                    {cantidadItems}
+                  </span>
+                )}
+              </button>
+
+              <AvatarUsuario nombre={usuario?.nombre} />
+
+              <div className="hidden lg:flex flex-col items-start ml-1">
+                <span className="text-xs font-semibold text-gray-700 leading-tight">
+                  {usuario?.nombre}
+                </span>
+                <span className="text-xs text-gray-400 capitalize leading-tight">
+                  {usuario?.rol?.replace('_', ' ')}
+                </span>
+              </div>
+
+              <button
+                onClick={handleLogout}
+                title="Cerrar sesión"
+                className="p-2 rounded-xl hover:bg-red-50 hover:text-red-500
+                  text-gray-400 transition-colors ml-1"
+              >
+                <LogOut size={16} />
+              </button>
+            </div>
+
+            {/* Controles mobile */}
+            <div className="flex md:hidden items-center gap-1 flex-shrink-0 ml-auto">
               <button
                 onClick={() => navigate('/inventario')}
                 className="relative p-2 rounded-xl hover:bg-gray-100 transition-colors"
@@ -127,16 +188,8 @@ export function Navbar() {
                 )}
               </button>
 
-              <div className="flex items-center gap-2 pl-2 border-l border-gray-200">
+              <div className="flex items-center gap-1 pl-2 border-l border-gray-200">
                 <AvatarUsuario nombre={usuario?.nombre} />
-                <div className="hidden lg:flex flex-col items-start">
-                  <span className="text-xs font-semibold text-gray-700 leading-tight">
-                    {usuario?.nombre}
-                  </span>
-                  <span className="text-xs text-gray-400 capitalize leading-tight">
-                    {usuario?.rol?.replace('_', ' ')}
-                  </span>
-                </div>
                 <button
                   onClick={handleLogout}
                   title="Cerrar sesión"
@@ -152,28 +205,30 @@ export function Navbar() {
         </div>
       </div>
 
-      {/* ── Segunda barra — nav para todas las pantallas ── */}
-      <div className="bg-white/90 backdrop-blur-xl border-b border-gray-200/50">
-        <div className="max-w-screen-xl mx-auto px-2">
-          <div className="flex items-center overflow-x-auto no-scrollbar px-2 py-1.5 gap-1">
-            {itemsVisibles.map((item) => {
-              const active   = location.pathname === item.path;
-              const ItemIcon = item.Icn;
-              return (
-                <button
-                  key={item.path}
-                  onClick={() => navigate(item.path)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl
-                    transition-all duration-150 text-xs font-medium whitespace-nowrap flex-shrink-0
-                    ${active
-                      ? 'bg-blue-600 text-white shadow-sm shadow-blue-200'
-                      : 'text-gray-500 hover:bg-gray-100 hover:text-gray-700'}`}
-                >
-                  <ItemIcon size={15} />
-                  <span>{item.label}</span>
-                </button>
-              );
-            })}
+      {/* ── Nav mobile — segunda barra con scroll horizontal ── */}
+      <div className="md:hidden bg-white/90 backdrop-blur-xl border-b border-gray-200/50">
+        <div className="flex items-center overflow-x-auto no-scrollbar px-3 py-1.5 gap-1">
+          {itemsVisibles.map((item) => {
+            const active   = location.pathname === item.path;
+            const ItemIcon = item.Icn;
+            return (
+              <button
+                key={item.path}
+                onClick={() => navigate(item.path)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl
+                  transition-all duration-150 text-xs font-medium whitespace-nowrap flex-shrink-0
+                  ${active
+                    ? 'bg-blue-600 text-white shadow-sm shadow-blue-200'
+                    : 'text-gray-500 hover:bg-gray-100 hover:text-gray-700'}`}
+              >
+                <ItemIcon size={14} />
+                <span>{item.label}</span>
+              </button>
+            );
+          })}
+
+          <div className="flex-shrink-0 pl-2 border-l border-gray-200 ml-1 flex items-center">
+            <SucursalSelector />
           </div>
         </div>
       </div>
