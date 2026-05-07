@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { buscarPrestamos as buscarPrestamosApi } from '../../api/busqueda.api';
+import { exportarPrestamosExcel } from '../../utils/exportarPrestamosExcel';
 import { getPrestamos, registrarAbonoPrestamo, devolverPrestamo, devolverParcialPrestamo } from '../../api/prestamos.api';
 import {
   getDomiciliarios,
@@ -947,7 +948,7 @@ function TabBusquedaPrestamos() {
     queryFn:  () => buscarPrestamosApi({ q: q.trim(), estado, tipo, fechaDesde, fechaHasta })
       .then((r) => r.data.data),
     // ✅ Después
-enabled: !!hasFilter,
+    enabled: !!hasFilter,
     staleTime: 30 * 1000,
   });
 
@@ -1047,15 +1048,21 @@ enabled: !!hasFilter,
       {/* Resumen y resultados */}
       {resultados.length > 0 && (
         <div className="flex flex-col gap-3">
-          <div className="flex items-center justify-between">
-            <p className="text-xs text-gray-400">
-              {resultados.length} resultado{resultados.length !== 1 ? 's' : ''}
-            </p>
-            {totalSaldo > 0 && (
-              <p className="text-xs font-semibold text-red-500">
-                Saldo activo total: {formatCOP(totalSaldo)}
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div className="flex items-center gap-3">
+              <p className="text-xs text-gray-400">
+                {resultados.length} resultado{resultados.length !== 1 ? 's' : ''}
               </p>
-            )}
+              {totalSaldo > 0 && (
+                <p className="text-xs font-semibold text-red-500">
+                  Saldo activo: {formatCOP(totalSaldo)}
+                </p>
+              )}
+            </div>
+            <Button size="sm" variant="secondary"
+              onClick={() => exportarPrestamosExcel(resultados, 'prestamos-filtrados')}>
+              <FileDown size={14} /> Exportar Excel
+            </Button>
           </div>
           {resultados.map((p) => (
             <TarjetaResultadoPrestamo
@@ -1177,6 +1184,19 @@ export default function PrestamosPage() {
 
   return (
     <div className="flex flex-col gap-4">
+
+      {/* ── Cabecera ── */}
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-bold text-gray-900">Préstamos</h1>
+          <p className="text-sm text-gray-400 mt-0.5">Gestiona préstamos, créditos y domicilios</p>
+        </div>
+        <Button size="sm" variant="secondary"
+          disabled={!prestamos.length}
+          onClick={() => exportarPrestamosExcel(prestamos, 'prestamos')}>
+          <FileDown size={14} /> Exportar Excel
+        </Button>
+      </div>
 
       {/* ── Tabs principales ── */}
       <div className="flex gap-1 bg-gray-100 p-1 rounded-xl w-fit">
