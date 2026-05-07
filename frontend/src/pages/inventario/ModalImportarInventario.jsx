@@ -6,7 +6,8 @@ import {
   Upload, Download, FileSpreadsheet,
   CheckCircle, AlertTriangle, X, ChevronDown, ChevronUp
 } from 'lucide-react';
-import api from '../../api/axios.config';
+import api              from '../../api/axios.config';
+import useSucursalStore from '../../store/sucursalStore';
 
 // ─────────────────────────────────────────────
 // SUBCOMPONENTES
@@ -74,8 +75,9 @@ function ResultadoCantidad({ data }) {
 // MODAL PRINCIPAL
 // ─────────────────────────────────────────────
 export function ModalImportarInventario({ onClose }) {
-  const queryClient = useQueryClient();
-  const inputRef    = useRef(null);
+  const queryClient    = useQueryClient();
+  const inputRef       = useRef(null);
+  const sucursalActiva = useSucursalStore((s) => s.sucursalActiva);
 
   const [archivo,   setArchivo]   = useState(null);
   const [resultado, setResultado] = useState(null);
@@ -84,7 +86,7 @@ export function ModalImportarInventario({ onClose }) {
   const mutation = useMutation({
     mutationFn: (formData) =>
       api.post('/importacion/inventario', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
+        params: sucursalActiva ? { sucursal_id: sucursalActiva } : undefined,
       }),
     onSuccess: (res) => {
   setResultado(res.data.data);
