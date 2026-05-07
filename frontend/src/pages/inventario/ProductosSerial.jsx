@@ -360,7 +360,7 @@ function GrupoLinea({ nombre, productos, productoSeleccionado, onSeleccionar, on
                 e.stopPropagation();
                 if (esAdmin) onEditarProducto(p);
               }}
-              className={`flex items-center justify-between p-3 rounded-xl text-left
+              className={`flex items-center justify-between p-3 rounded-xl text-left group
                 transition-all duration-150 border
                 ${productoSeleccionado?.id === p.id
                   ? 'bg-blue-50 border-blue-200 text-blue-700'
@@ -368,8 +368,7 @@ function GrupoLinea({ nombre, productos, productoSeleccionado, onSeleccionar, on
               title={p.nombre + (esAdmin ? ' · Doble click para editar' : '')}
             >
               <div className="min-w-0 flex-1">
-                {/* Nombre con wrap a 2 líneas en el sidebar */}
-                <p className="text-sm font-medium line-clamp-2 leading-snug">{p.nombre}</p>
+                <p className="text-sm font-medium line-clamp-2 leading-snug group-hover:line-clamp-none">{p.nombre}</p>
                 <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
                   <span className={`text-xs ${p.disponibles > 0 ? 'text-gray-400' : 'text-red-400'}`}>
                     {p.disponibles} disp.
@@ -634,7 +633,7 @@ export function ProductosSerial({ onAgregarProducto }) {
               key={p.id}
               onClick={() => handleSeleccionar(p)}
               onDoubleClick={(e) => { e.stopPropagation(); if (esAdmin) setProductoAEditar(p); }}
-              className={`flex items-center justify-between p-3 rounded-xl text-left
+              className={`flex items-center justify-between p-3 rounded-xl text-left group
                 transition-all duration-150 border
                 ${productoSeleccionado?.id === p.id
                   ? 'bg-blue-50 border-blue-200 text-blue-700'
@@ -642,7 +641,7 @@ export function ProductosSerial({ onAgregarProducto }) {
               title={p.nombre}
             >
               <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium line-clamp-2 leading-snug">{p.nombre}</p>
+                <p className="text-sm font-medium line-clamp-2 leading-snug group-hover:line-clamp-none">{p.nombre}</p>
                 <div className="flex items-center gap-1.5 mt-0.5">
                   <span className="text-xs text-gray-400">{p.disponibles} disp.</span>
                   {Number(p.prestados) > 0 && (
