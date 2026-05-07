@@ -3,32 +3,46 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '../../api/axios.config';
 import { getGarantias, crearGarantia, actualizarGarantia, eliminarGarantia } from '../../api/garantias.api';
 import { getLineas, crearLinea, actualizarLinea, eliminarLinea }             from '../../api/productos.api';
-import { UsuariosConfig }   from './UsuariosConfig';
-import { SucursalesConfig } from './SucursalesConfig';
-import { PasswordConfig }   from './PasswordConfig';
+import { UsuariosConfig }    from './UsuariosConfig';
+import { SucursalesConfig }  from './SucursalesConfig';
+import { PasswordConfig }    from './PasswordConfig';
 import { MetodosPagoConfig } from './MetodosPagoConfig';
-import { Button }  from '../../components/ui/Button';
-import { Input }   from '../../components/ui/Input';
-import { Modal }   from '../../components/ui/Modal';
-import { Spinner } from '../../components/ui/Spinner';
-import { Badge }   from '../../components/ui/Badge';
+import { Button }   from '../../components/ui/Button';
+import { Input }    from '../../components/ui/Input';
+import { Modal }    from '../../components/ui/Modal';
+import { Spinner }  from '../../components/ui/Spinner';
 import {
   Settings, Save, Eye, EyeOff, Plus, Trash2,
   GripVertical, ToggleLeft, ToggleRight, Tag, Lock,
-  Building2, ShieldCheck, FileSliders, BookOpen, Users, Printer, Palette, ListChecks,
+  Building2, ShieldCheck, FileSliders, BookOpen, Users,
+  Printer, Palette, ListChecks, Wallet,
 } from 'lucide-react';
 
-// ─── Secciones del sidebar ────────────────────────────────────────────────────
-
+// ─── Navegación principal ─────────────────────────────────────────────────────
 const SECCIONES = [
-  { id: 'negocio',    label: 'Negocio',          Icn: Building2   },
-  { id: 'seguridad',  label: 'Seguridad',         Icn: ShieldCheck },
-  { id: 'formulario', label: 'Formulario venta',  Icn: FileSliders },
-  { id: 'catalogo',   label: 'Catálogo',          Icn: BookOpen    },
-  { id: 'equipo',     label: 'Equipo',            Icn: Users       },
+  { id: 'negocio',   label: 'Negocio',   Icn: Building2   },
+  { id: 'catalogo',  label: 'Catálogo',  Icn: BookOpen    },
+  { id: 'seguridad', label: 'Seguridad', Icn: ShieldCheck },
+  { id: 'equipo',    label: 'Equipo',    Icn: Users       },
 ];
 
-// ─── Hook compartido de config ────────────────────────────────────────────────
+// ─── Sub-tabs del Catálogo ────────────────────────────────────────────────────
+const TABS_CATALOGO = [
+  { id: 'lineas',    label: 'Líneas',    Icn: Tag        },
+  { id: 'garantias', label: 'Garantías', Icn: BookOpen   },
+  { id: 'seriales',  label: 'Seriales',  Icn: Palette    },
+  { id: 'pagos',     label: 'Pagos',     Icn: Wallet     },
+];
+
+// ─── Campos del formulario de venta ──────────────────────────────────────────
+const CAMPOS_EDITABLES = [
+  { clave: 'campo_direccion_cliente', label: 'Dirección del cliente', description: 'Muestra el campo de dirección al registrar una venta' },
+];
+const CAMPOS_READONLY = [
+  { clave: 'campo_email_cliente', label: 'Envío de facturas por email', description: 'Envía automáticamente la factura al correo del cliente' },
+];
+
+// ─── Hook de config ───────────────────────────────────────────────────────────
 function useConfigQuery() {
   return useQuery({
     queryKey: ['config'],
@@ -36,7 +50,7 @@ function useConfigQuery() {
   });
 }
 
-// ─── Toggle reutilizable ──────────────────────────────────────────────────────
+// ─── Toggle ───────────────────────────────────────────────────────────────────
 function Toggle({ enabled, onChange, label, description }) {
   return (
     <div className="flex items-center justify-between gap-4">
@@ -58,7 +72,6 @@ function Toggle({ enabled, onChange, label, description }) {
   );
 }
 
-// ─── Toggle solo lectura ──────────────────────────────────────────────────────
 function ToggleReadOnly({ enabled, label, description }) {
   return (
     <div className="flex items-center justify-between gap-4">
@@ -136,8 +149,7 @@ function LineasConfig() {
         </div>
         <button
           onClick={abrirNuevo}
-          className="w-8 h-8 bg-blue-600 rounded-xl flex items-center justify-center
-            hover:bg-blue-700 transition-colors"
+          className="w-8 h-8 bg-blue-600 rounded-xl flex items-center justify-center hover:bg-blue-700 transition-colors"
         >
           <Plus size={15} className="text-white" />
         </button>
@@ -361,16 +373,7 @@ function GarantiasConfig() {
   );
 }
 
-// ─── Campos opcionales del formulario de venta ────────────────────────────────
-const CAMPOS_EDITABLES = [
-  { clave: 'campo_direccion_cliente', label: 'Dirección del cliente', description: 'Muestra el campo de dirección al registrar una venta' },
-];
-
-const CAMPOS_READONLY = [
-  { clave: 'campo_email_cliente', label: 'Envío de facturas por email', description: 'Envía automáticamente la factura al correo del cliente' },
-];
-
-// ─── Configuración de impresora ──────────────────────────────────────────────
+// ─── Impresora ────────────────────────────────────────────────────────────────
 const PRESETS_PAPEL = [
   { label: '80mm (estándar)', valor: '80' },
   { label: '58mm (compacto)', valor: '58' },
@@ -390,8 +393,6 @@ function ImpresoraConfig({ valores, set }) {
       </div>
 
       <div className="flex flex-col gap-4">
-
-        {/* Ancho del papel */}
         <div className="flex flex-col gap-1.5">
           <label className="text-xs font-medium text-gray-600">Ancho del papel</label>
           <div className="flex gap-2">
@@ -415,7 +416,6 @@ function ImpresoraConfig({ valores, set }) {
           </div>
         </div>
 
-        {/* Escala de impresión */}
         <div className="flex flex-col gap-1.5">
           <div className="flex items-center justify-between">
             <label className="text-xs font-medium text-gray-600">Escala de impresión</label>
@@ -423,59 +423,43 @@ function ImpresoraConfig({ valores, set }) {
               {Number(escala).toFixed(2)}×
             </span>
           </div>
-          <input
-            type="range" min="0.5" max="3.0" step="0.05"
-            value={escala}
-            onChange={(e) => set('impresion_escala', e.target.value)}
-            className="w-full accent-blue-600 h-2 rounded-full"
-          />
+          <input type="range" min="0.5" max="3.0" step="0.05"
+            value={escala} onChange={(e) => set('impresion_escala', e.target.value)}
+            className="w-full accent-blue-600 h-2 rounded-full" />
           <div className="flex justify-between text-xs text-gray-400">
-            <span>0.5× (pequeño)</span>
-            <span>3.0× (grande)</span>
+            <span>0.5× (pequeño)</span><span>3.0× (grande)</span>
           </div>
           <p className="text-xs text-gray-400">
             Equivale al valor de "Escala" en el diálogo de impresión del navegador.
-            Ajusta hasta que la factura llene bien el papel sin cortarse.
           </p>
         </div>
 
-        {/* Tamaño de fuente */}
         <div className="flex flex-col gap-1.5">
           <div className="flex items-center justify-between">
             <label className="text-xs font-medium text-gray-600">Tamaño de fuente</label>
             <span className="text-sm font-bold text-gray-800 tabular-nums">{fuenteSize}px</span>
           </div>
-          <input
-            type="range" min="9" max="18" step="1"
-            value={fuenteSize}
-            onChange={(e) => set('impresion_fuente_size', e.target.value)}
-            className="w-full accent-blue-600 h-2 rounded-full"
-          />
+          <input type="range" min="9" max="18" step="1"
+            value={fuenteSize} onChange={(e) => set('impresion_fuente_size', e.target.value)}
+            className="w-full accent-blue-600 h-2 rounded-full" />
           <div className="flex justify-between text-xs text-gray-400">
-            <span>9px (compacto)</span>
-            <span>18px (grande)</span>
+            <span>9px (compacto)</span><span>18px (grande)</span>
           </div>
         </div>
 
-        {/* Padding */}
         <div className="flex flex-col gap-1.5">
           <div className="flex items-center justify-between">
             <label className="text-xs font-medium text-gray-600">Margen interno (padding)</label>
             <span className="text-sm font-bold text-gray-800 tabular-nums">{padding}mm</span>
           </div>
-          <input
-            type="range" min="0" max="8" step="0.5"
-            value={padding}
-            onChange={(e) => set('impresion_padding', e.target.value)}
-            className="w-full accent-blue-600 h-2 rounded-full"
-          />
+          <input type="range" min="0" max="8" step="0.5"
+            value={padding} onChange={(e) => set('impresion_padding', e.target.value)}
+            className="w-full accent-blue-600 h-2 rounded-full" />
           <div className="flex justify-between text-xs text-gray-400">
-            <span>0mm (sin margen)</span>
-            <span>8mm (amplio)</span>
+            <span>0mm (sin margen)</span><span>8mm (amplio)</span>
           </div>
         </div>
 
-        {/* Preview visual */}
         <div className="flex flex-col gap-1.5">
           <p className="text-xs font-medium text-gray-600">Vista previa (pantalla)</p>
           <div className="flex justify-center bg-gray-100 rounded-xl p-4 overflow-hidden">
@@ -514,7 +498,6 @@ function ImpresoraConfig({ valores, set }) {
             La escala real en impresión puede verse diferente al preview
           </p>
         </div>
-
       </div>
     </div>
   );
@@ -523,30 +506,23 @@ function ImpresoraConfig({ valores, set }) {
 // ─── Colores de serial ────────────────────────────────────────────────────────
 function ColoresSerialConfig({ valores, set }) {
   const activo   = valores['colores_serial_activo'] === '1';
-  const listaRaw = valores['colores_serial_lista'];
   const colores  = (() => {
-    try { return JSON.parse(listaRaw || '[]'); }
+    try { return JSON.parse(valores['colores_serial_lista'] || '[]'); }
     catch { return []; }
   })();
 
   const [nuevoColor, setNuevoColor] = useState('');
   const [error,      setError]      = useState('');
 
-  const setColores = (nuevaLista) => {
-    set('colores_serial_lista', JSON.stringify(nuevaLista));
-  };
+  const setColores = (nuevaLista) => set('colores_serial_lista', JSON.stringify(nuevaLista));
 
   const handleAgregar = () => {
     const limpio = nuevoColor.trim();
-    if (!limpio)               return setError('El nombre del color es requerido');
+    if (!limpio)                return setError('El nombre del color es requerido');
     if (colores.includes(limpio)) return setError('Este color ya existe');
     setColores([...colores, limpio]);
     setNuevoColor('');
     setError('');
-  };
-
-  const handleEliminar = (color) => {
-    setColores(colores.filter((c) => c !== color));
   };
 
   return (
@@ -569,49 +545,34 @@ function ColoresSerialConfig({ valores, set }) {
       {activo && (
         <div className="flex flex-col gap-3">
           {colores.length === 0 ? (
-            <p className="text-sm text-gray-400 text-center py-2">
-              Sin colores configurados
-            </p>
+            <p className="text-sm text-gray-400 text-center py-2">Sin colores configurados</p>
           ) : (
             <div className="flex flex-col gap-2">
-              {colores.map((color) => {
-                const colorNombre = color;
-                return (
-                  <div key={colorNombre}
-                    className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl">
-                    <GripVertical size={15} className="text-gray-300 flex-shrink-0" />
-                    <p className="text-sm font-medium text-gray-800 flex-1 min-w-0 truncate">
-                      {colorNombre}
-                    </p>
-                    <button
-                      onClick={() => handleEliminar(colorNombre)}
-                      className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400
-                        hover:text-red-500 transition-colors flex-shrink-0"
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
-                );
-              })}
+              {colores.map((color) => (
+                <div key={color} className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl">
+                  <GripVertical size={15} className="text-gray-300 flex-shrink-0" />
+                  <p className="text-sm font-medium text-gray-800 flex-1 min-w-0 truncate">{color}</p>
+                  <button
+                    onClick={() => setColores(colores.filter((c) => c !== color))}
+                    className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors flex-shrink-0"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              ))}
             </div>
           )}
-
           <div className="flex gap-2">
             <input
-              type="text"
-              value={nuevoColor}
+              type="text" value={nuevoColor}
               onChange={(e) => { setNuevoColor(e.target.value); setError(''); }}
               onKeyDown={(e) => { if (e.key === 'Enter') handleAgregar(); }}
               placeholder="Ej: Negro, Azul, Rojo..."
-              className="flex-1 px-3 py-2 bg-gray-100 border-0 rounded-xl text-sm
-                text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2
-                focus:ring-blue-500 focus:bg-white transition-all"
+              className="flex-1 px-3 py-2 bg-gray-100 border-0 rounded-xl text-sm text-gray-900
+                placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"
             />
-            <button
-              onClick={handleAgregar}
-              className="w-9 h-9 bg-blue-600 rounded-xl flex items-center justify-center
-                hover:bg-blue-700 transition-colors flex-shrink-0"
-            >
+            <button onClick={handleAgregar}
+              className="w-9 h-9 bg-blue-600 rounded-xl flex items-center justify-center hover:bg-blue-700 transition-colors flex-shrink-0">
               <Plus size={15} className="text-white" />
             </button>
           </div>
@@ -622,144 +583,18 @@ function ColoresSerialConfig({ valores, set }) {
   );
 }
 
-// ─── Secciones ────────────────────────────────────────────────────────────────
-
-function SeccionNegocio({ valores, set, form, mutation, guardado }) {
-  const camposNegocio = [
-    { clave: 'nombre_negocio', label: 'Nombre del negocio', placeholder: 'Mi Tienda' },
-    { clave: 'nit',            label: 'NIT',                placeholder: '900123456-1' },
-    { clave: 'direccion',      label: 'Dirección',          placeholder: 'Calle 10 # 5-20' },
-    { clave: 'telefono',       label: 'Teléfono',           placeholder: '3001234567' },
-  ];
-
-  return (
-    <div className="flex flex-col gap-5">
-      <div>
-        <h2 className="text-base font-semibold text-gray-900">Datos del negocio</h2>
-        <p className="text-xs text-gray-400 mt-0.5">Esta información aparece en las facturas impresas.</p>
-      </div>
-
-      <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm flex flex-col gap-4">
-        {camposNegocio.map(({ clave, label, placeholder }) => (
-          <Input key={clave} label={label} placeholder={placeholder}
-            value={valores[clave] || ''} onChange={(e) => set(clave, e.target.value)} />
-        ))}
-      </div>
-
-      <ImpresoraConfig valores={valores} set={set} />
-
-      <div className="flex items-center gap-3">
-        <Button className="flex-1" loading={mutation.isPending} onClick={() => mutation.mutate(form)}>
-          <Save size={16} /> Guardar cambios
-        </Button>
-        {guardado && <Badge variant="green">✓ Guardado</Badge>}
-      </div>
-    </div>
-  );
-}
-
-function SeccionSeguridad({ form, set, mutation, guardado }) {
-  const [verPin, setVerPin] = useState(false);
-  const pinNuevo = form['pin_eliminacion'] || '';
-
-  return (
-    <div className="flex flex-col gap-5">
-      <div>
-        <h2 className="text-base font-semibold text-gray-900">Seguridad</h2>
-        <p className="text-xs text-gray-400 mt-0.5">Controla el acceso a acciones sensibles del sistema.</p>
-      </div>
-
-      <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm flex flex-col gap-4">
-        <div className="relative">
-          <Input label="PIN de eliminación / cancelación"
-            type={verPin ? 'text' : 'password'}
-            placeholder="Dejar vacío para mantener el actual"
-            value={pinNuevo}
-            onChange={(e) => set('pin_eliminacion', e.target.value)} />
-          <button type="button" onClick={() => setVerPin((v) => !v)}
-            className="absolute right-3 top-8 text-gray-400 hover:text-gray-600 transition-colors">
-            {verPin ? <EyeOff size={16} /> : <Eye size={16} />}
-          </button>
-        </div>
-        <p className="text-xs text-gray-400 -mt-2">
-          {pinNuevo
-            ? 'Se guardará un nuevo PIN al hacer clic en Guardar cambios.'
-            : 'Escribe un nuevo PIN solo si quieres cambiarlo. Vacío mantiene el actual.'}
-        </p>
-      </div>
-
-      <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
-        <PasswordConfig />
-      </div>
-
-      <div className="flex items-center gap-3">
-        <Button className="flex-1" loading={mutation.isPending} onClick={() => mutation.mutate(form)}>
-          <Save size={16} /> Guardar cambios
-        </Button>
-        {guardado && <Badge variant="green">✓ Guardado</Badge>}
-      </div>
-    </div>
-  );
-}
-
-function SeccionFormulario({ valores, set, form, mutation, guardado }) {
-  return (
-    <div className="flex flex-col gap-5">
-      <div>
-        <h2 className="text-base font-semibold text-gray-900">Formulario de venta</h2>
-        <p className="text-xs text-gray-400 mt-0.5">
-          Activa los campos adicionales que quieres recolectar al facturar.
-        </p>
-      </div>
-
-      <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm flex flex-col gap-4">
-        {CAMPOS_EDITABLES.map((campo) => {
-          const clave   = campo.clave;
-          const enabled = valores[clave] === '1';
-          return (
-            <Toggle key={clave} label={campo.label} description={campo.description}
-              enabled={enabled} onChange={(val) => set(clave, val ? '1' : '0')} />
-          );
-        })}
-
-        {CAMPOS_READONLY.length > 0 && (
-          <div className="border-t border-gray-100 pt-4 flex flex-col gap-4">
-            {CAMPOS_READONLY.map((campo) => {
-              const clave   = campo.clave;
-              const enabled = valores[clave] === '1';
-              return (
-                <ToggleReadOnly key={clave} label={campo.label}
-                  description={campo.description} enabled={enabled} />
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      <div className="flex items-center gap-3">
-        <Button className="flex-1" loading={mutation.isPending} onClick={() => mutation.mutate(form)}>
-          <Save size={16} /> Guardar cambios
-        </Button>
-        {guardado && <Badge variant="green">✓ Guardado</Badge>}
-      </div>
-    </div>
-  );
-}
-
-// ─── Características de serial ───────────────────────────────────────────────
+// ─── Características de serial ────────────────────────────────────────────────
 function CaracteristicasSerialConfig({ valores, set }) {
-  const activo   = valores['caracteristicas_serial_activo'] === '1';
-  const listaRaw = valores['caracteristicas_serial_lista'];
-  const lista    = (() => {
-    try { return JSON.parse(listaRaw || '[]'); }
+  const activo = valores['caracteristicas_serial_activo'] === '1';
+  const lista  = (() => {
+    try { return JSON.parse(valores['caracteristicas_serial_lista'] || '[]'); }
     catch { return []; }
   })();
 
   const [nueva, setNueva] = useState('');
   const [error, setError] = useState('');
 
-  const setLista = (nuevaLista) =>
-    set('caracteristicas_serial_lista', JSON.stringify(nuevaLista));
+  const setLista = (nuevaLista) => set('caracteristicas_serial_lista', JSON.stringify(nuevaLista));
 
   const handleAgregar = () => {
     const limpio = nueva.trim();
@@ -790,21 +625,16 @@ function CaracteristicasSerialConfig({ valores, set }) {
       {activo && (
         <div className="flex flex-col gap-3">
           {lista.length === 0 ? (
-            <p className="text-sm text-gray-400 text-center py-2">
-              Sin características configuradas
-            </p>
+            <p className="text-sm text-gray-400 text-center py-2">Sin características configuradas</p>
           ) : (
             <div className="flex flex-col gap-2">
               {lista.map((nombre) => (
                 <div key={nombre} className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl">
                   <GripVertical size={15} className="text-gray-300 flex-shrink-0" />
-                  <p className="text-sm font-medium text-gray-800 flex-1 min-w-0 truncate">
-                    {nombre}
-                  </p>
+                  <p className="text-sm font-medium text-gray-800 flex-1 min-w-0 truncate">{nombre}</p>
                   <button
                     onClick={() => setLista(lista.filter((c) => c !== nombre))}
-                    className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400
-                      hover:text-red-500 transition-colors flex-shrink-0"
+                    className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors flex-shrink-0"
                   >
                     <Trash2 size={14} />
                   </button>
@@ -812,23 +642,17 @@ function CaracteristicasSerialConfig({ valores, set }) {
               ))}
             </div>
           )}
-
           <div className="flex gap-2">
             <input
-              type="text"
-              value={nueva}
+              type="text" value={nueva}
               onChange={(e) => { setNueva(e.target.value); setError(''); }}
               onKeyDown={(e) => { if (e.key === 'Enter') handleAgregar(); }}
               placeholder="Ej: Batería, Capacidad, Estado pantalla..."
-              className="flex-1 px-3 py-2 bg-gray-100 border-0 rounded-xl text-sm
-                text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2
-                focus:ring-blue-500 focus:bg-white transition-all"
+              className="flex-1 px-3 py-2 bg-gray-100 border-0 rounded-xl text-sm text-gray-900
+                placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"
             />
-            <button
-              onClick={handleAgregar}
-              className="w-9 h-9 bg-blue-600 rounded-xl flex items-center justify-center
-                hover:bg-blue-700 transition-colors flex-shrink-0"
-            >
+            <button onClick={handleAgregar}
+              className="w-9 h-9 bg-blue-600 rounded-xl flex items-center justify-center hover:bg-blue-700 transition-colors flex-shrink-0">
               <Plus size={15} className="text-white" />
             </button>
           </div>
@@ -839,8 +663,89 @@ function CaracteristicasSerialConfig({ valores, set }) {
   );
 }
 
-// ─── SeccionCatalogo — recibe props para ColoresSerialConfig y botón guardar ──
-function SeccionCatalogo({ valores, set, form, mutation, guardado }) {
+// ─── Barra de guardado ────────────────────────────────────────────────────────
+function BarraGuardado({ isDirty, onGuardar, isPending, guardado }) {
+  if (!isDirty && !guardado) return null;
+  return (
+    <div className={`flex items-center justify-between gap-3 px-4 py-2.5 rounded-2xl mb-5
+      border transition-all
+      ${guardado ? 'bg-green-50 border-green-200' : 'bg-amber-50 border-amber-200'}`}>
+      <p className={`text-sm font-medium ${guardado ? 'text-green-700' : 'text-amber-700'}`}>
+        {guardado ? '✓ Cambios guardados' : 'Tienes cambios sin guardar'}
+      </p>
+      {!guardado && (
+        <button
+          onClick={onGuardar}
+          disabled={isPending}
+          className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-600 hover:bg-amber-700
+            text-white text-xs font-semibold rounded-xl transition-colors disabled:opacity-60"
+        >
+          <Save size={13} />
+          {isPending ? 'Guardando...' : 'Guardar'}
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ─── Sección: Negocio ─────────────────────────────────────────────────────────
+function SeccionNegocio({ valores, set }) {
+  const camposNegocio = [
+    { clave: 'nombre_negocio', label: 'Nombre del negocio', placeholder: 'Mi Tienda' },
+    { clave: 'nit',            label: 'NIT',                placeholder: '900123456-1' },
+    { clave: 'direccion',      label: 'Dirección',          placeholder: 'Calle 10 # 5-20' },
+    { clave: 'telefono',       label: 'Teléfono',           placeholder: '3001234567' },
+  ];
+
+  return (
+    <div className="flex flex-col gap-5">
+      <div>
+        <h2 className="text-base font-semibold text-gray-900">Datos del negocio</h2>
+        <p className="text-xs text-gray-400 mt-0.5">Esta información aparece en las facturas impresas.</p>
+      </div>
+
+      <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm flex flex-col gap-4">
+        {camposNegocio.map(({ clave, label, placeholder }) => (
+          <Input key={clave} label={label} placeholder={placeholder}
+            value={valores[clave] || ''} onChange={(e) => set(clave, e.target.value)} />
+        ))}
+      </div>
+
+      <ImpresoraConfig valores={valores} set={set} />
+
+      <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm flex flex-col gap-4">
+        <div className="flex items-center gap-2">
+          <FileSliders size={15} className="text-gray-400" />
+          <h3 className="text-sm font-semibold text-gray-700">Formulario de venta</h3>
+          <span className="text-xs text-gray-400 ml-1">— campos al facturar</span>
+        </div>
+        {CAMPOS_EDITABLES.map((campo) => {
+          const enabled = valores[campo.clave] === '1';
+          return (
+            <Toggle key={campo.clave} label={campo.label} description={campo.description}
+              enabled={enabled} onChange={(val) => set(campo.clave, val ? '1' : '0')} />
+          );
+        })}
+        {CAMPOS_READONLY.length > 0 && (
+          <div className="border-t border-gray-100 pt-4 flex flex-col gap-4">
+            {CAMPOS_READONLY.map((campo) => {
+              const enabled = valores[campo.clave] === '1';
+              return (
+                <ToggleReadOnly key={campo.clave} label={campo.label}
+                  description={campo.description} enabled={enabled} />
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Sección: Catálogo con sub-tabs ──────────────────────────────────────────
+function SeccionCatalogo({ valores, set }) {
+  const [tab, setTab] = useState('lineas');
+
   return (
     <div className="flex flex-col gap-5">
       <div>
@@ -850,36 +755,97 @@ function SeccionCatalogo({ valores, set, form, mutation, guardado }) {
         </p>
       </div>
 
-      <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
-        <LineasConfig />
+      {/* Sub-tabs */}
+      <div className="flex gap-1 bg-gray-100 p-1 rounded-2xl">
+        {TABS_CATALOGO.map(({ id, label, Icn }) => {
+          const activo  = tab === id;
+          const TabIcon = Icn;
+          return (
+            <button
+              key={id}
+              onClick={() => setTab(id)}
+              className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-2 rounded-xl
+                text-xs font-medium transition-all
+                ${activo ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+            >
+              <TabIcon size={13} className="flex-shrink-0" />
+              <span className="hidden sm:inline">{label}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      {tab === 'lineas' && (
+        <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
+          <LineasConfig />
+        </div>
+      )}
+
+      {tab === 'garantias' && (
+        <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
+          <GarantiasConfig />
+        </div>
+      )}
+
+      {tab === 'seriales' && (
+        <div className="flex flex-col gap-4">
+          <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
+            <ColoresSerialConfig valores={valores} set={set} />
+          </div>
+          <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
+            <CaracteristicasSerialConfig valores={valores} set={set} />
+          </div>
+        </div>
+      )}
+
+      {tab === 'pagos' && (
+        <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
+          <MetodosPagoConfig valores={valores} set={set} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Sección: Seguridad ───────────────────────────────────────────────────────
+function SeccionSeguridad({ form, set }) {
+  const [verPin, setVerPin] = useState(false);
+  const pinNuevo = form['pin_eliminacion'] || '';
+
+  return (
+    <div className="flex flex-col gap-5">
+      <div>
+        <h2 className="text-base font-semibold text-gray-900">Seguridad</h2>
+        <p className="text-xs text-gray-400 mt-0.5">Controla el acceso a acciones sensibles del sistema.</p>
+      </div>
+
+      <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm flex flex-col gap-4">
+        <div className="relative">
+          <Input label="PIN de eliminación / cancelación"
+            type={verPin ? 'text' : 'password'}
+            placeholder="Dejar vacío para mantener el actual"
+            value={pinNuevo}
+            onChange={(e) => set('pin_eliminacion', e.target.value)} />
+          <button type="button" onClick={() => setVerPin((v) => !v)}
+            className="absolute right-3 top-8 text-gray-400 hover:text-gray-600 transition-colors">
+            {verPin ? <EyeOff size={16} /> : <Eye size={16} />}
+          </button>
+        </div>
+        <p className="text-xs text-gray-400 -mt-2">
+          {pinNuevo
+            ? 'Se guardará un nuevo PIN al hacer clic en Guardar.'
+            : 'Escribe un nuevo PIN solo si quieres cambiarlo. Vacío mantiene el actual.'}
+        </p>
       </div>
 
       <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
-        <GarantiasConfig />
-      </div>
-
-      <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
-        <ColoresSerialConfig valores={valores} set={set} />
-      </div>
-
-      <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
-        <CaracteristicasSerialConfig valores={valores} set={set} />
-      </div>
-
-      <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
-        <MetodosPagoConfig valores={valores} set={set} />
-      </div>
-
-      <div className="flex items-center gap-3">
-        <Button className="flex-1" loading={mutation.isPending} onClick={() => mutation.mutate(form)}>
-          <Save size={16} /> Guardar cambios
-        </Button>
-        {guardado && <Badge variant="green">✓ Guardado</Badge>}
+        <PasswordConfig />
       </div>
     </div>
   );
 }
 
+// ─── Sección: Equipo ──────────────────────────────────────────────────────────
 function SeccionEquipo() {
   return (
     <div className="flex flex-col gap-5">
@@ -904,6 +870,7 @@ export default function ConfigPage() {
   const queryClient                 = useQueryClient();
   const { data: config, isLoading } = useConfigQuery();
   const [form,          setForm]    = useState({});
+  const [isDirty,       setIsDirty]  = useState(false);
   const [guardado,      setGuardado] = useState(false);
   const [seccionActiva, setSeccionActiva] = useState('negocio');
 
@@ -916,15 +883,19 @@ export default function ConfigPage() {
         delete siguiente['pin_eliminacion'];
         return siguiente;
       });
+      setIsDirty(false);
       setGuardado(true);
-      setTimeout(() => setGuardado(false), 2000);
+      setTimeout(() => setGuardado(false), 2500);
     },
   });
 
   if (isLoading) return <Spinner className="py-32" />;
 
   const valores = { ...config, ...form };
-  const set     = (clave, valor) => setForm((f) => ({ ...f, [clave]: valor }));
+  const set = (clave, valor) => {
+    setForm((f) => ({ ...f, [clave]: valor }));
+    setIsDirty(true);
+  };
 
   return (
     <div className="flex flex-col gap-4">
@@ -968,19 +939,16 @@ export default function ConfigPage() {
 
         {/* ── Contenido ── */}
         <div className="flex-1 min-w-0">
-          {seccionActiva === 'negocio'    && (
-            <SeccionNegocio valores={valores} set={set} form={form} mutation={mutation} guardado={guardado} />
-          )}
-          {seccionActiva === 'seguridad'  && (
-            <SeccionSeguridad form={form} set={set} mutation={mutation} guardado={guardado} />
-          )}
-          {seccionActiva === 'formulario' && (
-            <SeccionFormulario valores={valores} set={set} form={form} mutation={mutation} guardado={guardado} />
-          )}
-          {seccionActiva === 'catalogo'   && (
-            <SeccionCatalogo valores={valores} set={set} form={form} mutation={mutation} guardado={guardado} />
-          )}
-          {seccionActiva === 'equipo'     && <SeccionEquipo />}
+          <BarraGuardado
+            isDirty={isDirty}
+            onGuardar={() => mutation.mutate(form)}
+            isPending={mutation.isPending}
+            guardado={guardado}
+          />
+          {seccionActiva === 'negocio'   && <SeccionNegocio   valores={valores} set={set} />}
+          {seccionActiva === 'catalogo'  && <SeccionCatalogo  valores={valores} set={set} />}
+          {seccionActiva === 'seguridad' && <SeccionSeguridad form={form}       set={set} />}
+          {seccionActiva === 'equipo'    && <SeccionEquipo />}
         </div>
 
       </div>
