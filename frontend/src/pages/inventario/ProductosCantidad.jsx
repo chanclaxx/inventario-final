@@ -202,6 +202,7 @@ export function ProductosCantidad() {
       setProductoAReducir(null);
       setCantidadReducir('1');
     },
+    onError: () => {}, // El error se muestra en ModalPinEliminacion
   });
 
   const productos = Array.isArray(productosData?.items) ? productosData.items : [];
@@ -241,7 +242,9 @@ export function ProductosCantidad() {
 
   const handleConfirmarReducir = () => {
     const cant = parseInt(cantidadReducir, 10);
-    if (!cant || cant <= 0) return;
+    if (!cant || cant <= 0) throw new Error('La cantidad debe ser mayor a 0');
+    if (cant > productoAReducir.stock)
+      throw new Error(`Stock insuficiente. Stock actual: ${productoAReducir.stock}`);
     return mutReducir.mutateAsync({ productoId: productoAReducir.id, cantidad: cant });
   };
 

@@ -74,14 +74,32 @@ function buildPayloadCompra({ proveedorId, monto, modoPago, lineas, registrarEnC
 async function verificarImeis(imeis) {
   const resultados = await Promise.all(
     imeis.map(async (imei) => {
-      try {
-        const { data } = await verificarImeiApi(imei.trim());
-        if (data.data.existe) return data.data.serial;
-        return null;
-      } catch { return null; }
+      const { data } = await verificarImeiApi(imei.trim());
+      if (data.data.existe) return data.data.serial;
+      return null;
     })
   );
   return resultados.filter(Boolean);
+}
+
+// ─── Helper: validaciones locales de IMEIs antes de enviar ───────────────────
+function validarImeisLocales(imeis) {
+  const cortos = imeis.filter((i) => i.length < 5);
+  if (cortos.length > 0)
+    return cortos.length === 1
+      ? `El IMEI "${cortos[0]}" es demasiado corto (mínimo 5 caracteres)`
+      : `${cortos.length} IMEIs son demasiado cortos (mín. 5 caracteres): ${cortos.join(', ')}`;
+
+  const vistos = new Set();
+  const dupes  = [];
+  for (const i of imeis) {
+    if (vistos.has(i)) dupes.push(i);
+    else vistos.add(i);
+  }
+  if (dupes.length > 0)
+    return `IMEIs repetidos en la lista: ${[...new Set(dupes)].join(', ')}`;
+
+  return null;
 }
 
 // ─── Helper: extraer string de imei desde item (string o { imei, color }) ────
@@ -841,18 +859,28 @@ function PasoCompraCliente({ sucursalKey, sucursalLista, onExito, onDuplicadosEn
     if (!clienteSeleccionado) return setError('Selecciona el cliente que vende');
     if (!lineaSel)            return setError('Selecciona una línea de producto');
     if (imeisValidos === 0)   return setError('Ingresa al menos un IMEI');
+
     const imeisLimpios = items.filter((i) => extraerImei(i).trim()).map((i) => extraerImei(i).trim());
+
+    const errLocal = validarImeisLocales(imeisLimpios);
+    if (errLocal) return setError(errLocal);
+
     setVerificando(true);
-    const encontrados = await verificarImeis(imeisLimpios);
-    setVerificando(false);
-    if (encontrados.length > 0) {
-      onDuplicadosEncontrados(
-        { disponibles: encontrados.filter((s) => !s.vendido && !s.prestado), paraReactivar: encontrados.filter((s) => s.vendido || s.prestado) },
-        confirmarConReactivacion
-      );
-      return;
+    try {
+      const encontrados = await verificarImeis(imeisLimpios);
+      if (encontrados.length > 0) {
+        onDuplicadosEncontrados(
+          { disponibles: encontrados.filter((s) => !s.vendido && !s.prestado), paraReactivar: encontrados.filter((s) => s.vendido || s.prestado) },
+          confirmarConReactivacion,
+        );
+        return;
+      }
+      mutConfirmarSerial.mutate();
+    } catch {
+      setError('Error al verificar los IMEIs. Verifica tu conexión e intenta de nuevo.');
+    } finally {
+      setVerificando(false);
     }
-    mutConfirmarSerial.mutate();
   };
 
   const handleConfirmarCantidad = () => {
@@ -1223,21 +1251,31 @@ function PasoSerial({ sucursalKey, onExito, onDuplicadosEncontrados, coloresActi
 
   const handleConfirmar = async () => {
     setError('');
-    if (!lineaSel)          return setError('Selecciona una linea de producto');
+    if (!lineaSel)          return setError('Selecciona una línea de producto');
     if (imeisValidos === 0) return setError('Ingresa al menos un IMEI');
-    if (proveedorId && !modoPago) return setError('Selecciona si fue pagado o a credito');
+    if (proveedorId && !modoPago) return setError('Selecciona si fue pagado o a crédito');
+
     const imeisLimpios = items.filter((i) => extraerImei(i).trim()).map((i) => extraerImei(i).trim());
+
+    const errLocal = validarImeisLocales(imeisLimpios);
+    if (errLocal) return setError(errLocal);
+
     setVerificando(true);
-    const encontrados = await verificarImeis(imeisLimpios);
-    setVerificando(false);
-    if (encontrados.length > 0) {
-      onDuplicadosEncontrados(
-        { disponibles: encontrados.filter((s) => !s.vendido && !s.prestado), paraReactivar: encontrados.filter((s) => s.vendido || s.prestado) },
-        confirmarConReactivacion
-      );
-      return;
+    try {
+      const encontrados = await verificarImeis(imeisLimpios);
+      if (encontrados.length > 0) {
+        onDuplicadosEncontrados(
+          { disponibles: encontrados.filter((s) => !s.vendido && !s.prestado), paraReactivar: encontrados.filter((s) => s.vendido || s.prestado) },
+          confirmarConReactivacion,
+        );
+        return;
+      }
+      mutConfirmar.mutate();
+    } catch {
+      setError('Error al verificar los IMEIs. Verifica tu conexión e intenta de nuevo.');
+    } finally {
+      setVerificando(false);
     }
-    mutConfirmar.mutate();
   };
 
   const labelBoton = () => {

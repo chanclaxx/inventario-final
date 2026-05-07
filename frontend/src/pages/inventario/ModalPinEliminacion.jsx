@@ -32,17 +32,29 @@ export function ModalPinEliminacion({ titulo, descripcion, onConfirm, onClose, e
     setVerificando(true);
     setError('');
 
+    // ── Verificar PIN ──────────────────────────────────────────────
     try {
       const res = await verificarPin(pin.trim());
       if (!res.data.valido) {
         setError('PIN incorrecto');
         return;
       }
-      await onConfirm();
     } catch {
       setError('Error al verificar el PIN. Intenta de nuevo.');
+      return;
     } finally {
       setVerificando(false);
+    }
+
+    // ── PIN correcto — ejecutar la acción ──────────────────────────
+    try {
+      await onConfirm();
+    } catch (err) {
+      setError(
+        err.response?.data?.error ||
+        err.message ||
+        'Ocurrió un error al ejecutar la acción. Intenta de nuevo.',
+      );
     }
   };
 

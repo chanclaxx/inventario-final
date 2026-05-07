@@ -490,6 +490,7 @@ export function ProductosSerial({ onAgregarProducto }) {
       queryClient.invalidateQueries({ queryKey: ['productos-serial'], exact: false });
       setSerialAEliminar(null);
     },
+    onError: () => {}, // El error se muestra en ModalPinEliminacion
   });
 
   const productos = productosData || [];
