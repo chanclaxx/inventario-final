@@ -1,5 +1,63 @@
 const { pool } = require('../../config/db');
 
+// ─── Helper: crear factura automática al entregar ─────────────────────────────
+
+const METODOS_FACTURA = new Set(['Efectivo','Transferencia','Tarjeta','Nequi','Daviplata','Credito','Otro']);
+
+const _crearFacturaPorServicio = async (client, orden, precioServicio) => {
+  if (orden.factura_id) return;
+
+  const partes = ['Servicio técnico'];
+  if (orden.equipo_tipo)   partes.push(`(${orden.equipo_tipo})`);
+  if (orden.equipo_nombre) partes.push(`- ${orden.equipo_nombre}`);
+  const nombreLinea = partes.join(' ');
+
+  const notas = `OS-${String(orden.id).padStart(4, '0')}: ${(orden.falla_reportada || '').slice(0, 200)}`;
+
+  const { rows: [factura] } = await client.query(`
+    INSERT INTO facturas(sucursal_id, usuario_id, cliente_id, nombre_cliente, cedula, celular, notas, estado)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, 'Activa')
+    RETURNING id
+  `, [
+    orden.sucursal_id,
+    orden.usuario_id || null,
+    orden.cliente_id || null,
+    orden.cliente_nombre,
+    orden.cliente_cedula  || 'S/C',
+    orden.cliente_telefono || '0000000000',
+    notas,
+  ]);
+
+  await client.query(`
+    INSERT INTO lineas_factura(factura_id, nombre_producto, cantidad, precio)
+    VALUES ($1, $2, 1, $3)
+  `, [factura.id, nombreLinea, precioServicio]);
+
+  // Pagos: suma de abonos agrupados por método
+  const { rows: abonos } = await client.query(`
+    SELECT metodo, SUM(valor) AS total
+    FROM abonos_servicio
+    WHERE orden_id = $1
+    GROUP BY metodo
+  `, [orden.id]);
+
+  for (const ab of abonos) {
+    const val = Number(ab.total);
+    if (val > 0) {
+      const metodo = METODOS_FACTURA.has(ab.metodo) ? ab.metodo : 'Otro';
+      await client.query(
+        'INSERT INTO pagos_factura(factura_id, metodo, valor) VALUES ($1, $2, $3)',
+        [factura.id, metodo, val],
+      );
+    }
+  }
+
+  await client.query(
+    'UPDATE ordenes_servicio SET factura_id = $1 WHERE id = $2',
+    [factura.id, orden.id],
+  );
+};
+
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
 const HOY_BOGOTA = `(NOW() AT TIME ZONE 'America/Bogota')::date`;
@@ -59,7 +117,7 @@ const findAll = async (sucursalId, negocioId, filtros = {}) => {
       os.costo_estimado, os.costo_real, os.precio_final, os.total_abonado,
       os.precio_garantia, os.costo_garantia,
       os.motivo_sin_reparar, os.garantia_cobrable, os.orden_origen_id,
-      os.fecha_recepcion, os.fecha_entrega, os.sucursal_id,
+      os.fecha_recepcion, os.fecha_entrega, os.sucursal_id, os.factura_id,
       ${COLS_CALCULADAS},
       u.nombre AS usuario_nombre
     FROM ordenes_servicio os
@@ -271,7 +329,9 @@ const registrarAbono = async (negocioId, ordenId, { valor, metodo, notas, usuari
 
     const { rows: orden } = await client.query(`
       SELECT id, estado, precio_final, precio_garantia, total_abonado,
-             garantia_cobrable, sucursal_id
+             garantia_cobrable, sucursal_id,
+             usuario_id, cliente_id, cliente_nombre, cliente_cedula, cliente_telefono,
+             equipo_tipo, equipo_nombre, falla_reportada, factura_id
       FROM ordenes_servicio
       WHERE id = $1 AND negocio_id = $2
         AND estado IN ('Listo','Pendiente_pago','Garantia')
@@ -306,6 +366,10 @@ const registrarAbono = async (negocioId, ordenId, { valor, metodo, notas, usuari
       RETURNING total_abonado, precio_final, precio_garantia, estado, fecha_entrega
     `, [nuevoAbonado, nuevoEstado, ordenId]);
 
+    if (nuevoEstado === 'Entregado' && !o.factura_id) {
+      await _crearFacturaPorServicio(client, o, totalCobro);
+    }
+
     if (cajaId) {
       await client.query(`
         INSERT INTO movimientos_caja
@@ -335,7 +399,10 @@ const marcarEntregado = async (negocioId, id) => {
 
     const { rows } = await client.query(`
       SELECT id, precio_final, precio_garantia, total_abonado,
-             garantia_cobrable, estado
+             garantia_cobrable, estado,
+             sucursal_id, usuario_id, cliente_id, cliente_nombre,
+             cliente_cedula, cliente_telefono, equipo_tipo, equipo_nombre,
+             falla_reportada, factura_id
       FROM ordenes_servicio
       WHERE id = $1 AND negocio_id = $2
         AND estado IN ('Listo','Garantia')
@@ -361,6 +428,10 @@ const marcarEntregado = async (negocioId, id) => {
       WHERE id = $1
       RETURNING *
     `, [id, nuevoEstado]);
+
+    if (nuevoEstado === 'Entregado' && !o.factura_id) {
+      await _crearFacturaPorServicio(client, o, totalCobro);
+    }
 
     await client.query('COMMIT');
     return { ...updated[0], saldo_al_entregar: saldo > 0 ? saldo : 0 };

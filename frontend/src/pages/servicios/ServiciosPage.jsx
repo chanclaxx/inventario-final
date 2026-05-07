@@ -223,14 +223,32 @@ function AccionesOrden({ orden, onAccion }) {
         </>
       )}
       {estado === 'Listo' && (
-        <Button size="sm" onClick={() => onAccion('entregar', orden)}>
-          <CheckCircle size={13} /> Entregar
-        </Button>
+        <>
+          <Button size="sm" onClick={() => onAccion('entregar', orden)}>
+            <CheckCircle size={13} /> Entregar
+          </Button>
+          <button
+            onClick={() => onAccion('reimprimir-comprobante', orden)}
+            className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-blue-500 transition-colors"
+            title="Reimprimir comprobante"
+          >
+            <Printer size={14} />
+          </button>
+        </>
       )}
       {estado === 'Pendiente_pago' && (
-        <Button size="sm" onClick={() => onAccion('abono', orden)}>
-          <Plus size={13} /> Registrar pago
-        </Button>
+        <>
+          <Button size="sm" onClick={() => onAccion('abono', orden)}>
+            <Plus size={13} /> Registrar pago
+          </Button>
+          <button
+            onClick={() => onAccion('reimprimir-comprobante', orden)}
+            className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-blue-500 transition-colors"
+            title="Reimprimir comprobante"
+          >
+            <Printer size={14} />
+          </button>
+        </>
       )}
       {estado === 'Garantia' && (
         <>
@@ -246,6 +264,15 @@ function AccionesOrden({ orden, onAccion }) {
         <Button size="sm" variant="secondary" onClick={() => onAccion('garantia', orden)}>
           <RefreshCw size={13} /> Garantía
         </Button>
+      )}
+      {estado === 'Entregado' && (
+        <button
+          onClick={() => onAccion('reimprimir-comprobante', orden)}
+          className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-blue-500 transition-colors"
+          title="Reimprimir comprobante"
+        >
+          <Printer size={14} />
+        </button>
       )}
     </>
   );
@@ -1739,6 +1766,34 @@ function ReimprimirRecepcion({ orden, onClose }) {
   );
 }
 
+// ─── Reimprimir comprobante de entrega ────────────────────────────────────────
+
+function ReimprimirComprobante({ orden, onClose }) {
+  const config = useConfig();
+
+  const { data: ordenDetalle } = useQuery({
+    queryKey: ['orden-detalle-comprobante-reimp', orden.id],
+    queryFn:  () => getOrdenById(orden.id).then((r) => r.data.data),
+  });
+
+  if (!ordenDetalle) {
+    return (
+      <Modal open onClose={onClose} title="Cargando..." size="sm">
+        <Spinner className="py-10" />
+      </Modal>
+    );
+  }
+
+  return (
+    <ComprobanteServicio
+      orden={ordenDetalle}
+      config={config}
+      garantias={[]}
+      onClose={onClose}
+    />
+  );
+}
+
 // ─── Página principal ─────────────────────────────────────────────────────────
 
 export default function ServiciosPage() {
@@ -1931,6 +1986,9 @@ export default function ServiciosPage() {
       )}
       {accion?.tipo === 'reimprimir-recepcion' && (
         <ReimprimirRecepcion orden={accion.orden} onClose={cerrar} />
+      )}
+      {accion?.tipo === 'reimprimir-comprobante' && (
+        <ReimprimirComprobante orden={accion.orden} onClose={cerrar} />
       )}
     </>
   );
