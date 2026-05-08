@@ -466,17 +466,17 @@ function VistaDetallePersona({ nombre, tipo, personaId, prestamos, onVolver, onA
       </button>
 
       {/* Cabecera de persona */}
-      <div className="bg-white border border-gray-100 rounded-2xl p-4 flex items-center gap-4">
+      <div className="bg-white border border-gray-100 rounded-2xl p-4 flex flex-wrap items-center gap-3">
         <div className={`w-12 h-12 rounded-2xl flex items-center justify-center
           text-base font-bold flex-shrink-0 ${avatarClass}`}>
           {iniciales(nombre)}
         </div>
-        <div className="flex-1 min-w-0">
+        <div className="flex-1 min-w-0 basis-32">
           <p className="font-bold text-gray-900 text-base leading-tight truncate">{nombre}</p>
           {cedula   && <p className="text-xs text-gray-400 mt-0.5">CC: {cedula}</p>}
           {telefono && <p className="text-xs text-gray-400">Tel: {telefono}</p>}
         </div>
-        <div className="flex flex-col items-end gap-2 flex-shrink-0">
+        <div className="flex items-center gap-3 flex-shrink-0 ml-auto">
           {saldoTotal > 0 && (
             <div className="text-right">
               <p className="text-xs text-gray-400 leading-tight">Saldo total</p>
@@ -1186,12 +1186,12 @@ export default function PrestamosPage() {
     <div className="flex flex-col gap-4">
 
       {/* ── Cabecera ── */}
-      <div className="flex items-center justify-between gap-3">
-        <div>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
           <h1 className="text-xl font-bold text-gray-900">Préstamos</h1>
           <p className="text-sm text-gray-400 mt-0.5">Gestiona préstamos, créditos y domicilios</p>
         </div>
-        <Button size="sm" variant="secondary"
+        <Button size="sm" variant="secondary" className="flex-shrink-0"
           disabled={!prestamos.length}
           onClick={() => exportarPrestamosExcel(prestamos, 'prestamos')}>
           <FileDown size={14} /> Exportar Excel
@@ -1199,17 +1199,19 @@ export default function PrestamosPage() {
       </div>
 
       {/* ── Tabs principales ── */}
-      <div className="flex gap-1 bg-gray-100 p-1 rounded-xl w-fit">
-        {TABS_PRINCIPALES.map((tab) => {
-          const TabIcon = tab.Icn;
-          return (
-            <button key={tab.id} onClick={() => setTabPrincipal(tab.id)}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all
-                ${tabPrincipal === tab.id ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
-              <TabIcon size={16} />{tab.label}
-            </button>
-          );
-        })}
+      <div className="overflow-x-auto">
+        <div className="flex gap-1 bg-gray-100 p-1 rounded-xl w-max">
+          {TABS_PRINCIPALES.map((tab) => {
+            const TabIcon = tab.Icn;
+            return (
+              <button key={tab.id} onClick={() => setTabPrincipal(tab.id)}
+                className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-all flex-shrink-0 whitespace-nowrap
+                  ${tabPrincipal === tab.id ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+                <TabIcon size={16} />{tab.label}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* ── Tab Préstamos ── */}
