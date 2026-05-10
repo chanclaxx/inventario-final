@@ -481,7 +481,14 @@ function ListaAcreedores({ acreedores, acreedorSel, isLoading, busqueda, setBusq
                       ? 'bg-blue-50 border-blue-200 text-blue-700'
                       : 'bg-white border-gray-100 hover:border-gray-200 hover:bg-gray-50'}`}>
                   <div>
-                    <p className="text-sm font-medium text-gray-800">{a.nombre}</p>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <p className="text-sm font-medium text-gray-800">{a.nombre}</p>
+                      {a.proveedor_id && (
+                        <span className="text-xs text-blue-500 bg-blue-50 border border-blue-100 px-1.5 py-0.5 rounded-full leading-none">
+                          Proveedor
+                        </span>
+                      )}
+                    </div>
                     <p className={`text-xs font-semibold mt-0.5 ${saldo > 0 ? 'text-red-500' : 'text-green-600'}`}>
                       {saldo > 0 ? `Debemos: ${formatCOP(saldo)}` : 'Al día'}
                     </p>
