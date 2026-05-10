@@ -11,7 +11,8 @@ import { Modal }      from '../../components/ui/Modal';
 import { Badge }      from '../../components/ui/Badge';
 import { Spinner }    from '../../components/ui/Spinner';
 import { EmptyState } from '../../components/ui/EmptyState';
-import { useSucursalKey } from '../../hooks/useSucursalKey';
+import { useSucursalKey }  from '../../hooks/useSucursalKey';
+import { useMetodosPago }  from '../../hooks/useMetodosPago';
 import {
   Wallet, Plus, Lock, ChevronDown, ChevronUp,
   ShoppingCart, CreditCard, ArrowDownCircle, ArrowUpCircle,
@@ -552,9 +553,274 @@ function GrupoMovimientosInformativo({ grupo }) {
   );
 }
 
+// ─── ModalMovimientoMetodo ────────────────────────────────────────────────────
+function ModalMovimientoMetodo({ cajaId, metodoInicial, onClose }) {
+  const queryClient = useQueryClient();
+  const metodos     = useMetodosPago();
+  const [form,  setForm]  = useState({
+    tipo:    'Ingreso',
+    concepto: '',
+    valor:   '',
+    metodo:  metodoInicial || metodos[0]?.id || 'Efectivo',
+  });
+  const [error, setError] = useState('');
+
+  const mutation = useMutation({
+    mutationFn: () => registrarMovimiento(cajaId, {
+      tipo:     form.tipo,
+      concepto: form.concepto.trim() || `${form.tipo} - ${form.metodo}`,
+      valor:    Number(form.valor),
+      metodo:   form.metodo,
+    }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['caja-resumen', cajaId], exact: false });
+      await queryClient.invalidateQueries({ queryKey: ['caja-activa'],           exact: false });
+      onClose();
+    },
+    onError: (err) => setError(err.response?.data?.error || 'Error al registrar'),
+  });
+
+  return (
+    <Modal open onClose={onClose} title="Registrar Movimiento" size="sm">
+      <div className="flex flex-col gap-4">
+        <div className="flex gap-2">
+          {['Ingreso', 'Egreso'].map((t) => (
+            <button key={t} onClick={() => setForm({ ...form, tipo: t })}
+              className={`flex-1 py-2.5 rounded-xl text-sm font-medium border transition-all
+                ${form.tipo === t
+                  ? t === 'Ingreso' ? 'bg-green-50 border-green-300 text-green-700'
+                                    : 'bg-red-50 border-red-300 text-red-700'
+                  : 'bg-gray-50 border-gray-200 text-gray-600'}`}>
+              {t}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <label className="text-sm font-medium text-gray-700">Método de pago</label>
+          <select
+            value={form.metodo}
+            onChange={(e) => setForm({ ...form, metodo: e.target.value })}
+            className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-sm
+              text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            {metodos.map((m) => (
+              <option key={m.id} value={m.id}>{m.label}</option>
+            ))}
+          </select>
+        </div>
+
+        <Input
+          label="Concepto (opcional)"
+          placeholder="Ej: Retiro para gastos"
+          value={form.concepto}
+          onChange={(e) => setForm({ ...form, concepto: e.target.value })}
+          onKeyDown={(e) => { if (e.key === 'Enter') document.getElementById('valor-metodo-mov')?.focus(); }}
+        />
+        <Input
+          id="valor-metodo-mov"
+          label="Valor"
+          type="number" placeholder="0"
+          value={form.valor}
+          onChange={(e) => setForm({ ...form, valor: e.target.value })}
+          onKeyDown={(e) => { if (e.key === 'Enter') mutation.mutate(); }}
+        />
+        {error && <p className="text-sm text-red-500">{error}</p>}
+        <div className="flex gap-2">
+          <Button variant="secondary" className="flex-1" onClick={onClose}>Cancelar</Button>
+          <Button className="flex-1" loading={mutation.isPending} onClick={() => mutation.mutate()}>
+            Registrar
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// ─── TabMetodos ───────────────────────────────────────────────────────────────
+
+function _buildItemsPorMetodo(grupos) {
+  const result = {};
+
+  const add = (item, descripcion, tipo) => {
+    if (!item.metodo) return;
+    if (!result[item.metodo]) result[item.metodo] = [];
+    result[item.metodo].push({
+      id: `${tipo}-${item.id}`,
+      descripcion,
+      valor:  Number(item.valor || 0),
+      tipo,
+      fecha:  item.fecha,
+      activo: item.activo,
+    });
+  };
+
+  (grupos.facturas?.items || []).forEach((item) =>
+    add(item, `Factura #${String(item.factura_id).padStart(6, '0')} — ${item.nombre_cliente}`, 'Ingreso')
+  );
+  (grupos.abonosCredito?.items || []).forEach((item) =>
+    add(item, `Crédito Factura #${String(item.factura_id).padStart(6, '0')} — ${item.nombre_cliente}`, 'Ingreso')
+  );
+  (grupos.abonosPrestamo?.items || []).forEach((item) =>
+    add(item, `Préstamo — ${item.prestatario}`, 'Ingreso')
+  );
+  (grupos.abonosServicio?.items || []).forEach((item) => {
+    const partes = [
+      item.orden_id ? `#OS-${String(item.orden_id).padStart(4, '0')}` : '',
+      item.equipo_nombre || item.equipo_tipo || '',
+      item.cliente_nombre || '',
+    ].filter(Boolean);
+    add(item, partes.join(' — ') || 'Servicio técnico', 'Ingreso');
+  });
+  (grupos.abonosDomicilio?.items || []).forEach((item) =>
+    add(item, item.concepto || 'Abono domicilio', 'Ingreso')
+  );
+  (grupos.compras?.items || []).forEach((item) =>
+    add(item, `Compra — ${item.proveedor || 'Proveedor'}`, 'Egreso')
+  );
+  (grupos.abonosAcreedor?.items || []).forEach((item) =>
+    add(item, `Abono a ${item.acreedor || 'Acreedor'}`, 'Egreso')
+  );
+  (grupos.manuales?.items || []).forEach((item) => {
+    if (!item.metodo) return;
+    if (!result[item.metodo]) result[item.metodo] = [];
+    result[item.metodo].push({
+      id: `manual-${item.id}`,
+      descripcion: item.concepto,
+      valor:  Number(item.valor || 0),
+      tipo:   item.tipo,
+      fecha:  item.fecha,
+      activo: item.activo,
+    });
+  });
+
+  Object.values(result).forEach((items) =>
+    items.sort((a, b) => new Date(a.fecha) - new Date(b.fecha))
+  );
+  return result;
+}
+
+function TarjetaMetodo({ metodo, ingresos, egresos, items, onAgregar }) {
+  const [expandido, setExpandido] = useState(false);
+  const saldo = ingresos - egresos;
+
+  return (
+    <div className="border border-gray-100 rounded-2xl overflow-hidden bg-white shadow-sm">
+      {/* Cabecera */}
+      <div className="flex items-center justify-between px-4 py-3.5">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 bg-blue-50 rounded-xl flex items-center justify-center flex-shrink-0">
+            <Wallet size={17} className="text-blue-600" />
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-gray-900">{metodo.label}</p>
+            <div className="flex items-center gap-2 mt-0.5">
+              {ingresos > 0 && <span className="text-xs text-green-600">+{formatCOP(ingresos)}</span>}
+              {egresos  > 0 && <span className="text-xs text-red-500">-{formatCOP(egresos)}</span>}
+              {ingresos === 0 && egresos === 0 && (
+                <span className="text-xs text-gray-400">Sin movimientos</span>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <span className={`text-base font-bold ${saldo < 0 ? 'text-red-600' : 'text-gray-900'}`}>
+            {formatCOP(saldo)}
+          </span>
+          <button
+            onClick={onAgregar}
+            className="p-1.5 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors"
+            title="Agregar movimiento"
+          >
+            <Plus size={15} />
+          </button>
+          {items.length > 0 && (
+            <button
+              onClick={() => setExpandido((v) => !v)}
+              className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors text-gray-400"
+            >
+              {expandido ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Historial */}
+      {expandido && items.length > 0 && (
+        <div className="border-t border-gray-100 divide-y divide-gray-50">
+          {items.map((item) => (
+            <div
+              key={item.id}
+              className={`flex items-center justify-between px-4 py-2.5 bg-white
+                ${item.activo === false ? 'bg-red-50/30' : ''}`}
+            >
+              <div className="flex-1 min-w-0">
+                <p className={`text-sm truncate
+                  ${item.activo === false ? 'line-through text-gray-400' : 'text-gray-700'}`}>
+                  {item.descripcion}
+                </p>
+                <div className="flex items-center gap-2">
+                  {item.fecha && (
+                    <span className="text-xs text-gray-300">{formatFechaHora(item.fecha)}</span>
+                  )}
+                  {item.activo === false && (
+                    <span className="text-xs bg-red-100 text-red-500 font-semibold px-1.5 py-0.5 rounded-full">
+                      Anulado
+                    </span>
+                  )}
+                </div>
+              </div>
+              <span className={`text-sm font-semibold flex-shrink-0 ml-3
+                ${item.activo === false
+                  ? 'line-through text-gray-300'
+                  : item.tipo === 'Ingreso' ? 'text-green-600' : 'text-red-500'}`}>
+                {item.tipo === 'Ingreso' ? '+' : '-'}{formatCOP(item.valor)}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TabMetodos({ grupos, metodosPagoDetalle, cajaId }) {
+  const metodos                  = useMetodosPago();
+  const [modalMetodo, setModalMetodo] = useState(null);
+  const itemsPorMetodo           = useMemo(() => _buildItemsPorMetodo(grupos), [grupos]);
+
+  return (
+    <div className="flex flex-col gap-3">
+      {metodos.map((m) => {
+        const datos = metodosPagoDetalle?.[m.id] || { ingresos: 0, egresos: 0 };
+        return (
+          <TarjetaMetodo
+            key={m.id}
+            metodo={m}
+            ingresos={datos.ingresos}
+            egresos={datos.egresos}
+            items={itemsPorMetodo[m.id] || []}
+            onAgregar={() => setModalMetodo(m.id)}
+          />
+        );
+      })}
+
+      {modalMetodo && (
+        <ModalMovimientoMetodo
+          cajaId={cajaId}
+          metodoInicial={modalMetodo}
+          onClose={() => setModalMetodo(null)}
+        />
+      )}
+    </div>
+  );
+}
+
 export default function CajaPage() {
   const queryClient                       = useQueryClient();
   const { sucursalKey, sucursalLista }    = useSucursalKey();
+  const [tabVista,      setTabVista]      = useState('movimientos');
   const [modalMov,      setModalMov]      = useState(false);
   const [modalCerrar,   setModalCerrar]   = useState(false);
   const [montoApertura, setMontoApertura] = useState('');
@@ -673,47 +939,78 @@ export default function CajaPage() {
         </div>
       </div>
 
-      <ResumenMetodosPago metodosPagoDetalle={resumenData?.metodosPagoDetalle} />
-
-      <div className="flex flex-col gap-3">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-gray-700">Movimientos del período</h2>
-          {loadingResumen && <Spinner className="py-0 scale-75" />}
-        </div>
-
-        {!hayMovimientos ? (
-          <EmptyState icon={Wallet} titulo="Sin movimientos aún" />
-        ) : (
-          <>
-            <p className="text-xs text-gray-400 font-medium px-1">Ingresos</p>
-            <GrupoMovimientos grupoKey="facturas"        grupo={grupos.facturas        || { items: [] }} cajaId={caja.id} opciones={opcionesGrupo} />
-            <GrupoMovimientos grupoKey="abonosCredito"   grupo={grupos.abonosCredito   || { items: [] }} cajaId={caja.id} opciones={opcionesGrupo} />
-            <GrupoMovimientos grupoKey="abonosPrestamo"  grupo={grupos.abonosPrestamo  || { items: [] }} cajaId={caja.id} opciones={opcionesGrupo} />
-            <GrupoMovimientos grupoKey="abonosServicio"  grupo={grupos.abonosServicio  || { items: [] }} cajaId={caja.id} opciones={opcionesGrupo} />
-            <GrupoMovimientos grupoKey="abonosDomicilio" grupo={grupos.abonosDomicilio || { items: [] }} cajaId={caja.id} opciones={opcionesGrupo} />
-
-            {grupos.facturasDomicilio?.items?.length > 0 && (
-              <>
-                <p className="text-xs text-gray-400 font-medium px-1 mt-1">En poder del domiciliario</p>
-                <GrupoMovimientosInformativo grupo={grupos.facturasDomicilio} />
-              </>
-            )}
-
-            <p className="text-xs text-gray-400 font-medium px-1 mt-1">Egresos</p>
-            <GrupoMovimientos grupoKey="retomas"        grupo={grupos.retomas        || { items: [] }} cajaId={caja.id} opciones={opcionesGrupo} />
-            <GrupoMovimientos grupoKey="devoluciones"   grupo={grupos.devoluciones   || { items: [] }} cajaId={caja.id} opciones={opcionesGrupo} />
-            <GrupoMovimientos grupoKey="compras"        grupo={grupos.compras        || { items: [] }} cajaId={caja.id} opciones={opcionesGrupo} />
-            <GrupoMovimientos grupoKey="abonosAcreedor" grupo={grupos.abonosAcreedor || { items: [] }} cajaId={caja.id} opciones={opcionesGrupo} />
-
-            {grupos.manuales?.items?.length > 0 && (
-              <>
-                <p className="text-xs text-gray-400 font-medium px-1 mt-1">Manuales</p>
-                <GrupoMovimientos grupoKey="manuales" grupo={grupos.manuales} cajaId={caja.id} opciones={opcionesGrupo} />
-              </>
-            )}
-          </>
-        )}
+      {/* ── Tab switcher ── */}
+      <div className="flex gap-1 bg-gray-100 p-1 rounded-xl w-fit">
+        {[
+          { id: 'movimientos', label: 'Movimientos' },
+          { id: 'metodos',     label: 'Por Método'  },
+        ].map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => setTabVista(tab.id)}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-150
+              ${tabVista === tab.id
+                ? 'bg-white text-gray-900 shadow-sm'
+                : 'text-gray-500 hover:text-gray-700'}`}
+          >
+            {tab.label}
+          </button>
+        ))}
+        {loadingResumen && <Spinner className="py-0 scale-75 ml-1" />}
       </div>
+
+      {/* ── Tab: Movimientos ── */}
+      {tabVista === 'movimientos' && (
+        <>
+          <ResumenMetodosPago metodosPagoDetalle={resumenData?.metodosPagoDetalle} />
+
+          <div className="flex flex-col gap-3">
+            <h2 className="text-sm font-semibold text-gray-700">Movimientos del período</h2>
+
+            {!hayMovimientos ? (
+              <EmptyState icon={Wallet} titulo="Sin movimientos aún" />
+            ) : (
+              <>
+                <p className="text-xs text-gray-400 font-medium px-1">Ingresos</p>
+                <GrupoMovimientos grupoKey="facturas"        grupo={grupos.facturas        || { items: [] }} cajaId={caja.id} opciones={opcionesGrupo} />
+                <GrupoMovimientos grupoKey="abonosCredito"   grupo={grupos.abonosCredito   || { items: [] }} cajaId={caja.id} opciones={opcionesGrupo} />
+                <GrupoMovimientos grupoKey="abonosPrestamo"  grupo={grupos.abonosPrestamo  || { items: [] }} cajaId={caja.id} opciones={opcionesGrupo} />
+                <GrupoMovimientos grupoKey="abonosServicio"  grupo={grupos.abonosServicio  || { items: [] }} cajaId={caja.id} opciones={opcionesGrupo} />
+                <GrupoMovimientos grupoKey="abonosDomicilio" grupo={grupos.abonosDomicilio || { items: [] }} cajaId={caja.id} opciones={opcionesGrupo} />
+
+                {grupos.facturasDomicilio?.items?.length > 0 && (
+                  <>
+                    <p className="text-xs text-gray-400 font-medium px-1 mt-1">En poder del domiciliario</p>
+                    <GrupoMovimientosInformativo grupo={grupos.facturasDomicilio} />
+                  </>
+                )}
+
+                <p className="text-xs text-gray-400 font-medium px-1 mt-1">Egresos</p>
+                <GrupoMovimientos grupoKey="retomas"        grupo={grupos.retomas        || { items: [] }} cajaId={caja.id} opciones={opcionesGrupo} />
+                <GrupoMovimientos grupoKey="devoluciones"   grupo={grupos.devoluciones   || { items: [] }} cajaId={caja.id} opciones={opcionesGrupo} />
+                <GrupoMovimientos grupoKey="compras"        grupo={grupos.compras        || { items: [] }} cajaId={caja.id} opciones={opcionesGrupo} />
+                <GrupoMovimientos grupoKey="abonosAcreedor" grupo={grupos.abonosAcreedor || { items: [] }} cajaId={caja.id} opciones={opcionesGrupo} />
+
+                {grupos.manuales?.items?.length > 0 && (
+                  <>
+                    <p className="text-xs text-gray-400 font-medium px-1 mt-1">Manuales</p>
+                    <GrupoMovimientos grupoKey="manuales" grupo={grupos.manuales} cajaId={caja.id} opciones={opcionesGrupo} />
+                  </>
+                )}
+              </>
+            )}
+          </div>
+        </>
+      )}
+
+      {/* ── Tab: Por Método ── */}
+      {tabVista === 'metodos' && (
+        <TabMetodos
+          grupos={grupos}
+          metodosPagoDetalle={resumenData?.metodosPagoDetalle}
+          cajaId={caja.id}
+        />
+      )}
 
       {modalMov    && <ModalMovimiento cajaId={caja.id} onClose={() => setModalMov(false)} />}
       {modalCerrar && (

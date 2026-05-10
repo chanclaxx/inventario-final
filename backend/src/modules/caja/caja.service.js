@@ -44,13 +44,13 @@ const getResumenDia = async (negocioId, cajaId, sucursalId) => {
 
 const getResumenGlobal = (negocioId) => repo.getResumenGlobal(negocioId);
 
-const registrarMovimiento = async (negocioId, cajaId, { usuario_id, tipo, concepto, valor, referencia_id, referencia_tipo }) => {
+const registrarMovimiento = async (negocioId, cajaId, { usuario_id, tipo, concepto, valor, referencia_id, referencia_tipo, metodo }) => {
   const caja = await repo.findByIdYNegocio(cajaId, negocioId);
   if (!caja) throw { status: 404, message: 'Caja no encontrada' };
   if (caja.estado === 'Cerrada') throw { status: 400, message: 'No se puede registrar movimientos en una caja cerrada' };
   if (!['Ingreso', 'Egreso'].includes(tipo)) throw { status: 400, message: 'Tipo debe ser Ingreso o Egreso' };
   if (valor <= 0) throw { status: 400, message: 'El valor debe ser mayor a 0' };
-  return repo.insertarMovimiento({ caja_id: cajaId, usuario_id, tipo, concepto, valor, referencia_id, referencia_tipo });
+  return repo.insertarMovimiento({ caja_id: cajaId, usuario_id, tipo, concepto, valor, referencia_id, referencia_tipo, metodo });
 };
 const toggleMovimiento = async (negocioId, movimientoId) => {
   return repo.toggleMovimiento(movimientoId, negocioId);

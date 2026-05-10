@@ -73,13 +73,13 @@ const cerrarCaja = async (id, monto_cierre) => {
 };
 
 const insertarMovimiento = async ({
-  caja_id, usuario_id, tipo, concepto, valor, referencia_id, referencia_tipo,
+  caja_id, usuario_id, tipo, concepto, valor, referencia_id, referencia_tipo, metodo,
 }) => {
   const { rows } = await pool.query(`
-    INSERT INTO movimientos_caja(caja_id, usuario_id, tipo, concepto, valor, referencia_id, referencia_tipo)
-    VALUES ($1, $2, $3, $4, $5, $6, $7)
+    INSERT INTO movimientos_caja(caja_id, usuario_id, tipo, concepto, valor, referencia_id, referencia_tipo, metodo)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
     RETURNING *
-  `, [caja_id, usuario_id, tipo, concepto, valor, referencia_id || null, referencia_tipo || null]);
+  `, [caja_id, usuario_id, tipo, concepto, valor, referencia_id || null, referencia_tipo || null, metodo || null]);
   return rows[0];
 };
 
