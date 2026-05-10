@@ -276,7 +276,9 @@ const getResumenDia = async (cajaId, sucursalId, negocioId) => {
   const [pf, ac, ap, cp, aa, mn, dv, rt, ad, sv] = await Promise.all([
 
     pool.query(`
-      SELECT pf.id, pf.metodo, pf.valor, f.nombre_cliente, f.id AS factura_id, f.fecha
+      SELECT pf.id, pf.metodo, pf.valor, f.nombre_cliente, f.id AS factura_id, f.fecha,
+             (SELECT STRING_AGG(lf.nombre_producto, ', ')
+              FROM lineas_factura lf WHERE lf.factura_id = f.id) AS productos
       FROM pagos_factura pf
       JOIN facturas f ON f.id = pf.factura_id
       WHERE f.sucursal_id = $1
@@ -292,7 +294,9 @@ const getResumenDia = async (cajaId, sucursalId, negocioId) => {
 
     pool.query(`
       SELECT ac.id, ac.valor, ac.metodo, ac.fecha,
-             f.nombre_cliente, c.id AS credito_id, f.id AS factura_id
+             f.nombre_cliente, c.id AS credito_id, f.id AS factura_id,
+             (SELECT STRING_AGG(lf.nombre_producto, ', ')
+              FROM lineas_factura lf WHERE lf.factura_id = f.id) AS productos
       FROM abonos_credito ac
       JOIN creditos c ON c.id = ac.credito_id
       JOIN facturas f ON f.id = c.factura_id
@@ -310,7 +314,9 @@ const getResumenDia = async (cajaId, sucursalId, negocioId) => {
 
     pool.query(`
       SELECT c.id, c.total AS valor, c.fecha, c.numero_factura, c.metodo,
-             pr.nombre AS proveedor, pr.tipo AS tipo_proveedor
+             pr.nombre AS proveedor, pr.tipo AS tipo_proveedor,
+             (SELECT STRING_AGG(lc.nombre_producto, ', ')
+              FROM lineas_compra lc WHERE lc.compra_id = c.id) AS productos
       FROM compras c
       LEFT JOIN proveedores pr ON pr.id = c.proveedor_id
       WHERE c.sucursal_id = $1
@@ -403,7 +409,9 @@ const getResumenGlobal = async (negocioId) => {
 
     pool.query(`
       SELECT pf.id, pf.metodo, pf.valor, f.nombre_cliente,
-             f.id AS factura_id, f.fecha, su.nombre AS sucursal_nombre
+             f.id AS factura_id, f.fecha, su.nombre AS sucursal_nombre,
+             (SELECT STRING_AGG(lf.nombre_producto, ', ')
+              FROM lineas_factura lf WHERE lf.factura_id = f.id) AS productos
       FROM pagos_factura pf
       JOIN facturas   f  ON f.id  = pf.factura_id
       JOIN sucursales su ON su.id = f.sucursal_id
@@ -421,7 +429,9 @@ const getResumenGlobal = async (negocioId) => {
     pool.query(`
       SELECT ac.id, ac.valor, ac.metodo, ac.fecha,
              f.nombre_cliente, c.id AS credito_id, f.id AS factura_id,
-             su.nombre AS sucursal_nombre
+             su.nombre AS sucursal_nombre,
+             (SELECT STRING_AGG(lf.nombre_producto, ', ')
+              FROM lineas_factura lf WHERE lf.factura_id = f.id) AS productos
       FROM abonos_credito ac
       JOIN creditos   c  ON c.id  = ac.credito_id
       JOIN facturas   f  ON f.id  = c.factura_id
@@ -443,7 +453,9 @@ const getResumenGlobal = async (negocioId) => {
     pool.query(`
       SELECT c.id, c.total AS valor, c.fecha, c.numero_factura, c.metodo,
              pr.nombre AS proveedor, pr.tipo AS tipo_proveedor,
-             su.nombre AS sucursal_nombre
+             su.nombre AS sucursal_nombre,
+             (SELECT STRING_AGG(lc.nombre_producto, ', ')
+              FROM lineas_compra lc WHERE lc.compra_id = c.id) AS productos
       FROM compras c
       JOIN      sucursales  su ON su.id = c.sucursal_id
       LEFT JOIN proveedores pr ON pr.id = c.proveedor_id

@@ -37,7 +37,7 @@ const CONFIG_GRUPOS = {
     borderColor:'border-green-100',
     renderItem: (item) => ({
       descripcion: `Factura #${String(item.factura_id).padStart(6, '0')} — ${item.nombre_cliente}`,
-      detalle:     item.metodo,
+      detalle:     [item.productos, item.metodo].filter(Boolean).join(' · ') || null,
       fecha:       item.fecha,
     }),
   },
@@ -49,7 +49,7 @@ const CONFIG_GRUPOS = {
     borderColor:'border-blue-100',
     renderItem: (item) => ({
       descripcion: `Crédito Factura #${String(item.factura_id).padStart(6, '0')} — ${item.nombre_cliente}`,
-      detalle:     item.metodo,
+      detalle:     [item.productos, item.metodo].filter(Boolean).join(' · ') || null,
       fecha:       item.fecha,
     }),
   },
@@ -117,7 +117,7 @@ const CONFIG_GRUPOS = {
     const nombre = nombreVisible(item.proveedor, item.tipo_proveedor, opciones?.esAdmin);
     return {
       descripcion: `Compra — ${nombre}`,
-      detalle:     [item.numero_factura ? `Fact. ${item.numero_factura}` : null, item.metodo || null]
+      detalle:     [item.productos, item.numero_factura ? `Fact. ${item.numero_factura}` : null, item.metodo || null]
                      .filter(Boolean).join(' · ') || null,
       fecha:       item.fecha,
     };
