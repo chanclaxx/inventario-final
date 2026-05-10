@@ -21,17 +21,17 @@ function StatCard({ icon, label, valor, sub, color = 'blue', onClick }) {
   return (
     <button
       onClick={onClick}
-      className={`bg-white border border-gray-100 rounded-2xl p-4 flex items-start gap-4 
+      className={`bg-white border border-gray-100 rounded-2xl p-3 sm:p-4 flex items-start gap-2 sm:gap-4
         shadow-sm hover:shadow-md transition-all duration-200 text-left w-full
         ${onClick ? 'cursor-pointer' : 'cursor-default'}`}
     >
-      <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${colors[color]}`}>
-        {(() => { const StatIcon = icon; return <StatIcon size={20} />; })()}
+      <div className={`w-9 h-9 sm:w-10 sm:h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${colors[color]}`}>
+        {(() => { const StatIcon = icon; return <StatIcon size={18} />; })()}
       </div>
       <div className="flex-1 min-w-0">
-        <p className="text-xs text-gray-400 font-medium">{label}</p>
-        <p className="text-xl font-bold text-gray-900 mt-0.5">{valor}</p>
-        {sub && <p className="text-xs text-gray-400 mt-0.5">{sub}</p>}
+        <p className="text-xs text-gray-400 font-medium truncate">{label}</p>
+        <p className="text-base sm:text-xl font-bold text-gray-900 mt-0.5 truncate">{valor}</p>
+        {sub && <p className="text-xs text-gray-400 mt-0.5 truncate">{sub}</p>}
       </div>
     </button>
   );
@@ -57,7 +57,7 @@ export default function Dashboard() {
 
       {/* Saludo */}
       <div>
-        <h1 className="text-2xl font-bold text-gray-900">
+        <h1 className="text-xl sm:text-2xl font-bold text-gray-900">
           {saludo}, {usuario?.nombre?.split(' ')[0]} 👋
         </h1>
         <p className="text-gray-400 text-sm mt-1">

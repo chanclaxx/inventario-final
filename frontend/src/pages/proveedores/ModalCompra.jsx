@@ -957,12 +957,12 @@ function PasoPago({ proveedor, productos, tipo, onConfirmar, onVolver, loading }
         {resumen.map((r, i) => {
           const resumenItem = r;
           return (
-            <div key={i} className="flex justify-between text-sm">
-              <span className="text-gray-700">
+            <div key={i} className="flex justify-between gap-2 text-sm">
+              <span className="text-gray-700 flex-1 min-w-0 truncate">
                 {resumenItem.nombre} x{resumenItem.cantidad}
                 {resumenItem.precio_usd && <span className="text-xs text-gray-400 ml-1">(${resumenItem.precio_usd} USD)</span>}
               </span>
-              <span className="font-medium">{formatCOP(resumenItem.precio_unitario * resumenItem.cantidad)}</span>
+              <span className="font-medium flex-shrink-0">{formatCOP(resumenItem.precio_unitario * resumenItem.cantidad)}</span>
             </div>
           );
         })}

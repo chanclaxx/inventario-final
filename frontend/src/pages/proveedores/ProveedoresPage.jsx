@@ -519,18 +519,21 @@ function HistorialProveedor({ proveedor, sucursalKey, sucursalLista, onVolver, o
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-center gap-3">
-        <button onClick={onVolver} className="p-2 rounded-xl hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors">
+      <div className="flex items-center gap-2 flex-wrap">
+        <button onClick={onVolver} className="p-2 rounded-xl hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors flex-shrink-0">
           <ChevronLeft size={18} />
         </button>
-        <div className="flex-1">
-          <div className="flex items-center gap-2">
-            <h2 className="text-base font-bold text-gray-900">{proveedor.nombre}</h2>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h2 className="text-base font-bold text-gray-900 truncate">{proveedor.nombre}</h2>
             <ProveedorTipoBadge tipo={proveedor.tipo} />
           </div>
           <p className="text-xs text-gray-400">Historial de compras</p>
         </div>
-        <Button size="sm" onClick={onNuevaCompra}><ShoppingCart size={14} /> Nueva compra</Button>
+        <Button size="sm" onClick={onNuevaCompra} className="flex-shrink-0">
+          <ShoppingCart size={14} />
+          <span className="hidden sm:inline">Nueva compra</span>
+        </Button>
       </div>
       <div className="grid grid-cols-2 gap-3">
         <div className="bg-blue-50 rounded-xl p-3">
@@ -706,8 +709,8 @@ function TabProveedores({ sucursalKey, sucursalLista }) {
         proveedores.map((p) => (
           <div key={p.id} className="bg-white border border-gray-100 rounded-2xl p-4 flex items-center justify-between gap-3">
             <button onClick={() => setProveedorVer(p)} className="flex-1 text-left min-w-0">
-              <div className="flex items-center gap-2">
-                <p className="font-semibold text-gray-900">{p.nombre}</p>
+              <div className="flex items-center gap-2 flex-wrap">
+                <p className="font-semibold text-gray-900 truncate">{p.nombre}</p>
                 <ProveedorTipoBadge tipo={p.tipo} />
               </div>
               <div className="flex items-center gap-3 mt-0.5 flex-wrap">
@@ -717,7 +720,10 @@ function TabProveedores({ sucursalKey, sucursalLista }) {
               </div>
             </button>
             <div className="flex items-center gap-2 flex-shrink-0">
-              <Button size="sm" onClick={() => setModalCompra(p)}><ShoppingCart size={14} /> Compra</Button>
+              <Button size="sm" onClick={() => setModalCompra(p)}>
+                <ShoppingCart size={14} />
+                <span className="hidden sm:inline">Compra</span>
+              </Button>
               <button onClick={() => setProveedorEditar(p)} className="p-2 rounded-xl hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors">
                 <Package size={16} />
               </button>
@@ -778,8 +784,8 @@ function TabCruces({ sucursalKey, sucursalLista }) {
         cruces.map((c) => (
           <div key={c.id} className="bg-white border border-gray-100 rounded-2xl p-4 flex items-center justify-between gap-3">
             <button onClick={() => setCruceVer(c)} className="flex-1 text-left min-w-0">
-              <div className="flex items-center gap-2">
-                <p className="font-semibold text-gray-900">{c.nombre}</p>
+              <div className="flex items-center gap-2 flex-wrap">
+                <p className="font-semibold text-gray-900 truncate">{c.nombre}</p>
                 <ProveedorTipoBadge tipo="cruce" />
               </div>
               <div className="flex items-center gap-3 mt-0.5 flex-wrap">
@@ -789,7 +795,10 @@ function TabCruces({ sucursalKey, sucursalLista }) {
               </div>
             </button>
             <div className="flex items-center gap-2 flex-shrink-0">
-              <Button size="sm" onClick={() => setModalCompra(c)}><ShoppingCart size={14} /> Compra</Button>
+              <Button size="sm" onClick={() => setModalCompra(c)}>
+                <ShoppingCart size={14} />
+                <span className="hidden sm:inline">Compra</span>
+              </Button>
               <button onClick={() => setCruceEditar(c)} className="p-2 rounded-xl hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors">
                 <Package size={16} />
               </button>
@@ -1012,13 +1021,13 @@ export default function ProveedoresPage() {
           const TabIcon = tab.Icn;
           return (
             <button key={tab.id} onClick={() => setTabActivo(tab.id)}
-              className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg
+              className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-2 sm:px-3 rounded-lg
                 text-sm font-medium transition-all
                 ${tabActivo === tab.id
                   ? 'bg-white text-gray-900 shadow-sm'
                   : 'text-gray-500 hover:text-gray-700'}`}>
               <TabIcon size={15} />
-              {tab.label}
+              <span className="hidden sm:inline">{tab.label}</span>
             </button>
           );
         })}
