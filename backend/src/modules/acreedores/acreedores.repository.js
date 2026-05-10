@@ -21,7 +21,7 @@ const findAll = async (negocioId, filtro) => {
     query += ` AND (LOWER(a.nombre) LIKE $2 ESCAPE '\\' OR a.cedula LIKE $2 ESCAPE '\\')`;
   }
 
-  query += ` GROUP BY a.id ORDER BY a.nombre`;
+  query += ` GROUP BY a.id, p.tipo ORDER BY a.nombre`;
   const { rows } = await pool.query(query, params);
   return rows;
 };
