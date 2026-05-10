@@ -19,7 +19,7 @@ import { getLineas }     from '../../api/lineas.api';
 import { useSucursalKey } from '../../hooks/useSucursalKey';
 import api from '../../api/axios.config';
 import {
-  Trash2, Package, ShoppingBag, ChevronRight,
+  Trash2, Package, ShoppingBag, ChevronRight, ChevronDown,
   RefreshCw, AlertTriangle, X,
 } from 'lucide-react';
 
@@ -40,6 +40,15 @@ function parsearColoresConfig(configData) {
   }
 }
 
+function parsearCaracteristicasConfig(configData) {
+  try {
+    const lista = JSON.parse(configData?.caracteristicas_serial_lista || '[]');
+    return Array.isArray(lista) ? lista : [];
+  } catch {
+    return [];
+  }
+}
+
 // ─── Helper: extraer string de imei desde item (string o { imei, color }) ────
 function extraerImei(item) {
   if (typeof item === 'string') return item;
@@ -50,6 +59,13 @@ function extraerImei(item) {
 function extraerColor(item) {
   if (typeof item === 'string') return null;
   return item.color?.trim() || null;
+}
+
+function extraerCaracteristicas(item) {
+  if (typeof item === 'string') return {};
+  return (item.caracteristicas && typeof item.caracteristicas === 'object')
+    ? item.caracteristicas
+    : {};
 }
 
 // ─── Utilidad: bloquear ruedita en inputs numéricos ──────────────────────────
@@ -299,15 +315,115 @@ function SelectLinea({ value, onChange }) {
   );
 }
 
+// ─── Select de filtro por línea (para buscadores) ────────────────────────────
+function SelectFiltroLinea({ value, onChange }) {
+  const lineas = useLineas();
+  return (
+    <div className="flex flex-col gap-1">
+      <label className="text-xs text-gray-500 font-medium">Filtrar por línea</label>
+      <select value={value} onChange={(e) => onChange(e.target.value)}
+        className="w-full px-2.5 py-2 bg-white border border-gray-200 rounded-xl text-xs
+          text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-400">
+        <option value="">Todas las líneas</option>
+        {lineas.map((l) => (
+          <option key={l.id} value={l.id}>{l.nombre}</option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+// ─── Fila de IMEI con color + características expandibles ────────────────────
+function FilaImeiCompra({
+  index, item, coloresActivo, coloresConfig,
+  caracteristicasActivo, caracteristicasLista,
+  esDuplicado, inputRef, onChange, onKeyDown, onEliminar, mostrarEliminar,
+}) {
+  const [expandido, setExpandido] = useState(false);
+
+  const imeiValor      = extraerImei(item);
+  const colorValor     = extraerColor(item) || '';
+  const caracteristicas = extraerCaracteristicas(item);
+
+  const usaObjeto = coloresActivo || (caracteristicasActivo && caracteristicasLista?.length > 0);
+
+  const handleImeiChange = (valor) => {
+    if (!usaObjeto) { onChange(valor); return; }
+    onChange({ imei: valor, color: colorValor, caracteristicas });
+  };
+
+  const handleColorChange = (valor) => {
+    onChange({ imei: imeiValor, color: valor, caracteristicas });
+  };
+
+  const handleCaracteristicaChange = (nombre, valor) => {
+    onChange({ imei: imeiValor, color: colorValor, caracteristicas: { ...caracteristicas, [nombre]: valor } });
+  };
+
+  const tieneCaracteristicas = caracteristicasActivo && caracteristicasLista?.length > 0;
+
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex gap-1.5 items-center">
+        <input
+          ref={inputRef}
+          type="text"
+          value={imeiValor}
+          onChange={(e) => handleImeiChange(e.target.value)}
+          onKeyDown={onKeyDown}
+          placeholder={`IMEI ${index + 1}`}
+          className={`flex-1 px-2 py-1.5 border rounded-lg text-sm font-mono
+            focus:outline-none focus:ring-2
+            ${esDuplicado
+              ? 'bg-red-50 border-red-400 text-red-700 focus:ring-red-400'
+              : 'bg-white border-gray-200 focus:ring-blue-500'}`}
+        />
+        {coloresActivo && coloresConfig.length > 0 && (
+          <select value={colorValor} onChange={(e) => handleColorChange(e.target.value)}
+            className="w-24 px-2 py-1.5 bg-white border border-gray-200 rounded-lg text-xs
+              text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-400 flex-shrink-0">
+            <option value="">Color...</option>
+            {coloresConfig.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+        )}
+        {tieneCaracteristicas && (
+          <button type="button" onClick={() => setExpandido((v) => !v)}
+            className={`p-2 rounded-lg border transition-colors flex-shrink-0
+              ${expandido ? 'bg-blue-50 border-blue-200 text-blue-600' : 'bg-white border-gray-200 text-gray-400 hover:text-gray-600'}`}>
+            <ChevronDown size={13} className={`transition-transform ${expandido ? 'rotate-180' : ''}`} />
+          </button>
+        )}
+        {mostrarEliminar && (
+          <button onClick={onEliminar}
+            className="p-1.5 rounded-lg hover:bg-red-50 text-gray-300 hover:text-red-400 flex-shrink-0">
+            <Trash2 size={12} />
+          </button>
+        )}
+      </div>
+      {expandido && tieneCaracteristicas && (
+        <div className="flex flex-col gap-1.5 pl-3 border-l-2 border-blue-100 ml-1">
+          {caracteristicasLista.map((nombre) => (
+            <div key={nombre} className="flex items-center gap-2">
+              <span className="text-xs text-gray-500 w-24 flex-shrink-0 truncate">{nombre}</span>
+              <input type="text" value={caracteristicas[nombre] || ''}
+                onChange={(e) => handleCaracteristicaChange(nombre, e.target.value)}
+                placeholder={`${nombre}...`}
+                className="flex-1 px-2 py-1.5 bg-white border border-gray-200 rounded-lg
+                  text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-700" />
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Componente línea con IMEIs ───────────────────────────────────────────────
-// coloresActivo y coloresConfig se reciben como props.
-// Si coloresActivo es false, linea.imeis es string[] y el render es idéntico al original.
-// Si coloresActivo es true, linea.imeis es { imei, color }[] y cada fila muestra un select de color.
 function LineaImeis({
   linea, factor, traida, imeisDuplicados,
   onActualizarPrecioUsd, onActualizarPrecioCOP,
   onActualizarImei, onAgregarCampo, onEliminarImei, onEliminarLinea,
-  coloresActivo, coloresConfig,
+  coloresActivo, coloresConfig, caracteristicasActivo, caracteristicasLista,
 }) {
   const inputRefs        = useRef([]);
   const usandoConversion = Number(factor) > 0;
@@ -333,21 +449,8 @@ function LineaImeis({
     }
   };
 
-  // ── Helpers locales para manejar cambio de imei/color por item ───────────
-  const handleImeiChange = (index, nuevoImei) => {
-    if (!coloresActivo) {
-      onActualizarImei(linea.id, index, nuevoImei);
-    } else {
-      const itemActual = linea.imeis[index];
-      const colorActual = extraerColor(itemActual) || '';
-      onActualizarImei(linea.id, index, { imei: nuevoImei, color: colorActual });
-    }
-  };
-
-  const handleColorChange = (index, nuevoColor) => {
-    const itemActual = linea.imeis[index];
-    const imeiActual = extraerImei(itemActual);
-    onActualizarImei(linea.id, index, { imei: imeiActual, color: nuevoColor });
+  const handleItemChange = (index, nuevoValor) => {
+    onActualizarImei(linea.id, index, nuevoValor);
   };
 
   const imeisValidos = linea.imeis.filter((i) => extraerImei(i).trim()).length;
@@ -357,6 +460,9 @@ function LineaImeis({
       <div className="flex items-center justify-between">
         <div>
           <p className="text-sm font-semibold text-gray-800">{linea.nombre}</p>
+          {linea.linea_nombre && (
+            <span className="text-xs text-blue-500 font-medium">{linea.linea_nombre}</span>
+          )}
           <Badge variant="blue">{imeisValidos} IMEI(s)</Badge>
         </div>
         <button onClick={() => onEliminarLinea(linea.id)}
@@ -390,47 +496,23 @@ function LineaImeis({
       <div className="flex flex-col gap-1.5">
         {linea.imeis.map((item, index) => {
           const imeiVal     = extraerImei(item);
-          const colorVal    = extraerColor(item) || '';
           const esDuplicado = imeiVal.trim() && imeisDuplicados.has(imeiVal.trim());
           return (
-            <div key={index} className="flex gap-1.5 items-center">
-              <input
-                ref={(el) => { inputRefs.current[index] = el; }}
-                type="text"
-                value={imeiVal}
-                onChange={(e) => handleImeiChange(index, e.target.value)}
-                onKeyDown={(e) => handleKeyDown(e, index)}
-                placeholder={`IMEI ${index + 1}`}
-                className={`flex-1 px-2 py-1.5 border rounded-lg text-sm font-mono
-                  focus:outline-none focus:ring-2
-                  ${esDuplicado
-                    ? 'bg-red-50 border-red-400 text-red-700 focus:ring-red-400'
-                    : 'bg-white border-gray-200 focus:ring-blue-500'}`}
-              />
-              {/* Selector de color — solo visible si coloresActivo */}
-              {coloresActivo && coloresConfig.length > 0 && (
-                <select
-                  value={colorVal}
-                  onChange={(e) => handleColorChange(index, e.target.value)}
-                  className="w-24 px-2 py-1.5 bg-white border border-gray-200 rounded-lg text-xs
-                    text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-400 flex-shrink-0"
-                >
-                  <option value="">Color...</option>
-                  {coloresConfig.map((color) => {
-                    const colorNombre = color;
-                    return (
-                      <option key={colorNombre} value={colorNombre}>{colorNombre}</option>
-                    );
-                  })}
-                </select>
-              )}
-              {linea.imeis.length > 1 && (
-                <button onClick={() => onEliminarImei(linea.id, index)}
-                  className="p-1.5 rounded-lg hover:bg-red-50 text-gray-300 hover:text-red-400 flex-shrink-0">
-                  <Trash2 size={12} />
-                </button>
-              )}
-            </div>
+            <FilaImeiCompra
+              key={index}
+              index={index}
+              item={item}
+              coloresActivo={coloresActivo}
+              coloresConfig={coloresConfig}
+              caracteristicasActivo={caracteristicasActivo}
+              caracteristicasLista={caracteristicasLista}
+              esDuplicado={esDuplicado}
+              inputRef={(el) => { inputRefs.current[index] = el; }}
+              onChange={(val) => handleItemChange(index, val)}
+              onKeyDown={(e) => handleKeyDown(e, index)}
+              onEliminar={() => onEliminarImei(linea.id, index)}
+              mostrarEliminar={linea.imeis.length > 1}
+            />
           );
         })}
         {linea.imeis.some((i) => extraerImei(i).trim() && imeisDuplicados.has(extraerImei(i).trim())) && (
@@ -449,9 +531,10 @@ function LineaImeis({
 function PasoLineaSerial({
   proveedorId, lineasIniciales, factorInicial, traidaInicial,
   verificando, sucursalKey, sucursalLista, onContinuar, onVolver,
-  coloresActivo, coloresConfig,
+  coloresActivo, coloresConfig, caracteristicasActivo, caracteristicasLista,
 }) {
   const [busqueda,            setBusqueda]           = useState('');
+  const [filtroLineaId,       setFiltroLineaId]      = useState('');
   const [creandoNueva,        setCreandoNueva]        = useState(false);
   const [nuevaLinea,          setNuevaLinea]          = useState({ nombre: '', marca: '', modelo: '', precio: '', linea_id: '' });
   const [lineasSeleccionadas, setLineasSeleccionadas] = useState(lineasIniciales);
@@ -461,8 +544,10 @@ function PasoLineaSerial({
   const [traida,              setTraida]             = useState(traidaInicial);
   const queryClient = useQueryClient();
 
-  // item vacío según si colores está activo
-  const itemVacio = () => coloresActivo ? { imei: '', color: '' } : '';
+  const itemVacio = () =>
+    (coloresActivo || (caracteristicasActivo && caracteristicasLista?.length > 0))
+      ? { imei: '', color: '', caracteristicas: {} }
+      : '';
 
   const { data: productosData } = useQuery({
     queryKey: ['productos-serial', ...sucursalKey],
@@ -470,9 +555,9 @@ function PasoLineaSerial({
     enabled:  sucursalLista,
   });
 
-  const productos = normalizarProductos(productosData).filter((p) =>
-    p.nombre.toLowerCase().includes(busqueda.toLowerCase())
-  );
+  const productos = normalizarProductos(productosData)
+    .filter((p) => p.nombre.toLowerCase().includes(busqueda.toLowerCase()))
+    .filter((p) => !filtroLineaId || String(p.linea_id) === filtroLineaId);
 
   const mutCrearLinea = useMutation({
     mutationFn: () => crearProductoSerial({
@@ -585,18 +670,25 @@ function PasoLineaSerial({
       <div className="flex flex-col gap-2">
         <p className="text-sm font-medium text-gray-700">Seleccionar línea de producto</p>
         <SearchInput value={busqueda} onChange={setBusqueda} placeholder="Buscar modelo..." />
+        <SelectFiltroLinea value={filtroLineaId} onChange={setFiltroLineaId} />
         <div className="max-h-36 overflow-y-auto flex flex-col gap-1">
           {productos.map((p) => {
             const productoItem = p;
+            const yaAgregado = !!lineasSeleccionadas.find((l) => l.id === productoItem.id);
             return (
               <button key={productoItem.id} onClick={() => agregarLinea(productoItem)}
-                disabled={!!lineasSeleccionadas.find((l) => l.id === productoItem.id)}
+                disabled={yaAgregado}
                 className={`flex items-center justify-between p-2.5 rounded-xl text-left text-sm border transition-all
-                  ${lineasSeleccionadas.find((l) => l.id === productoItem.id)
+                  ${yaAgregado
                     ? 'bg-blue-50 border-blue-200 text-blue-600 opacity-60 cursor-not-allowed'
                     : 'bg-white border-gray-100 hover:border-blue-200 hover:bg-blue-50'}`}>
-                <span className="font-medium">{productoItem.nombre}</span>
-                <ChevronRight size={14} className="text-gray-400" />
+                <div className="flex flex-col min-w-0">
+                  <span className="font-medium truncate">{productoItem.nombre}</span>
+                  {productoItem.linea_nombre && (
+                    <span className="text-xs text-gray-400">{productoItem.linea_nombre}</span>
+                  )}
+                </div>
+                <ChevronRight size={14} className="text-gray-400 flex-shrink-0" />
               </button>
             );
           })}
@@ -653,6 +745,8 @@ function PasoLineaSerial({
                 onEliminarLinea={eliminarLinea}
                 coloresActivo={coloresActivo}
                 coloresConfig={coloresConfig}
+                caracteristicasActivo={caracteristicasActivo}
+                caracteristicasLista={caracteristicasLista}
               />
             );
           })}
@@ -678,6 +772,7 @@ function PasoCantidad({
   sucursalKey, sucursalLista, onProductosListos, onVolver,
 }) {
   const [busqueda,               setBusqueda]              = useState('');
+  const [filtroLineaId,          setFiltroLineaId]         = useState('');
   const [creandoNuevo,           setCreandoNuevo]          = useState(false);
   const [nuevoProducto,          setNuevoProducto]         = useState({ nombre: '', unidad_medida: 'unidad', precio: '', costo_unitario: '', linea_id: '' });
   const [productosSeleccionados, setProductosSeleccionados] = useState(productosIniciales);
@@ -692,9 +787,9 @@ function PasoCantidad({
     enabled:  sucursalLista,
   });
 
-  const productos = normalizarProductos(productosData).filter((p) =>
-    p.nombre.toLowerCase().includes(busqueda.toLowerCase())
-  );
+  const productos = normalizarProductos(productosData)
+    .filter((p) => p.nombre.toLowerCase().includes(busqueda.toLowerCase()))
+    .filter((p) => !filtroLineaId || String(p.linea_id) === filtroLineaId);
 
   const mutCrear = useMutation({
     mutationFn: () => crearProductoCantidad({
@@ -776,18 +871,25 @@ function PasoCantidad({
       <div className="flex flex-col gap-2">
         <p className="text-sm font-medium text-gray-700">Seleccionar producto</p>
         <SearchInput value={busqueda} onChange={setBusqueda} placeholder="Buscar producto..." />
+        <SelectFiltroLinea value={filtroLineaId} onChange={setFiltroLineaId} />
         <div className="max-h-36 overflow-y-auto flex flex-col gap-1">
           {productos.map((p) => {
             const productoItem = p;
+            const yaAgregado = !!productosSeleccionados.find((s) => s.id === productoItem.id);
             return (
               <button key={productoItem.id} onClick={() => agregarProducto(productoItem)}
-                disabled={!!productosSeleccionados.find((s) => s.id === productoItem.id)}
+                disabled={yaAgregado}
                 className={`flex items-center justify-between p-2.5 rounded-xl text-left text-sm border transition-all
-                  ${productosSeleccionados.find((s) => s.id === productoItem.id)
+                  ${yaAgregado
                     ? 'bg-green-50 border-green-200 opacity-60 cursor-not-allowed'
                     : 'bg-white border-gray-100 hover:border-green-200 hover:bg-green-50'}`}>
-                <span className="font-medium">{productoItem.nombre}</span>
-                <span className="text-xs text-gray-400">Stock: {productoItem.stock}</span>
+                <div className="flex flex-col min-w-0">
+                  <span className="font-medium truncate">{productoItem.nombre}</span>
+                  {productoItem.linea_nombre && (
+                    <span className="text-xs text-gray-400">{productoItem.linea_nombre}</span>
+                  )}
+                </div>
+                <span className="text-xs text-gray-400 flex-shrink-0">Stock: {productoItem.stock}</span>
               </button>
             );
           })}
@@ -1133,8 +1235,10 @@ export function ModalCompra({ proveedor, onClose }) {
     enabled:  sucursalLista,
   });
 
-  const coloresActivo = configData?.colores_serial_activo === '1';
-  const coloresConfig = parsearColoresConfig(configData);
+  const coloresActivo          = configData?.colores_serial_activo === '1';
+  const coloresConfig          = parsearColoresConfig(configData);
+  const caracteristicasActivo  = configData?.caracteristicas_serial_activo === '1';
+  const caracteristicasLista   = parsearCaracteristicasConfig(configData);
 
   const {
     verificando, verificarYProceder,
@@ -1159,15 +1263,18 @@ export function ModalCompra({ proveedor, onClose }) {
 
   const handleContinuarSerial = (imeis, lineasPayload, factor, traida) => {
     verificarYProceder(imeis, ({ reactivarMap }) => {
-      // Enriquecer cada item con reactivar_serial_id preservando el color si existe
       const lineasEnriquecidas = lineasPayload.map((linea) => ({
         ...linea,
         imeis: linea.imeis.map((item) => {
-          const imeiStr = extraerImei(item).trim();
-          const color   = extraerColor(item);
+          const imeiStr        = extraerImei(item).trim();
+          const color          = extraerColor(item);
+          const caracteristicas = extraerCaracteristicas(item);
           return {
             valor:               imeiStr,
             color:               color || null,
+            caracteristicas:     Object.keys(caracteristicas).some((k) => caracteristicas[k]?.trim?.())
+                                   ? caracteristicas
+                                   : null,
             reactivar_serial_id: reactivarMap[imeiStr] || null,
           };
         }),
@@ -1196,9 +1303,10 @@ export function ModalCompra({ proveedor, onClose }) {
             })
             .map((i) => {
               const esObjeto          = typeof i !== 'string';
-              const imeiValor         = esObjeto ? i.valor          : i;
-              const reactivarSerialId = esObjeto ? i.reactivar_serial_id : null;
-              const color             = esObjeto ? (i.color || null) : null;
+              const imeiValor         = esObjeto ? i.valor               : i;
+              const reactivarSerialId = esObjeto ? i.reactivar_serial_id  : null;
+              const color             = esObjeto ? (i.color || null)      : null;
+              const caracteristicas   = esObjeto ? (i.caracteristicas || null) : null;
               return {
                 nombre_producto:     linea.nombre,
                 imei:                imeiValor.trim(),
@@ -1210,6 +1318,7 @@ export function ModalCompra({ proveedor, onClose }) {
                 producto_id:         linea.id,
                 reactivar_serial_id: reactivarSerialId,
                 color,
+                caracteristicas,
               };
             })
         )
@@ -1238,12 +1347,13 @@ export function ModalCompra({ proveedor, onClose }) {
 
   const titulos = ['Tipo de producto', 'Productos e IMEIs', 'Pago y confirmación'];
 
+  const usaObjeto = coloresActivo || (caracteristicasActivo && caracteristicasLista?.length > 0);
   const lineasParaPaso2 = productos.map((l) => ({
     ...l,
     imeis: (l.imeis || []).map((i) => {
       if (typeof i === 'string') return i;
-      // Preservar color al volver al paso 2
-      return coloresActivo ? { imei: i.valor || '', color: i.color || '' } : (i.valor || '');
+      if (usaObjeto) return { imei: i.valor || '', color: i.color || '', caracteristicas: i.caracteristicas || {} };
+      return i.valor || '';
     }),
   }));
 
@@ -1281,6 +1391,8 @@ export function ModalCompra({ proveedor, onClose }) {
             onVolver={handleVolverA1}
             coloresActivo={coloresActivo}
             coloresConfig={coloresConfig}
+            caracteristicasActivo={caracteristicasActivo}
+            caracteristicasLista={caracteristicasLista}
           />
         )}
         {paso === 2 && tipo === 'cantidad' && (

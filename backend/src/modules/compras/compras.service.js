@@ -80,18 +80,24 @@ const registrarCompra = async ({
           if (!rows.length) {
             throw { status: 400, message: `El serial ${linea.imei} no pertenece a esta sucursal` };
           }
-          // ── CAMBIO: color incluido en el UPDATE de reactivación ───────────
-          // COALESCE preserva el color existente si no viene uno nuevo
+          // COALESCE preserva el color/caracteristicas existente si no viene uno nuevo
           await client.query(
             `UPDATE seriales
-             SET vendido      = false,
-                 prestado     = false,
-                 fecha_salida = NULL,
-                 costo_compra = $1,
-                 proveedor_id = COALESCE($2, proveedor_id),
-                 color        = COALESCE($3, color)
-             WHERE id = $4`,
-            [linea.precio_unitario, proveedor_id || null, linea.color || null, linea.reactivar_serial_id]
+             SET vendido         = false,
+                 prestado        = false,
+                 fecha_salida    = NULL,
+                 costo_compra    = $1,
+                 proveedor_id    = COALESCE($2, proveedor_id),
+                 color           = COALESCE($3, color),
+                 caracteristicas = COALESCE($4, caracteristicas)
+             WHERE id = $5`,
+            [
+              linea.precio_unitario,
+              proveedor_id || null,
+              linea.color || null,
+              linea.caracteristicas ? JSON.stringify(linea.caracteristicas) : null,
+              linea.reactivar_serial_id,
+            ]
           );
         } else {
           const { rows: existente } = await client.query(
@@ -115,11 +121,9 @@ const registrarCompra = async ({
             }
           }
 
-          // ── CAMBIO: color incluido en el INSERT de serial nuevo ───────────
-          // Si linea.color no viene (negocio sin opción activa), queda NULL
           await client.query(
-            `INSERT INTO seriales(producto_id, imei, fecha_entrada, costo_compra, proveedor_id, color)
-             VALUES ($1, $2, $3, $4, $5, $6)`,
+            `INSERT INTO seriales(producto_id, imei, fecha_entrada, costo_compra, proveedor_id, color, caracteristicas)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)`,
             [
               linea.producto_id,
               linea.imei,
@@ -127,6 +131,7 @@ const registrarCompra = async ({
               linea.precio_unitario,
               proveedor_id || null,
               linea.color  || null,
+              linea.caracteristicas ? JSON.stringify(linea.caracteristicas) : null,
             ]
           );
         }
