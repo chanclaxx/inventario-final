@@ -41,8 +41,8 @@ const _procesarItemPrestamo = async (client, { imei, producto_id, nombre_product
       throw { status: 400, message: `El producto ${nombre_producto} no pertenece a esta sucursal` };
     }
     await client.query(
-      'UPDATE seriales SET prestado = true, cliente_origen = $1 WHERE id = $2',
-      [prestatario || null, rows[0].id]
+      'UPDATE seriales SET prestado = true WHERE id = $1',
+      [rows[0].id]
     );
   } else if (producto_id) {
     const { rows: prodRows } = await client.query(
