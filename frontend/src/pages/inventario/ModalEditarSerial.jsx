@@ -74,9 +74,9 @@ export function ModalEditarSerial({ serial, precioProducto, productoId, onClose 
       }
       return actualizarSerial(serial.id, payload);
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['seriales', productoId], exact: false });
-      queryClient.invalidateQueries({ queryKey: ['productos-serial'],     exact: false });
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['seriales', productoId], exact: false });
+      await queryClient.invalidateQueries({ queryKey: ['productos-serial'],     exact: false });
       onClose();
     },
     onError: (err) => {

@@ -52,8 +52,8 @@ export function ModalEditarProductoCantidad({ producto, pinEliminacion, onClose 
       proveedor_id  : form.proveedor_id   !== '' ? Number(form.proveedor_id)   : null,
       linea_id      : form.linea_id       !== '' ? Number(form.linea_id)       : null,
     }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['productos-cantidad'], exact: false });
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['productos-cantidad'], exact: false });
       onClose();
     },
     onError: (err) => setError(err.response?.data?.error || 'Error al actualizar el producto'),

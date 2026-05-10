@@ -196,8 +196,8 @@ export function ProductosCantidad() {
   const mutReducir = useMutation({
     mutationFn: ({ productoId, cantidad }) =>
       ajustarStockCantidad(productoId, { cantidad: -Math.abs(cantidad) }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['productos-cantidad'], exact: false });
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['productos-cantidad'], exact: false });
       setProductoAReducir(null);
       setCantidadReducir('1');
     },
