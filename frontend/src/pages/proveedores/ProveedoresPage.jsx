@@ -873,6 +873,11 @@ function ModalProveedor({ proveedor, tipoForzado, onClose }) {
               {tipoForzado === 'cruce' ? 'Cruce' : 'Proveedor'}
             </div>
           )}
+          {form.tipo === 'cruce' && (
+            <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 leading-relaxed">
+              Un cruce es un intercambio o compra a crédito con otra empresa. Las deudas se registran en Cuenta corriente y no afectan la caja directamente.
+            </p>
+          )}
         </div>
 
         {error && <p className="text-sm text-red-500">{error}</p>}
@@ -976,6 +981,13 @@ function TabCruces({ sucursalKey, sucursalLista }) {
     queryFn:  () => getCruces().then((r) => r.data.data),
   });
 
+  const { data: acreedoresRaw } = useQuery({
+    queryKey: ['acreedores'],
+    queryFn:  () => getAcreedores('').then((r) => r.data.data),
+    staleTime: 60_000,
+  });
+  const acreedoresAll = Array.isArray(acreedoresRaw) ? acreedoresRaw : [];
+
   const cruces = (crucesData || []).filter((c) =>
     c.nombre.toLowerCase().includes(busqueda.toLowerCase())
   );
@@ -998,37 +1010,49 @@ function TabCruces({ sucursalKey, sucursalLista }) {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
-        <p className="text-sm text-gray-400">{cruces.length} cruce(s)</p>
+        <div>
+          <p className="text-sm text-gray-400">{cruces.length} cruce(s)</p>
+          <p className="text-xs text-gray-400 mt-0.5">Empresas con las que haces intercambios o compras sin pago inmediato en caja</p>
+        </div>
         <Button size="sm" onClick={() => setModalCruce(true)}><Plus size={16} /> Nuevo cruce</Button>
       </div>
       <SearchInput value={busqueda} onChange={setBusqueda} placeholder="Buscar cruce..." />
       {isLoading ? <Spinner className="py-20" /> : cruces.length === 0 ? (
-        <EmptyState icon={Repeat} titulo="Sin cruces" descripcion="Aún no hay cruces registrados" />
+        <EmptyState icon={Repeat} titulo="Sin cruces" descripcion="Los cruces son empresas con las que intercambias mercancía o compras a crédito. Su deuda se lleva en Cuenta corriente." />
       ) : (
-        cruces.map((c) => (
-          <div key={c.id} className="bg-white border border-gray-100 rounded-2xl p-4 flex items-center justify-between gap-3">
-            <button onClick={() => setCruceVer(c)} className="flex-1 text-left min-w-0">
-              <div className="flex items-center gap-2 flex-wrap">
-                <p className="font-semibold text-gray-900 truncate">{c.nombre}</p>
-                <ProveedorTipoBadge tipo="cruce" />
-              </div>
-              <div className="flex items-center gap-3 mt-0.5 flex-wrap">
-                {c.nit      && <span className="text-xs text-gray-400">NIT: {c.nit}</span>}
-                {c.telefono && <span className="text-xs text-gray-400">Tel: {c.telefono}</span>}
-                {c.contacto && <span className="text-xs text-gray-400">{c.contacto}</span>}
-              </div>
-            </button>
-            <div className="flex items-center gap-2 flex-shrink-0">
-              <Button size="sm" onClick={() => setModalCompra(c)}>
-                <ShoppingCart size={14} />
-                <span className="hidden sm:inline">Compra</span>
-              </Button>
-              <button onClick={() => setCruceEditar(c)} className="p-2 rounded-xl hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors">
-                <Package size={16} />
+        cruces.map((c) => {
+          const acreedorVinculado = acreedoresAll.find((a) => a.proveedor_id === c.id);
+          const saldo = acreedorVinculado ? Number(acreedorVinculado.saldo || 0) : 0;
+          return (
+            <div key={c.id} className="bg-white border border-gray-100 rounded-2xl p-4 flex items-center justify-between gap-3">
+              <button onClick={() => setCruceVer(c)} className="flex-1 text-left min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <p className="font-semibold text-gray-900 truncate">{c.nombre}</p>
+                  <ProveedorTipoBadge tipo="cruce" />
+                  {saldo > 0 && (
+                    <span className="text-xs text-red-600 font-semibold bg-red-50 border border-red-200 px-2 py-0.5 rounded-full">
+                      Debe {formatCOP(saldo)}
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-3 mt-0.5 flex-wrap">
+                  {c.nit      && <span className="text-xs text-gray-400">NIT: {c.nit}</span>}
+                  {c.telefono && <span className="text-xs text-gray-400">Tel: {c.telefono}</span>}
+                  {c.contacto && <span className="text-xs text-gray-400">{c.contacto}</span>}
+                </div>
               </button>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <Button size="sm" onClick={() => setModalCompra(c)}>
+                  <ShoppingCart size={14} />
+                  <span className="hidden sm:inline">Compra</span>
+                </Button>
+                <button onClick={() => setCruceEditar(c)} className="p-2 rounded-xl hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors">
+                  <Package size={16} />
+                </button>
+              </div>
             </div>
-          </div>
-        ))
+          );
+        })
       )}
       {/* Crear cruce: tipo forzado a 'cruce' */}
       {modalCruce  && <ModalProveedor tipoForzado="cruce" onClose={() => setModalCruce(false)} />}

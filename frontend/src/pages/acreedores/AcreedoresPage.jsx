@@ -484,8 +484,11 @@ function ListaAcreedores({ acreedores, acreedorSel, isLoading, busqueda, setBusq
                     <div className="flex items-center gap-1.5 flex-wrap">
                       <p className="text-sm font-medium text-gray-800">{a.nombre}</p>
                       {a.proveedor_id && (
-                        <span className="text-xs text-blue-500 bg-blue-50 border border-blue-100 px-1.5 py-0.5 rounded-full leading-none">
-                          Proveedor
+                        <span className={`text-xs px-1.5 py-0.5 rounded-full leading-none border
+                          ${a.proveedor_tipo === 'cruce'
+                            ? 'text-amber-700 bg-amber-50 border-amber-200'
+                            : 'text-blue-500 bg-blue-50 border-blue-100'}`}>
+                          {a.proveedor_tipo === 'cruce' ? 'Cruce' : 'Proveedor'}
                         </span>
                       )}
                     </div>
