@@ -14,7 +14,7 @@ import { Spinner }     from '../../components/ui/Spinner';
 import { EmptyState }  from '../../components/ui/EmptyState';
 import { SearchInput } from '../../components/ui/SearchInput';
 import { ReciboAcreedor } from '../../components/Reciboacreedor';
-import { Users, Plus, ChevronRight, ChevronLeft, ChevronUp, PenLine, Printer, Trash2, AlertTriangle } from 'lucide-react';
+import { Users, Plus, ChevronRight, ChevronLeft, ChevronUp, PenLine, Printer, Trash2, AlertTriangle, Calculator } from 'lucide-react';
 import api from '../../api/axios.config';
 import { getCompraById } from '../../api/compras.api';
 
@@ -28,6 +28,120 @@ const normalizarProductos = (data) => {
 };
 
 const PAGE_SIZE = 10;
+
+// ─────────────────────────────────────────────
+// CALCULADORA
+// ─────────────────────────────────────────────
+function CalcBtn({ ch, onClick, wide, accent, active }) {
+  return (
+    <button type="button" onClick={onClick}
+      className={`h-11 rounded-xl text-sm font-semibold transition-all active:scale-95 select-none
+        ${wide ? 'col-span-2' : ''}
+        ${active  ? 'bg-blue-600 text-white shadow-sm'
+          : accent ? 'bg-blue-50 text-blue-700 hover:bg-blue-100'
+          : ch === 'C'  ? 'bg-red-50 text-red-600 hover:bg-red-100'
+          : ch === '⌫'  ? 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+          : ch === '='  ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-sm'
+          : 'bg-white border border-gray-200 text-gray-800 hover:bg-gray-50'}`}>
+      {ch}
+    </button>
+  );
+}
+
+function Calculadora({ onUsar }) {
+  const [display,    setDisplay]    = useState('0');
+  const [prevVal,    setPrevVal]    = useState(null);
+  const [op,         setOp]         = useState(null);
+  const [esperando,  setEsperando]  = useState(false);
+  const [historial,  setHistorial]  = useState('');
+
+  const fmtNum = (n) => String(Number.isInteger(n) ? n : parseFloat(n.toFixed(2)));
+
+  const calcOp = (a, b, o) => {
+    const r = o === '+' ? a + b : o === '-' ? a - b : o === '×' ? a * b : b !== 0 ? a / b : 0;
+    return Math.round(r * 100) / 100;
+  };
+
+  const presNum = (n) => {
+    if (esperando) { setDisplay(String(n)); setEsperando(false); }
+    else setDisplay(display === '0' ? String(n) : display + n);
+  };
+
+  const presDecimal = () => {
+    if (esperando) { setDisplay('0.'); setEsperando(false); return; }
+    if (!display.includes('.')) setDisplay(display + '.');
+  };
+
+  const presOp = (o) => {
+    const val = parseFloat(display);
+    if (prevVal !== null && !esperando) {
+      const res = calcOp(prevVal, val, op);
+      setDisplay(fmtNum(res));
+      setHistorial(`${fmtNum(res)} ${o}`);
+      setPrevVal(res);
+    } else {
+      setHistorial(`${display} ${o}`);
+      setPrevVal(val);
+    }
+    setOp(o);
+    setEsperando(true);
+  };
+
+  const igual = () => {
+    if (prevVal === null || op === null) return;
+    const val = parseFloat(display);
+    const res = calcOp(prevVal, val, op);
+    setHistorial(`${historial} ${display} =`);
+    setDisplay(fmtNum(res));
+    setPrevVal(null); setOp(null); setEsperando(true);
+  };
+
+  const limpiar = () => {
+    setDisplay('0'); setPrevVal(null); setOp(null); setEsperando(false); setHistorial('');
+  };
+
+  const borrar = () => {
+    if (esperando) return;
+    setDisplay(display.length > 1 ? display.slice(0, -1) : '0');
+  };
+
+  return (
+    <div className="flex flex-col gap-2 bg-gray-50 border border-gray-200 rounded-2xl p-3">
+      {/* Display */}
+      <div className="bg-gray-900 rounded-xl px-3 py-2.5 flex flex-col items-end gap-0.5">
+        <p className="text-gray-500 text-xs h-4 tabular-nums truncate w-full text-right">{historial}</p>
+        <p className="text-white text-2xl font-mono tabular-nums leading-tight">
+          {Number(display).toLocaleString('es-CO')}
+        </p>
+      </div>
+
+      {/* Teclado */}
+      <div className="grid grid-cols-4 gap-1.5">
+        <CalcBtn ch="C"  onClick={limpiar}            wide />
+        <CalcBtn ch="⌫"  onClick={borrar} />
+        <CalcBtn ch="÷"  onClick={() => presOp('÷')}  accent active={op === '÷' && esperando} />
+
+        {[7, 8, 9].map((n) => <CalcBtn key={n} ch={String(n)} onClick={() => presNum(n)} />)}
+        <CalcBtn ch="×"  onClick={() => presOp('×')}  accent active={op === '×' && esperando} />
+
+        {[4, 5, 6].map((n) => <CalcBtn key={n} ch={String(n)} onClick={() => presNum(n)} />)}
+        <CalcBtn ch="−"  onClick={() => presOp('-')}  accent active={op === '-' && esperando} />
+
+        {[1, 2, 3].map((n) => <CalcBtn key={n} ch={String(n)} onClick={() => presNum(n)} />)}
+        <CalcBtn ch="+"  onClick={() => presOp('+')}  accent active={op === '+' && esperando} />
+
+        <CalcBtn ch="0"  onClick={() => presNum(0)}   wide />
+        <CalcBtn ch="."  onClick={presDecimal} />
+        <CalcBtn ch="="  onClick={igual} />
+      </div>
+
+      <Button size="sm" className="w-full" onClick={() => onUsar(display)}
+        disabled={display === '0'}>
+        Usar {formatCOP(Math.round(Number(display) || 0))}
+      </Button>
+    </div>
+  );
+}
 
 // ─────────────────────────────────────────────
 // DETALLE EXPANDIBLE DE COMPRA
@@ -97,6 +211,7 @@ function ModalMovimiento({ acreedor, proveedorTipo, onClose, onImprimir }) {
   const queryClient             = useQueryClient();
   const [form,  setForm]        = useState({ tipo: 'Cargo', descripcion: '', valor: '' });
   const [registrarEnCaja, setRegistrarEnCaja] = useState(proveedorTipo !== 'proveedor');
+  const [mostrarCalc, setMostrarCalc] = useState(false);
   const [error, setError]       = useState('');
   const metodosPago = useMetodosPago();
   const [metodoPago, setMetodoPago] = useState('Efectivo');
@@ -158,12 +273,26 @@ function ModalMovimiento({ acreedor, proveedorTipo, onClose, onImprimir }) {
           onKeyDown={(e) => handleKeyDown(e, 'valor-acreedor')} />
 
         <div className="flex flex-col gap-1">
-          <label className="text-sm font-medium text-gray-700">Valor</label>
+          <div className="flex items-center justify-between">
+            <label className="text-sm font-medium text-gray-700">Valor</label>
+            <button type="button" onClick={() => setMostrarCalc((v) => !v)}
+              className="flex items-center gap-1 text-xs text-blue-500 hover:text-blue-700 transition-colors">
+              <Calculator size={12} />
+              {mostrarCalc ? 'Cerrar' : 'Calculadora'}
+            </button>
+          </div>
           <InputMoneda id="valor-acreedor" value={form.valor}
             onChange={(val) => setForm({ ...form, valor: val })} placeholder="0"
             className="w-full px-3 py-2 bg-gray-100 rounded-xl text-sm
               focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all" />
         </div>
+
+        {mostrarCalc && (
+          <Calculadora onUsar={(val) => {
+            setForm((f) => ({ ...f, valor: String(Math.round(Number(val) || 0)) }));
+            setMostrarCalc(false);
+          }} />
+        )}
 
         {mostrarCheckbox && esAbono && (
           <div className={`rounded-xl p-3 border transition-all
