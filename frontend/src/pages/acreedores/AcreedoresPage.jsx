@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getAcreedores, getAcreedorById, crearAcreedor, registrarMovimiento, eliminarAcreedor } from '../../api/acreedores.api';
 import { getConfig, verificarPin } from '../../api/config.api';
@@ -27,76 +27,7 @@ const normalizarProductos = (data) => {
   return [];
 };
 
-// ─────────────────────────────────────────────
-// CANVAS DE FIRMA
-// ─────────────────────────────────────────────
-function FirmaCanvas({ onFirma }) {
-  const canvasRef                   = useRef(null);
-  const [dibujando, setDibujando]   = useState(false);
-  const [tieneFirma, setTieneFirma] = useState(false);
-
-  const getPos = (e, canvas) => {
-    const rect   = canvas.getBoundingClientRect();
-    const source = e.touches ? e.touches[0] : e;
-    return { x: source.clientX - rect.left, y: source.clientY - rect.top };
-  };
-
-  const iniciar = (e) => {
-    e.preventDefault();
-    const canvas = canvasRef.current;
-    const ctx    = canvas.getContext('2d');
-    const pos    = getPos(e, canvas);
-    ctx.beginPath();
-    ctx.moveTo(pos.x, pos.y);
-    setDibujando(true);
-  };
-
-  const dibujar = (e) => {
-    e.preventDefault();
-    if (!dibujando) return;
-    const canvas = canvasRef.current;
-    const ctx    = canvas.getContext('2d');
-    const pos    = getPos(e, canvas);
-    ctx.lineTo(pos.x, pos.y);
-    ctx.strokeStyle = '#1d4ed8';
-    ctx.lineWidth   = 2;
-    ctx.lineCap     = 'round';
-    ctx.stroke();
-    setTieneFirma(true);
-  };
-
-  const terminar = () => {
-    setDibujando(false);
-    if (tieneFirma) onFirma(canvasRef.current.toDataURL());
-  };
-
-  const limpiar = () => {
-    const canvas = canvasRef.current;
-    canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
-    setTieneFirma(false);
-    onFirma(null);
-  };
-
-  return (
-    <div className="flex flex-col gap-2">
-      <div className="flex items-center justify-between">
-        <label className="text-sm font-medium text-gray-700">Firma</label>
-        {tieneFirma && (
-          <button onClick={limpiar} className="text-xs text-red-400 hover:text-red-600">Limpiar</button>
-        )}
-      </div>
-      <canvas
-        ref={canvasRef} width={340} height={120}
-        className="border-2 border-dashed border-gray-200 rounded-xl bg-gray-50 touch-none cursor-crosshair w-full"
-        onMouseDown={iniciar} onMouseMove={dibujar} onMouseUp={terminar} onMouseLeave={terminar}
-        onTouchStart={iniciar} onTouchMove={dibujar} onTouchEnd={terminar}
-      />
-      <p className="text-xs text-gray-400 text-center">
-        {tieneFirma ? '✓ Firma capturada' : 'Dibuja la firma aquí'}
-      </p>
-    </div>
-  );
-}
+const PAGE_SIZE = 10;
 
 // ─────────────────────────────────────────────
 // DETALLE EXPANDIBLE DE COMPRA
@@ -165,7 +96,6 @@ function DetalleCompraInline({ compraId }) {
 function ModalMovimiento({ acreedor, proveedorTipo, onClose, onImprimir }) {
   const queryClient             = useQueryClient();
   const [form,  setForm]        = useState({ tipo: 'Cargo', descripcion: '', valor: '' });
-  const [firma, setFirma]       = useState(null);
   const [registrarEnCaja, setRegistrarEnCaja] = useState(proveedorTipo !== 'proveedor');
   const [error, setError]       = useState('');
   const metodosPago = useMetodosPago();
@@ -180,7 +110,6 @@ function ModalMovimiento({ acreedor, proveedorTipo, onClose, onImprimir }) {
       tipo:              form.tipo,
       descripcion:       form.descripcion,
       valor:             Number(form.valor),
-      firma,
       registrar_en_caja: esAbono ? registrarEnCaja : false,
       metodo:            metodoPago,
     }),
@@ -269,8 +198,6 @@ function ModalMovimiento({ acreedor, proveedorTipo, onClose, onImprimir }) {
             })}
           </div>
         </div>
-
-        <FirmaCanvas onFirma={setFirma} />
 
         {error && <p className="text-sm text-red-500">{error}</p>}
 
@@ -508,7 +435,12 @@ function ModalEliminarAcreedor({ acreedor, onClose, onEliminar }) {
 // DETALLE ACREEDOR
 // ─────────────────────────────────────────────
 function DetalleAcreedor({ detalle, loadingDetalle, movimientosUI, onRegistrar, onImprimir, onVolver, onEliminar, esAdmin }) {
+  const [pagina, setPagina] = useState(1);
+
   if (loadingDetalle) return <Spinner className="py-20" />;
+
+  const totalPaginas = Math.ceil(movimientosUI.length / PAGE_SIZE);
+  const movsPagina   = movimientosUI.slice((pagina - 1) * PAGE_SIZE, pagina * PAGE_SIZE);
 
   return (
     <div className="flex flex-col gap-4">
@@ -543,38 +475,58 @@ function DetalleAcreedor({ detalle, loadingDetalle, movimientosUI, onRegistrar, 
         {movimientosUI.length === 0 ? (
           <EmptyState icon={PenLine} titulo="Sin movimientos" />
         ) : (
-          movimientosUI.map((m) => (
-            <div key={m.id} className="bg-white border border-gray-100 rounded-xl p-3 flex items-start justify-between gap-3">
-              <div className="flex-1">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <Badge variant={m.tipo === 'Cargo' ? 'red' : 'green'}>{m.tipo}</Badge>
-                  <span className="text-sm text-gray-700">{m.descripcion}</span>
-                  {m.registrar_en_caja === false && (
-                    <span className="text-xs text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">Sin caja</span>
-                  )}
+          <>
+            {movsPagina.map((m) => (
+              <div key={m.id} className="bg-white border border-gray-100 rounded-xl p-3 flex items-start justify-between gap-3">
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <Badge variant={m.tipo === 'Cargo' ? 'red' : 'green'}>{m.tipo}</Badge>
+                    <span className="text-sm text-gray-700">{m.descripcion}</span>
+                    {m.registrar_en_caja === false && (
+                      <span className="text-xs text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">Sin caja</span>
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-400 mt-1">{formatFechaHora(m.fecha)}</p>
+                  <div className="flex items-center gap-1 mt-1 text-xs text-gray-400">
+                    <span>{formatCOP(m.saldo_antes)}</span>
+                    <span>→</span>
+                    <span className="font-semibold text-gray-600">{formatCOP(m.saldo_despues)}</span>
+                  </div>
+                  {m.firma && <img src={m.firma} alt="firma" className="mt-2 h-12 border border-gray-100 rounded-lg" />}
+                  {m.compra_id && <DetalleCompraInline compraId={m.compra_id} />}
                 </div>
-                <p className="text-xs text-gray-400 mt-1">{formatFechaHora(m.fecha)}</p>
-                <div className="flex items-center gap-1 mt-1 text-xs text-gray-400">
-                  <span>{formatCOP(m.saldo_antes)}</span>
-                  <span>→</span>
-                  <span className="font-semibold text-gray-600">{formatCOP(m.saldo_despues)}</span>
+                <div className="flex flex-col items-end gap-2 flex-shrink-0">
+                  <span className={`text-sm font-bold ${m.tipo === 'Cargo' ? 'text-red-500' : 'text-green-600'}`}>
+                    {m.tipo === 'Cargo' ? '+' : '-'}{formatCOP(m.valor)}
+                  </span>
+                  <button onClick={() => onImprimir(m)}
+                    className="flex items-center gap-1 text-xs text-gray-400 hover:text-blue-600 transition-colors"
+                    title="Imprimir recibo">
+                    <Printer size={14} />
+                    <span className="hidden sm:inline">Recibo</span>
+                  </button>
                 </div>
-                {m.firma && <img src={m.firma} alt="firma" className="mt-2 h-12 border border-gray-100 rounded-lg" />}
-                {m.compra_id && <DetalleCompraInline compraId={m.compra_id} />}
               </div>
-              <div className="flex flex-col items-end gap-2 flex-shrink-0">
-                <span className={`text-sm font-bold ${m.tipo === 'Cargo' ? 'text-red-500' : 'text-green-600'}`}>
-                  {m.tipo === 'Cargo' ? '+' : '-'}{formatCOP(m.valor)}
-                </span>
-                <button onClick={() => onImprimir(m)}
-                  className="flex items-center gap-1 text-xs text-gray-400 hover:text-blue-600 transition-colors"
-                  title="Imprimir recibo">
-                  <Printer size={14} />
-                  <span className="hidden sm:inline">Recibo</span>
+            ))}
+
+            {totalPaginas > 1 && (
+              <div className="flex items-center justify-center gap-3 pt-1">
+                <button
+                  disabled={pagina === 1}
+                  onClick={() => setPagina((p) => p - 1)}
+                  className="p-1.5 rounded-lg border border-gray-200 disabled:opacity-30 hover:bg-gray-50 transition-colors">
+                  <ChevronLeft size={15} />
+                </button>
+                <span className="text-xs text-gray-500 tabular-nums">{pagina} / {totalPaginas}</span>
+                <button
+                  disabled={pagina === totalPaginas}
+                  onClick={() => setPagina((p) => p + 1)}
+                  className="p-1.5 rounded-lg border border-gray-200 disabled:opacity-30 hover:bg-gray-50 transition-colors">
+                  <ChevronRight size={15} />
                 </button>
               </div>
-            </div>
-          ))
+            )}
+          </>
         )}
       </div>
     </div>
@@ -661,7 +613,7 @@ export default function AcreedoresPage() {
             <EmptyState icon={Users} titulo="Selecciona un acreedor"
               descripcion="Elige un acreedor para ver su historial" />
           ) : (
-            <DetalleAcreedor {...detalleProps} />
+            <DetalleAcreedor key={acreedorSel.id} {...detalleProps} />
           )}
         </div>
       </div>
@@ -670,7 +622,7 @@ export default function AcreedoresPage() {
         {!acreedorSel ? (
           <ListaAcreedores {...listaProps} />
         ) : (
-          <DetalleAcreedor {...detalleProps} />
+          <DetalleAcreedor key={acreedorSel.id} {...detalleProps} />
         )}
       </div>
 
