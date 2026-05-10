@@ -454,7 +454,6 @@ export function ProductosSerial({ onAgregarProducto }) {
     queryFn:   () => getProductosSerial().then((r) => r.data.data),
     enabled:   sucursalLista,
     staleTime: 0,
-    gcTime:    0,
   });
 
   const { data: lineasData } = useQuery({
@@ -468,7 +467,6 @@ export function ProductosSerial({ onAgregarProducto }) {
     queryFn:   () => getSeriales(productoSeleccionado.id, false).then((r) => r.data.data),
     enabled:   sucursalLista && !!productoSeleccionado,
     staleTime: 0,
-    gcTime:    0,
   });
 
   const { data: configData } = useQuery({

@@ -1429,6 +1429,7 @@ function PasoCantidad({ sucursalKey, onExito }) {
   const { data: productosData } = useQuery({
     queryKey: ['productos-cantidad', ...sucursalKey],
     queryFn:  () => getProductosCantidad().then((r) => normalizarProductos(r.data.data)),
+    enabled:  sucursalKey.length > 0,
   });
 
   // ── Filtrado combinado: nombre + línea ────────────────────────────────────

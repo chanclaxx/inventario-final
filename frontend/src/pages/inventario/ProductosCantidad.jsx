@@ -176,7 +176,6 @@ export function ProductosCantidad() {
     queryFn:   () => getProductosCantidad().then((r) => r.data.data),
     enabled:   sucursalLista,
     staleTime: 0,
-    gcTime:    0,
   });
 
   const { data: lineasData } = useQuery({
@@ -205,7 +204,9 @@ export function ProductosCantidad() {
     onError: () => {}, // El error se muestra en ModalPinEliminacion
   });
 
-  const productos = Array.isArray(productosData?.items) ? productosData.items : [];
+  const productos = Array.isArray(productosData)
+    ? productosData
+    : (Array.isArray(productosData?.items) ? productosData.items : []);
   const lineas    = lineasData || [];
   const esAdmin   = esAdminNegocio();
 
