@@ -1011,7 +1011,9 @@ function PasoPago({ proveedor, productos, tipo, onConfirmar, onVolver, loading }
     queryFn:  () => getAcreedores('').then((r) => r.data.data),
   });
   const acreedoresData = normalizarProductos(acreedoresRaw);
-  const proveedorYaEsAcreedor = acreedoresData.some((a) => a.proveedor_id === proveedor.id);
+  const acreedorVinculado = acreedoresData.find((a) => a.proveedor_id === proveedor.id) || null;
+  const proveedorYaEsAcreedor = !!acreedorVinculado;
+  const saldoActual = acreedorVinculado ? Number(acreedorVinculado.saldo || 0) : 0;
 
   const handleConfirmar = () => {
     setError('');
@@ -1150,6 +1152,20 @@ function PasoPago({ proveedor, productos, tipo, onConfirmar, onVolver, loading }
           <p className="text-xs text-gray-400 mt-2 px-1">
             Se registrará el total completo ({formatCOP(totalCompra)}) como {pagos[0].metodo}
           </p>
+        )}
+
+        {pagos.some((p) => p.metodo === 'Credito' || p.metodo === 'Fiado') && saldoActual > 0 && (
+          <div className="mt-3 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5 flex flex-col gap-0.5">
+            <p className="text-xs font-semibold text-amber-700">Deuda actual con este proveedor</p>
+            <div className="flex justify-between text-xs text-amber-600">
+              <span>Saldo anterior</span>
+              <span className="font-medium tabular-nums">{formatCOP(saldoActual)}</span>
+            </div>
+            <div className="flex justify-between text-xs text-amber-800 border-t border-amber-200 mt-1 pt-1">
+              <span className="font-semibold">Nueva deuda total</span>
+              <span className="font-bold tabular-nums">{formatCOP(saldoActual + Number(totalCompra))}</span>
+            </div>
+          </div>
         )}
 
         {pagos.some((p) => p.metodo === 'Contado' || p.metodo === 'Transferencia') && (
