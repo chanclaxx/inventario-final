@@ -2,7 +2,7 @@ const { pool } = require('../../config/db');
 
 const findAll = async (negocioId) => {
   const { rows } = await pool.query(`
-    SELECT p.id, p.nombre, p.telefono, p.creado_en,
+    SELECT p.id, p.nombre, p.telefono, p.creado_en, p.saldo_a_favor,
            COUNT(e.id) AS total_empleados,
            COALESCE(SUM(pr.valor_prestamo - pr.total_abonado)
              FILTER (WHERE pr.estado = 'Activo'), 0) AS saldo_total

@@ -205,6 +205,7 @@ const crearPrestamos = async ({
   prestatario, cedula, telefono,
   prestatario_id, empleado_id, cliente_id,
   items,
+  aplicar_saldo_favor = false,
 }) => {
   if (!items?.length) throw { status: 400, message: 'Se requiere al menos un ítem para el préstamo' };
 
@@ -246,6 +247,40 @@ const crearPrestamos = async ({
       prestamosCreados.push(prestamo);
     }
 
+    // ── Aplicar saldo a favor dentro de la misma transacción ─────────────────
+    if (aplicar_saldo_favor && (prestatario_id || cliente_id)) {
+      const tipo      = prestatario_id ? 'prestatario' : 'cliente';
+      const personaId = prestatario_id || cliente_id;
+
+      let saldoRestante = await repo.getSaldoAFavorPersona(client, tipo, personaId);
+
+      if (saldoRestante > 0) {
+        for (const prestamo of prestamosCreados) {
+          if (saldoRestante <= 0) break;
+
+          const saldoPendiente = Number(prestamo.valor_prestamo) - Number(prestamo.total_abonado);
+          if (saldoPendiente <= 0) continue;
+
+          const montoAbono = Math.min(saldoRestante, saldoPendiente);
+          const resultado  = await repo.insertarAbono(client, {
+            prestamo_id: prestamo.id,
+            valor:       montoAbono,
+            metodo:      'Saldo a favor',
+          });
+          saldoRestante -= montoAbono;
+
+          if (Number(resultado.total_abonado) >= Number(resultado.valor_prestamo)) {
+            await repo.updateEstado(client, prestamo.id, 'Saldado');
+            if (prestamo.imei) {
+              await repo.salarSerial(client, prestamo.imei, sucursal_id);
+            }
+          }
+        }
+
+        await repo.setearSaldoAFavorPersona(client, tipo, personaId, saldoRestante);
+      }
+    }
+
     await client.query('COMMIT');
     return prestamosCreados;
   } catch (err) {
@@ -254,6 +289,19 @@ const crearPrestamos = async ({
   } finally {
     client.release();
   }
+};
+
+// ─── Servicio: registrar/actualizar saldo a favor de una persona ──────────────
+
+const registrarSaldoAFavor = async (negocioId, tipo, personaId, monto) => {
+  if (tipo === 'prestatario') {
+    await _verificarPrestatario(personaId, negocioId);
+  } else {
+    await _verificarCliente(personaId, negocioId);
+  }
+
+  await repo.setearSaldoAFavorPersona(pool, tipo, personaId, monto);
+  return { saldo_a_favor: monto };
 };
 
 // ─── Servicio: registrar abono ────────────────────────────────────────────────
@@ -395,4 +443,5 @@ module.exports = {
   crearPrestamo, crearPrestamos,
   registrarAbono,
   devolverPrestamo, devolverParcial,
+  registrarSaldoAFavor,
 };

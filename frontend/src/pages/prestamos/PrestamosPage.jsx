@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { buscarPrestamos as buscarPrestamosApi } from '../../api/busqueda.api';
 import { exportarPrestamosExcel } from '../../utils/exportarPrestamosExcel';
-import { getPrestamos, registrarAbonoPrestamo, devolverPrestamo, devolverParcialPrestamo } from '../../api/prestamos.api';
+import { getPrestamos, registrarAbonoPrestamo, devolverPrestamo, devolverParcialPrestamo, registrarSaldoAFavor as registrarSaldoAFavorApi } from '../../api/prestamos.api';
 import {
   getDomiciliarios,
   getEntregas,
@@ -30,7 +30,7 @@ import api                                      from '../../api/axios.config';
 import {
   Handshake, CreditCard, Bike, Plus, CheckCircle,
   ChevronDown, ChevronUp, ChevronLeft, ChevronRight,
-  Users, User, AlertTriangle, FileDown, Loader2, Printer, Search,
+  Users, User, AlertTriangle, FileDown, Loader2, Printer, Search, Wallet,
 } from 'lucide-react';
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
@@ -295,6 +295,75 @@ function ModalDevolucion({ prestamo, onClose }) {
           <Button variant="secondary" className="flex-1" onClick={onClose}>Cancelar</Button>
           <Button className="flex-1" loading={isPending} onClick={handleConfirmar}>
             <CheckCircle size={15} /> Confirmar devolución
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// ─── Modal saldo a favor ──────────────────────────────────────────────────────
+
+function ModalSaldoAFavor({ nombre, tipo, personaId, montoActual, onClose }) {
+  const queryClient = useQueryClient();
+  const [monto, setMonto] = useState(montoActual > 0 ? String(montoActual) : '');
+  const [error, setError]  = useState('');
+
+  const tipoApi = tipo === 'companero' ? 'prestatario' : 'cliente';
+
+  const mutation = useMutation({
+    mutationFn: () => registrarSaldoAFavorApi(tipoApi, personaId, Number(monto)),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['prestamos'],     exact: false });
+      queryClient.invalidateQueries({ queryKey: ['prestatarios'],  exact: false });
+      onClose();
+    },
+    onError: (err) => setError(err.response?.data?.error || 'Error al guardar el saldo'),
+  });
+
+  const handleGuardar = () => {
+    setError('');
+    const val = Number(monto);
+    if (isNaN(val) || val < 0) return setError('El monto debe ser mayor o igual a 0');
+    mutation.mutate();
+  };
+
+  return (
+    <Modal open onClose={onClose} title="Saldo a favor" size="sm">
+      <div className="flex flex-col gap-4">
+        <div className="bg-emerald-50 border border-emerald-100 rounded-xl px-4 py-3">
+          <p className="text-xs text-emerald-600">Persona</p>
+          <p className="text-sm font-semibold text-emerald-800">{nombre}</p>
+          {montoActual > 0 && (
+            <p className="text-xs text-emerald-600 mt-1">
+              Saldo actual: <span className="font-bold">{formatCOP(montoActual)}</span>
+            </p>
+          )}
+        </div>
+        <p className="text-sm text-gray-600">
+          Este monto se descontará automáticamente del próximo préstamo que registres a esta persona.
+        </p>
+        <div className="flex flex-col gap-1">
+          <label className="text-sm font-medium text-gray-700">Monto del saldo a favor</label>
+          <InputMoneda
+            value={monto}
+            onChange={setMonto}
+            placeholder="0"
+            autoFocus
+            onKeyDown={(e) => e.key === 'Enter' && handleGuardar()}
+            className="w-full px-3 py-2 bg-gray-100 rounded-xl text-sm
+              focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-all"
+          />
+        </div>
+        {error && <p className="text-sm text-red-500">{error}</p>}
+        <div className="flex gap-2">
+          <Button variant="secondary" className="flex-1" onClick={onClose}>Cancelar</Button>
+          <Button
+            className="flex-1 bg-emerald-600 hover:bg-emerald-700"
+            loading={mutation.isPending}
+            onClick={handleGuardar}
+          >
+            <Wallet size={14} /> Guardar saldo
           </Button>
         </div>
       </div>

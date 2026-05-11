@@ -23,9 +23,15 @@ const validarDevolucionParcial = [
   body('cantidad_devuelta').isInt({ min: 1 }).withMessage('La cantidad a devolver debe ser mayor a 0'),
 ];
 
+const validarSaldoAFavor = [
+  body('monto').isFloat({ min: 0 }).withMessage('El monto debe ser mayor o igual a 0'),
+];
+
 router.get('/',       requireModulo('prestamos'), ctrl.getPrestamos);
 router.post('/',      requireModulo('prestamos'), validarPrestamo,  validate, ctrl.crearPrestamo);
 router.post('/batch', requireModulo('prestamos'), validarPrestamos, validate, ctrl.crearPrestamos);
+
+router.patch('/personas/:tipo/:id/saldo-a-favor', requireModulo('prestamos'), validarSaldoAFavor, validate, ctrl.registrarSaldoAFavor);
 
 router.get('/pdf/:tipo/:personaId', requireModulo('prestamos'), ctrl.exportarPdfPorPersona);
 router.get('/:id/pdf', requireModulo('prestamos'), ctrl.exportarPdfPrestamoIndividual);

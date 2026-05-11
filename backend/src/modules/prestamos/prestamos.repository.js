@@ -16,7 +16,9 @@ const findAll = async (sucursalId, negocioId) => {
       pr.nombre AS prestatario_nombre,
       e.nombre  AS empleado_nombre,
       c.nombre  AS cliente_nombre,
-      s.color   AS serial_color
+      s.color   AS serial_color,
+      COALESCE(pr.saldo_a_favor, 0) AS prestatario_saldo_a_favor,
+      COALESCE(c.saldo_a_favor,  0) AS cliente_saldo_a_favor
     FROM prestamos p
     JOIN  sucursales                su  ON su.id  = p.sucursal_id
     LEFT JOIN usuarios               u   ON u.id   = p.usuario_id
@@ -236,10 +238,33 @@ const findAbonosPorPrestamos = async (prestamoIds) => {
   return rows;
 };
 
+// ── Saldo a favor ─────────────────────────────────────────────────────────────
+// executor puede ser pool o client (ambos tienen .query())
+
+const TABLA_PERSONA = { prestatario: 'prestatarios', cliente: 'clientes' };
+
+const getSaldoAFavorPersona = async (executor, tipo, personaId) => {
+  const tabla = TABLA_PERSONA[tipo];
+  const { rows } = await executor.query(
+    `SELECT saldo_a_favor FROM ${tabla} WHERE id = $1 FOR UPDATE`,
+    [personaId]
+  );
+  return Number(rows[0]?.saldo_a_favor ?? 0);
+};
+
+const setearSaldoAFavorPersona = async (executor, tipo, personaId, monto) => {
+  const tabla = TABLA_PERSONA[tipo];
+  await executor.query(
+    `UPDATE ${tabla} SET saldo_a_favor = $1 WHERE id = $2`,
+    [monto, personaId]
+  );
+};
+
 module.exports = {
   findAll, findById, findByIdYNegocio,
   perteneceAlNegocio,
   getAbonos, create, insertarAbono, updateEstado,
   ajustarStock, actualizarCantidadYValor,
-  salarSerial,findAbonosPorPrestamos,findActivosPorCliente,findActivosPorPrestatario
+  salarSerial, findAbonosPorPrestamos, findActivosPorCliente, findActivosPorPrestatario,
+  getSaldoAFavorPersona, setearSaldoAFavorPersona,
 };

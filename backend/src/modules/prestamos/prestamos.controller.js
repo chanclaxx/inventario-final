@@ -151,9 +151,30 @@ const exportarPdfPorPersona = async (req, res, next) => {
   }
 };
 
+const registrarSaldoAFavor = async (req, res, next) => {
+  try {
+    const { tipo, id } = req.params;
+    const { monto }    = req.body;
+
+    if (!['prestatario', 'cliente'].includes(tipo)) {
+      return res.status(400).json({ ok: false, error: "El tipo debe ser 'prestatario' o 'cliente'" });
+    }
+
+    const data = await service.registrarSaldoAFavor(
+      req.user.negocio_id,
+      tipo,
+      Number(id),
+      Number(monto),
+    );
+    res.json({ ok: true, data, message: 'Saldo a favor actualizado correctamente' });
+  } catch (err) { next(err); }
+};
+
 module.exports = {
   getPrestamos, getPrestamoById,
   crearPrestamo, crearPrestamos,
   registrarAbono,
-  devolverPrestamo, devolverParcial,exportarPdfPorPersona,exportarPdfPrestamoIndividual
+  devolverPrestamo, devolverParcial,
+  exportarPdfPorPersona, exportarPdfPrestamoIndividual,
+  registrarSaldoAFavor,
 };
