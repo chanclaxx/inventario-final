@@ -4,7 +4,7 @@ import { buscarCompras as buscarComprasApi } from '../../api/busqueda.api';
 import { getProveedores, crearProveedor, actualizarProveedor } from '../../api/proveedores.api';
 import { getCruces, crearCruce } from '../../api/cruces.api';
 import { getComprasByProveedor, getCompraById } from '../../api/compras.api';
-import { getAcreedores, getAcreedorById, registrarMovimiento as registrarMovAcreedor } from '../../api/acreedores.api';
+import { getAcreedores, getAcreedorById, getCargosAbiertos, registrarMovimiento as registrarMovAcreedor } from '../../api/acreedores.api';
 import { formatCOP, formatFechaHora } from '../../utils/formatters';
 import { Button }      from '../../components/ui/Button';
 import { Input }       from '../../components/ui/Input';
@@ -511,21 +511,34 @@ function ModalDetalleCompra({ compraId, onClose }) {
 function ModalMovimientoProveedor({ acreedorId, nombreProveedor, onClose }) {
   const queryClient = useQueryClient();
   const [form,       setForm]       = useState({ tipo: 'Abono', descripcion: '', valor: '' });
+  const [cargoId,    setCargoId]    = useState(null);
   const [error,      setError]      = useState('');
   const metodosPago                 = useMetodosPago();
   const [metodoPago, setMetodoPago] = useState('Efectivo');
+
+  const esAbono = form.tipo === 'Abono';
+
+  const { data: cargosRaw, isLoading: loadingCargos } = useQuery({
+    queryKey:  ['cargos-abiertos', acreedorId],
+    queryFn:   () => getCargosAbiertos(acreedorId).then((r) => r.data.data),
+    enabled:   esAbono,
+    staleTime: 0,
+  });
+  const cargosAbiertos = Array.isArray(cargosRaw) ? cargosRaw : [];
 
   const mutation = useMutation({
     mutationFn: () => registrarMovAcreedor(acreedorId, {
       tipo:              form.tipo,
       descripcion:       form.descripcion,
       valor:             Number(form.valor),
-      registrar_en_caja: form.tipo === 'Abono',
+      registrar_en_caja: esAbono,
       metodo:            metodoPago,
+      cargo_id:          esAbono ? cargoId : null,
     }),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['acreedor', acreedorId], exact: false });
-      await queryClient.invalidateQueries({ queryKey: ['acreedores'],           exact: false });
+      await queryClient.invalidateQueries({ queryKey: ['acreedor',        acreedorId], exact: false });
+      await queryClient.invalidateQueries({ queryKey: ['cargos-abiertos', acreedorId], exact: false });
+      await queryClient.invalidateQueries({ queryKey: ['acreedores'],                  exact: false });
       onClose();
     },
     onError: (err) => setError(err.response?.data?.error || 'Error al registrar'),
@@ -537,7 +550,8 @@ function ModalMovimientoProveedor({ acreedorId, nombreProveedor, onClose }) {
 
         <div className="flex gap-2">
           {['Abono', 'Cargo'].map((t) => (
-            <button key={t} type="button" onClick={() => setForm({ ...form, tipo: t })}
+            <button key={t} type="button"
+              onClick={() => { setForm({ ...form, tipo: t }); setCargoId(null); }}
               className={`flex-1 py-2.5 rounded-xl text-sm font-medium border transition-all
                 ${form.tipo === t
                   ? t === 'Cargo'
@@ -561,6 +575,46 @@ function ModalMovimientoProveedor({ acreedorId, nombreProveedor, onClose }) {
               focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all" />
         </div>
 
+        {esAbono && (
+          <div className="flex flex-col gap-2">
+            <p className="text-sm font-medium text-gray-700">
+              Aplicar a cargo pendiente <span className="text-xs font-normal text-gray-400">(opcional)</span>
+            </p>
+            {loadingCargos ? (
+              <Spinner className="py-3" />
+            ) : cargosAbiertos.length === 0 ? (
+              <p className="text-xs text-gray-400 bg-gray-50 rounded-xl px-3 py-2">
+                No hay cargos pendientes sin saldar
+              </p>
+            ) : (
+              <div className="flex flex-col gap-1.5 max-h-44 overflow-y-auto pr-0.5">
+                {cargosAbiertos.map((c) => {
+                  const sel = cargoId === c.id;
+                  return (
+                    <button key={c.id} type="button"
+                      onClick={() => setCargoId(sel ? null : c.id)}
+                      className={`flex items-start justify-between gap-3 text-left px-3 py-2.5 rounded-xl border transition-all
+                        ${sel ? 'bg-green-50 border-green-300' : 'bg-gray-50 border-gray-200 hover:border-gray-300'}`}>
+                      <div className="flex-1 min-w-0">
+                        <p className={`text-xs font-medium truncate ${sel ? 'text-green-800' : 'text-gray-700'}`}>
+                          {c.descripcion || 'Sin descripción'}
+                        </p>
+                        <p className="text-xs text-gray-400 mt-0.5">{formatFechaHora(c.fecha)}</p>
+                      </div>
+                      <div className="text-right flex-shrink-0">
+                        <p className="text-xs text-gray-400 line-through">{formatCOP(c.valor_original)}</p>
+                        <p className={`text-xs font-bold ${sel ? 'text-green-700' : 'text-red-500'}`}>
+                          Pendiente: {formatCOP(c.saldo_pendiente)}
+                        </p>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="flex flex-col gap-1.5">
           <label className="text-sm font-medium text-gray-700">Método de pago</label>
           <div className="flex gap-2 flex-wrap">
@@ -576,7 +630,7 @@ function ModalMovimientoProveedor({ acreedorId, nombreProveedor, onClose }) {
           </div>
         </div>
 
-        {form.tipo === 'Abono' && (
+        {esAbono && (
           <p className="text-xs text-blue-700 bg-blue-50 border border-blue-100 rounded-xl px-3 py-2">
             El abono se registrará en caja como egreso automáticamente.
           </p>
@@ -906,6 +960,13 @@ function TabProveedores({ sucursalKey, sucursalLista }) {
     queryFn:  () => getProveedores('proveedor').then((r) => r.data.data),
   });
 
+  const { data: acreedoresRaw } = useQuery({
+    queryKey:  ['acreedores'],
+    queryFn:   () => getAcreedores('').then((r) => r.data.data),
+    staleTime: 60_000,
+  });
+  const acreedoresAll = Array.isArray(acreedoresRaw) ? acreedoresRaw : [];
+
   const proveedores = (proveedoresData || []).filter((p) =>
     p.nombre.toLowerCase().includes(busqueda.toLowerCase())
   );
@@ -935,30 +996,39 @@ function TabProveedores({ sucursalKey, sucursalLista }) {
       {isLoading ? <Spinner className="py-20" /> : proveedores.length === 0 ? (
         <EmptyState icon={Truck} titulo="Sin proveedores" />
       ) : (
-        proveedores.map((p) => (
-          <div key={p.id} className="bg-white border border-gray-100 rounded-2xl p-4 flex items-center justify-between gap-3">
-            <button onClick={() => setProveedorVer(p)} className="flex-1 text-left min-w-0">
-              <div className="flex items-center gap-2 flex-wrap">
-                <p className="font-semibold text-gray-900 truncate">{p.nombre}</p>
-                <ProveedorTipoBadge tipo={p.tipo} />
-              </div>
-              <div className="flex items-center gap-3 mt-0.5 flex-wrap">
-                {p.nit      && <span className="text-xs text-gray-400">NIT: {p.nit}</span>}
-                {p.telefono && <span className="text-xs text-gray-400">Tel: {p.telefono}</span>}
-                {p.contacto && <span className="text-xs text-gray-400">{p.contacto}</span>}
-              </div>
-            </button>
-            <div className="flex items-center gap-2 flex-shrink-0">
-              <Button size="sm" onClick={() => setModalCompra(p)}>
-                <ShoppingCart size={14} />
-                <span className="hidden sm:inline">Compra</span>
-              </Button>
-              <button onClick={() => setProveedorEditar(p)} className="p-2 rounded-xl hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors">
-                <Package size={16} />
+        proveedores.map((p) => {
+          const acreedorVinculado = acreedoresAll.find((a) => a.proveedor_id === p.id);
+          const saldo = acreedorVinculado ? Number(acreedorVinculado.saldo || 0) : 0;
+          return (
+            <div key={p.id} className="bg-white border border-gray-100 rounded-2xl p-4 flex items-center justify-between gap-3">
+              <button onClick={() => setProveedorVer(p)} className="flex-1 text-left min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <p className="font-semibold text-gray-900 truncate">{p.nombre}</p>
+                  <ProveedorTipoBadge tipo={p.tipo} />
+                  {saldo > 0 && (
+                    <span className="text-xs text-red-600 font-semibold bg-red-50 border border-red-200 px-2 py-0.5 rounded-full">
+                      Debe {formatCOP(saldo)}
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-3 mt-0.5 flex-wrap">
+                  {p.nit      && <span className="text-xs text-gray-400">NIT: {p.nit}</span>}
+                  {p.telefono && <span className="text-xs text-gray-400">Tel: {p.telefono}</span>}
+                  {p.contacto && <span className="text-xs text-gray-400">{p.contacto}</span>}
+                </div>
               </button>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <Button size="sm" onClick={() => setModalCompra(p)}>
+                  <ShoppingCart size={14} />
+                  <span className="hidden sm:inline">Compra</span>
+                </Button>
+                <button onClick={() => setProveedorEditar(p)} className="p-2 rounded-xl hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors">
+                  <Package size={16} />
+                </button>
+              </div>
             </div>
-          </div>
-        ))
+          );
+        })
       )}
       {modalProveedor  && <ModalProveedor onClose={() => setModalProveedor(false)} />}
       {proveedorEditar && <ModalProveedor proveedor={proveedorEditar} onClose={() => setProveedorEditar(null)} />}
