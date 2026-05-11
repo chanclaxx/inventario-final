@@ -1,9 +1,3 @@
-// src/pages/config/UsuariosConfig.jsx
-// ─────────────────────────────────────────────────────────────────────────────
-// Gestión de usuarios con permisos por módulo personalizables.
-// El admin puede marcar qué módulos puede ver cada usuario.
-// ─────────────────────────────────────────────────────────────────────────────
-
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '../../api/axios.config';
@@ -12,7 +6,7 @@ import { Modal }   from '../../components/ui/Modal';
 import { Button }  from '../../components/ui/Button';
 import { Input }   from '../../components/ui/Input';
 import { Badge }   from '../../components/ui/Badge';
-import { Plus, Pencil, UserX, UserCheck, Users, ShieldCheck } from 'lucide-react';
+import { Plus, Pencil, UserX, UserCheck, Users, ShieldCheck, Truck } from 'lucide-react';
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
@@ -22,7 +16,6 @@ const ROLES = [
   { value: 'vendedor',      label: 'Vendedor'      },
 ];
 
-// Debe coincidir con src/config/modulos.js del backend
 const MODULOS = [
   { key: 'inventario',  label: 'Inventario'  },
   { key: 'facturar',    label: 'Facturas'    },
@@ -35,7 +28,6 @@ const MODULOS = [
   { key: 'acreedores',  label: 'Acreedores'  },
 ];
 
-// Permisos base por rol (espejo del backend)
 const PERMISOS_BASE = {
   supervisor: ['inventario','facturar','servicios','proveedores',
                'prestamos','caja','traslados','reportes','acreedores'],
@@ -43,27 +35,168 @@ const PERMISOS_BASE = {
 };
 
 const FORM_INICIAL = {
-  nombre:             '',
-  email:              '',
-  password:           '',
-  rol:                'vendedor',
-  sucursal_id:        '',
-  modulos_permitidos: null, // null = usar base del rol
+  nombre:               '',
+  email:                '',
+  password:             '',
+  rol:                  'vendedor',
+  sucursal_id:          '',
+  modulos_permitidos:   null,
+  permisos_proveedores: null,
 };
 
 // ─── Queries ──────────────────────────────────────────────────────────────────
 
 const fetchUsuarios   = () => api.get('/usuarios').then((r)   => r.data.data);
 const fetchSucursales = () => api.get('/sucursales').then((r) => r.data.data);
+const fetchProveedores = () => api.get('/proveedores').then((r) => {
+  const data = r.data.data;
+  return Array.isArray(data) ? data : [];
+});
+
+// ─── CheckboxCustom ───────────────────────────────────────────────────────────
+
+function CheckboxCustom({ checked, onChange, color = 'indigo' }) {
+  const colors = {
+    indigo: checked ? 'bg-indigo-600 border-indigo-600' : 'border-gray-300 bg-white',
+    green:  checked ? 'bg-green-600  border-green-600'  : 'border-gray-300 bg-white',
+    blue:   checked ? 'bg-blue-600   border-blue-600'   : 'border-gray-300 bg-white',
+  };
+  return (
+    <span
+      onClick={onChange}
+      className={`w-4 h-4 rounded border-2 flex items-center justify-center flex-shrink-0
+        cursor-pointer transition-all ${colors[color]}`}
+    >
+      {checked && (
+        <svg viewBox="0 0 8 8" className="w-2.5 h-2.5">
+          <path d="M1 4l2 2 4-4" stroke="white" strokeWidth="1.5"
+            fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+      )}
+    </span>
+  );
+}
+
+// ─── SelectorPermisosProveedores ──────────────────────────────────────────────
+
+function SelectorPermisosProveedores({ permisos, onChange, proveedores = [] }) {
+  const tieneVer   = permisos?.ver    ?? false;
+  const tieneCrear = permisos?.crear  ?? false;
+  const verTodos   = permisos?.ver_todos ?? true;
+  const verLista   = permisos?.ver_lista ?? [];
+
+  const update = (partial) => {
+    const base = permisos || { ver: false, ver_todos: true, ver_lista: [], crear: false };
+    onChange({ ...base, ...partial });
+  };
+
+  const toggleVerLista = (id) => {
+    const lista = verLista.includes(id)
+      ? verLista.filter((v) => v !== id)
+      : [...verLista, id];
+    update({ ver_lista: lista });
+  };
+
+  return (
+    <div className="flex flex-col gap-3 bg-indigo-50 border border-indigo-100 rounded-xl p-3.5">
+      <div className="flex items-center gap-2">
+        <Truck size={13} className="text-indigo-500 flex-shrink-0" />
+        <p className="text-xs font-semibold text-indigo-700 uppercase tracking-wide">
+          Permisos de proveedores
+        </p>
+      </div>
+
+      {/* ── Ver proveedores ── */}
+      <label className="flex items-center gap-2.5 cursor-pointer select-none">
+        <CheckboxCustom
+          checked={tieneVer}
+          onChange={() => update({ ver: !tieneVer })}
+        />
+        <span className="text-sm text-gray-700">Puede ver proveedores</span>
+      </label>
+
+      {tieneVer && (
+        <div className="ml-6 flex flex-col gap-2">
+          {/* Radios: ver todos / ver algunos */}
+          <label className="flex items-center gap-2 cursor-pointer select-none">
+            <input
+              type="radio"
+              className="accent-indigo-600 w-3.5 h-3.5"
+              checked={verTodos}
+              onChange={() => update({ ver_todos: true, ver_lista: [] })}
+            />
+            <span className="text-sm text-gray-600">Ver todos</span>
+          </label>
+          <label className="flex items-center gap-2 cursor-pointer select-none">
+            <input
+              type="radio"
+              className="accent-indigo-600 w-3.5 h-3.5"
+              checked={!verTodos}
+              onChange={() => update({ ver_todos: false })}
+            />
+            <span className="text-sm text-gray-600">Ver solo algunos</span>
+          </label>
+
+          {!verTodos && (
+            <div className="mt-1 bg-white border border-indigo-100 rounded-xl overflow-hidden">
+              {proveedores.length === 0 ? (
+                <p className="text-xs text-gray-400 text-center py-3">
+                  Sin proveedores registrados
+                </p>
+              ) : (
+                <div className="flex flex-col divide-y divide-gray-50 max-h-40 overflow-y-auto">
+                  {proveedores.map((p) => {
+                    const pId      = p.id;
+                    const pNombre  = p.nombre;
+                    const selected = verLista.includes(pId);
+                    return (
+                      <label
+                        key={pId}
+                        className={`flex items-center gap-2.5 px-3 py-2 cursor-pointer
+                          select-none transition-colors
+                          ${selected ? 'bg-indigo-50' : 'hover:bg-gray-50'}`}
+                      >
+                        <CheckboxCustom
+                          checked={selected}
+                          onChange={() => toggleVerLista(pId)}
+                        />
+                        <span className="text-xs text-gray-700 truncate">{pNombre}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+              {!verTodos && verLista.length > 0 && (
+                <p className="text-xs text-indigo-600 px-3 py-1.5 border-t border-indigo-100 bg-indigo-50">
+                  {verLista.length} proveedor(es) seleccionado(s)
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Crear proveedores ── */}
+      <label className="flex items-center gap-2.5 cursor-pointer select-none">
+        <CheckboxCustom
+          checked={tieneCrear}
+          onChange={() => update({ crear: !tieneCrear })}
+        />
+        <span className="text-sm text-gray-700">Puede crear proveedores</span>
+      </label>
+
+      {/* Nota: si no tiene ningún permiso activo, mostrar hint */}
+      {!tieneVer && !tieneCrear && (
+        <p className="text-xs text-gray-400 bg-white rounded-lg px-3 py-1.5 border border-gray-100">
+          Sin permisos de proveedores — el módulo estará vacío para este usuario.
+        </p>
+      )}
+    </div>
+  );
+}
 
 // ─── SelectorModulos ──────────────────────────────────────────────────────────
 
-/**
- * Checkboxes para seleccionar módulos permitidos.
- * Cuando el usuario no ha personalizado, muestra los del rol como marcados
- * pero en estado "base" (badge distinto). Al tocar cualquiera, se guarda
- * una copia personalizada.
- */
 function SelectorModulos({ rol, modulosPermitidos, onChange }) {
   if (rol === 'admin_negocio') {
     return (
@@ -77,7 +210,6 @@ function SelectorModulos({ rol, modulosPermitidos, onChange }) {
     );
   }
 
-  // Si modulosPermitidos es null → mostrar los del rol como base
   const estaPersonalizado = modulosPermitidos !== null;
   const activos = estaPersonalizado
     ? modulosPermitidos
@@ -118,10 +250,10 @@ function SelectorModulos({ rol, modulosPermitidos, onChange }) {
 
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
         {MODULOS.map((modulo) => {
-          const moduloKey    = modulo.key;
-          const moduloLabel  = modulo.label;
-          const estaActivo   = activos.includes(moduloKey);
-          const esBase       = !estaPersonalizado && (PERMISOS_BASE[rol] || []).includes(moduloKey);
+          const moduloKey   = modulo.key;
+          const moduloLabel = modulo.label;
+          const estaActivo  = activos.includes(moduloKey);
+          const esBase      = !estaPersonalizado && (PERMISOS_BASE[rol] || []).includes(moduloKey);
 
           return (
             <button
@@ -174,6 +306,9 @@ function FilaUsuario({ usuario, onEditar, onToggleActivo }) {
     ? null
     : (usuario.modulos_permitidos ?? PERMISOS_BASE[usuario.rol] ?? []);
 
+  const pp = usuario.permisos_proveedores;
+  const tienePermProv = !esAdmin && pp && (pp.ver || pp.crear);
+
   return (
     <div className={`flex items-center gap-3 p-3 rounded-xl border transition-all
       ${usuario.activo ? 'bg-gray-50 border-gray-100' : 'bg-gray-50/50 border-gray-100 opacity-60'}`}
@@ -200,6 +335,12 @@ function FilaUsuario({ usuario, onEditar, onToggleActivo }) {
           ) : (
             <span className="text-xs text-gray-400">
               Permisos base del rol
+            </span>
+          )}
+          {tienePermProv && (
+            <span className="text-xs text-indigo-600 flex items-center gap-1">
+              <Truck size={10} />
+              {pp.ver && pp.crear ? 'Ver+crear prov.' : pp.crear ? 'Crear prov.' : 'Ver prov.'}
             </span>
           )}
         </div>
@@ -232,12 +373,13 @@ function ModalUsuario({ open, onClose, editando, sucursales, onGuardar, cargando
   const [form, setForm] = useState(() =>
     editando
       ? {
-          nombre:             editando.nombre      || '',
-          email:              editando.email       || '',
-          password:           '',
-          rol:                editando.rol         || 'vendedor',
-          sucursal_id:        editando.sucursal_id ?? '',
-          modulos_permitidos: editando.modulos_permitidos ?? null,
+          nombre:               editando.nombre      || '',
+          email:                editando.email       || '',
+          password:             '',
+          rol:                  editando.rol         || 'vendedor',
+          sucursal_id:          editando.sucursal_id ?? '',
+          modulos_permitidos:   editando.modulos_permitidos   ?? null,
+          permisos_proveedores: editando.permisos_proveedores ?? null,
         }
       : FORM_INICIAL
   );
@@ -246,15 +388,44 @@ function ModalUsuario({ open, onClose, editando, sucursales, onGuardar, cargando
 
   const requiereSucursal = form.rol !== 'admin_negocio';
 
-  // Cuando cambia el rol, resetear módulos a null (base del nuevo rol)
+  // Módulos efectivos del usuario (para saber si proveedores está habilitado)
+  const modulosEfectivos = form.rol === 'admin_negocio'
+    ? null
+    : (form.modulos_permitidos ?? PERMISOS_BASE[form.rol] ?? []);
+  const tieneModuloProveedores = modulosEfectivos === null
+    || modulosEfectivos.includes('proveedores');
+  const mostrarPermProv = form.rol !== 'admin_negocio' && tieneModuloProveedores;
+
+  // Lista de proveedores para el selector "ver solo algunos"
+  const { data: proveedoresLista = [] } = useQuery({
+    queryKey:  ['proveedores-selector'],
+    queryFn:   fetchProveedores,
+    enabled:   mostrarPermProv,
+    staleTime: 60_000,
+  });
+
+  // Cuando cambia el rol: resetear módulos Y permisos de proveedores
   const handleRolChange = (nuevoRol) => {
-    setForm((f) => ({ ...f, rol: nuevoRol, modulos_permitidos: null }));
+    setForm((f) => ({
+      ...f,
+      rol:                  nuevoRol,
+      modulos_permitidos:   null,
+      permisos_proveedores: null,
+    }));
+  };
+
+  // Cuando el módulo de proveedores se desactiva: limpiar permisos
+  const handleModulosChange = (modulos) => {
+    const tieneProveedores = modulos === null || modulos.includes('proveedores');
+    set('modulos_permitidos', modulos);
+    if (!tieneProveedores) set('permisos_proveedores', null);
   };
 
   const handleGuardar = () => {
     const payload = { ...form };
     if (!payload.password) delete payload.password;
     if (!requiereSucursal) payload.sucursal_id = null;
+    if (payload.rol === 'admin_negocio') payload.permisos_proveedores = null;
     onGuardar(payload);
   };
 
@@ -330,8 +501,17 @@ function ModalUsuario({ open, onClose, editando, sucursales, onGuardar, cargando
         <SelectorModulos
           rol={form.rol}
           modulosPermitidos={form.modulos_permitidos}
-          onChange={(modulos) => set('modulos_permitidos', modulos)}
+          onChange={handleModulosChange}
         />
+
+        {/* Permisos granulares de proveedores (solo si el módulo está activo) */}
+        {mostrarPermProv && (
+          <SelectorPermisosProveedores
+            permisos={form.permisos_proveedores}
+            onChange={(p) => set('permisos_proveedores', p)}
+            proveedores={proveedoresLista}
+          />
+        )}
 
         {error && (
           <div className="bg-red-50 border border-red-100 rounded-xl px-3 py-2">
@@ -378,17 +558,18 @@ export function UsuariosConfig() {
 
   const mutToggleActivo = useMutation({
     mutationFn: (usuario) => api.put(`/usuarios/${usuario.id}`, {
-      nombre:             usuario.nombre,
-      email:              usuario.email,
-      rol:                usuario.rol,
-      sucursal_id:        usuario.sucursal_id,
-      modulos_permitidos: usuario.modulos_permitidos,
-      activo:             !usuario.activo,
+      nombre:               usuario.nombre,
+      email:                usuario.email,
+      rol:                  usuario.rol,
+      sucursal_id:          usuario.sucursal_id,
+      modulos_permitidos:   usuario.modulos_permitidos,
+      permisos_proveedores: usuario.permisos_proveedores,
+      activo:               !usuario.activo,
     }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['usuarios'] }),
   });
 
-  const abrirNuevo = () => { setEditando(null); setError(''); setModalOpen(true); };
+  const abrirNuevo  = () => { setEditando(null); setError(''); setModalOpen(true); };
   const abrirEditar = (usuario) => { setEditando(usuario); setError(''); setModalOpen(true); };
   const cerrarModal = () => { setModalOpen(false); setEditando(null); setError(''); };
 
