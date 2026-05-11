@@ -1,7 +1,10 @@
 const { pool } = require('../../config/db');
 const repo = require('./proveedores.repository');
 
-const getProveedores = (negocioId, tipo = null) => repo.findAll(negocioId, tipo);
+const getProveedores = (negocioId, tipo = null, ids = null) => {
+  if (ids !== null) return repo.findByIds(negocioId, ids, tipo);
+  return repo.findAll(negocioId, tipo);
+};
 
 const getProveedorById = async (negocioId, id) => {
   const p = await repo.findById(negocioId, id);
@@ -17,6 +20,11 @@ const crearProveedor = async (negocioId, datos) => {
     if (existe) throw { status: 409, message: `Ya existe un proveedor con el NIT ${datos.nit}` };
   }
 
+  if (datos.nombre?.trim()) {
+    const existeNombre = await repo.findByNombre(negocioId, datos.nombre);
+    if (existeNombre) throw { status: 409, message: 'Este nombre ya existe, coloca uno diferente' };
+  }
+
   const proveedor = await repo.create(negocioId, datos);
 
   // Crear acreedor vinculado automáticamente (si no existe ya)
@@ -26,6 +34,11 @@ const crearProveedor = async (negocioId, datos) => {
 };
 
 const actualizarProveedor = async (negocioId, id, datos) => {
+  if (datos.nombre?.trim()) {
+    const existeNombre = await repo.findByNombre(negocioId, datos.nombre, Number(id));
+    if (existeNombre) throw { status: 409, message: 'Este nombre ya existe, coloca uno diferente' };
+  }
+
   const p = await repo.update(negocioId, id, datos);
   if (!p) throw { status: 404, message: 'Proveedor no encontrado' };
 

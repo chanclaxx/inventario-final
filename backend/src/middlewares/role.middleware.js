@@ -98,4 +98,28 @@ const assertBelongsToNegocio = async (tipo, id, negocioId) => {
   }
 };
 
-module.exports = { requireRole, requireNivel, requireSucursal, assertBelongsToNegocio };
+/**
+ * Verifica permisos granulares sobre el módulo de proveedores.
+ * admin_negocio siempre pasa. Para otros roles se lee req.user.permisos_proveedores
+ * que viene directamente del JWT.
+ *
+ * @param {'ver'|'crear'} tipo
+ */
+const requirePermisoProveedores = (tipo) => (req, res, next) => {
+  if (!req.user) return res.status(401).json({ ok: false, error: 'No autenticado' });
+  if (req.user.rol === 'admin_negocio') return next();
+
+  const permisos = req.user.permisos_proveedores;
+  if (!permisos) {
+    return res.status(403).json({ ok: false, error: 'Sin permisos para proveedores' });
+  }
+  if (tipo === 'ver' && !permisos.ver) {
+    return res.status(403).json({ ok: false, error: 'Sin permiso para ver proveedores' });
+  }
+  if (tipo === 'crear' && !permisos.crear) {
+    return res.status(403).json({ ok: false, error: 'Sin permiso para crear proveedores' });
+  }
+  next();
+};
+
+module.exports = { requireRole, requireNivel, requireSucursal, assertBelongsToNegocio, requirePermisoProveedores };

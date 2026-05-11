@@ -83,6 +83,38 @@ const findByNit = async (negocioId, nit) => {
   return rows[0] || null;
 };
 
+const findByNombre = async (negocioId, nombre, excludeId = null) => {
+  const { rows } = await pool.query(
+    `SELECT id FROM proveedores
+     WHERE negocio_id = $1 AND LOWER(nombre) = LOWER($2)
+       AND activo = TRUE AND ($3::int IS NULL OR id <> $3)
+     LIMIT 1`,
+    [negocioId, nombre.trim(), excludeId]
+  );
+  return rows[0] || null;
+};
+
+const findByIds = async (negocioId, ids, tipo = null) => {
+  if (!ids || ids.length === 0) return [];
+  const params = [negocioId, ids];
+  let filtroTipo = '';
+  if (tipo) {
+    params.push(tipo);
+    filtroTipo = `AND p.tipo = $${params.length}`;
+  }
+  const { rows } = await pool.query(`
+    SELECT p.id, p.nombre, p.nit, p.telefono, p.email,
+           p.direccion, p.contacto, p.tipo, p.activo, p.creado_en,
+           COUNT(c.id) AS total_compras
+    FROM proveedores p
+    LEFT JOIN compras c ON c.proveedor_id = p.id
+    WHERE p.negocio_id = $1 AND p.activo = TRUE AND p.id = ANY($2::int[]) ${filtroTipo}
+    GROUP BY p.id
+    ORDER BY p.nombre
+  `, params);
+  return rows;
+};
+
 const contarDependenciasActivas = async (negocioId, proveedorId) => {
   const { rows } = await pool.query(`
     SELECT
@@ -105,7 +137,7 @@ const contarDependenciasActivas = async (negocioId, proveedorId) => {
 };
 
 module.exports = {
-  findAll, findById, findByNit,
+  findAll, findById, findByNit, findByNombre, findByIds,
   contarDependenciasActivas,
   create, update, eliminar,
 };

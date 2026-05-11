@@ -18,6 +18,7 @@ import { ModalCompra } from './ModalCompra';
 import { useSucursalKey } from '../../hooks/useSucursalKey';
 import { useMetodosPago } from '../../hooks/useMetodosPago';
 import api from '../../api/axios.config';
+import { useAuth } from '../../context/useAuth';
 import {
   Truck, Plus, ShoppingCart, ChevronRight, ChevronLeft,
   Package, Hash, User, RefreshCw, ArrowLeftRight, ShoppingBag, Repeat,
@@ -1126,6 +1127,9 @@ function ModalProveedor({ proveedor, tipoForzado, onClose }) {
 // ─── Tab Proveedores (tipo = proveedor) ────────────────────────────────────────
 
 function TabProveedores({ sucursalKey, sucursalLista }) {
+  const { usuario }         = useAuth();
+  const puedeCrearProveedor = usuario?.rol === 'admin_negocio' || !!usuario?.permisos_proveedores?.crear;
+
   const [busqueda,        setBusqueda]        = useState('');
   const [modalProveedor,  setModalProveedor]  = useState(false);
   const [proveedorEditar, setProveedorEditar] = useState(null);
@@ -1167,7 +1171,9 @@ function TabProveedores({ sucursalKey, sucursalLista }) {
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
         <p className="text-sm text-gray-400">{proveedores.length} proveedor(es)</p>
-        <Button size="sm" onClick={() => setModalProveedor(true)}><Plus size={16} /> Nuevo</Button>
+        {puedeCrearProveedor && (
+          <Button size="sm" onClick={() => setModalProveedor(true)}><Plus size={16} /> Nuevo</Button>
+        )}
       </div>
       <SearchInput value={busqueda} onChange={setBusqueda} placeholder="Buscar proveedor..." />
       {isLoading ? <Spinner className="py-20" /> : proveedores.length === 0 ? (

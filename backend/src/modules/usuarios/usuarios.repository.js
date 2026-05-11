@@ -4,7 +4,7 @@ const findAll = async (negocioId) => {
   const { rows } = await pool.query(`
     SELECT u.id, u.nombre, u.email, u.rol, u.activo,
            u.sucursal_id, u.creado_en, u.ultimo_acceso,
-           u.modulos_permitidos,
+           u.modulos_permitidos, u.permisos_proveedores,
            s.nombre AS sucursal_nombre
     FROM usuarios u
     LEFT JOIN sucursales s ON s.id = u.sucursal_id
@@ -18,7 +18,7 @@ const findById = async (negocioId, id) => {
   const { rows } = await pool.query(`
     SELECT u.id, u.nombre, u.email, u.rol, u.activo,
            u.sucursal_id, u.creado_en, u.ultimo_acceso,
-           u.modulos_permitidos,
+           u.modulos_permitidos, u.permisos_proveedores,
            s.nombre AS sucursal_nombre
     FROM usuarios u
     LEFT JOIN sucursales s ON s.id = u.sucursal_id
@@ -43,28 +43,36 @@ const findByEmail = async (email, excludeId = null) => {
 
 const create = async ({
   negocio_id, nombre, email, password_hash, rol,
-  sucursal_id, password_temporal, modulos_permitidos,
+  sucursal_id, password_temporal, modulos_permitidos, permisos_proveedores,
 }) => {
   const { rows } = await pool.query(`
     INSERT INTO usuarios(
       negocio_id, nombre, email, password_hash, rol,
-      sucursal_id, password_temporal, modulos_permitidos
+      sucursal_id, password_temporal, modulos_permitidos, permisos_proveedores
     )
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)
     RETURNING id, nombre, email, rol, activo, sucursal_id,
-              creado_en, modulos_permitidos
+              creado_en, modulos_permitidos, permisos_proveedores
   `, [
     negocio_id, nombre, email, password_hash, rol,
     sucursal_id || null,
     password_temporal ?? false,
     modulos_permitidos || null,
+    permisos_proveedores ? JSON.stringify(permisos_proveedores) : null,
   ]);
   return rows[0];
 };
 
 const update = async (negocioId, id, datos) => {
-  const { nombre, email, rol, sucursal_id, modulos_permitidos } = datos;
+  const { nombre, email, rol, sucursal_id, modulos_permitidos, permisos_proveedores } = datos;
   const activoExplicito = typeof datos.activo === 'boolean';
+
+  const modGuardar = (modulos_permitidos !== undefined && modulos_permitidos !== null)
+    ? modulos_permitidos
+    : null;
+  const permGuardar = (permisos_proveedores !== undefined && permisos_proveedores !== null)
+    ? JSON.stringify(permisos_proveedores)
+    : null;
 
   let query, params;
 
@@ -72,31 +80,28 @@ const update = async (negocioId, id, datos) => {
     query = `
       UPDATE usuarios
       SET nombre = $1, email = $2, rol = $3, sucursal_id = $4,
-          activo = $5, modulos_permitidos = $6::text[]
-      WHERE id = $7 AND negocio_id = $8
-      RETURNING id, nombre, email, rol, activo, sucursal_id, modulos_permitidos
+          activo = $5, modulos_permitidos = $6::text[], permisos_proveedores = $7::jsonb
+      WHERE id = $8 AND negocio_id = $9
+      RETURNING id, nombre, email, rol, activo, sucursal_id,
+                modulos_permitidos, permisos_proveedores
     `;
     params = [
       nombre, email, rol, sucursal_id || null,
-      datos.activo,
-      modulos_permitidos !== undefined && modulos_permitidos !== null
-        ? modulos_permitidos
-        : null,
+      datos.activo, modGuardar, permGuardar,
       id, negocioId,
     ];
   } else {
     query = `
       UPDATE usuarios
       SET nombre = $1, email = $2, rol = $3,
-          sucursal_id = $4, modulos_permitidos = $5::text[]
-      WHERE id = $6 AND negocio_id = $7
-      RETURNING id, nombre, email, rol, activo, sucursal_id, modulos_permitidos
+          sucursal_id = $4, modulos_permitidos = $5::text[], permisos_proveedores = $6::jsonb
+      WHERE id = $7 AND negocio_id = $8
+      RETURNING id, nombre, email, rol, activo, sucursal_id,
+                modulos_permitidos, permisos_proveedores
     `;
     params = [
       nombre, email, rol, sucursal_id || null,
-      modulos_permitidos !== undefined && modulos_permitidos !== null
-        ? modulos_permitidos
-        : null,
+      modGuardar, permGuardar,
       id, negocioId,
     ];
   }

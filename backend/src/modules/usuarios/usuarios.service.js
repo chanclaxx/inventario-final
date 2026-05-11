@@ -14,7 +14,7 @@ const getUsuarioById = async (negocioId, id) => {
 };
 
 const crearUsuario = async (negocioId, {
-  nombre, email, password, rol, sucursal_id, modulos_permitidos,
+  nombre, email, password, rol, sucursal_id, modulos_permitidos, permisos_proveedores,
 }) => {
   if (rol === 'admin_negocio' && sucursal_id) {
     throw { status: 400, message: 'El admin de negocio no puede tener sucursal asignada' };
@@ -54,13 +54,18 @@ const crearUsuario = async (negocioId, {
   const modulosAGuardar = (modulos_permitidos && rol !== 'admin_negocio')
     ? modulos_permitidos
     : null;
- 
+
+  const permisosProveedoresAGuardar = (rol !== 'admin_negocio' && permisos_proveedores)
+    ? permisos_proveedores
+    : null;
+
   try {
     return await usuariosRepo.create({
-      negocio_id:         negocioId,
+      negocio_id:           negocioId,
       nombre, email, password_hash, rol, sucursal_id,
-      password_temporal:  false,
-      modulos_permitidos: modulosAGuardar,
+      password_temporal:    false,
+      modulos_permitidos:   modulosAGuardar,
+      permisos_proveedores: permisosProveedoresAGuardar,
     });
   } catch (err) {
     if (err.constraint === 'usuarios_email_key') {
@@ -103,9 +108,16 @@ const actualizarUsuario = async (negocioId, id, datos) => {
         ? datos.modulos_permitidos
         : existe.modulos_permitidos);
 
+  const permisosProveedoresAGuardar = (rolFinal === 'admin_negocio')
+    ? null
+    : (datos.permisos_proveedores !== undefined
+        ? datos.permisos_proveedores
+        : existe.permisos_proveedores);
+
   return usuariosRepo.update(negocioId, id, {
     ...datos,
-    modulos_permitidos: modulosAGuardar,
+    modulos_permitidos:   modulosAGuardar,
+    permisos_proveedores: permisosProveedoresAGuardar,
   });
 };
 

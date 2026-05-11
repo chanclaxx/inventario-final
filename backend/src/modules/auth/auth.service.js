@@ -18,8 +18,9 @@ const _buildPayload = (usuario) => ({
   sucursal_id:         usuario.sucursal_id,
   sucursal_nombre:     usuario.sucursal_nombre,
   password_temporal:   usuario.password_temporal ?? false,
-  modulos_permitidos:  resolverModulos(usuario.rol, usuario.modulos_permitidos),
-  fecha_vencimiento:   usuario.fecha_vencimiento ?? null,   // ← LÍNEA NUEVA
+  modulos_permitidos:   resolverModulos(usuario.rol, usuario.modulos_permitidos),
+  fecha_vencimiento:    usuario.fecha_vencimiento ?? null,
+  permisos_proveedores: usuario.rol === 'admin_negocio' ? null : (usuario.permisos_proveedores ?? null),
 });
 
 // Query reutilizada en login y refreshAccessToken
@@ -30,7 +31,8 @@ const QUERY_USUARIO_BASE = `
     n.estado_plan, n.fecha_vencimiento,
     u.sucursal_id, s.nombre AS sucursal_nombre,
     u.password_temporal,
-    u.modulos_permitidos
+    u.modulos_permitidos,
+    u.permisos_proveedores
   FROM usuarios u
   JOIN negocios n ON n.id = u.negocio_id
   LEFT JOIN sucursales s ON s.id = u.sucursal_id
