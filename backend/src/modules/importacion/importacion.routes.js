@@ -15,6 +15,10 @@ const upload = multer({
   },
 });
 
+// Descarga la plantilla generada dinámicamente según la config del negocio
+router.get('/plantilla',   requireNivel('supervisor'), ctrl.generarPlantilla);
+
+// Importa el archivo Excel al inventario
 router.post('/inventario', requireNivel('supervisor'), upload.single('archivo'), ctrl.importarInventario);
 
 module.exports = router;

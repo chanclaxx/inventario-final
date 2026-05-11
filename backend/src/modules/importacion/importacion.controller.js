@@ -1,5 +1,7 @@
-const XLSX    = require('xlsx');
-const service = require('./importacion.service');
+const XLSX        = require('xlsx');
+const service     = require('./importacion.service');
+const { generarPlantillaBuffer } = require('./importacion.plantilla');
+const configRepo  = require('../config/config.repository');
 
 const HOJAS_RESERVADAS = ['instrucciones', 'productos cantidad', 'cantidad'];
 
@@ -9,12 +11,33 @@ const _esHojaSerial = (nombre) =>
 const _normalizarFila = (fila) => {
   const normalizada = {};
   for (const clave in fila) {
-    const claveNorm = clave.replace(/\s*\*\s*/g, '').trim().toLowerCase();
+    const claveNorm = clave
+      .replace(/\s*\*\s*/g, '')   // quita asteriscos (marcadores de requerido)
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, '_');      // espacios → guiones bajos
     normalizada[claveNorm] = fila[clave];
   }
   return normalizada;
 };
 
+// ─── Generar plantilla dinámica ───────────────────────────────────────────────
+const generarPlantilla = async (req, res, next) => {
+  try {
+    const negocioId = req.user.negocio_id;
+    const config    = await configRepo.getMap(negocioId);
+    const buffer    = generarPlantillaBuffer(config);
+
+    res.setHeader('Content-Type',        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename="plantilla_inventario.xlsx"');
+    res.setHeader('Content-Length',      buffer.length);
+    res.end(buffer);
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ─── Importar inventario ──────────────────────────────────────────────────────
 const importarInventario = async (req, res, next) => {
   try {
     if (!req.file) {
@@ -23,32 +46,36 @@ const importarInventario = async (req, res, next) => {
 
     const sucursalId = req.sucursal_id;
     const negocioId  = req.user.negocio_id;
-    const wb         = XLSX.read(req.file.buffer, { type: 'buffer', cellDates: true });
-    const resultado  = { serial: null, cantidad: null };
+
+    // Leer configuración del negocio para saber qué columnas procesar
+    const config = await configRepo.getMap(negocioId);
+
+    const wb        = XLSX.read(req.file.buffer, { type: 'buffer', cellDates: true });
+    const resultado = { serial: null, cantidad: null };
 
     const hojasSerial = wb.SheetNames.filter(_esHojaSerial);
 
     if (hojasSerial.length > 0) {
-  const hojas = [];
-  for (const nombreHoja of hojasSerial) {
-    const filas = XLSX.utils.sheet_to_json(wb.Sheets[nombreHoja], {
-      range:  1,
-      defval: '',
-    });
-    const datos = filas
-      .slice(1)
-      .map(_normalizarFila)
-      .filter((f) => f.imei?.toString().trim());
+      const hojas = [];
+      for (const nombreHoja of hojasSerial) {
+        const filas = XLSX.utils.sheet_to_json(wb.Sheets[nombreHoja], {
+          range:  1,
+          defval: '',
+        });
+        const datos = filas
+          .slice(1)
+          .map(_normalizarFila)
+          .filter((f) => f.imei?.toString().trim());
 
-    if (datos.length > 0) {
-      hojas.push({ nombreProducto: nombreHoja.trim(), filas: datos });
+        if (datos.length > 0) {
+          hojas.push({ nombreProducto: nombreHoja.trim(), filas: datos });
+        }
+      }
+
+      if (hojas.length > 0) {
+        resultado.serial = await service.importarSerial(hojas, sucursalId, negocioId, config);
+      }
     }
-  }
-
-  if (hojas.length > 0) {
-    resultado.serial = await service.importarSerial(hojas, sucursalId, negocioId);
-  }
-}
 
     const hojaCantidad = wb.SheetNames.find((n) =>
       n.toLowerCase().includes('cantidad')
@@ -82,4 +109,4 @@ const importarInventario = async (req, res, next) => {
   }
 };
 
-module.exports = { importarInventario };
+module.exports = { generarPlantilla, importarInventario };

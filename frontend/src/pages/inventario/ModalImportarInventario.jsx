@@ -9,6 +9,18 @@ import {
 import api              from '../../api/axios.config';
 import useSucursalStore from '../../store/sucursalStore';
 
+async function descargarPlantilla() {
+  const res = await api.get('/importacion/plantilla', { responseType: 'blob' });
+  const url  = URL.createObjectURL(new Blob([res.data], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  }));
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = 'plantilla_inventario.xlsx';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 // ─────────────────────────────────────────────
 // SUBCOMPONENTES
 // ─────────────────────────────────────────────
@@ -149,15 +161,14 @@ export function ModalImportarInventario({ onClose }) {
               La hoja <strong>Productos Cantidad</strong> es para productos sin serial.
             </p>
           </div>
-          <a
-            href="/plantilla_inventario.xlsx"
-            download
+          <button
+            onClick={descargarPlantilla}
             className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg
               bg-white border border-blue-200 text-blue-700 text-xs font-medium
               hover:bg-blue-50 transition-colors"
           >
             <Download size={13} /> Plantilla
-          </a>
+          </button>
         </div>
 
         {/* Paso 2 — subir / resultado */}

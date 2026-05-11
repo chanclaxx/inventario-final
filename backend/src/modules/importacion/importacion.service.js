@@ -9,7 +9,6 @@ const _mensajeSeguro = (err) => {
   return 'Error al procesar la fila';
 };
 
-// ── Fix timezone: evita desfase UTC al convertir fechas de Excel ─────────────
 const _formatearFecha = (valor) => {
   if (!valor) return new Date().toISOString().split('T')[0];
   const d = valor instanceof Date ? valor : new Date(valor);
@@ -18,6 +17,14 @@ const _formatearFecha = (valor) => {
   const day   = String(d.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
 };
+
+const _parseLista = (valor) => {
+  try { return JSON.parse(valor || '[]'); }
+  catch { return []; }
+};
+
+// Misma normalización que el controller (mantenida en sync)
+const _normClave = (s) => s.toLowerCase().replace(/\s+/g, '_');
 
 const _resolverProveedor = async (client, nombre, negocioId) => {
   if (!nombre?.toString().trim()) return null;
@@ -37,7 +44,7 @@ const _resolverProveedor = async (client, nombre, negocioId) => {
   return nuevo[0].id;
 };
 
-const _resolverProductoSerial = async (client, { nombre, marca, modelo, sucursalId, proveedorId }) => {
+const _resolverProductoSerial = async (client, { nombre, marca, modelo, precio, sucursalId, proveedorId }) => {
   const { rows: existe } = await client.query(
     `SELECT id FROM productos_serial
      WHERE LOWER(nombre) = LOWER($1) AND sucursal_id = $2 LIMIT 1`,
@@ -45,26 +52,34 @@ const _resolverProductoSerial = async (client, { nombre, marca, modelo, sucursal
   );
 
   if (existe.length) {
-    if (marca || modelo || proveedorId) {
+    if (marca || modelo || proveedorId || precio) {
       await client.query(
         `UPDATE productos_serial SET
            marca        = COALESCE(NULLIF($1,''), marca),
            modelo       = COALESCE(NULLIF($2,''), modelo),
-           proveedor_id = COALESCE($3, proveedor_id)
-         WHERE id = $4`,
-        [marca?.toString().trim() || '', modelo?.toString().trim() || '', proveedorId, existe[0].id]
+           proveedor_id = COALESCE($3, proveedor_id),
+           precio       = COALESCE($4, precio)
+         WHERE id = $5`,
+        [
+          marca?.toString().trim() || '',
+          modelo?.toString().trim() || '',
+          proveedorId,
+          precio || null,
+          existe[0].id,
+        ]
       );
     }
     return existe[0].id;
   }
 
   const { rows: nuevo } = await client.query(
-    `INSERT INTO productos_serial(sucursal_id, proveedor_id, nombre, marca, modelo)
-     VALUES($1,$2,$3,$4,$5) RETURNING id`,
+    `INSERT INTO productos_serial(sucursal_id, proveedor_id, nombre, marca, modelo, precio)
+     VALUES($1,$2,$3,$4,$5,$6) RETURNING id`,
     [
       sucursalId, proveedorId, nombre.trim(),
       marca?.toString().trim()  || null,
       modelo?.toString().trim() || null,
+      precio || null,
     ]
   );
   return nuevo[0].id;
@@ -74,7 +89,7 @@ const _resolverProductoSerial = async (client, { nombre, marca, modelo, sucursal
 // IMPORTAR SERIAL
 // ─────────────────────────────────────────────
 
-const importarSerial = async (hojas, sucursalId, negocioId) => {
+const importarSerial = async (hojas, sucursalId, negocioId, config = {}) => {
   const totalFilas = hojas.reduce((s, h) => s + h.filas.length, 0);
   if (totalFilas > MAX_FILAS) {
     throw {
@@ -82,6 +97,16 @@ const importarSerial = async (hojas, sucursalId, negocioId) => {
       message: `El archivo tiene ${totalFilas} filas. El máximo permitido es ${MAX_FILAS}.`,
     };
   }
+
+  // ── Leer configuración del negocio ────────────────────────────────────────
+  const coloresActivo         = config.colores_serial_activo === '1';
+  const caracteristicasActivo = config.caracteristicas_serial_activo === '1';
+  // Lista de características con su nombre original (para guardar como clave en JSON)
+  // y su forma normalizada (para buscarla en la fila importada)
+  const caracteristicasLista  = _parseLista(config.caracteristicas_serial_lista).map((nombre) => ({
+    original:    nombre,
+    normalizada: _normClave(nombre),
+  }));
 
   const resumenPorProducto = [];
 
@@ -106,18 +131,38 @@ const importarSerial = async (hojas, sucursalId, negocioId) => {
           }
 
           const proveedorId = await _resolverProveedor(client, fila.proveedor, negocioId);
-          const productoId  = await _resolverProductoSerial(client, {
+
+          // Precio de venta para productos_serial
+          const precio = fila.precio ? Number(fila.precio) : null;
+
+          const productoId = await _resolverProductoSerial(client, {
             nombre: hoja.nombreProducto,
             marca:  fila.marca,
             modelo: fila.modelo,
+            precio,
             sucursalId,
             proveedorId,
           });
 
-          // ── Usar _formatearFecha para evitar desfase de timezone ──
           const fechaEntrada  = _formatearFecha(fila.fecha_entrada);
           const costoCompra   = fila.costo_compra   ? Number(fila.costo_compra)   : null;
           const clienteOrigen = fila.cliente_origen?.toString().trim() || null;
+
+          // Color (solo si la feature está activa)
+          const color = coloresActivo
+            ? (fila.color?.toString().trim() || null)
+            : null;
+
+          // Características: construir JSON con nombre original como clave
+          let caracteristicas = null;
+          if (caracteristicasActivo && caracteristicasLista.length > 0) {
+            const obj = {};
+            for (const { original, normalizada } of caracteristicasLista) {
+              const valor = fila[normalizada]?.toString().trim();
+              if (valor) obj[original] = valor;
+            }
+            if (Object.keys(obj).length > 0) caracteristicas = obj;
+          }
 
           const { rows: serialExiste } = await client.query(
             `SELECT s.id FROM seriales s
@@ -130,17 +175,31 @@ const importarSerial = async (hojas, sucursalId, negocioId) => {
           if (serialExiste.length) {
             await client.query(
               `UPDATE seriales SET
-                 costo_compra   = COALESCE($1, costo_compra),
-                 cliente_origen = COALESCE($2, cliente_origen)
-               WHERE id = $3`,
-              [costoCompra, clienteOrigen, serialExiste[0].id]
+                 costo_compra    = COALESCE($1, costo_compra),
+                 cliente_origen  = COALESCE($2, cliente_origen),
+                 color           = COALESCE($3, color),
+                 caracteristicas = COALESCE($4::jsonb, caracteristicas)
+               WHERE id = $5`,
+              [
+                costoCompra,
+                clienteOrigen,
+                color,
+                caracteristicas ? JSON.stringify(caracteristicas) : null,
+                serialExiste[0].id,
+              ]
             );
             resultado.actualizados++;
           } else {
             await client.query(
-              `INSERT INTO seriales(producto_id, imei, fecha_entrada, costo_compra, cliente_origen)
-               VALUES($1,$2,$3,$4,$5)`,
-              [productoId, imei, fechaEntrada, costoCompra, clienteOrigen]
+              `INSERT INTO seriales
+                 (producto_id, imei, fecha_entrada, costo_compra, cliente_origen, color, caracteristicas)
+               VALUES($1,$2,$3,$4,$5,$6,$7::jsonb)`,
+              [
+                productoId, imei, fechaEntrada,
+                costoCompra, clienteOrigen,
+                color,
+                caracteristicas ? JSON.stringify(caracteristicas) : null,
+              ]
             );
             resultado.insertados++;
           }
@@ -201,10 +260,10 @@ const importarCantidad = async (filas, sucursalId, negocioId) => {
           continue;
         }
 
-        const stock       = fila.stock         !== undefined ? Number(fila.stock)         : 0;
-        const stockMinimo = fila.stock_minimo   !== undefined ? Number(fila.stock_minimo)  : 0;
-        const costoUnit   = fila.costo_unitario ? Number(fila.costo_unitario) : null;
-        const precioVenta = fila.precio_venta   ? Number(fila.precio_venta)   : null; // ← agregar
+        const stock       = fila.stock          !== undefined ? Number(fila.stock)          : 0;
+        const stockMinimo = fila.stock_minimo    !== undefined ? Number(fila.stock_minimo)   : 0;
+        const costoUnit   = fila.costo_unitario  ? Number(fila.costo_unitario)  : null;
+        const precioVenta = fila.precio_venta    ? Number(fila.precio_venta)    : null;
         const unidad      = fila.unidad_medida?.toString().trim() || 'unidad';
         const clienteOrig = fila.cliente_origen?.toString().trim() || null;
         const proveedorId = await _resolverProveedor(client, fila.proveedor, negocioId);
