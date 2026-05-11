@@ -205,6 +205,96 @@ function DetalleCompraInline({ compraId }) {
 }
 
 // ─────────────────────────────────────────────
+// MODAL DETALLE COMPRA (desde doble-click en movimiento)
+// ─────────────────────────────────────────────
+function ModalCompraDetalle({ compraId, onClose }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ['compra-detalle', compraId],
+    queryFn:  () => getCompraById(compraId).then((r) => r.data.data),
+    enabled:  !!compraId,
+  });
+  const esCredito = ['Credito', 'Fiado'].includes(data?.metodo);
+
+  return (
+    <Modal open onClose={onClose} title={`Compra #${String(compraId).padStart(5, '0')}`} size="lg">
+      {isLoading ? <Spinner className="py-10" /> : (
+        <div className="flex flex-col gap-4">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="bg-gray-50 rounded-xl p-3">
+              <p className="text-xs text-gray-400 mb-0.5">Fecha</p>
+              <p className="text-sm font-medium text-gray-800">{formatFechaHora(data?.fecha)}</p>
+            </div>
+            <div className="bg-gray-50 rounded-xl p-3">
+              <p className="text-xs text-gray-400 mb-0.5">Estado</p>
+              <Badge variant={data?.estado === 'Completada' ? 'green' : data?.estado === 'Pendiente' ? 'yellow' : 'red'}>
+                {data?.estado}
+              </Badge>
+            </div>
+            {data?.proveedor_nombre && (
+              <div className="bg-gray-50 rounded-xl p-3">
+                <p className="text-xs text-gray-400 mb-0.5">Proveedor</p>
+                <p className="text-sm font-medium text-gray-800">{data.proveedor_nombre}</p>
+              </div>
+            )}
+            {data?.numero_factura && (
+              <div className="bg-gray-50 rounded-xl p-3">
+                <p className="text-xs text-gray-400 mb-0.5">N° Factura proveedor</p>
+                <p className="text-sm font-medium text-gray-800">{data.numero_factura}</p>
+              </div>
+            )}
+            {data?.metodo && (
+              <div className={`col-span-2 rounded-xl p-3 ${esCredito ? 'bg-amber-50' : 'bg-green-50'}`}>
+                <p className={`text-xs mb-1 ${esCredito ? 'text-amber-500' : 'text-green-500'}`}>Forma de pago</p>
+                <div className="flex items-center gap-2">
+                  <span className={`text-sm font-semibold ${esCredito ? 'text-amber-700' : 'text-green-700'}`}>
+                    {data.metodo}
+                  </span>
+                  <span className="text-xs text-gray-400">·</span>
+                  <span className="text-xs text-gray-500">
+                    {data.registrar_en_caja ? 'Registrado en caja' : 'No afectó caja (crédito)'}
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <p className="text-sm font-semibold text-gray-700">Productos</p>
+            {(data?.lineas || []).map((l) => (
+              <div key={l.id} className="bg-gray-50 rounded-xl p-3 flex items-start justify-between gap-2">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-gray-800">{l.nombre_producto}</p>
+                  {l.imei
+                    ? <p className="text-xs text-gray-400 font-mono mt-0.5">{l.imei}</p>
+                    : <p className="text-xs text-gray-400">Cantidad: {l.cantidad}</p>
+                  }
+                </div>
+                <div className="text-right flex-shrink-0">
+                  <p className="text-xs text-gray-400">{l.cantidad} × {formatCOP(l.precio_unitario)}</p>
+                  <p className="text-sm font-semibold text-gray-900">{formatCOP(l.cantidad * l.precio_unitario)}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="flex justify-between items-center bg-blue-50 rounded-xl px-4 py-3">
+            <span className="text-sm font-semibold text-gray-700">Total</span>
+            <span className="text-base font-bold text-blue-700">{formatCOP(data?.total)}</span>
+          </div>
+          {data?.notas && (
+            <div className="bg-gray-50 rounded-xl px-3 py-2">
+              <p className="text-xs text-gray-400 mb-0.5">Notas</p>
+              <p className="text-xs text-gray-600">{data.notas}</p>
+            </div>
+          )}
+          <Button variant="secondary" onClick={onClose}>Cerrar</Button>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+// ─────────────────────────────────────────────
 // MODAL MOVIMIENTO (con checkbox registrar en caja)
 // ─────────────────────────────────────────────
 function ModalMovimiento({ acreedor, proveedorTipo, onClose, onImprimir }) {
@@ -628,12 +718,22 @@ function ModalEliminarAcreedor({ acreedor, onClose, onEliminar }) {
 // DETALLE ACREEDOR
 // ─────────────────────────────────────────────
 function DetalleAcreedor({ detalle, loadingDetalle, movimientosUI, onRegistrar, onImprimir, onVolver, onEliminar, esAdmin }) {
-  const [pagina, setPagina] = useState(1);
+  const [pagina,        setPagina]        = useState(1);
+  const [fechaDesde,    setFechaDesde]    = useState('');
+  const [fechaHasta,    setFechaHasta]    = useState('');
+  const [compraModal,   setCompraModal]   = useState(null);
 
   if (loadingDetalle) return <Spinner className="py-20" />;
 
-  const totalPaginas = Math.ceil(movimientosUI.length / PAGE_SIZE);
-  const movsPagina   = movimientosUI.slice((pagina - 1) * PAGE_SIZE, pagina * PAGE_SIZE);
+  const movsFiltrados = movimientosUI.filter((m) => {
+    const f = m.fecha ? m.fecha.slice(0, 10) : '';
+    if (fechaDesde && f < fechaDesde) return false;
+    if (fechaHasta && f > fechaHasta) return false;
+    return true;
+  });
+
+  const totalPaginas = Math.ceil(movsFiltrados.length / PAGE_SIZE);
+  const movsPagina   = movsFiltrados.slice((pagina - 1) * PAGE_SIZE, pagina * PAGE_SIZE);
 
   return (
     <div className="flex flex-col gap-4">
@@ -663,20 +763,59 @@ function DetalleAcreedor({ detalle, loadingDetalle, movimientosUI, onRegistrar, 
         </div>
       </div>
 
+      {/* Filtros de fecha */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex items-center gap-1.5">
+          <label className="text-xs text-gray-500">Desde</label>
+          <input
+            type="date"
+            value={fechaDesde}
+            onChange={(e) => { setFechaDesde(e.target.value); setPagina(1); }}
+            className="text-xs border border-gray-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-300"
+          />
+        </div>
+        <div className="flex items-center gap-1.5">
+          <label className="text-xs text-gray-500">Hasta</label>
+          <input
+            type="date"
+            value={fechaHasta}
+            onChange={(e) => { setFechaHasta(e.target.value); setPagina(1); }}
+            className="text-xs border border-gray-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-300"
+          />
+        </div>
+        {(fechaDesde || fechaHasta) && (
+          <button
+            onClick={() => { setFechaDesde(''); setFechaHasta(''); setPagina(1); }}
+            className="text-xs text-gray-400 hover:text-gray-600 underline">
+            Limpiar
+          </button>
+        )}
+      </div>
+
       <div className="flex flex-col gap-2">
-        <h3 className="text-sm font-semibold text-gray-600">Historial</h3>
-        {movimientosUI.length === 0 ? (
-          <EmptyState icon={PenLine} titulo="Sin movimientos" />
+        <h3 className="text-sm font-semibold text-gray-600">
+          Historial {movsFiltrados.length !== movimientosUI.length && `(${movsFiltrados.length} de ${movimientosUI.length})`}
+        </h3>
+        {movsFiltrados.length === 0 ? (
+          <EmptyState icon={PenLine} titulo="Sin movimientos" descripcion={movimientosUI.length > 0 ? 'Ningún movimiento en ese rango de fechas' : undefined} />
         ) : (
           <>
             {movsPagina.map((m) => (
-              <div key={m.id} className="bg-white border border-gray-100 rounded-xl p-3 flex items-start justify-between gap-3">
+              <div
+                key={m.id}
+                onDoubleClick={() => m.compra_id && setCompraModal(m.compra_id)}
+                className={`bg-white border border-gray-100 rounded-xl p-3 flex items-start justify-between gap-3 ${m.compra_id ? 'cursor-pointer hover:border-blue-200 hover:shadow-sm transition-all' : ''}`}
+                title={m.compra_id ? 'Doble clic para ver detalle de compra' : undefined}
+              >
                 <div className="flex-1">
                   <div className="flex items-center gap-2 flex-wrap">
                     <Badge variant={m.tipo === 'Cargo' ? 'red' : 'green'}>{m.tipo}</Badge>
                     <span className="text-sm text-gray-700">{m.descripcion}</span>
                     {m.registrar_en_caja === false && (
                       <span className="text-xs text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">Sin caja</span>
+                    )}
+                    {m.compra_id && (
+                      <span className="text-xs text-blue-400 bg-blue-50 px-1.5 py-0.5 rounded">Compra #{m.compra_id}</span>
                     )}
                   </div>
                   <p className="text-xs text-gray-400 mt-1">{formatFechaHora(m.fecha)}</p>
@@ -691,18 +830,27 @@ function DetalleAcreedor({ detalle, loadingDetalle, movimientosUI, onRegistrar, 
                     </p>
                   )}
                   {m.firma && <img src={m.firma} alt="firma" className="mt-2 h-12 border border-gray-100 rounded-lg" />}
-                  {m.compra_id && <DetalleCompraInline compraId={m.compra_id} />}
                 </div>
                 <div className="flex flex-col items-end gap-2 flex-shrink-0">
                   <span className={`text-sm font-bold ${m.tipo === 'Cargo' ? 'text-red-500' : 'text-green-600'}`}>
                     {m.tipo === 'Cargo' ? '+' : '-'}{formatCOP(m.valor)}
                   </span>
-                  <button onClick={() => onImprimir(m)}
-                    className="flex items-center gap-1 text-xs text-gray-400 hover:text-blue-600 transition-colors"
-                    title="Imprimir recibo">
-                    <Printer size={14} />
-                    <span className="hidden sm:inline">Recibo</span>
-                  </button>
+                  <div className="flex items-center gap-1.5">
+                    {m.compra_id && (
+                      <button
+                        onClick={() => setCompraModal(m.compra_id)}
+                        className="flex items-center gap-1 text-xs text-blue-400 hover:text-blue-600 transition-colors"
+                        title="Ver compra">
+                        <ChevronRight size={14} />
+                      </button>
+                    )}
+                    <button onClick={() => onImprimir(m)}
+                      className="flex items-center gap-1 text-xs text-gray-400 hover:text-blue-600 transition-colors"
+                      title="Imprimir recibo">
+                      <Printer size={14} />
+                      <span className="hidden sm:inline">Recibo</span>
+                    </button>
+                  </div>
                 </div>
               </div>
             ))}
@@ -727,6 +875,10 @@ function DetalleAcreedor({ detalle, loadingDetalle, movimientosUI, onRegistrar, 
           </>
         )}
       </div>
+
+      {compraModal && (
+        <ModalCompraDetalle compraId={compraModal} onClose={() => setCompraModal(null)} />
+      )}
     </div>
   );
 }

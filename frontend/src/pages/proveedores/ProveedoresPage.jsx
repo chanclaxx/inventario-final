@@ -447,6 +447,8 @@ function ModalDetalleCompra({ compraId, onClose }) {
     enabled:  !!compraId,
   });
 
+  const esCredito = ['Credito', 'Fiado'].includes(data?.metodo);
+
   return (
     <Modal open onClose={onClose} title={`Compra #${String(compraId).padStart(5, '0')}`} size="lg">
       {isLoading ? <Spinner className="py-10" /> : (
@@ -464,7 +466,7 @@ function ModalDetalleCompra({ compraId, onClose }) {
             </div>
             {data?.numero_factura && (
               <div className="bg-gray-50 rounded-xl p-3">
-                <p className="text-xs text-gray-400 mb-0.5">N° Factura</p>
+                <p className="text-xs text-gray-400 mb-0.5">N° Factura proveedor</p>
                 <p className="text-sm font-medium text-gray-800">{data.numero_factura}</p>
               </div>
             )}
@@ -472,7 +474,22 @@ function ModalDetalleCompra({ compraId, onClose }) {
               <p className="text-xs text-gray-400 mb-0.5">Registrado por</p>
               <p className="text-sm font-medium text-gray-800">{data?.usuario_nombre || '—'}</p>
             </div>
+            {data?.metodo && (
+              <div className={`col-span-2 rounded-xl p-3 ${esCredito ? 'bg-amber-50' : 'bg-green-50'}`}>
+                <p className={`text-xs mb-1 ${esCredito ? 'text-amber-500' : 'text-green-500'}`}>Forma de pago</p>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className={`text-sm font-semibold ${esCredito ? 'text-amber-700' : 'text-green-700'}`}>
+                    {data.metodo}
+                  </span>
+                  <span className="text-xs text-gray-400">·</span>
+                  <span className="text-xs text-gray-500">
+                    {data.registrar_en_caja ? 'Registrado en caja' : 'No afectó caja (crédito)'}
+                  </span>
+                </div>
+              </div>
+            )}
           </div>
+
           <div className="flex flex-col gap-2">
             <p className="text-sm font-semibold text-gray-700">Productos recibidos</p>
             {(data?.lineas || []).length === 0
@@ -485,6 +502,9 @@ function ModalDetalleCompra({ compraId, onClose }) {
                         ? <div className="flex items-center gap-1 mt-0.5"><Hash size={10} className="text-gray-400" /><p className="text-xs text-gray-400 font-mono">{l.imei}</p></div>
                         : <p className="text-xs text-gray-400">Cantidad: {l.cantidad}</p>
                       }
+                      {l.precio_usd && (
+                        <p className="text-xs text-gray-400 mt-0.5">${l.precio_usd} USD</p>
+                      )}
                     </div>
                     <div className="text-right flex-shrink-0">
                       <p className="text-xs text-gray-400">{l.cantidad} × {formatCOP(l.precio_unitario)}</p>
@@ -494,11 +514,17 @@ function ModalDetalleCompra({ compraId, onClose }) {
                 ))
             }
           </div>
+
           <div className="flex justify-between items-center bg-blue-50 rounded-xl px-4 py-3">
             <span className="text-sm font-semibold text-gray-700">Total de la compra</span>
             <span className="text-base font-bold text-blue-700">{formatCOP(data?.total)}</span>
           </div>
-          {data?.notas && <p className="text-xs text-gray-400 italic">Notas: {data.notas}</p>}
+          {data?.notas && (
+            <div className="bg-gray-50 rounded-xl px-3 py-2">
+              <p className="text-xs text-gray-400 mb-0.5">Notas</p>
+              <p className="text-xs text-gray-600">{data.notas}</p>
+            </div>
+          )}
           <Button variant="secondary" onClick={onClose}>Cerrar</Button>
         </div>
       )}
@@ -659,6 +685,13 @@ function HistorialProveedor({ proveedor, sucursalKey, sucursalLista, onVolver, o
   const [tabVista,      setTabVista]      = useState('compras');
   const [modalMov,      setModalMov]      = useState(false);
 
+  // ── Filtros compras ────────────────────────────────────────────────────────
+  const [filtroEstado,    setFiltroEstado]    = useState('Todas');
+  const [filtroPago,      setFiltroPago]      = useState('Todos');
+  const [fechaDesde,      setFechaDesde]      = useState('');
+  const [fechaHasta,      setFechaHasta]      = useState('');
+  const [busquedaFactura, setBusquedaFactura] = useState('');
+
   // ── Compras ────────────────────────────────────────────────────────────────
   const { data: comprasData, isLoading } = useQuery({
     queryKey: ['compras-proveedor', proveedor.id, ...sucursalKey],
@@ -688,6 +721,21 @@ function HistorialProveedor({ proveedor, sucursalKey, sucursalLista, onVolver, o
   const movimientosUI = detalleAcreedor?.movimientos
     ? [...detalleAcreedor.movimientos].reverse()
     : [];
+
+  const comprasFiltradas = compras.filter((c) => {
+    if (filtroEstado !== 'Todas' && c.estado !== filtroEstado) return false;
+    const esCredito = ['Credito', 'Fiado'].includes(c.metodo);
+    if (filtroPago === 'Crédito' && !esCredito) return false;
+    if (filtroPago === 'Contado' && esCredito) return false;
+    const fechaStr = c.fecha ? c.fecha.slice(0, 10) : '';
+    if (fechaDesde && fechaStr < fechaDesde) return false;
+    if (fechaHasta && fechaStr > fechaHasta) return false;
+    if (busquedaFactura) {
+      const q = busquedaFactura.toLowerCase();
+      if (!c.numero_factura?.toLowerCase().includes(q) && !String(c.id).includes(q)) return false;
+    }
+    return true;
+  });
 
   return (
     <div className="flex flex-col gap-4">
@@ -757,35 +805,95 @@ function HistorialProveedor({ proveedor, sucursalKey, sucursalLista, onVolver, o
       {/* ── Pestaña: Compras ── */}
       {tabVista === 'compras' && (
         <>
-          {isLoading ? <Spinner className="py-20" /> : compras.length === 0 ? (
-            <EmptyState icon={ShoppingCart} titulo="Sin compras"
-              descripcion="Aún no hay compras registradas a este proveedor" />
-          ) : (
-            <div className="flex flex-col gap-2">
-              {compras.map((c) => (
-                <button key={c.id} onClick={() => setCompraDetalle(c.id)}
-                  className="bg-white border border-gray-100 rounded-xl p-3 flex items-center
-                    justify-between hover:border-blue-200 hover:bg-blue-50 transition-all text-left">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-semibold text-gray-800">
-                        #{String(c.id).padStart(5, '0')}
-                      </span>
-                      <Badge variant={c.estado === 'Completada' ? 'green' : c.estado === 'Pendiente' ? 'yellow' : 'red'}>
-                        {c.estado}
-                      </Badge>
-                    </div>
-                    {c.numero_factura && (
-                      <p className="text-xs text-gray-400 mt-0.5">Factura: {c.numero_factura}</p>
-                    )}
-                    <p className="text-xs text-gray-400">{formatFechaHora(c.fecha)}</p>
-                  </div>
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    <span className="text-sm font-bold text-gray-900">{formatCOP(c.total)}</span>
-                    <ChevronRight size={14} className="text-gray-400" />
-                  </div>
+          {/* Filtros */}
+          <div className="flex flex-col gap-2">
+            <SearchInput value={busquedaFactura} onChange={setBusquedaFactura}
+              placeholder="Buscar por N° factura o ID…" />
+            <div className="flex gap-1.5 items-center">
+              <input type="date" value={fechaDesde} onChange={(e) => setFechaDesde(e.target.value)}
+                className="flex-1 px-2 py-1.5 text-xs border border-gray-200 rounded-lg text-gray-600 bg-white focus:outline-none focus:ring-1 focus:ring-blue-400" />
+              <span className="text-gray-300 text-xs flex-shrink-0">—</span>
+              <input type="date" value={fechaHasta} onChange={(e) => setFechaHasta(e.target.value)}
+                className="flex-1 px-2 py-1.5 text-xs border border-gray-200 rounded-lg text-gray-600 bg-white focus:outline-none focus:ring-1 focus:ring-blue-400" />
+              {(fechaDesde || fechaHasta) && (
+                <button onClick={() => { setFechaDesde(''); setFechaHasta(''); }}
+                  className="text-xs text-gray-400 hover:text-red-500 px-1 flex-shrink-0 transition-colors">✕</button>
+              )}
+            </div>
+            <div className="flex gap-1.5 flex-wrap">
+              {['Todas', 'Completada', 'Pendiente', 'Cancelada'].map((e) => (
+                <button key={e} onClick={() => setFiltroEstado(e)}
+                  className={`px-2.5 py-1 text-xs rounded-lg border font-medium transition-all
+                    ${filtroEstado === e
+                      ? 'bg-blue-50 border-blue-300 text-blue-700'
+                      : 'bg-gray-50 border-gray-200 text-gray-500 hover:border-gray-300'}`}>
+                  {e}
                 </button>
               ))}
+              <span className="text-gray-200 self-center">|</span>
+              {['Todos', 'Crédito', 'Contado'].map((p) => (
+                <button key={p} onClick={() => setFiltroPago(p)}
+                  className={`px-2.5 py-1 text-xs rounded-lg border font-medium transition-all
+                    ${filtroPago === p
+                      ? 'bg-amber-50 border-amber-300 text-amber-700'
+                      : 'bg-gray-50 border-gray-200 text-gray-500 hover:border-gray-300'}`}>
+                  {p}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {isLoading ? <Spinner className="py-20" /> : comprasFiltradas.length === 0 ? (
+            <EmptyState icon={ShoppingCart} titulo="Sin compras"
+              descripcion={compras.length === 0
+                ? 'Aún no hay compras registradas a este proveedor'
+                : 'Ninguna compra coincide con los filtros aplicados'} />
+          ) : (
+            <div className="flex flex-col gap-2">
+              <p className="text-xs text-gray-400 px-1 select-none">
+                {comprasFiltradas.length} compra(s) · Doble click para ver detalle
+              </p>
+              {comprasFiltradas.map((c) => {
+                const esCredito = ['Credito', 'Fiado'].includes(c.metodo);
+                return (
+                  <div key={c.id}
+                    onDoubleClick={() => setCompraDetalle(c.id)}
+                    className="bg-white border border-gray-100 rounded-xl p-3 flex items-center
+                      justify-between hover:border-gray-200 hover:bg-gray-50/50 transition-all
+                      cursor-default select-none">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-sm font-semibold text-gray-800">
+                          #{String(c.id).padStart(5, '0')}
+                        </span>
+                        <Badge variant={c.estado === 'Completada' ? 'green' : c.estado === 'Pendiente' ? 'yellow' : 'red'}>
+                          {c.estado}
+                        </Badge>
+                        {c.metodo && (
+                          <span className={`text-xs px-2 py-0.5 rounded-full font-medium border
+                            ${esCredito
+                              ? 'bg-amber-50 text-amber-700 border-amber-200'
+                              : 'bg-green-50 text-green-700 border-green-200'}`}>
+                            {esCredito ? 'Crédito' : c.metodo}
+                          </span>
+                        )}
+                      </div>
+                      {c.numero_factura && (
+                        <p className="text-xs text-gray-400 mt-0.5">Factura: {c.numero_factura}</p>
+                      )}
+                      <p className="text-xs text-gray-400">{formatFechaHora(c.fecha)}</p>
+                    </div>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <span className="text-sm font-bold text-gray-900">{formatCOP(c.total)}</span>
+                      <button onClick={() => setCompraDetalle(c.id)}
+                        className="p-1.5 rounded-lg hover:bg-blue-100 text-gray-300 hover:text-blue-600 transition-colors"
+                        title="Ver detalle">
+                        <ChevronRight size={14} />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
           {compraDetalle && (
@@ -824,6 +932,11 @@ function HistorialProveedor({ proveedor, sucursalKey, sucursalLista, onVolver, o
                       <span>→</span>
                       <span className="font-semibold text-gray-600">{formatCOP(m.saldo_despues)}</span>
                     </div>
+                    {m.tipo === 'Abono' && m.cargo_id && (
+                      <p className="text-xs text-green-700 bg-green-50 border border-green-100 rounded-lg px-2 py-1 mt-1.5">
+                        → Abono a: <span className="font-medium">{m.cargo_descripcion || `Cargo #${m.cargo_id}`}</span>
+                      </p>
+                    )}
                   </div>
                   <span className={`text-sm font-bold flex-shrink-0
                     ${m.tipo === 'Cargo' ? 'text-red-500' : 'text-green-600'}`}>

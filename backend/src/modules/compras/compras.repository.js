@@ -57,6 +57,7 @@ const findByProveedor = async (proveedorId, sucursalId, negocioId) => {
   const { rows } = await pool.query(`
     SELECT
       c.id, c.fecha, c.numero_factura, c.total, c.estado, c.notas,
+      c.metodo, c.registrar_en_caja,
       c.sucursal_id, su.nombre AS sucursal_nombre,
       u.nombre AS usuario_nombre
     FROM compras c
