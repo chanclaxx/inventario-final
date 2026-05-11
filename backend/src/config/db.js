@@ -1,4 +1,10 @@
-const { Pool } = require('pg');
+const { Pool, types } = require('pg');
+
+// Colombia es siempre UTC-5 (sin horario de verano).
+// Todos los TIMESTAMP WITHOUT TIME ZONE están guardados en hora Bogotá
+// porque el pool ejecuta "SET TIME ZONE 'America/Bogota'" en cada conexión.
+// Sin este override, pg los interpreta como UTC → 5 horas atrás.
+types.setTypeParser(1114, (val) => (val ? new Date(val + '-05:00') : null));
 
 const pool = new Pool({
   host:     process.env.DB_HOST,
