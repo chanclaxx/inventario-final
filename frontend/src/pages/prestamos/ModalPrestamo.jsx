@@ -6,6 +6,7 @@ import { Input }         from '../../components/ui/Input';
 import { Spinner }       from '../../components/ui/Spinner';
 import { formatCOP }     from '../../utils/formatters';
 import { crearPrestamos } from '../../api/prestamos.api';
+import { Wallet, Check } from 'lucide-react';
 import {
   getPrestatarios, crearPrestatario,
   getEmpleados,    crearEmpleado,
@@ -266,6 +267,7 @@ export function ModalPrestamo({ open, onClose }) {
   const [prestatarioSel, setPrestatarioSel] = useState(null);
   const [empleadoSel,    setEmpleadoSel]    = useState(null);
   const [clienteSel,     setClienteSel]     = useState(null);
+  const [aplicarSaldo,   setAplicarSaldo]   = useState(false);
   const [error,          setError]          = useState('');
 
   const { data: prestatariosData, isLoading: loadingPrestatarios } = useQuery({
@@ -334,6 +336,7 @@ export function ModalPrestamo({ open, onClose }) {
     setPrestatarioSel(null);
     setEmpleadoSel(null);
     setClienteSel(null);
+    setAplicarSaldo(false);
     setError('');
   };
 
@@ -346,6 +349,10 @@ export function ModalPrestamo({ open, onClose }) {
       valor_prestamo:    item.precioFinal * (item.cantidad || 1),
     }));
 
+  const saldoDisponible = tipoCliente === 'companero'
+    ? Number(prestatarioSel?.saldo_a_favor ?? 0)
+    : Number(clienteSel?.saldo_a_favor ?? 0);
+
   const handleSubmit = () => {
     setError('');
     if (items.length === 0) return setError('El carrito está vacío');
@@ -354,24 +361,26 @@ export function ModalPrestamo({ open, onClose }) {
       if (!prestatarioSel) return setError('Selecciona o crea un prestatario');
       if (!empleadoSel)    return setError('Selecciona o agrega un empleado');
       mutPrestamos.mutate({
-        prestatario:    prestatarioSel.nombre,
-        cedula:         'COMPANERO',
-        telefono:       '0000000000',
-        prestatario_id: prestatarioSel.id,
-        empleado_id:    empleadoSel.id,
-        cliente_id:     null,
-        items:          buildItems(),
+        prestatario:         prestatarioSel.nombre,
+        cedula:              'COMPANERO',
+        telefono:            '0000000000',
+        prestatario_id:      prestatarioSel.id,
+        empleado_id:         empleadoSel.id,
+        cliente_id:          null,
+        aplicar_saldo_favor: aplicarSaldo,
+        items:               buildItems(),
       });
     } else {
       if (!clienteSel) return setError('Selecciona o crea un cliente');
       mutPrestamos.mutate({
-        prestatario:    clienteSel.nombre,
-        cedula:         clienteSel.cedula  || 'S/C',
-        telefono:       clienteSel.celular || '0000000000',
-        prestatario_id: null,
-        empleado_id:    null,
-        cliente_id:     clienteSel.id,
-        items:          buildItems(),
+        prestatario:         clienteSel.nombre,
+        cedula:              clienteSel.cedula  || 'S/C',
+        telefono:            clienteSel.celular || '0000000000',
+        prestatario_id:      null,
+        empleado_id:         null,
+        cliente_id:          clienteSel.id,
+        aplicar_saldo_favor: aplicarSaldo,
+        items:               buildItems(),
       });
     }
   };
@@ -480,6 +489,34 @@ export function ModalPrestamo({ open, onClose }) {
                 onSeleccionar={(c) => setClienteSel(c)}
                 onCrear={(datos) => mutCrearCliente.mutate(datos)}
               />
+            )}
+          </div>
+        )}
+
+        {/* Banner saldo a favor */}
+        {saldoDisponible > 0 && (
+          <div className="border border-emerald-200 bg-emerald-50 rounded-xl p-3 flex flex-col gap-2">
+            <div className="flex items-center gap-2">
+              <Wallet size={14} className="text-emerald-600 flex-shrink-0" />
+              <span className="text-sm font-semibold text-emerald-800">
+                Saldo a favor disponible: {formatCOP(saldoDisponible)}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setAplicarSaldo((v) => !v)}
+              className="flex items-center gap-2 w-fit"
+            >
+              <span className={`w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 transition-all
+                ${aplicarSaldo ? 'bg-emerald-500 border-emerald-500' : 'border-gray-300 bg-white'}`}>
+                {aplicarSaldo && <Check size={12} className="text-white" />}
+              </span>
+              <span className="text-sm text-emerald-700">Aplicar saldo a este préstamo</span>
+            </button>
+            {aplicarSaldo && (
+              <p className="text-xs text-emerald-600">
+                Se descontarán hasta {formatCOP(saldoDisponible)} del total a pagar.
+              </p>
             )}
           </div>
         )}

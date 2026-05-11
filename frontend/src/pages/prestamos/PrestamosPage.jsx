@@ -508,7 +508,7 @@ function TarjetaPrestamoDetalle({ prestamo, onAbonar, onDevolver, onImprimir, co
 
 // ─── Vista detalle de persona ─────────────────────────────────────────────────
 
-function VistaDetallePersona({ nombre, tipo, personaId, prestamos, onVolver, onAbonar, onDevolver, onImprimir, coloresActivo }) {
+function VistaDetallePersona({ nombre, tipo, personaId, prestamos, saldoAFavor = 0, onVolver, onAbonar, onDevolver, onImprimir, onRegistrarSaldo, coloresActivo }) {
   const [cerradosAbiertos, setCerradosAbiertos] = useState(false);
 
   const activos  = prestamos.filter((p) => p.estado === 'Activo');
@@ -579,6 +579,39 @@ function VistaDetallePersona({ nombre, tipo, personaId, prestamos, onVolver, onA
       {activos.length === 0 && (
         <div className="bg-green-50 border border-green-100 rounded-xl px-4 py-3 text-center">
           <p className="text-green-700 text-sm font-medium">✓ Sin préstamos activos</p>
+        </div>
+      )}
+
+      {/* Saldo a favor */}
+      {(saldoAFavor > 0 || (activos.length === 0 && prestamos.length > 0)) && (
+        <div className="border border-emerald-200 bg-emerald-50 rounded-2xl p-4 flex flex-col gap-2">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Wallet size={15} className="text-emerald-600" />
+              <span className="text-sm font-semibold text-emerald-800">Saldo a favor</span>
+            </div>
+            {saldoAFavor > 0 && (
+              <span className="text-sm font-bold text-emerald-700">{formatCOP(saldoAFavor)}</span>
+            )}
+          </div>
+          {saldoAFavor === 0 && (
+            <p className="text-xs text-emerald-600">
+              Todos los préstamos están saldados. Puedes registrar un saldo a favor para descontarlo del próximo préstamo.
+            </p>
+          )}
+          {saldoAFavor > 0 && (
+            <p className="text-xs text-emerald-600">
+              Este monto se aplicará al próximo préstamo que registres a esta persona.
+            </p>
+          )}
+          <button
+            onClick={onRegistrarSaldo}
+            className="mt-1 flex items-center gap-1.5 text-xs font-medium text-emerald-700
+              hover:text-emerald-900 w-fit transition-colors"
+          >
+            <Plus size={13} />
+            {saldoAFavor > 0 ? 'Actualizar saldo a favor' : 'Registrar saldo a favor'}
+          </button>
         </div>
       )}
 
@@ -1169,7 +1202,8 @@ export default function PrestamosPage() {
   const [prestamoAbono,        setPrestamoAbono]        = useState(null);
   const [prestamoDevol,        setPrestamoDevol]        = useState(null);
 
-  const [prestamoImprimir, setPrestamoImprimir] = useState(null);
+  const [prestamoImprimir,    setPrestamoImprimir]    = useState(null);
+  const [modalSaldoPersona,   setModalSaldoPersona]   = useState(null); // { nombre, tipo, personaId, saldoAFavor }
   const abonosImprimir = useAbonosPrestamo(prestamoImprimir?.id);
 
   const [saldadoFacturaId,   setSaldadoFacturaId]   = useState(null);
@@ -1210,7 +1244,13 @@ export default function PrestamosPage() {
 
   const gruposCompaneros = prestamos.filter((p) => p.prestatario_id).reduce((acc, p) => {
     const key = `prestatario_${p.prestatario_id}`;
-    if (!acc[key]) acc[key] = { nombre: p.prestatario_nombre || p.prestatario, personaId: p.prestatario_id, prestamos: [], saldoTotal: 0 };
+    if (!acc[key]) acc[key] = {
+      nombre: p.prestatario_nombre || p.prestatario,
+      personaId: p.prestatario_id,
+      prestamos: [],
+      saldoTotal: 0,
+      saldoAFavor: Number(p.prestatario_saldo_a_favor ?? 0),
+    };
     acc[key].prestamos.push(p);
     if (p.estado === 'Activo') acc[key].saldoTotal += Number(p.valor_prestamo) - Number(p.total_abonado);
     return acc;
@@ -1218,7 +1258,13 @@ export default function PrestamosPage() {
 
   const gruposClientes = prestamos.filter((p) => p.cliente_id).reduce((acc, p) => {
     const key = `cliente_${p.cliente_id}`;
-    if (!acc[key]) acc[key] = { nombre: p.cliente_nombre || p.prestatario, personaId: p.cliente_id, prestamos: [], saldoTotal: 0 };
+    if (!acc[key]) acc[key] = {
+      nombre: p.cliente_nombre || p.prestatario,
+      personaId: p.cliente_id,
+      prestamos: [],
+      saldoTotal: 0,
+      saldoAFavor: Number(p.cliente_saldo_a_favor ?? 0),
+    };
     acc[key].prestamos.push(p);
     if (p.estado === 'Activo') acc[key].saldoTotal += Number(p.valor_prestamo) - Number(p.total_abonado);
     return acc;
@@ -1319,10 +1365,17 @@ export default function PrestamosPage() {
                 tipo={tabPrestamos === 'companeros' ? 'companero' : 'cliente'}
                 personaId={grupoActual.personaId}
                 prestamos={grupoActual.prestamos}
+                saldoAFavor={grupoActual.saldoAFavor ?? 0}
                 onVolver={() => setPersonaSeleccionadaKey(null)}
                 onAbonar={setPrestamoAbono}
                 onDevolver={setPrestamoDevol}
                 onImprimir={setPrestamoImprimir}
+                onRegistrarSaldo={() => setModalSaldoPersona({
+                  nombre:     grupoActual.nombre,
+                  tipo:       tabPrestamos === 'companeros' ? 'companero' : 'cliente',
+                  personaId:  grupoActual.personaId,
+                  saldoAFavor: grupoActual.saldoAFavor ?? 0,
+                })}
                 coloresActivo={coloresActivo}
               />
             ) : (
@@ -1403,6 +1456,16 @@ export default function PrestamosPage() {
       {facturaTermicaData && (
         <FacturaTermica factura={facturaTermicaData.factura}
           garantias={facturaTermicaData.garantias} onClose={limpiarSaldado} />
+      )}
+
+      {modalSaldoPersona && (
+        <ModalSaldoAFavor
+          nombre={modalSaldoPersona.nombre}
+          tipo={modalSaldoPersona.tipo}
+          personaId={modalSaldoPersona.personaId}
+          montoActual={modalSaldoPersona.saldoAFavor}
+          onClose={() => setModalSaldoPersona(null)}
+        />
       )}
     </div>
   );
