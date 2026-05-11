@@ -692,6 +692,11 @@ function HistorialProveedor({ proveedor, sucursalKey, sucursalLista, onVolver, o
   const [fechaHasta,      setFechaHasta]      = useState('');
   const [busquedaFactura, setBusquedaFactura] = useState('');
 
+  // ── Filtros cuenta corriente ───────────────────────────────────────────────
+  const [cuentaFechaDesde,  setCuentaFechaDesde]  = useState('');
+  const [cuentaFechaHasta,  setCuentaFechaHasta]  = useState('');
+  const [cuentaCompraModal, setCuentaCompraModal] = useState(null);
+
   // ── Compras ────────────────────────────────────────────────────────────────
   const { data: comprasData, isLoading } = useQuery({
     queryKey: ['compras-proveedor', proveedor.id, ...sucursalKey],
@@ -721,6 +726,13 @@ function HistorialProveedor({ proveedor, sucursalKey, sucursalLista, onVolver, o
   const movimientosUI = detalleAcreedor?.movimientos
     ? [...detalleAcreedor.movimientos].reverse()
     : [];
+
+  const movsFiltrados = movimientosUI.filter((m) => {
+    const f = m.fecha ? m.fecha.slice(0, 10) : '';
+    if (cuentaFechaDesde && f < cuentaFechaDesde) return false;
+    if (cuentaFechaHasta && f > cuentaFechaHasta) return false;
+    return true;
+  });
 
   const comprasFiltradas = compras.filter((c) => {
     if (filtroEstado !== 'Todas' && c.estado !== filtroEstado) return false;
@@ -906,25 +918,53 @@ function HistorialProveedor({ proveedor, sucursalKey, sucursalLista, onVolver, o
       {tabVista === 'cuenta' && acreedorInfo && (
         <div className="flex flex-col gap-3">
           <div className="flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-gray-600">Movimientos</h3>
+            <h3 className="text-sm font-semibold text-gray-600">
+              Movimientos {movsFiltrados.length !== movimientosUI.length && `(${movsFiltrados.length} de ${movimientosUI.length})`}
+            </h3>
             <Button size="sm" onClick={() => setModalMov(true)}>
               <PenLine size={14} /> Registrar
             </Button>
           </div>
 
+          {/* Filtros de fecha */}
+          <div className="flex gap-1.5 items-center flex-wrap">
+            <input type="date" value={cuentaFechaDesde}
+              onChange={(e) => setCuentaFechaDesde(e.target.value)}
+              className="flex-1 px-2 py-1.5 text-xs border border-gray-200 rounded-lg text-gray-600 bg-white focus:outline-none focus:ring-1 focus:ring-blue-400" />
+            <span className="text-gray-300 text-xs flex-shrink-0">—</span>
+            <input type="date" value={cuentaFechaHasta}
+              onChange={(e) => setCuentaFechaHasta(e.target.value)}
+              className="flex-1 px-2 py-1.5 text-xs border border-gray-200 rounded-lg text-gray-600 bg-white focus:outline-none focus:ring-1 focus:ring-blue-400" />
+            {(cuentaFechaDesde || cuentaFechaHasta) && (
+              <button onClick={() => { setCuentaFechaDesde(''); setCuentaFechaHasta(''); }}
+                className="text-xs text-gray-400 hover:text-red-500 px-1 flex-shrink-0 transition-colors">✕</button>
+            )}
+          </div>
+
           {loadingAcreedor ? <Spinner className="py-10" /> :
-           movimientosUI.length === 0 ? (
+           movsFiltrados.length === 0 ? (
             <EmptyState icon={Wallet} titulo="Sin movimientos"
-              descripcion="Aún no hay cargos ni abonos con este proveedor" />
+              descripcion={movimientosUI.length === 0
+                ? 'Aún no hay cargos ni abonos con este proveedor'
+                : 'Ningún movimiento en ese rango de fechas'} />
            ) : (
             <div className="flex flex-col gap-2">
-              {movimientosUI.map((m) => (
+              <p className="text-xs text-gray-400 px-1 select-none">Doble clic en movimientos con compra para ver detalle</p>
+              {movsFiltrados.map((m) => (
                 <div key={m.id}
-                  className="bg-white border border-gray-100 rounded-xl p-3 flex items-start justify-between gap-3">
+                  onDoubleClick={() => m.compra_id && setCuentaCompraModal(m.compra_id)}
+                  className={`bg-white border border-gray-100 rounded-xl p-3 flex items-start justify-between gap-3
+                    ${m.compra_id ? 'cursor-pointer hover:border-blue-200 hover:shadow-sm transition-all' : ''}`}
+                  title={m.compra_id ? 'Doble clic para ver detalle de compra' : undefined}>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <Badge variant={m.tipo === 'Cargo' ? 'red' : 'green'}>{m.tipo}</Badge>
                       <span className="text-sm text-gray-700 truncate">{m.descripcion}</span>
+                      {m.compra_id && (
+                        <span className="text-xs text-blue-400 bg-blue-50 px-1.5 py-0.5 rounded">
+                          Compra #{m.compra_id}
+                        </span>
+                      )}
                     </div>
                     <p className="text-xs text-gray-400 mt-1">{formatFechaHora(m.fecha)}</p>
                     <div className="flex items-center gap-1 mt-1 text-xs text-gray-400">
@@ -938,14 +978,26 @@ function HistorialProveedor({ proveedor, sucursalKey, sucursalLista, onVolver, o
                       </p>
                     )}
                   </div>
-                  <span className={`text-sm font-bold flex-shrink-0
-                    ${m.tipo === 'Cargo' ? 'text-red-500' : 'text-green-600'}`}>
-                    {m.tipo === 'Cargo' ? '+' : '-'}{formatCOP(m.valor)}
-                  </span>
+                  <div className="flex flex-col items-end gap-2 flex-shrink-0">
+                    <span className={`text-sm font-bold ${m.tipo === 'Cargo' ? 'text-red-500' : 'text-green-600'}`}>
+                      {m.tipo === 'Cargo' ? '+' : '-'}{formatCOP(m.valor)}
+                    </span>
+                    {m.compra_id && (
+                      <button onClick={() => setCuentaCompraModal(m.compra_id)}
+                        className="p-1 rounded-lg hover:bg-blue-100 text-gray-300 hover:text-blue-600 transition-colors"
+                        title="Ver compra">
+                        <ChevronRight size={14} />
+                      </button>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
            )}
+
+          {cuentaCompraModal && (
+            <ModalDetalleCompra compraId={cuentaCompraModal} onClose={() => setCuentaCompraModal(null)} />
+          )}
         </div>
       )}
 
