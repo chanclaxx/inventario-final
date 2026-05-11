@@ -715,11 +715,11 @@ function HistorialProveedor({ proveedor, sucursalKey, sucursalLista, onVolver, o
   const acreedorInfo  = acreedoresAll.find((a) => a.proveedor_id === proveedor.id) || null;
   const saldoAcreedor = acreedorInfo ? Number(acreedorInfo.saldo || 0) : 0;
 
-  // ── Detalle acreedor con movimientos (carga solo al abrir la pestaña) ─────
+  // ── Detalle acreedor con movimientos ─────────────────────────────────────
   const { data: detalleAcreedor, isLoading: loadingAcreedor } = useQuery({
     queryKey: ['acreedor', acreedorInfo?.id],
     queryFn:  () => getAcreedorById(acreedorInfo.id).then((r) => r.data.data),
-    enabled:  tabVista === 'cuenta' && !!acreedorInfo?.id,
+    enabled:  !!acreedorInfo?.id,
   });
 
   const compras       = comprasData || [];
