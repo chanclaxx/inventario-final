@@ -21,8 +21,9 @@ import api from '../../api/axios.config';
 import {
   Truck, Plus, ShoppingCart, ChevronRight, ChevronLeft,
   Package, Hash, User, RefreshCw, ArrowLeftRight, ShoppingBag, Repeat,
-  Search, ScanLine, Wallet, PenLine,
+  Search, ScanLine, Wallet, PenLine, Download,
 } from 'lucide-react';
+import { exportarCuentaExcel } from '../../utils/exportarCuentaExcel';
 
 // ─── API helpers ──────────────────────────────────────────────────────────────
 
@@ -771,6 +772,17 @@ function HistorialProveedor({ proveedor, sucursalKey, sucursalLista, onVolver, o
           <ShoppingCart size={14} />
           <span className="hidden sm:inline">Nueva compra</span>
         </Button>
+        <button
+          onClick={() => exportarCuentaExcel({
+            nombre: proveedor.nombre,
+            compras,
+            movimientos: movimientosUI,
+          })}
+          title="Exportar a Excel"
+          className="p-2 rounded-xl border border-gray-200 text-gray-400 hover:text-green-700
+            hover:border-green-300 hover:bg-green-50 transition-colors flex-shrink-0">
+          <Download size={16} />
+        </button>
       </div>
 
       {/* Tarjetas resumen */}

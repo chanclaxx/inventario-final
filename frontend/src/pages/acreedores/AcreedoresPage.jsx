@@ -14,9 +14,10 @@ import { Spinner }     from '../../components/ui/Spinner';
 import { EmptyState }  from '../../components/ui/EmptyState';
 import { SearchInput } from '../../components/ui/SearchInput';
 import { ReciboAcreedor } from '../../components/Reciboacreedor';
-import { Users, Plus, ChevronRight, ChevronLeft, ChevronUp, PenLine, Printer, Trash2, AlertTriangle, Calculator } from 'lucide-react';
+import { Users, Plus, ChevronRight, ChevronLeft, ChevronUp, PenLine, Printer, Trash2, AlertTriangle, Calculator, Download } from 'lucide-react';
 import api from '../../api/axios.config';
 import { getCompraById } from '../../api/compras.api';
+import { exportarCuentaExcel } from '../../utils/exportarCuentaExcel';
 
 // ─────────────────────────────────────────────
 // UTILS
@@ -752,6 +753,20 @@ function DetalleAcreedor({ detalle, loadingDetalle, movimientosUI, onRegistrar, 
         </div>
         <div className="flex gap-2">
           <Button onClick={onRegistrar}><PenLine size={16} /> Registrar</Button>
+          <button
+            onClick={() => {
+              const compraIds = [...new Set(movimientosUI.map((m) => m.compra_id).filter(Boolean))];
+              exportarCuentaExcel({
+                nombre: detalle?.nombre || 'acreedor',
+                compraIds,
+                movimientos: movimientosUI,
+              });
+            }}
+            title="Exportar a Excel"
+            className="p-2 rounded-xl border border-gray-200 text-gray-400 hover:text-green-700
+              hover:border-green-300 hover:bg-green-50 transition-colors">
+            <Download size={16} />
+          </button>
           {esAdmin && (
             <button onClick={onEliminar}
               className="p-2 rounded-xl border border-dashed border-red-200 text-red-400
