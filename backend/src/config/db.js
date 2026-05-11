@@ -6,6 +6,11 @@ const { Pool, types } = require('pg');
 // Sin este override, pg los interpreta como UTC → 5 horas atrás.
 types.setTypeParser(1114, (val) => (val ? new Date(val + '-05:00') : null));
 
+// DATE (OID 1082): pg por defecto convierte "2024-01-15" a un Date UTC medianoche,
+// lo cual causa que formatters en Colombia (UTC-5) muestren el día anterior.
+// Devolvemos el string plano para que el frontend lo maneje correctamente.
+types.setTypeParser(1082, (val) => val);
+
 const pool = new Pool({
   host:     process.env.DB_HOST,
   port:     process.env.DB_PORT,

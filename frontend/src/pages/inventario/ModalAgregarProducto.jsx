@@ -19,6 +19,7 @@ import {
 } from '../../api/productos.api';
 import api from '../../api/axios.config';
 import { getLineas } from '../../api/lineas.api';
+import { fechaHoyBogota } from '../../utils/formatters';
 import {
   Package, ShoppingBag, ChevronRight, ChevronDown, Trash2,
   ShoppingCart, CreditCard, Banknote,
@@ -808,7 +809,7 @@ function PasoCompraCliente({ sucursalKey, sucursalLista, onExito, onDuplicadosEn
             const caracteristicasPayload = Object.keys(caract).some((k) => caract[k]?.trim?.()) ? caract : null;
             return agregarSerial(lineaSel.id, {
               imei,
-              fecha_entrada:       new Date().toISOString().split('T')[0],
+              fecha_entrada:       fechaHoyBogota(),
               costo_compra:        costo,
               cliente_origen:      nombreCliente,
               color:               color || null,
@@ -1202,7 +1203,7 @@ function PasoSerial({ sucursalKey, onExito, onDuplicadosEncontrados, coloresActi
             const caracteristicasPayload = Object.keys(caract).some((k) => caract[k]?.trim?.()) ? caract : null;
             return agregarSerial(lineaSel.id, {
               imei:                extraerImei(item).trim(),
-              fecha_entrada:       new Date().toISOString().split('T')[0],
+              fecha_entrada:       fechaHoyBogota(),
               costo_compra:        costo,
               color:               extraerColor(item) || null,
               caracteristicas:     caracteristicasPayload,

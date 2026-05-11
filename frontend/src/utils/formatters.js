@@ -6,12 +6,15 @@
 const parseFecha = (fecha) => {
   if (!fecha) return null;
   if (fecha instanceof Date) return fecha;
-  // Si ya tiene T y Z o + → es ISO válido
-  if (typeof fecha === 'string' && (fecha.includes('T') || fecha.includes('+'))) {
-    return new Date(fecha);
+  if (typeof fecha === 'string') {
+    // DATE puro "YYYY-MM-DD" → tratar como medianoche Colombia para evitar salto de día en UTC
+    if (/^\d{4}-\d{2}-\d{2}$/.test(fecha)) return new Date(fecha + 'T00:00:00-05:00');
+    // ISO con T y/o Z o offset → ya es tiempo absoluto
+    if (fecha.includes('T') || fecha.includes('+')) return new Date(fecha);
+    // Postgres TIMESTAMP sin zona: "YYYY-MM-DD HH:MM:SS.mmm" → agregar T y Z
+    return new Date(fecha.replace(' ', 'T') + 'Z');
   }
-  // Postgres TIMESTAMP sin zona: '2026-03-21 01:23:45.123' → agregar T y Z
-  return new Date(fecha.replace(' ', 'T') + 'Z');
+  return null;
 };
 
 // ─── Formatters ───────────────────────────────────────────────────────────────

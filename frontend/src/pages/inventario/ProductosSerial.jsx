@@ -10,7 +10,7 @@ import { Badge }                     from '../../components/ui/Badge';
 import { Button }                    from '../../components/ui/Button';
 import { Spinner }                   from '../../components/ui/Spinner';
 import { EmptyState }                from '../../components/ui/EmptyState';
-import { formatCOP }                 from '../../utils/formatters';
+import { formatCOP, formatFecha }     from '../../utils/formatters';
 import useCarritoStore               from '../../store/carritoStore';
 import { ModalPinEliminacion }       from './ModalPinEliminacion';
 import { ModalEditarSerial }         from './ModalEditarSerial';
@@ -90,7 +90,7 @@ function TarjetaSerial({ serial, precio, onAgregar, onEliminar, onEditar }) {
           )}
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-xs text-gray-400">Entrada: {serial.fecha_entrada}</span>
+          <span className="text-xs text-gray-400">Entrada: {formatFecha(serial.fecha_entrada)}</span>
           {serial.cliente_origen && !prestado && (
             <Badge variant="purple">Retoma: {serial.cliente_origen}</Badge>
           )}
