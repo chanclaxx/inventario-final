@@ -12,14 +12,16 @@ const validarMovimiento = [
   body('firma').optional().isString().isLength({ max: 50000 }).withMessage('Firma demasiado grande'),
   body('metodo').optional({ values: 'null' }).isString().withMessage('Método de pago inválido'),
   body('registrar_en_caja').optional().toBoolean(),
+  body('cargo_id').optional({ values: 'null' }).isInt({ min: 1 }).withMessage('cargo_id inválido'),
 ];
 
-router.get('/cruces',           requireModulo('acreedores'), ctrl.getAcreedoresCruces);
+router.get('/cruces',              requireModulo('acreedores'), ctrl.getAcreedoresCruces);
 
-router.get('/',                 requireModulo('acreedores'), ctrl.getAcreedores);
-router.get('/:id',              requireModulo('acreedores'), ctrl.getAcreedorById);
-router.post('/',                requireModulo('acreedores'), requireNivel('supervisor'),    ctrl.crearAcreedor);
-router.post('/:id/movimientos', requireModulo('acreedores'), validarMovimiento, validate,   ctrl.registrarMovimiento);
-router.delete('/:id',           requireModulo('acreedores'), requireNivel('admin_negocio'), ctrl.eliminarAcreedor);
+router.get('/',                    requireModulo('acreedores'), ctrl.getAcreedores);
+router.get('/:id',                 requireModulo('acreedores'), ctrl.getAcreedorById);
+router.get('/:id/cargos',          requireModulo('acreedores'), ctrl.getCargosAbiertos);
+router.post('/',                   requireModulo('acreedores'), requireNivel('supervisor'),    ctrl.crearAcreedor);
+router.post('/:id/movimientos',    requireModulo('acreedores'), validarMovimiento, validate,   ctrl.registrarMovimiento);
+router.delete('/:id',              requireModulo('acreedores'), requireNivel('admin_negocio'), ctrl.eliminarAcreedor);
 
 module.exports = router;

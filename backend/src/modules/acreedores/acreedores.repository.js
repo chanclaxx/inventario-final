@@ -67,6 +67,9 @@ const getMovimientos = async (negocioId, acreedorId) => {
     SELECT
       m.id, m.acreedor_id, m.usuario_id, m.tipo, m.valor,
       m.descripcion, m.firma, m.fecha, m.compra_id, m.registrar_en_caja,
+      m.cargo_id,
+      cargo.descripcion AS cargo_descripcion,
+      cargo.fecha       AS cargo_fecha,
       COALESCE(
         SUM(CASE WHEN m.tipo = 'Cargo' THEN m.valor ELSE -m.valor END)
         OVER (
@@ -82,9 +85,30 @@ const getMovimientos = async (negocioId, acreedorId) => {
         ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
       ) AS saldo_despues
     FROM movimientos_acreedor m
+    LEFT JOIN movimientos_acreedor cargo ON cargo.id = m.cargo_id
     JOIN acreedores a ON a.id = m.acreedor_id
     WHERE m.acreedor_id = $1 AND a.negocio_id = $2
     ORDER BY m.fecha, m.id
+  `, [acreedorId, negocioId]);
+  return rows;
+};
+
+const getCargosAbiertos = async (negocioId, acreedorId) => {
+  const { rows } = await pool.query(`
+    SELECT
+      m.id, m.descripcion, m.fecha, m.compra_id,
+      m.valor                               AS valor_original,
+      COALESCE(SUM(a.valor), 0)             AS total_abonado,
+      m.valor - COALESCE(SUM(a.valor), 0)   AS saldo_pendiente
+    FROM movimientos_acreedor m
+    LEFT JOIN movimientos_acreedor a ON a.cargo_id = m.id AND a.tipo = 'Abono'
+    JOIN acreedores ac ON ac.id = m.acreedor_id
+    WHERE m.acreedor_id = $1
+      AND ac.negocio_id = $2
+      AND m.tipo = 'Cargo'
+    GROUP BY m.id
+    HAVING m.valor - COALESCE(SUM(a.valor), 0) > 0
+    ORDER BY m.fecha DESC
   `, [acreedorId, negocioId]);
   return rows;
 };
@@ -99,13 +123,13 @@ const create = async (negocioId, { nombre, cedula, telefono, proveedor_id }) => 
 };
 
 const insertarMovimiento = async ({
-  acreedor_id, usuario_id, tipo, valor, descripcion, firma, compra_id, registrar_en_caja, metodo,
+  acreedor_id, usuario_id, tipo, valor, descripcion, firma, compra_id, cargo_id, registrar_en_caja, metodo,
 }) => {
   const { rows } = await pool.query(`
-    INSERT INTO movimientos_acreedor(acreedor_id, usuario_id, tipo, valor, descripcion, firma, compra_id, registrar_en_caja, metodo)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+    INSERT INTO movimientos_acreedor(acreedor_id, usuario_id, tipo, valor, descripcion, firma, compra_id, cargo_id, registrar_en_caja, metodo)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
     RETURNING *
-  `, [acreedor_id, usuario_id, tipo, valor, descripcion, firma ?? null, compra_id || null, registrar_en_caja !== false, metodo || null]);
+  `, [acreedor_id, usuario_id, tipo, valor, descripcion, firma ?? null, compra_id || null, cargo_id || null, registrar_en_caja !== false, metodo || null]);
   return rows[0];
 };
 
@@ -157,4 +181,4 @@ const eliminarSeguro = async (negocioId, acreedorId) => {
   }
 };
 
-module.exports = { findAll, findByCruces, findById, getMovimientos, create, insertarMovimiento, eliminarSeguro };
+module.exports = { findAll, findByCruces, findById, getMovimientos, getCargosAbiertos, create, insertarMovimiento, eliminarSeguro };

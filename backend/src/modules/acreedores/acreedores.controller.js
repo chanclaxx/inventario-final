@@ -39,6 +39,13 @@ const registrarMovimiento = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+const getCargosAbiertos = async (req, res, next) => {
+  try {
+    const data = await service.getCargosAbiertos(req.user.negocio_id, req.params.id);
+    res.json({ ok: true, data });
+  } catch (err) { next(err); }
+};
+
 const eliminarAcreedor = async (req, res, next) => {
   try {
     await service.eliminarAcreedor(req.user.negocio_id, req.params.id);
@@ -48,5 +55,5 @@ const eliminarAcreedor = async (req, res, next) => {
 
 module.exports = {
   getAcreedores, getAcreedoresCruces, getAcreedorById,
-  crearAcreedor, registrarMovimiento, eliminarAcreedor,
+  crearAcreedor, registrarMovimiento, getCargosAbiertos, eliminarAcreedor,
 };

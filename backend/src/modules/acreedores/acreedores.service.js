@@ -36,6 +36,12 @@ const registrarMovimiento = async (negocioId, acreedorId, datos) => {
   return repo.insertarMovimiento({ ...datos, acreedor_id: acreedorId });
 };
 
+const getCargosAbiertos = async (negocioId, acreedorId) => {
+  const acreedor = await repo.findById(negocioId, acreedorId);
+  if (!acreedor) throw { status: 404, message: 'Acreedor no encontrado' };
+  return repo.getCargosAbiertos(negocioId, acreedorId);
+};
+
 const eliminarAcreedor = async (negocioId, acreedorId) => {
   try {
     await repo.eliminarSeguro(negocioId, acreedorId);
@@ -52,5 +58,5 @@ const eliminarAcreedor = async (negocioId, acreedorId) => {
 
 module.exports = {
   getAcreedores, getAcreedoresCruces, getAcreedorById,
-  crearAcreedor, registrarMovimiento, eliminarAcreedor,
+  crearAcreedor, registrarMovimiento, getCargosAbiertos, eliminarAcreedor,
 };
