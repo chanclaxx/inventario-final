@@ -1643,13 +1643,19 @@ ALTER SEQUENCE public.proveedores_id_seq OWNED BY public.proveedores.id;
 
 CREATE TABLE public.retomas (
     id integer NOT NULL,
-    factura_id integer NOT NULL,
+    factura_id integer,
+    prestamo_id integer,
     descripcion text NOT NULL,
     valor_retoma numeric(12,2) NOT NULL,
     ingreso_inventario boolean DEFAULT false NOT NULL,
     nombre_producto character varying(150),
     imei character varying(50),
-    cantidad_retoma integer DEFAULT 1 NOT NULL
+    cantidad_retoma integer DEFAULT 1 NOT NULL,
+    tipo_retoma character varying(20) DEFAULT 'serial'::character varying,
+    producto_serial_id integer,
+    producto_cantidad_id integer,
+    costo_retoma numeric(12,2) DEFAULT 0,
+    color character varying(50)
 );
 
 

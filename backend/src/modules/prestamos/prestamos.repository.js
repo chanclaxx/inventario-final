@@ -266,6 +266,67 @@ const retornarSerialConOrigen = async (client, imei, sucursalId, clienteOrigen) 
   `, [imei, sucursalId, clienteOrigen]);
 };
 
+// ── Retoma: insertar registro en tabla retomas ────────────────────────────────
+const insertarRetoma = async (client, {
+  prestamo_id, nombre_producto, imei, valor_retoma, cantidad_retoma,
+  descripcion, tipo_retoma, producto_serial_id, producto_cantidad_id,
+  costo_retoma, color, ingreso_inventario,
+}) => {
+  const { rows } = await client.query(`
+    INSERT INTO retomas(
+      prestamo_id, nombre_producto, imei, valor_retoma, cantidad_retoma,
+      descripcion, ingreso_inventario, tipo_retoma,
+      producto_serial_id, producto_cantidad_id, costo_retoma, color
+    )
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+    RETURNING *
+  `, [
+    prestamo_id,
+    nombre_producto        || null,
+    imei                   || null,
+    valor_retoma,
+    cantidad_retoma        || 1,
+    descripcion            || '',
+    ingreso_inventario     ?? true,
+    tipo_retoma            || 'serial',
+    producto_serial_id     || null,
+    producto_cantidad_id   || null,
+    costo_retoma           || 0,
+    color                  || null,
+  ]);
+  return rows[0];
+};
+
+// ── Retoma serial: inserta el IMEI al inventario ──────────────────────────────
+const insertarSerialParaRetoma = async (client, {
+  producto_id, imei, costo_compra, color, cliente_origen,
+}) => {
+  await client.query(`
+    INSERT INTO seriales(producto_id, imei, costo_compra, color, cliente_origen, prestado, vendido)
+    VALUES ($1, $2, $3, $4, $5, false, false)
+  `, [producto_id, imei, costo_compra || 0, color || null, cliente_origen || null]);
+};
+
+// ── Retoma cantidad: incrementa stock e inserta historial (dentro de tx) ──────
+const ajustarStockConHistorialEnTx = async (client, {
+  producto_id, sucursal_id, cantidad, costo_unitario, cliente_origen, tipo,
+}) => {
+  await client.query(
+    'UPDATE productos_cantidad SET stock = stock + $1 WHERE id = $2',
+    [cantidad, producto_id],
+  );
+  await client.query(`
+    INSERT INTO historial_stock_cantidad
+      (producto_id, sucursal_id, cantidad, costo_unitario, tipo, cliente_origen)
+    VALUES ($1, $2, $3, $4, $5, $6)
+  `, [
+    producto_id, sucursal_id, cantidad,
+    costo_unitario ?? null,
+    tipo           || 'retoma',
+    cliente_origen || null,
+  ]);
+};
+
 // ── Saldo a favor ─────────────────────────────────────────────────────────────
 // executor puede ser pool o client (ambos tienen .query())
 
@@ -296,4 +357,5 @@ module.exports = {
   salarSerial, findAbonosPorPrestamos, findActivosPorCliente, findActivosPorPrestatario,
   getSaldoAFavorPersona, setearSaldoAFavorPersona,
   retornarSerialConOrigen,
+  insertarRetoma, insertarSerialParaRetoma, ajustarStockConHistorialEnTx,
 };

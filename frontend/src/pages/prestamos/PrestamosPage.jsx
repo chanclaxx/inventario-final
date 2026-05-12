@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { buscarPrestamos as buscarPrestamosApi } from '../../api/busqueda.api';
 import { exportarPrestamosExcel } from '../../utils/exportarPrestamosExcel';
@@ -29,7 +29,6 @@ import useExportarPdfPrestamos                  from '../../hooks/useExportarPdf
 import api                                      from '../../api/axios.config';
 import {
   getProductosSerial, getProductosCantidad,
-  verificarImei as verificarImeiApi,
 }                                               from '../../api/productos.api';
 import {
   Handshake, CreditCard, Bike, Plus, CheckCircle,
@@ -377,6 +376,8 @@ function ModalSaldoAFavor({ nombre, tipo, personaId, montoActual, onClose }) {
 }
 
 // ─── Modal Intercambio ────────────────────────────────────────────────────────
+// El prestatario paga con un producto en lugar de efectivo.
+// El producto entra al inventario como retoma y su valor se aplica al préstamo.
 
 const IMEI_MIN = 8;
 
@@ -386,26 +387,22 @@ function normalizarProductos(data) {
   return [];
 }
 
-function ModalIntercambio({ prestamo, onClose }) {
+function ModalIntercambio({ prestamo, onClose, onSaldado }) {
   const queryClient = useQueryClient();
 
-  // Retoma (dispositivo que devuelve)
-  const [valorRetoma,       setValorRetoma]       = useState('');
-  const [ingresoInventario, setIngresoInventario] = useState(true);
+  const [tipoRetoma,          setTipoRetoma]          = useState('serial');
+  const [imeiRetoma,          setImeiRetoma]           = useState('');
+  const [busquedaSerial,      setBusquedaSerial]       = useState('');
+  const [productoSerialSel,   setProductoSerialSel]    = useState(null);
+  const [colorRetoma,         setColorRetoma]          = useState('');
+  const [busquedaCantidad,    setBusquedaCantidad]     = useState('');
+  const [productoCantidadSel, setProductoCantidadSel] = useState(null);
+  const [cantidadRetoma,      setCantidadRetoma]       = useState('1');
+  const [valorRetoma,         setValorRetoma]          = useState('');
+  const [costoRetoma,         setCostoRetoma]          = useState('');
+  const [ingresoInventario,   setIngresoInventario]    = useState(true);
+  const [error,               setError]                = useState('');
 
-  // Nuevo dispositivo
-  const [tipoNuevo,             setTipoNuevo]             = useState('serial');
-  const [imeiNuevo,             setImeiNuevo]             = useState('');
-  const [imeiEstado,            setImeiEstado]            = useState({ tipo: 'idle' });
-  const [busquedaSerial,        setBusquedaSerial]        = useState('');
-  const [productoSerialSel,     setProductoSerialSel]     = useState(null);
-  const [busquedaCantidad,      setBusquedaCantidad]      = useState('');
-  const [productoCantidadSel,   setProductoCantidadSel]   = useState(null);
-  const [cantidadNueva,         setCantidadNueva]         = useState('1');
-  const [valorNuevo,            setValorNuevo]            = useState('');
-  const [error,                 setError]                 = useState('');
-
-  // Catálogos de productos
   const { data: rawSerial   } = useQuery({
     queryKey: ['productos-serial'],
     queryFn:  () => getProductosSerial().then((r) => r.data.data),
@@ -424,212 +421,152 @@ function ModalIntercambio({ prestamo, onClose }) {
     p.nombre.toLowerCase().includes(busquedaCantidad.toLowerCase())
   );
 
-  // Verificar IMEI del nuevo dispositivo
-  const verificarImei = useCallback(async (imei) => {
-    const limpio = imei?.trim() ?? '';
-    if (limpio.length < IMEI_MIN) { setImeiEstado({ tipo: 'idle' }); return; }
-    setImeiEstado({ tipo: 'cargando' });
-    try {
-      const { data } = await verificarImeiApi(limpio);
-      if (data.data.existe) {
-        const serial = data.data.serial;
-        setImeiEstado({ tipo: 'encontrado', serial });
-        if (serial.producto_id && !productoSerialSel) {
-          setProductoSerialSel({ id: serial.producto_id, nombre: serial.producto_nombre || '' });
-          setBusquedaSerial(serial.producto_nombre || '');
-        }
-      } else {
-        setImeiEstado({ tipo: 'libre' });
-      }
-    } catch {
-      setImeiEstado({ tipo: 'error' });
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    if (tipoNuevo !== 'serial') return;
-    const t = setTimeout(() => verificarImei(imeiNuevo), 500);
-    return () => clearTimeout(t);
-  }, [imeiNuevo, tipoNuevo, verificarImei]);
-
-  // Resumen
-  const retoma = Number(valorRetoma) || 0;
-  const vNuevo = Number(valorNuevo)  || 0;
-  const diff   = vNuevo - retoma;
-
-  const resetNuevo = () => {
-    setImeiNuevo(''); setImeiEstado({ tipo: 'idle' });
-    setBusquedaSerial(''); setProductoSerialSel(null);
-    setBusquedaCantidad(''); setProductoCantidadSel(null);
-    setCantidadNueva('1');
+  const resetCamposProducto = () => {
+    setImeiRetoma(''); setBusquedaSerial(''); setProductoSerialSel(null); setColorRetoma('');
+    setBusquedaCantidad(''); setProductoCantidadSel(null); setCantidadRetoma('1');
   };
+
+  const saldoPendiente = Number(prestamo.valor_prestamo) - Number(prestamo.total_abonado);
+  const retoma         = Number(valorRetoma) || 0;
+  const diff           = saldoPendiente - retoma; // positivo = queda deuda, negativo = saldo a favor
 
   const mutation = useMutation({
     mutationFn: () => intercambiarPrestamoApi(prestamo.id, {
-      tipo_nuevo:                 tipoNuevo,
-      imei_nuevo:                 tipoNuevo === 'serial'   ? (imeiNuevo.trim() || null) : null,
-      producto_serial_id_nuevo:   tipoNuevo === 'serial'   ? (productoSerialSel?.id  || null) : null,
-      producto_cantidad_id_nuevo: tipoNuevo === 'cantidad' ? (productoCantidadSel?.id || null) : null,
-      cantidad_nueva:             tipoNuevo === 'cantidad' ? Number(cantidadNueva || 1) : 1,
-      valor_prestamo_nuevo:       vNuevo,
-      valor_retoma:               retoma,
-      ingreso_inventario:         ingresoInventario,
+      tipo_retoma:           tipoRetoma,
+      imei_retoma:           tipoRetoma === 'serial'   ? (imeiRetoma.trim() || null) : null,
+      producto_serial_id:    tipoRetoma === 'serial'   ? (productoSerialSel?.id  || null) : null,
+      color_retoma:          tipoRetoma === 'serial'   ? (colorRetoma.trim() || null) : null,
+      producto_cantidad_id:  tipoRetoma === 'cantidad' ? (productoCantidadSel?.id || null) : null,
+      cantidad_retoma:       tipoRetoma === 'cantidad' ? Number(cantidadRetoma || 1) : 1,
+      valor_retoma:          retoma,
+      costo_retoma:          Number(costoRetoma) || 0,
+      ingreso_inventario:    ingresoInventario,
     }),
-    onSuccess: () => {
+    onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ['prestamos'],    exact: false });
-      queryClient.invalidateQueries({ queryKey: ['prestatarios'], exact: false });
-      onClose();
+      queryClient.invalidateQueries({ queryKey: ['inventario'],   exact: false });
+      const data = res.data?.data;
+      if (data?.saldado && data?.factura_id && onSaldado) {
+        onSaldado(data.factura_id, prestamo);
+      } else {
+        onClose();
+      }
     },
     onError: (err) => setError(err.response?.data?.error || 'Error al registrar el intercambio'),
   });
 
   const handleConfirmar = () => {
     setError('');
-    if (!retoma || retoma <= 0) return setError('Ingresa el valor de retoma del dispositivo actual');
-    if (!vNuevo || vNuevo <= 0) return setError('Ingresa el valor del nuevo préstamo');
-    if (tipoNuevo === 'serial'   && !productoSerialSel)   return setError('Selecciona la línea de producto del nuevo equipo');
-    if (tipoNuevo === 'cantidad' && !productoCantidadSel) return setError('Selecciona el producto del nuevo equipo');
+    if (!retoma || retoma <= 0) return setError('Ingresa el valor de la retoma');
+    if (ingresoInventario) {
+      if (tipoRetoma === 'serial' && !productoSerialSel)
+        return setError('Selecciona la línea de producto del equipo retomado');
+      if (tipoRetoma === 'serial' && !imeiRetoma.trim())
+        return setError('Ingresa el IMEI del equipo retomado');
+      if (tipoRetoma === 'cantidad' && !productoCantidadSel)
+        return setError('Selecciona el producto retomado');
+    }
     mutation.mutate();
   };
 
-  const saldoPendienteOrig = Number(prestamo.valor_prestamo) - Number(prestamo.total_abonado);
-
   return (
-    <Modal open onClose={onClose} title="Intercambio de dispositivo" size="md">
+    <Modal open onClose={onClose} title="Intercambio — pago con producto" size="md">
       <div className="flex flex-col gap-4">
 
-        {/* Dispositivo que se retoma */}
+        {/* Préstamo actual */}
         <div className="bg-gray-50 rounded-xl p-3 flex flex-col gap-1">
-          <p className="text-xs text-gray-400">Dispositivo que se retoma</p>
+          <p className="text-xs text-gray-400">Préstamo de {prestamo.prestatario}</p>
           <p className="text-sm font-semibold text-gray-800">{prestamo.nombre_producto}</p>
           {prestamo.imei && <p className="text-xs text-gray-400 font-mono">{prestamo.imei}</p>}
           <div className="flex justify-between mt-1">
-            <span className="text-xs text-gray-400">Saldo pendiente actual</span>
-            <span className="text-sm font-bold text-red-500">{formatCOP(saldoPendienteOrig)}</span>
+            <span className="text-xs text-gray-400">Saldo pendiente</span>
+            <span className="text-sm font-bold text-red-500">{formatCOP(saldoPendiente)}</span>
           </div>
         </div>
 
-        {/* Sección retoma */}
+        {/* Producto que entrega */}
         <div className="flex flex-col gap-3 p-3 bg-purple-50 rounded-xl border border-purple-100">
-          <p className="text-xs font-semibold text-purple-700 uppercase tracking-wide">Retoma</p>
-          <div className="flex flex-col gap-1">
-            <label className="text-xs font-medium text-gray-600">Valor de retoma</label>
-            <InputMoneda value={valorRetoma} onChange={setValorRetoma} placeholder="0" autoFocus
-              className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-sm
-                focus:outline-none focus:ring-2 focus:ring-purple-400 transition-all" />
-          </div>
-          <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
-            <input type="checkbox" checked={ingresoInventario}
-              onChange={(e) => setIngresoInventario(e.target.checked)}
-              className="rounded accent-purple-600" />
-            Ingresa al inventario
-          </label>
-        </div>
+          <p className="text-xs font-semibold text-purple-700 uppercase tracking-wide">Producto que entrega</p>
 
-        {/* Sección nuevo dispositivo */}
-        <div className="flex flex-col gap-3 p-3 bg-blue-50 rounded-xl border border-blue-100">
-          <p className="text-xs font-semibold text-blue-700 uppercase tracking-wide">Nuevo dispositivo a prestar</p>
-
-          {/* Tipo */}
+          {/* Toggle serial / cantidad */}
           <div className="flex gap-2">
             {[
               { id: 'serial',   label: 'Con serial / IMEI', Icn: Package     },
               { id: 'cantidad', label: 'Por cantidad',       Icn: ShoppingBag },
             ].map((opt) => {
-              const TipoIcn = opt.Icn;
+              const Icn = opt.Icn;
               return (
-                <button key={opt.id} onClick={() => { setTipoNuevo(opt.id); resetNuevo(); }}
+                <button key={opt.id} onClick={() => { setTipoRetoma(opt.id); resetCamposProducto(); }}
                   className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl
                     text-xs font-medium border transition-all
-                    ${tipoNuevo === opt.id
-                      ? 'bg-blue-100 border-blue-400 text-blue-800'
+                    ${tipoRetoma === opt.id
+                      ? 'bg-purple-100 border-purple-400 text-purple-800'
                       : 'bg-white border-gray-200 text-gray-500 hover:border-gray-300'}`}>
-                  <TipoIcn size={13} /> {opt.label}
+                  <Icn size={13} /> {opt.label}
                 </button>
               );
             })}
           </div>
 
-          {/* Serial */}
-          {tipoNuevo === 'serial' && (
+          {/* Campos serial */}
+          {tipoRetoma === 'serial' && (
             <div className="flex flex-col gap-2">
-              {/* IMEI */}
               <div className="flex flex-col gap-1">
-                <label className="text-xs font-medium text-gray-600">IMEI del nuevo equipo (opcional)</label>
-                <div className="relative">
-                  <input type="text" placeholder="Ej: 356789012345678" value={imeiNuevo}
-                    onChange={(e) => {
-                      setImeiNuevo(e.target.value);
-                      setProductoSerialSel(null);
-                      setBusquedaSerial('');
-                    }}
-                    className="w-full px-3 py-2 pr-9 bg-white border border-gray-200 rounded-xl
-                      text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 transition-all" />
-                  <span className="absolute right-2.5 top-1/2 -translate-y-1/2">
-                    {imeiEstado.tipo === 'cargando'   && <Loader2     size={14} className="text-gray-400 animate-spin" />}
-                    {imeiEstado.tipo === 'libre'       && <CheckCircle size={14} className="text-green-500" />}
-                    {imeiEstado.tipo === 'encontrado'  && <CheckCircle size={14} className="text-amber-500" />}
-                    {imeiEstado.tipo === 'error'       && <XCircle     size={14} className="text-red-400" />}
-                  </span>
-                </div>
-                {imeiEstado.tipo === 'encontrado' && (
-                  <p className="text-xs text-amber-600">
-                    {imeiEstado.serial?.producto_nombre} —{' '}
-                    {imeiEstado.serial?.vendido ? 'vendido' : imeiEstado.serial?.prestado ? 'prestado' : 'disponible'}
-                  </p>
-                )}
-                {imeiEstado.tipo === 'libre' && (
-                  <p className="text-xs text-green-600">IMEI disponible en el sistema</p>
-                )}
+                <label className="text-xs font-medium text-gray-600">IMEI del equipo retomado {ingresoInventario ? '*' : ''}</label>
+                <input type="text" placeholder="Ej: 356789012345678" value={imeiRetoma}
+                  onChange={(e) => setImeiRetoma(e.target.value)}
+                  className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl
+                    text-sm focus:outline-none focus:ring-2 focus:ring-purple-400 transition-all" />
               </div>
-
-              {/* Línea de producto */}
               <div className="flex flex-col gap-1">
-                <label className="text-xs font-medium text-gray-600">Línea de producto *</label>
+                <label className="text-xs font-medium text-gray-600">Línea de producto {ingresoInventario ? '*' : ''}</label>
                 <input type="text" placeholder="Buscar modelo..." value={busquedaSerial}
                   onChange={(e) => { setBusquedaSerial(e.target.value); setProductoSerialSel(null); }}
                   className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl
-                    text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 transition-all" />
+                    text-sm focus:outline-none focus:ring-2 focus:ring-purple-400 transition-all" />
                 {busquedaSerial.length > 0 && !productoSerialSel && (
-                  <div className="flex flex-col gap-0 max-h-28 overflow-y-auto rounded-xl border border-gray-100 bg-white">
+                  <div className="flex flex-col max-h-28 overflow-y-auto rounded-xl border border-gray-100 bg-white">
                     {filtradosSerial.length === 0
                       ? <p className="text-xs text-gray-400 px-3 py-2">Sin resultados</p>
                       : filtradosSerial.map((p) => (
                           <button key={p.id}
                             onClick={() => { setProductoSerialSel(p); setBusquedaSerial(p.nombre); }}
-                            className="text-left px-3 py-2 text-sm hover:bg-blue-50 text-gray-700 border-b border-gray-50 last:border-0">
+                            className="text-left px-3 py-2 text-sm hover:bg-purple-50 text-gray-700 border-b border-gray-50 last:border-0">
                             {p.nombre}
-                            <span className="text-xs text-gray-400 ml-2">{p.disponibles} disp.</span>
                           </button>
                         ))
                     }
                   </div>
                 )}
-                {productoSerialSel && (
-                  <p className="text-xs text-blue-600">✓ {productoSerialSel.nombre}</p>
-                )}
+                {productoSerialSel && <p className="text-xs text-purple-600">✓ {productoSerialSel.nombre}</p>}
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-gray-600">Color (opcional)</label>
+                <input type="text" placeholder="Ej: Negro" value={colorRetoma}
+                  onChange={(e) => setColorRetoma(e.target.value)}
+                  className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl
+                    text-sm focus:outline-none focus:ring-2 focus:ring-purple-400 transition-all" />
               </div>
             </div>
           )}
 
-          {/* Cantidad */}
-          {tipoNuevo === 'cantidad' && (
+          {/* Campos cantidad */}
+          {tipoRetoma === 'cantidad' && (
             <div className="flex flex-col gap-2">
               <div className="flex flex-col gap-1">
-                <label className="text-xs font-medium text-gray-600">Producto *</label>
+                <label className="text-xs font-medium text-gray-600">Producto {ingresoInventario ? '*' : ''}</label>
                 <input type="text" placeholder="Buscar producto..." value={busquedaCantidad}
                   onChange={(e) => { setBusquedaCantidad(e.target.value); setProductoCantidadSel(null); }}
                   className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl
-                    text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 transition-all" />
+                    text-sm focus:outline-none focus:ring-2 focus:ring-purple-400 transition-all" />
                 {busquedaCantidad.length > 0 && !productoCantidadSel && (
-                  <div className="flex flex-col gap-0 max-h-28 overflow-y-auto rounded-xl border border-gray-100 bg-white">
+                  <div className="flex flex-col max-h-28 overflow-y-auto rounded-xl border border-gray-100 bg-white">
                     {filtradosCantidad.length === 0
                       ? <p className="text-xs text-gray-400 px-3 py-2">Sin resultados</p>
                       : filtradosCantidad.map((p) => (
                           <button key={p.id}
                             onClick={() => { setProductoCantidadSel(p); setBusquedaCantidad(p.nombre); }}
-                            className="text-left px-3 py-2 text-sm hover:bg-blue-50 text-gray-700 border-b border-gray-50 last:border-0">
+                            className="text-left px-3 py-2 text-sm hover:bg-purple-50 text-gray-700 border-b border-gray-50 last:border-0">
                             {p.nombre}
                             <span className="text-xs text-gray-400 ml-2">Stock: {p.stock}</span>
                           </button>
@@ -637,38 +574,60 @@ function ModalIntercambio({ prestamo, onClose }) {
                     }
                   </div>
                 )}
-                {productoCantidadSel && (
-                  <p className="text-xs text-blue-600">✓ {productoCantidadSel.nombre}</p>
-                )}
+                {productoCantidadSel && <p className="text-xs text-purple-600">✓ {productoCantidadSel.nombre}</p>}
               </div>
-              <Input label="Cantidad" type="number" min="1" placeholder="1"
-                value={cantidadNueva} onChange={(e) => setCantidadNueva(e.target.value)} />
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-gray-600">Cantidad</label>
+                <input type="number" min="1" placeholder="1" value={cantidadRetoma}
+                  onChange={(e) => setCantidadRetoma(e.target.value)}
+                  className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl
+                    text-sm focus:outline-none focus:ring-2 focus:ring-purple-400 transition-all" />
+              </div>
             </div>
           )}
 
-          {/* Valor del nuevo préstamo */}
-          <div className="flex flex-col gap-1">
-            <label className="text-xs font-medium text-gray-600">Valor del préstamo *</label>
-            <InputMoneda value={valorNuevo} onChange={setValorNuevo} placeholder="0"
-              className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-sm
-                focus:outline-none focus:ring-2 focus:ring-blue-400 transition-all" />
-          </div>
+          {/* Costo de la retoma */}
+          {ingresoInventario && (
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-gray-600">Costo de la retoma (opcional)</label>
+              <InputMoneda value={costoRetoma} onChange={setCostoRetoma} placeholder="0"
+                className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-sm
+                  focus:outline-none focus:ring-2 focus:ring-purple-400 transition-all" />
+            </div>
+          )}
+
+          {/* Toggle ingreso inventario */}
+          <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+            <input type="checkbox" checked={ingresoInventario}
+              onChange={(e) => setIngresoInventario(e.target.checked)}
+              className="rounded accent-purple-600" />
+            Ingresar al inventario
+          </label>
         </div>
 
-        {/* Resumen dinámico */}
-        {retoma > 0 && vNuevo > 0 && (
+        {/* Valor de la retoma */}
+        <div className="flex flex-col gap-1">
+          <label className="text-sm font-medium text-gray-700">Valor de la retoma *</label>
+          <InputMoneda value={valorRetoma} onChange={setValorRetoma} placeholder="0" autoFocus
+            className="w-full px-3 py-2 bg-gray-100 rounded-xl text-sm
+              focus:outline-none focus:ring-2 focus:ring-purple-500 focus:bg-white transition-all" />
+          <p className="text-xs text-gray-400">Este monto se aplica como abono al préstamo</p>
+        </div>
+
+        {/* Resumen */}
+        {retoma > 0 && (
           <div className="bg-gray-50 rounded-xl p-3 flex flex-col gap-1.5">
             <div className="flex justify-between text-xs text-gray-500">
-              <span>Retoma:</span>
-              <span className="font-medium text-gray-700">{formatCOP(retoma)}</span>
+              <span>Saldo pendiente:</span>
+              <span className="font-medium text-gray-700">{formatCOP(saldoPendiente)}</span>
             </div>
             <div className="flex justify-between text-xs text-gray-500">
-              <span>Nuevo préstamo:</span>
-              <span className="font-medium text-gray-700">{formatCOP(vNuevo)}</span>
+              <span>Retoma aplicada:</span>
+              <span className="font-medium text-purple-700">− {formatCOP(Math.min(retoma, saldoPendiente))}</span>
             </div>
             <div className={`flex justify-between text-sm font-semibold mt-1 pt-1 border-t border-gray-200
               ${diff > 0 ? 'text-red-600' : diff < 0 ? 'text-emerald-600' : 'text-green-600'}`}>
-              <span>{diff > 0 ? 'Saldo pendiente' : diff < 0 ? 'Saldo a favor' : 'Resultado'}</span>
+              <span>{diff > 0 ? 'Queda pendiente' : diff < 0 ? 'Saldo a favor' : 'Resultado'}</span>
               <span>
                 {diff > 0 ? formatCOP(diff) : diff < 0 ? formatCOP(Math.abs(diff)) : 'Préstamo saldado ✓'}
               </span>
@@ -681,7 +640,7 @@ function ModalIntercambio({ prestamo, onClose }) {
         <div className="flex gap-2">
           <Button variant="secondary" className="flex-1" onClick={onClose}>Cancelar</Button>
           <Button className="flex-1" loading={mutation.isPending} onClick={handleConfirmar}>
-            <ArrowLeftRight size={14} /> Confirmar intercambio
+            <ArrowLeftRight size={14} /> Registrar intercambio
           </Button>
         </div>
       </div>
@@ -851,11 +810,9 @@ function TarjetaPrestamoDetalle({ prestamo, onAbonar, onDevolver, onImprimir, on
           <Button size="sm" className="flex-1" onClick={() => onAbonar(prestamo)}>
             <Plus size={14} /> Abonar
           </Button>
-          {prestamo.imei && (
-            <Button size="sm" variant="secondary" onClick={() => onIntercambiar(prestamo)}>
-              <ArrowLeftRight size={14} /> Intercambio
-            </Button>
-          )}
+          <Button size="sm" variant="secondary" onClick={() => onIntercambiar(prestamo)}>
+            <ArrowLeftRight size={14} /> Intercambio
+          </Button>
           <Button size="sm" variant="secondary" onClick={() => onDevolver(prestamo)}>
             <CheckCircle size={14} /> Devuelto
           </Button>
@@ -1839,6 +1796,11 @@ export default function PrestamosPage() {
         <ModalIntercambio
           prestamo={prestamoIntercambio}
           onClose={() => setPrestamoIntercambio(null)}
+          onSaldado={(fid, p) => {
+            setPrestamoIntercambio(null);
+            setSaldadoFacturaId(fid);
+            setSaldadoPrestamo(p);
+          }}
         />
       )}
     </div>
