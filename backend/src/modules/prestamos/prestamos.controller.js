@@ -170,6 +170,26 @@ const registrarSaldoAFavor = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+const intercambiarPrestamo = async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const { imei_nuevo, nombre_producto_nuevo, valor_prestamo_nuevo, valor_retoma } = req.body;
+
+    const data = await service.intercambiarPrestamo(
+      req.user.negocio_id,
+      id,
+      {
+        usuario_id:           req.user.id,
+        imei_nuevo:           imei_nuevo           || null,
+        nombre_producto_nuevo,
+        valor_prestamo_nuevo: Number(valor_prestamo_nuevo),
+        valor_retoma:         Number(valor_retoma),
+      },
+    );
+    res.status(201).json({ ok: true, data, message: 'Intercambio registrado correctamente' });
+  } catch (err) { next(err); }
+};
+
 module.exports = {
   getPrestamos, getPrestamoById,
   crearPrestamo, crearPrestamos,
@@ -177,4 +197,5 @@ module.exports = {
   devolverPrestamo, devolverParcial,
   exportarPdfPorPersona, exportarPdfPrestamoIndividual,
   registrarSaldoAFavor,
+  intercambiarPrestamo,
 };

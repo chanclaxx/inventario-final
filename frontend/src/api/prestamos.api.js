@@ -11,3 +11,5 @@ export const devolverParcialPrestamo = (id, cantidad_devuelta) =>
   api.patch(`/prestamos/${id}/devolver-parcial`, { cantidad_devuelta });
 export const registrarSaldoAFavor = (tipo, id, monto) =>
   api.patch(`/prestamos/personas/${tipo}/${id}/saldo-a-favor`, { monto });
+export const intercambiarPrestamo = (id, data) =>
+  api.post(`/prestamos/${id}/intercambio`, data);

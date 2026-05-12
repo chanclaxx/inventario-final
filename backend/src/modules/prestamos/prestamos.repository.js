@@ -252,6 +252,20 @@ const findAbonosPorPrestamos = async (prestamoIds) => {
   return rows;
 };
 
+// ── Retoma con origen ─────────────────────────────────────────────────────────
+// Libera el serial prestado y registra quién lo entregó como retoma.
+const retornarSerialConOrigen = async (client, imei, sucursalId, clienteOrigen) => {
+  await client.query(`
+    UPDATE seriales s
+    SET prestado       = false,
+        cliente_origen = $3
+    FROM productos_serial ps
+    WHERE s.imei         = $1
+      AND ps.id          = s.producto_id
+      AND ps.sucursal_id = $2
+  `, [imei, sucursalId, clienteOrigen]);
+};
+
 // ── Saldo a favor ─────────────────────────────────────────────────────────────
 // executor puede ser pool o client (ambos tienen .query())
 
@@ -281,4 +295,5 @@ module.exports = {
   ajustarStock, actualizarCantidadYValor,
   salarSerial, findAbonosPorPrestamos, findActivosPorCliente, findActivosPorPrestatario,
   getSaldoAFavorPersona, setearSaldoAFavorPersona,
+  retornarSerialConOrigen,
 };

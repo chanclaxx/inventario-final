@@ -27,6 +27,12 @@ const validarSaldoAFavor = [
   body('monto').isFloat({ min: 0 }).withMessage('El monto debe ser mayor o igual a 0'),
 ];
 
+const validarIntercambio = [
+  body('nombre_producto_nuevo').notEmpty().withMessage('Se requiere el nombre del nuevo producto'),
+  body('valor_prestamo_nuevo').isFloat({ gt: 0 }).withMessage('El valor del nuevo préstamo debe ser mayor a 0'),
+  body('valor_retoma').isFloat({ gt: 0 }).withMessage('El valor de retoma debe ser mayor a 0'),
+];
+
 router.get('/',       requireModulo('prestamos'), ctrl.getPrestamos);
 router.post('/',      requireModulo('prestamos'), validarPrestamo,  validate, ctrl.crearPrestamo);
 router.post('/batch', requireModulo('prestamos'), validarPrestamos, validate, ctrl.crearPrestamos);
@@ -38,6 +44,7 @@ router.get('/:id/pdf', requireModulo('prestamos'), ctrl.exportarPdfPrestamoIndiv
 
 router.get('/:id',                    requireModulo('prestamos'), ctrl.getPrestamoById);
 router.post('/:id/abonos',            requireModulo('prestamos'), validarAbono,             validate, ctrl.registrarAbono);
+router.post('/:id/intercambio',       requireModulo('prestamos'), validarIntercambio,        validate, ctrl.intercambiarPrestamo);
 router.patch('/:id/devolver',         requireModulo('prestamos'),                                     ctrl.devolverPrestamo);
 router.patch('/:id/devolver-parcial', requireModulo('prestamos'), validarDevolucionParcial, validate, ctrl.devolverParcial);
 

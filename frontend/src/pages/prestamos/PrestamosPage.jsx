@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { buscarPrestamos as buscarPrestamosApi } from '../../api/busqueda.api';
 import { exportarPrestamosExcel } from '../../utils/exportarPrestamosExcel';
-import { getPrestamos, registrarAbonoPrestamo, devolverPrestamo, devolverParcialPrestamo, registrarSaldoAFavor as registrarSaldoAFavorApi } from '../../api/prestamos.api';
+import { getPrestamos, registrarAbonoPrestamo, devolverPrestamo, devolverParcialPrestamo, registrarSaldoAFavor as registrarSaldoAFavorApi, intercambiarPrestamo as intercambiarPrestamoApi } from '../../api/prestamos.api';
 import {
   getDomiciliarios,
   getEntregas,
@@ -30,7 +30,7 @@ import api                                      from '../../api/axios.config';
 import {
   Handshake, CreditCard, Bike, Plus, CheckCircle,
   ChevronDown, ChevronUp, ChevronLeft, ChevronRight,
-  Users, User, AlertTriangle, FileDown, Loader2, Printer, Search, Wallet,
+  Users, User, AlertTriangle, FileDown, Loader2, Printer, Search, Wallet, ArrowLeftRight,
 } from 'lucide-react';
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
@@ -371,6 +371,121 @@ function ModalSaldoAFavor({ nombre, tipo, personaId, montoActual, onClose }) {
   );
 }
 
+// ─── Modal Intercambio ────────────────────────────────────────────────────────
+
+function ModalIntercambio({ prestamo, onClose }) {
+  const queryClient = useQueryClient();
+  const [valorRetoma,  setValorRetoma]  = useState('');
+  const [imeiNuevo,    setImeiNuevo]    = useState('');
+  const [nombreNuevo,  setNombreNuevo]  = useState('');
+  const [valorNuevo,   setValorNuevo]   = useState('');
+  const [error,        setError]        = useState('');
+
+  const retoma = Number(valorRetoma) || 0;
+  const vNuevo = Number(valorNuevo)  || 0;
+  const diff   = vNuevo - retoma;
+
+  const mutation = useMutation({
+    mutationFn: () => intercambiarPrestamoApi(prestamo.id, {
+      imei_nuevo:            imeiNuevo.trim()   || null,
+      nombre_producto_nuevo: nombreNuevo.trim(),
+      valor_prestamo_nuevo:  vNuevo,
+      valor_retoma:          retoma,
+    }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['prestamos'],    exact: false });
+      queryClient.invalidateQueries({ queryKey: ['prestatarios'], exact: false });
+      onClose();
+    },
+    onError: (err) => setError(err.response?.data?.error || 'Error al registrar el intercambio'),
+  });
+
+  const handleConfirmar = () => {
+    setError('');
+    if (!nombreNuevo.trim())        return setError('Ingresa el nombre del nuevo dispositivo');
+    if (!vNuevo || vNuevo <= 0)     return setError('Ingresa el valor del nuevo préstamo');
+    if (!retoma  || retoma  <= 0)   return setError('Ingresa el valor de retoma');
+    mutation.mutate();
+  };
+
+  const saldoPendienteOrig = Number(prestamo.valor_prestamo) - Number(prestamo.total_abonado);
+
+  return (
+    <Modal open onClose={onClose} title="Intercambio de dispositivo" size="md">
+      <div className="flex flex-col gap-4">
+
+        {/* Dispositivo actual */}
+        <div className="bg-gray-50 rounded-xl p-3 flex flex-col gap-1">
+          <p className="text-xs text-gray-400">Dispositivo entregado (retoma)</p>
+          <p className="text-sm font-semibold text-gray-800">{prestamo.nombre_producto}</p>
+          {prestamo.imei && <p className="text-xs text-gray-400 font-mono">{prestamo.imei}</p>}
+          <div className="flex justify-between mt-1">
+            <span className="text-xs text-gray-400">Saldo pendiente actual</span>
+            <span className="text-sm font-bold text-red-500">{formatCOP(saldoPendienteOrig)}</span>
+          </div>
+        </div>
+
+        {/* Valor de retoma */}
+        <div className="flex flex-col gap-1">
+          <label className="text-sm font-medium text-gray-700">Valor de retoma del dispositivo</label>
+          <InputMoneda value={valorRetoma} onChange={setValorRetoma} placeholder="0" autoFocus
+            className="w-full px-3 py-2 bg-gray-100 rounded-xl text-sm
+              focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all" />
+        </div>
+
+        {/* Nuevo dispositivo */}
+        <div className="border-t border-gray-100 pt-3 flex flex-col gap-3">
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Nuevo dispositivo</p>
+          <Input label="IMEI del nuevo equipo (opcional)" placeholder="123456789012345"
+            value={imeiNuevo} onChange={(e) => setImeiNuevo(e.target.value)} />
+          <Input label="Nombre del producto *" placeholder="Ej: Samsung Galaxy S24"
+            value={nombreNuevo} onChange={(e) => setNombreNuevo(e.target.value)} />
+          <div className="flex flex-col gap-1">
+            <label className="text-sm font-medium text-gray-700">Valor del préstamo *</label>
+            <InputMoneda value={valorNuevo} onChange={setValorNuevo} placeholder="0"
+              className="w-full px-3 py-2 bg-gray-100 rounded-xl text-sm
+                focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all" />
+          </div>
+        </div>
+
+        {/* Resumen dinámico */}
+        {retoma > 0 && vNuevo > 0 && (
+          <div className="bg-gray-50 rounded-xl p-3 flex flex-col gap-1.5">
+            <div className="flex justify-between text-xs text-gray-500">
+              <span>Retoma:</span>
+              <span className="font-medium text-gray-700">{formatCOP(retoma)}</span>
+            </div>
+            <div className="flex justify-between text-xs text-gray-500">
+              <span>Nuevo préstamo:</span>
+              <span className="font-medium text-gray-700">{formatCOP(vNuevo)}</span>
+            </div>
+            <div className={`flex justify-between text-sm font-semibold mt-1 pt-1 border-t border-gray-200
+              ${diff > 0 ? 'text-red-600' : diff < 0 ? 'text-emerald-600' : 'text-green-600'}`}>
+              <span>{diff > 0 ? 'Saldo pendiente' : diff < 0 ? 'Saldo a favor' : 'Resultado'}</span>
+              <span>
+                {diff > 0
+                  ? formatCOP(diff)
+                  : diff < 0
+                    ? formatCOP(Math.abs(diff))
+                    : 'Préstamo saldado ✓'}
+              </span>
+            </div>
+          </div>
+        )}
+
+        {error && <p className="text-sm text-red-500">{error}</p>}
+
+        <div className="flex gap-2">
+          <Button variant="secondary" className="flex-1" onClick={onClose}>Cancelar</Button>
+          <Button className="flex-1" loading={mutation.isPending} onClick={handleConfirmar}>
+            <ArrowLeftRight size={14} /> Confirmar intercambio
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 // ─── Helper: tiempo desde último abono ───────────────────────────────────────
 
 function tiempoUltimoAbono(fecha) {
@@ -472,7 +587,7 @@ function CardPersona({ nombre, tipo, prestamos, saldoTotal, ultimoAbono, onSelec
 
 // ─── Tarjeta de préstamo individual (en vista detalle) ────────────────────────
 
-function TarjetaPrestamoDetalle({ prestamo, onAbonar, onDevolver, onImprimir, coloresActivo, cerrado = false }) {
+function TarjetaPrestamoDetalle({ prestamo, onAbonar, onDevolver, onImprimir, onIntercambiar, coloresActivo, cerrado = false }) {
   const saldo    = Number(prestamo.valor_prestamo) - Number(prestamo.total_abonado);
   const progreso = (Number(prestamo.total_abonado) / Number(prestamo.valor_prestamo)) * 100;
   const esSaldado = prestamo.estado === 'Saldado';
@@ -529,10 +644,15 @@ function TarjetaPrestamoDetalle({ prestamo, onAbonar, onDevolver, onImprimir, co
 
       {/* Acciones — solo préstamos activos */}
       {prestamo.estado === 'Activo' && (
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           <Button size="sm" className="flex-1" onClick={() => onAbonar(prestamo)}>
             <Plus size={14} /> Abonar
           </Button>
+          {prestamo.imei && (
+            <Button size="sm" variant="secondary" onClick={() => onIntercambiar(prestamo)}>
+              <ArrowLeftRight size={14} /> Intercambio
+            </Button>
+          )}
           <Button size="sm" variant="secondary" onClick={() => onDevolver(prestamo)}>
             <CheckCircle size={14} /> Devuelto
           </Button>
@@ -544,7 +664,7 @@ function TarjetaPrestamoDetalle({ prestamo, onAbonar, onDevolver, onImprimir, co
 
 // ─── Vista detalle de persona ─────────────────────────────────────────────────
 
-function VistaDetallePersona({ nombre, tipo, personaId, prestamos, saldoAFavor = 0, onVolver, onAbonar, onDevolver, onImprimir, onRegistrarSaldo, coloresActivo }) {
+function VistaDetallePersona({ nombre, tipo, personaId, prestamos, saldoAFavor = 0, onVolver, onAbonar, onDevolver, onImprimir, onIntercambiar, onRegistrarSaldo, coloresActivo }) {
   const [cerradosAbiertos, setCerradosAbiertos] = useState(false);
 
   const activos  = prestamos.filter((p) => p.estado === 'Activo');
@@ -607,6 +727,7 @@ function VistaDetallePersona({ nombre, tipo, personaId, prestamos, saldoAFavor =
           {activos.map((p) => (
             <TarjetaPrestamoDetalle key={p.id} prestamo={p}
               onAbonar={onAbonar} onDevolver={onDevolver} onImprimir={onImprimir}
+              onIntercambiar={onIntercambiar}
               coloresActivo={coloresActivo} />
           ))}
         </div>
@@ -676,6 +797,7 @@ function VistaDetallePersona({ nombre, tipo, personaId, prestamos, saldoAFavor =
               {cerrados.map((p) => (
                 <TarjetaPrestamoDetalle key={p.id} prestamo={p}
                   onAbonar={onAbonar} onDevolver={onDevolver} onImprimir={onImprimir}
+                  onIntercambiar={onIntercambiar}
                   coloresActivo={coloresActivo} cerrado />
               ))}
             </div>
@@ -1239,6 +1361,7 @@ export default function PrestamosPage() {
   const [prestamoDevol,        setPrestamoDevol]        = useState(null);
 
   const [prestamoImprimir,    setPrestamoImprimir]    = useState(null);
+  const [prestamoIntercambio, setPrestamoIntercambio] = useState(null);
   const [modalSaldoPersona,   setModalSaldoPersona]   = useState(null); // { nombre, tipo, personaId, saldoAFavor }
   const abonosImprimir = useAbonosPrestamo(prestamoImprimir?.id);
 
@@ -1408,6 +1531,7 @@ export default function PrestamosPage() {
                 onAbonar={setPrestamoAbono}
                 onDevolver={setPrestamoDevol}
                 onImprimir={setPrestamoImprimir}
+                onIntercambiar={setPrestamoIntercambio}
                 onRegistrarSaldo={() => setModalSaldoPersona({
                   nombre:     grupoActual.nombre,
                   tipo:       tabPrestamos === 'companeros' ? 'companero' : 'cliente',
@@ -1505,6 +1629,13 @@ export default function PrestamosPage() {
           personaId={modalSaldoPersona.personaId}
           montoActual={modalSaldoPersona.saldoAFavor}
           onClose={() => setModalSaldoPersona(null)}
+        />
+      )}
+
+      {prestamoIntercambio && (
+        <ModalIntercambio
+          prestamo={prestamoIntercambio}
+          onClose={() => setPrestamoIntercambio(null)}
         />
       )}
     </div>

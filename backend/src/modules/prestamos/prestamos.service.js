@@ -438,10 +438,118 @@ const devolverParcial = async (negocioId, prestamoId, cantidad_devuelta) => {
   }
 };
 
+// ─── Servicio: intercambio de dispositivo ──────────────────────────────────────
+// Devuelve el préstamo original, ingresa el dispositivo retomado al inventario
+// con el nombre de la persona como cliente_origen, crea un nuevo préstamo para
+// el dispositivo entregado y aplica el valor de retoma como abono inmediato.
+
+const intercambiarPrestamo = async (negocioId, prestamoId, {
+  usuario_id,
+  imei_nuevo, nombre_producto_nuevo, valor_prestamo_nuevo,
+  valor_retoma,
+}) => {
+  const prestamoOrig = await repo.findByIdYNegocio(prestamoId, negocioId);
+  if (!prestamoOrig) throw { status: 404, message: 'Préstamo no encontrado' };
+  if (prestamoOrig.estado !== 'Activo') {
+    throw { status: 400, message: 'Solo se pueden intercambiar préstamos activos' };
+  }
+
+  const sucursalId    = prestamoOrig.sucursal_id;
+  const imeiOrig      = prestamoOrig.imei;
+  const nombrePersona = prestamoOrig.prestatario || '';
+  const tipo          = prestamoOrig.prestatario_id ? 'prestatario' : 'cliente';
+  const personaId     = prestamoOrig.prestatario_id || prestamoOrig.cliente_id;
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // 1. Cerrar el préstamo original y liberar el dispositivo retomado
+    if (imeiOrig) {
+      await repo.retornarSerialConOrigen(client, imeiOrig, sucursalId, nombrePersona);
+    } else if (prestamoOrig.producto_id) {
+      await repo.ajustarStock(client, prestamoOrig.producto_id, prestamoOrig.cantidad_prestada);
+    }
+    await repo.updateEstado(client, prestamoId, 'Devuelto');
+
+    // 2. Crear el nuevo préstamo para el dispositivo entregado
+    const nuevoPrestamo = await repo.create(client, {
+      sucursal_id:       sucursalId,
+      usuario_id:        usuario_id || null,
+      prestatario:       prestamoOrig.prestatario,
+      cedula:            prestamoOrig.cedula,
+      telefono:          prestamoOrig.telefono,
+      nombre_producto:   nombre_producto_nuevo,
+      imei:              imei_nuevo || null,
+      producto_id:       null,
+      cantidad_prestada: 1,
+      valor_prestamo:    valor_prestamo_nuevo,
+      prestatario_id:    prestamoOrig.prestatario_id || null,
+      empleado_id:       prestamoOrig.empleado_id   || null,
+      cliente_id:        prestamoOrig.cliente_id    || null,
+    });
+
+    // Marcar el nuevo dispositivo como prestado (o descontar stock)
+    await _procesarItemPrestamo(client, {
+      imei:              imei_nuevo || null,
+      producto_id:       null,
+      nombre_producto:   nombre_producto_nuevo,
+      cantidad_prestada: 1,
+      sucursal_id:       sucursalId,
+      prestatario:       nombrePersona,
+    });
+
+    // 3. Aplicar la retoma como abono al nuevo préstamo
+    const montoAbono = Math.min(valor_retoma, valor_prestamo_nuevo);
+    const resultado  = await repo.insertarAbono(client, {
+      prestamo_id: nuevoPrestamo.id,
+      valor:       montoAbono,
+      metodo:      'Intercambio',
+    });
+
+    let saldado       = false;
+    let saldo_a_favor = 0;
+
+    if (Number(resultado.total_abonado) >= Number(resultado.valor_prestamo)) {
+      saldado = true;
+      await repo.updateEstado(client, nuevoPrestamo.id, 'Saldado');
+      if (imei_nuevo) {
+        await repo.salarSerial(client, imei_nuevo, sucursalId);
+      }
+    }
+
+    // Si la retoma supera el valor del nuevo préstamo → acumular saldo a favor
+    if (valor_retoma > valor_prestamo_nuevo && personaId) {
+      const excess      = valor_retoma - valor_prestamo_nuevo;
+      const saldoActual = await repo.getSaldoAFavorPersona(client, tipo, personaId);
+      await repo.setearSaldoAFavorPersona(client, tipo, personaId, saldoActual + excess);
+      saldo_a_favor = excess;
+    }
+
+    await client.query('COMMIT');
+
+    return {
+      prestamo_original_id: prestamoId,
+      nuevo_prestamo_id:    nuevoPrestamo.id,
+      valor_retoma,
+      valor_prestamo_nuevo,
+      saldado,
+      saldo_a_favor,
+      saldo_pendiente: saldado ? 0 : Math.max(0, valor_prestamo_nuevo - montoAbono),
+    };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+};
+
 module.exports = {
   getPrestamos, getPrestamoById,
   crearPrestamo, crearPrestamos,
   registrarAbono,
   devolverPrestamo, devolverParcial,
   registrarSaldoAFavor,
+  intercambiarPrestamo,
 };
