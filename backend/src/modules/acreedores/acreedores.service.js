@@ -42,6 +42,18 @@ const getCargosAbiertos = async (negocioId, acreedorId) => {
   return repo.getCargosAbiertos(negocioId, acreedorId);
 };
 
+const getComprasConSaldo = async (negocioId, acreedorId) => {
+  const acreedor = await repo.findById(negocioId, acreedorId);
+  if (!acreedor) throw { status: 404, message: 'Acreedor no encontrado' };
+  return repo.getComprasConSaldo(negocioId, acreedorId);
+};
+
+const getAbonosPorCargo = async (negocioId, acreedorId, cargoId) => {
+  const acreedor = await repo.findById(negocioId, acreedorId);
+  if (!acreedor) throw { status: 404, message: 'Acreedor no encontrado' };
+  return repo.getAbonosPorCargo(negocioId, acreedorId, cargoId);
+};
+
 const eliminarAcreedor = async (negocioId, acreedorId) => {
   try {
     await repo.eliminarSeguro(negocioId, acreedorId);
@@ -58,5 +70,7 @@ const eliminarAcreedor = async (negocioId, acreedorId) => {
 
 module.exports = {
   getAcreedores, getAcreedoresCruces, getAcreedorById,
-  crearAcreedor, registrarMovimiento, getCargosAbiertos, eliminarAcreedor,
+  crearAcreedor, registrarMovimiento, getCargosAbiertos,
+  getComprasConSaldo, getAbonosPorCargo,
+  eliminarAcreedor,
 };

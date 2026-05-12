@@ -4,7 +4,7 @@ import { buscarCompras as buscarComprasApi } from '../../api/busqueda.api';
 import { getProveedores, crearProveedor, actualizarProveedor } from '../../api/proveedores.api';
 import { getCruces, crearCruce } from '../../api/cruces.api';
 import { getComprasByProveedor, getCompraById } from '../../api/compras.api';
-import { getAcreedores, getAcreedorById, getCargosAbiertos, registrarMovimiento as registrarMovAcreedor } from '../../api/acreedores.api';
+import { getAcreedores, getAcreedorById, getCargosAbiertos, registrarMovimiento as registrarMovAcreedor, getComprasConSaldo, getAbonosPorCargo } from '../../api/acreedores.api';
 import { formatCOP, formatFechaHora } from '../../utils/formatters';
 import { Button }      from '../../components/ui/Button';
 import { Input }       from '../../components/ui/Input';
@@ -536,10 +536,10 @@ function ModalDetalleCompra({ compraId, onClose }) {
 
 // ─── Modal movimiento acreedor (desde proveedores) ────────────────────────────
 
-function ModalMovimientoProveedor({ acreedorId, nombreProveedor, onClose }) {
+function ModalMovimientoProveedor({ acreedorId, nombreProveedor, onClose, cargoIdInicial = null }) {
   const queryClient = useQueryClient();
   const [form,       setForm]       = useState({ tipo: 'Abono', descripcion: '', valor: '' });
-  const [cargoId,    setCargoId]    = useState(null);
+  const [cargoId,    setCargoId]    = useState(cargoIdInicial);
   const [error,      setError]      = useState('');
   const metodosPago                 = useMetodosPago();
   const [metodoPago, setMetodoPago] = useState('Efectivo');
@@ -564,9 +564,11 @@ function ModalMovimientoProveedor({ acreedorId, nombreProveedor, onClose }) {
       cargo_id:          esAbono ? cargoId : null,
     }),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['acreedor',        acreedorId], exact: false });
-      await queryClient.invalidateQueries({ queryKey: ['cargos-abiertos', acreedorId], exact: false });
-      await queryClient.invalidateQueries({ queryKey: ['acreedores'],                  exact: false });
+      await queryClient.invalidateQueries({ queryKey: ['acreedor',          acreedorId], exact: false });
+      await queryClient.invalidateQueries({ queryKey: ['cargos-abiertos',   acreedorId], exact: false });
+      await queryClient.invalidateQueries({ queryKey: ['compras-con-saldo', acreedorId], exact: false });
+      await queryClient.invalidateQueries({ queryKey: ['abonos-cargo'],                  exact: false });
+      await queryClient.invalidateQueries({ queryKey: ['acreedores'],                    exact: false });
       onClose();
     },
     onError: (err) => setError(err.response?.data?.error || 'Error al registrar'),
@@ -679,6 +681,207 @@ function ModalMovimientoProveedor({ acreedorId, nombreProveedor, onClose }) {
   );
 }
 
+// ─── Vista por cargo (proveedores) ────────────────────────────────────────────
+
+const ESTADO_CFG_PROV = {
+  Saldada:   { variant: 'green',  ring: 'border-green-200 bg-green-50/40'  },
+  Parcial:   { variant: 'yellow', ring: 'border-amber-200 bg-amber-50/40'  },
+  Pendiente: { variant: 'red',    ring: 'border-red-200   bg-red-50/40'    },
+};
+
+function ModalDetalleCargoProveedor({ cargo, acreedorId, onClose, onAbonar }) {
+  const [verCompra, setVerCompra] = useState(false);
+
+  const { data: abonos, isLoading: loadingAbonos } = useQuery({
+    queryKey: ['abonos-cargo', acreedorId, cargo.id],
+    queryFn:  () => getAbonosPorCargo(acreedorId, cargo.id).then((r) => r.data.data),
+  });
+  const listaAbonos = Array.isArray(abonos) ? abonos : [];
+  const cfg = ESTADO_CFG_PROV[cargo.estado_pago] || ESTADO_CFG_PROV.Pendiente;
+
+  return (
+    <Modal open onClose={onClose} title="Detalle del cargo" size="lg">
+      <div className="flex flex-col gap-4">
+        <div className="grid grid-cols-2 gap-2">
+          <div className="bg-gray-50 rounded-xl p-3">
+            <p className="text-xs text-gray-400 mb-0.5">Fecha</p>
+            <p className="text-sm font-medium text-gray-800">{formatFechaHora(cargo.fecha)}</p>
+          </div>
+          <div className="bg-gray-50 rounded-xl p-3">
+            <p className="text-xs text-gray-400 mb-0.5">Estado</p>
+            <Badge variant={cfg.variant}>{cargo.estado_pago}</Badge>
+          </div>
+          <div className="bg-red-50 rounded-xl p-3">
+            <p className="text-xs text-red-400 mb-0.5">Total cargo</p>
+            <p className="text-sm font-bold text-red-600">{formatCOP(cargo.valor_original)}</p>
+          </div>
+          <div className={`rounded-xl p-3 ${Number(cargo.saldo_pendiente) > 0 ? 'bg-amber-50' : 'bg-green-50'}`}>
+            <p className={`text-xs mb-0.5 ${Number(cargo.saldo_pendiente) > 0 ? 'text-amber-500' : 'text-green-500'}`}>
+              Saldo pendiente
+            </p>
+            <p className={`text-sm font-bold ${Number(cargo.saldo_pendiente) > 0 ? 'text-amber-600' : 'text-green-600'}`}>
+              {formatCOP(cargo.saldo_pendiente)}
+            </p>
+          </div>
+        </div>
+
+        <div className="bg-gray-50 rounded-xl px-3 py-2.5">
+          <p className="text-xs text-gray-400 mb-0.5">Descripción</p>
+          <p className="text-sm text-gray-700">{cargo.descripcion || '—'}</p>
+        </div>
+
+        {cargo.compra_id && (
+          <button onClick={() => setVerCompra(true)}
+            className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-800
+              bg-blue-50 border border-blue-100 rounded-xl px-3 py-2 transition-colors w-fit">
+            <ChevronRight size={14} />
+            Ver Compra #{String(cargo.compra_id).padStart(5, '0')}
+          </button>
+        )}
+
+        <div>
+          <p className="text-sm font-semibold text-gray-700 mb-2">Pagos aplicados</p>
+          {loadingAbonos ? <Spinner className="py-4" /> : listaAbonos.length === 0 ? (
+            <p className="text-xs text-gray-400 bg-gray-50 rounded-xl px-3 py-2.5">
+              Sin pagos aplicados todavía
+            </p>
+          ) : (
+            <div className="flex flex-col gap-1.5">
+              {listaAbonos.map((a) => (
+                <div key={a.id}
+                  className="bg-green-50 border border-green-100 rounded-xl px-3 py-2.5
+                    flex justify-between items-start gap-2">
+                  <div className="min-w-0">
+                    <p className="text-xs font-medium text-gray-700 truncate">{a.descripcion || 'Abono'}</p>
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      {formatFechaHora(a.fecha)}{a.metodo && ` · ${a.metodo}`}
+                      {a.usuario_nombre && ` · ${a.usuario_nombre}`}
+                    </p>
+                  </div>
+                  <span className="text-sm font-bold text-green-700 flex-shrink-0">-{formatCOP(a.valor)}</span>
+                </div>
+              ))}
+              <div className="flex justify-between items-center bg-green-100 border border-green-200
+                rounded-xl px-3 py-2 mt-1">
+                <span className="text-xs font-semibold text-green-700">Total pagado</span>
+                <span className="text-sm font-bold text-green-700">{formatCOP(cargo.total_abonado)}</span>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="flex gap-2">
+          {cargo.estado_pago !== 'Saldada' && (
+            <Button className="flex-1" onClick={() => { onClose(); onAbonar(cargo.id); }}>
+              Abonar a este cargo
+            </Button>
+          )}
+          <Button variant="secondary" className="flex-1" onClick={onClose}>Cerrar</Button>
+        </div>
+      </div>
+
+      {verCompra && cargo.compra_id && (
+        <ModalDetalleCompra compraId={cargo.compra_id} onClose={() => setVerCompra(false)} />
+      )}
+    </Modal>
+  );
+}
+
+function VistaCargoProveedor({ acreedorId, onAbonar }) {
+  const [cargoDetalle, setCargoDetalle] = useState(null);
+
+  const { data, isLoading } = useQuery({
+    queryKey:  ['compras-con-saldo', acreedorId],
+    queryFn:   () => getComprasConSaldo(acreedorId).then((r) => r.data.data),
+    staleTime: 0,
+  });
+  const cargos = Array.isArray(data) ? data : [];
+
+  if (isLoading) return <Spinner className="py-10" />;
+  if (cargos.length === 0)
+    return (
+      <EmptyState icon={Wallet} titulo="Sin cargos"
+        descripcion="No hay compras a crédito registradas con este proveedor" />
+    );
+
+  return (
+    <div className="flex flex-col gap-2">
+      <p className="text-xs text-gray-400 px-1 select-none">
+        {cargos.length} cargo(s) · Doble clic para ver detalle completo
+      </p>
+      {cargos.map((cargo) => {
+        const cfg      = ESTADO_CFG_PROV[cargo.estado_pago] || ESTADO_CFG_PROV.Pendiente;
+        const pendiente = Number(cargo.saldo_pendiente);
+        const pagado    = Number(cargo.total_abonado);
+        return (
+          <div key={cargo.id}
+            onDoubleClick={() => setCargoDetalle(cargo)}
+            className={`bg-white border rounded-2xl p-3.5 transition-all hover:shadow-sm
+              cursor-default select-none ${cfg.ring}`}>
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap mb-1">
+                  <Badge variant={cfg.variant}>{cargo.estado_pago}</Badge>
+                  {cargo.compra_id && (
+                    <span className="text-xs text-blue-400 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100">
+                      Compra #{String(cargo.compra_id).padStart(5, '0')}
+                    </span>
+                  )}
+                </div>
+                <p className="text-sm font-medium text-gray-800 truncate">
+                  {cargo.descripcion || 'Sin descripción'}
+                </p>
+                <p className="text-xs text-gray-400 mt-0.5">{formatFechaHora(cargo.fecha)}</p>
+                <div className="flex items-center gap-3 mt-2 flex-wrap">
+                  <span className="text-xs text-gray-500">
+                    Total: <span className="font-semibold text-gray-700">{formatCOP(cargo.valor_original)}</span>
+                  </span>
+                  {pagado > 0 && (
+                    <span className="text-xs text-green-600">
+                      Pagado: <span className="font-semibold">{formatCOP(pagado)}</span>
+                    </span>
+                  )}
+                  {pendiente > 0 && (
+                    <span className="text-xs text-red-500">
+                      Pendiente: <span className="font-semibold">{formatCOP(pendiente)}</span>
+                    </span>
+                  )}
+                </div>
+              </div>
+              <div className="flex flex-col items-end gap-2 flex-shrink-0">
+                <span className="text-sm font-bold text-gray-800">{formatCOP(cargo.valor_original)}</span>
+                {cargo.estado_pago !== 'Saldada' && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onAbonar(cargo.id); }}
+                    className="px-3 py-1 rounded-lg text-xs font-semibold bg-green-50 text-green-700
+                      border border-green-200 hover:bg-green-100 transition-colors">
+                    Abonar
+                  </button>
+                )}
+                <button
+                  onClick={(e) => { e.stopPropagation(); setCargoDetalle(cargo); }}
+                  className="p-1 rounded-lg text-gray-300 hover:text-blue-500 transition-colors"
+                  title="Ver detalle">
+                  <ChevronRight size={14} />
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })}
+
+      {cargoDetalle && (
+        <ModalDetalleCargoProveedor
+          cargo={cargoDetalle}
+          acreedorId={acreedorId}
+          onClose={() => setCargoDetalle(null)}
+          onAbonar={(cargoId) => { setCargoDetalle(null); onAbonar(cargoId); }}
+        />
+      )}
+    </div>
+  );
+}
+
 // ─── Vista historial proveedor ─────────────────────────────────────────────────
 
 function HistorialProveedor({ proveedor, sucursalKey, sucursalLista, onVolver, onNuevaCompra }) {
@@ -697,6 +900,8 @@ function HistorialProveedor({ proveedor, sucursalKey, sucursalLista, onVolver, o
   // ── Filtros cuenta corriente ───────────────────────────────────────────────
   const [cuentaFechaDesde,  setCuentaFechaDesde]  = useState('');
   const [cuentaFechaHasta,  setCuentaFechaHasta]  = useState('');
+  const [cuentaVistaMode,   setCuentaVistaMode]   = useState('lineal');
+  const [modalMovCargoId,   setModalMovCargoId]   = useState(null);
   const [cuentaCompraModal, setCuentaCompraModal] = useState(null);
 
   // ── Compras ────────────────────────────────────────────────────────────────
@@ -930,15 +1135,35 @@ function HistorialProveedor({ proveedor, sucursalKey, sucursalLista, onVolver, o
       {/* ── Pestaña: Cuenta corriente ── */}
       {tabVista === 'cuenta' && acreedorInfo && (
         <div className="flex flex-col gap-3">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-gray-600">
-              Movimientos {movsFiltrados.length !== movimientosUI.length && `(${movsFiltrados.length} de ${movimientosUI.length})`}
-            </h3>
-            <Button size="sm" onClick={() => setModalMov(true)}>
-              <PenLine size={14} /> Registrar
-            </Button>
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <h3 className="text-sm font-semibold text-gray-600">Cuenta corriente</h3>
+            <div className="flex items-center gap-2">
+              {/* Sub-toggle vista */}
+              <div className="flex gap-1 bg-gray-100 p-0.5 rounded-xl">
+                {[{ id: 'lineal', label: 'Movimientos' }, { id: 'por_cargo', label: 'Por cargo' }].map((v) => (
+                  <button key={v.id} onClick={() => setCuentaVistaMode(v.id)}
+                    className={`px-3 py-1 rounded-lg text-xs font-medium transition-all
+                      ${cuentaVistaMode === v.id ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+                    {v.label}
+                  </button>
+                ))}
+              </div>
+              <Button size="sm" onClick={() => setModalMov(true)}>
+                <PenLine size={14} /> Registrar
+              </Button>
+            </div>
           </div>
 
+          {/* ── Sub-vista: Por cargo ── */}
+          {cuentaVistaMode === 'por_cargo' && (
+            <VistaCargoProveedor
+              acreedorId={acreedorInfo.id}
+              onAbonar={(cargoId) => { setModalMovCargoId(cargoId); setModalMov(true); }}
+            />
+          )}
+
+          {/* ── Sub-vista: Movimientos lineales ── */}
+          {cuentaVistaMode === 'lineal' && (<>
           {/* Filtros de fecha */}
           <div className="flex gap-1.5 items-center flex-wrap">
             <input type="date" value={cuentaFechaDesde}
@@ -1011,6 +1236,7 @@ function HistorialProveedor({ proveedor, sucursalKey, sucursalLista, onVolver, o
           {cuentaCompraModal && (
             <ModalDetalleCompra compraId={cuentaCompraModal} onClose={() => setCuentaCompraModal(null)} />
           )}
+          </>)}
         </div>
       )}
 
@@ -1019,8 +1245,10 @@ function HistorialProveedor({ proveedor, sucursalKey, sucursalLista, onVolver, o
         <ModalMovimientoProveedor
           acreedorId={acreedorInfo.id}
           nombreProveedor={proveedor.nombre}
+          cargoIdInicial={modalMovCargoId}
           onClose={() => {
             setModalMov(false);
+            setModalMovCargoId(null);
             queryClient.invalidateQueries({ queryKey: ['acreedor', acreedorInfo.id], exact: false });
           }}
         />

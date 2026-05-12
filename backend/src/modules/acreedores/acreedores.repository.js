@@ -181,4 +181,50 @@ const eliminarSeguro = async (negocioId, acreedorId) => {
   }
 };
 
-module.exports = { findAll, findByCruces, findById, getMovimientos, getCargosAbiertos, create, insertarMovimiento, eliminarSeguro };
+const getComprasConSaldo = async (negocioId, acreedorId) => {
+  const { rows } = await pool.query(`
+    SELECT
+      m.id, m.descripcion, m.fecha, m.compra_id,
+      m.valor                                             AS valor_original,
+      COALESCE(SUM(a.valor), 0)                          AS total_abonado,
+      GREATEST(m.valor - COALESCE(SUM(a.valor), 0), 0)  AS saldo_pendiente,
+      CASE
+        WHEN m.valor - COALESCE(SUM(a.valor), 0) <= 0 THEN 'Saldada'
+        WHEN COALESCE(SUM(a.valor), 0)             >  0 THEN 'Parcial'
+        ELSE 'Pendiente'
+      END AS estado_pago
+    FROM movimientos_acreedor m
+    LEFT JOIN movimientos_acreedor a ON a.cargo_id = m.id AND a.tipo = 'Abono'
+    JOIN acreedores ac ON ac.id = m.acreedor_id
+    WHERE m.acreedor_id = $1
+      AND ac.negocio_id = $2
+      AND m.tipo = 'Cargo'
+    GROUP BY m.id
+    ORDER BY m.fecha DESC
+  `, [acreedorId, negocioId]);
+  return rows;
+};
+
+const getAbonosPorCargo = async (negocioId, acreedorId, cargoId) => {
+  const { rows } = await pool.query(`
+    SELECT
+      m.id, m.fecha, m.valor, m.descripcion, m.metodo, m.registrar_en_caja,
+      u.nombre AS usuario_nombre
+    FROM movimientos_acreedor m
+    JOIN  acreedores ac ON ac.id  = m.acreedor_id
+    LEFT JOIN usuarios u  ON u.id = m.usuario_id
+    WHERE m.cargo_id    = $1
+      AND m.acreedor_id = $2
+      AND ac.negocio_id = $3
+      AND m.tipo = 'Abono'
+    ORDER BY m.fecha ASC
+  `, [cargoId, acreedorId, negocioId]);
+  return rows;
+};
+
+module.exports = {
+  findAll, findByCruces, findById,
+  getMovimientos, getCargosAbiertos,
+  getComprasConSaldo, getAbonosPorCargo,
+  create, insertarMovimiento, eliminarSeguro,
+};

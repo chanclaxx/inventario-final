@@ -46,6 +46,20 @@ const getCargosAbiertos = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+const getComprasConSaldo = async (req, res, next) => {
+  try {
+    const data = await service.getComprasConSaldo(req.user.negocio_id, req.params.id);
+    res.json({ ok: true, data });
+  } catch (err) { next(err); }
+};
+
+const getAbonosPorCargo = async (req, res, next) => {
+  try {
+    const data = await service.getAbonosPorCargo(req.user.negocio_id, req.params.id, req.params.cargoId);
+    res.json({ ok: true, data });
+  } catch (err) { next(err); }
+};
+
 const eliminarAcreedor = async (req, res, next) => {
   try {
     await service.eliminarAcreedor(req.user.negocio_id, req.params.id);
@@ -55,5 +69,7 @@ const eliminarAcreedor = async (req, res, next) => {
 
 module.exports = {
   getAcreedores, getAcreedoresCruces, getAcreedorById,
-  crearAcreedor, registrarMovimiento, getCargosAbiertos, eliminarAcreedor,
+  crearAcreedor, registrarMovimiento, getCargosAbiertos,
+  getComprasConSaldo, getAbonosPorCargo,
+  eliminarAcreedor,
 };

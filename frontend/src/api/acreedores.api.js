@@ -8,3 +8,5 @@ export const crearAcreedor = (data) => api.post('/acreedores', data);
 export const registrarMovimiento = (id, data) =>
   api.post(`/acreedores/${id}/movimientos`, data);
 export const eliminarAcreedor = (id) => api.delete(`/acreedores/${id}`);
+export const getComprasConSaldo = (id) => api.get(`/acreedores/${id}/compras-saldo`);
+export const getAbonosPorCargo = (id, cargoId) => api.get(`/acreedores/${id}/cargos/${cargoId}/abonos`);

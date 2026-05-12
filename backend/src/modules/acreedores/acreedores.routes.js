@@ -19,7 +19,9 @@ router.get('/cruces',              requireModulo('acreedores'), ctrl.getAcreedor
 
 router.get('/',                    requireModulo('acreedores'), ctrl.getAcreedores);
 router.get('/:id',                 requireModulo('acreedores'), ctrl.getAcreedorById);
-router.get('/:id/cargos',          requireModulo('acreedores'), ctrl.getCargosAbiertos);
+router.get('/:id/cargos',                    requireModulo('acreedores'), ctrl.getCargosAbiertos);
+router.get('/:id/compras-saldo',             requireModulo('acreedores'), ctrl.getComprasConSaldo);
+router.get('/:id/cargos/:cargoId/abonos',    requireModulo('acreedores'), ctrl.getAbonosPorCargo);
 router.post('/',                   requireModulo('acreedores'), requireNivel('supervisor'),    ctrl.crearAcreedor);
 router.post('/:id/movimientos',    requireModulo('acreedores'), validarMovimiento, validate,   ctrl.registrarMovimiento);
 router.delete('/:id',              requireModulo('acreedores'), requireNivel('admin_negocio'), ctrl.eliminarAcreedor);
