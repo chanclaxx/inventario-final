@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { buscarPrestamos as buscarPrestamosApi } from '../../api/busqueda.api';
 import { exportarPrestamosExcel } from '../../utils/exportarPrestamosExcel';
@@ -28,9 +28,14 @@ import { useMetodosPago }                       from '../../hooks/useMetodosPago
 import useExportarPdfPrestamos                  from '../../hooks/useExportarPdfPrestamos';
 import api                                      from '../../api/axios.config';
 import {
+  getProductosSerial, getProductosCantidad,
+  verificarImei as verificarImeiApi,
+}                                               from '../../api/productos.api';
+import {
   Handshake, CreditCard, Bike, Plus, CheckCircle,
   ChevronDown, ChevronUp, ChevronLeft, ChevronRight,
-  Users, User, AlertTriangle, FileDown, Loader2, Printer, Search, Wallet, ArrowLeftRight,
+  Users, User, AlertTriangle, FileDown, Loader2, Printer, Search, Wallet,
+  ArrowLeftRight, Package, ShoppingBag, XCircle,
 } from 'lucide-react';
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
@@ -373,24 +378,103 @@ function ModalSaldoAFavor({ nombre, tipo, personaId, montoActual, onClose }) {
 
 // ─── Modal Intercambio ────────────────────────────────────────────────────────
 
+const IMEI_MIN = 8;
+
+function normalizarProductos(data) {
+  if (Array.isArray(data)) return data;
+  if (data?.items && Array.isArray(data.items)) return data.items;
+  return [];
+}
+
 function ModalIntercambio({ prestamo, onClose }) {
   const queryClient = useQueryClient();
-  const [valorRetoma,  setValorRetoma]  = useState('');
-  const [imeiNuevo,    setImeiNuevo]    = useState('');
-  const [nombreNuevo,  setNombreNuevo]  = useState('');
-  const [valorNuevo,   setValorNuevo]   = useState('');
-  const [error,        setError]        = useState('');
 
+  // Retoma (dispositivo que devuelve)
+  const [valorRetoma,       setValorRetoma]       = useState('');
+  const [ingresoInventario, setIngresoInventario] = useState(true);
+
+  // Nuevo dispositivo
+  const [tipoNuevo,             setTipoNuevo]             = useState('serial');
+  const [imeiNuevo,             setImeiNuevo]             = useState('');
+  const [imeiEstado,            setImeiEstado]            = useState({ tipo: 'idle' });
+  const [busquedaSerial,        setBusquedaSerial]        = useState('');
+  const [productoSerialSel,     setProductoSerialSel]     = useState(null);
+  const [busquedaCantidad,      setBusquedaCantidad]      = useState('');
+  const [productoCantidadSel,   setProductoCantidadSel]   = useState(null);
+  const [cantidadNueva,         setCantidadNueva]         = useState('1');
+  const [valorNuevo,            setValorNuevo]            = useState('');
+  const [error,                 setError]                 = useState('');
+
+  // Catálogos de productos
+  const { data: rawSerial   } = useQuery({
+    queryKey: ['productos-serial'],
+    queryFn:  () => getProductosSerial().then((r) => r.data.data),
+  });
+  const { data: rawCantidad } = useQuery({
+    queryKey: ['productos-cantidad'],
+    queryFn:  () => getProductosCantidad().then((r) => r.data.data),
+  });
+  const productosSerial   = normalizarProductos(rawSerial);
+  const productosCantidad = normalizarProductos(rawCantidad);
+
+  const filtradosSerial   = productosSerial.filter((p) =>
+    p.nombre.toLowerCase().includes(busquedaSerial.toLowerCase())
+  );
+  const filtradosCantidad = productosCantidad.filter((p) =>
+    p.nombre.toLowerCase().includes(busquedaCantidad.toLowerCase())
+  );
+
+  // Verificar IMEI del nuevo dispositivo
+  const verificarImei = useCallback(async (imei) => {
+    const limpio = imei?.trim() ?? '';
+    if (limpio.length < IMEI_MIN) { setImeiEstado({ tipo: 'idle' }); return; }
+    setImeiEstado({ tipo: 'cargando' });
+    try {
+      const { data } = await verificarImeiApi(limpio);
+      if (data.data.existe) {
+        const serial = data.data.serial;
+        setImeiEstado({ tipo: 'encontrado', serial });
+        if (serial.producto_id && !productoSerialSel) {
+          setProductoSerialSel({ id: serial.producto_id, nombre: serial.producto_nombre || '' });
+          setBusquedaSerial(serial.producto_nombre || '');
+        }
+      } else {
+        setImeiEstado({ tipo: 'libre' });
+      }
+    } catch {
+      setImeiEstado({ tipo: 'error' });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (tipoNuevo !== 'serial') return;
+    const t = setTimeout(() => verificarImei(imeiNuevo), 500);
+    return () => clearTimeout(t);
+  }, [imeiNuevo, tipoNuevo, verificarImei]);
+
+  // Resumen
   const retoma = Number(valorRetoma) || 0;
   const vNuevo = Number(valorNuevo)  || 0;
   const diff   = vNuevo - retoma;
 
+  const resetNuevo = () => {
+    setImeiNuevo(''); setImeiEstado({ tipo: 'idle' });
+    setBusquedaSerial(''); setProductoSerialSel(null);
+    setBusquedaCantidad(''); setProductoCantidadSel(null);
+    setCantidadNueva('1');
+  };
+
   const mutation = useMutation({
     mutationFn: () => intercambiarPrestamoApi(prestamo.id, {
-      imei_nuevo:            imeiNuevo.trim()   || null,
-      nombre_producto_nuevo: nombreNuevo.trim(),
-      valor_prestamo_nuevo:  vNuevo,
-      valor_retoma:          retoma,
+      tipo_nuevo:                 tipoNuevo,
+      imei_nuevo:                 tipoNuevo === 'serial'   ? (imeiNuevo.trim() || null) : null,
+      producto_serial_id_nuevo:   tipoNuevo === 'serial'   ? (productoSerialSel?.id  || null) : null,
+      producto_cantidad_id_nuevo: tipoNuevo === 'cantidad' ? (productoCantidadSel?.id || null) : null,
+      cantidad_nueva:             tipoNuevo === 'cantidad' ? Number(cantidadNueva || 1) : 1,
+      valor_prestamo_nuevo:       vNuevo,
+      valor_retoma:               retoma,
+      ingreso_inventario:         ingresoInventario,
     }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['prestamos'],    exact: false });
@@ -402,9 +486,10 @@ function ModalIntercambio({ prestamo, onClose }) {
 
   const handleConfirmar = () => {
     setError('');
-    if (!nombreNuevo.trim())        return setError('Ingresa el nombre del nuevo dispositivo');
-    if (!vNuevo || vNuevo <= 0)     return setError('Ingresa el valor del nuevo préstamo');
-    if (!retoma  || retoma  <= 0)   return setError('Ingresa el valor de retoma');
+    if (!retoma || retoma <= 0) return setError('Ingresa el valor de retoma del dispositivo actual');
+    if (!vNuevo || vNuevo <= 0) return setError('Ingresa el valor del nuevo préstamo');
+    if (tipoNuevo === 'serial'   && !productoSerialSel)   return setError('Selecciona la línea de producto del nuevo equipo');
+    if (tipoNuevo === 'cantidad' && !productoCantidadSel) return setError('Selecciona el producto del nuevo equipo');
     mutation.mutate();
   };
 
@@ -414,9 +499,9 @@ function ModalIntercambio({ prestamo, onClose }) {
     <Modal open onClose={onClose} title="Intercambio de dispositivo" size="md">
       <div className="flex flex-col gap-4">
 
-        {/* Dispositivo actual */}
+        {/* Dispositivo que se retoma */}
         <div className="bg-gray-50 rounded-xl p-3 flex flex-col gap-1">
-          <p className="text-xs text-gray-400">Dispositivo entregado (retoma)</p>
+          <p className="text-xs text-gray-400">Dispositivo que se retoma</p>
           <p className="text-sm font-semibold text-gray-800">{prestamo.nombre_producto}</p>
           {prestamo.imei && <p className="text-xs text-gray-400 font-mono">{prestamo.imei}</p>}
           <div className="flex justify-between mt-1">
@@ -425,26 +510,148 @@ function ModalIntercambio({ prestamo, onClose }) {
           </div>
         </div>
 
-        {/* Valor de retoma */}
-        <div className="flex flex-col gap-1">
-          <label className="text-sm font-medium text-gray-700">Valor de retoma del dispositivo</label>
-          <InputMoneda value={valorRetoma} onChange={setValorRetoma} placeholder="0" autoFocus
-            className="w-full px-3 py-2 bg-gray-100 rounded-xl text-sm
-              focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all" />
+        {/* Sección retoma */}
+        <div className="flex flex-col gap-3 p-3 bg-purple-50 rounded-xl border border-purple-100">
+          <p className="text-xs font-semibold text-purple-700 uppercase tracking-wide">Retoma</p>
+          <div className="flex flex-col gap-1">
+            <label className="text-xs font-medium text-gray-600">Valor de retoma</label>
+            <InputMoneda value={valorRetoma} onChange={setValorRetoma} placeholder="0" autoFocus
+              className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-sm
+                focus:outline-none focus:ring-2 focus:ring-purple-400 transition-all" />
+          </div>
+          <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+            <input type="checkbox" checked={ingresoInventario}
+              onChange={(e) => setIngresoInventario(e.target.checked)}
+              className="rounded accent-purple-600" />
+            Ingresa al inventario
+          </label>
         </div>
 
-        {/* Nuevo dispositivo */}
-        <div className="border-t border-gray-100 pt-3 flex flex-col gap-3">
-          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Nuevo dispositivo</p>
-          <Input label="IMEI del nuevo equipo (opcional)" placeholder="123456789012345"
-            value={imeiNuevo} onChange={(e) => setImeiNuevo(e.target.value)} />
-          <Input label="Nombre del producto *" placeholder="Ej: Samsung Galaxy S24"
-            value={nombreNuevo} onChange={(e) => setNombreNuevo(e.target.value)} />
+        {/* Sección nuevo dispositivo */}
+        <div className="flex flex-col gap-3 p-3 bg-blue-50 rounded-xl border border-blue-100">
+          <p className="text-xs font-semibold text-blue-700 uppercase tracking-wide">Nuevo dispositivo a prestar</p>
+
+          {/* Tipo */}
+          <div className="flex gap-2">
+            {[
+              { id: 'serial',   label: 'Con serial / IMEI', Icn: Package     },
+              { id: 'cantidad', label: 'Por cantidad',       Icn: ShoppingBag },
+            ].map((opt) => {
+              const TipoIcn = opt.Icn;
+              return (
+                <button key={opt.id} onClick={() => { setTipoNuevo(opt.id); resetNuevo(); }}
+                  className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl
+                    text-xs font-medium border transition-all
+                    ${tipoNuevo === opt.id
+                      ? 'bg-blue-100 border-blue-400 text-blue-800'
+                      : 'bg-white border-gray-200 text-gray-500 hover:border-gray-300'}`}>
+                  <TipoIcn size={13} /> {opt.label}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Serial */}
+          {tipoNuevo === 'serial' && (
+            <div className="flex flex-col gap-2">
+              {/* IMEI */}
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-gray-600">IMEI del nuevo equipo (opcional)</label>
+                <div className="relative">
+                  <input type="text" placeholder="Ej: 356789012345678" value={imeiNuevo}
+                    onChange={(e) => {
+                      setImeiNuevo(e.target.value);
+                      setProductoSerialSel(null);
+                      setBusquedaSerial('');
+                    }}
+                    className="w-full px-3 py-2 pr-9 bg-white border border-gray-200 rounded-xl
+                      text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 transition-all" />
+                  <span className="absolute right-2.5 top-1/2 -translate-y-1/2">
+                    {imeiEstado.tipo === 'cargando'   && <Loader2     size={14} className="text-gray-400 animate-spin" />}
+                    {imeiEstado.tipo === 'libre'       && <CheckCircle size={14} className="text-green-500" />}
+                    {imeiEstado.tipo === 'encontrado'  && <CheckCircle size={14} className="text-amber-500" />}
+                    {imeiEstado.tipo === 'error'       && <XCircle     size={14} className="text-red-400" />}
+                  </span>
+                </div>
+                {imeiEstado.tipo === 'encontrado' && (
+                  <p className="text-xs text-amber-600">
+                    {imeiEstado.serial?.producto_nombre} —{' '}
+                    {imeiEstado.serial?.vendido ? 'vendido' : imeiEstado.serial?.prestado ? 'prestado' : 'disponible'}
+                  </p>
+                )}
+                {imeiEstado.tipo === 'libre' && (
+                  <p className="text-xs text-green-600">IMEI disponible en el sistema</p>
+                )}
+              </div>
+
+              {/* Línea de producto */}
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-gray-600">Línea de producto *</label>
+                <input type="text" placeholder="Buscar modelo..." value={busquedaSerial}
+                  onChange={(e) => { setBusquedaSerial(e.target.value); setProductoSerialSel(null); }}
+                  className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl
+                    text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 transition-all" />
+                {busquedaSerial.length > 0 && !productoSerialSel && (
+                  <div className="flex flex-col gap-0 max-h-28 overflow-y-auto rounded-xl border border-gray-100 bg-white">
+                    {filtradosSerial.length === 0
+                      ? <p className="text-xs text-gray-400 px-3 py-2">Sin resultados</p>
+                      : filtradosSerial.map((p) => (
+                          <button key={p.id}
+                            onClick={() => { setProductoSerialSel(p); setBusquedaSerial(p.nombre); }}
+                            className="text-left px-3 py-2 text-sm hover:bg-blue-50 text-gray-700 border-b border-gray-50 last:border-0">
+                            {p.nombre}
+                            <span className="text-xs text-gray-400 ml-2">{p.disponibles} disp.</span>
+                          </button>
+                        ))
+                    }
+                  </div>
+                )}
+                {productoSerialSel && (
+                  <p className="text-xs text-blue-600">✓ {productoSerialSel.nombre}</p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Cantidad */}
+          {tipoNuevo === 'cantidad' && (
+            <div className="flex flex-col gap-2">
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-gray-600">Producto *</label>
+                <input type="text" placeholder="Buscar producto..." value={busquedaCantidad}
+                  onChange={(e) => { setBusquedaCantidad(e.target.value); setProductoCantidadSel(null); }}
+                  className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl
+                    text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 transition-all" />
+                {busquedaCantidad.length > 0 && !productoCantidadSel && (
+                  <div className="flex flex-col gap-0 max-h-28 overflow-y-auto rounded-xl border border-gray-100 bg-white">
+                    {filtradosCantidad.length === 0
+                      ? <p className="text-xs text-gray-400 px-3 py-2">Sin resultados</p>
+                      : filtradosCantidad.map((p) => (
+                          <button key={p.id}
+                            onClick={() => { setProductoCantidadSel(p); setBusquedaCantidad(p.nombre); }}
+                            className="text-left px-3 py-2 text-sm hover:bg-blue-50 text-gray-700 border-b border-gray-50 last:border-0">
+                            {p.nombre}
+                            <span className="text-xs text-gray-400 ml-2">Stock: {p.stock}</span>
+                          </button>
+                        ))
+                    }
+                  </div>
+                )}
+                {productoCantidadSel && (
+                  <p className="text-xs text-blue-600">✓ {productoCantidadSel.nombre}</p>
+                )}
+              </div>
+              <Input label="Cantidad" type="number" min="1" placeholder="1"
+                value={cantidadNueva} onChange={(e) => setCantidadNueva(e.target.value)} />
+            </div>
+          )}
+
+          {/* Valor del nuevo préstamo */}
           <div className="flex flex-col gap-1">
-            <label className="text-sm font-medium text-gray-700">Valor del préstamo *</label>
+            <label className="text-xs font-medium text-gray-600">Valor del préstamo *</label>
             <InputMoneda value={valorNuevo} onChange={setValorNuevo} placeholder="0"
-              className="w-full px-3 py-2 bg-gray-100 rounded-xl text-sm
-                focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all" />
+              className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-sm
+                focus:outline-none focus:ring-2 focus:ring-blue-400 transition-all" />
           </div>
         </div>
 
@@ -463,11 +670,7 @@ function ModalIntercambio({ prestamo, onClose }) {
               ${diff > 0 ? 'text-red-600' : diff < 0 ? 'text-emerald-600' : 'text-green-600'}`}>
               <span>{diff > 0 ? 'Saldo pendiente' : diff < 0 ? 'Saldo a favor' : 'Resultado'}</span>
               <span>
-                {diff > 0
-                  ? formatCOP(diff)
-                  : diff < 0
-                    ? formatCOP(Math.abs(diff))
-                    : 'Préstamo saldado ✓'}
+                {diff > 0 ? formatCOP(diff) : diff < 0 ? formatCOP(Math.abs(diff)) : 'Préstamo saldado ✓'}
               </span>
             </div>
           </div>

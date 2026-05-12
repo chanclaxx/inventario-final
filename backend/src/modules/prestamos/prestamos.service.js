@@ -445,8 +445,14 @@ const devolverParcial = async (negocioId, prestamoId, cantidad_devuelta) => {
 
 const intercambiarPrestamo = async (negocioId, prestamoId, {
   usuario_id,
-  imei_nuevo, nombre_producto_nuevo, valor_prestamo_nuevo,
+  tipo_nuevo = 'serial',
+  imei_nuevo,
+  producto_serial_id_nuevo,
+  producto_cantidad_id_nuevo,
+  cantidad_nueva = 1,
+  valor_prestamo_nuevo,
   valor_retoma,
+  ingreso_inventario = true,
 }) => {
   const prestamoOrig = await repo.findByIdYNegocio(prestamoId, negocioId);
   if (!prestamoOrig) throw { status: 404, message: 'Préstamo no encontrado' };
@@ -464,15 +470,45 @@ const intercambiarPrestamo = async (negocioId, prestamoId, {
   try {
     await client.query('BEGIN');
 
-    // 1. Cerrar el préstamo original y liberar el dispositivo retomado
+    // 0. Resolver nombre del producto nuevo desde su ID
+    let nombre_producto_nuevo = 'Equipo';
+    if (tipo_nuevo === 'serial' && producto_serial_id_nuevo) {
+      const { rows } = await client.query(
+        'SELECT nombre FROM productos_serial WHERE id = $1',
+        [producto_serial_id_nuevo],
+      );
+      nombre_producto_nuevo = rows[0]?.nombre || 'Equipo';
+    } else if (tipo_nuevo === 'cantidad' && producto_cantidad_id_nuevo) {
+      const { rows } = await client.query(
+        'SELECT nombre FROM productos_cantidad WHERE id = $1',
+        [producto_cantidad_id_nuevo],
+      );
+      nombre_producto_nuevo = rows[0]?.nombre || 'Producto';
+    }
+
+    // 1. Cerrar el préstamo original y manejar el dispositivo retomado
     if (imeiOrig) {
-      await repo.retornarSerialConOrigen(client, imeiOrig, sucursalId, nombrePersona);
+      if (ingreso_inventario) {
+        // Libera el serial y registra la persona como cliente_origen
+        await repo.retornarSerialConOrigen(client, imeiOrig, sucursalId, nombrePersona);
+      } else {
+        // Solo libera el serial sin dejar rastro de origen
+        await client.query(`
+          UPDATE seriales s SET prestado = false
+          FROM productos_serial ps
+          WHERE s.imei = $1 AND ps.id = s.producto_id AND ps.sucursal_id = $2
+        `, [imeiOrig, sucursalId]);
+      }
     } else if (prestamoOrig.producto_id) {
       await repo.ajustarStock(client, prestamoOrig.producto_id, prestamoOrig.cantidad_prestada);
     }
     await repo.updateEstado(client, prestamoId, 'Devuelto');
 
-    // 2. Crear el nuevo préstamo para el dispositivo entregado
+    // 2. Crear el nuevo préstamo
+    const esSerial       = tipo_nuevo === 'serial';
+    const cantidadFinal  = esSerial ? 1 : Number(cantidad_nueva || 1);
+    const productoIdNuevo = esSerial ? null : producto_cantidad_id_nuevo;
+
     const nuevoPrestamo = await repo.create(client, {
       sucursal_id:       sucursalId,
       usuario_id:        usuario_id || null,
@@ -480,26 +516,25 @@ const intercambiarPrestamo = async (negocioId, prestamoId, {
       cedula:            prestamoOrig.cedula,
       telefono:          prestamoOrig.telefono,
       nombre_producto:   nombre_producto_nuevo,
-      imei:              imei_nuevo || null,
-      producto_id:       null,
-      cantidad_prestada: 1,
+      imei:              esSerial ? (imei_nuevo || null) : null,
+      producto_id:       productoIdNuevo || null,
+      cantidad_prestada: cantidadFinal,
       valor_prestamo:    valor_prestamo_nuevo,
       prestatario_id:    prestamoOrig.prestatario_id || null,
       empleado_id:       prestamoOrig.empleado_id   || null,
       cliente_id:        prestamoOrig.cliente_id    || null,
     });
 
-    // Marcar el nuevo dispositivo como prestado (o descontar stock)
     await _procesarItemPrestamo(client, {
-      imei:              imei_nuevo || null,
-      producto_id:       null,
+      imei:              esSerial ? (imei_nuevo || null) : null,
+      producto_id:       productoIdNuevo || null,
       nombre_producto:   nombre_producto_nuevo,
-      cantidad_prestada: 1,
+      cantidad_prestada: cantidadFinal,
       sucursal_id:       sucursalId,
       prestatario:       nombrePersona,
     });
 
-    // 3. Aplicar la retoma como abono al nuevo préstamo
+    // 3. Aplicar retoma como abono inmediato
     const montoAbono = Math.min(valor_retoma, valor_prestamo_nuevo);
     const resultado  = await repo.insertarAbono(client, {
       prestamo_id: nuevoPrestamo.id,
@@ -513,12 +548,11 @@ const intercambiarPrestamo = async (negocioId, prestamoId, {
     if (Number(resultado.total_abonado) >= Number(resultado.valor_prestamo)) {
       saldado = true;
       await repo.updateEstado(client, nuevoPrestamo.id, 'Saldado');
-      if (imei_nuevo) {
+      if (esSerial && imei_nuevo) {
         await repo.salarSerial(client, imei_nuevo, sucursalId);
       }
     }
 
-    // Si la retoma supera el valor del nuevo préstamo → acumular saldo a favor
     if (valor_retoma > valor_prestamo_nuevo && personaId) {
       const excess      = valor_retoma - valor_prestamo_nuevo;
       const saldoActual = await repo.getSaldoAFavorPersona(client, tipo, personaId);

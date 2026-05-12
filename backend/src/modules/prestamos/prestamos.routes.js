@@ -28,9 +28,10 @@ const validarSaldoAFavor = [
 ];
 
 const validarIntercambio = [
-  body('nombre_producto_nuevo').notEmpty().withMessage('Se requiere el nombre del nuevo producto'),
   body('valor_prestamo_nuevo').isFloat({ gt: 0 }).withMessage('El valor del nuevo préstamo debe ser mayor a 0'),
   body('valor_retoma').isFloat({ gt: 0 }).withMessage('El valor de retoma debe ser mayor a 0'),
+  body('tipo_nuevo').optional().isIn(['serial', 'cantidad']).withMessage("tipo_nuevo debe ser 'serial' o 'cantidad'"),
+  body('cantidad_nueva').optional().isInt({ min: 1 }).withMessage('La cantidad debe ser mayor a 0'),
 ];
 
 router.get('/',       requireModulo('prestamos'), ctrl.getPrestamos);
