@@ -4,7 +4,7 @@ import { buscarCompras as buscarComprasApi } from '../../api/busqueda.api';
 import { getProveedores, crearProveedor, actualizarProveedor } from '../../api/proveedores.api';
 import { getCruces, crearCruce } from '../../api/cruces.api';
 import { getComprasByProveedor, getCompraById } from '../../api/compras.api';
-import { getAcreedores, getAcreedorById, getCargosAbiertos, registrarMovimiento as registrarMovAcreedor, getComprasConSaldo, getAbonosPorCargo } from '../../api/acreedores.api';
+import { getAcreedores, registrarMovimiento as registrarMovAcreedor, getComprasConSaldo, getAbonosPorCargo } from '../../api/acreedores.api';
 import { formatCOP, formatFechaHora } from '../../utils/formatters';
 import { Button }      from '../../components/ui/Button';
 import { Input }       from '../../components/ui/Input';
@@ -16,15 +16,13 @@ import { EmptyState }  from '../../components/ui/EmptyState';
 import { SearchInput } from '../../components/ui/SearchInput';
 import { ModalCompra } from './ModalCompra';
 import { useSucursalKey } from '../../hooks/useSucursalKey';
-import { useMetodosPago } from '../../hooks/useMetodosPago';
 import api from '../../api/axios.config';
 import { useAuth } from '../../context/useAuth';
 import {
-  Truck, Plus, ShoppingCart, ChevronRight, ChevronLeft,
+  Truck, Plus, ShoppingCart, ChevronRight, ChevronLeft, ChevronDown, ChevronUp,
   Package, Hash, User, RefreshCw, ArrowLeftRight, ShoppingBag, Repeat,
-  Search, ScanLine, Wallet, PenLine, Download,
+  Search, ScanLine, Calculator,
 } from 'lucide-react';
-import { exportarCuentaExcel } from '../../utils/exportarCuentaExcel';
 
 // ─── API helpers ──────────────────────────────────────────────────────────────
 
@@ -534,145 +532,187 @@ function ModalDetalleCompra({ compraId, onClose }) {
   );
 }
 
-// ─── Modal movimiento acreedor (desde proveedores) ────────────────────────────
+// ─── estado cfg ──────────────────────────────────────────────────────────────
 
-function ModalMovimientoProveedor({ acreedorId, nombreProveedor, onClose, cargoIdInicial = null }) {
-  const queryClient = useQueryClient();
-  const [form,       setForm]       = useState({ tipo: 'Abono', descripcion: '', valor: '' });
-  const [cargoId,    setCargoId]    = useState(cargoIdInicial);
-  const [error,      setError]      = useState('');
-  const metodosPago                 = useMetodosPago();
-  const [metodoPago, setMetodoPago] = useState('Efectivo');
+const ESTADO_CFG = {
+  Saldada:  { variant: 'green',  ring: 'border-green-200 bg-green-50/40'  },
+  Parcial:  { variant: 'yellow', ring: 'border-amber-200 bg-amber-50/40'  },
+  Pendiente:{ variant: 'red',    ring: 'border-red-200   bg-red-50/40'    },
+};
 
-  const esAbono = form.tipo === 'Abono';
+// ─── calculadora ─────────────────────────────────────────────────────────────
 
-  const { data: cargosRaw, isLoading: loadingCargos } = useQuery({
-    queryKey:  ['cargos-abiertos', acreedorId],
-    queryFn:   () => getCargosAbiertos(acreedorId).then((r) => r.data.data),
-    enabled:   esAbono,
-    staleTime: 0,
-  });
-  const cargosAbiertos = Array.isArray(cargosRaw) ? cargosRaw : [];
+function CalcBtn({ ch, onClick, wide, accent, active }) {
+  return (
+    <button type="button" onClick={onClick}
+      className={`h-11 rounded-xl text-sm font-semibold transition-all active:scale-95 select-none
+        ${wide ? 'col-span-2' : ''}
+        ${active  ? 'bg-blue-600 text-white shadow-sm'
+          : accent ? 'bg-blue-50 text-blue-700 hover:bg-blue-100'
+          : ch === 'C'  ? 'bg-red-50 text-red-600 hover:bg-red-100'
+          : ch === '⌫'  ? 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+          : ch === '='  ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-sm'
+          : 'bg-white border border-gray-200 text-gray-800 hover:bg-gray-50'}`}>
+      {ch}
+    </button>
+  );
+}
+
+function Calculadora({ onUsar }) {
+  const [display,   setDisplay]   = useState('0');
+  const [prevVal,   setPrevVal]   = useState(null);
+  const [op,        setOp]        = useState(null);
+  const [esperando, setEsperando] = useState(false);
+  const [historial, setHistorial] = useState('');
+
+  const fmtNum = (n) => String(Number.isInteger(n) ? n : parseFloat(n.toFixed(2)));
+  const calcOp = (a, b, o) => {
+    const r = o === '+' ? a + b : o === '-' ? a - b : o === '×' ? a * b : b !== 0 ? a / b : 0;
+    return Math.round(r * 100) / 100;
+  };
+  const presNum = (n) => {
+    if (esperando) { setDisplay(String(n)); setEsperando(false); }
+    else setDisplay(display === '0' ? String(n) : display + n);
+  };
+  const presDecimal = () => {
+    if (esperando) { setDisplay('0.'); setEsperando(false); return; }
+    if (!display.includes('.')) setDisplay(display + '.');
+  };
+  const presOp = (o) => {
+    const val = parseFloat(display);
+    if (prevVal !== null && !esperando) {
+      const res = calcOp(prevVal, val, op);
+      setDisplay(fmtNum(res)); setHistorial(`${fmtNum(res)} ${o}`); setPrevVal(res);
+    } else { setHistorial(`${display} ${o}`); setPrevVal(val); }
+    setOp(o); setEsperando(true);
+  };
+  const igual = () => {
+    if (prevVal === null || op === null) return;
+    const val = parseFloat(display);
+    const res = calcOp(prevVal, val, op);
+    setHistorial(`${historial} ${display} =`);
+    setDisplay(fmtNum(res)); setPrevVal(null); setOp(null); setEsperando(true);
+  };
+  const limpiar = () => { setDisplay('0'); setPrevVal(null); setOp(null); setEsperando(false); setHistorial(''); };
+  const borrar  = () => { if (esperando) return; setDisplay(display.length > 1 ? display.slice(0, -1) : '0'); };
+
+  return (
+    <div className="flex flex-col gap-2 bg-gray-50 border border-gray-200 rounded-2xl p-3">
+      <div className="bg-gray-900 rounded-xl px-3 py-2.5 flex flex-col items-end gap-0.5">
+        <p className="text-gray-500 text-xs h-4 tabular-nums truncate w-full text-right">{historial}</p>
+        <p className="text-white text-2xl font-mono tabular-nums leading-tight">
+          {Number(display).toLocaleString('es-CO')}
+        </p>
+      </div>
+      <div className="grid grid-cols-4 gap-1.5">
+        <CalcBtn ch="C"  onClick={limpiar}           wide />
+        <CalcBtn ch="⌫"  onClick={borrar} />
+        <CalcBtn ch="÷"  onClick={() => presOp('÷')} accent active={op === '÷' && esperando} />
+        {[7, 8, 9].map((n) => <CalcBtn key={n} ch={String(n)} onClick={() => presNum(n)} />)}
+        <CalcBtn ch="×"  onClick={() => presOp('×')} accent active={op === '×' && esperando} />
+        {[4, 5, 6].map((n) => <CalcBtn key={n} ch={String(n)} onClick={() => presNum(n)} />)}
+        <CalcBtn ch="−"  onClick={() => presOp('-')} accent active={op === '-' && esperando} />
+        {[1, 2, 3].map((n) => <CalcBtn key={n} ch={String(n)} onClick={() => presNum(n)} />)}
+        <CalcBtn ch="+"  onClick={() => presOp('+')} accent active={op === '+' && esperando} />
+        <CalcBtn ch="0"  onClick={() => presNum(0)}  wide />
+        <CalcBtn ch="."  onClick={presDecimal} />
+        <CalcBtn ch="="  onClick={igual} />
+      </div>
+      <Button size="sm" className="w-full" onClick={() => onUsar(display)} disabled={display === '0'}>
+        Usar {formatCOP(Math.round(Number(display) || 0))}
+      </Button>
+    </div>
+  );
+}
+
+// ─── modal abono rápido ───────────────────────────────────────────────────────
+
+function ModalAbonoRapido({ acreedorId, acreedorNombre, cargo, onClose }) {
+  const queryClient   = useQueryClient();
+  const [valor,       setValor]       = useState('');
+  const [descripcion, setDescripcion] = useState('');
+  const [mostrarCalc, setMostrarCalc] = useState(false);
+  const [error,       setError]       = useState('');
+
+  const pendiente    = Number(cargo.saldo_pendiente);
+  const tituloCompra = cargo.compra_id
+    ? `Compra #${String(cargo.compra_id).padStart(5, '0')}`
+    : (cargo.descripcion || 'Cargo');
 
   const mutation = useMutation({
     mutationFn: () => registrarMovAcreedor(acreedorId, {
-      tipo:              form.tipo,
-      descripcion:       form.descripcion,
-      valor:             Number(form.valor),
-      registrar_en_caja: esAbono,
-      metodo:            metodoPago,
-      cargo_id:          esAbono ? cargoId : null,
+      tipo:              'Abono',
+      valor:             Number(valor),
+      descripcion:       descripcion.trim() || undefined,
+      cargo_id:          cargo.id,
+      registrar_en_caja: true,
+      metodo:            'Efectivo',
     }),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['acreedor',          acreedorId], exact: false });
-      await queryClient.invalidateQueries({ queryKey: ['cargos-abiertos',   acreedorId], exact: false });
-      await queryClient.invalidateQueries({ queryKey: ['compras-con-saldo', acreedorId], exact: false });
-      await queryClient.invalidateQueries({ queryKey: ['abonos-cargo'],                  exact: false });
-      await queryClient.invalidateQueries({ queryKey: ['acreedores'],                    exact: false });
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['compras-con-saldo', acreedorId], exact: false });
+      queryClient.invalidateQueries({ queryKey: ['acreedores'],                    exact: false });
+      queryClient.invalidateQueries({ queryKey: ['abonos-cargo', acreedorId, cargo.id], exact: false });
       onClose();
     },
     onError: (err) => setError(err.response?.data?.error || 'Error al registrar'),
   });
 
   return (
-    <Modal open onClose={onClose} title={`Movimiento — ${nombreProveedor}`} size="sm">
+    <Modal open onClose={onClose} title={`Abonar — ${tituloCompra}`} size="sm">
       <div className="flex flex-col gap-4">
-
-        <div className="flex gap-2">
-          {['Abono', 'Cargo'].map((t) => (
-            <button key={t} type="button"
-              onClick={() => { setForm({ ...form, tipo: t }); setCargoId(null); }}
-              className={`flex-1 py-2.5 rounded-xl text-sm font-medium border transition-all
-                ${form.tipo === t
-                  ? t === 'Cargo'
-                    ? 'bg-red-50 border-red-300 text-red-700'
-                    : 'bg-green-50 border-green-300 text-green-700'
-                  : 'bg-gray-50 border-gray-200 text-gray-600'}`}>
-              {t === 'Abono' ? 'Abono (pago)' : 'Cargo (nueva deuda)'}
-            </button>
-          ))}
+        <div className="bg-red-50 border border-red-100 rounded-xl px-4 py-3">
+          <p className="text-xs text-red-400 mb-0.5">Saldo pendiente · {acreedorNombre}</p>
+          <p className="text-2xl font-bold text-red-600">{formatCOP(pendiente)}</p>
         </div>
-
-        <Input label="Descripción" placeholder="Ej: Pago factura mayo"
-          value={form.descripcion}
-          onChange={(e) => setForm({ ...form, descripcion: e.target.value })} />
-
-        <div className="flex flex-col gap-1">
-          <label className="text-sm font-medium text-gray-700">Valor</label>
-          <InputMoneda value={form.valor} onChange={(val) => setForm({ ...form, valor: val })}
-            placeholder="0"
-            className="w-full px-3 py-2 bg-gray-100 rounded-xl text-sm
-              focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all" />
-        </div>
-
-        {esAbono && (
-          <div className="flex flex-col gap-2">
-            <p className="text-sm font-medium text-gray-700">
-              Aplicar a cargo pendiente <span className="text-xs font-normal text-gray-400">(opcional)</span>
-            </p>
-            {loadingCargos ? (
-              <Spinner className="py-3" />
-            ) : cargosAbiertos.length === 0 ? (
-              <p className="text-xs text-gray-400 bg-gray-50 rounded-xl px-3 py-2">
-                No hay cargos pendientes sin saldar
-              </p>
-            ) : (
-              <div className="flex flex-col gap-1.5 max-h-44 overflow-y-auto pr-0.5">
-                {cargosAbiertos.map((c) => {
-                  const sel = cargoId === c.id;
-                  return (
-                    <button key={c.id} type="button"
-                      onClick={() => setCargoId(sel ? null : c.id)}
-                      className={`flex items-start justify-between gap-3 text-left px-3 py-2.5 rounded-xl border transition-all
-                        ${sel ? 'bg-green-50 border-green-300' : 'bg-gray-50 border-gray-200 hover:border-gray-300'}`}>
-                      <div className="flex-1 min-w-0">
-                        <p className={`text-xs font-medium truncate ${sel ? 'text-green-800' : 'text-gray-700'}`}>
-                          {c.descripcion || 'Sin descripción'}
-                        </p>
-                        <p className="text-xs text-gray-400 mt-0.5">{formatFechaHora(c.fecha)}</p>
-                      </div>
-                      <div className="text-right flex-shrink-0">
-                        <p className="text-xs text-gray-400 line-through">{formatCOP(c.valor_original)}</p>
-                        <p className={`text-xs font-bold ${sel ? 'text-green-700' : 'text-red-500'}`}>
-                          Pendiente: {formatCOP(c.saldo_pendiente)}
-                        </p>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        )}
 
         <div className="flex flex-col gap-1.5">
-          <label className="text-sm font-medium text-gray-700">Método de pago</label>
-          <div className="flex gap-2 flex-wrap">
-            {metodosPago.map((m) => (
-              <button key={m.id} type="button" onClick={() => setMetodoPago(m.id)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition-all
-                  ${metodoPago === m.id
-                    ? 'bg-blue-50 border-blue-300 text-blue-700'
-                    : 'bg-gray-50 border-gray-200 text-gray-600 hover:border-gray-300'}`}>
-                {m.label}
-              </button>
-            ))}
+          <div className="flex items-center justify-between">
+            <label className="text-sm font-medium text-gray-700">
+              Valor <span className="text-red-400 text-xs">*</span>
+            </label>
+            <button type="button" onClick={() => setMostrarCalc((v) => !v)}
+              className="flex items-center gap-1 text-xs text-blue-500 hover:text-blue-700 transition-colors">
+              <Calculator size={12} />
+              {mostrarCalc ? 'Cerrar' : 'Calculadora'}
+            </button>
           </div>
+          <InputMoneda
+            value={valor}
+            onChange={setValor}
+            placeholder="0"
+            autoFocus
+            className="w-full px-3 py-2 bg-gray-100 rounded-xl text-sm
+              focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"
+          />
         </div>
 
-        {esAbono && (
-          <p className="text-xs text-blue-700 bg-blue-50 border border-blue-100 rounded-xl px-3 py-2">
-            El abono se registrará en caja como egreso automáticamente.
-          </p>
+        {mostrarCalc && (
+          <Calculadora onUsar={(val) => {
+            setValor(String(Math.round(Number(val) || 0)));
+            setMostrarCalc(false);
+          }} />
         )}
+
+        <Input
+          label="Descripción (opcional)"
+          placeholder="Ej: Pago parcial enero"
+          value={descripcion}
+          onChange={(e) => setDescripcion(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && valor && Number(valor) > 0) mutation.mutate();
+          }}
+        />
 
         {error && <p className="text-sm text-red-500">{error}</p>}
 
         <div className="flex gap-2">
           <Button variant="secondary" className="flex-1" onClick={onClose}>Cancelar</Button>
-          <Button className="flex-1" loading={mutation.isPending}
-            disabled={!form.valor || Number(form.valor) <= 0}
-            onClick={() => mutation.mutate()}>
+          <Button
+            className="flex-1"
+            loading={mutation.isPending}
+            disabled={!valor || Number(valor) <= 0}
+            onClick={() => mutation.mutate()}
+          >
             Registrar
           </Button>
         </div>
@@ -681,201 +721,372 @@ function ModalMovimientoProveedor({ acreedorId, nombreProveedor, onClose, cargoI
   );
 }
 
-// ─── Vista por cargo (proveedores) ────────────────────────────────────────────
+// ─── modal nuevo cargo ────────────────────────────────────────────────────────
 
-const ESTADO_CFG_PROV = {
-  Saldada:   { variant: 'green',  ring: 'border-green-200 bg-green-50/40'  },
-  Parcial:   { variant: 'yellow', ring: 'border-amber-200 bg-amber-50/40'  },
-  Pendiente: { variant: 'red',    ring: 'border-red-200   bg-red-50/40'    },
-};
+function ModalNuevoCargo({ acreedorId, acreedorNombre, onClose }) {
+  const queryClient   = useQueryClient();
+  const [valor,       setValor]       = useState('');
+  const [descripcion, setDescripcion] = useState('');
+  const [mostrarCalc, setMostrarCalc] = useState(false);
+  const [error,       setError]       = useState('');
 
-function ModalDetalleCargoProveedor({ cargo, acreedorId, onClose, onAbonar }) {
-  const [verCompra, setVerCompra] = useState(false);
-
-  const { data: abonos, isLoading: loadingAbonos } = useQuery({
-    queryKey: ['abonos-cargo', acreedorId, cargo.id],
-    queryFn:  () => getAbonosPorCargo(acreedorId, cargo.id).then((r) => r.data.data),
+  const mutation = useMutation({
+    mutationFn: () => registrarMovAcreedor(acreedorId, {
+      tipo:              'Cargo',
+      valor:             Number(valor),
+      descripcion:       descripcion.trim() || undefined,
+      registrar_en_caja: false,
+      metodo:            null,
+    }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['compras-con-saldo', acreedorId], exact: false });
+      queryClient.invalidateQueries({ queryKey: ['acreedores'],                    exact: false });
+      onClose();
+    },
+    onError: (err) => setError(err.response?.data?.error || 'Error al registrar'),
   });
-  const listaAbonos = Array.isArray(abonos) ? abonos : [];
-  const cfg = ESTADO_CFG_PROV[cargo.estado_pago] || ESTADO_CFG_PROV.Pendiente;
 
   return (
-    <Modal open onClose={onClose} title="Detalle del cargo" size="lg">
+    <Modal open onClose={onClose} title={`Agregar cargo — ${acreedorNombre}`} size="sm">
       <div className="flex flex-col gap-4">
-        <div className="grid grid-cols-2 gap-2">
-          <div className="bg-gray-50 rounded-xl p-3">
-            <p className="text-xs text-gray-400 mb-0.5">Fecha</p>
-            <p className="text-sm font-medium text-gray-800">{formatFechaHora(cargo.fecha)}</p>
+        <Input
+          label="Descripción"
+          placeholder="Ej: Deuda por factura #001..."
+          value={descripcion}
+          onChange={(e) => setDescripcion(e.target.value)}
+          autoFocus
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') document.getElementById('valor-nuevo-cargo-prov')?.focus();
+          }}
+        />
+
+        <div className="flex flex-col gap-1.5">
+          <div className="flex items-center justify-between">
+            <label className="text-sm font-medium text-gray-700">
+              Valor <span className="text-red-400 text-xs">*</span>
+            </label>
+            <button type="button" onClick={() => setMostrarCalc((v) => !v)}
+              className="flex items-center gap-1 text-xs text-blue-500 hover:text-blue-700 transition-colors">
+              <Calculator size={12} />
+              {mostrarCalc ? 'Cerrar' : 'Calculadora'}
+            </button>
           </div>
-          <div className="bg-gray-50 rounded-xl p-3">
-            <p className="text-xs text-gray-400 mb-0.5">Estado</p>
-            <Badge variant={cfg.variant}>{cargo.estado_pago}</Badge>
-          </div>
-          <div className="bg-red-50 rounded-xl p-3">
-            <p className="text-xs text-red-400 mb-0.5">Total cargo</p>
-            <p className="text-sm font-bold text-red-600">{formatCOP(cargo.valor_original)}</p>
-          </div>
-          <div className={`rounded-xl p-3 ${Number(cargo.saldo_pendiente) > 0 ? 'bg-amber-50' : 'bg-green-50'}`}>
-            <p className={`text-xs mb-0.5 ${Number(cargo.saldo_pendiente) > 0 ? 'text-amber-500' : 'text-green-500'}`}>
-              Saldo pendiente
-            </p>
-            <p className={`text-sm font-bold ${Number(cargo.saldo_pendiente) > 0 ? 'text-amber-600' : 'text-green-600'}`}>
-              {formatCOP(cargo.saldo_pendiente)}
-            </p>
-          </div>
+          <InputMoneda
+            id="valor-nuevo-cargo-prov"
+            value={valor}
+            onChange={setValor}
+            placeholder="0"
+            className="w-full px-3 py-2 bg-gray-100 rounded-xl text-sm
+              focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"
+          />
         </div>
 
-        <div className="bg-gray-50 rounded-xl px-3 py-2.5">
-          <p className="text-xs text-gray-400 mb-0.5">Descripción</p>
-          <p className="text-sm text-gray-700">{cargo.descripcion || '—'}</p>
-        </div>
-
-        {cargo.compra_id && (
-          <button onClick={() => setVerCompra(true)}
-            className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-800
-              bg-blue-50 border border-blue-100 rounded-xl px-3 py-2 transition-colors w-fit">
-            <ChevronRight size={14} />
-            Ver Compra #{String(cargo.compra_id).padStart(5, '0')}
-          </button>
+        {mostrarCalc && (
+          <Calculadora onUsar={(val) => {
+            setValor(String(Math.round(Number(val) || 0)));
+            setMostrarCalc(false);
+          }} />
         )}
 
-        <div>
-          <p className="text-sm font-semibold text-gray-700 mb-2">Pagos aplicados</p>
-          {loadingAbonos ? <Spinner className="py-4" /> : listaAbonos.length === 0 ? (
-            <p className="text-xs text-gray-400 bg-gray-50 rounded-xl px-3 py-2.5">
-              Sin pagos aplicados todavía
-            </p>
-          ) : (
-            <div className="flex flex-col gap-1.5">
-              {listaAbonos.map((a) => (
-                <div key={a.id}
-                  className="bg-green-50 border border-green-100 rounded-xl px-3 py-2.5
-                    flex justify-between items-start gap-2">
-                  <div className="min-w-0">
-                    <p className="text-xs font-medium text-gray-700 truncate">{a.descripcion || 'Abono'}</p>
-                    <p className="text-xs text-gray-400 mt-0.5">
-                      {formatFechaHora(a.fecha)}{a.metodo && ` · ${a.metodo}`}
-                      {a.usuario_nombre && ` · ${a.usuario_nombre}`}
-                    </p>
-                  </div>
-                  <span className="text-sm font-bold text-green-700 flex-shrink-0">-{formatCOP(a.valor)}</span>
-                </div>
-              ))}
-              <div className="flex justify-between items-center bg-green-100 border border-green-200
-                rounded-xl px-3 py-2 mt-1">
-                <span className="text-xs font-semibold text-green-700">Total pagado</span>
-                <span className="text-sm font-bold text-green-700">{formatCOP(cargo.total_abonado)}</span>
-              </div>
-            </div>
-          )}
-        </div>
+        {error && <p className="text-sm text-red-500">{error}</p>}
 
         <div className="flex gap-2">
-          {cargo.estado_pago !== 'Saldada' && (
-            <Button className="flex-1" onClick={() => { onClose(); onAbonar(cargo.id); }}>
-              Abonar a este cargo
-            </Button>
-          )}
-          <Button variant="secondary" className="flex-1" onClick={onClose}>Cerrar</Button>
+          <Button variant="secondary" className="flex-1" onClick={onClose}>Cancelar</Button>
+          <Button
+            className="flex-1"
+            loading={mutation.isPending}
+            disabled={!valor || Number(valor) <= 0}
+            onClick={() => mutation.mutate()}
+          >
+            Agregar
+          </Button>
         </div>
       </div>
-
-      {verCompra && cargo.compra_id && (
-        <ModalDetalleCompra compraId={cargo.compra_id} onClose={() => setVerCompra(false)} />
-      )}
     </Modal>
   );
 }
 
-function VistaCargoProveedor({ acreedorId, onAbonar }) {
-  const [cargoDetalle, setCargoDetalle] = useState(null);
+// ─── historial de abonos ──────────────────────────────────────────────────────
 
+function AbonosHistorial({ acreedorId, cargoId }) {
   const { data, isLoading } = useQuery({
-    queryKey:  ['compras-con-saldo', acreedorId],
-    queryFn:   () => getComprasConSaldo(acreedorId).then((r) => r.data.data),
+    queryKey: ['abonos-cargo', acreedorId, cargoId],
+    queryFn:  () => getAbonosPorCargo(acreedorId, cargoId).then((r) => r.data.data),
     staleTime: 0,
   });
-  const cargos = Array.isArray(data) ? data : [];
+  const abonos = Array.isArray(data) ? data : [];
 
-  if (isLoading) return <Spinner className="py-10" />;
-  if (cargos.length === 0)
-    return (
-      <EmptyState icon={Wallet} titulo="Sin cargos"
-        descripcion="No hay compras a crédito registradas con este proveedor" />
-    );
+  if (isLoading) return <Spinner className="py-3" />;
+  if (abonos.length === 0)
+    return <p className="text-xs text-gray-400 italic">Sin abonos registrados aún</p>;
 
   return (
-    <div className="flex flex-col gap-2">
-      <p className="text-xs text-gray-400 px-1 select-none">
-        {cargos.length} cargo(s) · Doble clic para ver detalle completo
-      </p>
-      {cargos.map((cargo) => {
-        const cfg      = ESTADO_CFG_PROV[cargo.estado_pago] || ESTADO_CFG_PROV.Pendiente;
-        const pendiente = Number(cargo.saldo_pendiente);
-        const pagado    = Number(cargo.total_abonado);
-        return (
-          <div key={cargo.id}
-            onDoubleClick={() => setCargoDetalle(cargo)}
-            className={`bg-white border rounded-2xl p-3.5 transition-all hover:shadow-sm
-              cursor-default select-none ${cfg.ring}`}>
-            <div className="flex items-start justify-between gap-3">
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 flex-wrap mb-1">
-                  <Badge variant={cfg.variant}>{cargo.estado_pago}</Badge>
-                  {cargo.compra_id && (
-                    <span className="text-xs text-blue-400 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100">
-                      Compra #{String(cargo.compra_id).padStart(5, '0')}
-                    </span>
-                  )}
-                </div>
-                <p className="text-sm font-medium text-gray-800 truncate">
-                  {cargo.descripcion || 'Sin descripción'}
-                </p>
-                <p className="text-xs text-gray-400 mt-0.5">{formatFechaHora(cargo.fecha)}</p>
-                <div className="flex items-center gap-3 mt-2 flex-wrap">
-                  <span className="text-xs text-gray-500">
-                    Total: <span className="font-semibold text-gray-700">{formatCOP(cargo.valor_original)}</span>
-                  </span>
-                  {pagado > 0 && (
-                    <span className="text-xs text-green-600">
-                      Pagado: <span className="font-semibold">{formatCOP(pagado)}</span>
-                    </span>
-                  )}
-                  {pendiente > 0 && (
-                    <span className="text-xs text-red-500">
-                      Pendiente: <span className="font-semibold">{formatCOP(pendiente)}</span>
-                    </span>
-                  )}
-                </div>
-              </div>
-              <div className="flex flex-col items-end gap-2 flex-shrink-0">
-                <span className="text-sm font-bold text-gray-800">{formatCOP(cargo.valor_original)}</span>
-                {cargo.estado_pago !== 'Saldada' && (
-                  <button
-                    onClick={(e) => { e.stopPropagation(); onAbonar(cargo.id); }}
-                    className="px-3 py-1 rounded-lg text-xs font-semibold bg-green-50 text-green-700
-                      border border-green-200 hover:bg-green-100 transition-colors">
-                    Abonar
-                  </button>
-                )}
-                <button
-                  onClick={(e) => { e.stopPropagation(); setCargoDetalle(cargo); }}
-                  className="p-1 rounded-lg text-gray-300 hover:text-blue-500 transition-colors"
-                  title="Ver detalle">
-                  <ChevronRight size={14} />
-                </button>
-              </div>
-            </div>
+    <div className="flex flex-col gap-1.5">
+      {abonos.map((a) => (
+        <div key={a.id}
+          className="flex justify-between items-center gap-2 bg-green-50 border border-green-100
+            rounded-xl px-3 py-2">
+          <div className="min-w-0">
+            <p className="text-xs font-medium text-gray-700 truncate">{a.descripcion || 'Abono'}</p>
+            <p className="text-xs text-gray-400 mt-0.5">
+              {formatFechaHora(a.fecha)}{a.usuario_nombre && ` · ${a.usuario_nombre}`}
+            </p>
           </div>
-        );
-      })}
+          <span className="text-sm font-bold text-green-700 flex-shrink-0">
+            +{formatCOP(a.valor)}
+          </span>
+        </div>
+      ))}
+      <div className="flex justify-between px-1 pt-1 border-t border-gray-100">
+        <span className="text-xs text-gray-400">Total abonado</span>
+        <span className="text-xs font-bold text-green-700">
+          {formatCOP(abonos.reduce((s, a) => s + Number(a.valor), 0))}
+        </span>
+      </div>
+    </div>
+  );
+}
 
-      {cargoDetalle && (
-        <ModalDetalleCargoProveedor
-          cargo={cargoDetalle}
+// ─── cargo activo ─────────────────────────────────────────────────────────────
+
+function CargoActivo({ cargo, acreedorId, onAbonar }) {
+  const [historialAbierto, setHistorialAbierto] = useState(false);
+  const [modalCompra,      setModalCompra]      = useState(false);
+
+  const cfg       = ESTADO_CFG[cargo.estado_pago] || ESTADO_CFG.Pendiente;
+  const original  = Number(cargo.valor_original);
+  const pagado    = Number(cargo.total_abonado);
+  const pendiente = Number(cargo.saldo_pendiente);
+  const progreso  = original > 0 ? Math.min((pagado / original) * 100, 100) : 0;
+
+  return (
+    <div
+      className={`border rounded-2xl overflow-hidden ${cfg.ring}`}
+      onDoubleClick={() => cargo.compra_id && setModalCompra(true)}
+      title={cargo.compra_id ? 'Doble clic para ver detalle de la compra' : undefined}
+    >
+      <div className="p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap mb-1.5">
+              <Badge variant={cfg.variant}>{cargo.estado_pago}</Badge>
+              {cargo.compra_id && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); setModalCompra(true); }}
+                  className="text-xs text-blue-500 bg-blue-50 px-2 py-0.5 rounded-lg border
+                    border-blue-100 hover:bg-blue-100 transition-colors">
+                  Ver compra #{String(cargo.compra_id).padStart(5, '0')}
+                </button>
+              )}
+            </div>
+            <p className="text-sm font-semibold text-gray-900 leading-snug">
+              {cargo.descripcion || 'Sin descripción'}
+            </p>
+            <p className="text-xs text-gray-400 mt-0.5">{formatFechaHora(cargo.fecha)}</p>
+          </div>
+
+          <div className="flex flex-col items-end gap-2 flex-shrink-0">
+            <p className="text-base font-bold text-gray-900">{formatCOP(original)}</p>
+            <button
+              onClick={(e) => { e.stopPropagation(); onAbonar(cargo); }}
+              className="px-3 py-1.5 rounded-xl text-xs font-bold bg-green-600 text-white
+                hover:bg-green-700 active:scale-95 transition-all shadow-sm">
+              Abonar
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-3">
+          <div className="flex justify-between text-xs mb-1">
+            <span className="text-green-600 font-medium">
+              {pagado > 0 ? `Pagado: ${formatCOP(pagado)}` : 'Sin pagos aún'}
+            </span>
+            {pendiente > 0 && (
+              <span className="text-red-500 font-medium">Falta: {formatCOP(pendiente)}</span>
+            )}
+          </div>
+          <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
+            <div
+              className={`h-full rounded-full transition-all duration-500
+                ${pagado > 0 ? 'bg-blue-400' : 'bg-gray-300'}`}
+              style={{ width: `${progreso}%` }}
+            />
+          </div>
+        </div>
+
+        <button
+          onClick={(e) => { e.stopPropagation(); setHistorialAbierto((v) => !v); }}
+          className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-600
+            mt-2.5 transition-colors">
+          {historialAbierto ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+          {historialAbierto ? 'Ocultar historial' : 'Ver historial de pagos'}
+        </button>
+      </div>
+
+      {historialAbierto && (
+        <div className="border-t border-dashed border-gray-200 px-4 py-3 bg-white/70">
+          <AbonosHistorial acreedorId={acreedorId} cargoId={cargo.id} />
+        </div>
+      )}
+
+      {modalCompra && cargo.compra_id && (
+        <ModalDetalleCompra compraId={cargo.compra_id} onClose={() => setModalCompra(false)} />
+      )}
+    </div>
+  );
+}
+
+// ─── cargo saldado ────────────────────────────────────────────────────────────
+
+function CargoSaldado({ cargo, acreedorId }) {
+  const [expandido,   setExpandido]   = useState(false);
+  const [modalCompra, setModalCompra] = useState(false);
+
+  return (
+    <div
+      className="border border-green-100 rounded-2xl overflow-hidden bg-green-50/30"
+      onDoubleClick={() => cargo.compra_id && setModalCompra(true)}
+      title={cargo.compra_id ? 'Doble clic para ver detalle de la compra' : undefined}
+    >
+      <button
+        onClick={() => setExpandido((v) => !v)}
+        className="w-full flex items-center justify-between px-4 py-3 text-left
+          hover:bg-green-50/60 transition-colors">
+        <div className="flex-1 min-w-0 flex items-center gap-2 flex-wrap">
+          <Badge variant="green">Saldada</Badge>
+          {cargo.compra_id && (
+            <span className="text-xs text-blue-400">
+              Compra #{String(cargo.compra_id).padStart(5, '0')}
+            </span>
+          )}
+          <span className="text-xs text-gray-600 font-medium truncate">
+            {cargo.descripcion || 'Sin descripción'}
+          </span>
+          <span className="text-xs text-gray-400">{formatFechaHora(cargo.fecha)}</span>
+        </div>
+        <div className="flex items-center gap-3 flex-shrink-0">
+          <span className="text-sm font-bold text-gray-700">{formatCOP(cargo.valor_original)}</span>
+          {expandido
+            ? <ChevronUp size={14} className="text-gray-400" />
+            : <ChevronDown size={14} className="text-gray-400" />}
+        </div>
+      </button>
+
+      {expandido && (
+        <div className="border-t border-dashed border-green-100 px-4 py-3 bg-white/60">
+          {cargo.compra_id && (
+            <button
+              onClick={(e) => { e.stopPropagation(); setModalCompra(true); }}
+              className="mb-2 text-xs text-blue-500 hover:text-blue-700 transition-colors">
+              Ver productos de compra #{String(cargo.compra_id).padStart(5, '0')} →
+            </button>
+          )}
+          <p className="text-xs font-semibold text-gray-500 mb-2">Historial de pagos</p>
+          <AbonosHistorial acreedorId={acreedorId} cargoId={cargo.id} />
+        </div>
+      )}
+
+      {modalCompra && cargo.compra_id && (
+        <ModalDetalleCompra compraId={cargo.compra_id} onClose={() => setModalCompra(false)} />
+      )}
+    </div>
+  );
+}
+
+// ─── sección cuenta corriente ─────────────────────────────────────────────────
+
+function CuentaCorrienteSection({ acreedorId, acreedorNombre }) {
+  const [cargoAbono,       setCargoAbono]       = useState(null);
+  const [modalCargo,       setModalCargo]       = useState(false);
+  const [saldadasAbiertas, setSaldadasAbiertas] = useState(false);
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['compras-con-saldo', acreedorId],
+    queryFn:  () => getComprasConSaldo(acreedorId).then((r) => r.data.data),
+    staleTime: 0,
+  });
+  const cargos  = Array.isArray(data) ? data : [];
+  const activos  = cargos.filter((c) => c.estado_pago !== 'Saldada');
+  const saldados = cargos.filter((c) => c.estado_pago === 'Saldada');
+
+  if (isLoading) return <Spinner className="py-10" />;
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-gray-400">
+          {activos.length} pendiente(s) · {saldados.length} saldada(s)
+        </p>
+        <button
+          onClick={() => setModalCargo(true)}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold
+            border border-gray-200 bg-white text-gray-600
+            hover:border-blue-300 hover:text-blue-600 hover:bg-blue-50 transition-all">
+          <Plus size={13} /> Agregar cargo
+        </button>
+      </div>
+
+      {activos.length === 0 ? (
+        <div className="bg-green-50 border border-green-100 rounded-xl px-4 py-3 text-center">
+          <p className="text-green-700 text-sm font-medium">✓ Sin cargos pendientes</p>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-2.5">
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide px-0.5">
+            Pendientes ({activos.length})
+          </p>
+          {activos.map((c) => (
+            <CargoActivo
+              key={c.id}
+              cargo={c}
+              acreedorId={acreedorId}
+              onAbonar={(cargo) => setCargoAbono(cargo)}
+            />
+          ))}
+        </div>
+      )}
+
+      {saldados.length > 0 && (
+        <div className="border border-gray-100 rounded-2xl overflow-hidden mt-1">
+          <button
+            onClick={() => setSaldadasAbiertas((v) => !v)}
+            className="w-full flex items-center justify-between px-4 py-3
+              bg-gray-50 hover:bg-gray-100 transition-colors">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                Historial saldadas
+              </span>
+              <span className="text-xs bg-gray-200 text-gray-500 px-2 py-0.5 rounded-full">
+                {saldados.length}
+              </span>
+            </div>
+            {saldadasAbiertas
+              ? <ChevronUp size={15} className="text-gray-400" />
+              : <ChevronDown size={15} className="text-gray-400" />}
+          </button>
+          {saldadasAbiertas && (
+            <div className="flex flex-col gap-2 p-3">
+              {saldados.map((c) => (
+                <CargoSaldado key={c.id} cargo={c} acreedorId={acreedorId} />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {cargoAbono && (
+        <ModalAbonoRapido
           acreedorId={acreedorId}
-          onClose={() => setCargoDetalle(null)}
-          onAbonar={(cargoId) => { setCargoDetalle(null); onAbonar(cargoId); }}
+          acreedorNombre={acreedorNombre}
+          cargo={cargoAbono}
+          onClose={() => setCargoAbono(null)}
+        />
+      )}
+      {modalCargo && (
+        <ModalNuevoCargo
+          acreedorId={acreedorId}
+          acreedorNombre={acreedorNombre}
+          onClose={() => setModalCargo(false)}
         />
       )}
     </div>
@@ -885,33 +1096,21 @@ function VistaCargoProveedor({ acreedorId, onAbonar }) {
 // ─── Vista historial proveedor ─────────────────────────────────────────────────
 
 function HistorialProveedor({ proveedor, sucursalKey, sucursalLista, onVolver, onNuevaCompra }) {
-  const queryClient                     = useQueryClient();
   const [compraDetalle, setCompraDetalle] = useState(null);
   const [tabVista,      setTabVista]      = useState('compras');
-  const [modalMov,      setModalMov]      = useState(false);
 
-  // ── Filtros compras ────────────────────────────────────────────────────────
   const [filtroEstado,    setFiltroEstado]    = useState('Todas');
   const [filtroPago,      setFiltroPago]      = useState('Todos');
   const [fechaDesde,      setFechaDesde]      = useState('');
   const [fechaHasta,      setFechaHasta]      = useState('');
   const [busquedaFactura, setBusquedaFactura] = useState('');
 
-  // ── Filtros cuenta corriente ───────────────────────────────────────────────
-  const [cuentaFechaDesde,  setCuentaFechaDesde]  = useState('');
-  const [cuentaFechaHasta,  setCuentaFechaHasta]  = useState('');
-  const [cuentaVistaMode,   setCuentaVistaMode]   = useState('lineal');
-  const [modalMovCargoId,   setModalMovCargoId]   = useState(null);
-  const [cuentaCompraModal, setCuentaCompraModal] = useState(null);
-
-  // ── Compras ────────────────────────────────────────────────────────────────
   const { data: comprasData, isLoading } = useQuery({
     queryKey: ['compras-proveedor', proveedor.id, ...sucursalKey],
     queryFn:  () => getComprasByProveedor(proveedor.id).then((r) => r.data.data),
     enabled:  sucursalLista,
   });
 
-  // ── Acreedor vinculado (lista liviana para saldo) ─────────────────────────
   const { data: acreedoresRaw } = useQuery({
     queryKey: ['acreedores'],
     queryFn:  () => getAcreedores().then((r) => r.data.data),
@@ -921,25 +1120,8 @@ function HistorialProveedor({ proveedor, sucursalKey, sucursalLista, onVolver, o
   const acreedorInfo  = acreedoresAll.find((a) => a.proveedor_id === proveedor.id) || null;
   const saldoAcreedor = acreedorInfo ? Number(acreedorInfo.saldo || 0) : 0;
 
-  // ── Detalle acreedor con movimientos ─────────────────────────────────────
-  const { data: detalleAcreedor, isLoading: loadingAcreedor } = useQuery({
-    queryKey: ['acreedor', acreedorInfo?.id],
-    queryFn:  () => getAcreedorById(acreedorInfo.id).then((r) => r.data.data),
-    enabled:  !!acreedorInfo?.id,
-  });
-
   const compras       = comprasData || [];
   const totalComprado = compras.reduce((s, c) => s + Number(c.total || 0), 0);
-  const movimientosUI = detalleAcreedor?.movimientos
-    ? [...detalleAcreedor.movimientos].reverse()
-    : [];
-
-  const movsFiltrados = movimientosUI.filter((m) => {
-    const f = m.fecha ? m.fecha.slice(0, 10) : '';
-    if (cuentaFechaDesde && f < cuentaFechaDesde) return false;
-    if (cuentaFechaHasta && f > cuentaFechaHasta) return false;
-    return true;
-  });
 
   const comprasFiltradas = compras.filter((c) => {
     if (filtroEstado !== 'Todas' && c.estado !== filtroEstado) return false;
@@ -978,17 +1160,6 @@ function HistorialProveedor({ proveedor, sucursalKey, sucursalLista, onVolver, o
           <ShoppingCart size={14} />
           <span className="hidden sm:inline">Nueva compra</span>
         </Button>
-        <button
-          onClick={() => exportarCuentaExcel({
-            nombre: proveedor.nombre,
-            compras,
-            movimientos: movimientosUI,
-          })}
-          title="Exportar a Excel"
-          className="p-2 rounded-xl border border-gray-200 text-gray-400 hover:text-green-700
-            hover:border-green-300 hover:bg-green-50 transition-colors flex-shrink-0">
-          <Download size={16} />
-        </button>
       </div>
 
       {/* Tarjetas resumen */}
@@ -1014,7 +1185,7 @@ function HistorialProveedor({ proveedor, sucursalKey, sucursalLista, onVolver, o
         )}
       </div>
 
-      {/* Selector de vista (solo si hay acreedor vinculado) */}
+      {/* Selector de vista */}
       {acreedorInfo && (
         <div className="flex gap-1 bg-gray-100 p-1 rounded-xl w-fit">
           {[
@@ -1035,7 +1206,6 @@ function HistorialProveedor({ proveedor, sucursalKey, sucursalLista, onVolver, o
       {/* ── Pestaña: Compras ── */}
       {tabVista === 'compras' && (
         <>
-          {/* Filtros */}
           <div className="flex flex-col gap-2">
             <SearchInput value={busquedaFactura} onChange={setBusquedaFactura}
               placeholder="Buscar por N° factura o ID…" />
@@ -1134,123 +1304,9 @@ function HistorialProveedor({ proveedor, sucursalKey, sucursalLista, onVolver, o
 
       {/* ── Pestaña: Cuenta corriente ── */}
       {tabVista === 'cuenta' && acreedorInfo && (
-        <div className="flex flex-col gap-3">
-          <div className="flex items-center justify-between flex-wrap gap-2">
-            <h3 className="text-sm font-semibold text-gray-600">Cuenta corriente</h3>
-            <div className="flex items-center gap-2">
-              {/* Sub-toggle vista */}
-              <div className="flex gap-1 bg-gray-100 p-0.5 rounded-xl">
-                {[{ id: 'lineal', label: 'Movimientos' }, { id: 'por_cargo', label: 'Por cargo' }].map((v) => (
-                  <button key={v.id} onClick={() => setCuentaVistaMode(v.id)}
-                    className={`px-3 py-1 rounded-lg text-xs font-medium transition-all
-                      ${cuentaVistaMode === v.id ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
-                    {v.label}
-                  </button>
-                ))}
-              </div>
-              <Button size="sm" onClick={() => setModalMov(true)}>
-                <PenLine size={14} /> Registrar
-              </Button>
-            </div>
-          </div>
-
-          {/* ── Sub-vista: Por cargo ── */}
-          {cuentaVistaMode === 'por_cargo' && (
-            <VistaCargoProveedor
-              acreedorId={acreedorInfo.id}
-              onAbonar={(cargoId) => { setModalMovCargoId(cargoId); setModalMov(true); }}
-            />
-          )}
-
-          {/* ── Sub-vista: Movimientos lineales ── */}
-          {cuentaVistaMode === 'lineal' && (<>
-          {/* Filtros de fecha */}
-          <div className="flex gap-1.5 items-center flex-wrap">
-            <input type="date" value={cuentaFechaDesde}
-              onChange={(e) => setCuentaFechaDesde(e.target.value)}
-              className="flex-1 px-2 py-1.5 text-xs border border-gray-200 rounded-lg text-gray-600 bg-white focus:outline-none focus:ring-1 focus:ring-blue-400" />
-            <span className="text-gray-300 text-xs flex-shrink-0">—</span>
-            <input type="date" value={cuentaFechaHasta}
-              onChange={(e) => setCuentaFechaHasta(e.target.value)}
-              className="flex-1 px-2 py-1.5 text-xs border border-gray-200 rounded-lg text-gray-600 bg-white focus:outline-none focus:ring-1 focus:ring-blue-400" />
-            {(cuentaFechaDesde || cuentaFechaHasta) && (
-              <button onClick={() => { setCuentaFechaDesde(''); setCuentaFechaHasta(''); }}
-                className="text-xs text-gray-400 hover:text-red-500 px-1 flex-shrink-0 transition-colors">✕</button>
-            )}
-          </div>
-
-          {loadingAcreedor ? <Spinner className="py-10" /> :
-           movsFiltrados.length === 0 ? (
-            <EmptyState icon={Wallet} titulo="Sin movimientos"
-              descripcion={movimientosUI.length === 0
-                ? 'Aún no hay cargos ni abonos con este proveedor'
-                : 'Ningún movimiento en ese rango de fechas'} />
-           ) : (
-            <div className="flex flex-col gap-2">
-              <p className="text-xs text-gray-400 px-1 select-none">Doble clic en movimientos con compra para ver detalle</p>
-              {movsFiltrados.map((m) => (
-                <div key={m.id}
-                  onDoubleClick={() => m.compra_id && setCuentaCompraModal(m.compra_id)}
-                  className={`bg-white border border-gray-100 rounded-xl p-3 flex items-start justify-between gap-3
-                    ${m.compra_id ? 'cursor-pointer hover:border-blue-200 hover:shadow-sm transition-all' : ''}`}
-                  title={m.compra_id ? 'Doble clic para ver detalle de compra' : undefined}>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <Badge variant={m.tipo === 'Cargo' ? 'red' : 'green'}>{m.tipo}</Badge>
-                      <span className="text-sm text-gray-700 truncate">{m.descripcion}</span>
-                      {m.compra_id && (
-                        <span className="text-xs text-blue-400 bg-blue-50 px-1.5 py-0.5 rounded">
-                          Compra #{m.compra_id}
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-xs text-gray-400 mt-1">{formatFechaHora(m.fecha)}</p>
-                    <div className="flex items-center gap-1 mt-1 text-xs text-gray-400">
-                      <span>{formatCOP(m.saldo_antes)}</span>
-                      <span>→</span>
-                      <span className="font-semibold text-gray-600">{formatCOP(m.saldo_despues)}</span>
-                    </div>
-                    {m.tipo === 'Abono' && m.cargo_id && (
-                      <p className="text-xs text-green-700 bg-green-50 border border-green-100 rounded-lg px-2 py-1 mt-1.5">
-                        → Abono a: <span className="font-medium">{m.cargo_descripcion || `Cargo #${m.cargo_id}`}</span>
-                      </p>
-                    )}
-                  </div>
-                  <div className="flex flex-col items-end gap-2 flex-shrink-0">
-                    <span className={`text-sm font-bold ${m.tipo === 'Cargo' ? 'text-red-500' : 'text-green-600'}`}>
-                      {m.tipo === 'Cargo' ? '+' : '-'}{formatCOP(m.valor)}
-                    </span>
-                    {m.compra_id && (
-                      <button onClick={() => setCuentaCompraModal(m.compra_id)}
-                        className="p-1 rounded-lg hover:bg-blue-100 text-gray-300 hover:text-blue-600 transition-colors"
-                        title="Ver compra">
-                        <ChevronRight size={14} />
-                      </button>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-           )}
-
-          {cuentaCompraModal && (
-            <ModalDetalleCompra compraId={cuentaCompraModal} onClose={() => setCuentaCompraModal(null)} />
-          )}
-          </>)}
-        </div>
-      )}
-
-      {/* Modal registrar movimiento */}
-      {modalMov && acreedorInfo && (
-        <ModalMovimientoProveedor
+        <CuentaCorrienteSection
           acreedorId={acreedorInfo.id}
-          nombreProveedor={proveedor.nombre}
-          cargoIdInicial={modalMovCargoId}
-          onClose={() => {
-            setModalMov(false);
-            setModalMovCargoId(null);
-            queryClient.invalidateQueries({ queryKey: ['acreedor', acreedorInfo.id], exact: false });
-          }}
+          acreedorNombre={proveedor.nombre}
         />
       )}
     </div>
