@@ -10,18 +10,18 @@ import {
 } from '../../api/acreedores.api';
 import { getConfig, verificarPin } from '../../api/config.api';
 import { formatCOP, formatFechaHora } from '../../utils/formatters';
-import { useAuth }      from '../../context/useAuth';
-import { Button }       from '../../components/ui/Button';
-import { Input }        from '../../components/ui/Input';
-import { InputMoneda }  from '../../components/ui/InputMoneda';
-import { Modal }        from '../../components/ui/Modal';
-import { Badge }        from '../../components/ui/Badge';
-import { Spinner }      from '../../components/ui/Spinner';
-import { EmptyState }   from '../../components/ui/EmptyState';
-import { SearchInput }  from '../../components/ui/SearchInput';
+import { useAuth }     from '../../context/useAuth';
+import { Button }      from '../../components/ui/Button';
+import { Input }       from '../../components/ui/Input';
+import { InputMoneda } from '../../components/ui/InputMoneda';
+import { Modal }       from '../../components/ui/Modal';
+import { Badge }       from '../../components/ui/Badge';
+import { Spinner }     from '../../components/ui/Spinner';
+import { EmptyState }  from '../../components/ui/EmptyState';
+import { SearchInput } from '../../components/ui/SearchInput';
 import { ReciboAcreedor } from '../../components/Reciboacreedor';
 import {
-  Users, Plus, ChevronDown, ChevronUp,
+  Users, Plus, ChevronDown, ChevronUp, ChevronLeft, ChevronRight,
   Trash2, AlertTriangle, Calculator, PenLine,
 } from 'lucide-react';
 import api from '../../api/axios.config';
@@ -34,8 +34,6 @@ const normalizarProductos = (data) => {
   if (data?.items && Array.isArray(data.items)) return data.items;
   return [];
 };
-
-// ─── estado config ────────────────────────────────────────────────────────────
 
 const ESTADO_CFG = {
   Saldada:  { variant: 'green',  ring: 'border-green-200 bg-green-50/40'  },
@@ -290,6 +288,91 @@ function ModalAbonoRapido({ acreedor, cargo, onClose, onImprimir }) {
   );
 }
 
+// ─── modal nuevo cargo manual ─────────────────────────────────────────────────
+
+function ModalNuevoCargo({ acreedor, onClose }) {
+  const queryClient   = useQueryClient();
+  const [valor,       setValor]       = useState('');
+  const [descripcion, setDescripcion] = useState('');
+  const [mostrarCalc, setMostrarCalc] = useState(false);
+  const [error,       setError]       = useState('');
+
+  const mutation = useMutation({
+    mutationFn: () => registrarMovimiento(acreedor.id, {
+      tipo:              'Cargo',
+      valor:             Number(valor),
+      descripcion:       descripcion.trim() || undefined,
+      registrar_en_caja: false,
+      metodo:            null,
+    }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['compras-con-saldo', acreedor.id], exact: false });
+      queryClient.invalidateQueries({ queryKey: ['acreedores'],                     exact: false });
+      onClose();
+    },
+    onError: (err) => setError(err.response?.data?.error || 'Error al registrar'),
+  });
+
+  return (
+    <Modal open onClose={onClose} title="Agregar cargo" size="sm">
+      <div className="flex flex-col gap-4">
+        <Input
+          label="Descripción"
+          placeholder="Ej: Deuda por factura #001..."
+          value={descripcion}
+          onChange={(e) => setDescripcion(e.target.value)}
+          autoFocus
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') document.getElementById('valor-nuevo-cargo')?.focus();
+          }}
+        />
+
+        <div className="flex flex-col gap-1.5">
+          <div className="flex items-center justify-between">
+            <label className="text-sm font-medium text-gray-700">
+              Valor <span className="text-red-400 text-xs">*</span>
+            </label>
+            <button type="button" onClick={() => setMostrarCalc((v) => !v)}
+              className="flex items-center gap-1 text-xs text-blue-500 hover:text-blue-700 transition-colors">
+              <Calculator size={12} />
+              {mostrarCalc ? 'Cerrar' : 'Calculadora'}
+            </button>
+          </div>
+          <InputMoneda
+            id="valor-nuevo-cargo"
+            value={valor}
+            onChange={setValor}
+            placeholder="0"
+            className="w-full px-3 py-2 bg-gray-100 rounded-xl text-sm
+              focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"
+          />
+        </div>
+
+        {mostrarCalc && (
+          <Calculadora onUsar={(val) => {
+            setValor(String(Math.round(Number(val) || 0)));
+            setMostrarCalc(false);
+          }} />
+        )}
+
+        {error && <p className="text-sm text-red-500">{error}</p>}
+
+        <div className="flex gap-2">
+          <Button variant="secondary" className="flex-1" onClick={onClose}>Cancelar</Button>
+          <Button
+            className="flex-1"
+            loading={mutation.isPending}
+            disabled={!valor || Number(valor) <= 0}
+            onClick={() => mutation.mutate()}
+          >
+            Agregar
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 // ─── historial de abonos ──────────────────────────────────────────────────────
 
 function AbonosHistorial({ acreedorId, cargoId }) {
@@ -331,11 +414,11 @@ function AbonosHistorial({ acreedorId, cargoId }) {
   );
 }
 
-// ─── compra row ───────────────────────────────────────────────────────────────
+// ─── cargo activo (pendiente / parcial) ───────────────────────────────────────
 
-function CompraRow({ cargo, acreedorId, onAbonar }) {
-  const [expandido, setExpandido] = useState(false);
-  const [verCompra, setVerCompra] = useState(false);
+function CargoActivo({ cargo, acreedorId, onAbonar }) {
+  const [historialAbierto, setHistorialAbierto] = useState(false);
+  const [modalCompra,      setModalCompra]      = useState(false);
 
   const cfg       = ESTADO_CFG[cargo.estado_pago] || ESTADO_CFG.Pendiente;
   const original  = Number(cargo.valor_original);
@@ -344,22 +427,26 @@ function CompraRow({ cargo, acreedorId, onAbonar }) {
   const progreso  = original > 0 ? Math.min((pagado / original) * 100, 100) : 0;
 
   return (
-    <div className={`border rounded-2xl overflow-hidden ${cfg.ring}`}>
-      <div className="p-3.5">
+    <div
+      className={`border rounded-2xl overflow-hidden ${cfg.ring}`}
+      onDoubleClick={() => cargo.compra_id && setModalCompra(true)}
+      title={cargo.compra_id ? 'Doble clic para ver detalle de la compra' : undefined}
+    >
+      <div className="p-4">
         <div className="flex items-start justify-between gap-3">
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap mb-1.5">
               <Badge variant={cfg.variant}>{cargo.estado_pago}</Badge>
               {cargo.compra_id && (
                 <button
-                  onClick={() => setVerCompra(true)}
+                  onClick={(e) => { e.stopPropagation(); setModalCompra(true); }}
                   className="text-xs text-blue-500 bg-blue-50 px-2 py-0.5 rounded-lg border
                     border-blue-100 hover:bg-blue-100 transition-colors">
                   Ver compra #{String(cargo.compra_id).padStart(5, '0')}
                 </button>
               )}
             </div>
-            <p className="text-sm font-semibold text-gray-800 leading-snug">
+            <p className="text-sm font-semibold text-gray-900 leading-snug">
               {cargo.descripcion || 'Sin descripción'}
             </p>
             <p className="text-xs text-gray-400 mt-0.5">{formatFechaHora(cargo.fecha)}</p>
@@ -367,14 +454,12 @@ function CompraRow({ cargo, acreedorId, onAbonar }) {
 
           <div className="flex flex-col items-end gap-2 flex-shrink-0">
             <p className="text-base font-bold text-gray-900">{formatCOP(original)}</p>
-            {cargo.estado_pago !== 'Saldada' && (
-              <button
-                onClick={() => onAbonar(cargo)}
-                className="px-3 py-1.5 rounded-xl text-xs font-bold bg-green-600 text-white
-                  hover:bg-green-700 active:scale-95 transition-all shadow-sm">
-                Abonar
-              </button>
-            )}
+            <button
+              onClick={(e) => { e.stopPropagation(); onAbonar(cargo); }}
+              className="px-3 py-1.5 rounded-xl text-xs font-bold bg-green-600 text-white
+                hover:bg-green-700 active:scale-95 transition-all shadow-sm">
+              Abonar
+            </button>
           </div>
         </div>
 
@@ -390,40 +475,98 @@ function CompraRow({ cargo, acreedorId, onAbonar }) {
           <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
             <div
               className={`h-full rounded-full transition-all duration-500
-                ${progreso >= 100 ? 'bg-green-500' : pagado > 0 ? 'bg-blue-400' : 'bg-gray-300'}`}
+                ${pagado > 0 ? 'bg-blue-400' : 'bg-gray-300'}`}
               style={{ width: `${progreso}%` }}
             />
           </div>
         </div>
 
         <button
-          onClick={() => setExpandido((v) => !v)}
-          className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-600 mt-2.5 transition-colors">
-          {expandido ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-          {expandido ? 'Ocultar historial' : 'Ver historial de pagos'}
+          onClick={(e) => { e.stopPropagation(); setHistorialAbierto((v) => !v); }}
+          className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-600
+            mt-2.5 transition-colors">
+          {historialAbierto ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+          {historialAbierto ? 'Ocultar historial' : 'Ver historial de pagos'}
         </button>
       </div>
 
-      {expandido && (
-        <div className="border-t border-dashed border-gray-200 px-3.5 py-3 bg-white/70">
+      {historialAbierto && (
+        <div className="border-t border-dashed border-gray-200 px-4 py-3 bg-white/70">
           <AbonosHistorial acreedorId={acreedorId} cargoId={cargo.id} />
         </div>
       )}
 
-      {verCompra && cargo.compra_id && (
-        <ModalCompraDetalle compraId={cargo.compra_id} onClose={() => setVerCompra(false)} />
+      {modalCompra && cargo.compra_id && (
+        <ModalCompraDetalle compraId={cargo.compra_id} onClose={() => setModalCompra(false)} />
       )}
     </div>
   );
 }
 
-// ─── acreedor card ────────────────────────────────────────────────────────────
+// ─── cargo saldado (colapsable) ───────────────────────────────────────────────
 
-function AcreedorCard({ acreedor, esAdmin, onEliminar }) {
-  const [expanded,     setExpanded]     = useState(false);
-  const [cargoAbono,   setCargoAbono]   = useState(null);
-  const [movImprimir,  setMovImprimir]  = useState(null);
-  const [filtroEstado, setFiltroEstado] = useState('Todas');
+function CargoSaldado({ cargo, acreedorId }) {
+  const [expandido,   setExpandido]   = useState(false);
+  const [modalCompra, setModalCompra] = useState(false);
+
+  return (
+    <div
+      className="border border-green-100 rounded-2xl overflow-hidden bg-green-50/30"
+      onDoubleClick={() => cargo.compra_id && setModalCompra(true)}
+      title={cargo.compra_id ? 'Doble clic para ver detalle de la compra' : undefined}
+    >
+      <button
+        onClick={() => setExpandido((v) => !v)}
+        className="w-full flex items-center justify-between px-4 py-3 text-left
+          hover:bg-green-50/60 transition-colors">
+        <div className="flex-1 min-w-0 flex items-center gap-2 flex-wrap">
+          <Badge variant="green">Saldada</Badge>
+          {cargo.compra_id && (
+            <span className="text-xs text-blue-400">
+              Compra #{String(cargo.compra_id).padStart(5, '0')}
+            </span>
+          )}
+          <span className="text-xs text-gray-600 font-medium truncate">
+            {cargo.descripcion || 'Sin descripción'}
+          </span>
+          <span className="text-xs text-gray-400">{formatFechaHora(cargo.fecha)}</span>
+        </div>
+        <div className="flex items-center gap-3 flex-shrink-0">
+          <span className="text-sm font-bold text-gray-700">{formatCOP(cargo.valor_original)}</span>
+          {expandido
+            ? <ChevronUp size={14} className="text-gray-400" />
+            : <ChevronDown size={14} className="text-gray-400" />}
+        </div>
+      </button>
+
+      {expandido && (
+        <div className="border-t border-dashed border-green-100 px-4 py-3 bg-white/60">
+          {cargo.compra_id && (
+            <button
+              onClick={(e) => { e.stopPropagation(); setModalCompra(true); }}
+              className="mb-2 text-xs text-blue-500 hover:text-blue-700 transition-colors">
+              Ver productos de compra #{String(cargo.compra_id).padStart(5, '0')} →
+            </button>
+          )}
+          <p className="text-xs font-semibold text-gray-500 mb-2">Historial de pagos</p>
+          <AbonosHistorial acreedorId={acreedorId} cargoId={cargo.id} />
+        </div>
+      )}
+
+      {modalCompra && cargo.compra_id && (
+        <ModalCompraDetalle compraId={cargo.compra_id} onClose={() => setModalCompra(false)} />
+      )}
+    </div>
+  );
+}
+
+// ─── vista detalle de acreedor ────────────────────────────────────────────────
+
+function DetalleAcreedor({ acreedor, esAdmin, onVolver, onEliminar }) {
+  const [cargoAbono,       setCargoAbono]       = useState(null);
+  const [movImprimir,      setMovImprimir]       = useState(null);
+  const [modalCargo,       setModalCargo]       = useState(false);
+  const [saldadasAbiertas, setSaldadasAbiertas] = useState(false);
 
   const { data: configData } = useQuery({
     queryKey: ['config'],
@@ -433,126 +576,141 @@ function AcreedorCard({ acreedor, esAdmin, onEliminar }) {
   const { data, isLoading } = useQuery({
     queryKey: ['compras-con-saldo', acreedor.id],
     queryFn:  () => getComprasConSaldo(acreedor.id).then((r) => r.data.data),
-    enabled:  expanded,
     staleTime: 0,
   });
-  const cargos = Array.isArray(data) ? data : [];
-
-  const saldo = Number(acreedor.saldo || 0);
-
-  const countByEstado = {
-    Pendiente: cargos.filter((c) => c.estado_pago === 'Pendiente').length,
-    Parcial:   cargos.filter((c) => c.estado_pago === 'Parcial').length,
-    Saldada:   cargos.filter((c) => c.estado_pago === 'Saldada').length,
-  };
-
-  const cargosFiltrados = filtroEstado === 'Todas'
-    ? cargos
-    : cargos.filter((c) => c.estado_pago === filtroEstado);
+  const cargos  = Array.isArray(data) ? data : [];
+  const activos  = cargos.filter((c) => c.estado_pago !== 'Saldada');
+  const saldados = cargos.filter((c) => c.estado_pago === 'Saldada');
+  const saldoTotal = activos.reduce((s, c) => s + Number(c.saldo_pendiente), 0);
 
   return (
-    <div className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden">
-      {/* header */}
-      <button
-        onClick={() => setExpanded((v) => !v)}
-        className="w-full flex items-center justify-between px-4 py-3.5 text-left
-          hover:bg-gray-50/50 transition-colors">
-        <div className="flex items-center gap-3 min-w-0">
-          <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold text-sm
-            flex-shrink-0 select-none
-            ${saldo > 0 ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>
-            {acreedor.nombre.slice(0, 2).toUpperCase()}
-          </div>
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <p className="text-sm font-semibold text-gray-900">{acreedor.nombre}</p>
-              {acreedor.proveedor_id && (
-                <span className={`text-xs px-1.5 py-0.5 rounded-full border leading-none
-                  ${acreedor.proveedor_tipo === 'cruce'
-                    ? 'text-amber-700 bg-amber-50 border-amber-200'
-                    : 'text-blue-500 bg-blue-50 border-blue-100'}`}>
-                  {acreedor.proveedor_tipo === 'cruce' ? 'Cruce' : 'Proveedor'}
-                </span>
-              )}
-            </div>
-            <p className="text-xs text-gray-400 truncate">
-              CC: {acreedor.cedula}{acreedor.telefono && ` · ${acreedor.telefono}`}
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-3 flex-shrink-0">
-          <div className="text-right">
-            <p className="text-xs text-gray-400">Deuda total</p>
-            <p className={`text-sm font-bold ${saldo > 0 ? 'text-red-500' : 'text-green-600'}`}>
-              {saldo > 0 ? formatCOP(saldo) : 'Al día'}
-            </p>
-          </div>
-          {esAdmin && (
-            <button
-              onClick={(e) => { e.stopPropagation(); onEliminar(acreedor); }}
-              className="p-1.5 rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50 transition-colors"
-              title="Eliminar">
-              <Trash2 size={14} />
-            </button>
-          )}
-          {expanded
-            ? <ChevronUp size={16} className="text-gray-400" />
-            : <ChevronDown size={16} className="text-gray-400" />}
-        </div>
+    <div className="flex flex-col gap-4">
+      {/* Volver */}
+      <button onClick={onVolver}
+        className="flex items-center gap-1.5 text-sm text-gray-400 hover:text-gray-700
+          w-fit transition-colors">
+        <ChevronLeft size={16} /> Volver
       </button>
 
-      {/* contenido expandido */}
-      {expanded && (
-        <div className="border-t border-gray-100">
-          {isLoading ? (
-            <div className="p-6 flex justify-center"><Spinner /></div>
-          ) : cargos.length === 0 ? (
-            <div className="p-4">
-              <EmptyState icon={PenLine} titulo="Sin compras a crédito"
-                descripcion="Las compras registradas a crédito aparecerán aquí" />
-            </div>
-          ) : (
-            <>
-              <div className="flex items-center gap-2 px-4 py-2.5 border-b border-gray-50 bg-gray-50/60 flex-wrap">
-                {['Todas', 'Pendiente', 'Parcial', 'Saldada'].map((e) => {
-                  const count = e === 'Todas' ? cargos.length : (countByEstado[e] ?? 0);
-                  return (
-                    <button key={e} onClick={() => setFiltroEstado(e)}
-                      className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium
-                        transition-all border
-                        ${filtroEstado === e
-                          ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
-                          : 'bg-white text-gray-500 border-gray-200 hover:border-gray-300'}`}>
-                      {e}
-                      <span className={`rounded-full min-w-[18px] text-center
-                        ${filtroEstado === e ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-500'}`}>
-                        {count}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
+      {/* Cabecera del acreedor */}
+      <div className="bg-white border border-gray-100 rounded-2xl p-4
+        flex flex-wrap items-center gap-3 shadow-sm">
+        <div className={`w-12 h-12 rounded-2xl flex items-center justify-center
+          text-base font-bold flex-shrink-0 select-none
+          ${saldoTotal > 0 ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>
+          {acreedor.nombre.slice(0, 2).toUpperCase()}
+        </div>
 
-              <div className="p-4 flex flex-col gap-3">
-                {cargosFiltrados.length === 0 ? (
-                  <p className="text-xs text-gray-400 text-center py-4">
-                    No hay compras en este estado
-                  </p>
-                ) : (
-                  cargosFiltrados.map((cargo) => (
-                    <CompraRow
-                      key={cargo.id}
-                      cargo={cargo}
-                      acreedorId={acreedor.id}
-                      onAbonar={(c) => setCargoAbono(c)}
-                    />
-                  ))
-                )}
-              </div>
-            </>
+        <div className="flex-1 min-w-0 basis-32">
+          <div className="flex items-center gap-2 flex-wrap">
+            <p className="font-bold text-gray-900 text-base leading-tight truncate">
+              {acreedor.nombre}
+            </p>
+            {acreedor.proveedor_id && (
+              <span className={`text-xs px-1.5 py-0.5 rounded-full border leading-none
+                ${acreedor.proveedor_tipo === 'cruce'
+                  ? 'text-amber-700 bg-amber-50 border-amber-200'
+                  : 'text-blue-500 bg-blue-50 border-blue-100'}`}>
+                {acreedor.proveedor_tipo === 'cruce' ? 'Cruce' : 'Proveedor'}
+              </span>
+            )}
+          </div>
+          <p className="text-xs text-gray-400 mt-0.5">CC: {acreedor.cedula}</p>
+          {acreedor.telefono && <p className="text-xs text-gray-400">Tel: {acreedor.telefono}</p>}
+        </div>
+
+        <div className="flex items-center gap-3 flex-shrink-0 ml-auto">
+          {saldoTotal > 0 && (
+            <div className="text-right">
+              <p className="text-xs text-gray-400 leading-tight">Deuda total</p>
+              <p className="text-sm font-bold text-red-500">{formatCOP(saldoTotal)}</p>
+            </div>
+          )}
+          {saldoTotal === 0 && !isLoading && (
+            <span className="text-xs font-semibold text-green-600 bg-green-50 border border-green-200
+              px-2.5 py-1 rounded-full">
+              ✓ Al día
+            </span>
+          )}
+          {esAdmin && (
+            <button onClick={() => onEliminar(acreedor)}
+              className="p-1.5 rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50 transition-colors"
+              title="Eliminar acreedor">
+              <Trash2 size={15} />
+            </button>
           )}
         </div>
+      </div>
+
+      {isLoading ? (
+        <div className="py-12 flex justify-center"><Spinner /></div>
+      ) : (
+        <>
+          {/* Toolbar: stats + botón agregar cargo */}
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-gray-400">
+              {activos.length} pendiente(s) · {saldados.length} saldada(s)
+            </p>
+            <button
+              onClick={() => setModalCargo(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold
+                border border-gray-200 bg-white text-gray-600
+                hover:border-blue-300 hover:text-blue-600 hover:bg-blue-50 transition-all">
+              <Plus size={13} /> Agregar cargo
+            </button>
+          </div>
+
+          {/* Cargos activos */}
+          {activos.length === 0 ? (
+            <div className="bg-green-50 border border-green-100 rounded-xl px-4 py-3 text-center">
+              <p className="text-green-700 text-sm font-medium">✓ Sin compras pendientes</p>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-2.5">
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide px-0.5">
+                Pendientes ({activos.length})
+              </p>
+              {activos.map((c) => (
+                <CargoActivo
+                  key={c.id}
+                  cargo={c}
+                  acreedorId={acreedor.id}
+                  onAbonar={(cargo) => setCargoAbono(cargo)}
+                />
+              ))}
+            </div>
+          )}
+
+          {/* Saldadas (colapsable) */}
+          {saldados.length > 0 && (
+            <div className="border border-gray-100 rounded-2xl overflow-hidden mt-1">
+              <button
+                onClick={() => setSaldadasAbiertas((v) => !v)}
+                className="w-full flex items-center justify-between px-4 py-3
+                  bg-gray-50 hover:bg-gray-100 transition-colors">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                    Historial saldadas
+                  </span>
+                  <span className="text-xs bg-gray-200 text-gray-500 px-2 py-0.5 rounded-full">
+                    {saldados.length}
+                  </span>
+                </div>
+                {saldadasAbiertas
+                  ? <ChevronUp size={15} className="text-gray-400" />
+                  : <ChevronDown size={15} className="text-gray-400" />}
+              </button>
+
+              {saldadasAbiertas && (
+                <div className="flex flex-col gap-2 p-3">
+                  {saldados.map((c) => (
+                    <CargoSaldado key={c.id} cargo={c} acreedorId={acreedor.id} />
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </>
       )}
 
       {cargoAbono && (
@@ -564,6 +722,10 @@ function AcreedorCard({ acreedor, esAdmin, onEliminar }) {
         />
       )}
 
+      {modalCargo && (
+        <ModalNuevoCargo acreedor={acreedor} onClose={() => setModalCargo(false)} />
+      )}
+
       {movImprimir && (
         <ReciboAcreedor
           acreedor={acreedor}
@@ -573,6 +735,41 @@ function AcreedorCard({ acreedor, esAdmin, onEliminar }) {
         />
       )}
     </div>
+  );
+}
+
+// ─── fila acreedor en la lista ────────────────────────────────────────────────
+
+function FilaAcreedor({ acreedor, onClick }) {
+  const saldo = Number(acreedor.saldo || 0);
+  return (
+    <button onClick={onClick}
+      className="w-full flex items-center gap-3 px-4 py-3.5 bg-white border border-gray-100
+        rounded-2xl text-left hover:border-blue-200 hover:bg-blue-50/20 hover:shadow-sm
+        transition-all active:scale-[0.99]">
+      <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold text-sm
+        flex-shrink-0 select-none
+        ${saldo > 0 ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>
+        {acreedor.nombre.slice(0, 2).toUpperCase()}
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 flex-wrap">
+          <p className="text-sm font-semibold text-gray-900">{acreedor.nombre}</p>
+          {acreedor.proveedor_id && (
+            <span className={`text-xs px-1.5 py-0.5 rounded-full border leading-none
+              ${acreedor.proveedor_tipo === 'cruce'
+                ? 'text-amber-700 bg-amber-50 border-amber-200'
+                : 'text-blue-500 bg-blue-50 border-blue-100'}`}>
+              {acreedor.proveedor_tipo === 'cruce' ? 'Cruce' : 'Proveedor'}
+            </span>
+          )}
+        </div>
+        <p className={`text-xs font-semibold mt-0.5 ${saldo > 0 ? 'text-red-500' : 'text-green-600'}`}>
+          {saldo > 0 ? `Debemos: ${formatCOP(saldo)}` : 'Al día'}
+        </p>
+      </div>
+      <ChevronRight size={16} className="text-gray-300 flex-shrink-0" />
+    </button>
   );
 }
 
@@ -751,7 +948,8 @@ export default function AcreedoresPage() {
   const { esAdminNegocio }              = useAuth();
   const esAdmin                         = esAdminNegocio();
   const [busqueda, setBusqueda]         = useState('');
-  const [modalNuevo, setModalNuevo]     = useState(false);
+  const [acreedorSel, setAcreedorSel]  = useState(null);
+  const [modalNuevo, setModalNuevo]    = useState(false);
   const [acreedorEliminar, setEliminar] = useState(null);
   const queryClient                     = useQueryClient();
 
@@ -760,6 +958,7 @@ export default function AcreedoresPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['acreedores'], exact: false });
       setEliminar(null);
+      setAcreedorSel(null);
     },
     onError: (err) => {
       setEliminar(null);
@@ -776,36 +975,45 @@ export default function AcreedoresPage() {
   const acreedores = Array.isArray(acreedoresData) ? acreedoresData : [];
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex items-center gap-3">
-        <div className="flex-1">
-          <SearchInput value={busqueda} onChange={setBusqueda} placeholder="Buscar acreedor..." />
-        </div>
-        {esAdmin && (
-          <button onClick={() => setModalNuevo(true)}
-            className="h-10 w-10 bg-blue-600 rounded-xl flex items-center justify-center
-              hover:bg-blue-700 transition-colors flex-shrink-0">
-            <Plus size={18} className="text-white" />
-          </button>
-        )}
-      </div>
+    <>
+      {!acreedorSel ? (
+        <div className="flex flex-col gap-4">
+          <div className="flex items-center gap-3">
+            <div className="flex-1">
+              <SearchInput value={busqueda} onChange={setBusqueda} placeholder="Buscar acreedor..." />
+            </div>
+            {esAdmin && (
+              <button onClick={() => setModalNuevo(true)}
+                className="h-10 w-10 bg-blue-600 rounded-xl flex items-center justify-center
+                  hover:bg-blue-700 transition-colors flex-shrink-0">
+                <Plus size={18} className="text-white" />
+              </button>
+            )}
+          </div>
 
-      {isLoading ? (
-        <Spinner className="py-20" />
-      ) : acreedores.length === 0 ? (
-        <EmptyState icon={Users} titulo="Sin acreedores"
-          descripcion={esAdmin ? 'Crea el primer acreedor con el botón +' : 'Sin acreedores asignados'} />
-      ) : (
-        <div className="flex flex-col gap-3">
-          {acreedores.map((a) => (
-            <AcreedorCard
-              key={a.id}
-              acreedor={a}
-              esAdmin={esAdmin}
-              onEliminar={setEliminar}
-            />
-          ))}
+          {isLoading ? (
+            <Spinner className="py-20" />
+          ) : acreedores.length === 0 ? (
+            <EmptyState icon={Users} titulo="Sin acreedores"
+              descripcion={esAdmin
+                ? 'Crea el primer acreedor con el botón +'
+                : 'Sin acreedores asignados'} />
+          ) : (
+            <div className="flex flex-col gap-2">
+              {acreedores.map((a) => (
+                <FilaAcreedor key={a.id} acreedor={a} onClick={() => setAcreedorSel(a)} />
+              ))}
+            </div>
+          )}
         </div>
+      ) : (
+        <DetalleAcreedor
+          key={acreedorSel.id}
+          acreedor={acreedorSel}
+          esAdmin={esAdmin}
+          onVolver={() => setAcreedorSel(null)}
+          onEliminar={(a) => setEliminar(a)}
+        />
       )}
 
       {modalNuevo && <ModalNuevoAcreedor onClose={() => setModalNuevo(false)} />}
@@ -817,6 +1025,6 @@ export default function AcreedoresPage() {
           onEliminar={() => mutEliminar.mutate()}
         />
       )}
-    </div>
+    </>
   );
 }
