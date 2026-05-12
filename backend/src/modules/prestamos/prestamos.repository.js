@@ -18,7 +18,21 @@ const findAll = async (sucursalId, negocioId) => {
       c.nombre  AS cliente_nombre,
       s.color   AS serial_color,
       COALESCE(pr.saldo_a_favor, 0) AS prestatario_saldo_a_favor,
-      COALESCE(c.saldo_a_favor,  0) AS cliente_saldo_a_favor
+      COALESCE(c.saldo_a_favor,  0) AS cliente_saldo_a_favor,
+      (SELECT MAX(ap.fecha)
+       FROM abonos_prestamo ap
+       JOIN prestamos       p2  ON p2.id  = ap.prestamo_id
+       JOIN sucursales      su2 ON su2.id = p2.sucursal_id
+       WHERE p2.prestatario_id = p.prestatario_id
+         AND p2.prestatario_id IS NOT NULL
+         AND su2.negocio_id    = su.negocio_id) AS ultimo_abono_prestatario,
+      (SELECT MAX(ap.fecha)
+       FROM abonos_prestamo ap
+       JOIN prestamos       p2  ON p2.id  = ap.prestamo_id
+       JOIN sucursales      su2 ON su2.id = p2.sucursal_id
+       WHERE p2.cliente_id   = p.cliente_id
+         AND p2.cliente_id   IS NOT NULL
+         AND su2.negocio_id  = su.negocio_id) AS ultimo_abono_cliente
     FROM prestamos p
     JOIN  sucursales                su  ON su.id  = p.sucursal_id
     LEFT JOIN usuarios               u   ON u.id   = p.usuario_id

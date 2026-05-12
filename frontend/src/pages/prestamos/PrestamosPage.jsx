@@ -371,9 +371,38 @@ function ModalSaldoAFavor({ nombre, tipo, personaId, montoActual, onClose }) {
   );
 }
 
+// ─── Helper: tiempo desde último abono ───────────────────────────────────────
+
+function tiempoUltimoAbono(fecha) {
+  if (!fecha) return { texto: 'Sin abonos', nivel: 'rojo' };
+
+  const ahora   = new Date();
+  const d       = new Date(fecha);
+  const diffMs  = ahora - d;
+  const dias    = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+  let texto;
+  if (dias < 1)        texto = 'hoy';
+  else if (dias === 1) texto = 'ayer';
+  else if (dias < 7)   texto = `hace ${dias} días`;
+  else if (dias < 30)  { const s = Math.floor(dias / 7);  texto = `hace ${s} semana${s > 1 ? 's' : ''}`; }
+  else if (dias < 365) { const m = Math.floor(dias / 30); texto = `hace ${m} mes${m > 1 ? 'es' : ''}`; }
+  else                   texto = 'hace más de 1 año';
+
+  const nivel = dias <= 7 ? 'verde' : dias <= 30 ? 'amarillo' : dias <= 60 ? 'naranja' : 'rojo';
+  return { texto, nivel };
+}
+
+const ABONO_CLASES = {
+  verde:    'bg-green-50  text-green-600  border-green-200',
+  amarillo: 'bg-yellow-50 text-yellow-700 border-yellow-200',
+  naranja:  'bg-orange-50 text-orange-600 border-orange-200',
+  rojo:     'bg-red-50    text-red-600    border-red-200',
+};
+
 // ─── Card resumen de persona ──────────────────────────────────────────────────
 
-function CardPersona({ nombre, tipo, prestamos, saldoTotal, onSeleccionar }) {
+function CardPersona({ nombre, tipo, prestamos, saldoTotal, ultimoAbono, onSeleccionar }) {
   const activos  = prestamos.filter((p) => p.estado === 'Activo');
   const cerrados = prestamos.filter((p) => p.estado !== 'Activo');
 
@@ -384,6 +413,8 @@ function CardPersona({ nombre, tipo, prestamos, saldoTotal, onSeleccionar }) {
   const avatarClass = tipo === 'companero'
     ? 'bg-blue-100 text-blue-700'
     : 'bg-violet-100 text-violet-700';
+
+  const { texto: abonoTexto, nivel: abonoNivel } = tiempoUltimoAbono(ultimoAbono);
 
   return (
     <button
@@ -409,7 +440,7 @@ function CardPersona({ nombre, tipo, prestamos, saldoTotal, onSeleccionar }) {
           )}
         </div>
 
-        <div className="flex items-center gap-1.5 mt-1">
+        <div className="flex items-center gap-1.5 mt-1 flex-wrap">
           {activos.length > 0 && (
             <span className="text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full font-medium">
               {activos.length} activo{activos.length !== 1 ? 's' : ''}
@@ -418,6 +449,11 @@ function CardPersona({ nombre, tipo, prestamos, saldoTotal, onSeleccionar }) {
           {cerrados.length > 0 && (
             <span className="text-xs bg-gray-50 text-gray-400 px-2 py-0.5 rounded-full">
               {cerrados.length} cerrado{cerrados.length !== 1 ? 's' : ''}
+            </span>
+          )}
+          {activos.length > 0 && (
+            <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${ABONO_CLASES[abonoNivel]}`}>
+              {abonoTexto}
             </span>
           )}
         </div>
@@ -1245,11 +1281,12 @@ export default function PrestamosPage() {
   const gruposCompaneros = prestamos.filter((p) => p.prestatario_id).reduce((acc, p) => {
     const key = `prestatario_${p.prestatario_id}`;
     if (!acc[key]) acc[key] = {
-      nombre: p.prestatario_nombre || p.prestatario,
-      personaId: p.prestatario_id,
-      prestamos: [],
-      saldoTotal: 0,
+      nombre:      p.prestatario_nombre || p.prestatario,
+      personaId:   p.prestatario_id,
+      prestamos:   [],
+      saldoTotal:  0,
       saldoAFavor: Number(p.prestatario_saldo_a_favor ?? 0),
+      ultimoAbono: p.ultimo_abono_prestatario ?? null,
     };
     acc[key].prestamos.push(p);
     if (p.estado === 'Activo') acc[key].saldoTotal += Number(p.valor_prestamo) - Number(p.total_abonado);
@@ -1259,11 +1296,12 @@ export default function PrestamosPage() {
   const gruposClientes = prestamos.filter((p) => p.cliente_id).reduce((acc, p) => {
     const key = `cliente_${p.cliente_id}`;
     if (!acc[key]) acc[key] = {
-      nombre: p.cliente_nombre || p.prestatario,
-      personaId: p.cliente_id,
-      prestamos: [],
-      saldoTotal: 0,
+      nombre:      p.cliente_nombre || p.prestatario,
+      personaId:   p.cliente_id,
+      prestamos:   [],
+      saldoTotal:  0,
       saldoAFavor: Number(p.cliente_saldo_a_favor ?? 0),
+      ultimoAbono: p.ultimo_abono_cliente ?? null,
     };
     acc[key].prestamos.push(p);
     if (p.estado === 'Activo') acc[key].saldoTotal += Number(p.valor_prestamo) - Number(p.total_abonado);
@@ -1390,6 +1428,7 @@ export default function PrestamosPage() {
                       {sortedCompaneros.map(([key, grupo]) => (
                         <CardPersona key={key} nombre={grupo.nombre} tipo="companero"
                           prestamos={grupo.prestamos} saldoTotal={grupo.saldoTotal}
+                          ultimoAbono={grupo.ultimoAbono}
                           onSeleccionar={() => setPersonaSeleccionadaKey(key)} />
                       ))}
                     </div>
@@ -1404,6 +1443,7 @@ export default function PrestamosPage() {
                       {sortedClientes.map(([key, grupo]) => (
                         <CardPersona key={key} nombre={grupo.nombre} tipo="cliente"
                           prestamos={grupo.prestamos} saldoTotal={grupo.saldoTotal}
+                          ultimoAbono={grupo.ultimoAbono}
                           onSeleccionar={() => setPersonaSeleccionadaKey(key)} />
                       ))}
                     </div>
