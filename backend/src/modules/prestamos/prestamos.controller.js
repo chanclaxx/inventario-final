@@ -176,7 +176,7 @@ const intercambiarPrestamo = async (req, res, next) => {
     const {
       tipo_retoma, imei_retoma, producto_serial_id, color_retoma,
       producto_cantidad_id, cantidad_retoma,
-      valor_retoma, costo_retoma, descripcion, ingreso_inventario,
+      valor_retoma, descripcion, ingreso_inventario,
     } = req.body;
 
     const data = await service.intercambiarPrestamo(
@@ -184,15 +184,14 @@ const intercambiarPrestamo = async (req, res, next) => {
       id,
       {
         tipo_retoma,
-        imei_retoma:           imei_retoma           || null,
-        producto_serial_id:    producto_serial_id    ? Number(producto_serial_id)    : null,
-        color_retoma:          color_retoma          || null,
-        producto_cantidad_id:  producto_cantidad_id  ? Number(producto_cantidad_id)  : null,
-        cantidad_retoma:       Number(cantidad_retoma || 1),
-        valor_retoma:          Number(valor_retoma),
-        costo_retoma:          Number(costo_retoma   || 0),
-        descripcion:           descripcion           || null,
-        ingreso_inventario:    ingreso_inventario !== false,
+        imei_retoma:          imei_retoma          || null,
+        producto_serial_id:   producto_serial_id   ? Number(producto_serial_id)   : null,
+        color_retoma:         color_retoma         || null,
+        producto_cantidad_id: producto_cantidad_id ? Number(producto_cantidad_id) : null,
+        cantidad_retoma:      Number(cantidad_retoma || 1),
+        valor_retoma:         Number(valor_retoma),
+        descripcion:          descripcion          || null,
+        ingreso_inventario:   ingreso_inventario !== false,
       },
     );
     res.json({ ok: true, data, message: 'Intercambio registrado correctamente' });

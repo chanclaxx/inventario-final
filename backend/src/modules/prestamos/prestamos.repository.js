@@ -270,29 +270,28 @@ const retornarSerialConOrigen = async (client, imei, sucursalId, clienteOrigen) 
 const insertarRetoma = async (client, {
   prestamo_id, nombre_producto, imei, valor_retoma, cantidad_retoma,
   descripcion, tipo_retoma, producto_serial_id, producto_cantidad_id,
-  costo_retoma, color, ingreso_inventario,
+  color, ingreso_inventario,
 }) => {
   const { rows } = await client.query(`
     INSERT INTO retomas(
       prestamo_id, nombre_producto, imei, valor_retoma, cantidad_retoma,
       descripcion, ingreso_inventario, tipo_retoma,
-      producto_serial_id, producto_cantidad_id, costo_retoma, color
+      producto_serial_id, producto_cantidad_id, color
     )
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
     RETURNING *
   `, [
     prestamo_id,
-    nombre_producto        || null,
-    imei                   || null,
+    nombre_producto      || null,
+    imei                 || null,
     valor_retoma,
-    cantidad_retoma        || 1,
-    descripcion            || '',
-    ingreso_inventario     ?? true,
-    tipo_retoma            || 'serial',
-    producto_serial_id     || null,
-    producto_cantidad_id   || null,
-    costo_retoma           || 0,
-    color                  || null,
+    cantidad_retoma      || 1,
+    descripcion          || '',
+    ingreso_inventario   ?? true,
+    tipo_retoma          || 'serial',
+    producto_serial_id   || null,
+    producto_cantidad_id || null,
+    color                || null,
   ]);
   return rows[0];
 };

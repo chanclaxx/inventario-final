@@ -399,7 +399,6 @@ function ModalIntercambio({ prestamo, onClose, onSaldado }) {
   const [productoCantidadSel, setProductoCantidadSel] = useState(null);
   const [cantidadRetoma,      setCantidadRetoma]       = useState('1');
   const [valorRetoma,         setValorRetoma]          = useState('');
-  const [costoRetoma,         setCostoRetoma]          = useState('');
   const [ingresoInventario,   setIngresoInventario]    = useState(true);
   const [error,               setError]                = useState('');
 
@@ -439,7 +438,6 @@ function ModalIntercambio({ prestamo, onClose, onSaldado }) {
       producto_cantidad_id:  tipoRetoma === 'cantidad' ? (productoCantidadSel?.id || null) : null,
       cantidad_retoma:       tipoRetoma === 'cantidad' ? Number(cantidadRetoma || 1) : 1,
       valor_retoma:          retoma,
-      costo_retoma:          Number(costoRetoma) || 0,
       ingreso_inventario:    ingresoInventario,
     }),
     onSuccess: (res) => {
@@ -586,15 +584,7 @@ function ModalIntercambio({ prestamo, onClose, onSaldado }) {
             </div>
           )}
 
-          {/* Costo de la retoma */}
-          {ingresoInventario && (
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-gray-600">Costo de la retoma (opcional)</label>
-              <InputMoneda value={costoRetoma} onChange={setCostoRetoma} placeholder="0"
-                className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-sm
-                  focus:outline-none focus:ring-2 focus:ring-purple-400 transition-all" />
-            </div>
-          )}
+
 
           {/* Toggle ingreso inventario */}
           <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">

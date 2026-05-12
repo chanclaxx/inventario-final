@@ -1654,7 +1654,6 @@ CREATE TABLE public.retomas (
     tipo_retoma character varying(20) DEFAULT 'serial'::character varying,
     producto_serial_id integer,
     producto_cantidad_id integer,
-    costo_retoma numeric(12,2) DEFAULT 0,
     color character varying(50)
 );
 

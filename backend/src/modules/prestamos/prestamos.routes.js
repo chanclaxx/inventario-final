@@ -34,7 +34,6 @@ const validarIntercambio = [
   body('producto_serial_id').optional().isInt({ min: 1 }),
   body('producto_cantidad_id').optional().isInt({ min: 1 }),
   body('cantidad_retoma').optional().isInt({ min: 1 }),
-  body('costo_retoma').optional().isFloat({ min: 0 }),
   body('color_retoma').optional().isString(),
   body('descripcion').optional().isString(),
 ];

@@ -457,7 +457,6 @@ const intercambiarPrestamo = async (negocioId, prestamoId, {
 
   // Comunes
   valor_retoma,
-  costo_retoma = 0,
   descripcion,
   ingreso_inventario = true, // si false: solo aplica el valor como abono, sin tocar inventario
 }) => {
@@ -508,7 +507,7 @@ const intercambiarPrestamo = async (negocioId, prestamoId, {
         await repo.insertarSerialParaRetoma(client, {
           producto_id:    producto_serial_id,
           imei:           imei_retoma.trim(),
-          costo_compra:   Number(costo_retoma) || 0,
+          costo_compra:   Number(valor_retoma),
           color:          color_retoma || null,
           cliente_origen: nombrePersona,
         });
@@ -526,7 +525,7 @@ const intercambiarPrestamo = async (negocioId, prestamoId, {
           producto_id:    producto_cantidad_id,
           sucursal_id:    sucursalId,
           cantidad:       Number(cantidad_retoma || 1),
-          costo_unitario: Number(costo_retoma) || null,
+          costo_unitario: Number(valor_retoma) || null,
           cliente_origen: nombrePersona,
           tipo:           'retoma',
         });
@@ -546,7 +545,6 @@ const intercambiarPrestamo = async (negocioId, prestamoId, {
       tipo_retoma,
       producto_serial_id:   tipo_retoma === 'serial'   ? (producto_serial_id   || null) : null,
       producto_cantidad_id: tipo_retoma === 'cantidad' ? (producto_cantidad_id || null) : null,
-      costo_retoma:        Number(costo_retoma) || 0,
       color:               color_retoma || null,
     });
 

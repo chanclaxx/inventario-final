@@ -18,10 +18,6 @@ ALTER TABLE retomas
 ALTER TABLE retomas
   ADD COLUMN IF NOT EXISTS producto_cantidad_id integer REFERENCES productos_cantidad(id) ON DELETE SET NULL;
 
--- 5. costo de la retoma (para actualizar costo promedio si es cantidad)
-ALTER TABLE retomas
-  ADD COLUMN IF NOT EXISTS costo_retoma numeric(12,2) DEFAULT 0;
-
--- 6. color (útil para seriales)
+-- 5. color (útil para seriales)
 ALTER TABLE retomas
   ADD COLUMN IF NOT EXISTS color character varying(50);
