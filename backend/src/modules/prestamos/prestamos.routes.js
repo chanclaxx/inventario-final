@@ -29,13 +29,13 @@ const validarSaldoAFavor = [
 
 const validarIntercambio = [
   body('valor_retoma').isFloat({ gt: 0 }).withMessage('El valor de retoma debe ser mayor a 0'),
-  body('tipo_retoma').optional().isIn(['serial', 'cantidad']).withMessage("tipo_retoma debe ser 'serial' o 'cantidad'"),
-  body('imei_retoma').optional().isString(),
-  body('producto_serial_id').optional().isInt({ min: 1 }),
-  body('producto_cantidad_id').optional().isInt({ min: 1 }),
-  body('cantidad_retoma').optional().isInt({ min: 1 }),
-  body('color_retoma').optional().isString(),
-  body('descripcion').optional().isString(),
+  body('tipo_retoma').optional({ nullable: true }).isIn(['serial', 'cantidad']).withMessage("tipo_retoma debe ser 'serial' o 'cantidad'"),
+  body('imei_retoma').optional({ nullable: true }).isString(),
+  body('producto_serial_id').optional({ nullable: true }).isInt({ min: 1 }),
+  body('producto_cantidad_id').optional({ nullable: true }).isInt({ min: 1 }),
+  body('cantidad_retoma').optional({ nullable: true }).isInt({ min: 1 }),
+  body('color_retoma').optional({ nullable: true }).isString(),
+  body('descripcion').optional({ nullable: true }).isString(),
 ];
 
 router.get('/',       requireModulo('prestamos'), ctrl.getPrestamos);
