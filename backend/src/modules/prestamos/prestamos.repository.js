@@ -71,10 +71,32 @@ const perteneceAlNegocio = async (id, negocioId) => {
 };
 
 const getAbonos = async (prestamoId) => {
-  const { rows } = await pool.query(
-    'SELECT * FROM abonos_prestamo WHERE prestamo_id = $1 ORDER BY fecha',
-    [prestamoId]
-  );
+  const { rows } = await pool.query(`
+    SELECT
+      ap.id, ap.prestamo_id, ap.fecha, ap.valor, ap.metodo,
+      u.nombre AS usuario_nombre
+    FROM abonos_prestamo ap
+    LEFT JOIN usuarios u ON u.id = ap.usuario_id
+    WHERE ap.prestamo_id = $1
+    ORDER BY ap.fecha
+  `, [prestamoId]);
+  return rows;
+};
+
+const getRetomasPorPrestamo = async (prestamoId) => {
+  const { rows } = await pool.query(`
+    SELECT
+      r.id, r.nombre_producto, r.imei, r.valor_retoma,
+      r.cantidad_retoma, r.tipo_retoma, r.ingreso_inventario,
+      r.color, r.descripcion,
+      ps.nombre AS producto_serial_nombre,
+      pc.nombre AS producto_cantidad_nombre
+    FROM retomas r
+    LEFT JOIN productos_serial   ps ON ps.id = r.producto_serial_id
+    LEFT JOIN productos_cantidad pc ON pc.id = r.producto_cantidad_id
+    WHERE r.prestamo_id = $1
+    ORDER BY r.id
+  `, [prestamoId]);
   return rows;
 };
 
@@ -99,10 +121,10 @@ const create = async (client, {
   return rows[0];
 };
 
-const insertarAbono = async (client, { prestamo_id, valor, metodo }) => {
+const insertarAbono = async (client, { prestamo_id, valor, metodo, usuario_id }) => {
   await client.query(
-    'INSERT INTO abonos_prestamo(prestamo_id, valor, metodo) VALUES ($1, $2, $3)',
-    [prestamo_id, valor, metodo || 'Efectivo']
+    'INSERT INTO abonos_prestamo(prestamo_id, valor, metodo, usuario_id) VALUES ($1, $2, $3, $4)',
+    [prestamo_id, valor, metodo || 'Efectivo', usuario_id || null]
   );
   const { rows } = await client.query(`
     UPDATE prestamos SET total_abonado = total_abonado + $1
@@ -357,4 +379,5 @@ module.exports = {
   getSaldoAFavorPersona, setearSaldoAFavorPersona,
   retornarSerialConOrigen,
   insertarRetoma, insertarSerialParaRetoma, ajustarStockConHistorialEnTx,
+  getRetomasPorPrestamo,
 };

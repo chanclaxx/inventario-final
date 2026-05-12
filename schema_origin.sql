@@ -167,7 +167,8 @@ CREATE TABLE public.abonos_prestamo (
     prestamo_id integer NOT NULL,
     fecha timestamp without time zone DEFAULT now() NOT NULL,
     valor numeric(12,2) NOT NULL,
-    metodo character varying(50) DEFAULT 'Efectivo'::character varying
+    metodo character varying(50) DEFAULT 'Efectivo'::character varying,
+    usuario_id integer
 );
 
 

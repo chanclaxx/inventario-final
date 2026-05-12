@@ -146,8 +146,11 @@ const getPrestamos = (sucursalId, negocioId) => repo.findAll(sucursalId, negocio
 const getPrestamoById = async (negocioId, id) => {
   const prestamo = await repo.findByIdYNegocio(id, negocioId);
   if (!prestamo) throw { status: 404, message: 'Préstamo no encontrado' };
-  const abonos = await repo.getAbonos(id);
-  return { ...prestamo, abonos };
+  const [abonos, retomas] = await Promise.all([
+    repo.getAbonos(id),
+    repo.getRetomasPorPrestamo(id),
+  ]);
+  return { ...prestamo, abonos, retomas };
 };
 
 // ─── Servicio: crear un préstamo ──────────────────────────────────────────────
@@ -306,7 +309,7 @@ const registrarSaldoAFavor = async (negocioId, tipo, personaId, monto) => {
 
 // ─── Servicio: registrar abono ────────────────────────────────────────────────
 
-const registrarAbono = async (negocioId, prestamoId, valor, metodo) => {
+const registrarAbono = async (negocioId, prestamoId, valor, metodo, usuarioId) => {
   const prestamo = await repo.findByIdYNegocio(prestamoId, negocioId);
   if (!prestamo) throw { status: 404, message: 'Préstamo no encontrado' };
   if (prestamo.estado !== 'Activo') throw { status: 400, message: 'El préstamo no está activo' };
@@ -320,7 +323,7 @@ const registrarAbono = async (negocioId, prestamoId, valor, metodo) => {
   try {
     await client.query('BEGIN');
 
-    const resultado = await repo.insertarAbono(client, { prestamo_id: prestamoId, valor, metodo });
+    const resultado = await repo.insertarAbono(client, { prestamo_id: prestamoId, valor, metodo, usuario_id: usuarioId || null });
 
     let saldado    = false;
     let factura_id = null;
@@ -444,6 +447,7 @@ const devolverParcial = async (negocioId, prestamoId, cantidad_devuelta) => {
 // sobre el préstamo existente (no se crea un préstamo nuevo).
 
 const intercambiarPrestamo = async (negocioId, prestamoId, {
+  usuario_id,
   tipo_retoma = 'serial',    // 'serial' | 'cantidad'
 
   // Retoma serial
@@ -554,6 +558,7 @@ const intercambiarPrestamo = async (negocioId, prestamoId, {
       prestamo_id: prestamoId,
       valor:       montoAbono,
       metodo:      'Intercambio',
+      usuario_id:  usuario_id || null,
     });
 
     let saldado       = false;

@@ -739,73 +739,181 @@ function CardPersona({ nombre, tipo, prestamos, saldoTotal, ultimoAbono, onSelec
 
 // ─── Tarjeta de préstamo individual (en vista detalle) ────────────────────────
 
+const METODO_BADGE = {
+  Efectivo:     'bg-green-100 text-green-700',
+  Transferencia:'bg-blue-100 text-blue-700',
+  Intercambio:  'bg-purple-100 text-purple-700',
+  'Saldo a favor': 'bg-yellow-100 text-yellow-700',
+};
+
+function HistorialPrestamo({ prestamoId }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ['prestamo-detalle', prestamoId],
+    queryFn:  () => api.get(`/prestamos/${prestamoId}`).then((r) => r.data.data),
+    staleTime: 0,
+  });
+
+  if (isLoading) return <div className="py-2 text-center"><Loader2 size={14} className="animate-spin text-gray-400 mx-auto" /></div>;
+
+  const abonos  = data?.abonos  || [];
+  const retomas = data?.retomas || [];
+
+  if (!abonos.length && !retomas.length) {
+    return <p className="text-xs text-gray-400 text-center py-1">Sin movimientos registrados</p>;
+  }
+
+  // Empareja cada abono de tipo Intercambio con su retoma (orden de inserción 1:1)
+  let retomaIdx = 0;
+  const retomaByAbonoId = {};
+  abonos.forEach((ab) => {
+    if (ab.metodo === 'Intercambio' && retomaIdx < retomas.length) {
+      retomaByAbonoId[ab.id] = retomas[retomaIdx++];
+    }
+  });
+
+  return (
+    <div className="flex flex-col gap-2">
+      {abonos.map((abono) => {
+        const retoma = retomaByAbonoId[abono.id] || null;
+        const badgeClass = METODO_BADGE[abono.metodo] || 'bg-gray-100 text-gray-600';
+
+        return (
+          <div key={abono.id} className="flex flex-col gap-1 bg-gray-50 rounded-xl px-3 py-2">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${badgeClass}`}>
+                  {abono.metodo}
+                </span>
+                <span className="text-xs text-gray-400">{formatFechaHora(abono.fecha)}</span>
+              </div>
+              <span className="text-sm font-semibold text-green-600 flex-shrink-0">
+                + {formatCOP(abono.valor)}
+              </span>
+            </div>
+            {abono.usuario_nombre && (
+              <p className="text-xs text-gray-400">por {abono.usuario_nombre}</p>
+            )}
+            {abono.metodo === 'Intercambio' && retoma && (
+              <div className="mt-1 pt-1 border-t border-purple-100 flex flex-col gap-0.5">
+                <p className="text-xs font-medium text-purple-700">
+                  Retoma: {retoma.nombre_producto || retoma.producto_serial_nombre || retoma.producto_cantidad_nombre}
+                </p>
+                {retoma.imei && (
+                  <p className="text-xs text-gray-400 font-mono">IMEI: {retoma.imei}</p>
+                )}
+                {retoma.color && (
+                  <p className="text-xs text-gray-400">Color: {retoma.color}</p>
+                )}
+                <p className="text-xs text-purple-600">
+                  Valor retoma: {formatCOP(retoma.valor_retoma)}
+                  {retoma.ingreso_inventario ? ' · ingresó al inventario' : ''}
+                </p>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function TarjetaPrestamoDetalle({ prestamo, onAbonar, onDevolver, onImprimir, onIntercambiar, coloresActivo, cerrado = false }) {
+  const [historialAbierto, setHistorialAbierto] = useState(false);
+
   const saldo    = Number(prestamo.valor_prestamo) - Number(prestamo.total_abonado);
   const progreso = (Number(prestamo.total_abonado) / Number(prestamo.valor_prestamo)) * 100;
   const esSaldado = prestamo.estado === 'Saldado';
+  const tieneMovimientos = Number(prestamo.total_abonado) > 0;
 
   return (
-    <div className={`rounded-2xl border p-4 flex flex-col gap-3
+    <div className={`rounded-2xl border flex flex-col gap-0 overflow-hidden
       ${cerrado ? 'bg-gray-50 border-gray-100' : 'bg-white border-gray-200'}`}>
 
-      {/* Encabezado del producto */}
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0 flex-1">
-          <p className={`text-sm font-semibold truncate ${cerrado ? 'text-gray-500' : 'text-gray-800'}`}>
-            {prestamo.nombre_producto}
-          </p>
-          {prestamo.imei && (
-            <p className="text-xs text-gray-400 font-mono mt-0.5">{prestamo.imei}</p>
-          )}
-          {!prestamo.imei && prestamo.cantidad_prestada > 1 && (
-            <p className="text-xs text-gray-400 mt-0.5">Cantidad: {prestamo.cantidad_prestada}</p>
-          )}
-          {coloresActivo && prestamo.serial_color && <ChipColor color={prestamo.serial_color} />}
-          {prestamo.empleado_nombre && (
-            <p className="text-xs text-blue-500 mt-0.5">→ {prestamo.empleado_nombre}</p>
-          )}
-          <p className="text-xs text-gray-400 mt-0.5">{formatFechaHora(prestamo.fecha)}</p>
+      <div className="p-4 flex flex-col gap-3">
+        {/* Encabezado del producto */}
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0 flex-1">
+            <p className={`text-sm font-semibold truncate ${cerrado ? 'text-gray-500' : 'text-gray-800'}`}>
+              {prestamo.nombre_producto}
+            </p>
+            {prestamo.imei && (
+              <p className="text-xs text-gray-400 font-mono mt-0.5">{prestamo.imei}</p>
+            )}
+            {!prestamo.imei && prestamo.cantidad_prestada > 1 && (
+              <p className="text-xs text-gray-400 mt-0.5">Cantidad: {prestamo.cantidad_prestada}</p>
+            )}
+            {coloresActivo && prestamo.serial_color && <ChipColor color={prestamo.serial_color} />}
+            {prestamo.empleado_nombre && (
+              <p className="text-xs text-blue-500 mt-0.5">→ {prestamo.empleado_nombre}</p>
+            )}
+            <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+              <span className="text-xs text-gray-400">{formatFechaHora(prestamo.fecha)}</span>
+              {prestamo.usuario_nombre && (
+                <span className="text-xs text-gray-400">· registrado por {prestamo.usuario_nombre}</span>
+              )}
+            </div>
+          </div>
+          <div className="flex items-center gap-1 flex-shrink-0">
+            <BotonImprimirPrestamo prestamo={prestamo} onClick={onImprimir} />
+            <Badge variant={prestamo.estado === 'Activo' ? 'blue' : esSaldado ? 'green' : 'gray'}>
+              {prestamo.estado}
+            </Badge>
+          </div>
         </div>
-        <div className="flex items-center gap-1 flex-shrink-0">
-          <BotonImprimirPrestamo prestamo={prestamo} onClick={onImprimir} />
-          <Badge variant={prestamo.estado === 'Activo' ? 'blue' : esSaldado ? 'green' : 'gray'}>
-            {prestamo.estado}
-          </Badge>
-        </div>
-      </div>
 
-      {/* Barra de progreso */}
-      <div className="flex flex-col gap-1">
-        <div className="w-full bg-gray-100 rounded-full h-1.5">
-          <div
-            className={`h-1.5 rounded-full transition-all ${esSaldado ? 'bg-green-400' : 'bg-blue-500'}`}
-            style={{ width: `${Math.min(progreso, 100)}%` }}
-          />
-        </div>
-        <div className="flex justify-between text-xs">
-          <span className="text-gray-400">
-            {esSaldado ? '✓ ' : ''}Abonado: {formatCOP(Number(prestamo.total_abonado))}
-          </span>
-          {!esSaldado && (
-            <span className={`font-medium ${saldo > 0 ? 'text-red-500' : 'text-green-600'}`}>
-              Saldo: {formatCOP(saldo)}
+        {/* Barra de progreso */}
+        <div className="flex flex-col gap-1">
+          <div className="w-full bg-gray-100 rounded-full h-1.5">
+            <div
+              className={`h-1.5 rounded-full transition-all ${esSaldado ? 'bg-green-400' : 'bg-blue-500'}`}
+              style={{ width: `${Math.min(progreso, 100)}%` }}
+            />
+          </div>
+          <div className="flex justify-between text-xs">
+            <span className="text-gray-400">
+              {esSaldado ? '✓ ' : ''}Abonado: {formatCOP(Number(prestamo.total_abonado))}
             </span>
-          )}
+            {!esSaldado && (
+              <span className={`font-medium ${saldo > 0 ? 'text-red-500' : 'text-green-600'}`}>
+                Saldo: {formatCOP(saldo)}
+              </span>
+            )}
+          </div>
         </div>
+
+        {/* Acciones — solo préstamos activos */}
+        {prestamo.estado === 'Activo' && (
+          <div className="flex gap-2 flex-wrap">
+            <Button size="sm" className="flex-1" onClick={() => onAbonar(prestamo)}>
+              <Plus size={14} /> Abonar
+            </Button>
+            <Button size="sm" variant="secondary" onClick={() => onIntercambiar(prestamo)}>
+              <ArrowLeftRight size={14} /> Intercambio
+            </Button>
+            <Button size="sm" variant="secondary" onClick={() => onDevolver(prestamo)}>
+              <CheckCircle size={14} /> Devuelto
+            </Button>
+          </div>
+        )}
       </div>
 
-      {/* Acciones — solo préstamos activos */}
-      {prestamo.estado === 'Activo' && (
-        <div className="flex gap-2 flex-wrap">
-          <Button size="sm" className="flex-1" onClick={() => onAbonar(prestamo)}>
-            <Plus size={14} /> Abonar
-          </Button>
-          <Button size="sm" variant="secondary" onClick={() => onIntercambiar(prestamo)}>
-            <ArrowLeftRight size={14} /> Intercambio
-          </Button>
-          <Button size="sm" variant="secondary" onClick={() => onDevolver(prestamo)}>
-            <CheckCircle size={14} /> Devuelto
-          </Button>
+      {/* Historial desplegable */}
+      {tieneMovimientos && (
+        <div className="border-t border-gray-100">
+          <button
+            onClick={() => setHistorialAbierto((v) => !v)}
+            className="w-full flex items-center justify-between px-4 py-2 text-xs text-gray-500
+              hover:bg-gray-50 transition-colors font-medium">
+            <span>Historial de movimientos</span>
+            {historialAbierto
+              ? <ChevronUp size={13} className="text-gray-400" />
+              : <ChevronDown size={13} className="text-gray-400" />}
+          </button>
+          {historialAbierto && (
+            <div className="px-4 pb-4">
+              <HistorialPrestamo prestamoId={prestamo.id} />
+            </div>
+          )}
         </div>
       )}
     </div>

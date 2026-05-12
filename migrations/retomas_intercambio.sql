@@ -21,3 +21,7 @@ ALTER TABLE retomas
 -- 5. color (útil para seriales)
 ALTER TABLE retomas
   ADD COLUMN IF NOT EXISTS color character varying(50);
+
+-- 6. usuario que registró el abono / intercambio
+ALTER TABLE abonos_prestamo
+  ADD COLUMN IF NOT EXISTS usuario_id integer REFERENCES usuarios(id) ON DELETE SET NULL;

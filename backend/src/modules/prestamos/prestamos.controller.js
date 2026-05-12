@@ -84,7 +84,7 @@ const registrarAbono = async (req, res, next) => {
     if (!valor || valor <= 0) {
       return res.status(400).json({ ok: false, error: 'El valor del abono debe ser mayor a 0' });
     }
-    const data = await service.registrarAbono(req.user.negocio_id, req.params.id, valor, metodo);
+    const data = await service.registrarAbono(req.user.negocio_id, req.params.id, valor, metodo, req.user.id);
     res.json({ ok: true, data, message: 'Abono registrado correctamente' });
   } catch (err) { next(err); }
 };
@@ -183,6 +183,7 @@ const intercambiarPrestamo = async (req, res, next) => {
       req.user.negocio_id,
       id,
       {
+        usuario_id:           req.user.id,
         tipo_retoma,
         imei_retoma:          imei_retoma          || null,
         producto_serial_id:   producto_serial_id   ? Number(producto_serial_id)   : null,
