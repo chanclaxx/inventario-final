@@ -1101,7 +1101,7 @@ function PasoPago({ proveedor, productos, tipo, onConfirmar, onVolver, loading }
                     setPagos((prev) => prev.filter((p) => p.metodo !== metodo));
                   } else {
                     setPagos((prev) => [...prev, { metodo, valor: '' }]);
-                    if (metodo === 'Credito' || metodo === 'Fiado') setAgregarComoAcreedor(true);
+                    setAgregarComoAcreedor(true);
                   }
                 }}
                 className={`py-2.5 rounded-xl text-sm font-medium border transition-all
@@ -1211,10 +1211,16 @@ function PasoPago({ proveedor, productos, tipo, onConfirmar, onVolver, loading }
             onChange={(e) => setAgregarComoAcreedor(e.target.checked)} className="rounded" />
           <div>
             <p className="text-sm font-medium text-gray-700">
-              {proveedorYaEsAcreedor ? `Registrar cargo a ${proveedor.nombre}` : `Agregar ${proveedor.nombre} como acreedor`}
+              {proveedorYaEsAcreedor ? `Registrar en cuenta de ${proveedor.nombre}` : `Agregar ${proveedor.nombre} como acreedor`}
             </p>
             <p className="text-xs text-gray-400">
-              {proveedorYaEsAcreedor ? 'Se registrará el monto pendiente en su cuenta' : 'Se creará un acreedor con el monto pendiente de esta compra'}
+              {(() => {
+                const tieneSoloContado = pagos.length > 0 && pagos.every((p) => p.metodo !== 'Credito' && p.metodo !== 'Fiado');
+                if (tieneSoloContado) return 'La compra quedará saldada en su cuenta';
+                const tieneMixto = pagos.some((p) => p.metodo !== 'Credito' && p.metodo !== 'Fiado') && pagos.some((p) => p.metodo === 'Credito' || p.metodo === 'Fiado');
+                if (tieneMixto) return 'Se registrará el abono parcial y el saldo pendiente en su cuenta';
+                return proveedorYaEsAcreedor ? 'Se registrará la deuda completa en su cuenta' : 'Se creará un acreedor con la deuda de esta compra';
+              })()}
             </p>
           </div>
         </label>

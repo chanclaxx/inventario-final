@@ -171,48 +171,56 @@ const registrarCompra = async ({
 
     // ── Acreedor ───────────────────────────────────────────────────────────
     if (agregarComoAcreedor && proveedor_id) {
-      const totalPagado = pagos
-        .filter((p) => p.metodo !== 'Credito' && p.metodo !== 'Fiado')
-        .reduce((s, p) => s + Number(p.valor || 0), 0);
-      const montoCargo = total - totalPagado;
+      const pagosEfectivos = pagos.filter((p) => p.metodo !== 'Credito' && p.metodo !== 'Fiado');
+      const totalPagado    = pagosEfectivos.reduce((s, p) => s + Number(p.valor || 0), 0);
 
-      if (montoCargo > 0) {
-        let { rows: acrRows } = await client.query(
-          `SELECT id FROM acreedores WHERE negocio_id = $1 AND proveedor_id = $2 LIMIT 1`,
-          [negocio_id, proveedor_id]
+      let { rows: acrRows } = await client.query(
+        `SELECT id FROM acreedores WHERE negocio_id = $1 AND proveedor_id = $2 LIMIT 1`,
+        [negocio_id, proveedor_id]
+      );
+
+      if (acrRows.length === 0 && prov?.nit) {
+        const { rows: acrPorCedula } = await client.query(
+          `SELECT id FROM acreedores WHERE negocio_id = $1 AND cedula = $2 LIMIT 1`,
+          [negocio_id, prov.nit]
         );
-
-        if (acrRows.length === 0 && prov?.nit) {
-          const { rows: acrPorCedula } = await client.query(
-            `SELECT id FROM acreedores WHERE negocio_id = $1 AND cedula = $2 LIMIT 1`,
-            [negocio_id, prov.nit]
+        if (acrPorCedula.length) {
+          acrRows = acrPorCedula;
+          await client.query(
+            `UPDATE acreedores SET proveedor_id = $1 WHERE id = $2 AND proveedor_id IS NULL`,
+            [proveedor_id, acrPorCedula[0].id]
           );
-          if (acrPorCedula.length) {
-            acrRows = acrPorCedula;
-            await client.query(
-              `UPDATE acreedores SET proveedor_id = $1 WHERE id = $2 AND proveedor_id IS NULL`,
-              [proveedor_id, acrPorCedula[0].id]
-            );
-          }
         }
+      }
 
-        let acreedorId;
-        if (acrRows.length) {
-          acreedorId = acrRows[0].id;
-        } else {
-          const cedulaFinal = prov?.nit || `prov-${proveedor_id}`;
-          const { rows: nuevoRows } = await client.query(
-            `INSERT INTO acreedores(negocio_id, nombre, cedula, telefono, proveedor_id)
-             VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-            [negocio_id, prov?.nombre, cedulaFinal, prov?.telefono || '', proveedor_id]
-          );
-          acreedorId = nuevoRows[0].id;
-        }
+      let acreedorId;
+      if (acrRows.length) {
+        acreedorId = acrRows[0].id;
+      } else {
+        const cedulaFinal = prov?.nit || `prov-${proveedor_id}`;
+        const { rows: nuevoRows } = await client.query(
+          `INSERT INTO acreedores(negocio_id, nombre, cedula, telefono, proveedor_id)
+           VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+          [negocio_id, prov?.nombre, cedulaFinal, prov?.telefono || '', proveedor_id]
+        );
+        acreedorId = nuevoRows[0].id;
+      }
 
+      // Cargo siempre por el total completo de la compra
+      const { rows: cargoRows } = await client.query(
+        `INSERT INTO movimientos_acreedor(acreedor_id, usuario_id, tipo, descripcion, valor, compra_id)
+         VALUES ($1, $2, 'Cargo', $3, $4, $5) RETURNING id`,
+        [acreedorId, usuario_id, `Compra #${compra.id} — mercancía`, total, compra.id]
+      );
+      const cargoId = cargoRows[0].id;
+
+      // Si hubo pago inmediato (Contado / Transferencia / mezcla), crear Abono vinculado al cargo
+      if (totalPagado > 0) {
+        const metodoPagoInmediato = pagosEfectivos.map((p) => p.metodo).join('/') || null;
         await client.query(
-          `INSERT INTO movimientos_acreedor(acreedor_id, usuario_id, tipo, descripcion, valor, compra_id)
-           VALUES ($1, $2, 'Cargo', $3, $4, $5)`,
-          [acreedorId, usuario_id, `Compra #${compra.id} — mercancía`, montoCargo, compra.id]
+          `INSERT INTO movimientos_acreedor(acreedor_id, usuario_id, tipo, descripcion, valor, cargo_id, metodo, registrar_en_caja)
+           VALUES ($1, $2, 'Abono', $3, $4, $5, $6, $7)`,
+          [acreedorId, usuario_id, 'Pago al momento de la compra', totalPagado, cargoId, metodoPagoInmediato, registrar_en_caja !== false]
         );
       }
     }
