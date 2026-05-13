@@ -24,7 +24,7 @@ const _fechaHoy = () => {
 const registrarCompra = async ({
   negocio_id, sucursal_id, usuario_id, proveedor_id,
   numero_factura, notas, lineas,
-  total: totalRecibido, pagos = [], agregarComoAcreedor = false,
+  total: totalRecibido, pagos = [],
   registrar_en_caja = true,
 }) => {
   // ── Verificar sucursal pertenece al negocio ──────────────────────────────
@@ -170,7 +170,7 @@ const registrarCompra = async ({
     }
 
     // ── Acreedor ───────────────────────────────────────────────────────────
-    if (agregarComoAcreedor && proveedor_id) {
+    if (proveedor_id) {
       const pagosEfectivos = pagos.filter((p) => p.metodo !== 'Credito' && p.metodo !== 'Fiado');
       const totalPagado    = pagosEfectivos.reduce((s, p) => s + Number(p.valor || 0), 0);
 

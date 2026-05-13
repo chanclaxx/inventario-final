@@ -998,11 +998,10 @@ function PasoPago({ proveedor, productos, tipo, onConfirmar, onVolver, loading }
     }
     return productos.reduce((s, p) => s + (Number(p.precio_compra) * p.cantidad_comprada), 0);
   });
-  const [agregarComoAcreedor, setAgregarComoAcreedor] = useState(false);
-  const [registrarEnCaja,     setRegistrarEnCaja]     = useState(proveedor.tipo !== 'proveedor');
-  const [numeroFactura,       setNumeroFactura]        = useState('');
-  const [notas,               setNotas]                = useState('');
-  const [error,               setError]                = useState('');
+  const [registrarEnCaja,   setRegistrarEnCaja]   = useState(proveedor.tipo !== 'proveedor');
+  const [numeroFactura,     setNumeroFactura]      = useState('');
+  const [notas,             setNotas]              = useState('');
+  const [error,             setError]              = useState('');
   const metodosPago = useMetodosPago();
   const [metodoPagoDetalle, setMetodoPagoDetalle] = useState('Efectivo');
 
@@ -1010,10 +1009,9 @@ function PasoPago({ proveedor, productos, tipo, onConfirmar, onVolver, loading }
     queryKey: ['acreedores'],
     queryFn:  () => getAcreedores('').then((r) => r.data.data),
   });
-  const acreedoresData = normalizarProductos(acreedoresRaw);
+  const acreedoresData    = normalizarProductos(acreedoresRaw);
   const acreedorVinculado = acreedoresData.find((a) => a.proveedor_id === proveedor.id) || null;
-  const proveedorYaEsAcreedor = !!acreedorVinculado;
-  const saldoActual = acreedorVinculado ? Number(acreedorVinculado.saldo || 0) : 0;
+  const saldoActual       = acreedorVinculado ? Number(acreedorVinculado.saldo || 0) : 0;
 
   const handleConfirmar = () => {
     setError('');
@@ -1031,7 +1029,7 @@ function PasoPago({ proveedor, productos, tipo, onConfirmar, onVolver, loading }
         return setError(`El total asignado (${formatCOP(pagado)}) no coincide con el total (${formatCOP(totalCompra)})`);
       }
     }
-    onConfirmar({ pagos: pagosFinales, totalCompra: Number(totalCompra), agregarComoAcreedor, registrarEnCaja, numeroFactura, notas });
+    onConfirmar({ pagos: pagosFinales, totalCompra: Number(totalCompra), registrarEnCaja, numeroFactura, notas });
   };
 
    const resumen = tipo === 'serial'
@@ -1101,7 +1099,6 @@ function PasoPago({ proveedor, productos, tipo, onConfirmar, onVolver, loading }
                     setPagos((prev) => prev.filter((p) => p.metodo !== metodo));
                   } else {
                     setPagos((prev) => [...prev, { metodo, valor: '' }]);
-                    setAgregarComoAcreedor(true);
                   }
                 }}
                 className={`py-2.5 rounded-xl text-sm font-medium border transition-all
@@ -1204,27 +1201,6 @@ function PasoPago({ proveedor, productos, tipo, onConfirmar, onVolver, loading }
           </label>
         </div>
       )}
-
-      <div className={`rounded-xl p-3 border transition-all ${agregarComoAcreedor ? 'bg-orange-50 border-orange-200' : 'bg-gray-50 border-gray-200'}`}>
-        <label className="flex items-center gap-3 cursor-pointer">
-          <input type="checkbox" checked={agregarComoAcreedor}
-            onChange={(e) => setAgregarComoAcreedor(e.target.checked)} className="rounded" />
-          <div>
-            <p className="text-sm font-medium text-gray-700">
-              {proveedorYaEsAcreedor ? `Registrar en cuenta de ${proveedor.nombre}` : `Agregar ${proveedor.nombre} como acreedor`}
-            </p>
-            <p className="text-xs text-gray-400">
-              {(() => {
-                const tieneSoloContado = pagos.length > 0 && pagos.every((p) => p.metodo !== 'Credito' && p.metodo !== 'Fiado');
-                if (tieneSoloContado) return 'La compra quedará saldada en su cuenta';
-                const tieneMixto = pagos.some((p) => p.metodo !== 'Credito' && p.metodo !== 'Fiado') && pagos.some((p) => p.metodo === 'Credito' || p.metodo === 'Fiado');
-                if (tieneMixto) return 'Se registrará el abono parcial y el saldo pendiente en su cuenta';
-                return proveedorYaEsAcreedor ? 'Se registrará la deuda completa en su cuenta' : 'Se creará un acreedor con la deuda de esta compra';
-              })()}
-            </p>
-          </div>
-        </label>
-      </div>
 
       <Input label="Notas (opcional)" placeholder="Observaciones de la compra"
         value={notas} onChange={(e) => setNotas(e.target.value)} />
@@ -1361,9 +1337,8 @@ export function ModalCompra({ proveedor, onClose }) {
       estado:              'Completada',
       notas:               pagoData.notas,
       lineas,
-      pagos:               pagoData.pagos,
-      agregarComoAcreedor: pagoData.agregarComoAcreedor,
-      registrar_en_caja:   pagoData.registrarEnCaja,
+      pagos:             pagoData.pagos,
+      registrar_en_caja: pagoData.registrarEnCaja,
     });
   };
 
