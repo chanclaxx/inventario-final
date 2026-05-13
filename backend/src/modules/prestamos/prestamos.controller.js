@@ -261,6 +261,43 @@ const getResumenCartera = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+const anularAbono = async (req, res, next) => {
+  try {
+    const prestamoId = parseInt(req.params.id, 10);
+    const abonoId    = parseInt(req.params.abonoId, 10);
+    const retomaId   = req.body.retoma_id ? Number(req.body.retoma_id) : null;
+
+    if (isNaN(prestamoId) || isNaN(abonoId)) {
+      return res.status(400).json({ ok: false, error: 'IDs inválidos' });
+    }
+
+    const data = await service.anularAbono(req.user.negocio_id, prestamoId, abonoId, retomaId);
+    res.json({ ok: true, data, message: 'Abono anulado correctamente' });
+  } catch (err) { next(err); }
+};
+
+const getRetomasDirectas = async (req, res, next) => {
+  try {
+    const { tipo, id } = req.params;
+    if (!['prestatario', 'cliente'].includes(tipo)) {
+      return res.status(400).json({ ok: false, error: "tipo debe ser 'prestatario' o 'cliente'" });
+    }
+    const data = await service.getRetomasDirectas(req.user.negocio_id, tipo, Number(id));
+    res.json({ ok: true, data });
+  } catch (err) { next(err); }
+};
+
+const anularRetomaDirecta = async (req, res, next) => {
+  try {
+    const retomaId = parseInt(req.params.retomaId, 10);
+    if (isNaN(retomaId)) {
+      return res.status(400).json({ ok: false, error: 'ID de retoma inválido' });
+    }
+    await service.anularRetomaDirecta(req.user.negocio_id, retomaId);
+    res.json({ ok: true, message: 'Retoma anulada correctamente' });
+  } catch (err) { next(err); }
+};
+
 module.exports = {
   getPrestamos, getPrestamoById,
   crearPrestamo, crearPrestamos,
@@ -270,4 +307,5 @@ module.exports = {
   registrarSaldoAFavor,
   intercambiarPrestamo,
   retomaDirecta, aplicarSaldoAPrestamos, getResumenCartera,
+  anularAbono, getRetomasDirectas, anularRetomaDirecta,
 };

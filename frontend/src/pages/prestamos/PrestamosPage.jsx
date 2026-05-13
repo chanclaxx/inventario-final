@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { buscarPrestamos as buscarPrestamosApi } from '../../api/busqueda.api';
 import { exportarPrestamosExcel } from '../../utils/exportarPrestamosExcel';
-import { getPrestamos, registrarAbonoPrestamo, devolverPrestamo, devolverParcialPrestamo, registrarSaldoAFavor as registrarSaldoAFavorApi, intercambiarPrestamo as intercambiarPrestamoApi } from '../../api/prestamos.api';
+import { getPrestamos, registrarAbonoPrestamo, devolverPrestamo, devolverParcialPrestamo, registrarSaldoAFavor as registrarSaldoAFavorApi, intercambiarPrestamo as intercambiarPrestamoApi, anularAbono as anularAbonoApi, getRetomasDirectas as getRetomasDirectasApi, anularRetomaDirecta as anularRetomaDirectaApi } from '../../api/prestamos.api';
 import {
   getDomiciliarios,
   getEntregas,
@@ -748,11 +748,27 @@ const METODO_BADGE = {
   'Saldo a favor': 'bg-yellow-100 text-yellow-700',
 };
 
-function HistorialPrestamo({ prestamoId }) {
+function HistorialPrestamo({ prestamoId, prestamoEstado }) {
+  const queryClient = useQueryClient();
+  const [confirmandoId, setConfirmandoId] = useState(null);
+
   const { data, isLoading } = useQuery({
     queryKey: ['prestamo-detalle', prestamoId],
     queryFn:  () => api.get(`/prestamos/${prestamoId}`).then((r) => r.data.data),
     staleTime: 0,
+  });
+
+  const mutAnular = useMutation({
+    mutationFn: ({ abonoId, retomaId }) => anularAbonoApi(prestamoId, abonoId, retomaId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['prestamo-detalle', prestamoId] });
+      queryClient.invalidateQueries({ queryKey: ['prestamos'], exact: false });
+      setConfirmandoId(null);
+    },
+    onError: (err) => {
+      alert(err.response?.data?.error || 'Error al anular el abono');
+      setConfirmandoId(null);
+    },
   });
 
   if (isLoading) return <div className="py-2 text-center"><Loader2 size={14} className="animate-spin text-gray-400 mx-auto" /></div>;
@@ -776,8 +792,9 @@ function HistorialPrestamo({ prestamoId }) {
   return (
     <div className="flex flex-col gap-2">
       {abonos.map((abono) => {
-        const retoma = retomaByAbonoId[abono.id] || null;
+        const retoma     = retomaByAbonoId[abono.id] || null;
         const badgeClass = METODO_BADGE[abono.metodo] || 'bg-gray-100 text-gray-600';
+        const confirmando = confirmandoId === abono.id;
 
         return (
           <div key={abono.id} className="flex flex-col gap-1 bg-gray-50 rounded-xl px-3 py-2">
@@ -788,14 +805,58 @@ function HistorialPrestamo({ prestamoId }) {
                 </span>
                 <span className="text-xs text-gray-400">{formatFechaHora(abono.fecha)}</span>
               </div>
-              <span className="text-sm font-semibold text-green-600 flex-shrink-0">
-                + {formatCOP(abono.valor)}
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-semibold text-green-600 flex-shrink-0">
+                  + {formatCOP(abono.valor)}
+                </span>
+                {!confirmando && (
+                  <button
+                    onClick={() => setConfirmandoId(abono.id)}
+                    title="Anular abono"
+                    className="text-gray-300 hover:text-red-400 transition-colors flex-shrink-0">
+                    <XCircle size={15} />
+                  </button>
+                )}
+              </div>
             </div>
+
             {abono.usuario_nombre && (
               <p className="text-xs text-gray-400">por {abono.usuario_nombre}</p>
             )}
-            {abono.metodo === 'Intercambio' && retoma && (
+
+            {/* Confirmación inline */}
+            {confirmando && (
+              <div className="mt-1 p-2 bg-red-50 border border-red-200 rounded-lg flex flex-col gap-1.5">
+                <p className="text-xs font-medium text-red-700">
+                  ¿Anular este abono de {formatCOP(abono.valor)}?
+                </p>
+                {prestamoEstado === 'Saldado' && (
+                  <p className="text-xs text-red-500">
+                    El préstamo volverá a Activo y la factura será cancelada.
+                  </p>
+                )}
+                {retoma?.ingreso_inventario && (
+                  <p className="text-xs text-red-500">
+                    El producto retomado será eliminado del inventario.
+                  </p>
+                )}
+                <div className="flex gap-2 mt-0.5">
+                  <button
+                    onClick={() => mutAnular.mutate({ abonoId: abono.id, retomaId: retoma?.id || null })}
+                    disabled={mutAnular.isPending}
+                    className="flex-1 text-xs py-1 bg-red-500 hover:bg-red-600 text-white rounded-lg font-medium transition-colors disabled:opacity-50">
+                    {mutAnular.isPending ? 'Anulando…' : 'Sí, anular'}
+                  </button>
+                  <button
+                    onClick={() => setConfirmandoId(null)}
+                    className="flex-1 text-xs py-1 bg-white border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50 transition-colors">
+                    Cancelar
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {abono.metodo === 'Intercambio' && retoma && !confirmando && (
               <div className="mt-1 pt-1 border-t border-purple-100 flex flex-col gap-0.5">
                 <p className="text-xs font-medium text-purple-700">
                   Retoma: {retoma.nombre_producto || retoma.producto_serial_nombre || retoma.producto_cantidad_nombre}
@@ -913,7 +974,7 @@ function TarjetaPrestamoDetalle({ prestamo, onAbonar, onDevolver, onImprimir, on
           </button>
           {historialAbierto && (
             <div className="px-4 pb-4">
-              <HistorialPrestamo prestamoId={prestamo.id} />
+              <HistorialPrestamo prestamoId={prestamo.id} prestamoEstado={prestamo.estado} />
             </div>
           )}
         </div>
@@ -925,7 +986,31 @@ function TarjetaPrestamoDetalle({ prestamo, onAbonar, onDevolver, onImprimir, on
 // ─── Vista detalle de persona ─────────────────────────────────────────────────
 
 function VistaDetallePersona({ nombre, tipo, personaId, prestamos, saldoAFavor = 0, onVolver, onAbonar, onDevolver, onImprimir, onIntercambiar, onRegistrarSaldo, onRetomaDirecta, onAplicarSaldo, coloresActivo }) {
-  const [cerradosAbiertos, setCerradosAbiertos] = useState(false);
+  const queryClient = useQueryClient();
+  const [cerradosAbiertos,    setCerradosAbiertos]    = useState(false);
+  const [retomasAbiertas,     setRetomasAbiertas]     = useState(false);
+  const [confirmAnularRetoma, setConfirmAnularRetoma] = useState(null);
+
+  const tipoApi = tipo === 'companero' ? 'prestatario' : tipo;
+
+  const { data: retomasDirectas = [] } = useQuery({
+    queryKey:  ['retomas-directas', tipoApi, personaId],
+    queryFn:   () => getRetomasDirectasApi(tipoApi, personaId).then((r) => r.data.data),
+    staleTime: 30_000,
+  });
+
+  const mutAnularRetoma = useMutation({
+    mutationFn: (retomaId) => anularRetomaDirectaApi(retomaId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['retomas-directas', tipoApi, personaId] });
+      queryClient.invalidateQueries({ queryKey: ['prestamos'], exact: false });
+      setConfirmAnularRetoma(null);
+    },
+    onError: (err) => {
+      alert(err.response?.data?.error || 'Error al anular la retoma');
+      setConfirmAnularRetoma(null);
+    },
+  });
 
   const activos  = prestamos.filter((p) => p.estado === 'Activo');
   const cerrados = prestamos.filter((p) => p.estado !== 'Activo');
@@ -1046,6 +1131,87 @@ function VistaDetallePersona({ nombre, tipo, personaId, prestamos, saldoAFavor =
               </button>
             )}
           </div>
+        </div>
+      )}
+
+      {/* Retomas directas (colapsable) */}
+      {retomasDirectas.length > 0 && (
+        <div className="border border-purple-100 rounded-2xl overflow-hidden">
+          <button
+            onClick={() => setRetomasAbiertas((v) => !v)}
+            className="w-full flex items-center justify-between px-4 py-3
+              bg-purple-50 hover:bg-purple-100 transition-colors">
+            <div className="flex items-center gap-2">
+              <ArrowLeftRight size={13} className="text-purple-500" />
+              <span className="text-xs font-semibold text-purple-700 uppercase tracking-wide">
+                Retomas directas
+              </span>
+              <span className="text-xs bg-purple-200 text-purple-700 px-2 py-0.5 rounded-full">
+                {retomasDirectas.length}
+              </span>
+            </div>
+            {retomasAbiertas
+              ? <ChevronUp size={15} className="text-purple-400" />
+              : <ChevronDown size={15} className="text-purple-400" />}
+          </button>
+
+          {retomasAbiertas && (
+            <div className="flex flex-col gap-2 p-3">
+              {retomasDirectas.map((r) => {
+                const confirmando = confirmAnularRetoma === r.id;
+                return (
+                  <div key={r.id} className="bg-white border border-purple-100 rounded-xl px-3 py-2 flex flex-col gap-1">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-gray-800 truncate">{r.nombre_producto}</p>
+                        {r.imei && <p className="text-xs text-gray-400 font-mono">IMEI: {r.imei}</p>}
+                        {r.color && <p className="text-xs text-gray-400">Color: {r.color}</p>}
+                        <p className="text-xs text-purple-600 mt-0.5">
+                          {formatCOP(r.valor_retoma)}
+                          {r.ingreso_inventario ? ' · en inventario' : ' · sin inventario'}
+                        </p>
+                      </div>
+                      {!confirmando && (
+                        <button
+                          onClick={() => setConfirmAnularRetoma(r.id)}
+                          title="Anular retoma"
+                          className="text-gray-300 hover:text-red-400 transition-colors flex-shrink-0 mt-0.5">
+                          <XCircle size={15} />
+                        </button>
+                      )}
+                    </div>
+
+                    {confirmando && (
+                      <div className="mt-1 p-2 bg-red-50 border border-red-200 rounded-lg flex flex-col gap-1.5">
+                        <p className="text-xs font-medium text-red-700">
+                          ¿Anular esta retoma de {formatCOP(r.valor_retoma)}?
+                        </p>
+                        {r.ingreso_inventario && (
+                          <p className="text-xs text-red-500">El producto será eliminado del inventario.</p>
+                        )}
+                        <p className="text-xs text-red-500">
+                          Se reducirá el saldo a favor en {formatCOP(r.valor_retoma)}.
+                        </p>
+                        <div className="flex gap-2 mt-0.5">
+                          <button
+                            onClick={() => mutAnularRetoma.mutate(r.id)}
+                            disabled={mutAnularRetoma.isPending}
+                            className="flex-1 text-xs py-1 bg-red-500 hover:bg-red-600 text-white rounded-lg font-medium transition-colors disabled:opacity-50">
+                            {mutAnularRetoma.isPending ? 'Anulando…' : 'Sí, anular'}
+                          </button>
+                          <button
+                            onClick={() => setConfirmAnularRetoma(null)}
+                            className="flex-1 text-xs py-1 bg-white border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50 transition-colors">
+                            Cancelar
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 

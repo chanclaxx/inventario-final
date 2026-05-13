@@ -370,6 +370,101 @@ const setearSaldoAFavorPersona = async (executor, tipo, personaId, monto) => {
   );
 };
 
+// ── Anulación de abono ────────────────────────────────────────────────────────
+
+const findAbonoById = async (client, abonoId, prestamoId) => {
+  const { rows } = await client.query(
+    'SELECT * FROM abonos_prestamo WHERE id = $1 AND prestamo_id = $2',
+    [abonoId, prestamoId]
+  );
+  return rows[0] || null;
+};
+
+const eliminarAbono = async (client, abonoId) => {
+  await client.query('DELETE FROM abonos_prestamo WHERE id = $1', [abonoId]);
+};
+
+const restarTotalAbonado = async (client, prestamoId, valor) => {
+  const { rows } = await client.query(`
+    UPDATE prestamos
+    SET total_abonado = GREATEST(0, total_abonado - $1)
+    WHERE id = $2
+    RETURNING id, valor_prestamo, total_abonado, estado, imei, sucursal_id, prestatario_id, cliente_id
+  `, [valor, prestamoId]);
+  return rows[0];
+};
+
+const cancelarFacturaDePrestamo = async (client, prestamoId) => {
+  const { rows } = await client.query(`
+    UPDATE facturas SET estado = 'Cancelada'
+    WHERE notas LIKE $1
+      AND estado = 'Activa'
+    RETURNING id
+  `, [`%préstamo #${prestamoId}%`]);
+  return rows[0]?.id || null;
+};
+
+const revertirSerialVendido = async (client, imei, sucursalId) => {
+  await client.query(`
+    UPDATE seriales s
+    SET vendido      = false,
+        prestado     = true,
+        fecha_salida = NULL
+    FROM productos_serial ps
+    WHERE s.imei         = $1
+      AND ps.id          = s.producto_id
+      AND ps.sucursal_id = $2
+  `, [imei, sucursalId]);
+};
+
+const findRetomaPorId = async (client, retomaId) => {
+  const { rows } = await client.query(
+    'SELECT * FROM retomas WHERE id = $1',
+    [retomaId]
+  );
+  return rows[0] || null;
+};
+
+const findSerialEnInventario = async (client, imei) => {
+  const { rows } = await client.query(`
+    SELECT s.id, s.vendido, s.prestado
+    FROM seriales s
+    WHERE s.imei = $1
+      AND s.vendido = false
+  `, [imei]);
+  return rows[0] || null;
+};
+
+const eliminarSerial = async (client, serialId) => {
+  await client.query('DELETE FROM seriales WHERE id = $1', [serialId]);
+};
+
+const eliminarRetoma = async (client, retomaId) => {
+  await client.query('DELETE FROM retomas WHERE id = $1', [retomaId]);
+};
+
+// ── Retomas directas por persona ──────────────────────────────────────────────
+const findRetomasDirectasPorPersona = async (executor, tipo, personaId, negocioId) => {
+  const campo = tipo === 'prestatario' ? 'r.tipo_persona = \'prestatario\'' : 'r.tipo_persona = \'cliente\'';
+  const { rows } = await executor.query(`
+    SELECT
+      r.id, r.nombre_producto, r.imei, r.valor_retoma,
+      r.cantidad_retoma, r.tipo_retoma, r.ingreso_inventario,
+      r.color, r.descripcion,
+      r.producto_serial_id, r.producto_cantidad_id,
+      r.sucursal_id,
+      su.nombre AS sucursal_nombre
+    FROM retomas r
+    LEFT JOIN sucursales su ON su.id = r.sucursal_id
+    WHERE ${campo}
+      AND r.persona_id = $1
+      AND r.prestamo_id IS NULL
+      AND (r.sucursal_id IS NULL OR su.negocio_id = $2)
+    ORDER BY r.id DESC
+  `, [personaId, negocioId]);
+  return rows;
+};
+
 // ── Retoma directa (sin préstamo) ────────────────────────────────────────────
 const insertarRetomaDirecta = async (client, {
   tipo_persona, persona_id, sucursal_id,
@@ -455,4 +550,9 @@ module.exports = {
   insertarRetoma, insertarRetomaDirecta, insertarSerialParaRetoma, ajustarStockConHistorialEnTx,
   getRetomasPorPrestamo,
   findActivosPorPersona, getResumenPersona,
+  // anulación
+  findAbonoById, eliminarAbono, restarTotalAbonado,
+  cancelarFacturaDePrestamo, revertirSerialVendido,
+  findRetomaPorId, findSerialEnInventario, eliminarSerial, eliminarRetoma,
+  findRetomasDirectasPorPersona,
 };

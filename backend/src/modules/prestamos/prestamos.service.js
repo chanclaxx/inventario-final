@@ -800,6 +800,150 @@ const getResumenCartera = async (negocioId, tipo, personaId) => {
   };
 };
 
+// ─── Servicio: anular abono ───────────────────────────────────────────────────
+// retomaId: solo aplica cuando el abono tiene metodo='Intercambio'
+
+const anularAbono = async (negocioId, prestamoId, abonoId, retomaId = null) => {
+  const prestamo = await repo.findByIdYNegocio(prestamoId, negocioId);
+  if (!prestamo) throw { status: 404, message: 'Préstamo no encontrado' };
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const abono = await repo.findAbonoById(client, abonoId, prestamoId);
+    if (!abono) throw { status: 404, message: 'Abono no encontrado' };
+
+    // Si el abono es de intercambio, primero revertir la retoma
+    if (abono.metodo === 'Intercambio' && retomaId) {
+      const retoma = await repo.findRetomaPorId(client, retomaId);
+      if (retoma && retoma.prestamo_id === Number(prestamoId)) {
+        if (retoma.ingreso_inventario) {
+          if (retoma.tipo_retoma === 'serial' && retoma.imei) {
+            const serial = await repo.findSerialEnInventario(client, retoma.imei);
+            if (!serial) {
+              throw { status: 400, message: `El equipo ${retoma.imei} ya fue vendido. Anula la venta primero.` };
+            }
+            await repo.eliminarSerial(client, serial.id);
+          } else if (retoma.tipo_retoma === 'cantidad' && retoma.producto_cantidad_id) {
+            await client.query(
+              'UPDATE productos_cantidad SET stock = GREATEST(0, stock - $1) WHERE id = $2',
+              [retoma.cantidad_retoma, retoma.producto_cantidad_id]
+            );
+          }
+        }
+        await repo.eliminarRetoma(client, retomaId);
+      }
+    }
+
+    // Eliminar el abono y ajustar total_abonado
+    await repo.eliminarAbono(client, abonoId);
+    const prestamoDespues = await repo.restarTotalAbonado(client, prestamoId, Number(abono.valor));
+
+    let saldado_revertido = false;
+    let factura_cancelada_id = null;
+
+    // Si el préstamo estaba Saldado y ya no lo está → revertir
+    if (prestamo.estado === 'Saldado' &&
+        Number(prestamoDespues.total_abonado) < Number(prestamoDespues.valor_prestamo)) {
+      await repo.updateEstado(client, prestamoId, 'Activo');
+      saldado_revertido = true;
+
+      // Cancelar la factura generada por este préstamo
+      factura_cancelada_id = await repo.cancelarFacturaDePrestamo(client, prestamoId);
+
+      // Revertir serial de vendido → prestado
+      if (prestamo.imei) {
+        await repo.revertirSerialVendido(client, prestamo.imei, prestamo.sucursal_id);
+      }
+    }
+
+    // Si el abono era 'Saldo a favor', devolver el monto a la persona
+    if (abono.metodo === 'Saldo a favor') {
+      const tipo      = prestamo.prestatario_id ? 'prestatario' : 'cliente';
+      const personaId = prestamo.prestatario_id || prestamo.cliente_id;
+      if (personaId) {
+        const saldoActual = await repo.getSaldoAFavorPersona(client, tipo, personaId);
+        await repo.setearSaldoAFavorPersona(client, tipo, personaId, saldoActual + Number(abono.valor));
+      }
+    }
+
+    await client.query('COMMIT');
+    return { saldado_revertido, factura_cancelada_id };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+};
+
+// ─── Servicio: anular retoma directa ─────────────────────────────────────────
+
+const anularRetomaDirecta = async (negocioId, retomaId) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const retoma = await repo.findRetomaPorId(client, retomaId);
+    if (!retoma) throw { status: 404, message: 'Retoma no encontrada' };
+    if (retoma.prestamo_id !== null) throw { status: 400, message: 'Esta retoma está ligada a un préstamo. Anula el abono desde el historial.' };
+
+    // Verificar que pertenece a este negocio
+    if (retoma.sucursal_id) {
+      const { rows } = await client.query(
+        'SELECT id FROM sucursales WHERE id = $1 AND negocio_id = $2',
+        [retoma.sucursal_id, negocioId]
+      );
+      if (!rows.length) throw { status: 403, message: 'No autorizado' };
+    }
+
+    // Revertir inventario
+    if (retoma.ingreso_inventario) {
+      if (retoma.tipo_retoma === 'serial' && retoma.imei) {
+        const serial = await repo.findSerialEnInventario(client, retoma.imei);
+        if (!serial) {
+          throw { status: 400, message: `El equipo ${retoma.imei} ya fue vendido. Anula la venta primero.` };
+        }
+        await repo.eliminarSerial(client, serial.id);
+      } else if (retoma.tipo_retoma === 'cantidad' && retoma.producto_cantidad_id) {
+        await client.query(
+          'UPDATE productos_cantidad SET stock = GREATEST(0, stock - $1) WHERE id = $2',
+          [retoma.cantidad_retoma, retoma.producto_cantidad_id]
+        );
+      }
+    }
+
+    // Reducir saldo a favor
+    if (retoma.tipo_persona && retoma.persona_id) {
+      const saldoActual = await repo.getSaldoAFavorPersona(client, retoma.tipo_persona, retoma.persona_id);
+      const saldoNuevo  = Math.max(0, saldoActual - Number(retoma.valor_retoma));
+      await repo.setearSaldoAFavorPersona(client, retoma.tipo_persona, retoma.persona_id, saldoNuevo);
+    }
+
+    await repo.eliminarRetoma(client, retomaId);
+
+    await client.query('COMMIT');
+    return { ok: true };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+};
+
+// ─── Servicio: listar retomas directas de una persona ─────────────────────────
+
+const getRetomasDirectas = async (negocioId, tipo, personaId) => {
+  if (tipo === 'prestatario') {
+    await _verificarPrestatario(personaId, negocioId);
+  } else {
+    await _verificarCliente(personaId, negocioId);
+  }
+  return repo.findRetomasDirectasPorPersona(pool, tipo, personaId, negocioId);
+};
+
 module.exports = {
   getPrestamos, getPrestamoById,
   crearPrestamo, crearPrestamos,
@@ -808,4 +952,5 @@ module.exports = {
   registrarSaldoAFavor,
   intercambiarPrestamo,
   retomaDirecta, aplicarSaldoAPrestamos, getResumenCartera,
+  anularAbono, anularRetomaDirecta, getRetomasDirectas,
 };

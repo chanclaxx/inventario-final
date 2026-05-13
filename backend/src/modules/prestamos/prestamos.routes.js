@@ -55,19 +55,23 @@ router.get('/',       requireModulo('prestamos'), ctrl.getPrestamos);
 router.post('/',      requireModulo('prestamos'), validarPrestamo,  validate, ctrl.crearPrestamo);
 router.post('/batch', requireModulo('prestamos'), validarPrestamos, validate, ctrl.crearPrestamos);
 
-// Rutas de personas — deben ir ANTES de /:id para no ser capturadas por ese parámetro
-router.patch('/personas/:tipo/:id/saldo-a-favor',  requireModulo('prestamos'), validarSaldoAFavor,    validate, ctrl.registrarSaldoAFavor);
-router.get(  '/personas/:tipo/:id/resumen',         requireModulo('prestamos'), ctrl.getResumenCartera);
-router.post( '/personas/:tipo/:id/aplicar-saldo',   requireModulo('prestamos'), ctrl.aplicarSaldoAPrestamos);
-router.post( '/retoma-directa',                     requireModulo('prestamos'), validarRetomaDirecta, validate, ctrl.retomaDirecta);
+// Rutas con segmentos literales — ANTES de /:id para evitar conflictos
+router.patch(  '/personas/:tipo/:id/saldo-a-favor',       requireModulo('prestamos'), validarSaldoAFavor,    validate, ctrl.registrarSaldoAFavor);
+router.get(    '/personas/:tipo/:id/resumen',              requireModulo('prestamos'), ctrl.getResumenCartera);
+router.post(   '/personas/:tipo/:id/aplicar-saldo',        requireModulo('prestamos'), ctrl.aplicarSaldoAPrestamos);
+router.get(    '/personas/:tipo/:id/retomas-directas',     requireModulo('prestamos'), ctrl.getRetomasDirectas);
+router.post(   '/retoma-directa',                          requireModulo('prestamos'), validarRetomaDirecta, validate, ctrl.retomaDirecta);
+router.delete( '/retomas-directas/:retomaId',              requireModulo('prestamos'), ctrl.anularRetomaDirecta);
 
 router.get('/pdf/:tipo/:personaId', requireModulo('prestamos'), ctrl.exportarPdfPorPersona);
-router.get('/:id/pdf', requireModulo('prestamos'), ctrl.exportarPdfPrestamoIndividual);
+router.get('/:id/pdf',              requireModulo('prestamos'), ctrl.exportarPdfPrestamoIndividual);
 
-router.get('/:id',                    requireModulo('prestamos'), ctrl.getPrestamoById);
-router.post('/:id/abonos',            requireModulo('prestamos'), validarAbono,             validate, ctrl.registrarAbono);
-router.post('/:id/intercambio',       requireModulo('prestamos'), validarIntercambio,        validate, ctrl.intercambiarPrestamo);
-router.patch('/:id/devolver',         requireModulo('prestamos'),                                     ctrl.devolverPrestamo);
-router.patch('/:id/devolver-parcial', requireModulo('prestamos'), validarDevolucionParcial, validate, ctrl.devolverParcial);
+// Rutas con :id dinámico — AL FINAL
+router.get(   '/:id',                  requireModulo('prestamos'), ctrl.getPrestamoById);
+router.post(  '/:id/abonos',           requireModulo('prestamos'), validarAbono,            validate, ctrl.registrarAbono);
+router.delete('/:id/abonos/:abonoId',  requireModulo('prestamos'), ctrl.anularAbono);
+router.post(  '/:id/intercambio',      requireModulo('prestamos'), validarIntercambio,       validate, ctrl.intercambiarPrestamo);
+router.patch( '/:id/devolver',         requireModulo('prestamos'), ctrl.devolverPrestamo);
+router.patch( '/:id/devolver-parcial', requireModulo('prestamos'), validarDevolucionParcial, validate, ctrl.devolverParcial);
 
 module.exports = router;
