@@ -22,8 +22,16 @@ router.get('/:id',                 requireModulo('acreedores'), ctrl.getAcreedor
 router.get('/:id/cargos',                    requireModulo('acreedores'), ctrl.getCargosAbiertos);
 router.get('/:id/compras-saldo',             requireModulo('acreedores'), ctrl.getComprasConSaldo);
 router.get('/:id/cargos/:cargoId/abonos',    requireModulo('acreedores'), ctrl.getAbonosPorCargo);
+router.get('/:id/saldo-favor',     requireModulo('acreedores'), ctrl.getSaldoAFavor);
 router.post('/',                   requireModulo('acreedores'), requireNivel('supervisor'),    ctrl.crearAcreedor);
 router.post('/:id/movimientos',    requireModulo('acreedores'), validarMovimiento, validate,   ctrl.registrarMovimiento);
+router.post('/:id/aplicar-saldo',  requireModulo('acreedores'),
+  [
+    body('cargo_id').isInt({ min: 1 }).withMessage('cargo_id requerido'),
+    body('valor').isFloat({ gt: 0 }).withMessage('El valor debe ser mayor a 0'),
+  ],
+  validate, ctrl.aplicarSaldoAFavor,
+);
 router.delete('/:id',              requireModulo('acreedores'), requireNivel('admin_negocio'), ctrl.eliminarAcreedor);
 
 module.exports = router;

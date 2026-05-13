@@ -54,6 +54,18 @@ const getAbonosPorCargo = async (negocioId, acreedorId, cargoId) => {
   return repo.getAbonosPorCargo(negocioId, acreedorId, cargoId);
 };
 
+const getSaldoAFavor = async (negocioId, acreedorId) => {
+  const acreedor = await repo.findById(negocioId, acreedorId);
+  if (!acreedor) throw { status: 404, message: 'Acreedor no encontrado' };
+  return repo.getSaldoAFavor(negocioId, acreedorId);
+};
+
+const aplicarSaldoAFavor = async (negocioId, acreedorId, cargoId, valor) => {
+  const acreedor = await repo.findById(negocioId, acreedorId);
+  if (!acreedor) throw { status: 404, message: 'Acreedor no encontrado' };
+  return repo.aplicarSaldoAFavor(negocioId, acreedorId, cargoId, valor);
+};
+
 const eliminarAcreedor = async (negocioId, acreedorId) => {
   try {
     await repo.eliminarSeguro(negocioId, acreedorId);
@@ -72,5 +84,6 @@ module.exports = {
   getAcreedores, getAcreedoresCruces, getAcreedorById,
   crearAcreedor, registrarMovimiento, getCargosAbiertos,
   getComprasConSaldo, getAbonosPorCargo,
+  getSaldoAFavor, aplicarSaldoAFavor,
   eliminarAcreedor,
 };

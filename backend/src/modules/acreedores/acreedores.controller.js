@@ -60,6 +60,23 @@ const getAbonosPorCargo = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+const getSaldoAFavor = async (req, res, next) => {
+  try {
+    const data = await service.getSaldoAFavor(req.user.negocio_id, req.params.id);
+    res.json({ ok: true, data });
+  } catch (err) { next(err); }
+};
+
+const aplicarSaldoAFavor = async (req, res, next) => {
+  try {
+    await service.aplicarSaldoAFavor(
+      req.user.negocio_id, req.params.id,
+      Number(req.body.cargo_id), Number(req.body.valor),
+    );
+    res.json({ ok: true, message: 'Saldo a favor aplicado correctamente' });
+  } catch (err) { next(err); }
+};
+
 const eliminarAcreedor = async (req, res, next) => {
   try {
     await service.eliminarAcreedor(req.user.negocio_id, req.params.id);
@@ -71,5 +88,6 @@ module.exports = {
   getAcreedores, getAcreedoresCruces, getAcreedorById,
   crearAcreedor, registrarMovimiento, getCargosAbiertos,
   getComprasConSaldo, getAbonosPorCargo,
+  getSaldoAFavor, aplicarSaldoAFavor,
   eliminarAcreedor,
 };

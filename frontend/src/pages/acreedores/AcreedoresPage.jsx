@@ -7,6 +7,8 @@ import {
   eliminarAcreedor,
   getComprasConSaldo,
   getAbonosPorCargo,
+  getSaldoAFavor,
+  aplicarSaldoAFavor,
 } from '../../api/acreedores.api';
 import { getConfig, verificarPin } from '../../api/config.api';
 import { useMetodosPago } from '../../hooks/useMetodosPago';
@@ -23,7 +25,7 @@ import { SearchInput } from '../../components/ui/SearchInput';
 import { ReciboAcreedor } from '../../components/Reciboacreedor';
 import {
   Users, Plus, ChevronDown, ChevronUp, ChevronLeft, ChevronRight,
-  Trash2, AlertTriangle, Calculator, PenLine,
+  Trash2, AlertTriangle, Calculator, PenLine, Wallet,
 } from 'lucide-react';
 import api from '../../api/axios.config';
 import { getCompraById } from '../../api/compras.api';
@@ -320,6 +322,205 @@ function ModalAbonoRapido({ acreedor, cargo, onClose, onImprimir }) {
   );
 }
 
+// ─── modal saldo a favor (pago adelantado sin cargo vinculado) ────────────────
+
+function ModalSaldoAFavor({ acreedor, onClose }) {
+  const queryClient   = useQueryClient();
+  const metodosPago   = useMetodosPago();
+  const [valor,           setValor]           = useState('');
+  const [descripcion,     setDescripcion]     = useState('Pago adelantado');
+  const [mostrarCalc,     setMostrarCalc]     = useState(false);
+  const [metodo,          setMetodo]          = useState(() => metodosPago[0]?.id ?? 'Efectivo');
+  const [registrarEnCaja, setRegistrarEnCaja] = useState(true);
+  const [error,           setError]           = useState('');
+
+  const mutation = useMutation({
+    mutationFn: () => registrarMovimiento(acreedor.id, {
+      tipo:              'Abono',
+      valor:             Number(valor),
+      descripcion:       descripcion.trim() || 'Pago adelantado',
+      registrar_en_caja: registrarEnCaja,
+      metodo,
+      // sin cargo_id → queda como saldo a favor
+    }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['saldo-a-favor', acreedor.id], exact: false });
+      queryClient.invalidateQueries({ queryKey: ['acreedores'],                  exact: false });
+      onClose();
+    },
+    onError: (err) => setError(err.response?.data?.error || 'Error al registrar'),
+  });
+
+  return (
+    <Modal open onClose={onClose} title="Registrar saldo a favor" size="sm">
+      <div className="flex flex-col gap-4">
+        <div className="bg-green-50 border border-green-100 rounded-xl px-4 py-3">
+          <p className="text-xs text-green-500 mb-0.5">Pago adelantado · {acreedor.nombre}</p>
+          <p className="text-xs text-gray-500 leading-relaxed">
+            Este abono no se vincula a ninguna compra. Quedará como crédito disponible
+            para aplicar en futuras deudas.
+          </p>
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <div className="flex items-center justify-between">
+            <label className="text-sm font-medium text-gray-700">
+              Valor <span className="text-red-400 text-xs">*</span>
+            </label>
+            <button type="button" onClick={() => setMostrarCalc((v) => !v)}
+              className="flex items-center gap-1 text-xs text-blue-500 hover:text-blue-700 transition-colors">
+              <Calculator size={12} />
+              {mostrarCalc ? 'Cerrar' : 'Calculadora'}
+            </button>
+          </div>
+          <InputMoneda
+            value={valor}
+            onChange={setValor}
+            placeholder="0"
+            autoFocus
+            className="w-full px-3 py-2 bg-gray-100 rounded-xl text-sm
+              focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"
+          />
+        </div>
+
+        {mostrarCalc && (
+          <Calculadora onUsar={(val) => {
+            setValor(String(Math.round(Number(val) || 0)));
+            setMostrarCalc(false);
+          }} />
+        )}
+
+        <Input
+          label="Descripción"
+          value={descripcion}
+          onChange={(e) => setDescripcion(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter' && valor && Number(valor) > 0) mutation.mutate(); }}
+        />
+
+        <div className="flex flex-col gap-1.5">
+          <label className="text-sm font-medium text-gray-700">Método de pago</label>
+          <div className="flex gap-2 flex-wrap">
+            {metodosPago.map((m) => (
+              <button key={m.id} type="button" onClick={() => setMetodo(m.id)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition-all
+                  ${metodo === m.id
+                    ? 'bg-blue-50 border-blue-300 text-blue-700'
+                    : 'bg-gray-50 border-gray-200 text-gray-600 hover:border-gray-300'}`}>
+                {m.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className={`rounded-xl p-3 border transition-all
+          ${registrarEnCaja ? 'bg-blue-50 border-blue-200' : 'bg-gray-50 border-gray-200'}`}>
+          <label className="flex items-center gap-3 cursor-pointer">
+            <input type="checkbox" checked={registrarEnCaja}
+              onChange={(e) => setRegistrarEnCaja(e.target.checked)}
+              className="rounded accent-blue-600 w-4 h-4 flex-shrink-0" />
+            <div>
+              <p className="text-sm font-medium text-gray-700">Registrar en caja</p>
+              <p className="text-xs text-gray-400">Si no se marca, no aparecerá en el resumen de caja del día</p>
+            </div>
+          </label>
+        </div>
+
+        {error && <p className="text-sm text-red-500">{error}</p>}
+
+        <div className="flex gap-2">
+          <Button variant="secondary" className="flex-1" onClick={onClose}>Cancelar</Button>
+          <Button
+            className="flex-1"
+            loading={mutation.isPending}
+            disabled={!valor || Number(valor) <= 0}
+            onClick={() => mutation.mutate()}
+          >
+            Registrar
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// ─── modal aplicar saldo a favor a un cargo ───────────────────────────────────
+
+function ModalAplicarSaldo({ acreedor, cargo, saldoDisponible, onClose }) {
+  const queryClient = useQueryClient();
+  const maxAplicar  = Math.min(Number(cargo.saldo_pendiente), saldoDisponible);
+  const [valor, setValor] = useState(String(maxAplicar));
+  const [error, setError] = useState('');
+
+  const mutation = useMutation({
+    mutationFn: () => aplicarSaldoAFavor(acreedor.id, cargo.id, Number(valor)),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['saldo-a-favor', acreedor.id],          exact: false });
+      queryClient.invalidateQueries({ queryKey: ['compras-con-saldo', acreedor.id],       exact: false });
+      queryClient.invalidateQueries({ queryKey: ['acreedores'],                            exact: false });
+      queryClient.invalidateQueries({ queryKey: ['abonos-cargo', acreedor.id, cargo.id],  exact: false });
+      onClose();
+    },
+    onError: (err) => setError(err.response?.data?.error || 'Error al aplicar'),
+  });
+
+  const valorNum = Number(valor) || 0;
+
+  return (
+    <Modal open onClose={onClose} title="Aplicar saldo a favor" size="sm">
+      <div className="flex flex-col gap-4">
+        <div className="grid grid-cols-2 gap-2">
+          <div className="bg-green-50 border border-green-100 rounded-xl px-3 py-2.5">
+            <p className="text-xs text-green-500 mb-0.5">Saldo a favor disponible</p>
+            <p className="text-lg font-bold text-green-700">{formatCOP(saldoDisponible)}</p>
+          </div>
+          <div className="bg-red-50 border border-red-100 rounded-xl px-3 py-2.5">
+            <p className="text-xs text-red-400 mb-0.5">Saldo pendiente cargo</p>
+            <p className="text-lg font-bold text-red-600">{formatCOP(cargo.saldo_pendiente)}</p>
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <label className="text-sm font-medium text-gray-700">
+            Valor a aplicar <span className="text-red-400 text-xs">*</span>
+          </label>
+          <InputMoneda
+            value={valor}
+            onChange={setValor}
+            placeholder="0"
+            autoFocus
+            className="w-full px-3 py-2 bg-gray-100 rounded-xl text-sm
+              focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"
+          />
+          {valorNum > 0 && valorNum <= maxAplicar && (
+            <p className="text-xs text-gray-400 px-1">
+              Saldo restante a favor: {formatCOP(saldoDisponible - valorNum)}
+            </p>
+          )}
+          {valorNum > maxAplicar && (
+            <p className="text-xs text-red-500 px-1">
+              No puede superar {formatCOP(maxAplicar)}
+            </p>
+          )}
+        </div>
+
+        {error && <p className="text-sm text-red-500">{error}</p>}
+
+        <div className="flex gap-2">
+          <Button variant="secondary" className="flex-1" onClick={onClose}>Cancelar</Button>
+          <Button
+            className="flex-1"
+            loading={mutation.isPending}
+            disabled={!valorNum || valorNum <= 0 || valorNum > maxAplicar}
+            onClick={() => mutation.mutate()}
+          >
+            Aplicar
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 // ─── modal nuevo cargo manual ─────────────────────────────────────────────────
 
 function ModalNuevoCargo({ acreedor, onClose }) {
@@ -448,7 +649,7 @@ function AbonosHistorial({ acreedorId, cargoId }) {
 
 // ─── cargo activo (pendiente / parcial) ───────────────────────────────────────
 
-function CargoActivo({ cargo, acreedorId, onAbonar }) {
+function CargoActivo({ cargo, acreedorId, saldoAFavor, onAbonar, onAplicar }) {
   const [historialAbierto, setHistorialAbierto] = useState(false);
   const [modalCompra,      setModalCompra]      = useState(false);
 
@@ -486,12 +687,24 @@ function CargoActivo({ cargo, acreedorId, onAbonar }) {
 
           <div className="flex flex-col items-end gap-2 flex-shrink-0">
             <p className="text-base font-bold text-gray-900">{formatCOP(original)}</p>
-            <button
-              onClick={(e) => { e.stopPropagation(); onAbonar(cargo); }}
-              className="px-3 py-1.5 rounded-xl text-xs font-bold bg-green-600 text-white
-                hover:bg-green-700 active:scale-95 transition-all shadow-sm">
-              Abonar
-            </button>
+            <div className="flex gap-1.5">
+              {saldoAFavor > 0 && pendiente > 0 && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); onAplicar(cargo); }}
+                  className="px-2.5 py-1.5 rounded-xl text-xs font-bold bg-emerald-50 text-emerald-700
+                    border border-emerald-200 hover:bg-emerald-100 active:scale-95 transition-all"
+                  title={`Aplicar saldo a favor (${formatCOP(saldoAFavor)} disponible)`}>
+                  <Wallet size={12} className="inline -mt-px mr-0.5" />
+                  Aplicar
+                </button>
+              )}
+              <button
+                onClick={(e) => { e.stopPropagation(); onAbonar(cargo); }}
+                className="px-3 py-1.5 rounded-xl text-xs font-bold bg-green-600 text-white
+                  hover:bg-green-700 active:scale-95 transition-all shadow-sm">
+                Abonar
+              </button>
+            </div>
           </div>
         </div>
 
@@ -596,8 +809,10 @@ function CargoSaldado({ cargo, acreedorId }) {
 
 function DetalleAcreedor({ acreedor, esAdmin, onVolver, onEliminar }) {
   const [cargoAbono,       setCargoAbono]       = useState(null);
+  const [cargoAplicar,     setCargoAplicar]     = useState(null);
   const [movImprimir,      setMovImprimir]       = useState(null);
   const [modalCargo,       setModalCargo]       = useState(false);
+  const [modalSaldoFavor,  setModalSaldoFavor]  = useState(false);
   const [saldadasAbiertas, setSaldadasAbiertas] = useState(false);
 
   const { data: configData } = useQuery({
@@ -610,6 +825,14 @@ function DetalleAcreedor({ acreedor, esAdmin, onVolver, onEliminar }) {
     queryFn:  () => getComprasConSaldo(acreedor.id).then((r) => r.data.data),
     staleTime: 0,
   });
+
+  const { data: saldoFavorData } = useQuery({
+    queryKey: ['saldo-a-favor', acreedor.id],
+    queryFn:  () => getSaldoAFavor(acreedor.id).then((r) => r.data.data),
+    staleTime: 0,
+  });
+  const saldoAFavor = Number(saldoFavorData ?? 0);
+
   const cargos  = Array.isArray(data) ? data : [];
   const activos  = cargos.filter((c) => c.estado_pago !== 'Saldada');
   const saldados = cargos.filter((c) => c.estado_pago === 'Saldada');
@@ -652,13 +875,19 @@ function DetalleAcreedor({ acreedor, esAdmin, onVolver, onEliminar }) {
         </div>
 
         <div className="flex items-center gap-3 flex-shrink-0 ml-auto">
+          {saldoAFavor > 0 && (
+            <div className="text-right">
+              <p className="text-xs text-emerald-500 leading-tight">Saldo a favor</p>
+              <p className="text-sm font-bold text-emerald-600">{formatCOP(saldoAFavor)}</p>
+            </div>
+          )}
           {saldoTotal > 0 && (
             <div className="text-right">
               <p className="text-xs text-gray-400 leading-tight">Deuda total</p>
               <p className="text-sm font-bold text-red-500">{formatCOP(saldoTotal)}</p>
             </div>
           )}
-          {saldoTotal === 0 && !isLoading && (
+          {saldoTotal === 0 && saldoAFavor === 0 && !isLoading && (
             <span className="text-xs font-semibold text-green-600 bg-green-50 border border-green-200
               px-2.5 py-1 rounded-full">
               ✓ Al día
@@ -678,18 +907,27 @@ function DetalleAcreedor({ acreedor, esAdmin, onVolver, onEliminar }) {
         <div className="py-12 flex justify-center"><Spinner /></div>
       ) : (
         <>
-          {/* Toolbar: stats + botón agregar cargo */}
-          <div className="flex items-center justify-between">
+          {/* Toolbar: stats + botones */}
+          <div className="flex items-center justify-between gap-2">
             <p className="text-xs text-gray-400">
               {activos.length} pendiente(s) · {saldados.length} saldada(s)
             </p>
-            <button
-              onClick={() => setModalCargo(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold
-                border border-gray-200 bg-white text-gray-600
-                hover:border-blue-300 hover:text-blue-600 hover:bg-blue-50 transition-all">
-              <Plus size={13} /> Agregar cargo
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setModalSaldoFavor(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold
+                  border border-emerald-200 bg-white text-emerald-600
+                  hover:bg-emerald-50 transition-all">
+                <Wallet size={13} /> Pago adelantado
+              </button>
+              <button
+                onClick={() => setModalCargo(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold
+                  border border-gray-200 bg-white text-gray-600
+                  hover:border-blue-300 hover:text-blue-600 hover:bg-blue-50 transition-all">
+                <Plus size={13} /> Agregar cargo
+              </button>
+            </div>
           </div>
 
           {/* Cargos activos */}
@@ -707,7 +945,9 @@ function DetalleAcreedor({ acreedor, esAdmin, onVolver, onEliminar }) {
                   key={c.id}
                   cargo={c}
                   acreedorId={acreedor.id}
+                  saldoAFavor={saldoAFavor}
                   onAbonar={(cargo) => setCargoAbono(cargo)}
+                  onAplicar={(cargo) => setCargoAplicar(cargo)}
                 />
               ))}
             </div>
@@ -756,6 +996,19 @@ function DetalleAcreedor({ acreedor, esAdmin, onVolver, onEliminar }) {
 
       {modalCargo && (
         <ModalNuevoCargo acreedor={acreedor} onClose={() => setModalCargo(false)} />
+      )}
+
+      {modalSaldoFavor && (
+        <ModalSaldoAFavor acreedor={acreedor} onClose={() => setModalSaldoFavor(false)} />
+      )}
+
+      {cargoAplicar && (
+        <ModalAplicarSaldo
+          acreedor={acreedor}
+          cargo={cargoAplicar}
+          saldoDisponible={saldoAFavor}
+          onClose={() => setCargoAplicar(null)}
+        />
       )}
 
       {movImprimir && (

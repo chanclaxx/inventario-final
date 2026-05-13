@@ -205,6 +205,91 @@ const getComprasConSaldo = async (negocioId, acreedorId) => {
   return rows;
 };
 
+const getSaldoAFavor = async (negocioId, acreedorId) => {
+  const { rows } = await pool.query(`
+    SELECT COALESCE(SUM(m.valor), 0) AS saldo_a_favor
+    FROM movimientos_acreedor m
+    JOIN acreedores a ON a.id = m.acreedor_id
+    WHERE m.acreedor_id = $1
+      AND a.negocio_id  = $2
+      AND m.tipo        = 'Abono'
+      AND m.cargo_id    IS NULL
+  `, [acreedorId, negocioId]);
+  return Number(rows[0]?.saldo_a_favor || 0);
+};
+
+// Reasigna abonos libres (saldo a favor) al cargo indicado.
+// Consume los abonos más antiguos primero; divide si es necesario.
+// No crea registros nuevos salvo cuando hay que dividir un abono parcialmente.
+const aplicarSaldoAFavor = async (negocioId, acreedorId, cargoId, valor) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const { rows: acr } = await client.query(
+      `SELECT id FROM acreedores WHERE id = $1 AND negocio_id = $2 FOR UPDATE`,
+      [acreedorId, negocioId]
+    );
+    if (!acr.length) throw { status: 404, message: 'Acreedor no encontrado' };
+
+    const { rows: cargoRows } = await client.query(`
+      SELECT m.id,
+             GREATEST(m.valor - COALESCE(SUM(a.valor), 0), 0) AS saldo_pendiente
+      FROM movimientos_acreedor m
+      LEFT JOIN movimientos_acreedor a ON a.cargo_id = m.id AND a.tipo = 'Abono'
+      WHERE m.id = $1 AND m.acreedor_id = $2 AND m.tipo = 'Cargo'
+      GROUP BY m.id
+    `, [cargoId, acreedorId]);
+    if (!cargoRows.length) throw { status: 404, message: 'Cargo no encontrado' };
+    if (Number(cargoRows[0].saldo_pendiente) < valor) {
+      throw { status: 400, message: 'El valor excede el saldo pendiente del cargo' };
+    }
+
+    const { rows: libres } = await client.query(`
+      SELECT id, valor FROM movimientos_acreedor
+      WHERE acreedor_id = $1 AND tipo = 'Abono' AND cargo_id IS NULL
+      ORDER BY fecha ASC, id ASC
+      FOR UPDATE
+    `, [acreedorId]);
+
+    const totalLibre = libres.reduce((s, r) => s + Number(r.valor), 0);
+    if (totalLibre < valor) throw { status: 400, message: 'Saldo a favor insuficiente' };
+
+    let restante = valor;
+    for (const abono of libres) {
+      if (restante <= 0) break;
+      const av = Number(abono.valor);
+
+      if (av <= restante) {
+        await client.query(
+          `UPDATE movimientos_acreedor SET cargo_id = $1 WHERE id = $2`,
+          [cargoId, abono.id]
+        );
+        restante -= av;
+      } else {
+        // Dividir: reducir el abono libre y crear uno nuevo vinculado al cargo
+        await client.query(
+          `UPDATE movimientos_acreedor SET valor = valor - $1 WHERE id = $2`,
+          [restante, abono.id]
+        );
+        await client.query(`
+          INSERT INTO movimientos_acreedor(acreedor_id, usuario_id, tipo, valor, descripcion, cargo_id, metodo, registrar_en_caja)
+          SELECT acreedor_id, usuario_id, 'Abono', $1, 'Aplicación de saldo a favor', $2, metodo, false
+          FROM movimientos_acreedor WHERE id = $3
+        `, [restante, cargoId, abono.id]);
+        restante = 0;
+      }
+    }
+
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+};
+
 const getAbonosPorCargo = async (negocioId, acreedorId, cargoId) => {
   const { rows } = await pool.query(`
     SELECT
@@ -226,5 +311,6 @@ module.exports = {
   findAll, findByCruces, findById,
   getMovimientos, getCargosAbiertos,
   getComprasConSaldo, getAbonosPorCargo,
+  getSaldoAFavor, aplicarSaldoAFavor,
   create, insertarMovimiento, eliminarSeguro,
 };
