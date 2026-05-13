@@ -16,6 +16,7 @@ import { EmptyState }  from '../../components/ui/EmptyState';
 import { SearchInput } from '../../components/ui/SearchInput';
 import { ModalCompra } from './ModalCompra';
 import { useSucursalKey } from '../../hooks/useSucursalKey';
+import { useMetodosPago } from '../../hooks/useMetodosPago';
 import api from '../../api/axios.config';
 import { useAuth } from '../../context/useAuth';
 import {
@@ -629,10 +630,13 @@ function Calculadora({ onUsar }) {
 
 function ModalAbonoRapido({ acreedorId, acreedorNombre, cargo, onClose }) {
   const queryClient   = useQueryClient();
-  const [valor,       setValor]       = useState('');
-  const [descripcion, setDescripcion] = useState('');
-  const [mostrarCalc, setMostrarCalc] = useState(false);
-  const [error,       setError]       = useState('');
+  const metodosPago   = useMetodosPago();
+  const [valor,           setValor]           = useState('');
+  const [descripcion,     setDescripcion]     = useState('');
+  const [mostrarCalc,     setMostrarCalc]     = useState(false);
+  const [metodo,          setMetodo]          = useState(() => metodosPago[0]?.id ?? 'Efectivo');
+  const [registrarEnCaja, setRegistrarEnCaja] = useState(true);
+  const [error,           setError]           = useState('');
 
   const pendiente    = Number(cargo.saldo_pendiente);
   const tituloCompra = cargo.compra_id
@@ -645,8 +649,8 @@ function ModalAbonoRapido({ acreedorId, acreedorNombre, cargo, onClose }) {
       valor:             Number(valor),
       descripcion:       descripcion.trim() || undefined,
       cargo_id:          cargo.id,
-      registrar_en_caja: true,
-      metodo:            'Efectivo',
+      registrar_en_caja: registrarEnCaja,
+      metodo,
     }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['compras-con-saldo', acreedorId], exact: false });
@@ -702,6 +706,34 @@ function ModalAbonoRapido({ acreedorId, acreedorNombre, cargo, onClose }) {
             if (e.key === 'Enter' && valor && Number(valor) > 0) mutation.mutate();
           }}
         />
+
+        <div className="flex flex-col gap-1.5">
+          <label className="text-sm font-medium text-gray-700">Método de pago</label>
+          <div className="flex gap-2 flex-wrap">
+            {metodosPago.map((m) => (
+              <button key={m.id} type="button" onClick={() => setMetodo(m.id)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition-all
+                  ${metodo === m.id
+                    ? 'bg-blue-50 border-blue-300 text-blue-700'
+                    : 'bg-gray-50 border-gray-200 text-gray-600 hover:border-gray-300'}`}>
+                {m.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className={`rounded-xl p-3 border transition-all
+          ${registrarEnCaja ? 'bg-blue-50 border-blue-200' : 'bg-gray-50 border-gray-200'}`}>
+          <label className="flex items-center gap-3 cursor-pointer">
+            <input type="checkbox" checked={registrarEnCaja}
+              onChange={(e) => setRegistrarEnCaja(e.target.checked)}
+              className="rounded accent-blue-600 w-4 h-4 flex-shrink-0" />
+            <div>
+              <p className="text-sm font-medium text-gray-700">Registrar en caja</p>
+              <p className="text-xs text-gray-400">Si no se marca, el abono no aparecerá en el resumen de caja del día</p>
+            </div>
+          </label>
+        </div>
 
         {error && <p className="text-sm text-red-500">{error}</p>}
 
