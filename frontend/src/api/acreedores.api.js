@@ -13,3 +13,7 @@ export const getAbonosPorCargo  = (id, cargoId) => api.get(`/acreedores/${id}/ca
 export const getSaldoAFavor     = (id) => api.get(`/acreedores/${id}/saldo-favor`);
 export const aplicarSaldoAFavor = (id, cargo_id, valor) =>
   api.post(`/acreedores/${id}/aplicar-saldo`, { cargo_id, valor });
+export const editarAbono   = (acreedorId, movId, data) =>
+  api.put(`/acreedores/${acreedorId}/movimientos/${movId}`, data);
+export const eliminarAbono = (acreedorId, movId) =>
+  api.delete(`/acreedores/${acreedorId}/movimientos/${movId}`);

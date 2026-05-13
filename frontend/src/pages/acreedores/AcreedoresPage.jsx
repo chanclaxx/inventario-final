@@ -9,6 +9,8 @@ import {
   getAbonosPorCargo,
   getSaldoAFavor,
   aplicarSaldoAFavor,
+  editarAbono,
+  eliminarAbono,
 } from '../../api/acreedores.api';
 import { getConfig, verificarPin } from '../../api/config.api';
 import { useMetodosPago } from '../../hooks/useMetodosPago';
@@ -606,9 +608,127 @@ function ModalNuevoCargo({ acreedor, onClose }) {
   );
 }
 
+// ─── modal editar abono ───────────────────────────────────────────────────────
+
+function ModalEditarAbono({ acreedorId, cargoIdActual, abono, onClose }) {
+  const queryClient   = useQueryClient();
+  const metodosPago   = useMetodosPago();
+  const [valor,           setValor]           = useState(String(abono.valor));
+  const [descripcion,     setDescripcion]     = useState(abono.descripcion || '');
+  const [metodo,          setMetodo]          = useState(abono.metodo || metodosPago[0]?.id || 'Efectivo');
+  const [cargoId,         setCargoId]         = useState(cargoIdActual);
+  const [registrarEnCaja, setRegistrarEnCaja] = useState(abono.registrar_en_caja !== false);
+  const [error,           setError]           = useState('');
+
+  const { data: cargosRaw } = useQuery({
+    queryKey: ['compras-con-saldo', acreedorId],
+    queryFn:  () => getComprasConSaldo(acreedorId).then((r) => r.data.data),
+    staleTime: 30_000,
+  });
+  const cargos = Array.isArray(cargosRaw) ? cargosRaw : [];
+
+  const mutation = useMutation({
+    mutationFn: () => editarAbono(acreedorId, abono.id, {
+      valor:             Number(valor),
+      descripcion:       descripcion.trim() || undefined,
+      metodo,
+      cargo_id:          cargoId || undefined,
+      registrar_en_caja: registrarEnCaja,
+    }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['compras-con-saldo', acreedorId], exact: false });
+      queryClient.invalidateQueries({ queryKey: ['acreedores'],                    exact: false });
+      queryClient.invalidateQueries({ queryKey: ['abonos-cargo', acreedorId],      exact: false });
+      queryClient.invalidateQueries({ queryKey: ['saldo-a-favor', acreedorId],     exact: false });
+      onClose();
+    },
+    onError: (err) => setError(err.response?.data?.error || 'Error al actualizar'),
+  });
+
+  return (
+    <Modal open onClose={onClose} title="Editar abono" size="sm">
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-1.5">
+          <label className="text-sm font-medium text-gray-700">
+            Valor <span className="text-red-400 text-xs">*</span>
+          </label>
+          <InputMoneda value={valor} onChange={setValor} placeholder="0" autoFocus
+            className="w-full px-3 py-2 bg-gray-100 rounded-xl text-sm
+              focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all" />
+        </div>
+
+        <Input label="Descripción" value={descripcion}
+          onChange={(e) => setDescripcion(e.target.value)} />
+
+        <div className="flex flex-col gap-1.5">
+          <label className="text-sm font-medium text-gray-700">Método de pago</label>
+          <div className="flex gap-2 flex-wrap">
+            {metodosPago.map((m) => (
+              <button key={m.id} type="button" onClick={() => setMetodo(m.id)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition-all
+                  ${metodo === m.id
+                    ? 'bg-blue-50 border-blue-300 text-blue-700'
+                    : 'bg-gray-50 border-gray-200 text-gray-600 hover:border-gray-300'}`}>
+                {m.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <label className="text-sm font-medium text-gray-700">Vinculado a cargo</label>
+          <select
+            value={cargoId ?? ''}
+            onChange={(e) => setCargoId(e.target.value ? Number(e.target.value) : null)}
+            className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-sm
+              text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <option value="">Sin cargo (saldo a favor)</option>
+            {cargos.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.compra_id
+                  ? `Compra #${String(c.compra_id).padStart(5, '0')} — ${formatCOP(c.valor_original)}`
+                  : `${c.descripcion || 'Cargo'} — ${formatCOP(c.valor_original)}`
+                } · {c.estado_pago}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className={`rounded-xl p-3 border transition-all
+          ${registrarEnCaja ? 'bg-blue-50 border-blue-200' : 'bg-gray-50 border-gray-200'}`}>
+          <label className="flex items-center gap-3 cursor-pointer">
+            <input type="checkbox" checked={registrarEnCaja}
+              onChange={(e) => setRegistrarEnCaja(e.target.checked)}
+              className="rounded accent-blue-600 w-4 h-4 flex-shrink-0" />
+            <div>
+              <p className="text-sm font-medium text-gray-700">Registrar en caja</p>
+              <p className="text-xs text-gray-400">Si no se marca, no aparecerá en el resumen de caja del día</p>
+            </div>
+          </label>
+        </div>
+
+        {error && <p className="text-sm text-red-500">{error}</p>}
+
+        <div className="flex gap-2">
+          <Button variant="secondary" className="flex-1" onClick={onClose}>Cancelar</Button>
+          <Button className="flex-1" loading={mutation.isPending}
+            disabled={!valor || Number(valor) <= 0}
+            onClick={() => mutation.mutate()}>
+            Guardar cambios
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 // ─── historial de abonos ──────────────────────────────────────────────────────
 
-function AbonosHistorial({ acreedorId, cargoId }) {
+function AbonosHistorial({ acreedorId, cargoId, esAdmin }) {
+  const queryClient = useQueryClient();
+  const [abonoEditar,   setAbonoEditar]   = useState(null);
+  const [abonoEliminar, setAbonoEliminar] = useState(null);
+
   const { data, isLoading } = useQuery({
     queryKey: ['abonos-cargo', acreedorId, cargoId],
     queryFn:  () => getAbonosPorCargo(acreedorId, cargoId).then((r) => r.data.data),
@@ -616,40 +736,104 @@ function AbonosHistorial({ acreedorId, cargoId }) {
   });
   const abonos = Array.isArray(data) ? data : [];
 
+  const mutEliminar = useMutation({
+    mutationFn: () => eliminarAbono(acreedorId, abonoEliminar.id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['compras-con-saldo', acreedorId], exact: false });
+      queryClient.invalidateQueries({ queryKey: ['acreedores'],                    exact: false });
+      queryClient.invalidateQueries({ queryKey: ['abonos-cargo', acreedorId, cargoId], exact: false });
+      queryClient.invalidateQueries({ queryKey: ['saldo-a-favor', acreedorId],     exact: false });
+      setAbonoEliminar(null);
+    },
+    onError: (err) => {
+      alert(err.response?.data?.error || 'Error al eliminar');
+      setAbonoEliminar(null);
+    },
+  });
+
   if (isLoading) return <Spinner className="py-3" />;
   if (abonos.length === 0)
     return <p className="text-xs text-gray-400 italic">Sin abonos registrados aún</p>;
 
   return (
-    <div className="flex flex-col gap-1.5">
-      {abonos.map((a) => (
-        <div key={a.id}
-          className="flex justify-between items-center gap-2 bg-green-50 border border-green-100
-            rounded-xl px-3 py-2">
-          <div className="min-w-0">
-            <p className="text-xs font-medium text-gray-700 truncate">{a.descripcion || 'Abono'}</p>
-            <p className="text-xs text-gray-400 mt-0.5">
-              {formatFechaHora(a.fecha)}{a.usuario_nombre && ` · ${a.usuario_nombre}`}
-            </p>
+    <>
+      <div className="flex flex-col gap-1.5">
+        {abonos.map((a) => (
+          <div key={a.id}
+            className="flex items-center gap-2 bg-green-50 border border-green-100
+              rounded-xl px-3 py-2">
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-medium text-gray-700 truncate">{a.descripcion || 'Abono'}</p>
+              <p className="text-xs text-gray-400 mt-0.5">
+                {formatFechaHora(a.fecha)}{a.usuario_nombre && ` · ${a.usuario_nombre}`}
+                {a.metodo && ` · ${a.metodo}`}
+              </p>
+            </div>
+            <span className="text-sm font-bold text-green-700 flex-shrink-0">
+              +{formatCOP(a.valor)}
+            </span>
+            {esAdmin && (
+              <div className="flex gap-0.5 flex-shrink-0">
+                <button onClick={() => setAbonoEditar(a)}
+                  className="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50
+                    transition-colors" title="Editar abono">
+                  <PenLine size={12} />
+                </button>
+                <button onClick={() => setAbonoEliminar(a)}
+                  className="p-1.5 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50
+                    transition-colors" title="Eliminar abono">
+                  <Trash2 size={12} />
+                </button>
+              </div>
+            )}
           </div>
-          <span className="text-sm font-bold text-green-700 flex-shrink-0">
-            +{formatCOP(a.valor)}
+        ))}
+        <div className="flex justify-between px-1 pt-1 border-t border-gray-100">
+          <span className="text-xs text-gray-400">Total abonado</span>
+          <span className="text-xs font-bold text-green-700">
+            {formatCOP(abonos.reduce((s, a) => s + Number(a.valor), 0))}
           </span>
         </div>
-      ))}
-      <div className="flex justify-between px-1 pt-1 border-t border-gray-100">
-        <span className="text-xs text-gray-400">Total abonado</span>
-        <span className="text-xs font-bold text-green-700">
-          {formatCOP(abonos.reduce((s, a) => s + Number(a.valor), 0))}
-        </span>
       </div>
-    </div>
+
+      {abonoEditar && (
+        <ModalEditarAbono
+          acreedorId={acreedorId}
+          cargoIdActual={cargoId}
+          abono={abonoEditar}
+          onClose={() => setAbonoEditar(null)}
+        />
+      )}
+
+      {abonoEliminar && (
+        <Modal open onClose={() => setAbonoEliminar(null)} title="Eliminar abono" size="sm">
+          <div className="flex flex-col gap-4">
+            <div className="bg-red-50 border border-red-100 rounded-xl px-4 py-3">
+              <p className="text-sm font-semibold text-red-700 mb-1">¿Eliminar este abono?</p>
+              <p className="text-xs text-gray-600 truncate">{abonoEliminar.descripcion || 'Abono'}</p>
+              <p className="text-xl font-bold text-red-600 mt-1">{formatCOP(abonoEliminar.valor)}</p>
+            </div>
+            <p className="text-xs text-gray-400">Esta acción no se puede deshacer.</p>
+            <div className="flex gap-2">
+              <Button variant="secondary" className="flex-1"
+                onClick={() => setAbonoEliminar(null)}>
+                Cancelar
+              </Button>
+              <Button className="flex-1 bg-red-600 hover:bg-red-700 text-white"
+                loading={mutEliminar.isPending} onClick={() => mutEliminar.mutate()}>
+                <Trash2 size={14} /> Eliminar
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+    </>
   );
 }
 
 // ─── cargo activo (pendiente / parcial) ───────────────────────────────────────
 
-function CargoActivo({ cargo, acreedorId, saldoAFavor, onAbonar, onAplicar }) {
+function CargoActivo({ cargo, acreedorId, esAdmin, saldoAFavor, onAbonar, onAplicar }) {
   const [historialAbierto, setHistorialAbierto] = useState(false);
   const [modalCompra,      setModalCompra]      = useState(false);
 
@@ -737,7 +921,7 @@ function CargoActivo({ cargo, acreedorId, saldoAFavor, onAbonar, onAplicar }) {
 
       {historialAbierto && (
         <div className="border-t border-dashed border-gray-200 px-4 py-3 bg-white/70">
-          <AbonosHistorial acreedorId={acreedorId} cargoId={cargo.id} />
+          <AbonosHistorial acreedorId={acreedorId} cargoId={cargo.id} esAdmin={esAdmin} />
         </div>
       )}
 
@@ -750,7 +934,7 @@ function CargoActivo({ cargo, acreedorId, saldoAFavor, onAbonar, onAplicar }) {
 
 // ─── cargo saldado (colapsable) ───────────────────────────────────────────────
 
-function CargoSaldado({ cargo, acreedorId }) {
+function CargoSaldado({ cargo, acreedorId, esAdmin }) {
   const [expandido,   setExpandido]   = useState(false);
   const [modalCompra, setModalCompra] = useState(false);
 
@@ -794,7 +978,7 @@ function CargoSaldado({ cargo, acreedorId }) {
             </button>
           )}
           <p className="text-xs font-semibold text-gray-500 mb-2">Historial de pagos</p>
-          <AbonosHistorial acreedorId={acreedorId} cargoId={cargo.id} />
+          <AbonosHistorial acreedorId={acreedorId} cargoId={cargo.id} esAdmin={esAdmin} />
         </div>
       )}
 

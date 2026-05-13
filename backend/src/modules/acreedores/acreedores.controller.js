@@ -84,10 +84,27 @@ const eliminarAcreedor = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+const editarAbono = async (req, res, next) => {
+  try {
+    const data = await service.editarAbono(
+      req.user.negocio_id, req.params.id, req.params.movId, req.body,
+    );
+    res.json({ ok: true, data, message: 'Abono actualizado correctamente' });
+  } catch (err) { next(err); }
+};
+
+const eliminarAbono = async (req, res, next) => {
+  try {
+    await service.eliminarAbono(req.user.negocio_id, req.params.id, req.params.movId);
+    res.json({ ok: true, message: 'Abono eliminado correctamente' });
+  } catch (err) { next(err); }
+};
+
 module.exports = {
   getAcreedores, getAcreedoresCruces, getAcreedorById,
   crearAcreedor, registrarMovimiento, getCargosAbiertos,
   getComprasConSaldo, getAbonosPorCargo,
   getSaldoAFavor, aplicarSaldoAFavor,
+  editarAbono, eliminarAbono,
   eliminarAcreedor,
 };

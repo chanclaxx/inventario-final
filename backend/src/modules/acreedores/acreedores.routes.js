@@ -32,6 +32,18 @@ router.post('/:id/aplicar-saldo',  requireModulo('acreedores'),
   ],
   validate, ctrl.aplicarSaldoAFavor,
 );
+router.put('/:id/movimientos/:movId',
+  requireModulo('acreedores'), requireNivel('admin_negocio'),
+  [
+    body('valor').isFloat({ gt: 0 }).withMessage('El valor debe ser mayor a 0'),
+    body('descripcion').optional({ values: 'null' }).isString().trim().isLength({ max: 500 }),
+    body('metodo').optional({ values: 'null' }).isString(),
+    body('cargo_id').optional({ values: 'null' }).isInt({ min: 1 }),
+    body('registrar_en_caja').optional().toBoolean(),
+  ],
+  validate, ctrl.editarAbono,
+);
+router.delete('/:id/movimientos/:movId', requireModulo('acreedores'), requireNivel('admin_negocio'), ctrl.eliminarAbono);
 router.delete('/:id',              requireModulo('acreedores'), requireNivel('admin_negocio'), ctrl.eliminarAcreedor);
 
 module.exports = router;

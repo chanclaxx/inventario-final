@@ -307,10 +307,41 @@ const getAbonosPorCargo = async (negocioId, acreedorId, cargoId) => {
   return rows;
 };
 
+const editarAbono = async (negocioId, acreedorId, movId, { valor, descripcion, metodo, cargo_id, registrar_en_caja }) => {
+  const { rows } = await pool.query(`
+    UPDATE movimientos_acreedor
+    SET valor             = $1,
+        descripcion       = $2,
+        metodo            = $3,
+        cargo_id          = $4,
+        registrar_en_caja = $5
+    WHERE id          = $6
+      AND acreedor_id = $7
+      AND tipo        = 'Abono'
+      AND acreedor_id IN (SELECT id FROM acreedores WHERE id = $7 AND negocio_id = $8)
+    RETURNING *
+  `, [valor, descripcion || null, metodo || null, cargo_id || null, registrar_en_caja !== false, movId, acreedorId, negocioId]);
+  if (!rows.length) throw { status: 404, message: 'Abono no encontrado' };
+  return rows[0];
+};
+
+const eliminarAbono = async (negocioId, acreedorId, movId) => {
+  const { rows } = await pool.query(`
+    DELETE FROM movimientos_acreedor
+    WHERE id          = $1
+      AND acreedor_id = $2
+      AND tipo        = 'Abono'
+      AND acreedor_id IN (SELECT id FROM acreedores WHERE id = $2 AND negocio_id = $3)
+    RETURNING id
+  `, [movId, acreedorId, negocioId]);
+  if (!rows.length) throw { status: 404, message: 'Abono no encontrado o no se puede eliminar' };
+};
+
 module.exports = {
   findAll, findByCruces, findById,
   getMovimientos, getCargosAbiertos,
   getComprasConSaldo, getAbonosPorCargo,
   getSaldoAFavor, aplicarSaldoAFavor,
+  editarAbono, eliminarAbono,
   create, insertarMovimiento, eliminarSeguro,
 };
