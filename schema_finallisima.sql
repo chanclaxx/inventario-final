@@ -1661,7 +1661,10 @@ CREATE TABLE public.retomas (
     producto_serial_id integer,
     producto_cantidad_id integer,
     costo_retoma numeric(12,2) DEFAULT 0,
-    color character varying(50)
+    color character varying(50),
+    tipo_persona character varying(20),
+    persona_id integer,
+    sucursal_id integer
 );
 
 

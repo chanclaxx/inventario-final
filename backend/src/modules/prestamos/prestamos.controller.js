@@ -199,6 +199,68 @@ const intercambiarPrestamo = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+const retomaDirecta = async (req, res, next) => {
+  try {
+    const sucursal_id = req.todasSucursales ? req.body.sucursal_id : req.sucursal_id;
+    if (!sucursal_id) {
+      return res.status(400).json({ ok: false, error: 'Debes indicar la sucursal' });
+    }
+    const {
+      tipo, persona_id,
+      tipo_retoma, imei_retoma, producto_serial_id, color_retoma,
+      producto_cantidad_id, cantidad_retoma,
+      valor_retoma, descripcion, ingreso_inventario,
+    } = req.body;
+
+    if (!['prestatario', 'cliente'].includes(tipo)) {
+      return res.status(400).json({ ok: false, error: "tipo debe ser 'prestatario' o 'cliente'" });
+    }
+
+    const data = await service.retomaDirecta(req.user.negocio_id, {
+      sucursal_id,
+      usuario_id:           req.user.id,
+      tipo,
+      persona_id:           Number(persona_id),
+      tipo_retoma:          tipo_retoma || 'serial',
+      imei_retoma:          imei_retoma          || null,
+      producto_serial_id:   producto_serial_id   ? Number(producto_serial_id)   : null,
+      color_retoma:         color_retoma         || null,
+      producto_cantidad_id: producto_cantidad_id ? Number(producto_cantidad_id) : null,
+      cantidad_retoma:      Number(cantidad_retoma || 1),
+      valor_retoma:         Number(valor_retoma),
+      descripcion:          descripcion          || null,
+      ingreso_inventario:   ingreso_inventario !== false,
+    });
+    res.json({ ok: true, data, message: 'Retoma registrada. Saldo a favor acreditado.' });
+  } catch (err) { next(err); }
+};
+
+const aplicarSaldoAPrestamos = async (req, res, next) => {
+  try {
+    const { tipo, id } = req.params;
+    if (!['prestatario', 'cliente'].includes(tipo)) {
+      return res.status(400).json({ ok: false, error: "tipo debe ser 'prestatario' o 'cliente'" });
+    }
+    const data = await service.aplicarSaldoAPrestamos(
+      req.user.negocio_id, tipo, Number(id)
+    );
+    res.json({ ok: true, data, message: 'Saldo a favor aplicado a los préstamos activos' });
+  } catch (err) { next(err); }
+};
+
+const getResumenCartera = async (req, res, next) => {
+  try {
+    const { tipo, id } = req.params;
+    if (!['prestatario', 'cliente'].includes(tipo)) {
+      return res.status(400).json({ ok: false, error: "tipo debe ser 'prestatario' o 'cliente'" });
+    }
+    const data = await service.getResumenCartera(
+      req.user.negocio_id, tipo, Number(id)
+    );
+    res.json({ ok: true, data });
+  } catch (err) { next(err); }
+};
+
 module.exports = {
   getPrestamos, getPrestamoById,
   crearPrestamo, crearPrestamos,
@@ -207,4 +269,5 @@ module.exports = {
   exportarPdfPorPersona, exportarPdfPrestamoIndividual,
   registrarSaldoAFavor,
   intercambiarPrestamo,
+  retomaDirecta, aplicarSaldoAPrestamos, getResumenCartera,
 };

@@ -370,6 +370,80 @@ const setearSaldoAFavorPersona = async (executor, tipo, personaId, monto) => {
   );
 };
 
+// ── Retoma directa (sin préstamo) ────────────────────────────────────────────
+const insertarRetomaDirecta = async (client, {
+  tipo_persona, persona_id, sucursal_id,
+  nombre_producto, imei, valor_retoma, cantidad_retoma,
+  descripcion, tipo_retoma, producto_serial_id, producto_cantidad_id,
+  color, ingreso_inventario,
+}) => {
+  const { rows } = await client.query(`
+    INSERT INTO retomas(
+      prestamo_id, nombre_producto, imei, valor_retoma, cantidad_retoma,
+      descripcion, ingreso_inventario, tipo_retoma,
+      producto_serial_id, producto_cantidad_id, color,
+      tipo_persona, persona_id, sucursal_id
+    )
+    VALUES (NULL,$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+    RETURNING *
+  `, [
+    nombre_producto      || null,
+    imei                 || null,
+    valor_retoma,
+    cantidad_retoma      || 1,
+    descripcion          || '',
+    ingreso_inventario   ?? true,
+    tipo_retoma          || 'serial',
+    producto_serial_id   || null,
+    producto_cantidad_id || null,
+    color                || null,
+    tipo_persona,
+    persona_id,
+    sucursal_id,
+  ]);
+  return rows[0];
+};
+
+// ── Préstamos activos de una persona — ordenados por fecha ASC (FIFO) ─────────
+const findActivosPorPersona = async (executor, tipo, personaId, negocioId) => {
+  const campo = tipo === 'prestatario' ? 'p.prestatario_id' : 'p.cliente_id';
+  const { rows } = await executor.query(`
+    SELECT
+      p.id, p.fecha, p.nombre_producto, p.imei,
+      p.cantidad_prestada, p.valor_prestamo, p.total_abonado,
+      (p.valor_prestamo - p.total_abonado) AS saldo_pendiente,
+      p.estado, p.sucursal_id, p.prestatario, p.cedula, p.telefono,
+      p.prestatario_id, p.empleado_id, p.cliente_id, p.producto_id
+    FROM prestamos p
+    JOIN sucursales su ON su.id = p.sucursal_id
+    WHERE ${campo} = $1
+      AND su.negocio_id = $2
+      AND p.estado = 'Activo'
+    ORDER BY p.fecha ASC
+  `, [personaId, negocioId]);
+  return rows;
+};
+
+// ── Resumen agregado de cartera de una persona ────────────────────────────────
+const getResumenPersona = async (executor, negocioId, tipo, personaId) => {
+  const campo = tipo === 'prestatario' ? 'p.prestatario_id' : 'p.cliente_id';
+  const tabla = TABLA_PERSONA[tipo];
+  const { rows } = await executor.query(`
+    SELECT
+      COUNT(p.id) FILTER (WHERE p.estado = 'Activo')                         AS total_activos,
+      COALESCE(SUM(p.valor_prestamo) FILTER (WHERE p.estado = 'Activo'), 0)  AS total_deuda,
+      COALESCE(SUM(p.valor_prestamo - p.total_abonado)
+               FILTER (WHERE p.estado = 'Activo'), 0)                         AS total_pendiente,
+      per.saldo_a_favor
+    FROM prestamos p
+    JOIN sucursales su ON su.id = p.sucursal_id
+    CROSS JOIN (SELECT saldo_a_favor FROM ${tabla} WHERE id = $1) per
+    WHERE ${campo} = $1
+      AND su.negocio_id = $2
+  `, [personaId, negocioId]);
+  return rows[0];
+};
+
 module.exports = {
   findAll, findById, findByIdYNegocio,
   perteneceAlNegocio,
@@ -378,6 +452,7 @@ module.exports = {
   salarSerial, findAbonosPorPrestamos, findActivosPorCliente, findActivosPorPrestatario,
   getSaldoAFavorPersona, setearSaldoAFavorPersona,
   retornarSerialConOrigen,
-  insertarRetoma, insertarSerialParaRetoma, ajustarStockConHistorialEnTx,
+  insertarRetoma, insertarRetomaDirecta, insertarSerialParaRetoma, ajustarStockConHistorialEnTx,
   getRetomasPorPrestamo,
+  findActivosPorPersona, getResumenPersona,
 };

@@ -24,6 +24,8 @@ import { FacturaTermica }                       from '../../components/FacturaTe
 import { ModalImprimirFactura }                 from '../../components/ui/ModalImprimirFactura';
 import { ModalImprimirPrestamo }                from '../../components/ui/ModalImprimirPrestamo';
 import { TabCreditos }                          from './TabCreditos';
+import { ModalRetomaDirecta }                   from './ModalRetomaDirecta';
+import { ModalAplicarSaldo }                    from './ModalAplicarSaldo';
 import { useMetodosPago }                       from '../../hooks/useMetodosPago';
 import useExportarPdfPrestamos                  from '../../hooks/useExportarPdfPrestamos';
 import api                                      from '../../api/axios.config';
@@ -922,7 +924,7 @@ function TarjetaPrestamoDetalle({ prestamo, onAbonar, onDevolver, onImprimir, on
 
 // ─── Vista detalle de persona ─────────────────────────────────────────────────
 
-function VistaDetallePersona({ nombre, tipo, personaId, prestamos, saldoAFavor = 0, onVolver, onAbonar, onDevolver, onImprimir, onIntercambiar, onRegistrarSaldo, coloresActivo }) {
+function VistaDetallePersona({ nombre, tipo, personaId, prestamos, saldoAFavor = 0, onVolver, onAbonar, onDevolver, onImprimir, onIntercambiar, onRegistrarSaldo, onRetomaDirecta, onAplicarSaldo, coloresActivo }) {
   const [cerradosAbiertos, setCerradosAbiertos] = useState(false);
 
   const activos  = prestamos.filter((p) => p.estado === 'Activo');
@@ -966,6 +968,12 @@ function VistaDetallePersona({ nombre, tipo, personaId, prestamos, saldoAFavor =
               <p className="text-sm font-bold text-red-500">{formatCOP(saldoTotal)}</p>
             </div>
           )}
+          <button
+            onClick={onRetomaDirecta}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium
+              border border-purple-200 text-purple-600 bg-purple-50 hover:bg-purple-100 transition-colors">
+            <ArrowLeftRight size={12} /> Retoma directa
+          </button>
           {activos.length > 0 && (
             <BotonExportarPdf
               tipo={tipo === 'companero' ? 'prestatario' : 'cliente'}
@@ -1019,14 +1027,25 @@ function VistaDetallePersona({ nombre, tipo, personaId, prestamos, saldoAFavor =
               Este monto se aplicará al próximo préstamo que registres a esta persona.
             </p>
           )}
-          <button
-            onClick={onRegistrarSaldo}
-            className="mt-1 flex items-center gap-1.5 text-xs font-medium text-emerald-700
-              hover:text-emerald-900 w-fit transition-colors"
-          >
-            <Plus size={13} />
-            {saldoAFavor > 0 ? 'Actualizar saldo a favor' : 'Registrar saldo a favor'}
-          </button>
+          <div className="flex items-center gap-3 flex-wrap">
+            <button
+              onClick={onRegistrarSaldo}
+              className="mt-1 flex items-center gap-1.5 text-xs font-medium text-emerald-700
+                hover:text-emerald-900 w-fit transition-colors"
+            >
+              <Plus size={13} />
+              {saldoAFavor > 0 ? 'Actualizar saldo a favor' : 'Registrar saldo a favor'}
+            </button>
+            {saldoAFavor > 0 && activos.length > 0 && (
+              <button
+                onClick={onAplicarSaldo}
+                className="mt-1 flex items-center gap-1.5 text-xs font-medium
+                  bg-emerald-600 hover:bg-emerald-700 text-white px-2.5 py-1 rounded-lg transition-colors"
+              >
+                <Wallet size={12} /> Aplicar a préstamos activos
+              </button>
+            )}
+          </div>
         </div>
       )}
 
@@ -1621,6 +1640,8 @@ export default function PrestamosPage() {
   const [prestamoImprimir,    setPrestamoImprimir]    = useState(null);
   const [prestamoIntercambio, setPrestamoIntercambio] = useState(null);
   const [modalSaldoPersona,   setModalSaldoPersona]   = useState(null); // { nombre, tipo, personaId, saldoAFavor }
+  const [modalRetomaDirecta,  setModalRetomaDirecta]  = useState(null); // { persona: { tipo, id, nombre } }
+  const [modalAplicarSaldo,   setModalAplicarSaldo]   = useState(null); // { persona, saldoAFavor, prestamosActivos }
   const abonosImprimir = useAbonosPrestamo(prestamoImprimir?.id);
 
   const [saldadoFacturaId,   setSaldadoFacturaId]   = useState(null);
@@ -1796,6 +1817,22 @@ export default function PrestamosPage() {
                   personaId:  grupoActual.personaId,
                   saldoAFavor: grupoActual.saldoAFavor ?? 0,
                 })}
+                onRetomaDirecta={() => setModalRetomaDirecta({
+                  persona: {
+                    tipo:   tabPrestamos === 'companeros' ? 'companero' : 'cliente',
+                    id:     grupoActual.personaId,
+                    nombre: grupoActual.nombre,
+                  },
+                })}
+                onAplicarSaldo={() => setModalAplicarSaldo({
+                  persona: {
+                    tipo:   tabPrestamos === 'companeros' ? 'companero' : 'cliente',
+                    id:     grupoActual.personaId,
+                    nombre: grupoActual.nombre,
+                  },
+                  saldoAFavor:      grupoActual.saldoAFavor ?? 0,
+                  prestamosActivos: grupoActual.prestamos.filter((p) => p.estado === 'Activo'),
+                })}
                 coloresActivo={coloresActivo}
               />
             ) : (
@@ -1898,6 +1935,29 @@ export default function PrestamosPage() {
             setPrestamoIntercambio(null);
             setSaldadoFacturaId(fid);
             setSaldadoPrestamo(p);
+          }}
+        />
+      )}
+
+      {modalRetomaDirecta && (
+        <ModalRetomaDirecta
+          persona={modalRetomaDirecta.persona}
+          sucursalId={null}
+          onClose={() => setModalRetomaDirecta(null)}
+          onSuccess={() => {
+            setModalRetomaDirecta(null);
+          }}
+        />
+      )}
+
+      {modalAplicarSaldo && (
+        <ModalAplicarSaldo
+          persona={modalAplicarSaldo.persona}
+          saldoAFavor={modalAplicarSaldo.saldoAFavor}
+          prestamosActivos={modalAplicarSaldo.prestamosActivos}
+          onClose={() => setModalAplicarSaldo(null)}
+          onSuccess={() => {
+            setModalAplicarSaldo(null);
           }}
         />
       )}

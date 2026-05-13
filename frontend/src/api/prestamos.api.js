@@ -13,3 +13,10 @@ export const registrarSaldoAFavor = (tipo, id, monto) =>
   api.patch(`/prestamos/personas/${tipo}/${id}/saldo-a-favor`, { monto });
 export const intercambiarPrestamo = (id, data) =>
   api.post(`/prestamos/${id}/intercambio`, data);
+
+export const getResumenCartera   = (tipo, id) =>
+  api.get(`/prestamos/personas/${tipo}/${id}/resumen`);
+export const retomaDirecta       = (data) =>
+  api.post('/prestamos/retoma-directa', data);
+export const aplicarSaldoActivos = (tipo, id) =>
+  api.post(`/prestamos/personas/${tipo}/${id}/aplicar-saldo`);

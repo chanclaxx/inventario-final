@@ -38,11 +38,28 @@ const validarIntercambio = [
   body('descripcion').optional({ nullable: true }).isString(),
 ];
 
+const validarRetomaDirecta = [
+  body('tipo').isIn(['prestatario', 'cliente']).withMessage("tipo debe ser 'prestatario' o 'cliente'"),
+  body('persona_id').isInt({ min: 1 }).withMessage('persona_id inválido'),
+  body('valor_retoma').isFloat({ gt: 0 }).withMessage('El valor de retoma debe ser mayor a 0'),
+  body('tipo_retoma').optional({ nullable: true }).isIn(['serial', 'cantidad']),
+  body('imei_retoma').optional({ nullable: true }).isString(),
+  body('producto_serial_id').optional({ nullable: true }).isInt({ min: 1 }),
+  body('producto_cantidad_id').optional({ nullable: true }).isInt({ min: 1 }),
+  body('cantidad_retoma').optional({ nullable: true }).isInt({ min: 1 }),
+  body('color_retoma').optional({ nullable: true }).isString(),
+  body('descripcion').optional({ nullable: true }).isString(),
+];
+
 router.get('/',       requireModulo('prestamos'), ctrl.getPrestamos);
 router.post('/',      requireModulo('prestamos'), validarPrestamo,  validate, ctrl.crearPrestamo);
 router.post('/batch', requireModulo('prestamos'), validarPrestamos, validate, ctrl.crearPrestamos);
 
-router.patch('/personas/:tipo/:id/saldo-a-favor', requireModulo('prestamos'), validarSaldoAFavor, validate, ctrl.registrarSaldoAFavor);
+// Rutas de personas — deben ir ANTES de /:id para no ser capturadas por ese parámetro
+router.patch('/personas/:tipo/:id/saldo-a-favor',  requireModulo('prestamos'), validarSaldoAFavor,    validate, ctrl.registrarSaldoAFavor);
+router.get(  '/personas/:tipo/:id/resumen',         requireModulo('prestamos'), ctrl.getResumenCartera);
+router.post( '/personas/:tipo/:id/aplicar-saldo',   requireModulo('prestamos'), ctrl.aplicarSaldoAPrestamos);
+router.post( '/retoma-directa',                     requireModulo('prestamos'), validarRetomaDirecta, validate, ctrl.retomaDirecta);
 
 router.get('/pdf/:tipo/:personaId', requireModulo('prestamos'), ctrl.exportarPdfPorPersona);
 router.get('/:id/pdf', requireModulo('prestamos'), ctrl.exportarPdfPrestamoIndividual);

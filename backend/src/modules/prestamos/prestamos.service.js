@@ -597,6 +597,209 @@ const intercambiarPrestamo = async (negocioId, prestamoId, {
   }
 };
 
+// ─── Servicio: retoma directa — recibir producto sin préstamo activo ──────────
+// El prestatario/cliente entrega un producto que se convierte en saldo a favor.
+
+const retomaDirecta = async (negocioId, {
+  sucursal_id, usuario_id,
+  tipo, persona_id,
+  tipo_retoma = 'serial',
+  imei_retoma,
+  producto_serial_id,
+  color_retoma,
+  producto_cantidad_id,
+  cantidad_retoma = 1,
+  valor_retoma,
+  descripcion,
+  ingreso_inventario = true,
+}) => {
+  await _verificarSucursal(sucursal_id, negocioId);
+
+  if (tipo === 'prestatario') {
+    await _verificarPrestatario(persona_id, negocioId);
+  } else {
+    await _verificarCliente(persona_id, negocioId);
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // 1. Resolver nombre del producto
+    let nombreProducto = descripcion || 'Producto retomado';
+    if (tipo_retoma === 'serial' && producto_serial_id) {
+      const { rows } = await client.query(
+        'SELECT nombre FROM productos_serial WHERE id = $1', [producto_serial_id]
+      );
+      nombreProducto = rows[0]?.nombre || nombreProducto;
+    } else if (tipo_retoma === 'cantidad' && producto_cantidad_id) {
+      const { rows } = await client.query(
+        'SELECT nombre FROM productos_cantidad WHERE id = $1', [producto_cantidad_id]
+      );
+      nombreProducto = rows[0]?.nombre || nombreProducto;
+    }
+
+    // 2. Ingresar al inventario si corresponde
+    let retomaIngresoReal = false;
+    if (ingreso_inventario) {
+      if (tipo_retoma === 'serial' && imei_retoma && producto_serial_id) {
+        const { rows: psRows } = await client.query(
+          'SELECT id FROM productos_serial WHERE id = $1 AND sucursal_id = $2',
+          [producto_serial_id, sucursal_id]
+        );
+        if (!psRows.length) throw { status: 400, message: 'El producto serial no pertenece a esta sucursal' };
+        await repo.insertarSerialParaRetoma(client, {
+          producto_id:    producto_serial_id,
+          imei:           imei_retoma.trim(),
+          costo_compra:   Number(valor_retoma),
+          color:          color_retoma || null,
+          cliente_origen: null,
+        });
+        retomaIngresoReal = true;
+      } else if (tipo_retoma === 'cantidad' && producto_cantidad_id) {
+        const { rows: pcRows } = await client.query(
+          'SELECT sucursal_id FROM productos_cantidad WHERE id = $1', [producto_cantidad_id]
+        );
+        if (!pcRows.length || pcRows[0].sucursal_id !== sucursal_id) {
+          throw { status: 400, message: 'El producto no pertenece a esta sucursal' };
+        }
+        await repo.ajustarStockConHistorialEnTx(client, {
+          producto_id:    producto_cantidad_id,
+          sucursal_id,
+          cantidad:       Number(cantidad_retoma || 1),
+          costo_unitario: Number(valor_retoma) || null,
+          cliente_origen: null,
+          tipo:           'retoma',
+        });
+        retomaIngresoReal = true;
+      }
+    }
+
+    // 3. Registrar la retoma
+    await repo.insertarRetomaDirecta(client, {
+      tipo_persona:        tipo,
+      persona_id,
+      sucursal_id,
+      nombre_producto:     nombreProducto,
+      imei:                tipo_retoma === 'serial' ? (imei_retoma || null) : null,
+      valor_retoma:        Number(valor_retoma),
+      cantidad_retoma:     tipo_retoma === 'cantidad' ? Number(cantidad_retoma || 1) : 1,
+      descripcion:         descripcion || `Retoma directa — ${nombreProducto}`,
+      ingreso_inventario:  retomaIngresoReal,
+      tipo_retoma,
+      producto_serial_id:  tipo_retoma === 'serial'   ? (producto_serial_id   || null) : null,
+      producto_cantidad_id: tipo_retoma === 'cantidad' ? (producto_cantidad_id || null) : null,
+      color:               color_retoma || null,
+    });
+
+    // 4. Acreditar el valor como saldo a favor
+    const saldoActual  = await repo.getSaldoAFavorPersona(client, tipo, persona_id);
+    const saldoNuevo   = saldoActual + Number(valor_retoma);
+    await repo.setearSaldoAFavorPersona(client, tipo, persona_id, saldoNuevo);
+
+    await client.query('COMMIT');
+    return { saldo_a_favor_nuevo: saldoNuevo, valor_retoma: Number(valor_retoma) };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+};
+
+// ─── Servicio: aplicar saldo a favor a préstamos activos (FIFO) ───────────────
+
+const aplicarSaldoAPrestamos = async (negocioId, tipo, personaId) => {
+  if (tipo === 'prestatario') {
+    await _verificarPrestatario(personaId, negocioId);
+  } else {
+    await _verificarCliente(personaId, negocioId);
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    let saldoRestante = await repo.getSaldoAFavorPersona(client, tipo, personaId);
+    if (saldoRestante <= 0) {
+      throw { status: 400, message: 'La persona no tiene saldo a favor disponible' };
+    }
+
+    const activos = await repo.findActivosPorPersona(client, tipo, personaId, negocioId);
+    if (!activos.length) {
+      throw { status: 400, message: 'No hay préstamos activos a los que aplicar el saldo' };
+    }
+
+    const prestamosAfectados = [];
+
+    for (const prestamo of activos) {
+      if (saldoRestante <= 0) break;
+
+      const saldoPendiente = Number(prestamo.saldo_pendiente);
+      if (saldoPendiente <= 0) continue;
+
+      const montoAbono = Math.min(saldoRestante, saldoPendiente);
+      const resultado  = await repo.insertarAbono(client, {
+        prestamo_id: prestamo.id,
+        valor:       montoAbono,
+        metodo:      'Saldo a favor',
+        usuario_id:  null,
+      });
+      saldoRestante -= montoAbono;
+
+      let saldado    = false;
+      let factura_id = null;
+
+      if (Number(resultado.total_abonado) >= Number(resultado.valor_prestamo)) {
+        saldado = true;
+        await repo.updateEstado(client, prestamo.id, 'Saldado');
+        factura_id = await _crearFacturaDesdePrestamo(client, prestamo, 'Saldo a favor', negocioId);
+      }
+
+      prestamosAfectados.push({
+        id:           prestamo.id,
+        nombre:       prestamo.nombre_producto,
+        abono_aplicado: montoAbono,
+        saldado,
+        factura_id,
+      });
+    }
+
+    await repo.setearSaldoAFavorPersona(client, tipo, personaId, saldoRestante);
+
+    await client.query('COMMIT');
+    return { prestamos_afectados: prestamosAfectados, saldo_restante: saldoRestante };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+};
+
+// ─── Servicio: resumen de cartera de una persona ──────────────────────────────
+
+const getResumenCartera = async (negocioId, tipo, personaId) => {
+  if (tipo === 'prestatario') {
+    await _verificarPrestatario(personaId, negocioId);
+  } else {
+    await _verificarCliente(personaId, negocioId);
+  }
+
+  const [resumen, activos] = await Promise.all([
+    repo.getResumenPersona(pool, negocioId, tipo, personaId),
+    repo.findActivosPorPersona(pool, tipo, personaId, negocioId),
+  ]);
+
+  return {
+    total_activos:   Number(resumen?.total_activos  ?? 0),
+    total_deuda:     Number(resumen?.total_deuda    ?? 0),
+    total_pendiente: Number(resumen?.total_pendiente ?? 0),
+    saldo_a_favor:   Number(resumen?.saldo_a_favor  ?? 0),
+    prestamos_activos: activos,
+  };
+};
+
 module.exports = {
   getPrestamos, getPrestamoById,
   crearPrestamo, crearPrestamos,
@@ -604,4 +807,5 @@ module.exports = {
   devolverPrestamo, devolverParcial,
   registrarSaldoAFavor,
   intercambiarPrestamo,
+  retomaDirecta, aplicarSaldoAPrestamos, getResumenCartera,
 };
