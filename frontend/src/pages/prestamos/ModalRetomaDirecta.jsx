@@ -42,10 +42,10 @@ export function ModalRetomaDirecta({ persona, sucursalId, onClose, onSuccess }) 
   const productosCantidad = normalizarProductos(rawCantidad);
 
   const filtradosSerial   = productosSerial.filter((p) =>
-    p.nombre.toLowerCase().includes(busquedaSerial.toLowerCase())
+    (p.nombre ?? '').toLowerCase().includes(busquedaSerial.toLowerCase())
   );
   const filtradosCantidad = productosCantidad.filter((p) =>
-    p.nombre.toLowerCase().includes(busquedaCantidad.toLowerCase())
+    (p.nombre ?? '').toLowerCase().includes(busquedaCantidad.toLowerCase())
   );
 
   const resetCamposProducto = () => {
