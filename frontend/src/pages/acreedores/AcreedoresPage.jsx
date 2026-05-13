@@ -613,7 +613,7 @@ function ModalNuevoCargo({ acreedor, onClose }) {
 function ModalEditarAbono({ acreedorId, cargoIdActual, abono, onClose }) {
   const queryClient   = useQueryClient();
   const metodosPago   = useMetodosPago();
-  const [valor,           setValor]           = useState(String(abono.valor));
+  const [valor,           setValor]           = useState(String(Math.round(Number(abono.valor))));
   const [descripcion,     setDescripcion]     = useState(abono.descripcion || '');
   const [metodo,          setMetodo]          = useState(abono.metodo || metodosPago[0]?.id || 'Efectivo');
   const [cargoId,         setCargoId]         = useState(cargoIdActual);
