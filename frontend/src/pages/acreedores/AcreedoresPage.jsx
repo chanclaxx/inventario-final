@@ -1129,6 +1129,7 @@ function DetalleAcreedor({ acreedor, esAdmin, onVolver, onEliminar }) {
                   key={c.id}
                   cargo={c}
                   acreedorId={acreedor.id}
+                  esAdmin={esAdmin}
                   saldoAFavor={saldoAFavor}
                   onAbonar={(cargo) => setCargoAbono(cargo)}
                   onAplicar={(cargo) => setCargoAplicar(cargo)}
@@ -1160,7 +1161,7 @@ function DetalleAcreedor({ acreedor, esAdmin, onVolver, onEliminar }) {
               {saldadasAbiertas && (
                 <div className="flex flex-col gap-2 p-3">
                   {saldados.map((c) => (
-                    <CargoSaldado key={c.id} cargo={c} acreedorId={acreedor.id} />
+                    <CargoSaldado key={c.id} cargo={c} acreedorId={acreedor.id} esAdmin={esAdmin} />
                   ))}
                 </div>
               )}
