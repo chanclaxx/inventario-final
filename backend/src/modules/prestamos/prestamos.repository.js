@@ -539,6 +539,81 @@ const getResumenPersona = async (executor, negocioId, tipo, personaId) => {
   return rows[0];
 };
 
+// ── Estado de cuenta: todos los movimientos de una persona ───────────────────
+const getEstadoCuenta = async (executor, negocioId, tipo, personaId) => {
+  const filtroPersona = tipo === 'prestatario'
+    ? 'p.prestatario_id = $2'
+    : 'p.cliente_id = $2';
+
+  const { rows } = await executor.query(`
+    SELECT fecha, tipo, concepto, cargo, abono, referencia_id, anulable
+    FROM (
+
+      -- Préstamos otorgados (aumentan deuda)
+      SELECT
+        p.fecha,
+        'prestamo'::text                                AS tipo,
+        ('Préstamo — ' || p.nombre_producto)           AS concepto,
+        p.valor_prestamo::numeric                      AS cargo,
+        NULL::numeric                                  AS abono,
+        p.id                                           AS referencia_id,
+        false                                          AS anulable,
+        NULL::integer                                  AS prestamo_id
+      FROM prestamos p
+      JOIN sucursales su ON su.id = p.sucursal_id
+      WHERE su.negocio_id = $1 AND ${filtroPersona}
+
+      UNION ALL
+
+      -- Abonos a préstamos (reducen deuda)
+      SELECT
+        ap.fecha,
+        CASE ap.metodo
+          WHEN 'Intercambio'   THEN 'pago_producto'
+          WHEN 'Saldo a favor' THEN 'saldo_aplicado'
+          ELSE 'abono'
+        END::text                                      AS tipo,
+        CASE ap.metodo
+          WHEN 'Intercambio'   THEN 'Pago en producto — ' || p.nombre_producto
+          WHEN 'Saldo a favor' THEN 'Saldo a favor aplicado'
+          ELSE 'Abono ' || ap.metodo || ' — ' || p.nombre_producto
+        END                                            AS concepto,
+        NULL::numeric                                  AS cargo,
+        ap.valor::numeric                              AS abono,
+        ap.id                                          AS referencia_id,
+        true                                           AS anulable,
+        ap.prestamo_id                                 AS prestamo_id
+      FROM abonos_prestamo ap
+      JOIN prestamos  p  ON p.id  = ap.prestamo_id
+      JOIN sucursales su ON su.id = p.sucursal_id
+      WHERE su.negocio_id = $1 AND ${filtroPersona}
+
+      UNION ALL
+
+      -- Compras de artículo directas (afectan saldo a favor, no la deuda)
+      SELECT
+        COALESCE(r.fecha, NOW()),
+        'compra_directa'::text                         AS tipo,
+        ('Compra de artículo — ' || COALESCE(r.nombre_producto, 'artículo')) AS concepto,
+        NULL::numeric                                  AS cargo,
+        r.valor_retoma::numeric                        AS abono,
+        r.id                                           AS referencia_id,
+        true                                           AS anulable,
+        NULL::integer                                  AS prestamo_id
+      FROM retomas r
+      LEFT JOIN sucursales su ON su.id = r.sucursal_id
+      WHERE r.prestamo_id IS NULL
+        AND r.tipo_persona = $3
+        AND r.persona_id   = $2
+        AND (r.sucursal_id IS NULL OR su.negocio_id = $1)
+
+    ) movs
+    ORDER BY fecha ASC NULLS LAST, referencia_id ASC
+  `, [negocioId, personaId, tipo]);
+
+  return rows;
+};
+
 module.exports = {
   findAll, findById, findByIdYNegocio,
   perteneceAlNegocio,
@@ -554,5 +629,5 @@ module.exports = {
   findAbonoById, eliminarAbono, restarTotalAbonado,
   cancelarFacturaDePrestamo, revertirSerialVendido,
   findRetomaPorId, findSerialEnInventario, eliminarSerial, eliminarRetoma,
-  findRetomasDirectasPorPersona,
+  findRetomasDirectasPorPersona, getEstadoCuenta,
 };

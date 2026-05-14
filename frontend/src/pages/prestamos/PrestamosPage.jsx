@@ -26,6 +26,7 @@ import { ModalImprimirPrestamo }                from '../../components/ui/ModalI
 import { TabCreditos }                          from './TabCreditos';
 import { ModalRetomaDirecta }                   from './ModalRetomaDirecta';
 import { ModalAplicarSaldo }                    from './ModalAplicarSaldo';
+import { EstadoDeCuenta }                       from './EstadoDeCuenta';
 import { useMetodosPago }                       from '../../hooks/useMetodosPago';
 import useExportarPdfPrestamos                  from '../../hooks/useExportarPdfPrestamos';
 import api                                      from '../../api/axios.config';
@@ -452,25 +453,25 @@ function ModalIntercambio({ prestamo, onClose, onSaldado }) {
         onClose();
       }
     },
-    onError: (err) => setError(err.response?.data?.error || 'Error al registrar el intercambio'),
+    onError: (err) => setError(err.response?.data?.error || 'Error al registrar el pago en producto'),
   });
 
   const handleConfirmar = () => {
     setError('');
-    if (!retoma || retoma <= 0) return setError('Ingresa el valor de la retoma');
+    if (!retoma || retoma <= 0) return setError('Ingresa el valor del artículo');
     if (ingresoInventario) {
       if (tipoRetoma === 'serial' && !productoSerialSel)
-        return setError('Selecciona la línea de producto del equipo retomado');
+        return setError('Selecciona la línea de producto del artículo');
       if (tipoRetoma === 'serial' && !imeiRetoma.trim())
-        return setError('Ingresa el IMEI del equipo retomado');
+        return setError('Ingresa el IMEI del artículo');
       if (tipoRetoma === 'cantidad' && !productoCantidadSel)
-        return setError('Selecciona el producto retomado');
+        return setError('Selecciona el artículo');
     }
     mutation.mutate();
   };
 
   return (
-    <Modal open onClose={onClose} title="Intercambio — pago con producto" size="md">
+    <Modal open onClose={onClose} title="Pago en producto" size="md">
       <div className="flex flex-col gap-4">
 
         {/* Préstamo actual */}
@@ -614,12 +615,12 @@ function ModalIntercambio({ prestamo, onClose, onSaldado }) {
               <span className="font-medium text-gray-700">{formatCOP(saldoPendiente)}</span>
             </div>
             <div className="flex justify-between text-xs text-gray-500">
-              <span>Retoma aplicada:</span>
+              <span>Artículo recibido:</span>
               <span className="font-medium text-purple-700">− {formatCOP(Math.min(retoma, saldoPendiente))}</span>
             </div>
             <div className={`flex justify-between text-sm font-semibold mt-1 pt-1 border-t border-gray-200
               ${diff > 0 ? 'text-red-600' : diff < 0 ? 'text-emerald-600' : 'text-green-600'}`}>
-              <span>{diff > 0 ? 'Queda pendiente' : diff < 0 ? 'Saldo a favor' : 'Resultado'}</span>
+              <span>{diff > 0 ? 'Queda pendiente' : diff < 0 ? 'Saldo a favor generado' : 'Resultado'}</span>
               <span>
                 {diff > 0 ? formatCOP(diff) : diff < 0 ? formatCOP(Math.abs(diff)) : 'Préstamo saldado ✓'}
               </span>
@@ -632,7 +633,7 @@ function ModalIntercambio({ prestamo, onClose, onSaldado }) {
         <div className="flex gap-2">
           <Button variant="secondary" className="flex-1" onClick={onClose}>Cancelar</Button>
           <Button className="flex-1" loading={mutation.isPending} onClick={handleConfirmar}>
-            <ArrowLeftRight size={14} /> Registrar intercambio
+            <ArrowLeftRight size={14} /> Registrar pago en producto
           </Button>
         </div>
       </div>
@@ -742,10 +743,14 @@ function CardPersona({ nombre, tipo, prestamos, saldoTotal, ultimoAbono, onSelec
 // ─── Tarjeta de préstamo individual (en vista detalle) ────────────────────────
 
 const METODO_BADGE = {
-  Efectivo:     'bg-green-100 text-green-700',
-  Transferencia:'bg-blue-100 text-blue-700',
-  Intercambio:  'bg-purple-100 text-purple-700',
+  Efectivo:        'bg-green-100 text-green-700',
+  Transferencia:   'bg-blue-100 text-blue-700',
+  Intercambio:     'bg-purple-100 text-purple-700',
   'Saldo a favor': 'bg-yellow-100 text-yellow-700',
+};
+
+const METODO_LABEL = {
+  Intercambio: 'Pago en producto',
 };
 
 function HistorialPrestamo({ prestamoId, prestamoEstado }) {
@@ -801,7 +806,7 @@ function HistorialPrestamo({ prestamoId, prestamoEstado }) {
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-1.5 flex-wrap">
                 <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${badgeClass}`}>
-                  {abono.metodo}
+                  {METODO_LABEL[abono.metodo] ?? abono.metodo}
                 </span>
                 <span className="text-xs text-gray-400">{formatFechaHora(abono.fecha)}</span>
               </div>
@@ -859,7 +864,7 @@ function HistorialPrestamo({ prestamoId, prestamoEstado }) {
             {abono.metodo === 'Intercambio' && retoma && !confirmando && (
               <div className="mt-1 pt-1 border-t border-purple-100 flex flex-col gap-0.5">
                 <p className="text-xs font-medium text-purple-700">
-                  Retoma: {retoma.nombre_producto || retoma.producto_serial_nombre || retoma.producto_cantidad_nombre}
+                  Artículo recibido: {retoma.nombre_producto || retoma.producto_serial_nombre || retoma.producto_cantidad_nombre}
                 </p>
                 {retoma.imei && (
                   <p className="text-xs text-gray-400 font-mono">IMEI: {retoma.imei}</p>
@@ -868,7 +873,7 @@ function HistorialPrestamo({ prestamoId, prestamoEstado }) {
                   <p className="text-xs text-gray-400">Color: {retoma.color}</p>
                 )}
                 <p className="text-xs text-purple-600">
-                  Valor retoma: {formatCOP(retoma.valor_retoma)}
+                  Valor: {formatCOP(retoma.valor_retoma)}
                   {retoma.ingreso_inventario ? ' · ingresó al inventario' : ''}
                 </p>
               </div>
@@ -951,7 +956,7 @@ function TarjetaPrestamoDetalle({ prestamo, onAbonar, onDevolver, onImprimir, on
               <Plus size={14} /> Abonar
             </Button>
             <Button size="sm" variant="secondary" onClick={() => onIntercambiar(prestamo)}>
-              <ArrowLeftRight size={14} /> Intercambio
+              <ArrowLeftRight size={14} /> Pago en producto
             </Button>
             <Button size="sm" variant="secondary" onClick={() => onDevolver(prestamo)}>
               <CheckCircle size={14} /> Devuelto
@@ -987,6 +992,7 @@ function TarjetaPrestamoDetalle({ prestamo, onAbonar, onDevolver, onImprimir, on
 
 function VistaDetallePersona({ nombre, tipo, personaId, prestamos, saldoAFavor = 0, onVolver, onAbonar, onDevolver, onImprimir, onIntercambiar, onRegistrarSaldo, onRetomaDirecta, onAplicarSaldo, coloresActivo }) {
   const queryClient = useQueryClient();
+  const [tabDetalle,          setTabDetalle]          = useState('prestamos'); // 'prestamos' | 'cuenta'
   const [cerradosAbiertos,    setCerradosAbiertos]    = useState(false);
   const [retomasAbiertas,     setRetomasAbiertas]     = useState(false);
   const [confirmAnularRetoma, setConfirmAnularRetoma] = useState(null);
@@ -1014,9 +1020,10 @@ function VistaDetallePersona({ nombre, tipo, personaId, prestamos, saldoAFavor =
 
   const activos  = prestamos.filter((p) => p.estado === 'Activo');
   const cerrados = prestamos.filter((p) => p.estado !== 'Activo');
-  const saldoTotal = activos.reduce(
+  const saldoTotal  = activos.reduce(
     (s, p) => s + (Number(p.valor_prestamo) - Number(p.total_abonado)), 0
   );
+  const pagadoTotal = prestamos.reduce((s, p) => s + Number(p.total_abonado), 0);
 
   const ref      = prestamos[0] || {};
   const cedula   = ref.cedula   !== 'COMPANERO' ? ref.cedula   : null;
@@ -1035,30 +1042,22 @@ function VistaDetallePersona({ nombre, tipo, personaId, prestamos, saldoAFavor =
         <ChevronLeft size={16} /> Volver
       </button>
 
-      {/* Cabecera de persona */}
-      <div className="bg-white border border-gray-100 rounded-2xl p-4 flex flex-wrap items-center gap-3">
-        <div className={`w-12 h-12 rounded-2xl flex items-center justify-center
-          text-base font-bold flex-shrink-0 ${avatarClass}`}>
-          {iniciales(nombre)}
-        </div>
-        <div className="flex-1 min-w-0 basis-32">
-          <p className="font-bold text-gray-900 text-base leading-tight truncate">{nombre}</p>
-          {cedula   && <p className="text-xs text-gray-400 mt-0.5">CC: {cedula}</p>}
-          {telefono && <p className="text-xs text-gray-400">Tel: {telefono}</p>}
-        </div>
-        <div className="flex items-center gap-3 flex-shrink-0 ml-auto">
-          {saldoTotal > 0 && (
-            <div className="text-right">
-              <p className="text-xs text-gray-400 leading-tight">Saldo total</p>
-              <p className="text-sm font-bold text-red-500">{formatCOP(saldoTotal)}</p>
+      {/* Ficha de cuenta */}
+      <div className="bg-white border border-gray-100 rounded-2xl overflow-hidden">
+
+        {/* Fila 1: identidad */}
+        <div className="p-4 flex items-center gap-3">
+          <div className={`w-11 h-11 rounded-xl flex items-center justify-center
+            text-sm font-bold flex-shrink-0 ${avatarClass}`}>
+            {iniciales(nombre)}
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="font-bold text-gray-900 text-base leading-tight truncate">{nombre}</p>
+            <div className="flex flex-wrap gap-x-3 mt-0.5">
+              {cedula   && <p className="text-xs text-gray-400">CC: {cedula}</p>}
+              {telefono && <p className="text-xs text-gray-400">Tel: {telefono}</p>}
             </div>
-          )}
-          <button
-            onClick={onRetomaDirecta}
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium
-              border border-purple-200 text-purple-600 bg-purple-50 hover:bg-purple-100 transition-colors">
-            <ArrowLeftRight size={12} /> Retoma directa
-          </button>
+          </div>
           {activos.length > 0 && (
             <BotonExportarPdf
               tipo={tipo === 'companero' ? 'prestatario' : 'cliente'}
@@ -1067,8 +1066,79 @@ function VistaDetallePersona({ nombre, tipo, personaId, prestamos, saldoAFavor =
             />
           )}
         </div>
+
+        {/* Fila 2: métricas de cuenta */}
+        <div className="grid grid-cols-3 divide-x divide-gray-100 border-t border-gray-100">
+          <div className="px-4 py-3 flex flex-col gap-0.5">
+            <p className="text-xs text-gray-400">Deuda total</p>
+            <p className={`text-sm font-bold ${saldoTotal > 0 ? 'text-red-500' : 'text-gray-400'}`}>
+              {saldoTotal > 0 ? formatCOP(saldoTotal) : '—'}
+            </p>
+          </div>
+          <div className="px-4 py-3 flex flex-col gap-0.5">
+            <p className="text-xs text-gray-400">Saldo a favor</p>
+            <p className={`text-sm font-bold ${saldoAFavor > 0 ? 'text-emerald-600' : 'text-gray-400'}`}>
+              {saldoAFavor > 0 ? formatCOP(saldoAFavor) : '—'}
+            </p>
+          </div>
+          <div className="px-4 py-3 flex flex-col gap-0.5">
+            <p className="text-xs text-gray-400">Total pagado</p>
+            <p className={`text-sm font-bold ${pagadoTotal > 0 ? 'text-blue-600' : 'text-gray-400'}`}>
+              {pagadoTotal > 0 ? formatCOP(pagadoTotal) : '—'}
+            </p>
+          </div>
+        </div>
+
+        {/* Fila 3: acciones */}
+        <div className="px-4 py-3 border-t border-gray-100 flex flex-wrap items-center gap-2">
+          <button
+            onClick={onRetomaDirecta}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium
+              border border-purple-200 text-purple-600 bg-purple-50 hover:bg-purple-100 transition-colors">
+            <ArrowLeftRight size={12} /> Comprar artículo
+          </button>
+          {saldoAFavor > 0 && activos.length > 0 && (
+            <button
+              onClick={onAplicarSaldo}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium
+                bg-emerald-600 hover:bg-emerald-700 text-white transition-colors">
+              <Wallet size={12} /> Aplicar saldo
+            </button>
+          )}
+          <button
+            onClick={onRegistrarSaldo}
+            className="flex items-center gap-1.5 text-xs font-medium text-gray-400
+              hover:text-gray-600 transition-colors ml-auto">
+            <Plus size={12} />
+            {saldoAFavor > 0 ? 'Actualizar saldo' : 'Registrar saldo a favor'}
+          </button>
+        </div>
       </div>
 
+      {/* Tabs: Préstamos / Estado de cuenta */}
+      <div className="flex gap-1 bg-gray-100 p-1 rounded-xl w-fit">
+        {[
+          { id: 'prestamos', label: 'Préstamos' },
+          { id: 'cuenta',    label: 'Estado de cuenta' },
+        ].map((tab) => (
+          <button key={tab.id} onClick={() => setTabDetalle(tab.id)}
+            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all
+              ${tabDetalle === tab.id
+                ? 'bg-white text-gray-900 shadow-sm'
+                : 'text-gray-500 hover:text-gray-700'}`}>
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {/* ── Tab: Estado de cuenta ── */}
+      {tabDetalle === 'cuenta' && (
+        <EstadoDeCuenta tipo={tipo} personaId={personaId} />
+      )}
+
+      {/* ── Tab: Préstamos ── */}
+      {tabDetalle === 'prestamos' && (
+        <>
       {/* Préstamos activos */}
       {activos.length > 0 && (
         <div className="flex flex-col gap-2.5">
@@ -1090,51 +1160,7 @@ function VistaDetallePersona({ nombre, tipo, personaId, prestamos, saldoAFavor =
         </div>
       )}
 
-      {/* Saldo a favor */}
-      {(saldoAFavor > 0 || (activos.length === 0 && prestamos.length > 0)) && (
-        <div className="border border-emerald-200 bg-emerald-50 rounded-2xl p-4 flex flex-col gap-2">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Wallet size={15} className="text-emerald-600" />
-              <span className="text-sm font-semibold text-emerald-800">Saldo a favor</span>
-            </div>
-            {saldoAFavor > 0 && (
-              <span className="text-sm font-bold text-emerald-700">{formatCOP(saldoAFavor)}</span>
-            )}
-          </div>
-          {saldoAFavor === 0 && (
-            <p className="text-xs text-emerald-600">
-              Todos los préstamos están saldados. Puedes registrar un saldo a favor para descontarlo del próximo préstamo.
-            </p>
-          )}
-          {saldoAFavor > 0 && (
-            <p className="text-xs text-emerald-600">
-              Este monto se aplicará al próximo préstamo que registres a esta persona.
-            </p>
-          )}
-          <div className="flex items-center gap-3 flex-wrap">
-            <button
-              onClick={onRegistrarSaldo}
-              className="mt-1 flex items-center gap-1.5 text-xs font-medium text-emerald-700
-                hover:text-emerald-900 w-fit transition-colors"
-            >
-              <Plus size={13} />
-              {saldoAFavor > 0 ? 'Actualizar saldo a favor' : 'Registrar saldo a favor'}
-            </button>
-            {saldoAFavor > 0 && activos.length > 0 && (
-              <button
-                onClick={onAplicarSaldo}
-                className="mt-1 flex items-center gap-1.5 text-xs font-medium
-                  bg-emerald-600 hover:bg-emerald-700 text-white px-2.5 py-1 rounded-lg transition-colors"
-              >
-                <Wallet size={12} /> Aplicar a préstamos activos
-              </button>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Retomas directas (colapsable) */}
+      {/* Artículos comprados (colapsable) */}
       {retomasDirectas.length > 0 && (
         <div className="border border-purple-100 rounded-2xl overflow-hidden">
           <button
@@ -1144,7 +1170,7 @@ function VistaDetallePersona({ nombre, tipo, personaId, prestamos, saldoAFavor =
             <div className="flex items-center gap-2">
               <ArrowLeftRight size={13} className="text-purple-500" />
               <span className="text-xs font-semibold text-purple-700 uppercase tracking-wide">
-                Retomas directas
+                Artículos comprados al cliente
               </span>
               <span className="text-xs bg-purple-200 text-purple-700 px-2 py-0.5 rounded-full">
                 {retomasDirectas.length}
@@ -1174,7 +1200,7 @@ function VistaDetallePersona({ nombre, tipo, personaId, prestamos, saldoAFavor =
                       {!confirmando && (
                         <button
                           onClick={() => setConfirmAnularRetoma(r.id)}
-                          title="Anular retoma"
+                          title="Anular compra de artículo"
                           className="text-gray-300 hover:text-red-400 transition-colors flex-shrink-0 mt-0.5">
                           <XCircle size={15} />
                         </button>
@@ -1184,7 +1210,7 @@ function VistaDetallePersona({ nombre, tipo, personaId, prestamos, saldoAFavor =
                     {confirmando && (
                       <div className="mt-1 p-2 bg-red-50 border border-red-200 rounded-lg flex flex-col gap-1.5">
                         <p className="text-xs font-medium text-red-700">
-                          ¿Anular esta retoma de {formatCOP(r.valor_retoma)}?
+                          ¿Anular esta compra de artículo por {formatCOP(r.valor_retoma)}?
                         </p>
                         {r.ingreso_inventario && (
                           <p className="text-xs text-red-500">El producto será eliminado del inventario.</p>
@@ -1246,6 +1272,8 @@ function VistaDetallePersona({ nombre, tipo, personaId, prestamos, saldoAFavor =
             </div>
           )}
         </div>
+      )}
+        </>
       )}
     </div>
   );

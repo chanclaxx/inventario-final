@@ -944,6 +944,36 @@ const getRetomasDirectas = async (negocioId, tipo, personaId) => {
   return repo.findRetomasDirectasPorPersona(pool, tipo, personaId, negocioId);
 };
 
+const getEstadoCuenta = async (negocioId, tipo, personaId) => {
+  if (tipo === 'prestatario') {
+    await _verificarPrestatario(personaId, negocioId);
+  } else {
+    await _verificarCliente(personaId, negocioId);
+  }
+
+  const rows = await repo.getEstadoCuenta(pool, negocioId, tipo, personaId);
+
+  let saldoDeuda = 0;
+  return rows.map((row) => {
+    const cargo = Number(row.cargo  || 0);
+    const abono = Number(row.abono  || 0);
+    if (row.tipo !== 'compra_directa') {
+      saldoDeuda = saldoDeuda + cargo - abono;
+    }
+    return {
+      fecha:         row.fecha,
+      tipo:          row.tipo,
+      concepto:      row.concepto,
+      cargo:         cargo  || null,
+      abono:         abono  || null,
+      saldo:         row.tipo === 'compra_directa' ? null : saldoDeuda,
+      referencia_id: Number(row.referencia_id),
+      prestamo_id:   row.prestamo_id ? Number(row.prestamo_id) : null,
+      anulable:      row.anulable,
+    };
+  });
+};
+
 module.exports = {
   getPrestamos, getPrestamoById,
   crearPrestamo, crearPrestamos,
@@ -953,4 +983,5 @@ module.exports = {
   intercambiarPrestamo,
   retomaDirecta, aplicarSaldoAPrestamos, getResumenCartera,
   anularAbono, anularRetomaDirecta, getRetomasDirectas,
+  getEstadoCuenta,
 };

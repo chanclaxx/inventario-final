@@ -78,33 +78,33 @@ export function ModalRetomaDirecta({ persona, sucursalId, onClose, onSuccess }) 
       queryClient.invalidateQueries({ queryKey: ['productos-cantidad'], exact: false });
       onSuccess(res.data?.data);
     },
-    onError: (err) => setError(err.response?.data?.error || 'Error al registrar la retoma'),
+    onError: (err) => setError(err.response?.data?.error || 'Error al registrar la compra'),
   });
 
   const handleConfirmar = () => {
     setError('');
-    if (!retoma || retoma <= 0) return setError('Ingresa el valor de la retoma');
+    if (!retoma || retoma <= 0) return setError('Ingresa el valor del artículo');
     if (ingresoInventario) {
       if (tipoRetoma === 'serial' && !productoSerialSel)
-        return setError('Selecciona la línea de producto del equipo retomado');
+        return setError('Selecciona la línea de producto del artículo');
       if (tipoRetoma === 'serial' && !imeiRetoma.trim())
-        return setError('Ingresa el IMEI del equipo retomado');
+        return setError('Ingresa el IMEI del artículo');
       if (tipoRetoma === 'cantidad' && !productoCantidadSel)
-        return setError('Selecciona el producto retomado');
+        return setError('Selecciona el artículo');
     }
     mutation.mutate();
   };
 
   return (
-    <Modal open onClose={onClose} title="Retoma directa — generar saldo a favor" size="md">
+    <Modal open onClose={onClose} title="Compra de artículo — generar saldo a favor" size="md">
       <div className="flex flex-col gap-4">
 
         {/* Persona */}
         <div className="bg-gray-50 rounded-xl p-3">
-          <p className="text-xs text-gray-400">Registrando retoma para</p>
+          <p className="text-xs text-gray-400">Comprando artículo a</p>
           <p className="text-sm font-semibold text-gray-800">{persona.nombre}</p>
           <p className="text-xs text-emerald-600 mt-1">
-            El valor de la retoma se acreditará como saldo a favor
+            El valor del artículo se acreditará como saldo a favor
           </p>
         </div>
 
@@ -221,7 +221,7 @@ export function ModalRetomaDirecta({ persona, sucursalId, onClose, onSuccess }) 
 
         {/* Valor */}
         <div className="flex flex-col gap-1">
-          <label className="text-sm font-medium text-gray-700">Valor de la retoma *</label>
+          <label className="text-sm font-medium text-gray-700">Valor del artículo *</label>
           <InputMoneda value={valorRetoma} onChange={setValorRetoma} placeholder="0" autoFocus
             className="w-full px-3 py-2 bg-gray-100 rounded-xl text-sm
               focus:outline-none focus:ring-2 focus:ring-purple-500 focus:bg-white transition-all" />
@@ -231,7 +231,7 @@ export function ModalRetomaDirecta({ persona, sucursalId, onClose, onSuccess }) 
         {retoma > 0 && (
           <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 flex flex-col gap-1.5">
             <div className="flex justify-between text-xs text-gray-500">
-              <span>Valor retomado:</span>
+              <span>Valor del artículo:</span>
               <span className="font-medium text-purple-700">{formatCOP(retoma)}</span>
             </div>
             <div className="flex justify-between text-sm font-semibold text-emerald-700 mt-1 pt-1 border-t border-emerald-200">
@@ -246,7 +246,7 @@ export function ModalRetomaDirecta({ persona, sucursalId, onClose, onSuccess }) 
         <div className="flex gap-2">
           <Button variant="secondary" className="flex-1" onClick={onClose}>Cancelar</Button>
           <Button className="flex-1" loading={mutation.isPending} onClick={handleConfirmar}>
-            <ArrowLeftRight size={14} /> Registrar retoma
+            <ArrowLeftRight size={14} /> Registrar compra
           </Button>
         </div>
       </div>

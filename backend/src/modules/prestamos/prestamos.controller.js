@@ -298,6 +298,17 @@ const anularRetomaDirecta = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+const getEstadoCuenta = async (req, res, next) => {
+  try {
+    const { tipo, id } = req.params;
+    if (!['prestatario', 'cliente'].includes(tipo)) {
+      return res.status(400).json({ ok: false, error: "tipo debe ser 'prestatario' o 'cliente'" });
+    }
+    const data = await service.getEstadoCuenta(req.user.negocio_id, tipo, Number(id));
+    res.json({ ok: true, data });
+  } catch (err) { next(err); }
+};
+
 module.exports = {
   getPrestamos, getPrestamoById,
   crearPrestamo, crearPrestamos,
@@ -308,4 +319,5 @@ module.exports = {
   intercambiarPrestamo,
   retomaDirecta, aplicarSaldoAPrestamos, getResumenCartera,
   anularAbono, getRetomasDirectas, anularRetomaDirecta,
+  getEstadoCuenta,
 };

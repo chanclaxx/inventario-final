@@ -60,6 +60,7 @@ router.patch(  '/personas/:tipo/:id/saldo-a-favor',       requireModulo('prestam
 router.get(    '/personas/:tipo/:id/resumen',              requireModulo('prestamos'), ctrl.getResumenCartera);
 router.post(   '/personas/:tipo/:id/aplicar-saldo',        requireModulo('prestamos'), ctrl.aplicarSaldoAPrestamos);
 router.get(    '/personas/:tipo/:id/retomas-directas',     requireModulo('prestamos'), ctrl.getRetomasDirectas);
+router.get(    '/personas/:tipo/:id/estado-cuenta',        requireModulo('prestamos'), ctrl.getEstadoCuenta);
 router.post(   '/retoma-directa',                          requireModulo('prestamos'), validarRetomaDirecta, validate, ctrl.retomaDirecta);
 router.delete( '/retomas-directas/:retomaId',              requireModulo('prestamos'), ctrl.anularRetomaDirecta);
 

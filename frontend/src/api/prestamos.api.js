@@ -26,3 +26,5 @@ export const getRetomasDirectas = (tipo, id) =>
   api.get(`/prestamos/personas/${tipo}/${id}/retomas-directas`);
 export const anularRetomaDirecta = (retomaId) =>
   api.delete(`/prestamos/retomas-directas/${retomaId}`);
+export const getEstadoCuenta = (tipo, id) =>
+  api.get(`/prestamos/personas/${tipo}/${id}/estado-cuenta`);
