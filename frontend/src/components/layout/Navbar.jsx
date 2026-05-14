@@ -6,7 +6,7 @@ import { usePermisos } from '../../hooks/usePermisos.js';
 import {
   LayoutDashboard, Package, FileText, Handshake,
   Wallet, BarChart2, Settings, LogOut, ShoppingCart,
-  Users, Truck, Wrench, ArrowRightLeft, Search, UserCheck,
+  Users, Truck, Wrench, ArrowRightLeft, Search,
 } from 'lucide-react';
 import { getSucursales } from '../../api/sucursales.api.js';
 import useCarritoStore  from '../../store/carritoStore.js';
@@ -20,7 +20,6 @@ const NAV_ITEMS = [
   { path: '/servicios',   label: 'Servicios',   Icn: Wrench,          modulo: 'servicios'                     },
   { path: '/proveedores', label: 'Proveedores', Icn: Truck,           modulo: 'proveedores'                   },
   { path: '/prestamos',    label: 'Préstamos',    Icn: Handshake,   modulo: 'prestamos'                     },
-  { path: '/prestatarios', label: 'Prestatarios', Icn: UserCheck,   modulo: 'prestamos'                     },
   { path: '/caja',        label: 'Caja',        Icn: Wallet,          modulo: 'caja'                          },
   { path: '/traslados',   label: 'Traslados',   Icn: ArrowRightLeft,  modulo: 'traslados', multiSucursal: true },
   { path: '/reportes',    label: 'Reportes',    Icn: BarChart2,       modulo: 'reportes'                      },

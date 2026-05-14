@@ -19,7 +19,6 @@ import CajaPage             from './pages/caja/CajaPage';
 import ReportesPage         from './pages/reportes/ReportesPage';
 import ConfigPage           from './pages/configuracion/ConfigPage';
 import AcreedoresPage       from './pages/acreedores/AcreedoresPage';
-import PrestatariosPage     from './pages/prestatarios/PrestatariosPage';
 import ProveedoresPage      from './pages/proveedores/ProveedoresPage';
 import ServiciosPage        from './pages/servicios/ServiciosPage';
 import TrasladosPage        from './pages/traslados/TrasladosPage';
@@ -74,10 +73,6 @@ export default function App() {
               <Route path="/acreedores" element={
                 <ModuloGuard modulo="acreedores"><AcreedoresPage /></ModuloGuard>
               } />
-              <Route path="/prestatarios" element={
-                <ModuloGuard modulo="prestamos"><PrestatariosPage /></ModuloGuard>
-              } />
-
               {/* Búsqueda — todos los roles */}
               <Route path="/busqueda" element={<BusquedaPage />} />
 
