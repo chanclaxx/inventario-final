@@ -30,5 +30,5 @@ export const anularRetomaDirecta = (retomaId) =>
   api.delete(`/prestamos/retomas-directas/${retomaId}`);
 export const getEstadoCuenta = (tipo, id) =>
   api.get(`/prestamos/personas/${tipo}/${id}/estado-cuenta`);
-export const ajustarCuentas = (id, data) =>
-  api.patch(`/prestamos/${id}/ajuste-cuentas`, data);
+export const crearAjusteDeuda = (data) =>
+  api.post('/prestamos/ajuste-deuda', data);

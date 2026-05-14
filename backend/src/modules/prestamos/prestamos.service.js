@@ -784,19 +784,22 @@ const aplicarSaldoAPrestamos = async (negocioId, tipo, personaId) => {
   }
 };
 
-// ─── Servicio: ajuste manual de cuentas ──────────────────────────────────────
+// ─── Servicio: ajuste de deuda (cargo artificial) ─────────────────────────────
 
-const ajustarCuentas = async (negocioId, prestamoId, { nuevo_valor_prestamo, nuevo_total_abonado }) => {
-  if (nuevo_valor_prestamo !== undefined && Number(nuevo_valor_prestamo) <= 0)
-    throw { status: 400, message: 'El valor del préstamo debe ser mayor a 0' };
-  if (nuevo_total_abonado !== undefined && Number(nuevo_total_abonado) < 0)
-    throw { status: 400, message: 'El total abonado no puede ser negativo' };
+const crearAjusteDeuda = async (negocioId, { tipo, persona_id, valor, descripcion, sucursal_id, usuario_id }) => {
+  if (!['prestatario', 'cliente'].includes(tipo))
+    throw { status: 400, message: "tipo debe ser 'prestatario' o 'cliente'" };
+  if (!valor || Number(valor) <= 0)
+    throw { status: 400, message: 'El valor del ajuste debe ser mayor a 0' };
 
-  const result = await repo.ajustarCuentas(Number(prestamoId), negocioId, {
-    nuevo_valor_prestamo: nuevo_valor_prestamo !== undefined ? Number(nuevo_valor_prestamo) : undefined,
-    nuevo_total_abonado:  nuevo_total_abonado  !== undefined ? Number(nuevo_total_abonado)  : undefined,
+  await _verificarSucursal(sucursal_id, negocioId);
+
+  const result = await repo.crearAjusteDeuda({
+    tipo, persona_id: Number(persona_id),
+    valor: Number(valor), descripcion,
+    sucursal_id, usuario_id, negocio_id: negocioId,
   });
-  if (!result) throw { status: 404, message: 'Préstamo no encontrado' };
+  if (!result) throw { status: 404, message: 'Persona no encontrada' };
   return result;
 };
 
@@ -1061,5 +1064,5 @@ module.exports = {
   intercambiarPrestamo,
   retomaDirecta, aplicarSaldoAPrestamos, aplicarSaldoAPrestamo, getResumenCartera,
   anularAbono, anularRetomaDirecta, getRetomasDirectas,
-  getEstadoCuenta, ajustarCuentas,
+  getEstadoCuenta, crearAjusteDeuda,
 };

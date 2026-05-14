@@ -316,12 +316,16 @@ const aplicarSaldoAPrestamo = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-const ajustarCuentas = async (req, res, next) => {
+const crearAjusteDeuda = async (req, res, next) => {
   try {
-    const id = parseInt(req.params.id, 10);
-    if (isNaN(id)) return res.status(400).json({ ok: false, error: 'ID de préstamo inválido' });
-    const data = await service.ajustarCuentas(req.user.negocio_id, id, req.body);
-    res.json({ ok: true, data, message: 'Ajuste aplicado correctamente' });
+    const sucursal_id = req.todasSucursales ? req.body.sucursal_id : req.sucursal_id;
+    if (!sucursal_id) return res.status(400).json({ ok: false, error: 'Debes indicar la sucursal' });
+    const data = await service.crearAjusteDeuda(req.user.negocio_id, {
+      ...req.body,
+      sucursal_id,
+      usuario_id: req.user.id,
+    });
+    res.status(201).json({ ok: true, data, message: 'Ajuste registrado correctamente' });
   } catch (err) { next(err); }
 };
 
@@ -335,5 +339,5 @@ module.exports = {
   intercambiarPrestamo,
   retomaDirecta, aplicarSaldoAPrestamos, aplicarSaldoAPrestamo, getResumenCartera,
   anularAbono, getRetomasDirectas, anularRetomaDirecta,
-  getEstadoCuenta, ajustarCuentas,
+  getEstadoCuenta, crearAjusteDeuda,
 };

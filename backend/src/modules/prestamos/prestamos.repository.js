@@ -148,23 +148,44 @@ const findByIdYNegocio = async (id, negocioId) => {
   return rows[0] || null;
 };
 
-const ajustarCuentas = async (id, negocioId, { nuevo_valor_prestamo, nuevo_total_abonado }) => {
-  const prestamo = await findByIdYNegocio(id, negocioId);
-  if (!prestamo) return null;
+const crearAjusteDeuda = async ({ tipo, persona_id, valor, descripcion, sucursal_id, usuario_id, negocio_id }) => {
+  let nombre, telefono;
+  if (tipo === 'prestatario') {
+    const { rows } = await pool.query(
+      'SELECT nombre, telefono FROM prestatarios WHERE id = $1 AND negocio_id = $2',
+      [persona_id, negocio_id]
+    );
+    if (!rows.length) return null;
+    ({ nombre, telefono } = rows[0]);
+  } else {
+    const { rows } = await pool.query(
+      'SELECT nombre, telefono FROM clientes WHERE id = $1 AND negocio_id = $2',
+      [persona_id, negocio_id]
+    );
+    if (!rows.length) return null;
+    ({ nombre, telefono } = rows[0]);
+  }
 
-  const valorFinal   = nuevo_valor_prestamo  !== undefined ? Number(nuevo_valor_prestamo)  : Number(prestamo.valor_prestamo);
-  const abonadoFinal = nuevo_total_abonado   !== undefined ? Number(nuevo_total_abonado)   : Number(prestamo.total_abonado);
-  const nuevoEstado  = abonadoFinal >= valorFinal ? 'Saldado' : 'Activo';
+  const nombreProducto = descripcion?.trim() || 'Ajuste de deuda';
+  const tel = telefono || '0000000000';
 
-  const { rows } = await pool.query(
-    `UPDATE prestamos
-     SET valor_prestamo = $1, total_abonado = $2, estado = $3
-     WHERE id = $4
-     RETURNING id, nombre_producto, valor_prestamo, total_abonado, estado,
-       (valor_prestamo - total_abonado) AS saldo_pendiente`,
-    [valorFinal, abonadoFinal, nuevoEstado, id]
-  );
-  return rows[0];
+  if (tipo === 'prestatario') {
+    const { rows } = await pool.query(`
+      INSERT INTO prestamos(fecha, prestatario, cedula, telefono, nombre_producto, imei,
+        cantidad_prestada, valor_prestamo, total_abonado, estado, prestatario_id, sucursal_id, usuario_id)
+      VALUES (NOW(), $1, 'AJUSTE', $2, $3, NULL, 1, $4, 0, 'Activo', $5, $6, $7)
+      RETURNING *
+    `, [nombre, tel, nombreProducto, valor, persona_id, sucursal_id, usuario_id]);
+    return rows[0];
+  } else {
+    const { rows } = await pool.query(`
+      INSERT INTO prestamos(fecha, prestatario, cedula, telefono, nombre_producto, imei,
+        cantidad_prestada, valor_prestamo, total_abonado, estado, cliente_id, sucursal_id, usuario_id)
+      VALUES (NOW(), $1, 'AJUSTE', $2, $3, NULL, 1, $4, 0, 'Activo', $5, $6, $7)
+      RETURNING *
+    `, [nombre, tel, nombreProducto, valor, persona_id, sucursal_id, usuario_id]);
+    return rows[0];
+  }
 };
 
 const ajustarStock = async (client, productoId, cantidad) => {
@@ -652,7 +673,7 @@ const getPrestamoActivoById = async (executor, prestamoId, negocioId) => {
 };
 
 module.exports = {
-  ajustarCuentas,
+  crearAjusteDeuda,
   findAll, findById, findByIdYNegocio,
   perteneceAlNegocio,
   getAbonos, create, insertarAbono, updateEstado,

@@ -63,6 +63,7 @@ router.get(    '/personas/:tipo/:id/retomas-directas',     requireModulo('presta
 router.get(    '/personas/:tipo/:id/estado-cuenta',        requireModulo('prestamos'), ctrl.getEstadoCuenta);
 router.post(   '/retoma-directa',                          requireModulo('prestamos'), validarRetomaDirecta, validate, ctrl.retomaDirecta);
 router.delete( '/retomas-directas/:retomaId',              requireModulo('prestamos'), ctrl.anularRetomaDirecta);
+router.post(   '/ajuste-deuda',                            requireModulo('prestamos'), ctrl.crearAjusteDeuda);
 
 router.get('/pdf/:tipo/:personaId', requireModulo('prestamos'), ctrl.exportarPdfPorPersona);
 router.get('/:id/pdf',              requireModulo('prestamos'), ctrl.exportarPdfPrestamoIndividual);
@@ -75,6 +76,5 @@ router.delete('/:id/abonos/:abonoId',  requireModulo('prestamos'), ctrl.anularAb
 router.post(  '/:id/intercambio',      requireModulo('prestamos'), validarIntercambio,       validate, ctrl.intercambiarPrestamo);
 router.patch( '/:id/devolver',         requireModulo('prestamos'), ctrl.devolverPrestamo);
 router.patch( '/:id/devolver-parcial', requireModulo('prestamos'), validarDevolucionParcial, validate, ctrl.devolverParcial);
-router.patch( '/:id/ajuste-cuentas',  requireModulo('prestamos'), ctrl.ajustarCuentas);
 
 module.exports = router;

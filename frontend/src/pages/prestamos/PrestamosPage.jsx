@@ -3,8 +3,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { buscarPrestamos as buscarPrestamosApi } from '../../api/busqueda.api';
 import { exportarPrestamosExcel } from '../../utils/exportarPrestamosExcel';
 import { exportarCarteraPersonaExcel } from '../../utils/exportarCarteraPersonaExcel';
-import { getPrestamos, registrarAbonoPrestamo, devolverPrestamo, devolverParcialPrestamo, registrarSaldoAFavor as registrarSaldoAFavorApi, intercambiarPrestamo as intercambiarPrestamoApi, anularAbono as anularAbonoApi, getRetomasDirectas as getRetomasDirectasApi, anularRetomaDirecta as anularRetomaDirectaApi, aplicarSaldoAPrestamo as aplicarSaldoAPrestamoApi, getEstadoCuenta as getEstadoCuentaApi, ajustarCuentas as ajustarCuentasApi } from '../../api/prestamos.api';
-import { crearPrestatario as crearPrestatarioApi } from '../../api/prestatarios.api';
+import { getPrestamos, registrarAbonoPrestamo, devolverPrestamo, devolverParcialPrestamo, registrarSaldoAFavor as registrarSaldoAFavorApi, intercambiarPrestamo as intercambiarPrestamoApi, anularAbono as anularAbonoApi, getRetomasDirectas as getRetomasDirectasApi, anularRetomaDirecta as anularRetomaDirectaApi, aplicarSaldoAPrestamo as aplicarSaldoAPrestamoApi, getEstadoCuenta as getEstadoCuentaApi, crearAjusteDeuda as crearAjusteDeudaApi } from '../../api/prestamos.api';
+import { crearPrestatario as crearPrestatarioApi, getPrestatarios } from '../../api/prestatarios.api';
 import {
   getDomiciliarios,
   getEntregas,
@@ -471,111 +471,76 @@ function ModalCrearPrestatario({ onClose }) {
 
 // ─── Modal Ajuste de Cuentas ──────────────────────────────────────────────────
 
-function ModalAjusteCuentas({ nombre, prestamos, onClose }) {
+function ModalAjusteDeuda({ nombre, tipo, personaId, sucursalId, onClose }) {
   const queryClient = useQueryClient();
-  const [prestamoSel,  setPrestamoSel]  = useState(null);
-  const [nuevoValor,   setNuevoValor]   = useState('');
-  const [nuevoAbonado, setNuevoAbonado] = useState('');
-  const [error,        setError]        = useState('');
+  const [valor,       setValor]       = useState('');
+  const [descripcion, setDescripcion] = useState('');
+  const [error,       setError]       = useState('');
 
-  const handleSeleccionar = (p) => {
-    setPrestamoSel(p);
-    setNuevoValor(String(p.valor_prestamo));
-    setNuevoAbonado(String(p.total_abonado));
-    setError('');
-  };
-
-  const valFinal   = Number(nuevoValor)   || 0;
-  const abonFinal  = Number(nuevoAbonado) || 0;
-  const saldoNuevo = valFinal - abonFinal;
-  const estadoNuevo = abonFinal >= valFinal ? 'Saldado' : 'Activo';
+  const tipoApi = tipo === 'companero' ? 'prestatario' : 'cliente';
 
   const mutation = useMutation({
-    mutationFn: () => ajustarCuentasApi(prestamoSel.id, {
-      nuevo_valor_prestamo: valFinal,
-      nuevo_total_abonado:  abonFinal,
+    mutationFn: () => crearAjusteDeudaApi({
+      tipo:        tipoApi,
+      persona_id:  personaId,
+      valor:       Number(valor),
+      descripcion: descripcion.trim() || undefined,
+      sucursal_id: sucursalId,
     }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['prestamos'], exact: false });
       onClose();
     },
-    onError: (err) => setError(err.response?.data?.error || 'Error al aplicar el ajuste'),
+    onError: (err) => setError(err.response?.data?.error || 'Error al registrar el ajuste'),
   });
 
   const handleConfirmar = () => {
     setError('');
-    if (!prestamoSel)    return setError('Selecciona un préstamo');
-    if (valFinal  <= 0)  return setError('El valor del préstamo debe ser mayor a 0');
-    if (abonFinal <  0)  return setError('El total abonado no puede ser negativo');
+    if (!valor || Number(valor) <= 0) return setError('El valor debe ser mayor a 0');
     mutation.mutate();
   };
 
   return (
-    <Modal open onClose={onClose} title="Ajuste de cuentas" size="md">
+    <Modal open onClose={onClose} title="Ajuste de cuentas" size="sm">
       <div className="flex flex-col gap-4">
 
         <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
-          <p className="text-xs font-semibold text-amber-700">Uso administrativo</p>
+          <p className="text-xs font-semibold text-amber-700">Cargo de ajuste</p>
           <p className="text-xs text-amber-600 mt-0.5">
-            Corrige descuadres modificando directamente los valores del préstamo.
-            No genera movimientos adicionales en el estado de cuenta.
+            Se creará un nuevo cargo para <span className="font-semibold">{nombre}</span> que
+            quedará registrado en su estado de cuenta.
           </p>
         </div>
 
-        <div className="flex flex-col gap-2">
-          <p className="text-sm font-medium text-gray-700">
-            Préstamo de <span className="font-bold">{nombre}</span>
-          </p>
-          <div className="flex flex-col gap-1.5 max-h-52 overflow-y-auto pr-0.5">
-            {prestamos.map((p) => (
-              <button key={p.id} onClick={() => handleSeleccionar(p)}
-                className={`text-left px-3 py-2.5 rounded-xl border transition-all
-                  ${prestamoSel?.id === p.id
-                    ? 'bg-blue-50 border-blue-300'
-                    : 'bg-gray-50 border-gray-200 hover:border-gray-300'}`}>
-                <div className="flex justify-between items-start gap-2">
-                  <span className="text-sm font-medium text-gray-800 leading-tight">{p.nombre_producto}</span>
-                  <Badge color={p.estado === 'Activo' ? 'yellow' : 'green'} className="flex-shrink-0">
-                    {p.estado}
-                  </Badge>
-                </div>
-                <div className="flex gap-3 mt-1">
-                  <span className="text-xs text-gray-400">Valor: {formatCOP(p.valor_prestamo)}</span>
-                  <span className="text-xs text-gray-400">Abonado: {formatCOP(p.total_abonado)}</span>
-                </div>
-              </button>
-            ))}
-          </div>
+        <div className="flex flex-col gap-1">
+          <label className="text-sm font-medium text-gray-700">
+            Valor del ajuste <span className="text-red-500">*</span>
+          </label>
+          <InputMoneda
+            value={valor}
+            onChange={setValor}
+            placeholder="0"
+            autoFocus
+            onKeyDown={(e) => e.key === 'Enter' && handleConfirmar()}
+            className="w-full px-3 py-2 bg-gray-100 rounded-xl text-sm
+              focus:outline-none focus:ring-2 focus:ring-amber-500 focus:bg-white transition-all"
+          />
         </div>
 
-        {prestamoSel && (
-          <div className="flex flex-col gap-3 p-3 bg-gray-50 rounded-xl border border-gray-200">
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Ajustar valores</p>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="flex flex-col gap-1">
-                <label className="text-xs font-medium text-gray-600">Valor del préstamo</label>
-                <InputMoneda value={nuevoValor} onChange={setNuevoValor} placeholder="0"
-                  className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-sm
-                    focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
-              </div>
-              <div className="flex flex-col gap-1">
-                <label className="text-xs font-medium text-gray-600">Total abonado</label>
-                <InputMoneda value={nuevoAbonado} onChange={setNuevoAbonado} placeholder="0"
-                  className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-sm
-                    focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
-              </div>
-            </div>
-            <div className="flex justify-between items-center pt-2 border-t border-gray-200">
-              <div>
-                <p className="text-xs text-gray-400">Nuevo saldo pendiente</p>
-                <p className={`text-sm font-bold ${saldoNuevo > 0 ? 'text-red-500' : 'text-emerald-600'}`}>
-                  {saldoNuevo > 0 ? formatCOP(saldoNuevo) : 'Saldado'}
-                </p>
-              </div>
-              <Badge color={estadoNuevo === 'Saldado' ? 'green' : 'yellow'}>{estadoNuevo}</Badge>
-            </div>
-          </div>
-        )}
+        <div className="flex flex-col gap-1">
+          <label className="text-sm font-medium text-gray-700">
+            Descripción <span className="text-xs text-gray-400">(opcional)</span>
+          </label>
+          <Input
+            value={descripcion}
+            onChange={(e) => setDescripcion(e.target.value)}
+            placeholder="Ej: Cobro adicional, Error en préstamo anterior..."
+            onKeyDown={(e) => e.key === 'Enter' && handleConfirmar()}
+          />
+          <p className="text-xs text-gray-400">
+            Si no escribes nada aparecerá como "Ajuste de deuda".
+          </p>
+        </div>
 
         {error && <p className="text-sm text-red-500">{error}</p>}
         <div className="flex gap-2">
@@ -584,9 +549,8 @@ function ModalAjusteCuentas({ nombre, prestamos, onClose }) {
             className="flex-1 bg-amber-600 hover:bg-amber-700"
             loading={mutation.isPending}
             onClick={handleConfirmar}
-            disabled={!prestamoSel}
           >
-            <SlidersHorizontal size={14} /> Aplicar ajuste
+            <SlidersHorizontal size={14} /> Registrar ajuste
           </Button>
         </div>
       </div>
@@ -2205,7 +2169,7 @@ export default function PrestamosPage() {
   const [prestamoIntercambio, setPrestamoIntercambio] = useState(null);
   const [modalSaldoPersona,   setModalSaldoPersona]   = useState(null); // { nombre, tipo, personaId, saldoAFavor }
   const [modalRetomaDirecta,  setModalRetomaDirecta]  = useState(null); // { persona: { tipo, id, nombre } }
-  const [modalAjusteCuentas,  setModalAjusteCuentas]  = useState(null); // { nombre, prestamos }
+  const [modalAjusteCuentas,  setModalAjusteCuentas]  = useState(null); // { nombre, tipo, personaId, sucursalId }
   const [modalCrearPrestatario, setModalCrearPrestatario] = useState(false);
   const abonosImprimir = useAbonosPrestamo(prestamoImprimir?.id);
 
@@ -2243,6 +2207,11 @@ export default function PrestamosPage() {
     queryFn:  () => getPrestamos().then((r) => r.data.data),
   });
 
+  const { data: prestatariosData = [] } = useQuery({
+    queryKey: ['prestatarios'],
+    queryFn:  () => getPrestatarios().then((r) => r.data.data),
+  });
+
   const prestamos = prestamosData || [];
 
   const gruposCompaneros = prestamos.filter((p) => p.prestatario_id).reduce((acc, p) => {
@@ -2259,6 +2228,21 @@ export default function PrestamosPage() {
     if (p.estado === 'Activo') acc[key].saldoTotal += Number(p.valor_prestamo) - Number(p.total_abonado);
     return acc;
   }, {});
+
+  // Incluir prestamistas sin préstamos (recién creados)
+  prestatariosData.forEach((pr) => {
+    const key = `prestatario_${pr.id}`;
+    if (!gruposCompaneros[key]) {
+      gruposCompaneros[key] = {
+        nombre:      pr.nombre,
+        personaId:   pr.id,
+        prestamos:   [],
+        saldoTotal:  0,
+        saldoAFavor: Number(pr.saldo_a_favor ?? 0),
+        ultimoAbono: null,
+      };
+    }
+  });
 
   const gruposClientes = prestamos.filter((p) => p.cliente_id).reduce((acc, p) => {
     const key = `cliente_${p.cliente_id}`;
@@ -2425,8 +2409,10 @@ export default function PrestamosPage() {
                   },
                 })}
                 onAjusteCuentas={() => setModalAjusteCuentas({
-                  nombre:   grupoActual.nombre,
-                  prestamos: grupoActual.prestamos,
+                  nombre:     grupoActual.nombre,
+                  tipo:       tabPrestamos === 'companeros' ? 'companero' : 'cliente',
+                  personaId:  grupoActual.personaId,
+                  sucursalId: grupoActual.prestamos[0]?.sucursal_id ?? null,
                 })}
                 coloresActivo={coloresActivo}
               />
@@ -2616,9 +2602,11 @@ export default function PrestamosPage() {
       )}
 
       {modalAjusteCuentas && (
-        <ModalAjusteCuentas
+        <ModalAjusteDeuda
           nombre={modalAjusteCuentas.nombre}
-          prestamos={modalAjusteCuentas.prestamos}
+          tipo={modalAjusteCuentas.tipo}
+          personaId={modalAjusteCuentas.personaId}
+          sucursalId={modalAjusteCuentas.sucursalId}
           onClose={() => setModalAjusteCuentas(null)}
         />
       )}
