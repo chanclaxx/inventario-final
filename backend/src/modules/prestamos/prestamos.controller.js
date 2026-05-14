@@ -316,6 +316,15 @@ const aplicarSaldoAPrestamo = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+const ajustarCuentas = async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) return res.status(400).json({ ok: false, error: 'ID de préstamo inválido' });
+    const data = await service.ajustarCuentas(req.user.negocio_id, id, req.body);
+    res.json({ ok: true, data, message: 'Ajuste aplicado correctamente' });
+  } catch (err) { next(err); }
+};
+
 module.exports = {
   getPrestamos, getPrestamoById,
   crearPrestamo, crearPrestamos,
@@ -326,5 +335,5 @@ module.exports = {
   intercambiarPrestamo,
   retomaDirecta, aplicarSaldoAPrestamos, aplicarSaldoAPrestamo, getResumenCartera,
   anularAbono, getRetomasDirectas, anularRetomaDirecta,
-  getEstadoCuenta,
+  getEstadoCuenta, ajustarCuentas,
 };

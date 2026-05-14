@@ -148,6 +148,25 @@ const findByIdYNegocio = async (id, negocioId) => {
   return rows[0] || null;
 };
 
+const ajustarCuentas = async (id, negocioId, { nuevo_valor_prestamo, nuevo_total_abonado }) => {
+  const prestamo = await findByIdYNegocio(id, negocioId);
+  if (!prestamo) return null;
+
+  const valorFinal   = nuevo_valor_prestamo  !== undefined ? Number(nuevo_valor_prestamo)  : Number(prestamo.valor_prestamo);
+  const abonadoFinal = nuevo_total_abonado   !== undefined ? Number(nuevo_total_abonado)   : Number(prestamo.total_abonado);
+  const nuevoEstado  = abonadoFinal >= valorFinal ? 'Saldado' : 'Activo';
+
+  const { rows } = await pool.query(
+    `UPDATE prestamos
+     SET valor_prestamo = $1, total_abonado = $2, estado = $3
+     WHERE id = $4
+     RETURNING id, nombre_producto, valor_prestamo, total_abonado, estado,
+       (valor_prestamo - total_abonado) AS saldo_pendiente`,
+    [valorFinal, abonadoFinal, nuevoEstado, id]
+  );
+  return rows[0];
+};
+
 const ajustarStock = async (client, productoId, cantidad) => {
   await client.query(
     'UPDATE productos_cantidad SET stock = stock + $1 WHERE id = $2',
@@ -633,6 +652,7 @@ const getPrestamoActivoById = async (executor, prestamoId, negocioId) => {
 };
 
 module.exports = {
+  ajustarCuentas,
   findAll, findById, findByIdYNegocio,
   perteneceAlNegocio,
   getAbonos, create, insertarAbono, updateEstado,

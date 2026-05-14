@@ -75,5 +75,6 @@ router.delete('/:id/abonos/:abonoId',  requireModulo('prestamos'), ctrl.anularAb
 router.post(  '/:id/intercambio',      requireModulo('prestamos'), validarIntercambio,       validate, ctrl.intercambiarPrestamo);
 router.patch( '/:id/devolver',         requireModulo('prestamos'), ctrl.devolverPrestamo);
 router.patch( '/:id/devolver-parcial', requireModulo('prestamos'), validarDevolucionParcial, validate, ctrl.devolverParcial);
+router.patch( '/:id/ajuste-cuentas',  requireModulo('prestamos'), ctrl.ajustarCuentas);
 
 module.exports = router;

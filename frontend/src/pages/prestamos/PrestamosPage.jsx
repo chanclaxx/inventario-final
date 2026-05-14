@@ -3,7 +3,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { buscarPrestamos as buscarPrestamosApi } from '../../api/busqueda.api';
 import { exportarPrestamosExcel } from '../../utils/exportarPrestamosExcel';
 import { exportarCarteraPersonaExcel } from '../../utils/exportarCarteraPersonaExcel';
-import { getPrestamos, registrarAbonoPrestamo, devolverPrestamo, devolverParcialPrestamo, registrarSaldoAFavor as registrarSaldoAFavorApi, intercambiarPrestamo as intercambiarPrestamoApi, anularAbono as anularAbonoApi, getRetomasDirectas as getRetomasDirectasApi, anularRetomaDirecta as anularRetomaDirectaApi, aplicarSaldoAPrestamo as aplicarSaldoAPrestamoApi, getEstadoCuenta as getEstadoCuentaApi } from '../../api/prestamos.api';
+import { getPrestamos, registrarAbonoPrestamo, devolverPrestamo, devolverParcialPrestamo, registrarSaldoAFavor as registrarSaldoAFavorApi, intercambiarPrestamo as intercambiarPrestamoApi, anularAbono as anularAbonoApi, getRetomasDirectas as getRetomasDirectasApi, anularRetomaDirecta as anularRetomaDirectaApi, aplicarSaldoAPrestamo as aplicarSaldoAPrestamoApi, getEstadoCuenta as getEstadoCuentaApi, ajustarCuentas as ajustarCuentasApi } from '../../api/prestamos.api';
+import { crearPrestatario as crearPrestatarioApi } from '../../api/prestatarios.api';
 import {
   getDomiciliarios,
   getEntregas,
@@ -37,7 +38,7 @@ import {
   Handshake, CreditCard, Bike, Plus, CheckCircle,
   ChevronDown, ChevronUp, ChevronLeft, ChevronRight,
   Users, User, AlertTriangle, FileDown, Loader2, Printer, Search, Wallet,
-  ArrowLeftRight, Package, ShoppingBag, XCircle,
+  ArrowLeftRight, Package, ShoppingBag, XCircle, SlidersHorizontal, UserPlus,
 } from 'lucide-react';
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
@@ -400,6 +401,192 @@ function ModalSaldoAFavor({ nombre, tipo, personaId, montoActual, onClose }) {
             onClick={handleGuardar}
           >
             <Wallet size={14} /> Guardar saldo
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// ─── Modal Crear Prestamista ──────────────────────────────────────────────────
+
+function ModalCrearPrestatario({ onClose }) {
+  const queryClient = useQueryClient();
+  const [nombre,   setNombre]   = useState('');
+  const [telefono, setTelefono] = useState('');
+  const [error,    setError]    = useState('');
+
+  const mutation = useMutation({
+    mutationFn: () => crearPrestatarioApi({ nombre: nombre.trim(), telefono: telefono.trim() || undefined }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['prestamos'], exact: false });
+      onClose();
+    },
+    onError: (err) => setError(err.response?.data?.error || 'Error al crear el prestamista'),
+  });
+
+  const handleCrear = () => {
+    setError('');
+    if (!nombre.trim()) return setError('El nombre es requerido');
+    mutation.mutate();
+  };
+
+  return (
+    <Modal open onClose={onClose} title="Nuevo prestamista" size="sm">
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-1">
+          <label className="text-sm font-medium text-gray-700">
+            Nombre <span className="text-red-500">*</span>
+          </label>
+          <Input
+            value={nombre}
+            onChange={(e) => setNombre(e.target.value)}
+            placeholder="Nombre completo"
+            autoFocus
+            onKeyDown={(e) => e.key === 'Enter' && handleCrear()}
+          />
+        </div>
+        <div className="flex flex-col gap-1">
+          <label className="text-sm font-medium text-gray-700">
+            Teléfono <span className="text-xs text-gray-400">(opcional)</span>
+          </label>
+          <Input
+            value={telefono}
+            onChange={(e) => setTelefono(e.target.value)}
+            placeholder="Número de teléfono"
+            onKeyDown={(e) => e.key === 'Enter' && handleCrear()}
+          />
+        </div>
+        {error && <p className="text-sm text-red-500">{error}</p>}
+        <div className="flex gap-2">
+          <Button variant="secondary" className="flex-1" onClick={onClose}>Cancelar</Button>
+          <Button className="flex-1" loading={mutation.isPending} onClick={handleCrear}>
+            <UserPlus size={14} /> Crear prestamista
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// ─── Modal Ajuste de Cuentas ──────────────────────────────────────────────────
+
+function ModalAjusteCuentas({ nombre, prestamos, onClose }) {
+  const queryClient = useQueryClient();
+  const [prestamoSel,  setPrestamoSel]  = useState(null);
+  const [nuevoValor,   setNuevoValor]   = useState('');
+  const [nuevoAbonado, setNuevoAbonado] = useState('');
+  const [error,        setError]        = useState('');
+
+  const handleSeleccionar = (p) => {
+    setPrestamoSel(p);
+    setNuevoValor(String(p.valor_prestamo));
+    setNuevoAbonado(String(p.total_abonado));
+    setError('');
+  };
+
+  const valFinal   = Number(nuevoValor)   || 0;
+  const abonFinal  = Number(nuevoAbonado) || 0;
+  const saldoNuevo = valFinal - abonFinal;
+  const estadoNuevo = abonFinal >= valFinal ? 'Saldado' : 'Activo';
+
+  const mutation = useMutation({
+    mutationFn: () => ajustarCuentasApi(prestamoSel.id, {
+      nuevo_valor_prestamo: valFinal,
+      nuevo_total_abonado:  abonFinal,
+    }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['prestamos'], exact: false });
+      onClose();
+    },
+    onError: (err) => setError(err.response?.data?.error || 'Error al aplicar el ajuste'),
+  });
+
+  const handleConfirmar = () => {
+    setError('');
+    if (!prestamoSel)    return setError('Selecciona un préstamo');
+    if (valFinal  <= 0)  return setError('El valor del préstamo debe ser mayor a 0');
+    if (abonFinal <  0)  return setError('El total abonado no puede ser negativo');
+    mutation.mutate();
+  };
+
+  return (
+    <Modal open onClose={onClose} title="Ajuste de cuentas" size="md">
+      <div className="flex flex-col gap-4">
+
+        <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+          <p className="text-xs font-semibold text-amber-700">Uso administrativo</p>
+          <p className="text-xs text-amber-600 mt-0.5">
+            Corrige descuadres modificando directamente los valores del préstamo.
+            No genera movimientos adicionales en el estado de cuenta.
+          </p>
+        </div>
+
+        <div className="flex flex-col gap-2">
+          <p className="text-sm font-medium text-gray-700">
+            Préstamo de <span className="font-bold">{nombre}</span>
+          </p>
+          <div className="flex flex-col gap-1.5 max-h-52 overflow-y-auto pr-0.5">
+            {prestamos.map((p) => (
+              <button key={p.id} onClick={() => handleSeleccionar(p)}
+                className={`text-left px-3 py-2.5 rounded-xl border transition-all
+                  ${prestamoSel?.id === p.id
+                    ? 'bg-blue-50 border-blue-300'
+                    : 'bg-gray-50 border-gray-200 hover:border-gray-300'}`}>
+                <div className="flex justify-between items-start gap-2">
+                  <span className="text-sm font-medium text-gray-800 leading-tight">{p.nombre_producto}</span>
+                  <Badge color={p.estado === 'Activo' ? 'yellow' : 'green'} className="flex-shrink-0">
+                    {p.estado}
+                  </Badge>
+                </div>
+                <div className="flex gap-3 mt-1">
+                  <span className="text-xs text-gray-400">Valor: {formatCOP(p.valor_prestamo)}</span>
+                  <span className="text-xs text-gray-400">Abonado: {formatCOP(p.total_abonado)}</span>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {prestamoSel && (
+          <div className="flex flex-col gap-3 p-3 bg-gray-50 rounded-xl border border-gray-200">
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Ajustar valores</p>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-gray-600">Valor del préstamo</label>
+                <InputMoneda value={nuevoValor} onChange={setNuevoValor} placeholder="0"
+                  className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-sm
+                    focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-gray-600">Total abonado</label>
+                <InputMoneda value={nuevoAbonado} onChange={setNuevoAbonado} placeholder="0"
+                  className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-sm
+                    focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
+              </div>
+            </div>
+            <div className="flex justify-between items-center pt-2 border-t border-gray-200">
+              <div>
+                <p className="text-xs text-gray-400">Nuevo saldo pendiente</p>
+                <p className={`text-sm font-bold ${saldoNuevo > 0 ? 'text-red-500' : 'text-emerald-600'}`}>
+                  {saldoNuevo > 0 ? formatCOP(saldoNuevo) : 'Saldado'}
+                </p>
+              </div>
+              <Badge color={estadoNuevo === 'Saldado' ? 'green' : 'yellow'}>{estadoNuevo}</Badge>
+            </div>
+          </div>
+        )}
+
+        {error && <p className="text-sm text-red-500">{error}</p>}
+        <div className="flex gap-2">
+          <Button variant="secondary" className="flex-1" onClick={onClose}>Cancelar</Button>
+          <Button
+            className="flex-1 bg-amber-600 hover:bg-amber-700"
+            loading={mutation.isPending}
+            onClick={handleConfirmar}
+            disabled={!prestamoSel}
+          >
+            <SlidersHorizontal size={14} /> Aplicar ajuste
           </Button>
         </div>
       </div>
@@ -1051,7 +1238,7 @@ function TarjetaPrestamoDetalle({ prestamo, onAbonar, onDevolver, onImprimir, on
 
 // ─── Vista detalle de persona ─────────────────────────────────────────────────
 
-function VistaDetallePersona({ nombre, tipo, personaId, prestamos, saldoAFavor = 0, onVolver, onAbonar, onDevolver, onImprimir, onIntercambiar, onRegistrarSaldo, onRetomaDirecta, coloresActivo }) {
+function VistaDetallePersona({ nombre, tipo, personaId, prestamos, saldoAFavor = 0, onVolver, onAbonar, onDevolver, onImprimir, onIntercambiar, onRegistrarSaldo, onRetomaDirecta, onAjusteCuentas, coloresActivo }) {
   const queryClient = useQueryClient();
   const [tabDetalle,          setTabDetalle]          = useState('prestamos'); // 'prestamos' | 'cuenta'
   const [cerradosAbiertos,    setCerradosAbiertos]    = useState(false);
@@ -1200,6 +1387,12 @@ function VistaDetallePersona({ nombre, tipo, personaId, prestamos, saldoAFavor =
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium
               border border-purple-200 text-purple-600 bg-purple-50 hover:bg-purple-100 transition-colors">
             <ArrowLeftRight size={12} /> Comprar artículo
+          </button>
+          <button
+            onClick={onAjusteCuentas}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium
+              border border-amber-200 text-amber-700 bg-amber-50 hover:bg-amber-100 transition-colors">
+            <SlidersHorizontal size={12} /> Ajuste de cuentas
           </button>
           <button
             onClick={onRegistrarSaldo}
@@ -2012,6 +2205,8 @@ export default function PrestamosPage() {
   const [prestamoIntercambio, setPrestamoIntercambio] = useState(null);
   const [modalSaldoPersona,   setModalSaldoPersona]   = useState(null); // { nombre, tipo, personaId, saldoAFavor }
   const [modalRetomaDirecta,  setModalRetomaDirecta]  = useState(null); // { persona: { tipo, id, nombre } }
+  const [modalAjusteCuentas,  setModalAjusteCuentas]  = useState(null); // { nombre, prestamos }
+  const [modalCrearPrestatario, setModalCrearPrestatario] = useState(false);
   const abonosImprimir = useAbonosPrestamo(prestamoImprimir?.id);
 
   const [saldadoFacturaId,   setSaldadoFacturaId]   = useState(null);
@@ -2229,6 +2424,10 @@ export default function PrestamosPage() {
                     nombre: grupoActual.nombre,
                   },
                 })}
+                onAjusteCuentas={() => setModalAjusteCuentas({
+                  nombre:   grupoActual.nombre,
+                  prestamos: grupoActual.prestamos,
+                })}
                 coloresActivo={coloresActivo}
               />
             ) : (
@@ -2261,6 +2460,12 @@ export default function PrestamosPage() {
                     <option value="nombre_desc">Nombre Z → A</option>
                     <option value="abono_reciente">Último abono</option>
                   </select>
+                  {tabPrestamos === 'companeros' && (
+                    <Button size="sm" variant="secondary" onClick={() => setModalCrearPrestatario(true)}
+                      className="flex-shrink-0">
+                      <UserPlus size={14} /> Nuevo prestamista
+                    </Button>
+                  )}
                 </div>
 
                 {/* Filtros de estado */}
@@ -2403,6 +2608,18 @@ export default function PrestamosPage() {
           onSuccess={() => {
             setModalRetomaDirecta(null);
           }}
+        />
+      )}
+
+      {modalCrearPrestatario && (
+        <ModalCrearPrestatario onClose={() => setModalCrearPrestatario(false)} />
+      )}
+
+      {modalAjusteCuentas && (
+        <ModalAjusteCuentas
+          nombre={modalAjusteCuentas.nombre}
+          prestamos={modalAjusteCuentas.prestamos}
+          onClose={() => setModalAjusteCuentas(null)}
         />
       )}
 
