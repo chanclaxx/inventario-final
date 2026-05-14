@@ -11,7 +11,7 @@ import { formatCOP }                                     from '../../utils/forma
 import useCarritoStore                                   from '../../store/carritoStore';
 import { ModalPinEliminacion }                           from './ModalPinEliminacion';
 import { ModalEditarProductoCantidad }                   from './ModalEditarProductoCantidad';
-import { VistaArbolProducto }                            from './VistaArbolProducto';
+import { VistaVariantesProducto }                        from './VistaVariantesProducto';
 import { useAuth }                                       from '../../context/useAuth';
 import { useSucursalKey }                                from '../../hooks/useSucursalKey';
 import api                                               from '../../api/axios.config';
@@ -261,6 +261,17 @@ export function ProductosCantidad() {
 
   if (isLoading) return <Spinner className="py-20" />;
 
+  if (productoArbol) {
+    return (
+      <VistaVariantesProducto
+        producto={productoArbol}
+        sucursalId={productosData?.sucursal_id || productoArbol.sucursal_id}
+        esAdmin={esAdmin}
+        onClose={() => setProductoArbol(null)}
+      />
+    );
+  }
+
   return (
     <>
       <div className="flex flex-col gap-4">
@@ -307,15 +318,6 @@ export function ProductosCantidad() {
           </div>
         )}
       </div>
-
-      {productoArbol && (
-        <VistaArbolProducto
-          producto={productoArbol}
-          sucursalId={productosData?.sucursal_id || productoArbol.sucursal_id}
-          esAdmin={esAdmin}
-          onClose={() => setProductoArbol(null)}
-        />
-      )}
 
       {productoAReducir && (
         <ModalPinEliminacion
