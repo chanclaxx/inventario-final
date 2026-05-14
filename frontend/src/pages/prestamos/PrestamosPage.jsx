@@ -1157,9 +1157,11 @@ function TarjetaPrestamoDetalle({ prestamo, onAbonar, onDevolver, onImprimir, on
             <Button size="sm" variant="secondary" onClick={() => onIntercambiar(prestamo)}>
               <ArrowLeftRight size={14} /> Pago en producto
             </Button>
-            <Button size="sm" variant="secondary" onClick={() => onDevolver(prestamo)}>
-              <CheckCircle size={14} /> Devuelto
-            </Button>
+            {prestamo.cedula !== 'AJUSTE' && (
+              <Button size="sm" variant="secondary" onClick={() => onDevolver(prestamo)}>
+                <CheckCircle size={14} /> Devuelto
+              </Button>
+            )}
             {saldoAFavor > 0 && saldo > 0 && (
               <button
                 onClick={() => onAplicarSaldo(prestamo.id)}
