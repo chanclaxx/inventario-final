@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, Fragment } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getEstadoCuenta } from '../../api/prestamos.api';
 import { anularAbono as anularAbonoApi, anularRetomaDirecta as anularRetomaDirectaApi } from '../../api/prestamos.api';
@@ -8,43 +8,47 @@ import { XCircle, TrendingDown, TrendingUp, ArrowLeftRight, Wallet, ChevronLeft,
 
 const PAGE_SIZE_MOVS = 20;
 
-// ─── Mapa visual por tipo de movimiento ──────────────────────────────────────
-
+// lado: 'derecha' = acción del negocio | 'izquierda' = acción del deudor
 const TIPO_CONFIG = {
   prestamo: {
-    rowClass:  'bg-orange-50 border-l-2 border-orange-300',
-    badge:     'bg-orange-100 text-orange-700',
-    label:     'Préstamo',
-    Icn:       TrendingUp,
-    iconClass: 'text-orange-500',
+    badge:      'bg-orange-100 text-orange-700',
+    label:      'Préstamo',
+    Icn:        TrendingUp,
+    lado:       'derecha',
+    bubbleBg:   'bg-amber-50 border border-amber-200',
+    montoClass: 'text-amber-700',
   },
   abono: {
-    rowClass:  'bg-green-50 border-l-2 border-green-300',
-    badge:     'bg-green-100 text-green-700',
-    label:     'Abono',
-    Icn:       TrendingDown,
-    iconClass: 'text-green-500',
+    badge:      'bg-green-100 text-green-700',
+    label:      'Abono',
+    Icn:        TrendingDown,
+    lado:       'izquierda',
+    bubbleBg:   'bg-white border border-gray-200',
+    montoClass: 'text-green-600',
   },
   pago_producto: {
-    rowClass:  'bg-blue-50 border-l-2 border-blue-300',
-    badge:     'bg-blue-100 text-blue-700',
-    label:     'Pago en producto',
-    Icn:       ArrowLeftRight,
-    iconClass: 'text-blue-500',
+    badge:      'bg-blue-100 text-blue-700',
+    label:      'Pago en producto',
+    Icn:        ArrowLeftRight,
+    lado:       'izquierda',
+    bubbleBg:   'bg-white border border-gray-200',
+    montoClass: 'text-blue-600',
   },
   saldo_aplicado: {
-    rowClass:  'bg-teal-50 border-l-2 border-teal-300',
-    badge:     'bg-teal-100 text-teal-700',
-    label:     'Saldo aplicado',
-    Icn:       Wallet,
-    iconClass: 'text-teal-500',
+    badge:      'bg-teal-100 text-teal-700',
+    label:      'Saldo aplicado',
+    Icn:        Wallet,
+    lado:       'izquierda',
+    bubbleBg:   'bg-white border border-gray-200',
+    montoClass: 'text-teal-600',
   },
   compra_directa: {
-    rowClass:  'bg-purple-50 border-l-2 border-purple-300',
-    badge:     'bg-purple-100 text-purple-700',
-    label:     'Compra de artículo',
-    Icn:       ArrowLeftRight,
-    iconClass: 'text-purple-500',
+    badge:      'bg-purple-100 text-purple-700',
+    label:      'Compra de artículo',
+    Icn:        ArrowLeftRight,
+    lado:       'derecha',
+    bubbleBg:   'bg-purple-50 border border-purple-200',
+    montoClass: 'text-purple-700',
   },
 };
 
@@ -54,55 +58,78 @@ function formatFecha(fechaStr) {
   return d.toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
-// ─── Fila de movimiento ───────────────────────────────────────────────────────
+function mismoDia(fechaA, fechaB) {
+  if (!fechaA || !fechaB) return false;
+  return new Date(fechaA).toDateString() === new Date(fechaB).toDateString();
+}
 
-function FilaMovimiento({ mov, onAnular }) {
+// ─── Separador de fecha entre días distintos ──────────────────────────────────
+
+function SeparadorFecha({ fecha }) {
+  return (
+    <div className="flex items-center justify-center my-2">
+      <span className="bg-white/80 backdrop-blur-sm text-gray-500 text-[11px] font-medium px-3 py-1 rounded-full shadow-sm border border-gray-100">
+        {formatFecha(fecha)}
+      </span>
+    </div>
+  );
+}
+
+// ─── Burbuja de chat por movimiento ──────────────────────────────────────────
+
+function BurbujaMensaje({ mov, onAnular }) {
   const cfg = TIPO_CONFIG[mov.tipo] || TIPO_CONFIG.abono;
   const Icn = cfg.Icn;
+  const esDerecha = cfg.lado === 'derecha';
 
   return (
-    <div className={`flex items-start gap-3 px-4 py-3 rounded-xl ${cfg.rowClass}`}>
-      {/* Ícono tipo */}
-      <div className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5 bg-white/70 ${cfg.iconClass}`}>
-        <Icn size={14} />
-      </div>
+    <div className={`flex ${esDerecha ? 'justify-end' : 'justify-start'} px-2`}>
+      <div className={`max-w-[78%] flex flex-col ${esDerecha ? 'items-end' : 'items-start'}`}>
+        <div className={`relative px-3.5 py-2.5 rounded-2xl shadow-sm ${cfg.bubbleBg} ${
+          esDerecha ? 'rounded-tr-sm' : 'rounded-tl-sm'
+        }`}>
 
-      {/* Descripción */}
-      <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium text-gray-800 leading-tight truncate">{mov.concepto}</p>
-        <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-          <span className="text-xs text-gray-400">{formatFecha(mov.fecha)}</span>
-          <span className={`text-xs font-medium px-1.5 py-0.5 rounded-full ${cfg.badge}`}>
-            {cfg.label}
-          </span>
-          {mov.tipo === 'compra_directa' && (
-            <span className="text-xs text-purple-600 font-medium">→ saldo a favor</span>
+          {/* Badge tipo */}
+          <div className="flex items-center gap-1.5 mb-1">
+            <Icn size={11} className="flex-shrink-0 opacity-50" />
+            <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${cfg.badge}`}>
+              {cfg.label}
+            </span>
+            {mov.tipo === 'compra_directa' && (
+              <span className="text-[10px] text-purple-500 font-medium">→ saldo a favor</span>
+            )}
+          </div>
+
+          {/* Concepto */}
+          <p className="text-sm font-medium text-gray-800 leading-snug">{mov.concepto}</p>
+
+          {/* Monto */}
+          <p className={`text-base font-bold mt-0.5 ${cfg.montoClass}`}>
+            {mov.cargo ? `+${formatCOP(mov.cargo)}` : ''}
+            {mov.abono ? `−${formatCOP(mov.abono)}` : ''}
+          </p>
+
+          {/* Saldo resultante */}
+          {mov.saldo != null && (
+            <p className={`text-xs mt-0.5 ${mov.saldo > 0 ? 'text-red-400' : 'text-green-500'}`}>
+              Saldo deuda:{' '}
+              <span className="font-semibold">{formatCOP(mov.saldo)}</span>
+            </p>
           )}
-        </div>
-      </div>
 
-      {/* Valores */}
-      <div className="flex items-center gap-3 flex-shrink-0 text-right">
-        <div className="min-w-[80px]">
-          {mov.cargo  && <p className="text-sm font-semibold text-orange-600">+{formatCOP(mov.cargo)}</p>}
-          {mov.abono  && <p className="text-sm font-semibold text-green-600">−{formatCOP(mov.abono)}</p>}
+          {/* Footer: fecha + anular */}
+          <div className={`flex items-center gap-2 mt-1.5 ${esDerecha ? 'justify-end' : 'justify-start'}`}>
+            <span className="text-[10px] text-gray-400">{formatFecha(mov.fecha)}</span>
+            {mov.anulable && (
+              <button
+                onClick={() => onAnular(mov)}
+                title="Anular movimiento"
+                className="text-gray-300 hover:text-red-400 transition-colors">
+                <XCircle size={13} />
+              </button>
+            )}
+          </div>
         </div>
-        <div className="min-w-[80px]">
-          {mov.saldo != null
-            ? <p className={`text-sm font-bold ${mov.saldo > 0 ? 'text-red-500' : 'text-green-600'}`}>
-                {formatCOP(mov.saldo)}
-              </p>
-            : <p className="text-xs text-gray-400">—</p>
-          }
-        </div>
-        {mov.anulable && (
-          <button
-            onClick={() => onAnular(mov)}
-            title="Anular movimiento"
-            className="text-gray-300 hover:text-red-400 transition-colors">
-            <XCircle size={15} />
-          </button>
-        )}
       </div>
     </div>
   );
@@ -112,10 +139,10 @@ function FilaMovimiento({ mov, onAnular }) {
 
 export function EstadoDeCuenta({ tipo, personaId }) {
   const queryClient = useQueryClient();
-  const [confirmando, setConfirmando] = useState(null); // { mov }
+  const [confirmando, setConfirmando] = useState(null);
   const [fechaDesde, setFechaDesde]   = useState('');
   const [fechaHasta, setFechaHasta]   = useState('');
-  const [sortDir,    setSortDir]      = useState('asc');  // 'asc' | 'desc'
+  const [sortDir,    setSortDir]      = useState('asc');
   const [paginaMov,  setPaginaMov]    = useState(1);
   const [filtroTipo, setFiltroTipo]   = useState('todos');
 
@@ -144,8 +171,8 @@ export function EstadoDeCuenta({ tipo, personaId }) {
   const mutAnularCompra = useMutation({
     mutationFn: ({ referencia_id }) => anularRetomaDirectaApi(referencia_id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['estado-cuenta',      tipoApi, personaId] });
-      queryClient.invalidateQueries({ queryKey: ['retomas-directas',   tipoApi, personaId] });
+      queryClient.invalidateQueries({ queryKey: ['estado-cuenta',    tipoApi, personaId] });
+      queryClient.invalidateQueries({ queryKey: ['retomas-directas', tipoApi, personaId] });
       queryClient.invalidateQueries({ queryKey: ['prestamos'], exact: false });
       setConfirmando(null);
     },
@@ -155,8 +182,7 @@ export function EstadoDeCuenta({ tipo, personaId }) {
     },
   });
 
-  const handleAnular = (mov) => setConfirmando(mov);
-
+  const handleAnular     = (mov) => setConfirmando(mov);
   const confirmarAnulacion = () => {
     if (!confirmando) return;
     if (confirmando.tipo === 'compra_directa') {
@@ -169,7 +195,6 @@ export function EstadoDeCuenta({ tipo, personaId }) {
     }
   };
 
-  // Filtrar por tipo, fechas
   const filtrados = movimientos.filter((m) => {
     if (filtroTipo !== 'todos' && m.tipo !== filtroTipo) return false;
     const f = m.fecha ? new Date(m.fecha) : null;
@@ -178,15 +203,14 @@ export function EstadoDeCuenta({ tipo, personaId }) {
     return true;
   });
 
-  // saldoFinal siempre sobre el último movimiento cronológico
   const saldoFinal = filtrados.length > 0
     ? filtrados[filtrados.length - 1]?.saldo ?? null
     : null;
 
   const filtradosOrdenados = sortDir === 'desc' ? [...filtrados].reverse() : filtrados;
 
-  const totalMovs      = filtradosOrdenados.length;
-  const totalPagMovs   = Math.max(1, Math.ceil(totalMovs / PAGE_SIZE_MOVS));
+  const totalMovs       = filtradosOrdenados.length;
+  const totalPagMovs    = Math.max(1, Math.ceil(totalMovs / PAGE_SIZE_MOVS));
   const paginaMovActual = Math.min(paginaMov, totalPagMovs);
   const movsPagina = filtradosOrdenados.slice(
     (paginaMovActual - 1) * PAGE_SIZE_MOVS,
@@ -231,18 +255,16 @@ export function EstadoDeCuenta({ tipo, personaId }) {
         )}
         <button
           onClick={() => { setSortDir((d) => d === 'asc' ? 'desc' : 'asc'); setPaginaMov(1); }}
-          title={sortDir === 'asc' ? 'Mostrando más antiguo primero' : 'Mostrando más reciente primero'}
+          title={sortDir === 'asc' ? 'Más antiguo primero' : 'Más reciente primero'}
           className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium
             bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors ml-auto">
           <ArrowUpDown size={12} />
           {sortDir === 'asc' ? 'Más antiguo' : 'Más reciente'}
         </button>
-        <span className="text-xs text-gray-400">
-          {filtrados.length} mov.
-        </span>
+        <span className="text-xs text-gray-400">{filtrados.length} mov.</span>
       </div>
 
-      {/* Filtro por tipo de movimiento */}
+      {/* Filtro por tipo */}
       <div className="flex items-center gap-1 flex-wrap">
         <button
           onClick={() => { setFiltroTipo('todos'); setPaginaMov(1); }}
@@ -260,25 +282,26 @@ export function EstadoDeCuenta({ tipo, personaId }) {
         ))}
       </div>
 
-      {/* Cabecera de columnas */}
-      <div className="grid text-xs font-semibold text-gray-400 uppercase tracking-wide px-4"
-        style={{ gridTemplateColumns: '1fr 40px 80px 80px 28px' }}>
-        <span>Concepto</span>
-        <span />
-        <span className="text-right">Movimiento</span>
-        <span className="text-right">Saldo deuda</span>
-        <span />
+      {/* Leyenda lados */}
+      <div className="flex items-center justify-between px-1">
+        <span className="text-[11px] text-gray-400 font-medium">← Deudor</span>
+        <span className="text-[11px] text-gray-400 font-medium">Negocio →</span>
       </div>
 
-      {/* Lista de movimientos */}
-      <div className="flex flex-col gap-1.5">
-        {movsPagina.map((mov, idx) => (
-          <FilaMovimiento
-            key={`${mov.tipo}-${mov.referencia_id}-${idx}`}
-            mov={mov}
-            onAnular={handleAnular}
-          />
-        ))}
+      {/* Ventana de chat */}
+      <div
+        className="flex flex-col gap-2 py-3 rounded-2xl overflow-y-auto"
+        style={{ background: 'linear-gradient(160deg, #e8f4f0 0%, #eef2f7 100%)', minHeight: 180 }}>
+        {movsPagina.map((mov, idx) => {
+          const prev        = idx > 0 ? movsPagina[idx - 1] : null;
+          const showSepFecha = !prev || !mismoDia(mov.fecha, prev?.fecha);
+          return (
+            <Fragment key={`${mov.tipo}-${mov.referencia_id}-${idx}`}>
+              {showSepFecha && <SeparadorFecha fecha={mov.fecha} />}
+              <BurbujaMensaje mov={mov} onAnular={handleAnular} />
+            </Fragment>
+          );
+        })}
       </div>
 
       {/* Paginación */}
@@ -318,9 +341,7 @@ export function EstadoDeCuenta({ tipo, personaId }) {
       {confirmando && (
         <div className="fixed inset-0 bg-black/40 flex items-end sm:items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl w-full max-w-sm p-5 flex flex-col gap-4 shadow-xl">
-            <p className="text-sm font-semibold text-gray-800">
-              ¿Anular este movimiento?
-            </p>
+            <p className="text-sm font-semibold text-gray-800">¿Anular este movimiento?</p>
             <div className="bg-gray-50 rounded-xl px-3 py-2">
               <p className="text-xs text-gray-500">{confirmando.concepto}</p>
               <p className="text-sm font-bold text-gray-800 mt-0.5">
