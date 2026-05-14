@@ -392,6 +392,15 @@ function normalizarProductos(data) {
 function ModalIntercambio({ prestamo, onClose, onSaldado }) {
   const queryClient = useQueryClient();
 
+  const { data: configData } = useQuery({
+    queryKey: ['config'],
+    queryFn:  () => api.get('/config').then((r) => r.data.data),
+  });
+  const coloresActivo = configData?.colores_serial_activo === '1';
+  const coloresLista  = (() => {
+    try { return JSON.parse(configData?.colores_serial_lista || '[]'); } catch { return []; }
+  })();
+
   const [tipoRetoma,          setTipoRetoma]          = useState('serial');
   const [imeiRetoma,          setImeiRetoma]           = useState('');
   const [busquedaSerial,      setBusquedaSerial]       = useState('');
@@ -540,13 +549,23 @@ function ModalIntercambio({ prestamo, onClose, onSaldado }) {
                 )}
                 {productoSerialSel && <p className="text-xs text-purple-600">✓ {productoSerialSel.nombre}</p>}
               </div>
-              <div className="flex flex-col gap-1">
-                <label className="text-xs font-medium text-gray-600">Color (opcional)</label>
-                <input type="text" placeholder="Ej: Negro" value={colorRetoma}
-                  onChange={(e) => setColorRetoma(e.target.value)}
-                  className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl
-                    text-sm focus:outline-none focus:ring-2 focus:ring-purple-400 transition-all" />
-              </div>
+              {coloresActivo && coloresLista.length > 0 && (
+                <div className="flex flex-col gap-1">
+                  <label className="text-xs font-medium text-gray-600">Color (opcional)</label>
+                  <div className="flex flex-wrap gap-2">
+                    {coloresLista.map((c) => (
+                      <button key={c} type="button"
+                        onClick={() => setColorRetoma(colorRetoma === c ? '' : c)}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition-all
+                          ${colorRetoma === c
+                            ? 'bg-purple-100 border-purple-400 text-purple-800'
+                            : 'bg-white border-gray-200 text-gray-500 hover:border-gray-300'}`}>
+                        {c}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
