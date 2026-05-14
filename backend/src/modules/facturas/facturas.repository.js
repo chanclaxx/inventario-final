@@ -277,13 +277,67 @@ const create = async (client, {
   return rows[0];
 };
 
-const insertarLinea = async (client, { factura_id, nombre_producto, imei, cantidad, precio, producto_id }) => {
+const insertarLinea = async (client, {
+  factura_id, nombre_producto, imei, cantidad, precio, producto_id,
+  atributo_id, variante_id,
+}) => {
   const { rows } = await client.query(`
-    INSERT INTO lineas_factura(factura_id, nombre_producto, imei, cantidad, precio, producto_id)
-    VALUES ($1, $2, $3, $4, $5, $6)
+    INSERT INTO lineas_factura
+      (factura_id, nombre_producto, imei, cantidad, precio, producto_id, atributo_id, variante_id)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
     RETURNING *
-  `, [factura_id, nombre_producto, imei || null, cantidad, precio, producto_id || null]);
+  `, [
+    factura_id, nombre_producto, imei || null, cantidad, precio,
+    producto_id || null, atributo_id || null, variante_id || null,
+  ]);
   return rows[0];
+};
+
+const ajustarStockAtributoEnTx = async (client, atributoId, cantidad) => {
+  await client.query(
+    'UPDATE atributos_producto SET stock = stock + $1 WHERE id = $2',
+    [cantidad, atributoId]
+  );
+};
+
+const ajustarStockVarianteEnTx = async (client, varianteId, cantidad) => {
+  await client.query(
+    'UPDATE variantes_atributo SET stock = stock + $1 WHERE id = $2',
+    [cantidad, varianteId]
+  );
+};
+
+const sincronizarStockArbolEnTx = async (client, productoId) => {
+  await client.query(
+    `UPDATE atributos_producto ap
+     SET stock = sub.total
+     FROM (
+       SELECT v.atributo_id, COALESCE(SUM(v.stock), 0) AS total
+       FROM variantes_atributo v
+       WHERE v.activo = true
+       GROUP BY v.atributo_id
+     ) sub
+     WHERE ap.id = sub.atributo_id
+       AND ap.producto_id = $1
+       AND ap.activo = true`,
+    [productoId]
+  );
+  await client.query(
+    `UPDATE productos_cantidad pc
+     SET stock = sub.total
+     FROM (
+       SELECT ap.producto_id, COALESCE(SUM(ap.stock), 0) AS total
+       FROM atributos_producto ap
+       WHERE ap.activo = true AND ap.producto_id = $1
+       GROUP BY ap.producto_id
+     ) sub
+     WHERE pc.id = sub.producto_id
+       AND EXISTS (
+         SELECT 1 FROM atributos_producto ap
+         WHERE ap.producto_id = $1 AND ap.activo = true
+       )`,
+    [productoId]
+  );
 };
 
 const insertarPago = async (client, { factura_id, metodo, valor }) => {
@@ -360,4 +414,5 @@ module.exports = {
   getLineas, getPagos, getRetomas,
   create, insertarLinea, insertarPago, insertarRetoma, cancelar,
   ajustarStockCantidad, actualizarCostoPromedio,
+  ajustarStockAtributoEnTx, ajustarStockVarianteEnTx, sincronizarStockArbolEnTx,
 };

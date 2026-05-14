@@ -19,6 +19,7 @@ import {
 } from '../../api/productos.api';
 import api from '../../api/axios.config';
 import { getLineas } from '../../api/lineas.api';
+import { getArbol, ajustarStockAtributo, ajustarStockVariante } from '../../api/variantesProductoApi';
 import { fechaHoyBogota } from '../../utils/formatters';
 import {
   Package, ShoppingBag, ChevronRight, ChevronDown, Trash2,
@@ -1410,7 +1411,7 @@ function PasoSerial({ sucursalKey, onExito, onDuplicadosEncontrados, coloresActi
 }
 
 // ─── Paso Cantidad (proveedor) ─────────────────────────────────────────────────
-function PasoCantidad({ sucursalKey, onExito }) {
+function PasoCantidad({ sucursalKey, onExito, variantesActivo }) {
   const queryClient   = useQueryClient();
   const puedeVerCosto = true;
 
@@ -1426,12 +1427,28 @@ function PasoCantidad({ sucursalKey, onExito }) {
   const [modoPago,          setModoPago]          = useState(null);
   const [metodoPagoContado, setMetodoPagoContado] = useState('Efectivo');
   const [error,          setError]          = useState('');
+  const [atributoSel,    setAtributoSel]    = useState(null);
+  const [varianteSel,    setVarianteSel]    = useState(null);
 
   const { data: productosData } = useQuery({
     queryKey: ['productos-cantidad', ...sucursalKey],
     queryFn:  () => getProductosCantidad().then((r) => normalizarProductos(r.data.data)),
     enabled:  sucursalKey.length > 0,
   });
+
+  // Árbol de atributos/variantes del producto seleccionado (solo si variantes activo)
+  const sucursalId = productoSel?.sucursal_id || null;
+  const { data: arbolData = [] } = useQuery({
+    queryKey: ['arbol-producto', productoSel?.id, sucursalId],
+    queryFn:  () => getArbol(productoSel.id, sucursalId).then((r) => r.data.data),
+    enabled:  !!productoSel && !!sucursalId && variantesActivo,
+    staleTime: 0,
+  });
+  const tieneArbol = variantesActivo && arbolData.length > 0;
+
+  // Variantes del atributo seleccionado
+  const variantesDelAtributo = atributoSel?.variantes || [];
+  const atributoTieneVariantes = variantesDelAtributo.length > 0;
 
   // ── Filtrado combinado: nombre + línea ────────────────────────────────────
   const productos = normalizarProductos(productosData)
@@ -1440,9 +1457,16 @@ function PasoCantidad({ sucursalKey, onExito }) {
 
   const handleSeleccionarProducto = (producto) => {
     setProductoSel(producto);
+    setAtributoSel(null);
+    setVarianteSel(null);
     setError('');
     if (producto.proveedor_id)   setProveedorId(String(producto.proveedor_id));
     if (producto.costo_unitario) setCostoCompra(Number(producto.costo_unitario));
+  };
+
+  const handleSeleccionarAtributo = (atr) => {
+    setAtributoSel(atr);
+    setVarianteSel(null);
   };
 
   const mutCrear = useMutation({
@@ -1466,13 +1490,30 @@ function PasoCantidad({ sucursalKey, onExito }) {
     mutationFn: async () => {
       const cantidadNum = Number(cantidad);
       const costo = costoCompra !== '' ? Number(costoCompra) : null;
-      if (proveedorId && modoPago) {
+
+      if (varianteSel) {
+        // Nivel variante del árbol
+        await ajustarStockVariante(varianteSel.id, {
+          cantidad: cantidadNum,
+          costo_unitario: costo,
+          tipo: 'compra',
+        });
+      } else if (atributoSel) {
+        // Nivel atributo del árbol
+        await ajustarStockAtributo(atributoSel.id, {
+          cantidad: cantidadNum,
+          costo_unitario: costo,
+          tipo: 'compra',
+        });
+      } else if (proveedorId && modoPago) {
+        // Producto plano con compra registrada
         await crearCompra(buildPayloadCompra({
           proveedorId, monto: costo ? costo * cantidadNum : 0,
           modoPago, metodoPagoContado, registrarEnCaja,
           lineas: [{ nombre_producto: productoSel.nombre, cantidad: cantidadNum, precio_unitario: costo || 0, producto_id: productoSel.id }],
         }));
       } else {
+        // Producto plano sin compra registrada
         await ajustarStockCantidad(productoSel.id, { cantidad: cantidadNum, costo_unitario: costo, proveedor_id: proveedorId ? Number(proveedorId) : undefined });
       }
     },
@@ -1480,6 +1521,9 @@ function PasoCantidad({ sucursalKey, onExito }) {
       queryClient.invalidateQueries({ queryKey: ['productos-cantidad'], exact: false });
       queryClient.invalidateQueries({ queryKey: ['compras'],            exact: false });
       queryClient.invalidateQueries({ queryKey: ['acreedores'],         exact: false });
+      if (productoSel?.id && sucursalId) {
+        queryClient.invalidateQueries({ queryKey: ['arbol-producto', productoSel.id, sucursalId] });
+      }
       onExito();
     },
     onError: (e) => setError(e.response?.data?.error || 'Error al ajustar stock'),
@@ -1488,12 +1532,17 @@ function PasoCantidad({ sucursalKey, onExito }) {
   const handleConfirmar = () => {
     setError('');
     if (!productoSel)              return setError('Selecciona un producto');
+    if (tieneArbol && !atributoSel) return setError('Selecciona el atributo al que quieres agregar stock');
+    if (atributoTieneVariantes && !varianteSel) return setError('Selecciona la variante a la que quieres agregar stock');
     if (!cantidad || cantidad < 1) return setError('La cantidad debe ser mayor a 0');
-    if (proveedorId && !modoPago)  return setError('Selecciona si fue pagado o a credito');
+    if (!varianteSel && !atributoSel && proveedorId && !modoPago)
+      return setError('Selecciona si fue pagado o a credito');
     mutConfirmar.mutate();
   };
 
   const labelBoton = () => {
+    if (varianteSel)    return `Agregar ${cantidad} uds a ${varianteSel.valor}`;
+    if (atributoSel)    return `Agregar ${cantidad} uds a ${atributoSel.valor}`;
     if (modoPago === 'contado') return `Agregar ${cantidad} unidad(es) — compra en contado`;
     if (modoPago === 'credito') return `Agregar ${cantidad} unidad(es) — registrar como credito`;
     return `Agregar ${cantidad} unidad(es) al stock`;
@@ -1563,25 +1612,76 @@ function PasoCantidad({ sucursalKey, onExito }) {
               </p>
             </div>
             <button
-              onClick={() => { setProductoSel(null); setCantidad(1); setCostoCompra(''); setProveedorId(''); setModoPago(null); }}
+              onClick={() => { setProductoSel(null); setAtributoSel(null); setVarianteSel(null); setCantidad(1); setCostoCompra(''); setProveedorId(''); setModoPago(null); }}
               className="text-xs text-green-400 hover:text-green-600 underline"
             >
               Cambiar
             </button>
           </div>
+
+          {/* Selectores de atributo/variante cuando el producto tiene árbol */}
+          {tieneArbol && (
+            <div className="flex flex-col gap-2">
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-gray-600">Atributo</label>
+                <select
+                  value={atributoSel?.id ?? ''}
+                  onChange={(e) => {
+                    const atr = arbolData.find((a) => String(a.id) === e.target.value);
+                    handleSeleccionarAtributo(atr || null);
+                  }}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm
+                    focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                >
+                  <option value="">Seleccionar atributo…</option>
+                  {arbolData.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.tipo_nombre ? `${a.tipo_nombre}: ${a.valor}` : a.valor} — {a.stock} uds
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {atributoSel && atributoTieneVariantes && (
+                <div className="flex flex-col gap-1">
+                  <label className="text-xs font-medium text-gray-600">Variante</label>
+                  <select
+                    value={varianteSel?.id ?? ''}
+                    onChange={(e) => {
+                      const v = variantesDelAtributo.find((x) => String(x.id) === e.target.value);
+                      setVarianteSel(v || null);
+                    }}
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm
+                      focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                  >
+                    <option value="">Seleccionar variante…</option>
+                    {variantesDelAtributo.map((v) => (
+                      <option key={v.id} value={v.id}>
+                        {v.tipo_nombre ? `${v.tipo_nombre}: ${v.valor}` : v.valor} — {v.stock} uds
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
+          )}
+
           <Input label="Cantidad a agregar" type="number" autoFocus value={cantidad}
             onChange={(e) => setCantidad(e.target.value)}
             onWheel={(e) => e.target.blur()}
             onKeyDown={(e) => e.key === 'Enter' && handleConfirmar()} />
-          <InfoCompra
-            proveedorId={proveedorId}         setProveedorId={setProveedorId}
-            costoCompra={costoCompra}         setCostoCompra={setCostoCompra}
-            modoPago={modoPago}               setModoPago={setModoPago}
-            registrarEnCaja={registrarEnCaja} setRegistrarEnCaja={setRegistrarEnCaja}
-            metodoPagoContado={metodoPagoContado}
-            setMetodoPagoContado={setMetodoPagoContado}
-            onProveedorTipoChange={(tipo) => { setRegistrarEnCaja(tipo !== 'proveedor'); }}
-          />
+          {/* Info de compra solo cuando no hay árbol (productos planos) */}
+          {!tieneArbol && (
+            <InfoCompra
+              proveedorId={proveedorId}         setProveedorId={setProveedorId}
+              costoCompra={costoCompra}         setCostoCompra={setCostoCompra}
+              modoPago={modoPago}               setModoPago={setModoPago}
+              registrarEnCaja={registrarEnCaja} setRegistrarEnCaja={setRegistrarEnCaja}
+              metodoPagoContado={metodoPagoContado}
+              setMetodoPagoContado={setMetodoPagoContado}
+              onProveedorTipoChange={(tipo) => { setRegistrarEnCaja(tipo !== 'proveedor'); }}
+            />
+          )}
         </div>
       )}
       {error && <p className="text-sm text-red-500">{error}</p>}
@@ -1614,6 +1714,7 @@ export function ModalAgregarProducto({ onClose }) {
   const coloresConfig         = parsearColoresConfig(configData);
   const caracteristicasActivo = configData?.caracteristicas_serial_activo === '1';
   const caracteristicasLista  = parsearCaracteristicasConfig(configData);
+  const variantesActivo       = configData?.variantes_activo === '1';
 
   const handleDuplicadosEncontrados = ({ disponibles, paraReactivar }, confirmarFn) => {
     confirmarReactivarRef.current = confirmarFn;
@@ -1661,6 +1762,7 @@ export function ModalAgregarProducto({ onClose }) {
           <PasoCantidad
             sucursalKey={sucursalKey}
             sucursalLista={sucursalLista}
+            variantesActivo={variantesActivo}
             onExito={() => setExito(true)}
           />
         )}

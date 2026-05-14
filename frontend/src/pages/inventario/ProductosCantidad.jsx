@@ -1,6 +1,6 @@
 import { useState }                                      from 'react';
 import { useQuery, useMutation, useQueryClient }         from '@tanstack/react-query';
-import { ShoppingBag, Plus, AlertTriangle, Trash2, ChevronDown, ChevronRight } from 'lucide-react';
+import { ShoppingBag, Plus, AlertTriangle, Trash2, ChevronDown, ChevronRight, Layers } from 'lucide-react';
 import { getProductosCantidad, ajustarStockCantidad, getLineas } from '../../api/productos.api';
 import { SearchInput }                                   from '../../components/ui/SearchInput';
 import { Button }                                        from '../../components/ui/Button';
@@ -11,12 +11,13 @@ import { formatCOP }                                     from '../../utils/forma
 import useCarritoStore                                   from '../../store/carritoStore';
 import { ModalPinEliminacion }                           from './ModalPinEliminacion';
 import { ModalEditarProductoCantidad }                   from './ModalEditarProductoCantidad';
+import { VistaArbolProducto }                            from './VistaArbolProducto';
 import { useAuth }                                       from '../../context/useAuth';
 import { useSucursalKey }                                from '../../hooks/useSucursalKey';
 import api                                               from '../../api/axios.config';
 
 // ── Tarjeta de producto cantidad ──────────────────────────────────────────────
-function TarjetaProducto({ p, esAdmin, onAgregar, onReducir, onEditar }) {
+function TarjetaProducto({ p, esAdmin, onAgregar, onReducir, onEditar, variantesActivo, onVerArbol }) {
   const sinStock  = p.stock === 0;
   const stockBajo = !sinStock && p.stock_bajo;
 
@@ -41,12 +42,13 @@ function TarjetaProducto({ p, esAdmin, onAgregar, onReducir, onEditar }) {
 
   return (
     <div
-      onDoubleClick={() => esAdmin && onEditar(p)}
+      onClick={() => variantesActivo && onVerArbol && onVerArbol(p)}
+      onDoubleClick={() => esAdmin && !variantesActivo && onEditar(p)}
       className={`border rounded-2xl p-4 flex flex-col gap-3
         transition-colors select-none w-full
         ${cardBg} ${cardBorder}
-        ${esAdmin ? `cursor-pointer ${hoverBorder}` : 'cursor-default'}`}
-      title={esAdmin ? 'Doble click para editar' : undefined}
+        ${(variantesActivo && onVerArbol) || esAdmin ? `cursor-pointer ${hoverBorder}` : 'cursor-default'}`}
+      title={variantesActivo ? 'Click para ver variantes' : esAdmin ? 'Doble click para editar' : undefined}
     >
       {/* Nombre + eliminar */}
       <div className="flex items-start justify-between gap-2">
@@ -98,18 +100,22 @@ function TarjetaProducto({ p, esAdmin, onAgregar, onReducir, onEditar }) {
 
       <Button
         size="sm" className="w-full"
-        disabled={sinStock}
-        onClick={(e) => { e.stopPropagation(); onAgregar(p); }}
+        disabled={sinStock && !variantesActivo}
+        onClick={(e) => {
+          e.stopPropagation();
+          if (variantesActivo && onVerArbol) { onVerArbol(p); } else { onAgregar(p); }
+        }}
       >
-        <Plus size={14} />
-        {sinStock ? 'Sin stock' : 'Agregar al carrito'}
+        {variantesActivo
+          ? <><Layers size={14} />{sinStock ? 'Ver variantes' : 'Ver / Agregar'}</>
+          : <><Plus size={14} />{sinStock ? 'Sin stock' : 'Agregar al carrito'}</>}
       </Button>
     </div>
   );
 }
 
 // ── Acordeón de línea ─────────────────────────────────────────────────────────
-function AcordeonLinea({ nombre, productos, esAdmin, onAgregar, onReducir, onEditar }) {
+function AcordeonLinea({ nombre, productos, esAdmin, onAgregar, onReducir, onEditar, variantesActivo, onVerArbol }) {
   const [abierto, setAbierto] = useState(true);
 
   const alertas    = productos.filter((p) => p.stock_bajo || p.stock === 0).length;
@@ -152,6 +158,8 @@ function AcordeonLinea({ nombre, productos, esAdmin, onAgregar, onReducir, onEdi
               onAgregar={onAgregar}
               onReducir={onReducir}
               onEditar={onEditar}
+              variantesActivo={variantesActivo}
+              onVerArbol={onVerArbol}
             />
           ))}
         </div>
@@ -170,6 +178,7 @@ export function ProductosCantidad() {
   const [productoAReducir, setProductoAReducir] = useState(null);
   const [cantidadReducir,  setCantidadReducir]  = useState('1');
   const [productoAEditar,  setProductoAEditar]  = useState(null);
+  const [productoArbol,    setProductoArbol]    = useState(null);
 
   const { data: productosData, isLoading } = useQuery({
     queryKey:  ['productos-cantidad', ...sucursalKey],
@@ -187,9 +196,10 @@ export function ProductosCantidad() {
   const { data: configData } = useQuery({
     queryKey: ['config'],
     queryFn:  () => api.get('/config').then((r) => r.data.data),
-    enabled:  sucursalLista && esAdminNegocio(),
+    enabled:  sucursalLista,
   });
-  const pinEliminacion = configData?.pin_eliminacion ?? '';
+  const pinEliminacion  = configData?.pin_eliminacion ?? '';
+  const variantesActivo = configData?.variantes_activo === '1';
 
   const agregarItem = useCarritoStore((s) => s.agregarItem);
 
@@ -256,8 +266,11 @@ export function ProductosCantidad() {
       <div className="flex flex-col gap-4">
         <SearchInput value={busqueda} onChange={setBusqueda} placeholder="Buscar producto..." />
 
-        {esAdmin && (
+        {esAdmin && !variantesActivo && (
           <p className="text-xs text-gray-400 px-1">Doble click en una card para editar el producto</p>
+        )}
+        {variantesActivo && (
+          <p className="text-xs text-gray-400 px-1">Click en una card para ver y gestionar sus variantes</p>
         )}
 
         {productosFiltrados.length === 0 ? (
@@ -273,6 +286,8 @@ export function ProductosCantidad() {
                 onAgregar={handleAgregar}
                 onReducir={handleAbrirReducir}
                 onEditar={setProductoAEditar}
+                variantesActivo={variantesActivo}
+                onVerArbol={setProductoArbol}
               />
             ))}
 
@@ -285,11 +300,22 @@ export function ProductosCantidad() {
                 onAgregar={handleAgregar}
                 onReducir={handleAbrirReducir}
                 onEditar={setProductoAEditar}
+                variantesActivo={variantesActivo}
+                onVerArbol={setProductoArbol}
               />
             )}
           </div>
         )}
       </div>
+
+      {productoArbol && (
+        <VistaArbolProducto
+          producto={productoArbol}
+          sucursalId={productosData?.sucursal_id || productoArbol.sucursal_id}
+          esAdmin={esAdmin}
+          onClose={() => setProductoArbol(null)}
+        />
+      )}
 
       {productoAReducir && (
         <ModalPinEliminacion

@@ -7,6 +7,7 @@ import { UsuariosConfig }    from './UsuariosConfig';
 import { SucursalesConfig }  from './SucursalesConfig';
 import { PasswordConfig }    from './PasswordConfig';
 import { MetodosPagoConfig } from './MetodosPagoConfig';
+import { TiposCaracteristicaConfig } from './components/TiposCaracteristicaConfig';
 import { Button }   from '../../components/ui/Button';
 import { Input }    from '../../components/ui/Input';
 import { Modal }    from '../../components/ui/Modal';
@@ -15,7 +16,7 @@ import {
   Settings, Save, Eye, EyeOff, Plus, Trash2,
   GripVertical, ToggleLeft, ToggleRight, Tag, Lock,
   Building2, ShieldCheck, FileSliders, BookOpen, Users,
-  Printer, Palette, ListChecks, Wallet,
+  Printer, Palette, ListChecks, Wallet, Layers,
 } from 'lucide-react';
 
 // ─── Navegación principal ─────────────────────────────────────────────────────
@@ -31,6 +32,7 @@ const TABS_CATALOGO = [
   { id: 'lineas',    label: 'Líneas',    Icn: Tag        },
   { id: 'garantias', label: 'Garantías', Icn: BookOpen   },
   { id: 'seriales',  label: 'Seriales',  Icn: Palette    },
+  { id: 'variantes', label: 'Variantes', Icn: Layers     },
   { id: 'pagos',     label: 'Pagos',     Icn: Wallet     },
 ];
 
@@ -795,6 +797,12 @@ function SeccionCatalogo({ valores, set }) {
           <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
             <CaracteristicasSerialConfig valores={valores} set={set} />
           </div>
+        </div>
+      )}
+
+      {tab === 'variantes' && (
+        <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
+          <TiposCaracteristicaConfig valores={valores} set={set} />
         </div>
       )}
 

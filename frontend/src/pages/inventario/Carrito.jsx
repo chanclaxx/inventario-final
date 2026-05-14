@@ -75,6 +75,20 @@ export function Carrito({ onFacturar, onPrestar, sinHeader = false }) {
                           {item.imei}
                         </span>
                       )}
+                      {(item.atributo_label || item.variante_label) && (
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {item.atributo_label && (
+                            <span className="text-xs bg-blue-50 text-blue-600 border border-blue-100 px-2 py-0.5 rounded-full">
+                              {item.atributo_label}
+                            </span>
+                          )}
+                          {item.variante_label && (
+                            <span className="text-xs bg-purple-50 text-purple-600 border border-purple-100 px-2 py-0.5 rounded-full">
+                              {item.variante_label}
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </div>
                     <button onClick={() => eliminarItem(item.key)}
                       className="text-gray-300 hover:text-red-400 transition-colors flex-shrink-0 p-0.5">

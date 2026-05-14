@@ -83,13 +83,18 @@ function buildPayloadFactura({ tipoCliente, form, items, totalNeto, metodosSelec
           .map((id) => ({ metodo: id, valor: Number(montos[id]) }))
   );
 
-  const lineas = items.map((item) => ({
-    nombre_producto: item.nombre,
-    imei:            item.imei        || null,
-    producto_id:     item.imei ? null : (item.producto_id || null),
-    cantidad:        item.cantidad    || 1,
-    precio:          item.precioFinal,
-  }));
+  const lineas = items.map((item) => {
+    const varLabel = [item.atributo_label, item.variante_label].filter(Boolean).join(' / ');
+    return {
+      nombre_producto: varLabel ? `${item.nombre} (${varLabel})` : item.nombre,
+      imei:            item.imei        || null,
+      producto_id:     item.imei ? null : (item.producto_id || null),
+      atributo_id:     item.atributo_id || null,
+      variante_id:     item.variante_id || null,
+      cantidad:        item.cantidad    || 1,
+      precio:          item.precioFinal,
+    };
+  });
 
   const retomasPayload = retomas.map((r) => ({
     tipo_retoma:          r.tipo_retoma,

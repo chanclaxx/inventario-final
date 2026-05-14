@@ -160,6 +160,8 @@ const crearFactura = async ({
         cantidad:        linea.cantidad,
         precio:          linea.precio,
         producto_id:     linea.imei ? null : (linea.producto_id || null),
+        atributo_id:     linea.atributo_id || null,
+        variante_id:     linea.variante_id || null,
       });
       totalLineas += Number(lineaInsertada.subtotal || 0);
 
@@ -178,19 +180,48 @@ const crearFactura = async ({
           [serialRows[0].id]
         );
       } else if (linea.producto_id) {
-        const { rows: prodRows } = await client.query(
-          `SELECT id, stock, sucursal_id FROM productos_cantidad WHERE id = $1`,
-          [linea.producto_id]
-        );
-        const producto = prodRows[0];
-        if (!producto) throw { status: 404, message: `Producto ${linea.nombre_producto} no encontrado` };
-        if (producto.sucursal_id !== sucursal_id) {
-          throw { status: 400, message: `El producto ${linea.nombre_producto} no pertenece a esta sucursal` };
+        if (linea.variante_id) {
+          // Nivel variante (árbol nivel 2)
+          const { rows: varRows } = await client.query(
+            `SELECT v.stock FROM variantes_atributo v
+             JOIN atributos_producto ap ON ap.id = v.atributo_id
+             WHERE v.id = $1 AND ap.sucursal_id = $2`,
+            [linea.variante_id, sucursal_id]
+          );
+          if (!varRows.length) throw { status: 400, message: `Variante de ${linea.nombre_producto} no encontrada` };
+          if (varRows[0].stock < linea.cantidad) {
+            throw { status: 400, message: `Stock insuficiente para ${linea.nombre_producto}` };
+          }
+          await facturasRepo.ajustarStockVarianteEnTx(client, linea.variante_id, -linea.cantidad);
+          await facturasRepo.sincronizarStockArbolEnTx(client, linea.producto_id);
+        } else if (linea.atributo_id) {
+          // Nivel atributo (árbol nivel 1)
+          const { rows: atrRows } = await client.query(
+            `SELECT stock FROM atributos_producto WHERE id = $1 AND sucursal_id = $2`,
+            [linea.atributo_id, sucursal_id]
+          );
+          if (!atrRows.length) throw { status: 400, message: `Atributo de ${linea.nombre_producto} no encontrado` };
+          if (atrRows[0].stock < linea.cantidad) {
+            throw { status: 400, message: `Stock insuficiente para ${linea.nombre_producto}` };
+          }
+          await facturasRepo.ajustarStockAtributoEnTx(client, linea.atributo_id, -linea.cantidad);
+          await facturasRepo.sincronizarStockArbolEnTx(client, linea.producto_id);
+        } else {
+          // Flujo original (sin árbol)
+          const { rows: prodRows } = await client.query(
+            `SELECT id, stock, sucursal_id FROM productos_cantidad WHERE id = $1`,
+            [linea.producto_id]
+          );
+          const producto = prodRows[0];
+          if (!producto) throw { status: 404, message: `Producto ${linea.nombre_producto} no encontrado` };
+          if (producto.sucursal_id !== sucursal_id) {
+            throw { status: 400, message: `El producto ${linea.nombre_producto} no pertenece a esta sucursal` };
+          }
+          if (producto.stock < linea.cantidad) {
+            throw { status: 400, message: `Stock insuficiente para ${linea.nombre_producto}` };
+          }
+          await facturasRepo.ajustarStockCantidad(client, linea.producto_id, -linea.cantidad);
         }
-        if (producto.stock < linea.cantidad) {
-          throw { status: 400, message: `Stock insuficiente para ${linea.nombre_producto}` };
-        }
-        await facturasRepo.ajustarStockCantidad(client, linea.producto_id, -linea.cantidad);
       }
     }
 
@@ -382,7 +413,15 @@ const cancelarFactura = async (negocioId, id, eliminarRetoma = false, _desdeDevo
           );
         }
       } else if (linea.producto_id) {
-        await facturasRepo.ajustarStockCantidad(client, linea.producto_id, linea.cantidad);
+        if (linea.variante_id) {
+          await facturasRepo.ajustarStockVarianteEnTx(client, linea.variante_id, linea.cantidad);
+          await facturasRepo.sincronizarStockArbolEnTx(client, linea.producto_id);
+        } else if (linea.atributo_id) {
+          await facturasRepo.ajustarStockAtributoEnTx(client, linea.atributo_id, linea.cantidad);
+          await facturasRepo.sincronizarStockArbolEnTx(client, linea.producto_id);
+        } else {
+          await facturasRepo.ajustarStockCantidad(client, linea.producto_id, linea.cantidad);
+        }
       }
     }
 
