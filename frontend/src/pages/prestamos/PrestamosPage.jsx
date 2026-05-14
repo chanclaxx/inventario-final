@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { buscarPrestamos as buscarPrestamosApi } from '../../api/busqueda.api';
 import { exportarPrestamosExcel } from '../../utils/exportarPrestamosExcel';
-import { getPrestamos, registrarAbonoPrestamo, devolverPrestamo, devolverParcialPrestamo, registrarSaldoAFavor as registrarSaldoAFavorApi, intercambiarPrestamo as intercambiarPrestamoApi, anularAbono as anularAbonoApi, getRetomasDirectas as getRetomasDirectasApi, anularRetomaDirecta as anularRetomaDirectaApi, aplicarSaldoAPrestamo as aplicarSaldoAPrestamoApi } from '../../api/prestamos.api';
+import { exportarCarteraPersonaExcel } from '../../utils/exportarCarteraPersonaExcel';
+import { getPrestamos, registrarAbonoPrestamo, devolverPrestamo, devolverParcialPrestamo, registrarSaldoAFavor as registrarSaldoAFavorApi, intercambiarPrestamo as intercambiarPrestamoApi, anularAbono as anularAbonoApi, getRetomasDirectas as getRetomasDirectasApi, anularRetomaDirecta as anularRetomaDirectaApi, aplicarSaldoAPrestamo as aplicarSaldoAPrestamoApi, getEstadoCuenta as getEstadoCuentaApi } from '../../api/prestamos.api';
 import {
   getDomiciliarios,
   getEntregas,
@@ -118,6 +119,35 @@ function BotonExportarPdf({ tipo, personaId, nombrePersona }) {
         hover:border-blue-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0">
       {exportando ? <Loader2 size={12} className="animate-spin" /> : <FileDown size={12} />}
       PDF
+    </button>
+  );
+}
+
+function BotonExportarExcel({ tipo, personaId, nombre, cedula, telefono, prestamos, saldoAFavor }) {
+  const [cargando, setCargando] = useState(false);
+
+  const handleClick = async (e) => {
+    e.stopPropagation();
+    if (cargando) return;
+    setCargando(true);
+    try {
+      const res = await getEstadoCuentaApi(tipo, personaId);
+      const movimientos = res.data.data || [];
+      exportarCarteraPersonaExcel({ nombre, tipo, cedula, telefono, prestamos, movimientos, saldoAFavor });
+    } catch {
+      alert('No se pudo generar el Excel. Intenta de nuevo.');
+    } finally {
+      setCargando(false);
+    }
+  };
+
+  return (
+    <button onClick={handleClick} disabled={cargando}
+      className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium
+        border border-emerald-200 text-emerald-700 bg-emerald-50 hover:bg-emerald-100
+        hover:border-emerald-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0">
+      {cargando ? <Loader2 size={12} className="animate-spin" /> : <FileDown size={12} />}
+      Excel
     </button>
   );
 }
@@ -1121,13 +1151,24 @@ function VistaDetallePersona({ nombre, tipo, personaId, prestamos, saldoAFavor =
               {telefono && <p className="text-xs text-gray-400">Tel: {telefono}</p>}
             </div>
           </div>
-          {activosAll.length > 0 && (
-            <BotonExportarPdf
+          <div className="flex items-center gap-1.5 flex-shrink-0">
+            {activosAll.length > 0 && (
+              <BotonExportarPdf
+                tipo={tipo === 'companero' ? 'prestatario' : 'cliente'}
+                personaId={personaId}
+                nombrePersona={nombre}
+              />
+            )}
+            <BotonExportarExcel
               tipo={tipo === 'companero' ? 'prestatario' : 'cliente'}
               personaId={personaId}
-              nombrePersona={nombre}
+              nombre={nombre}
+              cedula={cedula}
+              telefono={telefono}
+              prestamos={prestamos}
+              saldoAFavor={saldoAFavor}
             />
-          )}
+          </div>
         </div>
 
         {/* Fila 2: métricas de cuenta */}

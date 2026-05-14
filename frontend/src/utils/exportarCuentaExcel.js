@@ -306,8 +306,6 @@ function hojaLineas(comprasDetalle) {
   comprasDetalle.forEach((compra) => {
     const lineas = compra?.lineas || [];
     if (lineas.length === 0) return;
-    const bgBase = bgCompra(compra.estado);
-
     // Fila de grupo (cabecera de la compra)
     const grupoLabel = `▶  Compra #${compra.id}  ·  ${fmtFecha(compra.fecha)}  ·  ${compra.numero_factura || 'Sin factura'}  ·  ${compra.proveedor_nombre || ''}`;
     COLS_LINEAS.forEach((_, c) => put(ws, r, c, 's', c === 0 ? grupoLabel : '', sH(C.headerGris)));
