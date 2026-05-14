@@ -996,6 +996,9 @@ function VistaDetallePersona({ nombre, tipo, personaId, prestamos, saldoAFavor =
   const [cerradosAbiertos,    setCerradosAbiertos]    = useState(false);
   const [retomasAbiertas,     setRetomasAbiertas]     = useState(false);
   const [confirmAnularRetoma, setConfirmAnularRetoma] = useState(null);
+  const [busquedaPrest,       setBusquedaPrest]       = useState('');
+  const [fechaPrestDesde,     setFechaPrestDesde]     = useState('');
+  const [fechaPrestHasta,     setFechaPrestHasta]     = useState('');
 
   const tipoApi = tipo === 'companero' ? 'prestatario' : tipo;
 
@@ -1018,12 +1021,25 @@ function VistaDetallePersona({ nombre, tipo, personaId, prestamos, saldoAFavor =
     },
   });
 
-  const activos  = prestamos.filter((p) => p.estado === 'Activo');
-  const cerrados = prestamos.filter((p) => p.estado !== 'Activo');
-  const saldoTotal  = activos.reduce(
+  const activosAll  = prestamos.filter((p) => p.estado === 'Activo');
+  const cerradosAll = prestamos.filter((p) => p.estado !== 'Activo');
+  const saldoTotal  = activosAll.reduce(
     (s, p) => s + (Number(p.valor_prestamo) - Number(p.total_abonado)), 0
   );
   const pagadoTotal = prestamos.reduce((s, p) => s + Number(p.total_abonado), 0);
+
+  const hayFiltrosPrest = busquedaPrest.trim() || fechaPrestDesde || fechaPrestHasta;
+
+  const filtrarPrest = (lista) => lista.filter((p) => {
+    const q = busquedaPrest.trim().toLowerCase();
+    if (q && !p.nombre_producto?.toLowerCase().includes(q)) return false;
+    if (fechaPrestDesde && p.fecha && new Date(p.fecha) < new Date(fechaPrestDesde)) return false;
+    if (fechaPrestHasta && p.fecha && new Date(p.fecha) > new Date(fechaPrestHasta + 'T23:59:59')) return false;
+    return true;
+  });
+
+  const activos  = filtrarPrest(activosAll);
+  const cerrados = filtrarPrest(cerradosAll);
 
   const ref      = prestamos[0] || {};
   const cedula   = ref.cedula   !== 'COMPANERO' ? ref.cedula   : null;
@@ -1058,7 +1074,7 @@ function VistaDetallePersona({ nombre, tipo, personaId, prestamos, saldoAFavor =
               {telefono && <p className="text-xs text-gray-400">Tel: {telefono}</p>}
             </div>
           </div>
-          {activos.length > 0 && (
+          {activosAll.length > 0 && (
             <BotonExportarPdf
               tipo={tipo === 'companero' ? 'prestatario' : 'cliente'}
               personaId={personaId}
@@ -1097,7 +1113,7 @@ function VistaDetallePersona({ nombre, tipo, personaId, prestamos, saldoAFavor =
               border border-purple-200 text-purple-600 bg-purple-50 hover:bg-purple-100 transition-colors">
             <ArrowLeftRight size={12} /> Comprar artículo
           </button>
-          {saldoAFavor > 0 && activos.length > 0 && (
+          {saldoAFavor > 0 && activosAll.length > 0 && (
             <button
               onClick={onAplicarSaldo}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium
@@ -1139,6 +1155,50 @@ function VistaDetallePersona({ nombre, tipo, personaId, prestamos, saldoAFavor =
       {/* ── Tab: Préstamos ── */}
       {tabDetalle === 'prestamos' && (
         <>
+
+      {/* Barra búsqueda + fechas */}
+      <div className="flex flex-col gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="relative flex-1 min-w-[180px]">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+            <input
+              type="text"
+              placeholder="Buscar por producto..."
+              value={busquedaPrest}
+              onChange={(e) => setBusquedaPrest(e.target.value)}
+              className="w-full pl-8 pr-3 py-2 bg-white border border-gray-200 rounded-xl text-sm
+                focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent transition-all"
+            />
+          </div>
+          <div className="flex items-center gap-1.5">
+            <label className="text-xs text-gray-400 whitespace-nowrap">Desde</label>
+            <input type="date" value={fechaPrestDesde}
+              onChange={(e) => setFechaPrestDesde(e.target.value)}
+              className="px-2 py-2 bg-white border border-gray-200 rounded-xl text-xs text-gray-700
+                focus:outline-none focus:ring-2 focus:ring-blue-400 transition-all" />
+          </div>
+          <div className="flex items-center gap-1.5">
+            <label className="text-xs text-gray-400 whitespace-nowrap">Hasta</label>
+            <input type="date" value={fechaPrestHasta}
+              onChange={(e) => setFechaPrestHasta(e.target.value)}
+              className="px-2 py-2 bg-white border border-gray-200 rounded-xl text-xs text-gray-700
+                focus:outline-none focus:ring-2 focus:ring-blue-400 transition-all" />
+          </div>
+          {hayFiltrosPrest && (
+            <button
+              onClick={() => { setBusquedaPrest(''); setFechaPrestDesde(''); setFechaPrestHasta(''); }}
+              className="text-xs text-gray-400 hover:text-gray-600 transition-colors whitespace-nowrap">
+              Limpiar
+            </button>
+          )}
+        </div>
+        {hayFiltrosPrest && (
+          <p className="text-xs text-gray-400">
+            {activos.length + cerrados.length} préstamo{activos.length + cerrados.length !== 1 ? 's' : ''} encontrado{activos.length + cerrados.length !== 1 ? 's' : ''}
+          </p>
+        )}
+      </div>
+
       {/* Préstamos activos */}
       {activos.length > 0 && (
         <div className="flex flex-col gap-2.5">

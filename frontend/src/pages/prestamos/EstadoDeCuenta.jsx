@@ -117,6 +117,7 @@ export function EstadoDeCuenta({ tipo, personaId }) {
   const [fechaHasta, setFechaHasta]   = useState('');
   const [sortDir,    setSortDir]      = useState('asc');  // 'asc' | 'desc'
   const [paginaMov,  setPaginaMov]    = useState(1);
+  const [filtroTipo, setFiltroTipo]   = useState('todos');
 
   const tipoApi = tipo === 'companero' ? 'prestatario' : tipo;
 
@@ -168,8 +169,9 @@ export function EstadoDeCuenta({ tipo, personaId }) {
     }
   };
 
-  // Filtrar por fechas si se especifica
+  // Filtrar por tipo, fechas
   const filtrados = movimientos.filter((m) => {
+    if (filtroTipo !== 'todos' && m.tipo !== filtroTipo) return false;
     const f = m.fecha ? new Date(m.fecha) : null;
     if (fechaDesde && f && f < new Date(fechaDesde)) return false;
     if (fechaHasta && f && f > new Date(fechaHasta + 'T23:59:59')) return false;
@@ -238,6 +240,24 @@ export function EstadoDeCuenta({ tipo, personaId }) {
         <span className="text-xs text-gray-400">
           {filtrados.length} mov.
         </span>
+      </div>
+
+      {/* Filtro por tipo de movimiento */}
+      <div className="flex items-center gap-1 flex-wrap">
+        <button
+          onClick={() => { setFiltroTipo('todos'); setPaginaMov(1); }}
+          className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-all
+            ${filtroTipo === 'todos' ? 'bg-gray-800 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
+          Todos
+        </button>
+        {Object.entries(TIPO_CONFIG).map(([key, cfg]) => (
+          <button key={key}
+            onClick={() => { setFiltroTipo(key); setPaginaMov(1); }}
+            className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-all
+              ${filtroTipo === key ? cfg.badge + ' ring-1 ring-current' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
+            {cfg.label}
+          </button>
+        ))}
       </div>
 
       {/* Cabecera de columnas */}
