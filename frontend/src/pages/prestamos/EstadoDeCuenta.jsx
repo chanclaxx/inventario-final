@@ -142,7 +142,7 @@ export function EstadoDeCuenta({ tipo, personaId }) {
   const [confirmando, setConfirmando] = useState(null);
   const [fechaDesde, setFechaDesde]   = useState('');
   const [fechaHasta, setFechaHasta]   = useState('');
-  const [sortDir,    setSortDir]      = useState('asc');
+  const [sortDir,    setSortDir]      = useState('desc');
   const [paginaMov,  setPaginaMov]    = useState(1);
   const [filtroTipo, setFiltroTipo]   = useState('todos');
 
