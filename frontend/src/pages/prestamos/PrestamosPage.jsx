@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { buscarPrestamos as buscarPrestamosApi } from '../../api/busqueda.api';
 import { exportarPrestamosExcel } from '../../utils/exportarPrestamosExcel';
-import { getPrestamos, registrarAbonoPrestamo, devolverPrestamo, devolverParcialPrestamo, registrarSaldoAFavor as registrarSaldoAFavorApi, intercambiarPrestamo as intercambiarPrestamoApi, anularAbono as anularAbonoApi, getRetomasDirectas as getRetomasDirectasApi, anularRetomaDirecta as anularRetomaDirectaApi } from '../../api/prestamos.api';
+import { getPrestamos, registrarAbonoPrestamo, devolverPrestamo, devolverParcialPrestamo, registrarSaldoAFavor as registrarSaldoAFavorApi, intercambiarPrestamo as intercambiarPrestamoApi, anularAbono as anularAbonoApi, getRetomasDirectas as getRetomasDirectasApi, anularRetomaDirecta as anularRetomaDirectaApi, aplicarSaldoAPrestamo as aplicarSaldoAPrestamoApi } from '../../api/prestamos.api';
 import {
   getDomiciliarios,
   getEntregas,
@@ -25,7 +25,6 @@ import { ModalImprimirFactura }                 from '../../components/ui/ModalI
 import { ModalImprimirPrestamo }                from '../../components/ui/ModalImprimirPrestamo';
 import { TabCreditos }                          from './TabCreditos';
 import { ModalRetomaDirecta }                   from './ModalRetomaDirecta';
-import { ModalAplicarSaldo }                    from './ModalAplicarSaldo';
 import { EstadoDeCuenta }                       from './EstadoDeCuenta';
 import { useMetodosPago }                       from '../../hooks/useMetodosPago';
 import useExportarPdfPrestamos                  from '../../hooks/useExportarPdfPrestamos';
@@ -885,7 +884,7 @@ function HistorialPrestamo({ prestamoId, prestamoEstado }) {
   );
 }
 
-function TarjetaPrestamoDetalle({ prestamo, onAbonar, onDevolver, onImprimir, onIntercambiar, coloresActivo, cerrado = false }) {
+function TarjetaPrestamoDetalle({ prestamo, onAbonar, onDevolver, onImprimir, onIntercambiar, onAplicarSaldo, saldoAFavor = 0, aplicandoSaldo = false, coloresActivo, cerrado = false }) {
   const [historialAbierto, setHistorialAbierto] = useState(false);
 
   const saldo    = Number(prestamo.valor_prestamo) - Number(prestamo.total_abonado);
@@ -961,6 +960,19 @@ function TarjetaPrestamoDetalle({ prestamo, onAbonar, onDevolver, onImprimir, on
             <Button size="sm" variant="secondary" onClick={() => onDevolver(prestamo)}>
               <CheckCircle size={14} /> Devuelto
             </Button>
+            {saldoAFavor > 0 && saldo > 0 && (
+              <button
+                onClick={() => onAplicarSaldo(prestamo.id)}
+                disabled={aplicandoSaldo}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium
+                  border border-emerald-200 text-emerald-700 bg-emerald-50 hover:bg-emerald-100
+                  transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                {aplicandoSaldo
+                  ? <Loader2 size={12} className="animate-spin" />
+                  : <Wallet size={12} />}
+                Aplicar saldo a favor
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -990,7 +1002,7 @@ function TarjetaPrestamoDetalle({ prestamo, onAbonar, onDevolver, onImprimir, on
 
 // ─── Vista detalle de persona ─────────────────────────────────────────────────
 
-function VistaDetallePersona({ nombre, tipo, personaId, prestamos, saldoAFavor = 0, onVolver, onAbonar, onDevolver, onImprimir, onIntercambiar, onRegistrarSaldo, onRetomaDirecta, onAplicarSaldo, coloresActivo }) {
+function VistaDetallePersona({ nombre, tipo, personaId, prestamos, saldoAFavor = 0, onVolver, onAbonar, onDevolver, onImprimir, onIntercambiar, onRegistrarSaldo, onRetomaDirecta, coloresActivo }) {
   const queryClient = useQueryClient();
   const [tabDetalle,          setTabDetalle]          = useState('prestamos'); // 'prestamos' | 'cuenta'
   const [cerradosAbiertos,    setCerradosAbiertos]    = useState(false);
@@ -999,6 +1011,22 @@ function VistaDetallePersona({ nombre, tipo, personaId, prestamos, saldoAFavor =
   const [busquedaPrest,       setBusquedaPrest]       = useState('');
   const [fechaPrestDesde,     setFechaPrestDesde]     = useState('');
   const [fechaPrestHasta,     setFechaPrestHasta]     = useState('');
+  const [aplicandoSaldoId,    setAplicandoSaldoId]    = useState(null);
+  const [resultadoSaldo,      setResultadoSaldo]      = useState(null);
+
+  const mutAplicarSaldo = useMutation({
+    mutationFn: (prestamoId) => aplicarSaldoAPrestamoApi(prestamoId),
+    onMutate:   (prestamoId) => setAplicandoSaldoId(prestamoId),
+    onSuccess:  (res) => {
+      queryClient.invalidateQueries({ queryKey: ['prestamos'], exact: false });
+      setResultadoSaldo(res.data.data);
+      setAplicandoSaldoId(null);
+    },
+    onError: (err) => {
+      alert(err.response?.data?.error || 'Error al aplicar el saldo');
+      setAplicandoSaldoId(null);
+    },
+  });
 
   const tipoApi = tipo === 'companero' ? 'prestatario' : tipo;
 
@@ -1113,14 +1141,6 @@ function VistaDetallePersona({ nombre, tipo, personaId, prestamos, saldoAFavor =
               border border-purple-200 text-purple-600 bg-purple-50 hover:bg-purple-100 transition-colors">
             <ArrowLeftRight size={12} /> Comprar artículo
           </button>
-          {saldoAFavor > 0 && activosAll.length > 0 && (
-            <button
-              onClick={onAplicarSaldo}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium
-                bg-emerald-600 hover:bg-emerald-700 text-white transition-colors">
-              <Wallet size={12} /> Aplicar saldo
-            </button>
-          )}
           <button
             onClick={onRegistrarSaldo}
             className="flex items-center gap-1.5 text-xs font-medium text-gray-400
@@ -1209,6 +1229,9 @@ function VistaDetallePersona({ nombre, tipo, personaId, prestamos, saldoAFavor =
             <TarjetaPrestamoDetalle key={p.id} prestamo={p}
               onAbonar={onAbonar} onDevolver={onDevolver} onImprimir={onImprimir}
               onIntercambiar={onIntercambiar}
+              saldoAFavor={saldoAFavor}
+              onAplicarSaldo={(id) => mutAplicarSaldo.mutate(id)}
+              aplicandoSaldo={aplicandoSaldoId === p.id}
               coloresActivo={coloresActivo} />
           ))}
         </div>
@@ -1334,6 +1357,36 @@ function VistaDetallePersona({ nombre, tipo, personaId, prestamos, saldoAFavor =
         </div>
       )}
         </>
+      )}
+
+      {/* Modal informativo — resultado de aplicar saldo */}
+      {resultadoSaldo && (
+        <Modal open onClose={() => setResultadoSaldo(null)} title="Saldo aplicado" size="sm">
+          <div className="flex flex-col gap-4">
+            <div className={`rounded-xl px-4 py-3 text-center border
+              ${resultadoSaldo.saldado
+                ? 'bg-green-50 border-green-200'
+                : 'bg-emerald-50 border-emerald-200'}`}>
+              <p className={`font-semibold text-sm ${resultadoSaldo.saldado ? 'text-green-700' : 'text-emerald-700'}`}>
+                {resultadoSaldo.saldado ? '✓ Préstamo saldado' : '✓ Saldo aplicado correctamente'}
+              </p>
+              <p className="text-xs mt-0.5 text-gray-500">{resultadoSaldo.nombre_producto}</p>
+            </div>
+            <div className="flex flex-col gap-2">
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-500">Monto aplicado</span>
+                <span className="font-semibold text-emerald-700">− {formatCOP(resultadoSaldo.abono_aplicado)}</span>
+              </div>
+              <div className="flex justify-between text-sm border-t border-gray-100 pt-2">
+                <span className="text-gray-500">Saldo a favor restante</span>
+                <span className={`font-semibold ${resultadoSaldo.saldo_restante > 0 ? 'text-emerald-600' : 'text-gray-400'}`}>
+                  {formatCOP(resultadoSaldo.saldo_restante)}
+                </span>
+              </div>
+            </div>
+            <Button onClick={() => setResultadoSaldo(null)}>Cerrar</Button>
+          </div>
+        </Modal>
       )}
     </div>
   );
@@ -1899,7 +1952,6 @@ export default function PrestamosPage() {
   const [prestamoIntercambio, setPrestamoIntercambio] = useState(null);
   const [modalSaldoPersona,   setModalSaldoPersona]   = useState(null); // { nombre, tipo, personaId, saldoAFavor }
   const [modalRetomaDirecta,  setModalRetomaDirecta]  = useState(null); // { persona: { tipo, id, nombre } }
-  const [modalAplicarSaldo,   setModalAplicarSaldo]   = useState(null); // { persona, saldoAFavor, prestamosActivos }
   const abonosImprimir = useAbonosPrestamo(prestamoImprimir?.id);
 
   const [saldadoFacturaId,   setSaldadoFacturaId]   = useState(null);
@@ -2117,15 +2169,6 @@ export default function PrestamosPage() {
                     nombre: grupoActual.nombre,
                   },
                 })}
-                onAplicarSaldo={() => setModalAplicarSaldo({
-                  persona: {
-                    tipo:   tabPrestamos === 'companeros' ? 'companero' : 'cliente',
-                    id:     grupoActual.personaId,
-                    nombre: grupoActual.nombre,
-                  },
-                  saldoAFavor:      grupoActual.saldoAFavor ?? 0,
-                  prestamosActivos: grupoActual.prestamos.filter((p) => p.estado === 'Activo'),
-                })}
                 coloresActivo={coloresActivo}
               />
             ) : (
@@ -2303,17 +2346,6 @@ export default function PrestamosPage() {
         />
       )}
 
-      {modalAplicarSaldo && (
-        <ModalAplicarSaldo
-          persona={modalAplicarSaldo.persona}
-          saldoAFavor={modalAplicarSaldo.saldoAFavor}
-          prestamosActivos={modalAplicarSaldo.prestamosActivos}
-          onClose={() => setModalAplicarSaldo(null)}
-          onSuccess={() => {
-            setModalAplicarSaldo(null);
-          }}
-        />
-      )}
     </div>
   );
 }

@@ -614,6 +614,24 @@ const getEstadoCuenta = async (executor, negocioId, tipo, personaId) => {
   return rows;
 };
 
+const getPrestamoActivoById = async (executor, prestamoId, negocioId) => {
+  const { rows } = await executor.query(`
+    SELECT
+      p.id, p.fecha, p.nombre_producto, p.imei,
+      p.cantidad_prestada, p.valor_prestamo, p.total_abonado,
+      (p.valor_prestamo - p.total_abonado) AS saldo_pendiente,
+      p.estado, p.sucursal_id, p.prestatario, p.cedula, p.telefono,
+      p.prestatario_id, p.empleado_id, p.cliente_id, p.producto_id,
+      CASE WHEN p.prestatario_id IS NOT NULL THEN 'prestatario' ELSE 'cliente' END AS tipo_persona,
+      COALESCE(p.prestatario_id, p.cliente_id) AS persona_id
+    FROM prestamos p
+    JOIN sucursales su ON su.id = p.sucursal_id
+    WHERE p.id = $1 AND su.negocio_id = $2 AND p.estado = 'Activo'
+    FOR UPDATE
+  `, [prestamoId, negocioId]);
+  return rows[0] || null;
+};
+
 module.exports = {
   findAll, findById, findByIdYNegocio,
   perteneceAlNegocio,
@@ -624,7 +642,7 @@ module.exports = {
   retornarSerialConOrigen,
   insertarRetoma, insertarRetomaDirecta, insertarSerialParaRetoma, ajustarStockConHistorialEnTx,
   getRetomasPorPrestamo,
-  findActivosPorPersona, getResumenPersona,
+  findActivosPorPersona, getResumenPersona, getPrestamoActivoById,
   // anulación
   findAbonoById, eliminarAbono, restarTotalAbonado,
   cancelarFacturaDePrestamo, revertirSerialVendido,

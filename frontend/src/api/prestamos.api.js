@@ -18,8 +18,10 @@ export const getResumenCartera   = (tipo, id) =>
   api.get(`/prestamos/personas/${tipo}/${id}/resumen`);
 export const retomaDirecta       = (data) =>
   api.post('/prestamos/retoma-directa', data);
-export const aplicarSaldoActivos = (tipo, id) =>
+export const aplicarSaldoActivos    = (tipo, id) =>
   api.post(`/prestamos/personas/${tipo}/${id}/aplicar-saldo`);
+export const aplicarSaldoAPrestamo  = (prestamoId) =>
+  api.post(`/prestamos/${prestamoId}/aplicar-saldo`);
 export const anularAbono = (prestamoId, abonoId, retomaId = null) =>
   api.delete(`/prestamos/${prestamoId}/abonos/${abonoId}`, { data: { retoma_id: retomaId } });
 export const getRetomasDirectas = (tipo, id) =>

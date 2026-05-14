@@ -309,6 +309,13 @@ const getEstadoCuenta = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+const aplicarSaldoAPrestamo = async (req, res, next) => {
+  try {
+    const data = await service.aplicarSaldoAPrestamo(req.user.negocio_id, Number(req.params.id));
+    res.json({ ok: true, data });
+  } catch (err) { next(err); }
+};
+
 module.exports = {
   getPrestamos, getPrestamoById,
   crearPrestamo, crearPrestamos,
@@ -317,7 +324,7 @@ module.exports = {
   exportarPdfPorPersona, exportarPdfPrestamoIndividual,
   registrarSaldoAFavor,
   intercambiarPrestamo,
-  retomaDirecta, aplicarSaldoAPrestamos, getResumenCartera,
+  retomaDirecta, aplicarSaldoAPrestamos, aplicarSaldoAPrestamo, getResumenCartera,
   anularAbono, getRetomasDirectas, anularRetomaDirecta,
   getEstadoCuenta,
 };

@@ -974,6 +974,61 @@ const getEstadoCuenta = async (negocioId, tipo, personaId) => {
   });
 };
 
+// ─── Aplicar saldo a un préstamo específico ───────────────────────────────────
+
+const aplicarSaldoAPrestamo = async (negocioId, prestamoId) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const prestamo = await repo.getPrestamoActivoById(client, prestamoId, negocioId);
+    if (!prestamo) throw { status: 404, message: 'Préstamo no encontrado o no está activo' };
+
+    const tipo      = prestamo.tipo_persona;
+    const personaId = Number(prestamo.persona_id);
+
+    const saldoAFavor = await repo.getSaldoAFavorPersona(client, tipo, personaId);
+    if (saldoAFavor <= 0) throw { status: 400, message: 'La persona no tiene saldo a favor disponible' };
+
+    const saldoPendiente = Number(prestamo.saldo_pendiente);
+    if (saldoPendiente <= 0) throw { status: 400, message: 'El préstamo ya está saldado' };
+
+    const montoAbono = Math.min(saldoAFavor, saldoPendiente);
+    const resultado  = await repo.insertarAbono(client, {
+      prestamo_id: prestamoId,
+      valor:       montoAbono,
+      metodo:      'Saldo a favor',
+      usuario_id:  null,
+    });
+
+    let saldado    = false;
+    let factura_id = null;
+    if (Number(resultado.total_abonado) >= Number(resultado.valor_prestamo)) {
+      saldado    = true;
+      await repo.updateEstado(client, prestamoId, 'Saldado');
+      factura_id = await _crearFacturaDesdePrestamo(client, prestamo, 'Saldo a favor', negocioId);
+    }
+
+    const saldoRestante = Math.max(0, saldoAFavor - montoAbono);
+    await repo.setearSaldoAFavorPersona(client, tipo, personaId, saldoRestante);
+
+    await client.query('COMMIT');
+    return {
+      prestamo_id:     prestamoId,
+      nombre_producto: prestamo.nombre_producto,
+      abono_aplicado:  montoAbono,
+      saldado,
+      factura_id,
+      saldo_restante:  saldoRestante,
+    };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+};
+
 module.exports = {
   getPrestamos, getPrestamoById,
   crearPrestamo, crearPrestamos,
@@ -981,7 +1036,7 @@ module.exports = {
   devolverPrestamo, devolverParcial,
   registrarSaldoAFavor,
   intercambiarPrestamo,
-  retomaDirecta, aplicarSaldoAPrestamos, getResumenCartera,
+  retomaDirecta, aplicarSaldoAPrestamos, aplicarSaldoAPrestamo, getResumenCartera,
   anularAbono, anularRetomaDirecta, getRetomasDirectas,
   getEstadoCuenta,
 };
