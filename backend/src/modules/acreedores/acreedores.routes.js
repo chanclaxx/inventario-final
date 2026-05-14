@@ -4,6 +4,7 @@ const { validate }      = require('../../middlewares/validate.middleware');
 const { requireNivel }  = require('../../middlewares/role.middleware');
 const { requireModulo } = require('../../middlewares/modulo.middleware');
 const ctrl     = require('./acreedores.controller');
+const pdfCtrl  = require('./acreedores.pdf.controller');
 
 const validarMovimiento = [
   body('tipo').isIn(['Abono', 'Cargo']).withMessage('Tipo debe ser Abono o Cargo'),
@@ -23,6 +24,7 @@ router.get('/:id/cargos',                    requireModulo('acreedores'), ctrl.g
 router.get('/:id/compras-saldo',             requireModulo('acreedores'), ctrl.getComprasConSaldo);
 router.get('/:id/cargos/:cargoId/abonos',    requireModulo('acreedores'), ctrl.getAbonosPorCargo);
 router.get('/:id/saldo-favor',     requireModulo('acreedores'), ctrl.getSaldoAFavor);
+router.get('/:id/pdf',             requireModulo('acreedores'), pdfCtrl.getPdfCuentaAcreedor);
 router.post('/',                   requireModulo('acreedores'), requireNivel('supervisor'),    ctrl.crearAcreedor);
 router.post('/:id/movimientos',    requireModulo('acreedores'), validarMovimiento, validate,   ctrl.registrarMovimiento);
 router.post('/:id/aplicar-saldo',  requireModulo('acreedores'),

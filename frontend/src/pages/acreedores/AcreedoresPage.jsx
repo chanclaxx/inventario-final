@@ -11,6 +11,7 @@ import {
   aplicarSaldoAFavor,
   editarAbono,
   eliminarAbono,
+  exportarCuentaPdf,
 } from '../../api/acreedores.api';
 import { getConfig, verificarPin } from '../../api/config.api';
 import { useMetodosPago } from '../../hooks/useMetodosPago';
@@ -27,7 +28,7 @@ import { SearchInput } from '../../components/ui/SearchInput';
 import { ReciboAcreedor } from '../../components/Reciboacreedor';
 import {
   Users, Plus, ChevronDown, ChevronUp, ChevronLeft, ChevronRight,
-  Trash2, AlertTriangle, Calculator, PenLine, Wallet, Search,
+  Trash2, AlertTriangle, Calculator, PenLine, Wallet, Search, FileDown,
 } from 'lucide-react';
 import api from '../../api/axios.config';
 import { getCompraById } from '../../api/compras.api';
@@ -1020,6 +1021,25 @@ function DetalleAcreedor({ acreedor, esAdmin, onVolver, onEliminar }) {
   const [busquedaCargo,    setBusquedaCargo]    = useState('');
   const [filtroEstado,     setFiltroEstado]     = useState('todos');
   const [ordenCargos,      setOrdenCargos]      = useState('fecha_desc');
+  const [exportandoPdf,    setExportandoPdf]    = useState(false);
+
+  const handleExportPdf = async () => {
+    if (exportandoPdf) return;
+    setExportandoPdf(true);
+    try {
+      const res = await exportarCuentaPdf(acreedor.id);
+      const url = URL.createObjectURL(new Blob([res.data], { type: 'application/pdf' }));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `cuenta_${acreedor.nombre.replace(/\s+/g, '_').toLowerCase()}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      // silencioso — el servidor devuelve error estándar si falla
+    } finally {
+      setExportandoPdf(false);
+    }
+  };
 
   const { data: configData } = useQuery({
     queryKey: ['config'],
@@ -1156,6 +1176,15 @@ function DetalleAcreedor({ acreedor, esAdmin, onVolver, onEliminar }) {
                   border border-gray-200 bg-white text-gray-600
                   hover:border-blue-300 hover:text-blue-600 hover:bg-blue-50 transition-all">
                 <Plus size={13} /> Agregar cargo
+              </button>
+              <button
+                onClick={handleExportPdf}
+                disabled={exportandoPdf}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold
+                  border border-gray-200 bg-white text-gray-600
+                  hover:border-gray-400 hover:text-gray-800 hover:bg-gray-50 transition-all
+                  disabled:opacity-50 disabled:cursor-not-allowed">
+                <FileDown size={13} /> {exportandoPdf ? 'Generando…' : 'Exportar PDF'}
               </button>
             </div>
           </div>

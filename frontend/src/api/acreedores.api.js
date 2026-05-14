@@ -17,3 +17,6 @@ export const editarAbono   = (acreedorId, movId, data) =>
   api.put(`/acreedores/${acreedorId}/movimientos/${movId}`, data);
 export const eliminarAbono = (acreedorId, movId) =>
   api.delete(`/acreedores/${acreedorId}/movimientos/${movId}`);
+
+export const exportarCuentaPdf = (id) =>
+  api.get(`/acreedores/${id}/pdf`, { responseType: 'blob' });
