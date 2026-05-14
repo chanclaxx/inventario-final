@@ -4,7 +4,8 @@ import { getEstadoCuenta } from '../../api/prestamos.api';
 import { anularAbono as anularAbonoApi, anularRetomaDirecta as anularRetomaDirectaApi } from '../../api/prestamos.api';
 import { formatCOP } from '../../utils/formatters';
 import { Spinner }   from '../../components/ui/Spinner';
-import { XCircle, TrendingDown, TrendingUp, ArrowLeftRight, Wallet, ChevronLeft, ChevronRight, ArrowUpDown } from 'lucide-react';
+import { XCircle, TrendingDown, TrendingUp, ArrowLeftRight, Wallet, ChevronLeft, ChevronRight, ArrowUpDown, Pencil } from 'lucide-react';
+import { ModalEditarValorPrestamo } from './ModalEditarValorPrestamo';
 
 const PAGE_SIZE_MOVS = 20;
 
@@ -77,7 +78,7 @@ function SeparadorFecha({ fecha }) {
 
 // ─── Burbuja de chat por movimiento ──────────────────────────────────────────
 
-function BurbujaMensaje({ mov, onAnular }) {
+function BurbujaMensaje({ mov, onAnular, onEditar }) {
   const cfg = TIPO_CONFIG[mov.tipo] || TIPO_CONFIG.abono;
   const Icn = cfg.Icn;
   const esDerecha = cfg.lado === 'derecha';
@@ -117,9 +118,17 @@ function BurbujaMensaje({ mov, onAnular }) {
             </p>
           )}
 
-          {/* Footer: fecha + anular */}
+          {/* Footer: fecha + acciones */}
           <div className={`flex items-center gap-2 mt-1.5 ${esDerecha ? 'justify-end' : 'justify-start'}`}>
             <span className="text-[10px] text-gray-400">{formatFecha(mov.fecha)}</span>
+            {mov.tipo === 'prestamo' && onEditar && (
+              <button
+                onClick={() => onEditar(mov)}
+                title="Editar valor"
+                className="text-gray-300 hover:text-blue-400 transition-colors">
+                <Pencil size={13} />
+              </button>
+            )}
             {mov.anulable && (
               <button
                 onClick={() => onAnular(mov)}
@@ -140,6 +149,7 @@ function BurbujaMensaje({ mov, onAnular }) {
 export function EstadoDeCuenta({ tipo, personaId }) {
   const queryClient = useQueryClient();
   const [confirmando, setConfirmando] = useState(null);
+  const [editando,    setEditando]    = useState(null);
   const [fechaDesde, setFechaDesde]   = useState('');
   const [fechaHasta, setFechaHasta]   = useState('');
   const [sortDir,    setSortDir]      = useState('desc');
@@ -182,7 +192,8 @@ export function EstadoDeCuenta({ tipo, personaId }) {
     },
   });
 
-  const handleAnular     = (mov) => setConfirmando(mov);
+  const handleAnular = (mov) => setConfirmando(mov);
+  const handleEditar = (mov) => setEditando(mov);
   const confirmarAnulacion = () => {
     if (!confirmando) return;
     if (confirmando.tipo === 'compra_directa') {
@@ -298,7 +309,7 @@ export function EstadoDeCuenta({ tipo, personaId }) {
           return (
             <Fragment key={`${mov.tipo}-${mov.referencia_id}-${idx}`}>
               {showSepFecha && <SeparadorFecha fecha={mov.fecha} />}
-              <BurbujaMensaje mov={mov} onAnular={handleAnular} />
+              <BurbujaMensaje mov={mov} onAnular={handleAnular} onEditar={handleEditar} />
             </Fragment>
           );
         })}
@@ -335,6 +346,18 @@ export function EstadoDeCuenta({ tipo, personaId }) {
             {formatCOP(saldoFinal)}
           </span>
         </div>
+      )}
+
+      {/* Modal editar valor del préstamo */}
+      {editando && (
+        <ModalEditarValorPrestamo
+          key={editando.referencia_id}
+          open
+          onClose={() => setEditando(null)}
+          mov={editando}
+          tipoApi={tipoApi}
+          personaId={personaId}
+        />
       )}
 
       {/* Modal confirmación anulación */}

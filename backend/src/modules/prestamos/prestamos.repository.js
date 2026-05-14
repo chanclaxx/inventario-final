@@ -672,6 +672,14 @@ const getPrestamoActivoById = async (executor, prestamoId, negocioId) => {
   return rows[0] || null;
 };
 
+const updateValorPrestamo = async (id, nuevoValor) => {
+  const { rows } = await pool.query(
+    `UPDATE prestamos SET valor_prestamo = $1 WHERE id = $2 RETURNING *`,
+    [nuevoValor, id]
+  );
+  return rows[0] || null;
+};
+
 module.exports = {
   crearAjusteDeuda,
   findAll, findById, findByIdYNegocio,
@@ -685,6 +693,7 @@ module.exports = {
   getRetomasPorPrestamo,
   findActivosPorPersona, getResumenPersona, getPrestamoActivoById,
   // anulación
+  updateValorPrestamo,
   findAbonoById, eliminarAbono, restarTotalAbonado,
   cancelarFacturaDePrestamo, revertirSerialVendido,
   findRetomaPorId, findSerialEnInventario, eliminarSerial, eliminarRetoma,

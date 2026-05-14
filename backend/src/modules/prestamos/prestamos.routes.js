@@ -69,6 +69,9 @@ router.get('/pdf/:tipo/:personaId', requireModulo('prestamos'), ctrl.exportarPdf
 router.get('/:id/pdf',              requireModulo('prestamos'), ctrl.exportarPdfPrestamoIndividual);
 
 // Rutas con :id dinámico — AL FINAL
+router.patch( '/:id/valor',            requireModulo('prestamos'),
+  body('valor_prestamo').isFloat({ gt: 0 }).withMessage('El valor debe ser mayor a 0'),
+  validate, ctrl.editarValorPrestamo);
 router.post(  '/:id/aplicar-saldo',    requireModulo('prestamos'), ctrl.aplicarSaldoAPrestamo);
 router.get(   '/:id',                  requireModulo('prestamos'), ctrl.getPrestamoById);
 router.post(  '/:id/abonos',           requireModulo('prestamos'), validarAbono,            validate, ctrl.registrarAbono);

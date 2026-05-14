@@ -316,6 +316,22 @@ const aplicarSaldoAPrestamo = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+const editarValorPrestamo = async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const { valor_prestamo } = req.body;
+    if (!valor_prestamo || Number(valor_prestamo) <= 0) {
+      return res.status(400).json({ ok: false, error: 'El valor debe ser mayor a 0' });
+    }
+    const data = await service.editarValorPrestamo(
+      req.user.negocio_id,
+      id,
+      Number(valor_prestamo)
+    );
+    res.json({ ok: true, data, message: 'Valor del préstamo actualizado correctamente' });
+  } catch (err) { next(err); }
+};
+
 const crearAjusteDeuda = async (req, res, next) => {
   try {
     const sucursal_id = req.todasSucursales ? req.body.sucursal_id : req.sucursal_id;
@@ -339,5 +355,5 @@ module.exports = {
   intercambiarPrestamo,
   retomaDirecta, aplicarSaldoAPrestamos, aplicarSaldoAPrestamo, getResumenCartera,
   anularAbono, getRetomasDirectas, anularRetomaDirecta,
-  getEstadoCuenta, crearAjusteDeuda,
+  getEstadoCuenta, crearAjusteDeuda, editarValorPrestamo,
 };

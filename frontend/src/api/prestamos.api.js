@@ -32,3 +32,5 @@ export const getEstadoCuenta = (tipo, id) =>
   api.get(`/prestamos/personas/${tipo}/${id}/estado-cuenta`);
 export const crearAjusteDeuda = (data) =>
   api.post('/prestamos/ajuste-deuda', data);
+export const editarValorPrestamo = (id, valor_prestamo) =>
+  api.patch(`/prestamos/${id}/valor`, { valor_prestamo });

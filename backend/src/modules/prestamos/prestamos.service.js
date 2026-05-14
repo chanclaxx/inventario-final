@@ -1055,6 +1055,21 @@ const aplicarSaldoAPrestamo = async (negocioId, prestamoId) => {
   }
 };
 
+const editarValorPrestamo = async (negocioId, prestamoId, nuevoValor) => {
+  const pertenece = await repo.perteneceAlNegocio(prestamoId, negocioId);
+  if (!pertenece) throw { status: 404, message: 'Préstamo no encontrado' };
+
+  const prestamo = await repo.findById(prestamoId);
+  if (Number(nuevoValor) < Number(prestamo.total_abonado)) {
+    throw {
+      status: 400,
+      message: `El nuevo valor no puede ser menor al total ya abonado (${Number(prestamo.total_abonado).toLocaleString('es-CO')})`,
+    };
+  }
+
+  return repo.updateValorPrestamo(prestamoId, nuevoValor);
+};
+
 module.exports = {
   getPrestamos, getPrestamoById,
   crearPrestamo, crearPrestamos,
@@ -1064,5 +1079,5 @@ module.exports = {
   intercambiarPrestamo,
   retomaDirecta, aplicarSaldoAPrestamos, aplicarSaldoAPrestamo, getResumenCartera,
   anularAbono, anularRetomaDirecta, getRetomasDirectas,
-  getEstadoCuenta, crearAjusteDeuda,
+  getEstadoCuenta, crearAjusteDeuda, editarValorPrestamo,
 };
