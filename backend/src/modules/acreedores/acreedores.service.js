@@ -33,6 +33,20 @@ const crearAcreedor = async (negocioId, datos) => {
 const registrarMovimiento = async (negocioId, acreedorId, datos) => {
   const acreedor = await repo.findById(negocioId, acreedorId);
   if (!acreedor) throw { status: 404, message: 'Acreedor no encontrado' };
+
+  if (datos.tipo === 'Abono' && datos.cargo_id) {
+    const { rows } = await pool.query(`
+      SELECT GREATEST(m.valor - COALESCE(SUM(a.valor), 0), 0) AS saldo_pendiente
+      FROM movimientos_acreedor m
+      LEFT JOIN movimientos_acreedor a ON a.cargo_id = m.id AND a.tipo = 'Abono'
+      WHERE m.id = $1 AND m.acreedor_id = $2 AND m.tipo = 'Cargo'
+      GROUP BY m.id
+    `, [datos.cargo_id, acreedorId]);
+    if (rows.length && Number(datos.valor) > Number(rows[0].saldo_pendiente)) {
+      throw { status: 400, message: 'El abono no puede superar el saldo pendiente del cargo' };
+    }
+  }
+
   return repo.insertarMovimiento({ ...datos, acreedor_id: acreedorId });
 };
 

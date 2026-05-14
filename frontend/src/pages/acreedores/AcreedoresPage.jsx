@@ -27,7 +27,7 @@ import { SearchInput } from '../../components/ui/SearchInput';
 import { ReciboAcreedor } from '../../components/Reciboacreedor';
 import {
   Users, Plus, ChevronDown, ChevronUp, ChevronLeft, ChevronRight,
-  Trash2, AlertTriangle, Calculator, PenLine, Wallet,
+  Trash2, AlertTriangle, Calculator, PenLine, Wallet, Search,
 } from 'lucide-react';
 import api from '../../api/axios.config';
 import { getCompraById } from '../../api/compras.api';
@@ -206,6 +206,7 @@ function ModalAbonoRapido({ acreedor, cargo, onClose, onImprimir }) {
   const [metodo,          setMetodo]          = useState(() => metodosPago[0]?.id ?? 'Efectivo');
   const [registrarEnCaja, setRegistrarEnCaja] = useState(true);
   const [error,           setError]           = useState('');
+  const [compraVisible,   setCompraVisible]   = useState(false);
 
   const pendiente    = Number(cargo.saldo_pendiente);
   const tituloCompra = cargo.compra_id
@@ -233,10 +234,19 @@ function ModalAbonoRapido({ acreedor, cargo, onClose, onImprimir }) {
   });
 
   return (
+    <>
     <Modal open onClose={onClose} title={`Abonar — ${tituloCompra}`} size="sm">
       <div className="flex flex-col gap-4">
         <div className="bg-red-50 border border-red-100 rounded-xl px-4 py-3">
-          <p className="text-xs text-red-400 mb-0.5">Saldo pendiente · {acreedor.nombre}</p>
+          <div className="flex items-center justify-between gap-2 mb-0.5">
+            <p className="text-xs text-red-400">Saldo pendiente · {acreedor.nombre}</p>
+            {cargo.compra_id && (
+              <button type="button" onClick={() => setCompraVisible(true)}
+                className="text-xs text-blue-500 hover:text-blue-700 font-medium transition-colors flex-shrink-0">
+                Ver compra →
+              </button>
+            )}
+          </div>
           <p className="text-2xl font-bold text-red-600">{formatCOP(pendiente)}</p>
         </div>
 
@@ -259,6 +269,11 @@ function ModalAbonoRapido({ acreedor, cargo, onClose, onImprimir }) {
             className="w-full px-3 py-2 bg-gray-100 rounded-xl text-sm
               focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"
           />
+          {Number(valor) > 0 && Number(valor) > pendiente && (
+            <p className="text-xs text-red-500 px-1">
+              El abono no puede superar el saldo pendiente ({formatCOP(pendiente)})
+            </p>
+          )}
         </div>
 
         {mostrarCalc && (
@@ -313,7 +328,7 @@ function ModalAbonoRapido({ acreedor, cargo, onClose, onImprimir }) {
           <Button
             className="flex-1"
             loading={mutation.isPending}
-            disabled={!valor || Number(valor) <= 0}
+            disabled={!valor || Number(valor) <= 0 || Number(valor) > pendiente}
             onClick={() => mutation.mutate()}
           >
             Registrar
@@ -321,6 +336,10 @@ function ModalAbonoRapido({ acreedor, cargo, onClose, onImprimir }) {
         </div>
       </div>
     </Modal>
+    {compraVisible && cargo.compra_id && (
+      <ModalCompraDetalle compraId={cargo.compra_id} onClose={() => setCompraVisible(false)} />
+    )}
+  </>
   );
 }
 
@@ -998,6 +1017,9 @@ function DetalleAcreedor({ acreedor, esAdmin, onVolver, onEliminar }) {
   const [modalCargo,       setModalCargo]       = useState(false);
   const [modalSaldoFavor,  setModalSaldoFavor]  = useState(false);
   const [saldadasAbiertas, setSaldadasAbiertas] = useState(false);
+  const [busquedaCargo,    setBusquedaCargo]    = useState('');
+  const [filtroEstado,     setFiltroEstado]     = useState('todos');
+  const [ordenCargos,      setOrdenCargos]      = useState('fecha_desc');
 
   const { data: configData } = useQuery({
     queryKey: ['config'],
@@ -1017,10 +1039,34 @@ function DetalleAcreedor({ acreedor, esAdmin, onVolver, onEliminar }) {
   });
   const saldoAFavor = Number(saldoFavorData ?? 0);
 
-  const cargos  = Array.isArray(data) ? data : [];
+  const cargos   = Array.isArray(data) ? data : [];
   const activos  = cargos.filter((c) => c.estado_pago !== 'Saldada');
   const saldados = cargos.filter((c) => c.estado_pago === 'Saldada');
   const saldoTotal = activos.reduce((s, c) => s + Number(c.saldo_pendiente), 0);
+
+  const cargosFiltrados = (() => {
+    let lista = [...cargos];
+    if (busquedaCargo.trim()) {
+      const q = busquedaCargo.toLowerCase().trim();
+      lista = lista.filter((c) =>
+        (c.descripcion && c.descripcion.toLowerCase().includes(q)) ||
+        (c.compra_id && String(c.compra_id).includes(q))
+      );
+    }
+    if (filtroEstado !== 'todos') {
+      lista = lista.filter((c) => c.estado_pago === filtroEstado);
+    }
+    lista.sort((a, b) => {
+      if (ordenCargos === 'fecha_desc') return new Date(b.fecha) - new Date(a.fecha);
+      if (ordenCargos === 'fecha_asc')  return new Date(a.fecha) - new Date(b.fecha);
+      if (ordenCargos === 'monto_desc') return Number(b.valor_original) - Number(a.valor_original);
+      if (ordenCargos === 'monto_asc')  return Number(a.valor_original) - Number(b.valor_original);
+      return 0;
+    });
+    return lista;
+  })();
+  const activosFiltrados  = cargosFiltrados.filter((c) => c.estado_pago !== 'Saldada');
+  const saldadosFiltrados = cargosFiltrados.filter((c) => c.estado_pago === 'Saldada');
 
   return (
     <div className="flex flex-col gap-4">
@@ -1114,17 +1160,69 @@ function DetalleAcreedor({ acreedor, esAdmin, onVolver, onEliminar }) {
             </div>
           </div>
 
+          {/* Búsqueda + filtros + orden */}
+          {cargos.length > 0 && (
+            <div className="flex flex-col gap-2">
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                  <input
+                    value={busquedaCargo}
+                    onChange={(e) => setBusquedaCargo(e.target.value)}
+                    placeholder="Buscar descripción o # compra..."
+                    className="w-full pl-8 pr-3 py-2 bg-white border border-gray-200 rounded-xl
+                      text-sm text-gray-700 placeholder-gray-400
+                      focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <select
+                  value={ordenCargos}
+                  onChange={(e) => setOrdenCargos(e.target.value)}
+                  className="px-3 py-2 bg-white border border-gray-200 rounded-xl text-xs
+                    text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 flex-shrink-0">
+                  <option value="fecha_desc">Reciente primero</option>
+                  <option value="fecha_asc">Antigua primero</option>
+                  <option value="monto_desc">Mayor monto</option>
+                  <option value="monto_asc">Menor monto</option>
+                </select>
+              </div>
+              <div className="flex gap-1.5 flex-wrap">
+                {[
+                  { key: 'todos',     label: 'Todos' },
+                  { key: 'Pendiente', label: `Pendiente (${cargos.filter((c) => c.estado_pago === 'Pendiente').length})` },
+                  { key: 'Parcial',   label: `Parcial (${cargos.filter((c) => c.estado_pago === 'Parcial').length})` },
+                  { key: 'Saldada',   label: `Saldada (${saldados.length})` },
+                ].map(({ key, label }) => (
+                  <button key={key} type="button" onClick={() => setFiltroEstado(key)}
+                    className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-all
+                      ${filtroEstado === key
+                        ? key === 'Pendiente' ? 'bg-red-500 text-white border-red-500'
+                          : key === 'Parcial' ? 'bg-amber-500 text-white border-amber-500'
+                          : key === 'Saldada' ? 'bg-green-600 text-white border-green-600'
+                          : 'bg-gray-800 text-white border-gray-800'
+                        : 'bg-white text-gray-500 border-gray-200 hover:border-gray-400'}`}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Cargos activos */}
           {activos.length === 0 ? (
             <div className="bg-green-50 border border-green-100 rounded-xl px-4 py-3 text-center">
               <p className="text-green-700 text-sm font-medium">✓ Sin compras pendientes</p>
             </div>
-          ) : (
+          ) : activosFiltrados.length === 0 && filtroEstado !== 'Saldada' ? (
+            <div className="bg-gray-50 border border-gray-100 rounded-xl px-4 py-3 text-center">
+              <p className="text-gray-500 text-sm">Sin pendientes que coincidan con el filtro</p>
+            </div>
+          ) : activosFiltrados.length > 0 ? (
             <div className="flex flex-col gap-2.5">
               <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide px-0.5">
-                Pendientes ({activos.length})
+                Pendientes ({activosFiltrados.length})
               </p>
-              {activos.map((c) => (
+              {activosFiltrados.map((c) => (
                 <CargoActivo
                   key={c.id}
                   cargo={c}
@@ -1136,7 +1234,7 @@ function DetalleAcreedor({ acreedor, esAdmin, onVolver, onEliminar }) {
                 />
               ))}
             </div>
-          )}
+          ) : null}
 
           {/* Saldadas (colapsable) */}
           {saldados.length > 0 && (
@@ -1150,7 +1248,7 @@ function DetalleAcreedor({ acreedor, esAdmin, onVolver, onEliminar }) {
                     Historial saldadas
                   </span>
                   <span className="text-xs bg-gray-200 text-gray-500 px-2 py-0.5 rounded-full">
-                    {saldados.length}
+                    {saldadosFiltrados.length}/{saldados.length}
                   </span>
                 </div>
                 {saldadasAbiertas
@@ -1160,9 +1258,13 @@ function DetalleAcreedor({ acreedor, esAdmin, onVolver, onEliminar }) {
 
               {saldadasAbiertas && (
                 <div className="flex flex-col gap-2 p-3">
-                  {saldados.map((c) => (
-                    <CargoSaldado key={c.id} cargo={c} acreedorId={acreedor.id} esAdmin={esAdmin} />
-                  ))}
+                  {saldadosFiltrados.length === 0 ? (
+                    <p className="text-xs text-gray-400 text-center py-2">Sin resultados para el filtro aplicado</p>
+                  ) : (
+                    saldadosFiltrados.map((c) => (
+                      <CargoSaldado key={c.id} cargo={c} acreedorId={acreedor.id} esAdmin={esAdmin} />
+                    ))
+                  )}
                 </div>
               )}
             </div>
