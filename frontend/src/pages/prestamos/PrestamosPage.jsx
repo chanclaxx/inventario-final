@@ -1830,6 +1830,10 @@ export default function PrestamosPage() {
   const [personaSeleccionadaKey, setPersonaSeleccionadaKey] = useState(null);
   const [prestamoAbono,        setPrestamoAbono]        = useState(null);
   const [prestamoDevol,        setPrestamoDevol]        = useState(null);
+  const [busquedaPersonas,     setBusquedaPersonas]     = useState('');
+  const [sortPersonas,         setSortPersonas]         = useState('deuda_desc');
+  const [filtroEstadoP,        setFiltroEstadoP]        = useState('todos');
+  const [paginaPersonas,       setPaginaPersonas]       = useState(1);
 
   const [prestamoImprimir,    setPrestamoImprimir]    = useState(null);
   const [prestamoIntercambio, setPrestamoIntercambio] = useState(null);
@@ -1925,11 +1929,46 @@ export default function PrestamosPage() {
   const cambiarTabPrestamos = (id) => {
     setTabPrestamos(id);
     setPersonaSeleccionadaKey(null);
+    setBusquedaPersonas('');
+    setFiltroEstadoP('todos');
+    setSortPersonas('deuda_desc');
+    setPaginaPersonas(1);
   };
 
-  // Ordenar grupos por saldo total descendente (más deuda primero)
-  const sortedCompaneros = Object.entries(gruposCompaneros).sort(([, a], [, b]) => b.saldoTotal - a.saldoTotal);
-  const sortedClientes   = Object.entries(gruposClientes).sort(([, a], [, b]) => b.saldoTotal - a.saldoTotal);
+  const PAGE_SIZE_PERSONAS = 10;
+
+  const gruposRaw     = tabPrestamos === 'companeros' ? gruposCompaneros : gruposClientes;
+  const gruposEntries = Object.entries(gruposRaw);
+
+  const gruposBuscados = busquedaPersonas.trim()
+    ? gruposEntries.filter(([, g]) => g.nombre.toLowerCase().includes(busquedaPersonas.trim().toLowerCase()))
+    : gruposEntries;
+
+  const gruposFiltrados = filtroEstadoP === 'activos'
+    ? gruposBuscados.filter(([, g]) => g.saldoTotal > 0)
+    : filtroEstadoP === 'sin_deuda'
+    ? gruposBuscados.filter(([, g]) => g.saldoTotal <= 0)
+    : gruposBuscados;
+
+  const gruposOrdenados = [...gruposFiltrados].sort(([, a], [, b]) => {
+    if (sortPersonas === 'deuda_asc')      return a.saldoTotal - b.saldoTotal;
+    if (sortPersonas === 'nombre_asc')     return a.nombre.localeCompare(b.nombre, 'es');
+    if (sortPersonas === 'nombre_desc')    return b.nombre.localeCompare(a.nombre, 'es');
+    if (sortPersonas === 'abono_reciente') {
+      const da = a.ultimoAbono ? new Date(a.ultimoAbono).getTime() : 0;
+      const db = b.ultimoAbono ? new Date(b.ultimoAbono).getTime() : 0;
+      return db - da;
+    }
+    return b.saldoTotal - a.saldoTotal;
+  });
+
+  const totalPersonasFiltradas = gruposOrdenados.length;
+  const totalPaginasPersonas   = Math.max(1, Math.ceil(totalPersonasFiltradas / PAGE_SIZE_PERSONAS));
+  const paginaPersonasActual   = Math.min(paginaPersonas, totalPaginasPersonas);
+  const gruposPagina = gruposOrdenados.slice(
+    (paginaPersonasActual - 1) * PAGE_SIZE_PERSONAS,
+    paginaPersonasActual * PAGE_SIZE_PERSONAS,
+  );
 
   return (
     <div className="flex flex-col gap-4">
@@ -2032,37 +2071,97 @@ export default function PrestamosPage() {
             ) : (
 
               /* ── Lista de cards de persona ── */
-              <>
-                {tabPrestamos === 'companeros' && (
-                  sortedCompaneros.length === 0 ? (
-                    <EmptyState icon={User} titulo="Sin préstamos a compañeros" />
-                  ) : (
-                    <div className="flex flex-col gap-2.5">
-                      {sortedCompaneros.map(([key, grupo]) => (
-                        <CardPersona key={key} nombre={grupo.nombre} tipo="companero"
-                          prestamos={grupo.prestamos} saldoTotal={grupo.saldoTotal}
-                          ultimoAbono={grupo.ultimoAbono}
-                          onSeleccionar={() => setPersonaSeleccionadaKey(key)} />
-                      ))}
-                    </div>
-                  )
+              <div className="flex flex-col gap-3">
+
+                {/* Barra búsqueda + ordenamiento */}
+                <div className="flex items-center gap-2 flex-wrap">
+                  <div className="relative flex-1 min-w-[180px]">
+                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                    <input
+                      type="text"
+                      placeholder="Buscar por nombre..."
+                      value={busquedaPersonas}
+                      onChange={(e) => { setBusquedaPersonas(e.target.value); setPaginaPersonas(1); }}
+                      className="w-full pl-8 pr-3 py-2 bg-white border border-gray-200 rounded-xl text-sm
+                        focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent transition-all"
+                    />
+                  </div>
+                  <select
+                    value={sortPersonas}
+                    onChange={(e) => { setSortPersonas(e.target.value); setPaginaPersonas(1); }}
+                    className="px-3 py-2 bg-white border border-gray-200 rounded-xl text-sm text-gray-700
+                      focus:outline-none focus:ring-2 focus:ring-blue-400 transition-all cursor-pointer"
+                  >
+                    <option value="deuda_desc">Mayor deuda</option>
+                    <option value="deuda_asc">Menor deuda</option>
+                    <option value="nombre_asc">Nombre A → Z</option>
+                    <option value="nombre_desc">Nombre Z → A</option>
+                    <option value="abono_reciente">Último abono</option>
+                  </select>
+                </div>
+
+                {/* Filtros de estado */}
+                <div className="flex items-center gap-1 flex-wrap">
+                  {[
+                    { id: 'todos',    label: 'Todos' },
+                    { id: 'activos',  label: 'Con deuda' },
+                    { id: 'sin_deuda', label: 'Saldados' },
+                  ].map((f) => (
+                    <button key={f.id}
+                      onClick={() => { setFiltroEstadoP(f.id); setPaginaPersonas(1); }}
+                      className={`px-3 py-1 rounded-lg text-xs font-medium transition-all
+                        ${filtroEstadoP === f.id
+                          ? 'bg-blue-100 text-blue-700'
+                          : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
+                      {f.label}
+                    </button>
+                  ))}
+                  <span className="ml-auto text-xs text-gray-400">
+                    {totalPersonasFiltradas} persona{totalPersonasFiltradas !== 1 ? 's' : ''}
+                  </span>
+                </div>
+
+                {/* Cards */}
+                {gruposPagina.length === 0 ? (
+                  <EmptyState
+                    icon={tabPrestamos === 'companeros' ? User : Users}
+                    titulo={busquedaPersonas.trim() ? 'Sin resultados para tu búsqueda' : 'Sin préstamos registrados'}
+                  />
+                ) : (
+                  <div className="flex flex-col gap-2.5">
+                    {gruposPagina.map(([key, grupo]) => (
+                      <CardPersona key={key} nombre={grupo.nombre}
+                        tipo={tabPrestamos === 'companeros' ? 'companero' : 'cliente'}
+                        prestamos={grupo.prestamos} saldoTotal={grupo.saldoTotal}
+                        ultimoAbono={grupo.ultimoAbono}
+                        onSeleccionar={() => setPersonaSeleccionadaKey(key)} />
+                    ))}
+                  </div>
                 )}
 
-                {tabPrestamos === 'clientes' && (
-                  sortedClientes.length === 0 ? (
-                    <EmptyState icon={Users} titulo="Sin préstamos a clientes" />
-                  ) : (
-                    <div className="flex flex-col gap-2.5">
-                      {sortedClientes.map(([key, grupo]) => (
-                        <CardPersona key={key} nombre={grupo.nombre} tipo="cliente"
-                          prestamos={grupo.prestamos} saldoTotal={grupo.saldoTotal}
-                          ultimoAbono={grupo.ultimoAbono}
-                          onSeleccionar={() => setPersonaSeleccionadaKey(key)} />
-                      ))}
-                    </div>
-                  )
+                {/* Paginación */}
+                {totalPaginasPersonas > 1 && (
+                  <div className="flex items-center justify-between px-1 pt-1">
+                    <button
+                      onClick={() => setPaginaPersonas((p) => Math.max(1, p - 1))}
+                      disabled={paginaPersonasActual === 1}
+                      className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm text-gray-600
+                        border border-gray-200 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                      <ChevronLeft size={14} /> Anterior
+                    </button>
+                    <span className="text-xs text-gray-500">
+                      Página {paginaPersonasActual} de {totalPaginasPersonas}
+                    </span>
+                    <button
+                      onClick={() => setPaginaPersonas((p) => Math.min(totalPaginasPersonas, p + 1))}
+                      disabled={paginaPersonasActual === totalPaginasPersonas}
+                      className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm text-gray-600
+                        border border-gray-200 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                      Siguiente <ChevronRight size={14} />
+                    </button>
+                  </div>
                 )}
-              </>
+              </div>
             )
           )}
         </div>

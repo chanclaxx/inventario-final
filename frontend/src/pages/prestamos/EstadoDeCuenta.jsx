@@ -4,7 +4,9 @@ import { getEstadoCuenta } from '../../api/prestamos.api';
 import { anularAbono as anularAbonoApi, anularRetomaDirecta as anularRetomaDirectaApi } from '../../api/prestamos.api';
 import { formatCOP } from '../../utils/formatters';
 import { Spinner }   from '../../components/ui/Spinner';
-import { XCircle, TrendingDown, TrendingUp, ArrowLeftRight, Wallet } from 'lucide-react';
+import { XCircle, TrendingDown, TrendingUp, ArrowLeftRight, Wallet, ChevronLeft, ChevronRight, ArrowUpDown } from 'lucide-react';
+
+const PAGE_SIZE_MOVS = 20;
 
 // ─── Mapa visual por tipo de movimiento ──────────────────────────────────────
 
@@ -113,6 +115,8 @@ export function EstadoDeCuenta({ tipo, personaId }) {
   const [confirmando, setConfirmando] = useState(null); // { mov }
   const [fechaDesde, setFechaDesde]   = useState('');
   const [fechaHasta, setFechaHasta]   = useState('');
+  const [sortDir,    setSortDir]      = useState('asc');  // 'asc' | 'desc'
+  const [paginaMov,  setPaginaMov]    = useState(1);
 
   const tipoApi = tipo === 'companero' ? 'prestatario' : tipo;
 
@@ -172,9 +176,20 @@ export function EstadoDeCuenta({ tipo, personaId }) {
     return true;
   });
 
+  // saldoFinal siempre sobre el último movimiento cronológico
   const saldoFinal = filtrados.length > 0
     ? filtrados[filtrados.length - 1]?.saldo ?? null
     : null;
+
+  const filtradosOrdenados = sortDir === 'desc' ? [...filtrados].reverse() : filtrados;
+
+  const totalMovs      = filtradosOrdenados.length;
+  const totalPagMovs   = Math.max(1, Math.ceil(totalMovs / PAGE_SIZE_MOVS));
+  const paginaMovActual = Math.min(paginaMov, totalPagMovs);
+  const movsPagina = filtradosOrdenados.slice(
+    (paginaMovActual - 1) * PAGE_SIZE_MOVS,
+    paginaMovActual * PAGE_SIZE_MOVS,
+  );
 
   if (isLoading) return <Spinner className="py-10" />;
 
@@ -189,29 +204,39 @@ export function EstadoDeCuenta({ tipo, personaId }) {
   return (
     <div className="flex flex-col gap-3">
 
-      {/* Filtros de fecha */}
+      {/* Filtros de fecha + orden */}
       <div className="flex items-center gap-2 flex-wrap">
         <div className="flex items-center gap-1.5">
           <label className="text-xs text-gray-400 whitespace-nowrap">Desde</label>
-          <input type="date" value={fechaDesde} onChange={(e) => setFechaDesde(e.target.value)}
+          <input type="date" value={fechaDesde}
+            onChange={(e) => { setFechaDesde(e.target.value); setPaginaMov(1); }}
             className="px-2 py-1 bg-gray-50 border border-gray-200 rounded-lg text-xs text-gray-700
               focus:outline-none focus:ring-1 focus:ring-blue-400 transition-all" />
         </div>
         <div className="flex items-center gap-1.5">
           <label className="text-xs text-gray-400 whitespace-nowrap">Hasta</label>
-          <input type="date" value={fechaHasta} onChange={(e) => setFechaHasta(e.target.value)}
+          <input type="date" value={fechaHasta}
+            onChange={(e) => { setFechaHasta(e.target.value); setPaginaMov(1); }}
             className="px-2 py-1 bg-gray-50 border border-gray-200 rounded-lg text-xs text-gray-700
               focus:outline-none focus:ring-1 focus:ring-blue-400 transition-all" />
         </div>
         {(fechaDesde || fechaHasta) && (
           <button
-            onClick={() => { setFechaDesde(''); setFechaHasta(''); }}
+            onClick={() => { setFechaDesde(''); setFechaHasta(''); setPaginaMov(1); }}
             className="text-xs text-gray-400 hover:text-gray-600 transition-colors">
             Limpiar
           </button>
         )}
-        <span className="text-xs text-gray-400 ml-auto">
-          {filtrados.length} movimiento{filtrados.length !== 1 ? 's' : ''}
+        <button
+          onClick={() => { setSortDir((d) => d === 'asc' ? 'desc' : 'asc'); setPaginaMov(1); }}
+          title={sortDir === 'asc' ? 'Mostrando más antiguo primero' : 'Mostrando más reciente primero'}
+          className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium
+            bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors ml-auto">
+          <ArrowUpDown size={12} />
+          {sortDir === 'asc' ? 'Más antiguo' : 'Más reciente'}
+        </button>
+        <span className="text-xs text-gray-400">
+          {filtrados.length} mov.
         </span>
       </div>
 
@@ -227,7 +252,7 @@ export function EstadoDeCuenta({ tipo, personaId }) {
 
       {/* Lista de movimientos */}
       <div className="flex flex-col gap-1.5">
-        {filtrados.map((mov, idx) => (
+        {movsPagina.map((mov, idx) => (
           <FilaMovimiento
             key={`${mov.tipo}-${mov.referencia_id}-${idx}`}
             mov={mov}
@@ -235,6 +260,29 @@ export function EstadoDeCuenta({ tipo, personaId }) {
           />
         ))}
       </div>
+
+      {/* Paginación */}
+      {totalPagMovs > 1 && (
+        <div className="flex items-center justify-between px-1">
+          <button
+            onClick={() => setPaginaMov((p) => Math.max(1, p - 1))}
+            disabled={paginaMovActual === 1}
+            className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm text-gray-600
+              border border-gray-200 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+            <ChevronLeft size={14} /> Anterior
+          </button>
+          <span className="text-xs text-gray-500">
+            Página {paginaMovActual} de {totalPagMovs}
+          </span>
+          <button
+            onClick={() => setPaginaMov((p) => Math.min(totalPagMovs, p + 1))}
+            disabled={paginaMovActual === totalPagMovs}
+            className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm text-gray-600
+              border border-gray-200 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+            Siguiente <ChevronRight size={14} />
+          </button>
+        </div>
+      )}
 
       {/* Saldo final */}
       {saldoFinal != null && (
