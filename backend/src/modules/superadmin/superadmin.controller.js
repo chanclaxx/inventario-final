@@ -65,13 +65,14 @@ async function getPlanes(req, res, next) {
 
 async function renovarPlan(req, res, next) {
   try {
-    const { plan, notas } = req.body;
+    const { plan, notas, fecha_hasta } = req.body;
     if (!plan) return res.status(400).json({ error: 'El plan es requerido' });
     const result = await svc.renovarPlan(
       Number(req.params.id),
       plan,
       req.user.id,
-      notas
+      notas,
+      fecha_hasta
     );
     res.json({ ok: true, data: result });
   } catch (err) { next(err); }

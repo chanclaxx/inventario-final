@@ -107,9 +107,20 @@ function ModalCredenciales({ credenciales, onCerrar }) {
 }
 
 // ── Modal renovar plan ────────────────────────────────
+function calcFechaDefecto(fechaVencimiento) {
+  const base = fechaVencimiento && new Date(fechaVencimiento) > new Date()
+    ? new Date(fechaVencimiento)
+    : new Date();
+  base.setMonth(base.getMonth() + 1);
+  return base.toISOString().split('T')[0];
+}
+
 function ModalRenovarPlan({ negocio, planes, onConfirmar, onCerrar, cargando }) {
   const [planSeleccionado, setPlanSeleccionado] = useState(negocio.plan || '');
-  const [notas, setNotas] = useState('');
+  const [notas,            setNotas]            = useState('');
+  const [fechaHasta,       setFechaHasta]       = useState(() => calcFechaDefecto(negocio.fecha_vencimiento));
+
+  const hoy = new Date().toISOString().split('T')[0];
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60">
@@ -158,6 +169,33 @@ function ModalRenovarPlan({ negocio, planes, onConfirmar, onCerrar, cargando }) 
               })}
             </div>
           </div>
+
+          <div className="flex flex-col gap-1">
+            <label className="text-sm font-medium text-gray-300">Nueva fecha de vencimiento</label>
+            <div className="flex items-center gap-2">
+              <input
+                type="date"
+                value={fechaHasta}
+                min={hoy}
+                onChange={(e) => setFechaHasta(e.target.value)}
+                className="flex-1 px-3 py-2.5 bg-gray-700 border border-gray-600 rounded-xl
+                  text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500
+                  [color-scheme:dark]"
+              />
+              <button
+                type="button"
+                onClick={() => setFechaHasta(calcFechaDefecto(negocio.fecha_vencimiento))}
+                className="px-3 py-2.5 text-xs text-gray-400 hover:text-white bg-gray-700
+                  hover:bg-gray-600 border border-gray-600 rounded-xl transition-colors whitespace-nowrap"
+              >
+                +1 mes
+              </button>
+            </div>
+            <p className="text-xs text-gray-500">
+              Vencimiento actual: <span className="text-gray-400">{formatFecha(negocio.fecha_vencimiento)}</span>
+            </p>
+          </div>
+
           <div className="flex flex-col gap-1">
             <label className="text-sm font-medium text-gray-300">
               Notas <span className="text-gray-500 font-normal">(opcional)</span>
@@ -168,10 +206,6 @@ function ModalRenovarPlan({ negocio, planes, onConfirmar, onCerrar, cargando }) 
                 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2
                 focus:ring-indigo-500 resize-none" />
           </div>
-          <p className="text-xs text-gray-500">
-            Vencimiento actual: <span className="text-gray-400">{formatFecha(negocio.fecha_vencimiento)}</span>
-            {' '}→ se extenderá 1 mes desde esa fecha.
-          </p>
         </div>
         <div className="flex gap-3 p-5 border-t border-gray-700">
           <button onClick={onCerrar}
@@ -180,8 +214,8 @@ function ModalRenovarPlan({ negocio, planes, onConfirmar, onCerrar, cargando }) 
             Cancelar
           </button>
           <button
-            onClick={() => onConfirmar({ id: negocio.id, plan: planSeleccionado, notas })}
-            disabled={!planSeleccionado || cargando}
+            onClick={() => onConfirmar({ id: negocio.id, plan: planSeleccionado, notas, fecha_hasta: fechaHasta })}
+            disabled={!planSeleccionado || !fechaHasta || cargando}
             className="flex-1 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700
               disabled:opacity-50 text-white text-sm font-medium transition-colors">
             {cargando ? 'Renovando...' : 'Confirmar renovación'}
@@ -536,7 +570,7 @@ function Panel({ usuario, onLogout }) {
   });
 
   const mutRenovar = useMutation({
-    mutationFn: ({ id, plan, notas }) => saApi.post(`/negocios/${id}/renovar-plan`, { plan, notas }),
+    mutationFn: ({ id, plan, notas, fecha_hasta }) => saApi.post(`/negocios/${id}/renovar-plan`, { plan, notas, fecha_hasta }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['sa_negocios'] });
       queryClient.invalidateQueries({ queryKey: ['sa_estadisticas'] });
@@ -635,7 +669,7 @@ function Panel({ usuario, onLogout }) {
 
       {negocioARenovar && (
         <ModalRenovarPlan negocio={negocioARenovar} planes={planes}
-          onConfirmar={({ id, plan, notas }) => mutRenovar.mutate({ id, plan, notas })}
+          onConfirmar={({ id, plan, notas, fecha_hasta }) => mutRenovar.mutate({ id, plan, notas, fecha_hasta })}
           onCerrar={() => setNegocioARenovar(null)}
           cargando={mutRenovar.isPending} />
       )}

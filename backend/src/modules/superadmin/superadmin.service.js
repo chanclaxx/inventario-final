@@ -197,7 +197,7 @@ const getPlanes = async () => {
 
 // ── Renovar plan de un negocio ────────────────────────
 
-const renovarPlan = async (negocioId, plan, superadminId, notas) => {
+const renovarPlan = async (negocioId, plan, superadminId, notas, fechaHastaCustom) => {
   const { rows: [planData] } = await pool.query(
     `SELECT * FROM planes WHERE nombre = $1 AND activo = true`,
     [plan]
@@ -215,8 +215,15 @@ const renovarPlan = async (negocioId, plan, superadminId, notas) => {
     : new Date();
 
   const fechaDesde = new Date(base);
-  const fechaHasta = new Date(base);
-  fechaHasta.setMonth(fechaHasta.getMonth() + 1);
+
+  let fechaHasta;
+  if (fechaHastaCustom) {
+    fechaHasta = new Date(fechaHastaCustom);
+    if (isNaN(fechaHasta.getTime())) throw { status: 400, message: 'Fecha de vencimiento no válida' };
+  } else {
+    fechaHasta = new Date(base);
+    fechaHasta.setMonth(fechaHasta.getMonth() + 1);
+  }
 
   const client = await pool.connect();
   try {
