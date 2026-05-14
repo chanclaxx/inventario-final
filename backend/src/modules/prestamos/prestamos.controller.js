@@ -80,11 +80,11 @@ const exportarPdfPrestamoIndividual = async (req, res, next) => {
 };
 const registrarAbono = async (req, res, next) => {
   try {
-    const { valor, metodo } = req.body;
+    const { valor, metodo, color } = req.body;
     if (!valor || valor <= 0) {
       return res.status(400).json({ ok: false, error: 'El valor del abono debe ser mayor a 0' });
     }
-    const data = await service.registrarAbono(req.user.negocio_id, req.params.id, valor, metodo, req.user.id);
+    const data = await service.registrarAbono(req.user.negocio_id, req.params.id, valor, metodo, req.user.id, color || null);
     res.json({ ok: true, data, message: 'Abono registrado correctamente' });
   } catch (err) { next(err); }
 };

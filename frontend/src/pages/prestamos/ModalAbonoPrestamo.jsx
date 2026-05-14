@@ -12,6 +12,18 @@ import { getGarantiasPorFactura } from '../../api/garantias.api';
 import { useMetodosPago }         from '../../hooks/useMetodosPago';
 import api from '../../api/axios.config';
 
+function useConfigColores() {
+  const { data } = useQuery({
+    queryKey: ['config'],
+    queryFn:  () => api.get('/config').then((r) => r.data.data),
+  });
+  const activo  = data?.colores_serial_activo === '1';
+  const colores = (() => {
+    try { return JSON.parse(data?.colores_serial_lista || '[]'); } catch { return []; }
+  })();
+  return { activo, colores };
+}
+
 // ─── Pantallas del flujo ──────────────────────────────────────────────────────
 // 'abono'      → formulario normal de abono
 // 'confirmar'  → "¿Generar factura?"
@@ -53,9 +65,11 @@ function useFacturaSaldada(facturaId) {
 export function ModalAbonoPrestamo({ prestamo, onClose }) {
   const queryClient = useQueryClient();
   const metodosPago = useMetodosPago();
+  const { activo: coloresActivo, colores } = useConfigColores();
 
   const [valor,      setValor]   = useState('');
   const [metodo,     setMetodo]  = useState('Efectivo');
+  const [color,      setColor]   = useState('');
   const [error,      setError]   = useState('');
   const [pantalla,   setPantalla]= useState('abono'); // 'abono' | 'confirmar' | 'imprimir' | 'pos'
   const [facturaId,  setFacturaId]  = useState(null);
@@ -63,10 +77,11 @@ export function ModalAbonoPrestamo({ prestamo, onClose }) {
 
   const { facturaConConfig, garantias } = useFacturaSaldada(facturaId);
 
-  const saldoPendiente = Number(prestamo.valor_prestamo) - Number(prestamo.total_abonado);
+  const saldoPendiente    = Number(prestamo.valor_prestamo) - Number(prestamo.total_abonado);
+  const mostrarColores    = coloresActivo && !!prestamo.imei && colores.length > 0;
 
   const mutation = useMutation({
-    mutationFn: () => registrarAbonoPrestamo(prestamo.id, Number(valor), metodo),
+    mutationFn: () => registrarAbonoPrestamo(prestamo.id, Number(valor), metodo, color || null),
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ['prestamos'], exact: false });
       queryClient.invalidateQueries({ queryKey: ['facturas'],  exact: false });
@@ -135,6 +150,26 @@ export function ModalAbonoPrestamo({ prestamo, onClose }) {
               })}
             </div>
           </div>
+
+          {mostrarColores && (
+            <div className="flex flex-col gap-1.5">
+              <label className="text-sm font-medium text-gray-700">
+                Color del serial
+                <span className="text-gray-400 font-normal ml-1">(opcional)</span>
+              </label>
+              <div className="flex flex-wrap gap-2">
+                {colores.map((c) => (
+                  <button key={c} type="button" onClick={() => setColor(color === c ? '' : c)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition-all
+                      ${color === c
+                        ? 'bg-indigo-50 border-indigo-300 text-indigo-700'
+                        : 'bg-gray-50 border-gray-200 text-gray-600 hover:border-gray-300'}`}>
+                    {c}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           {error && <p className="text-sm text-red-500">{error}</p>}
           <div className="flex gap-2">
             <Button variant="secondary" className="flex-1" onClick={onClose}>Cancelar</Button>

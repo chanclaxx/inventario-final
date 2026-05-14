@@ -309,7 +309,7 @@ const registrarSaldoAFavor = async (negocioId, tipo, personaId, monto) => {
 
 // ─── Servicio: registrar abono ────────────────────────────────────────────────
 
-const registrarAbono = async (negocioId, prestamoId, valor, metodo, usuarioId) => {
+const registrarAbono = async (negocioId, prestamoId, valor, metodo, usuarioId, color) => {
   const prestamo = await repo.findByIdYNegocio(prestamoId, negocioId);
   if (!prestamo) throw { status: 404, message: 'Préstamo no encontrado' };
   if (prestamo.estado !== 'Activo') throw { status: 400, message: 'El préstamo no está activo' };
@@ -324,6 +324,13 @@ const registrarAbono = async (negocioId, prestamoId, valor, metodo, usuarioId) =
     await client.query('BEGIN');
 
     const resultado = await repo.insertarAbono(client, { prestamo_id: prestamoId, valor, metodo, usuario_id: usuarioId || null });
+
+    if (color && prestamo.imei) {
+      await client.query(
+        `UPDATE seriales SET color = $1 WHERE imei = $2`,
+        [color, prestamo.imei],
+      );
+    }
 
     let saldado    = false;
     let factura_id = null;

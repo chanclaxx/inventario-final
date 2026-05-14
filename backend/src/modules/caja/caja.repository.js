@@ -309,6 +309,7 @@ const getResumenDia = async (cajaId, sucursalId, negocioId) => {
       FROM abonos_prestamo ab
       JOIN prestamos p ON p.id = ab.prestamo_id
       WHERE p.sucursal_id = $1 AND ab.fecha BETWEEN $2 AND $3
+        AND ab.metodo = 'Efectivo'
       ORDER BY ab.fecha ASC
     `, [sucursalId, inicio, fin]),
 
@@ -447,6 +448,7 @@ const getResumenGlobal = async (negocioId) => {
       JOIN prestamos  p  ON p.id  = ab.prestamo_id
       JOIN sucursales su ON su.id = p.sucursal_id
       WHERE su.negocio_id = $1 AND ab.fecha BETWEEN $2 AND $3
+        AND ab.metodo = 'Efectivo'
       ORDER BY ab.fecha ASC
     `, [negocioId, inicio, fin]),
 
