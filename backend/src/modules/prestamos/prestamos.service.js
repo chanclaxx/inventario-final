@@ -993,9 +993,10 @@ const getEstadoCuenta = async (negocioId, tipo, personaId) => {
       cargo:         cargo  || null,
       abono:         abono  || null,
       saldo:         row.tipo === 'compra_directa' ? null : saldoDeuda,
-      referencia_id: Number(row.referencia_id),
-      prestamo_id:   row.prestamo_id ? Number(row.prestamo_id) : null,
-      anulable:      row.anulable,
+      referencia_id:    Number(row.referencia_id),
+      prestamo_id:      row.prestamo_id ? Number(row.prestamo_id) : null,
+      anulable:         row.anulable,
+      prestamo_estado:  row.prestamo_estado || null,
     };
   });
 };
@@ -1060,6 +1061,9 @@ const editarValorPrestamo = async (negocioId, prestamoId, nuevoValor) => {
   if (!pertenece) throw { status: 404, message: 'Préstamo no encontrado' };
 
   const prestamo = await repo.findById(prestamoId);
+  if (prestamo.estado !== 'Activo') {
+    throw { status: 400, message: 'Solo se pueden editar préstamos activos' };
+  }
   if (Number(nuevoValor) < Number(prestamo.total_abonado)) {
     throw {
       status: 400,

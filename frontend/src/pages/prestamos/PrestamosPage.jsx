@@ -4,6 +4,7 @@ import { buscarPrestamos as buscarPrestamosApi } from '../../api/busqueda.api';
 import { exportarPrestamosExcel } from '../../utils/exportarPrestamosExcel';
 import { exportarCarteraPersonaExcel } from '../../utils/exportarCarteraPersonaExcel';
 import { getPrestamos, registrarAbonoPrestamo, devolverPrestamo, devolverParcialPrestamo, registrarSaldoAFavor as registrarSaldoAFavorApi, intercambiarPrestamo as intercambiarPrestamoApi, anularAbono as anularAbonoApi, getRetomasDirectas as getRetomasDirectasApi, anularRetomaDirecta as anularRetomaDirectaApi, aplicarSaldoAPrestamo as aplicarSaldoAPrestamoApi, getEstadoCuenta as getEstadoCuentaApi, crearAjusteDeuda as crearAjusteDeudaApi } from '../../api/prestamos.api';
+import { ModalEditarValorPrestamo } from './ModalEditarValorPrestamo';
 import { crearPrestatario as crearPrestatarioApi, getPrestatarios } from '../../api/prestatarios.api';
 import {
   getDomiciliarios,
@@ -38,7 +39,7 @@ import {
   Handshake, CreditCard, Bike, Plus, CheckCircle,
   ChevronDown, ChevronUp, ChevronLeft, ChevronRight,
   Users, User, AlertTriangle, FileDown, Loader2, Printer, Search, Wallet,
-  ArrowLeftRight, Package, ShoppingBag, XCircle, SlidersHorizontal, UserPlus,
+  ArrowLeftRight, Package, ShoppingBag, XCircle, SlidersHorizontal, UserPlus, Pencil,
 } from 'lucide-react';
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
@@ -1084,7 +1085,7 @@ function HistorialPrestamo({ prestamoId, prestamoEstado }) {
   );
 }
 
-function TarjetaPrestamoDetalle({ prestamo, onAbonar, onDevolver, onImprimir, onIntercambiar, onAplicarSaldo, saldoAFavor = 0, aplicandoSaldo = false, coloresActivo, cerrado = false }) {
+function TarjetaPrestamoDetalle({ prestamo, onAbonar, onDevolver, onImprimir, onIntercambiar, onAplicarSaldo, onEditar, saldoAFavor = 0, aplicandoSaldo = false, coloresActivo, cerrado = false }) {
   const [historialAbierto, setHistorialAbierto] = useState(false);
 
   const saldo    = Number(prestamo.valor_prestamo) - Number(prestamo.total_abonado);
@@ -1175,6 +1176,15 @@ function TarjetaPrestamoDetalle({ prestamo, onAbonar, onDevolver, onImprimir, on
                 Aplicar saldo a favor
               </button>
             )}
+            {onEditar && (
+              <button
+                onClick={() => onEditar(prestamo)}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium
+                  border border-gray-200 text-gray-500 bg-white hover:bg-gray-50
+                  transition-colors">
+                <Pencil size={12} /> Editar valor
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -1215,6 +1225,7 @@ function VistaDetallePersona({ nombre, tipo, personaId, prestamos, saldoAFavor =
   const [fechaPrestHasta,     setFechaPrestHasta]     = useState('');
   const [aplicandoSaldoId,    setAplicandoSaldoId]    = useState(null);
   const [resultadoSaldo,      setResultadoSaldo]      = useState(null);
+  const [editandoPrestamo,    setEditandoPrestamo]    = useState(null);
 
   const mutAplicarSaldo = useMutation({
     mutationFn: (prestamoId) => aplicarSaldoAPrestamoApi(prestamoId),
@@ -1451,6 +1462,7 @@ function VistaDetallePersona({ nombre, tipo, personaId, prestamos, saldoAFavor =
               saldoAFavor={saldoAFavor}
               onAplicarSaldo={(id) => mutAplicarSaldo.mutate(id)}
               aplicandoSaldo={aplicandoSaldoId === p.id}
+              onEditar={(p) => setEditandoPrestamo(p)}
               coloresActivo={coloresActivo} />
           ))}
         </div>
@@ -1576,6 +1588,22 @@ function VistaDetallePersona({ nombre, tipo, personaId, prestamos, saldoAFavor =
         </div>
       )}
         </>
+      )}
+
+      {/* Modal editar valor de préstamo */}
+      {editandoPrestamo && (
+        <ModalEditarValorPrestamo
+          key={editandoPrestamo.id}
+          open
+          onClose={() => setEditandoPrestamo(null)}
+          mov={{
+            referencia_id: editandoPrestamo.id,
+            concepto:      `Préstamo — ${editandoPrestamo.nombre_producto}`,
+            cargo:         Number(editandoPrestamo.valor_prestamo),
+          }}
+          tipoApi={tipoApi}
+          personaId={personaId}
+        />
       )}
 
       {/* Modal informativo — resultado de aplicar saldo */}
@@ -1931,7 +1959,7 @@ function TipoPrestamoBadge({ prestatarioId }) {
   );
 }
 
-function TarjetaResultadoPrestamo({ prestamo, onAbonar, onDevolver }) {
+function TarjetaResultadoPrestamo({ prestamo, onAbonar, onDevolver, onEditar }) {
   const saldo    = Number(prestamo.saldo_pendiente);
   const progreso = Number(prestamo.valor_prestamo) > 0
     ? Math.min(100, (Number(prestamo.total_abonado) / Number(prestamo.valor_prestamo)) * 100)
@@ -1981,13 +2009,21 @@ function TarjetaResultadoPrestamo({ prestamo, onAbonar, onDevolver }) {
       </div>
 
       {prestamo.estado === 'Activo' && (
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           <Button size="sm" className="flex-1" onClick={() => onAbonar(prestamo)}>
             <Plus size={14} /> Abonar
           </Button>
           <Button size="sm" variant="secondary" onClick={() => onDevolver(prestamo)}>
             <CheckCircle size={14} /> Devuelto
           </Button>
+          {onEditar && (
+            <button
+              onClick={() => onEditar(prestamo)}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium
+                border border-gray-200 text-gray-500 bg-white hover:bg-gray-50 transition-colors">
+              <Pencil size={12} /> Editar valor
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -2001,8 +2037,9 @@ function TabBusquedaPrestamos() {
   const [fechaDesde, setFechaDesde] = useState('');
   const [fechaHasta, setFechaHasta] = useState('');
 
-  const [prestamoAbono, setPrestamoAbono] = useState(null);
-  const [prestamoDevol, setPrestamoDevol] = useState(null);
+  const [prestamoAbono,   setPrestamoAbono]   = useState(null);
+  const [prestamoDevol,   setPrestamoDevol]   = useState(null);
+  const [prestamoEditar,  setPrestamoEditar]  = useState(null);
 
   const hasFilter = q.trim().length >= 2 || estado || tipo || fechaDesde || fechaHasta;
 
@@ -2133,6 +2170,7 @@ function TabBusquedaPrestamos() {
               prestamo={p}
               onAbonar={setPrestamoAbono}
               onDevolver={setPrestamoDevol}
+              onEditar={setPrestamoEditar}
             />
           ))}
         </div>
@@ -2147,6 +2185,20 @@ function TabBusquedaPrestamos() {
       )}
       {prestamoDevol && (
         <ModalDevolucion prestamo={prestamoDevol} onClose={() => setPrestamoDevol(null)} />
+      )}
+      {prestamoEditar && (
+        <ModalEditarValorPrestamo
+          key={prestamoEditar.id}
+          open
+          onClose={() => setPrestamoEditar(null)}
+          mov={{
+            referencia_id: prestamoEditar.id,
+            concepto:      `Préstamo — ${prestamoEditar.nombre_producto}`,
+            cargo:         Number(prestamoEditar.valor_prestamo),
+          }}
+          tipoApi={prestamoEditar.prestatario_id ? 'prestatario' : 'cliente'}
+          personaId={prestamoEditar.prestatario_id ?? prestamoEditar.cliente_id}
+        />
       )}
     </div>
   );

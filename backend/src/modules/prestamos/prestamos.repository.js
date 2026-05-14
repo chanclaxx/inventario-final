@@ -586,7 +586,7 @@ const getEstadoCuenta = async (executor, negocioId, tipo, personaId) => {
     : 'p.cliente_id = $2';
 
   const { rows } = await executor.query(`
-    SELECT fecha, tipo, concepto, cargo, abono, referencia_id, anulable
+    SELECT fecha, tipo, concepto, cargo, abono, referencia_id, anulable, prestamo_estado
     FROM (
 
       -- Préstamos otorgados (aumentan deuda)
@@ -598,7 +598,8 @@ const getEstadoCuenta = async (executor, negocioId, tipo, personaId) => {
         NULL::numeric                                  AS abono,
         p.id                                           AS referencia_id,
         false                                          AS anulable,
-        NULL::integer                                  AS prestamo_id
+        NULL::integer                                  AS prestamo_id,
+        p.estado::text                                 AS prestamo_estado
       FROM prestamos p
       JOIN sucursales su ON su.id = p.sucursal_id
       WHERE su.negocio_id = $1 AND ${filtroPersona}
@@ -622,7 +623,8 @@ const getEstadoCuenta = async (executor, negocioId, tipo, personaId) => {
         ap.valor::numeric                              AS abono,
         ap.id                                          AS referencia_id,
         true                                           AS anulable,
-        ap.prestamo_id                                 AS prestamo_id
+        ap.prestamo_id                                 AS prestamo_id,
+        NULL::text                                     AS prestamo_estado
       FROM abonos_prestamo ap
       JOIN prestamos  p  ON p.id  = ap.prestamo_id
       JOIN sucursales su ON su.id = p.sucursal_id
@@ -639,7 +641,8 @@ const getEstadoCuenta = async (executor, negocioId, tipo, personaId) => {
         r.valor_retoma::numeric                        AS abono,
         r.id                                           AS referencia_id,
         true                                           AS anulable,
-        NULL::integer                                  AS prestamo_id
+        NULL::integer                                  AS prestamo_id,
+        NULL::text                                     AS prestamo_estado
       FROM retomas r
       LEFT JOIN sucursales su ON su.id = r.sucursal_id
       WHERE r.prestamo_id IS NULL

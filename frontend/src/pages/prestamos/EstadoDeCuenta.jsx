@@ -121,7 +121,7 @@ function BurbujaMensaje({ mov, onAnular, onEditar }) {
           {/* Footer: fecha + acciones */}
           <div className={`flex items-center gap-2 mt-1.5 ${esDerecha ? 'justify-end' : 'justify-start'}`}>
             <span className="text-[10px] text-gray-400">{formatFecha(mov.fecha)}</span>
-            {mov.tipo === 'prestamo' && onEditar && (
+            {mov.tipo === 'prestamo' && mov.prestamo_estado === 'Activo' && onEditar && (
               <button
                 onClick={() => onEditar(mov)}
                 title="Editar valor"
