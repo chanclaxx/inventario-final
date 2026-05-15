@@ -10,6 +10,7 @@ import {
 import { buscarPorIMEI, buscarProductos, getHistorialCantidad } from '../../api/busqueda.api';
 import { formatCOP, formatFecha } from '../../utils/formatters';
 import { useAuth } from '../../context/useAuth';
+import useBusquedaStore from '../../store/busquedaStore';
 
 // ─── Componentes de soporte ───────────────────────────────────────────────────
 
@@ -439,9 +440,7 @@ const MODOS = [
 
 export default function BusquedaPage() {
   const { usuario } = useAuth();
-  const [modo,     setModo]     = useState('imei');
-  const [input,    setInput]    = useState('');
-  const [busqueda, setBusqueda] = useState('');
+  const { modo, input, busqueda, setModo, setInput, setBusqueda, limpiar } = useBusquedaStore();
   const inputRef = useRef(null);
 
   const queryIMEI = useQuery({
@@ -468,14 +467,11 @@ export default function BusquedaPage() {
 
   const handleCambiarModo = (nuevoModo) => {
     setModo(nuevoModo);
-    setBusqueda('');
-    setInput('');
     inputRef.current?.focus();
   };
 
   const handleLimpiar = () => {
-    setInput('');
-    setBusqueda('');
+    limpiar();
     inputRef.current?.focus();
   };
 
