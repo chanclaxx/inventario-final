@@ -8,7 +8,9 @@ import {
   getArbol,
   crearAtributo, actualizarAtributo, eliminarAtributo,
   crearVariante, actualizarVariante, eliminarVariante,
+  ajustarStockAtributo, ajustarStockVariante,
 } from '../../api/variantesProductoApi';
+import { ModalPinEliminacion } from './ModalPinEliminacion';
 import { Button }     from '../../components/ui/Button';
 import { Input }      from '../../components/ui/Input';
 import { Spinner }    from '../../components/ui/Spinner';
@@ -152,7 +154,7 @@ function ModalNodo({ open, onClose, titulo, tipos = [], datoInicial, onGuardar, 
 // ─── Tarjeta de atributo o variante ──────────────────────────────────────────
 function TarjetaNodo({
   nodo, tieneHijos, esAdmin,
-  onDrillDown, onAgregar, onEditar,
+  onDrillDown, onAgregar, onEditar, onReducir,
   precioPadre,
 }) {
   const sinStock  = nodo.stock === 0;
@@ -192,6 +194,15 @@ function TarjetaNodo({
               className="p-1.5 rounded-lg text-gray-300 hover:text-gray-600 hover:bg-gray-100 transition-colors"
             >
               <Settings size={13} />
+            </button>
+          )}
+          {esAdmin && !tieneHijos && onReducir && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onReducir(); }}
+              className="p-1.5 rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50 transition-colors"
+              title="Reducir stock"
+            >
+              <Trash2 size={13} />
             </button>
           )}
           {tieneHijos && <ChevronRight size={15} className="text-blue-400 ml-1" />}
@@ -277,8 +288,10 @@ export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose 
   });
   const tipos = tiposData || [];
 
-  const invalidar = () =>
+  const invalidar = () => {
     queryClient.invalidateQueries({ queryKey: ['arbol-producto', producto.id, sucursalId] });
+    queryClient.invalidateQueries({ queryKey: ['productos-cantidad'], exact: false });
+  };
 
   const cerrarModal = () => { setModalNodo(null); setErrorM(''); };
 
@@ -313,6 +326,34 @@ export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose 
     onSuccess:  invalidar,
     onError:    (e) => alert(e.response?.data?.error || 'Error al eliminar'),
   });
+
+  const [nodoAReducir,    setNodoAReducir]    = useState(null); // { nodo, tipo: 'atributo'|'variante' }
+  const [cantidadReducir, setCantidadReducir] = useState('1');
+
+  const mutReducirNodo = useMutation({
+    mutationFn: ({ id, tipo, cantidad }) =>
+      tipo === 'variante'
+        ? ajustarStockVariante(id, { cantidad: -Math.abs(cantidad) })
+        : ajustarStockAtributo(id, { cantidad: -Math.abs(cantidad) }),
+    onSuccess: () => {
+      invalidar();
+      setNodoAReducir(null);
+      setCantidadReducir('1');
+    },
+  });
+
+  const handleConfirmarReducir = () => {
+    const cant = parseInt(cantidadReducir, 10);
+    if (!cant || cant <= 0) throw new Error('La cantidad debe ser mayor a 0');
+    if (cant > nodoAReducir.nodo.stock)
+      throw new Error(`Stock insuficiente. Stock actual: ${nodoAReducir.nodo.stock}`);
+    return mutReducirNodo.mutateAsync({ id: nodoAReducir.nodo.id, tipo: nodoAReducir.tipo, cantidad: cant });
+  };
+
+  const abrirReducir = (nodo, tipo) => {
+    setNodoAReducir({ nodo, tipo });
+    setCantidadReducir('1');
+  };
 
   const handleAgregarAtributo = (atributo) => {
     agregarItem({
@@ -411,6 +452,7 @@ export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose 
                 onDrillDown={() => {}}
                 onAgregar={() => handleAgregarVariante(v)}
                 onEditar={() => { setErrorM(''); setModalNodo({ modo: 'editar-var', dato: v }); }}
+                onReducir={() => abrirReducir(v, 'variante')}
               />
             ))}
             {esAdmin && (
@@ -450,6 +492,24 @@ export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose 
             isPending={mutEditarVar.isPending}
             error={errorM}
             onEliminar={() => { mutEliminarVar.mutate(modalNodo.dato.id); cerrarModal(); }}
+          />
+        )}
+
+        {nodoAReducir && (
+          <ModalPinEliminacion
+            titulo="Reducir stock"
+            descripcion={`Reducir stock de "${labelNodo(nodoAReducir.nodo)}". Stock actual: ${nodoAReducir.nodo.stock} unidades.`}
+            loading={mutReducirNodo.isPending}
+            onConfirm={handleConfirmarReducir}
+            onClose={() => { setNodoAReducir(null); setCantidadReducir('1'); }}
+            extraContent={
+              <Input
+                label="Cantidad a reducir"
+                type="number" min="1" max={nodoAReducir.nodo.stock}
+                value={cantidadReducir}
+                onChange={(e) => setCantidadReducir(e.target.value)}
+              />
+            }
           />
         )}
       </div>
@@ -554,6 +614,7 @@ export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose 
                 onDrillDown={() => setAtributoSel(atributo)}
                 onAgregar={() => handleAgregarAtributo(atributo)}
                 onEditar={() => { setErrorM(''); setModalNodo({ modo: 'editar-atr', dato: atributo }); }}
+                onReducir={() => abrirReducir(atributo, 'atributo')}
               />
             );
           })}
@@ -594,6 +655,24 @@ export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose 
           isPending={mutEditarAtr.isPending}
           error={errorM}
           onEliminar={() => { mutEliminarAtr.mutate(modalNodo.dato.id); cerrarModal(); }}
+        />
+      )}
+
+      {nodoAReducir && (
+        <ModalPinEliminacion
+          titulo="Reducir stock"
+          descripcion={`Reducir stock de "${labelNodo(nodoAReducir.nodo)}". Stock actual: ${nodoAReducir.nodo.stock} unidades.`}
+          loading={mutReducirNodo.isPending}
+          onConfirm={handleConfirmarReducir}
+          onClose={() => { setNodoAReducir(null); setCantidadReducir('1'); }}
+          extraContent={
+            <Input
+              label="Cantidad a reducir"
+              type="number" min="1" max={nodoAReducir.nodo.stock}
+              value={cantidadReducir}
+              onChange={(e) => setCantidadReducir(e.target.value)}
+            />
+          }
         />
       )}
     </div>

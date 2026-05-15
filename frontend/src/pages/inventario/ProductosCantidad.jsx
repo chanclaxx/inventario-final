@@ -62,13 +62,15 @@ function TarjetaProducto({ p, esAdmin, onAgregar, onReducir, onEditar, variantes
           )}
         </div>
         <div className="flex items-center gap-0.5 flex-shrink-0">
-          <button
-            onClick={(e) => { e.stopPropagation(); onReducir(e, p); }}
-            className="p-1.5 rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50 transition-colors"
-            title="Reducir stock"
-          >
-            <Trash2 size={15} />
-          </button>
+          {!variantesActivo && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onReducir(e, p); }}
+              className="p-1.5 rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50 transition-colors"
+              title="Reducir stock"
+            >
+              <Trash2 size={15} />
+            </button>
+          )}
           {esAdmin && (
             <button
               onClick={(e) => { e.stopPropagation(); onEditar(p); }}
