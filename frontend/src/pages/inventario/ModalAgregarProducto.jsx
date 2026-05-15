@@ -1578,27 +1578,33 @@ function PasoCantidad({ sucursalKey, onExito, variantesActivo }) {
       const cantidadNum = Number(cantidad);
       const costo = costoCompra !== '' ? Number(costoCompra) : null;
 
-      if (nodoSel?.tipo === 'variante') {
+      if (proveedorId && modoPago) {
+        // Registro formal de compra — aplica tanto a producto plano como a variantes
+        const linea = {
+          nombre_producto: productoSel.nombre,
+          cantidad:        cantidadNum,
+          precio_unitario: costo || 0,
+          producto_id:     productoSel.id,
+        };
+        if (nodoSel?.tipo === 'variante') linea.variante_id = nodoSel.id;
+        else if (nodoSel?.tipo === 'atributo') linea.atributo_id = nodoSel.id;
+        await crearCompra(buildPayloadCompra({
+          proveedorId, monto: costo ? costo * cantidadNum : 0,
+          modoPago, metodoPagoContado, registrarEnCaja,
+          lineas: [linea],
+        }));
+      } else if (nodoSel?.tipo === 'variante') {
         await ajustarStockVariante(nodoSel.id, {
           cantidad: cantidadNum,
           costo_unitario: costo,
-          proveedor_id: proveedorId ? Number(proveedorId) : undefined,
-          tipo: proveedorId ? 'compra_proveedor' : 'ajuste',
+          tipo: 'ajuste',
         });
       } else if (nodoSel?.tipo === 'atributo') {
         await ajustarStockAtributo(nodoSel.id, {
           cantidad: cantidadNum,
           costo_unitario: costo,
-          proveedor_id: proveedorId ? Number(proveedorId) : undefined,
-          tipo: proveedorId ? 'compra_proveedor' : 'ajuste',
+          tipo: 'ajuste',
         });
-      } else if (proveedorId && modoPago) {
-        // Producto plano con registro formal de compra
-        await crearCompra(buildPayloadCompra({
-          proveedorId, monto: costo ? costo * cantidadNum : 0,
-          modoPago, metodoPagoContado, registrarEnCaja,
-          lineas: [{ nombre_producto: productoSel.nombre, cantidad: cantidadNum, precio_unitario: costo || 0, producto_id: productoSel.id }],
-        }));
       } else {
         // Producto plano sin registro formal de compra
         await ajustarStockCantidad(productoSel.id, {
@@ -1625,16 +1631,16 @@ function PasoCantidad({ sucursalKey, onExito, variantesActivo }) {
     if (!productoSel)              return setError('Selecciona un producto');
     if (tieneArbol && !nodoSel)    return setError('Selecciona la variante o atributo al que quieres agregar stock');
     if (!cantidad || cantidad < 1) return setError('La cantidad debe ser mayor a 0');
-    if (!nodoSel && proveedorId && !modoPago)
+    if (proveedorId && !modoPago)
       return setError('Selecciona si fue pagado o a crédito');
     mutConfirmar.mutate();
   };
 
   const labelBoton = () => {
-    if (nodoSel) return `Agregar ${cantidad} uds a ${nodoSel.label}`;
-    if (modoPago === 'contado') return `Agregar ${cantidad} unidad(es) — compra en contado`;
-    if (modoPago === 'credito') return `Agregar ${cantidad} unidad(es) — registrar como crédito`;
-    return `Agregar ${cantidad} unidad(es) al stock`;
+    const base = nodoSel ? `Agregar ${cantidad} uds a ${nodoSel.label}` : `Agregar ${cantidad} unidad(es)`;
+    if (modoPago === 'contado') return `${base} — compra en contado`;
+    if (modoPago === 'credito') return `${base} — registrar como crédito`;
+    return nodoSel ? base : `${base} al stock`;
   };
 
   return (
@@ -1755,10 +1761,10 @@ function PasoCantidad({ sucursalKey, onExito, variantesActivo }) {
             onProveedorTipoChange={(tipo) => { setRegistrarEnCaja(tipo !== 'proveedor'); }}
           />
 
-          {/* Nota informativa cuando hay proveedor + variante seleccionada */}
-          {nodoSel && proveedorId && (
+          {/* Nota informativa cuando hay variante + proveedor pero aún sin modo de pago */}
+          {nodoSel && proveedorId && !modoPago && (
             <p className="text-xs text-amber-600 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
-              Proveedor y costo quedan registrados en el historial de movimientos.
+              Selecciona si fue pagado o a crédito para registrar la compra en el proveedor.
             </p>
           )}
         </div>
