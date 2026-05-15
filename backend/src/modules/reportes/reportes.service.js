@@ -494,9 +494,14 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
       l.cantidad,
       l.precio,
       l.subtotal,
+      l.producto_id,
       CASE
         WHEN l.imei IS NOT NULL THEN
           ${_costoPorImei('l.imei', 'f.sucursal_id')}
+        WHEN l.producto_id IS NOT NULL THEN
+          (SELECT pc.costo_unitario
+           FROM productos_cantidad pc
+           WHERE pc.id = l.producto_id)
         ELSE
           (SELECT pc.costo_unitario
            FROM productos_cantidad pc
@@ -523,6 +528,7 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
       cantidad:              Number(linea.cantidad),
       precio_venta:          Number(linea.precio),
       subtotal:              Number(linea.subtotal),
+      producto_id:           linea.producto_id ? Number(linea.producto_id) : null,
       costo_unitario_compra: costoUnitario,
       costo_total:           costoTotal,
       utilidad,
@@ -770,7 +776,7 @@ const getInventarioBajo = async (sucursalId) => {
 
 // ─── actualizarCostoCompra ────────────────────────────────────────────────────
 
-const actualizarCostoCompra = async (sucursalId, tipo, imei, nombreProducto, nuevoCosto) => {
+const actualizarCostoCompra = async (sucursalId, tipo, imei, nombreProducto, nuevoCosto, productoId) => {
   if (tipo === 'serial') {
     const { rows: check } = await pool.query(`
       SELECT s.id
@@ -791,11 +797,20 @@ const actualizarCostoCompra = async (sucursalId, tipo, imei, nombreProducto, nue
   }
 
   if (tipo === 'cantidad') {
-    const { rows: check } = await pool.query(`
-      SELECT id FROM productos_cantidad
-      WHERE nombre = $1 AND sucursal_id = $2 AND activo = true
-      LIMIT 1
-    `, [nombreProducto, sucursalId]);
+    let check;
+    if (productoId) {
+      ({ rows: check } = await pool.query(
+        'SELECT id FROM productos_cantidad WHERE id = $1 AND sucursal_id = $2 AND activo = true',
+        [productoId, sucursalId],
+      ));
+    } else {
+      ({ rows: check } = await pool.query(
+        `SELECT id FROM productos_cantidad
+         WHERE nombre = $1 AND sucursal_id = $2 AND activo = true
+         LIMIT 1`,
+        [nombreProducto, sucursalId],
+      ));
+    }
 
     if (!check.length) {
       throw Object.assign(new Error('Producto no encontrado en esta sucursal'), { status: 404 });
