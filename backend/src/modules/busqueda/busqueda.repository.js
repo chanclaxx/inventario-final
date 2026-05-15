@@ -100,11 +100,32 @@ const getTrasladosPorIMEI = async (imei, negocioId) => {
 
 // ─── Búsqueda por nombre ──────────────────────────────────────────────────────
 
+// Divide la query en palabras y construye condiciones AND (cada palabra debe
+// aparecer en alguno de los campos dados). Permite búsqueda tolerante al orden.
+const _wordConditions = (q, fields, params) => {
+  const palabras = q.toLowerCase().trim().split(/\s+/).filter(Boolean);
+  let idx = params.length + 1;
+  const conds = palabras.map((word) => {
+    params.push(`%${word}%`);
+    const n = idx++;
+    return `(${fields.map((f) => `${f} LIKE $${n}`).join(' OR ')})`;
+  });
+  return { conds, nextIdx: idx };
+};
+
 const buscarSeriales = async (q, negocioId, sucursalId) => {
-  const filtro = sucursalId ? 'AND ps.sucursal_id = $3' : '';
-  const params = sucursalId
-    ? [negocioId, `%${q.toLowerCase()}%`, sucursalId]
-    : [negocioId, `%${q.toLowerCase()}%`];
+  const params = [negocioId];
+  const { conds, nextIdx } = _wordConditions(q, [
+    'LOWER(ps.nombre)',
+    "LOWER(COALESCE(ps.marca,''))",
+    "LOWER(COALESCE(ps.modelo,''))",
+  ], params);
+
+  let filtro = '';
+  if (sucursalId) {
+    filtro = `AND ps.sucursal_id = $${nextIdx}`;
+    params.push(sucursalId);
+  }
 
   const { rows } = await pool.query(`
     SELECT
@@ -120,11 +141,7 @@ const buscarSeriales = async (q, negocioId, sucursalId) => {
     LEFT JOIN seriales s ON s.producto_id = ps.id
     WHERE su.negocio_id = $1
       AND ps.activo = true
-      AND (
-        LOWER(ps.nombre) LIKE $2
-        OR LOWER(COALESCE(ps.marca, ''))   LIKE $2
-        OR LOWER(COALESCE(ps.modelo, ''))  LIKE $2
-      )
+      AND ${conds.join(' AND ')}
       ${filtro}
     GROUP BY ps.id, su.id
     ORDER BY ps.nombre
@@ -134,10 +151,14 @@ const buscarSeriales = async (q, negocioId, sucursalId) => {
 };
 
 const buscarCantidad = async (q, negocioId, sucursalId) => {
-  const filtro = sucursalId ? 'AND pc.sucursal_id = $3' : '';
-  const params = sucursalId
-    ? [negocioId, `%${q.toLowerCase()}%`, sucursalId]
-    : [negocioId, `%${q.toLowerCase()}%`];
+  const params = [negocioId];
+  const { conds, nextIdx } = _wordConditions(q, ['LOWER(pc.nombre)'], params);
+
+  let filtro = '';
+  if (sucursalId) {
+    filtro = `AND pc.sucursal_id = $${nextIdx}`;
+    params.push(sucursalId);
+  }
 
   const { rows } = await pool.query(`
     SELECT
@@ -149,11 +170,30 @@ const buscarCantidad = async (q, negocioId, sucursalId) => {
     JOIN sucursales su ON su.id = pc.sucursal_id
     WHERE su.negocio_id = $1
       AND pc.activo = true
-      AND LOWER(pc.nombre) LIKE $2
+      AND ${conds.join(' AND ')}
       ${filtro}
     ORDER BY pc.nombre
     LIMIT 40
   `, params);
+  return rows;
+};
+
+const getHistorialCantidad = async (productoId, negocioId) => {
+  const { rows } = await pool.query(`
+    SELECT
+      h.id, h.cantidad, h.costo_unitario, h.tipo,
+      h.cliente_origen, h.cedula_cliente, h.notas,
+      h.creado_en AS fecha,
+      su.nombre   AS sucursal_nombre,
+      p.nombre    AS proveedor_nombre
+    FROM historial_stock_cantidad h
+    JOIN productos_cantidad pc ON pc.id = h.producto_id
+    JOIN sucursales         su ON su.id = h.sucursal_id
+    LEFT JOIN proveedores   p  ON p.id  = h.proveedor_id
+    WHERE h.producto_id = $1 AND su.negocio_id = $2
+    ORDER BY h.creado_en DESC
+    LIMIT 60
+  `, [productoId, negocioId]);
   return rows;
 };
 
@@ -297,7 +337,7 @@ const buscarPrestamos = async ({ q, estado, tipo, fechaDesde, fechaHasta }, nego
 module.exports = {
   getSerialPorIMEI, getVentasPorIMEI, getRetomasPorIMEI,
   getPrestamosPorIMEI, getTrasladosPorIMEI,
-  buscarSeriales, buscarCantidad,
+  buscarSeriales, buscarCantidad, getHistorialCantidad,
   buscarComprasPorIMEI, buscarComprasPorTexto,
   buscarPrestamos,
 };

@@ -141,4 +141,7 @@ const buscarPrestamos = async (filtros, negocioId, sucursalId, rol) => {
   return repo.buscarPrestamos(filtros, negocioId, filtroSucursal);
 };
 
-module.exports = { buscarPorIMEI, buscarProductos, buscarCompras, buscarPrestamos };
+const getHistorialCantidad = async (productoId, negocioId) =>
+  repo.getHistorialCantidad(productoId, negocioId);
+
+module.exports = { buscarPorIMEI, buscarProductos, buscarCompras, buscarPrestamos, getHistorialCantidad };

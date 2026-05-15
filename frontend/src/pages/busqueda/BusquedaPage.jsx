@@ -4,9 +4,10 @@ import {
   Search, Package, Hash, ArrowRight, Handshake,
   ShoppingCart, RotateCcw, CheckCircle2, XCircle,
   MapPin, User, Phone, CreditCard, Tag, Loader2,
-  AlertCircle, Box, Layers, ScanLine,
+  AlertCircle, Box, Layers, ScanLine, ChevronDown, ChevronUp,
+  TrendingUp, RefreshCw, Truck,
 } from 'lucide-react';
-import { buscarPorIMEI, buscarProductos } from '../../api/busqueda.api';
+import { buscarPorIMEI, buscarProductos, getHistorialCantidad } from '../../api/busqueda.api';
 import { formatCOP, formatFecha } from '../../utils/formatters';
 import { useAuth } from '../../context/useAuth';
 
@@ -313,7 +314,71 @@ function TarjetaProductoSerial({ p }) {
   );
 }
 
+const tipoMovConfig = {
+  ajuste:           { label: 'Ajuste manual',      color: 'bg-gray-500',   Icon: RefreshCw   },
+  compra_proveedor: { label: 'Compra a proveedor', color: 'bg-blue-500',   Icon: Truck       },
+  compra_cliente:   { label: 'Compra a cliente',   color: 'bg-indigo-500', Icon: TrendingUp  },
+  retoma:           { label: 'Retoma',             color: 'bg-purple-500', Icon: RotateCcw   },
+  cantidad:         { label: 'Traslado',           color: 'bg-yellow-500', Icon: ArrowRight  },
+  venta:            { label: 'Venta',              color: 'bg-green-500',  Icon: ShoppingCart},
+};
+
+function HistorialCantidad({ productoId }) {
+  const { data, isFetching } = useQuery({
+    queryKey: ['historial-cantidad', productoId],
+    queryFn:  () => getHistorialCantidad(productoId).then((r) => r.data.data),
+    staleTime: 60_000,
+  });
+
+  if (isFetching) {
+    return (
+      <div className="flex items-center gap-2 py-3 text-gray-400">
+        <Loader2 size={14} className="animate-spin" />
+        <span className="text-xs">Cargando movimientos…</span>
+      </div>
+    );
+  }
+
+  if (!data?.length) {
+    return <p className="text-xs text-gray-400 py-2 text-center">Sin movimientos registrados</p>;
+  }
+
+  return (
+    <div className="flex flex-col gap-2 mt-3 pt-3 border-t border-gray-100">
+      <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Historial de movimientos</p>
+      {data.map((h) => {
+        const cfg = tipoMovConfig[h.tipo] || tipoMovConfig.ajuste;
+        const HIcon = cfg.Icon;
+        const esEntrada = h.cantidad > 0;
+        return (
+          <div key={h.id} className="flex items-start gap-2">
+            <div className={`w-6 h-6 rounded-lg ${cfg.color} flex items-center justify-center flex-shrink-0 mt-0.5`}>
+              <HIcon size={11} className="text-white" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-semibold text-gray-700">{cfg.label}</span>
+                <span className={`text-xs font-bold ${esEntrada ? 'text-green-600' : 'text-red-500'}`}>
+                  {esEntrada ? '+' : ''}{h.cantidad}{h.unidad_medida ? ` ${h.unidad_medida}` : ''}
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-x-3 text-xs text-gray-400 mt-0.5">
+                <span>{formatFecha(h.fecha)}</span>
+                {h.sucursal_nombre && <span className="flex items-center gap-0.5"><MapPin size={9} />{h.sucursal_nombre}</span>}
+                {h.proveedor_nombre && <span>Proveedor: <span className="text-gray-600">{h.proveedor_nombre}</span></span>}
+                {h.cliente_origen   && <span>Cliente: <span className="text-gray-600">{h.cliente_origen}</span></span>}
+              </div>
+              {h.notas && <p className="text-xs text-gray-400 mt-0.5 italic">{h.notas}</p>}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function TarjetaProductoCantidad({ p }) {
+  const [expandido, setExpandido] = useState(false);
   const alerta = p.stock_minimo != null && p.stock <= p.stock_minimo;
   return (
     <div className="bg-white border border-gray-200 rounded-2xl p-4 shadow-sm hover:shadow-md transition-shadow">
@@ -339,14 +404,26 @@ function TarjetaProductoCantidad({ p }) {
               </span>
             )}
           </div>
-          {p.precio != null && (
-            <p className="text-sm font-bold text-gray-700 mt-1">{formatCOP(p.precio)}</p>
-          )}
-          {p.costo_unitario != null && (
-            <p className="text-xs text-gray-400 mt-0.5">
-              Costo unit.: {formatCOP(p.costo_unitario)}
-            </p>
-          )}
+          <div className="flex items-center justify-between mt-1">
+            <div>
+              {p.precio != null && (
+                <p className="text-sm font-bold text-gray-700">{formatCOP(p.precio)}</p>
+              )}
+              {p.costo_unitario != null && (
+                <p className="text-xs text-gray-400">Costo unit.: {formatCOP(p.costo_unitario)}</p>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => setExpandido((v) => !v)}
+              className="flex items-center gap-1 text-xs text-blue-500 hover:text-blue-700 font-medium transition-colors"
+            >
+              {expandido ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+              {expandido ? 'Ocultar' : 'Ver movimientos'}
+            </button>
+          </div>
+
+          {expandido && <HistorialCantidad productoId={p.id} />}
         </div>
       </div>
     </div>

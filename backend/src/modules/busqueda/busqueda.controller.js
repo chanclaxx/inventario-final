@@ -65,4 +65,16 @@ const buscarPrestamos = async (req, res, next) => {
   }
 };
 
-module.exports = { buscarPorIMEI, buscarProductos, buscarCompras, buscarPrestamos };
+const getHistorialCantidad = async (req, res, next) => {
+  try {
+    const productoId = parseInt(req.params.productoId, 10);
+    if (!productoId) return res.status(400).json({ ok: false, error: 'ID de producto requerido' });
+    const { negocio_id } = req.user;
+    const data = await service.getHistorialCantidad(productoId, negocio_id);
+    res.json({ ok: true, data });
+  } catch (err) {
+    next(err);
+  }
+};
+
+module.exports = { buscarPorIMEI, buscarProductos, buscarCompras, buscarPrestamos, getHistorialCantidad };
