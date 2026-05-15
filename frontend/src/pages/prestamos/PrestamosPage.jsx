@@ -1110,6 +1110,20 @@ function TarjetaPrestamoDetalle({ prestamo, onAbonar, onDevolver, onImprimir, on
             {!prestamo.imei && prestamo.cantidad_prestada > 1 && (
               <p className="text-xs text-gray-400 mt-0.5">Cantidad: {prestamo.cantidad_prestada}</p>
             )}
+            {(prestamo.atributo_label || prestamo.variante_label) && (
+              <div className="flex flex-wrap gap-1 mt-0.5">
+                {prestamo.atributo_label && (
+                  <span className="text-xs bg-blue-50 text-blue-600 border border-blue-100 px-2 py-0.5 rounded-full">
+                    {prestamo.atributo_label}
+                  </span>
+                )}
+                {prestamo.variante_label && (
+                  <span className="text-xs bg-purple-50 text-purple-600 border border-purple-100 px-2 py-0.5 rounded-full">
+                    {prestamo.variante_label}
+                  </span>
+                )}
+              </div>
+            )}
             {coloresActivo && prestamo.serial_color && <ChipColor color={prestamo.serial_color} />}
             {prestamo.empleado_nombre && (
               <p className="text-xs text-blue-500 mt-0.5">→ {prestamo.empleado_nombre}</p>
@@ -1987,6 +2001,20 @@ function TarjetaResultadoPrestamo({ prestamo, onAbonar, onDevolver, onEditar }) 
           )}
           {!prestamo.imei && Number(prestamo.cantidad_prestada) > 1 && (
             <p className="text-xs text-gray-400 mt-0.5">Cantidad: {prestamo.cantidad_prestada}</p>
+          )}
+          {(prestamo.atributo_label || prestamo.variante_label) && (
+            <div className="flex flex-wrap gap-1 mt-0.5">
+              {prestamo.atributo_label && (
+                <span className="text-xs bg-blue-50 text-blue-600 border border-blue-100 px-2 py-0.5 rounded-full">
+                  {prestamo.atributo_label}
+                </span>
+              )}
+              {prestamo.variante_label && (
+                <span className="text-xs bg-purple-50 text-purple-600 border border-purple-100 px-2 py-0.5 rounded-full">
+                  {prestamo.variante_label}
+                </span>
+              )}
+            </div>
           )}
           <p className="text-xs text-gray-400 mt-0.5">
             {formatFechaHora(prestamo.fecha)} · {prestamo.sucursal_nombre}

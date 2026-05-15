@@ -10,6 +10,7 @@ const findAll = async (sucursalId, negocioId) => {
       p.nombre_producto, p.imei, p.cantidad_prestada,
       p.valor_prestamo, p.total_abonado, p.estado,
       p.prestatario_id, p.empleado_id, p.cliente_id, p.sucursal_id,
+      p.atributo_id, p.variante_id, p.atributo_label, p.variante_label,
       su.nombre AS sucursal_nombre,
       (p.valor_prestamo - p.total_abonado) AS saldo_pendiente,
       u.nombre  AS usuario_nombre,
@@ -104,19 +105,23 @@ const create = async (client, {
   sucursal_id, usuario_id, prestatario, cedula, telefono,
   nombre_producto, imei, producto_id, cantidad_prestada, valor_prestamo,
   prestatario_id, empleado_id, cliente_id,
+  atributo_id, variante_id, atributo_label, variante_label,
 }) => {
   const { rows } = await client.query(`
     INSERT INTO prestamos(
       sucursal_id, usuario_id, prestatario, cedula, telefono,
       nombre_producto, imei, producto_id, cantidad_prestada, valor_prestamo,
-      prestatario_id, empleado_id, cliente_id
+      prestatario_id, empleado_id, cliente_id,
+      atributo_id, variante_id, atributo_label, variante_label
     )
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
     RETURNING *
   `, [
     sucursal_id, usuario_id, prestatario, cedula, telefono,
     nombre_producto, imei, producto_id, cantidad_prestada, valor_prestamo,
     prestatario_id || null, empleado_id || null, cliente_id || null,
+    atributo_id   || null, variante_id  || null,
+    atributo_label || null, variante_label || null,
   ]);
   return rows[0];
 };
@@ -683,6 +688,55 @@ const updateValorPrestamo = async (id, nuevoValor) => {
   return rows[0] || null;
 };
 
+// ── Helpers para stock de variantes (espejo de facturas.repository) ───────────
+
+const ajustarStockAtributoEnTx = async (client, atributoId, cantidad) => {
+  await client.query(
+    'UPDATE atributos_producto SET stock = stock + $1 WHERE id = $2',
+    [cantidad, atributoId]
+  );
+};
+
+const ajustarStockVarianteEnTx = async (client, varianteId, cantidad) => {
+  await client.query(
+    'UPDATE variantes_atributo SET stock = stock + $1 WHERE id = $2',
+    [cantidad, varianteId]
+  );
+};
+
+const sincronizarStockArbolEnTx = async (client, productoId) => {
+  await client.query(
+    `UPDATE atributos_producto ap
+     SET stock = sub.total
+     FROM (
+       SELECT v.atributo_id, COALESCE(SUM(v.stock), 0) AS total
+       FROM variantes_atributo v
+       WHERE v.activo = true
+       GROUP BY v.atributo_id
+     ) sub
+     WHERE ap.id = sub.atributo_id
+       AND ap.producto_id = $1
+       AND ap.activo = true`,
+    [productoId]
+  );
+  await client.query(
+    `UPDATE productos_cantidad pc
+     SET stock = sub.total
+     FROM (
+       SELECT ap.producto_id, COALESCE(SUM(ap.stock), 0) AS total
+       FROM atributos_producto ap
+       WHERE ap.activo = true AND ap.producto_id = $1
+       GROUP BY ap.producto_id
+     ) sub
+     WHERE pc.id = sub.producto_id
+       AND EXISTS (
+         SELECT 1 FROM atributos_producto ap
+         WHERE ap.producto_id = $1 AND ap.activo = true
+       )`,
+    [productoId]
+  );
+};
+
 module.exports = {
   crearAjusteDeuda,
   findAll, findById, findByIdYNegocio,
@@ -701,4 +755,5 @@ module.exports = {
   cancelarFacturaDePrestamo, revertirSerialVendido,
   findRetomaPorId, findSerialEnInventario, eliminarSerial, eliminarRetoma,
   findRetomasDirectasPorPersona, getEstadoCuenta,
+  ajustarStockAtributoEnTx, ajustarStockVarianteEnTx, sincronizarStockArbolEnTx,
 };

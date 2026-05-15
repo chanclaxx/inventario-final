@@ -29,7 +29,10 @@ const _verificarPrestatario = async (prestatario_id, negocio_id) => {
   if (!rows.length) throw { status: 403, message: 'El prestatario no pertenece a este negocio' };
 };
 
-const _procesarItemPrestamo = async (client, { imei, producto_id, nombre_producto, cantidad_prestada, sucursal_id, prestatario }) => {
+const _procesarItemPrestamo = async (client, {
+  imei, producto_id, nombre_producto, cantidad_prestada, sucursal_id,
+  atributo_id, variante_id,
+}) => {
   if (imei) {
     const { rows } = await client.query(
       `SELECT s.id FROM seriales s
@@ -45,19 +48,45 @@ const _procesarItemPrestamo = async (client, { imei, producto_id, nombre_product
       [rows[0].id]
     );
   } else if (producto_id) {
-    const { rows: prodRows } = await client.query(
-      `SELECT id, stock, sucursal_id FROM productos_cantidad WHERE id = $1`,
-      [producto_id]
-    );
-    const producto = prodRows[0];
-    if (!producto) throw { status: 404, message: `Producto ${nombre_producto} no encontrado` };
-    if (producto.sucursal_id !== sucursal_id) {
-      throw { status: 400, message: `El producto ${nombre_producto} no pertenece a esta sucursal` };
+    if (variante_id) {
+      const { rows: varRows } = await client.query(
+        `SELECT v.stock FROM variantes_atributo v
+         JOIN atributos_producto ap ON ap.id = v.atributo_id
+         WHERE v.id = $1 AND ap.sucursal_id = $2`,
+        [variante_id, sucursal_id]
+      );
+      if (!varRows.length) throw { status: 400, message: `Variante de ${nombre_producto} no encontrada` };
+      if (varRows[0].stock < cantidad_prestada) {
+        throw { status: 400, message: `Stock insuficiente para ${nombre_producto}` };
+      }
+      await repo.ajustarStockVarianteEnTx(client, variante_id, -cantidad_prestada);
+      await repo.sincronizarStockArbolEnTx(client, producto_id);
+    } else if (atributo_id) {
+      const { rows: atrRows } = await client.query(
+        `SELECT stock FROM atributos_producto WHERE id = $1 AND sucursal_id = $2`,
+        [atributo_id, sucursal_id]
+      );
+      if (!atrRows.length) throw { status: 400, message: `Atributo de ${nombre_producto} no encontrado` };
+      if (atrRows[0].stock < cantidad_prestada) {
+        throw { status: 400, message: `Stock insuficiente para ${nombre_producto}` };
+      }
+      await repo.ajustarStockAtributoEnTx(client, atributo_id, -cantidad_prestada);
+      await repo.sincronizarStockArbolEnTx(client, producto_id);
+    } else {
+      const { rows: prodRows } = await client.query(
+        `SELECT id, stock, sucursal_id FROM productos_cantidad WHERE id = $1`,
+        [producto_id]
+      );
+      const producto = prodRows[0];
+      if (!producto) throw { status: 404, message: `Producto ${nombre_producto} no encontrado` };
+      if (producto.sucursal_id !== sucursal_id) {
+        throw { status: 400, message: `El producto ${nombre_producto} no pertenece a esta sucursal` };
+      }
+      if (producto.stock < cantidad_prestada) {
+        throw { status: 400, message: `Stock insuficiente para ${nombre_producto}` };
+      }
+      await repo.ajustarStock(client, producto_id, -cantidad_prestada);
     }
-    if (producto.stock < cantidad_prestada) {
-      throw { status: 400, message: `Stock insuficiente para ${nombre_producto}` };
-    }
-    await repo.ajustarStock(client, producto_id, -cantidad_prestada);
   }
 };
 
@@ -100,9 +129,9 @@ const _crearFacturaDesdePrestamo = async (client, prestamo, metodo, negocioId) =
   await client.query(`
     INSERT INTO lineas_factura(
       factura_id, nombre_producto, imei,
-      cantidad, precio, producto_id
+      cantidad, precio, producto_id, atributo_id, variante_id
     )
-    VALUES ($1, $2, $3, $4, $5, $6)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
   `, [
     facturaId,
     prestamo.nombre_producto,
@@ -110,6 +139,8 @@ const _crearFacturaDesdePrestamo = async (client, prestamo, metodo, negocioId) =
     prestamo.imei ? 1 : Number(prestamo.cantidad_prestada || 1),
     Number(prestamo.valor_prestamo),
     prestamo.imei ? null : (prestamo.producto_id || null),
+    prestamo.atributo_id || null,
+    prestamo.variante_id || null,
   ]);
 
   // Insertar pago con el método del abono
@@ -160,6 +191,7 @@ const crearPrestamo = async ({
   prestatario, cedula, telefono,
   nombre_producto, imei, producto_id, cantidad_prestada, valor_prestamo,
   prestatario_id, empleado_id, cliente_id,
+  atributo_id, variante_id, atributo_label, variante_label,
 }) => {
   await _verificarSucursal(sucursal_id, negocio_id);
   await _verificarCliente(cliente_id, negocio_id);
@@ -181,6 +213,10 @@ const crearPrestamo = async ({
       prestatario_id:    prestatario_id || null,
       empleado_id:       empleado_id   || null,
       cliente_id:        cliente_id    || null,
+      atributo_id:       atributo_id   || null,
+      variante_id:       variante_id   || null,
+      atributo_label:    atributo_label || null,
+      variante_label:    variante_label || null,
     });
 
     await _procesarItemPrestamo(client, {
@@ -188,7 +224,8 @@ const crearPrestamo = async ({
       nombre_producto,
       cantidad_prestada: esSerial ? 1 : (cantidad_prestada || 1),
       sucursal_id,
-      prestatario,
+      atributo_id: atributo_id || null,
+      variante_id: variante_id || null,
     });
 
     await client.query('COMMIT');
@@ -236,6 +273,10 @@ const crearPrestamos = async ({
         prestatario_id:    prestatario_id || null,
         empleado_id:       empleado_id   || null,
         cliente_id:        cliente_id    || null,
+        atributo_id:       item.atributo_id  || null,
+        variante_id:       item.variante_id  || null,
+        atributo_label:    item.atributo_label || null,
+        variante_label:    item.variante_label || null,
       });
 
       await _procesarItemPrestamo(client, {
@@ -244,7 +285,8 @@ const crearPrestamos = async ({
         nombre_producto:   item.nombre_producto,
         cantidad_prestada: esSerial ? 1 : (item.cantidad_prestada || 1),
         sucursal_id,
-        prestatario,
+        atributo_id:       item.atributo_id  || null,
+        variante_id:       item.variante_id  || null,
       });
 
       prestamosCreados.push(prestamo);
@@ -384,7 +426,15 @@ const devolverPrestamo = async (negocioId, prestamoId) => {
         );
       }
     } else if (prestamo.producto_id) {
-      await repo.ajustarStock(client, prestamo.producto_id, prestamo.cantidad_prestada);
+      if (prestamo.variante_id) {
+        await repo.ajustarStockVarianteEnTx(client, prestamo.variante_id, Number(prestamo.cantidad_prestada));
+        await repo.sincronizarStockArbolEnTx(client, prestamo.producto_id);
+      } else if (prestamo.atributo_id) {
+        await repo.ajustarStockAtributoEnTx(client, prestamo.atributo_id, Number(prestamo.cantidad_prestada));
+        await repo.sincronizarStockArbolEnTx(client, prestamo.producto_id);
+      } else {
+        await repo.ajustarStock(client, prestamo.producto_id, prestamo.cantidad_prestada);
+      }
     }
 
     await repo.updateEstado(client, prestamoId, 'Devuelto');
@@ -418,7 +468,15 @@ const devolverParcial = async (negocioId, prestamoId, cantidad_devuelta) => {
   try {
     await client.query('BEGIN');
 
-    await repo.ajustarStock(client, prestamo.producto_id, cantidad_devuelta);
+    if (prestamo.variante_id) {
+      await repo.ajustarStockVarianteEnTx(client, prestamo.variante_id, cantidad_devuelta);
+      await repo.sincronizarStockArbolEnTx(client, prestamo.producto_id);
+    } else if (prestamo.atributo_id) {
+      await repo.ajustarStockAtributoEnTx(client, prestamo.atributo_id, cantidad_devuelta);
+      await repo.sincronizarStockArbolEnTx(client, prestamo.producto_id);
+    } else {
+      await repo.ajustarStock(client, prestamo.producto_id, cantidad_devuelta);
+    }
 
     if (cantidad_devuelta === cantidadActual) {
       await repo.updateEstado(client, prestamoId, 'Devuelto');

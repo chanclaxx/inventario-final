@@ -218,6 +218,20 @@ function ResumenCarrito({ items, onActualizarPrecio, onActualizarCantidad }) {
           {item.imei && (
             <p className="text-xs text-gray-400 font-mono">{item.imei}</p>
           )}
+          {(item.atributo_label || item.variante_label) && (
+            <div className="flex flex-wrap gap-1">
+              {item.atributo_label && (
+                <span className="text-xs bg-blue-50 text-blue-600 border border-blue-100 px-2 py-0.5 rounded-full">
+                  {item.atributo_label}
+                </span>
+              )}
+              {item.variante_label && (
+                <span className="text-xs bg-purple-50 text-purple-600 border border-purple-100 px-2 py-0.5 rounded-full">
+                  {item.variante_label}
+                </span>
+              )}
+            </div>
+          )}
           <div className="flex items-center gap-2">
             {item.tipo === 'cantidad' && (
               <div className="flex items-center gap-1">
@@ -343,10 +357,14 @@ export function ModalPrestamo({ open, onClose }) {
   const buildItems = () =>
     items.map((item) => ({
       nombre_producto:   item.nombre,
-      imei:              item.imei        || null,
+      imei:              item.imei           || null,
       producto_id:       item.imei ? null : (item.producto_id || null),
-      cantidad_prestada: item.cantidad    || 1,
+      cantidad_prestada: item.cantidad       || 1,
       valor_prestamo:    item.precioFinal * (item.cantidad || 1),
+      atributo_id:       item.atributo_id   || null,
+      variante_id:       item.variante_id   || null,
+      atributo_label:    item.atributo_label || null,
+      variante_label:    item.variante_label || null,
     }));
 
   const saldoDisponible = tipoCliente === 'companero'
