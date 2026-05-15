@@ -24,6 +24,7 @@ router.get('/:id/cargos',                    requireModulo('acreedores'), ctrl.g
 router.get('/:id/compras-saldo',             requireModulo('acreedores'), ctrl.getComprasConSaldo);
 router.get('/:id/cargos/:cargoId/abonos',    requireModulo('acreedores'), ctrl.getAbonosPorCargo);
 router.get('/:id/saldo-favor',     requireModulo('acreedores'), ctrl.getSaldoAFavor);
+router.get('/:id/historial',       requireModulo('acreedores'), ctrl.getHistorial);
 router.get('/:id/pdf',             requireModulo('acreedores'), pdfCtrl.getPdfCuentaAcreedor);
 router.post('/',                   requireModulo('acreedores'), requireNivel('supervisor'),    ctrl.crearAcreedor);
 router.post('/:id/movimientos',    requireModulo('acreedores'), validarMovimiento, validate,   ctrl.registrarMovimiento);

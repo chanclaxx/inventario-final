@@ -32,6 +32,7 @@ import {
 } from 'lucide-react';
 import api from '../../api/axios.config';
 import { getCompraById } from '../../api/compras.api';
+import { EstadoCuentaAcreedor } from './EstadoCuentaAcreedor';
 
 // ─── utils ────────────────────────────────────────────────────────────────────
 
@@ -1011,7 +1012,13 @@ function CargoSaldado({ cargo, acreedorId, esAdmin }) {
 
 // ─── vista detalle de acreedor ────────────────────────────────────────────────
 
+const TABS_DETALLE = [
+  { id: 'cargos', label: 'Cargos'           },
+  { id: 'cuenta', label: 'Estado de cuenta' },
+];
+
 function DetalleAcreedor({ acreedor, esAdmin, onVolver, onEliminar }) {
+  const [tabActivo,        setTabActivo]        = useState('cargos');
   const [cargoAbono,       setCargoAbono]       = useState(null);
   const [cargoAplicar,     setCargoAplicar]     = useState(null);
   const [movImprimir,      setMovImprimir]       = useState(null);
@@ -1153,7 +1160,29 @@ function DetalleAcreedor({ acreedor, esAdmin, onVolver, onEliminar }) {
         </div>
       </div>
 
-      {isLoading ? (
+      {/* Tabs */}
+      <div className="flex gap-1 bg-gray-100 p-1 rounded-xl">
+        {TABS_DETALLE.map(({ id, label }) => (
+          <button
+            key={id}
+            onClick={() => setTabActivo(id)}
+            className={`flex-1 flex items-center justify-center px-3 py-2 rounded-lg
+              text-xs font-semibold transition-all
+              ${tabActivo === id
+                ? 'bg-white text-gray-800 shadow-sm'
+                : 'text-gray-500 hover:text-gray-700'}`}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {/* Tab: Estado de cuenta */}
+      {tabActivo === 'cuenta' && (
+        <EstadoCuentaAcreedor acreedorId={acreedor.id} esAdmin={esAdmin} />
+      )}
+
+      {/* Tab: Cargos */}
+      {tabActivo === 'cargos' && (isLoading ? (
         <div className="py-12 flex justify-center"><Spinner /></div>
       ) : (
         <>
@@ -1299,7 +1328,7 @@ function DetalleAcreedor({ acreedor, esAdmin, onVolver, onEliminar }) {
             </div>
           )}
         </>
-      )}
+      ))}
 
       {cargoAbono && (
         <ModalAbonoRapido

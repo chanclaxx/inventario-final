@@ -67,7 +67,7 @@ const getMovimientos = async (negocioId, acreedorId) => {
     SELECT
       m.id, m.acreedor_id, m.usuario_id, m.tipo, m.valor,
       m.descripcion, m.firma, m.fecha, m.compra_id, m.registrar_en_caja,
-      m.cargo_id,
+      m.cargo_id, m.metodo,
       cargo.descripcion AS cargo_descripcion,
       cargo.fecha       AS cargo_fecha,
       COALESCE(

@@ -20,3 +20,5 @@ export const eliminarAbono = (acreedorId, movId) =>
 
 export const exportarCuentaPdf = (id) =>
   api.get(`/acreedores/${id}/pdf`, { responseType: 'blob' });
+
+export const getHistorialAcreedor = (id) => api.get(`/acreedores/${id}/historial`);

@@ -100,11 +100,18 @@ const eliminarAbono = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+const getHistorial = async (req, res, next) => {
+  try {
+    const data = await service.getHistorial(req.user.negocio_id, req.params.id);
+    res.json({ ok: true, data });
+  } catch (err) { next(err); }
+};
+
 module.exports = {
   getAcreedores, getAcreedoresCruces, getAcreedorById,
   crearAcreedor, registrarMovimiento, getCargosAbiertos,
   getComprasConSaldo, getAbonosPorCargo,
   getSaldoAFavor, aplicarSaldoAFavor,
   editarAbono, eliminarAbono,
-  eliminarAcreedor,
+  eliminarAcreedor, getHistorial,
 };

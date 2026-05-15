@@ -106,11 +106,17 @@ const eliminarAbono = async (negocioId, acreedorId, movId) => {
   return repo.eliminarAbono(negocioId, acreedorId, movId);
 };
 
+const getHistorial = async (negocioId, acreedorId) => {
+  const acreedor = await repo.findById(negocioId, acreedorId);
+  if (!acreedor) throw { status: 404, message: 'Acreedor no encontrado' };
+  return repo.getMovimientos(negocioId, acreedorId);
+};
+
 module.exports = {
   getAcreedores, getAcreedoresCruces, getAcreedorById,
   crearAcreedor, registrarMovimiento, getCargosAbiertos,
   getComprasConSaldo, getAbonosPorCargo,
   getSaldoAFavor, aplicarSaldoAFavor,
   editarAbono, eliminarAbono,
-  eliminarAcreedor,
+  eliminarAcreedor, getHistorial,
 };
