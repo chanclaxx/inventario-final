@@ -71,6 +71,8 @@ const registrarCompra = async ({
         precio_usd:        linea.precio_usd        || null,
         factor_conversion: linea.factor_conversion || null,
         valor_traida:      linea.valor_traida      || null,
+        variante_id:       linea.variante_id       || null,
+        atributo_id:       linea.atributo_id       || null,
       });
 
       if (linea.imei) {

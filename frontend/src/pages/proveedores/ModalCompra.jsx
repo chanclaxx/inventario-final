@@ -266,6 +266,61 @@ function PanelConversion({ factor, traida, onChange, onAplicarATodos }) {
   );
 }
 
+// ─── Multi-selector de variantes para compras ─────────────────────────────────
+function MultiSelectorCompra({ hojas, nodosData, onActualizar }) {
+  const nodosActivos = hojas.filter((h) => Number(nodosData[h.key]?.cantidad) > 0);
+  const totalUds = nodosActivos.reduce((s, h) => s + Number(nodosData[h.key]?.cantidad || 0), 0);
+
+  const handleChange = (h, campo, valor) => {
+    const current = nodosData[h.key] || {
+      cantidad: '', costo: '',
+      label: h.label, labelPadre: h.labelPadre, tipo: h.tipo, id: h.id,
+    };
+    onActualizar(h.key, { ...current, [campo]: valor });
+  };
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center gap-2 px-1">
+        <p className="flex-1 text-[11px] font-medium text-gray-400 uppercase tracking-wide">Variante</p>
+        <p className="w-14 text-[11px] font-medium text-gray-400 text-center">Cant.</p>
+        <p className="w-24 text-[11px] font-medium text-gray-400 text-center">Precio unit.</p>
+      </div>
+      <div className="flex flex-col gap-1.5 max-h-52 overflow-y-auto pr-0.5">
+        {hojas.map((h) => {
+          const data   = nodosData[h.key] || { cantidad: '', costo: '' };
+          const activo = Number(data.cantidad) > 0;
+          return (
+            <div key={h.key}
+              className={`flex items-center gap-2 p-2 rounded-xl border transition-colors
+                ${activo ? 'border-blue-200 bg-blue-50/50' : 'border-gray-100 bg-white'}`}>
+              <div className="flex-1 min-w-0">
+                {h.labelPadre && <p className="text-[10px] text-gray-400 leading-none mb-0.5">{h.labelPadre}</p>}
+                <p className="text-xs font-medium text-gray-800 leading-tight">{h.label}</p>
+                <p className="text-[10px] text-gray-400">{h.stock} en stock</p>
+              </div>
+              <input type="number" min="0" value={data.cantidad}
+                onChange={(e) => handleChange(h, 'cantidad', e.target.value)}
+                onWheel={noWheel} placeholder="0"
+                className="w-14 px-2 py-1.5 text-xs text-center bg-white border border-gray-200
+                  rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400" />
+              <InputMoneda value={data.costo}
+                onChange={(val) => handleChange(h, 'costo', val)} placeholder="$0"
+                className="w-24 px-2 py-1.5 text-xs bg-white border border-gray-200 rounded-lg
+                  focus:outline-none focus:ring-2 focus:ring-blue-400" />
+            </div>
+          );
+        })}
+      </div>
+      {nodosActivos.length > 0 && (
+        <p className="text-xs text-blue-600 font-medium px-1">
+          {nodosActivos.length} variante(s) — {totalUds} unidades totales
+        </p>
+      )}
+    </div>
+  );
+}
+
 // ─── Selector de variante/atributo (árbol navegable) ─────────────────────────
 function MiniSelectorVariante({ arbolData, nodoSel, onSeleccionar }) {
   const [nivel,          setNivel]          = useState('atributos');
@@ -352,7 +407,7 @@ function MiniSelectorVariante({ arbolData, nodoSel, onSeleccionar }) {
 // ─── Fila de producto por cantidad con selector de variante ───────────────────
 function FilaProductoCantidad({
   productoSel, variantesActivo, usandoConversion,
-  onCantidadChange, onPrecioUsdChange, onPrecioChange, onNodoSelChange, onEliminar,
+  onCantidadChange, onPrecioUsdChange, onPrecioChange, onNodosDataChange, onEliminar,
 }) {
   const sucursalId = productoSel.sucursal_id || null;
   const { data: arbolData = [], isLoading: arbolLoading } = useQuery({
@@ -363,6 +418,17 @@ function FilaProductoCantidad({
   });
   const tieneArbol = variantesActivo && arbolData.length > 0;
 
+  const labelNodo = (n) => n.tipo_nombre ? `${n.tipo_nombre}: ${n.valor}` : n.valor;
+  const hojas = tieneArbol ? arbolData.flatMap((atr) => {
+    if (atr.variantes?.length > 0) {
+      return atr.variantes.map((v) => ({
+        key: `v-${v.id}`, id: v.id, tipo: 'variante',
+        labelPadre: labelNodo(atr), label: labelNodo(v), stock: v.stock,
+      }));
+    }
+    return [{ key: `a-${atr.id}`, id: atr.id, tipo: 'atributo', label: labelNodo(atr), stock: atr.stock }];
+  }) : [];
+
   return (
     <div className="bg-gray-50 rounded-xl p-3 flex flex-col gap-2">
       <div className="flex items-center justify-between">
@@ -372,52 +438,53 @@ function FilaProductoCantidad({
         </button>
       </div>
 
-      {tieneArbol && (
+      {tieneArbol ? (
         <div className="flex flex-col gap-1.5">
           <label className="text-xs font-medium text-gray-600 flex items-center gap-1">
-            <Layers size={11} /> Variante
+            <Layers size={11} /> Cantidad y precio por variante
           </label>
-          <MiniSelectorVariante
-            arbolData={arbolData}
-            nodoSel={productoSel.nodo_sel || null}
-            onSeleccionar={onNodoSelChange}
+          <MultiSelectorCompra
+            hojas={hojas}
+            nodosData={productoSel.nodosData || {}}
+            onActualizar={(key, fullData) => onNodosDataChange(key, fullData)}
           />
         </div>
-      )}
-
-      {variantesActivo && !tieneArbol && !arbolLoading && (
-        <p className="text-xs text-gray-400 italic">Sin variantes — se suma al stock general</p>
-      )}
-
-      <div className="flex gap-2">
-        <div className="flex-1">
-          <label className="text-xs text-gray-500 mb-1 block">Cantidad</label>
-          <input type="number" value={productoSel.cantidad_comprada}
-            onChange={(e) => onCantidadChange(Number(e.target.value))}
-            onWheel={noWheel}
-            className="w-full px-2 py-1.5 bg-white border border-gray-200 rounded-lg text-sm
-              focus:outline-none focus:ring-2 focus:ring-blue-500" />
-        </div>
-        {usandoConversion && (
-          <div className="flex-1">
-            <label className="text-xs text-gray-500 mb-1 block">Precio USD</label>
-            <input type="number" value={productoSel.precio_usd}
-              onChange={(e) => onPrecioUsdChange(e.target.value)}
-              onWheel={noWheel}
-              className="w-full px-2 py-1.5 bg-white border border-gray-200 rounded-lg text-sm
-                focus:outline-none focus:ring-2 focus:ring-blue-500" />
+      ) : (
+        <>
+          {variantesActivo && !arbolLoading && (
+            <p className="text-xs text-gray-400 italic">Sin variantes — se suma al stock general</p>
+          )}
+          <div className="flex gap-2">
+            <div className="flex-1">
+              <label className="text-xs text-gray-500 mb-1 block">Cantidad</label>
+              <input type="number" value={productoSel.cantidad_comprada}
+                onChange={(e) => onCantidadChange(Number(e.target.value))}
+                onWheel={noWheel}
+                className="w-full px-2 py-1.5 bg-white border border-gray-200 rounded-lg text-sm
+                  focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+            {usandoConversion && (
+              <div className="flex-1">
+                <label className="text-xs text-gray-500 mb-1 block">Precio USD</label>
+                <input type="number" value={productoSel.precio_usd}
+                  onChange={(e) => onPrecioUsdChange(e.target.value)}
+                  onWheel={noWheel}
+                  className="w-full px-2 py-1.5 bg-white border border-gray-200 rounded-lg text-sm
+                    focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+            )}
+            <div className="flex-1">
+              <label className="text-xs text-gray-500 mb-1 block">
+                {usandoConversion ? 'Precio COP' : 'Precio compra'}
+              </label>
+              <InputMoneda value={productoSel.precio_compra}
+                onChange={onPrecioChange} placeholder="0"
+                className="w-full px-2 py-1.5 bg-white border border-gray-200 rounded-lg text-sm
+                  focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
           </div>
-        )}
-        <div className="flex-1">
-          <label className="text-xs text-gray-500 mb-1 block">
-            {usandoConversion ? 'Precio COP' : 'Precio compra'}
-          </label>
-          <InputMoneda value={productoSel.precio_compra}
-            onChange={onPrecioChange} placeholder="0"
-            className="w-full px-2 py-1.5 bg-white border border-gray-200 rounded-lg text-sm
-              focus:outline-none focus:ring-2 focus:ring-blue-500" />
-        </div>
-      </div>
+        </>
+      )}
     </div>
   );
 }
@@ -972,15 +1039,17 @@ function PasoCantidad({
       cantidad_comprada: 1,
       precio_usd:        '',
       precio_compra:     Number(producto.costo_unitario) || 0,
-      nodo_sel:          null,
+      nodosData:         {},
     }]);
   };
 
   const actualizarCampo = (id, campo, valor) =>
     setProductosSeleccionados((prev) => prev.map((p) => p.id === id ? { ...p, [campo]: valor } : p));
 
-  const actualizarNodoSel = (id, nodoSel) =>
-    setProductosSeleccionados((prev) => prev.map((p) => p.id === id ? { ...p, nodo_sel: nodoSel } : p));
+  const actualizarNodosData = (id, key, fullData) =>
+    setProductosSeleccionados((prev) => prev.map((p) =>
+      p.id === id ? { ...p, nodosData: { ...p.nodosData, [key]: fullData } } : p
+    ));
 
   const actualizarPrecioUsd = (id, valor) =>
     setProductosSeleccionados((prev) =>
@@ -1009,7 +1078,8 @@ function PasoCantidad({
     setError('');
     if (productosSeleccionados.length === 0) return setError('Agrega al menos un producto');
     for (const p of productosSeleccionados) {
-      if (!p.cantidad_comprada || p.cantidad_comprada < 1)
+      const nodosActivos = Object.values(p.nodosData || {}).filter((d) => Number(d?.cantidad) > 0);
+      if (nodosActivos.length === 0 && (!p.cantidad_comprada || p.cantidad_comprada < 1))
         return setError(`"${p.nombre}" debe tener cantidad mayor a 0`);
     }
     onProductosListos(
@@ -1094,7 +1164,7 @@ function PasoCantidad({
               onCantidadChange={(val) => actualizarCampo(p.id, 'cantidad_comprada', val)}
               onPrecioUsdChange={(val) => actualizarPrecioUsd(p.id, val)}
               onPrecioChange={(val) => actualizarCampo(p.id, 'precio_compra', val)}
-              onNodoSelChange={(nodo) => actualizarNodoSel(p.id, nodo)}
+              onNodosDataChange={(key, fullData) => actualizarNodosData(p.id, key, fullData)}
               onEliminar={() => setProductosSeleccionados((prev) => prev.filter((s) => s.id !== p.id))}
             />
           ))}
@@ -1126,7 +1196,13 @@ function PasoPago({ proveedor, productos, tipo, onConfirmar, onVolver, loading }
         return s + (Number(l.precio_compra) * imeisValidos);
       }, 0);
     }
-    return productos.reduce((s, p) => s + (Number(p.precio_compra) * p.cantidad_comprada), 0);
+    return productos.reduce((s, p) => {
+      const nodosActivos = Object.values(p.nodosData || {}).filter((d) => Number(d?.cantidad) > 0);
+      if (nodosActivos.length > 0) {
+        return s + nodosActivos.reduce((ns, d) => ns + Number(d.cantidad || 0) * Number(d.costo || 0), 0);
+      }
+      return s + (Number(p.precio_compra) * p.cantidad_comprada);
+    }, 0);
   });
   const [registrarEnCaja,   setRegistrarEnCaja]   = useState(proveedor.tipo !== 'proveedor');
   const [numeroFactura,     setNumeroFactura]      = useState('');
@@ -1172,12 +1248,23 @@ function PasoPago({ proveedor, productos, tipo, onConfirmar, onVolver, loading }
         precio_unitario: Number(l.precio_compra),
         precio_usd:      l.precio_usd || null,
       }))
-    : productos.map((p) => ({
-        nombre:          p.nombre,
-        cantidad:        p.cantidad_comprada,
-        precio_unitario: Number(p.precio_compra),
-        precio_usd:      p.precio_usd || null,
-      }));
+    : productos.flatMap((p) => {
+        const nodosActivos = Object.values(p.nodosData || {}).filter((d) => Number(d?.cantidad) > 0);
+        if (nodosActivos.length > 0) {
+          return nodosActivos.map((d) => ({
+            nombre:          `${p.nombre}${d.labelPadre ? ` — ${d.labelPadre}` : ''}${d.label ? ` / ${d.label}` : ''}`,
+            cantidad:        Number(d.cantidad),
+            precio_unitario: Number(d.costo || 0),
+            precio_usd:      null,
+          }));
+        }
+        return [{
+          nombre:          p.nombre,
+          cantidad:        p.cantidad_comprada,
+          precio_unitario: Number(p.precio_compra),
+          precio_usd:      p.precio_usd || null,
+        }];
+      });
 
   const pagadoParcial = pagos.reduce((s, p) => s + (Number(p.valor) || 0), 0);
   const diferencia    = Number(totalCompra) - pagadoParcial;
@@ -1451,17 +1538,33 @@ export function ModalCompra({ proveedor, onClose }) {
               };
             })
         )
-      : productos.map((p) => ({
-          nombre_producto:   p.nombre,
-          cantidad:          p.cantidad_comprada,
-          precio_unitario:   Number(p.precio_compra),
-          precio_usd:        p.precio_usd ? Number(p.precio_usd) : null,
-          factor_conversion: p.factor_conversion || null,
-          valor_traida:      p.valor_traida      || null,
-          producto_id:       p.id,
-          variante_id:       p.nodo_sel?.tipo === 'variante' ? p.nodo_sel.id : null,
-          atributo_id:       p.nodo_sel?.tipo === 'atributo' ? p.nodo_sel.id : null,
-        }));
+      : productos.flatMap((p) => {
+          const nodosActivos = Object.entries(p.nodosData || {}).filter(([, d]) => Number(d?.cantidad) > 0);
+          if (nodosActivos.length > 0) {
+            return nodosActivos.map(([, d]) => ({
+              nombre_producto:   p.nombre,
+              cantidad:          Number(d.cantidad),
+              precio_unitario:   Number(d.costo || 0),
+              precio_usd:        null,
+              factor_conversion: p.factor_conversion || null,
+              valor_traida:      p.valor_traida      || null,
+              producto_id:       p.id,
+              variante_id:       d.tipo === 'variante' ? d.id : null,
+              atributo_id:       d.tipo === 'atributo' ? d.id : null,
+            }));
+          }
+          return [{
+            nombre_producto:   p.nombre,
+            cantidad:          p.cantidad_comprada,
+            precio_unitario:   Number(p.precio_compra),
+            precio_usd:        p.precio_usd ? Number(p.precio_usd) : null,
+            factor_conversion: p.factor_conversion || null,
+            valor_traida:      p.valor_traida      || null,
+            producto_id:       p.id,
+            variante_id:       null,
+            atributo_id:       null,
+          }];
+        });
 
     mutCompra.mutate({
       proveedor_id:        proveedor.id,

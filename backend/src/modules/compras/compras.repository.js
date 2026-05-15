@@ -43,10 +43,17 @@ const perteneceAlNegocio = async (id, negocioId) => {
 };
 
 const getLineas = async (compraId) => {
-  const { rows } = await pool.query(
-    'SELECT * FROM lineas_compra WHERE compra_id = $1',
-    [compraId]
-  );
+  const { rows } = await pool.query(`
+    SELECT lc.*,
+      va.valor        AS variante_valor,
+      va.tipo_nombre  AS variante_tipo_nombre,
+      ap.valor        AS atributo_valor,
+      ap.tipo_nombre  AS atributo_tipo_nombre
+    FROM lineas_compra lc
+    LEFT JOIN variantes_atributo va ON va.id = lc.variante_id
+    LEFT JOIN atributos_producto ap ON ap.id = lc.atributo_id
+    WHERE lc.compra_id = $1
+  `, [compraId]);
   return rows;
 };
 
@@ -80,20 +87,22 @@ const create = async (client, { sucursal_id, proveedor_id, usuario_id, numero_fa
 
 const insertarLinea = async (client, {
   compra_id, nombre_producto, imei, cantidad, precio_unitario,
-  precio_usd, factor_conversion, valor_traida,
+  precio_usd, factor_conversion, valor_traida, variante_id, atributo_id,
 }) => {
   const { rows } = await client.query(`
     INSERT INTO lineas_compra(
       compra_id, nombre_producto, imei, cantidad, precio_unitario,
-      precio_usd, factor_conversion, valor_traida
+      precio_usd, factor_conversion, valor_traida, variante_id, atributo_id
     )
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
     RETURNING *
   `, [
     compra_id, nombre_producto, imei || null, cantidad, precio_unitario,
     precio_usd        || null,
     factor_conversion || null,
     valor_traida      || null,
+    variante_id       || null,
+    atributo_id       || null,
   ]);
   return rows[0];
 };
