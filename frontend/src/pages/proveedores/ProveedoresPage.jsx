@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { buscarCompras as buscarComprasApi } from '../../api/busqueda.api';
 import { getProveedores, crearProveedor, actualizarProveedor } from '../../api/proveedores.api';
@@ -42,6 +42,17 @@ function norm(data) {
   if (data?.items && Array.isArray(data.items)) return data.items;
   return [];
 }
+
+function normalizarTexto(texto) {
+  return (texto || '')
+    .toLowerCase()
+    .trim()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/\s+/g, ' ');
+}
+
+const PAGE_SIZE = 20;
 
 // ─── Opciones de tipo para el select ──────────────────────────────────────────
 
@@ -283,18 +294,30 @@ function ModalDetalleCantidad({ item, historial, onClose }) {
 // ─── Tab: Retomas de clientes ──────────────────────────────────────────────────
 
 function TabRetomas() {
-  const [busqueda,    setBusqueda]    = useState('');
-  const [itemDetalle, setItemDetalle] = useState(null);
-  const [tabFuente,   setTabFuente]   = useState('todas');
+  const [busqueda,          setBusqueda]          = useState('');
+  const [queryDebounced,    setQueryDebounced]    = useState('');
+  const [itemDetalle,       setItemDetalle]       = useState(null);
+  const [tabFuente,         setTabFuente]         = useState('todas');
+  const [pagina,            setPagina]            = useState(1);
+
+  // Debounce + normalización: espera 350 ms tras el último teclazo
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setQueryDebounced(normalizarTexto(busqueda));
+      setPagina(1);
+    }, 350);
+    return () => clearTimeout(t);
+  }, [busqueda]);
+
 
   const { data: dataSerial, isLoading: loadingSerial } = useQuery({
-    queryKey: ['compras-cliente-serial', busqueda],
-    queryFn:  () => getComprasClienteSerial(busqueda),
+    queryKey: ['compras-cliente-serial', queryDebounced],
+    queryFn:  () => getComprasClienteSerial(queryDebounced),
   });
 
   const { data: dataCantidad, isLoading: loadingCantidad } = useQuery({
-    queryKey: ['historial-stock-cantidad', busqueda],
-    queryFn:  () => getHistorialStockCantidad(busqueda),
+    queryKey: ['historial-stock-cantidad', queryDebounced],
+    queryFn:  () => getHistorialStockCantidad(queryDebounced),
   });
 
   const isLoading = loadingSerial || loadingCantidad;
@@ -313,16 +336,22 @@ function TabRetomas() {
     ? todasSerial
     : todasCantidad;
 
+  // Con búsqueda activa se muestran todos los resultados; sin búsqueda se pagina
+  const hayBusqueda  = queryDebounced.length > 0;
+  const listaVisible = hayBusqueda ? lista : lista.slice(0, pagina * PAGE_SIZE);
+  const hayMas       = !hayBusqueda && lista.length > pagina * PAGE_SIZE;
+  const restantes    = lista.length - pagina * PAGE_SIZE;
+
   const historialCliente = (item) => {
     if (!item) return [];
     if (item.fuente === 'serial') {
       return todasSerial.filter((i) =>
-        (i.nombre_cliente || '').toLowerCase() === (item.nombre_cliente || '').toLowerCase()
+        normalizarTexto(i.nombre_cliente) === normalizarTexto(item.nombre_cliente)
       );
     }
     return todasCantidad.filter((i) =>
       i.cliente_origen &&
-      (i.cliente_origen || '').toLowerCase() === (item.cliente_origen || '').toLowerCase()
+      normalizarTexto(i.cliente_origen) === normalizarTexto(item.cliente_origen)
     );
   };
 
@@ -343,7 +372,7 @@ function TabRetomas() {
           { id: 'serial',   label: `Con IMEI (${totalSerial})`              },
           { id: 'cantidad', label: `Por cantidad (${totalCantidad})`        },
         ].map((t) => (
-          <button key={t.id} onClick={() => setTabFuente(t.id)}
+          <button key={t.id} onClick={() => { setTabFuente(t.id); setPagina(1); }}
             className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition-all
               ${tabFuente === t.id
                 ? 'bg-blue-50 border-blue-300 text-blue-700'
@@ -357,68 +386,84 @@ function TabRetomas() {
         <EmptyState
           icon={RefreshCw}
           titulo="Sin registros"
-          descripcion={busqueda ? `Sin resultados para "${busqueda}"` : 'Aún no hay retomas ni compras a clientes'}
+          descripcion={hayBusqueda ? `Sin resultados para "${busqueda}"` : 'Aún no hay retomas ni compras a clientes'}
         />
       ) : (
-        <div className="flex flex-col gap-2">
-          {lista.map((item, i) => {
-            const esSerial = item.fuente === 'serial';
-            const nombreMostrar = esSerial
-              ? (item.nombre_cliente || '—')
-              : (item.cliente_origen || item.proveedor_nombre || '—');
-            const cedulaMostrar = esSerial ? item.cedula_cliente : item.cedula_cliente;
+        <>
+          {!hayBusqueda && (
+            <p className="text-xs text-gray-400 text-right">
+              Mostrando {listaVisible.length} de {lista.length}
+            </p>
+          )}
+          <div className="flex flex-col gap-2">
+            {listaVisible.map((item, i) => {
+              const esSerial = item.fuente === 'serial';
+              const nombreMostrar = esSerial
+                ? (item.nombre_cliente || '—')
+                : (item.cliente_origen || item.proveedor_nombre || '—');
+              const cedulaMostrar = item.cedula_cliente;
 
-            return (
-              <button key={`${item.fuente}-${item.tipo}-${item.id}-${i}`}
-                onClick={() => setItemDetalle(item)}
-                className="bg-white border border-gray-100 rounded-2xl p-3 flex items-start
-                  justify-between gap-3 hover:border-blue-200 hover:bg-blue-50 transition-all text-left">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap mb-1">
-                    <TipoBadge tipo={item.tipo} />
-                  </div>
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    <User size={12} className="text-gray-400 flex-shrink-0" />
-                    <span className="text-sm font-semibold text-gray-900 truncate">{nombreMostrar}</span>
-                    {cedulaMostrar && (
-                      <span className="text-xs text-gray-400 font-mono flex-shrink-0">CC {cedulaMostrar}</span>
-                    )}
-                  </div>
-                  <p className="text-sm text-gray-700 truncate mt-0.5">
-                    {item.nombre_producto || '—'}
-                    {item.marca ? ` · ${item.marca}` : ''}
-                    {!esSerial && item.unidad_medida ? ` (${item.unidad_medida})` : ''}
-                  </p>
-                  {item.imei && (
-                    <div className="flex items-center gap-1 mt-0.5">
-                      <Hash size={10} className="text-gray-400" />
-                      <span className="text-xs text-gray-400 font-mono">{item.imei}</span>
+              return (
+                <button key={`${item.fuente}-${item.tipo}-${item.id}-${i}`}
+                  onClick={() => setItemDetalle(item)}
+                  className="bg-white border border-gray-100 rounded-2xl p-3 flex items-start
+                    justify-between gap-3 hover:border-blue-200 hover:bg-blue-50 transition-all text-left">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap mb-1">
+                      <TipoBadge tipo={item.tipo} />
                     </div>
-                  )}
-                  {!esSerial && (
-                    <p className="text-xs text-gray-500 mt-0.5">
-                      Cantidad: <span className={`font-semibold ${item.cantidad > 0 ? 'text-green-600' : 'text-red-500'}`}>
-                        {item.cantidad > 0 ? '+' : ''}{item.cantidad}
-                      </span>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <User size={12} className="text-gray-400 flex-shrink-0" />
+                      <span className="text-sm font-semibold text-gray-900 truncate">{nombreMostrar}</span>
+                      {cedulaMostrar && (
+                        <span className="text-xs text-gray-400 font-mono flex-shrink-0">CC {cedulaMostrar}</span>
+                      )}
+                    </div>
+                    <p className="text-sm text-gray-700 truncate mt-0.5">
+                      {item.nombre_producto || '—'}
+                      {item.marca ? ` · ${item.marca}` : ''}
+                      {!esSerial && item.unidad_medida ? ` (${item.unidad_medida})` : ''}
                     </p>
-                  )}
-                  <p className="text-xs text-gray-400 mt-0.5">
-                    {formatFechaHora(item.fecha)} · {item.sucursal_nombre}
-                  </p>
-                </div>
-                <div className="flex items-center gap-2 flex-shrink-0">
-                  {(item.valor != null || item.costo_unitario != null) &&
-                    Number(item.valor ?? item.costo_unitario) > 0 && (
-                    <span className="text-sm font-bold text-emerald-700">
-                      {formatCOP(item.valor ?? item.costo_unitario)}
-                    </span>
-                  )}
-                  <ChevronRight size={14} className="text-gray-400" />
-                </div>
-              </button>
-            );
-          })}
-        </div>
+                    {item.imei && (
+                      <div className="flex items-center gap-1 mt-0.5">
+                        <Hash size={10} className="text-gray-400" />
+                        <span className="text-xs text-gray-400 font-mono">{item.imei}</span>
+                      </div>
+                    )}
+                    {!esSerial && (
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        Cantidad: <span className={`font-semibold ${item.cantidad > 0 ? 'text-green-600' : 'text-red-500'}`}>
+                          {item.cantidad > 0 ? '+' : ''}{item.cantidad}
+                        </span>
+                      </p>
+                    )}
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      {formatFechaHora(item.fecha)} · {item.sucursal_nombre}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    {(item.valor != null || item.costo_unitario != null) &&
+                      Number(item.valor ?? item.costo_unitario) > 0 && (
+                      <span className="text-sm font-bold text-emerald-700">
+                        {formatCOP(item.valor ?? item.costo_unitario)}
+                      </span>
+                    )}
+                    <ChevronRight size={14} className="text-gray-400" />
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          {hayMas && (
+            <button
+              onClick={() => setPagina((p) => p + 1)}
+              className="w-full py-2.5 rounded-2xl border border-gray-200 text-sm text-gray-500
+                hover:border-blue-300 hover:text-blue-600 hover:bg-blue-50 transition-all font-medium">
+              Ver más ({restantes > PAGE_SIZE ? PAGE_SIZE : restantes} de {restantes} restantes)
+            </button>
+          )}
+        </>
       )}
 
       {itemDetalle && itemDetalle.fuente === 'serial' && (
