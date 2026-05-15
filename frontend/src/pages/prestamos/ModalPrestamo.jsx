@@ -26,8 +26,9 @@ const TIPOS_CLIENTE = [
 // ─── SelectorOCrear ───────────────────────────────────────────────────────────
 
 function SelectorOCrear({ items, onSeleccionar, onCrear, placeholder, labelCrear, loading, renderItem }) {
-  const [modo,   setModo]   = useState('seleccionar');
-  const [nombre, setNombre] = useState('');
+  const [modo,     setModo]     = useState('seleccionar');
+  const [nombre,   setNombre]   = useState('');
+  const [busqueda, setBusqueda] = useState('');
 
   if (loading) return <Spinner className="py-4" />;
 
@@ -58,11 +59,28 @@ function SelectorOCrear({ items, onSeleccionar, onCrear, placeholder, labelCrear
     );
   }
 
+  const filtrados = busqueda.trim()
+    ? items.filter((item) => item.nombre?.toLowerCase().includes(busqueda.toLowerCase()))
+    : items;
+
   return (
     <div className="flex flex-col gap-2">
-      {items.length > 0 ? (
-        <div className="flex flex-col gap-1 max-h-40 overflow-y-auto">
-          {items.map((item) => {
+      {items.length > 4 && (
+        <div className="relative">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+          <input
+            type="text"
+            placeholder="Buscar..."
+            value={busqueda}
+            onChange={(e) => setBusqueda(e.target.value)}
+            className="w-full pl-8 pr-3 py-2 bg-gray-50 border border-gray-200 rounded-xl
+              text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"
+          />
+        </div>
+      )}
+      {filtrados.length > 0 ? (
+        <div className="flex flex-col gap-1 max-h-44 overflow-y-auto">
+          {filtrados.map((item) => {
             const itemId = item.id;
             return (
               <button
@@ -77,7 +95,9 @@ function SelectorOCrear({ items, onSeleccionar, onCrear, placeholder, labelCrear
           })}
         </div>
       ) : (
-        <p className="text-xs text-gray-400 px-1">{placeholder}</p>
+        <p className="text-xs text-gray-400 px-1">
+          {busqueda.trim() ? `Sin resultados para "${busqueda}"` : placeholder}
+        </p>
       )}
       <button
         onClick={() => setModo('crear')}
