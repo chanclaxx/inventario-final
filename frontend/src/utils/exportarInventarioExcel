@@ -223,6 +223,13 @@ function crearHojaSerial(nombreProducto, seriales) {
 }
 
 // ─── Hoja de productos por cantidad ──────────────────────────────────────────
+
+// Escribe una celda numérica o de texto con estilo, evitando repetición
+function _cel(ws, r, c, v, s) {
+  const esNum = typeof v === 'number';
+  ws[XLSX.utils.encode_cell({ r, c })] = { t: esNum ? 'n' : 's', v: esNum ? v : String(v ?? ''), s };
+}
+
 function crearHojaCantidad(productos) {
   const ws = {};
 
@@ -234,47 +241,125 @@ function crearHojaCantidad(productos) {
     },
   };
 
-  const COLS       = ['Producto', 'Stock Actual', 'Stock Mínimo', 'Unidad', 'Proveedor', 'Estado Stock', 'Cliente Origen', 'Fecha Registro'];
-  const COL_WIDTHS = [28, 14, 14, 12, 20, 15, 22, 16];
+  // Detectar si algún producto tiene atributos/variantes para elegir el layout
+  const tieneVariantes = productos.some((p) => p.atributos?.length > 0);
+
+  const COLS = tieneVariantes
+    ? ['Producto', 'Atributo', 'Sub-variante', 'Stock', 'Stock Mín', 'Unidad', 'Proveedor', 'Estado Stock', 'Cliente Origen', 'Fecha Registro']
+    : ['Producto', 'Stock Actual', 'Stock Mínimo', 'Unidad', 'Proveedor', 'Estado Stock', 'Cliente Origen', 'Fecha Registro'];
+
+  const COL_WIDTHS = tieneVariantes
+    ? [28, 22, 22, 11, 11, 12, 20, 14, 22, 16]
+    : [28, 14, 14, 12, 20, 15, 22, 16];
+
+  // Índices de columna según modo
+  // Sin variantes: Producto=0 Stock=1 StockMin=2 Unidad=3 Proveedor=4 Estado=5 Cliente=6 Fecha=7
+  // Con variantes: Producto=0 Atrib=1 SubVar=2 Stock=3 StockMin=4 Unidad=5 Proveedor=6 Estado=7 Cliente=8 Fecha=9
+  const IDX = tieneVariantes
+    ? { stock: 3, stockMin: 4, unidad: 5, proveedor: 6, estado: 7, cliente: 8, fecha: 9 }
+    : { stock: 1, stockMin: 2, unidad: 3, proveedor: 4, estado: 5, cliente: 6, fecha: 7 };
 
   let fila = 2;
-
   COLS.forEach((col, c) => {
     ws[XLSX.utils.encode_cell({ r: fila, c })] = { t: 's', v: col, s: estiloHeader(COLOR.headerCantidad) };
   });
   fila++;
 
+  let totalStockGeneral = 0;
+
+  const estadoLabel = (stock, stockMin, activo) => {
+    if (!activo) return 'Inactivo';
+    return stock <= stockMin ? 'Stock bajo' : 'OK';
+  };
+  const bgColor = (stock, stockMin, activo) => {
+    if (!activo) return 'F3F4F6';
+    return stock <= stockMin ? 'FEF3C7' : COLOR.disponible;
+  };
+
   productos.forEach((p) => {
-    const stockBajo   = p.stock <= p.stock_minimo;
-    const bg          = !p.activo ? 'F3F4F6' : stockBajo ? 'FEF3C7' : COLOR.disponible;
-    const estadoStock = !p.activo ? 'Inactivo' : stockBajo ? 'Stock bajo' : 'OK';
+    const bg     = bgColor(p.stock, p.stock_minimo, p.activo);
+    const estado = estadoLabel(p.stock, p.stock_minimo, p.activo);
+    totalStockGeneral += Number(p.stock || 0);
 
-    const vals = [
-      p.nombre,
-      p.stock,
-      p.stock_minimo,
-      p.unidad_medida  || 'unidad',
-      p.proveedor      || '',
-      estadoStock,
-      p.cliente_origen || '',
-      fmtFecha(p.creado_en),
-    ];
+    if (!tieneVariantes) {
+      // ── Layout original ──────────────────────────────────────────────────
+      const vals = [
+        p.nombre, p.stock, p.stock_minimo,
+        p.unidad_medida || 'unidad', p.proveedor || '',
+        estado, p.cliente_origen || '', fmtFecha(p.creado_en),
+      ];
+      vals.forEach((v, c) => {
+        ws[XLSX.utils.encode_cell({ r: fila, c })] = {
+          t: typeof v === 'number' ? 'n' : 's',
+          v: typeof v === 'number' ? v : String(v),
+          s: c === IDX.estado ? estiloCeldaCentrada(bg) : estiloCelda(bg),
+        };
+      });
+      fila++;
+      return;
+    }
 
-    vals.forEach((v, c) => {
-      const esNum = c === 1 || c === 2;
-      ws[XLSX.utils.encode_cell({ r: fila, c })] = {
-        t: esNum ? 'n' : 's',
-        v: esNum ? Number(v) : String(v),
-        s: c === 5 ? estiloCeldaCentrada(bg) : estiloCelda(bg),
-      };
-    });
+    // ── Layout con variantes ─────────────────────────────────────────────
+
+    // Fila del producto (resumen total)
+    _cel(ws, fila, 0, p.nombre, estiloCelda(bg));
+    _cel(ws, fila, 1, '',       estiloCelda(bg));
+    _cel(ws, fila, 2, '',       estiloCelda(bg));
+    _cel(ws, fila, IDX.stock,    p.stock,                      estiloCelda(bg));
+    _cel(ws, fila, IDX.stockMin, p.stock_minimo,                estiloCelda(bg));
+    _cel(ws, fila, IDX.unidad,   p.unidad_medida || 'unidad',   estiloCelda(bg));
+    _cel(ws, fila, IDX.proveedor,p.proveedor || '',             estiloCelda(bg));
+    _cel(ws, fila, IDX.estado,   estado,                       estiloCeldaCentrada(bg));
+    _cel(ws, fila, IDX.cliente,  p.cliente_origen || '',        estiloCelda(bg));
+    _cel(ws, fila, IDX.fecha,    fmtFecha(p.creado_en),        estiloCelda(bg));
     fila++;
+
+    // Filas de atributos y sub-variantes
+    (p.atributos || []).forEach((a) => {
+      const etiqA  = a.tipo_nombre ? `${a.tipo_nombre}: ${a.valor}` : a.valor;
+      const bgA    = bgColor(a.stock, a.stock_minimo, true);
+      const estA   = estadoLabel(a.stock, a.stock_minimo, true);
+
+      // Atributo
+      _cel(ws, fila, 0, '',    estiloCelda(bgA));
+      _cel(ws, fila, 1, etiqA, estiloCelda(bgA));
+      _cel(ws, fila, 2, '',    estiloCelda(bgA));
+      _cel(ws, fila, IDX.stock,    a.stock,     estiloCelda(bgA));
+      _cel(ws, fila, IDX.stockMin, a.stock_minimo, estiloCelda(bgA));
+      _cel(ws, fila, IDX.unidad,   '',          estiloCelda(bgA));
+      _cel(ws, fila, IDX.proveedor,'',          estiloCelda(bgA));
+      _cel(ws, fila, IDX.estado,   estA,        estiloCeldaCentrada(bgA));
+      _cel(ws, fila, IDX.cliente,  '',          estiloCelda(bgA));
+      _cel(ws, fila, IDX.fecha,    '',          estiloCelda(bgA));
+      fila++;
+
+      // Sub-variantes
+      (a.variantes || []).forEach((v) => {
+        const etiqV = v.tipo_nombre ? `${v.tipo_nombre}: ${v.valor}` : v.valor;
+        const bgV   = bgColor(v.stock, v.stock_minimo, true);
+        const estV  = estadoLabel(v.stock, v.stock_minimo, true);
+
+        _cel(ws, fila, 0, '',    estiloCelda(bgV));
+        _cel(ws, fila, 1, '',    estiloCelda(bgV));
+        _cel(ws, fila, 2, etiqV, estiloCelda(bgV));
+        _cel(ws, fila, IDX.stock,    v.stock,          estiloCelda(bgV));
+        _cel(ws, fila, IDX.stockMin, v.stock_minimo,   estiloCelda(bgV));
+        _cel(ws, fila, IDX.unidad,   '',               estiloCelda(bgV));
+        _cel(ws, fila, IDX.proveedor,'',               estiloCelda(bgV));
+        _cel(ws, fila, IDX.estado,   estV,             estiloCeldaCentrada(bgV));
+        _cel(ws, fila, IDX.cliente,  '',               estiloCelda(bgV));
+        _cel(ws, fila, IDX.fecha,    '',               estiloCelda(bgV));
+        fila++;
+      });
+    });
   });
 
-  const totalStock = productos.reduce((s, p) => s + Number(p.stock || 0), 0);
+  // Fila resumen
+  const colStock = tieneVariantes ? IDX.stock : 1;
   ws[XLSX.utils.encode_cell({ r: fila, c: 0 })] = { t: 's', v: `Total productos: ${productos.length}`, s: estiloResumen() };
-  ws[XLSX.utils.encode_cell({ r: fila, c: 1 })] = { t: 'n', v: totalStock, s: estiloResumen() };
-  for (let c = 2; c < COLS.length; c++) {
+  ws[XLSX.utils.encode_cell({ r: fila, c: colStock })] = { t: 'n', v: totalStockGeneral, s: estiloResumen() };
+  for (let c = 1; c < COLS.length; c++) {
+    if (c === colStock) continue;
     ws[XLSX.utils.encode_cell({ r: fila, c })] = { t: 's', v: '', s: estiloResumen() };
   }
 

@@ -104,6 +104,7 @@ const getSeriales = async (sucursalId) => {
 const getProductosCantidad = async (sucursalId) => {
   const { rows } = await pool.query(`
     SELECT
+      pc.id,
       pc.nombre,
       pc.stock,
       pc.stock_minimo,
@@ -120,4 +121,47 @@ const getProductosCantidad = async (sucursalId) => {
   return rows;
 };
 
-module.exports = { getSeriales, getProductosCantidad };
+// Trae todos los atributos y sub-variantes activos de los productos de una sucursal
+// en dos queries (evita N+1). Retorna un objeto indexado por producto_id.
+const getVariantesPorSucursal = async (sucursalId) => {
+  const { rows: atributos } = await pool.query(`
+    SELECT
+      ap.id, ap.producto_id,
+      ap.tipo_id, tc.nombre AS tipo_nombre,
+      ap.valor, ap.stock, ap.stock_minimo, ap.precio
+    FROM atributos_producto ap
+    JOIN productos_cantidad  pc ON pc.id  = ap.producto_id
+    LEFT JOIN tipos_caracteristica tc ON tc.id = ap.tipo_id
+    WHERE pc.sucursal_id = $1 AND ap.activo = true AND pc.activo = true
+    ORDER BY tc.orden ASC NULLS LAST, ap.valor ASC
+  `, [sucursalId]);
+
+  if (!atributos.length) return {};
+
+  const atributoIds = atributos.map((a) => a.id);
+  const { rows: variantes } = await pool.query(`
+    SELECT
+      v.id, v.atributo_id,
+      v.tipo_id, tc.nombre AS tipo_nombre,
+      v.valor, v.stock, v.stock_minimo, v.precio
+    FROM variantes_atributo v
+    LEFT JOIN tipos_caracteristica tc ON tc.id = v.tipo_id
+    WHERE v.atributo_id = ANY($1) AND v.activo = true
+    ORDER BY tc.orden ASC NULLS LAST, v.valor ASC
+  `, [atributoIds]);
+
+  const varsByAtributo = {};
+  for (const v of variantes) {
+    if (!varsByAtributo[v.atributo_id]) varsByAtributo[v.atributo_id] = [];
+    varsByAtributo[v.atributo_id].push(v);
+  }
+
+  const result = {};
+  for (const a of atributos) {
+    if (!result[a.producto_id]) result[a.producto_id] = [];
+    result[a.producto_id].push({ ...a, variantes: varsByAtributo[a.id] || [] });
+  }
+  return result;
+};
+
+module.exports = { getSeriales, getProductosCantidad, getVariantesPorSucursal };
