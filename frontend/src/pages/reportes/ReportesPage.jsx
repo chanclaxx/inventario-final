@@ -167,41 +167,45 @@ const CeldaCostoEditable = ({ linea, onGuardado }) => {
 
   if (editando) {
     return (
-      <div className="flex items-center gap-1 justify-end">
-        <input
-          type="number" min="0" value={valor}
-          onChange={(e) => setValor(e.target.value)}
-          onKeyDown={handleKeyDown} autoFocus
-          className={`w-24 text-right text-xs px-2 py-1 border rounded-lg focus:outline-none focus:ring-2
-            ${error ? 'border-red-400 focus:ring-red-300' : 'border-blue-400 focus:ring-blue-300'}`}
-        />
-        {guardando ? (
-          <span className="text-xs text-gray-400 animate-pulse">...</span>
-        ) : (
-          <>
-            <button onClick={handleGuardar} title="Guardar" className="text-green-600 hover:text-green-800 transition-colors">
-              <Check size={13} />
-            </button>
-            <button onClick={handleCancelar} title="Cancelar" className="text-gray-400 hover:text-gray-600 transition-colors">
-              <X size={13} />
-            </button>
-          </>
-        )}
-        {error && <span className="text-xs text-red-500 ml-1">{error}</span>}
+      <div className="flex flex-col items-end gap-1">
+        <div className="flex items-center gap-1">
+          <input
+            type="number" min="0" value={valor}
+            onChange={(e) => setValor(e.target.value)}
+            onKeyDown={handleKeyDown} autoFocus
+            className={`w-28 text-right text-xs px-2 py-1.5 border rounded-lg focus:outline-none focus:ring-2
+              ${error ? 'border-red-400 focus:ring-red-300' : 'border-blue-400 focus:ring-blue-300'}`}
+          />
+          {guardando ? (
+            <span className="text-xs text-gray-400 animate-pulse">...</span>
+          ) : (
+            <>
+              <button onClick={handleGuardar} title="Guardar"
+                className="p-1 rounded bg-green-100 text-green-700 hover:bg-green-200 transition-colors">
+                <Check size={14} />
+              </button>
+              <button onClick={handleCancelar} title="Cancelar"
+                className="p-1 rounded bg-gray-100 text-gray-500 hover:bg-gray-200 transition-colors">
+                <X size={14} />
+              </button>
+            </>
+          )}
+        </div>
+        {error && <span className="text-xs text-red-500">{error}</span>}
       </div>
     );
   }
 
   return (
-    <div className="flex items-center justify-end gap-1 group">
-      <span className="text-gray-500">
+    <div className="flex items-center justify-end gap-1.5">
+      <span className="text-gray-700 font-medium">
         {costoActual !== null
           ? formatCOP(costoActual)
           : <span className="text-gray-300 italic">N/A</span>}
       </span>
       <button onClick={handleEditar} title="Editar costo de compra"
-        className="opacity-0 group-hover:opacity-100 transition-opacity text-blue-400 hover:text-blue-600">
-        <Pencil size={11} />
+        className="p-1 rounded-md bg-blue-50 text-blue-500 hover:bg-blue-100 hover:text-blue-700 transition-colors flex-shrink-0">
+        <Pencil size={12} />
       </button>
     </div>
   );
@@ -264,35 +268,75 @@ const FilaFactura = ({ factura, esAdmin }) => {
 
       {expandida && (
         <div className="border-t border-gray-100 px-4 py-3 flex flex-col gap-2 bg-gray-50">
-          <div className="grid grid-cols-12 gap-1 text-xs font-medium text-gray-400 pb-1 border-b border-gray-200">
+
+          {/* Encabezado — solo escritorio */}
+          <div className="hidden sm:grid grid-cols-12 gap-1 text-xs font-medium text-gray-400 pb-1 border-b border-gray-200">
             <span className="col-span-4">Producto</span>
             <span className="col-span-2 text-center">Cant.</span>
             <span className="col-span-2 text-right">Precio</span>
-            <span className="col-span-2 text-right">
-              Costo{esAdmin && <span className="text-blue-400 ml-0.5" title="Editable">✎</span>}
+            <span className="col-span-2 text-right flex items-center justify-end gap-1">
+              Costo{esAdmin && <span className="text-blue-400" title="Editable"><Pencil size={10} /></span>}
             </span>
             <span className="col-span-2 text-right">Utilidad</span>
           </div>
+
           {lineas.map((linea, idx) => {
             const sinCosto = linea.costo_unitario_compra === null;
             return (
-              <div key={idx} className="grid grid-cols-12 gap-1 text-xs items-center py-1">
-                <div className="col-span-4 min-w-0">
-                  <p className="font-medium text-gray-700 truncate">{linea.nombre_producto}</p>
-                  {linea.imei && <p className="text-gray-400 font-mono truncate">{linea.imei}</p>}
+              <div key={idx}>
+                {/* Layout móvil — tarjeta por línea */}
+                <div className="sm:hidden bg-white rounded-xl p-3 shadow-sm border border-gray-100 flex flex-col gap-2">
+                  <div>
+                    <p className="font-semibold text-gray-800 text-sm">{linea.nombre_producto}</p>
+                    {linea.imei && <p className="text-xs text-gray-400 font-mono">{linea.imei}</p>}
+                  </div>
+                  <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+                    <div className="flex justify-between">
+                      <span className="text-gray-400">Cant.</span>
+                      <span className="font-medium text-gray-700">{linea.cantidad}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-400">Precio</span>
+                      <span className="font-medium text-gray-700">{formatCOP(linea.precio_venta)}</span>
+                    </div>
+                    <div className="flex justify-between items-center col-span-2 pt-1 border-t border-gray-100">
+                      <span className="text-gray-400 font-medium">
+                        Costo{esAdmin && <span className="text-blue-400 ml-1">(editable)</span>}
+                      </span>
+                      {esAdmin ? (
+                        <CeldaCostoEditable linea={linea} onGuardado={handleCostoGuardado} />
+                      ) : (
+                        sinCosto
+                          ? <span className="italic text-gray-300">N/A</span>
+                          : <span className="font-medium text-gray-700">{formatCOP(linea.costo_unitario_compra)}</span>
+                      )}
+                    </div>
+                    <div className="flex justify-between items-center col-span-2">
+                      <span className="text-gray-400 font-medium">Utilidad</span>
+                      <UtilidadBadge valor={linea.utilidad} sinDato={sinCosto} />
+                    </div>
+                  </div>
                 </div>
-                <span className="col-span-2 text-center text-gray-600">{linea.cantidad}</span>
-                <span className="col-span-2 text-right text-gray-700">{formatCOP(linea.precio_venta)}</span>
-                <span className="col-span-2 text-right">
-                  {esAdmin ? (
-                    <CeldaCostoEditable linea={linea} onGuardado={handleCostoGuardado} />
-                  ) : (
-                    sinCosto ? <span className="text-gray-300 italic">N/A</span> : formatCOP(linea.costo_unitario_compra)
-                  )}
-                </span>
-                <span className="col-span-2 text-right">
-                  <UtilidadBadge valor={linea.utilidad} sinDato={sinCosto} />
-                </span>
+
+                {/* Layout escritorio — tabla */}
+                <div className="hidden sm:grid grid-cols-12 gap-1 text-xs items-center py-1">
+                  <div className="col-span-4 min-w-0">
+                    <p className="font-medium text-gray-700 truncate">{linea.nombre_producto}</p>
+                    {linea.imei && <p className="text-gray-400 font-mono truncate">{linea.imei}</p>}
+                  </div>
+                  <span className="col-span-2 text-center text-gray-600">{linea.cantidad}</span>
+                  <span className="col-span-2 text-right text-gray-700">{formatCOP(linea.precio_venta)}</span>
+                  <span className="col-span-2 text-right">
+                    {esAdmin ? (
+                      <CeldaCostoEditable linea={linea} onGuardado={handleCostoGuardado} />
+                    ) : (
+                      sinCosto ? <span className="text-gray-300 italic">N/A</span> : formatCOP(linea.costo_unitario_compra)
+                    )}
+                  </span>
+                  <span className="col-span-2 text-right">
+                    <UtilidadBadge valor={linea.utilidad} sinDato={sinCosto} />
+                  </span>
+                </div>
               </div>
             );
           })}
@@ -933,9 +977,11 @@ const PanelVentas = ({ desde, hasta, onDesde, onHasta, esAdmin }) => {
               )}
 
               {esAdmin && (
-                <div className="flex items-center gap-2 bg-blue-50 border border-blue-100 rounded-xl px-4 py-2 text-xs text-blue-600">
-                  <Pencil size={12} />
-                  Puedes editar el costo de compra de cada línea pasando el cursor sobre la columna <strong>Costo</strong>.
+                <div className="flex items-start gap-3 bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 text-sm text-blue-700">
+                  <Pencil size={15} className="flex-shrink-0 mt-0.5 text-blue-500" />
+                  <span>
+                    <strong>Costo editable:</strong> toca el ícono <Pencil size={12} className="inline mx-0.5 text-blue-500" /> junto a cualquier costo para corregirlo y recalcular la utilidad al instante.
+                  </span>
                 </div>
               )}
 
