@@ -540,10 +540,19 @@ function ModalDetalleCompra({ compraId, onClose }) {
             <p className="text-sm font-semibold text-gray-700">Productos recibidos</p>
             {(data?.lineas || []).length === 0
               ? <p className="text-sm text-gray-400 italic">Sin líneas registradas</p>
-              : (data?.lineas || []).map((l) => (
+              : (data?.lineas || []).map((l) => {
+                  const varianteLabel = l.variante_id
+                    ? `${l.variante_tipo_nombre ? l.variante_tipo_nombre + ': ' : ''}${l.variante_valor}`
+                    : l.atributo_id
+                    ? `${l.atributo_tipo_nombre ? l.atributo_tipo_nombre + ': ' : ''}${l.atributo_valor}`
+                    : null;
+                  return (
                   <div key={l.id} className="bg-gray-50 rounded-xl p-3 flex items-start justify-between gap-2">
                     <div className="flex-1">
                       <p className="text-sm font-medium text-gray-800">{l.nombre_producto}</p>
+                      {varianteLabel && (
+                        <p className="text-xs text-blue-600 font-medium mt-0.5">{varianteLabel}</p>
+                      )}
                       {l.imei
                         ? <div className="flex items-center gap-1 mt-0.5"><Hash size={10} className="text-gray-400" /><p className="text-xs text-gray-400 font-mono">{l.imei}</p></div>
                         : <p className="text-xs text-gray-400">Cantidad: {l.cantidad}</p>
@@ -557,7 +566,8 @@ function ModalDetalleCompra({ compraId, onClose }) {
                       <p className="text-sm font-semibold text-gray-900">{formatCOP(l.cantidad * l.precio_unitario)}</p>
                     </div>
                   </div>
-                ))
+                  );
+                })
             }
           </div>
 
