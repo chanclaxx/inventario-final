@@ -289,6 +289,11 @@ const getResumenDia = async (cajaId, sucursalId, negocioId) => {
           SELECT 1 FROM entregas_domicilio ed
           WHERE ed.factura_id = f.id AND ed.estado = 'Pendiente'
         )
+        AND NOT EXISTS (
+          SELECT 1 FROM ordenes_servicio os
+          WHERE os.factura_id = f.id
+        )
+        AND (f.notas IS NULL OR f.notas NOT LIKE 'Factura generada por saldo de préstamo #%')
       ORDER BY f.fecha ASC
     `, [sucursalId, inicio, fin]),
 
@@ -309,7 +314,7 @@ const getResumenDia = async (cajaId, sucursalId, negocioId) => {
       FROM abonos_prestamo ab
       JOIN prestamos p ON p.id = ab.prestamo_id
       WHERE p.sucursal_id = $1 AND ab.fecha BETWEEN $2 AND $3
-        AND ab.metodo = 'Efectivo'
+        AND ab.metodo NOT IN ('Intercambio', 'Saldo a favor')
       ORDER BY ab.fecha ASC
     `, [sucursalId, inicio, fin]),
 
@@ -424,6 +429,11 @@ const getResumenGlobal = async (negocioId) => {
           SELECT 1 FROM entregas_domicilio ed
           WHERE ed.factura_id = f.id AND ed.estado = 'Pendiente'
         )
+        AND NOT EXISTS (
+          SELECT 1 FROM ordenes_servicio os
+          WHERE os.factura_id = f.id
+        )
+        AND (f.notas IS NULL OR f.notas NOT LIKE 'Factura generada por saldo de préstamo #%')
       ORDER BY f.fecha ASC
     `, [negocioId, inicio, fin]),
 
@@ -448,7 +458,7 @@ const getResumenGlobal = async (negocioId) => {
       JOIN prestamos  p  ON p.id  = ab.prestamo_id
       JOIN sucursales su ON su.id = p.sucursal_id
       WHERE su.negocio_id = $1 AND ab.fecha BETWEEN $2 AND $3
-        AND ab.metodo = 'Efectivo'
+        AND ab.metodo NOT IN ('Intercambio', 'Saldo a favor')
       ORDER BY ab.fecha ASC
     `, [negocioId, inicio, fin]),
 
