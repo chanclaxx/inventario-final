@@ -152,6 +152,24 @@ function labelSeccion(doc, y, texto) {
   return y + 14;
 }
 
+// ─── Helper: logo en cabecera ─────────────────────────────────────────────────
+
+function dibujarLogoHeader(doc, config, headerH) {
+  const raw = config?.logo_negocio;
+  if (!raw) return 0;
+  try {
+    const base64 = raw.replace(/^data:image\/[a-z+]+;base64,/, '');
+    const buf = Buffer.from(base64, 'base64');
+    if (!buf.length) return 0;
+    const LOGO_MAX = 60;
+    const logoY = Math.round((headerH - LOGO_MAX) / 2);
+    doc.image(buf, MARGIN, logoY, { fit: [LOGO_MAX, LOGO_MAX], align: 'center', valign: 'center' });
+    return LOGO_MAX + 10;
+  } catch {
+    return 0;
+  }
+}
+
 // ─── SECCIÓN: Encabezado ──────────────────────────────────────────────────────
 
 function seccionEncabezado(doc, config, factura) {
@@ -163,10 +181,15 @@ function seccionEncabezado(doc, config, factura) {
   // Línea de acento inferior (delgada, verde)
   doc.rect(0, HEADER_H - 3, PAGE_W, 3).fill(C.verde);
 
+  // ── Logo (opcional) ───────────────────────────────────────────────────────
+  const logoOffset = dibujarLogoHeader(doc, config, HEADER_H);
+  const textX      = MARGIN + logoOffset;
+  const textW      = CONTENT_W * 0.55 - logoOffset;
+
   // ── Lado izquierdo: nombre del negocio ───────────────────────────────────
   const nombreNegocio = config?.nombre_negocio || 'MI TIENDA';
   doc.font(FONT.bold).fontSize(22).fillColor(C.headerText)
-    .text(nombreNegocio, MARGIN, 28, { width: CONTENT_W * 0.55 });
+    .text(nombreNegocio, textX, 28, { width: textW });
 
   let yInfoNegocio = 56;
   const infoNegocio = [
@@ -177,7 +200,7 @@ function seccionEncabezado(doc, config, factura) {
 
   for (const linea of infoNegocio) {
     doc.font(FONT.normal).fontSize(8).fillColor(C.headerSub)
-      .text(linea, MARGIN, yInfoNegocio, { width: CONTENT_W * 0.55 });
+      .text(linea, textX, yInfoNegocio, { width: textW });
     yInfoNegocio += 12;
   }
 

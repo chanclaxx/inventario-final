@@ -102,14 +102,33 @@ const drawRect = (doc, x, y, w, h, color) =>
 const drawLine = (doc, x1, y1, x2, y2, color = COLORS_ORIG.border, width = 0.5) =>
   doc.save().moveTo(x1, y1).lineTo(x2, y2).strokeColor(color).lineWidth(width).stroke().restore();
 
-const drawHeader = (doc, { negocioNombre, personaNombre, personaInfo, fechaGeneracion }) => {
-  drawRect(doc, 0, 0, PAGE_WIDTH, 80, COLORS_ORIG.headerBg);
+const intentarLogoHeader = (doc, logoRaw, headerH) => {
+  if (!logoRaw) return 0;
+  try {
+    const base64 = logoRaw.replace(/^data:image\/[a-z+]+;base64,/, '');
+    const buf = Buffer.from(base64, 'base64');
+    if (!buf.length) return 0;
+    const LOGO_MAX = 50;
+    const logoY = Math.round((headerH - LOGO_MAX) / 2);
+    doc.image(buf, MARGIN, logoY, { fit: [LOGO_MAX, LOGO_MAX], align: 'center', valign: 'center' });
+    return LOGO_MAX + 10;
+  } catch {
+    return 0;
+  }
+};
+
+const drawHeader = (doc, { negocioNombre, personaNombre, personaInfo, fechaGeneracion, logoNegocio }) => {
+  const HEADER_H = 80;
+  drawRect(doc, 0, 0, PAGE_WIDTH, HEADER_H, COLORS_ORIG.headerBg);
+  const logoOffset = intentarLogoHeader(doc, logoNegocio, HEADER_H);
+  const textX = MARGIN + logoOffset;
+  const textW = COL_WIDTH - 160 - logoOffset;
   doc.font('Helvetica-Bold').fontSize(18).fillColor(COLORS_ORIG.white)
-    .text(negocioNombre || 'Mi Negocio', MARGIN, 22, { width: COL_WIDTH - 160 });
+    .text(negocioNombre || 'Mi Negocio', textX, 22, { width: textW });
   doc.font('Helvetica').fontSize(8).fillColor('#94A3B8')
     .text(`Generado: ${fechaGeneracion}`, MARGIN, 55, { width: COL_WIDTH, align: 'right' });
   doc.font('Helvetica').fontSize(9).fillColor('#93C5FD')
-    .text('Estado de cuenta — Préstamos activos', MARGIN, 45, { width: COL_WIDTH - 160 });
+    .text('Estado de cuenta — Préstamos activos', textX, 45, { width: textW });
   const cardY = 95;
   drawRect(doc, MARGIN, cardY, COL_WIDTH, 52, COLORS_ORIG.rowAlt);
   doc.save().rect(MARGIN, cardY, 4, 52).fill(COLORS_ORIG.accent).restore();
@@ -219,7 +238,7 @@ const drawResumenGlobal = (doc, prestamos, y) => {
   return y + 46;
 };
 
-const generarPdfPrestamosActivos = async ({ tipo, personaId, negocioId, negocioNombre }) => {
+const generarPdfPrestamosActivos = async ({ tipo, personaId, negocioId, negocioNombre, logoNegocio }) => {
   let prestamos;
   if (tipo === 'prestatario') {
     prestamos = await repo.findActivosPorPrestatario(personaId, negocioId);
@@ -261,7 +280,7 @@ const generarPdfPrestamosActivos = async ({ tipo, personaId, negocioId, negocioN
       Subject: 'Préstamos activos',
     },
   });
-  let y = drawHeader(doc, { negocioNombre, personaNombre, personaInfo, fechaGeneracion });
+  let y = drawHeader(doc, { negocioNombre, personaNombre, personaInfo, fechaGeneracion, logoNegocio });
   doc.font('Helvetica').fontSize(8).fillColor(COLORS_ORIG.textMuted)
     .text(
       `${prestamos.length} préstamo${prestamos.length !== 1 ? 's' : ''} activo${prestamos.length !== 1 ? 's' : ''}`,
@@ -292,17 +311,21 @@ const generarPdfPrestamosActivos = async ({ tipo, personaId, negocioId, negocioN
 
 // ── Encabezado ────────────────────────────────────────────────────────────────
 
-const _encabezadoIndividual = (doc, { negocioNombre, prestamo, fechaGeneracion }) => {
+const _encabezadoIndividual = (doc, { negocioNombre, prestamo, fechaGeneracion, logoNegocio }) => {
   const HEADER_H = 110;
 
   rectFill(doc, 0, 0, PAGE_WIDTH, HEADER_H, C.headerBg, 0);
   doc.rect(0, HEADER_H - 3, PAGE_WIDTH, 3).fill(C.verde);
 
+  const logoOffset = intentarLogoHeader(doc, logoNegocio, HEADER_H);
+  const textX      = MARGIN + logoOffset;
+  const textW      = COL_WIDTH * 0.55 - logoOffset;
+
   // Nombre del negocio
   doc.font(FONT.bold).fontSize(22).fillColor(C.headerText)
-    .text(negocioNombre || 'Mi Negocio', MARGIN, 28, { width: COL_WIDTH * 0.55 });
+    .text(negocioNombre || 'Mi Negocio', textX, 28, { width: textW });
   doc.font(FONT.normal).fontSize(9).fillColor(C.headerSub)
-    .text('Comprobante de Préstamo', MARGIN, 56, { width: COL_WIDTH * 0.55 });
+    .text('Comprobante de Préstamo', textX, 56, { width: textW });
 
   // Número de préstamo (derecha)
   const numPrestamo = `#${String(prestamo.id).padStart(6, '0')}`;
@@ -525,7 +548,7 @@ const _pie = (doc, prestamoId, negocioNombre, fechaGeneracion, totalPages) => {
 
 // ── Función principal ─────────────────────────────────────────────────────────
 
-const generarPdfPrestamoIndividual = async ({ prestamoId, negocioId, negocioNombre }) => {
+const generarPdfPrestamoIndividual = async ({ prestamoId, negocioId, negocioNombre, logoNegocio }) => {
   const prestamo = await repo.findByIdYNegocio(prestamoId, negocioId);
   if (!prestamo) {
     const err = new Error('Préstamo no encontrado');
@@ -571,7 +594,7 @@ const generarPdfPrestamoIndividual = async ({ prestamoId, negocioId, negocioNomb
     },
   });
 
-  let y = _encabezadoIndividual(doc, { negocioNombre, prestamo: datos, fechaGeneracion });
+  let y = _encabezadoIndividual(doc, { negocioNombre, prestamo: datos, fechaGeneracion, logoNegocio });
   y     = _bloquePrestatario(doc, datos, y);
   y     = _tablaDatosProducto(doc, datos, y);
   y     = _tablaAbonos(doc, abonos, y);

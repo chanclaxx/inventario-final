@@ -1,5 +1,14 @@
 const service = require('./prestamos.service');
 const pdfService = require('./prestamos.pdf.service');
+const { pool }   = require('../../config/db');
+
+const _getLogoNegocio = async (negocioId) => {
+  const { rows } = await pool.query(
+    `SELECT valor FROM config_negocio WHERE negocio_id = $1 AND clave = 'logo_negocio'`,
+    [negocioId]
+  );
+  return rows[0]?.valor || null;
+};
 
 const getPrestamos = async (req, res, next) => {
   try {
@@ -63,11 +72,13 @@ const exportarPdfPrestamoIndividual = async (req, res, next) => {
     }
  
     const negocioNombre = req.user?.negocio_nombre || '';
- 
+    const logoNegocio   = await _getLogoNegocio(req.user.negocio_id);
+
     const pdfStream = await pdfService.generarPdfPrestamoIndividual({
       prestamoId:   id,
       negocioId:    req.user.negocio_id,
       negocioNombre,
+      logoNegocio,
     });
  
     const filename = `prestamo-${id}-${Date.now()}.pdf`;
@@ -131,12 +142,14 @@ const exportarPdfPorPersona = async (req, res, next) => {
     // Si tu middleware popula req.user.negocio_nombre úsalo;
     // de lo contrario deja cadena vacía y el PDF usará 'Mi Negocio'.
     const negocioNombre = req.user?.negocio_nombre || '';
- 
+    const logoNegocio   = await _getLogoNegocio(req.user.negocio_id);
+
     const pdfStream = await pdfService.generarPdfPrestamosActivos({
       tipo,
       personaId:    id,
       negocioId:    req.user.negocio_id,
       negocioNombre,
+      logoNegocio,
     });
  
     // Nombre de archivo sugerido para el navegador

@@ -76,21 +76,45 @@ function texto(doc, x, y, w, str, { font = FONT.normal, size = 9, color = C.negr
   doc.text(String(str ?? ''), x, y, { width: w, align, lineGap });
 }
 
+// ─── Helper: logo en cabecera ─────────────────────────────────────────────────
+
+function dibujarLogoHeader(doc, config, headerH) {
+  const raw = config?.logo_negocio;
+  if (!raw) return 0;
+  try {
+    const base64 = raw.replace(/^data:image\/[a-z+]+;base64,/, '');
+    const buf = Buffer.from(base64, 'base64');
+    if (!buf.length) return 0;
+    const LOGO_MAX = 55;
+    const logoY = Math.round((headerH - LOGO_MAX) / 2);
+    doc.image(buf, MARGIN, logoY, { fit: [LOGO_MAX, LOGO_MAX], align: 'center', valign: 'center' });
+    return LOGO_MAX + 10;
+  } catch {
+    return 0;
+  }
+}
+
 // ─── Secciones ───────────────────────────────────────────────────────────────
 
 function dibujarEncabezado(doc, config, acreedor, saldoTotal, saldoAFavor) {
+  const HEADER_H = 110;
   // Fondo oscuro
-  rectFill(doc, 0, 0, PAGE_W, 110, C.headerBg, 0);
+  rectFill(doc, 0, 0, PAGE_W, HEADER_H, C.headerBg, 0);
+
+  // Logo (opcional)
+  const logoOffset = dibujarLogoHeader(doc, config, HEADER_H);
+  const textX = MARGIN + logoOffset;
+  const textW = CW - logoOffset;
 
   // Nombre del negocio
   doc.font(FONT.bold).fontSize(18).fillColor(C.headerText)
-    .text(config.nombre_negocio || 'Mi Negocio', MARGIN, 22, { width: CW });
+    .text(config.nombre_negocio || 'Mi Negocio', textX, 22, { width: textW });
 
   // Subtítulo
   const sub = [config.direccion, config.telefono_negocio].filter(Boolean).join('  ·  ');
   if (sub) {
     doc.font(FONT.normal).fontSize(8).fillColor(C.headerSub)
-      .text(sub, MARGIN, 44, { width: CW });
+      .text(sub, textX, 44, { width: textW });
   }
 
   // Título del documento

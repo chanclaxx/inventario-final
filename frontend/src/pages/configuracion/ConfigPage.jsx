@@ -18,6 +18,7 @@ import {
   Building2, ShieldCheck, FileSliders, BookOpen, Users,
   Printer, Palette, ListChecks, Wallet, Layers,
   ChevronUp, ChevronDown, RotateCcw, Navigation,
+  Upload, X, Image as ImageIcon,
 } from 'lucide-react';
 
 // ─── Navegación principal ─────────────────────────────────────────────────────
@@ -899,6 +900,100 @@ function BarraGuardado({ isDirty, onGuardar, isPending, guardado }) {
   );
 }
 
+// ─── Logo del negocio ────────────────────────────────────────────────────────
+function LogoConfig({ valores, set }) {
+  const logo = valores.logo_negocio || '';
+  const [error, setError] = useState('');
+
+  const comprimirImagen = (file) =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new window.Image();
+        img.onload = () => {
+          const MAX = 400;
+          const scale = Math.min(1, MAX / Math.max(img.width, img.height));
+          const w = Math.round(img.width * scale);
+          const h = Math.round(img.height * scale);
+          const canvas = document.createElement('canvas');
+          canvas.width = w;
+          canvas.height = h;
+          canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+          resolve(canvas.toDataURL('image/jpeg', 0.8));
+        };
+        img.onerror = () => reject(new Error('Imagen inválida'));
+        img.src = e.target.result;
+      };
+      reader.onerror = () => reject(new Error('Error leyendo archivo'));
+      reader.readAsDataURL(file);
+    });
+
+  const handleFile = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setError('');
+    if (file.size > 5 * 1024 * 1024) {
+      setError('El archivo es demasiado grande. Máximo 5 MB.');
+      e.target.value = '';
+      return;
+    }
+    try {
+      const b64 = await comprimirImagen(file);
+      set('logo_negocio', b64);
+    } catch {
+      setError('No se pudo procesar la imagen.');
+    }
+    e.target.value = '';
+  };
+
+  return (
+    <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm flex flex-col gap-4">
+      <div className="flex items-center gap-2">
+        <ImageIcon size={15} className="text-gray-400" />
+        <h3 className="text-sm font-semibold text-gray-700">Logo del negocio</h3>
+      </div>
+      <p className="text-xs text-gray-400 -mt-2">
+        Aparece en la cabecera de todas las facturas PDF. Recomendado: imagen cuadrada en PNG o JPG.
+      </p>
+
+      {logo ? (
+        <div className="flex items-center gap-4">
+          <img
+            src={logo}
+            alt="Logo del negocio"
+            className="w-24 h-24 object-contain border border-gray-200 rounded-xl bg-gray-50 p-1"
+          />
+          <div className="flex flex-col gap-2">
+            <label className="cursor-pointer inline-flex items-center gap-1.5 px-3 py-1.5
+              bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-semibold rounded-xl transition-colors">
+              <Upload size={13} /> Cambiar imagen
+              <input type="file" accept="image/*" onChange={handleFile} className="hidden" />
+            </label>
+            <button
+              type="button"
+              onClick={() => set('logo_negocio', '')}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5
+                bg-red-50 hover:bg-red-100 text-red-600 text-xs font-semibold rounded-xl transition-colors"
+            >
+              <X size={13} /> Eliminar logo
+            </button>
+          </div>
+        </div>
+      ) : (
+        <label className="cursor-pointer flex flex-col items-center gap-2 border-2 border-dashed
+          border-gray-200 hover:border-blue-300 rounded-xl py-8 transition-colors">
+          <Upload size={22} className="text-gray-300" />
+          <span className="text-sm text-gray-400 font-medium">Haz clic para subir el logo</span>
+          <span className="text-xs text-gray-300">PNG, JPG · máx. 5 MB</span>
+          <input type="file" accept="image/*" onChange={handleFile} className="hidden" />
+        </label>
+      )}
+
+      {error && <p className="text-xs text-red-500">{error}</p>}
+    </div>
+  );
+}
+
 // ─── Sección: Negocio ─────────────────────────────────────────────────────────
 function SeccionNegocio({ valores, set }) {
   const camposNegocio = [
@@ -921,6 +1016,8 @@ function SeccionNegocio({ valores, set }) {
             value={valores[clave] || ''} onChange={(e) => set(clave, e.target.value)} />
         ))}
       </div>
+
+      <LogoConfig valores={valores} set={set} />
 
       <ImpresoraConfig valores={valores} set={set} />
 
