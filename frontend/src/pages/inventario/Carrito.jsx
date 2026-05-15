@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ShoppingCart, Trash2, Plus, Minus, FileText, Handshake, ArrowRightLeft } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
@@ -8,6 +8,32 @@ import { formatCOP } from '../../utils/formatters';
 import { getSucursales } from '../../api/sucursales.api';
 import useCarritoStore from '../../store/carritoStore';
 import { ModalTraslado } from './ModalTraslado';
+
+function CantidadInput({ valor, stock, onCambiar }) {
+  const [texto, setTexto] = useState(String(valor));
+  useEffect(() => { setTexto(String(valor)); }, [valor]);
+
+  const confirmar = () => {
+    const n = parseInt(texto, 10);
+    if (!isNaN(n) && n >= 1 && n <= stock) onCambiar(n);
+    else setTexto(String(valor));
+  };
+
+  return (
+    <input
+      type="number"
+      min={1}
+      max={stock}
+      value={texto}
+      onChange={(e) => setTexto(e.target.value)}
+      onBlur={confirmar}
+      onKeyDown={(e) => e.key === 'Enter' && confirmar()}
+      className="w-10 text-center text-sm font-semibold text-gray-800 bg-white
+        border border-gray-200 rounded-lg py-1
+        focus:outline-none focus:ring-2 focus:ring-blue-500"
+    />
+  );
+}
 
 export function Carrito({ onFacturar, onPrestar, sinHeader = false }) {
   const { items, eliminarItem, actualizarPrecio, actualizarCantidad, limpiarCarrito, totalCarrito } =
@@ -97,33 +123,35 @@ export function Carrito({ onFacturar, onPrestar, sinHeader = false }) {
                   </div>
 
                   {/* Controles cantidad + precio */}
-                  <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
                     {item.tipo === 'cantidad' ? (
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex items-center gap-1.5 flex-1 min-w-0">
                         <button
                           onClick={() => actualizarCantidad(item.key, (item.cantidad || 1) - 1)}
                           className="w-7 h-7 rounded-lg bg-white border border-gray-200
                             hover:bg-gray-100 flex items-center justify-center
-                            transition-colors shadow-sm">
+                            transition-colors shadow-sm flex-shrink-0">
                           <Minus size={12} />
                         </button>
-                        <span className="text-sm font-semibold w-7 text-center tabular-nums">
-                          {item.cantidad || 1}
-                        </span>
+                        <CantidadInput
+                          valor={item.cantidad || 1}
+                          stock={item.stock}
+                          onCambiar={(n) => actualizarCantidad(item.key, n)}
+                        />
                         <button
                           onClick={() => actualizarCantidad(item.key, (item.cantidad || 1) + 1)}
                           disabled={(item.cantidad || 1) >= item.stock}
                           className="w-7 h-7 rounded-lg bg-white border border-gray-200
                             hover:bg-gray-100 flex items-center justify-center transition-colors
-                            shadow-sm disabled:opacity-40 disabled:cursor-not-allowed">
+                            shadow-sm disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0">
                           <Plus size={12} />
                         </button>
-                        <span className="text-xs text-gray-400 ml-0.5">/ {item.stock}</span>
+                        <span className="text-xs text-gray-400 flex-shrink-0">/ {item.stock}</span>
                       </div>
                     ) : (
-                      <div />
+                      <div className="flex-1" />
                     )}
-                    <div className="flex items-center gap-1 ml-auto">
+                    <div className="flex items-center gap-1 flex-shrink-0">
                       <span className="text-xs text-gray-400">$</span>
                       <InputMoneda
                         value={item.precioFinal}
