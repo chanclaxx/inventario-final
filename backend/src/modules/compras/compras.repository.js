@@ -45,13 +45,15 @@ const perteneceAlNegocio = async (id, negocioId) => {
 const getLineas = async (compraId) => {
   const { rows } = await pool.query(`
     SELECT lc.*,
-      va.valor        AS variante_valor,
-      va.tipo_nombre  AS variante_tipo_nombre,
-      ap.valor        AS atributo_valor,
-      ap.tipo_nombre  AS atributo_tipo_nombre
+      va.valor   AS variante_valor,
+      tva.nombre AS variante_tipo_nombre,
+      ap.valor   AS atributo_valor,
+      tap.nombre AS atributo_tipo_nombre
     FROM lineas_compra lc
-    LEFT JOIN variantes_atributo va ON va.id = lc.variante_id
-    LEFT JOIN atributos_producto ap ON ap.id = lc.atributo_id
+    LEFT JOIN variantes_atributo  va  ON va.id  = lc.variante_id
+    LEFT JOIN tipos_caracteristica tva ON tva.id = va.tipo_id
+    LEFT JOIN atributos_producto  ap  ON ap.id  = lc.atributo_id
+    LEFT JOIN tipos_caracteristica tap ON tap.id = ap.tipo_id
     WHERE lc.compra_id = $1
   `, [compraId]);
   return rows;
