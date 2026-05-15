@@ -189,9 +189,22 @@ const findByIdYNegocio = async (id, negocioId) => {
   return rows[0] || null;
 };
 
+const normalizarBusqueda = (str) =>
+  (str || '')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, ' ');
+
+const SA = "'áéíóúüñàèìòùâêîôûãõäëïöç'";
+const TA = "'aeiouunaeioaeiouaaoaeioc'";
+const sn = (col) => `translate(LOWER(${col}), ${SA}, ${TA})`;
+
 const getHistorialStock = async (negocioId, q) => {
-  const filtro = q
-    ? `%${q.toLowerCase().replace(/[%_\\]/g, '\\$&').slice(0, 100)}%`
+  const qNorm  = normalizarBusqueda(q);
+  const filtro = qNorm
+    ? `%${qNorm.replace(/[%_\\]/g, '\\$&').slice(0, 100)}%`
     : '%';
 
   const { rows } = await pool.query(`
@@ -209,10 +222,10 @@ const getHistorialStock = async (negocioId, q) => {
     LEFT JOIN proveedores   p  ON p.id  = h.proveedor_id
     WHERE su.negocio_id = $1
       AND (
-        LOWER(COALESCE(h.cliente_origen,   '')) LIKE $2 ESCAPE '\\'
-        OR LOWER(COALESCE(h.cedula_cliente,'')) LIKE $2 ESCAPE '\\'
-        OR LOWER(pc.nombre)                     LIKE $2 ESCAPE '\\'
-        OR LOWER(h.tipo)                        LIKE $2 ESCAPE '\\'
+        ${sn('COALESCE(h.cliente_origen,   \'\')')} LIKE $2 ESCAPE '\\'
+        OR LOWER(COALESCE(h.cedula_cliente, ''))    LIKE $2 ESCAPE '\\'
+        OR ${sn('pc.nombre')}                       LIKE $2 ESCAPE '\\'
+        OR LOWER(h.tipo)                            LIKE $2 ESCAPE '\\'
       )
     ORDER BY h.creado_en DESC
     LIMIT 200

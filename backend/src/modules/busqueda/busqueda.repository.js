@@ -1,5 +1,20 @@
 const { pool } = require('../../config/db');
 
+// ─── Normalización de texto para búsquedas ────────────────────────────────────
+
+const normalizarBusqueda = (str) =>
+  (str || '')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, ' ');
+
+// translate() quita acentos comunes en SQL sin requerir extensiones
+const SA = "'áéíóúüñàèìòùâêîôûãõäëïöç'";
+const TA = "'aeiouunaeioaeiouaaoaeioc'";
+const sn = (col) => `translate(LOWER(${col}), ${SA}, ${TA})`;
+
 // ─── IMEI / Serial ────────────────────────────────────────────────────────────
 
 const getSerialPorIMEI = async (imei, negocioId) => {
@@ -100,10 +115,10 @@ const getTrasladosPorIMEI = async (imei, negocioId) => {
 
 // ─── Búsqueda por nombre ──────────────────────────────────────────────────────
 
-// Divide la query en palabras y construye condiciones AND (cada palabra debe
-// aparecer en alguno de los campos dados). Permite búsqueda tolerante al orden.
+// Divide la query en palabras normalizadas (sin acentos) y construye condiciones
+// AND: cada palabra debe aparecer en al menos uno de los campos dados.
 const _wordConditions = (q, fields, params) => {
-  const palabras = q.toLowerCase().trim().split(/\s+/).filter(Boolean);
+  const palabras = normalizarBusqueda(q).split(/\s+/).filter(Boolean);
   let idx = params.length + 1;
   const conds = palabras.map((word) => {
     params.push(`%${word}%`);
@@ -116,9 +131,9 @@ const _wordConditions = (q, fields, params) => {
 const buscarSeriales = async (q, negocioId, sucursalId) => {
   const params = [negocioId];
   const { conds, nextIdx } = _wordConditions(q, [
-    'LOWER(ps.nombre)',
-    "LOWER(COALESCE(ps.marca,''))",
-    "LOWER(COALESCE(ps.modelo,''))",
+    sn('ps.nombre'),
+    sn("COALESCE(ps.marca,'')"),
+    sn("COALESCE(ps.modelo,'')"),
   ], params);
 
   let filtro = '';
@@ -152,7 +167,7 @@ const buscarSeriales = async (q, negocioId, sucursalId) => {
 
 const buscarCantidad = async (q, negocioId, sucursalId) => {
   const params = [negocioId];
-  const { conds, nextIdx } = _wordConditions(q, ['LOWER(pc.nombre)'], params);
+  const { conds, nextIdx } = _wordConditions(q, [sn('pc.nombre')], params);
 
   let filtro = '';
   if (sucursalId) {
@@ -228,9 +243,10 @@ const buscarComprasPorIMEI = async (imei, negocioId) => {
 
 const buscarComprasPorTexto = async (q, negocioId, sucursalId) => {
   const filtro = sucursalId ? 'AND c.sucursal_id = $3' : '';
+  const qNorm  = normalizarBusqueda(q);
   const params = sucursalId
-    ? [negocioId, `%${q.toLowerCase()}%`, sucursalId]
-    : [negocioId, `%${q.toLowerCase()}%`];
+    ? [negocioId, `%${qNorm}%`, sucursalId]
+    : [negocioId, `%${qNorm}%`];
 
   const { rows } = await pool.query(`
     SELECT
@@ -254,10 +270,10 @@ const buscarComprasPorTexto = async (q, negocioId, sucursalId) => {
     LEFT JOIN usuarios u ON u.id = c.usuario_id
     WHERE su.negocio_id = $1
       AND (
-        LOWER(lc.nombre_producto)               LIKE $2
-        OR LOWER(COALESCE(lc.imei, ''))         LIKE $2
-        OR LOWER(p.nombre)                       LIKE $2
-        OR LOWER(COALESCE(c.numero_factura, '')) LIKE $2
+        ${sn('lc.nombre_producto')}               LIKE $2
+        OR LOWER(COALESCE(lc.imei, ''))           LIKE $2
+        OR ${sn('p.nombre')}                      LIKE $2
+        OR LOWER(COALESCE(c.numero_factura, ''))  LIKE $2
       )
       ${filtro}
     ORDER BY c.fecha DESC
@@ -281,12 +297,12 @@ const buscarPrestamos = async ({ q, estado, tipo, fechaDesde, fechaHasta }, nego
 
   if (q && q.trim()) {
     conditions.push(`(
-      LOWER(p.prestatario)             LIKE $${i}
-      OR LOWER(p.nombre_producto)      LIKE $${i}
-      OR LOWER(COALESCE(p.imei,  ''))  LIKE $${i}
-      OR LOWER(COALESCE(p.cedula,''))  LIKE $${i}
+      ${sn('p.prestatario')}               LIKE $${i}
+      OR ${sn('p.nombre_producto')}        LIKE $${i}
+      OR LOWER(COALESCE(p.imei,  ''))      LIKE $${i}
+      OR LOWER(COALESCE(p.cedula,''))      LIKE $${i}
     )`);
-    params.push(`%${q.toLowerCase().trim()}%`);
+    params.push(`%${normalizarBusqueda(q)}%`);
     i++;
   }
 

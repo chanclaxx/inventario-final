@@ -197,9 +197,24 @@ const eliminarSerial = async (serialId) => {
   return rows[0] || null;
 };
 
+// Normaliza texto en Node.js: quita acentos, minúsculas, colapsa espacios
+const normalizarBusqueda = (str) =>
+  (str || '')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, ' ');
+
+// Expresión SQL reutilizable: quita acentos comunes (español/colombiano) + minúsculas
+const SA = "'áéíóúüñàèìòùâêîôûãõäëïöç'";
+const TA = "'aeiouunaeioaeiouaaoaeioc'";
+const sn = (col) => `translate(LOWER(${col}), ${SA}, ${TA})`;
+
 const findComprasCliente = async (negocioId, q) => {
-  const filtro = q
-    ? `%${q.toLowerCase().replace(/[%_\\]/g, '\\$&').slice(0, 100)}%`
+  const qNorm  = normalizarBusqueda(q);
+  const filtro = qNorm
+    ? `%${qNorm.replace(/[%_\\]/g, '\\$&').slice(0, 100)}%`
     : '%';
 
   const { rows: seriales } = await pool.query(`
@@ -222,9 +237,9 @@ const findComprasCliente = async (negocioId, q) => {
         WHERE r.imei = s.imei AND sf.negocio_id = $1
       )
       AND (
-        LOWER(s.cliente_origen) LIKE $2 ESCAPE '\\'
-        OR LOWER(ps.nombre)     LIKE $2 ESCAPE '\\'
-        OR LOWER(s.imei)        LIKE $2 ESCAPE '\\'
+        ${sn('s.cliente_origen')} LIKE $2 ESCAPE '\\'
+        OR ${sn('ps.nombre')}     LIKE $2 ESCAPE '\\'
+        OR LOWER(s.imei)          LIKE $2 ESCAPE '\\'
       )
     ORDER BY s.fecha_entrada DESC
   `, [negocioId, filtro]);
@@ -241,10 +256,10 @@ const findComprasCliente = async (negocioId, q) => {
     JOIN sucursales su ON su.id = f.sucursal_id
     WHERE su.negocio_id = $1
       AND (
-        LOWER(f.nombre_cliente)       LIKE $2 ESCAPE '\\'
-        OR LOWER(f.cedula)            LIKE $2 ESCAPE '\\'
-        OR LOWER(r.nombre_producto)   LIKE $2 ESCAPE '\\'
-        OR LOWER(COALESCE(r.imei,'')) LIKE $2 ESCAPE '\\'
+        ${sn('f.nombre_cliente')}          LIKE $2 ESCAPE '\\'
+        OR LOWER(f.cedula)                 LIKE $2 ESCAPE '\\'
+        OR ${sn('r.nombre_producto')}      LIKE $2 ESCAPE '\\'
+        OR LOWER(COALESCE(r.imei, ''))     LIKE $2 ESCAPE '\\'
       )
     ORDER BY f.fecha DESC
   `, [negocioId, filtro]);

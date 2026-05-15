@@ -45,10 +45,10 @@ function norm(data) {
 
 function normalizarTexto(texto) {
   return (texto || '')
-    .toLowerCase()
-    .trim()
     .normalize('NFD')
     .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .trim()
     .replace(/\s+/g, ' ');
 }
 
