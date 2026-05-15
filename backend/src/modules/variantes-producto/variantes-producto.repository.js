@@ -263,6 +263,28 @@ const ajustarStockVarianteEnTx = async (client, varianteId, cantidad) => {
   );
 };
 
+const actualizarCostoVarianteEnTx = async (client, varianteId, costoNuevo) => {
+  await client.query(
+    'UPDATE variantes_atributo SET costo_unitario = $1 WHERE id = $2',
+    [costoNuevo, varianteId]
+  );
+};
+
+const actualizarCostoAtributoEnTx = async (client, atributoId, costoNuevo) => {
+  await client.query(
+    'UPDATE atributos_producto SET costo_unitario = $1 WHERE id = $2',
+    [costoNuevo, atributoId]
+  );
+};
+
+const sincronizarCostoProductoEnTx = async (client, productoId, costoNuevo) => {
+  if (costoNuevo == null) return;
+  await client.query(
+    'UPDATE productos_cantidad SET costo_unitario = $1 WHERE id = $2',
+    [costoNuevo, productoId]
+  );
+};
+
 const sincronizarStockProductoEnTx = async (client, productoId) => {
   await client.query(
     `UPDATE atributos_producto ap
@@ -306,4 +328,5 @@ module.exports = {
   ajustarStockAtributo, ajustarStockVariante,
   sincronizarStockProducto, sincronizarCostoProducto,
   ajustarStockAtributoEnTx, ajustarStockVarianteEnTx, sincronizarStockProductoEnTx,
+  actualizarCostoVarianteEnTx, actualizarCostoAtributoEnTx, sincronizarCostoProductoEnTx,
 };

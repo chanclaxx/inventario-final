@@ -77,7 +77,7 @@ const ajustarStockAtributo = async (negocioId, atributoId, cantidad, opciones = 
   if (cantidad < 0 && (atributo.stock + cantidad) < 0) {
     throw { status: 400, message: `Stock insuficiente. Stock actual: ${atributo.stock}` };
   }
-  if (cantidad > 0 && opciones.costo_unitario != null) {
+  if (cantidad > 0 && opciones.costo_unitario != null && Number(opciones.costo_unitario) > 0) {
     opciones._costo_nuevo = calcularCostoPromedio(
       atributo.stock, atributo.costo_unitario, cantidad, opciones.costo_unitario
     );
@@ -95,7 +95,7 @@ const ajustarStockVariante = async (negocioId, varianteId, cantidad, opciones = 
   if (cantidad < 0 && (variante.stock + cantidad) < 0) {
     throw { status: 400, message: `Stock insuficiente. Stock actual: ${variante.stock}` };
   }
-  if (cantidad > 0 && opciones.costo_unitario != null) {
+  if (cantidad > 0 && opciones.costo_unitario != null && Number(opciones.costo_unitario) > 0) {
     opciones._costo_nuevo = calcularCostoPromedio(
       variante.stock, variante.costo_unitario, cantidad, opciones.costo_unitario
     );

@@ -154,23 +154,46 @@ const registrarCompra = async ({
         }
 
         if (linea.variante_id) {
+          const { rows: varRows } = await client.query(
+            'SELECT stock, costo_unitario FROM variantes_atributo WHERE id = $1',
+            [linea.variante_id]
+          );
+          const variante = varRows[0];
           await variantesRepo.ajustarStockVarianteEnTx(client, linea.variante_id, linea.cantidad);
           await variantesRepo.sincronizarStockProductoEnTx(client, linea.producto_id);
+          if (linea.precio_unitario != null && linea.precio_unitario > 0) {
+            const costoPromedio = calcularCostoPromedio(
+              variante.stock, variante.costo_unitario,
+              linea.cantidad, linea.precio_unitario,
+            );
+            await variantesRepo.actualizarCostoVarianteEnTx(client, linea.variante_id, costoPromedio);
+            await variantesRepo.sincronizarCostoProductoEnTx(client, linea.producto_id, costoPromedio);
+          }
         } else if (linea.atributo_id) {
+          const { rows: atrRows } = await client.query(
+            'SELECT stock, costo_unitario FROM atributos_producto WHERE id = $1',
+            [linea.atributo_id]
+          );
+          const atributo = atrRows[0];
           await variantesRepo.ajustarStockAtributoEnTx(client, linea.atributo_id, linea.cantidad);
           await variantesRepo.sincronizarStockProductoEnTx(client, linea.producto_id);
+          if (linea.precio_unitario != null && linea.precio_unitario > 0) {
+            const costoPromedio = calcularCostoPromedio(
+              atributo.stock, atributo.costo_unitario,
+              linea.cantidad, linea.precio_unitario,
+            );
+            await variantesRepo.actualizarCostoAtributoEnTx(client, linea.atributo_id, costoPromedio);
+            await variantesRepo.sincronizarCostoProductoEnTx(client, linea.producto_id, costoPromedio);
+          }
         } else {
           await comprasRepo.ajustarStockCantidad(client, linea.producto_id, linea.cantidad);
-        }
-
-        if (linea.precio_unitario != null) {
-          const costoPromedio = calcularCostoPromedio(
-            producto.stock,
-            producto.costo_unitario,
-            linea.cantidad,
-            linea.precio_unitario,
-          );
-          await comprasRepo.actualizarCostoPromedio(client, linea.producto_id, costoPromedio);
+          if (linea.precio_unitario != null && linea.precio_unitario > 0) {
+            const costoPromedio = calcularCostoPromedio(
+              producto.stock, producto.costo_unitario,
+              linea.cantidad, linea.precio_unitario,
+            );
+            await comprasRepo.actualizarCostoPromedio(client, linea.producto_id, costoPromedio);
+          }
         }
 
         if (proveedor_id) {

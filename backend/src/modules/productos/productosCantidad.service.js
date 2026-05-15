@@ -58,9 +58,9 @@ const ajustarStock = async (
   }
 
   // Promedio ponderado móvil — solo en entradas con costo conocido
-  const costoAjustado = (cantidad > 0 && costo_unitario != null)
+  const costoAjustado = (cantidad > 0 && costo_unitario != null && Number(costo_unitario) > 0)
     ? calcularCostoPromedio(producto.stock, producto.costo_unitario, cantidad, costo_unitario)
-    : costo_unitario;
+    : (costo_unitario > 0 ? costo_unitario : null);
 
   const actualizado = await repo.ajustarStock(id, cantidad, {
     costo_unitario: costoAjustado,
