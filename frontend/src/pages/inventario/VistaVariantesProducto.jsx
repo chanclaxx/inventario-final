@@ -33,7 +33,7 @@ function colorBarra(stock, minimo) {
 }
 
 // ─── Modal crear/editar nodo ──────────────────────────────────────────────────
-function ModalNodo({ open, onClose, titulo, tipos = [], datoInicial, onGuardar, isPending, error }) {
+function ModalNodo({ open, onClose, titulo, tipos = [], datoInicial, onGuardar, isPending, error, onEliminar }) {
   const [valor,    setValor]    = useState(datoInicial?.valor || '');
   const [stockMin, setStockMin] = useState(datoInicial?.stock_minimo ?? 0);
   const [precio,   setPrecio]   = useState(datoInicial?.precio || '');
@@ -130,6 +130,20 @@ function ModalNodo({ open, onClose, titulo, tipos = [], datoInicial, onGuardar, 
             {datoInicial ? 'Guardar' : 'Agregar'}
           </Button>
         </div>
+
+        {datoInicial && onEliminar && (
+          <button
+            type="button"
+            onClick={onEliminar}
+            className="flex items-center justify-center gap-1.5 w-full py-2 rounded-xl
+              text-xs font-medium text-red-400 hover:text-red-600
+              hover:bg-red-50 transition-colors border border-dashed border-red-200
+              hover:border-red-300"
+          >
+            <Trash2 size={13} />
+            Eliminar
+          </button>
+        )}
       </div>
     </Modal>
   );
@@ -138,7 +152,7 @@ function ModalNodo({ open, onClose, titulo, tipos = [], datoInicial, onGuardar, 
 // ─── Tarjeta de atributo o variante ──────────────────────────────────────────
 function TarjetaNodo({
   nodo, tieneHijos, esAdmin,
-  onDrillDown, onAgregar, onEditar, onEliminar,
+  onDrillDown, onAgregar, onEditar,
   precioPadre,
 }) {
   const sinStock  = nodo.stock === 0;
@@ -173,20 +187,12 @@ function TarjetaNodo({
         </p>
         <div className="flex items-center gap-0.5 flex-shrink-0">
           {esAdmin && (
-            <>
-              <button
-                onClick={(e) => { e.stopPropagation(); onEditar(); }}
-                className="p-1.5 rounded-lg text-gray-300 hover:text-gray-600 hover:bg-gray-100 transition-colors"
-              >
-                <Settings size={13} />
-              </button>
-              <button
-                onClick={(e) => { e.stopPropagation(); onEliminar(); }}
-                className="p-1.5 rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50 transition-colors"
-              >
-                <Trash2 size={13} />
-              </button>
-            </>
+            <button
+              onClick={(e) => { e.stopPropagation(); onEditar(); }}
+              className="p-1.5 rounded-lg text-gray-300 hover:text-gray-600 hover:bg-gray-100 transition-colors"
+            >
+              <Settings size={13} />
+            </button>
           )}
           {tieneHijos && <ChevronRight size={15} className="text-blue-400 ml-1" />}
         </div>
@@ -405,7 +411,6 @@ export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose 
                 onDrillDown={() => {}}
                 onAgregar={() => handleAgregarVariante(v)}
                 onEditar={() => { setErrorM(''); setModalNodo({ modo: 'editar-var', dato: v }); }}
-                onEliminar={() => mutEliminarVar.mutate(v.id)}
               />
             ))}
             {esAdmin && (
@@ -444,6 +449,7 @@ export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose 
             onGuardar={(d) => mutEditarVar.mutate({ id: modalNodo.dato.id, datos: d })}
             isPending={mutEditarVar.isPending}
             error={errorM}
+            onEliminar={() => { mutEliminarVar.mutate(modalNodo.dato.id); cerrarModal(); }}
           />
         )}
       </div>
@@ -548,7 +554,6 @@ export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose 
                 onDrillDown={() => setAtributoSel(atributo)}
                 onAgregar={() => handleAgregarAtributo(atributo)}
                 onEditar={() => { setErrorM(''); setModalNodo({ modo: 'editar-atr', dato: atributo }); }}
-                onEliminar={() => mutEliminarAtr.mutate(atributo.id)}
               />
             );
           })}
@@ -588,6 +593,7 @@ export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose 
           onGuardar={(d) => mutEditarAtr.mutate({ id: modalNodo.dato.id, datos: d })}
           isPending={mutEditarAtr.isPending}
           error={errorM}
+          onEliminar={() => { mutEliminarAtr.mutate(modalNodo.dato.id); cerrarModal(); }}
         />
       )}
     </div>

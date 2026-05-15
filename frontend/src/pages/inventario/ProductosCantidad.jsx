@@ -1,6 +1,6 @@
 import { useState }                                      from 'react';
 import { useQuery, useMutation, useQueryClient }         from '@tanstack/react-query';
-import { ShoppingBag, Plus, AlertTriangle, Trash2, ChevronDown, ChevronRight, Layers } from 'lucide-react';
+import { ShoppingBag, Plus, AlertTriangle, Trash2, ChevronDown, ChevronRight, Layers, Settings } from 'lucide-react';
 import { getProductosCantidad, ajustarStockCantidad, getLineas } from '../../api/productos.api';
 import { SearchInput }                                   from '../../components/ui/SearchInput';
 import { Button }                                        from '../../components/ui/Button';
@@ -50,7 +50,7 @@ function TarjetaProducto({ p, esAdmin, onAgregar, onReducir, onEditar, variantes
         ${(variantesActivo && onVerArbol) || esAdmin ? `cursor-pointer ${hoverBorder}` : 'cursor-default'}`}
       title={variantesActivo ? 'Click para ver variantes' : esAdmin ? 'Doble click para editar' : undefined}
     >
-      {/* Nombre + eliminar */}
+      {/* Nombre + acciones */}
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1 min-w-0">
           <p className={`font-medium text-sm break-words leading-snug
@@ -61,13 +61,24 @@ function TarjetaProducto({ p, esAdmin, onAgregar, onReducir, onEditar, variantes
             <p className="text-xs text-gray-400 mt-0.5">{p.unidad_medida}</p>
           )}
         </div>
-        <button
-          onClick={(e) => { e.stopPropagation(); onReducir(e, p); }}
-          className="p-1.5 rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50 transition-colors"
-          title="Reducir stock"
-        >
-          <Trash2 size={15} />
-        </button>
+        <div className="flex items-center gap-0.5 flex-shrink-0">
+          <button
+            onClick={(e) => { e.stopPropagation(); onReducir(e, p); }}
+            className="p-1.5 rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50 transition-colors"
+            title="Reducir stock"
+          >
+            <Trash2 size={15} />
+          </button>
+          {esAdmin && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onEditar(p); }}
+              className="p-1.5 rounded-lg text-gray-300 hover:text-gray-600 hover:bg-gray-100 transition-colors"
+              title="Editar producto"
+            >
+              <Settings size={15} />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Stock + precio + barra de progreso */}
