@@ -15,7 +15,7 @@ const TIPO_CONFIG = {
     badge:      'bg-orange-100 text-orange-700',
     label:      'Cargo',
     Icn:        TrendingUp,
-    lado:       'derecha',
+    lado:       'izquierda',
     bubbleBg:   'bg-amber-50 border border-amber-200',
     montoClass: 'text-amber-700',
   },
@@ -23,7 +23,7 @@ const TIPO_CONFIG = {
     badge:      'bg-purple-100 text-purple-700',
     label:      'Compra',
     Icn:        ShoppingBag,
-    lado:       'derecha',
+    lado:       'izquierda',
     bubbleBg:   'bg-purple-50 border border-purple-200',
     montoClass: 'text-purple-700',
   },
@@ -31,7 +31,7 @@ const TIPO_CONFIG = {
     badge:      'bg-green-100 text-green-700',
     label:      'Abono',
     Icn:        TrendingDown,
-    lado:       'izquierda',
+    lado:       'derecha',
     bubbleBg:   'bg-white border border-gray-200',
     montoClass: 'text-green-600',
   },
@@ -39,7 +39,7 @@ const TIPO_CONFIG = {
     badge:      'bg-teal-100 text-teal-700',
     label:      'Pago adelantado',
     Icn:        Wallet,
-    lado:       'izquierda',
+    lado:       'derecha',
     bubbleBg:   'bg-teal-50 border border-teal-200',
     montoClass: 'text-teal-600',
   },
@@ -271,8 +271,8 @@ export function EstadoCuentaAcreedor({ acreedorId, esAdmin }) {
 
       {/* Leyenda lados */}
       <div className="flex items-center justify-between px-1">
-        <span className="text-[11px] text-gray-400 font-medium">← Negocio (pagos)</span>
-        <span className="text-[11px] text-gray-400 font-medium">Acreedor (cargos) →</span>
+        <span className="text-[11px] text-gray-400 font-medium">← Acreedor (compras)</span>
+        <span className="text-[11px] text-gray-400 font-medium">Nosotros (pagos) →</span>
       </div>
 
       {/* Ventana de chat */}
