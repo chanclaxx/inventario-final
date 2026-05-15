@@ -4,6 +4,7 @@ import { Pencil, Trash2 }                    from 'lucide-react';
 import { actualizarProductoCantidad }        from '../../api/productos.api';
 import { getProveedores }                    from '../../api/proveedores.api';
 import { getLineas }                         from '../../api/productos.api';
+import { getArbol }                          from '../../api/variantesProductoApi';
 import { Modal }        from '../../components/ui/Modal';
 import { Input }        from '../../components/ui/Input';
 import { InputMoneda }  from '../../components/ui/InputMoneda';
@@ -14,6 +15,14 @@ import { ModalEliminarProducto, TIPO_PRODUCTO_CANTIDAD } from './ModalEliminarPr
 export function ModalEditarProductoCantidad({ producto, pinEliminacion, variantesActivo, onClose }) {
   const { esAdminNegocio } = useAuth();
   const queryClient = useQueryClient();
+
+  const { data: arbol = [] } = useQuery({
+    queryKey: ['arbol-producto', producto.id, producto.sucursal_id],
+    queryFn:  () => getArbol(producto.id, producto.sucursal_id).then((r) => r.data.data),
+    enabled:  variantesActivo,
+    staleTime: 30000,
+  });
+  const tieneAtributos = variantesActivo && arbol.length > 0;
 
   const [form, setForm] = useState({
     nombre        : producto.nombre         || '',
@@ -127,7 +136,7 @@ export function ModalEditarProductoCantidad({ producto, pinEliminacion, variante
 
           <div className="flex flex-col gap-1">
             <label className="text-sm font-medium text-gray-700">Costo unitario</label>
-            {variantesActivo ? (
+            {tieneAtributos ? (
               <p className="text-xs text-gray-400 bg-gray-50 rounded-xl px-3 py-2 border border-gray-200">
                 Se define por cada variante — edítalo desde la vista de variantes del producto.
               </p>

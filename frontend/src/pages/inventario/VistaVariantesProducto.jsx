@@ -36,7 +36,7 @@ function colorBarra(stock, minimo) {
 }
 
 // ─── Modal crear/editar nodo ──────────────────────────────────────────────────
-function ModalNodo({ open, onClose, titulo, tipos = [], datoInicial, onGuardar, isPending, error, onEliminar }) {
+function ModalNodo({ open, onClose, titulo, tipos = [], datoInicial, onGuardar, isPending, error, onEliminar, ocultarCosto = false }) {
   const [valor,         setValor]         = useState(datoInicial?.valor || '');
   const [stockMin,      setStockMin]      = useState(datoInicial?.stock_minimo ?? 0);
   const [precio,        setPrecio]        = useState(datoInicial?.precio || '');
@@ -127,17 +127,24 @@ function ModalNodo({ open, onClose, titulo, tipos = [], datoInicial, onGuardar, 
           placeholder="Dejar vacío para usar el precio del producto"
         />
 
-        <div className="flex flex-col gap-1">
-          <label className="text-xs font-medium text-gray-600">Costo unitario (opcional)</label>
-          <InputMoneda
-            value={costoUnitario}
-            onChange={setCostoUnitario}
-            placeholder="0"
-            className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl
-              text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500
-              transition-all"
-          />
-        </div>
+        {!ocultarCosto && (
+          <div className="flex flex-col gap-1">
+            <label className="text-xs font-medium text-gray-600">Costo unitario (opcional)</label>
+            <InputMoneda
+              value={costoUnitario}
+              onChange={setCostoUnitario}
+              placeholder="0"
+              className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl
+                text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500
+                transition-all"
+            />
+          </div>
+        )}
+        {ocultarCosto && (
+          <p className="text-xs text-gray-400 bg-gray-50 rounded-xl px-3 py-2 border border-gray-200">
+            El costo recae en cada variante — edítalo desde la variante correspondiente.
+          </p>
+        )}
 
         {error && <p className="text-sm text-red-500">{error}</p>}
 
@@ -675,6 +682,7 @@ export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose 
           isPending={mutEditarAtr.isPending}
           error={errorM}
           onEliminar={() => { mutEliminarAtr.mutate(modalNodo.dato.id); cerrarModal(); }}
+          ocultarCosto={modalNodo.dato.variantes?.length > 0}
         />
       )}
 
