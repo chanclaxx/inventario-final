@@ -5,7 +5,7 @@ import { exportarPrestamosExcel } from '../../utils/exportarPrestamosExcel';
 import { exportarCarteraPersonaExcel } from '../../utils/exportarCarteraPersonaExcel';
 import { getPrestamos, registrarAbonoPrestamo, devolverPrestamo, devolverParcialPrestamo, registrarSaldoAFavor as registrarSaldoAFavorApi, intercambiarPrestamo as intercambiarPrestamoApi, anularAbono as anularAbonoApi, getRetomasDirectas as getRetomasDirectasApi, anularRetomaDirecta as anularRetomaDirectaApi, aplicarSaldoAPrestamo as aplicarSaldoAPrestamoApi, getEstadoCuenta as getEstadoCuentaApi, crearAjusteDeuda as crearAjusteDeudaApi } from '../../api/prestamos.api';
 import { ModalEditarValorPrestamo } from './ModalEditarValorPrestamo';
-import { crearPrestatario as crearPrestatarioApi, getPrestatarios } from '../../api/prestatarios.api';
+import { crearPrestatario as crearPrestatarioApi, getPrestatarios, actualizarPrestatario as actualizarPrestatarioApi } from '../../api/prestatarios.api';
 import {
   getDomiciliarios,
   getEntregas,
@@ -39,7 +39,7 @@ import {
   Handshake, CreditCard, Bike, Plus, CheckCircle,
   ChevronDown, ChevronUp, ChevronLeft, ChevronRight,
   Users, User, AlertTriangle, FileDown, Loader2, Printer, Search, Wallet,
-  ArrowLeftRight, Package, ShoppingBag, XCircle, SlidersHorizontal, UserPlus, Pencil,
+  ArrowLeftRight, Package, ShoppingBag, XCircle, SlidersHorizontal, UserPlus, Pencil, Settings,
 } from 'lucide-react';
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
@@ -470,6 +470,71 @@ function ModalCrearPrestatario({ onClose }) {
   );
 }
 
+// ─── Modal Editar Prestatario ─────────────────────────────────────────────────
+
+function ModalEditarPrestatario({ prestatario, onClose }) {
+  const queryClient = useQueryClient();
+  const [nombre,   setNombre]   = useState(prestatario.nombre);
+  const [telefono, setTelefono] = useState(prestatario.telefono || '');
+  const [error,    setError]    = useState('');
+
+  const mutation = useMutation({
+    mutationFn: () => actualizarPrestatarioApi(prestatario.id, {
+      nombre:   nombre.trim(),
+      telefono: telefono.trim() || undefined,
+    }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['prestatarios'], exact: false });
+      queryClient.invalidateQueries({ queryKey: ['prestamos'],    exact: false });
+      onClose();
+    },
+    onError: (err) => setError(err.response?.data?.error || 'Error al actualizar el prestamista'),
+  });
+
+  const handleGuardar = () => {
+    setError('');
+    if (!nombre.trim()) return setError('El nombre es requerido');
+    mutation.mutate();
+  };
+
+  return (
+    <Modal open onClose={onClose} title="Editar prestamista" size="sm">
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-1">
+          <label className="text-sm font-medium text-gray-700">
+            Nombre <span className="text-red-500">*</span>
+          </label>
+          <Input
+            value={nombre}
+            onChange={(e) => setNombre(e.target.value)}
+            placeholder="Nombre completo"
+            autoFocus
+            onKeyDown={(e) => e.key === 'Enter' && handleGuardar()}
+          />
+        </div>
+        <div className="flex flex-col gap-1">
+          <label className="text-sm font-medium text-gray-700">
+            Teléfono <span className="text-xs text-gray-400">(opcional)</span>
+          </label>
+          <Input
+            value={telefono}
+            onChange={(e) => setTelefono(e.target.value)}
+            placeholder="Número de teléfono"
+            onKeyDown={(e) => e.key === 'Enter' && handleGuardar()}
+          />
+        </div>
+        {error && <p className="text-sm text-red-500">{error}</p>}
+        <div className="flex gap-2">
+          <Button variant="secondary" className="flex-1" onClick={onClose}>Cancelar</Button>
+          <Button className="flex-1" loading={mutation.isPending} onClick={handleGuardar}>
+            <Pencil size={14} /> Guardar cambios
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 // ─── Modal Ajuste de Cuentas ──────────────────────────────────────────────────
 
 function ModalAjusteDeuda({ nombre, tipo, personaId, sucursalId, onClose }) {
@@ -872,7 +937,7 @@ const ABONO_CLASES = {
 
 // ─── Card resumen de persona ──────────────────────────────────────────────────
 
-function CardPersona({ nombre, tipo, prestamos, saldoTotal, ultimoAbono, onSeleccionar }) {
+function CardPersona({ nombre, tipo, prestamos, saldoTotal, ultimoAbono, onSeleccionar, onEditar }) {
   const activos  = prestamos.filter((p) => p.estado === 'Activo');
   const cerrados = prestamos.filter((p) => p.estado !== 'Activo');
 
@@ -887,11 +952,14 @@ function CardPersona({ nombre, tipo, prestamos, saldoTotal, ultimoAbono, onSelec
   const { texto: abonoTexto, nivel: abonoNivel } = tiempoUltimoAbono(ultimoAbono);
 
   return (
-    <button
+    <div
       onClick={onSeleccionar}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => e.key === 'Enter' && onSeleccionar()}
       className="w-full text-left bg-white border border-gray-100 rounded-2xl p-4
         hover:border-blue-200 hover:shadow-sm active:scale-[0.99] transition-all
-        flex items-center gap-3"
+        flex items-center gap-3 cursor-pointer"
     >
       {/* Avatar */}
       <div className={`w-11 h-11 rounded-xl flex items-center justify-center
@@ -935,8 +1003,20 @@ function CardPersona({ nombre, tipo, prestamos, saldoTotal, ultimoAbono, onSelec
         )}
       </div>
 
-      <ChevronRight size={15} className="text-gray-300 flex-shrink-0" />
-    </button>
+      <div className="flex items-center gap-1 flex-shrink-0">
+        {onEditar && (
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onEditar(); }}
+            title="Editar prestamista"
+            className="p-1.5 rounded-lg text-gray-300 hover:text-blue-500 hover:bg-blue-50 transition-colors"
+          >
+            <Settings size={15} />
+          </button>
+        )}
+        <ChevronRight size={15} className="text-gray-300" />
+      </div>
+    </div>
   );
 }
 
@@ -2252,7 +2332,8 @@ export default function PrestamosPage() {
   const [modalSaldoPersona,   setModalSaldoPersona]   = useState(null); // { nombre, tipo, personaId, saldoAFavor }
   const [modalRetomaDirecta,  setModalRetomaDirecta]  = useState(null); // { persona: { tipo, id, nombre } }
   const [modalAjusteCuentas,  setModalAjusteCuentas]  = useState(null); // { nombre, tipo, personaId, sucursalId }
-  const [modalCrearPrestatario, setModalCrearPrestatario] = useState(false);
+  const [modalCrearPrestatario,   setModalCrearPrestatario]   = useState(false);
+  const [modalEditarPrestatario,  setModalEditarPrestatario]  = useState(null);
   const abonosImprimir = useAbonosPrestamo(prestamoImprimir?.id);
 
   const [saldadoFacturaId,   setSaldadoFacturaId]   = useState(null);
@@ -2311,7 +2392,7 @@ export default function PrestamosPage() {
     return acc;
   }, {});
 
-  // Incluir prestamistas sin préstamos (recién creados)
+  // Incluir prestamistas sin préstamos (recién creados) y enriquecer con telefono
   prestatariosData.forEach((pr) => {
     const key = `prestatario_${pr.id}`;
     if (!gruposCompaneros[key]) {
@@ -2324,6 +2405,7 @@ export default function PrestamosPage() {
         ultimoAbono: null,
       };
     }
+    gruposCompaneros[key].telefono = pr.telefono || '';
   });
 
   const gruposClientes = prestamos.filter((p) => p.cliente_id).reduce((acc, p) => {
@@ -2570,7 +2652,13 @@ export default function PrestamosPage() {
                         tipo={tabPrestamos === 'companeros' ? 'companero' : 'cliente'}
                         prestamos={grupo.prestamos} saldoTotal={grupo.saldoTotal}
                         ultimoAbono={grupo.ultimoAbono}
-                        onSeleccionar={() => setPersonaSeleccionadaKey(key)} />
+                        onSeleccionar={() => setPersonaSeleccionadaKey(key)}
+                        onEditar={tabPrestamos === 'companeros' ? () => setModalEditarPrestatario({
+                          id:       grupo.personaId,
+                          nombre:   grupo.nombre,
+                          telefono: grupo.telefono || '',
+                        }) : undefined}
+                      />
                     ))}
                   </div>
                 )}
@@ -2681,6 +2769,13 @@ export default function PrestamosPage() {
 
       {modalCrearPrestatario && (
         <ModalCrearPrestatario onClose={() => setModalCrearPrestatario(false)} />
+      )}
+
+      {modalEditarPrestatario && (
+        <ModalEditarPrestatario
+          prestatario={modalEditarPrestatario}
+          onClose={() => setModalEditarPrestatario(null)}
+        />
       )}
 
       {modalAjusteCuentas && (

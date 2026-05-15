@@ -36,6 +36,17 @@ const crearEmpleado = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+const actualizarPrestatario = async (req, res, next) => {
+  try {
+    const data = await service.actualizarPrestatario(
+      req.user.negocio_id,
+      req.params.id,
+      req.body,
+    );
+    res.json({ ok: true, data });
+  } catch (err) { next(err); }
+};
+
 module.exports = {
-  getPrestatarios, crearPrestatario, getEmpleados, crearEmpleado,
+  getPrestatarios, crearPrestatario, actualizarPrestatario, getEmpleados, crearEmpleado,
 };

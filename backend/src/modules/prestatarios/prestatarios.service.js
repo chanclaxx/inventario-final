@@ -20,6 +20,13 @@ const crearEmpleado = async (negocioId, { prestatario_id, nombre }) => {
   return repo.createEmpleado({ prestatario_id, nombre: nombre.trim() });
 };
 
+const actualizarPrestatario = async (negocioId, id, { nombre, telefono }) => {
+  if (!nombre?.trim()) throw { status: 400, message: 'El nombre es requerido' };
+  const updated = await repo.update(id, negocioId, { nombre: nombre.trim(), telefono });
+  if (!updated) throw { status: 404, message: 'Prestatario no encontrado' };
+  return updated;
+};
+
 module.exports = {
-  getPrestatarios, crearPrestatario, getEmpleados, crearEmpleado,
+  getPrestatarios, crearPrestatario, actualizarPrestatario, getEmpleados, crearEmpleado,
 };

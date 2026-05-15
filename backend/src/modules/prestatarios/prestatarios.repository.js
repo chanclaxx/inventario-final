@@ -52,6 +52,16 @@ const createEmpleado = async ({ prestatario_id, nombre }) => {
   return rows[0];
 };
 
+const update = async (id, negocioId, { nombre, telefono }) => {
+  const { rows } = await pool.query(`
+    UPDATE prestatarios
+    SET nombre = $1, telefono = $2
+    WHERE id = $3 AND negocio_id = $4
+    RETURNING *
+  `, [nombre, telefono || null, id, negocioId]);
+  return rows[0] || null;
+};
+
 module.exports = {
-  findAll, findById, create, getEmpleados, createEmpleado,
+  findAll, findById, create, update, getEmpleados, createEmpleado,
 };
