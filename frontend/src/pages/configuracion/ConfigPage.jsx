@@ -17,6 +17,7 @@ import {
   GripVertical, ToggleLeft, ToggleRight, Tag, Lock,
   Building2, ShieldCheck, FileSliders, BookOpen, Users,
   Printer, Palette, ListChecks, Wallet, Layers,
+  ChevronUp, ChevronDown, RotateCcw, Navigation,
 } from 'lucide-react';
 
 // ─── Navegación principal ─────────────────────────────────────────────────────
@@ -665,6 +666,214 @@ function CaracteristicasSerialConfig({ valores, set }) {
   );
 }
 
+// ─── Personalización del navbar ──────────────────────────────────────────────
+
+const NAV_DEFAULTS = [
+  { path: '/',            label: 'Inicio'      },
+  { path: '/inventario',  label: 'Inventario'  },
+  { path: '/facturar',    label: 'Facturas'    },
+  { path: '/servicios',   label: 'Servicios'   },
+  { path: '/proveedores', label: 'Proveedores' },
+  { path: '/prestamos',   label: 'Préstamos'   },
+  { path: '/caja',        label: 'Caja'        },
+  { path: '/traslados',   label: 'Traslados'   },
+  { path: '/reportes',    label: 'Reportes'    },
+  { path: '/acreedores',  label: 'Acreedores'  },
+  { path: '/busqueda',    label: 'Búsqueda'    },
+];
+
+function NavbarConfig({ valores, set }) {
+  const initItems = () => {
+    try {
+      const saved = JSON.parse(valores['nav_config'] || '[]');
+      if (!Array.isArray(saved) || saved.length === 0) throw new Error();
+      // Merge saved with defaults: add any new route that wasn't in saved config
+      const savedPaths = new Set(saved.map((s) => s.path));
+      const merged = [...saved];
+      let nextOrden = saved.length;
+      for (const def of NAV_DEFAULTS) {
+        if (!savedPaths.has(def.path)) {
+          merged.push({ path: def.path, label: def.label, orden: nextOrden++ });
+        }
+      }
+      return merged.sort((a, b) => a.orden - b.orden);
+    } catch {
+      return NAV_DEFAULTS.map((d, i) => ({ ...d, orden: i }));
+    }
+  };
+
+  const [items,    setItems]    = useState(initItems);
+  const [dragOver, setDragOver] = useState(null);
+  const dragRef = useState(null);  // [0] = current drag index
+
+  const persist = (newItems) => {
+    const withOrden = newItems.map((item, i) => ({ ...item, orden: i }));
+    setItems(withOrden);
+    set('nav_config', JSON.stringify(withOrden));
+  };
+
+  const moverArriba = (idx) => {
+    if (idx === 0) return;
+    const n = [...items];
+    [n[idx - 1], n[idx]] = [n[idx], n[idx - 1]];
+    persist(n);
+  };
+
+  const moverAbajo = (idx) => {
+    if (idx === items.length - 1) return;
+    const n = [...items];
+    [n[idx], n[idx + 1]] = [n[idx + 1], n[idx]];
+    persist(n);
+  };
+
+  const setLabel = (idx, label) => {
+    const n = [...items];
+    n[idx] = { ...n[idx], label };
+    persist(n);
+  };
+
+  const resetLabel = (idx) => {
+    const def = NAV_DEFAULTS.find((d) => d.path === items[idx].path);
+    if (def) setLabel(idx, def.label);
+  };
+
+  const resetTodo = () => {
+    const defaults = NAV_DEFAULTS.map((d, i) => ({ ...d, orden: i }));
+    setItems(defaults);
+    set('nav_config', JSON.stringify(defaults));
+  };
+
+  // HTML5 drag & drop
+  const handleDragStart = (e, idx) => {
+    dragRef[0] = idx;
+    e.dataTransfer.effectAllowed = 'move';
+  };
+  const handleDragOver = (e, idx) => {
+    e.preventDefault();
+    setDragOver(idx);
+  };
+  const handleDrop = (idx) => {
+    const from = dragRef[0];
+    if (from == null || from === idx) { setDragOver(null); return; }
+    const n = [...items];
+    const [moved] = n.splice(from, 1);
+    n.splice(idx, 0, moved);
+    dragRef[0] = null;
+    setDragOver(null);
+    persist(n);
+  };
+  const handleDragEnd = () => { dragRef[0] = null; setDragOver(null); };
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Navigation size={15} className="text-gray-400" />
+          <h3 className="text-sm font-semibold text-gray-700">Menú de navegación</h3>
+        </div>
+        <button
+          type="button"
+          onClick={resetTodo}
+          className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-600
+            px-2 py-1 rounded-lg hover:bg-gray-100 transition-colors"
+        >
+          <RotateCcw size={11} />
+          Restablecer
+        </button>
+      </div>
+      <p className="text-xs text-gray-400 -mt-2">
+        Arrastra o usa las flechas para reordenar. Edita el nombre que verán todos los usuarios.
+      </p>
+
+      <div className="flex flex-col gap-1.5">
+        {items.map((item, idx) => {
+          const def          = NAV_DEFAULTS.find((d) => d.path === item.path);
+          const esModificado = def && item.label !== def.label;
+          const esDragOver   = dragOver === idx;
+
+          return (
+            <div
+              key={item.path}
+              draggable
+              onDragStart={(e) => handleDragStart(e, idx)}
+              onDragOver={(e)  => handleDragOver(e, idx)}
+              onDrop={()       => handleDrop(idx)}
+              onDragEnd={handleDragEnd}
+              className={`flex items-center gap-2 px-3 py-2 rounded-xl border transition-all
+                ${esDragOver
+                  ? 'border-blue-300 bg-blue-50 scale-[1.01]'
+                  : 'border-gray-100 bg-gray-50 hover:border-gray-200'}`}
+            >
+              {/* Drag handle */}
+              <GripVertical
+                size={15}
+                className="text-gray-300 flex-shrink-0 cursor-grab active:cursor-grabbing"
+              />
+
+              {/* Up / Down */}
+              <div className="flex flex-col gap-0.5 flex-shrink-0">
+                <button
+                  type="button"
+                  onClick={() => moverArriba(idx)}
+                  disabled={idx === 0}
+                  className="p-0.5 rounded hover:bg-gray-200 text-gray-400
+                    hover:text-gray-600 disabled:opacity-25 transition-colors"
+                >
+                  <ChevronUp size={11} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => moverAbajo(idx)}
+                  disabled={idx === items.length - 1}
+                  className="p-0.5 rounded hover:bg-gray-200 text-gray-400
+                    hover:text-gray-600 disabled:opacity-25 transition-colors"
+                >
+                  <ChevronDown size={11} />
+                </button>
+              </div>
+
+              {/* Posición */}
+              <span className="text-xs text-gray-300 tabular-nums w-4 text-center flex-shrink-0">
+                {idx + 1}
+              </span>
+
+              {/* Label input */}
+              <input
+                type="text"
+                value={item.label}
+                onChange={(e) => setLabel(idx, e.target.value)}
+                placeholder={def?.label ?? ''}
+                maxLength={24}
+                className="flex-1 min-w-0 px-2.5 py-1.5 bg-white border border-gray-200 rounded-lg
+                  text-sm text-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500
+                  focus:border-blue-500 transition-all"
+              />
+
+              {/* Ruta (hint) */}
+              <span className="text-xs text-gray-300 font-mono hidden sm:block flex-shrink-0">
+                {item.path === '/' ? '/inicio' : item.path}
+              </span>
+
+              {/* Reset individual si fue modificado */}
+              {esModificado && (
+                <button
+                  type="button"
+                  onClick={() => resetLabel(idx)}
+                  title={`Volver a "${def.label}"`}
+                  className="p-1 rounded-lg hover:bg-gray-200 text-gray-400
+                    hover:text-gray-600 transition-colors flex-shrink-0"
+                >
+                  <RotateCcw size={11} />
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ─── Barra de guardado ────────────────────────────────────────────────────────
 function BarraGuardado({ isDirty, onGuardar, isPending, guardado }) {
   if (!isDirty && !guardado) return null;
@@ -714,6 +923,10 @@ function SeccionNegocio({ valores, set }) {
       </div>
 
       <ImpresoraConfig valores={valores} set={set} />
+
+      <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
+        <NavbarConfig valores={valores} set={set} />
+      </div>
 
       <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm flex flex-col gap-4">
         <div className="flex items-center gap-2">

@@ -11,6 +11,7 @@ import {
 import { getSucursales } from '../../api/sucursales.api.js';
 import useCarritoStore  from '../../store/carritoStore.js';
 import useSucursalStore from '../../store/sucursalStore.js';
+import api from '../../api/axios.config.js';
 import { SucursalSelector } from './SucursalSelector.jsx';
 
 const NAV_ITEMS = [
@@ -70,6 +71,28 @@ export function Navbar() {
   });
   const totalSucursales = (sucursalesRaw || []).length;
 
+  const { data: configData } = useQuery({
+    queryKey: ['config'],
+    queryFn:  () => api.get('/config').then((r) => r.data.data),
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const navCustom = (() => {
+    try {
+      const p = JSON.parse(configData?.nav_config || '[]');
+      return Array.isArray(p) && p.length > 0 ? p : [];
+    } catch { return []; }
+  })();
+
+  const itemsBase = navCustom.length > 0
+    ? NAV_ITEMS
+        .map((item) => {
+          const c = navCustom.find((x) => x.path === item.path);
+          return c ? { ...item, label: c.label, _orden: c.orden } : { ...item, _orden: 9999 };
+        })
+        .sort((a, b) => a._orden - b._orden)
+    : NAV_ITEMS;
+
   // Publica la altura real del navbar como --navbar-height en :root
   useEffect(() => {
     const el = headerRef.current;
@@ -102,7 +125,7 @@ export function Navbar() {
     navigate('/login');
   };
 
-  const itemsVisibles = NAV_ITEMS.filter((item) =>
+  const itemsVisibles = itemsBase.filter((item) =>
     esItemVisible(item, puedeVer, esAdmin, totalSucursales)
   );
 
