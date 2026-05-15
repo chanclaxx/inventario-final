@@ -147,9 +147,11 @@ const CeldaCostoEditable = ({ linea, onGuardado }) => {
     try {
       await actualizarCostoCompra({
         tipo:            linea.tipo_producto,
-        imei:            linea.imei ?? null,
-        nombre_producto: linea.imei ? null : linea.nombre_producto,
-        producto_id:     linea.imei ? null : (linea.producto_id ?? null),
+        imei:            linea.imei            ?? null,
+        nombre_producto: linea.imei            ? null : linea.nombre_producto,
+        producto_id:     linea.imei            ? null : (linea.producto_id  ?? null),
+        variante_id:     linea.variante_id     ?? null,
+        atributo_id:     linea.atributo_id     ?? null,
         nuevo_costo:     nuevoCosto,
       });
       setEditando(false);

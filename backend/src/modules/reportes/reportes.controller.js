@@ -38,7 +38,7 @@ const getInventarioBajo = async (req, res, next) => {
 
 const actualizarCostoCompra = async (req, res, next) => {
   try {
-    const { tipo, imei, nombre_producto, nuevo_costo, producto_id } = req.body;
+    const { tipo, imei, nombre_producto, nuevo_costo, producto_id, variante_id, atributo_id } = req.body;
 
     if (!tipo || nuevo_costo === undefined || nuevo_costo === null) {
       return res.status(400).json({
@@ -61,20 +61,22 @@ const actualizarCostoCompra = async (req, res, next) => {
       });
     }
 
-    if (tipo === 'cantidad' && !nombre_producto && !producto_id) {
+    if (tipo === 'cantidad' && !nombre_producto && !producto_id && !variante_id && !atributo_id) {
       return res.status(400).json({
         ok: false,
-        error: 'El campo nombre_producto o producto_id es requerido para productos de tipo cantidad',
+        error: 'Se requiere nombre_producto, producto_id, variante_id o atributo_id',
       });
     }
 
     const data = await service.actualizarCostoCompra(
       req.sucursal_id,
       tipo,
-      imei ?? null,
+      imei         ?? null,
       nombre_producto ?? null,
       Number(nuevo_costo),
-      producto_id ? Number(producto_id) : null,
+      producto_id  ? Number(producto_id)  : null,
+      variante_id  ? Number(variante_id)  : null,
+      atributo_id  ? Number(atributo_id)  : null,
     );
 
     res.json({ ok: true, data });

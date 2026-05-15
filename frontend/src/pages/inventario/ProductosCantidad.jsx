@@ -354,6 +354,7 @@ export function ProductosCantidad() {
         <ModalEditarProductoCantidad
           producto={productoAEditar}
           pinEliminacion={pinEliminacion}
+          variantesActivo={variantesActivo}
           onClose={() => setProductoAEditar(null)}
         />
       )}

@@ -11,7 +11,7 @@ import { Button }       from '../../components/ui/Button';
 import { useAuth }      from '../../context/useAuth';
 import { ModalEliminarProducto, TIPO_PRODUCTO_CANTIDAD } from './ModalEliminarProducto';
 
-export function ModalEditarProductoCantidad({ producto, pinEliminacion, onClose }) {
+export function ModalEditarProductoCantidad({ producto, pinEliminacion, variantesActivo, onClose }) {
   const { esAdminNegocio } = useAuth();
   const queryClient = useQueryClient();
 
@@ -127,16 +127,22 @@ export function ModalEditarProductoCantidad({ producto, pinEliminacion, onClose 
 
           <div className="flex flex-col gap-1">
             <label className="text-sm font-medium text-gray-700">Costo unitario</label>
-            <InputMoneda
-              id="edit-costo-cant"
-              value={form.costo_unitario}
-              onChange={(val) => setForm({ ...form, costo_unitario: val })}
-              placeholder="0"
-              onKeyDown={(e) => handleKeyDown(e, null)}
-              className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl
-                text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500
-                transition-all"
-            />
+            {variantesActivo ? (
+              <p className="text-xs text-gray-400 bg-gray-50 rounded-xl px-3 py-2 border border-gray-200">
+                Se define por cada variante — edítalo desde la vista de variantes del producto.
+              </p>
+            ) : (
+              <InputMoneda
+                id="edit-costo-cant"
+                value={form.costo_unitario}
+                onChange={(val) => setForm({ ...form, costo_unitario: val })}
+                placeholder="0"
+                onKeyDown={(e) => handleKeyDown(e, null)}
+                className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl
+                  text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500
+                  transition-all"
+              />
+            )}
           </div>
 
           <div className="flex flex-col gap-1">

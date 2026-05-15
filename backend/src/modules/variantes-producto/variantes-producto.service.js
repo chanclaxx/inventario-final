@@ -14,6 +14,7 @@ const crearAtributo = async (negocioId, productoId, datos) => {
   if (Number(datos.stock || 0) < 0) throw { status: 400, message: 'El stock inicial no puede ser negativo' };
   const atributo = await repo.crearAtributo(productoId, producto.sucursal_id, datos);
   await repo.sincronizarStockProducto(productoId);
+  await repo.sincronizarCostoProducto(productoId, atributo.costo_unitario);
   return atributo;
 };
 
@@ -22,6 +23,9 @@ const actualizarAtributo = async (negocioId, atributoId, datos) => {
   if (!atributo) throw { status: 404, message: 'Atributo no encontrado' };
   const actualizado = await repo.actualizarAtributo(atributoId, datos);
   if (!actualizado) throw { status: 404, message: 'Atributo no encontrado' };
+  if (datos.costo_unitario !== undefined) {
+    await repo.sincronizarCostoProducto(atributo.producto_id, actualizado.costo_unitario);
+  }
   return actualizado;
 };
 
@@ -42,6 +46,7 @@ const crearVariante = async (negocioId, atributoId, datos) => {
   if (Number(datos.stock || 0) < 0) throw { status: 400, message: 'El stock inicial no puede ser negativo' };
   const variante = await repo.crearVariante(atributoId, datos);
   await repo.sincronizarStockProducto(atributo.producto_id);
+  await repo.sincronizarCostoProducto(atributo.producto_id, variante.costo_unitario);
   return variante;
 };
 
@@ -50,6 +55,9 @@ const actualizarVariante = async (negocioId, varianteId, datos) => {
   if (!variante) throw { status: 404, message: 'Variante no encontrada' };
   const actualizado = await repo.actualizarVariante(varianteId, datos);
   if (!actualizado) throw { status: 404, message: 'Variante no encontrada' };
+  if (datos.costo_unitario !== undefined) {
+    await repo.sincronizarCostoProducto(variante.producto_id, actualizado.costo_unitario);
+  }
   return actualizado;
 };
 
@@ -78,6 +86,7 @@ const ajustarStockAtributo = async (negocioId, atributoId, cantidad, opciones = 
     atributoId, cantidad, atributo.producto_id, atributo.sucursal_id, opciones
   );
   await repo.sincronizarStockProducto(atributo.producto_id);
+  await repo.sincronizarCostoProducto(atributo.producto_id, opciones._costo_nuevo ?? null);
 };
 
 const ajustarStockVariante = async (negocioId, varianteId, cantidad, opciones = {}) => {
@@ -96,6 +105,7 @@ const ajustarStockVariante = async (negocioId, varianteId, cantidad, opciones = 
     variante.producto_id, variante.sucursal_id, opciones
   );
   await repo.sincronizarStockProducto(variante.producto_id);
+  await repo.sincronizarCostoProducto(variante.producto_id, opciones._costo_nuevo ?? null);
 };
 
 module.exports = {

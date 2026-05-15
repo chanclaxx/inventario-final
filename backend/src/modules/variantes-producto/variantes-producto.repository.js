@@ -236,6 +236,17 @@ const sincronizarStockProducto = async (productoId) => {
   );
 };
 
+// ── Sincroniza costo del producto padre con el de la última variante modificada ──
+// Cuando variantes está activo, el producto padre refleja el último costo registrado.
+
+const sincronizarCostoProducto = async (productoId, costoNuevo) => {
+  if (costoNuevo == null) return;
+  await pool.query(
+    'UPDATE productos_cantidad SET costo_unitario = $1 WHERE id = $2',
+    [costoNuevo, productoId]
+  );
+};
+
 // ── Versiones dentro de transacción (para facturas) ──────────────────────────
 
 const ajustarStockAtributoEnTx = async (client, atributoId, cantidad) => {
@@ -293,6 +304,6 @@ module.exports = {
   crearAtributo, actualizarAtributo, eliminarAtributo,
   crearVariante, actualizarVariante, eliminarVariante,
   ajustarStockAtributo, ajustarStockVariante,
-  sincronizarStockProducto,
+  sincronizarStockProducto, sincronizarCostoProducto,
   ajustarStockAtributoEnTx, ajustarStockVarianteEnTx, sincronizarStockProductoEnTx,
 };

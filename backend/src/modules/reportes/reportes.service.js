@@ -100,11 +100,10 @@ const getDashboard = async (sucursalId) => {
                   ${_costoPorImei('l.imei', 'f.sucursal_id')}
                 ELSE
                   COALESCE(
-                    (SELECT pc.costo_unitario
-                     FROM productos_cantidad pc
-                     WHERE pc.nombre = l.nombre_producto
-                       AND pc.sucursal_id = f.sucursal_id
-                     LIMIT 1),
+                    (SELECT v.costo_unitario FROM variantes_atributo v WHERE v.id = l.variante_id),
+                    (SELECT ap.costo_unitario FROM atributos_producto ap WHERE ap.id = l.atributo_id),
+                    (SELECT pc.costo_unitario FROM productos_cantidad pc
+                     WHERE pc.nombre = l.nombre_producto AND pc.sucursal_id = f.sucursal_id LIMIT 1),
                     0
                   ) * l.cantidad
               END
@@ -150,11 +149,11 @@ const getDashboard = async (sucursalId) => {
                 ${_costoPorImei('l.imei', 'f.sucursal_id')}
               ELSE
                 COALESCE(
-                  (SELECT pc.costo_unitario
-                   FROM productos_cantidad pc
-                   WHERE pc.nombre = l.nombre_producto
-                     AND pc.sucursal_id = f.sucursal_id
-                   LIMIT 1), 0
+                  (SELECT v.costo_unitario FROM variantes_atributo v WHERE v.id = l.variante_id),
+                  (SELECT ap.costo_unitario FROM atributos_producto ap WHERE ap.id = l.atributo_id),
+                  (SELECT pc.costo_unitario FROM productos_cantidad pc
+                   WHERE pc.nombre = l.nombre_producto AND pc.sucursal_id = f.sucursal_id LIMIT 1),
+                  0
                 ) * l.cantidad
             END
           ) AS costo_total
@@ -495,19 +494,20 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
       l.precio,
       l.subtotal,
       l.producto_id,
+      l.atributo_id,
+      l.variante_id,
       CASE
         WHEN l.imei IS NOT NULL THEN
           ${_costoPorImei('l.imei', 'f.sucursal_id')}
+        WHEN l.variante_id IS NOT NULL THEN
+          (SELECT v.costo_unitario FROM variantes_atributo v WHERE v.id = l.variante_id)
+        WHEN l.atributo_id IS NOT NULL THEN
+          (SELECT ap.costo_unitario FROM atributos_producto ap WHERE ap.id = l.atributo_id)
         WHEN l.producto_id IS NOT NULL THEN
-          (SELECT pc.costo_unitario
-           FROM productos_cantidad pc
-           WHERE pc.id = l.producto_id)
+          (SELECT pc.costo_unitario FROM productos_cantidad pc WHERE pc.id = l.producto_id)
         ELSE
-          (SELECT pc.costo_unitario
-           FROM productos_cantidad pc
-           WHERE pc.nombre = l.nombre_producto
-             AND pc.sucursal_id = f.sucursal_id
-           LIMIT 1)
+          (SELECT pc.costo_unitario FROM productos_cantidad pc
+           WHERE pc.nombre = l.nombre_producto AND pc.sucursal_id = f.sucursal_id LIMIT 1)
       END AS costo_unitario_compra,
       CASE WHEN l.imei IS NOT NULL THEN 'serial' ELSE 'cantidad' END AS tipo_producto
     FROM lineas_factura l
@@ -528,7 +528,9 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
       cantidad:              Number(linea.cantidad),
       precio_venta:          Number(linea.precio),
       subtotal:              Number(linea.subtotal),
-      producto_id:           linea.producto_id ? Number(linea.producto_id) : null,
+      producto_id:           linea.producto_id  ? Number(linea.producto_id)  : null,
+      atributo_id:           linea.atributo_id  ? Number(linea.atributo_id)  : null,
+      variante_id:           linea.variante_id  ? Number(linea.variante_id)  : null,
       costo_unitario_compra: costoUnitario,
       costo_total:           costoTotal,
       utilidad,
@@ -776,7 +778,7 @@ const getInventarioBajo = async (sucursalId) => {
 
 // ─── actualizarCostoCompra ────────────────────────────────────────────────────
 
-const actualizarCostoCompra = async (sucursalId, tipo, imei, nombreProducto, nuevoCosto, productoId) => {
+const actualizarCostoCompra = async (sucursalId, tipo, imei, nombreProducto, nuevoCosto, productoId, varianteId, atributoId) => {
   if (tipo === 'serial') {
     const { rows: check } = await pool.query(`
       SELECT s.id
@@ -797,6 +799,32 @@ const actualizarCostoCompra = async (sucursalId, tipo, imei, nombreProducto, nue
   }
 
   if (tipo === 'cantidad') {
+    // Prioridad: variante → atributo → producto
+    if (varianteId) {
+      const { rows: check } = await pool.query(`
+        SELECT v.id, ap.producto_id
+        FROM variantes_atributo v
+        JOIN atributos_producto ap ON ap.id = v.atributo_id
+        WHERE v.id = $1 AND ap.sucursal_id = $2
+      `, [varianteId, sucursalId]);
+      if (!check.length) throw Object.assign(new Error('Variante no encontrada en esta sucursal'), { status: 404 });
+      await pool.query('UPDATE variantes_atributo SET costo_unitario = $1 WHERE id = $2', [nuevoCosto, varianteId]);
+      await pool.query('UPDATE productos_cantidad SET costo_unitario = $1 WHERE id = $2', [nuevoCosto, check[0].producto_id]);
+      return { tipo: 'cantidad', variante_id: varianteId, nuevo_costo: nuevoCosto };
+    }
+
+    if (atributoId) {
+      const { rows: check } = await pool.query(`
+        SELECT ap.id, ap.producto_id
+        FROM atributos_producto ap
+        WHERE ap.id = $1 AND ap.sucursal_id = $2
+      `, [atributoId, sucursalId]);
+      if (!check.length) throw Object.assign(new Error('Atributo no encontrado en esta sucursal'), { status: 404 });
+      await pool.query('UPDATE atributos_producto SET costo_unitario = $1 WHERE id = $2', [nuevoCosto, atributoId]);
+      await pool.query('UPDATE productos_cantidad SET costo_unitario = $1 WHERE id = $2', [nuevoCosto, check[0].producto_id]);
+      return { tipo: 'cantidad', atributo_id: atributoId, nuevo_costo: nuevoCosto };
+    }
+
     let check;
     if (productoId) {
       ({ rows: check } = await pool.query(
