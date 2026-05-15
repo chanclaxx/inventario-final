@@ -185,7 +185,7 @@ function ModalYaEnInventario({ open, seriales, onCerrar }) {
 }
 
 // ─── Panel info de compra ─────────────────────────────────────────────────────
-function InfoCompra({ proveedorId, setProveedorId, costoCompra, setCostoCompra, modoPago, setModoPago, onProveedorTipoChange, registrarEnCaja, setRegistrarEnCaja, metodoPagoContado, setMetodoPagoContado }) {
+function InfoCompra({ proveedorId, setProveedorId, costoCompra, setCostoCompra, modoPago, setModoPago, onProveedorTipoChange, registrarEnCaja, setRegistrarEnCaja, metodoPagoContado, setMetodoPagoContado, sinCosto = false }) {
   const queryClient = useQueryClient();
   const { esAdminNegocio } = useAuth();
   const esAdmin = esAdminNegocio();
@@ -279,16 +279,18 @@ function InfoCompra({ proveedorId, setProveedorId, costoCompra, setCostoCompra, 
             ))}
           </select>
         </div>
-        <div className="flex-1 flex flex-col gap-1">
-          <label className="text-xs text-amber-700 font-medium">Precio compra</label>
-          <InputMoneda
-            value={costoCompra}
-            onChange={setCostoCompra}
-            placeholder="0"
-            className="w-full px-2.5 py-2 bg-white border border-amber-200 rounded-lg text-xs
-              text-gray-700 focus:outline-none focus:ring-2 focus:ring-amber-400"
-          />
-        </div>
+        {!sinCosto && (
+          <div className="flex-1 flex flex-col gap-1">
+            <label className="text-xs text-amber-700 font-medium">Precio compra</label>
+            <InputMoneda
+              value={costoCompra}
+              onChange={setCostoCompra}
+              placeholder="0"
+              className="w-full px-2.5 py-2 bg-white border border-amber-200 rounded-lg text-xs
+                text-gray-700 focus:outline-none focus:ring-2 focus:ring-amber-400"
+            />
+          </div>
+        )}
       </div>
 
       {!creandoProveedor ? (
@@ -1411,6 +1413,67 @@ function PasoSerial({ sucursalKey, onExito, onDuplicadosEncontrados, coloresActi
 }
 
 // ─── Mini selector de variante (cards navegables) ────────────────────────────
+// ─── Selector multi-variante (cantidad + costo por hoja del árbol) ────────────
+function MultiSelectorVariante({ hojas, nodosData, onActualizar }) {
+  const nodosActivos = hojas.filter((h) => Number(nodosData[h.key]?.cantidad) > 0);
+  const totalUds     = nodosActivos.reduce((s, h) => s + Number(nodosData[h.key]?.cantidad || 0), 0);
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center gap-2 px-1">
+        <p className="flex-1 text-[11px] font-medium text-gray-400 uppercase tracking-wide">Variante</p>
+        <p className="w-14 text-[11px] font-medium text-gray-400 text-center">Cant.</p>
+        <p className="w-24 text-[11px] font-medium text-gray-400 text-center">Costo unit.</p>
+      </div>
+
+      <div className="flex flex-col gap-1.5 max-h-52 overflow-y-auto pr-0.5">
+        {hojas.map((h) => {
+          const data   = nodosData[h.key] || { cantidad: '', costo: '' };
+          const activo = Number(data.cantidad) > 0;
+          return (
+            <div
+              key={h.key}
+              className={`flex items-center gap-2 p-2 rounded-xl border transition-colors
+                ${activo ? 'border-blue-200 bg-blue-50/50' : 'border-gray-100 bg-white'}`}
+            >
+              <div className="flex-1 min-w-0">
+                {h.labelPadre && (
+                  <p className="text-[10px] text-gray-400 leading-none mb-0.5">{h.labelPadre}</p>
+                )}
+                <p className="text-xs font-medium text-gray-800 leading-tight">{h.label}</p>
+                <p className="text-[10px] text-gray-400">{h.stock} en stock</p>
+              </div>
+              <input
+                type="number" min="0"
+                value={data.cantidad}
+                onChange={(e) => onActualizar(h.key, 'cantidad', e.target.value)}
+                onWheel={(e) => e.target.blur()}
+                placeholder="0"
+                className="w-14 px-2 py-1.5 text-xs text-center bg-white border border-gray-200 rounded-lg
+                  focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400"
+              />
+              <InputMoneda
+                value={data.costo}
+                onChange={(val) => onActualizar(h.key, 'costo', val)}
+                placeholder="$0"
+                className="w-24 px-2 py-1.5 text-xs bg-white border border-gray-200 rounded-lg
+                  focus:outline-none focus:ring-2 focus:ring-blue-400"
+              />
+            </div>
+          );
+        })}
+      </div>
+
+      {nodosActivos.length > 0 && (
+        <p className="text-xs text-blue-600 font-medium px-1">
+          {nodosActivos.length} variante(s) seleccionada(s) — {totalUds} unidades totales
+        </p>
+      )}
+    </div>
+  );
+}
+
+// ─── Selector de variante única (carrito / vista árbol) ───────────────────────
 function MiniSelectorVariante({ arbolData, nodoSel, onSeleccionar }) {
   const [nivel,          setNivel]          = useState('atributos');
   const [atributoActivo, setAtributoActivo] = useState(null);
@@ -1512,8 +1575,9 @@ function PasoCantidad({ sucursalKey, onExito, variantesActivo }) {
   const [costoCompra,       setCostoCompra]       = useState('');
   const [modoPago,          setModoPago]          = useState(null);
   const [metodoPagoContado, setMetodoPagoContado] = useState('Efectivo');
-  const [error,    setError]    = useState('');
-  const [nodoSel,  setNodoSel]  = useState(null);
+  const [error,     setError]     = useState('');
+  const [nodoSel,   setNodoSel]   = useState(null);
+  const [nodosData, setNodosData] = useState({});
 
   const { data: productosData } = useQuery({
     queryKey: ['productos-cantidad', ...sucursalKey],
@@ -1530,6 +1594,22 @@ function PasoCantidad({ sucursalKey, onExito, variantesActivo }) {
     staleTime: 0,
   });
   const tieneArbol = variantesActivo && arbolData.length > 0;
+
+  // Deriva los nodos hoja del árbol (donde recae el costo y el stock a agregar)
+  const labelNodoInline = (n) => n.tipo_nombre ? `${n.tipo_nombre}: ${n.valor}` : n.valor;
+  const hojas = tieneArbol ? arbolData.flatMap((atr) => {
+    if (atr.variantes?.length > 0) {
+      return atr.variantes.map((v) => ({
+        key:        `v-${v.id}`,
+        id:         v.id,
+        tipo:       'variante',
+        labelPadre: labelNodoInline(atr),
+        label:      labelNodoInline(v),
+        stock:      v.stock,
+      }));
+    }
+    return [{ key: `a-${atr.id}`, id: atr.id, tipo: 'atributo', label: labelNodoInline(atr), stock: atr.stock }];
+  }) : [];
 
   // Query de proveedores/cruces para el panel "crear nuevo producto"
   const { esAdminNegocio } = useAuth();
@@ -1551,6 +1631,7 @@ function PasoCantidad({ sucursalKey, onExito, variantesActivo }) {
   const handleSeleccionarProducto = (producto) => {
     setProductoSel(producto);
     setNodoSel(null);
+    setNodosData({});
     setError('');
     if (producto.proveedor_id)   setProveedorId(String(producto.proveedor_id));
     if (producto.costo_unitario) setCostoCompra(Number(producto.costo_unitario));
@@ -1578,8 +1659,35 @@ function PasoCantidad({ sucursalKey, onExito, variantesActivo }) {
       const cantidadNum = Number(cantidad);
       const costo = costoCompra !== '' ? Number(costoCompra) : null;
 
-      if (proveedorId && modoPago) {
-        // Registro formal de compra — aplica tanto a producto plano como a variantes
+      if (tieneArbol) {
+        // Camino multi-nodo: cada hoja con su propia cantidad y costo
+        const nodosActivos = hojas.filter((h) => Number(nodosData[h.key]?.cantidad) > 0);
+        if (proveedorId && modoPago) {
+          const lineas = nodosActivos.map((h) => {
+            const d = nodosData[h.key];
+            const c = d.costo !== '' ? Number(d.costo) : 0;
+            const linea = {
+              nombre_producto: productoSel.nombre,
+              cantidad:        Number(d.cantidad),
+              precio_unitario: c,
+              producto_id:     productoSel.id,
+            };
+            if (h.tipo === 'variante') linea.variante_id = h.id;
+            else linea.atributo_id = h.id;
+            return linea;
+          });
+          const monto = lineas.reduce((s, l) => s + l.cantidad * l.precio_unitario, 0);
+          await crearCompra(buildPayloadCompra({ proveedorId, monto, modoPago, metodoPagoContado, registrarEnCaja, lineas }));
+        } else {
+          await Promise.all(nodosActivos.map((h) => {
+            const d = nodosData[h.key];
+            const c = d.costo !== '' ? Number(d.costo) : null;
+            if (h.tipo === 'variante') return ajustarStockVariante(h.id, { cantidad: Number(d.cantidad), costo_unitario: c, tipo: 'ajuste' });
+            return ajustarStockAtributo(h.id, { cantidad: Number(d.cantidad), costo_unitario: c, tipo: 'ajuste' });
+          }));
+        }
+      } else if (proveedorId && modoPago) {
+        // Registro formal de compra — producto plano
         const linea = {
           nombre_producto: productoSel.nombre,
           cantidad:        cantidadNum,
@@ -1628,15 +1736,28 @@ function PasoCantidad({ sucursalKey, onExito, variantesActivo }) {
 
   const handleConfirmar = () => {
     setError('');
-    if (!productoSel)              return setError('Selecciona un producto');
-    if (tieneArbol && !nodoSel)    return setError('Selecciona la variante o atributo al que quieres agregar stock');
-    if (!cantidad || cantidad < 1) return setError('La cantidad debe ser mayor a 0');
-    if (proveedorId && !modoPago)
-      return setError('Selecciona si fue pagado o a crédito');
+    if (!productoSel) return setError('Selecciona un producto');
+    if (tieneArbol) {
+      const nodosActivos = hojas.filter((h) => Number(nodosData[h.key]?.cantidad) > 0);
+      if (nodosActivos.length === 0) return setError('Ingresa la cantidad para al menos una variante');
+    } else {
+      if (!cantidad || cantidad < 1) return setError('La cantidad debe ser mayor a 0');
+    }
+    if (proveedorId && !modoPago) return setError('Selecciona si fue pagado o a crédito');
     mutConfirmar.mutate();
   };
 
   const labelBoton = () => {
+    if (tieneArbol) {
+      const nodosActivos = hojas.filter((h) => Number(nodosData[h.key]?.cantidad) > 0);
+      const totalUds = nodosActivos.reduce((s, h) => s + Number(nodosData[h.key]?.cantidad || 0), 0);
+      const base = nodosActivos.length > 0
+        ? `Agregar a ${nodosActivos.length} variante(s) — ${totalUds} uds`
+        : 'Agregar stock';
+      if (modoPago === 'contado') return `${base} — compra en contado`;
+      if (modoPago === 'credito') return `${base} — registrar como crédito`;
+      return base;
+    }
     const base = nodoSel ? `Agregar ${cantidad} uds a ${nodoSel.label}` : `Agregar ${cantidad} unidad(es)`;
     if (modoPago === 'contado') return `${base} — compra en contado`;
     if (modoPago === 'credito') return `${base} — registrar como crédito`;
@@ -1730,11 +1851,17 @@ function PasoCantidad({ sucursalKey, onExito, variantesActivo }) {
             </button>
           </div>
 
-          {/* Selector de variante/atributo con cards navegables */}
+          {/* Multi-selector de variantes con cantidad + costo por nodo hoja */}
           {tieneArbol && (
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-medium text-gray-600">Variante / Atributo</label>
-              <MiniSelectorVariante arbolData={arbolData} nodoSel={nodoSel} onSeleccionar={setNodoSel} />
+              <label className="text-xs font-medium text-gray-600">Cantidad y costo por variante</label>
+              <MultiSelectorVariante
+                hojas={hojas}
+                nodosData={nodosData}
+                onActualizar={(key, campo, valor) =>
+                  setNodosData((prev) => ({ ...prev, [key]: { ...(prev[key] || {}), [campo]: valor } }))
+                }
+              />
             </div>
           )}
 
@@ -1745,12 +1872,15 @@ function PasoCantidad({ sucursalKey, onExito, variantesActivo }) {
             </p>
           )}
 
-          <Input label="Cantidad a agregar" type="number" autoFocus value={cantidad}
-            onChange={(e) => setCantidad(e.target.value)}
-            onWheel={(e) => e.target.blur()}
-            onKeyDown={(e) => e.key === 'Enter' && handleConfirmar()} />
+          {/* Cantidad única — solo cuando el producto no tiene árbol */}
+          {!tieneArbol && (
+            <Input label="Cantidad a agregar" type="number" autoFocus value={cantidad}
+              onChange={(e) => setCantidad(e.target.value)}
+              onWheel={(e) => e.target.blur()}
+              onKeyDown={(e) => e.key === 'Enter' && handleConfirmar()} />
+          )}
 
-          {/* Info de compra — siempre visible */}
+          {/* Info de compra — siempre visible; costo va por variante cuando tieneArbol */}
           <InfoCompra
             proveedorId={proveedorId}         setProveedorId={setProveedorId}
             costoCompra={costoCompra}         setCostoCompra={setCostoCompra}
@@ -1759,10 +1889,11 @@ function PasoCantidad({ sucursalKey, onExito, variantesActivo }) {
             metodoPagoContado={metodoPagoContado}
             setMetodoPagoContado={setMetodoPagoContado}
             onProveedorTipoChange={(tipo) => { setRegistrarEnCaja(tipo !== 'proveedor'); }}
+            sinCosto={tieneArbol}
           />
 
-          {/* Nota informativa cuando hay variante + proveedor pero aún sin modo de pago */}
-          {nodoSel && proveedorId && !modoPago && (
+          {/* Nota informativa proveedor sin modo de pago */}
+          {proveedorId && !modoPago && (tieneArbol || nodoSel) && (
             <p className="text-xs text-amber-600 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
               Selecciona si fue pagado o a crédito para registrar la compra en el proveedor.
             </p>
