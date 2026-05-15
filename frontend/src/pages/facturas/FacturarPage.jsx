@@ -150,7 +150,10 @@ function ModalDetalle({ facturaId, onClose, onAbrirImprimir, onEditar }) {
   if (isLoading) return <Modal open onClose={onClose} title="Detalle de Factura" size="lg"><Spinner className="py-10" /></Modal>;
 
   const f = data;
-  const total = f?.lineas?.reduce((s, l) => s + Number(l.subtotal || 0), 0) || 0;
+  const total = f?.lineas?.reduce((s, l) => {
+    const neta = Number(l.cantidad) - Number(l.cantidad_devuelta || 0);
+    return s + Number(l.precio) * neta;
+  }, 0) || 0;
   const totalPagado = f?.pagos?.reduce((s, p) => s + Number(p.valor || 0), 0) || 0;
   const valorRetoma = f?.retomas?.reduce((s, r) => s + Number(r.valor_retoma || 0), 0) || 0;
   const facturaConConfig = { ...f, config: configData };
@@ -168,12 +171,27 @@ function ModalDetalle({ facturaId, onClose, onAbrirImprimir, onEditar }) {
         {esAdminNegocio() && <SeccionProveedor proveedorNombre={f?.proveedor_nombre} />}
         <div className="bg-gray-50 rounded-xl p-3 flex flex-col gap-2">
           <p className="text-xs text-gray-400 font-medium">Productos</p>
-          {f?.lineas?.map((l) => (
-            <div key={l.id} className="flex items-start justify-between text-sm gap-2">
-              <div className="flex-1"><p className="font-medium text-gray-800">{l.nombre_producto}</p>{l.imei && <p className="text-xs text-gray-400 font-mono">{l.imei}</p>}{esAdminNegocio() && l.proveedor_nombre && <p className="text-xs text-amber-600 font-medium mt-0.5">{l.proveedor_nombre}</p>}</div>
-              <div className="text-right flex-shrink-0"><p className="text-xs text-gray-400">{l.cantidad} x {formatCOP(l.precio)}</p><p className="font-semibold text-gray-900">{formatCOP(l.subtotal)}</p></div>
-            </div>
-          ))}
+          {f?.lineas?.map((l) => {
+            const devuelta  = Number(l.cantidad_devuelta || 0);
+            const neta      = Number(l.cantidad) - devuelta;
+            const subtotalNeto = Number(l.precio) * neta;
+            const totalDev  = devuelta === Number(l.cantidad);
+            return (
+              <div key={l.id} className={`flex items-start justify-between text-sm gap-2 ${totalDev ? 'opacity-50' : ''}`}>
+                <div className="flex-1">
+                  <p className={`font-medium ${totalDev ? 'line-through text-gray-400' : 'text-gray-800'}`}>{l.nombre_producto}</p>
+                  {l.imei && <p className="text-xs text-gray-400 font-mono">{l.imei}</p>}
+                  {devuelta > 0 && !totalDev && <p className="text-xs text-orange-500">{devuelta} devuelto{devuelta > 1 ? 's' : ''}</p>}
+                  {totalDev && <p className="text-xs text-green-600">Devuelto completamente</p>}
+                  {esAdminNegocio() && l.proveedor_nombre && <p className="text-xs text-amber-600 font-medium mt-0.5">{l.proveedor_nombre}</p>}
+                </div>
+                <div className="text-right flex-shrink-0">
+                  <p className="text-xs text-gray-400">{neta} x {formatCOP(l.precio)}</p>
+                  <p className={`font-semibold ${totalDev ? 'text-gray-400 line-through' : 'text-gray-900'}`}>{formatCOP(subtotalNeto)}</p>
+                </div>
+              </div>
+            );
+          })}
         </div>
         {f?.retomas?.length > 0 && (
           <div className="flex flex-col gap-2">

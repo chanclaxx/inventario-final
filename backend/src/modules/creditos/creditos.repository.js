@@ -19,6 +19,7 @@ const findAll = async (sucursalId, negocioId) => {
             'nombre', lf.nombre_producto,
             'imei',   lf.imei,
             'cantidad', lf.cantidad,
+            'cantidad_devuelta', COALESCE(lf.cantidad_devuelta, 0),
             'precio',   lf.precio
           ) ORDER BY lf.id
         )

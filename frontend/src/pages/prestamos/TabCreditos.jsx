@@ -355,20 +355,32 @@ function CardCredito({ credito, onAbonar, onSaldar, onCancelar, onVerDetalle, on
       {productos.length > 0 && (
         <div className="bg-gray-50 rounded-xl p-2.5 flex flex-col gap-1.5">
           {productos.map((prod, idx) => {
-            const prodKey = `${credito.id}-${idx}`;
+            const prodKey       = `${credito.id}-${idx}`;
+            const devuelta      = Number(prod.cantidad_devuelta || 0);
+            const neta          = Number(prod.cantidad) - devuelta;
+            const totalDevuelta = devuelta === Number(prod.cantidad);
             return (
-              <div key={prodKey} className="flex items-start justify-between gap-2">
+              <div key={prodKey}
+                className={`flex items-start justify-between gap-2 ${totalDevuelta ? 'opacity-50' : ''}`}>
                 <div className="min-w-0 flex-1">
-                  <p className="text-xs font-medium text-gray-700 truncate">{prod.nombre}</p>
+                  <p className={`text-xs font-medium truncate ${totalDevuelta ? 'line-through text-gray-400' : 'text-gray-700'}`}>
+                    {prod.nombre}
+                  </p>
                   {prod.imei && (
                     <p className="text-[11px] text-gray-400 font-mono">{prod.imei}</p>
                   )}
+                  {devuelta > 0 && !totalDevuelta && (
+                    <p className="text-[11px] text-orange-500">{devuelta} devuelto{devuelta > 1 ? 's' : ''}</p>
+                  )}
+                  {totalDevuelta && (
+                    <p className="text-[11px] text-green-600">Devuelto</p>
+                  )}
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
-                  {Number(prod.cantidad) > 1 && (
-                    <span className="text-[11px] text-gray-400">x{prod.cantidad}</span>
+                  {neta > 1 && (
+                    <span className="text-[11px] text-gray-400">x{neta}</span>
                   )}
-                  <span className="text-xs font-semibold text-gray-600">
+                  <span className={`text-xs font-semibold ${totalDevuelta ? 'text-gray-400 line-through' : 'text-gray-600'}`}>
                     {formatCOP(prod.precio)}
                   </span>
                 </div>

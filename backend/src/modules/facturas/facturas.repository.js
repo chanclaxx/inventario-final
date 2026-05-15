@@ -43,7 +43,7 @@ const _selectColumnas = () => `
   f.estado, f.notas, f.sucursal_id,
   su.nombre AS sucursal_nombre,
   u.nombre  AS usuario_nombre,
-  COALESCE(SUM(l.subtotal), 0) AS total,
+  COALESCE(SUM(l.precio * (l.cantidad - COALESCE(l.cantidad_devuelta, 0))), 0) AS total,
   COALESCE(
     (SELECT SUM(r.valor_retoma) FROM retomas r WHERE r.factura_id = f.id), 0
   ) AS total_retoma,
