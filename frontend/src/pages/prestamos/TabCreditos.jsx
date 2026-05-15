@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getCreditos, getCreditoById, registrarAbonoCredito, saldarCredito, cancelarCredito } from '../../api/creditos.api';
 import { formatCOP, formatFechaHora } from '../../utils/formatters';
@@ -12,7 +12,7 @@ import { EmptyState }  from '../../components/ui/EmptyState';
 import { ModalDevolucionParcialCredito } from '../facturas/ModalDevolucionParcialCredito';
 import {
   CreditCard, Plus, CheckCircle, XCircle, AlertTriangle,
-  ChevronLeft, ChevronDown, ChevronUp, RotateCcw,
+  ChevronLeft, ChevronDown, ChevronUp, RotateCcw, Users,
 } from 'lucide-react';
 
 // ─── Modal Abono ──────────────────────────────────────────────────────────────
@@ -29,7 +29,7 @@ function ModalAbonoCredito({ credito, onClose }) {
   const valorTotal     = Number(credito.valor_total);
   const saldoPendiente = Number(credito.saldo_pendiente ?? (valorTotal - cuotaInicial - totalAbonado));
 
-const metodosPago = useMetodosPago();
+  const metodosPago = useMetodosPago();
 
   const mutation = useMutation({
     mutationFn: () => registrarAbonoCredito(credito.id, {
@@ -55,19 +55,15 @@ const metodosPago = useMetodosPago();
         </div>
 
         <div className="flex flex-wrap gap-2">
-          {metodosPago.map((m) => {
-            const mId    = m.id;
-            const mLabel = m.label;
-            return (
-              <button key={mId} onClick={() => setMetodo(mId)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition-all
-                  ${metodo === mId
-                    ? 'bg-blue-50 border-blue-300 text-blue-700'
-                    : 'bg-gray-50 border-gray-200 text-gray-600'}`}>
-                {mLabel}
-              </button>
-            );
-          })}
+          {metodosPago.map((m) => (
+            <button key={m.id} onClick={() => setMetodo(m.id)}
+              className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition-all
+                ${metodo === m.id
+                  ? 'bg-blue-50 border-blue-300 text-blue-700'
+                  : 'bg-gray-50 border-gray-200 text-gray-600'}`}>
+              {m.label}
+            </button>
+          ))}
         </div>
 
         <div className="flex flex-col gap-1">
@@ -272,25 +268,22 @@ function PanelDetalleCredito({ creditoId, onVolver, onAbonar, onSaldar, onCancel
             Historial de abonos
           </p>
           <div className="flex flex-col gap-1 max-h-48 overflow-y-auto">
-            {c.abonos.map((abono) => {
-              const abonoId = abono.id;
-              return (
-                <div key={abonoId}
-                  className="flex items-center justify-between bg-gray-50 rounded-xl px-3 py-2">
-                  <div>
-                    <p className="text-xs text-gray-500">{formatFechaHora(abono.fecha)}</p>
-                    <p className="text-xs text-gray-400">
-                      {abono.metodo}
-                      {abono.usuario_nombre ? ` · ${abono.usuario_nombre}` : ''}
-                    </p>
-                    {abono.notas && <p className="text-xs text-gray-400 italic">{abono.notas}</p>}
-                  </div>
-                  <span className="text-sm font-semibold text-green-600">
-                    + {formatCOP(abono.valor)}
-                  </span>
+            {c.abonos.map((abono) => (
+              <div key={abono.id}
+                className="flex items-center justify-between bg-gray-50 rounded-xl px-3 py-2">
+                <div>
+                  <p className="text-xs text-gray-500">{formatFechaHora(abono.fecha)}</p>
+                  <p className="text-xs text-gray-400">
+                    {abono.metodo}
+                    {abono.usuario_nombre ? ` · ${abono.usuario_nombre}` : ''}
+                  </p>
+                  {abono.notas && <p className="text-xs text-gray-400 italic">{abono.notas}</p>}
                 </div>
-              );
-            })}
+                <span className="text-sm font-semibold text-green-600">
+                  + {formatCOP(abono.valor)}
+                </span>
+              </div>
+            ))}
           </div>
         </div>
       )}
@@ -323,9 +316,9 @@ function PanelDetalleCredito({ creditoId, onVolver, onAbonar, onSaldar, onCancel
   );
 }
 
-// ─── Card de crédito ──────────────────────────────────────────────────────────
+// ─── Card de crédito por factura ──────────────────────────────────────────────
 
-function CardCredito({ credito, onAbonar, onSaldar, onCancelar, onVerDetalle, onDevolucion }) {
+function CardCredito({ credito, onAbonar, onSaldar, onCancelar, onVerDetalle, onDevolucion, sinNombre = false }) {
   const cuotaInicial   = Number(credito.cuota_inicial || 0);
   const totalAbonado   = Number(credito.total_abonado || 0);
   const valorTotal     = Number(credito.valor_total);
@@ -337,12 +330,14 @@ function CardCredito({ credito, onAbonar, onSaldar, onCancelar, onVerDetalle, on
     <div className="bg-white border border-gray-100 rounded-2xl p-4 flex flex-col gap-3">
       <div className="flex items-start justify-between">
         <div className="min-w-0">
-          <p className="font-semibold text-gray-900 truncate">{credito.nombre_cliente}</p>
+          {!sinNombre && (
+            <p className="font-semibold text-gray-900 truncate">{credito.nombre_cliente}</p>
+          )}
           <p className="text-xs text-gray-400 mt-0.5">
             Factura #{String(credito.factura_id).padStart(6, '0')}
-            {credito.celular ? ` · ${credito.celular}` : ''}
+            {credito.celular && !sinNombre ? ` · ${credito.celular}` : ''}
           </p>
-          {credito.cedula && (
+          {credito.cedula && !sinNombre && (
             <p className="text-xs text-gray-400">CC: {credito.cedula}</p>
           )}
         </div>
@@ -355,12 +350,11 @@ function CardCredito({ credito, onAbonar, onSaldar, onCancelar, onVerDetalle, on
       {productos.length > 0 && (
         <div className="bg-gray-50 rounded-xl p-2.5 flex flex-col gap-1.5">
           {productos.map((prod, idx) => {
-            const prodKey       = `${credito.id}-${idx}`;
             const devuelta      = Number(prod.cantidad_devuelta || 0);
             const neta          = Number(prod.cantidad) - devuelta;
             const totalDevuelta = devuelta === Number(prod.cantidad);
             return (
-              <div key={prodKey}
+              <div key={`${credito.id}-${idx}`}
                 className={`flex items-start justify-between gap-2 ${totalDevuelta ? 'opacity-50' : ''}`}>
                 <div className="min-w-0 flex-1">
                   <p className={`text-xs font-medium truncate ${totalDevuelta ? 'line-through text-gray-400' : 'text-gray-700'}`}>
@@ -432,18 +426,125 @@ function CardCredito({ credito, onAbonar, onSaldar, onCancelar, onVerDetalle, on
   );
 }
 
-// ─── Sección colapsable de créditos saldados ─────────────────────────────────
+// ─── Historial de créditos cerrados (saldados / cancelados) ──────────────────
 
 function CreditosSaldados({ creditos }) {
   const [abierto, setAbierto] = useState(false);
 
   return (
-    <div className="border border-gray-100 rounded-xl overflow-hidden mt-2">
+    <div className="border border-gray-100 rounded-xl overflow-hidden">
       <button onClick={() => setAbierto((v) => !v)}
         className="w-full flex items-center justify-between px-4 py-2.5
           bg-gray-50 hover:bg-gray-100 transition-colors">
         <span className="text-xs font-semibold text-gray-500">
-          {creditos.length} crédito{creditos.length !== 1 ? 's' : ''} cerrado{creditos.length !== 1 ? 's' : ''}
+          {creditos.length} factura{creditos.length !== 1 ? 's' : ''} cerrada{creditos.length !== 1 ? 's' : ''}
+        </span>
+        {abierto
+          ? <ChevronUp   size={15} className="text-gray-400" />
+          : <ChevronDown size={15} className="text-gray-400" />}
+      </button>
+
+      {abierto && (
+        <div className="flex flex-col gap-1.5 p-3">
+          {creditos.map((c) => (
+            <div key={c.id}
+              className="bg-gray-50 border border-gray-100 rounded-xl p-2.5
+                flex justify-between items-center">
+              <div>
+                <p className="text-xs font-medium text-gray-600">
+                  Factura #{String(c.factura_id).padStart(6, '0')}
+                </p>
+                <p className="text-xs text-gray-400">{formatCOP(c.valor_total)}</p>
+              </div>
+              <Badge variant={c.estado === 'Cancelado' ? 'red' : 'green'}>{c.estado}</Badge>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Card agrupada por persona ────────────────────────────────────────────────
+
+function CardPersonaCredito({ persona, onAbonar, onSaldar, onCancelar, onVerDetalle, onDevolucion }) {
+  const [expandido, setExpandido] = useState(true);
+
+  const creditosActivos  = persona.creditos.filter((c) => c.estado === 'Activo');
+  const creditosCerrados = persona.creditos.filter((c) => c.estado !== 'Activo');
+
+  const totalDeuda = creditosActivos.reduce((s, c) => {
+    const val = Number(c.valor_total);
+    const ini = Number(c.cuota_inicial || 0);
+    const abo = Number(c.total_abonado || 0);
+    return s + Math.max(0, Number(c.saldo_pendiente ?? (val - ini - abo)));
+  }, 0);
+
+  return (
+    <div className="bg-white border border-gray-100 rounded-2xl overflow-hidden">
+      <button
+        onClick={() => setExpandido((v) => !v)}
+        className="w-full flex items-start justify-between p-4 text-left"
+      >
+        <div className="min-w-0 flex-1">
+          <p className="font-semibold text-gray-900 truncate">{persona.nombre_cliente}</p>
+          <div className="flex flex-wrap gap-x-3 mt-0.5">
+            {persona.cedula && <span className="text-xs text-gray-400">CC: {persona.cedula}</span>}
+            {persona.celular && <span className="text-xs text-gray-400">{persona.celular}</span>}
+          </div>
+          <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+            <span className="text-xs text-gray-500">
+              {creditosActivos.length} factura{creditosActivos.length !== 1 ? 's' : ''} activa{creditosActivos.length !== 1 ? 's' : ''}
+            </span>
+            <span className="text-gray-300">·</span>
+            <span className="text-sm font-semibold text-red-500">{formatCOP(totalDeuda)} pendiente</span>
+          </div>
+        </div>
+        <div className="flex-shrink-0 ml-3 mt-1">
+          {expandido
+            ? <ChevronUp size={16} className="text-gray-400" />
+            : <ChevronDown size={16} className="text-gray-400" />}
+        </div>
+      </button>
+
+      {expandido && (
+        <div className="border-t border-gray-50 px-4 pb-4 pt-3 flex flex-col gap-3">
+          {creditosActivos.map((c) => (
+            <CardCredito
+              key={c.id}
+              credito={c}
+              sinNombre
+              onAbonar={onAbonar}
+              onSaldar={onSaldar}
+              onCancelar={onCancelar}
+              onVerDetalle={onVerDetalle}
+              onDevolucion={onDevolucion}
+            />
+          ))}
+          {creditosCerrados.length > 0 && (
+            <CreditosSaldados creditos={creditosCerrados} />
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Historial: personas con solo créditos cerrados ───────────────────────────
+
+function HistorialPersonasSinDeuda({ personas }) {
+  const [abierto, setAbierto] = useState(false);
+  const total = personas.reduce((s, p) => s + p.creditos.length, 0);
+
+  return (
+    <div className="border border-gray-100 rounded-xl overflow-hidden mt-1">
+      <button onClick={() => setAbierto((v) => !v)}
+        className="w-full flex items-center justify-between px-4 py-2.5
+          bg-gray-50 hover:bg-gray-100 transition-colors">
+        <span className="text-xs font-semibold text-gray-500 flex items-center gap-1.5">
+          <Users size={13} />
+          {personas.length} persona{personas.length !== 1 ? 's' : ''} sin deuda activa
+          {' '}({total} crédito{total !== 1 ? 's' : ''} cerrado{total !== 1 ? 's' : ''})
         </span>
         {abierto
           ? <ChevronUp   size={15} className="text-gray-400" />
@@ -452,24 +553,24 @@ function CreditosSaldados({ creditos }) {
 
       {abierto && (
         <div className="flex flex-col gap-2 p-3">
-          {creditos.map((c) => {
-            const creditoId   = c.id;
-            const esCancelado = c.estado === 'Cancelado';
-            return (
-              <div key={creditoId}
-                className="bg-gray-50 border border-gray-100 rounded-xl p-3
-                  flex justify-between items-center">
-                <div>
-                  <p className="text-sm font-medium text-gray-600">{c.nombre_cliente}</p>
-                  <p className="text-xs text-gray-400">
-                    Factura #{String(c.factura_id).padStart(6, '0')}
-                    {' · '}{formatCOP(c.valor_total)}
-                  </p>
-                </div>
-                <Badge variant={esCancelado ? 'red' : 'green'}>{c.estado}</Badge>
+          {personas.map((persona) => (
+            <div key={persona.key} className="bg-gray-50 border border-gray-100 rounded-xl p-3">
+              <p className="text-sm font-medium text-gray-700">{persona.nombre_cliente}</p>
+              {persona.cedula && (
+                <p className="text-xs text-gray-400">CC: {persona.cedula}</p>
+              )}
+              <div className="flex flex-col gap-1 mt-2">
+                {persona.creditos.map((c) => (
+                  <div key={c.id} className="flex items-center justify-between">
+                    <span className="text-xs text-gray-500">
+                      Factura #{String(c.factura_id).padStart(6, '0')} · {formatCOP(c.valor_total)}
+                    </span>
+                    <Badge variant={c.estado === 'Cancelado' ? 'red' : 'green'}>{c.estado}</Badge>
+                  </div>
+                ))}
               </div>
-            );
-          })}
+            </div>
+          ))}
         </div>
       )}
     </div>
@@ -490,11 +591,30 @@ export function TabCreditos() {
     queryFn:  () => getCreditos().then((r) => r.data.data),
   });
 
-  const creditos         = creditosData || [];
-  const creditosActivos  = creditos.filter((c) => c.estado === 'Activo');
-  const creditosCerrados = creditos.filter((c) => c.estado !== 'Activo');
+  // Agrupar por persona usando cedula como clave (o nombre si no tiene cedula)
+  const creditosPorPersona = useMemo(() => {
+    const creditos = creditosData || [];
+    const mapa = new Map();
+    for (const c of creditos) {
+      const key = c.cedula || c.nombre_cliente;
+      if (!mapa.has(key)) {
+        mapa.set(key, {
+          key,
+          cedula:         c.cedula,
+          nombre_cliente: c.nombre_cliente,
+          celular:        c.celular,
+          creditos:       [],
+        });
+      }
+      mapa.get(key).creditos.push(c);
+    }
+    return Array.from(mapa.values());
+  }, [creditosData]);
 
-  // ── Vista detalle ──────────────────────────────────────────────────────────
+  const personasActivas  = creditosPorPersona.filter((p) => p.creditos.some((c) => c.estado === 'Activo'));
+  const personasCerradas = creditosPorPersona.filter((p) => p.creditos.every((c) => c.estado !== 'Activo'));
+
+  // ── Vista detalle de un crédito individual ─────────────────────────────────
   if (creditoDetalle) {
     return (
       <>
@@ -514,10 +634,12 @@ export function TabCreditos() {
           <ModalSaldarCredito credito={creditoSaldar} onClose={() => setCreditoSaldar(null)} />
         )}
         {creditoCancelar && (
-          <ModalCancelarCredito credito={creditoCancelar} onClose={() => { setCreditoCancelar(null); setCreditoDetalle(null); }} />
+          <ModalCancelarCredito credito={creditoCancelar}
+            onClose={() => { setCreditoCancelar(null); setCreditoDetalle(null); }} />
         )}
         {creditoDevolucion && (
-          <ModalDevolucionParcialCredito credito={creditoDevolucion} onClose={() => setCreditoDevolucion(null)} />
+          <ModalDevolucionParcialCredito credito={creditoDevolucion}
+            onClose={() => setCreditoDevolucion(null)} />
         )}
       </>
     );
@@ -529,28 +651,25 @@ export function TabCreditos() {
   return (
     <>
       <div className="flex flex-col gap-3">
-        {creditosActivos.length === 0 ? (
+        {personasActivas.length === 0 ? (
           <EmptyState icon={CreditCard} titulo="Sin créditos activos"
             descripcion="Los créditos aparecen al crear facturas a crédito" />
         ) : (
-          creditosActivos.map((c) => {
-            const creditoId = c.id;
-            return (
-              <CardCredito
-                key={creditoId}
-                credito={c}
-                onAbonar={setCreditoAbono}
-                onSaldar={setCreditoSaldar}
-                onCancelar={setCreditoCancelar}
-                onVerDetalle={setCreditoDetalle}
-                onDevolucion={setCreditoDevolucion}
-              />
-            );
-          })
+          personasActivas.map((persona) => (
+            <CardPersonaCredito
+              key={persona.key}
+              persona={persona}
+              onAbonar={setCreditoAbono}
+              onSaldar={setCreditoSaldar}
+              onCancelar={setCreditoCancelar}
+              onVerDetalle={setCreditoDetalle}
+              onDevolucion={setCreditoDevolucion}
+            />
+          ))
         )}
 
-        {creditosCerrados.length > 0 && (
-          <CreditosSaldados creditos={creditosCerrados} />
+        {personasCerradas.length > 0 && (
+          <HistorialPersonasSinDeuda personas={personasCerradas} />
         )}
       </div>
 
@@ -564,7 +683,8 @@ export function TabCreditos() {
         <ModalCancelarCredito credito={creditoCancelar} onClose={() => setCreditoCancelar(null)} />
       )}
       {creditoDevolucion && (
-        <ModalDevolucionParcialCredito credito={creditoDevolucion} onClose={() => setCreditoDevolucion(null)} />
+        <ModalDevolucionParcialCredito credito={creditoDevolucion}
+          onClose={() => setCreditoDevolucion(null)} />
       )}
     </>
   );

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, PackageX, RotateCcw } from 'lucide-react';
 import { Modal }       from '../../components/ui/Modal';
@@ -16,6 +16,10 @@ function FilaLinea({ linea, seleccionada, cantidad, onToggle, onCantidad }) {
   const disponible = Number(linea.cantidad) - Number(linea.cantidad_devuelta || 0);
   const esSerial   = !!linea.imei;
   const yaDevuelta = disponible === 0;
+
+  // Estado local del input para evitar que el clamping inmediato bloquee la edición
+  const [inputVal, setInputVal] = useState(String(cantidad));
+  useEffect(() => { setInputVal(String(cantidad)); }, [cantidad, seleccionada]);
 
   return (
     <div
@@ -67,9 +71,15 @@ function FilaLinea({ linea, seleccionada, cantidad, onToggle, onCantidad }) {
             type="number"
             min={1}
             max={disponible}
-            value={cantidad}
+            value={inputVal}
             onChange={(e) => {
-              const v = Math.min(Math.max(1, Number(e.target.value)), disponible);
+              setInputVal(e.target.value);
+              const n = Number(e.target.value);
+              if (n >= 1 && n <= disponible) onCantidad(linea.id, n);
+            }}
+            onBlur={() => {
+              const v = Math.min(Math.max(1, Number(inputVal) || 1), disponible);
+              setInputVal(String(v));
               onCantidad(linea.id, v);
             }}
             className="w-16 px-2 py-1 text-sm text-center border border-orange-300 rounded-lg
