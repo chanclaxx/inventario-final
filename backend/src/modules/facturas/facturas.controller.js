@@ -78,7 +78,20 @@ const editarFactura = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+const devolverLineasCredito = async (req, res, next) => {
+  try {
+    const { lineas } = req.body;
+    const data = await service.devolverLineasCredito(
+      req.user.negocio_id,
+      req.params.id,
+      lineas,
+    );
+    res.json({ ok: true, data, message: 'Devolución registrada correctamente' });
+  } catch (err) { next(err); }
+};
+
 module.exports = {
   getFacturas, getFacturasRecientes, buscarFacturas,
   getFacturaById, crearFactura, cancelarFactura, editarFactura,
+  devolverLineasCredito,
 };

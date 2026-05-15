@@ -9,9 +9,10 @@ import { Modal }       from '../../components/ui/Modal';
 import { InputMoneda } from '../../components/ui/InputMoneda';
 import { Spinner }     from '../../components/ui/Spinner';
 import { EmptyState }  from '../../components/ui/EmptyState';
+import { ModalDevolucionParcialCredito } from '../facturas/ModalDevolucionParcialCredito';
 import {
   CreditCard, Plus, CheckCircle, XCircle, AlertTriangle,
-  ChevronLeft, ChevronDown, ChevronUp,
+  ChevronLeft, ChevronDown, ChevronUp, RotateCcw,
 } from 'lucide-react';
 
 // ─── Modal Abono ──────────────────────────────────────────────────────────────
@@ -211,7 +212,7 @@ function ModalCancelarCredito({ credito, onClose }) {
 
 // ─── Panel detalle crédito ────────────────────────────────────────────────────
 
-function PanelDetalleCredito({ creditoId, onVolver, onAbonar, onSaldar, onCancelar }) {
+function PanelDetalleCredito({ creditoId, onVolver, onAbonar, onSaldar, onCancelar, onDevolucion }) {
   const { data, isLoading } = useQuery({
     queryKey: ['credito-detalle', creditoId],
     queryFn:  () => getCreditoById(creditoId).then((r) => r.data.data),
@@ -304,11 +305,17 @@ function PanelDetalleCredito({ creditoId, onVolver, onAbonar, onSaldar, onCancel
               <CheckCircle size={14} /> Saldado
             </Button>
           </div>
+          <button onClick={() => onDevolucion(c)}
+            className="w-full py-2 rounded-xl text-xs font-medium border border-orange-200
+              text-orange-600 bg-orange-50 hover:bg-orange-100 transition-colors">
+            <RotateCcw size={13} className="inline mr-1" />
+            Devolver producto(s)
+          </button>
           <button onClick={() => onCancelar(c)}
             className="w-full py-2 rounded-xl text-xs font-medium border border-red-200
               text-red-500 bg-red-50 hover:bg-red-100 transition-colors">
             <XCircle size={13} className="inline mr-1" />
-            Cancelar crédito y devolver productos
+            Cancelar crédito y devolver todos
           </button>
         </div>
       )}
@@ -318,7 +325,7 @@ function PanelDetalleCredito({ creditoId, onVolver, onAbonar, onSaldar, onCancel
 
 // ─── Card de crédito ──────────────────────────────────────────────────────────
 
-function CardCredito({ credito, onAbonar, onSaldar, onCancelar, onVerDetalle }) {
+function CardCredito({ credito, onAbonar, onSaldar, onCancelar, onVerDetalle, onDevolucion }) {
   const cuotaInicial   = Number(credito.cuota_inicial || 0);
   const totalAbonado   = Number(credito.total_abonado || 0);
   const valorTotal     = Number(credito.valor_total);
@@ -398,10 +405,16 @@ function CardCredito({ credito, onAbonar, onSaldar, onCancelar, onVerDetalle }) 
           className="text-xs text-yellow-600 hover:text-yellow-700 transition-colors">
           Ver detalle y abonos →
         </button>
-        <button onClick={() => onCancelar(credito)}
-          className="text-xs text-red-400 hover:text-red-600 transition-colors">
-          Cancelar crédito
-        </button>
+        <div className="flex gap-3">
+          <button onClick={() => onDevolucion(credito)}
+            className="text-xs text-orange-500 hover:text-orange-700 transition-colors flex items-center gap-0.5">
+            <RotateCcw size={11} /> Devolución
+          </button>
+          <button onClick={() => onCancelar(credito)}
+            className="text-xs text-red-400 hover:text-red-600 transition-colors">
+            Cancelar
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -454,10 +467,11 @@ function CreditosSaldados({ creditos }) {
 // ─── Componente principal del tab ─────────────────────────────────────────────
 
 export function TabCreditos() {
-  const [creditoAbono,    setCreditoAbono]    = useState(null);
-  const [creditoSaldar,   setCreditoSaldar]   = useState(null);
-  const [creditoCancelar, setCreditoCancelar] = useState(null);
-  const [creditoDetalle,  setCreditoDetalle]  = useState(null);
+  const [creditoAbono,      setCreditoAbono]      = useState(null);
+  const [creditoSaldar,     setCreditoSaldar]     = useState(null);
+  const [creditoCancelar,   setCreditoCancelar]   = useState(null);
+  const [creditoDetalle,    setCreditoDetalle]    = useState(null);
+  const [creditoDevolucion, setCreditoDevolucion] = useState(null);
 
   const { data: creditosData, isLoading } = useQuery({
     queryKey: ['creditos'],
@@ -478,6 +492,7 @@ export function TabCreditos() {
           onAbonar={setCreditoAbono}
           onSaldar={setCreditoSaldar}
           onCancelar={setCreditoCancelar}
+          onDevolucion={setCreditoDevolucion}
         />
 
         {creditoAbono && (
@@ -488,6 +503,9 @@ export function TabCreditos() {
         )}
         {creditoCancelar && (
           <ModalCancelarCredito credito={creditoCancelar} onClose={() => { setCreditoCancelar(null); setCreditoDetalle(null); }} />
+        )}
+        {creditoDevolucion && (
+          <ModalDevolucionParcialCredito credito={creditoDevolucion} onClose={() => setCreditoDevolucion(null)} />
         )}
       </>
     );
@@ -513,6 +531,7 @@ export function TabCreditos() {
                 onSaldar={setCreditoSaldar}
                 onCancelar={setCreditoCancelar}
                 onVerDetalle={setCreditoDetalle}
+                onDevolucion={setCreditoDevolucion}
               />
             );
           })
@@ -531,6 +550,9 @@ export function TabCreditos() {
       )}
       {creditoCancelar && (
         <ModalCancelarCredito credito={creditoCancelar} onClose={() => setCreditoCancelar(null)} />
+      )}
+      {creditoDevolucion && (
+        <ModalDevolucionParcialCredito credito={creditoDevolucion} onClose={() => setCreditoDevolucion(null)} />
       )}
     </>
   );

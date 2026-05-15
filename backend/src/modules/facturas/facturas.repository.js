@@ -374,6 +374,29 @@ const cancelar = async (client, id) => {
   );
 };
 
+const getLineaPorId = async (client, lineaId, facturaId) => {
+  const { rows } = await client.query(
+    `SELECT * FROM lineas_factura WHERE id = $1 AND factura_id = $2`,
+    [lineaId, facturaId]
+  );
+  return rows[0] || null;
+};
+
+const marcarLineaDevuelta = async (client, lineaId, cantidadDevuelta) => {
+  await client.query(
+    `UPDATE lineas_factura SET cantidad_devuelta = cantidad_devuelta + $1 WHERE id = $2`,
+    [cantidadDevuelta, lineaId]
+  );
+};
+
+const getLineasConDevolucion = async (client, facturaId) => {
+  const { rows } = await client.query(
+    `SELECT * FROM lineas_factura WHERE factura_id = $1 ORDER BY id`,
+    [facturaId]
+  );
+  return rows;
+};
+
 const findByIdYNegocio = async (id, negocioId) => {
   const { rows } = await pool.query(`
     SELECT
@@ -415,4 +438,5 @@ module.exports = {
   create, insertarLinea, insertarPago, insertarRetoma, cancelar,
   ajustarStockCantidad, actualizarCostoPromedio,
   ajustarStockAtributoEnTx, ajustarStockVarianteEnTx, sincronizarStockArbolEnTx,
+  getLineaPorId, marcarLineaDevuelta, getLineasConDevolucion,
 };

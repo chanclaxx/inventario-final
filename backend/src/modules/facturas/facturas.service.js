@@ -612,7 +612,114 @@ const editarFactura = async (negocioId, id, {
   }
 };
 
+// ── Devolución parcial de líneas en una factura a crédito ─────────────────────
+// lineasDevolver: [{ linea_id: Number, cantidad_devolver: Number }]
+
+const devolverLineasCredito = async (negocioId, facturaId, lineasDevolver) => {
+  const creditosRepo = require('../creditos/creditos.repository');
+
+  const factura = await facturasRepo.findByIdYNegocio(facturaId, negocioId);
+  if (!factura) throw { status: 404, message: 'Factura no encontrada' };
+  if (factura.estado === 'Cancelada') throw { status: 400, message: 'La factura ya está cancelada' };
+  if (factura.estado !== 'Credito') throw { status: 400, message: 'Solo se pueden hacer devoluciones parciales en facturas a crédito' };
+  if (!Array.isArray(lineasDevolver) || lineasDevolver.length === 0) {
+    throw { status: 400, message: 'Debes seleccionar al menos un producto para devolver' };
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const credito = await creditosRepo.findByFacturaId(client, facturaId);
+    if (!credito) throw { status: 404, message: 'Crédito asociado no encontrado' };
+    if (credito.estado === 'Cancelado') throw { status: 400, message: 'El crédito ya está cancelado' };
+
+    const todasLineas = await facturasRepo.getLineasConDevolucion(client, facturaId);
+
+    let totalDevuelto = 0;
+
+    for (const { linea_id, cantidad_devolver } of lineasDevolver) {
+      const linea = todasLineas.find((l) => l.id === Number(linea_id));
+      if (!linea) throw { status: 404, message: `Línea ${linea_id} no encontrada en esta factura` };
+
+      const cantDisponible = Number(linea.cantidad) - Number(linea.cantidad_devuelta || 0);
+      if (cantidad_devolver <= 0 || cantidad_devolver > cantDisponible) {
+        throw {
+          status: 400,
+          message: `Cantidad inválida para "${linea.nombre_producto}" (disponible para devolver: ${cantDisponible})`,
+        };
+      }
+
+      // Restaurar stock / serial
+      if (linea.imei) {
+        await client.query(
+          `UPDATE seriales SET vendido = false, fecha_salida = NULL
+           WHERE imei = $1
+             AND producto_id IN (
+               SELECT ps.id FROM productos_serial ps
+               JOIN sucursales su ON su.id = ps.sucursal_id
+               WHERE su.id = $2
+             )`,
+          [linea.imei, factura.sucursal_id]
+        );
+      } else if (linea.producto_id) {
+        if (linea.variante_id) {
+          await facturasRepo.ajustarStockVarianteEnTx(client, linea.variante_id, cantidad_devolver);
+          await facturasRepo.sincronizarStockArbolEnTx(client, linea.producto_id);
+        } else if (linea.atributo_id) {
+          await facturasRepo.ajustarStockAtributoEnTx(client, linea.atributo_id, cantidad_devolver);
+          await facturasRepo.sincronizarStockArbolEnTx(client, linea.producto_id);
+        } else {
+          await facturasRepo.ajustarStockCantidad(client, linea.producto_id, cantidad_devolver);
+        }
+      }
+
+      await facturasRepo.marcarLineaDevuelta(client, linea.id, cantidad_devolver);
+      totalDevuelto += Number(linea.precio) * cantidad_devolver;
+    }
+
+    // Reducir el valor total del crédito
+    const creditoActualizado = await creditosRepo.reducirValorTotal(client, credito.id, totalDevuelto);
+    const nuevoValorTotal = Number(creditoActualizado.valor_total);
+    const cuotaInicial    = Number(creditoActualizado.cuota_inicial || 0);
+    const totalAbonado    = Number(creditoActualizado.total_abonado || 0);
+
+    // Verificar si queda completamente pagado con lo ya abonado
+    const nuevoSaldo = nuevoValorTotal - cuotaInicial - totalAbonado;
+
+    // Recargar líneas para verificar si todas están devueltas
+    const lineasActualizadas = await facturasRepo.getLineasConDevolucion(client, facturaId);
+    const todasDevueltas = lineasActualizadas.every(
+      (l) => Number(l.cantidad_devuelta || 0) >= Number(l.cantidad)
+    );
+
+    if (todasDevueltas) {
+      // Cancelar factura y crédito completos
+      await facturasRepo.cancelar(client, facturaId);
+      await client.query(`UPDATE creditos SET estado = 'Cancelado' WHERE id = $1`, [credito.id]);
+    } else if (nuevoSaldo <= 0 && creditoActualizado.estado === 'Activo') {
+      await client.query(`UPDATE creditos SET estado = 'Saldado' WHERE id = $1`, [credito.id]);
+    }
+
+    await client.query('COMMIT');
+
+    return {
+      total_devuelto:    totalDevuelto,
+      cancelada:         todasDevueltas,
+      credito_saldado:   !todasDevueltas && nuevoSaldo <= 0,
+      nuevo_valor_total: nuevoValorTotal,
+      nuevo_saldo:       Math.max(0, nuevoSaldo),
+    };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+};
+
 module.exports = {
   getFacturas, getFacturasRecientes, buscarFacturas,
   getFacturaById, crearFactura, cancelarFactura, editarFactura,
+  devolverLineasCredito,
 };

@@ -14,3 +14,6 @@ export const getFacturasRecientes = (cursor = null, dias = 5) =>
 
 export const buscarFacturas = ({ q, desde, hasta, limit = 100, offset = 0 }) =>
   api.get('/facturas/buscar', { params: { q, desde, hasta, limit, offset } });
+
+export const devolverLineasCredito = (facturaId, lineas) =>
+  api.patch(`/facturas/${facturaId}/devolucion-parcial`, { lineas });

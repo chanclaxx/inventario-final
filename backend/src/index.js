@@ -7,6 +7,7 @@ const rateLimit    = require('express-rate-limit');
 
 const { validateEnv }      = require('./config/env');
 const { connectDB }        = require('./config/db');
+const { runMigrations }    = require('./config/migrations');
 const { auth }             = require('./middlewares/auth.middleware');
 const { verificarPlan }    = require('./middlewares/plan.middleware');
 const { resolveSucursal }  = require('./middlewares/sucursal.middleware');
@@ -104,6 +105,7 @@ const PORT = process.env.PORT || 3001;
 
 const start = async () => {
   await connectDB();
+  await runMigrations();
 
   verificarVencimientos();
   setInterval(verificarVencimientos, 24 * 60 * 60 * 1000);

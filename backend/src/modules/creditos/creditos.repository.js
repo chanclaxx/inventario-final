@@ -91,7 +91,27 @@ const updateEstado = async (client, id, estado) => {
   await client.query('UPDATE creditos SET estado = $1 WHERE id = $2', [estado, id]);
 };
 
+// ── Buscar crédito por factura_id (dentro de transacción) ────────────────────
+const findByFacturaId = async (client, facturaId) => {
+  const { rows } = await client.query(
+    `SELECT * FROM creditos WHERE factura_id = $1`,
+    [facturaId]
+  );
+  return rows[0] || null;
+};
+
+// ── Reducir valor_total del crédito ─────────────────────────────────────────
+const reducirValorTotal = async (client, creditoId, monto) => {
+  const { rows } = await client.query(
+    `UPDATE creditos SET valor_total = valor_total - $1 WHERE id = $2
+     RETURNING valor_total, cuota_inicial, total_abonado, estado`,
+    [monto, creditoId]
+  );
+  return rows[0];
+};
+
 module.exports = {
   findAll, findByIdYNegocio,
   getAbonos, create, insertarAbono, updateEstado,
+  findByFacturaId, reducirValorTotal,
 };

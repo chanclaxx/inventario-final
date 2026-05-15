@@ -30,7 +30,8 @@ router.get('/',            requireModulo('facturar'),                           
 router.get('/:id/pdf',     requireModulo('facturar'),                              getPdfFactura);
 router.get('/:id',         requireModulo('facturar'),                              ctrl.getFacturaById);
 router.post('/',           requireModulo('facturar'), validarFactura, validate,    ctrl.crearFactura);
-router.patch('/:id/cancelar', requireModulo('facturar'), requireNivel('supervisor'), ctrl.cancelarFactura);
-router.patch('/:id',          requireModulo('facturar'), requireNivel('supervisor'), ctrl.editarFactura);
+router.patch('/:id/cancelar',           requireModulo('facturar'), requireNivel('supervisor'), ctrl.cancelarFactura);
+router.patch('/:id/devolucion-parcial', requireModulo('facturar'), requireNivel('supervisor'), ctrl.devolverLineasCredito);
+router.patch('/:id',                    requireModulo('facturar'), requireNivel('supervisor'), ctrl.editarFactura);
 
 module.exports = router;
