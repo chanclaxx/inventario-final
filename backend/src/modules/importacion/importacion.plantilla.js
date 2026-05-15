@@ -2,20 +2,22 @@ const XLSX = require('xlsx');
 
 // ─── Paleta ───────────────────────────────────────────────────────────────────
 const C = {
-  tituloFondo:   '1E3A8A',
-  headerFondo:   '1D4ED8',
-  descFondo:     'DBEAFE',
-  descTexto:     '1E40AF',
-  requerido:     'DC2626',
-  colorFondo:    'BE185D',
-  caracterFondo: '6D28D9',
-  precioFondo:   '065F46',
-  cantidadFondo: '0369A1',
-  datoFondo:     'F8FAFC',
-  datoFondoAlt:  'EFF6FF',
-  borde:         'CBD5E1',
-  blanco:        'FFFFFF',
-  gris:          '6B7280',
+  tituloFondo:      '1E3A8A',
+  headerFondo:      '1D4ED8',
+  descFondo:        'DBEAFE',
+  descTexto:        '1E40AF',
+  requerido:        'DC2626',
+  colorFondo:       'BE185D',
+  caracterFondo:    '6D28D9',
+  precioFondo:      '065F46',
+  cantidadFondo:    '0369A1',
+  varianteFondo:    '0F766E',  // teal para columna Atributo
+  subvarianteFondo: '115E59',  // teal oscuro para columna Variante
+  datoFondo:        'F8FAFC',
+  datoFondoAlt:     'EFF6FF',
+  borde:            'CBD5E1',
+  blanco:           'FFFFFF',
+  gris:             '6B7280',
 };
 
 function bl() {
@@ -170,23 +172,37 @@ function hojaSerial(nombreProducto, coloresActivo, coloresLista, caracteristicas
 }
 
 // ─── Hoja cantidad ────────────────────────────────────────────────────────────
-function hojaCantidad() {
+function hojaCantidad(variantesActivo = false) {
   const columnas = [
-    { clave: 'Nombre *',       desc: 'Requerido · Nombre del producto',                    bg: C.requerido,      num: false },
-    { clave: 'Stock',          desc: 'Cantidad actual en inventario (0 si es nuevo)',       bg: C.cantidadFondo,  num: true  },
-    { clave: 'Stock Minimo',   desc: 'Alerta de stock bajo (stock_minimo en la DB)',        bg: C.cantidadFondo,  num: true  },
-    { clave: 'Costo Unitario', desc: 'Costo de compra por unidad (COP)',                    bg: C.headerFondo,    num: true  },
-    { clave: 'Precio Venta',   desc: 'Precio de venta al público (COP)',                   bg: C.precioFondo,    num: true  },
-    { clave: 'Unidad Medida',  desc: 'Ej: unidad, caja, kg, litro (defecto: unidad)',      bg: C.headerFondo,    num: false },
-    { clave: 'Proveedor',      desc: 'Opcional · Nombre del proveedor habitual',           bg: C.headerFondo,    num: false },
-    { clave: 'Cliente Origen', desc: 'Opcional · Solo si proviene de un cliente',          bg: C.headerFondo,    num: false },
+    { clave: 'Nombre *',       desc: 'Requerido · Nombre del producto',                             bg: C.requerido,         num: false, wch: 30 },
   ];
+
+  if (variantesActivo) {
+    columnas.push(
+      { clave: 'Atributo', desc: 'Opcional · Valor del atributo (ej: M, L, XL, Rojo)',             bg: C.varianteFondo,     num: false, wch: 18 },
+      { clave: 'Variante', desc: 'Opcional · Sub-variante dentro del atributo (ej: Oscuro, Claro)', bg: C.subvarianteFondo,  num: false, wch: 18 },
+    );
+  }
+
+  columnas.push(
+    { clave: 'Stock',          desc: 'Cantidad (se suma al existente, 0 si es nuevo)',              bg: C.cantidadFondo,     num: true,  wch: 10 },
+    { clave: 'Stock Minimo',   desc: 'Alerta de stock bajo (toma el mayor)',                        bg: C.cantidadFondo,     num: true,  wch: 14 },
+    { clave: 'Costo Unitario', desc: 'Costo de compra por unidad (COP)',                            bg: C.headerFondo,       num: true,  wch: 16 },
+    { clave: 'Precio Venta',   desc: 'Precio de venta al público (COP)',                            bg: C.precioFondo,       num: true,  wch: 14 },
+    { clave: 'Unidad Medida',  desc: 'Ej: unidad, caja, kg, litro (defecto: unidad)',              bg: C.headerFondo,       num: false, wch: 16 },
+    { clave: 'Proveedor',      desc: 'Opcional · Nombre del proveedor habitual',                    bg: C.headerFondo,       num: false, wch: 20 },
+    { clave: 'Cliente Origen', desc: 'Opcional · Solo si proviene de un cliente',                   bg: C.headerFondo,       num: false, wch: 22 },
+  );
 
   const ws      = {};
   const numCols = columnas.length;
 
+  const titulo = variantesActivo
+    ? '📦  Productos por Cantidad · Con Variantes'
+    : '📦  Productos por Cantidad — Sin serial';
+
   columnas.forEach((_, c) => {
-    put(ws, 0, c, 's', c === 0 ? '📦  Productos por Cantidad — Sin serial' : '', sT(C.cantidadFondo, C.blanco, 11));
+    put(ws, 0, c, 's', c === 0 ? titulo : '', sT(C.cantidadFondo, C.blanco, 11));
   });
   columnas.forEach(({ clave, bg }, c) => {
     put(ws, 1, c, 's', clave, sT(bg, C.blanco, 9));
@@ -204,10 +220,7 @@ function hojaCantidad() {
 
   seal(ws, 3 + NUM_FILAS_DATOS - 1, numCols);
   freeze(ws);
-  ws['!cols'] = [
-    { wch: 30 }, { wch: 10 }, { wch: 14 }, { wch: 16 },
-    { wch: 14 }, { wch: 16 }, { wch: 20 }, { wch: 22 },
-  ];
+  ws['!cols'] = columnas.map(({ wch }) => ({ wch }));
   ws['!rows'] = [{ hpt: 20 }, { hpt: 22 }, { hpt: 30 }];
   return ws;
 }
@@ -216,6 +229,7 @@ function hojaCantidad() {
 function hojaInstrucciones(config) {
   const coloresActivo         = config.colores_serial_activo === '1';
   const caracteristicasActivo = config.caracteristicas_serial_activo === '1';
+  const variantesActivo       = config.variantes_activo === '1';
   const coloresLista          = _parseLista(config.colores_serial_lista);
   const caracteristicasLista  = _parseLista(config.caracteristicas_serial_lista);
 
@@ -250,7 +264,7 @@ function hojaInstrucciones(config) {
   linea('   Columna Nombre * es obligatoria en la hoja de cantidad.');
   linea('');
 
-  if (coloresActivo || caracteristicasActivo) {
+  if (coloresActivo || caracteristicasActivo || variantesActivo) {
     linea('CONFIGURACIÓN ACTIVA EN TU NEGOCIO', C.headerFondo, true, 10);
     if (coloresActivo) {
       linea(`✅  Colores de serial ACTIVOS — Colores válidos: ${coloresLista.join(', ') || 'ninguno configurado'}`);
@@ -258,17 +272,26 @@ function hojaInstrucciones(config) {
     if (caracteristicasActivo) {
       linea(`✅  Características ACTIVAS — Campos: ${caracteristicasLista.join(', ') || 'ninguno configurado'}`);
     }
+    if (variantesActivo) {
+      linea('✅  Variantes ACTIVAS — La hoja "Productos Cantidad" incluye columnas Atributo y Variante.');
+      linea('   • Deja Atributo y Variante en blanco → stock va directo al producto (sin variantes).');
+      linea('   • Llena Atributo, deja Variante en blanco → stock va al atributo (nivel 1).');
+      linea('   • Llena ambos → stock va a la variante (nivel 2) y se sincroniza en cascada.');
+      linea('   Ejemplo: Nombre=Camiseta | Atributo=Talla M | Variante=Rojo | Stock=5');
+    }
     linea('');
   }
 
   linea('LEYENDA DE COLORES DE COLUMNA', C.headerFondo, true, 10);
   const leyenda = [
-    [C.requerido,     'Columna OBLIGATORIA'],
-    [C.headerFondo,   'Columna opcional estándar'],
-    [C.colorFondo,    'Columna de color (activa según tu configuración)'],
-    [C.caracterFondo, 'Columna de característica (activa según tu configuración)'],
-    [C.precioFondo,   'Columna de precio'],
-    [C.cantidadFondo, 'Columna numérica de stock'],
+    [C.requerido,         'Columna OBLIGATORIA'],
+    [C.headerFondo,       'Columna opcional estándar'],
+    [C.colorFondo,        'Columna de color (activa según tu configuración)'],
+    [C.caracterFondo,     'Columna de característica (activa según tu configuración)'],
+    [C.precioFondo,       'Columna de precio'],
+    [C.cantidadFondo,     'Columna numérica de stock'],
+    [C.varianteFondo,     'Columna de Atributo (variantes activas)'],
+    [C.subvarianteFondo,  'Columna de Variante / sub-variante'],
   ];
   leyenda.forEach(([bg, texto]) => {
     put(ws, r, 0, 's', '  ', sT(bg, C.blanco, 9));
@@ -303,23 +326,21 @@ function _parseLista(valor) {
 function generarPlantillaBuffer(config = {}) {
   const coloresActivo         = config.colores_serial_activo === '1';
   const caracteristicasActivo = config.caracteristicas_serial_activo === '1';
+  const variantesActivo       = config.variantes_activo === '1';
   const coloresLista          = _parseLista(config.colores_serial_lista);
   const caracteristicasLista  = _parseLista(config.caracteristicas_serial_lista);
 
   const wb = XLSX.utils.book_new();
 
-  // Hoja de instrucciones primero
   XLSX.utils.book_append_sheet(wb, hojaInstrucciones(config), 'Instrucciones');
 
-  // Hoja de ejemplo serial (el nombre de la hoja = nombre del producto)
   XLSX.utils.book_append_sheet(
     wb,
     hojaSerial('Ejemplo Producto', coloresActivo, coloresLista, caracteristicasActivo, caracteristicasLista),
     'Ejemplo Producto'
   );
 
-  // Hoja de cantidad (nombre reservado que el controller detecta)
-  XLSX.utils.book_append_sheet(wb, hojaCantidad(), 'Productos Cantidad');
+  XLSX.utils.book_append_sheet(wb, hojaCantidad(variantesActivo), 'Productos Cantidad');
 
   return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx', cellStyles: true });
 }

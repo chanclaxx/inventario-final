@@ -233,10 +233,116 @@ const importarSerial = async (hojas, sucursalId, negocioId, config = {}) => {
 };
 
 // ─────────────────────────────────────────────
+// HELPERS DE VARIANTES (para importarCantidad)
+// ─────────────────────────────────────────────
+
+// Crea o actualiza el producto raíz sin tocar su stock (el stock lo manejan atributos/variantes)
+const _resolverProductoBase = async (client, { nombre, sucursalId, proveedorId, costoUnit, unidad, clienteOrig, precioVenta }) => {
+  const { rows } = await client.query(
+    `SELECT id FROM productos_cantidad WHERE LOWER(nombre) = LOWER($1) AND sucursal_id = $2 LIMIT 1`,
+    [nombre, sucursalId]
+  );
+  if (rows.length) {
+    await client.query(
+      `UPDATE productos_cantidad SET
+         costo_unitario = COALESCE($1, costo_unitario),
+         unidad_medida  = COALESCE(NULLIF($2,''), unidad_medida),
+         cliente_origen = COALESCE($3, cliente_origen),
+         proveedor_id   = COALESCE($4, proveedor_id),
+         precio         = COALESCE($5, precio)
+       WHERE id = $6`,
+      [costoUnit, unidad, clienteOrig, proveedorId, precioVenta, rows[0].id]
+    );
+    return rows[0].id;
+  }
+  const { rows: nuevo } = await client.query(
+    `INSERT INTO productos_cantidad
+       (sucursal_id, proveedor_id, nombre, stock, stock_minimo, costo_unitario, unidad_medida, cliente_origen, precio)
+     VALUES($1,$2,$3,0,0,$4,$5,$6,$7) RETURNING id`,
+    [sucursalId, proveedorId, nombre, costoUnit, unidad, clienteOrig, precioVenta]
+  );
+  return nuevo[0].id;
+};
+
+// Busca o crea un atributo para el producto en la sucursal
+const _resolverAtributo = async (client, productoId, sucursalId, valor) => {
+  const { rows } = await client.query(
+    `SELECT id FROM atributos_producto
+     WHERE producto_id = $1 AND sucursal_id = $2 AND LOWER(valor) = LOWER($3) AND activo = true LIMIT 1`,
+    [productoId, sucursalId, valor]
+  );
+  if (rows.length) return { id: rows[0].id, nuevo: false };
+  const { rows: ins } = await client.query(
+    `INSERT INTO atributos_producto (producto_id, sucursal_id, valor, stock, stock_minimo)
+     VALUES($1, $2, $3, 0, 0) RETURNING id`,
+    [productoId, sucursalId, valor.trim()]
+  );
+  return { id: ins[0].id, nuevo: true };
+};
+
+// Busca o crea/actualiza una variante dentro de un atributo
+const _ajustarVariante = async (client, atributoId, valor, stock, stockMinimo, precioVenta) => {
+  const { rows } = await client.query(
+    `SELECT id FROM variantes_atributo
+     WHERE atributo_id = $1 AND LOWER(valor) = LOWER($2) AND activo = true LIMIT 1`,
+    [atributoId, valor]
+  );
+  if (rows.length) {
+    await client.query(
+      `UPDATE variantes_atributo SET
+         stock        = stock + $1,
+         stock_minimo = GREATEST(stock_minimo, $2),
+         precio       = COALESCE($3, precio)
+       WHERE id = $4`,
+      [stock, stockMinimo, precioVenta, rows[0].id]
+    );
+    return 'actualizado';
+  }
+  await client.query(
+    `INSERT INTO variantes_atributo (atributo_id, valor, stock, stock_minimo, precio)
+     VALUES($1, $2, $3, $4, $5)`,
+    [atributoId, valor.trim(), stock, stockMinimo, precioVenta]
+  );
+  return 'insertado';
+};
+
+// Recalcula stock en cascada: variantes → atributo → producto
+const _recalcularStockProducto = async (client, productoId) => {
+  await client.query(
+    `UPDATE atributos_producto ap
+     SET stock = COALESCE(sub.total, 0)
+     FROM (
+       SELECT v.atributo_id, SUM(v.stock) AS total
+       FROM variantes_atributo v
+       WHERE v.activo = true
+       GROUP BY v.atributo_id
+     ) sub
+     WHERE ap.id = sub.atributo_id AND ap.producto_id = $1 AND ap.activo = true`,
+    [productoId]
+  );
+  await client.query(
+    `UPDATE productos_cantidad pc
+     SET stock = sub.total
+     FROM (
+       SELECT ap.producto_id, COALESCE(SUM(ap.stock), 0) AS total
+       FROM atributos_producto ap
+       WHERE ap.activo = true AND ap.producto_id = $1
+       GROUP BY ap.producto_id
+     ) sub
+     WHERE pc.id = sub.producto_id
+       AND EXISTS (
+         SELECT 1 FROM atributos_producto WHERE producto_id = $1 AND activo = true
+       )`,
+    [productoId]
+  );
+};
+
+// ─────────────────────────────────────────────
 // IMPORTAR CANTIDAD
 // ─────────────────────────────────────────────
 
-const importarCantidad = async (filas, sucursalId, negocioId) => {
+const importarCantidad = async (filas, sucursalId, negocioId, config = {}) => {
+  const variantesActivo = config.variantes_activo === '1';
   if (filas.length > MAX_FILAS) {
     throw {
       status: 400,
@@ -260,44 +366,80 @@ const importarCantidad = async (filas, sucursalId, negocioId) => {
           continue;
         }
 
-        const stock       = fila.stock          !== undefined ? Number(fila.stock)          : 0;
-        const stockMinimo = fila.stock_minimo    !== undefined ? Number(fila.stock_minimo)   : 0;
-        const costoUnit   = fila.costo_unitario  ? Number(fila.costo_unitario)  : null;
-        const precioVenta = fila.precio_venta    ? Number(fila.precio_venta)    : null;
+        const stock       = fila.stock          !== undefined ? Number(fila.stock)         : 0;
+        const stockMinimo = fila.stock_minimo    !== undefined ? Number(fila.stock_minimo)  : 0;
+        const costoUnit   = fila.costo_unitario  ? Number(fila.costo_unitario) : null;
+        const precioVenta = fila.precio_venta    ? Number(fila.precio_venta)   : null;
         const unidad      = fila.unidad_medida?.toString().trim() || 'unidad';
         const clienteOrig = fila.cliente_origen?.toString().trim() || null;
         const proveedorId = await _resolverProveedor(client, fila.proveedor, negocioId);
 
-        const { rows: existe } = await client.query(
-          `SELECT id FROM productos_cantidad
-           WHERE LOWER(nombre) = LOWER($1) AND sucursal_id = $2 LIMIT 1`,
-          [nombre, sucursalId]
-        );
+        const atributoValor = variantesActivo ? fila.atributo?.toString().trim() || null : null;
+        const varianteValor = atributoValor   ? fila.variante?.toString().trim() || null : null;
 
-        if (existe.length) {
-          await client.query(
-            `UPDATE productos_cantidad SET
-               stock          = stock + $1,
-               stock_minimo   = GREATEST(stock_minimo, $2),
-               costo_unitario = COALESCE($3, costo_unitario),
-               unidad_medida  = COALESCE(NULLIF($4,''), unidad_medida),
-               cliente_origen = COALESCE($5, cliente_origen),
-               proveedor_id   = COALESCE($6, proveedor_id),
-               precio         = COALESCE($7, precio)
-             WHERE id = $8`,
-            [stock, stockMinimo, costoUnit, unidad, clienteOrig, proveedorId, precioVenta, existe[0].id]
+        if (atributoValor) {
+          // ── Con variante: el producto es contenedor, el stock vive en atributo/variante ──
+          const productoId = await _resolverProductoBase(client, {
+            nombre, sucursalId, proveedorId, costoUnit, unidad, clienteOrig, precioVenta,
+          });
+
+          const { id: atributoId, nuevo: atrNuevo } = await _resolverAtributo(
+            client, productoId, sucursalId, atributoValor
           );
-          resultado.actualizados++;
+
+          if (varianteValor) {
+            // Stock → variante (nivel 2); luego sincronizar hacia arriba
+            const accion = await _ajustarVariante(
+              client, atributoId, varianteValor, stock, stockMinimo, precioVenta
+            );
+            await _recalcularStockProducto(client, productoId);
+            accion === 'insertado' ? resultado.insertados++ : resultado.actualizados++;
+          } else {
+            // Stock → atributo (nivel 1, sin sub-variantes)
+            await client.query(
+              `UPDATE atributos_producto SET
+                 stock        = stock + $1,
+                 stock_minimo = GREATEST(stock_minimo, $2),
+                 precio       = COALESCE($3, precio)
+               WHERE id = $4`,
+              [stock, stockMinimo, precioVenta, atributoId]
+            );
+            await _recalcularStockProducto(client, productoId);
+            atrNuevo ? resultado.insertados++ : resultado.actualizados++;
+          }
         } else {
-          await client.query(
-            `INSERT INTO productos_cantidad
-               (sucursal_id, proveedor_id, nombre, stock, stock_minimo,
-                costo_unitario, unidad_medida, cliente_origen, precio)
-             VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-            [sucursalId, proveedorId, nombre, stock, stockMinimo,
-             costoUnit, unidad, clienteOrig, precioVenta]
+          // ── Sin variante: comportamiento original sobre productos_cantidad ──
+          const { rows: existe } = await client.query(
+            `SELECT id FROM productos_cantidad
+             WHERE LOWER(nombre) = LOWER($1) AND sucursal_id = $2 LIMIT 1`,
+            [nombre, sucursalId]
           );
-          resultado.insertados++;
+
+          if (existe.length) {
+            await client.query(
+              `UPDATE productos_cantidad SET
+                 stock          = stock + $1,
+                 stock_minimo   = GREATEST(stock_minimo, $2),
+                 costo_unitario = COALESCE($3, costo_unitario),
+                 unidad_medida  = COALESCE(NULLIF($4,''), unidad_medida),
+                 cliente_origen = COALESCE($5, cliente_origen),
+                 proveedor_id   = COALESCE($6, proveedor_id),
+                 precio         = COALESCE($7, precio)
+               WHERE id = $8`,
+              [stock, stockMinimo, costoUnit, unidad, clienteOrig, proveedorId, precioVenta, existe[0].id]
+            );
+            resultado.actualizados++;
+          } else {
+            await client.query(
+              `INSERT INTO productos_cantidad
+                 (sucursal_id, proveedor_id, nombre, stock, stock_minimo,
+                  costo_unitario, unidad_medida, cliente_origen, precio)
+               VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+              [sucursalId, proveedorId, nombre, stock, stockMinimo,
+               costoUnit, unidad, clienteOrig, precioVenta]
+            );
+            resultado.insertados++;
+          }
         }
       } catch (err) {
         resultado.errores.push({ fila: nFila, error: _mensajeSeguro(err) });

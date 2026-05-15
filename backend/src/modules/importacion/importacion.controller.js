@@ -92,7 +92,7 @@ const importarInventario = async (req, res, next) => {
         .filter((f) => f.nombre?.toString().trim());
 
       if (datos.length > 0) {
-        resultado.cantidad = await service.importarCantidad(datos, sucursalId, negocioId);
+        resultado.cantidad = await service.importarCantidad(datos, sucursalId, negocioId, config);
       }
     }
 
