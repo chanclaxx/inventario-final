@@ -50,4 +50,21 @@ const getComprasByProveedor = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-module.exports = { getCompras, getCompraById, getComprasByProveedor, registrarCompra };
+const getComprasPaginadas = async (req, res, next) => {
+  try {
+    const sucursalId = req.todasSucursales ? null : req.sucursal_id;
+    const { page, limit, busqueda, fechaDesde, fechaHasta, metodo, estado } = req.query;
+    const data = await service.getComprasPaginadas(sucursalId, req.user.negocio_id, {
+      page:       parseInt(page)  || 1,
+      limit:      parseInt(limit) || 20,
+      busqueda:   busqueda   || null,
+      fechaDesde: fechaDesde || null,
+      fechaHasta: fechaHasta || null,
+      metodo:     metodo     || null,
+      estado:     estado     || null,
+    });
+    res.json({ ok: true, data });
+  } catch (err) { next(err); }
+};
+
+module.exports = { getCompras, getCompraById, getComprasByProveedor, registrarCompra, getComprasPaginadas };

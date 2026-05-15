@@ -125,9 +125,83 @@ const actualizarCostoPromedio = async (client, productoId, costoPromedio) => {
   );
 };
 
+const findAllPaginado = async (sucursalId, negocioId, { page = 1, limit = 20, busqueda, fechaDesde, fechaHasta, metodo, estado } = {}) => {
+  const conditions = [];
+  const params = [];
+  let idx = 1;
+
+  if (sucursalId) {
+    conditions.push(`c.sucursal_id = $${idx++}`);
+    params.push(sucursalId);
+  } else {
+    conditions.push(`su.negocio_id = $${idx++}`);
+    params.push(negocioId);
+  }
+
+  if (busqueda) {
+    conditions.push(`(p.nombre ILIKE $${idx} OR c.numero_factura ILIKE $${idx})`);
+    params.push(`%${busqueda}%`);
+    idx++;
+  }
+  if (fechaDesde) {
+    conditions.push(`c.fecha::date >= $${idx++}::date`);
+    params.push(fechaDesde);
+  }
+  if (fechaHasta) {
+    conditions.push(`c.fecha::date <= $${idx++}::date`);
+    params.push(fechaHasta);
+  }
+  if (metodo) {
+    conditions.push(`c.metodo = $${idx++}`);
+    params.push(metodo);
+  }
+  if (estado) {
+    conditions.push(`c.estado = $${idx++}`);
+    params.push(estado);
+  }
+
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+
+  const countRes = await pool.query(
+    `SELECT COUNT(DISTINCT c.id) AS total
+     FROM compras c
+     JOIN sucursales su ON su.id = c.sucursal_id
+     JOIN proveedores p  ON p.id  = c.proveedor_id
+     ${where}`,
+    params
+  );
+  const total = parseInt(countRes.rows[0].total, 10);
+
+  const offset = (page - 1) * limit;
+  const dataParams = [...params, limit, offset];
+
+  const { rows } = await pool.query(
+    `SELECT
+       c.id, c.fecha, c.numero_factura, c.total, c.estado, c.notas,
+       c.metodo, c.registrar_en_caja,
+       c.sucursal_id, su.nombre AS sucursal_nombre,
+       p.id AS proveedor_id, p.nombre AS proveedor_nombre, p.tipo AS proveedor_tipo,
+       u.nombre AS usuario_nombre,
+       COUNT(lc.id) AS num_lineas
+     FROM compras c
+     JOIN sucursales su ON su.id = c.sucursal_id
+     JOIN proveedores p  ON p.id  = c.proveedor_id
+     LEFT JOIN usuarios u   ON u.id  = c.usuario_id
+     LEFT JOIN lineas_compra lc ON lc.compra_id = c.id
+     ${where}
+     GROUP BY c.id, su.nombre, p.id, p.nombre, p.tipo, u.nombre
+     ORDER BY c.fecha DESC
+     LIMIT $${idx++} OFFSET $${idx++}`,
+    dataParams
+  );
+
+  return { rows, total, page, limit, totalPages: Math.ceil(total / limit) };
+};
+
 module.exports = {
   findAll, findById, findByIdYNegocio,
   perteneceAlNegocio, findByProveedor,
   getLineas, create, insertarLinea,
   ajustarStockCantidad, actualizarCostoPromedio,
+  findAllPaginado,
 };

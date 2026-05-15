@@ -14,6 +14,7 @@ const validarCompra = [
 
 // Compras viven dentro del módulo de proveedores
 router.get('/',                       requireModulo('proveedores'), ctrl.getCompras);
+router.get('/paginadas',              requireModulo('proveedores'), ctrl.getComprasPaginadas);
 router.get('/proveedor/:proveedorId', requireModulo('proveedores'), ctrl.getComprasByProveedor);
 router.get('/:id',                    requireModulo('proveedores'), ctrl.getCompraById);
 router.post('/', requireModulo('proveedores'), requireNivel('supervisor'), validarCompra, validate, ctrl.registrarCompra);

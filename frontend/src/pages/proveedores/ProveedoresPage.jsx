@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { buscarCompras as buscarComprasApi } from '../../api/busqueda.api';
 import { getProveedores, crearProveedor, actualizarProveedor } from '../../api/proveedores.api';
 import { getCruces, crearCruce } from '../../api/cruces.api';
-import { getComprasByProveedor, getCompraById } from '../../api/compras.api';
+import { getComprasByProveedor, getCompraById, getComprasPaginadas } from '../../api/compras.api';
 import { getAcreedores, registrarMovimiento as registrarMovAcreedor, getComprasConSaldo, getAbonosPorCargo } from '../../api/acreedores.api';
 import { formatCOP, formatFechaHora } from '../../utils/formatters';
 import { Button }      from '../../components/ui/Button';
@@ -1677,6 +1677,226 @@ function TabCruces({ sucursalKey, sucursalLista }) {
   );
 }
 
+// ─── Tab: Compras (historial paginado) ───────────────────────────────────────
+
+const METODOS_PAGO = ['Contado', 'Transferencia', 'Crédito', 'Fiado'];
+const ESTADOS_COMPRA = ['Completada', 'Pendiente', 'Anulada'];
+const LIMIT = 20;
+
+function TabCompras() {
+  const [busqueda,   setBusqueda]   = useState('');
+  const [inputText,  setInputText]  = useState('');
+  const [fechaDesde, setFechaDesde] = useState('');
+  const [fechaHasta, setFechaHasta] = useState('');
+  const [metodo,     setMetodo]     = useState('');
+  const [estado,     setEstado]     = useState('');
+  const [page,       setPage]       = useState(1);
+  const [compraDetalle, setCompraDetalle] = useState(null);
+
+  const queryKey = ['compras-paginadas', page, busqueda, fechaDesde, fechaHasta, metodo, estado];
+
+  const { data, isLoading, isFetching } = useQuery({
+    queryKey,
+    queryFn: () => getComprasPaginadas({
+      page, limit: LIMIT,
+      busqueda:   busqueda   || undefined,
+      fechaDesde: fechaDesde || undefined,
+      fechaHasta: fechaHasta || undefined,
+      metodo:     metodo     || undefined,
+      estado:     estado     || undefined,
+    }).then((r) => r.data.data),
+    placeholderData: (prev) => prev,
+    staleTime: 30_000,
+  });
+
+  const compras    = data?.rows       || [];
+  const total      = data?.total      || 0;
+  const totalPages = data?.totalPages || 1;
+  const cargando   = isLoading || isFetching;
+
+  const aplicarFiltros = () => {
+    setPage(1);
+    setBusqueda(inputText.trim());
+  };
+
+  const limpiarFiltros = () => {
+    setPage(1);
+    setBusqueda('');
+    setInputText('');
+    setFechaDesde('');
+    setFechaHasta('');
+    setMetodo('');
+    setEstado('');
+  };
+
+  const hayFiltros = busqueda || fechaDesde || fechaHasta || metodo || estado;
+
+  const totalStr = total === 1 ? '1 compra' : `${total} compras`;
+
+  return (
+    <div className="flex flex-col gap-4">
+
+      {/* ── Filtros ── */}
+      <div className="bg-white border border-gray-100 rounded-2xl p-4 flex flex-col gap-3">
+        {/* Búsqueda por texto */}
+        <form onSubmit={(e) => { e.preventDefault(); aplicarFiltros(); }} className="flex gap-2">
+          <div className="flex-1">
+            <SearchInput
+              value={inputText}
+              onChange={setInputText}
+              placeholder="Buscar por proveedor o N° factura…"
+            />
+          </div>
+          <Button type="submit" size="sm">
+            <Search size={15} /> Buscar
+          </Button>
+        </form>
+
+        {/* Fechas y selects */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <div className="flex flex-col gap-1">
+            <label className="text-xs text-gray-500 font-medium">Desde</label>
+            <input
+              type="date"
+              value={fechaDesde}
+              onChange={(e) => { setFechaDesde(e.target.value); setPage(1); }}
+              className="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-xs text-gray-500 font-medium">Hasta</label>
+            <input
+              type="date"
+              value={fechaHasta}
+              onChange={(e) => { setFechaHasta(e.target.value); setPage(1); }}
+              className="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-xs text-gray-500 font-medium">Método de pago</label>
+            <select
+              value={metodo}
+              onChange={(e) => { setMetodo(e.target.value); setPage(1); }}
+              className="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+            >
+              <option value="">Todos</option>
+              {METODOS_PAGO.map((m) => <option key={m} value={m}>{m}</option>)}
+            </select>
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-xs text-gray-500 font-medium">Estado</label>
+            <select
+              value={estado}
+              onChange={(e) => { setEstado(e.target.value); setPage(1); }}
+              className="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+            >
+              <option value="">Todos</option>
+              {ESTADOS_COMPRA.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+        </div>
+
+        {/* Resumen filtros activos */}
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <p className="text-sm text-gray-500">
+            {cargando ? 'Cargando…' : totalStr}
+          </p>
+          {hayFiltros && (
+            <button
+              onClick={limpiarFiltros}
+              className="text-xs text-blue-600 hover:text-blue-800 font-medium"
+            >
+              Limpiar filtros
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* ── Lista ── */}
+      {cargando && compras.length === 0 ? (
+        <Spinner className="py-20" />
+      ) : compras.length === 0 ? (
+        <EmptyState
+          icon={ShoppingCart}
+          titulo="Sin compras"
+          descripcion={hayFiltros ? 'No hay compras que coincidan con los filtros aplicados.' : 'Aún no se han registrado compras.'}
+        />
+      ) : (
+        <div className="flex flex-col gap-2">
+          {compras.map((c) => {
+            const estadoVariant = c.estado === 'Completada' ? 'green' : c.estado === 'Pendiente' ? 'yellow' : 'red';
+            return (
+              <button
+                key={c.id}
+                onClick={() => setCompraDetalle(c.id)}
+                className="bg-white border border-gray-100 rounded-2xl p-4 flex items-start justify-between gap-3
+                  hover:border-blue-200 hover:bg-blue-50 transition-all text-left"
+              >
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap mb-1">
+                    <ProveedorTipoBadge tipo={c.proveedor_tipo} />
+                    <Badge variant={estadoVariant}>{c.estado || 'Completada'}</Badge>
+                    {c.metodo && (
+                      <span className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">
+                        {c.metodo}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1.5 mb-0.5">
+                    <Truck size={12} className="text-gray-400 flex-shrink-0" />
+                    <p className="text-sm font-semibold text-gray-900 truncate">{c.proveedor_nombre}</p>
+                  </div>
+                  <div className="flex items-center gap-3 flex-wrap">
+                    {c.numero_factura && (
+                      <span className="text-xs text-gray-500">Fact. {c.numero_factura}</span>
+                    )}
+                    <span className="text-xs text-gray-400">{formatFechaHora(c.fecha)}</span>
+                    <span className="text-xs text-gray-400">{c.sucursal_nombre}</span>
+                    {c.num_lineas > 0 && (
+                      <span className="text-xs text-gray-400">{c.num_lineas} producto(s)</span>
+                    )}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <span className="text-sm font-bold text-emerald-700">{formatCOP(c.total)}</span>
+                  <ChevronRight size={14} className="text-gray-400" />
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* ── Paginación ── */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between bg-white border border-gray-100 rounded-2xl px-4 py-3">
+          <button
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            disabled={page === 1 || cargando}
+            className="flex items-center gap-1 text-sm text-gray-600 disabled:opacity-40 hover:text-blue-600 transition-colors"
+          >
+            <ChevronLeft size={16} /> Anterior
+          </button>
+          <span className="text-sm text-gray-500">
+            Página {page} de {totalPages}
+          </span>
+          <button
+            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            disabled={page === totalPages || cargando}
+            className="flex items-center gap-1 text-sm text-gray-600 disabled:opacity-40 hover:text-blue-600 transition-colors"
+          >
+            Siguiente <ChevronRight size={16} />
+          </button>
+        </div>
+      )}
+
+      {compraDetalle && (
+        <ModalDetalleCompra compraId={compraDetalle} onClose={() => setCompraDetalle(null)} />
+      )}
+    </div>
+  );
+}
+
 // ─── Tab: Búsqueda de compras ─────────────────────────────────────────────────
 
 const MODOS_BUSQUEDA = [
@@ -1865,10 +2085,11 @@ export default function ProveedoresPage() {
   const [tabActivo, setTabActivo] = useState('proveedores');
 
   const tabs = [
-    { id: 'proveedores', label: 'Proveedores', Icn: Truck     },
-    { id: 'cruces',      label: 'Cruces',      Icn: Repeat    },
-    { id: 'retomas',     label: 'Retomas',     Icn: RefreshCw },
-    { id: 'busqueda',    label: 'Búsqueda',    Icn: Search    },
+    { id: 'proveedores', label: 'Proveedores', Icn: Truck        },
+    { id: 'cruces',      label: 'Cruces',      Icn: Repeat       },
+    { id: 'retomas',     label: 'Retomas',     Icn: RefreshCw    },
+    { id: 'compras',     label: 'Compras',     Icn: ShoppingCart },
+    { id: 'busqueda',    label: 'Búsqueda',    Icn: Search       },
   ];
 
   return (
@@ -1902,6 +2123,7 @@ export default function ProveedoresPage() {
         <TabCruces sucursalKey={sucursalKey} sucursalLista={sucursalLista} />
       )}
       {tabActivo === 'retomas'    && <TabRetomas />}
+      {tabActivo === 'compras'    && <TabCompras />}
       {tabActivo === 'busqueda'   && <TabBusquedaCompras />}
     </div>
   );

@@ -6,6 +6,9 @@ const variantesRepo             = require('../variantes-producto/variantes-produ
 const getCompras = (sucursalId, negocioId) =>
   comprasRepo.findAll(sucursalId, negocioId);
 
+const getComprasPaginadas = (sucursalId, negocioId, filtros) =>
+  comprasRepo.findAllPaginado(sucursalId, negocioId, filtros);
+
 const getComprasByProveedor = (proveedorId, sucursalId, negocioId) =>
   comprasRepo.findByProveedor(proveedorId, sucursalId, negocioId);
 
@@ -244,4 +247,4 @@ const registrarCompra = async ({
   }
 };
 
-module.exports = { getCompras, getCompraById, getComprasByProveedor, registrarCompra };
+module.exports = { getCompras, getCompraById, getComprasByProveedor, registrarCompra, getComprasPaginadas };
