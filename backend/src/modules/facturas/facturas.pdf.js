@@ -269,6 +269,18 @@ function seccionCliente(doc, factura, y) {
 // ─── SECCIÓN: Tabla de productos ──────────────────────────────────────────────
 
 function seccionProductos(doc, lineas, y) {
+  // Excluir productos totalmente devueltos; ajustar cantidad neta para los parciales
+  const lineasMostrar = lineas
+    .filter((l) => {
+      const cantNeta = Number(l.cantidad) - Number(l.cantidad_devuelta || 0);
+      return cantNeta > 0;
+    })
+    .map((l) => {
+      const cantNeta     = Number(l.cantidad) - Number(l.cantidad_devuelta || 0);
+      const subtotalNeto = Number(l.precio) * cantNeta;
+      return { ...l, _cantNeta: cantNeta, _subtotalNeto: subtotalNeto };
+    });
+
   y = labelSeccion(doc, y, 'Productos');
 
   const COL = {
@@ -280,7 +292,7 @@ function seccionProductos(doc, lineas, y) {
 
   // Calcular altura total de la tabla
   let alturaTotal = 32; // header
-  for (const l of lineas) {
+  for (const l of lineasMostrar) {
     alturaTotal += l.imei ? 34 : 24;
   }
 
@@ -300,13 +312,13 @@ function seccionProductos(doc, lineas, y) {
 
   let yFila = y + 28;
 
-  for (const [i, linea] of lineas.entries()) {
+  for (const [i, linea] of lineasMostrar.entries()) {
     const altFila = linea.imei ? 34 : 24;
     const esPar   = i % 2 === 1;
 
     if (esPar) {
       // Fondo alternado — esquinas cuadradas en filas intermedias
-      const esUltima = i === lineas.length - 1;
+      const esUltima = i === lineasMostrar.length - 1;
       if (esUltima) {
         doc.roundedRect(MARGIN, yFila, CONTENT_W, altFila, 8).fill('#F8FAFC');
         doc.rect(MARGIN, yFila, CONTENT_W, altFila - 8).fill('#F8FAFC');
@@ -331,18 +343,56 @@ function seccionProductos(doc, lineas, y) {
     }
 
     doc.font(FONT.normal).fontSize(9).fillColor(C.grisOscuro)
-      .text(String(linea.cantidad), COL.cant.x, yTexto, { width: COL.cant.w, align: 'right', lineBreak: false });
+      .text(String(linea._cantNeta), COL.cant.x, yTexto, { width: COL.cant.w, align: 'right', lineBreak: false });
 
     doc.font(FONT.normal).fontSize(9).fillColor(C.grisOscuro)
       .text(formatCOP(linea.precio), COL.precio.x, yTexto, { width: COL.precio.w, align: 'right', lineBreak: false });
 
     doc.font(FONT.bold).fontSize(9).fillColor(C.negro)
-      .text(formatCOP(linea.subtotal), COL.sub.x, yTexto, { width: COL.sub.w, align: 'right', lineBreak: false });
+      .text(formatCOP(linea._subtotalNeto), COL.sub.x, yTexto, { width: COL.sub.w, align: 'right', lineBreak: false });
 
     yFila += altFila;
   }
 
   return y + alturaTotal + 24;
+}
+
+// ─── SECCIÓN: Devoluciones ────────────────────────────────────────────────────
+
+function seccionDevoluciones(doc, lineas, y) {
+  const devueltas = lineas.filter((l) => Number(l.cantidad_devuelta || 0) > 0);
+  if (devueltas.length === 0) return y;
+
+  y = labelSeccion(doc, y, devueltas.length === 1 ? 'Devolución' : `Devoluciones (${devueltas.length})`);
+
+  for (const linea of devueltas) {
+    const cantDev  = Number(linea.cantidad_devuelta);
+    const valorDev = Number(linea.precio) * cantDev;
+    const alturaBloque = linea.imei ? 56 : 42;
+
+    rectFillStroke(doc, MARGIN, y, CONTENT_W, alturaBloque, C.naranjaFondo, '#FDE68A', 8);
+
+    let yInterna = y + 12;
+
+    doc.font(FONT.bold).fontSize(8.5).fillColor(C.naranja)
+      .text(linea.nombre_producto, MARGIN + 14, yInterna, { width: CONTENT_W * 0.65, lineBreak: false });
+    yInterna += 14;
+
+    if (linea.imei) {
+      doc.font(FONT.normal).fontSize(7.5).fillColor(C.grisOscuro)
+        .text(`IMEI: ${linea.imei}`, MARGIN + 14, yInterna, { width: CONTENT_W - 28, lineBreak: false });
+      yInterna += 14;
+    }
+
+    doc.font(FONT.normal).fontSize(8.5).fillColor(C.grisOscuro)
+      .text(`Devuelto: ${cantDev} ud${cantDev !== 1 ? 's' : ''}.`, MARGIN + 14, yInterna, { lineBreak: false });
+    doc.font(FONT.bold).fontSize(8.5).fillColor(C.naranja)
+      .text(`- ${formatCOP(valorDev)}`, MARGIN, yInterna, { width: CONTENT_W - 14, align: 'right', lineBreak: false });
+
+    y += alturaBloque + 10;
+  }
+
+  return y + 10;
 }
 
 // ─── SECCIÓN: Retomas ─────────────────────────────────────────────────────────
@@ -405,7 +455,10 @@ function seccionTotalesYPagos(doc, factura, y) {
   const lineas      = factura.lineas  || [];
   const pagos       = factura.pagos   || [];
   const retomas     = factura.retomas || [];
-  const total       = lineas.reduce((s, l) => s + Number(l.subtotal || 0), 0);
+  const total       = lineas.reduce((s, l) => {
+    const cantNeta = Math.max(0, Number(l.cantidad) - Number(l.cantidad_devuelta || 0));
+    return s + Number(l.precio) * cantNeta;
+  }, 0);
   const totalRetoma = retomas.reduce((s, r) => s + calcularValorRetoma(r), 0);
   const totalNeto   = total - totalRetoma;
   const totalPagado = pagos.reduce((s, p) => s + Number(p.valor || 0), 0);
@@ -587,6 +640,7 @@ function generarPdfFactura({ factura, config, garantias = [], res }) {
   y = seccionEncabezado(doc, config, factura);
   y = seccionCliente(doc, factura, y);
   y = seccionProductos(doc, factura.lineas || [], y);
+  y = seccionDevoluciones(doc, factura.lineas || [], y);
   y = seccionRetomas(doc, factura.retomas || [], y);
   y = seccionTotalesYPagos(doc, factura, y);
   y = seccionNotas(doc, factura.notas, y);

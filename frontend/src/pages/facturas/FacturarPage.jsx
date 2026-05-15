@@ -193,6 +193,29 @@ function ModalDetalle({ facturaId, onClose, onAbrirImprimir, onEditar }) {
             );
           })}
         </div>
+        {f?.lineas?.some((l) => Number(l.cantidad_devuelta || 0) > 0) && (
+          <div className="bg-orange-50 border border-orange-100 rounded-xl p-3 flex flex-col gap-2">
+            <p className="text-xs text-orange-600 font-semibold uppercase tracking-wide">Devoluciones registradas</p>
+            {f.lineas.filter((l) => Number(l.cantidad_devuelta || 0) > 0).map((l) => {
+              const cantDev  = Number(l.cantidad_devuelta);
+              const valorDev = Number(l.precio) * cantDev;
+              return (
+                <div key={`dev-${l.id}`} className="flex items-start justify-between text-sm gap-2">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-gray-700 truncate">{l.nombre_producto}</p>
+                    {l.imei && <p className="text-xs text-gray-400 font-mono">{l.imei}</p>}
+                    <p className="text-xs text-orange-500">
+                      {cantDev} ud{cantDev > 1 ? 's' : ''}. devuelta{cantDev > 1 ? 's' : ''}
+                    </p>
+                  </div>
+                  <p className="text-sm font-semibold text-orange-600 flex-shrink-0">
+                    - {formatCOP(valorDev)}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+        )}
         {f?.retomas?.length > 0 && (
           <div className="flex flex-col gap-2">
             {f.retomas.map((retoma) => <SeccionRetoma key={retoma.id} retoma={retoma} />)}

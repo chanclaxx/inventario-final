@@ -62,7 +62,20 @@ function ContenidoFactura({ factura, garantias, config }) {
       : [];
 
   const hayRetomas   = retomas.length > 0;
-  const total        = factura.lineas?.reduce((s, l) => s + Number(l.subtotal || 0), 0) || 0;
+
+  // Solo mostrar líneas con cantidad neta > 0 (excluir totalmente devueltas)
+  const lineasActivas = (factura.lineas || []).filter((l) => {
+    const cantNeta = Number(l.cantidad) - Number(l.cantidad_devuelta || 0);
+    return cantNeta > 0;
+  });
+
+  // Líneas que tienen al menos una unidad devuelta
+  const lineasConDevolucion = (factura.lineas || []).filter((l) => Number(l.cantidad_devuelta || 0) > 0);
+
+  const total        = (factura.lineas || []).reduce((s, l) => {
+    const cantNeta = Math.max(0, Number(l.cantidad) - Number(l.cantidad_devuelta || 0));
+    return s + Number(l.precio) * cantNeta;
+  }, 0);
   const totalPagado  = factura.pagos?.reduce((s, p) => s + Number(p.valor    || 0), 0) || 0;
   const totalRetomas = retomas.reduce((s, r) => s + calcularValorRetoma(r), 0);
   const cambio       = totalPagado - (total - totalRetomas);
@@ -106,18 +119,44 @@ function ContenidoFactura({ factura, garantias, config }) {
 
       <div className="linea-divisor" />
 
-      {/* Productos */}
+      {/* Productos (excluye los totalmente devueltos) */}
       <div className="negrita">PRODUCTOS</div>
-      {factura.lineas?.map((l, i) => (
-        <div key={i} style={{ marginBottom: '4px' }}>
-          <div className="negrita">{l.nombre_producto}</div>
-          {l.imei && <div style={{ fontSize: '9px' }}>IMEI: {l.imei}</div>}
-          <div className="fila">
-            <span>{l.cantidad} x {formatCOP(l.precio)}</span>
-            <span>{formatCOP(l.subtotal)}</span>
+      {lineasActivas.map((l, i) => {
+        const cantNeta     = Number(l.cantidad) - Number(l.cantidad_devuelta || 0);
+        const subtotalNeto = Number(l.precio) * cantNeta;
+        return (
+          <div key={i} style={{ marginBottom: '4px' }}>
+            <div className="negrita">{l.nombre_producto}</div>
+            {l.imei && <div style={{ fontSize: '9px' }}>IMEI: {l.imei}</div>}
+            <div className="fila">
+              <span>{cantNeta} x {formatCOP(l.precio)}</span>
+              <span>{formatCOP(subtotalNeto)}</span>
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
+
+      {/* Devoluciones */}
+      {lineasConDevolucion.length > 0 && (
+        <>
+          <div className="linea-divisor" />
+          <div className="negrita">DEVOLUCIONES</div>
+          {lineasConDevolucion.map((l, i) => {
+            const cantDev    = Number(l.cantidad_devuelta);
+            const valorDev   = Number(l.precio) * cantDev;
+            return (
+              <div key={i} style={{ marginBottom: '4px' }}>
+                <div className="negrita">{l.nombre_producto}</div>
+                {l.imei && <div style={{ fontSize: '9px' }}>IMEI: {l.imei}</div>}
+                <div className="fila">
+                  <span>Devuelto: {cantDev} ud{cantDev !== 1 ? 's' : ''}.</span>
+                  <span>- {formatCOP(valorDev)}</span>
+                </div>
+              </div>
+            );
+          })}
+        </>
+      )}
 
       <div className="linea-divisor" />
 
