@@ -18,9 +18,10 @@ import { getAcreedores } from '../../api/acreedores.api';
 import { getLineas }     from '../../api/lineas.api';
 import { useSucursalKey } from '../../hooks/useSucursalKey';
 import api from '../../api/axios.config';
+import { getArbol } from '../../api/variantesProductoApi';
 import {
   Trash2, Package, ShoppingBag, ChevronRight, ChevronDown,
-  RefreshCw, AlertTriangle, X,
+  RefreshCw, AlertTriangle, X, ChevronLeft, Layers,
 } from 'lucide-react';
 
 // ─── Utilidad: normalizar respuesta de productos a array ─────────────────────
@@ -261,6 +262,162 @@ function PanelConversion({ factor, traida, onChange, onAplicarATodos }) {
         </button>
       )}
       <p className="text-xs text-gray-400">Fórmula: precio COP = (precio USD × factor) + traída</p>
+    </div>
+  );
+}
+
+// ─── Selector de variante/atributo (árbol navegable) ─────────────────────────
+function MiniSelectorVariante({ arbolData, nodoSel, onSeleccionar }) {
+  const [nivel,          setNivel]          = useState('atributos');
+  const [atributoActivo, setAtributoActivo] = useState(null);
+
+  const labelNodo = (n) => n.tipo_nombre ? `${n.tipo_nombre}: ${n.valor}` : n.valor;
+
+  if (nodoSel) {
+    return (
+      <div className="flex items-center justify-between bg-blue-50 border border-blue-200 rounded-xl px-3 py-2">
+        <div className="flex items-center gap-2">
+          <Layers size={13} className="text-blue-500" />
+          <p className="text-sm font-semibold text-blue-800">{nodoSel.label}</p>
+        </div>
+        <button
+          onClick={() => { onSeleccionar(null); setNivel('atributos'); setAtributoActivo(null); }}
+          className="text-xs text-blue-400 hover:text-blue-600 underline"
+        >
+          Cambiar
+        </button>
+      </div>
+    );
+  }
+
+  if (nivel === 'variantes' && atributoActivo) {
+    return (
+      <div className="flex flex-col gap-2">
+        <button
+          onClick={() => { setNivel('atributos'); setAtributoActivo(null); }}
+          className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-700 transition-colors w-fit"
+        >
+          <ChevronLeft size={13} />
+          {labelNodo(atributoActivo)}
+        </button>
+        <div className="grid grid-cols-2 gap-2">
+          {(atributoActivo.variantes || []).map((v) => (
+            <button
+              key={v.id}
+              onClick={() => onSeleccionar({
+                id: v.id, tipo: 'variante',
+                valor: v.valor, tipo_nombre: v.tipo_nombre,
+                atributoId: atributoActivo.id,
+                label: labelNodo(v),
+              })}
+              className="flex items-center justify-between p-2.5 rounded-xl border border-gray-200
+                bg-white hover:border-blue-300 hover:bg-blue-50 transition-all text-left"
+            >
+              <span className="text-xs font-medium text-gray-800 leading-snug">{labelNodo(v)}</span>
+              <span className="text-xs text-gray-400 ml-1 tabular-nums flex-shrink-0">{v.stock} uds</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid grid-cols-2 gap-2">
+      {arbolData.map((a) => {
+        const tieneHijos = Array.isArray(a.variantes) && a.variantes.length > 0;
+        return (
+          <button
+            key={a.id}
+            onClick={() => {
+              if (tieneHijos) { setAtributoActivo(a); setNivel('variantes'); }
+              else onSeleccionar({ id: a.id, tipo: 'atributo', valor: a.valor, tipo_nombre: a.tipo_nombre, label: labelNodo(a) });
+            }}
+            className="flex items-center justify-between p-2.5 rounded-xl border border-gray-200
+              bg-white hover:border-blue-300 hover:bg-blue-50 transition-all text-left"
+          >
+            <span className="text-xs font-medium text-gray-800 leading-snug">{labelNodo(a)}</span>
+            <span className="text-xs text-gray-400 ml-1 flex items-center gap-0.5 flex-shrink-0">
+              {tieneHijos
+                ? <ChevronRight size={11} className="text-blue-400" />
+                : <span className="tabular-nums">{a.stock} uds</span>}
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── Fila de producto por cantidad con selector de variante ───────────────────
+function FilaProductoCantidad({
+  productoSel, variantesActivo, usandoConversion,
+  onCantidadChange, onPrecioUsdChange, onPrecioChange, onNodoSelChange, onEliminar,
+}) {
+  const sucursalId = productoSel.sucursal_id || null;
+  const { data: arbolData = [], isLoading: arbolLoading } = useQuery({
+    queryKey: ['arbol-producto', productoSel.id, sucursalId],
+    queryFn:  () => getArbol(productoSel.id, sucursalId).then((r) => r.data.data),
+    enabled:  !!productoSel.id && !!sucursalId && variantesActivo,
+    staleTime: 0,
+  });
+  const tieneArbol = variantesActivo && arbolData.length > 0;
+
+  return (
+    <div className="bg-gray-50 rounded-xl p-3 flex flex-col gap-2">
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-semibold text-gray-800">{productoSel.nombre}</p>
+        <button onClick={onEliminar} className="p-1 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-500">
+          <Trash2 size={14} />
+        </button>
+      </div>
+
+      {tieneArbol && (
+        <div className="flex flex-col gap-1.5">
+          <label className="text-xs font-medium text-gray-600 flex items-center gap-1">
+            <Layers size={11} /> Variante
+          </label>
+          <MiniSelectorVariante
+            arbolData={arbolData}
+            nodoSel={productoSel.nodo_sel || null}
+            onSeleccionar={onNodoSelChange}
+          />
+        </div>
+      )}
+
+      {variantesActivo && !tieneArbol && !arbolLoading && (
+        <p className="text-xs text-gray-400 italic">Sin variantes — se suma al stock general</p>
+      )}
+
+      <div className="flex gap-2">
+        <div className="flex-1">
+          <label className="text-xs text-gray-500 mb-1 block">Cantidad</label>
+          <input type="number" value={productoSel.cantidad_comprada}
+            onChange={(e) => onCantidadChange(Number(e.target.value))}
+            onWheel={noWheel}
+            className="w-full px-2 py-1.5 bg-white border border-gray-200 rounded-lg text-sm
+              focus:outline-none focus:ring-2 focus:ring-blue-500" />
+        </div>
+        {usandoConversion && (
+          <div className="flex-1">
+            <label className="text-xs text-gray-500 mb-1 block">Precio USD</label>
+            <input type="number" value={productoSel.precio_usd}
+              onChange={(e) => onPrecioUsdChange(e.target.value)}
+              onWheel={noWheel}
+              className="w-full px-2 py-1.5 bg-white border border-gray-200 rounded-lg text-sm
+                focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          </div>
+        )}
+        <div className="flex-1">
+          <label className="text-xs text-gray-500 mb-1 block">
+            {usandoConversion ? 'Precio COP' : 'Precio compra'}
+          </label>
+          <InputMoneda value={productoSel.precio_compra}
+            onChange={onPrecioChange} placeholder="0"
+            className="w-full px-2 py-1.5 bg-white border border-gray-200 rounded-lg text-sm
+              focus:outline-none focus:ring-2 focus:ring-blue-500" />
+        </div>
+      </div>
     </div>
   );
 }
@@ -766,10 +923,9 @@ function PasoLineaSerial({
 }
 
 // ─── Paso 2 Cantidad ──────────────────────────────────────────────────────────
-// Sin cambios — cantidad no maneja colores
 function PasoCantidad({
   proveedorId, productosIniciales, factorInicial, traidaInicial,
-  sucursalKey, sucursalLista, onProductosListos, onVolver,
+  sucursalKey, sucursalLista, onProductosListos, onVolver, variantesActivo,
 }) {
   const [busqueda,               setBusqueda]              = useState('');
   const [filtroLineaId,          setFiltroLineaId]         = useState('');
@@ -816,11 +972,15 @@ function PasoCantidad({
       cantidad_comprada: 1,
       precio_usd:        '',
       precio_compra:     Number(producto.costo_unitario) || 0,
+      nodo_sel:          null,
     }]);
   };
 
   const actualizarCampo = (id, campo, valor) =>
     setProductosSeleccionados((prev) => prev.map((p) => p.id === id ? { ...p, [campo]: valor } : p));
+
+  const actualizarNodoSel = (id, nodoSel) =>
+    setProductosSeleccionados((prev) => prev.map((p) => p.id === id ? { ...p, nodo_sel: nodoSel } : p));
 
   const actualizarPrecioUsd = (id, valor) =>
     setProductosSeleccionados((prev) =>
@@ -925,49 +1085,19 @@ function PasoCantidad({
       {productosSeleccionados.length > 0 && (
         <div className="flex flex-col gap-2">
           <p className="text-sm font-medium text-gray-700">Cantidades y precios</p>
-          {productosSeleccionados.map((p) => {
-            const productoSel = p;
-            return (
-              <div key={productoSel.id} className="bg-gray-50 rounded-xl p-3 flex flex-col gap-2">
-                <div className="flex items-center justify-between">
-                  <p className="text-sm font-semibold text-gray-800">{productoSel.nombre}</p>
-                  <button onClick={() => setProductosSeleccionados((prev) => prev.filter((s) => s.id !== productoSel.id))}
-                    className="p-1 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-500">
-                    <Trash2 size={14} />
-                  </button>
-                </div>
-                <div className="flex gap-2">
-                  <div className="flex-1">
-                    <label className="text-xs text-gray-500 mb-1 block">Cantidad</label>
-                    <input type="number" value={productoSel.cantidad_comprada}
-                      onChange={(e) => actualizarCampo(productoSel.id, 'cantidad_comprada', Number(e.target.value))}
-                      onWheel={noWheel}
-                      className="w-full px-2 py-1.5 bg-white border border-gray-200 rounded-lg text-sm
-                        focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                  </div>
-                  {usandoConversion && (
-                    <div className="flex-1">
-                      <label className="text-xs text-gray-500 mb-1 block">Precio USD</label>
-                      <input type="number" value={productoSel.precio_usd}
-                        onChange={(e) => actualizarPrecioUsd(productoSel.id, e.target.value)}
-                        onWheel={noWheel}
-                        className="w-full px-2 py-1.5 bg-white border border-gray-200 rounded-lg text-sm
-                          focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                    </div>
-                  )}
-                  <div className="flex-1">
-                    <label className="text-xs text-gray-500 mb-1 block">
-                      {usandoConversion ? 'Precio COP' : 'Precio compra'}
-                    </label>
-                    <InputMoneda value={productoSel.precio_compra}
-                      onChange={(val) => actualizarCampo(productoSel.id, 'precio_compra', val)} placeholder="0"
-                      className="w-full px-2 py-1.5 bg-white border border-gray-200 rounded-lg text-sm
-                        focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                  </div>
-                </div>
-              </div>
-            );
-          })}
+          {productosSeleccionados.map((p) => (
+            <FilaProductoCantidad
+              key={p.id}
+              productoSel={p}
+              variantesActivo={variantesActivo}
+              usandoConversion={usandoConversion}
+              onCantidadChange={(val) => actualizarCampo(p.id, 'cantidad_comprada', val)}
+              onPrecioUsdChange={(val) => actualizarPrecioUsd(p.id, val)}
+              onPrecioChange={(val) => actualizarCampo(p.id, 'precio_compra', val)}
+              onNodoSelChange={(nodo) => actualizarNodoSel(p.id, nodo)}
+              onEliminar={() => setProductosSeleccionados((prev) => prev.filter((s) => s.id !== p.id))}
+            />
+          ))}
         </div>
       )}
 
@@ -1237,6 +1367,7 @@ export function ModalCompra({ proveedor, onClose }) {
   const coloresConfig          = parsearColoresConfig(configData);
   const caracteristicasActivo  = configData?.caracteristicas_serial_activo === '1';
   const caracteristicasLista   = parsearCaracteristicasConfig(configData);
+  const variantesActivo        = configData?.variantes_activo === '1';
 
   const {
     verificando, verificarYProceder,
@@ -1328,6 +1459,8 @@ export function ModalCompra({ proveedor, onClose }) {
           factor_conversion: p.factor_conversion || null,
           valor_traida:      p.valor_traida      || null,
           producto_id:       p.id,
+          variante_id:       p.nodo_sel?.tipo === 'variante' ? p.nodo_sel.id : null,
+          atributo_id:       p.nodo_sel?.tipo === 'atributo' ? p.nodo_sel.id : null,
         }));
 
     mutCompra.mutate({
@@ -1402,6 +1535,7 @@ export function ModalCompra({ proveedor, onClose }) {
             sucursalLista={sucursalLista}
             onProductosListos={handleProductosListos}
             onVolver={handleVolverA1}
+            variantesActivo={variantesActivo}
           />
         )}
 

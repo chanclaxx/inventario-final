@@ -1,6 +1,7 @@
 const { pool }                  = require('../../config/db');
 const comprasRepo               = require('./compras.repository');
 const { calcularCostoPromedio } = require('../../utils/costoPromedio.util');
+const variantesRepo             = require('../variantes-producto/variantes-producto.repository');
 
 const getCompras = (sucursalId, negocioId) =>
   comprasRepo.findAll(sucursalId, negocioId);
@@ -147,7 +148,15 @@ const registrarCompra = async ({
           throw { status: 400, message: `El producto ${linea.nombre_producto} no pertenece a esta sucursal` };
         }
 
-        await comprasRepo.ajustarStockCantidad(client, linea.producto_id, linea.cantidad);
+        if (linea.variante_id) {
+          await variantesRepo.ajustarStockVarianteEnTx(client, linea.variante_id, linea.cantidad);
+          await variantesRepo.sincronizarStockProductoEnTx(client, linea.producto_id);
+        } else if (linea.atributo_id) {
+          await variantesRepo.ajustarStockAtributoEnTx(client, linea.atributo_id, linea.cantidad);
+          await variantesRepo.sincronizarStockProductoEnTx(client, linea.producto_id);
+        } else {
+          await comprasRepo.ajustarStockCantidad(client, linea.producto_id, linea.cantidad);
+        }
 
         if (linea.precio_unitario != null) {
           const costoPromedio = calcularCostoPromedio(
