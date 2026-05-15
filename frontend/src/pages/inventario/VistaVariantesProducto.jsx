@@ -15,7 +15,8 @@ import { Button }     from '../../components/ui/Button';
 import { Input }      from '../../components/ui/Input';
 import { Spinner }    from '../../components/ui/Spinner';
 import { Modal }      from '../../components/ui/Modal';
-import { formatCOP }  from '../../utils/formatters';
+import { formatCOP }      from '../../utils/formatters';
+import { InputMoneda }    from '../../components/ui/InputMoneda';
 import useCarritoStore from '../../store/carritoStore';
 
 function labelNodo(nodo) {
@@ -36,11 +37,12 @@ function colorBarra(stock, minimo) {
 
 // ─── Modal crear/editar nodo ──────────────────────────────────────────────────
 function ModalNodo({ open, onClose, titulo, tipos = [], datoInicial, onGuardar, isPending, error, onEliminar }) {
-  const [valor,    setValor]    = useState(datoInicial?.valor || '');
-  const [stockMin, setStockMin] = useState(datoInicial?.stock_minimo ?? 0);
-  const [precio,   setPrecio]   = useState(datoInicial?.precio || '');
-  const [tipoId,   setTipoId]   = useState(String(datoInicial?.tipo_id || ''));
-  const [stock,    setStock]    = useState('');
+  const [valor,         setValor]         = useState(datoInicial?.valor || '');
+  const [stockMin,      setStockMin]      = useState(datoInicial?.stock_minimo ?? 0);
+  const [precio,        setPrecio]        = useState(datoInicial?.precio || '');
+  const [costoUnitario, setCostoUnitario] = useState(datoInicial?.costo_unitario != null ? Number(datoInicial.costo_unitario) : '');
+  const [tipoId,        setTipoId]        = useState(String(datoInicial?.tipo_id || ''));
+  const [stock,         setStock]         = useState('');
 
   const tipoSel   = tipos.find((t) => String(t.id) === tipoId);
   const sugeridos = tipoSel?.valores || [];
@@ -49,10 +51,11 @@ function ModalNodo({ open, onClose, titulo, tipos = [], datoInicial, onGuardar, 
     if (!valor.trim()) return;
     onGuardar({
       valor,
-      stock_minimo: stockMin,
-      precio:   precio || null,
-      tipo_id:  tipoId ? Number(tipoId) : null,
-      stock:    Number(stock) || undefined,
+      stock_minimo:  stockMin,
+      precio:        precio || null,
+      costo_unitario: costoUnitario !== '' ? Number(costoUnitario) : null,
+      tipo_id:       tipoId ? Number(tipoId) : null,
+      stock:         Number(stock) || undefined,
     });
   };
 
@@ -123,6 +126,18 @@ function ModalNodo({ open, onClose, titulo, tipos = [], datoInicial, onGuardar, 
           onChange={(e) => setPrecio(e.target.value)}
           placeholder="Dejar vacío para usar el precio del producto"
         />
+
+        <div className="flex flex-col gap-1">
+          <label className="text-xs font-medium text-gray-600">Costo unitario (opcional)</label>
+          <InputMoneda
+            value={costoUnitario}
+            onChange={setCostoUnitario}
+            placeholder="0"
+            className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl
+              text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500
+              transition-all"
+          />
+        </div>
 
         {error && <p className="text-sm text-red-500">{error}</p>}
 
@@ -221,9 +236,14 @@ function TarjetaNodo({
               {sinStock ? 'sin stock' : stockBajo ? 'bajo mín.' : tieneHijos ? 'total' : 'en stock'}
             </span>
           </div>
-          {precioMostrar && (
-            <span className="text-sm font-semibold text-gray-700">{formatCOP(precioMostrar)}</span>
-          )}
+          <div className="flex flex-col items-end gap-0.5">
+            {precioMostrar && (
+              <span className="text-sm font-semibold text-gray-700">{formatCOP(precioMostrar)}</span>
+            )}
+            {esAdmin && nodo.costo_unitario != null && (
+              <span className="text-xs text-gray-400">costo: {formatCOP(nodo.costo_unitario)}</span>
+            )}
+          </div>
         </div>
 
         {nodo.stock_minimo > 0 && (

@@ -1,4 +1,5 @@
 const repo = require('./variantes-producto.repository');
+const { calcularCostoPromedio } = require('../../utils/costoPromedio.util');
 
 const getArbol = async (negocioId, productoId, sucursalId) => {
   const producto = await repo.verificarProductoNegocio(productoId, negocioId);
@@ -68,6 +69,11 @@ const ajustarStockAtributo = async (negocioId, atributoId, cantidad, opciones = 
   if (cantidad < 0 && (atributo.stock + cantidad) < 0) {
     throw { status: 400, message: `Stock insuficiente. Stock actual: ${atributo.stock}` };
   }
+  if (cantidad > 0 && opciones.costo_unitario != null) {
+    opciones._costo_nuevo = calcularCostoPromedio(
+      atributo.stock, atributo.costo_unitario, cantidad, opciones.costo_unitario
+    );
+  }
   await repo.ajustarStockAtributo(
     atributoId, cantidad, atributo.producto_id, atributo.sucursal_id, opciones
   );
@@ -79,6 +85,11 @@ const ajustarStockVariante = async (negocioId, varianteId, cantidad, opciones = 
   if (!variante) throw { status: 404, message: 'Variante no encontrada' };
   if (cantidad < 0 && (variante.stock + cantidad) < 0) {
     throw { status: 400, message: `Stock insuficiente. Stock actual: ${variante.stock}` };
+  }
+  if (cantidad > 0 && opciones.costo_unitario != null) {
+    opciones._costo_nuevo = calcularCostoPromedio(
+      variante.stock, variante.costo_unitario, cantidad, opciones.costo_unitario
+    );
   }
   await repo.ajustarStockVariante(
     varianteId, variante.atributo_id, cantidad,
