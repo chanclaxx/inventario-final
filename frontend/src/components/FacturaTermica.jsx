@@ -32,9 +32,6 @@ function BloqueRetoma({ retoma }) {
       {tipoLabel && (
         <div className="retoma-linea">Tipo: {tipoLabel}</div>
       )}
-      {retoma.imei && (
-        <div className="retoma-linea">IMEI: {retoma.imei}</div>
-      )}
       {nombreProd && (
         <div className="retoma-linea">Producto: {nombreProd}</div>
       )}

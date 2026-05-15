@@ -411,7 +411,6 @@ function seccionRetomas(doc, retomas, y) {
     const lineas = [
       retoma.descripcion                                     ? retoma.descripcion            : null,
       `Tipo: ${labelTipoRetoma(retoma)}`,
-      retoma.imei                                           ? `IMEI: ${retoma.imei}`        : null,
       nombreProd                                            ? `Producto: ${nombreProd}`     : null,
       (!retoma.imei && Number(retoma.cantidad_retoma) > 1)  ? `Cantidad: ${retoma.cantidad_retoma}` : null,
     ].filter(Boolean);
