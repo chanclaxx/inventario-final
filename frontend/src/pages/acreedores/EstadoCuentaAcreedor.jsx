@@ -1,8 +1,11 @@
 import { useState, Fragment } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getHistorialAcreedor, eliminarAbono as eliminarAbonoApi } from '../../api/acreedores.api';
-import { formatCOP } from '../../utils/formatters';
+import { getCompraById } from '../../api/compras.api';
+import { formatCOP, formatFechaHora } from '../../utils/formatters';
 import { Spinner } from '../../components/ui/Spinner';
+import { Modal }   from '../../components/ui/Modal';
+import { Badge }   from '../../components/ui/Badge';
 import {
   XCircle, TrendingDown, TrendingUp, Wallet,
   ChevronLeft, ChevronRight, ArrowUpDown, ShoppingBag,
@@ -74,19 +77,90 @@ function SeparadorFecha({ fecha }) {
   );
 }
 
-function BurbujaMensaje({ mov, onAnular }) {
-  const tipoKey = resolverTipo(mov);
-  const cfg     = TIPO_CONFIG[tipoKey];
-  const Icn     = cfg.Icn;
+// ─── Modal detalle de compra ──────────────────────────────────────────────────
+
+function ModalCompraDetalle({ compraId, onClose }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ['compra-detalle', compraId],
+    queryFn:  () => getCompraById(compraId).then((r) => r.data.data),
+    enabled:  !!compraId,
+  });
+
+  return (
+    <Modal open onClose={onClose} title={`Compra #${String(compraId).padStart(5, '0')}`} size="lg">
+      {isLoading ? <Spinner className="py-10" /> : (
+        <div className="flex flex-col gap-4">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="bg-gray-50 rounded-xl p-3">
+              <p className="text-xs text-gray-400 mb-0.5">Fecha</p>
+              <p className="text-sm font-medium text-gray-800">{formatFechaHora(data?.fecha)}</p>
+            </div>
+            <div className="bg-gray-50 rounded-xl p-3">
+              <p className="text-xs text-gray-400 mb-0.5">Estado</p>
+              <Badge variant={data?.estado === 'Completada' ? 'green' : 'yellow'}>{data?.estado}</Badge>
+            </div>
+            {data?.numero_factura && (
+              <div className="bg-gray-50 rounded-xl p-3 col-span-2">
+                <p className="text-xs text-gray-400 mb-0.5">N° Factura proveedor</p>
+                <p className="text-sm font-medium text-gray-800">{data.numero_factura}</p>
+              </div>
+            )}
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <p className="text-sm font-semibold text-gray-700">Productos</p>
+            {(data?.lineas || []).map((l) => (
+              <div key={l.id} className="bg-gray-50 rounded-xl p-3 flex items-start justify-between gap-2">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-gray-800">{l.nombre_producto}</p>
+                  {l.imei
+                    ? <p className="text-xs text-gray-400 font-mono mt-0.5">{l.imei}</p>
+                    : <p className="text-xs text-gray-400">Cantidad: {l.cantidad}</p>
+                  }
+                </div>
+                <div className="text-right flex-shrink-0">
+                  <p className="text-xs text-gray-400">{l.cantidad} × {formatCOP(l.precio_unitario)}</p>
+                  <p className="text-sm font-semibold text-gray-900">{formatCOP(l.cantidad * l.precio_unitario)}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="flex justify-between items-center bg-blue-50 rounded-xl px-4 py-3">
+            <span className="text-sm font-semibold text-gray-700">Total</span>
+            <span className="text-base font-bold text-blue-700">{formatCOP(data?.total)}</span>
+          </div>
+
+          {data?.notas && (
+            <div className="bg-gray-50 rounded-xl px-3 py-2">
+              <p className="text-xs text-gray-400 mb-0.5">Notas</p>
+              <p className="text-xs text-gray-600">{data.notas}</p>
+            </div>
+          )}
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+// ─── Burbuja de chat ──────────────────────────────────────────────────────────
+
+function BurbujaMensaje({ mov, onAnular, onVerCompra }) {
+  const tipoKey   = resolverTipo(mov);
+  const cfg       = TIPO_CONFIG[tipoKey];
+  const Icn       = cfg.Icn;
   const esDerecha = cfg.lado === 'derecha';
-  const saldo   = Number(mov.saldo_despues);
+  const saldo     = Number(mov.saldo_despues);
+  const esCompra  = tipoKey === 'cargo_compra' && !!mov.compra_id;
 
   return (
     <div className={`flex ${esDerecha ? 'justify-end' : 'justify-start'} px-2`}>
       <div className={`max-w-[78%] flex flex-col ${esDerecha ? 'items-end' : 'items-start'}`}>
-        <div className={`relative px-3.5 py-2.5 rounded-2xl shadow-sm ${cfg.bubbleBg} ${
-          esDerecha ? 'rounded-tr-sm' : 'rounded-tl-sm'
-        }`}>
+        <div
+          onClick={esCompra ? () => onVerCompra(mov.compra_id) : undefined}
+          className={`relative px-3.5 py-2.5 rounded-2xl shadow-sm ${cfg.bubbleBg} ${
+            esDerecha ? 'rounded-tr-sm' : 'rounded-tl-sm'
+          } ${esCompra ? 'cursor-pointer hover:shadow-md hover:brightness-95 transition-all' : ''}`}>
 
           {/* Badge tipo */}
           <div className="flex items-center gap-1.5 mb-1">
@@ -94,9 +168,9 @@ function BurbujaMensaje({ mov, onAnular }) {
             <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${cfg.badge}`}>
               {cfg.label}
             </span>
-            {tipoKey === 'cargo_compra' && mov.compra_id && (
+            {esCompra && (
               <span className="text-[10px] text-purple-500 font-medium">
-                #{String(mov.compra_id).padStart(5, '0')}
+                #{String(mov.compra_id).padStart(5, '0')} · ver detalle →
               </span>
             )}
           </div>
@@ -127,7 +201,7 @@ function BurbujaMensaje({ mov, onAnular }) {
             <span className="text-[10px] text-gray-400">{formatFecha(mov.fecha)}</span>
             {mov.tipo === 'Abono' && onAnular && (
               <button
-                onClick={() => onAnular(mov)}
+                onClick={(e) => { e.stopPropagation(); onAnular(mov); }}
                 title="Eliminar abono"
                 className="text-gray-300 hover:text-red-400 transition-colors">
                 <XCircle size={13} />
@@ -142,12 +216,13 @@ function BurbujaMensaje({ mov, onAnular }) {
 
 export function EstadoCuentaAcreedor({ acreedorId, esAdmin }) {
   const queryClient = useQueryClient();
-  const [confirmando, setConfirmando] = useState(null);
-  const [fechaDesde,  setFechaDesde]  = useState('');
-  const [fechaHasta,  setFechaHasta]  = useState('');
-  const [sortDir,     setSortDir]     = useState('desc');
-  const [pagina,      setPagina]      = useState(1);
-  const [filtroTipo,  setFiltroTipo]  = useState('todos');
+  const [confirmando,   setConfirmando]   = useState(null);
+  const [compraModal,   setCompraModal]   = useState(null);
+  const [fechaDesde,    setFechaDesde]    = useState('');
+  const [fechaHasta,    setFechaHasta]    = useState('');
+  const [sortDir,       setSortDir]       = useState('desc');
+  const [pagina,        setPagina]        = useState(1);
+  const [filtroTipo,    setFiltroTipo]    = useState('todos');
 
   const { data: movimientos = [], isLoading, isError, error } = useQuery({
     queryKey:  ['historial-acreedor', acreedorId],
@@ -288,6 +363,7 @@ export function EstadoCuentaAcreedor({ acreedorId, esAdmin }) {
               <BurbujaMensaje
                 mov={mov}
                 onAnular={esAdmin ? (m) => setConfirmando(m) : null}
+                onVerCompra={(id) => setCompraModal(id)}
               />
             </Fragment>
           );
@@ -354,6 +430,10 @@ export function EstadoCuentaAcreedor({ acreedorId, esAdmin }) {
             </div>
           </div>
         </div>
+      )}
+
+      {compraModal && (
+        <ModalCompraDetalle compraId={compraModal} onClose={() => setCompraModal(null)} />
       )}
     </div>
   );
