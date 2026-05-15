@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { buscarEquivalentes, ejecutarTraslado } from '../../api/traslados.api';
+import { buscarEquivalentes, ejecutarTraslado, buscarProductosEnSucursal } from '../../api/traslados.api';
 import { getSucursales } from '../../api/sucursales.api';
 import { Modal }         from '../../components/ui/Modal';
 import { Button }        from '../../components/ui/Button';
@@ -11,8 +11,31 @@ import useSucursalStore  from '../../store/sucursalStore';
 import { useAuth }       from '../../context/useAuth';
 import {
   ArrowRightLeft, ChevronRight, CheckCircle, AlertTriangle,
-  Package, ShoppingBag,
+  Package, ShoppingBag, Search,
 } from 'lucide-react';
+
+// ─── Utilidades de normalización (espejo del backend) ─────────────────────────
+const _norm = (s) =>
+  (s || '')
+    .toLowerCase()
+    .trim()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[-_]/g, ' ')
+    .replace(/\s+/g, ' ');
+
+const _tokens = (s) => _norm(s).split(/\s+/).filter((t) => t.length >= 2);
+
+/** Devuelve true si `nombre` coincide con `query` usando tokens y subcadenas */
+const _matches = (nombre, query) => {
+  if (!query.trim()) return true;
+  const q = _norm(query);
+  const n = _norm(nombre);
+  if (n.includes(q) || q.includes(n)) return true;
+  const qt = _tokens(query);
+  const nt = _tokens(nombre);
+  return qt.length > 0 && qt.some((t) => nt.some((nt2) => nt2.startsWith(t) || t.startsWith(nt2)));
+};
 
 // ─── Indicador de nivel de coincidencia ───────────────────────────────────────
 const NIVEL_CONFIG = {
@@ -32,26 +55,99 @@ function BadgeNivel({ nivel }) {
 }
 
 // ─── Selector de producto destino por item ────────────────────────────────────
-function SelectorDestino({ equivalencia, seleccionId, onSeleccionar }) {
-  const [busqueda, setBusqueda] = useState('');
+function SelectorDestino({ equivalencia, seleccionId, onSeleccionar, sucursalDestinoId }) {
+  const [busqueda, setBusqueda]               = useState('');
+  const [resultadosManuales, setResultadosManuales] = useState(null); // null = mostrando sugerencias
+  const [buscandoManual, setBuscandoManual]   = useState(false);
+  const [errorManual, setErrorManual]         = useState('');
 
-  const sugerencias = equivalencia.sugerencias || [];
-  const filtradas = busqueda.trim()
-    ? sugerencias.filter((s) => s.nombre.toLowerCase().includes(busqueda.toLowerCase()))
-    : sugerencias;
+  const sugerencias   = equivalencia.sugerencias || [];
+  const filtradas     = sugerencias.filter((s) => _matches(s.nombre, busqueda));
+  const listaVisible  = resultadosManuales !== null ? resultadosManuales : filtradas;
+
+  const handleChangeBusqueda = (v) => {
+    setBusqueda(v);
+    setErrorManual('');
+    if (!v.trim()) setResultadosManuales(null);
+  };
+
+  const handleBuscarEnDestino = async () => {
+    if (!busqueda.trim() || busqueda.trim().length < 2) return;
+    setBuscandoManual(true);
+    setErrorManual('');
+    try {
+      const res = await buscarProductosEnSucursal(sucursalDestinoId, equivalencia.tipo, busqueda.trim());
+      setResultadosManuales(res.data.data || []);
+    } catch {
+      setErrorManual('Error al buscar. Intenta de nuevo.');
+      setResultadosManuales([]);
+    } finally {
+      setBuscandoManual(false);
+    }
+  };
+
+  const handleVolverSugerencias = () => {
+    setResultadosManuales(null);
+    setBusqueda('');
+    setErrorManual('');
+  };
+
+  const msgVacio = resultadosManuales !== null
+    ? 'No se encontraron productos con ese término en la sucursal destino'
+    : busqueda.trim()
+    ? 'Sin coincidencias — prueba el botón "Buscar" para ampliar la búsqueda'
+    : 'No hay productos disponibles en la sucursal destino';
 
   return (
     <div className="flex flex-col gap-2">
-      {sugerencias.length > 5 && (
-        <SearchInput value={busqueda} onChange={setBusqueda} placeholder="Filtrar productos..." />
+      {/* Barra de búsqueda + botón buscar en backend */}
+      <div className="flex gap-2 items-center">
+        <div className="flex-1">
+          <SearchInput
+            value={busqueda}
+            onChange={handleChangeBusqueda}
+            placeholder="Buscar en sucursal destino..."
+          />
+        </div>
+        {busqueda.trim().length >= 2 && (
+          <button
+            type="button"
+            onClick={handleBuscarEnDestino}
+            disabled={buscandoManual}
+            className="flex items-center gap-1.5 px-3 py-2 bg-blue-600 text-white text-xs
+              font-medium rounded-xl hover:bg-blue-700 disabled:opacity-50 transition-colors
+              whitespace-nowrap flex-shrink-0"
+          >
+            <Search size={11} />
+            {buscandoManual ? 'Buscando...' : 'Buscar'}
+          </button>
+        )}
+      </div>
+
+      {/* Banner de resultados manuales */}
+      {resultadosManuales !== null && (
+        <div className="flex items-center justify-between text-xs px-0.5">
+          <span className={resultadosManuales.length === 0 ? 'text-red-500' : 'text-blue-600'}>
+            {errorManual || (resultadosManuales.length === 0
+              ? 'Sin resultados para esa búsqueda'
+              : `${resultadosManuales.length} resultado${resultadosManuales.length !== 1 ? 's' : ''} encontrado${resultadosManuales.length !== 1 ? 's' : ''}`)}
+          </span>
+          <button
+            type="button"
+            onClick={handleVolverSugerencias}
+            className="text-gray-400 underline hover:text-gray-600"
+          >
+            Ver sugerencias
+          </button>
+        </div>
       )}
-      <div className="flex flex-col gap-1 max-h-40 overflow-y-auto">
-        {filtradas.length === 0 ? (
-          <p className="text-xs text-gray-400 px-2 py-3 text-center">
-            No hay productos disponibles en la sucursal destino
-          </p>
+
+      {/* Lista de productos */}
+      <div className="flex flex-col gap-1 max-h-48 overflow-y-auto">
+        {listaVisible.length === 0 ? (
+          <p className="text-xs text-gray-400 px-2 py-3 text-center">{msgVacio}</p>
         ) : (
-          filtradas.map((prod) => {
+          listaVisible.map((prod) => {
             const esSel = seleccionId === prod.id;
             return (
               <button key={prod.id} onClick={() => onSeleccionar(prod.id)}
@@ -80,7 +176,7 @@ function SelectorDestino({ equivalencia, seleccionId, onSeleccionar }) {
 }
 
 // ─── Card de item a trasladar ─────────────────────────────────────────────────
-function ItemTraslado({ item, equivalencia, seleccionId, onSeleccionar }) {
+function ItemTraslado({ item, equivalencia, seleccionId, onSeleccionar, sucursalDestinoId }) {
   const [expandido, setExpandido] = useState(!equivalencia?.auto_seleccionado);
 
   const TipoIcon = item.tipo === 'serial' ? Package : ShoppingBag;
@@ -128,6 +224,7 @@ function ItemTraslado({ item, equivalencia, seleccionId, onSeleccionar }) {
             equivalencia={equivalencia}
             seleccionId={seleccionId}
             onSeleccionar={(id) => { onSeleccionar(id); setExpandido(false); }}
+            sucursalDestinoId={sucursalDestinoId}
           />
         </div>
       )}
@@ -164,7 +261,7 @@ function PasoSucursal({ sucursales, sucursalOrigenId, sucursalDestinoId, onSelec
 }
 
 // ─── Paso 2: Mapear productos ─────────────────────────────────────────────────
-function PasoMapeo({ items, equivalencias, selecciones, onSeleccionar }) {
+function PasoMapeo({ items, equivalencias, selecciones, onSeleccionar, sucursalDestinoId }) {
   const totalItems  = items.length;
   const mapeados    = Object.values(selecciones).filter(Boolean).length;
   const sinOpciones = equivalencias.filter((e) => (e.sugerencias || []).length === 0).length;
@@ -199,6 +296,7 @@ function PasoMapeo({ items, equivalencias, selecciones, onSeleccionar }) {
               equivalencia={equiv}
               seleccionId={selecciones[item.key] || null}
               onSeleccionar={(id) => onSeleccionar(item.key, id)}
+              sucursalDestinoId={sucursalDestinoId}
             />
           );
         })}
@@ -394,6 +492,7 @@ export function ModalTraslado({ open, onClose }) {
               equivalencias={equivalencias}
               selecciones={selecciones}
               onSeleccionar={handleSeleccionarDestino}
+              sucursalDestinoId={sucursalDestinoId}
             />
 
             <div className="flex flex-col gap-2">

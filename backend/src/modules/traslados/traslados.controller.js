@@ -17,6 +17,20 @@ const buscarEquivalentes = async (req, res, next) => {
     res.json({ ok: true, data });
   } catch (err) { next(err); }
 };
+const buscarEnSucursal = async (req, res, next) => {
+  try {
+    const { sucursalId } = req.params;
+    const { tipo, q } = req.query;
+    if (!tipo || !q) {
+      return res.status(400).json({ ok: false, error: 'Los parámetros tipo y q son requeridos' });
+    }
+    const data = await service.buscarEnSucursal(
+      req.user.negocio_id, Number(sucursalId), tipo, q
+    );
+    res.json({ ok: true, data });
+  } catch (err) { next(err); }
+};
+
 const revertirLineaTraslado = async (req, res, next) => {
   try {
     await service.revertirLineaTraslado(
@@ -70,4 +84,7 @@ const revertirTraslado = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-module.exports = { buscarEquivalentes, ejecutarTraslado, getTraslados, getTrasladoById, revertirTraslado,revertirLineaTraslado };
+module.exports = {
+  buscarEquivalentes, buscarEnSucursal, ejecutarTraslado,
+  getTraslados, getTrasladoById, revertirTraslado, revertirLineaTraslado,
+};

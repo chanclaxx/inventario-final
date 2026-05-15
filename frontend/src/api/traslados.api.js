@@ -14,3 +14,6 @@ export const getTrasladoById = (id) =>
 
 export const revertirTraslado = (id) =>
   api.post(`/traslados/${id}/revertir`);
+
+export const buscarProductosEnSucursal = (sucursalId, tipo, q) =>
+  api.get(`/traslados/sucursal/${sucursalId}/productos`, { params: { tipo, q } });

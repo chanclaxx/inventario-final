@@ -1,144 +1,146 @@
 const { pool } = require('../../config/db');
 
-// ─── Búsqueda de equivalentes en sucursal destino ─────────────────────────────
+// ─── Utilidades de similitud ──────────────────────────────────────────────────
+
+/** Normaliza un string: minúsculas, sin tildes, sin guiones, espacios simples */
+const _norm = (s) =>
+  (s || '')
+    .toLowerCase()
+    .trim()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[-_]/g, ' ')
+    .replace(/\s+/g, ' ');
+
+/** Divide en tokens de 2+ caracteres */
+const _tokens = (s) => _norm(s).split(/\s+/).filter((t) => t.length >= 2);
 
 /**
- * Busca productos_serial equivalentes en la sucursal destino.
- * Cascada: exacto → parcial → misma línea → todos
+ * Calcula un score de similitud entre un producto destino y los datos del origen.
+ * Insensible a: orden de palabras, tildes, mayúsculas, guiones.
+ *
+ * Escala:
+ *  100 → cadena exacta
+ *   99 → mismas palabras, distinto orden
+ *  20–98 → superposición parcial de tokens + bonos de marca/modelo/línea
+ *   0–19 → muy poca o ninguna similitud
  */
-const buscarEquivalentesSerial = async (negocioId, sucursalDestinoId, { nombre, marca, modelo, linea_id }) => {
-  // 1. Coincidencia exacta: nombre + marca + modelo
-  const { rows: exactos } = await pool.query(`
-    SELECT ps.id, ps.nombre, ps.marca, ps.modelo, ps.precio, ps.linea_id,
-           lp.nombre AS linea_nombre,
-           COUNT(s.id) FILTER (WHERE s.vendido = false AND s.prestado = false) AS disponibles
-    FROM productos_serial ps
-    JOIN sucursales su ON su.id = ps.sucursal_id
-    LEFT JOIN lineas_producto lp ON lp.id = ps.linea_id
-    LEFT JOIN seriales s ON s.producto_id = ps.id
-    WHERE ps.sucursal_id = $1 AND su.negocio_id = $2
-      AND LOWER(TRIM(ps.nombre)) = LOWER(TRIM($3))
-      AND ($4::text IS NULL OR LOWER(TRIM(ps.marca)) = LOWER(TRIM($4)))
-      AND ($5::text IS NULL OR LOWER(TRIM(ps.modelo)) = LOWER(TRIM($5)))
-    GROUP BY ps.id, lp.nombre
-    ORDER BY ps.nombre
-  `, [sucursalDestinoId, negocioId, nombre, marca || null, modelo || null]);
+const _score = (prod, { nombre, marca, modelo, linea_id }) => {
+  const n1 = _norm(nombre);
+  const n2 = _norm(prod.nombre);
 
-  if (exactos.length > 0) return { nivel: 'exacto', resultados: exactos };
+  if (n1 === n2) return 100;
 
-  // 2. Parcial: nombre contiene o marca coincide + misma línea
-  const { rows: parciales } = await pool.query(`
-    SELECT ps.id, ps.nombre, ps.marca, ps.modelo, ps.precio, ps.linea_id,
-           lp.nombre AS linea_nombre,
-           COUNT(s.id) FILTER (WHERE s.vendido = false AND s.prestado = false) AS disponibles
-    FROM productos_serial ps
-    JOIN sucursales su ON su.id = ps.sucursal_id
-    LEFT JOIN lineas_producto lp ON lp.id = ps.linea_id
-    LEFT JOIN seriales s ON s.producto_id = ps.id
-    WHERE ps.sucursal_id = $1 AND su.negocio_id = $2
-      AND (
-        LOWER(ps.nombre) LIKE '%' || LOWER(TRIM($3)) || '%'
-        OR ($4::text IS NOT NULL AND LOWER(TRIM(ps.marca)) = LOWER(TRIM($4)))
-      )
-    GROUP BY ps.id, lp.nombre
-    ORDER BY ps.nombre
-    LIMIT 20
-  `, [sucursalDestinoId, negocioId, nombre, marca || null]);
+  const t1 = _tokens(nombre);
+  const t2 = _tokens(prod.nombre);
 
-  if (parciales.length > 0) return { nivel: 'parcial', resultados: parciales };
+  // Mismas palabras, distinto orden → casi exacto
+  if (
+    t1.length > 0 &&
+    t1.length === t2.length &&
+    t1.every((t) => t2.includes(t)) &&
+    t2.every((t) => t1.includes(t))
+  ) return 99;
 
-  // 3. Misma línea de producto
-  if (linea_id) {
-    const { rows: porLinea } = await pool.query(`
-      SELECT ps.id, ps.nombre, ps.marca, ps.modelo, ps.precio, ps.linea_id,
-             lp.nombre AS linea_nombre,
-             COUNT(s.id) FILTER (WHERE s.vendido = false AND s.prestado = false) AS disponibles
-      FROM productos_serial ps
-      JOIN sucursales su ON su.id = ps.sucursal_id
-      LEFT JOIN lineas_producto lp ON lp.id = ps.linea_id
-      LEFT JOIN seriales s ON s.producto_id = ps.id
-      WHERE ps.sucursal_id = $1 AND su.negocio_id = $2 AND ps.linea_id = $3
-      GROUP BY ps.id, lp.nombre
-      ORDER BY ps.nombre
-      LIMIT 30
-    `, [sucursalDestinoId, negocioId, linea_id]);
+  let score = 0;
 
-    if (porLinea.length > 0) return { nivel: 'linea', resultados: porLinea };
+  if (t1.length && t2.length) {
+    const hits = t1.filter((t) => t2.includes(t)).length;
+    const union = new Set([...t1, ...t2]).size;
+    score += (hits / union) * 60;
+    if (hits === t1.length) score += 15; // todos los tokens del origen están en el destino
   }
 
-  // 4. Todos los productos serial de la sucursal destino
-  const { rows: todos } = await pool.query(`
-    SELECT ps.id, ps.nombre, ps.marca, ps.modelo, ps.precio, ps.linea_id,
-           lp.nombre AS linea_nombre,
-           COUNT(s.id) FILTER (WHERE s.vendido = false AND s.prestado = false) AS disponibles
-    FROM productos_serial ps
-    JOIN sucursales su ON su.id = ps.sucursal_id
-    LEFT JOIN lineas_producto lp ON lp.id = ps.linea_id
-    LEFT JOIN seriales s ON s.producto_id = ps.id
-    WHERE ps.sucursal_id = $1 AND su.negocio_id = $2
-    GROUP BY ps.id, lp.nombre
-    ORDER BY ps.nombre
-    LIMIT 50
-  `, [sucursalDestinoId, negocioId]);
+  // Coincidencia de subcadena (bidireccional)
+  if (n2.includes(n1) || n1.includes(n2)) score += 10;
 
-  return { nivel: 'todos', resultados: todos };
+  // Bono por marca y modelo
+  if (marca && prod.marca && _norm(marca) === _norm(prod.marca))   score += 12;
+  if (modelo && prod.modelo && _norm(modelo) === _norm(prod.modelo)) score += 10;
+
+  // Bono por misma línea
+  if (linea_id && prod.linea_id === linea_id) score += 5;
+
+  return score;
 };
 
 /**
- * Busca productos_cantidad equivalentes en la sucursal destino.
- * Cascada: exacto → parcial → misma línea → todos
+ * Scoring para búsqueda libre: usa coincidencia de prefijo/subcadena por token
+ * para que "gal" encuentre "Galaxy".
  */
-const buscarEquivalentesCantidad = async (negocioId, sucursalDestinoId, { nombre, linea_id }) => {
-  // 1. Coincidencia exacta por nombre
-  const { rows: exactos } = await pool.query(`
-    SELECT pc.id, pc.nombre, pc.stock, pc.precio, pc.costo_unitario,
-           pc.unidad_medida, pc.linea_id, lp.nombre AS linea_nombre
-    FROM productos_cantidad pc
-    JOIN sucursales su ON su.id = pc.sucursal_id
-    LEFT JOIN lineas_producto lp ON lp.id = pc.linea_id
-    WHERE pc.sucursal_id = $1 AND su.negocio_id = $2
-      AND pc.activo = true
-      AND LOWER(TRIM(pc.nombre)) = LOWER(TRIM($3))
-    ORDER BY pc.nombre
-  `, [sucursalDestinoId, negocioId, nombre]);
+const _scoreQuery = (prod, q) => {
+  const n1 = _norm(q);
+  const n2 = _norm(prod.nombre);
 
-  if (exactos.length > 0) return { nivel: 'exacto', resultados: exactos };
+  if (!n1) return 0;
+  if (n1 === n2) return 100;
+  if (n2.includes(n1)) return 80;
+  if (n1.includes(n2)) return 70;
 
-  // 2. Parcial: nombre contiene
-  const { rows: parciales } = await pool.query(`
-    SELECT pc.id, pc.nombre, pc.stock, pc.precio, pc.costo_unitario,
-           pc.unidad_medida, pc.linea_id, lp.nombre AS linea_nombre
-    FROM productos_cantidad pc
-    JOIN sucursales su ON su.id = pc.sucursal_id
-    LEFT JOIN lineas_producto lp ON lp.id = pc.linea_id
-    WHERE pc.sucursal_id = $1 AND su.negocio_id = $2
-      AND pc.activo = true
-      AND LOWER(pc.nombre) LIKE '%' || LOWER(TRIM($3)) || '%'
-    ORDER BY pc.nombre
-    LIMIT 20
-  `, [sucursalDestinoId, negocioId, nombre]);
+  const t1 = _tokens(q);
+  const t2 = _tokens(prod.nombre);
+  if (!t1.length || !t2.length) return n2.includes(n1) ? 30 : 0;
 
-  if (parciales.length > 0) return { nivel: 'parcial', resultados: parciales };
+  let hits = 0;
+  for (const qt of t1) {
+    if (t2.some((pt) => pt.startsWith(qt) || qt.startsWith(pt))) hits++;
+  }
+  return (hits / Math.max(t1.length, 1)) * 60;
+};
 
-  // 3. Misma línea
-  if (linea_id) {
-    const { rows: porLinea } = await pool.query(`
-      SELECT pc.id, pc.nombre, pc.stock, pc.precio, pc.costo_unitario,
-             pc.unidad_medida, pc.linea_id, lp.nombre AS linea_nombre
-      FROM productos_cantidad pc
-      JOIN sucursales su ON su.id = pc.sucursal_id
-      LEFT JOIN lineas_producto lp ON lp.id = pc.linea_id
-      WHERE pc.sucursal_id = $1 AND su.negocio_id = $2
-        AND pc.activo = true AND pc.linea_id = $3
-      ORDER BY pc.nombre
-      LIMIT 30
-    `, [sucursalDestinoId, negocioId, linea_id]);
+// ─── Búsqueda de equivalentes en sucursal destino ─────────────────────────────
 
-    if (porLinea.length > 0) return { nivel: 'linea', resultados: porLinea };
+/**
+ * Trae todos los productos_serial de la sucursal destino y los rankea por
+ * similitud con el producto origen usando _score (insensible a orden y tildes).
+ * Devuelve { nivel, resultados } con el nivel de mejor coincidencia.
+ */
+const buscarEquivalentesSerial = async (negocioId, sucursalDestinoId, { nombre, marca, modelo, linea_id }) => {
+  const { rows } = await pool.query(`
+    SELECT ps.id, ps.nombre, ps.marca, ps.modelo, ps.precio, ps.linea_id,
+           lp.nombre AS linea_nombre,
+           COUNT(s.id) FILTER (WHERE s.vendido = false AND s.prestado = false) AS disponibles
+    FROM productos_serial ps
+    JOIN sucursales su ON su.id = ps.sucursal_id
+    LEFT JOIN lineas_producto lp ON lp.id = ps.linea_id
+    LEFT JOIN seriales s ON s.producto_id = ps.id
+    WHERE ps.sucursal_id = $1 AND su.negocio_id = $2
+    GROUP BY ps.id, lp.nombre
+    ORDER BY ps.nombre
+  `, [sucursalDestinoId, negocioId]);
+
+  if (!rows.length) return { nivel: 'todos', resultados: [] };
+
+  const scored = rows
+    .map((p) => ({ ...p, _s: _score(p, { nombre, marca, modelo, linea_id }) }))
+    .sort((a, b) => b._s - a._s);
+
+  const best = scored[0]._s;
+
+  let nivel, resultados;
+  if (best >= 99) {
+    nivel = 'exacto';
+    resultados = scored.filter((p) => p._s >= 99);
+  } else if (best >= 20) {
+    nivel = 'parcial';
+    resultados = scored.filter((p) => p._s >= 20).slice(0, 20);
+  } else if (linea_id && rows.some((p) => p.linea_id === linea_id)) {
+    nivel = 'linea';
+    resultados = scored.filter((p) => p.linea_id === linea_id).slice(0, 30);
+  } else {
+    nivel = 'todos';
+    resultados = scored.slice(0, 50);
   }
 
-  // 4. Todos
-  const { rows: todos } = await pool.query(`
+  return { nivel, resultados: resultados.map(({ _s, ...p }) => p) };
+};
+
+/**
+ * Trae todos los productos_cantidad de la sucursal destino y los rankea por
+ * similitud con el producto origen.
+ */
+const buscarEquivalentesCantidad = async (negocioId, sucursalDestinoId, { nombre, linea_id }) => {
+  const { rows } = await pool.query(`
     SELECT pc.id, pc.nombre, pc.stock, pc.precio, pc.costo_unitario,
            pc.unidad_medida, pc.linea_id, lp.nombre AS linea_nombre
     FROM productos_cantidad pc
@@ -146,10 +148,82 @@ const buscarEquivalentesCantidad = async (negocioId, sucursalDestinoId, { nombre
     LEFT JOIN lineas_producto lp ON lp.id = pc.linea_id
     WHERE pc.sucursal_id = $1 AND su.negocio_id = $2 AND pc.activo = true
     ORDER BY pc.nombre
-    LIMIT 50
   `, [sucursalDestinoId, negocioId]);
 
-  return { nivel: 'todos', resultados: todos };
+  if (!rows.length) return { nivel: 'todos', resultados: [] };
+
+  const scored = rows
+    .map((p) => ({ ...p, _s: _score(p, { nombre, linea_id }) }))
+    .sort((a, b) => b._s - a._s);
+
+  const best = scored[0]._s;
+
+  let nivel, resultados;
+  if (best >= 99) {
+    nivel = 'exacto';
+    resultados = scored.filter((p) => p._s >= 99);
+  } else if (best >= 20) {
+    nivel = 'parcial';
+    resultados = scored.filter((p) => p._s >= 20).slice(0, 20);
+  } else if (linea_id && rows.some((p) => p.linea_id === linea_id)) {
+    nivel = 'linea';
+    resultados = scored.filter((p) => p.linea_id === linea_id).slice(0, 30);
+  } else {
+    nivel = 'todos';
+    resultados = scored.slice(0, 50);
+  }
+
+  return { nivel, resultados: resultados.map(({ _s, ...p }) => p) };
+};
+
+// ─── Búsqueda libre en sucursal destino (escape hatch) ───────────────────────
+
+/**
+ * Permite al usuario buscar cualquier producto en la sucursal destino con un
+ * término libre, usando coincidencia de prefijo por token (_scoreQuery).
+ * Usado cuando el algoritmo automático no encontró lo que el usuario quería.
+ */
+const buscarProductosEnSucursal = async (negocioId, sucursalId, tipo, q) => {
+  if (tipo === 'serial') {
+    const { rows } = await pool.query(`
+      SELECT ps.id, ps.nombre, ps.marca, ps.modelo, ps.precio, ps.linea_id,
+             lp.nombre AS linea_nombre,
+             COUNT(s.id) FILTER (WHERE s.vendido = false AND s.prestado = false) AS disponibles
+      FROM productos_serial ps
+      JOIN sucursales su ON su.id = ps.sucursal_id
+      LEFT JOIN lineas_producto lp ON lp.id = ps.linea_id
+      LEFT JOIN seriales s ON s.producto_id = ps.id
+      WHERE ps.sucursal_id = $1 AND su.negocio_id = $2
+      GROUP BY ps.id, lp.nombre
+      ORDER BY ps.nombre
+    `, [sucursalId, negocioId]);
+
+    if (!rows.length) return [];
+    return rows
+      .map((p) => ({ ...p, _s: _scoreQuery(p, q) }))
+      .filter((p) => p._s > 0)
+      .sort((a, b) => b._s - a._s)
+      .slice(0, 30)
+      .map(({ _s, ...p }) => p);
+  }
+
+  const { rows } = await pool.query(`
+    SELECT pc.id, pc.nombre, pc.stock, pc.precio, pc.costo_unitario,
+           pc.unidad_medida, pc.linea_id, lp.nombre AS linea_nombre
+    FROM productos_cantidad pc
+    JOIN sucursales su ON su.id = pc.sucursal_id
+    LEFT JOIN lineas_producto lp ON lp.id = pc.linea_id
+    WHERE pc.sucursal_id = $1 AND su.negocio_id = $2 AND pc.activo = true
+    ORDER BY pc.nombre
+  `, [sucursalId, negocioId]);
+
+  if (!rows.length) return [];
+  return rows
+    .map((p) => ({ ...p, _s: _scoreQuery(p, q) }))
+    .filter((p) => p._s > 0)
+    .sort((a, b) => b._s - a._s)
+    .slice(0, 30)
+    .map(({ _s, ...p }) => p);
 };
 
 // ─── Ejecución del traslado (dentro de transacción) ───────────────────────────
@@ -186,7 +260,6 @@ const insertarLineaTraslado = async (client, linea) => {
   return rows[0];
 };
 
-// Mover serial: cambiar producto_id al producto destino
 const moverSerial = async (client, serialId, productoDestinoId) => {
   const { rows } = await client.query(`
     UPDATE seriales SET producto_id = $1 WHERE id = $2 RETURNING *
@@ -194,7 +267,6 @@ const moverSerial = async (client, serialId, productoDestinoId) => {
   return rows[0];
 };
 
-// Ajustar stock de producto_cantidad dentro de transacción
 const ajustarStockEnTransaccion = async (client, productoId, cantidad) => {
   const { rows } = await client.query(`
     UPDATE productos_cantidad SET stock = stock + $1 WHERE id = $2 RETURNING *
@@ -202,7 +274,6 @@ const ajustarStockEnTransaccion = async (client, productoId, cantidad) => {
   return rows[0];
 };
 
-// Insertar historial de stock dentro de transacción
 const insertarHistorialEnTransaccion = async (client, datos) => {
   await client.query(`
     INSERT INTO historial_stock_cantidad
@@ -253,11 +324,9 @@ const getLineas = async (trasladoId) => {
   const { rows } = await pool.query(`
     SELECT
       lt.*,
-      -- Nombre del producto destino (serial)
       ps_dest.nombre  AS nombre_producto_destino,
       ps_dest.marca   AS marca_destino,
       ps_dest.modelo  AS modelo_destino,
-      -- Nombre del producto destino (cantidad)
       pc_dest.nombre  AS nombre_cantidad_destino
     FROM lineas_traslado lt
     LEFT JOIN productos_serial   ps_dest ON ps_dest.id = lt.producto_serial_destino_id
@@ -270,6 +339,7 @@ const getLineas = async (trasladoId) => {
 
 module.exports = {
   buscarEquivalentesSerial, buscarEquivalentesCantidad,
+  buscarProductosEnSucursal,
   crearTraslado, insertarLineaTraslado,
   moverSerial, ajustarStockEnTransaccion, insertarHistorialEnTransaccion,
   findAll, findById, getLineas,

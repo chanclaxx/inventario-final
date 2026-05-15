@@ -227,6 +227,19 @@ const ejecutarTraslado = async (negocioId, usuarioId, {
   }
 };
 
+// ─── Búsqueda libre en sucursal destino ──────────────────────────────────────
+
+const buscarEnSucursal = async (negocioId, sucursalId, tipo, q) => {
+  await _verificarSucursalNegocio(sucursalId, negocioId);
+  if (!['serial', 'cantidad'].includes(tipo)) {
+    throw { status: 400, message: 'tipo debe ser "serial" o "cantidad"' };
+  }
+  if (!q || q.trim().length < 2) {
+    throw { status: 400, message: 'La búsqueda debe tener al menos 2 caracteres' };
+  }
+  return repo.buscarProductosEnSucursal(negocioId, sucursalId, tipo, q.trim());
+};
+
 // ─── Consultas ────────────────────────────────────────────────────────────────
 
 const getTraslados = (negocioId) => repo.findAll(negocioId);
@@ -414,6 +427,6 @@ const revertirLineaTraslado = async (negocioId, trasladoId, lineaId, usuarioId) 
 };
 
 module.exports = {
-  buscarEquivalentes, ejecutarTraslado,
-  getTraslados, getTrasladoById, revertirTraslado,revertirLineaTraslado
+  buscarEquivalentes, buscarEnSucursal, ejecutarTraslado,
+  getTraslados, getTrasladoById, revertirTraslado, revertirLineaTraslado,
 };

@@ -3,7 +3,8 @@ const { requireNivel }   = require('../../middlewares/role.middleware');
 const { requireModulo }  = require('../../middlewares/modulo.middleware');
 const ctrl = require('./traslados.controller');
 
-router.post('/buscar-equivalentes', requireModulo('traslados'), requireNivel('supervisor'), ctrl.buscarEquivalentes);
+router.post('/buscar-equivalentes',              requireModulo('traslados'), requireNivel('supervisor'), ctrl.buscarEquivalentes);
+router.get('/sucursal/:sucursalId/productos',    requireModulo('traslados'), requireNivel('supervisor'), ctrl.buscarEnSucursal);
 router.post('/:id/lineas/:lineaId/revertir',
   requireModulo('traslados'),
   requireNivel('supervisor'),
