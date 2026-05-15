@@ -149,10 +149,11 @@ export function EstadoCuentaAcreedor({ acreedorId, esAdmin }) {
   const [pagina,      setPagina]      = useState(1);
   const [filtroTipo,  setFiltroTipo]  = useState('todos');
 
-  const { data: movimientos = [], isLoading } = useQuery({
+  const { data: movimientos = [], isLoading, isError, error } = useQuery({
     queryKey:  ['historial-acreedor', acreedorId],
     queryFn:   () => getHistorialAcreedor(acreedorId).then((r) => r.data.data),
     staleTime: 30_000,
+    retry: 1,
   });
 
   const mutEliminar = useMutation({
@@ -191,7 +192,21 @@ export function EstadoCuentaAcreedor({ acreedorId, esAdmin }) {
 
   if (isLoading) return <Spinner className="py-10" />;
 
-  if (movimientos.length === 0) {
+  if (isError) {
+    return (
+      <div className="text-center py-10 flex flex-col items-center gap-2">
+        <p className="text-sm text-red-500 font-medium">Error al cargar el historial</p>
+        <p className="text-xs text-gray-400">
+          {error?.response?.data?.error || error?.message || 'Intenta refrescar la página'}
+        </p>
+        <p className="text-xs text-gray-300 font-mono">
+          {error?.response?.status ? `HTTP ${error.response.status}` : ''}
+        </p>
+      </div>
+    );
+  }
+
+  if (!isLoading && movimientos.length === 0) {
     return (
       <div className="text-center py-10">
         <p className="text-sm text-gray-400">Sin movimientos registrados</p>
