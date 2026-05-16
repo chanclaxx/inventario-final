@@ -357,6 +357,12 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
          JOIN productos_serial ps ON ps.id = s.producto_id
          WHERE s.imei = p.imei AND ps.sucursal_id = p.sucursal_id
          LIMIT 1)
+      WHEN p.variante_id IS NOT NULL THEN
+        (SELECT v.costo_unitario * p.cantidad_prestada
+         FROM variantes_atributo v WHERE v.id = p.variante_id LIMIT 1)
+      WHEN p.atributo_id IS NOT NULL THEN
+        (SELECT ap.costo_unitario * p.cantidad_prestada
+         FROM atributos_producto ap WHERE ap.id = p.atributo_id LIMIT 1)
       WHEN p.producto_id IS NOT NULL THEN
         (SELECT pc.costo_unitario * p.cantidad_prestada
          FROM productos_cantidad pc

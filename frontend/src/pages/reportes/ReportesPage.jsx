@@ -462,44 +462,46 @@ const FilaPrestamo = ({ prestamo, tipo }) => {
 const SeccionPrestamos = ({ prestamos }) => {
   if (!prestamos) return null;
 
-  const { saldados, activos, resumen } = prestamos;
+  const { saldados, activos } = prestamos;
 
-  // Solo mostrar: saldados con costo, y activos donde el costo ya está cubierto
-  const saldadosConCosto     = saldados.filter((p) => p.costo_producto !== null);
-  const activosCostoCubierto = activos.filter((p)  => p.costo_producto !== null && p.falta_para_cubrir === 0);
+  // Saldados: todos los del período (con o sin costo registrado)
+  // Activos: solo los que ya tienen el costo cubierto
+  const activosCostoCubierto = activos.filter((p) => p.costo_producto !== null && p.falta_para_cubrir === 0);
 
-  if (saldadosConCosto.length === 0 && activosCostoCubierto.length === 0) return null;
+  if (saldados.length === 0 && activosCostoCubierto.length === 0) return null;
 
-  const utilidadConfirmada   = resumen.utilidad_confirmada;
+  // Utilidad: solo cuenta prestamos con costo registrado
+  const saldadosConCosto         = saldados.filter((p) => p.costo_producto !== null);
+  const utilidadConfirmada       = saldadosConCosto.reduce((s, p) => s + (p.utilidad ?? 0), 0);
   const utilidadActivosCubiertos = activosCostoCubierto.reduce((s, p) => s + (p.utilidad_parcial ?? 0), 0);
-  const utilidadTotal        = utilidadConfirmada + utilidadActivosCubiertos;
+  const utilidadTotal            = utilidadConfirmada + utilidadActivosCubiertos;
 
   return (
     <div className="flex flex-col gap-3 border-t border-gray-100 pt-4">
       <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
         <Handshake size={15} className="text-indigo-500" />
         Utilidad de préstamos
-        {resumen.total_saldados > 0 && (
+        {saldados.length > 0 && (
           <span className="text-xs font-normal text-gray-400">
-            {resumen.total_saldados} saldado{resumen.total_saldados !== 1 ? 's' : ''} hoy
+            {saldados.length} saldado{saldados.length !== 1 ? 's' : ''} en el período
           </span>
         )}
       </h3>
 
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-        <div className="bg-indigo-50 text-indigo-700 rounded-xl p-3">
-          <p className="text-xs font-medium opacity-70">Utilidad total préstamos</p>
-          <p className="text-lg font-bold mt-0.5">{formatCOP(utilidadTotal)}</p>
-          <p className="text-xs opacity-60 mt-0.5">
-            confirmada + activos cubiertos
-          </p>
-        </div>
+        {(utilidadTotal > 0 || saldadosConCosto.length > 0) && (
+          <div className="bg-indigo-50 text-indigo-700 rounded-xl p-3">
+            <p className="text-xs font-medium opacity-70">Utilidad total préstamos</p>
+            <p className="text-lg font-bold mt-0.5">{formatCOP(utilidadTotal)}</p>
+            <p className="text-xs opacity-60 mt-0.5">confirmada + activos cubiertos</p>
+          </div>
+        )}
         {saldadosConCosto.length > 0 && (
           <div className="bg-green-50 text-green-700 rounded-xl p-3">
             <p className="text-xs font-medium opacity-70">Utilidad confirmada</p>
             <p className="text-lg font-bold mt-0.5">{formatCOP(utilidadConfirmada)}</p>
             <p className="text-xs opacity-60 mt-0.5">
-              {saldadosConCosto.length} saldado{saldadosConCosto.length !== 1 ? 's' : ''}
+              {saldadosConCosto.length} saldado{saldadosConCosto.length !== 1 ? 's' : ''} con costo
             </p>
           </div>
         )}
@@ -515,12 +517,12 @@ const SeccionPrestamos = ({ prestamos }) => {
       </div>
 
       <div className="flex flex-col gap-3">
-        {saldadosConCosto.length > 0 && (
+        {saldados.length > 0 && (
           <div className="flex flex-col gap-2">
             <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-              Saldados hoy — utilidad confirmada
+              Saldados en el período
             </p>
-            {saldadosConCosto.map((p) => (
+            {saldados.map((p) => (
               <FilaPrestamo key={p.id} prestamo={p} tipo="saldado" />
             ))}
           </div>
