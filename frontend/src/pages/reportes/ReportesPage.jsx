@@ -914,16 +914,19 @@ const SeccionCreditos = ({ creditos }) => {
         )}
       </div>
 
-      {activos.total > 0 && activos.detalle?.length > 0 && (
-        <div className="flex flex-col gap-2">
-          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-            Créditos activos — utilidad acumulada
-          </p>
-          {activos.detalle.map((c) => (
-            <FilaCreditoActivo key={c.credito_id} credito={c} />
-          ))}
-        </div>
-      )}
+      {(() => {
+        const costoCubierto = (activos.detalle ?? []).filter((c) => c.falta_para_cubrir === 0);
+        return costoCubierto.length > 0 ? (
+          <div className="flex flex-col gap-2">
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+              Activos — costo cubierto
+            </p>
+            {costoCubierto.map((c) => (
+              <FilaCreditoActivo key={c.credito_id} credito={c} />
+            ))}
+          </div>
+        ) : null;
+      })()}
 
       {saldados.length > 0 && (
         <div className="flex flex-col gap-2">
