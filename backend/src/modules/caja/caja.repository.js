@@ -279,14 +279,16 @@ const getResumenDia = async (cajaId, sucursalId, negocioId) => {
   console.log('[CAJA DEBUG] fin   :', fin,    '| tipo:', typeof fin);
   const { rows: diagRows } = await pool.query(`
     SELECT
-      (SELECT COUNT(*) FROM facturas       WHERE sucursal_id = $1 AND fecha BETWEEN $2 AND $3) AS facturas,
-      (SELECT COUNT(*) FROM facturas       WHERE sucursal_id = $1 AND estado != 'Cancelada' AND fecha BETWEEN $2 AND $3) AS facturas_activas,
-      (SELECT COUNT(*) FROM pagos_factura  pf JOIN facturas f ON f.id = pf.factura_id WHERE f.sucursal_id = $1 AND pf.metodo != 'Credito' AND f.fecha BETWEEN $2 AND $3) AS pagos_no_credito,
-      (SELECT COUNT(*) FROM abonos_credito ac JOIN creditos c ON c.id = ac.credito_id WHERE c.sucursal_id = $1 AND ac.fecha BETWEEN $2 AND $3) AS abonos_credito,
-      (SELECT COUNT(*) FROM compras        WHERE sucursal_id = $1 AND fecha BETWEEN $2 AND $3) AS compras,
-      NOW() AS ahora_bd
+      (SELECT COUNT(*) FROM facturas WHERE sucursal_id = $1 AND fecha BETWEEN $2 AND $3) AS facturas_en_rango,
+      (SELECT COUNT(*) FROM facturas WHERE sucursal_id = $1) AS facturas_total_sucursal,
+      (SELECT MAX(fecha) FROM facturas WHERE sucursal_id = $1) AS ultima_factura_fecha,
+      (SELECT MAX(fecha)::text FROM facturas WHERE sucursal_id = $1) AS ultima_factura_fecha_texto,
+      $2::text AS param_inicio,
+      $3::text AS param_fin,
+      NOW()::text AS ahora_bd,
+      NOW() AT TIME ZONE 'America/Bogota' AS ahora_bogota
   `, [sucursalId, inicio, fin]);
-  console.log('[CAJA DEBUG] conteos BD:', diagRows[0]);
+  console.log('[CAJA DEBUG] diagnóstico extendido:', JSON.stringify(diagRows[0], null, 2));
   // ── FIN DIAGNÓSTICO ────────────────────────────────────────────────────────
 
   const [pf, ac, ap, cp, aa, mn, dv, rt, ad, sv] = await Promise.all([
