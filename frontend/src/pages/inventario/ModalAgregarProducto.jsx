@@ -1412,57 +1412,87 @@ function PasoSerial({ sucursalKey, onExito, onDuplicadosEncontrados, coloresActi
   );
 }
 
-// ─── Mini selector de variante (cards navegables) ────────────────────────────
 // ─── Selector multi-variante (cantidad + costo por hoja del árbol) ────────────
 function MultiSelectorVariante({ hojas, nodosData, onActualizar }) {
-  const nodosActivos = hojas.filter((h) => Number(nodosData[h.key]?.cantidad) > 0);
-  const totalUds     = nodosActivos.reduce((s, h) => s + Number(nodosData[h.key]?.cantidad || 0), 0);
+  const [seleccionadas, setSeleccionadas] = useState(
+    () => new Set(hojas.filter((h) => Number(nodosData[h.key]?.cantidad) > 0).map((h) => h.key))
+  );
+
+  const toggle = (h) => {
+    setSeleccionadas((prev) => {
+      const next = new Set(prev);
+      if (next.has(h.key)) {
+        next.delete(h.key);
+        onActualizar(h.key, 'cantidad', '');
+        onActualizar(h.key, 'costo', '');
+      } else {
+        next.add(h.key);
+      }
+      return next;
+    });
+  };
+
+  const hojasSel    = hojas.filter((h) => seleccionadas.has(h.key));
+  const nodosActivos = hojasSel.filter((h) => Number(nodosData[h.key]?.cantidad) > 0);
+  const totalUds    = nodosActivos.reduce((s, h) => s + Number(nodosData[h.key]?.cantidad || 0), 0);
 
   return (
-    <div className="flex flex-col gap-2">
-      <div className="flex items-center gap-2 px-1">
-        <p className="flex-1 text-[11px] font-medium text-gray-400 uppercase tracking-wide">Variante</p>
-        <p className="w-14 text-[11px] font-medium text-gray-400 text-center">Cant.</p>
-        <p className="w-24 text-[11px] font-medium text-gray-400 text-center">Costo unit.</p>
-      </div>
-
-      <div className="flex flex-col gap-1.5 max-h-52 overflow-y-auto pr-0.5">
+    <div className="flex flex-col gap-3">
+      {/* Chips de selección */}
+      <div className="flex flex-wrap gap-1.5">
         {hojas.map((h) => {
-          const data   = nodosData[h.key] || { cantidad: '', costo: '' };
-          const activo = Number(data.cantidad) > 0;
+          const activa = seleccionadas.has(h.key);
+          const chipLabel = h.labelPadre ? `${h.labelPadre} / ${h.label}` : h.label;
           return (
-            <div
-              key={h.key}
-              className={`flex items-center gap-2 p-2 rounded-xl border transition-colors
-                ${activo ? 'border-blue-200 bg-blue-50/50' : 'border-gray-100 bg-white'}`}
-            >
-              <div className="flex-1 min-w-0">
-                {h.labelPadre && (
-                  <p className="text-[10px] text-gray-400 leading-none mb-0.5">{h.labelPadre}</p>
-                )}
-                <p className="text-xs font-medium text-gray-800 leading-tight">{h.label}</p>
-                <p className="text-[10px] text-gray-400">{h.stock} en stock</p>
-              </div>
-              <input
-                type="number" min="0"
-                value={data.cantidad}
-                onChange={(e) => onActualizar(h.key, 'cantidad', e.target.value)}
-                onWheel={(e) => e.target.blur()}
-                placeholder="0"
-                className="w-14 px-2 py-1.5 text-xs text-center bg-white border border-gray-200 rounded-lg
-                  focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400"
-              />
-              <InputMoneda
-                value={data.costo}
-                onChange={(val) => onActualizar(h.key, 'costo', val)}
-                placeholder="$0"
-                className="w-24 px-2 py-1.5 text-xs bg-white border border-gray-200 rounded-lg
-                  focus:outline-none focus:ring-2 focus:ring-blue-400"
-              />
-            </div>
+            <button key={h.key} type="button" onClick={() => toggle(h)}
+              className={`flex items-center gap-1 px-2.5 py-1 rounded-xl text-xs font-medium border transition-all
+                ${activa
+                  ? 'bg-blue-50 border-blue-300 text-blue-700'
+                  : 'bg-white border-gray-200 text-gray-600 hover:border-blue-200 hover:bg-blue-50/50'}`}>
+              {chipLabel}
+              {activa && <X size={9} />}
+            </button>
           );
         })}
       </div>
+
+      {/* Inputs solo para las seleccionadas */}
+      {hojasSel.length > 0 && (
+        <div className="flex flex-col gap-1.5">
+          <div className="flex items-center gap-2 px-1">
+            <p className="flex-1 text-[11px] font-medium text-gray-400 uppercase tracking-wide">Variante</p>
+            <p className="w-14 text-[11px] font-medium text-gray-400 text-center">Cant.</p>
+            <p className="w-24 text-[11px] font-medium text-gray-400 text-center">Costo unit.</p>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            {hojasSel.map((h) => {
+              const data = nodosData[h.key] || { cantidad: '', costo: '' };
+              return (
+                <div key={h.key}
+                  className="flex items-center gap-2 p-2 rounded-xl border border-blue-200 bg-blue-50/50">
+                  <div className="flex-1 min-w-0">
+                    {h.labelPadre && (
+                      <p className="text-[10px] text-gray-400 leading-none mb-0.5">{h.labelPadre}</p>
+                    )}
+                    <p className="text-xs font-medium text-gray-800 leading-tight">{h.label}</p>
+                    <p className="text-[10px] text-gray-400">{h.stock} en stock</p>
+                  </div>
+                  <input type="number" min="0" value={data.cantidad}
+                    onChange={(e) => onActualizar(h.key, 'cantidad', e.target.value)}
+                    onWheel={(e) => e.target.blur()} placeholder="0"
+                    className="w-14 px-2 py-1.5 text-xs text-center bg-white border border-gray-200 rounded-lg
+                      focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400" />
+                  <InputMoneda value={data.costo}
+                    onChange={(val) => onActualizar(h.key, 'costo', val)}
+                    placeholder="$0"
+                    className="w-24 px-2 py-1.5 text-xs bg-white border border-gray-200 rounded-lg
+                      focus:outline-none focus:ring-2 focus:ring-blue-400" />
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {nodosActivos.length > 0 && (
         <p className="text-xs text-blue-600 font-medium px-1">
