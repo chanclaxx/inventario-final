@@ -43,8 +43,9 @@ const validarGarantia = [
 
 router.get('/',            requireModulo('servicios'), ctrl.getOrdenes);
 router.get('/resumen-hoy', requireModulo('servicios'), ctrl.getResumenHoy);
-router.get('/:id/pdf',     requireModulo('servicios'), pdfCtrl.getPdfServicio);
-router.get('/:id',         requireModulo('servicios'), ctrl.getOrdenById);
+router.get('/:id/pdf',           requireModulo('servicios'), pdfCtrl.getPdfServicio);
+router.get('/:id/pdf-recepcion', requireModulo('servicios'), pdfCtrl.getPdfRecepcion);
+router.get('/:id',               requireModulo('servicios'), ctrl.getOrdenById);
 
 router.post('/',                    requireModulo('servicios'), validarOrden,      validate, ctrl.crearOrden);
 router.patch('/:id/en-reparacion',  requireModulo('servicios'),                             ctrl.enReparacion);

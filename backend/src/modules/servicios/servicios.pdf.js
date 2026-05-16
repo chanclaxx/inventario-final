@@ -467,4 +467,133 @@ function generarPdfServicio({ orden, abonos = [], config = {}, garantias = [], r
   doc.end();
 }
 
-module.exports = { generarPdfServicio };
+// ─── PDF: Recibo de Recepción ─────────────────────────────────────────────────
+
+function seccionEncabezadoRecepcion(doc, config, orden) {
+  const HEADER_H = 110;
+
+  rectFill(doc, 0, 0, PAGE_W, HEADER_H, C.headerBg, 0);
+  doc.rect(0, HEADER_H - 3, PAGE_W, 3).fill(C.verde);
+
+  const logoOffset = dibujarLogoHeader(doc, config, HEADER_H);
+  const textX      = MARGIN + logoOffset;
+  const textW      = CONTENT_W * 0.55 - logoOffset;
+
+  const nombreNegocio = config?.nombre_negocio || 'MI TIENDA';
+  doc.font(FONT.bold).fontSize(22).fillColor(C.headerText)
+    .text(nombreNegocio, textX, 28, { width: textW });
+
+  let yInfo = 56;
+  for (const linea of [
+    config?.nit       ? `NIT: ${config.nit}`     : null,
+    config?.direccion ? config.direccion           : null,
+    config?.telefono  ? `Tel: ${config.telefono}` : null,
+  ].filter(Boolean)) {
+    doc.font(FONT.normal).fontSize(8).fillColor(C.headerSub)
+      .text(linea, textX, yInfo, { width: textW });
+    yInfo += 12;
+  }
+
+  const numOS = `#OS-${String(orden.id).padStart(4, '0')}`;
+
+  doc.font(FONT.bold).fontSize(26).fillColor(C.headerText)
+    .text(numOS, MARGIN, 22, { width: CONTENT_W, align: 'right' });
+
+  doc.font(FONT.normal).fontSize(8).fillColor(C.headerSub)
+    .text('RECIBO DE RECEPCIÓN', MARGIN, 54, { width: CONTENT_W, align: 'right' });
+
+  doc.font(FONT.normal).fontSize(8).fillColor(C.headerSub)
+    .text(formatFechaHora(orden.fecha_recepcion), MARGIN, 66, { width: CONTENT_W, align: 'right' });
+
+  const badgeW = 68;
+  const badgeX = PAGE_W - MARGIN - badgeW;
+  rectFill(doc, badgeX, 79, badgeW, 18, C.verde, 4);
+  doc.font(FONT.bold).fontSize(7.5).fillColor(C.blanco)
+    .text('RECIBIDO', badgeX, 84, { width: badgeW, align: 'center', characterSpacing: 0.8 });
+
+  return HEADER_H + 28;
+}
+
+function seccionAvisoImportante(doc, y) {
+  y = labelSeccion(doc, y, 'Importante');
+
+  const texto = 'Conserve este recibo para reclamar su equipo. No se entregan equipos sin presentar este comprobante o documento de identidad del titular.';
+  const altoTexto    = doc.heightOfString(texto, { width: CONTENT_W - 28 });
+  const alturaBloque = altoTexto + 28;
+
+  rectFillStroke(doc, MARGIN, y, CONTENT_W, alturaBloque, C.naranjaFondo, '#FDE68A', 8);
+
+  doc.font(FONT.normal).fontSize(8.5).fillColor(C.naranja)
+    .text(texto, MARGIN + 14, y + 14, { width: CONTENT_W - 28 });
+
+  return y + alturaBloque + 24;
+}
+
+function seccionCostoEstimado(doc, orden, y) {
+  if (!orden.costo_estimado || Number(orden.costo_estimado) <= 0) return y;
+
+  y = fila(doc, y, 'Costo estimado', formatCOP(Number(orden.costo_estimado)), {
+    valorFont: FONT.bold, valorColor: C.negro,
+  });
+
+  doc.font(FONT.normal).fontSize(7.5).fillColor(C.grisClaro)
+    .text('* El precio final puede variar según el diagnóstico', MARGIN, y, { width: CONTENT_W });
+
+  return y + 20;
+}
+
+/**
+ * Genera el PDF del recibo de recepción de una orden de servicio.
+ *
+ * @param {{ orden: object, config: object, res: object }} params
+ */
+function generarPdfRecepcion({ orden, config = {}, res }) {
+  const numOS = String(orden.id).padStart(4, '0');
+
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader(
+    'Content-Disposition',
+    `attachment; filename="recepcion-OS-${numOS}.pdf"`,
+  );
+
+  const doc = new PDFDocument({
+    size: 'A4',
+    margin: 0,
+    autoFirstPage: true,
+    info: {
+      Title:   `Recibo de Recepción #OS-${numOS}`,
+      Author:  config?.nombre_negocio || 'Servicio Técnico',
+      Subject: 'Recibo de recepción de equipo',
+      Creator: 'Sistema POS',
+    },
+  });
+
+  doc.pipe(res);
+
+  let y = 0;
+
+  y = seccionEncabezadoRecepcion(doc, config, orden);
+  y = seccionCliente(doc, orden, y);
+  y = seccionEquipo(doc, orden, y);
+  y = seccionDiagnostico(doc, orden, y);
+  y = seccionCostoEstimado(doc, orden, y);
+  y = seccionAvisoImportante(doc, y);
+
+  // Línea de firma
+  hLine(doc, y, { color: C.grisBorde });
+  y += 20;
+
+  const firmaY  = y + 16;
+  const firmaX1 = PAGE_W / 2 - 80;
+  const firmaX2 = PAGE_W / 2 + 80;
+
+  doc.moveTo(firmaX1, firmaY).lineTo(firmaX2, firmaY)
+    .strokeColor(C.grisBorde).lineWidth(0.75).stroke();
+
+  doc.font(FONT.normal).fontSize(8).fillColor(C.grisClaro)
+    .text('Firma del cliente', MARGIN, firmaY + 6, { width: CONTENT_W, align: 'center' });
+
+  doc.end();
+}
+
+module.exports = { generarPdfServicio, generarPdfRecepcion };
