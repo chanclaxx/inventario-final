@@ -61,8 +61,8 @@ const CONFIG_GRUPOS = {
   textHeader: 'text-purple-700',
   borderColor:'border-purple-100',
   renderItem: (item) => ({
-    descripcion: `Préstamo — ${item.prestatario}`,
-    detalle:     item.metodo || null,   // ← agregar método
+    descripcion: `Préstamo #${String(item.prestamo_id).padStart(4, '0')} — ${item.prestatario}`,
+    detalle:     item.metodo || null,
     fecha:       item.fecha,
   }),
 },
@@ -91,9 +91,13 @@ const CONFIG_GRUPOS = {
     textHeader: 'text-orange-700',
     borderColor:'border-orange-100',
     renderItem: (item) => ({
-      descripcion: item.descripcion || item.nombre_producto || 'Retoma',
-      detalle:     item.imei ? `IMEI: ${item.imei}` : null,
-      fecha:       item.fecha,
+      descripcion: item.factura_id
+        ? `Retoma — Factura #${String(item.factura_id).padStart(6, '0')} · ${item.nombre_cliente || ''}`
+        : (item.descripcion || item.nombre_producto || 'Retoma'),
+      detalle: item.imei
+        ? `IMEI: ${item.imei}`
+        : (item.nombre_producto || item.descripcion || null),
+      fecha: item.fecha,
     }),
   },
   devoluciones: {
@@ -103,8 +107,10 @@ const CONFIG_GRUPOS = {
     textHeader: 'text-red-700',
     borderColor:'border-red-100',
     renderItem: (item) => ({
-      descripcion: item.concepto,
-      detalle:     null,
+      descripcion: item.referencia_id
+        ? `Dev. Factura #${String(item.referencia_id).padStart(6, '0')}${item.concepto ? ` — ${item.concepto}` : ''}`
+        : (item.concepto || 'Devolución'),
+      detalle:     item.usuario_nombre || null,
       fecha:       item.fecha,
     }),
   },
@@ -147,8 +153,10 @@ const CONFIG_GRUPOS = {
     textHeader: 'text-orange-700',
     borderColor:'border-orange-200',
     renderItem: (item) => ({
-      descripcion: item.concepto,
-      detalle:     null,
+      descripcion: item.referencia_id
+        ? `Domicilio Factura #${String(item.referencia_id).padStart(6, '0')}${item.concepto ? ` — ${item.concepto}` : ''}`
+        : (item.concepto || 'Abono domicilio'),
+      detalle:     item.usuario_nombre || null,
       fecha:       item.fecha,
     }),
   },
@@ -662,7 +670,7 @@ function _buildItemsPorMetodo(grupos) {
     add(item, `Crédito Factura #${String(item.factura_id).padStart(6, '0')} — ${item.nombre_cliente}`, 'Ingreso')
   );
   (grupos.abonosPrestamo?.items || []).forEach((item) =>
-    add(item, `Préstamo — ${item.prestatario}`, 'Ingreso')
+    add(item, `Préstamo #${String(item.prestamo_id).padStart(4, '0')} — ${item.prestatario}`, 'Ingreso')
   );
   (grupos.abonosServicio?.items || []).forEach((item) => {
     const partes = [
