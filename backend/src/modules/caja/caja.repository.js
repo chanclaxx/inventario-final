@@ -273,6 +273,22 @@ const getResumenDia = async (cajaId, sucursalId, negocioId) => {
   if (!rango) return null;
   const { inicio, fin } = rango;
 
+  // ── DIAGNÓSTICO TEMPORAL ───────────────────────────────────────────────────
+  console.log('[CAJA DEBUG] cajaId:', cajaId, '| sucursalId:', sucursalId, '| negocioId:', negocioId);
+  console.log('[CAJA DEBUG] inicio:', inicio, '| tipo:', typeof inicio);
+  console.log('[CAJA DEBUG] fin   :', fin,    '| tipo:', typeof fin);
+  const { rows: diagRows } = await pool.query(`
+    SELECT
+      (SELECT COUNT(*) FROM facturas       WHERE sucursal_id = $1 AND fecha BETWEEN $2 AND $3) AS facturas,
+      (SELECT COUNT(*) FROM facturas       WHERE sucursal_id = $1 AND estado != 'Cancelada' AND fecha BETWEEN $2 AND $3) AS facturas_activas,
+      (SELECT COUNT(*) FROM pagos_factura  pf JOIN facturas f ON f.id = pf.factura_id WHERE f.sucursal_id = $1 AND pf.metodo != 'Credito' AND f.fecha BETWEEN $2 AND $3) AS pagos_no_credito,
+      (SELECT COUNT(*) FROM abonos_credito ac JOIN creditos c ON c.id = ac.credito_id WHERE c.sucursal_id = $1 AND ac.fecha BETWEEN $2 AND $3) AS abonos_credito,
+      (SELECT COUNT(*) FROM compras        WHERE sucursal_id = $1 AND fecha BETWEEN $2 AND $3) AS compras,
+      NOW() AS ahora_bd
+  `, [sucursalId, inicio, fin]);
+  console.log('[CAJA DEBUG] conteos BD:', diagRows[0]);
+  // ── FIN DIAGNÓSTICO ────────────────────────────────────────────────────────
+
   const [pf, ac, ap, cp, aa, mn, dv, rt, ad, sv] = await Promise.all([
 
     pool.query(`
