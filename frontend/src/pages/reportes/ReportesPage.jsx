@@ -465,10 +465,14 @@ const SeccionPrestamos = ({ prestamos }) => {
   const { saldados, activos, resumen } = prestamos;
 
   // Solo mostrar: saldados con costo, y activos donde el costo ya está cubierto
-  const saldadosConCosto  = saldados.filter((p) => p.costo_producto !== null);
-  const activosCostoCubierto = activos.filter((p) => p.costo_producto !== null && p.falta_para_cubrir === 0);
+  const saldadosConCosto     = saldados.filter((p) => p.costo_producto !== null);
+  const activosCostoCubierto = activos.filter((p)  => p.costo_producto !== null && p.falta_para_cubrir === 0);
 
   if (saldadosConCosto.length === 0 && activosCostoCubierto.length === 0) return null;
+
+  const utilidadConfirmada   = resumen.utilidad_confirmada;
+  const utilidadActivosCubiertos = activosCostoCubierto.reduce((s, p) => s + (p.utilidad_parcial ?? 0), 0);
+  const utilidadTotal        = utilidadConfirmada + utilidadActivosCubiertos;
 
   return (
     <div className="flex flex-col gap-3 border-t border-gray-100 pt-4">
@@ -483,10 +487,17 @@ const SeccionPrestamos = ({ prestamos }) => {
       </h3>
 
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+        <div className="bg-indigo-50 text-indigo-700 rounded-xl p-3">
+          <p className="text-xs font-medium opacity-70">Utilidad total préstamos</p>
+          <p className="text-lg font-bold mt-0.5">{formatCOP(utilidadTotal)}</p>
+          <p className="text-xs opacity-60 mt-0.5">
+            confirmada + activos cubiertos
+          </p>
+        </div>
         {saldadosConCosto.length > 0 && (
           <div className="bg-green-50 text-green-700 rounded-xl p-3">
             <p className="text-xs font-medium opacity-70">Utilidad confirmada</p>
-            <p className="text-lg font-bold mt-0.5">{formatCOP(resumen.utilidad_confirmada)}</p>
+            <p className="text-lg font-bold mt-0.5">{formatCOP(utilidadConfirmada)}</p>
             <p className="text-xs opacity-60 mt-0.5">
               {saldadosConCosto.length} saldado{saldadosConCosto.length !== 1 ? 's' : ''}
             </p>
@@ -495,21 +506,10 @@ const SeccionPrestamos = ({ prestamos }) => {
         {activosCostoCubierto.length > 0 && (
           <div className="bg-amber-50 text-amber-700 rounded-xl p-3">
             <p className="text-xs font-medium opacity-70">Pendientes por cobrar</p>
-            <p className="text-lg font-bold mt-0.5">
-              {resumen.utilidad_parcial >= 0
-                ? `+${formatCOP(resumen.utilidad_parcial)}`
-                : `-${formatCOP(Math.abs(resumen.utilidad_parcial))}`}
-            </p>
+            <p className="text-lg font-bold mt-0.5">{formatCOP(utilidadActivosCubiertos)}</p>
             <p className="text-xs opacity-60 mt-0.5">
-              {activosCostoCubierto.length} activo{activosCostoCubierto.length !== 1 ? 's' : ''}
+              {activosCostoCubierto.length} activo{activosCostoCubierto.length !== 1 ? 's' : ''} con costo cubierto
             </p>
-          </div>
-        )}
-        {resumen.por_cubrir > 0 && (
-          <div className="bg-red-50 text-red-600 rounded-xl p-3">
-            <p className="text-xs font-medium opacity-70">Falta por cubrir costo</p>
-            <p className="text-lg font-bold mt-0.5">{formatCOP(resumen.por_cubrir)}</p>
-            <p className="text-xs opacity-60 mt-0.5">entre los activos</p>
           </div>
         )}
       </div>
@@ -1026,15 +1026,14 @@ const PanelVentas = ({ desde, hasta, onDesde, onHasta, esAdmin }) => {
           {/* Métricas de facturas */}
           {resumen && (
             <>
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 <MetricCard label="Total vendido"      valor={formatCOP(resumen.total_ventas)}       colorClass="bg-green-50 text-green-700"   />
                 <MetricCard
-                  label="Utilidad neta facturas"
+                  label="Utilidad neta"
                   valor={formatCOP(facturas.reduce((s, f) => s + calcularUtilidadNeta(f.lineas), 0))}
                   colorClass="bg-emerald-50 text-emerald-700"
                 />
                 <MetricCard label="Utilidad créditos saldados" valor={formatCOP(resumen.utilidad_creditos_saldados)} colorClass="bg-yellow-50 text-yellow-700" />
-                <MetricCard label="Utilidad préstamos saldados" valor={formatCOP(prestamos?.resumen?.utilidad_confirmada ?? 0)} colorClass="bg-indigo-50 text-indigo-700" />
                 <MetricCard
                   label={`${resumen.total_facturas} factura(s)`}
                   valor={`${resumen.facturas_activas} activas · ${resumen.facturas_credito} crédito`}
