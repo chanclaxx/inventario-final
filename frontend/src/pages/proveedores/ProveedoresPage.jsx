@@ -1225,6 +1225,9 @@ function HistorialProveedor({ proveedor, sucursalKey, sucursalLista, onVolver, o
     return true;
   });
 
+  const totalFiltrado = comprasFiltradas.reduce((s, c) => s + Number(c.total || 0), 0);
+  const hayFiltrosActivos = filtroEstado !== 'Todas' || filtroPago !== 'Todos' || fechaDesde || fechaHasta || busquedaFactura;
+
   return (
     <div className="flex flex-col gap-4">
 
@@ -1337,9 +1340,22 @@ function HistorialProveedor({ proveedor, sucursalKey, sucursalLista, onVolver, o
                 : 'Ninguna compra coincide con los filtros aplicados'} />
           ) : (
             <div className="flex flex-col gap-2">
-              <p className="text-xs text-gray-400 px-1 select-none">
-                {comprasFiltradas.length} compra(s) · Doble click para ver detalle
-              </p>
+              <div className={`flex items-center justify-between rounded-xl px-3 py-2.5 select-none
+                ${hayFiltrosActivos ? 'bg-blue-50 border border-blue-100' : 'bg-gray-50'}`}>
+                <p className="text-xs text-gray-400">
+                  {comprasFiltradas.length} compra(s)
+                  {hayFiltrosActivos && <span className="text-blue-400 ml-1">· con filtros</span>}
+                  <span className="hidden sm:inline text-gray-300"> · Doble click para ver detalle</span>
+                </p>
+                <div className="flex flex-col items-end">
+                  {hayFiltrosActivos && (
+                    <p className="text-[10px] text-gray-400 leading-none mb-0.5">Total filtrado</p>
+                  )}
+                  <p className={`text-sm font-bold ${hayFiltrosActivos ? 'text-blue-700' : 'text-gray-700'}`}>
+                    {formatCOP(totalFiltrado)}
+                  </p>
+                </div>
+              </div>
               {comprasFiltradas.map((c) => {
                 const esCredito = ['Credito', 'Fiado'].includes(c.metodo);
                 return (
