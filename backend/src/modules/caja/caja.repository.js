@@ -1,5 +1,12 @@
 const { pool } = require('../../config/db');
 
+// Convierte un JS Date (UTC) al string de hora local Bogotá (UTC-5) sin zona horaria,
+// para usarlo como parámetro en queries contra columnas TIMESTAMP WITHOUT TIME ZONE.
+const _toBogotaStr = (d) => {
+  const local = new Date(d.getTime() - 5 * 60 * 60 * 1000);
+  return local.toISOString().slice(0, 23).replace('T', ' ');
+};
+
 // ─── Queries básicas ──────────────────────────────────────────────────────────
 
 const findCajaAbierta = async (sucursalId) => {
@@ -260,9 +267,10 @@ const _getRangoCaja = async (cajaId) => {
   );
   const caja = rows[0];
   if (!caja) return null;
+  const finDate = caja.estado === 'Cerrada' && caja.fecha_cierre ? caja.fecha_cierre : new Date();
   return {
-    inicio: caja.fecha_apertura,
-    fin:    caja.estado === 'Cerrada' && caja.fecha_cierre ? caja.fecha_cierre : new Date(),
+    inicio: _toBogotaStr(caja.fecha_apertura),
+    fin:    _toBogotaStr(finDate),
   };
 };
 
@@ -272,24 +280,6 @@ const getResumenDia = async (cajaId, sucursalId, negocioId) => {
   const rango = await _getRangoCaja(cajaId);
   if (!rango) return null;
   const { inicio, fin } = rango;
-
-  // ── DIAGNÓSTICO TEMPORAL ───────────────────────────────────────────────────
-  console.log('[CAJA DEBUG] cajaId:', cajaId, '| sucursalId:', sucursalId, '| negocioId:', negocioId);
-  console.log('[CAJA DEBUG] inicio:', inicio, '| tipo:', typeof inicio);
-  console.log('[CAJA DEBUG] fin   :', fin,    '| tipo:', typeof fin);
-  const { rows: diagRows } = await pool.query(`
-    SELECT
-      (SELECT COUNT(*) FROM facturas WHERE sucursal_id = $1 AND fecha BETWEEN $2 AND $3) AS facturas_en_rango,
-      (SELECT COUNT(*) FROM facturas WHERE sucursal_id = $1) AS facturas_total_sucursal,
-      (SELECT MAX(fecha) FROM facturas WHERE sucursal_id = $1) AS ultima_factura_fecha,
-      (SELECT MAX(fecha)::text FROM facturas WHERE sucursal_id = $1) AS ultima_factura_fecha_texto,
-      $2::text AS param_inicio,
-      $3::text AS param_fin,
-      NOW()::text AS ahora_bd,
-      NOW() AT TIME ZONE 'America/Bogota' AS ahora_bogota
-  `, [sucursalId, inicio, fin]);
-  console.log('[CAJA DEBUG] diagnóstico extendido:', JSON.stringify(diagRows[0], null, 2));
-  // ── FIN DIAGNÓSTICO ────────────────────────────────────────────────────────
 
   const [pf, ac, ap, cp, aa, mn, dv, rt, ad, sv] = await Promise.all([
 
@@ -425,9 +415,13 @@ const getResumenDia = async (cajaId, sucursalId, negocioId) => {
 // ─── getResumenGlobal ─────────────────────────────────────────────────────────
 
 const getResumenGlobal = async (negocioId) => {
-  const hoy    = new Date();
-  const inicio = new Date(hoy); inicio.setHours(0, 0, 0, 0);
-  const fin    = new Date(hoy); fin.setHours(23, 59, 59, 999);
+  const ahora      = new Date();
+  const bogotaHoy  = new Date(ahora.getTime() - 5 * 60 * 60 * 1000);
+  const yyyy = bogotaHoy.getUTCFullYear();
+  const mm   = String(bogotaHoy.getUTCMonth() + 1).padStart(2, '0');
+  const dd   = String(bogotaHoy.getUTCDate()).padStart(2, '0');
+  const inicio = `${yyyy}-${mm}-${dd} 00:00:00.000`;
+  const fin    = `${yyyy}-${mm}-${dd} 23:59:59.999`;
 
   const [pf, ac, ap, cp, aa, mn, dv, rt, ad, sv] = await Promise.all([
 
