@@ -1026,14 +1026,15 @@ const PanelVentas = ({ desde, hasta, onDesde, onHasta, esAdmin }) => {
           {/* Métricas de facturas */}
           {resumen && (
             <>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                 <MetricCard label="Total vendido"      valor={formatCOP(resumen.total_ventas)}       colorClass="bg-green-50 text-green-700"   />
                 <MetricCard
-                  label="Utilidad neta"
+                  label="Utilidad neta facturas"
                   valor={formatCOP(facturas.reduce((s, f) => s + calcularUtilidadNeta(f.lineas), 0))}
                   colorClass="bg-emerald-50 text-emerald-700"
                 />
                 <MetricCard label="Utilidad créditos saldados" valor={formatCOP(resumen.utilidad_creditos_saldados)} colorClass="bg-yellow-50 text-yellow-700" />
+                <MetricCard label="Utilidad préstamos saldados" valor={formatCOP(prestamos?.resumen?.utilidad_confirmada ?? 0)} colorClass="bg-indigo-50 text-indigo-700" />
                 <MetricCard
                   label={`${resumen.total_facturas} factura(s)`}
                   valor={`${resumen.facturas_activas} activas · ${resumen.facturas_credito} crédito`}
