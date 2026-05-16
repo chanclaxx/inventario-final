@@ -460,11 +460,15 @@ const FilaPrestamo = ({ prestamo, tipo }) => {
 };
 
 const SeccionPrestamos = ({ prestamos }) => {
-  if (!prestamos || (prestamos.saldados.length === 0 && prestamos.activos.length === 0)) {
-    return null;
-  }
+  if (!prestamos) return null;
 
   const { saldados, activos, resumen } = prestamos;
+
+  // Solo mostrar préstamos que tienen costo registrado — sin costo no aportan info de utilidad
+  const saldadosConCosto = saldados.filter((p) => p.costo_producto !== null);
+  const activosConCosto  = activos.filter((p)  => p.costo_producto !== null);
+
+  if (saldadosConCosto.length === 0 && activosConCosto.length === 0) return null;
 
   return (
     <div className="flex flex-col gap-3 border-t border-gray-100 pt-4">
@@ -479,24 +483,28 @@ const SeccionPrestamos = ({ prestamos }) => {
       </h3>
 
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-        <div className="bg-green-50 text-green-700 rounded-xl p-3">
-          <p className="text-xs font-medium opacity-70">Utilidad confirmada</p>
-          <p className="text-lg font-bold mt-0.5">{formatCOP(resumen.utilidad_confirmada)}</p>
-          <p className="text-xs opacity-60 mt-0.5">
-            {saldados.length} saldado{saldados.length !== 1 ? 's' : ''}
-          </p>
-        </div>
-        <div className="bg-amber-50 text-amber-700 rounded-xl p-3">
-          <p className="text-xs font-medium opacity-70">Pendientes por cobrar</p>
-          <p className="text-lg font-bold mt-0.5">
-            {resumen.utilidad_parcial >= 0
-              ? `+${formatCOP(resumen.utilidad_parcial)}`
-              : `-${formatCOP(Math.abs(resumen.utilidad_parcial))}`}
-          </p>
-          <p className="text-xs opacity-60 mt-0.5">
-            {resumen.total_activos} activo{resumen.total_activos !== 1 ? 's' : ''}
-          </p>
-        </div>
+        {saldadosConCosto.length > 0 && (
+          <div className="bg-green-50 text-green-700 rounded-xl p-3">
+            <p className="text-xs font-medium opacity-70">Utilidad confirmada</p>
+            <p className="text-lg font-bold mt-0.5">{formatCOP(resumen.utilidad_confirmada)}</p>
+            <p className="text-xs opacity-60 mt-0.5">
+              {saldadosConCosto.length} saldado{saldadosConCosto.length !== 1 ? 's' : ''}
+            </p>
+          </div>
+        )}
+        {activosConCosto.length > 0 && (
+          <div className="bg-amber-50 text-amber-700 rounded-xl p-3">
+            <p className="text-xs font-medium opacity-70">Pendientes por cobrar</p>
+            <p className="text-lg font-bold mt-0.5">
+              {resumen.utilidad_parcial >= 0
+                ? `+${formatCOP(resumen.utilidad_parcial)}`
+                : `-${formatCOP(Math.abs(resumen.utilidad_parcial))}`}
+            </p>
+            <p className="text-xs opacity-60 mt-0.5">
+              {activosConCosto.length} activo{activosConCosto.length !== 1 ? 's' : ''}
+            </p>
+          </div>
+        )}
         {resumen.por_cubrir > 0 && (
           <div className="bg-red-50 text-red-600 rounded-xl p-3">
             <p className="text-xs font-medium opacity-70">Falta por cubrir costo</p>
@@ -507,26 +515,24 @@ const SeccionPrestamos = ({ prestamos }) => {
       </div>
 
       <div className="flex flex-col gap-3">
-        {saldados.length > 0 && (
+        {saldadosConCosto.length > 0 && (
           <div className="flex flex-col gap-2">
             <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
               Saldados hoy — utilidad confirmada
             </p>
-            {saldados.map((p) => {
-              const prestamoId = p.id;
-              return <FilaPrestamo key={prestamoId} prestamo={p} tipo="saldado" />;
-            })}
+            {saldadosConCosto.map((p) => (
+              <FilaPrestamo key={p.id} prestamo={p} tipo="saldado" />
+            ))}
           </div>
         )}
-        {activos.length > 0 && (
+        {activosConCosto.length > 0 && (
           <div className="flex flex-col gap-2">
             <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-              Pendientes — todos los activos
+              Pendientes — activos con costo registrado
             </p>
-            {activos.map((p) => {
-              const prestamoId = p.id;
-              return <FilaPrestamo key={prestamoId} prestamo={p} tipo="activo" />;
-            })}
+            {activosConCosto.map((p) => (
+              <FilaPrestamo key={p.id} prestamo={p} tipo="activo" />
+            ))}
           </div>
         )}
       </div>
