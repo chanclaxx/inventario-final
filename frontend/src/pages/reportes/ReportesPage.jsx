@@ -464,11 +464,11 @@ const SeccionPrestamos = ({ prestamos }) => {
 
   const { saldados, activos, resumen } = prestamos;
 
-  // Solo mostrar préstamos que tienen costo registrado — sin costo no aportan info de utilidad
-  const saldadosConCosto = saldados.filter((p) => p.costo_producto !== null);
-  const activosConCosto  = activos.filter((p)  => p.costo_producto !== null);
+  // Solo mostrar: saldados con costo, y activos donde el costo ya está cubierto
+  const saldadosConCosto  = saldados.filter((p) => p.costo_producto !== null);
+  const activosCostoCubierto = activos.filter((p) => p.costo_producto !== null && p.falta_para_cubrir === 0);
 
-  if (saldadosConCosto.length === 0 && activosConCosto.length === 0) return null;
+  if (saldadosConCosto.length === 0 && activosCostoCubierto.length === 0) return null;
 
   return (
     <div className="flex flex-col gap-3 border-t border-gray-100 pt-4">
@@ -492,7 +492,7 @@ const SeccionPrestamos = ({ prestamos }) => {
             </p>
           </div>
         )}
-        {activosConCosto.length > 0 && (
+        {activosCostoCubierto.length > 0 && (
           <div className="bg-amber-50 text-amber-700 rounded-xl p-3">
             <p className="text-xs font-medium opacity-70">Pendientes por cobrar</p>
             <p className="text-lg font-bold mt-0.5">
@@ -501,7 +501,7 @@ const SeccionPrestamos = ({ prestamos }) => {
                 : `-${formatCOP(Math.abs(resumen.utilidad_parcial))}`}
             </p>
             <p className="text-xs opacity-60 mt-0.5">
-              {activosConCosto.length} activo{activosConCosto.length !== 1 ? 's' : ''}
+              {activosCostoCubierto.length} activo{activosCostoCubierto.length !== 1 ? 's' : ''}
             </p>
           </div>
         )}
@@ -525,12 +525,12 @@ const SeccionPrestamos = ({ prestamos }) => {
             ))}
           </div>
         )}
-        {activosConCosto.length > 0 && (
+        {activosCostoCubierto.length > 0 && (
           <div className="flex flex-col gap-2">
             <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-              Pendientes — activos con costo registrado
+              Activos — costo cubierto
             </p>
-            {activosConCosto.map((p) => (
+            {activosCostoCubierto.map((p) => (
               <FilaPrestamo key={p.id} prestamo={p} tipo="activo" />
             ))}
           </div>
