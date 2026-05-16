@@ -747,6 +747,48 @@ const SeccionServicios = ({ servicios }) => {
 // UTILIDAD DE CRÉDITOS — componentes
 // ─────────────────────────────────────────────
 
+const FilaCreditoActivo = ({ credito }) => {
+  const { costo_total, total_cobrado, utilidad_parcial, falta_para_cubrir, saldo_pendiente } = credito;
+
+  return (
+    <div className="bg-white border border-gray-100 rounded-xl p-3 flex flex-col gap-1.5 shadow-sm">
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold text-gray-800 truncate">{credito.nombre_cliente}</p>
+          <p className="text-xs text-gray-400">
+            Factura #{String(credito.factura_id).padStart(6, '0')}
+            {credito.cedula ? ` · CC: ${credito.cedula}` : ''}
+          </p>
+        </div>
+        <div className="flex flex-col items-end gap-1 flex-shrink-0">
+          <Badge variant="yellow">Activo</Badge>
+          {utilidad_parcial > 0
+            ? <UtilidadBadge valor={utilidad_parcial} />
+            : <span className="text-xs text-gray-400 italic">Sin utilidad aún</span>}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-x-3 text-xs text-gray-500 pt-1 border-t border-gray-100">
+        <span>Costo: {formatCOP(costo_total)}</span>
+        <span className="text-right">Cobrado: {formatCOP(total_cobrado)}</span>
+        {falta_para_cubrir > 0 && (
+          <span className="col-span-2 text-amber-600 font-medium mt-0.5">
+            Faltan {formatCOP(falta_para_cubrir)} para cubrir el costo
+          </span>
+        )}
+        {falta_para_cubrir === 0 && utilidad_parcial > 0 && (
+          <span className="col-span-2 text-green-600 font-medium mt-0.5">
+            ✓ Costo cubierto
+          </span>
+        )}
+        <span className="col-span-2 text-red-500 font-medium mt-0.5">
+          Saldo pendiente: {formatCOP(saldo_pendiente)}
+        </span>
+      </div>
+    </div>
+  );
+};
+
 const FilaCreditoSaldado = ({ credito }) => {
   const [expandida, setExpandida] = useState(false);
   const sinCosto = credito.tiene_costo_incompleto;
@@ -838,7 +880,7 @@ const SeccionCreditos = ({ creditos }) => {
         )}
       </h3>
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
         {resumen.total_saldados > 0 && (
           <div className="bg-green-50 text-green-700 rounded-xl p-3">
             <p className="text-xs font-medium opacity-70">Utilidad confirmada</p>
@@ -849,15 +891,33 @@ const SeccionCreditos = ({ creditos }) => {
           </div>
         )}
         {activos.total > 0 && (
-          <div className="bg-yellow-50 text-yellow-700 rounded-xl p-3">
-            <p className="text-xs font-medium opacity-70">Créditos activos</p>
-            <p className="text-lg font-bold mt-0.5">{activos.total}</p>
+          <div className="bg-amber-50 text-amber-700 rounded-xl p-3">
+            <p className="text-xs font-medium opacity-70">Utilidad parcial activos</p>
+            <p className="text-lg font-bold mt-0.5">{formatCOP(activos.utilidad_parcial)}</p>
             <p className="text-xs opacity-60 mt-0.5">
-              Saldo por cobrar: {formatCOP(activos.saldo_pendiente)}
+              {activos.total} activo{activos.total !== 1 ? 's' : ''} · saldo: {formatCOP(activos.saldo_pendiente)}
             </p>
           </div>
         )}
+        {activos.falta_para_cubrir > 0 && (
+          <div className="bg-red-50 text-red-600 rounded-xl p-3">
+            <p className="text-xs font-medium opacity-70">Falta por cubrir costo</p>
+            <p className="text-lg font-bold mt-0.5">{formatCOP(activos.falta_para_cubrir)}</p>
+            <p className="text-xs opacity-60 mt-0.5">entre los activos</p>
+          </div>
+        )}
       </div>
+
+      {activos.total > 0 && activos.detalle?.length > 0 && (
+        <div className="flex flex-col gap-2">
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+            Créditos activos — utilidad acumulada
+          </p>
+          {activos.detalle.map((c) => (
+            <FilaCreditoActivo key={c.credito_id} credito={c} />
+          ))}
+        </div>
+      )}
 
       {saldados.length > 0 && (
         <div className="flex flex-col gap-2">

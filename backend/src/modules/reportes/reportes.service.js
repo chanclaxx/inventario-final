@@ -655,21 +655,86 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
     (s, c) => c.utilidad !== null ? s + c.utilidad : s, 0,
   );
 
-  // ── Créditos activos: resumen compacto ────────────────────────────────────
-  const { rows: creditosActivosResumen } = await pool.query(`
+  // ── Créditos activos: detalle con utilidad parcial ────────────────────────
+  // Utilidad parcial = MAX(0, cobrado - costo). Solo hay utilidad una vez
+  // que lo cobrado (cuota_inicial + abonos) supera el costo de los productos.
+  const { rows: creditosActivosRows } = await pool.query(`
+    WITH activos AS (
+      SELECT
+        cr.id            AS credito_id,
+        cr.factura_id,
+        cr.valor_total,
+        cr.cuota_inicial,
+        cr.total_abonado,
+        (cr.cuota_inicial + cr.total_abonado) AS total_cobrado,
+        f.nombre_cliente,
+        f.cedula
+      FROM creditos cr
+      JOIN facturas f ON f.id = cr.factura_id
+      WHERE cr.sucursal_id = $1 AND cr.estado = 'Activo'
+    ),
+    costos AS (
+      SELECT
+        l.factura_id,
+        SUM(
+          CASE
+            WHEN l.imei IS NOT NULL THEN
+              ${_costoPorImei('l.imei', 'f.sucursal_id')}
+            ELSE
+              COALESCE(
+                (SELECT v.costo_unitario FROM variantes_atributo v WHERE v.id = l.variante_id),
+                (SELECT ap.costo_unitario FROM atributos_producto ap WHERE ap.id = l.atributo_id),
+                (SELECT pc.costo_unitario FROM productos_cantidad pc
+                 WHERE pc.nombre = l.nombre_producto AND pc.sucursal_id = f.sucursal_id LIMIT 1),
+                0
+              ) * l.cantidad
+          END
+        ) AS costo_total
+      FROM lineas_factura l
+      JOIN facturas f ON f.id = l.factura_id
+      WHERE l.factura_id IN (SELECT factura_id FROM activos)
+      GROUP BY l.factura_id
+    )
     SELECT
-      COUNT(*)::int AS total,
-      COALESCE(SUM(valor_total - cuota_inicial - total_abonado), 0) AS saldo_pendiente
-    FROM creditos
-    WHERE sucursal_id = $1 AND estado = 'Activo'
+      a.credito_id,
+      a.factura_id,
+      a.nombre_cliente,
+      a.cedula,
+      a.valor_total,
+      a.cuota_inicial,
+      a.total_abonado,
+      a.total_cobrado,
+      COALESCE(c.costo_total, 0)                                AS costo_total,
+      GREATEST(0, a.total_cobrado - COALESCE(c.costo_total, 0)) AS utilidad_parcial,
+      GREATEST(0, COALESCE(c.costo_total, 0) - a.total_cobrado) AS falta_para_cubrir
+    FROM activos a
+    LEFT JOIN costos c ON c.factura_id = a.factura_id
+    ORDER BY a.credito_id DESC
   `, [sucursalId]);
 
-  // FIX: creditosActivosResumen ya ES el array (rows fue destructurado arriba)
+  const creditosActivos = creditosActivosRows.map((r) => ({
+    credito_id:        Number(r.credito_id),
+    factura_id:        Number(r.factura_id),
+    nombre_cliente:    r.nombre_cliente,
+    cedula:            r.cedula,
+    valor_total:       Number(r.valor_total),
+    cuota_inicial:     Number(r.cuota_inicial),
+    total_abonado:     Number(r.total_abonado),
+    total_cobrado:     Number(r.total_cobrado),
+    costo_total:       Number(r.costo_total),
+    utilidad_parcial:  Number(r.utilidad_parcial),
+    falta_para_cubrir: Number(r.falta_para_cubrir),
+    saldo_pendiente:   Math.max(0, Number(r.valor_total) - Number(r.cuota_inicial) - Number(r.total_abonado)),
+  }));
+
   const creditosData = {
     saldados: creditosSaldados,
     activos: {
-      total:           Number(creditosActivosResumen[0]?.total           || 0),
-      saldo_pendiente: Number(creditosActivosResumen[0]?.saldo_pendiente || 0),
+      total:             creditosActivos.length,
+      saldo_pendiente:   creditosActivos.reduce((s, c) => s + c.saldo_pendiente, 0),
+      utilidad_parcial:  creditosActivos.reduce((s, c) => s + c.utilidad_parcial, 0),
+      falta_para_cubrir: creditosActivos.reduce((s, c) => s + c.falta_para_cubrir, 0),
+      detalle:           creditosActivos,
     },
     resumen: {
       utilidad_confirmada: utilidadCreditosSaldados,
