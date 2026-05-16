@@ -11,6 +11,7 @@ import { useCedulaCliente }            from '../../hooks/useCedulaCliente';
 import { ModalConflictoCedula }        from '../../components/ui/ModalConflictoCedula';
 import { formatCOP, formatFechaHora }  from '../../utils/formatters';
 import { ComprobanteServicio }         from '../../components/ComprobanteServicio';
+import { ModalImprimirServicio }       from '../../components/ui/ModalImprimirServicio';
 import { ReciboRecepcion }            from '../../components/ReciboRecepcion';
 import { ChecklistEquipo }            from '../../components/ChecklistEquipo';
 import { PatronGrid }                 from '../../components/PatronGrid';
@@ -1988,6 +1989,15 @@ export default function ServiciosPage() {
         <ReimprimirRecepcion orden={accion.orden} onClose={cerrar} />
       )}
       {accion?.tipo === 'reimprimir-comprobante' && (
+        <ModalImprimirServicio
+          open
+          onClose={cerrar}
+          ordenId={accion.orden.id}
+          nombreCliente={accion.orden.cliente_nombre}
+          onImprimirPos={() => setAccion({ tipo: 'reimprimir-comprobante-pos', orden: accion.orden })}
+        />
+      )}
+      {accion?.tipo === 'reimprimir-comprobante-pos' && (
         <ReimprimirComprobante orden={accion.orden} onClose={cerrar} />
       )}
     </>

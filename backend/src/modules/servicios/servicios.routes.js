@@ -3,7 +3,8 @@ const { body } = require('express-validator');
 const { validate }      = require('../../middlewares/validate.middleware');
 const { requireNivel }  = require('../../middlewares/role.middleware');
 const { requireModulo } = require('../../middlewares/modulo.middleware');
-const ctrl = require('./servicios.controller');
+const ctrl    = require('./servicios.controller');
+const pdfCtrl = require('./servicios.pdf.controller');
 
 const validarOrden = [
   body('cliente_nombre').notEmpty().trim().withMessage('El nombre del cliente es requerido'),
@@ -42,6 +43,7 @@ const validarGarantia = [
 
 router.get('/',            requireModulo('servicios'), ctrl.getOrdenes);
 router.get('/resumen-hoy', requireModulo('servicios'), ctrl.getResumenHoy);
+router.get('/:id/pdf',     requireModulo('servicios'), pdfCtrl.getPdfServicio);
 router.get('/:id',         requireModulo('servicios'), ctrl.getOrdenById);
 
 router.post('/',                    requireModulo('servicios'), validarOrden,      validate, ctrl.crearOrden);
