@@ -573,7 +573,7 @@ function ModalNuevoCargo({ acreedor, onClose }) {
     <Modal open onClose={onClose} title="Agregar cargo" size="sm">
       <div className="flex flex-col gap-4">
         <Input
-          label="Descripción"
+          label="Descripción (opcional)"
           placeholder="Ej: Deuda por factura #001..."
           value={descripcion}
           onChange={(e) => setDescripcion(e.target.value)}
@@ -678,7 +678,7 @@ function ModalEditarAbono({ acreedorId, cargoIdActual, abono, onClose }) {
               focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all" />
         </div>
 
-        <Input label="Descripción" value={descripcion}
+        <Input label="Descripción (opcional)" value={descripcion}
           onChange={(e) => setDescripcion(e.target.value)} />
 
         <div className="flex flex-col gap-1.5">
