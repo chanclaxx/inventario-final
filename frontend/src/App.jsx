@@ -17,7 +17,8 @@ import FacturarPage         from './pages/facturas/FacturarPage';
 import PrestamosPage        from './pages/prestamos/PrestamosPage';
 import CajaPage             from './pages/caja/CajaPage';
 import ReportesPage         from './pages/reportes/ReportesPage';
-import ConfigPage           from './pages/configuracion/ConfigPage';
+import ConfigPage              from './pages/configuracion/ConfigPage';
+import ActividadUsuariosPage  from './pages/actividad/ActividadUsuariosPage';
 import AcreedoresPage       from './pages/acreedores/AcreedoresPage';
 import ProveedoresPage      from './pages/proveedores/ProveedoresPage';
 import ServiciosPage        from './pages/servicios/ServiciosPage';
@@ -79,6 +80,9 @@ export default function App() {
               {/* Solo admin_negocio — sin ModuloGuard */}
               <Route path="/config" element={
                 <PrivateRoute rol="admin_negocio"><ConfigPage /></PrivateRoute>
+              } />
+              <Route path="/actividad-usuarios" element={
+                <PrivateRoute rol="admin_negocio"><ActividadUsuariosPage /></PrivateRoute>
               } />
 
               {/* Página sin acceso */}

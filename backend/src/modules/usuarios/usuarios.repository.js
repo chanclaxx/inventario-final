@@ -178,9 +178,116 @@ const invalidarTokenRecuperacion = async (tokenId) => {
   );
 };
 
+const getActividad = async (negocioId, { usuario_id, fecha_desde, fecha_hasta, tipo, limit = 50, offset = 0 } = {}) => {
+  const params = [negocioId];
+  let idx = 2;
+
+  const filtroUsuario   = usuario_id   ? `AND u.id = $${idx++}`                  : '';
+  if (usuario_id)   params.push(usuario_id);
+
+  const filtroDesde     = fecha_desde  ? `AND fecha >= $${idx++}`                 : '';
+  if (fecha_desde)  params.push(fecha_desde);
+
+  const filtroHasta     = fecha_hasta  ? `AND fecha <= ($${idx++}::date + interval '1 day' - interval '1 second')` : '';
+  if (fecha_hasta)  params.push(fecha_hasta);
+
+  params.push(limit);
+  params.push(offset);
+  const idxLimit  = idx++;
+  const idxOffset = idx++;
+
+  const bloques = {
+    venta: `
+      SELECT 'venta' AS tipo, f.id, f.fecha,
+             u.id AS usuario_id, u.nombre AS usuario_nombre, u.rol AS usuario_rol,
+             s.nombre AS sucursal_nombre,
+             'Venta a ' || COALESCE(f.nombre_cliente, 'cliente') AS descripcion,
+             COALESCE(SUM(l.precio * (l.cantidad - COALESCE(l.cantidad_devuelta,0))), 0) AS valor
+      FROM facturas f
+      JOIN sucursales s ON s.id = f.sucursal_id
+      JOIN usuarios   u ON u.id = f.usuario_id
+      LEFT JOIN lineas_factura l ON l.factura_id = f.id
+      WHERE s.negocio_id = $1 AND f.usuario_id IS NOT NULL
+        ${filtroUsuario} ${filtroDesde} ${filtroHasta}
+      GROUP BY f.id, u.id, u.nombre, u.rol, s.nombre`,
+
+    compra: `
+      SELECT 'compra' AS tipo, c.id, c.fecha,
+             u.id AS usuario_id, u.nombre AS usuario_nombre, u.rol AS usuario_rol,
+             s.nombre AS sucursal_nombre,
+             'Compra registrada' AS descripcion,
+             c.total AS valor
+      FROM compras c
+      JOIN sucursales s ON s.id = c.sucursal_id
+      JOIN usuarios   u ON u.id = c.usuario_id
+      WHERE s.negocio_id = $1 AND c.usuario_id IS NOT NULL
+        ${filtroUsuario} ${filtroDesde} ${filtroHasta}`,
+
+    apertura_caja: `
+      SELECT 'apertura_caja' AS tipo, ac.id, ac.fecha_apertura AS fecha,
+             u.id AS usuario_id, u.nombre AS usuario_nombre, u.rol AS usuario_rol,
+             s.nombre AS sucursal_nombre,
+             CASE ac.estado
+               WHEN 'Cerrada' THEN 'Cierre de caja'
+               ELSE 'Apertura de caja'
+             END AS descripcion,
+             ac.monto_inicial AS valor
+      FROM aperturas_caja ac
+      JOIN sucursales s ON s.id = ac.sucursal_id
+      JOIN usuarios   u ON u.id = ac.usuario_id
+      WHERE s.negocio_id = $1 AND ac.usuario_id IS NOT NULL
+        ${filtroUsuario} ${filtroDesde} ${filtroHasta}`,
+
+    traslado: `
+      SELECT 'traslado' AS tipo, t.id, t.fecha,
+             u.id AS usuario_id, u.nombre AS usuario_nombre, u.rol AS usuario_rol,
+             so.nombre AS sucursal_nombre,
+             'Traslado: ' || so.nombre || ' → ' || sd.nombre AS descripcion,
+             NULL::numeric AS valor
+      FROM traslados t
+      JOIN sucursales so ON so.id = t.sucursal_origen_id
+      JOIN sucursales sd ON sd.id = t.sucursal_destino_id
+      JOIN usuarios   u  ON u.id  = t.usuario_id
+      WHERE t.negocio_id = $1 AND t.usuario_id IS NOT NULL
+        ${filtroUsuario} ${filtroDesde} ${filtroHasta}`,
+
+    movimiento_caja: `
+      SELECT 'movimiento_caja' AS tipo, mc.id, mc.fecha,
+             u.id AS usuario_id, u.nombre AS usuario_nombre, u.rol AS usuario_rol,
+             s.nombre AS sucursal_nombre,
+             mc.tipo || ' de caja: ' || mc.concepto AS descripcion,
+             mc.valor AS valor
+      FROM movimientos_caja mc
+      JOIN aperturas_caja ac ON ac.id = mc.caja_id
+      JOIN sucursales     s  ON s.id  = ac.sucursal_id
+      JOIN usuarios       u  ON u.id  = mc.usuario_id
+      WHERE s.negocio_id = $1 AND mc.usuario_id IS NOT NULL AND mc.activo = true
+        ${filtroUsuario} ${filtroDesde} ${filtroHasta}`,
+  };
+
+  const tiposActivos = (tipo && bloques[tipo]) ? [tipo] : Object.keys(bloques);
+  const union = tiposActivos.map((t) => bloques[t]).join('\nUNION ALL\n');
+
+  const sql = `
+    SELECT * FROM (${union}) act
+    ORDER BY fecha DESC
+    LIMIT $${idxLimit} OFFSET $${idxOffset}
+  `;
+
+  const countSql = `SELECT COUNT(*) AS total FROM (${union}) act`;
+
+  const [{ rows }, { rows: countRows }] = await Promise.all([
+    pool.query(sql, params),
+    pool.query(countSql, params.slice(0, -2)),
+  ]);
+
+  return { actividad: rows, total: parseInt(countRows[0].total) };
+};
+
 module.exports = {
   findAll, findById, findByEmail,
   create, update, updatePassword,
   crearTokenRecuperacion, findAdminByEmail,
   findTokenRecuperacion, invalidarTokenRecuperacion,
+  getActividad,
 };

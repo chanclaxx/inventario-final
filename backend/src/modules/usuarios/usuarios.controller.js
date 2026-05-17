@@ -65,7 +65,22 @@ const resetearPassword = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+const getActividadUsuarios = async (req, res, next) => {
+  try {
+    const { usuario_id, fecha_desde, fecha_hasta, tipo, page = 1, limit = 50 } = req.query;
+    const offset = (Math.max(1, parseInt(page)) - 1) * parseInt(limit);
+    const data = await service.getActividadUsuarios(req.user.negocio_id, {
+      usuario_id: usuario_id ? parseInt(usuario_id) : undefined,
+      fecha_desde, fecha_hasta, tipo,
+      limit: parseInt(limit),
+      offset,
+    });
+    res.json({ ok: true, ...data });
+  } catch (err) { next(err); }
+};
+
 module.exports = {
   getUsuarios, getUsuarioById, crearUsuario,
-  actualizarUsuario, cambiarPassword, cambiarPasswordTemporal,solicitarRecuperacion,resetearPassword
+  actualizarUsuario, cambiarPassword, cambiarPasswordTemporal,
+  solicitarRecuperacion, resetearPassword, getActividadUsuarios,
 };

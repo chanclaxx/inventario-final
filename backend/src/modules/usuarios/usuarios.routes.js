@@ -3,6 +3,7 @@ const { requireNivel } = require('../../middlewares/role.middleware');
 const ctrl = require('./usuarios.controller');
 
 // auth y verificarPlan ya vienen aplicados desde index.js
+router.get('/actividad',               requireNivel('admin_negocio'), ctrl.getActividadUsuarios);
 router.get('/',                        requireNivel('admin_negocio'), ctrl.getUsuarios);
 router.get('/:id',                     requireNivel('admin_negocio'), ctrl.getUsuarioById);
 router.post('/',                       requireNivel('admin_negocio'), ctrl.crearUsuario);

@@ -221,7 +221,11 @@ const resetearPassword = async (tokenPlano, passwordNueva) => {
   await usuariosRepo.invalidarTokenRecuperacion(tokenData.id);
 };
 
+const getActividadUsuarios = (negocioId, filtros) =>
+  usuariosRepo.getActividad(negocioId, filtros);
+
 module.exports = {
   getUsuarios, getUsuarioById, crearUsuario,
-  actualizarUsuario, cambiarPassword, cambiarPasswordTemporal,resetearPassword,solicitarRecuperacion
+  actualizarUsuario, cambiarPassword, cambiarPasswordTemporal,
+  resetearPassword, solicitarRecuperacion, getActividadUsuarios,
 };
