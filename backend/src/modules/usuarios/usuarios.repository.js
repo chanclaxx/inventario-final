@@ -202,7 +202,13 @@ const getActividad = async (negocioId, { usuario_id, fecha_desde, fecha_hasta, t
              u.id AS usuario_id, u.nombre AS usuario_nombre, u.rol AS usuario_rol,
              s.nombre AS sucursal_nombre,
              'Venta a ' || COALESCE(f.nombre_cliente, 'cliente') AS descripcion,
-             COALESCE(SUM(l.precio * (l.cantidad - COALESCE(l.cantidad_devuelta,0))), 0) AS valor
+             COALESCE(SUM(l.precio * (l.cantidad - COALESCE(l.cantidad_devuelta,0))), 0) AS valor,
+             f.estado,
+             NULL::varchar AS metodo,
+             f.notas,
+             f.nombre_cliente AS ref_nombre,
+             f.cedula         AS ref_extra,
+             NULL::varchar    AS sucursal_destino
       FROM facturas f
       JOIN sucursales s ON s.id = f.sucursal_id
       JOIN usuarios   u ON u.id = f.usuario_id
@@ -216,10 +222,17 @@ const getActividad = async (negocioId, { usuario_id, fecha_desde, fecha_hasta, t
              u.id AS usuario_id, u.nombre AS usuario_nombre, u.rol AS usuario_rol,
              s.nombre AS sucursal_nombre,
              'Compra registrada' AS descripcion,
-             c.total AS valor
+             c.total AS valor,
+             c.estado,
+             c.metodo,
+             c.notas,
+             p.nombre         AS ref_nombre,
+             c.numero_factura AS ref_extra,
+             NULL::varchar    AS sucursal_destino
       FROM compras c
-      JOIN sucursales s ON s.id = c.sucursal_id
-      JOIN usuarios   u ON u.id = c.usuario_id
+      JOIN sucursales s  ON s.id = c.sucursal_id
+      JOIN usuarios   u  ON u.id = c.usuario_id
+      LEFT JOIN proveedores p ON p.id = c.proveedor_id
       WHERE s.negocio_id = $1 AND c.usuario_id IS NOT NULL
         ${filtroUsuario} ${filtroDesde} ${filtroHasta}`,
 
@@ -227,11 +240,14 @@ const getActividad = async (negocioId, { usuario_id, fecha_desde, fecha_hasta, t
       SELECT 'apertura_caja' AS tipo, ac.id, ac.fecha_apertura AS fecha,
              u.id AS usuario_id, u.nombre AS usuario_nombre, u.rol AS usuario_rol,
              s.nombre AS sucursal_nombre,
-             CASE ac.estado
-               WHEN 'Cerrada' THEN 'Cierre de caja'
-               ELSE 'Apertura de caja'
-             END AS descripcion,
-             ac.monto_inicial AS valor
+             CASE ac.estado WHEN 'Cerrada' THEN 'Cierre de caja' ELSE 'Apertura de caja' END AS descripcion,
+             ac.monto_inicial AS valor,
+             ac.estado,
+             NULL::varchar AS metodo,
+             NULL::text    AS notas,
+             NULL::varchar AS ref_nombre,
+             COALESCE(ac.monto_cierre::varchar, '—') AS ref_extra,
+             NULL::varchar AS sucursal_destino
       FROM aperturas_caja ac
       JOIN sucursales s ON s.id = ac.sucursal_id
       JOIN usuarios   u ON u.id = ac.usuario_id
@@ -243,7 +259,13 @@ const getActividad = async (negocioId, { usuario_id, fecha_desde, fecha_hasta, t
              u.id AS usuario_id, u.nombre AS usuario_nombre, u.rol AS usuario_rol,
              so.nombre AS sucursal_nombre,
              'Traslado: ' || so.nombre || ' → ' || sd.nombre AS descripcion,
-             NULL::numeric AS valor
+             NULL::numeric AS valor,
+             t.estado,
+             NULL::varchar AS metodo,
+             t.notas,
+             NULL::varchar AS ref_nombre,
+             NULL::varchar AS ref_extra,
+             sd.nombre     AS sucursal_destino
       FROM traslados t
       JOIN sucursales so ON so.id = t.sucursal_origen_id
       JOIN sucursales sd ON sd.id = t.sucursal_destino_id
@@ -256,7 +278,13 @@ const getActividad = async (negocioId, { usuario_id, fecha_desde, fecha_hasta, t
              u.id AS usuario_id, u.nombre AS usuario_nombre, u.rol AS usuario_rol,
              s.nombre AS sucursal_nombre,
              mc.tipo || ' de caja: ' || mc.concepto AS descripcion,
-             mc.valor AS valor
+             mc.valor AS valor,
+             mc.tipo   AS estado,
+             mc.metodo,
+             mc.concepto AS notas,
+             NULL::varchar AS ref_nombre,
+             NULL::varchar AS ref_extra,
+             NULL::varchar AS sucursal_destino
       FROM movimientos_caja mc
       JOIN aperturas_caja ac ON ac.id = mc.caja_id
       JOIN sucursales     s  ON s.id  = ac.sucursal_id

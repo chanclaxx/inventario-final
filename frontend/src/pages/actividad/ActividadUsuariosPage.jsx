@@ -4,30 +4,33 @@ import {
   Activity, ShoppingCart, PackagePlus, Vault,
   ArrowLeftRight, TrendingUp, TrendingDown,
   ChevronLeft, ChevronRight, Filter, X,
+  User, MapPin, Calendar, CreditCard,
+  FileText, Tag, StickyNote, ArrowRight,
 } from 'lucide-react';
 import { getActividadUsuarios } from '../../api/usuarios.api';
 import api from '../../api/axios.config';
+import { Modal }      from '../../components/ui/Modal';
 import { Spinner }    from '../../components/ui/Spinner';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { formatCOP, formatFechaHora, fechaHoyBogota } from '../../utils/formatters';
 
-// ─── Config por tipo de actividad ────────────────────────────────────────────
+// ─── Config por tipo ──────────────────────────────────────────────────────────
 
 const TIPOS = [
-  { value: '',               label: 'Todos'          },
-  { value: 'venta',          label: 'Ventas'         },
-  { value: 'compra',         label: 'Compras'        },
-  { value: 'apertura_caja',  label: 'Caja'           },
-  { value: 'traslado',       label: 'Traslados'      },
-  { value: 'movimiento_caja',label: 'Mov. de caja'   },
+  { value: '',               label: 'Todos'        },
+  { value: 'venta',          label: 'Ventas'       },
+  { value: 'compra',         label: 'Compras'      },
+  { value: 'apertura_caja',  label: 'Caja'         },
+  { value: 'traslado',       label: 'Traslados'    },
+  { value: 'movimiento_caja',label: 'Mov. de caja' },
 ];
 
 const TIPO_META = {
-  venta:           { Icn: ShoppingCart,  bg: 'bg-green-100',  text: 'text-green-600',  label: 'Venta'         },
-  compra:          { Icn: PackagePlus,   bg: 'bg-blue-100',   text: 'text-blue-600',   label: 'Compra'        },
-  apertura_caja:   { Icn: Vault,         bg: 'bg-yellow-100', text: 'text-yellow-600', label: 'Caja'          },
-  traslado:        { Icn: ArrowLeftRight,bg: 'bg-purple-100', text: 'text-purple-600', label: 'Traslado'      },
-  movimiento_caja: { Icn: TrendingUp,    bg: 'bg-orange-100', text: 'text-orange-600', label: 'Mov. caja'     },
+  venta:           { Icn: ShoppingCart,   bg: 'bg-green-100',  text: 'text-green-600',  border: 'border-green-200',  label: 'Venta'      },
+  compra:          { Icn: PackagePlus,    bg: 'bg-blue-100',   text: 'text-blue-600',   border: 'border-blue-200',   label: 'Compra'     },
+  apertura_caja:   { Icn: Vault,          bg: 'bg-yellow-100', text: 'text-yellow-600', border: 'border-yellow-200', label: 'Caja'       },
+  traslado:        { Icn: ArrowLeftRight, bg: 'bg-purple-100', text: 'text-purple-600', border: 'border-purple-200', label: 'Traslado'   },
+  movimiento_caja: { Icn: TrendingUp,     bg: 'bg-orange-100', text: 'text-orange-600', border: 'border-orange-200', label: 'Mov. caja'  },
 };
 
 const ROL_LABEL = {
@@ -38,9 +41,126 @@ const ROL_LABEL = {
 
 const LIMIT = 30;
 
-// ─── Componente de ítem de actividad ─────────────────────────────────────────
+// ─── Modal de detalle ─────────────────────────────────────────────────────────
 
-function ItemActividad({ item }) {
+function FilaDetalle({ icono: Icn, label, value, mono }) {
+  if (value === null || value === undefined || value === '' || value === '—') return null;
+  return (
+    <div className="flex items-start gap-3 py-2.5 border-b border-gray-50 last:border-0">
+      <div className="w-7 h-7 bg-gray-100 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
+        <Icn size={13} className="text-gray-400" />
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-xs text-gray-400 leading-none mb-0.5">{label}</p>
+        <p className={`text-sm text-gray-800 font-medium break-words ${mono ? 'font-mono' : ''}`}>{value}</p>
+      </div>
+    </div>
+  );
+}
+
+function ModalDetalle({ item, onClose }) {
+  if (!item) return null;
+  const meta = TIPO_META[item.tipo] ?? { Icn: Activity, bg: 'bg-gray-100', text: 'text-gray-500', border: 'border-gray-200', label: item.tipo };
+  const MetaIcn = meta.Icn;
+
+  // Campos específicos por tipo
+  const camposExtra = () => {
+    switch (item.tipo) {
+      case 'venta':
+        return (
+          <>
+            <FilaDetalle icono={User}       label="Cliente"  value={item.ref_nombre} />
+            <FilaDetalle icono={CreditCard} label="Cédula"   value={item.ref_extra}  mono />
+            <FilaDetalle icono={Tag}        label="Estado"   value={item.estado} />
+            <FilaDetalle icono={StickyNote} label="Notas"    value={item.notas} />
+          </>
+        );
+      case 'compra':
+        return (
+          <>
+            <FilaDetalle icono={User}       label="Proveedor"        value={item.ref_nombre} />
+            <FilaDetalle icono={FileText}   label="N.° factura"      value={item.ref_extra}  mono />
+            <FilaDetalle icono={Tag}        label="Estado"           value={item.estado} />
+            <FilaDetalle icono={CreditCard} label="Método de pago"   value={item.metodo} />
+            <FilaDetalle icono={StickyNote} label="Notas"            value={item.notas} />
+          </>
+        );
+      case 'apertura_caja':
+        return (
+          <>
+            <FilaDetalle icono={Tag}        label="Estado"          value={item.estado} />
+            <FilaDetalle icono={CreditCard} label="Monto de cierre"
+              value={item.ref_extra && item.ref_extra !== '—' ? formatCOP(Number(item.ref_extra)) : null} />
+          </>
+        );
+      case 'traslado':
+        return (
+          <>
+            <FilaDetalle icono={MapPin}      label="Sucursal origen"  value={item.sucursal_nombre} />
+            <FilaDetalle icono={ArrowRight}  label="Sucursal destino" value={item.sucursal_destino} />
+            <FilaDetalle icono={Tag}         label="Estado"           value={item.estado} />
+            <FilaDetalle icono={StickyNote}  label="Notas"            value={item.notas} />
+          </>
+        );
+      case 'movimiento_caja':
+        return (
+          <>
+            <FilaDetalle icono={Tag}        label="Tipo"           value={item.estado} />
+            <FilaDetalle icono={CreditCard} label="Método"         value={item.metodo} />
+            <FilaDetalle icono={StickyNote} label="Concepto"       value={item.notas} />
+          </>
+        );
+      default:
+        return null;
+    }
+  };
+
+  return (
+    <Modal open onClose={onClose} title="Detalle del movimiento" size="sm">
+      <div className="flex flex-col gap-4">
+
+        {/* ── Cabecera tipo ── */}
+        <div className={`flex items-center gap-3 p-3 rounded-2xl border ${meta.bg} ${meta.border}`}>
+          <div className={`w-9 h-9 rounded-xl flex items-center justify-center bg-white/60`}>
+            <MetaIcn size={18} className={meta.text} />
+          </div>
+          <div>
+            <p className={`text-sm font-bold ${meta.text}`}>{meta.label}</p>
+            <p className="text-xs text-gray-500">{formatFechaHora(item.fecha)}</p>
+          </div>
+        </div>
+
+        {/* ── Descripción ── */}
+        <p className="text-sm font-semibold text-gray-800 leading-snug">{item.descripcion}</p>
+
+        {/* ── Monto ── */}
+        {item.valor !== null && item.valor !== undefined && Number(item.valor) > 0 && (
+          <div className="flex items-center justify-between bg-gray-50 rounded-xl px-4 py-2.5">
+            <span className="text-xs text-gray-500 font-medium">Monto</span>
+            <span className="text-lg font-bold text-gray-900 tabular-nums">
+              {formatCOP(Number(item.valor))}
+            </span>
+          </div>
+        )}
+
+        {/* ── Campos comunes + específicos ── */}
+        <div className="flex flex-col">
+          <FilaDetalle icono={User}     label="Usuario"  value={`${item.usuario_nombre} (${ROL_LABEL[item.usuario_rol] ?? item.usuario_rol})`} />
+          {item.tipo !== 'traslado' && (
+            <FilaDetalle icono={MapPin} label="Sucursal" value={item.sucursal_nombre} />
+          )}
+          <FilaDetalle icono={Calendar} label="Fecha"    value={formatFechaHora(item.fecha)} />
+          {camposExtra()}
+        </div>
+
+      </div>
+    </Modal>
+  );
+}
+
+// ─── Ítem de la lista ─────────────────────────────────────────────────────────
+
+function ItemActividad({ item, onClick }) {
   const meta = TIPO_META[item.tipo] ?? { Icn: Activity, bg: 'bg-gray-100', text: 'text-gray-500', label: item.tipo };
   const { Icn } = meta;
 
@@ -48,10 +168,12 @@ function ItemActividad({ item }) {
     ? item.usuario_nombre.split(' ').slice(0, 2).map((p) => p[0]).join('').toUpperCase()
     : '?';
 
-  const tieneValor = item.valor !== null && item.valor !== undefined;
-
   return (
-    <div className="flex items-start gap-3 py-3 px-4 hover:bg-gray-50 transition-colors rounded-xl">
+    <button
+      onClick={onClick}
+      className="w-full flex items-start gap-3 py-3 px-4 hover:bg-gray-50 active:bg-gray-100
+        transition-colors rounded-xl text-left"
+    >
       {/* Icono tipo */}
       <div className={`w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5 ${meta.bg}`}>
         <Icn size={14} className={meta.text} />
@@ -63,7 +185,6 @@ function ItemActividad({ item }) {
           <div className="flex-1 min-w-0">
             <p className="text-sm font-medium text-gray-900 truncate">{item.descripcion}</p>
             <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-              {/* Avatar + nombre usuario */}
               <div className="flex items-center gap-1.5">
                 <span className="w-5 h-5 rounded-full bg-blue-600 text-white text-[9px] font-bold
                   flex items-center justify-center flex-shrink-0">
@@ -88,7 +209,7 @@ function ItemActividad({ item }) {
 
           {/* Valor + fecha */}
           <div className="flex flex-col items-end gap-0.5 flex-shrink-0">
-            {tieneValor && Number(item.valor) > 0 && (
+            {item.valor !== null && item.valor !== undefined && Number(item.valor) > 0 && (
               <span className="text-sm font-semibold text-gray-800 tabular-nums">
                 {formatCOP(Number(item.valor))}
               </span>
@@ -99,7 +220,7 @@ function ItemActividad({ item }) {
           </div>
         </div>
       </div>
-    </div>
+    </button>
   );
 }
 
@@ -116,10 +237,12 @@ export default function ActividadUsuariosPage() {
     page:        1,
   });
 
+  const [itemSeleccionado, setItemSeleccionado] = useState(null);
+
   const setFiltro = (key, value) =>
     setFiltros((f) => ({ ...f, [key]: value, page: key !== 'page' ? 1 : value }));
 
-  // ── Usuarios del negocio para el select ──────────────────────────────────
+  // ── Usuarios del negocio ──────────────────────────────────────────────────
   const { data: usuariosData } = useQuery({
     queryKey: ['usuarios'],
     queryFn:  () => api.get('/usuarios').then((r) => r.data.data),
@@ -145,12 +268,10 @@ export default function ActividadUsuariosPage() {
   const actividad = data?.actividad ?? [];
   const total     = data?.total     ?? 0;
   const totalPags = Math.max(1, Math.ceil(total / LIMIT));
-
   const hayFiltros = filtros.usuario_id || filtros.fecha_desde || filtros.fecha_hasta || filtros.tipo;
 
-  const limpiarFiltros = () => setFiltros({
-    usuario_id: '', fecha_desde: '', fecha_hasta: '', tipo: '', page: 1,
-  });
+  const limpiarFiltros = () =>
+    setFiltros({ usuario_id: '', fecha_desde: '', fecha_hasta: '', tipo: '', page: 1 });
 
   return (
     <div className="flex flex-col gap-4">
@@ -183,7 +304,6 @@ export default function ActividadUsuariosPage() {
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          {/* Usuario */}
           <div className="flex flex-col gap-1">
             <label className="text-xs font-medium text-gray-500">Usuario</label>
             <select
@@ -199,7 +319,6 @@ export default function ActividadUsuariosPage() {
             </select>
           </div>
 
-          {/* Tipo */}
           <div className="flex flex-col gap-1">
             <label className="text-xs font-medium text-gray-500">Tipo</label>
             <select
@@ -214,7 +333,6 @@ export default function ActividadUsuariosPage() {
             </select>
           </div>
 
-          {/* Desde */}
           <div className="flex flex-col gap-1">
             <label className="text-xs font-medium text-gray-500">Desde</label>
             <input
@@ -227,7 +345,6 @@ export default function ActividadUsuariosPage() {
             />
           </div>
 
-          {/* Hasta */}
           <div className="flex flex-col gap-1">
             <label className="text-xs font-medium text-gray-500">Hasta</label>
             <input
@@ -243,10 +360,9 @@ export default function ActividadUsuariosPage() {
         </div>
       </div>
 
-      {/* ── Lista de actividad ── */}
+      {/* ── Lista ── */}
       <div className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden">
 
-        {/* Cabecera con conteo */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-gray-50">
           <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
             {isLoading ? 'Cargando...' : `${total} registro${total !== 1 ? 's' : ''}`}
@@ -258,7 +374,6 @@ export default function ActividadUsuariosPage() {
           )}
         </div>
 
-        {/* Contenido */}
         {isLoading ? (
           <Spinner className="py-16" />
         ) : isError ? (
@@ -276,7 +391,11 @@ export default function ActividadUsuariosPage() {
         ) : (
           <div className="divide-y divide-gray-50 px-1 py-1">
             {actividad.map((item) => (
-              <ItemActividad key={`${item.tipo}-${item.id}`} item={item} />
+              <ItemActividad
+                key={`${item.tipo}-${item.id}`}
+                item={item}
+                onClick={() => setItemSeleccionado(item)}
+              />
             ))}
           </div>
         )}
@@ -288,8 +407,7 @@ export default function ActividadUsuariosPage() {
               onClick={() => setFiltro('page', filtros.page - 1)}
               disabled={filtros.page <= 1}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-medium
-                text-gray-600 hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed
-                transition-colors"
+                text-gray-600 hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
             >
               <ChevronLeft size={15} /> Anterior
             </button>
@@ -300,14 +418,21 @@ export default function ActividadUsuariosPage() {
               onClick={() => setFiltro('page', filtros.page + 1)}
               disabled={filtros.page >= totalPags}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-medium
-                text-gray-600 hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed
-                transition-colors"
+                text-gray-600 hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
             >
               Siguiente <ChevronRight size={15} />
             </button>
           </div>
         )}
       </div>
+
+      {/* ── Modal de detalle ── */}
+      {itemSeleccionado && (
+        <ModalDetalle
+          item={itemSeleccionado}
+          onClose={() => setItemSeleccionado(null)}
+        />
+      )}
     </div>
   );
 }

@@ -670,17 +670,18 @@ function CaracteristicasSerialConfig({ valores, set }) {
 // ─── Personalización del navbar ──────────────────────────────────────────────
 
 const NAV_DEFAULTS = [
-  { path: '/',            label: 'Inicio'      },
-  { path: '/inventario',  label: 'Inventario'  },
-  { path: '/facturar',    label: 'Facturas'    },
-  { path: '/servicios',   label: 'Servicios'   },
-  { path: '/proveedores', label: 'Proveedores' },
-  { path: '/prestamos',   label: 'Préstamos'   },
-  { path: '/caja',        label: 'Caja'        },
-  { path: '/traslados',   label: 'Traslados'   },
-  { path: '/reportes',    label: 'Reportes'    },
-  { path: '/acreedores',  label: 'Acreedores'  },
-  { path: '/busqueda',    label: 'Búsqueda'    },
+  { path: '/',                    label: 'Inicio'     },
+  { path: '/inventario',          label: 'Inventario' },
+  { path: '/facturar',            label: 'Facturas'   },
+  { path: '/servicios',           label: 'Servicios'  },
+  { path: '/proveedores',         label: 'Proveedores'},
+  { path: '/prestamos',           label: 'Préstamos'  },
+  { path: '/caja',                label: 'Caja'       },
+  { path: '/traslados',           label: 'Traslados'  },
+  { path: '/reportes',            label: 'Reportes'   },
+  { path: '/acreedores',          label: 'Acreedores' },
+  { path: '/busqueda',            label: 'Búsqueda'   },
+  { path: '/actividad-usuarios',  label: 'Actividad'  },
 ];
 
 function NavbarConfig({ valores, set }) {

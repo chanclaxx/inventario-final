@@ -6,7 +6,7 @@ import { usePermisos } from '../../hooks/usePermisos.js';
 import {
   LayoutDashboard, Package, FileText, Handshake,
   Wallet, BarChart2, Settings, LogOut, ShoppingCart,
-  Users, Truck, Wrench, ArrowRightLeft, Search,
+  Users, Truck, Wrench, ArrowRightLeft, Search, Activity,
 } from 'lucide-react';
 import { getSucursales } from '../../api/sucursales.api.js';
 import useCarritoStore  from '../../store/carritoStore.js';
@@ -26,7 +26,8 @@ const NAV_ITEMS = [
   { path: '/reportes',    label: 'Reportes',    Icn: BarChart2,       modulo: 'reportes'                      },
   { path: '/acreedores',  label: 'Acreedores',  Icn: Users,           modulo: 'acreedores'                    },
   { path: '/busqueda',    label: 'Búsqueda',    Icn: Search                                                   },
-  { path: '/config',      label: 'Config',      Icn: Settings,        soloAdmin: true                         },
+  { path: '/actividad-usuarios', label: 'Actividad', Icn: Activity, soloAdmin: true                         },
+  { path: '/config',             label: 'Config',    Icn: Settings, soloAdmin: true                         },
 ];
 
 function esItemVisible(item, puedeVer, esAdmin, totalSucursales) {
