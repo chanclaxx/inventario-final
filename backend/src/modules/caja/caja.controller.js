@@ -1,4 +1,5 @@
 const service = require('./caja.service');
+const audit   = require('../../utils/auditoria.util');
 
 const getCajaActiva = async (req, res, next) => {
   try {
@@ -24,6 +25,10 @@ const abrirCaja = async (req, res, next) => {
       usuario_id:  req.user.id,
       negocio_id:  req.user.negocio_id,
     });
+    audit.registrar(req.user.negocio_id, req.user.id, 'Caja abierta', 'caja', data.id, {
+      sucursal_id:   req.sucursal_id,
+      saldo_inicial: Number(req.body.saldo_inicial ?? 0),
+    });
     res.status(201).json({ ok: true, data, message: 'Caja abierta correctamente' });
   } catch (err) { next(err); }
 };
@@ -38,6 +43,11 @@ const toggleMovimiento = async (req, res, next) => {
 const cerrarCaja = async (req, res, next) => {
   try {
     const data = await service.cerrarCaja(req.user.negocio_id, req.params.id, req.body);
+    audit.registrar(req.user.negocio_id, req.user.id, 'Caja cerrada', 'caja', Number(req.params.id), {
+      sucursal_id:    data.sucursal_id ?? null,
+      saldo_final:    Number(data.saldo_final    ?? 0),
+      total_ventas:   Number(data.total_ventas   ?? 0),
+    });
     res.json({ ok: true, data, message: 'Caja cerrada correctamente' });
   } catch (err) { next(err); }
 };
@@ -71,6 +81,12 @@ const registrarMovimiento = async (req, res, next) => {
     const data = await service.registrarMovimiento(req.user.negocio_id, req.params.id, {
       ...req.body,
       usuario_id: req.user.id,
+    });
+    audit.registrar(req.user.negocio_id, req.user.id, 'Movimiento de caja', 'caja', Number(req.params.id), {
+      sucursal_id: req.sucursal_id,
+      tipo:        req.body.tipo        ?? null,
+      monto:       Number(req.body.monto ?? 0),
+      concepto:    req.body.concepto    ?? null,
     });
     res.status(201).json({ ok: true, data, message: 'Movimiento registrado' });
   } catch (err) { next(err); }

@@ -1,4 +1,5 @@
 const service = require('./traslados.service');
+const audit   = require('../../utils/auditoria.util');
 
 const buscarEquivalentes = async (req, res, next) => {
   try {
@@ -59,6 +60,12 @@ const ejecutarTraslado = async (req, res, next) => {
       req.user.negocio_id, req.user.id,
       { sucursal_origen_id: Number(sucursal_origen_id), sucursal_destino_id: Number(sucursal_destino_id), notas, lineas }
     );
+    audit.registrar(req.user.negocio_id, req.user.id, 'Traslado registrado', 'traslados', data.id, {
+      sucursal_id:         Number(sucursal_origen_id),
+      sucursal_destino_id: Number(sucursal_destino_id),
+      items:               lineas.length,
+      notas:               notas ?? null,
+    });
     res.status(201).json({ ok: true, data, message: 'Traslado completado correctamente' });
   } catch (err) { next(err); }
 };
@@ -80,6 +87,7 @@ const getTrasladoById = async (req, res, next) => {
 const revertirTraslado = async (req, res, next) => {
   try {
     const data = await service.revertirTraslado(req.user.negocio_id, Number(req.params.id), req.user.id);
+    audit.registrar(req.user.negocio_id, req.user.id, 'Traslado revertido', 'traslados', Number(req.params.id), {});
     res.json({ ok: true, data, message: 'Traslado revertido correctamente' });
   } catch (err) { next(err); }
 };

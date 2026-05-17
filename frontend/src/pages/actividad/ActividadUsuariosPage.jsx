@@ -2,10 +2,10 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   Activity, ShoppingCart, PackagePlus, Vault,
-  ArrowLeftRight, TrendingUp, TrendingDown,
+  ArrowLeftRight, TrendingUp, Package, Wrench,
   ChevronLeft, ChevronRight, Filter, X,
   User, MapPin, Calendar, CreditCard,
-  FileText, Tag, StickyNote, ArrowRight,
+  FileText, Tag, StickyNote, Smartphone,
 } from 'lucide-react';
 import { getActividadUsuarios } from '../../api/usuarios.api';
 import api from '../../api/axios.config';
@@ -14,23 +14,41 @@ import { Spinner }    from '../../components/ui/Spinner';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { formatCOP, formatFechaHora, fechaHoyBogota } from '../../utils/formatters';
 
-// ─── Config por tipo ──────────────────────────────────────────────────────────
+// ─── Tipos de filtro (valores = claves de TABLA_POR_TIPO en el backend) ────────
 
 const TIPOS = [
-  { value: '',               label: 'Todos'        },
-  { value: 'venta',          label: 'Ventas'       },
-  { value: 'compra',         label: 'Compras'      },
-  { value: 'apertura_caja',  label: 'Caja'         },
-  { value: 'traslado',       label: 'Traslados'    },
-  { value: 'movimiento_caja',label: 'Mov. de caja' },
+  { value: '',                   label: 'Todos'          },
+  { value: 'venta',              label: 'Ventas'         },
+  { value: 'compra',             label: 'Compras'        },
+  { value: 'caja',               label: 'Caja'           },
+  { value: 'traslado',           label: 'Traslados'      },
+  { value: 'inventario_serial',  label: 'Inv. serial'    },
+  { value: 'inventario_cantidad',label: 'Inv. cantidad'  },
+  { value: 'servicio',           label: 'Servicios'      },
+  { value: 'credito',            label: 'Créditos'       },
 ];
 
-const TIPO_META = {
-  venta:           { Icn: ShoppingCart,   bg: 'bg-green-100',  text: 'text-green-600',  border: 'border-green-200',  label: 'Venta'      },
-  compra:          { Icn: PackagePlus,    bg: 'bg-blue-100',   text: 'text-blue-600',   border: 'border-blue-200',   label: 'Compra'     },
-  apertura_caja:   { Icn: Vault,          bg: 'bg-yellow-100', text: 'text-yellow-600', border: 'border-yellow-200', label: 'Caja'       },
-  traslado:        { Icn: ArrowLeftRight, bg: 'bg-purple-100', text: 'text-purple-600', border: 'border-purple-200', label: 'Traslado'   },
-  movimiento_caja: { Icn: TrendingUp,     bg: 'bg-orange-100', text: 'text-orange-600', border: 'border-orange-200', label: 'Mov. caja'  },
+// ─── Meta por tabla (viene del campo item.tabla en auditoria) ─────────────────
+
+const TABLA_META = {
+  facturas:           { Icn: ShoppingCart,   bg: 'bg-green-100',  text: 'text-green-600',  border: 'border-green-200',  label: 'Venta'         },
+  compras:            { Icn: PackagePlus,    bg: 'bg-blue-100',   text: 'text-blue-600',   border: 'border-blue-200',   label: 'Compra'        },
+  traslados:          { Icn: ArrowLeftRight, bg: 'bg-purple-100', text: 'text-purple-600', border: 'border-purple-200', label: 'Traslado'      },
+  caja:               { Icn: Vault,          bg: 'bg-yellow-100', text: 'text-yellow-600', border: 'border-yellow-200', label: 'Caja'          },
+  productos_serial:   { Icn: Smartphone,     bg: 'bg-indigo-100', text: 'text-indigo-600', border: 'border-indigo-200', label: 'Inv. serial'   },
+  productos_cantidad: { Icn: Package,        bg: 'bg-cyan-100',   text: 'text-cyan-600',   border: 'border-cyan-200',   label: 'Inv. cantidad' },
+  servicios:          { Icn: Wrench,         bg: 'bg-orange-100', text: 'text-orange-600', border: 'border-orange-200', label: 'Servicio'      },
+  creditos:           { Icn: CreditCard,     bg: 'bg-rose-100',   text: 'text-rose-600',   border: 'border-rose-200',   label: 'Crédito'       },
+  prestamos:          { Icn: TrendingUp,     bg: 'bg-teal-100',   text: 'text-teal-600',   border: 'border-teal-200',   label: 'Préstamo'      },
+  usuarios:           { Icn: User,           bg: 'bg-gray-100',   text: 'text-gray-600',   border: 'border-gray-200',   label: 'Usuario'       },
+};
+
+const getMeta = (tabla) =>
+  TABLA_META[tabla] ?? { Icn: Activity, bg: 'bg-gray-100', text: 'text-gray-500', border: 'border-gray-200', label: tabla ?? '?' };
+
+const getValor = (item) => {
+  const d = item.detalle ?? {};
+  return Number(d.valor ?? d.precio ?? d.monto ?? d.saldo_inicial ?? d.saldo_final ?? 0);
 };
 
 const ROL_LABEL = {
@@ -41,7 +59,7 @@ const ROL_LABEL = {
 
 const LIMIT = 30;
 
-// ─── Modal de detalle ─────────────────────────────────────────────────────────
+// ─── Fila dentro del modal ────────────────────────────────────────────────────
 
 function FilaDetalle({ icono, label, value, mono }) {
   if (value === null || value === undefined || value === '' || value === '—') return null;
@@ -59,56 +77,95 @@ function FilaDetalle({ icono, label, value, mono }) {
   );
 }
 
+// ─── Modal de detalle ─────────────────────────────────────────────────────────
+
 function ModalDetalle({ item, onClose }) {
   if (!item) return null;
-  const meta = TIPO_META[item.tipo] ?? { Icn: Activity, bg: 'bg-gray-100', text: 'text-gray-500', border: 'border-gray-200', label: item.tipo };
+  const meta   = getMeta(item.tabla);
   const MetaIcn = meta.Icn;
+  const d       = item.detalle ?? {};
+  const valor   = getValor(item);
 
-  // Campos específicos por tipo
   const camposExtra = () => {
-    switch (item.tipo) {
-      case 'venta':
+    switch (item.tabla) {
+      case 'facturas':
         return (
           <>
-            <FilaDetalle icono={User}       label="Cliente"  value={item.ref_nombre} />
-            <FilaDetalle icono={CreditCard} label="Cédula"   value={item.ref_extra}  mono />
-            <FilaDetalle icono={Tag}        label="Estado"   value={item.estado} />
-            <FilaDetalle icono={StickyNote} label="Notas"    value={item.notas} />
+            <FilaDetalle icono={User}       label="Cliente"        value={d.cliente} />
+            <FilaDetalle icono={CreditCard} label="Cédula"         value={d.cedula}  mono />
+            <FilaDetalle icono={Tag}        label="Estado"         value={d.estado} />
           </>
         );
-      case 'compra':
+      case 'compras':
         return (
           <>
-            <FilaDetalle icono={User}       label="Proveedor"        value={item.ref_nombre} />
-            <FilaDetalle icono={FileText}   label="N.° factura"      value={item.ref_extra}  mono />
-            <FilaDetalle icono={Tag}        label="Estado"           value={item.estado} />
-            <FilaDetalle icono={CreditCard} label="Método de pago"   value={item.metodo} />
-            <FilaDetalle icono={StickyNote} label="Notas"            value={item.notas} />
+            <FilaDetalle icono={FileText}   label="N.° factura"    value={d.numero_factura}   mono />
+            <FilaDetalle icono={Tag}        label="Estado"         value={d.estado} />
+            <FilaDetalle icono={CreditCard} label="Método de pago" value={d.metodo} />
           </>
         );
-      case 'apertura_caja':
+      case 'traslados':
         return (
           <>
-            <FilaDetalle icono={Tag}        label="Estado"          value={item.estado} />
-            <FilaDetalle icono={CreditCard} label="Monto de cierre"
-              value={item.ref_extra && item.ref_extra !== '—' ? formatCOP(Number(item.ref_extra)) : null} />
+            <FilaDetalle icono={Tag}        label="Productos"      value={d.items != null ? `${d.items} ítem(s)` : null} />
+            <FilaDetalle icono={StickyNote} label="Notas"          value={d.notas} />
           </>
         );
-      case 'traslado':
+      case 'caja':
         return (
           <>
-            <FilaDetalle icono={MapPin}      label="Sucursal origen"  value={item.sucursal_nombre} />
-            <FilaDetalle icono={ArrowRight}  label="Sucursal destino" value={item.sucursal_destino} />
-            <FilaDetalle icono={Tag}         label="Estado"           value={item.estado} />
-            <FilaDetalle icono={StickyNote}  label="Notas"            value={item.notas} />
+            {d.saldo_inicial != null && (
+              <FilaDetalle icono={CreditCard} label="Saldo inicial" value={formatCOP(Number(d.saldo_inicial))} />
+            )}
+            {d.saldo_final != null && (
+              <FilaDetalle icono={CreditCard} label="Saldo final"   value={formatCOP(Number(d.saldo_final))} />
+            )}
+            {d.total_ventas != null && (
+              <FilaDetalle icono={ShoppingCart} label="Total ventas" value={formatCOP(Number(d.total_ventas))} />
+            )}
+            <FilaDetalle icono={Tag}        label="Tipo"           value={d.tipo} />
+            <FilaDetalle icono={StickyNote} label="Concepto"       value={d.concepto} />
           </>
         );
-      case 'movimiento_caja':
+      case 'productos_serial':
+      case 'productos_cantidad':
         return (
           <>
-            <FilaDetalle icono={Tag}        label="Tipo"           value={item.estado} />
-            <FilaDetalle icono={CreditCard} label="Método"         value={item.metodo} />
-            <FilaDetalle icono={StickyNote} label="Concepto"       value={item.notas} />
+            <FilaDetalle icono={Tag}        label="Producto"       value={d.producto} />
+            <FilaDetalle icono={Tag}        label="Marca"          value={d.marca} />
+            <FilaDetalle icono={Tag}        label="Modelo"         value={d.modelo} />
+            {d.precio_anterior != null && (
+              <FilaDetalle icono={CreditCard} label="Precio anterior" value={formatCOP(d.precio_anterior)} />
+            )}
+            {d.precio_nuevo != null && (
+              <FilaDetalle icono={CreditCard} label="Precio nuevo"    value={formatCOP(d.precio_nuevo)} />
+            )}
+            {d.cantidad != null && (
+              <FilaDetalle icono={Package}  label="Cantidad"       value={String(d.cantidad)} />
+            )}
+            <FilaDetalle icono={Tag}        label="Tipo ajuste"    value={d.tipo} />
+            <FilaDetalle icono={StickyNote} label="Notas"          value={d.notas} />
+          </>
+        );
+      case 'servicios':
+        return (
+          <>
+            <FilaDetalle icono={User}       label="Cliente"        value={d.cliente} />
+            <FilaDetalle icono={Wrench}     label="Equipo"         value={d.equipo} />
+            {d.monto != null && (
+              <FilaDetalle icono={CreditCard} label="Abono"        value={formatCOP(Number(d.monto))} />
+            )}
+          </>
+        );
+      case 'creditos':
+        return (
+          <>
+            {d.monto != null && (
+              <FilaDetalle icono={CreditCard} label="Abono"        value={formatCOP(Number(d.monto))} />
+            )}
+            {d.saldo_nuevo != null && (
+              <FilaDetalle icono={TrendingUp} label="Saldo restante" value={formatCOP(Number(d.saldo_nuevo))} />
+            )}
           </>
         );
       default:
@@ -120,9 +177,8 @@ function ModalDetalle({ item, onClose }) {
     <Modal open onClose={onClose} title="Detalle del movimiento" size="sm">
       <div className="flex flex-col gap-4">
 
-        {/* ── Cabecera tipo ── */}
         <div className={`flex items-center gap-3 p-3 rounded-2xl border ${meta.bg} ${meta.border}`}>
-          <div className={`w-9 h-9 rounded-xl flex items-center justify-center bg-white/60`}>
+          <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-white/60">
             <MetaIcn size={18} className={meta.text} />
           </div>
           <div>
@@ -131,25 +187,20 @@ function ModalDetalle({ item, onClose }) {
           </div>
         </div>
 
-        {/* ── Descripción ── */}
-        <p className="text-sm font-semibold text-gray-800 leading-snug">{item.descripcion}</p>
+        <p className="text-sm font-semibold text-gray-800 leading-snug">{item.accion}</p>
 
-        {/* ── Monto ── */}
-        {item.valor !== null && item.valor !== undefined && Number(item.valor) > 0 && (
+        {valor > 0 && (
           <div className="flex items-center justify-between bg-gray-50 rounded-xl px-4 py-2.5">
             <span className="text-xs text-gray-500 font-medium">Monto</span>
             <span className="text-lg font-bold text-gray-900 tabular-nums">
-              {formatCOP(Number(item.valor))}
+              {formatCOP(valor)}
             </span>
           </div>
         )}
 
-        {/* ── Campos comunes + específicos ── */}
         <div className="flex flex-col">
           <FilaDetalle icono={User}     label="Usuario"  value={`${item.usuario_nombre} (${ROL_LABEL[item.usuario_rol] ?? item.usuario_rol})`} />
-          {item.tipo !== 'traslado' && (
-            <FilaDetalle icono={MapPin} label="Sucursal" value={item.sucursal_nombre} />
-          )}
+          <FilaDetalle icono={MapPin}   label="Sucursal" value={item.sucursal_nombre} />
           <FilaDetalle icono={Calendar} label="Fecha"    value={formatFechaHora(item.fecha)} />
           {camposExtra()}
         </div>
@@ -162,8 +213,9 @@ function ModalDetalle({ item, onClose }) {
 // ─── Ítem de la lista ─────────────────────────────────────────────────────────
 
 function ItemActividad({ item, onClick }) {
-  const meta = TIPO_META[item.tipo] ?? { Icn: Activity, bg: 'bg-gray-100', text: 'text-gray-500', label: item.tipo };
+  const meta    = getMeta(item.tabla);
   const { Icn } = meta;
+  const valor   = getValor(item);
 
   const iniciales = item.usuario_nombre
     ? item.usuario_nombre.split(' ').slice(0, 2).map((p) => p[0]).join('').toUpperCase()
@@ -175,16 +227,14 @@ function ItemActividad({ item, onClick }) {
       className="w-full flex items-start gap-3 py-3 px-4 hover:bg-gray-50 active:bg-gray-100
         transition-colors rounded-xl text-left"
     >
-      {/* Icono tipo */}
       <div className={`w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5 ${meta.bg}`}>
         <Icn size={14} className={meta.text} />
       </div>
 
-      {/* Contenido */}
       <div className="flex-1 min-w-0">
         <div className="flex items-start justify-between gap-2">
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-gray-900 truncate">{item.descripcion}</p>
+            <p className="text-sm font-medium text-gray-900 truncate">{item.accion}</p>
             <div className="flex items-center gap-2 mt-0.5 flex-wrap">
               <div className="flex items-center gap-1.5">
                 <span className="w-5 h-5 rounded-full bg-blue-600 text-white text-[9px] font-bold
@@ -194,7 +244,7 @@ function ItemActividad({ item, onClick }) {
                 <span className="text-xs text-gray-600 font-medium">{item.usuario_nombre}</span>
               </div>
               <span className="text-gray-300 text-xs">·</span>
-              <span className="text-xs text-gray-400">{item.sucursal_nombre}</span>
+              <span className="text-xs text-gray-400">{item.sucursal_nombre ?? '—'}</span>
               <span className="text-gray-300 text-xs">·</span>
               <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${meta.bg} ${meta.text}`}>
                 {meta.label}
@@ -208,11 +258,10 @@ function ItemActividad({ item, onClick }) {
             </div>
           </div>
 
-          {/* Valor + fecha */}
           <div className="flex flex-col items-end gap-0.5 flex-shrink-0">
-            {item.valor !== null && item.valor !== undefined && Number(item.valor) > 0 && (
+            {valor > 0 && (
               <span className="text-sm font-semibold text-gray-800 tabular-nums">
-                {formatCOP(Number(item.valor))}
+                {formatCOP(valor)}
               </span>
             )}
             <span className="text-xs text-gray-400 tabular-nums whitespace-nowrap">
@@ -243,14 +292,12 @@ export default function ActividadUsuariosPage() {
   const setFiltro = (key, value) =>
     setFiltros((f) => ({ ...f, [key]: value, page: key !== 'page' ? 1 : value }));
 
-  // ── Usuarios del negocio ──────────────────────────────────────────────────
   const { data: usuariosData } = useQuery({
     queryKey: ['usuarios'],
     queryFn:  () => api.get('/usuarios').then((r) => r.data.data),
   });
   const usuarios = usuariosData ?? [];
 
-  // ── Actividad ─────────────────────────────────────────────────────────────
   const queryParams = {
     ...(filtros.usuario_id  && { usuario_id:  filtros.usuario_id  }),
     ...(filtros.fecha_desde && { fecha_desde: filtros.fecha_desde }),
@@ -266,9 +313,9 @@ export default function ActividadUsuariosPage() {
     keepPreviousData: true,
   });
 
-  const actividad = data?.actividad ?? [];
-  const total     = data?.total     ?? 0;
-  const totalPags = Math.max(1, Math.ceil(total / LIMIT));
+  const actividad  = data?.actividad ?? [];
+  const total      = data?.total     ?? 0;
+  const totalPags  = Math.max(1, Math.ceil(total / LIMIT));
   const hayFiltros = filtros.usuario_id || filtros.fecha_desde || filtros.fecha_hasta || filtros.tipo;
 
   const limpiarFiltros = () =>
@@ -277,7 +324,6 @@ export default function ActividadUsuariosPage() {
   return (
     <div className="flex flex-col gap-4">
 
-      {/* ── Encabezado ── */}
       <div className="flex items-center gap-3">
         <div className="w-10 h-10 bg-blue-50 rounded-xl flex items-center justify-center">
           <Activity size={20} className="text-blue-600" />
@@ -387,13 +433,13 @@ export default function ActividadUsuariosPage() {
             titulo="Sin actividad"
             descripcion={hayFiltros
               ? 'No hay resultados para los filtros aplicados'
-              : 'Aún no hay actividad registrada en tu negocio'}
+              : 'La actividad se registrará a partir de ahora'}
           />
         ) : (
           <div className="divide-y divide-gray-50 px-1 py-1">
             {actividad.map((item) => (
               <ItemActividad
-                key={`${item.tipo}-${item.id}`}
+                key={item.id}
                 item={item}
                 onClick={() => setItemSeleccionado(item)}
               />
@@ -401,7 +447,6 @@ export default function ActividadUsuariosPage() {
           </div>
         )}
 
-        {/* Paginación */}
         {totalPags > 1 && !isLoading && (
           <div className="flex items-center justify-between px-4 py-3 border-t border-gray-50">
             <button
@@ -427,7 +472,6 @@ export default function ActividadUsuariosPage() {
         )}
       </div>
 
-      {/* ── Modal de detalle ── */}
       {itemSeleccionado && (
         <ModalDetalle
           item={itemSeleccionado}

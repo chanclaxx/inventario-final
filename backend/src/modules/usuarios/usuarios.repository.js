@@ -178,131 +178,69 @@ const invalidarTokenRecuperacion = async (tokenId) => {
   );
 };
 
+// Mapeo de tipo UI → valor de tabla en auditoria
+const TABLA_POR_TIPO = {
+  venta:              'facturas',
+  compra:             'compras',
+  traslado:           'traslados',
+  caja:               'caja',
+  inventario_serial:  'productos_serial',
+  inventario_cantidad:'productos_cantidad',
+  servicio:           'servicios',
+  credito:            'creditos',
+  prestamo:           'prestamos',
+  usuario:            'usuarios',
+};
+
 const getActividad = async (negocioId, { usuario_id, fecha_desde, fecha_hasta, tipo, limit = 50, offset = 0 } = {}) => {
   const params = [negocioId];
   let idx = 2;
 
-  const filtroUsuario   = usuario_id   ? `AND u.id = $${idx++}`                  : '';
-  if (usuario_id)   params.push(usuario_id);
+  const filtroUsuario = usuario_id   ? `AND a.usuario_id = $${idx++}` : '';
+  if (usuario_id)   params.push(Number(usuario_id));
 
-  const filtroDesde     = fecha_desde  ? `AND fecha >= $${idx++}`                 : '';
+  const filtroDesde = fecha_desde ? `AND a.fecha >= $${idx++}` : '';
   if (fecha_desde)  params.push(fecha_desde);
 
-  const filtroHasta     = fecha_hasta  ? `AND fecha <= ($${idx++}::date + interval '1 day' - interval '1 second')` : '';
+  const filtroHasta = fecha_hasta
+    ? `AND a.fecha <= ($${idx++}::date + interval '1 day' - interval '1 second')` : '';
   if (fecha_hasta)  params.push(fecha_hasta);
 
-  params.push(limit);
-  params.push(offset);
+  const filtroTabla = tipo && TABLA_POR_TIPO[tipo]
+    ? `AND a.tabla = $${idx++}` : '';
+  if (tipo && TABLA_POR_TIPO[tipo]) params.push(TABLA_POR_TIPO[tipo]);
+
   const idxLimit  = idx++;
   const idxOffset = idx++;
+  params.push(limit);
+  params.push(offset);
 
-  const bloques = {
-    venta: `
-      SELECT 'venta' AS tipo, f.id, f.fecha,
-             u.id AS usuario_id, u.nombre AS usuario_nombre, u.rol AS usuario_rol,
-             s.nombre AS sucursal_nombre,
-             'Venta a ' || COALESCE(f.nombre_cliente, 'cliente') AS descripcion,
-             COALESCE(SUM(l.precio * (l.cantidad - COALESCE(l.cantidad_devuelta,0))), 0) AS valor,
-             f.estado,
-             NULL::varchar AS metodo,
-             f.notas,
-             f.nombre_cliente AS ref_nombre,
-             f.cedula         AS ref_extra,
-             NULL::varchar    AS sucursal_destino
-      FROM facturas f
-      JOIN sucursales s ON s.id = f.sucursal_id
-      JOIN usuarios   u ON u.id = f.usuario_id
-      LEFT JOIN lineas_factura l ON l.factura_id = f.id
-      WHERE s.negocio_id = $1 AND f.usuario_id IS NOT NULL
-        ${filtroUsuario} ${filtroDesde} ${filtroHasta}
-      GROUP BY f.id, u.id, u.nombre, u.rol, s.nombre`,
-
-    compra: `
-      SELECT 'compra' AS tipo, c.id, c.fecha,
-             u.id AS usuario_id, u.nombre AS usuario_nombre, u.rol AS usuario_rol,
-             s.nombre AS sucursal_nombre,
-             'Compra registrada' AS descripcion,
-             c.total AS valor,
-             c.estado,
-             c.metodo,
-             c.notas,
-             p.nombre         AS ref_nombre,
-             c.numero_factura AS ref_extra,
-             NULL::varchar    AS sucursal_destino
-      FROM compras c
-      JOIN sucursales s  ON s.id = c.sucursal_id
-      JOIN usuarios   u  ON u.id = c.usuario_id
-      LEFT JOIN proveedores p ON p.id = c.proveedor_id
-      WHERE s.negocio_id = $1 AND c.usuario_id IS NOT NULL
-        ${filtroUsuario} ${filtroDesde} ${filtroHasta}`,
-
-    apertura_caja: `
-      SELECT 'apertura_caja' AS tipo, ac.id, ac.fecha_apertura AS fecha,
-             u.id AS usuario_id, u.nombre AS usuario_nombre, u.rol AS usuario_rol,
-             s.nombre AS sucursal_nombre,
-             CASE ac.estado WHEN 'Cerrada' THEN 'Cierre de caja' ELSE 'Apertura de caja' END AS descripcion,
-             ac.monto_inicial AS valor,
-             ac.estado,
-             NULL::varchar AS metodo,
-             NULL::text    AS notas,
-             NULL::varchar AS ref_nombre,
-             COALESCE(ac.monto_cierre::varchar, '—') AS ref_extra,
-             NULL::varchar AS sucursal_destino
-      FROM aperturas_caja ac
-      JOIN sucursales s ON s.id = ac.sucursal_id
-      JOIN usuarios   u ON u.id = ac.usuario_id
-      WHERE s.negocio_id = $1 AND ac.usuario_id IS NOT NULL
-        ${filtroUsuario} ${filtroDesde} ${filtroHasta}`,
-
-    traslado: `
-      SELECT 'traslado' AS tipo, t.id, t.fecha,
-             u.id AS usuario_id, u.nombre AS usuario_nombre, u.rol AS usuario_rol,
-             so.nombre AS sucursal_nombre,
-             'Traslado: ' || so.nombre || ' → ' || sd.nombre AS descripcion,
-             NULL::numeric AS valor,
-             t.estado,
-             NULL::varchar AS metodo,
-             t.notas,
-             NULL::varchar AS ref_nombre,
-             NULL::varchar AS ref_extra,
-             sd.nombre     AS sucursal_destino
-      FROM traslados t
-      JOIN sucursales so ON so.id = t.sucursal_origen_id
-      JOIN sucursales sd ON sd.id = t.sucursal_destino_id
-      JOIN usuarios   u  ON u.id  = t.usuario_id
-      WHERE t.negocio_id = $1 AND t.usuario_id IS NOT NULL
-        ${filtroUsuario} ${filtroDesde} ${filtroHasta}`,
-
-    movimiento_caja: `
-      SELECT 'movimiento_caja' AS tipo, mc.id, mc.fecha,
-             u.id AS usuario_id, u.nombre AS usuario_nombre, u.rol AS usuario_rol,
-             s.nombre AS sucursal_nombre,
-             mc.tipo || ' de caja: ' || mc.concepto AS descripcion,
-             mc.valor AS valor,
-             mc.tipo   AS estado,
-             mc.metodo,
-             mc.concepto AS notas,
-             NULL::varchar AS ref_nombre,
-             NULL::varchar AS ref_extra,
-             NULL::varchar AS sucursal_destino
-      FROM movimientos_caja mc
-      JOIN aperturas_caja ac ON ac.id = mc.caja_id
-      JOIN sucursales     s  ON s.id  = ac.sucursal_id
-      JOIN usuarios       u  ON u.id  = mc.usuario_id
-      WHERE s.negocio_id = $1 AND mc.usuario_id IS NOT NULL AND mc.activo = true
-        ${filtroUsuario} ${filtroDesde} ${filtroHasta}`,
-  };
-
-  const tiposActivos = (tipo && bloques[tipo]) ? [tipo] : Object.keys(bloques);
-  const union = tiposActivos.map((t) => bloques[t]).join('\nUNION ALL\n');
+  const base = `
+    FROM auditoria a
+    JOIN usuarios u ON u.id = a.usuario_id
+    LEFT JOIN sucursales s
+      ON s.id = NULLIF((a.detalle::jsonb->>'sucursal_id'), '')::int
+    WHERE a.negocio_id = $1
+      ${filtroUsuario}
+      ${filtroDesde}
+      ${filtroHasta}
+      ${filtroTabla}
+  `;
 
   const sql = `
-    SELECT * FROM (${union}) act
-    ORDER BY fecha DESC
+    SELECT
+      a.id, a.fecha, a.accion, a.tabla, a.registro_id,
+      a.detalle::jsonb   AS detalle,
+      u.id               AS usuario_id,
+      u.nombre           AS usuario_nombre,
+      u.rol              AS usuario_rol,
+      COALESCE(s.nombre, a.detalle::jsonb->>'sucursal') AS sucursal_nombre
+    ${base}
+    ORDER BY a.fecha DESC
     LIMIT $${idxLimit} OFFSET $${idxOffset}
   `;
 
-  const countSql = `SELECT COUNT(*) AS total FROM (${union}) act`;
+  const countSql = `SELECT COUNT(*) AS total ${base}`;
 
   const [{ rows }, { rows: countRows }] = await Promise.all([
     pool.query(sql, params),

@@ -1,4 +1,5 @@
 const service = require('./creditos.service');
+const audit   = require('../../utils/auditoria.util');
 
 const getCreditos = async (req, res, next) => {
   try {
@@ -20,6 +21,11 @@ const registrarAbono = async (req, res, next) => {
     const data = await service.registrarAbono(req.user.negocio_id, Number(req.params.id), {
       ...req.body,
       usuario_id: req.user.id,
+    });
+    audit.registrar(req.user.negocio_id, req.user.id, 'Abono a crédito', 'creditos', Number(req.params.id), {
+      sucursal_id: data.sucursal_id ?? null,
+      monto:       Number(req.body.monto ?? 0),
+      saldo_nuevo: Number(data.saldo    ?? 0),
     });
     res.json({ ok: true, data, message: 'Abono registrado correctamente' });
   } catch (err) { next(err); }

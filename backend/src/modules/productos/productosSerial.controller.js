@@ -1,4 +1,5 @@
 const service = require('./productosSerial.service');
+const audit   = require('../../utils/auditoria.util');
 
 const getProductos = async (req, res, next) => {
   try {
@@ -22,26 +23,48 @@ const crearProducto = async (req, res, next) => {
       ...req.body,
       sucursal_id: req.sucursal_id,
     });
+    audit.registrar(req.user.negocio_id, req.user.id, 'Producto serial creado', 'productos_serial', data.id, {
+      sucursal_id: req.sucursal_id,
+      producto:    data.nombre,
+      marca:       data.marca   ?? null,
+      modelo:      data.modelo  ?? null,
+      precio:      Number(data.precio_venta ?? 0),
+    });
     res.status(201).json({ ok: true, data, message: 'Producto creado correctamente' });
   } catch (err) { next(err); }
 };
 
 const actualizarProducto = async (req, res, next) => {
   try {
-    const data = await service.actualizarProducto(req.user.negocio_id, req.params.id, req.body);
+    const anterior = await service.getProductoById(req.user.negocio_id, req.params.id);
+    const data     = await service.actualizarProducto(req.user.negocio_id, req.params.id, req.body);
+    const cambios  = {};
+    if (req.body.precio_venta !== undefined &&
+        Number(req.body.precio_venta) !== Number(anterior.precio_venta)) {
+      cambios.precio_anterior = Number(anterior.precio_venta);
+      cambios.precio_nuevo    = Number(req.body.precio_venta);
+    }
+    audit.registrar(req.user.negocio_id, req.user.id, 'Producto serial editado', 'productos_serial', data.id, {
+      sucursal_id: anterior.sucursal_id,
+      producto:    data.nombre,
+      ...cambios,
+    });
     res.json({ ok: true, data, message: 'Producto actualizado correctamente' });
   } catch (err) { next(err); }
 };
 
 const eliminarProductoSerial = async (req, res, next) => {
   try {
-    // forzar=true viene en el body cuando el usuario confirmó la advertencia
     const forzar = req.body?.forzar === true;
-    await service.eliminarProductoSerial(req.user.negocio_id, Number(req.params.id), forzar);
+    const id     = Number(req.params.id);
+    const prev   = await service.getProductoById(req.user.negocio_id, id).catch(() => null);
+    await service.eliminarProductoSerial(req.user.negocio_id, id, forzar);
+    audit.registrar(req.user.negocio_id, req.user.id, 'Producto serial eliminado', 'productos_serial', id, {
+      sucursal_id: prev?.sucursal_id ?? null,
+      producto:    prev?.nombre      ?? null,
+    });
     res.json({ ok: true, message: 'Producto eliminado correctamente' });
   } catch (err) {
-    // Si es advertencia de seriales comprometidos, retornar 409 con detalle
-    // para que el frontend pueda mostrar el modal de confirmación
     if (err.code === 'SERIALES_COMPROMETIDOS' || err.code === 'SERIALES_DISPONIBLES') {
       return res.status(409).json({
         ok:      false,

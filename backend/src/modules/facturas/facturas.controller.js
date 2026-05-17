@@ -1,4 +1,5 @@
-const service = require('./facturas.service');
+const service  = require('./facturas.service');
+const audit    = require('../../utils/auditoria.util');
 
 const getFacturas = async (req, res, next) => {
   try {
@@ -55,6 +56,13 @@ const crearFactura = async (req, res, next) => {
       usuario_id: req.user.id,
       negocio_id: req.user.negocio_id,
     });
+    audit.registrar(req.user.negocio_id, req.user.id, 'Venta registrada', 'facturas', data.id, {
+      sucursal_id,
+      cliente:  data.nombre_cliente,
+      cedula:   data.cedula,
+      valor:    Number(data.total ?? 0),
+      estado:   data.estado,
+    });
     res.status(201).json({ ok: true, data, message: 'Factura creada correctamente' });
   } catch (err) { next(err); }
 };
@@ -63,6 +71,9 @@ const cancelarFactura = async (req, res, next) => {
   try {
     const eliminarRetoma = req.body?.eliminarRetoma === true;
     await service.cancelarFactura(req.user.negocio_id, req.params.id, eliminarRetoma);
+    audit.registrar(req.user.negocio_id, req.user.id, 'Venta cancelada', 'facturas', Number(req.params.id), {
+      sucursal_id: req.sucursal_id,
+    });
     res.json({ ok: true, message: 'Factura cancelada correctamente' });
   } catch (err) { next(err); }
 };

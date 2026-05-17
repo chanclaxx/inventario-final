@@ -2,12 +2,12 @@
 -- PostgreSQL database dump
 --
 
-\restrict dxhXBdEgccdRwQyzehuExgXstoVJPwZ1OBM2X3TlN1RqUYZdP6W24jMoqBEe0Ry
+\restrict sbOyquNoApgGZJTJJIxAyhXHM9BIuEQ8SULq6VGTvKWls2ssNOFnCRCbAXeVxPi
 
 -- Dumped from database version 17.7 (Debian 17.7-3.pgdg13+1)
 -- Dumped by pg_dump version 18.1
 
--- Started on 2026-05-15 16:56:28
+-- Started on 2026-05-17 13:35:53
 
 SET statement_timeout = 0;
 SET lock_timeout = 0;
@@ -30,7 +30,7 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;
 
 
 --
--- TOC entry 4186 (class 0 OID 0)
+-- TOC entry 4188 (class 0 OID 0)
 -- Dependencies: 2
 -- Name: EXTENSION pgcrypto; Type: COMMENT; Schema: -; Owner: 
 --
@@ -105,7 +105,7 @@ CREATE SEQUENCE public.abonos_credito_id_seq
 ALTER SEQUENCE public.abonos_credito_id_seq OWNER TO postgres;
 
 --
--- TOC entry 4187 (class 0 OID 0)
+-- TOC entry 4189 (class 0 OID 0)
 -- Dependencies: 219
 -- Name: abonos_credito_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -149,7 +149,7 @@ CREATE SEQUENCE public.abonos_domicilio_id_seq
 ALTER SEQUENCE public.abonos_domicilio_id_seq OWNER TO postgres;
 
 --
--- TOC entry 4188 (class 0 OID 0)
+-- TOC entry 4190 (class 0 OID 0)
 -- Dependencies: 289
 -- Name: abonos_domicilio_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -191,7 +191,7 @@ CREATE SEQUENCE public.abonos_prestamo_id_seq
 ALTER SEQUENCE public.abonos_prestamo_id_seq OWNER TO postgres;
 
 --
--- TOC entry 4189 (class 0 OID 0)
+-- TOC entry 4191 (class 0 OID 0)
 -- Dependencies: 221
 -- Name: abonos_prestamo_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -235,7 +235,7 @@ CREATE SEQUENCE public.abonos_servicio_id_seq
 ALTER SEQUENCE public.abonos_servicio_id_seq OWNER TO postgres;
 
 --
--- TOC entry 4190 (class 0 OID 0)
+-- TOC entry 4192 (class 0 OID 0)
 -- Dependencies: 293
 -- Name: abonos_servicio_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -278,7 +278,7 @@ CREATE SEQUENCE public.acreedores_id_seq
 ALTER SEQUENCE public.acreedores_id_seq OWNER TO postgres;
 
 --
--- TOC entry 4191 (class 0 OID 0)
+-- TOC entry 4193 (class 0 OID 0)
 -- Dependencies: 223
 -- Name: acreedores_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -323,7 +323,7 @@ CREATE SEQUENCE public.aperturas_caja_id_seq
 ALTER SEQUENCE public.aperturas_caja_id_seq OWNER TO postgres;
 
 --
--- TOC entry 4192 (class 0 OID 0)
+-- TOC entry 4194 (class 0 OID 0)
 -- Dependencies: 225
 -- Name: aperturas_caja_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -346,7 +346,8 @@ CREATE TABLE public.atributos_producto (
     stock_minimo integer DEFAULT 0,
     precio numeric(12,2),
     activo boolean DEFAULT true,
-    creado_en timestamp without time zone DEFAULT now() NOT NULL
+    creado_en timestamp without time zone DEFAULT now() NOT NULL,
+    costo_unitario numeric(12,2)
 );
 
 
@@ -369,7 +370,7 @@ CREATE SEQUENCE public.atributos_producto_id_seq
 ALTER SEQUENCE public.atributos_producto_id_seq OWNER TO postgres;
 
 --
--- TOC entry 4193 (class 0 OID 0)
+-- TOC entry 4195 (class 0 OID 0)
 -- Dependencies: 303
 -- Name: atributos_producto_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -413,7 +414,7 @@ CREATE SEQUENCE public.auditoria_id_seq
 ALTER SEQUENCE public.auditoria_id_seq OWNER TO postgres;
 
 --
--- TOC entry 4194 (class 0 OID 0)
+-- TOC entry 4196 (class 0 OID 0)
 -- Dependencies: 227
 -- Name: auditoria_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -473,7 +474,7 @@ CREATE SEQUENCE public.clientes_frecuentes_id_seq
 ALTER SEQUENCE public.clientes_frecuentes_id_seq OWNER TO postgres;
 
 --
--- TOC entry 4195 (class 0 OID 0)
+-- TOC entry 4197 (class 0 OID 0)
 -- Dependencies: 299
 -- Name: clientes_frecuentes_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -498,7 +499,7 @@ CREATE SEQUENCE public.clientes_id_seq
 ALTER SEQUENCE public.clientes_id_seq OWNER TO postgres;
 
 --
--- TOC entry 4196 (class 0 OID 0)
+-- TOC entry 4198 (class 0 OID 0)
 -- Dependencies: 229
 -- Name: clientes_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -547,7 +548,7 @@ CREATE SEQUENCE public.compras_id_seq
 ALTER SEQUENCE public.compras_id_seq OWNER TO postgres;
 
 --
--- TOC entry 4197 (class 0 OID 0)
+-- TOC entry 4199 (class 0 OID 0)
 -- Dependencies: 231
 -- Name: compras_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -588,7 +589,7 @@ CREATE SEQUENCE public.config_negocio_id_seq
 ALTER SEQUENCE public.config_negocio_id_seq OWNER TO postgres;
 
 --
--- TOC entry 4198 (class 0 OID 0)
+-- TOC entry 4200 (class 0 OID 0)
 -- Dependencies: 233
 -- Name: config_negocio_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -634,7 +635,7 @@ CREATE SEQUENCE public.creditos_id_seq
 ALTER SEQUENCE public.creditos_id_seq OWNER TO postgres;
 
 --
--- TOC entry 4199 (class 0 OID 0)
+-- TOC entry 4201 (class 0 OID 0)
 -- Dependencies: 235
 -- Name: creditos_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -676,7 +677,7 @@ CREATE SEQUENCE public.domiciliarios_id_seq
 ALTER SEQUENCE public.domiciliarios_id_seq OWNER TO postgres;
 
 --
--- TOC entry 4200 (class 0 OID 0)
+-- TOC entry 4202 (class 0 OID 0)
 -- Dependencies: 285
 -- Name: domiciliarios_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -716,7 +717,7 @@ CREATE SEQUENCE public.empleados_prestatario_id_seq
 ALTER SEQUENCE public.empleados_prestatario_id_seq OWNER TO postgres;
 
 --
--- TOC entry 4201 (class 0 OID 0)
+-- TOC entry 4203 (class 0 OID 0)
 -- Dependencies: 276
 -- Name: empleados_prestatario_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -765,7 +766,7 @@ CREATE SEQUENCE public.entregas_domicilio_id_seq
 ALTER SEQUENCE public.entregas_domicilio_id_seq OWNER TO postgres;
 
 --
--- TOC entry 4202 (class 0 OID 0)
+-- TOC entry 4204 (class 0 OID 0)
 -- Dependencies: 287
 -- Name: entregas_domicilio_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -813,7 +814,7 @@ CREATE SEQUENCE public.facturas_id_seq
 ALTER SEQUENCE public.facturas_id_seq OWNER TO postgres;
 
 --
--- TOC entry 4203 (class 0 OID 0)
+-- TOC entry 4205 (class 0 OID 0)
 -- Dependencies: 237
 -- Name: facturas_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -854,7 +855,7 @@ CREATE SEQUENCE public.garantias_id_seq
 ALTER SEQUENCE public.garantias_id_seq OWNER TO postgres;
 
 --
--- TOC entry 4204 (class 0 OID 0)
+-- TOC entry 4206 (class 0 OID 0)
 -- Dependencies: 239
 -- Name: garantias_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -916,7 +917,7 @@ CREATE SEQUENCE public.historial_stock_cantidad_id_seq
 ALTER SEQUENCE public.historial_stock_cantidad_id_seq OWNER TO postgres;
 
 --
--- TOC entry 4205 (class 0 OID 0)
+-- TOC entry 4207 (class 0 OID 0)
 -- Dependencies: 278
 -- Name: historial_stock_cantidad_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -939,7 +940,9 @@ CREATE TABLE public.lineas_compra (
     subtotal numeric(12,2) GENERATED ALWAYS AS (((cantidad)::numeric * precio_unitario)) STORED,
     precio_usd numeric(12,2),
     factor_conversion numeric(10,4),
-    valor_traida numeric(12,2)
+    valor_traida numeric(12,2),
+    variante_id integer,
+    atributo_id integer
 );
 
 
@@ -962,7 +965,7 @@ CREATE SEQUENCE public.lineas_compra_id_seq
 ALTER SEQUENCE public.lineas_compra_id_seq OWNER TO postgres;
 
 --
--- TOC entry 4206 (class 0 OID 0)
+-- TOC entry 4208 (class 0 OID 0)
 -- Dependencies: 241
 -- Name: lineas_compra_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -1010,7 +1013,7 @@ CREATE SEQUENCE public.lineas_factura_id_seq
 ALTER SEQUENCE public.lineas_factura_id_seq OWNER TO postgres;
 
 --
--- TOC entry 4207 (class 0 OID 0)
+-- TOC entry 4209 (class 0 OID 0)
 -- Dependencies: 243
 -- Name: lineas_factura_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -1050,7 +1053,7 @@ CREATE SEQUENCE public.lineas_producto_id_seq
 ALTER SEQUENCE public.lineas_producto_id_seq OWNER TO postgres;
 
 --
--- TOC entry 4208 (class 0 OID 0)
+-- TOC entry 4210 (class 0 OID 0)
 -- Dependencies: 280
 -- Name: lineas_producto_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -1099,7 +1102,7 @@ CREATE SEQUENCE public.lineas_traslado_id_seq
 ALTER SEQUENCE public.lineas_traslado_id_seq OWNER TO postgres;
 
 --
--- TOC entry 4209 (class 0 OID 0)
+-- TOC entry 4211 (class 0 OID 0)
 -- Dependencies: 297
 -- Name: lineas_traslado_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -1119,7 +1122,7 @@ CREATE TABLE public.movimientos_acreedor (
     fecha timestamp without time zone DEFAULT now() NOT NULL,
     tipo character varying(10) DEFAULT 'Abono'::character varying NOT NULL,
     valor numeric(12,2) NOT NULL,
-    descripcion text NOT NULL,
+    descripcion text,
     firma bytea,
     compra_id integer,
     registrar_en_caja boolean DEFAULT true NOT NULL,
@@ -1148,7 +1151,7 @@ CREATE SEQUENCE public.movimientos_acreedor_id_seq
 ALTER SEQUENCE public.movimientos_acreedor_id_seq OWNER TO postgres;
 
 --
--- TOC entry 4210 (class 0 OID 0)
+-- TOC entry 4212 (class 0 OID 0)
 -- Dependencies: 245
 -- Name: movimientos_acreedor_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -1196,7 +1199,7 @@ CREATE SEQUENCE public.movimientos_caja_id_seq
 ALTER SEQUENCE public.movimientos_caja_id_seq OWNER TO postgres;
 
 --
--- TOC entry 4211 (class 0 OID 0)
+-- TOC entry 4213 (class 0 OID 0)
 -- Dependencies: 247
 -- Name: movimientos_caja_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -1249,7 +1252,7 @@ CREATE SEQUENCE public.negocios_id_seq
 ALTER SEQUENCE public.negocios_id_seq OWNER TO postgres;
 
 --
--- TOC entry 4212 (class 0 OID 0)
+-- TOC entry 4214 (class 0 OID 0)
 -- Dependencies: 249
 -- Name: negocios_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -1316,7 +1319,7 @@ CREATE SEQUENCE public.ordenes_servicio_id_seq
 ALTER SEQUENCE public.ordenes_servicio_id_seq OWNER TO postgres;
 
 --
--- TOC entry 4213 (class 0 OID 0)
+-- TOC entry 4215 (class 0 OID 0)
 -- Dependencies: 291
 -- Name: ordenes_servicio_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -1356,7 +1359,7 @@ CREATE SEQUENCE public.pagos_factura_id_seq
 ALTER SEQUENCE public.pagos_factura_id_seq OWNER TO postgres;
 
 --
--- TOC entry 4214 (class 0 OID 0)
+-- TOC entry 4216 (class 0 OID 0)
 -- Dependencies: 251
 -- Name: pagos_factura_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -1404,7 +1407,7 @@ CREATE SEQUENCE public.pagos_plan_id_seq
 ALTER SEQUENCE public.pagos_plan_id_seq OWNER TO postgres;
 
 --
--- TOC entry 4215 (class 0 OID 0)
+-- TOC entry 4217 (class 0 OID 0)
 -- Dependencies: 253
 -- Name: pagos_plan_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -1447,7 +1450,7 @@ CREATE SEQUENCE public.planes_id_seq
 ALTER SEQUENCE public.planes_id_seq OWNER TO postgres;
 
 --
--- TOC entry 4216 (class 0 OID 0)
+-- TOC entry 4218 (class 0 OID 0)
 -- Dependencies: 255
 -- Name: planes_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -1505,7 +1508,7 @@ CREATE SEQUENCE public.prestamos_id_seq
 ALTER SEQUENCE public.prestamos_id_seq OWNER TO postgres;
 
 --
--- TOC entry 4217 (class 0 OID 0)
+-- TOC entry 4219 (class 0 OID 0)
 -- Dependencies: 257
 -- Name: prestamos_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -1548,7 +1551,7 @@ CREATE SEQUENCE public.prestatarios_id_seq
 ALTER SEQUENCE public.prestatarios_id_seq OWNER TO postgres;
 
 --
--- TOC entry 4218 (class 0 OID 0)
+-- TOC entry 4220 (class 0 OID 0)
 -- Dependencies: 274
 -- Name: prestatarios_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -1597,7 +1600,7 @@ CREATE SEQUENCE public.productos_cantidad_id_seq
 ALTER SEQUENCE public.productos_cantidad_id_seq OWNER TO postgres;
 
 --
--- TOC entry 4219 (class 0 OID 0)
+-- TOC entry 4221 (class 0 OID 0)
 -- Dependencies: 259
 -- Name: productos_cantidad_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -1643,7 +1646,7 @@ CREATE SEQUENCE public.productos_serial_id_seq
 ALTER SEQUENCE public.productos_serial_id_seq OWNER TO postgres;
 
 --
--- TOC entry 4220 (class 0 OID 0)
+-- TOC entry 4222 (class 0 OID 0)
 -- Dependencies: 261
 -- Name: productos_serial_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -1691,7 +1694,7 @@ CREATE SEQUENCE public.proveedores_id_seq
 ALTER SEQUENCE public.proveedores_id_seq OWNER TO postgres;
 
 --
--- TOC entry 4221 (class 0 OID 0)
+-- TOC entry 4223 (class 0 OID 0)
 -- Dependencies: 263
 -- Name: proveedores_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -1745,7 +1748,7 @@ CREATE SEQUENCE public.retomas_id_seq
 ALTER SEQUENCE public.retomas_id_seq OWNER TO postgres;
 
 --
--- TOC entry 4222 (class 0 OID 0)
+-- TOC entry 4224 (class 0 OID 0)
 -- Dependencies: 265
 -- Name: retomas_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -1794,7 +1797,7 @@ CREATE SEQUENCE public.seriales_id_seq
 ALTER SEQUENCE public.seriales_id_seq OWNER TO postgres;
 
 --
--- TOC entry 4223 (class 0 OID 0)
+-- TOC entry 4225 (class 0 OID 0)
 -- Dependencies: 267
 -- Name: seriales_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -1837,7 +1840,7 @@ CREATE SEQUENCE public.sucursales_id_seq
 ALTER SEQUENCE public.sucursales_id_seq OWNER TO postgres;
 
 --
--- TOC entry 4224 (class 0 OID 0)
+-- TOC entry 4226 (class 0 OID 0)
 -- Dependencies: 269
 -- Name: sucursales_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -1879,7 +1882,7 @@ CREATE SEQUENCE public.superadmins_id_seq
 ALTER SEQUENCE public.superadmins_id_seq OWNER TO postgres;
 
 --
--- TOC entry 4225 (class 0 OID 0)
+-- TOC entry 4227 (class 0 OID 0)
 -- Dependencies: 271
 -- Name: superadmins_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -1922,7 +1925,7 @@ CREATE SEQUENCE public.tipos_caracteristica_id_seq
 ALTER SEQUENCE public.tipos_caracteristica_id_seq OWNER TO postgres;
 
 --
--- TOC entry 4226 (class 0 OID 0)
+-- TOC entry 4228 (class 0 OID 0)
 -- Dependencies: 301
 -- Name: tipos_caracteristica_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -1964,7 +1967,7 @@ CREATE SEQUENCE public.tokens_recuperacion_id_seq
 ALTER SEQUENCE public.tokens_recuperacion_id_seq OWNER TO postgres;
 
 --
--- TOC entry 4227 (class 0 OID 0)
+-- TOC entry 4229 (class 0 OID 0)
 -- Dependencies: 283
 -- Name: tokens_recuperacion_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -2010,7 +2013,7 @@ CREATE SEQUENCE public.traslados_id_seq
 ALTER SEQUENCE public.traslados_id_seq OWNER TO postgres;
 
 --
--- TOC entry 4228 (class 0 OID 0)
+-- TOC entry 4230 (class 0 OID 0)
 -- Dependencies: 295
 -- Name: traslados_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -2036,7 +2039,8 @@ CREATE TABLE public.usuarios (
     ultimo_acceso timestamp without time zone,
     password_temporal boolean DEFAULT false NOT NULL,
     modulos_permitidos text[],
-    permisos_proveedores jsonb
+    permisos_proveedores jsonb,
+    permisos_edicion_productos jsonb
 );
 
 
@@ -2059,7 +2063,7 @@ CREATE SEQUENCE public.usuarios_id_seq
 ALTER SEQUENCE public.usuarios_id_seq OWNER TO postgres;
 
 --
--- TOC entry 4229 (class 0 OID 0)
+-- TOC entry 4231 (class 0 OID 0)
 -- Dependencies: 273
 -- Name: usuarios_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -2081,7 +2085,8 @@ CREATE TABLE public.variantes_atributo (
     stock_minimo integer DEFAULT 0,
     precio numeric(12,2),
     activo boolean DEFAULT true,
-    creado_en timestamp without time zone DEFAULT now() NOT NULL
+    creado_en timestamp without time zone DEFAULT now() NOT NULL,
+    costo_unitario numeric(12,2)
 );
 
 
@@ -2104,7 +2109,7 @@ CREATE SEQUENCE public.variantes_atributo_id_seq
 ALTER SEQUENCE public.variantes_atributo_id_seq OWNER TO postgres;
 
 --
--- TOC entry 4230 (class 0 OID 0)
+-- TOC entry 4232 (class 0 OID 0)
 -- Dependencies: 305
 -- Name: variantes_atributo_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -3747,7 +3752,7 @@ ALTER TABLE ONLY public.abonos_credito
 
 
 --
--- TOC entry 4007 (class 2606 OID 17295)
+-- TOC entry 4009 (class 2606 OID 17295)
 -- Name: abonos_domicilio abonos_domicilio_entrega_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -3756,7 +3761,7 @@ ALTER TABLE ONLY public.abonos_domicilio
 
 
 --
--- TOC entry 4008 (class 2606 OID 17300)
+-- TOC entry 4010 (class 2606 OID 17300)
 -- Name: abonos_domicilio abonos_domicilio_negocio_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -3765,7 +3770,7 @@ ALTER TABLE ONLY public.abonos_domicilio
 
 
 --
--- TOC entry 4009 (class 2606 OID 17305)
+-- TOC entry 4011 (class 2606 OID 17305)
 -- Name: abonos_domicilio abonos_domicilio_usuario_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -3792,7 +3797,7 @@ ALTER TABLE ONLY public.abonos_prestamo
 
 
 --
--- TOC entry 4016 (class 2606 OID 17380)
+-- TOC entry 4018 (class 2606 OID 17380)
 -- Name: abonos_servicio abonos_servicio_orden_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -3801,7 +3806,7 @@ ALTER TABLE ONLY public.abonos_servicio
 
 
 --
--- TOC entry 4017 (class 2606 OID 17385)
+-- TOC entry 4019 (class 2606 OID 17385)
 -- Name: abonos_servicio abonos_servicio_usuario_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -3846,7 +3851,7 @@ ALTER TABLE ONLY public.aperturas_caja
 
 
 --
--- TOC entry 4031 (class 2606 OID 17859)
+-- TOC entry 4033 (class 2606 OID 17859)
 -- Name: atributos_producto atributos_producto_producto_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -3855,7 +3860,7 @@ ALTER TABLE ONLY public.atributos_producto
 
 
 --
--- TOC entry 4032 (class 2606 OID 17864)
+-- TOC entry 4034 (class 2606 OID 17864)
 -- Name: atributos_producto atributos_producto_sucursal_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -3864,7 +3869,7 @@ ALTER TABLE ONLY public.atributos_producto
 
 
 --
--- TOC entry 4033 (class 2606 OID 17869)
+-- TOC entry 4035 (class 2606 OID 17869)
 -- Name: atributos_producto atributos_producto_tipo_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -3891,7 +3896,7 @@ ALTER TABLE ONLY public.auditoria
 
 
 --
--- TOC entry 4028 (class 2606 OID 17536)
+-- TOC entry 4030 (class 2606 OID 17536)
 -- Name: clientes_frecuentes clientes_frecuentes_cliente_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -3900,7 +3905,7 @@ ALTER TABLE ONLY public.clientes_frecuentes
 
 
 --
--- TOC entry 4029 (class 2606 OID 17531)
+-- TOC entry 4031 (class 2606 OID 17531)
 -- Name: clientes_frecuentes clientes_frecuentes_sucursal_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -3981,7 +3986,7 @@ ALTER TABLE ONLY public.creditos
 
 
 --
--- TOC entry 4002 (class 2606 OID 17231)
+-- TOC entry 4004 (class 2606 OID 17231)
 -- Name: domiciliarios domiciliarios_negocio_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -3990,7 +3995,7 @@ ALTER TABLE ONLY public.domiciliarios
 
 
 --
--- TOC entry 3992 (class 2606 OID 17046)
+-- TOC entry 3994 (class 2606 OID 17046)
 -- Name: empleados_prestatario empleados_prestatario_prestatario_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -3999,7 +4004,7 @@ ALTER TABLE ONLY public.empleados_prestatario
 
 
 --
--- TOC entry 4003 (class 2606 OID 17265)
+-- TOC entry 4005 (class 2606 OID 17265)
 -- Name: entregas_domicilio entregas_domicilio_domiciliario_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4008,7 +4013,7 @@ ALTER TABLE ONLY public.entregas_domicilio
 
 
 --
--- TOC entry 4004 (class 2606 OID 17260)
+-- TOC entry 4006 (class 2606 OID 17260)
 -- Name: entregas_domicilio entregas_domicilio_factura_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4017,7 +4022,7 @@ ALTER TABLE ONLY public.entregas_domicilio
 
 
 --
--- TOC entry 4005 (class 2606 OID 17270)
+-- TOC entry 4007 (class 2606 OID 17270)
 -- Name: entregas_domicilio entregas_domicilio_negocio_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4026,7 +4031,7 @@ ALTER TABLE ONLY public.entregas_domicilio
 
 
 --
--- TOC entry 4006 (class 2606 OID 17275)
+-- TOC entry 4008 (class 2606 OID 17275)
 -- Name: entregas_domicilio entregas_domicilio_usuario_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4062,7 +4067,7 @@ ALTER TABLE ONLY public.facturas
 
 
 --
--- TOC entry 3999 (class 2606 OID 17152)
+-- TOC entry 4001 (class 2606 OID 17152)
 -- Name: garantias_lineas garantias_lineas_garantia_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4071,7 +4076,7 @@ ALTER TABLE ONLY public.garantias_lineas
 
 
 --
--- TOC entry 4000 (class 2606 OID 17157)
+-- TOC entry 4002 (class 2606 OID 17157)
 -- Name: garantias_lineas garantias_lineas_linea_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4089,7 +4094,7 @@ ALTER TABLE ONLY public.garantias
 
 
 --
--- TOC entry 3993 (class 2606 OID 17900)
+-- TOC entry 3995 (class 2606 OID 17900)
 -- Name: historial_stock_cantidad historial_stock_cantidad_atributo_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4098,7 +4103,7 @@ ALTER TABLE ONLY public.historial_stock_cantidad
 
 
 --
--- TOC entry 3994 (class 2606 OID 17086)
+-- TOC entry 3996 (class 2606 OID 17086)
 -- Name: historial_stock_cantidad historial_stock_cantidad_producto_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4107,7 +4112,7 @@ ALTER TABLE ONLY public.historial_stock_cantidad
 
 
 --
--- TOC entry 3995 (class 2606 OID 17096)
+-- TOC entry 3997 (class 2606 OID 17096)
 -- Name: historial_stock_cantidad historial_stock_cantidad_proveedor_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4116,7 +4121,7 @@ ALTER TABLE ONLY public.historial_stock_cantidad
 
 
 --
--- TOC entry 3996 (class 2606 OID 17091)
+-- TOC entry 3998 (class 2606 OID 17091)
 -- Name: historial_stock_cantidad historial_stock_cantidad_sucursal_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4125,7 +4130,7 @@ ALTER TABLE ONLY public.historial_stock_cantidad
 
 
 --
--- TOC entry 3997 (class 2606 OID 17905)
+-- TOC entry 3999 (class 2606 OID 17905)
 -- Name: historial_stock_cantidad historial_stock_cantidad_variante_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4134,7 +4139,16 @@ ALTER TABLE ONLY public.historial_stock_cantidad
 
 
 --
--- TOC entry 3952 (class 2606 OID 16893)
+-- TOC entry 3952 (class 2606 OID 17949)
+-- Name: lineas_compra lineas_compra_atributo_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.lineas_compra
+    ADD CONSTRAINT lineas_compra_atributo_id_fkey FOREIGN KEY (atributo_id) REFERENCES public.atributos_producto(id);
+
+
+--
+-- TOC entry 3953 (class 2606 OID 16893)
 -- Name: lineas_compra lineas_compra_compra_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4143,7 +4157,16 @@ ALTER TABLE ONLY public.lineas_compra
 
 
 --
--- TOC entry 3953 (class 2606 OID 17910)
+-- TOC entry 3954 (class 2606 OID 17944)
+-- Name: lineas_compra lineas_compra_variante_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.lineas_compra
+    ADD CONSTRAINT lineas_compra_variante_id_fkey FOREIGN KEY (variante_id) REFERENCES public.variantes_atributo(id);
+
+
+--
+-- TOC entry 3955 (class 2606 OID 17910)
 -- Name: lineas_factura lineas_factura_atributo_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4152,7 +4175,7 @@ ALTER TABLE ONLY public.lineas_factura
 
 
 --
--- TOC entry 3954 (class 2606 OID 16898)
+-- TOC entry 3956 (class 2606 OID 16898)
 -- Name: lineas_factura lineas_factura_factura_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4161,7 +4184,7 @@ ALTER TABLE ONLY public.lineas_factura
 
 
 --
--- TOC entry 3955 (class 2606 OID 17106)
+-- TOC entry 3957 (class 2606 OID 17106)
 -- Name: lineas_factura lineas_factura_producto_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4170,7 +4193,7 @@ ALTER TABLE ONLY public.lineas_factura
 
 
 --
--- TOC entry 3956 (class 2606 OID 17915)
+-- TOC entry 3958 (class 2606 OID 17915)
 -- Name: lineas_factura lineas_factura_variante_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4179,7 +4202,7 @@ ALTER TABLE ONLY public.lineas_factura
 
 
 --
--- TOC entry 3998 (class 2606 OID 17132)
+-- TOC entry 4000 (class 2606 OID 17132)
 -- Name: lineas_producto lineas_producto_negocio_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4188,7 +4211,7 @@ ALTER TABLE ONLY public.lineas_producto
 
 
 --
--- TOC entry 4022 (class 2606 OID 17490)
+-- TOC entry 4024 (class 2606 OID 17490)
 -- Name: lineas_traslado lineas_traslado_producto_cantidad_destino_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4197,7 +4220,7 @@ ALTER TABLE ONLY public.lineas_traslado
 
 
 --
--- TOC entry 4023 (class 2606 OID 17485)
+-- TOC entry 4025 (class 2606 OID 17485)
 -- Name: lineas_traslado lineas_traslado_producto_cantidad_origen_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4206,7 +4229,7 @@ ALTER TABLE ONLY public.lineas_traslado
 
 
 --
--- TOC entry 4024 (class 2606 OID 17480)
+-- TOC entry 4026 (class 2606 OID 17480)
 -- Name: lineas_traslado lineas_traslado_producto_serial_destino_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4215,7 +4238,7 @@ ALTER TABLE ONLY public.lineas_traslado
 
 
 --
--- TOC entry 4025 (class 2606 OID 17475)
+-- TOC entry 4027 (class 2606 OID 17475)
 -- Name: lineas_traslado lineas_traslado_producto_serial_origen_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4224,7 +4247,7 @@ ALTER TABLE ONLY public.lineas_traslado
 
 
 --
--- TOC entry 4026 (class 2606 OID 17470)
+-- TOC entry 4028 (class 2606 OID 17470)
 -- Name: lineas_traslado lineas_traslado_serial_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4233,7 +4256,7 @@ ALTER TABLE ONLY public.lineas_traslado
 
 
 --
--- TOC entry 4027 (class 2606 OID 17465)
+-- TOC entry 4029 (class 2606 OID 17465)
 -- Name: lineas_traslado lineas_traslado_traslado_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4242,7 +4265,7 @@ ALTER TABLE ONLY public.lineas_traslado
 
 
 --
--- TOC entry 3957 (class 2606 OID 16903)
+-- TOC entry 3959 (class 2606 OID 16903)
 -- Name: movimientos_acreedor movimientos_acreedor_acreedor_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4251,7 +4274,7 @@ ALTER TABLE ONLY public.movimientos_acreedor
 
 
 --
--- TOC entry 3958 (class 2606 OID 17727)
+-- TOC entry 3960 (class 2606 OID 17727)
 -- Name: movimientos_acreedor movimientos_acreedor_cargo_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4260,7 +4283,7 @@ ALTER TABLE ONLY public.movimientos_acreedor
 
 
 --
--- TOC entry 3959 (class 2606 OID 17162)
+-- TOC entry 3961 (class 2606 OID 17162)
 -- Name: movimientos_acreedor movimientos_acreedor_compra_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4269,7 +4292,7 @@ ALTER TABLE ONLY public.movimientos_acreedor
 
 
 --
--- TOC entry 3960 (class 2606 OID 16908)
+-- TOC entry 3962 (class 2606 OID 16908)
 -- Name: movimientos_acreedor movimientos_acreedor_usuario_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4278,7 +4301,7 @@ ALTER TABLE ONLY public.movimientos_acreedor
 
 
 --
--- TOC entry 3961 (class 2606 OID 16913)
+-- TOC entry 3963 (class 2606 OID 16913)
 -- Name: movimientos_caja movimientos_caja_caja_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4287,7 +4310,7 @@ ALTER TABLE ONLY public.movimientos_caja
 
 
 --
--- TOC entry 3962 (class 2606 OID 16918)
+-- TOC entry 3964 (class 2606 OID 16918)
 -- Name: movimientos_caja movimientos_caja_usuario_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4296,7 +4319,7 @@ ALTER TABLE ONLY public.movimientos_caja
 
 
 --
--- TOC entry 4010 (class 2606 OID 17358)
+-- TOC entry 4012 (class 2606 OID 17358)
 -- Name: ordenes_servicio ordenes_servicio_cliente_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4305,7 +4328,7 @@ ALTER TABLE ONLY public.ordenes_servicio
 
 
 --
--- TOC entry 4011 (class 2606 OID 17705)
+-- TOC entry 4013 (class 2606 OID 17705)
 -- Name: ordenes_servicio ordenes_servicio_factura_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4314,7 +4337,7 @@ ALTER TABLE ONLY public.ordenes_servicio
 
 
 --
--- TOC entry 4012 (class 2606 OID 17348)
+-- TOC entry 4014 (class 2606 OID 17348)
 -- Name: ordenes_servicio ordenes_servicio_negocio_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4323,7 +4346,7 @@ ALTER TABLE ONLY public.ordenes_servicio
 
 
 --
--- TOC entry 4013 (class 2606 OID 17363)
+-- TOC entry 4015 (class 2606 OID 17363)
 -- Name: ordenes_servicio ordenes_servicio_orden_origen_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4332,7 +4355,7 @@ ALTER TABLE ONLY public.ordenes_servicio
 
 
 --
--- TOC entry 4014 (class 2606 OID 17343)
+-- TOC entry 4016 (class 2606 OID 17343)
 -- Name: ordenes_servicio ordenes_servicio_sucursal_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4341,7 +4364,7 @@ ALTER TABLE ONLY public.ordenes_servicio
 
 
 --
--- TOC entry 4015 (class 2606 OID 17353)
+-- TOC entry 4017 (class 2606 OID 17353)
 -- Name: ordenes_servicio ordenes_servicio_usuario_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4350,7 +4373,7 @@ ALTER TABLE ONLY public.ordenes_servicio
 
 
 --
--- TOC entry 3963 (class 2606 OID 16923)
+-- TOC entry 3965 (class 2606 OID 16923)
 -- Name: pagos_factura pagos_factura_factura_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4359,7 +4382,7 @@ ALTER TABLE ONLY public.pagos_factura
 
 
 --
--- TOC entry 3964 (class 2606 OID 16928)
+-- TOC entry 3966 (class 2606 OID 16928)
 -- Name: pagos_plan pagos_plan_negocio_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4368,7 +4391,7 @@ ALTER TABLE ONLY public.pagos_plan
 
 
 --
--- TOC entry 3965 (class 2606 OID 16933)
+-- TOC entry 3967 (class 2606 OID 16933)
 -- Name: pagos_plan pagos_plan_registrado_por_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4377,7 +4400,7 @@ ALTER TABLE ONLY public.pagos_plan
 
 
 --
--- TOC entry 3966 (class 2606 OID 17921)
+-- TOC entry 3968 (class 2606 OID 17921)
 -- Name: prestamos prestamos_atributo_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4386,7 +4409,7 @@ ALTER TABLE ONLY public.prestamos
 
 
 --
--- TOC entry 3967 (class 2606 OID 17062)
+-- TOC entry 3969 (class 2606 OID 17062)
 -- Name: prestamos prestamos_cliente_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4395,7 +4418,7 @@ ALTER TABLE ONLY public.prestamos
 
 
 --
--- TOC entry 3968 (class 2606 OID 17056)
+-- TOC entry 3970 (class 2606 OID 17056)
 -- Name: prestamos prestamos_empleado_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4404,7 +4427,7 @@ ALTER TABLE ONLY public.prestamos
 
 
 --
--- TOC entry 3969 (class 2606 OID 17051)
+-- TOC entry 3971 (class 2606 OID 17051)
 -- Name: prestamos prestamos_prestatario_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4413,7 +4436,7 @@ ALTER TABLE ONLY public.prestamos
 
 
 --
--- TOC entry 3970 (class 2606 OID 16938)
+-- TOC entry 3972 (class 2606 OID 16938)
 -- Name: prestamos prestamos_producto_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4422,7 +4445,7 @@ ALTER TABLE ONLY public.prestamos
 
 
 --
--- TOC entry 3971 (class 2606 OID 16943)
+-- TOC entry 3973 (class 2606 OID 16943)
 -- Name: prestamos prestamos_sucursal_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4431,7 +4454,7 @@ ALTER TABLE ONLY public.prestamos
 
 
 --
--- TOC entry 3972 (class 2606 OID 16948)
+-- TOC entry 3974 (class 2606 OID 16948)
 -- Name: prestamos prestamos_usuario_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4440,7 +4463,7 @@ ALTER TABLE ONLY public.prestamos
 
 
 --
--- TOC entry 3973 (class 2606 OID 17926)
+-- TOC entry 3975 (class 2606 OID 17926)
 -- Name: prestamos prestamos_variante_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4449,7 +4472,7 @@ ALTER TABLE ONLY public.prestamos
 
 
 --
--- TOC entry 3991 (class 2606 OID 17033)
+-- TOC entry 3993 (class 2606 OID 17033)
 -- Name: prestatarios prestatarios_negocio_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4458,7 +4481,7 @@ ALTER TABLE ONLY public.prestatarios
 
 
 --
--- TOC entry 3974 (class 2606 OID 17142)
+-- TOC entry 3976 (class 2606 OID 17142)
 -- Name: productos_cantidad productos_cantidad_linea_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4467,7 +4490,7 @@ ALTER TABLE ONLY public.productos_cantidad
 
 
 --
--- TOC entry 3975 (class 2606 OID 16953)
+-- TOC entry 3977 (class 2606 OID 16953)
 -- Name: productos_cantidad productos_cantidad_proveedor_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4476,7 +4499,7 @@ ALTER TABLE ONLY public.productos_cantidad
 
 
 --
--- TOC entry 3976 (class 2606 OID 16958)
+-- TOC entry 3978 (class 2606 OID 16958)
 -- Name: productos_cantidad productos_cantidad_sucursal_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4485,7 +4508,7 @@ ALTER TABLE ONLY public.productos_cantidad
 
 
 --
--- TOC entry 3977 (class 2606 OID 17137)
+-- TOC entry 3979 (class 2606 OID 17137)
 -- Name: productos_serial productos_serial_linea_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4494,7 +4517,7 @@ ALTER TABLE ONLY public.productos_serial
 
 
 --
--- TOC entry 3978 (class 2606 OID 16963)
+-- TOC entry 3980 (class 2606 OID 16963)
 -- Name: productos_serial productos_serial_proveedor_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4503,7 +4526,7 @@ ALTER TABLE ONLY public.productos_serial
 
 
 --
--- TOC entry 3979 (class 2606 OID 16968)
+-- TOC entry 3981 (class 2606 OID 16968)
 -- Name: productos_serial productos_serial_sucursal_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4512,7 +4535,7 @@ ALTER TABLE ONLY public.productos_serial
 
 
 --
--- TOC entry 3980 (class 2606 OID 16973)
+-- TOC entry 3982 (class 2606 OID 16973)
 -- Name: proveedores proveedores_negocio_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4521,7 +4544,7 @@ ALTER TABLE ONLY public.proveedores
 
 
 --
--- TOC entry 3981 (class 2606 OID 16978)
+-- TOC entry 3983 (class 2606 OID 16978)
 -- Name: retomas retomas_factura_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4530,7 +4553,7 @@ ALTER TABLE ONLY public.retomas
 
 
 --
--- TOC entry 3982 (class 2606 OID 17739)
+-- TOC entry 3984 (class 2606 OID 17739)
 -- Name: retomas retomas_prestamo_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4539,7 +4562,7 @@ ALTER TABLE ONLY public.retomas
 
 
 --
--- TOC entry 3983 (class 2606 OID 17750)
+-- TOC entry 3985 (class 2606 OID 17750)
 -- Name: retomas retomas_producto_cantidad_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4548,7 +4571,7 @@ ALTER TABLE ONLY public.retomas
 
 
 --
--- TOC entry 3984 (class 2606 OID 17745)
+-- TOC entry 3986 (class 2606 OID 17745)
 -- Name: retomas retomas_producto_serial_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4557,7 +4580,7 @@ ALTER TABLE ONLY public.retomas
 
 
 --
--- TOC entry 3985 (class 2606 OID 17761)
+-- TOC entry 3987 (class 2606 OID 17761)
 -- Name: retomas retomas_sucursal_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4566,7 +4589,7 @@ ALTER TABLE ONLY public.retomas
 
 
 --
--- TOC entry 3986 (class 2606 OID 16983)
+-- TOC entry 3988 (class 2606 OID 16983)
 -- Name: seriales seriales_producto_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4575,7 +4598,7 @@ ALTER TABLE ONLY public.seriales
 
 
 --
--- TOC entry 3987 (class 2606 OID 17067)
+-- TOC entry 3989 (class 2606 OID 17067)
 -- Name: seriales seriales_proveedor_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4584,7 +4607,7 @@ ALTER TABLE ONLY public.seriales
 
 
 --
--- TOC entry 3988 (class 2606 OID 16988)
+-- TOC entry 3990 (class 2606 OID 16988)
 -- Name: sucursales sucursales_negocio_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4593,7 +4616,7 @@ ALTER TABLE ONLY public.sucursales
 
 
 --
--- TOC entry 4030 (class 2606 OID 17840)
+-- TOC entry 4032 (class 2606 OID 17840)
 -- Name: tipos_caracteristica tipos_caracteristica_negocio_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4602,7 +4625,7 @@ ALTER TABLE ONLY public.tipos_caracteristica
 
 
 --
--- TOC entry 4001 (class 2606 OID 17204)
+-- TOC entry 4003 (class 2606 OID 17204)
 -- Name: tokens_recuperacion tokens_recuperacion_usuario_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4611,7 +4634,7 @@ ALTER TABLE ONLY public.tokens_recuperacion
 
 
 --
--- TOC entry 4018 (class 2606 OID 17437)
+-- TOC entry 4020 (class 2606 OID 17437)
 -- Name: traslados traslados_negocio_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4620,7 +4643,7 @@ ALTER TABLE ONLY public.traslados
 
 
 --
--- TOC entry 4019 (class 2606 OID 17447)
+-- TOC entry 4021 (class 2606 OID 17447)
 -- Name: traslados traslados_sucursal_destino_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4629,7 +4652,7 @@ ALTER TABLE ONLY public.traslados
 
 
 --
--- TOC entry 4020 (class 2606 OID 17442)
+-- TOC entry 4022 (class 2606 OID 17442)
 -- Name: traslados traslados_sucursal_origen_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4638,7 +4661,7 @@ ALTER TABLE ONLY public.traslados
 
 
 --
--- TOC entry 4021 (class 2606 OID 17452)
+-- TOC entry 4023 (class 2606 OID 17452)
 -- Name: traslados traslados_usuario_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4647,7 +4670,7 @@ ALTER TABLE ONLY public.traslados
 
 
 --
--- TOC entry 3989 (class 2606 OID 16993)
+-- TOC entry 3991 (class 2606 OID 16993)
 -- Name: usuarios usuarios_negocio_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4656,7 +4679,7 @@ ALTER TABLE ONLY public.usuarios
 
 
 --
--- TOC entry 3990 (class 2606 OID 16998)
+-- TOC entry 3992 (class 2606 OID 16998)
 -- Name: usuarios usuarios_sucursal_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4665,7 +4688,7 @@ ALTER TABLE ONLY public.usuarios
 
 
 --
--- TOC entry 4034 (class 2606 OID 17889)
+-- TOC entry 4036 (class 2606 OID 17889)
 -- Name: variantes_atributo variantes_atributo_atributo_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4674,7 +4697,7 @@ ALTER TABLE ONLY public.variantes_atributo
 
 
 --
--- TOC entry 4035 (class 2606 OID 17894)
+-- TOC entry 4037 (class 2606 OID 17894)
 -- Name: variantes_atributo variantes_atributo_tipo_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4682,11 +4705,11 @@ ALTER TABLE ONLY public.variantes_atributo
     ADD CONSTRAINT variantes_atributo_tipo_id_fkey FOREIGN KEY (tipo_id) REFERENCES public.tipos_caracteristica(id) ON DELETE RESTRICT;
 
 
--- Completed on 2026-05-15 16:56:39
+-- Completed on 2026-05-17 13:36:04
 
 --
 -- PostgreSQL database dump complete
 --
 
-\unrestrict dxhXBdEgccdRwQyzehuExgXstoVJPwZ1OBM2X3TlN1RqUYZdP6W24jMoqBEe0Ry
+\unrestrict sbOyquNoApgGZJTJJIxAyhXHM9BIuEQ8SULq6VGTvKWls2ssNOFnCRCbAXeVxPi
 

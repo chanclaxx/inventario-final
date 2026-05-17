@@ -1,4 +1,5 @@
 const service = require('./servicios.service');
+const audit   = require('../../utils/auditoria.util');
 
 const getOrdenes = async (req, res, next) => {
   try {
@@ -33,6 +34,12 @@ const crearOrden = async (req, res, next) => {
       negocio_id: req.user.negocio_id,
       usuario_id: req.user.id,
     });
+    audit.registrar(req.user.negocio_id, req.user.id, 'Orden de servicio creada', 'servicios', data.id, {
+      sucursal_id,
+      cliente:    req.body.nombre_cliente ?? null,
+      equipo:     req.body.equipo         ?? null,
+      valor:      Number(data.valor_servicio ?? 0),
+    });
     res.status(201).json({ ok: true, data, message: 'Orden creada correctamente' });
   } catch (err) { next(err); }
 };
@@ -47,6 +54,9 @@ const enReparacion = async (req, res, next) => {
 const marcarListo = async (req, res, next) => {
   try {
     const data = await service.marcarListo(req.user.negocio_id, req.params.id, req.body);
+    audit.registrar(req.user.negocio_id, req.user.id, 'Orden lista para entrega', 'servicios', Number(req.params.id), {
+      sucursal_id: data.sucursal_id ?? null,
+    });
     res.json({ ok: true, data, message: 'Orden marcada como lista' });
   } catch (err) { next(err); }
 };
@@ -57,6 +67,10 @@ const registrarAbono = async (req, res, next) => {
       ...req.body,
       usuarioId: req.user.id,
       cajaId:    req.caja_id || null,
+    });
+    audit.registrar(req.user.negocio_id, req.user.id, 'Abono a servicio', 'servicios', Number(req.params.id), {
+      sucursal_id: data.sucursal_id ?? null,
+      monto:       Number(req.body.monto ?? 0),
     });
     res.json({ ok: true, data, message: 'Abono registrado correctamente' });
   } catch (err) { next(err); }

@@ -1,4 +1,5 @@
 const service = require('./compras.service');
+const audit   = require('../../utils/auditoria.util');
 
 const getCompras = async (req, res, next) => {
   try {
@@ -33,6 +34,14 @@ const registrarCompra = async (req, res, next) => {
       negocio_id:  req.user.negocio_id,
       sucursal_id,
       usuario_id:  req.user.id,
+    });
+    audit.registrar(req.user.negocio_id, req.user.id, 'Compra registrada', 'compras', data.id, {
+      sucursal_id,
+      valor:           Number(data.total ?? 0),
+      proveedor_id:    req.body.proveedor_id,
+      numero_factura:  req.body.numero_factura ?? null,
+      metodo:          req.body.metodo ?? null,
+      estado:          data.estado,
     });
     res.status(201).json({ ok: true, data, message: 'Compra registrada correctamente' });
   } catch (err) { next(err); }
