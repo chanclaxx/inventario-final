@@ -86,7 +86,7 @@ function ToggleReadOnly({ enabled, label, description }) {
         </div>
         {description && <span className="text-xs text-gray-400">{description}</span>}
         <span className="text-xs text-gray-300 mt-0.5">
-          Solo puede ser modificado por el administrador del sistema
+          Solo puede ser modificado por el administrador del sistem
         </span>
       </div>
       <div className="flex-shrink-0 cursor-not-allowed opacity-60">
