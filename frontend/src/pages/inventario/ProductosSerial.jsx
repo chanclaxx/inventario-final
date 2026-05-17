@@ -439,7 +439,7 @@ function ListaSeriales({ seriales, precio, onAgregar, onEliminar, onEditar, colo
 // ─── Componente principal ─────────────────────────────────────────────────────
 export function ProductosSerial({ onAgregarProducto }) {
   const queryClient                    = useQueryClient();
-  const { esAdminNegocio }             = useAuth();
+  const { puedeEditarProductos }       = useAuth();
   const { sucursalKey, sucursalLista } = useSucursalKey();
 
   const [productoSeleccionado, setProductoSeleccionado] = useState(null);
@@ -494,7 +494,7 @@ export function ProductosSerial({ onAgregarProducto }) {
   const productos = productosData || [];
   const lineas    = lineasData    || [];
   const seriales  = serialesData  || [];
-  const esAdmin   = esAdminNegocio();
+  const esAdmin   = puedeEditarProductos();
 
   const productosFiltrados = productos.filter((p) =>
     p.nombre.toLowerCase().includes(busqueda.toLowerCase())

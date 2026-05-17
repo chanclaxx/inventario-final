@@ -60,6 +60,18 @@ export function AuthProvider({ children }) {
   const esSupervisor   = () => ['admin_negocio', 'supervisor'].includes(usuario?.rol);
   const esVendedor     = () => !!usuario;
 
+  // true si el usuario puede abrir los modales de edición de productos
+  const puedeEditarProductos = () => {
+    if (usuario?.rol === 'admin_negocio') return true;
+    return usuario?.permisos_edicion_productos?.puede_editar === true;
+  };
+
+  // null = admin (todos los campos); array = campos permitidos para el usuario
+  const camposEdicionProductos = () => {
+    if (usuario?.rol === 'admin_negocio') return null;
+    return usuario?.permisos_edicion_productos?.campos ?? [];
+  };
+
   return (
     <AuthContext.Provider value={{
       usuario,
@@ -68,6 +80,8 @@ export function AuthProvider({ children }) {
       esAdminNegocio,
       esSupervisor,
       esVendedor,
+      puedeEditarProductos,
+      camposEdicionProductos,
     }}>
       {children}
     </AuthContext.Provider>

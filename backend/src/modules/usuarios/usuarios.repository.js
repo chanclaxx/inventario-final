@@ -5,6 +5,7 @@ const findAll = async (negocioId) => {
     SELECT u.id, u.nombre, u.email, u.rol, u.activo,
            u.sucursal_id, u.creado_en, u.ultimo_acceso,
            u.modulos_permitidos, u.permisos_proveedores,
+           u.permisos_edicion_productos,
            s.nombre AS sucursal_nombre
     FROM usuarios u
     LEFT JOIN sucursales s ON s.id = u.sucursal_id
@@ -19,6 +20,7 @@ const findById = async (negocioId, id) => {
     SELECT u.id, u.nombre, u.email, u.rol, u.activo,
            u.sucursal_id, u.creado_en, u.ultimo_acceso,
            u.modulos_permitidos, u.permisos_proveedores,
+           u.permisos_edicion_productos,
            s.nombre AS sucursal_nombre
     FROM usuarios u
     LEFT JOIN sucursales s ON s.id = u.sucursal_id
@@ -44,27 +46,30 @@ const findByEmail = async (email, excludeId = null) => {
 const create = async ({
   negocio_id, nombre, email, password_hash, rol,
   sucursal_id, password_temporal, modulos_permitidos, permisos_proveedores,
+  permisos_edicion_productos,
 }) => {
   const { rows } = await pool.query(`
     INSERT INTO usuarios(
       negocio_id, nombre, email, password_hash, rol,
-      sucursal_id, password_temporal, modulos_permitidos, permisos_proveedores
+      sucursal_id, password_temporal, modulos_permitidos, permisos_proveedores,
+      permisos_edicion_productos
     )
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb)
     RETURNING id, nombre, email, rol, activo, sucursal_id,
-              creado_en, modulos_permitidos, permisos_proveedores
+              creado_en, modulos_permitidos, permisos_proveedores, permisos_edicion_productos
   `, [
     negocio_id, nombre, email, password_hash, rol,
     sucursal_id || null,
     password_temporal ?? false,
     modulos_permitidos || null,
     permisos_proveedores ? JSON.stringify(permisos_proveedores) : null,
+    permisos_edicion_productos ? JSON.stringify(permisos_edicion_productos) : null,
   ]);
   return rows[0];
 };
 
 const update = async (negocioId, id, datos) => {
-  const { nombre, email, rol, sucursal_id, modulos_permitidos, permisos_proveedores } = datos;
+  const { nombre, email, rol, sucursal_id, modulos_permitidos, permisos_proveedores, permisos_edicion_productos } = datos;
   const activoExplicito = typeof datos.activo === 'boolean';
 
   const modGuardar = (modulos_permitidos !== undefined && modulos_permitidos !== null)
@@ -73,6 +78,9 @@ const update = async (negocioId, id, datos) => {
   const permGuardar = (permisos_proveedores !== undefined && permisos_proveedores !== null)
     ? JSON.stringify(permisos_proveedores)
     : null;
+  const permEdicionGuardar = (permisos_edicion_productos !== undefined && permisos_edicion_productos !== null)
+    ? JSON.stringify(permisos_edicion_productos)
+    : null;
 
   let query, params;
 
@@ -80,28 +88,30 @@ const update = async (negocioId, id, datos) => {
     query = `
       UPDATE usuarios
       SET nombre = $1, email = $2, rol = $3, sucursal_id = $4,
-          activo = $5, modulos_permitidos = $6::text[], permisos_proveedores = $7::jsonb
-      WHERE id = $8 AND negocio_id = $9
+          activo = $5, modulos_permitidos = $6::text[], permisos_proveedores = $7::jsonb,
+          permisos_edicion_productos = $8::jsonb
+      WHERE id = $9 AND negocio_id = $10
       RETURNING id, nombre, email, rol, activo, sucursal_id,
-                modulos_permitidos, permisos_proveedores
+                modulos_permitidos, permisos_proveedores, permisos_edicion_productos
     `;
     params = [
       nombre, email, rol, sucursal_id || null,
-      datos.activo, modGuardar, permGuardar,
+      datos.activo, modGuardar, permGuardar, permEdicionGuardar,
       id, negocioId,
     ];
   } else {
     query = `
       UPDATE usuarios
       SET nombre = $1, email = $2, rol = $3,
-          sucursal_id = $4, modulos_permitidos = $5::text[], permisos_proveedores = $6::jsonb
-      WHERE id = $7 AND negocio_id = $8
+          sucursal_id = $4, modulos_permitidos = $5::text[], permisos_proveedores = $6::jsonb,
+          permisos_edicion_productos = $7::jsonb
+      WHERE id = $8 AND negocio_id = $9
       RETURNING id, nombre, email, rol, activo, sucursal_id,
-                modulos_permitidos, permisos_proveedores
+                modulos_permitidos, permisos_proveedores, permisos_edicion_productos
     `;
     params = [
       nombre, email, rol, sucursal_id || null,
-      modGuardar, permGuardar,
+      modGuardar, permGuardar, permEdicionGuardar,
       id, negocioId,
     ];
   }

@@ -184,7 +184,8 @@ function AcordeonLinea({ nombre, productos, esAdmin, onAgregar, onReducir, onEdi
 // ── Componente principal ──────────────────────────────────────────────────────
 export function ProductosCantidad() {
   const queryClient = useQueryClient();
-  const { esAdminNegocio } = useAuth();
+  const { puedeEditarProductos } = useAuth();
+
   const { sucursalKey, sucursalLista } = useSucursalKey();
 
   const [busqueda,         setBusqueda]         = useState('');
@@ -231,7 +232,7 @@ export function ProductosCantidad() {
     ? productosData
     : (Array.isArray(productosData?.items) ? productosData.items : []);
   const lineas    = lineasData || [];
-  const esAdmin   = esAdminNegocio();
+  const esAdmin   = puedeEditarProductos();
 
   const productosFiltrados = productos.filter((p) =>
     p.nombre.toLowerCase().includes(busqueda.toLowerCase())

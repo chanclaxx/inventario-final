@@ -11,14 +11,12 @@ import { useAuth }     from '../../context/useAuth';
 import { ModalEliminarProducto, TIPO_PRODUCTO_SERIAL } from './ModalEliminarProducto';
 
 export function ModalEditarProductoSerial({ producto, pinEliminacion, onClose }) {
-  const { esAdminNegocio } = useAuth();
+  const { esAdminNegocio, puedeEditarProductos, camposEdicionProductos } = useAuth();
+  const esAdmin = esAdminNegocio();
+  const campos  = camposEdicionProductos();
+  const tiene   = (c) => campos === null || campos.includes(c);
   const queryClient = useQueryClient();
 
-  // ── Estado del formulario ─────────────────────────────────────────────────
-  // CAMBIO: precio se inicializa como NUMBER en vez de String.
-  //   • Postgres devuelve '850000.00' — Number('850000.00') → 850000 ✓
-  //   • InputMoneda espera number o '' (vacío = sin valor)
-  //   • La mutación hace Number(form.precio): Number(850000) = 850000 ✓
   const [form, setForm] = useState({
     nombre:   producto.nombre   || '',
     precio:   producto.precio   != null ? Number(producto.precio)   : '',
@@ -30,7 +28,7 @@ export function ModalEditarProductoSerial({ producto, pinEliminacion, onClose })
   const { data: lineasData } = useQuery({
     queryKey: ['lineas'],
     queryFn:  () => getLineas().then((r) => r.data.data),
-    enabled:  esAdminNegocio(),
+    enabled:  puedeEditarProductos() && tiene('linea'),
   });
   const lineas = lineasData || [];
 
@@ -48,7 +46,7 @@ export function ModalEditarProductoSerial({ producto, pinEliminacion, onClose })
     onError: (err) => setError(err.response?.data?.error || 'Error al actualizar el producto'),
   });
 
-  if (!esAdminNegocio()) return null;
+  if (!puedeEditarProductos()) return null;
 
   return (
     <>
@@ -62,41 +60,46 @@ export function ModalEditarProductoSerial({ producto, pinEliminacion, onClose })
             </p>
           </div>
 
-          <Input
-            label="Nombre"
-            placeholder="Ej: iPhone 15 Pro"
-            value={form.nombre}
-            onChange={(e) => setForm({ ...form, nombre: e.target.value })}
-            autoFocus
-          />
-
-          {/* CAMBIO: Input type=number → InputMoneda */}
-          <div className="flex flex-col gap-1">
-            <label className="text-sm font-medium text-gray-700">Precio de venta</label>
-            <InputMoneda
-              value={form.precio}
-              onChange={(val) => setForm({ ...form, precio: val })}
-              placeholder="0"
-              className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl
-                text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500
-                transition-all"
+          {tiene('nombre') && (
+            <Input
+              label="Nombre"
+              placeholder="Ej: iPhone 15 Pro"
+              value={form.nombre}
+              onChange={(e) => setForm({ ...form, nombre: e.target.value })}
+              autoFocus
             />
-          </div>
+          )}
 
-          <div className="flex flex-col gap-1">
-            <label className="text-sm font-medium text-gray-700">Línea</label>
-            <select
-              value={form.linea_id}
-              onChange={(e) => setForm({ ...form, linea_id: e.target.value })}
-              className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-sm
-                focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-700"
-            >
-              <option value="">Sin línea</option>
-              {lineas.map((l) => (
-                <option key={l.id} value={l.id}>{l.nombre}</option>
-              ))}
-            </select>
-          </div>
+          {tiene('precio') && (
+            <div className="flex flex-col gap-1">
+              <label className="text-sm font-medium text-gray-700">Precio de venta</label>
+              <InputMoneda
+                value={form.precio}
+                onChange={(val) => setForm({ ...form, precio: val })}
+                placeholder="0"
+                className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl
+                  text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500
+                  transition-all"
+              />
+            </div>
+          )}
+
+          {tiene('linea') && (
+            <div className="flex flex-col gap-1">
+              <label className="text-sm font-medium text-gray-700">Línea</label>
+              <select
+                value={form.linea_id}
+                onChange={(e) => setForm({ ...form, linea_id: e.target.value })}
+                className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-sm
+                  focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-700"
+              >
+                <option value="">Sin línea</option>
+                {lineas.map((l) => (
+                  <option key={l.id} value={l.id}>{l.nombre}</option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {error && <p className="text-sm text-red-500">{error}</p>}
 
@@ -115,17 +118,19 @@ export function ModalEditarProductoSerial({ producto, pinEliminacion, onClose })
               </Button>
             </div>
 
-            <button
-              type="button"
-              onClick={() => setModalEliminar(true)}
-              className="flex items-center justify-center gap-1.5 w-full py-2 rounded-xl
-                text-xs font-medium text-red-400 hover:text-red-600
-                hover:bg-red-50 transition-colors border border-dashed border-red-200
-                hover:border-red-300"
-            >
-              <Trash2 size={13} />
-              Eliminar producto
-            </button>
+            {esAdmin && (
+              <button
+                type="button"
+                onClick={() => setModalEliminar(true)}
+                className="flex items-center justify-center gap-1.5 w-full py-2 rounded-xl
+                  text-xs font-medium text-red-400 hover:text-red-600
+                  hover:bg-red-50 transition-colors border border-dashed border-red-200
+                  hover:border-red-300"
+              >
+                <Trash2 size={13} />
+                Eliminar producto
+              </button>
+            )}
           </div>
 
         </div>

@@ -14,7 +14,7 @@ const getUsuarioById = async (negocioId, id) => {
 };
 
 const crearUsuario = async (negocioId, {
-  nombre, email, password, rol, sucursal_id, modulos_permitidos, permisos_proveedores,
+  nombre, email, password, rol, sucursal_id, modulos_permitidos, permisos_proveedores, permisos_edicion_productos,
 }) => {
   if (rol === 'admin_negocio' && sucursal_id) {
     throw { status: 400, message: 'El admin de negocio no puede tener sucursal asignada' };
@@ -59,13 +59,18 @@ const crearUsuario = async (negocioId, {
     ? permisos_proveedores
     : null;
 
+  const permisosEdicionAGuardar = (rol !== 'admin_negocio' && permisos_edicion_productos)
+    ? permisos_edicion_productos
+    : null;
+
   try {
     return await usuariosRepo.create({
-      negocio_id:           negocioId,
+      negocio_id:                  negocioId,
       nombre, email, password_hash, rol, sucursal_id,
-      password_temporal:    false,
-      modulos_permitidos:   modulosAGuardar,
-      permisos_proveedores: permisosProveedoresAGuardar,
+      password_temporal:           false,
+      modulos_permitidos:          modulosAGuardar,
+      permisos_proveedores:        permisosProveedoresAGuardar,
+      permisos_edicion_productos:  permisosEdicionAGuardar,
     });
   } catch (err) {
     if (err.constraint === 'usuarios_email_key') {
@@ -114,10 +119,17 @@ const actualizarUsuario = async (negocioId, id, datos) => {
         ? datos.permisos_proveedores
         : existe.permisos_proveedores);
 
+  const permisosEdicionAGuardar = (rolFinal === 'admin_negocio')
+    ? null
+    : (datos.permisos_edicion_productos !== undefined
+        ? datos.permisos_edicion_productos
+        : existe.permisos_edicion_productos);
+
   return usuariosRepo.update(negocioId, id, {
     ...datos,
-    modulos_permitidos:   modulosAGuardar,
-    permisos_proveedores: permisosProveedoresAGuardar,
+    modulos_permitidos:          modulosAGuardar,
+    permisos_proveedores:        permisosProveedoresAGuardar,
+    permisos_edicion_productos:  permisosEdicionAGuardar,
   });
 };
 

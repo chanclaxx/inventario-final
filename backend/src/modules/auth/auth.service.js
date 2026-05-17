@@ -9,18 +9,19 @@ const { resolverModulos } = require('../../config/modulos');
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const _buildPayload = (usuario) => ({
-  id:                  usuario.id,
-  nombre:              usuario.nombre,
-  email:               usuario.email,
-  rol:                 usuario.rol,
-  negocio_id:          usuario.negocio_id,
-  negocio_nombre:      usuario.negocio_nombre,
-  sucursal_id:         usuario.sucursal_id,
-  sucursal_nombre:     usuario.sucursal_nombre,
-  password_temporal:   usuario.password_temporal ?? false,
-  modulos_permitidos:   resolverModulos(usuario.rol, usuario.modulos_permitidos),
-  fecha_vencimiento:    usuario.fecha_vencimiento ?? null,
-  permisos_proveedores: usuario.rol === 'admin_negocio' ? null : (usuario.permisos_proveedores ?? null),
+  id:                          usuario.id,
+  nombre:                      usuario.nombre,
+  email:                       usuario.email,
+  rol:                         usuario.rol,
+  negocio_id:                  usuario.negocio_id,
+  negocio_nombre:              usuario.negocio_nombre,
+  sucursal_id:                 usuario.sucursal_id,
+  sucursal_nombre:             usuario.sucursal_nombre,
+  password_temporal:           usuario.password_temporal ?? false,
+  modulos_permitidos:           resolverModulos(usuario.rol, usuario.modulos_permitidos),
+  fecha_vencimiento:            usuario.fecha_vencimiento ?? null,
+  permisos_proveedores:         usuario.rol === 'admin_negocio' ? null : (usuario.permisos_proveedores ?? null),
+  permisos_edicion_productos:   usuario.rol === 'admin_negocio' ? null : (usuario.permisos_edicion_productos ?? null),
 });
 
 // Query reutilizada en login y refreshAccessToken
@@ -32,7 +33,8 @@ const QUERY_USUARIO_BASE = `
     u.sucursal_id, s.nombre AS sucursal_nombre,
     u.password_temporal,
     u.modulos_permitidos,
-    u.permisos_proveedores
+    u.permisos_proveedores,
+    u.permisos_edicion_productos
   FROM usuarios u
   JOIN negocios n ON n.id = u.negocio_id
   LEFT JOIN sucursales s ON s.id = u.sucursal_id

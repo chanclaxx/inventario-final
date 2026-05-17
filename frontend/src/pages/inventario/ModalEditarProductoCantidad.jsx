@@ -13,7 +13,10 @@ import { useAuth }      from '../../context/useAuth';
 import { ModalEliminarProducto, TIPO_PRODUCTO_CANTIDAD } from './ModalEliminarProducto';
 
 export function ModalEditarProductoCantidad({ producto, pinEliminacion, variantesActivo, onClose }) {
-  const { esAdminNegocio } = useAuth();
+  const { esAdminNegocio, puedeEditarProductos, camposEdicionProductos } = useAuth();
+  const esAdmin    = esAdminNegocio();
+  const campos     = camposEdicionProductos(); // null = todos, array = permitidos
+  const tiene      = (c) => campos === null || campos.includes(c);
   const queryClient = useQueryClient();
 
   const { data: arbol = [] } = useQuery({
@@ -39,13 +42,13 @@ export function ModalEditarProductoCantidad({ producto, pinEliminacion, variante
   const { data: proveedoresData } = useQuery({
     queryKey: ['proveedores'],
     queryFn:  () => getProveedores().then((r) => r.data.data),
-    enabled:  esAdminNegocio(),
+    enabled:  puedeEditarProductos() && tiene('proveedor'),
   });
 
   const { data: lineasData } = useQuery({
     queryKey: ['lineas'],
     queryFn:  () => getLineas().then((r) => r.data.data),
-    enabled:  esAdminNegocio(),
+    enabled:  puedeEditarProductos() && tiene('linea'),
   });
 
   const proveedores = proveedoresData || [];
@@ -76,7 +79,7 @@ export function ModalEditarProductoCantidad({ producto, pinEliminacion, variante
     }
   };
 
-  if (!esAdminNegocio()) return null;
+  if (!puedeEditarProductos()) return null;
 
   return (
     <>
@@ -90,103 +93,119 @@ export function ModalEditarProductoCantidad({ producto, pinEliminacion, variante
             </p>
           </div>
 
-          <Input
-            id="edit-nombre-cant"
-            label="Nombre"
-            placeholder="Ej: Cable USB-C"
-            value={form.nombre}
-            onChange={(e) => setForm({ ...form, nombre: e.target.value })}
-            onKeyDown={(e) => handleKeyDown(e, 'edit-unidad-cant')}
-            autoFocus
-          />
-
-          <Input
-            id="edit-unidad-cant"
-            label="Unidad de medida"
-            placeholder="Ej: unidad, caja, metro"
-            value={form.unidad_medida}
-            onChange={(e) => setForm({ ...form, unidad_medida: e.target.value })}
-            onKeyDown={(e) => handleKeyDown(e, 'edit-stock-min-cant')}
-          />
-
-          <div className="grid grid-cols-2 gap-3">
+          {tiene('nombre') && (
             <Input
-              id="edit-stock-min-cant"
-              label="Stock mínimo"
-              type="number" min="0" placeholder="0"
-              value={form.stock_minimo}
-              onChange={(e) => setForm({ ...form, stock_minimo: e.target.value })}
-              onKeyDown={(e) => handleKeyDown(e, 'edit-precio-cant')}
+              id="edit-nombre-cant"
+              label="Nombre"
+              placeholder="Ej: Cable USB-C"
+              value={form.nombre}
+              onChange={(e) => setForm({ ...form, nombre: e.target.value })}
+              onKeyDown={(e) => handleKeyDown(e, 'edit-unidad-cant')}
+              autoFocus
             />
+          )}
 
-            <div className="flex flex-col gap-1">
-              <label className="text-sm font-medium text-gray-700">Precio de venta</label>
-              <InputMoneda
-                id="edit-precio-cant"
-                value={form.precio}
-                onChange={(val) => setForm({ ...form, precio: val })}
-                placeholder="0"
-                onKeyDown={(e) => handleKeyDown(e, 'edit-costo-cant')}
-                className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl
-                  text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500
-                  transition-all"
-              />
+          {tiene('unidad_medida') && (
+            <Input
+              id="edit-unidad-cant"
+              label="Unidad de medida"
+              placeholder="Ej: unidad, caja, metro"
+              value={form.unidad_medida}
+              onChange={(e) => setForm({ ...form, unidad_medida: e.target.value })}
+              onKeyDown={(e) => handleKeyDown(e, 'edit-stock-min-cant')}
+            />
+          )}
+
+          {(tiene('stock_minimo') || tiene('precio')) && (
+            <div className="grid grid-cols-2 gap-3">
+              {tiene('stock_minimo') && (
+                <Input
+                  id="edit-stock-min-cant"
+                  label="Stock mínimo"
+                  type="number" min="0" placeholder="0"
+                  value={form.stock_minimo}
+                  onChange={(e) => setForm({ ...form, stock_minimo: e.target.value })}
+                  onKeyDown={(e) => handleKeyDown(e, 'edit-precio-cant')}
+                />
+              )}
+
+              {tiene('precio') && (
+                <div className="flex flex-col gap-1">
+                  <label className="text-sm font-medium text-gray-700">Precio de venta</label>
+                  <InputMoneda
+                    id="edit-precio-cant"
+                    value={form.precio}
+                    onChange={(val) => setForm({ ...form, precio: val })}
+                    placeholder="0"
+                    onKeyDown={(e) => handleKeyDown(e, 'edit-costo-cant')}
+                    className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl
+                      text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500
+                      transition-all"
+                  />
+                </div>
+              )}
             </div>
-          </div>
+          )}
 
-          <div className="flex flex-col gap-1">
-            <label className="text-sm font-medium text-gray-700">Costo unitario</label>
-            {tieneAtributos ? (
-              <p className="text-xs text-gray-400 bg-gray-50 rounded-xl px-3 py-2 border border-gray-200">
-                Se define por cada variante — edítalo desde la vista de variantes del producto.
-              </p>
-            ) : (
-              <InputMoneda
-                id="edit-costo-cant"
-                value={form.costo_unitario}
-                onChange={(val) => setForm({ ...form, costo_unitario: val })}
-                placeholder="0"
-                onKeyDown={(e) => handleKeyDown(e, null)}
-                className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl
-                  text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500
-                  transition-all"
-              />
-            )}
-          </div>
+          {tiene('costo') && (
+            <div className="flex flex-col gap-1">
+              <label className="text-sm font-medium text-gray-700">Costo unitario</label>
+              {tieneAtributos ? (
+                <p className="text-xs text-gray-400 bg-gray-50 rounded-xl px-3 py-2 border border-gray-200">
+                  Se define por cada variante — edítalo desde la vista de variantes del producto.
+                </p>
+              ) : (
+                <InputMoneda
+                  id="edit-costo-cant"
+                  value={form.costo_unitario}
+                  onChange={(val) => setForm({ ...form, costo_unitario: val })}
+                  placeholder="0"
+                  onKeyDown={(e) => handleKeyDown(e, null)}
+                  className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl
+                    text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500
+                    transition-all"
+                />
+              )}
+            </div>
+          )}
 
-          <div className="flex flex-col gap-1">
-            <label className="text-sm font-medium text-gray-700">Línea</label>
-            <select
-              id="edit-linea-cant"
-              value={form.linea_id}
-              onChange={(e) => setForm({ ...form, linea_id: e.target.value })}
-              className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-sm
-                focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-700"
-            >
-              <option value="">Sin línea</option>
-              {lineas.map((l) => (
-                <option key={l.id} value={l.id}>{l.nombre}</option>
-              ))}
-            </select>
-          </div>
+          {tiene('linea') && (
+            <div className="flex flex-col gap-1">
+              <label className="text-sm font-medium text-gray-700">Línea</label>
+              <select
+                id="edit-linea-cant"
+                value={form.linea_id}
+                onChange={(e) => setForm({ ...form, linea_id: e.target.value })}
+                className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-sm
+                  focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-700"
+              >
+                <option value="">Sin línea</option>
+                {lineas.map((l) => (
+                  <option key={l.id} value={l.id}>{l.nombre}</option>
+                ))}
+              </select>
+            </div>
+          )}
 
-          <div className="flex flex-col gap-1">
-            <label className="text-sm font-medium text-gray-700">
-              Proveedor <span className="text-gray-400 font-normal">(opcional)</span>
-            </label>
-            <select
-              id="edit-proveedor-cant"
-              value={form.proveedor_id}
-              onChange={(e) => setForm({ ...form, proveedor_id: e.target.value })}
-              className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-sm
-                focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-700"
-            >
-              <option value="">Sin proveedor</option>
-              {proveedores.map((p) => (
-                <option key={p.id} value={p.id}>{p.nombre}</option>
-              ))}
-            </select>
-          </div>
+          {tiene('proveedor') && (
+            <div className="flex flex-col gap-1">
+              <label className="text-sm font-medium text-gray-700">
+                Proveedor <span className="text-gray-400 font-normal">(opcional)</span>
+              </label>
+              <select
+                id="edit-proveedor-cant"
+                value={form.proveedor_id}
+                onChange={(e) => setForm({ ...form, proveedor_id: e.target.value })}
+                className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-sm
+                  focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-700"
+              >
+                <option value="">Sin proveedor</option>
+                {proveedores.map((p) => (
+                  <option key={p.id} value={p.id}>{p.nombre}</option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {error && <p className="text-sm text-red-500">{error}</p>}
 
@@ -205,17 +224,19 @@ export function ModalEditarProductoCantidad({ producto, pinEliminacion, variante
               </Button>
             </div>
 
-            <button
-              type="button"
-              onClick={() => setModalEliminar(true)}
-              className="flex items-center justify-center gap-1.5 w-full py-2 rounded-xl
-                text-xs font-medium text-red-400 hover:text-red-600
-                hover:bg-red-50 transition-colors border border-dashed border-red-200
-                hover:border-red-300"
-            >
-              <Trash2 size={13} />
-              Eliminar producto
-            </button>
+            {esAdmin && (
+              <button
+                type="button"
+                onClick={() => setModalEliminar(true)}
+                className="flex items-center justify-center gap-1.5 w-full py-2 rounded-xl
+                  text-xs font-medium text-red-400 hover:text-red-600
+                  hover:bg-red-50 transition-colors border border-dashed border-red-200
+                  hover:border-red-300"
+              >
+                <Trash2 size={13} />
+                Eliminar producto
+              </button>
+            )}
           </div>
 
         </div>

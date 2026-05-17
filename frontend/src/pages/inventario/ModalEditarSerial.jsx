@@ -1,4 +1,4 @@
-import { useState, useContext }              from 'react';
+import { useState }                           from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Pencil }                            from 'lucide-react';
 import { actualizarSerial }                  from '../../api/productos.api';
@@ -7,7 +7,7 @@ import { Modal }       from '../../components/ui/Modal';
 import { Input }       from '../../components/ui/Input';
 import { InputMoneda } from '../../components/ui/InputMoneda';
 import { Button }      from '../../components/ui/Button';
-import { AuthContext } from '../../context/AuthContext';
+import { useAuth }     from '../../context/useAuth';
 import api             from '../../api/axios.config';
 
 function parsearLista(raw) {
@@ -20,7 +20,9 @@ function parsearLista(raw) {
 }
 
 export function ModalEditarSerial({ serial, precioProducto, productoId, onClose }) {
-  const { esAdminNegocio } = useContext(AuthContext);
+  const { puedeEditarProductos, camposEdicionProductos } = useAuth();
+  const campos = camposEdicionProductos();
+  const tiene  = (c) => campos === null || campos.includes(c);
   const queryClient = useQueryClient();
 
   const [form, setForm] = useState({
@@ -38,7 +40,7 @@ export function ModalEditarSerial({ serial, precioProducto, productoId, onClose 
   const { data: configData } = useQuery({
     queryKey: ['config'],
     queryFn:  () => api.get('/config').then((r) => r.data.data),
-    enabled:  esAdminNegocio(),
+    enabled:  puedeEditarProductos(),
   });
 
   const coloresActivo          = configData?.colores_serial_activo === '1';
@@ -49,7 +51,7 @@ export function ModalEditarSerial({ serial, precioProducto, productoId, onClose 
   const { data: proveedoresData } = useQuery({
     queryKey: ['proveedores'],
     queryFn:  () => getProveedores().then((r) => r.data.data),
-    enabled:  esAdminNegocio(),
+    enabled:  puedeEditarProductos() && tiene('proveedor'),
   });
 
   const proveedores = proveedoresData || [];
@@ -95,7 +97,7 @@ export function ModalEditarSerial({ serial, precioProducto, productoId, onClose 
   const setCaracteristica = (nombre, valor) =>
     setForm((f) => ({ ...f, caracteristicas: { ...f.caracteristicas, [nombre]: valor } }));
 
-  if (!esAdminNegocio()) return null;
+  if (!puedeEditarProductos()) return null;
 
   return (
     <Modal open onClose={onClose} title="Editar serial" size="sm">
@@ -107,72 +109,80 @@ export function ModalEditarSerial({ serial, precioProducto, productoId, onClose 
           </p>
         </div>
 
-        <Input
-          id="edit-imei"
-          label="IMEI / Serial"
-          placeholder="Ej: 356789012345678"
-          value={form.imei}
-          onChange={(e) => setForm({ ...form, imei: e.target.value })}
-          onKeyDown={(e) => handleKeyDown(e, 'edit-precio-serial')}
-          autoFocus
-        />
-
-        <div className="flex flex-col gap-1">
-          <label className="text-sm font-medium text-gray-700">
-            Precio de venta{' '}
-            <span className="text-gray-400 font-normal text-xs">
-              (aplica a todos los seriales del modelo)
-            </span>
-          </label>
-          <InputMoneda
-            id="edit-precio-serial"
-            value={form.precio}
-            onChange={(val) => setForm({ ...form, precio: val })}
-            placeholder="0"
-            onKeyDown={(e) => handleKeyDown(e, 'edit-costo-serial')}
-            className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl
-              text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500
-              transition-all"
+        {tiene('imei') && (
+          <Input
+            id="edit-imei"
+            label="IMEI / Serial"
+            placeholder="Ej: 356789012345678"
+            value={form.imei}
+            onChange={(e) => setForm({ ...form, imei: e.target.value })}
+            onKeyDown={(e) => handleKeyDown(e, 'edit-precio-serial')}
+            autoFocus
           />
-        </div>
+        )}
 
-        <div className="flex flex-col gap-1">
-          <label className="text-sm font-medium text-gray-700">
-            Costo de compra{' '}
-            <span className="text-gray-400 font-normal text-xs">(opcional)</span>
-          </label>
-          <InputMoneda
-            id="edit-costo-serial"
-            value={form.costo_compra}
-            onChange={(val) => setForm({ ...form, costo_compra: val })}
-            placeholder="0"
-            onKeyDown={(e) => handleKeyDown(e, 'edit-proveedor-serial')}
-            className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl
-              text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500
-              transition-all"
-          />
-        </div>
+        {tiene('precio') && (
+          <div className="flex flex-col gap-1">
+            <label className="text-sm font-medium text-gray-700">
+              Precio de venta{' '}
+              <span className="text-gray-400 font-normal text-xs">
+                (aplica a todos los seriales del modelo)
+              </span>
+            </label>
+            <InputMoneda
+              id="edit-precio-serial"
+              value={form.precio}
+              onChange={(val) => setForm({ ...form, precio: val })}
+              placeholder="0"
+              onKeyDown={(e) => handleKeyDown(e, 'edit-costo-serial')}
+              className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl
+                text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500
+                transition-all"
+            />
+          </div>
+        )}
 
-        <div className="flex flex-col gap-1">
-          <label className="text-sm font-medium text-gray-700">
-            Proveedor{' '}
-            <span className="text-gray-400 font-normal">(opcional)</span>
-          </label>
-          <select
-            id="edit-proveedor-serial"
-            value={form.proveedor_id}
-            onChange={(e) => setForm({ ...form, proveedor_id: e.target.value })}
-            className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-sm
-              focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-700"
-          >
-            <option value="">Sin proveedor</option>
-            {proveedores.map((p) => (
-              <option key={p.id} value={p.id}>{p.nombre}</option>
-            ))}
-          </select>
-        </div>
+        {tiene('costo') && (
+          <div className="flex flex-col gap-1">
+            <label className="text-sm font-medium text-gray-700">
+              Costo de compra{' '}
+              <span className="text-gray-400 font-normal text-xs">(opcional)</span>
+            </label>
+            <InputMoneda
+              id="edit-costo-serial"
+              value={form.costo_compra}
+              onChange={(val) => setForm({ ...form, costo_compra: val })}
+              placeholder="0"
+              onKeyDown={(e) => handleKeyDown(e, 'edit-proveedor-serial')}
+              className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl
+                text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500
+                transition-all"
+            />
+          </div>
+        )}
 
-        {coloresActivo && coloresConfig.length > 0 && (
+        {tiene('proveedor') && (
+          <div className="flex flex-col gap-1">
+            <label className="text-sm font-medium text-gray-700">
+              Proveedor{' '}
+              <span className="text-gray-400 font-normal">(opcional)</span>
+            </label>
+            <select
+              id="edit-proveedor-serial"
+              value={form.proveedor_id}
+              onChange={(e) => setForm({ ...form, proveedor_id: e.target.value })}
+              className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-sm
+                focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-700"
+            >
+              <option value="">Sin proveedor</option>
+              {proveedores.map((p) => (
+                <option key={p.id} value={p.id}>{p.nombre}</option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {tiene('color') && coloresActivo && coloresConfig.length > 0 && (
           <div className="flex flex-col gap-1">
             <label className="text-sm font-medium text-gray-700">
               Color{' '}
@@ -193,7 +203,7 @@ export function ModalEditarSerial({ serial, precioProducto, productoId, onClose 
           </div>
         )}
 
-        {caracteristicasActivo && caracteristicasLista.length > 0 && (
+        {tiene('caracteristicas') && caracteristicasActivo && caracteristicasLista.length > 0 && (
           <div className="flex flex-col gap-2">
             <label className="text-sm font-medium text-gray-700">Características</label>
             <div className="flex flex-col gap-2 bg-gray-50 rounded-xl p-3">

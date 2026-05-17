@@ -6,7 +6,7 @@ import { Modal }   from '../../components/ui/Modal';
 import { Button }  from '../../components/ui/Button';
 import { Input }   from '../../components/ui/Input';
 import { Badge }   from '../../components/ui/Badge';
-import { Plus, Pencil, UserX, UserCheck, Users, ShieldCheck, Truck } from 'lucide-react';
+import { Plus, Pencil, UserX, UserCheck, Users, ShieldCheck, Truck, PackageSearch } from 'lucide-react';
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
@@ -34,14 +34,30 @@ const PERMISOS_BASE = {
   vendedor:   ['inventario','facturar','servicios','prestamos'],
 };
 
+const CAMPOS_EDICION = [
+  { key: 'nombre',          label: 'Nombre'        },
+  { key: 'precio',          label: 'Precio'        },
+  { key: 'costo',           label: 'Costo'         },
+  { key: 'stock_minimo',    label: 'Stock mín.'    },
+  { key: 'unidad_medida',   label: 'Unidad medida' },
+  { key: 'linea',           label: 'Línea'         },
+  { key: 'proveedor',       label: 'Proveedor'     },
+  { key: 'imei',            label: 'IMEI/Serial'   },
+  { key: 'color',           label: 'Color'         },
+  { key: 'caracteristicas', label: 'Características' },
+];
+
+const CAMPOS_DEFAULT = CAMPOS_EDICION.map((c) => c.key);
+
 const FORM_INICIAL = {
-  nombre:               '',
-  email:                '',
-  password:             '',
-  rol:                  'vendedor',
-  sucursal_id:          '',
-  modulos_permitidos:   null,
-  permisos_proveedores: null,
+  nombre:                      '',
+  email:                       '',
+  password:                    '',
+  rol:                         'vendedor',
+  sucursal_id:                 '',
+  modulos_permitidos:          null,
+  permisos_proveedores:        null,
+  permisos_edicion_productos:  null,
 };
 
 // ─── Queries ──────────────────────────────────────────────────────────────────
@@ -195,6 +211,90 @@ function SelectorPermisosProveedores({ permisos, onChange, proveedores = [] }) {
   );
 }
 
+// ─── SelectorPermisosEdicionProductos ────────────────────────────────────────
+
+function SelectorPermisosEdicionProductos({ permisos, onChange }) {
+  const puedeEditar = permisos?.puede_editar ?? false;
+  const campos      = permisos?.campos ?? CAMPOS_DEFAULT;
+
+  const update = (partial) => {
+    const base = permisos || { puede_editar: false, campos: CAMPOS_DEFAULT };
+    onChange({ ...base, ...partial });
+  };
+
+  const toggleCampo = (key) => {
+    const siguiente = campos.includes(key)
+      ? campos.filter((c) => c !== key)
+      : [...campos, key];
+    update({ campos: siguiente });
+  };
+
+  return (
+    <div className="flex flex-col gap-3 bg-purple-50 border border-purple-100 rounded-xl p-3.5">
+      <div className="flex items-center gap-2">
+        <PackageSearch size={13} className="text-purple-500 flex-shrink-0" />
+        <p className="text-xs font-semibold text-purple-700 uppercase tracking-wide">
+          Permisos de edición de productos
+        </p>
+      </div>
+
+      <label className="flex items-center gap-2.5 cursor-pointer select-none">
+        <CheckboxCustom
+          checked={puedeEditar}
+          onChange={() => {
+            if (!puedeEditar) {
+              onChange({ puede_editar: true, campos: CAMPOS_DEFAULT });
+            } else {
+              onChange(null);
+            }
+          }}
+          color="indigo"
+        />
+        <span className="text-sm text-gray-700">Puede editar productos</span>
+      </label>
+
+      {puedeEditar && (
+        <div className="ml-6 flex flex-col gap-2">
+          <p className="text-xs text-gray-500">Campos que puede editar:</p>
+          <div className="grid grid-cols-2 gap-1.5">
+            {CAMPOS_EDICION.map(({ key, label }) => {
+              const activo = campos.includes(key);
+              return (
+                <label
+                  key={key}
+                  className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg border
+                    cursor-pointer select-none text-xs transition-colors
+                    ${activo
+                      ? 'bg-purple-100 border-purple-300 text-purple-800'
+                      : 'bg-white border-gray-200 text-gray-400 hover:border-gray-300'}`}
+                >
+                  <CheckboxCustom
+                    checked={activo}
+                    onChange={() => toggleCampo(key)}
+                    color="indigo"
+                  />
+                  {label}
+                </label>
+              );
+            })}
+          </div>
+          {campos.length === 0 && (
+            <p className="text-xs text-orange-500 bg-orange-50 rounded-lg px-3 py-1.5 border border-orange-100">
+              Sin campos seleccionados — el modal se abrirá vacío.
+            </p>
+          )}
+        </div>
+      )}
+
+      {!puedeEditar && (
+        <p className="text-xs text-gray-400 bg-white rounded-lg px-3 py-1.5 border border-gray-100">
+          Sin permiso — no podrá editar productos del inventario.
+        </p>
+      )}
+    </div>
+  );
+}
+
 // ─── SelectorModulos ──────────────────────────────────────────────────────────
 
 function SelectorModulos({ rol, modulosPermitidos, onChange }) {
@@ -306,8 +406,10 @@ function FilaUsuario({ usuario, onEditar, onToggleActivo }) {
     ? null
     : (usuario.modulos_permitidos ?? PERMISOS_BASE[usuario.rol] ?? []);
 
-  const pp = usuario.permisos_proveedores;
-  const tienePermProv = !esAdmin && pp && (pp.ver || pp.crear);
+  const pp  = usuario.permisos_proveedores;
+  const pep = usuario.permisos_edicion_productos;
+  const tienePermProv   = !esAdmin && pp  && (pp.ver || pp.crear);
+  const tienePermEditar = !esAdmin && pep && pep.puede_editar;
 
   return (
     <div className={`flex items-center gap-3 p-3 rounded-xl border transition-all
@@ -343,6 +445,12 @@ function FilaUsuario({ usuario, onEditar, onToggleActivo }) {
               {pp.ver && pp.crear ? 'Ver+crear prov.' : pp.crear ? 'Crear prov.' : 'Ver prov.'}
             </span>
           )}
+          {tienePermEditar && (
+            <span className="text-xs text-purple-600 flex items-center gap-1">
+              <PackageSearch size={10} />
+              Edita productos ({pep.campos?.length ?? 0} campos)
+            </span>
+          )}
         </div>
       </div>
       <div className="flex gap-1 flex-shrink-0">
@@ -373,13 +481,14 @@ function ModalUsuario({ open, onClose, editando, sucursales, onGuardar, cargando
   const [form, setForm] = useState(() =>
     editando
       ? {
-          nombre:               editando.nombre      || '',
-          email:                editando.email       || '',
-          password:             '',
-          rol:                  editando.rol         || 'vendedor',
-          sucursal_id:          editando.sucursal_id ?? '',
-          modulos_permitidos:   editando.modulos_permitidos   ?? null,
-          permisos_proveedores: editando.permisos_proveedores ?? null,
+          nombre:                      editando.nombre      || '',
+          email:                       editando.email       || '',
+          password:                    '',
+          rol:                         editando.rol         || 'vendedor',
+          sucursal_id:                 editando.sucursal_id ?? '',
+          modulos_permitidos:          editando.modulos_permitidos          ?? null,
+          permisos_proveedores:        editando.permisos_proveedores        ?? null,
+          permisos_edicion_productos:  editando.permisos_edicion_productos  ?? null,
         }
       : FORM_INICIAL
   );
@@ -392,9 +501,10 @@ function ModalUsuario({ open, onClose, editando, sucursales, onGuardar, cargando
   const modulosEfectivos = form.rol === 'admin_negocio'
     ? null
     : (form.modulos_permitidos ?? PERMISOS_BASE[form.rol] ?? []);
-  const tieneModuloProveedores = modulosEfectivos === null
-    || modulosEfectivos.includes('proveedores');
-  const mostrarPermProv = form.rol !== 'admin_negocio' && tieneModuloProveedores;
+  const tieneModuloProveedores  = modulosEfectivos === null || modulosEfectivos.includes('proveedores');
+  const tieneModuloInventario   = modulosEfectivos === null || modulosEfectivos.includes('inventario');
+  const mostrarPermProv   = form.rol !== 'admin_negocio' && tieneModuloProveedores;
+  const mostrarPermEditar = form.rol !== 'admin_negocio' && tieneModuloInventario;
 
   // Lista de proveedores para el selector "ver solo algunos"
   const { data: proveedoresLista = [] } = useQuery({
@@ -414,18 +524,23 @@ function ModalUsuario({ open, onClose, editando, sucursales, onGuardar, cargando
     }));
   };
 
-  // Cuando el módulo de proveedores se desactiva: limpiar permisos
+  // Cuando se desactiva un módulo: limpiar sus permisos asociados
   const handleModulosChange = (modulos) => {
     const tieneProveedores = modulos === null || modulos.includes('proveedores');
+    const tieneInv         = modulos === null || modulos.includes('inventario');
     set('modulos_permitidos', modulos);
     if (!tieneProveedores) set('permisos_proveedores', null);
+    if (!tieneInv)         set('permisos_edicion_productos', null);
   };
 
   const handleGuardar = () => {
     const payload = { ...form };
     if (!payload.password) delete payload.password;
     if (!requiereSucursal) payload.sucursal_id = null;
-    if (payload.rol === 'admin_negocio') payload.permisos_proveedores = null;
+    if (payload.rol === 'admin_negocio') {
+      payload.permisos_proveedores       = null;
+      payload.permisos_edicion_productos = null;
+    }
     onGuardar(payload);
   };
 
@@ -513,6 +628,14 @@ function ModalUsuario({ open, onClose, editando, sucursales, onGuardar, cargando
           />
         )}
 
+        {/* Permisos de edición de productos (solo si el módulo inventario está activo) */}
+        {mostrarPermEditar && (
+          <SelectorPermisosEdicionProductos
+            permisos={form.permisos_edicion_productos}
+            onChange={(p) => set('permisos_edicion_productos', p)}
+          />
+        )}
+
         {error && (
           <div className="bg-red-50 border border-red-100 rounded-xl px-3 py-2">
             <p className="text-sm text-red-600">{error}</p>
@@ -558,13 +681,14 @@ export function UsuariosConfig() {
 
   const mutToggleActivo = useMutation({
     mutationFn: (usuario) => api.put(`/usuarios/${usuario.id}`, {
-      nombre:               usuario.nombre,
-      email:                usuario.email,
-      rol:                  usuario.rol,
-      sucursal_id:          usuario.sucursal_id,
-      modulos_permitidos:   usuario.modulos_permitidos,
-      permisos_proveedores: usuario.permisos_proveedores,
-      activo:               !usuario.activo,
+      nombre:                      usuario.nombre,
+      email:                       usuario.email,
+      rol:                         usuario.rol,
+      sucursal_id:                 usuario.sucursal_id,
+      modulos_permitidos:          usuario.modulos_permitidos,
+      permisos_proveedores:        usuario.permisos_proveedores,
+      permisos_edicion_productos:  usuario.permisos_edicion_productos,
+      activo:                      !usuario.activo,
     }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['usuarios'] }),
   });
