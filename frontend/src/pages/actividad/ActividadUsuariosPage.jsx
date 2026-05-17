@@ -45,10 +45,11 @@ const LIMIT = 30;
 
 function FilaDetalle({ icono, label, value, mono }) {
   if (value === null || value === undefined || value === '' || value === '—') return null;
+  const Icn = icono;
   return (
     <div className="flex items-start gap-3 py-2.5 border-b border-gray-50 last:border-0">
       <div className="w-7 h-7 bg-gray-100 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
-        {icono({ size: 13, className: 'text-gray-400' })}
+        <Icn size={13} className="text-gray-400" />
       </div>
       <div className="flex-1 min-w-0">
         <p className="text-xs text-gray-400 leading-none mb-0.5">{label}</p>
