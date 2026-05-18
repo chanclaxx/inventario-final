@@ -260,7 +260,7 @@ const findComprasCliente = async (negocioId, q) => {
       'retoma' AS tipo, r.id, r.imei,
       f.nombre_cliente, f.cedula AS cedula_cliente, f.cliente_id,
       r.nombre_producto, NULL AS marca, NULL AS modelo,
-      f.fecha, r.valor_retoma AS valor,
+      r.fecha, r.valor_retoma AS valor,
       su.nombre AS sucursal_nombre, f.id AS factura_id
     FROM retomas r
     JOIN facturas   f  ON f.id  = r.factura_id
@@ -272,7 +272,7 @@ const findComprasCliente = async (negocioId, q) => {
         OR ${sn('r.nombre_producto')}      LIKE $2 ESCAPE '\\'
         OR LOWER(COALESCE(r.imei, ''))     LIKE $2 ESCAPE '\\'
       )
-    ORDER BY f.fecha DESC
+    ORDER BY r.fecha DESC
   `, [negocioId, filtro]);
 
   return { seriales, retomas };

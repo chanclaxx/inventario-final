@@ -495,7 +495,7 @@ const findRetomasDirectasPorPersona = async (executor, tipo, personaId, negocioI
     SELECT
       r.id, r.nombre_producto, r.imei, r.valor_retoma,
       r.cantidad_retoma, r.tipo_retoma, r.ingreso_inventario,
-      r.color, r.descripcion,
+      r.color, r.descripcion, r.fecha,
       r.producto_serial_id, r.producto_cantidad_id,
       r.sucursal_id,
       su.nombre AS sucursal_nombre

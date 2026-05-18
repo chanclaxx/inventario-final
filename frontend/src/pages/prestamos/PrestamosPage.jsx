@@ -1600,6 +1600,7 @@ function VistaDetallePersona({ nombre, tipo, personaId, prestamos, saldoAFavor =
                         <p className="text-sm font-medium text-gray-800 truncate">{r.nombre_producto}</p>
                         {r.imei && <p className="text-xs text-gray-400 font-mono">IMEI: {r.imei}</p>}
                         {r.color && <p className="text-xs text-gray-400">Color: {r.color}</p>}
+                        {r.fecha && <p className="text-xs text-gray-400">{formatFechaHora(r.fecha)}</p>}
                         <p className="text-xs text-purple-600 mt-0.5">
                           {formatCOP(r.valor_retoma)}
                           {r.ingreso_inventario ? ' · en inventario' : ' · sin inventario'}
