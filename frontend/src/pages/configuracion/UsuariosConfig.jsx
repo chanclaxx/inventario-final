@@ -6,7 +6,7 @@ import { Modal }   from '../../components/ui/Modal';
 import { Button }  from '../../components/ui/Button';
 import { Input }   from '../../components/ui/Input';
 import { Badge }   from '../../components/ui/Badge';
-import { Plus, Pencil, UserX, UserCheck, Users, ShieldCheck, Truck, PackageSearch } from 'lucide-react';
+import { Plus, Pencil, UserX, UserCheck, Users, ShieldCheck, Truck, PackageSearch, FileDown } from 'lucide-react';
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
@@ -214,11 +214,12 @@ function SelectorPermisosProveedores({ permisos, onChange, proveedores = [] }) {
 // ─── SelectorPermisosEdicionProductos ────────────────────────────────────────
 
 function SelectorPermisosEdicionProductos({ permisos, onChange }) {
-  const puedeEditar = permisos?.puede_editar ?? false;
-  const campos      = permisos?.campos ?? CAMPOS_DEFAULT;
+  const puedeEditar   = permisos?.puede_editar   ?? false;
+  const puedeExportar = permisos?.puede_exportar ?? false;
+  const campos        = permisos?.campos ?? CAMPOS_DEFAULT;
 
   const update = (partial) => {
-    const base = permisos || { puede_editar: false, campos: CAMPOS_DEFAULT };
+    const base = permisos || { puede_editar: false, puede_exportar: false, campos: CAMPOS_DEFAULT };
     onChange({ ...base, ...partial });
   };
 
@@ -289,6 +290,22 @@ function SelectorPermisosEdicionProductos({ permisos, onChange }) {
       {!puedeEditar && (
         <p className="text-xs text-gray-400 bg-white rounded-lg px-3 py-1.5 border border-gray-100">
           Sin permiso — no podrá editar productos del inventario.
+        </p>
+      )}
+
+      {/* Exportar inventario — independiente de puede_editar */}
+      <label className="flex items-center gap-2.5 cursor-pointer select-none">
+        <CheckboxCustom
+          checked={puedeExportar}
+          onChange={() => update({ puede_exportar: !puedeExportar })}
+          color="indigo"
+        />
+        <span className="text-sm text-gray-700">Puede exportar inventario (Excel)</span>
+      </label>
+
+      {!puedeEditar && !puedeExportar && (
+        <p className="text-xs text-gray-400 bg-white rounded-lg px-3 py-1.5 border border-gray-100">
+          Sin permisos de inventario — no podrá editar ni exportar.
         </p>
       )}
     </div>
@@ -408,8 +425,9 @@ function FilaUsuario({ usuario, onEditar, onToggleActivo }) {
 
   const pp  = usuario.permisos_proveedores;
   const pep = usuario.permisos_edicion_productos;
-  const tienePermProv   = !esAdmin && pp  && (pp.ver || pp.crear);
-  const tienePermEditar = !esAdmin && pep && pep.puede_editar;
+  const tienePermProv     = !esAdmin && pp  && (pp.ver || pp.crear);
+  const tienePermEditar   = !esAdmin && pep && pep.puede_editar;
+  const tienePermExportar = !esAdmin && pep?.puede_exportar === true;
 
   return (
     <div className={`flex items-center gap-3 p-3 rounded-xl border transition-all
@@ -449,6 +467,12 @@ function FilaUsuario({ usuario, onEditar, onToggleActivo }) {
             <span className="text-xs text-purple-600 flex items-center gap-1">
               <PackageSearch size={10} />
               Edita productos ({pep.campos?.length ?? 0} campos)
+            </span>
+          )}
+          {tienePermExportar && (
+            <span className="text-xs text-emerald-600 flex items-center gap-1">
+              <FileDown size={10} />
+              Exporta inventario
             </span>
           )}
         </div>

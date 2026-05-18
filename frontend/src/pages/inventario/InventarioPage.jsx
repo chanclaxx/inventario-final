@@ -35,7 +35,7 @@ export default function InventarioPage() {
   const [carritoAbierto, setCarritoAbierto] = useState(false);
   const [modalImportar,  setModalImportar]  = useState(false);
 
-  const { esSupervisor } = useAuth();
+  const { puedeExportarInventario } = useAuth();
 
   const { items, totalCarrito } = useCarritoStore();
   const totalItems = items.length;
@@ -45,7 +45,7 @@ export default function InventarioPage() {
   const esUnicaSucursal = useSucursalStore((s) => s.esUnicaSucursal());
 
   const bloquearCreacion = esVistaGlobal && !esUnicaSucursal;
-  const puedeExportar    = esSupervisor();
+  const puedeExportar    = puedeExportarInventario();
 
   const handleExportar = async () => {
     setExportando(true);

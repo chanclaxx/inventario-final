@@ -72,6 +72,11 @@ export function AuthProvider({ children }) {
     return usuario?.permisos_edicion_productos?.campos ?? [];
   };
 
+  const puedeExportarInventario = () => {
+    if (usuario?.rol === 'admin_negocio') return true;
+    return usuario?.permisos_edicion_productos?.puede_exportar === true;
+  };
+
   return (
     <AuthContext.Provider value={{
       usuario,
@@ -82,6 +87,7 @@ export function AuthProvider({ children }) {
       esVendedor,
       puedeEditarProductos,
       camposEdicionProductos,
+      puedeExportarInventario,
     }}>
       {children}
     </AuthContext.Provider>
