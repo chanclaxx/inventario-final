@@ -690,7 +690,7 @@ const retomaDirecta = async (negocioId, {
   try {
     await client.query('BEGIN');
 
-    // 1. Resolver nombre del producto
+    // 1. Resolver nombre del producto y de la persona
     let nombreProducto = descripcion || 'Producto retomado';
     if (tipo_retoma === 'serial' && producto_serial_id) {
       const { rows } = await client.query(
@@ -703,6 +703,12 @@ const retomaDirecta = async (negocioId, {
       );
       nombreProducto = rows[0]?.nombre || nombreProducto;
     }
+
+    const tabla = tipo === 'prestatario' ? 'prestatarios' : 'clientes';
+    const { rows: personaRows } = await client.query(
+      `SELECT nombre FROM ${tabla} WHERE id = $1`, [persona_id]
+    );
+    const nombrePersona = personaRows[0]?.nombre || null;
 
     // 2. Ingresar al inventario si corresponde
     let retomaIngresoReal = false;
@@ -718,7 +724,7 @@ const retomaDirecta = async (negocioId, {
           imei:           imei_retoma.trim(),
           costo_compra:   Number(valor_retoma),
           color:          color_retoma || null,
-          cliente_origen: null,
+          cliente_origen: nombrePersona,
         });
         retomaIngresoReal = true;
       } else if (tipo_retoma === 'cantidad' && producto_cantidad_id) {
@@ -733,7 +739,7 @@ const retomaDirecta = async (negocioId, {
           sucursal_id,
           cantidad:       Number(cantidad_retoma || 1),
           costo_unitario: Number(valor_retoma) || null,
-          cliente_origen: null,
+          cliente_origen: nombrePersona,
           tipo:           'retoma',
         });
         retomaIngresoReal = true;
