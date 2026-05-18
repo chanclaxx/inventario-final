@@ -266,6 +266,8 @@ const revertirTraslado = async (negocioId, trasladoId, usuarioId) => {
     await client.query('BEGIN');
 
     for (const linea of lineasData) {
+      if (linea.revertida) continue;
+
       if (linea.tipo === 'serial') {
         // Verificar que el serial sigue en la sucursal destino y está disponible
         const { rows } = await client.query(`
@@ -280,13 +282,11 @@ const revertirTraslado = async (negocioId, trasladoId, usuarioId) => {
         if (rows[0].vendido) throw { status: 400, message: `El serial ${linea.imei} fue vendido, no se puede revertir` };
         if (rows[0].prestado) throw { status: 400, message: `El serial ${linea.imei} está prestado, no se puede revertir` };
 
-        // Mover serial de vuelta al producto origen
         await repo.moverSerial(client, linea.serial_id, linea.producto_serial_origen_id);
 
       } else if (linea.tipo === 'cantidad') {
         const cant = Number(linea.cantidad);
 
-        // Verificar stock suficiente en destino para devolver
         const { rows: destRows } = await client.query(`
           SELECT id, stock, costo_unitario FROM productos_cantidad
           WHERE id = $1 FOR UPDATE
@@ -297,12 +297,9 @@ const revertirTraslado = async (negocioId, trasladoId, usuarioId) => {
           throw { status: 400, message: `Stock insuficiente en destino para revertir "${linea.nombre_producto}". Disponible: ${destRows[0].stock}, necesario: ${cant}` };
         }
 
-        // Restar del destino
         await repo.ajustarStockEnTransaccion(client, linea.producto_cantidad_destino_id, -cant);
-        // Sumar al origen
         await repo.ajustarStockEnTransaccion(client, linea.producto_cantidad_origen_id, cant);
 
-        // Historial
         await repo.insertarHistorialEnTransaccion(client, {
           producto_id:    linea.producto_cantidad_destino_id,
           sucursal_id:    traslado.sucursal_destino_id,
@@ -318,13 +315,11 @@ const revertirTraslado = async (negocioId, trasladoId, usuarioId) => {
           notas:          `Reversión traslado #${trasladoId}`,
         });
       }
+
+      await repo.marcarLineaRevertida(client, linea.id, usuarioId);
     }
 
-    // Marcar traslado como cancelado
-    await client.query(
-      `UPDATE traslados SET estado = 'Cancelado' WHERE id = $1`,
-      [trasladoId]
-    );
+    await repo.marcarTrasladoCancelado(client, trasladoId, usuarioId);
 
     await client.query('COMMIT');
     return { ...traslado, estado: 'Cancelado' };
@@ -401,19 +396,15 @@ const revertirLineaTraslado = async (negocioId, trasladoId, lineaId, usuarioId) 
       });
     }
  
-    // Marcar la línea como revertida
-    await client.query(
-      `UPDATE lineas_traslado SET revertida = true WHERE id = $1`,
-      [lineaId]
-    );
- 
+    await repo.marcarLineaRevertida(client, lineaId, usuarioId);
+
     // Si todas las líneas quedan revertidas, marcar el traslado como Cancelado
     const { rows: pendientes } = await client.query(
       `SELECT COUNT(*) AS total FROM lineas_traslado WHERE traslado_id = $1 AND revertida = false`,
       [trasladoId]
     );
     if (Number(pendientes[0].total) === 0) {
-      await client.query(`UPDATE traslados SET estado = 'Cancelado' WHERE id = $1`, [trasladoId]);
+      await repo.marcarTrasladoCancelado(client, trasladoId, usuarioId);
     }
  
     await client.query('COMMIT');

@@ -308,13 +308,15 @@ const findAll = async (negocioId, limit = 50) => {
 const findById = async (negocioId, id) => {
   const { rows } = await pool.query(`
     SELECT t.*,
-           so.nombre AS sucursal_origen_nombre,
-           sd.nombre AS sucursal_destino_nombre,
-           u.nombre  AS usuario_nombre
+           so.nombre   AS sucursal_origen_nombre,
+           sd.nombre   AS sucursal_destino_nombre,
+           u.nombre    AS usuario_nombre,
+           u_rev.nombre AS revertido_por_nombre
     FROM traslados t
     JOIN sucursales so ON so.id = t.sucursal_origen_id
     JOIN sucursales sd ON sd.id = t.sucursal_destino_id
-    LEFT JOIN usuarios u ON u.id = t.usuario_id
+    LEFT JOIN usuarios u     ON u.id     = t.usuario_id
+    LEFT JOIN usuarios u_rev ON u_rev.id = t.revertido_por_usuario_id
     WHERE t.id = $1 AND t.negocio_id = $2
   `, [id, negocioId]);
   return rows[0] || null;
@@ -327,14 +329,34 @@ const getLineas = async (trasladoId) => {
       ps_dest.nombre  AS nombre_producto_destino,
       ps_dest.marca   AS marca_destino,
       ps_dest.modelo  AS modelo_destino,
-      pc_dest.nombre  AS nombre_cantidad_destino
+      pc_dest.nombre  AS nombre_cantidad_destino,
+      u_rev.nombre    AS revertida_por_nombre
     FROM lineas_traslado lt
     LEFT JOIN productos_serial   ps_dest ON ps_dest.id = lt.producto_serial_destino_id
     LEFT JOIN productos_cantidad pc_dest ON pc_dest.id = lt.producto_cantidad_destino_id
+    LEFT JOIN usuarios           u_rev   ON u_rev.id   = lt.revertida_por_usuario_id
     WHERE lt.traslado_id = $1
     ORDER BY lt.id
   `, [trasladoId]);
   return rows;
+};
+
+const marcarLineaRevertida = async (client, lineaId, usuarioId) => {
+  await client.query(
+    `UPDATE lineas_traslado
+     SET revertida = true, revertida_por_usuario_id = $2, fecha_reversion = NOW()
+     WHERE id = $1`,
+    [lineaId, usuarioId]
+  );
+};
+
+const marcarTrasladoCancelado = async (client, trasladoId, usuarioId) => {
+  await client.query(
+    `UPDATE traslados
+     SET estado = 'Cancelado', revertido_por_usuario_id = $2, fecha_reversion = NOW()
+     WHERE id = $1`,
+    [trasladoId, usuarioId]
+  );
 };
 
 module.exports = {
@@ -343,4 +365,5 @@ module.exports = {
   crearTraslado, insertarLineaTraslado,
   moverSerial, ajustarStockEnTransaccion, insertarHistorialEnTransaccion,
   findAll, findById, getLineas,
+  marcarLineaRevertida, marcarTrasladoCancelado,
 };

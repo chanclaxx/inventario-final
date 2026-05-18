@@ -156,6 +156,16 @@ function TarjetaLinea({ linea, esCancelado, onRevertir }) {
             <Badge variant="red">Revertido</Badge>
           )}
         </div>
+        {revertida && (linea.revertida_por_nombre || linea.fecha_reversion) && (
+          <div className="flex items-center gap-1.5 mt-1">
+            <RotateCcw size={10} className="text-red-300 flex-shrink-0" />
+            <span className="text-xs text-red-400">
+              {linea.revertida_por_nombre && `por ${linea.revertida_por_nombre}`}
+              {linea.revertida_por_nombre && linea.fecha_reversion && ' · '}
+              {linea.fecha_reversion && formatFechaHora(linea.fecha_reversion)}
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Acción */}
@@ -240,6 +250,16 @@ function DetalleTraslado({ trasladoId, onVolver }) {
             <p className="text-sm text-gray-400 mt-1">{formatFechaHora(detalle.fecha)}</p>
             {detalle.usuario_nombre && (
               <p className="text-xs text-gray-400 mt-0.5">Por: {detalle.usuario_nombre}</p>
+            )}
+            {esCancelado && (detalle.revertido_por_nombre || detalle.fecha_reversion) && (
+              <div className="flex items-center gap-1.5 mt-1.5 bg-red-50 border border-red-100 rounded-lg px-2.5 py-1.5 w-fit">
+                <RotateCcw size={11} className="text-red-400 flex-shrink-0" />
+                <span className="text-xs text-red-500">
+                  Revertido
+                  {detalle.revertido_por_nombre && ` por ${detalle.revertido_por_nombre}`}
+                  {detalle.fecha_reversion && ` · ${formatFechaHora(detalle.fecha_reversion)}`}
+                </span>
+              </div>
             )}
           </div>
           {/* Revertir todo solo si hay líneas activas */}
