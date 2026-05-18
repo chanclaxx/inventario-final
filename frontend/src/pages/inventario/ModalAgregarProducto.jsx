@@ -17,14 +17,16 @@ import {
   getProductosCantidad, crearProductoCantidad, ajustarStockCantidad,
   verificarImei as verificarImeiApi,
 } from '../../api/productos.api';
+import { retomaDirecta as retomaDirectaApi } from '../../api/prestamos.api';
+import { getPrestatarios } from '../../api/prestatarios.api';
 import api from '../../api/axios.config';
 import { getLineas } from '../../api/lineas.api';
 import { getArbol, ajustarStockAtributo, ajustarStockVariante } from '../../api/variantesProductoApi';
-import { fechaHoyBogota } from '../../utils/formatters';
+import { fechaHoyBogota, formatCOP } from '../../utils/formatters';
 import {
   Package, ShoppingBag, ChevronRight, ChevronLeft, ChevronDown, Trash2,
   ShoppingCart, CreditCard, Banknote, Layers,
-  AlertTriangle, RefreshCw, X, User, Search, CheckCircle,
+  AlertTriangle, RefreshCw, X, User, Search, CheckCircle, ArrowLeftRight,
 } from 'lucide-react';
 
 // ─── Utilidad: normalizar respuesta de productos a array ──────────────────────
@@ -535,6 +537,14 @@ function PasoTipo({ onSelect }) {
         <div className="text-left">
           <p className="text-sm font-medium text-gray-700">Compra a cliente</p>
           <p className="text-xs text-gray-400">Producto que un cliente vende al negocio</p>
+        </div>
+      </button>
+      <button onClick={() => onSelect('prestatario')}
+        className="w-full flex items-center gap-3 p-4 bg-gray-50 border border-gray-200 rounded-2xl hover:bg-purple-50 hover:border-purple-300 transition-all">
+        <ArrowLeftRight size={24} className="text-purple-600 flex-shrink-0" />
+        <div className="text-left">
+          <p className="text-sm font-medium text-gray-700">Retoma / Compra a prestatario</p>
+          <p className="text-xs text-gray-400">Genera saldo a favor en la cuenta del prestatario</p>
         </div>
       </button>
     </div>
@@ -1938,6 +1948,354 @@ function PasoCantidad({ sucursalKey, onExito, variantesActivo }) {
   );
 }
 
+// ─── Buscador de prestatario ──────────────────────────────────────────────────
+function BuscadorPrestatario({ prestatarioSeleccionado, onSeleccionar }) {
+  const [busqueda, setBusqueda] = useState('');
+
+  const { data: rawPrestatarios } = useQuery({
+    queryKey: ['prestatarios'],
+    queryFn:  () => getPrestatarios().then((r) => r.data.data),
+  });
+  const prestatarios = normalizarProductos(rawPrestatarios);
+  const filtrados    = prestatarios.filter((p) =>
+    (p.nombre ?? '').toLowerCase().includes(busqueda.toLowerCase())
+  );
+
+  if (prestatarioSeleccionado) {
+    return (
+      <div className="flex items-center justify-between bg-purple-50 border border-purple-200 rounded-xl px-3 py-2.5">
+        <div className="flex items-center gap-2">
+          <div className="w-7 h-7 rounded-full bg-purple-100 flex items-center justify-center flex-shrink-0">
+            <User size={13} className="text-purple-600" />
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-purple-800">{prestatarioSeleccionado.nombre}</p>
+            {prestatarioSeleccionado.cedula && (
+              <p className="text-xs text-purple-500">CC {prestatarioSeleccionado.cedula}</p>
+            )}
+          </div>
+        </div>
+        <button onClick={() => onSeleccionar(null)} className="text-xs text-purple-400 hover:text-purple-600 underline flex-shrink-0">
+          Cambiar
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      <p className="text-sm font-medium text-gray-700">Seleccionar prestatario</p>
+      <div className="relative">
+        <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+        <input
+          type="text"
+          placeholder="Buscar por nombre..."
+          value={busqueda}
+          onChange={(e) => setBusqueda(e.target.value)}
+          className="w-full pl-8 pr-3 py-2 bg-white border border-gray-200 rounded-xl text-sm
+            focus:outline-none focus:ring-2 focus:ring-purple-400 transition-all"
+          autoFocus
+        />
+      </div>
+      {busqueda.trim().length >= 2 && (
+        <div className="flex flex-col gap-1 max-h-36 overflow-y-auto rounded-xl border border-gray-100 bg-white">
+          {filtrados.length === 0
+            ? <p className="text-xs text-gray-400 px-3 py-2">Sin resultados para "{busqueda}"</p>
+            : filtrados.map((p) => (
+                <button key={p.id}
+                  onClick={() => { onSeleccionar(p); setBusqueda(''); }}
+                  className="text-left px-3 py-2.5 text-sm hover:bg-purple-50 transition-all flex items-center justify-between gap-2">
+                  <span className="font-medium text-gray-800">{p.nombre}</span>
+                  {p.cedula && <span className="text-xs text-gray-400 flex-shrink-0">CC {p.cedula}</span>}
+                </button>
+              ))
+          }
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Paso Retoma / Compra a prestatario ───────────────────────────────────────
+function PasoRetomaPrestatario({ sucursalKey, onExito }) {
+  const queryClient = useQueryClient();
+
+  const { data: configData } = useQuery({
+    queryKey: ['config'],
+    queryFn:  () => api.get('/config').then((r) => r.data.data),
+  });
+  const coloresActivo = configData?.colores_serial_activo === '1';
+  const coloresLista  = (() => {
+    try { return JSON.parse(configData?.colores_serial_lista || '[]'); } catch { return []; }
+  })();
+
+  const sucursalId = typeof sucursalKey[1] === 'number' ? sucursalKey[1] : undefined;
+
+  const [prestatario,         setPrestatario]         = useState(null);
+  const [tipoRetoma,          setTipoRetoma]          = useState('serial');
+  const [imeiRetoma,          setImeiRetoma]          = useState('');
+  const [busquedaSerial,      setBusquedaSerial]      = useState('');
+  const [productoSerialSel,   setProductoSerialSel]   = useState(null);
+  const [colorRetoma,         setColorRetoma]         = useState('');
+  const [busquedaCantidad,    setBusquedaCantidad]    = useState('');
+  const [productoCantidadSel, setProductoCantidadSel] = useState(null);
+  const [cantidadRetoma,      setCantidadRetoma]      = useState('1');
+  const [valorRetoma,         setValorRetoma]         = useState('');
+  const [ingresoInventario,   setIngresoInventario]   = useState(true);
+  const [error,               setError]               = useState('');
+
+  const { data: rawSerial   } = useQuery({
+    queryKey: ['productos-serial', ...sucursalKey],
+    queryFn:  () => getProductosSerial().then((r) => r.data.data),
+  });
+  const { data: rawCantidad } = useQuery({
+    queryKey: ['productos-cantidad', ...sucursalKey],
+    queryFn:  () => getProductosCantidad().then((r) => r.data.data),
+  });
+
+  const productosSerial   = normalizarProductos(rawSerial);
+  const productosCantidad = normalizarProductos(rawCantidad);
+
+  const filtradosSerial   = productosSerial.filter((p) =>
+    (p.nombre ?? '').toLowerCase().includes(busquedaSerial.toLowerCase())
+  );
+  const filtradosCantidad = productosCantidad.filter((p) =>
+    (p.nombre ?? '').toLowerCase().includes(busquedaCantidad.toLowerCase())
+  );
+
+  const resetCamposProducto = () => {
+    setImeiRetoma(''); setBusquedaSerial(''); setProductoSerialSel(null); setColorRetoma('');
+    setBusquedaCantidad(''); setProductoCantidadSel(null); setCantidadRetoma('1');
+  };
+
+  const retoma = Number(valorRetoma) || 0;
+
+  const mutation = useMutation({
+    mutationFn: () => retomaDirectaApi({
+      tipo:                 'prestatario',
+      persona_id:           prestatario.id,
+      sucursal_id:          sucursalId,
+      tipo_retoma:          tipoRetoma,
+      imei_retoma:          tipoRetoma === 'serial'   ? (imeiRetoma.trim() || null)    : null,
+      producto_serial_id:   tipoRetoma === 'serial'   ? (productoSerialSel?.id || null) : null,
+      color_retoma:         tipoRetoma === 'serial'   ? (colorRetoma.trim() || null)    : null,
+      producto_cantidad_id: tipoRetoma === 'cantidad' ? (productoCantidadSel?.id || null) : null,
+      cantidad_retoma:      tipoRetoma === 'cantidad' ? Number(cantidadRetoma || 1) : 1,
+      valor_retoma:         retoma,
+      ingreso_inventario:   ingresoInventario,
+    }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['prestamos'],          exact: false });
+      queryClient.invalidateQueries({ queryKey: ['inventario'],         exact: false });
+      queryClient.invalidateQueries({ queryKey: ['productos-serial'],   exact: false });
+      queryClient.invalidateQueries({ queryKey: ['productos-cantidad'], exact: false });
+      onExito();
+    },
+    onError: (err) => setError(err.response?.data?.error || 'Error al registrar la compra'),
+  });
+
+  const handleConfirmar = () => {
+    setError('');
+    if (!prestatario)            return setError('Selecciona un prestatario');
+    if (!retoma || retoma <= 0)  return setError('Ingresa el valor del artículo');
+    if (ingresoInventario) {
+      if (tipoRetoma === 'serial' && !productoSerialSel)
+        return setError('Selecciona la línea de producto del artículo');
+      if (tipoRetoma === 'serial' && !imeiRetoma.trim())
+        return setError('Ingresa el IMEI del artículo');
+      if (tipoRetoma === 'cantidad' && !productoCantidadSel)
+        return setError('Selecciona el artículo');
+    }
+    mutation.mutate();
+  };
+
+  return (
+    <div className="flex flex-col gap-4">
+
+      {/* Selector de prestatario */}
+      <BuscadorPrestatario
+        prestatarioSeleccionado={prestatario}
+        onSeleccionar={setPrestatario}
+      />
+
+      {prestatario && (
+        <>
+          {/* Nota */}
+          <div className="bg-purple-50 border border-purple-100 rounded-xl p-3">
+            <p className="text-xs text-purple-700">
+              El valor del artículo comprado se acreditará como{' '}
+              <span className="font-semibold">saldo a favor</span> en la cuenta de{' '}
+              <span className="font-semibold">{prestatario.nombre}</span>.
+            </p>
+          </div>
+
+          {/* Producto que entrega */}
+          <div className="flex flex-col gap-3 p-3 bg-purple-50 rounded-xl border border-purple-100">
+            <p className="text-xs font-semibold text-purple-700 uppercase tracking-wide">Producto que entrega</p>
+
+            {/* Toggle serial / cantidad */}
+            <div className="flex gap-2">
+              {[
+                { id: 'serial',   label: 'Con serial / IMEI', Icn: Package     },
+                { id: 'cantidad', label: 'Por cantidad',       Icn: ShoppingBag },
+              ].map((opt) => {
+                const Icn = opt.Icn;
+                return (
+                  <button key={opt.id}
+                    onClick={() => { setTipoRetoma(opt.id); resetCamposProducto(); }}
+                    className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl
+                      text-xs font-medium border transition-all
+                      ${tipoRetoma === opt.id
+                        ? 'bg-purple-100 border-purple-400 text-purple-800'
+                        : 'bg-white border-gray-200 text-gray-500 hover:border-gray-300'}`}>
+                    <Icn size={13} /> {opt.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Campos serial */}
+            {tipoRetoma === 'serial' && (
+              <div className="flex flex-col gap-2">
+                <div className="flex flex-col gap-1">
+                  <label className="text-xs font-medium text-gray-600">
+                    IMEI del equipo{ingresoInventario ? ' *' : ''}
+                  </label>
+                  <input type="text" placeholder="Ej: 356789012345678" value={imeiRetoma}
+                    onChange={(e) => setImeiRetoma(e.target.value)}
+                    className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl
+                      text-sm focus:outline-none focus:ring-2 focus:ring-purple-400 transition-all" />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label className="text-xs font-medium text-gray-600">
+                    Línea de producto{ingresoInventario ? ' *' : ''}
+                  </label>
+                  <input type="text" placeholder="Buscar modelo..." value={busquedaSerial}
+                    onChange={(e) => { setBusquedaSerial(e.target.value); setProductoSerialSel(null); }}
+                    className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl
+                      text-sm focus:outline-none focus:ring-2 focus:ring-purple-400 transition-all" />
+                  {busquedaSerial.length > 0 && !productoSerialSel && (
+                    <div className="flex flex-col max-h-28 overflow-y-auto rounded-xl border border-gray-100 bg-white">
+                      {filtradosSerial.length === 0
+                        ? <p className="text-xs text-gray-400 px-3 py-2">Sin resultados</p>
+                        : filtradosSerial.map((p) => (
+                            <button key={p.id}
+                              onClick={() => { setProductoSerialSel(p); setBusquedaSerial(p.nombre); }}
+                              className="text-left px-3 py-2 text-sm hover:bg-purple-50 text-gray-700 border-b border-gray-50 last:border-0">
+                              {p.nombre}
+                            </button>
+                          ))
+                      }
+                    </div>
+                  )}
+                  {productoSerialSel && (
+                    <p className="text-xs text-purple-600">✓ {productoSerialSel.nombre}</p>
+                  )}
+                </div>
+                {coloresActivo && coloresLista.length > 0 && (
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs font-medium text-gray-600">Color (opcional)</label>
+                    <div className="flex flex-wrap gap-2">
+                      {coloresLista.map((c) => (
+                        <button key={c} type="button"
+                          onClick={() => setColorRetoma(colorRetoma === c ? '' : c)}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition-all
+                            ${colorRetoma === c
+                              ? 'bg-purple-100 border-purple-400 text-purple-800'
+                              : 'bg-white border-gray-200 text-gray-500 hover:border-gray-300'}`}>
+                          {c}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Campos cantidad */}
+            {tipoRetoma === 'cantidad' && (
+              <div className="flex flex-col gap-2">
+                <div className="flex flex-col gap-1">
+                  <label className="text-xs font-medium text-gray-600">
+                    Producto{ingresoInventario ? ' *' : ''}
+                  </label>
+                  <input type="text" placeholder="Buscar producto..." value={busquedaCantidad}
+                    onChange={(e) => { setBusquedaCantidad(e.target.value); setProductoCantidadSel(null); }}
+                    className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl
+                      text-sm focus:outline-none focus:ring-2 focus:ring-purple-400 transition-all" />
+                  {busquedaCantidad.length > 0 && !productoCantidadSel && (
+                    <div className="flex flex-col max-h-28 overflow-y-auto rounded-xl border border-gray-100 bg-white">
+                      {filtradosCantidad.length === 0
+                        ? <p className="text-xs text-gray-400 px-3 py-2">Sin resultados</p>
+                        : filtradosCantidad.map((p) => (
+                            <button key={p.id}
+                              onClick={() => { setProductoCantidadSel(p); setBusquedaCantidad(p.nombre); }}
+                              className="text-left px-3 py-2 text-sm hover:bg-purple-50 text-gray-700 border-b border-gray-50 last:border-0">
+                              {p.nombre}
+                              <span className="text-xs text-gray-400 ml-2">Stock: {p.stock}</span>
+                            </button>
+                          ))
+                      }
+                    </div>
+                  )}
+                  {productoCantidadSel && (
+                    <p className="text-xs text-purple-600">✓ {productoCantidadSel.nombre}</p>
+                  )}
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label className="text-xs font-medium text-gray-600">Cantidad</label>
+                  <input type="number" min="1" placeholder="1" value={cantidadRetoma}
+                    onChange={(e) => setCantidadRetoma(e.target.value)}
+                    className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl
+                      text-sm focus:outline-none focus:ring-2 focus:ring-purple-400 transition-all" />
+                </div>
+              </div>
+            )}
+
+            {/* Toggle ingreso inventario */}
+            <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+              <input type="checkbox" checked={ingresoInventario}
+                onChange={(e) => setIngresoInventario(e.target.checked)}
+                className="rounded accent-purple-600" />
+              Ingresar al inventario
+            </label>
+          </div>
+
+          {/* Valor del artículo */}
+          <div className="flex flex-col gap-1">
+            <label className="text-sm font-medium text-gray-700">Valor del artículo *</label>
+            <InputMoneda value={valorRetoma} onChange={setValorRetoma} placeholder="0"
+              className="w-full px-3 py-2 bg-gray-100 rounded-xl text-sm
+                focus:outline-none focus:ring-2 focus:ring-purple-500 focus:bg-white transition-all" />
+          </div>
+
+          {/* Resumen */}
+          {retoma > 0 && (
+            <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 flex flex-col gap-1.5">
+              <div className="flex justify-between text-xs text-gray-500">
+                <span>Valor del artículo:</span>
+                <span className="font-medium text-purple-700">{formatCOP(retoma)}</span>
+              </div>
+              <div className="flex justify-between text-sm font-semibold text-emerald-700 mt-1 pt-1 border-t border-emerald-200">
+                <span>Saldo a favor a acreditar:</span>
+                <span>{formatCOP(retoma)}</span>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      {error && <p className="text-sm text-red-500">{error}</p>}
+
+      {prestatario && (
+        <Button className="w-full" loading={mutation.isPending} onClick={handleConfirmar}>
+          <ArrowLeftRight size={14} className="inline mr-1" /> Registrar compra — acreditar saldo
+        </Button>
+      )}
+    </div>
+  );
+}
+
 // ─── Modal principal ───────────────────────────────────────────────────────────
 export function ModalAgregarProducto({ onClose }) {
   const { sucursalKey, sucursalLista } = useSucursalKey();
@@ -1971,7 +2329,11 @@ export function ModalAgregarProducto({ onClose }) {
   const handleReactivar         = () => { confirmarReactivarRef.current?.(serialesDuplicados); setModalReactivar(false); setSerializesDuplicados([]); };
   const handleCancelarReactivar = () => { setModalReactivar(false); setSerializesDuplicados([]); };
 
-  const tituloModal = tipo === 'serial' ? 'Agregar seriales' : tipo === 'cantidad' ? 'Agregar stock' : tipo === 'cliente' ? 'Compra a cliente' : 'Agregar producto';
+  const tituloModal = tipo === 'serial'      ? 'Agregar seriales'
+    : tipo === 'cantidad'    ? 'Agregar stock'
+    : tipo === 'cliente'     ? 'Compra a cliente'
+    : tipo === 'prestatario' ? 'Retoma / Compra a prestatario'
+    : 'Agregar producto';
 
   if (exito) {
     return (
@@ -2022,6 +2384,12 @@ export function ModalAgregarProducto({ onClose }) {
             coloresConfig={coloresConfig}
             caracteristicasActivo={caracteristicasActivo}
             caracteristicasLista={caracteristicasLista}
+          />
+        )}
+        {tipo === 'prestatario' && (
+          <PasoRetomaPrestatario
+            sucursalKey={sucursalKey}
+            onExito={() => setExito(true)}
           />
         )}
         {tipo && (
