@@ -134,6 +134,16 @@ export function CuadriculaImei({
 
   const imeisValidos = filas.filter((f) => f.imei.trim()).length;
 
+  // Detectar duplicados en tiempo real para resaltar celdas
+  const imeisDuplicadosSet = (() => {
+    const conteo = {};
+    for (const f of filas) {
+      const key = f.imei.trim().toLowerCase();
+      if (key) conteo[key] = (conteo[key] || 0) + 1;
+    }
+    return new Set(Object.keys(conteo).filter((k) => conteo[k] > 1));
+  })();
+
   const handleGuardar = () => {
     setError('');
     const filasValidas = filas.filter((f) => f.imei.trim() !== '');
@@ -141,15 +151,9 @@ export function CuadriculaImei({
       setError('Ingresa al menos un IMEI');
       return;
     }
-    const vistos = new Set();
-    const duplicados = [];
-    for (const f of filasValidas) {
-      const key = f.imei.trim().toLowerCase();
-      if (vistos.has(key)) duplicados.push(f.imei.trim());
-      else vistos.add(key);
-    }
-    if (duplicados.length > 0) {
-      setError(`IMEIs duplicados en la cuadrícula: ${duplicados.slice(0, 3).join(', ')}${duplicados.length > 3 ? '...' : ''}`);
+    if (imeisDuplicadosSet.size > 0) {
+      const ejemplos = [...imeisDuplicadosSet].slice(0, 3).join(', ');
+      setError(`Corrige los IMEIs duplicados antes de guardar: ${ejemplos}${imeisDuplicadosSet.size > 3 ? '...' : ''}`);
       return;
     }
     const rows = filasValidas.map((f) => ({
@@ -161,11 +165,16 @@ export function CuadriculaImei({
     onGuardar(rows, costoModo === 'grupal' ? (costoGrupal !== '' ? Number(costoGrupal) : null) : null);
   };
 
-  const cellInputClass = (rowIdx, colId) =>
-    `w-full px-2 py-1 border text-xs font-mono focus:outline-none focus:ring-1 focus:ring-blue-400 focus:bg-blue-50 focus:z-10 relative
+  const cellInputClass = (rowIdx, colId, imeiVal) => {
+    const esDuplicado = colId === 'imei' && imeiVal?.trim() && imeisDuplicadosSet.has(imeiVal.trim().toLowerCase());
+    if (esDuplicado) {
+      return 'w-full px-2 py-1 border text-xs font-mono focus:outline-none focus:ring-1 focus:ring-red-400 border-red-400 bg-red-50 text-red-700';
+    }
+    return `w-full px-2 py-1 border text-xs font-mono focus:outline-none focus:ring-1 focus:ring-blue-400 focus:bg-blue-50
     ${focusedCell?.row === rowIdx && focusedCell?.col === colId
       ? 'border-blue-400 bg-blue-50'
       : 'border-gray-200 bg-white hover:border-gray-300'}`;
+  };
 
   return (
     <div
@@ -302,7 +311,8 @@ export function CuadriculaImei({
                       onFocus={() => setFocusedCell({ row: rowIdx, col: 'imei' })}
                       onChange={(e) => handleCellChange(rowIdx, 'imei', e.target.value)}
                       placeholder={rowIdx < 5 ? 'Serial / IMEI...' : ''}
-                      className={cellInputClass(rowIdx, 'imei')}
+                      className={cellInputClass(rowIdx, 'imei', fila.imei)}
+                      title={imeisDuplicadosSet.has(fila.imei.trim().toLowerCase()) && fila.imei.trim() ? 'IMEI duplicado' : undefined}
                     />
                   </td>
 
@@ -380,6 +390,11 @@ export function CuadriculaImei({
           <div>
             <p className="text-xs text-gray-500">
               <span className="font-semibold text-gray-700">{imeisValidos}</span> IMEI(s) ingresado(s)
+              {imeisDuplicadosSet.size > 0 && (
+                <span className="ml-2 text-red-500 font-semibold">
+                  · {imeisDuplicadosSet.size} duplicado(s)
+                </span>
+              )}
             </p>
             {error && <p className="text-xs text-red-500 mt-0.5">{error}</p>}
           </div>
