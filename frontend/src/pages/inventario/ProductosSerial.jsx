@@ -390,7 +390,7 @@ function GrupoLinea({ nombre, productos, productoSeleccionado, onSeleccionar, on
 }
 
 // ─── Panel de seriales agrupados por color ────────────────────────────────────
-function ListaSeriales({ seriales, precio, onAgregar, onEliminar, onEditar, coloresActivo, coloresConfig }) {
+function ListaSeriales({ seriales, precioProducto, onAgregar, onEliminar, onEditar, coloresActivo, coloresConfig }) {
   if (!coloresActivo) {
     return (
       <div className="flex flex-col gap-2">
@@ -398,7 +398,7 @@ function ListaSeriales({ seriales, precio, onAgregar, onEliminar, onEditar, colo
           <TarjetaSerial
             key={s.id}
             serial={s}
-            precio={precio}
+            precio={s.precio ?? precioProducto}
             onAgregar={onAgregar}
             onEliminar={onEliminar}
             onEditar={onEditar}
@@ -422,7 +422,7 @@ function ListaSeriales({ seriales, precio, onAgregar, onEliminar, onEditar, colo
                 <TarjetaSerial
                   key={s.id}
                   serial={s}
-                  precio={precio}
+                  precio={s.precio ?? precioProducto}
                   onAgregar={onAgregar}
                   onEliminar={onEliminar}
                   onEditar={onEditar}
@@ -534,7 +534,7 @@ export function ProductosSerial({ onAgregarProducto }) {
       tipo:        'serial',
       nombre:      productoSeleccionado.nombre,
       imei:        serial.imei,
-      precio:      Math.round(Number(productoSeleccionado.precio || 0)),
+      precio:      Math.round(Number(serial.precio ?? productoSeleccionado.precio ?? 0)),
       cantidad:    1,
       serial_id:   serial.id,
       marca:       productoSeleccionado.marca    || null,
@@ -597,7 +597,7 @@ export function ProductosSerial({ onAgregarProducto }) {
         <div className="overflow-y-auto max-h-[55vh]">
           <ListaSeriales
             seriales={serialesOrdenados}
-            precio={productoSeleccionado.precio}
+            precioProducto={productoSeleccionado.precio}
             onAgregar={handleAgregarSerial}
             onEliminar={(serial) => setSerialAEliminar({ id: serial.id, imei: serial.imei })}
             onEditar={esAdmin ? setSerialAEditar : null}
@@ -739,6 +739,16 @@ export function ProductosSerial({ onAgregarProducto }) {
           producto={productoAEditar}
           pinEliminacion={pinEliminacion}
           onClose={() => setProductoAEditar(null)}
+          onSaved={(updatedProducto) => {
+            if (productoSeleccionado?.id === updatedProducto.id) {
+              setProductoSeleccionado((prev) => ({
+                ...prev,
+                nombre:   updatedProducto.nombre,
+                precio:   updatedProducto.precio,
+                linea_id: updatedProducto.linea_id,
+              }));
+            }
+          }}
         />
       )}
     </>

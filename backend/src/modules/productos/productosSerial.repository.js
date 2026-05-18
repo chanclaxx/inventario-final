@@ -166,7 +166,7 @@ const reactivarSerial = async (serialId, { costo_compra, proveedor_id } = {}) =>
 };
 
 const actualizarSerial = async (serialId, datos) => {
-  const { imei, costo_compra, color, caracteristicas } = datos;
+  const { imei, costo_compra, color, caracteristicas, precio } = datos;
 
   // Build SET clause dynamically — only touch optional columns when explicitly sent
   const sets   = ['imei = COALESCE($1, imei)', 'costo_compra = COALESCE($2, costo_compra)'];
@@ -180,6 +180,10 @@ const actualizarSerial = async (serialId, datos) => {
     params.push(caracteristicas != null ? JSON.stringify(caracteristicas) : null);
     sets.push(`caracteristicas = $${params.length}`);
   }
+  if (precio !== undefined) {
+    params.push(precio != null ? Number(precio) : null);
+    sets.push(`precio = $${params.length}`);
+  }
   params.push(serialId);
 
   const { rows } = await pool.query(
@@ -187,6 +191,13 @@ const actualizarSerial = async (serialId, datos) => {
     params,
   );
   return rows[0] || null;
+};
+
+const resetPreciosSeriales = async (productoId) => {
+  await pool.query(
+    'UPDATE seriales SET precio = NULL WHERE producto_id = $1',
+    [productoId]
+  );
 };
 
 const eliminarSerial = async (serialId) => {
@@ -308,5 +319,6 @@ module.exports = {
   create, update, updatePrecio,
   getSeriales, findSerialByIMEI, findSerialByIMEIEnNegocio,
   insertarSerial, reactivarSerial, actualizarSerial, eliminarSerial,
-  findComprasCliente,eliminarProductoSerial,contarSerialesDetalle,eliminarSerialesDeProducto
+  resetPreciosSeriales,
+  findComprasCliente, eliminarProductoSerial, contarSerialesDetalle, eliminarSerialesDeProducto,
 };

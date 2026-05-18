@@ -27,7 +27,8 @@ export function ModalEditarSerial({ serial, precioProducto, productoId, onClose 
 
   const [form, setForm] = useState({
     imei:            serial.imei         || '',
-    precio:          precioProducto      != null ? Number(precioProducto)      : '',
+    precio:          serial.precio       != null ? Number(serial.precio)
+                   : precioProducto      != null ? Number(precioProducto) : '',
     costo_compra:    serial.costo_compra != null ? Number(serial.costo_compra) : '',
     proveedor_id:    serial.proveedor_id != null ? String(serial.proveedor_id) : '',
     color:           serial.color        || '',
@@ -78,7 +79,6 @@ export function ModalEditarSerial({ serial, precioProducto, productoId, onClose 
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['seriales', productoId], exact: false });
-      await queryClient.invalidateQueries({ queryKey: ['productos-serial'],     exact: false });
       onClose();
     },
     onError: (err) => {
@@ -105,7 +105,7 @@ export function ModalEditarSerial({ serial, precioProducto, productoId, onClose 
         <div className="flex items-center gap-2 bg-blue-50 rounded-xl px-3 py-2">
           <Pencil size={15} className="text-blue-500 flex-shrink-0" />
           <p className="text-xs text-blue-700">
-            Edita el IMEI o costo de compra de este serial. El precio de venta aplica a todos los seriales del modelo.
+            Edita el IMEI, costo de compra o precio de venta de este serial. El precio aplica solo a este serial.
           </p>
         </div>
 
@@ -126,7 +126,7 @@ export function ModalEditarSerial({ serial, precioProducto, productoId, onClose 
             <label className="text-sm font-medium text-gray-700">
               Precio de venta{' '}
               <span className="text-gray-400 font-normal text-xs">
-                (aplica a todos los seriales del modelo)
+                (solo este serial)
               </span>
             </label>
             <InputMoneda

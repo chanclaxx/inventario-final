@@ -43,6 +43,12 @@ const actualizarProducto = async (negocioId, id, datos) => {
 
   const actualizado = await repo.update(id, datos);
   if (!actualizado) throw { status: 404, message: 'Producto no encontrado' };
+
+  // When product price is explicitly set, reset individual serial prices so all serials use the new price
+  if (datos.precio != null) {
+    await repo.resetPreciosSeriales(id);
+  }
+
   return actualizado;
 };
 
@@ -86,12 +92,10 @@ const actualizarSerial = async (negocioId, serialId, { imei, costo_compra, preci
   const serial = await repo.findSerialByIdYNegocio(serialId, negocioId);
   if (!serial) throw { status: 404, message: 'Serial no encontrado' };
 
-  const actualizado = await repo.actualizarSerial(serialId, { imei, costo_compra, color, caracteristicas });
+  // Price is stored on the individual serial (not on the product) so other serials are unaffected
+  const actualizado = await repo.actualizarSerial(serialId, { imei, costo_compra, precio, color, caracteristicas });
   if (!actualizado) throw { status: 404, message: 'Serial no encontrado' };
 
-  if (precio !== undefined) {
-    await repo.updatePrecio(serial.producto_id, precio);
-  }
   return actualizado;
 };
 

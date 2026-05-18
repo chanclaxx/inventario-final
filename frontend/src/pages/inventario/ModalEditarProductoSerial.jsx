@@ -10,7 +10,7 @@ import { Button }      from '../../components/ui/Button';
 import { useAuth }     from '../../context/useAuth';
 import { ModalEliminarProducto, TIPO_PRODUCTO_SERIAL } from './ModalEliminarProducto';
 
-export function ModalEditarProductoSerial({ producto, pinEliminacion, onClose }) {
+export function ModalEditarProductoSerial({ producto, pinEliminacion, onClose, onSaved }) {
   const { esAdminNegocio, puedeEditarProductos, camposEdicionProductos } = useAuth();
   const esAdmin = esAdminNegocio();
   const campos  = camposEdicionProductos();
@@ -39,8 +39,10 @@ export function ModalEditarProductoSerial({ producto, pinEliminacion, onClose })
       precio:   form.precio   !== '' ? Number(form.precio)   : null,
       linea_id: form.linea_id !== '' ? Number(form.linea_id) : null,
     }),
-    onSuccess: () => {
+    onSuccess: (response) => {
       queryClient.invalidateQueries({ queryKey: ['productos-serial'], exact: false });
+      queryClient.invalidateQueries({ queryKey: ['seriales'],         exact: false });
+      onSaved?.(response.data.data);
       onClose();
     },
     onError: (err) => setError(err.response?.data?.error || 'Error al actualizar el producto'),
