@@ -21,8 +21,9 @@ import api from '../../api/axios.config';
 import { getArbol } from '../../api/variantesProductoApi';
 import {
   Trash2, Package, ShoppingBag, ChevronRight, ChevronDown,
-  RefreshCw, AlertTriangle, X, ChevronLeft, Layers,
+  RefreshCw, AlertTriangle, X, ChevronLeft, Layers, LayoutGrid,
 } from 'lucide-react';
+import { CuadriculaImei } from './CuadriculaImei';
 
 // ─── Utilidad: normalizar respuesta de productos a array ─────────────────────
 function normalizarProductos(data) {
@@ -681,12 +682,86 @@ function FilaImeiCompra({
   );
 }
 
+// ─── Resumen compacto de IMEIs guardados con cuadrícula ──────────────────────
+function ResumenImeis({ imeis, caracteristicasActivo, caracteristicasLista, onEditar }) {
+  const [pagina, setPagina] = useState(0);
+  const POR_PAGINA = 10;
+  const validos = imeis.filter((i) => extraerImei(i).trim());
+  const totalPaginas = Math.ceil(validos.length / POR_PAGINA);
+  const visibles = validos.slice(pagina * POR_PAGINA, (pagina + 1) * POR_PAGINA);
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-semibold text-gray-700">
+          {validos.length} serial(es) registrado(s)
+        </p>
+        <button
+          type="button"
+          onClick={onEditar}
+          className="text-xs text-blue-600 hover:text-blue-800 font-medium underline"
+        >
+          Editar en cuadrícula
+        </button>
+      </div>
+      <div className="rounded-lg border border-gray-200 overflow-hidden">
+        <table className="w-full text-xs">
+          <thead className="bg-gray-50">
+            <tr>
+              <th className="px-2 py-1.5 text-left font-medium text-gray-500">IMEI</th>
+              {caracteristicasActivo && (caracteristicasLista || []).map((n) => (
+                <th key={n} className="px-2 py-1.5 text-left font-medium text-gray-500">{n}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {visibles.map((item, i) => {
+              const imeiStr = extraerImei(item);
+              const carac   = extraerCaracteristicas(item);
+              return (
+                <tr key={i} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                  <td className="px-2 py-1 font-mono text-gray-700 truncate max-w-[160px]">{imeiStr}</td>
+                  {caracteristicasActivo && (caracteristicasLista || []).map((n) => (
+                    <td key={n} className="px-2 py-1 text-gray-600">{carac[n] || '—'}</td>
+                  ))}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      {totalPaginas > 1 && (
+        <div className="flex items-center justify-between px-1">
+          <button
+            type="button"
+            disabled={pagina === 0}
+            onClick={() => setPagina((p) => p - 1)}
+            className="text-xs text-blue-500 disabled:text-gray-300 font-medium"
+          >
+            ← Anterior
+          </button>
+          <span className="text-xs text-gray-400">{pagina + 1} / {totalPaginas}</span>
+          <button
+            type="button"
+            disabled={pagina >= totalPaginas - 1}
+            onClick={() => setPagina((p) => p + 1)}
+            className="text-xs text-blue-500 disabled:text-gray-300 font-medium"
+          >
+            Siguiente →
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Componente línea con IMEIs ───────────────────────────────────────────────
 function LineaImeis({
   linea, factor, traida, imeisDuplicados,
   onActualizarPrecioUsd, onActualizarPrecioCOP,
   onActualizarImei, onAgregarCampo, onEliminarImei, onEliminarLinea,
   coloresActivo, coloresConfig, caracteristicasActivo, caracteristicasLista,
+  guardadaConCuadricula, onAbrirCuadricula, onEditarCuadricula,
 }) {
   const inputRefs        = useRef([]);
   const usandoConversion = Number(factor) > 0;
@@ -757,34 +832,55 @@ function LineaImeis({
       </div>
 
       <div className="flex flex-col gap-1.5">
-        {linea.imeis.map((item, index) => {
-          const imeiVal     = extraerImei(item);
-          const esDuplicado = imeiVal.trim() && imeisDuplicados.has(imeiVal.trim());
-          return (
-            <FilaImeiCompra
-              key={index}
-              index={index}
-              item={item}
-              coloresActivo={coloresActivo}
-              coloresConfig={coloresConfig}
-              caracteristicasActivo={caracteristicasActivo}
-              caracteristicasLista={caracteristicasLista}
-              esDuplicado={esDuplicado}
-              inputRef={(el) => { inputRefs.current[index] = el; }}
-              onChange={(val) => handleItemChange(index, val)}
-              onKeyDown={(e) => handleKeyDown(e, index)}
-              onEliminar={() => onEliminarImei(linea.id, index)}
-              mostrarEliminar={linea.imeis.length > 1}
-            />
-          );
-        })}
-        {linea.imeis.some((i) => extraerImei(i).trim() && imeisDuplicados.has(extraerImei(i).trim())) && (
-          <p className="text-xs text-red-500 font-medium">⚠ Algunos IMEIs están duplicados (marcados en rojo)</p>
-        )}
-        <button onClick={() => onAgregarCampo(linea.id)}
-          className="text-xs text-blue-500 hover:text-blue-700 font-medium text-left mt-1">
-          + Agregar IMEI
+        <button
+          type="button"
+          onClick={onAbrirCuadricula}
+          className="flex items-center gap-1.5 text-xs text-purple-600 hover:text-purple-800
+            font-medium border border-purple-200 bg-purple-50 hover:bg-purple-100
+            px-3 py-1.5 rounded-lg transition-colors self-start"
+        >
+          <LayoutGrid size={12} /> Ingresar en cuadrícula
         </button>
+
+        {guardadaConCuadricula ? (
+          <ResumenImeis
+            imeis={linea.imeis}
+            caracteristicasActivo={caracteristicasActivo}
+            caracteristicasLista={caracteristicasLista}
+            onEditar={onEditarCuadricula}
+          />
+        ) : (
+          <>
+            {linea.imeis.map((item, index) => {
+              const imeiVal     = extraerImei(item);
+              const esDuplicado = imeiVal.trim() && imeisDuplicados.has(imeiVal.trim());
+              return (
+                <FilaImeiCompra
+                  key={index}
+                  index={index}
+                  item={item}
+                  coloresActivo={coloresActivo}
+                  coloresConfig={coloresConfig}
+                  caracteristicasActivo={caracteristicasActivo}
+                  caracteristicasLista={caracteristicasLista}
+                  esDuplicado={esDuplicado}
+                  inputRef={(el) => { inputRefs.current[index] = el; }}
+                  onChange={(val) => handleItemChange(index, val)}
+                  onKeyDown={(e) => handleKeyDown(e, index)}
+                  onEliminar={() => onEliminarImei(linea.id, index)}
+                  mostrarEliminar={linea.imeis.length > 1}
+                />
+              );
+            })}
+            {linea.imeis.some((i) => extraerImei(i).trim() && imeisDuplicados.has(extraerImei(i).trim())) && (
+              <p className="text-xs text-red-500 font-medium">⚠ Algunos IMEIs están duplicados (marcados en rojo)</p>
+            )}
+            <button onClick={() => onAgregarCampo(linea.id)}
+              className="text-xs text-blue-500 hover:text-blue-700 font-medium text-left mt-1">
+              + Agregar IMEI
+            </button>
+          </>
+        )}
       </div>
     </div>
   );
@@ -805,6 +901,8 @@ function PasoLineaSerial({
   const [imeisDuplicados,     setImeisDuplicados]    = useState(new Set());
   const [factor,              setFactor]             = useState(factorInicial);
   const [traida,              setTraida]             = useState(traidaInicial);
+  const [gridGuardado,        setGridGuardado]       = useState({});
+  const [cuadriculaAbierta,   setCuadriculaAbierta]  = useState(null);
   const queryClient = useQueryClient();
 
   const itemVacio = () =>
@@ -882,6 +980,32 @@ function PasoLineaSerial({
       })
     );
   }, [factor, traida]);
+
+  const handleGuardarCuadricula = (lineaId, rows, costoGrupal) => {
+    const usaObjeto = coloresActivo || (caracteristicasActivo && caracteristicasLista?.length > 0);
+    const itemsImei = rows.map((r) =>
+      usaObjeto
+        ? {
+            imei: r.imei,
+            color: r.color || '',
+            caracteristicas: r.caracteristicas || {},
+            ...(r.costo !== null && r.costo !== '' ? { _costo_individual: Number(r.costo) } : {}),
+          }
+        : r.imei
+    );
+    setLineasSeleccionadas((prev) =>
+      prev.map((l) => {
+        if (l.id !== lineaId) return l;
+        return {
+          ...l,
+          imeis: itemsImei,
+          ...(costoGrupal !== null ? { precio_compra: costoGrupal } : {}),
+        };
+      })
+    );
+    setGridGuardado((prev) => ({ ...prev, [lineaId]: true }));
+    setCuadriculaAbierta(null);
+  };
 
   const handleConversionChange = (campo, valor) => {
     if (campo === 'factor') setFactor(valor);
@@ -1010,11 +1134,40 @@ function PasoLineaSerial({
                 coloresConfig={coloresConfig}
                 caracteristicasActivo={caracteristicasActivo}
                 caracteristicasLista={caracteristicasLista}
+                guardadaConCuadricula={!!gridGuardado[lineaItem.id]}
+                onAbrirCuadricula={() => setCuadriculaAbierta(lineaItem.id)}
+                onEditarCuadricula={() => setCuadriculaAbierta(lineaItem.id)}
               />
             );
           })}
         </div>
       )}
+
+      {cuadriculaAbierta !== null && (() => {
+        const la = lineasSeleccionadas.find((l) => l.id === cuadriculaAbierta);
+        if (!la) return null;
+        const filasIniciales = gridGuardado[cuadriculaAbierta]
+          ? la.imeis.map((item) => ({
+              imei: extraerImei(item),
+              color: extraerColor(item) || '',
+              caracteristicas: extraerCaracteristicas(item),
+              costo: item._costo_individual || '',
+            }))
+          : null;
+        return (
+          <CuadriculaImei
+            productoNombre={la.nombre}
+            caracteristicasActivo={caracteristicasActivo}
+            caracteristicasLista={caracteristicasLista}
+            coloresActivo={coloresActivo}
+            coloresConfig={coloresConfig}
+            precioCopInicial={la.precio_compra}
+            filasIniciales={filasIniciales}
+            onGuardar={(rows, costoGrupal) => handleGuardarCuadricula(la.id, rows, costoGrupal)}
+            onCerrar={() => setCuadriculaAbierta(null)}
+          />
+        );
+      })()}
 
       {error && <p className="text-sm text-red-500">{error}</p>}
 
@@ -1566,7 +1719,7 @@ export function ModalCompra({ proveedor, onClose }) {
                 nombre_producto:     linea.nombre,
                 imei:                imeiValor.trim(),
                 cantidad:            1,
-                precio_unitario:     Number(linea.precio_compra),
+                precio_unitario:     (esObjeto && i._costo_individual) ? Number(i._costo_individual) : Number(linea.precio_compra),
                 precio_usd:          linea.precio_usd ? Number(linea.precio_usd) : null,
                 factor_conversion:   linea.factor_conversion || null,
                 valor_traida:        linea.valor_traida      || null,
