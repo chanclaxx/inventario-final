@@ -234,7 +234,7 @@ const findComprasCliente = async (negocioId, q) => {
       s.cliente_origen AS nombre_cliente,
       NULL AS cedula_cliente, NULL AS cliente_id,
       ps.nombre AS nombre_producto, ps.marca, ps.modelo,
-      s.fecha_entrada AS fecha, s.costo_compra AS valor,
+      s.creado_en AS fecha, s.costo_compra AS valor,
       su.nombre AS sucursal_nombre, NULL AS factura_id
     FROM seriales s
     JOIN productos_serial ps ON ps.id = s.producto_id
@@ -252,7 +252,7 @@ const findComprasCliente = async (negocioId, q) => {
         OR ${sn('ps.nombre')}     LIKE $2 ESCAPE '\\'
         OR LOWER(s.imei)          LIKE $2 ESCAPE '\\'
       )
-    ORDER BY s.fecha_entrada DESC
+    ORDER BY s.creado_en DESC
   `, [negocioId, filtro]);
 
   const { rows: retomas } = await pool.query(`
