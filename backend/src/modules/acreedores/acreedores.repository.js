@@ -9,6 +9,7 @@ const findAll = async (negocioId, filtro) => {
     LEFT JOIN proveedores p ON p.id = a.proveedor_id
     LEFT JOIN movimientos_acreedor m ON m.acreedor_id = a.id
     WHERE a.negocio_id = $1
+      AND (a.proveedor_id IS NULL OR p.activo = TRUE)
   `;
   const params = [negocioId];
 

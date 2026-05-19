@@ -42,6 +42,11 @@ const TABS_CATALOGO = [
 const CAMPOS_EDITABLES = [
   { clave: 'campo_direccion_cliente', label: 'Dirección del cliente', description: 'Muestra el campo de dirección al registrar una venta' },
 ];
+
+// ─── Permisos de módulos para usuarios no administradores ─────────────────────
+const PERMISOS_MODULOS = [
+  { clave: 'compras_visible_no_admin', label: 'Historial de compras (supervisores y vendedores)', description: 'Permite que usuarios no administradores vean el historial de compras en el módulo de proveedores' },
+];
 const CAMPOS_READONLY = [
   { clave: 'campo_email_cliente', label: 'Envío de facturas por email', description: 'Envía automáticamente la factura al correo del cliente' },
 ];
@@ -1050,6 +1055,24 @@ function SeccionNegocio({ valores, set }) {
             })}
           </div>
         )}
+      </div>
+
+      <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm flex flex-col gap-4">
+        <div className="flex items-center gap-2">
+          <Users size={15} className="text-gray-400" />
+          <h3 className="text-sm font-semibold text-gray-700">Permisos de módulos</h3>
+          <span className="text-xs text-gray-400 ml-1">— acceso para supervisores y vendedores</span>
+        </div>
+        <p className="text-xs text-gray-400 -mt-2">
+          Por defecto estos módulos solo son visibles para el administrador. Actívalos para ampliar el acceso.
+        </p>
+        {PERMISOS_MODULOS.map((campo) => {
+          const enabled = valores[campo.clave] === '1';
+          return (
+            <Toggle key={campo.clave} label={campo.label} description={campo.description}
+              enabled={enabled} onChange={(val) => set(campo.clave, val ? '1' : '0')} />
+          );
+        })}
       </div>
     </div>
   );

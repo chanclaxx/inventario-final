@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { buscarCompras as buscarComprasApi } from '../../api/busqueda.api';
 import { getProveedores, crearProveedor, actualizarProveedor } from '../../api/proveedores.api';
+import { getConfig } from '../../api/config.api';
 import { getCruces, crearCruce } from '../../api/cruces.api';
 import { getComprasByProveedor, getCompraById, getComprasPaginadas } from '../../api/compras.api';
 import { getAcreedores, registrarMovimiento as registrarMovAcreedor, getComprasConSaldo, getAbonosPorCargo } from '../../api/acreedores.api';
@@ -2108,13 +2109,23 @@ function TabBusquedaCompras() {
 
 export default function ProveedoresPage() {
   const { sucursalKey, sucursalLista } = useSucursalKey();
+  const { esAdminNegocio } = useAuth();
+  const esAdmin = esAdminNegocio();
   const [tabActivo, setTabActivo] = useState('proveedores');
+
+  const { data: configData } = useQuery({
+    queryKey: ['config'],
+    queryFn:  () => getConfig().then((r) => r.data.data),
+    staleTime: 60_000,
+  });
+  const comprasVisibleNoAdmin = configData?.compras_visible_no_admin === '1';
+  const verCompras = esAdmin || comprasVisibleNoAdmin;
 
   const tabs = [
     { id: 'proveedores', label: 'Proveedores', Icn: Truck        },
     { id: 'cruces',      label: 'Cruces',      Icn: Repeat       },
     { id: 'retomas',     label: 'Retomas',     Icn: RefreshCw    },
-    { id: 'compras',     label: 'Compras',     Icn: ShoppingCart },
+    ...(verCompras ? [{ id: 'compras', label: 'Compras', Icn: ShoppingCart }] : []),
     { id: 'busqueda',    label: 'Búsqueda',    Icn: Search       },
   ];
 
