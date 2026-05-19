@@ -17,7 +17,7 @@ const sn = (col) => `translate(LOWER(${col}), ${SA}, ${TA})`;
 
 // ─── IMEI / Serial ────────────────────────────────────────────────────────────
 
-const getSerialPorIMEI = async (imei, negocioId) => {
+const buscarSerialPorIMEI = async (query, negocioId) => {
   const { rows } = await pool.query(`
     SELECT
       s.id, s.imei, s.fecha_entrada, s.vendido, s.prestado,
@@ -33,10 +33,13 @@ const getSerialPorIMEI = async (imei, negocioId) => {
     JOIN productos_serial ps ON ps.id   = s.producto_id
     JOIN sucursales       su ON su.id   = ps.sucursal_id
     LEFT JOIN proveedores prov ON prov.id = s.proveedor_id
-    WHERE s.imei = $1 AND su.negocio_id = $2
-    LIMIT 1
-  `, [imei, negocioId]);
-  return rows[0] || null;
+    WHERE LOWER(s.imei) LIKE '%' || LOWER($1) || '%' AND su.negocio_id = $2
+    ORDER BY
+      CASE WHEN LOWER(s.imei) = LOWER($1) THEN 0 ELSE 1 END,
+      s.imei
+    LIMIT 20
+  `, [query, negocioId]);
+  return rows;
 };
 
 const getVentasPorIMEI = async (imei, negocioId) => {
@@ -351,7 +354,7 @@ const buscarPrestamos = async ({ q, estado, tipo, fechaDesde, fechaHasta }, nego
 };
 
 module.exports = {
-  getSerialPorIMEI, getVentasPorIMEI, getRetomasPorIMEI,
+  buscarSerialPorIMEI, getVentasPorIMEI, getRetomasPorIMEI,
   getPrestamosPorIMEI, getTrasladosPorIMEI,
   buscarSeriales, buscarCantidad, getHistorialCantidad,
   buscarComprasPorIMEI, buscarComprasPorTexto,

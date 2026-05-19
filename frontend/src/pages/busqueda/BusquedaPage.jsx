@@ -195,6 +195,45 @@ function LineaTiempo({ historial }) {
   );
 }
 
+// ─── Lista de candidatos IMEI (múltiples coincidencias parciales) ─────────────
+
+function ListaCandidatosIMEI({ candidatos, onSeleccionar }) {
+  return (
+    <div className="flex flex-col gap-2">
+      <p className="text-sm text-gray-500 mb-1">
+        Se encontraron <span className="font-semibold text-gray-700">{candidatos.length}</span> seriales que coinciden. Selecciona uno para ver su historial completo.
+      </p>
+      {candidatos.map((c) => (
+        <button
+          key={c.imei}
+          type="button"
+          onClick={() => onSeleccionar(c.imei)}
+          className="flex items-center gap-3 bg-white border border-gray-200 rounded-2xl p-3 shadow-sm hover:border-blue-400 hover:shadow-md text-left transition-all"
+        >
+          <div className="w-9 h-9 bg-blue-50 rounded-xl flex items-center justify-center flex-shrink-0">
+            <ScanLine size={17} className="text-blue-500" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-gray-900 leading-tight">{c.producto_nombre}</p>
+            {(c.marca || c.modelo) && (
+              <p className="text-xs text-gray-400">{[c.marca, c.modelo].filter(Boolean).join(' · ')}</p>
+            )}
+            <p className="text-xs font-mono text-blue-600 mt-0.5">{c.imei}</p>
+          </div>
+          <div className="flex flex-col items-end gap-1">
+            {c.sucursal_nombre && (
+              <span className="text-xs text-gray-400 flex items-center gap-0.5">
+                <MapPin size={10} />{c.sucursal_nombre}
+              </span>
+            )}
+            <SerialEstado serial={c} />
+          </div>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 // ─── Tarjeta de serial encontrado ────────────────────────────────────────────
 
 function TarjetaSerial({ serial }) {
@@ -478,8 +517,13 @@ export default function BusquedaPage() {
   const loading = queryIMEI.isFetching || queryNombre.isFetching;
   const error   = queryIMEI.error || queryNombre.error;
 
+  const handleSeleccionarCandidato = (imei) => {
+    setInput(imei);
+    setBusqueda(imei);
+  };
+
   const sinResultados =
-    (modo === 'imei'   && queryIMEI.isSuccess  && !queryIMEI.data) ||
+    (modo === 'imei'   && queryIMEI.isSuccess  && !queryIMEI.data?.serial && !queryIMEI.data?.candidatos) ||
     (modo === 'nombre' && queryNombre.isSuccess &&
       !queryNombre.data?.seriales?.length && !queryNombre.data?.cantidad?.length);
 
@@ -588,8 +632,16 @@ export default function BusquedaPage() {
         </div>
       )}
 
+      {/* ── Candidatos IMEI (búsqueda parcial con múltiples resultados) ── */}
+      {!loading && !error && modo === 'imei' && queryIMEI.data?.candidatos && (
+        <ListaCandidatosIMEI
+          candidatos={queryIMEI.data.candidatos}
+          onSeleccionar={handleSeleccionarCandidato}
+        />
+      )}
+
       {/* ── Resultado IMEI ── */}
-      {!loading && !error && modo === 'imei' && queryIMEI.data && (
+      {!loading && !error && modo === 'imei' && queryIMEI.data?.serial && (
         <div className="flex flex-col gap-5">
           <TarjetaSerial serial={queryIMEI.data.serial} />
 

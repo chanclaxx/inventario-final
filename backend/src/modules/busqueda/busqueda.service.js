@@ -4,18 +4,35 @@ const _esAdmin = (rol) => rol === 'admin_negocio';
 
 // ─── Historial por IMEI ───────────────────────────────────────────────────────
 
-const buscarPorIMEI = async (imei, negocioId, rol) => {
+const buscarPorIMEI = async (query, negocioId, rol) => {
   const admin = _esAdmin(rol);
 
-  const [serial, ventas, retomas, prestamos, traslados] = await Promise.all([
-    repo.getSerialPorIMEI(imei, negocioId),
-    repo.getVentasPorIMEI(imei, negocioId),
-    repo.getRetomasPorIMEI(imei, negocioId),
-    repo.getPrestamosPorIMEI(imei, negocioId),
-    repo.getTrasladosPorIMEI(imei, negocioId),
-  ]);
+  const candidatos = await repo.buscarSerialPorIMEI(query, negocioId);
+  if (candidatos.length === 0) return null;
 
-  if (!serial) return null;
+  const exacto = candidatos.find((c) => c.imei.toLowerCase() === query.toLowerCase());
+  const serial = exacto ?? (candidatos.length === 1 ? candidatos[0] : null);
+
+  if (!serial) {
+    return {
+      candidatos: candidatos.map((c) => ({
+        imei:            c.imei,
+        producto_nombre: c.producto_nombre,
+        marca:           c.marca,
+        modelo:          c.modelo,
+        vendido:         c.vendido,
+        prestado:        c.prestado,
+        sucursal_nombre: c.sucursal_nombre,
+      })),
+    };
+  }
+
+  const [ventas, retomas, prestamos, traslados] = await Promise.all([
+    repo.getVentasPorIMEI(serial.imei, negocioId),
+    repo.getRetomasPorIMEI(serial.imei, negocioId),
+    repo.getPrestamosPorIMEI(serial.imei, negocioId),
+    repo.getTrasladosPorIMEI(serial.imei, negocioId),
+  ]);
 
   // Capturar info sensible antes de borrarla del objeto serial
   const entradaDetalle = admin
