@@ -82,7 +82,7 @@ const hLine = (doc, y, { x1 = MARGIN, x2 = PAGE_WIDTH - MARGIN, color = C.grisBo
 const labelSeccion = (doc, y, texto) => {
   doc.font(FONT.bold).fontSize(7).fillColor(C.grisClaro)
     .text(texto.toUpperCase(), MARGIN, y, { characterSpacing: 1.2, width: COL_WIDTH });
-  return y + 14;
+  return y + 10;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -312,7 +312,7 @@ const generarPdfPrestamosActivos = async ({ tipo, personaId, negocioId, negocioN
 // ── Encabezado ────────────────────────────────────────────────────────────────
 
 const _encabezadoIndividual = (doc, { negocioNombre, prestamo, fechaGeneracion, logoNegocio }) => {
-  const HEADER_H = 110;
+  const HEADER_H = 80;
 
   rectFill(doc, 0, 0, PAGE_WIDTH, HEADER_H, C.headerBg, 0);
   doc.rect(0, HEADER_H - 3, PAGE_WIDTH, 3).fill(C.verde);
@@ -322,19 +322,19 @@ const _encabezadoIndividual = (doc, { negocioNombre, prestamo, fechaGeneracion, 
   const textW      = COL_WIDTH * 0.55 - logoOffset;
 
   // Nombre del negocio
-  doc.font(FONT.bold).fontSize(22).fillColor(C.headerText)
-    .text(negocioNombre || 'Mi Negocio', textX, 28, { width: textW });
-  doc.font(FONT.normal).fontSize(9).fillColor(C.headerSub)
-    .text('Comprobante de Préstamo', textX, 56, { width: textW });
+  doc.font(FONT.bold).fontSize(18).fillColor(C.headerText)
+    .text(negocioNombre || 'Mi Negocio', textX, 16, { width: textW });
+  doc.font(FONT.normal).fontSize(8.5).fillColor(C.headerSub)
+    .text('Comprobante de Préstamo', textX, 40, { width: textW });
 
   // Número de préstamo (derecha)
   const numPrestamo = `#${String(prestamo.id).padStart(6, '0')}`;
-  doc.font(FONT.bold).fontSize(26).fillColor(C.headerText)
-    .text(numPrestamo, MARGIN, 22, { width: COL_WIDTH, align: 'right' });
+  doc.font(FONT.bold).fontSize(22).fillColor(C.headerText)
+    .text(numPrestamo, MARGIN, 14, { width: COL_WIDTH, align: 'right' });
   doc.font(FONT.normal).fontSize(8).fillColor(C.headerSub)
-    .text('PRÉSTAMO', MARGIN, 54, { width: COL_WIDTH, align: 'right' });
+    .text('PRÉSTAMO', MARGIN, 40, { width: COL_WIDTH, align: 'right' });
   doc.font(FONT.normal).fontSize(8).fillColor(C.headerSub)
-    .text(formatFechaHora(prestamo.fecha), MARGIN, 66, { width: COL_WIDTH, align: 'right' });
+    .text(formatFechaHora(prestamo.fecha), MARGIN, 50, { width: COL_WIDTH, align: 'right' });
 
   // Badge de estado
   const estadoConf = {
@@ -342,13 +342,13 @@ const _encabezadoIndividual = (doc, { negocioNombre, prestamo, fechaGeneracion, 
     Saldado: { bg: C.verde,  texto: 'SALDADO'  },
   };
   const est    = estadoConf[prestamo.estado] || { bg: C.gris, texto: (prestamo.estado || '').toUpperCase() };
-  const badgeW = 72;
+  const badgeW = 68;
   const badgeX = PAGE_WIDTH - MARGIN - badgeW;
-  rectFill(doc, badgeX, 79, badgeW, 18, est.bg, 4);
-  doc.font(FONT.bold).fontSize(7.5).fillColor(C.blanco)
-    .text(est.texto, badgeX, 84, { width: badgeW, align: 'center', characterSpacing: 0.8 });
+  rectFill(doc, badgeX, 58, badgeW, 16, est.bg, 4);
+  doc.font(FONT.bold).fontSize(7).fillColor(C.blanco)
+    .text(est.texto, badgeX, 62, { width: badgeW, align: 'center', characterSpacing: 0.8 });
 
-  return HEADER_H + 28;
+  return HEADER_H + 16;
 };
 
 // ── Bloque prestatario ────────────────────────────────────────────────────────
@@ -362,32 +362,32 @@ const _bloquePrestatario = (doc, prestamo, y) => {
   if (!esCompanero)   lineasExtra += 1;
   if (tieneTelefono)  lineasExtra += 1;
   if (tieneEmpleado)  lineasExtra += 1;
-  const altBloque = 44 + lineasExtra * 14;
+  const altBloque = 32 + lineasExtra * 11;
 
   rectFillStroke(doc, MARGIN, y, COL_WIDTH, altBloque, C.grisFondo, C.grisBorde, 8);
 
   doc.font(FONT.bold).fontSize(7).fillColor(C.grisClaro)
-    .text('PRESTATARIO', MARGIN + 14, y + 12, { characterSpacing: 1 });
-  doc.font(FONT.bold).fontSize(13).fillColor(C.negro)
-    .text(prestamo.prestatario || '—', MARGIN + 14, y + 24, { width: COL_WIDTH - 28 });
+    .text('PRESTATARIO', MARGIN + 14, y + 7, { characterSpacing: 1 });
+  doc.font(FONT.bold).fontSize(12).fillColor(C.negro)
+    .text(prestamo.prestatario || '—', MARGIN + 14, y + 18, { width: COL_WIDTH - 28 });
 
-  let yDatos = y + 40;
+  let yDatos = y + 30;
   if (!esCompanero) {
-    doc.font(FONT.normal).fontSize(8.5).fillColor(C.gris)
+    doc.font(FONT.normal).fontSize(8).fillColor(C.gris)
       .text(`CC: ${prestamo.cedula}`, MARGIN + 14, yDatos, { width: COL_WIDTH - 28 });
-    yDatos += 14;
+    yDatos += 11;
   }
   if (tieneTelefono) {
-    doc.font(FONT.normal).fontSize(8.5).fillColor(C.gris)
+    doc.font(FONT.normal).fontSize(8).fillColor(C.gris)
       .text(`Tel: ${prestamo.telefono}`, MARGIN + 14, yDatos, { width: COL_WIDTH - 28 });
-    yDatos += 14;
+    yDatos += 11;
   }
   if (tieneEmpleado) {
-    doc.font(FONT.normal).fontSize(8).fillColor(C.grisClaro)
+    doc.font(FONT.normal).fontSize(7.5).fillColor(C.grisClaro)
       .text(`Empleado: ${prestamo.empleado_nombre}`, MARGIN + 14, yDatos, { width: COL_WIDTH - 28 });
   }
 
-  return y + altBloque + 24;
+  return y + altBloque + 12;
 };
 
 // ── Tabla de datos del préstamo ───────────────────────────────────────────────
@@ -404,87 +404,84 @@ const _tablaDatosProducto = (doc, prestamo, y) => {
   ].filter((c) => c.val);
 
   // Calcular altura total
-  const altTotal = 28 + campos.length * 22;
+  const altTotal = 22 + campos.length * 16;
   rectFillStroke(doc, MARGIN, y, COL_WIDTH, altTotal, C.blanco, C.grisBorde, 8);
 
   // Encabezado oscuro
-  rectFill(doc, MARGIN, y, COL_WIDTH, 28, C.negro, 8);
-  doc.rect(MARGIN, y + 16, COL_WIDTH, 12).fill(C.negro);
+  rectFill(doc, MARGIN, y, COL_WIDTH, 22, C.negro, 8);
+  doc.rect(MARGIN, y + 12, COL_WIDTH, 10).fill(C.negro);
   doc.font(FONT.bold).fontSize(7.5).fillColor(C.blanco)
-    .text('Campo', MARGIN + 14, y + 10, { width: COL_WIDTH * 0.4, characterSpacing: 0.5 });
+    .text('Campo', MARGIN + 14, y + 7, { width: COL_WIDTH * 0.4, characterSpacing: 0.5 });
   doc.font(FONT.bold).fontSize(7.5).fillColor(C.blanco)
-    .text('Detalle', MARGIN + COL_WIDTH * 0.4, y + 10, { width: COL_WIDTH * 0.6 - 14, align: 'right', characterSpacing: 0.5 });
+    .text('Detalle', MARGIN + COL_WIDTH * 0.4, y + 7, { width: COL_WIDTH * 0.6 - 14, align: 'right', characterSpacing: 0.5 });
 
-  let yFila = y + 28;
+  let yFila = y + 22;
   campos.forEach((c, i) => {
     if (i > 0) hLine(doc, yFila, { color: C.grisBorde, width: 0.4 });
     const esPar = i % 2 === 1;
-    if (esPar) doc.rect(MARGIN, yFila, COL_WIDTH, 22).fill('#F8FAFC');
+    if (esPar) doc.rect(MARGIN, yFila, COL_WIDTH, 16).fill('#F8FAFC');
 
-    doc.font(FONT.normal).fontSize(8.5).fillColor(C.gris)
-      .text(c.label, MARGIN + 14, yFila + 7, { width: COL_WIDTH * 0.4, lineBreak: false });
-    doc.font(FONT.bold).fontSize(8.5).fillColor(C.negro)
-      .text(c.val, MARGIN + COL_WIDTH * 0.4, yFila + 7, {
+    doc.font(FONT.normal).fontSize(8).fillColor(C.gris)
+      .text(c.label, MARGIN + 14, yFila + 4, { width: COL_WIDTH * 0.4, lineBreak: false });
+    doc.font(FONT.bold).fontSize(8).fillColor(C.negro)
+      .text(c.val, MARGIN + COL_WIDTH * 0.4, yFila + 4, {
         width: COL_WIDTH * 0.6 - 14, align: 'right', lineBreak: false,
       });
-    yFila += 22;
+    yFila += 16;
   });
 
-  return y + altTotal + 24;
+  return y + altTotal + 12;
 };
 
 // ── Historial de abonos ───────────────────────────────────────────────────────
 
 const _tablaAbonos = (doc, abonos, y) => {
-  if (y > 660) { doc.addPage(); y = MARGIN; }
 
   y = labelSeccion(doc, y, 'Historial de abonos');
 
-  const altTotal = 28 + (abonos.length === 0 ? 24 : abonos.length * 22);
+  const altTotal = 22 + (abonos.length === 0 ? 18 : abonos.length * 16);
   rectFillStroke(doc, MARGIN, y, COL_WIDTH, altTotal, C.blanco, C.grisBorde, 8);
 
   // Encabezado
-  rectFill(doc, MARGIN, y, COL_WIDTH, 28, C.negro, 8);
-  doc.rect(MARGIN, y + 16, COL_WIDTH, 12).fill(C.negro);
+  rectFill(doc, MARGIN, y, COL_WIDTH, 22, C.negro, 8);
+  doc.rect(MARGIN, y + 12, COL_WIDTH, 10).fill(C.negro);
 
   const COL_F = COL_WIDTH * 0.32;
   const COL_M = COL_WIDTH * 0.32;
   const COL_V = COL_WIDTH - COL_F - COL_M;
 
   doc.font(FONT.bold).fontSize(7.5).fillColor(C.blanco)
-    .text('Fecha',  MARGIN + 14,          y + 10, { width: COL_F,  characterSpacing: 0.5 })
-    .text('Método', MARGIN + COL_F + 4,   y + 10, { width: COL_M,  characterSpacing: 0.5 })
-    .text('Valor',  MARGIN + COL_F + COL_M, y + 10, { width: COL_V - 14, align: 'right', characterSpacing: 0.5 });
+    .text('Fecha',  MARGIN + 14,          y + 7, { width: COL_F,  characterSpacing: 0.5 })
+    .text('Método', MARGIN + COL_F + 4,   y + 7, { width: COL_M,  characterSpacing: 0.5 })
+    .text('Valor',  MARGIN + COL_F + COL_M, y + 7, { width: COL_V - 14, align: 'right', characterSpacing: 0.5 });
 
-  let yFila = y + 28;
+  let yFila = y + 22;
 
   if (abonos.length === 0) {
-    doc.font(FONT.normal).fontSize(8.5).fillColor(C.grisClaro)
-      .text('Sin abonos registrados', MARGIN + 14, yFila + 7, { width: COL_WIDTH - 28 });
+    doc.font(FONT.normal).fontSize(8).fillColor(C.grisClaro)
+      .text('Sin abonos registrados', MARGIN + 14, yFila + 4, { width: COL_WIDTH - 28 });
   } else {
     abonos.forEach((abono, i) => {
       if (i > 0) hLine(doc, yFila, { color: C.grisBorde, width: 0.4 });
-      if (i % 2 === 1) doc.rect(MARGIN, yFila, COL_WIDTH, 22).fill('#F8FAFC');
+      if (i % 2 === 1) doc.rect(MARGIN, yFila, COL_WIDTH, 16).fill('#F8FAFC');
 
-      doc.font(FONT.normal).fontSize(8.5).fillColor(C.grisOscuro)
-        .text(formatFecha(abono.fecha),    MARGIN + 14,          yFila + 7, { width: COL_F,  lineBreak: false })
-        .text(abono.metodo || 'Efectivo',  MARGIN + COL_F + 4,   yFila + 7, { width: COL_M,  lineBreak: false });
-      doc.font(FONT.bold).fontSize(8.5).fillColor(C.verde)
-        .text(formatCOP(abono.valor), MARGIN + COL_F + COL_M, yFila + 7, {
+      doc.font(FONT.normal).fontSize(8).fillColor(C.grisOscuro)
+        .text(formatFecha(abono.fecha),    MARGIN + 14,          yFila + 4, { width: COL_F,  lineBreak: false })
+        .text(abono.metodo || 'Efectivo',  MARGIN + COL_F + 4,   yFila + 4, { width: COL_M,  lineBreak: false });
+      doc.font(FONT.bold).fontSize(8).fillColor(C.verde)
+        .text(formatCOP(abono.valor), MARGIN + COL_F + COL_M, yFila + 4, {
           width: COL_V - 14, align: 'right', lineBreak: false,
         });
-      yFila += 22;
+      yFila += 16;
     });
   }
 
-  return y + altTotal + 24;
+  return y + altTotal + 12;
 };
 
 // ── Bloque de totales ─────────────────────────────────────────────────────────
 
 const _bloqueTotales = (doc, prestamo, y) => {
-  if (y > 700) { doc.addPage(); y = MARGIN; }
-
   const saldo      = Number(prestamo.valor_prestamo) - Number(prestamo.total_abonado);
   const esSaldado  = saldo <= 0;
 
@@ -492,25 +489,25 @@ const _bloqueTotales = (doc, prestamo, y) => {
   const colorTotalBg  = esSaldado ? C.verdeFondo : C.negro;
   const colorTotalTxt = esSaldado ? C.verde      : C.blanco;
 
-  rectFill(doc, MARGIN, y, COL_WIDTH, 48, colorTotalBg, 8);
-  doc.font(FONT.bold).fontSize(11).fillColor(colorTotalTxt)
-    .text(esSaldado ? 'PRÉSTAMO SALDADO' : 'SALDO PENDIENTE', MARGIN + 16, y + 16, {
+  rectFill(doc, MARGIN, y, COL_WIDTH, 36, colorTotalBg, 8);
+  doc.font(FONT.bold).fontSize(10).fillColor(colorTotalTxt)
+    .text(esSaldado ? 'PRÉSTAMO SALDADO' : 'SALDO PENDIENTE', MARGIN + 16, y + 11, {
       width: COL_WIDTH * 0.5, lineBreak: false,
     });
-  doc.font(FONT.bold).fontSize(16).fillColor(colorTotalTxt)
-    .text(formatCOP(Math.abs(saldo)), MARGIN, y + 12, {
+  doc.font(FONT.bold).fontSize(14).fillColor(colorTotalTxt)
+    .text(formatCOP(Math.abs(saldo)), MARGIN, y + 9, {
       width: COL_WIDTH - 16, align: 'right', lineBreak: false,
     });
 
-  y += 48 + 20;
+  y += 36 + 10;
 
   // Desglose
   y = labelSeccion(doc, y, 'Resumen');
 
-  const altBloque = 24 + 3 * 22;
+  const altBloque = 18 + 3 * 16;
   rectFillStroke(doc, MARGIN, y, COL_WIDTH, altBloque, C.grisFondo, C.grisBorde, 8);
 
-  let yFila = y + 12;
+  let yFila = y + 8;
 
   const filas = [
     { label: 'Valor del préstamo', val: formatCOP(prestamo.valor_prestamo), color: C.negro },
@@ -519,15 +516,15 @@ const _bloqueTotales = (doc, prestamo, y) => {
   ];
 
   filas.forEach((f, i) => {
-    if (i > 0) hLine(doc, yFila - 4, { x1: MARGIN + 14, x2: PAGE_WIDTH - MARGIN - 14, color: C.grisBorde, width: 0.4 });
-    doc.font(FONT.normal).fontSize(9).fillColor(C.grisOscuro)
+    if (i > 0) hLine(doc, yFila - 3, { x1: MARGIN + 14, x2: PAGE_WIDTH - MARGIN - 14, color: C.grisBorde, width: 0.4 });
+    doc.font(FONT.normal).fontSize(8.5).fillColor(C.grisOscuro)
       .text(f.label, MARGIN + 14, yFila, { width: COL_WIDTH * 0.5, lineBreak: false });
-    doc.font(FONT.bold).fontSize(9).fillColor(f.color)
+    doc.font(FONT.bold).fontSize(8.5).fillColor(f.color)
       .text(f.val, MARGIN, yFila, { width: COL_WIDTH - 14, align: 'right', lineBreak: false });
-    yFila += 22;
+    yFila += 16;
   });
 
-  return y + altBloque + 24;
+  return y + altBloque + 12;
 };
 
 // ── Bloque de garantías del producto ─────────────────────────────────────────
@@ -535,27 +532,25 @@ const _bloqueTotales = (doc, prestamo, y) => {
 const _bloqueGarantias = (doc, garantias, y) => {
   if (!garantias || garantias.length === 0) return y;
 
-  if (y > 650) { doc.addPage(); y = MARGIN; }
   y = labelSeccion(doc, y, 'Garantías del producto');
 
   garantias.forEach((g, i) => {
-    if (y > 710) { doc.addPage(); y = MARGIN; }
 
     const textoH = doc.font(FONT.normal).fontSize(8)
       .heightOfString(g.texto, { width: COL_WIDTH - 28 });
-    const bloqueH = 28 + textoH + 12;
+    const bloqueH = 20 + textoH + 8;
 
     rectFillStroke(doc, MARGIN, y, COL_WIDTH, bloqueH, i % 2 === 0 ? C.grisFondo : C.blanco, C.grisBorde, 6);
 
-    doc.font(FONT.bold).fontSize(9).fillColor(C.negro)
-      .text(g.titulo, MARGIN + 14, y + 10, { width: COL_WIDTH - 28 });
+    doc.font(FONT.bold).fontSize(8.5).fillColor(C.negro)
+      .text(g.titulo, MARGIN + 14, y + 6, { width: COL_WIDTH - 28 });
     doc.font(FONT.normal).fontSize(8).fillColor(C.grisOscuro)
-      .text(g.texto, MARGIN + 14, y + 26, { width: COL_WIDTH - 28 });
+      .text(g.texto, MARGIN + 14, y + 18, { width: COL_WIDTH - 28 });
 
-    y += bloqueH + 6;
+    y += bloqueH + 4;
   });
 
-  return y + 10;
+  return y + 6;
 };
 
 // ── Pie de página ─────────────────────────────────────────────────────────────
