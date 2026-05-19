@@ -47,7 +47,9 @@ const CAMPOS_EDICION = [
   { key: 'caracteristicas', label: 'Características' },
 ];
 
-const CAMPOS_DEFAULT = CAMPOS_EDICION.map((c) => c.key);
+const CAMPOS_DEFAULT = CAMPOS_EDICION
+  .map((c) => c.key)
+  .filter((k) => k !== 'proveedor' && k !== 'costo');
 
 const FORM_INICIAL = {
   nombre:                      '',
