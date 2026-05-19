@@ -27,6 +27,34 @@ const findAll = async (negocioId, filtro) => {
   return rows;
 };
 
+// Acreedores cuyos proveedores están en la lista permitida del usuario
+const findByProveedorIds = async (negocioId, proveedorIds, filtro) => {
+  if (!proveedorIds || !proveedorIds.length) return [];
+
+  let query = `
+    SELECT a.id, a.nombre, a.cedula, a.telefono, a.proveedor_id,
+           p.tipo AS proveedor_tipo,
+           COALESCE(SUM(CASE WHEN m.tipo = 'Cargo' THEN m.valor ELSE -m.valor END), 0) AS saldo
+    FROM acreedores a
+    JOIN proveedores p ON p.id = a.proveedor_id
+    LEFT JOIN movimientos_acreedor m ON m.acreedor_id = a.id
+    WHERE a.negocio_id = $1
+      AND a.proveedor_id = ANY($2::int[])
+      AND p.activo = TRUE
+  `;
+  const params = [negocioId, proveedorIds];
+
+  if (filtro) {
+    const filtroSeguro = filtro.toLowerCase().replace(/[%_\\]/g, '\\$&').slice(0, 100);
+    params.push(`%${filtroSeguro}%`);
+    query += ` AND (LOWER(a.nombre) LIKE $3 ESCAPE '\\' OR a.cedula LIKE $3 ESCAPE '\\')`;
+  }
+
+  query += ` GROUP BY a.id, p.tipo ORDER BY a.nombre`;
+  const { rows } = await pool.query(query, params);
+  return rows;
+};
+
 // Solo acreedores vinculados a proveedores tipo 'cruce'
 const findByCruces = async (negocioId, filtro) => {
   let query = `
@@ -339,7 +367,7 @@ const eliminarAbono = async (negocioId, acreedorId, movId) => {
 };
 
 module.exports = {
-  findAll, findByCruces, findById,
+  findAll, findByProveedorIds, findByCruces, findById,
   getMovimientos, getCargosAbiertos,
   getComprasConSaldo, getAbonosPorCargo,
   getSaldoAFavor, aplicarSaldoAFavor,

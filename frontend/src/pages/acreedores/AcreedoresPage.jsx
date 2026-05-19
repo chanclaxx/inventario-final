@@ -1597,10 +1597,8 @@ export default function AcreedoresPage() {
   });
 
   const { data: acreedoresData, isLoading } = useQuery({
-    queryKey: esAdmin ? ['acreedores', busqueda] : ['acreedores-cruces', busqueda],
-    queryFn:  () => esAdmin
-      ? getAcreedores(busqueda).then((r) => r.data.data)
-      : api.get('/acreedores/cruces', { params: { filtro: busqueda || undefined } }).then((r) => r.data.data),
+    queryKey: ['acreedores', busqueda],
+    queryFn:  () => getAcreedores(busqueda).then((r) => r.data.data),
   });
   const acreedores = Array.isArray(acreedoresData) ? acreedoresData : [];
 

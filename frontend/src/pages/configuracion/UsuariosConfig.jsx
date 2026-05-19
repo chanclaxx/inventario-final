@@ -96,13 +96,14 @@ function CheckboxCustom({ checked, onChange, color = 'indigo' }) {
 // ─── SelectorPermisosProveedores ──────────────────────────────────────────────
 
 function SelectorPermisosProveedores({ permisos, onChange, proveedores = [] }) {
-  const tieneVer   = permisos?.ver    ?? false;
-  const tieneCrear = permisos?.crear  ?? false;
-  const verTodos   = permisos?.ver_todos ?? true;
-  const verLista   = permisos?.ver_lista ?? [];
+  const tieneVer    = permisos?.ver         ?? false;
+  const tieneCrear  = permisos?.crear       ?? false;
+  const verTodos    = permisos?.ver_todos   ?? true;
+  const verLista    = permisos?.ver_lista   ?? [];
+  const verCompras  = permisos?.ver_compras ?? false;
 
   const update = (partial) => {
-    const base = permisos || { ver: false, ver_todos: true, ver_lista: [], crear: false };
+    const base = permisos || { ver: false, ver_todos: true, ver_lista: [], crear: false, ver_compras: false };
     onChange({ ...base, ...partial });
   };
 
@@ -201,8 +202,17 @@ function SelectorPermisosProveedores({ permisos, onChange, proveedores = [] }) {
         <span className="text-sm text-gray-700">Puede crear proveedores</span>
       </label>
 
+      {/* ── Ver historial de compras ── */}
+      <label className="flex items-center gap-2.5 cursor-pointer select-none">
+        <CheckboxCustom
+          checked={verCompras}
+          onChange={() => update({ ver_compras: !verCompras })}
+        />
+        <span className="text-sm text-gray-700">Puede ver historial de compras</span>
+      </label>
+
       {/* Nota: si no tiene ningún permiso activo, mostrar hint */}
-      {!tieneVer && !tieneCrear && (
+      {!tieneVer && !tieneCrear && !verCompras && (
         <p className="text-xs text-gray-400 bg-white rounded-lg px-3 py-1.5 border border-gray-100">
           Sin permisos de proveedores — el módulo estará vacío para este usuario.
         </p>
@@ -460,7 +470,8 @@ function FilaUsuario({ usuario, onEditar, onToggleActivo }) {
           {tienePermProv && (
             <span className="text-xs text-indigo-600 flex items-center gap-1">
               <Truck size={10} />
-              {pp.ver && pp.crear ? 'Ver+crear prov.' : pp.crear ? 'Crear prov.' : 'Ver prov.'}
+              {[pp.ver && 'Ver', pp.crear && 'Crear', pp.ver_compras && 'Compras']
+                .filter(Boolean).join('+') + ' prov.'}
             </span>
           )}
           {tienePermEditar && (

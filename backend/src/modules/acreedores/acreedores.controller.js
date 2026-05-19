@@ -2,12 +2,15 @@ const service = require('./acreedores.service');
 
 const getAcreedores = async (req, res, next) => {
   try {
-    const data = await service.getAcreedores(req.user.negocio_id, req.query.filtro);
+    const { negocio_id, rol, permisos_proveedores } = req.user;
+    const filtro = req.query.filtro;
+    const data = rol === 'admin_negocio'
+      ? await service.getAcreedores(negocio_id, filtro)
+      : await service.getAcreedoresParaUsuario(negocio_id, permisos_proveedores, filtro);
     res.json({ ok: true, data });
   } catch (err) { next(err); }
 };
 
-// Solo acreedores vinculados a cruces — para supervisores
 const getAcreedoresCruces = async (req, res, next) => {
   try {
     const data = await service.getAcreedoresCruces(req.user.negocio_id, req.query.filtro);

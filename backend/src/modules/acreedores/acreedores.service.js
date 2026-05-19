@@ -3,7 +3,14 @@ const repo = require('./acreedores.repository');
 
 const getAcreedores = (negocioId, filtro) => repo.findAll(negocioId, filtro);
 
-// Solo acreedores vinculados a cruces — para supervisores
+// Para usuarios no-admin: filtra por los proveedores que tienen permitidos
+const getAcreedoresParaUsuario = (negocioId, permisos, filtro) => {
+  if (!permisos || !permisos.ver) return Promise.resolve([]);
+  if (permisos.ver_todos) return repo.findAll(negocioId, filtro);
+  return repo.findByProveedorIds(negocioId, permisos.ver_lista || [], filtro);
+};
+
+// Solo acreedores vinculados a cruces — mantenida por compatibilidad interna
 const getAcreedoresCruces = (negocioId, filtro) => repo.findByCruces(negocioId, filtro);
 
 const getAcreedorById = async (negocioId, id) => {
@@ -113,7 +120,7 @@ const getHistorial = async (negocioId, acreedorId) => {
 };
 
 module.exports = {
-  getAcreedores, getAcreedoresCruces, getAcreedorById,
+  getAcreedores, getAcreedoresParaUsuario, getAcreedoresCruces, getAcreedorById,
   crearAcreedor, registrarMovimiento, getCargosAbiertos,
   getComprasConSaldo, getAbonosPorCargo,
   getSaldoAFavor, aplicarSaldoAFavor,
