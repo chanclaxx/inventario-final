@@ -236,7 +236,7 @@ const buscarComprasPorIMEI = async (imei, negocioId) => {
     FROM lineas_compra lc
     JOIN compras     c  ON c.id  = lc.compra_id
     JOIN sucursales  su ON su.id = c.sucursal_id
-    JOIN proveedores p  ON p.id  = c.proveedor_id
+    JOIN proveedores p  ON p.id  = c.proveedor_id AND p.activo = TRUE
     LEFT JOIN usuarios u ON u.id = c.usuario_id
     WHERE lc.imei = $1 AND su.negocio_id = $2
     ORDER BY c.fecha DESC
@@ -269,7 +269,7 @@ const buscarComprasPorTexto = async (q, negocioId, sucursalId) => {
     FROM lineas_compra lc
     JOIN compras     c  ON c.id  = lc.compra_id
     JOIN sucursales  su ON su.id = c.sucursal_id
-    JOIN proveedores p  ON p.id  = c.proveedor_id
+    JOIN proveedores p  ON p.id  = c.proveedor_id AND p.activo = TRUE
     LEFT JOIN usuarios u ON u.id = c.usuario_id
     WHERE su.negocio_id = $1
       AND (
