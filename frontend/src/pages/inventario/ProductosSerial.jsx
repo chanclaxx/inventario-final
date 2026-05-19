@@ -29,6 +29,16 @@ function parsearColoresConfig(configData) {
   }
 }
 
+// ─── Helper: leer lista de características desde config ──────────────────────
+function parsearCaracteristicasConfig(configData) {
+  try {
+    const lista = JSON.parse(configData?.caracteristicas_serial_lista || '[]');
+    return Array.isArray(lista) ? lista : [];
+  } catch {
+    return [];
+  }
+}
+
 // ─── Helper: agrupar seriales por color ──────────────────────────────────────
 function agruparPorColor(seriales, coloresConfig) {
   const grupos = coloresConfig
@@ -46,6 +56,29 @@ function agruparPorColor(seriales, coloresConfig) {
   }
 
   return grupos;
+}
+
+// ─── Helper: extraer valores únicos por característica ───────────────────────
+function extraerValoresCaracteristica(seriales, nombreClave) {
+  const valores = new Set();
+  for (const s of seriales) {
+    const val = s.caracteristicas?.[nombreClave];
+    if (val != null && String(val).trim()) {
+      valores.add(String(val).trim());
+    }
+  }
+  return [...valores].sort();
+}
+
+// ─── Helper: aplicar filtros de características ──────────────────────────────
+function aplicarFiltrosCaracteristicas(seriales, filtros) {
+  const entradas = Object.entries(filtros).filter(([, v]) => v !== '');
+  if (entradas.length === 0) return seriales;
+  return seriales.filter((s) =>
+    entradas.every(([clave, valor]) =>
+      String(s.caracteristicas?.[clave] ?? '').trim() === valor
+    )
+  );
 }
 
 // ─── Cabecera de grupo de color ───────────────────────────────────────────────
@@ -138,6 +171,111 @@ function TarjetaSerial({ serial, precio, onAgregar, onEliminar, onEditar }) {
           <span className="hidden sm:inline">{prestado ? 'Prestado' : 'Agregar'}</span>
         </Button>
       </div>
+    </div>
+  );
+}
+
+// ─── Filtros de características ───────────────────────────────────────────────
+function FiltrosCaracteristicas({ seriales, caracteristicasLista, filtros, onFiltroChange, onLimpiar }) {
+  const hayFiltrosActivos = Object.values(filtros).some((v) => v !== '');
+
+  // Solo mostrar claves que tienen al menos 1 valor en los seriales actuales
+  const clavesConOpciones = caracteristicasLista
+    .map((nombre) => ({
+      nombre,
+      opciones: extraerValoresCaracteristica(seriales, nombre),
+    }))
+    .filter((c) => c.opciones.length >= 1);
+
+  if (clavesConOpciones.length === 0) return null;
+
+  return (
+    <div className="flex flex-col gap-2 p-3 bg-gray-50 border border-gray-100 rounded-xl">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-medium text-gray-400 flex items-center gap-1.5">
+          <SlidersHorizontal size={12} />
+          Filtrar por características
+        </span>
+        {hayFiltrosActivos && (
+          <button
+            onClick={onLimpiar}
+            className="text-xs text-blue-500 hover:text-blue-700 transition-colors flex items-center gap-1"
+          >
+            <X size={11} />
+            Limpiar filtros
+          </button>
+        )}
+      </div>
+
+      <div className="flex flex-col gap-2">
+        {clavesConOpciones.map(({ nombre, opciones }) => {
+          const valorActivo = filtros[nombre] ?? '';
+          return (
+            <div key={nombre} className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs text-gray-500 font-medium w-20 flex-shrink-0 truncate" title={nombre}>
+                {nombre}:
+              </span>
+              {/* Chips para ≤4 opciones, selector para más */}
+              {opciones.length <= 4 ? (
+                <div className="flex items-center gap-1 flex-wrap">
+                  {opciones.map((op) => {
+                    const activo = valorActivo === op;
+                    return (
+                      <button
+                        key={op}
+                        onClick={() => onFiltroChange(nombre, activo ? '' : op)}
+                        className={`text-xs px-2.5 py-1 rounded-lg border transition-all font-medium
+                          ${activo
+                            ? 'bg-blue-600 border-blue-600 text-white shadow-sm'
+                            : 'bg-white border-gray-200 text-gray-600 hover:border-blue-300 hover:text-blue-600'
+                          }`}
+                      >
+                        {op}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <select
+                  value={valorActivo}
+                  onChange={(e) => onFiltroChange(nombre, e.target.value)}
+                  className={`text-xs px-2.5 py-1 rounded-lg border transition-all
+                    ${valorActivo
+                      ? 'border-blue-400 bg-blue-50 text-blue-700 font-medium'
+                      : 'border-gray-200 bg-white text-gray-600'
+                    } focus:outline-none focus:ring-2 focus:ring-blue-500`}
+                >
+                  <option value="">Todos</option>
+                  {opciones.map((op) => (
+                    <option key={op} value={op}>{op}</option>
+                  ))}
+                </select>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Chips resumen de filtros activos */}
+      {hayFiltrosActivos && (
+        <div className="flex flex-wrap gap-1 pt-1 border-t border-gray-200">
+          {Object.entries(filtros)
+            .filter(([, v]) => v !== '')
+            .map(([clave, valor]) => (
+              <span key={clave}
+                className="inline-flex items-center gap-1 text-xs bg-blue-50 text-blue-700
+                  border border-blue-200 px-2 py-0.5 rounded-full">
+                <span className="font-medium">{clave}:</span>{valor}
+                <button
+                  onClick={() => onFiltroChange(clave, '')}
+                  className="hover:text-blue-900 ml-0.5 transition-colors"
+                >
+                  <X size={10} />
+                </button>
+              </span>
+            ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -448,6 +586,7 @@ export function ProductosSerial({ onAgregarProducto }) {
   const [serialAEliminar,      setSerialAEliminar]      = useState(null);
   const [serialAEditar,        setSerialAEditar]        = useState(null);
   const [productoAEditar,      setProductoAEditar]      = useState(null);
+  const [filtrosCaracteristicas, setFiltrosCaracteristicas] = useState({});
 
   const { data: productosData, isLoading } = useQuery({
     queryKey:  ['productos-serial', ...sucursalKey],
@@ -475,9 +614,11 @@ export function ProductosSerial({ onAgregarProducto }) {
     enabled:  sucursalLista,
   });
 
-  const coloresActivo  = configData?.colores_serial_activo === '1';
-  const coloresConfig  = parsearColoresConfig(configData);
-  const pinEliminacion = configData?.pin_eliminacion ?? '';
+  const coloresActivo           = configData?.colores_serial_activo === '1';
+  const coloresConfig           = parsearColoresConfig(configData);
+  const caracteristicasActivo   = configData?.caracteristicas_serial_activo === '1';
+  const caracteristicasLista    = parsearCaracteristicasConfig(configData);
+  const pinEliminacion          = configData?.pin_eliminacion ?? '';
 
   const agregarItem = useCarritoStore((s) => s.agregarItem);
 
@@ -517,15 +658,26 @@ export function ProductosSerial({ onAgregarProducto }) {
       : []),
   ];
 
-  const serialesFiltrados = seriales.filter((s) =>
+  // Filtro por IMEI primero, luego por características encima
+  const serialesFiltradosPorImei = seriales.filter((s) =>
     s.imei.toLowerCase().includes(busquedaSerial.toLowerCase())
   );
+  const serialesFiltrados = aplicarFiltrosCaracteristicas(
+    serialesFiltradosPorImei,
+    filtrosCaracteristicas
+  );
+
   const disponibles       = serialesFiltrados.filter((s) => !s.vendido && !s.prestado);
   const prestados         = serialesFiltrados.filter((s) =>  s.prestado && !s.vendido);
   const vendidos          = serialesFiltrados.filter((s) =>  s.vendido);
   const serialesOrdenados = [...disponibles, ...prestados, ...vendidos];
 
-  const handleSeleccionar = (p) => { setProductoSeleccionado(p); setBusquedaSerial(''); };
+  // Limpiar búsqueda serial y filtros al cambiar producto
+  const handleSeleccionar = (p) => {
+    setProductoSeleccionado(p);
+    setBusquedaSerial('');
+    setFiltrosCaracteristicas({});
+  };
 
   const handleAgregarSerial = (serial) => {
     if (serial.prestado) return;
@@ -572,6 +724,19 @@ export function ProductosSerial({ onAgregarProducto }) {
       </div>
 
       <SearchInput value={busquedaSerial} onChange={setBusquedaSerial} placeholder="Buscar IMEI..." />
+
+      {/* Filtros de características — solo si están activas en config */}
+      {caracteristicasActivo && caracteristicasLista.length > 0 && (
+        <FiltrosCaracteristicas
+          seriales={seriales}
+          caracteristicasLista={caracteristicasLista}
+          filtros={filtrosCaracteristicas}
+          onFiltroChange={(clave, valor) =>
+            setFiltrosCaracteristicas((prev) => ({ ...prev, [clave]: valor }))
+          }
+          onLimpiar={() => setFiltrosCaracteristicas({})}
+        />
+      )}
 
       {serialesOrdenados.length > 0 && (
         <div className="flex items-center gap-3 px-1 flex-wrap">
