@@ -99,8 +99,16 @@ const updatePrecio = async (productoId, precio) => {
 
 const getSeriales = async (productoId, vendido) => {
   const { rows } = await pool.query(`
-    SELECT s.*
+    SELECT s.*,
+      CASE
+        WHEN s.prestado = true
+        THEN COALESCE(pr.nombre, c.nombre, p.prestatario)
+        ELSE NULL
+      END AS prestado_a
     FROM seriales s
+    LEFT JOIN prestamos      p  ON p.imei  = s.imei AND p.estado = 'Activo'
+    LEFT JOIN prestatarios   pr ON pr.id   = p.prestatario_id
+    LEFT JOIN clientes       c  ON c.id    = p.cliente_id
     WHERE s.producto_id = $1
       AND ($2::boolean IS NULL OR s.vendido = $2)
     ORDER BY s.fecha_entrada DESC

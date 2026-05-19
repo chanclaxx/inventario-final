@@ -145,8 +145,10 @@ function TarjetaSerial({ serial, precio, onAgregar, onEliminar, onEditar }) {
           {serial.cliente_origen && !prestado && (
             <Badge variant="purple">Retoma: {serial.cliente_origen}</Badge>
           )}
-          {prestado && serial.cliente_origen && (
-            <span className="text-xs text-blue-500">Prestado a: {serial.cliente_origen}</span>
+          {prestado && serial.prestado_a && (
+            <span className="text-xs font-semibold text-blue-600">
+              → {serial.prestado_a}
+            </span>
           )}
         </div>
         {serial.caracteristicas && Object.keys(serial.caracteristicas).length > 0 && (
