@@ -58,27 +58,45 @@ function agruparPorColor(seriales, coloresConfig) {
   return grupos;
 }
 
-// ─── Helper: extraer valores únicos por característica ───────────────────────
-function extraerValoresCaracteristica(seriales, nombreClave) {
-  const valores = new Set();
-  for (const s of seriales) {
-    const val = s.caracteristicas?.[nombreClave];
-    if (val != null && String(val).trim()) {
-      valores.add(String(val).trim());
+// ─── Helper: construir scopes de búsqueda disponibles ────────────────────────
+function extraerScopesDisponibles(seriales, caracteristicasLista, coloresActivo) {
+  const scopes = [
+    { key: 'todo',  label: 'Todo' },
+    { key: 'imei',  label: 'IMEI' },
+  ];
+  if (coloresActivo && seriales.some((s) => s.color)) {
+    scopes.push({ key: 'color', label: 'Color' });
+  }
+  for (const nombre of caracteristicasLista) {
+    if (seriales.some((s) => {
+      const v = s.caracteristicas?.[nombre];
+      return v != null && String(v).trim();
+    })) {
+      scopes.push({ key: `car:${nombre}`, label: nombre });
     }
   }
-  return [...valores].sort();
+  return scopes;
 }
 
-// ─── Helper: aplicar filtros de características ──────────────────────────────
-function aplicarFiltrosCaracteristicas(seriales, filtros) {
-  const entradas = Object.entries(filtros).filter(([, v]) => v !== '');
-  if (entradas.length === 0) return seriales;
-  return seriales.filter((s) =>
-    entradas.every(([clave, valor]) =>
-      String(s.caracteristicas?.[clave] ?? '').trim() === valor
-    )
-  );
+// ─── Helper: filtrar seriales según scope y texto ────────────────────────────
+function filtrarPorScope(seriales, busqueda, scope) {
+  if (!busqueda.trim()) return seriales;
+  const q = busqueda.toLowerCase().trim();
+  if (scope === 'todo') {
+    return seriales.filter((s) =>
+      s.imei.toLowerCase().includes(q) ||
+      (s.color ?? '').toLowerCase().includes(q) ||
+      (s.cliente_origen ?? '').toLowerCase().includes(q) ||
+      Object.values(s.caracteristicas || {}).some((v) => String(v).toLowerCase().includes(q))
+    );
+  }
+  if (scope === 'imei')  return seriales.filter((s) => s.imei.toLowerCase().includes(q));
+  if (scope === 'color') return seriales.filter((s) => (s.color ?? '').toLowerCase().includes(q));
+  if (scope.startsWith('car:')) {
+    const clave = scope.slice(4);
+    return seriales.filter((s) => String(s.caracteristicas?.[clave] ?? '').toLowerCase().includes(q));
+  }
+  return seriales;
 }
 
 // ─── Cabecera de grupo de color ───────────────────────────────────────────────
@@ -175,105 +193,52 @@ function TarjetaSerial({ serial, precio, onAgregar, onEliminar, onEditar }) {
   );
 }
 
-// ─── Filtros de características ───────────────────────────────────────────────
-function FiltrosCaracteristicas({ seriales, caracteristicasLista, filtros, onFiltroChange, onLimpiar }) {
-  const hayFiltrosActivos = Object.values(filtros).some((v) => v !== '');
-
-  // Solo mostrar claves que tienen al menos 1 valor en los seriales actuales
-  const clavesConOpciones = caracteristicasLista
-    .map((nombre) => ({
-      nombre,
-      opciones: extraerValoresCaracteristica(seriales, nombre),
-    }))
-    .filter((c) => c.opciones.length >= 1);
-
-  if (clavesConOpciones.length === 0) return null;
+// ─── Buscador unificado con selector de scope ────────────────────────────────
+function BuscadorConScope({ seriales, caracteristicasLista, coloresActivo, busqueda, onBusquedaChange, scope, onScopeChange }) {
+  const scopes     = extraerScopesDisponibles(seriales, caracteristicasLista, coloresActivo);
+  const scopeLabel = scopes.find((s) => s.key === scope)?.label ?? 'Todo';
+  const placeholder = scope === 'todo'
+    ? 'Buscar IMEI, color, características...'
+    : `Buscar por ${scopeLabel}...`;
 
   return (
-    <div className="flex flex-col gap-2 p-3 bg-gray-50 border border-gray-100 rounded-xl">
-      <div className="flex items-center justify-between">
-        <span className="text-xs font-medium text-gray-400 flex items-center gap-1.5">
-          <SlidersHorizontal size={12} />
-          Filtrar por características
-        </span>
-        {hayFiltrosActivos && (
+    <div className="flex flex-col gap-2">
+      <div className="relative">
+        <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+        <input
+          type="text"
+          value={busqueda}
+          onChange={(e) => onBusquedaChange(e.target.value)}
+          placeholder={placeholder}
+          className="w-full pl-9 pr-8 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm
+            focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white focus:border-blue-300
+            transition-all placeholder:text-gray-400"
+        />
+        {busqueda && (
           <button
-            onClick={onLimpiar}
-            className="text-xs text-blue-500 hover:text-blue-700 transition-colors flex items-center gap-1"
+            onClick={() => onBusquedaChange('')}
+            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-300 hover:text-gray-500 transition-colors"
           >
-            <X size={11} />
-            Limpiar filtros
+            <X size={14} />
           </button>
         )}
       </div>
 
-      <div className="flex flex-col gap-2">
-        {clavesConOpciones.map(({ nombre, opciones }) => {
-          const valorActivo = filtros[nombre] ?? '';
-          return (
-            <div key={nombre} className="flex items-center gap-2 flex-wrap">
-              <span className="text-xs text-gray-500 font-medium w-20 flex-shrink-0 truncate" title={nombre}>
-                {nombre}:
-              </span>
-              {/* Chips para ≤4 opciones, selector para más */}
-              {opciones.length <= 4 ? (
-                <div className="flex items-center gap-1 flex-wrap">
-                  {opciones.map((op) => {
-                    const activo = valorActivo === op;
-                    return (
-                      <button
-                        key={op}
-                        onClick={() => onFiltroChange(nombre, activo ? '' : op)}
-                        className={`text-xs px-2.5 py-1 rounded-lg border transition-all font-medium
-                          ${activo
-                            ? 'bg-blue-600 border-blue-600 text-white shadow-sm'
-                            : 'bg-white border-gray-200 text-gray-600 hover:border-blue-300 hover:text-blue-600'
-                          }`}
-                      >
-                        {op}
-                      </button>
-                    );
-                  })}
-                </div>
-              ) : (
-                <select
-                  value={valorActivo}
-                  onChange={(e) => onFiltroChange(nombre, e.target.value)}
-                  className={`text-xs px-2.5 py-1 rounded-lg border transition-all
-                    ${valorActivo
-                      ? 'border-blue-400 bg-blue-50 text-blue-700 font-medium'
-                      : 'border-gray-200 bg-white text-gray-600'
-                    } focus:outline-none focus:ring-2 focus:ring-blue-500`}
-                >
-                  <option value="">Todos</option>
-                  {opciones.map((op) => (
-                    <option key={op} value={op}>{op}</option>
-                  ))}
-                </select>
-              )}
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Chips resumen de filtros activos */}
-      {hayFiltrosActivos && (
-        <div className="flex flex-wrap gap-1 pt-1 border-t border-gray-200">
-          {Object.entries(filtros)
-            .filter(([, v]) => v !== '')
-            .map(([clave, valor]) => (
-              <span key={clave}
-                className="inline-flex items-center gap-1 text-xs bg-blue-50 text-blue-700
-                  border border-blue-200 px-2 py-0.5 rounded-full">
-                <span className="font-medium">{clave}:</span>{valor}
-                <button
-                  onClick={() => onFiltroChange(clave, '')}
-                  className="hover:text-blue-900 ml-0.5 transition-colors"
-                >
-                  <X size={10} />
-                </button>
-              </span>
-            ))}
+      {scopes.length > 2 && (
+        <div className="flex gap-1.5 flex-wrap">
+          {scopes.map((s) => (
+            <button
+              key={s.key}
+              onClick={() => { onScopeChange(s.key); onBusquedaChange(''); }}
+              className={`text-xs px-2.5 py-1 rounded-lg border transition-all font-medium
+                ${scope === s.key
+                  ? 'bg-blue-600 border-blue-600 text-white shadow-sm'
+                  : 'bg-white border-gray-200 text-gray-500 hover:border-blue-300 hover:text-blue-600'
+                }`}
+            >
+              {s.label}
+            </button>
+          ))}
         </div>
       )}
     </div>
@@ -586,7 +551,7 @@ export function ProductosSerial({ onAgregarProducto }) {
   const [serialAEliminar,      setSerialAEliminar]      = useState(null);
   const [serialAEditar,        setSerialAEditar]        = useState(null);
   const [productoAEditar,      setProductoAEditar]      = useState(null);
-  const [filtrosCaracteristicas, setFiltrosCaracteristicas] = useState({});
+  const [scopeBusqueda,        setScopeBusqueda]        = useState('todo');
 
   const { data: productosData, isLoading } = useQuery({
     queryKey:  ['productos-serial', ...sucursalKey],
@@ -658,25 +623,17 @@ export function ProductosSerial({ onAgregarProducto }) {
       : []),
   ];
 
-  // Filtro por IMEI primero, luego por características encima
-  const serialesFiltradosPorImei = seriales.filter((s) =>
-    s.imei.toLowerCase().includes(busquedaSerial.toLowerCase())
-  );
-  const serialesFiltrados = aplicarFiltrosCaracteristicas(
-    serialesFiltradosPorImei,
-    filtrosCaracteristicas
-  );
+  const serialesFiltrados = filtrarPorScope(seriales, busquedaSerial, scopeBusqueda);
 
   const disponibles       = serialesFiltrados.filter((s) => !s.vendido && !s.prestado);
   const prestados         = serialesFiltrados.filter((s) =>  s.prestado && !s.vendido);
   const vendidos          = serialesFiltrados.filter((s) =>  s.vendido);
   const serialesOrdenados = [...disponibles, ...prestados, ...vendidos];
 
-  // Limpiar búsqueda serial y filtros al cambiar producto
   const handleSeleccionar = (p) => {
     setProductoSeleccionado(p);
     setBusquedaSerial('');
-    setFiltrosCaracteristicas({});
+    setScopeBusqueda('todo');
   };
 
   const handleAgregarSerial = (serial) => {
@@ -723,20 +680,15 @@ export function ProductosSerial({ onAgregarProducto }) {
         )}
       </div>
 
-      <SearchInput value={busquedaSerial} onChange={setBusquedaSerial} placeholder="Buscar IMEI..." />
-
-      {/* Filtros de características — solo si están activas en config */}
-      {caracteristicasActivo && caracteristicasLista.length > 0 && (
-        <FiltrosCaracteristicas
-          seriales={seriales}
-          caracteristicasLista={caracteristicasLista}
-          filtros={filtrosCaracteristicas}
-          onFiltroChange={(clave, valor) =>
-            setFiltrosCaracteristicas((prev) => ({ ...prev, [clave]: valor }))
-          }
-          onLimpiar={() => setFiltrosCaracteristicas({})}
-        />
-      )}
+      <BuscadorConScope
+        seriales={seriales}
+        caracteristicasLista={caracteristicasActivo ? caracteristicasLista : []}
+        coloresActivo={coloresActivo}
+        busqueda={busquedaSerial}
+        onBusquedaChange={setBusquedaSerial}
+        scope={scopeBusqueda}
+        onScopeChange={setScopeBusqueda}
+      />
 
       {serialesOrdenados.length > 0 && (
         <div className="flex items-center gap-3 px-1 flex-wrap">
