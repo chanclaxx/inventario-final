@@ -698,8 +698,13 @@ export function ProductosSerial({ onAgregarProducto }) {
           {prestados.length > 0 && (
             <span className="text-xs text-blue-500 font-medium">· {prestados.length} prestado(s)</span>
           )}
-          {esAdmin && (
-            <span className="text-xs text-gray-300 italic hidden sm:inline">
+          {busquedaSerial && (
+            <span className="text-xs text-gray-400 ml-auto">
+              {serialesOrdenados.length} de {seriales.length} resultado{serialesOrdenados.length !== 1 ? 's' : ''}
+            </span>
+          )}
+          {esAdmin && !busquedaSerial && (
+            <span className="text-xs text-gray-300 italic hidden sm:inline ml-auto">
               · Doble click en IMEI para editar
             </span>
           )}
