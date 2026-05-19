@@ -39,8 +39,18 @@ const buscarCompras = async (req, res, next) => {
     if (!q || q.length < 2) {
       return res.status(400).json({ ok: false, error: 'Ingresa al menos 2 caracteres' });
     }
-    const { negocio_id, rol } = req.user;
-    const data = await service.buscarCompras(q, modo, negocio_id, req.sucursal_id, rol);
+    const { negocio_id, rol, permisos_proveedores } = req.user;
+
+    // Si el usuario tiene lista restringida de proveedores, solo buscar en esos
+    let proveedorIds = null;
+    if (rol !== 'admin_negocio' && permisos_proveedores
+        && !permisos_proveedores.ver_todos
+        && Array.isArray(permisos_proveedores.ver_lista)
+        && permisos_proveedores.ver_lista.length > 0) {
+      proveedorIds = permisos_proveedores.ver_lista;
+    }
+
+    const data = await service.buscarCompras(q, modo, negocio_id, req.sucursal_id, rol, proveedorIds);
     res.json({ ok: true, data });
   } catch (err) {
     next(err);

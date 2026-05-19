@@ -134,19 +134,19 @@ const buscarProductos = async (q, negocioId, sucursalId, rol) => {
 
 // ─── Búsqueda de compras a proveedores ───────────────────────────────────────
 
-const buscarCompras = async (q, modo, negocioId, sucursalId, rol) => {
+const buscarCompras = async (q, modo, negocioId, sucursalId, rol, proveedorIds = null) => {
   const admin = _esAdmin(rol);
   const filtroSucursal = admin ? null : sucursalId;
 
   if (modo === 'imei') {
     const [lineas, retomas] = await Promise.all([
-      repo.buscarComprasPorIMEI(q, negocioId),
+      repo.buscarComprasPorIMEI(q, negocioId, proveedorIds),
       repo.getRetomasPorIMEI(q, negocioId),
     ]);
     return { lineas, retomas };
   }
 
-  const lineas = await repo.buscarComprasPorTexto(q, negocioId, filtroSucursal);
+  const lineas = await repo.buscarComprasPorTexto(q, negocioId, filtroSucursal, proveedorIds);
   return { lineas, retomas: [] };
 };
 

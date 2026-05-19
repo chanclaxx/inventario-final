@@ -217,7 +217,14 @@ const getHistorialCantidad = async (productoId, negocioId) => {
 
 // ─── Búsqueda de compras a proveedores ───────────────────────────────────────
 
-const buscarComprasPorIMEI = async (imei, negocioId) => {
+const buscarComprasPorIMEI = async (imei, negocioId, proveedorIds = null) => {
+  const params = [imei, negocioId];
+  let filtroProveedores = '';
+  if (proveedorIds && proveedorIds.length > 0) {
+    params.push(proveedorIds);
+    filtroProveedores = `AND c.proveedor_id = ANY($${params.length}::int[])`;
+  }
+
   const { rows } = await pool.query(`
     SELECT
       lc.id           AS linea_id,
@@ -239,17 +246,26 @@ const buscarComprasPorIMEI = async (imei, negocioId) => {
     JOIN proveedores p  ON p.id  = c.proveedor_id AND p.activo = TRUE
     LEFT JOIN usuarios u ON u.id = c.usuario_id
     WHERE lc.imei = $1 AND su.negocio_id = $2
+      ${filtroProveedores}
     ORDER BY c.fecha DESC
-  `, [imei, negocioId]);
+  `, params);
   return rows;
 };
 
-const buscarComprasPorTexto = async (q, negocioId, sucursalId) => {
-  const filtro = sucursalId ? 'AND c.sucursal_id = $3' : '';
+const buscarComprasPorTexto = async (q, negocioId, sucursalId, proveedorIds = null) => {
   const qNorm  = normalizarBusqueda(q);
-  const params = sucursalId
-    ? [negocioId, `%${qNorm}%`, sucursalId]
-    : [negocioId, `%${qNorm}%`];
+  const params = [negocioId, `%${qNorm}%`];
+  let extraFiltros = '';
+
+  if (sucursalId) {
+    params.push(sucursalId);
+    extraFiltros += ` AND c.sucursal_id = $${params.length}`;
+  }
+
+  if (proveedorIds && proveedorIds.length > 0) {
+    params.push(proveedorIds);
+    extraFiltros += ` AND c.proveedor_id = ANY($${params.length}::int[])`;
+  }
 
   const { rows } = await pool.query(`
     SELECT
@@ -278,7 +294,7 @@ const buscarComprasPorTexto = async (q, negocioId, sucursalId) => {
         OR ${sn('p.nombre')}                      LIKE $2
         OR LOWER(COALESCE(c.numero_factura, ''))  LIKE $2
       )
-      ${filtro}
+      ${extraFiltros}
     ORDER BY c.fecha DESC
     LIMIT 60
   `, params);
