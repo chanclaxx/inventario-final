@@ -64,10 +64,12 @@ const getComprasByProveedor = async (req, res, next) => {
     if (ids !== null && !ids.includes(Number(req.params.proveedorId))) {
       return res.status(403).json({ ok: false, error: 'Sin acceso a las compras de este proveedor' });
     }
-    const sucursalId = req.todasSucursales ? null : req.sucursal_id;
+    // El historial de un proveedor es a nivel de negocio, no de sucursal:
+    // un supervisor debe ver TODAS las compras de sus proveedores asignados
+    // independientemente de qué sucursal registró la compra.
     const data = await service.getComprasByProveedor(
       req.params.proveedorId,
-      sucursalId,
+      null,
       req.user.negocio_id,
     );
     res.json({ ok: true, data });
@@ -76,7 +78,9 @@ const getComprasByProveedor = async (req, res, next) => {
 
 const getComprasPaginadas = async (req, res, next) => {
   try {
-    const sucursalId = req.todasSucursales ? null : req.sucursal_id;
+    const ids = _proveedorIds(req.user);
+    // Usuarios con ver_lista ven compras de sus proveedores en todo el negocio
+    const sucursalId = ids !== null ? null : (req.todasSucursales ? null : req.sucursal_id);
     const { page, limit, busqueda, fechaDesde, fechaHasta, metodo, estado } = req.query;
     const data = await service.getComprasPaginadas(sucursalId, req.user.negocio_id, {
       page:         parseInt(page)  || 1,
@@ -86,7 +90,7 @@ const getComprasPaginadas = async (req, res, next) => {
       fechaHasta:   fechaHasta || null,
       metodo:       metodo     || null,
       estado:       estado     || null,
-      proveedorIds: _proveedorIds(req.user),
+      proveedorIds: ids,
     });
     res.json({ ok: true, data });
   } catch (err) { next(err); }
