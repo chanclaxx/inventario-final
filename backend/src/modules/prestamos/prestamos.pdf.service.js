@@ -530,6 +530,34 @@ const _bloqueTotales = (doc, prestamo, y) => {
   return y + altBloque + 24;
 };
 
+// ── Bloque de garantías del producto ─────────────────────────────────────────
+
+const _bloqueGarantias = (doc, garantias, y) => {
+  if (!garantias || garantias.length === 0) return y;
+
+  if (y > 650) { doc.addPage(); y = MARGIN; }
+  y = labelSeccion(doc, y, 'Garantías del producto');
+
+  garantias.forEach((g, i) => {
+    if (y > 710) { doc.addPage(); y = MARGIN; }
+
+    const textoH = doc.font(FONT.normal).fontSize(8)
+      .heightOfString(g.texto, { width: COL_WIDTH - 28 });
+    const bloqueH = 28 + textoH + 12;
+
+    rectFillStroke(doc, MARGIN, y, COL_WIDTH, bloqueH, i % 2 === 0 ? C.grisFondo : C.blanco, C.grisBorde, 6);
+
+    doc.font(FONT.bold).fontSize(9).fillColor(C.negro)
+      .text(g.titulo, MARGIN + 14, y + 10, { width: COL_WIDTH - 28 });
+    doc.font(FONT.normal).fontSize(8).fillColor(C.grisOscuro)
+      .text(g.texto, MARGIN + 14, y + 26, { width: COL_WIDTH - 28 });
+
+    y += bloqueH + 6;
+  });
+
+  return y + 10;
+};
+
 // ── Pie de página ─────────────────────────────────────────────────────────────
 
 const _pie = (doc, prestamoId, negocioNombre, fechaGeneracion, totalPages) => {
@@ -578,8 +606,9 @@ const generarPdfPrestamoIndividual = async ({ prestamoId, negocioId, negocioNomb
     WHERE p.id = $1
   `, [prestamoId]);
 
-  const datos  = extra[0];
-  const abonos = await repo.getAbonos(prestamoId);
+  const datos     = extra[0];
+  const abonos    = await repo.getAbonos(prestamoId);
+  const garantias = await repo.getGarantiasPorProducto(datos.producto_id, negocioId);
 
   const fechaGeneracion = new Date().toLocaleDateString('es-CO', {
     day: '2-digit', month: '2-digit', year: 'numeric',
@@ -599,6 +628,7 @@ const generarPdfPrestamoIndividual = async ({ prestamoId, negocioId, negocioNomb
   y     = _tablaDatosProducto(doc, datos, y);
   y     = _tablaAbonos(doc, abonos, y);
   y     = _bloqueTotales(doc, datos, y);
+  y     = _bloqueGarantias(doc, garantias, y);
 
   const totalPages = doc.bufferedPageRange().count;
   _pie(doc, prestamoId, negocioNombre, fechaGeneracion, totalPages);

@@ -688,6 +688,22 @@ const updateValorPrestamo = async (id, nuevoValor) => {
   return rows[0] || null;
 };
 
+const getGarantiasPorProducto = async (productoId, negocioId) => {
+  if (!productoId) return [];
+  const { rows } = await pool.query(`
+    SELECT g.titulo, g.texto, g.orden
+    FROM garantias g
+    JOIN garantias_lineas gl ON gl.garantia_id = g.id
+    WHERE g.negocio_id = $2
+      AND gl.linea_id = COALESCE(
+        (SELECT linea_id FROM productos_serial   WHERE id = $1),
+        (SELECT linea_id FROM productos_cantidad WHERE id = $1)
+      )
+    ORDER BY g.orden, g.id
+  `, [productoId, negocioId]);
+  return rows;
+};
+
 // ── Helpers para stock de variantes (espejo de facturas.repository) ───────────
 
 const ajustarStockAtributoEnTx = async (client, atributoId, cantidad) => {
@@ -756,4 +772,5 @@ module.exports = {
   findRetomaPorId, findSerialEnInventario, eliminarSerial, eliminarRetoma,
   findRetomasDirectasPorPersona, getEstadoCuenta,
   ajustarStockAtributoEnTx, ajustarStockVarianteEnTx, sincronizarStockArbolEnTx,
+  getGarantiasPorProducto,
 };
