@@ -1,8 +1,24 @@
 const { pool } = require('../../config/db');
 
-const findAll = async (sucursalId, negocioId) => {
-  const filtro = sucursalId ? 'c.sucursal_id = $1' : 'su.negocio_id = $1';
-  const param  = sucursalId ?? negocioId;
+const findAll = async (sucursalId, negocioId, proveedorIds = null) => {
+  const conditions = [];
+  const params = [];
+  let idx = 1;
+
+  if (sucursalId) {
+    conditions.push(`c.sucursal_id = $${idx++}`);
+    params.push(sucursalId);
+  } else {
+    conditions.push(`su.negocio_id = $${idx++}`);
+    params.push(negocioId);
+  }
+
+  if (proveedorIds && proveedorIds.length > 0) {
+    conditions.push(`c.proveedor_id = ANY($${idx++}::int[])`);
+    params.push(proveedorIds);
+  }
+
+  const where = `WHERE ${conditions.join(' AND ')}`;
 
   const { rows } = await pool.query(`
     SELECT
@@ -14,9 +30,9 @@ const findAll = async (sucursalId, negocioId) => {
     JOIN  sucursales  su ON su.id = c.sucursal_id
     JOIN  proveedores p  ON p.id  = c.proveedor_id
     LEFT JOIN usuarios u ON u.id  = c.usuario_id
-    WHERE ${filtro}
+    ${where}
     ORDER BY c.fecha DESC
-  `, [param]);
+  `, params);
   return rows;
 };
 
@@ -136,7 +152,7 @@ const actualizarCostoPromedio = async (client, productoId, costoPromedio) => {
   );
 };
 
-const findAllPaginado = async (sucursalId, negocioId, { page = 1, limit = 20, busqueda, fechaDesde, fechaHasta, metodo, estado } = {}) => {
+const findAllPaginado = async (sucursalId, negocioId, { page = 1, limit = 20, busqueda, fechaDesde, fechaHasta, metodo, estado, proveedorIds } = {}) => {
   const conditions = [];
   const params = [];
   let idx = 1;
@@ -147,6 +163,11 @@ const findAllPaginado = async (sucursalId, negocioId, { page = 1, limit = 20, bu
   } else {
     conditions.push(`su.negocio_id = $${idx++}`);
     params.push(negocioId);
+  }
+
+  if (proveedorIds && proveedorIds.length > 0) {
+    conditions.push(`c.proveedor_id = ANY($${idx++}::int[])`);
+    params.push(proveedorIds);
   }
 
   if (busqueda) {

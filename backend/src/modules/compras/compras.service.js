@@ -3,8 +3,8 @@ const comprasRepo               = require('./compras.repository');
 const { calcularCostoPromedio } = require('../../utils/costoPromedio.util');
 const variantesRepo             = require('../variantes-producto/variantes-producto.repository');
 
-const getCompras = (sucursalId, negocioId) =>
-  comprasRepo.findAll(sucursalId, negocioId);
+const getCompras = (sucursalId, negocioId, proveedorIds = null) =>
+  comprasRepo.findAll(sucursalId, negocioId, proveedorIds);
 
 const getComprasPaginadas = (sucursalId, negocioId, filtros) =>
   comprasRepo.findAllPaginado(sucursalId, negocioId, filtros);
