@@ -41,13 +41,19 @@ const buscarCompras = async (req, res, next) => {
     }
     const { negocio_id, rol, permisos_proveedores } = req.user;
 
-    // Si el usuario tiene lista restringida de proveedores, solo buscar en esos
-    let proveedorIds = null;
-    if (rol !== 'admin_negocio' && permisos_proveedores
-        && !permisos_proveedores.ver_todos
-        && Array.isArray(permisos_proveedores.ver_lista)
-        && permisos_proveedores.ver_lista.length > 0) {
-      proveedorIds = permisos_proveedores.ver_lista;
+    // Para no-admin, aplicar la misma lógica de acceso que en getProveedores
+    let proveedorIds = null; // null = sin restricción (admin o ver_todos)
+    if (rol !== 'admin_negocio') {
+      if (!permisos_proveedores || !permisos_proveedores.ver) {
+        // Sin permiso de proveedores → no puede ver ninguna compra
+        return res.json({ ok: true, data: { lineas: [], retomas: [] } });
+      }
+      if (!permisos_proveedores.ver_todos) {
+        // Lista restringida: solo los proveedores asignados
+        proveedorIds = Array.isArray(permisos_proveedores.ver_lista)
+          ? permisos_proveedores.ver_lista
+          : [];
+      }
     }
 
     const data = await service.buscarCompras(q, modo, negocio_id, req.sucursal_id, rol, proveedorIds);

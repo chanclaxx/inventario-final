@@ -218,6 +218,9 @@ const getHistorialCantidad = async (productoId, negocioId) => {
 // ─── Búsqueda de compras a proveedores ───────────────────────────────────────
 
 const buscarComprasPorIMEI = async (imei, negocioId, proveedorIds = null) => {
+  // Lista vacía explícita → usuario sin acceso a ningún proveedor
+  if (proveedorIds !== null && proveedorIds.length === 0) return [];
+
   const params = [imei, negocioId];
   let filtroProveedores = '';
   if (proveedorIds && proveedorIds.length > 0) {
@@ -243,7 +246,7 @@ const buscarComprasPorIMEI = async (imei, negocioId, proveedorIds = null) => {
     FROM lineas_compra lc
     JOIN compras     c  ON c.id  = lc.compra_id
     JOIN sucursales  su ON su.id = c.sucursal_id
-    JOIN proveedores p  ON p.id  = c.proveedor_id AND p.activo = TRUE
+    JOIN proveedores p  ON p.id  = c.proveedor_id AND p.activo IS NOT FALSE
     LEFT JOIN usuarios u ON u.id = c.usuario_id
     WHERE lc.imei = $1 AND su.negocio_id = $2
       ${filtroProveedores}
@@ -253,6 +256,9 @@ const buscarComprasPorIMEI = async (imei, negocioId, proveedorIds = null) => {
 };
 
 const buscarComprasPorTexto = async (q, negocioId, sucursalId, proveedorIds = null) => {
+  // Lista vacía explícita → usuario sin acceso a ningún proveedor
+  if (proveedorIds !== null && proveedorIds.length === 0) return [];
+
   const qNorm  = normalizarBusqueda(q);
   const params = [negocioId, `%${qNorm}%`];
   let extraFiltros = '';
@@ -285,7 +291,7 @@ const buscarComprasPorTexto = async (q, negocioId, sucursalId, proveedorIds = nu
     FROM lineas_compra lc
     JOIN compras     c  ON c.id  = lc.compra_id
     JOIN sucursales  su ON su.id = c.sucursal_id
-    JOIN proveedores p  ON p.id  = c.proveedor_id AND p.activo = TRUE
+    JOIN proveedores p  ON p.id  = c.proveedor_id AND p.activo IS NOT FALSE
     LEFT JOIN usuarios u ON u.id = c.usuario_id
     WHERE su.negocio_id = $1
       AND (
