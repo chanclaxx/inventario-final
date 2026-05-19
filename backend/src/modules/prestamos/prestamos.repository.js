@@ -688,19 +688,18 @@ const updateValorPrestamo = async (id, nuevoValor) => {
   return rows[0] || null;
 };
 
-const getGarantiasPorProducto = async (productoId, negocioId) => {
-  if (!productoId) return [];
+const getGarantiasPorPrestamo = async (imei, productoId, negocioId) => {
   const { rows } = await pool.query(`
-    SELECT g.titulo, g.texto, g.orden
+    SELECT DISTINCT g.id, g.titulo, g.texto, g.orden
     FROM garantias g
-    JOIN garantias_lineas gl ON gl.garantia_id = g.id
-    WHERE g.negocio_id = $2
-      AND gl.linea_id = COALESCE(
-        (SELECT linea_id FROM productos_serial   WHERE id = $1),
-        (SELECT linea_id FROM productos_cantidad WHERE id = $1)
-      )
-    ORDER BY g.orden, g.id
-  `, [productoId, negocioId]);
+    JOIN garantias_lineas  gl  ON gl.garantia_id = g.id
+    LEFT JOIN seriales           s   ON s.imei  = $1
+    LEFT JOIN productos_serial   ps  ON ps.id   = s.producto_id
+    LEFT JOIN productos_cantidad pc  ON pc.id   = $2
+    WHERE g.negocio_id = $3
+      AND gl.linea_id  = COALESCE(ps.linea_id, pc.linea_id)
+    ORDER BY g.orden ASC, g.id ASC
+  `, [imei || null, productoId || null, negocioId]);
   return rows;
 };
 
@@ -772,5 +771,5 @@ module.exports = {
   findRetomaPorId, findSerialEnInventario, eliminarSerial, eliminarRetoma,
   findRetomasDirectasPorPersona, getEstadoCuenta,
   ajustarStockAtributoEnTx, ajustarStockVarianteEnTx, sincronizarStockArbolEnTx,
-  getGarantiasPorProducto,
+  getGarantiasPorPrestamo,
 };

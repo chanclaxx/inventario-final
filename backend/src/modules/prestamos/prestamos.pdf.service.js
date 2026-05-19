@@ -608,7 +608,7 @@ const generarPdfPrestamoIndividual = async ({ prestamoId, negocioId, negocioNomb
 
   const datos     = extra[0];
   const abonos    = await repo.getAbonos(prestamoId);
-  const garantias = await repo.getGarantiasPorProducto(datos.producto_id, negocioId);
+  const garantias = await repo.getGarantiasPorPrestamo(datos.imei, datos.producto_id, negocioId);
 
   const fechaGeneracion = new Date().toLocaleDateString('es-CO', {
     day: '2-digit', month: '2-digit', year: 'numeric',
