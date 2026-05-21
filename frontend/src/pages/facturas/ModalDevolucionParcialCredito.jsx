@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, PackageX, RotateCcw } from 'lucide-react';
 import { Modal }       from '../../components/ui/Modal';
@@ -18,8 +18,15 @@ function FilaLinea({ linea, seleccionada, cantidad, onToggle, onCantidad }) {
   const yaDevuelta = disponible === 0;
 
   // Estado local del input para evitar que el clamping inmediato bloquee la edición
-  const [inputVal, setInputVal] = useState(String(cantidad));
-  useEffect(() => { setInputVal(String(cantidad)); }, [cantidad, seleccionada]);
+  const [inputVal,        setInputVal]        = useState(String(cantidad));
+  const [prevCantidad,    setPrevCantidad]    = useState(cantidad);
+  const [prevSeleccionada,setPrevSeleccionada]= useState(seleccionada);
+
+  if (prevCantidad !== cantidad || prevSeleccionada !== seleccionada) {
+    setPrevCantidad(cantidad);
+    setPrevSeleccionada(seleccionada);
+    setInputVal(String(cantidad));
+  }
 
   return (
     <div
