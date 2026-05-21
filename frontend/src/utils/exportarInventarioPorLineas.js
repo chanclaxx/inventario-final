@@ -14,13 +14,13 @@ function borde() {
   return { top: l, bottom: l, left: l, right: l };
 }
 function sHeader() {
-  return { font: { bold: true, name: 'Arial', sz: 10, color: { rgb: C_BLANCO } }, fill: { patternType: 'solid', fgColor: { rgb: C_HEADER } }, alignment: { horizontal: 'center', vertical: 'center', wrapText: true }, border: borde() };
+  return { font: { bold: true, name: 'Arial', sz: 10, color: { rgb: C_BLANCO } }, fill: { patternType: 'solid', fgColor: { rgb: C_HEADER }, bgColor: { indexed: 64 } }, alignment: { horizontal: 'center', vertical: 'center', wrapText: true }, border: borde() };
 }
 function sCelda(bg) {
-  return { font: { name: 'Arial', sz: 9 }, fill: { patternType: 'solid', fgColor: { rgb: bg } }, alignment: { vertical: 'center' }, border: borde() };
+  return { font: { name: 'Arial', sz: 9 }, fill: { patternType: 'solid', fgColor: { rgb: bg }, bgColor: { indexed: 64 } }, alignment: { vertical: 'center' }, border: borde() };
 }
 function sCeldaNum(bg) {
-  return { font: { name: 'Arial', sz: 9 }, fill: { patternType: 'solid', fgColor: { rgb: bg } }, alignment: { horizontal: 'right', vertical: 'center' }, numFmt: '#,##0', border: borde() };
+  return { font: { name: 'Arial', sz: 9 }, fill: { patternType: 'solid', fgColor: { rgb: bg }, bgColor: { indexed: 64 } }, alignment: { horizontal: 'right', vertical: 'center' }, numFmt: '#,##0', border: borde() };
 }
 function enc(r, c) { return XLSX.utils.encode_cell({ r: r, c: c }); }
 function parseLista(val) {
@@ -37,9 +37,9 @@ function bgSerial(s) {
   return C_DISPONIBLE;
 }
 function leyenda(ws, n) {
-  var sT = { font: { bold: true, name: 'Arial', sz: 9, color: { rgb: '374151' } }, fill: { patternType: 'solid', fgColor: { rgb: C_LEY_TIT } }, alignment: { horizontal: 'left', vertical: 'center' }, border: borde() };
-  var sV = { fill: { patternType: 'solid', fgColor: { rgb: C_LEY_BG } }, border: borde() };
-  function sI(bg) { return { font: { name: 'Arial', sz: 9, color: { rgb: '374151' } }, fill: { patternType: 'solid', fgColor: { rgb: bg } }, alignment: { horizontal: 'center', vertical: 'center' }, border: borde() }; }
+  var sT = { font: { bold: true, name: 'Arial', sz: 9, color: { rgb: '374151' } }, fill: { patternType: 'solid', fgColor: { rgb: C_LEY_TIT }, bgColor: { indexed: 64 } }, alignment: { horizontal: 'left', vertical: 'center' }, border: borde() };
+  var sV = { fill: { patternType: 'solid', fgColor: { rgb: C_LEY_BG }, bgColor: { indexed: 64 } }, border: borde() };
+  function sI(bg) { return { font: { name: 'Arial', sz: 9, color: { rgb: '374151' } }, fill: { patternType: 'solid', fgColor: { rgb: bg }, bgColor: { indexed: 64 } }, alignment: { horizontal: 'center', vertical: 'center' }, border: borde() }; }
   ws[enc(0,0)] = { t:'s', v:'Leyenda:', s:sT };
   ws[enc(0,1)] = { t:'s', v:'Disponible', s:sI(C_DISPONIBLE) };
   ws[enc(0,2)] = { t:'s', v:'Prestado',   s:sI(C_PRESTADO) };
