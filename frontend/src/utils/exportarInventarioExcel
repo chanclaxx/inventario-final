@@ -97,12 +97,11 @@ function crearHojaSerial(nombreProducto, seriales) {
   // Columnas: Cliente Origen ahora tiene Cédula Origen y Celular Origen al lado
   const COLS = [
     'IMEI', 'Estado', 'Marca', 'Modelo',
-    'Proveedor',
     'Cliente Origen', 'Cédula Origen', 'Celular Origen',
     'Fecha Entrada', 'Fecha Salida',
     'Cliente Venta', 'Cédula Cliente', 'Celular Cliente',
   ];
-  const COL_WIDTHS = [22, 12, 14, 14, 20, 22, 16, 16, 14, 14, 24, 16, 16];
+  const COL_WIDTHS = [22, 12, 14, 14, 22, 16, 16, 14, 14, 24, 16, 16];
 
   let fila = 2;
 
@@ -135,7 +134,6 @@ function crearHojaSerial(nombreProducto, seriales) {
         estadoLabel.charAt(0).toUpperCase() + estadoLabel.slice(1),
         s.marca                   || '',
         s.modelo                  || '',
-        s.proveedor               || '',
         s.cliente_origen          || '',
         s.cedula_cliente_origen   || '',
         s.celular_cliente_origen  || '',
@@ -163,7 +161,6 @@ function crearHojaSerial(nombreProducto, seriales) {
             'Venta anterior',
             s.marca  || '',
             s.modelo || '',
-            '',
             '',
             '',
             '',
@@ -245,19 +242,19 @@ function crearHojaCantidad(productos) {
   const tieneVariantes = productos.some((p) => p.atributos?.length > 0);
 
   const COLS = tieneVariantes
-    ? ['Producto', 'Atributo', 'Sub-variante', 'Stock', 'Stock Mín', 'Unidad', 'Proveedor', 'Estado Stock', 'Cliente Origen', 'Fecha Registro']
-    : ['Producto', 'Stock Actual', 'Stock Mínimo', 'Unidad', 'Proveedor', 'Estado Stock', 'Cliente Origen', 'Fecha Registro'];
+    ? ['Producto', 'Atributo', 'Sub-variante', 'Stock', 'Stock Mín', 'Unidad', 'Estado Stock', 'Cliente Origen', 'Fecha Registro']
+    : ['Producto', 'Stock Actual', 'Stock Mínimo', 'Unidad', 'Estado Stock', 'Cliente Origen', 'Fecha Registro'];
 
   const COL_WIDTHS = tieneVariantes
-    ? [28, 22, 22, 11, 11, 12, 20, 14, 22, 16]
-    : [28, 14, 14, 12, 20, 15, 22, 16];
+    ? [28, 22, 22, 11, 11, 12, 14, 22, 16]
+    : [28, 14, 14, 12, 15, 22, 16];
 
   // Índices de columna según modo
-  // Sin variantes: Producto=0 Stock=1 StockMin=2 Unidad=3 Proveedor=4 Estado=5 Cliente=6 Fecha=7
-  // Con variantes: Producto=0 Atrib=1 SubVar=2 Stock=3 StockMin=4 Unidad=5 Proveedor=6 Estado=7 Cliente=8 Fecha=9
+  // Sin variantes: Producto=0 Stock=1 StockMin=2 Unidad=3 Estado=4 Cliente=5 Fecha=6
+  // Con variantes: Producto=0 Atrib=1 SubVar=2 Stock=3 StockMin=4 Unidad=5 Estado=6 Cliente=7 Fecha=8
   const IDX = tieneVariantes
-    ? { stock: 3, stockMin: 4, unidad: 5, proveedor: 6, estado: 7, cliente: 8, fecha: 9 }
-    : { stock: 1, stockMin: 2, unidad: 3, proveedor: 4, estado: 5, cliente: 6, fecha: 7 };
+    ? { stock: 3, stockMin: 4, unidad: 5, estado: 6, cliente: 7, fecha: 8 }
+    : { stock: 1, stockMin: 2, unidad: 3, estado: 4, cliente: 5, fecha: 6 };
 
   let fila = 2;
   COLS.forEach((col, c) => {
@@ -285,7 +282,7 @@ function crearHojaCantidad(productos) {
       // ── Layout original ──────────────────────────────────────────────────
       const vals = [
         p.nombre, p.stock, p.stock_minimo,
-        p.unidad_medida || 'unidad', p.proveedor || '',
+        p.unidad_medida || 'unidad',
         estado, p.cliente_origen || '', fmtFecha(p.creado_en),
       ];
       vals.forEach((v, c) => {
@@ -308,7 +305,6 @@ function crearHojaCantidad(productos) {
     _cel(ws, fila, IDX.stock,    p.stock,                      estiloCelda(bg));
     _cel(ws, fila, IDX.stockMin, p.stock_minimo,                estiloCelda(bg));
     _cel(ws, fila, IDX.unidad,   p.unidad_medida || 'unidad',   estiloCelda(bg));
-    _cel(ws, fila, IDX.proveedor,p.proveedor || '',             estiloCelda(bg));
     _cel(ws, fila, IDX.estado,   estado,                       estiloCeldaCentrada(bg));
     _cel(ws, fila, IDX.cliente,  p.cliente_origen || '',        estiloCelda(bg));
     _cel(ws, fila, IDX.fecha,    fmtFecha(p.creado_en),        estiloCelda(bg));
@@ -327,7 +323,6 @@ function crearHojaCantidad(productos) {
       _cel(ws, fila, IDX.stock,    a.stock,     estiloCelda(bgA));
       _cel(ws, fila, IDX.stockMin, a.stock_minimo, estiloCelda(bgA));
       _cel(ws, fila, IDX.unidad,   '',          estiloCelda(bgA));
-      _cel(ws, fila, IDX.proveedor,'',          estiloCelda(bgA));
       _cel(ws, fila, IDX.estado,   estA,        estiloCeldaCentrada(bgA));
       _cel(ws, fila, IDX.cliente,  '',          estiloCelda(bgA));
       _cel(ws, fila, IDX.fecha,    '',          estiloCelda(bgA));
@@ -345,7 +340,6 @@ function crearHojaCantidad(productos) {
         _cel(ws, fila, IDX.stock,    v.stock,          estiloCelda(bgV));
         _cel(ws, fila, IDX.stockMin, v.stock_minimo,   estiloCelda(bgV));
         _cel(ws, fila, IDX.unidad,   '',               estiloCelda(bgV));
-        _cel(ws, fila, IDX.proveedor,'',               estiloCelda(bgV));
         _cel(ws, fila, IDX.estado,   estV,             estiloCeldaCentrada(bgV));
         _cel(ws, fila, IDX.cliente,  '',               estiloCelda(bgV));
         _cel(ws, fila, IDX.fecha,    '',               estiloCelda(bgV));
