@@ -5,7 +5,7 @@ const findAll = async (negocioId) => {
     SELECT u.id, u.nombre, u.email, u.rol, u.activo,
            u.sucursal_id, u.creado_en, u.ultimo_acceso,
            u.modulos_permitidos, u.permisos_proveedores,
-           u.permisos_edicion_productos,
+           u.permisos_edicion_productos, u.sucursales_vista,
            s.nombre AS sucursal_nombre
     FROM usuarios u
     LEFT JOIN sucursales s ON s.id = u.sucursal_id
@@ -20,7 +20,7 @@ const findById = async (negocioId, id) => {
     SELECT u.id, u.nombre, u.email, u.rol, u.activo,
            u.sucursal_id, u.creado_en, u.ultimo_acceso,
            u.modulos_permitidos, u.permisos_proveedores,
-           u.permisos_edicion_productos,
+           u.permisos_edicion_productos, u.sucursales_vista,
            s.nombre AS sucursal_nombre
     FROM usuarios u
     LEFT JOIN sucursales s ON s.id = u.sucursal_id
@@ -46,17 +46,18 @@ const findByEmail = async (email, excludeId = null) => {
 const create = async ({
   negocio_id, nombre, email, password_hash, rol,
   sucursal_id, password_temporal, modulos_permitidos, permisos_proveedores,
-  permisos_edicion_productos,
+  permisos_edicion_productos, sucursales_vista,
 }) => {
   const { rows } = await pool.query(`
     INSERT INTO usuarios(
       negocio_id, nombre, email, password_hash, rol,
       sucursal_id, password_temporal, modulos_permitidos, permisos_proveedores,
-      permisos_edicion_productos
+      permisos_edicion_productos, sucursales_vista
     )
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb, $11::integer[])
     RETURNING id, nombre, email, rol, activo, sucursal_id,
-              creado_en, modulos_permitidos, permisos_proveedores, permisos_edicion_productos
+              creado_en, modulos_permitidos, permisos_proveedores,
+              permisos_edicion_productos, sucursales_vista
   `, [
     negocio_id, nombre, email, password_hash, rol,
     sucursal_id || null,
@@ -64,23 +65,27 @@ const create = async ({
     modulos_permitidos || null,
     permisos_proveedores ? JSON.stringify(permisos_proveedores) : null,
     permisos_edicion_productos ? JSON.stringify(permisos_edicion_productos) : null,
+    sucursales_vista || null,
   ]);
   return rows[0];
 };
 
 const update = async (negocioId, id, datos) => {
-  const { nombre, email, rol, sucursal_id, modulos_permitidos, permisos_proveedores, permisos_edicion_productos } = datos;
+  const {
+    nombre, email, rol, sucursal_id,
+    modulos_permitidos, permisos_proveedores, permisos_edicion_productos,
+    sucursales_vista,
+  } = datos;
   const activoExplicito = typeof datos.activo === 'boolean';
 
   const modGuardar = (modulos_permitidos !== undefined && modulos_permitidos !== null)
-    ? modulos_permitidos
-    : null;
+    ? modulos_permitidos : null;
   const permGuardar = (permisos_proveedores !== undefined && permisos_proveedores !== null)
-    ? JSON.stringify(permisos_proveedores)
-    : null;
+    ? JSON.stringify(permisos_proveedores) : null;
   const permEdicionGuardar = (permisos_edicion_productos !== undefined && permisos_edicion_productos !== null)
-    ? JSON.stringify(permisos_edicion_productos)
-    : null;
+    ? JSON.stringify(permisos_edicion_productos) : null;
+  const vistaGuardar = (sucursales_vista !== undefined && sucursales_vista !== null && sucursales_vista.length)
+    ? sucursales_vista : null;
 
   let query, params;
 
@@ -89,14 +94,14 @@ const update = async (negocioId, id, datos) => {
       UPDATE usuarios
       SET nombre = $1, email = $2, rol = $3, sucursal_id = $4,
           activo = $5, modulos_permitidos = $6::text[], permisos_proveedores = $7::jsonb,
-          permisos_edicion_productos = $8::jsonb
-      WHERE id = $9 AND negocio_id = $10
+          permisos_edicion_productos = $8::jsonb, sucursales_vista = $9::integer[]
+      WHERE id = $10 AND negocio_id = $11
       RETURNING id, nombre, email, rol, activo, sucursal_id,
-                modulos_permitidos, permisos_proveedores, permisos_edicion_productos
+                modulos_permitidos, permisos_proveedores, permisos_edicion_productos, sucursales_vista
     `;
     params = [
       nombre, email, rol, sucursal_id || null,
-      datos.activo, modGuardar, permGuardar, permEdicionGuardar,
+      datos.activo, modGuardar, permGuardar, permEdicionGuardar, vistaGuardar,
       id, negocioId,
     ];
   } else {
@@ -104,14 +109,14 @@ const update = async (negocioId, id, datos) => {
       UPDATE usuarios
       SET nombre = $1, email = $2, rol = $3,
           sucursal_id = $4, modulos_permitidos = $5::text[], permisos_proveedores = $6::jsonb,
-          permisos_edicion_productos = $7::jsonb
-      WHERE id = $8 AND negocio_id = $9
+          permisos_edicion_productos = $7::jsonb, sucursales_vista = $8::integer[]
+      WHERE id = $9 AND negocio_id = $10
       RETURNING id, nombre, email, rol, activo, sucursal_id,
-                modulos_permitidos, permisos_proveedores, permisos_edicion_productos
+                modulos_permitidos, permisos_proveedores, permisos_edicion_productos, sucursales_vista
     `;
     params = [
       nombre, email, rol, sucursal_id || null,
-      modGuardar, permGuardar, permEdicionGuardar,
+      modGuardar, permGuardar, permEdicionGuardar, vistaGuardar,
       id, negocioId,
     ];
   }

@@ -15,12 +15,12 @@ const getUsuarioById = async (negocioId, id) => {
 
 const crearUsuario = async (negocioId, {
   nombre, email, password, rol, sucursal_id, modulos_permitidos, permisos_proveedores, permisos_edicion_productos,
+  sucursales_vista,
 }) => {
-  const ROL_SIN_SUCURSAL = ['admin_negocio', 'espectador'];
-  if (ROL_SIN_SUCURSAL.includes(rol) && sucursal_id) {
-    throw { status: 400, message: 'Este rol no puede tener sucursal asignada' };
+  if (rol === 'admin_negocio' && sucursal_id) {
+    throw { status: 400, message: 'El admin de negocio no puede tener sucursal asignada' };
   }
-  if (!ROL_SIN_SUCURSAL.includes(rol) && !sucursal_id) {
+  if (rol !== 'admin_negocio' && !sucursal_id) {
     throw { status: 400, message: 'Supervisores y vendedores requieren sucursal asignada' };
   }
  
@@ -64,6 +64,10 @@ const crearUsuario = async (negocioId, {
     ? permisos_edicion_productos
     : null;
 
+  const sucursalesVistaAGuardar = (rol !== 'admin_negocio' && Array.isArray(sucursales_vista) && sucursales_vista.length)
+    ? sucursales_vista
+    : null;
+
   try {
     return await usuariosRepo.create({
       negocio_id:                  negocioId,
@@ -72,6 +76,7 @@ const crearUsuario = async (negocioId, {
       modulos_permitidos:          modulosAGuardar,
       permisos_proveedores:        permisosProveedoresAGuardar,
       permisos_edicion_productos:  permisosEdicionAGuardar,
+      sucursales_vista:            sucursalesVistaAGuardar,
     });
   } catch (err) {
     if (err.constraint === 'usuarios_email_key') {
@@ -126,11 +131,18 @@ const actualizarUsuario = async (negocioId, id, datos) => {
         ? datos.permisos_edicion_productos
         : existe.permisos_edicion_productos);
 
+  const sucursalesVistaAGuardar = (rolFinal === 'admin_negocio')
+    ? null
+    : (datos.sucursales_vista !== undefined
+        ? (Array.isArray(datos.sucursales_vista) && datos.sucursales_vista.length ? datos.sucursales_vista : null)
+        : existe.sucursales_vista);
+
   return usuariosRepo.update(negocioId, id, {
     ...datos,
     modulos_permitidos:          modulosAGuardar,
     permisos_proveedores:        permisosProveedoresAGuardar,
     permisos_edicion_productos:  permisosEdicionAGuardar,
+    sucursales_vista:            sucursalesVistaAGuardar,
   });
 };
 

@@ -34,8 +34,9 @@ export default function InventarioPage() {
   const [carritoAbierto, setCarritoAbierto] = useState(false);
   const [modalImportar,  setModalImportar]  = useState(false);
 
-  const { puedeExportarInventario, esEspectador } = useAuth();
-  const soloLectura = esEspectador();
+  const { puedeExportarInventario, esSucursalVista } = useAuth();
+  const sucursalActiva = useSucursalStore((s) => s.sucursalActiva);
+  const soloLectura    = esSucursalVista(sucursalActiva);
 
   const { items, totalCarrito } = useCarritoStore();
   const totalItems = items.length;

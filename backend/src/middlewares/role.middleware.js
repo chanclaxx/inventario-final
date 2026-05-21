@@ -1,6 +1,6 @@
 const { pool } = require('../config/db');
 
-const JERARQUIA = { admin_negocio: 3, supervisor: 2, vendedor: 1, espectador: 0 };
+const JERARQUIA = { admin_negocio: 3, supervisor: 2, vendedor: 1 };
 
 // ── Sin cambios ──────────────────────────────────────────────────────────
 const requireRole  = (...roles) => (req, res, next) => {
@@ -18,19 +18,20 @@ const requireNivel = (nivelMinimo) => (req, res, next) => {
 };
 
 // ── Patch: requireSucursal ahora valida ownership en DB ──────────────────
-const ROLES_MULTISUCURSAL = new Set(['admin_negocio', 'espectador']);
-
 const requireSucursal = async (req, res, next) => {
   if (!req.user) return res.status(401).json({ ok: false, error: 'No autenticado' });
-  if (ROLES_MULTISUCURSAL.has(req.user.rol)) return next();
+  if (req.user.rol === 'admin_negocio') return next();
 
   const sucursalSolicitada = Number(req.params.sucursal_id || req.query.sucursal_id);
   if (!sucursalSolicitada) return next();
 
-  if (sucursalSolicitada !== req.user.sucursal_id) {
-    return res.status(403).json({ ok: false, error: 'No tienes acceso a esta sucursal' });
-  }
-  next();
+  if (sucursalSolicitada === req.user.sucursal_id) return next();
+
+  // Permite también sucursales de solo lectura asignadas al usuario
+  const vistaIds = req.user.sucursales_vista ?? [];
+  if (vistaIds.includes(sucursalSolicitada)) return next();
+
+  return res.status(403).json({ ok: false, error: 'No tienes acceso a esta sucursal' });
 };
 
 // ── NUEVO: helper central de ownership para recursos sin negocio_id ──────

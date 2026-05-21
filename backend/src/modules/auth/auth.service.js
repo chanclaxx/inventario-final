@@ -18,10 +18,12 @@ const _buildPayload = (usuario) => ({
   sucursal_id:                 usuario.sucursal_id,
   sucursal_nombre:             usuario.sucursal_nombre,
   password_temporal:           usuario.password_temporal ?? false,
-  modulos_permitidos:           resolverModulos(usuario.rol, usuario.modulos_permitidos),
-  fecha_vencimiento:            usuario.fecha_vencimiento ?? null,
-  permisos_proveedores:         usuario.rol === 'admin_negocio' ? null : (usuario.permisos_proveedores ?? null),
-  permisos_edicion_productos:   usuario.rol === 'admin_negocio' ? null : (usuario.permisos_edicion_productos ?? null),
+  modulos_permitidos:          resolverModulos(usuario.rol, usuario.modulos_permitidos),
+  fecha_vencimiento:           usuario.fecha_vencimiento ?? null,
+  permisos_proveedores:        usuario.rol === 'admin_negocio' ? null : (usuario.permisos_proveedores ?? null),
+  permisos_edicion_productos:  usuario.rol === 'admin_negocio' ? null : (usuario.permisos_edicion_productos ?? null),
+  // IDs de sucursales que el usuario puede ver en modo lectura (no admin)
+  sucursales_vista:            usuario.rol === 'admin_negocio' ? null : (usuario.sucursales_vista ?? []),
 });
 
 // Query reutilizada en login y refreshAccessToken
@@ -34,7 +36,8 @@ const QUERY_USUARIO_BASE = `
     u.password_temporal,
     u.modulos_permitidos,
     u.permisos_proveedores,
-    u.permisos_edicion_productos
+    u.permisos_edicion_productos,
+    u.sucursales_vista
   FROM usuarios u
   JOIN negocios n ON n.id = u.negocio_id
   LEFT JOIN sucursales s ON s.id = u.sucursal_id
@@ -65,12 +68,11 @@ const _validarEstadoPlan = async (usuario) => {
 };
 
 /**
- * Retorna las sucursales activas del negocio para admin_negocio y espectador.
- * Ambos pueden cambiar de sucursal — el espectador solo con acceso lectura.
- * Vendedor y supervisor tienen su sucursal fija en el token — no necesitan lista.
+ * Retorna las sucursales activas del negocio solo para admin_negocio.
+ * Vendedor y supervisor tienen su sucursal en el token; las vistas se leen del JWT.
  */
 const _getSucursalesParaAdmin = async (usuario) => {
-  if (!['admin_negocio', 'espectador'].includes(usuario.rol)) return null;
+  if (usuario.rol !== 'admin_negocio') return null;
   const { rows } = await pool.query(QUERY_SUCURSALES_NEGOCIO, [usuario.negocio_id]);
   return rows;
 };

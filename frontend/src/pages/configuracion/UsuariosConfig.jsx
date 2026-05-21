@@ -11,10 +11,9 @@ import { Plus, Pencil, UserX, UserCheck, Users, ShieldCheck, Truck, PackageSearc
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
 const ROLES = [
-  { value: 'admin_negocio', label: 'Admin negocio'        },
-  { value: 'supervisor',    label: 'Supervisor'            },
-  { value: 'vendedor',      label: 'Vendedor'              },
-  { value: 'espectador',    label: 'Espectador (lectura)'  },
+  { value: 'admin_negocio', label: 'Admin negocio' },
+  { value: 'supervisor',    label: 'Supervisor'    },
+  { value: 'vendedor',      label: 'Vendedor'      },
 ];
 
 const MODULOS = [
@@ -61,6 +60,7 @@ const FORM_INICIAL = {
   modulos_permitidos:          null,
   permisos_proveedores:        null,
   permisos_edicion_productos:  null,
+  sucursales_vista:            [],
 };
 
 // ─── Queries ──────────────────────────────────────────────────────────────────
@@ -344,6 +344,63 @@ function SelectorPermisosEdicionProductos({ permisos, onChange }) {
   );
 }
 
+// ─── SelectorSucursalesVista ──────────────────────────────────────────────────
+
+function SelectorSucursalesVista({ sucursalesVista, sucursalHomeId, onChange, sucursales }) {
+  const disponibles = sucursales.filter((s) => String(s.id) !== String(sucursalHomeId));
+  if (!disponibles.length) return null;
+
+  const toggle = (id) => {
+    const siguiente = sucursalesVista.includes(id)
+      ? sucursalesVista.filter((v) => v !== id)
+      : [...sucursalesVista, id];
+    onChange(siguiente);
+  };
+
+  return (
+    <div className="flex flex-col gap-3 bg-amber-50 border border-amber-100 rounded-xl p-3.5">
+      <div className="flex items-center gap-2">
+        <Eye size={13} className="text-amber-500 flex-shrink-0" />
+        <p className="text-xs font-semibold text-amber-700 uppercase tracking-wide">
+          Sucursales de solo lectura
+        </p>
+      </div>
+      <p className="text-xs text-gray-500">
+        Puede ver el inventario de estas sucursales sin hacer cambios.
+      </p>
+      <div className="flex flex-col gap-1.5">
+        {disponibles.map((s) => {
+          const sId      = s.id;
+          const sNombre  = s.nombre;
+          const selected = sucursalesVista.includes(sId);
+          return (
+            <label
+              key={sId}
+              className={`flex items-center gap-2.5 px-3 py-2 rounded-xl border cursor-pointer
+                select-none transition-colors
+                ${selected
+                  ? 'bg-amber-100 border-amber-300 text-amber-800'
+                  : 'bg-white border-gray-200 text-gray-600 hover:border-amber-200'}`}
+            >
+              <CheckboxCustom
+                checked={selected}
+                onChange={() => toggle(sId)}
+                color="green"
+              />
+              <span className="text-sm">{sNombre}</span>
+            </label>
+          );
+        })}
+      </div>
+      {sucursalesVista.length > 0 && (
+        <p className="text-xs text-amber-600">
+          {sucursalesVista.length} sucursal(es) asignada(s) — solo lectura
+        </p>
+      )}
+    </div>
+  );
+}
+
 // ─── SelectorModulos ──────────────────────────────────────────────────────────
 
 function SelectorModulos({ rol, modulosPermitidos, onChange }) {
@@ -480,10 +537,6 @@ function FilaUsuario({ usuario, onEditar, onToggleActivo }) {
             <span className="text-xs text-blue-500 flex items-center gap-1">
               <ShieldCheck size={11} /> Acceso total
             </span>
-          ) : usuario.rol === 'espectador' ? (
-            <span className="text-xs text-amber-600 flex items-center gap-1">
-              <Eye size={11} /> Solo lectura · cambia sucursal
-            </span>
           ) : usuario.modulos_permitidos !== null ? (
             <span className="text-xs text-purple-600 font-medium">
               {modulosActivos.length} módulos personalizados
@@ -510,6 +563,12 @@ function FilaUsuario({ usuario, onEditar, onToggleActivo }) {
             <span className="text-xs text-emerald-600 flex items-center gap-1">
               <FileDown size={10} />
               Exporta inventario
+            </span>
+          )}
+          {!esAdmin && usuario.sucursales_vista?.length > 0 && (
+            <span className="text-xs text-amber-600 flex items-center gap-1">
+              <Eye size={10} />
+              {usuario.sucursales_vista.length} sucursal(es) vista
             </span>
           )}
         </div>
@@ -550,14 +609,14 @@ function ModalUsuario({ open, onClose, editando, sucursales, onGuardar, cargando
           modulos_permitidos:          editando.modulos_permitidos          ?? null,
           permisos_proveedores:        editando.permisos_proveedores        ?? null,
           permisos_edicion_productos:  editando.permisos_edicion_productos  ?? null,
+          sucursales_vista:            editando.sucursales_vista            ?? [],
         }
       : FORM_INICIAL
   );
 
   const set = (campo, valor) => setForm((f) => ({ ...f, [campo]: valor }));
 
-  const ROL_SIN_SUCURSAL = ['admin_negocio', 'espectador'];
-  const requiereSucursal = !ROL_SIN_SUCURSAL.includes(form.rol);
+  const requiereSucursal = form.rol !== 'admin_negocio';
 
   // Módulos efectivos del usuario (para saber si proveedores está habilitado)
   const modulosEfectivos = form.rol === 'admin_negocio'
@@ -576,13 +635,14 @@ function ModalUsuario({ open, onClose, editando, sucursales, onGuardar, cargando
     staleTime: 60_000,
   });
 
-  // Cuando cambia el rol: resetear módulos Y permisos de proveedores
+  // Cuando cambia el rol: resetear módulos, permisos y vista
   const handleRolChange = (nuevoRol) => {
     setForm((f) => ({
       ...f,
       rol:                  nuevoRol,
       modulos_permitidos:   null,
       permisos_proveedores: null,
+      sucursales_vista:     [],
     }));
   };
 
@@ -598,10 +658,14 @@ function ModalUsuario({ open, onClose, editando, sucursales, onGuardar, cargando
   const handleGuardar = () => {
     const payload = { ...form };
     if (!payload.password) delete payload.password;
-    if (!requiereSucursal) payload.sucursal_id = null;
+    if (!requiereSucursal) {
+      payload.sucursal_id    = null;
+      payload.sucursales_vista = [];
+    }
     if (payload.rol === 'admin_negocio') {
       payload.permisos_proveedores       = null;
       payload.permisos_edicion_productos = null;
+      payload.sucursales_vista           = [];
     }
     onGuardar(payload);
   };
@@ -681,6 +745,16 @@ function ModalUsuario({ open, onClose, editando, sucursales, onGuardar, cargando
           onChange={handleModulosChange}
         />
 
+        {/* Sucursales de solo lectura (solo para supervisor/vendedor con sucursal asignada) */}
+        {requiereSucursal && sucursales.length > 1 && (
+          <SelectorSucursalesVista
+            sucursalesVista={form.sucursales_vista}
+            sucursalHomeId={form.sucursal_id}
+            onChange={(v) => set('sucursales_vista', v)}
+            sucursales={sucursales}
+          />
+        )}
+
         {/* Permisos granulares de proveedores (solo si el módulo está activo) */}
         {mostrarPermProv && (
           <SelectorPermisosProveedores
@@ -750,6 +824,7 @@ export function UsuariosConfig() {
       modulos_permitidos:          usuario.modulos_permitidos,
       permisos_proveedores:        usuario.permisos_proveedores,
       permisos_edicion_productos:  usuario.permisos_edicion_productos,
+      sucursales_vista:            usuario.sucursales_vista ?? [],
       activo:                      !usuario.activo,
     }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['usuarios'] }),
@@ -764,8 +839,7 @@ export function UsuariosConfig() {
     if (!payload.nombre?.trim()) return setError('El nombre es requerido');
     if (!payload.email?.trim())  return setError('El email es requerido');
     if (!editando && !payload.password?.trim()) return setError('La contraseña es requerida');
-    const _sinSucursal = ['admin_negocio', 'espectador'];
-    if (!_sinSucursal.includes(payload.rol) && !payload.sucursal_id) {
+    if (payload.rol !== 'admin_negocio' && !payload.sucursal_id) {
       return setError('Debes asignar una sucursal');
     }
     editando ? mutEditar.mutate(payload) : mutCrear.mutate(payload);

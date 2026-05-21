@@ -48,10 +48,6 @@ const PERMISOS_BASE = {
     'servicios',
     'prestamos',
   ],
-  // espectador: solo lectura de inventario, puede cambiar de sucursal como admin
-  espectador: [
-    'inventario',
-  ],
 };
 
 /**

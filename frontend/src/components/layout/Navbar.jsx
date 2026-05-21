@@ -30,7 +30,9 @@ const NAV_ITEMS = [
   { path: '/config',             label: 'Config',    Icn: Settings, soloAdmin: true                         },
 ];
 
-function esItemVisible(item, puedeVer, esAdmin, totalSucursales) {
+function esItemVisible(item, puedeVer, esAdmin, totalSucursales, esModoVista) {
+  // En modo vista solo se muestra el inventario
+  if (esModoVista) return item.path === '/inventario';
   if (item.multiSucursal && totalSucursales < 2) return false;
   if (item.soloAdmin) return esAdmin;
   if (item.modulo)    return puedeVer(item.modulo);
@@ -53,7 +55,9 @@ function AvatarUsuario({ nombre }) {
 }
 
 export function Navbar() {
-  const { usuario, logout, esEspectador } = useAuth();
+  const { usuario, logout, esSucursalVista } = useAuth();
+  const sucursalActiva = useSucursalStore((s) => s.sucursalActiva);
+  const esModoVista    = esSucursalVista(sucursalActiva);
   const { puedeVer, esAdmin } = usePermisos();
   const navigate  = useNavigate();
   const location  = useLocation();
@@ -127,7 +131,7 @@ export function Navbar() {
   };
 
   const itemsVisibles = itemsBase.filter((item) =>
-    esItemVisible(item, puedeVer, esAdmin, totalSucursales)
+    esItemVisible(item, puedeVer, esAdmin, totalSucursales, esModoVista)
   );
 
   return (
@@ -160,7 +164,7 @@ export function Navbar() {
             <div className="flex items-center gap-1 flex-shrink-0">
               <SucursalSelector />
 
-              {!esEspectador() && (
+              {!esModoVista && (
                 <button
                   onClick={() => navigate('/inventario')}
                   className="relative p-1.5 rounded-lg hover:bg-gray-100 transition-colors"

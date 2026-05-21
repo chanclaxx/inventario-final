@@ -18,9 +18,32 @@ const resolveSucursal = async (req, res, next) => {
   try {
     if (!req.user) return next();
 
-    // ── Vendedor y supervisor: solo su sucursal asignada ──────────────────
-    const ROLES_MULTISUCURSAL = ['admin_negocio', 'espectador'];
-    if (!ROLES_MULTISUCURSAL.includes(req.user.rol)) {
+    // ── Vendedor y supervisor ─────────────────────────────────────────────
+    if (req.user.rol !== 'admin_negocio') {
+      const sucursalSolicitada = Number(req.query.sucursal_id);
+      const vistaIds = req.user.sucursales_vista ?? [];
+
+      // ¿Está intentando ver una sucursal vista (distinta a la suya)?
+      if (sucursalSolicitada && sucursalSolicitada !== req.user.sucursal_id) {
+        if (!vistaIds.includes(sucursalSolicitada)) {
+          return res.status(403).json({ ok: false, error: 'No tienes acceso a esta sucursal' });
+        }
+        const { rows } = await pool.query(
+          `SELECT id FROM sucursales WHERE id = $1 AND negocio_id = $2 AND activa = true`,
+          [sucursalSolicitada, req.user.negocio_id]
+        );
+        if (!rows.length) {
+          return res.status(403).json({ ok: false, error: 'Sucursal no válida para este negocio' });
+        }
+        req.sucursal_id = sucursalSolicitada;
+        // Bloquear escrituras en sucursales de solo lectura
+        if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
+          return res.status(403).json({ ok: false, error: 'Sin permisos de escritura en esta sucursal' });
+        }
+        return next();
+      }
+
+      // Sucursal propia (token)
       if (!req.user.sucursal_id) {
         return res.status(403).json({
           ok: false,
@@ -31,7 +54,7 @@ const resolveSucursal = async (req, res, next) => {
       return next();
     }
 
-    // ── Admin / Espectador: leer sucursal_id SOLO del query param ────────
+    // ── Admin: leer sucursal_id SOLO del query param ─────────────────────
     const sucursalExplicita = Number(req.query.sucursal_id);
     if (sucursalExplicita) {
       const { rows } = await pool.query(

@@ -8,7 +8,7 @@ import useCarritoStore from '../../store/carritoStore';
 import { getSucursales } from '../../api/sucursales.api';
 
 export function SucursalSelector() {
-  const { usuario, esAdminNegocio, esEspectador } = useAuth();
+  const { usuario, esAdminNegocio } = useAuth();
   const queryClient = useQueryClient();
 
   const sucursalActiva  = useSucursalStore((s) => s.sucursalActiva);
@@ -23,7 +23,9 @@ export function SucursalSelector() {
   const btnRef      = useRef(null);
   const dropdownRef = useRef(null);
 
-  const puedeSeleccionar = esAdminNegocio() || esEspectador();
+  const esAdmin    = esAdminNegocio();
+  const tieneVista = Array.isArray(usuario?.sucursales_vista) && usuario.sucursales_vista.length > 0;
+  const puedeSeleccionar = esAdmin || tieneVista;
 
   const { data: listaSucursales } = useQuery({
     queryKey  : ['sucursales-selector'],
@@ -36,22 +38,31 @@ export function SucursalSelector() {
   });
 
   useEffect(() => {
-    if (Array.isArray(listaSucursales) && listaSucursales.length > 0) {
-      setSucursales(listaSucursales, usuario?.negocio_id ?? null);
-    }
-  }, [listaSucursales, setSucursales, usuario?.negocio_id]);
+    if (!Array.isArray(listaSucursales) || !listaSucursales.length) return;
 
-  // Recalcula posición cada vez que se abre
+    if (esAdmin) {
+      // Admin ve todas las sucursales
+      setSucursales(listaSucursales, usuario?.negocio_id ?? null);
+    } else if (tieneVista) {
+      // No-admin: filtrar a sucursal propia + sucursales de vista
+      const permitidas = listaSucursales.filter(
+        (s) => s.id === usuario.sucursal_id || usuario.sucursales_vista.includes(s.id)
+      );
+      setSucursales(permitidas, usuario?.negocio_id ?? null);
+      // Asegurar que inicie en la sucursal propia
+      if (!sucursalActiva || !permitidas.some((s) => s.id === sucursalActiva)) {
+        setSucursal(usuario.sucursal_id);
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listaSucursales]);
+
   useEffect(() => {
     if (!abierto || !btnRef.current) return;
     const rect = btnRef.current.getBoundingClientRect();
-    setPos({
-      top  : rect.bottom + 6,
-      left : rect.right - 224,
-    });
+    setPos({ top: rect.bottom + 6, left: rect.right - 224 });
   }, [abierto]);
 
-  // Cierra al hacer clic fuera — comprueba tanto el botón como el dropdown
   useEffect(() => {
     if (!abierto) return;
     const handleClick = (e) => {
@@ -110,19 +121,30 @@ export function SucursalSelector() {
           }}
           className="bg-white rounded-xl border border-gray-200 shadow-lg overflow-hidden"
         >
-          {sucursales.map((sucursal) => (
-            <button
-              key={sucursal.id}
-              onClick={() => handleSeleccionar(sucursal.id)}
-              className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-sm transition-colors
-                ${sucursalActiva === sucursal.id
-                  ? 'bg-blue-50 text-blue-700 font-medium'
-                  : 'text-gray-700 hover:bg-gray-50'}`}
-            >
-              <Building2 size={15} className="flex-shrink-0" />
-              <span className="truncate">{sucursal.nombre}</span>
-            </button>
-          ))}
+          {sucursales.map((sucursal) => {
+            const esVista = usuario?.sucursales_vista?.includes(sucursal.id) &&
+                            sucursal.id !== usuario?.sucursal_id;
+            return (
+              <button
+                key={sucursal.id}
+                onClick={() => handleSeleccionar(sucursal.id)}
+                className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-sm transition-colors
+                  ${sucursalActiva === sucursal.id
+                    ? 'bg-blue-50 text-blue-700 font-medium'
+                    : 'text-gray-700 hover:bg-gray-50'}`}
+              >
+                <Building2 size={15} className="flex-shrink-0" />
+                <div className="flex flex-col items-start min-w-0">
+                  <span className="truncate">{sucursal.nombre}</span>
+                  {esVista && (
+                    <span className="text-[10px] text-amber-500 font-medium leading-tight">
+                      Solo lectura
+                    </span>
+                  )}
+                </div>
+              </button>
+            );
+          })}
         </div>,
         document.body
       )}

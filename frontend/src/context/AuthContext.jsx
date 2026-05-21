@@ -59,7 +59,12 @@ export function AuthProvider({ children }) {
   const esAdminNegocio = () => usuario?.rol === 'admin_negocio';
   const esSupervisor   = () => ['admin_negocio', 'supervisor'].includes(usuario?.rol);
   const esVendedor     = () => !!usuario;
-  const esEspectador   = () => usuario?.rol === 'espectador';
+
+  // Devuelve true si sucursalId es una sucursal de solo lectura asignada al usuario
+  const esSucursalVista = (sucursalId) => {
+    if (!sucursalId || !Array.isArray(usuario?.sucursales_vista)) return false;
+    return usuario.sucursales_vista.includes(sucursalId) && sucursalId !== usuario.sucursal_id;
+  };
 
   // true si el usuario puede abrir los modales de edición de productos
   const puedeEditarProductos = () => {
@@ -91,7 +96,7 @@ export function AuthProvider({ children }) {
       esAdminNegocio,
       esSupervisor,
       esVendedor,
-      esEspectador,
+      esSucursalVista,
       puedeEditarProductos,
       camposEdicionProductos,
       puedeExportarInventario,
