@@ -290,9 +290,10 @@ function SelectorModeloMovil({ productos, lineas, productoSeleccionado, onSelecc
   };
 
   const toggleModo = () => {
-    setModoImei((v) => !v);
-    setBusqueda('');
+    const nuevoModo = !modoImei;
+    setModoImei(nuevoModo);
     setSugerencias([]);
+    if (nuevoModo && busqueda.trim().length >= 2) handleBusquedaImei(busqueda);
     setTimeout(() => inputRef.current?.focus(), 60);
   };
 
@@ -672,10 +673,11 @@ function BuscadorModelos({ productos, busqueda, onBusquedaChange, modoImei, onMo
   };
 
   const toggleModo = () => {
-    onModoImeiChange(!modoImei);
-    onBusquedaChange('');
+    const nuevoModo = !modoImei;
+    onModoImeiChange(nuevoModo);
     setSugerencias([]);
     setMostrarDrop(false);
+    if (nuevoModo && busqueda.trim().length >= 2) buscar(busqueda);
     setTimeout(() => inputRef.current?.focus(), 60);
   };
 
