@@ -38,15 +38,7 @@ const eliminarLinea = async (negocioId, id) => {
   const linea = await repo.findById(id, negocioId);
   if (!linea) throw { status: 404, message: 'Línea no encontrada' };
 
-  // ── Advertir si tiene productos asociados ──
-  const totalProductos = await repo.contarProductos(id, negocioId);
-  if (totalProductos > 0) {
-    throw {
-      status: 409,
-      message: `No se puede eliminar: la línea tiene ${totalProductos} producto(s) asociado(s). Reasígnalos primero.`,
-    };
-  }
-
+  // Los productos asociados quedan sin línea (linea_id = NULL) — ver repo.eliminar
   const ok = await repo.eliminar(id, negocioId);
   if (!ok) throw { status: 404, message: 'Línea no encontrada' };
 };

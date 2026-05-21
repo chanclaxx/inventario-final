@@ -103,11 +103,12 @@ function ToggleReadOnly({ enabled, label, description }) {
 
 // ─── Líneas de producto ───────────────────────────────────────────────────────
 function LineasConfig() {
-  const queryClient               = useQueryClient();
-  const [modalOpen, setModalOpen] = useState(false);
-  const [editando,  setEditando]  = useState(null);
-  const [nombre,    setNombre]    = useState('');
-  const [error,     setError]     = useState('');
+  const queryClient                       = useQueryClient();
+  const [modalOpen,       setModalOpen]   = useState(false);
+  const [editando,        setEditando]    = useState(null);
+  const [nombre,          setNombre]      = useState('');
+  const [error,           setError]       = useState('');
+  const [lineaAEliminar,  setLineaAEliminar] = useState(null);
 
   const { data: lineas = [] } = useQuery({
     queryKey: ['lineas'],
@@ -183,7 +184,7 @@ function LineasConfig() {
                     className="p-1.5 rounded-lg hover:bg-gray-200 text-gray-400 hover:text-gray-600 transition-colors">
                     <Settings size={14} />
                   </button>
-                  <button onClick={() => mutEliminar.mutate(lineaId)}
+                  <button onClick={() => setLineaAEliminar(l)}
                     disabled={mutEliminar.isPending}
                     className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors disabled:opacity-50">
                     <Trash2 size={14} />
@@ -207,6 +208,30 @@ function LineasConfig() {
             <Button className="flex-1" loading={mutCrear.isPending || mutEditar.isPending}
               onClick={handleGuardar} disabled={!nombre.trim()}>
               {editando ? 'Guardar cambios' : 'Crear línea'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal open={!!lineaAEliminar} onClose={() => setLineaAEliminar(null)}
+        title="Eliminar línea" size="sm">
+        <div className="flex flex-col gap-4">
+          <p className="text-sm text-gray-700">
+            ¿Eliminar la línea <span className="font-semibold">"{lineaAEliminar?.nombre}"</span>?
+          </p>
+          <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
+            Los productos asociados a esta línea pasarán a <span className="font-semibold">Sin Línea</span>, no serán eliminados.
+          </p>
+          <div className="flex gap-2">
+            <Button variant="secondary" className="flex-1" onClick={() => setLineaAEliminar(null)}>
+              Cancelar
+            </Button>
+            <Button
+              className="flex-1 !bg-red-600 hover:!bg-red-700"
+              loading={mutEliminar.isPending}
+              onClick={() => { mutEliminar.mutate(lineaAEliminar.id); setLineaAEliminar(null); }}
+            >
+              Eliminar
             </Button>
           </div>
         </div>
