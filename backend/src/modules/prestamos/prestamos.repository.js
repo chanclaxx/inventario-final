@@ -415,6 +415,65 @@ const setearSaldoAFavorPersona = async (executor, tipo, personaId, monto) => {
   );
 };
 
+// ── Saldo a favor POR SUCURSAL ────────────────────────────────────────────────
+
+const getSaldoSucursal = async (executor, tipo, personaId, sucursalId) => {
+  const { rows } = await executor.query(
+    `SELECT saldo FROM saldo_a_favor_sucursal
+     WHERE tipo_persona = $1 AND persona_id = $2 AND sucursal_id = $3
+     FOR UPDATE`,
+    [tipo, personaId, sucursalId]
+  );
+  return Number(rows[0]?.saldo ?? 0);
+};
+
+const setSaldoSucursal = async (executor, tipo, personaId, sucursalId, monto) => {
+  await executor.query(
+    `INSERT INTO saldo_a_favor_sucursal (tipo_persona, persona_id, sucursal_id, saldo, actualizado_en)
+     VALUES ($1, $2, $3, $4, NOW())
+     ON CONFLICT (tipo_persona, persona_id, sucursal_id)
+     DO UPDATE SET saldo = $4, actualizado_en = NOW()`,
+    [tipo, personaId, sucursalId, Math.max(0, monto)]
+  );
+};
+
+const registrarMovSaldoSucursal = async (executor, {
+  tipo_persona, persona_id, sucursal_id,
+  concepto, monto, tipo_movimiento,
+  referencia_id = null, usuario_id = null,
+}) => {
+  await executor.query(
+    `INSERT INTO historial_saldo_sucursal
+       (tipo_persona, persona_id, sucursal_id, concepto, monto, tipo_movimiento, referencia_id, usuario_id)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+    [tipo_persona, persona_id, sucursal_id, concepto, monto, tipo_movimiento, referencia_id, usuario_id]
+  );
+};
+
+const getHistorialSaldoSucursal = async (tipo, personaId, sucursalId) => {
+  const { rows } = await pool.query(
+    `SELECT h.id, h.concepto, h.monto, h.tipo_movimiento, h.referencia_id,
+            h.creado_en, u.nombre AS usuario_nombre
+     FROM historial_saldo_sucursal h
+     LEFT JOIN usuarios u ON u.id = h.usuario_id
+     WHERE h.tipo_persona = $1 AND h.persona_id = $2 AND h.sucursal_id = $3
+     ORDER BY h.creado_en DESC
+     LIMIT 100`,
+    [tipo, personaId, sucursalId]
+  );
+  return rows;
+};
+
+const getSaldoSucursalPublico = async (tipo, personaId, sucursalId) => {
+  const { rows } = await pool.query(
+    `SELECT COALESCE(saldo, 0) AS saldo
+     FROM saldo_a_favor_sucursal
+     WHERE tipo_persona = $1 AND persona_id = $2 AND sucursal_id = $3`,
+    [tipo, personaId, sucursalId]
+  );
+  return Number(rows[0]?.saldo ?? 0);
+};
+
 // ── Anulación de abono ────────────────────────────────────────────────────────
 
 const findAbonoById = async (client, abonoId, prestamoId) => {
@@ -760,6 +819,9 @@ module.exports = {
   ajustarStock, actualizarCantidadYValor,
   salarSerial, findAbonosPorPrestamos, findActivosPorCliente, findActivosPorPrestatario,
   getSaldoAFavorPersona, setearSaldoAFavorPersona,
+  // saldo por sucursal
+  getSaldoSucursal, setSaldoSucursal, registrarMovSaldoSucursal,
+  getHistorialSaldoSucursal, getSaldoSucursalPublico,
   retornarSerialConOrigen,
   insertarRetoma, insertarRetomaDirecta, insertarSerialParaRetoma, ajustarStockConHistorialEnTx,
   getRetomasPorPrestamo,

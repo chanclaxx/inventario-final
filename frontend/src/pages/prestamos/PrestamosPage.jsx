@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { buscarPrestamos as buscarPrestamosApi } from '../../api/busqueda.api';
 import { exportarPrestamosExcel } from '../../utils/exportarPrestamosExcel';
 import { exportarCarteraPersonaExcel } from '../../utils/exportarCarteraPersonaExcel';
-import { getPrestamos, registrarAbonoPrestamo, devolverPrestamo, devolverParcialPrestamo, registrarSaldoAFavor as registrarSaldoAFavorApi, intercambiarPrestamo as intercambiarPrestamoApi, anularAbono as anularAbonoApi, getRetomasDirectas as getRetomasDirectasApi, anularRetomaDirecta as anularRetomaDirectaApi, aplicarSaldoAPrestamo as aplicarSaldoAPrestamoApi, getEstadoCuenta as getEstadoCuentaApi, crearAjusteDeuda as crearAjusteDeudaApi } from '../../api/prestamos.api';
+import { getPrestamos, registrarAbonoPrestamo, devolverPrestamo, devolverParcialPrestamo, registrarSaldoAFavor as registrarSaldoAFavorApi, intercambiarPrestamo as intercambiarPrestamoApi, anularAbono as anularAbonoApi, getRetomasDirectas as getRetomasDirectasApi, anularRetomaDirecta as anularRetomaDirectaApi, aplicarSaldoAPrestamo as aplicarSaldoAPrestamoApi, getEstadoCuenta as getEstadoCuentaApi, crearAjusteDeuda as crearAjusteDeudaApi, getSaldoSucursal as getSaldoSucursalApi, getHistorialSaldoSucursal as getHistorialSaldoSucursalApi } from '../../api/prestamos.api';
 import { ModalEditarValorPrestamo } from './ModalEditarValorPrestamo';
 import { crearPrestatario as crearPrestatarioApi, getPrestatarios, actualizarPrestatario as actualizarPrestatarioApi } from '../../api/prestatarios.api';
 import {
@@ -403,6 +403,73 @@ function ModalSaldoAFavor({ nombre, tipo, personaId, montoActual, onClose }) {
           >
             <Wallet size={14} /> Guardar saldo
           </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// ─── Modal Historial Saldo a favor por sucursal ───────────────────────────────
+
+function ModalHistorialSaldo({ nombre, tipo, personaId, onClose }) {
+  const tipoApi = tipo === 'companero' ? 'prestatario' : tipo;
+
+  const { data: saldoData, isLoading: loadingSaldo } = useQuery({
+    queryKey:  ['saldo-sucursal', tipoApi, personaId],
+    queryFn:   () => getSaldoSucursalApi(tipoApi, personaId).then((r) => r.data.data),
+    staleTime: 0,
+  });
+
+  const { data: historial = [], isLoading: loadingHist } = useQuery({
+    queryKey:  ['historial-saldo-sucursal', tipoApi, personaId],
+    queryFn:   () => getHistorialSaldoSucursalApi(tipoApi, personaId).then((r) => r.data.data),
+    staleTime: 0,
+  });
+
+  const saldo = Number(saldoData?.saldo ?? 0);
+
+  return (
+    <Modal open onClose={onClose} title="Historial saldo a favor" size="md">
+      <div className="flex flex-col gap-4">
+        <div className="bg-emerald-50 border border-emerald-100 rounded-xl px-4 py-3 flex items-center justify-between">
+          <div>
+            <p className="text-xs text-emerald-600">Persona</p>
+            <p className="text-sm font-semibold text-emerald-800">{nombre}</p>
+          </div>
+          <div className="text-right">
+            <p className="text-xs text-emerald-600">Saldo actual (esta sucursal)</p>
+            <p className={`text-lg font-bold ${saldo > 0 ? 'text-emerald-700' : 'text-gray-400'}`}>
+              {loadingSaldo ? '...' : saldo > 0 ? formatCOP(saldo) : '—'}
+            </p>
+          </div>
+        </div>
+
+        {loadingHist ? (
+          <Spinner className="py-8" />
+        ) : historial.length === 0 ? (
+          <p className="text-sm text-gray-400 text-center py-6">Sin movimientos registrados en esta sucursal.</p>
+        ) : (
+          <div className="flex flex-col gap-1 max-h-80 overflow-y-auto">
+            {historial.map((mov) => (
+              <div key={mov.id}
+                className="flex items-center justify-between px-3 py-2.5 rounded-lg bg-gray-50 text-sm">
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-gray-800 truncate">{mov.concepto}</p>
+                  <p className="text-xs text-gray-400">
+                    {formatFechaHora(mov.creado_en)}
+                    {mov.usuario_nombre ? ` · ${mov.usuario_nombre}` : ''}
+                  </p>
+                </div>
+                <span className={`ml-3 font-semibold flex-shrink-0 ${mov.tipo_movimiento === 'credito' ? 'text-emerald-600' : 'text-red-500'}`}>
+                  {mov.tipo_movimiento === 'credito' ? '+' : '-'}{formatCOP(mov.monto)}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="flex justify-end">
+          <Button variant="secondary" onClick={onClose}>Cerrar</Button>
         </div>
       </div>
     </Modal>
@@ -1308,7 +1375,7 @@ function TarjetaPrestamoDetalle({ prestamo, onAbonar, onDevolver, onImprimir, on
 
 // ─── Vista detalle de persona ─────────────────────────────────────────────────
 
-function VistaDetallePersona({ nombre, tipo, personaId, prestamos, saldoAFavor = 0, onVolver, onAbonar, onDevolver, onImprimir, onIntercambiar, onRegistrarSaldo, onRetomaDirecta, onAjusteCuentas, coloresActivo }) {
+function VistaDetallePersona({ nombre, tipo, personaId, prestamos, saldoAFavor = 0, onVolver, onAbonar, onDevolver, onImprimir, onIntercambiar, onRegistrarSaldo, onRetomaDirecta, onAjusteCuentas, coloresActivo, onVerHistorialSaldo }) {
   const queryClient = useQueryClient();
   const [tabDetalle,          setTabDetalle]          = useState('prestamos'); // 'prestamos' | 'cuenta'
   const [cerradosAbiertos,    setCerradosAbiertos]    = useState(false);
@@ -1437,12 +1504,14 @@ function VistaDetallePersona({ nombre, tipo, personaId, prestamos, saldoAFavor =
               {saldoTotal > 0 ? formatCOP(saldoTotal) : '—'}
             </p>
           </div>
-          <div className="px-4 py-3 flex flex-col gap-0.5">
+          <button
+            onClick={onVerHistorialSaldo}
+            className="px-4 py-3 flex flex-col gap-0.5 text-left hover:bg-emerald-50 transition-colors rounded-none">
             <p className="text-xs text-gray-400">Saldo a favor</p>
             <p className={`text-sm font-bold ${saldoAFavor > 0 ? 'text-emerald-600' : 'text-gray-400'}`}>
               {saldoAFavor > 0 ? formatCOP(saldoAFavor) : '—'}
             </p>
-          </div>
+          </button>
           <div className="px-4 py-3 flex flex-col gap-0.5">
             <p className="text-xs text-gray-400">Total pagado</p>
             <p className={`text-sm font-bold ${pagadoTotal > 0 ? 'text-blue-600' : 'text-gray-400'}`}>
@@ -2331,6 +2400,7 @@ export default function PrestamosPage() {
   const [prestamoImprimir,    setPrestamoImprimir]    = useState(null);
   const [prestamoIntercambio, setPrestamoIntercambio] = useState(null);
   const [modalSaldoPersona,   setModalSaldoPersona]   = useState(null); // { nombre, tipo, personaId, saldoAFavor }
+  const [modalHistorialSaldo, setModalHistorialSaldo] = useState(null); // { nombre, tipo, personaId }
   const [modalRetomaDirecta,  setModalRetomaDirecta]  = useState(null); // { persona: { tipo, id, nombre } }
   const [modalAjusteCuentas,  setModalAjusteCuentas]  = useState(null); // { nombre, tipo, personaId, sucursalId }
   const [modalCrearPrestatario,   setModalCrearPrestatario]   = useState(false);
@@ -2579,6 +2649,11 @@ export default function PrestamosPage() {
                   personaId:  grupoActual.personaId,
                   sucursalId: grupoActual.prestamos[0]?.sucursal_id ?? null,
                 })}
+                onVerHistorialSaldo={() => setModalHistorialSaldo({
+                  nombre:    grupoActual.nombre,
+                  tipo:      tabPrestamos === 'companeros' ? 'companero' : 'cliente',
+                  personaId: grupoActual.personaId,
+                })}
                 coloresActivo={coloresActivo}
               />
             ) : (
@@ -2742,6 +2817,15 @@ export default function PrestamosPage() {
           personaId={modalSaldoPersona.personaId}
           montoActual={modalSaldoPersona.saldoAFavor}
           onClose={() => setModalSaldoPersona(null)}
+        />
+      )}
+
+      {modalHistorialSaldo && (
+        <ModalHistorialSaldo
+          nombre={modalHistorialSaldo.nombre}
+          tipo={modalHistorialSaldo.tipo}
+          personaId={modalHistorialSaldo.personaId}
+          onClose={() => setModalHistorialSaldo(null)}
         />
       )}
 

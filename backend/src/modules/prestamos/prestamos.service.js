@@ -338,7 +338,7 @@ const crearPrestamos = async ({
 
 // ─── Servicio: registrar/actualizar saldo a favor de una persona ──────────────
 
-const registrarSaldoAFavor = async (negocioId, tipo, personaId, monto) => {
+const registrarSaldoAFavor = async (negocioId, tipo, personaId, monto, sucursalId = null, usuarioId = null) => {
   if (tipo === 'prestatario') {
     await _verificarPrestatario(personaId, negocioId);
   } else {
@@ -346,6 +346,33 @@ const registrarSaldoAFavor = async (negocioId, tipo, personaId, monto) => {
   }
 
   await repo.setearSaldoAFavorPersona(pool, tipo, personaId, monto);
+
+  if (sucursalId) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const anterior = await repo.getSaldoSucursal(client, tipo, personaId, sucursalId);
+      await repo.setSaldoSucursal(client, tipo, personaId, sucursalId, monto);
+      const delta = monto - anterior;
+      await repo.registrarMovSaldoSucursal(client, {
+        tipo_persona:    tipo,
+        persona_id:      personaId,
+        sucursal_id:     sucursalId,
+        concepto:        'Actualización manual de saldo a favor',
+        monto:           Math.abs(delta),
+        tipo_movimiento: delta >= 0 ? 'credito' : 'debito',
+        referencia_id:   null,
+        usuario_id:      usuarioId,
+      });
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
   return { saldo_a_favor: monto };
 };
 
@@ -641,6 +668,19 @@ const intercambiarPrestamo = async (negocioId, prestamoId, {
       const saldoActual = await repo.getSaldoAFavorPersona(client, tipoPers, personaId);
       await repo.setearSaldoAFavorPersona(client, tipoPers, personaId, saldoActual + excess);
       saldo_a_favor = excess;
+
+      const saldoSucActual = await repo.getSaldoSucursal(client, tipoPers, personaId, sucursalId);
+      await repo.setSaldoSucursal(client, tipoPers, personaId, sucursalId, saldoSucActual + excess);
+      await repo.registrarMovSaldoSucursal(client, {
+        tipo_persona:    tipoPers,
+        persona_id:      personaId,
+        sucursal_id:     sucursalId,
+        concepto:        `Excedente de intercambio — ${nombreProductoRetoma || 'producto'}`,
+        monto:           excess,
+        tipo_movimiento: 'credito',
+        referencia_id:   prestamoId,
+        usuario_id:      usuario_id || null,
+      });
     }
 
     await client.query('COMMIT');
@@ -763,10 +803,23 @@ const retomaDirecta = async (negocioId, {
       color:               color_retoma || null,
     });
 
-    // 4. Acreditar el valor como saldo a favor
+    // 4. Acreditar el valor como saldo a favor (global + por sucursal)
     const saldoActual  = await repo.getSaldoAFavorPersona(client, tipo, persona_id);
     const saldoNuevo   = saldoActual + Number(valor_retoma);
     await repo.setearSaldoAFavorPersona(client, tipo, persona_id, saldoNuevo);
+
+    const saldoSucActual = await repo.getSaldoSucursal(client, tipo, persona_id, sucursal_id);
+    await repo.setSaldoSucursal(client, tipo, persona_id, sucursal_id, saldoSucActual + Number(valor_retoma));
+    await repo.registrarMovSaldoSucursal(client, {
+      tipo_persona:    tipo,
+      persona_id,
+      sucursal_id,
+      concepto:        `Compra de artículo — ${nombreProducto}`,
+      monto:           Number(valor_retoma),
+      tipo_movimiento: 'credito',
+      referencia_id:   null,
+      usuario_id:      usuario_id || null,
+    });
 
     await client.query('COMMIT');
     return { saldo_a_favor_nuevo: saldoNuevo, valor_retoma: Number(valor_retoma) };
@@ -802,6 +855,7 @@ const aplicarSaldoAPrestamos = async (negocioId, tipo, personaId) => {
     }
 
     const prestamosAfectados = [];
+    const deduccionesPorSucursal = {}; // { sucursalId: totalDeducido }
 
     for (const prestamo of activos) {
       if (saldoRestante <= 0) break;
@@ -817,6 +871,9 @@ const aplicarSaldoAPrestamos = async (negocioId, tipo, personaId) => {
         usuario_id:  null,
       });
       saldoRestante -= montoAbono;
+
+      const sid = prestamo.sucursal_id;
+      deduccionesPorSucursal[sid] = (deduccionesPorSucursal[sid] || 0) + montoAbono;
 
       let saldado    = false;
       let factura_id = null;
@@ -837,6 +894,23 @@ const aplicarSaldoAPrestamos = async (negocioId, tipo, personaId) => {
     }
 
     await repo.setearSaldoAFavorPersona(client, tipo, personaId, saldoRestante);
+
+    for (const [sucId, totalDeducido] of Object.entries(deduccionesPorSucursal)) {
+      const sucursalId = Number(sucId);
+      const saldoSuc   = await repo.getSaldoSucursal(client, tipo, personaId, sucursalId);
+      const nuevoSuc   = Math.max(0, saldoSuc - totalDeducido);
+      await repo.setSaldoSucursal(client, tipo, personaId, sucursalId, nuevoSuc);
+      await repo.registrarMovSaldoSucursal(client, {
+        tipo_persona:    tipo,
+        persona_id:      personaId,
+        sucursal_id:     sucursalId,
+        concepto:        'Saldo aplicado a préstamos activos',
+        monto:           totalDeducido,
+        tipo_movimiento: 'debito',
+        referencia_id:   null,
+        usuario_id:      null,
+      });
+    }
 
     await client.query('COMMIT');
     return { prestamos_afectados: prestamosAfectados, saldo_restante: saldoRestante };
@@ -955,6 +1029,20 @@ const anularAbono = async (negocioId, prestamoId, abonoId, retomaId = null) => {
       if (personaId) {
         const saldoActual = await repo.getSaldoAFavorPersona(client, tipo, personaId);
         await repo.setearSaldoAFavorPersona(client, tipo, personaId, saldoActual + Number(abono.valor));
+
+        const sucursalId     = prestamo.sucursal_id;
+        const saldoSucActual = await repo.getSaldoSucursal(client, tipo, personaId, sucursalId);
+        await repo.setSaldoSucursal(client, tipo, personaId, sucursalId, saldoSucActual + Number(abono.valor));
+        await repo.registrarMovSaldoSucursal(client, {
+          tipo_persona:    tipo,
+          persona_id:      personaId,
+          sucursal_id:     sucursalId,
+          concepto:        `Anulación de abono — ${prestamo.nombre_producto}`,
+          monto:           Number(abono.valor),
+          tipo_movimiento: 'credito',
+          referencia_id:   prestamoId,
+          usuario_id:      null,
+        });
       }
     }
 
@@ -1004,11 +1092,26 @@ const anularRetomaDirecta = async (negocioId, retomaId) => {
       }
     }
 
-    // Reducir saldo a favor
+    // Reducir saldo a favor (global + por sucursal)
     if (retoma.tipo_persona && retoma.persona_id) {
       const saldoActual = await repo.getSaldoAFavorPersona(client, retoma.tipo_persona, retoma.persona_id);
       const saldoNuevo  = Math.max(0, saldoActual - Number(retoma.valor_retoma));
       await repo.setearSaldoAFavorPersona(client, retoma.tipo_persona, retoma.persona_id, saldoNuevo);
+
+      if (retoma.sucursal_id) {
+        const saldoSucActual = await repo.getSaldoSucursal(client, retoma.tipo_persona, retoma.persona_id, retoma.sucursal_id);
+        await repo.setSaldoSucursal(client, retoma.tipo_persona, retoma.persona_id, retoma.sucursal_id, Math.max(0, saldoSucActual - Number(retoma.valor_retoma)));
+        await repo.registrarMovSaldoSucursal(client, {
+          tipo_persona:    retoma.tipo_persona,
+          persona_id:      retoma.persona_id,
+          sucursal_id:     retoma.sucursal_id,
+          concepto:        `Anulación de compra — ${retoma.nombre_producto || 'artículo'}`,
+          monto:           Number(retoma.valor_retoma),
+          tipo_movimiento: 'debito',
+          referencia_id:   retomaId,
+          usuario_id:      null,
+        });
+      }
     }
 
     await repo.eliminarRetoma(client, retomaId);
@@ -1103,6 +1206,20 @@ const aplicarSaldoAPrestamo = async (negocioId, prestamoId) => {
     const saldoRestante = Math.max(0, saldoAFavor - montoAbono);
     await repo.setearSaldoAFavorPersona(client, tipo, personaId, saldoRestante);
 
+    const sucursalId    = prestamo.sucursal_id;
+    const saldoSucActual = await repo.getSaldoSucursal(client, tipo, personaId, sucursalId);
+    await repo.setSaldoSucursal(client, tipo, personaId, sucursalId, Math.max(0, saldoSucActual - montoAbono));
+    await repo.registrarMovSaldoSucursal(client, {
+      tipo_persona:    tipo,
+      persona_id:      personaId,
+      sucursal_id:     sucursalId,
+      concepto:        `Saldo aplicado — ${prestamo.nombre_producto}`,
+      monto:           montoAbono,
+      tipo_movimiento: 'debito',
+      referencia_id:   prestamoId,
+      usuario_id:      null,
+    });
+
     await client.query('COMMIT');
     return {
       prestamo_id:     prestamoId,
@@ -1118,6 +1235,25 @@ const aplicarSaldoAPrestamo = async (negocioId, prestamoId) => {
   } finally {
     client.release();
   }
+};
+
+const getSaldoSucursalPersona = async (negocioId, tipo, personaId, sucursalId) => {
+  if (tipo === 'prestatario') {
+    await _verificarPrestatario(personaId, negocioId);
+  } else {
+    await _verificarCliente(personaId, negocioId);
+  }
+  const saldo = await repo.getSaldoSucursalPublico(tipo, personaId, sucursalId);
+  return { saldo };
+};
+
+const getHistorialSaldoSucursalPersona = async (negocioId, tipo, personaId, sucursalId) => {
+  if (tipo === 'prestatario') {
+    await _verificarPrestatario(personaId, negocioId);
+  } else {
+    await _verificarCliente(personaId, negocioId);
+  }
+  return repo.getHistorialSaldoSucursal(tipo, personaId, sucursalId);
 };
 
 const editarValorPrestamo = async (negocioId, prestamoId, nuevoValor) => {
@@ -1148,4 +1284,5 @@ module.exports = {
   retomaDirecta, aplicarSaldoAPrestamos, aplicarSaldoAPrestamo, getResumenCartera,
   anularAbono, anularRetomaDirecta, getRetomasDirectas,
   getEstadoCuenta, crearAjusteDeuda, editarValorPrestamo,
+  getSaldoSucursalPersona, getHistorialSaldoSucursalPersona,
 };

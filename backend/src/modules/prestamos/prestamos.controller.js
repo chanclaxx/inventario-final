@@ -173,13 +173,43 @@ const registrarSaldoAFavor = async (req, res, next) => {
       return res.status(400).json({ ok: false, error: "El tipo debe ser 'prestatario' o 'cliente'" });
     }
 
+    const sucursalId = req.todasSucursales ? (req.body.sucursal_id || req.sucursal_id) : req.sucursal_id;
+
     const data = await service.registrarSaldoAFavor(
       req.user.negocio_id,
       tipo,
       Number(id),
       Number(monto),
+      sucursalId || null,
+      req.user.id,
     );
     res.json({ ok: true, data, message: 'Saldo a favor actualizado correctamente' });
+  } catch (err) { next(err); }
+};
+
+const getSaldoSucursal = async (req, res, next) => {
+  try {
+    const { tipo, id } = req.params;
+    if (!['prestatario', 'cliente'].includes(tipo)) {
+      return res.status(400).json({ ok: false, error: "tipo debe ser 'prestatario' o 'cliente'" });
+    }
+    const sucursalId = req.sucursal_id;
+    if (!sucursalId) return res.status(400).json({ ok: false, error: 'Sucursal no identificada' });
+    const data = await service.getSaldoSucursalPersona(req.user.negocio_id, tipo, Number(id), sucursalId);
+    res.json({ ok: true, data });
+  } catch (err) { next(err); }
+};
+
+const getHistorialSaldoSucursal = async (req, res, next) => {
+  try {
+    const { tipo, id } = req.params;
+    if (!['prestatario', 'cliente'].includes(tipo)) {
+      return res.status(400).json({ ok: false, error: "tipo debe ser 'prestatario' o 'cliente'" });
+    }
+    const sucursalId = req.sucursal_id;
+    if (!sucursalId) return res.status(400).json({ ok: false, error: 'Sucursal no identificada' });
+    const data = await service.getHistorialSaldoSucursalPersona(req.user.negocio_id, tipo, Number(id), sucursalId);
+    res.json({ ok: true, data });
   } catch (err) { next(err); }
 };
 
@@ -369,4 +399,5 @@ module.exports = {
   retomaDirecta, aplicarSaldoAPrestamos, aplicarSaldoAPrestamo, getResumenCartera,
   anularAbono, getRetomasDirectas, anularRetomaDirecta,
   getEstadoCuenta, crearAjusteDeuda, editarValorPrestamo,
+  getSaldoSucursal, getHistorialSaldoSucursal,
 };
