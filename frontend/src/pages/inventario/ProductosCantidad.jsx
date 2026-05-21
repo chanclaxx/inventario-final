@@ -14,6 +14,7 @@ import { ModalEditarProductoCantidad }                   from './ModalEditarProd
 import { VistaVariantesProducto }                        from './VistaVariantesProducto';
 import { useAuth }                                       from '../../context/useAuth';
 import { useSucursalKey }                                from '../../hooks/useSucursalKey';
+import useSucursalStore                                  from '../../store/sucursalStore';
 import api                                               from '../../api/axios.config';
 
 // ── Tarjeta de producto cantidad ──────────────────────────────────────────────
@@ -184,7 +185,9 @@ function AcordeonLinea({ nombre, productos, esAdmin, onAgregar, onReducir, onEdi
 // ── Componente principal ──────────────────────────────────────────────────────
 export function ProductosCantidad() {
   const queryClient = useQueryClient();
-  const { puedeEditarProductos } = useAuth();
+  const { puedeEditarProductos, esSucursalVista } = useAuth();
+  const sucursalActiva = useSucursalStore((s) => s.sucursalActiva);
+  const soloLectura    = esSucursalVista(sucursalActiva);
 
   const { sucursalKey, sucursalLista } = useSucursalKey();
 
@@ -310,7 +313,7 @@ export function ProductosCantidad() {
                 esAdmin={esAdmin}
                 onAgregar={handleAgregar}
                 onReducir={handleAbrirReducir}
-                onEditar={setProductoAEditar}
+                onEditar={soloLectura ? null : setProductoAEditar}
                 variantesActivo={variantesActivo}
                 onVerArbol={setProductoArbol}
               />
@@ -324,7 +327,7 @@ export function ProductosCantidad() {
                 esAdmin={esAdmin}
                 onAgregar={handleAgregar}
                 onReducir={handleAbrirReducir}
-                onEditar={setProductoAEditar}
+                onEditar={soloLectura ? null : setProductoAEditar}
                 variantesActivo={variantesActivo}
                 onVerArbol={setProductoArbol}
               />

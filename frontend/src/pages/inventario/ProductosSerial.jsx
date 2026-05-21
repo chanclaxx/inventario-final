@@ -16,6 +16,7 @@ import { ModalEditarSerial }         from './ModalEditarSerial';
 import { ModalEditarProductoSerial } from './ModalEditarProductoSerial';
 import { useAuth }                   from '../../context/useAuth';
 import { useSucursalKey }            from '../../hooks/useSucursalKey';
+import useSucursalStore              from '../../store/sucursalStore';
 import api                           from '../../api/axios.config';
 
 // ─── Helper: leer lista de colores desde config ───────────────────────────────
@@ -752,7 +753,9 @@ function BuscadorModelos({ productos, busqueda, onBusquedaChange, modoImei, onMo
 // ─── Componente principal ─────────────────────────────────────────────────────
 export function ProductosSerial({ onAgregarProducto }) {
   const queryClient                    = useQueryClient();
-  const { puedeEditarProductos }       = useAuth();
+  const { puedeEditarProductos, esSucursalVista } = useAuth();
+  const sucursalActiva = useSucursalStore((s) => s.sucursalActiva);
+  const soloLectura    = esSucursalVista(sucursalActiva);
   const { sucursalKey, sucursalLista } = useSucursalKey();
 
   const [productoSeleccionado, setProductoSeleccionado] = useState(null);
@@ -939,7 +942,7 @@ export function ProductosSerial({ onAgregarProducto }) {
             precioProducto={productoSeleccionado.precio}
             onAgregar={handleAgregarSerial}
             onEliminar={(serial) => setSerialAEliminar({ id: serial.id, imei: serial.imei })}
-            onEditar={esAdmin ? setSerialAEditar : null}
+            onEditar={esAdmin && !soloLectura ? setSerialAEditar : null}
             coloresActivo={coloresActivo}
             coloresConfig={coloresConfig}
           />
@@ -977,7 +980,7 @@ export function ProductosSerial({ onAgregarProducto }) {
             <button
               key={p.id}
               onClick={() => handleSeleccionar(p)}
-              onDoubleClick={(e) => { e.stopPropagation(); if (esAdmin) setProductoAEditar(p); }}
+              onDoubleClick={(e) => { e.stopPropagation(); if (esAdmin && !soloLectura) setProductoAEditar(p); }}
               className={`flex items-center justify-between p-3 rounded-xl text-left group
                 transition-all duration-150 border
                 ${productoSeleccionado?.id === p.id
@@ -1005,7 +1008,7 @@ export function ProductosSerial({ onAgregarProducto }) {
               productos={g.productos}
               productoSeleccionado={productoSeleccionado}
               onSeleccionar={handleSeleccionar}
-              onEditarProducto={setProductoAEditar}
+              onEditarProducto={soloLectura ? null : setProductoAEditar}
               esAdmin={esAdmin}
             />
           ))
