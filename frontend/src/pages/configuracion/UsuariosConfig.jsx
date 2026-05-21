@@ -226,12 +226,13 @@ function SelectorPermisosProveedores({ permisos, onChange, proveedores = [] }) {
 // ─── SelectorPermisosEdicionProductos ────────────────────────────────────────
 
 function SelectorPermisosEdicionProductos({ permisos, onChange }) {
-  const puedeEditar   = permisos?.puede_editar   ?? false;
-  const puedeExportar = permisos?.puede_exportar ?? false;
-  const campos        = permisos?.campos ?? CAMPOS_DEFAULT;
+  const puedeEditar        = permisos?.puede_editar        ?? false;
+  const puedeExportar      = permisos?.puede_exportar      ?? false;
+  const puedeExportarGlobal = permisos?.puede_exportar_global ?? false;
+  const campos             = permisos?.campos ?? CAMPOS_DEFAULT;
 
   const update = (partial) => {
-    const base = permisos || { puede_editar: false, puede_exportar: false, campos: CAMPOS_DEFAULT };
+    const base = permisos || { puede_editar: false, puede_exportar: false, puede_exportar_global: false, campos: CAMPOS_DEFAULT };
     onChange({ ...base, ...partial });
   };
 
@@ -309,11 +310,29 @@ function SelectorPermisosEdicionProductos({ permisos, onChange }) {
       <label className="flex items-center gap-2.5 cursor-pointer select-none">
         <CheckboxCustom
           checked={puedeExportar}
-          onChange={() => update({ puede_exportar: !puedeExportar })}
+          onChange={() => update({
+            puede_exportar:        !puedeExportar,
+            // al quitar exportar, también se quita el global
+            ...(!puedeExportar ? {} : { puede_exportar_global: false }),
+          })}
           color="indigo"
         />
         <span className="text-sm text-gray-700">Puede exportar inventario (Excel)</span>
       </label>
+
+      {puedeExportar && (
+        <label className="flex items-center gap-2.5 cursor-pointer select-none ml-6">
+          <CheckboxCustom
+            checked={puedeExportarGlobal}
+            onChange={() => update({ puede_exportar_global: !puedeExportarGlobal })}
+            color="indigo"
+          />
+          <div className="flex flex-col gap-0.5">
+            <span className="text-sm text-gray-700">Permite exportar inventario global</span>
+            <span className="text-xs text-gray-400">Puede exportar todas las sucursales del negocio</span>
+          </div>
+        </label>
+      )}
 
       {!puedeEditar && !puedeExportar && (
         <p className="text-xs text-gray-400 bg-white rounded-lg px-3 py-1.5 border border-gray-100">

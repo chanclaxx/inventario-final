@@ -77,6 +77,11 @@ export function AuthProvider({ children }) {
     return usuario?.permisos_edicion_productos?.puede_exportar === true;
   };
 
+  const puedeExportarInventarioGlobal = () => {
+    if (usuario?.rol === 'admin_negocio') return true;
+    return usuario?.permisos_edicion_productos?.puede_exportar_global === true;
+  };
+
   return (
     <AuthContext.Provider value={{
       usuario,
@@ -88,6 +93,7 @@ export function AuthProvider({ children }) {
       puedeEditarProductos,
       camposEdicionProductos,
       puedeExportarInventario,
+      puedeExportarInventarioGlobal,
     }}>
       {children}
     </AuthContext.Provider>

@@ -129,4 +129,11 @@ const requirePermisoExportarInventario = (req, res, next) => {
   return res.status(403).json({ ok: false, error: 'Sin permiso para exportar el inventario' });
 };
 
-module.exports = { requireRole, requireNivel, requireSucursal, assertBelongsToNegocio, requirePermisoProveedores, requirePermisoExportarInventario };
+const requirePermisoExportarNegocio = (req, res, next) => {
+  if (!req.user) return res.status(401).json({ ok: false, error: 'No autenticado' });
+  if (req.user.rol === 'admin_negocio') return next();
+  if (req.user.permisos_edicion_productos?.puede_exportar_global === true) return next();
+  return res.status(403).json({ ok: false, error: 'Sin permiso para exportar el inventario global' });
+};
+
+module.exports = { requireRole, requireNivel, requireSucursal, assertBelongsToNegocio, requirePermisoProveedores, requirePermisoExportarInventario, requirePermisoExportarNegocio };

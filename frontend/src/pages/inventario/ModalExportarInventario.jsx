@@ -39,8 +39,8 @@ const ALCANCES = [
 ];
 
 export function ModalExportarInventario({ open, onClose }) {
-  const { esAdminNegocio } = useAuth();
-  const esAdmin = esAdminNegocio();
+  const { puedeExportarInventarioGlobal } = useAuth();
+  const puedeVerAlcance = puedeExportarInventarioGlobal();
 
   const [alcance,    setAlcance]    = useState('sucursal');
   const [modo,       setModo]       = useState('productos');
@@ -78,8 +78,8 @@ export function ModalExportarInventario({ open, onClose }) {
     <Modal open={open} onClose={onClose} title="Exportar inventario" size="sm">
       <div className="flex flex-col gap-5 pb-1">
 
-        {/* ── Alcance (solo admin) ── */}
-        {esAdmin && (
+        {/* ── Alcance (admin o usuario con permiso global) ── */}
+        {puedeVerAlcance && (
           <div className="flex flex-col gap-2">
             <p className="text-sm font-medium text-gray-700">Alcance</p>
             <div className="grid grid-cols-2 gap-2">
