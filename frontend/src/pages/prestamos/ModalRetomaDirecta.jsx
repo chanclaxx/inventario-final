@@ -82,10 +82,12 @@ export function ModalRetomaDirecta({ persona, sucursalId, onClose, onSuccess }) 
       ingreso_inventario:   ingresoInventario,
     }),
     onSuccess: (res) => {
-      queryClient.invalidateQueries({ queryKey: ['prestamos'],          exact: false });
-      queryClient.invalidateQueries({ queryKey: ['inventario'],         exact: false });
-      queryClient.invalidateQueries({ queryKey: ['productos-serial'],   exact: false });
-      queryClient.invalidateQueries({ queryKey: ['productos-cantidad'], exact: false });
+      queryClient.invalidateQueries({ queryKey: ['prestamos'],                   exact: false });
+      queryClient.invalidateQueries({ queryKey: ['inventario'],                  exact: false });
+      queryClient.invalidateQueries({ queryKey: ['productos-serial'],            exact: false });
+      queryClient.invalidateQueries({ queryKey: ['productos-cantidad'],          exact: false });
+      queryClient.invalidateQueries({ queryKey: ['saldo-sucursal'],              exact: false });
+      queryClient.invalidateQueries({ queryKey: ['historial-saldo-sucursal'],    exact: false });
       onSuccess(res.data?.data);
     },
     onError: (err) => setError(err.response?.data?.error || 'Error al registrar la compra'),

@@ -32,6 +32,7 @@ import { EstadoDeCuenta }                       from './EstadoDeCuenta';
 import { useMetodosPago }                       from '../../hooks/useMetodosPago';
 import useExportarPdfPrestamos                  from '../../hooks/useExportarPdfPrestamos';
 import api                                      from '../../api/axios.config';
+import useSucursalStore                         from '../../store/sucursalStore';
 import {
   getProductosSerial, getProductosCantidad,
 }                                               from '../../api/productos.api';
@@ -352,8 +353,10 @@ function ModalSaldoAFavor({ nombre, tipo, personaId, montoActual, onClose }) {
   const mutation = useMutation({
     mutationFn: () => registrarSaldoAFavorApi(tipoApi, personaId, Number(monto)),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['prestamos'],     exact: false });
-      queryClient.invalidateQueries({ queryKey: ['prestatarios'],  exact: false });
+      queryClient.invalidateQueries({ queryKey: ['prestamos'],               exact: false });
+      queryClient.invalidateQueries({ queryKey: ['prestatarios'],            exact: false });
+      queryClient.invalidateQueries({ queryKey: ['saldo-sucursal'],          exact: false });
+      queryClient.invalidateQueries({ queryKey: ['historial-saldo-sucursal'], exact: false });
       onClose();
     },
     onError: (err) => setError(err.response?.data?.error || 'Error al guardar el saldo'),
@@ -412,16 +415,17 @@ function ModalSaldoAFavor({ nombre, tipo, personaId, montoActual, onClose }) {
 // ─── Modal Historial Saldo a favor por sucursal ───────────────────────────────
 
 function ModalHistorialSaldo({ nombre, tipo, personaId, onClose }) {
-  const tipoApi = tipo === 'companero' ? 'prestatario' : tipo;
+  const tipoApi        = tipo === 'companero' ? 'prestatario' : tipo;
+  const sucursalActiva = useSucursalStore((s) => s.sucursalActiva);
 
   const { data: saldoData, isLoading: loadingSaldo } = useQuery({
-    queryKey:  ['saldo-sucursal', tipoApi, personaId],
+    queryKey:  ['saldo-sucursal', tipoApi, personaId, sucursalActiva],
     queryFn:   () => getSaldoSucursalApi(tipoApi, personaId).then((r) => r.data.data),
     staleTime: 0,
   });
 
   const { data: historial = [], isLoading: loadingHist } = useQuery({
-    queryKey:  ['historial-saldo-sucursal', tipoApi, personaId],
+    queryKey:  ['historial-saldo-sucursal', tipoApi, personaId, sucursalActiva],
     queryFn:   () => getHistorialSaldoSucursalApi(tipoApi, personaId).then((r) => r.data.data),
     staleTime: 0,
   });
@@ -1376,7 +1380,9 @@ function TarjetaPrestamoDetalle({ prestamo, onAbonar, onDevolver, onImprimir, on
 // ─── Vista detalle de persona ─────────────────────────────────────────────────
 
 function VistaDetallePersona({ nombre, tipo, personaId, prestamos, saldoAFavor = 0, onVolver, onAbonar, onDevolver, onImprimir, onIntercambiar, onRegistrarSaldo, onRetomaDirecta, onAjusteCuentas, coloresActivo, onVerHistorialSaldo }) {
-  const queryClient = useQueryClient();
+  const queryClient    = useQueryClient();
+  const sucursalActiva = useSucursalStore((s) => s.sucursalActiva);
+
   const [tabDetalle,          setTabDetalle]          = useState('prestamos'); // 'prestamos' | 'cuenta'
   const [cerradosAbiertos,    setCerradosAbiertos]    = useState(false);
   const [retomasAbiertas,     setRetomasAbiertas]     = useState(false);
@@ -1388,11 +1394,27 @@ function VistaDetallePersona({ nombre, tipo, personaId, prestamos, saldoAFavor =
   const [resultadoSaldo,      setResultadoSaldo]      = useState(null);
   const [editandoPrestamo,    setEditandoPrestamo]    = useState(null);
 
+  const tipoApi = tipo === 'companero' ? 'prestatario' : tipo;
+
+  // Saldo real de esta sucursal (no el global de prestatarios/clientes)
+  const { data: saldoSucData } = useQuery({
+    queryKey:  ['saldo-sucursal', tipoApi, personaId, sucursalActiva],
+    queryFn:   () => getSaldoSucursalApi(tipoApi, personaId).then((r) => r.data.data),
+    staleTime: 0,
+  });
+  const saldoSucursal = Number(saldoSucData?.saldo ?? 0);
+
+  const _invalidarSaldo = () => {
+    queryClient.invalidateQueries({ queryKey: ['prestamos'],       exact: false });
+    queryClient.invalidateQueries({ queryKey: ['saldo-sucursal'],  exact: false });
+    queryClient.invalidateQueries({ queryKey: ['historial-saldo-sucursal'], exact: false });
+  };
+
   const mutAplicarSaldo = useMutation({
     mutationFn: (prestamoId) => aplicarSaldoAPrestamoApi(prestamoId),
     onMutate:   (prestamoId) => setAplicandoSaldoId(prestamoId),
     onSuccess:  (res) => {
-      queryClient.invalidateQueries({ queryKey: ['prestamos'], exact: false });
+      _invalidarSaldo();
       setResultadoSaldo(res.data.data);
       setAplicandoSaldoId(null);
     },
@@ -1401,8 +1423,6 @@ function VistaDetallePersona({ nombre, tipo, personaId, prestamos, saldoAFavor =
       setAplicandoSaldoId(null);
     },
   });
-
-  const tipoApi = tipo === 'companero' ? 'prestatario' : tipo;
 
   const { data: retomasDirectas = [] } = useQuery({
     queryKey:  ['retomas-directas', tipoApi, personaId],
@@ -1414,7 +1434,7 @@ function VistaDetallePersona({ nombre, tipo, personaId, prestamos, saldoAFavor =
     mutationFn: (retomaId) => anularRetomaDirectaApi(retomaId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['retomas-directas', tipoApi, personaId] });
-      queryClient.invalidateQueries({ queryKey: ['prestamos'], exact: false });
+      _invalidarSaldo();
       setConfirmAnularRetoma(null);
     },
     onError: (err) => {
@@ -1508,8 +1528,8 @@ function VistaDetallePersona({ nombre, tipo, personaId, prestamos, saldoAFavor =
             onClick={onVerHistorialSaldo}
             className="px-4 py-3 flex flex-col gap-0.5 text-left hover:bg-emerald-50 transition-colors rounded-none">
             <p className="text-xs text-gray-400">Saldo a favor</p>
-            <p className={`text-sm font-bold ${saldoAFavor > 0 ? 'text-emerald-600' : 'text-gray-400'}`}>
-              {saldoAFavor > 0 ? formatCOP(saldoAFavor) : '—'}
+            <p className={`text-sm font-bold ${saldoSucursal > 0 ? 'text-emerald-600' : 'text-gray-400'}`}>
+              {saldoSucursal > 0 ? formatCOP(saldoSucursal) : '—'}
             </p>
           </button>
           <div className="px-4 py-3 flex flex-col gap-0.5">
@@ -1539,7 +1559,7 @@ function VistaDetallePersona({ nombre, tipo, personaId, prestamos, saldoAFavor =
             className="flex items-center gap-1.5 text-xs font-medium text-gray-400
               hover:text-gray-600 transition-colors ml-auto">
             <Plus size={12} />
-            {saldoAFavor > 0 ? 'Actualizar saldo' : 'Registrar saldo a favor'}
+            {saldoSucursal > 0 ? 'Actualizar saldo' : 'Registrar saldo a favor'}
           </button>
         </div>
       </div>
