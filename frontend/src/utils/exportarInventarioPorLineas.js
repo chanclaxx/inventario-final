@@ -23,29 +23,18 @@ function sCeldaNum(bg) {
   return { font: { name: 'Arial', sz: 9 }, fill: { patternType: 'solid', fgColor: { rgb: bg } }, alignment: { horizontal: 'right', vertical: 'center' }, numFmt: '#,##0', border: borde() };
 }
 function enc(r, c) { return XLSX.utils.encode_cell({ r: r, c: c }); }
-function fmtFecha(val) {
-  if (!val) return '';
-  var d = new Date(val);
-  if (isNaN(d.getTime())) return '';
-  return d.toLocaleDateString('es-CO', { day: '2-digit', month: '2-digit', year: 'numeric' });
-}
 function parseLista(val) {
   if (!val) return [];
   try { var p = JSON.parse(val); return Array.isArray(p) ? p : []; } catch (e) { return String(val).split(',').map(function(v) { return v.trim(); }).filter(Boolean); }
 }
 function colW(col) {
-  var m = { 'IMEI / Serial': 22, 'Estado': 12, 'Color': 14, 'Prestamista': 22, 'Fecha Entrada': 14, 'Fecha Salida': 14, 'Cliente Venta': 22, 'Cédula Venta': 14, 'Cliente Origen': 22, 'Proveedor': 20, 'Costo Compra': 14, 'Precio Venta': 14, 'Nombre': 28, 'Stock': 10, 'Stock Mínimo': 12, 'Unidad Medida': 14 };
+  var m = { 'Referencia': 28, 'IMEI / Serial': 22, 'Color': 14, 'Precio Costo': 14, 'Precio Venta': 14, 'Proveedor': 20 };
   return { wch: m[col] !== undefined ? m[col] : Math.max(col.length + 4, 12) };
 }
 function bgSerial(s) {
   if (s.vendido) return C_VENDIDO;
   if (s.prestado) return C_PRESTADO;
   return C_DISPONIBLE;
-}
-function estadoSerial(s) {
-  if (s.vendido) return 'Vendido';
-  if (s.prestado) return 'Prestado';
-  return 'Disponible';
 }
 function leyenda(ws, n) {
   var sT = { font: { bold: true, name: 'Arial', sz: 9, color: { rgb: '374151' } }, fill: { patternType: 'solid', fgColor: { rgb: C_LEY_TIT } }, alignment: { horizontal: 'left', vertical: 'center' }, border: borde() };
@@ -64,61 +53,51 @@ function hojaUnica(nombre, usadas) {
 }
 function hoy() { return new Date().toLocaleDateString('es-CO',{day:'2-digit',month:'2-digit',year:'numeric'}).replace(/\//g,'-'); }
 
-export function exportarInventarioExcel(porProducto, cantidad, configMap) {
+export function exportarInventarioPorLineas(porLinea, configMap, opciones) {
   var cfg = configMap || {};
-  var colAct = cfg.colores_serial_activo === '1';
-  var carAct = cfg.caracteristicas_serial_activo === '1';
+  var opc = opciones || {};
+  var incluirCosto     = opc.incluirCosto     !== false;
+  var incluirPrecio    = opc.incluirPrecio    !== false;
+  var incluirProveedor = opc.incluirProveedor !== false;
+
+  var colAct  = cfg.colores_serial_activo === '1';
+  var carAct  = cfg.caracteristicas_serial_activo === '1';
   var carList = carAct ? parseLista(cfg.caracteristicas_serial_lista) : [];
+
   var wb = XLSX.utils.book_new();
   var usadas = new Set();
 
-  var construirSerial = function(seriales) {
-    var ws = {}; var cols = ['IMEI / Serial','Estado'];
+  var construirHoja = function(seriales) {
+    var ws = {}; var cols = ['Referencia','IMEI / Serial'];
     if (colAct) cols.push('Color');
     for (var ci=0;ci<carList.length;ci++) cols.push(carList[ci]);
-    cols.push('Prestamista','Fecha Entrada','Fecha Salida','Cliente Venta','Cédula Venta','Cliente Origen','Proveedor','Costo Compra','Precio Venta');
+    if (incluirCosto)     cols.push('Precio Costo');
+    if (incluirPrecio)    cols.push('Precio Venta');
+    if (incluirProveedor) cols.push('Proveedor');
     leyenda(ws, cols.length);
     for (var hi=0;hi<cols.length;hi++) ws[enc(1,hi)]={t:'s',v:cols[hi],s:sHeader()};
     ws['!autofilter']={ref:XLSX.utils.encode_range({s:{r:1,c:0},e:{r:1,c:cols.length-1}})};
-    for (var ri=0;ri<seriales.length;ri++) {
-      var s=seriales[ri]; var r=ri+2; var bg=bgSerial(s); var car=s.caracteristicas||{}; var c=0;
+    var sorted = seriales.slice().sort(function(a,b) {
+      var oa=a.vendido?2:a.prestado?1:0; var ob=b.vendido?2:b.prestado?1:0; return oa-ob;
+    });
+    for (var ri=0;ri<sorted.length;ri++) {
+      var s=sorted[ri]; var r=ri+2; var bg=bgSerial(s); var car=s.caracteristicas||{}; var c=0;
+      ws[enc(r,c++)]={t:'s',v:s.producto||'',s:sCelda(bg)};
       ws[enc(r,c++)]={t:'s',v:s.imei||'',s:sCelda(bg)};
-      ws[enc(r,c++)]={t:'s',v:estadoSerial(s),s:sCelda(bg)};
       if (colAct) ws[enc(r,c++)]={t:'s',v:s.color||'',s:sCelda(bg)};
       for (var ki=0;ki<carList.length;ki++) ws[enc(r,c++)]={t:'s',v:car[carList[ki]]||'',s:sCelda(bg)};
-      ws[enc(r,c++)]={t:'s',v:s.prestamista||'',s:sCelda(bg)};
-      ws[enc(r,c++)]={t:'s',v:fmtFecha(s.fecha_entrada),s:sCelda(bg)};
-      ws[enc(r,c++)]={t:'s',v:fmtFecha(s.fecha_salida),s:sCelda(bg)};
-      ws[enc(r,c++)]={t:'s',v:s.cliente_venta||'',s:sCelda(bg)};
-      ws[enc(r,c++)]={t:'s',v:s.cedula_cliente_venta||'',s:sCelda(bg)};
-      ws[enc(r,c++)]={t:'s',v:s.cliente_origen||'',s:sCelda(bg)};
-      ws[enc(r,c++)]={t:'s',v:s.proveedor||'',s:sCelda(bg)};
-      ws[enc(r,c++)]={t:'n',v:Number(s.costo_compra)||0,s:sCeldaNum(bg)};
-      ws[enc(r,c++)]={t:'n',v:Number(s.precio_venta)||0,s:sCeldaNum(bg)};
+      if (incluirCosto)     ws[enc(r,c++)]={t:'n',v:Number(s.costo_compra)||0,s:sCeldaNum(bg)};
+      if (incluirPrecio)    ws[enc(r,c++)]={t:'n',v:Number(s.precio_venta)||0,s:sCeldaNum(bg)};
+      if (incluirProveedor) ws[enc(r,c++)]={t:'s',v:s.proveedor||'',s:sCelda(bg)};
     }
-    var tf=seriales.length+2;
+    var tf=sorted.length+2;
     ws['!ref']=XLSX.utils.encode_range({s:{r:0,c:0},e:{r:tf-1,c:cols.length-1}});
     ws['!cols']=cols.map(colW); ws['!rows']=[{hpt:18},{hpt:22}]; return ws;
   };
 
-  var construirCantidad = function(cant) {
-    var ws={}; var cols=['Nombre','Stock','Stock Mínimo','Unidad Medida','Proveedor','Cliente Origen']; var bg=C_DISPONIBLE;
-    for (var hi=0;hi<cols.length;hi++) ws[enc(0,hi)]={t:'s',v:cols[hi],s:sHeader()};
-    for (var ri=0;ri<cant.length;ri++) {
-      var p=cant[ri]; var row=ri+1;
-      ws[enc(row,0)]={t:'s',v:p.nombre||'',s:sCelda(bg)};
-      ws[enc(row,1)]={t:'n',v:Number(p.stock)||0,s:sCeldaNum(bg)};
-      ws[enc(row,2)]={t:'n',v:Number(p.stock_minimo)||0,s:sCeldaNum(bg)};
-      ws[enc(row,3)]={t:'s',v:p.unidad_medida||'',s:sCelda(bg)};
-      ws[enc(row,4)]={t:'s',v:p.proveedor||'',s:sCelda(bg)};
-      ws[enc(row,5)]={t:'s',v:p.cliente_origen||'',s:sCelda(bg)};
-    }
-    ws['!ref']=XLSX.utils.encode_range({s:{r:0,c:0},e:{r:cant.length,c:cols.length-1}});
-    ws['!cols']=cols.map(colW); return ws;
-  };
-
-  var nombres = Object.keys(porProducto).sort(function(a,b){return a.localeCompare(b,'es');});
-  for (var i=0;i<nombres.length;i++) XLSX.utils.book_append_sheet(wb, construirSerial(porProducto[nombres[i]]), hojaUnica(nombres[i],usadas));
-  if (cantidad&&cantidad.length) XLSX.utils.book_append_sheet(wb, construirCantidad(cantidad), 'Por Cantidad');
-  XLSX.writeFile(wb, 'inventario_'+hoy()+'.xlsx', {cellStyles:true});
+  var lineas = Object.keys(porLinea).sort(function(a,b) {
+    if (a==='Sin Línea') return 1; if (b==='Sin Línea') return -1; return a.localeCompare(b,'es');
+  });
+  for (var i=0;i<lineas.length;i++) XLSX.utils.book_append_sheet(wb, construirHoja(porLinea[lineas[i]]), hojaUnica(lineas[i],usadas));
+  XLSX.writeFile(wb, 'inventario_lineas_'+hoy()+'.xlsx', {cellStyles:true});
 }

@@ -3,7 +3,8 @@ import { Download, ToggleLeft, ToggleRight, FileSpreadsheet, Layers } from 'luci
 import { Modal }  from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
 import api        from '../../api/axios.config';
-import { exportarInventarioExcel, exportarInventarioPorLineas } from '../../utils/exportarInventarioExcel';
+import { exportarInventarioExcel }    from '../../utils/exportarInventarioExcel';
+import { exportarInventarioPorLineas } from '../../utils/exportarInventarioPorLineas';
 
 const MODOS = [
   {
