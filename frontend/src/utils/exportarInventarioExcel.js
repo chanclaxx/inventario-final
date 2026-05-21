@@ -76,7 +76,7 @@ export function exportarInventarioExcel(porProducto, cantidad, configMap) {
     var ws = {}; var cols = ['IMEI / Serial','Estado'];
     if (colAct) cols.push('Color');
     for (var ci=0;ci<carList.length;ci++) cols.push(carList[ci]);
-    cols.push('Prestamista','Fecha Entrada','Fecha Salida','Cliente Venta','Cédula Venta','Cliente Origen','Proveedor','Costo Compra','Precio Venta');
+    cols.push('Prestamista','Fecha Entrada','Fecha Salida','Cliente Venta','Cédula Venta','Cliente Origen');
     leyenda(ws, cols.length);
     for (var hi=0;hi<cols.length;hi++) ws[enc(1,hi)]={t:'s',v:cols[hi],s:sHeader()};
     ws['!autofilter']={ref:XLSX.utils.encode_range({s:{r:1,c:0},e:{r:1,c:cols.length-1}})};
@@ -92,9 +92,6 @@ export function exportarInventarioExcel(porProducto, cantidad, configMap) {
       ws[enc(r,c++)]={t:'s',v:s.cliente_venta||'',s:sCelda(bg)};
       ws[enc(r,c++)]={t:'s',v:s.cedula_cliente_venta||'',s:sCelda(bg)};
       ws[enc(r,c++)]={t:'s',v:s.cliente_origen||'',s:sCelda(bg)};
-      ws[enc(r,c++)]={t:'s',v:s.proveedor||'',s:sCelda(bg)};
-      ws[enc(r,c++)]={t:'n',v:Number(s.costo_compra)||0,s:sCeldaNum(bg)};
-      ws[enc(r,c++)]={t:'n',v:Number(s.precio_venta)||0,s:sCeldaNum(bg)};
     }
     var tf=seriales.length+2;
     ws['!ref']=XLSX.utils.encode_range({s:{r:0,c:0},e:{r:tf-1,c:cols.length-1}});
@@ -102,7 +99,7 @@ export function exportarInventarioExcel(porProducto, cantidad, configMap) {
   };
 
   var construirCantidad = function(cant) {
-    var ws={}; var cols=['Nombre','Stock','Stock Mínimo','Unidad Medida','Proveedor','Cliente Origen']; var bg=C_DISPONIBLE;
+    var ws={}; var cols=['Nombre','Stock','Stock Mínimo','Unidad Medida','Cliente Origen']; var bg=C_DISPONIBLE;
     for (var hi=0;hi<cols.length;hi++) ws[enc(0,hi)]={t:'s',v:cols[hi],s:sHeader()};
     for (var ri=0;ri<cant.length;ri++) {
       var p=cant[ri]; var row=ri+1;
@@ -110,8 +107,7 @@ export function exportarInventarioExcel(porProducto, cantidad, configMap) {
       ws[enc(row,1)]={t:'n',v:Number(p.stock)||0,s:sCeldaNum(bg)};
       ws[enc(row,2)]={t:'n',v:Number(p.stock_minimo)||0,s:sCeldaNum(bg)};
       ws[enc(row,3)]={t:'s',v:p.unidad_medida||'',s:sCelda(bg)};
-      ws[enc(row,4)]={t:'s',v:p.proveedor||'',s:sCelda(bg)};
-      ws[enc(row,5)]={t:'s',v:p.cliente_origen||'',s:sCelda(bg)};
+      ws[enc(row,4)]={t:'s',v:p.cliente_origen||'',s:sCelda(bg)};
     }
     ws['!ref']=XLSX.utils.encode_range({s:{r:0,c:0},e:{r:cant.length,c:cols.length-1}});
     ws['!cols']=cols.map(colW); return ws;

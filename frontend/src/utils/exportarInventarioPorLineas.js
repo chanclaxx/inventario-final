@@ -28,7 +28,7 @@ function parseLista(val) {
   try { var p = JSON.parse(val); return Array.isArray(p) ? p : []; } catch (e) { return String(val).split(',').map(function(v) { return v.trim(); }).filter(Boolean); }
 }
 function colW(col) {
-  var m = { 'Referencia': 28, 'IMEI / Serial': 22, 'Color': 14, 'Precio Costo': 14, 'Precio Venta': 14, 'Proveedor': 20 };
+  var m = { 'Referencia': 28, 'IMEI / Serial': 22, 'Color': 14 };
   return { wch: m[col] !== undefined ? m[col] : Math.max(col.length + 4, 12) };
 }
 function bgSerial(s) {
@@ -53,12 +53,8 @@ function hojaUnica(nombre, usadas) {
 }
 function hoy() { return new Date().toLocaleDateString('es-CO',{day:'2-digit',month:'2-digit',year:'numeric'}).replace(/\//g,'-'); }
 
-export function exportarInventarioPorLineas(porLinea, configMap, opciones) {
+export function exportarInventarioPorLineas(porLinea, configMap) {
   var cfg = configMap || {};
-  var opc = opciones || {};
-  var incluirCosto     = opc.incluirCosto     !== false;
-  var incluirPrecio    = opc.incluirPrecio    !== false;
-  var incluirProveedor = opc.incluirProveedor !== false;
 
   var colAct  = cfg.colores_serial_activo === '1';
   var carAct  = cfg.caracteristicas_serial_activo === '1';
@@ -71,9 +67,6 @@ export function exportarInventarioPorLineas(porLinea, configMap, opciones) {
     var ws = {}; var cols = ['Referencia','IMEI / Serial'];
     if (colAct) cols.push('Color');
     for (var ci=0;ci<carList.length;ci++) cols.push(carList[ci]);
-    if (incluirCosto)     cols.push('Precio Costo');
-    if (incluirPrecio)    cols.push('Precio Venta');
-    if (incluirProveedor) cols.push('Proveedor');
     leyenda(ws, cols.length);
     for (var hi=0;hi<cols.length;hi++) ws[enc(1,hi)]={t:'s',v:cols[hi],s:sHeader()};
     ws['!autofilter']={ref:XLSX.utils.encode_range({s:{r:1,c:0},e:{r:1,c:cols.length-1}})};
@@ -86,9 +79,6 @@ export function exportarInventarioPorLineas(porLinea, configMap, opciones) {
       ws[enc(r,c++)]={t:'s',v:s.imei||'',s:sCelda(bg)};
       if (colAct) ws[enc(r,c++)]={t:'s',v:s.color||'',s:sCelda(bg)};
       for (var ki=0;ki<carList.length;ki++) ws[enc(r,c++)]={t:'s',v:car[carList[ki]]||'',s:sCelda(bg)};
-      if (incluirCosto)     ws[enc(r,c++)]={t:'n',v:Number(s.costo_compra)||0,s:sCeldaNum(bg)};
-      if (incluirPrecio)    ws[enc(r,c++)]={t:'n',v:Number(s.precio_venta)||0,s:sCeldaNum(bg)};
-      if (incluirProveedor) ws[enc(r,c++)]={t:'s',v:s.proveedor||'',s:sCelda(bg)};
     }
     var tf=sorted.length+2;
     ws['!ref']=XLSX.utils.encode_range({s:{r:0,c:0},e:{r:tf-1,c:cols.length-1}});

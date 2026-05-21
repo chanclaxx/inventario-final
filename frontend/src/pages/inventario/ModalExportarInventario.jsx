@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Download, ToggleLeft, ToggleRight, FileSpreadsheet, Layers } from 'lucide-react';
+import { Download, FileSpreadsheet, Layers } from 'lucide-react';
 import { Modal }  from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
 import api        from '../../api/axios.config';
@@ -21,26 +21,10 @@ const MODOS = [
   },
 ];
 
-function Toggle({ label, value, onChange }) {
-  return (
-    <div className="flex items-center justify-between">
-      <span className="text-sm text-gray-700">{label}</span>
-      <button type="button" onClick={() => onChange(!value)} className="transition-colors">
-        {value
-          ? <ToggleRight size={28} className="text-blue-600" />
-          : <ToggleLeft  size={28} className="text-gray-300" />}
-      </button>
-    </div>
-  );
-}
-
 export function ModalExportarInventario({ open, onClose }) {
-  const [modo,             setModo]             = useState('productos');
-  const [incluirCosto,     setIncluirCosto]     = useState(true);
-  const [incluirPrecio,    setIncluirPrecio]    = useState(true);
-  const [incluirProveedor, setIncluirProveedor] = useState(true);
-  const [exportando,       setExportando]       = useState(false);
-  const [error,            setError]            = useState('');
+  const [modo,       setModo]       = useState('productos');
+  const [exportando, setExportando] = useState(false);
+  const [error,      setError]      = useState('');
 
   const handleExportar = async () => {
     setExportando(true);
@@ -52,11 +36,7 @@ export function ModalExportarInventario({ open, onClose }) {
       if (modo === 'productos') {
         exportarInventarioExcel(porProducto, cantidad, configMap);
       } else {
-        exportarInventarioPorLineas(porLinea, configMap, {
-          incluirCosto,
-          incluirPrecio,
-          incluirProveedor,
-        });
+        exportarInventarioPorLineas(porLinea, configMap);
       }
       onClose();
     } catch (err) {
@@ -99,40 +79,26 @@ export function ModalExportarInventario({ open, onClose }) {
           </div>
         </div>
 
-        {/* Opciones solo para "por líneas" */}
-        {modo === 'lineas' && (
-          <>
-            <div className="flex flex-col gap-3 p-3 bg-gray-50 rounded-xl">
-              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                Columnas adicionales
-              </p>
-              <Toggle label="Precio Costo"  value={incluirCosto}     onChange={setIncluirCosto} />
-              <Toggle label="Precio Venta"  value={incluirPrecio}    onChange={setIncluirPrecio} />
-              <Toggle label="Proveedor"     value={incluirProveedor} onChange={setIncluirProveedor} />
+        {/* Leyenda de colores (ambos modos) */}
+        <div className="flex flex-col gap-2">
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+            Colores en el Excel
+          </p>
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-1.5">
+              <div className="w-4 h-4 rounded border border-gray-300 bg-white" />
+              <span className="text-xs text-gray-600">Disponible</span>
             </div>
-
-            {/* Leyenda de colores */}
-            <div className="flex flex-col gap-2">
-              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                Colores en el Excel
-              </p>
-              <div className="flex items-center gap-4">
-                <div className="flex items-center gap-1.5">
-                  <div className="w-4 h-4 rounded border border-gray-300 bg-white" />
-                  <span className="text-xs text-gray-600">Disponible</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <div className="w-4 h-4 rounded bg-blue-200" />
-                  <span className="text-xs text-gray-600">Prestado</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <div className="w-4 h-4 rounded bg-green-100" />
-                  <span className="text-xs text-gray-600">Vendido</span>
-                </div>
-              </div>
+            <div className="flex items-center gap-1.5">
+              <div className="w-4 h-4 rounded bg-blue-200" />
+              <span className="text-xs text-gray-600">Prestado</span>
             </div>
-          </>
-        )}
+            <div className="flex items-center gap-1.5">
+              <div className="w-4 h-4 rounded bg-green-100" />
+              <span className="text-xs text-gray-600">Vendido</span>
+            </div>
+          </div>
+        </div>
 
         {error && (
           <p className="text-sm text-red-500 text-center">{error}</p>
