@@ -15,13 +15,19 @@ function parseLista(val) {
   try { var p = JSON.parse(val); return Array.isArray(p) ? p : []; }
   catch { return String(val).split(',').map(function(v) { return v.trim(); }).filter(Boolean); }
 }
+function fmtFecha(val) {
+  if (!val) return '';
+  var d = new Date(val);
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('es-CO', { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
 function bgSerial(s) {
   if (s.vendido)  return A_VENDIDO;
   if (s.prestado) return A_PRESTADO;
   return A_DISPONIBLE;
 }
 function colW(col) {
-  var m = { 'Referencia': 28, 'IMEI / Serial': 22, 'Color': 14 };
+  var m = { 'Referencia': 28, 'IMEI / Serial': 22, 'Color': 14, 'Prestamista': 22, 'Fecha Entrada': 14, 'Cliente Origen': 22 };
   return m[col] !== undefined ? m[col] : Math.max(col.length + 4, 12);
 }
 function applyBorde(cell) {
@@ -100,6 +106,7 @@ export async function exportarInventarioPorLineas(porLinea, configMap) {
     var cols = ['Referencia', 'IMEI / Serial'];
     if (colAct) cols.push('Color');
     for (var ci = 0; ci < carList.length; ci++) cols.push(carList[ci]);
+    cols.push('Prestamista', 'Fecha Entrada', 'Cliente Origen');
 
     ws.columns = cols.map(function(c) { return { width: colW(c) }; });
     leyenda(ws, cols.length);
@@ -129,6 +136,9 @@ export async function exportarInventarioPorLineas(porLinea, configMap) {
       for (var ki = 0; ki < carList.length; ki++) {
         var ck = dr.getCell(cc++); ck.value = car[carList[ki]] || ''; applyCell(ck, bg);
       }
+      var cpCell = dr.getCell(cc++); cpCell.value = s.prestamista            || ''; applyCell(cpCell, bg);
+      var cfCell = dr.getCell(cc++); cfCell.value = fmtFecha(s.fecha_entrada);       applyCell(cfCell, bg);
+      var coCell = dr.getCell(cc++); coCell.value = s.cliente_origen         || ''; applyCell(coCell, bg);
     }
   }
 
