@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { buscarCompras as buscarComprasApi } from '../../api/busqueda.api';
 import { getProveedores, crearProveedor, actualizarProveedor } from '../../api/proveedores.api';
-import { getCruces, crearCruce } from '../../api/cruces.api';
 import { getComprasByProveedor, getCompraById, getComprasPaginadas } from '../../api/compras.api';
 import { getAcreedores, registrarMovimiento as registrarMovAcreedor, getComprasConSaldo, getAbonosPorCargo } from '../../api/acreedores.api';
 import { formatCOP, formatFechaHora } from '../../utils/formatters';
@@ -1438,9 +1437,7 @@ function ModalProveedor({ proveedor, tipoForzado, onClose }) {
   const mutation = useMutation({
     mutationFn: () => proveedor
       ? actualizarProveedor(proveedor.id, form)
-      : tipoForzado === 'cruce'
-        ? crearCruce(form)
-        : crearProveedor(form),
+      : crearProveedor(form),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['proveedores'], exact: false });
       queryClient.invalidateQueries({ queryKey: ['cruces'],      exact: false });
@@ -1524,8 +1521,8 @@ function TabProveedores({ sucursalKey, sucursalLista }) {
   const [modalCompra,     setModalCompra]     = useState(null);
 
   const { data: proveedoresData, isLoading } = useQuery({
-    queryKey: ['proveedores', 'tipo-proveedor'],
-    queryFn:  () => getProveedores('proveedor').then((r) => r.data.data),
+    queryKey: ['proveedores'],
+    queryFn:  () => getProveedores().then((r) => r.data.data),
   });
 
   const { data: acreedoresRaw } = useQuery({
@@ -1603,102 +1600,6 @@ function TabProveedores({ sucursalKey, sucursalLista }) {
       {modalProveedor  && <ModalProveedor onClose={() => setModalProveedor(false)} />}
       {proveedorEditar && <ModalProveedor proveedor={proveedorEditar} onClose={() => setProveedorEditar(null)} />}
       {modalCompra     && <ModalCompra proveedor={modalCompra} onClose={() => setModalCompra(null)} />}
-    </div>
-  );
-}
-
-// ─── Tab Cruces (tipo = cruce) ─────────────────────────────────────────────────
-
-function TabCruces({ sucursalKey, sucursalLista }) {
-  const [busqueda,     setBusqueda]     = useState('');
-  const [modalCruce,   setModalCruce]   = useState(false);
-  const [cruceEditar,  setCruceEditar]  = useState(null);
-  const [cruceVer,     setCruceVer]     = useState(null);
-  const [modalCompra,  setModalCompra]  = useState(null);
-
-  const { data: crucesData, isLoading } = useQuery({
-    queryKey: ['cruces'],
-    queryFn:  () => getCruces().then((r) => r.data.data),
-  });
-
-  const { data: acreedoresRaw } = useQuery({
-    queryKey: ['acreedores'],
-    queryFn:  () => getAcreedores('').then((r) => r.data.data),
-    staleTime: 60_000,
-  });
-  const acreedoresAll = Array.isArray(acreedoresRaw) ? acreedoresRaw : [];
-
-  const cruces = (crucesData || []).filter((c) =>
-    c.nombre.toLowerCase().includes(busqueda.toLowerCase())
-  );
-
-  if (cruceVer) {
-    return (
-      <>
-        <HistorialProveedor
-          proveedor={cruceVer}
-          sucursalKey={sucursalKey}
-          sucursalLista={sucursalLista}
-          onVolver={() => setCruceVer(null)}
-          onNuevaCompra={() => setModalCompra(cruceVer)}
-        />
-        {modalCompra && <ModalCompra proveedor={modalCompra} onClose={() => setModalCompra(null)} />}
-      </>
-    );
-  }
-
-  return (
-    <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-sm text-gray-400">{cruces.length} cruce(s)</p>
-          <p className="text-xs text-gray-400 mt-0.5">Empresas con las que haces intercambios o compras sin pago inmediato en caja</p>
-        </div>
-        <Button size="sm" onClick={() => setModalCruce(true)}><Plus size={16} /> Nuevo cruce</Button>
-      </div>
-      <SearchInput value={busqueda} onChange={setBusqueda} placeholder="Buscar cruce..." />
-      {isLoading ? <Spinner className="py-20" /> : cruces.length === 0 ? (
-        <EmptyState icon={Repeat} titulo="Sin cruces" descripcion="Los cruces son empresas con las que intercambias mercancía o compras a crédito. Su deuda se lleva en Cuenta corriente." />
-      ) : (
-        cruces.map((c) => {
-          const acreedorVinculado = acreedoresAll.find((a) => a.proveedor_id === c.id);
-          const saldo = acreedorVinculado ? Number(acreedorVinculado.saldo || 0) : 0;
-          return (
-            <div key={c.id} className="bg-white border border-gray-100 rounded-2xl p-4 flex items-center justify-between gap-3">
-              <button onClick={() => setCruceVer(c)} className="flex-1 text-left min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <p className="font-semibold text-gray-900 truncate">{c.nombre}</p>
-                  <ProveedorTipoBadge tipo="cruce" />
-                  {saldo > 0 && (
-                    <span className="text-xs text-red-600 font-semibold bg-red-50 border border-red-200 px-2 py-0.5 rounded-full">
-                      Debe {formatCOP(saldo)}
-                    </span>
-                  )}
-                </div>
-                <div className="flex items-center gap-3 mt-0.5 flex-wrap">
-                  {c.nit      && <span className="text-xs text-gray-400">NIT: {c.nit}</span>}
-                  {c.telefono && <span className="text-xs text-gray-400">Tel: {c.telefono}</span>}
-                  {c.contacto && <span className="text-xs text-gray-400">{c.contacto}</span>}
-                </div>
-              </button>
-              <div className="flex items-center gap-2 flex-shrink-0">
-                <Button size="sm" onClick={() => setModalCompra(c)}>
-                  <ShoppingCart size={14} />
-                  <span className="hidden sm:inline">Compra</span>
-                </Button>
-                <button onClick={() => setCruceEditar(c)} className="p-2 rounded-xl hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors">
-                  <Package size={16} />
-                </button>
-              </div>
-            </div>
-          );
-        })
-      )}
-      {/* Crear cruce: tipo forzado a 'cruce' */}
-      {modalCruce  && <ModalProveedor tipoForzado="cruce" onClose={() => setModalCruce(false)} />}
-      {/* Editar cruce: admin puede cambiar tipo si quiere */}
-      {cruceEditar && <ModalProveedor proveedor={cruceEditar} onClose={() => setCruceEditar(null)} />}
-      {modalCompra && <ModalCompra proveedor={modalCompra} onClose={() => setModalCompra(null)} />}
     </div>
   );
 }
@@ -2116,7 +2017,6 @@ export default function ProveedoresPage() {
 
   const tabs = [
     { id: 'proveedores', label: 'Proveedores', Icn: Truck        },
-    { id: 'cruces',      label: 'Cruces',      Icn: Repeat       },
     { id: 'retomas',     label: 'Retomas',     Icn: RefreshCw    },
     ...(verCompras ? [{ id: 'compras', label: 'Compras', Icn: ShoppingCart }] : []),
     { id: 'busqueda',    label: 'Búsqueda',    Icn: Search       },
@@ -2148,9 +2048,6 @@ export default function ProveedoresPage() {
 
       {tabActivo === 'proveedores' && (
         <TabProveedores sucursalKey={sucursalKey} sucursalLista={sucursalLista} />
-      )}
-      {tabActivo === 'cruces' && (
-        <TabCruces sucursalKey={sucursalKey} sucursalLista={sucursalLista} />
       )}
       {tabActivo === 'retomas'    && <TabRetomas />}
       {tabActivo === 'compras'    && <TabCompras />}
