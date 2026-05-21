@@ -11,11 +11,10 @@ import { ModalFactura }            from '../facturas/ModalFactura';
 import { ModalPrestamo }           from '../prestamos/ModalPrestamo';
 import { ModalAgregarProducto }    from './ModalAgregarProducto';
 import { Button }                  from '../../components/ui/Button';
-import { exportarInventarioExcel } from '../../utils/exportarInventarioExcel';
+import { ModalExportarInventario }  from './ModalExportarInventario';
 import useCarritoStore             from '../../store/carritoStore';
 import useSucursalStore            from '../../store/sucursalStore';
 import { useAuth }                 from '../../context/useAuth';
-import api                         from '../../api/axios.config';
 import { ModalImportarInventario } from './ModalImportarInventario';
 import { formatCOP }               from '../../utils/formatters';
 
@@ -31,7 +30,7 @@ export default function InventarioPage() {
   const [modalFactura,   setModalFactura]   = useState(false);
   const [modalPrestamo,  setModalPrestamo]  = useState(false);
   const [modalAgregar,   setModalAgregar]   = useState(false);
-  const [exportando,     setExportando]     = useState(false);
+  const [modalExportar,  setModalExportar]  = useState(false);
   const [carritoAbierto, setCarritoAbierto] = useState(false);
   const [modalImportar,  setModalImportar]  = useState(false);
 
@@ -47,18 +46,6 @@ export default function InventarioPage() {
   const bloquearCreacion = esVistaGlobal && !esUnicaSucursal;
   const puedeExportar    = puedeExportarInventario();
 
-  const handleExportar = async () => {
-    setExportando(true);
-    try {
-      const { data } = await api.get('/inventario/exportar');
-      const { porProducto, cantidad } = data.data;
-      exportarInventarioExcel(porProducto, cantidad);
-    } catch (err) {
-      console.error('Error al exportar inventario:', err);
-    } finally {
-      setExportando(false);
-    }
-  };
 
   const handleCerrarModalAgregar = () => {
     setModalAgregar(false);
@@ -116,12 +103,10 @@ export default function InventarioPage() {
 
           <div className="flex items-center gap-2">
             {puedeExportar && (
-              <Button size="sm" variant="secondary" onClick={handleExportar} loading={exportando}
+              <Button size="sm" variant="secondary" onClick={() => setModalExportar(true)}
                 title="Descargar inventario completo en Excel">
                 <Download size={16} />
-                <span className="hidden sm:inline">
-                  {exportando ? 'Generando...' : 'Exportar Excel'}
-                </span>
+                <span className="hidden sm:inline">Exportar Excel</span>
               </Button>
             )}
 
@@ -246,6 +231,7 @@ export default function InventarioPage() {
 
       <ModalFactura  open={modalFactura}  onClose={() => setModalFactura(false)}  />
       <ModalPrestamo open={modalPrestamo} onClose={() => setModalPrestamo(false)} />
+      <ModalExportarInventario open={modalExportar} onClose={() => setModalExportar(false)} />
 
       {modalAgregar && !bloquearCreacion && (
         <ModalAgregarProducto onClose={handleCerrarModalAgregar} />

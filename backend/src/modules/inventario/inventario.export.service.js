@@ -20,9 +20,14 @@ const getInventarioCompleto = async (sucursalId, negocioId) => {
   ]);
 
   const porProducto = {};
+  const porLinea    = {};
   for (const s of seriales) {
     if (!porProducto[s.producto]) porProducto[s.producto] = [];
     porProducto[s.producto].push(s);
+
+    const linea = s.linea || 'Sin Línea';
+    if (!porLinea[linea]) porLinea[linea] = [];
+    porLinea[linea].push(s);
   }
 
   // Adjuntar árbol de atributos/variantes a cada producto de cantidad
@@ -31,7 +36,7 @@ const getInventarioCompleto = async (sucursalId, negocioId) => {
     atributos: variantesPorProducto[p.id] || [],
   }));
 
-  return { porProducto, cantidad: cantidadEnriquecida };
+  return { porProducto, porLinea, cantidad: cantidadEnriquecida, configMap };
 };
 
 module.exports = { getInventarioCompleto };

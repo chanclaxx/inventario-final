@@ -6,8 +6,12 @@ const getSeriales = async (sucursalId) => {
       ps.nombre       AS producto,
       ps.marca,
       ps.modelo,
+      lp.nombre       AS linea,
       s.imei,
       s.color,
+      s.caracteristicas,
+      s.costo_compra,
+      COALESCE(s.precio, ps.precio) AS precio_venta,
       s.fecha_entrada,
       s.vendido,
       s.prestado,
@@ -30,10 +34,20 @@ const getSeriales = async (sucursalId) => {
       f.celular  AS celular_cliente_venta,
 
       -- Historial completo de ventas para trazabilidad en el Excel (más antigua primero)
-      COALESCE(hist.historial, '[]'::json) AS historial_ventas
+      COALESCE(hist.historial, '[]'::json) AS historial_ventas,
+
+      -- Prestamista: nombre de quien tiene el producto en préstamo activo
+      CASE
+        WHEN s.prestado = true
+        THEN COALESCE(pr_prest.nombre, c_prest.nombre, p_activo.prestatario)
+        ELSE NULL
+      END AS prestamista
 
     FROM seriales s
     JOIN productos_serial ps ON ps.id = s.producto_id
+
+    -- Línea del producto
+    LEFT JOIN lineas_producto lp ON lp.id = ps.linea_id
 
     -- Proveedor directo del serial
     LEFT JOIN proveedores pr_serial   ON pr_serial.id   = s.proveedor_id
@@ -94,6 +108,17 @@ const getSeriales = async (sucursalId) => {
         AND imei IS NOT NULL
       ORDER BY imei, fecha DESC
     ) p_saldado ON p_saldado.imei = s.imei
+
+    -- Préstamo activo más reciente por IMEI (para prestamista)
+    LEFT JOIN LATERAL (
+      SELECT p2.prestatario, p2.prestatario_id, p2.cliente_id
+      FROM prestamos p2
+      WHERE p2.imei = s.imei AND p2.estado = 'Activo'
+      ORDER BY p2.fecha DESC
+      LIMIT 1
+    ) p_activo ON true
+    LEFT JOIN prestatarios pr_prest ON pr_prest.id = p_activo.prestatario_id
+    LEFT JOIN clientes c_prest      ON c_prest.id  = p_activo.cliente_id
 
     WHERE ps.sucursal_id = $1
     ORDER BY ps.nombre, s.vendido ASC, s.fecha_salida DESC
