@@ -3,6 +3,9 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '../../api/axios.config';
 import { getGarantias, crearGarantia, actualizarGarantia, eliminarGarantia } from '../../api/garantias.api';
 import { getLineas, crearLinea, actualizarLinea, eliminarLinea }             from '../../api/productos.api';
+import { getSucursales }   from '../../api/sucursales.api';
+import { useAuth }         from '../../context/useAuth';
+import { exportarInventarioPorLineasNegocio } from '../../utils/exportarInventarioPorLineasNegocio';
 import { UsuariosConfig }    from './UsuariosConfig';
 import { SucursalesConfig }  from './SucursalesConfig';
 import { PasswordConfig }    from './PasswordConfig';
@@ -18,7 +21,7 @@ import {
   Building2, ShieldCheck, FileSliders, BookOpen, Users,
   Printer, Palette, ListChecks, Wallet, Layers,
   ChevronUp, ChevronDown, RotateCcw, Navigation,
-  Upload, X, Image as ImageIcon,
+  Upload, X, Image as ImageIcon, Download,
 } from 'lucide-react';
 
 // ─── Navegación principal ─────────────────────────────────────────────────────
@@ -1056,9 +1059,155 @@ function SeccionNegocio({ valores, set }) {
   );
 }
 
+// ─── Exportar inventario por líneas (solo admin_negocio) ─────────────────────
+function ExportarInventarioConfig() {
+  const [alcance,    setAlcance]    = useState('negocio'); // 'negocio' | 'sucursal'
+  const [sucursalId, setSucursalId] = useState('');
+  const [exportando, setExportando] = useState(false);
+  const [error,      setError]      = useState('');
+
+  const { data: sucursales = [] } = useQuery({
+    queryKey: ['sucursales'],
+    queryFn:  () => getSucursales().then((r) => r.data.data),
+  });
+
+  const efectivoId = sucursalId || (sucursales[0]?.id?.toString() ?? '');
+
+  const handleExportar = async () => {
+    setExportando(true);
+    setError('');
+    try {
+      if (alcance === 'negocio') {
+        const { data } = await api.get('/inventario/exportar-negocio');
+        await exportarInventarioPorLineasNegocio(data.data.porLinea, data.data.configMap);
+      } else {
+        const id = Number(efectivoId);
+        const { data } = await api.get('/inventario/exportar', { params: { sucursal_id: id } });
+        const sucNombre = sucursales.find((s) => s.id === id)?.nombre || '';
+        const porLineaConSuc = {};
+        for (const [linea, sers] of Object.entries(data.data.porLinea)) {
+          porLineaConSuc[linea] = sers.map((s) => ({ ...s, sucursal_nombre: sucNombre }));
+        }
+        await exportarInventarioPorLineasNegocio(porLineaConSuc, data.data.configMap);
+      }
+    } catch {
+      setError('No se pudo exportar. Intenta de nuevo.');
+    } finally {
+      setExportando(false);
+    }
+  };
+
+  const ALCANCES = [
+    { id: 'negocio',   label: 'Todo el negocio', desc: 'Todas las sucursales' },
+    { id: 'sucursal',  label: 'Una sucursal',     desc: 'Elige la sucursal'   },
+  ];
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex items-center gap-2">
+        <Download size={15} className="text-gray-400" />
+        <h3 className="text-sm font-semibold text-gray-700">Exportar inventario por líneas</h3>
+      </div>
+      <p className="text-xs text-gray-400 -mt-2">
+        Genera un Excel organizado por líneas de producto con una columna de sucursal.
+      </p>
+
+      {/* Selector de alcance */}
+      <div className="flex flex-col gap-2">
+        <p className="text-sm font-medium text-gray-700">Alcance</p>
+        <div className="grid grid-cols-2 gap-2">
+          {ALCANCES.map((opt) => (
+            <button
+              key={opt.id}
+              onClick={() => setAlcance(opt.id)}
+              className={`flex flex-col gap-1 p-3 rounded-xl border-2 text-left transition-all
+                ${alcance === opt.id
+                  ? 'border-blue-500 bg-blue-50'
+                  : 'border-gray-200 bg-white hover:border-gray-300'}`}
+            >
+              <span className={`text-sm font-semibold
+                ${alcance === opt.id ? 'text-blue-700' : 'text-gray-700'}`}>
+                {opt.label}
+              </span>
+              <span className="text-xs text-gray-400">{opt.desc}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Selector de sucursal */}
+      {alcance === 'sucursal' && (
+        <div className="flex flex-col gap-1.5">
+          <label className="text-sm font-medium text-gray-700">Sucursal</label>
+          {sucursales.length === 0 ? (
+            <p className="text-xs text-gray-400">No hay sucursales disponibles.</p>
+          ) : (
+            <select
+              value={efectivoId}
+              onChange={(e) => setSucursalId(e.target.value)}
+              className="px-3 py-2 bg-gray-100 border-0 rounded-xl text-sm text-gray-900
+                focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"
+            >
+              {sucursales.map((s) => (
+                <option key={s.id} value={s.id}>{s.nombre}</option>
+              ))}
+            </select>
+          )}
+        </div>
+      )}
+
+      {/* Leyenda de colores */}
+      <div className="flex flex-col gap-2 p-3 bg-gray-50 rounded-xl">
+        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+          Colores en el Excel
+        </p>
+        <div className="flex flex-wrap gap-x-4 gap-y-2">
+          {[
+            { color: '#ffffff', border: true, label: 'Disponible (principal)' },
+            { color: '#FED7AA',               label: 'Disponible (otra sucursal)' },
+            { color: '#BFDBFE',               label: 'Prestado (principal)' },
+            { color: '#E9D5FF',               label: 'Prestado (otra sucursal)' },
+            { color: '#FCA5A5',               label: 'Vendido' },
+          ].map((item) => (
+            <div key={item.label} className="flex items-center gap-1.5">
+              <div
+                className={`w-4 h-4 rounded flex-shrink-0 ${item.border ? 'border border-gray-300' : ''}`}
+                style={{ background: item.color }}
+              />
+              <span className="text-xs text-gray-600">{item.label}</span>
+            </div>
+          ))}
+        </div>
+        <p className="text-xs text-gray-400">
+          Sucursales adicionales reciben colores de una paleta extendida.
+        </p>
+      </div>
+
+      {error && <p className="text-sm text-red-500">{error}</p>}
+
+      <Button
+        onClick={handleExportar}
+        loading={exportando}
+        disabled={alcance === 'sucursal' && !efectivoId}
+      >
+        <Download size={15} />
+        {exportando ? 'Generando...' : 'Descargar Excel'}
+      </Button>
+    </div>
+  );
+}
+
 // ─── Sección: Catálogo con sub-tabs ──────────────────────────────────────────
 function SeccionCatalogo({ valores, set }) {
+  const { usuario } = useAuth();
   const [tab, setTab] = useState('lineas');
+
+  const tabs = [
+    ...TABS_CATALOGO,
+    ...(usuario?.rol === 'admin_negocio'
+      ? [{ id: 'exportar', label: 'Exportar', Icn: Download }]
+      : []),
+  ];
 
   return (
     <div className="flex flex-col gap-5">
@@ -1071,7 +1220,7 @@ function SeccionCatalogo({ valores, set }) {
 
       {/* Sub-tabs */}
       <div className="flex gap-1 bg-gray-100 p-1 rounded-2xl">
-        {TABS_CATALOGO.map(({ id, label, Icn }) => {
+        {tabs.map(({ id, label, Icn }) => {
           const activo  = tab === id;
           const TabIcon = Icn;
           return (
@@ -1121,6 +1270,12 @@ function SeccionCatalogo({ valores, set }) {
       {tab === 'pagos' && (
         <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
           <MetodosPagoConfig valores={valores} set={set} />
+        </div>
+      )}
+
+      {tab === 'exportar' && (
+        <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
+          <ExportarInventarioConfig />
         </div>
       )}
     </div>

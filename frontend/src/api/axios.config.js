@@ -53,10 +53,8 @@ api.interceptors.request.use((config) => {
   if (usuario?.rol === 'admin_negocio' && requiereSucursal(config.url)) {
     const param = useSucursalStore.getState().sucursalParam();
 
-    if (param !== null) {
-      // SIEMPRE como query param, NUNCA en el body.
-      // Inyectar en el body sobrescribía campos como sucursal_id
-      // en payloads de edición de usuarios, compras, etc.
+    // No sobreescribir sucursal_id si ya viene explícito en la llamada
+    if (param !== null && !config.params?.sucursal_id) {
       config.params = { ...config.params, sucursal_id: param };
     }
   }

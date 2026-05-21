@@ -39,4 +39,19 @@ const getInventarioCompleto = async (sucursalId, negocioId) => {
   return { porProducto, porLinea, cantidad: cantidadEnriquecida, configMap };
 };
 
-module.exports = { getInventarioCompleto };
+const getInventarioPorLineasNegocio = async (negocioId) => {
+  const configMap = await configRepo.getMap(negocioId);
+
+  const seriales = await repo.getSerialesTodas(negocioId);
+
+  const porLinea = {};
+  for (const s of seriales) {
+    const linea = s.linea || 'Sin Línea';
+    if (!porLinea[linea]) porLinea[linea] = [];
+    porLinea[linea].push(s);
+  }
+
+  return { porLinea, configMap };
+};
+
+module.exports = { getInventarioCompleto, getInventarioPorLineasNegocio };

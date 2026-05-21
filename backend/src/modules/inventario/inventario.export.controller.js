@@ -17,4 +17,11 @@ const exportarInventario = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-module.exports = { exportarInventario };
+const exportarInventarioNegocio = async (req, res, next) => {
+  try {
+    const data = await service.getInventarioPorLineasNegocio(req.user.negocio_id);
+    res.json({ ok: true, data });
+  } catch (err) { next(err); }
+};
+
+module.exports = { exportarInventario, exportarInventarioNegocio };
