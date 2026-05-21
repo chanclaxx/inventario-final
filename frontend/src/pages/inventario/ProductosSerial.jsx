@@ -1,11 +1,10 @@
-import { useState, useEffect, useRef }                                from 'react';
+import { useState, useEffect, useRef, useCallback }                   from 'react';
 import { useQuery, useMutation, useQueryClient }                     from '@tanstack/react-query';
 import {
   Package, Plus, ChevronRight, ChevronDown, Trash2, Lock,
-  Palette, Search, CheckCircle, X, SlidersHorizontal,
+  Palette, Search, CheckCircle, X, SlidersHorizontal, Smartphone,
 } from 'lucide-react';
-import { getProductosSerial, getSeriales, eliminarSerial, getLineas } from '../../api/productos.api';
-import { SearchInput }               from '../../components/ui/SearchInput';
+import { getProductosSerial, getSeriales, eliminarSerial, getLineas, buscarImei } from '../../api/productos.api';
 import { Badge }                     from '../../components/ui/Badge';
 import { Button }                    from '../../components/ui/Button';
 import { Spinner }                   from '../../components/ui/Spinner';
@@ -248,10 +247,14 @@ function BuscadorConScope({ seriales, caracteristicasLista, coloresActivo, busqu
 }
 
 // ─── Bottom sheet buscable para móvil ─────────────────────────────────────────
-function SelectorModeloMovil({ productos, lineas, productoSeleccionado, onSeleccionar }) {
-  const [abierto,  setAbierto]  = useState(false);
-  const [busqueda, setBusqueda] = useState('');
-  const inputRef               = useRef(null);
+function SelectorModeloMovil({ productos, lineas, productoSeleccionado, onSeleccionar, onImeiSeleccionado }) {
+  const [abierto,       setAbierto]       = useState(false);
+  const [busqueda,      setBusqueda]      = useState('');
+  const [modoImei,      setModoImei]      = useState(false);
+  const [sugerencias,   setSugerencias]   = useState([]);
+  const [cargandoImei,  setCargandoImei]  = useState(false);
+  const inputRef    = useRef(null);
+  const debounceRef = useRef(null);
 
   // Enfocar input al abrir
   useEffect(() => {
@@ -264,7 +267,34 @@ function SelectorModeloMovil({ productos, lineas, productoSeleccionado, onSelecc
     return () => { document.body.style.overflow = ''; };
   }, [abierto]);
 
-  const cerrar = () => { setAbierto(false); setBusqueda(''); };
+  const cerrar = () => { setAbierto(false); setBusqueda(''); setSugerencias([]); };
+
+  const handleBusquedaImei = (q) => {
+    setBusqueda(q);
+    clearTimeout(debounceRef.current);
+    if (q.trim().length < 2) { setSugerencias([]); return; }
+    debounceRef.current = setTimeout(async () => {
+      setCargandoImei(true);
+      try {
+        const res = await buscarImei(q.trim());
+        setSugerencias(res.data.data || []);
+      } catch { setSugerencias([]); }
+      finally { setCargandoImei(false); }
+    }, 280);
+  };
+
+  const handleSeleccionarImei = (item) => {
+    const producto = productos.find((p) => p.id === item.producto_id);
+    if (producto) onImeiSeleccionado(producto, item.imei);
+    cerrar();
+  };
+
+  const toggleModo = () => {
+    setModoImei((v) => !v);
+    setBusqueda('');
+    setSugerencias([]);
+    setTimeout(() => inputRef.current?.focus(), 60);
+  };
 
   const filtrados = productos.filter((p) =>
     p.nombre.toLowerCase().includes(busqueda.toLowerCase()) ||
@@ -339,93 +369,147 @@ function SelectorModeloMovil({ productos, lineas, productoSeleccionado, onSelecc
                 </button>
               </div>
               <p className="text-xs text-gray-400 mt-0.5">
-                {productos.length} modelo{productos.length !== 1 ? 's' : ''} disponibles
+                {modoImei ? 'Modo IMEI — escribe el número para buscar' : `${productos.length} modelo${productos.length !== 1 ? 's' : ''} disponibles`}
               </p>
 
-              {/* Buscador */}
-              <div className="relative mt-3">
-                <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                <input
-                  ref={inputRef}
-                  type="text"
-                  placeholder="Buscar por nombre, marca..."
-                  value={busqueda}
-                  onChange={(e) => setBusqueda(e.target.value)}
-                  className="w-full pl-9 pr-3 py-2.5 bg-gray-100 rounded-xl text-sm
-                    focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"
-                />
-                {busqueda && (
-                  <button onClick={() => setBusqueda('')}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400">
-                    <X size={14} />
-                  </button>
-                )}
+              {/* Buscador + toggle IMEI */}
+              <div className="flex gap-1.5 mt-3">
+                <div className="relative flex-1">
+                  <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                  <input
+                    ref={inputRef}
+                    type="text"
+                    placeholder={modoImei ? 'Buscar por IMEI...' : 'Buscar por nombre, marca...'}
+                    value={busqueda}
+                    onChange={(e) => modoImei ? handleBusquedaImei(e.target.value) : setBusqueda(e.target.value)}
+                    className="w-full pl-9 pr-8 py-2.5 bg-gray-100 rounded-xl text-sm
+                      focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"
+                  />
+                  {busqueda && (
+                    <button
+                      onClick={() => { setBusqueda(''); setSugerencias([]); }}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400"
+                    >
+                      <X size={14} />
+                    </button>
+                  )}
+                </div>
+                <button
+                  onClick={toggleModo}
+                  title={modoImei ? 'Volver a buscar por modelo' : 'Buscar por IMEI'}
+                  className={`flex-shrink-0 flex items-center gap-1 px-3 py-2.5 rounded-xl border
+                    text-xs font-medium transition-all
+                    ${modoImei
+                      ? 'bg-blue-600 border-blue-600 text-white'
+                      : 'bg-white border-gray-200 text-gray-500'}`}
+                >
+                  <Smartphone size={15} />
+                  <span>IMEI</span>
+                </button>
               </div>
             </div>
 
             {/* Lista scrollable */}
             <div className="overflow-y-auto flex-1 px-4 pb-8">
-              {filtrados.length === 0 ? (
-                <div className="flex flex-col items-center gap-2 py-12 text-center">
-                  <Package size={32} className="text-gray-200" />
-                  <p className="text-sm text-gray-400">Sin resultados para "{busqueda}"</p>
-                </div>
+              {modoImei ? (
+                /* ── Resultados IMEI ── */
+                busqueda.trim().length < 2 ? (
+                  <div className="flex flex-col items-center gap-2 py-12 text-center">
+                    <Smartphone size={32} className="text-gray-200" />
+                    <p className="text-sm text-gray-400">Escribe al menos 2 caracteres</p>
+                  </div>
+                ) : cargandoImei ? (
+                  <div className="py-8 text-center text-sm text-gray-400">Buscando...</div>
+                ) : sugerencias.length === 0 ? (
+                  <div className="flex flex-col items-center gap-2 py-12 text-center">
+                    <Package size={32} className="text-gray-200" />
+                    <p className="text-sm text-gray-400">Sin resultados para "{busqueda}"</p>
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-1">
+                    {sugerencias.map((s) => (
+                      <button
+                        key={s.serial_id}
+                        onClick={() => handleSeleccionarImei(s)}
+                        className="w-full flex items-start gap-3 p-3.5 rounded-xl text-left
+                          bg-gray-50 border border-transparent hover:bg-blue-50 hover:border-blue-100
+                          transition-all active:scale-[0.98]"
+                      >
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-mono font-medium text-gray-800">{s.imei}</p>
+                          <p className="text-xs text-gray-400 truncate mt-0.5">{s.producto_nombre}</p>
+                          {s.prestado && (
+                            <span className="text-xs text-blue-500 font-medium">· Prestado</span>
+                          )}
+                        </div>
+                        <ChevronRight size={16} className="text-gray-300 flex-shrink-0 mt-0.5" />
+                      </button>
+                    ))}
+                  </div>
+                )
               ) : (
-                <div className="flex flex-col gap-1">
-                  {grupos.map((grupo) => (
-                    <div key={grupo.nombre}>
-                      {mostrarEncabezadoGrupo && (
-                        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide
-                          px-2 pt-3 pb-1.5 first:pt-0">
-                          {grupo.nombre}
-                        </p>
-                      )}
-                      <div className="flex flex-col gap-1">
-                        {grupo.prods.map((p) => {
-                          const seleccionado = productoSeleccionado?.id === p.id;
-                          return (
-                            <button
-                              key={p.id}
-                              onClick={() => { onSeleccionar(p); cerrar(); }}
-                              className={`w-full flex items-center gap-3 p-3.5 rounded-xl text-left
-                                border transition-all active:scale-[0.98]
-                                ${seleccionado
-                                  ? 'bg-blue-50 border-blue-200'
-                                  : 'bg-gray-50 border-transparent hover:bg-gray-100'}`}
-                            >
-                              <div className="flex-1 min-w-0">
-                                {/* Nombre completo sin truncar */}
-                                <p className={`text-sm font-medium leading-snug
-                                  ${seleccionado ? 'text-blue-800' : 'text-gray-800'}`}>
-                                  {p.nombre}
-                                </p>
-                                {(p.marca || p.modelo) && (
-                                  <p className="text-xs text-gray-400 mt-0.5">
-                                    {[p.marca, p.modelo].filter(Boolean).join(' · ')}
+                /* ── Resultados modelo ── */
+                filtrados.length === 0 ? (
+                  <div className="flex flex-col items-center gap-2 py-12 text-center">
+                    <Package size={32} className="text-gray-200" />
+                    <p className="text-sm text-gray-400">Sin resultados para "{busqueda}"</p>
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-1">
+                    {grupos.map((grupo) => (
+                      <div key={grupo.nombre}>
+                        {mostrarEncabezadoGrupo && (
+                          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide
+                            px-2 pt-3 pb-1.5 first:pt-0">
+                            {grupo.nombre}
+                          </p>
+                        )}
+                        <div className="flex flex-col gap-1">
+                          {grupo.prods.map((p) => {
+                            const seleccionado = productoSeleccionado?.id === p.id;
+                            return (
+                              <button
+                                key={p.id}
+                                onClick={() => { onSeleccionar(p); cerrar(); }}
+                                className={`w-full flex items-center gap-3 p-3.5 rounded-xl text-left
+                                  border transition-all active:scale-[0.98]
+                                  ${seleccionado
+                                    ? 'bg-blue-50 border-blue-200'
+                                    : 'bg-gray-50 border-transparent hover:bg-gray-100'}`}
+                              >
+                                <div className="flex-1 min-w-0">
+                                  <p className={`text-sm font-medium leading-snug
+                                    ${seleccionado ? 'text-blue-800' : 'text-gray-800'}`}>
+                                    {p.nombre}
                                   </p>
-                                )}
-                                <div className="flex items-center gap-2 mt-1">
-                                  <span className={`text-xs font-medium
-                                    ${p.disponibles > 0 ? 'text-green-600' : 'text-gray-400'}`}>
-                                    {p.disponibles} disp.
-                                  </span>
-                                  {Number(p.prestados) > 0 && (
-                                    <span className="text-xs text-blue-500 font-medium">
-                                      · {p.prestados} prest.
-                                    </span>
+                                  {(p.marca || p.modelo) && (
+                                    <p className="text-xs text-gray-400 mt-0.5">
+                                      {[p.marca, p.modelo].filter(Boolean).join(' · ')}
+                                    </p>
                                   )}
+                                  <div className="flex items-center gap-2 mt-1">
+                                    <span className={`text-xs font-medium
+                                      ${p.disponibles > 0 ? 'text-green-600' : 'text-gray-400'}`}>
+                                      {p.disponibles} disp.
+                                    </span>
+                                    {Number(p.prestados) > 0 && (
+                                      <span className="text-xs text-blue-500 font-medium">
+                                        · {p.prestados} prest.
+                                      </span>
+                                    )}
+                                  </div>
                                 </div>
-                              </div>
-                              {seleccionado && (
-                                <CheckCircle size={18} className="text-blue-500 flex-shrink-0" />
-                              )}
-                            </button>
-                          );
-                        })}
+                                {seleccionado && (
+                                  <CheckCircle size={18} className="text-blue-500 flex-shrink-0" />
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
                       </div>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                )
               )}
             </div>
           </div>
@@ -541,6 +625,128 @@ function ListaSeriales({ seriales, precioProducto, onAgregar, onEliminar, onEdit
   );
 }
 
+// ─── Buscador de modelos con toggle modo IMEI (desktop) ──────────────────────
+function BuscadorModelos({ productos, busqueda, onBusquedaChange, modoImei, onModoImeiChange, onImeiSeleccionado }) {
+  const [sugerencias,  setSugerencias]  = useState([]);
+  const [cargando,     setCargando]     = useState(false);
+  const [mostrarDrop,  setMostrarDrop]  = useState(false);
+  const debounceRef  = useRef(null);
+  const containerRef = useRef(null);
+  const inputRef     = useRef(null);
+
+  useEffect(() => {
+    const handler = (e) => {
+      if (containerRef.current && !containerRef.current.contains(e.target)) {
+        setMostrarDrop(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const buscar = useCallback((q) => {
+    clearTimeout(debounceRef.current);
+    if (q.trim().length < 2) { setSugerencias([]); setMostrarDrop(false); return; }
+    debounceRef.current = setTimeout(async () => {
+      setCargando(true);
+      try {
+        const res = await buscarImei(q.trim());
+        const data = res.data.data || [];
+        setSugerencias(data);
+        setMostrarDrop(true);
+      } catch { setSugerencias([]); }
+      finally { setCargando(false); }
+    }, 280);
+  }, []);
+
+  const handleChange = (val) => {
+    onBusquedaChange(val);
+    if (modoImei) buscar(val);
+  };
+
+  const handleSeleccionar = (item) => {
+    const producto = productos.find((p) => p.id === item.producto_id);
+    if (producto) onImeiSeleccionado(producto, item.imei);
+    setMostrarDrop(false);
+    onBusquedaChange('');
+  };
+
+  const toggleModo = () => {
+    onModoImeiChange(!modoImei);
+    onBusquedaChange('');
+    setSugerencias([]);
+    setMostrarDrop(false);
+    setTimeout(() => inputRef.current?.focus(), 60);
+  };
+
+  return (
+    <div ref={containerRef} className="relative">
+      <div className="flex gap-1.5">
+        <div className="relative flex-1">
+          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+          <input
+            ref={inputRef}
+            type="text"
+            value={busqueda}
+            onChange={(e) => handleChange(e.target.value)}
+            placeholder={modoImei ? 'Buscar por IMEI...' : 'Buscar modelo...'}
+            className="w-full pl-9 pr-8 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm
+              focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white focus:border-blue-300
+              transition-all placeholder:text-gray-400"
+          />
+          {busqueda && (
+            <button
+              onClick={() => { onBusquedaChange(''); setSugerencias([]); setMostrarDrop(false); }}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-300 hover:text-gray-500 transition-colors"
+            >
+              <X size={14} />
+            </button>
+          )}
+        </div>
+        <button
+          onClick={toggleModo}
+          title={modoImei ? 'Volver a buscar por modelo' : 'Buscar por IMEI'}
+          className={`flex-shrink-0 flex items-center gap-1.5 px-2.5 py-2 rounded-xl border
+            text-xs font-medium transition-all
+            ${modoImei
+              ? 'bg-blue-600 border-blue-600 text-white shadow-sm'
+              : 'bg-white border-gray-200 text-gray-500 hover:border-blue-300 hover:text-blue-600'}`}
+        >
+          <Smartphone size={14} />
+          <span className="hidden xl:inline">IMEI</span>
+        </button>
+      </div>
+
+      {modoImei && mostrarDrop && (
+        <div className="absolute z-40 mt-1 w-full bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden">
+          {cargando ? (
+            <div className="px-4 py-3 text-xs text-gray-400">Buscando...</div>
+          ) : sugerencias.length === 0 ? (
+            <div className="px-4 py-3 text-xs text-gray-400">Sin resultados para "{busqueda}"</div>
+          ) : (
+            <div className="max-h-64 overflow-y-auto divide-y divide-gray-50">
+              {sugerencias.map((s) => (
+                <button
+                  key={s.serial_id}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => handleSeleccionar(s)}
+                  className="w-full text-left px-3 py-2.5 hover:bg-blue-50 transition-colors"
+                >
+                  <p className="text-sm font-mono font-medium text-gray-800">{s.imei}</p>
+                  <p className="text-xs text-gray-400 truncate">{s.producto_nombre}</p>
+                  {s.prestado && (
+                    <span className="text-xs text-blue-500 font-medium">· Prestado</span>
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Componente principal ─────────────────────────────────────────────────────
 export function ProductosSerial({ onAgregarProducto }) {
   const queryClient                    = useQueryClient();
@@ -554,6 +760,7 @@ export function ProductosSerial({ onAgregarProducto }) {
   const [serialAEditar,        setSerialAEditar]        = useState(null);
   const [productoAEditar,      setProductoAEditar]      = useState(null);
   const [scopeBusqueda,        setScopeBusqueda]        = useState('todo');
+  const [modoImei,             setModoImei]             = useState(false);
 
   const { data: productosData, isLoading } = useQuery({
     queryKey:  ['productos-serial', ...sucursalKey],
@@ -636,6 +843,12 @@ export function ProductosSerial({ onAgregarProducto }) {
     setProductoSeleccionado(p);
     setBusquedaSerial('');
     setScopeBusqueda('todo');
+  };
+
+  const handleImeiSeleccionado = (producto, imei) => {
+    setProductoSeleccionado(producto);
+    setBusquedaSerial(imei);
+    setScopeBusqueda('imei');
   };
 
   const handleAgregarSerial = (serial) => {
@@ -739,7 +952,14 @@ export function ProductosSerial({ onAgregarProducto }) {
   // ─── Lista de productos para desktop ─────────────────────────────────────
   const ListaProductos = (
     <div className="w-64 flex-shrink-0 flex flex-col gap-3">
-      <SearchInput value={busqueda} onChange={setBusqueda} placeholder="Buscar modelo..." />
+      <BuscadorModelos
+        productos={productos}
+        busqueda={busqueda}
+        onBusquedaChange={setBusqueda}
+        modoImei={modoImei}
+        onModoImeiChange={setModoImei}
+        onImeiSeleccionado={handleImeiSeleccionado}
+      />
 
       {esAdmin && (
         <p className="text-xs text-gray-400 px-1">
@@ -810,6 +1030,7 @@ export function ProductosSerial({ onAgregarProducto }) {
           lineas={lineas}
           productoSeleccionado={productoSeleccionado}
           onSeleccionar={handleSeleccionar}
+          onImeiSeleccionado={handleImeiSeleccionado}
         />
 
         {/* Chip "cambiar modelo" cuando hay uno seleccionado */}

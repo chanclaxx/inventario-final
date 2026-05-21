@@ -18,6 +18,7 @@ export const agregarSerial            = (productoId, data) =>
 export const actualizarSerial         = (id, data)    => api.put(`/productos-serial/seriales/${id}`, data);
 export const eliminarSerial           = (id)          => api.delete(`/productos-serial/seriales/${id}`);
 export const verificarImei            = (imei)        => api.get(`/productos-serial/verificar-imei/${imei}`);
+export const buscarImei               = (q)           => api.get('/productos-serial/buscar-imei', { params: { q } });
 
 export const eliminarProductoSerial = (id, forzar = false) =>
   api.delete(`/productos-serial/${id}`, { data: { forzar } });

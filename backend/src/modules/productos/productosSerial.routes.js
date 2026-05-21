@@ -6,6 +6,7 @@ const ctrl = require('./productosSerial.controller');
 // Rutas estáticas primero
 router.get('/verificar-imei/:imei', requireModulo('inventario'), ctrl.verificarImei);
 router.get('/compras-cliente',      requireModulo('inventario'), ctrl.getComprasCliente);
+router.get('/buscar-imei',          requireModulo('inventario'), ctrl.buscarPorImei);
 
 // Rutas de producto
 router.get('/',       requireModulo('inventario'),                                ctrl.getProductos);

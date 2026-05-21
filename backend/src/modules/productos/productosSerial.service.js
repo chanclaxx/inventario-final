@@ -186,8 +186,13 @@ const eliminarProductoSerial = async (negocioId, id, forzar = false) => {
 const getComprasCliente = async (negocioId, q) =>
   repo.findComprasCliente(negocioId, q || '');
 
+const buscarPorImei = async (q, sucursalId, negocioId) => {
+  if (!q || q.trim().length < 2) return [];
+  return repo.buscarPorImei(q.trim(), sucursalId, negocioId);
+};
+
 module.exports = {
   getProductos, getProductoById, crearProducto, actualizarProducto,
   getSeriales, agregarSerial, actualizarSerial, eliminarSerial,
-  verificarImei, getComprasCliente, eliminarProductoSerial,
+  verificarImei, getComprasCliente, eliminarProductoSerial, buscarPorImei,
 };

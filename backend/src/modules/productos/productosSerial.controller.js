@@ -125,9 +125,19 @@ const getComprasCliente = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+const buscarPorImei = async (req, res, next) => {
+  try {
+    const q = (req.query.q || '').trim();
+    if (q.length < 2) return res.json({ ok: true, data: [] });
+    const sucursalId = req.todasSucursales ? null : req.sucursal_id;
+    const data = await service.buscarPorImei(q, sucursalId, req.user.negocio_id);
+    res.json({ ok: true, data });
+  } catch (err) { next(err); }
+};
+
 module.exports = {
   getProductos, getProductoById, crearProducto, actualizarProducto,
   eliminarProductoSerial,
   getSeriales, agregarSerial, actualizarSerial, eliminarSerial,
-  verificarImei, getComprasCliente,
+  verificarImei, getComprasCliente, buscarPorImei,
 };

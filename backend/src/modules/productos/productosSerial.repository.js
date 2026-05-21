@@ -321,6 +321,30 @@ const eliminarProductoSerial = async (id) => {
 // ── Añadir al module.exports existente: ──────────────────────────────────────
 // contarSeriales, eliminarProductoSerial
 
+const buscarPorImei = async (q, sucursalId, negocioId) => {
+  const filtro = `%${q.replace(/[%_\\]/g, '\\$&').slice(0, 60)}%`;
+  const { rows } = await pool.query(`
+    SELECT
+      s.id   AS serial_id,
+      s.imei,
+      s.vendido,
+      s.prestado,
+      ps.id   AS producto_id,
+      ps.nombre AS producto_nombre,
+      ps.precio
+    FROM seriales s
+    JOIN productos_serial ps ON ps.id = s.producto_id
+    JOIN sucursales        su ON su.id = ps.sucursal_id
+    WHERE su.negocio_id = $1
+      AND ($2::int IS NULL OR ps.sucursal_id = $2)
+      AND s.vendido  = false
+      AND LOWER(s.imei) LIKE LOWER($3) ESCAPE '\\'
+    ORDER BY s.prestado ASC, s.imei ASC
+    LIMIT 30
+  `, [negocioId, sucursalId ?? null, filtro]);
+  return rows;
+};
+
 module.exports = {
   findAll, findById, findByIdYNegocio,
   perteneceAlNegocio, findSerialByIdYNegocio,
@@ -329,4 +353,5 @@ module.exports = {
   insertarSerial, reactivarSerial, actualizarSerial, eliminarSerial,
   resetPreciosSeriales,
   findComprasCliente, eliminarProductoSerial, contarSerialesDetalle, eliminarSerialesDeProducto,
+  buscarPorImei,
 };
