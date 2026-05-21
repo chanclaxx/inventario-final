@@ -221,7 +221,7 @@ const buscarComprasPorIMEI = async (imei, negocioId, proveedorIds = null) => {
   // Lista vacía explícita → usuario sin acceso a ningún proveedor
   if (proveedorIds !== null && proveedorIds.length === 0) return [];
 
-  const params = [imei, negocioId];
+  const params = [`%${imei.toLowerCase()}%`, imei.toLowerCase(), negocioId];
   let filtroProveedores = '';
   if (proveedorIds && proveedorIds.length > 0) {
     params.push(proveedorIds);
@@ -248,9 +248,12 @@ const buscarComprasPorIMEI = async (imei, negocioId, proveedorIds = null) => {
     JOIN sucursales  su ON su.id = c.sucursal_id
     JOIN proveedores p  ON p.id  = c.proveedor_id AND p.activo IS NOT FALSE
     LEFT JOIN usuarios u ON u.id = c.usuario_id
-    WHERE lc.imei = $1 AND su.negocio_id = $2
+    WHERE LOWER(lc.imei) LIKE $1 AND su.negocio_id = $3
       ${filtroProveedores}
-    ORDER BY c.fecha DESC
+    ORDER BY
+      CASE WHEN LOWER(lc.imei) = $2 THEN 0 ELSE 1 END,
+      c.fecha DESC
+    LIMIT 40
   `, params);
   return rows;
 };

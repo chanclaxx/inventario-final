@@ -1827,7 +1827,7 @@ function TabCompras() {
 // ─── Tab: Búsqueda de compras ─────────────────────────────────────────────────
 
 const MODOS_BUSQUEDA = [
-  { key: 'imei',   label: 'IMEI / Serial',       Icon: ScanLine, placeholder: 'Ingresa el IMEI o número de serie…'      },
+  { key: 'imei',   label: 'IMEI / Serial',       Icon: ScanLine, placeholder: 'Escribe parte del IMEI para ver compras candidatas…' },
   { key: 'nombre', label: 'Nombre / Proveedor',   Icon: Search,   placeholder: 'Nombre, proveedor o N° de factura…'     },
 ];
 
@@ -1902,7 +1902,7 @@ function TabBusquedaCompras() {
       {!busqueda && (
         <p className="text-sm text-gray-400 text-center py-10">
           {modo === 'imei'
-            ? 'Ingresa un IMEI para ver de qué compra proviene el producto'
+            ? 'Escribe parte del IMEI (mínimo 2 dígitos) para ver las compras candidatas'
             : 'Busca por nombre de producto, proveedor o número de factura de compra'}
         </p>
       )}
