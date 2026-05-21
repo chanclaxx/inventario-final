@@ -21,7 +21,7 @@ const buscarProductos = async (req, res, next) => {
   try {
     const q = req.query.q?.trim();
     if (!q || q.length < 2) {
-      return res.status(400).json({ ok: false, error: 'Ingresa al menos 2 caracteres' });
+      return res.status(400).json({ ok: false, error: 'Ingresa al meno 2 caracteres' });
     }
 
     const { negocio_id, rol } = req.user;
