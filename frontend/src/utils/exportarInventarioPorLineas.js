@@ -1,93 +1,137 @@
-import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 
-var C_DISPONIBLE = 'FFFFFF';
-var C_PRESTADO   = 'BFDBFE';
-var C_VENDIDO    = 'DCFCE7';
-var C_HEADER     = '1E40AF';
-var C_BLANCO     = 'FFFFFF';
-var C_BORDE      = 'D1D5DB';
-var C_LEY_TIT    = 'E2E8F0';
-var C_LEY_BG     = 'F1F5F9';
+var A_DISPONIBLE = 'FFFFFFFF';
+var A_PRESTADO   = 'FFBFDBFE';
+var A_VENDIDO    = 'FFDCFCE7';
+var A_HEADER     = 'FF1E40AF';
+var A_BLANCO     = 'FFFFFFFF';
+var A_BORDE      = 'FFD1D5DB';
+var A_LEY_TIT    = 'FFE2E8F0';
+var A_LEY_BG     = 'FFF1F5F9';
+var A_TEXTO      = 'FF374151';
 
-function borde() {
-  var l = { style: 'thin', color: { rgb: C_BORDE } };
-  return { top: l, bottom: l, left: l, right: l };
-}
-function sHeader() {
-  return { font: { bold: true, name: 'Arial', sz: 10, color: { rgb: C_BLANCO } }, fill: { patternType: 'solid', fgColor: { rgb: C_HEADER }, bgColor: { indexed: 64 } }, alignment: { horizontal: 'center', vertical: 'center', wrapText: true }, border: borde() };
-}
-function sCelda(bg) {
-  return { font: { name: 'Arial', sz: 9 }, fill: { patternType: 'solid', fgColor: { rgb: bg }, bgColor: { indexed: 64 } }, alignment: { vertical: 'center' }, border: borde() };
-}
-function sCeldaNum(bg) {
-  return { font: { name: 'Arial', sz: 9 }, fill: { patternType: 'solid', fgColor: { rgb: bg }, bgColor: { indexed: 64 } }, alignment: { horizontal: 'right', vertical: 'center' }, numFmt: '#,##0', border: borde() };
-}
-function enc(r, c) { return XLSX.utils.encode_cell({ r: r, c: c }); }
 function parseLista(val) {
   if (!val) return [];
-  try { var p = JSON.parse(val); return Array.isArray(p) ? p : []; } catch (e) { return String(val).split(',').map(function(v) { return v.trim(); }).filter(Boolean); }
+  try { var p = JSON.parse(val); return Array.isArray(p) ? p : []; }
+  catch { return String(val).split(',').map(function(v) { return v.trim(); }).filter(Boolean); }
+}
+function bgSerial(s) {
+  if (s.vendido)  return A_VENDIDO;
+  if (s.prestado) return A_PRESTADO;
+  return A_DISPONIBLE;
 }
 function colW(col) {
   var m = { 'Referencia': 28, 'IMEI / Serial': 22, 'Color': 14 };
-  return { wch: m[col] !== undefined ? m[col] : Math.max(col.length + 4, 12) };
+  return m[col] !== undefined ? m[col] : Math.max(col.length + 4, 12);
 }
-function bgSerial(s) {
-  if (s.vendido) return C_VENDIDO;
-  if (s.prestado) return C_PRESTADO;
-  return C_DISPONIBLE;
+function applyBorde(cell) {
+  var b = { style: 'thin', color: { argb: A_BORDE } };
+  cell.border = { top: b, bottom: b, left: b, right: b };
+}
+function applyHeader(cell) {
+  cell.font      = { bold: true, name: 'Arial', size: 10, color: { argb: A_BLANCO } };
+  cell.fill      = { type: 'pattern', pattern: 'solid', fgColor: { argb: A_HEADER } };
+  cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+  applyBorde(cell);
+}
+function applyCell(cell, bg) {
+  cell.font      = { name: 'Arial', size: 9 };
+  cell.fill      = { type: 'pattern', pattern: 'solid', fgColor: { argb: bg } };
+  cell.alignment = { vertical: 'middle' };
+  applyBorde(cell);
 }
 function leyenda(ws, n) {
-  var sT = { font: { bold: true, name: 'Arial', sz: 9, color: { rgb: '374151' } }, fill: { patternType: 'solid', fgColor: { rgb: C_LEY_TIT }, bgColor: { indexed: 64 } }, alignment: { horizontal: 'left', vertical: 'center' }, border: borde() };
-  var sV = { fill: { patternType: 'solid', fgColor: { rgb: C_LEY_BG }, bgColor: { indexed: 64 } }, border: borde() };
-  function sI(bg) { return { font: { name: 'Arial', sz: 9, color: { rgb: '374151' } }, fill: { patternType: 'solid', fgColor: { rgb: bg }, bgColor: { indexed: 64 } }, alignment: { horizontal: 'center', vertical: 'center' }, border: borde() }; }
-  ws[enc(0,0)] = { t:'s', v:'Leyenda:', s:sT };
-  ws[enc(0,1)] = { t:'s', v:'Disponible', s:sI(C_DISPONIBLE) };
-  ws[enc(0,2)] = { t:'s', v:'Prestado',   s:sI(C_PRESTADO) };
-  ws[enc(0,3)] = { t:'s', v:'Vendido',    s:sI(C_VENDIDO) };
-  for (var c=4; c<n; c++) ws[enc(0,c)] = { t:'s', v:'', s:sV };
+  var lr = ws.getRow(1); lr.height = 18;
+  var c1 = lr.getCell(1); c1.value = 'Leyenda:';
+  c1.font = { bold: true, name: 'Arial', size: 9, color: { argb: A_TEXTO } };
+  c1.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: A_LEY_TIT } };
+  c1.alignment = { horizontal: 'left', vertical: 'middle' }; applyBorde(c1);
+  var inds = [['Disponible', A_DISPONIBLE], ['Prestado', A_PRESTADO], ['Vendido', A_VENDIDO]];
+  for (var i = 0; i < inds.length; i++) {
+    var ci = lr.getCell(i + 2); ci.value = inds[i][0];
+    ci.font = { name: 'Arial', size: 9, color: { argb: A_TEXTO } };
+    ci.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: inds[i][1] } };
+    ci.alignment = { horizontal: 'center', vertical: 'middle' }; applyBorde(ci);
+  }
+  for (var ei = 5; ei <= n; ei++) {
+    var ec = lr.getCell(ei);
+    ec.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: A_LEY_BG } };
+    applyBorde(ec);
+  }
 }
 function hojaUnica(nombre, usadas) {
-  var h = (nombre||'Sin nombre').replace(/[\\/?*[\]:]/g,'').trim().slice(0,31)||'Sin nombre';
-  if (usadas.has(h.toLowerCase())) { var i=2; while(usadas.has((h.slice(0,28)+' '+i).toLowerCase())) i++; h=h.slice(0,28)+' '+i; }
+  var h = (nombre || 'Sin nombre').replace(/[\\/?*[\]:]/g, '').trim().slice(0, 31) || 'Sin nombre';
+  if (usadas.has(h.toLowerCase())) {
+    var i = 2;
+    while (usadas.has((h.slice(0, 28) + ' ' + i).toLowerCase())) i++;
+    h = h.slice(0, 28) + ' ' + i;
+  }
   usadas.add(h.toLowerCase()); return h;
 }
-function hoy() { return new Date().toLocaleDateString('es-CO',{day:'2-digit',month:'2-digit',year:'numeric'}).replace(/\//g,'-'); }
+function hoy() {
+  return new Date().toLocaleDateString('es-CO', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '-');
+}
+function descargar(buffer, nombre) {
+  var blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  var url  = URL.createObjectURL(blob);
+  var a    = document.createElement('a'); a.href = url; a.download = nombre; a.click();
+  URL.revokeObjectURL(url);
+}
 
-export function exportarInventarioPorLineas(porLinea, configMap) {
-  var cfg = configMap || {};
-
-  var colAct  = cfg.colores_serial_activo === '1';
+export async function exportarInventarioPorLineas(porLinea, configMap) {
+  var cfg     = configMap || {};
+  var colAct  = cfg.colores_serial_activo         === '1';
   var carAct  = cfg.caracteristicas_serial_activo === '1';
   var carList = carAct ? parseLista(cfg.caracteristicas_serial_lista) : [];
 
-  var wb = XLSX.utils.book_new();
+  var wb     = new ExcelJS.Workbook();
   var usadas = new Set();
 
-  var construirHoja = function(seriales) {
-    var ws = {}; var cols = ['Referencia','IMEI / Serial'];
-    if (colAct) cols.push('Color');
-    for (var ci=0;ci<carList.length;ci++) cols.push(carList[ci]);
-    leyenda(ws, cols.length);
-    for (var hi=0;hi<cols.length;hi++) ws[enc(1,hi)]={t:'s',v:cols[hi],s:sHeader()};
-    ws['!autofilter']={ref:XLSX.utils.encode_range({s:{r:1,c:0},e:{r:1,c:cols.length-1}})};
-    var sorted = seriales.slice().sort(function(a,b) {
-      var oa=a.vendido?2:a.prestado?1:0; var ob=b.vendido?2:b.prestado?1:0; return oa-ob;
-    });
-    for (var ri=0;ri<sorted.length;ri++) {
-      var s=sorted[ri]; var r=ri+2; var bg=bgSerial(s); var car=s.caracteristicas||{}; var c=0;
-      ws[enc(r,c++)]={t:'s',v:s.producto||'',s:sCelda(bg)};
-      ws[enc(r,c++)]={t:'s',v:s.imei||'',s:sCelda(bg)};
-      if (colAct) ws[enc(r,c++)]={t:'s',v:s.color||'',s:sCelda(bg)};
-      for (var ki=0;ki<carList.length;ki++) ws[enc(r,c++)]={t:'s',v:car[carList[ki]]||'',s:sCelda(bg)};
-    }
-    var tf=sorted.length+2;
-    ws['!ref']=XLSX.utils.encode_range({s:{r:0,c:0},e:{r:tf-1,c:cols.length-1}});
-    ws['!cols']=cols.map(colW); ws['!rows']=[{hpt:18},{hpt:22}]; return ws;
-  };
-
-  var lineas = Object.keys(porLinea).sort(function(a,b) {
-    if (a==='Sin Línea') return 1; if (b==='Sin Línea') return -1; return a.localeCompare(b,'es');
+  var lineas = Object.keys(porLinea).sort(function(a, b) {
+    if (a === 'Sin Línea') return 1; if (b === 'Sin Línea') return -1;
+    return a.localeCompare(b, 'es');
   });
-  for (var i=0;i<lineas.length;i++) XLSX.utils.book_append_sheet(wb, construirHoja(porLinea[lineas[i]]), hojaUnica(lineas[i],usadas));
-  XLSX.writeFile(wb, 'inventario_lineas_'+hoy()+'.xlsx', {cellStyles:true});
+
+  for (var i = 0; i < lineas.length; i++) {
+    var linea    = lineas[i];
+    var seriales = porLinea[linea];
+    var ws       = wb.addWorksheet(hojaUnica(linea, usadas));
+
+    var cols = ['Referencia', 'IMEI / Serial'];
+    if (colAct) cols.push('Color');
+    for (var ci = 0; ci < carList.length; ci++) cols.push(carList[ci]);
+
+    ws.columns = cols.map(function(c) { return { width: colW(c) }; });
+    leyenda(ws, cols.length);
+
+    var hr = ws.getRow(2); hr.height = 22;
+    for (var hi = 0; hi < cols.length; hi++) {
+      var hc = hr.getCell(hi + 1); hc.value = cols[hi]; applyHeader(hc);
+    }
+    ws.autoFilter = { from: { row: 2, column: 1 }, to: { row: 2, column: cols.length } };
+
+    var sorted = seriales.slice().sort(function(a, b) {
+      var oa = a.vendido ? 2 : a.prestado ? 1 : 0;
+      var ob = b.vendido ? 2 : b.prestado ? 1 : 0;
+      return oa - ob;
+    });
+
+    for (var ri = 0; ri < sorted.length; ri++) {
+      var s   = sorted[ri];
+      var bg  = bgSerial(s);
+      var car = s.caracteristicas || {};
+      var dr  = ws.getRow(ri + 3);
+      var cc  = 1;
+
+      var refCell  = dr.getCell(cc++); refCell.value  = s.producto || ''; applyCell(refCell, bg);
+      var imeiCell = dr.getCell(cc++); imeiCell.value = s.imei     || ''; applyCell(imeiCell, bg);
+      if (colAct) { var clrCell = dr.getCell(cc++); clrCell.value = s.color || ''; applyCell(clrCell, bg); }
+      for (var ki = 0; ki < carList.length; ki++) {
+        var ck = dr.getCell(cc++); ck.value = car[carList[ki]] || ''; applyCell(ck, bg);
+      }
+    }
+  }
+
+  var buffer = await wb.xlsx.writeBuffer();
+  descargar(buffer, 'inventario_lineas_' + hoy() + '.xlsx');
 }

@@ -23,6 +23,7 @@ export default defineConfig({
         ],
       },
       workbox: {
+        maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
         // Activa el nuevo SW inmediatamente sin esperar a que se cierren todas las pestañas
         skipWaiting: true,
         // El nuevo SW toma control de todas las pestañas abiertas al instante

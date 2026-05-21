@@ -34,9 +34,9 @@ export function ModalExportarInventario({ open, onClose }) {
       const { porProducto, porLinea, cantidad, configMap } = data.data;
 
       if (modo === 'productos') {
-        exportarInventarioExcel(porProducto, cantidad, configMap);
+        await exportarInventarioExcel(porProducto, cantidad, configMap);
       } else {
-        exportarInventarioPorLineas(porLinea, configMap);
+        await exportarInventarioPorLineas(porLinea, configMap);
       }
       onClose();
     } catch (err) {
