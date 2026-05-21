@@ -1,6 +1,6 @@
 const { pool } = require('../config/db');
 
-const JERARQUIA = { admin_negocio: 3, supervisor: 2, vendedor: 1 };
+const JERARQUIA = { admin_negocio: 3, supervisor: 2, vendedor: 1, espectador: 0 };
 
 // ── Sin cambios ──────────────────────────────────────────────────────────
 const requireRole  = (...roles) => (req, res, next) => {
@@ -18,9 +18,11 @@ const requireNivel = (nivelMinimo) => (req, res, next) => {
 };
 
 // ── Patch: requireSucursal ahora valida ownership en DB ──────────────────
+const ROLES_MULTISUCURSAL = new Set(['admin_negocio', 'espectador']);
+
 const requireSucursal = async (req, res, next) => {
   if (!req.user) return res.status(401).json({ ok: false, error: 'No autenticado' });
-  if (req.user.rol === 'admin_negocio') return next();
+  if (ROLES_MULTISUCURSAL.has(req.user.rol)) return next();
 
   const sucursalSolicitada = Number(req.params.sucursal_id || req.query.sucursal_id);
   if (!sucursalSolicitada) return next();

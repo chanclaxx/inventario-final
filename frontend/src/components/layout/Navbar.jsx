@@ -53,7 +53,7 @@ function AvatarUsuario({ nombre }) {
 }
 
 export function Navbar() {
-  const { usuario, logout } = useAuth();
+  const { usuario, logout, esEspectador } = useAuth();
   const { puedeVer, esAdmin } = usePermisos();
   const navigate  = useNavigate();
   const location  = useLocation();
@@ -160,19 +160,21 @@ export function Navbar() {
             <div className="flex items-center gap-1 flex-shrink-0">
               <SucursalSelector />
 
-              <button
-                onClick={() => navigate('/inventario')}
-                className="relative p-1.5 rounded-lg hover:bg-gray-100 transition-colors"
-                title="Carrito"
-              >
-                <ShoppingCart size={17} className="text-gray-500" />
-                {cantidadItems > 0 && (
-                  <span className="absolute -top-1 -right-1 w-4 h-4 bg-blue-600 text-white
-                    text-xs rounded-full flex items-center justify-center font-medium leading-none">
-                    {cantidadItems}
-                  </span>
-                )}
-              </button>
+              {!esEspectador() && (
+                <button
+                  onClick={() => navigate('/inventario')}
+                  className="relative p-1.5 rounded-lg hover:bg-gray-100 transition-colors"
+                  title="Carrito"
+                >
+                  <ShoppingCart size={17} className="text-gray-500" />
+                  {cantidadItems > 0 && (
+                    <span className="absolute -top-1 -right-1 w-4 h-4 bg-blue-600 text-white
+                      text-xs rounded-full flex items-center justify-center font-medium leading-none">
+                      {cantidadItems}
+                    </span>
+                  )}
+                </button>
+              )}
 
               <div className="flex items-center gap-1.5 pl-2 border-l border-gray-200 ml-1">
                 <AvatarUsuario nombre={usuario?.nombre} />

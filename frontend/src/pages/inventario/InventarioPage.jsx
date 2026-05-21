@@ -34,7 +34,8 @@ export default function InventarioPage() {
   const [carritoAbierto, setCarritoAbierto] = useState(false);
   const [modalImportar,  setModalImportar]  = useState(false);
 
-  const { puedeExportarInventario } = useAuth();
+  const { puedeExportarInventario, esEspectador } = useAuth();
+  const soloLectura = esEspectador();
 
   const { items, totalCarrito } = useCarritoStore();
   const totalItems = items.length;
@@ -66,7 +67,7 @@ export default function InventarioPage() {
 
       {/* ── Contenido principal ── */}
       {/* pb-28 en móvil para que la barra fija del carrito no tape el contenido */}
-      <div className="flex-1 min-w-0 pb-28 lg:pb-0">
+      <div className={`flex-1 min-w-0 ${soloLectura ? '' : 'pb-28 lg:pb-0'}`}>
 
         {bloquearCreacion && (
           <div className="flex items-start gap-2 px-3 py-2.5 mb-3 bg-purple-50
@@ -101,132 +102,133 @@ export default function InventarioPage() {
             })}
           </div>
 
-          <div className="flex items-center gap-2">
-            {puedeExportar && (
-              <Button size="sm" variant="secondary" onClick={() => setModalExportar(true)}
-                title="Descargar inventario completo en Excel">
-                <Download size={16} />
-                <span className="hidden sm:inline">Exportar Excel</span>
+          {!soloLectura && (
+            <div className="flex items-center gap-2">
+              {puedeExportar && (
+                <Button size="sm" variant="secondary" onClick={() => setModalExportar(true)}
+                  title="Descargar inventario completo en Excel">
+                  <Download size={16} />
+                  <span className="hidden sm:inline">Exportar Excel</span>
+                </Button>
+              )}
+
+              <Button size="sm" variant="secondary" onClick={() => setModalImportar(true)}
+                disabled={bloquearCreacion}
+                title={bloquearCreacion ? 'Selecciona una sucursal para importar' : 'Importar desde Excel'}>
+                <Upload size={16} />
+                <span className="hidden sm:inline">Importar</span>
               </Button>
-            )}
 
-            <Button size="sm" variant="secondary" onClick={() => setModalImportar(true)}
-              disabled={bloquearCreacion}
-              title={bloquearCreacion ? 'Selecciona una sucursal para importar' : 'Importar desde Excel'}>
-              <Upload size={16} />
-              <span className="hidden sm:inline">Importar</span>
-            </Button>
-
-            <Button size="sm" onClick={() => setModalAgregar(true)}
-              disabled={bloquearCreacion}
-              title={bloquearCreacion ? 'Selecciona una sucursal para agregar productos' : 'Agregar producto'}>
-              <Plus size={16} />
-              <span className="hidden sm:inline">Agregar</span>
-            </Button>
-          </div>
+              <Button size="sm" onClick={() => setModalAgregar(true)}
+                disabled={bloquearCreacion}
+                title={bloquearCreacion ? 'Selecciona una sucursal para agregar productos' : 'Agregar producto'}>
+                <Plus size={16} />
+                <span className="hidden sm:inline">Agregar</span>
+              </Button>
+            </div>
+          )}
         </div>
 
         {tabActiva === 'serial'   && <ProductosSerial />}
         {tabActiva === 'cantidad' && <ProductosCantidad />}
       </div>
 
-      {/* ── Carrito desktop: columna fija derecha ── */}
-      <div className="hidden lg:block w-72 flex-shrink-0">
-        <div className="sticky top-28 bg-white border border-gray-100 rounded-2xl p-4 shadow-sm">
-          <Carrito
-            onFacturar={() => setModalFactura(true)}
-            onPrestar={() => setModalPrestamo(true)}
-          />
-        </div>
-      </div>
-
-      {/* ── Barra fija inferior del carrito (móvil) ── */}
-      <div className="lg:hidden fixed bottom-0 left-0 right-0 z-40 px-4 pb-5 pt-2
-        bg-gradient-to-t from-white via-white to-transparent pointer-events-none">
-        <button
-          onClick={() => setCarritoAbierto(true)}
-          className={`w-full pointer-events-auto flex items-center justify-between px-4 py-3.5
-            rounded-2xl shadow-xl transition-all active:scale-[0.98]
-            ${totalItems > 0
-              ? 'bg-blue-600 text-white shadow-blue-300/50'
-              : 'bg-white border border-gray-200 text-gray-500 shadow-gray-200/80'}`}
-        >
-          <div className="flex items-center gap-3">
-            <div className="relative">
-              <ShoppingCart size={20} className={totalItems > 0 ? 'text-white' : 'text-blue-500'} />
-              {totalItems > 0 && (
-                <span className="absolute -top-2 -right-2 w-5 h-5 bg-white text-blue-600
-                  text-[10px] font-bold rounded-full flex items-center justify-center shadow-sm">
-                  {totalItems > 9 ? '9+' : totalItems}
-                </span>
-              )}
-            </div>
-            <span className="text-sm font-semibold">
-              {totalItems > 0
-                ? `${totalItems} producto${totalItems !== 1 ? 's' : ''} en carrito`
-                : 'Carrito vacío'}
-            </span>
-          </div>
-          {totalItems > 0 ? (
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-bold">{formatCOP(total)}</span>
-              <ChevronUp size={16} className="opacity-70" />
-            </div>
-          ) : (
-            <ChevronUp size={16} className="opacity-40" />
-          )}
-        </button>
-      </div>
-
-      {/* ── Bottom sheet del carrito (móvil) ── */}
-      {carritoAbierto && (
-        <div className="lg:hidden fixed inset-0 z-50 flex flex-col justify-end">
-          {/* Backdrop */}
-          <div
-            className="absolute inset-0 bg-black/50 backdrop-blur-sm"
-            onClick={() => setCarritoAbierto(false)}
-          />
-
-          {/* Sheet */}
-          <div
-            className="relative bg-white rounded-t-3xl flex flex-col"
-            style={{ maxHeight: '88dvh' }}
-          >
-            {/* Handle + cabecera */}
-            <div className="flex-shrink-0 px-5 pt-3 pb-4 border-b border-gray-100">
-              <div className="flex justify-center mb-3">
-                <div className="w-10 h-1 bg-gray-200 rounded-full" />
-              </div>
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <ShoppingCart size={18} className="text-blue-600" />
-                  <p className="text-base font-bold text-gray-900">Carrito</p>
-                  {totalItems > 0 && (
-                    <span className="bg-blue-100 text-blue-600 text-xs font-semibold
-                      px-2 py-0.5 rounded-full">
-                      {totalItems}
-                    </span>
-                  )}
-                </div>
-                <button
-                  onClick={() => setCarritoAbierto(false)}
-                  className="p-1.5 rounded-xl hover:bg-gray-100 transition-colors text-gray-400"
-                >
-                  <X size={18} />
-                </button>
-              </div>
-            </div>
-
-            {/* Contenido scrollable */}
-            <div className="overflow-y-auto flex-1 px-5 py-4">
+      {/* ── Carrito (oculto en modo lectura) ── */}
+      {!soloLectura && (
+        <>
+          {/* Desktop: columna fija derecha */}
+          <div className="hidden lg:block w-72 flex-shrink-0">
+            <div className="sticky top-28 bg-white border border-gray-100 rounded-2xl p-4 shadow-sm">
               <Carrito
-                sinHeader
-                onFacturar={() => { setModalFactura(true);  setCarritoAbierto(false); }}
-                onPrestar={() =>  { setModalPrestamo(true); setCarritoAbierto(false); }}
+                onFacturar={() => setModalFactura(true)}
+                onPrestar={() => setModalPrestamo(true)}
               />
             </div>
           </div>
-        </div>
+
+          {/* Móvil: barra fija inferior */}
+          <div className="lg:hidden fixed bottom-0 left-0 right-0 z-40 px-4 pb-5 pt-2
+            bg-gradient-to-t from-white via-white to-transparent pointer-events-none">
+            <button
+              onClick={() => setCarritoAbierto(true)}
+              className={`w-full pointer-events-auto flex items-center justify-between px-4 py-3.5
+                rounded-2xl shadow-xl transition-all active:scale-[0.98]
+                ${totalItems > 0
+                  ? 'bg-blue-600 text-white shadow-blue-300/50'
+                  : 'bg-white border border-gray-200 text-gray-500 shadow-gray-200/80'}`}
+            >
+              <div className="flex items-center gap-3">
+                <div className="relative">
+                  <ShoppingCart size={20} className={totalItems > 0 ? 'text-white' : 'text-blue-500'} />
+                  {totalItems > 0 && (
+                    <span className="absolute -top-2 -right-2 w-5 h-5 bg-white text-blue-600
+                      text-[10px] font-bold rounded-full flex items-center justify-center shadow-sm">
+                      {totalItems > 9 ? '9+' : totalItems}
+                    </span>
+                  )}
+                </div>
+                <span className="text-sm font-semibold">
+                  {totalItems > 0
+                    ? `${totalItems} producto${totalItems !== 1 ? 's' : ''} en carrito`
+                    : 'Carrito vacío'}
+                </span>
+              </div>
+              {totalItems > 0 ? (
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-bold">{formatCOP(total)}</span>
+                  <ChevronUp size={16} className="opacity-70" />
+                </div>
+              ) : (
+                <ChevronUp size={16} className="opacity-40" />
+              )}
+            </button>
+          </div>
+
+          {/* Móvil: bottom sheet */}
+          {carritoAbierto && (
+            <div className="lg:hidden fixed inset-0 z-50 flex flex-col justify-end">
+              <div
+                className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+                onClick={() => setCarritoAbierto(false)}
+              />
+              <div
+                className="relative bg-white rounded-t-3xl flex flex-col"
+                style={{ maxHeight: '88dvh' }}
+              >
+                <div className="flex-shrink-0 px-5 pt-3 pb-4 border-b border-gray-100">
+                  <div className="flex justify-center mb-3">
+                    <div className="w-10 h-1 bg-gray-200 rounded-full" />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <ShoppingCart size={18} className="text-blue-600" />
+                      <p className="text-base font-bold text-gray-900">Carrito</p>
+                      {totalItems > 0 && (
+                        <span className="bg-blue-100 text-blue-600 text-xs font-semibold
+                          px-2 py-0.5 rounded-full">
+                          {totalItems}
+                        </span>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => setCarritoAbierto(false)}
+                      className="p-1.5 rounded-xl hover:bg-gray-100 transition-colors text-gray-400"
+                    >
+                      <X size={18} />
+                    </button>
+                  </div>
+                </div>
+                <div className="overflow-y-auto flex-1 px-5 py-4">
+                  <Carrito
+                    sinHeader
+                    onFacturar={() => { setModalFactura(true);  setCarritoAbierto(false); }}
+                    onPrestar={() =>  { setModalPrestamo(true); setCarritoAbierto(false); }}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+        </>
       )}
 
       <ModalFactura  open={modalFactura}  onClose={() => setModalFactura(false)}  />

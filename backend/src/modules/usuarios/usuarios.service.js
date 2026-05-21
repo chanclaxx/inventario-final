@@ -16,10 +16,11 @@ const getUsuarioById = async (negocioId, id) => {
 const crearUsuario = async (negocioId, {
   nombre, email, password, rol, sucursal_id, modulos_permitidos, permisos_proveedores, permisos_edicion_productos,
 }) => {
-  if (rol === 'admin_negocio' && sucursal_id) {
-    throw { status: 400, message: 'El admin de negocio no puede tener sucursal asignada' };
+  const ROL_SIN_SUCURSAL = ['admin_negocio', 'espectador'];
+  if (ROL_SIN_SUCURSAL.includes(rol) && sucursal_id) {
+    throw { status: 400, message: 'Este rol no puede tener sucursal asignada' };
   }
-  if (rol !== 'admin_negocio' && !sucursal_id) {
+  if (!ROL_SIN_SUCURSAL.includes(rol) && !sucursal_id) {
     throw { status: 400, message: 'Supervisores y vendedores requieren sucursal asignada' };
   }
  

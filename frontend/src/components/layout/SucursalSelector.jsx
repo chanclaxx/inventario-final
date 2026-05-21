@@ -8,7 +8,7 @@ import useCarritoStore from '../../store/carritoStore';
 import { getSucursales } from '../../api/sucursales.api';
 
 export function SucursalSelector() {
-  const { usuario, esAdminNegocio } = useAuth();
+  const { usuario, esAdminNegocio, esEspectador } = useAuth();
   const queryClient = useQueryClient();
 
   const sucursalActiva  = useSucursalStore((s) => s.sucursalActiva);
@@ -23,13 +23,15 @@ export function SucursalSelector() {
   const btnRef      = useRef(null);
   const dropdownRef = useRef(null);
 
+  const puedeSeleccionar = esAdminNegocio() || esEspectador();
+
   const { data: listaSucursales } = useQuery({
     queryKey  : ['sucursales-selector'],
     queryFn   : async () => {
       const { data } = await getSucursales();
       return data.data ?? data;
     },
-    enabled   : esAdminNegocio(),
+    enabled   : puedeSeleccionar,
     staleTime : 5 * 60 * 1000,
   });
 
@@ -63,7 +65,7 @@ export function SucursalSelector() {
     return () => document.removeEventListener('mousedown', handleClick);
   }, [abierto]);
 
-  if (!esAdminNegocio() || esUnicaSucursal()) return null;
+  if (!puedeSeleccionar || esUnicaSucursal()) return null;
 
   const handleSeleccionar = (sucursalId) => {
     if (sucursalId !== sucursalActiva) {

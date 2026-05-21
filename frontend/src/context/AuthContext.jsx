@@ -59,6 +59,7 @@ export function AuthProvider({ children }) {
   const esAdminNegocio = () => usuario?.rol === 'admin_negocio';
   const esSupervisor   = () => ['admin_negocio', 'supervisor'].includes(usuario?.rol);
   const esVendedor     = () => !!usuario;
+  const esEspectador   = () => usuario?.rol === 'espectador';
 
   // true si el usuario puede abrir los modales de edición de productos
   const puedeEditarProductos = () => {
@@ -90,6 +91,7 @@ export function AuthProvider({ children }) {
       esAdminNegocio,
       esSupervisor,
       esVendedor,
+      esEspectador,
       puedeEditarProductos,
       camposEdicionProductos,
       puedeExportarInventario,

@@ -19,7 +19,8 @@ const resolveSucursal = async (req, res, next) => {
     if (!req.user) return next();
 
     // ── Vendedor y supervisor: solo su sucursal asignada ──────────────────
-    if (req.user.rol !== 'admin_negocio') {
+    const ROLES_MULTISUCURSAL = ['admin_negocio', 'espectador'];
+    if (!ROLES_MULTISUCURSAL.includes(req.user.rol)) {
       if (!req.user.sucursal_id) {
         return res.status(403).json({
           ok: false,
@@ -30,7 +31,7 @@ const resolveSucursal = async (req, res, next) => {
       return next();
     }
 
-    // ── Admin: leer sucursal_id SOLO del query param ─────────────────────
+    // ── Admin / Espectador: leer sucursal_id SOLO del query param ────────
     const sucursalExplicita = Number(req.query.sucursal_id);
     if (sucursalExplicita) {
       const { rows } = await pool.query(

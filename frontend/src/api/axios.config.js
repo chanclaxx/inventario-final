@@ -47,10 +47,11 @@ api.interceptors.request.use((config) => {
     config.headers.Authorization = `Bearer ${token}`;
   }
 
-  // 2. Inyección de sucursal_id — solo para admin_negocio
+  // 2. Inyección de sucursal_id — admin_negocio y espectador usan el store.
   //    Vendedor/supervisor: el backend resuelve por token, no inyectar nada.
   const usuario = getUsuarioSesion();
-  if (usuario?.rol === 'admin_negocio' && requiereSucursal(config.url)) {
+  const ROLES_MULTISUCURSAL = ['admin_negocio', 'espectador'];
+  if (ROLES_MULTISUCURSAL.includes(usuario?.rol) && requiereSucursal(config.url)) {
     const param = useSucursalStore.getState().sucursalParam();
 
     // No sobreescribir sucursal_id si ya viene explícito en la llamada

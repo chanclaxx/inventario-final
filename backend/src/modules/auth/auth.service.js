@@ -65,11 +65,12 @@ const _validarEstadoPlan = async (usuario) => {
 };
 
 /**
- * Retorna las sucursales activas del negocio solo para admin_negocio.
+ * Retorna las sucursales activas del negocio para admin_negocio y espectador.
+ * Ambos pueden cambiar de sucursal — el espectador solo con acceso lectura.
  * Vendedor y supervisor tienen su sucursal fija en el token — no necesitan lista.
  */
 const _getSucursalesParaAdmin = async (usuario) => {
-  if (usuario.rol !== 'admin_negocio') return null;
+  if (!['admin_negocio', 'espectador'].includes(usuario.rol)) return null;
   const { rows } = await pool.query(QUERY_SUCURSALES_NEGOCIO, [usuario.negocio_id]);
   return rows;
 };

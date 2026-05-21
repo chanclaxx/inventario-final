@@ -6,14 +6,15 @@ import { Modal }   from '../../components/ui/Modal';
 import { Button }  from '../../components/ui/Button';
 import { Input }   from '../../components/ui/Input';
 import { Badge }   from '../../components/ui/Badge';
-import { Plus, Pencil, UserX, UserCheck, Users, ShieldCheck, Truck, PackageSearch, FileDown } from 'lucide-react';
+import { Plus, Pencil, UserX, UserCheck, Users, ShieldCheck, Truck, PackageSearch, FileDown, Eye } from 'lucide-react';
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
 const ROLES = [
-  { value: 'admin_negocio', label: 'Admin negocio' },
-  { value: 'supervisor',    label: 'Supervisor'    },
-  { value: 'vendedor',      label: 'Vendedor'      },
+  { value: 'admin_negocio', label: 'Admin negocio'        },
+  { value: 'supervisor',    label: 'Supervisor'            },
+  { value: 'vendedor',      label: 'Vendedor'              },
+  { value: 'espectador',    label: 'Espectador (lectura)'  },
 ];
 
 const MODULOS = [
@@ -479,6 +480,10 @@ function FilaUsuario({ usuario, onEditar, onToggleActivo }) {
             <span className="text-xs text-blue-500 flex items-center gap-1">
               <ShieldCheck size={11} /> Acceso total
             </span>
+          ) : usuario.rol === 'espectador' ? (
+            <span className="text-xs text-amber-600 flex items-center gap-1">
+              <Eye size={11} /> Solo lectura · cambia sucursal
+            </span>
           ) : usuario.modulos_permitidos !== null ? (
             <span className="text-xs text-purple-600 font-medium">
               {modulosActivos.length} módulos personalizados
@@ -551,7 +556,8 @@ function ModalUsuario({ open, onClose, editando, sucursales, onGuardar, cargando
 
   const set = (campo, valor) => setForm((f) => ({ ...f, [campo]: valor }));
 
-  const requiereSucursal = form.rol !== 'admin_negocio';
+  const ROL_SIN_SUCURSAL = ['admin_negocio', 'espectador'];
+  const requiereSucursal = !ROL_SIN_SUCURSAL.includes(form.rol);
 
   // Módulos efectivos del usuario (para saber si proveedores está habilitado)
   const modulosEfectivos = form.rol === 'admin_negocio'
@@ -758,7 +764,8 @@ export function UsuariosConfig() {
     if (!payload.nombre?.trim()) return setError('El nombre es requerido');
     if (!payload.email?.trim())  return setError('El email es requerido');
     if (!editando && !payload.password?.trim()) return setError('La contraseña es requerida');
-    if (payload.rol !== 'admin_negocio' && !payload.sucursal_id) {
+    const _sinSucursal = ['admin_negocio', 'espectador'];
+    if (!_sinSucursal.includes(payload.rol) && !payload.sucursal_id) {
       return setError('Debes asignar una sucursal');
     }
     editando ? mutEditar.mutate(payload) : mutCrear.mutate(payload);
