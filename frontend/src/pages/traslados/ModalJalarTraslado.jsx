@@ -12,11 +12,11 @@ import { SearchInput }    from '../../components/ui/SearchInput';
 import useSucursalStore   from '../../store/sucursalStore';
 import { useAuth }        from '../../context/useAuth';
 import {
-  ArrowRightLeft, ChevronDown, ChevronUp, ChevronRight,
+  ArrowRightLeft, ChevronLeft, ChevronRight,
   CheckCircle, AlertTriangle, Package, ShoppingBag, Search, Plus, Minus,
 } from 'lucide-react';
 
-// ─── Normalización (espejo del backend) ──────────────────────────────────────
+// ─── Normalización ────────────────────────────────────────────────────────────
 
 const _norm = (s) =>
   (s || '').toLowerCase().trim().normalize('NFD')
@@ -34,7 +34,7 @@ const _matches = (nombre, query) => {
   return qt.length > 0 && qt.some((t) => nt.some((nt2) => nt2.startsWith(t) || t.startsWith(nt2)));
 };
 
-// ─── Badge de coincidencia ────────────────────────────────────────────────────
+// ─── Badge de coincidencia (paso 3) ──────────────────────────────────────────
 
 const NIVEL_CONFIG = {
   exacto:  { label: 'Coincidencia exacta',  color: 'text-green-600 bg-green-50 border-green-200' },
@@ -52,20 +52,35 @@ function BadgeNivel({ nivel }) {
   );
 }
 
-// ─── Selector de equivalente en MI sucursal ───────────────────────────────────
+// ─── Checkbox visual reutilizable ─────────────────────────────────────────────
+
+function Checkbox({ checked }) {
+  return (
+    <div className={`w-4 h-4 rounded border-2 flex items-center justify-center flex-shrink-0 transition-all
+      ${checked ? 'bg-blue-500 border-blue-500' : 'border-gray-300 bg-white'}`}>
+      {checked && (
+        <svg width="9" height="7" viewBox="0 0 9 7" fill="none">
+          <path d="M1 3L3.5 5.5L8 1" stroke="white" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      )}
+    </div>
+  );
+}
+
+// ─── Selector de equivalente en MI sucursal (paso 3) ─────────────────────────
 
 function SelectorMiProducto({ equivalencia, seleccionId, onSeleccionar, miSucursalId }) {
-  const [busqueda, setBusqueda]                   = useState('');
+  const [busqueda, setBusqueda]                     = useState('');
   const [resultadosManuales, setResultadosManuales] = useState(null);
-  const [buscando, setBuscando]                   = useState(false);
-  const [errorBusqueda, setErrorBusqueda]         = useState('');
+  const [buscando, setBuscando]                     = useState(false);
+  const [errorBusqueda, setErrorBusqueda]           = useState('');
 
   const sugerencias  = equivalencia.sugerencias || [];
   const filtradas    = sugerencias.filter((s) => _matches(s.nombre, busqueda));
   const listaVisible = resultadosManuales !== null ? resultadosManuales : filtradas;
 
   const handleBuscarEnMiSucursal = async () => {
-    if (!busqueda.trim() || busqueda.trim().length < 2) return;
+    if (busqueda.trim().length < 2) return;
     setBuscando(true);
     setErrorBusqueda('');
     try {
@@ -80,7 +95,7 @@ function SelectorMiProducto({ equivalencia, seleccionId, onSeleccionar, miSucurs
   };
 
   const msgVacio = resultadosManuales !== null
-    ? 'No se encontraron productos con ese término en tu sucursal'
+    ? 'Sin resultados en tu sucursal para esa búsqueda'
     : busqueda.trim()
     ? 'Sin coincidencias — prueba el botón "Buscar"'
     : 'No hay productos disponibles en tu sucursal';
@@ -115,7 +130,7 @@ function SelectorMiProducto({ equivalencia, seleccionId, onSeleccionar, miSucurs
           <span className={resultadosManuales.length === 0 ? 'text-red-500' : 'text-blue-600'}>
             {errorBusqueda || (resultadosManuales.length === 0
               ? 'Sin resultados'
-              : `${resultadosManuales.length} resultado${resultadosManuales.length !== 1 ? 's' : ''} encontrado${resultadosManuales.length !== 1 ? 's' : ''}`)}
+              : `${resultadosManuales.length} resultado${resultadosManuales.length !== 1 ? 's' : ''}`)}
           </span>
           <button
             type="button"
@@ -164,7 +179,7 @@ function SelectorMiProducto({ equivalencia, seleccionId, onSeleccionar, miSucurs
 
 function ItemMapeo({ item, equivalencia, seleccionId, onSeleccionar, miSucursalId }) {
   const [expandido, setExpandido] = useState(!equivalencia?.auto_seleccionado);
-  const TipoIcon   = item.tipo === 'serial' ? Package : ShoppingBag;
+  const TipoIcon    = item.tipo === 'serial' ? Package : ShoppingBag;
   const sinOpciones = !equivalencia || (equivalencia.sugerencias || []).length === 0;
 
   return (
@@ -202,9 +217,7 @@ function ItemMapeo({ item, equivalencia, seleccionId, onSeleccionar, miSucursalI
 
       {expandido && equivalencia && (
         <div className="px-4 pb-3 border-t border-gray-100">
-          <p className="text-xs text-gray-500 font-medium py-2">
-            Selecciona el producto en tu sucursal:
-          </p>
+          <p className="text-xs text-gray-500 font-medium py-2">Selecciona el producto en tu sucursal:</p>
           <SelectorMiProducto
             equivalencia={equivalencia}
             seleccionId={seleccionId}
@@ -248,13 +261,153 @@ function PasoSucursalOrigen({ sucursales, miSucursalId, seleccionadoId, onSelecc
   );
 }
 
-// ─── Paso 2: Explorar y seleccionar productos de la sucursal origen ───────────
+// ─── Serial picker: vista dedicada para seleccionar IMEIs ─────────────────────
+// Se muestra cuando el usuario toca un producto serial con muchos IMEIs.
+// Reemplaza el contenido del paso 2 y tiene su propia búsqueda + select-all.
 
-function PasoSeleccionProductos({ sucursalOrigenId, itemsSeleccionados, onToggleSerial, onCambiarCantidad }) {
+function SerialPicker({ producto, sucursalOrigenId, itemsSeleccionados, onToggleSerial, onBulkToggle, onVolver }) {
+  const [busqueda, setBusqueda] = useState('');
+
+  const { data: seriales, isLoading } = useQuery({
+    queryKey: ['seriales-jalar', sucursalOrigenId, producto.id],
+    queryFn:  () => buscarSerialesProducto(sucursalOrigenId, producto.id).then((r) => r.data.data),
+    staleTime: 10_000,
+  });
+
+  // Filtra por IMEI: el usuario puede pegar el número con o sin espacios
+  const serialesFiltrados = (seriales || []).filter((s) => {
+    if (!busqueda.trim()) return true;
+    const q = busqueda.replace(/\s/g, '');
+    return s.imei.includes(q);
+  });
+
+  const selDelProducto = itemsSeleccionados.filter(
+    (i) => i.tipo === 'serial' && i.productoOrigenId === producto.id
+  );
+  const selCount = selDelProducto.length;
+
+  const cuantosFiltrSel = serialesFiltrados.filter(
+    (s) => itemsSeleccionados.some((i) => i.key === `serial-${s.id}`)
+  ).length;
+  const todosFiltrSel   = serialesFiltrados.length > 0 && cuantosFiltrSel === serialesFiltrados.length;
+  const hayBusqueda     = busqueda.trim().length > 0;
+
+  const handleToggleTodos = () => {
+    onBulkToggle(serialesFiltrados, producto, !todosFiltrSel);
+  };
+
+  return (
+    <div className="flex flex-col gap-3">
+
+      {/* Cabecera: volver + nombre producto + contador */}
+      <div className="flex items-center gap-2">
+        <button
+          onClick={onVolver}
+          className="w-8 h-8 flex items-center justify-center rounded-xl hover:bg-gray-100 transition-colors flex-shrink-0"
+        >
+          <ChevronLeft size={18} className="text-gray-500" />
+        </button>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-bold text-gray-900 truncate">{producto.nombre}</p>
+          <p className="text-xs text-gray-400">
+            {[producto.marca, producto.modelo].filter(Boolean).join(' · ')}
+            {' · '}
+            <span className="font-medium text-blue-600">
+              {producto.disponibles} disponible{Number(producto.disponibles) !== 1 ? 's' : ''}
+            </span>
+          </p>
+        </div>
+        {selCount > 0 && (
+          <span className="flex-shrink-0 bg-blue-500 text-white text-xs font-bold px-2.5 py-1 rounded-full">
+            {selCount} sel.
+          </span>
+        )}
+      </div>
+
+      {/* Búsqueda por IMEI */}
+      <SearchInput
+        value={busqueda}
+        onChange={setBusqueda}
+        placeholder="Buscar por IMEI..."
+      />
+
+      {isLoading ? (
+        <div className="flex items-center justify-center py-10 gap-2">
+          <Spinner className="py-0 scale-75" />
+          <span className="text-sm text-gray-400">Cargando seriales...</span>
+        </div>
+      ) : (
+        <>
+          {/* Botón seleccionar / quitar todos los filtrados */}
+          {serialesFiltrados.length > 0 && (
+            <button
+              onClick={handleToggleTodos}
+              className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl border text-sm
+                font-medium transition-all
+                ${todosFiltrSel
+                  ? 'bg-blue-50 border-blue-200 text-blue-700'
+                  : 'bg-gray-50 border-gray-200 text-gray-700 hover:border-blue-200 hover:bg-blue-50/40'}`}
+            >
+              <Checkbox checked={todosFiltrSel} />
+              {todosFiltrSel
+                ? `Quitar ${hayBusqueda ? 'filtrados' : 'todos'} (${serialesFiltrados.length})`
+                : `Seleccionar ${hayBusqueda ? 'filtrados' : 'todos'} (${serialesFiltrados.length})`}
+            </button>
+          )}
+
+          {/* Lista de IMEIs */}
+          <div className="flex flex-col gap-1 overflow-y-auto" style={{ maxHeight: '44vh' }}>
+            {serialesFiltrados.length === 0 ? (
+              <p className="text-sm text-gray-400 text-center py-8">
+                {busqueda.trim()
+                  ? 'Ningún IMEI coincide con esa búsqueda'
+                  : 'No hay seriales disponibles'}
+              </p>
+            ) : serialesFiltrados.map((serial) => {
+              const key          = `serial-${serial.id}`;
+              const seleccionado = itemsSeleccionados.some((i) => i.key === key);
+              return (
+                <button
+                  key={serial.id}
+                  onClick={() => onToggleSerial(serial, producto, key)}
+                  className={`flex items-center gap-3 px-3.5 py-3 rounded-xl border text-left transition-all
+                    ${seleccionado
+                      ? 'bg-blue-50 border-blue-200'
+                      : 'bg-white border-gray-100 hover:border-blue-200 hover:bg-blue-50/20'}`}
+                >
+                  <Checkbox checked={seleccionado} />
+                  <span className={`font-mono text-sm tracking-wider flex-1
+                    ${seleccionado ? 'text-blue-800 font-semibold' : 'text-gray-700'}`}>
+                    {serial.imei}
+                  </span>
+                  {seleccionado && <CheckCircle size={15} className="text-blue-500 flex-shrink-0" />}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Botón confirmar */}
+          <Button onClick={onVolver} variant={selCount > 0 ? 'primary' : 'secondary'} className="w-full">
+            {selCount > 0 ? (
+              <>
+                <CheckCircle size={14} />
+                Confirmar {selCount} serial{selCount !== 1 ? 'es' : ''} seleccionado{selCount !== 1 ? 's' : ''}
+              </>
+            ) : 'Volver al catálogo'}
+          </Button>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ─── Paso 2: Catálogo de productos de la sucursal origen ─────────────────────
+// Los productos serial NO se expanden inline — al tocarlos se abre SerialPicker.
+
+function PasoSeleccionProductos({ sucursalOrigenId, itemsSeleccionados, onAbrirSerialPicker, onCambiarCantidad }) {
   const [tipo, setTipo]                         = useState('serial');
   const [busqueda, setBusqueda]                 = useState('');
   const [busquedaServidor, setBusquedaServidor] = useState('');
-  const [productoExpandidoId, setProductoExpandidoId] = useState(null);
 
   const { data: catalogo, isLoading, isFetching } = useQuery({
     queryKey: ['catalogo-jalar', sucursalOrigenId, tipo, busquedaServidor],
@@ -263,25 +416,12 @@ function PasoSeleccionProductos({ sucursalOrigenId, itemsSeleccionados, onToggle
     staleTime: 30_000,
   });
 
-  const { data: seriales, isLoading: loadingSeriales } = useQuery({
-    queryKey: ['seriales-jalar', sucursalOrigenId, productoExpandidoId],
-    queryFn:  () => buscarSerialesProducto(sucursalOrigenId, productoExpandidoId).then((r) => r.data.data),
-    enabled:  !!sucursalOrigenId && !!productoExpandidoId && tipo === 'serial',
-    staleTime: 10_000,
-  });
-
   const handleCambiarTipo = (t) => {
     setTipo(t);
-    setProductoExpandidoId(null);
     setBusqueda('');
     setBusquedaServidor('');
   };
 
-  const handleBuscarServidor = () => {
-    if (busqueda.trim().length >= 2) setBusquedaServidor(busqueda.trim());
-  };
-
-  // Filtro client-side sobre el catálogo ya cargado
   const lista = (catalogo || []).filter((p) => _matches(p.nombre, busqueda));
 
   const serialesSelCount  = itemsSeleccionados.filter((i) => i.tipo === 'serial').length;
@@ -290,11 +430,11 @@ function PasoSeleccionProductos({ sucursalOrigenId, itemsSeleccionados, onToggle
   return (
     <div className="flex flex-col gap-3">
 
-      {/* Tabs serial / cantidad */}
+      {/* Tabs */}
       <div className="flex gap-1 p-1 bg-gray-100 rounded-xl">
         {[
-          { id: 'serial',   label: 'Con serial',   Icon: Package,     count: serialesSelCount },
-          { id: 'cantidad', label: 'Por cantidad',  Icon: ShoppingBag, count: cantidadSelCount },
+          { id: 'serial',   label: 'Con serial',  Icon: Package,     count: serialesSelCount },
+          { id: 'cantidad', label: 'Por cantidad', Icon: ShoppingBag, count: cantidadSelCount },
         ].map(({ id, label, Icon, count }) => (
           <button
             key={id}
@@ -315,7 +455,7 @@ function PasoSeleccionProductos({ sucursalOrigenId, itemsSeleccionados, onToggle
         ))}
       </div>
 
-      {/* Barra de búsqueda */}
+      {/* Búsqueda */}
       <div className="flex gap-2 items-center">
         <div className="flex-1">
           <SearchInput
@@ -327,7 +467,7 @@ function PasoSeleccionProductos({ sucursalOrigenId, itemsSeleccionados, onToggle
         {busqueda.trim().length >= 2 && (
           <button
             type="button"
-            onClick={handleBuscarServidor}
+            onClick={() => setBusquedaServidor(busqueda.trim())}
             disabled={isFetching}
             className="flex items-center gap-1.5 px-3 py-2 bg-blue-600 text-white text-xs
               font-medium rounded-xl hover:bg-blue-700 disabled:opacity-50 transition-colors
@@ -339,7 +479,7 @@ function PasoSeleccionProductos({ sucursalOrigenId, itemsSeleccionados, onToggle
         )}
       </div>
 
-      {/* Lista de productos */}
+      {/* Lista */}
       {isLoading ? (
         <Spinner className="py-8" />
       ) : lista.length === 0 ? (
@@ -347,94 +487,59 @@ function PasoSeleccionProductos({ sucursalOrigenId, itemsSeleccionados, onToggle
           {busqueda.trim()
             ? 'Sin resultados — prueba el botón Buscar'
             : tipo === 'serial'
-            ? 'No hay equipos disponibles en esta sucursal'
+            ? 'No hay equipos con stock disponible'
             : 'No hay productos con stock en esta sucursal'}
         </p>
       ) : (
         <div className="flex flex-col gap-2 max-h-64 overflow-y-auto">
 
-          {/* ── Tab SERIAL ── */}
+          {/* ── Serial: tarjetas que llevan al SerialPicker ── */}
           {tipo === 'serial' && lista.map((producto) => {
-            const expandido = productoExpandidoId === producto.id;
-            const selCount  = itemsSeleccionados.filter(
+            const selCount = itemsSeleccionados.filter(
               (i) => i.tipo === 'serial' && i.productoOrigenId === producto.id
             ).length;
             return (
-              <div
+              <button
                 key={producto.id}
-                className={`rounded-xl border overflow-hidden transition-all
-                  ${selCount > 0 ? 'border-blue-200 bg-blue-50/10' : 'border-gray-100 bg-white'}`}
+                onClick={() => onAbrirSerialPicker(producto)}
+                className={`flex items-center gap-3 px-3.5 py-3 rounded-xl border text-left
+                  transition-all hover:shadow-sm
+                  ${selCount > 0
+                    ? 'border-blue-200 bg-blue-50/30 hover:border-blue-300'
+                    : 'border-gray-100 bg-white hover:border-blue-200 hover:bg-blue-50/20'}`}
               >
-                <button
-                  onClick={() => setProductoExpandidoId(expandido ? null : producto.id)}
-                  className="w-full flex items-center gap-3 px-3.5 py-3 text-left hover:bg-blue-50/30 transition-colors"
-                >
-                  <div className="w-7 h-7 bg-blue-50 rounded-lg flex items-center justify-center flex-shrink-0">
-                    <Package size={13} className="text-blue-500" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-gray-900 truncate">{producto.nombre}</p>
-                    <p className="text-xs text-gray-400">
-                      {[producto.marca, producto.modelo].filter(Boolean).join(' ')}
-                      {' · '}
-                      <span className="font-medium text-blue-600">
-                        {producto.disponibles} disponible{Number(producto.disponibles) !== 1 ? 's' : ''}
-                      </span>
-                      {selCount > 0 && (
-                        <span className="text-green-600 font-medium">
-                          {' · '}{selCount} seleccionado{selCount !== 1 ? 's' : ''}
-                        </span>
-                      )}
-                    </p>
-                  </div>
-                  {expandido
-                    ? <ChevronUp   size={14} className="text-gray-400 flex-shrink-0" />
-                    : <ChevronDown size={14} className="text-gray-400 flex-shrink-0" />}
-                </button>
+                <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0
+                  ${selCount > 0 ? 'bg-blue-100' : 'bg-gray-50'}`}>
+                  <Package size={15} className={selCount > 0 ? 'text-blue-600' : 'text-gray-400'} />
+                </div>
 
-                {expandido && (
-                  <div className="border-t border-gray-100 px-3.5 pb-3 pt-2 flex flex-col gap-1.5">
-                    {loadingSeriales ? (
-                      <div className="flex items-center justify-center py-3 gap-2">
-                        <Spinner className="py-0 scale-75" />
-                        <span className="text-xs text-gray-400">Cargando seriales...</span>
-                      </div>
-                    ) : !seriales || seriales.length === 0 ? (
-                      <p className="text-xs text-gray-400 py-2 text-center">No hay seriales disponibles</p>
-                    ) : seriales.map((serial) => {
-                      const key          = `serial-${serial.id}`;
-                      const seleccionado = itemsSeleccionados.some((i) => i.key === key);
-                      return (
-                        <button
-                          key={serial.id}
-                          onClick={() => onToggleSerial(serial, producto, key)}
-                          className={`flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-left transition-all
-                            ${seleccionado
-                              ? 'bg-blue-50 border border-blue-200'
-                              : 'hover:bg-gray-50 border border-transparent'}`}
-                        >
-                          <div className={`w-4 h-4 rounded border-2 flex items-center justify-center flex-shrink-0 transition-all
-                            ${seleccionado ? 'bg-blue-500 border-blue-500' : 'border-gray-300'}`}>
-                            {seleccionado && (
-                              <svg width="9" height="7" viewBox="0 0 9 7" fill="none">
-                                <path d="M1 3L3.5 5.5L8 1" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                              </svg>
-                            )}
-                          </div>
-                          <span className="font-mono text-xs text-gray-700 flex-1">{serial.imei}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-gray-900 truncate">{producto.nombre}</p>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    {[producto.marca, producto.modelo].filter(Boolean).join(' · ')}
+                    {' · '}
+                    <span className="font-medium text-blue-600">
+                      {producto.disponibles} disponible{Number(producto.disponibles) !== 1 ? 's' : ''}
+                    </span>
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  {selCount > 0 && (
+                    <span className="bg-blue-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">
+                      {selCount}
+                    </span>
+                  )}
+                  <ChevronRight size={15} className="text-gray-300" />
+                </div>
+              </button>
             );
           })}
 
-          {/* ── Tab CANTIDAD ── */}
+          {/* ── Cantidad: control +/- ── */}
           {tipo === 'cantidad' && lista.map((producto) => {
-            const key      = `cantidad-${producto.id}`;
-            const selItem  = itemsSeleccionados.find((i) => i.key === key);
+            const key        = `cantidad-${producto.id}`;
+            const selItem    = itemsSeleccionados.find((i) => i.key === key);
             const cantActual = selItem?.cantidad || 0;
             const stockMax   = Number(producto.stock);
             return (
@@ -445,17 +550,18 @@ function PasoSeleccionProductos({ sucursalOrigenId, itemsSeleccionados, onToggle
                     ? 'border-green-200 bg-green-50/20'
                     : 'border-gray-100 bg-white'}`}
               >
-                <div className="w-7 h-7 bg-green-50 rounded-lg flex items-center justify-center flex-shrink-0">
-                  <ShoppingBag size={13} className="text-green-500" />
+                <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0
+                  ${cantActual > 0 ? 'bg-green-100' : 'bg-gray-50'}`}>
+                  <ShoppingBag size={15} className={cantActual > 0 ? 'text-green-600' : 'text-gray-400'} />
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold text-gray-900 truncate">{producto.nombre}</p>
-                  <p className="text-xs text-gray-400">
+                  <p className="text-xs text-gray-400 mt-0.5">
                     {producto.linea_nombre && `${producto.linea_nombre} · `}
-                    Stock: <span className="font-medium">{stockMax}</span>
+                    Stock disponible: <span className="font-medium">{stockMax}</span>
                   </p>
                 </div>
-                <div className="flex items-center gap-2 flex-shrink-0">
+                <div className="flex items-center gap-1.5 flex-shrink-0">
                   <button
                     onClick={() => onCambiarCantidad(producto, Math.max(0, cantActual - 1), key)}
                     disabled={cantActual === 0}
@@ -464,7 +570,7 @@ function PasoSeleccionProductos({ sucursalOrigenId, itemsSeleccionados, onToggle
                   >
                     <Minus size={12} />
                   </button>
-                  <span className={`text-sm font-bold min-w-[20px] text-center
+                  <span className={`text-sm font-bold w-6 text-center
                     ${cantActual > 0 ? 'text-green-700' : 'text-gray-400'}`}>
                     {cantActual}
                   </span>
@@ -548,6 +654,8 @@ export function ModalJalarTraslado({ open, onClose }) {
   const [selecciones, setSelecciones]               = useState({});
   const [notas, setNotas]                           = useState('');
   const [error, setError]                           = useState('');
+  // Cuando está seteado, el paso 2 muestra el SerialPicker en lugar del catálogo
+  const [productoParaSeriales, setProductoParaSeriales] = useState(null);
 
   useEffect(() => {
     if (open) {
@@ -558,6 +666,7 @@ export function ModalJalarTraslado({ open, onClose }) {
       setSelecciones({});
       setNotas('');
       setError('');
+      setProductoParaSeriales(null);
     }
   }, [open]);
 
@@ -568,7 +677,6 @@ export function ModalJalarTraslado({ open, onClose }) {
   });
   const sucursales = sucursalesRaw || [];
 
-  // Buscar equivalentes en MI sucursal para los ítems seleccionados del origen
   const mutBuscar = useMutation({
     mutationFn: () => buscarEquivalentes({
       sucursal_destino_id: miSucursalId,
@@ -593,7 +701,6 @@ export function ModalJalarTraslado({ open, onClose }) {
     onError: (err) => setError(err.response?.data?.error || 'Error al buscar equivalentes'),
   });
 
-  // Ejecutar traslado: origen = otra sucursal, destino = la mía
   const mutEjecutar = useMutation({
     mutationFn: () => {
       const lineas = itemsSeleccionados.map((item) => {
@@ -625,6 +732,8 @@ export function ModalJalarTraslado({ open, onClose }) {
     onError: (err) => setError(err.response?.data?.error || 'Error al ejecutar traslado'),
   });
 
+  // ── Handlers de selección ─────────────────────────────────────────────────
+
   const handleToggleSerial = (serial, producto, key) => {
     const yaSeleccionado = itemsSeleccionados.some((i) => i.key === key);
     if (yaSeleccionado) {
@@ -636,11 +745,34 @@ export function ModalJalarTraslado({ open, onClose }) {
         serial_id:       serial.id,
         productoOrigenId: producto.id,
         nombre:          producto.nombre,
-        marca:           producto.marca   || null,
-        modelo:          producto.modelo  || null,
+        marca:           producto.marca    || null,
+        modelo:          producto.modelo   || null,
         linea_id:        producto.linea_id || null,
         imei:            serial.imei,
       }]);
+    }
+  };
+
+  // Agrega o quita múltiples seriales de un producto en un solo setState
+  const handleBulkToggle = (serialesFiltrados, producto, seleccionar) => {
+    if (seleccionar) {
+      const nuevos = serialesFiltrados
+        .filter((s) => !itemsSeleccionados.some((i) => i.key === `serial-${s.id}`))
+        .map((s) => ({
+          key:             `serial-${s.id}`,
+          tipo:            'serial',
+          serial_id:       s.id,
+          productoOrigenId: producto.id,
+          nombre:          producto.nombre,
+          marca:           producto.marca    || null,
+          modelo:          producto.modelo   || null,
+          linea_id:        producto.linea_id || null,
+          imei:            s.imei,
+        }));
+      setItemsSeleccionados((prev) => [...prev, ...nuevos]);
+    } else {
+      const keysAQuitar = new Set(serialesFiltrados.map((s) => `serial-${s.id}`));
+      setItemsSeleccionados((prev) => prev.filter((i) => !keysAQuitar.has(i.key)));
     }
   };
 
@@ -679,9 +811,10 @@ export function ModalJalarTraslado({ open, onClose }) {
     mutEjecutar.mutate();
   };
 
-  const miSucursalNombre  = sucursales.find((s) => s.id === miSucursalId)?.nombre  || '';
-  const origenNombre      = sucursales.find((s) => s.id === sucursalOrigenId)?.nombre || '';
-  const todosMapeados     = itemsSeleccionados.length > 0 && itemsSeleccionados.every((item) => selecciones[item.key]);
+  const miSucursalNombre = sucursales.find((s) => s.id === miSucursalId)?.nombre || '';
+  const origenNombre     = sucursales.find((s) => s.id === sucursalOrigenId)?.nombre || '';
+  const todosMapeados    = itemsSeleccionados.length > 0 &&
+    itemsSeleccionados.every((item) => selecciones[item.key]);
 
   // ── Paso 4: éxito ─────────────────────────────────────────────────────────
   if (paso === 4) {
@@ -709,7 +842,7 @@ export function ModalJalarTraslado({ open, onClose }) {
     <Modal open={open} onClose={onClose} title="Traer de otra sucursal" size="md">
       <div className="flex flex-col gap-4">
 
-        {/* Header visual: origen → mi sucursal */}
+        {/* Header: origen → mi sucursal */}
         <div className="flex items-center gap-3 bg-gray-50 rounded-xl px-4 py-3">
           <div className="flex-1 text-center">
             <p className="text-xs text-gray-400">Origen</p>
@@ -724,7 +857,7 @@ export function ModalJalarTraslado({ open, onClose }) {
           </div>
         </div>
 
-        {/* ── Paso 1: Seleccionar sucursal ── */}
+        {/* ── Paso 1 ── */}
         {paso === 1 && (
           <PasoSucursalOrigen
             sucursales={sucursales}
@@ -734,13 +867,25 @@ export function ModalJalarTraslado({ open, onClose }) {
           />
         )}
 
-        {/* ── Paso 2: Seleccionar productos ── */}
-        {paso === 2 && (
+        {/* ── Paso 2A: Serial Picker (vista de detalle de un producto) ── */}
+        {paso === 2 && productoParaSeriales && (
+          <SerialPicker
+            producto={productoParaSeriales}
+            sucursalOrigenId={sucursalOrigenId}
+            itemsSeleccionados={itemsSeleccionados}
+            onToggleSerial={handleToggleSerial}
+            onBulkToggle={handleBulkToggle}
+            onVolver={() => setProductoParaSeriales(null)}
+          />
+        )}
+
+        {/* ── Paso 2B: Catálogo general ── */}
+        {paso === 2 && !productoParaSeriales && (
           <>
             <PasoSeleccionProductos
               sucursalOrigenId={sucursalOrigenId}
               itemsSeleccionados={itemsSeleccionados}
-              onToggleSerial={handleToggleSerial}
+              onAbrirSerialPicker={setProductoParaSeriales}
               onCambiarCantidad={handleCambiarCantidad}
             />
 
@@ -749,8 +894,8 @@ export function ModalJalarTraslado({ open, onClose }) {
               <div className="bg-blue-50 border border-blue-100 rounded-xl px-3 py-2 flex items-center gap-2">
                 <CheckCircle size={14} className="text-blue-500 flex-shrink-0" />
                 <p className="text-sm text-blue-700 flex-1">
-                  <span className="font-semibold">{itemsSeleccionados.length} item{itemsSeleccionados.length !== 1 ? 's' : ''}</span>
-                  {' '}seleccionado{itemsSeleccionados.length !== 1 ? 's' : ''}
+                  <span className="font-semibold">{itemsSeleccionados.length}</span>
+                  {' '}item{itemsSeleccionados.length !== 1 ? 's' : ''} seleccionado{itemsSeleccionados.length !== 1 ? 's' : ''}
                 </p>
                 <button
                   type="button"
