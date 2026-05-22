@@ -11,7 +11,7 @@ const getPdfCuentaAcreedor = async (req, res, next) => {
     const acreedor = await repo.findById(negocio_id, acreedorId);
     if (!acreedor) return next({ status: 404, message: 'Acreedor no encontrado' });
 
-    const cargos = await repo.getComprasConSaldo(negocio_id, acreedorId);
+    const movimientos = await repo.getMovimientos(negocio_id, acreedorId);
     const saldoAFavor = await repo.getSaldoAFavor(negocio_id, acreedorId);
 
     const { rows: configRows } = await pool.query(
@@ -21,7 +21,7 @@ const getPdfCuentaAcreedor = async (req, res, next) => {
     const config = {};
     for (const row of configRows) config[row.clave] = row.valor;
 
-    generarPdfCuentaAcreedor({ acreedor, cargos, saldoAFavor, config, res });
+    generarPdfCuentaAcreedor({ acreedor, movimientos, saldoAFavor, config, res });
   } catch (err) {
     next(err);
   }
