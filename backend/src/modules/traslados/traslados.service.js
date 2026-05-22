@@ -417,7 +417,21 @@ const revertirLineaTraslado = async (negocioId, trasladoId, lineaId, usuarioId) 
   }
 };
 
+const getCatalogoSucursal = async (negocioId, sucursalId, tipo, q) => {
+  await _verificarSucursalNegocio(sucursalId, negocioId);
+  if (!['serial', 'cantidad'].includes(tipo)) {
+    throw { status: 400, message: 'tipo debe ser "serial" o "cantidad"' };
+  }
+  return repo.getCatalogoSucursal(negocioId, sucursalId, tipo, q || '');
+};
+
+const buscarSerialesProducto = async (negocioId, sucursalId, productoSerialId) => {
+  await _verificarSucursalNegocio(sucursalId, negocioId);
+  return repo.buscarSerialesProducto(negocioId, sucursalId, productoSerialId);
+};
+
 module.exports = {
   buscarEquivalentes, buscarEnSucursal, ejecutarTraslado,
   getTraslados, getTrasladoById, revertirTraslado, revertirLineaTraslado,
+  getCatalogoSucursal, buscarSerialesProducto,
 };

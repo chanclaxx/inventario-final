@@ -92,7 +92,32 @@ const revertirTraslado = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+const getCatalogoSucursal = async (req, res, next) => {
+  try {
+    const { sucursalId } = req.params;
+    const { tipo, q } = req.query;
+    if (!tipo) {
+      return res.status(400).json({ ok: false, error: 'El parámetro tipo es requerido' });
+    }
+    const data = await service.getCatalogoSucursal(
+      req.user.negocio_id, Number(sucursalId), tipo, q || ''
+    );
+    res.json({ ok: true, data });
+  } catch (err) { next(err); }
+};
+
+const buscarSerialesProducto = async (req, res, next) => {
+  try {
+    const { sucursalId, productoSerialId } = req.params;
+    const data = await service.buscarSerialesProducto(
+      req.user.negocio_id, Number(sucursalId), Number(productoSerialId)
+    );
+    res.json({ ok: true, data });
+  } catch (err) { next(err); }
+};
+
 module.exports = {
   buscarEquivalentes, buscarEnSucursal, ejecutarTraslado,
   getTraslados, getTrasladoById, revertirTraslado, revertirLineaTraslado,
+  getCatalogoSucursal, buscarSerialesProducto,
 };

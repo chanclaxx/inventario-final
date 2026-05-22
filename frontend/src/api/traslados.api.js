@@ -17,3 +17,9 @@ export const revertirTraslado = (id) =>
 
 export const buscarProductosEnSucursal = (sucursalId, tipo, q) =>
   api.get(`/traslados/sucursal/${sucursalId}/productos`, { params: { tipo, q } });
+
+export const getCatalogoSucursal = (sucursalId, tipo, q) =>
+  api.get(`/traslados/sucursal/${sucursalId}/catalogo`, { params: { tipo, q: q || '' } });
+
+export const buscarSerialesProducto = (sucursalId, productoSerialId) =>
+  api.get(`/traslados/sucursal/${sucursalId}/seriales-producto/${productoSerialId}`);

@@ -359,9 +359,70 @@ const marcarTrasladoCancelado = async (client, trasladoId, usuarioId) => {
   );
 };
 
+// ─── Catálogo completo de una sucursal (para jalar traslado) ─────────────────
+
+const getCatalogoSucursal = async (negocioId, sucursalId, tipo, q) => {
+  if (tipo === 'serial') {
+    const { rows } = await pool.query(`
+      SELECT ps.id, ps.nombre, ps.marca, ps.modelo, ps.precio, ps.linea_id,
+             lp.nombre AS linea_nombre,
+             COUNT(s.id) FILTER (WHERE s.vendido = false AND s.prestado = false) AS disponibles
+      FROM productos_serial ps
+      JOIN sucursales su ON su.id = ps.sucursal_id
+      LEFT JOIN lineas_producto lp ON lp.id = ps.linea_id
+      LEFT JOIN seriales s ON s.producto_id = ps.id
+      WHERE ps.sucursal_id = $1 AND su.negocio_id = $2
+      GROUP BY ps.id, lp.nombre
+      HAVING COUNT(s.id) FILTER (WHERE s.vendido = false AND s.prestado = false) > 0
+      ORDER BY ps.nombre
+    `, [sucursalId, negocioId]);
+
+    if (!rows.length) return [];
+    if (!q || q.trim().length < 2) return rows;
+    return rows
+      .map((p) => ({ ...p, _s: _scoreQuery(p, q) }))
+      .filter((p) => p._s > 0)
+      .sort((a, b) => b._s - a._s)
+      .map(({ _s, ...p }) => p);
+  }
+
+  const { rows } = await pool.query(`
+    SELECT pc.id, pc.nombre, pc.stock, pc.precio, pc.costo_unitario,
+           pc.unidad_medida, pc.linea_id, lp.nombre AS linea_nombre
+    FROM productos_cantidad pc
+    JOIN sucursales su ON su.id = pc.sucursal_id
+    LEFT JOIN lineas_producto lp ON lp.id = pc.linea_id
+    WHERE pc.sucursal_id = $1 AND su.negocio_id = $2 AND pc.activo = true AND pc.stock > 0
+    ORDER BY pc.nombre
+  `, [sucursalId, negocioId]);
+
+  if (!rows.length) return [];
+  if (!q || q.trim().length < 2) return rows;
+  return rows
+    .map((p) => ({ ...p, _s: _scoreQuery(p, q) }))
+    .filter((p) => p._s > 0)
+    .sort((a, b) => b._s - a._s)
+    .map(({ _s, ...p }) => p);
+};
+
+// ─── Seriales disponibles de un producto en una sucursal ─────────────────────
+
+const buscarSerialesProducto = async (negocioId, sucursalId, productoSerialId) => {
+  const { rows } = await pool.query(`
+    SELECT s.id, s.imei
+    FROM seriales s
+    JOIN productos_serial ps ON ps.id = s.producto_id
+    JOIN sucursales su ON su.id = ps.sucursal_id
+    WHERE s.producto_id = $1 AND ps.sucursal_id = $2 AND su.negocio_id = $3
+      AND s.vendido = false AND s.prestado = false
+    ORDER BY s.imei
+  `, [productoSerialId, sucursalId, negocioId]);
+  return rows;
+};
+
 module.exports = {
   buscarEquivalentesSerial, buscarEquivalentesCantidad,
-  buscarProductosEnSucursal,
+  buscarProductosEnSucursal, getCatalogoSucursal, buscarSerialesProducto,
   crearTraslado, insertarLineaTraslado,
   moverSerial, ajustarStockEnTransaccion, insertarHistorialEnTransaccion,
   findAll, findById, getLineas,

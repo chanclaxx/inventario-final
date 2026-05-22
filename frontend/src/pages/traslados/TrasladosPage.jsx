@@ -8,10 +8,12 @@ import { Modal }      from '../../components/ui/Modal';
 import { Badge }      from '../../components/ui/Badge';
 import { Spinner }    from '../../components/ui/Spinner';
 import { EmptyState } from '../../components/ui/EmptyState';
+import { ModalJalarTraslado } from './ModalJalarTraslado';
 import api from '../../api/axios.config';
 import {
   ArrowRightLeft, ChevronLeft, Package, ShoppingBag,
   RotateCcw, AlertTriangle, CheckCircle, XCircle, Clock, ArrowRight,
+  ArrowDownToLine,
 } from 'lucide-react';
 
 // ─── API call reversión individual ───────────────────────────────────────────
@@ -419,6 +421,7 @@ function ListaTraslados({ traslados, isLoading, onSeleccionar }) {
 
 export default function TrasladosPage() {
   const [trasladoSelId, setTrasladoSelId] = useState(null);
+  const [modalJalar, setModalJalar]       = useState(false);
 
   const { data: sucursalesRaw } = useQuery({
     queryKey: ['sucursales'],
@@ -449,10 +452,14 @@ export default function TrasladosPage() {
         <div className="w-10 h-10 bg-blue-50 rounded-xl flex items-center justify-center">
           <ArrowRightLeft size={20} className="text-blue-600" />
         </div>
-        <div>
+        <div className="flex-1">
           <h1 className="text-lg font-bold text-gray-900">Traslados</h1>
           <p className="text-sm text-gray-400">Historial de movimientos entre sucursales</p>
         </div>
+        <Button onClick={() => setModalJalar(true)} variant="secondary">
+          <ArrowDownToLine size={15} />
+          Traer de otra sucursal
+        </Button>
       </div>
 
       <ListaTraslados
@@ -460,6 +467,8 @@ export default function TrasladosPage() {
         isLoading={isLoading}
         onSeleccionar={setTrasladoSelId}
       />
+
+      <ModalJalarTraslado open={modalJalar} onClose={() => setModalJalar(false)} />
     </div>
   );
 }
