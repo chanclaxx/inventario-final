@@ -67,8 +67,9 @@ router.post(   '/retoma-directa',                          requireModulo('presta
 router.delete( '/retomas-directas/:retomaId',              requireModulo('prestamos'), ctrl.anularRetomaDirecta);
 router.post(   '/ajuste-deuda',                            requireModulo('prestamos'), ctrl.crearAjusteDeuda);
 
-router.get('/pdf/:tipo/:personaId', requireModulo('prestamos'), ctrl.exportarPdfPorPersona);
-router.get('/:id/pdf',              requireModulo('prestamos'), ctrl.exportarPdfPrestamoIndividual);
+router.get('/pdf/:tipo/:personaId',              requireModulo('prestamos'), ctrl.exportarPdfPorPersona);
+router.get('/pdf/:tipo/:personaId/estado-cuenta', requireModulo('prestamos'), ctrl.exportarPdfEstadoCuenta);
+router.get('/:id/pdf',                           requireModulo('prestamos'), ctrl.exportarPdfPrestamoIndividual);
 
 // Rutas con :id dinámico — AL FINAL
 router.patch( '/:id/valor',            requireModulo('prestamos'),

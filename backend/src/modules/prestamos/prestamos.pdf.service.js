@@ -633,5 +633,282 @@ const generarPdfPrestamoIndividual = async ({ prestamoId, negocioId, negocioNomb
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// SECCIÓN 3: PDF estado de cuenta — 5 columnas igual que la cuadrícula web
+// ─────────────────────────────────────────────────────────────────────────────
 
-module.exports = { generarPdfPrestamosActivos, generarPdfPrestamoIndividual };
+const TIPO_LABEL = {
+  prestamo:       { label: 'Préstamo',        bg: '#FFFBEB', text: '#D97706' },
+  abono:          { label: 'Abono',           bg: '#ECFDF5', text: '#059669' },
+  pago_producto:  { label: 'Pago producto',   bg: '#EFF6FF', text: '#2563EB' },
+  saldo_aplicado: { label: 'Saldo aplicado',  bg: '#F0FDFA', text: '#0D9488' },
+  compra_directa: { label: 'Compra artículo', bg: '#F5F3FF', text: '#7C3AED' },
+};
+
+const _ecEncabezado = (doc, config, persona, logoNegocio) => {
+  const HEADER_H = 110;
+  doc.roundedRect(0, 0, PAGE_WIDTH, HEADER_H, 0).fill(C.headerBg);
+
+  // Logo
+  let logoOffset = 0;
+  if (logoNegocio) {
+    try {
+      const base64 = logoNegocio.replace(/^data:image\/[a-z+]+;base64,/, '');
+      const buf = Buffer.from(base64, 'base64');
+      if (buf.length) {
+        doc.image(buf, MARGIN, Math.round((HEADER_H - 50) / 2), { fit: [50, 50] });
+        logoOffset = 60;
+      }
+    } catch { /* sin logo */ }
+  }
+
+  const textX = MARGIN + logoOffset;
+  const textW = COL_WIDTH - logoOffset;
+
+  doc.font(FONT.bold).fontSize(18).fillColor(C.headerText)
+    .text(config?.nombre_negocio || 'Mi Negocio', textX, 22, { width: textW });
+
+  const sub = [config?.direccion, config?.telefono_negocio].filter(Boolean).join('  ·  ');
+  if (sub) {
+    doc.font(FONT.normal).fontSize(8).fillColor(C.headerSub)
+      .text(sub, textX, 44, { width: textW });
+  }
+
+  doc.font(FONT.bold).fontSize(11).fillColor(C.headerText)
+    .text('ESTADO DE CUENTA', PAGE_WIDTH - MARGIN - 150, 22, { width: 150, align: 'right' });
+  doc.font(FONT.normal).fontSize(8).fillColor(C.headerSub)
+    .text(`Generado: ${formatFechaHora(new Date())}`, PAGE_WIDTH - MARGIN - 150, 38, { width: 150, align: 'right' });
+
+  return HEADER_H;
+};
+
+const _ecInfoPersona = (doc, persona, tipo, saldoFinal, y) => {
+  const H = 70;
+  rectFillStroke(doc, MARGIN, y, COL_WIDTH, H, C.grisFondo, C.grisBorde, 8);
+
+  const avSize = 38;
+  const avX = MARGIN + 14;
+  const avY = y + (H - avSize) / 2;
+  const avBg   = saldoFinal > 0 ? C.rojoFondo   : C.verdeFondo;
+  const avText = saldoFinal > 0 ? C.rojo         : C.verde;
+  rectFill(doc, avX, avY, avSize, avSize, avBg, 10);
+  doc.font(FONT.bold).fontSize(13).fillColor(avText)
+    .text((persona.nombre || '?').slice(0, 2).toUpperCase(), avX, avY + 11, { width: avSize, align: 'center' });
+
+  const dataX = avX + avSize + 12;
+  doc.font(FONT.bold).fontSize(11).fillColor(C.negro)
+    .text(persona.nombre || '', dataX, y + 12, { width: 220 });
+  doc.font(FONT.normal).fontSize(8).fillColor(C.gris)
+    .text(tipo === 'prestatario' ? 'Prestatario' : 'Cliente', dataX, y + 27);
+  if (persona.cedula || persona.celular) {
+    const datos = [persona.cedula && `CC: ${persona.cedula}`, persona.celular && `Tel: ${persona.celular}`]
+      .filter(Boolean).join('  ·  ');
+    doc.font(FONT.normal).fontSize(8).fillColor(C.gris).text(datos, dataX, y + 38);
+  }
+
+  // Saldo
+  const saldoX = PAGE_WIDTH - MARGIN - 14;
+  doc.font(FONT.normal).fontSize(7.5).fillColor(C.grisClaro)
+    .text('Saldo deuda', saldoX - 90, y + 18, { width: 90, align: 'right' });
+  doc.font(FONT.bold).fontSize(12).fillColor(saldoFinal > 0 ? C.rojo : C.verde)
+    .text(formatCOP(saldoFinal), saldoX - 90, y + 30, { width: 90, align: 'right' });
+
+  return y + H + 12;
+};
+
+const _ecTabla = (doc, movimientos, startY) => {
+  // Fecha(62) + Justificación(199) + −(76) + +(76) + Saldo(86) = 499 = COL_WIDTH
+  const cols = [
+    { label: 'Fecha',         x: MARGIN,       w: 62,  align: 'left'  },
+    { label: 'Justificación', x: MARGIN + 62,  w: 199, align: 'left'  },
+    { label: '−',             x: MARGIN + 261, w: 76,  align: 'right' },
+    { label: '+',             x: MARGIN + 337, w: 76,  align: 'right' },
+    { label: 'Saldo',         x: MARGIN + 413, w: 86,  align: 'right' },
+  ];
+
+  const ROW_H      = 24;
+  const HEAD_H     = 26;
+  const PAGE_BOTTOM = PAGE_H - 60;
+  let y = startY;
+
+  const dibujarCabecera = (yy) => {
+    rectFill(doc, MARGIN, yy, COL_WIDTH, HEAD_H, C.negro, 6);
+    cols.forEach((col) => {
+      const color = col.label === '−' ? C.verde : col.label === '+' ? C.naranja : C.blanco;
+      doc.font(FONT.bold).fontSize(8).fillColor(color)
+        .text(col.label, col.x + 4, yy + 9, { width: col.w - 8, align: col.align });
+    });
+    return yy + HEAD_H;
+  };
+
+  y = dibujarCabecera(y);
+
+  movimientos.forEach((mov, i) => {
+    if (y + ROW_H > PAGE_BOTTOM) {
+      doc.addPage();
+      y = MARGIN;
+      y = dibujarCabecera(y);
+    }
+
+    const rowBg  = i % 2 === 0 ? C.blanco : C.grisFondo;
+    rectFill(doc, MARGIN, y, COL_WIDTH, ROW_H, rowBg, 0);
+
+    const esCargo    = !!mov.cargo;
+    const tipoCfg    = TIPO_LABEL[mov.tipo] || TIPO_LABEL.abono;
+    const badgeW = 52; const badgeH = 13;
+
+    // Fecha
+    doc.font(FONT.normal).fontSize(7.5).fillColor(C.grisClaro)
+      .text(formatFecha(mov.fecha), cols[0].x + 4, y + 8, { width: cols[0].w - 8, align: 'left' });
+
+    // Badge + concepto
+    rectFill(doc, cols[1].x + 4, y + (ROW_H - badgeH) / 2, badgeW, badgeH, tipoCfg.bg, 6);
+    doc.font(FONT.bold).fontSize(6.5).fillColor(tipoCfg.text)
+      .text(tipoCfg.label, cols[1].x + 4, y + (ROW_H - badgeH) / 2 + 3.5, { width: badgeW, align: 'center' });
+    doc.font(FONT.normal).fontSize(8).fillColor(C.negro)
+      .text(mov.concepto || '', cols[1].x + badgeW + 8, y + 8,
+        { width: cols[1].w - badgeW - 12, align: 'left', ellipsis: true, height: ROW_H - 10 });
+
+    // − abonos (reducen deuda)
+    if (!esCargo) {
+      doc.font(FONT.normal).fontSize(8).fillColor(C.verde)
+        .text(formatCOP(mov.abono), cols[2].x + 4, y + 8, { width: cols[2].w - 8, align: 'right' });
+    } else {
+      doc.font(FONT.normal).fontSize(8).fillColor(C.grisBorde)
+        .text('—', cols[2].x + 4, y + 8, { width: cols[2].w - 8, align: 'right' });
+    }
+
+    // + cargos (aumentan deuda)
+    if (esCargo) {
+      doc.font(FONT.normal).fontSize(8).fillColor(C.naranja)
+        .text(formatCOP(mov.cargo), cols[3].x + 4, y + 8, { width: cols[3].w - 8, align: 'right' });
+    } else {
+      doc.font(FONT.normal).fontSize(8).fillColor(C.grisBorde)
+        .text('—', cols[3].x + 4, y + 8, { width: cols[3].w - 8, align: 'right' });
+    }
+
+    // Saldo
+    if (mov.saldo != null) {
+      const sColor = mov.saldo > 0 ? C.rojo : C.verde;
+      doc.font(FONT.bold).fontSize(8).fillColor(sColor)
+        .text(formatCOP(mov.saldo), cols[4].x + 4, y + 8, { width: cols[4].w - 8, align: 'right' });
+    } else {
+      doc.font(FONT.normal).fontSize(8).fillColor(C.grisClaro)
+        .text('—', cols[4].x + 4, y + 8, { width: cols[4].w - 8, align: 'right' });
+    }
+
+    hLine(doc, y + ROW_H, { x1: MARGIN, x2: PAGE_WIDTH - MARGIN, color: C.grisBorde });
+    y += ROW_H;
+  });
+
+  doc.roundedRect(MARGIN, startY, COL_WIDTH, y - startY, 6).strokeColor(C.grisBorde).lineWidth(0.5).stroke();
+  return y;
+};
+
+const _ecResumen = (doc, movimientos, saldoFinal, y) => {
+  const totalCargos = movimientos.filter((m) => m.cargo).reduce((s, m) => s + Number(m.cargo), 0);
+  const totalAbonos = movimientos.filter((m) => m.abono).reduce((s, m) => s + Number(m.abono), 0);
+  const nCargos     = movimientos.filter((m) => m.cargo).length;
+  const nAbonos     = movimientos.filter((m) => m.abono).length;
+
+  y += 14;
+  const H = 64;
+  rectFillStroke(doc, MARGIN, y, COL_WIDTH, H, C.grisFondo, C.grisBorde, 8);
+
+  doc.font(FONT.bold).fontSize(9).fillColor(C.negro)
+    .text('Resumen', MARGIN + 14, y + 10);
+
+  const statW = (COL_WIDTH - 28) / 4;
+  const stats = [
+    { label: 'Movimientos',        value: String(movimientos.length), color: C.negro   },
+    { label: `Cargos (${nCargos})`, value: formatCOP(totalCargos),   color: C.naranja  },
+    { label: `Abonos (${nAbonos})`, value: formatCOP(totalAbonos),   color: C.verde    },
+    { label: 'Saldo final',        value: formatCOP(saldoFinal),     color: saldoFinal > 0 ? C.rojo : C.verde },
+  ];
+
+  stats.forEach((s, i) => {
+    const sx = MARGIN + 14 + i * statW;
+    doc.font(FONT.normal).fontSize(7.5).fillColor(C.grisClaro)
+      .text(s.label, sx, y + 28, { width: statW - 4 });
+    doc.font(FONT.bold).fontSize(9.5).fillColor(s.color)
+      .text(s.value, sx, y + 40, { width: statW - 4 });
+  });
+
+  return y + H;
+};
+
+const generarPdfEstadoCuenta = async ({ tipo, personaId, negocioId, negocioNombre, logoNegocio }) => {
+  // Datos de persona
+  const tabla = tipo === 'prestatario' ? 'prestatarios' : 'clientes';
+  const { rows: personaRows } = await pool.query(
+    `SELECT nombre, cedula, celular, telefono FROM ${tabla} WHERE id = $1`,
+    [personaId]
+  );
+  const persona = personaRows[0];
+  if (!persona) {
+    const err = new Error('Persona no encontrada');
+    err.status = 404;
+    throw err;
+  }
+
+  // Config del negocio
+  const { rows: configRows } = await pool.query(
+    `SELECT clave, valor FROM config_negocio WHERE negocio_id = $1`,
+    [negocioId]
+  );
+  const config = {};
+  for (const row of configRows) config[row.clave] = row.valor;
+
+  // Movimientos con saldo acumulado (misma lógica que el servicio)
+  const movRows = await repo.getEstadoCuenta(pool, negocioId, tipo, personaId);
+  let saldoAcum = 0;
+  const movimientos = movRows.map((row) => {
+    const cargo = Number(row.cargo || 0);
+    const abono = Number(row.abono || 0);
+    if (row.tipo !== 'compra_directa') saldoAcum = saldoAcum + cargo - abono;
+    return {
+      fecha:    row.fecha,
+      tipo:     row.tipo,
+      concepto: row.concepto,
+      cargo:    cargo || null,
+      abono:    abono || null,
+      saldo:    row.tipo === 'compra_directa' ? null : saldoAcum,
+    };
+  });
+
+  const saldoFinal = saldoAcum;
+
+  const doc = new PDFDocument({ size: 'A4', margin: 0, bufferPages: true,
+    info: { Title: `Estado de cuenta — ${persona.nombre}`, Author: negocioNombre || 'Mi Negocio' },
+  });
+
+  let y = _ecEncabezado(doc, config, persona, logoNegocio);
+  y += 16;
+  y  = _ecInfoPersona(doc, persona, tipo, saldoFinal, y);
+
+  if (movimientos.length === 0) {
+    doc.font(FONT.normal).fontSize(10).fillColor(C.grisClaro)
+      .text('Sin movimientos registrados.', MARGIN, y + 20, { width: COL_WIDTH, align: 'center' });
+  } else {
+    y += 4;
+    doc.font(FONT.bold).fontSize(9).fillColor(C.negro).text('Movimientos', MARGIN, y);
+    y += 14;
+    y  = _ecTabla(doc, movimientos, y);
+    y  = _ecResumen(doc, movimientos, saldoFinal, y);
+  }
+
+  // Pie de página
+  const totalPages = doc.bufferedPageRange().count;
+  for (let i = 0; i < totalPages; i++) {
+    doc.switchToPage(i);
+    hLine(doc, PAGE_H - 44, { color: C.grisBorde });
+    doc.font(FONT.normal).fontSize(7.5).fillColor(C.grisClaro)
+      .text(`Página ${i + 1} de ${totalPages}`, MARGIN, PAGE_H - 38, { width: COL_WIDTH, align: 'right' });
+  }
+
+  doc.end();
+  return doc;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+module.exports = { generarPdfPrestamosActivos, generarPdfPrestamoIndividual, generarPdfEstadoCuenta };

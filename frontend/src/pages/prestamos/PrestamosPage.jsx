@@ -1605,7 +1605,7 @@ function VistaDetallePersona({ nombre, tipo, personaId, prestamos, saldoAFavor =
 
       {/* ── Tab: Estado de cuenta ── */}
       {tabDetalle === 'cuenta' && (
-        <EstadoDeCuenta tipo={tipo} personaId={personaId} />
+        <EstadoDeCuenta tipo={tipo} personaId={personaId} personaNombre={nombre} />
       )}
 
       {/* ── Tab: Préstamos ── */}

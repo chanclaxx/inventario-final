@@ -164,6 +164,34 @@ const exportarPdfPorPersona = async (req, res, next) => {
   }
 };
 
+const exportarPdfEstadoCuenta = async (req, res, next) => {
+  try {
+    const { tipo, personaId } = req.params;
+    if (!['prestatario', 'cliente'].includes(tipo)) {
+      return res.status(400).json({ ok: false, error: "tipo debe ser 'prestatario' o 'cliente'" });
+    }
+    const id = parseInt(personaId, 10);
+    if (isNaN(id) || id < 1) {
+      return res.status(400).json({ ok: false, error: 'ID de persona inválido' });
+    }
+    const negocioNombre = req.user?.negocio_nombre || '';
+    const logoNegocio   = await _getLogoNegocio(req.user.negocio_id);
+    const pdfStream = await pdfService.generarPdfEstadoCuenta({
+      tipo,
+      personaId:    id,
+      negocioId:    req.user.negocio_id,
+      negocioNombre,
+      logoNegocio,
+    });
+    const filename = `estado-cuenta-${tipo}-${id}-${Date.now()}.pdf`;
+    res.setHeader('Content-Type',        'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    pdfStream.pipe(res);
+  } catch (err) {
+    next(err);
+  }
+};
+
 const registrarSaldoAFavor = async (req, res, next) => {
   try {
     const { tipo, id } = req.params;
@@ -395,7 +423,7 @@ module.exports = {
   crearPrestamo, crearPrestamos,
   registrarAbono,
   devolverPrestamo, devolverParcial,
-  exportarPdfPorPersona, exportarPdfPrestamoIndividual,
+  exportarPdfPorPersona, exportarPdfPrestamoIndividual, exportarPdfEstadoCuenta,
   registrarSaldoAFavor,
   intercambiarPrestamo,
   retomaDirecta, aplicarSaldoAPrestamos, aplicarSaldoAPrestamo, getResumenCartera,

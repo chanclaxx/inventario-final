@@ -4,8 +4,9 @@ import { getEstadoCuenta } from '../../api/prestamos.api';
 import { anularAbono as anularAbonoApi, anularRetomaDirecta as anularRetomaDirectaApi } from '../../api/prestamos.api';
 import { formatCOP } from '../../utils/formatters';
 import { Spinner }   from '../../components/ui/Spinner';
-import { XCircle, TrendingDown, TrendingUp, ArrowLeftRight, Wallet, ChevronLeft, ChevronRight, ArrowUpDown, Pencil, MessageSquare, Table2 } from 'lucide-react';
-import { ModalEditarValorPrestamo } from './ModalEditarValorPrestamo';
+import { XCircle, TrendingDown, TrendingUp, ArrowLeftRight, Wallet, ChevronLeft, ChevronRight, ArrowUpDown, Pencil, MessageSquare, Table2, FileDown } from 'lucide-react';
+import { ModalEditarValorPrestamo }      from './ModalEditarValorPrestamo';
+import { ModalExportarPdfPrestamos }     from './ModalExportarPdfPrestamos';
 
 const PAGE_SIZE_MOVS = 20;
 
@@ -195,7 +196,7 @@ function FilaTabla({ mov, onAnular, onEditar, isOdd }) {
 
 // ─── EstadoDeCuenta ───────────────────────────────────────────────────────────
 
-export function EstadoDeCuenta({ tipo, personaId }) {
+export function EstadoDeCuenta({ tipo, personaId, personaNombre }) {
   const queryClient = useQueryClient();
   const [confirmando, setConfirmando] = useState(null);
   const [editando,    setEditando]    = useState(null);
@@ -205,6 +206,7 @@ export function EstadoDeCuenta({ tipo, personaId }) {
   const [paginaMov,  setPaginaMov]    = useState(1);
   const [filtroTipo, setFiltroTipo]   = useState('todos');
   const [vista,      setVista]        = useState('tabla'); // 'tabla' | 'chat'
+  const [modalPdf,   setModalPdf]     = useState(false);
 
   const tipoApi = tipo === 'companero' ? 'prestatario' : tipo;
 
@@ -339,6 +341,14 @@ export function EstadoDeCuenta({ tipo, personaId }) {
             <Table2 size={12} />
           </button>
         </div>
+        {/* Exportar PDF */}
+        <button
+          onClick={() => setModalPdf(true)}
+          title="Exportar PDF"
+          className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium
+            bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors">
+          <FileDown size={12} /> PDF
+        </button>
         <span className="text-xs text-gray-400">{filtrados.length} mov.</span>
       </div>
 
@@ -444,6 +454,16 @@ export function EstadoDeCuenta({ tipo, personaId }) {
             {formatCOP(saldoFinal)}
           </span>
         </div>
+      )}
+
+      {/* Modal exportar PDF */}
+      {modalPdf && (
+        <ModalExportarPdfPrestamos
+          tipo={tipo}
+          personaId={personaId}
+          personaNombre={personaNombre}
+          onClose={() => setModalPdf(false)}
+        />
       )}
 
       {/* Modal editar valor del préstamo */}

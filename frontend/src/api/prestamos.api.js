@@ -38,3 +38,8 @@ export const getSaldoSucursal = (tipo, id) =>
   api.get(`/prestamos/personas/${tipo}/${id}/saldo-sucursal`);
 export const getHistorialSaldoSucursal = (tipo, id) =>
   api.get(`/prestamos/personas/${tipo}/${id}/historial-saldo`);
+
+export const descargarPdfPrestamosActivos = (tipo, id) =>
+  api.get(`/prestamos/pdf/${tipo}/${id}`, { responseType: 'blob' });
+export const descargarPdfEstadoCuenta = (tipo, id) =>
+  api.get(`/prestamos/pdf/${tipo}/${id}/estado-cuenta`, { responseType: 'blob' });
