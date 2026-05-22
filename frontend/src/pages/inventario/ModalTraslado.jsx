@@ -11,7 +11,7 @@ import useSucursalStore  from '../../store/sucursalStore';
 import { useAuth }       from '../../context/useAuth';
 import {
   ArrowRightLeft, ChevronRight, CheckCircle, AlertTriangle,
-  Package, ShoppingBag, Search,
+  Package, ShoppingBag, Search, X,
 } from 'lucide-react';
 
 // ─── Utilidades de normalización (espejo del backend) ─────────────────────────
@@ -176,7 +176,7 @@ function SelectorDestino({ equivalencia, seleccionId, onSeleccionar, sucursalDes
 }
 
 // ─── Card de item a trasladar ─────────────────────────────────────────────────
-function ItemTraslado({ item, equivalencia, seleccionId, onSeleccionar, sucursalDestinoId }) {
+function ItemTraslado({ item, equivalencia, seleccionId, onSeleccionar, sucursalDestinoId, onEliminar }) {
   const [expandido, setExpandido] = useState(!equivalencia?.auto_seleccionado);
 
   const TipoIcon = item.tipo === 'serial' ? Package : ShoppingBag;
@@ -191,28 +191,37 @@ function ItemTraslado({ item, equivalencia, seleccionId, onSeleccionar, sucursal
         : 'border-amber-200 bg-amber-50/20'}`}>
 
       {/* Header del item */}
-      <button onClick={() => setExpandido(!expandido)}
-        className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-white/50 transition-colors">
-        <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0
-          ${item.tipo === 'serial' ? 'bg-blue-100' : 'bg-green-100'}`}>
-          <TipoIcon size={14} className={item.tipo === 'serial' ? 'text-blue-600' : 'text-green-600'} />
-        </div>
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-gray-900 truncate">{item.nombre}</p>
-          <div className="flex items-center gap-2 flex-wrap">
-            {item.imei && <span className="text-xs text-gray-400 font-mono">{item.imei}</span>}
-            {item.tipo === 'cantidad' && <span className="text-xs text-gray-400">×{item.cantidad || 1}</span>}
+      <div className="flex items-center">
+        <button onClick={() => setExpandido(!expandido)}
+          className="flex-1 flex items-center gap-3 px-4 py-3 text-left hover:bg-white/50 transition-colors min-w-0">
+          <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0
+            ${item.tipo === 'serial' ? 'bg-blue-100' : 'bg-green-100'}`}>
+            <TipoIcon size={14} className={item.tipo === 'serial' ? 'text-blue-600' : 'text-green-600'} />
           </div>
-        </div>
-        <div className="flex items-center gap-2 flex-shrink-0">
-          {equivalencia && <BadgeNivel nivel={equivalencia.nivel} />}
-          {seleccionId
-            ? <CheckCircle size={16} className="text-green-500" />
-            : sinOpciones
-            ? <AlertTriangle size={16} className="text-red-400" />
-            : <ChevronRight size={14} className={`text-gray-400 transition-transform ${expandido ? 'rotate-90' : ''}`} />}
-        </div>
-      </button>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-gray-900 truncate">{item.nombre}</p>
+            <div className="flex items-center gap-2 flex-wrap">
+              {item.imei && <span className="text-xs text-gray-400 font-mono">{item.imei}</span>}
+              {item.tipo === 'cantidad' && <span className="text-xs text-gray-400">×{item.cantidad || 1}</span>}
+            </div>
+          </div>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {equivalencia && <BadgeNivel nivel={equivalencia.nivel} />}
+            {seleccionId
+              ? <CheckCircle size={16} className="text-green-500" />
+              : sinOpciones
+              ? <AlertTriangle size={16} className="text-red-400" />
+              : <ChevronRight size={14} className={`text-gray-400 transition-transform ${expandido ? 'rotate-90' : ''}`} />}
+          </div>
+        </button>
+        <button
+          onClick={() => onEliminar(item.key)}
+          title="Quitar del traslado"
+          className="px-3 py-3 text-gray-300 hover:text-red-500 transition-colors flex-shrink-0"
+        >
+          <X size={14} />
+        </button>
+      </div>
 
       {/* Selector expandido */}
       {expandido && equivalencia && (
@@ -261,7 +270,7 @@ function PasoSucursal({ sucursales, sucursalOrigenId, sucursalDestinoId, onSelec
 }
 
 // ─── Paso 2: Mapear productos ─────────────────────────────────────────────────
-function PasoMapeo({ items, equivalencias, selecciones, onSeleccionar, sucursalDestinoId }) {
+function PasoMapeo({ items, equivalencias, selecciones, onSeleccionar, sucursalDestinoId, onEliminar }) {
   const totalItems  = items.length;
   const mapeados    = Object.values(selecciones).filter(Boolean).length;
   const sinOpciones = equivalencias.filter((e) => (e.sugerencias || []).length === 0).length;
@@ -297,6 +306,7 @@ function PasoMapeo({ items, equivalencias, selecciones, onSeleccionar, sucursalD
               seleccionId={selecciones[item.key] || null}
               onSeleccionar={(id) => onSeleccionar(item.key, id)}
               sucursalDestinoId={sucursalDestinoId}
+              onEliminar={onEliminar}
             />
           );
         })}
@@ -308,7 +318,7 @@ function PasoMapeo({ items, equivalencias, selecciones, onSeleccionar, sucursalD
 // ─── Modal principal ──────────────────────────────────────────────────────────
 export function ModalTraslado({ open, onClose }) {
   const queryClient = useQueryClient();
-  const { items, limpiarCarrito } = useCarritoStore();
+  const { items, limpiarCarrito, eliminarItem } = useCarritoStore();
   const { usuario } = useAuth();
   const sucursalStore = useSucursalStore((s) => s.sucursalActiva);
 
@@ -395,6 +405,17 @@ export function ModalTraslado({ open, onClose }) {
     },
     onError: (err) => setError(err.response?.data?.error || 'Error al ejecutar traslado'),
   });
+
+  const handleEliminarItem = (key) => {
+    const restantes = items.filter((i) => i.key !== key);
+    eliminarItem(key);
+    setSelecciones((prev) => { const next = { ...prev }; delete next[key]; return next; });
+    if (restantes.length === 0) {
+      setPaso(1);
+      setSucursalDestinoId(null);
+      setEquivalencias([]);
+    }
+  };
 
   const handleSeleccionarSucursal = (id) => {
     setSucursalDestinoId(id);
@@ -493,6 +514,7 @@ export function ModalTraslado({ open, onClose }) {
               selecciones={selecciones}
               onSeleccionar={handleSeleccionarDestino}
               sucursalDestinoId={sucursalDestinoId}
+              onEliminar={handleEliminarItem}
             />
 
             <div className="flex flex-col gap-2">

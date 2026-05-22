@@ -13,7 +13,7 @@ import useSucursalStore   from '../../store/sucursalStore';
 import { useAuth }        from '../../context/useAuth';
 import {
   ArrowRightLeft, ChevronLeft, ChevronRight,
-  CheckCircle, AlertTriangle, Package, ShoppingBag, Search, Plus, Minus,
+  CheckCircle, AlertTriangle, Package, ShoppingBag, Search, Plus, Minus, X,
 } from 'lucide-react';
 
 // ─── Normalización ────────────────────────────────────────────────────────────
@@ -177,7 +177,7 @@ function SelectorMiProducto({ equivalencia, seleccionId, onSeleccionar, miSucurs
 
 // ─── Card de item a mapear (paso 3) ──────────────────────────────────────────
 
-function ItemMapeo({ item, equivalencia, seleccionId, onSeleccionar, miSucursalId }) {
+function ItemMapeo({ item, equivalencia, seleccionId, onSeleccionar, miSucursalId, onEliminar }) {
   const [expandido, setExpandido] = useState(!equivalencia?.auto_seleccionado);
   const TipoIcon    = item.tipo === 'serial' ? Package : ShoppingBag;
   const sinOpciones = !equivalencia || (equivalencia.sugerencias || []).length === 0;
@@ -190,30 +190,39 @@ function ItemMapeo({ item, equivalencia, seleccionId, onSeleccionar, miSucursalI
         ? 'border-green-200 bg-green-50/20'
         : 'border-amber-200 bg-amber-50/20'}`}>
 
-      <button
-        onClick={() => setExpandido(!expandido)}
-        className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-white/50 transition-colors"
-      >
-        <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0
-          ${item.tipo === 'serial' ? 'bg-blue-100' : 'bg-green-100'}`}>
-          <TipoIcon size={14} className={item.tipo === 'serial' ? 'text-blue-600' : 'text-green-600'} />
-        </div>
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-gray-900 truncate">{item.nombre}</p>
-          <div className="flex items-center gap-2 flex-wrap">
-            {item.imei && <span className="text-xs text-gray-400 font-mono">{item.imei}</span>}
-            {item.tipo === 'cantidad' && <span className="text-xs text-gray-400">×{item.cantidad || 1}</span>}
+      <div className="flex items-center">
+        <button
+          onClick={() => setExpandido(!expandido)}
+          className="flex-1 flex items-center gap-3 px-4 py-3 text-left hover:bg-white/50 transition-colors min-w-0"
+        >
+          <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0
+            ${item.tipo === 'serial' ? 'bg-blue-100' : 'bg-green-100'}`}>
+            <TipoIcon size={14} className={item.tipo === 'serial' ? 'text-blue-600' : 'text-green-600'} />
           </div>
-        </div>
-        <div className="flex items-center gap-2 flex-shrink-0">
-          {equivalencia && <BadgeNivel nivel={equivalencia.nivel} />}
-          {seleccionId
-            ? <CheckCircle size={16} className="text-green-500" />
-            : sinOpciones
-            ? <AlertTriangle size={16} className="text-red-400" />
-            : <ChevronRight size={14} className={`text-gray-400 transition-transform ${expandido ? 'rotate-90' : ''}`} />}
-        </div>
-      </button>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-gray-900 truncate">{item.nombre}</p>
+            <div className="flex items-center gap-2 flex-wrap">
+              {item.imei && <span className="text-xs text-gray-400 font-mono">{item.imei}</span>}
+              {item.tipo === 'cantidad' && <span className="text-xs text-gray-400">×{item.cantidad || 1}</span>}
+            </div>
+          </div>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {equivalencia && <BadgeNivel nivel={equivalencia.nivel} />}
+            {seleccionId
+              ? <CheckCircle size={16} className="text-green-500" />
+              : sinOpciones
+              ? <AlertTriangle size={16} className="text-red-400" />
+              : <ChevronRight size={14} className={`text-gray-400 transition-transform ${expandido ? 'rotate-90' : ''}`} />}
+          </div>
+        </button>
+        <button
+          onClick={() => onEliminar(item.key)}
+          title="Quitar de este traslado"
+          className="px-3 py-3 text-gray-300 hover:text-red-500 transition-colors flex-shrink-0"
+        >
+          <X size={14} />
+        </button>
+      </div>
 
       {expandido && equivalencia && (
         <div className="px-4 pb-3 border-t border-gray-100">
@@ -595,7 +604,7 @@ function PasoSeleccionProductos({ sucursalOrigenId, itemsSeleccionados, onAbrirS
 
 // ─── Paso 3: Mapear a mis productos ──────────────────────────────────────────
 
-function PasoMapeoDestino({ itemsSeleccionados, equivalencias, selecciones, onSeleccionar, miSucursalId }) {
+function PasoMapeoDestino({ itemsSeleccionados, equivalencias, selecciones, onSeleccionar, miSucursalId, onEliminarItem }) {
   const totalItems  = itemsSeleccionados.length;
   const mapeados    = Object.values(selecciones).filter(Boolean).length;
   const sinOpciones = equivalencias.filter((e) => (e.sugerencias || []).length === 0).length;
@@ -631,6 +640,7 @@ function PasoMapeoDestino({ itemsSeleccionados, equivalencias, selecciones, onSe
               seleccionId={selecciones[item.key] || null}
               onSeleccionar={(id) => onSeleccionar(item.key, id)}
               miSucursalId={miSucursalId}
+              onEliminar={onEliminarItem}
             />
           );
         })}
@@ -794,6 +804,16 @@ export function ModalJalarTraslado({ open, onClose }) {
     }
   };
 
+  const handleEliminarItemJalar = (key) => {
+    const restantes = itemsSeleccionados.filter((i) => i.key !== key);
+    setItemsSeleccionados(restantes);
+    setSelecciones((prev) => { const next = { ...prev }; delete next[key]; return next; });
+    if (restantes.length === 0) {
+      setPaso(2);
+      setEquivalencias([]);
+    }
+  };
+
   const handleContinuarSeleccion = () => {
     if (itemsSeleccionados.length === 0) {
       return setError('Selecciona al menos un producto para traer');
@@ -944,6 +964,7 @@ export function ModalJalarTraslado({ open, onClose }) {
               selecciones={selecciones}
               onSeleccionar={(key, id) => setSelecciones((prev) => ({ ...prev, [key]: id }))}
               miSucursalId={miSucursalId}
+              onEliminarItem={handleEliminarItemJalar}
             />
 
             <input
