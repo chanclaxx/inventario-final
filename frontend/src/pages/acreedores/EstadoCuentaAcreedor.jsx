@@ -9,6 +9,7 @@ import { Badge }   from '../../components/ui/Badge';
 import {
   XCircle, TrendingDown, TrendingUp, Wallet,
   ChevronLeft, ChevronRight, ArrowUpDown, ShoppingBag,
+  MessageSquare, Table2,
 } from 'lucide-react';
 
 const PAGE_SIZE = 20;
@@ -143,6 +144,60 @@ function ModalCompraDetalle({ compraId, onClose }) {
   );
 }
 
+// ─── Fila de cuadrícula contable ─────────────────────────────────────────────
+
+function FilaTablaAcreedor({ mov, onAnular, onVerCompra, isOdd, esAdmin }) {
+  const tipoKey  = resolverTipo(mov);
+  const cfg      = TIPO_CONFIG[tipoKey];
+  const saldo    = Number(mov.saldo_despues);
+  const esCompra = tipoKey === 'cargo_compra' && !!mov.compra_id;
+  const esCargo  = mov.tipo === 'Cargo';
+
+  return (
+    <tr
+      onClick={esCompra ? () => onVerCompra(mov.compra_id) : undefined}
+      className={`${isOdd ? 'bg-gray-50/60' : 'bg-white'} ${esCompra ? 'cursor-pointer hover:bg-purple-50/40 transition-colors' : ''}`}>
+      <td className="px-3 py-2 text-xs text-gray-400 whitespace-nowrap align-middle">
+        {formatFecha(mov.fecha)}
+      </td>
+      <td className="px-3 py-2 align-middle">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full whitespace-nowrap ${cfg.badge}`}>
+            {cfg.label}
+          </span>
+          <span className="text-xs text-gray-700 leading-tight">
+            {mov.descripcion || (esCargo ? 'Cargo' : 'Abono')}
+          </span>
+          {esCompra && (
+            <span className="text-[10px] text-purple-400">#{String(mov.compra_id).padStart(5, '0')}</span>
+          )}
+        </div>
+      </td>
+      <td className="px-3 py-2 text-right text-xs font-semibold text-green-600 whitespace-nowrap align-middle">
+        {!esCargo ? formatCOP(mov.valor) : <span className="text-gray-200">—</span>}
+      </td>
+      <td className="px-3 py-2 text-right text-xs font-semibold text-amber-700 whitespace-nowrap align-middle">
+        {esCargo ? formatCOP(mov.valor) : <span className="text-gray-200">—</span>}
+      </td>
+      <td className={`px-3 py-2 text-right text-xs font-bold whitespace-nowrap align-middle ${
+        saldo > 0 ? 'text-red-500' : 'text-green-600'
+      }`}>
+        {formatCOP(saldo)}
+      </td>
+      <td className="px-2 py-2 align-middle">
+        {esAdmin && mov.tipo === 'Abono' && onAnular && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onAnular(mov); }}
+            title="Eliminar abono"
+            className="text-gray-300 hover:text-red-400 transition-colors">
+            <XCircle size={12} />
+          </button>
+        )}
+      </td>
+    </tr>
+  );
+}
+
 // ─── Burbuja de chat ──────────────────────────────────────────────────────────
 
 function BurbujaMensaje({ mov, onAnular, onVerCompra }) {
@@ -223,6 +278,7 @@ export function EstadoCuentaAcreedor({ acreedorId, esAdmin }) {
   const [sortDir,       setSortDir]       = useState('desc');
   const [pagina,        setPagina]        = useState(1);
   const [filtroTipo,    setFiltroTipo]    = useState('todos');
+  const [vista,         setVista]         = useState('tabla'); // 'tabla' | 'chat'
 
   const { data: movimientos = [], isLoading, isError, error } = useQuery({
     queryKey:  ['historial-acreedor', acreedorId],
@@ -323,6 +379,23 @@ export function EstadoCuentaAcreedor({ acreedorId, esAdmin }) {
           <ArrowUpDown size={12} />
           {sortDir === 'asc' ? 'Más antiguo' : 'Más reciente'}
         </button>
+        {/* Toggle de vista */}
+        <div className="flex rounded-lg border border-gray-200 overflow-hidden">
+          <button
+            onClick={() => setVista('tabla')}
+            title="Vista cuadrícula"
+            className={`flex items-center px-2 py-1 text-xs transition-colors
+              ${vista === 'tabla' ? 'bg-gray-800 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}>
+            <Table2 size={12} />
+          </button>
+          <button
+            onClick={() => setVista('chat')}
+            title="Vista conversación"
+            className={`flex items-center px-2 py-1 text-xs transition-colors
+              ${vista === 'chat' ? 'bg-gray-800 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}>
+            <MessageSquare size={12} />
+          </button>
+        </div>
         <span className="text-xs text-gray-400">{filtrados.length} mov.</span>
       </div>
 
@@ -344,31 +417,63 @@ export function EstadoCuentaAcreedor({ acreedorId, esAdmin }) {
         ))}
       </div>
 
-      {/* Leyenda lados */}
-      <div className="flex items-center justify-between px-1">
-        <span className="text-[11px] text-gray-400 font-medium">← Acreedor (compras)</span>
-        <span className="text-[11px] text-gray-400 font-medium">Nosotros (pagos) →</span>
-      </div>
+      {/* Vista cuadrícula */}
+      {vista === 'tabla' && (
+        <div className="overflow-x-auto rounded-2xl border border-gray-100 shadow-sm">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="bg-gray-50 border-b border-gray-100">
+                <th className="px-3 py-2.5 text-xs font-semibold text-gray-500 whitespace-nowrap">Fecha</th>
+                <th className="px-3 py-2.5 text-xs font-semibold text-gray-500">Justificación</th>
+                <th className="px-3 py-2.5 text-xs font-semibold text-green-600 text-right whitespace-nowrap">−</th>
+                <th className="px-3 py-2.5 text-xs font-semibold text-amber-600 text-right whitespace-nowrap">+</th>
+                <th className="px-3 py-2.5 text-xs font-semibold text-gray-500 text-right whitespace-nowrap">Saldo</th>
+                <th className="px-2 py-2.5 w-10" />
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-50">
+              {pagItems.map((mov, idx) => (
+                <FilaTablaAcreedor
+                  key={`${mov.tipo}-${mov.id}-${idx}`}
+                  mov={mov}
+                  onAnular={esAdmin ? (m) => setConfirmando(m) : null}
+                  onVerCompra={(id) => setCompraModal(id)}
+                  isOdd={idx % 2 !== 0}
+                  esAdmin={esAdmin}
+                />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
-      {/* Ventana de chat */}
-      <div
-        className="flex flex-col gap-2 py-3 rounded-2xl overflow-y-auto"
-        style={{ background: 'linear-gradient(160deg, #f0f4f8 0%, #eef2f7 100%)', minHeight: 180 }}>
-        {pagItems.map((mov, idx) => {
-          const prev         = idx > 0 ? pagItems[idx - 1] : null;
-          const showSepFecha = !prev || !mismoDia(mov.fecha, prev?.fecha);
-          return (
-            <Fragment key={`${mov.tipo}-${mov.id}-${idx}`}>
-              {showSepFecha && <SeparadorFecha fecha={mov.fecha} />}
-              <BurbujaMensaje
-                mov={mov}
-                onAnular={esAdmin ? (m) => setConfirmando(m) : null}
-                onVerCompra={(id) => setCompraModal(id)}
-              />
-            </Fragment>
-          );
-        })}
-      </div>
+      {/* Vista chat */}
+      {vista === 'chat' && (
+        <>
+          <div className="flex items-center justify-between px-1">
+            <span className="text-[11px] text-gray-400 font-medium">← Acreedor (compras)</span>
+            <span className="text-[11px] text-gray-400 font-medium">Nosotros (pagos) →</span>
+          </div>
+          <div
+            className="flex flex-col gap-2 py-3 rounded-2xl overflow-y-auto"
+            style={{ background: 'linear-gradient(160deg, #f0f4f8 0%, #eef2f7 100%)', minHeight: 180 }}>
+            {pagItems.map((mov, idx) => {
+              const prev         = idx > 0 ? pagItems[idx - 1] : null;
+              const showSepFecha = !prev || !mismoDia(mov.fecha, prev?.fecha);
+              return (
+                <Fragment key={`${mov.tipo}-${mov.id}-${idx}`}>
+                  {showSepFecha && <SeparadorFecha fecha={mov.fecha} />}
+                  <BurbujaMensaje
+                    mov={mov}
+                    onAnular={esAdmin ? (m) => setConfirmando(m) : null}
+                    onVerCompra={(id) => setCompraModal(id)}
+                  />
+                </Fragment>
+              );
+            })}
+          </div>
+        </>
+      )}
 
       {/* Paginación */}
       {totalPag > 1 && (

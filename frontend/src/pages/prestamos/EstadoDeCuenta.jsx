@@ -162,11 +162,11 @@ function FilaTabla({ mov, onAnular, onEditar, isOdd }) {
           <span className="text-xs text-gray-700 leading-tight">{mov.concepto}</span>
         </div>
       </td>
-      <td className="px-3 py-2 text-right text-xs font-semibold text-amber-700 whitespace-nowrap align-middle">
-        {mov.cargo ? formatCOP(mov.cargo) : <span className="text-gray-200">—</span>}
-      </td>
       <td className="px-3 py-2 text-right text-xs font-semibold text-green-600 whitespace-nowrap align-middle">
         {mov.abono ? formatCOP(mov.abono) : <span className="text-gray-200">—</span>}
+      </td>
+      <td className="px-3 py-2 text-right text-xs font-semibold text-amber-700 whitespace-nowrap align-middle">
+        {mov.cargo ? formatCOP(mov.cargo) : <span className="text-gray-200">—</span>}
       </td>
       <td className={`px-3 py-2 text-right text-xs font-bold whitespace-nowrap align-middle ${
         mov.saldo > 0 ? 'text-red-500' : 'text-green-600'
@@ -204,7 +204,7 @@ export function EstadoDeCuenta({ tipo, personaId }) {
   const [sortDir,    setSortDir]      = useState('desc');
   const [paginaMov,  setPaginaMov]    = useState(1);
   const [filtroTipo, setFiltroTipo]   = useState('todos');
-  const [vista,      setVista]        = useState('chat'); // 'chat' | 'tabla'
+  const [vista,      setVista]        = useState('tabla'); // 'tabla' | 'chat'
 
   const tipoApi = tipo === 'companero' ? 'prestatario' : tipo;
 
@@ -392,8 +392,8 @@ export function EstadoDeCuenta({ tipo, personaId }) {
               <tr className="bg-gray-50 border-b border-gray-100">
                 <th className="px-3 py-2.5 text-xs font-semibold text-gray-500 whitespace-nowrap">Fecha</th>
                 <th className="px-3 py-2.5 text-xs font-semibold text-gray-500">Justificación</th>
-                <th className="px-3 py-2.5 text-xs font-semibold text-amber-600 text-right whitespace-nowrap">−</th>
-                <th className="px-3 py-2.5 text-xs font-semibold text-green-600 text-right whitespace-nowrap">+</th>
+                <th className="px-3 py-2.5 text-xs font-semibold text-green-600 text-right whitespace-nowrap">−</th>
+                <th className="px-3 py-2.5 text-xs font-semibold text-amber-600 text-right whitespace-nowrap">+</th>
                 <th className="px-3 py-2.5 text-xs font-semibold text-gray-500 text-right whitespace-nowrap">Saldo</th>
                 <th className="px-2 py-2.5 w-10" />
               </tr>
