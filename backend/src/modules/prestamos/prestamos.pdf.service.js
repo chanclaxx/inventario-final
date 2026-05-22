@@ -837,12 +837,11 @@ const _ecResumen = (doc, movimientos, saldoFinal, y) => {
 };
 
 const generarPdfEstadoCuenta = async ({ tipo, personaId, negocioId, negocioNombre, logoNegocio }) => {
-  // Datos de persona
-  const tabla = tipo === 'prestatario' ? 'prestatarios' : 'clientes';
-  const { rows: personaRows } = await pool.query(
-    `SELECT nombre, cedula, celular, telefono FROM ${tabla} WHERE id = $1`,
-    [personaId]
-  );
+  // Datos de persona (prestatarios no tiene cedula/celular)
+  const personaQuery = tipo === 'prestatario'
+    ? `SELECT nombre, NULL AS cedula, NULL AS celular, telefono FROM prestatarios WHERE id = $1`
+    : `SELECT nombre, cedula, celular, telefono           FROM clientes       WHERE id = $1`;
+  const { rows: personaRows } = await pool.query(personaQuery, [personaId]);
   const persona = personaRows[0];
   if (!persona) {
     const err = new Error('Persona no encontrada');
