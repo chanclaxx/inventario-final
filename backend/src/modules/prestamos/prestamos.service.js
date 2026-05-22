@@ -604,7 +604,7 @@ const intercambiarPrestamo = async (negocioId, prestamoId, {
         await repo.insertarSerialParaRetoma(client, {
           producto_id:     producto_serial_id,
           imei:            imei_retoma.trim(),
-          costo_compra:    Number(valor_retoma),
+          precio:          Number(valor_retoma),
           color:           color_retoma || null,
           cliente_origen:  nombrePersona,
           caracteristicas: caracteristicas_retoma || null,
@@ -765,7 +765,7 @@ const retomaDirecta = async (negocioId, {
         await repo.insertarSerialParaRetoma(client, {
           producto_id:     producto_serial_id,
           imei:            imei_retoma.trim(),
-          costo_compra:    Number(valor_retoma),
+          precio:          Number(valor_retoma),
           color:           color_retoma || null,
           cliente_origen:  nombrePersona,
           caracteristicas: caracteristicas_retoma || null,

@@ -217,7 +217,7 @@ const intercambiarPrestamo = async (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);
     const {
-      tipo_retoma, imei_retoma, producto_serial_id, color_retoma,
+      tipo_retoma, imei_retoma, producto_serial_id, color_retoma, caracteristicas_retoma,
       producto_cantidad_id, cantidad_retoma,
       valor_retoma, descripcion, ingreso_inventario,
     } = req.body;
@@ -226,16 +226,17 @@ const intercambiarPrestamo = async (req, res, next) => {
       req.user.negocio_id,
       id,
       {
-        usuario_id:           req.user.id,
+        usuario_id:             req.user.id,
         tipo_retoma,
-        imei_retoma:          imei_retoma          || null,
-        producto_serial_id:   producto_serial_id   ? Number(producto_serial_id)   : null,
-        color_retoma:         color_retoma         || null,
-        producto_cantidad_id: producto_cantidad_id ? Number(producto_cantidad_id) : null,
-        cantidad_retoma:      Number(cantidad_retoma || 1),
-        valor_retoma:         Number(valor_retoma),
-        descripcion:          descripcion          || null,
-        ingreso_inventario:   ingreso_inventario !== false,
+        imei_retoma:            imei_retoma          || null,
+        producto_serial_id:     producto_serial_id   ? Number(producto_serial_id)   : null,
+        color_retoma:           color_retoma         || null,
+        caracteristicas_retoma: caracteristicas_retoma || null,
+        producto_cantidad_id:   producto_cantidad_id ? Number(producto_cantidad_id) : null,
+        cantidad_retoma:        Number(cantidad_retoma || 1),
+        valor_retoma:           Number(valor_retoma),
+        descripcion:            descripcion          || null,
+        ingreso_inventario:     ingreso_inventario !== false,
       },
     );
     res.json({ ok: true, data, message: 'Intercambio registrado correctamente' });
@@ -250,7 +251,7 @@ const retomaDirecta = async (req, res, next) => {
     }
     const {
       tipo, persona_id,
-      tipo_retoma, imei_retoma, producto_serial_id, color_retoma,
+      tipo_retoma, imei_retoma, producto_serial_id, color_retoma, caracteristicas_retoma,
       producto_cantidad_id, cantidad_retoma,
       valor_retoma, descripcion, ingreso_inventario,
     } = req.body;
@@ -261,18 +262,19 @@ const retomaDirecta = async (req, res, next) => {
 
     const data = await service.retomaDirecta(req.user.negocio_id, {
       sucursal_id,
-      usuario_id:           req.user.id,
+      usuario_id:             req.user.id,
       tipo,
-      persona_id:           Number(persona_id),
-      tipo_retoma:          tipo_retoma || 'serial',
-      imei_retoma:          imei_retoma          || null,
-      producto_serial_id:   producto_serial_id   ? Number(producto_serial_id)   : null,
-      color_retoma:         color_retoma         || null,
-      producto_cantidad_id: producto_cantidad_id ? Number(producto_cantidad_id) : null,
-      cantidad_retoma:      Number(cantidad_retoma || 1),
-      valor_retoma:         Number(valor_retoma),
-      descripcion:          descripcion          || null,
-      ingreso_inventario:   ingreso_inventario !== false,
+      persona_id:             Number(persona_id),
+      tipo_retoma:            tipo_retoma || 'serial',
+      imei_retoma:            imei_retoma          || null,
+      producto_serial_id:     producto_serial_id   ? Number(producto_serial_id)   : null,
+      color_retoma:           color_retoma         || null,
+      caracteristicas_retoma: caracteristicas_retoma || null,
+      producto_cantidad_id:   producto_cantidad_id ? Number(producto_cantidad_id) : null,
+      cantidad_retoma:        Number(cantidad_retoma || 1),
+      valor_retoma:           Number(valor_retoma),
+      descripcion:            descripcion          || null,
+      ingreso_inventario:     ingreso_inventario !== false,
     });
     res.json({ ok: true, data, message: 'Retoma registrada. Saldo a favor acreditado.' });
   } catch (err) { next(err); }

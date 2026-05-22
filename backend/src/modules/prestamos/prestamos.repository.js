@@ -365,13 +365,13 @@ const insertarRetoma = async (client, {
 
 // ── Retoma serial: inserta el IMEI al inventario ──────────────────────────────
 const insertarSerialParaRetoma = async (client, {
-  producto_id, imei, costo_compra, color, cliente_origen, caracteristicas,
+  producto_id, imei, precio, color, cliente_origen, caracteristicas,
 }) => {
   await client.query(`
-    INSERT INTO seriales(producto_id, imei, costo_compra, color, cliente_origen, caracteristicas, prestado, vendido)
+    INSERT INTO seriales(producto_id, imei, precio, color, cliente_origen, caracteristicas, prestado, vendido)
     VALUES ($1, $2, $3, $4, $5, $6, false, false)
   `, [
-    producto_id, imei, costo_compra || 0, color || null, cliente_origen || null,
+    producto_id, imei, precio || null, color || null, cliente_origen || null,
     caracteristicas != null ? JSON.stringify(caracteristicas) : null,
   ]);
 };
