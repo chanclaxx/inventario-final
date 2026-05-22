@@ -22,22 +22,27 @@ export function ModalRetomaDirecta({ persona, sucursalId, onClose, onSuccess }) 
     queryKey: ['config'],
     queryFn:  () => api.get('/config').then((r) => r.data.data),
   });
-  const coloresActivo = configData?.colores_serial_activo === '1';
-  const coloresLista  = (() => {
+  const coloresActivo          = configData?.colores_serial_activo === '1';
+  const coloresLista           = (() => {
     try { return JSON.parse(configData?.colores_serial_lista || '[]'); } catch { return []; }
   })();
+  const caracteristicasActivo  = configData?.caracteristicas_serial_activo === '1';
+  const caracteristicasLista   = (() => {
+    try { return JSON.parse(configData?.caracteristicas_serial_lista || '[]'); } catch { return []; }
+  })();
 
-  const [tipoRetoma,          setTipoRetoma]          = useState('serial');
-  const [imeiRetoma,          setImeiRetoma]           = useState('');
-  const [busquedaSerial,      setBusquedaSerial]       = useState('');
-  const [productoSerialSel,   setProductoSerialSel]    = useState(null);
-  const [colorRetoma,         setColorRetoma]          = useState('');
-  const [busquedaCantidad,    setBusquedaCantidad]     = useState('');
-  const [productoCantidadSel, setProductoCantidadSel] = useState(null);
-  const [cantidadRetoma,      setCantidadRetoma]       = useState('1');
-  const [valorRetoma,         setValorRetoma]          = useState('');
-  const [ingresoInventario,   setIngresoInventario]    = useState(true);
-  const [error,               setError]                = useState('');
+  const [tipoRetoma,            setTipoRetoma]            = useState('serial');
+  const [imeiRetoma,            setImeiRetoma]             = useState('');
+  const [busquedaSerial,        setBusquedaSerial]         = useState('');
+  const [productoSerialSel,     setProductoSerialSel]      = useState(null);
+  const [colorRetoma,           setColorRetoma]            = useState('');
+  const [caracteristicasRetoma, setCaracteristicasRetoma]  = useState({});
+  const [busquedaCantidad,      setBusquedaCantidad]       = useState('');
+  const [productoCantidadSel,   setProductoCantidadSel]    = useState(null);
+  const [cantidadRetoma,        setCantidadRetoma]         = useState('1');
+  const [valorRetoma,           setValorRetoma]            = useState('');
+  const [ingresoInventario,     setIngresoInventario]      = useState(true);
+  const [error,                 setError]                  = useState('');
 
   const { data: rawSerial   } = useQuery({
     queryKey: ['productos-serial'],
@@ -60,6 +65,7 @@ export function ModalRetomaDirecta({ persona, sucursalId, onClose, onSuccess }) 
 
   const resetCamposProducto = () => {
     setImeiRetoma(''); setBusquedaSerial(''); setProductoSerialSel(null); setColorRetoma('');
+    setCaracteristicasRetoma({});
     setBusquedaCantidad(''); setProductoCantidadSel(null); setCantidadRetoma('1');
   };
 
@@ -73,9 +79,12 @@ export function ModalRetomaDirecta({ persona, sucursalId, onClose, onSuccess }) 
       persona_id:           persona.id,
       sucursal_id:          sucursalId || undefined,
       tipo_retoma:          tipoRetoma,
-      imei_retoma:          tipoRetoma === 'serial'   ? (imeiRetoma.trim() || null) : null,
-      producto_serial_id:   tipoRetoma === 'serial'   ? (productoSerialSel?.id  || null) : null,
-      color_retoma:         tipoRetoma === 'serial'   ? (colorRetoma.trim() || null) : null,
+      imei_retoma:            tipoRetoma === 'serial' ? (imeiRetoma.trim() || null) : null,
+      producto_serial_id:     tipoRetoma === 'serial' ? (productoSerialSel?.id || null) : null,
+      color_retoma:           tipoRetoma === 'serial' ? (colorRetoma.trim() || null) : null,
+      caracteristicas_retoma: tipoRetoma === 'serial' && caracteristicasActivo && caracteristicasLista.length > 0
+        ? Object.fromEntries(Object.entries(caracteristicasRetoma).filter(([, v]) => v.trim()))
+        : null,
       producto_cantidad_id: tipoRetoma === 'cantidad' ? (productoCantidadSel?.id || null) : null,
       cantidad_retoma:      tipoRetoma === 'cantidad' ? Number(cantidadRetoma || 1) : 1,
       valor_retoma:         retoma,
@@ -191,6 +200,20 @@ export function ModalRetomaDirecta({ persona, sucursalId, onClose, onSuccess }) 
                       </button>
                     ))}
                   </div>
+                </div>
+              )}
+              {caracteristicasActivo && caracteristicasLista.length > 0 && (
+                <div className="flex flex-col gap-2">
+                  {caracteristicasLista.map((campo) => (
+                    <div key={campo} className="flex flex-col gap-1">
+                      <label className="text-xs font-medium text-gray-600">{campo} (opcional)</label>
+                      <input type="text" placeholder={campo}
+                        value={caracteristicasRetoma[campo] || ''}
+                        onChange={(e) => setCaracteristicasRetoma((prev) => ({ ...prev, [campo]: e.target.value }))}
+                        className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl
+                          text-sm focus:outline-none focus:ring-2 focus:ring-purple-400 transition-all" />
+                    </div>
+                  ))}
                 </div>
               )}
             </div>

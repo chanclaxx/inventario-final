@@ -546,6 +546,7 @@ const intercambiarPrestamo = async (negocioId, prestamoId, {
   imei_retoma,               // IMEI del equipo que entrega el prestatario
   producto_serial_id,        // FK a productos_serial (tipo/línea del equipo)
   color_retoma,
+  caracteristicas_retoma,
 
   // Retoma cantidad
   producto_cantidad_id,      // FK a productos_cantidad
@@ -601,11 +602,12 @@ const intercambiarPrestamo = async (negocioId, prestamoId, {
           throw { status: 400, message: 'El producto serial no pertenece a esta sucursal' };
         }
         await repo.insertarSerialParaRetoma(client, {
-          producto_id:    producto_serial_id,
-          imei:           imei_retoma.trim(),
-          costo_compra:   Number(valor_retoma),
-          color:          color_retoma || null,
-          cliente_origen: nombrePersona,
+          producto_id:     producto_serial_id,
+          imei:            imei_retoma.trim(),
+          costo_compra:    Number(valor_retoma),
+          color:           color_retoma || null,
+          cliente_origen:  nombrePersona,
+          caracteristicas: caracteristicas_retoma || null,
         });
         retomaIngresoReal = true;
 
@@ -712,6 +714,7 @@ const retomaDirecta = async (negocioId, {
   imei_retoma,
   producto_serial_id,
   color_retoma,
+  caracteristicas_retoma,
   producto_cantidad_id,
   cantidad_retoma = 1,
   valor_retoma,
@@ -760,11 +763,12 @@ const retomaDirecta = async (negocioId, {
         );
         if (!psRows.length) throw { status: 400, message: 'El producto serial no pertenece a esta sucursal' };
         await repo.insertarSerialParaRetoma(client, {
-          producto_id:    producto_serial_id,
-          imei:           imei_retoma.trim(),
-          costo_compra:   Number(valor_retoma),
-          color:          color_retoma || null,
-          cliente_origen: nombrePersona,
+          producto_id:     producto_serial_id,
+          imei:            imei_retoma.trim(),
+          costo_compra:    Number(valor_retoma),
+          color:           color_retoma || null,
+          cliente_origen:  nombrePersona,
+          caracteristicas: caracteristicas_retoma || null,
         });
         retomaIngresoReal = true;
       } else if (tipo_retoma === 'cantidad' && producto_cantidad_id) {
