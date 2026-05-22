@@ -4,7 +4,7 @@ import { getEstadoCuenta } from '../../api/prestamos.api';
 import { anularAbono as anularAbonoApi, anularRetomaDirecta as anularRetomaDirectaApi } from '../../api/prestamos.api';
 import { formatCOP } from '../../utils/formatters';
 import { Spinner }   from '../../components/ui/Spinner';
-import { XCircle, TrendingDown, TrendingUp, ArrowLeftRight, Wallet, ChevronLeft, ChevronRight, ArrowUpDown, Pencil } from 'lucide-react';
+import { XCircle, TrendingDown, TrendingUp, ArrowLeftRight, Wallet, ChevronLeft, ChevronRight, ArrowUpDown, Pencil, MessageSquare, Table2 } from 'lucide-react';
 import { ModalEditarValorPrestamo } from './ModalEditarValorPrestamo';
 
 const PAGE_SIZE_MOVS = 20;
@@ -144,6 +144,55 @@ function BurbujaMensaje({ mov, onAnular, onEditar }) {
   );
 }
 
+// ─── Fila de cuadrícula contable ─────────────────────────────────────────────
+
+function FilaTabla({ mov, onAnular, onEditar, isOdd }) {
+  const cfg = TIPO_CONFIG[mov.tipo] || TIPO_CONFIG.abono;
+
+  return (
+    <tr className={isOdd ? 'bg-gray-50/60' : 'bg-white'}>
+      <td className="px-3 py-2 text-xs text-gray-400 whitespace-nowrap align-middle">
+        {formatFecha(mov.fecha)}
+      </td>
+      <td className="px-3 py-2 align-middle">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full whitespace-nowrap ${cfg.badge}`}>
+            {cfg.label}
+          </span>
+          <span className="text-xs text-gray-700 leading-tight">{mov.concepto}</span>
+        </div>
+      </td>
+      <td className="px-3 py-2 text-right text-xs font-semibold text-amber-700 whitespace-nowrap align-middle">
+        {mov.cargo ? formatCOP(mov.cargo) : <span className="text-gray-200">—</span>}
+      </td>
+      <td className="px-3 py-2 text-right text-xs font-semibold text-green-600 whitespace-nowrap align-middle">
+        {mov.abono ? formatCOP(mov.abono) : <span className="text-gray-200">—</span>}
+      </td>
+      <td className={`px-3 py-2 text-right text-xs font-bold whitespace-nowrap align-middle ${
+        mov.saldo > 0 ? 'text-red-500' : 'text-green-600'
+      }`}>
+        {mov.saldo != null ? formatCOP(mov.saldo) : '—'}
+      </td>
+      <td className="px-2 py-2 align-middle">
+        <div className="flex items-center gap-1 justify-end">
+          {mov.tipo === 'prestamo' && mov.prestamo_estado === 'Activo' && onEditar && (
+            <button onClick={() => onEditar(mov)} title="Editar valor"
+              className="text-gray-300 hover:text-blue-400 transition-colors">
+              <Pencil size={12} />
+            </button>
+          )}
+          {mov.anulable && (
+            <button onClick={() => onAnular(mov)} title="Anular"
+              className="text-gray-300 hover:text-red-400 transition-colors">
+              <XCircle size={12} />
+            </button>
+          )}
+        </div>
+      </td>
+    </tr>
+  );
+}
+
 // ─── EstadoDeCuenta ───────────────────────────────────────────────────────────
 
 export function EstadoDeCuenta({ tipo, personaId }) {
@@ -155,6 +204,7 @@ export function EstadoDeCuenta({ tipo, personaId }) {
   const [sortDir,    setSortDir]      = useState('desc');
   const [paginaMov,  setPaginaMov]    = useState(1);
   const [filtroTipo, setFiltroTipo]   = useState('todos');
+  const [vista,      setVista]        = useState('chat'); // 'chat' | 'tabla'
 
   const tipoApi = tipo === 'companero' ? 'prestatario' : tipo;
 
@@ -272,6 +322,23 @@ export function EstadoDeCuenta({ tipo, personaId }) {
           <ArrowUpDown size={12} />
           {sortDir === 'asc' ? 'Más antiguo' : 'Más reciente'}
         </button>
+        {/* Toggle de vista */}
+        <div className="flex rounded-lg border border-gray-200 overflow-hidden">
+          <button
+            onClick={() => setVista('chat')}
+            title="Vista conversación"
+            className={`flex items-center gap-1 px-2 py-1 text-xs transition-colors
+              ${vista === 'chat' ? 'bg-gray-800 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}>
+            <MessageSquare size={12} />
+          </button>
+          <button
+            onClick={() => setVista('tabla')}
+            title="Vista cuadrícula"
+            className={`flex items-center gap-1 px-2 py-1 text-xs transition-colors
+              ${vista === 'tabla' ? 'bg-gray-800 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}>
+            <Table2 size={12} />
+          </button>
+        </div>
         <span className="text-xs text-gray-400">{filtrados.length} mov.</span>
       </div>
 
@@ -293,27 +360,58 @@ export function EstadoDeCuenta({ tipo, personaId }) {
         ))}
       </div>
 
-      {/* Leyenda lados */}
-      <div className="flex items-center justify-between px-1">
-        <span className="text-[11px] text-gray-400 font-medium">← Deudor</span>
-        <span className="text-[11px] text-gray-400 font-medium">Negocio →</span>
-      </div>
+      {/* Vista chat */}
+      {vista === 'chat' && (
+        <>
+          <div className="flex items-center justify-between px-1">
+            <span className="text-[11px] text-gray-400 font-medium">← Deudor</span>
+            <span className="text-[11px] text-gray-400 font-medium">Negocio →</span>
+          </div>
+          <div
+            className="flex flex-col gap-2 py-3 rounded-2xl overflow-y-auto"
+            style={{ background: 'linear-gradient(160deg, #e8f4f0 0%, #eef2f7 100%)', minHeight: 180 }}>
+            {movsPagina.map((mov, idx) => {
+              const prev         = idx > 0 ? movsPagina[idx - 1] : null;
+              const showSepFecha = !prev || !mismoDia(mov.fecha, prev?.fecha);
+              return (
+                <Fragment key={`${mov.tipo}-${mov.referencia_id}-${idx}`}>
+                  {showSepFecha && <SeparadorFecha fecha={mov.fecha} />}
+                  <BurbujaMensaje mov={mov} onAnular={handleAnular} onEditar={handleEditar} />
+                </Fragment>
+              );
+            })}
+          </div>
+        </>
+      )}
 
-      {/* Ventana de chat */}
-      <div
-        className="flex flex-col gap-2 py-3 rounded-2xl overflow-y-auto"
-        style={{ background: 'linear-gradient(160deg, #e8f4f0 0%, #eef2f7 100%)', minHeight: 180 }}>
-        {movsPagina.map((mov, idx) => {
-          const prev        = idx > 0 ? movsPagina[idx - 1] : null;
-          const showSepFecha = !prev || !mismoDia(mov.fecha, prev?.fecha);
-          return (
-            <Fragment key={`${mov.tipo}-${mov.referencia_id}-${idx}`}>
-              {showSepFecha && <SeparadorFecha fecha={mov.fecha} />}
-              <BurbujaMensaje mov={mov} onAnular={handleAnular} onEditar={handleEditar} />
-            </Fragment>
-          );
-        })}
-      </div>
+      {/* Vista cuadrícula */}
+      {vista === 'tabla' && (
+        <div className="overflow-x-auto rounded-2xl border border-gray-100 shadow-sm">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="bg-gray-50 border-b border-gray-100">
+                <th className="px-3 py-2.5 text-xs font-semibold text-gray-500 whitespace-nowrap">Fecha</th>
+                <th className="px-3 py-2.5 text-xs font-semibold text-gray-500">Justificación</th>
+                <th className="px-3 py-2.5 text-xs font-semibold text-amber-600 text-right whitespace-nowrap">−</th>
+                <th className="px-3 py-2.5 text-xs font-semibold text-green-600 text-right whitespace-nowrap">+</th>
+                <th className="px-3 py-2.5 text-xs font-semibold text-gray-500 text-right whitespace-nowrap">Saldo</th>
+                <th className="px-2 py-2.5 w-10" />
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-50">
+              {movsPagina.map((mov, idx) => (
+                <FilaTabla
+                  key={`${mov.tipo}-${mov.referencia_id}-${idx}`}
+                  mov={mov}
+                  onAnular={handleAnular}
+                  onEditar={handleEditar}
+                  isOdd={idx % 2 !== 0}
+                />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {/* Paginación */}
       {totalPagMovs > 1 && (
