@@ -30,7 +30,7 @@ import { TabCreditos }                          from './TabCreditos';
 import { ModalRetomaDirecta }                   from './ModalRetomaDirecta';
 import { EstadoDeCuenta }                       from './EstadoDeCuenta';
 import { useMetodosPago }                       from '../../hooks/useMetodosPago';
-import useExportarPdfPrestamos                  from '../../hooks/useExportarPdfPrestamos';
+import { ModalExportarPdfPrestamos }             from './ModalExportarPdfPrestamos';
 import api                                      from '../../api/axios.config';
 import useSucursalStore                         from '../../store/sucursalStore';
 import {
@@ -108,21 +108,26 @@ function ChipColor({ color }) {
 }
 
 function BotonExportarPdf({ tipo, personaId, nombrePersona }) {
-  const { exportando, exportarPdf } = useExportarPdfPrestamos();
-  const handleClick = async (e) => {
-    e.stopPropagation();
-    try {
-      await exportarPdf(tipo, personaId, `prestamos-activos-${nombrePersona.replace(/\s+/g, '-').toLowerCase()}`);
-    } catch (err) { alert(err.message || 'Error al generar el PDF'); }
-  };
+  const [modalAbierto, setModalAbierto] = useState(false);
   return (
-    <button onClick={handleClick} disabled={exportando}
-      className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium
-        border border-blue-200 text-blue-600 bg-blue-50 hover:bg-blue-100
-        hover:border-blue-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0">
-      {exportando ? <Loader2 size={12} className="animate-spin" /> : <FileDown size={12} />}
-      PDF
-    </button>
+    <>
+      <button
+        onClick={(e) => { e.stopPropagation(); setModalAbierto(true); }}
+        className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium
+          border border-blue-200 text-blue-600 bg-blue-50 hover:bg-blue-100
+          hover:border-blue-300 transition-colors flex-shrink-0">
+        <FileDown size={12} />
+        PDF
+      </button>
+      {modalAbierto && (
+        <ModalExportarPdfPrestamos
+          tipo={tipo}
+          personaId={personaId}
+          personaNombre={nombrePersona}
+          onClose={() => setModalAbierto(false)}
+        />
+      )}
+    </>
   );
 }
 
@@ -1605,7 +1610,7 @@ function VistaDetallePersona({ nombre, tipo, personaId, prestamos, saldoAFavor =
 
       {/* ── Tab: Estado de cuenta ── */}
       {tabDetalle === 'cuenta' && (
-        <EstadoDeCuenta tipo={tipo} personaId={personaId} personaNombre={nombre} />
+        <EstadoDeCuenta tipo={tipo} personaId={personaId} />
       )}
 
       {/* ── Tab: Préstamos ── */}
