@@ -105,14 +105,14 @@ const create = async (client, { sucursal_id, proveedor_id, usuario_id, numero_fa
 
 const insertarLinea = async (client, {
   compra_id, nombre_producto, imei, cantidad, precio_unitario,
-  precio_usd, factor_conversion, valor_traida, variante_id, atributo_id,
+  precio_usd, factor_conversion, valor_traida, variante_id, atributo_id, producto_id,
 }) => {
   const { rows } = await client.query(`
     INSERT INTO lineas_compra(
       compra_id, nombre_producto, imei, cantidad, precio_unitario,
-      precio_usd, factor_conversion, valor_traida, variante_id, atributo_id
+      precio_usd, factor_conversion, valor_traida, variante_id, atributo_id, producto_id
     )
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
     RETURNING *
   `, [
     compra_id, nombre_producto, imei || null, cantidad, precio_unitario,
@@ -121,6 +121,7 @@ const insertarLinea = async (client, {
     valor_traida      || null,
     variante_id       || null,
     atributo_id       || null,
+    producto_id       || null,
   ]);
   return rows[0];
 };

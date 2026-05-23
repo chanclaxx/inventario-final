@@ -73,6 +73,8 @@ const registrarCompra = async ({
         valor_traida:      linea.valor_traida      || null,
         variante_id:       linea.variante_id       || null,
         atributo_id:       linea.atributo_id       || null,
+        // Solo para productos de cantidad; los seriales se identifican por imei
+        producto_id:       linea.imei ? null : (linea.producto_id || null),
       });
 
       if (linea.imei) {
@@ -280,18 +282,23 @@ const cancelarCompra = async (negocioId, compraId) => {
   const lineas = await comprasRepo.getLineas(compraId);
 
   // Validar que ningún serial haya sido vendido o prestado antes de cancelar
+  const imeisConflictivos = [];
   for (const linea of lineas) {
     if (!linea.imei) continue;
     const { rows } = await pool.query(
-      `SELECT id, vendido, prestado FROM seriales WHERE imei = $1 LIMIT 1`,
+      `SELECT vendido, prestado FROM seriales WHERE imei = $1 LIMIT 1`,
       [linea.imei]
     );
     if (rows.length && (rows[0].vendido || rows[0].prestado)) {
-      throw {
-        status: 400,
-        message: `No se puede cancelar: el IMEI ${linea.imei} ya fue vendido o está prestado`,
-      };
+      const estado = rows[0].vendido ? 'vendido' : 'prestado';
+      imeisConflictivos.push(`${linea.imei} (${estado})`);
     }
+  }
+  if (imeisConflictivos.length > 0) {
+    throw {
+      status: 400,
+      message: `No se puede cancelar la compra. Los siguientes IMEI ya fueron vendidos o están prestados: ${imeisConflictivos.join(', ')}`,
+    };
   }
 
   const client = await pool.connect();
@@ -366,9 +373,13 @@ const cancelarCompra = async (negocioId, compraId) => {
             [atrRows[0].producto_id]
           );
         }
+      } else if (linea.producto_id) {
+        // Producto de cantidad simple (sin variante ni atributo): restar stock directamente
+        await client.query(
+          `UPDATE productos_cantidad SET stock = GREATEST(0, stock - $1) WHERE id = $2`,
+          [linea.cantidad, linea.producto_id]
+        );
       }
-      // Productos de cantidad simples (sin variante/atributo): no se puede identificar
-      // de forma segura sin producto_id en lineas_compra, se omite la reversión de stock
     }
 
     await client.query('COMMIT');
