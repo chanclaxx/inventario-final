@@ -244,7 +244,8 @@ const findActivosPorPrestatario = async (prestatarioId, negocioId) => {
       p.estado,
       pr.nombre  AS prestatario_nombre,
       e.nombre   AS empleado_nombre,
-      su.nombre  AS sucursal_nombre
+      su.nombre  AS sucursal_nombre,
+      COALESCE(lps.nombre, lpc.nombre) AS linea_nombre
     FROM prestamos p
     JOIN  sucursales               su  ON su.id  = p.sucursal_id
     JOIN  prestatarios             pr  ON pr.id  = p.prestatario_id
@@ -252,6 +253,9 @@ const findActivosPorPrestatario = async (prestatarioId, negocioId) => {
     LEFT JOIN seriales              s  ON s.imei = p.imei
     LEFT JOIN productos_serial      ps ON ps.id  = s.producto_id
                                       AND ps.sucursal_id = p.sucursal_id
+    LEFT JOIN lineas_producto       lps ON lps.id = ps.linea_id
+    LEFT JOIN productos_cantidad    pc  ON pc.id  = p.producto_id AND p.imei IS NULL
+    LEFT JOIN lineas_producto       lpc ON lpc.id = pc.linea_id
     WHERE p.prestatario_id = $1
       AND su.negocio_id    = $2
       AND p.estado         = 'Activo'
@@ -284,13 +288,17 @@ const findActivosPorCliente = async (clienteId, negocioId) => {
       c.nombre   AS cliente_nombre,
       c.cedula   AS cliente_cedula,
       c.celular  AS cliente_celular,
-      su.nombre  AS sucursal_nombre
+      su.nombre  AS sucursal_nombre,
+      COALESCE(lps.nombre, lpc.nombre) AS linea_nombre
     FROM prestamos p
     JOIN  sucursales su ON su.id = p.sucursal_id
     JOIN  clientes   c  ON c.id  = p.cliente_id
     LEFT JOIN seriales              s  ON s.imei = p.imei
     LEFT JOIN productos_serial      ps ON ps.id  = s.producto_id
                                       AND ps.sucursal_id = p.sucursal_id
+    LEFT JOIN lineas_producto       lps ON lps.id = ps.linea_id
+    LEFT JOIN productos_cantidad    pc  ON pc.id  = p.producto_id AND p.imei IS NULL
+    LEFT JOIN lineas_producto       lpc ON lpc.id = pc.linea_id
     WHERE p.cliente_id = $1
       AND su.negocio_id = $2
       AND p.estado      = 'Activo'

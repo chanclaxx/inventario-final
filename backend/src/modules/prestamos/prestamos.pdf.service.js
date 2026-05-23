@@ -154,6 +154,7 @@ const drawPrestamo = (doc, prestamo, abonos, index, startY) => {
   drawRect(doc, MARGIN, y, COL_WIDTH, 24, COLORS_ORIG.rowAlt);
   const detalles = [
     { label: 'Sucursal', val: prestamo.sucursal_nombre || '—' },
+    { label: 'Línea',    val: prestamo.linea_nombre    || '—' },
     { label: 'IMEI',     val: prestamo.imei            || '—' },
     { label: 'Cantidad', val: prestamo.imei ? '1' : String(prestamo.cantidad_prestada || 1) },
     { label: 'Empleado', val: prestamo.empleado_nombre || '—' },
@@ -397,6 +398,7 @@ const _tablaDatosProducto = (doc, prestamo, y) => {
 
   const campos = [
     { label: 'Producto',  val: prestamo.nombre_producto || '—' },
+    { label: 'Línea',     val: prestamo.linea_nombre    || null },
     { label: 'IMEI',      val: prestamo.imei            || null },
     { label: 'Sucursal',  val: prestamo.sucursal_nombre || '—' },
     { label: 'Cantidad',  val: prestamo.imei ? '1' : String(prestamo.cantidad_prestada || 1) },
@@ -592,12 +594,18 @@ const generarPdfPrestamoIndividual = async ({ prestamoId, negocioId, negocioNomb
       pr.nombre  AS prestatario_nombre,
       c.nombre   AS cliente_nombre,
       c.cedula   AS cliente_cedula,
-      c.celular  AS cliente_celular
+      c.celular  AS cliente_celular,
+      COALESCE(lps.nombre, lpc.nombre) AS linea_nombre
     FROM prestamos p
-    JOIN  sucursales               su ON su.id = p.sucursal_id
-    LEFT JOIN empleados_prestatario e  ON e.id  = p.empleado_id
-    LEFT JOIN prestatarios          pr ON pr.id = p.prestatario_id
-    LEFT JOIN clientes              c  ON c.id  = p.cliente_id
+    JOIN  sucursales               su  ON su.id  = p.sucursal_id
+    LEFT JOIN empleados_prestatario e   ON e.id   = p.empleado_id
+    LEFT JOIN prestatarios          pr  ON pr.id  = p.prestatario_id
+    LEFT JOIN clientes              c   ON c.id   = p.cliente_id
+    LEFT JOIN seriales              s   ON s.imei = p.imei
+    LEFT JOIN productos_serial      ps  ON ps.id  = s.producto_id AND ps.sucursal_id = p.sucursal_id
+    LEFT JOIN lineas_producto       lps ON lps.id = ps.linea_id
+    LEFT JOIN productos_cantidad    pc  ON pc.id  = p.producto_id AND p.imei IS NULL
+    LEFT JOIN lineas_producto       lpc ON lpc.id = pc.linea_id
     WHERE p.id = $1
   `, [prestamoId]);
 
