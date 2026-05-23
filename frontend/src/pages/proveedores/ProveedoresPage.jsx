@@ -500,8 +500,10 @@ function ModalDetalleCompra({ compraId, onClose }) {
     mutationFn: () => cancelarCompraApi(compraId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['compra-detalle', compraId] });
-      queryClient.invalidateQueries({ queryKey: ['compras-paginadas'], exact: false });
-      queryClient.invalidateQueries({ queryKey: ['compras-proveedor'],  exact: false });
+      queryClient.invalidateQueries({ queryKey: ['compras-paginadas'],   exact: false });
+      queryClient.invalidateQueries({ queryKey: ['compras-proveedor'],   exact: false });
+      queryClient.invalidateQueries({ queryKey: ['acreedores'],          exact: false });
+      queryClient.invalidateQueries({ queryKey: ['compras-con-saldo'],   exact: false });
       setConfirmando(false);
     },
     onError: (err) => setErrorCancel(err.response?.data?.error || 'Error al cancelar la compra'),

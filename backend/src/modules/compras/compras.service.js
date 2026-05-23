@@ -301,7 +301,26 @@ const cancelarCompra = async (negocioId, compraId) => {
     // 1. Marcar compra como cancelada
     await comprasRepo.marcarCancelada(client, compraId);
 
-    // 2. Revertir ítems del inventario
+    // 2. Eliminar cargo y abonos del acreedor vinculados a esta compra
+    const { rows: cargoRows } = await client.query(
+      `SELECT id FROM movimientos_acreedor WHERE compra_id = $1 AND tipo = 'Cargo' LIMIT 1`,
+      [compraId]
+    );
+    if (cargoRows.length) {
+      const cargoId = cargoRows[0].id;
+      // Primero los abonos que apuntan a este cargo
+      await client.query(
+        `DELETE FROM movimientos_acreedor WHERE cargo_id = $1`,
+        [cargoId]
+      );
+      // Luego el cargo mismo
+      await client.query(
+        `DELETE FROM movimientos_acreedor WHERE id = $1`,
+        [cargoId]
+      );
+    }
+
+    // 3. Revertir ítems del inventario
     for (const linea of lineas) {
       if (linea.imei) {
         // Serial: eliminar del inventario si aún no fue vendido ni prestado
