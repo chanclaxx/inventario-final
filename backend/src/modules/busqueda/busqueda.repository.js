@@ -325,10 +325,11 @@ const buscarPrestamos = async ({ q, estado, tipo, fechaDesde, fechaHasta }, nego
 
   if (q && q.trim()) {
     conditions.push(`(
-      ${sn('p.prestatario')}               LIKE $${i}
-      OR ${sn('p.nombre_producto')}        LIKE $${i}
-      OR LOWER(COALESCE(p.imei,  ''))      LIKE $${i}
-      OR LOWER(COALESCE(p.cedula,''))      LIKE $${i}
+      ${sn('p.prestatario')}                        LIKE $${i}
+      OR ${sn('p.nombre_producto')}                 LIKE $${i}
+      OR LOWER(COALESCE(p.imei,  ''))               LIKE $${i}
+      OR LOWER(COALESCE(p.cedula,''))               LIKE $${i}
+      OR ${sn("COALESCE(lps.nombre, lpc.nombre, '')")} LIKE $${i}
     )`);
     params.push(`%${normalizarBusqueda(q)}%`);
     i++;
@@ -365,12 +366,18 @@ const buscarPrestamos = async ({ q, estado, tipo, fechaDesde, fechaHasta }, nego
       (p.valor_prestamo - p.total_abonado) AS saldo_pendiente,
       pr.nombre AS prestatario_nombre,
       e.nombre  AS empleado_nombre,
-      c.nombre  AS cliente_nombre
+      c.nombre  AS cliente_nombre,
+      COALESCE(lps.nombre, lpc.nombre) AS linea_nombre
     FROM prestamos p
-    JOIN  sucursales                su ON su.id = p.sucursal_id
-    LEFT JOIN prestatarios          pr ON pr.id = p.prestatario_id
-    LEFT JOIN empleados_prestatario e  ON e.id  = p.empleado_id
-    LEFT JOIN clientes              c  ON c.id  = p.cliente_id
+    JOIN  sucursales                su  ON su.id  = p.sucursal_id
+    LEFT JOIN prestatarios          pr  ON pr.id  = p.prestatario_id
+    LEFT JOIN empleados_prestatario e   ON e.id   = p.empleado_id
+    LEFT JOIN clientes              c   ON c.id   = p.cliente_id
+    LEFT JOIN seriales              s   ON s.imei = p.imei
+    LEFT JOIN productos_serial      ps  ON ps.id  = s.producto_id AND ps.sucursal_id = p.sucursal_id
+    LEFT JOIN lineas_producto       lps ON lps.id = ps.linea_id
+    LEFT JOIN productos_cantidad    pc  ON pc.id  = p.producto_id AND p.imei IS NULL
+    LEFT JOIN lineas_producto       lpc ON lpc.id = pc.linea_id
     WHERE ${conditions.join(' AND ')}
     ORDER BY p.fecha DESC
     LIMIT 100

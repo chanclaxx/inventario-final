@@ -20,6 +20,7 @@ const findAll = async (sucursalId, negocioId) => {
       s.color   AS serial_color,
       COALESCE(pr.saldo_a_favor, 0) AS prestatario_saldo_a_favor,
       COALESCE(c.saldo_a_favor,  0) AS cliente_saldo_a_favor,
+      COALESCE(lps.nombre, lpc.nombre) AS linea_nombre,
       (SELECT MAX(ap.fecha)
        FROM abonos_prestamo ap
        JOIN prestamos       p2  ON p2.id  = ap.prestamo_id
@@ -43,6 +44,9 @@ const findAll = async (sucursalId, negocioId) => {
     LEFT JOIN seriales               s   ON s.imei = p.imei
     LEFT JOIN productos_serial       ps2 ON ps2.id = s.producto_id
                                         AND ps2.sucursal_id = p.sucursal_id
+    LEFT JOIN lineas_producto        lps ON lps.id = ps2.linea_id
+    LEFT JOIN productos_cantidad     pc  ON pc.id  = p.producto_id AND p.imei IS NULL
+    LEFT JOIN lineas_producto        lpc ON lpc.id = pc.linea_id
     WHERE ${filtro}
       AND (p.imei IS NULL OR ps2.sucursal_id IS NOT NULL)  -- ← filtra duplicados
     ORDER BY

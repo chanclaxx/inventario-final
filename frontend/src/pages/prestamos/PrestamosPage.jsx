@@ -1303,6 +1303,11 @@ function TarjetaPrestamoDetalle({ prestamo, onAbonar, onDevolver, onImprimir, on
                 )}
               </div>
             )}
+            {prestamo.linea_nombre && (
+              <span className="text-xs bg-gray-100 text-gray-500 border border-gray-200 px-2 py-0.5 rounded-full w-fit">
+                {prestamo.linea_nombre}
+              </span>
+            )}
             {coloresActivo && prestamo.serial_color && <ChipColor color={prestamo.serial_color} />}
             {prestamo.empleado_nombre && (
               <p className="text-xs text-blue-500 mt-0.5">→ {prestamo.empleado_nombre}</p>
@@ -1482,7 +1487,7 @@ function VistaDetallePersona({ nombre, tipo, personaId, prestamos, saldoAFavor =
 
   const filtrarPrest = (lista) => lista.filter((p) => {
     const q = busquedaPrest.trim().toLowerCase();
-    if (q && !p.nombre_producto?.toLowerCase().includes(q)) return false;
+    if (q && !p.nombre_producto?.toLowerCase().includes(q) && !p.linea_nombre?.toLowerCase().includes(q)) return false;
     if (fechaPrestDesde && p.fecha && new Date(p.fecha) < new Date(fechaPrestDesde)) return false;
     if (fechaPrestHasta && p.fecha && new Date(p.fecha) > new Date(fechaPrestHasta + 'T23:59:59')) return false;
     return true;
@@ -1624,7 +1629,7 @@ function VistaDetallePersona({ nombre, tipo, personaId, prestamos, saldoAFavor =
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
             <input
               type="text"
-              placeholder="Buscar por producto..."
+              placeholder="Buscar por producto o línea..."
               value={busquedaPrest}
               onChange={(e) => setBusquedaPrest(e.target.value)}
               className="w-full pl-8 pr-3 py-2 bg-white border border-gray-200 rounded-xl text-sm
@@ -2296,7 +2301,7 @@ function TabBusquedaPrestamos() {
           type="text"
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          placeholder="Buscar por nombre, IMEI, cédula o producto…"
+          placeholder="Buscar por nombre, IMEI, cédula, producto o línea…"
           className="w-full pl-9 pr-3 py-2.5 bg-gray-50 border border-gray-200 rounded-xl
             text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"
         />
