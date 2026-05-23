@@ -992,6 +992,9 @@ const anularAbono = async (negocioId, prestamoId, abonoId, retomaId = null) => {
             if (!serial) {
               throw { status: 400, message: `El equipo ${retoma.imei} ya fue vendido. Anula la venta primero.` };
             }
+            if (serial.prestado) {
+              throw { status: 400, message: `El equipo ${retoma.imei} está actualmente prestado. Devuelve el préstamo primero.` };
+            }
             await repo.eliminarSerial(client, serial.id);
           } else if (retoma.tipo_retoma === 'cantidad' && retoma.producto_cantidad_id) {
             await client.query(
@@ -1086,6 +1089,9 @@ const anularRetomaDirecta = async (negocioId, retomaId) => {
         const serial = await repo.findSerialEnInventario(client, retoma.imei);
         if (!serial) {
           throw { status: 400, message: `El equipo ${retoma.imei} ya fue vendido. Anula la venta primero.` };
+        }
+        if (serial.prestado) {
+          throw { status: 400, message: `El equipo ${retoma.imei} está actualmente prestado. Devuelve el préstamo primero.` };
         }
         await repo.eliminarSerial(client, serial.id);
       } else if (retoma.tipo_retoma === 'cantidad' && retoma.producto_cantidad_id) {
