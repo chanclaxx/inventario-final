@@ -291,7 +291,12 @@ const FilaFactura = ({ factura, esAdmin }) => {
                 <div className="sm:hidden bg-white rounded-xl p-3 shadow-sm border border-gray-100 flex flex-col gap-2">
                   <div>
                     <p className="font-semibold text-gray-800 text-sm">{linea.nombre_producto}</p>
-                    {linea.imei && <p className="text-xs text-gray-400 font-mono">{linea.imei}</p>}
+                    {linea.linea_nombre && (
+                      <span className="inline-block text-xs bg-gray-100 text-gray-500 border border-gray-200 px-1.5 py-0.5 rounded-full mt-0.5">
+                        {linea.linea_nombre}
+                      </span>
+                    )}
+                    {linea.imei && <p className="text-xs text-gray-400 font-mono mt-0.5">{linea.imei}</p>}
                   </div>
                   <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
                     <div className="flex justify-between">
@@ -325,6 +330,11 @@ const FilaFactura = ({ factura, esAdmin }) => {
                 <div className="hidden sm:grid grid-cols-12 gap-1 text-xs items-center py-1">
                   <div className="col-span-4 min-w-0">
                     <p className="font-medium text-gray-700 truncate">{linea.nombre_producto}</p>
+                    {linea.linea_nombre && (
+                      <span className="inline-block text-xs bg-gray-100 text-gray-500 border border-gray-200 px-1.5 py-0.5 rounded-full leading-tight">
+                        {linea.linea_nombre}
+                      </span>
+                    )}
                     {linea.imei && <p className="text-gray-400 font-mono truncate">{linea.imei}</p>}
                   </div>
                   <span className="col-span-2 text-center text-gray-600">{linea.cantidad}</span>
@@ -377,6 +387,11 @@ const FilaProducto = ({ producto, posicion }) => {
       </span>
       <div className="flex-1 min-w-0">
         <p className="text-sm font-semibold text-gray-800 truncate">{producto.nombre_producto}</p>
+        {producto.linea_nombre && (
+          <span className="inline-block text-xs bg-gray-100 text-gray-500 border border-gray-200 px-1.5 py-0.5 rounded-full mb-0.5">
+            {producto.linea_nombre}
+          </span>
+        )}
         <div className="flex items-center gap-3 mt-0.5 flex-wrap">
           <span className="text-xs text-gray-400">{producto.cantidad_vendida} vendido(s)</span>
           <span className="text-xs text-gray-400">
@@ -415,6 +430,11 @@ const FilaPrestamo = ({ prestamo, tipo }) => {
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold text-gray-800 truncate">{prestamo.nombre_producto}</p>
+          {prestamo.linea_nombre && (
+            <span className="inline-block text-xs bg-gray-100 text-gray-500 border border-gray-200 px-1.5 py-0.5 rounded-full mt-0.5">
+              {prestamo.linea_nombre}
+            </span>
+          )}
           {prestamo.imei && (
             <p className="text-xs text-gray-400 font-mono truncate">{prestamo.imei}</p>
           )}
@@ -843,6 +863,11 @@ const FilaCreditoSaldado = ({ credito }) => {
                 <div key={prodKey} className="flex items-start justify-between text-xs gap-2">
                   <div className="min-w-0 flex-1">
                     <p className="font-medium text-gray-700 truncate">{prod.nombre}</p>
+                    {prod.linea_nombre && (
+                      <span className="inline-block text-xs bg-gray-100 text-gray-500 border border-gray-200 px-1.5 py-0.5 rounded-full leading-tight">
+                        {prod.linea_nombre}
+                      </span>
+                    )}
                     {prod.imei && <p className="text-gray-400 font-mono">{prod.imei}</p>}
                   </div>
                   <div className="flex items-center gap-3 flex-shrink-0">

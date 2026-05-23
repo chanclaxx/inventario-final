@@ -395,7 +395,16 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
       p.estado,
       p.fecha                AS fecha_prestamo,
       ua.fecha_saldo,
-      ${costoProductoCase}   AS costo_producto
+      ${costoProductoCase}   AS costo_producto,
+      COALESCE(
+        (SELECT lp.nombre FROM seriales s
+         JOIN productos_serial ps ON ps.id = s.producto_id
+         JOIN lineas_producto  lp ON lp.id = ps.linea_id
+         WHERE s.imei = p.imei LIMIT 1),
+        (SELECT lp.nombre FROM productos_cantidad pc
+         JOIN lineas_producto lp ON lp.id = pc.linea_id
+         WHERE pc.id = p.producto_id LIMIT 1)
+      ) AS linea_nombre
     FROM prestamos p
     JOIN ultimo_abono ua ON ua.prestamo_id = p.id
     WHERE p.sucursal_id = $1
@@ -414,7 +423,16 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
       p.total_abonado,
       p.estado,
       p.fecha AS fecha_prestamo,
-      ${costoProductoCase} AS costo_producto
+      ${costoProductoCase} AS costo_producto,
+      COALESCE(
+        (SELECT lp.nombre FROM seriales s
+         JOIN productos_serial ps ON ps.id = s.producto_id
+         JOIN lineas_producto  lp ON lp.id = ps.linea_id
+         WHERE s.imei = p.imei LIMIT 1),
+        (SELECT lp.nombre FROM productos_cantidad pc
+         JOIN lineas_producto lp ON lp.id = pc.linea_id
+         WHERE pc.id = p.producto_id LIMIT 1)
+      ) AS linea_nombre
     FROM prestamos p
     WHERE p.sucursal_id = $1
       AND p.estado = 'Activo'
@@ -435,6 +453,7 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
       fecha:           p.fecha_prestamo,
       fecha_saldo:     p.fecha_saldo,
       utilidad:        costo !== null ? totalAbonado - costo : null,
+      linea_nombre:    p.linea_nombre || null,
     };
   });
 
@@ -454,6 +473,7 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
       saldo_pendiente:   valorPrestamo - totalAbonado,
       utilidad_parcial:  costo !== null ? totalAbonado - costo : null,
       falta_para_cubrir: costo !== null ? Math.max(0, costo - totalAbonado) : null,
+      linea_nombre:      p.linea_nombre || null,
     };
   });
 
@@ -515,9 +535,15 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
           (SELECT pc.costo_unitario FROM productos_cantidad pc
            WHERE pc.nombre = l.nombre_producto AND pc.sucursal_id = f.sucursal_id LIMIT 1)
       END AS costo_unitario_compra,
-      CASE WHEN l.imei IS NOT NULL THEN 'serial' ELSE 'cantidad' END AS tipo_producto
+      CASE WHEN l.imei IS NOT NULL THEN 'serial' ELSE 'cantidad' END AS tipo_producto,
+      COALESCE(lps.nombre, lpc.nombre) AS linea_nombre
     FROM lineas_factura l
     JOIN facturas f ON f.id = l.factura_id
+    LEFT JOIN seriales          s_r  ON s_r.imei  = l.imei
+    LEFT JOIN productos_serial  ps_r ON ps_r.id   = s_r.producto_id AND ps_r.sucursal_id = f.sucursal_id
+    LEFT JOIN lineas_producto   lps  ON lps.id    = ps_r.linea_id
+    LEFT JOIN productos_cantidad pc_r ON pc_r.id  = l.producto_id AND l.imei IS NULL
+    LEFT JOIN lineas_producto   lpc  ON lpc.id    = pc_r.linea_id
     WHERE l.factura_id = ANY($1::int[])
     ORDER BY l.id ASC
   `, [facturaIds]);
@@ -541,6 +567,7 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
       costo_total:           costoTotal,
       utilidad,
       tipo_producto:         linea.tipo_producto,
+      linea_nombre:          linea.linea_nombre || null,
     };
 
     if (!lineasPorFactura[linea.factura_id]) lineasPorFactura[linea.factura_id] = [];
@@ -649,10 +676,11 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
       utilidad,
       tiene_costo_incompleto: tieneCostoIncompleto,
       productos: lineasOrig.map((l) => ({
-        nombre: l.nombre_producto,
-        imei:   l.imei,
-        precio: l.precio_venta,
-        costo:  l.costo_unitario_compra,
+        nombre:       l.nombre_producto,
+        imei:         l.imei,
+        precio:       l.precio_venta,
+        costo:        l.costo_unitario_compra,
+        linea_nombre: l.linea_nombre,
       })),
     };
   });
@@ -801,7 +829,15 @@ const getProductosTop = async (sucursalId, desde, hasta) => {
           LIMIT 1
         )
       END AS costo_unitario_promedio,
-      CASE WHEN MAX(l.imei) IS NOT NULL THEN 'serial' ELSE 'cantidad' END AS tipo_producto
+      CASE WHEN MAX(l.imei) IS NOT NULL THEN 'serial' ELSE 'cantidad' END AS tipo_producto,
+      COALESCE(
+        (SELECT lp.nombre FROM lineas_producto lp
+         JOIN productos_serial ps ON ps.linea_id = lp.id
+         WHERE ps.nombre = l.nombre_producto AND ps.sucursal_id = $1 LIMIT 1),
+        (SELECT lp.nombre FROM lineas_producto lp
+         JOIN productos_cantidad pc ON pc.linea_id = lp.id
+         WHERE pc.nombre = l.nombre_producto AND pc.sucursal_id = $1 LIMIT 1)
+      ) AS linea_nombre
     FROM lineas_factura l
     JOIN facturas f ON f.id = l.factura_id
     WHERE f.sucursal_id = $1
@@ -831,6 +867,7 @@ const getProductosTop = async (sucursalId, desde, hasta) => {
       costo_total:             costoTotal,
       utilidad,
       margen_porcentaje:       margen,
+      linea_nombre:            p.linea_nombre || null,
     };
   });
 };
