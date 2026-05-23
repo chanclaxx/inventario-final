@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { buscarCompras as buscarComprasApi } from '../../api/busqueda.api';
 import { getProveedores, crearProveedor, actualizarProveedor } from '../../api/proveedores.api';
-import { getComprasByProveedor, getCompraById, getComprasPaginadas } from '../../api/compras.api';
+import { getComprasByProveedor, getCompraById, getComprasPaginadas, cancelarCompra as cancelarCompraApi } from '../../api/compras.api';
 import { getAcreedores, registrarMovimiento as registrarMovAcreedor, getComprasConSaldo, getAbonosPorCargo } from '../../api/acreedores.api';
 import { formatCOP, formatFechaHora } from '../../utils/formatters';
 import { Button }      from '../../components/ui/Button';
@@ -486,13 +486,29 @@ function TabRetomas() {
 // ─── Modal detalle de compra proveedor ────────────────────────────────────────
 
 function ModalDetalleCompra({ compraId, onClose }) {
+  const queryClient = useQueryClient();
+  const [confirmando, setConfirmando] = useState(false);
+  const [errorCancel, setErrorCancel] = useState('');
+
   const { data, isLoading } = useQuery({
     queryKey: ['compra-detalle', compraId],
     queryFn:  () => getCompraById(compraId).then((r) => r.data.data),
     enabled:  !!compraId,
   });
 
-  const esCredito = ['Credito', 'Fiado'].includes(data?.metodo);
+  const mutCancelar = useMutation({
+    mutationFn: () => cancelarCompraApi(compraId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['compra-detalle', compraId] });
+      queryClient.invalidateQueries({ queryKey: ['compras-paginadas'], exact: false });
+      queryClient.invalidateQueries({ queryKey: ['compras-proveedor'],  exact: false });
+      setConfirmando(false);
+    },
+    onError: (err) => setErrorCancel(err.response?.data?.error || 'Error al cancelar la compra'),
+  });
+
+  const esCancelada = data?.estado === 'Cancelada';
+  const esCredito   = ['Credito', 'Fiado'].includes(data?.metodo);
 
   return (
     <Modal open onClose={onClose} title={`Compra #${String(compraId).padStart(5, '0')}`} size="lg">
@@ -574,13 +590,50 @@ function ModalDetalleCompra({ compraId, onClose }) {
             <span className="text-sm font-semibold text-gray-700">Total de la compra</span>
             <span className="text-base font-bold text-blue-700">{formatCOP(data?.total)}</span>
           </div>
+
           {data?.notas && (
             <div className="bg-gray-50 rounded-xl px-3 py-2">
               <p className="text-xs text-gray-400 mb-0.5">Notas</p>
               <p className="text-xs text-gray-600">{data.notas}</p>
             </div>
           )}
-          <Button variant="secondary" onClick={onClose}>Cerrar</Button>
+
+          {/* Confirmación de cancelación */}
+          {!esCancelada && confirmando && (
+            <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex flex-col gap-3">
+              <p className="text-sm font-semibold text-red-700">¿Cancelar esta compra?</p>
+              <p className="text-xs text-red-600 leading-relaxed">
+                Los IMEIs y productos de esta compra se eliminarán del inventario si aún no han sido vendidos o prestados.
+                El registro de la compra quedará marcado como <strong>Cancelada</strong>.
+              </p>
+              {errorCancel && <p className="text-xs text-red-600 font-medium">{errorCancel}</p>}
+              <div className="flex gap-2">
+                <button
+                  onClick={() => { setConfirmando(false); setErrorCancel(''); }}
+                  className="flex-1 py-2 rounded-xl text-sm border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors">
+                  No, mantener
+                </button>
+                <button
+                  onClick={() => mutCancelar.mutate()}
+                  disabled={mutCancelar.isPending}
+                  className="flex-1 py-2 rounded-xl text-sm bg-red-500 hover:bg-red-600 text-white font-medium transition-colors disabled:opacity-50">
+                  {mutCancelar.isPending ? 'Cancelando…' : 'Sí, cancelar compra'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div className="flex gap-2">
+            {!esCancelada && !confirmando && (
+              <button
+                onClick={() => { setConfirmando(true); setErrorCancel(''); }}
+                className="px-3 py-2 rounded-xl text-sm border border-red-200 text-red-600 bg-red-50
+                  hover:bg-red-100 transition-colors font-medium">
+                Cancelar compra
+              </button>
+            )}
+            <Button variant="secondary" className="flex-1" onClick={onClose}>Cerrar</Button>
+          </div>
         </div>
       )}
     </Modal>

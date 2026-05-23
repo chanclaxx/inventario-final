@@ -18,5 +18,6 @@ router.get('/paginadas',              requireModulo('proveedores'), ctrl.getComp
 router.get('/proveedor/:proveedorId', requireModulo('proveedores'), ctrl.getComprasByProveedor);
 router.get('/:id',                    requireModulo('proveedores'), ctrl.getCompraById);
 router.post('/', requireModulo('proveedores'), requireNivel('supervisor'), validarCompra, validate, ctrl.registrarCompra);
+router.patch('/:id/cancelar', requireModulo('proveedores'), requireNivel('supervisor'), ctrl.cancelarCompra);
 
 module.exports = router;

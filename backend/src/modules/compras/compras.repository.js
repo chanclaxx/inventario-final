@@ -230,10 +230,17 @@ const findAllPaginado = async (sucursalId, negocioId, { page = 1, limit = 20, bu
   return { rows, total, page, limit, totalPages: Math.ceil(total / limit) };
 };
 
+const marcarCancelada = async (client, compraId) => {
+  await client.query(
+    `UPDATE compras SET estado = 'Cancelada' WHERE id = $1`,
+    [compraId]
+  );
+};
+
 module.exports = {
   findAll, findById, findByIdYNegocio,
   perteneceAlNegocio, findByProveedor,
   getLineas, create, insertarLinea,
   ajustarStockCantidad, actualizarCostoPromedio,
-  findAllPaginado,
+  findAllPaginado, marcarCancelada,
 };

@@ -7,3 +7,4 @@ export const getComprasByProveedor = (proveedorId) =>
   api.get(`/compras/proveedor/${proveedorId}`);
 export const getComprasPaginadas = (params) =>
   api.get('/compras/paginadas', { params });
+export const cancelarCompra = (id) => api.patch(`/compras/${id}/cancelar`);

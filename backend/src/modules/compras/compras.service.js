@@ -272,4 +272,94 @@ const registrarCompra = async ({
   }
 };
 
-module.exports = { getCompras, getCompraById, getComprasByProveedor, registrarCompra, getComprasPaginadas };
+const cancelarCompra = async (negocioId, compraId) => {
+  const compra = await comprasRepo.findByIdYNegocio(compraId, negocioId);
+  if (!compra) throw { status: 404, message: 'Compra no encontrada' };
+  if (compra.estado === 'Cancelada') throw { status: 400, message: 'La compra ya está cancelada' };
+
+  const lineas = await comprasRepo.getLineas(compraId);
+
+  // Validar que ningún serial haya sido vendido o prestado antes de cancelar
+  for (const linea of lineas) {
+    if (!linea.imei) continue;
+    const { rows } = await pool.query(
+      `SELECT id, vendido, prestado FROM seriales WHERE imei = $1 LIMIT 1`,
+      [linea.imei]
+    );
+    if (rows.length && (rows[0].vendido || rows[0].prestado)) {
+      throw {
+        status: 400,
+        message: `No se puede cancelar: el IMEI ${linea.imei} ya fue vendido o está prestado`,
+      };
+    }
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // 1. Marcar compra como cancelada
+    await comprasRepo.marcarCancelada(client, compraId);
+
+    // 2. Revertir ítems del inventario
+    for (const linea of lineas) {
+      if (linea.imei) {
+        // Serial: eliminar del inventario si aún no fue vendido ni prestado
+        await client.query(
+          `DELETE FROM seriales WHERE imei = $1 AND vendido = false AND prestado = false`,
+          [linea.imei]
+        );
+      } else if (linea.variante_id) {
+        // Producto con variante: restar stock
+        await client.query(
+          `UPDATE variantes_atributo SET stock = GREATEST(0, stock - $1) WHERE id = $2`,
+          [linea.cantidad, linea.variante_id]
+        );
+        // Sincronizar stock del producto padre
+        const { rows: varRows } = await client.query(
+          `SELECT producto_id FROM variantes_atributo WHERE id = $1`,
+          [linea.variante_id]
+        );
+        if (varRows.length) {
+          await client.query(
+            `UPDATE productos_cantidad
+             SET stock = (SELECT COALESCE(SUM(stock), 0) FROM variantes_atributo WHERE producto_id = $1)
+             WHERE id = $1`,
+            [varRows[0].producto_id]
+          );
+        }
+      } else if (linea.atributo_id) {
+        // Producto con atributo: restar stock
+        await client.query(
+          `UPDATE atributos_producto SET stock = GREATEST(0, stock - $1) WHERE id = $2`,
+          [linea.cantidad, linea.atributo_id]
+        );
+        // Sincronizar stock del producto padre
+        const { rows: atrRows } = await client.query(
+          `SELECT producto_id FROM atributos_producto WHERE id = $1`,
+          [linea.atributo_id]
+        );
+        if (atrRows.length) {
+          await client.query(
+            `UPDATE productos_cantidad
+             SET stock = (SELECT COALESCE(SUM(stock), 0) FROM atributos_producto WHERE producto_id = $1)
+             WHERE id = $1`,
+            [atrRows[0].producto_id]
+          );
+        }
+      }
+      // Productos de cantidad simples (sin variante/atributo): no se puede identificar
+      // de forma segura sin producto_id en lineas_compra, se omite la reversión de stock
+    }
+
+    await client.query('COMMIT');
+    return { id: compraId, estado: 'Cancelada' };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+};
+
+module.exports = { getCompras, getCompraById, getComprasByProveedor, registrarCompra, getComprasPaginadas, cancelarCompra };

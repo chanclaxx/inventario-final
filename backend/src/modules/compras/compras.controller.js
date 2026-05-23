@@ -96,4 +96,15 @@ const getComprasPaginadas = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-module.exports = { getCompras, getCompraById, getComprasByProveedor, registrarCompra, getComprasPaginadas };
+const cancelarCompra = async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id) || id < 1) {
+      return res.status(400).json({ ok: false, error: 'ID de compra inválido' });
+    }
+    const data = await service.cancelarCompra(req.user.negocio_id, id);
+    res.json({ ok: true, data, message: 'Compra cancelada correctamente' });
+  } catch (err) { next(err); }
+};
+
+module.exports = { getCompras, getCompraById, getComprasByProveedor, registrarCompra, getComprasPaginadas, cancelarCompra };
