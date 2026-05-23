@@ -836,7 +836,7 @@ const _ecResumen = (doc, movimientos, saldoFinal, y) => {
   return y + H;
 };
 
-const generarPdfEstadoCuenta = async ({ tipo, personaId, negocioId, negocioNombre, logoNegocio }) => {
+const generarPdfEstadoCuenta = async ({ tipo, personaId, negocioId, negocioNombre, logoNegocio, sucursalId = null }) => {
   // Datos de persona (prestatarios no tiene cedula/celular)
   const personaQuery = tipo === 'prestatario'
     ? `SELECT nombre, NULL AS cedula, NULL AS celular, telefono FROM prestatarios WHERE id = $1`
@@ -858,7 +858,7 @@ const generarPdfEstadoCuenta = async ({ tipo, personaId, negocioId, negocioNombr
   for (const row of configRows) config[row.clave] = row.valor;
 
   // Movimientos con saldo acumulado (misma lógica que el servicio)
-  const movRows = await repo.getEstadoCuenta(pool, negocioId, tipo, personaId);
+  const movRows = await repo.getEstadoCuenta(pool, negocioId, tipo, personaId, sucursalId);
   let saldoAcum = 0;
   const movimientos = movRows.map((row) => {
     const cargo = Number(row.cargo || 0);

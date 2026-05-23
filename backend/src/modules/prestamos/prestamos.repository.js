@@ -555,8 +555,14 @@ const eliminarRetoma = async (client, retomaId) => {
 };
 
 // ── Retomas directas por persona ──────────────────────────────────────────────
-const findRetomasDirectasPorPersona = async (executor, tipo, personaId, negocioId) => {
+const findRetomasDirectasPorPersona = async (executor, tipo, personaId, negocioId, sucursalId = null) => {
   const campo = tipo === 'prestatario' ? 'r.tipo_persona = \'prestatario\'' : 'r.tipo_persona = \'cliente\'';
+  const params = [personaId, negocioId];
+  let filtroSucursal = '';
+  if (sucursalId) {
+    params.push(sucursalId);
+    filtroSucursal = `AND r.sucursal_id = $${params.length}`;
+  }
   const { rows } = await executor.query(`
     SELECT
       r.id, r.nombre_producto, r.imei, r.valor_retoma,
@@ -571,8 +577,9 @@ const findRetomasDirectasPorPersona = async (executor, tipo, personaId, negocioI
       AND r.persona_id = $1
       AND r.prestamo_id IS NULL
       AND (r.sucursal_id IS NULL OR su.negocio_id = $2)
+      ${filtroSucursal}
     ORDER BY r.id DESC
-  `, [personaId, negocioId]);
+  `, params);
   return rows;
 };
 
@@ -611,8 +618,14 @@ const insertarRetomaDirecta = async (client, {
 };
 
 // ── Préstamos activos de una persona — ordenados por fecha ASC (FIFO) ─────────
-const findActivosPorPersona = async (executor, tipo, personaId, negocioId) => {
+const findActivosPorPersona = async (executor, tipo, personaId, negocioId, sucursalId = null) => {
   const campo = tipo === 'prestatario' ? 'p.prestatario_id' : 'p.cliente_id';
+  const params = [personaId, negocioId];
+  let filtroSucursal = '';
+  if (sucursalId) {
+    params.push(sucursalId);
+    filtroSucursal = `AND p.sucursal_id = $${params.length}`;
+  }
   const { rows } = await executor.query(`
     SELECT
       p.id, p.fecha, p.nombre_producto, p.imei,
@@ -625,15 +638,22 @@ const findActivosPorPersona = async (executor, tipo, personaId, negocioId) => {
     WHERE ${campo} = $1
       AND su.negocio_id = $2
       AND p.estado = 'Activo'
+      ${filtroSucursal}
     ORDER BY p.fecha ASC
-  `, [personaId, negocioId]);
+  `, params);
   return rows;
 };
 
 // ── Resumen agregado de cartera de una persona ────────────────────────────────
-const getResumenPersona = async (executor, negocioId, tipo, personaId) => {
+const getResumenPersona = async (executor, negocioId, tipo, personaId, sucursalId = null) => {
   const campo = tipo === 'prestatario' ? 'p.prestatario_id' : 'p.cliente_id';
   const tabla = TABLA_PERSONA[tipo];
+  const params = [personaId, negocioId];
+  let filtroSucursal = '';
+  if (sucursalId) {
+    params.push(sucursalId);
+    filtroSucursal = `AND p.sucursal_id = $${params.length}`;
+  }
   const { rows } = await executor.query(`
     SELECT
       COUNT(p.id) FILTER (WHERE p.estado = 'Activo')                         AS total_activos,
@@ -646,15 +666,26 @@ const getResumenPersona = async (executor, negocioId, tipo, personaId) => {
     CROSS JOIN (SELECT saldo_a_favor FROM ${tabla} WHERE id = $1) per
     WHERE ${campo} = $1
       AND su.negocio_id = $2
-  `, [personaId, negocioId]);
+      ${filtroSucursal}
+  `, params);
   return rows[0];
 };
 
 // ── Estado de cuenta: todos los movimientos de una persona ───────────────────
-const getEstadoCuenta = async (executor, negocioId, tipo, personaId) => {
+const getEstadoCuenta = async (executor, negocioId, tipo, personaId, sucursalId = null) => {
   const filtroPersona = tipo === 'prestatario'
     ? 'p.prestatario_id = $2'
     : 'p.cliente_id = $2';
+
+  const params = [negocioId, personaId, tipo];
+  let filtroSucursalPrestamo = '';
+  let filtroSucursalRetoma   = '';
+  if (sucursalId) {
+    params.push(sucursalId);
+    const n = params.length;
+    filtroSucursalPrestamo = `AND p.sucursal_id = $${n}`;
+    filtroSucursalRetoma   = `AND r.sucursal_id = $${n}`;
+  }
 
   const { rows } = await executor.query(`
     SELECT fecha, tipo, concepto, cargo, abono, referencia_id, anulable, prestamo_estado
@@ -674,6 +705,7 @@ const getEstadoCuenta = async (executor, negocioId, tipo, personaId) => {
       FROM prestamos p
       JOIN sucursales su ON su.id = p.sucursal_id
       WHERE su.negocio_id = $1 AND ${filtroPersona}
+        ${filtroSucursalPrestamo}
 
       UNION ALL
 
@@ -700,6 +732,7 @@ const getEstadoCuenta = async (executor, negocioId, tipo, personaId) => {
       JOIN prestamos  p  ON p.id  = ap.prestamo_id
       JOIN sucursales su ON su.id = p.sucursal_id
       WHERE su.negocio_id = $1 AND ${filtroPersona}
+        ${filtroSucursalPrestamo}
 
       UNION ALL
 
@@ -720,10 +753,11 @@ const getEstadoCuenta = async (executor, negocioId, tipo, personaId) => {
         AND r.tipo_persona = $3
         AND r.persona_id   = $2
         AND (r.sucursal_id IS NULL OR su.negocio_id = $1)
+        ${filtroSucursalRetoma}
 
     ) movs
     ORDER BY fecha ASC NULLS LAST, referencia_id ASC
-  `, [negocioId, personaId, tipo]);
+  `, params);
 
   return rows;
 };

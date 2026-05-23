@@ -176,12 +176,14 @@ const exportarPdfEstadoCuenta = async (req, res, next) => {
     }
     const negocioNombre = req.user?.negocio_nombre || '';
     const logoNegocio   = await _getLogoNegocio(req.user.negocio_id);
+    const sucursalId    = req.todasSucursales ? null : req.sucursal_id;
     const pdfStream = await pdfService.generarPdfEstadoCuenta({
       tipo,
       personaId:    id,
       negocioId:    req.user.negocio_id,
       negocioNombre,
       logoNegocio,
+      sucursalId,
     });
     const filename = `estado-cuenta-${tipo}-${id}-${Date.now()}.pdf`;
     res.setHeader('Content-Type',        'application/pdf');
@@ -327,8 +329,9 @@ const getResumenCartera = async (req, res, next) => {
     if (!['prestatario', 'cliente'].includes(tipo)) {
       return res.status(400).json({ ok: false, error: "tipo debe ser 'prestatario' o 'cliente'" });
     }
+    const sucursalId = req.todasSucursales ? null : req.sucursal_id;
     const data = await service.getResumenCartera(
-      req.user.negocio_id, tipo, Number(id)
+      req.user.negocio_id, tipo, Number(id), sucursalId
     );
     res.json({ ok: true, data });
   } catch (err) { next(err); }
@@ -355,7 +358,8 @@ const getRetomasDirectas = async (req, res, next) => {
     if (!['prestatario', 'cliente'].includes(tipo)) {
       return res.status(400).json({ ok: false, error: "tipo debe ser 'prestatario' o 'cliente'" });
     }
-    const data = await service.getRetomasDirectas(req.user.negocio_id, tipo, Number(id));
+    const sucursalId = req.todasSucursales ? null : req.sucursal_id;
+    const data = await service.getRetomasDirectas(req.user.negocio_id, tipo, Number(id), sucursalId);
     res.json({ ok: true, data });
   } catch (err) { next(err); }
 };
@@ -377,7 +381,8 @@ const getEstadoCuenta = async (req, res, next) => {
     if (!['prestatario', 'cliente'].includes(tipo)) {
       return res.status(400).json({ ok: false, error: "tipo debe ser 'prestatario' o 'cliente'" });
     }
-    const data = await service.getEstadoCuenta(req.user.negocio_id, tipo, Number(id));
+    const sucursalId = req.todasSucursales ? null : req.sucursal_id;
+    const data = await service.getEstadoCuenta(req.user.negocio_id, tipo, Number(id), sucursalId);
     res.json({ ok: true, data });
   } catch (err) { next(err); }
 };

@@ -947,7 +947,7 @@ const crearAjusteDeuda = async (negocioId, { tipo, persona_id, valor, descripcio
 
 // ─── Servicio: resumen de cartera de una persona ──────────────────────────────
 
-const getResumenCartera = async (negocioId, tipo, personaId) => {
+const getResumenCartera = async (negocioId, tipo, personaId, sucursalId = null) => {
   if (tipo === 'prestatario') {
     await _verificarPrestatario(personaId, negocioId);
   } else {
@@ -955,8 +955,8 @@ const getResumenCartera = async (negocioId, tipo, personaId) => {
   }
 
   const [resumen, activos] = await Promise.all([
-    repo.getResumenPersona(pool, negocioId, tipo, personaId),
-    repo.findActivosPorPersona(pool, tipo, personaId, negocioId),
+    repo.getResumenPersona(pool, negocioId, tipo, personaId, sucursalId),
+    repo.findActivosPorPersona(pool, tipo, personaId, negocioId, sucursalId),
   ]);
 
   return {
@@ -1138,23 +1138,23 @@ const anularRetomaDirecta = async (negocioId, retomaId) => {
 
 // ─── Servicio: listar retomas directas de una persona ─────────────────────────
 
-const getRetomasDirectas = async (negocioId, tipo, personaId) => {
+const getRetomasDirectas = async (negocioId, tipo, personaId, sucursalId = null) => {
   if (tipo === 'prestatario') {
     await _verificarPrestatario(personaId, negocioId);
   } else {
     await _verificarCliente(personaId, negocioId);
   }
-  return repo.findRetomasDirectasPorPersona(pool, tipo, personaId, negocioId);
+  return repo.findRetomasDirectasPorPersona(pool, tipo, personaId, negocioId, sucursalId);
 };
 
-const getEstadoCuenta = async (negocioId, tipo, personaId) => {
+const getEstadoCuenta = async (negocioId, tipo, personaId, sucursalId = null) => {
   if (tipo === 'prestatario') {
     await _verificarPrestatario(personaId, negocioId);
   } else {
     await _verificarCliente(personaId, negocioId);
   }
 
-  const rows = await repo.getEstadoCuenta(pool, negocioId, tipo, personaId);
+  const rows = await repo.getEstadoCuenta(pool, negocioId, tipo, personaId, sucursalId);
 
   let saldoDeuda = 0;
   return rows.map((row) => {
