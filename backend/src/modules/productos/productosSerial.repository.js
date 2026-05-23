@@ -209,6 +209,7 @@ const resetPreciosSeriales = async (productoId) => {
 };
 
 const eliminarSerial = async (serialId) => {
+  await pool.query('UPDATE lineas_traslado SET serial_id = NULL WHERE serial_id = $1', [serialId]);
   const { rows } = await pool.query(
     'DELETE FROM seriales WHERE id = $1 RETURNING id',
     [serialId]
@@ -306,6 +307,10 @@ const contarSerialesDetalle = async (productoId) => {
 };
 
 const eliminarSerialesDeProducto = async (client, productoId) => {
+  await client.query(
+    'UPDATE lineas_traslado SET serial_id = NULL WHERE serial_id IN (SELECT id FROM seriales WHERE producto_id = $1)',
+    [productoId]
+  );
   await client.query('DELETE FROM seriales WHERE producto_id = $1', [productoId]);
 };
 
