@@ -237,9 +237,10 @@ export function ProductosCantidad() {
   const lineas    = lineasData || [];
   const esAdmin   = puedeEditarProductos();
 
-  const productosFiltrados = productos.filter((p) =>
-    p.nombre.toLowerCase().includes(busqueda.toLowerCase())
-  );
+  const productosFiltrados = productos.filter((p) => {
+    const q = busqueda.toLowerCase();
+    return p.nombre.toLowerCase().includes(q) || p.linea_nombre?.toLowerCase().includes(q);
+  });
 
   const sinLinea = productosFiltrados.filter((p) => !p.linea_id);
   const porLinea = lineas
@@ -292,7 +293,7 @@ export function ProductosCantidad() {
   return (
     <>
       <div className="flex flex-col gap-4">
-        <SearchInput value={busqueda} onChange={setBusqueda} placeholder="Buscar producto..." />
+        <SearchInput value={busqueda} onChange={setBusqueda} placeholder="Buscar por producto o línea..." />
 
         {esAdmin && !variantesActivo && (
           <p className="text-xs text-gray-400 px-1">Doble click en una card para editar el producto</p>
