@@ -152,12 +152,18 @@ const drawPrestamo = (doc, prestamo, abonos, index, startY) => {
     .text(formatFecha(prestamo.fecha), MARGIN + 8, y + 9, { width: COL_WIDTH - 16, align: 'right' });
   y += 26;
   drawRect(doc, MARGIN, y, COL_WIDTH, 24, COLORS_ORIG.rowAlt);
+  const cantPrestada  = Number(prestamo.cantidad_prestada) || 1;
+  const valorUnitario = !prestamo.imei
+    ? formatCOP(Number(prestamo.valor_prestamo) / cantPrestada)
+    : '—';
+
   const detalles = [
-    { label: 'Sucursal', val: prestamo.sucursal_nombre || '—' },
-    { label: 'Línea',    val: prestamo.linea_nombre    || '—' },
-    { label: 'IMEI',     val: prestamo.imei            || '—' },
-    { label: 'Cantidad', val: prestamo.imei ? '1' : String(prestamo.cantidad_prestada || 1) },
-    { label: 'Empleado', val: prestamo.empleado_nombre || '—' },
+    { label: 'Sucursal',   val: prestamo.sucursal_nombre || '—' },
+    { label: 'Línea',      val: prestamo.linea_nombre    || '—' },
+    { label: 'IMEI',       val: prestamo.imei            || '—' },
+    { label: 'Cantidad',   val: prestamo.imei ? '1' : String(cantPrestada) },
+    { label: 'V. unitario', val: valorUnitario },
+    { label: 'Empleado',   val: prestamo.empleado_nombre || '—' },
   ].filter((d) => d.val !== '—' || d.label === 'Sucursal');
   const colW = COL_WIDTH / detalles.length;
   detalles.forEach((d, i) => {
