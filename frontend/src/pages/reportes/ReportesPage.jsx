@@ -484,36 +484,37 @@ const SeccionPrestamos = ({ prestamos }) => {
 
   const { saldados, activos } = prestamos;
 
-  // Saldados: todos los del período (con o sin costo registrado)
-  // Activos: solo los que ya tienen el costo cubierto
-  const activosCostoCubierto = activos.filter((p) => p.costo_producto !== null && p.falta_para_cubrir === 0);
+  if (saldados.length === 0 && activos.length === 0) return null;
 
-  if (saldados.length === 0 && activosCostoCubierto.length === 0) return null;
-
-  // Utilidad: solo cuenta prestamos con costo registrado
   const saldadosConCosto         = saldados.filter((p) => p.costo_producto !== null);
   const utilidadConfirmada       = saldadosConCosto.reduce((s, p) => s + (p.utilidad ?? 0), 0);
-  const utilidadActivosCubiertos = activosCostoCubierto.reduce((s, p) => s + (p.utilidad_parcial ?? 0), 0);
-  const utilidadTotal            = utilidadConfirmada + utilidadActivosCubiertos;
+  const activosConCostoCubierto  = activos.filter((p) => p.costo_producto !== null && p.falta_para_cubrir === 0);
+  const utilidadActivosCubiertos = activosConCostoCubierto.reduce((s, p) => s + (p.utilidad_parcial ?? 0), 0);
+  const saldoTotalActivos        = activos.reduce((s, p) => s + p.saldo_pendiente, 0);
 
   return (
     <div className="flex flex-col gap-3 border-t border-gray-100 pt-4">
       <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
         <Handshake size={15} className="text-indigo-500" />
-        Utilidad de préstamos
+        Préstamos
         {saldados.length > 0 && (
           <span className="text-xs font-normal text-gray-400">
             {saldados.length} saldado{saldados.length !== 1 ? 's' : ''} en el período
           </span>
         )}
+        {activos.length > 0 && (
+          <span className="text-xs font-normal text-gray-400">
+            · {activos.length} activo{activos.length !== 1 ? 's' : ''}
+          </span>
+        )}
       </h3>
 
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-        {(utilidadTotal > 0 || saldadosConCosto.length > 0) && (
+        {activos.length > 0 && (
           <div className="bg-indigo-50 text-indigo-700 rounded-xl p-3">
-            <p className="text-xs font-medium opacity-70">Utilidad total préstamos</p>
-            <p className="text-lg font-bold mt-0.5">{formatCOP(utilidadTotal)}</p>
-            <p className="text-xs opacity-60 mt-0.5">confirmada + activos cubiertos</p>
+            <p className="text-xs font-medium opacity-70">Saldo por cobrar</p>
+            <p className="text-lg font-bold mt-0.5">{formatCOP(saldoTotalActivos)}</p>
+            <p className="text-xs opacity-60 mt-0.5">{activos.length} activo{activos.length !== 1 ? 's' : ''}</p>
           </div>
         )}
         {saldadosConCosto.length > 0 && (
@@ -525,18 +526,28 @@ const SeccionPrestamos = ({ prestamos }) => {
             </p>
           </div>
         )}
-        {activosCostoCubierto.length > 0 && (
+        {activosConCostoCubierto.length > 0 && (
           <div className="bg-amber-50 text-amber-700 rounded-xl p-3">
-            <p className="text-xs font-medium opacity-70">Pendientes por cobrar</p>
+            <p className="text-xs font-medium opacity-70">Utilidad pendiente de cobrar</p>
             <p className="text-lg font-bold mt-0.5">{formatCOP(utilidadActivosCubiertos)}</p>
             <p className="text-xs opacity-60 mt-0.5">
-              {activosCostoCubierto.length} activo{activosCostoCubierto.length !== 1 ? 's' : ''} con costo cubierto
+              {activosConCostoCubierto.length} activo{activosConCostoCubierto.length !== 1 ? 's' : ''} con costo cubierto
             </p>
           </div>
         )}
       </div>
 
       <div className="flex flex-col gap-3">
+        {activos.length > 0 && (
+          <div className="flex flex-col gap-2">
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+              Préstamos activos
+            </p>
+            {activos.map((p) => (
+              <FilaPrestamo key={p.id} prestamo={p} tipo="activo" />
+            ))}
+          </div>
+        )}
         {saldados.length > 0 && (
           <div className="flex flex-col gap-2">
             <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
@@ -544,16 +555,6 @@ const SeccionPrestamos = ({ prestamos }) => {
             </p>
             {saldados.map((p) => (
               <FilaPrestamo key={p.id} prestamo={p} tipo="saldado" />
-            ))}
-          </div>
-        )}
-        {activosCostoCubierto.length > 0 && (
-          <div className="flex flex-col gap-2">
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-              Activos — costo cubierto
-            </p>
-            {activosCostoCubierto.map((p) => (
-              <FilaPrestamo key={p.id} prestamo={p} tipo="activo" />
             ))}
           </div>
         )}
