@@ -4,7 +4,7 @@ const getGarantias = (negocioId) => repo.findAll(negocioId);
 
 const getGarantiaById = async (negocioId, id) => {
   const g = await repo.findById(negocioId, id);
-  if (!g) throw { status: 404, message: 'Garantía no encontrad' };
+  if (!g) throw { status: 404, message: 'Garantía no encontrada' };
   return g;
 };
 
