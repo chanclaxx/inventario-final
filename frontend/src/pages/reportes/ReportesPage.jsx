@@ -1231,6 +1231,11 @@ const SeccionSinCosto = ({ items }) => {
             >
               <div className="flex items-center gap-1.5 flex-wrap min-w-0">
                 <span className="text-sm font-medium text-gray-700 truncate">{item.nombre}</span>
+                {item.linea_nombre && (
+                  <span className="text-xs bg-blue-50 text-blue-500 border border-blue-100 px-1.5 py-0.5 rounded-full whitespace-nowrap">
+                    {item.linea_nombre}
+                  </span>
+                )}
                 {item.atributo_valor && (
                   <span className="text-xs bg-gray-100 text-gray-500 border border-gray-200 px-1.5 py-0.5 rounded-full whitespace-nowrap">
                     {item.atributo_valor}

@@ -1038,6 +1038,7 @@ const getValorInventario = async (sucursalId) => {
       SELECT 'simple'::text   AS tipo,
              pc.id::int        AS producto_id,
              pc.nombre::text   AS nombre,
+             lp.nombre::text   AS linea_nombre,
              NULL::int         AS atributo_id,
              NULL::text        AS atributo_valor,
              NULL::int         AS variante_id,
@@ -1045,6 +1046,7 @@ const getValorInventario = async (sucursalId) => {
              pc.stock::int     AS stock,
              NULL::text        AS imei
       FROM productos_cantidad pc
+      LEFT JOIN lineas_producto lp ON lp.id = pc.linea_id
       WHERE pc.activo = true AND pc.stock > 0 AND pc.costo_unitario IS NULL
         AND pc.sucursal_id = $1
         AND NOT EXISTS (
@@ -1057,6 +1059,7 @@ const getValorInventario = async (sucursalId) => {
       SELECT 'atributo'::text,
              pc.id::int,
              pc.nombre::text,
+             lp.nombre::text,
              ap.id::int,
              ap.valor::text,
              NULL::int,
@@ -1065,6 +1068,7 @@ const getValorInventario = async (sucursalId) => {
              NULL::text
       FROM atributos_producto ap
       JOIN productos_cantidad pc ON pc.id = ap.producto_id
+      LEFT JOIN lineas_producto lp ON lp.id = pc.linea_id
       WHERE ap.activo = true AND ap.stock > 0 AND ap.costo_unitario IS NULL
         AND pc.sucursal_id = $1
         AND NOT EXISTS (
@@ -1077,6 +1081,7 @@ const getValorInventario = async (sucursalId) => {
       SELECT 'variante'::text,
              pc.id::int,
              pc.nombre::text,
+             lp.nombre::text,
              ap.id::int,
              ap.valor::text,
              v.id::int,
@@ -1086,6 +1091,7 @@ const getValorInventario = async (sucursalId) => {
       FROM variantes_atributo v
       JOIN atributos_producto ap ON ap.id = v.atributo_id AND ap.activo = true
       JOIN productos_cantidad pc ON pc.id = ap.producto_id AND pc.sucursal_id = $1
+      LEFT JOIN lineas_producto lp ON lp.id = pc.linea_id
       WHERE v.activo = true AND v.stock > 0 AND v.costo_unitario IS NULL
 
       UNION ALL
@@ -1093,6 +1099,7 @@ const getValorInventario = async (sucursalId) => {
       SELECT 'serial'::text,
              ps.id::int,
              ps.nombre::text,
+             lp.nombre::text,
              NULL::int,
              NULL::text,
              NULL::int,
@@ -1101,6 +1108,7 @@ const getValorInventario = async (sucursalId) => {
              se.imei::text
       FROM seriales se
       JOIN productos_serial ps ON ps.id = se.producto_id
+      LEFT JOIN lineas_producto lp ON lp.id = ps.linea_id
       WHERE se.vendido = false AND se.prestado = false
         AND ps.activo = true AND ps.sucursal_id = $1
         AND se.costo_compra IS NULL
