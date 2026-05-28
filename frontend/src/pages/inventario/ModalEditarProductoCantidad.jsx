@@ -1,10 +1,10 @@
-import { useState }                          from 'react';
+import { useState, useMemo }                  from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Pencil, Trash2 }                    from 'lucide-react';
 import { actualizarProductoCantidad }        from '../../api/productos.api';
 import { getProveedores }                    from '../../api/proveedores.api';
 import { getLineas }                         from '../../api/productos.api';
-import { getArbol }                          from '../../api/variantesProductoApi';
+import { getArbol, actualizarAtributo, actualizarVariante } from '../../api/variantesProductoApi';
 import { Modal }        from '../../components/ui/Modal';
 import { Input }        from '../../components/ui/Input';
 import { InputMoneda }  from '../../components/ui/InputMoneda';
@@ -26,6 +26,42 @@ export function ModalEditarProductoCantidad({ producto, pinEliminacion, variante
     staleTime: 30000,
   });
   const tieneAtributos = variantesActivo && arbol.length > 0;
+
+  // Nodos hoja del árbol: si el atributo no tiene variantes él es la hoja,
+  // si tiene variantes, cada variante es la hoja.
+  const hojas = useMemo(() => {
+    if (!tieneAtributos) return [];
+    const lista = [];
+    for (const at of arbol) {
+      if (!at.variantes || at.variantes.length === 0) {
+        lista.push({
+          tipo:          'atributo',
+          id:            at.id,
+          label:         at.valor,
+          costoOriginal: at.costo_unitario != null ? Number(at.costo_unitario) : '',
+        });
+      } else {
+        for (const v of at.variantes) {
+          lista.push({
+            tipo:          'variante',
+            id:            v.id,
+            label:         `${at.valor} / ${v.valor}`,
+            costoOriginal: v.costo_unitario != null ? Number(v.costo_unitario) : '',
+          });
+        }
+      }
+    }
+    return lista;
+  }, [arbol, tieneAtributos]);
+
+  // Solo almacena los valores que el usuario haya modificado.
+  // Para leer el costo actual de una hoja: costosEditados[key] ?? h.costoOriginal
+  const [costosEditados, setCostosEditados] = useState({});
+
+  const getCostoHoja = (h) => {
+    const key = `${h.tipo}-${h.id}`;
+    return key in costosEditados ? costosEditados[key] : h.costoOriginal;
+  };
 
   const [form, setForm] = useState({
     nombre        : producto.nombre         || '',
@@ -55,17 +91,35 @@ export function ModalEditarProductoCantidad({ producto, pinEliminacion, variante
   const lineas      = lineasData      || [];
 
   const mutation = useMutation({
-    mutationFn: () => actualizarProductoCantidad(producto.id, {
-      nombre        : form.nombre.trim(),
-      unidad_medida : form.unidad_medida.trim() || 'unidad',
-      stock_minimo  : Number(form.stock_minimo)  || 0,
-      precio        : form.precio         !== '' ? Number(form.precio)         : null,
-      costo_unitario: form.costo_unitario !== '' ? Number(form.costo_unitario) : null,
-      proveedor_id  : form.proveedor_id   !== '' ? Number(form.proveedor_id)   : null,
-      linea_id      : form.linea_id       !== '' ? Number(form.linea_id)       : null,
-    }),
+    mutationFn: async () => {
+      await actualizarProductoCantidad(producto.id, {
+        nombre        : form.nombre.trim(),
+        unidad_medida : form.unidad_medida.trim() || 'unidad',
+        stock_minimo  : Number(form.stock_minimo)  || 0,
+        precio        : form.precio         !== '' ? Number(form.precio)         : null,
+        costo_unitario: form.costo_unitario !== '' ? Number(form.costo_unitario) : null,
+        proveedor_id  : form.proveedor_id   !== '' ? Number(form.proveedor_id)   : null,
+        linea_id      : form.linea_id       !== '' ? Number(form.linea_id)       : null,
+      });
+      if (tieneAtributos && hojas.length > 0) {
+        const pendientes = hojas.filter((h) => {
+          const key = `${h.tipo}-${h.id}`;
+          return key in costosEditados && costosEditados[key] !== h.costoOriginal;
+        });
+        if (pendientes.length > 0) {
+          await Promise.all(pendientes.map((h) => {
+            const val = costosEditados[`${h.tipo}-${h.id}`];
+            const payload = { costo_unitario: val !== '' ? Number(val) : null };
+            return h.tipo === 'atributo'
+              ? actualizarAtributo(h.id, payload)
+              : actualizarVariante(h.id, payload);
+          }));
+        }
+      }
+    },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['productos-cantidad'], exact: false });
+      await queryClient.invalidateQueries({ queryKey: ['arbol-producto', producto.id], exact: false });
       onClose();
     },
     onError: (err) => setError(err.response?.data?.error || 'Error al actualizar el producto'),
@@ -148,12 +202,31 @@ export function ModalEditarProductoCantidad({ producto, pinEliminacion, variante
           )}
 
           {tiene('costo') && (
-            <div className="flex flex-col gap-1">
-              <label className="text-sm font-medium text-gray-700">Costo unitario</label>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-sm font-medium text-gray-700">
+                {tieneAtributos ? 'Costo por variante' : 'Costo unitario'}
+              </label>
               {tieneAtributos ? (
-                <p className="text-xs text-gray-400 bg-gray-50 rounded-xl px-3 py-2 border border-gray-200">
-                  Se define por cada variante — edítalo desde la vista de variantes del producto.
-                </p>
+                <div className={`flex flex-col gap-2 ${hojas.length > 4 ? 'max-h-52 overflow-y-auto pr-1' : ''}`}>
+                  {hojas.map((h) => {
+                    const key = `${h.tipo}-${h.id}`;
+                    return (
+                      <div key={key} className="flex items-center gap-2">
+                        <span className="text-xs text-gray-500 flex-1 min-w-0 truncate">{h.label}</span>
+                        <div className="w-36 flex-shrink-0">
+                          <InputMoneda
+                            value={getCostoHoja(h)}
+                            onChange={(val) => setCostosEditados((prev) => ({ ...prev, [key]: val }))}
+                            placeholder="0"
+                            className="w-full px-3 py-1.5 bg-white border border-gray-200 rounded-xl
+                              text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500
+                              transition-all"
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               ) : (
                 <InputMoneda
                   id="edit-costo-cant"
