@@ -967,7 +967,7 @@ const actualizarCostoCompra = async (sucursalId, tipo, imei, nombreProducto, nue
 // ─── getValorInventario ───────────────────────────────────────────────────────
 
 const getValorInventario = async (sucursalId) => {
-  const [serialResult, sinVariantesResult, atributosResult, variantesResult] = await Promise.all([
+  const [serialResult, sinVariantesResult, atributosResult, variantesResult, sinCostoResult] = await Promise.all([
 
     // Productos seriales: sin cambios
     pool.query(`
@@ -1032,6 +1032,81 @@ const getValorInventario = async (sucursalId) => {
       WHERE v.activo = true
         AND v.stock  > 0
     `, [sucursalId]),
+
+    // Todos los nodos hoja sin costo, para listarlos en el reporte
+    pool.query(`
+      SELECT 'simple'::text   AS tipo,
+             pc.id::int        AS producto_id,
+             pc.nombre::text   AS nombre,
+             NULL::int         AS atributo_id,
+             NULL::text        AS atributo_valor,
+             NULL::int         AS variante_id,
+             NULL::text        AS variante_valor,
+             pc.stock::int     AS stock,
+             NULL::text        AS imei
+      FROM productos_cantidad pc
+      WHERE pc.activo = true AND pc.stock > 0 AND pc.costo_unitario IS NULL
+        AND pc.sucursal_id = $1
+        AND NOT EXISTS (
+          SELECT 1 FROM atributos_producto ap
+          WHERE ap.producto_id = pc.id AND ap.activo = true
+        )
+
+      UNION ALL
+
+      SELECT 'atributo'::text,
+             pc.id::int,
+             pc.nombre::text,
+             ap.id::int,
+             ap.valor::text,
+             NULL::int,
+             NULL::text,
+             ap.stock::int,
+             NULL::text
+      FROM atributos_producto ap
+      JOIN productos_cantidad pc ON pc.id = ap.producto_id
+      WHERE ap.activo = true AND ap.stock > 0 AND ap.costo_unitario IS NULL
+        AND pc.sucursal_id = $1
+        AND NOT EXISTS (
+          SELECT 1 FROM variantes_atributo v
+          WHERE v.atributo_id = ap.id AND v.activo = true
+        )
+
+      UNION ALL
+
+      SELECT 'variante'::text,
+             pc.id::int,
+             pc.nombre::text,
+             ap.id::int,
+             ap.valor::text,
+             v.id::int,
+             v.valor::text,
+             v.stock::int,
+             NULL::text
+      FROM variantes_atributo v
+      JOIN atributos_producto ap ON ap.id = v.atributo_id AND ap.activo = true
+      JOIN productos_cantidad pc ON pc.id = ap.producto_id AND pc.sucursal_id = $1
+      WHERE v.activo = true AND v.stock > 0 AND v.costo_unitario IS NULL
+
+      UNION ALL
+
+      SELECT 'serial'::text,
+             ps.id::int,
+             ps.nombre::text,
+             NULL::int,
+             NULL::text,
+             NULL::int,
+             NULL::text,
+             1::int,
+             se.imei::text
+      FROM seriales se
+      JOIN productos_serial ps ON ps.id = se.producto_id
+      WHERE se.vendido = false AND se.prestado = false
+        AND ps.activo = true AND ps.sucursal_id = $1
+        AND se.costo_compra IS NULL
+
+      ORDER BY nombre, atributo_valor NULLS FIRST, variante_valor NULLS FIRST, imei NULLS FIRST
+    `, [sucursalId]),
   ]);
 
   const serial      = serialResult.rows[0];
@@ -1065,6 +1140,7 @@ const getValorInventario = async (sucursalId) => {
       costo_total:        serialCosto     + cantidadCosto,
       precio_venta_total: serialVenta     + cantidadVenta,
     },
+    sin_costo_items: sinCostoResult.rows,
   };
 };
 

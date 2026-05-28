@@ -1196,6 +1196,70 @@ const PanelStock = () => {
 };
 
 // ─────────────────────────────────────────────
+// PANEL INVENTARIO — lista de productos sin costo
+// ─────────────────────────────────────────────
+const SeccionSinCosto = ({ items }) => {
+  const [expandida, setExpandida] = useState(false);
+  if (!items?.length) return null;
+
+  return (
+    <div className="border border-yellow-200 rounded-xl overflow-hidden">
+      <button
+        onClick={() => setExpandida((v) => !v)}
+        className="w-full flex items-center justify-between px-4 py-3 bg-yellow-50 hover:bg-yellow-100 transition-colors text-left"
+      >
+        <div className="flex items-center gap-2">
+          <AlertTriangle size={15} className="text-yellow-600 flex-shrink-0" />
+          <span className="text-sm font-semibold text-yellow-800">
+            Productos sin costo registrado
+          </span>
+          <span className="bg-yellow-200 text-yellow-800 text-xs font-bold px-2 py-0.5 rounded-full">
+            {items.length}
+          </span>
+        </div>
+        {expandida
+          ? <ChevronUp size={15} className="text-yellow-600 flex-shrink-0" />
+          : <ChevronDown size={15} className="text-yellow-600 flex-shrink-0" />}
+      </button>
+
+      {expandida && (
+        <div className="bg-white px-4 py-3 flex flex-col gap-0.5">
+          {items.map((item, idx) => (
+            <div
+              key={idx}
+              className="flex items-center justify-between py-2 border-b border-gray-50 last:border-0 gap-3"
+            >
+              <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+                <span className="text-sm font-medium text-gray-700 truncate">{item.nombre}</span>
+                {item.atributo_valor && (
+                  <span className="text-xs bg-gray-100 text-gray-500 border border-gray-200 px-1.5 py-0.5 rounded-full whitespace-nowrap">
+                    {item.atributo_valor}
+                  </span>
+                )}
+                {item.variante_valor && (
+                  <span className="text-xs bg-gray-100 text-gray-500 border border-gray-200 px-1.5 py-0.5 rounded-full whitespace-nowrap">
+                    {item.variante_valor}
+                  </span>
+                )}
+                {item.imei && (
+                  <span className="text-xs text-gray-400 font-mono">{item.imei}</span>
+                )}
+              </div>
+              <span className="text-xs text-gray-400 flex-shrink-0">
+                {item.tipo === 'serial' ? '1 u.' : `${item.stock} u.`}
+              </span>
+            </div>
+          ))}
+          <p className="text-xs text-gray-400 pt-2">
+            Registra el costo desde el módulo de Productos o editándolo en el tab <strong>Ventas</strong>.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────
 // PANEL INVENTARIO
 // ─────────────────────────────────────────────
 const FilaInventario = ({ label, datos, colorCosto, colorVenta }) => (
@@ -1260,15 +1324,7 @@ const PanelInventario = () => {
         <FilaInventario label="Productos por cantidad" datos={data.cantidad}
           colorCosto="bg-purple-50 text-purple-700" colorVenta="bg-purple-100 text-purple-800" />
       </div>
-      {(data.serial.sin_costo > 0 || data.cantidad.sin_costo > 0) && (
-        <div className="flex items-start gap-2 bg-yellow-50 border border-yellow-100 rounded-xl px-4 py-3 text-xs text-yellow-700">
-          <Info size={14} className="flex-shrink-0 mt-0.5" />
-          <span>
-            Algunos productos no tienen costo registrado — el valor en costo está subestimado.
-            Puedes corregirlo editando el costo desde el tab <strong>Ventas</strong> o en el módulo de Productos.
-          </span>
-        </div>
-      )}
+      <SeccionSinCosto items={data.sin_costo_items} />
     </div>
   );
 };
