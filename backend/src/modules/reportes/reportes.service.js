@@ -967,7 +967,9 @@ const actualizarCostoCompra = async (sucursalId, tipo, imei, nombreProducto, nue
 // ─── getValorInventario ───────────────────────────────────────────────────────
 
 const getValorInventario = async (sucursalId) => {
-  const [serialResult, cantidadResult] = await Promise.all([
+  const [serialResult, sinVariantesResult, atributosResult, variantesResult] = await Promise.all([
+
+    // Productos seriales: sin cambios
     pool.query(`
       SELECT
         COUNT(se.id)::int                                         AS unidades,
@@ -982,6 +984,7 @@ const getValorInventario = async (sucursalId) => {
         AND ps.sucursal_id = $1
     `, [sucursalId]),
 
+    // Productos cantidad SIN atributos activos (sin variantes) — comportamiento original
     pool.query(`
       SELECT
         COALESCE(SUM(pc.stock),                                                     0)::int     AS unidades,
@@ -992,16 +995,57 @@ const getValorInventario = async (sucursalId) => {
       WHERE pc.activo      = true
         AND pc.stock       > 0
         AND pc.sucursal_id = $1
+        AND NOT EXISTS (
+          SELECT 1 FROM atributos_producto ap
+          WHERE ap.producto_id = pc.id AND ap.activo = true
+        )
+    `, [sucursalId]),
+
+    // Atributos que son hoja (tienen stock propio, sin variantes debajo)
+    pool.query(`
+      SELECT
+        COALESCE(SUM(ap.stock),                                                     0)::int     AS unidades,
+        COALESCE(SUM(ap.stock * ap.costo_unitario),                                 0)::numeric AS costo_total,
+        COALESCE(SUM(ap.stock * ap.precio),                                         0)::numeric AS precio_venta_total,
+        COALESCE(SUM(CASE WHEN ap.costo_unitario IS NULL THEN ap.stock ELSE 0 END), 0)::int     AS sin_costo
+      FROM atributos_producto ap
+      JOIN productos_cantidad pc ON pc.id = ap.producto_id
+      WHERE ap.activo      = true
+        AND ap.stock       > 0
+        AND pc.sucursal_id = $1
+        AND NOT EXISTS (
+          SELECT 1 FROM variantes_atributo v
+          WHERE v.atributo_id = ap.id AND v.activo = true
+        )
+    `, [sucursalId]),
+
+    // Variantes que son hoja (nivel más profundo del árbol)
+    pool.query(`
+      SELECT
+        COALESCE(SUM(v.stock),                                                      0)::int     AS unidades,
+        COALESCE(SUM(v.stock * v.costo_unitario),                                   0)::numeric AS costo_total,
+        COALESCE(SUM(v.stock * v.precio),                                           0)::numeric AS precio_venta_total,
+        COALESCE(SUM(CASE WHEN v.costo_unitario IS NULL THEN v.stock ELSE 0 END),   0)::int     AS sin_costo
+      FROM variantes_atributo v
+      JOIN atributos_producto ap ON ap.id = v.atributo_id AND ap.activo = true
+      JOIN productos_cantidad pc ON pc.id = ap.producto_id AND pc.sucursal_id = $1
+      WHERE v.activo = true
+        AND v.stock  > 0
     `, [sucursalId]),
   ]);
 
-  const serial   = serialResult.rows[0];
-  const cantidad = cantidadResult.rows[0];
+  const serial      = serialResult.rows[0];
+  const sinVar      = sinVariantesResult.rows[0];
+  const conAtrib    = atributosResult.rows[0];
+  const conVariante = variantesResult.rows[0];
 
-  const serialCosto   = Number(serial.costo_total);
-  const serialVenta   = Number(serial.precio_venta_total);
-  const cantidadCosto = Number(cantidad.costo_total);
-  const cantidadVenta = Number(cantidad.precio_venta_total);
+  const serialCosto = Number(serial.costo_total);
+  const serialVenta = Number(serial.precio_venta_total);
+
+  const cantidadUnidades = Number(sinVar.unidades)    + Number(conAtrib.unidades)    + Number(conVariante.unidades);
+  const cantidadCosto    = Number(sinVar.costo_total) + Number(conAtrib.costo_total) + Number(conVariante.costo_total);
+  const cantidadVenta    = Number(sinVar.precio_venta_total) + Number(conAtrib.precio_venta_total) + Number(conVariante.precio_venta_total);
+  const cantidadSinCosto = Number(sinVar.sin_costo)   + Number(conAtrib.sin_costo)   + Number(conVariante.sin_costo);
 
   return {
     serial: {
@@ -1011,15 +1055,15 @@ const getValorInventario = async (sucursalId) => {
       sin_costo:          serial.sin_costo,
     },
     cantidad: {
-      unidades:           cantidad.unidades,
+      unidades:           cantidadUnidades,
       costo_total:        cantidadCosto,
       precio_venta_total: cantidadVenta,
-      sin_costo:          cantidad.sin_costo,
+      sin_costo:          cantidadSinCosto,
     },
     totales: {
-      unidades:           serial.unidades   + cantidad.unidades,
-      costo_total:        serialCosto       + cantidadCosto,
-      precio_venta_total: serialVenta       + cantidadVenta,
+      unidades:           serial.unidades + cantidadUnidades,
+      costo_total:        serialCosto     + cantidadCosto,
+      precio_venta_total: serialVenta     + cantidadVenta,
     },
   };
 };
