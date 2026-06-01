@@ -71,7 +71,9 @@ export function ModalAbonoTotal({ nombre, tipo, personaId, prestamos, onClose, m
   const handleConfirmar = () => {
     setError('');
     if (!valorNum || valorNum <= 0) return setError('El valor debe ser mayor a 0');
-    if (valorNum > totalPendiente)  return setError(`El valor supera el saldo total pendiente (${formatCOP(totalPendiente)})`);
+    // En editar, el backend valida el máximo contra el estado real (incluye préstamos que este total saldó)
+    if (mode === 'crear' && valorNum > totalPendiente)
+      return setError(`El valor supera el saldo total pendiente (${formatCOP(totalPendiente)})`);
     mutation.mutate();
   };
 
@@ -85,10 +87,18 @@ export function ModalAbonoTotal({ nombre, tipo, personaId, prestamos, onClose, m
             <p className="text-xs text-blue-500">Persona</p>
             <p className="text-sm font-semibold text-blue-900">{nombre}</p>
           </div>
-          <div className="text-right">
-            <p className="text-xs text-blue-500">Saldo total pendiente</p>
-            <p className="text-base font-bold text-red-500">{formatCOP(totalPendiente)}</p>
-          </div>
+          {mode === 'crear' && (
+            <div className="text-right">
+              <p className="text-xs text-blue-500">Saldo total pendiente</p>
+              <p className="text-base font-bold text-red-500">{formatCOP(totalPendiente)}</p>
+            </div>
+          )}
+          {mode === 'editar' && (
+            <div className="text-right">
+              <p className="text-xs text-blue-500">Pago actual</p>
+              <p className="text-base font-bold text-indigo-600">{formatCOP(valorActual)}</p>
+            </div>
+          )}
         </div>
 
         {/* Info de funcionamiento */}
@@ -126,8 +136,14 @@ export function ModalAbonoTotal({ nombre, tipo, personaId, prestamos, onClose, m
           </div>
         </div>
 
-        {/* Preview de distribución */}
-        {distribucion.length > 0 && (
+        {/* Preview de distribución — solo en modo crear */}
+        {mode === 'editar' && valorNum > 0 && (
+          <div className="bg-indigo-50 border border-indigo-100 rounded-xl px-3 py-2.5 text-xs text-indigo-700">
+            El sistema revertirá el pago anterior y redistribuirá <strong>{formatCOP(valorNum)}</strong> desde el préstamo más antiguo al más reciente.
+          </div>
+        )}
+
+        {mode === 'crear' && distribucion.length > 0 && (
           <div className="flex flex-col gap-1">
             <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">
               Distribución del pago

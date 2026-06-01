@@ -1292,7 +1292,7 @@ const registrarAbonoTotal = async (negocioId, tipo, personaId, valorTotal, metod
   if (tipo === 'prestatario') await _verificarPrestatario(personaId, negocioId);
   else await _verificarCliente(personaId, negocioId);
 
-  const prestamosActivos = await repo.getPrestamoActivosPorPersona(tipo, personaId, negocioId);
+  const prestamosActivos = await repo.getPrestamoActivosPorPersona(pool, tipo, personaId, negocioId);
   if (!prestamosActivos.length) throw { status: 400, message: 'Esta persona no tiene préstamos activos' };
 
   const totalPendiente = prestamosActivos.reduce(
@@ -1417,8 +1417,8 @@ const modificarAbonoTotal = async (negocioId, abonoTotalId, nuevoValor, metodo) 
       await client.query('DELETE FROM abonos_prestamo WHERE id = $1', [abono.id]);
     }
 
-    // 3. Re-distribuir FIFO con nuevo valor
-    const prestamosActivos = await repo.getPrestamoActivosPorPersona(tipo, personaId, negocioId);
+    // 3. Re-distribuir FIFO con nuevo valor — usa client para ver los préstamos restaurados en esta transacción
+    const prestamosActivos = await repo.getPrestamoActivosPorPersona(client, tipo, personaId, negocioId);
     let remaining = nuevoValor;
 
     for (const prestamo of prestamosActivos) {

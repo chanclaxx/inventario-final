@@ -897,9 +897,10 @@ const insertarAbonoTotal = async (client, { tipo_persona, persona_id, sucursal_i
 };
 
 // ── Préstamos activos de una persona ordenados FIFO (más antiguo primero) ─────
-const getPrestamoActivosPorPersona = async (tipo, personaId, negocioId) => {
+// executor puede ser pool o un client de transacción (para ver cambios no committed)
+const getPrestamoActivosPorPersona = async (executor, tipo, personaId, negocioId) => {
   const col = tipo === 'prestatario' ? 'p.prestatario_id' : 'p.cliente_id';
-  const { rows } = await pool.query(`
+  const { rows } = await executor.query(`
     SELECT p.id, p.fecha, p.nombre_producto, p.imei, p.sucursal_id,
            p.valor_prestamo, p.total_abonado, p.estado, p.producto_id,
            p.cedula, p.telefono, p.prestatario, p.cliente_id, p.prestatario_id,
