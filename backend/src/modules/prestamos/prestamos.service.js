@@ -1375,6 +1375,10 @@ const modificarAbonoTotal = async (negocioId, abonoTotalId, nuevoValor, metodo) 
   const abonoTotal = await repo.getAbonoTotalById(abonoTotalId, negocioId);
   if (!abonoTotal) throw { status: 404, message: 'Abono total no encontrado' };
 
+  if (nuevoValor >= Number(abonoTotal.valor_total)) {
+    throw { status: 400, message: 'Solo se puede reducir el valor de un abono total. Para aumentar, registra un nuevo abono.' };
+  }
+
   const { tipo_persona: tipo, persona_id: personaId } = abonoTotal;
 
   const client = await pool.connect();

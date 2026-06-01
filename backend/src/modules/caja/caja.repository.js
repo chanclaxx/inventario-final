@@ -323,7 +323,18 @@ const getResumenDia = async (cajaId, sucursalId, negocioId) => {
       JOIN prestamos p ON p.id = ab.prestamo_id
       WHERE p.sucursal_id = $1 AND ab.fecha BETWEEN $2 AND $3
         AND ab.metodo NOT IN ('Intercambio', 'Saldo a favor')
-      ORDER BY ab.fecha ASC
+        AND ab.abono_total_id IS NULL
+      UNION ALL
+      SELECT at.id, at.valor_total AS valor, at.metodo, at.fecha,
+             COALESCE(pr.nombre, cl.nombre) AS prestatario,
+             NULL AS prestamo_id
+      FROM abonos_totales at
+      JOIN sucursales su ON su.id = at.sucursal_id
+      LEFT JOIN prestatarios pr ON pr.id = at.persona_id AND at.tipo_persona = 'prestatario'
+      LEFT JOIN clientes     cl ON cl.id = at.persona_id AND at.tipo_persona = 'cliente'
+      WHERE su.id = $1 AND at.fecha BETWEEN $2 AND $3
+        AND at.metodo NOT IN ('Intercambio', 'Saldo a favor')
+      ORDER BY fecha ASC
     `, [sucursalId, inicio, fin]),
 
     pool.query(`
@@ -465,13 +476,25 @@ const getResumenGlobal = async (negocioId) => {
 
     pool.query(`
       SELECT ab.id, ab.valor, ab.metodo, ab.fecha, p.prestatario, p.id AS prestamo_id,
-              su.nombre AS sucursal_nombre
+             su.nombre AS sucursal_nombre
       FROM abonos_prestamo ab
       JOIN prestamos  p  ON p.id  = ab.prestamo_id
       JOIN sucursales su ON su.id = p.sucursal_id
       WHERE su.negocio_id = $1 AND ab.fecha BETWEEN $2 AND $3
         AND ab.metodo NOT IN ('Intercambio', 'Saldo a favor')
-      ORDER BY ab.fecha ASC
+        AND ab.abono_total_id IS NULL
+      UNION ALL
+      SELECT at.id, at.valor_total AS valor, at.metodo, at.fecha,
+             COALESCE(pr.nombre, cl.nombre) AS prestatario,
+             NULL AS prestamo_id,
+             su.nombre AS sucursal_nombre
+      FROM abonos_totales at
+      JOIN sucursales su ON su.id = at.sucursal_id
+      LEFT JOIN prestatarios pr ON pr.id = at.persona_id AND at.tipo_persona = 'prestatario'
+      LEFT JOIN clientes     cl ON cl.id = at.persona_id AND at.tipo_persona = 'cliente'
+      WHERE su.negocio_id = $1 AND at.fecha BETWEEN $2 AND $3
+        AND at.metodo NOT IN ('Intercambio', 'Saldo a favor')
+      ORDER BY fecha ASC
     `, [negocioId, inicio, fin]),
 
     pool.query(`

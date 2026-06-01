@@ -71,9 +71,10 @@ export function ModalAbonoTotal({ nombre, tipo, personaId, prestamos, onClose, m
   const handleConfirmar = () => {
     setError('');
     if (!valorNum || valorNum <= 0) return setError('El valor debe ser mayor a 0');
-    // En editar, el backend valida el máximo contra el estado real (incluye préstamos que este total saldó)
     if (mode === 'crear' && valorNum > totalPendiente)
       return setError(`El valor supera el saldo total pendiente (${formatCOP(totalPendiente)})`);
+    if (mode === 'editar' && valorNum >= Number(valorActual))
+      return setError(`Solo puedes disminuir el valor. El pago actual es ${formatCOP(valorActual)}`);
     mutation.mutate();
   };
 
@@ -137,9 +138,14 @@ export function ModalAbonoTotal({ nombre, tipo, personaId, prestamos, onClose, m
         </div>
 
         {/* Preview de distribución — solo en modo crear */}
-        {mode === 'editar' && valorNum > 0 && (
-          <div className="bg-indigo-50 border border-indigo-100 rounded-xl px-3 py-2.5 text-xs text-indigo-700">
-            El sistema revertirá el pago anterior y redistribuirá <strong>{formatCOP(valorNum)}</strong> desde el préstamo más antiguo al más reciente.
+        {mode === 'editar' && (
+          <div className="bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5 text-xs text-amber-700">
+            Solo puedes <strong>reducir</strong> el valor del pago. El nuevo valor debe ser menor a {formatCOP(valorActual)}.
+            {valorNum > 0 && valorNum < Number(valorActual) && (
+              <span className="block mt-1 text-indigo-700">
+                El sistema redistribuirá <strong>{formatCOP(valorNum)}</strong> desde el préstamo más antiguo al más reciente.
+              </span>
+            )}
           </div>
         )}
 
