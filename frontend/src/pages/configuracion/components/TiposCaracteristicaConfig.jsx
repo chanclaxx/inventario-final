@@ -183,6 +183,13 @@ export function TiposCaracteristicaConfig({ valores, set }) {
 
       {activo && (
         <div className="flex flex-col gap-3 pt-1">
+          <Toggle
+            label="Permitir reducir stock sin variantes"
+            description="Muestra el botón de reducir stock en productos que aún no tienen atributos configurados"
+            enabled={valores['ajuste_stock_sin_variantes'] === '1'}
+            onChange={(val) => set('ajuste_stock_sin_variantes', val ? '1' : '0')}
+          />
+          <div className="border-t border-gray-100" />
           <div className="flex items-center justify-between">
             <p className="text-xs font-medium text-gray-600">Tipos de característica</p>
             <button

@@ -215,8 +215,9 @@ export function ProductosCantidad() {
     queryFn:  () => api.get('/config').then((r) => r.data.data),
     enabled:  sucursalLista,
   });
-  const pinEliminacion  = configData?.pin_eliminacion ?? '';
-  const variantesActivo = configData?.variantes_activo === '1';
+  const pinEliminacion          = configData?.pin_eliminacion ?? '';
+  const variantesActivo         = configData?.variantes_activo === '1';
+  const ajusteStockSinVariantes = configData?.ajuste_stock_sin_variantes === '1';
 
   const agregarItem = useCarritoStore((s) => s.agregarItem);
 
@@ -286,6 +287,7 @@ export function ProductosCantidad() {
         sucursalId={productosData?.sucursal_id || productoArbol.sucursal_id}
         esAdmin={esAdmin}
         onClose={() => setProductoArbol(null)}
+        ajusteStockSinVariantes={ajusteStockSinVariantes}
       />
     );
   }

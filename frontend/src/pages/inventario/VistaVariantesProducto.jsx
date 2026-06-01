@@ -10,6 +10,7 @@ import {
   crearVariante, actualizarVariante, eliminarVariante,
   ajustarStockAtributo, ajustarStockVariante,
 } from '../../api/variantesProductoApi';
+import { ajustarStockCantidad } from '../../api/productos.api';
 import { ModalPinEliminacion } from './ModalPinEliminacion';
 import { Button }     from '../../components/ui/Button';
 import { Input }      from '../../components/ui/Input';
@@ -292,7 +293,7 @@ function TarjetaNodo({
 }
 
 // ─── Componente principal ─────────────────────────────────────────────────────
-export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose }) {
+export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose, ajusteStockSinVariantes = false }) {
   const queryClient = useQueryClient();
   const agregarItem = useCarritoStore((s) => s.agregarItem);
 
@@ -356,6 +357,19 @@ export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose 
 
   const [nodoAReducir,    setNodoAReducir]    = useState(null); // { nodo, tipo: 'atributo'|'variante' }
   const [cantidadReducir, setCantidadReducir] = useState('1');
+
+  const [modalReducirBase,    setModalReducirBase]    = useState(false);
+  const [cantidadReducirBase, setCantidadReducirBase] = useState('1');
+
+  const mutReducirBase = useMutation({
+    mutationFn: (cantidad) =>
+      ajustarStockCantidad(producto.id, { cantidad: -Math.abs(cantidad) }),
+    onSuccess: () => {
+      invalidar();
+      setModalReducirBase(false);
+      setCantidadReducirBase('1');
+    },
+  });
 
   const mutReducirNodo = useMutation({
     mutationFn: ({ id, tipo, cantidad }) =>
@@ -616,6 +630,16 @@ export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose 
             <ShoppingCart size={14} />
             {producto.stock === 0 ? 'Sin stock' : 'Agregar al carrito'}
           </Button>
+          {ajusteStockSinVariantes && producto.stock > 0 && (
+            <Button
+              variant="secondary"
+              className="w-full max-w-xs"
+              onClick={() => { setCantidadReducirBase('1'); setModalReducirBase(true); }}
+            >
+              <Trash2 size={14} />
+              Reducir stock
+            </Button>
+          )}
           {esAdmin && (
             <button
               onClick={() => { setErrorM(''); setModalNodo({ modo: 'crear-atr' }); }}
@@ -699,6 +723,30 @@ export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose 
               type="number" min="1" max={nodoAReducir.nodo.stock}
               value={cantidadReducir}
               onChange={(e) => setCantidadReducir(e.target.value)}
+            />
+          }
+        />
+      )}
+
+      {modalReducirBase && (
+        <ModalPinEliminacion
+          titulo="Reducir stock"
+          descripcion={`Reducir stock de "${producto.nombre}". Stock actual: ${producto.stock} unidades.`}
+          loading={mutReducirBase.isPending}
+          onConfirm={() => {
+            const cant = parseInt(cantidadReducirBase, 10);
+            if (!cant || cant <= 0) throw new Error('La cantidad debe ser mayor a 0');
+            if (cant > producto.stock)
+              throw new Error(`Stock insuficiente. Stock actual: ${producto.stock}`);
+            return mutReducirBase.mutateAsync(cant);
+          }}
+          onClose={() => { setModalReducirBase(false); setCantidadReducirBase('1'); }}
+          extraContent={
+            <Input
+              label="Cantidad a reducir"
+              type="number" min="1" max={producto.stock}
+              value={cantidadReducirBase}
+              onChange={(e) => setCantidadReducirBase(e.target.value)}
             />
           }
         />
