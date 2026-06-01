@@ -217,7 +217,7 @@ export function ProductosCantidad() {
   });
   const pinEliminacion          = configData?.pin_eliminacion ?? '';
   const variantesActivo         = configData?.variantes_activo === '1';
-  const ajusteStockSinVariantes = configData?.ajuste_stock_sin_variantes === '1';
+  const ajusteStockSinVariantes = configData?.ajuste_stock_sin_variantes !== '0';
 
   const agregarItem = useCarritoStore((s) => s.agregarItem);
 

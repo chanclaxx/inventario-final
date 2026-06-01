@@ -186,7 +186,7 @@ export function TiposCaracteristicaConfig({ valores, set }) {
           <Toggle
             label="Permitir reducir stock sin variantes"
             description="Muestra el botón de reducir stock en productos que aún no tienen atributos configurados"
-            enabled={valores['ajuste_stock_sin_variantes'] === '1'}
+            enabled={valores['ajuste_stock_sin_variantes'] !== '0'}
             onChange={(val) => set('ajuste_stock_sin_variantes', val ? '1' : '0')}
           />
           <div className="border-t border-gray-100" />
