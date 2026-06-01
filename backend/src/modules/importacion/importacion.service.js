@@ -44,7 +44,22 @@ const _resolverProveedor = async (client, nombre, negocioId) => {
   return nuevo[0].id;
 };
 
-const _resolverProductoSerial = async (client, { nombre, marca, modelo, precio, sucursalId, proveedorId }) => {
+const _resolverLinea = async (client, nombre, negocioId) => {
+  if (!nombre?.toString().trim()) return null;
+  const nombreLimpio = nombre.toString().trim();
+  const { rows: existe } = await client.query(
+    `SELECT id FROM lineas_producto WHERE negocio_id = $1 AND LOWER(nombre) = LOWER($2) LIMIT 1`,
+    [negocioId, nombreLimpio]
+  );
+  if (existe.length) return existe[0].id;
+  const { rows: nuevo } = await client.query(
+    `INSERT INTO lineas_producto(negocio_id, nombre) VALUES($1,$2) RETURNING id`,
+    [negocioId, nombreLimpio]
+  );
+  return nuevo[0].id;
+};
+
+const _resolverProductoSerial = async (client, { nombre, marca, modelo, precio, sucursalId, proveedorId, lineaId }) => {
   const { rows: existe } = await client.query(
     `SELECT id FROM productos_serial
      WHERE LOWER(nombre) = LOWER($1) AND sucursal_id = $2 LIMIT 1`,
@@ -52,19 +67,21 @@ const _resolverProductoSerial = async (client, { nombre, marca, modelo, precio, 
   );
 
   if (existe.length) {
-    if (marca || modelo || proveedorId || precio) {
+    if (marca || modelo || proveedorId || precio || lineaId) {
       await client.query(
         `UPDATE productos_serial SET
            marca        = COALESCE(NULLIF($1,''), marca),
            modelo       = COALESCE(NULLIF($2,''), modelo),
            proveedor_id = COALESCE($3, proveedor_id),
-           precio       = COALESCE($4, precio)
-         WHERE id = $5`,
+           precio       = COALESCE($4, precio),
+           linea_id     = COALESCE($5, linea_id)
+         WHERE id = $6`,
         [
           marca?.toString().trim() || '',
           modelo?.toString().trim() || '',
           proveedorId,
           precio || null,
+          lineaId,
           existe[0].id,
         ]
       );
@@ -73,13 +90,14 @@ const _resolverProductoSerial = async (client, { nombre, marca, modelo, precio, 
   }
 
   const { rows: nuevo } = await client.query(
-    `INSERT INTO productos_serial(sucursal_id, proveedor_id, nombre, marca, modelo, precio)
-     VALUES($1,$2,$3,$4,$5,$6) RETURNING id`,
+    `INSERT INTO productos_serial(sucursal_id, proveedor_id, nombre, marca, modelo, precio, linea_id)
+     VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
     [
       sucursalId, proveedorId, nombre.trim(),
       marca?.toString().trim()  || null,
       modelo?.toString().trim() || null,
       precio || null,
+      lineaId,
     ]
   );
   return nuevo[0].id;
@@ -120,6 +138,19 @@ const importarSerial = async (hojas, sucursalId, negocioId, config = {}) => {
     try {
       await client.query('BEGIN');
 
+      // Línea es atributo del producto, no del serial → resolverla una vez por hoja
+      const lineaNombre = hoja.filas.find((f) => f.linea?.toString().trim())?.linea?.toString().trim() ?? null;
+      const lineaId     = await _resolverLinea(client, lineaNombre, negocioId);
+
+      // Garantizar que el producto existe aunque la hoja no tenga seriales
+      if (hoja.filas.length === 0) {
+        await _resolverProductoSerial(client, {
+          nombre: hoja.nombreProducto,
+          marca: null, modelo: null, precio: null,
+          sucursalId, proveedorId: null, lineaId,
+        });
+      }
+
       for (const [i, fila] of hoja.filas.entries()) {
         const nFila = i + 4;
         try {
@@ -142,6 +173,7 @@ const importarSerial = async (hojas, sucursalId, negocioId, config = {}) => {
             precio,
             sucursalId,
             proveedorId,
+            lineaId,
           });
 
           const fechaEntrada  = _formatearFecha(fila.fecha_entrada);
@@ -237,7 +269,7 @@ const importarSerial = async (hojas, sucursalId, negocioId, config = {}) => {
 // ─────────────────────────────────────────────
 
 // Crea o actualiza el producto raíz sin tocar su stock (el stock lo manejan atributos/variantes)
-const _resolverProductoBase = async (client, { nombre, sucursalId, proveedorId, costoUnit, unidad, clienteOrig, precioVenta }) => {
+const _resolverProductoBase = async (client, { nombre, sucursalId, proveedorId, costoUnit, unidad, clienteOrig, precioVenta, lineaId }) => {
   const { rows } = await client.query(
     `SELECT id FROM productos_cantidad WHERE LOWER(nombre) = LOWER($1) AND sucursal_id = $2 LIMIT 1`,
     [nombre, sucursalId]
@@ -249,17 +281,18 @@ const _resolverProductoBase = async (client, { nombre, sucursalId, proveedorId, 
          unidad_medida  = COALESCE(NULLIF($2,''), unidad_medida),
          cliente_origen = COALESCE($3, cliente_origen),
          proveedor_id   = COALESCE($4, proveedor_id),
-         precio         = COALESCE($5, precio)
-       WHERE id = $6`,
-      [costoUnit, unidad, clienteOrig, proveedorId, precioVenta, rows[0].id]
+         precio         = COALESCE($5, precio),
+         linea_id       = COALESCE($6, linea_id)
+       WHERE id = $7`,
+      [costoUnit, unidad, clienteOrig, proveedorId, precioVenta, lineaId, rows[0].id]
     );
     return rows[0].id;
   }
   const { rows: nuevo } = await client.query(
     `INSERT INTO productos_cantidad
-       (sucursal_id, proveedor_id, nombre, stock, stock_minimo, costo_unitario, unidad_medida, cliente_origen, precio)
-     VALUES($1,$2,$3,0,0,$4,$5,$6,$7) RETURNING id`,
-    [sucursalId, proveedorId, nombre, costoUnit, unidad, clienteOrig, precioVenta]
+       (sucursal_id, proveedor_id, nombre, stock, stock_minimo, costo_unitario, unidad_medida, cliente_origen, precio, linea_id)
+     VALUES($1,$2,$3,0,0,$4,$5,$6,$7,$8) RETURNING id`,
+    [sucursalId, proveedorId, nombre, costoUnit, unidad, clienteOrig, precioVenta, lineaId]
   );
   return nuevo[0].id;
 };
@@ -373,6 +406,7 @@ const importarCantidad = async (filas, sucursalId, negocioId, config = {}) => {
         const unidad      = fila.unidad_medida?.toString().trim() || 'unidad';
         const clienteOrig = fila.cliente_origen?.toString().trim() || null;
         const proveedorId = await _resolverProveedor(client, fila.proveedor, negocioId);
+        const lineaId     = await _resolverLinea(client, fila.linea, negocioId);
 
         const atributoValor = variantesActivo ? fila.atributo?.toString().trim() || null : null;
         const varianteValor = atributoValor   ? fila.variante?.toString().trim() || null : null;
@@ -380,7 +414,7 @@ const importarCantidad = async (filas, sucursalId, negocioId, config = {}) => {
         if (atributoValor) {
           // ── Con variante: el producto es contenedor, el stock vive en atributo/variante ──
           const productoId = await _resolverProductoBase(client, {
-            nombre, sucursalId, proveedorId, costoUnit, unidad, clienteOrig, precioVenta,
+            nombre, sucursalId, proveedorId, costoUnit, unidad, clienteOrig, precioVenta, lineaId,
           });
 
           const { id: atributoId, nuevo: atrNuevo } = await _resolverAtributo(
@@ -424,19 +458,20 @@ const importarCantidad = async (filas, sucursalId, negocioId, config = {}) => {
                  unidad_medida  = COALESCE(NULLIF($4,''), unidad_medida),
                  cliente_origen = COALESCE($5, cliente_origen),
                  proveedor_id   = COALESCE($6, proveedor_id),
-                 precio         = COALESCE($7, precio)
-               WHERE id = $8`,
-              [stock, stockMinimo, costoUnit, unidad, clienteOrig, proveedorId, precioVenta, existe[0].id]
+                 precio         = COALESCE($7, precio),
+                 linea_id       = COALESCE($8, linea_id)
+               WHERE id = $9`,
+              [stock, stockMinimo, costoUnit, unidad, clienteOrig, proveedorId, precioVenta, lineaId, existe[0].id]
             );
             resultado.actualizados++;
           } else {
             await client.query(
               `INSERT INTO productos_cantidad
                  (sucursal_id, proveedor_id, nombre, stock, stock_minimo,
-                  costo_unitario, unidad_medida, cliente_origen, precio)
-               VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+                  costo_unitario, unidad_medida, cliente_origen, precio, linea_id)
+               VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
               [sucursalId, proveedorId, nombre, stock, stockMinimo,
-               costoUnit, unidad, clienteOrig, precioVenta]
+               costoUnit, unidad, clienteOrig, precioVenta, lineaId]
             );
             resultado.insertados++;
           }

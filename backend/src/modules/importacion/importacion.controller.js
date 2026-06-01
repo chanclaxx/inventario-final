@@ -2,8 +2,9 @@ const XLSX        = require('xlsx');
 const service     = require('./importacion.service');
 const { generarPlantillaBuffer } = require('./importacion.plantilla');
 const configRepo  = require('../config/config.repository');
+const lineasRepo  = require('../lineas/lineas.repository');
 
-const HOJAS_RESERVADAS = ['instrucciones', 'productos cantidad', 'cantidad'];
+const HOJAS_RESERVADAS = ['instrucciones', 'productos cantidad', 'cantidad', 'ejemplo producto'];
 
 const _esHojaSerial = (nombre) =>
   !HOJAS_RESERVADAS.includes(nombre.toLowerCase().trim());
@@ -25,8 +26,11 @@ const _normalizarFila = (fila) => {
 const generarPlantilla = async (req, res, next) => {
   try {
     const negocioId = req.user.negocio_id;
-    const config    = await configRepo.getMap(negocioId);
-    const buffer    = generarPlantillaBuffer(config);
+    const [config, lineas] = await Promise.all([
+      configRepo.getMap(negocioId),
+      lineasRepo.findAll(negocioId),
+    ]);
+    const buffer    = generarPlantillaBuffer(config, lineas);
 
     res.setHeader('Content-Type',        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', 'attachment; filename="plantilla_inventario.xlsx"');
@@ -67,9 +71,7 @@ const importarInventario = async (req, res, next) => {
           .map(_normalizarFila)
           .filter((f) => f.imei?.toString().trim());
 
-        if (datos.length > 0) {
-          hojas.push({ nombreProducto: nombreHoja.trim(), filas: datos });
-        }
+        hojas.push({ nombreProducto: nombreHoja.trim(), filas: datos });
       }
 
       if (hojas.length > 0) {

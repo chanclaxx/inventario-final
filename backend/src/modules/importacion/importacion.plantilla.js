@@ -13,6 +13,7 @@ const C = {
   cantidadFondo:    '0369A1',
   varianteFondo:    '0F766E',  // teal para columna Atributo
   subvarianteFondo: '115E59',  // teal oscuro para columna Variante
+  lineaFondo:       'D97706',  // amber para columna Línea
   datoFondo:        'F8FAFC',
   datoFondoAlt:     'EFF6FF',
   borde:            'CBD5E1',
@@ -69,7 +70,7 @@ const NUM_FILAS_DATOS = 200;
 // ─── Hoja serial ─────────────────────────────────────────────────────────────
 // Estructura: fila 0 = título, fila 1 = claves (usadas como headers por sheet_to_json),
 //             fila 2 = descripciones (slice(1) la descarta), filas 3+ = datos vacíos
-function hojaSerial(nombreProducto, coloresActivo, coloresLista, caracteristicasActivo, caracteristicasLista) {
+function hojaSerial(nombreProducto, coloresActivo, coloresLista, caracteristicasActivo, caracteristicasLista, lineas = []) {
   const ws = {};
 
   // ── Columnas dinámicas ────────────────────────────────────────────────────
@@ -81,6 +82,14 @@ function hojaSerial(nombreProducto, coloresActivo, coloresLista, caracteristicas
     { clave: 'Proveedor',      desc: 'Opcional · Nombre del proveedor',                   bg: C.headerFondo, num: false },
     { clave: 'Marca',          desc: 'Opcional · Ej: Apple, Samsung',                     bg: C.headerFondo, num: false },
     { clave: 'Modelo',         desc: 'Opcional · Ej: 128GB / Pro Max',                   bg: C.headerFondo, num: false },
+    {
+      clave: 'Linea',
+      desc:  lineas.length > 0
+        ? `Opcional · Categoría del producto (${lineas.slice(0, 5).map(l => l.nombre).join(', ')}${lineas.length > 5 ? '…' : ''})`
+        : 'Opcional · Categoría o línea del producto (escribe el nombre)',
+      bg:    C.lineaFondo,
+      num:   false,
+    },
   ];
 
   if (coloresActivo) {
@@ -156,12 +165,30 @@ function hojaSerial(nombreProducto, coloresActivo, coloresLista, caracteristicas
     }
   }
 
+  // Dropdown de líneas (sugerido, permite texto libre para crear líneas nuevas)
+  if (lineas.length > 0) {
+    const linIdx = columnas.findIndex((col) => col.clave === 'Linea');
+    if (linIdx >= 0) {
+      const colLetter = XLSX.utils.encode_col(linIdx);
+      const listaStr  = _listaDropdown(lineas.map((l) => l.nombre));
+      ws['!dataValidation'] = ws['!dataValidation'] || [];
+      ws['!dataValidation'].push({
+        sqref:            `${colLetter}4:${colLetter}${3 + NUM_FILAS_DATOS}`,
+        type:             'list',
+        formula1:         `"${listaStr}"`,
+        showDropDown:     false,
+        showErrorMessage: false,
+      });
+    }
+  }
+
   seal(ws, 3 + NUM_FILAS_DATOS - 1, numCols);
   freeze(ws);
   ws['!cols'] = columnas.map(({ clave }) => {
     if (clave.includes('IMEI'))   return { wch: 22 };
     if (clave === 'Fecha Entrada') return { wch: 16 };
     if (clave === 'Color')         return { wch: 16 };
+    if (clave === 'Linea')         return { wch: 22 };
     if (clave === 'Precio' || clave === 'Costo Compra') return { wch: 16 };
     if (clave === 'Cliente Origen') return { wch: 22 };
     return { wch: 18 };
@@ -172,9 +199,18 @@ function hojaSerial(nombreProducto, coloresActivo, coloresLista, caracteristicas
 }
 
 // ─── Hoja cantidad ────────────────────────────────────────────────────────────
-function hojaCantidad(variantesActivo = false) {
+function hojaCantidad(variantesActivo = false, lineas = []) {
   const columnas = [
     { clave: 'Nombre *',       desc: 'Requerido · Nombre del producto',                             bg: C.requerido,         num: false, wch: 30 },
+    {
+      clave: 'Linea',
+      desc:  lineas.length > 0
+        ? `Opcional · Categoría (${lineas.slice(0, 5).map(l => l.nombre).join(', ')}${lineas.length > 5 ? '…' : ''})`
+        : 'Opcional · Línea o categoría del producto (escribe el nombre)',
+      bg:    C.lineaFondo,
+      num:   false,
+      wch:   22,
+    },
   ];
 
   if (variantesActivo) {
@@ -216,6 +252,23 @@ function hojaCantidad(variantesActivo = false) {
     columnas.forEach(({ num }, c) => {
       put(ws, r, c, 's', '', num ? sCeldaNum(alterno) : sCelda(alterno));
     });
+  }
+
+  // Dropdown de líneas en hoja cantidad
+  if (lineas.length > 0) {
+    const linIdx = columnas.findIndex((col) => col.clave === 'Linea');
+    if (linIdx >= 0) {
+      const colLetter = XLSX.utils.encode_col(linIdx);
+      const listaStr  = _listaDropdown(lineas.map((l) => l.nombre));
+      ws['!dataValidation'] = ws['!dataValidation'] || [];
+      ws['!dataValidation'].push({
+        sqref:            `${colLetter}4:${colLetter}${3 + NUM_FILAS_DATOS}`,
+        type:             'list',
+        formula1:         `"${listaStr}"`,
+        showDropDown:     false,
+        showErrorMessage: false,
+      });
+    }
   }
 
   seal(ws, 3 + NUM_FILAS_DATOS - 1, numCols);
@@ -286,6 +339,7 @@ function hojaInstrucciones(config) {
   const leyenda = [
     [C.requerido,         'Columna OBLIGATORIA'],
     [C.headerFondo,       'Columna opcional estándar'],
+    [C.lineaFondo,        'Columna de Línea/categoría (desplegable si hay líneas creadas, o escribe el nombre)'],
     [C.colorFondo,        'Columna de color (activa según tu configuración)'],
     [C.caracterFondo,     'Columna de característica (activa según tu configuración)'],
     [C.precioFondo,       'Columna de precio'],
@@ -322,8 +376,22 @@ function _parseLista(valor) {
   catch { return []; }
 }
 
+// Construye la cadena para formula1 del dropdown de Excel (máx ~250 chars)
+function _listaDropdown(nombres, maxLen = 250) {
+  const result = [];
+  let len = 0;
+  for (const n of nombres) {
+    const sep  = result.length === 0 ? '' : ',';
+    const part = `${sep}${n}`;
+    if (len + part.length > maxLen) break;
+    result.push(n);
+    len += part.length;
+  }
+  return result.join(',');
+}
+
 // ─── Export principal ─────────────────────────────────────────────────────────
-function generarPlantillaBuffer(config = {}) {
+function generarPlantillaBuffer(config = {}, lineas = []) {
   const coloresActivo         = config.colores_serial_activo === '1';
   const caracteristicasActivo = config.caracteristicas_serial_activo === '1';
   const variantesActivo       = config.variantes_activo === '1';
@@ -336,11 +404,11 @@ function generarPlantillaBuffer(config = {}) {
 
   XLSX.utils.book_append_sheet(
     wb,
-    hojaSerial('Ejemplo Producto', coloresActivo, coloresLista, caracteristicasActivo, caracteristicasLista),
+    hojaSerial('Ejemplo Producto', coloresActivo, coloresLista, caracteristicasActivo, caracteristicasLista, lineas),
     'Ejemplo Producto'
   );
 
-  XLSX.utils.book_append_sheet(wb, hojaCantidad(variantesActivo), 'Productos Cantidad');
+  XLSX.utils.book_append_sheet(wb, hojaCantidad(variantesActivo, lineas), 'Productos Cantidad');
 
   return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx', cellStyles: true });
 }
