@@ -29,6 +29,7 @@ import { ModalImprimirPrestamo }                from '../../components/ui/ModalI
 import { TabCreditos }                          from './TabCreditos';
 import { ModalRetomaDirecta }                   from './ModalRetomaDirecta';
 import { EstadoDeCuenta }                       from './EstadoDeCuenta';
+import { ModalAbonoTotal }                      from './ModalAbonoTotal';
 import { useMetodosPago }                       from '../../hooks/useMetodosPago';
 import { ModalExportarPdfPrestamos }             from './ModalExportarPdfPrestamos';
 import api                                      from '../../api/axios.config';
@@ -40,7 +41,7 @@ import {
   Handshake, CreditCard, Bike, Plus, CheckCircle,
   ChevronDown, ChevronUp, ChevronLeft, ChevronRight,
   Users, User, AlertTriangle, FileDown, Loader2, Printer, Search, Wallet,
-  ArrowLeftRight, Package, ShoppingBag, XCircle, SlidersHorizontal, UserPlus, Pencil, Settings,
+  ArrowLeftRight, Package, ShoppingBag, XCircle, SlidersHorizontal, UserPlus, Pencil, Settings, Layers,
 } from 'lucide-react';
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
@@ -1187,13 +1188,18 @@ function HistorialPrestamo({ prestamoId, prestamoEstado }) {
                 <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${badgeClass}`}>
                   {METODO_LABEL[abono.metodo] ?? abono.metodo}
                 </span>
+                {abono.abono_total_id && (
+                  <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700">
+                    Pago total {formatCOP(abono.abono_total_valor)}
+                  </span>
+                )}
                 <span className="text-xs text-gray-400">{formatFechaHora(abono.fecha)}</span>
               </div>
               <div className="flex items-center gap-2">
                 <span className="text-sm font-semibold text-green-600 flex-shrink-0">
                   + {formatCOP(abono.valor)}
                 </span>
-                {!confirmando && (
+                {!confirmando && !abono.abono_total_id && (
                   <button
                     onClick={() => setConfirmandoId(abono.id)}
                     title="Anular abono"
@@ -1426,6 +1432,7 @@ function VistaDetallePersona({ nombre, tipo, personaId, prestamos, saldoAFavor =
   const [aplicandoSaldoId,    setAplicandoSaldoId]    = useState(null);
   const [resultadoSaldo,      setResultadoSaldo]      = useState(null);
   const [editandoPrestamo,    setEditandoPrestamo]    = useState(null);
+  const [modalAbonoTotal,     setModalAbonoTotal]     = useState(null); // null | { mode, abonoTotalId?, valorActual?, metodoActual? }
 
   const tipoApi = tipo === 'companero' ? 'prestatario' : tipo;
 
@@ -1587,6 +1594,14 @@ function VistaDetallePersona({ nombre, tipo, personaId, prestamos, saldoAFavor =
               border border-amber-200 text-amber-700 bg-amber-50 hover:bg-amber-100 transition-colors">
             <SlidersHorizontal size={12} /> Ajuste de cuentas
           </button>
+          {activosAll.length > 1 && (
+            <button
+              onClick={() => setModalAbonoTotal({ mode: 'crear' })}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium
+                border border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100 transition-colors">
+              <Layers size={12} /> Abono total
+            </button>
+          )}
           <button
             onClick={onRegistrarSaldo}
             className="flex items-center gap-1.5 text-xs font-medium text-gray-400
@@ -1615,7 +1630,16 @@ function VistaDetallePersona({ nombre, tipo, personaId, prestamos, saldoAFavor =
 
       {/* ── Tab: Estado de cuenta ── */}
       {tabDetalle === 'cuenta' && (
-        <EstadoDeCuenta tipo={tipo} personaId={personaId} />
+        <EstadoDeCuenta
+          tipo={tipo}
+          personaId={personaId}
+          onEditarAbonoTotal={(mov) => setModalAbonoTotal({
+            mode:         'editar',
+            abonoTotalId: mov.referencia_id,
+            valorActual:  mov.abono,
+            metodoActual: mov.concepto?.replace('Pago total ', '') || 'Efectivo',
+          })}
+        />
       )}
 
       {/* ── Tab: Préstamos ── */}
@@ -1851,6 +1875,21 @@ function VistaDetallePersona({ nombre, tipo, personaId, prestamos, saldoAFavor =
             <Button onClick={() => setResultadoSaldo(null)}>Cerrar</Button>
           </div>
         </Modal>
+      )}
+
+      {/* Modal abono total */}
+      {modalAbonoTotal && (
+        <ModalAbonoTotal
+          nombre={nombre}
+          tipo={tipo}
+          personaId={personaId}
+          prestamos={prestamos}
+          mode={modalAbonoTotal.mode}
+          abonoTotalId={modalAbonoTotal.abonoTotalId}
+          valorActual={modalAbonoTotal.valorActual}
+          metodoActual={modalAbonoTotal.metodoActual}
+          onClose={() => setModalAbonoTotal(null)}
+        />
       )}
     </div>
   );

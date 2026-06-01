@@ -79,9 +79,12 @@ const getAbonos = async (prestamoId) => {
   const { rows } = await pool.query(`
     SELECT
       ap.id, ap.prestamo_id, ap.fecha, ap.valor, ap.metodo,
+      ap.abono_total_id,
+      at.valor_total AS abono_total_valor,
       u.nombre AS usuario_nombre
     FROM abonos_prestamo ap
-    LEFT JOIN usuarios u ON u.id = ap.usuario_id
+    LEFT JOIN usuarios      u  ON u.id  = ap.usuario_id
+    LEFT JOIN abonos_totales at ON at.id = ap.abono_total_id
     WHERE ap.prestamo_id = $1
     ORDER BY ap.fecha
   `, [prestamoId]);
@@ -686,13 +689,15 @@ const getEstadoCuenta = async (executor, negocioId, tipo, personaId, sucursalId 
     : 'p.cliente_id = $2';
 
   const params = [negocioId, personaId, tipo];
-  let filtroSucursalPrestamo = '';
-  let filtroSucursalRetoma   = '';
+  let filtroSucursalPrestamo  = '';
+  let filtroSucursalRetoma    = '';
+  let filtroSucursalAbonoTotal = '';
   if (sucursalId) {
     params.push(sucursalId);
     const n = params.length;
-    filtroSucursalPrestamo = `AND p.sucursal_id = $${n}`;
-    filtroSucursalRetoma   = `AND r.sucursal_id = $${n}`;
+    filtroSucursalPrestamo   = `AND p.sucursal_id  = $${n}`;
+    filtroSucursalRetoma     = `AND r.sucursal_id  = $${n}`;
+    filtroSucursalAbonoTotal = `AND at.sucursal_id = $${n}`;
   }
 
   const { rows } = await executor.query(`
@@ -717,7 +722,7 @@ const getEstadoCuenta = async (executor, negocioId, tipo, personaId, sucursalId 
 
       UNION ALL
 
-      -- Abonos a préstamos (reducen deuda)
+      -- Abonos a préstamos individuales (excluye los que forman parte de un abono total)
       SELECT
         ap.fecha,
         CASE ap.metodo
@@ -740,7 +745,28 @@ const getEstadoCuenta = async (executor, negocioId, tipo, personaId, sucursalId 
       JOIN prestamos  p  ON p.id  = ap.prestamo_id
       JOIN sucursales su ON su.id = p.sucursal_id
       WHERE su.negocio_id = $1 AND ${filtroPersona}
+        AND ap.abono_total_id IS NULL
         ${filtroSucursalPrestamo}
+
+      UNION ALL
+
+      -- Abonos totales (un solo entry por pago masivo)
+      SELECT
+        at.fecha,
+        'abono_total'::text                            AS tipo,
+        'Pago total ' || at.metodo                    AS concepto,
+        NULL::numeric                                  AS cargo,
+        at.valor_total::numeric                        AS abono,
+        at.id                                          AS referencia_id,
+        false                                          AS anulable,
+        NULL::integer                                  AS prestamo_id,
+        NULL::text                                     AS prestamo_estado
+      FROM abonos_totales at
+      JOIN sucursales su ON su.id = at.sucursal_id
+      WHERE su.negocio_id = $1
+        AND at.tipo_persona = $3
+        AND at.persona_id   = $2
+        ${filtroSucursalAbonoTotal}
 
       UNION ALL
 
@@ -860,6 +886,56 @@ const sincronizarStockArbolEnTx = async (client, productoId) => {
   );
 };
 
+// ── Abono total: insertar registro maestro ────────────────────────────────────
+const insertarAbonoTotal = async (client, { tipo_persona, persona_id, sucursal_id, valor_total, metodo, usuario_id }) => {
+  const { rows } = await client.query(`
+    INSERT INTO abonos_totales(tipo_persona, persona_id, sucursal_id, valor_total, metodo, usuario_id)
+    VALUES ($1, $2, $3, $4, $5, $6)
+    RETURNING *
+  `, [tipo_persona, persona_id, sucursal_id, valor_total, metodo || 'Efectivo', usuario_id || null]);
+  return rows[0];
+};
+
+// ── Préstamos activos de una persona ordenados FIFO (más antiguo primero) ─────
+const getPrestamoActivosPorPersona = async (tipo, personaId, negocioId) => {
+  const col = tipo === 'prestatario' ? 'p.prestatario_id' : 'p.cliente_id';
+  const { rows } = await pool.query(`
+    SELECT p.id, p.fecha, p.nombre_producto, p.imei, p.sucursal_id,
+           p.valor_prestamo, p.total_abonado, p.estado, p.producto_id,
+           p.cedula, p.telefono, p.prestatario, p.cliente_id, p.prestatario_id,
+           p.atributo_id, p.variante_id
+    FROM prestamos p
+    JOIN sucursales su ON su.id = p.sucursal_id
+    WHERE ${col} = $1 AND su.negocio_id = $2 AND p.estado = 'Activo'
+    ORDER BY p.fecha ASC
+  `, [personaId, negocioId]);
+  return rows;
+};
+
+// ── Obtener un abono_total verificando que pertenece al negocio ────────────────
+const getAbonoTotalById = async (id, negocioId) => {
+  const { rows } = await pool.query(`
+    SELECT at.*
+    FROM abonos_totales at
+    JOIN sucursales su ON su.id = at.sucursal_id
+    WHERE at.id = $1 AND su.negocio_id = $2
+  `, [id, negocioId]);
+  return rows[0] || null;
+};
+
+// ── Abonos individuales que pertenecen a un abono_total (para reversión) ──────
+const getAbonosPorTotal = async (client, abonoTotalId) => {
+  const { rows } = await client.query(`
+    SELECT ap.id, ap.prestamo_id, ap.valor,
+           p.valor_prestamo, p.total_abonado, p.estado, p.imei, p.sucursal_id
+    FROM abonos_prestamo ap
+    JOIN prestamos p ON p.id = ap.prestamo_id
+    WHERE ap.abono_total_id = $1
+    ORDER BY p.fecha ASC
+  `, [abonoTotalId]);
+  return rows;
+};
+
 module.exports = {
   crearAjusteDeuda,
   findAll, findById, findByIdYNegocio,
@@ -883,4 +959,6 @@ module.exports = {
   findRetomasDirectasPorPersona, getEstadoCuenta,
   ajustarStockAtributoEnTx, ajustarStockVarianteEnTx, sincronizarStockArbolEnTx,
   getGarantiasPorPrestamo,
+  // abono total
+  insertarAbonoTotal, getPrestamoActivosPorPersona, getAbonoTotalById, getAbonosPorTotal,
 };

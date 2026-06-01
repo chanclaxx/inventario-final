@@ -59,6 +59,12 @@ router.post('/batch', requireModulo('prestamos'), validarPrestamos, validate, ct
 router.patch(  '/personas/:tipo/:id/saldo-a-favor',       requireModulo('prestamos'), validarSaldoAFavor,    validate, ctrl.registrarSaldoAFavor);
 router.get(    '/personas/:tipo/:id/resumen',              requireModulo('prestamos'), ctrl.getResumenCartera);
 router.post(   '/personas/:tipo/:id/aplicar-saldo',        requireModulo('prestamos'), ctrl.aplicarSaldoAPrestamos);
+router.post(   '/personas/:tipo/:id/abono-total',          requireModulo('prestamos'),
+  body('valor_total').isFloat({ gt: 0 }).withMessage('El valor total debe ser mayor a 0'),
+  validate, ctrl.registrarAbonoTotal);
+router.patch(  '/abonos-totales/:abonoTotalId',            requireModulo('prestamos'),
+  body('valor_total').isFloat({ gt: 0 }).withMessage('El valor total debe ser mayor a 0'),
+  validate, ctrl.modificarAbonoTotal);
 router.get(    '/personas/:tipo/:id/retomas-directas',     requireModulo('prestamos'), ctrl.getRetomasDirectas);
 router.get(    '/personas/:tipo/:id/estado-cuenta',        requireModulo('prestamos'), ctrl.getEstadoCuenta);
 router.get(    '/personas/:tipo/:id/saldo-sucursal',       requireModulo('prestamos'), ctrl.getSaldoSucursal);

@@ -423,6 +423,34 @@ const crearAjusteDeuda = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+const registrarAbonoTotal = async (req, res, next) => {
+  try {
+    const { tipo, id } = req.params;
+    const { valor_total, metodo } = req.body;
+    if (!valor_total || valor_total <= 0) {
+      return res.status(400).json({ ok: false, error: 'El valor total debe ser mayor a 0' });
+    }
+    const data = await service.registrarAbonoTotal(
+      req.user.negocio_id, tipo, id, Number(valor_total), metodo, req.user.id
+    );
+    res.json({ ok: true, data, message: 'Abono total registrado correctamente' });
+  } catch (err) { next(err); }
+};
+
+const modificarAbonoTotal = async (req, res, next) => {
+  try {
+    const { abonoTotalId } = req.params;
+    const { valor_total, metodo } = req.body;
+    if (!valor_total || valor_total <= 0) {
+      return res.status(400).json({ ok: false, error: 'El valor total debe ser mayor a 0' });
+    }
+    const data = await service.modificarAbonoTotal(
+      req.user.negocio_id, abonoTotalId, Number(valor_total), metodo
+    );
+    res.json({ ok: true, data, message: 'Abono total modificado correctamente' });
+  } catch (err) { next(err); }
+};
+
 module.exports = {
   getPrestamos, getPrestamoById,
   crearPrestamo, crearPrestamos,
@@ -435,4 +463,5 @@ module.exports = {
   anularAbono, getRetomasDirectas, anularRetomaDirecta,
   getEstadoCuenta, crearAjusteDeuda, editarValorPrestamo,
   getSaldoSucursal, getHistorialSaldoSucursal,
+  registrarAbonoTotal, modificarAbonoTotal,
 };

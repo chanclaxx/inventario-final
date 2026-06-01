@@ -1284,6 +1284,193 @@ const editarValorPrestamo = async (negocioId, prestamoId, nuevoValor) => {
   return repo.updateValorPrestamo(prestamoId, nuevoValor);
 };
 
+// ─── Servicio: registrar abono total (FIFO) ───────────────────────────────────
+// Distribuye un pago único entre los préstamos activos más antiguos primero.
+// No genera facturas individuales — un solo entry en estado de cuenta.
+
+const registrarAbonoTotal = async (negocioId, tipo, personaId, valorTotal, metodo, usuarioId) => {
+  if (tipo === 'prestatario') await _verificarPrestatario(personaId, negocioId);
+  else await _verificarCliente(personaId, negocioId);
+
+  const prestamosActivos = await repo.getPrestamoActivosPorPersona(tipo, personaId, negocioId);
+  if (!prestamosActivos.length) throw { status: 400, message: 'Esta persona no tiene préstamos activos' };
+
+  const totalPendiente = prestamosActivos.reduce(
+    (s, p) => s + Number(p.valor_prestamo) - Number(p.total_abonado), 0
+  );
+  if (valorTotal > totalPendiente) {
+    throw { status: 400, message: `El abono (${valorTotal}) supera el saldo total pendiente (${totalPendiente.toFixed(2)})` };
+  }
+
+  const sucId = prestamosActivos[0].sucursal_id;
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const abonoTotal = await repo.insertarAbonoTotal(client, {
+      tipo_persona: tipo,
+      persona_id:   personaId,
+      sucursal_id:  sucId,
+      valor_total:  valorTotal,
+      metodo,
+      usuario_id:   usuarioId || null,
+    });
+
+    let remaining = valorTotal;
+    const distribucion = [];
+
+    for (const prestamo of prestamosActivos) {
+      if (remaining <= 0) break;
+
+      const saldoPendiente = Number(prestamo.valor_prestamo) - Number(prestamo.total_abonado);
+      if (saldoPendiente <= 0) continue;
+
+      const abonoEste = Math.min(remaining, saldoPendiente);
+
+      await client.query(
+        `INSERT INTO abonos_prestamo(prestamo_id, valor, metodo, usuario_id, abono_total_id)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [prestamo.id, abonoEste, metodo, usuarioId || null, abonoTotal.id]
+      );
+
+      const { rows: upd } = await client.query(
+        `UPDATE prestamos SET total_abonado = total_abonado + $1
+         WHERE id = $2 RETURNING valor_prestamo, total_abonado`,
+        [abonoEste, prestamo.id]
+      );
+
+      const saldado = Number(upd[0].total_abonado) >= Number(upd[0].valor_prestamo);
+      if (saldado) {
+        await repo.updateEstado(client, prestamo.id, 'Saldado');
+        if (prestamo.imei) {
+          await client.query(
+            `UPDATE seriales s
+             SET vendido = true, prestado = false, fecha_salida = CURRENT_DATE
+             FROM productos_serial ps
+             WHERE s.imei = $1 AND ps.id = s.producto_id AND ps.sucursal_id = $2`,
+            [prestamo.imei, prestamo.sucursal_id]
+          );
+        }
+      }
+
+      distribucion.push({ prestamo_id: prestamo.id, nombre_producto: prestamo.nombre_producto, abono: abonoEste, saldado });
+      remaining -= abonoEste;
+    }
+
+    await client.query('COMMIT');
+    return { abonoTotal, distribucion };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+};
+
+// ─── Servicio: modificar abono total ─────────────────────────────────────────
+// Revierte todos los abonos individuales del total y re-distribuye con el nuevo valor.
+
+const modificarAbonoTotal = async (negocioId, abonoTotalId, nuevoValor, metodo) => {
+  const abonoTotal = await repo.getAbonoTotalById(abonoTotalId, negocioId);
+  if (!abonoTotal) throw { status: 404, message: 'Abono total no encontrado' };
+
+  const { tipo_persona: tipo, persona_id: personaId } = abonoTotal;
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // 1. Obtener abonos individuales de este total (FIFO)
+    const abonosExistentes = await repo.getAbonosPorTotal(client, abonoTotalId);
+    if (!abonosExistentes.length) throw { status: 400, message: 'No hay abonos asociados a este pago total' };
+
+    // Calcular máximo modificable (saldo pendiente real + lo que ya se pagó con este total)
+    const totalDisponible = abonosExistentes.reduce(
+      (s, a) => s + (Number(a.valor_prestamo) - Number(a.total_abonado)) + Number(a.valor), 0
+    );
+    if (nuevoValor > totalDisponible) {
+      throw { status: 400, message: `El nuevo valor supera el saldo disponible (${totalDisponible.toFixed(2)})` };
+    }
+
+    // 2. Revertir cada abono individual
+    for (const abono of abonosExistentes) {
+      await client.query(
+        'UPDATE prestamos SET total_abonado = total_abonado - $1 WHERE id = $2',
+        [abono.valor, abono.prestamo_id]
+      );
+      // Si el préstamo estaba Saldado y ahora no alcanza, restaurar a Activo
+      const { rows: pRows } = await client.query(
+        'SELECT total_abonado, valor_prestamo, estado FROM prestamos WHERE id = $1',
+        [abono.prestamo_id]
+      );
+      const p = pRows[0];
+      if (p.estado === 'Saldado' && Number(p.total_abonado) < Number(p.valor_prestamo)) {
+        await repo.updateEstado(client, abono.prestamo_id, 'Activo');
+        if (abono.imei) {
+          await client.query(
+            'UPDATE seriales SET vendido = false, prestado = true, fecha_salida = NULL WHERE imei = $1',
+            [abono.imei]
+          );
+        }
+      }
+      await client.query('DELETE FROM abonos_prestamo WHERE id = $1', [abono.id]);
+    }
+
+    // 3. Re-distribuir FIFO con nuevo valor
+    const prestamosActivos = await repo.getPrestamoActivosPorPersona(tipo, personaId, negocioId);
+    let remaining = nuevoValor;
+
+    for (const prestamo of prestamosActivos) {
+      if (remaining <= 0) break;
+      const saldoPendiente = Number(prestamo.valor_prestamo) - Number(prestamo.total_abonado);
+      if (saldoPendiente <= 0) continue;
+
+      const abonoEste = Math.min(remaining, saldoPendiente);
+
+      await client.query(
+        `INSERT INTO abonos_prestamo(prestamo_id, valor, metodo, usuario_id, abono_total_id)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [prestamo.id, abonoEste, metodo || abonoTotal.metodo, null, abonoTotalId]
+      );
+
+      const { rows: upd } = await client.query(
+        `UPDATE prestamos SET total_abonado = total_abonado + $1
+         WHERE id = $2 RETURNING valor_prestamo, total_abonado`,
+        [abonoEste, prestamo.id]
+      );
+
+      if (Number(upd[0].total_abonado) >= Number(upd[0].valor_prestamo)) {
+        await repo.updateEstado(client, prestamo.id, 'Saldado');
+        if (prestamo.imei) {
+          await client.query(
+            `UPDATE seriales s
+             SET vendido = true, prestado = false, fecha_salida = CURRENT_DATE
+             FROM productos_serial ps
+             WHERE s.imei = $1 AND ps.id = s.producto_id AND ps.sucursal_id = $2`,
+            [prestamo.imei, prestamo.sucursal_id]
+          );
+        }
+      }
+      remaining -= abonoEste;
+    }
+
+    // 4. Actualizar registro maestro
+    await client.query(
+      'UPDATE abonos_totales SET valor_total = $1, metodo = $2 WHERE id = $3',
+      [nuevoValor, metodo || abonoTotal.metodo, abonoTotalId]
+    );
+
+    await client.query('COMMIT');
+    return { ok: true };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+};
+
 module.exports = {
   getPrestamos, getPrestamoById,
   crearPrestamo, crearPrestamos,
@@ -1295,4 +1482,5 @@ module.exports = {
   anularAbono, anularRetomaDirecta, getRetomasDirectas,
   getEstadoCuenta, crearAjusteDeuda, editarValorPrestamo,
   getSaldoSucursalPersona, getHistorialSaldoSucursalPersona,
+  registrarAbonoTotal, modificarAbonoTotal,
 };

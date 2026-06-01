@@ -4,7 +4,7 @@ import { getEstadoCuenta } from '../../api/prestamos.api';
 import { anularAbono as anularAbonoApi, anularRetomaDirecta as anularRetomaDirectaApi } from '../../api/prestamos.api';
 import { formatCOP } from '../../utils/formatters';
 import { Spinner }   from '../../components/ui/Spinner';
-import { XCircle, TrendingDown, TrendingUp, ArrowLeftRight, Wallet, ChevronLeft, ChevronRight, ArrowUpDown, Pencil, MessageSquare, Table2 } from 'lucide-react';
+import { XCircle, TrendingDown, TrendingUp, ArrowLeftRight, Wallet, ChevronLeft, ChevronRight, ArrowUpDown, Pencil, MessageSquare, Table2, Layers } from 'lucide-react';
 import { ModalEditarValorPrestamo }      from './ModalEditarValorPrestamo';
 
 const PAGE_SIZE_MOVS = 20;
@@ -51,6 +51,14 @@ const TIPO_CONFIG = {
     bubbleBg:   'bg-purple-50 border border-purple-200',
     montoClass: 'text-purple-700',
   },
+  abono_total: {
+    badge:      'bg-indigo-100 text-indigo-700',
+    label:      'Pago total',
+    Icn:        Layers,
+    lado:       'izquierda',
+    bubbleBg:   'bg-indigo-50 border border-indigo-200',
+    montoClass: 'text-indigo-700',
+  },
 };
 
 function formatFecha(fechaStr) {
@@ -78,7 +86,7 @@ function SeparadorFecha({ fecha }) {
 
 // ─── Burbuja de chat por movimiento ──────────────────────────────────────────
 
-function BurbujaMensaje({ mov, onAnular, onEditar }) {
+function BurbujaMensaje({ mov, onAnular, onEditar, onEditarAbonoTotal }) {
   const cfg = TIPO_CONFIG[mov.tipo] || TIPO_CONFIG.abono;
   const Icn = cfg.Icn;
   const esDerecha = cfg.lado === 'derecha';
@@ -129,6 +137,14 @@ function BurbujaMensaje({ mov, onAnular, onEditar }) {
                 <Pencil size={13} />
               </button>
             )}
+            {mov.tipo === 'abono_total' && onEditarAbonoTotal && (
+              <button
+                onClick={() => onEditarAbonoTotal(mov)}
+                title="Modificar pago total"
+                className="text-gray-300 hover:text-indigo-500 transition-colors">
+                <Pencil size={13} />
+              </button>
+            )}
             {mov.anulable && (
               <button
                 onClick={() => onAnular(mov)}
@@ -146,7 +162,7 @@ function BurbujaMensaje({ mov, onAnular, onEditar }) {
 
 // ─── Fila de cuadrícula contable ─────────────────────────────────────────────
 
-function FilaTabla({ mov, onAnular, onEditar, isOdd }) {
+function FilaTabla({ mov, onAnular, onEditar, onEditarAbonoTotal, isOdd }) {
   const cfg = TIPO_CONFIG[mov.tipo] || TIPO_CONFIG.abono;
 
   return (
@@ -181,6 +197,12 @@ function FilaTabla({ mov, onAnular, onEditar, isOdd }) {
               <Pencil size={12} />
             </button>
           )}
+          {mov.tipo === 'abono_total' && onEditarAbonoTotal && (
+            <button onClick={() => onEditarAbonoTotal(mov)} title="Modificar pago total"
+              className="text-gray-300 hover:text-indigo-500 transition-colors">
+              <Pencil size={12} />
+            </button>
+          )}
           {mov.anulable && (
             <button onClick={() => onAnular(mov)} title="Anular"
               className="text-gray-300 hover:text-red-400 transition-colors">
@@ -195,7 +217,7 @@ function FilaTabla({ mov, onAnular, onEditar, isOdd }) {
 
 // ─── EstadoDeCuenta ───────────────────────────────────────────────────────────
 
-export function EstadoDeCuenta({ tipo, personaId }) {
+export function EstadoDeCuenta({ tipo, personaId, onEditarAbonoTotal }) {
   const queryClient = useQueryClient();
   const [confirmando, setConfirmando] = useState(null);
   const [editando,    setEditando]    = useState(null);
@@ -376,7 +398,7 @@ export function EstadoDeCuenta({ tipo, personaId }) {
               return (
                 <Fragment key={`${mov.tipo}-${mov.referencia_id}-${idx}`}>
                   {showSepFecha && <SeparadorFecha fecha={mov.fecha} />}
-                  <BurbujaMensaje mov={mov} onAnular={handleAnular} onEditar={handleEditar} />
+                  <BurbujaMensaje mov={mov} onAnular={handleAnular} onEditar={handleEditar} onEditarAbonoTotal={onEditarAbonoTotal} />
                 </Fragment>
               );
             })}
@@ -405,6 +427,7 @@ export function EstadoDeCuenta({ tipo, personaId }) {
                   mov={mov}
                   onAnular={handleAnular}
                   onEditar={handleEditar}
+                  onEditarAbonoTotal={onEditarAbonoTotal}
                   isOdd={idx % 2 !== 0}
                 />
               ))}

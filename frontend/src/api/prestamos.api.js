@@ -43,3 +43,8 @@ export const descargarPdfPrestamosActivos = (tipo, id) =>
   api.get(`/prestamos/pdf/${tipo}/${id}`, { responseType: 'blob' });
 export const descargarPdfEstadoCuenta = (tipo, id) =>
   api.get(`/prestamos/pdf/${tipo}/${id}/estado-cuenta`, { responseType: 'blob' });
+
+export const registrarAbonoTotal = (tipo, personaId, valor_total, metodo) =>
+  api.post(`/prestamos/personas/${tipo}/${personaId}/abono-total`, { valor_total, metodo });
+export const modificarAbonoTotal = (abonoTotalId, valor_total, metodo) =>
+  api.patch(`/prestamos/abonos-totales/${abonoTotalId}`, { valor_total, metodo });
