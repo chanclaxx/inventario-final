@@ -65,14 +65,14 @@ const buscarCompras = async (req, res, next) => {
 
 const buscarPrestamos = async (req, res, next) => {
   try {
-    const { q = '', estado = '', tipo = '', fechaDesde = '', fechaHasta = '' } = req.query;
+    const { q = '', estado = '', tipo = '', fechaDesde = '', fechaHasta = '', suc = '' } = req.query;
 
     const tieneAlgunFiltro = q.trim() || estado || tipo || fechaDesde || fechaHasta;
     if (!tieneAlgunFiltro) return res.json({ ok: true, data: [] });
 
     const { negocio_id, rol } = req.user;
     const data = await service.buscarPrestamos(
-      { q, estado, tipo, fechaDesde, fechaHasta },
+      { q, estado, tipo, fechaDesde, fechaHasta, suc },
       negocio_id, req.sucursal_id, rol,
     );
     res.json({ ok: true, data });

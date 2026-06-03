@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useContext } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { buscarPrestamos as buscarPrestamosApi } from '../../api/busqueda.api';
 import { exportarPrestamosExcel } from '../../utils/exportarPrestamosExcel';
@@ -34,6 +34,7 @@ import { useMetodosPago }                       from '../../hooks/useMetodosPago
 import { ModalExportarPdfPrestamos }             from './ModalExportarPdfPrestamos';
 import api                                      from '../../api/axios.config';
 import useSucursalStore                         from '../../store/sucursalStore';
+import { AuthContext }                          from '../../context/AuthContext.js';
 import {
   getProductosSerial, getProductosCantidad,
 }                                               from '../../api/productos.api';
@@ -2301,11 +2302,16 @@ function TarjetaResultadoPrestamo({ prestamo, onAbonar, onDevolver, onEditar }) 
 }
 
 function TabBusquedaPrestamos() {
-  const [q,          setQ]          = useState('');
-  const [estado,     setEstado]     = useState('');
-  const [tipo,       setTipo]       = useState('');
-  const [fechaDesde, setFechaDesde] = useState('');
-  const [fechaHasta, setFechaHasta] = useState('');
+  const { usuario }         = useContext(AuthContext);
+  const esAdmin             = usuario?.rol === 'admin_negocio';
+  const sucursalesStore     = useSucursalStore((s) => s.sucursales);
+
+  const [q,              setQ]              = useState('');
+  const [estado,         setEstado]         = useState('');
+  const [tipo,           setTipo]           = useState('');
+  const [fechaDesde,     setFechaDesde]     = useState('');
+  const [fechaHasta,     setFechaHasta]     = useState('');
+  const [sucursalFiltro, setSucursalFiltro] = useState('');
 
   const [prestamoAbono,   setPrestamoAbono]   = useState(null);
   const [prestamoDevol,   setPrestamoDevol]   = useState(null);
@@ -2314,10 +2320,11 @@ function TabBusquedaPrestamos() {
   const hasFilter = q.trim().length >= 2 || estado || tipo || fechaDesde || fechaHasta;
 
   const { data: resultados = [], isLoading } = useQuery({
-    queryKey: ['busqueda-prestamos', q, estado, tipo, fechaDesde, fechaHasta],
-    queryFn:  () => buscarPrestamosApi({ q: q.trim(), estado, tipo, fechaDesde, fechaHasta })
-      .then((r) => r.data.data),
-    // ✅ Después
+    queryKey: ['busqueda-prestamos', q, estado, tipo, fechaDesde, fechaHasta, sucursalFiltro],
+    queryFn:  () => buscarPrestamosApi({
+      q: q.trim(), estado, tipo, fechaDesde, fechaHasta,
+      ...(sucursalFiltro && { suc: sucursalFiltro }),
+    }).then((r) => r.data.data),
     enabled: !!hasFilter,
     staleTime: 30 * 1000,
   });
@@ -2327,7 +2334,7 @@ function TabBusquedaPrestamos() {
     .reduce((s, p) => s + Number(p.saldo_pendiente || 0), 0);
 
   const limpiar = () => {
-    setQ(''); setEstado(''); setTipo(''); setFechaDesde(''); setFechaHasta('');
+    setQ(''); setEstado(''); setTipo(''); setFechaDesde(''); setFechaHasta(''); setSucursalFiltro('');
   };
 
   return (
@@ -2376,6 +2383,24 @@ function TabBusquedaPrestamos() {
           );
         })}
       </div>
+
+      {/* Filtro sucursal — solo admin_negocio con múltiples sucursales */}
+      {esAdmin && sucursalesStore.length > 1 && (
+        <div className="flex flex-col gap-1">
+          <label className="text-xs font-medium text-gray-500">Sucursal</label>
+          <select
+            value={sucursalFiltro}
+            onChange={(e) => setSucursalFiltro(e.target.value)}
+            className="px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm text-gray-700
+              focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"
+          >
+            <option value="">Todas las sucursales</option>
+            {sucursalesStore.map((s) => (
+              <option key={s.id} value={String(s.id)}>{s.nombre}</option>
+            ))}
+          </select>
+        </div>
+      )}
 
       {/* Rango de fechas */}
       <div className="grid grid-cols-2 gap-2">
