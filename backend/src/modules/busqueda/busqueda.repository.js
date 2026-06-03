@@ -380,7 +380,6 @@ const buscarPrestamos = async ({ q, estado, tipo, fechaDesde, fechaHasta }, nego
     LEFT JOIN lineas_producto       lpc ON lpc.id = pc.linea_id
     WHERE ${conditions.join(' AND ')}
     ORDER BY p.fecha DESC
-    LIMIT 100
   `, params);
   return rows;
 };
