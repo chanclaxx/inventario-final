@@ -430,8 +430,12 @@ const registrarAbonoTotal = async (req, res, next) => {
     if (!valor_total || valor_total <= 0) {
       return res.status(400).json({ ok: false, error: 'El valor total debe ser mayor a 0' });
     }
+    const sucursal_id = req.todasSucursales ? req.body.sucursal_id : req.sucursal_id;
+    if (!sucursal_id) {
+      return res.status(400).json({ ok: false, error: 'Debes indicar la sucursal' });
+    }
     const data = await service.registrarAbonoTotal(
-      req.user.negocio_id, tipo, id, Number(valor_total), metodo, req.user.id
+      req.user.negocio_id, tipo, id, Number(valor_total), metodo, req.user.id, sucursal_id
     );
     res.json({ ok: true, data, message: 'Abono total registrado correctamente' });
   } catch (err) { next(err); }

@@ -1288,12 +1288,12 @@ const editarValorPrestamo = async (negocioId, prestamoId, nuevoValor) => {
 // Distribuye un pago único entre los préstamos activos más antiguos primero.
 // No genera facturas individuales — un solo entry en estado de cuenta.
 
-const registrarAbonoTotal = async (negocioId, tipo, personaId, valorTotal, metodo, usuarioId) => {
+const registrarAbonoTotal = async (negocioId, tipo, personaId, valorTotal, metodo, usuarioId, sucursalId) => {
   if (tipo === 'prestatario') await _verificarPrestatario(personaId, negocioId);
   else await _verificarCliente(personaId, negocioId);
 
-  const prestamosActivos = await repo.getPrestamoActivosPorPersona(pool, tipo, personaId, negocioId);
-  if (!prestamosActivos.length) throw { status: 400, message: 'Esta persona no tiene préstamos activos' };
+  const prestamosActivos = await repo.getPrestamoActivosPorPersona(pool, tipo, personaId, negocioId, sucursalId);
+  if (!prestamosActivos.length) throw { status: 400, message: 'Esta persona no tiene préstamos activos en esta sucursal' };
 
   const totalPendiente = prestamosActivos.reduce(
     (s, p) => s + Number(p.valor_prestamo) - Number(p.total_abonado), 0
@@ -1302,7 +1302,7 @@ const registrarAbonoTotal = async (negocioId, tipo, personaId, valorTotal, metod
     throw { status: 400, message: `El abono (${valorTotal}) supera el saldo total pendiente (${totalPendiente.toFixed(2)})` };
   }
 
-  const sucId = prestamosActivos[0].sucursal_id;
+  const sucId = sucursalId;
 
   const client = await pool.connect();
   try {
@@ -1422,7 +1422,7 @@ const modificarAbonoTotal = async (negocioId, abonoTotalId, nuevoValor, metodo) 
     }
 
     // 3. Re-distribuir FIFO con nuevo valor — usa client para ver los préstamos restaurados en esta transacción
-    const prestamosActivos = await repo.getPrestamoActivosPorPersona(client, tipo, personaId, negocioId);
+    const prestamosActivos = await repo.getPrestamoActivosPorPersona(client, tipo, personaId, negocioId, abonoTotal.sucursal_id);
     let remaining = nuevoValor;
 
     for (const prestamo of prestamosActivos) {

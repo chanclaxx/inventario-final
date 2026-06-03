@@ -898,8 +898,14 @@ const insertarAbonoTotal = async (client, { tipo_persona, persona_id, sucursal_i
 
 // ── Préstamos activos de una persona ordenados FIFO (más antiguo primero) ─────
 // executor puede ser pool o un client de transacción (para ver cambios no committed)
-const getPrestamoActivosPorPersona = async (executor, tipo, personaId, negocioId) => {
+const getPrestamoActivosPorPersona = async (executor, tipo, personaId, negocioId, sucursalId = null) => {
   const col = tipo === 'prestatario' ? 'p.prestatario_id' : 'p.cliente_id';
+  const params = [personaId, negocioId];
+  let filtroSucursal = '';
+  if (sucursalId) {
+    params.push(sucursalId);
+    filtroSucursal = `AND p.sucursal_id = $${params.length}`;
+  }
   const { rows } = await executor.query(`
     SELECT p.id, p.fecha, p.nombre_producto, p.imei, p.sucursal_id,
            p.valor_prestamo, p.total_abonado, p.estado, p.producto_id,
@@ -908,8 +914,9 @@ const getPrestamoActivosPorPersona = async (executor, tipo, personaId, negocioId
     FROM prestamos p
     JOIN sucursales su ON su.id = p.sucursal_id
     WHERE ${col} = $1 AND su.negocio_id = $2 AND p.estado = 'Activo'
+    ${filtroSucursal}
     ORDER BY p.fecha ASC
-  `, [personaId, negocioId]);
+  `, params);
   return rows;
 };
 
