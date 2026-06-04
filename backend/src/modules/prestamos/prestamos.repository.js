@@ -171,7 +171,7 @@ const crearAjusteDeuda = async ({ tipo, persona_id, valor, descripcion, sucursal
     ({ nombre, telefono } = rows[0]);
   } else {
     const { rows } = await pool.query(
-      'SELECT nombre, telefono FROM clientes WHERE id = $1 AND negocio_id = $2',
+      'SELECT nombre, celular AS telefono FROM clientes WHERE id = $1 AND negocio_id = $2',
       [persona_id, negocio_id]
     );
     if (!rows.length) return null;
