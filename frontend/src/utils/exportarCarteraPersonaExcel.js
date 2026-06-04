@@ -25,6 +25,8 @@ const C = {
   saldoApl_tx:    '0F766E',
   compraDirect_bg:'EDE9FE',   // lila          — compra de artículo → saldo
   compraDirect_tx:'5B21B6',
+  abonoTotal_bg:  'E0E7FF',   // índigo claro  — pago masivo distribuido
+  abonoTotal_tx:  '4338CA',
 
   // Estados de préstamo
   activo_bg:      'FFFFFF',
@@ -128,11 +130,12 @@ const sLeyenda = (bg) => ({
 // ─── Paleta por tipo de movimiento ───────────────────────────────────────────
 
 const TIPO_META = {
-  prestamo:      { bg: C.prestamo_bg,    tx: C.prestamo_tx,    label: '📤 Préstamo',            desc: 'Entrega de artículo (genera deuda)'       },
-  abono:         { bg: C.abono_bg,       tx: C.abono_tx,       label: '💵 Abono',               desc: 'Pago en efectivo / transferencia / tarjeta' },
-  pago_producto: { bg: C.pagoProd_bg,    tx: C.pagoProd_tx,    label: '🔄 Pago en producto',    desc: 'Entrega de artículo como pago'             },
-  saldo_aplicado:{ bg: C.saldoApl_bg,   tx: C.saldoApl_tx,    label: '🏦 Saldo aplicado',      desc: 'Saldo a favor utilizado para pagar'        },
-  compra_directa:{ bg: C.compraDirect_bg, tx: C.compraDirect_tx, label: '🛍️ Compra de artículo', desc: 'Artículo comprado → genera saldo a favor'  },
+  prestamo:      { bg: C.prestamo_bg,     tx: C.prestamo_tx,     label: '📤 Préstamo',            desc: 'Entrega de artículo (genera deuda)'                  },
+  abono:         { bg: C.abono_bg,        tx: C.abono_tx,        label: '💵 Abono',               desc: 'Pago en efectivo / transferencia / tarjeta'          },
+  abono_total:   { bg: C.abonoTotal_bg,   tx: C.abonoTotal_tx,   label: '💳 Pago total',          desc: 'Pago único distribuido entre varios préstamos activos' },
+  pago_producto: { bg: C.pagoProd_bg,     tx: C.pagoProd_tx,     label: '🔄 Pago en producto',    desc: 'Entrega de artículo como pago'                       },
+  saldo_aplicado:{ bg: C.saldoApl_bg,    tx: C.saldoApl_tx,    label: '🏦 Saldo aplicado',      desc: 'Saldo a favor utilizado para pagar'                  },
+  compra_directa:{ bg: C.compraDirect_bg, tx: C.compraDirect_tx, label: '🛍️ Compra de artículo', desc: 'Artículo comprado → genera saldo a favor'            },
 };
 
 // ─── Fecha helpers ────────────────────────────────────────────────────────────

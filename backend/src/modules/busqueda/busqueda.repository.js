@@ -384,10 +384,59 @@ const buscarPrestamos = async ({ q, estado, tipo, fechaDesde, fechaHasta }, nego
   return rows;
 };
 
+// ─── Búsqueda de abonos totales con filtros ───────────────────────────────────
+
+const buscarAbonosTotales = async ({ fechaDesde, fechaHasta, tipo }, negocioId, sucursalId) => {
+  // Solo es útil si hay filtro de fecha; sin él devolvemos vacío
+  if (!fechaDesde && !fechaHasta) return [];
+
+  const params     = [negocioId];
+  const conditions = ['su.negocio_id = $1'];
+  let   i          = 2;
+
+  if (sucursalId) {
+    conditions.push(`at.sucursal_id = $${i}`);
+    params.push(sucursalId);
+    i++;
+  }
+
+  if (tipo === 'companero') conditions.push(`at.tipo_persona = 'prestatario'`);
+  else if (tipo === 'cliente') conditions.push(`at.tipo_persona = 'cliente'`);
+
+  if (fechaDesde) {
+    conditions.push(`at.fecha::date >= $${i}`);
+    params.push(fechaDesde);
+    i++;
+  }
+
+  if (fechaHasta) {
+    conditions.push(`at.fecha::date <= $${i}`);
+    params.push(fechaHasta);
+    i++;
+  }
+
+  const { rows } = await pool.query(`
+    SELECT
+      at.id, at.fecha, at.tipo_persona, at.persona_id,
+      at.valor_total, at.metodo, at.sucursal_id,
+      su.nombre                          AS sucursal_nombre,
+      COALESCE(pr.nombre, c.nombre)      AS persona_nombre,
+      u.nombre                           AS usuario_nombre
+    FROM abonos_totales at
+    JOIN  sucursales    su ON su.id  = at.sucursal_id
+    LEFT JOIN prestatarios pr ON pr.id = at.persona_id AND at.tipo_persona = 'prestatario'
+    LEFT JOIN clientes     c  ON c.id  = at.persona_id AND at.tipo_persona = 'cliente'
+    LEFT JOIN usuarios     u  ON u.id  = at.usuario_id
+    WHERE ${conditions.join(' AND ')}
+    ORDER BY at.fecha DESC
+  `, params);
+  return rows;
+};
+
 module.exports = {
   buscarSerialPorIMEI, getVentasPorIMEI, getRetomasPorIMEI,
   getPrestamosPorIMEI, getTrasladosPorIMEI,
   buscarSeriales, buscarCantidad, getHistorialCantidad,
   buscarComprasPorIMEI, buscarComprasPorTexto,
-  buscarPrestamos,
+  buscarPrestamos, buscarAbonosTotales,
 };

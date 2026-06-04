@@ -2319,7 +2319,7 @@ function TabBusquedaPrestamos() {
 
   const hasFilter = q.trim().length >= 2 || estado || tipo || fechaDesde || fechaHasta;
 
-  const { data: resultados = [], isLoading } = useQuery({
+  const { data: searchData, isLoading } = useQuery({
     queryKey: ['busqueda-prestamos', q, estado, tipo, fechaDesde, fechaHasta, sucursalFiltro],
     queryFn:  () => buscarPrestamosApi({
       q: q.trim(), estado, tipo, fechaDesde, fechaHasta,
@@ -2328,6 +2328,9 @@ function TabBusquedaPrestamos() {
     enabled: !!hasFilter,
     staleTime: 30 * 1000,
   });
+
+  const resultados    = searchData?.prestamos    ?? [];
+  const abonosTotales = searchData?.abonosTotales ?? [];
 
   const totalSaldo = resultados
     .filter((p) => p.estado === 'Activo')
@@ -2455,7 +2458,7 @@ function TabBusquedaPrestamos() {
               )}
             </div>
             <Button size="sm" variant="secondary"
-              onClick={() => exportarPrestamosExcel(resultados, 'prestamos-filtrados')}>
+              onClick={() => exportarPrestamosExcel({ prestamos: resultados, abonosTotales }, 'prestamos-filtrados')}>
               <FileDown size={14} /> Exportar Excel
             </Button>
           </div>

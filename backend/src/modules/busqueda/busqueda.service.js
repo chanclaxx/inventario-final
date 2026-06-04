@@ -155,10 +155,14 @@ const buscarCompras = async (q, modo, negocioId, sucursalId, rol, proveedorIds =
 const buscarPrestamos = async (filtros, negocioId, sucursalId, rol) => {
   const admin = _esAdmin(rol);
   const { suc, ...filtrosSinSuc } = filtros;
-  // Admin: respeta filtro explícito de sucursal si se pasa; sin filtro muestra todas
-  // Supervisor/vendedor: siempre restringido a su sucursal asignada
   const filtroSucursal = admin ? (suc ? Number(suc) : null) : sucursalId;
-  return repo.buscarPrestamos(filtrosSinSuc, negocioId, filtroSucursal);
+
+  const [prestamos, abonosTotales] = await Promise.all([
+    repo.buscarPrestamos(filtrosSinSuc, negocioId, filtroSucursal),
+    repo.buscarAbonosTotales(filtrosSinSuc, negocioId, filtroSucursal),
+  ]);
+
+  return { prestamos, abonosTotales };
 };
 
 const getHistorialCantidad = async (productoId, negocioId) =>
