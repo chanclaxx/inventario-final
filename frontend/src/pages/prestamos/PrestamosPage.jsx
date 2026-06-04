@@ -2505,7 +2505,8 @@ function TabBusquedaPrestamos() {
 // ─── Página principal ─────────────────────────────────────────────────────────
 
 export default function PrestamosPage() {
-  const { coloresActivo } = useColoresConfig();
+  const { coloresActivo }  = useColoresConfig();
+  const sucursalActiva     = useSucursalStore((s) => s.sucursalActiva);
 
   const [tabPrincipal,         setTabPrincipal]         = useState('prestamos');
   const [tabPrestamos,         setTabPrestamos]         = useState('companeros');
@@ -2557,7 +2558,7 @@ export default function PrestamosPage() {
     : null;
 
   const { data: prestamosData, isLoading: loadingP } = useQuery({
-    queryKey: ['prestamos'],
+    queryKey: ['prestamos', sucursalActiva],
     queryFn:  () => getPrestamos().then((r) => r.data.data),
   });
 

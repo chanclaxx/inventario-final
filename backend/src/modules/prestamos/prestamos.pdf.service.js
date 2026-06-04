@@ -653,6 +653,7 @@ const generarPdfPrestamoIndividual = async ({ prestamoId, negocioId, negocioNomb
 const TIPO_LABEL = {
   prestamo:       { label: 'Préstamo',        bg: '#FFFBEB', text: '#D97706' },
   abono:          { label: 'Abono',           bg: '#ECFDF5', text: '#059669' },
+  abono_total:    { label: 'Pago total',      bg: '#EEF2FF', text: '#4338CA' },
   pago_producto:  { label: 'Pago producto',   bg: '#EFF6FF', text: '#2563EB' },
   saldo_aplicado: { label: 'Saldo aplicado',  bg: '#F0FDFA', text: '#0D9488' },
   compra_directa: { label: 'Compra artículo', bg: '#F5F3FF', text: '#7C3AED' },
