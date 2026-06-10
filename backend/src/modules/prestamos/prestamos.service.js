@@ -31,7 +31,7 @@ const _verificarPrestatario = async (prestatario_id, negocio_id) => {
 
 const _procesarItemPrestamo = async (client, {
   imei, producto_id, nombre_producto, cantidad_prestada, sucursal_id,
-  atributo_id, variante_id,
+  atributo_id, variante_id, prestamo_id,
 }) => {
   if (imei) {
     const { rows } = await client.query(
@@ -46,9 +46,13 @@ const _procesarItemPrestamo = async (client, {
     if (rows[0].prestado) {
       throw { status: 400, message: `El equipo ${imei} ya tiene un préstamo activo. Devuélvelo antes de crear uno nuevo.` };
     }
+    // Excluye el préstamo recién insertado en esta misma transacción:
+    // repo.create() corre ANTES de esta validación, así que sin el filtro
+    // el chequeo se encontraría a sí mismo y bloquearía todo préstamo.
     const { rows: activoRows } = await client.query(
-      `SELECT id FROM prestamos WHERE imei = $1 AND estado = 'Activo' AND sucursal_id = $2`,
-      [imei, sucursal_id]
+      `SELECT id FROM prestamos
+       WHERE imei = $1 AND estado = 'Activo' AND sucursal_id = $2 AND id <> $3`,
+      [imei, sucursal_id, prestamo_id ?? 0]
     );
     if (activoRows.length) {
       throw { status: 400, message: `Ya existe un préstamo activo con el equipo ${imei} (préstamo #${activoRows[0].id}). Devuélvelo antes de crear uno nuevo.` };
@@ -241,6 +245,7 @@ const crearPrestamo = async ({
       sucursal_id,
       atributo_id: atributo_id || null,
       variante_id: variante_id || null,
+      prestamo_id: prestamo.id,
     });
 
     await client.query('COMMIT');
@@ -302,6 +307,7 @@ const crearPrestamos = async ({
         sucursal_id,
         atributo_id:       item.atributo_id  || null,
         variante_id:       item.variante_id  || null,
+        prestamo_id:       prestamo.id,
       });
 
       prestamosCreados.push(prestamo);
