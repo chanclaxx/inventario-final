@@ -47,16 +47,21 @@ const _procesarItemPrestamo = async (client, {
       throw { status: 400, message: `El equipo ${imei} ya tiene un préstamo activo. Devuélvelo antes de crear uno nuevo.` };
     }
     const { rows: activoRows } = await client.query(
-      `SELECT id FROM prestamos WHERE imei = $1 AND estado = 'Activo'`,
-      [imei]
+      `SELECT id FROM prestamos WHERE imei = $1 AND estado = 'Activo' AND sucursal_id = $2`,
+      [imei, sucursal_id]
     );
     if (activoRows.length) {
       throw { status: 400, message: `Ya existe un préstamo activo con el equipo ${imei} (préstamo #${activoRows[0].id}). Devuélvelo antes de crear uno nuevo.` };
     }
-    await client.query(
-      'UPDATE seriales SET prestado = true WHERE id = $1',
+    // prestado = false en el WHERE cierra la ventana de carrera si llegan
+    // dos requests simultáneos que leyeron el mismo estado del serial
+    const { rowCount } = await client.query(
+      'UPDATE seriales SET prestado = true WHERE id = $1 AND prestado = false',
       [rows[0].id]
     );
+    if (!rowCount) {
+      throw { status: 400, message: `El equipo ${imei} ya tiene un préstamo activo. Devuélvelo antes de crear uno nuevo.` };
+    }
   } else if (producto_id) {
     if (variante_id) {
       const { rows: varRows } = await client.query(

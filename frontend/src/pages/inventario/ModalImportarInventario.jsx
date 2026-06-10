@@ -99,6 +99,7 @@ export function ModalImportarInventario({ onClose }) {
     mutationFn: (formData) =>
       api.post('/importacion/inventario', formData, {
         params: sucursalActiva ? { sucursal_id: sucursalActiva } : undefined,
+        timeout: 120000, // archivos grandes pueden tardar más que el timeout global
       }),
     onSuccess: (res) => {
   setResultado(res.data.data);

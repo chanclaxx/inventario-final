@@ -6,6 +6,10 @@ const api = axios.create({
     ? `${import.meta.env.VITE_API_URL}/api`
     : '/api',
   withCredentials : true,
+  // Evita peticiones colgadas indefinidamente (sin esto, un request que el
+  // servidor nunca responde deja el botón girando para siempre).
+  // Las peticiones largas legítimas (importación Excel) lo sobreescriben.
+  timeout : 30000,
 });
 
 // ── Constantes ────────────────────────────────────────────────
