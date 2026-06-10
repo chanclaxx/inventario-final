@@ -35,13 +35,23 @@ const _procesarItemPrestamo = async (client, {
 }) => {
   if (imei) {
     const { rows } = await client.query(
-      `SELECT s.id FROM seriales s
+      `SELECT s.id, s.prestado FROM seriales s
        JOIN productos_serial ps ON ps.id = s.producto_id
        WHERE s.imei = $1 AND ps.sucursal_id = $2`,
       [imei, sucursal_id]
     );
     if (!rows.length) {
       throw { status: 400, message: `El producto ${nombre_producto} no pertenece a esta sucursal` };
+    }
+    if (rows[0].prestado) {
+      throw { status: 400, message: `El equipo ${imei} ya tiene un préstamo activo. Devuélvelo antes de crear uno nuevo.` };
+    }
+    const { rows: activoRows } = await client.query(
+      `SELECT id FROM prestamos WHERE imei = $1 AND estado = 'Activo'`,
+      [imei]
+    );
+    if (activoRows.length) {
+      throw { status: 400, message: `Ya existe un préstamo activo con el equipo ${imei} (préstamo #${activoRows[0].id}). Devuélvelo antes de crear uno nuevo.` };
     }
     await client.query(
       'UPDATE seriales SET prestado = true WHERE id = $1',

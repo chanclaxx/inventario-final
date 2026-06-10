@@ -362,7 +362,13 @@ export function ModalPrestamo({ open, onClose }) {
       onClose();
       resetForm();
     },
-    onError: (err) => setError(err.response?.data?.error || 'Error al registrar el préstamo'),
+    onError: (err) => {
+      if (!err.response) {
+        setError('Error de conexión. Verifica en la lista de préstamos si el préstamo fue creado antes de intentar de nuevo.');
+      } else {
+        setError(err.response?.data?.error || 'Error al registrar el préstamo');
+      }
+    },
   });
 
   const resetForm = () => {
