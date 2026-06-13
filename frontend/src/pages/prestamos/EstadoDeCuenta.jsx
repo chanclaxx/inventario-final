@@ -107,6 +107,11 @@ function BurbujaMensaje({ mov, onAnular, onEditar, onEditarAbonoTotal }) {
             {mov.tipo === 'compra_directa' && (
               <span className="text-[10px] text-purple-500 font-medium">→ saldo a favor</span>
             )}
+            {mov.tipo === 'prestamo' && mov.prestamo_estado === 'Devuelto' && (
+              <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500">
+                Devuelto
+              </span>
+            )}
           </div>
 
           {/* Concepto */}
@@ -175,6 +180,11 @@ function FilaTabla({ mov, onAnular, onEditar, onEditarAbonoTotal, isOdd }) {
           <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full whitespace-nowrap ${cfg.badge}`}>
             {cfg.label}
           </span>
+          {mov.tipo === 'prestamo' && mov.prestamo_estado === 'Devuelto' && (
+            <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full whitespace-nowrap bg-gray-100 text-gray-500">
+              Devuelto
+            </span>
+          )}
           <span className="text-xs text-gray-700 leading-tight">{mov.concepto}</span>
         </div>
       </td>

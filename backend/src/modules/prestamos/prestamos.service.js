@@ -1179,22 +1179,23 @@ const getEstadoCuenta = async (negocioId, tipo, personaId, sucursalId = null) =>
 
   let saldoDeuda = 0;
   return rows.map((row) => {
-    const cargo = Number(row.cargo  || 0);
-    const abono = Number(row.abono  || 0);
-    if (row.tipo !== 'compra_directa') {
+    const cargo = Number(row.cargo || 0);
+    const abono = Number(row.abono || 0);
+    const esDevuelto = row.tipo === 'prestamo' && row.prestamo_estado === 'Devuelto';
+    if (row.tipo !== 'compra_directa' && !esDevuelto) {
       saldoDeuda = saldoDeuda + cargo - abono;
     }
     return {
-      fecha:         row.fecha,
-      tipo:          row.tipo,
-      concepto:      row.concepto,
-      cargo:         cargo  || null,
-      abono:         abono  || null,
-      saldo:         row.tipo === 'compra_directa' ? null : saldoDeuda,
-      referencia_id:    Number(row.referencia_id),
-      prestamo_id:      row.prestamo_id ? Number(row.prestamo_id) : null,
-      anulable:         row.anulable,
-      prestamo_estado:  row.prestamo_estado || null,
+      fecha:           row.fecha,
+      tipo:            row.tipo,
+      concepto:        row.concepto,
+      cargo:           cargo || null,
+      abono:           abono || null,
+      saldo:           (row.tipo === 'compra_directa' || esDevuelto) ? null : saldoDeuda,
+      referencia_id:   Number(row.referencia_id),
+      prestamo_id:     row.prestamo_id ? Number(row.prestamo_id) : null,
+      anulable:        row.anulable,
+      prestamo_estado: row.prestamo_estado || null,
     };
   });
 };

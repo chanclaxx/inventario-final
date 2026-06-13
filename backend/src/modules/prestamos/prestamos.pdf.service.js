@@ -768,6 +768,7 @@ const _ecTabla = (doc, movimientos, startY) => {
     rectFill(doc, MARGIN, y, COL_WIDTH, ROW_H, rowBg, 0);
 
     const esCargo    = !!mov.cargo;
+    const esDevuelto = mov.tipo === 'prestamo' && mov.prestamo_estado === 'Devuelto';
     const tipoCfg    = TIPO_LABEL[mov.tipo] || TIPO_LABEL.abono;
     const badgeW = 52; const badgeH = 13;
 
@@ -779,8 +780,9 @@ const _ecTabla = (doc, movimientos, startY) => {
     rectFill(doc, cols[1].x + 4, y + (ROW_H - badgeH) / 2, badgeW, badgeH, tipoCfg.bg, 6);
     doc.font(FONT.bold).fontSize(6.5).fillColor(tipoCfg.text)
       .text(tipoCfg.label, cols[1].x + 4, y + (ROW_H - badgeH) / 2 + 3.5, { width: badgeW, align: 'center' });
-    doc.font(FONT.normal).fontSize(8).fillColor(C.negro)
-      .text(mov.concepto || '', cols[1].x + badgeW + 8, y + 8,
+    const conceptoTexto = esDevuelto ? `${mov.concepto || ''} (Devuelto)` : (mov.concepto || '');
+    doc.font(FONT.normal).fontSize(8).fillColor(esDevuelto ? C.grisClaro : C.negro)
+      .text(conceptoTexto, cols[1].x + badgeW + 8, y + 8,
         { width: cols[1].w - badgeW - 12, align: 'left', ellipsis: true, height: ROW_H - 10 });
 
     // − abonos (reducen deuda)
@@ -878,14 +880,16 @@ const generarPdfEstadoCuenta = async ({ tipo, personaId, negocioId, negocioNombr
   const movimientos = movRows.map((row) => {
     const cargo = Number(row.cargo || 0);
     const abono = Number(row.abono || 0);
-    if (row.tipo !== 'compra_directa') saldoAcum = saldoAcum + cargo - abono;
+    const esDevuelto = row.tipo === 'prestamo' && row.prestamo_estado === 'Devuelto';
+    if (row.tipo !== 'compra_directa' && !esDevuelto) saldoAcum = saldoAcum + cargo - abono;
     return {
-      fecha:    row.fecha,
-      tipo:     row.tipo,
-      concepto: row.concepto,
-      cargo:    cargo || null,
-      abono:    abono || null,
-      saldo:    row.tipo === 'compra_directa' ? null : saldoAcum,
+      fecha:           row.fecha,
+      tipo:            row.tipo,
+      concepto:        row.concepto,
+      cargo:           cargo || null,
+      abono:           abono || null,
+      saldo:           (row.tipo === 'compra_directa' || esDevuelto) ? null : saldoAcum,
+      prestamo_estado: row.prestamo_estado || null,
     };
   });
 
