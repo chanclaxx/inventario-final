@@ -144,7 +144,15 @@ const _crearFacturaDesdePrestamo = async (client, prestamo, metodo, negocioId) =
 
   const facturaId = facturaRows[0].id;
 
-  // Insertar línea del producto
+  // Insertar línea del producto.
+  // OJO: `valor_prestamo` es el valor TOTAL del préstamo (no el unitario) y
+  // `lineas_factura.subtotal` es una columna generada = cantidad * precio.
+  // Por eso `precio` debe ser el valor UNITARIO; de lo contrario el subtotal
+  // queda multiplicado por la cantidad y el reporte muestra valor_prestamo × cantidad.
+  const cantidadLinea  = prestamo.imei ? 1 : Number(prestamo.cantidad_prestada || 1);
+  const valorTotal     = Number(prestamo.valor_prestamo);
+  const precioUnitario = cantidadLinea > 0 ? valorTotal / cantidadLinea : valorTotal;
+
   await client.query(`
     INSERT INTO lineas_factura(
       factura_id, nombre_producto, imei,
@@ -155,8 +163,8 @@ const _crearFacturaDesdePrestamo = async (client, prestamo, metodo, negocioId) =
     facturaId,
     prestamo.nombre_producto,
     prestamo.imei     || null,
-    prestamo.imei ? 1 : Number(prestamo.cantidad_prestada || 1),
-    Number(prestamo.valor_prestamo),
+    cantidadLinea,
+    precioUnitario,
     prestamo.imei ? null : (prestamo.producto_id || null),
     prestamo.atributo_id || null,
     prestamo.variante_id || null,
