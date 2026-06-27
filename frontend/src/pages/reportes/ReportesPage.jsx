@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, lazy, Suspense } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   getDashboard,
@@ -16,14 +16,16 @@ import { useAuth }    from '../../context/useAuth';
 import {
   BarChart2, TrendingUp, Package, AlertTriangle,
   ChevronDown, ChevronUp, Info, Pencil, Check, X,
-  Warehouse, Handshake, Wrench, CreditCard,
+  Warehouse, Handshake, Wrench, CreditCard, LineChart,
 } from 'lucide-react';
+const PanelAnalisis = lazy(() => import('./PanelAnalisis'));
 
 // ─────────────────────────────────────────────
 // CONSTANTES
 // ─────────────────────────────────────────────
 const TABS = [
   { id: 'resumen',    label: 'Resumen',    icon: BarChart2     },
+  { id: 'analisis',   label: 'Análisis',   icon: LineChart     },
   { id: 'ventas',     label: 'Ventas',     icon: TrendingUp    },
   { id: 'productos',  label: 'Productos',  icon: Package       },
   { id: 'stock',      label: 'Stock Bajo', icon: AlertTriangle },
@@ -1352,7 +1354,7 @@ export default function ReportesPage() {
     queryFn: () => getDashboard().then((r) => r.data.data),
   });
 
-  const tabsVisibles = TABS.filter((t) => t.id !== 'inventario' || esAdmin);
+  const tabsVisibles = TABS.filter((t) => !['inventario', 'analisis'].includes(t.id) || esAdmin);
 
   return (
     <div className="flex flex-col gap-4">
@@ -1374,6 +1376,11 @@ export default function ReportesPage() {
       </div>
 
       {tabActiva === 'resumen'    && <PanelResumen   dashboard={dashboard} loading={loadingD} />}
+      {tabActiva === 'analisis'   && esAdmin && (
+        <Suspense fallback={<Spinner className="py-20" />}>
+          <PanelAnalisis />
+        </Suspense>
+      )}
       {tabActiva === 'ventas'     && <PanelVentas    desde={desde} hasta={hasta} onDesde={setDesde} onHasta={setHasta} esAdmin={esAdmin} />}
       {tabActiva === 'productos'  && <PanelProductos desde={desde} hasta={hasta} onDesde={setDesde} onHasta={setHasta} />}
       {tabActiva === 'stock'      && <PanelStock />}

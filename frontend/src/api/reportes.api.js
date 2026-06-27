@@ -5,6 +5,8 @@ export const getVentasRango = (desde, hasta) =>
   api.get('/reportes/ventas-rango', { params: { desde, hasta } });
 export const getProductosTop = (desde, hasta) =>
   api.get('/reportes/productos-top', { params: { desde, hasta } });
+export const getAnalisis = (desde, hasta, agrupacion) =>
+  api.get('/reportes/analisis', { params: { desde, hasta, agrupacion } });
 export const getInventarioBajo = () => api.get('/reportes/inventario-bajo');
 
 export const actualizarCostoCompra = (payload) =>

@@ -872,6 +872,195 @@ const getProductosTop = async (sucursalId, desde, hasta) => {
   });
 };
 
+// ─── getAnalisis ──────────────────────────────────────────────────────────────
+// Datos agregados para el tab "Análisis" (gráficas). Solo admin_negocio.
+//   - serie:        tendencia temporal (día/semana/mes) de ventas y utilidad
+//   - composicion:  ingresos por fuente (contado, crédito, servicios, préstamos)
+//   - metodos_pago: total cobrado por método en el período
+//
+// La utilidad respeta exactamente las reglas del resto del módulo:
+//   · facturas Activas → utilidad = subtotal − costo − retomas (por fecha factura)
+//   · créditos saldados → utilidad = cobrado − costo (por fecha de saldo)
+
+const getAnalisis = async (sucursalId, desde, hasta, agrupacion) => {
+  // Whitelist: nunca interpolar entrada del usuario directo en el SQL
+  const unit = ({ dia: 'day', semana: 'week', mes: 'month' })[agrupacion] || 'month';
+
+  const periodoFactura = `date_trunc('${unit}', (f.fecha AT TIME ZONE 'UTC' AT TIME ZONE 'America/Bogota'))::date`;
+
+  // Costo por línea: misma lógica que getVentasRango
+  const costoLineaCase = `
+    CASE
+      WHEN l.imei IS NOT NULL THEN
+        ${_costoPorImei('l.imei', 'f.sucursal_id')}
+      ELSE
+        COALESCE(
+          (SELECT v.costo_unitario FROM variantes_atributo v WHERE v.id = l.variante_id),
+          (SELECT ap.costo_unitario FROM atributos_producto ap WHERE ap.id = l.atributo_id),
+          (SELECT pc.costo_unitario FROM productos_cantidad pc
+           WHERE pc.nombre = l.nombre_producto AND pc.sucursal_id = f.sucursal_id LIMIT 1),
+          0
+        ) * l.cantidad
+    END
+  `;
+
+  const [serieResult, ventasEstadoResult, serviciosIngResult, prestamosIngResult, metodosResult] = await Promise.all([
+
+    // ── Serie temporal ──────────────────────────────────────────────────────
+    pool.query(`
+      WITH por_factura AS (
+        SELECT
+          ${periodoFactura}        AS periodo,
+          f.id                     AS factura_id,
+          f.estado                 AS estado,
+          SUM(l.subtotal)          AS total_venta,
+          SUM(${costoLineaCase})   AS costo_total,
+          COALESCE((
+            SELECT SUM(r.valor_retoma) FROM retomas r WHERE r.factura_id = f.id
+          ), 0)                    AS retoma
+        FROM lineas_factura l
+        JOIN facturas f ON f.id = l.factura_id
+        WHERE f.sucursal_id = $1
+          AND DATE(f.fecha AT TIME ZONE 'UTC' AT TIME ZONE 'America/Bogota') BETWEEN $2 AND $3
+          AND f.estado != 'Cancelada'
+        GROUP BY periodo, f.id, f.estado
+      ),
+      ventas_periodo AS (
+        SELECT
+          periodo,
+          SUM(total_venta)                                                          AS total_vendido,
+          COUNT(*)                                                                  AS num_facturas,
+          SUM(costo_total)                                                          AS costo,
+          SUM(CASE WHEN estado = 'Activa' THEN total_venta - costo_total - retoma ELSE 0 END) AS utilidad_activas
+        FROM por_factura
+        GROUP BY periodo
+      ),
+      ultimo_abono_credito AS (
+        SELECT ac.credito_id, MAX(ac.fecha) AS fecha_saldo
+        FROM abonos_credito ac
+        GROUP BY ac.credito_id
+      ),
+      creditos_saldados AS (
+        SELECT
+          cr.id          AS credito_id,
+          cr.factura_id,
+          date_trunc('${unit}', (ua.fecha_saldo AT TIME ZONE 'UTC' AT TIME ZONE 'America/Bogota'))::date AS periodo,
+          (cr.cuota_inicial + cr.total_abonado) AS total_cobrado
+        FROM creditos cr
+        JOIN ultimo_abono_credito ua ON ua.credito_id = cr.id
+        WHERE cr.sucursal_id = $1
+          AND cr.estado = 'Saldado'
+          AND DATE(ua.fecha_saldo AT TIME ZONE 'UTC' AT TIME ZONE 'America/Bogota') BETWEEN $2 AND $3
+      ),
+      costo_credito AS (
+        SELECT
+          l.factura_id,
+          SUM(${costoLineaCase}) AS costo_total
+        FROM lineas_factura l
+        JOIN facturas f ON f.id = l.factura_id
+        WHERE l.factura_id IN (SELECT factura_id FROM creditos_saldados)
+        GROUP BY l.factura_id
+      ),
+      creditos_periodo AS (
+        SELECT
+          cs.periodo,
+          SUM(cs.total_cobrado - COALESCE(cc.costo_total, 0)) AS utilidad_creditos
+        FROM creditos_saldados cs
+        LEFT JOIN costo_credito cc ON cc.factura_id = cs.factura_id
+        GROUP BY cs.periodo
+      )
+      SELECT
+        COALESCE(v.periodo, c.periodo)                                      AS periodo,
+        COALESCE(v.total_vendido, 0)                                        AS total_vendido,
+        COALESCE(v.num_facturas, 0)                                         AS num_facturas,
+        COALESCE(v.costo, 0)                                                AS costo,
+        COALESCE(v.utilidad_activas, 0) + COALESCE(c.utilidad_creditos, 0)  AS utilidad
+      FROM ventas_periodo v
+      FULL OUTER JOIN creditos_periodo c ON c.periodo = v.periodo
+      ORDER BY periodo
+    `, [sucursalId, desde, hasta]),
+
+    // ── Composición: productos contado vs crédito ──────────────────────────
+    pool.query(`
+      SELECT
+        f.estado,
+        COALESCE(SUM(l.subtotal), 0) AS total
+      FROM lineas_factura l
+      JOIN facturas f ON f.id = l.factura_id
+      WHERE f.sucursal_id = $1
+        AND DATE(f.fecha AT TIME ZONE 'UTC' AT TIME ZONE 'America/Bogota') BETWEEN $2 AND $3
+        AND f.estado IN ('Activa', 'Credito')
+      GROUP BY f.estado
+    `, [sucursalId, desde, hasta]),
+
+    // ── Composición: ingresos de servicios técnicos (cobrado en el período) ─
+    pool.query(`
+      SELECT COALESCE(SUM(os.total_abonado), 0) AS total
+      FROM ordenes_servicio os
+      WHERE os.sucursal_id = $1
+        AND os.estado IN ('Entregado', 'Pendiente_pago', 'Sin_reparar')
+        AND ${fechaBogota('os.fecha_entrega')} BETWEEN $2 AND $3
+    `, [sucursalId, desde, hasta]),
+
+    // ── Composición: recuperado de préstamos saldados en el período ─────────
+    pool.query(`
+      WITH ultimo_abono AS (
+        SELECT ab.prestamo_id, MAX(ab.fecha) AS fecha_saldo
+        FROM abonos_prestamo ab
+        GROUP BY ab.prestamo_id
+      )
+      SELECT COALESCE(SUM(p.total_abonado), 0) AS total
+      FROM prestamos p
+      JOIN ultimo_abono ua ON ua.prestamo_id = p.id
+      WHERE p.sucursal_id = $1
+        AND p.estado = 'Saldado'
+        AND DATE(ua.fecha_saldo AT TIME ZONE 'UTC' AT TIME ZONE 'America/Bogota') BETWEEN $2 AND $3
+    `, [sucursalId, desde, hasta]),
+
+    // ── Métodos de pago en el período ──────────────────────────────────────
+    pool.query(`
+      SELECT pf.metodo, COALESCE(SUM(pf.valor), 0) AS total
+      FROM pagos_factura pf
+      JOIN facturas f ON f.id = pf.factura_id
+      WHERE f.sucursal_id = $1
+        AND DATE(f.fecha AT TIME ZONE 'UTC' AT TIME ZONE 'America/Bogota') BETWEEN $2 AND $3
+        AND f.estado != 'Cancelada'
+      GROUP BY pf.metodo
+      ORDER BY total DESC
+    `, [sucursalId, desde, hasta]),
+  ]);
+
+  const serie = serieResult.rows.map((r) => {
+    const totalVendido = Number(r.total_vendido);
+    const numFacturas  = Number(r.num_facturas);
+    return {
+      periodo:         r.periodo,
+      total_vendido:   totalVendido,
+      utilidad:        Number(r.utilidad),
+      costo:           Number(r.costo),
+      num_facturas:    numFacturas,
+      ticket_promedio: numFacturas > 0 ? totalVendido / numFacturas : 0,
+    };
+  });
+
+  const ventasPorEstado = {};
+  ventasEstadoResult.rows.forEach((r) => { ventasPorEstado[r.estado] = Number(r.total); });
+
+  const composicion = [
+    { fuente: 'Contado',   total: ventasPorEstado.Activa  || 0 },
+    { fuente: 'Crédito',   total: ventasPorEstado.Credito || 0 },
+    { fuente: 'Servicios', total: Number(serviciosIngResult.rows[0].total) },
+    { fuente: 'Préstamos', total: Number(prestamosIngResult.rows[0].total) },
+  ].filter((c) => c.total > 0);
+
+  const metodos_pago = metodosResult.rows.map((r) => ({
+    metodo: r.metodo,
+    total:  Number(r.total),
+  }));
+
+  return { agrupacion: unit, serie, composicion, metodos_pago };
+};
+
 // ─── getInventarioBajo ────────────────────────────────────────────────────────
 
 const getInventarioBajo = async (sucursalId) => {
@@ -1156,6 +1345,7 @@ module.exports = {
   getDashboard,
   getVentasRango,
   getServiciosRango,
+  getAnalisis,
   getProductosTop,
   getInventarioBajo,
   actualizarCostoCompra,
