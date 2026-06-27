@@ -33,7 +33,7 @@ const getAnalisis = async (req, res, next) => {
 
 const exportarPdf = async (req, res, next) => {
   try {
-    const { desde, hasta, agrupacion } = req.query;
+    const { desde, hasta, agrupacion, detalle } = req.query;
     if (!desde || !hasta) {
       return res.status(400).json({ ok: false, error: 'Los parámetros desde y hasta son requeridos' });
     }
@@ -51,7 +51,8 @@ const exportarPdf = async (req, res, next) => {
       desde,
       hasta,
       agrupacion,
-      logo:           logoRes.rows[0]?.valor || null,
+      logo:            logoRes.rows[0]?.valor || null,
+      detalleFacturas: detalle === 'completo',
     });
 
     const filename = `reporte-gestion-${desde}_a_${hasta}.pdf`;

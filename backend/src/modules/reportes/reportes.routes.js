@@ -22,7 +22,9 @@ router.get('/analisis',         requireModulo('reportes'), requireNivel('admin_n
   [...validarRango, query('agrupacion').optional().isIn(['dia', 'semana', 'mes']).withMessage('Agrupación inválida')],
   validate, ctrl.getAnalisis);
 router.get('/analisis/pdf',     requireModulo('reportes'), requireNivel('admin_negocio'),
-  [...validarRango, query('agrupacion').optional().isIn(['dia', 'semana', 'mes']).withMessage('Agrupación inválida')],
+  [...validarRango,
+   query('agrupacion').optional().isIn(['dia', 'semana', 'mes']).withMessage('Agrupación inválida'),
+   query('detalle').optional().isIn(['resumen', 'completo']).withMessage('Detalle inválido')],
   validate, ctrl.exportarPdf);
 router.get('/productos-top',    requireModulo('reportes'), requireNivel('supervisor'),    validarRango, validate, ctrl.getProductosTop);
 router.get('/inventario-bajo',  requireModulo('reportes'),                               ctrl.getInventarioBajo);

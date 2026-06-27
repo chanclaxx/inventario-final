@@ -7,8 +7,8 @@ export const getProductosTop = (desde, hasta) =>
   api.get('/reportes/productos-top', { params: { desde, hasta } });
 export const getAnalisis = (desde, hasta, agrupacion) =>
   api.get('/reportes/analisis', { params: { desde, hasta, agrupacion } });
-export const exportarAnalisisPdf = (desde, hasta, agrupacion) =>
-  api.get('/reportes/analisis/pdf', { params: { desde, hasta, agrupacion }, responseType: 'blob' });
+export const exportarAnalisisPdf = (desde, hasta, agrupacion, detalle) =>
+  api.get('/reportes/analisis/pdf', { params: { desde, hasta, agrupacion, detalle }, responseType: 'blob' });
 export const getInventarioBajo = () => api.get('/reportes/inventario-bajo');
 
 export const actualizarCostoCompra = (payload) =>

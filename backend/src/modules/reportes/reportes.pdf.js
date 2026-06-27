@@ -25,6 +25,7 @@ const C = {
   verdeFondo: '#ECFDF5',
   rojo:       '#DC2626',
   azul:       '#2563EB',
+  barPalette: ['#3B82F6', '#10B981', '#F59E0B', '#8B5CF6', '#EC4899', '#06B6D4', '#EF4444'],
 };
 
 const FONT = { normal: 'Helvetica', bold: 'Helvetica-Bold' };
@@ -42,6 +43,15 @@ const formatCOP = (v) => new Intl.NumberFormat('es-CO', {
 }).format(Number(v || 0));
 
 const formatPct = (v) => `${(Number(v) || 0).toFixed(1)}%`;
+
+// Formato compacto para ejes de gráficas: $1.2M, $850k
+const formatCompacto = (v) => {
+  const n = Number(v) || 0;
+  const abs = Math.abs(n);
+  if (abs >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
+  if (abs >= 1_000)     return `$${Math.round(n / 1_000)}k`;
+  return `$${Math.round(n)}`;
+};
 
 // Parseo defensivo de timestamps de Postgres (sin zona → tratar como UTC)
 const parseFecha = (fecha) => {
@@ -216,10 +226,128 @@ const drawKpis = (doc, y, kpis) => {
   return y + cardH + 14;
 };
 
+// ─── Leyenda ───────────────────────────────────────────────────────────────────
+const drawLeyenda = (doc, y, items) => {
+  let x = MARGIN;
+  items.forEach((it) => {
+    if (it.tipo === 'linea') {
+      doc.moveTo(x, y + 4).lineTo(x + 14, y + 4).strokeColor(it.color).lineWidth(2).stroke();
+      doc.circle(x + 7, y + 4, 2).fill(it.color);
+    } else {
+      rectFill(doc, x, y, 10, 8, it.color, 2);
+    }
+    doc.font(FONT.normal).fontSize(7.5).fillColor(C.gris)
+      .text(it.label, x + 18, y, { lineBreak: false });
+    x += 22 + doc.widthOfString(it.label) + 16;
+  });
+  return y + 16;
+};
+
+// ─── Gráfica de tendencia: barras (vendido) + línea (utilidad) ─────────────────
+const drawTendenciaChart = (doc, y, serie, unit) => {
+  const data = serie.length > 24 ? serie.slice(-24) : serie;
+  if (!data.length) return y;
+
+  const chartH   = 150;
+  const padX     = 26;          // espacio para etiquetas eje X
+  const axisW    = 42;          // espacio para eje Y
+  y = ensureSpace(doc, y, chartH + 40);
+
+  y = drawLeyenda(doc, y, [
+    { tipo: 'barra', color: C.azul,  label: 'Total vendido' },
+    { tipo: 'linea', color: C.verde, label: 'Utilidad' },
+  ]);
+
+  const plotX = MARGIN + axisW;
+  const plotW = CONTENT_W - axisW;
+  const plotH = chartH - padX;
+  const baseY = y + plotH;
+  const maxVal = Math.max(1, ...data.map((d) => Math.max(d.total_vendido, d.utilidad)));
+
+  // Cuadrícula + etiquetas eje Y
+  for (let g = 0; g <= 3; g++) {
+    const gy = baseY - (plotH * g) / 3;
+    hLine(doc, gy, { x1: plotX, x2: plotX + plotW, color: C.grisBorde, width: 0.4 });
+    doc.font(FONT.normal).fontSize(6.5).fillColor(C.grisClaro)
+      .text(formatCompacto((maxVal * g) / 3), MARGIN, gy - 4, { width: axisW - 6, align: 'right', lineBreak: false });
+  }
+
+  const slot     = plotW / data.length;
+  const barW     = Math.min(slot * 0.55, 26);
+  const labelEvery = Math.ceil(data.length / 12);
+  const puntos   = [];
+
+  data.forEach((d, i) => {
+    const cx = plotX + slot * i + slot / 2;
+    // Barra vendido
+    const hV = (plotH * d.total_vendido) / maxVal;
+    rectFill(doc, cx - barW / 2, baseY - hV, barW, hV, C.azul, 2);
+    // Punto utilidad
+    const yU = baseY - (plotH * Math.max(0, d.utilidad)) / maxVal;
+    puntos.push({ x: cx, y: yU });
+    // Etiqueta eje X
+    if (i % labelEvery === 0) {
+      doc.font(FONT.normal).fontSize(6.5).fillColor(C.grisClaro)
+        .text(labelPeriodo(d.periodo, unit), cx - slot / 2, baseY + 6, { width: slot, align: 'center', lineBreak: false });
+    }
+  });
+
+  // Línea de utilidad
+  if (puntos.length > 1) {
+    doc.moveTo(puntos[0].x, puntos[0].y);
+    puntos.slice(1).forEach((p) => doc.lineTo(p.x, p.y));
+    doc.strokeColor(C.verde).lineWidth(1.5).stroke();
+  }
+  puntos.forEach((p) => doc.circle(p.x, p.y, 2).fill(C.verde));
+
+  let yEnd = baseY + 18;
+  if (serie.length > data.length) {
+    doc.font(FONT.normal).fontSize(7).fillColor(C.grisClaro)
+      .text(`* La gráfica muestra los últimos ${data.length} periodos; la tabla incluye todos.`, MARGIN, yEnd);
+    yEnd += 12;
+  }
+  return yEnd + 4;
+};
+
+// ─── Barras horizontales (composición, métodos, productos) ─────────────────────
+const drawHBars = (doc, y, items, { labelKey, valueKey, emptyMsg = 'Sin datos' }) => {
+  if (!items.length) {
+    doc.font(FONT.normal).fontSize(9).fillColor(C.grisClaro).text(emptyMsg, MARGIN, y);
+    return y + 18;
+  }
+  const total  = items.reduce((s, it) => s + Number(it[valueKey]), 0);
+  const maxVal = Math.max(1, ...items.map((it) => Number(it[valueKey])));
+  const labelW = CONTENT_W * 0.26;
+  const valueW = CONTENT_W * 0.24;
+  const barX   = MARGIN + labelW;
+  const barMaxW = CONTENT_W - labelW - valueW;
+  const rowH   = 18;
+
+  items.forEach((it, i) => {
+    y = ensureSpace(doc, y, rowH);
+    const val = Number(it[valueKey]);
+    const color = C.barPalette[i % C.barPalette.length];
+    // Etiqueta
+    doc.font(FONT.normal).fontSize(8).fillColor(C.grisOscuro)
+      .text(it[labelKey], MARGIN, y + 2, { width: labelW - 6, lineBreak: false });
+    // Pista + barra
+    rectFill(doc, barX, y + 1, barMaxW, 11, C.grisFondo, 3);
+    const w = Math.max(2, (barMaxW * val) / maxVal);
+    rectFill(doc, barX, y + 1, w, 11, color, 3);
+    // Valor + %
+    const pct = total > 0 ? formatPct((val / total) * 100) : '';
+    doc.font(FONT.bold).fontSize(8).fillColor(C.grisOscuro)
+      .text(`${formatCOP(val)}  ${pct ? `· ${pct}` : ''}`, MARGIN + labelW + barMaxW, y + 2,
+        { width: valueW, align: 'right', lineBreak: false });
+    y += rowH;
+  });
+  return y + 6;
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // GENERADOR PRINCIPAL
 // ─────────────────────────────────────────────────────────────────────────────
-const generarReporteContable = async ({ negocio, sucursalNombre, sucursalId, desde, hasta, agrupacion, logo }) => {
+const generarReporteContable = async ({ negocio, sucursalNombre, sucursalId, desde, hasta, agrupacion, logo, detalleFacturas = false }) => {
   // ── Recolectar datos (reusa los servicios existentes) ──────────────────────
   const [analisis, productos, inventario, ventas] = await Promise.all([
     service.getAnalisis(sucursalId, desde, hasta, agrupacion),
@@ -285,32 +413,11 @@ const generarReporteContable = async ({ negocio, sucursalNombre, sucursalId, des
   y = fila(doc, y, `Facturas en el periodo`, `${resumen?.total_facturas || 0}  (${resumen?.facturas_activas || 0} contado · ${resumen?.facturas_credito || 0} crédito)`);
   y += 10;
 
-  // ── 3. Composición de ingresos ─────────────────────────────────────────────
-  const totalComp = analisis.composicion.reduce((s, c) => s + c.total, 0);
-  y = ensureSpace(doc, y, 60);
-  y = tituloSeccion(doc, y, 'Composición de ingresos');
-  y = drawTable(doc, y, [
-    { label: 'Fuente', frac: 0.5, render: (r) => ({ text: r.fuente }) },
-    { label: 'Valor',  frac: 0.3, align: 'right', render: (r) => ({ text: formatCOP(r.total) }) },
-    { label: '%',      frac: 0.2, align: 'right', render: (r) => ({ text: totalComp > 0 ? formatPct((r.total / totalComp) * 100) : '—' }) },
-  ], analisis.composicion, { emptyMsg: 'Sin ingresos registrados en el período' });
-  y += 8;
-
-  // ── 4. Recaudo por método de pago ──────────────────────────────────────────
-  const totalMet = analisis.metodos_pago.reduce((s, m) => s + m.total, 0);
-  y = ensureSpace(doc, y, 60);
-  y = tituloSeccion(doc, y, 'Recaudo por método de pago');
-  y = drawTable(doc, y, [
-    { label: 'Método', frac: 0.5, render: (r) => ({ text: r.metodo }) },
-    { label: 'Valor',  frac: 0.3, align: 'right', render: (r) => ({ text: formatCOP(r.total) }) },
-    { label: '%',      frac: 0.2, align: 'right', render: (r) => ({ text: totalMet > 0 ? formatPct((r.total / totalMet) * 100) : '—' }) },
-  ], analisis.metodos_pago, { emptyMsg: 'Sin pagos registrados en el período' });
-  y += 8;
-
-  // ── 5. Tendencia por periodo ───────────────────────────────────────────────
-  y = ensureSpace(doc, y, 60);
+  // ── 3. Tendencia por periodo (gráfica + tabla) ─────────────────────────────
   const unitLabel = unit === 'month' ? 'mes' : unit === 'week' ? 'semana' : 'día';
+  y = ensureSpace(doc, y, 60);
   y = tituloSeccion(doc, y, `Comparativo por ${unitLabel}`);
+  y = drawTendenciaChart(doc, y, analisis.serie, unit);
   y = drawTable(doc, y, [
     { label: 'Periodo',  frac: 0.24, render: (r) => ({ text: labelPeriodo(r.periodo, unit) }) },
     { label: 'Vendido',  frac: 0.22, align: 'right', render: (r) => ({ text: formatCOP(r.total_vendido) }) },
@@ -318,6 +425,22 @@ const generarReporteContable = async ({ negocio, sucursalNombre, sucursalId, des
     { label: 'Facturas', frac: 0.14, align: 'right', render: (r) => ({ text: String(r.num_facturas) }) },
     { label: 'Ticket prom.', frac: 0.18, align: 'right', render: (r) => ({ text: formatCOP(r.ticket_promedio) }) },
   ], analisis.serie);
+  y += 8;
+
+  // ── 4. Composición de ingresos (barras) ────────────────────────────────────
+  y = ensureSpace(doc, y, 60);
+  y = tituloSeccion(doc, y, 'Composición de ingresos');
+  y = drawHBars(doc, y, analisis.composicion, {
+    labelKey: 'fuente', valueKey: 'total', emptyMsg: 'Sin ingresos registrados en el período',
+  });
+  y += 8;
+
+  // ── 5. Recaudo por método de pago (barras) ─────────────────────────────────
+  y = ensureSpace(doc, y, 60);
+  y = tituloSeccion(doc, y, 'Recaudo por método de pago');
+  y = drawHBars(doc, y, analisis.metodos_pago, {
+    labelKey: 'metodo', valueKey: 'total', emptyMsg: 'Sin pagos registrados en el período',
+  });
   y += 8;
 
   // ── 6. Productos destacados (por utilidad) ─────────────────────────────────
@@ -354,17 +477,25 @@ const generarReporteContable = async ({ negocio, sucursalNombre, sucursalId, des
   y = fila(doc, y, 'Total por cobrar', formatCOP((creditos?.activos?.saldo_pendiente || 0) + saldoPrestamos), { bold: true, valorColor: C.rojo });
   y += 10;
 
-  // ── 9. Libro auxiliar de facturas ──────────────────────────────────────────
-  y = ensureSpace(doc, y, 60);
-  y = tituloSeccion(doc, y, `Libro auxiliar de facturas (${facturas.length})`);
-  y = drawTable(doc, y, [
-    { label: 'Fecha',     frac: 0.16, render: (r) => ({ text: formatFechaCorta(r.fecha) }) },
-    { label: 'Factura',   frac: 0.13, render: (r) => ({ text: `#${String(r.id).padStart(6, '0')}` }) },
-    { label: 'Cliente',   frac: 0.31, render: (r) => ({ text: r.nombre_cliente || '—' }) },
-    { label: 'Documento', frac: 0.16, render: (r) => ({ text: r.cedula || '—' }) },
-    { label: 'Estado',    frac: 0.10, render: (r) => ({ text: r.estado }) },
-    { label: 'Total',     frac: 0.14, align: 'right', render: (r) => ({ text: formatCOP(r.total_venta) }) },
-  ], facturas, { emptyMsg: 'Sin facturas en el período' });
+  // ── 9. Libro auxiliar de facturas (opcional — solo si se pide el detalle) ───
+  if (detalleFacturas) {
+    doc.addPage();
+    y = MARGIN;
+    y = tituloSeccion(doc, y, `Libro auxiliar de facturas (${facturas.length})`);
+    y = drawTable(doc, y, [
+      { label: 'Fecha',     frac: 0.16, render: (r) => ({ text: formatFechaCorta(r.fecha) }) },
+      { label: 'Factura',   frac: 0.13, render: (r) => ({ text: `#${String(r.id).padStart(6, '0')}` }) },
+      { label: 'Cliente',   frac: 0.31, render: (r) => ({ text: r.nombre_cliente || '—' }) },
+      { label: 'Documento', frac: 0.16, render: (r) => ({ text: r.cedula || '—' }) },
+      { label: 'Estado',    frac: 0.10, render: (r) => ({ text: r.estado }) },
+      { label: 'Total',     frac: 0.14, align: 'right', render: (r) => ({ text: formatCOP(r.total_venta) }) },
+    ], facturas, { emptyMsg: 'Sin facturas en el período' });
+  } else {
+    y = ensureSpace(doc, y, 30);
+    doc.font(FONT.normal).fontSize(7.5).fillColor(C.grisClaro)
+      .text('El detalle factura por factura (libro auxiliar) se puede incluir activando la opción "Detalle de facturas" antes de exportar.',
+        MARGIN, y, { width: CONTENT_W });
+  }
 
   drawFooters(doc, negocio?.nombre, fechaGeneracion);
   doc.end();

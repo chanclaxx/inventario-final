@@ -234,12 +234,13 @@ export default function PanelAnalisis() {
   const [critProductos, setCrit]    = useState('utilidad');
   const [exportando, setExportando] = useState(false);
   const [errorPdf, setErrorPdf]     = useState(null);
+  const [detalleFacturas, setDetalleFacturas] = useState(false);
 
   const handleExportarPdf = async () => {
     setExportando(true);
     setErrorPdf(null);
     try {
-      const res = await exportarAnalisisPdf(desde, hasta, agrupacion);
+      const res = await exportarAnalisisPdf(desde, hasta, agrupacion, detalleFacturas ? 'completo' : 'resumen');
       const url = URL.createObjectURL(new Blob([res.data], { type: 'application/pdf' }));
       const link = document.createElement('a');
       link.href = url;
@@ -299,15 +300,26 @@ export default function PanelAnalisis() {
             ]}
           />
         </div>
-        <button
-          onClick={handleExportarPdf}
-          disabled={exportando}
-          className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium bg-gray-900 text-white
-            hover:bg-gray-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed sm:ml-auto"
-        >
-          <FileDown size={16} />
-          {exportando ? 'Generando…' : 'Exportar PDF'}
-        </button>
+        <div className="flex flex-col gap-1.5 sm:ml-auto">
+          <label className="flex items-center gap-2 text-xs font-medium text-gray-600 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={detalleFacturas}
+              onChange={(e) => setDetalleFacturas(e.target.checked)}
+              className="rounded border-gray-300 text-gray-900 focus:ring-gray-400"
+            />
+            Detalle de facturas
+          </label>
+          <button
+            onClick={handleExportarPdf}
+            disabled={exportando}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium bg-gray-900 text-white
+              hover:bg-gray-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <FileDown size={16} />
+            {exportando ? 'Generando…' : 'Exportar PDF'}
+          </button>
+        </div>
       </div>
 
       {errorPdf && (
