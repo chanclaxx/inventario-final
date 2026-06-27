@@ -1,4 +1,6 @@
-const service = require('./reportes.service');
+const service    = require('./reportes.service');
+const pdfService = require('./reportes.pdf');
+const { pool }   = require('../../config/db');
 
 const getDashboard = async (req, res, next) => {
   try {
@@ -26,6 +28,36 @@ const getAnalisis = async (req, res, next) => {
     }
     const data = await service.getAnalisis(req.sucursal_id, desde, hasta, agrupacion);
     res.json({ ok: true, data });
+  } catch (err) { next(err); }
+};
+
+const exportarPdf = async (req, res, next) => {
+  try {
+    const { desde, hasta, agrupacion } = req.query;
+    if (!desde || !hasta) {
+      return res.status(400).json({ ok: false, error: 'Los parámetros desde y hasta son requeridos' });
+    }
+
+    const [negocioRes, sucursalRes, logoRes] = await Promise.all([
+      pool.query('SELECT nombre, nit, direccion, telefono FROM negocios WHERE id = $1', [req.user.negocio_id]),
+      pool.query('SELECT nombre FROM sucursales WHERE id = $1', [req.sucursal_id]),
+      pool.query(`SELECT valor FROM config_negocio WHERE negocio_id = $1 AND clave = 'logo_negocio'`, [req.user.negocio_id]),
+    ]);
+
+    const pdfStream = await pdfService.generarReporteContable({
+      negocio:        negocioRes.rows[0] || null,
+      sucursalNombre: sucursalRes.rows[0]?.nombre || null,
+      sucursalId:     req.sucursal_id,
+      desde,
+      hasta,
+      agrupacion,
+      logo:           logoRes.rows[0]?.valor || null,
+    });
+
+    const filename = `reporte-gestion-${desde}_a_${hasta}.pdf`;
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    pdfStream.pipe(res);
   } catch (err) { next(err); }
 };
 
@@ -106,6 +138,6 @@ const getValorInventario = async (req, res, next) => {
 };
 
 module.exports = {
-  getDashboard, getVentasRango, getAnalisis, getProductosTop,
+  getDashboard, getVentasRango, getAnalisis, exportarPdf, getProductosTop,
   getInventarioBajo, actualizarCostoCompra, getValorInventario,
 };

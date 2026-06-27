@@ -21,6 +21,9 @@ router.get('/ventas-rango',     requireModulo('reportes'), requireNivel('supervi
 router.get('/analisis',         requireModulo('reportes'), requireNivel('admin_negocio'),
   [...validarRango, query('agrupacion').optional().isIn(['dia', 'semana', 'mes']).withMessage('Agrupación inválida')],
   validate, ctrl.getAnalisis);
+router.get('/analisis/pdf',     requireModulo('reportes'), requireNivel('admin_negocio'),
+  [...validarRango, query('agrupacion').optional().isIn(['dia', 'semana', 'mes']).withMessage('Agrupación inválida')],
+  validate, ctrl.exportarPdf);
 router.get('/productos-top',    requireModulo('reportes'), requireNivel('supervisor'),    validarRango, validate, ctrl.getProductosTop);
 router.get('/inventario-bajo',  requireModulo('reportes'),                               ctrl.getInventarioBajo);
 router.patch('/costo-compra',   requireModulo('reportes'), requireNivel('admin_negocio'), ctrl.actualizarCostoCompra);

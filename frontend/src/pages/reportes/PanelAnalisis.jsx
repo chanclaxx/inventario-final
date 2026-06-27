@@ -7,9 +7,9 @@ import {
 } from 'recharts';
 import {
   LineChart as LineIcon, BarChart3, AreaChart as AreaIcon,
-  TrendingUp, PieChart as PieIcon, CreditCard, Package,
+  TrendingUp, PieChart as PieIcon, CreditCard, Package, FileDown,
 } from 'lucide-react';
-import { getAnalisis, getProductosTop } from '../../api/reportes.api';
+import { getAnalisis, getProductosTop, exportarAnalisisPdf } from '../../api/reportes.api';
 import { formatCOP, formatFechaISO, fechaHoyBogota } from '../../utils/formatters';
 import { Spinner } from '../../components/ui/Spinner';
 import { EmptyState } from '../../components/ui/EmptyState';
@@ -232,6 +232,32 @@ export default function PanelAnalisis() {
   const [tipoGrafica, setTipo]      = useState('barras');
   const [puntos, setPuntos]         = useState(true);
   const [critProductos, setCrit]    = useState('utilidad');
+  const [exportando, setExportando] = useState(false);
+  const [errorPdf, setErrorPdf]     = useState(null);
+
+  const handleExportarPdf = async () => {
+    setExportando(true);
+    setErrorPdf(null);
+    try {
+      const res = await exportarAnalisisPdf(desde, hasta, agrupacion);
+      const url = URL.createObjectURL(new Blob([res.data], { type: 'application/pdf' }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `reporte-gestion-${desde}_a_${hasta}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      let msg = 'No se pudo generar el PDF. Intenta de nuevo.';
+      if (err.response?.data instanceof Blob) {
+        try { msg = JSON.parse(await err.response.data.text()).error || msg; } catch { /* usa mensaje por defecto */ }
+      }
+      setErrorPdf(msg);
+    } finally {
+      setExportando(false);
+    }
+  };
 
   const { data: analisis, isLoading, isError } = useQuery({
     queryKey: ['analisis', desde, hasta, agrupacion],
@@ -273,7 +299,22 @@ export default function PanelAnalisis() {
             ]}
           />
         </div>
+        <button
+          onClick={handleExportarPdf}
+          disabled={exportando}
+          className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium bg-gray-900 text-white
+            hover:bg-gray-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed sm:ml-auto"
+        >
+          <FileDown size={16} />
+          {exportando ? 'Generando…' : 'Exportar PDF'}
+        </button>
       </div>
+
+      {errorPdf && (
+        <div className="bg-red-50 border border-red-100 rounded-xl px-4 py-3 text-sm text-red-600">
+          {errorPdf}
+        </div>
+      )}
 
       {isLoading && <Spinner className="py-20" />}
       {isError && (
