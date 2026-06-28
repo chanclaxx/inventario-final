@@ -158,13 +158,13 @@ const create = async (negocioId, { nombre, cedula, telefono, proveedor_id }) => 
 };
 
 const insertarMovimiento = async ({
-  acreedor_id, usuario_id, tipo, valor, descripcion, firma, compra_id, cargo_id, registrar_en_caja, metodo,
+  acreedor_id, usuario_id, tipo, valor, descripcion, firma, compra_id, cargo_id, registrar_en_caja, metodo, sucursal_id,
 }) => {
   const { rows } = await pool.query(`
-    INSERT INTO movimientos_acreedor(acreedor_id, usuario_id, tipo, valor, descripcion, firma, compra_id, cargo_id, registrar_en_caja, metodo)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+    INSERT INTO movimientos_acreedor(acreedor_id, usuario_id, tipo, valor, descripcion, firma, compra_id, cargo_id, registrar_en_caja, metodo, sucursal_id)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
     RETURNING *
-  `, [acreedor_id, usuario_id, tipo, valor, descripcion, firma ?? null, compra_id || null, cargo_id || null, registrar_en_caja !== false, metodo || null]);
+  `, [acreedor_id, usuario_id, tipo, valor, descripcion, firma ?? null, compra_id || null, cargo_id || null, registrar_en_caja !== false, metodo || null, sucursal_id || null]);
   return rows[0];
 };
 
@@ -308,8 +308,8 @@ const aplicarSaldoAFavor = async (negocioId, acreedorId, cargoId, valor) => {
           [restante, abono.id]
         );
         await client.query(`
-          INSERT INTO movimientos_acreedor(acreedor_id, usuario_id, tipo, valor, descripcion, cargo_id, metodo, registrar_en_caja)
-          SELECT acreedor_id, usuario_id, 'Abono', $1, 'Aplicación de saldo a favor', $2, metodo, false
+          INSERT INTO movimientos_acreedor(acreedor_id, usuario_id, tipo, valor, descripcion, cargo_id, metodo, registrar_en_caja, sucursal_id)
+          SELECT acreedor_id, usuario_id, 'Abono', $1, 'Aplicación de saldo a favor', $2, metodo, false, sucursal_id
           FROM movimientos_acreedor WHERE id = $3
         `, [restante, cargoId, abono.id]);
         restante = 0;
@@ -327,7 +327,7 @@ const aplicarSaldoAFavor = async (negocioId, acreedorId, cargoId, valor) => {
 
 // Distribuye un pago único entre los cargos abiertos del acreedor (FIFO: más
 // antiguo primero). Crea un Abono vinculado a cada cargo afectado. Atómico.
-const registrarAbonoTotal = async (negocioId, acreedorId, { valor, metodo, registrar_en_caja, usuario_id }) => {
+const registrarAbonoTotal = async (negocioId, acreedorId, { valor, metodo, registrar_en_caja, usuario_id, sucursal_id }) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -366,9 +366,9 @@ const registrarAbonoTotal = async (negocioId, acreedorId, { valor, metodo, regis
       if (pend <= 0) continue;
       const aplica = Math.min(restante, pend);
       await client.query(`
-        INSERT INTO movimientos_acreedor(acreedor_id, usuario_id, tipo, valor, descripcion, cargo_id, metodo, registrar_en_caja)
-        VALUES ($1, $2, 'Abono', $3, $4, $5, $6, $7)
-      `, [acreedorId, usuario_id || null, aplica, 'Pago total distribuido', cargo.id, metodo || null, registrar_en_caja !== false]);
+        INSERT INTO movimientos_acreedor(acreedor_id, usuario_id, tipo, valor, descripcion, cargo_id, metodo, registrar_en_caja, sucursal_id)
+        VALUES ($1, $2, 'Abono', $3, $4, $5, $6, $7, $8)
+      `, [acreedorId, usuario_id || null, aplica, 'Pago total distribuido', cargo.id, metodo || null, registrar_en_caja !== false, sucursal_id || null]);
       distribucion.push({ cargo_id: cargo.id, valor: aplica });
       restante -= aplica;
     }

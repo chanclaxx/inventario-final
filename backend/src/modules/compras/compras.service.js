@@ -247,9 +247,9 @@ const registrarCompra = async ({
 
       // Cargo siempre por el total completo de la compra
       const { rows: cargoRows } = await client.query(
-        `INSERT INTO movimientos_acreedor(acreedor_id, usuario_id, tipo, descripcion, valor, compra_id)
-         VALUES ($1, $2, 'Cargo', $3, $4, $5) RETURNING id`,
-        [acreedorId, usuario_id, `Compra #${compra.id} — mercancía`, total, compra.id]
+        `INSERT INTO movimientos_acreedor(acreedor_id, usuario_id, tipo, descripcion, valor, compra_id, sucursal_id)
+         VALUES ($1, $2, 'Cargo', $3, $4, $5, $6) RETURNING id`,
+        [acreedorId, usuario_id, `Compra #${compra.id} — mercancía`, total, compra.id, sucursal_id]
       );
       const cargoId = cargoRows[0].id;
 
@@ -257,9 +257,9 @@ const registrarCompra = async ({
       if (totalPagado > 0) {
         const metodoPagoInmediato = pagosEfectivos.map((p) => p.metodo).join('/') || null;
         await client.query(
-          `INSERT INTO movimientos_acreedor(acreedor_id, usuario_id, tipo, descripcion, valor, cargo_id, metodo, registrar_en_caja)
-           VALUES ($1, $2, 'Abono', $3, $4, $5, $6, $7)`,
-          [acreedorId, usuario_id, 'Pago al momento de la compra', totalPagado, cargoId, metodoPagoInmediato, registrar_en_caja !== false]
+          `INSERT INTO movimientos_acreedor(acreedor_id, usuario_id, tipo, descripcion, valor, cargo_id, metodo, registrar_en_caja, sucursal_id)
+           VALUES ($1, $2, 'Abono', $3, $4, $5, $6, $7, $8)`,
+          [acreedorId, usuario_id, 'Pago al momento de la compra', totalPagado, cargoId, metodoPagoInmediato, registrar_en_caja !== false, sucursal_id]
         );
       }
     }
@@ -521,9 +521,9 @@ const devolverCompra = async (negocioId, compraId, { lineas: lineasDevol, motivo
       const abonoAlCargo = Math.min(valorDevuelto, saldoPendiente);
       if (abonoAlCargo > 0) {
         await client.query(
-          `INSERT INTO movimientos_acreedor(acreedor_id, usuario_id, tipo, valor, descripcion, compra_id, cargo_id, metodo, registrar_en_caja)
-           VALUES ($1, $2, 'Abono', $3, $4, $5, $6, 'Devolución', false)`,
-          [cargo.acreedor_id, usuario_id || null, abonoAlCargo, desc, compraId, cargo.id]
+          `INSERT INTO movimientos_acreedor(acreedor_id, usuario_id, tipo, valor, descripcion, compra_id, cargo_id, metodo, registrar_en_caja, sucursal_id)
+           VALUES ($1, $2, 'Abono', $3, $4, $5, $6, 'Devolución', false, $7)`,
+          [cargo.acreedor_id, usuario_id || null, abonoAlCargo, desc, compraId, cargo.id, compra.sucursal_id]
         );
       }
 
@@ -531,9 +531,9 @@ const devolverCompra = async (negocioId, compraId, { lineas: lineasDevol, motivo
       if (excedente > 0) {
         // Ya estaba pagada → el excedente queda como saldo a favor del negocio
         await client.query(
-          `INSERT INTO movimientos_acreedor(acreedor_id, usuario_id, tipo, valor, descripcion, compra_id, cargo_id, metodo, registrar_en_caja)
-           VALUES ($1, $2, 'Abono', $3, $4, $5, NULL, 'Devolución', false)`,
-          [cargo.acreedor_id, usuario_id || null, excedente, `${desc} (saldo a favor)`, compraId]
+          `INSERT INTO movimientos_acreedor(acreedor_id, usuario_id, tipo, valor, descripcion, compra_id, cargo_id, metodo, registrar_en_caja, sucursal_id)
+           VALUES ($1, $2, 'Abono', $3, $4, $5, NULL, 'Devolución', false, $6)`,
+          [cargo.acreedor_id, usuario_id || null, excedente, `${desc} (saldo a favor)`, compraId, compra.sucursal_id]
         );
       }
     }

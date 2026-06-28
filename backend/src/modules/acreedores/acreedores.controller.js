@@ -36,7 +36,8 @@ const registrarMovimiento = async (req, res, next) => {
   try {
     const data = await service.registrarMovimiento(req.user.negocio_id, req.params.id, {
       ...req.body,
-      usuario_id: req.user.id,
+      usuario_id:  req.user.id,
+      sucursal_id: req.sucursal_id,
     });
     res.json({ ok: true, data, message: 'Movimiento registrado correctamente' });
   } catch (err) { next(err); }
@@ -87,6 +88,7 @@ const registrarAbonoTotal = async (req, res, next) => {
       metodo:            req.body.metodo,
       registrar_en_caja: req.body.registrar_en_caja,
       usuario_id:        req.user.id,
+      sucursal_id:       req.sucursal_id,
     });
     res.json({ ok: true, data, message: 'Pago total registrado correctamente' });
   } catch (err) { next(err); }

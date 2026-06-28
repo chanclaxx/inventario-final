@@ -355,15 +355,22 @@ const getResumenDia = async (cajaId, sucursalId, negocioId) => {
       ORDER BY c.fecha ASC
     `, [sucursalId, inicio, fin]),
 
+    // Pagos a acreedores atribuidos a ESTA sucursal. Se prefiere ma.sucursal_id
+    // (registrado al crear el movimiento) y, si falta, se deriva por compra
+    // (compra_id directo o vía el cargo). Sin esto, como movimientos_acreedor no
+    // distinguía sucursal, un pago se contaba en la caja de TODAS las sucursales.
     pool.query(`
       SELECT ma.id, ma.valor, ma.fecha, ma.descripcion, ma.metodo,
              a.nombre AS acreedor, pr.tipo AS tipo_proveedor
       FROM movimientos_acreedor ma
-      JOIN acreedores a ON a.id = ma.acreedor_id
+      JOIN acreedores a        ON a.id = ma.acreedor_id
+      LEFT JOIN movimientos_acreedor cargo ON cargo.id = ma.cargo_id
+      LEFT JOIN compras comp   ON comp.id = COALESCE(ma.compra_id, cargo.compra_id)
       LEFT JOIN proveedores pr ON pr.id = a.proveedor_id
       WHERE ma.tipo = 'Abono' AND a.negocio_id = $1 AND ma.fecha BETWEEN $2 AND $3
         AND ma.registrar_en_caja = TRUE
-    `, [negocioId, inicio, fin]),
+        AND COALESCE(ma.sucursal_id, comp.sucursal_id) = $4
+    `, [negocioId, inicio, fin, sucursalId]),
 
     pool.query(`
       SELECT m.*, u.nombre AS usuario_nombre
