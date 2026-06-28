@@ -19,5 +19,13 @@ router.get('/proveedor/:proveedorId', requireModulo('proveedores'), ctrl.getComp
 router.get('/:id',                    requireModulo('proveedores'), ctrl.getCompraById);
 router.post('/', requireModulo('proveedores'), requireNivel('supervisor'), validarCompra, validate, ctrl.registrarCompra);
 router.patch('/:id/cancelar', requireModulo('proveedores'), requireNivel('supervisor'), ctrl.cancelarCompra);
+router.post('/:id/devolucion', requireModulo('proveedores'), requireNivel('supervisor'),
+  [
+    body('lineas').isArray({ min: 1 }).withMessage('Debe indicar al menos una línea a devolver'),
+    body('lineas.*.linea_id').isInt({ gt: 0 }).withMessage('linea_id inválido'),
+    body('lineas.*.cantidad').optional().isInt({ gt: 0 }).withMessage('Cantidad inválida'),
+    body('motivo').optional({ values: 'null' }).isString().trim().isLength({ max: 300 }),
+  ],
+  validate, ctrl.devolverCompra);
 
 module.exports = router;

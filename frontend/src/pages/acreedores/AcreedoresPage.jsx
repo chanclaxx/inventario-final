@@ -12,7 +12,10 @@ import {
   editarAbono,
   eliminarAbono,
   exportarCuentaPdf,
+  getHistorialAcreedor,
+  registrarAbonoTotal,
 } from '../../api/acreedores.api';
+import { exportarCuentaAcreedorExcel } from '../../utils/exportarCuentaAcreedorExcel';
 import { getConfig, verificarPin } from '../../api/config.api';
 import { useMetodosPago } from '../../hooks/useMetodosPago';
 import { formatCOP, formatFechaHora } from '../../utils/formatters';
@@ -29,6 +32,7 @@ import { ReciboAcreedor } from '../../components/Reciboacreedor';
 import {
   Users, Plus, ChevronDown, ChevronUp, ChevronLeft, ChevronRight,
   Trash2, AlertTriangle, Calculator, PenLine, Wallet, Search, FileDown,
+  FileSpreadsheet, Layers, Clock,
 } from 'lucide-react';
 import api from '../../api/axios.config';
 import { getCompraById } from '../../api/compras.api';
@@ -46,6 +50,28 @@ const ESTADO_CFG = {
   Saldada:  { variant: 'green',  ring: 'border-green-200 bg-green-50/40'  },
   Parcial:  { variant: 'yellow', ring: 'border-amber-200 bg-amber-50/40'  },
   Pendiente:{ variant: 'red',    ring: 'border-red-200   bg-red-50/40'    },
+};
+
+// Tiempo transcurrido desde el último pago — etiqueta + nivel de color
+function tiempoUltimoPago(fecha) {
+  if (!fecha) return { texto: 'Sin pagos', nivel: 'rojo' };
+  const dias = Math.floor((Date.now() - new Date(fecha)) / 86400000);
+  let texto;
+  if (dias < 1)        texto = 'hoy';
+  else if (dias === 1) texto = 'ayer';
+  else if (dias < 7)   texto = `hace ${dias} días`;
+  else if (dias < 30)  { const s = Math.floor(dias / 7);  texto = `hace ${s} sem.`; }
+  else if (dias < 365) { const m = Math.floor(dias / 30); texto = `hace ${m} mes${m > 1 ? 'es' : ''}`; }
+  else                   texto = 'hace +1 año';
+  const nivel = dias <= 7 ? 'verde' : dias <= 30 ? 'amarillo' : dias <= 60 ? 'naranja' : 'rojo';
+  return { texto, nivel };
+}
+
+const PAGO_CLASES = {
+  verde:    'bg-green-50  text-green-600  border-green-200',
+  amarillo: 'bg-yellow-50 text-yellow-700 border-yellow-200',
+  naranja:  'bg-orange-50 text-orange-600 border-orange-200',
+  rojo:     'bg-red-50    text-red-600    border-red-200',
 };
 
 // ─── calculadora ──────────────────────────────────────────────────────────────
@@ -459,6 +485,146 @@ function ModalSaldoAFavor({ acreedor, onClose }) {
             onClick={() => mutation.mutate()}
           >
             Registrar
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// ─── modal pago total (distribuye un pago entre los cargos más antiguos) ──────
+
+function ModalAbonoTotal({ acreedor, cargos, onClose }) {
+  const queryClient = useQueryClient();
+  const metodosPago = useMetodosPago();
+  const [valor,           setValor]           = useState('');
+  const [metodo,          setMetodo]          = useState(() => metodosPago[0]?.id ?? 'Efectivo');
+  const [registrarEnCaja, setRegistrarEnCaja] = useState(true);
+  const [error,           setError]           = useState('');
+
+  const totalPendiente = cargos.reduce((s, c) => s + Number(c.saldo_pendiente || 0), 0);
+
+  // Previsualización de la distribución FIFO (más antiguo primero)
+  const distribucion = (() => {
+    let restante = Number(valor) || 0;
+    const ordenados = [...cargos].sort((a, b) => new Date(a.fecha) - new Date(b.fecha));
+    const res = [];
+    for (const c of ordenados) {
+      if (restante <= 0) break;
+      const pend = Number(c.saldo_pendiente || 0);
+      if (pend <= 0) continue;
+      const aplica = Math.min(restante, pend);
+      res.push({ cargo: c, aplica });
+      restante -= aplica;
+    }
+    return res;
+  })();
+
+  const mutation = useMutation({
+    mutationFn: () => registrarAbonoTotal(acreedor.id, {
+      valor:             Number(valor),
+      metodo,
+      registrar_en_caja: registrarEnCaja,
+    }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['compras-con-saldo', acreedor.id], exact: false });
+      queryClient.invalidateQueries({ queryKey: ['acreedores'],                     exact: false });
+      queryClient.invalidateQueries({ queryKey: ['historial-acreedor', acreedor.id], exact: false });
+      queryClient.invalidateQueries({ queryKey: ['saldo-a-favor', acreedor.id],     exact: false });
+      onClose();
+    },
+    onError: (err) => setError(err.response?.data?.error || 'Error al registrar el pago'),
+  });
+
+  const handleRegistrar = () => {
+    setError('');
+    const v = Number(valor);
+    if (!v || v <= 0) return setError('El valor debe ser mayor a 0');
+    if (v > totalPendiente) return setError(`El pago no puede superar la deuda total (${formatCOP(totalPendiente)})`);
+    mutation.mutate();
+  };
+
+  return (
+    <Modal open onClose={onClose} title={`Pago total — ${acreedor.nombre}`} size="sm">
+      <div className="flex flex-col gap-4">
+        <div className="bg-indigo-50 border border-indigo-100 rounded-xl px-4 py-3">
+          <p className="text-xs text-indigo-500">Deuda total · {cargos.length} cargo(s) pendiente(s)</p>
+          <p className="text-2xl font-bold text-indigo-700">{formatCOP(totalPendiente)}</p>
+          <p className="text-xs text-indigo-400 mt-0.5">
+            El pago se reparte entre los cargos más antiguos primero.
+          </p>
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <label className="text-sm font-medium text-gray-700">
+            Valor a pagar <span className="text-red-400 text-xs">*</span>
+          </label>
+          <InputMoneda
+            value={valor} onChange={setValor} placeholder="0" autoFocus
+            onKeyDown={(e) => e.key === 'Enter' && handleRegistrar()}
+            className="w-full px-3 py-2 bg-gray-100 rounded-xl text-sm
+              focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all"
+          />
+          {Number(valor) > totalPendiente && (
+            <p className="text-xs text-red-500 px-1">
+              Supera la deuda total ({formatCOP(totalPendiente)})
+            </p>
+          )}
+        </div>
+
+        {distribucion.length > 0 && (
+          <div className="bg-gray-50 rounded-xl p-3 flex flex-col gap-1.5 max-h-44 overflow-y-auto">
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Se aplicará a</p>
+            {distribucion.map(({ cargo, aplica }) => (
+              <div key={cargo.id} className="flex items-center justify-between text-xs gap-2">
+                <span className="text-gray-600 truncate">
+                  {cargo.descripcion || (cargo.compra_id ? `Compra #${String(cargo.compra_id).padStart(5, '0')}` : 'Cargo')}
+                </span>
+                <span className="font-semibold text-indigo-600 flex-shrink-0">{formatCOP(aplica)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="flex flex-col gap-1.5">
+          <label className="text-sm font-medium text-gray-700">Método de pago</label>
+          <div className="flex gap-2 flex-wrap">
+            {metodosPago.map((m) => (
+              <button key={m.id} type="button" onClick={() => setMetodo(m.id)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition-all
+                  ${metodo === m.id
+                    ? 'bg-indigo-50 border-indigo-300 text-indigo-700'
+                    : 'bg-gray-50 border-gray-200 text-gray-600 hover:border-gray-300'}`}>
+                {m.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className={`rounded-xl p-3 border transition-all
+          ${registrarEnCaja ? 'bg-blue-50 border-blue-200' : 'bg-gray-50 border-gray-200'}`}>
+          <label className="flex items-center gap-3 cursor-pointer">
+            <input type="checkbox" checked={registrarEnCaja}
+              onChange={(e) => setRegistrarEnCaja(e.target.checked)}
+              className="rounded accent-blue-600 w-4 h-4 flex-shrink-0" />
+            <div>
+              <p className="text-sm font-medium text-gray-700">Registrar en caja</p>
+              <p className="text-xs text-gray-400">Si no se marca, el pago no aparecerá en el resumen de caja del día</p>
+            </div>
+          </label>
+        </div>
+
+        {error && <p className="text-sm text-red-500">{error}</p>}
+
+        <div className="flex gap-2">
+          <Button variant="secondary" className="flex-1" onClick={onClose}>Cancelar</Button>
+          <Button
+            className="flex-1 bg-indigo-600 hover:bg-indigo-700"
+            loading={mutation.isPending}
+            disabled={!valor || Number(valor) <= 0 || Number(valor) > totalPendiente}
+            onClick={handleRegistrar}
+          >
+            <Layers size={14} /> Registrar pago
           </Button>
         </div>
       </div>
@@ -1024,27 +1190,54 @@ function DetalleAcreedor({ acreedor, esAdmin, onVolver, onEliminar }) {
   const [movImprimir,      setMovImprimir]       = useState(null);
   const [modalCargo,       setModalCargo]       = useState(false);
   const [modalSaldoFavor,  setModalSaldoFavor]  = useState(false);
+  const [modalAbonoTotal,  setModalAbonoTotal]  = useState(false);
   const [saldadasAbiertas, setSaldadasAbiertas] = useState(false);
   const [busquedaCargo,    setBusquedaCargo]    = useState('');
   const [filtroEstado,     setFiltroEstado]     = useState('todos');
   const [ordenCargos,      setOrdenCargos]      = useState('fecha_desc');
   const [exportandoPdf,    setExportandoPdf]    = useState(false);
+  const [exportandoExcel,  setExportandoExcel]  = useState(false);
+  const [menuPdf,          setMenuPdf]          = useState(false);
 
-  const handleExportPdf = async () => {
+  const handleExportPdf = async (formato = 'estado') => {
     if (exportandoPdf) return;
+    setMenuPdf(false);
     setExportandoPdf(true);
     try {
-      const res = await exportarCuentaPdf(acreedor.id);
+      const res = await exportarCuentaPdf(acreedor.id, formato);
       const url = URL.createObjectURL(new Blob([res.data], { type: 'application/pdf' }));
       const a = document.createElement('a');
       a.href = url;
-      a.download = `cuenta_${acreedor.nombre.replace(/\s+/g, '_').toLowerCase()}.pdf`;
+      const prefijo = formato === 'resumen' ? 'deuda' : 'cuenta';
+      a.download = `${prefijo}_${acreedor.nombre.replace(/\s+/g, '_').toLowerCase()}.pdf`;
       a.click();
       URL.revokeObjectURL(url);
     } catch {
       // silencioso — el servidor devuelve error estándar si falla
     } finally {
       setExportandoPdf(false);
+    }
+  };
+
+  const handleExportExcel = async () => {
+    if (exportandoExcel) return;
+    setExportandoExcel(true);
+    try {
+      const res = await getHistorialAcreedor(acreedor.id);
+      const movimientos = Array.isArray(res.data?.data) ? res.data.data : [];
+      exportarCuentaAcreedorExcel({
+        nombre:      acreedor.nombre,
+        cedula:      acreedor.cedula,
+        telefono:    acreedor.telefono,
+        esProveedor: !!acreedor.proveedor_id,
+        movimientos,
+        cargos:      Array.isArray(data) ? data : [],
+        saldoAFavor,
+      });
+    } catch {
+      alert('No se pudo generar el Excel. Intenta de nuevo.');
+    } finally {
+      setExportandoExcel(false);
     }
   };
 
@@ -1191,7 +1384,16 @@ function DetalleAcreedor({ acreedor, esAdmin, onVolver, onEliminar }) {
             <p className="text-xs text-gray-400">
               {activos.length} pendiente(s) · {saldados.length} saldada(s)
             </p>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap justify-end">
+              {activos.length > 0 && (
+                <button
+                  onClick={() => setModalAbonoTotal(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold
+                    border border-indigo-200 bg-white text-indigo-600
+                    hover:bg-indigo-50 transition-all">
+                  <Layers size={13} /> Pago total
+                </button>
+              )}
               <button
                 onClick={() => setModalSaldoFavor(true)}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold
@@ -1206,14 +1408,44 @@ function DetalleAcreedor({ acreedor, esAdmin, onVolver, onEliminar }) {
                   hover:border-blue-300 hover:text-blue-600 hover:bg-blue-50 transition-all">
                 <Plus size={13} /> Agregar cargo
               </button>
+              <div className="relative">
+                <button
+                  onClick={() => setMenuPdf((v) => !v)}
+                  disabled={exportandoPdf}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold
+                    border border-gray-200 bg-white text-gray-600
+                    hover:border-gray-400 hover:text-gray-800 hover:bg-gray-50 transition-all
+                    disabled:opacity-50 disabled:cursor-not-allowed">
+                  <FileDown size={13} /> {exportandoPdf ? 'Generando…' : 'PDF'}
+                  <ChevronDown size={12} />
+                </button>
+                {menuPdf && (
+                  <>
+                    <div className="fixed inset-0 z-10" onClick={() => setMenuPdf(false)} />
+                    <div className="absolute right-0 mt-1 z-20 bg-white border border-gray-200 rounded-xl
+                      shadow-lg overflow-hidden w-44">
+                      <button
+                        onClick={() => handleExportPdf('estado')}
+                        className="w-full text-left px-3 py-2 text-xs text-gray-700 hover:bg-gray-50 transition-colors">
+                        Estado de cuenta
+                      </button>
+                      <button
+                        onClick={() => handleExportPdf('resumen')}
+                        className="w-full text-left px-3 py-2 text-xs text-gray-700 hover:bg-gray-50 transition-colors border-t border-gray-100">
+                        Resumen de deuda
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
               <button
-                onClick={handleExportPdf}
-                disabled={exportandoPdf}
+                onClick={handleExportExcel}
+                disabled={exportandoExcel}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold
-                  border border-gray-200 bg-white text-gray-600
-                  hover:border-gray-400 hover:text-gray-800 hover:bg-gray-50 transition-all
+                  border border-emerald-200 bg-white text-emerald-700
+                  hover:border-emerald-400 hover:bg-emerald-50 transition-all
                   disabled:opacity-50 disabled:cursor-not-allowed">
-                <FileDown size={13} /> {exportandoPdf ? 'Generando…' : 'Exportar PDF'}
+                <FileSpreadsheet size={13} /> {exportandoExcel ? 'Generando…' : 'Excel'}
               </button>
             </div>
           </div>
@@ -1347,6 +1579,14 @@ function DetalleAcreedor({ acreedor, esAdmin, onVolver, onEliminar }) {
         <ModalSaldoAFavor acreedor={acreedor} onClose={() => setModalSaldoFavor(false)} />
       )}
 
+      {modalAbonoTotal && (
+        <ModalAbonoTotal
+          acreedor={acreedor}
+          cargos={activos}
+          onClose={() => setModalAbonoTotal(false)}
+        />
+      )}
+
       {cargoAplicar && (
         <ModalAplicarSaldo
           acreedor={acreedor}
@@ -1371,7 +1611,13 @@ function DetalleAcreedor({ acreedor, esAdmin, onVolver, onEliminar }) {
 // ─── fila acreedor en la lista ────────────────────────────────────────────────
 
 function FilaAcreedor({ acreedor, onClick }) {
-  const saldo = Number(acreedor.saldo || 0);
+  const saldo         = Number(acreedor.saldo || 0);
+  const totalCargado  = Number(acreedor.total_cargado || 0);
+  const totalAbonado  = Number(acreedor.total_abonado || 0);
+  const pct           = totalCargado > 0 ? Math.min(100, (totalAbonado / totalCargado) * 100) : 0;
+  const tieneDeuda    = saldo > 0;
+  const { texto: pagoTexto, nivel: pagoNivel } = tiempoUltimoPago(acreedor.ultimo_pago);
+
   return (
     <button onClick={onClick}
       className="w-full flex items-center gap-3 px-4 py-3.5 bg-white border border-gray-100
@@ -1379,12 +1625,17 @@ function FilaAcreedor({ acreedor, onClick }) {
         transition-all active:scale-[0.99]">
       <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold text-sm
         flex-shrink-0 select-none
-        ${saldo > 0 ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>
+        ${tieneDeuda ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>
         {acreedor.nombre.slice(0, 2).toUpperCase()}
       </div>
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 flex-wrap">
-          <p className="text-sm font-semibold text-gray-900">{acreedor.nombre}</p>
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-sm font-semibold text-gray-900 truncate">{acreedor.nombre}</p>
+          {tieneDeuda && (
+            <span className="text-sm font-bold text-red-500 flex-shrink-0">{formatCOP(saldo)}</span>
+          )}
+        </div>
+        <div className="flex items-center gap-1.5 mt-1 flex-wrap">
           {acreedor.proveedor_id && (
             <span className={`text-xs px-1.5 py-0.5 rounded-full border leading-none
               ${acreedor.proveedor_tipo === 'cruce'
@@ -1393,10 +1644,22 @@ function FilaAcreedor({ acreedor, onClick }) {
               {acreedor.proveedor_tipo === 'cruce' ? 'Cruce' : 'Proveedor'}
             </span>
           )}
+          {!tieneDeuda && (
+            <span className="text-xs bg-green-50 text-green-600 px-2 py-0.5 rounded-full font-medium">
+              Al día
+            </span>
+          )}
+          {tieneDeuda && (
+            <span className={`text-xs px-2 py-0.5 rounded-full border font-medium flex items-center gap-1 ${PAGO_CLASES[pagoNivel]}`}>
+              <Clock size={10} /> {pagoTexto}
+            </span>
+          )}
         </div>
-        <p className={`text-xs font-semibold mt-0.5 ${saldo > 0 ? 'text-red-500' : 'text-green-600'}`}>
-          {saldo > 0 ? `Debemos: ${formatCOP(saldo)}` : 'Al día'}
-        </p>
+        {tieneDeuda && totalCargado > 0 && (
+          <div className="mt-2 w-full bg-gray-100 rounded-full h-1">
+            <div className="bg-blue-400 h-1 rounded-full transition-all" style={{ width: `${pct}%` }} />
+          </div>
+        )}
       </div>
       <ChevronRight size={16} className="text-gray-300 flex-shrink-0" />
     </button>

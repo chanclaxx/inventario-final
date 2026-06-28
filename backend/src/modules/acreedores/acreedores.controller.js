@@ -80,6 +80,18 @@ const aplicarSaldoAFavor = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+const registrarAbonoTotal = async (req, res, next) => {
+  try {
+    const data = await service.registrarAbonoTotal(req.user.negocio_id, req.params.id, {
+      valor:             req.body.valor,
+      metodo:            req.body.metodo,
+      registrar_en_caja: req.body.registrar_en_caja,
+      usuario_id:        req.user.id,
+    });
+    res.json({ ok: true, data, message: 'Pago total registrado correctamente' });
+  } catch (err) { next(err); }
+};
+
 const eliminarAcreedor = async (req, res, next) => {
   try {
     await service.eliminarAcreedor(req.user.negocio_id, req.params.id);
@@ -115,6 +127,7 @@ module.exports = {
   crearAcreedor, registrarMovimiento, getCargosAbiertos,
   getComprasConSaldo, getAbonosPorCargo,
   getSaldoAFavor, aplicarSaldoAFavor,
+  registrarAbonoTotal,
   editarAbono, eliminarAbono,
   eliminarAcreedor, getHistorial,
 };

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { buscarCompras as buscarComprasApi } from '../../api/busqueda.api';
 import { getProveedores, crearProveedor, actualizarProveedor } from '../../api/proveedores.api';
-import { getComprasByProveedor, getCompraById, getComprasPaginadas, cancelarCompra as cancelarCompraApi } from '../../api/compras.api';
+import { getComprasByProveedor, getCompraById, getComprasPaginadas, cancelarCompra as cancelarCompraApi, devolverCompra as devolverCompraApi } from '../../api/compras.api';
 import { getAcreedores, registrarMovimiento as registrarMovAcreedor, getComprasConSaldo, getAbonosPorCargo } from '../../api/acreedores.api';
 import { formatCOP, formatFechaHora } from '../../utils/formatters';
 import { Button }      from '../../components/ui/Button';
@@ -21,7 +21,7 @@ import { useAuth } from '../../context/useAuth';
 import {
   Truck, Plus, ShoppingCart, ChevronRight, ChevronLeft, ChevronDown, ChevronUp,
   Package, Hash, User, RefreshCw, ArrowLeftRight, ShoppingBag, Repeat,
-  Search, ScanLine, Calculator,
+  Search, ScanLine, Calculator, Undo2,
 } from 'lucide-react';
 
 // ─── API helpers ──────────────────────────────────────────────────────────────
@@ -489,6 +489,10 @@ function ModalDetalleCompra({ compraId, onClose }) {
   const queryClient = useQueryClient();
   const [confirmando, setConfirmando] = useState(false);
   const [errorCancel, setErrorCancel] = useState('');
+  const [modoDevolucion, setModoDevolucion] = useState(false);
+  const [cantidades, setCantidades] = useState({});   // { linea_id: cantidad }
+  const [motivo, setMotivo]         = useState('');
+  const [errorDevol, setErrorDevol] = useState('');
 
   const { data, isLoading } = useQuery({
     queryKey: ['compra-detalle', compraId],
@@ -496,21 +500,57 @@ function ModalDetalleCompra({ compraId, onClose }) {
     enabled:  !!compraId,
   });
 
+  const invalidarCompras = () => {
+    queryClient.invalidateQueries({ queryKey: ['compra-detalle', compraId] });
+    queryClient.invalidateQueries({ queryKey: ['compras-paginadas'],   exact: false });
+    queryClient.invalidateQueries({ queryKey: ['compras-proveedor'],   exact: false });
+    queryClient.invalidateQueries({ queryKey: ['acreedores'],          exact: false });
+    queryClient.invalidateQueries({ queryKey: ['compras-con-saldo'],   exact: false });
+    queryClient.invalidateQueries({ queryKey: ['historial-acreedor'],  exact: false });
+  };
+
   const mutCancelar = useMutation({
     mutationFn: () => cancelarCompraApi(compraId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['compra-detalle', compraId] });
-      queryClient.invalidateQueries({ queryKey: ['compras-paginadas'],   exact: false });
-      queryClient.invalidateQueries({ queryKey: ['compras-proveedor'],   exact: false });
-      queryClient.invalidateQueries({ queryKey: ['acreedores'],          exact: false });
-      queryClient.invalidateQueries({ queryKey: ['compras-con-saldo'],   exact: false });
+      invalidarCompras();
       setConfirmando(false);
     },
     onError: (err) => setErrorCancel(err.response?.data?.error || 'Error al cancelar la compra'),
   });
 
+  const mutDevolver = useMutation({
+    mutationFn: (lineas) => devolverCompraApi(compraId, { lineas, motivo: motivo.trim() || undefined }),
+    onSuccess: () => {
+      invalidarCompras();
+      setModoDevolucion(false);
+      setCantidades({});
+      setMotivo('');
+    },
+    onError: (err) => setErrorDevol(err.response?.data?.error || 'Error al registrar la devolución'),
+  });
+
   const esCancelada = data?.estado === 'Cancelada';
   const esCredito   = ['Credito', 'Fiado'].includes(data?.metodo);
+
+  const setCantidadLinea = (id, val) => setCantidades((prev) => ({ ...prev, [id]: val }));
+
+  const lineasSeleccionadas = (data?.lineas || [])
+    .map((l) => {
+      const cant = l.imei ? (cantidades[l.id] ? 1 : 0) : Number(cantidades[l.id] || 0);
+      return { linea_id: l.id, cantidad: cant };
+    })
+    .filter((x) => x.cantidad > 0);
+
+  const valorDevolucion = (data?.lineas || []).reduce((s, l) => {
+    const cant = l.imei ? (cantidades[l.id] ? 1 : 0) : Number(cantidades[l.id] || 0);
+    return s + cant * Number(l.precio_unitario);
+  }, 0);
+
+  const handleConfirmarDevolucion = () => {
+    setErrorDevol('');
+    if (!lineasSeleccionadas.length) return setErrorDevol('Selecciona al menos un producto a devolver');
+    mutDevolver.mutate(lineasSeleccionadas);
+  };
 
   return (
     <Modal open onClose={onClose} title={`Compra #${String(compraId).padStart(5, '0')}`} size="lg">
@@ -564,24 +604,50 @@ function ModalDetalleCompra({ compraId, onClose }) {
                     ? `${l.atributo_tipo_nombre ? l.atributo_tipo_nombre + ': ' : ''}${l.atributo_valor}`
                     : null;
                   return (
-                  <div key={l.id} className="bg-gray-50 rounded-xl p-3 flex items-start justify-between gap-2">
-                    <div className="flex-1">
-                      <p className="text-sm font-medium text-gray-800">{l.nombre_producto}</p>
-                      {varianteLabel && (
-                        <p className="text-xs text-blue-600 font-medium mt-0.5">{varianteLabel}</p>
-                      )}
-                      {l.imei
-                        ? <div className="flex items-center gap-1 mt-0.5"><Hash size={10} className="text-gray-400" /><p className="text-xs text-gray-400 font-mono">{l.imei}</p></div>
-                        : <p className="text-xs text-gray-400">Cantidad: {l.cantidad}</p>
-                      }
-                      {l.precio_usd && (
-                        <p className="text-xs text-gray-400 mt-0.5">${l.precio_usd} USD</p>
-                      )}
+                  <div key={l.id} className="bg-gray-50 rounded-xl p-3 flex flex-col gap-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex-1">
+                        <p className="text-sm font-medium text-gray-800">{l.nombre_producto}</p>
+                        {varianteLabel && (
+                          <p className="text-xs text-blue-600 font-medium mt-0.5">{varianteLabel}</p>
+                        )}
+                        {l.imei
+                          ? <div className="flex items-center gap-1 mt-0.5"><Hash size={10} className="text-gray-400" /><p className="text-xs text-gray-400 font-mono">{l.imei}</p></div>
+                          : <p className="text-xs text-gray-400">Cantidad: {l.cantidad}</p>
+                        }
+                        {l.precio_usd && (
+                          <p className="text-xs text-gray-400 mt-0.5">${l.precio_usd} USD</p>
+                        )}
+                      </div>
+                      <div className="text-right flex-shrink-0">
+                        <p className="text-xs text-gray-400">{l.cantidad} × {formatCOP(l.precio_unitario)}</p>
+                        <p className="text-sm font-semibold text-gray-900">{formatCOP(l.cantidad * l.precio_unitario)}</p>
+                      </div>
                     </div>
-                    <div className="text-right flex-shrink-0">
-                      <p className="text-xs text-gray-400">{l.cantidad} × {formatCOP(l.precio_unitario)}</p>
-                      <p className="text-sm font-semibold text-gray-900">{formatCOP(l.cantidad * l.precio_unitario)}</p>
-                    </div>
+                    {modoDevolucion && (
+                      <div className="flex items-center justify-between gap-2 border-t border-gray-200 pt-2">
+                        <span className="text-xs font-medium text-amber-700">Devolver</span>
+                        {l.imei ? (
+                          <label className="flex items-center gap-2 text-xs text-gray-600 cursor-pointer">
+                            <input type="checkbox"
+                              checked={!!cantidades[l.id]}
+                              onChange={(e) => setCantidadLinea(l.id, e.target.checked ? 1 : 0)}
+                              className="rounded accent-amber-600 w-4 h-4" />
+                            Este equipo
+                          </label>
+                        ) : (
+                          <input type="number" min="0" max={l.cantidad}
+                            value={cantidades[l.id] ?? ''}
+                            placeholder="0"
+                            onChange={(e) => {
+                              const v = e.target.value === '' ? '' : Math.max(0, Math.min(Number(l.cantidad), Number(e.target.value)));
+                              setCantidadLinea(l.id, v);
+                            }}
+                            className="w-24 text-right px-2 py-1 bg-white border border-amber-200 rounded-lg
+                              text-sm focus:outline-none focus:ring-2 focus:ring-amber-400" />
+                        )}
+                      </div>
+                    )}
                   </div>
                   );
                 })
@@ -625,14 +691,58 @@ function ModalDetalleCompra({ compraId, onClose }) {
             </div>
           )}
 
-          <div className="flex gap-2">
-            {!esCancelada && !confirmando && (
-              <button
-                onClick={() => { setConfirmando(true); setErrorCancel(''); }}
-                className="px-3 py-2 rounded-xl text-sm border border-red-200 text-red-600 bg-red-50
-                  hover:bg-red-100 transition-colors font-medium">
-                Cancelar compra
-              </button>
+          {/* Panel de devolución */}
+          {!esCancelada && modoDevolucion && (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex flex-col gap-3">
+              <p className="text-sm font-semibold text-amber-800">Devolución de mercancía</p>
+              <p className="text-xs text-amber-700 leading-relaxed">
+                Indica arriba las cantidades a devolver. Se descontarán del inventario y se
+                registrará una nota crédito que <strong>reduce la deuda</strong> con el proveedor
+                (si ya estaba pagada, queda como saldo a favor). No afecta la caja.
+              </p>
+              <Input
+                label="Motivo (opcional)"
+                placeholder="Ej: producto defectuoso, error de pedido…"
+                value={motivo}
+                onChange={(e) => setMotivo(e.target.value)}
+              />
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-amber-700">Valor a devolver</span>
+                <span className="text-sm font-bold text-amber-800">{formatCOP(valorDevolucion)}</span>
+              </div>
+              {errorDevol && <p className="text-xs text-red-600 font-medium">{errorDevol}</p>}
+              <div className="flex gap-2">
+                <button
+                  onClick={() => { setModoDevolucion(false); setCantidades({}); setMotivo(''); setErrorDevol(''); }}
+                  className="flex-1 py-2 rounded-xl text-sm border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors">
+                  Cancelar
+                </button>
+                <button
+                  onClick={handleConfirmarDevolucion}
+                  disabled={mutDevolver.isPending || lineasSeleccionadas.length === 0}
+                  className="flex-1 py-2 rounded-xl text-sm bg-amber-600 hover:bg-amber-700 text-white font-medium transition-colors disabled:opacity-50">
+                  {mutDevolver.isPending ? 'Registrando…' : 'Confirmar devolución'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div className="flex gap-2 flex-wrap">
+            {!esCancelada && !confirmando && !modoDevolucion && (
+              <>
+                <button
+                  onClick={() => { setModoDevolucion(true); setErrorDevol(''); }}
+                  className="px-3 py-2 rounded-xl text-sm border border-amber-200 text-amber-700 bg-amber-50
+                    hover:bg-amber-100 transition-colors font-medium flex items-center gap-1.5">
+                  <Undo2 size={14} /> Devolver mercancía
+                </button>
+                <button
+                  onClick={() => { setConfirmando(true); setErrorCancel(''); }}
+                  className="px-3 py-2 rounded-xl text-sm border border-red-200 text-red-600 bg-red-50
+                    hover:bg-red-100 transition-colors font-medium">
+                  Cancelar compra
+                </button>
+              </>
             )}
             <Button variant="secondary" className="flex-1" onClick={onClose}>Cerrar</Button>
           </div>

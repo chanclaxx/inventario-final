@@ -107,4 +107,24 @@ const cancelarCompra = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-module.exports = { getCompras, getCompraById, getComprasByProveedor, registrarCompra, getComprasPaginadas, cancelarCompra };
+const devolverCompra = async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id) || id < 1) {
+      return res.status(400).json({ ok: false, error: 'ID de compra inválido' });
+    }
+    const data = await service.devolverCompra(req.user.negocio_id, id, {
+      lineas:     req.body.lineas,
+      motivo:     req.body.motivo,
+      usuario_id: req.user.id,
+    });
+    audit.registrar(req.user.negocio_id, req.user.id, 'Devolución a proveedor', 'compras', id, {
+      valor:   Number(data.valor_devuelto ?? 0),
+      lineas:  data.detalle?.length ?? 0,
+      motivo:  req.body.motivo ?? null,
+    });
+    res.json({ ok: true, data, message: 'Devolución registrada correctamente' });
+  } catch (err) { next(err); }
+};
+
+module.exports = { getCompras, getCompraById, getComprasByProveedor, registrarCompra, getComprasPaginadas, cancelarCompra, devolverCompra };

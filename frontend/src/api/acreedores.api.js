@@ -13,12 +13,14 @@ export const getAbonosPorCargo  = (id, cargoId) => api.get(`/acreedores/${id}/ca
 export const getSaldoAFavor     = (id) => api.get(`/acreedores/${id}/saldo-favor`);
 export const aplicarSaldoAFavor = (id, cargo_id, valor) =>
   api.post(`/acreedores/${id}/aplicar-saldo`, { cargo_id, valor });
+export const registrarAbonoTotal = (id, data) =>
+  api.post(`/acreedores/${id}/abono-total`, data);
 export const editarAbono   = (acreedorId, movId, data) =>
   api.put(`/acreedores/${acreedorId}/movimientos/${movId}`, data);
 export const eliminarAbono = (acreedorId, movId) =>
   api.delete(`/acreedores/${acreedorId}/movimientos/${movId}`);
 
-export const exportarCuentaPdf = (id) =>
-  api.get(`/acreedores/${id}/pdf`, { responseType: 'blob' });
+export const exportarCuentaPdf = (id, formato) =>
+  api.get(`/acreedores/${id}/pdf`, { params: { formato }, responseType: 'blob' });
 
 export const getHistorialAcreedor = (id) => api.get(`/acreedores/${id}/historial`);

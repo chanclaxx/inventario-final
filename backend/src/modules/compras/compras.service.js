@@ -315,10 +315,15 @@ const cancelarCompra = async (negocioId, compraId) => {
     );
     if (cargoRows.length) {
       const cargoId = cargoRows[0].id;
-      // Primero los abonos que apuntan a este cargo
+      // Abonos que apuntan a este cargo (pagos + devoluciones ligadas al cargo)
       await client.query(
         `DELETE FROM movimientos_acreedor WHERE cargo_id = $1`,
         [cargoId]
+      );
+      // Notas crédito de devolución que quedaron como saldo a favor (sin cargo)
+      await client.query(
+        `DELETE FROM movimientos_acreedor WHERE compra_id = $1 AND cargo_id IS NULL AND tipo = 'Abono'`,
+        [compraId]
       );
       // Luego el cargo mismo
       await client.query(
@@ -392,4 +397,155 @@ const cancelarCompra = async (negocioId, compraId) => {
   }
 };
 
-module.exports = { getCompras, getCompraById, getComprasByProveedor, registrarCompra, getComprasPaginadas, cancelarCompra };
+// ── Devolución total/parcial de mercancía a proveedor ─────────────────────────
+// Revierte el inventario de las líneas indicadas (reusa la misma lógica probada
+// de cancelarCompra) y registra una nota crédito en el acreedor: reduce la deuda
+// del cargo de la compra y, si ya estaba pagada, el excedente queda como saldo a
+// favor. NO afecta caja (es mercancía devuelta, no dinero).
+const devolverCompra = async (negocioId, compraId, { lineas: lineasDevol, motivo, usuario_id }) => {
+  if (!Array.isArray(lineasDevol) || lineasDevol.length === 0) {
+    throw { status: 400, message: 'Debes indicar al menos una línea a devolver' };
+  }
+
+  const compra = await comprasRepo.findByIdYNegocio(compraId, negocioId);
+  if (!compra) throw { status: 404, message: 'Compra no encontrada' };
+  if (compra.estado === 'Cancelada') throw { status: 400, message: 'La compra está cancelada; no se puede devolver' };
+
+  const lineasCompra = await comprasRepo.getLineas(compraId);
+  const lineasById = new Map(lineasCompra.map((l) => [Number(l.id), l]));
+
+  // Validar y normalizar las solicitudes de devolución
+  const solicitudes = [];
+  for (const req of lineasDevol) {
+    const linea = lineasById.get(Number(req.linea_id));
+    if (!linea) throw { status: 400, message: `La línea ${req.linea_id} no pertenece a esta compra` };
+
+    if (linea.imei) {
+      solicitudes.push({ linea, cantidad: 1 });
+    } else {
+      const cant = Number(req.cantidad);
+      if (!Number.isInteger(cant) || cant < 1 || cant > Number(linea.cantidad)) {
+        throw { status: 400, message: `Cantidad inválida para ${linea.nombre_producto} (entre 1 y ${linea.cantidad})` };
+      }
+      solicitudes.push({ linea, cantidad: cant });
+    }
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    let valorDevuelto = 0;
+    const detalle = [];
+
+    for (const { linea, cantidad } of solicitudes) {
+      if (linea.imei) {
+        const { rows } = await client.query(
+          `SELECT id, vendido, prestado FROM seriales WHERE imei = $1 LIMIT 1`,
+          [linea.imei]
+        );
+        if (!rows.length) throw { status: 400, message: `El equipo ${linea.imei} ya no está en el inventario` };
+        if (rows[0].vendido || rows[0].prestado) {
+          throw { status: 400, message: `El equipo ${linea.imei} ya fue ${rows[0].vendido ? 'vendido' : 'prestado'} y no se puede devolver` };
+        }
+        await client.query(`DELETE FROM seriales WHERE id = $1`, [rows[0].id]);
+
+      } else if (linea.variante_id) {
+        const { rows } = await client.query(`SELECT stock, producto_id FROM variantes_atributo WHERE id = $1`, [linea.variante_id]);
+        if (!rows.length || Number(rows[0].stock) < cantidad) {
+          throw { status: 400, message: `Stock insuficiente para devolver ${linea.nombre_producto}` };
+        }
+        await client.query(`UPDATE variantes_atributo SET stock = stock - $1 WHERE id = $2`, [cantidad, linea.variante_id]);
+        await client.query(
+          `UPDATE productos_cantidad
+           SET stock = (SELECT COALESCE(SUM(stock), 0) FROM variantes_atributo WHERE producto_id = $1)
+           WHERE id = $1`,
+          [rows[0].producto_id]
+        );
+
+      } else if (linea.atributo_id) {
+        const { rows } = await client.query(`SELECT stock, producto_id FROM atributos_producto WHERE id = $1`, [linea.atributo_id]);
+        if (!rows.length || Number(rows[0].stock) < cantidad) {
+          throw { status: 400, message: `Stock insuficiente para devolver ${linea.nombre_producto}` };
+        }
+        await client.query(`UPDATE atributos_producto SET stock = stock - $1 WHERE id = $2`, [cantidad, linea.atributo_id]);
+        await client.query(
+          `UPDATE productos_cantidad
+           SET stock = (SELECT COALESCE(SUM(stock), 0) FROM atributos_producto WHERE producto_id = $1)
+           WHERE id = $1`,
+          [rows[0].producto_id]
+        );
+
+      } else if (linea.producto_id) {
+        const { rows } = await client.query(`SELECT stock FROM productos_cantidad WHERE id = $1`, [linea.producto_id]);
+        if (!rows.length || Number(rows[0].stock) < cantidad) {
+          throw { status: 400, message: `Stock insuficiente para devolver ${linea.nombre_producto}` };
+        }
+        await client.query(`UPDATE productos_cantidad SET stock = stock - $1 WHERE id = $2`, [cantidad, linea.producto_id]);
+      }
+
+      const sub = cantidad * Number(linea.precio_unitario);
+      valorDevuelto += sub;
+      detalle.push({ linea_id: linea.id, nombre: linea.nombre_producto, cantidad, valor: sub });
+    }
+
+    // ── Nota crédito en el acreedor ─────────────────────────────────────────
+    const { rows: cargoRows } = await client.query(
+      `SELECT id, acreedor_id, valor FROM movimientos_acreedor
+       WHERE compra_id = $1 AND tipo = 'Cargo' LIMIT 1`,
+      [compraId]
+    );
+
+    if (cargoRows.length && valorDevuelto > 0) {
+      const cargo = cargoRows[0];
+
+      // Tope: no se puede devolver más valor del que vale la compra
+      const { rows: yaDevRows } = await client.query(
+        `SELECT COALESCE(SUM(valor), 0) AS dev FROM movimientos_acreedor
+         WHERE compra_id = $1 AND tipo = 'Abono' AND metodo = 'Devolución'`,
+        [compraId]
+      );
+      if (Number(yaDevRows[0].dev) + valorDevuelto > Number(cargo.valor) + 0.001) {
+        throw { status: 400, message: 'La devolución supera el valor pendiente de devolver de esta compra' };
+      }
+
+      // Saldo pendiente del cargo (lo que aún se debe de esta compra)
+      const { rows: abRows } = await client.query(
+        `SELECT COALESCE(SUM(valor), 0) AS ab FROM movimientos_acreedor
+         WHERE cargo_id = $1 AND tipo = 'Abono'`,
+        [cargo.id]
+      );
+      const saldoPendiente = Math.max(0, Number(cargo.valor) - Number(abRows[0].ab));
+      const desc = `Devolución de mercancía — compra #${compraId}${motivo ? ` (${motivo})` : ''}`;
+
+      const abonoAlCargo = Math.min(valorDevuelto, saldoPendiente);
+      if (abonoAlCargo > 0) {
+        await client.query(
+          `INSERT INTO movimientos_acreedor(acreedor_id, usuario_id, tipo, valor, descripcion, compra_id, cargo_id, metodo, registrar_en_caja)
+           VALUES ($1, $2, 'Abono', $3, $4, $5, $6, 'Devolución', false)`,
+          [cargo.acreedor_id, usuario_id || null, abonoAlCargo, desc, compraId, cargo.id]
+        );
+      }
+
+      const excedente = valorDevuelto - abonoAlCargo;
+      if (excedente > 0) {
+        // Ya estaba pagada → el excedente queda como saldo a favor del negocio
+        await client.query(
+          `INSERT INTO movimientos_acreedor(acreedor_id, usuario_id, tipo, valor, descripcion, compra_id, cargo_id, metodo, registrar_en_caja)
+           VALUES ($1, $2, 'Abono', $3, $4, $5, NULL, 'Devolución', false)`,
+          [cargo.acreedor_id, usuario_id || null, excedente, `${desc} (saldo a favor)`, compraId]
+        );
+      }
+    }
+
+    await client.query('COMMIT');
+    return { compra_id: compraId, valor_devuelto: valorDevuelto, detalle };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+};
+
+module.exports = { getCompras, getCompraById, getComprasByProveedor, registrarCompra, getComprasPaginadas, cancelarCompra, devolverCompra };

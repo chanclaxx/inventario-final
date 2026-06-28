@@ -87,6 +87,15 @@ const aplicarSaldoAFavor = async (negocioId, acreedorId, cargoId, valor) => {
   return repo.aplicarSaldoAFavor(negocioId, acreedorId, cargoId, valor);
 };
 
+const registrarAbonoTotal = async (negocioId, acreedorId, { valor, metodo, registrar_en_caja, usuario_id }) => {
+  const acreedor = await repo.findById(negocioId, acreedorId);
+  if (!acreedor) throw { status: 404, message: 'Acreedor no encontrado' };
+  if (!valor || Number(valor) <= 0) throw { status: 400, message: 'El valor debe ser mayor a 0' };
+  return repo.registrarAbonoTotal(negocioId, acreedorId, {
+    valor: Number(valor), metodo, registrar_en_caja, usuario_id,
+  });
+};
+
 const eliminarAcreedor = async (negocioId, acreedorId) => {
   try {
     await repo.eliminarSeguro(negocioId, acreedorId);
@@ -124,6 +133,7 @@ module.exports = {
   crearAcreedor, registrarMovimiento, getCargosAbiertos,
   getComprasConSaldo, getAbonosPorCargo,
   getSaldoAFavor, aplicarSaldoAFavor,
+  registrarAbonoTotal,
   editarAbono, eliminarAbono,
   eliminarAcreedor, getHistorial,
 };

@@ -4,7 +4,10 @@ const findAll = async (negocioId, filtro) => {
   let query = `
     SELECT a.id, a.nombre, a.cedula, a.telefono, a.proveedor_id,
            p.tipo AS proveedor_tipo,
-           COALESCE(SUM(CASE WHEN m.tipo = 'Cargo' THEN m.valor ELSE -m.valor END), 0) AS saldo
+           COALESCE(SUM(CASE WHEN m.tipo = 'Cargo' THEN m.valor ELSE -m.valor END), 0) AS saldo,
+           COALESCE(SUM(CASE WHEN m.tipo = 'Cargo' THEN m.valor ELSE 0 END), 0) AS total_cargado,
+           COALESCE(SUM(CASE WHEN m.tipo = 'Abono' THEN m.valor ELSE 0 END), 0) AS total_abonado,
+           MAX(m.fecha) FILTER (WHERE m.tipo = 'Abono') AS ultimo_pago
     FROM acreedores a
     LEFT JOIN proveedores p ON p.id = a.proveedor_id
     LEFT JOIN movimientos_acreedor m ON m.acreedor_id = a.id
@@ -34,7 +37,10 @@ const findByProveedorIds = async (negocioId, proveedorIds, filtro) => {
   let query = `
     SELECT a.id, a.nombre, a.cedula, a.telefono, a.proveedor_id,
            p.tipo AS proveedor_tipo,
-           COALESCE(SUM(CASE WHEN m.tipo = 'Cargo' THEN m.valor ELSE -m.valor END), 0) AS saldo
+           COALESCE(SUM(CASE WHEN m.tipo = 'Cargo' THEN m.valor ELSE -m.valor END), 0) AS saldo,
+           COALESCE(SUM(CASE WHEN m.tipo = 'Cargo' THEN m.valor ELSE 0 END), 0) AS total_cargado,
+           COALESCE(SUM(CASE WHEN m.tipo = 'Abono' THEN m.valor ELSE 0 END), 0) AS total_abonado,
+           MAX(m.fecha) FILTER (WHERE m.tipo = 'Abono') AS ultimo_pago
     FROM acreedores a
     JOIN proveedores p ON p.id = a.proveedor_id
     LEFT JOIN movimientos_acreedor m ON m.acreedor_id = a.id
@@ -319,6 +325,64 @@ const aplicarSaldoAFavor = async (negocioId, acreedorId, cargoId, valor) => {
   }
 };
 
+// Distribuye un pago único entre los cargos abiertos del acreedor (FIFO: más
+// antiguo primero). Crea un Abono vinculado a cada cargo afectado. Atómico.
+const registrarAbonoTotal = async (negocioId, acreedorId, { valor, metodo, registrar_en_caja, usuario_id }) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const { rows: acr } = await client.query(
+      `SELECT id FROM acreedores WHERE id = $1 AND negocio_id = $2 FOR UPDATE`,
+      [acreedorId, negocioId]
+    );
+    if (!acr.length) throw { status: 404, message: 'Acreedor no encontrado' };
+
+    // Cargos abiertos, más antiguos primero
+    const { rows: cargos } = await client.query(`
+      SELECT
+        m.id,
+        m.valor - COALESCE(SUM(a.valor), 0) AS saldo_pendiente
+      FROM movimientos_acreedor m
+      LEFT JOIN movimientos_acreedor a ON a.cargo_id = m.id AND a.tipo = 'Abono'
+      WHERE m.acreedor_id = $1 AND m.tipo = 'Cargo'
+      GROUP BY m.id
+      HAVING m.valor - COALESCE(SUM(a.valor), 0) > 0
+      ORDER BY m.fecha ASC, m.id ASC
+    `, [acreedorId]);
+
+    if (!cargos.length) throw { status: 400, message: 'Este acreedor no tiene cargos pendientes' };
+
+    const totalPendiente = cargos.reduce((s, c) => s + Number(c.saldo_pendiente), 0);
+    if (valor > totalPendiente + 0.001) {
+      throw { status: 400, message: `El pago (${valor}) supera la deuda total pendiente (${totalPendiente.toFixed(2)})` };
+    }
+
+    let restante = valor;
+    const distribucion = [];
+    for (const cargo of cargos) {
+      if (restante <= 0) break;
+      const pend = Number(cargo.saldo_pendiente);
+      if (pend <= 0) continue;
+      const aplica = Math.min(restante, pend);
+      await client.query(`
+        INSERT INTO movimientos_acreedor(acreedor_id, usuario_id, tipo, valor, descripcion, cargo_id, metodo, registrar_en_caja)
+        VALUES ($1, $2, 'Abono', $3, $4, $5, $6, $7)
+      `, [acreedorId, usuario_id || null, aplica, 'Pago total distribuido', cargo.id, metodo || null, registrar_en_caja !== false]);
+      distribucion.push({ cargo_id: cargo.id, valor: aplica });
+      restante -= aplica;
+    }
+
+    await client.query('COMMIT');
+    return { distribucion, total_aplicado: valor - restante };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+};
+
 const getAbonosPorCargo = async (negocioId, acreedorId, cargoId) => {
   const { rows } = await pool.query(`
     SELECT
@@ -371,6 +435,7 @@ module.exports = {
   getMovimientos, getCargosAbiertos,
   getComprasConSaldo, getAbonosPorCargo,
   getSaldoAFavor, aplicarSaldoAFavor,
+  registrarAbonoTotal,
   editarAbono, eliminarAbono,
   create, insertarMovimiento, eliminarSeguro,
 };

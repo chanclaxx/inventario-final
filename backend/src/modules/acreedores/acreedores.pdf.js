@@ -97,7 +97,7 @@ function dibujarLogoHeader(doc, config, headerH) {
 
 // ─── Secciones ───────────────────────────────────────────────────────────────
 
-function dibujarEncabezado(doc, config, acreedor) {
+function dibujarEncabezado(doc, config, acreedor, titulo = 'ESTADO DE CUENTA') {
   const HEADER_H = 110;
   rectFill(doc, 0, 0, PAGE_W, HEADER_H, C.headerBg, 0);
 
@@ -115,7 +115,7 @@ function dibujarEncabezado(doc, config, acreedor) {
   }
 
   doc.font(FONT.bold).fontSize(11).fillColor(C.headerText)
-    .text('ESTADO DE CUENTA', PAGE_W - MARGIN - 150, 22, { width: 150, align: 'right' });
+    .text(titulo, PAGE_W - MARGIN - 180, 22, { width: 180, align: 'right' });
 
   doc.font(FONT.normal).fontSize(8).fillColor(C.headerSub)
     .text(`Generado: ${formatFechaHora(new Date())}`, PAGE_W - MARGIN - 150, 38, { width: 150, align: 'right' });
@@ -348,4 +348,93 @@ function generarPdfCuentaAcreedor({ acreedor, movimientos, saldoAFavor, config, 
   doc.end();
 }
 
-module.exports = { generarPdfCuentaAcreedor };
+// ─── Formato 2: Resumen de deuda (cargos pendientes) ─────────────────────────
+
+function dibujarTablaCargos(doc, cargos, startY) {
+  // Fecha(60) + Descripción(195) + Valor(84) + Abonado(84) + Pendiente(76) = 499 = CW
+  const cols = [
+    { label: 'Fecha',       x: MARGIN,       w: 60,  align: 'left'  },
+    { label: 'Descripción', x: MARGIN + 60,  w: 195, align: 'left'  },
+    { label: 'Valor',       x: MARGIN + 255, w: 84,  align: 'right' },
+    { label: 'Abonado',     x: MARGIN + 339, w: 84,  align: 'right' },
+    { label: 'Pendiente',   x: MARGIN + 423, w: 76,  align: 'right' },
+  ];
+  const ROW_H = 22, HEAD_H = 24, PAGE_BOTTOM = 841.89 - 60;
+  let y = startY;
+
+  const cabecera = (yy) => {
+    rectFill(doc, MARGIN, yy, CW, HEAD_H, C.negro, 6);
+    cols.forEach((col) => {
+      doc.font(FONT.bold).fontSize(8).fillColor(C.blanco)
+        .text(col.label, col.x + 4, yy + 8, { width: col.w - 8, align: col.align });
+    });
+    return yy + HEAD_H;
+  };
+  y = cabecera(y);
+
+  cargos.forEach((c, i) => {
+    if (y + ROW_H > PAGE_BOTTOM) { doc.addPage(); y = cabecera(MARGIN); }
+    rectFill(doc, MARGIN, y, CW, ROW_H, i % 2 === 0 ? C.blanco : C.grisFondo, 0);
+
+    const desc = c.descripcion
+      || (c.compra_id ? `Compra #${String(c.compra_id).padStart(5, '0')}` : 'Cargo');
+
+    doc.font(FONT.normal).fontSize(7.5).fillColor(C.grisClaro)
+      .text(formatFecha(c.fecha), cols[0].x + 4, y + 7, { width: cols[0].w - 8 });
+    doc.font(FONT.normal).fontSize(8).fillColor(C.negro)
+      .text(desc, cols[1].x + 4, y + 7, { width: cols[1].w - 8, ellipsis: true, height: ROW_H - 8 });
+    doc.font(FONT.normal).fontSize(8).fillColor(C.gris)
+      .text(formatCOP(c.valor_original), cols[2].x + 4, y + 7, { width: cols[2].w - 8, align: 'right' });
+    doc.font(FONT.normal).fontSize(8).fillColor(C.verde)
+      .text(formatCOP(c.total_abonado), cols[3].x + 4, y + 7, { width: cols[3].w - 8, align: 'right' });
+    doc.font(FONT.bold).fontSize(8).fillColor(C.rojo)
+      .text(formatCOP(c.saldo_pendiente), cols[4].x + 4, y + 7, { width: cols[4].w - 8, align: 'right' });
+
+    hLine(doc, y + ROW_H, MARGIN, PAGE_W - MARGIN, C.grisBorde);
+    y += ROW_H;
+  });
+
+  rectStroke(doc, MARGIN, startY, CW, y - startY, C.grisBorde, 6);
+  return y;
+}
+
+function generarPdfResumenDeuda({ acreedor, cargos, saldoAFavor, config, res }) {
+  const doc = new PDFDocument({ size: 'A4', margin: 0, bufferPages: true });
+  res.setHeader('Content-Type', 'application/pdf');
+  const nombre = (acreedor.nombre || 'acreedor').replace(/\s+/g, '_').toLowerCase();
+  res.setHeader('Content-Disposition', `attachment; filename="deuda_${nombre}.pdf"`);
+  doc.pipe(res);
+
+  const pendientes = cargos.filter((c) => Number(c.saldo_pendiente) > 0);
+  const saldoTotal = pendientes.reduce((s, c) => s + Number(c.saldo_pendiente), 0);
+
+  let y = dibujarEncabezado(doc, config, acreedor, 'RESUMEN DE DEUDA');
+  y += 16;
+  y = dibujarInfoAcreedor(doc, acreedor, saldoTotal, Number(saldoAFavor || 0), y);
+
+  if (pendientes.length === 0) {
+    doc.font(FONT.normal).fontSize(10).fillColor(C.grisClaro)
+      .text('Este acreedor no tiene cargos pendientes. ✓', MARGIN, y + 20, { width: CW, align: 'center' });
+  } else {
+    y += 4;
+    doc.font(FONT.bold).fontSize(9).fillColor(C.negro)
+      .text(`Cargos pendientes (${pendientes.length})`, MARGIN, y);
+    y += 14;
+    y = dibujarTablaCargos(doc, pendientes, y);
+
+    // Total
+    y += 14;
+    const H = 40;
+    rectFill(doc, MARGIN, y, CW, H, C.grisFondo);
+    rectStroke(doc, MARGIN, y, CW, H, C.grisBorde);
+    doc.font(FONT.bold).fontSize(9).fillColor(C.negro)
+      .text('Deuda total pendiente', MARGIN + 14, y + 14);
+    doc.font(FONT.bold).fontSize(13).fillColor(C.rojo)
+      .text(formatCOP(saldoTotal), PAGE_W - MARGIN - 160, y + 11, { width: 146, align: 'right' });
+  }
+
+  dibujarPiePagina(doc);
+  doc.end();
+}
+
+module.exports = { generarPdfCuentaAcreedor, generarPdfResumenDeuda };

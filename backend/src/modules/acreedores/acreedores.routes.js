@@ -28,6 +28,14 @@ router.get('/:id/historial',       requireModulo('acreedores'), ctrl.getHistoria
 router.get('/:id/pdf',             requireModulo('acreedores'), pdfCtrl.getPdfCuentaAcreedor);
 router.post('/',                   requireModulo('acreedores'), requireNivel('supervisor'),    ctrl.crearAcreedor);
 router.post('/:id/movimientos',    requireModulo('acreedores'), validarMovimiento, validate,   ctrl.registrarMovimiento);
+router.post('/:id/abono-total',    requireModulo('acreedores'),
+  [
+    body('valor').isFloat({ gt: 0 }).withMessage('El valor debe ser mayor a 0'),
+    body('metodo').optional({ values: 'null' }).isString(),
+    body('registrar_en_caja').optional().toBoolean(),
+  ],
+  validate, ctrl.registrarAbonoTotal,
+);
 router.post('/:id/aplicar-saldo',  requireModulo('acreedores'),
   [
     body('cargo_id').isInt({ min: 1 }).withMessage('cargo_id requerido'),
