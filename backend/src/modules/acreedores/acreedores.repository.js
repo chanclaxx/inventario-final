@@ -400,6 +400,20 @@ const getAbonosPorCargo = async (negocioId, acreedorId, cargoId) => {
   return rows;
 };
 
+// Máximo valor que puede tomar un abono al editarlo, sin sobre-pagar el cargo:
+//   valor_original_del_cargo − (suma de los OTROS abonos del cargo, excluyendo este)
+// Devuelve null si el cargo no existe o no pertenece al acreedor.
+const getMaxAbonoEditable = async (acreedorId, cargoId, movId) => {
+  const { rows } = await pool.query(`
+    SELECT m.valor - COALESCE(SUM(a.valor) FILTER (WHERE a.id <> $3), 0) AS max_valor
+    FROM movimientos_acreedor m
+    LEFT JOIN movimientos_acreedor a ON a.cargo_id = m.id AND a.tipo = 'Abono'
+    WHERE m.id = $1 AND m.acreedor_id = $2 AND m.tipo = 'Cargo'
+    GROUP BY m.id, m.valor
+  `, [cargoId, acreedorId, movId]);
+  return rows.length ? Number(rows[0].max_valor) : null;
+};
+
 const editarAbono = async (negocioId, acreedorId, movId, { valor, descripcion, metodo, cargo_id, registrar_en_caja }) => {
   const { rows } = await pool.query(`
     UPDATE movimientos_acreedor
@@ -436,6 +450,6 @@ module.exports = {
   getComprasConSaldo, getAbonosPorCargo,
   getSaldoAFavor, aplicarSaldoAFavor,
   registrarAbonoTotal,
-  editarAbono, eliminarAbono,
+  getMaxAbonoEditable, editarAbono, eliminarAbono,
   create, insertarMovimiento, eliminarSeguro,
 };

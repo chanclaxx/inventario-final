@@ -113,6 +113,14 @@ const eliminarAcreedor = async (negocioId, acreedorId) => {
 const editarAbono = async (negocioId, acreedorId, movId, datos) => {
   const acreedor = await repo.findById(negocioId, acreedorId);
   if (!acreedor) throw { status: 404, message: 'Acreedor no encontrado' };
+  // Si el abono queda ligado a un cargo, no puede superar el saldo pendiente de
+  // ese cargo (mismo criterio que al crear). Evita dejar cargos sobre-pagados.
+  if (datos.cargo_id) {
+    const max = await repo.getMaxAbonoEditable(acreedorId, Number(datos.cargo_id), Number(movId));
+    if (max !== null && Number(datos.valor) > max + 0.001) {
+      throw { status: 400, message: `El abono no puede superar el saldo pendiente del cargo (${max.toLocaleString('es-CO')})` };
+    }
+  }
   return repo.editarAbono(negocioId, acreedorId, movId, datos);
 };
 

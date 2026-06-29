@@ -267,7 +267,17 @@ const _getRangoCaja = async (cajaId) => {
   );
   const caja = rows[0];
   if (!caja) return null;
-  const finDate = caja.estado === 'Cerrada' && caja.fecha_cierre ? caja.fecha_cierre : new Date();
+  // Para caja abierta el tope superior debe ser el reloj de la BASE DE DATOS,
+  // no el del servidor de la app (new Date()): si la app va unos ms/seg detrás
+  // de la DB, un abono recién registrado (fecha = now() de la DB) quedaría
+  // apenas después del tope y no aparecería en la caja del día hasta refrescar.
+  let finDate;
+  if (caja.estado === 'Cerrada' && caja.fecha_cierre) {
+    finDate = caja.fecha_cierre;
+  } else {
+    const { rows: nowRows } = await pool.query('SELECT now() AS ahora');
+    finDate = nowRows[0].ahora;
+  }
   return {
     inicio: _toBogotaStr(caja.fecha_apertura),
     fin:    _toBogotaStr(finDate),
