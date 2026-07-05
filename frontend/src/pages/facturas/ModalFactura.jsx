@@ -44,6 +44,7 @@ const RETOMA_VACIA = () => ({
   nombre_producto:      '',
   producto_cantidad_id: null,
   reactivar_serial_id:  null,
+  estado_serial:        null, // null | 'vendido' | 'prestado' | 'disponible'
 });
 
 const DOMICILIO_VACIO = () => ({
@@ -177,26 +178,51 @@ function AvisoImeiRetoma({ estado, nombreCliente }) {
 
   if (estado.tipo === 'encontrado') {
     const serial = estado.serial;
-    const estaDisponible = !serial.vendido && !serial.prestado;
-    if (estaDisponible) {
+
+    // Prestado: NO se puede ingresar como retoma — debe devolverse desde Préstamos
+    if (serial.prestado) {
       return (
-        <div className="flex items-start gap-2 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2">
-          <Package size={13} className="text-blue-500 flex-shrink-0 mt-0.5" />
+        <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+          <XCircle size={13} className="text-red-500 flex-shrink-0 mt-0.5" />
           <div className="flex flex-col gap-0.5">
-            <p className="text-xs font-medium text-blue-700">Ya está en inventario como disponible</p>
-            <p className="text-xs text-blue-500">
-              Se actualizará el cliente origen a <span className="font-semibold">{nombreCliente || 'el cliente de la retoma'}</span>.
+            <p className="text-xs font-medium text-red-700">IMEI prestado — no se puede ingresar como retoma</p>
+            <p className="text-xs text-red-600">
+              Producto: <span className="font-medium">{serial.producto_nombre}</span>
+              {serial.marca ? ` · ${serial.marca}` : ''}
+            </p>
+            <p className="text-xs text-red-500">
+              Ve a la pestaña de <span className="font-semibold">Préstamos</span> y regístralo como devuelto para que regrese al inventario.
             </p>
           </div>
         </div>
       );
     }
-    const estadoLabel = serial.vendido ? 'vendido' : 'prestado';
+
+    // Disponible: ya está en inventario — ingresar de nuevo lo duplicaría
+    if (!serial.vendido) {
+      return (
+        <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+          <AlertCircle size={13} className="text-amber-500 flex-shrink-0 mt-0.5" />
+          <div className="flex flex-col gap-0.5">
+            <p className="text-xs font-medium text-amber-700">Este IMEI ya está disponible en el inventario</p>
+            <p className="text-xs text-amber-600">
+              Producto: <span className="font-medium">{serial.producto_nombre}</span>
+              {serial.marca ? ` · ${serial.marca}` : ''}
+            </p>
+            <p className="text-xs text-amber-500">
+              No se puede ingresar de nuevo. Revisa el IMEI o desmarca «Ingresar al inventario».
+            </p>
+          </div>
+        </div>
+      );
+    }
+
+    // Vendido: se reactiva (equipo que regresa)
     return (
       <div className="flex items-start gap-2 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
         <RefreshCw size={13} className="text-amber-500 flex-shrink-0 mt-0.5" />
         <div className="flex flex-col gap-0.5">
-          <p className="text-xs font-medium text-amber-700">IMEI {estadoLabel} — se reactivará automáticamente</p>
+          <p className="text-xs font-medium text-amber-700">IMEI vendido — se reactivará automáticamente</p>
           <p className="text-xs text-amber-600">
             Producto: <span className="font-medium">{serial.producto_nombre}</span>
             {serial.marca ? ` · ${serial.marca}` : ''}
@@ -398,17 +424,25 @@ function ItemRetoma({ retoma, index, total, productosSerial, productosCantidad,
   const handleImeiChange = (e) => {
     set('imei', e.target.value);
     set('reactivar_serial_id', null);
+    set('estado_serial', null);
     set('producto_serial_id', retoma.producto_serial_id);
     limpiar();
   };
 
-  const handleCheckboxInventario = async (marcado) => {
-    set('ingreso_inventario', marcado);
-    if (!marcado) { set('reactivar_serial_id', null); limpiar(); return; }
-    const imeiActual = retoma.imei?.trim() ?? '';
-    if (retoma.tipo_retoma !== 'serial' || imeiActual.length < IMEI_MIN_LENGTH) return;
-    const serial = await verificar(imeiActual);
-    if (!serial) return;
+  // Solo se reactiva un serial VENDIDO que regresa.
+  // Prestado → debe devolverse desde Préstamos. Disponible → ya está en inventario.
+  const aplicarSerialVerificado = (serial) => {
+    if (!serial) {
+      set('reactivar_serial_id', null);
+      set('estado_serial', null);
+      return;
+    }
+    const estadoSerial = serial.prestado ? 'prestado' : (serial.vendido ? 'vendido' : 'disponible');
+    set('estado_serial', estadoSerial);
+    if (estadoSerial !== 'vendido') {
+      set('reactivar_serial_id', null);
+      return;
+    }
     set('reactivar_serial_id', serial.id);
     if (serial.producto_id) {
       set('producto_serial_id', serial.producto_id);
@@ -416,24 +450,25 @@ function ItemRetoma({ retoma, index, total, productosSerial, productosCantidad,
     }
   };
 
+  const handleCheckboxInventario = async (marcado) => {
+    set('ingreso_inventario', marcado);
+    if (!marcado) { set('reactivar_serial_id', null); set('estado_serial', null); limpiar(); return; }
+    const imeiActual = retoma.imei?.trim() ?? '';
+    if (retoma.tipo_retoma !== 'serial' || imeiActual.length < IMEI_MIN_LENGTH) return;
+    const serial = await verificar(imeiActual);
+    aplicarSerialVerificado(serial);
+  };
+
   useEffect(() => {
     if (!retoma.ingreso_inventario) return;
     const imeiActual = retoma.imei?.trim() ?? '';
     if (retoma.tipo_retoma !== 'serial' || imeiActual.length < IMEI_MIN_LENGTH) {
-      limpiar(); set('reactivar_serial_id', null); return;
+      limpiar(); set('reactivar_serial_id', null); set('estado_serial', null); return;
     }
     let activo = true;
     verificar(imeiActual).then((serial) => {
       if (!activo) return;
-      if (serial) {
-        set('reactivar_serial_id', serial.id);
-        if (serial.producto_id) {
-          set('producto_serial_id', serial.producto_id);
-          set('nombre_producto', serial.producto_nombre || '');
-        }
-      } else {
-        set('reactivar_serial_id', null);
-      }
+      aplicarSerialVerificado(serial);
     });
     return () => { activo = false; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -467,6 +502,7 @@ function ItemRetoma({ retoma, index, total, productosSerial, productosCantidad,
                 set('nombre_producto', '');
                 set('ingreso_inventario', false);
                 set('reactivar_serial_id', null);
+                set('estado_serial', null);
                 setBusqueda('');
                 limpiar();
               }}
@@ -860,6 +896,10 @@ export function ModalFactura({ open, onClose }) {
         if (r.ingreso_inventario) {
           if (r.tipo_retoma === 'serial' && !r.imei.trim())
             return setError('El IMEI es requerido para ingresar al inventario');
+          if (r.tipo_retoma === 'serial' && r.estado_serial === 'prestado')
+            return setError(`El IMEI ${r.imei} está prestado. Ve a la pestaña de Préstamos y regístralo como devuelto para que regrese al inventario.`);
+          if (r.tipo_retoma === 'serial' && r.estado_serial === 'disponible')
+            return setError(`El IMEI ${r.imei} ya está disponible en el inventario. Revisa el IMEI o desmarca «Ingresar al inventario».`);
           if (r.tipo_retoma === 'cantidad' && !r.producto_cantidad_id)
             return setError('Selecciona el producto para ingresar al inventario');
         }

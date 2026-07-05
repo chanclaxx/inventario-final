@@ -641,7 +641,7 @@ const intercambiarPrestamo = async (negocioId, prestamoId, {
         );
         if (exRows.length) {
           if (exRows[0].prestado) {
-            throw { status: 409, message: `El IMEI ${imei_retoma.trim()} está prestado. Devuélvelo desde el módulo de Préstamos para que regrese al inventario; no se puede ingresar como retoma.` };
+            throw { status: 409, code: 'IMEI_PRESTADO', message: `El IMEI ${imei_retoma.trim()} está prestado. Ve a la pestaña de Préstamos y regístralo como devuelto para que regrese al inventario; no se puede ingresar como retoma.` };
           }
           if (!exRows[0].vendido) {
             throw { status: 409, message: `El IMEI ${imei_retoma.trim()} ya está registrado y disponible en el inventario.` };
@@ -835,7 +835,7 @@ const retomaDirecta = async (negocioId, {
           [imei_retoma.trim(), negocioId]
         );
         if (exRows.length) {
-          if (exRows[0].prestado) throw { status: 409, message: `El IMEI ${imei_retoma.trim()} está prestado. Devuélvelo desde el módulo de Préstamos para que regrese al inventario; no se puede ingresar como retoma.` };
+          if (exRows[0].prestado) throw { status: 409, code: 'IMEI_PRESTADO', message: `El IMEI ${imei_retoma.trim()} está prestado. Ve a la pestaña de Préstamos y regístralo como devuelto para que regrese al inventario; no se puede ingresar como retoma.` };
           if (!exRows[0].vendido) throw { status: 409, message: `El IMEI ${imei_retoma.trim()} ya está registrado y disponible en el inventario.` };
           await client.query(
             `UPDATE seriales

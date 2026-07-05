@@ -96,7 +96,8 @@ async function verificarImeisDuplicados(imeis) {
   const encontrados = resultados.filter(Boolean);
   return {
     disponibles:   encontrados.filter((s) => !s.vendido && !s.prestado),
-    paraReactivar: encontrados.filter((s) => s.vendido  || s.prestado),
+    prestados:     encontrados.filter((s) => s.prestado),
+    paraReactivar: encontrados.filter((s) => s.vendido  && !s.prestado),
   };
 }
 
@@ -105,8 +106,10 @@ function useVerificacionImeis() {
   const [verificando,         setVerificando]          = useState(false);
   const [modalReactivar,      setModalReactivar]       = useState(false);
   const [modalYaEnInventario, setModalYaEnInventario]  = useState(false);
+  const [modalPrestados,      setModalPrestados]       = useState(false);
   const [serialesReactivar,   setSerializesReactivar]  = useState([]);
   const [serialesDisponibles, setSerializesDisponibles] = useState([]);
+  const [serialesPrestados,   setSerialesPrestados]    = useState([]);
 
   const reactivarMapRef    = useRef({});
   const pendingCallbackRef = useRef(null);
@@ -114,9 +117,15 @@ function useVerificacionImeis() {
   const verificarYProceder = useCallback(async (imeis, onProceder) => {
     reactivarMapRef.current = {};
     setVerificando(true);
-    const { disponibles, paraReactivar } = await verificarImeisDuplicados(imeis);
+    const { disponibles, paraReactivar, prestados } = await verificarImeisDuplicados(imeis);
     setVerificando(false);
 
+    // Prestados bloquean la compra: deben devolverse desde Préstamos
+    if (prestados.length > 0) {
+      setSerialesPrestados(prestados);
+      setModalPrestados(true);
+      return;
+    }
     if (disponibles.length > 0) {
       setSerializesDisponibles(disponibles);
       setModalYaEnInventario(true);
@@ -152,10 +161,16 @@ function useVerificacionImeis() {
     setSerializesDisponibles([]);
   }, []);
 
+  const handleCerrarPrestados = useCallback(() => {
+    setModalPrestados(false);
+    setSerialesPrestados([]);
+  }, []);
+
   return {
     verificando, verificarYProceder,
     modalReactivar, serialesReactivar, handleConfirmarReactivar, handleCancelarReactivar,
     modalYaEnInventario, serialesDisponibles, handleCerrarDisponibles,
+    modalPrestados, serialesPrestados, handleCerrarPrestados,
   };
 }
 
@@ -194,7 +209,7 @@ function ModalReactivarSeriales({ open, seriales, onReactivar, onCancelar }) {
         <div className="w-14 h-14 rounded-full bg-amber-50 border-2 border-amber-200 flex items-center justify-center"><AlertTriangle size={26} className="text-amber-500" /></div>
         <div className="text-center">
           <h3 className="text-base font-semibold text-gray-900">{seriales.length === 1 ? 'IMEI ya registrado' : `${seriales.length} IMEIs ya registrados`}</h3>
-          <p className="text-sm text-gray-500 mt-1">{seriales.length === 1 ? 'Este equipo fue vendido o prestado — puedes reactivarlo con esta compra' : 'Estos equipos fueron vendidos o prestados — puedes reactivarlos con esta compra'}</p>
+          <p className="text-sm text-gray-500 mt-1">{seriales.length === 1 ? 'Este equipo fue vendido — puedes reactivarlo con esta compra' : 'Estos equipos fueron vendidos — puedes reactivarlos con esta compra'}</p>
         </div>
         <FilasSerial seriales={seriales} />
         <p className="text-sm text-center text-gray-700 leading-relaxed">¿Deseas <span className="font-semibold text-purple-700">reactivar estos seriales</span> y registrarlos en esta compra? Se marcarán como disponibles nuevamente.</p>
@@ -220,6 +235,27 @@ function ModalYaEnInventario({ open, seriales, onCerrar }) {
         </div>
         <FilasSerial seriales={seriales} />
         <p className="text-sm text-center text-gray-700 leading-relaxed">Corrige los IMEIs marcados antes de continuar con la compra.</p>
+        <Button className="w-full" onClick={onCerrar}>Entendido</Button>
+      </div>
+    </Modal>
+  );
+}
+
+// ─── Modal: IMEIs prestados (bloqueante) ──────────────────────────────────────
+function ModalImeisPrestados({ open, seriales, onCerrar }) {
+  if (!seriales || seriales.length === 0) return null;
+  return (
+    <Modal open={open} onClose={onCerrar} title="" size="sm">
+      <div className="flex flex-col items-center gap-4 py-2">
+        <div className="w-14 h-14 rounded-full bg-red-50 border-2 border-red-200 flex items-center justify-center"><AlertTriangle size={26} className="text-red-500" /></div>
+        <div className="text-center">
+          <h3 className="text-base font-semibold text-gray-900">{seriales.length === 1 ? 'IMEI prestado' : `${seriales.length} IMEIs prestados`}</h3>
+          <p className="text-sm text-gray-500 mt-1">{seriales.length === 1 ? 'Este equipo está en un préstamo activo' : 'Estos equipos están en préstamos activos'}</p>
+        </div>
+        <FilasSerial seriales={seriales} />
+        <p className="text-sm text-center text-gray-700 leading-relaxed">
+          No se {seriales.length === 1 ? 'puede reactivar' : 'pueden reactivar'} desde una compra. Ve a la pestaña de <span className="font-semibold text-purple-700">Préstamos</span> y {seriales.length === 1 ? 'regístralo como devuelto' : 'regístralos como devueltos'} para que {seriales.length === 1 ? 'regrese' : 'regresen'} al inventario.
+        </p>
         <Button className="w-full" onClick={onCerrar}>Entendido</Button>
       </div>
     </Modal>
@@ -1652,6 +1688,7 @@ export function ModalCompra({ proveedor, onClose }) {
     verificando, verificarYProceder,
     modalReactivar, serialesReactivar, handleConfirmarReactivar, handleCancelarReactivar,
     modalYaEnInventario, serialesDisponibles, handleCerrarDisponibles,
+    modalPrestados, serialesPrestados, handleCerrarPrestados,
   } = useVerificacionImeis();
 
   const mutCompra = useMutation({
@@ -1848,6 +1885,7 @@ export function ModalCompra({ proveedor, onClose }) {
 
       <ModalReactivarSeriales open={modalReactivar} seriales={serialesReactivar} onReactivar={handleConfirmarReactivar} onCancelar={handleCancelarReactivar} />
       <ModalYaEnInventario open={modalYaEnInventario} seriales={serialesDisponibles} onCerrar={handleCerrarDisponibles} />
+      <ModalImeisPrestados open={modalPrestados} seriales={serialesPrestados} onCerrar={handleCerrarPrestados} />
     </>
   );
 }

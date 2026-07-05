@@ -71,7 +71,7 @@ const agregarSerial = async (
     const serial = await repo.findSerialByIdYNegocio(reactivar_serial_id, negocioId);
     if (!serial) throw { status: 404, message: 'Serial a reactivar no encontrado' };
     if (serial.prestado) {
-      throw { status: 409, message: `El IMEI ${serial.imei} está prestado. Devuélvelo desde el módulo de Préstamos para que regrese al inventario.` };
+      throw { status: 409, code: 'IMEI_PRESTADO', message: `El IMEI ${serial.imei} está prestado. Ve a la pestaña de Préstamos y regístralo como devuelto para que regrese al inventario.` };
     }
     if (!serial.vendido) {
       throw { status: 409, message: `El IMEI ${serial.imei} ya está registrado y disponible en el inventario.` };

@@ -89,7 +89,7 @@ const registrarCompra = async ({
             throw { status: 400, message: `El serial ${linea.imei} no pertenece a esta sucursal` };
           }
           if (rows[0].prestado) {
-            throw { status: 409, message: `El IMEI ${linea.imei} está prestado. Devuélvelo desde el módulo de Préstamos para que regrese al inventario.` };
+            throw { status: 409, code: 'IMEI_PRESTADO', message: `El IMEI ${linea.imei} está prestado. Ve a la pestaña de Préstamos y regístralo como devuelto para que regrese al inventario.` };
           }
           if (!rows[0].vendido) {
             throw { status: 409, message: `El IMEI ${linea.imei} ya está registrado y disponible en el inventario.` };

@@ -24,7 +24,13 @@ const errorHandler = (err, req, res, next) => {
         ? 'Error interno del servidor'
         : err.message;
 
-  res.status(status).json({ ok: false, error: mensaje });
+  // Código de error operacional (ej. IMEI_PRESTADO) para que el frontend
+  // pueda distinguir casos específicos. Solo en errores lanzados con err.status.
+  const payload = { ok: false, error: mensaje };
+  if (err.status && err.code) payload.code = err.code;
+  if (err.status && err.detalle) payload.detalle = err.detalle;
+
+  res.status(status).json(payload);
 };
 
 module.exports = { errorHandler };

@@ -268,13 +268,19 @@ const crearFactura = async ({
 
         if (retoma.reactivar_serial_id) {
           const { rows: serialCheck } = await client.query(
-            `SELECT s.id FROM seriales s
+            `SELECT s.id, s.vendido, s.prestado FROM seriales s
              JOIN productos_serial ps ON ps.id = s.producto_id
              JOIN sucursales       su ON su.id = ps.sucursal_id
              WHERE s.id = $1 AND su.negocio_id = $2`,
             [retoma.reactivar_serial_id, negocio_id]
           );
           if (!serialCheck.length) throw { status: 403, message: 'El serial a reactivar no pertenece a este negocio' };
+          if (serialCheck[0].prestado) {
+            throw { status: 409, code: 'IMEI_PRESTADO', message: `El IMEI ${retoma.imei} está prestado. Ve a la pestaña de Préstamos y regístralo como devuelto para que regrese al inventario; no se puede ingresar como retoma.` };
+          }
+          if (!serialCheck[0].vendido) {
+            throw { status: 409, message: `El IMEI ${retoma.imei} ya está registrado y disponible en el inventario.` };
+          }
           await client.query(
             `UPDATE seriales SET vendido = false, prestado = false,
              fecha_salida = NULL, cliente_origen = $1 WHERE id = $2`,
@@ -282,7 +288,7 @@ const crearFactura = async ({
           );
         } else if (existeSerial) {
           if (existeSerial.prestado) {
-            throw { status: 409, message: `El IMEI ${retoma.imei} está prestado. Devuélvelo desde el módulo de Préstamos para que regrese al inventario; no se puede ingresar como retoma.` };
+            throw { status: 409, code: 'IMEI_PRESTADO', message: `El IMEI ${retoma.imei} está prestado. Ve a la pestaña de Préstamos y regístralo como devuelto para que regrese al inventario; no se puede ingresar como retoma.` };
           }
           if (!existeSerial.vendido) {
             throw { status: 409, message: `El IMEI ${retoma.imei} ya está registrado y disponible en el inventario.` };
@@ -570,7 +576,7 @@ const editarFactura = async (negocioId, id, {
           if (retoma.producto_serial_id) {
             if (existeSerial) {
               if (existeSerial.prestado) {
-                throw { status: 409, message: `El IMEI ${retoma.imei} está prestado. Devuélvelo desde el módulo de Préstamos para que regrese al inventario; no se puede ingresar como retoma.` };
+                throw { status: 409, code: 'IMEI_PRESTADO', message: `El IMEI ${retoma.imei} está prestado. Ve a la pestaña de Préstamos y regístralo como devuelto para que regrese al inventario; no se puede ingresar como retoma.` };
               }
               if (!existeSerial.vendido) {
                 throw { status: 409, message: `El IMEI ${retoma.imei} ya está registrado y disponible en el inventario.` };
