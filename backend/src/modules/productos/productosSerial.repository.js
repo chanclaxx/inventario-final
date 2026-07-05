@@ -137,7 +137,7 @@ const findSerialByIMEIEnNegocio = async (imei, negocioId) => {
     FROM seriales s
     JOIN productos_serial ps ON ps.id = s.producto_id
     JOIN sucursales        su ON su.id = ps.sucursal_id
-    WHERE s.imei = $1 AND su.negocio_id = $2
+    WHERE UPPER(TRIM(s.imei)) = UPPER(TRIM($1)) AND su.negocio_id = $2
     LIMIT 1
   `, [imei, negocioId]);
   return rows[0] || null;

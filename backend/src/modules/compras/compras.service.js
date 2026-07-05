@@ -112,7 +112,7 @@ const registrarCompra = async ({
             `SELECT s.id FROM seriales s
              JOIN productos_serial ps ON ps.id = s.producto_id
              JOIN sucursales       su ON su.id = ps.sucursal_id
-             WHERE s.imei = $1 AND su.negocio_id = $2`,
+             WHERE UPPER(TRIM(s.imei)) = UPPER(TRIM($1)) AND su.negocio_id = $2`,
             [linea.imei, negocio_id]
           );
           if (existente.length) {
@@ -286,8 +286,11 @@ const cancelarCompra = async (negocioId, compraId) => {
   for (const linea of lineas) {
     if (!linea.imei) continue;
     const { rows } = await pool.query(
-      `SELECT vendido, prestado FROM seriales WHERE imei = $1 LIMIT 1`,
-      [linea.imei]
+      `SELECT s.vendido, s.prestado FROM seriales s
+       JOIN productos_serial ps ON ps.id = s.producto_id
+       JOIN sucursales       su ON su.id = ps.sucursal_id
+       WHERE UPPER(TRIM(s.imei)) = UPPER(TRIM($1)) AND su.negocio_id = $2 LIMIT 1`,
+      [linea.imei, negocioId]
     );
     if (rows.length && (rows[0].vendido || rows[0].prestado)) {
       const estado = rows[0].vendido ? 'vendido' : 'prestado';
@@ -336,9 +339,17 @@ const cancelarCompra = async (negocioId, compraId) => {
     for (const linea of lineas) {
       if (linea.imei) {
         // Serial: eliminar del inventario si aún no fue vendido ni prestado
+        // Acotado al negocio: el mismo IMEI puede existir en otros negocios.
         await client.query(
-          `DELETE FROM seriales WHERE imei = $1 AND vendido = false AND prestado = false`,
-          [linea.imei]
+          `DELETE FROM seriales s
+           USING productos_serial ps, sucursales su
+           WHERE s.producto_id = ps.id
+             AND ps.sucursal_id = su.id
+             AND su.negocio_id = $2
+             AND s.imei = $1
+             AND s.vendido = false
+             AND s.prestado = false`,
+          [linea.imei, negocioId]
         );
       } else if (linea.variante_id) {
         // Producto con variante: restar stock
@@ -441,8 +452,11 @@ const devolverCompra = async (negocioId, compraId, { lineas: lineasDevol, motivo
     for (const { linea, cantidad } of solicitudes) {
       if (linea.imei) {
         const { rows } = await client.query(
-          `SELECT id, vendido, prestado FROM seriales WHERE imei = $1 LIMIT 1`,
-          [linea.imei]
+          `SELECT s.id, s.vendido, s.prestado FROM seriales s
+           JOIN productos_serial ps ON ps.id = s.producto_id
+           JOIN sucursales       su ON su.id = ps.sucursal_id
+           WHERE UPPER(TRIM(s.imei)) = UPPER(TRIM($1)) AND su.negocio_id = $2 LIMIT 1`,
+          [linea.imei, negocioId]
         );
         if (!rows.length) throw { status: 400, message: `El equipo ${linea.imei} ya no está en el inventario` };
         if (rows[0].vendido || rows[0].prestado) {

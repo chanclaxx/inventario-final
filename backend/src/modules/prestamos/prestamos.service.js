@@ -630,14 +630,45 @@ const intercambiarPrestamo = async (negocioId, prestamoId, {
         if (!psRows.length) {
           throw { status: 400, message: 'El producto serial no pertenece a esta sucursal' };
         }
-        await repo.insertarSerialParaRetoma(client, {
-          producto_id:     producto_serial_id,
-          imei:            imei_retoma.trim(),
-          precio:          Number(valor_retoma),
-          color:           color_retoma || null,
-          cliente_origen:  nombrePersona,
-          caracteristicas: caracteristicas_retoma || null,
-        });
+        // IMEI único por negocio: si ya existe se REACTIVA (equipo vendido que regresa);
+        // si está en préstamo activo se bloquea; si no existe se inserta.
+        const { rows: exRows } = await client.query(
+          `SELECT s.id, s.prestado FROM seriales s
+           JOIN productos_serial ps ON ps.id = s.producto_id
+           JOIN sucursales       su ON su.id = ps.sucursal_id
+           WHERE UPPER(TRIM(s.imei)) = UPPER(TRIM($1)) AND su.negocio_id = $2 LIMIT 1`,
+          [imei_retoma.trim(), negocioId],
+        );
+        if (exRows.length) {
+          if (exRows[0].prestado) {
+            throw { status: 409, message: `El IMEI ${imei_retoma.trim()} está en un préstamo activo; no se puede ingresar como retoma.` };
+          }
+          await client.query(
+            `UPDATE seriales
+             SET vendido = false, prestado = false, fecha_salida = NULL,
+                 precio          = COALESCE($1, precio),
+                 color           = COALESCE($2, color),
+                 cliente_origen  = $3,
+                 caracteristicas = COALESCE($4::jsonb, caracteristicas)
+             WHERE id = $5`,
+            [
+              Number(valor_retoma) || null,
+              color_retoma || null,
+              nombrePersona,
+              caracteristicas_retoma != null ? JSON.stringify(caracteristicas_retoma) : null,
+              exRows[0].id,
+            ],
+          );
+        } else {
+          await repo.insertarSerialParaRetoma(client, {
+            producto_id:     producto_serial_id,
+            imei:            imei_retoma.trim(),
+            precio:          Number(valor_retoma),
+            color:           color_retoma || null,
+            cliente_origen:  nombrePersona,
+            caracteristicas: caracteristicas_retoma || null,
+          });
+        }
         retomaIngresoReal = true;
 
       } else if (tipo_retoma === 'cantidad' && producto_cantidad_id) {
@@ -791,14 +822,43 @@ const retomaDirecta = async (negocioId, {
           [producto_serial_id, sucursal_id]
         );
         if (!psRows.length) throw { status: 400, message: 'El producto serial no pertenece a esta sucursal' };
-        await repo.insertarSerialParaRetoma(client, {
-          producto_id:     producto_serial_id,
-          imei:            imei_retoma.trim(),
-          precio:          Number(valor_retoma),
-          color:           color_retoma || null,
-          cliente_origen:  nombrePersona,
-          caracteristicas: caracteristicas_retoma || null,
-        });
+        // IMEI único por negocio: si ya existe se REACTIVA (equipo vendido que regresa);
+        // si está en préstamo activo se bloquea; si no existe se inserta.
+        const { rows: exRows } = await client.query(
+          `SELECT s.id, s.prestado FROM seriales s
+           JOIN productos_serial ps ON ps.id = s.producto_id
+           JOIN sucursales       su ON su.id = ps.sucursal_id
+           WHERE UPPER(TRIM(s.imei)) = UPPER(TRIM($1)) AND su.negocio_id = $2 LIMIT 1`,
+          [imei_retoma.trim(), negocioId]
+        );
+        if (exRows.length) {
+          if (exRows[0].prestado) throw { status: 409, message: `El IMEI ${imei_retoma.trim()} está en un préstamo activo; no se puede ingresar como retoma.` };
+          await client.query(
+            `UPDATE seriales
+             SET vendido = false, prestado = false, fecha_salida = NULL,
+                 precio          = COALESCE($1, precio),
+                 color           = COALESCE($2, color),
+                 cliente_origen  = $3,
+                 caracteristicas = COALESCE($4::jsonb, caracteristicas)
+             WHERE id = $5`,
+            [
+              Number(valor_retoma) || null,
+              color_retoma || null,
+              nombrePersona,
+              caracteristicas_retoma != null ? JSON.stringify(caracteristicas_retoma) : null,
+              exRows[0].id,
+            ]
+          );
+        } else {
+          await repo.insertarSerialParaRetoma(client, {
+            producto_id:     producto_serial_id,
+            imei:            imei_retoma.trim(),
+            precio:          Number(valor_retoma),
+            color:           color_retoma || null,
+            cliente_origen:  nombrePersona,
+            caracteristicas: caracteristicas_retoma || null,
+          });
+        }
         retomaIngresoReal = true;
       } else if (tipo_retoma === 'cantidad' && producto_cantidad_id) {
         const { rows: pcRows } = await client.query(
@@ -1443,8 +1503,14 @@ const modificarAbonoTotal = async (negocioId, abonoTotalId, nuevoValor, metodo) 
         await repo.updateEstado(client, abono.prestamo_id, 'Activo');
         if (abono.imei) {
           await client.query(
-            'UPDATE seriales SET vendido = false, prestado = true, fecha_salida = NULL WHERE imei = $1',
-            [abono.imei]
+            `UPDATE seriales s
+             SET vendido = false, prestado = true, fecha_salida = NULL
+             FROM productos_serial ps, sucursales su
+             WHERE s.producto_id = ps.id
+               AND ps.sucursal_id = su.id
+               AND su.negocio_id = $2
+               AND s.imei = $1`,
+            [abono.imei, negocioId]
           );
         }
       }

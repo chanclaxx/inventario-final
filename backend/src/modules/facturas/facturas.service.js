@@ -166,14 +166,22 @@ const crearFactura = async ({
       totalLineas += Number(lineaInsertada.subtotal || 0);
 
       if (linea.imei) {
+        // FOR UPDATE bloquea el serial durante la venta para evitar doble venta concurrente.
         const { rows: serialRows } = await client.query(
-          `SELECT s.id FROM seriales s
+          `SELECT s.id, s.vendido, s.prestado FROM seriales s
            JOIN productos_serial ps ON ps.id = s.producto_id
-           WHERE s.imei = $1 AND ps.sucursal_id = $2`,
+           WHERE s.imei = $1 AND ps.sucursal_id = $2
+           FOR UPDATE OF s`,
           [linea.imei, sucursal_id]
         );
         if (!serialRows.length) {
           throw { status: 400, message: `El producto ${linea.nombre_producto} no pertenece a esta sucursal` };
+        }
+        if (serialRows[0].vendido) {
+          throw { status: 400, message: `El equipo ${linea.imei} ya fue vendido` };
+        }
+        if (serialRows[0].prestado) {
+          throw { status: 400, message: `El equipo ${linea.imei} está prestado y no se puede vender` };
         }
         await client.query(
           'UPDATE seriales SET vendido = true, fecha_salida = CURRENT_DATE WHERE id = $1',
@@ -250,10 +258,10 @@ const crearFactura = async ({
 
       if (retoma.ingreso_inventario && retoma.tipo_retoma === 'serial' && retoma.imei) {
         const { rows: existeRows } = await client.query(
-          `SELECT s.id FROM seriales s
+          `SELECT s.id, s.prestado, s.vendido FROM seriales s
            JOIN productos_serial ps ON ps.id = s.producto_id
            JOIN sucursales       su ON su.id = ps.sucursal_id
-           WHERE s.imei = $1 AND su.negocio_id = $2 LIMIT 1`,
+           WHERE UPPER(TRIM(s.imei)) = UPPER(TRIM($1)) AND su.negocio_id = $2 LIMIT 1`,
           [retoma.imei, negocio_id]
         );
         const existeSerial = existeRows[0] || null;
@@ -273,13 +281,16 @@ const crearFactura = async ({
             [nombre_cliente, retoma.reactivar_serial_id]
           );
         } else if (existeSerial) {
-          if (retoma.producto_serial_id) {
-            await client.query(
-              `UPDATE seriales SET vendido = false, prestado = false,
-               fecha_salida = NULL, cliente_origen = $1 WHERE id = $2`,
-              [nombre_cliente, existeSerial.id]
-            );
+          if (existeSerial.prestado) {
+            throw { status: 400, message: `El IMEI ${retoma.imei} está en un préstamo activo; no se puede ingresar como retoma.` };
           }
+          // El IMEI es único por negocio: se reactiva el serial existente (sin importar
+          // el producto elegido, que solo aplica cuando el serial no existe).
+          await client.query(
+            `UPDATE seriales SET vendido = false, prestado = false,
+             fecha_salida = NULL, cliente_origen = $1 WHERE id = $2`,
+            [nombre_cliente, existeSerial.id]
+          );
         } else if (retoma.producto_serial_id) {
           const { rows: psCheck } = await client.query(
             `SELECT ps.id FROM productos_serial ps
@@ -546,19 +557,22 @@ const editarFactura = async (negocioId, id, {
       if (retoma.ingreso_inventario) {
         if (retoma.tipo_retoma === 'serial' && retoma.imei) {
           const { rows: existeRows } = await client.query(
-            `SELECT s.id FROM seriales s
+            `SELECT s.id, s.prestado, s.vendido FROM seriales s
              JOIN productos_serial ps ON ps.id = s.producto_id
              JOIN sucursales       su ON su.id = ps.sucursal_id
-             WHERE s.imei = $1 AND su.negocio_id = $2 LIMIT 1`,
+             WHERE UPPER(TRIM(s.imei)) = UPPER(TRIM($1)) AND su.negocio_id = $2 LIMIT 1`,
             [retoma.imei, negocioId]
           );
           const existeSerial = existeRows[0] || null;
 
           if (retoma.producto_serial_id) {
             if (existeSerial) {
+              if (existeSerial.prestado) {
+                throw { status: 400, message: `El IMEI ${retoma.imei} está en un préstamo activo; no se puede ingresar como retoma.` };
+              }
               await client.query(
                 `UPDATE seriales
-                 SET vendido = false, fecha_salida = NULL, cliente_origen = $1
+                 SET vendido = false, prestado = false, fecha_salida = NULL, cliente_origen = $1
                  WHERE id = $2`,
                 [nombre_cliente, existeSerial.id]
               );
