@@ -80,13 +80,19 @@ const registrarCompra = async ({
       if (linea.imei) {
         if (linea.reactivar_serial_id) {
           const { rows } = await client.query(
-            `SELECT s.id FROM seriales s
+            `SELECT s.id, s.vendido, s.prestado FROM seriales s
              JOIN productos_serial ps ON ps.id = s.producto_id
              WHERE s.id = $1 AND ps.sucursal_id = $2`,
             [linea.reactivar_serial_id, sucursal_id]
           );
           if (!rows.length) {
             throw { status: 400, message: `El serial ${linea.imei} no pertenece a esta sucursal` };
+          }
+          if (rows[0].prestado) {
+            throw { status: 409, message: `El IMEI ${linea.imei} está prestado. Devuélvelo desde el módulo de Préstamos para que regrese al inventario.` };
+          }
+          if (!rows[0].vendido) {
+            throw { status: 409, message: `El IMEI ${linea.imei} ya está registrado y disponible en el inventario.` };
           }
           // COALESCE preserva el color/caracteristicas existente si no viene uno nuevo
           await client.query(
