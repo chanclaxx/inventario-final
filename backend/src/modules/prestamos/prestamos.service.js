@@ -633,7 +633,7 @@ const intercambiarPrestamo = async (negocioId, prestamoId, {
         // IMEI único por negocio: si ya existe se REACTIVA (equipo vendido que regresa);
         // si está en préstamo activo se bloquea; si no existe se inserta.
         const { rows: exRows } = await client.query(
-          `SELECT s.id, s.prestado FROM seriales s
+          `SELECT s.id, s.prestado, s.vendido FROM seriales s
            JOIN productos_serial ps ON ps.id = s.producto_id
            JOIN sucursales       su ON su.id = ps.sucursal_id
            WHERE UPPER(TRIM(s.imei)) = UPPER(TRIM($1)) AND su.negocio_id = $2 LIMIT 1`,
@@ -641,7 +641,10 @@ const intercambiarPrestamo = async (negocioId, prestamoId, {
         );
         if (exRows.length) {
           if (exRows[0].prestado) {
-            throw { status: 409, message: `El IMEI ${imei_retoma.trim()} está en un préstamo activo; no se puede ingresar como retoma.` };
+            throw { status: 409, message: `El IMEI ${imei_retoma.trim()} está prestado. Devuélvelo desde el módulo de Préstamos para que regrese al inventario; no se puede ingresar como retoma.` };
+          }
+          if (!exRows[0].vendido) {
+            throw { status: 409, message: `El IMEI ${imei_retoma.trim()} ya está registrado y disponible en el inventario.` };
           }
           await client.query(
             `UPDATE seriales
@@ -825,14 +828,15 @@ const retomaDirecta = async (negocioId, {
         // IMEI único por negocio: si ya existe se REACTIVA (equipo vendido que regresa);
         // si está en préstamo activo se bloquea; si no existe se inserta.
         const { rows: exRows } = await client.query(
-          `SELECT s.id, s.prestado FROM seriales s
+          `SELECT s.id, s.prestado, s.vendido FROM seriales s
            JOIN productos_serial ps ON ps.id = s.producto_id
            JOIN sucursales       su ON su.id = ps.sucursal_id
            WHERE UPPER(TRIM(s.imei)) = UPPER(TRIM($1)) AND su.negocio_id = $2 LIMIT 1`,
           [imei_retoma.trim(), negocioId]
         );
         if (exRows.length) {
-          if (exRows[0].prestado) throw { status: 409, message: `El IMEI ${imei_retoma.trim()} está en un préstamo activo; no se puede ingresar como retoma.` };
+          if (exRows[0].prestado) throw { status: 409, message: `El IMEI ${imei_retoma.trim()} está prestado. Devuélvelo desde el módulo de Préstamos para que regrese al inventario; no se puede ingresar como retoma.` };
+          if (!exRows[0].vendido) throw { status: 409, message: `El IMEI ${imei_retoma.trim()} ya está registrado y disponible en el inventario.` };
           await client.query(
             `UPDATE seriales
              SET vendido = false, prestado = false, fecha_salida = NULL,

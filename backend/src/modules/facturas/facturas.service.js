@@ -282,10 +282,12 @@ const crearFactura = async ({
           );
         } else if (existeSerial) {
           if (existeSerial.prestado) {
-            throw { status: 400, message: `El IMEI ${retoma.imei} está en un préstamo activo; no se puede ingresar como retoma.` };
+            throw { status: 409, message: `El IMEI ${retoma.imei} está prestado. Devuélvelo desde el módulo de Préstamos para que regrese al inventario; no se puede ingresar como retoma.` };
           }
-          // El IMEI es único por negocio: se reactiva el serial existente (sin importar
-          // el producto elegido, que solo aplica cuando el serial no existe).
+          if (!existeSerial.vendido) {
+            throw { status: 409, message: `El IMEI ${retoma.imei} ya está registrado y disponible en el inventario.` };
+          }
+          // Solo se reactiva un serial VENDIDO que regresa (IMEI único por negocio).
           await client.query(
             `UPDATE seriales SET vendido = false, prestado = false,
              fecha_salida = NULL, cliente_origen = $1 WHERE id = $2`,
@@ -568,7 +570,10 @@ const editarFactura = async (negocioId, id, {
           if (retoma.producto_serial_id) {
             if (existeSerial) {
               if (existeSerial.prestado) {
-                throw { status: 400, message: `El IMEI ${retoma.imei} está en un préstamo activo; no se puede ingresar como retoma.` };
+                throw { status: 409, message: `El IMEI ${retoma.imei} está prestado. Devuélvelo desde el módulo de Préstamos para que regrese al inventario; no se puede ingresar como retoma.` };
+              }
+              if (!existeSerial.vendido) {
+                throw { status: 409, message: `El IMEI ${retoma.imei} ya está registrado y disponible en el inventario.` };
               }
               await client.query(
                 `UPDATE seriales
