@@ -14,6 +14,7 @@ import useCarritoStore               from '../../store/carritoStore';
 import { ModalPinEliminacion }       from './ModalPinEliminacion';
 import { ModalEditarSerial }         from './ModalEditarSerial';
 import { ModalEditarProductoSerial } from './ModalEditarProductoSerial';
+import { AntiguedadBadge }            from './AntiguedadInventario';
 import { useAuth }                   from '../../context/useAuth';
 import { useSucursalKey }            from '../../hooks/useSucursalKey';
 import useSucursalStore              from '../../store/sucursalStore';
@@ -142,6 +143,9 @@ function TarjetaSerial({ serial, precio, onAgregar, onEliminar, onEditar }) {
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-xs text-gray-400">Entrada: {formatFecha(serial.fecha_entrada)}</span>
+          {!serial.vendido && serial.dias_en_inventario != null && (
+            <AntiguedadBadge dias={serial.dias_en_inventario} />
+          )}
           {serial.cliente_origen && !prestado && (
             <Badge variant="purple">Retoma: {serial.cliente_origen}</Badge>
           )}
@@ -489,7 +493,7 @@ function SelectorModeloMovil({ productos, lineas, productoSeleccionado, onSelecc
                                       {[p.marca, p.modelo].filter(Boolean).join(' · ')}
                                     </p>
                                   )}
-                                  <div className="flex items-center gap-2 mt-1">
+                                  <div className="flex items-center gap-2 mt-1 flex-wrap">
                                     <span className={`text-xs font-medium
                                       ${p.disponibles > 0 ? 'text-green-600' : 'text-gray-400'}`}>
                                       {p.disponibles} disp.
@@ -498,6 +502,9 @@ function SelectorModeloMovil({ productos, lineas, productoSeleccionado, onSelecc
                                       <span className="text-xs text-blue-500 font-medium">
                                         · {p.prestados} prest.
                                       </span>
+                                    )}
+                                    {p.dias_en_inventario != null && (
+                                      <AntiguedadBadge dias={p.dias_en_inventario} />
                                     )}
                                   </div>
                                 </div>
@@ -568,6 +575,9 @@ function GrupoLinea({ nombre, productos, productoSeleccionado, onSeleccionar, on
                     <span className="text-xs text-blue-500 font-medium">
                       · {p.prestados} prest.
                     </span>
+                  )}
+                  {p.dias_en_inventario != null && (
+                    <AntiguedadBadge dias={p.dias_en_inventario} />
                   )}
                 </div>
               </div>
@@ -990,10 +1000,13 @@ export function ProductosSerial({ onAgregarProducto }) {
             >
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium line-clamp-2 leading-snug group-hover:line-clamp-none">{p.nombre}</p>
-                <div className="flex items-center gap-1.5 mt-0.5">
+                <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
                   <span className="text-xs text-gray-400">{p.disponibles} disp.</span>
                   {Number(p.prestados) > 0 && (
                     <span className="text-xs text-blue-500 font-medium">· {p.prestados} prest.</span>
+                  )}
+                  {p.dias_en_inventario != null && (
+                    <AntiguedadBadge dias={p.dias_en_inventario} />
                   )}
                 </div>
               </div>

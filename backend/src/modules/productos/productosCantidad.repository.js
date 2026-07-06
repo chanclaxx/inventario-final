@@ -7,15 +7,26 @@ const findAll = async (sucursalId, negocioId, lineaId) => {
         pc.id, pc.nombre, pc.stock, pc.stock_minimo,
         pc.unidad_medida, pc.costo_unitario, pc.precio,
         pc.cliente_origen, pc.activo, pc.sucursal_id, pc.proveedor_id,
-        pc.linea_id,
+        pc.linea_id, pc.creado_en,
         lp.nombre AS linea_nombre,
         p.nombre  AS proveedor_nombre,
         su.nombre AS sucursal_nombre,
-        CASE WHEN pc.stock <= pc.stock_minimo THEN true ELSE false END AS stock_bajo
+        CASE WHEN pc.stock <= pc.stock_minimo THEN true ELSE false END AS stock_bajo,
+        -- Días que el producto lleva en el inventario (calculado en zona America/Bogota)
+        (CURRENT_DATE - pc.creado_en::date)::int AS dias_en_inventario,
+        -- Última venta y días transcurridos desde ella (para detectar productos que no rotan)
+        uv.ultima_venta,
+        (CURRENT_DATE - uv.ultima_venta::date)::int AS dias_sin_venta
       FROM productos_cantidad pc
       LEFT JOIN proveedores    p  ON p.id  = pc.proveedor_id
       LEFT JOIN lineas_producto lp ON lp.id = pc.linea_id
       JOIN  sucursales         su ON su.id = pc.sucursal_id
+      LEFT JOIN LATERAL (
+        SELECT MAX(f.fecha) AS ultima_venta
+        FROM lineas_factura lf
+        JOIN facturas f ON f.id = lf.factura_id AND f.estado <> 'Cancelada'
+        WHERE lf.producto_id = pc.id
+      ) uv ON true
       WHERE pc.sucursal_id = $1
         AND pc.activo = true
         AND ($2::int IS NULL OR pc.linea_id = $2)
@@ -32,6 +43,8 @@ const findAll = async (sucursalId, negocioId, lineaId) => {
       lp.nombre AS linea_nombre,
       SUM(pc.stock)                        AS stock_total,
       BOOL_OR(pc.stock <= pc.stock_minimo) AS stock_bajo,
+      -- Antigüedad: días del registro más viejo del grupo (el que lleva más tiempo)
+      (CURRENT_DATE - MIN(pc.creado_en)::date)::int AS dias_en_inventario,
       JSON_AGG(
         JSON_BUILD_OBJECT(
           'id',               pc.id,

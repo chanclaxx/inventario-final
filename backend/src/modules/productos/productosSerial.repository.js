@@ -8,7 +8,10 @@ const findAll = async (sucursalId, negocioId, lineaId) => {
       ps.sucursal_id, ps.proveedor_id, ps.linea_id,
       su.nombre  AS sucursal_nombre,
       lp.nombre  AS linea_nombre,
-      COUNT(s.id) FILTER (WHERE s.vendido = false AND s.prestado = false) AS disponibles
+      COUNT(s.id) FILTER (WHERE s.vendido = false AND s.prestado = false) AS disponibles,
+      -- Días de la unidad disponible más antigua (la que lleva más tiempo sin venderse)
+      (CURRENT_DATE - MIN(s.fecha_entrada)
+        FILTER (WHERE s.vendido = false AND s.prestado = false))::int AS dias_en_inventario
     FROM productos_serial ps
     JOIN  sucursales         su ON su.id  = ps.sucursal_id
     LEFT JOIN lineas_producto lp ON lp.id = ps.linea_id
@@ -100,6 +103,8 @@ const updatePrecio = async (productoId, precio) => {
 const getSeriales = async (productoId, vendido) => {
   const { rows } = await pool.query(`
     SELECT s.*,
+      -- Días que esta unidad lleva en el inventario (desde su fecha de entrada)
+      (CURRENT_DATE - s.fecha_entrada)::int AS dias_en_inventario,
       CASE
         WHEN s.prestado = true
         THEN COALESCE(pr.nombre, c.nombre, p.prestatario)

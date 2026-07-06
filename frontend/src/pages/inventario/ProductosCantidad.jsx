@@ -11,6 +11,7 @@ import { formatCOP }                                     from '../../utils/forma
 import useCarritoStore                                   from '../../store/carritoStore';
 import { ModalPinEliminacion }                           from './ModalPinEliminacion';
 import { ModalEditarProductoCantidad }                   from './ModalEditarProductoCantidad';
+import { UltimaVentaBadge }                               from './AntiguedadInventario';
 import { VistaVariantesProducto }                        from './VistaVariantesProducto';
 import { useAuth }                                       from '../../context/useAuth';
 import { useSucursalKey }                                from '../../hooks/useSucursalKey';
@@ -60,6 +61,14 @@ function TarjetaProducto({ p, esAdmin, onAgregar, onReducir, onEditar, variantes
           </p>
           {p.unidad_medida && (
             <p className="text-xs text-gray-400 mt-0.5">{p.unidad_medida}</p>
+          )}
+          {p.dias_en_inventario != null && (
+            <UltimaVentaBadge
+              tieneVentas={p.ultima_venta != null}
+              diasSinVenta={p.dias_sin_venta}
+              diasEnInventario={p.dias_en_inventario}
+              className="mt-1"
+            />
           )}
         </div>
         <div className="flex items-center gap-0.5 flex-shrink-0">
