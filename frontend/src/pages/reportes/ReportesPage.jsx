@@ -1,5 +1,5 @@
 import { useState, useCallback, lazy, Suspense } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   getDashboard,
   getVentasRango,
@@ -219,18 +219,15 @@ const CeldaCostoEditable = ({ linea, onGuardado }) => {
 // ─────────────────────────────────────────────
 // FILA EXPANDIBLE DE FACTURA
 // ─────────────────────────────────────────────
-const FilaFactura = ({ factura, esAdmin }) => {
+const FilaFactura = ({ factura, esAdmin, onCostoActualizado }) => {
   const [expandida, setExpandida] = useState(false);
-  const [lineas,    setLineas]    = useState(factura.lineas);
 
+  // Se renderiza directo desde props (fuente de verdad = cache de React Query).
+  // La edición de costo actualiza el cache vía onCostoActualizado, por lo que
+  // esta fila y las métricas superiores se refrescan al instante.
+  const lineas               = factura.lineas;
   const utilidadNeta         = calcularUtilidadNeta(lineas);
   const tieneCostoIncompleto = lineas.some((i) => i.costo_unitario_compra === null);
-
-  const handleCostoGuardado = useCallback((lineaEditada, nuevoCosto) => {
-    setLineas((prev) =>
-      prev.map((l) => esMismaLinea(l, lineaEditada) ? recalcularLinea(l, nuevoCosto) : l),
-    );
-  }, []);
 
   const estadoVariant =
     factura.estado === 'Activa'  ? 'green'  :
@@ -314,7 +311,7 @@ const FilaFactura = ({ factura, esAdmin }) => {
                         Costo{esAdmin && <span className="text-blue-400 ml-1">(editable)</span>}
                       </span>
                       {esAdmin ? (
-                        <CeldaCostoEditable linea={linea} onGuardado={handleCostoGuardado} />
+                        <CeldaCostoEditable linea={linea} onGuardado={onCostoActualizado} />
                       ) : (
                         sinCosto
                           ? <span className="italic text-gray-300">N/A</span>
@@ -343,7 +340,7 @@ const FilaFactura = ({ factura, esAdmin }) => {
                   <span className="col-span-2 text-right text-gray-700">{formatCOP(linea.precio_venta)}</span>
                   <span className="col-span-2 text-right">
                     {esAdmin ? (
-                      <CeldaCostoEditable linea={linea} onGuardado={handleCostoGuardado} />
+                      <CeldaCostoEditable linea={linea} onGuardado={onCostoActualizado} />
                     ) : (
                       sinCosto ? <span className="text-gray-300 italic">N/A</span> : formatCOP(linea.costo_unitario_compra)
                     )}
@@ -1018,10 +1015,45 @@ const PanelResumen = ({ dashboard, loading }) => {
 // PANEL VENTAS — incluye préstamos, servicios y créditos
 // ─────────────────────────────────────────────
 const PanelVentas = ({ desde, hasta, onDesde, onHasta, esAdmin }) => {
+  const queryClient = useQueryClient();
+
   const { data: ventasData, isLoading, isError } = useQuery({
     queryKey: ['ventas-rango', desde, hasta],
     queryFn: () => getVentasRango(desde, hasta).then((r) => r.data.data),
   });
+
+  // Al guardar un costo: (1) parche instantáneo del cache para refrescar esta
+  // vista (filas + métrica superior) sin recargar, y (2) invalidación para
+  // reconciliar el resto de vistas (créditos, productos, análisis, etc.) con el
+  // servidor, que ya persistió el costo.
+  const handleCostoActualizado = useCallback((lineaEditada, nuevoCosto) => {
+    queryClient.setQueryData(['ventas-rango', desde, hasta], (old) => {
+      if (!old?.facturas) return old;
+      const facturas = old.facturas.map((f) => {
+        let cambiada = false;
+        const nuevasLineas = f.lineas.map((l) => {
+          if (esMismaLinea(l, lineaEditada)) { cambiada = true; return recalcularLinea(l, nuevoCosto); }
+          return l;
+        });
+        if (!cambiada) return f;
+        const utilidadBruta = calcularUtilidadNeta(nuevasLineas);
+        return {
+          ...f,
+          lineas:                 nuevasLineas,
+          utilidad_bruta:         utilidadBruta,
+          utilidad_neta:          utilidadBruta,
+          tiene_costo_incompleto: nuevasLineas.some((i) => i.costo_unitario_compra === null),
+        };
+      });
+      return { ...old, facturas };
+    });
+
+    queryClient.invalidateQueries({ queryKey: ['ventas-rango', desde, hasta] });
+    queryClient.invalidateQueries({ queryKey: ['productos-top'] });
+    queryClient.invalidateQueries({ queryKey: ['analisis'] });
+    queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+    queryClient.invalidateQueries({ queryKey: ['valor-inventario'] });
+  }, [queryClient, desde, hasta]);
 
   const facturas  = ventasData?.facturas  ?? [];
   const resumen   = ventasData?.resumen   ?? null;
@@ -1089,7 +1121,7 @@ const PanelVentas = ({ desde, hasta, onDesde, onHasta, esAdmin }) => {
 
               <div className="flex flex-col gap-2">
                 {facturas.map((factura) => (
-                  <FilaFactura key={factura.id} factura={factura} esAdmin={esAdmin} />
+                  <FilaFactura key={factura.id} factura={factura} esAdmin={esAdmin} onCostoActualizado={handleCostoActualizado} />
                 ))}
               </div>
             </>
