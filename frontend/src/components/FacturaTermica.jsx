@@ -98,6 +98,12 @@ function ContenidoFactura({ factura, garantias, config }) {
         <span>Fecha:</span>
         <span>{formatFechaHora(factura.fecha)}</span>
       </div>
+      {factura.vendedor_nombre && (
+        <div className="fila">
+          <span>Vendedor:</span>
+          <span>{factura.vendedor_nombre}</span>
+        </div>
+      )}
 
       <div className="linea-divisor" />
 

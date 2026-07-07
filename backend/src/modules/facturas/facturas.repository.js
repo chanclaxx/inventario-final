@@ -40,9 +40,10 @@ const _subqueryProveedores = (facturaAlias = 'f') => `
 
 const _selectColumnas = () => `
   f.id, f.fecha, f.nombre_cliente, f.cedula, f.celular,
-  f.estado, f.notas, f.sucursal_id,
+  f.estado, f.notas, f.sucursal_id, f.vendedor_id,
   su.nombre AS sucursal_nombre,
   u.nombre  AS usuario_nombre,
+  vd.nombre AS vendedor_nombre,
   COALESCE(SUM(l.precio * (l.cantidad - COALESCE(l.cantidad_devuelta, 0))), 0) AS total,
   COALESCE(
     (SELECT SUM(r.valor_retoma) FROM retomas r WHERE r.factura_id = f.id), 0
@@ -62,6 +63,7 @@ const _fromJoins = () => `
   JOIN      sucursales      su ON su.id = f.sucursal_id
   LEFT JOIN lineas_factura  l  ON l.factura_id = f.id
   LEFT JOIN usuarios        u  ON u.id = f.usuario_id
+  LEFT JOIN vendedores      vd ON vd.id = f.vendedor_id
 `;
 
 // ── findAll original (se mantiene por compatibilidad) ─────────────────────────
@@ -74,7 +76,7 @@ const findAll = async (sucursalId, negocioId) => {
     SELECT ${_selectColumnas()}
     ${_fromJoins()}
     WHERE ${filtro}
-    GROUP BY f.id, u.nombre, su.nombre
+    GROUP BY f.id, u.nombre, su.nombre, vd.nombre
     ORDER BY f.fecha DESC
   `, [param]);
   return rows;
@@ -95,7 +97,7 @@ const findRecientes = async (sucursalId, negocioId, { cursor, dias = 5 }) => {
     ${_fromJoins()}
     WHERE ${filtroSucursal}
       AND f.fecha >= $2 AND f.fecha < $3
-    GROUP BY f.id, u.nombre, su.nombre
+    GROUP BY f.id, u.nombre, su.nombre, vd.nombre
     ORDER BY f.fecha DESC
   `, [param, fechaDesde, fechaHasta]);
 
@@ -167,7 +169,7 @@ const buscar = async (sucursalId, negocioId, { q, desde, hasta, limit = 100, off
     SELECT ${_selectColumnas()}
     ${_fromJoins()}
     WHERE ${condiciones.join(' AND ')}
-    GROUP BY f.id, u.nombre, su.nombre
+    GROUP BY f.id, u.nombre, su.nombre, vd.nombre
     ORDER BY f.fecha DESC
     LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
   `, params);
@@ -186,12 +188,14 @@ const _findById = async (id) => {
     SELECT
       f.*,
       u.nombre  AS usuario_nombre,
+      vd.nombre AS vendedor_nombre,
       su.nombre AS sucursal_nombre,
       c.email     AS cliente_email,
       c.direccion AS cliente_direccion,
       ${_subqueryProveedores('f')}
     FROM facturas f
     LEFT JOIN usuarios   u  ON u.id  = f.usuario_id
+    LEFT JOIN vendedores vd ON vd.id = f.vendedor_id
     JOIN      sucursales su ON su.id = f.sucursal_id
     LEFT JOIN clientes   c  ON c.id  = f.cliente_id
     WHERE f.id = $1
@@ -266,14 +270,14 @@ const getRetomas = async (facturaId) => {
 };
 
 const create = async (client, {
-  sucursal_id, usuario_id, cliente_id,
+  sucursal_id, usuario_id, cliente_id, vendedor_id,
   nombre_cliente, cedula, celular, notas, estado,
 }) => {
   const { rows } = await client.query(`
-    INSERT INTO facturas(sucursal_id, usuario_id, cliente_id, nombre_cliente, cedula, celular, notas, estado)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    INSERT INTO facturas(sucursal_id, usuario_id, cliente_id, vendedor_id, nombre_cliente, cedula, celular, notas, estado)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
     RETURNING *
-  `, [sucursal_id, usuario_id, cliente_id, nombre_cliente, cedula, celular, notas, estado || 'Activa']);
+  `, [sucursal_id, usuario_id, cliente_id, vendedor_id || null, nombre_cliente, cedula, celular, notas, estado || 'Activa']);
   return rows[0];
 };
 
@@ -402,12 +406,14 @@ const findByIdYNegocio = async (id, negocioId) => {
     SELECT
       f.*,
       u.nombre  AS usuario_nombre,
+      vd.nombre AS vendedor_nombre,
       su.nombre AS sucursal_nombre,
       c.email     AS cliente_email,
       c.direccion AS cliente_direccion,
       ${_subqueryProveedores('f')}
     FROM facturas f
     LEFT JOIN usuarios   u  ON u.id  = f.usuario_id
+    LEFT JOIN vendedores vd ON vd.id = f.vendedor_id
     JOIN      sucursales su ON su.id = f.sucursal_id
     LEFT JOIN clientes   c  ON c.id  = f.cliente_id
     WHERE f.id = $1 AND su.negocio_id = $2

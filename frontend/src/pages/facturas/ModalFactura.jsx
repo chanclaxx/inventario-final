@@ -18,6 +18,7 @@ import {
   verificarImei as verificarImeiApi,
 } from '../../api/productos.api';
 import { getDomiciliarios, crearDomiciliario } from '../../api/domiciliarios.api';
+import { getVendedoresActivos } from '../../api/vendedores.api';
 import { FacturaTermica }    from '../../components/FacturaTermica';
 import { useSucursalKey }    from '../../hooks/useSucursalKey';
 import api                   from '../../api/axios.config';
@@ -71,7 +72,7 @@ function calcularValorRetoma(retoma) {
   return Number(retoma.valor_retoma || 0);
 }
 
-function buildPayloadFactura({ tipoCliente, form, items, totalNeto, metodosSeleccionados, montos, retomas, domicilio, credito }) {
+function buildPayloadFactura({ tipoCliente, form, items, totalNeto, metodosSeleccionados, montos, retomas, domicilio, credito, vendedorId }) {
   const pagosPorDefecto = totalNeto <= 0
     ? [{ metodo: metodosSeleccionados[0] || 'Efectivo', valor: totalNeto }]
     : null;
@@ -131,6 +132,7 @@ function buildPayloadFactura({ tipoCliente, form, items, totalNeto, metodosSelec
     domicilio:      domicilioPayload,
     es_credito:     credito.activo || false,
     cuota_inicial:  credito.activo ? Number(credito.cuota_inicial || 0) : 0,
+    vendedor_id:    vendedorId || null,
   };
 }
 
@@ -726,6 +728,7 @@ export function ModalFactura({ open, onClose }) {
   const [retomas,              setRetomas]              = useState([RETOMA_VACIA()]);
   const [domicilio,            setDomicilio]            = useState(DOMICILIO_VACIO());
   const [credito,              setCredito]              = useState(CREDITO_VACIO());
+  const [vendedorId,           setVendedorId]           = useState('');
   const [error,                setError]                = useState('');
   const [verificandoCedula,    setVerificandoCedula]    = useState(false);
   const [buscandoCedula,       setBuscandoCedula]       = useState(false);
@@ -763,6 +766,13 @@ export function ModalFactura({ open, onClose }) {
   const productosCantidad = normalizarProductos(productosCantidadRaw);
   const mostrarEmail      = configData?.campo_email_cliente     === '1';
   const mostrarDireccion  = configData?.campo_direccion_cliente === '1';
+  const mostrarVendedor   = configData?.vendedores_activo       === '1';
+
+  const { data: vendedores = [] } = useQuery({
+    queryKey: ['vendedores-activos', ...sucursalKey],
+    queryFn:  () => getVendedoresActivos().then((r) => r.data.data),
+    enabled:  mostrarVendedor && sucursalLista,
+  });
 
   const totalRetomas = conRetoma ? retomas.reduce((s, r) => s + calcularValorRetoma(r), 0) : 0;
   const totalNeto    = total - totalRetomas;
@@ -831,6 +841,7 @@ export function ModalFactura({ open, onClose }) {
     setConRetoma(false); setRetomas([RETOMA_VACIA()]);
     setDomicilio(DOMICILIO_VACIO());
     setCredito(CREDITO_VACIO());
+    setVendedorId('');
     setError(''); setTipoCliente('cliente');
     setVerificandoCedula(false);
   };
@@ -863,6 +874,7 @@ export function ModalFactura({ open, onClose }) {
       retomas: conRetoma ? retomas : [],
       domicilio,
       credito,
+      vendedorId: mostrarVendedor ? vendedorId : null,
     }));
   };
 
@@ -871,6 +883,7 @@ export function ModalFactura({ open, onClose }) {
     if (!form.nombre.trim())                                return setError('El nombre es requerido');
     if (tipoCliente === 'cliente' && !form.cedula.trim())   return setError('La cédula es requerida');
     if (tipoCliente === 'cliente' && !form.celular.trim())  return setError('El celular es requerido');
+    if (mostrarVendedor && !vendedorId)                     return setError('Selecciona el vendedor que realizó la venta');
 
     // Validaciones de crédito
     if (credito.activo) {
@@ -989,6 +1002,35 @@ export function ModalFactura({ open, onClose }) {
                 onChange={(e) => setForm({ ...form, direccion: e.target.value })} />
             )}
           </div>
+
+          {/* Vendedor (si el negocio lo tiene activo) */}
+          {mostrarVendedor && (
+            <div className="flex flex-col gap-1">
+              <label className="text-sm font-medium text-gray-700 flex items-center gap-1.5">
+                <Users size={14} className="text-gray-400" />
+                Vendedor <span className="text-red-500">*</span>
+              </label>
+              {vendedores.length === 0 ? (
+                <p className="text-xs text-amber-600 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2">
+                  No hay vendedores registrados para esta sucursal. Créalos en
+                  Configuración → Equipo → Vendedores.
+                </p>
+              ) : (
+                <select
+                  value={vendedorId}
+                  onChange={(e) => setVendedorId(e.target.value)}
+                  className="w-full px-3 py-2.5 bg-gray-100 border-0 rounded-xl text-sm
+                    text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500
+                    focus:bg-white transition-all"
+                >
+                  <option value="">Selecciona el vendedor…</option>
+                  {vendedores.map((v) => (
+                    <option key={v.id} value={v.id}>{v.nombre}</option>
+                  ))}
+                </select>
+              )}
+            </div>
+          )}
 
           {/* Notas */}
           <div className="flex flex-col gap-1">

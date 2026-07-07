@@ -80,7 +80,7 @@ const getFacturaById = async (negocioId, id) => {
 // ── Crear factura ─────────────────────────────────────────────────────────────
 
 const crearFactura = async ({
-  negocio_id, sucursal_id, usuario_id,
+  negocio_id, sucursal_id, usuario_id, vendedor_id,
   nombre_cliente, cedula, celular, email, direccion, notas,
   lineas, pagos, retomas = [],
   domicilio,
@@ -92,6 +92,7 @@ const crearFactura = async ({
   const garantiasRepo        = require('../garantias/garantias.repository');
   const domiciliariosService = require('../domiciliarios/domiciliarios.service');
   const creditosRepo         = require('../creditos/creditos.repository');
+  const vendedoresRepo       = require('../vendedores/vendedores.repository');
 
   const ES_COMPANERO = (c) => c === 'COMPANERO';
   const _fechaHoy = () => {
@@ -127,6 +128,19 @@ const crearFactura = async ({
   );
   if (!sucRows.length) throw { status: 403, message: 'Sucursal no válida para este negocio' };
 
+  // ── Vendedor (opcional / obligatorio según config del negocio) ────────────
+  // Si `vendedores_activo` está encendido, la factura DEBE llevar un vendedor de
+  // la sucursal. Si está apagado, se ignora por completo (comportamiento actual).
+  const { rows: cfgVend } = await pool.query(
+    `SELECT valor FROM config_negocio WHERE negocio_id = $1 AND clave = 'vendedores_activo'`,
+    [negocio_id]
+  );
+  const vendedoresActivo = cfgVend[0]?.valor === '1';
+  const vendedorFinal    = vendedoresActivo ? (vendedor_id || null) : null;
+  if (vendedoresActivo && !vendedorFinal) {
+    throw { status: 400, message: 'Debes seleccionar el vendedor que realizó la venta' };
+  }
+
   const tieneRetomas   = Array.isArray(retomas) && retomas.length > 0;
   const tieneDomicilio = !!(domicilio?.domiciliario_id);
   if (tieneRetomas && tieneDomicilio) {
@@ -144,8 +158,18 @@ const crearFactura = async ({
       cedula, nombre: nombre_cliente, celular, email, direccion,
     });
 
+    // Validar que el vendedor pertenezca al negocio y a la sucursal, y esté activo.
+    if (vendedorFinal) {
+      const vendedorValido = await vendedoresRepo.validarEnSucursalTx(
+        client, vendedorFinal, negocio_id, sucursal_id
+      );
+      if (!vendedorValido) {
+        throw { status: 400, message: 'El vendedor no pertenece a esta sucursal o está inactivo' };
+      }
+    }
+
     const factura = await facturasRepo.create(client, {
-  sucursal_id, usuario_id, cliente_id,
+  sucursal_id, usuario_id, cliente_id, vendedor_id: vendedorFinal,
   nombre_cliente, cedula, celular, notas,
   estado: es_credito ? 'Credito' : 'Activa',
 });
@@ -509,17 +533,38 @@ const cancelarFactura = async (negocioId, id, eliminarRetoma = false, _desdeDevo
 
 const editarFactura = async (negocioId, id, {
   nombre_cliente, cedula, celular, email, direccion, notas,
-  lineas, pagos, retoma,
+  lineas, pagos, retoma, vendedor_id,
 }) => {
+  const vendedoresRepo = require('../vendedores/vendedores.repository');
+
   const facturaActual = await facturasRepo.findByIdYNegocio(id, negocioId);
   if (!facturaActual) throw { status: 404, message: 'Factura no encontrada' };
   if (facturaActual.estado === 'Cancelada') {
     throw { status: 400, message: 'No se puede editar una factura cancelada' };
   }
 
+  // El vendedor solo se puede cambiar si la config del negocio lo tiene activo.
+  // Si está apagado, se ignora el vendedor_id recibido (no toca la columna).
+  const { rows: cfgVend } = await pool.query(
+    `SELECT valor FROM config_negocio WHERE negocio_id = $1 AND clave = 'vendedores_activo'`,
+    [negocioId]
+  );
+  const vendedoresActivo = cfgVend[0]?.valor === '1';
+  const vendedorFinal    = (vendedoresActivo && vendedor_id) ? vendedor_id : null;
+
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+
+    // Validar el vendedor contra la sucursal de la factura antes de asignarlo.
+    if (vendedorFinal) {
+      const vendedorValido = await vendedoresRepo.validarEnSucursalTx(
+        client, vendedorFinal, negocioId, facturaActual.sucursal_id
+      );
+      if (!vendedorValido) {
+        throw { status: 400, message: 'El vendedor no pertenece a esta sucursal o está inactivo' };
+      }
+    }
 
     const cliente_id = await resolverClienteId(client, negocioId, {
       cedula, nombre: nombre_cliente, celular, email, direccion,
@@ -527,9 +572,10 @@ const editarFactura = async (negocioId, id, {
 
     await client.query(
       `UPDATE facturas
-       SET nombre_cliente = $1, cedula = $2, celular = $3, notas = $4, cliente_id = $5
-       WHERE id = $6`,
-      [nombre_cliente, cedula, celular, notas, cliente_id, id]
+       SET nombre_cliente = $1, cedula = $2, celular = $3, notas = $4, cliente_id = $5,
+           vendedor_id = COALESCE($6, vendedor_id)
+       WHERE id = $7`,
+      [nombre_cliente, cedula, celular, notas, cliente_id, vendedorFinal, id]
     );
 
     for (const linea of lineas) {

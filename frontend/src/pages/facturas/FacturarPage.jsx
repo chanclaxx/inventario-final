@@ -90,6 +90,7 @@ function BloqueCliente({ factura }) {
       {tieneCliente && factura?.cliente_email && <p className="text-xs text-gray-500">{factura.cliente_email}</p>}
       {tieneCliente && factura?.cliente_direccion && <p className="text-xs text-gray-500">{factura.cliente_direccion}</p>}
       {factura?.usuario_nombre && <p className="text-xs text-gray-400 mt-1">Atendido por: <span className="text-gray-600 font-medium">{factura.usuario_nombre}</span></p>}
+      {factura?.vendedor_nombre && <p className="text-xs text-gray-400">Vendedor: <span className="text-gray-600 font-medium">{factura.vendedor_nombre}</span></p>}
     </div>
   );
 }
@@ -256,7 +257,7 @@ function FilaFactura({ factura, onVerDetalle, onInactivar, onEditar, onAbrirPdf,
         </div>
         <p className="text-sm text-gray-600 truncate mt-0.5">{factura.nombre_cliente}</p>
         {factura.productos_nombres && <p className="text-xs text-gray-400 truncate">{factura.productos_nombres}</p>}
-        <p className="text-xs text-gray-400">{formatFechaHora(factura.fecha)}{factura.usuario_nombre && <span className="ml-2 text-gray-300">· {factura.usuario_nombre}</span>}</p>
+        <p className="text-xs text-gray-400">{formatFechaHora(factura.fecha)}{factura.usuario_nombre && <span className="ml-2 text-gray-300">· {factura.usuario_nombre}</span>}{factura.vendedor_nombre && <span className="ml-2 text-blue-400">· Vend: {factura.vendedor_nombre}</span>}</p>
       </div>
       <div className="flex items-center gap-2 flex-shrink-0">
         <span className="text-sm font-bold text-gray-900">{formatCOP(total)}</span>

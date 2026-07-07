@@ -8,8 +8,11 @@ import { Spinner }              from '../../components/ui/Spinner';
 import { formatCOP }            from '../../utils/formatters';
 import { ModalConflictoCedula } from '../../components/ui/ModalConflictoCedula';
 import { useCedulaCliente }     from '../../hooks/useCedulaCliente';
+import { useAuth }              from '../../context/useAuth';
 import { getProductosSerial, getProductosCantidad } from '../../api/productos.api';
 import { getFacturaById, editarFactura }            from '../../api/facturas.api';
+import { getVendedores }        from '../../api/vendedores.api';
+import { ModalPinEliminacion }  from '../inventario/ModalPinEliminacion';
 import { useSucursalKey }       from '../../hooks/useSucursalKey';
 import { User, Users, Package, ShoppingBag, Lock }  from 'lucide-react';
 import api from '../../api/axios.config';
@@ -75,6 +78,8 @@ function buildEstadoInicial(data) {
       precio:          Number(l.precio || 0),
     })),
     pagos: pagosArrayAMapa(data.pagos),
+    vendedor_id:     data.vendedor_id     ?? '',
+    vendedor_nombre: data.vendedor_nombre ?? '',
     // ← array de retomas existentes
     retomasExistentes: (data.retomas || []).map((r) => ({
       descripcion:        r.descripcion       || '',
@@ -298,6 +303,7 @@ function PanelRetomaNueva({ retoma, setRetoma, sucursalKey, sucursalLista }) {
 export function ModalEditarFactura({ facturaId, onClose, onGuardado }) {
   const queryClient                    = useQueryClient();
   const { sucursalKey, sucursalLista } = useSucursalKey();
+  const { esAdminNegocio }             = useAuth();
 
   const { data, isLoading } = useQuery({
     queryKey: ['factura-detalle', facturaId],
@@ -320,6 +326,9 @@ export function ModalEditarFactura({ facturaId, onClose, onGuardado }) {
   const [agregarRetoma,     setAgregarRetoma]     = useState(false);
   const [error,             setError]             = useState('');
   const [verificandoCedula, setVerificandoCedula] = useState(false);
+  const [vendedorSel,       setVendedorSel]       = useState(null);
+  const [vendedorDesbloqueado, setVendedorDesbloqueado] = useState(false);
+  const [pinVendedorOpen,   setPinVendedorOpen]   = useState(false);
 
   const { conflictoCliente, verificarCedula, reescribirCliente, cancelarConflicto } = useCedulaCliente();
 
@@ -331,7 +340,19 @@ export function ModalEditarFactura({ facturaId, onClose, onGuardado }) {
 
   const mostrarEmail          = configData?.campo_email_cliente     === '1';
   const mostrarDireccion      = configData?.campo_direccion_cliente === '1';
+  const mostrarVendedor       = configData?.vendedores_activo       === '1';
   const tieneClienteVinculado = estadoInicial?.tieneCliente ?? false;
+
+  const vendedorIdEfectivo   = vendedorSel ?? estadoInicial?.vendedor_id ?? '';
+  const vendedorNombreActual = estadoInicial?.vendedor_nombre ?? '';
+
+  // Vendedores activos de la sucursal de la factura (para el cambio con PIN).
+  const { data: vendedores = [] } = useQuery({
+    queryKey: ['vendedores-sucursal', data?.sucursal_id],
+    queryFn:  () => getVendedores({ sucursal_id: data.sucursal_id })
+      .then((r) => r.data.data.filter((v) => v.activo)),
+    enabled:  mostrarVendedor && vendedorDesbloqueado && !!data?.sucursal_id,
+  });
 
   const buildPayload = () => ({
     nombre_cliente: formEfectivo.nombre,
@@ -346,6 +367,9 @@ export function ModalEditarFactura({ facturaId, onClose, onGuardado }) {
       .map(([metodo, valor]) => ({ metodo, valor: Number(valor) })),
     retoma:        agregarRetoma && retomaNueva ? retomaNueva : null,
     esRetomaNueva: agregarRetoma && !!retomaNueva,
+    // Solo se envía si el negocio tiene vendedores activos. El backend usa
+    // COALESCE, así que null mantiene el vendedor actual sin cambios.
+    vendedor_id:   mostrarVendedor && vendedorIdEfectivo ? Number(vendedorIdEfectivo) : null,
   });
 
   const mutEditar = useMutation({
@@ -380,6 +404,7 @@ export function ModalEditarFactura({ facturaId, onClose, onGuardado }) {
       if (retomaNueva.tipo_retoma === 'serial'   && !retomaNueva.imei?.trim())             return setError('El IMEI es requerido para ingresar al inventario');
       if (retomaNueva.tipo_retoma === 'cantidad' && !retomaNueva.producto_cantidad_id)     return setError('Selecciona el producto para ingresar al inventario');
     }
+    if (mostrarVendedor && vendedorDesbloqueado && !vendedorIdEfectivo)                     return setError('Selecciona el vendedor que realizó la venta');
 
     if (tipoClienteEfectivo === 'cliente') {
       setVerificandoCedula(true);
@@ -479,6 +504,48 @@ export function ModalEditarFactura({ facturaId, onClose, onGuardado }) {
                 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500
                 focus:bg-white transition-all resize-none" />
           </div>
+
+          {/* Vendedor (si el negocio lo tiene activo) — cambio protegido con PIN */}
+          {mostrarVendedor && (
+            <div className="flex flex-col gap-1.5">
+              <label className="text-sm font-medium text-gray-700 flex items-center gap-1.5">
+                <Users size={14} className="text-gray-400" /> Vendedor
+              </label>
+              {vendedorDesbloqueado ? (
+                <select
+                  value={vendedorIdEfectivo}
+                  onChange={(e) => setVendedorSel(e.target.value)}
+                  className="w-full px-3 py-2.5 bg-gray-100 border-0 rounded-xl text-sm
+                    text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500
+                    focus:bg-white transition-all"
+                >
+                  <option value="">Selecciona el vendedor…</option>
+                  {vendedores.map((v) => (
+                    <option key={v.id} value={v.id}>{v.nombre}</option>
+                  ))}
+                </select>
+              ) : (
+                <div className="flex items-center justify-between gap-2 bg-gray-50
+                  border border-gray-200 rounded-xl px-3 py-2.5">
+                  <span className={`text-sm ${vendedorNombreActual ? 'text-gray-800 font-medium' : 'text-gray-400'}`}>
+                    {vendedorNombreActual || 'Sin vendedor asignado'}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      // El admin puede cambiar el vendedor directamente.
+                      // Vendedor/supervisor requieren el PIN del administrador.
+                      if (esAdminNegocio()) setVendedorDesbloqueado(true);
+                      else setPinVendedorOpen(true);
+                    }}
+                    className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 transition-colors"
+                  >
+                    {esAdminNegocio() ? 'Cambiar' : <><Lock size={12} /> Cambiar</>}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Productos */}
           <div className="bg-gray-50 rounded-xl p-3 flex flex-col gap-2">
@@ -611,6 +678,18 @@ export function ModalEditarFactura({ facturaId, onClose, onGuardado }) {
         onCancelar={handleCancelarConflicto}
         guardando={mutEditar.isPending}
       />
+
+      {pinVendedorOpen && (
+        <ModalPinEliminacion
+          titulo="Cambiar vendedor"
+          descripcion="Cambiar el vendedor de una factura requiere la autorización del administrador. Ingresa el PIN para continuar."
+          onConfirm={async () => {
+            setVendedorDesbloqueado(true);
+            setPinVendedorOpen(false);
+          }}
+          onClose={() => setPinVendedorOpen(false)}
+        />
+      )}
     </>
   );
 }

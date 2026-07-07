@@ -244,6 +244,7 @@ function seccionCliente(doc, factura, y) {
   if (!esCompanero && factura.cliente_email)         lineasExtra += 1;
   if (!esCompanero && factura.cliente_direccion)     lineasExtra += 1;
   if (factura.usuario_nombre)                        lineasExtra += 1;
+  if (factura.vendedor_nombre)                       lineasExtra += 1;
   const alturaBloque = 44 + lineasExtra * 14;
 
   // Tarjeta con borde
@@ -284,6 +285,12 @@ function seccionCliente(doc, factura, y) {
   if (factura.usuario_nombre) {
     doc.font(FONT.normal).fontSize(8).fillColor(C.grisClaro)
       .text(`Atendido por: ${factura.usuario_nombre}`, MARGIN + 14, yDatos, { width: CONTENT_W - 28 });
+    yDatos += 14;
+  }
+
+  if (factura.vendedor_nombre) {
+    doc.font(FONT.normal).fontSize(8).fillColor(C.grisClaro)
+      .text(`Vendedor: ${factura.vendedor_nombre}`, MARGIN + 14, yDatos, { width: CONTENT_W - 28 });
   }
 
   return y + alturaBloque + 24;

@@ -8,6 +8,7 @@ import { useAuth }         from '../../context/useAuth';
 import { exportarInventarioPorLineasNegocio } from '../../utils/exportarInventarioPorLineasNegocio';
 import { UsuariosConfig }    from './UsuariosConfig';
 import { SucursalesConfig }  from './SucursalesConfig';
+import { VendedoresConfig }  from './VendedoresConfig';
 import { PasswordConfig }    from './PasswordConfig';
 import { MetodosPagoConfig } from './MetodosPagoConfig';
 import { TiposCaracteristicaConfig } from './components/TiposCaracteristicaConfig';
@@ -1346,12 +1347,12 @@ function SeccionSeguridad({ form, set }) {
 }
 
 // ─── Sección: Equipo ──────────────────────────────────────────────────────────
-function SeccionEquipo() {
+function SeccionEquipo({ valores, set }) {
   return (
     <div className="flex flex-col gap-5">
       <div>
         <h2 className="text-base font-semibold text-gray-900">Equipo</h2>
-        <p className="text-xs text-gray-400 mt-0.5">Gestiona los usuarios y sucursales de tu negocio.</p>
+        <p className="text-xs text-gray-400 mt-0.5">Gestiona los usuarios, sucursales y vendedores de tu negocio.</p>
       </div>
 
       <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
@@ -1360,6 +1361,10 @@ function SeccionEquipo() {
 
       <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
         <UsuariosConfig />
+      </div>
+
+      <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
+        <VendedoresConfig valores={valores} set={set} />
       </div>
     </div>
   );
@@ -1448,7 +1453,7 @@ export default function ConfigPage() {
           {seccionActiva === 'negocio'   && <SeccionNegocio   valores={valores} set={set} />}
           {seccionActiva === 'catalogo'  && <SeccionCatalogo  valores={valores} set={set} />}
           {seccionActiva === 'seguridad' && <SeccionSeguridad form={form}       set={set} />}
-          {seccionActiva === 'equipo'    && <SeccionEquipo />}
+          {seccionActiva === 'equipo'    && <SeccionEquipo valores={valores} set={set} />}
         </div>
 
       </div>
