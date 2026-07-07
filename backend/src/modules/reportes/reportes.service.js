@@ -177,7 +177,9 @@ const getDashboard = async (sucursalId) => {
     ventas_hoy:         ventasHoy.rows[0].total,
     facturas_hoy:       facturasHoy.rows[0].total,
     stock_bajo:         stockBajo.rows[0].total,
-    utilidad_hoy:       Number(uActiva.utilidad_bruta)  - Number(uActiva.total_retomas),
+    // La retoma NO se resta de la utilidad (medio de pago / activo recibido),
+    // consistente con Ventas y Análisis.
+    utilidad_hoy:       Number(uActiva.utilidad_bruta),
     utilidad_pendiente: Number(uCredito.utilidad_bruta) - Number(uCredito.total_retomas),
     prestamos_activos: {
       cantidad:    prestamosActivos.rows[0].total,
@@ -536,14 +538,30 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
            WHERE pc.nombre = l.nombre_producto AND pc.sucursal_id = f.sucursal_id LIMIT 1)
       END AS costo_unitario_compra,
       CASE WHEN l.imei IS NOT NULL THEN 'serial' ELSE 'cantidad' END AS tipo_producto,
-      COALESCE(lps.nombre, lpc.nombre) AS linea_nombre
+      -- IMPORTANTE: se usan subconsultas con LIMIT 1 (no JOINs) para obtener el
+      -- nombre de línea. Un mismo IMEI puede existir en varias filas de
+      -- 'seriales' (constraint UNIQUE es por (imei, producto_id), no por imei),
+      -- por lo que un JOIN duplicaría la línea de factura y contaría la utilidad
+      -- 2 o 3 veces. La subconsulta garantiza exactamente una fila por línea.
+      CASE
+        WHEN l.imei IS NOT NULL THEN (
+          SELECT lps.nombre
+          FROM seriales s_r
+          JOIN productos_serial ps_r ON ps_r.id = s_r.producto_id AND ps_r.sucursal_id = f.sucursal_id
+          JOIN lineas_producto  lps  ON lps.id  = ps_r.linea_id
+          WHERE s_r.imei = l.imei
+          LIMIT 1
+        )
+        ELSE (
+          SELECT lpc.nombre
+          FROM productos_cantidad pc_r
+          JOIN lineas_producto lpc ON lpc.id = pc_r.linea_id
+          WHERE pc_r.id = l.producto_id
+          LIMIT 1
+        )
+      END AS linea_nombre
     FROM lineas_factura l
     JOIN facturas f ON f.id = l.factura_id
-    LEFT JOIN seriales          s_r  ON s_r.imei  = l.imei
-    LEFT JOIN productos_serial  ps_r ON ps_r.id   = s_r.producto_id AND ps_r.sucursal_id = f.sucursal_id
-    LEFT JOIN lineas_producto   lps  ON lps.id    = ps_r.linea_id
-    LEFT JOIN productos_cantidad pc_r ON pc_r.id  = l.producto_id AND l.imei IS NULL
-    LEFT JOIN lineas_producto   lpc  ON lpc.id    = pc_r.linea_id
     WHERE l.factura_id = ANY($1::int[])
     ORDER BY l.id ASC
   `, [facturaIds]);
@@ -591,7 +609,9 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
       total_venta:            Number(f.total_venta),
       total_retomas:          totalRetomas,
       utilidad_bruta:         utilidadBruta,
-      utilidad_neta:          utilidadBruta - totalRetomas,
+      // La retoma NO se resta: se informa aparte (total_retomas). utilidad_neta
+      // se mantiene por compatibilidad, igual a la utilidad bruta de productos.
+      utilidad_neta:          utilidadBruta,
       tiene_costo_incompleto: items.some((i) => i.costo_unitario_compra === null),
       lineas:                 items,
     };
@@ -879,7 +899,9 @@ const getProductosTop = async (sucursalId, desde, hasta) => {
 //   - metodos_pago: total cobrado por método en el período
 //
 // La utilidad respeta exactamente las reglas del resto del módulo:
-//   · facturas Activas → utilidad = subtotal − costo − retomas (por fecha factura)
+//   · facturas Activas → utilidad = subtotal − costo (por fecha factura).
+//     La retoma NO se resta: es un medio de pago / activo recibido, no una
+//     pérdida. Coincide con la pantalla de Ventas.
 //   · créditos saldados → utilidad = cobrado − costo (por fecha de saldo)
 
 const getAnalisis = async (sucursalId, desde, hasta, agrupacion) => {
@@ -914,10 +936,7 @@ const getAnalisis = async (sucursalId, desde, hasta, agrupacion) => {
           f.id                     AS factura_id,
           f.estado                 AS estado,
           SUM(l.subtotal)          AS total_venta,
-          SUM(${costoLineaCase})   AS costo_total,
-          COALESCE((
-            SELECT SUM(r.valor_retoma) FROM retomas r WHERE r.factura_id = f.id
-          ), 0)                    AS retoma
+          SUM(${costoLineaCase})   AS costo_total
         FROM lineas_factura l
         JOIN facturas f ON f.id = l.factura_id
         WHERE f.sucursal_id = $1
@@ -931,7 +950,9 @@ const getAnalisis = async (sucursalId, desde, hasta, agrupacion) => {
           SUM(total_venta)                                                          AS total_vendido,
           COUNT(*)                                                                  AS num_facturas,
           SUM(costo_total)                                                          AS costo,
-          SUM(CASE WHEN estado = 'Activa' THEN total_venta - costo_total - retoma ELSE 0 END) AS utilidad_activas
+          -- La retoma NO se resta de la utilidad: es un medio de pago / activo
+          -- recibido, no una pérdida. Coincide con la pantalla de Ventas.
+          SUM(CASE WHEN estado = 'Activa' THEN total_venta - costo_total ELSE 0 END) AS utilidad_activas
         FROM por_factura
         GROUP BY periodo
       ),

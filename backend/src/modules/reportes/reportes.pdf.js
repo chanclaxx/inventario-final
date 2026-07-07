@@ -400,12 +400,14 @@ const generarReporteContable = async ({ negocio, sucursalNombre, sucursalId, des
   y = tituloSeccion(doc, y, 'Resumen del periodo');
   y = fila(doc, y, 'Ventas de contado (facturado)', formatCOP(ventasContado));
   y = fila(doc, y, '(−) Costo de mercancía vendida', formatCOP(costoVentas), { valorColor: C.rojo });
-  if ((resumen?.total_retomas || 0) > 0) {
-    y = fila(doc, y, '(−) Devoluciones / retomas', formatCOP(resumen.total_retomas), { valorColor: C.rojo });
-  }
   hLine(doc, y); y += 6;
   y = fila(doc, y, 'Utilidad bruta de ventas de contado', formatCOP(utilidadBruta), { bold: true, valorColor: C.verde });
   y = fila(doc, y, `Margen sobre ventas de contado`, formatPct(margen), { bold: true });
+  // La retoma no reduce la utilidad (es un medio de pago / activo recibido);
+  // se muestra solo como dato informativo.
+  if ((resumen?.total_retomas || 0) > 0) {
+    y = fila(doc, y, 'Retomas recibidas (informativo, no afecta la utilidad)', formatCOP(resumen.total_retomas), { valorColor: C.gris });
+  }
   y += 4;
   y = fila(doc, y, 'Utilidad de créditos saldados', formatCOP(resumen?.utilidad_creditos_saldados || 0));
   y = fila(doc, y, 'Utilidad de servicios técnicos', formatCOP((servicios?.resumen?.utilidad_confirmada || 0) + (servicios?.resumen?.utilidad_garantias || 0)));
