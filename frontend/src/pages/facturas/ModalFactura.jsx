@@ -818,9 +818,6 @@ export function ModalFactura({ open, onClose }) {
       queryClient.invalidateQueries({ queryKey: ['productos-cantidad'],  exact: false });
       queryClient.invalidateQueries({ queryKey: ['seriales'],            exact: false });
       queryClient.invalidateQueries({ queryKey: ['facturas'],            exact: false });
-      queryClient.invalidateQueries({ queryKey: ['ventas-rango'],        exact: false });
-      queryClient.invalidateQueries({ queryKey: ['productos-top'],       exact: false });
-      queryClient.invalidateQueries({ queryKey: ['dashboard'],           exact: false });
       queryClient.invalidateQueries({ queryKey: ['clientes'],            exact: false });
       queryClient.invalidateQueries({ queryKey: ['domiciliarios'],       exact: false });
       queryClient.invalidateQueries({ queryKey: ['creditos'],            exact: false });

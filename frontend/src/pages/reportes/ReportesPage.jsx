@@ -7,6 +7,7 @@ import {
   getInventarioBajo,
   getValorInventario,
   actualizarCostoCompra,
+  invalidarReportes,
 } from '../../api/reportes.api';
 import { formatCOP, formatFecha, formatFechaHora, fechaHoyBogota } from '../../utils/formatters';
 import { Spinner }    from '../../components/ui/Spinner';
@@ -1048,11 +1049,7 @@ const PanelVentas = ({ desde, hasta, onDesde, onHasta, esAdmin }) => {
       return { ...old, facturas };
     });
 
-    queryClient.invalidateQueries({ queryKey: ['ventas-rango', desde, hasta] });
-    queryClient.invalidateQueries({ queryKey: ['productos-top'] });
-    queryClient.invalidateQueries({ queryKey: ['analisis'] });
-    queryClient.invalidateQueries({ queryKey: ['dashboard'] });
-    queryClient.invalidateQueries({ queryKey: ['valor-inventario'] });
+    invalidarReportes(queryClient);
   }, [queryClient, desde, hasta]);
 
   const facturas  = ventasData?.facturas  ?? [];

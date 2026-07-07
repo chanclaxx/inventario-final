@@ -30,6 +30,15 @@ const _costoPorImei = (imeiAlias, sucursalAlias) => `
   )
 `;
 
+// ── Devoluciones parciales (solo créditos): cantidad y subtotal EFECTIVOS ─────
+// Tras una devolución parcial de crédito, la línea queda con cantidad_devuelta > 0
+// pero su `cantidad`/`subtotal` originales no cambian. Los reportes deben contar
+// solo lo NO devuelto. Para facturas de contado (Activa) cantidad_devuelta es
+// siempre 0, por lo que estas expresiones no alteran esos casos.
+// (Requiere que la tabla lineas_factura tenga alias `l`.)
+const CANT_EFECTIVA     = `(l.cantidad - COALESCE(l.cantidad_devuelta, 0))`;
+const SUBTOTAL_EFECTIVO = `(${CANT_EFECTIVA} * l.precio)`;
+
 const getDashboard = async (sucursalId) => {
   const [
     ventasHoy,
@@ -146,7 +155,7 @@ const getDashboard = async (sucursalId) => {
           SUM(
             CASE
               WHEN l.imei IS NOT NULL THEN
-                ${_costoPorImei('l.imei', 'f.sucursal_id')}
+                ${_costoPorImei('l.imei', 'f.sucursal_id')} * ${CANT_EFECTIVA}
               ELSE
                 COALESCE(
                   (SELECT v.costo_unitario FROM variantes_atributo v WHERE v.id = l.variante_id),
@@ -154,7 +163,7 @@ const getDashboard = async (sucursalId) => {
                   (SELECT pc.costo_unitario FROM productos_cantidad pc
                    WHERE pc.nombre = l.nombre_producto AND pc.sucursal_id = f.sucursal_id LIMIT 1),
                   0
-                ) * l.cantidad
+                ) * ${CANT_EFECTIVA}
             END
           ) AS costo_total
         FROM lineas_factura l
@@ -339,7 +348,7 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
     SELECT
       f.id, f.nombre_cliente, f.cedula, f.celular,
       f.fecha, f.estado, f.notas,
-      COALESCE(SUM(l.subtotal), 0) AS total_venta,
+      COALESCE(SUM(${SUBTOTAL_EFECTIVO}), 0) AS total_venta,
       COALESCE(r.total_retomas, 0) AS total_retomas
     FROM facturas f
     LEFT JOIN lineas_factura l      ON l.factura_id = f.id
@@ -518,9 +527,9 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
       l.factura_id,
       l.nombre_producto,
       l.imei,
-      l.cantidad,
+      ${CANT_EFECTIVA} AS cantidad,
       l.precio,
-      l.subtotal,
+      ${SUBTOTAL_EFECTIVO} AS subtotal,
       l.producto_id,
       l.atributo_id,
       l.variante_id,
@@ -733,7 +742,7 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
         SUM(
           CASE
             WHEN l.imei IS NOT NULL THEN
-              ${_costoPorImei('l.imei', 'f.sucursal_id')}
+              ${_costoPorImei('l.imei', 'f.sucursal_id')} * ${CANT_EFECTIVA}
             ELSE
               COALESCE(
                 (SELECT v.costo_unitario FROM variantes_atributo v WHERE v.id = l.variante_id),
@@ -741,7 +750,7 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
                 (SELECT pc.costo_unitario FROM productos_cantidad pc
                  WHERE pc.nombre = l.nombre_producto AND pc.sucursal_id = f.sucursal_id LIMIT 1),
                 0
-              ) * l.cantidad
+              ) * ${CANT_EFECTIVA}
           END
         ) AS costo_total
       FROM lineas_factura l
@@ -816,8 +825,8 @@ const getProductosTop = async (sucursalId, desde, hasta) => {
   const { rows } = await pool.query(`
     SELECT
       l.nombre_producto,
-      SUM(l.cantidad) AS cantidad_vendida,
-      SUM(l.subtotal) AS total_ventas,
+      SUM(${CANT_EFECTIVA}) AS cantidad_vendida,
+      SUM(${SUBTOTAL_EFECTIVO}) AS total_ventas,
       CASE
         WHEN MAX(l.imei) IS NOT NULL THEN (
           SELECT AVG(
@@ -914,7 +923,7 @@ const getAnalisis = async (sucursalId, desde, hasta, agrupacion) => {
   const costoLineaCase = `
     CASE
       WHEN l.imei IS NOT NULL THEN
-        ${_costoPorImei('l.imei', 'f.sucursal_id')}
+        ${_costoPorImei('l.imei', 'f.sucursal_id')} * ${CANT_EFECTIVA}
       ELSE
         COALESCE(
           (SELECT v.costo_unitario FROM variantes_atributo v WHERE v.id = l.variante_id),
@@ -922,7 +931,7 @@ const getAnalisis = async (sucursalId, desde, hasta, agrupacion) => {
           (SELECT pc.costo_unitario FROM productos_cantidad pc
            WHERE pc.nombre = l.nombre_producto AND pc.sucursal_id = f.sucursal_id LIMIT 1),
           0
-        ) * l.cantidad
+        ) * ${CANT_EFECTIVA}
     END
   `;
 
@@ -935,7 +944,7 @@ const getAnalisis = async (sucursalId, desde, hasta, agrupacion) => {
           ${periodoFactura}        AS periodo,
           f.id                     AS factura_id,
           f.estado                 AS estado,
-          SUM(l.subtotal)          AS total_venta,
+          SUM(${SUBTOTAL_EFECTIVO}) AS total_venta,
           SUM(${costoLineaCase})   AS costo_total
         FROM lineas_factura l
         JOIN facturas f ON f.id = l.factura_id
@@ -1005,7 +1014,7 @@ const getAnalisis = async (sucursalId, desde, hasta, agrupacion) => {
     pool.query(`
       SELECT
         f.estado,
-        COALESCE(SUM(l.subtotal), 0) AS total
+        COALESCE(SUM(${SUBTOTAL_EFECTIVO}), 0) AS total
       FROM lineas_factura l
       JOIN facturas f ON f.id = l.factura_id
       WHERE f.sucursal_id = $1
