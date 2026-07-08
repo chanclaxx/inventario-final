@@ -469,16 +469,16 @@ const marcarSinReparar = async (negocioId, id, { motivo, precio_diagnostico, caj
       RETURNING *
     `, [id, negocioId, motivo || null, pd]);
 
-    if (pd && pd > 0 && cajaId) {
+    // El cobro de diagnóstico es un ingreso real de servicio. Se registra como
+    // abono de servicio para que la caja lo refleje (grupo "Servicio técnico",
+    // leído desde abonos_servicio) igual que cualquier otro abono. Antes se
+    // insertaba en movimientos_caja con referencia_tipo='servicio', que el
+    // resumen de caja no lee, y por eso el diagnóstico quedaba invisible.
+    if (pd && pd > 0) {
       await client.query(`
-        INSERT INTO movimientos_caja
-          (caja_id, usuario_id, tipo, concepto, valor, referencia_id, referencia_tipo)
-        VALUES ($1, $2, 'Ingreso', $3, $4, $5, 'servicio')
-      `, [
-        cajaId, usuarioId || null,
-        `Diagnóstico #OS-${String(id).padStart(4, '0')}`,
-        pd, id,
-      ]);
+        INSERT INTO abonos_servicio(orden_id, usuario_id, valor, metodo, notas)
+        VALUES ($1, $2, $3, 'Efectivo', $4)
+      `, [id, usuarioId || null, pd, `Diagnóstico — ${motivo || 'sin reparar'}`]);
     }
 
     await client.query('COMMIT');

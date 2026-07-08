@@ -79,6 +79,16 @@ const cerrarCaja = async (id, monto_cierre) => {
   return rows[0];
 };
 
+// Congela el resumen calculado al cerrar la caja. Se guarda como JSON para que
+// las consultas posteriores de una caja cerrada devuelvan exactamente lo que
+// había al cierre, sin recalcular en vivo (evita retroactividad).
+const guardarResumenCierre = async (id, resumen) => {
+  await pool.query(
+    `UPDATE aperturas_caja SET resumen_cierre = $1 WHERE id = $2`,
+    [JSON.stringify(resumen), id]
+  );
+};
+
 const insertarMovimiento = async ({
   caja_id, usuario_id, tipo, concepto, valor, referencia_id, referencia_tipo, metodo,
 }) => {
@@ -109,6 +119,25 @@ const toggleMovimiento = async (movimientoId, negocioId) => {
   return rows[0];
 };
 
+// Historial de cajas (abiertas y cerradas) de una sucursal, más recientes primero.
+// Para cajas cerradas con foto (resumen_cierre) se devuelven los totales ya
+// congelados; para las demás, totales = null (el detalle se calcula al abrir).
+const getHistorial = async (sucursalId, negocioId, limit, offset) => {
+  const { rows } = await pool.query(`
+    SELECT ac.id, ac.fecha_apertura, ac.fecha_cierre, ac.estado,
+           ac.monto_inicial, ac.monto_cierre,
+           u.nombre AS usuario_nombre,
+           ac.resumen_cierre->'totales' AS totales
+    FROM aperturas_caja ac
+    JOIN      sucursales s ON s.id = ac.sucursal_id
+    LEFT JOIN usuarios   u ON u.id = ac.usuario_id
+    WHERE ac.sucursal_id = $1 AND s.negocio_id = $2
+    ORDER BY ac.fecha_apertura DESC
+    LIMIT $3 OFFSET $4
+  `, [sucursalId, negocioId, limit, offset]);
+  return rows;
+};
+
 const getResumenCaja = async (cajaId) => {
   const { rows } = await pool.query(`
     SELECT
@@ -123,7 +152,7 @@ const getResumenCaja = async (cajaId) => {
 
 // ─── _buildResumen ────────────────────────────────────────────────────────────
 
-const _buildResumen = ({ pf, ac, ap, cp, aa, mn, rt, dv, ad, sv }) => {
+const _buildResumen = ({ pf, ac, ap, cp, aa, mn, rt, dv, ad, sv, fd = [] }) => {
   const sum = (arr) => arr
     .filter((r) => r.activo !== false)
     .reduce((s, r) => s + Number(r.valor || 0), 0);
@@ -147,6 +176,11 @@ const _buildResumen = ({ pf, ac, ap, cp, aa, mn, rt, dv, ad, sv }) => {
     .reduce((s, m) => s + Number(m.valor || 0), 0);
 
   const totalAbonosDomicilio = sum(ad);
+
+  // Informativo: dinero de domicilios aún en poder del domiciliario (no cobrado).
+  // NO entra en ingresos/egresos — solo se muestra como "por rendir".
+  const totalPendienteDomicilios = fd
+    .reduce((s, r) => s + Number(r.valor || 0), 0);
 
   const totalIngresosBruto = totalFacturas + totalAbonosCredito + totalAbonosPrestamo
     + totalAbonosDomicilio + totalAbonosServicio + totalManualesIngreso;
@@ -245,15 +279,23 @@ const _buildResumen = ({ pf, ac, ap, cp, aa, mn, rt, dv, ad, sv }) => {
         totalIngreso: totalManualesIngreso,
         totalEgreso:  totalManualesEgreso,
       },
+      // Informativo (no suma a ingresos): pedidos a domicilio pendientes de rendir.
+      facturasDomicilio: {
+        tipo:  'Informativo',
+        label: 'Pedidos en domicilio',
+        items: fd,
+        total: totalPendienteDomicilios,
+      },
     },
     metodosPago,
     metodosPagoDetalle: metodoMap,
     totales: {
-      ingresosBruto: totalIngresosBruto,
-      retomas:       totalRetomas,
-      ingresos:      totalIngresos,
-      egresos:       totalEgresos,
-      saldo:         totalIngresos - totalEgresos,
+      ingresosBruto:       totalIngresosBruto,
+      retomas:             totalRetomas,
+      ingresos:            totalIngresos,
+      egresos:             totalEgresos,
+      saldo:               totalIngresos - totalEgresos,
+      pendienteDomicilios: totalPendienteDomicilios,
     },
   };
 };
@@ -291,7 +333,7 @@ const getResumenDia = async (cajaId, sucursalId, negocioId) => {
   if (!rango) return null;
   const { inicio, fin } = rango;
 
-  const [pf, ac, ap, cp, aa, mn, dv, rt, ad, sv] = await Promise.all([
+  const [pf, ac, ap, cp, aa, mn, dv, rt, ad, sv, fd] = await Promise.all([
 
     pool.query(`
       SELECT pf.id, pf.metodo, pf.valor, f.nombre_cliente, f.id AS factura_id, f.fecha,
@@ -305,7 +347,7 @@ const getResumenDia = async (cajaId, sucursalId, negocioId) => {
         AND f.fecha BETWEEN $2 AND $3
         AND NOT EXISTS (
           SELECT 1 FROM entregas_domicilio ed
-          WHERE ed.factura_id = f.id AND ed.estado = 'Pendiente'
+          WHERE ed.factura_id = f.id
         )
         AND NOT EXISTS (
           SELECT 1 FROM ordenes_servicio os
@@ -324,6 +366,7 @@ const getResumenDia = async (cajaId, sucursalId, negocioId) => {
       JOIN creditos c ON c.id = ac.credito_id
       JOIN facturas f ON f.id = c.factura_id
       WHERE c.sucursal_id = $1 AND ac.fecha BETWEEN $2 AND $3
+        AND f.estado != 'Cancelada'
       ORDER BY ac.fecha ASC
     `, [sucursalId, inicio, fin]),
 
@@ -431,12 +474,27 @@ const getResumenDia = async (cajaId, sucursalId, negocioId) => {
       WHERE os.sucursal_id = $1 AND ab.fecha BETWEEN $2 AND $3
       ORDER BY ab.fecha ASC
     `, [sucursalId, inicio, fin]),
+
+    // Informativo: pedidos a domicilio pendientes de rendir en esta sucursal
+    // (dinero aún en poder del domiciliario). No suma a caja.
+    pool.query(`
+      SELECT e.id, e.factura_id, f.nombre_cliente,
+             (e.valor_total - e.total_abonado) AS valor,
+             e.fecha_asignacion AS fecha, d.nombre AS domiciliario_nombre
+      FROM entregas_domicilio e
+      JOIN facturas      f ON f.id = e.factura_id
+      JOIN domiciliarios d ON d.id = e.domiciliario_id
+      WHERE f.sucursal_id = $1
+        AND e.estado = 'Pendiente'
+        AND (e.valor_total - e.total_abonado) > 0
+      ORDER BY e.fecha_asignacion ASC
+    `, [sucursalId]),
   ]);
 
   return _buildResumen({
     pf: pf.rows, ac: ac.rows, ap: ap.rows, cp: cp.rows,
     aa: aa.rows, mn: mn.rows, dv: dv.rows, rt: rt.rows,
-    ad: ad.rows, sv: sv.rows,
+    ad: ad.rows, sv: sv.rows, fd: fd.rows,
   });
 };
 
@@ -451,7 +509,7 @@ const getResumenGlobal = async (negocioId) => {
   const inicio = `${yyyy}-${mm}-${dd} 00:00:00.000`;
   const fin    = `${yyyy}-${mm}-${dd} 23:59:59.999`;
 
-  const [pf, ac, ap, cp, aa, mn, dv, rt, ad, sv] = await Promise.all([
+  const [pf, ac, ap, cp, aa, mn, dv, rt, ad, sv, fd] = await Promise.all([
 
     pool.query(`
       SELECT pf.id, pf.metodo, pf.valor, f.nombre_cliente,
@@ -467,7 +525,7 @@ const getResumenGlobal = async (negocioId) => {
         AND f.fecha BETWEEN $2 AND $3
         AND NOT EXISTS (
           SELECT 1 FROM entregas_domicilio ed
-          WHERE ed.factura_id = f.id AND ed.estado = 'Pendiente'
+          WHERE ed.factura_id = f.id
         )
         AND NOT EXISTS (
           SELECT 1 FROM ordenes_servicio os
@@ -488,6 +546,7 @@ const getResumenGlobal = async (negocioId) => {
       JOIN facturas   f  ON f.id  = c.factura_id
       JOIN sucursales su ON su.id = c.sucursal_id
       WHERE su.negocio_id = $1 AND ac.fecha BETWEEN $2 AND $3
+        AND f.estado != 'Cancelada'
       ORDER BY ac.fecha ASC
     `, [negocioId, inicio, fin]),
 
@@ -616,19 +675,37 @@ const getResumenGlobal = async (negocioId) => {
       WHERE su.negocio_id = $1 AND ab.fecha BETWEEN $2 AND $3
       ORDER BY ab.fecha ASC
     `, [negocioId, inicio, fin]),
+
+    // Informativo: pedidos a domicilio pendientes de rendir en el negocio
+    // (dinero aún en poder del domiciliario). No suma a caja.
+    pool.query(`
+      SELECT e.id, e.factura_id, f.nombre_cliente,
+             (e.valor_total - e.total_abonado) AS valor,
+             e.fecha_asignacion AS fecha,
+             d.nombre AS domiciliario_nombre, su.nombre AS sucursal_nombre
+      FROM entregas_domicilio e
+      JOIN facturas      f  ON f.id  = e.factura_id
+      JOIN sucursales    su ON su.id = f.sucursal_id
+      JOIN domiciliarios d  ON d.id  = e.domiciliario_id
+      WHERE su.negocio_id = $1
+        AND e.estado = 'Pendiente'
+        AND (e.valor_total - e.total_abonado) > 0
+      ORDER BY e.fecha_asignacion ASC
+    `, [negocioId]),
   ]);
 
   return _buildResumen({
     pf: pf.rows, ac: ac.rows, ap: ap.rows, cp: cp.rows,
     aa: aa.rows, mn: mn.rows, dv: dv.rows, rt: rt.rows,
-    ad: ad.rows, sv: sv.rows,
+    ad: ad.rows, sv: sv.rows, fd: fd.rows,
   });
 };
 
 module.exports = {
   findCajaAbierta, findById, findByIdYNegocio,
   perteneceAlNegocio,
-  getMovimientos, abrirCaja, cerrarCaja,
+  getMovimientos, abrirCaja, cerrarCaja, guardarResumenCierre,
+  getHistorial,
   insertarMovimiento, getResumenCaja,
   toggleMovimiento,
   getResumenDia, getResumenGlobal,

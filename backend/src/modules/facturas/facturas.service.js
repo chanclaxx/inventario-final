@@ -499,19 +499,55 @@ const cancelarFactura = async (negocioId, id, eliminarRetoma = false, _desdeDevo
 
     await facturasRepo.cancelar(client, id);
 
+    // ── Devolución en caja ────────────────────────────────────────────────
+    // Modelo de cierre congelado: la caja del día en que entró el dinero es la
+    // que lo contabilizó. Por eso solo se registra un EGRESO de devolución por
+    // el efectivo que se cobró en cajas ANTERIORES (ya cerradas): factura.fecha
+    // o abono.fecha < apertura de la caja actual. El efectivo cobrado en la
+    // caja abierta actual NO se devuelve como egreso: al quedar la factura
+    // 'Cancelada', las queries de caja (pf y ac) ya lo excluyen del resumen en
+    // vivo, así que sumar un egreso lo descontaría dos veces.
+    // Se devuelve TODO lo cobrado en efectivo: cuota inicial (pagos) + abonos
+    // de crédito. Los pagos con método 'Credito' no son efectivo → no se tocan.
     const METODOS_NO_CAJA = ['Credito'];
-    const totalDevolucion = pagos
-      .filter((p) => !METODOS_NO_CAJA.includes(p.metodo))
-      .reduce((s, p) => s + Number(p.valor || 0), 0);
+    const cajaActiva = await cajaRepo.findCajaAbierta(factura.sucursal_id);
 
-    if (totalDevolucion > 0) {
-      const caja = await cajaRepo.findCajaAbierta(factura.sucursal_id);
-      if (caja) {
+    // Las facturas con domicilio NO entran en caja por sus pagos (el dinero
+    // entra vía abono_domicilio). Devolver sus pagos crearía un egreso por
+    // dinero que nunca entró, así que se omite la devolución para ellas.
+    const { rows: entregaRows } = await client.query(
+      `SELECT 1 FROM entregas_domicilio WHERE factura_id = $1 LIMIT 1`,
+      [id]
+    );
+    const tieneDomicilio = entregaRows.length > 0;
+
+    if (cajaActiva && !tieneDomicilio) {
+      const apertura = new Date(cajaActiva.fecha_apertura);
+      let totalDevolucion = 0;
+
+      // Cuota inicial / pagos en efectivo (contados en pf a la fecha de la factura)
+      if (new Date(factura.fecha) < apertura) {
+        totalDevolucion += pagos
+          .filter((p) => !METODOS_NO_CAJA.includes(p.metodo))
+          .reduce((s, p) => s + Number(p.valor || 0), 0);
+      }
+
+      // Abonos de crédito ya cobrados en efectivo, cada uno según su fecha
+      const creditosRepo = require('../creditos/creditos.repository');
+      const credito = await creditosRepo.findByFacturaId(client, id);
+      if (credito) {
+        const abonos = await creditosRepo.getAbonos(credito.id);
+        totalDevolucion += abonos
+          .filter((a) => !METODOS_NO_CAJA.includes(a.metodo) && new Date(a.fecha) < apertura)
+          .reduce((s, a) => s + Number(a.valor || 0), 0);
+      }
+
+      if (totalDevolucion > 0) {
         await client.query(
           `INSERT INTO movimientos_caja(caja_id, tipo, concepto, valor, referencia_id, referencia_tipo)
            VALUES ($1, 'Egreso', $2, $3, $4, 'factura_cancelada')`,
           [
-            caja.id,
+            cajaActiva.id,
             `Devolución factura #${String(id).padStart(6, '0')} — ${factura.nombre_cliente}`,
             totalDevolucion,
             id,

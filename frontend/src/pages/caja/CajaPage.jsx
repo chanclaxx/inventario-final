@@ -2,9 +2,9 @@ import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   getCajaActiva, abrirCaja, cerrarCaja,
-  registrarMovimiento, getResumenDia, toggleMovimiento,
+  registrarMovimiento, getResumenDia, toggleMovimiento, getHistorialCajas,
 } from '../../api/caja.api';
-import { formatCOP, formatFechaHora } from '../../utils/formatters';
+import { formatCOP, formatFecha, formatFechaHora } from '../../utils/formatters';
 import { Button }     from '../../components/ui/Button';
 import { Input }      from '../../components/ui/Input';
 import { Modal }      from '../../components/ui/Modal';
@@ -17,6 +17,7 @@ import {
   Wallet, Plus, Lock, ChevronDown, ChevronUp,
   ShoppingCart, CreditCard, ArrowDownCircle, ArrowUpCircle,
   Receipt, Sliders, RefreshCw, Bike, Ban, RotateCcw, Wrench,
+  History, CalendarDays, CheckCircle2, AlertTriangle,
 } from 'lucide-react';
 
 const METODOS_PAGO_ORDEN = ['Efectivo', 'Nequi', 'Daviplata', 'Transferencia', 'Tarjeta'];
@@ -384,7 +385,7 @@ function ResumenMetodosPago({ metodosPagoDetalle }) {
 
 // ─── GrupoMovimientos ────────────────────────────────────────────────────────
 
-function ItemMovimiento({ item, rendered, esTipoIngreso, cajaId }) {
+function ItemMovimiento({ item, rendered, esTipoIngreso, cajaId, readOnly = false }) {
   const queryClient = useQueryClient();
 
   const mutation = useMutation({
@@ -394,7 +395,7 @@ function ItemMovimiento({ item, rendered, esTipoIngreso, cajaId }) {
     },
   });
 
-  const tieneToggle = item.activo !== undefined;
+  const tieneToggle = item.activo !== undefined && !readOnly;
   const estaActivo  = item.activo !== false;
 
   return (
@@ -451,7 +452,7 @@ function ItemMovimiento({ item, rendered, esTipoIngreso, cajaId }) {
   );
 }
 
-function GrupoMovimientos({ grupoKey, grupo, cajaId, opciones }) {
+function GrupoMovimientos({ grupoKey, grupo, cajaId, opciones, readOnly = false }) {
   const [expandido, setExpandido] = useState(false);
   const cfg = CONFIG_GRUPOS[grupoKey];
   if (!cfg || grupo.items.length === 0) return null;
@@ -504,7 +505,7 @@ function GrupoMovimientos({ grupoKey, grupo, cajaId, opciones }) {
             const esTipoIngreso = rendered.esMixto ? rendered.tipo === 'Ingreso' : esIngreso;
             return (
               <ItemMovimiento key={item.id} item={item} rendered={rendered}
-                esTipoIngreso={esTipoIngreso} cajaId={cajaId} />
+                esTipoIngreso={esTipoIngreso} cajaId={cajaId} readOnly={readOnly} />
             );
           })}
         </div>
@@ -825,9 +826,173 @@ function TabMetodos({ grupos, metodosPagoDetalle, cajaId }) {
   );
 }
 
+// ─── Histórico de cajas ───────────────────────────────────────────────────────
+
+// Bloque reutilizable: renderiza los grupos de un resumen (ingresos/egresos/etc).
+function ResumenGrupos({ grupos, cajaId, opciones, readOnly = false }) {
+  const g = grupos || {};
+  const has = (keys) => keys.some((k) => g[k]?.items?.length > 0);
+  const ingresoKeys = ['facturas', 'abonosCredito', 'abonosPrestamo', 'abonosServicio', 'abonosDomicilio'];
+  const egresoKeys  = ['retomas', 'devoluciones', 'compras', 'abonosAcreedor'];
+  const hayNada = Object.values(g).every((x) => !x?.items?.length);
+
+  if (hayNada) return <EmptyState icon={Wallet} titulo="Sin movimientos" />;
+
+  return (
+    <div className="flex flex-col gap-3">
+      {has(ingresoKeys) && <p className="text-xs text-gray-400 font-medium px-1">Ingresos</p>}
+      {ingresoKeys.map((k) => (
+        <GrupoMovimientos key={k} grupoKey={k} grupo={g[k] || { items: [] }}
+          cajaId={cajaId} opciones={opciones} readOnly={readOnly} />
+      ))}
+
+      {g.facturasDomicilio?.items?.length > 0 && (
+        <>
+          <p className="text-xs text-gray-400 font-medium px-1 mt-1">En poder del domiciliario</p>
+          <GrupoMovimientosInformativo grupo={g.facturasDomicilio} />
+        </>
+      )}
+
+      {has(egresoKeys) && <p className="text-xs text-gray-400 font-medium px-1 mt-1">Egresos</p>}
+      {egresoKeys.map((k) => (
+        <GrupoMovimientos key={k} grupoKey={k} grupo={g[k] || { items: [] }}
+          cajaId={cajaId} opciones={opciones} readOnly={readOnly} />
+      ))}
+
+      {g.manuales?.items?.length > 0 && (
+        <>
+          <p className="text-xs text-gray-400 font-medium px-1 mt-1">Manuales</p>
+          <GrupoMovimientos grupoKey="manuales" grupo={g.manuales}
+            cajaId={cajaId} opciones={opciones} readOnly={readOnly} />
+        </>
+      )}
+    </div>
+  );
+}
+
+// Detalle de una caja del histórico — carga el resumen (foto si está cerrada) al abrir.
+function DetalleCajaHist({ cajaId }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ['caja-hist-detalle', cajaId],
+    queryFn:  () => getResumenDia(cajaId).then((r) => r.data),
+    staleTime: 5 * 60 * 1000,
+  });
+
+  if (isLoading) return <Spinner className="py-8" />;
+  const resumen  = data?.data;
+  const opciones = { esAdmin: data?.nivel === 'admin_negocio' };
+  if (!resumen) return <p className="text-sm text-gray-400 px-1 py-4">No se pudo cargar el detalle.</p>;
+
+  return (
+    <div className="flex flex-col gap-4 pt-1">
+      <ResumenMetodosPago metodosPagoDetalle={resumen.metodosPagoDetalle} />
+      <ResumenGrupos grupos={resumen.grupos} cajaId={cajaId} opciones={opciones} readOnly />
+    </div>
+  );
+}
+
+function CajaHistCard({ caja }) {
+  const [abierto, setAbierto] = useState(false);
+  const cerrada = caja.estado === 'Cerrada';
+  const t = caja.totales; // null si no hay foto (caja abierta o previa a la migración)
+
+  const inicial = Number(caja.monto_inicial || 0);
+  const ingresos = t ? Number(t.ingresos || 0) : null;
+  const egresos  = t ? Number(t.egresos  || 0) : null;
+  const saldoEsperado = t ? inicial + ingresos - egresos : null;
+  const conteo   = caja.monto_cierre != null ? Number(caja.monto_cierre) : null;
+  const dif      = (cerrada && t && conteo != null) ? conteo - saldoEsperado : null;
+
+  return (
+    <div className={`border rounded-2xl overflow-hidden ${cerrada ? 'border-gray-100' : 'border-green-200'}`}>
+      <button onClick={() => setAbierto((v) => !v)}
+        className="w-full flex items-start justify-between gap-3 px-4 py-3 bg-white hover:bg-gray-50/60 transition-colors text-left">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <CalendarDays size={14} className="text-gray-400 flex-shrink-0" />
+            <span className="text-sm font-semibold text-gray-800">{formatFecha(caja.fecha_apertura)}</span>
+            <Badge variant={cerrada ? 'gray' : 'green'}>{cerrada ? 'Cerrada' : 'Abierta'}</Badge>
+          </div>
+          <p className="text-xs text-gray-400 mt-1">
+            {caja.usuario_nombre || 'Sin cajero'} · {formatFechaHora(caja.fecha_apertura)}
+            {caja.fecha_cierre ? ` → ${formatFechaHora(caja.fecha_cierre)}` : ''}
+          </p>
+          {t ? (
+            <div className="flex items-center gap-3 mt-1.5 text-xs flex-wrap">
+              <span className="text-green-600 font-medium">+{formatCOP(ingresos)}</span>
+              <span className="text-red-500 font-medium">-{formatCOP(egresos)}</span>
+              <span className="text-gray-500">Saldo <span className="font-semibold text-gray-800">{formatCOP(t.saldo)}</span></span>
+            </div>
+          ) : (
+            <p className="text-xs text-gray-300 mt-1.5">{cerrada ? 'Toca para ver el detalle' : 'En curso'}</p>
+          )}
+        </div>
+        <div className="flex flex-col items-end gap-1 flex-shrink-0">
+          {dif != null && (
+            <span className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full
+              ${dif === 0 ? 'bg-green-50 text-green-600' : dif > 0 ? 'bg-blue-50 text-blue-600' : 'bg-red-50 text-red-500'}`}>
+              {dif === 0 ? <><CheckCircle2 size={12} /> Cuadró</>
+                : dif > 0 ? `Sobra ${formatCOP(dif)}`
+                : <><AlertTriangle size={12} /> Falta {formatCOP(Math.abs(dif))}</>}
+            </span>
+          )}
+          {abierto ? <ChevronUp size={16} className="text-gray-400" /> : <ChevronDown size={16} className="text-gray-400" />}
+        </div>
+      </button>
+      {abierto && (
+        <div className="px-3 pb-3 border-t border-gray-50 bg-gray-50/30">
+          {cerrada && conteo != null && t && (
+            <div className="grid grid-cols-3 gap-2 py-3">
+              <div className="bg-white rounded-xl p-2.5 text-center border border-gray-100">
+                <p className="text-[11px] text-gray-400">Inicial</p>
+                <p className="text-sm font-bold text-gray-700">{formatCOP(inicial)}</p>
+              </div>
+              <div className="bg-white rounded-xl p-2.5 text-center border border-gray-100">
+                <p className="text-[11px] text-blue-400">Esperado</p>
+                <p className="text-sm font-bold text-blue-700">{formatCOP(saldoEsperado)}</p>
+              </div>
+              <div className="bg-white rounded-xl p-2.5 text-center border border-gray-100">
+                <p className="text-[11px] text-gray-400">Conteo</p>
+                <p className="text-sm font-bold text-gray-700">{formatCOP(conteo)}</p>
+              </div>
+            </div>
+          )}
+          <DetalleCajaHist cajaId={caja.id} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function HistorialCajas() {
+  const { sucursalKey, sucursalLista } = useSucursalKey();
+  const { data: cajas, isLoading } = useQuery({
+    queryKey: ['caja-historial', ...sucursalKey],
+    queryFn:  () => getHistorialCajas().then((r) => r.data.data),
+    enabled:  sucursalLista,
+  });
+
+  if (!sucursalLista) {
+    return <EmptyState icon={History} titulo="Selecciona una sucursal"
+      descripcion="Elige una sucursal para ver su historial de cajas." />;
+  }
+  if (isLoading) return <Spinner className="py-16" />;
+  if (!cajas?.length) {
+    return <EmptyState icon={History} titulo="Sin cajas registradas"
+      descripcion="Aquí verás el historial de cajas abiertas y cerradas." />;
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      {cajas.map((c) => <CajaHistCard key={c.id} caja={c} />)}
+    </div>
+  );
+}
+
 export default function CajaPage() {
   const queryClient                       = useQueryClient();
   const { sucursalKey, sucursalLista }    = useSucursalKey();
+  const [vista,         setVista]         = useState('actual'); // 'actual' | 'historial'
   const [tabVista,      setTabVista]      = useState('movimientos');
   const [modalMov,      setModalMov]      = useState(false);
   const [modalCerrar,   setModalCerrar]   = useState(false);
@@ -877,21 +1042,45 @@ export default function CajaPage() {
 
   if (isLoading) return <Spinner className="py-32" />;
 
+  const topTabs = (
+    <div className="flex gap-1 bg-gray-100 p-1 rounded-xl w-fit">
+      {[{ id: 'actual', label: 'Caja actual' }, { id: 'historial', label: 'Historial' }].map((tab) => (
+        <button key={tab.id} onClick={() => setVista(tab.id)}
+          className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-150
+            ${vista === tab.id ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+          {tab.id === 'historial' && <History size={14} />}{tab.label}
+        </button>
+      ))}
+    </div>
+  );
+
+  if (vista === 'historial') {
+    return (
+      <div className="flex flex-col gap-5">
+        {topTabs}
+        <HistorialCajas />
+      </div>
+    );
+  }
+
   if (!caja) {
     return (
-      <div className="flex flex-col items-center justify-center py-20 gap-6">
-        <div className="w-16 h-16 bg-blue-50 rounded-2xl flex items-center justify-center">
-          <Wallet size={32} className="text-blue-600" />
-        </div>
-        <div className="text-center">
-          <h2 className="text-lg font-bold text-gray-900">No hay caja abierta</h2>
-          <p className="text-sm text-gray-400 mt-1">Ingresa el monto inicial para comenzar</p>
-        </div>
-        <div className="flex gap-3 w-full max-w-xs">
-          <Input placeholder="Monto inicial" type="number" value={montoApertura}
-            onChange={(e) => setMontoApertura(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && mutAbrir.mutate()} />
-          <Button loading={mutAbrir.isPending} onClick={() => mutAbrir.mutate()}>Abrir</Button>
+      <div className="flex flex-col gap-5">
+        {topTabs}
+        <div className="flex flex-col items-center justify-center py-20 gap-6">
+          <div className="w-16 h-16 bg-blue-50 rounded-2xl flex items-center justify-center">
+            <Wallet size={32} className="text-blue-600" />
+          </div>
+          <div className="text-center">
+            <h2 className="text-lg font-bold text-gray-900">No hay caja abierta</h2>
+            <p className="text-sm text-gray-400 mt-1">Ingresa el monto inicial para comenzar</p>
+          </div>
+          <div className="flex gap-3 w-full max-w-xs">
+            <Input placeholder="Monto inicial" type="number" value={montoApertura}
+              onChange={(e) => setMontoApertura(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && mutAbrir.mutate()} />
+            <Button loading={mutAbrir.isPending} onClick={() => mutAbrir.mutate()}>Abrir</Button>
+          </div>
         </div>
       </div>
     );
@@ -899,6 +1088,7 @@ export default function CajaPage() {
 
   return (
     <div className="flex flex-col gap-5">
+      {topTabs}
 
       <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
         <div className="flex items-start justify-between">

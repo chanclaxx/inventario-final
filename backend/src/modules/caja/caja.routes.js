@@ -14,6 +14,7 @@ const validarCierre = [
 ];
 
 router.get('/activa',           requireModulo('caja'), ctrl.getCajaActiva);
+router.get('/historial',        requireModulo('caja'), ctrl.getHistorial);
 router.post('/abrir',           requireModulo('caja'), ctrl.abrirCaja);
 router.patch('/:id/cerrar',     requireModulo('caja'), validarCierre,     validate, ctrl.cerrarCaja);
 router.get('/:id/movimientos',  requireModulo('caja'), ctrl.getMovimientos);

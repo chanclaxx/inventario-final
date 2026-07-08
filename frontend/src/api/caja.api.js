@@ -6,5 +6,6 @@ export const cerrarCaja         = (id, data) => api.patch(`/caja/${id}/cerrar`, 
 export const getMovimientos     = (id)       => api.get(`/caja/${id}/movimientos`);
 export const registrarMovimiento = (id, data) => api.post(`/caja/${id}/movimientos`, data);
 export const getResumenDia      = (id)       => api.get(`/caja/${id}/resumen-dia`);
+export const getHistorialCajas  = (params)   => api.get('/caja/historial', { params });
 export const toggleMovimiento = (movimientoId) =>
   api.patch(`/caja/movimientos/${movimientoId}/toggle`);

@@ -59,6 +59,22 @@ const getMovimientos = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+const getHistorial = async (req, res, next) => {
+  try {
+    if (req.todasSucursales) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Selecciona una sucursal para ver su historial de cajas',
+      });
+    }
+    const data = await service.getHistorial(req.user.negocio_id, req.sucursal_id, {
+      limit:  req.query.limit,
+      offset: req.query.offset,
+    });
+    res.json({ ok: true, data });
+  } catch (err) { next(err); }
+};
+
 const getResumenDia = async (req, res, next) => {
   try {
     if (req.todasSucursales) {
@@ -95,4 +111,5 @@ const registrarMovimiento = async (req, res, next) => {
 module.exports = {
   getCajaActiva, abrirCaja, cerrarCaja,
   getMovimientos, getResumenDia, registrarMovimiento, toggleMovimiento,
+  getHistorial,
 };
