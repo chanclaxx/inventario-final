@@ -62,6 +62,17 @@ const exportarPdf = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+const getVentasPorVendedor = async (req, res, next) => {
+  try {
+    const { desde, hasta } = req.query;
+    if (!desde || !hasta) {
+      return res.status(400).json({ ok: false, error: 'Los parámetros desde y hasta son requeridos' });
+    }
+    const data = await service.getVentasPorVendedor(req.sucursal_id, desde, hasta);
+    res.json({ ok: true, data });
+  } catch (err) { next(err); }
+};
+
 const getProductosTop = async (req, res, next) => {
   try {
     const { desde, hasta } = req.query;
@@ -139,6 +150,6 @@ const getValorInventario = async (req, res, next) => {
 };
 
 module.exports = {
-  getDashboard, getVentasRango, getAnalisis, exportarPdf, getProductosTop,
+  getDashboard, getVentasRango, getAnalisis, exportarPdf, getVentasPorVendedor, getProductosTop,
   getInventarioBajo, actualizarCostoCompra, getValorInventario,
 };

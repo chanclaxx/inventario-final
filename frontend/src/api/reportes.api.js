@@ -5,6 +5,8 @@ export const getVentasRango = (desde, hasta) =>
   api.get('/reportes/ventas-rango', { params: { desde, hasta } });
 export const getProductosTop = (desde, hasta) =>
   api.get('/reportes/productos-top', { params: { desde, hasta } });
+export const getVentasPorVendedor = (desde, hasta) =>
+  api.get('/reportes/ventas-vendedor', { params: { desde, hasta } });
 export const getAnalisis = (desde, hasta, agrupacion) =>
   api.get('/reportes/analisis', { params: { desde, hasta, agrupacion } });
 export const exportarAnalisisPdf = (desde, hasta, agrupacion, detalle) =>
@@ -27,6 +29,7 @@ export const REPORT_QUERY_KEYS = [
   'dashboard',
   'ventas-rango',
   'productos-top',
+  'ventas-vendedor',
   'analisis',
   'valor-inventario',
   'inventario-bajo',

@@ -9,6 +9,7 @@ import {
   actualizarCostoCompra,
   invalidarReportes,
 } from '../../api/reportes.api';
+import { getConfig } from '../../api/config.api';
 import { formatCOP, formatFecha, formatFechaHora, fechaHoyBogota } from '../../utils/formatters';
 import { Spinner }    from '../../components/ui/Spinner';
 import { EmptyState } from '../../components/ui/EmptyState';
@@ -17,9 +18,10 @@ import { useAuth }    from '../../context/useAuth';
 import {
   BarChart2, TrendingUp, Package, AlertTriangle,
   ChevronDown, ChevronUp, Info, Pencil, Check, X,
-  Warehouse, Handshake, Wrench, CreditCard, LineChart,
+  Warehouse, Handshake, Wrench, CreditCard, LineChart, Users,
 } from 'lucide-react';
-const PanelAnalisis = lazy(() => import('./PanelAnalisis'));
+const PanelAnalisis   = lazy(() => import('./PanelAnalisis'));
+const PanelVendedores = lazy(() => import('./PanelVendedores'));
 
 // ─────────────────────────────────────────────
 // CONSTANTES
@@ -27,6 +29,7 @@ const PanelAnalisis = lazy(() => import('./PanelAnalisis'));
 const TABS = [
   { id: 'resumen',    label: 'Resumen',    icon: BarChart2     },
   { id: 'analisis',   label: 'Análisis',   icon: LineChart     },
+  { id: 'vendedores', label: 'Vendedores', icon: Users         },
   { id: 'ventas',     label: 'Ventas',     icon: TrendingUp    },
   { id: 'productos',  label: 'Productos',  icon: Package       },
   { id: 'stock',      label: 'Stock Bajo', icon: AlertTriangle },
@@ -1383,7 +1386,17 @@ export default function ReportesPage() {
     queryFn: () => getDashboard().then((r) => r.data.data),
   });
 
-  const tabsVisibles = TABS.filter((t) => !['inventario', 'analisis'].includes(t.id) || esAdmin);
+  const { data: config } = useQuery({
+    queryKey: ['config'],
+    queryFn: () => getConfig().then((r) => r.data.data),
+  });
+  const vendedoresActivo = config?.vendedores_activo === '1';
+
+  const tabsVisibles = TABS.filter((t) => {
+    if (['inventario', 'analisis'].includes(t.id)) return esAdmin;
+    if (t.id === 'vendedores') return vendedoresActivo;
+    return true;
+  });
 
   return (
     <div className="flex flex-col gap-4">
@@ -1408,6 +1421,11 @@ export default function ReportesPage() {
       {tabActiva === 'analisis'   && esAdmin && (
         <Suspense fallback={<Spinner className="py-20" />}>
           <PanelAnalisis />
+        </Suspense>
+      )}
+      {tabActiva === 'vendedores' && vendedoresActivo && (
+        <Suspense fallback={<Spinner className="py-20" />}>
+          <PanelVendedores />
         </Suspense>
       )}
       {tabActiva === 'ventas'     && <PanelVentas    desde={desde} hasta={hasta} onDesde={setDesde} onHasta={setHasta} esAdmin={esAdmin} />}

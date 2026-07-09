@@ -901,6 +901,160 @@ const getProductosTop = async (sucursalId, desde, hasta) => {
   });
 };
 
+// ─── getVentasPorVendedor ─────────────────────────────────────────────────────
+// Análisis de desempeño por vendedor (catálogo de vendedores por sucursal).
+// Solo tiene sentido si el negocio activó `vendedores_activo`; si no, devuelve
+// { activo:false } y el frontend muestra el aviso correspondiente.
+//
+// Semántica (igual que el tab "Productos" / "Análisis"):
+//   · Se consideran TODAS las facturas no canceladas del rango (Activa + Credito)
+//     por fecha de factura — es una vista de DESEMPEÑO de venta, no de caja.
+//   · total_vendido = Σ subtotal efectivo (descuenta devoluciones parciales).
+//   · utilidad      = total_vendido − costo (costo faltante se cuenta como 0,
+//     idéntico a la utilidad del tab Análisis). La retoma NO se resta.
+//   · Cada factura se atribuye a su vendedor_id. Las facturas sin vendedor
+//     (histórico previo a activar la opción) se agrupan aparte en `sin_vendedor`.
+
+const getVentasPorVendedor = async (sucursalId, desde, hasta) => {
+  const { rows: cfg } = await pool.query(
+    `SELECT cn.valor
+     FROM config_negocio cn
+     JOIN sucursales s ON s.negocio_id = cn.negocio_id
+     WHERE s.id = $1 AND cn.clave = 'vendedores_activo'`,
+    [sucursalId]
+  );
+  const activo = cfg[0]?.valor === '1';
+
+  // Costo por línea: misma lógica que getAnalisis (faltante → 0).
+  const costoLineaCase = `
+    CASE
+      WHEN l.imei IS NOT NULL THEN
+        ${_costoPorImei('l.imei', 'f.sucursal_id')} * ${CANT_EFECTIVA}
+      ELSE
+        COALESCE(
+          (SELECT v.costo_unitario FROM variantes_atributo v WHERE v.id = l.variante_id),
+          (SELECT ap.costo_unitario FROM atributos_producto ap WHERE ap.id = l.atributo_id),
+          (SELECT pc.costo_unitario FROM productos_cantidad pc
+           WHERE pc.nombre = l.nombre_producto AND pc.sucursal_id = f.sucursal_id LIMIT 1),
+          0
+        ) * ${CANT_EFECTIVA}
+    END
+  `;
+
+  const [aggResult, topResult] = await Promise.all([
+    // ── Agregado por vendedor ────────────────────────────────────────────────
+    pool.query(`
+      WITH agg AS (
+        SELECT
+          f.vendedor_id,
+          COUNT(DISTINCT f.id)                  AS num_facturas,
+          COALESCE(SUM(${CANT_EFECTIVA}), 0)     AS unidades,
+          COALESCE(SUM(${SUBTOTAL_EFECTIVO}), 0) AS total_vendido,
+          COALESCE(SUM(${costoLineaCase}), 0)    AS costo_total
+        FROM lineas_factura l
+        JOIN facturas f ON f.id = l.factura_id
+        WHERE f.sucursal_id = $1
+          AND DATE(f.fecha AT TIME ZONE 'UTC' AT TIME ZONE 'America/Bogota') BETWEEN $2 AND $3
+          AND f.estado != 'Cancelada'
+        GROUP BY f.vendedor_id
+      )
+      SELECT
+        a.vendedor_id,
+        a.num_facturas,
+        a.unidades,
+        a.total_vendido,
+        a.costo_total,
+        v.nombre AS vendedor_nombre,
+        v.activo AS vendedor_activo
+      FROM agg a
+      LEFT JOIN vendedores v ON v.id = a.vendedor_id
+      ORDER BY a.total_vendido DESC
+    `, [sucursalId, desde, hasta]),
+
+    // ── Top 5 productos por vendedor ─────────────────────────────────────────
+    pool.query(`
+      WITH base AS (
+        SELECT
+          f.vendedor_id,
+          l.nombre_producto,
+          SUM(${CANT_EFECTIVA})     AS cantidad,
+          SUM(${SUBTOTAL_EFECTIVO}) AS total
+        FROM lineas_factura l
+        JOIN facturas f ON f.id = l.factura_id
+        WHERE f.sucursal_id = $1
+          AND DATE(f.fecha AT TIME ZONE 'UTC' AT TIME ZONE 'America/Bogota') BETWEEN $2 AND $3
+          AND f.estado != 'Cancelada'
+          AND f.vendedor_id IS NOT NULL
+        GROUP BY f.vendedor_id, l.nombre_producto
+      ),
+      ranked AS (
+        SELECT *,
+          ROW_NUMBER() OVER (PARTITION BY vendedor_id ORDER BY cantidad DESC, total DESC) AS rn
+        FROM base
+      )
+      SELECT vendedor_id, nombre_producto, cantidad, total
+      FROM ranked
+      WHERE rn <= 5
+      ORDER BY vendedor_id, rn
+    `, [sucursalId, desde, hasta]),
+  ]);
+
+  // Indexar top productos por vendedor
+  const topPorVendedor = {};
+  for (const r of topResult.rows) {
+    (topPorVendedor[r.vendedor_id] ||= []).push({
+      nombre_producto: r.nombre_producto,
+      cantidad:        Number(r.cantidad),
+      total:           Number(r.total),
+    });
+  }
+
+  // Total atribuido SOLO a vendedores (excluye facturas sin vendedor).
+  // Las participaciones y los totales del panel se calculan sobre esta base:
+  // es una vista de desempeño de vendedores, no del total del negocio.
+  const filasVendedor = aggResult.rows.filter((r) => r.vendedor_id !== null);
+  const totalVendedores = filasVendedor.reduce((s, r) => s + Number(r.total_vendido), 0);
+
+  const mapFila = (r) => {
+    const totalVendido = Number(r.total_vendido);
+    const costoTotal   = Number(r.costo_total);
+    const numFacturas  = Number(r.num_facturas);
+    const utilidad     = totalVendido - costoTotal;
+    return {
+      vendedor_id:       r.vendedor_id,
+      vendedor_nombre:   r.vendedor_nombre,
+      vendedor_activo:   r.vendedor_activo,
+      num_facturas:      numFacturas,
+      unidades:          Number(r.unidades),
+      total_vendido:     totalVendido,
+      costo_total:       costoTotal,
+      utilidad,
+      margen_porcentaje: totalVendido > 0 ? (utilidad / totalVendido) * 100 : null,
+      ticket_promedio:   numFacturas > 0 ? totalVendido / numFacturas : 0,
+      participacion:     totalVendedores > 0 ? (totalVendido / totalVendedores) * 100 : 0,
+      top_productos:     topPorVendedor[r.vendedor_id] || [],
+    };
+  };
+
+  const vendedores   = filasVendedor.map(mapFila);
+  const sinVendRow   = aggResult.rows.find((r) => r.vendedor_id === null);
+  const sin_vendedor = sinVendRow ? {
+    num_facturas:  Number(sinVendRow.num_facturas),
+    unidades:      Number(sinVendRow.unidades),
+    total_vendido: Number(sinVendRow.total_vendido),
+    utilidad:      Number(sinVendRow.total_vendido) - Number(sinVendRow.costo_total),
+  } : null;
+
+  const totales = {
+    total_vendido: totalVendedores,
+    num_facturas:  filasVendedor.reduce((s, r) => s + Number(r.num_facturas), 0),
+    unidades:      filasVendedor.reduce((s, r) => s + Number(r.unidades), 0),
+    utilidad:      filasVendedor.reduce((s, r) => s + (Number(r.total_vendido) - Number(r.costo_total)), 0),
+  };
+
+  return { activo, vendedores, sin_vendedor, totales };
+};
+
 // ─── getAnalisis ──────────────────────────────────────────────────────────────
 // Datos agregados para el tab "Análisis" (gráficas). Solo admin_negocio.
 //   - serie:        tendencia temporal (día/semana/mes) de ventas y utilidad
@@ -1376,6 +1530,7 @@ module.exports = {
   getVentasRango,
   getServiciosRango,
   getAnalisis,
+  getVentasPorVendedor,
   getProductosTop,
   getInventarioBajo,
   actualizarCostoCompra,
