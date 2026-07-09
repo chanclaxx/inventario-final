@@ -49,7 +49,7 @@ const findByIdYNegocio = async (id, negocioId) => {
 
 const findSerialByIdYNegocio = async (serialId, negocioId) => {
   const { rows } = await pool.query(`
-    SELECT s.*, ps.sucursal_id, su.negocio_id
+    SELECT s.*, ps.sucursal_id, ps.nombre AS producto_nombre, su.negocio_id
     FROM seriales s
     JOIN productos_serial ps ON ps.id = s.producto_id
     JOIN sucursales        su ON su.id = ps.sucursal_id
@@ -60,11 +60,11 @@ const findSerialByIdYNegocio = async (serialId, negocioId) => {
 
 const perteneceAlNegocio = async (productoId, negocioId) => {
   const { rows } = await pool.query(`
-    SELECT ps.id FROM productos_serial ps
+    SELECT ps.id, ps.nombre, ps.sucursal_id FROM productos_serial ps
     JOIN sucursales s ON s.id = ps.sucursal_id
     WHERE ps.id = $1 AND s.negocio_id = $2
   `, [productoId, negocioId]);
-  return rows.length > 0;
+  return rows[0] || null;
 };
 
 // ── linea_id incluido en create ───────────────────────────────────────────

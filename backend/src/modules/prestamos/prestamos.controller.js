@@ -1,6 +1,16 @@
 const service = require('./prestamos.service');
 const pdfService = require('./prestamos.pdf.service');
 const { pool }   = require('../../config/db');
+const audit      = require('../../utils/auditoria.util');
+
+// Detalle estándar de auditoría para un préstamo ya creado/cargado
+const _detallePrestamo = (p, extra = {}) => ({
+  sucursal_id: p?.sucursal_id      ?? null,
+  prestatario: p?.prestatario      ?? null,
+  producto:    p?.nombre_producto  ?? null,
+  imei:        p?.imei             ?? null,
+  ...extra,
+});
 
 const _getLogoNegocio = async (negocioId) => {
   const { rows } = await pool.query(
@@ -41,6 +51,11 @@ const crearPrestamo = async (req, res, next) => {
       usuario_id: req.user.id,
       negocio_id: req.user.negocio_id,
     });
+    audit.registrar(req.user.negocio_id, req.user.id, 'Préstamo registrado', 'prestamos', data.id,
+      _detallePrestamo(data, {
+        valor:    Number(data.valor_prestamo ?? 0),
+        cantidad: data.cantidad_prestada != null ? Number(data.cantidad_prestada) : null,
+      }));
     res.status(201).json({ ok: true, data, message: 'Préstamo registrado correctamente' });
   } catch (err) { next(err); }
 };
@@ -61,6 +76,13 @@ const crearPrestamos = async (req, res, next) => {
       usuario_id: req.user.id,
       negocio_id: req.user.negocio_id,
     });
+    for (const p of data) {
+      audit.registrar(req.user.negocio_id, req.user.id, 'Préstamo registrado', 'prestamos', p.id,
+        _detallePrestamo(p, {
+          valor:    Number(p.valor_prestamo ?? 0),
+          cantidad: p.cantidad_prestada != null ? Number(p.cantidad_prestada) : null,
+        }));
+    }
     res.status(201).json({ ok: true, data, message: `${data.length} préstamo(s) registrado(s) correctamente` });
   } catch (err) { next(err); }
 };
@@ -96,13 +118,23 @@ const registrarAbono = async (req, res, next) => {
       return res.status(400).json({ ok: false, error: 'El valor del abono debe ser mayor a 0' });
     }
     const data = await service.registrarAbono(req.user.negocio_id, req.params.id, valor, metodo, req.user.id, color || null);
+    audit.registrar(req.user.negocio_id, req.user.id, data.saldado ? 'Préstamo saldado con abono' : 'Abono a préstamo', 'prestamos', Number(req.params.id),
+      _detallePrestamo(data, {
+        monto:  Number(valor),
+        metodo: metodo ?? null,
+      }));
     res.json({ ok: true, data, message: 'Abono registrado correctamente' });
   } catch (err) { next(err); }
 };
 
 const devolverPrestamo = async (req, res, next) => {
   try {
-    await service.devolverPrestamo(req.user.negocio_id, req.params.id);
+    const data = await service.devolverPrestamo(req.user.negocio_id, req.params.id);
+    audit.registrar(req.user.negocio_id, req.user.id, 'Préstamo devuelto', 'prestamos', Number(req.params.id),
+      _detallePrestamo(data, {
+        valor:    Number(data?.valor_prestamo ?? 0),
+        cantidad: data?.cantidad != null ? Number(data.cantidad) : null,
+      }));
     res.json({ ok: true, message: 'Préstamo marcado como devuelto' });
   } catch (err) { next(err); }
 };
@@ -119,6 +151,11 @@ const devolverParcial = async (req, res, next) => {
       req.params.id,
       Number(cantidad_devuelta),
     );
+    audit.registrar(req.user.negocio_id, req.user.id, 'Devolución parcial de préstamo', 'prestamos', Number(req.params.id),
+      _detallePrestamo(data, {
+        cantidad_devuelta:  Number(data.devuelto  ?? cantidad_devuelta),
+        cantidad_pendiente: Number(data.pendiente ?? 0),
+      }));
     res.json({ ok: true, data, message: 'Devolución registrada correctamente' });
   } catch (err) { next(err); }
 };
@@ -213,6 +250,10 @@ const registrarSaldoAFavor = async (req, res, next) => {
       sucursalId || null,
       req.user.id,
     );
+    audit.registrar(req.user.negocio_id, req.user.id, 'Saldo a favor actualizado', 'prestamos', Number(id) || null, {
+      sucursal_id: sucursalId ?? null,
+      monto:       Number(monto ?? 0),
+    });
     res.json({ ok: true, data, message: 'Saldo a favor actualizado correctamente' });
   } catch (err) { next(err); }
 };
@@ -269,6 +310,13 @@ const intercambiarPrestamo = async (req, res, next) => {
         ingreso_inventario:     ingreso_inventario !== false,
       },
     );
+    audit.registrar(req.user.negocio_id, req.user.id, 'Retoma aplicada a préstamo (intercambio)', 'prestamos', id, {
+      sucursal_id: data?.sucursal_id ?? null,
+      valor:       Number(valor_retoma ?? 0),
+      imei:        imei_retoma ?? null,
+      tipo:        tipo_retoma ?? 'serial',
+      descripcion: descripcion ?? null,
+    });
     res.json({ ok: true, data, message: 'Intercambio registrado correctamente' });
   } catch (err) { next(err); }
 };
@@ -306,6 +354,13 @@ const retomaDirecta = async (req, res, next) => {
       descripcion:            descripcion          || null,
       ingreso_inventario:     ingreso_inventario !== false,
     });
+    audit.registrar(req.user.negocio_id, req.user.id, 'Retoma directa registrada', 'prestamos', data?.id ?? null, {
+      sucursal_id: sucursal_id ?? null,
+      valor:       Number(valor_retoma ?? 0),
+      imei:        imei_retoma ?? null,
+      tipo:        tipo_retoma || 'serial',
+      descripcion: descripcion ?? null,
+    });
     res.json({ ok: true, data, message: 'Retoma registrada. Saldo a favor acreditado.' });
   } catch (err) { next(err); }
 };
@@ -319,6 +374,7 @@ const aplicarSaldoAPrestamos = async (req, res, next) => {
     const data = await service.aplicarSaldoAPrestamos(
       req.user.negocio_id, tipo, Number(id)
     );
+    audit.registrar(req.user.negocio_id, req.user.id, 'Saldo a favor aplicado a préstamos', 'prestamos', Number(id) || null, {});
     res.json({ ok: true, data, message: 'Saldo a favor aplicado a los préstamos activos' });
   } catch (err) { next(err); }
 };
@@ -348,6 +404,10 @@ const anularAbono = async (req, res, next) => {
     }
 
     const data = await service.anularAbono(req.user.negocio_id, prestamoId, abonoId, retomaId);
+    audit.registrar(req.user.negocio_id, req.user.id, 'Abono de préstamo anulado', 'prestamos', prestamoId, {
+      abono_id:  abonoId,
+      retoma_id: retomaId,
+    });
     res.json({ ok: true, data, message: 'Abono anulado correctamente' });
   } catch (err) { next(err); }
 };
@@ -371,6 +431,7 @@ const anularRetomaDirecta = async (req, res, next) => {
       return res.status(400).json({ ok: false, error: 'ID de retoma inválido' });
     }
     await service.anularRetomaDirecta(req.user.negocio_id, retomaId);
+    audit.registrar(req.user.negocio_id, req.user.id, 'Retoma directa anulada', 'prestamos', retomaId, {});
     res.json({ ok: true, message: 'Retoma anulada correctamente' });
   } catch (err) { next(err); }
 };
@@ -390,6 +451,7 @@ const getEstadoCuenta = async (req, res, next) => {
 const aplicarSaldoAPrestamo = async (req, res, next) => {
   try {
     const data = await service.aplicarSaldoAPrestamo(req.user.negocio_id, Number(req.params.id));
+    audit.registrar(req.user.negocio_id, req.user.id, 'Saldo a favor aplicado a préstamo', 'prestamos', Number(req.params.id), {});
     res.json({ ok: true, data });
   } catch (err) { next(err); }
 };
@@ -406,6 +468,8 @@ const editarValorPrestamo = async (req, res, next) => {
       id,
       Number(valor_prestamo)
     );
+    audit.registrar(req.user.negocio_id, req.user.id, 'Valor de préstamo editado', 'prestamos', id,
+      _detallePrestamo(data, { valor: Number(valor_prestamo) }));
     res.json({ ok: true, data, message: 'Valor del préstamo actualizado correctamente' });
   } catch (err) { next(err); }
 };
@@ -418,6 +482,11 @@ const crearAjusteDeuda = async (req, res, next) => {
       ...req.body,
       sucursal_id,
       usuario_id: req.user.id,
+    });
+    audit.registrar(req.user.negocio_id, req.user.id, 'Ajuste de deuda registrado', 'prestamos', data?.id ?? null, {
+      sucursal_id: sucursal_id ?? null,
+      valor:       Number(req.body.valor ?? 0),
+      descripcion: req.body.descripcion ?? null,
     });
     res.status(201).json({ ok: true, data, message: 'Ajuste registrado correctamente' });
   } catch (err) { next(err); }
@@ -437,6 +506,11 @@ const registrarAbonoTotal = async (req, res, next) => {
     const data = await service.registrarAbonoTotal(
       req.user.negocio_id, tipo, id, Number(valor_total), metodo, req.user.id, sucursal_id
     );
+    audit.registrar(req.user.negocio_id, req.user.id, 'Abono total a préstamos', 'prestamos', Number(id) || null, {
+      sucursal_id: sucursal_id ?? null,
+      monto:       Number(valor_total),
+      metodo:      metodo ?? null,
+    });
     res.json({ ok: true, data, message: 'Abono total registrado correctamente' });
   } catch (err) { next(err); }
 };
@@ -451,6 +525,10 @@ const modificarAbonoTotal = async (req, res, next) => {
     const data = await service.modificarAbonoTotal(
       req.user.negocio_id, abonoTotalId, Number(valor_total), metodo
     );
+    audit.registrar(req.user.negocio_id, req.user.id, 'Abono total modificado', 'prestamos', Number(abonoTotalId) || null, {
+      monto:  Number(valor_total),
+      metodo: metodo ?? null,
+    });
     res.json({ ok: true, data, message: 'Abono total modificado correctamente' });
   } catch (err) { next(err); }
 };

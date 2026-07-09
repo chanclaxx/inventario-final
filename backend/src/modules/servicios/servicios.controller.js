@@ -47,6 +47,11 @@ const crearOrden = async (req, res, next) => {
 const enReparacion = async (req, res, next) => {
   try {
     const data = await service.enReparacion(req.user.negocio_id, req.params.id);
+    audit.registrar(req.user.negocio_id, req.user.id, 'Orden pasada a reparación', 'servicios', Number(req.params.id), {
+      sucursal_id: data.sucursal_id ?? null,
+      cliente:     data.nombre_cliente ?? null,
+      equipo:      data.equipo ?? null,
+    });
     res.json({ ok: true, data, message: 'Orden en reparación' });
   } catch (err) { next(err); }
 };
@@ -79,6 +84,12 @@ const registrarAbono = async (req, res, next) => {
 const entregar = async (req, res, next) => {
   try {
     const data = await service.entregar(req.user.negocio_id, req.params.id);
+    audit.registrar(req.user.negocio_id, req.user.id, 'Equipo de servicio entregado', 'servicios', Number(req.params.id), {
+      sucursal_id:     data.sucursal_id ?? null,
+      cliente:         data.nombre_cliente ?? null,
+      equipo:          data.equipo ?? null,
+      saldo_pendiente: Number(data.saldo_al_entregar ?? 0),
+    });
     const msg = data.estado === 'Pendiente_pago'
       ? `Equipo entregado con saldo pendiente de $${Number(data.saldo_al_entregar || 0).toLocaleString('es-CO')}`
       : 'Equipo entregado correctamente';
@@ -93,6 +104,11 @@ const sinReparar = async (req, res, next) => {
       usuario_id: req.user.id,
       caja_id:    req.caja_id || null,
     });
+    audit.registrar(req.user.negocio_id, req.user.id, 'Orden cerrada sin reparación', 'servicios', Number(req.params.id), {
+      sucursal_id: data.sucursal_id ?? null,
+      cliente:     data.nombre_cliente ?? null,
+      equipo:      data.equipo ?? null,
+    });
     res.json({ ok: true, data, message: 'Orden cerrada sin reparación' });
   } catch (err) { next(err); }
 };
@@ -100,6 +116,11 @@ const sinReparar = async (req, res, next) => {
 const abrirGarantia = async (req, res, next) => {
   try {
     const data = await service.abrirGarantia(req.user.negocio_id, req.params.id, req.body);
+    audit.registrar(req.user.negocio_id, req.user.id, 'Garantía de servicio activada', 'servicios', Number(req.params.id), {
+      sucursal_id: data.sucursal_id ?? null,
+      cliente:     data.nombre_cliente ?? null,
+      equipo:      data.equipo ?? null,
+    });
     res.json({ ok: true, data, message: 'Garantía activada' });
   } catch (err) { next(err); }
 };

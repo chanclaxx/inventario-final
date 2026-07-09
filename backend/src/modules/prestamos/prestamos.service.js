@@ -447,6 +447,9 @@ const registrarAbono = async (negocioId, prestamoId, valor, metodo, usuarioId, c
       ...resultado,
       saldado,
       factura_id,
+      sucursal_id:     prestamo.sucursal_id     ?? null,
+      prestatario:     prestamo.prestatario     ?? null,
+      nombre_producto: prestamo.nombre_producto ?? null,
     };
   } catch (err) {
     await client.query('ROLLBACK');
@@ -495,6 +498,16 @@ const devolverPrestamo = async (negocioId, prestamoId) => {
 
     await repo.updateEstado(client, prestamoId, 'Devuelto');
     await client.query('COMMIT');
+
+    return {
+      id:              prestamo.id,
+      sucursal_id:     prestamo.sucursal_id       ?? null,
+      prestatario:     prestamo.prestatario       ?? null,
+      nombre_producto: prestamo.nombre_producto   ?? null,
+      imei:            prestamo.imei              ?? null,
+      cantidad:        prestamo.cantidad_prestada ?? null,
+      valor_prestamo:  prestamo.valor_prestamo    ?? null,
+    };
   } catch (err) {
     await client.query('ROLLBACK');
     throw err;
@@ -551,8 +564,11 @@ const devolverParcial = async (negocioId, prestamoId, cantidad_devuelta) => {
 
     await client.query('COMMIT');
     return {
-      devuelto:  cantidad_devuelta,
-      pendiente: cantidadActual - cantidad_devuelta,
+      devuelto:        cantidad_devuelta,
+      pendiente:       cantidadActual - cantidad_devuelta,
+      sucursal_id:     prestamo.sucursal_id     ?? null,
+      prestatario:     prestamo.prestatario     ?? null,
+      nombre_producto: prestamo.nombre_producto ?? null,
     };
   } catch (err) {
     await client.query('ROLLBACK');

@@ -63,8 +63,8 @@ const agregarSerial = async (
   productoId,
   { imei, fecha_entrada, costo_compra, cliente_origen, proveedor_id, reactivar_serial_id, color, caracteristicas }
 ) => {
-  const valido = await repo.perteneceAlNegocio(productoId, negocioId);
-  if (!valido) throw { status: 404, message: 'Producto no encontrado' };
+  const producto = await repo.perteneceAlNegocio(productoId, negocioId);
+  if (!producto) throw { status: 404, message: 'Producto no encontrado' };
 
   if (reactivar_serial_id) {
     // Solo se reactiva un serial VENDIDO que regresa; validado dentro del negocio.
@@ -76,16 +76,22 @@ const agregarSerial = async (
     if (!serial.vendido) {
       throw { status: 409, message: `El IMEI ${serial.imei} ya está registrado y disponible en el inventario.` };
     }
-    return repo.reactivarSerial(reactivar_serial_id, {
+    const reactivado = await repo.reactivarSerial(reactivar_serial_id, {
       costo_compra: costo_compra ?? null,
       proveedor_id: proveedor_id || null,
     });
+    return {
+      ...reactivado,
+      producto_nombre: serial.producto_nombre ?? null,
+      sucursal_id:     serial.sucursal_id     ?? null,
+      reactivado:      true,
+    };
   }
 
   const existe = await repo.findSerialByIMEIEnNegocio(imei, negocioId);
   if (existe) throw { status: 409, message: `El IMEI ${imei} ya está registrado` };
 
-  return repo.insertarSerial({
+  const creado = await repo.insertarSerial({
     producto_id:    productoId,
     imei,
     fecha_entrada:  fecha_entrada || fechaHoyColombia(),
@@ -95,6 +101,12 @@ const agregarSerial = async (
     color:          color          || null,
     caracteristicas: caracteristicas || null,
   });
+  return {
+    ...creado,
+    producto_nombre: producto.nombre      ?? null,
+    sucursal_id:     producto.sucursal_id ?? null,
+    reactivado:      false,
+  };
 };
 
 const actualizarSerial = async (negocioId, serialId, { imei, costo_compra, precio, color, caracteristicas }) => {
@@ -105,7 +117,13 @@ const actualizarSerial = async (negocioId, serialId, { imei, costo_compra, preci
   const actualizado = await repo.actualizarSerial(serialId, { imei, costo_compra, precio, color, caracteristicas });
   if (!actualizado) throw { status: 404, message: 'Serial no encontrado' };
 
-  return actualizado;
+  return {
+    ...actualizado,
+    producto_nombre: serial.producto_nombre ?? null,
+    sucursal_id:     serial.sucursal_id     ?? null,
+    imei_anterior:   serial.imei,
+    precio_anterior: serial.precio ?? null,
+  };
 };
 
 const eliminarSerial = async (negocioId, serialId) => {
@@ -121,6 +139,8 @@ const eliminarSerial = async (negocioId, serialId) => {
 
   const eliminado = await repo.eliminarSerial(serialId);
   if (!eliminado) throw { status: 404, message: 'Serial no encontrado' };
+
+  return serial;
 };
 
 const verificarImei = async (imei, negocioId) => {

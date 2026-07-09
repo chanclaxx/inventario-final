@@ -85,6 +85,12 @@ const editarFactura = async (req, res, next) => {
       req.params.id,
       req.body,
     );
+    audit.registrar(req.user.negocio_id, req.user.id, 'Venta editada', 'facturas', Number(req.params.id), {
+      sucursal_id: data?.sucursal_id ?? req.sucursal_id ?? null,
+      cliente:     data?.nombre_cliente ?? null,
+      valor:       Number(data?.total ?? 0),
+      estado:      data?.estado ?? null,
+    });
     res.json({ ok: true, data, message: 'Factura actualizada correctamente' });
   } catch (err) { next(err); }
 };
@@ -97,6 +103,12 @@ const devolverLineasCredito = async (req, res, next) => {
       req.params.id,
       lineas,
     );
+    audit.registrar(req.user.negocio_id, req.user.id, 'Devolución en venta a crédito', 'facturas', Number(req.params.id), {
+      sucursal_id: data?.sucursal_id ?? req.sucursal_id ?? null,
+      cliente:     data?.nombre_cliente ?? null,
+      lineas:      Array.isArray(lineas) ? lineas.length : null,
+      valor:       Number(data?.valor_devuelto ?? data?.total_devuelto ?? 0),
+    });
     res.json({ ok: true, data, message: 'Devolución registrada correctamente' });
   } catch (err) { next(err); }
 };

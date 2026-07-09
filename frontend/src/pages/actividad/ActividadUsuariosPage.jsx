@@ -26,6 +26,8 @@ const TIPOS = [
   { value: 'inventario_cantidad',label: 'Inv. cantidad'  },
   { value: 'servicio',           label: 'Servicios'      },
   { value: 'credito',            label: 'Créditos'       },
+  { value: 'prestamo',           label: 'Préstamos'      },
+  { value: 'usuario',            label: 'Usuarios'       },
 ];
 
 // ─── Meta por tabla (viene del campo item.tabla en auditoria) ─────────────────
@@ -132,6 +134,8 @@ function ModalDetalle({ item, onClose }) {
         return (
           <>
             <FilaDetalle icono={Tag}        label="Producto"       value={d.producto} />
+            <FilaDetalle icono={Smartphone} label="IMEI"           value={d.imei}          mono />
+            <FilaDetalle icono={Smartphone} label="IMEI anterior"  value={d.imei_anterior} mono />
             <FilaDetalle icono={Tag}        label="Marca"          value={d.marca} />
             <FilaDetalle icono={Tag}        label="Modelo"         value={d.modelo} />
             {d.precio_anterior != null && (
@@ -155,6 +159,9 @@ function ModalDetalle({ item, onClose }) {
             {d.monto != null && (
               <FilaDetalle icono={CreditCard} label="Abono"        value={formatCOP(Number(d.monto))} />
             )}
+            {Number(d.saldo_pendiente) > 0 && (
+              <FilaDetalle icono={TrendingUp} label="Saldo pendiente" value={formatCOP(Number(d.saldo_pendiente))} />
+            )}
           </>
         );
       case 'creditos':
@@ -166,6 +173,35 @@ function ModalDetalle({ item, onClose }) {
             {d.saldo_nuevo != null && (
               <FilaDetalle icono={TrendingUp} label="Saldo restante" value={formatCOP(Number(d.saldo_nuevo))} />
             )}
+          </>
+        );
+      case 'prestamos':
+        return (
+          <>
+            <FilaDetalle icono={User}       label="Prestatario"    value={d.prestatario} />
+            <FilaDetalle icono={Tag}        label="Producto"       value={d.producto} />
+            <FilaDetalle icono={Smartphone} label="IMEI"           value={d.imei}   mono />
+            {d.cantidad != null && (
+              <FilaDetalle icono={Package}  label="Cantidad"       value={String(d.cantidad)} />
+            )}
+            {d.cantidad_devuelta != null && (
+              <FilaDetalle icono={Package}  label="Cantidad devuelta" value={String(d.cantidad_devuelta)} />
+            )}
+            {d.cantidad_pendiente != null && (
+              <FilaDetalle icono={Package}  label="Cantidad pendiente" value={String(d.cantidad_pendiente)} />
+            )}
+            {d.monto != null && (
+              <FilaDetalle icono={CreditCard} label="Abono"        value={formatCOP(Number(d.monto))} />
+            )}
+            <FilaDetalle icono={CreditCard} label="Método de pago" value={d.metodo} />
+            <FilaDetalle icono={StickyNote} label="Descripción"    value={d.descripcion} />
+          </>
+        );
+      case 'usuarios':
+        return (
+          <>
+            <FilaDetalle icono={User}       label="Nombre"         value={d.nombre} />
+            <FilaDetalle icono={Tag}        label="Rol"            value={ROL_LABEL[d.rol] ?? d.rol} />
           </>
         );
       default:

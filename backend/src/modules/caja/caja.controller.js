@@ -36,6 +36,17 @@ const abrirCaja = async (req, res, next) => {
 const toggleMovimiento = async (req, res, next) => {
   try {
     const data = await service.toggleMovimiento(req.user.negocio_id, req.params.movimientoId);
+    audit.registrar(
+      req.user.negocio_id, req.user.id,
+      data.activo ? 'Movimiento de caja reactivado' : 'Movimiento de caja anulado',
+      'caja', Number(req.params.movimientoId),
+      {
+        sucursal_id: req.sucursal_id ?? null,
+        tipo:        data.tipo ?? null,
+        monto:       Number(data.monto ?? 0),
+        concepto:    data.concepto ?? null,
+      }
+    );
     res.json({ ok: true, data, message: `Movimiento ${data.activo ? 'activado' : 'anulado'}` });
   } catch (err) { next(err); }
 };

@@ -1,4 +1,5 @@
 const service = require('./usuarios.service');
+const audit   = require('../../utils/auditoria.util');
 
 const getUsuarios = async (req, res, next) => {
   try {
@@ -17,6 +18,11 @@ const getUsuarioById = async (req, res, next) => {
 const crearUsuario = async (req, res, next) => {
   try {
     const data = await service.crearUsuario(req.user.negocio_id, req.body);
+    audit.registrar(req.user.negocio_id, req.user.id, 'Usuario creado', 'usuarios', data.id, {
+      sucursal_id: data.sucursal_id ?? null,
+      nombre:      data.nombre ?? null,
+      rol:         data.rol    ?? null,
+    });
     res.status(201).json({ ok: true, data, message: 'Usuario creado correctamente' });
   } catch (err) { next(err); }
 };
@@ -24,6 +30,15 @@ const crearUsuario = async (req, res, next) => {
 const actualizarUsuario = async (req, res, next) => {
   try {
     const data = await service.actualizarUsuario(req.user.negocio_id, req.params.id, req.body);
+    // Si el payload trae "activo", la intención fue activar/desactivar la cuenta
+    const accion = req.body.activo === false ? 'Usuario desactivado'
+                 : req.body.activo === true  ? 'Usuario activado'
+                 : 'Usuario actualizado';
+    audit.registrar(req.user.negocio_id, req.user.id, accion, 'usuarios', Number(req.params.id), {
+      sucursal_id: data?.sucursal_id ?? null,
+      nombre:      data?.nombre ?? null,
+      rol:         data?.rol    ?? null,
+    });
     res.json({ ok: true, data, message: 'Usuario actualizado correctamente' });
   } catch (err) { next(err); }
 };
@@ -31,6 +46,7 @@ const actualizarUsuario = async (req, res, next) => {
 const cambiarPassword = async (req, res, next) => {
   try {
     await service.cambiarPassword(req.user.negocio_id, req.user.id, req.body);
+    audit.registrar(req.user.negocio_id, req.user.id, 'Contraseña actualizada', 'usuarios', req.user.id, {});
     res.json({ ok: true, message: 'Contraseña actualizada correctamente' });
   } catch (err) { next(err); }
 };

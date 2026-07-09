@@ -88,6 +88,16 @@ const getSeriales = async (req, res, next) => {
 const agregarSerial = async (req, res, next) => {
   try {
     const data = await service.agregarSerial(req.user.negocio_id, req.params.id, req.body);
+    audit.registrar(
+      req.user.negocio_id, req.user.id,
+      data.reactivado ? 'Equipo reactivado en inventario' : 'Equipo agregado al inventario',
+      'productos_serial', data.id,
+      {
+        sucursal_id: data.sucursal_id ?? req.sucursal_id ?? null,
+        producto:    data.producto_nombre ?? null,
+        imei:        data.imei ?? null,
+      }
+    );
     res.status(201).json({ ok: true, data, message: 'IMEI agregado correctamente' });
   } catch (err) { next(err); }
 };
@@ -95,13 +105,33 @@ const agregarSerial = async (req, res, next) => {
 const actualizarSerial = async (req, res, next) => {
   try {
     const data = await service.actualizarSerial(req.user.negocio_id, req.params.id, req.body);
+    const cambios = {};
+    if (req.body.imei !== undefined && req.body.imei && req.body.imei !== data.imei_anterior) {
+      cambios.imei_anterior = data.imei_anterior;
+    }
+    if (req.body.precio !== undefined &&
+        Number(req.body.precio ?? 0) !== Number(data.precio_anterior ?? 0)) {
+      cambios.precio_anterior = data.precio_anterior != null ? Number(data.precio_anterior) : null;
+      cambios.precio_nuevo    = req.body.precio      != null ? Number(req.body.precio)      : null;
+    }
+    audit.registrar(req.user.negocio_id, req.user.id, 'Equipo editado', 'productos_serial', data.id, {
+      sucursal_id: data.sucursal_id ?? null,
+      producto:    data.producto_nombre ?? null,
+      imei:        data.imei ?? null,
+      ...cambios,
+    });
     res.json({ ok: true, data, message: 'Serial actualizado correctamente' });
   } catch (err) { next(err); }
 };
 
 const eliminarSerial = async (req, res, next) => {
   try {
-    await service.eliminarSerial(req.user.negocio_id, req.params.id);
+    const serial = await service.eliminarSerial(req.user.negocio_id, req.params.id);
+    audit.registrar(req.user.negocio_id, req.user.id, 'Equipo eliminado del inventario', 'productos_serial', Number(req.params.id), {
+      sucursal_id: serial?.sucursal_id ?? null,
+      producto:    serial?.producto_nombre ?? null,
+      imei:        serial?.imei ?? null,
+    });
     res.json({ ok: true, message: 'Serial eliminado correctamente' });
   } catch (err) { next(err); }
 };
