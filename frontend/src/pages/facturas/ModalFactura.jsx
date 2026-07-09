@@ -11,7 +11,7 @@ import { useCedulaCliente }         from '../../hooks/useCedulaCliente';
 import { useMetodosPago }           from '../../hooks/useMetodosPago';
 import { crearFactura, getFacturaById } from '../../api/facturas.api';
 import { getGarantiasPorFactura }   from '../../api/garantias.api';
-import { buscarPorCedula }          from '../../api/clientes.api';
+import { buscarPorCedula, getClientes } from '../../api/clientes.api';
 import {
   getProductosSerial,
   getProductosCantidad,
@@ -732,7 +732,22 @@ export function ModalFactura({ open, onClose }) {
   const [error,                setError]                = useState('');
   const [verificandoCedula,    setVerificandoCedula]    = useState(false);
   const [buscandoCedula,       setBuscandoCedula]       = useState(false);
+  const [mostrarSugerencias,   setMostrarSugerencias]   = useState(false);
+  const [cedulaBusqueda,       setCedulaBusqueda]       = useState('');
   const metodosPago = useMetodosPago();
+
+  // Debounce del texto de la cédula para el autocompletado de clientes
+  useEffect(() => {
+    const t = setTimeout(() => setCedulaBusqueda(form.cedula.trim()), 250);
+    return () => clearTimeout(t);
+  }, [form.cedula]);
+
+  const { data: sugerenciasClientes = [] } = useQuery({
+    queryKey: ['clientes-buscar', cedulaBusqueda],
+    queryFn:  () => getClientes(cedulaBusqueda).then((r) => r.data.data),
+    enabled:  tipoCliente === 'cliente' && mostrarSugerencias && cedulaBusqueda.length >= 3,
+    staleTime: 30_000,
+  });
 
   const { conflictoCliente, verificarCedula, reescribirCliente, cancelarConflicto } = useCedulaCliente();
 
@@ -804,6 +819,18 @@ export function ModalFactura({ open, onClose }) {
     finally { setBuscandoCedula(false); }
   }, [form.cedula, form.nombre, form.celular, tipoCliente]);
 
+  const seleccionarCliente = (cli) => {
+    setForm((f) => ({
+      ...f,
+      cedula:    cli.cedula    || f.cedula,
+      nombre:    cli.nombre    || '',
+      celular:   cli.celular   || '',
+      email:     cli.email     || f.email,
+      direccion: cli.direccion || f.direccion,
+    }));
+    setMostrarSugerencias(false);
+  };
+
   const handleChangeRetoma = useCallback((key, campo, valor) => {
     setRetomas((prev) => prev.map((r) => r._key === key ? { ...r, [campo]: valor } : r));
   }, []);
@@ -841,6 +868,7 @@ export function ModalFactura({ open, onClose }) {
     setVendedorId('');
     setError(''); setTipoCliente('cliente');
     setVerificandoCedula(false);
+    setMostrarSugerencias(false); setCedulaBusqueda('');
   };
 
   const handleToggleMetodo = (metodoId) => {
@@ -969,12 +997,29 @@ export function ModalFactura({ open, onClose }) {
             {tipoCliente === 'cliente' && (
               <div className="relative">
                 <Input id="cedula" label="Cédula" placeholder="123456789"
+                  autoComplete="off"
                   value={form.cedula}
-                  onChange={(e) => setForm({ ...form, cedula: e.target.value })}
-                  onBlur={handleBlurCedula}
+                  onChange={(e) => { setForm({ ...form, cedula: e.target.value }); setMostrarSugerencias(true); }}
+                  onFocus={() => setMostrarSugerencias(true)}
+                  onBlur={() => { handleBlurCedula(); setTimeout(() => setMostrarSugerencias(false), 150); }}
                   onKeyDown={(e) => handleKeyDown(e, 'nombre')} />
                 {buscandoCedula && (
                   <Loader2 size={14} className="absolute right-3 top-9 text-gray-400 animate-spin" />
+                )}
+                {mostrarSugerencias && cedulaBusqueda.length >= 3 && sugerenciasClientes.length > 0 && (
+                  <div className="absolute z-20 left-0 right-0 mt-1 flex flex-col gap-0.5 max-h-56
+                    overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-lg">
+                    {sugerenciasClientes.slice(0, 8).map((cli) => (
+                      <button key={cli.id} type="button"
+                        onMouseDown={(e) => { e.preventDefault(); seleccionarCliente(cli); }}
+                        className="text-left px-3 py-2 hover:bg-blue-50 transition-colors">
+                        <span className="text-sm font-medium text-gray-800">{cli.nombre}</span>
+                        <span className="block text-xs text-gray-400">
+                          {cli.cedula}{cli.celular ? ` · ${cli.celular}` : ''}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
                 )}
               </div>
             )}
