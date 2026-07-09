@@ -22,6 +22,20 @@ const _normalizarFila = (fila) => {
   return normalizada;
 };
 
+// Nombre del producto: se toma de la celda título A1 ("📦  <nombre> — Hoja de Seriales"),
+// porque el NOMBRE DE HOJA de Excel se trunca a 31 caracteres (genera nombres cortados
+// y productos duplicados). Si el título está vacío o es el genérico de la plantilla,
+// se cae al nombre de la hoja.
+const _nombreProducto = (ws, nombreHoja) => {
+  const a1 = ws && ws['A1'] && ws['A1'].v != null ? ws['A1'].v.toString() : '';
+  const limpio = a1
+    .replace(/\s*[—\-]\s*Hoja de Seriales.*$/i, '') // quita el sufijo del título
+    .replace(/^[^\p{L}\p{N}]+/u, '')                 // quita emoji/espacios iniciales
+    .trim();
+  if (!limpio || /^ejemplo producto$/i.test(limpio)) return nombreHoja.trim();
+  return limpio;
+};
+
 // ─── Generar plantilla dinámica ───────────────────────────────────────────────
 const generarPlantilla = async (req, res, next) => {
   try {
@@ -62,7 +76,8 @@ const importarInventario = async (req, res, next) => {
     if (hojasSerial.length > 0) {
       const hojas = [];
       for (const nombreHoja of hojasSerial) {
-        const filas = XLSX.utils.sheet_to_json(wb.Sheets[nombreHoja], {
+        const ws    = wb.Sheets[nombreHoja];
+        const filas = XLSX.utils.sheet_to_json(ws, {
           range:  1,
           defval: '',
         });
@@ -71,7 +86,7 @@ const importarInventario = async (req, res, next) => {
           .map(_normalizarFila)
           .filter((f) => f.imei?.toString().trim());
 
-        hojas.push({ nombreProducto: nombreHoja.trim(), filas: datos });
+        hojas.push({ nombreProducto: _nombreProducto(ws, nombreHoja), filas: datos });
       }
 
       if (hojas.length > 0) {

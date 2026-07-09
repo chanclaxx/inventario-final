@@ -9,13 +9,40 @@ const _mensajeSeguro = (err) => {
   return 'Error al procesar la fila';
 };
 
+const _hoyISO = () => new Date().toISOString().split('T')[0];
+
 const _formatearFecha = (valor) => {
-  if (!valor) return new Date().toISOString().split('T')[0];
-  const d = valor instanceof Date ? valor : new Date(valor);
-  const year  = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day   = String(d.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+  if (valor == null || valor === '') return _hoyISO();
+
+  // Celda de fecha real de Excel (cellDates:true) → objeto Date válido
+  if (valor instanceof Date) {
+    if (isNaN(valor)) return _hoyISO();
+    const year  = valor.getFullYear();
+    const month = String(valor.getMonth() + 1).padStart(2, '0');
+    const day   = String(valor.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
+  const s = valor.toString().trim();
+  if (!s) return _hoyISO();
+
+  // Formato de la plantilla: dd/mm/aaaa (también admite dd-mm-aaaa).
+  // OJO: new Date("dd/mm/aaaa") interpreta mm/dd (bug), por eso se parsea a mano.
+  let m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+  if (m) {
+    const dia = Number(m[1]), mes = Number(m[2]), anio = Number(m[3]);
+    if (dia >= 1 && dia <= 31 && mes >= 1 && mes <= 12) {
+      return `${anio}-${String(mes).padStart(2, '0')}-${String(dia).padStart(2, '0')}`;
+    }
+    return _hoyISO(); // fecha imposible → hoy, sin romper la fila
+  }
+
+  // Formato ISO aaaa-mm-dd
+  m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (m) return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
+
+  // Cualquier otro texto no reconocido → hoy (nunca "NaN-NaN-NaN")
+  return _hoyISO();
 };
 
 const _parseLista = (valor) => {
@@ -153,14 +180,19 @@ const importarSerial = async (hojas, sucursalId, negocioId, config = {}) => {
 
       for (const [i, fila] of hoja.filas.entries()) {
         const nFila = i + 4;
-        try {
-          const imei = fila.imei?.toString().trim();
-          if (!imei) {
-            resultado.errores.push({ fila: nFila, error: 'IMEI vacío' });
-            resultado.omitidos++;
-            continue;
-          }
 
+        const imei = fila.imei?.toString().trim();
+        if (!imei) {
+          resultado.errores.push({ fila: nFila, error: 'IMEI vacío' });
+          resultado.omitidos++;
+          continue;
+        }
+
+        // Savepoint por fila: si una fila falla, se revierte SOLO esa fila y la
+        // hoja continúa. Sin esto, el 1er error aborta toda la transacción de la
+        // hoja y el COMMIT hace un ROLLBACK silencioso (se pierde todo).
+        await client.query('SAVEPOINT fila_sp');
+        try {
           const proveedorId = await _resolverProveedor(client, fila.proveedor, negocioId);
 
           // Precio de venta para productos_serial
@@ -208,12 +240,14 @@ const importarSerial = async (hojas, sucursalId, negocioId, config = {}) => {
             await client.query(
               `UPDATE seriales SET
                  costo_compra    = COALESCE($1, costo_compra),
-                 cliente_origen  = COALESCE($2, cliente_origen),
-                 color           = COALESCE($3, color),
-                 caracteristicas = COALESCE($4::jsonb, caracteristicas)
-               WHERE id = $5`,
+                 precio          = COALESCE($2, precio),
+                 cliente_origen  = COALESCE($3, cliente_origen),
+                 color           = COALESCE($4, color),
+                 caracteristicas = COALESCE($5::jsonb, caracteristicas)
+               WHERE id = $6`,
               [
                 costoCompra,
+                precio,
                 clienteOrigen,
                 color,
                 caracteristicas ? JSON.stringify(caracteristicas) : null,
@@ -224,18 +258,20 @@ const importarSerial = async (hojas, sucursalId, negocioId, config = {}) => {
           } else {
             await client.query(
               `INSERT INTO seriales
-                 (producto_id, imei, fecha_entrada, costo_compra, cliente_origen, color, caracteristicas)
-               VALUES($1,$2,$3,$4,$5,$6,$7::jsonb)`,
+                 (producto_id, imei, fecha_entrada, costo_compra, precio, cliente_origen, color, caracteristicas)
+               VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb)`,
               [
                 productoId, imei, fechaEntrada,
-                costoCompra, clienteOrigen,
+                costoCompra, precio, clienteOrigen,
                 color,
                 caracteristicas ? JSON.stringify(caracteristicas) : null,
               ]
             );
             resultado.insertados++;
           }
+          await client.query('RELEASE SAVEPOINT fila_sp');
         } catch (err) {
+          await client.query('ROLLBACK TO SAVEPOINT fila_sp');
           resultado.errores.push({ fila: nFila, error: _mensajeSeguro(err) });
           resultado.omitidos++;
         }
@@ -391,14 +427,17 @@ const importarCantidad = async (filas, sucursalId, negocioId, config = {}) => {
 
     for (const [i, fila] of filas.entries()) {
       const nFila = i + 4;
-      try {
-        const nombre = fila.nombre?.toString().trim();
-        if (!nombre) {
-          resultado.errores.push({ fila: nFila, error: 'Nombre requerido' });
-          resultado.omitidos++;
-          continue;
-        }
 
+      const nombre = fila.nombre?.toString().trim();
+      if (!nombre) {
+        resultado.errores.push({ fila: nFila, error: 'Nombre requerido' });
+        resultado.omitidos++;
+        continue;
+      }
+
+      // Savepoint por fila: un error revierte solo esa fila, no toda la importación.
+      await client.query('SAVEPOINT fila_sp');
+      try {
         const stock       = fila.stock          !== undefined ? Number(fila.stock)         : 0;
         const stockMinimo = fila.stock_minimo    !== undefined ? Number(fila.stock_minimo)  : 0;
         const costoUnit   = fila.costo_unitario  ? Number(fila.costo_unitario) : null;
@@ -476,7 +515,9 @@ const importarCantidad = async (filas, sucursalId, negocioId, config = {}) => {
             resultado.insertados++;
           }
         }
+        await client.query('RELEASE SAVEPOINT fila_sp');
       } catch (err) {
+        await client.query('ROLLBACK TO SAVEPOINT fila_sp');
         resultado.errores.push({ fila: nFila, error: _mensajeSeguro(err) });
         resultado.omitidos++;
       }
