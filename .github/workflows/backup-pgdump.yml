@@ -8,16 +8,18 @@
 # ⚠ INACTIVO HASTA CONFIGURAR SECRETS — si faltan, el job termina en verde
 #   sin hacer nada (no rompe ni ensucia el repositorio con fallos).
 #
-# Secrets requeridos (Settings → Secrets and variables → Actions):
-#   SUPABASE_DB_URL              Cadena de conexión al pooler en MODO SESIÓN
-#                                (puerto 5432, NO 6543):
-#                                postgres://postgres.<ref>:<password>@aws-1-us-west-2.pooler.supabase.com:5432/postgres
-#   BACKUP_SUPABASE_URL          URL del proyecto Supabase de backups
-#                                (el proyecto de Storage, NO el de la BD)
+# Secrets requeridos (Settings → Secrets and variables → Actions).
+# Los 5 DB_* son EXACTAMENTE los mismos valores que usa el backend en Railway
+# (cópialos tal cual) — así se evita armar una URL a mano y errores de formato:
+#   DB_HOST                      aws-1-us-west-2.pooler.supabase.com
+#   DB_PORT                      5432   (pooler en modo sesión — NO 6543)
+#   DB_USER                      postgres.<ref-del-proyecto-BD>
+#   DB_PASSWORD                  la contraseña de la base
+#   DB_NAME                      postgres
+#   BACKUP_SUPABASE_URL          URL del proyecto Supabase de backups (Storage)
 #   BACKUP_SUPABASE_SERVICE_KEY  Service key de ese proyecto
 # Opcional:
-#   BACKUP_HEALTHCHECK_URL       URL de healthchecks.io — recibe ping de
-#                                éxito o /fail según el resultado
+#   BACKUP_HEALTHCHECK_URL       URL de healthchecks.io — ping de éxito o /fail
 # ─────────────────────────────────────────────────────────────────────────────
 name: Backup PostgreSQL (pg_dump)
 
@@ -35,7 +37,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      SUPABASE_DB_URL:             ${{ secrets.SUPABASE_DB_URL }}
+      # Variables estándar de libpq — pg_dump/psql/pg_restore las leen solas,
+      # sin necesidad de cadena de conexión (elimina errores de formato/encoding).
+      PGHOST:     ${{ secrets.DB_HOST }}
+      PGPORT:     ${{ secrets.DB_PORT }}
+      PGUSER:     ${{ secrets.DB_USER }}
+      PGPASSWORD: ${{ secrets.DB_PASSWORD }}
+      PGDATABASE: ${{ secrets.DB_NAME }}
+      PGSSLMODE:  require
       BACKUP_SUPABASE_URL:         ${{ secrets.BACKUP_SUPABASE_URL }}
       BACKUP_SUPABASE_SERVICE_KEY: ${{ secrets.BACKUP_SUPABASE_SERVICE_KEY }}
       BACKUP_HEALTHCHECK_URL:      ${{ secrets.BACKUP_HEALTHCHECK_URL }}
@@ -44,7 +53,7 @@ jobs:
       - name: Verificar secrets
         id: guard
         run: |
-          if [ -z "$SUPABASE_DB_URL" ] || [ -z "$BACKUP_SUPABASE_URL" ] || [ -z "$BACKUP_SUPABASE_SERVICE_KEY" ]; then
+          if [ -z "$PGHOST" ] || [ -z "$PGPASSWORD" ] || [ -z "$BACKUP_SUPABASE_URL" ] || [ -z "$BACKUP_SUPABASE_SERVICE_KEY" ]; then
             echo "::notice::Secrets de backup no configurados — backup omitido (ver docs/BACKUP.md)"
             echo "listo=false" >> "$GITHUB_OUTPUT"
           else
@@ -75,16 +84,17 @@ jobs:
         if: steps.guard.outputs.listo == 'true'
         run: |
           echo "Cliente pg_dump: $(pg_dump --version)"
+          echo "Conectando a $PGUSER@$PGHOST:$PGPORT/$PGDATABASE (sslmode=$PGSSLMODE)"
           echo "Servidor Postgres:"
-          psql "$SUPABASE_DB_URL" -tAc "SELECT version();" \
-            || { echo "::error::No se pudo conectar a la base de datos. Revisa SUPABASE_DB_URL (usa el pooler en puerto 5432, modo sesión)."; exit 1; }
+          psql -tAc "SELECT version();" \
+            || { echo "::error::No se pudo conectar. Verifica los secrets DB_HOST/DB_PORT/DB_USER/DB_PASSWORD/DB_NAME — deben ser IDÉNTICOS a los del backend en Railway (puerto 5432, modo sesión)."; exit 1; }
 
       - name: Generar dump (pg_dump -Fc, solo esquema public)
         if: steps.guard.outputs.listo == 'true'
         run: |
           NOMBRE="pgdump_$(date -u +%Y-%m-%d_%H-%M).dump"
           echo "NOMBRE=$NOMBRE" >> "$GITHUB_ENV"
-          pg_dump "$SUPABASE_DB_URL" \
+          pg_dump \
             --schema=public \
             --format=custom \
             --no-owner \

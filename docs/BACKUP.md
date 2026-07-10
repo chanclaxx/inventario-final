@@ -30,17 +30,26 @@ Nada de lo implementado se activa solo. Para encender cada capa:
 3. Evaluar el add-on **PITR** cuando el volumen del negocio lo justifique.
 
 ### Capa 2 — pg_dump por GitHub Actions
-En GitHub → Settings → Secrets and variables → **Actions**, crear:
+En GitHub → Settings → Secrets and variables → **Actions**, crear.
+Los 5 `DB_*` son **idénticos** a los del backend en Railway — cópialos tal cual
+(así se evita armar una URL a mano, que fue el origen de los primeros fallos):
 
 | Secret | Valor |
 |--------|-------|
-| `SUPABASE_DB_URL` | `postgres://postgres.<ref>:<password>@aws-1-us-west-2.pooler.supabase.com:5432/postgres` — **puerto 5432 (modo sesión)**, nunca 6543 |
+| `DB_HOST` | `aws-1-us-west-2.pooler.supabase.com` |
+| `DB_PORT` | `5432` — **modo sesión**, nunca 6543 |
+| `DB_USER` | `postgres.<ref-del-proyecto-BD>` (ej. `postgres.mkosuhvfoyxupadxjoub`) |
+| `DB_PASSWORD` | la contraseña de la base |
+| `DB_NAME` | `postgres` |
 | `BACKUP_SUPABASE_URL` | `https://tyeqlsqkzlihwiaiytzg.supabase.co` |
 | `BACKUP_SUPABASE_SERVICE_KEY` | Service key del proyecto de backups |
 | `BACKUP_HEALTHCHECK_URL` | (opcional) URL de healthchecks.io |
 
+El workflow usa las variables estándar de libpq (`PGHOST`, `PGPASSWORD`, …), así
+que `pg_dump` se conecta sin cadena de conexión y no hay errores de formato.
 Sin secrets, el workflow corre y termina en verde sin hacer nada.
-Probar manualmente: pestaña **Actions → Backup PostgreSQL (pg_dump) → Run workflow**.
+Probar manualmente: pestaña **Actions → Backup PostgreSQL (pg_dump) → Run workflow**
+(el botón "Run workflow", **no** "Re-run" — este último repite el commit viejo).
 
 > Si un dump supera el límite de subida del bucket (50 MB por defecto),
 > subir el límite en Storage → Settings del proyecto de backups.
