@@ -84,10 +84,17 @@ jobs:
         if: steps.guard.outputs.listo == 'true'
         run: |
           echo "Cliente pg_dump: $(pg_dump --version)"
-          echo "Conectando a $PGUSER@$PGHOST:$PGPORT/$PGDATABASE (sslmode=$PGSSLMODE)"
-          echo "Servidor Postgres:"
-          psql -tAc "SELECT version();" \
-            || { echo "::error::No se pudo conectar. Verifica los secrets DB_HOST/DB_PORT/DB_USER/DB_PASSWORD/DB_NAME — deben ser IDÉNTICOS a los del backend en Railway (puerto 5432, modo sesión)."; exit 1; }
+          # Longitud esperada de cada secret (sin revelar el valor). Si alguna
+          # difiere, ese secret tiene un typo, un espacio de más, o está vacío.
+          #   PGHOST=35  PGUSER=29  PGDATABASE=8  PGPORT=4  PGPASSWORD=14
+          echo "Longitudes (esperado → PGHOST=35 PGUSER=29 PGDATABASE=8 PGPORT=4 PGPASSWORD=14):"
+          echo "  PGHOST=${#PGHOST}  PGPORT=${#PGPORT}  PGUSER=${#PGUSER}  PGDATABASE=${#PGDATABASE}  PGPASSWORD=${#PGPASSWORD}"
+          # ¿El servidor responde en el puerto? (separa problema de red vs. de credenciales)
+          pg_isready -t 15 && echo "TCP OK — el servidor responde" || echo "TCP FALLA — host/puerto incorrecto o red bloqueada"
+          echo "Intentando autenticar..."
+          ERR=$(psql -tAc "SELECT version();" 2>&1) \
+            && echo "Servidor Postgres: $ERR" \
+            || { echo "::error::Fallo de conexión: ${ERR}"; exit 1; }
 
       - name: Generar dump (pg_dump -Fc, solo esquema public)
         if: steps.guard.outputs.listo == 'true'
