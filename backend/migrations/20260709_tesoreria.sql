@@ -33,6 +33,9 @@ CREATE TABLE IF NOT EXISTS cuentas_dinero (
   metodos_pago        TEXT[]      NOT NULL DEFAULT '{}',
   -- Comisión informativa (%) que cobra la entidad (corresponsal, datáfono…)
   porcentaje_comision NUMERIC(5,2) NOT NULL DEFAULT 0,
+  -- 'COP' | 'USD'. Las cuentas USD (divisa) llevan su saldo EN DÓLARES y no
+  -- pueden tener métodos de pago asignados (las ventas/compras son en pesos).
+  moneda              TEXT        NOT NULL DEFAULT 'COP',
   activa              BOOLEAN     NOT NULL DEFAULT TRUE,
   creada_en           TIMESTAMP   NOT NULL DEFAULT NOW()
 );
@@ -58,6 +61,8 @@ CREATE TABLE IF NOT EXISTS movimientos_dinero (
   -- Liga el par salida/entrada de un traslado (mismo UUID en ambas filas)
   grupo_traslado     UUID,
   usuario_id         INTEGER,
+  -- Tasa COP por USD cuando el movimiento cruza monedas (compra de divisa)
+  tasa_cambio        NUMERIC(12,4),
   fecha              TIMESTAMP   NOT NULL DEFAULT NOW(),
   activo             BOOLEAN     NOT NULL DEFAULT TRUE,
   -- Idempotencia: si el cliente reintenta el mismo POST, el UNIQUE evita

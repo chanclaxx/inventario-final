@@ -255,12 +255,12 @@ const findCuentaById = async (id, negocioId) => {
   return rows[0] || null;
 };
 
-const crearCuenta = async ({ negocio_id, sucursal_id, nombre, tipo, metodos_pago, porcentaje_comision }) => {
+const crearCuenta = async ({ negocio_id, sucursal_id, nombre, tipo, metodos_pago, porcentaje_comision, moneda }) => {
   const { rows } = await pool.query(`
-    INSERT INTO cuentas_dinero (negocio_id, sucursal_id, nombre, tipo, metodos_pago, porcentaje_comision)
-    VALUES ($1, $2, $3, $4, $5, $6)
+    INSERT INTO cuentas_dinero (negocio_id, sucursal_id, nombre, tipo, metodos_pago, porcentaje_comision, moneda)
+    VALUES ($1, $2, $3, $4, $5, $6, $7)
     RETURNING *
-  `, [negocio_id, sucursal_id, nombre, tipo, metodos_pago || [], porcentaje_comision || 0]);
+  `, [negocio_id, sucursal_id, nombre, tipo, metodos_pago || [], porcentaje_comision || 0, moneda || 'COP']);
   return rows[0];
 };
 
@@ -309,15 +309,16 @@ const asegurarCuentaEfectivo = async (negocioId, sucursalId) => {
 // ─── Movimientos de tesorería ────────────────────────────────────────────────
 
 const insertarMovimiento = async (client, {
-  cuenta_id, tipo, categoria, valor, concepto, grupo_traslado, usuario_id, clave_idempotencia,
+  cuenta_id, tipo, categoria, valor, concepto, grupo_traslado, usuario_id, clave_idempotencia, tasa_cambio,
 }) => {
   const { rows } = await (client || pool).query(`
     INSERT INTO movimientos_dinero
-      (cuenta_id, tipo, categoria, valor, concepto, grupo_traslado, usuario_id, clave_idempotencia)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      (cuenta_id, tipo, categoria, valor, concepto, grupo_traslado, usuario_id, clave_idempotencia, tasa_cambio)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
     RETURNING *
   `, [cuenta_id, tipo, categoria, valor, concepto || null,
-      grupo_traslado || null, usuario_id || null, clave_idempotencia || null]);
+      grupo_traslado || null, usuario_id || null, clave_idempotencia || null,
+      tasa_cambio || null]);
   return rows[0];
 };
 
@@ -401,6 +402,17 @@ const insertarEspejoCaja = async (client, { caja_id, usuario_id, tipo, concepto,
 };
 
 // ─── Arqueos ──────────────────────────────────────────────────────────────────
+
+// Última tasa COP/USD registrada en la cuenta (para mostrar el equivalente
+// en pesos de una cuenta en divisa).
+const ultimaTasa = async (cuentaId) => {
+  const { rows } = await pool.query(`
+    SELECT tasa_cambio FROM movimientos_dinero
+    WHERE cuenta_id = $1 AND tasa_cambio IS NOT NULL AND activo IS NOT FALSE
+    ORDER BY fecha DESC, id DESC LIMIT 1
+  `, [cuentaId]);
+  return rows[0] ? Number(rows[0].tasa_cambio) : null;
+};
 
 const ultimoArqueo = async (cuentaId) => {
   const { rows } = await pool.query(`
@@ -502,7 +514,7 @@ module.exports = {
   metodosOcupados, asegurarCuentaEfectivo,
   insertarMovimiento, findMovimientoPorClave, findMovimientoById, toggleMovimiento,
   findCajaAbierta, insertarEspejoCaja,
-  ultimoArqueo, insertarArqueo,
+  ultimoArqueo, insertarArqueo, ultimaTasa,
   getCartera, metodosSinAsignar,
   pool,
 };

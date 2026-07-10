@@ -2,8 +2,9 @@ const crypto = require('crypto');
 const repo   = require('./tesoreria.repository');
 const { pool } = require('../../config/db');
 
-const TIPOS_CUENTA     = ['efectivo', 'banco', 'billetera', 'corresponsal', 'otro'];
-const CATEGORIAS_MOV   = ['ingreso', 'retiro', 'gasto', 'ajuste'];
+const TIPOS_CUENTA     = ['efectivo', 'banco', 'billetera', 'corresponsal', 'divisa', 'otro'];
+const CATEGORIAS_MOV   = ['ingreso', 'retiro', 'gasto', 'mercancia', 'ajuste'];
+const MONEDAS          = ['COP', 'USD'];
 
 // ¿La cuenta representa dinero físico? (espejo en caja + recibe retomas,
 // devoluciones y movimientos sin método)
@@ -17,7 +18,18 @@ const listarCuentas = async (negocioId, sucursalId) => {
   return repo.findCuentas(negocioId, sucursalId);
 };
 
-const _validarCuenta = async ({ negocioId, sucursalId, nombre, tipo, metodos_pago, porcentaje_comision, excluirCuentaId }) => {
+const _validarCuenta = async ({ negocioId, sucursalId, nombre, tipo, metodos_pago, porcentaje_comision, moneda, excluirCuentaId }) => {
+  if (moneda !== undefined && moneda !== null && !MONEDAS.includes(moneda)) {
+    throw { status: 400, message: `Moneda inválida. Usa: ${MONEDAS.join(', ')}` };
+  }
+  // Una cuenta en divisa lleva su saldo en dólares: no puede recibir métodos
+  // de pago (las ventas/compras del sistema son en pesos y descuadrarían).
+  if (moneda === 'USD' && Array.isArray(metodos_pago) && metodos_pago.length > 0) {
+    throw {
+      status: 400,
+      message: 'Una cuenta en dólares no puede tener métodos de pago asignados. Los pagos en dólares se registran con "Pagué mercancía" o traslados.',
+    };
+  }
   if (nombre !== undefined && !String(nombre || '').trim()) {
     throw { status: 400, message: 'El nombre de la cuenta es obligatorio' };
   }
@@ -53,12 +65,12 @@ const _validarCuenta = async ({ negocioId, sucursalId, nombre, tipo, metodos_pag
 };
 
 const crearCuenta = async (negocioId, sucursalId, datos) => {
-  const { nombre, tipo = 'otro', metodos_pago = [], porcentaje_comision = 0 } = datos;
-  await _validarCuenta({ negocioId, sucursalId, nombre, tipo, metodos_pago, porcentaje_comision });
+  const { nombre, tipo = 'otro', metodos_pago = [], porcentaje_comision = 0, moneda = 'COP' } = datos;
+  await _validarCuenta({ negocioId, sucursalId, nombre, tipo, metodos_pago, porcentaje_comision, moneda });
   try {
     return await repo.crearCuenta({
       negocio_id: negocioId, sucursal_id: sucursalId,
-      nombre: String(nombre).trim(), tipo, metodos_pago, porcentaje_comision,
+      nombre: String(nombre).trim(), tipo, metodos_pago, porcentaje_comision, moneda,
     });
   } catch (err) {
     if (err.code === '23505') {
@@ -79,6 +91,9 @@ const actualizarCuenta = async (negocioId, sucursalId, cuentaId, datos) => {
     nombre: datos.nombre, tipo: datos.tipo,
     metodos_pago: datos.metodos_pago,
     porcentaje_comision: datos.porcentaje_comision,
+    // La moneda es inmutable tras crear la cuenta (cambiarla corrompería el
+    // saldo); se valida contra la moneda ya guardada.
+    moneda: cuenta.moneda,
     excluirCuentaId: cuentaId,
   });
   try {
@@ -123,20 +138,35 @@ const getSaldos = async (negocioId, sucursalId) => {
     repo.metodosSinAsignar(sucursalId, negocioId),
   ]);
 
-  const cuentasConSaldo = cuentas.map((c, i) => ({
-    ...c,
-    porcentaje_comision: Number(c.porcentaje_comision),
-    ...saldos[i],
+  // Equivalente en pesos: las cuentas COP valen su saldo; las cuentas en
+  // divisa se convierten con la última tasa registrada (si no hay tasa aún,
+  // no suman al total y el frontend lo indica).
+  const cuentasConSaldo = await Promise.all(cuentas.map(async (c, i) => {
+    const moneda = c.moneda || 'COP';
+    let tasaReferencia = null;
+    let saldoCop       = saldos[i].saldo;
+    if (moneda !== 'COP') {
+      tasaReferencia = await repo.ultimaTasa(c.id);
+      saldoCop       = tasaReferencia !== null ? saldos[i].saldo * tasaReferencia : null;
+    }
+    return {
+      ...c,
+      moneda,
+      porcentaje_comision: Number(c.porcentaje_comision),
+      ...saldos[i],
+      tasa_referencia: tasaReferencia,
+      saldo_cop:       saldoCop,
+    };
   }));
 
-  const totalDisponible = cuentasConSaldo.reduce((s, c) => s + c.saldo, 0);
+  const totalDisponible = cuentasConSaldo.reduce((s, c) => s + (c.saldo_cop ?? 0), 0);
   const totalCartera    = cartera.creditos.total + cartera.prestamos.total + cartera.domicilios.total;
   const totalGeneral    = totalDisponible + totalCartera;
 
   const pct = (v) => (totalGeneral > 0 ? (v / totalGeneral) * 100 : 0);
 
   return {
-    cuentas: cuentasConSaldo.map((c) => ({ ...c, porcentaje: pct(c.saldo) })),
+    cuentas: cuentasConSaldo.map((c) => ({ ...c, porcentaje: pct(c.saldo_cop ?? 0) })),
     cartera: {
       creditos:   { ...cartera.creditos,   porcentaje: pct(cartera.creditos.total)   },
       prestamos:  { ...cartera.prestamos,  porcentaje: pct(cartera.prestamos.total)  },
@@ -276,7 +306,7 @@ const registrarMovimiento = async (negocioId, sucursalId, usuarioId, datos) => {
 // ─── Traslados entre cuentas ──────────────────────────────────────────────────
 
 const trasladar = async (negocioId, sucursalId, usuarioId, datos) => {
-  const { origen_id, destino_id, valor, concepto, clave_idempotencia } = datos;
+  const { origen_id, destino_id, valor, valor_destino, concepto, clave_idempotencia } = datos;
 
   const monto = Number(valor);
   if (!(monto > 0)) throw { status: 400, message: 'El valor debe ser mayor a 0' };
@@ -296,13 +326,38 @@ const trasladar = async (negocioId, sucursalId, usuarioId, datos) => {
     throw { status: 403, message: 'La cuenta origen pertenece a otra sucursal' };
   }
 
+  // ── Monedas distintas (compra/venta de divisa) ──────────────────────────
+  // Cada cuenta lleva su saldo en SU moneda: la salida se registra en la
+  // moneda del origen y la entrada en la del destino. La tasa (COP por USD)
+  // queda registrada en ambos movimientos.
+  const monedaOrigen  = origen.moneda  || 'COP';
+  const monedaDestino = destino.moneda || 'COP';
+  const cruzaMoneda   = monedaOrigen !== monedaDestino;
+
+  let montoDestino = monto;
+  let tasa = null;
+  if (cruzaMoneda) {
+    montoDestino = Number(valor_destino);
+    if (!(montoDestino > 0)) {
+      throw {
+        status: 400,
+        message: `Las cuentas usan monedas distintas (${monedaOrigen} → ${monedaDestino}): indica también cuánto llega a la cuenta destino`,
+      };
+    }
+    const ladoCop = monedaOrigen === 'COP' ? monto : montoDestino;
+    const ladoUsd = monedaOrigen === 'USD' ? monto : montoDestino;
+    tasa = Math.round((ladoCop / ladoUsd) * 10000) / 10000;
+  }
+
   if (clave_idempotencia) {
     const existente = await repo.findMovimientoPorClave(clave_idempotencia);
     if (existente) return { salida: { ...existente, repetido: true } };
   }
 
   const grupo = crypto.randomUUID();
-  const desc  = concepto || `Traslado ${origen.nombre} → ${destino.nombre}`;
+  const desc  = concepto || (cruzaMoneda
+    ? `Cambio ${origen.nombre} → ${destino.nombre} (tasa ${tasa})`
+    : `Traslado ${origen.nombre} → ${destino.nombre}`);
 
   const client = await pool.connect();
   try {
@@ -310,12 +365,12 @@ const trasladar = async (negocioId, sucursalId, usuarioId, datos) => {
     const salida = await repo.insertarMovimiento(client, {
       cuenta_id: origen.id, tipo: 'salida', categoria: 'traslado',
       valor: monto, concepto: desc, grupo_traslado: grupo,
-      usuario_id: usuarioId, clave_idempotencia,
+      usuario_id: usuarioId, clave_idempotencia, tasa_cambio: tasa,
     });
     const entrada = await repo.insertarMovimiento(client, {
       cuenta_id: destino.id, tipo: 'entrada', categoria: 'traslado',
-      valor: monto, concepto: desc, grupo_traslado: grupo,
-      usuario_id: usuarioId,
+      valor: montoDestino, concepto: desc, grupo_traslado: grupo,
+      usuario_id: usuarioId, tasa_cambio: tasa,
     });
     await _espejarEnCaja(client, origen,  salida,  usuarioId, desc);
     await _espejarEnCaja(client, destino, entrada, usuarioId, desc);

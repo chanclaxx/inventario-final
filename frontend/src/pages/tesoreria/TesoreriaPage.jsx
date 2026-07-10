@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Landmark, Banknote, Smartphone, Store, CircleDollarSign,
   Plus, Pencil, ArrowRightLeft, ClipboardCheck, FileText,
-  AlertTriangle, HandCoins, Building2,
+  AlertTriangle, HandCoins, Building2, Coins, Package,
 } from 'lucide-react';
 import * as tesoreriaApi from '../../api/tesoreria.api';
 import { useMetodosPago } from '../../hooks/useMetodosPago';
@@ -24,11 +24,21 @@ const TIPOS_CUENTA = [
   { value: 'banco',        label: 'Banco',        Icn: Landmark   },
   { value: 'billetera',    label: 'Billetera',    Icn: Smartphone },
   { value: 'corresponsal', label: 'Corresponsal', Icn: Store      },
+  { value: 'divisa',       label: 'Divisa',       Icn: Coins      },
   { value: 'otro',         label: 'Otro',         Icn: CircleDollarSign },
 ];
 
 const defTipo = (tipo) =>
-  TIPOS_CUENTA.find((t) => t.value === tipo) || TIPOS_CUENTA[4];
+  TIPOS_CUENTA.find((t) => t.value === tipo) || TIPOS_CUENTA[TIPOS_CUENTA.length - 1];
+
+const esUSD = (cuenta) => (cuenta?.moneda || 'COP') === 'USD';
+
+const formatUSD = (v) =>
+  `US$ ${Number(v || 0).toLocaleString('es-CO', { maximumFractionDigits: 2 })}`;
+
+// Formatea un valor en la moneda de la cuenta
+const formatMoneda = (valor, cuenta) =>
+  esUSD(cuenta) ? formatUSD(valor) : formatCOP(valor);
 
 const FUENTE_LABELS = {
   venta:                  'Venta',
@@ -44,6 +54,7 @@ const FUENTE_LABELS = {
   tesoreria_traslado:     'Traslado',
   tesoreria_retiro:       'Retiro',
   tesoreria_gasto:        'Gasto',
+  tesoreria_mercancia:    'Pago mercancía',
   tesoreria_ingreso:      'Ingreso',
   tesoreria_ajuste:       'Ajuste',
 };
@@ -115,7 +126,8 @@ function Distribucion({ data }) {
         </div>
       </div>
       {cuentas.map((c) => (
-        <FilaDistribucion key={`c-${c.id}`} nombre={c.nombre} valor={c.saldo}
+        <FilaDistribucion key={`c-${c.id}`} nombre={c.nombre} valor={c.saldo_cop ?? 0}
+          detalle={esUSD(c) ? formatUSD(c.saldo) : undefined}
           porcentaje={c.porcentaje} color={COLOR_DISPONIBLE} />
       ))}
       {cartera.creditos.total > 0 && (
@@ -160,8 +172,15 @@ function TarjetaCuenta({ cuenta, onExtracto, onArqueo, onEditar }) {
       </div>
 
       <p className={`text-2xl font-bold ${cuenta.saldo < 0 ? 'text-red-500' : 'text-gray-900'}`}>
-        {formatCOP(cuenta.saldo)}
+        {formatMoneda(cuenta.saldo, cuenta)}
       </p>
+      {esUSD(cuenta) && (
+        <p className="text-xs text-gray-400 -mt-1">
+          {cuenta.tasa_referencia
+            ? `≈ ${formatCOP(cuenta.saldo_cop)} (tasa ${Number(cuenta.tasa_referencia).toLocaleString('es-CO')})`
+            : 'Sin tasa aún — registra una compra de divisa para calcular el equivalente'}
+        </p>
+      )}
 
       {(cuenta.metodos_pago || []).length > 0 && (
         <div className="flex flex-wrap gap-1">
@@ -207,6 +226,7 @@ function ModalCuenta({ cuenta, onClose }) {
     tipo:                cuenta?.tipo   || 'banco',
     metodos_pago:        cuenta?.metodos_pago || [],
     porcentaje_comision: cuenta?.porcentaje_comision ?? 0,
+    moneda:              cuenta?.moneda || 'COP',
     activa:              cuenta?.activa ?? true,
   });
   const [error, setError] = useState('');
@@ -259,6 +279,34 @@ function ModalCuenta({ cuenta, onClose }) {
         </div>
 
         <div>
+          <label className="text-xs font-semibold text-gray-500">Moneda</label>
+          <div className="grid grid-cols-2 gap-1.5 mt-1">
+            {[['COP', 'Pesos ($)'], ['USD', 'Dólares (US$)']].map(([m, lbl]) => (
+              <button key={m} type="button" disabled={esEdicion}
+                onClick={() => setForm((f) => ({
+                  ...f, moneda: m,
+                  metodos_pago: m === 'USD' ? [] : f.metodos_pago,
+                }))}
+                className={`py-2 rounded-xl border text-xs transition-colors disabled:opacity-60
+                  ${form.moneda === m
+                    ? 'border-blue-300 bg-blue-50 text-blue-700 font-medium'
+                    : 'border-gray-200 text-gray-500 hover:bg-gray-50'}`}>
+                {lbl}
+              </button>
+            ))}
+          </div>
+          {esEdicion && (
+            <p className="text-xs text-gray-400 mt-1">La moneda no se puede cambiar después de crear la cuenta.</p>
+          )}
+        </div>
+
+        {form.moneda === 'USD' ? (
+          <p className="text-xs text-gray-400 bg-gray-50 rounded-xl p-3">
+            Las cuentas en dólares no reciben métodos de pago: se mueven con
+            los botones <b>Volví divisa</b> y <b>Pagué mercancía</b>, o con traslados.
+          </p>
+        ) : (
+        <div>
           <label className="text-xs font-semibold text-gray-500">
             Métodos de pago que caen en esta cuenta
           </label>
@@ -277,6 +325,7 @@ function ModalCuenta({ cuenta, onClose }) {
             ))}
           </div>
         </div>
+        )}
 
         <div>
           <label className="text-xs font-semibold text-gray-500">Comisión % (opcional)</label>
@@ -309,11 +358,28 @@ function ModalCuenta({ cuenta, onClose }) {
 // ─── Modal movimiento (retiro / gasto / ingreso / ajuste) ────────────────────
 
 const CATEGORIAS = [
-  { value: 'retiro',  label: 'Retiro',  tipo: 'salida'  },
-  { value: 'gasto',   label: 'Gasto',   tipo: 'salida'  },
-  { value: 'ingreso', label: 'Ingreso', tipo: 'entrada' },
-  { value: 'ajuste',  label: 'Ajuste',  tipo: null      },
+  { value: 'retiro',    label: 'Retiro',    tipo: 'salida'  },
+  { value: 'gasto',     label: 'Gasto',     tipo: 'salida'  },
+  { value: 'mercancia', label: 'Mercancía', tipo: 'salida'  },
+  { value: 'ingreso',   label: 'Ingreso',   tipo: 'entrada' },
+  { value: 'ajuste',    label: 'Ajuste',    tipo: null      },
 ];
+
+// Input de valor según la moneda de la cuenta: pesos con puntos de miles,
+// dólares con decimales.
+function InputValor({ cuenta, value, onChange, autoFocus }) {
+  const clase = `w-full mt-1 border border-gray-200 rounded-xl px-3 py-2 text-sm
+    focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300`;
+  if (esUSD(cuenta)) {
+    return (
+      <input type="number" min="0" step="0.01" inputMode="decimal"
+        value={value} autoFocus={autoFocus} placeholder="0"
+        onChange={(e) => onChange(e.target.value === '' ? '' : Number(e.target.value))}
+        className={clase} />
+    );
+  }
+  return <InputMoneda value={value} onChange={onChange} autoFocus={autoFocus} className={clase} />;
+}
 
 function ModalMovimiento({ cuentas, onClose }) {
   const queryClient = useQueryClient();
@@ -349,14 +415,14 @@ function ModalMovimiento({ cuentas, onClose }) {
             onChange={(e) => setForm((f) => ({ ...f, cuenta_id: Number(e.target.value) }))}
             className="w-full mt-1 border border-gray-200 rounded-xl px-3 py-2 text-sm bg-white">
             {cuentas.map((c) => (
-              <option key={c.id} value={c.id}>{c.nombre} — {formatCOP(c.saldo)}</option>
+              <option key={c.id} value={c.id}>{c.nombre} — {formatMoneda(c.saldo, c)}</option>
             ))}
           </select>
         </div>
 
         <div>
           <label className="text-xs font-semibold text-gray-500">Tipo de movimiento</label>
-          <div className="grid grid-cols-4 gap-1.5 mt-1">
+          <div className="grid grid-cols-3 gap-1.5 mt-1">
             {CATEGORIAS.map((c) => (
               <button key={c.value} type="button" onClick={() => setCategoria(c)}
                 className={`py-2 rounded-xl border text-xs transition-colors
@@ -384,10 +450,11 @@ function ModalMovimiento({ cuentas, onClose }) {
         )}
 
         <div>
-          <label className="text-xs font-semibold text-gray-500">Valor</label>
-          <InputMoneda value={form.valor} onChange={(v) => setForm((f) => ({ ...f, valor: v }))}
-            className="w-full mt-1 border border-gray-200 rounded-xl px-3 py-2 text-sm
-              focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300" />
+          <label className="text-xs font-semibold text-gray-500">
+            Valor {esUSD(cuentas.find((c) => c.id === Number(form.cuenta_id))) ? '(en dólares)' : ''}
+          </label>
+          <InputValor cuenta={cuentas.find((c) => c.id === Number(form.cuenta_id))}
+            value={form.valor} onChange={(v) => setForm((f) => ({ ...f, valor: v }))} />
         </div>
 
         <div>
@@ -406,6 +473,191 @@ function ModalMovimiento({ cuentas, onClose }) {
           className="w-full bg-blue-600 text-white rounded-xl py-2.5 text-sm font-semibold
             hover:bg-blue-700 disabled:opacity-50 transition-colors">
           {mutation.isPending ? 'Registrando…' : 'Registrar'}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+// ─── Acciones rápidas (modo simple) ──────────────────────────────────────────
+
+function BotonRapido(props) {
+  const { titulo, sub, onClick } = props;
+  return (
+    <button onClick={onClick}
+      className="flex flex-col items-center gap-1 bg-white border border-gray-200 rounded-2xl
+        px-2 py-3 shadow-sm hover:border-blue-300 hover:bg-blue-50/40 transition-colors">
+      <props.Icn size={22} className="text-blue-600" />
+      <span className="text-sm font-semibold text-gray-800 leading-tight">{titulo}</span>
+      <span className="text-xs text-gray-400 leading-tight text-center">{sub}</span>
+    </button>
+  );
+}
+
+// "Volví divisa": cambié pesos en efectivo por dólares. Crea la cuenta
+// Divisa (USD) automáticamente la primera vez.
+function ModalVolviDivisa({ cuentas, onClose }) {
+  const queryClient = useQueryClient();
+  const [claveIdem] = useState(() => crypto.randomUUID());
+  const [pesos, setPesos]     = useState('');
+  const [dolares, setDolares] = useState('');
+  const [error, setError]     = useState('');
+
+  const efectivo = cuentas.find((c) => c.tipo === 'efectivo')
+    || cuentas.find((c) => (c.metodos_pago || []).includes('Efectivo'));
+  const divisa = cuentas.find((c) => esUSD(c));
+
+  const tasa = Number(pesos) > 0 && Number(dolares) > 0
+    ? Number(pesos) / Number(dolares)
+    : null;
+
+  const mutation = useMutation({
+    mutationFn: async () => {
+      let destino = divisa;
+      if (!destino) {
+        const r = await tesoreriaApi.crearCuenta({
+          nombre: 'Divisa (USD)', tipo: 'divisa', moneda: 'USD',
+        });
+        destino = r.data.data;
+      }
+      return tesoreriaApi.trasladar({
+        origen_id:          efectivo.id,
+        destino_id:         destino.id,
+        valor:              pesos,
+        valor_destino:      dolares,
+        concepto:           'Compra de divisa',
+        clave_idempotencia: claveIdem,
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tesoreria'] });
+      onClose();
+    },
+    onError: (err) => setError(errMsg(err, 'Error al registrar el cambio')),
+  });
+
+  return (
+    <Modal open onClose={onClose} title="Volví divisa (compré dólares)">
+      <div className="flex flex-col gap-4">
+        <div>
+          <label className="text-xs font-semibold text-gray-500">¿Cuántos pesos entregaste?</label>
+          <InputMoneda value={pesos} onChange={setPesos} autoFocus
+            className="w-full mt-1 border border-gray-200 rounded-xl px-3 py-2.5 text-lg font-semibold
+              focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300" />
+        </div>
+
+        <div>
+          <label className="text-xs font-semibold text-gray-500">¿Cuántos dólares te dieron?</label>
+          <input type="number" min="0" step="0.01" inputMode="decimal" placeholder="0"
+            value={dolares}
+            onChange={(e) => setDolares(e.target.value === '' ? '' : Number(e.target.value))}
+            className="w-full mt-1 border border-gray-200 rounded-xl px-3 py-2.5 text-lg font-semibold
+              focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300" />
+        </div>
+
+        {tasa && (
+          <p className="text-sm text-gray-500 bg-gray-50 rounded-xl p-3">
+            Tasa: <b>{tasa.toLocaleString('es-CO', { maximumFractionDigits: 0 })}</b> pesos por dólar.
+            Saldrán {formatCOP(pesos)} del efectivo y entrarán {formatUSD(dolares)} a la Divisa.
+          </p>
+        )}
+
+        {!efectivo && (
+          <p className="text-sm text-red-500">No hay una cuenta de efectivo activa en esta sucursal.</p>
+        )}
+        {error && <p className="text-sm text-red-500">{error}</p>}
+
+        <button onClick={() => mutation.mutate()}
+          disabled={mutation.isPending || !pesos || !dolares || !efectivo}
+          className="w-full bg-blue-600 text-white rounded-xl py-3 text-base font-semibold
+            hover:bg-blue-700 disabled:opacity-50 transition-colors">
+          {mutation.isPending ? 'Registrando…' : 'Registrar cambio'}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+// "Pagué mercancía": salida directa de una cuenta (en su moneda) sin
+// necesidad de llevar cuentas con el proveedor en el sistema.
+function ModalPagueMercancia({ cuentas, onClose }) {
+  const queryClient = useQueryClient();
+  const [claveIdem] = useState(() => crypto.randomUUID());
+  const [cuentaId, setCuentaId] = useState(cuentas[0]?.id || '');
+  const [valor, setValor]       = useState('');
+  const [concepto, setConcepto] = useState('');
+  const [error, setError]       = useState('');
+
+  const cuenta = cuentas.find((c) => c.id === Number(cuentaId));
+
+  const mutation = useMutation({
+    mutationFn: () => tesoreriaApi.registrarMovimiento({
+      cuenta_id:          cuenta.id,
+      tipo:               'salida',
+      categoria:          'mercancia',
+      valor,
+      concepto:           concepto || 'Pago de mercancía',
+      clave_idempotencia: claveIdem,
+    }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tesoreria'] });
+      onClose();
+    },
+    onError: (err) => setError(errMsg(err, 'Error al registrar el pago')),
+  });
+
+  return (
+    <Modal open onClose={onClose} title="Pagué mercancía">
+      <div className="flex flex-col gap-4">
+        <div>
+          <label className="text-xs font-semibold text-gray-500">¿De dónde salió la plata?</label>
+          <div className="grid grid-cols-2 gap-1.5 mt-1">
+            {cuentas.map((c) => {
+              const T = defTipo(c.tipo);
+              return (
+                <button key={c.id} type="button" onClick={() => { setCuentaId(c.id); setValor(''); }}
+                  className={`flex items-center gap-2 px-3 py-2.5 rounded-xl border text-left transition-colors
+                    ${Number(cuentaId) === c.id
+                      ? 'border-blue-300 bg-blue-50'
+                      : 'border-gray-200 hover:bg-gray-50'}`}>
+                  <T.Icn size={16} className={Number(cuentaId) === c.id ? 'text-blue-600' : 'text-gray-400'} />
+                  <span className="min-w-0">
+                    <span className="block text-sm font-medium text-gray-800 truncate">{c.nombre}</span>
+                    <span className="block text-xs text-gray-400">{formatMoneda(c.saldo, c)}</span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div>
+          <label className="text-xs font-semibold text-gray-500">
+            {esUSD(cuenta) ? '¿Cuántos dólares pagaste?' : '¿Cuántos pesos pagaste?'}
+          </label>
+          <InputValor cuenta={cuenta} value={valor} onChange={setValor} />
+        </div>
+
+        <div>
+          <label className="text-xs font-semibold text-gray-500">¿A quién? (opcional)</label>
+          <input value={concepto} onChange={(e) => setConcepto(e.target.value)}
+            placeholder="Ej: proveedor Juan — 10 cargadores"
+            className="w-full mt-1 border border-gray-200 rounded-xl px-3 py-2 text-sm
+              focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300" />
+        </div>
+
+        <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl p-3">
+          Ojo: si esta compra ya la registraste en Proveedores con método de pago
+          y "registrar en caja", <b>no la pagues también aquí</b> — se descontaría dos veces.
+        </p>
+
+        {error && <p className="text-sm text-red-500">{error}</p>}
+
+        <button onClick={() => mutation.mutate()}
+          disabled={mutation.isPending || !valor || !cuenta}
+          className="w-full bg-blue-600 text-white rounded-xl py-3 text-base font-semibold
+            hover:bg-blue-700 disabled:opacity-50 transition-colors">
+          {mutation.isPending ? 'Registrando…' : 'Registrar pago'}
         </button>
       </div>
     </Modal>
@@ -431,15 +683,24 @@ function ModalTraslado({ cuentas, esAdmin, onClose }) {
     : cuentas.map((c) => ({ ...c, etiqueta: c.nombre }));
 
   const [form, setForm] = useState({
-    origen_id:  cuentas[0]?.id || '',
-    destino_id: '',
-    valor:      '',
-    concepto:   '',
+    origen_id:     cuentas[0]?.id || '',
+    destino_id:    '',
+    valor:         '',
+    valor_destino: '',
+    concepto:      '',
   });
   const [error, setError] = useState('');
 
+  const origen  = cuentas.find((c) => c.id === Number(form.origen_id));
+  const destino = destinos.find((c) => c.id === Number(form.destino_id));
+  const cruzaMoneda = origen && destino && (origen.moneda || 'COP') !== (destino.moneda || 'COP');
+
   const mutation = useMutation({
-    mutationFn: () => tesoreriaApi.trasladar({ ...form, clave_idempotencia: claveIdem }),
+    mutationFn: () => tesoreriaApi.trasladar({
+      ...form,
+      valor_destino: cruzaMoneda ? form.valor_destino : undefined,
+      clave_idempotencia: claveIdem,
+    }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['tesoreria'] });
       onClose();
@@ -456,7 +717,7 @@ function ModalTraslado({ cuentas, esAdmin, onClose }) {
             onChange={(e) => setForm((f) => ({ ...f, origen_id: Number(e.target.value) }))}
             className="w-full mt-1 border border-gray-200 rounded-xl px-3 py-2 text-sm bg-white">
             {cuentas.map((c) => (
-              <option key={c.id} value={c.id}>{c.nombre} — {formatCOP(c.saldo)}</option>
+              <option key={c.id} value={c.id}>{c.nombre} — {formatMoneda(c.saldo, c)}</option>
             ))}
           </select>
         </div>
@@ -476,11 +737,30 @@ function ModalTraslado({ cuentas, esAdmin, onClose }) {
         </div>
 
         <div>
-          <label className="text-xs font-semibold text-gray-500">Valor</label>
-          <InputMoneda value={form.valor} onChange={(v) => setForm((f) => ({ ...f, valor: v }))}
-            className="w-full mt-1 border border-gray-200 rounded-xl px-3 py-2 text-sm
-              focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300" />
+          <label className="text-xs font-semibold text-gray-500">
+            Valor que sale {esUSD(origen) ? '(en dólares)' : ''}
+          </label>
+          <InputValor cuenta={origen} value={form.valor}
+            onChange={(v) => setForm((f) => ({ ...f, valor: v }))} />
         </div>
+
+        {cruzaMoneda && (
+          <div>
+            <label className="text-xs font-semibold text-gray-500">
+              Valor que llega {esUSD(destino) ? '(en dólares)' : '(en pesos)'}
+            </label>
+            <InputValor cuenta={destino} value={form.valor_destino}
+              onChange={(v) => setForm((f) => ({ ...f, valor_destino: v }))} />
+            {Number(form.valor) > 0 && Number(form.valor_destino) > 0 && (
+              <p className="text-xs text-gray-400 mt-1">
+                Tasa: {(
+                  (esUSD(destino) ? Number(form.valor) / Number(form.valor_destino)
+                                  : Number(form.valor_destino) / Number(form.valor))
+                ).toLocaleString('es-CO', { maximumFractionDigits: 0 })} pesos por dólar
+              </p>
+            )}
+          </div>
+        )}
 
         <div>
           <label className="text-xs font-semibold text-gray-500">Concepto (opcional)</label>
@@ -494,7 +774,8 @@ function ModalTraslado({ cuentas, esAdmin, onClose }) {
         {error && <p className="text-sm text-red-500">{error}</p>}
 
         <button onClick={() => mutation.mutate()}
-          disabled={mutation.isPending || !form.valor || !form.origen_id || !form.destino_id}
+          disabled={mutation.isPending || !form.valor || !form.origen_id || !form.destino_id
+            || (cruzaMoneda && !form.valor_destino)}
           className="w-full bg-blue-600 text-white rounded-xl py-2.5 text-sm font-semibold
             hover:bg-blue-700 disabled:opacity-50 transition-colors">
           {mutation.isPending ? 'Trasladando…' : 'Registrar traslado'}
@@ -510,12 +791,32 @@ function ModalArqueo({ cuenta, onClose }) {
   const queryClient = useQueryClient();
   const [contado, setContado] = useState('');
   const [notas, setNotas]     = useState('');
+  // Cuando falta plata: ¿en qué se fue? 'mercancia' | 'gasto' | 'ajuste'
+  const [clasificacion, setClasificacion] = useState('mercancia');
   const [error, setError]     = useState('');
 
   const diferencia = contado === '' ? null : Number(contado) - cuenta.saldo;
+  const hayFaltante = diferencia !== null && diferencia < 0;
 
   const mutation = useMutation({
-    mutationFn: () => tesoreriaApi.arquear({ cuenta_id: cuenta.id, saldo_contado: Number(contado), notas }),
+    mutationFn: async () => {
+      // Si el faltante fue mercancía o gasto, se registra como salida con su
+      // categoría ANTES de anclar: el arqueo queda con diferencia ≈ 0 y el
+      // gasto queda clasificado en el histórico.
+      if (hayFaltante && clasificacion !== 'ajuste') {
+        await tesoreriaApi.registrarMovimiento({
+          cuenta_id: cuenta.id,
+          tipo:      'salida',
+          categoria: clasificacion,
+          valor:     Math.abs(diferencia),
+          concepto:  clasificacion === 'mercancia'
+            ? 'Pago de mercancía detectado en arqueo'
+            : 'Gasto detectado en arqueo',
+          clave_idempotencia: crypto.randomUUID(),
+        });
+      }
+      return tesoreriaApi.arquear({ cuenta_id: cuenta.id, saldo_contado: Number(contado), notas });
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['tesoreria'] });
       onClose();
@@ -533,20 +834,43 @@ function ModalArqueo({ cuenta, onClose }) {
 
         <div className="bg-gray-50 rounded-xl p-3 text-sm flex justify-between">
           <span className="text-gray-500">Saldo según el sistema</span>
-          <span className="font-semibold text-gray-800">{formatCOP(cuenta.saldo)}</span>
+          <span className="font-semibold text-gray-800">{formatMoneda(cuenta.saldo, cuenta)}</span>
         </div>
 
         <div>
-          <label className="text-xs font-semibold text-gray-500">Saldo real contado</label>
-          <InputMoneda value={contado} onChange={setContado} autoFocus
-            className="w-full mt-1 border border-gray-200 rounded-xl px-3 py-2 text-sm
-              focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300" />
+          <label className="text-xs font-semibold text-gray-500">
+            Saldo real contado {esUSD(cuenta) ? '(en dólares)' : ''}
+          </label>
+          <InputValor cuenta={cuenta} value={contado} onChange={setContado} autoFocus />
         </div>
 
-        {diferencia !== null && diferencia !== 0 && (
-          <p className={`text-sm font-medium ${diferencia > 0 ? 'text-green-600' : 'text-red-500'}`}>
-            Diferencia: {diferencia > 0 ? '+' : ''}{formatCOP(diferencia)} — quedará registrada en el arqueo.
+        {diferencia !== null && diferencia > 0 && (
+          <p className="text-sm font-medium text-green-600">
+            Sobran {formatMoneda(diferencia, cuenta)} — quedarán registrados en el arqueo.
           </p>
+        )}
+
+        {hayFaltante && (
+          <div>
+            <p className="text-sm font-medium text-red-500 mb-2">
+              Faltan {formatMoneda(Math.abs(diferencia), cuenta)}. ¿Esa plata fue para…?
+            </p>
+            <div className="grid grid-cols-3 gap-1.5">
+              {[
+                ['mercancia', '📦 Mercancía'],
+                ['gasto',     '🏠 Un gasto'],
+                ['ajuste',    '🤷 No sé'],
+              ].map(([v, lbl]) => (
+                <button key={v} type="button" onClick={() => setClasificacion(v)}
+                  className={`py-2.5 rounded-xl border text-xs font-medium transition-colors
+                    ${clasificacion === v
+                      ? 'border-blue-300 bg-blue-50 text-blue-700'
+                      : 'border-gray-200 text-gray-500 hover:bg-gray-50'}`}>
+                  {lbl}
+                </button>
+              ))}
+            </div>
+          </div>
         )}
 
         <div>
@@ -604,8 +928,8 @@ function ModalExtracto({ cuenta, onClose }) {
         ) : (
           <>
             <div className="flex justify-between text-sm bg-gray-50 rounded-xl p-3">
-              <span className="text-gray-500">Saldo inicial: <b className="text-gray-800">{formatCOP(data.saldo_inicial)}</b></span>
-              <span className="text-gray-500">Saldo final: <b className="text-gray-800">{formatCOP(data.saldo_final)}</b></span>
+              <span className="text-gray-500">Saldo inicial: <b className="text-gray-800">{formatMoneda(data.saldo_inicial, cuenta)}</b></span>
+              <span className="text-gray-500">Saldo final: <b className="text-gray-800">{formatMoneda(data.saldo_final, cuenta)}</b></span>
             </div>
 
             {data.movimientos.length === 0 ? (
@@ -636,10 +960,10 @@ function ModalExtracto({ cuenta, onClose }) {
                         </td>
                         <td className={`py-2 px-1 text-right font-medium whitespace-nowrap
                           ${m.tipo === 'entrada' ? 'text-green-600' : 'text-red-500'}`}>
-                          {m.tipo === 'entrada' ? '+' : '−'}{formatCOP(m.valor)}
+                          {m.tipo === 'entrada' ? '+' : '−'}{formatMoneda(m.valor, cuenta)}
                         </td>
                         <td className="py-2 px-1 text-right text-gray-500 whitespace-nowrap">
-                          {formatCOP(m.saldo)}
+                          {formatMoneda(m.saldo, cuenta)}
                         </td>
                         <td className="py-2 px-1 text-right">
                           {m.mov_id && (
@@ -695,7 +1019,7 @@ function Consolidado() {
                   <span className="w-2 h-2 rounded-full" style={{ background: COLOR_DISPONIBLE }} />
                   {c.nombre}
                 </span>
-                <span className="font-medium text-gray-800">{formatCOP(c.saldo)}</span>
+                <span className="font-medium text-gray-800">{formatMoneda(c.saldo, c)}</span>
               </div>
             ))}
             {s.totales.cartera > 0 && (
@@ -783,6 +1107,15 @@ export default function TesoreriaPage() {
         </p>
       ) : data && (
         <>
+          {/* Acciones rápidas — modo simple */}
+          <div className="grid grid-cols-3 gap-2">
+            <BotonRapido Icn={Coins} titulo="Volví divisa" sub="Cambié pesos a dólares"
+              onClick={() => setModal({ tipo: 'volvi-divisa' })} />
+            <BotonRapido Icn={Package} titulo="Pagué mercancía" sub="Le pagué a un proveedor"
+              onClick={() => setModal({ tipo: 'pague-mercancia' })} />
+            <BotonRapido Icn={Landmark} titulo="Consigné" sub="Llevé plata al banco"
+              onClick={() => setModal({ tipo: 'traslado' })} />
+          </div>
           {/* Alerta de métodos sin cuenta */}
           {data.metodos_sin_asignar.length > 0 && (
             <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-2xl p-3">
@@ -827,6 +1160,10 @@ export default function TesoreriaPage() {
         <ModalTraslado cuentas={cuentas} esAdmin={esAdmin} onClose={() => setModal(null)} />}
       {modal?.tipo === 'arqueo'     && <ModalArqueo   cuenta={modal.cuenta} onClose={() => setModal(null)} />}
       {modal?.tipo === 'extracto'   && <ModalExtracto cuenta={modal.cuenta} onClose={() => setModal(null)} />}
+      {modal?.tipo === 'volvi-divisa' && cuentas.length > 0 &&
+        <ModalVolviDivisa cuentas={cuentas} onClose={() => setModal(null)} />}
+      {modal?.tipo === 'pague-mercancia' && cuentas.length > 0 &&
+        <ModalPagueMercancia cuentas={cuentas} onClose={() => setModal(null)} />}
     </div>
   );
 }
