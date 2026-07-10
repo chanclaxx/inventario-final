@@ -66,6 +66,18 @@ jobs:
             | sudo tee /etc/apt/sources.list.d/pgdg.list
           sudo apt-get update -qq
           sudo apt-get install -y -qq postgresql-client-17
+          # El runner trae preinstalado un cliente más viejo (16). Forzamos que
+          # pg_dump/pg_restore resuelvan a la versión 17 recién instalada — de lo
+          # contrario un servidor Postgres 17 rechaza el dump por "version mismatch".
+          echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
+
+      - name: Diagnóstico de conexión y versiones
+        if: steps.guard.outputs.listo == 'true'
+        run: |
+          echo "Cliente pg_dump: $(pg_dump --version)"
+          echo "Servidor Postgres:"
+          psql "$SUPABASE_DB_URL" -tAc "SELECT version();" \
+            || { echo "::error::No se pudo conectar a la base de datos. Revisa SUPABASE_DB_URL (usa el pooler en puerto 5432, modo sesión)."; exit 1; }
 
       - name: Generar dump (pg_dump -Fc, solo esquema public)
         if: steps.guard.outputs.listo == 'true'
