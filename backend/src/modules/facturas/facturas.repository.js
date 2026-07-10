@@ -355,11 +355,11 @@ const insertarPago = async (client, { factura_id, metodo, valor }) => {
 
 const insertarRetoma = async (client, {
   factura_id, descripcion, valor_retoma,
-  ingreso_inventario, nombre_producto, imei, cantidad_retoma,
+  ingreso_inventario, nombre_producto, imei, cantidad_retoma, color,
 }) => {
   const { rows } = await client.query(`
-    INSERT INTO retomas(factura_id, descripcion, valor_retoma, ingreso_inventario, nombre_producto, imei, cantidad_retoma)
-    VALUES ($1, $2, $3, $4, $5, $6, $7)
+    INSERT INTO retomas(factura_id, descripcion, valor_retoma, ingreso_inventario, nombre_producto, imei, cantidad_retoma, color)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
     RETURNING *
   `, [
     factura_id, descripcion, valor_retoma,
@@ -367,6 +367,7 @@ const insertarRetoma = async (client, {
     nombre_producto    || null,
     imei               || null,
     Number(cantidad_retoma) || 1,
+    color              || null,
   ]);
   return rows[0];
 };

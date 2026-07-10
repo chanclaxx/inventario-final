@@ -46,6 +46,8 @@ const RETOMA_VACIA = () => ({
   producto_cantidad_id: null,
   reactivar_serial_id:  null,
   estado_serial:        null, // null | 'vendido' | 'prestado' | 'disponible'
+  color_retoma:         '',
+  caracteristicas_retoma: {},
 });
 
 const DOMICILIO_VACIO = () => ({
@@ -70,6 +72,22 @@ function calcularValorRetoma(retoma) {
     return Number(retoma.valor_retoma || 0) * Number(retoma.cantidad_retoma || 1);
   }
   return Number(retoma.valor_retoma || 0);
+}
+
+function limpiarCaracteristicasRetoma(caracteristicas) {
+  const limpio = Object.fromEntries(
+    Object.entries(caracteristicas || {}).filter(([, v]) => typeof v === 'string' && v.trim() !== '')
+  );
+  return Object.keys(limpio).length ? limpio : null;
+}
+
+function parsearListaConfig(valor) {
+  try {
+    const lista = JSON.parse(valor || '[]');
+    return Array.isArray(lista) ? lista : [];
+  } catch {
+    return [];
+  }
 }
 
 function buildPayloadFactura({ tipoCliente, form, items, totalNeto, metodosSeleccionados, montos, retomas, domicilio, credito, vendedorId }) {
@@ -109,6 +127,8 @@ function buildPayloadFactura({ tipoCliente, form, items, totalNeto, metodosSelec
     producto_cantidad_id: r.tipo_retoma === 'cantidad' ? r.producto_cantidad_id               : null,
     cantidad_retoma:      r.tipo_retoma === 'cantidad' ? Number(r.cantidad_retoma || 1)        : 1,
     reactivar_serial_id:  r.reactivar_serial_id || null,
+    color_retoma:           r.tipo_retoma === 'serial' ? (r.color_retoma?.trim() || null)                     : null,
+    caracteristicas_retoma: r.tipo_retoma === 'serial' ? limpiarCaracteristicasRetoma(r.caracteristicas_retoma) : null,
   }));
 
   const domicilioPayload = (domicilio.activo && domicilio.domiciliario_id)
@@ -405,7 +425,8 @@ function SeccionDomicilio({ domicilio, onChange }) {
 // ─── ItemRetoma ───────────────────────────────────────────────────────────────
 
 function ItemRetoma({ retoma, index, total, productosSerial, productosCantidad,
-  onChange, onRemove, nombreCliente }) {
+  onChange, onRemove, nombreCliente,
+  coloresActivo, coloresLista, caracteristicasActivo, caracteristicasLista }) {
 
   const [busqueda, setBusqueda]        = useState('');
   const { estado, verificar, limpiar } = useVerificarImei();
@@ -505,6 +526,8 @@ function ItemRetoma({ retoma, index, total, productosSerial, productosCantidad,
                 set('ingreso_inventario', false);
                 set('reactivar_serial_id', null);
                 set('estado_serial', null);
+                set('color_retoma', '');
+                set('caracteristicas_retoma', {});
                 setBusqueda('');
                 limpiar();
               }}
@@ -579,6 +602,41 @@ function ItemRetoma({ retoma, index, total, productosSerial, productosCantidad,
               <p className="text-xs text-purple-600 mt-1">✓ {retoma.nombre_producto}</p>
             )}
           </div>
+
+          {coloresActivo && coloresLista.length > 0 && (
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-gray-600">
+                Color <span className="text-gray-400 font-normal">(opcional)</span>
+              </label>
+              <select
+                value={retoma.color_retoma || ''}
+                onChange={(e) => set('color_retoma', e.target.value)}
+                className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-sm
+                  text-gray-700 focus:outline-none focus:ring-2 focus:ring-purple-400 transition-all">
+                <option value="">Color...</option>
+                {coloresLista.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {caracteristicasActivo && caracteristicasLista.length > 0 && (
+            <div className="flex flex-col gap-2">
+              {caracteristicasLista.map((campo) => (
+                <div key={campo} className="flex flex-col gap-1">
+                  <label className="text-xs font-medium text-gray-600">
+                    {campo} <span className="text-gray-400 font-normal">(opcional)</span>
+                  </label>
+                  <input type="text" placeholder={`${campo}...`}
+                    value={retoma.caracteristicas_retoma?.[campo] || ''}
+                    onChange={(e) => set('caracteristicas_retoma', { ...(retoma.caracteristicas_retoma || {}), [campo]: e.target.value })}
+                    className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl
+                      text-sm focus:outline-none focus:ring-2 focus:ring-purple-400 transition-all" />
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -782,6 +840,11 @@ export function ModalFactura({ open, onClose }) {
   const mostrarEmail      = configData?.campo_email_cliente     === '1';
   const mostrarDireccion  = configData?.campo_direccion_cliente === '1';
   const mostrarVendedor   = configData?.vendedores_activo       === '1';
+
+  const coloresActivo         = configData?.colores_serial_activo        === '1';
+  const coloresLista          = parsearListaConfig(configData?.colores_serial_lista);
+  const caracteristicasActivo = configData?.caracteristicas_serial_activo === '1';
+  const caracteristicasLista  = parsearListaConfig(configData?.caracteristicas_serial_lista);
 
   const { data: vendedores = [] } = useQuery({
     queryKey: ['vendedores-activos', ...sucursalKey],
@@ -1142,6 +1205,10 @@ export function ModalFactura({ open, onClose }) {
                     onChange={handleChangeRetoma}
                     onRemove={handleRemoveRetoma}
                     nombreCliente={nombreClienteRetoma}
+                    coloresActivo={coloresActivo}
+                    coloresLista={coloresLista}
+                    caracteristicasActivo={caracteristicasActivo}
+                    caracteristicasLista={caracteristicasLista}
                   />
                 ))}
                 <button onClick={handleAddRetoma}

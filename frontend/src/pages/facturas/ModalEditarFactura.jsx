@@ -37,6 +37,8 @@ const RETOMA_VACIA = {
   producto_serial_id:   null,
   producto_cantidad_id: null,
   cantidad_retoma:      '1',
+  color_retoma:         '',
+  caracteristicas_retoma: {},
 };
 
 // ─── Utilidades ───────────────────────────────────────────────────────────────
@@ -45,6 +47,15 @@ function normalizarProductos(data) {
   if (Array.isArray(data)) return data;
   if (data?.items && Array.isArray(data.items)) return data.items;
   return [];
+}
+
+function parsearListaConfig(valor) {
+  try {
+    const lista = JSON.parse(valor || '[]');
+    return Array.isArray(lista) ? lista : [];
+  } catch {
+    return [];
+  }
 }
 
 function pagosArrayAMapa(pagosArr) {
@@ -140,7 +151,8 @@ function RetomaLectura({ retoma, index, total }) {
 
 // ─── Retoma serial nueva ──────────────────────────────────────────────────────
 
-function RetomaSerial({ retoma, setRetomaField, productosSerial }) {
+function RetomaSerial({ retoma, setRetomaField, productosSerial,
+  coloresActivo, coloresLista, caracteristicasActivo, caracteristicasLista }) {
   const [busqueda, setBusqueda] = useState('');
   const lista     = normalizarProductos(productosSerial);
   const filtrados = lista.filter((p) => p.nombre.toLowerCase().includes(busqueda.toLowerCase()));
@@ -179,6 +191,41 @@ function RetomaSerial({ retoma, setRetomaField, productosSerial }) {
           <p className="text-xs text-purple-600 mt-1">✓ {retoma.nombre_producto}</p>
         )}
       </div>
+
+      {coloresActivo && coloresLista.length > 0 && (
+        <div className="flex flex-col gap-1">
+          <label className="text-xs font-medium text-gray-600">
+            Color <span className="text-gray-400 font-normal">(opcional)</span>
+          </label>
+          <select
+            value={retoma.color_retoma || ''}
+            onChange={(e) => setRetomaField('color_retoma', e.target.value)}
+            className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-sm
+              text-gray-700 focus:outline-none focus:ring-2 focus:ring-purple-400 transition-all">
+            <option value="">Color...</option>
+            {coloresLista.map((c) => (
+              <option key={c} value={c}>{c}</option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {caracteristicasActivo && caracteristicasLista.length > 0 && (
+        <div className="flex flex-col gap-2">
+          {caracteristicasLista.map((campo) => (
+            <div key={campo} className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-gray-600">
+                {campo} <span className="text-gray-400 font-normal">(opcional)</span>
+              </label>
+              <input type="text" placeholder={`${campo}...`}
+                value={retoma.caracteristicas_retoma?.[campo] || ''}
+                onChange={(e) => setRetomaField('caracteristicas_retoma', { ...(retoma.caracteristicas_retoma || {}), [campo]: e.target.value })}
+                className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl
+                  text-sm focus:outline-none focus:ring-2 focus:ring-purple-400 transition-all" />
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -229,7 +276,8 @@ function RetomaCantidad({ retoma, setRetomaField, productosCantidad }) {
 
 // ─── Panel retoma nueva ───────────────────────────────────────────────────────
 
-function PanelRetomaNueva({ retoma, setRetoma, sucursalKey, sucursalLista }) {
+function PanelRetomaNueva({ retoma, setRetoma, sucursalKey, sucursalLista,
+  coloresActivo, coloresLista, caracteristicasActivo, caracteristicasLista }) {
   const setRetomaField = (campo, valor) => setRetoma((r) => ({ ...r, [campo]: valor }));
 
   const { data: productosSerialRaw } = useQuery({
@@ -289,7 +337,9 @@ function PanelRetomaNueva({ retoma, setRetoma, sucursalKey, sucursalLista }) {
       </label>
 
       {retoma.ingreso_inventario && retoma.tipo_retoma === 'serial' && (
-        <RetomaSerial retoma={retoma} setRetomaField={setRetomaField} productosSerial={productosSerial} />
+        <RetomaSerial retoma={retoma} setRetomaField={setRetomaField} productosSerial={productosSerial}
+          coloresActivo={coloresActivo} coloresLista={coloresLista}
+          caracteristicasActivo={caracteristicasActivo} caracteristicasLista={caracteristicasLista} />
       )}
       {retoma.ingreso_inventario && retoma.tipo_retoma === 'cantidad' && (
         <RetomaCantidad retoma={retoma} setRetomaField={setRetomaField} productosCantidad={productosCantidad} />
@@ -341,6 +391,11 @@ export function ModalEditarFactura({ facturaId, onClose, onGuardado }) {
   const mostrarEmail          = configData?.campo_email_cliente     === '1';
   const mostrarDireccion      = configData?.campo_direccion_cliente === '1';
   const mostrarVendedor       = configData?.vendedores_activo       === '1';
+
+  const coloresActivo         = configData?.colores_serial_activo        === '1';
+  const coloresLista          = parsearListaConfig(configData?.colores_serial_lista);
+  const caracteristicasActivo = configData?.caracteristicas_serial_activo === '1';
+  const caracteristicasLista  = parsearListaConfig(configData?.caracteristicas_serial_lista);
   const tieneClienteVinculado = estadoInicial?.tieneCliente ?? false;
 
   const vendedorIdEfectivo   = vendedorSel ?? estadoInicial?.vendedor_id ?? '';
@@ -605,7 +660,9 @@ export function ModalEditarFactura({ facturaId, onClose, onGuardado }) {
             </button>
             {agregarRetoma && retomaNueva && (
               <PanelRetomaNueva retoma={retomaNueva} setRetoma={setRetomaNueva}
-                sucursalKey={sucursalKey} sucursalLista={sucursalLista} />
+                sucursalKey={sucursalKey} sucursalLista={sucursalLista}
+                coloresActivo={coloresActivo} coloresLista={coloresLista}
+                caracteristicasActivo={caracteristicasActivo} caracteristicasLista={caracteristicasLista} />
             )}
           </div>
 

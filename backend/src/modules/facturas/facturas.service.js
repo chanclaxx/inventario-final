@@ -15,6 +15,17 @@ const _fechaHoy = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 
+// Normaliza las características de una retoma serial a JSON para la columna
+// jsonb de seriales. Solo acepta un objeto plano con al menos un valor no vacío;
+// cualquier otra cosa (null, string, array, objeto vacío) devuelve null.
+const _caracteristicasRetomaJson = (valor) => {
+  if (!valor || typeof valor !== 'object' || Array.isArray(valor)) return null;
+  const limpio = Object.fromEntries(
+    Object.entries(valor).filter(([, v]) => typeof v === 'string' && v.trim() !== '')
+  );
+  return Object.keys(limpio).length ? JSON.stringify(limpio) : null;
+};
+
 const _verificarProductoCantidadNegocio = async (client, productoId, negocioId) => {
   const { rows } = await client.query(
     `SELECT pc.id FROM productos_cantidad pc
@@ -270,6 +281,11 @@ const crearFactura = async ({
     }
 
     for (const retoma of retomas) {
+      const colorRetoma           = retoma.tipo_retoma === 'serial' ? (retoma.color_retoma || null) : null;
+      const caracteristicasRetoma = retoma.tipo_retoma === 'serial'
+        ? _caracteristicasRetomaJson(retoma.caracteristicas_retoma)
+        : null;
+
       await facturasRepo.insertarRetoma(client, {
         factura_id:         factura.id,
         descripcion:        retoma.descripcion,
@@ -278,6 +294,7 @@ const crearFactura = async ({
         nombre_producto:    retoma.nombre_producto    || null,
         imei:               retoma.imei               || null,
         cantidad_retoma:    retoma.cantidad_retoma     || 1,
+        color:              colorRetoma,
       });
 
       if (retoma.ingreso_inventario && retoma.tipo_retoma === 'serial' && retoma.imei) {
@@ -307,8 +324,11 @@ const crearFactura = async ({
           }
           await client.query(
             `UPDATE seriales SET vendido = false, prestado = false,
-             fecha_salida = NULL, cliente_origen = $1 WHERE id = $2`,
-            [nombre_cliente, retoma.reactivar_serial_id]
+             fecha_salida = NULL, cliente_origen = $1,
+             color = COALESCE($2, color),
+             caracteristicas = COALESCE($3::jsonb, caracteristicas)
+             WHERE id = $4`,
+            [nombre_cliente, colorRetoma, caracteristicasRetoma, retoma.reactivar_serial_id]
           );
         } else if (existeSerial) {
           if (existeSerial.prestado) {
@@ -320,8 +340,11 @@ const crearFactura = async ({
           // Solo se reactiva un serial VENDIDO que regresa (IMEI único por negocio).
           await client.query(
             `UPDATE seriales SET vendido = false, prestado = false,
-             fecha_salida = NULL, cliente_origen = $1 WHERE id = $2`,
-            [nombre_cliente, existeSerial.id]
+             fecha_salida = NULL, cliente_origen = $1,
+             color = COALESCE($2, color),
+             caracteristicas = COALESCE($3::jsonb, caracteristicas)
+             WHERE id = $4`,
+            [nombre_cliente, colorRetoma, caracteristicasRetoma, existeSerial.id]
           );
         } else if (retoma.producto_serial_id) {
           const { rows: psCheck } = await client.query(
@@ -332,9 +355,10 @@ const crearFactura = async ({
           );
           if (!psCheck.length) throw { status: 403, message: 'El producto de retoma no pertenece a este negocio' };
           await client.query(
-            `INSERT INTO seriales(producto_id, imei, fecha_entrada, costo_compra, cliente_origen)
-             VALUES ($1,$2,$3,$4,$5)`,
-            [retoma.producto_serial_id, retoma.imei, _fechaHoy(), retoma.valor_retoma, nombre_cliente]
+            `INSERT INTO seriales(producto_id, imei, fecha_entrada, costo_compra, cliente_origen, color, caracteristicas)
+             VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb)`,
+            [retoma.producto_serial_id, retoma.imei, _fechaHoy(), retoma.valor_retoma, nombre_cliente,
+             colorRetoma, caracteristicasRetoma]
           );
         }
       }
@@ -634,6 +658,11 @@ const editarFactura = async (negocioId, id, {
     }
 
     if (retoma) {
+      const colorRetoma           = retoma.tipo_retoma === 'serial' ? (retoma.color_retoma || null) : null;
+      const caracteristicasRetoma = retoma.tipo_retoma === 'serial'
+        ? _caracteristicasRetomaJson(retoma.caracteristicas_retoma)
+        : null;
+
       await facturasRepo.insertarRetoma(client, {
         factura_id:         id,
         descripcion:        retoma.descripcion,
@@ -642,6 +671,7 @@ const editarFactura = async (negocioId, id, {
         nombre_producto:    retoma.nombre_producto    || null,
         imei:               retoma.imei               || null,
         cantidad_retoma:    retoma.cantidad_retoma     || 1,
+        color:              colorRetoma,
       });
 
       if (retoma.ingreso_inventario) {
@@ -665,9 +695,11 @@ const editarFactura = async (negocioId, id, {
               }
               await client.query(
                 `UPDATE seriales
-                 SET vendido = false, prestado = false, fecha_salida = NULL, cliente_origen = $1
-                 WHERE id = $2`,
-                [nombre_cliente, existeSerial.id]
+                 SET vendido = false, prestado = false, fecha_salida = NULL, cliente_origen = $1,
+                     color = COALESCE($2, color),
+                     caracteristicas = COALESCE($3::jsonb, caracteristicas)
+                 WHERE id = $4`,
+                [nombre_cliente, colorRetoma, caracteristicasRetoma, existeSerial.id]
               );
             } else {
               const { rows: psCheck } = await client.query(
@@ -680,10 +712,11 @@ const editarFactura = async (negocioId, id, {
                 throw { status: 403, message: 'El producto de retoma no pertenece a este negocio' };
               }
               await client.query(
-                `INSERT INTO seriales(producto_id, imei, fecha_entrada, costo_compra, cliente_origen)
-                 VALUES ($1, $2, $3, $4, $5)`,
+                `INSERT INTO seriales(producto_id, imei, fecha_entrada, costo_compra, cliente_origen, color, caracteristicas)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)`,
                 [retoma.producto_serial_id, retoma.imei,
-                 _fechaHoy(), retoma.valor_retoma, nombre_cliente]
+                 _fechaHoy(), retoma.valor_retoma, nombre_cliente,
+                 colorRetoma, caracteristicasRetoma]
               );
             }
           }
