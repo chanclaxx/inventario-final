@@ -310,15 +310,17 @@ const asegurarCuentaEfectivo = async (negocioId, sucursalId) => {
 
 const insertarMovimiento = async (client, {
   cuenta_id, tipo, categoria, valor, concepto, grupo_traslado, usuario_id, clave_idempotencia, tasa_cambio,
+  proveedor_id, compra_id,
 }) => {
   const { rows } = await (client || pool).query(`
     INSERT INTO movimientos_dinero
-      (cuenta_id, tipo, categoria, valor, concepto, grupo_traslado, usuario_id, clave_idempotencia, tasa_cambio)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      (cuenta_id, tipo, categoria, valor, concepto, grupo_traslado, usuario_id, clave_idempotencia, tasa_cambio,
+       proveedor_id, compra_id)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
     RETURNING *
   `, [cuenta_id, tipo, categoria, valor, concepto || null,
       grupo_traslado || null, usuario_id || null, clave_idempotencia || null,
-      tasa_cambio || null]);
+      tasa_cambio || null, proveedor_id || null, compra_id || null]);
   return rows[0];
 };
 
@@ -433,6 +435,67 @@ const insertarArqueo = async ({ cuenta_id, saldo, saldo_calculado, diferencia, u
   return rows[0];
 };
 
+// ─── Proveedores y compras (para asignar pagos de mercancía) ─────────────────
+
+const findProveedores = async (negocioId) => {
+  const { rows } = await pool.query(
+    `SELECT id, nombre, tipo FROM proveedores WHERE negocio_id = $1 ORDER BY nombre ASC`,
+    [negocioId]
+  );
+  return rows;
+};
+
+const findProveedorById = async (id, negocioId) => {
+  const { rows } = await pool.query(
+    `SELECT id, nombre FROM proveedores WHERE id = $1 AND negocio_id = $2`,
+    [id, negocioId]
+  );
+  return rows[0] || null;
+};
+
+// Total pagado a una compra vía tesorería, convertido a pesos: los pagos desde
+// cuentas USD usan la tasa congelada al momento del pago (tasa_cambio).
+const _SQL_PAGADO_COMPRA = `
+  SELECT COALESCE(SUM(
+    CASE WHEN cu.moneda = 'USD' THEN md.valor * COALESCE(md.tasa_cambio, 0)
+         ELSE md.valor END), 0) AS pagado
+  FROM movimientos_dinero md
+  JOIN cuentas_dinero cu ON cu.id = md.cuenta_id
+  WHERE md.compra_id = $1 AND md.activo IS NOT FALSE AND md.tipo = 'salida'
+`;
+
+const pagadoCompra = async (compraId) => {
+  const { rows } = await pool.query(_SQL_PAGADO_COMPRA, [compraId]);
+  return Number(rows[0].pagado);
+};
+
+const findCompraParaPago = async (compraId, sucursalId) => {
+  const { rows } = await pool.query(`
+    SELECT c.id, c.fecha, c.numero_factura, c.total, c.estado,
+           c.registrar_en_caja, c.metodo, c.proveedor_id
+    FROM compras c
+    WHERE c.id = $1 AND c.sucursal_id = $2
+  `, [compraId, sucursalId]);
+  return rows[0] || null;
+};
+
+// Compras recientes de un proveedor en la sucursal, con lo ya pagado por
+// tesorería (para elegir a cuál compra asignar un pago).
+const findComprasProveedor = async (proveedorId, sucursalId) => {
+  const { rows } = await pool.query(`
+    SELECT c.id, c.fecha, c.numero_factura, c.total,
+           c.registrar_en_caja, c.metodo,
+           COALESCE(p.pagado, 0) AS pagado_tesoreria
+    FROM compras c
+    LEFT JOIN LATERAL (${_SQL_PAGADO_COMPRA.replace('$1', 'c.id')}) p ON TRUE
+    WHERE c.proveedor_id = $1 AND c.sucursal_id = $2
+      AND c.estado != 'Cancelada'
+    ORDER BY c.fecha DESC
+    LIMIT 30
+  `, [proveedorId, sucursalId]);
+  return rows;
+};
+
 // ─── Cartera (dinero "en la calle") ──────────────────────────────────────────
 
 const getCartera = async (sucursalId) => {
@@ -516,5 +579,6 @@ module.exports = {
   findCajaAbierta, insertarEspejoCaja,
   ultimoArqueo, insertarArqueo, ultimaTasa,
   getCartera, metodosSinAsignar,
+  findProveedores, findProveedorById, findCompraParaPago, findComprasProveedor, pagadoCompra,
   pool,
 };

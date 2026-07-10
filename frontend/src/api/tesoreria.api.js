@@ -13,3 +13,7 @@ export const toggleMovimiento    = (id)      => api.patch(`/tesoreria/movimiento
 
 export const arquear          = (data)       => api.post('/tesoreria/arqueos', data);
 export const getResumenNegocio = ()          => api.get('/tesoreria/resumen');
+
+export const getProveedoresTesoreria = ()    => api.get('/tesoreria/proveedores');
+export const getComprasProveedor = (proveedorId) =>
+  api.get(`/tesoreria/compras-proveedor/${proveedorId}`);

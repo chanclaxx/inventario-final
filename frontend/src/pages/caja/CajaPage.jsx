@@ -179,7 +179,10 @@ const CONFIG_GRUPOS = {
 
 function ModalMovimiento({ cajaId, onClose }) {
   const queryClient = useQueryClient();
-  const [form,  setForm]  = useState({ tipo: 'Ingreso', concepto: '', valor: '' });
+  const metodos     = useMetodosPago();
+  // El método es obligatorio para que Tesorería asigne el movimiento a la
+  // cuenta correcta (efectivo, banco, billetera…).
+  const [form,  setForm]  = useState({ tipo: 'Ingreso', concepto: '', valor: '', metodo: 'Efectivo' });
   const [error, setError] = useState('');
 
   const mutation = useMutation({
@@ -187,6 +190,7 @@ function ModalMovimiento({ cajaId, onClose }) {
       tipo:     form.tipo,
       concepto: form.concepto,
       valor:    Number(form.valor),
+      metodo:   form.metodo,
     }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['caja-resumen', cajaId], exact: false });
@@ -218,6 +222,19 @@ function ModalMovimiento({ cajaId, onClose }) {
               {t}
             </button>
           ))}
+        </div>
+        <div className="flex flex-col gap-1">
+          <label className="text-sm font-medium text-gray-700">Método de pago</label>
+          <select
+            value={form.metodo}
+            onChange={(e) => setForm({ ...form, metodo: e.target.value })}
+            className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-sm
+              text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            {metodos.map((m) => (
+              <option key={m.id} value={m.id}>{m.label}</option>
+            ))}
+          </select>
         </div>
         <Input id="concepto" label="Concepto" placeholder="Ej: Pago servicios"
           value={form.concepto} onChange={(e) => setForm({ ...form, concepto: e.target.value })}

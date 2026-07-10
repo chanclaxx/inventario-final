@@ -578,17 +578,44 @@ function ModalVolviDivisa({ cuentas, onClose }) {
   );
 }
 
-// "Pagué mercancía": salida directa de una cuenta (en su moneda) sin
-// necesidad de llevar cuentas con el proveedor en el sistema.
+// "Pagué mercancía": salida directa de una cuenta (en su moneda).
+// Dos modos: rápido (texto libre) o asignado a un proveedor y, opcionalmente,
+// a una compra ya registrada (con bloqueo de dobles pagos en el backend).
 function ModalPagueMercancia({ cuentas, onClose }) {
   const queryClient = useQueryClient();
   const [claveIdem] = useState(() => crypto.randomUUID());
-  const [cuentaId, setCuentaId] = useState(cuentas[0]?.id || '');
-  const [valor, setValor]       = useState('');
-  const [concepto, setConcepto] = useState('');
-  const [error, setError]       = useState('');
+  const [modo, setModo]           = useState('rapido'); // 'rapido' | 'proveedor'
+  const [cuentaId, setCuentaId]   = useState(cuentas[0]?.id || '');
+  const [valor, setValor]         = useState('');
+  const [concepto, setConcepto]   = useState('');
+  const [proveedorId, setProveedorId] = useState('');
+  const [compraId, setCompraId]   = useState('');
+  const [error, setError]         = useState('');
 
   const cuenta = cuentas.find((c) => c.id === Number(cuentaId));
+
+  const { data: proveedores } = useQuery({
+    queryKey: ['tesoreria', 'proveedores'],
+    queryFn:  () => tesoreriaApi.getProveedoresTesoreria().then((r) => r.data.data),
+    enabled:  modo === 'proveedor',
+  });
+
+  const { data: compras } = useQuery({
+    queryKey: ['tesoreria', 'compras-proveedor', proveedorId],
+    queryFn:  () => tesoreriaApi.getComprasProveedor(proveedorId).then((r) => r.data.data),
+    enabled:  modo === 'proveedor' && !!proveedorId,
+  });
+
+  const compraSel = (compras || []).find((c) => c.id === Number(compraId));
+
+  const seleccionarCompra = (c) => {
+    if (c.ya_descuenta) return; // ya salió de tesorería por su método de pago
+    if (Number(compraId) === c.id) { setCompraId(''); return; }
+    setCompraId(c.id);
+    // Prellenar con el saldo por pagar (solo si la cuenta es en pesos —
+    // en dólares el usuario digita lo que pagó en dólares)
+    if (!esUSD(cuenta)) setValor(c.saldo_por_pagar);
+  };
 
   const mutation = useMutation({
     mutationFn: () => tesoreriaApi.registrarMovimiento({
@@ -596,7 +623,9 @@ function ModalPagueMercancia({ cuentas, onClose }) {
       tipo:               'salida',
       categoria:          'mercancia',
       valor,
-      concepto:           concepto || 'Pago de mercancía',
+      concepto:           concepto || (modo === 'proveedor' ? '' : 'Pago de mercancía'),
+      proveedor_id:       modo === 'proveedor' && proveedorId ? Number(proveedorId) : undefined,
+      compra_id:          modo === 'proveedor' && compraId    ? Number(compraId)    : undefined,
       clave_idempotencia: claveIdem,
     }),
     onSuccess: () => {
@@ -609,6 +638,79 @@ function ModalPagueMercancia({ cuentas, onClose }) {
   return (
     <Modal open onClose={onClose} title="Pagué mercancía">
       <div className="flex flex-col gap-4">
+
+        {/* Modo: rápido o asignado a proveedor */}
+        <div className="flex gap-1 bg-gray-100 rounded-xl p-1">
+          {[['rapido', 'Pago rápido'], ['proveedor', 'A un proveedor']].map(([m, lbl]) => (
+            <button key={m} type="button"
+              onClick={() => { setModo(m); setError(''); }}
+              className={`flex-1 text-xs font-medium px-3 py-2 rounded-lg transition-colors
+                ${modo === m ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500'}`}>
+              {lbl}
+            </button>
+          ))}
+        </div>
+
+        {modo === 'proveedor' && (
+          <>
+            <div>
+              <label className="text-xs font-semibold text-gray-500">Proveedor</label>
+              <select value={proveedorId}
+                onChange={(e) => { setProveedorId(e.target.value); setCompraId(''); }}
+                className="w-full mt-1 border border-gray-200 rounded-xl px-3 py-2 text-sm bg-white">
+                <option value="">Selecciona el proveedor…</option>
+                {(proveedores || []).map((p) => (
+                  <option key={p.id} value={p.id}>{p.nombre}</option>
+                ))}
+              </select>
+            </div>
+
+            {proveedorId && (
+              <div>
+                <label className="text-xs font-semibold text-gray-500">
+                  Compra (opcional — toca para asignar el pago)
+                </label>
+                {(compras || []).length === 0 ? (
+                  <p className="text-xs text-gray-400 mt-1">
+                    Este proveedor no tiene compras registradas en esta sucursal.
+                    Puedes registrar el pago solo al proveedor.
+                  </p>
+                ) : (
+                  <div className="flex flex-col gap-1.5 mt-1 max-h-44 overflow-y-auto pr-1">
+                    {compras.map((c) => (
+                      <button key={c.id} type="button" onClick={() => seleccionarCompra(c)}
+                        disabled={c.ya_descuenta}
+                        className={`flex items-center justify-between gap-2 px-3 py-2 rounded-xl border text-left transition-colors
+                          ${c.ya_descuenta
+                            ? 'border-gray-100 bg-gray-50 opacity-60 cursor-not-allowed'
+                            : Number(compraId) === c.id
+                              ? 'border-blue-300 bg-blue-50'
+                              : 'border-gray-200 hover:bg-gray-50'}`}>
+                        <span className="min-w-0">
+                          <span className="block text-sm font-medium text-gray-800">
+                            Compra #{c.id}{c.numero_factura ? ` · Fact. ${c.numero_factura}` : ''}
+                          </span>
+                          <span className="block text-xs text-gray-400">
+                            {formatFechaHora(c.fecha)} · {formatCOP(c.total)}
+                          </span>
+                        </span>
+                        <span className={`text-xs font-medium whitespace-nowrap
+                          ${c.ya_descuenta ? 'text-gray-400' : c.saldo_por_pagar > 0 ? 'text-amber-600' : 'text-green-600'}`}>
+                          {c.ya_descuenta
+                            ? 'Ya descontada'
+                            : c.pagado_tesoreria > 0
+                              ? `Por pagar: ${formatCOP(c.saldo_por_pagar)}`
+                              : 'Sin pagos'}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </>
+        )}
+
         <div>
           <label className="text-xs font-semibold text-gray-500">¿De dónde salió la plata?</label>
           <div className="grid grid-cols-2 gap-1.5 mt-1">
@@ -639,22 +741,36 @@ function ModalPagueMercancia({ cuentas, onClose }) {
         </div>
 
         <div>
-          <label className="text-xs font-semibold text-gray-500">¿A quién? (opcional)</label>
+          <label className="text-xs font-semibold text-gray-500">
+            {modo === 'proveedor' ? 'Nota (opcional)' : '¿A quién? (opcional)'}
+          </label>
           <input value={concepto} onChange={(e) => setConcepto(e.target.value)}
-            placeholder="Ej: proveedor Juan — 10 cargadores"
+            placeholder={modo === 'proveedor'
+              ? 'Ej: 10 cargadores tipo C'
+              : 'Ej: proveedor Juan — 10 cargadores'}
             className="w-full mt-1 border border-gray-200 rounded-xl px-3 py-2 text-sm
               focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300" />
         </div>
 
-        <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl p-3">
-          Ojo: si esta compra ya la registraste en Proveedores con método de pago
-          y "registrar en caja", <b>no la pagues también aquí</b> — se descontaría dos veces.
-        </p>
+        {esUSD(cuenta) && compraSel && (
+          <p className="text-xs text-gray-500 bg-gray-50 rounded-xl p-3">
+            La compra vale {formatCOP(compraSel.total)}. Digita cuántos <b>dólares</b> pagaste;
+            el sistema usa la última tasa para llevar la cuenta en pesos.
+          </p>
+        )}
+
+        {modo === 'rapido' && (
+          <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl p-3">
+            Ojo: si esta compra ya la registraste en Proveedores con método de pago
+            y "registrar en caja", <b>no la pagues también aquí</b> — se descontaría dos veces.
+          </p>
+        )}
 
         {error && <p className="text-sm text-red-500">{error}</p>}
 
         <button onClick={() => mutation.mutate()}
-          disabled={mutation.isPending || !valor || !cuenta}
+          disabled={mutation.isPending || !valor || !cuenta
+            || (modo === 'proveedor' && !proveedorId)}
           className="w-full bg-blue-600 text-white rounded-xl py-3 text-base font-semibold
             hover:bg-blue-700 disabled:opacity-50 transition-colors">
           {mutation.isPending ? 'Registrando…' : 'Registrar pago'}

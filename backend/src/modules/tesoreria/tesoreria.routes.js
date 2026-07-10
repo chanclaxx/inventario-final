@@ -39,6 +39,10 @@ router.patch('/movimientos/:id/toggle', requireModulo('tesoreria'), ctrl.toggleM
 
 router.post('/arqueos',       requireModulo('tesoreria'), validarArqueo, validate, ctrl.arquear);
 
+// Para asignar pagos de mercancía a proveedor/compra (solo lectura)
+router.get('/proveedores',                    requireModulo('tesoreria'), ctrl.getProveedores);
+router.get('/compras-proveedor/:proveedorId', requireModulo('tesoreria'), ctrl.getComprasProveedor);
+
 // Consolidado de todas las sucursales — solo el dueño del negocio
 router.get('/resumen',        requireRole('admin_negocio'), ctrl.getResumenNegocio);
 

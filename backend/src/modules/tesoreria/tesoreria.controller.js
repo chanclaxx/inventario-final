@@ -123,6 +123,22 @@ const arquear = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+const getProveedores = async (req, res, next) => {
+  try {
+    const data = await service.getProveedores(req.user.negocio_id);
+    res.json({ ok: true, data });
+  } catch (err) { next(err); }
+};
+
+const getComprasProveedor = async (req, res, next) => {
+  try {
+    const data = await service.getComprasProveedor(
+      req.user.negocio_id, req.sucursal_id, Number(req.params.proveedorId)
+    );
+    res.json({ ok: true, data });
+  } catch (err) { next(err); }
+};
+
 const getResumenNegocio = async (req, res, next) => {
   try {
     const data = await service.getResumenNegocio(req.user.negocio_id);
@@ -135,4 +151,5 @@ module.exports = {
   getSaldos, getExtracto,
   registrarMovimiento, trasladar, toggleMovimiento,
   arquear, getResumenNegocio,
+  getProveedores, getComprasProveedor,
 };

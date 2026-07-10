@@ -11,6 +11,8 @@ const MONEDAS          = ['COP', 'USD'];
 const esCuentaEfectivo = (cuenta) =>
   cuenta.tipo === 'efectivo' || (cuenta.metodos_pago || []).includes('Efectivo');
 
+const esUSDCuenta = (cuenta) => (cuenta.moneda || 'COP') === 'USD';
+
 // ─── Cuentas ──────────────────────────────────────────────────────────────────
 
 const listarCuentas = async (negocioId, sucursalId) => {
@@ -254,7 +256,8 @@ const _espejarEnCaja = async (client, cuenta, mov, usuarioId, etiqueta) => {
 };
 
 const registrarMovimiento = async (negocioId, sucursalId, usuarioId, datos) => {
-  const { cuenta_id, tipo, categoria, valor, concepto, clave_idempotencia } = datos;
+  const { cuenta_id, tipo, categoria, valor, clave_idempotencia, proveedor_id, compra_id } = datos;
+  let { concepto } = datos;
 
   if (!['entrada', 'salida'].includes(tipo)) {
     throw { status: 400, message: 'tipo debe ser entrada o salida' };
@@ -271,6 +274,44 @@ const registrarMovimiento = async (negocioId, sucursalId, usuarioId, datos) => {
     throw { status: 403, message: 'La cuenta pertenece a otra sucursal' };
   }
 
+  // Pagos desde cuentas en divisa: congelar la tasa de referencia del momento
+  // (permite mostrar/comparar el equivalente en pesos del pago).
+  const tasaPago = esUSDCuenta(cuenta) ? await repo.ultimaTasa(cuenta.id) : null;
+
+  // ── Vínculo opcional con proveedor / compra (pagos de mercancía) ────────
+  let proveedor = null;
+  let compra    = null;
+  if (compra_id) {
+    compra = await repo.findCompraParaPago(compra_id, sucursalId);
+    if (!compra) throw { status: 404, message: 'Compra no encontrada en esta sucursal' };
+    if (compra.estado === 'Cancelada') {
+      throw { status: 400, message: 'La compra está cancelada' };
+    }
+    // Anti doble conteo: si la compra se registró con pago en caja, la
+    // derivación YA la descuenta de tesorería por su método de pago.
+    if (compra.registrar_en_caja) {
+      throw {
+        status: 409,
+        message: `La compra #${compra.id} ya descuenta de tesorería (se registró con pago en caja${compra.metodo ? ` — ${compra.metodo}` : ''}). No la pagues de nuevo.`,
+      };
+    }
+    const pagado = await repo.pagadoCompra(compra.id);
+    if (pagado >= Number(compra.total)) {
+      throw { status: 409, message: `La compra #${compra.id} ya está pagada por tesorería (${pagado} de ${compra.total})` };
+    }
+    if (proveedor_id && Number(proveedor_id) !== compra.proveedor_id) {
+      throw { status: 400, message: 'La compra no pertenece a ese proveedor' };
+    }
+  }
+  const proveedorIdFinal = proveedor_id || compra?.proveedor_id || null;
+  if (proveedorIdFinal) {
+    proveedor = await repo.findProveedorById(proveedorIdFinal, negocioId);
+    if (!proveedor) throw { status: 404, message: 'Proveedor no encontrado' };
+  }
+  if ((proveedor || compra) && !concepto) {
+    concepto = `Pago mercancía — ${proveedor?.nombre || 'proveedor'}${compra ? ` (Compra #${compra.id})` : ''}`;
+  }
+
   // Idempotencia: reintento del mismo POST → devolver el movimiento original
   if (clave_idempotencia) {
     const existente = await repo.findMovimientoPorClave(clave_idempotencia);
@@ -283,6 +324,8 @@ const registrarMovimiento = async (negocioId, sucursalId, usuarioId, datos) => {
     const mov = await repo.insertarMovimiento(client, {
       cuenta_id, tipo, categoria, valor: monto,
       concepto, usuario_id: usuarioId, clave_idempotencia,
+      tasa_cambio: tasaPago,
+      proveedor_id: proveedorIdFinal, compra_id: compra?.id || null,
     });
     const etiqueta = concepto
       ? `${categoria.charAt(0).toUpperCase()}${categoria.slice(1)} — ${concepto}`
@@ -416,6 +459,24 @@ const arquear = async (negocioId, sucursalId, usuarioId, { cuenta_id, saldo_cont
   });
 };
 
+// ─── Proveedores y compras (para asignar pagos de mercancía) ─────────────────
+
+const getProveedores = (negocioId) => repo.findProveedores(negocioId);
+
+const getComprasProveedor = async (negocioId, sucursalId, proveedorId) => {
+  const proveedor = await repo.findProveedorById(proveedorId, negocioId);
+  if (!proveedor) throw { status: 404, message: 'Proveedor no encontrado' };
+  const compras = await repo.findComprasProveedor(proveedorId, sucursalId);
+  return compras.map((c) => ({
+    ...c,
+    total:            Number(c.total),
+    pagado_tesoreria: Number(c.pagado_tesoreria),
+    saldo_por_pagar:  Math.max(0, Number(c.total) - Number(c.pagado_tesoreria)),
+    // true = ya descuenta de tesorería por su método de pago (no pagar de nuevo)
+    ya_descuenta:     c.registrar_en_caja === true,
+  }));
+};
+
 // ─── Resumen consolidado del negocio (todas las sucursales) ──────────────────
 
 const getResumenNegocio = async (negocioId) => {
@@ -445,4 +506,5 @@ module.exports = {
   getSaldos, getExtracto,
   registrarMovimiento, trasladar, toggleMovimiento,
   arquear, getResumenNegocio,
+  getProveedores, getComprasProveedor,
 };
