@@ -56,7 +56,8 @@ router.patch('/negocios/:id/email-facturas',         authSuperadmin, ctrl.toggle
 router.get('/planes',                                authSuperadmin, ctrl.getPlanes);
 router.post('/negocios/:id/renovar-plan',            authSuperadmin, ctrl.renovarPlan);
 
-router.post('/backup',           authSuperadmin, backupCtrl.hacerBackup);
-router.get('/backup/historial',  authSuperadmin, backupCtrl.getBackups);
+router.post('/backup',                     authSuperadmin, backupCtrl.hacerBackup);
+router.get('/backup/historial',            authSuperadmin, backupCtrl.getBackups);
+router.get('/backup/descargar/:nombre',    authSuperadmin, backupCtrl.descargarBackup);
 
 module.exports = router;

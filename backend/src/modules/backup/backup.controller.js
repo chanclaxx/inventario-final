@@ -1,4 +1,4 @@
-const { ejecutarBackup, listarBackups } = require('./backup.service');
+const { ejecutarBackup, listarBackups, generarUrlDescarga } = require('./backup.service');
 
 const hacerBackup = async (req, res, next) => {
   try {
@@ -18,4 +18,13 @@ const getBackups = async (req, res, next) => {
   }
 };
 
-module.exports = { hacerBackup, getBackups };
+const descargarBackup = async (req, res, next) => {
+  try {
+    const url = await generarUrlDescarga(req.params.nombre);
+    res.json({ ok: true, data: { url, expira_en_segundos: 300 } });
+  } catch (err) {
+    next(err);
+  }
+};
+
+module.exports = { hacerBackup, getBackups, descargarBackup };

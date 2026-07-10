@@ -318,4 +318,35 @@ const enviarRecuperacionPassword = async ({ email, nombre, token }) => {
   });
 };
 
-module.exports = { enviarFactura, enviarAprobacion, enviarConfirmacionRegistro,enviarRecuperacionPassword };
+// ── Alerta operativa de backups — para el dueño de la plataforma ─────────────
+// Requiere BACKUP_ALERT_EMAIL; si no está configurada, se omite en silencio
+// (mismo contrato que el resto del servicio: nunca lanza error al caller).
+const enviarAlertaBackup = async ({ asunto, detalles }) => {
+  const destinatario = process.env.BACKUP_ALERT_EMAIL;
+  if (!destinatario) {
+    console.warn('[email] BACKUP_ALERT_EMAIL no configurada — alerta de backup omitida');
+    return { ok: false, razon: 'sin_destinatario' };
+  }
+
+  return _enviarSilencioso({
+    to:      [{ email: destinatario }],
+    sender:  {
+      email: process.env.BREVO_FROM_EMAIL,
+      name:  process.env.BREVO_FROM_NAME || 'Sistema de Inventario',
+    },
+    subject: `⚠️ ${asunto}`,
+    htmlContent: `
+      <div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;padding:32px;">
+        <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:16px 20px;">
+          <h2 style="margin:0 0 8px;color:#b91c1c;font-size:17px;">${asunto}</h2>
+          <p style="margin:0;color:#374151;font-size:14px;white-space:pre-wrap;">${detalles}</p>
+        </div>
+        <p style="margin:16px 0 0;color:#9ca3af;font-size:12px;">
+          Alerta automática del sistema de backups — ${new Date().toISOString()}
+        </p>
+      </div>
+    `,
+  });
+};
+
+module.exports = { enviarFactura, enviarAprobacion, enviarConfirmacionRegistro, enviarRecuperacionPassword, enviarAlertaBackup };

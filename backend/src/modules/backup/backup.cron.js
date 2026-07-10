@@ -1,12 +1,23 @@
-const cron            = require('node-cron');
-const { ejecutarBackup } = require('./backup.service');
+const cron = require('node-cron');
+const { ejecutarBackupConAlertas } = require('./backup.service');
 
 // ── Configuración ─────────────────────────────────────────────────────────────
-// Backup diario a las 2:00 AM — hora en que el sistema tiene menos actividad.
-// Mantiene los últimos 30 backups (~1 mes de historial).
-// Si falla, solo loguea — nunca interrumpe el servidor.
+// Backup diario a las 2:00 AM por defecto — configurable con BACKUP_CRON
+// (ej. "0 */6 * * *" para cada 6 horas) sin tocar código.
+// Retención: 7 días completos, uno por semana hasta 28 días, uno por mes
+// hasta 180 días — ver backup.service.js.
+// Si falla: loguea, alerta por email (BACKUP_ALERT_EMAIL) y notifica al
+// heartbeat (BACKUP_HEALTHCHECK_URL) — nunca interrumpe el servidor.
 
-const CRON_EXPRESION = '0 2 * * *'; // Cada día a las 2:00 AM
+const CRON_POR_DEFECTO = '0 2 * * *'; // Cada día a las 2:00 AM
+
+const _resolverExpresion = () => {
+  const custom = process.env.BACKUP_CRON;
+  if (!custom) return CRON_POR_DEFECTO;
+  if (cron.validate(custom)) return custom;
+  console.warn(`[backup-cron] BACKUP_CRON inválida ("${custom}") — usando "${CRON_POR_DEFECTO}"`);
+  return CRON_POR_DEFECTO;
+};
 
 // ── Iniciar el cron ───────────────────────────────────────────────────────────
 
@@ -16,19 +27,22 @@ const iniciarCronBackup = () => {
     return;
   }
 
-  cron.schedule(CRON_EXPRESION, async () => {
+  const expresion = _resolverExpresion();
+
+  cron.schedule(expresion, async () => {
     console.log(`[backup-cron] Iniciando backup automático — ${new Date().toISOString()}`);
-    try {
-      const resultado = await ejecutarBackup();
-      console.log(`[backup-cron] ✓ Backup completado: ${resultado.archivo} | ${resultado.total_registros} registros | ${resultado.eliminados_antiguos} backups eliminados`);
-    } catch (err) {
-      console.error('[backup-cron] ✗ Error en backup automático:', err?.message || err);
+    const resultado = await ejecutarBackupConAlertas();
+    if (resultado.ok) {
+      const nota = resultado.advertencia ? ` | ⚠ ${resultado.advertencia}` : '';
+      console.log(`[backup-cron] ✓ Backup completado: ${resultado.archivo} | ${resultado.total_registros} registros | ${resultado.eliminados_antiguos} backups eliminados${nota}`);
+    } else {
+      console.error(`[backup-cron] ✗ Error en backup automático: ${resultado.error}`);
     }
   }, {
     timezone: 'America/Bogota',
   });
 
-  console.log(`[backup-cron] Cron de backup activado — ${CRON_EXPRESION} (America/Bogota)`);
+  console.log(`[backup-cron] Cron de backup activado — ${expresion} (America/Bogota)`);
 };
 
 module.exports = { iniciarCronBackup };

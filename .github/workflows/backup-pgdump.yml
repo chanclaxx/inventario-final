@@ -1,0 +1,118 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Backup binario de PostgreSQL (pg_dump -Fc) — independiente del backend.
+#
+# Corre en GitHub Actions cada 6 horas: aunque Railway esté caído, el backup
+# se genera igual. El dump incluye esquema, datos, secuencias e índices, y se
+# restaura completo con un solo comando pg_restore (ver docs/BACKUP.md).
+#
+# ⚠ INACTIVO HASTA CONFIGURAR SECRETS — si faltan, el job termina en verde
+#   sin hacer nada (no rompe ni ensucia el repositorio con fallos).
+#
+# Secrets requeridos (Settings → Secrets and variables → Actions):
+#   SUPABASE_DB_URL              Cadena de conexión al pooler en MODO SESIÓN
+#                                (puerto 5432, NO 6543):
+#                                postgres://postgres.<ref>:<password>@aws-1-us-west-2.pooler.supabase.com:5432/postgres
+#   BACKUP_SUPABASE_URL          URL del proyecto Supabase de backups
+#                                (el proyecto de Storage, NO el de la BD)
+#   BACKUP_SUPABASE_SERVICE_KEY  Service key de ese proyecto
+# Opcional:
+#   BACKUP_HEALTHCHECK_URL       URL de healthchecks.io — recibe ping de
+#                                éxito o /fail según el resultado
+# ─────────────────────────────────────────────────────────────────────────────
+name: Backup PostgreSQL (pg_dump)
+
+on:
+  schedule:
+    # UTC: 07:17, 13:17, 19:17, 01:17 → Bogotá (UTC-5): 02:17, 08:17, 14:17, 20:17
+    - cron: '17 1,7,13,19 * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      SUPABASE_DB_URL:             ${{ secrets.SUPABASE_DB_URL }}
+      BACKUP_SUPABASE_URL:         ${{ secrets.BACKUP_SUPABASE_URL }}
+      BACKUP_SUPABASE_SERVICE_KEY: ${{ secrets.BACKUP_SUPABASE_SERVICE_KEY }}
+      BACKUP_HEALTHCHECK_URL:      ${{ secrets.BACKUP_HEALTHCHECK_URL }}
+
+    steps:
+      - name: Verificar secrets
+        id: guard
+        run: |
+          if [ -z "$SUPABASE_DB_URL" ] || [ -z "$BACKUP_SUPABASE_URL" ] || [ -z "$BACKUP_SUPABASE_SERVICE_KEY" ]; then
+            echo "::notice::Secrets de backup no configurados — backup omitido (ver docs/BACKUP.md)"
+            echo "listo=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "listo=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout
+        if: steps.guard.outputs.listo == 'true'
+        uses: actions/checkout@v4
+
+      - name: Instalar cliente PostgreSQL 17
+        if: steps.guard.outputs.listo == 'true'
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -sSf -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] \
+            http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client-17
+
+      - name: Generar dump (pg_dump -Fc, solo esquema public)
+        if: steps.guard.outputs.listo == 'true'
+        run: |
+          NOMBRE="pgdump_$(date -u +%Y-%m-%d_%H-%M).dump"
+          echo "NOMBRE=$NOMBRE" >> "$GITHUB_ENV"
+          pg_dump "$SUPABASE_DB_URL" \
+            --schema=public \
+            --format=custom \
+            --no-owner \
+            --no-privileges \
+            --file="$NOMBRE"
+          ls -lh "$NOMBRE"
+
+      - name: Verificar integridad del dump
+        if: steps.guard.outputs.listo == 'true'
+        run: |
+          pg_restore --list "$NOMBRE" > /dev/null
+          TAMANO=$(stat -c%s "$NOMBRE")
+          if [ "$TAMANO" -lt 10000 ]; then
+            echo "::error::Dump sospechosamente pequeño ($TAMANO bytes) — abortando"
+            exit 1
+          fi
+          echo "Dump íntegro — $TAMANO bytes"
+
+      - name: Subir a Supabase Storage (backups/pgdump/)
+        if: steps.guard.outputs.listo == 'true'
+        run: |
+          HTTP=$(curl -s -o respuesta.json -w "%{http_code}" -X POST \
+            "$BACKUP_SUPABASE_URL/storage/v1/object/backups/pgdump/$NOMBRE" \
+            -H "Authorization: Bearer $BACKUP_SUPABASE_SERVICE_KEY" \
+            -H "Content-Type: application/octet-stream" \
+            --data-binary "@$NOMBRE")
+          if [ "$HTTP" != "200" ]; then
+            echo "::error::Fallo subiendo el dump (HTTP $HTTP): $(cat respuesta.json)"
+            exit 1
+          fi
+          echo "Subido: pgdump/$NOMBRE"
+
+      - name: Aplicar retención (conservar los 60 más recientes)
+        if: steps.guard.outputs.listo == 'true'
+        run: node scripts/backup/limpiar-pgdump.mjs
+
+      - name: Ping heartbeat (éxito)
+        if: steps.guard.outputs.listo == 'true' && env.BACKUP_HEALTHCHECK_URL != ''
+        run: curl -sf -m 10 -X POST "$BACKUP_HEALTHCHECK_URL" || true
+
+      - name: Ping heartbeat (fallo)
+        if: failure() && env.BACKUP_HEALTHCHECK_URL != ''
+        run: curl -sf -m 10 -X POST "${BACKUP_HEALTHCHECK_URL%/}/fail" || true
