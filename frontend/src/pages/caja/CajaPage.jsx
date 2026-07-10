@@ -531,7 +531,8 @@ function GrupoMovimientos({ grupoKey, grupo, cajaId, opciones, readOnly = false 
   );
 }
 
-function GrupoMovimientosInformativo({ grupo }) {
+function GrupoMovimientosInformativo(props) {
+  const { grupo, badge = 'por rendir' } = props;
   const [expandido, setExpandido] = useState(false);
   if (!grupo || grupo.items.length === 0) return null;
 
@@ -540,7 +541,9 @@ function GrupoMovimientosInformativo({ grupo }) {
       <button onClick={() => setExpandido(!expandido)}
         className="w-full flex items-center justify-between px-4 py-3 bg-gray-50 hover:bg-gray-100 transition-colors">
         <div className="flex items-center gap-2">
-          <Bike size={16} className="text-gray-400" />
+          {props.Icono
+            ? <props.Icono size={16} className="text-gray-400" />
+            : <Bike size={16} className="text-gray-400" />}
           <span className="text-sm font-semibold text-gray-500">{grupo.label}</span>
           <span className="text-xs px-2 py-0.5 rounded-full bg-white/80 text-gray-400">
             {grupo.items.length}
@@ -548,7 +551,7 @@ function GrupoMovimientosInformativo({ grupo }) {
         </div>
         <div className="flex items-center gap-3">
           <span className="text-sm font-medium text-gray-400">{formatCOP(grupo.total)}</span>
-          <span className="text-xs text-gray-400 bg-gray-200 px-2 py-0.5 rounded-full">por rendir</span>
+          <span className="text-xs text-gray-400 bg-gray-200 px-2 py-0.5 rounded-full">{badge}</span>
           {expandido
             ? <ChevronUp size={15} className="text-gray-400" />
             : <ChevronDown size={15} className="text-gray-400" />}
@@ -850,7 +853,8 @@ function ResumenGrupos({ grupos, cajaId, opciones, readOnly = false }) {
   const g = grupos || {};
   const has = (keys) => keys.some((k) => g[k]?.items?.length > 0);
   const ingresoKeys = ['facturas', 'abonosCredito', 'abonosPrestamo', 'abonosServicio', 'abonosDomicilio'];
-  const egresoKeys  = ['retomas', 'devoluciones', 'compras', 'abonosAcreedor'];
+  // Retomas NO van en egresos: los pagos de factura ya vienen netos de retoma
+  const egresoKeys  = ['devoluciones', 'compras', 'abonosAcreedor'];
   const hayNada = Object.values(g).every((x) => !x?.items?.length);
 
   if (hayNada) return <EmptyState icon={Wallet} titulo="Sin movimientos" />;
@@ -867,6 +871,13 @@ function ResumenGrupos({ grupos, cajaId, opciones, readOnly = false }) {
         <>
           <p className="text-xs text-gray-400 font-medium px-1 mt-1">En poder del domiciliario</p>
           <GrupoMovimientosInformativo grupo={g.facturasDomicilio} />
+        </>
+      )}
+
+      {g.retomas?.items?.length > 0 && (
+        <>
+          <p className="text-xs text-gray-400 font-medium px-1 mt-1">Retomas (informativo)</p>
+          <GrupoMovimientosInformativo grupo={g.retomas} badge="ya descontada" Icono={RefreshCw} />
         </>
       )}
 
@@ -1127,9 +1138,9 @@ export default function CajaPage() {
             <p className="text-sm font-bold text-green-700">+{formatCOP(totales.ingresos)}</p>
           </div>
           {totales.retomas > 0 && (
-            <div className="bg-orange-50 rounded-xl p-3 text-center">
-              <p className="text-xs text-orange-500">Retomas</p>
-              <p className="text-sm font-bold text-orange-700">-{formatCOP(totales.retomas)}</p>
+            <div className="bg-purple-50 rounded-xl p-3 text-center" title="Ya descontadas en el pago de la factura — no restan de la caja">
+              <p className="text-xs text-purple-500">Retomas (ya en factura)</p>
+              <p className="text-sm font-bold text-purple-700">{formatCOP(totales.retomas)}</p>
             </div>
           )}
           {totales.pendienteDomicilios > 0 && (
@@ -1200,8 +1211,14 @@ export default function CajaPage() {
                   </>
                 )}
 
+                {grupos.retomas?.items?.length > 0 && (
+                  <>
+                    <p className="text-xs text-gray-400 font-medium px-1 mt-1">Retomas (informativo)</p>
+                    <GrupoMovimientosInformativo grupo={grupos.retomas} badge="ya descontada" Icono={RefreshCw} />
+                  </>
+                )}
+
                 <p className="text-xs text-gray-400 font-medium px-1 mt-1">Egresos</p>
-                <GrupoMovimientos grupoKey="retomas"        grupo={grupos.retomas        || { items: [] }} cajaId={caja.id} opciones={opcionesGrupo} />
                 <GrupoMovimientos grupoKey="devoluciones"   grupo={grupos.devoluciones   || { items: [] }} cajaId={caja.id} opciones={opcionesGrupo} />
                 <GrupoMovimientos grupoKey="compras"        grupo={grupos.compras        || { items: [] }} cajaId={caja.id} opciones={opcionesGrupo} />
                 <GrupoMovimientos grupoKey="abonosAcreedor" grupo={grupos.abonosAcreedor || { items: [] }} cajaId={caja.id} opciones={opcionesGrupo} />

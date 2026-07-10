@@ -182,18 +182,9 @@ const UNION_EVENTOS = `
       AND ${MATCH_METODO('ma.metodo')}
 
     UNION ALL
-    -- Retomas (≈ caja: restan del ingreso — el cliente entregó equipo en vez
-    -- de dinero). Se atribuyen a la cuenta de efectivo.
-    SELECT f.fecha, 'salida', r.valor_retoma, 'retoma',
-           'Retoma factura #' || f.id || COALESCE(' — ' || r.nombre_producto, ''),
-           NULL::text, NULL::bigint AS mov_id
-    FROM retomas r
-    JOIN facturas f ON f.id = r.factura_id
-    WHERE f.sucursal_id = $2
-      AND f.estado != 'Cancelada'
-      AND $4::boolean
-
-    UNION ALL
+    -- NOTA: las retomas NO se restan aquí. Los pagos de factura ya vienen
+    -- NETOS de retoma (pagos_factura registra lo que el cliente pagó de
+    -- verdad), así que restarlas descontaría dos veces.
     -- Movimientos propios de tesorería (traslados, retiros, consignaciones…)
     SELECT md.fecha, md.tipo, md.valor,
            'tesoreria_' || md.categoria,
@@ -374,6 +365,39 @@ const toggleMovimiento = async (id, negocioId) => {
         AND referencia_id = ANY($2::int[])
     `, [nuevoEstado, afectados.map((r) => r.id)]);
 
+    // Abonos espejo en acreedores: anular = eliminarlos (la deuda revive);
+    // reactivar = recrearlos desde el movimiento (idempotente por mov_dinero_id).
+    const ids = afectados.map((r) => r.id);
+    if (!nuevoEstado) {
+      await client.query(
+        `DELETE FROM movimientos_acreedor WHERE mov_dinero_id = ANY($1::bigint[])`,
+        [ids]
+      );
+    } else {
+      await client.query(`
+        INSERT INTO movimientos_acreedor
+          (acreedor_id, usuario_id, tipo, descripcion, valor, cargo_id, metodo,
+           registrar_en_caja, sucursal_id, mov_dinero_id, fecha)
+        SELECT cargo.acreedor_id, md.usuario_id, 'Abono',
+               'Pago desde Tesorería (mov #' || md.id || ')',
+               ROUND(CASE WHEN cu.moneda = 'USD'
+                          THEN md.valor * COALESCE(md.tasa_cambio, 0)
+                          ELSE md.valor END, 2),
+               cargo.id, 'Tesorería', FALSE, cu.sucursal_id, md.id, md.fecha
+        FROM movimientos_dinero md
+        JOIN cuentas_dinero cu ON cu.id = md.cuenta_id
+        JOIN LATERAL (
+          SELECT m.id, m.acreedor_id FROM movimientos_acreedor m
+          WHERE m.compra_id = md.compra_id AND m.tipo = 'Cargo'
+          ORDER BY m.id LIMIT 1
+        ) cargo ON TRUE
+        WHERE md.id = ANY($1::bigint[])
+          AND md.compra_id IS NOT NULL
+          AND md.tipo = 'salida'
+          AND NOT EXISTS (SELECT 1 FROM movimientos_acreedor e WHERE e.mov_dinero_id = md.id)
+      `, [ids]);
+    }
+
     await client.query('COMMIT');
     return { id, activo: nuevoEstado, afectados: afectados.map((r) => r.id) };
   } catch (err) {
@@ -479,14 +503,57 @@ const findCompraParaPago = async (compraId, sucursalId) => {
   return rows[0] || null;
 };
 
-// Compras recientes de un proveedor en la sucursal, con lo ya pagado por
-// tesorería (para elegir a cuál compra asignar un pago).
+// Cargo del acreedor asociado a una compra + total abonado a ese cargo.
+// El estado de pago de la compra es: cargo.valor − abonado (fuente de verdad).
+const findCargoCompra = async (compraId) => {
+  const { rows } = await pool.query(`
+    SELECT c.id, c.acreedor_id, c.valor,
+           COALESCE((SELECT SUM(a.valor) FROM movimientos_acreedor a
+                     WHERE a.cargo_id = c.id AND a.tipo = 'Abono'), 0) AS abonado
+    FROM movimientos_acreedor c
+    WHERE c.compra_id = $1 AND c.tipo = 'Cargo'
+    ORDER BY c.id LIMIT 1
+  `, [compraId]);
+  if (!rows[0]) return null;
+  return { ...rows[0], valor: Number(rows[0].valor), abonado: Number(rows[0].abonado) };
+};
+
+// Abono espejo: salda la deuda del acreedor SIN descontar en caja/tesorería
+// (registrar_en_caja = FALSE — ambas derivaciones lo exigen en TRUE).
+const insertarAbonoEspejo = async (client, {
+  acreedor_id, usuario_id, valor, cargo_id, sucursal_id, mov_dinero_id, metodo, descripcion,
+}) => {
+  await (client || pool).query(`
+    INSERT INTO movimientos_acreedor
+      (acreedor_id, usuario_id, tipo, descripcion, valor, cargo_id, metodo,
+       registrar_en_caja, sucursal_id, mov_dinero_id)
+    VALUES ($1, $2, 'Abono', $3, $4, $5, $6, FALSE, $7, $8)
+  `, [acreedor_id, usuario_id || null, descripcion, valor, cargo_id,
+      metodo || 'Tesorería', sucursal_id, mov_dinero_id]);
+};
+
+// Compras recientes de un proveedor en la sucursal, con su estado real de
+// pago: si la compra tiene cargo de acreedor, el saldo es cargo − abonos
+// (incluye abonos de Acreedores Y los espejo de Tesorería); si no tiene
+// cargo, se usa lo pagado directamente por tesorería.
 const findComprasProveedor = async (proveedorId, sucursalId) => {
   const { rows } = await pool.query(`
     SELECT c.id, c.fecha, c.numero_factura, c.total,
            c.registrar_en_caja, c.metodo,
-           COALESCE(p.pagado, 0) AS pagado_tesoreria
+           cargo.id    AS cargo_id,
+           cargo.valor AS cargo_valor,
+           COALESCE(ab.abonado, 0) AS abonado,
+           COALESCE(p.pagado, 0)   AS pagado_tesoreria
     FROM compras c
+    LEFT JOIN LATERAL (
+      SELECT m.id, m.valor FROM movimientos_acreedor m
+      WHERE m.compra_id = c.id AND m.tipo = 'Cargo'
+      ORDER BY m.id LIMIT 1
+    ) cargo ON TRUE
+    LEFT JOIN LATERAL (
+      SELECT SUM(a.valor) AS abonado FROM movimientos_acreedor a
+      WHERE a.cargo_id = cargo.id AND a.tipo = 'Abono'
+    ) ab ON TRUE
     LEFT JOIN LATERAL (${_SQL_PAGADO_COMPRA.replace('$1', 'c.id')}) p ON TRUE
     WHERE c.proveedor_id = $1 AND c.sucursal_id = $2
       AND c.estado != 'Cancelada'
@@ -580,5 +647,6 @@ module.exports = {
   ultimoArqueo, insertarArqueo, ultimaTasa,
   getCartera, metodosSinAsignar,
   findProveedores, findProveedorById, findCompraParaPago, findComprasProveedor, pagadoCompra,
+  findCargoCompra, insertarAbonoEspejo,
   pool,
 };

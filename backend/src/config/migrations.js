@@ -18,6 +18,8 @@ const runMigrations = async () => {
   //   Idempotente; aplicar después de 20260709_tesoreria.sql (la versión actual de 20260709 ya las incluye).
   // - tesoreria pago-compra: proveedor_id/compra_id en movimientos_dinero — ver migrations/20260710_tesoreria_pago_compra.sql
   //   Idempotente; permite asignar "Pagué mercancía" a proveedor/compra y bloquear dobles pagos.
+  // - tesoreria abono espejo: mov_dinero_id en movimientos_acreedor + backfill — ver migrations/20260710_tesoreria_abono_espejo.sql
+  //   Idempotente; un pago de compra desde Tesorería crea un Abono (registrar_en_caja=FALSE) que salda la deuda del acreedor.
   console.log('✅ Migraciones: sin pendientes.');
 };
 

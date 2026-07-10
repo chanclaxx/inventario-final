@@ -184,7 +184,10 @@ const _buildResumen = ({ pf, ac, ap, cp, aa, mn, rt, dv, ad, sv, fd = [] }) => {
 
   const totalIngresosBruto = totalFacturas + totalAbonosCredito + totalAbonosPrestamo
     + totalAbonosDomicilio + totalAbonosServicio + totalManualesIngreso;
-  const totalIngresos      = totalIngresosBruto - totalRetomas;
+  // Las retomas NO se restan: los pagos de factura ya vienen NETOS de retoma
+  // (el cliente paga total − retoma, y eso es lo que registra pagos_factura).
+  // Restarlas aquí descontaba dos veces. El grupo queda solo informativo.
+  const totalIngresos      = totalIngresosBruto;
   const totalEgresos       = totalCompras + totalAbonosAcreedor + totalManualesEgreso + totalDevoluciones;
 
   // ── Resumen por método de pago (entradas + salidas) ────────────────────
@@ -248,9 +251,11 @@ const _buildResumen = ({ pf, ac, ap, cp, aa, mn, rt, dv, ad, sv, fd = [] }) => {
         items: ad,
         total: totalAbonosDomicilio,
       },
+      // Informativo: la retoma ya está descontada en el pago de la factura
+      // (pagos_factura es neto). No suma ni resta en los totales de caja.
       retomas: {
-        tipo:  'Egreso',
-        label: 'Retomas',
+        tipo:  'Informativo',
+        label: 'Retomas (ya descontadas en la factura)',
         items: rt,
         total: totalRetomas,
       },

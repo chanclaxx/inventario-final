@@ -609,7 +609,7 @@ function ModalPagueMercancia({ cuentas, onClose }) {
   const compraSel = (compras || []).find((c) => c.id === Number(compraId));
 
   const seleccionarCompra = (c) => {
-    if (c.ya_descuenta) return; // ya salió de tesorería por su método de pago
+    if (c.bloqueada) return; // pagada o ya descontada por su pago en caja
     if (Number(compraId) === c.id) { setCompraId(''); return; }
     setCompraId(c.id);
     // Prellenar con el saldo por pagar (solo si la cuenta es en pesos —
@@ -679,9 +679,9 @@ function ModalPagueMercancia({ cuentas, onClose }) {
                   <div className="flex flex-col gap-1.5 mt-1 max-h-44 overflow-y-auto pr-1">
                     {compras.map((c) => (
                       <button key={c.id} type="button" onClick={() => seleccionarCompra(c)}
-                        disabled={c.ya_descuenta}
+                        disabled={c.bloqueada}
                         className={`flex items-center justify-between gap-2 px-3 py-2 rounded-xl border text-left transition-colors
-                          ${c.ya_descuenta
+                          ${c.bloqueada
                             ? 'border-gray-100 bg-gray-50 opacity-60 cursor-not-allowed'
                             : Number(compraId) === c.id
                               ? 'border-blue-300 bg-blue-50'
@@ -695,12 +695,14 @@ function ModalPagueMercancia({ cuentas, onClose }) {
                           </span>
                         </span>
                         <span className={`text-xs font-medium whitespace-nowrap
-                          ${c.ya_descuenta ? 'text-gray-400' : c.saldo_por_pagar > 0 ? 'text-amber-600' : 'text-green-600'}`}>
-                          {c.ya_descuenta
-                            ? 'Ya descontada'
-                            : c.pagado_tesoreria > 0
-                              ? `Por pagar: ${formatCOP(c.saldo_por_pagar)}`
-                              : 'Sin pagos'}
+                          ${c.pagada ? 'text-green-600' : c.bloqueada ? 'text-gray-400' : 'text-amber-600'}`}>
+                          {c.pagada
+                            ? '✓ Pagada'
+                            : c.ya_descuenta
+                              ? 'Ya descontada'
+                              : c.saldo_por_pagar < c.total
+                                ? `Por pagar: ${formatCOP(c.saldo_por_pagar)}`
+                                : 'Debe todo'}
                         </span>
                       </button>
                     ))}

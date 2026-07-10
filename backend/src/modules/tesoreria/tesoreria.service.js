@@ -51,6 +51,9 @@ const _validarCuenta = async ({ negocioId, sucursalId, nombre, tipo, metodos_pag
     if (metodos_pago.includes('Credito')) {
       throw { status: 400, message: '"Credito" no es dinero recibido: no puede asignarse a una cuenta' };
     }
+    if (metodos_pago.includes('Divisa')) {
+      throw { status: 400, message: '"Divisa" tiene su propia cuenta en dólares: no puede asignarse como método de otra cuenta' };
+    }
     // Un método no puede vivir en dos cuentas activas de la misma sucursal
     // (contaría doble en los saldos).
     const ocupados = await repo.metodosOcupados(negocioId, sucursalId, excluirCuentaId);
@@ -279,28 +282,58 @@ const registrarMovimiento = async (negocioId, sucursalId, usuarioId, datos) => {
   const tasaPago = esUSDCuenta(cuenta) ? await repo.ultimaTasa(cuenta.id) : null;
 
   // ── Vínculo opcional con proveedor / compra (pagos de mercancía) ────────
+  // El estado de pago de una compra con proveedor vive en la cuenta del
+  // acreedor (Cargo − Abonos): esa es la fuente de verdad contra la que se
+  // valida, y el pago crea un Abono espejo que salda la deuda.
   let proveedor = null;
   let compra    = null;
+  let cargo     = null;
+  let valorCop  = monto;
   if (compra_id) {
     compra = await repo.findCompraParaPago(compra_id, sucursalId);
     if (!compra) throw { status: 404, message: 'Compra no encontrada en esta sucursal' };
     if (compra.estado === 'Cancelada') {
       throw { status: 400, message: 'La compra está cancelada' };
     }
-    // Anti doble conteo: si la compra se registró con pago en caja, la
-    // derivación YA la descuenta de tesorería por su método de pago.
-    if (compra.registrar_en_caja) {
-      throw {
-        status: 409,
-        message: `La compra #${compra.id} ya descuenta de tesorería (se registró con pago en caja${compra.metodo ? ` — ${compra.metodo}` : ''}). No la pagues de nuevo.`,
-      };
-    }
-    const pagado = await repo.pagadoCompra(compra.id);
-    if (pagado >= Number(compra.total)) {
-      throw { status: 409, message: `La compra #${compra.id} ya está pagada por tesorería (${pagado} de ${compra.total})` };
-    }
     if (proveedor_id && Number(proveedor_id) !== compra.proveedor_id) {
       throw { status: 400, message: 'La compra no pertenece a ese proveedor' };
+    }
+    if (esUSDCuenta(cuenta)) {
+      if (!tasaPago) {
+        throw {
+          status: 400,
+          message: 'La cuenta en dólares no tiene tasa registrada aún. Usa primero "Volví divisa" para que el sistema conozca la tasa.',
+        };
+      }
+      valorCop = Math.round(monto * tasaPago * 100) / 100;
+    }
+
+    cargo = await repo.findCargoCompra(compra.id);
+    if (cargo) {
+      const saldo = cargo.valor - cargo.abonado;
+      if (saldo <= 0) {
+        throw { status: 409, message: `La compra #${compra.id} ya está pagada` };
+      }
+      // Margen de $1 por redondeos de conversión USD→COP
+      if (valorCop > saldo + 1) {
+        throw {
+          status: 400,
+          message: `El pago (${valorCop}) supera el saldo por pagar (${saldo}) de la compra #${compra.id}`,
+        };
+      }
+    } else {
+      // Compra sin cargo de acreedor (sin proveedor): si se registró con pago
+      // en caja, la derivación YA la descuenta por su método — no pagar doble.
+      if (compra.registrar_en_caja) {
+        throw {
+          status: 409,
+          message: `La compra #${compra.id} ya descuenta de tesorería (se registró con pago en caja${compra.metodo ? ` — ${compra.metodo}` : ''}). No la pagues de nuevo.`,
+        };
+      }
+      const pagado = await repo.pagadoCompra(compra.id);
+      if (pagado >= Number(compra.total)) {
+        throw { status: 409, message: `La compra #${compra.id} ya está pagada por tesorería (${pagado} de ${compra.total})` };
+      }
     }
   }
   const proveedorIdFinal = proveedor_id || compra?.proveedor_id || null;
@@ -327,6 +360,19 @@ const registrarMovimiento = async (negocioId, sucursalId, usuarioId, datos) => {
       tasa_cambio: tasaPago,
       proveedor_id: proveedorIdFinal, compra_id: compra?.id || null,
     });
+    // Abono espejo: salda la deuda de la compra en la cuenta del acreedor
+    if (cargo && tipo === 'salida') {
+      await repo.insertarAbonoEspejo(client, {
+        acreedor_id:   cargo.acreedor_id,
+        usuario_id:    usuarioId,
+        valor:         valorCop,
+        cargo_id:      cargo.id,
+        sucursal_id:   sucursalId,
+        mov_dinero_id: mov.id,
+        metodo:        esUSDCuenta(cuenta) ? 'Divisa' : `Tesorería — ${cuenta.nombre}`,
+        descripcion:   `Pago desde Tesorería (mov #${mov.id})`,
+      });
+    }
     const etiqueta = concepto
       ? `${categoria.charAt(0).toUpperCase()}${categoria.slice(1)} — ${concepto}`
       : `${categoria.charAt(0).toUpperCase()}${categoria.slice(1)} (${cuenta.nombre})`;
@@ -467,14 +513,27 @@ const getComprasProveedor = async (negocioId, sucursalId, proveedorId) => {
   const proveedor = await repo.findProveedorById(proveedorId, negocioId);
   if (!proveedor) throw { status: 404, message: 'Proveedor no encontrado' };
   const compras = await repo.findComprasProveedor(proveedorId, sucursalId);
-  return compras.map((c) => ({
-    ...c,
-    total:            Number(c.total),
-    pagado_tesoreria: Number(c.pagado_tesoreria),
-    saldo_por_pagar:  Math.max(0, Number(c.total) - Number(c.pagado_tesoreria)),
-    // true = ya descuenta de tesorería por su método de pago (no pagar de nuevo)
-    ya_descuenta:     c.registrar_en_caja === true,
-  }));
+  return compras.map((c) => {
+    const conCargo = c.cargo_id !== null && c.cargo_id !== undefined;
+    // Con cargo de acreedor: saldo real = cargo − abonos (incluye espejos de
+    // tesorería). Sin cargo: lo pagado por tesorería contra el total.
+    const saldo = conCargo
+      ? Math.max(0, Number(c.cargo_valor) - Number(c.abonado))
+      : Math.max(0, Number(c.total) - Number(c.pagado_tesoreria));
+    const pagada       = saldo <= 0 && (conCargo || Number(c.pagado_tesoreria) > 0);
+    // Sin cargo y registrada con pago en caja → ya descuenta por su método
+    const ya_descuenta = !conCargo && c.registrar_en_caja === true;
+    return {
+      id: c.id, fecha: c.fecha, numero_factura: c.numero_factura,
+      total:            Number(c.total),
+      pagado_tesoreria: Number(c.pagado_tesoreria),
+      abonado:          Number(c.abonado),
+      saldo_por_pagar:  saldo,
+      pagada,
+      ya_descuenta,
+      bloqueada:        pagada || ya_descuenta,
+    };
+  });
 };
 
 // ─── Resumen consolidado del negocio (todas las sucursales) ──────────────────

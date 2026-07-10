@@ -1438,6 +1438,8 @@ function PasoPago({ proveedor, productos, tipo, onConfirmar, onVolver, loading }
   const [error,             setError]              = useState('');
   const metodosPago = useMetodosPago();
   const [metodoPagoDetalle, setMetodoPagoDetalle] = useState('Efectivo');
+  // Pago con divisa: dólares entregados (la parte en pesos va en pagos[].valor)
+  const [dolaresDivisa, setDolaresDivisa] = useState('');
 
   const { data: acreedoresRaw } = useQuery({
     queryKey: ['acreedores'],
@@ -1450,12 +1452,20 @@ function PasoPago({ proveedor, productos, tipo, onConfirmar, onVolver, loading }
   const handleConfirmar = () => {
     setError('');
     const esMetodoPagoFisico = (metodo) => metodo === 'Contado' || metodo === 'Transferencia';
-    const pagosFinales = pagos.length === 1
+    // El pago con Divisa lleva además los dólares entregados (valor_usd);
+    // el backend descuenta esos dólares de la cuenta Divisa de Tesorería.
+    const conUsd = (p) => (p.metodo === 'Divisa' ? { ...p, valor_usd: Number(dolaresDivisa) } : p);
+    const pagosFinales = (pagos.length === 1
       ? [{ ...pagos[0], metodo: esMetodoPagoFisico(pagos[0].metodo) ? metodoPagoDetalle : pagos[0].metodo, valor: totalCompra }]
       : pagos.map((p) => ({
           ...p,
           metodo: esMetodoPagoFisico(p.metodo) ? metodoPagoDetalle : p.metodo,
-        }));
+        }))
+    ).map(conUsd);
+
+    if (pagos.some((p) => p.metodo === 'Divisa') && !(Number(dolaresDivisa) > 0)) {
+      return setError('Indica cuántos dólares se entregaron en el pago con Divisa');
+    }
 
     if (pagos.length > 1) {
       const pagado = pagosFinales.reduce((s, p) => s + (Number(p.valor) || 0), 0);
@@ -1534,7 +1544,7 @@ function PasoPago({ proveedor, productos, tipo, onConfirmar, onVolver, loading }
       <div>
         <p className="text-sm font-medium text-gray-700 mb-2">Método de pago</p>
         <div className="grid grid-cols-2 gap-2">
-          {['Contado', 'Transferencia', 'Credito', 'Fiado'].map((m) => {
+          {['Contado', 'Transferencia', 'Credito', 'Fiado', 'Divisa'].map((m) => {
             const metodo       = m;
             const seleccionado = pagos.find((p) => p.metodo === metodo);
             return (
@@ -1548,7 +1558,7 @@ function PasoPago({ proveedor, productos, tipo, onConfirmar, onVolver, loading }
                 }}
                 className={`py-2.5 rounded-xl text-sm font-medium border transition-all
                   ${seleccionado ? 'bg-blue-50 border-blue-300 text-blue-700' : 'bg-gray-50 border-gray-200 text-gray-600'}`}>
-                {metodo}
+                {metodo === 'Divisa' ? 'Divisa (US$)' : metodo}
               </button>
             );
           })}
@@ -1628,6 +1638,23 @@ function PasoPago({ proveedor, productos, tipo, onConfirmar, onVolver, loading }
                 );
               })}
             </div>
+          </div>
+        )}
+
+        {pagos.some((p) => p.metodo === 'Divisa') && (
+          <div className="flex flex-col gap-1.5 mt-3 pt-3 border-t border-gray-200">
+            <label className="text-xs text-gray-500 font-medium">
+              ¿Cuántos dólares se entregaron?
+            </label>
+            <input type="number" min="0" step="0.01" inputMode="decimal" placeholder="0"
+              value={dolaresDivisa}
+              onChange={(e) => setDolaresDivisa(e.target.value === '' ? '' : Number(e.target.value))}
+              className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-sm
+                focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            <p className="text-xs text-gray-400">
+              Los dólares salen de la cuenta Divisa (USD) de Tesorería y la compra
+              queda abonada por la parte en pesos que asignaste a Divisa.
+            </p>
           </div>
         )}
       </div>

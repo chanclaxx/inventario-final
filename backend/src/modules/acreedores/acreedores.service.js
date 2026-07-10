@@ -110,9 +110,26 @@ const eliminarAcreedor = async (negocioId, acreedorId) => {
   }
 };
 
+// Los abonos espejo (mov_dinero_id) provienen de un pago hecho en Tesorería:
+// editarlos o borrarlos aquí descuadraría el dinero. Se anulan desde
+// Tesorería (extracto de la cuenta) y el sistema sincroniza ambos lados.
+const _bloquearAbonoEspejo = async (movId) => {
+  const { rows } = await pool.query(
+    `SELECT id FROM movimientos_acreedor WHERE id = $1 AND mov_dinero_id IS NOT NULL`,
+    [movId]
+  );
+  if (rows.length) {
+    throw {
+      status: 400,
+      message: 'Este abono proviene de un pago hecho en Tesorería. Para modificarlo, anula el pago desde Tesorería (extracto de la cuenta) y el sistema cuadra ambos lados.',
+    };
+  }
+};
+
 const editarAbono = async (negocioId, acreedorId, movId, datos) => {
   const acreedor = await repo.findById(negocioId, acreedorId);
   if (!acreedor) throw { status: 404, message: 'Acreedor no encontrado' };
+  await _bloquearAbonoEspejo(movId);
   // Si el abono queda ligado a un cargo, no puede superar el saldo pendiente de
   // ese cargo (mismo criterio que al crear). Evita dejar cargos sobre-pagados.
   if (datos.cargo_id) {
@@ -127,6 +144,7 @@ const editarAbono = async (negocioId, acreedorId, movId, datos) => {
 const eliminarAbono = async (negocioId, acreedorId, movId) => {
   const acreedor = await repo.findById(negocioId, acreedorId);
   if (!acreedor) throw { status: 404, message: 'Acreedor no encontrado' };
+  await _bloquearAbonoEspejo(movId);
   return repo.eliminarAbono(negocioId, acreedorId, movId);
 };
 

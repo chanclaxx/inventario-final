@@ -215,8 +215,12 @@ const registrarCompra = async ({
     }
 
     // ── Acreedor ───────────────────────────────────────────────────────────
+    let acreedorIdCompra = null;
+    let cargoIdCompra    = null;
     if (proveedor_id) {
-      const pagosEfectivos = pagos.filter((p) => p.metodo !== 'Credito' && p.metodo !== 'Fiado');
+      // 'Divisa' se maneja aparte: sale de la cuenta Divisa (USD) de Tesorería
+      // con su propio abono espejo, no del abono de caja.
+      const pagosEfectivos = pagos.filter((p) => !['Credito', 'Fiado', 'Divisa'].includes(p.metodo));
       const totalPagado    = pagosEfectivos.reduce((s, p) => s + Number(p.valor || 0), 0);
 
       let { rows: acrRows } = await client.query(
@@ -258,6 +262,8 @@ const registrarCompra = async ({
         [acreedorId, usuario_id, `Compra #${compra.id} — mercancía`, total, compra.id, sucursal_id]
       );
       const cargoId = cargoRows[0].id;
+      acreedorIdCompra = acreedorId;
+      cargoIdCompra    = cargoId;
 
       // Si hubo pago inmediato (Contado / Transferencia / mezcla), crear Abono vinculado al cargo
       if (totalPagado > 0) {
@@ -266,6 +272,58 @@ const registrarCompra = async ({
           `INSERT INTO movimientos_acreedor(acreedor_id, usuario_id, tipo, descripcion, valor, cargo_id, metodo, registrar_en_caja, sucursal_id)
            VALUES ($1, $2, 'Abono', $3, $4, $5, $6, $7, $8)`,
           [acreedorId, usuario_id, 'Pago al momento de la compra', totalPagado, cargoId, metodoPagoInmediato, registrar_en_caja !== false, sucursal_id]
+        );
+      }
+    }
+
+    // ── Pago en divisa (US$) vía Tesorería ────────────────────────────────
+    // La salida se registra EN DÓLARES en la cuenta Divisa de la sucursal
+    // (se crea si no existe) con la tasa implícita del pago. Si hay cargo de
+    // acreedor, un abono espejo (registrar_en_caja = FALSE) salda esa parte
+    // de la deuda sin doble descuento en caja/tesorería.
+    const pagoDivisa = pagos.find((p) => p.metodo === 'Divisa' && Number(p.valor) > 0);
+    if (pagoDivisa) {
+      const valorCop = Number(pagoDivisa.valor);
+      const valorUsd = Number(pagoDivisa.valor_usd);
+      if (!(valorUsd > 0)) {
+        throw { status: 400, message: 'Indica cuántos dólares se entregaron en el pago con divisa' };
+      }
+
+      let { rows: divisaRows } = await client.query(
+        `SELECT id FROM cuentas_dinero
+         WHERE negocio_id = $1 AND sucursal_id = $2 AND moneda = 'USD' AND activa
+         ORDER BY id LIMIT 1`,
+        [negocio_id, sucursal_id]
+      );
+      if (!divisaRows.length) {
+        const { rows: nueva } = await client.query(
+          `INSERT INTO cuentas_dinero (negocio_id, sucursal_id, nombre, tipo, moneda)
+           VALUES ($1, $2, 'Divisa (USD)', 'divisa', 'USD') RETURNING id`,
+          [negocio_id, sucursal_id]
+        );
+        divisaRows = nueva;
+      }
+
+      const tasa = Math.round((valorCop / valorUsd) * 10000) / 10000;
+      const { rows: movRows } = await client.query(
+        `INSERT INTO movimientos_dinero
+           (cuenta_id, tipo, categoria, valor, concepto, usuario_id, tasa_cambio, proveedor_id, compra_id)
+         VALUES ($1, 'salida', 'mercancia', $2, $3, $4, $5, $6, $7)
+         RETURNING id`,
+        [divisaRows[0].id, valorUsd,
+         `Pago compra #${compra.id}${prov?.nombre ? ` — ${prov.nombre}` : ''} (US$ ${valorUsd})`,
+         usuario_id, tasa, proveedor_id || null, compra.id]
+      );
+
+      if (cargoIdCompra) {
+        await client.query(
+          `INSERT INTO movimientos_acreedor
+             (acreedor_id, usuario_id, tipo, descripcion, valor, cargo_id, metodo,
+              registrar_en_caja, sucursal_id, mov_dinero_id)
+           VALUES ($1, $2, 'Abono', $3, $4, $5, 'Divisa', FALSE, $6, $7)`,
+          [acreedorIdCompra, usuario_id,
+           `Pago en divisa al momento de la compra (US$ ${valorUsd})`,
+           valorCop, cargoIdCompra, sucursal_id, movRows[0].id]
         );
       }
     }
