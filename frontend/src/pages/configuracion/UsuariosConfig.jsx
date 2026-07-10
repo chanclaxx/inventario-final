@@ -23,6 +23,7 @@ const MODULOS = [
   { key: 'proveedores', label: 'Proveedores' },
   { key: 'prestamos',   label: 'Préstamos'   },
   { key: 'caja',        label: 'Caja'        },
+  { key: 'tesoreria',   label: 'Tesorería'   },
   { key: 'traslados',   label: 'Traslados'   },
   { key: 'reportes',    label: 'Reportes'    },
   { key: 'acreedores',  label: 'Acreedores'  },
@@ -30,7 +31,7 @@ const MODULOS = [
 
 const PERMISOS_BASE = {
   supervisor: ['inventario','facturar','servicios','proveedores',
-               'prestamos','caja','traslados','reportes','acreedores'],
+               'prestamos','caja','tesoreria','traslados','reportes','acreedores'],
   vendedor:   ['inventario','facturar','servicios','prestamos'],
 };
 

@@ -33,6 +33,9 @@ export const REPORT_QUERY_KEYS = [
   'analisis',
   'valor-inventario',
   'inventario-bajo',
+  // Tesorería deriva sus saldos de las mismas transacciones: cualquier
+  // mutación (venta, abono, compra, cancelación…) puede moverlos.
+  'tesoreria',
 ];
 
 export const invalidarReportes = (queryClient) => {

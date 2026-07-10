@@ -84,6 +84,7 @@ app.use('/api/vendedores',         protegida, require('./modules/vendedores/vend
 app.use('/api/servicios',          protegida, require('./modules/servicios/servicios.routes'));
 app.use('/api/traslados',          protegida, require('./modules/traslados/traslados.routes'));
 app.use('/api/busqueda',           protegida, require('./modules/busqueda/busqueda.routes'));
+app.use('/api/tesoreria',          protegida, require('./modules/tesoreria/tesoreria.routes'));
 app.use('/api/tipos-caracteristica', protegida, require('./modules/tipos-caracteristica/tipos-caracteristica.routes'));
 app.use('/api/variantes-producto',   protegida, require('./modules/variantes-producto/variantes-producto.routes'));
 

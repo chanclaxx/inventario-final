@@ -31,8 +31,8 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
         runtimeCaching: [
           {
-            // Reportes, facturas, dashboard — datos en tiempo real: NUNCA cachear
-            urlPattern: /^https:\/\/inventario-final-production\.up\.railway\.app\/api\/(reportes|facturas|dashboard)/i,
+            // Reportes, facturas, dashboard, tesorería — datos en tiempo real: NUNCA cachear
+            urlPattern: /^https:\/\/inventario-final-production\.up\.railway\.app\/api\/(reportes|facturas|dashboard|tesoreria)/i,
             handler: 'NetworkOnly',
           },
           {

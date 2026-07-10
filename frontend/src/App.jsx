@@ -23,6 +23,7 @@ import AcreedoresPage       from './pages/acreedores/AcreedoresPage';
 import ProveedoresPage      from './pages/proveedores/ProveedoresPage';
 import ServiciosPage        from './pages/servicios/ServiciosPage';
 import TrasladosPage        from './pages/traslados/TrasladosPage';
+import TesoreriaPage        from './pages/tesoreria/TesoreriaPage';
 import BusquedaPage         from './pages/busqueda/BusquedaPage';
 
 export default function App() {
@@ -64,6 +65,9 @@ export default function App() {
               } />
               <Route path="/traslados" element={
                 <ModuloGuard modulo="traslados"><TrasladosPage /></ModuloGuard>
+              } />
+              <Route path="/tesoreria" element={
+                <ModuloGuard modulo="tesoreria"><TesoreriaPage /></ModuloGuard>
               } />
               <Route path="/reportes" element={
                 <ModuloGuard modulo="reportes"><ReportesPage /></ModuloGuard>
