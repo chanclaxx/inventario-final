@@ -6,6 +6,8 @@ import { Input }        from '../../components/ui/Input';
 import { Badge }        from '../../components/ui/Badge';
 import { SearchInput }  from '../../components/ui/SearchInput';
 import { InputMoneda }  from '../../components/ui/InputMoneda';
+import { CambioDivisa } from '../../components/ui/CambioDivisa';
+import { cambioInicial, cambioCompleto } from '../../utils/cambioDivisa';
 import { formatCOP }    from '../../utils/formatters';
 import { crearCompra }  from '../../api/compras.api';
 import { useMetodosPago } from '../../hooks/useMetodosPago';
@@ -1438,8 +1440,10 @@ function PasoPago({ proveedor, productos, tipo, onConfirmar, onVolver, loading }
   const [error,             setError]              = useState('');
   const metodosPago = useMetodosPago();
   const [metodoPagoDetalle, setMetodoPagoDetalle] = useState('Efectivo');
-  // Pago con divisa: dólares entregados (la parte en pesos va en pagos[].valor)
-  const [dolaresDivisa, setDolaresDivisa] = useState('');
+  // Pago con divisa: dólares + tasa (o dólares + pesos). El panel resuelve el
+  // trío { dolares, pesos, tasa }; los pesos son la parte de la deuda que salda.
+  const [cambioDivisa, setCambioDivisa] = useState(() => cambioInicial());
+  const hayDivisa = pagos.some((p) => p.metodo === 'Divisa');
 
   const { data: acreedoresRaw } = useQuery({
     queryKey: ['acreedores'],
@@ -1452,20 +1456,34 @@ function PasoPago({ proveedor, productos, tipo, onConfirmar, onVolver, loading }
   const handleConfirmar = () => {
     setError('');
     const esMetodoPagoFisico = (metodo) => metodo === 'Contado' || metodo === 'Transferencia';
-    // El pago con Divisa lleva además los dólares entregados (valor_usd);
-    // el backend descuenta esos dólares de la cuenta Divisa de Tesorería.
-    const conUsd = (p) => (p.metodo === 'Divisa' ? { ...p, valor_usd: Number(dolaresDivisa) } : p);
+
+    if (hayDivisa && !cambioCompleto(cambioDivisa)) {
+      return setError('Completa el pago con Divisa: dólares y tasa (o dólares y pesos).');
+    }
+    // Divisa solo: la parte en pesos del panel es lo que se abona; no puede
+    // superar el total de la compra (el resto quedaría como deuda del proveedor).
+    if (pagos.length === 1 && hayDivisa && Number(cambioDivisa.pesos) > Number(totalCompra)) {
+      return setError(`El pago en dólares (${formatCOP(cambioDivisa.pesos)}) supera el total de la compra (${formatCOP(totalCompra)}).`);
+    }
+
+    // El pago con Divisa aporta su parte en pesos (cambioDivisa.pesos), y lleva
+    // los dólares entregados + la tasa: el backend descuenta los dólares de la
+    // cuenta Divisa de Tesorería y salda esa parte de la deuda en pesos.
+    const aplicarDivisa = (p) => (p.metodo === 'Divisa'
+      ? { ...p, valor:     Number(cambioDivisa.pesos) || 0,
+                valor_usd: Number(cambioDivisa.dolares),
+                tasa:      Number(cambioDivisa.tasa) || undefined }
+      : p);
+
     const pagosFinales = (pagos.length === 1
-      ? [{ ...pagos[0], metodo: esMetodoPagoFisico(pagos[0].metodo) ? metodoPagoDetalle : pagos[0].metodo, valor: totalCompra }]
+      ? [pagos[0].metodo === 'Divisa'
+          ? pagos[0]
+          : { ...pagos[0], metodo: esMetodoPagoFisico(pagos[0].metodo) ? metodoPagoDetalle : pagos[0].metodo, valor: totalCompra }]
       : pagos.map((p) => ({
           ...p,
           metodo: esMetodoPagoFisico(p.metodo) ? metodoPagoDetalle : p.metodo,
         }))
-    ).map(conUsd);
-
-    if (pagos.some((p) => p.metodo === 'Divisa') && !(Number(dolaresDivisa) > 0)) {
-      return setError('Indica cuántos dólares se entregaron en el pago con Divisa');
-    }
+    ).map(aplicarDivisa);
 
     if (pagos.length > 1) {
       const pagado = pagosFinales.reduce((s, p) => s + (Number(p.valor) || 0), 0);
@@ -1504,7 +1522,8 @@ function PasoPago({ proveedor, productos, tipo, onConfirmar, onVolver, loading }
         }];
       });
 
-  const pagadoParcial = pagos.reduce((s, p) => s + (Number(p.valor) || 0), 0);
+  const pagadoParcial = pagos.reduce((s, p) =>
+    s + (p.metodo === 'Divisa' ? (Number(cambioDivisa.pesos) || 0) : (Number(p.valor) || 0)), 0);
   const diferencia    = Number(totalCompra) - pagadoParcial;
 
   return (
@@ -1566,7 +1585,7 @@ function PasoPago({ proveedor, productos, tipo, onConfirmar, onVolver, loading }
 
         {pagos.length > 1 && (
           <div className="mt-3 flex flex-col gap-2">
-            {pagos.map((p) => {
+            {pagos.filter((p) => p.metodo !== 'Divisa').map((p) => {
               const pagoItem = p;
               return (
                 <div key={pagoItem.metodo} className="flex items-center gap-2">
@@ -1580,6 +1599,15 @@ function PasoPago({ proveedor, productos, tipo, onConfirmar, onVolver, loading }
                 </div>
               );
             })}
+            {hayDivisa && (
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-gray-500 w-28 flex-shrink-0">Divisa (US$):</span>
+                <span className="flex-1 px-2 py-1.5 text-sm text-gray-700 tabular-nums">
+                  {cambioDivisa.pesos > 0 ? formatCOP(cambioDivisa.pesos) : '—'}
+                  <span className="text-xs text-gray-400"> (se define abajo)</span>
+                </span>
+              </div>
+            )}
             {diferencia > 0 && (
               <div className="flex justify-between text-xs px-1 mt-1 text-orange-500">
                 <span>Pendiente por asignar</span>
@@ -1600,7 +1628,7 @@ function PasoPago({ proveedor, productos, tipo, onConfirmar, onVolver, loading }
             )}
           </div>
         )}
-         {pagos.length === 1 && (
+         {pagos.length === 1 && !hayDivisa && (
           <p className="text-xs text-gray-400 mt-2 px-1">
             Se registrará el total completo ({formatCOP(totalCompra)}) como {pagos[0].metodo}
           </p>
@@ -1641,19 +1669,30 @@ function PasoPago({ proveedor, productos, tipo, onConfirmar, onVolver, loading }
           </div>
         )}
 
-        {pagos.some((p) => p.metodo === 'Divisa') && (
-          <div className="flex flex-col gap-1.5 mt-3 pt-3 border-t border-gray-200">
-            <label className="text-xs text-gray-500 font-medium">
-              ¿Cuántos dólares se entregaron?
-            </label>
-            <input type="number" min="0" step="0.01" inputMode="decimal" placeholder="0"
-              value={dolaresDivisa}
-              onChange={(e) => setDolaresDivisa(e.target.value === '' ? '' : Number(e.target.value))}
-              className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-sm
-                focus:outline-none focus:ring-2 focus:ring-blue-500" />
+        {hayDivisa && (
+          <div className="flex flex-col gap-2 mt-3 pt-3 border-t border-gray-200">
+            <label className="text-xs text-gray-500 font-medium">Pago con Divisa (US$)</label>
+            <CambioDivisa
+              estado={cambioDivisa}
+              onChange={setCambioDivisa}
+              labelDolares="¿Cuántos dólares entregaste?"
+              labelPesos="¿Cuánto abonas en pesos?"
+            />
+            {cambioDivisa.pesos > 0 && (
+              <p className="text-xs text-gray-500 bg-gray-50 rounded-xl p-2.5">
+                Salen US$ {cambioDivisa.dolares} de la cuenta Divisa y se abonan{' '}
+                {formatCOP(cambioDivisa.pesos)} a la compra.
+                {pagos.length === 1 && (() => {
+                  const resto = Number(totalCompra) - Number(cambioDivisa.pesos);
+                  if (resto > 0) return ` Queda debiendo ${formatCOP(resto)}.`;
+                  if (resto < 0) return ` Supera el total en ${formatCOP(Math.abs(resto))}.`;
+                  return ' Cubre el total exacto.';
+                })()}
+              </p>
+            )}
             <p className="text-xs text-gray-400">
-              Los dólares salen de la cuenta Divisa (USD) de Tesorería y la compra
-              queda abonada por la parte en pesos que asignaste a Divisa.
+              Los dólares salen de la cuenta Divisa (USD) de Tesorería; la compra
+              queda abonada por su equivalente en pesos.
             </p>
           </div>
         )}

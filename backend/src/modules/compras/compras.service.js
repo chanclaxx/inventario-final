@@ -304,7 +304,10 @@ const registrarCompra = async ({
         divisaRows = nueva;
       }
 
-      const tasa = Math.round((valorCop / valorUsd) * 10000) / 10000;
+      // Si el usuario escribió la tasa (modo "Por tasa"), se conserva EXACTA;
+      // si no, se deriva de los montos (pesos abonados ÷ dólares entregados).
+      const tasaInput = Number(pagoDivisa.tasa);
+      const tasa = tasaInput > 0 ? tasaInput : Math.round((valorCop / valorUsd) * 10000) / 10000;
       const { rows: movRows } = await client.query(
         `INSERT INTO movimientos_dinero
            (cuenta_id, tipo, categoria, valor, concepto, usuario_id, tasa_cambio, proveedor_id, compra_id)

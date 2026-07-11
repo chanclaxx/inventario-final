@@ -259,7 +259,7 @@ const _espejarEnCaja = async (client, cuenta, mov, usuarioId, etiqueta) => {
 };
 
 const registrarMovimiento = async (negocioId, sucursalId, usuarioId, datos) => {
-  const { cuenta_id, tipo, categoria, valor, clave_idempotencia, proveedor_id, compra_id } = datos;
+  const { cuenta_id, tipo, categoria, valor, clave_idempotencia, proveedor_id, compra_id, tasa_cambio } = datos;
   let { concepto } = datos;
 
   if (!['entrada', 'salida'].includes(tipo)) {
@@ -277,9 +277,13 @@ const registrarMovimiento = async (negocioId, sucursalId, usuarioId, datos) => {
     throw { status: 403, message: 'La cuenta pertenece a otra sucursal' };
   }
 
-  // Pagos desde cuentas en divisa: congelar la tasa de referencia del momento
-  // (permite mostrar/comparar el equivalente en pesos del pago).
-  const tasaPago = esUSDCuenta(cuenta) ? await repo.ultimaTasa(cuenta.id) : null;
+  // Pagos desde cuentas en divisa: congelar la tasa del momento (permite
+  // mostrar/comparar el equivalente en pesos del pago). Si el usuario escribió
+  // una tasa (modo "Por tasa"), esa manda; si no, se usa la última registrada.
+  const tasaOverride = Number(tasa_cambio) > 0 ? Number(tasa_cambio) : null;
+  const tasaPago = esUSDCuenta(cuenta)
+    ? (tasaOverride ?? await repo.ultimaTasa(cuenta.id))
+    : null;
 
   // ── Vínculo opcional con proveedor / compra (pagos de mercancía) ────────
   // El estado de pago de una compra con proveedor vive en la cuenta del
@@ -302,7 +306,7 @@ const registrarMovimiento = async (negocioId, sucursalId, usuarioId, datos) => {
       if (!tasaPago) {
         throw {
           status: 400,
-          message: 'La cuenta en dólares no tiene tasa registrada aún. Usa primero "Volví divisa" para que el sistema conozca la tasa.',
+          message: 'La cuenta en dólares no tiene tasa aún. Escribe la tasa del pago (pesos por dólar) o registra primero un "Volví divisa".',
         };
       }
       valorCop = Math.round(monto * tasaPago * 100) / 100;
@@ -395,7 +399,7 @@ const registrarMovimiento = async (negocioId, sucursalId, usuarioId, datos) => {
 // ─── Traslados entre cuentas ──────────────────────────────────────────────────
 
 const trasladar = async (negocioId, sucursalId, usuarioId, datos) => {
-  const { origen_id, destino_id, valor, valor_destino, concepto, clave_idempotencia } = datos;
+  const { origen_id, destino_id, valor, valor_destino, concepto, clave_idempotencia, tasa_cambio } = datos;
 
   const monto = Number(valor);
   if (!(monto > 0)) throw { status: 400, message: 'El valor debe ser mayor a 0' };
@@ -433,9 +437,12 @@ const trasladar = async (negocioId, sucursalId, usuarioId, datos) => {
         message: `Las cuentas usan monedas distintas (${monedaOrigen} → ${monedaDestino}): indica también cuánto llega a la cuenta destino`,
       };
     }
-    const ladoCop = monedaOrigen === 'COP' ? monto : montoDestino;
-    const ladoUsd = monedaOrigen === 'USD' ? monto : montoDestino;
-    tasa = Math.round((ladoCop / ladoUsd) * 10000) / 10000;
+    // Si el usuario escribió la tasa (modo "Por tasa"), se conserva EXACTA;
+    // si no, se deriva de los montos (modo "Por montos").
+    const tasaInput = Number(tasa_cambio);
+    const ladoCop   = monedaOrigen === 'COP' ? monto : montoDestino;
+    const ladoUsd   = monedaOrigen === 'USD' ? monto : montoDestino;
+    tasa = tasaInput > 0 ? tasaInput : Math.round((ladoCop / ladoUsd) * 10000) / 10000;
   }
 
   if (clave_idempotencia) {

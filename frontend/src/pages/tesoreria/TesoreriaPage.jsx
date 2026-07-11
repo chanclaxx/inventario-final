@@ -13,6 +13,8 @@ import { formatCOP, formatFechaHora } from '../../utils/formatters';
 import { Modal }   from '../../components/ui/Modal';
 import { Spinner } from '../../components/ui/Spinner';
 import { InputMoneda } from '../../components/ui/InputMoneda';
+import { CambioDivisa } from '../../components/ui/CambioDivisa';
+import { cambioInicial, cambioCompleto } from '../../utils/cambioDivisa';
 
 // Colores validados (dataviz): identidad la lleva el texto de cada fila;
 // el color codifica solo el estado del dinero.
@@ -499,17 +501,13 @@ function BotonRapido(props) {
 function ModalVolviDivisa({ cuentas, onClose }) {
   const queryClient = useQueryClient();
   const [claveIdem] = useState(() => crypto.randomUUID());
-  const [pesos, setPesos]     = useState('');
-  const [dolares, setDolares] = useState('');
-  const [error, setError]     = useState('');
+  const [cambio, setCambio] = useState(() => cambioInicial());
+  const [error, setError]   = useState('');
 
   const efectivo = cuentas.find((c) => c.tipo === 'efectivo')
     || cuentas.find((c) => (c.metodos_pago || []).includes('Efectivo'));
   const divisa = cuentas.find((c) => esUSD(c));
-
-  const tasa = Number(pesos) > 0 && Number(dolares) > 0
-    ? Number(pesos) / Number(dolares)
-    : null;
+  const listo  = cambioCompleto(cambio);
 
   const mutation = useMutation({
     mutationFn: async () => {
@@ -523,8 +521,9 @@ function ModalVolviDivisa({ cuentas, onClose }) {
       return tesoreriaApi.trasladar({
         origen_id:          efectivo.id,
         destino_id:         destino.id,
-        valor:              pesos,
-        valor_destino:      dolares,
+        valor:              cambio.pesos,     // pesos que salen del efectivo
+        valor_destino:      cambio.dolares,   // dólares que entran a la Divisa
+        tasa_cambio:        cambio.tasa || undefined,
         concepto:           'Compra de divisa',
         clave_idempotencia: claveIdem,
       });
@@ -539,26 +538,17 @@ function ModalVolviDivisa({ cuentas, onClose }) {
   return (
     <Modal open onClose={onClose} title="Volví divisa (compré dólares)">
       <div className="flex flex-col gap-4">
-        <div>
-          <label className="text-xs font-semibold text-gray-500">¿Cuántos pesos entregaste?</label>
-          <InputMoneda value={pesos} onChange={setPesos} autoFocus
-            className="w-full mt-1 border border-gray-200 rounded-xl px-3 py-2.5 text-lg font-semibold
-              focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300" />
-        </div>
+        <CambioDivisa
+          estado={cambio}
+          onChange={setCambio}
+          labelDolares="¿Cuántos dólares compraste?"
+          labelPesos="¿Cuántos pesos entregaste?"
+          autoFocus
+        />
 
-        <div>
-          <label className="text-xs font-semibold text-gray-500">¿Cuántos dólares te dieron?</label>
-          <input type="number" min="0" step="0.01" inputMode="decimal" placeholder="0"
-            value={dolares}
-            onChange={(e) => setDolares(e.target.value === '' ? '' : Number(e.target.value))}
-            className="w-full mt-1 border border-gray-200 rounded-xl px-3 py-2.5 text-lg font-semibold
-              focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300" />
-        </div>
-
-        {tasa && (
+        {listo && (
           <p className="text-sm text-gray-500 bg-gray-50 rounded-xl p-3">
-            Tasa: <b>{tasa.toLocaleString('es-CO', { maximumFractionDigits: 0 })}</b> pesos por dólar.
-            Saldrán {formatCOP(pesos)} del efectivo y entrarán {formatUSD(dolares)} a la Divisa.
+            Saldrán {formatCOP(cambio.pesos)} del efectivo y entrarán {formatUSD(cambio.dolares)} a la Divisa.
           </p>
         )}
 
@@ -568,7 +558,7 @@ function ModalVolviDivisa({ cuentas, onClose }) {
         {error && <p className="text-sm text-red-500">{error}</p>}
 
         <button onClick={() => mutation.mutate()}
-          disabled={mutation.isPending || !pesos || !dolares || !efectivo}
+          disabled={mutation.isPending || !listo || !efectivo}
           className="w-full bg-blue-600 text-white rounded-xl py-3 text-base font-semibold
             hover:bg-blue-700 disabled:opacity-50 transition-colors">
           {mutation.isPending ? 'Registrando…' : 'Registrar cambio'}
@@ -586,13 +576,19 @@ function ModalPagueMercancia({ cuentas, onClose }) {
   const [claveIdem] = useState(() => crypto.randomUUID());
   const [modo, setModo]           = useState('rapido'); // 'rapido' | 'proveedor'
   const [cuentaId, setCuentaId]   = useState(cuentas[0]?.id || '');
-  const [valor, setValor]         = useState('');
+  const [valor, setValor]         = useState('');       // cuentas en pesos
+  const [cambio, setCambio]       = useState(() => cambioInicial()); // cuentas USD
   const [concepto, setConcepto]   = useState('');
   const [proveedorId, setProveedorId] = useState('');
   const [compraId, setCompraId]   = useState('');
   const [error, setError]         = useState('');
 
   const cuenta = cuentas.find((c) => c.id === Number(cuentaId));
+  const esUsdCuenta = esUSD(cuenta);
+  // En cuentas USD el pago sale en dólares y la tasa fija cuántos pesos de la
+  // deuda se saldan; en cuentas en pesos se paga directo el monto en pesos.
+  const valorFinal = esUsdCuenta ? cambio.dolares : valor;
+  const tasaFinal  = esUsdCuenta ? (cambio.tasa || undefined) : undefined;
 
   const { data: proveedores } = useQuery({
     queryKey: ['tesoreria', 'proveedores'],
@@ -622,7 +618,8 @@ function ModalPagueMercancia({ cuentas, onClose }) {
       cuenta_id:          cuenta.id,
       tipo:               'salida',
       categoria:          'mercancia',
-      valor,
+      valor:              valorFinal,
+      tasa_cambio:        tasaFinal,
       concepto:           concepto || (modo === 'proveedor' ? '' : 'Pago de mercancía'),
       proveedor_id:       modo === 'proveedor' && proveedorId ? Number(proveedorId) : undefined,
       compra_id:          modo === 'proveedor' && compraId    ? Number(compraId)    : undefined,
@@ -719,7 +716,13 @@ function ModalPagueMercancia({ cuentas, onClose }) {
             {cuentas.map((c) => {
               const T = defTipo(c.tipo);
               return (
-                <button key={c.id} type="button" onClick={() => { setCuentaId(c.id); setValor(''); }}
+                <button key={c.id} type="button"
+                  onClick={() => {
+                    setCuentaId(c.id);
+                    setValor('');
+                    setCambio(cambioInicial(esUSD(c) && c.tasa_referencia
+                      ? { tasa: Number(c.tasa_referencia) } : {}));
+                  }}
                   className={`flex items-center gap-2 px-3 py-2.5 rounded-xl border text-left transition-colors
                     ${Number(cuentaId) === c.id
                       ? 'border-blue-300 bg-blue-50'
@@ -735,12 +738,20 @@ function ModalPagueMercancia({ cuentas, onClose }) {
           </div>
         </div>
 
-        <div>
-          <label className="text-xs font-semibold text-gray-500">
-            {esUSD(cuenta) ? '¿Cuántos dólares pagaste?' : '¿Cuántos pesos pagaste?'}
-          </label>
-          <InputValor cuenta={cuenta} value={valor} onChange={setValor} />
-        </div>
+        {esUsdCuenta ? (
+          <CambioDivisa
+            estado={cambio}
+            onChange={setCambio}
+            labelDolares="¿Cuántos dólares pagaste?"
+            labelPesos="¿A cuántos pesos equivale?"
+            tasaSugerida={cuenta?.tasa_referencia}
+          />
+        ) : (
+          <div>
+            <label className="text-xs font-semibold text-gray-500">¿Cuántos pesos pagaste?</label>
+            <InputValor cuenta={cuenta} value={valor} onChange={setValor} />
+          </div>
+        )}
 
         <div>
           <label className="text-xs font-semibold text-gray-500">
@@ -754,10 +765,10 @@ function ModalPagueMercancia({ cuentas, onClose }) {
               focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300" />
         </div>
 
-        {esUSD(cuenta) && compraSel && (
+        {esUsdCuenta && compraSel && (
           <p className="text-xs text-gray-500 bg-gray-50 rounded-xl p-3">
-            La compra vale {formatCOP(compraSel.total)}. Digita cuántos <b>dólares</b> pagaste;
-            el sistema usa la última tasa para llevar la cuenta en pesos.
+            La compra vale {formatCOP(compraSel.total)}. Escribe cuántos <b>dólares</b> pagaste
+            y a qué tasa; con eso el sistema salda esa parte de la deuda en pesos.
           </p>
         )}
 
@@ -771,7 +782,8 @@ function ModalPagueMercancia({ cuentas, onClose }) {
         {error && <p className="text-sm text-red-500">{error}</p>}
 
         <button onClick={() => mutation.mutate()}
-          disabled={mutation.isPending || !valor || !cuenta
+          disabled={mutation.isPending || !cuenta
+            || (esUsdCuenta ? !cambioCompleto(cambio) : !valor)
             || (modo === 'proveedor' && !proveedorId)}
           className="w-full bg-blue-600 text-white rounded-xl py-3 text-base font-semibold
             hover:bg-blue-700 disabled:opacity-50 transition-colors">
@@ -804,19 +816,28 @@ function ModalTraslado({ cuentas, esAdmin, onClose }) {
     origen_id:     cuentas[0]?.id || '',
     destino_id:    '',
     valor:         '',
-    valor_destino: '',
     concepto:      '',
   });
+  const [cambio, setCambio] = useState(() => cambioInicial()); // traslado que cruza moneda
   const [error, setError] = useState('');
 
   const origen  = cuentas.find((c) => c.id === Number(form.origen_id));
   const destino = destinos.find((c) => c.id === Number(form.destino_id));
   const cruzaMoneda = origen && destino && (origen.moneda || 'COP') !== (destino.moneda || 'COP');
+  const origenEsUsd = esUSD(origen);
+
+  // Al cruzar moneda, mapear dólares/pesos del panel a los dos lados del traslado
+  const valorOrigen  = origenEsUsd ? cambio.dolares : cambio.pesos;
+  const valorDestino = origenEsUsd ? cambio.pesos   : cambio.dolares;
 
   const mutation = useMutation({
     mutationFn: () => tesoreriaApi.trasladar({
-      ...form,
-      valor_destino: cruzaMoneda ? form.valor_destino : undefined,
+      origen_id:          form.origen_id,
+      destino_id:         form.destino_id,
+      concepto:           form.concepto,
+      valor:              cruzaMoneda ? valorOrigen  : form.valor,
+      valor_destino:      cruzaMoneda ? valorDestino : undefined,
+      tasa_cambio:        cruzaMoneda ? (cambio.tasa || undefined) : undefined,
       clave_idempotencia: claveIdem,
     }),
     onSuccess: () => {
@@ -854,29 +875,20 @@ function ModalTraslado({ cuentas, esAdmin, onClose }) {
           </select>
         </div>
 
-        <div>
-          <label className="text-xs font-semibold text-gray-500">
-            Valor que sale {esUSD(origen) ? '(en dólares)' : ''}
-          </label>
-          <InputValor cuenta={origen} value={form.valor}
-            onChange={(v) => setForm((f) => ({ ...f, valor: v }))} />
-        </div>
-
-        {cruzaMoneda && (
+        {cruzaMoneda ? (
+          <CambioDivisa
+            estado={cambio}
+            onChange={setCambio}
+            labelDolares={origenEsUsd ? 'Dólares que salen' : 'Dólares que llegan'}
+            labelPesos={origenEsUsd ? 'Pesos que llegan' : 'Pesos que salen'}
+          />
+        ) : (
           <div>
             <label className="text-xs font-semibold text-gray-500">
-              Valor que llega {esUSD(destino) ? '(en dólares)' : '(en pesos)'}
+              Valor que sale {esUSD(origen) ? '(en dólares)' : ''}
             </label>
-            <InputValor cuenta={destino} value={form.valor_destino}
-              onChange={(v) => setForm((f) => ({ ...f, valor_destino: v }))} />
-            {Number(form.valor) > 0 && Number(form.valor_destino) > 0 && (
-              <p className="text-xs text-gray-400 mt-1">
-                Tasa: {(
-                  (esUSD(destino) ? Number(form.valor) / Number(form.valor_destino)
-                                  : Number(form.valor_destino) / Number(form.valor))
-                ).toLocaleString('es-CO', { maximumFractionDigits: 0 })} pesos por dólar
-              </p>
-            )}
+            <InputValor cuenta={origen} value={form.valor}
+              onChange={(v) => setForm((f) => ({ ...f, valor: v }))} />
           </div>
         )}
 
@@ -892,8 +904,8 @@ function ModalTraslado({ cuentas, esAdmin, onClose }) {
         {error && <p className="text-sm text-red-500">{error}</p>}
 
         <button onClick={() => mutation.mutate()}
-          disabled={mutation.isPending || !form.valor || !form.origen_id || !form.destino_id
-            || (cruzaMoneda && !form.valor_destino)}
+          disabled={mutation.isPending || !form.origen_id || !form.destino_id
+            || (cruzaMoneda ? !cambioCompleto(cambio) : !form.valor)}
           className="w-full bg-blue-600 text-white rounded-xl py-2.5 text-sm font-semibold
             hover:bg-blue-700 disabled:opacity-50 transition-colors">
           {mutation.isPending ? 'Trasladando…' : 'Registrar traslado'}
