@@ -12,6 +12,7 @@ import useCarritoStore                                   from '../../store/carri
 import { ModalPinEliminacion }                           from './ModalPinEliminacion';
 import { ModalEditarProductoCantidad }                   from './ModalEditarProductoCantidad';
 import { UltimaVentaBadge }                               from './AntiguedadInventario';
+import { NotaStrip }                                     from './PostItNota';
 import { VistaVariantesProducto }                        from './VistaVariantesProducto';
 import { useAuth }                                       from '../../context/useAuth';
 import { useSucursalKey }                                from '../../hooks/useSucursalKey';
@@ -120,6 +121,8 @@ function TarjetaProducto({ p, esAdmin, onAgregar, onReducir, onEditar, variantes
           </div>
         )}
       </div>
+
+      {p.nota && <NotaStrip nota={p.nota} />}
 
       <Button
         size="sm" className="w-full"

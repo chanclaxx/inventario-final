@@ -2,9 +2,9 @@ import { useState, useEffect, useRef, useCallback }                   from 'reac
 import { useQuery, useMutation, useQueryClient }                     from '@tanstack/react-query';
 import {
   Package, Plus, ChevronRight, ChevronDown, Trash2, Lock,
-  Palette, Search, CheckCircle, X, SlidersHorizontal, Smartphone,
+  Palette, Search, CheckCircle, X, SlidersHorizontal, Smartphone, StickyNote,
 } from 'lucide-react';
-import { getProductosSerial, getSeriales, eliminarSerial, getLineas, buscarImei } from '../../api/productos.api';
+import { getProductosSerial, getSeriales, eliminarSerial, getLineas, buscarImei, actualizarSerial } from '../../api/productos.api';
 import { Badge }                     from '../../components/ui/Badge';
 import { Button }                    from '../../components/ui/Button';
 import { Spinner }                   from '../../components/ui/Spinner';
@@ -15,6 +15,7 @@ import { ModalPinEliminacion }       from './ModalPinEliminacion';
 import { ModalEditarSerial }         from './ModalEditarSerial';
 import { ModalEditarProductoSerial } from './ModalEditarProductoSerial';
 import { AntiguedadBadge }            from './AntiguedadInventario';
+import { NotaStrip, PostItNota }      from './PostItNota';
 import { useAuth }                   from '../../context/useAuth';
 import { useSucursalKey }            from '../../hooks/useSucursalKey';
 import useSucursalStore              from '../../store/sucursalStore';
@@ -114,7 +115,7 @@ function CabeceraGrupoColor({ color, cantidad }) {
 }
 
 // ─── Tarjeta individual de serial ─────────────────────────────────────────────
-function TarjetaSerial({ serial, precio, onAgregar, onEliminar, onEditar }) {
+function TarjetaSerial({ serial, precio, onAgregar, onEliminar, onEditar, onGuardarNota, notaEditable }) {
   const prestado = serial.prestado && !serial.vendido;
 
   const estiloContenedor = prestado
@@ -171,12 +172,19 @@ function TarjetaSerial({ serial, precio, onAgregar, onEliminar, onEditar }) {
             Debe ser devuelto antes de poder venderse
           </p>
         )}
+        {serial.nota && <NotaStrip nota={serial.nota} className="mt-1" />}
       </div>
 
       <div className="flex items-center gap-2 flex-shrink-0">
         <span className={`text-sm font-semibold ${prestado ? 'text-blue-400' : 'text-gray-700'}`}>
           {formatCOP(precio || 0)}
         </span>
+        {notaEditable && onGuardarNota && (
+          <PostItNota
+            nota={serial.nota}
+            onGuardar={(texto) => onGuardarNota(serial, texto)}
+          />
+        )}
         <button
           onClick={(e) => { e.stopPropagation(); onEliminar(serial); }}
           className="p-1.5 rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50 transition-colors"
@@ -506,6 +514,7 @@ function SelectorModeloMovil({ productos, lineas, productoSeleccionado, onSelecc
                                     {p.dias_en_inventario != null && (
                                       <AntiguedadBadge dias={p.dias_en_inventario} />
                                     )}
+                                    {p.nota && <StickyNote size={12} className="text-amber-400 flex-shrink-0" />}
                                   </div>
                                 </div>
                                 {seleccionado && (
@@ -579,6 +588,7 @@ function GrupoLinea({ nombre, productos, productoSeleccionado, onSeleccionar, on
                   {p.dias_en_inventario != null && (
                     <AntiguedadBadge dias={p.dias_en_inventario} />
                   )}
+                  {p.nota && <StickyNote size={12} className="text-amber-400 flex-shrink-0" />}
                 </div>
               </div>
               <ChevronRight size={14} className="text-gray-300 flex-shrink-0 ml-2" />
@@ -591,7 +601,7 @@ function GrupoLinea({ nombre, productos, productoSeleccionado, onSeleccionar, on
 }
 
 // ─── Panel de seriales agrupados por color ────────────────────────────────────
-function ListaSeriales({ seriales, precioProducto, onAgregar, onEliminar, onEditar, coloresActivo, coloresConfig }) {
+function ListaSeriales({ seriales, precioProducto, onAgregar, onEliminar, onEditar, onGuardarNota, notaEditable, coloresActivo, coloresConfig }) {
   if (!coloresActivo) {
     return (
       <div className="flex flex-col gap-2">
@@ -603,6 +613,8 @@ function ListaSeriales({ seriales, precioProducto, onAgregar, onEliminar, onEdit
             onAgregar={onAgregar}
             onEliminar={onEliminar}
             onEditar={onEditar}
+            onGuardarNota={onGuardarNota}
+            notaEditable={notaEditable}
           />
         ))}
       </div>
@@ -627,6 +639,8 @@ function ListaSeriales({ seriales, precioProducto, onAgregar, onEliminar, onEdit
                   onAgregar={onAgregar}
                   onEliminar={onEliminar}
                   onEditar={onEditar}
+                  onGuardarNota={onGuardarNota}
+                  notaEditable={notaEditable}
                 />
               ))}
             </div>
@@ -821,6 +835,15 @@ export function ProductosSerial({ onAgregarProducto }) {
     onError: () => {}, // El error se muestra en ModalPinEliminacion
   });
 
+  const mutNota = useMutation({
+    mutationFn: ({ serialId, nota }) => actualizarSerial(serialId, { nota }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['seriales'], exact: false });
+    },
+  });
+  const handleGuardarNota = (serial, texto) =>
+    mutNota.mutateAsync({ serialId: serial.id, nota: texto });
+
   const productos = productosData || [];
   const lineas    = lineasData    || [];
   const seriales  = serialesData  || [];
@@ -900,6 +923,9 @@ export function ProductosSerial({ onAgregarProducto }) {
               </span>
             )}
           </p>
+          {productoSeleccionado.nota && (
+            <NotaStrip nota={productoSeleccionado.nota} className="mt-1.5" />
+          )}
         </div>
         {onAgregarProducto && (
           <Button size="sm" className="flex-shrink-0"
@@ -953,6 +979,8 @@ export function ProductosSerial({ onAgregarProducto }) {
             onAgregar={handleAgregarSerial}
             onEliminar={(serial) => setSerialAEliminar({ id: serial.id, imei: serial.imei })}
             onEditar={esAdmin && !soloLectura ? setSerialAEditar : null}
+            onGuardarNota={handleGuardarNota}
+            notaEditable={esAdmin && !soloLectura}
             coloresActivo={coloresActivo}
             coloresConfig={coloresConfig}
           />
@@ -1008,6 +1036,7 @@ export function ProductosSerial({ onAgregarProducto }) {
                   {p.dias_en_inventario != null && (
                     <AntiguedadBadge dias={p.dias_en_inventario} />
                   )}
+                  {p.nota && <StickyNote size={12} className="text-amber-400 flex-shrink-0" />}
                 </div>
               </div>
               <ChevronRight size={14} className="text-gray-300 flex-shrink-0 ml-2" />
@@ -1109,6 +1138,7 @@ export function ProductosSerial({ onAgregarProducto }) {
                 nombre:   updatedProducto.nombre,
                 precio:   updatedProducto.precio,
                 linea_id: updatedProducto.linea_id,
+                nota:     updatedProducto.nota,
               }));
             }
           }}

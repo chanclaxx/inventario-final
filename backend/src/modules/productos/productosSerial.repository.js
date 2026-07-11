@@ -5,7 +5,7 @@ const findAll = async (sucursalId, negocioId, lineaId) => {
   const { rows } = await pool.query(`
     SELECT
       ps.id, ps.nombre, ps.marca, ps.modelo, ps.precio,
-      ps.sucursal_id, ps.proveedor_id, ps.linea_id,
+      ps.sucursal_id, ps.proveedor_id, ps.linea_id, ps.nota,
       su.nombre  AS sucursal_nombre,
       lp.nombre  AS linea_nombre,
       COUNT(s.id) FILTER (WHERE s.vendido = false AND s.prestado = false) AS disponibles,
@@ -86,10 +86,17 @@ const update = async (id, datos) => {
         modelo       = COALESCE($3, modelo),
         precio       = COALESCE($4, precio),
         proveedor_id = COALESCE($5, proveedor_id),
-        linea_id     = $6
-    WHERE id = $7
+        linea_id     = $6,
+        nota         = CASE WHEN $7::boolean THEN $8 ELSE nota END
+    WHERE id = $9
     RETURNING *
-  `, [datos.nombre, datos.marca, datos.modelo, datos.precio, datos.proveedor_id, datos.linea_id || null, id]);
+  `, [
+    datos.nombre, datos.marca, datos.modelo, datos.precio, datos.proveedor_id,
+    datos.linea_id || null,
+    datos.nota !== undefined,
+    datos.nota != null && String(datos.nota).trim() ? String(datos.nota).trim() : null,
+    id,
+  ]);
   return rows[0] || null;
 };
 
@@ -179,12 +186,16 @@ const reactivarSerial = async (serialId, { costo_compra, proveedor_id } = {}) =>
 };
 
 const actualizarSerial = async (serialId, datos) => {
-  const { imei, costo_compra, color, caracteristicas, precio } = datos;
+  const { imei, costo_compra, color, caracteristicas, precio, nota } = datos;
 
   // Build SET clause dynamically — only touch optional columns when explicitly sent
   const sets   = ['imei = COALESCE($1, imei)', 'costo_compra = COALESCE($2, costo_compra)'];
   const params = [imei || null, costo_compra ?? null];
 
+  if (nota !== undefined) {
+    params.push(nota != null && String(nota).trim() ? String(nota).trim() : null);
+    sets.push(`nota = $${params.length}`);
+  }
   if (color !== undefined) {
     params.push(color);
     sets.push(`color = $${params.length}`);

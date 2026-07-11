@@ -1,6 +1,6 @@
 import { useState, useMemo }                  from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Pencil, Trash2 }                    from 'lucide-react';
+import { Pencil, Trash2, StickyNote }        from 'lucide-react';
 import { actualizarProductoCantidad }        from '../../api/productos.api';
 import { getProveedores }                    from '../../api/proveedores.api';
 import { getLineas }                         from '../../api/productos.api';
@@ -71,6 +71,7 @@ export function ModalEditarProductoCantidad({ producto, pinEliminacion, variante
     costo_unitario: producto.costo_unitario != null ? Number(producto.costo_unitario) : '',
     proveedor_id  : producto.proveedor_id   != null ? String(producto.proveedor_id)   : '',
     linea_id      : producto.linea_id       != null ? String(producto.linea_id)       : '',
+    nota          : producto.nota           || '',
   });
   const [error,         setError]         = useState('');
   const [modalEliminar, setModalEliminar] = useState(false);
@@ -100,6 +101,7 @@ export function ModalEditarProductoCantidad({ producto, pinEliminacion, variante
         costo_unitario: form.costo_unitario !== '' ? Number(form.costo_unitario) : null,
         proveedor_id  : form.proveedor_id   !== '' ? Number(form.proveedor_id)   : null,
         linea_id      : form.linea_id       !== '' ? Number(form.linea_id)       : null,
+        nota          : form.nota.trim() || null,
       });
       if (tieneAtributos && hojas.length > 0) {
         const pendientes = hojas.filter((h) => {
@@ -279,6 +281,23 @@ export function ModalEditarProductoCantidad({ producto, pinEliminacion, variante
               </select>
             </div>
           )}
+
+          <div className="flex flex-col gap-1">
+            <label className="flex items-center gap-1.5 text-sm font-medium text-gray-700">
+              <StickyNote size={14} className="text-amber-500" />
+              Nota / recordatorio <span className="text-gray-400 font-normal text-xs">(opcional)</span>
+            </label>
+            <textarea
+              value={form.nota}
+              onChange={(e) => setForm({ ...form, nota: e.target.value })}
+              rows={2}
+              maxLength={280}
+              placeholder="Ej: quedan pocas, pedir al proveedor..."
+              className="w-full px-3 py-2 bg-amber-50/60 border border-amber-200 rounded-xl
+                text-sm text-gray-700 resize-none placeholder:text-amber-300
+                focus:outline-none focus:ring-2 focus:ring-amber-400 transition-all"
+            />
+          </div>
 
           {error && <p className="text-sm text-red-500">{error}</p>}
 

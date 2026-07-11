@@ -1,4 +1,14 @@
+const { pool } = require('./db');
+
 const runMigrations = async () => {
+  // ── Auto-aplicadas al arrancar (100% aditivas e idempotentes) ──────────────
+  // Notas / post-it de inventario — ver migrations/20260710_notas_inventario.sql
+  await pool.query(`
+    ALTER TABLE IF EXISTS seriales           ADD COLUMN IF NOT EXISTS nota TEXT;
+    ALTER TABLE IF EXISTS productos_serial   ADD COLUMN IF NOT EXISTS nota TEXT;
+    ALTER TABLE IF EXISTS productos_cantidad ADD COLUMN IF NOT EXISTS nota TEXT;
+  `);
+
   // Aplicadas manualmente en producción:
   // - lineas_traslado: revertida_por_usuario_id, fecha_reversion
   // - traslados: revertido_por_usuario_id, fecha_reversion

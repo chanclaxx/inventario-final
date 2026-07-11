@@ -1,6 +1,6 @@
 import { useState }                           from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Pencil }                            from 'lucide-react';
+import { Pencil, StickyNote }                from 'lucide-react';
 import { actualizarSerial }                  from '../../api/productos.api';
 import { getProveedores }                    from '../../api/proveedores.api';
 import { Modal }       from '../../components/ui/Modal';
@@ -35,6 +35,7 @@ export function ModalEditarSerial({ serial, precioProducto, productoId, onClose 
     caracteristicas: (serial.caracteristicas && typeof serial.caracteristicas === 'object')
       ? serial.caracteristicas
       : {},
+    nota:            serial.nota          || '',
   });
   const [error, setError] = useState('');
 
@@ -65,6 +66,7 @@ export function ModalEditarSerial({ serial, precioProducto, productoId, onClose 
         costo_compra: form.costo_compra !== '' ? Number(form.costo_compra) : null,
         proveedor_id: form.proveedor_id !== '' ? Number(form.proveedor_id) : null,
         producto_id:  productoId,
+        nota:         form.nota.trim() || null,
       };
       if (coloresActivo) {
         payload.color = form.color.trim() !== '' ? form.color.trim() : null;
@@ -225,6 +227,23 @@ export function ModalEditarSerial({ serial, precioProducto, productoId, onClose 
             </div>
           </div>
         )}
+
+        <div className="flex flex-col gap-1">
+          <label className="flex items-center gap-1.5 text-sm font-medium text-gray-700">
+            <StickyNote size={14} className="text-amber-500" />
+            Nota / recordatorio <span className="text-gray-400 font-normal text-xs">(opcional)</span>
+          </label>
+          <textarea
+            value={form.nota}
+            onChange={(e) => setForm({ ...form, nota: e.target.value })}
+            rows={2}
+            maxLength={280}
+            placeholder="Ej: está donde el técnico, lo tiene Juan..."
+            className="w-full px-3 py-2 bg-amber-50/60 border border-amber-200 rounded-xl
+              text-sm text-gray-700 resize-none placeholder:text-amber-300
+              focus:outline-none focus:ring-2 focus:ring-amber-400 transition-all"
+          />
+        </div>
 
         {error && <p className="text-sm text-red-500">{error}</p>}
 

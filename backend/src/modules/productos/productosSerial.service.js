@@ -109,12 +109,12 @@ const agregarSerial = async (
   };
 };
 
-const actualizarSerial = async (negocioId, serialId, { imei, costo_compra, precio, color, caracteristicas }) => {
+const actualizarSerial = async (negocioId, serialId, { imei, costo_compra, precio, color, caracteristicas, nota }) => {
   const serial = await repo.findSerialByIdYNegocio(serialId, negocioId);
   if (!serial) throw { status: 404, message: 'Serial no encontrado' };
 
   // Price is stored on the individual serial (not on the product) so other serials are unaffected
-  const actualizado = await repo.actualizarSerial(serialId, { imei, costo_compra, precio, color, caracteristicas });
+  const actualizado = await repo.actualizarSerial(serialId, { imei, costo_compra, precio, color, caracteristicas, nota });
   if (!actualizado) throw { status: 404, message: 'Serial no encontrado' };
 
   return {

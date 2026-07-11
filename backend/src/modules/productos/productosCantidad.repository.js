@@ -7,7 +7,7 @@ const findAll = async (sucursalId, negocioId, lineaId) => {
         pc.id, pc.nombre, pc.stock, pc.stock_minimo,
         pc.unidad_medida, pc.costo_unitario, pc.precio,
         pc.cliente_origen, pc.activo, pc.sucursal_id, pc.proveedor_id,
-        pc.linea_id, pc.creado_en,
+        pc.linea_id, pc.creado_en, pc.nota,
         lp.nombre AS linea_nombre,
         p.nombre  AS proveedor_nombre,
         su.nombre AS sucursal_nombre,
@@ -116,7 +116,7 @@ const create = async ({
 // ── linea_id incluido en update ───────────────────────────────────────────
 const update = async (id, {
   nombre, stock_minimo, unidad_medida,
-  costo_unitario, precio, proveedor_id, linea_id,
+  costo_unitario, precio, proveedor_id, linea_id, nota,
 }) => {
   const { rows } = await pool.query(`
     UPDATE productos_cantidad
@@ -126,13 +126,17 @@ const update = async (id, {
         costo_unitario = $4,
         precio         = $5,
         proveedor_id   = $6,
-        linea_id       = $7
-    WHERE id = $8
+        linea_id       = $7,
+        nota           = CASE WHEN $8::boolean THEN $9 ELSE nota END
+    WHERE id = $10
     RETURNING *
   `, [
     nombre, stock_minimo, unidad_medida,
     costo_unitario || null, precio || null,
-    proveedor_id || null, linea_id || null, id,
+    proveedor_id || null, linea_id || null,
+    nota !== undefined,
+    nota != null && String(nota).trim() ? String(nota).trim() : null,
+    id,
   ]);
   return rows[0] || null;
 };
