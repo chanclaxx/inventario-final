@@ -9,6 +9,22 @@ const runMigrations = async () => {
     ALTER TABLE IF EXISTS productos_cantidad ADD COLUMN IF NOT EXISTS nota TEXT;
   `);
 
+  // Gastos fijos mensuales por sucursal (Proyección) — ver migrations/20260712_gastos_fijos.sql
+  // 100% aditiva e idempotente. Alimenta la utilidad neta y el punto de equilibrio.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS gastos_fijos (
+      id             SERIAL        PRIMARY KEY,
+      sucursal_id    INTEGER       NOT NULL,
+      nombre         TEXT          NOT NULL,
+      valor          NUMERIC(14,2) NOT NULL CHECK (valor >= 0),
+      activo         BOOLEAN       NOT NULL DEFAULT TRUE,
+      creado_en      TIMESTAMP     NOT NULL DEFAULT NOW(),
+      actualizado_en TIMESTAMP     NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_gastos_fijos_sucursal
+      ON gastos_fijos (sucursal_id) WHERE activo;
+  `);
+
   // Aplicadas manualmente en producción:
   // - lineas_traslado: revertida_por_usuario_id, fecha_reversion
   // - traslados: revertido_por_usuario_id, fecha_reversion

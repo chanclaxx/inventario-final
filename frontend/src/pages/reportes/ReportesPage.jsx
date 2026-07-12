@@ -18,10 +18,11 @@ import { useAuth }    from '../../context/useAuth';
 import {
   BarChart2, TrendingUp, Package, AlertTriangle,
   ChevronDown, ChevronUp, Info, Pencil, Check, X,
-  Warehouse, Handshake, Wrench, CreditCard, LineChart, Users,
+  Warehouse, Handshake, Wrench, CreditCard, LineChart, Users, Target,
 } from 'lucide-react';
 const PanelAnalisis   = lazy(() => import('./PanelAnalisis'));
 const PanelVendedores = lazy(() => import('./PanelVendedores'));
+const PanelProyeccion = lazy(() => import('./PanelProyeccion'));
 
 // ─────────────────────────────────────────────
 // CONSTANTES
@@ -29,6 +30,7 @@ const PanelVendedores = lazy(() => import('./PanelVendedores'));
 const TABS = [
   { id: 'resumen',    label: 'Resumen',    icon: BarChart2     },
   { id: 'analisis',   label: 'Análisis',   icon: LineChart     },
+  { id: 'proyeccion', label: 'Proyección', icon: Target        },
   { id: 'vendedores', label: 'Vendedores', icon: Users         },
   { id: 'ventas',     label: 'Ventas',     icon: TrendingUp    },
   { id: 'productos',  label: 'Productos',  icon: Package       },
@@ -1393,7 +1395,7 @@ export default function ReportesPage() {
   const vendedoresActivo = config?.vendedores_activo === '1';
 
   const tabsVisibles = TABS.filter((t) => {
-    if (['inventario', 'analisis'].includes(t.id)) return esAdmin;
+    if (['inventario', 'analisis', 'proyeccion'].includes(t.id)) return esAdmin;
     if (t.id === 'vendedores') return vendedoresActivo;
     return true;
   });
@@ -1421,6 +1423,11 @@ export default function ReportesPage() {
       {tabActiva === 'analisis'   && esAdmin && (
         <Suspense fallback={<Spinner className="py-20" />}>
           <PanelAnalisis />
+        </Suspense>
+      )}
+      {tabActiva === 'proyeccion' && esAdmin && (
+        <Suspense fallback={<Spinner className="py-20" />}>
+          <PanelProyeccion />
         </Suspense>
       )}
       {tabActiva === 'vendedores' && vendedoresActivo && (

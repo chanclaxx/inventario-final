@@ -62,6 +62,45 @@ const exportarPdf = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+const getProyeccion = async (req, res, next) => {
+  try {
+    const meses = req.query.meses ? Number(req.query.meses) : 6;
+    const data = await service.getProyeccion(req.sucursal_id, meses);
+    res.json({ ok: true, data });
+  } catch (err) { next(err); }
+};
+
+// ── Gastos fijos (por sucursal) ──────────────────────────────────────────────
+const listarGastosFijos = async (req, res, next) => {
+  try {
+    const data = await service.listarGastosFijos(req.sucursal_id);
+    res.json({ ok: true, data });
+  } catch (err) { next(err); }
+};
+
+const crearGastoFijo = async (req, res, next) => {
+  try {
+    const { nombre, valor } = req.body;
+    const data = await service.crearGastoFijo(req.sucursal_id, nombre, Number(valor));
+    res.status(201).json({ ok: true, data });
+  } catch (err) { next(err); }
+};
+
+const actualizarGastoFijo = async (req, res, next) => {
+  try {
+    const { nombre, valor } = req.body;
+    const data = await service.actualizarGastoFijo(req.sucursal_id, Number(req.params.id), nombre, Number(valor));
+    res.json({ ok: true, data });
+  } catch (err) { next(err); }
+};
+
+const eliminarGastoFijo = async (req, res, next) => {
+  try {
+    const data = await service.eliminarGastoFijo(req.sucursal_id, Number(req.params.id));
+    res.json({ ok: true, data });
+  } catch (err) { next(err); }
+};
+
 const getVentasPorVendedor = async (req, res, next) => {
   try {
     const { desde, hasta } = req.query;
@@ -152,4 +191,5 @@ const getValorInventario = async (req, res, next) => {
 module.exports = {
   getDashboard, getVentasRango, getAnalisis, exportarPdf, getVentasPorVendedor, getProductosTop,
   getInventarioBajo, actualizarCostoCompra, getValorInventario,
+  getProyeccion, listarGastosFijos, crearGastoFijo, actualizarGastoFijo, eliminarGastoFijo,
 };

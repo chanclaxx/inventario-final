@@ -26,6 +26,22 @@ router.get('/analisis/pdf',     requireModulo('reportes'), requireNivel('admin_n
    query('agrupacion').optional().isIn(['dia', 'semana', 'mes']).withMessage('Agrupación inválida'),
    query('detalle').optional().isIn(['resumen', 'completo']).withMessage('Detalle inválido')],
   validate, ctrl.exportarPdf);
+// Proyección mensual + gastos fijos: solo admin_negocio.
+router.get('/proyeccion',       requireModulo('reportes'), requireNivel('admin_negocio'),
+  [query('meses').optional().isIn(['3', '6', '12']).withMessage('meses inválido (3, 6 o 12)')],
+  validate, ctrl.getProyeccion);
+
+const validarGastoFijo = [
+  body('nombre').trim().notEmpty().withMessage('El nombre es requerido')
+    .isLength({ max: 60 }).withMessage('El nombre es demasiado largo'),
+  body('valor').isFloat({ min: 0 }).withMessage('El valor debe ser un número ≥ 0'),
+];
+
+router.get('/gastos-fijos',        requireModulo('reportes'), requireNivel('admin_negocio'), ctrl.listarGastosFijos);
+router.post('/gastos-fijos',       requireModulo('reportes'), requireNivel('admin_negocio'), validarGastoFijo, validate, ctrl.crearGastoFijo);
+router.patch('/gastos-fijos/:id',  requireModulo('reportes'), requireNivel('admin_negocio'), validarGastoFijo, validate, ctrl.actualizarGastoFijo);
+router.delete('/gastos-fijos/:id', requireModulo('reportes'), requireNivel('admin_negocio'), ctrl.eliminarGastoFijo);
+
 router.get('/ventas-vendedor',  requireModulo('reportes'), requireNivel('supervisor'),    validarRango, validate, ctrl.getVentasPorVendedor);
 router.get('/productos-top',    requireModulo('reportes'), requireNivel('supervisor'),    validarRango, validate, ctrl.getProductosTop);
 router.get('/inventario-bajo',  requireModulo('reportes'),                               ctrl.getInventarioBajo);

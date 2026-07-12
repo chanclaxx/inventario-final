@@ -1525,14 +1525,176 @@ const getValorInventario = async (sucursalId) => {
   };
 };
 
+// ─── PROYECCIÓN MENSUAL ────────────────────────────────────────────────────────
+// Reporte "hacia adelante": estima el próximo mes a partir del promedio de los
+// últimos N meses COMPLETOS (se excluye el mes en curso, que está a medias).
+//
+//   Ventas esperadas = promedio de ventas de los meses completos con datos
+//   % costo histórico = Σ costo / Σ ventas de esos meses
+//   Costo esperado    = Ventas esperadas × % costo histórico
+//   Utilidad bruta    = Ventas esperadas − Costo esperado
+//   Gastos fijos      = Σ gastos_fijos activos de la sucursal (configurables)
+//   Utilidad neta     = Utilidad bruta − Gastos fijos
+//   Margen contrib.   = Utilidad bruta / Ventas esperadas
+//   Punto equilibrio  = Gastos fijos / Margen contribución  (ventas mínimas para no perder)
+//
+// La serie histórica reutiliza getAnalisis(agrupacion='mes'), por lo que respeta
+// exactamente las reglas de utilidad del módulo (créditos, retomas, devoluciones).
+
+const getProyeccion = async (sucursalId, meses = 6) => {
+  // Ventana: N meses calendario completos (excluye el mes en curso).
+  const { rows: [rango] } = await pool.query(`
+    SELECT
+      to_char(date_trunc('month', (NOW() AT TIME ZONE 'America/Bogota')) - ($1 || ' months')::interval, 'YYYY-MM-DD') AS desde,
+      to_char(date_trunc('month', (NOW() AT TIME ZONE 'America/Bogota')) - interval '1 day',             'YYYY-MM-DD') AS hasta,
+      to_char(date_trunc('month', (NOW() AT TIME ZONE 'America/Bogota')),                                 'YYYY-MM-DD') AS periodo_proyectado
+  `, [meses]);
+
+  // Serie mensual de ventas/costo (misma semántica que el tab Análisis).
+  const { serie } = await getAnalisis(sucursalId, rango.desde, rango.hasta, 'mes');
+
+  const historial = serie.map((s) => ({
+    periodo:        s.periodo,
+    ventas:         Number(s.total_vendido),
+    costo:          Number(s.costo),
+    utilidad_bruta: Number(s.total_vendido) - Number(s.costo),
+  }));
+
+  const mesesConDatos = historial.length;
+  const sumVentas = historial.reduce((a, m) => a + m.ventas, 0);
+  const sumCosto  = historial.reduce((a, m) => a + m.costo,  0);
+
+  const ventasEstimadas = mesesConDatos > 0 ? sumVentas / mesesConDatos : 0;
+  const pctCosto        = sumVentas > 0 ? sumCosto / sumVentas : 0;
+  const costoEstimado   = ventasEstimadas * pctCosto;
+  const utilidadBruta   = ventasEstimadas - costoEstimado;
+
+  // Gastos fijos configurados (activos) de la sucursal.
+  const { rows: gastosFijos } = await pool.query(
+    `SELECT id, nombre, valor
+     FROM gastos_fijos
+     WHERE sucursal_id = $1 AND activo
+     ORDER BY creado_en ASC, id ASC`,
+    [sucursalId],
+  );
+  const listaGastos     = gastosFijos.map((g) => ({ id: g.id, nombre: g.nombre, valor: Number(g.valor) }));
+  const gastosFijosTotal = listaGastos.reduce((a, g) => a + g.valor, 0);
+
+  const utilidadNeta      = utilidadBruta - gastosFijosTotal;
+  const margenContribPct  = ventasEstimadas > 0 ? utilidadBruta / ventasEstimadas : 0;
+  const margenNetoPct     = ventasEstimadas > 0 ? utilidadNeta  / ventasEstimadas : 0;
+  // Ventas mínimas para cubrir los gastos fijos (no perder). Sin margen positivo
+  // no existe punto de equilibrio alcanzable → null.
+  const puntoEquilibrio   = margenContribPct > 0 ? gastosFijosTotal / margenContribPct : null;
+
+  // Gastos reales registrados en Tesorería (informativo, chequeo cruzado).
+  // Tesorería puede no estar instalada: si las tablas no existen, se omite.
+  let gastosRealesProm = 0;
+  const { rows: [tbl] } = await pool.query(`SELECT to_regclass('movimientos_dinero') AS t`);
+  if (tbl.t) {
+    const { rows: [g] } = await pool.query(`
+      SELECT
+        COALESCE(SUM(md.valor), 0) AS total,
+        COUNT(DISTINCT date_trunc('month', ${fechaBogota('md.fecha')})) AS meses_con_gastos
+      FROM movimientos_dinero md
+      JOIN cuentas_dinero c ON c.id = md.cuenta_id
+      WHERE c.sucursal_id = $1
+        AND md.categoria = 'gasto'
+        AND md.tipo      = 'salida'
+        AND md.activo    = TRUE
+        AND ${fechaBogota('md.fecha')} BETWEEN $2 AND $3
+    `, [sucursalId, rango.desde, rango.hasta]);
+    const nMeses = Number(g.meses_con_gastos);
+    gastosRealesProm = nMeses > 0 ? Number(g.total) / nMeses : 0;
+  }
+
+  return {
+    meses_historial:    meses,
+    meses_con_datos:    mesesConDatos,
+    rango:              { desde: rango.desde, hasta: rango.hasta },
+    periodo_proyectado: rango.periodo_proyectado,
+    historial,
+    proyeccion: {
+      ventas_estimadas:        ventasEstimadas,
+      pct_costo:               pctCosto,
+      costo_estimado:          costoEstimado,
+      utilidad_bruta:          utilidadBruta,
+      gastos_fijos:            gastosFijosTotal,
+      utilidad_neta:           utilidadNeta,
+      margen_contribucion_pct: margenContribPct,
+      margen_neto_pct:         margenNetoPct,
+      punto_equilibrio:        puntoEquilibrio,
+    },
+    gastos_fijos:       listaGastos,
+    gastos_reales_prom: gastosRealesProm,
+  };
+};
+
+// ─── CRUD de gastos fijos (por sucursal) ───────────────────────────────────────
+
+const listarGastosFijos = async (sucursalId) => {
+  const { rows } = await pool.query(
+    `SELECT id, nombre, valor
+     FROM gastos_fijos
+     WHERE sucursal_id = $1 AND activo
+     ORDER BY creado_en ASC, id ASC`,
+    [sucursalId],
+  );
+  return rows.map((g) => ({ id: g.id, nombre: g.nombre, valor: Number(g.valor) }));
+};
+
+const crearGastoFijo = async (sucursalId, nombre, valor) => {
+  const { rows } = await pool.query(
+    `INSERT INTO gastos_fijos (sucursal_id, nombre, valor)
+     VALUES ($1, $2, $3)
+     RETURNING id, nombre, valor`,
+    [sucursalId, nombre.trim(), valor],
+  );
+  return { id: rows[0].id, nombre: rows[0].nombre, valor: Number(rows[0].valor) };
+};
+
+const actualizarGastoFijo = async (sucursalId, id, nombre, valor) => {
+  const { rows } = await pool.query(
+    `UPDATE gastos_fijos
+     SET nombre = $3, valor = $4, actualizado_en = NOW()
+     WHERE id = $1 AND sucursal_id = $2 AND activo
+     RETURNING id, nombre, valor`,
+    [id, sucursalId, nombre.trim(), valor],
+  );
+  if (!rows.length) {
+    throw Object.assign(new Error('Gasto fijo no encontrado en esta sucursal'), { status: 404 });
+  }
+  return { id: rows[0].id, nombre: rows[0].nombre, valor: Number(rows[0].valor) };
+};
+
+// Borrado lógico (consistente con el resto del sistema).
+const eliminarGastoFijo = async (sucursalId, id) => {
+  const { rows } = await pool.query(
+    `UPDATE gastos_fijos
+     SET activo = FALSE, actualizado_en = NOW()
+     WHERE id = $1 AND sucursal_id = $2 AND activo
+     RETURNING id`,
+    [id, sucursalId],
+  );
+  if (!rows.length) {
+    throw Object.assign(new Error('Gasto fijo no encontrado en esta sucursal'), { status: 404 });
+  }
+  return { id: rows[0].id };
+};
+
 module.exports = {
   getDashboard,
   getVentasRango,
   getServiciosRango,
   getAnalisis,
+  getProyeccion,
   getVentasPorVendedor,
   getProductosTop,
   getInventarioBajo,
   actualizarCostoCompra,
   getValorInventario,
+  listarGastosFijos,
+  crearGastoFijo,
+  actualizarGastoFijo,
+  eliminarGastoFijo,
 };
