@@ -109,6 +109,16 @@ const MetricCard = ({ label, valor, colorClass, ayuda }) => (
   </div>
 );
 
+// Tarjeta de escenario de cierre de mes
+const EscenarioCard = ({ label, valor, destacado }) => (
+  <div className={`rounded-xl p-3 border ${destacado ? 'bg-blue-50 border-blue-200' : 'bg-gray-50 border-gray-100'}`}>
+    <p className="text-xs text-gray-500">
+      {label}{destacado && <span className="text-blue-500 font-semibold"> · recomendada</span>}
+    </p>
+    <p className={`text-lg font-bold mt-0.5 ${destacado ? 'text-blue-700' : 'text-gray-700'}`}>{formatCOP(valor)}</p>
+  </div>
+);
+
 // Barra horizontal simple (para comparación de punto de equilibrio)
 const BarraComparativa = ({ label, valor, max, colorBar, colorTxt }) => {
   const ancho = max > 0 ? Math.max(3, (valor / max) * 100) : 0;
@@ -375,9 +385,16 @@ export default function PanelProyeccion() {
   const gastos    = base.gastos_fijos;
   const utilNeta  = utilBruta - gastos;
   const margenContrib = ventas > 0 ? utilBruta / ventas : 0;
-  const puntoEq   = margenContrib > 0 ? gastos / margenContrib : null;
+  // Sin gastos fijos el punto de equilibrio sería $0 (no dice nada) → null = "—".
+  const puntoEq   = (margenContrib > 0 && gastos > 0) ? gastos / margenContrib : null;
   const ajustado  = ventasAjuste !== null;
   const mesTexto  = labelMesLargo(data.periodo_proyectado);
+
+  // Análisis de ritmo del mes en curso
+  const ritmo      = data.ritmo || { actual_diario: 0, historico_diario: 0 };
+  const escenarios = data.escenarios || {};
+  const ritmoAlto  = ritmo.historico_diario > 0 && ritmo.actual_diario > ritmo.historico_diario * 1.05;
+  const ritmoBajo  = ritmo.historico_diario > 0 && ritmo.actual_diario < ritmo.historico_diario * 0.95;
 
   const estado = calcularEstado({ gastos, utilNeta, ventas, puntoEq });
   const tono   = TONO[estado.tono];
@@ -430,15 +447,45 @@ export default function PanelProyeccion() {
             <p className={`text-xs ${tono.sub}`}>{estado.mensaje}</p>
           </div>
 
-          {/* Así vas este mes (usa los datos que ya hay del mes en curso) */}
+          {/* Análisis del mes en curso: progreso + ritmo + escenarios */}
           {mes.con_datos && (
-            <div className="flex items-start gap-2 bg-indigo-50 border border-indigo-100 rounded-xl px-4 py-2.5 text-sm text-indigo-700">
-              <TrendingUp size={15} className="flex-shrink-0 mt-0.5" />
-              <span>
-                Llevas <strong>{formatCOP(mes.ventas)}</strong> vendidos en los primeros <strong>{mes.dias_transcurridos}</strong> días de {mesTexto}.
-                Ya lo tuvimos en cuenta: proyectamos el cierre del mes con {mes.dias_restantes} día(s) por delante.
-              </span>
-            </div>
+            <ChartCard titulo={`Así viene ${mesTexto}`} icon={TrendingUp} color="text-indigo-500"
+              subtitulo={`Combinamos lo que ya llevas este mes con el ritmo de tus últimos ${data.meses_con_datos} mes(es) para proyectar el cierre.`}>
+              <div className="flex items-center justify-between gap-2 flex-wrap text-sm">
+                <span className="text-gray-600">
+                  Llevas <strong className="text-gray-900">{formatCOP(mes.ventas)}</strong> en {mes.dias_transcurridos} días
+                  <span className="text-gray-400"> · faltan {mes.dias_restantes}</span>
+                </span>
+                <span className="text-gray-600">
+                  Ritmo actual: <strong className="text-gray-900">{formatCOP(ritmo.actual_diario)}/día</strong>
+                </span>
+              </div>
+
+              {/* Barra de avance del mes */}
+              <div className="w-full bg-gray-100 rounded-full h-2.5 overflow-hidden">
+                <div className="h-full bg-indigo-500 rounded-full"
+                  style={{ width: `${Math.min(100, (mes.dias_transcurridos / mes.dias_mes) * 100)}%` }} />
+              </div>
+
+              {/* Insight de ritmo */}
+              {(ritmoAlto || ritmoBajo) && (
+                <div className={`rounded-xl px-3 py-2 text-xs ${ritmoAlto ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
+                  {ritmoAlto
+                    ? <>Vas a <strong>mejor ritmo</strong> que lo normal ({formatCOP(ritmo.actual_diario)}/día vs {formatCOP(ritmo.historico_diario)}/día de tu promedio). ¡Buen mes!</>
+                    : <>Vas a un ritmo <strong>más bajo</strong> que lo normal ({formatCOP(ritmo.actual_diario)}/día vs {formatCOP(ritmo.historico_diario)}/día de tu promedio). Quedan {mes.dias_restantes} días para remontar.</>}
+                </div>
+              )}
+
+              {/* Escenarios de cierre */}
+              <div className="border-t border-gray-100 pt-3">
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">¿Cómo podría cerrar el mes?</p>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <EscenarioCard label="Si sigues a este ritmo" valor={escenarios.a_este_ritmo} />
+                  <EscenarioCard label="Proyección" valor={escenarios.equilibrada} destacado />
+                  <EscenarioCard label="Un mes normal tuyo" valor={escenarios.mes_normal} />
+                </div>
+              </div>
+            </ChartCard>
           )}
 
           {/* Métricas grandes con explicación simple */}
@@ -451,7 +498,7 @@ export default function PanelProyeccion() {
               ayuda="Después de costos y gastos" />
             <MetricCard label="Para no perder" valor={puntoEq !== null ? formatCOP(puntoEq) : '—'}
               colorClass="bg-purple-50 text-purple-700"
-              ayuda="Mínimo que debes vender" />
+              ayuda={puntoEq !== null ? 'Mínimo que debes vender' : 'Agrega tus gastos fijos'} />
             <MetricCard label="De cada $100, te quedan" valor={`$${Math.round(margenContrib > 0 ? (utilNeta / ventas) * 100 : 0)}`}
               colorClass="bg-gray-100 text-gray-700"
               ayuda="Tu margen de ganancia" />

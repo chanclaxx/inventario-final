@@ -1597,6 +1597,10 @@ const getProyeccion = async (sucursalId, meses = 6) => {
   // Ventas esperadas del cierre del mes = lo que ya va + lo que falta al ritmo histórico.
   const ventasEstimadas = ventasMesActual + promedioDiarioHist * diasRestantes;
 
+  // Ritmo diario (para comparar el mes en curso contra lo normal) y escenarios.
+  const ritmoActualDiario   = diasTranscurridos > 0 ? ventasMesActual / diasTranscurridos : 0;
+  const promedioMensualHist = mesesConDatos > 0 ? sumVentas / mesesConDatos : 0;
+
   // % costo: de los meses completos; si no hay, del mes en curso.
   const pctCosto = sumVentas > 0
     ? sumCosto / sumVentas
@@ -1619,8 +1623,9 @@ const getProyeccion = async (sucursalId, meses = 6) => {
   const margenContribPct  = ventasEstimadas > 0 ? utilidadBruta / ventasEstimadas : 0;
   const margenNetoPct     = ventasEstimadas > 0 ? utilidadNeta  / ventasEstimadas : 0;
   // Ventas mínimas para cubrir los gastos fijos (no perder). Sin margen positivo
-  // no existe punto de equilibrio alcanzable → null.
-  const puntoEquilibrio   = margenContribPct > 0 ? gastosFijosTotal / margenContribPct : null;
+  // O sin gastos fijos configurados no hay punto de equilibrio útil (sería $0) → null.
+  // El frontend/PDF lo muestran como "—" e invitan a configurar gastos.
+  const puntoEquilibrio   = (margenContribPct > 0 && gastosFijosTotal > 0) ? gastosFijosTotal / margenContribPct : null;
 
   // Gastos reales registrados en Tesorería (informativo, chequeo cruzado).
   // Tesorería puede no estar instalada: si las tablas no existen, se omite.
@@ -1656,6 +1661,19 @@ const getProyeccion = async (sucursalId, meses = 6) => {
       dias_mes:           diasMes,
       dias_restantes:     diasRestantes,
       con_datos:          ventasMesActual > 0,
+    },
+    // Comparación de ritmo y escenarios de cierre (análisis del mes en curso).
+    ritmo: {
+      actual_diario:    ritmoActualDiario,
+      historico_diario: promedioDiarioHist,
+    },
+    escenarios: {
+      // Si el resto del mes va al ritmo de lo que llevas.
+      a_este_ritmo: (diasTranscurridos > 0 && ventasMesActual > 0) ? ritmoActualDiario * diasMes : ventasEstimadas,
+      // Recomendada: lo que llevas + resto al ritmo histórico.
+      equilibrada:  ventasEstimadas,
+      // Como un mes normal tuyo (promedio histórico).
+      mes_normal:   promedioMensualHist,
     },
     historial,
     proyeccion: {
