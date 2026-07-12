@@ -15,6 +15,7 @@ import {
 import { formatCOP } from '../../utils/formatters';
 import { Spinner } from '../../components/ui/Spinner';
 import { EmptyState } from '../../components/ui/EmptyState';
+import { InputMoneda } from '../../components/ui/InputMoneda';
 
 // ─────────────────────────────────────────────
 // HELPERS
@@ -235,16 +236,16 @@ const DondeVaCadaPeso = ({ ventas, costo, gastos, utilNeta }) => {
 // ─────────────────────────────────────────────
 const FilaGastoFijo = ({ gasto, onGuardar, onEliminar, guardando }) => {
   const [nombre, setNombre] = useState(gasto.nombre);
-  const [valor,  setValor]  = useState(String(gasto.valor));
+  const [valor,  setValor]  = useState(gasto.valor);
   const dirty  = nombre.trim() !== gasto.nombre || Number(valor) !== gasto.valor;
-  const valido = nombre.trim() !== '' && !isNaN(Number(valor)) && Number(valor) >= 0;
+  const valido = nombre.trim() !== '' && valor !== '' && !isNaN(Number(valor)) && Number(valor) >= 0;
 
   return (
     <div className="flex items-center gap-2">
       <input value={nombre} onChange={(e) => setNombre(e.target.value)}
         className="flex-1 min-w-0 px-3 py-2 bg-gray-100 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
         placeholder="Concepto (arriendo, nómina…)" />
-      <input type="number" min="0" value={valor} onChange={(e) => setValor(e.target.value)}
+      <InputMoneda value={valor} onChange={setValor}
         className="w-32 px-3 py-2 bg-gray-100 rounded-xl text-sm text-right focus:outline-none focus:ring-2 focus:ring-blue-500"
         placeholder="0" />
       {dirty && valido && (
@@ -273,7 +274,7 @@ const GastosFijosEditor = ({ gastos, total, realesProm }) => {
   const mDel   = useMutation({ mutationFn: (id) => eliminarGastoFijo(id),               onSuccess: onSettled });
   const guardando = mCrear.isPending || mEdit.isPending || mDel.isPending;
 
-  const nuevoValido = nuevoNombre.trim() !== '' && !isNaN(Number(nuevoValor)) && Number(nuevoValor) >= 0;
+  const nuevoValido = nuevoNombre.trim() !== '' && nuevoValor !== '' && !isNaN(Number(nuevoValor)) && Number(nuevoValor) >= 0;
   const agregar = () => {
     if (!nuevoValido) return;
     mCrear.mutate({ nombre: nuevoNombre.trim(), valor: Number(nuevoValor) }, {
@@ -302,7 +303,7 @@ const GastosFijosEditor = ({ gastos, total, realesProm }) => {
           onKeyDown={(e) => e.key === 'Enter' && agregar()}
           className="flex-1 min-w-0 px-3 py-2 bg-gray-100 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
           placeholder="Nuevo gasto (arriendo, nómina…)" />
-        <input type="number" min="0" value={nuevoValor} onChange={(e) => setNuevoValor(e.target.value)}
+        <InputMoneda value={nuevoValor} onChange={setNuevoValor}
           onKeyDown={(e) => e.key === 'Enter' && agregar()}
           className="w-32 px-3 py-2 bg-gray-100 rounded-xl text-sm text-right focus:outline-none focus:ring-2 focus:ring-blue-500"
           placeholder="0" />
@@ -364,7 +365,8 @@ export default function PanelProyeccion() {
   if (!data) return null;
 
   const base = data.proyeccion;
-  const sinDatos = data.meses_con_datos === 0;
+  const mes  = data.mes_en_curso;
+  const sinDatos = !data.puede_proyectar;
 
   // Recálculo en vivo con el ajuste manual (parte siempre del promedio real).
   const ventas    = ventasAjuste ?? base.ventas_estimadas;
@@ -428,11 +430,22 @@ export default function PanelProyeccion() {
             <p className={`text-xs ${tono.sub}`}>{estado.mensaje}</p>
           </div>
 
+          {/* Así vas este mes (usa los datos que ya hay del mes en curso) */}
+          {mes.con_datos && (
+            <div className="flex items-start gap-2 bg-indigo-50 border border-indigo-100 rounded-xl px-4 py-2.5 text-sm text-indigo-700">
+              <TrendingUp size={15} className="flex-shrink-0 mt-0.5" />
+              <span>
+                Llevas <strong>{formatCOP(mes.ventas)}</strong> vendidos en los primeros <strong>{mes.dias_transcurridos}</strong> días de {mesTexto}.
+                Ya lo tuvimos en cuenta: proyectamos el cierre del mes con {mes.dias_restantes} día(s) por delante.
+              </span>
+            </div>
+          )}
+
           {/* Métricas grandes con explicación simple */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             <MetricCard label="Esperas vender" valor={formatCOP(ventas)}
               colorClass="bg-blue-50 text-blue-700"
-              ayuda={ajustado ? 'Ajustado por ti' : `Promedio de ${data.meses_con_datos} mes(es)`} />
+              ayuda={ajustado ? 'Ajustado por ti' : (mes.con_datos ? 'Cómo cerrará el mes' : `Promedio de ${data.meses_con_datos} mes(es)`)} />
             <MetricCard label="Te queda (ganancia)" valor={formatCOP(utilNeta)}
               colorClass={utilNeta >= 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}
               ayuda="Después de costos y gastos" />
@@ -446,7 +459,7 @@ export default function PanelProyeccion() {
 
           {/* Gráfica de barras */}
           <ChartCard titulo="¿Cómo vienen tus ventas?" icon={TrendingUp} color="text-blue-500"
-            subtitulo="Las barras azules son meses que ya pasaron. La morada es lo que esperamos el próximo mes.">
+            subtitulo="Las barras azules son meses que ya cerraron. La morada es cómo esperamos que cierre este mes.">
             <GraficaVentas
               historial={data.historial}
               periodoProyectado={data.periodo_proyectado}
@@ -494,8 +507,8 @@ export default function PanelProyeccion() {
                 </button>
               )}
             </div>
-            <input type="number" min="0" value={Math.round(ventas)}
-              onChange={(e) => setAjuste(e.target.value === '' ? 0 : Number(e.target.value))}
+            <InputMoneda value={Math.round(ventas)}
+              onChange={(v) => setAjuste(v === '' ? 0 : v)}
               className="w-full sm:w-56 px-3 py-2 bg-gray-100 rounded-xl text-base font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
 

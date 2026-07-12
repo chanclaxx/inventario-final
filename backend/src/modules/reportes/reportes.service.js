@@ -1526,34 +1526,55 @@ const getValorInventario = async (sucursalId) => {
 };
 
 // ─── PROYECCIÓN MENSUAL ────────────────────────────────────────────────────────
-// Reporte "hacia adelante": estima el próximo mes a partir del promedio de los
-// últimos N meses COMPLETOS (se excluye el mes en curso, que está a medias).
+// Reporte "hacia adelante": estima cómo CERRARÁ el mes en curso combinando lo que
+// ya se lleva vendido este mes con el ritmo histórico de los meses completos.
 //
-//   Ventas esperadas = promedio de ventas de los meses completos con datos
-//   % costo histórico = Σ costo / Σ ventas de esos meses
-//   Costo esperado    = Ventas esperadas × % costo histórico
-//   Utilidad bruta    = Ventas esperadas − Costo esperado
-//   Gastos fijos      = Σ gastos_fijos activos de la sucursal (configurables)
-//   Utilidad neta     = Utilidad bruta − Gastos fijos
-//   Margen contrib.   = Utilidad bruta / Ventas esperadas
-//   Punto equilibrio  = Gastos fijos / Margen contribución  (ventas mínimas para no perder)
+//   Promedio diario hist. = Σ ventas meses completos / (N meses × 30.44)
+//   Ventas esperadas      = ventas del mes en curso + promedio diario × días restantes
+//   % costo histórico      = Σ costo / Σ ventas de los meses completos
+//   Costo esperado         = Ventas esperadas × % costo histórico
+//   Utilidad bruta         = Ventas esperadas − Costo esperado
+//   Gastos fijos           = Σ gastos_fijos activos de la sucursal (configurables)
+//   Utilidad neta          = Utilidad bruta − Gastos fijos
+//   Margen contrib.        = Utilidad bruta / Ventas esperadas
+//   Punto equilibrio       = Gastos fijos / Margen contribución (ventas mínimas para no perder)
 //
-// La serie histórica reutiliza getAnalisis(agrupacion='mes'), por lo que respeta
+// La serie mensual reutiliza getAnalisis(agrupacion='mes'), por lo que respeta
 // exactamente las reglas de utilidad del módulo (créditos, retomas, devoluciones).
+// El mes en curso llega como la última fila de la serie (parcial) y se separa del
+// histórico para no ensuciar el promedio, pero SÍ se usa para el run-rate.
+
+const DIAS_MES_PROMEDIO = 30.44;
 
 const getProyeccion = async (sucursalId, meses = 6) => {
-  // Ventana: N meses calendario completos (excluye el mes en curso).
+  // Fechas ancla en hora Bogotá: ventana histórica + progreso del mes en curso.
   const { rows: [rango] } = await pool.query(`
     SELECT
-      to_char(date_trunc('month', (NOW() AT TIME ZONE 'America/Bogota')) - ($1 || ' months')::interval, 'YYYY-MM-DD') AS desde,
-      to_char(date_trunc('month', (NOW() AT TIME ZONE 'America/Bogota')) - interval '1 day',             'YYYY-MM-DD') AS hasta,
-      to_char(date_trunc('month', (NOW() AT TIME ZONE 'America/Bogota')),                                 'YYYY-MM-DD') AS periodo_proyectado
+      to_char(mstart - ($1 || ' months')::interval, 'YYYY-MM-DD')           AS desde,
+      to_char(mstart - interval '1 day', 'YYYY-MM-DD')                      AS hasta,
+      to_char(hoy, 'YYYY-MM-DD')                                            AS hoy,
+      to_char(mstart, 'YYYY-MM-DD')                                         AS periodo_proyectado,
+      extract(day FROM hoy)::int                                            AS dias_transcurridos,
+      extract(day FROM (mstart + interval '1 month - 1 day'))::int          AS dias_mes
+    FROM (
+      SELECT (NOW() AT TIME ZONE 'America/Bogota') AS hoy,
+             date_trunc('month', (NOW() AT TIME ZONE 'America/Bogota')) AS mstart
+    ) t
   `, [meses]);
 
-  // Serie mensual de ventas/costo (misma semántica que el tab Análisis).
-  const { serie } = await getAnalisis(sucursalId, rango.desde, rango.hasta, 'mes');
+  const diasTranscurridos = Number(rango.dias_transcurridos);
+  const diasMes           = Number(rango.dias_mes);
+  const diasRestantes     = Math.max(0, diasMes - diasTranscurridos);
 
-  const historial = serie.map((s) => ({
+  // Serie mensual desde el inicio de la ventana hasta HOY (incluye el mes en curso
+  // como última fila parcial). Misma semántica que el tab Análisis.
+  const { serie } = await getAnalisis(sucursalId, rango.desde, rango.hoy, 'mes');
+
+  // Separar meses completos (base del promedio) del mes en curso (parcial).
+  const completos = serie.filter((s) => s.periodo < rango.periodo_proyectado);
+  const actual    = serie.find((s) => s.periodo === rango.periodo_proyectado);
+
+  const historial = completos.map((s) => ({
     periodo:        s.periodo,
     ventas:         Number(s.total_vendido),
     costo:          Number(s.costo),
@@ -1564,8 +1585,22 @@ const getProyeccion = async (sucursalId, meses = 6) => {
   const sumVentas = historial.reduce((a, m) => a + m.ventas, 0);
   const sumCosto  = historial.reduce((a, m) => a + m.costo,  0);
 
-  const ventasEstimadas = mesesConDatos > 0 ? sumVentas / mesesConDatos : 0;
-  const pctCosto        = sumVentas > 0 ? sumCosto / sumVentas : 0;
+  const ventasMesActual = actual ? Number(actual.total_vendido) : 0;
+  const costoMesActual  = actual ? Number(actual.costo)         : 0;
+
+  // Promedio diario histórico; si no hay meses completos, se usa el ritmo del mes
+  // en curso (run-rate puro). Si no hay nada, 0.
+  const promedioDiarioHist = mesesConDatos > 0
+    ? (sumVentas / mesesConDatos) / DIAS_MES_PROMEDIO
+    : (diasTranscurridos > 0 ? ventasMesActual / diasTranscurridos : 0);
+
+  // Ventas esperadas del cierre del mes = lo que ya va + lo que falta al ritmo histórico.
+  const ventasEstimadas = ventasMesActual + promedioDiarioHist * diasRestantes;
+
+  // % costo: de los meses completos; si no hay, del mes en curso.
+  const pctCosto = sumVentas > 0
+    ? sumCosto / sumVentas
+    : (ventasMesActual > 0 ? costoMesActual / ventasMesActual : 0);
   const costoEstimado   = ventasEstimadas * pctCosto;
   const utilidadBruta   = ventasEstimadas - costoEstimado;
 
@@ -1611,8 +1646,17 @@ const getProyeccion = async (sucursalId, meses = 6) => {
   return {
     meses_historial:    meses,
     meses_con_datos:    mesesConDatos,
+    // Se puede proyectar si hay meses completos O ya hay ventas este mes.
+    puede_proyectar:    mesesConDatos > 0 || ventasMesActual > 0,
     rango:              { desde: rango.desde, hasta: rango.hasta },
     periodo_proyectado: rango.periodo_proyectado,
+    mes_en_curso: {
+      ventas:             ventasMesActual,
+      dias_transcurridos: diasTranscurridos,
+      dias_mes:           diasMes,
+      dias_restantes:     diasRestantes,
+      con_datos:          ventasMesActual > 0,
+    },
     historial,
     proyeccion: {
       ventas_estimadas:        ventasEstimadas,

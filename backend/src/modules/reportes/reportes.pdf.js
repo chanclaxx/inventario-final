@@ -439,10 +439,10 @@ const generarReporteProyeccion = async ({ negocio, sucursalNombre, sucursalId, m
   });
 
   // ── Sin datos suficientes ──────────────────────────────────────────────────
-  if (p.meses_con_datos === 0) {
+  if (!p.puede_proyectar) {
     y = tituloSeccion(doc, y, 'Proyección');
     y = parrafo(doc, y,
-      'Aún no hay meses calendario completos con ventas para proyectar. Registra ventas durante al menos un mes cerrado y vuelve a generar este reporte.',
+      'Aún no hay ventas suficientes para proyectar. Registra ventas durante al menos un mes cerrado (o avanza el mes en curso) y vuelve a generar este reporte.',
       { size: 10, color: C.gris });
     drawFooters(doc, negocio?.nombre, fechaGeneracion);
     doc.end();
@@ -452,8 +452,15 @@ const generarReporteProyeccion = async ({ negocio, sucursalNombre, sucursalId, m
   // ── Encabezado narrativo ───────────────────────────────────────────────────
   y = tituloSeccion(doc, y, `Proyección para ${mesLabel}`);
   y = parrafo(doc, y,
-    `Con base en el promedio de tus últimos ${p.meses_con_datos} mes(es) con ventas, esto es lo que puedes esperar el próximo mes:`,
+    p.mes_en_curso.con_datos
+      ? `Combinando lo que ya llevas este mes con el ritmo de tus últimos ${p.meses_con_datos} mes(es), así podría cerrar ${mesLabel}:`
+      : `Con base en el promedio de tus últimos ${p.meses_con_datos} mes(es) con ventas, así podría cerrar ${mesLabel}:`,
     { size: 10 });
+  if (p.mes_en_curso.con_datos) {
+    y = parrafo(doc, y,
+      `Ya llevas ${formatCOP(p.mes_en_curso.ventas)} vendidos en los primeros ${p.mes_en_curso.dias_transcurridos} días (quedan ${p.mes_en_curso.dias_restantes} por delante).`,
+      { size: 9, color: C.gris });
+  }
   y += 2;
 
   // ── KPIs grandes ───────────────────────────────────────────────────────────
@@ -616,7 +623,7 @@ const generarReporteContable = async ({ negocio, sucursalNombre, sucursalId, des
   // ── 2. Estado de resultados resumido ───────────────────────────────────────
   y = tituloSeccion(doc, y, 'Resumen del periodo');
   y = fila(doc, y, 'Ventas de contado (facturado)', formatCOP(ventasContado));
-  y = fila(doc, y, '(−) Costo de mercancía vendida', formatCOP(costoVentas), { valorColor: C.rojo });
+  y = fila(doc, y, '(-) Costo de mercancía vendida', formatCOP(costoVentas), { valorColor: C.rojo });
   hLine(doc, y); y += 6;
   y = fila(doc, y, 'Utilidad bruta de ventas de contado', formatCOP(utilidadBruta), { bold: true, valorColor: C.verde });
   y = fila(doc, y, `Margen sobre ventas de contado`, formatPct(margen), { bold: true });

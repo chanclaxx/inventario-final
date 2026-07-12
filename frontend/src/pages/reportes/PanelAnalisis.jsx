@@ -8,8 +8,9 @@ import {
 import {
   LineChart as LineIcon, BarChart3, AreaChart as AreaIcon,
   TrendingUp, PieChart as PieIcon, CreditCard, Package, FileDown,
+  Scale, Info,
 } from 'lucide-react';
-import { getAnalisis, getProductosTop, exportarAnalisisPdf } from '../../api/reportes.api';
+import { getAnalisis, getProductosTop, exportarAnalisisPdf, getGastosFijos } from '../../api/reportes.api';
 import { formatCOP, formatFechaISO, fechaHoyBogota } from '../../utils/formatters';
 import { Spinner } from '../../components/ui/Spinner';
 import { EmptyState } from '../../components/ui/EmptyState';
@@ -44,6 +45,14 @@ const seisMesesAtras = () => {
   d.setMonth(d.getMonth() - 5);
   d.setDate(1);
   return formatFechaISO(d);
+};
+
+// Días (inclusivos) entre dos fechas 'YYYY-MM-DD' — para prorratear gastos fijos
+const diasEntre = (desde, hasta) => {
+  const d1 = new Date(`${desde}T00:00:00-05:00`);
+  const d2 = new Date(`${hasta}T00:00:00-05:00`);
+  if (isNaN(d1) || isNaN(d2)) return 0;
+  return Math.max(1, Math.round((d2 - d1) / 86_400_000) + 1);
 };
 
 // ─────────────────────────────────────────────
@@ -270,10 +279,24 @@ export default function PanelAnalisis() {
     queryFn: () => getProductosTop(desde, hasta).then((r) => r.data.data),
   });
 
+  const { data: gastosFijos } = useQuery({
+    queryKey: ['gastos-fijos'],
+    queryFn: () => getGastosFijos().then((r) => r.data.data),
+  });
+
   const serie        = analisis?.serie        ?? [];
   const composicion  = analisis?.composicion  ?? [];
   const metodosPago  = analisis?.metodos_pago ?? [];
   const unit         = analisis?.agrupacion   ?? 'month';
+
+  // Utilidad neta estimada del período: utilidad bruta − gastos fijos actuales,
+  // prorrateados por los días del período. Es una ESTIMACIÓN (usa los gastos de
+  // hoy), por eso se muestra claramente etiquetada y no altera la serie por mes.
+  const gastosMensual        = (gastosFijos ?? []).reduce((s, g) => s + Number(g.valor), 0);
+  const utilidadBrutaPeriodo = serie.reduce((s, r) => s + Number(r.utilidad), 0);
+  const diasPeriodo          = diasEntre(desde, hasta);
+  const gastosPeriodo        = gastosMensual * (diasPeriodo / 30.44);
+  const utilidadNetaPeriodo  = utilidadBrutaPeriodo - gastosPeriodo;
 
   return (
     <div className="flex flex-col gap-4">
@@ -366,6 +389,34 @@ export default function PanelAnalisis() {
               ? <EmptyState icon={TrendingUp} titulo="Sin ventas en el período seleccionado" />
               : <GraficaTendencia serie={serie} unit={unit} tipo={tipoGrafica} puntos={puntos} />}
           </ChartCard>
+
+          {/* Utilidad neta estimada del período (usa gastos fijos actuales) */}
+          {gastosMensual > 0 && serie.length > 0 && (
+            <div className="bg-white border border-gray-100 rounded-2xl p-4 shadow-sm flex flex-col gap-3">
+              <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                <Scale size={15} className="text-emerald-500" />
+                Utilidad neta estimada del período
+              </h3>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="bg-emerald-50 text-emerald-700 rounded-xl p-3">
+                  <p className="text-xs opacity-70">Utilidad bruta</p>
+                  <p className="text-lg font-bold mt-0.5">{formatCOP(utilidadBrutaPeriodo)}</p>
+                </div>
+                <div className="bg-rose-50 text-rose-700 rounded-xl p-3">
+                  <p className="text-xs opacity-70">(−) Gastos fijos (estimado)</p>
+                  <p className="text-lg font-bold mt-0.5">{formatCOP(gastosPeriodo)}</p>
+                </div>
+                <div className={`rounded-xl p-3 ${utilidadNetaPeriodo >= 0 ? 'bg-blue-50 text-blue-700' : 'bg-red-50 text-red-700'}`}>
+                  <p className="text-xs opacity-70">= Utilidad neta</p>
+                  <p className="text-lg font-bold mt-0.5">{formatCOP(utilidadNetaPeriodo)}</p>
+                </div>
+              </div>
+              <p className="text-xs text-gray-400 flex items-start gap-1.5">
+                <Info size={12} className="flex-shrink-0 mt-0.5" />
+                Estimado: resta tus gastos fijos actuales ({formatCOP(gastosMensual)}/mes) proporcional a los {diasPeriodo} días del período. No refleja lo que pagabas en meses pasados. Edita tus gastos en la pestaña Proyección.
+              </p>
+            </div>
+          )}
 
           {/* Composición + Métodos de pago */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
