@@ -11,6 +11,8 @@ export const getAnalisis = (desde, hasta, agrupacion) =>
   api.get('/reportes/analisis', { params: { desde, hasta, agrupacion } });
 export const getProyeccion = (meses) =>
   api.get('/reportes/proyeccion', { params: { meses } });
+export const exportarProyeccionPdf = (meses) =>
+  api.get('/reportes/proyeccion/pdf', { params: { meses }, responseType: 'blob' });
 
 // Gastos fijos mensuales (por sucursal) — alimentan la proyección
 export const getGastosFijos    = ()             => api.get('/reportes/gastos-fijos');

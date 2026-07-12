@@ -30,6 +30,9 @@ router.get('/analisis/pdf',     requireModulo('reportes'), requireNivel('admin_n
 router.get('/proyeccion',       requireModulo('reportes'), requireNivel('admin_negocio'),
   [query('meses').optional().isIn(['3', '6', '12']).withMessage('meses inválido (3, 6 o 12)')],
   validate, ctrl.getProyeccion);
+router.get('/proyeccion/pdf',   requireModulo('reportes'), requireNivel('admin_negocio'),
+  [query('meses').optional().isIn(['3', '6', '12']).withMessage('meses inválido (3, 6 o 12)')],
+  validate, ctrl.exportarProyeccionPdf);
 
 const validarGastoFijo = [
   body('nombre').trim().notEmpty().withMessage('El nombre es requerido')

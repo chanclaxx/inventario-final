@@ -70,6 +70,31 @@ const getProyeccion = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+const exportarProyeccionPdf = async (req, res, next) => {
+  try {
+    const meses = req.query.meses ? Number(req.query.meses) : 6;
+
+    const [negocioRes, sucursalRes, logoRes] = await Promise.all([
+      pool.query('SELECT nombre, nit, direccion, telefono FROM negocios WHERE id = $1', [req.user.negocio_id]),
+      pool.query('SELECT nombre FROM sucursales WHERE id = $1', [req.sucursal_id]),
+      pool.query(`SELECT valor FROM config_negocio WHERE negocio_id = $1 AND clave = 'logo_negocio'`, [req.user.negocio_id]),
+    ]);
+
+    const pdfStream = await pdfService.generarReporteProyeccion({
+      negocio:        negocioRes.rows[0] || null,
+      sucursalNombre: sucursalRes.rows[0]?.nombre || null,
+      sucursalId:     req.sucursal_id,
+      meses,
+      logo:           logoRes.rows[0]?.valor || null,
+    });
+
+    const filename = `proyeccion-${req.sucursal_id}.pdf`;
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    pdfStream.pipe(res);
+  } catch (err) { next(err); }
+};
+
 // ── Gastos fijos (por sucursal) ──────────────────────────────────────────────
 const listarGastosFijos = async (req, res, next) => {
   try {
@@ -191,5 +216,5 @@ const getValorInventario = async (req, res, next) => {
 module.exports = {
   getDashboard, getVentasRango, getAnalisis, exportarPdf, getVentasPorVendedor, getProductosTop,
   getInventarioBajo, actualizarCostoCompra, getValorInventario,
-  getProyeccion, listarGastosFijos, crearGastoFijo, actualizarGastoFijo, eliminarGastoFijo,
+  getProyeccion, exportarProyeccionPdf, listarGastosFijos, crearGastoFijo, actualizarGastoFijo, eliminarGastoFijo,
 };

@@ -115,7 +115,7 @@ const dibujarLogo = (doc, logo, headerH) => {
   } catch { return 0; }
 };
 
-const drawHeader = (doc, { negocio, sucursalNombre, desde, hasta, fechaGeneracion, logo }) => {
+const drawHeader = (doc, { negocio, sucursalNombre, desde, hasta, fechaGeneracion, logo, titulo = 'REPORTE DE GESTIÓN', periodoLabel }) => {
   const H = 116;
   rectFill(doc, 0, 0, PAGE_W, H, C.headerBg, 0);
   doc.rect(0, H - 3, PAGE_W, 3).fill(C.verde);
@@ -139,10 +139,10 @@ const drawHeader = (doc, { negocio, sucursalNombre, desde, hasta, fechaGeneracio
 
   // Lado derecho
   doc.font(FONT.bold).fontSize(15).fillColor(C.headerText)
-    .text('REPORTE DE GESTIÓN', MARGIN, 26, { width: CONTENT_W, align: 'right' });
+    .text(titulo, MARGIN, 26, { width: CONTENT_W, align: 'right' });
   doc.font(FONT.normal).fontSize(8).fillColor(C.headerSub)
     .text(`Sucursal: ${sucursalNombre || '—'}`, MARGIN, 50, { width: CONTENT_W, align: 'right' });
-  doc.text(`Periodo: ${formatFechaCorta(desde)}  a  ${formatFechaCorta(hasta)}`, MARGIN, 62, { width: CONTENT_W, align: 'right' });
+  doc.text(periodoLabel || `Periodo: ${formatFechaCorta(desde)}  a  ${formatFechaCorta(hasta)}`, MARGIN, 62, { width: CONTENT_W, align: 'right' });
   doc.text(`Generado: ${fechaGeneracion}`, MARGIN, 74, { width: CONTENT_W, align: 'right' });
 
   return H + 18;
@@ -344,6 +344,223 @@ const drawHBars = (doc, y, items, { labelKey, valueKey, emptyMsg = 'Sin datos' }
   return y + 6;
 };
 
+// ─── Párrafo de texto (con salto de línea automático) ──────────────────────────
+const parrafo = (doc, y, texto, { size = 9.5, color = C.grisOscuro, font = FONT.normal, width = CONTENT_W, gap = 6 } = {}) => {
+  doc.font(font).fontSize(size).fillColor(color);
+  const h = doc.heightOfString(texto, { width });
+  doc.text(texto, MARGIN, y, { width });
+  return y + h + gap;
+};
+
+// ─── Pastilla de estado (semáforo) ─────────────────────────────────────────────
+const drawPastilla = (doc, y, texto, { fondo, color }) => {
+  const padX = 12, padY = 8;
+  doc.font(FONT.bold).fontSize(9.5);
+  const h = doc.heightOfString(texto, { width: CONTENT_W - padX * 2 }) + padY * 2;
+  rectFill(doc, MARGIN, y, CONTENT_W, h, fondo, 8);
+  doc.fillColor(color).text(texto, MARGIN + padX, y + padY, { width: CONTENT_W - padX * 2 });
+  return y + h + 10;
+};
+
+// ─── Barra apilada: a dónde va cada peso vendido ───────────────────────────────
+const drawStackedBar = (doc, y, segments, total) => {
+  const barH = 26;
+  const t = total > 0 ? total : 1;
+  doc.save();
+  doc.roundedRect(MARGIN, y, CONTENT_W, barH, 6).clip();
+  let x = MARGIN;
+  segments.forEach((s) => {
+    const w = (CONTENT_W * Math.max(0, s.valor)) / t;
+    if (w > 0) { doc.rect(x, y, w, barH).fill(s.color); x += w; }
+  });
+  doc.restore();
+  y += barH + 10;
+  // Leyenda con valor y %
+  segments.forEach((s) => {
+    const pct = total > 0 ? (s.valor / total) * 100 : 0;
+    rectFill(doc, MARGIN, y + 1, 10, 9, s.color, 2);
+    doc.font(FONT.normal).fontSize(9).fillColor(C.grisOscuro)
+      .text(`${s.label}`, MARGIN + 16, y, { width: CONTENT_W * 0.4, lineBreak: false });
+    doc.font(FONT.bold).fontSize(9).fillColor(C.grisOscuro)
+      .text(`${formatCOP(s.valor)}   ·   ${formatPct(pct)}`, MARGIN, y, { width: CONTENT_W, align: 'right', lineBreak: false });
+    y += 15;
+  });
+  return y + 6;
+};
+
+// ─── Barras comparativas mismas escala (punto de equilibrio) ───────────────────
+const drawCompareBars = (doc, y, rows, maxVal) => {
+  const labelW  = CONTENT_W * 0.34;
+  const valueW  = CONTENT_W * 0.22;
+  const barX    = MARGIN + labelW;
+  const barMaxW = CONTENT_W - labelW - valueW;
+  const m       = maxVal > 0 ? maxVal : 1;
+  const rowH    = 24;
+  rows.forEach((r) => {
+    doc.font(FONT.normal).fontSize(9).fillColor(C.grisOscuro)
+      .text(r.label, MARGIN, y + 3, { width: labelW - 6, lineBreak: false });
+    rectFill(doc, barX, y + 2, barMaxW, 13, C.grisFondo, 3);
+    const w = Math.max(3, (barMaxW * r.valor) / m);
+    rectFill(doc, barX, y + 2, w, 13, r.color, 3);
+    doc.font(FONT.bold).fontSize(9).fillColor(r.color)
+      .text(formatCOP(r.valor), barX + barMaxW, y + 3, { width: valueW, align: 'right', lineBreak: false });
+    y += rowH;
+  });
+  return y + 4;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GENERADOR: PROYECCIÓN FINANCIERA (una página, lenguaje llano)
+// ─────────────────────────────────────────────────────────────────────────────
+const generarReporteProyeccion = async ({ negocio, sucursalNombre, sucursalId, meses = 6, logo }) => {
+  const p  = await service.getProyeccion(sucursalId, meses);
+  const pr = p.proyeccion;
+  const mesLabel = labelPeriodo(p.periodo_proyectado, 'month');
+
+  const fechaGeneracion = new Date().toLocaleString('es-CO', {
+    day: '2-digit', month: '2-digit', year: 'numeric',
+    hour: '2-digit', minute: '2-digit', timeZone: 'America/Bogota',
+  });
+
+  const doc = new PDFDocument({
+    size: 'A4', bufferPages: true,
+    margins: { top: MARGIN, bottom: MARGIN, left: MARGIN, right: MARGIN },
+    info: {
+      Title:   `Proyección financiera — ${negocio?.nombre || 'Negocio'}`,
+      Author:  negocio?.nombre || 'Inventario',
+      Subject: `Proyección para ${mesLabel}`,
+    },
+  });
+
+  let y = drawHeader(doc, {
+    negocio, sucursalNombre, fechaGeneracion, logo,
+    titulo: 'PROYECCIÓN FINANCIERA',
+    periodoLabel: `Base: ${formatFechaCorta(p.rango.desde)} a ${formatFechaCorta(p.rango.hasta)}`,
+  });
+
+  // ── Sin datos suficientes ──────────────────────────────────────────────────
+  if (p.meses_con_datos === 0) {
+    y = tituloSeccion(doc, y, 'Proyección');
+    y = parrafo(doc, y,
+      'Aún no hay meses calendario completos con ventas para proyectar. Registra ventas durante al menos un mes cerrado y vuelve a generar este reporte.',
+      { size: 10, color: C.gris });
+    drawFooters(doc, negocio?.nombre, fechaGeneracion);
+    doc.end();
+    return doc;
+  }
+
+  // ── Encabezado narrativo ───────────────────────────────────────────────────
+  y = tituloSeccion(doc, y, `Proyección para ${mesLabel}`);
+  y = parrafo(doc, y,
+    `Con base en el promedio de tus últimos ${p.meses_con_datos} mes(es) con ventas, esto es lo que puedes esperar el próximo mes:`,
+    { size: 10 });
+  y += 2;
+
+  // ── KPIs grandes ───────────────────────────────────────────────────────────
+  const gananciaColor = pr.utilidad_neta >= 0 ? C.verde : C.rojo;
+  y = drawKpis(doc, y, [
+    { label: 'Esperas vender', valor: formatCOP(pr.ventas_estimadas), fondo: '#EFF6FF', color: C.azul },
+    { label: 'Te quedaría (ganancia)', valor: formatCOP(pr.utilidad_neta), fondo: pr.utilidad_neta >= 0 ? C.verdeFondo : '#FEF2F2', color: gananciaColor },
+    { label: 'Mínimo para no perder', valor: pr.punto_equilibrio !== null ? formatCOP(pr.punto_equilibrio) : '—', fondo: '#F5F3FF', color: '#7C3AED' },
+  ]);
+
+  // ── Semáforo (estado en lenguaje llano) ────────────────────────────────────
+  let estado;
+  if (pr.gastos_fijos === 0) {
+    estado = { texto: 'Consejo: agrega tus gastos fijos (arriendo, nómina, servicios) para ver tu ganancia real y cuánto necesitas vender para no perder.', fondo: '#EFF6FF', color: C.azul };
+  } else if (pr.utilidad_neta < 0) {
+    estado = { texto: 'Atención: con este nivel de ventas estarías perdiendo dinero. Necesitas vender más o reducir gastos.', fondo: '#FEF2F2', color: C.rojo };
+  } else if (pr.punto_equilibrio !== null && pr.ventas_estimadas < pr.punto_equilibrio * 1.15) {
+    estado = { texto: 'Vas justo: cubres tus costos y gastos, pero cualquier bajón en ventas te dejaría en pérdida.', fondo: '#FEFCE8', color: '#A16207' };
+  } else {
+    estado = { texto: 'Vas por buen camino: tus ventas cubren la mercancía y los gastos, y te queda ganancia con margen.', fondo: C.verdeFondo, color: C.verde };
+  }
+  y = drawPastilla(doc, y, estado.texto, estado);
+  y += 4;
+
+  // ── Estado de resultados esperado ──────────────────────────────────────────
+  y = ensureSpace(doc, y, 120);
+  y = tituloSeccion(doc, y, 'Cómo se arma tu ganancia');
+  y = fila(doc, y, 'Ventas esperadas', formatCOP(pr.ventas_estimadas));
+  y = fila(doc, y, `(-) Mercancía que vendes  (${formatPct(pr.pct_costo * 100)} de la venta)`, `-${formatCOP(pr.costo_estimado)}`, { valorColor: C.rojo });
+  hLine(doc, y); y += 6;
+  y = fila(doc, y, '= Utilidad bruta', formatCOP(pr.utilidad_bruta), { bold: true });
+  y = fila(doc, y, '(-) Gastos fijos del mes', `-${formatCOP(pr.gastos_fijos)}`, { valorColor: C.rojo });
+  hLine(doc, y); y += 6;
+  y = fila(doc, y, '= Ganancia esperada (después de todo)', formatCOP(pr.utilidad_neta), { bold: true, valorColor: gananciaColor });
+  y += 12;
+
+  // ── A dónde va cada peso ───────────────────────────────────────────────────
+  if (pr.ventas_estimadas > 0) {
+    y = ensureSpace(doc, y, 110);
+    y = tituloSeccion(doc, y, 'A dónde va cada peso que vendes');
+    y = drawStackedBar(doc, y, [
+      { label: 'Mercancía',      valor: pr.costo_estimado,                    color: '#F59E0B' },
+      { label: 'Gastos fijos',   valor: pr.gastos_fijos,                      color: '#F43F5E' },
+      { label: 'Te queda',       valor: Math.max(0, pr.utilidad_neta),        color: '#10B981' },
+    ], pr.ventas_estimadas);
+    y += 8;
+  }
+
+  // ── ¿Vas a ganar o a perder? (punto de equilibrio visual) ──────────────────
+  if (pr.punto_equilibrio !== null) {
+    y = ensureSpace(doc, y, 110);
+    y = tituloSeccion(doc, y, '¿Vas a ganar o a perder?');
+    const maxCmp = Math.max(pr.ventas_estimadas, pr.punto_equilibrio);
+    y = drawCompareBars(doc, y, [
+      { label: 'Mínimo para no perder', valor: pr.punto_equilibrio, color: '#7C3AED' },
+      { label: 'Esperas vender',        valor: pr.ventas_estimadas, color: C.verde },
+    ], maxCmp);
+    const dif = pr.ventas_estimadas - pr.punto_equilibrio;
+    y = parrafo(doc, y,
+      dif >= 0
+        ? `Esperas vender ${formatCOP(dif)} por encima del mínimo. Ese colchón es tu margen de seguridad.`
+        : `Te faltan ${formatCOP(-dif)} de ventas para no perder. Enfócate en cerrar más ventas o bajar gastos.`,
+      { size: 9, color: C.gris });
+    y += 8;
+  }
+
+  // ── Meses base ─────────────────────────────────────────────────────────────
+  y = ensureSpace(doc, y, 70);
+  y = tituloSeccion(doc, y, 'Meses en los que se basa esta proyección');
+  y = drawTable(doc, y, [
+    { label: 'Mes',      frac: 0.34, render: (r) => ({ text: labelPeriodo(r.periodo, 'month') }) },
+    { label: 'Ventas',   frac: 0.22, align: 'right', render: (r) => ({ text: formatCOP(r.ventas) }) },
+    { label: 'Costo',    frac: 0.22, align: 'right', render: (r) => ({ text: formatCOP(r.costo) }) },
+    { label: 'Utilidad', frac: 0.22, align: 'right', render: (r) => ({ text: formatCOP(r.utilidad_bruta), color: r.utilidad_bruta >= 0 ? C.verde : C.rojo }) },
+  ], p.historial);
+  y += 8;
+
+  // ── Gastos fijos configurados ──────────────────────────────────────────────
+  y = ensureSpace(doc, y, 60);
+  y = tituloSeccion(doc, y, 'Tus gastos fijos mensuales');
+  if (p.gastos_fijos.length === 0) {
+    y = parrafo(doc, y, 'Todavía no has registrado gastos fijos. Agrégalos en el programa para una proyección más precisa.', { size: 9, color: C.grisClaro });
+  } else {
+    y = drawTable(doc, y, [
+      { label: 'Concepto', frac: 0.68, render: (r) => ({ text: r.nombre }) },
+      { label: 'Valor mensual', frac: 0.32, align: 'right', render: (r) => ({ text: formatCOP(r.valor) }) },
+    ], p.gastos_fijos);
+    y = fila(doc, y, 'Total de gastos fijos', formatCOP(pr.gastos_fijos), { bold: true, valorColor: C.rojo });
+  }
+  y += 6;
+  if (p.gastos_reales_prom > 0) {
+    y = parrafo(doc, y,
+      `Referencia: según Tesorería, tus gastos registrados promedian ${formatCOP(p.gastos_reales_prom)} al mes.`,
+      { size: 8.5, color: C.grisClaro });
+  }
+
+  // ── Nota metodológica ──────────────────────────────────────────────────────
+  y += 4;
+  y = parrafo(doc, y,
+    'Esta es una estimación basada en tu propio historial; no es una promesa. Los resultados reales dependen de tus ventas del mes.',
+    { size: 8, color: C.grisClaro });
+
+  drawFooters(doc, negocio?.nombre, fechaGeneracion);
+  doc.end();
+  return doc;
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // GENERADOR PRINCIPAL
 // ─────────────────────────────────────────────────────────────────────────────
@@ -504,4 +721,4 @@ const generarReporteContable = async ({ negocio, sucursalNombre, sucursalId, des
   return doc;
 };
 
-module.exports = { generarReporteContable };
+module.exports = { generarReporteContable, generarReporteProyeccion };
