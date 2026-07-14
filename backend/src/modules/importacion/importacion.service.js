@@ -572,10 +572,32 @@ const importarCantidad = async (filas, sucursalId, negocioId, config = {}) => {
           }
         }
 
-        // Código único: se asigna por nombre a TODAS las filas del producto
-        // lógico en el negocio (cubre insert, update y producto base de
-        // variantes, y mantiene el escaneo funcionando en otras sucursales).
-        if (codigo) {
+        // Código único: si la fila no trae código pero el producto ya existe con
+        // uno en otra sucursal, se hereda (un código = un producto en el negocio).
+        let codigoFinal = codigo;
+        if (!codigoFinal) {
+          const { rows: her } = await client.query(
+            `SELECT pc.codigo
+             FROM productos_cantidad pc
+             JOIN sucursales su ON su.id = pc.sucursal_id
+             WHERE su.negocio_id = $1
+               AND pc.activo = true
+               AND pc.codigo IS NOT NULL
+               AND LOWER(pc.nombre) = LOWER($2)
+               AND NOT EXISTS (
+                 SELECT 1 FROM productos_cantidad x
+                 WHERE x.sucursal_id = $3 AND x.activo = true AND x.codigo = pc.codigo
+               )
+             LIMIT 1`,
+            [negocioId, nombre, sucursalId]
+          );
+          codigoFinal = her[0]?.codigo || null;
+        }
+
+        // Se asigna por nombre a TODAS las filas del producto lógico en el negocio
+        // (cubre insert, update y producto base de variantes, y mantiene el
+        // escaneo funcionando en las demás sucursales).
+        if (codigoFinal) {
           await client.query(
             `UPDATE productos_cantidad pc
              SET codigo = $3
@@ -585,7 +607,7 @@ const importarCantidad = async (filas, sucursalId, negocioId, config = {}) => {
                AND LOWER(pc.nombre) = LOWER($2)
                AND pc.activo = true
                AND pc.codigo IS DISTINCT FROM $3`,
-            [negocioId, nombre, codigo]
+            [negocioId, nombre, codigoFinal]
           );
         }
         await client.query('RELEASE SAVEPOINT fila_sp');

@@ -165,6 +165,28 @@ const codigoEnConflicto = async (negocioId, codigo, nombre, excluirId = null) =>
   return rows[0] || null;
 };
 
+// El mismo producto lógico (mismo nombre) creado en otra sucursal debe usar
+// el mismo código: devuelve el código ya asignado a ese nombre en el negocio.
+// Solo lo hereda si en la sucursal destino ese código está libre (evita chocar
+// con el índice único ante datos heredados inconsistentes).
+const codigoHeredado = async (negocioId, nombre, sucursalId) => {
+  const { rows } = await pool.query(`
+    SELECT pc.codigo
+    FROM productos_cantidad pc
+    JOIN sucursales su ON su.id = pc.sucursal_id
+    WHERE su.negocio_id = $1
+      AND pc.activo = true
+      AND pc.codigo IS NOT NULL
+      AND LOWER(pc.nombre) = LOWER($2)
+      AND NOT EXISTS (
+        SELECT 1 FROM productos_cantidad x
+        WHERE x.sucursal_id = $3 AND x.activo = true AND x.codigo = pc.codigo
+      )
+    LIMIT 1
+  `, [negocioId, nombre, sucursalId]);
+  return rows[0]?.codigo || null;
+};
+
 // Propaga el código a las filas hermanas del mismo producto lógico
 // (mismo nombre) en las demás sucursales del negocio, para que el escaneo
 // funcione en todas. Best-effort: nunca debe tumbar la operación principal.
@@ -299,5 +321,5 @@ module.exports = {
   perteneceAlNegocio,
   create, update, ajustarStock, eliminar,
   insertarHistorial, getHistorialStock,
-  codigoEnConflicto, sincronizarCodigoPorNombre,
+  codigoEnConflicto, sincronizarCodigoPorNombre, codigoHeredado,
 };

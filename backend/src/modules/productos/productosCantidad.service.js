@@ -62,8 +62,14 @@ const crearProducto = async (negocioId, datos) => {
   if (!datos.linea_id) throw { status: 400, message: 'La línea es requerida' };
   await _verificarLineaNegocio(datos.linea_id, negocioId);
 
-  const codigo = _normalizarCodigo(datos.codigo);
-  if (codigo) await _validarCodigoUnico(negocioId, codigo, datos.nombre);
+  let codigo = _normalizarCodigo(datos.codigo);
+  if (codigo) {
+    await _validarCodigoUnico(negocioId, codigo, datos.nombre);
+  } else {
+    // Mismo producto (mismo nombre) ya creado en otra sucursal → hereda su código,
+    // para que el escaneo funcione igual en todas las sucursales del negocio.
+    codigo = await repo.codigoHeredado(negocioId, datos.nombre, datos.sucursal_id);
+  }
 
   const creado = await repo.create({ ...datos, codigo }).catch(_traducirCodigoDuplicado);
   if (codigo) await repo.sincronizarCodigoPorNombre(negocioId, creado.nombre, codigo);
@@ -79,7 +85,9 @@ const actualizarProducto = async (negocioId, id, datos) => {
   }
 
   const codigo = _normalizarCodigo(datos.codigo);
-  if (codigo) {
+  // Solo se valida cuando el código realmente cambia: reguardar un producto con
+  // el código que ya tenía no debe fallar (no está tomando el código de nadie).
+  if (codigo && codigo !== producto.codigo) {
     await _validarCodigoUnico(negocioId, codigo, datos.nombre ?? producto.nombre, producto.id);
   }
 
