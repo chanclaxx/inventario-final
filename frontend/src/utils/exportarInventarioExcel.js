@@ -103,6 +103,7 @@ export async function exportarInventarioExcel(porProducto, cantidad, configMap) 
   var cfg     = configMap || {};
   var colAct  = cfg.colores_serial_activo         === '1';
   var carAct  = cfg.caracteristicas_serial_activo === '1';
+  var codAct  = cfg.codigo_producto_activo        === '1';
   var carList = carAct ? parseLista(cfg.caracteristicas_serial_lista) : [];
 
   var wb     = new ExcelJS.Workbook();
@@ -154,7 +155,9 @@ export async function exportarInventarioExcel(porProducto, cantidad, configMap) 
   // ── Hoja Por Cantidad ──
   if (cantidad && cantidad.length) {
     var wsCant   = wb.addWorksheet('Por Cantidad');
-    var cantCols = ['Nombre', 'Stock', 'Stock Mínimo', 'Unidad Medida', 'Cliente Origen'];
+    var cantCols = ['Nombre'];
+    if (codAct) cantCols.push('Código');
+    cantCols.push('Stock', 'Stock Mínimo', 'Unidad Medida', 'Cliente Origen');
     wsCant.columns = cantCols.map(function(c) { return { width: colW(c) }; });
 
     var cantHr = wsCant.getRow(1);
@@ -166,11 +169,16 @@ export async function exportarInventarioExcel(porProducto, cantidad, configMap) 
     for (var cri = 0; cri < cantidad.length; cri++) {
       var p   = cantidad[cri];
       var cdr = wsCant.getRow(cri + 2);
-      var ca0 = cdr.getCell(1); ca0.value = p.nombre                 || ''; applyCell(ca0, bgCant);
-      var ca1 = cdr.getCell(2); ca1.value = Number(p.stock)          || 0;  applyCellNum(ca1, bgCant);
-      var ca2 = cdr.getCell(3); ca2.value = Number(p.stock_minimo)   || 0;  applyCellNum(ca2, bgCant);
-      var ca3 = cdr.getCell(4); ca3.value = p.unidad_medida          || ''; applyCell(ca3, bgCant);
-      var ca4 = cdr.getCell(5); ca4.value = p.cliente_origen         || ''; applyCell(ca4, bgCant);
+      var ccn = 1;
+      var ca0 = cdr.getCell(ccn++); ca0.value = p.nombre               || ''; applyCell(ca0, bgCant);
+      if (codAct) {
+        // Texto explícito: preserva ceros a la izquierda de códigos EAN/UPC
+        var cak = cdr.getCell(ccn++); cak.value = p.codigo != null ? String(p.codigo) : ''; applyCell(cak, bgCant);
+      }
+      var ca1 = cdr.getCell(ccn++); ca1.value = Number(p.stock)        || 0;  applyCellNum(ca1, bgCant);
+      var ca2 = cdr.getCell(ccn++); ca2.value = Number(p.stock_minimo) || 0;  applyCellNum(ca2, bgCant);
+      var ca3 = cdr.getCell(ccn++); ca3.value = p.unidad_medida        || ''; applyCell(ca3, bgCant);
+      var ca4 = cdr.getCell(ccn++); ca4.value = p.cliente_origen       || ''; applyCell(ca4, bgCant);
     }
   }
 

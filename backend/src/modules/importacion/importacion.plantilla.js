@@ -199,9 +199,22 @@ function hojaSerial(nombreProducto, coloresActivo, coloresLista, caracteristicas
 }
 
 // ─── Hoja cantidad ────────────────────────────────────────────────────────────
-function hojaCantidad(variantesActivo = false, lineas = []) {
+function hojaCantidad(variantesActivo = false, lineas = [], codigoActivo = false) {
   const columnas = [
     { clave: 'Nombre *',       desc: 'Requerido · Nombre del producto',                             bg: C.requerido,         num: false, wch: 30 },
+  ];
+
+  if (codigoActivo) {
+    columnas.push({
+      clave: 'Codigo',
+      desc:  'Opcional · Código único / de barras (escríbelo como TEXTO, no número)',
+      bg:    C.headerFondo,
+      num:   false,
+      wch:   18,
+    });
+  }
+
+  columnas.push(
     {
       clave: 'Linea',
       desc:  lineas.length > 0
@@ -211,7 +224,7 @@ function hojaCantidad(variantesActivo = false, lineas = []) {
       num:   false,
       wch:   22,
     },
-  ];
+  );
 
   if (variantesActivo) {
     columnas.push(
@@ -283,6 +296,7 @@ function hojaInstrucciones(config) {
   const coloresActivo         = config.colores_serial_activo === '1';
   const caracteristicasActivo = config.caracteristicas_serial_activo === '1';
   const variantesActivo       = config.variantes_activo === '1';
+  const codigoActivo          = config.codigo_producto_activo === '1';
   const coloresLista          = _parseLista(config.colores_serial_lista);
   const caracteristicasLista  = _parseLista(config.caracteristicas_serial_lista);
 
@@ -317,13 +331,18 @@ function hojaInstrucciones(config) {
   linea('   Columna Nombre * es obligatoria en la hoja de cantidad.');
   linea('');
 
-  if (coloresActivo || caracteristicasActivo || variantesActivo) {
+  if (coloresActivo || caracteristicasActivo || variantesActivo || codigoActivo) {
     linea('CONFIGURACIÓN ACTIVA EN TU NEGOCIO', C.headerFondo, true, 10);
     if (coloresActivo) {
       linea(`✅  Colores de serial ACTIVOS — Colores válidos: ${coloresLista.join(', ') || 'ninguno configurado'}`);
     }
     if (caracteristicasActivo) {
       linea(`✅  Características ACTIVAS — Campos: ${caracteristicasLista.join(', ') || 'ninguno configurado'}`);
+    }
+    if (codigoActivo) {
+      linea('✅  Código único de producto ACTIVO — La hoja "Productos Cantidad" incluye la columna Codigo.');
+      linea('   • Escribe el código como TEXTO (formato de celda Texto) para no perder ceros a la izquierda.');
+      linea('   • Un código debe apuntar a UN solo producto dentro del negocio.');
     }
     if (variantesActivo) {
       linea('✅  Variantes ACTIVAS — La hoja "Productos Cantidad" incluye columnas Atributo y Variante.');
@@ -395,6 +414,7 @@ function generarPlantillaBuffer(config = {}, lineas = []) {
   const coloresActivo         = config.colores_serial_activo === '1';
   const caracteristicasActivo = config.caracteristicas_serial_activo === '1';
   const variantesActivo       = config.variantes_activo === '1';
+  const codigoActivo          = config.codigo_producto_activo === '1';
   const coloresLista          = _parseLista(config.colores_serial_lista);
   const caracteristicasLista  = _parseLista(config.caracteristicas_serial_lista);
 
@@ -408,7 +428,7 @@ function generarPlantillaBuffer(config = {}, lineas = []) {
     'Ejemplo Producto'
   );
 
-  XLSX.utils.book_append_sheet(wb, hojaCantidad(variantesActivo, lineas), 'Productos Cantidad');
+  XLSX.utils.book_append_sheet(wb, hojaCantidad(variantesActivo, lineas, codigoActivo), 'Productos Cantidad');
 
   return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx', cellStyles: true });
 }

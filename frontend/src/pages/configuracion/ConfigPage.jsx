@@ -22,7 +22,7 @@ import {
   Building2, ShieldCheck, FileSliders, BookOpen, Users,
   Printer, Palette, ListChecks, Wallet, Layers,
   ChevronUp, ChevronDown, RotateCcw, Navigation,
-  Upload, X, Image as ImageIcon, Download,
+  Upload, X, Image as ImageIcon, Download, Barcode,
 } from 'lucide-react';
 
 // ─── Navegación principal ─────────────────────────────────────────────────────
@@ -39,6 +39,7 @@ const TABS_CATALOGO = [
   { id: 'garantias', label: 'Garantías', Icn: BookOpen   },
   { id: 'seriales',  label: 'Seriales',  Icn: Palette    },
   { id: 'variantes', label: 'Variantes', Icn: Layers     },
+  { id: 'codigos',   label: 'Códigos',   Icn: Barcode    },
   { id: 'pagos',     label: 'Pagos',     Icn: Wallet     },
 ];
 
@@ -610,6 +611,49 @@ function ColoresSerialConfig({ valores, set }) {
             </button>
           </div>
           {error && <p className="text-xs text-red-500">{error}</p>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Código único de producto (tipo supermercado) ────────────────────────────
+function CodigoProductoConfig({ valores, set }) {
+  const activo = valores['codigo_producto_activo'] === '1';
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex items-center gap-2">
+        <Barcode size={15} className="text-gray-400" />
+        <h3 className="text-sm font-semibold text-gray-700">Código único de producto</h3>
+      </div>
+      <p className="text-xs text-gray-400 -mt-2">
+        Asigna un código único (de barras o interno) a tus productos por cantidad,
+        como en un supermercado. Podrás buscarlos y agregarlos a la venta escaneando el código.
+      </p>
+
+      <Toggle
+        label="Activar código único"
+        description="Muestra el campo Código al crear/editar productos y el escáner en el inventario"
+        enabled={activo}
+        onChange={(val) => set('codigo_producto_activo', val ? '1' : '0')}
+      />
+
+      {activo && (
+        <div className="bg-blue-50 rounded-xl p-4 flex flex-col gap-1.5">
+          <p className="text-xs font-medium text-blue-800">Cómo funciona</p>
+          <p className="text-xs text-blue-700">
+            • Usa el código de barras impreso del producto (escanéalo en el campo Código al crearlo)
+            o inventa un código interno corto para productos sin código de fábrica.
+          </p>
+          <p className="text-xs text-blue-700">
+            • Un código apunta a un solo producto en todo el negocio; si el producto existe
+            en varias sucursales, comparten el mismo código automáticamente.
+          </p>
+          <p className="text-xs text-blue-700">
+            • Los lectores USB/Bluetooth funcionan sin configuración: escanea sobre el campo
+            de búsqueda por código del inventario y el producto se agrega al carrito.
+          </p>
         </div>
       )}
     </div>
@@ -1290,6 +1334,12 @@ function SeccionCatalogo({ valores, set }) {
       {tab === 'variantes' && (
         <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
           <TiposCaracteristicaConfig valores={valores} set={set} />
+        </div>
+      )}
+
+      {tab === 'codigos' && (
+        <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
+          <CodigoProductoConfig valores={valores} set={set} />
         </div>
       )}
 

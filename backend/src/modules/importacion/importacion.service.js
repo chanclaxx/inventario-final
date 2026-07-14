@@ -410,6 +410,25 @@ const _recalcularStockProducto = async (client, productoId) => {
 // IMPORTAR CANTIDAD
 // ─────────────────────────────────────────────
 
+// Código único: Excel suele convertir códigos largos (EAN-13) a número y
+// mostrarlos en notación científica, o perder ceros a la izquierda. Por eso
+// la plantilla pide TEXTO, y aquí se recuperan los casos numéricos comunes.
+const _normalizarCodigoImport = (valor) => {
+  if (valor === undefined || valor === null) return null;
+  let s = String(valor).trim();
+  if (!s) return null;
+  if (/^\d+(\.\d+)?[eE]\+?\d+$/.test(s)) {
+    const n = Number(s);
+    if (Number.isFinite(n)) s = String(Math.round(n));
+  } else if (/^\d+\.0+$/.test(s)) {
+    s = s.replace(/\.0+$/, '');
+  }
+  s = s.toUpperCase();
+  if (/\s/.test(s)) throw { message: 'El código no puede contener espacios' };
+  if (s.length > 50) throw { message: 'El código no puede superar 50 caracteres' };
+  return s;
+};
+
 const importarCantidad = async (filas, sucursalId, negocioId, config = {}) => {
   const variantesActivo = config.variantes_activo === '1';
   if (filas.length > MAX_FILAS) {
@@ -420,6 +439,10 @@ const importarCantidad = async (filas, sucursalId, negocioId, config = {}) => {
   }
 
   const resultado = { insertados: 0, actualizados: 0, omitidos: 0, errores: [] };
+
+  // codigo → nombre (lower) ya visto en el archivo, para detectar el mismo
+  // código apuntando a dos productos distintos dentro del mismo Excel.
+  const codigosArchivo = new Map();
 
   const client = await pool.connect();
   try {
@@ -433,6 +456,39 @@ const importarCantidad = async (filas, sucursalId, negocioId, config = {}) => {
         resultado.errores.push({ fila: nFila, error: 'Nombre requerido' });
         resultado.omitidos++;
         continue;
+      }
+
+      let codigo = null;
+      try {
+        // La plantilla usa "Codigo", pero se tolera "Código" escrito a mano
+        codigo = _normalizarCodigoImport(fila.codigo ?? fila['código']);
+      } catch (e) {
+        resultado.errores.push({ fila: nFila, error: e.message });
+        resultado.omitidos++;
+        continue;
+      }
+      if (codigo) {
+        const nombrePrevio = codigosArchivo.get(codigo);
+        if (nombrePrevio && nombrePrevio !== nombre.toLowerCase()) {
+          resultado.errores.push({ fila: nFila, error: `El código ${codigo} aparece en el archivo con otro producto` });
+          resultado.omitidos++;
+          continue;
+        }
+        codigosArchivo.set(codigo, nombre.toLowerCase());
+
+        const { rows: conflicto } = await client.query(
+          `SELECT pc.nombre FROM productos_cantidad pc
+           JOIN sucursales su ON su.id = pc.sucursal_id
+           WHERE su.negocio_id = $1 AND pc.activo = true
+             AND UPPER(pc.codigo) = $2 AND LOWER(pc.nombre) <> LOWER($3)
+           LIMIT 1`,
+          [negocioId, codigo, nombre]
+        );
+        if (conflicto.length) {
+          resultado.errores.push({ fila: nFila, error: `El código ${codigo} ya está en uso por "${conflicto[0].nombre}"` });
+          resultado.omitidos++;
+          continue;
+        }
       }
 
       // Savepoint por fila: un error revierte solo esa fila, no toda la importación.
@@ -514,6 +570,23 @@ const importarCantidad = async (filas, sucursalId, negocioId, config = {}) => {
             );
             resultado.insertados++;
           }
+        }
+
+        // Código único: se asigna por nombre a TODAS las filas del producto
+        // lógico en el negocio (cubre insert, update y producto base de
+        // variantes, y mantiene el escaneo funcionando en otras sucursales).
+        if (codigo) {
+          await client.query(
+            `UPDATE productos_cantidad pc
+             SET codigo = $3
+             FROM sucursales su
+             WHERE su.id = pc.sucursal_id
+               AND su.negocio_id = $1
+               AND LOWER(pc.nombre) = LOWER($2)
+               AND pc.activo = true
+               AND pc.codigo IS DISTINCT FROM $3`,
+            [negocioId, nombre, codigo]
+          );
         }
         await client.query('RELEASE SAVEPOINT fila_sp');
       } catch (err) {

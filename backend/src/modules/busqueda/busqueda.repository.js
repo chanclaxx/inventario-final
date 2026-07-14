@@ -170,7 +170,10 @@ const buscarSeriales = async (q, negocioId, sucursalId) => {
 
 const buscarCantidad = async (q, negocioId, sucursalId) => {
   const params = [negocioId];
-  const { conds, nextIdx } = _wordConditions(q, [sn('pc.nombre')], params);
+  const { conds, nextIdx } = _wordConditions(q, [
+    sn('pc.nombre'),
+    sn("COALESCE(pc.codigo,'')"),
+  ], params);
 
   let filtro = '';
   if (sucursalId) {
@@ -181,7 +184,7 @@ const buscarCantidad = async (q, negocioId, sucursalId) => {
   const { rows } = await pool.query(`
     SELECT
       pc.id, pc.nombre, pc.stock, pc.stock_minimo, pc.precio,
-      pc.unidad_medida, pc.costo_unitario,
+      pc.unidad_medida, pc.costo_unitario, pc.codigo,
       su.id   AS sucursal_id,
       su.nombre AS sucursal_nombre
     FROM productos_cantidad pc
@@ -193,6 +196,28 @@ const buscarCantidad = async (q, negocioId, sucursalId) => {
     ORDER BY pc.nombre
     LIMIT 40
   `, params);
+  return rows;
+};
+
+// ─── Código único de producto (escaneo POS) ─────────────────────────────────
+// Match EXACTO (el lector manda el código completo): resuelve a un único
+// producto por sucursal gracias al índice uq_productos_cantidad_codigo.
+const buscarCantidadPorCodigo = async (codigo, negocioId, sucursalId) => {
+  const { rows } = await pool.query(`
+    SELECT
+      pc.id, pc.nombre, pc.stock, pc.stock_minimo, pc.precio,
+      pc.unidad_medida, pc.costo_unitario, pc.codigo, pc.linea_id,
+      su.id   AS sucursal_id,
+      su.nombre AS sucursal_nombre
+    FROM productos_cantidad pc
+    JOIN sucursales su ON su.id = pc.sucursal_id
+    WHERE su.negocio_id = $1
+      AND pc.activo = true
+      AND UPPER(pc.codigo) = UPPER($2)
+      AND ($3::int IS NULL OR pc.sucursal_id = $3)
+    ORDER BY su.nombre
+    LIMIT 10
+  `, [negocioId, codigo, sucursalId ?? null]);
   return rows;
 };
 
@@ -436,7 +461,7 @@ const buscarAbonosTotales = async ({ fechaDesde, fechaHasta, tipo }, negocioId, 
 module.exports = {
   buscarSerialPorIMEI, getVentasPorIMEI, getRetomasPorIMEI,
   getPrestamosPorIMEI, getTrasladosPorIMEI,
-  buscarSeriales, buscarCantidad, getHistorialCantidad,
+  buscarSeriales, buscarCantidad, buscarCantidadPorCodigo, getHistorialCantidad,
   buscarComprasPorIMEI, buscarComprasPorTexto,
   buscarPrestamos, buscarAbonosTotales,
 };

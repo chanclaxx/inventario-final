@@ -1,7 +1,8 @@
 import { useState }                                      from 'react';
 import { useQuery, useMutation, useQueryClient }         from '@tanstack/react-query';
-import { ShoppingBag, Plus, AlertTriangle, Trash2, ChevronDown, ChevronRight, Layers, Settings } from 'lucide-react';
+import { ShoppingBag, Plus, AlertTriangle, Trash2, ChevronDown, ChevronRight, Layers, Settings, Barcode } from 'lucide-react';
 import { getProductosCantidad, ajustarStockCantidad, getLineas } from '../../api/productos.api';
+import { buscarPorCodigo }                               from '../../api/busqueda.api';
 import { SearchInput }                                   from '../../components/ui/SearchInput';
 import { Button }                                        from '../../components/ui/Button';
 import { Input }                                         from '../../components/ui/Input';
@@ -62,6 +63,12 @@ function TarjetaProducto({ p, esAdmin, onAgregar, onReducir, onEditar, variantes
           </p>
           {p.unidad_medida && (
             <p className="text-xs text-gray-400 mt-0.5">{p.unidad_medida}</p>
+          )}
+          {p.codigo && (
+            <p className="flex items-center gap-1 text-[11px] font-mono text-gray-400 mt-0.5">
+              <Barcode size={11} className="flex-shrink-0" />
+              {p.codigo}
+            </p>
           )}
           {p.dias_en_inventario != null && (
             <UltimaVentaBadge
@@ -230,8 +237,10 @@ export function ProductosCantidad() {
   const pinEliminacion          = configData?.pin_eliminacion ?? '';
   const variantesActivo         = configData?.variantes_activo === '1';
   const ajusteStockSinVariantes = configData?.ajuste_stock_sin_variantes !== '0';
+  const codigoActivo            = configData?.codigo_producto_activo === '1';
 
-  const agregarItem = useCarritoStore((s) => s.agregarItem);
+  const agregarItem         = useCarritoStore((s) => s.agregarItem);
+  const agregarOIncrementar = useCarritoStore((s) => s.agregarOIncrementar);
 
   const mutReducir = useMutation({
     mutationFn: ({ productoId, cantidad }) =>
@@ -252,7 +261,9 @@ export function ProductosCantidad() {
 
   const productosFiltrados = productos.filter((p) => {
     const q = busqueda.toLowerCase();
-    return p.nombre.toLowerCase().includes(q) || p.linea_nombre?.toLowerCase().includes(q);
+    return p.nombre.toLowerCase().includes(q)
+      || p.linea_nombre?.toLowerCase().includes(q)
+      || p.codigo?.toLowerCase().includes(q);
   });
 
   const sinLinea = productosFiltrados.filter((p) => !p.linea_id);
@@ -274,6 +285,60 @@ export function ProductosCantidad() {
       cantidad:    1,
       linea_id:    producto.linea_id || null,
     });
+  };
+
+  // ── Escaneo de código único (lector USB/BT = teclado + Enter) ─────────────
+  const [scan,    setScan]    = useState('');
+  const [scanMsg, setScanMsg] = useState(null); // { tipo: 'ok'|'error', texto }
+
+  const handleScan = async () => {
+    const codigo = scan.trim().toUpperCase();
+    if (!codigo) return;
+    setScan('');
+
+    // Match exacto local (la lista de la sucursal ya está cargada);
+    // si no aparece (p. ej. recién importado), se consulta al backend.
+    let producto = productos.find((p) => (p.codigo || '').toUpperCase() === codigo);
+    if (!producto) {
+      try {
+        const r = await buscarPorCodigo(codigo);
+        const remoto = r.data?.data?.[0];
+        if (remoto) producto = productos.find((p) => p.id === remoto.id) || remoto;
+      } catch { /* 404 = no existe */ }
+    }
+
+    if (!producto) {
+      setScanMsg({ tipo: 'error', texto: `Código ${codigo} no encontrado` });
+      return;
+    }
+    // Vista global (todas las sucursales): los grupos no tienen id de producto
+    if (!producto.id) {
+      setScanMsg({ tipo: 'error', texto: 'Selecciona una sucursal para agregar con el escáner' });
+      return;
+    }
+    if (variantesActivo) {
+      setScanMsg(null);
+      setProductoArbol(producto);
+      return;
+    }
+    if (!producto.stock || Number(producto.stock) <= 0) {
+      setScanMsg({ tipo: 'error', texto: `"${producto.nombre}" está sin stock` });
+      return;
+    }
+
+    const res = agregarOIncrementar({
+      key:         `cant-${producto.id}`,
+      tipo:        'cantidad',
+      nombre:      producto.nombre,
+      producto_id: producto.id,
+      precio:      Math.round(Number(producto.precio || producto.costo_unitario || 0)),
+      stock:       producto.stock,
+      cantidad:    1,
+      linea_id:    producto.linea_id || null,
+    });
+    setScanMsg(res === 'sin_stock'
+      ? { tipo: 'error', texto: `"${producto.nombre}": ya está todo el stock en el carrito` }
+      : { tipo: 'ok', texto: `✓ ${producto.nombre} — en el carrito` });
   };
 
   const handleAbrirReducir = (e, producto) => {
@@ -307,7 +372,36 @@ export function ProductosCantidad() {
   return (
     <>
       <div className="flex flex-col gap-4">
-        <SearchInput value={busqueda} onChange={setBusqueda} placeholder="Buscar por producto o línea..." />
+        <SearchInput
+          value={busqueda}
+          onChange={setBusqueda}
+          placeholder={codigoActivo ? 'Buscar por producto, línea o código...' : 'Buscar por producto o línea...'}
+        />
+
+        {codigoActivo && (
+          <div className="flex flex-col gap-1">
+            <div className="relative">
+              <Barcode size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+              <input
+                type="text"
+                inputMode="text"
+                autoComplete="off"
+                value={scan}
+                onChange={(e) => { setScan(e.target.value); if (scanMsg) setScanMsg(null); }}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleScan(); } }}
+                placeholder="Escanear código y Enter → agrega al carrito"
+                className="w-full pl-9 pr-3 py-2 bg-blue-50/60 border border-blue-200 rounded-xl text-sm
+                  text-gray-800 placeholder-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-500
+                  focus:bg-white transition-all"
+              />
+            </div>
+            {scanMsg && (
+              <p className={`text-xs px-1 ${scanMsg.tipo === 'ok' ? 'text-green-600' : 'text-red-500'}`}>
+                {scanMsg.texto}
+              </p>
+            )}
+          </div>
+        )}
 
         {esAdmin && !variantesActivo && (
           <p className="text-xs text-gray-400 px-1">Doble click en una card para editar el producto</p>
@@ -374,6 +468,7 @@ export function ProductosCantidad() {
           producto={productoAEditar}
           pinEliminacion={pinEliminacion}
           variantesActivo={variantesActivo}
+          codigoActivo={codigoActivo}
           onClose={() => setProductoAEditar(null)}
         />
       )}

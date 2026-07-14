@@ -7,7 +7,7 @@ const findAll = async (sucursalId, negocioId, lineaId) => {
         pc.id, pc.nombre, pc.stock, pc.stock_minimo,
         pc.unidad_medida, pc.costo_unitario, pc.precio,
         pc.cliente_origen, pc.activo, pc.sucursal_id, pc.proveedor_id,
-        pc.linea_id, pc.creado_en, pc.nota,
+        pc.linea_id, pc.creado_en, pc.nota, pc.codigo,
         lp.nombre AS linea_nombre,
         p.nombre  AS proveedor_nombre,
         su.nombre AS sucursal_nombre,
@@ -41,6 +41,7 @@ const findAll = async (sucursalId, negocioId, lineaId) => {
       pc.nombre,
       pc.linea_id,
       lp.nombre AS linea_nombre,
+      MIN(pc.codigo)                       AS codigo,
       SUM(pc.stock)                        AS stock_total,
       BOOL_OR(pc.stock <= pc.stock_minimo) AS stock_bajo,
       -- Antigüedad: días del registro más viejo del grupo (el que lleva más tiempo)
@@ -56,6 +57,7 @@ const findAll = async (sucursalId, negocioId, lineaId) => {
           'precio',           pc.precio,
           'proveedor_id',     pc.proveedor_id,
           'proveedor_nombre', p.nombre,
+          'codigo',           pc.codigo,
           'stock_bajo',       pc.stock <= pc.stock_minimo
         ) ORDER BY su.nombre
       ) AS sucursales
@@ -97,18 +99,19 @@ const perteneceAlNegocio = async (id, negocioId) => {
 // ── linea_id incluido en create ───────────────────────────────────────────
 const create = async ({
   nombre, stock, stock_minimo, unidad_medida,
-  costo_unitario, precio, sucursal_id, proveedor_id, linea_id,
+  costo_unitario, precio, sucursal_id, proveedor_id, linea_id, codigo,
 }) => {
   const { rows } = await pool.query(`
     INSERT INTO productos_cantidad
       (nombre, stock, stock_minimo, unidad_medida,
-       costo_unitario, precio, sucursal_id, proveedor_id, linea_id)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       costo_unitario, precio, sucursal_id, proveedor_id, linea_id, codigo)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
     RETURNING *
   `, [
     nombre, stock || 0, stock_minimo || 0, unidad_medida || 'unidad',
     costo_unitario || null, precio || null,
     sucursal_id, proveedor_id || null, linea_id || null,
+    codigo || null,
   ]);
   return rows[0];
 };
@@ -116,7 +119,7 @@ const create = async ({
 // ── linea_id incluido en update ───────────────────────────────────────────
 const update = async (id, {
   nombre, stock_minimo, unidad_medida,
-  costo_unitario, precio, proveedor_id, linea_id, nota,
+  costo_unitario, precio, proveedor_id, linea_id, nota, codigo,
 }) => {
   const { rows } = await pool.query(`
     UPDATE productos_cantidad
@@ -127,8 +130,9 @@ const update = async (id, {
         precio         = $5,
         proveedor_id   = $6,
         linea_id       = $7,
-        nota           = CASE WHEN $8::boolean THEN $9 ELSE nota END
-    WHERE id = $10
+        nota           = CASE WHEN $8::boolean THEN $9 ELSE nota END,
+        codigo         = CASE WHEN $10::boolean THEN $11 ELSE codigo END
+    WHERE id = $12
     RETURNING *
   `, [
     nombre, stock_minimo, unidad_medida,
@@ -136,9 +140,49 @@ const update = async (id, {
     proveedor_id || null, linea_id || null,
     nota !== undefined,
     nota != null && String(nota).trim() ? String(nota).trim() : null,
+    codigo !== undefined,
+    codigo || null,
     id,
   ]);
   return rows[0] || null;
+};
+
+// ── Código único de producto (feature opt-in tipo supermercado) ───────────
+// Un código dentro del negocio solo puede apuntar a UN producto lógico
+// (= un nombre). Devuelve el producto en conflicto, si existe.
+const codigoEnConflicto = async (negocioId, codigo, nombre, excluirId = null) => {
+  const { rows } = await pool.query(`
+    SELECT pc.id, pc.nombre, su.nombre AS sucursal_nombre
+    FROM productos_cantidad pc
+    JOIN sucursales su ON su.id = pc.sucursal_id
+    WHERE su.negocio_id = $1
+      AND pc.activo = true
+      AND pc.codigo = $2
+      AND LOWER(pc.nombre) <> LOWER($3)
+      AND ($4::int IS NULL OR pc.id <> $4)
+    LIMIT 1
+  `, [negocioId, codigo, nombre, excluirId]);
+  return rows[0] || null;
+};
+
+// Propaga el código a las filas hermanas del mismo producto lógico
+// (mismo nombre) en las demás sucursales del negocio, para que el escaneo
+// funcione en todas. Best-effort: nunca debe tumbar la operación principal.
+const sincronizarCodigoPorNombre = async (negocioId, nombre, codigo) => {
+  try {
+    await pool.query(`
+      UPDATE productos_cantidad pc
+      SET codigo = $3
+      FROM sucursales su
+      WHERE su.id = pc.sucursal_id
+        AND su.negocio_id = $1
+        AND LOWER(pc.nombre) = LOWER($2)
+        AND pc.activo = true
+        AND pc.codigo IS DISTINCT FROM $3
+    `, [negocioId, nombre, codigo ?? null]);
+  } catch (err) {
+    console.warn('⚠️ No se pudo sincronizar el código entre sucursales:', err.message);
+  }
 };
 
 const ajustarStock = async (id, cantidad, { costo_unitario, proveedor_id, cliente_origen } = {}) => {
@@ -255,4 +299,5 @@ module.exports = {
   perteneceAlNegocio,
   create, update, ajustarStock, eliminar,
   insertarHistorial, getHistorialStock,
+  codigoEnConflicto, sincronizarCodigoPorNombre,
 };

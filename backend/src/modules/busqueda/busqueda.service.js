@@ -132,6 +132,21 @@ const buscarProductos = async (q, negocioId, sucursalId, rol) => {
   return { seriales, cantidad };
 };
 
+// ─── Código único de producto (escaneo POS): match exacto ───────────────────
+
+const buscarPorCodigo = async (codigo, negocioId, sucursalId, rol) => {
+  const admin = _esAdmin(rol);
+
+  // El escaneo se resuelve en la sucursal activa si la hay; un admin sin
+  // sucursal seleccionada ve las coincidencias de todas.
+  const resultados = await repo.buscarCantidadPorCodigo(codigo, negocioId, sucursalId || null);
+
+  if (!admin) {
+    resultados.forEach((p) => { delete p.costo_unitario; });
+  }
+  return resultados;
+};
+
 // ─── Búsqueda de compras a proveedores ───────────────────────────────────────
 
 const buscarCompras = async (q, modo, negocioId, sucursalId, rol, proveedorIds = null) => {
@@ -168,4 +183,4 @@ const buscarPrestamos = async (filtros, negocioId, sucursalId, rol) => {
 const getHistorialCantidad = async (productoId, negocioId) =>
   repo.getHistorialCantidad(productoId, negocioId);
 
-module.exports = { buscarPorIMEI, buscarProductos, buscarCompras, buscarPrestamos, getHistorialCantidad };
+module.exports = { buscarPorIMEI, buscarProductos, buscarPorCodigo, buscarCompras, buscarPrestamos, getHistorialCantidad };

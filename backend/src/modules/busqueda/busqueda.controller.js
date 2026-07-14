@@ -32,6 +32,24 @@ const buscarProductos = async (req, res, next) => {
   }
 };
 
+// Escaneo POS: el lector manda el código completo → match exacto o 404
+const buscarPorCodigo = async (req, res, next) => {
+  try {
+    const codigo = req.params.codigo?.trim();
+    if (!codigo) return res.status(400).json({ ok: false, error: 'Código requerido' });
+
+    const { negocio_id, rol } = req.user;
+    const resultados = await service.buscarPorCodigo(codigo, negocio_id, req.sucursal_id, rol);
+
+    if (!resultados.length) {
+      return res.status(404).json({ ok: false, error: 'Código no encontrado en este negocio' });
+    }
+    res.json({ ok: true, data: resultados });
+  } catch (err) {
+    next(err);
+  }
+};
+
 const buscarCompras = async (req, res, next) => {
   try {
     const q    = req.query.q?.trim();
@@ -93,4 +111,4 @@ const getHistorialCantidad = async (req, res, next) => {
   }
 };
 
-module.exports = { buscarPorIMEI, buscarProductos, buscarCompras, buscarPrestamos, getHistorialCantidad };
+module.exports = { buscarPorIMEI, buscarProductos, buscarPorCodigo, buscarCompras, buscarPrestamos, getHistorialCantidad };

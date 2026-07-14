@@ -12,7 +12,7 @@ import { Button }       from '../../components/ui/Button';
 import { useAuth }      from '../../context/useAuth';
 import { ModalEliminarProducto, TIPO_PRODUCTO_CANTIDAD } from './ModalEliminarProducto';
 
-export function ModalEditarProductoCantidad({ producto, pinEliminacion, variantesActivo, onClose }) {
+export function ModalEditarProductoCantidad({ producto, pinEliminacion, variantesActivo, codigoActivo, onClose }) {
   const { esAdminNegocio, puedeEditarProductos, camposEdicionProductos } = useAuth();
   const esAdmin    = esAdminNegocio();
   const campos     = camposEdicionProductos(); // null = todos, array = permitidos
@@ -72,6 +72,7 @@ export function ModalEditarProductoCantidad({ producto, pinEliminacion, variante
     proveedor_id  : producto.proveedor_id   != null ? String(producto.proveedor_id)   : '',
     linea_id      : producto.linea_id       != null ? String(producto.linea_id)       : '',
     nota          : producto.nota           || '',
+    codigo        : producto.codigo         || '',
   });
   const [error,         setError]         = useState('');
   const [modalEliminar, setModalEliminar] = useState(false);
@@ -102,6 +103,8 @@ export function ModalEditarProductoCantidad({ producto, pinEliminacion, variante
         proveedor_id  : form.proveedor_id   !== '' ? Number(form.proveedor_id)   : null,
         linea_id      : form.linea_id       !== '' ? Number(form.linea_id)       : null,
         nota          : form.nota.trim() || null,
+        // Solo se envía si la feature está activa: negocios sin código no tocan la columna
+        ...(codigoActivo ? { codigo: form.codigo.trim() || null } : {}),
       });
       if (tieneAtributos && hojas.length > 0) {
         const pendientes = hojas.filter((h) => {
@@ -158,6 +161,17 @@ export function ModalEditarProductoCantidad({ producto, pinEliminacion, variante
               onChange={(e) => setForm({ ...form, nombre: e.target.value })}
               onKeyDown={(e) => handleKeyDown(e, 'edit-unidad-cant')}
               autoFocus
+            />
+          )}
+
+          {codigoActivo && (
+            <Input
+              id="edit-codigo-cant"
+              label="Código único / de barras"
+              placeholder="Escanéalo o escríbelo (vacío = sin código)"
+              value={form.codigo}
+              onChange={(e) => setForm({ ...form, codigo: e.target.value })}
+              onKeyDown={(e) => handleKeyDown(e, 'edit-unidad-cant')}
             />
           )}
 

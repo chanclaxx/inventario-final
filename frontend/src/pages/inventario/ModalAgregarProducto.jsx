@@ -728,7 +728,7 @@ function FilaImei({ index, item, coloresActivo, coloresConfig, caracteristicasAc
 }
 
 // ─── Paso Compra a Cliente ─────────────────────────────────────────────────────
-function PasoCompraCliente({ sucursalKey, sucursalLista, onExito, onDuplicadosEncontrados, coloresActivo, coloresConfig, caracteristicasActivo, caracteristicasLista }) {
+function PasoCompraCliente({ sucursalKey, sucursalLista, onExito, onDuplicadosEncontrados, coloresActivo, coloresConfig, caracteristicasActivo, caracteristicasLista, codigoActivo }) {
   const queryClient        = useQueryClient();
   const { esAdminNegocio } = useAuth();
   const esAdmin            = esAdminNegocio();
@@ -749,7 +749,7 @@ function PasoCompraCliente({ sucursalKey, sucursalLista, onExito, onDuplicadosEn
   const [filtroLineaCantidad, setFiltroLineaCantidad] = useState('');  // ← NUEVO
   const [productoSel,        setProductoSel]        = useState(null);
   const [creandoProducto,    setCreandoProducto]    = useState(false);
-  const [nuevoProducto,      setNuevoProducto]      = useState({ nombre: '', unidad_medida: 'unidad', precio: '', costo_unitario: '', linea_id: '' });
+  const [nuevoProducto,      setNuevoProducto]      = useState({ nombre: '', unidad_medida: 'unidad', precio: '', costo_unitario: '', linea_id: '', codigo: '' });
   const [cantidad,           setCantidad]           = useState(1);
 
   const [costoCompra, setCostoCompra] = useState('');
@@ -823,12 +823,13 @@ function PasoCompraCliente({ sucursalKey, sucursalLista, onExito, onDuplicadosEn
       precio:         nuevoProducto.precio         !== '' ? Number(nuevoProducto.precio)         : null,
       cliente_origen: nombreCliente,
       linea_id:       nuevoProducto.linea_id ? Number(nuevoProducto.linea_id) : null,
+      ...(codigoActivo && nuevoProducto.codigo.trim() ? { codigo: nuevoProducto.codigo.trim() } : {}),
     }),
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ['productos-cantidad'], exact: false });
       setProductoSel(res.data.data);
       setCreandoProducto(false);
-      setNuevoProducto({ nombre: '', unidad_medida: 'unidad', precio: '', costo_unitario: '', linea_id: '' });
+      setNuevoProducto({ nombre: '', unidad_medida: 'unidad', precio: '', costo_unitario: '', linea_id: '', codigo: '' });
     },
     onError: (e) => setError(e.response?.data?.error || 'Error al crear producto'),
   });
@@ -1090,6 +1091,9 @@ function PasoCompraCliente({ sucursalKey, sucursalLista, onExito, onDuplicadosEn
                 <div className="bg-emerald-50 rounded-xl p-3 flex flex-col gap-2 border border-emerald-100">
                   <p className="text-xs font-semibold text-emerald-700">Nuevo producto</p>
                   <Input placeholder="Nombre del producto" value={nuevoProducto.nombre} onChange={(e) => setNuevoProducto({ ...nuevoProducto, nombre: e.target.value })} />
+                  {codigoActivo && (
+                    <Input placeholder="Código único / de barras (opcional, puedes escanearlo)" value={nuevoProducto.codigo} onChange={(e) => setNuevoProducto({ ...nuevoProducto, codigo: e.target.value })} />
+                  )}
                   {puedeVerCosto && (
                     <div className="flex gap-2">
                       <div className="flex-1 flex flex-col gap-1">
@@ -1631,7 +1635,7 @@ function MiniSelectorVariante({ arbolData, nodoSel, onSeleccionar }) {
 }
 
 // ─── Paso Cantidad (proveedor) ─────────────────────────────────────────────────
-function PasoCantidad({ sucursalKey, onExito, variantesActivo }) {
+function PasoCantidad({ sucursalKey, onExito, variantesActivo, codigoActivo }) {
   const queryClient   = useQueryClient();
   const puedeVerCosto = true;
 
@@ -1639,7 +1643,7 @@ function PasoCantidad({ sucursalKey, onExito, variantesActivo }) {
   const [filtroLineaId,  setFiltroLineaId]  = useState('');  // ← NUEVO
   const [productoSel,    setProductoSel]    = useState(null);
   const [creandoNuevo,   setCreandoNuevo]   = useState(false);
-  const [nuevoProducto,  setNuevoProducto]  = useState({ nombre: '', unidad_medida: 'unidad', precio: '', costo_unitario: '', linea_id: '' });
+  const [nuevoProducto,  setNuevoProducto]  = useState({ nombre: '', unidad_medida: 'unidad', precio: '', costo_unitario: '', linea_id: '', codigo: '' });
   const [cantidad,       setCantidad]       = useState(1);
   const [proveedorId,       setProveedorId]       = useState('');
   const [registrarEnCaja,   setRegistrarEnCaja]   = useState(true);
@@ -1716,6 +1720,7 @@ function PasoCantidad({ sucursalKey, onExito, variantesActivo }) {
       precio:         nuevoProducto.precio         !== '' ? Number(nuevoProducto.precio)         : null,
       proveedor_id:   proveedorId                  ? Number(proveedorId)                          : null,
       linea_id:       nuevoProducto.linea_id       ? Number(nuevoProducto.linea_id)               : null,
+      ...(codigoActivo && nuevoProducto.codigo.trim() ? { codigo: nuevoProducto.codigo.trim() } : {}),
     }),
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ['productos-cantidad'], exact: false });
@@ -1866,6 +1871,9 @@ function PasoCantidad({ sucursalKey, onExito, variantesActivo }) {
             <div className="bg-green-50 rounded-xl p-3 flex flex-col gap-2">
               <p className="text-xs font-semibold text-green-700">Nuevo producto</p>
               <Input placeholder="Nombre del producto" value={nuevoProducto.nombre} onChange={(e) => setNuevoProducto({ ...nuevoProducto, nombre: e.target.value })} />
+              {codigoActivo && (
+                <Input placeholder="Código único / de barras (opcional, puedes escanearlo)" value={nuevoProducto.codigo} onChange={(e) => setNuevoProducto({ ...nuevoProducto, codigo: e.target.value })} />
+              )}
               {puedeVerCosto && (
                 <div className="flex gap-2">
                   <div className="flex-1 flex flex-col gap-1">
@@ -2352,6 +2360,7 @@ export function ModalAgregarProducto({ onClose }) {
   const caracteristicasActivo = configData?.caracteristicas_serial_activo === '1';
   const caracteristicasLista  = parsearCaracteristicasConfig(configData);
   const variantesActivo       = configData?.variantes_activo === '1';
+  const codigoActivo          = configData?.codigo_producto_activo === '1';
 
   const handleDuplicadosEncontrados = ({ disponibles, paraReactivar, prestados = [] }, confirmarFn) => {
     confirmarReactivarRef.current = confirmarFn;
@@ -2406,6 +2415,7 @@ export function ModalAgregarProducto({ onClose }) {
             sucursalKey={sucursalKey}
             sucursalLista={sucursalLista}
             variantesActivo={variantesActivo}
+            codigoActivo={codigoActivo}
             onExito={() => setExito(true)}
           />
         )}
@@ -2419,6 +2429,7 @@ export function ModalAgregarProducto({ onClose }) {
             coloresConfig={coloresConfig}
             caracteristicasActivo={caracteristicasActivo}
             caracteristicasLista={caracteristicasLista}
+            codigoActivo={codigoActivo}
           />
         )}
         {tipo === 'prestatario' && (

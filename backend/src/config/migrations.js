@@ -9,6 +9,16 @@ const runMigrations = async () => {
     ALTER TABLE IF EXISTS productos_cantidad ADD COLUMN IF NOT EXISTS nota TEXT;
   `);
 
+  // Código único de producto (tipo supermercado) — ver migrations/20260714_codigo_producto.sql
+  // 100% aditiva e idempotente. Columna nullable: negocios sin la feature no la notan.
+  // Unicidad por sucursal solo entre productos activos (permite reusar código tras borrado lógico).
+  await pool.query(`
+    ALTER TABLE IF EXISTS productos_cantidad ADD COLUMN IF NOT EXISTS codigo TEXT;
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_productos_cantidad_codigo
+      ON productos_cantidad (sucursal_id, codigo)
+      WHERE codigo IS NOT NULL AND activo;
+  `);
+
   // Gastos fijos mensuales por sucursal (Proyección) — ver migrations/20260712_gastos_fijos.sql
   // 100% aditiva e idempotente. Alimenta la utilidad neta y el punto de equilibrio.
   await pool.query(`

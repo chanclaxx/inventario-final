@@ -11,6 +11,38 @@ const _verificarLineaNegocio = async (lineaId, negocioId) => {
   if (!rows.length) throw { status: 403, message: 'La línea no pertenece a este negocio' };
 };
 
+// ── Código único de producto (feature opt-in tipo supermercado) ──────────
+// undefined → no tocar (clientes que no envían el campo no notan nada);
+// ''/null   → limpiar; texto → trim + mayúsculas (el lector siempre manda
+// la misma cadena; la entrada manual puede variar en mayúsculas).
+const _normalizarCodigo = (codigo) => {
+  if (codigo === undefined) return undefined;
+  const limpio = String(codigo ?? '').trim().toUpperCase();
+  if (!limpio) return null;
+  if (/\s/.test(limpio)) throw { status: 400, message: 'El código no puede contener espacios' };
+  if (limpio.length > 50) throw { status: 400, message: 'El código no puede superar 50 caracteres' };
+  return limpio;
+};
+
+const _validarCodigoUnico = async (negocioId, codigo, nombre, excluirId = null) => {
+  const conflicto = await repo.codigoEnConflicto(negocioId, codigo, nombre, excluirId);
+  if (conflicto) {
+    throw {
+      status: 409,
+      message: `El código ${codigo} ya está en uso por "${conflicto.nombre}" (${conflicto.sucursal_nombre})`,
+    };
+  }
+};
+
+// El índice único (sucursal_id, codigo) puede saltar en una carrera de dos
+// escrituras simultáneas; se traduce a un error claro en vez de un 500.
+const _traducirCodigoDuplicado = (err) => {
+  if (err?.code === '23505' && String(err.constraint || '').includes('uq_productos_cantidad_codigo')) {
+    throw { status: 409, message: 'Ese código ya está en uso por otro producto de la sucursal' };
+  }
+  throw err;
+};
+
 const getProductos = (sucursalId, negocioId, lineaId) =>
   repo.findAll(sucursalId, negocioId, lineaId);
 
@@ -30,7 +62,12 @@ const crearProducto = async (negocioId, datos) => {
   if (!datos.linea_id) throw { status: 400, message: 'La línea es requerida' };
   await _verificarLineaNegocio(datos.linea_id, negocioId);
 
-  return repo.create(datos);
+  const codigo = _normalizarCodigo(datos.codigo);
+  if (codigo) await _validarCodigoUnico(negocioId, codigo, datos.nombre);
+
+  const creado = await repo.create({ ...datos, codigo }).catch(_traducirCodigoDuplicado);
+  if (codigo) await repo.sincronizarCodigoPorNombre(negocioId, creado.nombre, codigo);
+  return creado;
 };
 
 const actualizarProducto = async (negocioId, id, datos) => {
@@ -41,8 +78,16 @@ const actualizarProducto = async (negocioId, id, datos) => {
     await _verificarLineaNegocio(datos.linea_id, negocioId);
   }
 
-  const actualizado = await repo.update(id, datos);
+  const codigo = _normalizarCodigo(datos.codigo);
+  if (codigo) {
+    await _validarCodigoUnico(negocioId, codigo, datos.nombre ?? producto.nombre, producto.id);
+  }
+
+  const actualizado = await repo.update(id, { ...datos, codigo }).catch(_traducirCodigoDuplicado);
   if (!actualizado) throw { status: 404, message: 'Producto no encontrado' };
+  if (codigo !== undefined) {
+    await repo.sincronizarCodigoPorNombre(negocioId, actualizado.nombre, codigo);
+  }
   return actualizado;
 };
 

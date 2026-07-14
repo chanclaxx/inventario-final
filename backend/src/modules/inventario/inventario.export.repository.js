@@ -131,6 +131,7 @@ const getProductosCantidad = async (sucursalId) => {
     SELECT
       pc.id,
       pc.nombre,
+      pc.codigo,
       pc.stock,
       pc.stock_minimo,
       pc.unidad_medida,
