@@ -3,10 +3,11 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Modal }       from '../../components/ui/Modal';
 import { Button }      from '../../components/ui/Button';
 import { InputMoneda } from '../../components/ui/InputMoneda';
+import { Calculadora } from '../../components/ui/Calculadora';
 import { formatCOP }   from '../../utils/formatters';
 import { registrarAbonoTotal, modificarAbonoTotal } from '../../api/prestamos.api';
 import { useMetodosPago } from '../../hooks/useMetodosPago';
-import { CheckCircle, ArrowRight } from 'lucide-react';
+import { CheckCircle, ArrowRight, Calculator } from 'lucide-react';
 
 // Simula la distribución FIFO igual que el backend
 function simularDistribucion(prestamosActivos, valorTotal) {
@@ -36,6 +37,7 @@ export function ModalAbonoTotal({ nombre, tipo, personaId, prestamos, onClose, m
   const [valor,  setValor]  = useState(mode === 'editar' ? String(valorActual) : '');
   const [metodo, setMetodo] = useState(mode === 'editar' ? metodoActual : 'Efectivo');
   const [error,  setError]  = useState('');
+  const [mostrarCalc, setMostrarCalc] = useState(false);
 
   // Préstamos activos en orden FIFO (más antiguo primero)
   const prestamosActivos = useMemo(
@@ -109,7 +111,17 @@ export function ModalAbonoTotal({ nombre, tipo, personaId, prestamos, onClose, m
 
         {/* Valor */}
         <div className="flex flex-col gap-1">
-          <label className="text-sm font-medium text-gray-700">Valor del pago total</label>
+          <div className="flex items-center justify-between">
+            <label className="text-sm font-medium text-gray-700">Valor del pago total</label>
+            <button
+              type="button"
+              onClick={() => setMostrarCalc((v) => !v)}
+              className={`flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-lg transition-colors
+                ${mostrarCalc ? 'bg-blue-100 text-blue-700' : 'text-gray-400 hover:text-blue-600 hover:bg-blue-50'}`}
+            >
+              <Calculator size={14} /> Calculadora
+            </button>
+          </div>
           <InputMoneda
             value={valor}
             onChange={setValor}
@@ -119,6 +131,13 @@ export function ModalAbonoTotal({ nombre, tipo, personaId, prestamos, onClose, m
             className="w-full px-3 py-2 bg-gray-100 rounded-xl text-sm
               focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"
           />
+          {mostrarCalc && (
+            <Calculadora
+              valorInicial={valor}
+              onAplicar={(v) => { setValor(v); setMostrarCalc(false); }}
+              onCerrar={() => setMostrarCalc(false)}
+            />
+          )}
         </div>
 
         {/* Método */}

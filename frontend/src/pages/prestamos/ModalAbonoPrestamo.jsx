@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
+import { Calculator }         from 'lucide-react';
 import { Modal }              from '../../components/ui/Modal';
 import { Button }             from '../../components/ui/Button';
 import { InputMoneda }        from '../../components/ui/InputMoneda';
+import { Calculadora }        from '../../components/ui/Calculadora';
 import { formatCOP }          from '../../utils/formatters';
 import { ModalImprimirFactura } from '../../components/ui/ModalImprimirFactura';
 import { FacturaTermica }     from '../../components/FacturaTermica';
@@ -71,6 +73,7 @@ export function ModalAbonoPrestamo({ prestamo, onClose }) {
   const [metodo,     setMetodo]  = useState('Efectivo');
   const [color,      setColor]   = useState('');
   const [error,      setError]   = useState('');
+  const [mostrarCalc, setMostrarCalc] = useState(false);
   const [pantalla,   setPantalla]= useState('abono'); // 'abono' | 'confirmar' | 'imprimir' | 'pos'
   const [facturaId,  setFacturaId]  = useState(null);
   const [datosPos,   setDatosPos]   = useState(null); // { factura, garantias }
@@ -121,7 +124,17 @@ export function ModalAbonoPrestamo({ prestamo, onClose }) {
             </div>
           </div>
           <div className="flex flex-col gap-1">
-            <label className="text-sm font-medium text-gray-700">Valor del abono</label>
+            <div className="flex items-center justify-between">
+              <label className="text-sm font-medium text-gray-700">Valor del abono</label>
+              <button
+                type="button"
+                onClick={() => setMostrarCalc((v) => !v)}
+                className={`flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-lg transition-colors
+                  ${mostrarCalc ? 'bg-blue-100 text-blue-700' : 'text-gray-400 hover:text-blue-600 hover:bg-blue-50'}`}
+              >
+                <Calculator size={14} /> Calculadora
+              </button>
+            </div>
             <InputMoneda
               value={valor}
               onChange={setValor}
@@ -131,6 +144,13 @@ export function ModalAbonoPrestamo({ prestamo, onClose }) {
               className="w-full px-3 py-2 bg-gray-100 rounded-xl text-sm
                 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"
             />
+            {mostrarCalc && (
+              <Calculadora
+                valorInicial={valor}
+                onAplicar={(v) => { setValor(v); setMostrarCalc(false); }}
+                onCerrar={() => setMostrarCalc(false)}
+              />
+            )}
           </div>
           <div className="flex flex-col gap-1.5">
             <label className="text-sm font-medium text-gray-700">Método de pago</label>
