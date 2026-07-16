@@ -259,7 +259,7 @@ const registrarCompra = async ({
       const { rows: cargoRows } = await client.query(
         `INSERT INTO movimientos_acreedor(acreedor_id, usuario_id, tipo, descripcion, valor, compra_id, sucursal_id)
          VALUES ($1, $2, 'Cargo', $3, $4, $5, $6) RETURNING id`,
-        [acreedorId, usuario_id, `Compra #${compra.id} — mercancía`, total, compra.id, sucursal_id]
+        [acreedorId, usuario_id, `Compra #${compra.numero ?? compra.id} — mercancía`, total, compra.id, sucursal_id]
       );
       const cargoId = cargoRows[0].id;
       acreedorIdCompra = acreedorId;
@@ -314,7 +314,7 @@ const registrarCompra = async ({
          VALUES ($1, 'salida', 'mercancia', $2, $3, $4, $5, $6, $7)
          RETURNING id`,
         [divisaRows[0].id, valorUsd,
-         `Pago compra #${compra.id}${prov?.nombre ? ` — ${prov.nombre}` : ''} (US$ ${valorUsd})`,
+         `Pago compra #${compra.numero ?? compra.id}${prov?.nombre ? ` — ${prov.nombre}` : ''} (US$ ${valorUsd})`,
          usuario_id, tasa, proveedor_id || null, compra.id]
       );
 
@@ -597,7 +597,7 @@ const devolverCompra = async (negocioId, compraId, { lineas: lineasDevol, motivo
         [cargo.id]
       );
       const saldoPendiente = Math.max(0, Number(cargo.valor) - Number(abRows[0].ab));
-      const desc = `Devolución de mercancía — compra #${compraId}${motivo ? ` (${motivo})` : ''}`;
+      const desc = `Devolución de mercancía — compra #${compra.numero ?? compraId}${motivo ? ` (${motivo})` : ''}`;
 
       const abonoAlCargo = Math.min(valorDevuelto, saldoPendiente);
       if (abonoAlCargo > 0) {

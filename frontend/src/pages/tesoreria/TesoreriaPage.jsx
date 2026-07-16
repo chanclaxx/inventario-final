@@ -685,7 +685,7 @@ function ModalPagueMercancia({ cuentas, onClose }) {
                               : 'border-gray-200 hover:bg-gray-50'}`}>
                         <span className="min-w-0">
                           <span className="block text-sm font-medium text-gray-800">
-                            Compra #{c.id}{c.numero_factura ? ` · Fact. ${c.numero_factura}` : ''}
+                            Compra #{c.numero ?? c.id}{c.numero_factura ? ` · Fact. ${c.numero_factura}` : ''}
                           </span>
                           <span className="block text-xs text-gray-400">
                             {formatFechaHora(c.fecha)} · {formatCOP(c.total)}

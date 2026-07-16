@@ -169,7 +169,7 @@ function ModalCompraDetalle({ compraId, onClose }) {
   });
 
   return (
-    <Modal open onClose={onClose} title={`Compra #${String(compraId).padStart(5, '0')}`} size="lg">
+    <Modal open onClose={onClose} title={`Compra #${String(data?.numero ?? compraId).padStart(5, '0')}`} size="lg">
       {isLoading ? <Spinner className="py-10" /> : (
         <div className="flex flex-col gap-4">
           <div className="grid grid-cols-2 gap-3">
@@ -238,7 +238,7 @@ function ModalAbonoRapido({ acreedor, cargo, onClose, onImprimir }) {
 
   const pendiente    = Number(cargo.saldo_pendiente);
   const tituloCompra = cargo.compra_id
-    ? `Compra #${String(cargo.compra_id).padStart(5, '0')}`
+    ? `Compra #${String(cargo.compra_numero ?? cargo.compra_id).padStart(5, '0')}`
     : (cargo.descripcion || 'Cargo');
 
   const mutation = useMutation({
@@ -578,7 +578,7 @@ function ModalAbonoTotal({ acreedor, cargos, onClose }) {
             {distribucion.map(({ cargo, aplica }) => (
               <div key={cargo.id} className="flex items-center justify-between text-xs gap-2">
                 <span className="text-gray-600 truncate">
-                  {cargo.descripcion || (cargo.compra_id ? `Compra #${String(cargo.compra_id).padStart(5, '0')}` : 'Cargo')}
+                  {cargo.descripcion || (cargo.compra_id ? `Compra #${String(cargo.compra_numero ?? cargo.compra_id).padStart(5, '0')}` : 'Cargo')}
                 </span>
                 <span className="font-semibold text-indigo-600 flex-shrink-0">{formatCOP(aplica)}</span>
               </div>
@@ -873,7 +873,7 @@ function ModalEditarAbono({ acreedorId, cargoIdActual, abono, onClose }) {
             {cargos.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.compra_id
-                  ? `Compra #${String(c.compra_id).padStart(5, '0')} — ${formatCOP(c.valor_original)}`
+                  ? `Compra #${String(c.compra_numero ?? c.compra_id).padStart(5, '0')} — ${formatCOP(c.valor_original)}`
                   : `${c.descripcion || 'Cargo'} — ${formatCOP(c.valor_original)}`
                 } · {c.estado_pago}
               </option>
@@ -1046,7 +1046,7 @@ function CargoActivo({ cargo, acreedorId, esAdmin, saldoAFavor, onAbonar, onApli
                   onClick={(e) => { e.stopPropagation(); setModalCompra(true); }}
                   className="text-xs text-blue-500 bg-blue-50 px-2 py-0.5 rounded-lg border
                     border-blue-100 hover:bg-blue-100 transition-colors">
-                  Ver compra #{String(cargo.compra_id).padStart(5, '0')}
+                  Ver compra #{String(cargo.compra_numero ?? cargo.compra_id).padStart(5, '0')}
                 </button>
               )}
             </div>
@@ -1139,7 +1139,7 @@ function CargoSaldado({ cargo, acreedorId, esAdmin }) {
           <Badge variant="green">Saldada</Badge>
           {cargo.compra_id && (
             <span className="text-xs text-blue-400">
-              Compra #{String(cargo.compra_id).padStart(5, '0')}
+              Compra #{String(cargo.compra_numero ?? cargo.compra_id).padStart(5, '0')}
             </span>
           )}
           <span className="text-xs text-gray-600 font-medium truncate">
@@ -1161,7 +1161,7 @@ function CargoSaldado({ cargo, acreedorId, esAdmin }) {
             <button
               onClick={(e) => { e.stopPropagation(); setModalCompra(true); }}
               className="mb-2 text-xs text-blue-500 hover:text-blue-700 transition-colors">
-              Ver productos de compra #{String(cargo.compra_id).padStart(5, '0')} →
+              Ver productos de compra #{String(cargo.compra_numero ?? cargo.compra_id).padStart(5, '0')} →
             </button>
           )}
           <p className="text-xs font-semibold text-gray-500 mb-2">Historial de pagos</p>

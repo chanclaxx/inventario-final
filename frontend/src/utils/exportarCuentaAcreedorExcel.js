@@ -213,7 +213,7 @@ function hojaCuenta(movimientos) {
     if (esCargo) sumaCargos += valor; else sumaAbonos += valor;
 
     const desc = m.descripcion
-      || (m.compra_id ? `Compra #${String(m.compra_id).padStart(5, '0')}` : meta.label);
+      || (m.compra_id ? `Compra #${String(m.compra_numero ?? m.compra_id).padStart(5, '0')}` : meta.label);
 
     put(ws, row, 0, 'n', i + 1,            sNat(bg));
     put(ws, row, 1, 's', fmtFecha(m.fecha), sC(bg));
@@ -260,8 +260,8 @@ function hojaCargos(cargos) {
 
     put(ws, row, 0, 'n', i + 1, sNat(bg));
     put(ws, row, 1, 's', fmtFecha(c.fecha), sC(bg));
-    put(ws, row, 2, 's', c.descripcion || (c.compra_id ? `Compra #${String(c.compra_id).padStart(5, '0')}` : 'Cargo'), sC(bg));
-    put(ws, row, 3, 's', c.compra_id ? `#${String(c.compra_id).padStart(5, '0')}` : '', sC(bg, 'center'));
+    put(ws, row, 2, 's', c.descripcion || (c.compra_id ? `Compra #${String(c.compra_numero ?? c.compra_id).padStart(5, '0')}` : 'Cargo'), sC(bg));
+    put(ws, row, 3, 's', c.compra_id ? `#${String(c.compra_numero ?? c.compra_id).padStart(5, '0')}` : '', sC(bg, 'center'));
     put(ws, row, 4, 'n', valor, sN(bg));
     put(ws, row, 5, 'n', abonado, sN(bg));
     put(ws, row, 6, 'n', pend, sN(bg));

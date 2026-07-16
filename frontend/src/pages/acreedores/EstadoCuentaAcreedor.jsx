@@ -88,7 +88,7 @@ function ModalCompraDetalle({ compraId, onClose }) {
   });
 
   return (
-    <Modal open onClose={onClose} title={`Compra #${String(compraId).padStart(5, '0')}`} size="lg">
+    <Modal open onClose={onClose} title={`Compra #${String(data?.numero ?? compraId).padStart(5, '0')}`} size="lg">
       {isLoading ? <Spinner className="py-10" /> : (
         <div className="flex flex-col gap-4">
           <div className="grid grid-cols-2 gap-3">
@@ -169,7 +169,7 @@ function FilaTablaAcreedor({ mov, onAnular, onVerCompra, isOdd, esAdmin }) {
             {mov.descripcion || (esCargo ? 'Cargo' : 'Abono')}
           </span>
           {esCompra && (
-            <span className="text-[10px] text-purple-400">#{String(mov.compra_id).padStart(5, '0')}</span>
+            <span className="text-[10px] text-purple-400">#{String(mov.compra_numero ?? mov.compra_id).padStart(5, '0')}</span>
           )}
         </div>
       </td>
@@ -225,7 +225,7 @@ function BurbujaMensaje({ mov, onAnular, onVerCompra }) {
             </span>
             {esCompra && (
               <span className="text-[10px] text-purple-500 font-medium">
-                #{String(mov.compra_id).padStart(5, '0')} · ver detalle →
+                #{String(mov.compra_numero ?? mov.compra_id).padStart(5, '0')} · ver detalle →
               </span>
             )}
           </div>

@@ -553,7 +553,7 @@ function ModalDetalleCompra({ compraId, onClose }) {
   };
 
   return (
-    <Modal open onClose={onClose} title={`Compra #${String(compraId).padStart(5, '0')}`} size="lg">
+    <Modal open onClose={onClose} title={`Compra #${String(data?.numero ?? compraId).padStart(5, '0')}`} size="lg">
       {isLoading ? <Spinner className="py-10" /> : (
         <div className="flex flex-col gap-4">
           <div className="grid grid-cols-2 gap-3">
@@ -859,7 +859,7 @@ function ModalAbonoRapido({ acreedorId, acreedorNombre, cargo, onClose }) {
 
   const pendiente    = Number(cargo.saldo_pendiente);
   const tituloCompra = cargo.compra_id
-    ? `Compra #${String(cargo.compra_id).padStart(5, '0')}`
+    ? `Compra #${String(cargo.compra_numero ?? cargo.compra_id).padStart(5, '0')}`
     : (cargo.descripcion || 'Cargo');
 
   const mutation = useMutation({
@@ -1126,7 +1126,7 @@ function CargoActivo({ cargo, acreedorId, onAbonar }) {
                   onClick={(e) => { e.stopPropagation(); setModalCompra(true); }}
                   className="text-xs text-blue-500 bg-blue-50 px-2 py-0.5 rounded-lg border
                     border-blue-100 hover:bg-blue-100 transition-colors">
-                  Ver compra #{String(cargo.compra_id).padStart(5, '0')}
+                  Ver compra #{String(cargo.compra_numero ?? cargo.compra_id).padStart(5, '0')}
                 </button>
               )}
             </div>
@@ -1207,7 +1207,7 @@ function CargoSaldado({ cargo, acreedorId }) {
           <Badge variant="green">Saldada</Badge>
           {cargo.compra_id && (
             <span className="text-xs text-blue-400">
-              Compra #{String(cargo.compra_id).padStart(5, '0')}
+              Compra #{String(cargo.compra_numero ?? cargo.compra_id).padStart(5, '0')}
             </span>
           )}
           <span className="text-xs text-gray-600 font-medium truncate">
@@ -1229,7 +1229,7 @@ function CargoSaldado({ cargo, acreedorId }) {
             <button
               onClick={(e) => { e.stopPropagation(); setModalCompra(true); }}
               className="mb-2 text-xs text-blue-500 hover:text-blue-700 transition-colors">
-              Ver productos de compra #{String(cargo.compra_id).padStart(5, '0')} →
+              Ver productos de compra #{String(cargo.compra_numero ?? cargo.compra_id).padStart(5, '0')} →
             </button>
           )}
           <p className="text-xs font-semibold text-gray-500 mb-2">Historial de pagos</p>
@@ -1384,7 +1384,8 @@ function HistorialProveedor({ proveedor, sucursalKey, sucursalLista, onVolver, o
     if (fechaHasta && fechaStr > fechaHasta) return false;
     if (busquedaFactura) {
       const q = busquedaFactura.toLowerCase();
-      if (!c.numero_factura?.toLowerCase().includes(q) && !String(c.id).includes(q)) return false;
+      if (!c.numero_factura?.toLowerCase().includes(q) && !String(c.id).includes(q)
+          && !String(c.numero ?? '').includes(q)) return false;
     }
     return true;
   });
@@ -1531,7 +1532,7 @@ function HistorialProveedor({ proveedor, sucursalKey, sucursalLista, onVolver, o
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-sm font-semibold text-gray-800">
-                          #{String(c.id).padStart(5, '0')}
+                          #{String(c.numero ?? c.id).padStart(5, '0')}
                         </span>
                         <Badge variant={c.estado === 'Completada' ? 'green' : c.estado === 'Pendiente' ? 'yellow' : 'red'}>
                           {c.estado}

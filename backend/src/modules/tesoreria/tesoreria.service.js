@@ -316,13 +316,13 @@ const registrarMovimiento = async (negocioId, sucursalId, usuarioId, datos) => {
     if (cargo) {
       const saldo = cargo.valor - cargo.abonado;
       if (saldo <= 0) {
-        throw { status: 409, message: `La compra #${compra.id} ya está pagada` };
+        throw { status: 409, message: `La compra #${compra.numero ?? compra.id} ya está pagada` };
       }
       // Margen de $1 por redondeos de conversión USD→COP
       if (valorCop > saldo + 1) {
         throw {
           status: 400,
-          message: `El pago (${valorCop}) supera el saldo por pagar (${saldo}) de la compra #${compra.id}`,
+          message: `El pago (${valorCop}) supera el saldo por pagar (${saldo}) de la compra #${compra.numero ?? compra.id}`,
         };
       }
     } else {
@@ -331,12 +331,12 @@ const registrarMovimiento = async (negocioId, sucursalId, usuarioId, datos) => {
       if (compra.registrar_en_caja) {
         throw {
           status: 409,
-          message: `La compra #${compra.id} ya descuenta de tesorería (se registró con pago en caja${compra.metodo ? ` — ${compra.metodo}` : ''}). No la pagues de nuevo.`,
+          message: `La compra #${compra.numero ?? compra.id} ya descuenta de tesorería (se registró con pago en caja${compra.metodo ? ` — ${compra.metodo}` : ''}). No la pagues de nuevo.`,
         };
       }
       const pagado = await repo.pagadoCompra(compra.id);
       if (pagado >= Number(compra.total)) {
-        throw { status: 409, message: `La compra #${compra.id} ya está pagada por tesorería (${pagado} de ${compra.total})` };
+        throw { status: 409, message: `La compra #${compra.numero ?? compra.id} ya está pagada por tesorería (${pagado} de ${compra.total})` };
       }
     }
   }
@@ -346,7 +346,7 @@ const registrarMovimiento = async (negocioId, sucursalId, usuarioId, datos) => {
     if (!proveedor) throw { status: 404, message: 'Proveedor no encontrado' };
   }
   if ((proveedor || compra) && !concepto) {
-    concepto = `Pago mercancía — ${proveedor?.nombre || 'proveedor'}${compra ? ` (Compra #${compra.id})` : ''}`;
+    concepto = `Pago mercancía — ${proveedor?.nombre || 'proveedor'}${compra ? ` (Compra #${compra.numero ?? compra.id})` : ''}`;
   }
 
   // Idempotencia: reintento del mismo POST → devolver el movimiento original
@@ -531,7 +531,7 @@ const getComprasProveedor = async (negocioId, sucursalId, proveedorId) => {
     // Sin cargo y registrada con pago en caja → ya descuenta por su método
     const ya_descuenta = !conCargo && c.registrar_en_caja === true;
     return {
-      id: c.id, fecha: c.fecha, numero_factura: c.numero_factura,
+      id: c.id, numero: c.numero, fecha: c.fecha, numero_factura: c.numero_factura,
       total:            Number(c.total),
       pagado_tesoreria: Number(c.pagado_tesoreria),
       abonado:          Number(c.abonado),

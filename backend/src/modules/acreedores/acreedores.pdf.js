@@ -234,7 +234,7 @@ function dibujarTabla(doc, movimientos, startY) {
       .text(tipoLabel, cols[1].x + 4, y + (ROW_H - badgeH) / 2 + 3.5, { width: badgeW, align: 'center' });
 
     const desc = mov.descripcion
-      || (mov.compra_id ? `Compra #${String(mov.compra_id).padStart(5, '0')}` : tipoLabel);
+      || (mov.compra_id ? `Compra #${String(mov.compra_numero ?? mov.compra_id).padStart(5, '0')}` : tipoLabel);
     doc.font(FONT.normal).fontSize(8).fillColor(C.negro)
       .text(desc, cols[1].x + badgeW + 8, y + 8,
         { width: cols[1].w - badgeW - 12, align: 'left', ellipsis: true, height: ROW_H - 10 });
@@ -377,7 +377,7 @@ function dibujarTablaCargos(doc, cargos, startY) {
     rectFill(doc, MARGIN, y, CW, ROW_H, i % 2 === 0 ? C.blanco : C.grisFondo, 0);
 
     const desc = c.descripcion
-      || (c.compra_id ? `Compra #${String(c.compra_id).padStart(5, '0')}` : 'Cargo');
+      || (c.compra_id ? `Compra #${String(c.compra_numero ?? c.compra_id).padStart(5, '0')}` : 'Cargo');
 
     doc.font(FONT.normal).fontSize(7.5).fillColor(C.grisClaro)
       .text(formatFecha(c.fecha), cols[0].x + 4, y + 7, { width: cols[0].w - 8 });

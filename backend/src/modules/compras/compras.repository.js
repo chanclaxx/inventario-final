@@ -1,4 +1,5 @@
 const { pool } = require('../../config/db');
+const { asignarNumeroDocumento } = require('../../utils/numeracion.util');
 
 const findAll = async (sucursalId, negocioId, proveedorIds = null) => {
   const conditions = [];
@@ -22,7 +23,7 @@ const findAll = async (sucursalId, negocioId, proveedorIds = null) => {
 
   const { rows } = await pool.query(`
     SELECT
-      c.id, c.fecha, c.numero_factura, c.total, c.estado, c.notas,
+      c.id, c.numero, c.fecha, c.numero_factura, c.total, c.estado, c.notas,
       c.sucursal_id, su.nombre AS sucursal_nombre,
       p.nombre AS proveedor_nombre,
       u.nombre AS usuario_nombre
@@ -81,7 +82,7 @@ const findByProveedor = async (proveedorId, sucursalId, negocioId) => {
 
   const { rows } = await pool.query(`
     SELECT
-      c.id, c.fecha, c.numero_factura, c.total, c.estado, c.notas,
+      c.id, c.numero, c.fecha, c.numero_factura, c.total, c.estado, c.notas,
       c.metodo, c.registrar_en_caja,
       c.sucursal_id, su.nombre AS sucursal_nombre,
       u.nombre AS usuario_nombre
@@ -100,6 +101,9 @@ const create = async (client, { sucursal_id, proveedor_id, usuario_id, numero_fa
     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
     RETURNING *
   `, [sucursal_id, proveedor_id, usuario_id, numero_factura, total, notas, registrar_en_caja !== false, metodo || null]);
+  rows[0].numero = await asignarNumeroDocumento(client, {
+    tipo: 'compra', docId: rows[0].id, sucursalId: sucursal_id,
+  });
   return rows[0];
 };
 
@@ -210,7 +214,7 @@ const findAllPaginado = async (sucursalId, negocioId, { page = 1, limit = 20, bu
 
   const { rows } = await pool.query(
     `SELECT
-       c.id, c.fecha, c.numero_factura, c.total, c.estado, c.notas,
+       c.id, c.numero, c.fecha, c.numero_factura, c.total, c.estado, c.notas,
        c.metodo, c.registrar_en_caja,
        c.sucursal_id, su.nombre AS sucursal_nombre,
        p.id AS proveedor_id, p.nombre AS proveedor_nombre, p.tipo AS proveedor_tipo,

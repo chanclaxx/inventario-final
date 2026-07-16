@@ -153,7 +153,7 @@ const UNION_EVENTOS = `
     UNION ALL
     -- Compras a proveedores (≈ caja: compras)
     SELECT c.fecha, 'salida', c.total, 'compra',
-           'Compra #' || c.id || COALESCE(' — ' || pr.nombre, ''),
+           'Compra #' || COALESCE(c.numero, c.id) || COALESCE(' — ' || pr.nombre, ''),
            c.metodo, NULL::bigint AS mov_id
     FROM compras c
     LEFT JOIN proveedores pr ON pr.id = c.proveedor_id
@@ -495,7 +495,7 @@ const pagadoCompra = async (compraId) => {
 
 const findCompraParaPago = async (compraId, sucursalId) => {
   const { rows } = await pool.query(`
-    SELECT c.id, c.fecha, c.numero_factura, c.total, c.estado,
+    SELECT c.id, c.numero, c.fecha, c.numero_factura, c.total, c.estado,
            c.registrar_en_caja, c.metodo, c.proveedor_id
     FROM compras c
     WHERE c.id = $1 AND c.sucursal_id = $2
@@ -538,7 +538,7 @@ const insertarAbonoEspejo = async (client, {
 // cargo, se usa lo pagado directamente por tesorería.
 const findComprasProveedor = async (proveedorId, sucursalId) => {
   const { rows } = await pool.query(`
-    SELECT c.id, c.fecha, c.numero_factura, c.total,
+    SELECT c.id, c.numero, c.fecha, c.numero_factura, c.total,
            c.registrar_en_caja, c.metodo,
            cargo.id    AS cargo_id,
            cargo.valor AS cargo_valor,

@@ -13,6 +13,7 @@ const TABLAS = {
   factura:        'facturas',
   prestamo:       'prestamos',
   orden_servicio: 'ordenes_servicio',
+  compra:         'compras',
 };
 
 // Cache: una vez detectada la infraestructura no se vuelve a consultar.
