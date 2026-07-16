@@ -260,7 +260,23 @@ function AccionesOrden({ orden, onAccion }) {
               <Plus size={13} /> Abono
             </Button>
           )}
+          <button
+            onClick={() => onAccion('reimprimir-comprobante', orden)}
+            className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-blue-500 transition-colors"
+            title="Reimprimir comprobante"
+          >
+            <Printer size={14} />
+          </button>
         </>
+      )}
+      {estado === 'Sin_reparar' && (
+        <button
+          onClick={() => onAccion('reimprimir-comprobante', orden)}
+          className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-blue-500 transition-colors"
+          title="Reimprimir comprobante"
+        >
+          <Printer size={14} />
+        </button>
       )}
       {(estado === 'Entregado' || estado === 'Pendiente_pago') && (
         <Button size="sm" variant="secondary" onClick={() => onAccion('garantia', orden)}>
@@ -1511,7 +1527,7 @@ function ModalGarantia({ orden, onClose, onExito }) {
 
 // ─── Modal: Detalle ───────────────────────────────────────────────────────────
 
-function ModalDetalleOrden({ ordenId, onClose }) {
+function ModalDetalleOrden({ ordenId, onClose, onImprimir }) {
   const { data, isLoading } = useQuery({
     queryKey: ['orden-detalle', ordenId],
     queryFn:  () => getOrdenById(ordenId).then((r) => r.data.data),
@@ -1735,7 +1751,14 @@ function ModalDetalleOrden({ ordenId, onClose }) {
           )}
         </div>
 
-        <Button variant="secondary" className="w-full" onClick={onClose}>Cerrar</Button>
+        <div className="flex gap-2">
+          {onImprimir && (
+            <Button variant="secondary" className="flex-1" onClick={() => onImprimir(data)}>
+              <Printer size={15} /> Imprimir
+            </Button>
+          )}
+          <Button variant="secondary" className="flex-1" onClick={onClose}>Cerrar</Button>
+        </div>
       </div>
     </Modal>
   );
@@ -1984,7 +2007,14 @@ export default function ServiciosPage() {
         <ModalGarantia orden={accion.orden} onClose={cerrar} onExito={invalidar} />
       )}
       {accion?.tipo === 'detalle' && (
-        <ModalDetalleOrden ordenId={accion.orden.id} onClose={cerrar} />
+        <ModalDetalleOrden ordenId={accion.orden.id} onClose={cerrar}
+          onImprimir={(orden) => setAccion({
+            tipo: ['Recibido', 'En_reparacion'].includes(orden.estado)
+              ? 'reimprimir-recepcion'
+              : 'reimprimir-comprobante',
+            orden,
+          })}
+        />
       )}
       {accion?.tipo === 'reimprimir-recepcion' && (
         <ModalImprimirRecepcion

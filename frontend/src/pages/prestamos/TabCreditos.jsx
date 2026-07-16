@@ -4,6 +4,9 @@ import {
   getCreditos, getCreditoById,
   registrarAbonoCredito, saldarCredito, cancelarCredito,
 } from '../../api/creditos.api';
+import { getFacturaById }          from '../../api/facturas.api';
+import { getGarantiasPorFactura }  from '../../api/garantias.api';
+import api from '../../api/axios.config';
 import { formatCOP, formatFechaHora } from '../../utils/formatters';
 import { useMetodosPago } from '../../hooks/useMetodosPago';
 import { Badge }       from '../../components/ui/Badge';
@@ -12,10 +15,12 @@ import { Modal }       from '../../components/ui/Modal';
 import { InputMoneda } from '../../components/ui/InputMoneda';
 import { Spinner }     from '../../components/ui/Spinner';
 import { EmptyState }  from '../../components/ui/EmptyState';
+import { ModalImprimirFactura } from '../../components/ui/ModalImprimirFactura';
+import { FacturaTermica }       from '../../components/FacturaTermica';
 import { ModalDevolucionParcialCredito } from '../facturas/ModalDevolucionParcialCredito';
 import {
   CreditCard, Plus, CheckCircle, XCircle, AlertTriangle,
-  ChevronLeft, ChevronDown, ChevronUp, RotateCcw, ChevronRight, Loader2,
+  ChevronLeft, ChevronDown, ChevronUp, RotateCcw, ChevronRight, Loader2, Printer,
 } from 'lucide-react';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -212,6 +217,59 @@ function ModalCancelarCredito({ credito, onClose }) {
   );
 }
 
+// ─── Imprimir factura del crédito (POS o PDF) ────────────────────────────────
+// Reutiliza el mismo flujo de FacturarPage: ModalImprimirFactura → FacturaTermica.
+
+function ImprimirFacturaCredito({ facturaId, onClose }) {
+  const [posData, setPosData] = useState(null);
+
+  const { data: f, isLoading } = useQuery({
+    queryKey: ['factura-detalle', facturaId],
+    queryFn:  () => getFacturaById(facturaId).then((r) => r.data.data),
+    enabled:  !!facturaId,
+  });
+  const { data: configData } = useQuery({
+    queryKey: ['config'],
+    queryFn:  () => api.get('/config').then((r) => r.data.data),
+  });
+  const { data: garantias = [] } = useQuery({
+    queryKey: ['garantias-factura', facturaId],
+    queryFn:  () => getGarantiasPorFactura(facturaId).then((r) => r.data.data),
+    enabled:  !!facturaId,
+    staleTime: 0,
+  });
+
+  if (posData) {
+    return (
+      <FacturaTermica
+        factura={posData.factura}
+        garantias={posData.garantias}
+        onClose={onClose}
+      />
+    );
+  }
+
+  if (isLoading || !f) {
+    return (
+      <Modal open onClose={onClose} title="Imprimir factura" size="sm">
+        <Spinner className="py-10" />
+      </Modal>
+    );
+  }
+
+  const facturaConConfig = { ...f, config: configData };
+
+  return (
+    <ModalImprimirFactura
+      open
+      onClose={onClose}
+      factura={facturaConConfig}
+      garantias={garantias}
+      onImprimirPos={(fa, g) => setPosData({ factura: fa, garantias: g })}
+    />
+  );
+}
+
 // ─── Historial de abonos (lazy, se carga al expandir) ────────────────────────
 
 function HistorialAbonos({ creditoId }) {
@@ -256,7 +314,7 @@ function HistorialAbonos({ creditoId }) {
 // ─── Tarjeta de crédito individual (por factura) ──────────────────────────────
 
 function TarjetaCreditoDetalle({
-  credito, onAbonar, onSaldar, onCancelar, onDevolucion, cerrado = false,
+  credito, onAbonar, onSaldar, onCancelar, onDevolucion, onImprimir, cerrado = false,
 }) {
   const [historialAbierto, setHistorialAbierto] = useState(false);
 
@@ -285,12 +343,21 @@ function TarjetaCreditoDetalle({
               <p className="text-xs text-gray-400 mt-0.5">{formatFechaHora(credito.creado_en)}</p>
             )}
           </div>
-          <Badge variant={
-            credito.estado === 'Activo'    ? 'yellow' :
-            credito.estado === 'Cancelado' ? 'red'    : 'green'
-          }>
-            {credito.estado}
-          </Badge>
+          <div className="flex items-center gap-1.5 flex-shrink-0">
+            {credito.estado !== 'Cancelado' && (
+              <button onClick={() => onImprimir(credito)}
+                className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-blue-500 transition-colors"
+                title="Imprimir factura (POS o PDF)">
+                <Printer size={14} />
+              </button>
+            )}
+            <Badge variant={
+              credito.estado === 'Activo'    ? 'yellow' :
+              credito.estado === 'Cancelado' ? 'red'    : 'green'
+            }>
+              {credito.estado}
+            </Badge>
+          </div>
         </div>
 
         {/* Productos de la factura */}
@@ -410,7 +477,7 @@ function TarjetaCreditoDetalle({
 // ─── Vista detalle de persona ─────────────────────────────────────────────────
 
 function VistaDetallePersonaCredito({
-  persona, onVolver, onAbonar, onSaldar, onCancelar, onDevolucion,
+  persona, onVolver, onAbonar, onSaldar, onCancelar, onDevolucion, onImprimir,
 }) {
   const [cerradosAbiertos, setCerradosAbiertos] = useState(false);
 
@@ -489,6 +556,7 @@ function VistaDetallePersonaCredito({
               onSaldar={onSaldar}
               onCancelar={onCancelar}
               onDevolucion={onDevolucion}
+              onImprimir={onImprimir}
             />
           ))}
         </div>
@@ -529,6 +597,7 @@ function VistaDetallePersonaCredito({
                   onSaldar={onSaldar}
                   onCancelar={onCancelar}
                   onDevolucion={onDevolucion}
+                  onImprimir={onImprimir}
                   cerrado
                 />
               ))}
@@ -675,6 +744,7 @@ export function TabCreditos() {
   const [creditoSaldar,       setCreditoSaldar]       = useState(null);
   const [creditoCancelar,     setCreditoCancelar]     = useState(null);
   const [creditoDevolucion,   setCreditoDevolucion]   = useState(null);
+  const [creditoImprimir,     setCreditoImprimir]     = useState(null);
 
   const { data: creditosData, isLoading } = useQuery({
     queryKey: ['creditos'],
@@ -724,6 +794,10 @@ export function TabCreditos() {
         <ModalDevolucionParcialCredito credito={creditoDevolucion}
           onClose={() => setCreditoDevolucion(null)} />
       )}
+      {creditoImprimir && (
+        <ImprimirFacturaCredito facturaId={creditoImprimir.factura_id}
+          onClose={() => setCreditoImprimir(null)} />
+      )}
     </>
   );
 
@@ -738,6 +812,7 @@ export function TabCreditos() {
           onSaldar={setCreditoSaldar}
           onCancelar={setCreditoCancelar}
           onDevolucion={setCreditoDevolucion}
+          onImprimir={setCreditoImprimir}
         />
         {modales}
       </>
