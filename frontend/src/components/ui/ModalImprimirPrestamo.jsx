@@ -25,7 +25,7 @@ function PrestamoTermico({ prestamo, abonos, onClose }) {
         <div className="bg-[#1E3A5F] px-5 py-4 flex items-center justify-between">
           <div>
             <p className="text-white font-bold text-sm">Comprobante de Préstamo</p>
-            <p className="text-blue-300 text-xs mt-0.5">#{String(prestamo.id).padStart(6, '0')}</p>
+            <p className="text-blue-300 text-xs mt-0.5">#{String(prestamo.numero ?? prestamo.id).padStart(6, '0')}</p>
           </div>
           <span className={`text-xs font-bold px-3 py-1 rounded-full
             ${prestamo.estado === 'Saldado' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}`}>
@@ -146,7 +146,7 @@ export function ModalImprimirPrestamo({ prestamo, abonos, onClose }) {
 
         {/* Opción PDF */}
         <button
-          onClick={() => descargarPdf(prestamo.id)}
+          onClick={() => descargarPdf(prestamo.id, prestamo.numero ?? prestamo.id)}
           disabled={descargando}
           className="flex items-center gap-4 p-4 rounded-xl border-2 border-gray-200
             hover:border-green-300 hover:bg-green-50/30 transition-all text-left group
@@ -165,7 +165,7 @@ export function ModalImprimirPrestamo({ prestamo, abonos, onClose }) {
         {/* Opción compartir (móvil) */}
         {navigator.canShare && (
           <button
-            onClick={() => compartirPdf(prestamo.id)}
+            onClick={() => compartirPdf(prestamo.id, prestamo.numero ?? prestamo.id)}
             disabled={descargando}
             className="flex items-center gap-4 p-4 rounded-xl border-2 border-gray-200
               hover:border-purple-300 hover:bg-purple-50/30 transition-all text-left group

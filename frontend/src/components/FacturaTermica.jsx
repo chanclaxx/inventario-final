@@ -92,7 +92,7 @@ function ContenidoFactura({ factura, garantias, config }) {
       <div className="centrado negrita">FACTURA DE VENTA</div>
       <div className="fila">
         <span>No.</span>
-        <span>{String(factura.id).padStart(6, '0')}</span>
+        <span>{String(factura.numero ?? factura.id).padStart(6, '0')}</span>
       </div>
       <div className="fila">
         <span>Fecha:</span>

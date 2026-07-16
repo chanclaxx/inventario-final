@@ -1925,7 +1925,7 @@ function TarjetaEntregaPendiente({ entrega, onSeleccionar }) {
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold text-gray-800 truncate">{entrega.nombre_cliente}</p>
           <p className="text-xs text-gray-500">
-            Factura #{String(entrega.factura_id).padStart(6, '0')}
+            Factura #{String(entrega.factura_numero ?? entrega.factura_id).padStart(6, '0')}
             {entrega.cliente_celular ? ` · ${entrega.cliente_celular}` : ''}
           </p>
           {entrega.direccion_entrega && <p className="text-xs text-gray-400 truncate mt-0.5">{entrega.direccion_entrega}</p>}
@@ -1952,7 +1952,7 @@ function FilaEntregaCompacta({ entrega, onSeleccionar }) {
       className="w-full text-left flex items-center justify-between gap-3 px-3 py-2.5 hover:bg-gray-50 transition-colors">
       <div className="flex-1 min-w-0">
         <p className="text-sm text-gray-700 truncate">{entrega.nombre_cliente}</p>
-        <p className="text-xs text-gray-400">#{String(entrega.factura_id).padStart(6, '0')} · {entrega.domiciliario_nombre}</p>
+        <p className="text-xs text-gray-400">#{String(entrega.factura_numero ?? entrega.factura_id).padStart(6, '0')} · {entrega.domiciliario_nombre}</p>
       </div>
       <div className="flex items-center gap-2 flex-shrink-0">
         <span className="text-xs text-gray-400 hidden sm:block">{formatFechaHora(entrega.fecha_asignacion)}</span>
@@ -2055,7 +2055,7 @@ function PanelDetalleEntrega({ entregaId, onVolver }) {
           <p className="text-sm font-semibold text-gray-800">{e?.nombre_cliente}</p>
           <Badge variant={ESTADO_ENTREGA_BADGE[e?.estado] || 'gray'}>{ESTADO_ENTREGA_LABEL[e?.estado] || e?.estado}</Badge>
         </div>
-        <p className="text-xs text-gray-500">Factura #{String(e?.factura_id || 0).padStart(6, '0')}{e?.cliente_celular ? ` · ${e.cliente_celular}` : ''}</p>
+        <p className="text-xs text-gray-500">Factura #{String(e?.factura_numero ?? e?.factura_id ?? 0).padStart(6, '0')}{e?.cliente_celular ? ` · ${e.cliente_celular}` : ''}</p>
         <p className="text-xs text-orange-600 font-medium">Domiciliario: {e?.domiciliario_nombre}{e?.domiciliario_telefono ? ` · ${e.domiciliario_telefono}` : ''}</p>
         {e?.direccion_entrega && <p className="text-xs text-gray-500">{e.direccion_entrega}</p>}
         {e?.notas && <p className="text-xs text-gray-400 italic">{e.notas}</p>}

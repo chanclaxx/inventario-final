@@ -15,10 +15,11 @@ import api from '../api/axios.config';
 /**
  * Descarga el PDF de una factura como Blob desde el backend.
  * @param {number|string} facturaId
+ * @param {number|string} [numeroMostrar] - Número por negocio para el nombre del archivo (fallback: id)
  * @returns {Promise<{blob: Blob, nombreArchivo: string}>}
  */
-async function fetchPdfBlob(facturaId) {
-  const numFormateado = String(facturaId).padStart(6, '0');
+async function fetchPdfBlob(facturaId, numeroMostrar) {
+  const numFormateado = String(numeroMostrar ?? facturaId).padStart(6, '0');
 
   const response = await api.get(`/facturas/${facturaId}/pdf`, {
     responseType: 'blob',
@@ -60,10 +61,10 @@ const useExportarPdfFactura = () => {
   /**
    * Descarga el PDF directamente al dispositivo.
    */
-  const descargarPdf = useCallback(async (facturaId) => {
+  const descargarPdf = useCallback(async (facturaId, numeroMostrar) => {
     setExportando(true);
     try {
-      const { blob, nombreArchivo } = await fetchPdfBlob(facturaId);
+      const { blob, nombreArchivo } = await fetchPdfBlob(facturaId, numeroMostrar);
       const url  = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href     = url;
@@ -84,14 +85,14 @@ const useExportarPdfFactura = () => {
    * @param {number|string} facturaId
    * @param {string} [nombreCliente] - Para el texto del mensaje compartido
    */
-  const compartirPdf = useCallback(async (facturaId, nombreCliente = '') => {
+  const compartirPdf = useCallback(async (facturaId, nombreCliente = '', numeroMostrar) => {
     setExportando(true);
     try {
-      const { blob, nombreArchivo } = await fetchPdfBlob(facturaId);
+      const { blob, nombreArchivo } = await fetchPdfBlob(facturaId, numeroMostrar);
       const archivo = new File([blob], nombreArchivo, { type: 'application/pdf' });
 
       const shareData = {
-        title: `Factura #${String(facturaId).padStart(6, '0')}`,
+        title: `Factura #${String(numeroMostrar ?? facturaId).padStart(6, '0')}`,
         text:  nombreCliente
           ? `Factura de compra de ${nombreCliente}`
           : 'Adjunto tu factura de compra',

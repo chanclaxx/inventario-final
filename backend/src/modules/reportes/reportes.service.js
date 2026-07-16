@@ -208,7 +208,7 @@ const getServiciosRango = async (sucursalId, desde, hasta) => {
 
   const { rows: cerradosRaw } = await pool.query(`
     SELECT
-      os.id, os.estado, os.cliente_nombre,
+      os.id, os.numero, os.estado, os.cliente_nombre,
       os.equipo_tipo, os.equipo_nombre, os.equipo_serial,
       os.falla_reportada, os.notas_tecnico, os.motivo_sin_reparar,
       os.precio_final, os.costo_real, os.total_abonado,
@@ -277,6 +277,7 @@ const getServiciosRango = async (sucursalId, desde, hasta) => {
 
     return {
       id:                 os.id,
+      numero:             os.numero,
       estado:             os.estado,
       categoria,
       cliente_nombre:     os.cliente_nombre,
@@ -346,7 +347,7 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
       GROUP BY factura_id
     )
     SELECT
-      f.id, f.nombre_cliente, f.cedula, f.celular,
+      f.id, f.numero, f.nombre_cliente, f.cedula, f.celular,
       f.fecha, f.estado, f.notas,
       COALESCE(SUM(${SUBTOTAL_EFECTIVO}), 0) AS total_venta,
       COALESCE(r.total_retomas, 0) AS total_retomas
@@ -652,6 +653,7 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
     SELECT
       cr.id            AS credito_id,
       cr.factura_id,
+      f.numero         AS factura_numero,
       cr.valor_total,
       cr.cuota_inicial,
       cr.total_abonado,
@@ -694,6 +696,7 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
     return {
       credito_id:             cr.credito_id,
       factura_id:             cr.factura_id,
+      factura_numero:         cr.factura_numero,
       nombre_cliente:         cr.nombre_cliente,
       cedula:                 cr.cedula,
       valor_total:            Number(cr.valor_total),
@@ -726,6 +729,7 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
       SELECT
         cr.id            AS credito_id,
         cr.factura_id,
+        f.numero         AS factura_numero,
         cr.valor_total,
         cr.cuota_inicial,
         cr.total_abonado,
@@ -761,6 +765,7 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
     SELECT
       a.credito_id,
       a.factura_id,
+      a.factura_numero,
       a.nombre_cliente,
       a.cedula,
       a.valor_total,
@@ -778,6 +783,7 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
   const creditosActivos = creditosActivosRows.map((r) => ({
     credito_id:        Number(r.credito_id),
     factura_id:        Number(r.factura_id),
+    factura_numero:    r.factura_numero,
     nombre_cliente:    r.nombre_cliente,
     cedula:            r.cedula,
     valor_total:       Number(r.valor_total),

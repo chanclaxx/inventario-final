@@ -147,7 +147,7 @@ function seccionEncabezado(doc, config, orden) {
     yInfo += 12;
   }
 
-  const numOS = `#OS-${String(orden.id).padStart(4, '0')}`;
+  const numOS = `#OS-${String(orden.numero ?? orden.id).padStart(4, '0')}`;
 
   doc.font(FONT.bold).fontSize(26).fillColor(C.headerText)
     .text(numOS, MARGIN, 22, { width: CONTENT_W, align: 'right' });
@@ -430,7 +430,7 @@ function seccionPie(doc, y) {
  * @param {{ orden: object, abonos: Array, config: object, garantias: Array, res: object }} params
  */
 function generarPdfServicio({ orden, abonos = [], config = {}, garantias = [], res }) {
-  const numOS = String(orden.id).padStart(4, '0');
+  const numOS = String(orden.numero ?? orden.id).padStart(4, '0');
 
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader(
@@ -494,7 +494,7 @@ function seccionEncabezadoRecepcion(doc, config, orden) {
     yInfo += 12;
   }
 
-  const numOS = `#OS-${String(orden.id).padStart(4, '0')}`;
+  const numOS = `#OS-${String(orden.numero ?? orden.id).padStart(4, '0')}`;
 
   doc.font(FONT.bold).fontSize(26).fillColor(C.headerText)
     .text(numOS, MARGIN, 22, { width: CONTENT_W, align: 'right' });
@@ -548,7 +548,7 @@ function seccionCostoEstimado(doc, orden, y) {
  * @param {{ orden: object, config: object, res: object }} params
  */
 function generarPdfRecepcion({ orden, config = {}, res }) {
-  const numOS = String(orden.id).padStart(4, '0');
+  const numOS = String(orden.numero ?? orden.id).padStart(4, '0');
 
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader(

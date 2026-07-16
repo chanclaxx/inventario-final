@@ -21,7 +21,7 @@ function ContenidoRecepcion({ orden, config }) {
       <div className="rr-centrado negrita">ORDEN DE SERVICIO</div>
       <div className="rr-fila" style={{ marginTop: '4px' }}>
         <span>Orden:</span>
-        <span>#OS-{String(orden.id).padStart(4, '0')}</span>
+        <span>#OS-{String(orden.numero ?? orden.id).padStart(4, '0')}</span>
       </div>
       <div className="rr-fila">
         <span>Fecha:</span>

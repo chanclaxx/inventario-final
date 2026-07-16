@@ -131,7 +131,7 @@ const _htmlFactura = (factura, config) => {
     <div style="background:#2563eb;padding:24px 32px;">
       <h1 style="margin:0;color:#fff;font-size:22px;">${nombre}</h1>
       <p style="margin:4px 0 0;color:#bfdbfe;font-size:14px;">
-        Factura #${String(factura.id).padStart(6, '0')}
+        Factura #${String(factura.numero ?? factura.id).padStart(6, '0')}
       </p>
     </div>
 
@@ -219,7 +219,7 @@ const enviarFactura = async (factura, config) => {
       email: process.env.BREVO_FROM_EMAIL,
       name:  process.env.BREVO_FROM_NAME || negocioNombre(config),
     },
-    subject: `Factura #${String(factura.id).padStart(6, '0')} — ${negocioNombre(config)}`,
+    subject: `Factura #${String(factura.numero ?? factura.id).padStart(6, '0')} — ${negocioNombre(config)}`,
     htmlContent: _htmlFactura(factura, config),
   });
 };

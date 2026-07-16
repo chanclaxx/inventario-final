@@ -1,4 +1,5 @@
 const { pool } = require('../../config/db');
+const { asignarNumeroDocumento } = require('../../utils/numeracion.util');
 
 // ── Subconsulta de proveedores reutilizable ───────────────────────────────────
 //
@@ -39,7 +40,7 @@ const _subqueryProveedores = (facturaAlias = 'f') => `
 // ── Columnas SELECT compartidas ───────────────────────────────────────────────
 
 const _selectColumnas = () => `
-  f.id, f.fecha, f.nombre_cliente, f.cedula, f.celular,
+  f.id, f.numero, f.fecha, f.nombre_cliente, f.cedula, f.celular,
   f.estado, f.notas, f.sucursal_id, f.vendedor_id,
   su.nombre AS sucursal_nombre,
   u.nombre  AS usuario_nombre,
@@ -134,6 +135,7 @@ const buscar = async (sucursalId, negocioId, { q, desde, hasta, limit = 100, off
       OR f.cedula LIKE $${paramIndex} ESCAPE '\\'
       OR f.celular LIKE $${paramIndex} ESCAPE '\\'
       OR CAST(f.id AS TEXT) LIKE $${paramIndex} ESCAPE '\\'
+      OR CAST(f.numero AS TEXT) LIKE $${paramIndex} ESCAPE '\\'
       OR EXISTS (
         SELECT 1 FROM lineas_factura lf_s
         WHERE lf_s.factura_id = f.id
@@ -278,6 +280,9 @@ const create = async (client, {
     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
     RETURNING *
   `, [sucursal_id, usuario_id, cliente_id, vendedor_id || null, nombre_cliente, cedula, celular, notas, estado || 'Activa']);
+  rows[0].numero = await asignarNumeroDocumento(client, {
+    tipo: 'factura', docId: rows[0].id, sucursalId: sucursal_id,
+  });
   return rows[0];
 };
 

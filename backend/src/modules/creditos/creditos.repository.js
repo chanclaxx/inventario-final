@@ -11,6 +11,7 @@ const findAll = async (sucursalId, negocioId) => {
       c.estado, c.creado_en, c.sucursal_id,
       su.nombre  AS sucursal_nombre,
       f.id       AS factura_id,
+      f.numero   AS factura_numero,
       f.nombre_cliente, f.cedula, f.celular,
       (c.valor_total - c.cuota_inicial - c.total_abonado) AS saldo_pendiente,
       (
@@ -41,6 +42,7 @@ const findAll = async (sucursalId, negocioId) => {
 const findByIdYNegocio = async (id, negocioId) => {
   const { rows } = await pool.query(`
     SELECT c.*, f.nombre_cliente, f.cedula, f.celular,
+           f.numero AS factura_numero,
            su.nombre AS sucursal_nombre
     FROM creditos   c
     JOIN facturas   f  ON f.id  = c.factura_id

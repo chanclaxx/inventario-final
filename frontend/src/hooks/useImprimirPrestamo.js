@@ -5,7 +5,7 @@ import api from '../api/axios.config';
 export default function useImprimirPrestamo() {
   const [descargando, setDescargando] = useState(false);
 
-  const descargarPdf = async (prestamoId) => {
+  const descargarPdf = async (prestamoId, numeroMostrar) => {
     setDescargando(true);
     try {
       const response = await api.get(`/prestamos/${prestamoId}/pdf`, {
@@ -15,7 +15,7 @@ export default function useImprimirPrestamo() {
       const url      = window.URL.createObjectURL(new Blob([response.data], { type: 'application/pdf' }));
       const link     = document.createElement('a');
       link.href      = url;
-      link.download  = `prestamo-${prestamoId}.pdf`;
+      link.download  = `prestamo-${numeroMostrar ?? prestamoId}.pdf`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -25,7 +25,7 @@ export default function useImprimirPrestamo() {
     }
   };
 
-  const compartirPdf = async (prestamoId) => {
+  const compartirPdf = async (prestamoId, numeroMostrar) => {
     setDescargando(true);
     try {
       const response = await api.get(`/prestamos/${prestamoId}/pdf`, {
@@ -34,18 +34,18 @@ export default function useImprimirPrestamo() {
 
       const file = new File(
         [response.data],
-        `prestamo-${prestamoId}.pdf`,
+        `prestamo-${numeroMostrar ?? prestamoId}.pdf`,
         { type: 'application/pdf' }
       );
 
       if (navigator.canShare?.({ files: [file] })) {
-        await navigator.share({ files: [file], title: `Préstamo #${prestamoId}` });
+        await navigator.share({ files: [file], title: `Préstamo #${numeroMostrar ?? prestamoId}` });
       } else {
         // Fallback a descarga directa
         const url  = window.URL.createObjectURL(new Blob([response.data]));
         const link = document.createElement('a');
         link.href  = url;
-        link.download = `prestamo-${prestamoId}.pdf`;
+        link.download = `prestamo-${numeroMostrar ?? prestamoId}.pdf`;
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);

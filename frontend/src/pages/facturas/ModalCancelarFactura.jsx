@@ -177,7 +177,7 @@ export function ModalCancelarFactura({ factura, onClose, onSuccess }) {
   if (esCredito) {
     return (
       <PantallaBloqueoCredito
-        facturaId={factura.id}
+        facturaId={factura.numero ?? factura.id}
         nombreCliente={factura.nombre_cliente}
         onClose={onClose}
       />
@@ -188,7 +188,7 @@ export function ModalCancelarFactura({ factura, onClose, onSuccess }) {
   if (entregaPendiente) {
     return (
       <PantallaBloqueo
-        facturaId={factura.id}
+        facturaId={factura.numero ?? factura.id}
         entrega={entregaPendiente}
         onClose={onClose}
       />
@@ -205,7 +205,7 @@ export function ModalCancelarFactura({ factura, onClose, onSuccess }) {
             <ShieldAlert size={18} className="text-red-500 flex-shrink-0 mt-0.5" />
             <div className="flex flex-col gap-0.5">
               <p className="text-sm font-semibold text-red-700">
-                Factura #{String(factura.id).padStart(6, '0')} — {factura.nombre_cliente}
+                Factura #{String(factura.numero ?? factura.id).padStart(6, '0')} — {factura.nombre_cliente}
               </p>
               <p className="text-xs text-red-500">
                 Esta factura tiene{' '}
@@ -281,7 +281,7 @@ export function ModalCancelarFactura({ factura, onClose, onSuccess }) {
           <div className="flex flex-col gap-1">
             <p className="text-sm text-red-700">
               Cancelar factura{' '}
-              <span className="font-bold">#{String(factura.id).padStart(6, '0')}</span>{' '}
+              <span className="font-bold">#{String(factura.numero ?? factura.id).padStart(6, '0')}</span>{' '}
               de <span className="font-bold">{factura.nombre_cliente}</span>.
             </p>
             <p className="text-xs text-red-500">

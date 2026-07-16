@@ -132,7 +132,7 @@ function CardOrden({ orden, onAccion, esAdmin = false }) {
           </div>
           <div className="flex items-center gap-3 mt-0.5 flex-wrap">
             <span className="text-xs text-gray-400 font-mono">
-              #OS-{String(orden.id).padStart(4,'0')}
+              #OS-{String(orden.numero ?? orden.id).padStart(4,'0')}
             </span>
             <span className="flex items-center gap-1 text-xs text-gray-400">
               <Clock size={10} /> {formatFechaHora(orden.fecha_recepcion)}
@@ -339,7 +339,7 @@ function CardOrdenCerrada({ orden, onAccion, esAdmin = false }) {
       <button onClick={() => setExpandida((v) => !v)}
         className="w-full px-4 py-2.5 flex items-center gap-3 hover:bg-gray-50 transition-colors text-left">
         <div className="flex-1 min-w-0 flex items-center gap-2 flex-wrap">
-          <span className="text-xs text-gray-300 font-mono">#OS-{String(orden.id).padStart(4,'0')}</span>
+          <span className="text-xs text-gray-300 font-mono">#OS-{String(orden.numero ?? orden.id).padStart(4,'0')}</span>
           <Badge variant={estado.badge}>{estado.label}</Badge>
           <span className="text-xs font-medium text-gray-600 truncate">{nombreEquipo(orden)}</span>
           <span className="text-xs text-gray-400 truncate hidden sm:block">{orden.cliente_nombre}</span>
@@ -602,7 +602,7 @@ function ModalNuevaOrden({ onClose, onCreada }) {
           </div>
           <div className="text-center">
             <p className="text-sm font-semibold text-gray-900">
-              Orden #OS-{String(ordenCreada.id).padStart(4, '0')} creada
+              Orden #OS-{String(ordenCreada.numero ?? ordenCreada.id).padStart(4, '0')} creada
             </p>
             <p className="text-xs text-gray-400 mt-1">
               {ordenCreada.cliente_nombre} — {ordenCreada.equipo_nombre || ordenCreada.equipo_tipo || 'Equipo'}
@@ -1529,7 +1529,7 @@ function ModalDetalleOrden({ ordenId, onClose }) {
   const saldo  = Number(data.precio_final || 0) - Number(data.total_abonado || 0);
 
   return (
-    <Modal open onClose={onClose} title={`#OS-${String(data.id).padStart(4,'0')}`} size="md">
+    <Modal open onClose={onClose} title={`#OS-${String(data.numero ?? data.id).padStart(4,'0')}`} size="md">
       <div className="flex flex-col gap-4">
 
         <div className="flex items-start justify-between gap-2">
@@ -1991,6 +1991,7 @@ export default function ServiciosPage() {
           open
           onClose={cerrar}
           ordenId={accion.orden.id}
+          numeroOrden={accion.orden.numero ?? accion.orden.id}
           nombreCliente={accion.orden.cliente_nombre}
           onImprimirPos={() => setAccion({ tipo: 'reimprimir-recepcion-pos', orden: accion.orden })}
         />
@@ -2003,6 +2004,7 @@ export default function ServiciosPage() {
           open
           onClose={cerrar}
           ordenId={accion.orden.id}
+          numeroOrden={accion.orden.numero ?? accion.orden.id}
           nombreCliente={accion.orden.cliente_nombre}
           onImprimirPos={() => setAccion({ tipo: 'reimprimir-comprobante-pos', orden: accion.orden })}
         />

@@ -61,7 +61,7 @@ function ModalAbonoCredito({ credito, onClose }) {
       <div className="flex flex-col gap-4">
         <div className="bg-gray-50 rounded-xl p-3 flex flex-col gap-1">
           <p className="text-xs text-gray-400">
-            Crédito — {credito.nombre_cliente} · Factura #{String(credito.factura_id).padStart(6, '0')}
+            Crédito — {credito.nombre_cliente} · Factura #{String(credito.factura_numero ?? credito.factura_id).padStart(6, '0')}
           </p>
           <div className="flex justify-between mt-1">
             <span className="text-xs text-gray-400">Saldo pendiente</span>
@@ -279,7 +279,7 @@ function TarjetaCreditoDetalle({
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
             <p className={`text-sm font-semibold ${cerrado ? 'text-gray-500' : 'text-gray-800'}`}>
-              Factura #{String(credito.factura_id).padStart(6, '0')}
+              Factura #{String(credito.factura_numero ?? credito.factura_id).padStart(6, '0')}
             </p>
             {credito.creado_en && (
               <p className="text-xs text-gray-400 mt-0.5">{formatFechaHora(credito.creado_en)}</p>

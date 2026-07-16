@@ -585,7 +585,7 @@ const FilaServicio = ({ servicio }) => {
       >
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-xs text-gray-300 font-mono">#OS-{String(servicio.id).padStart(4, '0')}</span>
+            <span className="text-xs text-gray-300 font-mono">#OS-{String(servicio.numero ?? servicio.id).padStart(4, '0')}</span>
             <Badge variant={catCfg.badge}>{catCfg.label}</Badge>
           </div>
           <p className="text-sm font-semibold text-gray-800 truncate mt-0.5">{servicio.equipo_nombre}</p>
@@ -790,7 +790,7 @@ const FilaCreditoActivo = ({ credito }) => {
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold text-gray-800 truncate">{credito.nombre_cliente}</p>
           <p className="text-xs text-gray-400">
-            Factura #{String(credito.factura_id).padStart(6, '0')}
+            Factura #{String(credito.factura_numero ?? credito.factura_id).padStart(6, '0')}
             {credito.cedula ? ` · CC: ${credito.cedula}` : ''}
           </p>
         </div>
@@ -836,7 +836,7 @@ const FilaCreditoSaldado = ({ credito }) => {
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold text-gray-800 truncate">{credito.nombre_cliente}</p>
           <p className="text-xs text-gray-400">
-            Factura #{String(credito.factura_id).padStart(6, '0')}
+            Factura #{String(credito.factura_numero ?? credito.factura_id).padStart(6, '0')}
             {credito.cedula ? ` · CC: ${credito.cedula}` : ''}
           </p>
           <p className="text-xs text-gray-400">

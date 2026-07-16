@@ -1,5 +1,6 @@
 const { pool }     = require('../../config/db');
 const repo         = require('./prestamos.repository');
+const { asignarNumeroDocumento } = require('../../utils/numeracion.util');
 
 // ─── Helpers privados ─────────────────────────────────────────────────────────
 
@@ -139,10 +140,14 @@ const _crearFacturaDesdePrestamo = async (client, prestamo, metodo, negocioId) =
     prestamo.prestatario || '',
     cedula,
     celular,
-    `Factura generada por saldo de préstamo #${prestamo.id}`,
+    `Factura generada por saldo de préstamo #${prestamo.numero ?? prestamo.id}`,
   ]);
 
   const facturaId = facturaRows[0].id;
+
+  await asignarNumeroDocumento(client, {
+    tipo: 'factura', docId: facturaId, negocioId,
+  });
 
   // Insertar línea del producto.
   // OJO: `valor_prestamo` es el valor TOTAL del préstamo (no el unitario) y

@@ -38,7 +38,7 @@ const CONFIG_GRUPOS = {
     textHeader: 'text-green-700',
     borderColor:'border-green-100',
     renderItem: (item) => ({
-      descripcion: `Factura #${String(item.factura_id).padStart(6, '0')} — ${item.nombre_cliente}`,
+      descripcion: `Factura #${String(item.factura_numero ?? item.factura_id).padStart(6, '0')} — ${item.nombre_cliente}`,
       detalle:     [item.productos, item.metodo].filter(Boolean).join(' · ') || null,
       fecha:       item.fecha,
     }),
@@ -50,7 +50,7 @@ const CONFIG_GRUPOS = {
     textHeader: 'text-blue-700',
     borderColor:'border-blue-100',
     renderItem: (item) => ({
-      descripcion: `Crédito Factura #${String(item.factura_id).padStart(6, '0')} — ${item.nombre_cliente}`,
+      descripcion: `Crédito Factura #${String(item.factura_numero ?? item.factura_id).padStart(6, '0')} — ${item.nombre_cliente}`,
       detalle:     [item.productos, item.metodo].filter(Boolean).join(' · ') || null,
       fecha:       item.fecha,
     }),
@@ -62,7 +62,7 @@ const CONFIG_GRUPOS = {
   textHeader: 'text-purple-700',
   borderColor:'border-purple-100',
   renderItem: (item) => ({
-    descripcion: `Préstamo #${String(item.prestamo_id).padStart(4, '0')} — ${item.prestatario}`,
+    descripcion: `Préstamo #${String(item.prestamo_numero ?? item.prestamo_id).padStart(4, '0')} — ${item.prestatario}`,
     detalle:     item.metodo || null,
     fecha:       item.fecha,
   }),
@@ -76,7 +76,7 @@ const CONFIG_GRUPOS = {
   renderItem: (item) => {
     const equipo   = item.equipo_nombre || item.equipo_tipo || '';
     const cliente  = item.cliente_nombre || '';
-    const ordenNum = item.orden_id ? `#OS-${String(item.orden_id).padStart(4, '0')}` : '';
+    const ordenNum = item.orden_id ? `#OS-${String(item.orden_numero ?? item.orden_id).padStart(4, '0')}` : '';
     const partes   = [ordenNum, equipo, cliente].filter(Boolean).join(' — ');
     return {
       descripcion: partes || item.concepto || 'Servicio técnico',
@@ -93,7 +93,7 @@ const CONFIG_GRUPOS = {
     borderColor:'border-orange-100',
     renderItem: (item) => ({
       descripcion: item.factura_id
-        ? `Retoma — Factura #${String(item.factura_id).padStart(6, '0')} · ${item.nombre_cliente || ''}`
+        ? `Retoma — Factura #${String(item.factura_numero ?? item.factura_id).padStart(6, '0')} · ${item.nombre_cliente || ''}`
         : (item.descripcion || item.nombre_producto || 'Retoma'),
       detalle: item.imei
         ? `IMEI: ${item.imei}`
@@ -564,7 +564,7 @@ function GrupoMovimientosInformativo(props) {
               className="flex items-center justify-between px-4 py-2.5 bg-white hover:bg-gray-50/50">
               <div className="flex-1 min-w-0">
                 <p className="text-sm text-gray-600 truncate">
-                  Factura #{String(item.factura_id).padStart(6,'0')} — {item.nombre_cliente}
+                  Factura #{String(item.factura_numero ?? item.factura_id).padStart(6,'0')} — {item.nombre_cliente}
                 </p>
                 <div className="flex items-center gap-2">
                   {item.metodo && <span className="text-xs text-gray-400">{item.metodo}</span>}
@@ -685,17 +685,17 @@ function _buildItemsPorMetodo(grupos) {
   };
 
   (grupos.facturas?.items || []).forEach((item) =>
-    add(item, `Factura #${String(item.factura_id).padStart(6, '0')} — ${item.nombre_cliente}`, 'Ingreso')
+    add(item, `Factura #${String(item.factura_numero ?? item.factura_id).padStart(6, '0')} — ${item.nombre_cliente}`, 'Ingreso')
   );
   (grupos.abonosCredito?.items || []).forEach((item) =>
-    add(item, `Crédito Factura #${String(item.factura_id).padStart(6, '0')} — ${item.nombre_cliente}`, 'Ingreso')
+    add(item, `Crédito Factura #${String(item.factura_numero ?? item.factura_id).padStart(6, '0')} — ${item.nombre_cliente}`, 'Ingreso')
   );
   (grupos.abonosPrestamo?.items || []).forEach((item) =>
-    add(item, `Préstamo #${String(item.prestamo_id).padStart(4, '0')} — ${item.prestatario}`, 'Ingreso')
+    add(item, `Préstamo #${String(item.prestamo_numero ?? item.prestamo_id).padStart(4, '0')} — ${item.prestatario}`, 'Ingreso')
   );
   (grupos.abonosServicio?.items || []).forEach((item) => {
     const partes = [
-      item.orden_id ? `#OS-${String(item.orden_id).padStart(4, '0')}` : '',
+      item.orden_id ? `#OS-${String(item.orden_numero ?? item.orden_id).padStart(4, '0')}` : '',
       item.equipo_nombre || item.equipo_tipo || '',
       item.cliente_nombre || '',
     ].filter(Boolean);

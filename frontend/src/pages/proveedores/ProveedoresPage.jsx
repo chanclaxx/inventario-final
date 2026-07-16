@@ -152,7 +152,7 @@ function ModalDetalleSerial({ item, historial, onClose }) {
           {item.factura_id && (
             <div className="flex justify-between text-sm">
               <span className="text-gray-500">Factura</span>
-              <span className="font-mono text-gray-700">#{String(item.factura_id).padStart(6, '0')}</span>
+              <span className="font-mono text-gray-700">#{String(item.factura_numero ?? item.factura_id).padStart(6, '0')}</span>
             </div>
           )}
         </div>

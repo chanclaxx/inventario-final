@@ -572,7 +572,7 @@ const cancelarFactura = async (negocioId, id, eliminarRetoma = false, _desdeDevo
            VALUES ($1, 'Egreso', $2, $3, $4, 'factura_cancelada')`,
           [
             cajaActiva.id,
-            `Devolución factura #${String(id).padStart(6, '0')} — ${factura.nombre_cliente}`,
+            `Devolución factura #${String(factura.numero ?? id).padStart(6, '0')} — ${factura.nombre_cliente}`,
             totalDevolucion,
             id,
           ]

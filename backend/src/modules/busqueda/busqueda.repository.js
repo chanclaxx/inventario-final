@@ -45,7 +45,7 @@ const buscarSerialPorIMEI = async (query, negocioId) => {
 const getVentasPorIMEI = async (imei, negocioId) => {
   const { rows } = await pool.query(`
     SELECT
-      f.id, f.fecha, f.nombre_cliente, f.cedula, f.celular,
+      f.id, f.numero, f.fecha, f.nombre_cliente, f.cedula, f.celular,
       f.estado, f.notas,
       lf.precio    AS precio_venta,
       lf.cantidad,
@@ -68,6 +68,7 @@ const getRetomasPorIMEI = async (imei, negocioId) => {
       r.id, r.descripcion, r.valor_retoma, r.ingreso_inventario,
       r.nombre_producto,
       f.id         AS factura_id,
+      f.numero     AS factura_numero,
       f.fecha,
       f.nombre_cliente,
       f.estado,

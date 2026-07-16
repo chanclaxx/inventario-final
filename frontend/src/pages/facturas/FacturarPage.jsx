@@ -160,7 +160,7 @@ function ModalDetalle({ facturaId, onClose, onAbrirImprimir, onEditar }) {
   const facturaConConfig = { ...f, config: configData };
 
   return (
-    <Modal open onClose={onClose} title={`Factura #${String(facturaId).padStart(6, '0')}`} size="lg">
+    <Modal open onClose={onClose} title={`Factura #${String(f?.numero ?? facturaId).padStart(6, '0')}`} size="lg">
       <div className="flex flex-col gap-4">
         <div className="flex items-center justify-between">
           <Badge variant={f?.estado === 'Activa' ? 'green' : f?.estado === 'Credito' ? 'yellow' : 'red'}>{f?.estado}</Badge>
@@ -250,7 +250,7 @@ function FilaFactura({ factura, onVerDetalle, onInactivar, onEditar, onAbrirPdf,
     <div className={`bg-white border rounded-xl p-3 flex items-center justify-between gap-3 ${factura.estado === 'Cancelada' ? 'opacity-50 border-gray-100' : 'border-gray-100'}`}>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-sm font-semibold text-gray-800">#{String(factura.id).padStart(6, '0')}</span>
+          <span className="text-sm font-semibold text-gray-800">#{String(factura.numero ?? factura.id).padStart(6, '0')}</span>
           <Badge variant={factura.estado === 'Activa' ? 'green' : factura.estado === 'Credito' ? 'yellow' : 'red'}>{factura.estado}</Badge>
           {factura.retoma_descripcion && <Badge variant="purple">Retoma</Badge>}
           {mostrarSucursal && factura.sucursal_nombre && <span className="flex items-center gap-1 text-[10px] text-purple-600 bg-purple-50 border border-purple-100 rounded-full px-2 py-0.5"><Building2 size={9} />{factura.sucursal_nombre}</span>}

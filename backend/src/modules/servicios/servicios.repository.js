@@ -1,4 +1,5 @@
 const { pool } = require('../../config/db');
+const { asignarNumeroDocumento } = require('../../utils/numeracion.util');
 
 // ─── Helper: crear factura automática al entregar ─────────────────────────────
 
@@ -12,7 +13,7 @@ const _crearFacturaPorServicio = async (client, orden, precioServicio) => {
   if (orden.equipo_nombre) partes.push(`- ${orden.equipo_nombre}`);
   const nombreLinea = partes.join(' ');
 
-  const notas = `OS-${String(orden.id).padStart(4, '0')}: ${(orden.falla_reportada || '').slice(0, 200)}`;
+  const notas = `OS-${String(orden.numero ?? orden.id).padStart(4, '0')}: ${(orden.falla_reportada || '').slice(0, 200)}`;
 
   const { rows: [factura] } = await client.query(`
     INSERT INTO facturas(sucursal_id, usuario_id, cliente_id, nombre_cliente, cedula, celular, notas, estado)
@@ -27,6 +28,10 @@ const _crearFacturaPorServicio = async (client, orden, precioServicio) => {
     orden.cliente_telefono || '0000000000',
     notas,
   ]);
+
+  await asignarNumeroDocumento(client, {
+    tipo: 'factura', docId: factura.id, sucursalId: orden.sucursal_id,
+  });
 
   await client.query(`
     INSERT INTO lineas_factura(factura_id, nombre_producto, cantidad, precio)
@@ -263,6 +268,9 @@ const create = async (negocioId, sucursalId, usuarioId, datos) => {
     checklist_equipo  ? JSON.stringify(checklist_equipo)  : null,
     patron_desbloqueo ? JSON.stringify(patron_desbloqueo) : null,
   ]);
+  rows[0].numero = await asignarNumeroDocumento(pool, {
+    tipo: 'orden_servicio', docId: rows[0].id, negocioId,
+  });
   return rows[0];
 };
 
@@ -328,7 +336,7 @@ const registrarAbono = async (negocioId, ordenId, { valor, metodo, notas, usuari
     await client.query('BEGIN');
 
     const { rows: orden } = await client.query(`
-      SELECT id, estado, precio_final, precio_garantia, total_abonado,
+      SELECT id, numero, estado, precio_final, precio_garantia, total_abonado,
              garantia_cobrable, sucursal_id,
              usuario_id, cliente_id, cliente_nombre, cliente_cedula, cliente_telefono,
              equipo_tipo, equipo_nombre, falla_reportada, factura_id
@@ -377,7 +385,7 @@ const registrarAbono = async (negocioId, ordenId, { valor, metodo, notas, usuari
         VALUES ($1, $2, 'Ingreso', $3, $4, $5, 'servicio')
       `, [
         cajaId, usuarioId || null,
-        `Servicio técnico #OS-${String(ordenId).padStart(4, '0')}`,
+        `Servicio técnico #OS-${String(o.numero ?? ordenId).padStart(4, '0')}`,
         valor, ordenId,
       ]);
     }
@@ -398,7 +406,7 @@ const marcarEntregado = async (negocioId, id) => {
     await client.query('BEGIN');
 
     const { rows } = await client.query(`
-      SELECT id, precio_final, precio_garantia, total_abonado,
+      SELECT id, numero, precio_final, precio_garantia, total_abonado,
              garantia_cobrable, estado,
              sucursal_id, usuario_id, cliente_id, cliente_nombre,
              cliente_cedula, cliente_telefono, equipo_tipo, equipo_nombre,

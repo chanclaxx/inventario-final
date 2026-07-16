@@ -34,10 +34,11 @@ function OpcionFormato({ activo, onClick, icono, titulo, descripcion, color }) {
  * @param {boolean}  props.open
  * @param {Function} props.onClose
  * @param {number}   props.ordenId         - ID de la orden de servicio
+ * @param {number}   [props.numeroOrden]   - Número por negocio (fallback: ordenId)
  * @param {string}   [props.nombreCliente] - Para el texto del share
  * @param {Function} props.onImprimirPos   - Callback para abrir ComprobanteServicio (impresión POS)
  */
-export function ModalImprimirServicio({ open, onClose, ordenId, nombreCliente, onImprimirPos }) {
+export function ModalImprimirServicio({ open, onClose, ordenId, numeroOrden, nombreCliente, onImprimirPos }) {
   const [formato, setFormato] = useState('pos');
   const [error,   setError]   = useState('');
 
@@ -56,7 +57,7 @@ export function ModalImprimirServicio({ open, onClose, ordenId, nombreCliente, o
     }
 
     try {
-      await descargarPdf(ordenId);
+      await descargarPdf(ordenId, numeroOrden ?? ordenId);
       onClose();
     } catch (err) {
       setError(err.message || 'Error al generar el PDF');
@@ -66,7 +67,7 @@ export function ModalImprimirServicio({ open, onClose, ordenId, nombreCliente, o
   const handleCompartir = async () => {
     setError('');
     try {
-      await compartirPdf(ordenId, nombreCliente);
+      await compartirPdf(ordenId, nombreCliente, numeroOrden ?? ordenId);
       onClose();
     } catch (err) {
       if (err?.name !== 'AbortError') {
@@ -75,7 +76,7 @@ export function ModalImprimirServicio({ open, onClose, ordenId, nombreCliente, o
     }
   };
 
-  const numOS = `#OS-${String(ordenId).padStart(4, '0')}`;
+  const numOS = `#OS-${String(numeroOrden ?? ordenId).padStart(4, '0')}`;
 
   return (
     <Modal open={open} onClose={onClose} title="Imprimir comprobante" size="sm">

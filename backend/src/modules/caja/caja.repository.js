@@ -341,7 +341,8 @@ const getResumenDia = async (cajaId, sucursalId, negocioId) => {
   const [pf, ac, ap, cp, aa, mn, dv, rt, ad, sv, fd] = await Promise.all([
 
     pool.query(`
-      SELECT pf.id, pf.metodo, pf.valor, f.nombre_cliente, f.id AS factura_id, f.fecha,
+      SELECT pf.id, pf.metodo, pf.valor, f.nombre_cliente, f.id AS factura_id,
+             f.numero AS factura_numero, f.fecha,
              (SELECT STRING_AGG(lf.nombre_producto, ', ')
               FROM lineas_factura lf WHERE lf.factura_id = f.id) AS productos
       FROM pagos_factura pf
@@ -365,6 +366,7 @@ const getResumenDia = async (cajaId, sucursalId, negocioId) => {
     pool.query(`
       SELECT ac.id, ac.valor, ac.metodo, ac.fecha,
              f.nombre_cliente, c.id AS credito_id, f.id AS factura_id,
+             f.numero AS factura_numero,
              (SELECT STRING_AGG(lf.nombre_producto, ', ')
               FROM lineas_factura lf WHERE lf.factura_id = f.id) AS productos
       FROM abonos_credito ac
@@ -376,7 +378,8 @@ const getResumenDia = async (cajaId, sucursalId, negocioId) => {
     `, [sucursalId, inicio, fin]),
 
     pool.query(`
-      SELECT ab.id, ab.valor, ab.metodo, ab.fecha, p.prestatario, p.id AS prestamo_id
+      SELECT ab.id, ab.valor, ab.metodo, ab.fecha, p.prestatario, p.id AS prestamo_id,
+             p.numero AS prestamo_numero
       FROM abonos_prestamo ab
       JOIN prestamos p ON p.id = ab.prestamo_id
       WHERE p.sucursal_id = $1 AND ab.fecha BETWEEN $2 AND $3
@@ -385,7 +388,8 @@ const getResumenDia = async (cajaId, sucursalId, negocioId) => {
       UNION ALL
       SELECT at.id, at.valor_total AS valor, at.metodo, at.fecha,
              COALESCE(pr.nombre, cl.nombre) AS prestatario,
-             NULL AS prestamo_id
+             NULL AS prestamo_id,
+             NULL::integer AS prestamo_numero
       FROM abonos_totales at
       JOIN sucursales su ON su.id = at.sucursal_id
       LEFT JOIN prestatarios pr ON pr.id = at.persona_id AND at.tipo_persona = 'prestatario'
@@ -451,7 +455,7 @@ const getResumenDia = async (cajaId, sucursalId, negocioId) => {
     pool.query(`
       SELECT r.id, r.valor_retoma AS valor, r.descripcion,
              r.imei, r.nombre_producto, r.ingreso_inventario,
-             f.nombre_cliente, f.id AS factura_id, f.fecha
+             f.nombre_cliente, f.id AS factura_id, f.numero AS factura_numero, f.fecha
       FROM retomas r
       JOIN facturas f ON f.id = r.factura_id
       WHERE f.sucursal_id = $1
@@ -470,7 +474,7 @@ const getResumenDia = async (cajaId, sucursalId, negocioId) => {
 
     pool.query(`
       SELECT ab.id, ab.valor, ab.metodo, ab.fecha,
-             os.id AS orden_id, os.cliente_nombre,
+             os.id AS orden_id, os.numero AS orden_numero, os.cliente_nombre,
              os.equipo_nombre, os.equipo_tipo,
              u.nombre AS usuario_nombre
       FROM abonos_servicio ab
@@ -483,7 +487,7 @@ const getResumenDia = async (cajaId, sucursalId, negocioId) => {
     // Informativo: pedidos a domicilio pendientes de rendir en esta sucursal
     // (dinero aún en poder del domiciliario). No suma a caja.
     pool.query(`
-      SELECT e.id, e.factura_id, f.nombre_cliente,
+      SELECT e.id, e.factura_id, f.numero AS factura_numero, f.nombre_cliente,
              (e.valor_total - e.total_abonado) AS valor,
              e.fecha_asignacion AS fecha, d.nombre AS domiciliario_nombre
       FROM entregas_domicilio e
@@ -518,7 +522,8 @@ const getResumenGlobal = async (negocioId) => {
 
     pool.query(`
       SELECT pf.id, pf.metodo, pf.valor, f.nombre_cliente,
-             f.id AS factura_id, f.fecha, su.nombre AS sucursal_nombre,
+             f.id AS factura_id, f.numero AS factura_numero, f.fecha,
+             su.nombre AS sucursal_nombre,
              (SELECT STRING_AGG(lf.nombre_producto, ', ')
               FROM lineas_factura lf WHERE lf.factura_id = f.id) AS productos
       FROM pagos_factura pf
@@ -543,6 +548,7 @@ const getResumenGlobal = async (negocioId) => {
     pool.query(`
       SELECT ac.id, ac.valor, ac.metodo, ac.fecha,
              f.nombre_cliente, c.id AS credito_id, f.id AS factura_id,
+             f.numero AS factura_numero,
              su.nombre AS sucursal_nombre,
              (SELECT STRING_AGG(lf.nombre_producto, ', ')
               FROM lineas_factura lf WHERE lf.factura_id = f.id) AS productos
@@ -557,6 +563,7 @@ const getResumenGlobal = async (negocioId) => {
 
     pool.query(`
       SELECT ab.id, ab.valor, ab.metodo, ab.fecha, p.prestatario, p.id AS prestamo_id,
+             p.numero AS prestamo_numero,
              su.nombre AS sucursal_nombre
       FROM abonos_prestamo ab
       JOIN prestamos  p  ON p.id  = ab.prestamo_id
@@ -568,6 +575,7 @@ const getResumenGlobal = async (negocioId) => {
       SELECT at.id, at.valor_total AS valor, at.metodo, at.fecha,
              COALESCE(pr.nombre, cl.nombre) AS prestatario,
              NULL AS prestamo_id,
+             NULL::integer AS prestamo_numero,
              su.nombre AS sucursal_nombre
       FROM abonos_totales at
       JOIN sucursales su ON su.id = at.sucursal_id
@@ -645,7 +653,7 @@ const getResumenGlobal = async (negocioId) => {
     pool.query(`
       SELECT r.id, r.valor_retoma AS valor, r.descripcion,
              r.imei, r.nombre_producto, r.ingreso_inventario,
-             f.nombre_cliente, f.id AS factura_id, f.fecha,
+             f.nombre_cliente, f.id AS factura_id, f.numero AS factura_numero, f.fecha,
              su.nombre AS sucursal_nombre
       FROM retomas r
       JOIN facturas   f  ON f.id  = r.factura_id
@@ -670,7 +678,7 @@ const getResumenGlobal = async (negocioId) => {
 
     pool.query(`
       SELECT ab.id, ab.valor, ab.metodo, ab.fecha,
-             os.id AS orden_id, os.cliente_nombre,
+             os.id AS orden_id, os.numero AS orden_numero, os.cliente_nombre,
              os.equipo_nombre, os.equipo_tipo,
              u.nombre AS usuario_nombre, su.nombre AS sucursal_nombre
       FROM abonos_servicio ab
@@ -684,7 +692,7 @@ const getResumenGlobal = async (negocioId) => {
     // Informativo: pedidos a domicilio pendientes de rendir en el negocio
     // (dinero aún en poder del domiciliario). No suma a caja.
     pool.query(`
-      SELECT e.id, e.factura_id, f.nombre_cliente,
+      SELECT e.id, e.factura_id, f.numero AS factura_numero, f.nombre_cliente,
              (e.valor_total - e.total_abonado) AS valor,
              e.fecha_asignacion AS fecha,
              d.nombre AS domiciliario_nombre, su.nombre AS sucursal_nombre

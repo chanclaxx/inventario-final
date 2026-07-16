@@ -205,7 +205,7 @@ function seccionEncabezado(doc, config, factura) {
   }
 
   // ── Lado derecho: número y datos de factura ───────────────────────────────
-  const numFactura = `#${String(factura.id).padStart(6, '0')}`;
+  const numFactura = `#${String(factura.numero ?? factura.id).padStart(6, '0')}`;
 
   doc.font(FONT.bold).fontSize(26).fillColor(C.headerText)
     .text(numFactura, MARGIN, 22, { width: CONTENT_W, align: 'right' });
@@ -642,7 +642,7 @@ function seccionPie(doc, y) {
  * @param {{ factura: object, config: object, garantias: Array, res: object }} params
  */
 function generarPdfFactura({ factura, config, garantias = [], res }) {
-  const numFactura = String(factura.id).padStart(6, '0');
+  const numFactura = String(factura.numero ?? factura.id).padStart(6, '0');
 
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader(

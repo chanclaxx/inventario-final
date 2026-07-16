@@ -64,7 +64,7 @@ export function ModalImprimirFactura({ open, onClose, factura, garantias, onImpr
 
     // Formato PDF
     try {
-      await descargarPdf(factura.id);
+      await descargarPdf(factura.id, factura.numero ?? factura.id);
       onClose();
     } catch (err) {
       setError(err.message || 'Error al generar el PDF');
@@ -74,7 +74,7 @@ export function ModalImprimirFactura({ open, onClose, factura, garantias, onImpr
   const handleCompartir = async () => {
     setError('');
     try {
-      await compartirPdf(factura.id, factura.nombre_cliente);
+      await compartirPdf(factura.id, factura.nombre_cliente, factura.numero ?? factura.id);
       onClose();
     } catch (err) {
       // Si el usuario canceló el share nativo, no mostrar error
@@ -84,7 +84,7 @@ export function ModalImprimirFactura({ open, onClose, factura, garantias, onImpr
     }
   };
 
-  const numFactura = `#${String(factura.id).padStart(6, '0')}`;
+  const numFactura = `#${String(factura.numero ?? factura.id).padStart(6, '0')}`;
 
   return (
     <Modal open={open} onClose={onClose} title="Imprimir factura" size="sm">

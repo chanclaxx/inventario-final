@@ -497,7 +497,7 @@ export function ModalEditarFactura({ facturaId, onClose, onGuardado }) {
 
   return (
     <>
-      <Modal open onClose={onClose} title={`Editar Factura #${String(facturaId).padStart(6, '0')}`} size="lg">
+      <Modal open onClose={onClose} title={`Editar Factura #${String(data?.numero ?? facturaId).padStart(6, '0')}`} size="lg">
         <div className="flex flex-col gap-5">
 
           {/* Tipo de cliente */}

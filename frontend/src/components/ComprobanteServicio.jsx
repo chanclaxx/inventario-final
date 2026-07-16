@@ -26,7 +26,7 @@ function ContenidoComprobante({ orden, config, garantias }) {
       <div className="cs-centrado negrita">COMPROBANTE DE SERVICIO</div>
       <div className="cs-fila">
         <span>Orden:</span>
-        <span>#OS-{String(orden.id).padStart(4, '0')}</span>
+        <span>#OS-{String(orden.numero ?? orden.id).padStart(4, '0')}</span>
       </div>
       <div className="cs-fila">
         <span>Fecha entrega:</span>

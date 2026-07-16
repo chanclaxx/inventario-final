@@ -113,10 +113,11 @@ const registrarAbono = async (negocioId, entregaId, { usuarioId, valor, notas })
 
   // Necesitamos la sucursal de la factura para buscar la caja abierta.
   const { rows: facturaRows } = await pool.query(
-    'SELECT sucursal_id FROM facturas WHERE id = $1',
+    'SELECT sucursal_id, numero FROM facturas WHERE id = $1',
     [entrega.factura_id]
   );
-  const sucursalId = facturaRows[0]?.sucursal_id || null;
+  const sucursalId    = facturaRows[0]?.sucursal_id || null;
+  const facturaNumero = facturaRows[0]?.numero ?? entrega.factura_id;
 
   const client = await pool.connect();
   try {
@@ -134,7 +135,7 @@ const registrarAbono = async (negocioId, entregaId, { usuarioId, valor, notas })
       const cajaRepo = require('../caja/caja.repository');
       const caja = await cajaRepo.findCajaAbierta(sucursalId);
       if (caja) {
-        const facturaRef = String(entrega.factura_id).padStart(6, '0');
+        const facturaRef = String(facturaNumero).padStart(6, '0');
         await cajaRepo.insertarMovimiento({
           caja_id:        caja.id,
           usuario_id:     usuarioId || null,

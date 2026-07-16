@@ -62,6 +62,7 @@ const findEntregaById = async (id, negocioId) => {
     `SELECT e.*,
             d.nombre  AS domiciliario_nombre,
             d.telefono AS domiciliario_telefono,
+            f.numero  AS factura_numero,
             f.nombre_cliente,
             f.celular AS cliente_celular,
             f.cedula  AS cliente_cedula,
@@ -115,6 +116,7 @@ const findAllEntregas = async (negocioId, { domiciliarioId, estado, facturaId } 
     `SELECT e.*,
             d.nombre  AS domiciliario_nombre,
             d.telefono AS domiciliario_telefono,
+            f.numero  AS factura_numero,
             f.nombre_cliente,
             f.celular AS cliente_celular,
             f.cedula  AS cliente_cedula,
@@ -124,7 +126,7 @@ const findAllEntregas = async (negocioId, { domiciliarioId, estado, facturaId } 
      JOIN facturas         f  ON f.id = e.factura_id
      LEFT JOIN lineas_factura lf ON lf.factura_id = f.id
      WHERE ${condiciones.join(' AND ')}
-     GROUP BY e.id, d.nombre, d.telefono, f.nombre_cliente, f.celular, f.cedula
+     GROUP BY e.id, d.nombre, d.telefono, f.numero, f.nombre_cliente, f.celular, f.cedula
      ORDER BY e.fecha_asignacion DESC`,
     params
   );

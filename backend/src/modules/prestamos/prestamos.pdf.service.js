@@ -335,7 +335,7 @@ const _encabezadoIndividual = (doc, { negocioNombre, prestamo, fechaGeneracion, 
     .text('Comprobante de Préstamo', textX, 40, { width: textW });
 
   // Número de préstamo (derecha)
-  const numPrestamo = `#${String(prestamo.id).padStart(6, '0')}`;
+  const numPrestamo = `#${String(prestamo.numero ?? prestamo.id).padStart(6, '0')}`;
   doc.font(FONT.bold).fontSize(22).fillColor(C.headerText)
     .text(numPrestamo, MARGIN, 14, { width: COL_WIDTH, align: 'right' });
   doc.font(FONT.normal).fontSize(8).fillColor(C.headerSub)

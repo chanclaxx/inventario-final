@@ -4,8 +4,8 @@
 import { useState, useCallback } from 'react';
 import api from '../api/axios.config';
 
-async function fetchPdfBlob(ordenId) {
-  const numFormateado = String(ordenId).padStart(4, '0');
+async function fetchPdfBlob(ordenId, numeroMostrar) {
+  const numFormateado = String(numeroMostrar ?? ordenId).padStart(4, '0');
 
   const response = await api.get(`/servicios/${ordenId}/pdf-recepcion`, {
     responseType: 'blob',
@@ -34,10 +34,10 @@ const useExportarPdfRecepcion = () => {
     && typeof navigator.share === 'function'
     && typeof navigator.canShare === 'function';
 
-  const descargarPdf = useCallback(async (ordenId) => {
+  const descargarPdf = useCallback(async (ordenId, numeroMostrar) => {
     setExportando(true);
     try {
-      const { blob, nombreArchivo } = await fetchPdfBlob(ordenId);
+      const { blob, nombreArchivo } = await fetchPdfBlob(ordenId, numeroMostrar);
       const url  = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href     = url;
@@ -51,14 +51,14 @@ const useExportarPdfRecepcion = () => {
     }
   }, []);
 
-  const compartirPdf = useCallback(async (ordenId, nombreCliente = '') => {
+  const compartirPdf = useCallback(async (ordenId, nombreCliente = '', numeroMostrar) => {
     setExportando(true);
     try {
-      const { blob, nombreArchivo } = await fetchPdfBlob(ordenId);
+      const { blob, nombreArchivo } = await fetchPdfBlob(ordenId, numeroMostrar);
       const archivo = new File([blob], nombreArchivo, { type: 'application/pdf' });
 
       const shareData = {
-        title: `Recibo de recepción #OS-${String(ordenId).padStart(4, '0')}`,
+        title: `Recibo de recepción #OS-${String(numeroMostrar ?? ordenId).padStart(4, '0')}`,
         text:  nombreCliente
           ? `Recibo de recepción de ${nombreCliente}`
           : 'Adjunto tu recibo de recepción',

@@ -1,4 +1,5 @@
 const { pool } = require('../../config/db');
+const { asignarNumeroDocumento } = require('../../utils/numeracion.util');
 
 const findAll = async (sucursalId, negocioId) => {
   const filtro = sucursalId ? 'p.sucursal_id = $1' : 'su.negocio_id = $1';
@@ -6,7 +7,7 @@ const findAll = async (sucursalId, negocioId) => {
 
   const { rows } = await pool.query(`
     SELECT
-      p.id, p.fecha, p.prestatario, p.cedula, p.telefono,
+      p.id, p.numero, p.fecha, p.prestatario, p.cedula, p.telefono,
       p.nombre_producto, p.imei, p.cantidad_prestada,
       p.valor_prestamo, p.total_abonado, p.estado,
       p.prestatario_id, p.empleado_id, p.cliente_id, p.sucursal_id,
@@ -130,6 +131,9 @@ const create = async (client, {
     atributo_id   || null, variante_id  || null,
     atributo_label || null, variante_label || null,
   ]);
+  rows[0].numero = await asignarNumeroDocumento(client, {
+    tipo: 'prestamo', docId: rows[0].id, sucursalId: sucursal_id,
+  });
   return rows[0];
 };
 
@@ -188,6 +192,9 @@ const crearAjusteDeuda = async ({ tipo, persona_id, valor, descripcion, sucursal
       VALUES (NOW(), $1, 'AJUSTE', $2, $3, NULL, 1, $4, 0, 'Activo', $5, $6, $7)
       RETURNING *
     `, [nombre, tel, nombreProducto, valor, persona_id, sucursal_id, usuario_id]);
+    rows[0].numero = await asignarNumeroDocumento(pool, {
+      tipo: 'prestamo', docId: rows[0].id, negocioId: negocio_id,
+    });
     return rows[0];
   } else {
     const { rows } = await pool.query(`
@@ -196,6 +203,9 @@ const crearAjusteDeuda = async ({ tipo, persona_id, valor, descripcion, sucursal
       VALUES (NOW(), $1, 'AJUSTE', $2, $3, NULL, 1, $4, 0, 'Activo', $5, $6, $7)
       RETURNING *
     `, [nombre, tel, nombreProducto, valor, persona_id, sucursal_id, usuario_id]);
+    rows[0].numero = await asignarNumeroDocumento(pool, {
+      tipo: 'prestamo', docId: rows[0].id, negocioId: negocio_id,
+    });
     return rows[0];
   }
 };
