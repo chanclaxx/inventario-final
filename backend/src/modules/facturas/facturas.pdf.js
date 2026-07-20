@@ -173,42 +173,44 @@ function dibujarLogoHeader(doc, config, headerH) {
 // ─── SECCIÓN: Encabezado ──────────────────────────────────────────────────────
 
 function seccionEncabezado(doc, config, factura) {
-  let HEADER_H = 110;
-
-  // ── Logo (opcional) ───────────────────────────────────────────────────────
-  const logoOffset = dibujarLogoHeader(doc, config, HEADER_H);
-  const leftX      = MARGIN + logoOffset;
-  const leftW      = CONTENT_W * 0.48 - logoOffset;
-
-  // Área derecha: empieza donde termina la izquierda
-  const rightX     = leftX + leftW + 20;
-  const rightW     = PAGE_W - rightX - MARGIN;
-
-  // ── Lado izquierdo: nombre del negocio ───────────────────────────────────
   const nombreNegocio = config?.nombre_negocio || 'MI TIENDA';
 
-  // Reducir tamaño de fuente si el nombre es muy largo para evitar superposiciones
-  let fontSizeNombre = 22;
-  let altNombre = doc.heightOfString(nombreNegocio, { width: leftW, fontSize: fontSizeNombre });
+  // Determinar si el nombre es muy largo
+  const testWidth = CONTENT_W * 0.45;
+  const altNombreTest = doc.heightOfString(nombreNegocio, { width: testWidth, fontSize: 22 });
+  const nombreMuyLargo = altNombreTest > 32; // Si ocupa más de ~2 líneas
 
-  if (altNombre > 25) {
-    fontSizeNombre = 18;
-    altNombre = doc.heightOfString(nombreNegocio, { width: leftW, fontSize: fontSizeNombre });
+  let HEADER_H = 110;
+  let leftX, leftW, rightX, rightW;
+
+  if (nombreMuyLargo) {
+    // LAYOUT ALTERNATIVO: Nombre y datos del negocio ocupan toda la izquierda (60%)
+    leftX = MARGIN;
+    leftW = CONTENT_W * 0.60;
+    rightX = leftX + leftW + 12;
+    rightW = PAGE_W - rightX - MARGIN;
+
+    // Calcular altura real del nombre
+    const altNombre = doc.heightOfString(nombreNegocio, { width: leftW, fontSize: 20 });
+    HEADER_H = Math.max(110, altNombre + 55);
+  } else {
+    // LAYOUT NORMAL: Distribución equilibrada
+    leftX = MARGIN;
+    leftW = CONTENT_W * 0.48;
+    rightX = leftX + leftW + 12;
+    rightW = PAGE_W - rightX - MARGIN;
   }
-  if (altNombre > 30) {
-    fontSizeNombre = 14;
-    altNombre = doc.heightOfString(nombreNegocio, { width: leftW, fontSize: fontSizeNombre });
-  }
 
-  HEADER_H = Math.max(110, altNombre + 50);
-
-  // Fondo oscuro del encabezado (ajustado a altura dinámica)
+  // Fondo oscuro del encabezado
   rectFill(doc, 0, 0, PAGE_W, HEADER_H, C.headerBg, 0);
 
-  // Línea de acento inferior (delgada, verde)
+  // Línea de acento inferior (verde)
   doc.rect(0, HEADER_H - 3, PAGE_W, 3).fill(C.verde);
 
-  // Dibujar nombre con tamaño dinámico
+  // ── Lado izquierdo: nombre y datos del negocio ───────────────────────────
+  const fontSizeNombre = nombreMuyLargo ? 20 : 22;
+  const altNombre = doc.heightOfString(nombreNegocio, { width: leftW, fontSize: fontSizeNombre });
+
   doc.font(FONT.bold).fontSize(fontSizeNombre).fillColor(C.headerText)
     .text(nombreNegocio, leftX, 28, { width: leftW, lineBreak: true });
 
@@ -225,7 +227,7 @@ function seccionEncabezado(doc, config, factura) {
     yInfoNegocio += 12;
   }
 
-  // ── Lado derecho: número y datos de factura (EN SU PROPIO ESPACIO) ───────
+  // ── Lado derecho: número y datos de factura ────────────────────────────
   const numFactura = `#${String(factura.numero ?? factura.id).padStart(6, '0')}`;
 
   doc.font(FONT.bold).fontSize(26).fillColor(C.headerText)
@@ -251,7 +253,7 @@ function seccionEncabezado(doc, config, factura) {
   doc.font(FONT.bold).fontSize(7.5).fillColor(C.blanco)
     .text(est.texto, badgeX, 84, { width: badgeW, align: 'center', characterSpacing: 0.8 });
 
-  return HEADER_H + 28; // y de inicio del contenido
+  return HEADER_H + 28;
 }
 
 // ─── SECCIÓN: Cliente ─────────────────────────────────────────────────────────

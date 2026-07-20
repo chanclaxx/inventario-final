@@ -116,34 +116,38 @@ const dibujarLogo = (doc, logo, headerH) => {
 };
 
 const drawHeader = (doc, { negocio, sucursalNombre, desde, hasta, fechaGeneracion, logo, titulo = 'REPORTE DE GESTIÓN', periodoLabel }) => {
-  let H = 116;
-
-  const logoOffset = dibujarLogo(doc, logo, H);
-  const leftX = MARGIN + logoOffset;
-  const leftW = CONTENT_W * 0.48 - logoOffset;
-
-  // Área derecha: empieza donde termina la izquierda
-  const rightX = leftX + leftW + 20;
-  const rightW = PAGE_W - rightX - MARGIN;
-
-  // Calcular altura y reducir tamaño de fuente si es necesario
   const nombreNegocio = negocio?.nombre || 'Mi Negocio';
-  let fontSizeNombre = 20;
-  let altNombre = doc.heightOfString(nombreNegocio, { width: leftW, fontSize: fontSizeNombre });
 
-  if (altNombre > 25) {
-    fontSizeNombre = 16;
-    altNombre = doc.heightOfString(nombreNegocio, { width: leftW, fontSize: fontSizeNombre });
-  }
-  if (altNombre > 30) {
-    fontSizeNombre = 13;
-    altNombre = doc.heightOfString(nombreNegocio, { width: leftW, fontSize: fontSizeNombre });
-  }
+  // Determinar si el nombre es muy largo
+  const testWidth = CONTENT_W * 0.45;
+  const altNombreTest = doc.heightOfString(nombreNegocio, { width: testWidth, fontSize: 20 });
+  const nombreMuyLargo = altNombreTest > 32; // Si ocupa más de ~2 líneas
 
-  H = Math.max(116, altNombre + 54);
+  let H = 116;
+  let leftX, leftW, rightX, rightW;
+
+  if (nombreMuyLargo) {
+    // LAYOUT ALTERNATIVO: Nombre y datos ocupan 60% izquierda
+    leftX = MARGIN;
+    leftW = CONTENT_W * 0.60;
+    rightX = leftX + leftW + 12;
+    rightW = PAGE_W - rightX - MARGIN;
+
+    const altNombre = doc.heightOfString(nombreNegocio, { width: leftW, fontSize: 18 });
+    H = Math.max(116, altNombre + 50);
+  } else {
+    // LAYOUT NORMAL: Distribución equilibrada
+    leftX = MARGIN;
+    leftW = CONTENT_W * 0.48;
+    rightX = leftX + leftW + 12;
+    rightW = PAGE_W - rightX - MARGIN;
+  }
 
   rectFill(doc, 0, 0, PAGE_W, H, C.headerBg, 0);
   doc.rect(0, H - 3, PAGE_W, 3).fill(C.verde);
+
+  const fontSizeNombre = nombreMuyLargo ? 18 : 20;
+  const altNombre = doc.heightOfString(nombreNegocio, { width: leftW, fontSize: fontSizeNombre });
 
   doc.font(FONT.bold).fontSize(fontSizeNombre).fillColor(C.headerText)
     .text(nombreNegocio, leftX, 26, { width: leftW, lineBreak: true });
@@ -158,7 +162,7 @@ const drawHeader = (doc, { negocio, sucursalNombre, desde, hasta, fechaGeneracio
     yi += 12;
   });
 
-  // Lado derecho - EN SU PROPIO ESPACIO
+  // Lado derecho
   doc.font(FONT.bold).fontSize(15).fillColor(C.headerText)
     .text(titulo, rightX, 26, { width: rightW, align: 'right' });
   doc.font(FONT.normal).fontSize(8).fillColor(C.headerSub)

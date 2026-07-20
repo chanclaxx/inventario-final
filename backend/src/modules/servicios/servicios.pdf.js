@@ -123,35 +123,38 @@ const ESTADO_BADGE = {
 // ─── SECCIÓN: Encabezado ──────────────────────────────────────────────────────
 
 function seccionEncabezado(doc, config, orden) {
-  let HEADER_H = 110;
-
-  const logoOffset = dibujarLogoHeader(doc, config, HEADER_H);
-  const leftX      = MARGIN + logoOffset;
-  const leftW      = CONTENT_W * 0.48 - logoOffset;
-
-  // Área derecha: empieza donde termina la izquierda
-  const rightX     = leftX + leftW + 20;
-  const rightW     = PAGE_W - rightX - MARGIN;
-
   const nombreNegocio = config?.nombre_negocio || 'MI TIENDA';
 
-  // Reducir tamaño de fuente si el nombre es muy largo
-  let fontSizeNombre = 22;
-  let altNombre = doc.heightOfString(nombreNegocio, { width: leftW, fontSize: fontSizeNombre });
+  // Determinar si el nombre es muy largo
+  const testWidth = CONTENT_W * 0.45;
+  const altNombreTest = doc.heightOfString(nombreNegocio, { width: testWidth, fontSize: 22 });
+  const nombreMuyLargo = altNombreTest > 32;
 
-  if (altNombre > 25) {
-    fontSizeNombre = 18;
-    altNombre = doc.heightOfString(nombreNegocio, { width: leftW, fontSize: fontSizeNombre });
-  }
-  if (altNombre > 30) {
-    fontSizeNombre = 14;
-    altNombre = doc.heightOfString(nombreNegocio, { width: leftW, fontSize: fontSizeNombre });
-  }
+  let HEADER_H = 110;
+  let logoOffset, leftX, leftW, rightX, rightW;
 
-  HEADER_H = Math.max(110, altNombre + 50);
+  if (nombreMuyLargo) {
+    logoOffset = 0; // Sin logo offset en layout alternativo
+    leftX = MARGIN;
+    leftW = CONTENT_W * 0.60;
+    rightX = leftX + leftW + 12;
+    rightW = PAGE_W - rightX - MARGIN;
+
+    const altNombre = doc.heightOfString(nombreNegocio, { width: leftW, fontSize: 20 });
+    HEADER_H = Math.max(110, altNombre + 55);
+  } else {
+    logoOffset = dibujarLogoHeader(doc, config, HEADER_H);
+    leftX = MARGIN + logoOffset;
+    leftW = CONTENT_W * 0.48 - logoOffset;
+    rightX = leftX + leftW + 12;
+    rightW = PAGE_W - rightX - MARGIN;
+  }
 
   rectFill(doc, 0, 0, PAGE_W, HEADER_H, C.headerBg, 0);
   doc.rect(0, HEADER_H - 3, PAGE_W, 3).fill(C.azul);
+
+  const fontSizeNombre = nombreMuyLargo ? 20 : 22;
+  const altNombre = doc.heightOfString(nombreNegocio, { width: leftW, fontSize: fontSizeNombre });
 
   doc.font(FONT.bold).fontSize(fontSizeNombre).fillColor(C.headerText)
     .text(nombreNegocio, leftX, 28, { width: leftW, lineBreak: true });
@@ -490,35 +493,38 @@ function generarPdfServicio({ orden, abonos = [], config = {}, garantias = [], r
 // ─── PDF: Recibo de Recepción ─────────────────────────────────────────────────
 
 function seccionEncabezadoRecepcion(doc, config, orden) {
-  let HEADER_H = 110;
-
-  const logoOffset = dibujarLogoHeader(doc, config, HEADER_H);
-  const leftX      = MARGIN + logoOffset;
-  const leftW      = CONTENT_W * 0.48 - logoOffset;
-
-  // Área derecha: empieza donde termina la izquierda
-  const rightX     = leftX + leftW + 20;
-  const rightW     = PAGE_W - rightX - MARGIN;
-
   const nombreNegocio = config?.nombre_negocio || 'MI TIENDA';
 
-  // Reducir tamaño de fuente si el nombre es muy largo
-  let fontSizeNombre = 22;
-  let altNombre = doc.heightOfString(nombreNegocio, { width: leftW, fontSize: fontSizeNombre });
+  // Determinar si el nombre es muy largo
+  const testWidth = CONTENT_W * 0.45;
+  const altNombreTest = doc.heightOfString(nombreNegocio, { width: testWidth, fontSize: 22 });
+  const nombreMuyLargo = altNombreTest > 32;
 
-  if (altNombre > 25) {
-    fontSizeNombre = 18;
-    altNombre = doc.heightOfString(nombreNegocio, { width: leftW, fontSize: fontSizeNombre });
-  }
-  if (altNombre > 30) {
-    fontSizeNombre = 14;
-    altNombre = doc.heightOfString(nombreNegocio, { width: leftW, fontSize: fontSizeNombre });
-  }
+  let HEADER_H = 110;
+  let logoOffset, leftX, leftW, rightX, rightW;
 
-  HEADER_H = Math.max(110, altNombre + 50);
+  if (nombreMuyLargo) {
+    logoOffset = 0;
+    leftX = MARGIN;
+    leftW = CONTENT_W * 0.60;
+    rightX = leftX + leftW + 12;
+    rightW = PAGE_W - rightX - MARGIN;
+
+    const altNombre = doc.heightOfString(nombreNegocio, { width: leftW, fontSize: 20 });
+    HEADER_H = Math.max(110, altNombre + 55);
+  } else {
+    logoOffset = dibujarLogoHeader(doc, config, HEADER_H);
+    leftX = MARGIN + logoOffset;
+    leftW = CONTENT_W * 0.48 - logoOffset;
+    rightX = leftX + leftW + 12;
+    rightW = PAGE_W - rightX - MARGIN;
+  }
 
   rectFill(doc, 0, 0, PAGE_W, HEADER_H, C.headerBg, 0);
   doc.rect(0, HEADER_H - 3, PAGE_W, 3).fill(C.verde);
+
+  const fontSizeNombre = nombreMuyLargo ? 20 : 22;
+  const altNombre = doc.heightOfString(nombreNegocio, { width: leftW, fontSize: fontSizeNombre });
 
   doc.font(FONT.bold).fontSize(fontSizeNombre).fillColor(C.headerText)
     .text(nombreNegocio, leftX, 28, { width: leftW, lineBreak: true });

@@ -118,31 +118,34 @@ const intentarLogoHeader = (doc, logoRaw, headerH) => {
 };
 
 const drawHeader = (doc, { negocioNombre, personaNombre, personaInfo, fechaGeneracion, logoNegocio }) => {
+  // Determinar si el nombre es muy largo
+  const testWidth = COL_WIDTH * 0.45;
+  const altNombreTest = doc.heightOfString(negocioNombre || 'Mi Negocio', { width: testWidth, fontSize: 18 });
+  const nombreMuyLargo = altNombreTest > 32;
+
   let HEADER_H = 80;
-  const logoOffset = intentarLogoHeader(doc, logoNegocio, HEADER_H);
-  const leftX = MARGIN + logoOffset;
-  const leftW = COL_WIDTH * 0.48 - logoOffset;
+  let logoOffset, leftX, leftW, rightX, rightW;
 
-  // Área derecha: empieza donde termina la izquierda
-  const rightX = leftX + leftW + 20;
-  const rightW = PAGE_WIDTH - rightX - MARGIN;
+  if (nombreMuyLargo) {
+    logoOffset = 0;
+    leftX = MARGIN;
+    leftW = COL_WIDTH * 0.60;
+    rightX = leftX + leftW + 12;
+    rightW = PAGE_WIDTH - rightX - MARGIN;
 
-  // Reducir tamaño de fuente si el nombre es muy largo
-  let fontSizeNombre = 18;
-  let altNombre = doc.heightOfString(negocioNombre || 'Mi Negocio', { width: leftW, fontSize: fontSizeNombre });
-
-  if (altNombre > 25) {
-    fontSizeNombre = 15;
-    altNombre = doc.heightOfString(negocioNombre || 'Mi Negocio', { width: leftW, fontSize: fontSizeNombre });
+    const altNombre = doc.heightOfString(negocioNombre || 'Mi Negocio', { width: leftW, fontSize: 16 });
+    HEADER_H = Math.max(80, altNombre + 45);
+  } else {
+    logoOffset = intentarLogoHeader(doc, logoNegocio, HEADER_H);
+    leftX = MARGIN + logoOffset;
+    leftW = COL_WIDTH * 0.48 - logoOffset;
+    rightX = leftX + leftW + 12;
+    rightW = PAGE_WIDTH - rightX - MARGIN;
   }
-  if (altNombre > 30) {
-    fontSizeNombre = 12;
-    altNombre = doc.heightOfString(negocioNombre || 'Mi Negocio', { width: leftW, fontSize: fontSizeNombre });
-  }
-
-  HEADER_H = Math.max(80, altNombre + 35);
 
   drawRect(doc, 0, 0, PAGE_WIDTH, HEADER_H, COLORS_ORIG.headerBg);
+
+  const fontSizeNombre = nombreMuyLargo ? 16 : 18;
   doc.font('Helvetica-Bold').fontSize(fontSizeNombre).fillColor(COLORS_ORIG.white)
     .text(negocioNombre || 'Mi Negocio', leftX, 22, { width: leftW, lineBreak: true });
   doc.font('Helvetica').fontSize(8).fillColor('#94A3B8')
