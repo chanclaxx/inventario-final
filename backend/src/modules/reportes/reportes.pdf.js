@@ -118,45 +118,35 @@ const dibujarLogo = (doc, logo, headerH) => {
 const drawHeader = (doc, { negocio, sucursalNombre, desde, hasta, fechaGeneracion, logo, titulo = 'REPORTE DE GESTIÓN', periodoLabel }) => {
   const nombreNegocio = negocio?.nombre || 'Mi Negocio';
 
-  // Determinar si el nombre es muy largo (ANTES de dibujar)
+  // Determinar si el nombre es muy largo
   const testWidth = CONTENT_W * 0.45;
   const altNombreTest = doc.heightOfString(nombreNegocio, { width: testWidth, fontSize: 20 });
   const nombreMuyLargo = altNombreTest > 32;
 
   let H = 116;
-  let logoOffset = 0;
 
-  // Calcular height primero
+  // Calcular altura si nombre es muy largo
   if (nombreMuyLargo) {
-    logoOffset = logo ? 66 : 0;
-    const altNombre = doc.heightOfString(nombreNegocio, { width: CONTENT_W * 0.60 - logoOffset, fontSize: 18 });
+    const logoOffset = logo ? 66 : 0;
+    const altNombre = doc.heightOfString(nombreNegocio, { width: CONTENT_W * 0.55 - logoOffset, fontSize: 18 });
     H = Math.max(116, altNombre + 50);
   }
 
-  // ─── DIBUJAR FONDO PRIMERO ─────────────────────────────────────────────────
+  // ─── DIBUJAR FONDO ─────────────────────────────────────────────────────────
   rectFill(doc, 0, 0, PAGE_W, H, C.headerBg, 0);
-
-  // ─── LUEGO DIBUJAR EL LOGO ENCIMA ──────────────────────────────────────────
-  logoOffset = dibujarLogo(doc, logo, H);
-
-  // Calcular posiciones considerando logo
-  let leftX, leftW, rightX, rightW;
-
-  if (nombreMuyLargo) {
-    // LAYOUT ALTERNATIVO: Nombre y datos ocupan 60% izquierda (considerando logo)
-    leftX = MARGIN + logoOffset;
-    leftW = CONTENT_W * 0.60 - logoOffset;
-    rightX = MARGIN + CONTENT_W * 0.60 + 12;
-    rightW = PAGE_W - rightX - MARGIN;
-  } else {
-    // LAYOUT NORMAL: Distribución 48-48 (considerando logo)
-    leftX = MARGIN + logoOffset;
-    leftW = CONTENT_W * 0.48 - logoOffset;
-    rightX = leftX + leftW + 12;
-    rightW = PAGE_W - rightX - MARGIN;
-  }
-
   doc.rect(0, H - 3, PAGE_W, 3).fill(C.verde);
+
+  // ─── DIBUJAR LOGO ENCIMA ───────────────────────────────────────────────────
+  const logoOffset = dibujarLogo(doc, logo, H);
+
+  // ─── LAYOUT SIMPLE: IZQUIERDA CLARA / DERECHA CLARA ───────────────────────
+  // Izquierda: nombre y datos (después del logo)
+  const leftX = MARGIN + logoOffset;
+  const leftW = nombreMuyLargo ? CONTENT_W * 0.55 - logoOffset : CONTENT_W * 0.48 - logoOffset;
+
+  // Derecha: SEPARACIÓN FIRME - título, sucursal, período, generado (a 60% del ancho)
+  const rightX = MARGIN + CONTENT_W * 0.60;
+  const rightW = PAGE_W - rightX - MARGIN;
 
   const fontSizeNombre = nombreMuyLargo ? 18 : 20;
   const altNombre = doc.heightOfString(nombreNegocio, { width: leftW, fontSize: fontSizeNombre });

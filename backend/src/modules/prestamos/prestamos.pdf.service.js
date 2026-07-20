@@ -124,37 +124,28 @@ const drawHeader = (doc, { negocioNombre, personaNombre, personaInfo, fechaGener
   const nombreMuyLargo = altNombreTest > 32;
 
   let HEADER_H = 80;
-  let logoOffset = 0;
 
-  // Calcular height primero
+  // Calcular altura si nombre es muy largo
   if (nombreMuyLargo) {
-    logoOffset = logoNegocio ? 60 : 0;
-    const altNombre = doc.heightOfString(negocioNombre || 'Mi Negocio', { width: COL_WIDTH * 0.60 - logoOffset, fontSize: 16 });
-    HEADER_H = Math.max(80, altNombre + 45);
+    const logoOffset = logoNegocio ? 60 : 0;
+    const altNombre = doc.heightOfString(negocioNombre || 'Mi Negocio', { width: COL_WIDTH * 0.55 - logoOffset, fontSize: 16 });
+    HEADER_H = Math.max(80, altNombre + 40);
   }
 
-  // ─── DIBUJAR FONDO PRIMERO ─────────────────────────────────────────────────
+  // ─── DIBUJAR FONDO ─────────────────────────────────────────────────────────
   drawRect(doc, 0, 0, PAGE_WIDTH, HEADER_H, COLORS_ORIG.headerBg);
 
-  // ─── LUEGO DIBUJAR EL LOGO ENCIMA ──────────────────────────────────────────
-  logoOffset = intentarLogoHeader(doc, logoNegocio, HEADER_H);
+  // ─── DIBUJAR LOGO ENCIMA ───────────────────────────────────────────────────
+  const logoOffset = intentarLogoHeader(doc, logoNegocio, HEADER_H);
 
-  // Calcular posiciones considerando logo
-  let leftX, leftW, rightX, rightW;
+  // ─── LAYOUT SIMPLE: IZQUIERDA CLARA / DERECHA CLARA ───────────────────────
+  // Izquierda: nombre y datos (después del logo)
+  const leftX = MARGIN + logoOffset;
+  const leftW = nombreMuyLargo ? COL_WIDTH * 0.55 - logoOffset : COL_WIDTH * 0.48 - logoOffset;
 
-  if (nombreMuyLargo) {
-    // LAYOUT ALTERNATIVO: Nombre y datos ocupan 60% izquierda (considerando logo)
-    leftX = MARGIN + logoOffset;
-    leftW = COL_WIDTH * 0.60 - logoOffset;
-    rightX = MARGIN + COL_WIDTH * 0.60 + 12;
-    rightW = PAGE_WIDTH - rightX - MARGIN;
-  } else {
-    // LAYOUT NORMAL: Distribución 48-48 (considerando logo)
-    leftX = MARGIN + logoOffset;
-    leftW = COL_WIDTH * 0.48 - logoOffset;
-    rightX = leftX + leftW + 12;
-    rightW = PAGE_WIDTH - rightX - MARGIN;
-  }
+  // Derecha: SEPARACIÓN FIRME (a 60% del ancho)
+  const rightX = MARGIN + COL_WIDTH * 0.60;
+  const rightW = PAGE_WIDTH - rightX - MARGIN;
 
   const fontSizeNombre = nombreMuyLargo ? 16 : 18;
   doc.font('Helvetica-Bold').fontSize(fontSizeNombre).fillColor(COLORS_ORIG.white)

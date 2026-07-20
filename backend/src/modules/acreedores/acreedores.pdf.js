@@ -106,37 +106,28 @@ function dibujarEncabezado(doc, config, acreedor, titulo = 'ESTADO DE CUENTA') {
   const nombreMuyLargo = altNombreTest > 32;
 
   let HEADER_H = 110;
-  let logoOffset = 0;
 
-  // Calcular height primero
+  // Calcular altura si nombre es muy largo
   if (nombreMuyLargo) {
-    logoOffset = config?.logo_negocio ? 65 : 0;
-    const altNombre = doc.heightOfString(nombreNegocio, { width: CW * 0.60 - logoOffset, fontSize: 16 });
-    HEADER_H = Math.max(110, altNombre + 50);
+    const logoOffset = config?.logo_negocio ? 65 : 0;
+    const altNombre = doc.heightOfString(nombreNegocio, { width: CW * 0.55 - logoOffset, fontSize: 16 });
+    HEADER_H = Math.max(110, altNombre + 45);
   }
 
-  // ─── DIBUJAR FONDO PRIMERO ─────────────────────────────────────────────────
+  // ─── DIBUJAR FONDO ─────────────────────────────────────────────────────────
   rectFill(doc, 0, 0, PAGE_W, HEADER_H, C.headerBg, 0);
 
-  // ─── LUEGO DIBUJAR EL LOGO ENCIMA ──────────────────────────────────────────
-  logoOffset = dibujarLogoHeader(doc, config, HEADER_H);
+  // ─── DIBUJAR LOGO ENCIMA ───────────────────────────────────────────────────
+  const logoOffset = dibujarLogoHeader(doc, config, HEADER_H);
 
-  // Calcular posiciones considerando logo
-  let leftX, leftW, rightX, rightW;
+  // ─── LAYOUT SIMPLE: IZQUIERDA CLARA / DERECHA CLARA ───────────────────────
+  // Izquierda: nombre y datos (después del logo)
+  const leftX = MARGIN + logoOffset;
+  const leftW = nombreMuyLargo ? CW * 0.55 - logoOffset : CW * 0.48 - logoOffset;
 
-  if (nombreMuyLargo) {
-    // LAYOUT ALTERNATIVO: Nombre y datos ocupan 60% izquierda (considerando logo)
-    leftX = MARGIN + logoOffset;
-    leftW = CW * 0.60 - logoOffset;
-    rightX = MARGIN + CW * 0.60 + 12;
-    rightW = PAGE_W - rightX - MARGIN;
-  } else {
-    // LAYOUT NORMAL: Distribución 48-48 (considerando logo)
-    leftX = MARGIN + logoOffset;
-    leftW = CW * 0.48 - logoOffset;
-    rightX = leftX + leftW + 12;
-    rightW = PAGE_W - rightX - MARGIN;
-  }
+  // Derecha: SEPARACIÓN FIRME (a 60% del ancho)
+  const rightX = MARGIN + CW * 0.60;
+  const rightW = PAGE_W - rightX - MARGIN;
 
   const fontSizeNombre = nombreMuyLargo ? 16 : 18;
   const altNombre = doc.heightOfString(nombreNegocio, { width: leftW, fontSize: fontSizeNombre });
