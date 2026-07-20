@@ -115,54 +115,61 @@ const dibujarLogo = (doc, logo, headerH) => {
   } catch { return 0; }
 };
 
-const drawHeader = (doc, { negocio, sucursalNombre, desde, hasta, fechaGeneracion, logo, titulo = 'REPORTE DE GESTIÓN', periodoLabel }) => {
-  const nombreNegocio = negocio?.nombre || 'Mi Negocio';
+/**
+ * Escribe un texto en UNA sola línea, reduciendo el tamaño de fuente hasta que
+ * su ancho real quepa en maxW. Si ni con el mínimo cabe, se recorta con "…".
+ */
+const textoUnaLinea = (doc, texto, x, y, maxW, {
+  max = 20, min = 10, font = FONT.bold, color = C.headerText,
+} = {}) => {
+  doc.font(font);
+  let size = max;
+  while (size > min && doc.fontSize(size).widthOfString(texto) > maxW) {
+    size -= 0.5;
+  }
+  doc.fontSize(size);
 
-  // Determinar si el nombre es muy largo
-  const testWidth = CONTENT_W * 0.45;
-  const altNombreTest = doc.heightOfString(nombreNegocio, { width: testWidth, fontSize: 20 });
-  const nombreMuyLargo = altNombreTest > 32;
-
-  let H = 116;
-
-  // Calcular altura si nombre es muy largo
-  if (nombreMuyLargo) {
-    const logoOffset = logo ? 66 : 0;
-    const altNombre = doc.heightOfString(nombreNegocio, { width: CONTENT_W * 0.55 - logoOffset, fontSize: 18 });
-    H = Math.max(116, altNombre + 50);
+  // Si ni en el tamaño mínimo cabe, recortar para no invadir la otra columna.
+  let salida = texto;
+  if (doc.widthOfString(salida) > maxW) {
+    while (salida.length > 1 && doc.widthOfString(`${salida.trimEnd()}…`) > maxW) {
+      salida = salida.slice(0, -1);
+    }
+    salida = `${salida.trimEnd()}…`;
   }
 
-  // ─── DIBUJAR FONDO ─────────────────────────────────────────────────────────
+  doc.fillColor(color).text(salida, x, y, { width: maxW, lineBreak: false });
+  return size;
+};
+
+const drawHeader = (doc, { negocio, sucursalNombre, desde, hasta, fechaGeneracion, logo, titulo = 'REPORTE DE GESTIÓN', periodoLabel }) => {
+  const H = 116;
+
+  // ── Fondo del encabezado ──────────────────────────────────────────────────
   rectFill(doc, 0, 0, PAGE_W, H, C.headerBg, 0);
   doc.rect(0, H - 3, PAGE_W, 3).fill(C.verde);
 
-  // ─── DIBUJAR LOGO ENCIMA ───────────────────────────────────────────────────
+  // ── Logo (se dibuja encima del fondo) ─────────────────────────────────────
   const logoOffset = dibujarLogo(doc, logo, H);
 
-  // ─── LAYOUT SIMPLE: IZQUIERDA CLARA / DERECHA CLARA ───────────────────────
-  // Izquierda: nombre y datos (después del logo)
-  const leftX = MARGIN + logoOffset;
-  const leftW = nombreMuyLargo ? CONTENT_W * 0.55 - logoOffset : CONTENT_W * 0.48 - logoOffset;
-
-  // Derecha: SEPARACIÓN FIRME - título, sucursal, período, generado (a 60% del ancho)
-  const rightX = MARGIN + CONTENT_W * 0.60;
+  // Columna izquierda (negocio) hasta el 60%; columna derecha (reporte) desde el 62%.
+  const leftX  = MARGIN + logoOffset;
+  const leftW  = MARGIN + CONTENT_W * 0.60 - leftX;
+  const rightX = MARGIN + CONTENT_W * 0.62;
   const rightW = PAGE_W - rightX - MARGIN;
 
-  let fontSizeNombre = 20;
-  if (nombreMuyLargo) {
-    fontSizeNombre = 15;
-  }
+  // ── Lado izquierdo: nombre del negocio en una sola línea ──────────────────
+  const nombreNegocio = negocio?.nombre || 'Mi Negocio';
+  textoUnaLinea(doc, nombreNegocio, leftX, 26, leftW);
 
-  doc.font(FONT.bold).fontSize(fontSizeNombre).fillColor(C.headerText)
-    .text(nombreNegocio, leftX, 26, { width: leftW, lineBreak: false });
-
-  let yi = 26 + 20;
+  let yi = 54;
   [
     negocio?.nit       ? `NIT: ${negocio.nit}` : null,
     negocio?.direccion || null,
     negocio?.telefono  ? `Tel: ${negocio.telefono}` : null,
   ].filter(Boolean).forEach((linea) => {
-    doc.font(FONT.normal).fontSize(8).fillColor(C.headerSub).text(linea, leftX, yi, { width: leftW });
+    doc.font(FONT.normal).fontSize(8).fillColor(C.headerSub)
+      .text(linea, leftX, yi, { width: leftW, lineBreak: false, ellipsis: true });
     yi += 12;
   });
 

@@ -117,43 +117,53 @@ const intentarLogoHeader = (doc, logoRaw, headerH) => {
   }
 };
 
-const drawHeader = (doc, { negocioNombre, personaNombre, personaInfo, fechaGeneracion, logoNegocio }) => {
-  // Determinar si el nombre es muy largo (ANTES de dibujar)
-  const testWidth = COL_WIDTH * 0.45;
-  const altNombreTest = doc.heightOfString(negocioNombre || 'Mi Negocio', { width: testWidth, fontSize: 18 });
-  const nombreMuyLargo = altNombreTest > 32;
+/**
+ * Escribe un texto en UNA sola línea, reduciendo el tamaño de fuente hasta que
+ * su ancho real quepa en maxW. Si ni con el mínimo cabe, se recorta con "…".
+ */
+const textoUnaLinea = (doc, texto, x, y, maxW, {
+  max = 18, min = 9, font = FONT.bold, color = COLORS_ORIG.white,
+} = {}) => {
+  doc.font(font);
+  let size = max;
+  while (size > min && doc.fontSize(size).widthOfString(texto) > maxW) {
+    size -= 0.5;
+  }
+  doc.fontSize(size);
 
-  let HEADER_H = 80;
-
-  // Calcular altura si nombre es muy largo
-  if (nombreMuyLargo) {
-    const logoOffset = logoNegocio ? 60 : 0;
-    const altNombre = doc.heightOfString(negocioNombre || 'Mi Negocio', { width: COL_WIDTH * 0.55 - logoOffset, fontSize: 16 });
-    HEADER_H = Math.max(80, altNombre + 40);
+  // Si ni en el tamaño mínimo cabe, recortar para no invadir la otra columna.
+  let salida = texto;
+  if (doc.widthOfString(salida) > maxW) {
+    while (salida.length > 1 && doc.widthOfString(`${salida.trimEnd()}…`) > maxW) {
+      salida = salida.slice(0, -1);
+    }
+    salida = `${salida.trimEnd()}…`;
   }
 
-  // ─── DIBUJAR FONDO ─────────────────────────────────────────────────────────
+  doc.fillColor(color).text(salida, x, y, { width: maxW, lineBreak: false });
+  return size;
+};
+
+const drawHeader = (doc, { negocioNombre, personaNombre, personaInfo, fechaGeneracion, logoNegocio }) => {
+  const HEADER_H = 80;
+
+  // ── Fondo del encabezado ──────────────────────────────────────────────────
   drawRect(doc, 0, 0, PAGE_WIDTH, HEADER_H, COLORS_ORIG.headerBg);
 
-  // ─── DIBUJAR LOGO ENCIMA ───────────────────────────────────────────────────
+  // ── Logo (se dibuja encima del fondo) ─────────────────────────────────────
   const logoOffset = intentarLogoHeader(doc, logoNegocio, HEADER_H);
 
-  // ─── LAYOUT SIMPLE: IZQUIERDA CLARA / DERECHA CLARA ───────────────────────
-  // Izquierda: nombre y datos (después del logo)
-  const leftX = MARGIN + logoOffset;
-  const leftW = nombreMuyLargo ? COL_WIDTH * 0.55 - logoOffset : COL_WIDTH * 0.48 - logoOffset;
-
-  // Derecha: SEPARACIÓN FIRME (a 60% del ancho)
-  const rightX = MARGIN + COL_WIDTH * 0.60;
+  // Columna izquierda (negocio) hasta el 60%; columna derecha (fecha) desde el 62%.
+  const leftX  = MARGIN + logoOffset;
+  const leftW  = MARGIN + COL_WIDTH * 0.60 - leftX;
+  const rightX = MARGIN + COL_WIDTH * 0.62;
   const rightW = PAGE_WIDTH - rightX - MARGIN;
 
-  const fontSizeNombre = nombreMuyLargo ? 16 : 18;
-  doc.font('Helvetica-Bold').fontSize(fontSizeNombre).fillColor(COLORS_ORIG.white)
-    .text(negocioNombre || 'Mi Negocio', leftX, 22, { width: leftW, lineBreak: false });
+  textoUnaLinea(doc, negocioNombre || 'Mi Negocio', leftX, 22, leftW);
   doc.font('Helvetica').fontSize(8).fillColor('#94A3B8')
     .text(`Generado: ${fechaGeneracion}`, rightX, 55, { width: rightW, align: 'right' });
   doc.font('Helvetica').fontSize(9).fillColor('#93C5FD')
-    .text('Estado de cuenta — Préstamos activos', leftX, 45, { width: leftW });
+    .text('Estado de cuenta — Préstamos activos', leftX, 45, { width: leftW, lineBreak: false, ellipsis: true });
   const cardY = HEADER_H + 12;
   drawRect(doc, MARGIN, cardY, COL_WIDTH, 52, COLORS_ORIG.rowAlt);
   doc.save().rect(MARGIN, cardY, 4, 52).fill(COLORS_ORIG.accent).restore();
