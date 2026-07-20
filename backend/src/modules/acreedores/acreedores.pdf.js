@@ -98,20 +98,27 @@ function dibujarLogoHeader(doc, config, headerH) {
 // ─── Secciones ───────────────────────────────────────────────────────────────
 
 function dibujarEncabezado(doc, config, acreedor, titulo = 'ESTADO DE CUENTA') {
-  const HEADER_H = 110;
-  rectFill(doc, 0, 0, PAGE_W, HEADER_H, C.headerBg, 0);
+  let HEADER_H = 110;
 
   const logoOffset = dibujarLogoHeader(doc, config, HEADER_H);
   const textX = MARGIN + logoOffset;
   const textW = CW - logoOffset;
 
+  const nombreNegocio = config.nombre_negocio || 'Mi Negocio';
+
+  // Calcular altura del nombre para nombres largos
+  const altNombre = doc.heightOfString(nombreNegocio, { width: textW });
+  HEADER_H = Math.max(110, altNombre + 50);
+
+  rectFill(doc, 0, 0, PAGE_W, HEADER_H, C.headerBg, 0);
+
   doc.font(FONT.bold).fontSize(18).fillColor(C.headerText)
-    .text(config.nombre_negocio || 'Mi Negocio', textX, 22, { width: textW });
+    .text(nombreNegocio, textX, 22, { width: textW, lineBreak: true });
 
   const sub = [config.direccion, config.telefono_negocio].filter(Boolean).join('  ·  ');
   if (sub) {
     doc.font(FONT.normal).fontSize(8).fillColor(C.headerSub)
-      .text(sub, textX, 44, { width: textW });
+      .text(sub, textX, 22 + altNombre + 4, { width: textW });
   }
 
   doc.font(FONT.bold).fontSize(11).fillColor(C.headerText)

@@ -123,20 +123,25 @@ const ESTADO_BADGE = {
 // ─── SECCIÓN: Encabezado ──────────────────────────────────────────────────────
 
 function seccionEncabezado(doc, config, orden) {
-  const HEADER_H = 110;
-
-  rectFill(doc, 0, 0, PAGE_W, HEADER_H, C.headerBg, 0);
-  doc.rect(0, HEADER_H - 3, PAGE_W, 3).fill(C.azul);
+  let HEADER_H = 110;
 
   const logoOffset = dibujarLogoHeader(doc, config, HEADER_H);
   const textX      = MARGIN + logoOffset;
   const textW      = CONTENT_W * 0.55 - logoOffset;
 
   const nombreNegocio = config?.nombre_negocio || 'MI TIENDA';
-  doc.font(FONT.bold).fontSize(22).fillColor(C.headerText)
-    .text(nombreNegocio, textX, 28, { width: textW });
 
-  let yInfo = 56;
+  // Calcular altura del nombre para nombres largos
+  const altNombre = doc.heightOfString(nombreNegocio, { width: textW });
+  HEADER_H = Math.max(110, altNombre + 60);
+
+  rectFill(doc, 0, 0, PAGE_W, HEADER_H, C.headerBg, 0);
+  doc.rect(0, HEADER_H - 3, PAGE_W, 3).fill(C.azul);
+
+  doc.font(FONT.bold).fontSize(22).fillColor(C.headerText)
+    .text(nombreNegocio, textX, 28, { width: textW, lineBreak: true });
+
+  let yInfo = 28 + altNombre + 6;
   for (const linea of [
     config?.nit       ? `NIT: ${config.nit}`     : null,
     config?.direccion ? config.direccion           : null,
@@ -470,20 +475,25 @@ function generarPdfServicio({ orden, abonos = [], config = {}, garantias = [], r
 // ─── PDF: Recibo de Recepción ─────────────────────────────────────────────────
 
 function seccionEncabezadoRecepcion(doc, config, orden) {
-  const HEADER_H = 110;
-
-  rectFill(doc, 0, 0, PAGE_W, HEADER_H, C.headerBg, 0);
-  doc.rect(0, HEADER_H - 3, PAGE_W, 3).fill(C.verde);
+  let HEADER_H = 110;
 
   const logoOffset = dibujarLogoHeader(doc, config, HEADER_H);
   const textX      = MARGIN + logoOffset;
   const textW      = CONTENT_W * 0.55 - logoOffset;
 
   const nombreNegocio = config?.nombre_negocio || 'MI TIENDA';
-  doc.font(FONT.bold).fontSize(22).fillColor(C.headerText)
-    .text(nombreNegocio, textX, 28, { width: textW });
 
-  let yInfo = 56;
+  // Calcular altura del nombre para nombres largos
+  const altNombre = doc.heightOfString(nombreNegocio, { width: textW });
+  HEADER_H = Math.max(110, altNombre + 60);
+
+  rectFill(doc, 0, 0, PAGE_W, HEADER_H, C.headerBg, 0);
+  doc.rect(0, HEADER_H - 3, PAGE_W, 3).fill(C.verde);
+
+  doc.font(FONT.bold).fontSize(22).fillColor(C.headerText)
+    .text(nombreNegocio, textX, 28, { width: textW, lineBreak: true });
+
+  let yInfo = 28 + altNombre + 6;
   for (const linea of [
     config?.nit       ? `NIT: ${config.nit}`     : null,
     config?.direccion ? config.direccion           : null,

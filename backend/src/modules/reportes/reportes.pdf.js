@@ -116,18 +116,24 @@ const dibujarLogo = (doc, logo, headerH) => {
 };
 
 const drawHeader = (doc, { negocio, sucursalNombre, desde, hasta, fechaGeneracion, logo, titulo = 'REPORTE DE GESTIÓN', periodoLabel }) => {
-  const H = 116;
-  rectFill(doc, 0, 0, PAGE_W, H, C.headerBg, 0);
-  doc.rect(0, H - 3, PAGE_W, 3).fill(C.verde);
+  let H = 116;
 
   const logoOffset = dibujarLogo(doc, logo, H);
   const textX = MARGIN + logoOffset;
   const textW = CONTENT_W * 0.55 - logoOffset;
 
-  doc.font(FONT.bold).fontSize(20).fillColor(C.headerText)
-    .text(negocio?.nombre || 'Mi Negocio', textX, 26, { width: textW });
+  // Calcular altura del nombre para nombres largos
+  const nombreNegocio = negocio?.nombre || 'Mi Negocio';
+  const altNombre = doc.heightOfString(nombreNegocio, { width: textW });
+  H = Math.max(116, altNombre + 64);
 
-  let yi = 54;
+  rectFill(doc, 0, 0, PAGE_W, H, C.headerBg, 0);
+  doc.rect(0, H - 3, PAGE_W, 3).fill(C.verde);
+
+  doc.font(FONT.bold).fontSize(20).fillColor(C.headerText)
+    .text(nombreNegocio, textX, 26, { width: textW, lineBreak: true });
+
+  let yi = 26 + altNombre + 6;
   [
     negocio?.nit       ? `NIT: ${negocio.nit}` : null,
     negocio?.direccion || null,

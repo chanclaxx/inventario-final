@@ -173,13 +173,7 @@ function dibujarLogoHeader(doc, config, headerH) {
 // ─── SECCIÓN: Encabezado ──────────────────────────────────────────────────────
 
 function seccionEncabezado(doc, config, factura) {
-  const HEADER_H = 110;
-
-  // Fondo oscuro del encabezado
-  rectFill(doc, 0, 0, PAGE_W, HEADER_H, C.headerBg, 0);
-
-  // Línea de acento inferior (delgada, verde)
-  doc.rect(0, HEADER_H - 3, PAGE_W, 3).fill(C.verde);
+  let HEADER_H = 110;
 
   // ── Logo (opcional) ───────────────────────────────────────────────────────
   const logoOffset = dibujarLogoHeader(doc, config, HEADER_H);
@@ -188,10 +182,22 @@ function seccionEncabezado(doc, config, factura) {
 
   // ── Lado izquierdo: nombre del negocio ───────────────────────────────────
   const nombreNegocio = config?.nombre_negocio || 'MI TIENDA';
-  doc.font(FONT.bold).fontSize(22).fillColor(C.headerText)
-    .text(nombreNegocio, textX, 28, { width: textW });
 
-  let yInfoNegocio = 56;
+  // Calcular altura del nombre para nombres largos
+  const altNombre = doc.heightOfString(nombreNegocio, { width: textW });
+  HEADER_H = Math.max(110, altNombre + 60);
+
+  // Fondo oscuro del encabezado (ajustado a altura dinámica)
+  rectFill(doc, 0, 0, PAGE_W, HEADER_H, C.headerBg, 0);
+
+  // Línea de acento inferior (delgada, verde)
+  doc.rect(0, HEADER_H - 3, PAGE_W, 3).fill(C.verde);
+
+  // Dibujar nombre con saltos de línea automáticos
+  doc.font(FONT.bold).fontSize(22).fillColor(C.headerText)
+    .text(nombreNegocio, textX, 28, { width: textW, lineBreak: true });
+
+  let yInfoNegocio = 28 + altNombre + 6;
   const infoNegocio = [
     config?.nit       ? `NIT: ${config.nit}`       : null,
     config?.direccion ? config.direccion             : null,
