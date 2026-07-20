@@ -187,9 +187,20 @@ function seccionEncabezado(doc, config, factura) {
   // ── Lado izquierdo: nombre del negocio ───────────────────────────────────
   const nombreNegocio = config?.nombre_negocio || 'MI TIENDA';
 
-  // Calcular altura del nombre para nombres largos
-  const altNombre = doc.heightOfString(nombreNegocio, { width: leftW });
-  HEADER_H = Math.max(110, altNombre + 60);
+  // Reducir tamaño de fuente si el nombre es muy largo para evitar superposiciones
+  let fontSizeNombre = 22;
+  let altNombre = doc.heightOfString(nombreNegocio, { width: leftW, fontSize: fontSizeNombre });
+
+  if (altNombre > 25) {
+    fontSizeNombre = 18;
+    altNombre = doc.heightOfString(nombreNegocio, { width: leftW, fontSize: fontSizeNombre });
+  }
+  if (altNombre > 30) {
+    fontSizeNombre = 14;
+    altNombre = doc.heightOfString(nombreNegocio, { width: leftW, fontSize: fontSizeNombre });
+  }
+
+  HEADER_H = Math.max(110, altNombre + 50);
 
   // Fondo oscuro del encabezado (ajustado a altura dinámica)
   rectFill(doc, 0, 0, PAGE_W, HEADER_H, C.headerBg, 0);
@@ -197,8 +208,8 @@ function seccionEncabezado(doc, config, factura) {
   // Línea de acento inferior (delgada, verde)
   doc.rect(0, HEADER_H - 3, PAGE_W, 3).fill(C.verde);
 
-  // Dibujar nombre con saltos de línea automáticos
-  doc.font(FONT.bold).fontSize(22).fillColor(C.headerText)
+  // Dibujar nombre con tamaño dinámico
+  doc.font(FONT.bold).fontSize(fontSizeNombre).fillColor(C.headerText)
     .text(nombreNegocio, leftX, 28, { width: leftW, lineBreak: true });
 
   let yInfoNegocio = 28 + altNombre + 6;

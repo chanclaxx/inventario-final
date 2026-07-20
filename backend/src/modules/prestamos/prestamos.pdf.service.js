@@ -127,12 +127,23 @@ const drawHeader = (doc, { negocioNombre, personaNombre, personaInfo, fechaGener
   const rightX = leftX + leftW + 20;
   const rightW = PAGE_WIDTH - rightX - MARGIN;
 
-  // Calcular altura del nombre para nombres largos
-  const altNombre = doc.heightOfString(negocioNombre || 'Mi Negocio', { width: leftW });
-  HEADER_H = Math.max(80, altNombre + 40);
+  // Reducir tamaño de fuente si el nombre es muy largo
+  let fontSizeNombre = 18;
+  let altNombre = doc.heightOfString(negocioNombre || 'Mi Negocio', { width: leftW, fontSize: fontSizeNombre });
+
+  if (altNombre > 25) {
+    fontSizeNombre = 15;
+    altNombre = doc.heightOfString(negocioNombre || 'Mi Negocio', { width: leftW, fontSize: fontSizeNombre });
+  }
+  if (altNombre > 30) {
+    fontSizeNombre = 12;
+    altNombre = doc.heightOfString(negocioNombre || 'Mi Negocio', { width: leftW, fontSize: fontSizeNombre });
+  }
+
+  HEADER_H = Math.max(80, altNombre + 35);
 
   drawRect(doc, 0, 0, PAGE_WIDTH, HEADER_H, COLORS_ORIG.headerBg);
-  doc.font('Helvetica-Bold').fontSize(18).fillColor(COLORS_ORIG.white)
+  doc.font('Helvetica-Bold').fontSize(fontSizeNombre).fillColor(COLORS_ORIG.white)
     .text(negocioNombre || 'Mi Negocio', leftX, 22, { width: leftW, lineBreak: true });
   doc.font('Helvetica').fontSize(8).fillColor('#94A3B8')
     .text(`Generado: ${fechaGeneracion}`, rightX, 55, { width: rightW, align: 'right' });

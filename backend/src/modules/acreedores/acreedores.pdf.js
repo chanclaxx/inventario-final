@@ -110,13 +110,24 @@ function dibujarEncabezado(doc, config, acreedor, titulo = 'ESTADO DE CUENTA') {
 
   const nombreNegocio = config.nombre_negocio || 'Mi Negocio';
 
-  // Calcular altura del nombre para nombres largos
-  const altNombre = doc.heightOfString(nombreNegocio, { width: leftW });
-  HEADER_H = Math.max(110, altNombre + 50);
+  // Reducir tamaño de fuente si el nombre es muy largo
+  let fontSizeNombre = 18;
+  let altNombre = doc.heightOfString(nombreNegocio, { width: leftW, fontSize: fontSizeNombre });
+
+  if (altNombre > 25) {
+    fontSizeNombre = 15;
+    altNombre = doc.heightOfString(nombreNegocio, { width: leftW, fontSize: fontSizeNombre });
+  }
+  if (altNombre > 30) {
+    fontSizeNombre = 12;
+    altNombre = doc.heightOfString(nombreNegocio, { width: leftW, fontSize: fontSizeNombre });
+  }
+
+  HEADER_H = Math.max(110, altNombre + 45);
 
   rectFill(doc, 0, 0, PAGE_W, HEADER_H, C.headerBg, 0);
 
-  doc.font(FONT.bold).fontSize(18).fillColor(C.headerText)
+  doc.font(FONT.bold).fontSize(fontSizeNombre).fillColor(C.headerText)
     .text(nombreNegocio, leftX, 22, { width: leftW, lineBreak: true });
 
   const sub = [config.direccion, config.telefono_negocio].filter(Boolean).join('  ·  ');

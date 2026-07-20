@@ -126,15 +126,26 @@ const drawHeader = (doc, { negocio, sucursalNombre, desde, hasta, fechaGeneracio
   const rightX = leftX + leftW + 20;
   const rightW = PAGE_W - rightX - MARGIN;
 
-  // Calcular altura del nombre para nombres largos
+  // Calcular altura y reducir tamaño de fuente si es necesario
   const nombreNegocio = negocio?.nombre || 'Mi Negocio';
-  const altNombre = doc.heightOfString(nombreNegocio, { width: leftW });
-  H = Math.max(116, altNombre + 64);
+  let fontSizeNombre = 20;
+  let altNombre = doc.heightOfString(nombreNegocio, { width: leftW, fontSize: fontSizeNombre });
+
+  if (altNombre > 25) {
+    fontSizeNombre = 16;
+    altNombre = doc.heightOfString(nombreNegocio, { width: leftW, fontSize: fontSizeNombre });
+  }
+  if (altNombre > 30) {
+    fontSizeNombre = 13;
+    altNombre = doc.heightOfString(nombreNegocio, { width: leftW, fontSize: fontSizeNombre });
+  }
+
+  H = Math.max(116, altNombre + 54);
 
   rectFill(doc, 0, 0, PAGE_W, H, C.headerBg, 0);
   doc.rect(0, H - 3, PAGE_W, 3).fill(C.verde);
 
-  doc.font(FONT.bold).fontSize(20).fillColor(C.headerText)
+  doc.font(FONT.bold).fontSize(fontSizeNombre).fillColor(C.headerText)
     .text(nombreNegocio, leftX, 26, { width: leftW, lineBreak: true });
 
   let yi = 26 + altNombre + 6;
