@@ -118,15 +118,28 @@ const dibujarLogo = (doc, logo, headerH) => {
 const drawHeader = (doc, { negocio, sucursalNombre, desde, hasta, fechaGeneracion, logo, titulo = 'REPORTE DE GESTIÓN', periodoLabel }) => {
   const nombreNegocio = negocio?.nombre || 'Mi Negocio';
 
-  // Dibujar logo primero (si existe)
-  let logoOffset = dibujarLogo(doc, logo, 116);
-
-  // Determinar si el nombre es muy largo
+  // Determinar si el nombre es muy largo (ANTES de dibujar)
   const testWidth = CONTENT_W * 0.45;
   const altNombreTest = doc.heightOfString(nombreNegocio, { width: testWidth, fontSize: 20 });
   const nombreMuyLargo = altNombreTest > 32;
 
   let H = 116;
+  let logoOffset = 0;
+
+  // Calcular height primero
+  if (nombreMuyLargo) {
+    logoOffset = logo ? 66 : 0;
+    const altNombre = doc.heightOfString(nombreNegocio, { width: CONTENT_W * 0.60 - logoOffset, fontSize: 18 });
+    H = Math.max(116, altNombre + 50);
+  }
+
+  // ─── DIBUJAR FONDO PRIMERO ─────────────────────────────────────────────────
+  rectFill(doc, 0, 0, PAGE_W, H, C.headerBg, 0);
+
+  // ─── LUEGO DIBUJAR EL LOGO ENCIMA ──────────────────────────────────────────
+  logoOffset = dibujarLogo(doc, logo, H);
+
+  // Calcular posiciones considerando logo
   let leftX, leftW, rightX, rightW;
 
   if (nombreMuyLargo) {
@@ -135,9 +148,6 @@ const drawHeader = (doc, { negocio, sucursalNombre, desde, hasta, fechaGeneracio
     leftW = CONTENT_W * 0.60 - logoOffset;
     rightX = MARGIN + CONTENT_W * 0.60 + 12;
     rightW = PAGE_W - rightX - MARGIN;
-
-    const altNombre = doc.heightOfString(nombreNegocio, { width: leftW, fontSize: 18 });
-    H = Math.max(116, altNombre + 50);
   } else {
     // LAYOUT NORMAL: Distribución 48-48 (considerando logo)
     leftX = MARGIN + logoOffset;
@@ -146,7 +156,6 @@ const drawHeader = (doc, { negocio, sucursalNombre, desde, hasta, fechaGeneracio
     rightW = PAGE_W - rightX - MARGIN;
   }
 
-  rectFill(doc, 0, 0, PAGE_W, H, C.headerBg, 0);
   doc.rect(0, H - 3, PAGE_W, 3).fill(C.verde);
 
   const fontSizeNombre = nombreMuyLargo ? 18 : 20;

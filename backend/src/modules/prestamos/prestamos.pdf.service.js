@@ -118,15 +118,28 @@ const intentarLogoHeader = (doc, logoRaw, headerH) => {
 };
 
 const drawHeader = (doc, { negocioNombre, personaNombre, personaInfo, fechaGeneracion, logoNegocio }) => {
-  // Dibujar logo primero (si existe)
-  let logoOffset = intentarLogoHeader(doc, logoNegocio, 80);
-
-  // Determinar si el nombre es muy largo
+  // Determinar si el nombre es muy largo (ANTES de dibujar)
   const testWidth = COL_WIDTH * 0.45;
   const altNombreTest = doc.heightOfString(negocioNombre || 'Mi Negocio', { width: testWidth, fontSize: 18 });
   const nombreMuyLargo = altNombreTest > 32;
 
   let HEADER_H = 80;
+  let logoOffset = 0;
+
+  // Calcular height primero
+  if (nombreMuyLargo) {
+    logoOffset = logoNegocio ? 60 : 0;
+    const altNombre = doc.heightOfString(negocioNombre || 'Mi Negocio', { width: COL_WIDTH * 0.60 - logoOffset, fontSize: 16 });
+    HEADER_H = Math.max(80, altNombre + 45);
+  }
+
+  // ─── DIBUJAR FONDO PRIMERO ─────────────────────────────────────────────────
+  drawRect(doc, 0, 0, PAGE_WIDTH, HEADER_H, COLORS_ORIG.headerBg);
+
+  // ─── LUEGO DIBUJAR EL LOGO ENCIMA ──────────────────────────────────────────
+  logoOffset = intentarLogoHeader(doc, logoNegocio, HEADER_H);
+
+  // Calcular posiciones considerando logo
   let leftX, leftW, rightX, rightW;
 
   if (nombreMuyLargo) {
@@ -135,9 +148,6 @@ const drawHeader = (doc, { negocioNombre, personaNombre, personaInfo, fechaGener
     leftW = COL_WIDTH * 0.60 - logoOffset;
     rightX = MARGIN + COL_WIDTH * 0.60 + 12;
     rightW = PAGE_WIDTH - rightX - MARGIN;
-
-    const altNombre = doc.heightOfString(negocioNombre || 'Mi Negocio', { width: leftW, fontSize: 16 });
-    HEADER_H = Math.max(80, altNombre + 45);
   } else {
     // LAYOUT NORMAL: Distribución 48-48 (considerando logo)
     leftX = MARGIN + logoOffset;
@@ -145,8 +155,6 @@ const drawHeader = (doc, { negocioNombre, personaNombre, personaInfo, fechaGener
     rightX = leftX + leftW + 12;
     rightW = PAGE_WIDTH - rightX - MARGIN;
   }
-
-  drawRect(doc, 0, 0, PAGE_WIDTH, HEADER_H, COLORS_ORIG.headerBg);
 
   const fontSizeNombre = nombreMuyLargo ? 16 : 18;
   doc.font('Helvetica-Bold').fontSize(fontSizeNombre).fillColor(COLORS_ORIG.white)
