@@ -149,7 +149,7 @@ const drawHeader = (doc, { negocioNombre, personaNombre, personaInfo, fechaGener
 
   const fontSizeNombre = nombreMuyLargo ? 16 : 18;
   doc.font('Helvetica-Bold').fontSize(fontSizeNombre).fillColor(COLORS_ORIG.white)
-    .text(negocioNombre || 'Mi Negocio', leftX, 22, { width: leftW, lineBreak: true });
+    .text(negocioNombre || 'Mi Negocio', leftX, 22, { width: leftW, lineBreak: false });
   doc.font('Helvetica').fontSize(8).fillColor('#94A3B8')
     .text(`Generado: ${fechaGeneracion}`, rightX, 55, { width: rightW, align: 'right' });
   doc.font('Helvetica').fontSize(9).fillColor('#93C5FD')

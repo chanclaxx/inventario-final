@@ -199,20 +199,22 @@ function seccionEncabezado(doc, config, factura) {
   // ─── LAYOUT SIMPLE: IZQUIERDA CLARA / DERECHA CLARA ───────────────────────
   // Izquierda: nombre y datos (empieza después del logo)
   const leftX = MARGIN + logoOffset;
-  const leftW = nombreMuyLargo ? CONTENT_W * 0.55 - logoOffset : CONTENT_W * 0.48 - logoOffset;
+  const leftW = CONTENT_W * 0.48 - logoOffset; // Ancho fijo para nombre
 
   // Derecha: SEPARACIÓN FIRME - número, fecha, estado (empieza a 60% del ancho total)
   const rightX = MARGIN + CONTENT_W * 0.60;
   const rightW = PAGE_W - rightX - MARGIN;
 
-  // ── Lado izquierdo: nombre y datos del negocio ───────────────────────────
-  const fontSizeNombre = nombreMuyLargo ? 20 : 22;
-  const altNombre = doc.heightOfString(nombreNegocio, { width: leftW, fontSize: fontSizeNombre });
+  // ── Lado izquierdo: nombre SIN saltos de línea (solo reducir tamaño) ────────
+  let fontSizeNombre = 22;
+  if (nombreMuyLargo) {
+    fontSizeNombre = 16; // Reducir tamaño si es muy largo
+  }
 
   doc.font(FONT.bold).fontSize(fontSizeNombre).fillColor(C.headerText)
-    .text(nombreNegocio, leftX, 28, { width: leftW, lineBreak: true });
+    .text(nombreNegocio, leftX, 28, { width: leftW, lineBreak: false });
 
-  let yInfo = 28 + altNombre + 6;
+  let yInfo = 28 + 20; // Altura fija para el nombre
   const infoNegocio = [
     config?.nit       ? `NIT: ${config.nit}`       : null,
     config?.direccion ? config.direccion             : null,

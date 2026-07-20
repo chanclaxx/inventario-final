@@ -133,7 +133,7 @@ function dibujarEncabezado(doc, config, acreedor, titulo = 'ESTADO DE CUENTA') {
   const altNombre = doc.heightOfString(nombreNegocio, { width: leftW, fontSize: fontSizeNombre });
 
   doc.font(FONT.bold).fontSize(fontSizeNombre).fillColor(C.headerText)
-    .text(nombreNegocio, leftX, 22, { width: leftW, lineBreak: true });
+    .text(nombreNegocio, leftX, 22, { width: leftW, lineBreak: false });
 
   const sub = [config.direccion, config.telefono_negocio].filter(Boolean).join('  ·  ');
   if (sub) {

@@ -148,13 +148,15 @@ const drawHeader = (doc, { negocio, sucursalNombre, desde, hasta, fechaGeneracio
   const rightX = MARGIN + CONTENT_W * 0.60;
   const rightW = PAGE_W - rightX - MARGIN;
 
-  const fontSizeNombre = nombreMuyLargo ? 18 : 20;
-  const altNombre = doc.heightOfString(nombreNegocio, { width: leftW, fontSize: fontSizeNombre });
+  let fontSizeNombre = 20;
+  if (nombreMuyLargo) {
+    fontSizeNombre = 15;
+  }
 
   doc.font(FONT.bold).fontSize(fontSizeNombre).fillColor(C.headerText)
-    .text(nombreNegocio, leftX, 26, { width: leftW, lineBreak: true });
+    .text(nombreNegocio, leftX, 26, { width: leftW, lineBreak: false });
 
-  let yi = 26 + altNombre + 6;
+  let yi = 26 + 20;
   [
     negocio?.nit       ? `NIT: ${negocio.nit}` : null,
     negocio?.direccion || null,

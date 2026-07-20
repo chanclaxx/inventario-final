@@ -159,7 +159,7 @@ function seccionEncabezado(doc, config, orden) {
   const altNombre = doc.heightOfString(nombreNegocio, { width: leftW, fontSize: fontSizeNombre });
 
   doc.font(FONT.bold).fontSize(fontSizeNombre).fillColor(C.headerText)
-    .text(nombreNegocio, leftX, 28, { width: leftW, lineBreak: true });
+    .text(nombreNegocio, leftX, 28, { width: leftW, lineBreak: false });
 
   let yInfo = 28 + altNombre + 6;
   for (const linea of [
@@ -531,7 +531,7 @@ function seccionEncabezadoRecepcion(doc, config, orden) {
   const altNombre = doc.heightOfString(nombreNegocio, { width: leftW, fontSize: fontSizeNombre });
 
   doc.font(FONT.bold).fontSize(fontSizeNombre).fillColor(C.headerText)
-    .text(nombreNegocio, leftX, 28, { width: leftW, lineBreak: true });
+    .text(nombreNegocio, leftX, 28, { width: leftW, lineBreak: false });
 
   let yInfo = 28 + altNombre + 6;
   for (const linea of [
