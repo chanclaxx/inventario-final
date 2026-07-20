@@ -175,28 +175,30 @@ function dibujarLogoHeader(doc, config, headerH) {
 function seccionEncabezado(doc, config, factura) {
   const nombreNegocio = config?.nombre_negocio || 'MI TIENDA';
 
+  // Dibujar logo primero (si existe)
+  let logoOffset = dibujarLogoHeader(doc, config, 110);
+
   // Determinar si el nombre es muy largo
   const testWidth = CONTENT_W * 0.45;
   const altNombreTest = doc.heightOfString(nombreNegocio, { width: testWidth, fontSize: 22 });
-  const nombreMuyLargo = altNombreTest > 32; // Si ocupa más de ~2 líneas
+  const nombreMuyLargo = altNombreTest > 32;
 
   let HEADER_H = 110;
   let leftX, leftW, rightX, rightW;
 
   if (nombreMuyLargo) {
-    // LAYOUT ALTERNATIVO: Nombre y datos del negocio ocupan toda la izquierda (60%)
-    leftX = MARGIN;
-    leftW = CONTENT_W * 0.60;
-    rightX = leftX + leftW + 12;
+    // LAYOUT ALTERNATIVO: Nombre y datos ocupan 60% izquierda (considerando logo)
+    leftX = MARGIN + logoOffset;
+    leftW = CONTENT_W * 0.60 - logoOffset;
+    rightX = MARGIN + CONTENT_W * 0.60 + 12;
     rightW = PAGE_W - rightX - MARGIN;
 
-    // Calcular altura real del nombre
     const altNombre = doc.heightOfString(nombreNegocio, { width: leftW, fontSize: 20 });
     HEADER_H = Math.max(110, altNombre + 55);
   } else {
-    // LAYOUT NORMAL: Distribución equilibrada
-    leftX = MARGIN;
-    leftW = CONTENT_W * 0.48;
+    // LAYOUT NORMAL: Distribución 48-48 (considerando logo)
+    leftX = MARGIN + logoOffset;
+    leftW = CONTENT_W * 0.48 - logoOffset;
     rightX = leftX + leftW + 12;
     rightW = PAGE_W - rightX - MARGIN;
   }

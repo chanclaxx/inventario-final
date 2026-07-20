@@ -100,25 +100,28 @@ function dibujarLogoHeader(doc, config, headerH) {
 function dibujarEncabezado(doc, config, acreedor, titulo = 'ESTADO DE CUENTA') {
   const nombreNegocio = config.nombre_negocio || 'Mi Negocio';
 
+  // Dibujar logo primero (si existe)
+  let logoOffset = dibujarLogoHeader(doc, config, 110);
+
   // Determinar si el nombre es muy largo
   const testWidth = CW * 0.45;
   const altNombreTest = doc.heightOfString(nombreNegocio, { width: testWidth, fontSize: 18 });
   const nombreMuyLargo = altNombreTest > 32;
 
   let HEADER_H = 110;
-  let logoOffset, leftX, leftW, rightX, rightW;
+  let leftX, leftW, rightX, rightW;
 
   if (nombreMuyLargo) {
-    logoOffset = 0;
-    leftX = MARGIN;
-    leftW = CW * 0.60;
-    rightX = leftX + leftW + 12;
+    // LAYOUT ALTERNATIVO: Nombre y datos ocupan 60% izquierda (considerando logo)
+    leftX = MARGIN + logoOffset;
+    leftW = CW * 0.60 - logoOffset;
+    rightX = MARGIN + CW * 0.60 + 12;
     rightW = PAGE_W - rightX - MARGIN;
 
     const altNombre = doc.heightOfString(nombreNegocio, { width: leftW, fontSize: 16 });
     HEADER_H = Math.max(110, altNombre + 50);
   } else {
-    logoOffset = dibujarLogoHeader(doc, config, HEADER_H);
+    // LAYOUT NORMAL: Distribución 48-48 (considerando logo)
     leftX = MARGIN + logoOffset;
     leftW = CW * 0.48 - logoOffset;
     rightX = leftX + leftW + 12;

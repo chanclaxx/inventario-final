@@ -118,27 +118,30 @@ const dibujarLogo = (doc, logo, headerH) => {
 const drawHeader = (doc, { negocio, sucursalNombre, desde, hasta, fechaGeneracion, logo, titulo = 'REPORTE DE GESTIÓN', periodoLabel }) => {
   const nombreNegocio = negocio?.nombre || 'Mi Negocio';
 
+  // Dibujar logo primero (si existe)
+  let logoOffset = dibujarLogo(doc, logo, 116);
+
   // Determinar si el nombre es muy largo
   const testWidth = CONTENT_W * 0.45;
   const altNombreTest = doc.heightOfString(nombreNegocio, { width: testWidth, fontSize: 20 });
-  const nombreMuyLargo = altNombreTest > 32; // Si ocupa más de ~2 líneas
+  const nombreMuyLargo = altNombreTest > 32;
 
   let H = 116;
   let leftX, leftW, rightX, rightW;
 
   if (nombreMuyLargo) {
-    // LAYOUT ALTERNATIVO: Nombre y datos ocupan 60% izquierda
-    leftX = MARGIN;
-    leftW = CONTENT_W * 0.60;
-    rightX = leftX + leftW + 12;
+    // LAYOUT ALTERNATIVO: Nombre y datos ocupan 60% izquierda (considerando logo)
+    leftX = MARGIN + logoOffset;
+    leftW = CONTENT_W * 0.60 - logoOffset;
+    rightX = MARGIN + CONTENT_W * 0.60 + 12;
     rightW = PAGE_W - rightX - MARGIN;
 
     const altNombre = doc.heightOfString(nombreNegocio, { width: leftW, fontSize: 18 });
     H = Math.max(116, altNombre + 50);
   } else {
-    // LAYOUT NORMAL: Distribución equilibrada
-    leftX = MARGIN;
-    leftW = CONTENT_W * 0.48;
+    // LAYOUT NORMAL: Distribución 48-48 (considerando logo)
+    leftX = MARGIN + logoOffset;
+    leftW = CONTENT_W * 0.48 - logoOffset;
     rightX = leftX + leftW + 12;
     rightW = PAGE_W - rightX - MARGIN;
   }
