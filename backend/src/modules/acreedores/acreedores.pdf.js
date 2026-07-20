@@ -101,31 +101,35 @@ function dibujarEncabezado(doc, config, acreedor, titulo = 'ESTADO DE CUENTA') {
   let HEADER_H = 110;
 
   const logoOffset = dibujarLogoHeader(doc, config, HEADER_H);
-  const textX = MARGIN + logoOffset;
-  const textW = CW - logoOffset;
+  const leftX = MARGIN + logoOffset;
+  const leftW = CW * 0.48 - logoOffset;
+
+  // Área derecha: empieza donde termina la izquierda
+  const rightX = leftX + leftW + 20;
+  const rightW = PAGE_W - rightX - MARGIN;
 
   const nombreNegocio = config.nombre_negocio || 'Mi Negocio';
 
   // Calcular altura del nombre para nombres largos
-  const altNombre = doc.heightOfString(nombreNegocio, { width: textW });
+  const altNombre = doc.heightOfString(nombreNegocio, { width: leftW });
   HEADER_H = Math.max(110, altNombre + 50);
 
   rectFill(doc, 0, 0, PAGE_W, HEADER_H, C.headerBg, 0);
 
   doc.font(FONT.bold).fontSize(18).fillColor(C.headerText)
-    .text(nombreNegocio, textX, 22, { width: textW, lineBreak: true });
+    .text(nombreNegocio, leftX, 22, { width: leftW, lineBreak: true });
 
   const sub = [config.direccion, config.telefono_negocio].filter(Boolean).join('  ·  ');
   if (sub) {
     doc.font(FONT.normal).fontSize(8).fillColor(C.headerSub)
-      .text(sub, textX, 22 + altNombre + 4, { width: textW });
+      .text(sub, leftX, 22 + altNombre + 4, { width: leftW });
   }
 
   doc.font(FONT.bold).fontSize(11).fillColor(C.headerText)
-    .text(titulo, PAGE_W - MARGIN - 180, 22, { width: 180, align: 'right' });
+    .text(titulo, rightX, 22, { width: rightW, align: 'right' });
 
   doc.font(FONT.normal).fontSize(8).fillColor(C.headerSub)
-    .text(`Generado: ${formatFechaHora(new Date())}`, PAGE_W - MARGIN - 150, 38, { width: 150, align: 'right' });
+    .text(`Generado: ${formatFechaHora(new Date())}`, rightX, 38, { width: rightW, align: 'right' });
 
   return HEADER_H;
 }

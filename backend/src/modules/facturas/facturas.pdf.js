@@ -177,14 +177,18 @@ function seccionEncabezado(doc, config, factura) {
 
   // ── Logo (opcional) ───────────────────────────────────────────────────────
   const logoOffset = dibujarLogoHeader(doc, config, HEADER_H);
-  const textX      = MARGIN + logoOffset;
-  const textW      = CONTENT_W * 0.55 - logoOffset;
+  const leftX      = MARGIN + logoOffset;
+  const leftW      = CONTENT_W * 0.48 - logoOffset;
+
+  // Área derecha: empieza donde termina la izquierda
+  const rightX     = leftX + leftW + 20;
+  const rightW     = PAGE_W - rightX - MARGIN;
 
   // ── Lado izquierdo: nombre del negocio ───────────────────────────────────
   const nombreNegocio = config?.nombre_negocio || 'MI TIENDA';
 
   // Calcular altura del nombre para nombres largos
-  const altNombre = doc.heightOfString(nombreNegocio, { width: textW });
+  const altNombre = doc.heightOfString(nombreNegocio, { width: leftW });
   HEADER_H = Math.max(110, altNombre + 60);
 
   // Fondo oscuro del encabezado (ajustado a altura dinámica)
@@ -195,7 +199,7 @@ function seccionEncabezado(doc, config, factura) {
 
   // Dibujar nombre con saltos de línea automáticos
   doc.font(FONT.bold).fontSize(22).fillColor(C.headerText)
-    .text(nombreNegocio, textX, 28, { width: textW, lineBreak: true });
+    .text(nombreNegocio, leftX, 28, { width: leftW, lineBreak: true });
 
   let yInfoNegocio = 28 + altNombre + 6;
   const infoNegocio = [
@@ -206,21 +210,21 @@ function seccionEncabezado(doc, config, factura) {
 
   for (const linea of infoNegocio) {
     doc.font(FONT.normal).fontSize(8).fillColor(C.headerSub)
-      .text(linea, textX, yInfoNegocio, { width: textW });
+      .text(linea, leftX, yInfoNegocio, { width: leftW });
     yInfoNegocio += 12;
   }
 
-  // ── Lado derecho: número y datos de factura ───────────────────────────────
+  // ── Lado derecho: número y datos de factura (EN SU PROPIO ESPACIO) ───────
   const numFactura = `#${String(factura.numero ?? factura.id).padStart(6, '0')}`;
 
   doc.font(FONT.bold).fontSize(26).fillColor(C.headerText)
-    .text(numFactura, MARGIN, 22, { width: CONTENT_W, align: 'right' });
+    .text(numFactura, rightX, 22, { width: rightW, align: 'right' });
 
   doc.font(FONT.normal).fontSize(8).fillColor(C.headerSub)
-    .text('FACTURA DE VENTA', MARGIN, 54, { width: CONTENT_W, align: 'right' });
+    .text('FACTURA DE VENTA', rightX, 54, { width: rightW, align: 'right' });
 
   doc.font(FONT.normal).fontSize(8).fillColor(C.headerSub)
-    .text(formatFechaHora(factura.fecha), MARGIN, 66, { width: CONTENT_W, align: 'right' });
+    .text(formatFechaHora(factura.fecha), rightX, 66, { width: rightW, align: 'right' });
 
   // Badge de estado
   const estadoConfig = {

@@ -126,20 +126,24 @@ function seccionEncabezado(doc, config, orden) {
   let HEADER_H = 110;
 
   const logoOffset = dibujarLogoHeader(doc, config, HEADER_H);
-  const textX      = MARGIN + logoOffset;
-  const textW      = CONTENT_W * 0.55 - logoOffset;
+  const leftX      = MARGIN + logoOffset;
+  const leftW      = CONTENT_W * 0.48 - logoOffset;
+
+  // Área derecha: empieza donde termina la izquierda
+  const rightX     = leftX + leftW + 20;
+  const rightW     = PAGE_W - rightX - MARGIN;
 
   const nombreNegocio = config?.nombre_negocio || 'MI TIENDA';
 
   // Calcular altura del nombre para nombres largos
-  const altNombre = doc.heightOfString(nombreNegocio, { width: textW });
+  const altNombre = doc.heightOfString(nombreNegocio, { width: leftW });
   HEADER_H = Math.max(110, altNombre + 60);
 
   rectFill(doc, 0, 0, PAGE_W, HEADER_H, C.headerBg, 0);
   doc.rect(0, HEADER_H - 3, PAGE_W, 3).fill(C.azul);
 
   doc.font(FONT.bold).fontSize(22).fillColor(C.headerText)
-    .text(nombreNegocio, textX, 28, { width: textW, lineBreak: true });
+    .text(nombreNegocio, leftX, 28, { width: leftW, lineBreak: true });
 
   let yInfo = 28 + altNombre + 6;
   for (const linea of [
@@ -148,20 +152,20 @@ function seccionEncabezado(doc, config, orden) {
     config?.telefono  ? `Tel: ${config.telefono}` : null,
   ].filter(Boolean)) {
     doc.font(FONT.normal).fontSize(8).fillColor(C.headerSub)
-      .text(linea, textX, yInfo, { width: textW });
+      .text(linea, leftX, yInfo, { width: leftW });
     yInfo += 12;
   }
 
   const numOS = `#OS-${String(orden.numero ?? orden.id).padStart(4, '0')}`;
 
   doc.font(FONT.bold).fontSize(26).fillColor(C.headerText)
-    .text(numOS, MARGIN, 22, { width: CONTENT_W, align: 'right' });
+    .text(numOS, rightX, 22, { width: rightW, align: 'right' });
 
   doc.font(FONT.normal).fontSize(8).fillColor(C.headerSub)
-    .text('COMPROBANTE DE SERVICIO', MARGIN, 54, { width: CONTENT_W, align: 'right' });
+    .text('COMPROBANTE DE SERVICIO', rightX, 54, { width: rightW, align: 'right' });
 
   doc.font(FONT.normal).fontSize(8).fillColor(C.headerSub)
-    .text(formatFechaHora(orden.fecha_recepcion), MARGIN, 66, { width: CONTENT_W, align: 'right' });
+    .text(formatFechaHora(orden.fecha_recepcion), rightX, 66, { width: rightW, align: 'right' });
 
   const est = ESTADO_BADGE[orden.estado] || { bg: C.gris, texto: (orden.estado || '').toUpperCase() };
   const badgeW = 80;
@@ -478,20 +482,24 @@ function seccionEncabezadoRecepcion(doc, config, orden) {
   let HEADER_H = 110;
 
   const logoOffset = dibujarLogoHeader(doc, config, HEADER_H);
-  const textX      = MARGIN + logoOffset;
-  const textW      = CONTENT_W * 0.55 - logoOffset;
+  const leftX      = MARGIN + logoOffset;
+  const leftW      = CONTENT_W * 0.48 - logoOffset;
+
+  // Área derecha: empieza donde termina la izquierda
+  const rightX     = leftX + leftW + 20;
+  const rightW     = PAGE_W - rightX - MARGIN;
 
   const nombreNegocio = config?.nombre_negocio || 'MI TIENDA';
 
   // Calcular altura del nombre para nombres largos
-  const altNombre = doc.heightOfString(nombreNegocio, { width: textW });
+  const altNombre = doc.heightOfString(nombreNegocio, { width: leftW });
   HEADER_H = Math.max(110, altNombre + 60);
 
   rectFill(doc, 0, 0, PAGE_W, HEADER_H, C.headerBg, 0);
   doc.rect(0, HEADER_H - 3, PAGE_W, 3).fill(C.verde);
 
   doc.font(FONT.bold).fontSize(22).fillColor(C.headerText)
-    .text(nombreNegocio, textX, 28, { width: textW, lineBreak: true });
+    .text(nombreNegocio, leftX, 28, { width: leftW, lineBreak: true });
 
   let yInfo = 28 + altNombre + 6;
   for (const linea of [
@@ -500,20 +508,20 @@ function seccionEncabezadoRecepcion(doc, config, orden) {
     config?.telefono  ? `Tel: ${config.telefono}` : null,
   ].filter(Boolean)) {
     doc.font(FONT.normal).fontSize(8).fillColor(C.headerSub)
-      .text(linea, textX, yInfo, { width: textW });
+      .text(linea, leftX, yInfo, { width: leftW });
     yInfo += 12;
   }
 
   const numOS = `#OS-${String(orden.numero ?? orden.id).padStart(4, '0')}`;
 
   doc.font(FONT.bold).fontSize(26).fillColor(C.headerText)
-    .text(numOS, MARGIN, 22, { width: CONTENT_W, align: 'right' });
+    .text(numOS, rightX, 22, { width: rightW, align: 'right' });
 
   doc.font(FONT.normal).fontSize(8).fillColor(C.headerSub)
-    .text('RECIBO DE RECEPCIÓN', MARGIN, 54, { width: CONTENT_W, align: 'right' });
+    .text('RECIBO DE RECEPCIÓN', rightX, 54, { width: rightW, align: 'right' });
 
   doc.font(FONT.normal).fontSize(8).fillColor(C.headerSub)
-    .text(formatFechaHora(orden.fecha_recepcion), MARGIN, 66, { width: CONTENT_W, align: 'right' });
+    .text(formatFechaHora(orden.fecha_recepcion), rightX, 66, { width: rightW, align: 'right' });
 
   const badgeW = 68;
   const badgeX = PAGE_W - MARGIN - badgeW;

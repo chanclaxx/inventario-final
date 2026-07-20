@@ -120,20 +120,24 @@ const intentarLogoHeader = (doc, logoRaw, headerH) => {
 const drawHeader = (doc, { negocioNombre, personaNombre, personaInfo, fechaGeneracion, logoNegocio }) => {
   let HEADER_H = 80;
   const logoOffset = intentarLogoHeader(doc, logoNegocio, HEADER_H);
-  const textX = MARGIN + logoOffset;
-  const textW = COL_WIDTH - 160 - logoOffset;
+  const leftX = MARGIN + logoOffset;
+  const leftW = COL_WIDTH * 0.48 - logoOffset;
+
+  // Área derecha: empieza donde termina la izquierda
+  const rightX = leftX + leftW + 20;
+  const rightW = PAGE_WIDTH - rightX - MARGIN;
 
   // Calcular altura del nombre para nombres largos
-  const altNombre = doc.heightOfString(negocioNombre || 'Mi Negocio', { width: textW });
+  const altNombre = doc.heightOfString(negocioNombre || 'Mi Negocio', { width: leftW });
   HEADER_H = Math.max(80, altNombre + 40);
 
   drawRect(doc, 0, 0, PAGE_WIDTH, HEADER_H, COLORS_ORIG.headerBg);
   doc.font('Helvetica-Bold').fontSize(18).fillColor(COLORS_ORIG.white)
-    .text(negocioNombre || 'Mi Negocio', textX, 22, { width: textW, lineBreak: true });
+    .text(negocioNombre || 'Mi Negocio', leftX, 22, { width: leftW, lineBreak: true });
   doc.font('Helvetica').fontSize(8).fillColor('#94A3B8')
-    .text(`Generado: ${fechaGeneracion}`, MARGIN, 55, { width: COL_WIDTH, align: 'right' });
+    .text(`Generado: ${fechaGeneracion}`, rightX, 55, { width: rightW, align: 'right' });
   doc.font('Helvetica').fontSize(9).fillColor('#93C5FD')
-    .text('Estado de cuenta — Préstamos activos', textX, 45, { width: textW });
+    .text('Estado de cuenta — Préstamos activos', leftX, 45, { width: leftW });
   const cardY = HEADER_H + 12;
   drawRect(doc, MARGIN, cardY, COL_WIDTH, 52, COLORS_ORIG.rowAlt);
   doc.save().rect(MARGIN, cardY, 4, 52).fill(COLORS_ORIG.accent).restore();
