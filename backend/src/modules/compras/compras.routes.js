@@ -19,6 +19,15 @@ router.get('/proveedor/:proveedorId', requireModulo('proveedores'), ctrl.getComp
 router.get('/:id',                    requireModulo('proveedores'), ctrl.getCompraById);
 router.post('/', requireModulo('proveedores'), requireNivel('supervisor'), validarCompra, validate, ctrl.registrarCompra);
 router.patch('/:id/cancelar', requireModulo('proveedores'), requireNivel('supervisor'), ctrl.cancelarCompra);
+// Corrección de precios de una compra: solo admin_negocio (cascada a costo/deuda)
+router.patch('/:id/precios', requireModulo('proveedores'), requireNivel('admin_negocio'),
+  [
+    body('lineas').isArray({ min: 1 }).withMessage('Debe indicar al menos una línea a editar'),
+    body('lineas.*.linea_id').isInt({ gt: 0 }).withMessage('linea_id inválido'),
+    body('lineas.*.precio_unitario').isFloat({ gt: 0 }).withMessage('Precio unitario inválido'),
+    body('motivo').optional({ values: 'null' }).isString().trim().isLength({ max: 300 }),
+  ],
+  validate, ctrl.editarPreciosCompra);
 router.post('/:id/devolucion', requireModulo('proveedores'), requireNivel('supervisor'),
   [
     body('lineas').isArray({ min: 1 }).withMessage('Debe indicar al menos una línea a devolver'),

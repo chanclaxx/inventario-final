@@ -9,3 +9,4 @@ export const getComprasPaginadas = (params) =>
   api.get('/compras/paginadas', { params });
 export const cancelarCompra = (id) => api.patch(`/compras/${id}/cancelar`);
 export const devolverCompra = (id, data) => api.post(`/compras/${id}/devolucion`, data);
+export const editarPreciosCompra = (id, data) => api.patch(`/compras/${id}/precios`, data);

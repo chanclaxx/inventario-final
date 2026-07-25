@@ -629,4 +629,178 @@ const devolverCompra = async (negocioId, compraId, { lineas: lineasDevol, motivo
   }
 };
 
-module.exports = { getCompras, getCompraById, getComprasByProveedor, registrarCompra, getComprasPaginadas, cancelarCompra, devolverCompra };
+// ── Ajuste de costo promedio ante una corrección de precio ────────────────────
+// Reparte el delta de precio (nuevo − viejo) de la línea sobre el stock ACTUAL.
+// Tope: nunca corrige más de |deltaUnit| por unidad (usa min(cantidad, stock)),
+// de modo que una venta previa no sobre-corrija el promedio. Si no hay stock,
+// devuelve null (no hay inventario que revaluar). Nunca produce costo negativo.
+const _ajustarCostoPromedioDelta = (stockActual, costoActual, cantidad, deltaUnit) => {
+  const stock = Math.max(0, Number(stockActual) || 0);
+  if (stock === 0) return null;
+  const unidades = Math.min(Math.max(0, Number(cantidad) || 0), stock);
+  const nuevo = Number(costoActual || 0) + (deltaUnit * unidades) / stock;
+  return Math.max(0, Math.round(nuevo));
+};
+
+// ── Corrección del precio de una o varias líneas de una compra ────────────────
+// Caso de uso: alguien registró un precio equivocado y hay que corregirlo sin
+// rehacer la compra. Cascada CONGRUENTE en una sola transacción:
+//   1. lineas_compra.precio_unitario  (SET absoluto → idempotente)
+//   2. costo del inventario:
+//        · serial   → seriales.costo_compra (fila en inventario, o la más reciente)
+//        · cantidad → costo_unitario ajustado por delta (variante/atributo/producto)
+//   3. compras.total  (recalculado desde las líneas)
+//   4. movimientos_acreedor Cargo.valor  (= nuevo total → recalcula la deuda)
+// Idempotente: las líneas cuyo precio no cambia se omiten; en una segunda
+// ejecución el delta es 0 y los SET quedan iguales.
+const editarPreciosCompra = async (negocioId, compraId, { lineas: cambios, motivo, usuario_id }) => {
+  if (!Array.isArray(cambios) || cambios.length === 0) {
+    throw { status: 400, message: 'Debes indicar al menos una línea a editar' };
+  }
+
+  const compra = await comprasRepo.findByIdYNegocio(compraId, negocioId);
+  if (!compra) throw { status: 404, message: 'Compra no encontrada' };
+  if (compra.estado === 'Cancelada') {
+    throw { status: 400, message: 'La compra está cancelada; no se pueden editar precios' };
+  }
+
+  const lineasCompra = await comprasRepo.getLineas(compraId);
+  const lineasById = new Map(lineasCompra.map((l) => [Number(l.id), l]));
+
+  // Validar y normalizar las solicitudes de cambio
+  const solicitudes = [];
+  for (const req of cambios) {
+    const linea = lineasById.get(Number(req.linea_id));
+    if (!linea) throw { status: 400, message: `La línea ${req.linea_id} no pertenece a esta compra` };
+    const nuevo = Number(req.precio_unitario);
+    if (!Number.isFinite(nuevo) || nuevo <= 0) {
+      throw { status: 400, message: `Precio inválido para ${linea.nombre_producto}` };
+    }
+    solicitudes.push({ linea, precioNuevo: Math.round(nuevo) });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const editadas = [];
+    const costoNoAjustado = [];
+
+    for (const { linea, precioNuevo } of solicitudes) {
+      const precioViejo = Math.round(Number(linea.precio_unitario));
+      if (precioNuevo === precioViejo) continue;      // no-op → idempotente
+      const deltaUnit = precioNuevo - precioViejo;
+
+      // 1) Actualizar la línea de compra
+      await client.query(
+        `UPDATE lineas_compra SET precio_unitario = $1 WHERE id = $2 AND compra_id = $3`,
+        [precioNuevo, linea.id, compraId]
+      );
+
+      // 2) Cascada al costo del inventario
+      if (linea.imei) {
+        // Serial: costo exacto por unidad. Se ancla al negocio por sucursal y se
+        // prefiere la fila que sigue en inventario (no vendida/prestada); si ya
+        // salió, la más reciente de ese IMEI. No se agrega por IMEI (fan-out).
+        const { rows } = await client.query(
+          `SELECT s.id FROM seriales s
+           JOIN productos_serial ps ON ps.id = s.producto_id
+           WHERE UPPER(TRIM(s.imei)) = UPPER(TRIM($1)) AND ps.sucursal_id = $2
+           ORDER BY (s.vendido OR s.prestado) ASC, s.id DESC
+           LIMIT 1`,
+          [linea.imei, compra.sucursal_id]
+        );
+        if (rows.length) {
+          await client.query(`UPDATE seriales SET costo_compra = $1 WHERE id = $2`, [precioNuevo, rows[0].id]);
+        }
+
+      } else if (linea.variante_id) {
+        const { rows } = await client.query(
+          `SELECT stock, costo_unitario, producto_id FROM variantes_atributo WHERE id = $1`,
+          [linea.variante_id]
+        );
+        if (rows.length) {
+          const nuevoCosto = _ajustarCostoPromedioDelta(rows[0].stock, rows[0].costo_unitario, linea.cantidad, deltaUnit);
+          if (nuevoCosto == null) costoNoAjustado.push(linea.nombre_producto);
+          else {
+            await variantesRepo.actualizarCostoVarianteEnTx(client, linea.variante_id, nuevoCosto);
+            await variantesRepo.sincronizarCostoProductoEnTx(client, rows[0].producto_id, nuevoCosto);
+          }
+        }
+
+      } else if (linea.atributo_id) {
+        const { rows } = await client.query(
+          `SELECT stock, costo_unitario, producto_id FROM atributos_producto WHERE id = $1`,
+          [linea.atributo_id]
+        );
+        if (rows.length) {
+          const nuevoCosto = _ajustarCostoPromedioDelta(rows[0].stock, rows[0].costo_unitario, linea.cantidad, deltaUnit);
+          if (nuevoCosto == null) costoNoAjustado.push(linea.nombre_producto);
+          else {
+            await variantesRepo.actualizarCostoAtributoEnTx(client, linea.atributo_id, nuevoCosto);
+            await variantesRepo.sincronizarCostoProductoEnTx(client, rows[0].producto_id, nuevoCosto);
+          }
+        }
+
+      } else if (linea.producto_id) {
+        const { rows } = await client.query(
+          `SELECT stock, costo_unitario FROM productos_cantidad WHERE id = $1`,
+          [linea.producto_id]
+        );
+        if (rows.length) {
+          const nuevoCosto = _ajustarCostoPromedioDelta(rows[0].stock, rows[0].costo_unitario, linea.cantidad, deltaUnit);
+          if (nuevoCosto == null) costoNoAjustado.push(linea.nombre_producto);
+          else await comprasRepo.actualizarCostoPromedio(client, linea.producto_id, nuevoCosto);
+        }
+      }
+
+      editadas.push({
+        linea_id:        linea.id,
+        nombre:          linea.nombre_producto,
+        imei:            linea.imei || null,
+        precio_anterior: precioViejo,
+        precio_nuevo:    precioNuevo,
+      });
+    }
+
+    // 3) Recalcular el total de la compra desde sus líneas
+    const { rows: totRows } = await client.query(
+      `UPDATE compras SET total = sub.t
+       FROM (SELECT COALESCE(SUM(cantidad * precio_unitario), 0) AS t
+             FROM lineas_compra WHERE compra_id = $1) sub
+       WHERE compras.id = $1
+       RETURNING compras.total`,
+      [compraId]
+    );
+    const totalNuevo = Number(totRows[0].total);
+
+    // 4) Ajustar la deuda con el proveedor: el Cargo del acreedor pasa a valer el
+    //    nuevo total. El saldo (por compra y global) se deriva de Cargo − Abonos;
+    //    si lo pagado supera el total corregido, queda como saldo a favor.
+    if (editadas.length > 0) {
+      await client.query(
+        `UPDATE movimientos_acreedor SET valor = $1 WHERE compra_id = $2 AND tipo = 'Cargo'`,
+        [totalNuevo, compraId]
+      );
+    }
+
+    await client.query('COMMIT');
+    return {
+      compra_id:         compraId,
+      sucursal_id:       compra.sucursal_id,
+      numero:            compra.numero ?? compraId,
+      total_anterior:    Number(compra.total),
+      total_nuevo:       totalNuevo,
+      lineas_editadas:   editadas,
+      costo_no_ajustado: costoNoAjustado,
+      motivo:            motivo || null,
+    };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+};
+
+module.exports = { getCompras, getCompraById, getComprasByProveedor, registrarCompra, getComprasPaginadas, cancelarCompra, devolverCompra, editarPreciosCompra };

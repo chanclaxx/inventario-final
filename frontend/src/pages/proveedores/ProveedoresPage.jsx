@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { buscarCompras as buscarComprasApi } from '../../api/busqueda.api';
 import { getProveedores, crearProveedor, actualizarProveedor } from '../../api/proveedores.api';
-import { getComprasByProveedor, getCompraById, getComprasPaginadas, cancelarCompra as cancelarCompraApi, devolverCompra as devolverCompraApi } from '../../api/compras.api';
+import { getComprasByProveedor, getCompraById, getComprasPaginadas, cancelarCompra as cancelarCompraApi, devolverCompra as devolverCompraApi, editarPreciosCompra as editarPreciosCompraApi } from '../../api/compras.api';
 import { getAcreedores, registrarMovimiento as registrarMovAcreedor, getComprasConSaldo, getAbonosPorCargo } from '../../api/acreedores.api';
 import { formatCOP, formatFechaHora } from '../../utils/formatters';
 import { Button }      from '../../components/ui/Button';
@@ -21,7 +21,7 @@ import { useAuth } from '../../context/useAuth';
 import {
   Truck, Plus, ShoppingCart, ChevronRight, ChevronLeft, ChevronDown, ChevronUp,
   Package, Hash, User, RefreshCw, ArrowLeftRight, ShoppingBag, Repeat,
-  Search, ScanLine, Calculator, Undo2,
+  Search, ScanLine, Calculator, Undo2, Pencil,
 } from 'lucide-react';
 
 // ─── API helpers ──────────────────────────────────────────────────────────────
@@ -487,12 +487,18 @@ function TabRetomas() {
 
 function ModalDetalleCompra({ compraId, onClose }) {
   const queryClient = useQueryClient();
+  const { usuario }  = useAuth();
+  const esAdmin      = usuario?.rol === 'admin_negocio';
   const [confirmando, setConfirmando] = useState(false);
   const [errorCancel, setErrorCancel] = useState('');
   const [modoDevolucion, setModoDevolucion] = useState(false);
   const [cantidades, setCantidades] = useState({});   // { linea_id: cantidad }
   const [motivo, setMotivo]         = useState('');
   const [errorDevol, setErrorDevol] = useState('');
+  const [modoEditar, setModoEditar]   = useState(false);
+  const [precios, setPrecios]         = useState({});  // { linea_id: precio_unitario }
+  const [motivoEditar, setMotivoEditar] = useState('');
+  const [errorEditar, setErrorEditar] = useState('');
 
   const { data, isLoading } = useQuery({
     queryKey: ['compra-detalle', compraId],
@@ -529,8 +535,58 @@ function ModalDetalleCompra({ compraId, onClose }) {
     onError: (err) => setErrorDevol(err.response?.data?.error || 'Error al registrar la devolución'),
   });
 
+  const mutEditar = useMutation({
+    mutationFn: (lineas) => editarPreciosCompraApi(compraId, { lineas, motivo: motivoEditar.trim() || undefined }),
+    onSuccess: () => {
+      invalidarCompras();
+      // El costo del inventario cambió: refrescar vistas de inventario
+      // (reportes y valor de inventario se invalidan globalmente al mutar).
+      ['productos-serial', 'productos-cantidad', 'seriales'].forEach((key) =>
+        queryClient.invalidateQueries({ queryKey: [key], exact: false }));
+      setModoEditar(false);
+      setPrecios({});
+      setMotivoEditar('');
+    },
+    onError: (err) => setErrorEditar(err.response?.data?.error || 'Error al corregir los precios'),
+  });
+
   const esCancelada = data?.estado === 'Cancelada';
   const esCredito   = ['Credito', 'Fiado'].includes(data?.metodo);
+
+  // ── Edición de precios ──────────────────────────────────────────────────────
+  const abrirEdicion = () => {
+    const inicial = {};
+    (data?.lineas || []).forEach((l) => { inicial[l.id] = Math.round(Number(l.precio_unitario)); });
+    setPrecios(inicial);
+    setMotivoEditar('');
+    setErrorEditar('');
+    setModoEditar(true);
+  };
+  const cerrarEdicion = () => { setModoEditar(false); setPrecios({}); setMotivoEditar(''); setErrorEditar(''); };
+  const setPrecioLinea = (id, val) => setPrecios((prev) => ({ ...prev, [id]: val }));
+
+  const preciosCambiados = (data?.lineas || [])
+    .map((l) => ({
+      linea_id:        l.id,
+      precio_unitario: precios[l.id],
+      original:        Math.round(Number(l.precio_unitario)),
+    }))
+    .filter((x) => x.precio_unitario !== '' && x.precio_unitario != null
+      && Number(x.precio_unitario) > 0
+      && Number(x.precio_unitario) !== x.original)
+    .map((x) => ({ linea_id: x.linea_id, precio_unitario: Number(x.precio_unitario) }));
+
+  const totalEditado = (data?.lineas || []).reduce((s, l) => {
+    const p = precios[l.id];
+    const precio = (p === '' || p == null) ? Number(l.precio_unitario) : Number(p);
+    return s + Number(l.cantidad) * precio;
+  }, 0);
+
+  const handleConfirmarEdicion = () => {
+    setErrorEditar('');
+    if (!preciosCambiados.length) return setErrorEditar('Cambia el precio de al menos un producto');
+    mutEditar.mutate(preciosCambiados);
+  };
 
   const setCantidadLinea = (id, val) => setCantidades((prev) => ({ ...prev, [id]: val }));
 
@@ -648,6 +704,16 @@ function ModalDetalleCompra({ compraId, onClose }) {
                         )}
                       </div>
                     )}
+                    {modoEditar && (
+                      <div className="flex items-center justify-between gap-2 border-t border-gray-200 pt-2">
+                        <span className="text-xs font-medium text-indigo-700">Precio unitario (costo)</span>
+                        <InputMoneda
+                          value={precios[l.id] ?? ''}
+                          onChange={(v) => setPrecioLinea(l.id, v)}
+                          className="w-32 text-right px-2 py-1 bg-white border border-indigo-200 rounded-lg
+                            text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" />
+                      </div>
+                    )}
                   </div>
                   );
                 })
@@ -656,7 +722,7 @@ function ModalDetalleCompra({ compraId, onClose }) {
 
           <div className="flex justify-between items-center bg-blue-50 rounded-xl px-4 py-3">
             <span className="text-sm font-semibold text-gray-700">Total de la compra</span>
-            <span className="text-base font-bold text-blue-700">{formatCOP(data?.total)}</span>
+            <span className="text-base font-bold text-blue-700">{formatCOP(modoEditar ? totalEditado : data?.total)}</span>
           </div>
 
           {data?.notas && (
@@ -727,8 +793,45 @@ function ModalDetalleCompra({ compraId, onClose }) {
             </div>
           )}
 
+          {/* Panel de corrección de precios (solo admin_negocio) */}
+          {!esCancelada && modoEditar && (
+            <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4 flex flex-col gap-3">
+              <p className="text-sm font-semibold text-indigo-800">Corregir precios de compra</p>
+              <p className="text-xs text-indigo-700 leading-relaxed">
+                Ajusta arriba el precio unitario que se registró mal. Se actualizará el
+                <strong> costo del inventario</strong> (equipos/productos), el
+                <strong> total de la compra</strong> y la <strong>deuda con el proveedor</strong>.
+                No mueve la caja ni los abonos ya registrados.
+              </p>
+              <Input
+                label="Motivo (opcional)"
+                placeholder="Ej: se digitó mal el precio de costo…"
+                value={motivoEditar}
+                onChange={(e) => setMotivoEditar(e.target.value)}
+              />
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-indigo-700">Nuevo total</span>
+                <span className="text-sm font-bold text-indigo-800">{formatCOP(totalEditado)}</span>
+              </div>
+              {errorEditar && <p className="text-xs text-red-600 font-medium">{errorEditar}</p>}
+              <div className="flex gap-2">
+                <button
+                  onClick={cerrarEdicion}
+                  className="flex-1 py-2 rounded-xl text-sm border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors">
+                  Cancelar
+                </button>
+                <button
+                  onClick={handleConfirmarEdicion}
+                  disabled={mutEditar.isPending || preciosCambiados.length === 0}
+                  className="flex-1 py-2 rounded-xl text-sm bg-indigo-600 hover:bg-indigo-700 text-white font-medium transition-colors disabled:opacity-50">
+                  {mutEditar.isPending ? 'Guardando…' : 'Guardar precios'}
+                </button>
+              </div>
+            </div>
+          )}
+
           <div className="flex gap-2 flex-wrap">
-            {!esCancelada && !confirmando && !modoDevolucion && (
+            {!esCancelada && !confirmando && !modoDevolucion && !modoEditar && (
               <>
                 <button
                   onClick={() => { setModoDevolucion(true); setErrorDevol(''); }}
@@ -736,6 +839,14 @@ function ModalDetalleCompra({ compraId, onClose }) {
                     hover:bg-amber-100 transition-colors font-medium flex items-center gap-1.5">
                   <Undo2 size={14} /> Devolver mercancía
                 </button>
+                {esAdmin && (
+                  <button
+                    onClick={abrirEdicion}
+                    className="px-3 py-2 rounded-xl text-sm border border-indigo-200 text-indigo-700 bg-indigo-50
+                      hover:bg-indigo-100 transition-colors font-medium flex items-center gap-1.5">
+                    <Pencil size={14} /> Corregir precios
+                  </button>
+                )}
                 <button
                   onClick={() => { setConfirmando(true); setErrorCancel(''); }}
                   className="px-3 py-2 rounded-xl text-sm border border-red-200 text-red-600 bg-red-50

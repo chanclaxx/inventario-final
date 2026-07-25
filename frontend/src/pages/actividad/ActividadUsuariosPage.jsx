@@ -104,6 +104,19 @@ function ModalDetalle({ item, onClose }) {
             <FilaDetalle icono={FileText}   label="N.° factura"    value={d.numero_factura}   mono />
             <FilaDetalle icono={Tag}        label="Estado"         value={d.estado} />
             <FilaDetalle icono={CreditCard} label="Método de pago" value={d.metodo} />
+            {/* Corrección de precios: total_nuevo solo lo trae este evento */}
+            {d.total_nuevo != null && (
+              <>
+                <FilaDetalle icono={CreditCard} label="Total anterior"   value={formatCOP(Number(d.total_anterior))} />
+                <FilaDetalle icono={CreditCard} label="Total corregido"  value={formatCOP(Number(d.total_nuevo))} />
+                {d.lineas != null && (
+                  <FilaDetalle icono={Package} label="Productos ajustados" value={`${d.lineas} ítem(s)`} />
+                )}
+                {d.motivo && (
+                  <FilaDetalle icono={StickyNote} label="Motivo" value={d.motivo} />
+                )}
+              </>
+            )}
           </>
         );
       case 'traslados':

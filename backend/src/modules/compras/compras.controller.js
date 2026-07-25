@@ -127,4 +127,28 @@ const devolverCompra = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-module.exports = { getCompras, getCompraById, getComprasByProveedor, registrarCompra, getComprasPaginadas, cancelarCompra, devolverCompra };
+const editarPreciosCompra = async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id) || id < 1) {
+      return res.status(400).json({ ok: false, error: 'ID de compra inválido' });
+    }
+    const data = await service.editarPreciosCompra(req.user.negocio_id, id, {
+      lineas:     req.body.lineas,
+      motivo:     req.body.motivo,
+      usuario_id: req.user.id,
+    });
+    audit.registrar(req.user.negocio_id, req.user.id, 'Precios de compra corregidos', 'compras', id, {
+      sucursal_id:    data.sucursal_id,
+      numero:         data.numero,
+      total_anterior: data.total_anterior,
+      total_nuevo:    data.total_nuevo,
+      lineas:         data.lineas_editadas.length,
+      motivo:         data.motivo,
+      detalle:        data.lineas_editadas,
+    });
+    res.json({ ok: true, data, message: 'Precios corregidos correctamente' });
+  } catch (err) { next(err); }
+};
+
+module.exports = { getCompras, getCompraById, getComprasByProveedor, registrarCompra, getComprasPaginadas, cancelarCompra, devolverCompra, editarPreciosCompra };
