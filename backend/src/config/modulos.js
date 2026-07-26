@@ -19,6 +19,7 @@ const MODULOS = [
   { key: 'caja',        label: 'Caja'        },
   { key: 'tesoreria',   label: 'Tesorería'   },
   { key: 'traslados',   label: 'Traslados'   },
+  { key: 'red_interna', label: 'Bodega'      },
   { key: 'reportes',    label: 'Reportes'    },
   { key: 'acreedores',  label: 'Acreedores'  },
   // 'config' y 'inicio' (dashboard) NO aparecen aquí:
@@ -41,14 +42,19 @@ const PERMISOS_BASE = {
     'caja',
     'tesoreria',
     'traslados',
+    'red_interna',
     'reportes',
     'acreedores',
   ],
+  // El vendedor entra a la red interna a propósito: es quien confirma la
+  // recepción de las remisiones en el local. Sin el flag `red_interna_activa`
+  // del negocio el módulo no existe, así que esto no cambia nada para nadie más.
   vendedor: [
     'inventario',
     'facturar',
     'servicios',
     'prestamos',
+    'red_interna',
   ],
 };
 

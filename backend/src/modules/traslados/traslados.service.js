@@ -112,9 +112,33 @@ const buscarEquivalentes = async (negocioId, sucursalDestinoId, items) => {
 
 // ─── Ejecutar traslado ────────────────────────────────────────────────────────
 
+// Con la red interna activa, la mercancía solo se mueve por remisiones: así
+// queda documentada, valorizada y rastreable en la consignación de cada local.
+// Un traslado libre por fuera dejaría unidades sin dueño contable.
+//
+// No aplica a negocios sin la feature: `activa: false` sale del catch y de la
+// lectura normal, y esta función retorna sin hacer nada.
+const _bloquearSiRedInterna = async (negocioId) => {
+  let red;
+  try {
+    const { getConfigRed } = require('../../middlewares/redInterna.middleware');
+    red = await getConfigRed(negocioId);
+  } catch {
+    return; // ante cualquier problema leyendo la config, no se bloquea nada
+  }
+  if (!red?.activa || !red.bloquear_traslados) return;
+  throw {
+    status: 409,
+    message: 'Este negocio mueve la mercancía por remisiones de bodega. '
+           + 'Usa "Despachar" desde la bodega o "Devolver a bodega" desde el local.',
+  };
+};
+
 const ejecutarTraslado = async (negocioId, usuarioId, {
   sucursal_origen_id, sucursal_destino_id, notas, lineas,
 }) => {
+  await _bloquearSiRedInterna(negocioId);
+
   // Validar sucursales antes de la transacción
   await _verificarSucursalNegocio(sucursal_origen_id, negocioId);
   await _verificarSucursalNegocio(sucursal_destino_id, negocioId);

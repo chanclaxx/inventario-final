@@ -6,7 +6,7 @@ import { usePermisos } from '../../hooks/usePermisos.js';
 import {
   LayoutDashboard, Package, FileText, Handshake,
   Wallet, BarChart2, Settings, LogOut, ShoppingCart,
-  Users, Truck, Wrench, ArrowRightLeft, Search, Activity, HandCoins,
+  Users, Truck, Wrench, ArrowRightLeft, Search, Activity, HandCoins, Warehouse,
 } from 'lucide-react';
 import { getSucursales } from '../../api/sucursales.api.js';
 import useCarritoStore  from '../../store/carritoStore.js';
@@ -23,7 +23,11 @@ const NAV_ITEMS = [
   { path: '/prestamos',    label: 'Préstamos',    Icn: Handshake,   modulo: 'prestamos'                     },
   { path: '/caja',        label: 'Caja',        Icn: Wallet,          modulo: 'caja'                          },
   { path: '/tesoreria',   label: 'Tesorería',   Icn: HandCoins,       modulo: 'tesoreria'                     },
-  { path: '/traslados',   label: 'Traslados',   Icn: ArrowRightLeft,  modulo: 'traslados', multiSucursal: true },
+  { path: '/traslados',   label: 'Traslados',   Icn: ArrowRightLeft,  modulo: 'traslados', multiSucursal: true, ocultarSiRed: true },
+  // Red interna: NO agrega un ítem al menú, REEMPLAZA a "Traslados" cuando el
+  // negocio activa la distribución desde bodega. Así la barra no crece y el
+  // usuario nunca ve dos opciones que hacen cosas parecidas.
+  { path: '/bodega',      label: 'Bodega',      Icn: Warehouse,       modulo: 'red_interna', soloSiRed: true },
   { path: '/reportes',    label: 'Reportes',    Icn: BarChart2,       modulo: 'reportes'                      },
   { path: '/acreedores',  label: 'Acreedores',  Icn: Users,           modulo: 'acreedores'                    },
   { path: '/busqueda',    label: 'Búsqueda',    Icn: Search                                                   },
@@ -31,9 +35,13 @@ const NAV_ITEMS = [
   { path: '/config',             label: 'Config',    Icn: Settings, soloAdmin: true                         },
 ];
 
-function esItemVisible(item, puedeVer, esAdmin, totalSucursales, esModoVista) {
+function esItemVisible(item, puedeVer, esAdmin, totalSucursales, esModoVista, redActiva) {
   // En modo vista solo se muestra el inventario
   if (esModoVista) return item.path === '/inventario';
+  // Red interna encendida: "Bodega" entra y "Traslados" sale (la mercancía se
+  // mueve por remisiones). Apagada: todo queda exactamente como estaba.
+  if (item.soloSiRed   && !redActiva) return false;
+  if (item.ocultarSiRed && redActiva) return false;
   if (item.multiSucursal && totalSucursales < 2) return false;
   if (item.soloAdmin) return esAdmin;
   if (item.modulo)    return puedeVer(item.modulo);
@@ -131,8 +139,12 @@ export function Navbar() {
     navigate('/login');
   };
 
+  // La config del negocio ya se consulta arriba para `nav_config`: el flag de
+  // red interna sale de ahí sin una petición extra.
+  const redActiva = configData?.red_interna_activa === '1';
+
   const itemsVisibles = itemsBase.filter((item) =>
-    esItemVisible(item, puedeVer, esAdmin, totalSucursales, esModoVista)
+    esItemVisible(item, puedeVer, esAdmin, totalSucursales, esModoVista, redActiva)
   );
 
   return (

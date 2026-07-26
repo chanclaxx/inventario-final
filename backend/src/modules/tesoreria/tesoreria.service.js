@@ -2,7 +2,10 @@ const crypto = require('crypto');
 const repo   = require('./tesoreria.repository');
 const { pool } = require('../../config/db');
 
-const TIPOS_CUENTA     = ['efectivo', 'banco', 'billetera', 'corresponsal', 'divisa', 'otro'];
+// 'transito' lo crea automáticamente la red interna (remesas en camino de un
+// local a la bodega). No se ofrece en el selector del frontend: se acepta aquí
+// solo para que la cuenta se pueda renombrar sin que la validación la rechace.
+const TIPOS_CUENTA     = ['efectivo', 'banco', 'billetera', 'corresponsal', 'divisa', 'transito', 'otro'];
 const CATEGORIAS_MOV   = ['ingreso', 'retiro', 'gasto', 'mercancia', 'ajuste'];
 const MONEDAS          = ['COP', 'USD'];
 

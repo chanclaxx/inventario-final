@@ -23,6 +23,7 @@ import AcreedoresPage       from './pages/acreedores/AcreedoresPage';
 import ProveedoresPage      from './pages/proveedores/ProveedoresPage';
 import ServiciosPage        from './pages/servicios/ServiciosPage';
 import TrasladosPage        from './pages/traslados/TrasladosPage';
+import RedInternaPage       from './pages/red-interna/RedInternaPage';
 import TesoreriaPage        from './pages/tesoreria/TesoreriaPage';
 import BusquedaPage         from './pages/busqueda/BusquedaPage';
 
@@ -65,6 +66,12 @@ export default function App() {
               } />
               <Route path="/traslados" element={
                 <ModuloGuard modulo="traslados"><TrasladosPage /></ModuloGuard>
+              } />
+              {/* Red interna (bodega → locales). Solo existe para los negocios
+                  que activaron la feature: el backend responde 404 al resto y
+                  la página muestra un estado vacío explicativo. */}
+              <Route path="/bodega" element={
+                <ModuloGuard modulo="red_interna"><RedInternaPage /></ModuloGuard>
               } />
               <Route path="/tesoreria" element={
                 <ModuloGuard modulo="tesoreria"><TesoreriaPage /></ModuloGuard>

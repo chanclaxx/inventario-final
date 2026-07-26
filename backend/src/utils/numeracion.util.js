@@ -14,6 +14,10 @@ const TABLAS = {
   prestamo:       'prestamos',
   orden_servicio: 'ordenes_servicio',
   compra:         'compras',
+  // Red interna. Consecutivos propios: una remisión NO es una venta y no puede
+  // consumir números del consecutivo de facturas.
+  remision:       'remisiones',
+  remesa:         'remesas',
 };
 
 // Cache: una vez detectada la infraestructura no se vuelve a consultar.

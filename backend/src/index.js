@@ -83,6 +83,7 @@ app.use('/api/domiciliarios',      protegida, require('./modules/domiciliarios/d
 app.use('/api/vendedores',         protegida, require('./modules/vendedores/vendedores.routes'));
 app.use('/api/servicios',          protegida, require('./modules/servicios/servicios.routes'));
 app.use('/api/traslados',          protegida, require('./modules/traslados/traslados.routes'));
+app.use('/api/red-interna',        protegida, require('./modules/red-interna/redInterna.routes'));
 app.use('/api/busqueda',           protegida, require('./modules/busqueda/busqueda.routes'));
 app.use('/api/tesoreria',          protegida, require('./modules/tesoreria/tesoreria.routes'));
 app.use('/api/tipos-caracteristica', protegida, require('./modules/tipos-caracteristica/tipos-caracteristica.routes'));

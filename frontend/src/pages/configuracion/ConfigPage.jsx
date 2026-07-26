@@ -8,6 +8,7 @@ import { useAuth }         from '../../context/useAuth';
 import { exportarInventarioPorLineasNegocio } from '../../utils/exportarInventarioPorLineasNegocio';
 import { UsuariosConfig }    from './UsuariosConfig';
 import { SucursalesConfig }  from './SucursalesConfig';
+import { RedInternaConfig } from './RedInternaConfig';
 import { VendedoresConfig }  from './VendedoresConfig';
 import { PasswordConfig }    from './PasswordConfig';
 import { MetodosPagoConfig } from './MetodosPagoConfig';
@@ -1407,6 +1408,10 @@ function SeccionEquipo({ valores, set }) {
 
       <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
         <SucursalesConfig />
+      </div>
+
+      <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
+        <RedInternaConfig valores={valores} set={set} />
       </div>
 
       <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">

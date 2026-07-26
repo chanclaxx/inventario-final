@@ -23,7 +23,15 @@ const saveConfig = async (negocioId, datos) => {
     }
   }
 
-  return repo.updateMany(negocioId, datosProcesados);
+  const resultado = await repo.updateMany(negocioId, datosProcesados);
+
+  // La config de red interna se cachea 60s en su middleware; al guardarla desde
+  // Ajustes hay que invalidar para que el cambio se sienta de inmediato.
+  if (Object.keys(datosProcesados).some((k) => k.startsWith('red_interna_'))) {
+    require('../../middlewares/redInterna.middleware').invalidarCache(negocioId);
+  }
+
+  return resultado;
 };
 
 // Verifica un PIN ingresado contra el hash almacenado.

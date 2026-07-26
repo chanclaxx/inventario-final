@@ -35,6 +35,118 @@ const runMigrations = async () => {
       ON gastos_fijos (sucursal_id) WHERE activo;
   `);
 
+  // Red interna (bodega → locales, modelo consignación) — ver migrations/20260725_red_interna.sql
+  //
+  // 100% aditiva: crea 4 tablas nuevas y NINGÚN ALTER sobre tablas existentes.
+  // Un negocio sin el flag `red_interna_activa` jamás escribe en ellas, así que
+  // para el resto de clientes son 4 tablas vacías sin costo ni efecto.
+  //
+  // Va en su propio try/catch A PROPÓSITO: runMigrations() corre antes de
+  // app.listen(), así que un fallo aquí (permisos, tipo de FK inesperado en una
+  // BD vieja) dejaría el servidor sin arrancar para TODOS los negocios. Ante un
+  // error se registra y se sigue: solo la red interna queda sin infraestructura,
+  // y su middleware ya responde 503 si las tablas no existen.
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS remisiones (
+        id                  BIGSERIAL     PRIMARY KEY,
+        negocio_id          INTEGER       NOT NULL REFERENCES negocios(id)   ON DELETE RESTRICT,
+        numero              INTEGER,
+        tipo                TEXT          NOT NULL DEFAULT 'entrega',
+        sucursal_origen_id  INTEGER       NOT NULL REFERENCES sucursales(id) ON DELETE RESTRICT,
+        sucursal_destino_id INTEGER       NOT NULL REFERENCES sucursales(id) ON DELETE RESTRICT,
+        traslado_id         INTEGER       REFERENCES traslados(id)           ON DELETE RESTRICT,
+        estado              TEXT          NOT NULL DEFAULT 'En transito',
+        valor_total         NUMERIC(14,2) NOT NULL DEFAULT 0,
+        usuario_emisor_id   INTEGER,
+        usuario_receptor_id INTEGER,
+        fecha_emision       TIMESTAMP     NOT NULL DEFAULT NOW(),
+        fecha_recepcion     TIMESTAMP,
+        clave_idempotencia  TEXT,
+        notas               TEXT,
+        CONSTRAINT remisiones_tipo_chk   CHECK (tipo   IN ('entrega', 'devolucion')),
+        CONSTRAINT remisiones_estado_chk CHECK (estado IN ('En transito', 'Recibida', 'Parcial', 'Anulada')),
+        CONSTRAINT remisiones_suc_distintas_chk CHECK (sucursal_origen_id <> sucursal_destino_id)
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_remisiones_idem
+        ON remisiones (clave_idempotencia) WHERE clave_idempotencia IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_remisiones_negocio_destino
+        ON remisiones (negocio_id, sucursal_destino_id, estado);
+      CREATE INDEX IF NOT EXISTS idx_remisiones_origen
+        ON remisiones (sucursal_origen_id, fecha_emision DESC);
+
+      CREATE TABLE IF NOT EXISTS lineas_remision (
+        id                  BIGSERIAL     PRIMARY KEY,
+        remision_id         BIGINT        NOT NULL REFERENCES remisiones(id) ON DELETE CASCADE,
+        tipo                TEXT          NOT NULL,
+        serial_id           INTEGER       REFERENCES seriales(id)            ON DELETE RESTRICT,
+        imei                TEXT,
+        producto_origen_id  INTEGER,
+        producto_destino_id INTEGER,
+        cantidad            INTEGER       NOT NULL DEFAULT 1,
+        cantidad_recibida   INTEGER,
+        valor_interno       NUMERIC(14,2) NOT NULL DEFAULT 0,
+        estado_linea        TEXT          NOT NULL DEFAULT 'Pendiente',
+        nombre_producto     TEXT,
+        CONSTRAINT lineas_remision_tipo_chk   CHECK (tipo IN ('serial', 'cantidad')),
+        CONSTRAINT lineas_remision_estado_chk CHECK (estado_linea IN ('Pendiente', 'Recibida', 'Faltante', 'Devuelta'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_lineas_remision_remision ON lineas_remision (remision_id);
+      CREATE INDEX IF NOT EXISTS idx_lineas_remision_serial   ON lineas_remision (serial_id) WHERE serial_id IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_lineas_remision_producto ON lineas_remision (producto_destino_id) WHERE tipo = 'cantidad';
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_lineas_remision_serial_viva
+        ON lineas_remision (serial_id)
+        WHERE serial_id IS NOT NULL AND estado_linea IN ('Pendiente', 'Recibida');
+
+      CREATE TABLE IF NOT EXISTS remesas (
+        id                  BIGSERIAL     PRIMARY KEY,
+        negocio_id          INTEGER       NOT NULL REFERENCES negocios(id)   ON DELETE RESTRICT,
+        numero              INTEGER,
+        sucursal_origen_id  INTEGER       NOT NULL REFERENCES sucursales(id) ON DELETE RESTRICT,
+        sucursal_destino_id INTEGER       NOT NULL REFERENCES sucursales(id) ON DELETE RESTRICT,
+        cuenta_origen_id    INTEGER,
+        cuenta_transito_id  INTEGER,
+        cuenta_destino_id   INTEGER,
+        valor               NUMERIC(14,2) NOT NULL CHECK (valor > 0),
+        metodo              TEXT,
+        estado              TEXT          NOT NULL DEFAULT 'En transito',
+        mov_salida_id       BIGINT,
+        mov_transito_id     BIGINT,
+        mov_entrada_id      BIGINT,
+        usuario_envia_id    INTEGER,
+        usuario_recibe_id   INTEGER,
+        fecha_envio         TIMESTAMP     NOT NULL DEFAULT NOW(),
+        fecha_recepcion     TIMESTAMP,
+        clave_idempotencia  TEXT,
+        notas               TEXT,
+        CONSTRAINT remesas_estado_chk CHECK (estado IN ('En transito', 'Recibida', 'Anulada'))
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_remesas_idem
+        ON remesas (clave_idempotencia) WHERE clave_idempotencia IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_remesas_origen  ON remesas (negocio_id, sucursal_origen_id, estado);
+      CREATE INDEX IF NOT EXISTS idx_remesas_destino ON remesas (negocio_id, sucursal_destino_id, estado);
+
+      CREATE TABLE IF NOT EXISTS movimientos_cuenta_interna (
+        id              BIGSERIAL     PRIMARY KEY,
+        negocio_id      INTEGER       NOT NULL REFERENCES negocios(id)   ON DELETE RESTRICT,
+        sucursal_id     INTEGER       NOT NULL REFERENCES sucursales(id) ON DELETE RESTRICT,
+        tipo            TEXT          NOT NULL,
+        valor           NUMERIC(14,2) NOT NULL DEFAULT 0,
+        saldo_congelado NUMERIC(14,2),
+        mov_dinero_id   BIGINT,
+        concepto        TEXT,
+        usuario_id      INTEGER,
+        fecha           TIMESTAMP     NOT NULL DEFAULT NOW(),
+        anulado         BOOLEAN       NOT NULL DEFAULT FALSE,
+        CONSTRAINT mci_tipo_chk CHECK (tipo IN ('GastoAutorizado', 'Ajuste', 'Corte'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_mci_sucursal
+        ON movimientos_cuenta_interna (negocio_id, sucursal_id, fecha DESC) WHERE NOT anulado;
+    `);
+  } catch (err) {
+    console.error('⚠️  Migración red interna no aplicada (el resto del sistema sigue normal):', err.message);
+  }
+
   // Aplicadas manualmente en producción:
   // - lineas_traslado: revertida_por_usuario_id, fecha_reversion
   // - traslados: revertido_por_usuario_id, fecha_reversion
