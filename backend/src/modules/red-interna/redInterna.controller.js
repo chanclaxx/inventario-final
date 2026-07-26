@@ -38,6 +38,26 @@ const buscarParaDespacho = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+// Previsualiza a qué referencia del destino va cada producto, ANTES de
+// despachar. Es lo que evita crear referencias duplicadas a ciegas.
+const previsualizarDestino = async (req, res, next) => {
+  try {
+    const { sucursal_destino_id, lineas } = req.body;
+    const data = await service.previsualizarDestino(req, { sucursal_destino_id, lineas });
+    res.json({ ok: true, data });
+  } catch (err) { next(err); }
+};
+
+// Referencias de una sucursal, para elegir el destino a mano.
+const catalogoReferencias = async (req, res, next) => {
+  try {
+    const data = await service.catalogoReferencias(req, {
+      sucursalId: req.params.sucursalId, tipo: req.query.tipo, q: req.query.q,
+    });
+    res.json({ ok: true, data });
+  } catch (err) { next(err); }
+};
+
 const catalogoCantidad = async (req, res, next) => {
   try {
     const data = await service.catalogoCantidad(req, req.query.q || '');
@@ -212,6 +232,13 @@ const getConciliacion = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+// Diagnóstico del catálogo: qué referencias parecen duplicadas hoy.
+const getReferenciasDuplicadas = async (req, res, next) => {
+  try {
+    res.json({ ok: true, data: await service.getReferenciasDuplicadas(req) });
+  } catch (err) { next(err); }
+};
+
 const getSalud = async (req, res, next) => {
   try {
     res.json({ ok: true, data: await service.getSalud(req) });
@@ -221,9 +248,10 @@ const getSalud = async (req, res, next) => {
 module.exports = {
   getPanel, getSucursales, getContexto,
   buscarParaDespacho, catalogoCantidad, resolverItems,
+  previsualizarDestino, catalogoReferencias,
   despachar, recibir, anularRemision, devolver,
   listarRemisiones, getRemision,
   enviarRemesa, confirmarRemesa, anularRemesa, listarRemesas,
   gastoAutorizado, ajuste, getMovimientosCuenta,
-  getConciliacion, getSalud,
+  getConciliacion, getSalud, getReferenciasDuplicadas,
 };

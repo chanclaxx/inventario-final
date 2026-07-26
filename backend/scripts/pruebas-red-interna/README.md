@@ -17,10 +17,24 @@ Se instala solo cuando se van a correr las pruebas:
 cd backend
 npm install --no-save @electric-sql/pglite   # o: npm i -D @electric-sql/pglite
 
+node scripts/pruebas-red-interna/00-aislamiento-sucursales.mjs
 node scripts/pruebas-red-interna/01-circuito-completo.mjs
 node scripts/pruebas-red-interna/02-seguridad-produccion.mjs
 node scripts/pruebas-red-interna/03-accesorios-y-codigos.mjs
+node scripts/pruebas-red-interna/04-referencias-sin-duplicar.mjs
 ```
+
+### Diagnóstico sobre datos reales (solo lectura)
+
+```bash
+node scripts/pruebas-red-interna/diagnostico-catalogo.mjs <negocio_id>
+```
+
+Se conecta a la base del `.env` y reporta qué referencias parecen duplicadas o
+quedaron sin código. **No escribe nada**: abre la sesión con
+`SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY`, así que cualquier
+intento de escritura falla en el motor. El `negocio_id` es obligatorio para no
+recorrer datos de otros clientes por accidente.
 
 Ambos salen con código 0 si todo pasa.
 
@@ -29,6 +43,31 @@ Ambos salen con código 0 si todo pasa.
 > `backend/node_modules/`. La dependencia solo se usa para correr estas pruebas.
 
 ## Qué cubre cada una
+
+### `00-aislamiento-sucursales.mjs` — 47 verificaciones · **prueba de caracterización**
+
+Deja por escrito que dos sucursales que manejan **el mismo producto** (mismo
+nombre y mismo código) siguen siendo independientes. Ejercita los repositorios
+reales de inventario, préstamos, búsqueda y reportes.
+
+Se corrió **antes** de tocar la resolución de referencias (línea base: 47/47) y
+**después** del cambio (47/47). Que dé idéntico es la prueba de que el
+aislamiento no se rompió.
+
+| # | Propiedad |
+|---|---|
+| 1 | Cada sucursal ve solo su stock, su costo y su precio |
+| 2 | La vista global agrupa por nombre pero detalla cada sucursal |
+| 3 | Vender en una no toca el stock ni los seriales de la otra |
+| 4 | Prestar en una no afecta a la otra |
+| 5 | El mismo código escaneado en cada sucursal devuelve **su** fila |
+| 6 | Ventas y utilidad se reportan por sucursal, sin mezclarse |
+| 7 | La alerta de stock bajo no se contamina entre sucursales |
+| 8 | El valor de inventario es independiente |
+| 9 | Ajustar el costo en una no mueve el de la otra |
+| 10 | El código único se valida a nivel negocio y se hereda al replicar |
+| 11 | Las garantías siguen la línea del producto |
+| 12 | Ninguna sucursal termina con el mismo producto repetido |
 
 ### `01-circuito-completo.mjs` — 51 verificaciones
 
@@ -72,6 +111,24 @@ Ambos salen con código 0 si todo pasa.
 | 6 | Liquidación de accesorios anclada en el stock del local |
 | 7 | Devolución de accesorios rebaja la consignación |
 | 8 | Un local no puede despachar: solo la bodega |
+
+### `04-referencias-sin-duplicar.mjs` — 22 verificaciones
+
+El caso reportado en producción: la bodega tiene `iPad 10 64GB` (cód. `IPAD10`)
+y el local tiene **el mismo iPad** escrito `iPad 10ma gen 64GB`, con el mismo
+código. El despacho creaba una tercera fila **sin código** que el lector no
+encontraba, y corregirla a mano tiraba un 409.
+
+| # | Escenario |
+|---|---|
+| 1 | La previsualización dice a qué referencia va cada producto y con qué confianza |
+| 2 | Despachar y recibir sin crear una sola referencia nueva |
+| 3 | El lector sigue funcionando en el local después del despacho |
+| 4 | Lo que sí es nuevo se crea **heredando el código** |
+| 5 | Despachar lo mismo otra vez no vuelve a crear |
+| 6 | Ninguna sucursal queda con el producto repetido ni con referencias mudas |
+| 7 | El usuario puede forzar el destino a mano |
+| 8 | Un id de otra sucursal se rechaza |
 
 ## Nota sobre `esquema.sql`
 

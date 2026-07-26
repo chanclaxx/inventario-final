@@ -461,6 +461,121 @@ const buscarCantidadDisponible = async (negocioId, sucursalOrigenId, q = '') => 
   return rows;
 };
 
+// Referencias de una sucursal, para que el usuario elija el destino a mano
+// cuando la resolución automática no está segura.
+const buscarReferencias = async (negocioId, sucursalId, tipo, q = '') => {
+  const filtro = (q || '').trim().toLowerCase().replace(/[%_\\]/g, '\\$&').slice(0, 60);
+
+  if (tipo === 'serial') {
+    const { rows } = await pool.query(`
+      SELECT ps.id, ps.nombre, ps.marca, ps.modelo, ps.linea_id,
+             lp.nombre AS linea_nombre,
+             COUNT(s.id) FILTER (WHERE NOT s.vendido AND NOT s.prestado)::int AS disponibles
+      FROM productos_serial ps
+      JOIN sucursales su            ON su.id = ps.sucursal_id
+      LEFT JOIN lineas_producto lp  ON lp.id = ps.linea_id
+      LEFT JOIN seriales s          ON s.producto_id = ps.id
+      WHERE su.negocio_id = $1 AND ps.sucursal_id = $2
+        AND ($3 = '' OR LOWER(ps.nombre) LIKE '%' || $3 || '%' ESCAPE '\\'
+                     OR LOWER(COALESCE(ps.marca, '')) LIKE '%' || $3 || '%' ESCAPE '\\')
+      GROUP BY ps.id, lp.nombre
+      ORDER BY ps.nombre LIMIT 50
+    `, [negocioId, sucursalId, filtro]);
+    return rows;
+  }
+
+  const { rows } = await pool.query(`
+    SELECT pc.id, pc.nombre, pc.codigo, pc.stock, pc.linea_id,
+           lp.nombre AS linea_nombre
+    FROM productos_cantidad pc
+    JOIN sucursales su           ON su.id = pc.sucursal_id
+    LEFT JOIN lineas_producto lp ON lp.id = pc.linea_id
+    WHERE su.negocio_id = $1 AND pc.sucursal_id = $2 AND pc.activo = true
+      AND ($3 = '' OR LOWER(pc.nombre) LIKE '%' || $3 || '%' ESCAPE '\\'
+                   OR LOWER(COALESCE(pc.codigo, '')) LIKE '%' || $3 || '%' ESCAPE '\\')
+    ORDER BY pc.nombre LIMIT 50
+  `, [negocioId, sucursalId, filtro]);
+  return rows;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DETECTOR DE REFERENCIAS DUPLICADAS
+//
+// Encuentra el desorden que YA existe en el catálogo. No corrige nada: fusionar
+// stock e historial adivinando sería irreversible. Solo señala, para que una
+// persona decida.
+//
+// Dos señales, de más a menos fiable:
+//   1. Mismo CÓDIGO con nombres distintos → casi seguro es el mismo producto.
+//   2. Mismo nombre normalizado repetido dentro de UNA sucursal → duplicado real.
+// ─────────────────────────────────────────────────────────────────────────────
+const getReferenciasDuplicadas = async (negocioId) => {
+  const NORMSQL = (col) => `
+    regexp_replace(trim(translate(lower(COALESCE(${col}, '')),
+      'áàäâãéèëêíìïîóòöôõúùüûñç-_', 'aaaaaeeeeiiiiooooouuuunc  ')),
+      '[[:space:]]+', ' ', 'g')`;
+
+  const [porCodigo, enMismaSucursal, mudos] = await Promise.all([
+    // 1. Mismo código, nombres distintos.
+    pool.query(`
+      SELECT pc.codigo,
+             JSON_AGG(JSON_BUILD_OBJECT(
+               'id', pc.id, 'nombre', pc.nombre, 'stock', pc.stock,
+               'sucursal_id', pc.sucursal_id, 'sucursal_nombre', su.nombre
+             ) ORDER BY pc.id) AS filas
+      FROM productos_cantidad pc
+      JOIN sucursales su ON su.id = pc.sucursal_id
+      WHERE su.negocio_id = $1 AND pc.activo = true AND pc.codigo IS NOT NULL
+      GROUP BY pc.codigo
+      HAVING COUNT(DISTINCT ${NORMSQL('pc.nombre')}) > 1
+      ORDER BY pc.codigo
+    `, [negocioId]),
+
+    // 2. Mismo nombre repetido dentro de la misma sucursal.
+    pool.query(`
+      SELECT su.nombre AS sucursal_nombre, pc.sucursal_id,
+             ${NORMSQL('pc.nombre')} AS nombre_normalizado,
+             JSON_AGG(JSON_BUILD_OBJECT(
+               'id', pc.id, 'nombre', pc.nombre, 'stock', pc.stock, 'codigo', pc.codigo
+             ) ORDER BY pc.id) AS filas
+      FROM productos_cantidad pc
+      JOIN sucursales su ON su.id = pc.sucursal_id
+      WHERE su.negocio_id = $1 AND pc.activo = true
+      GROUP BY su.nombre, pc.sucursal_id, ${NORMSQL('pc.nombre')}
+      HAVING COUNT(*) > 1
+      ORDER BY su.nombre
+    `, [negocioId]),
+
+    // 3. Referencias sin código cuando el mismo producto SÍ lo tiene en otra
+    //    sucursal: el lector no las encuentra. Es el síntoma más molesto.
+    pool.query(`
+      SELECT pc.id, pc.nombre, pc.stock, pc.sucursal_id, su.nombre AS sucursal_nombre,
+             (SELECT o.codigo FROM productos_cantidad o
+              JOIN sucursales so ON so.id = o.sucursal_id
+              WHERE so.negocio_id = $1 AND o.activo AND o.codigo IS NOT NULL
+                AND ${NORMSQL('o.nombre')} = ${NORMSQL('pc.nombre')}
+              ORDER BY o.id LIMIT 1) AS codigo_esperado
+      FROM productos_cantidad pc
+      JOIN sucursales su ON su.id = pc.sucursal_id
+      WHERE su.negocio_id = $1 AND pc.activo = true AND pc.codigo IS NULL
+        AND EXISTS (
+          SELECT 1 FROM productos_cantidad o
+          JOIN sucursales so ON so.id = o.sucursal_id
+          WHERE so.negocio_id = $1 AND o.activo AND o.codigo IS NOT NULL
+            AND ${NORMSQL('o.nombre')} = ${NORMSQL('pc.nombre')}
+        )
+      ORDER BY pc.nombre
+    `, [negocioId]),
+  ]);
+
+  return {
+    mismo_codigo_distinto_nombre: porCodigo.rows,
+    repetidos_en_una_sucursal:    enMismaSucursal.rows,
+    sin_codigo_teniendolo:        mudos.rows,
+    total: porCodigo.rows.length + enMismaSucursal.rows.length + mudos.rows.length,
+  };
+};
+
 // Datos de un producto de cantidad concreto (para resolver ítems del carrito).
 const findCantidadById = async (negocioId, sucursalOrigenId, productoId) => {
   const { rows } = await pool.query(`
@@ -694,7 +809,7 @@ module.exports = {
   findRemisionById, getLineasRemision, findRemisiones,
   marcarRemisionRecibida, marcarRemisionAnulada, marcarLineas,
   buscarSerialDisponible, buscarCantidadPorCodigo, buscarCantidadDisponible,
-  findCantidadById, findSerialById,
+  findCantidadById, findSerialById, buscarReferencias, getReferenciasDuplicadas,
   crearRemesa, findRemesaById, findRemesas, marcarRemesaRecibida, marcarRemesaAnulada,
   findRemesaPorClave, findRemisionPorClave,
   insertarMovimientoCuenta, findMovimientosCuenta,

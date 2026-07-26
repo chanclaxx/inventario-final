@@ -1,8 +1,10 @@
 import { useState, useRef, useEffect } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import {
-  buscarParaDespacho, buscarAccesorios, despachar,
+  buscarParaDespacho, buscarAccesorios, despachar, previsualizarDestino,
 } from '../../api/redInterna.api';
+import { PanelRevisionDestino } from './PanelRevisionDestino';
+import { claveItem } from './claveItem';
 import { formatCOP } from '../../utils/formatters';
 import { useClaveIdempotencia } from '../../utils/claveIdempotencia';
 import api from '../../api/axios.config';
@@ -99,6 +101,9 @@ export function ModalDespachar({ locales, itemsIniciales = null, descartados = [
   const [aviso,       setAviso]       = useState('');
   const [notas,       setNotas]       = useState('');
   const [verAccesorios, setVerAccesorios] = useState(false);
+  // Revisión de destino: null = no se ha pedido; objeto = hay dudas que resolver.
+  const [revision,   setRevision]   = useState(null);
+  const [decisiones, setDecisiones] = useState({});
   const inputRef = useRef(null);
   const clave = useClaveIdempotencia();
 
@@ -157,12 +162,53 @@ export function ModalDespachar({ locales, itemsIniciales = null, descartados = [
     },
   });
 
+  // ── Líneas a enviar, aplicando las decisiones de la revisión ──────────────
+  const construirLineas = () => items.map((i) => {
+    const base = i.tipo === 'serial'
+      ? { tipo: 'serial',   serial_id:   i.serial_id }
+      : { tipo: 'cantidad', producto_id: i.producto_id, cantidad: i.cantidad || 1 };
+
+    // Si el usuario decidió el destino en la revisión, viaja con la línea.
+    // 'nueva' se manda sin destino: el backend creará la referencia al recibir.
+    const d = decisionDe(i);
+    if (d?.tipo === 'existente') base.producto_destino_id = d.id;
+    return base;
+  });
+
+  // Busca la decisión tomada para este ítem (las claves se generan igual que
+  // en el panel de revisión, respetando el orden de la previsualización).
+  const decisionDe = (item) => {
+    if (!revision) return null;
+    const dudosos = revision.items.filter((x) => !x.seguro);
+    const n = dudosos.findIndex((x) => (
+      item.tipo === 'serial'
+        ? Number(x.serial_id) === Number(item.serial_id)
+        : Number(x.producto_id) === Number(item.producto_id)
+    ));
+    return n === -1 ? null : decisiones[claveItem(dudosos[n], n)];
+  };
+
+  // Paso previo: preguntar al backend a qué referencia iría cada producto.
+  // Si todo se resuelve solo, se despacha de una — el usuario no ve nada extra.
+  const revisar = useMutation({
+    mutationFn: () => previsualizarDestino({
+      sucursal_destino_id: destino,
+      lineas: items.map((i) => ({
+        tipo: i.tipo, serial_id: i.serial_id, producto_id: i.producto_id,
+        cantidad: i.cantidad || 1, nombre: i.nombre,
+      })),
+    }).then((r) => r.data.data),
+    onSuccess: (data) => {
+      if (!data.requiere_confirmacion) { enviar.mutate(); return; }
+      setRevision(data);
+    },
+    onError: (err) => setError(err.response?.data?.error || 'No se pudo revisar el destino'),
+  });
+
   const enviar = useMutation({
     mutationFn: () => despachar({
       sucursal_destino_id: destino,
-      lineas: items.map((i) => (i.tipo === 'serial'
-        ? { tipo: 'serial',   serial_id:   i.serial_id }
-        : { tipo: 'cantidad', producto_id: i.producto_id, cantidad: i.cantidad || 1 })),
+      lineas: construirLineas(),
       notas: notas.trim() || null,
       clave_idempotencia: clave(),
     }).then((r) => r.data.data),
@@ -182,6 +228,24 @@ export function ModalDespachar({ locales, itemsIniciales = null, descartados = [
     const v = texto.trim();
     if (v.length >= 3) buscar.mutate(v);
   };
+
+  // Hay dudas por resolver: la pantalla se dedica solo a eso.
+  if (revision) {
+    return (
+      <Modal open onClose={onCerrar} title="¿A qué producto del local va?" size="lg">
+        <PanelRevisionDestino
+          revision={revision}
+          localNombre={localName || 'el local'}
+          decisiones={decisiones}
+          onDecidir={(k, d) => setDecisiones((p) => ({ ...p, [k]: d }))}
+          onVolver={() => { setRevision(null); setError(''); }}
+          onConfirmar={() => enviar.mutate()}
+          enviando={enviar.isPending}
+        />
+        {error && <p className="text-sm text-red-500 mt-3">{error}</p>}
+      </Modal>
+    );
+  }
 
   return (
     <Modal open onClose={onCerrar} title="Despachar a un local" size="lg">
@@ -350,8 +414,8 @@ export function ModalDespachar({ locales, itemsIniciales = null, descartados = [
           <Button
             className="flex-1"
             disabled={!destino || items.length === 0}
-            loading={enviar.isPending}
-            onClick={() => enviar.mutate()}
+            loading={revisar.isPending || enviar.isPending}
+            onClick={() => { setError(''); revisar.mutate(); }}
           >
             <Truck size={15} /> Despachar {unidades || ''} {localName ? `a ${localName}` : ''}
           </Button>

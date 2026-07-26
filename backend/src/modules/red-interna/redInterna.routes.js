@@ -26,11 +26,14 @@ router.get('/remesas',                  ctrl.listarRemesas);
 router.get('/cuenta/movimientos',       ctrl.getMovimientosCuenta);
 router.get('/conciliacion/:sucursalId', ctrl.getConciliacion);
 router.get('/salud',                    requireNivel('supervisor'), ctrl.getSalud);
+router.get('/referencias-duplicadas',   requireNivel('supervisor'), ctrl.getReferenciasDuplicadas);
 
 // ── Mercancía ────────────────────────────────────────────────────────────────
 router.get ('/despacho/buscar',      requireNivel('supervisor'), ctrl.buscarParaDespacho);
 router.get ('/despacho/accesorios',  requireNivel('supervisor'), ctrl.catalogoCantidad);
 router.post('/despacho/resolver',    requireNivel('supervisor'), ctrl.resolverItems);
+router.post('/despacho/previsualizar', requireNivel('supervisor'), ctrl.previsualizarDestino);
+router.get ('/referencias/:sucursalId', requireNivel('supervisor'), ctrl.catalogoReferencias);
 router.post('/remisiones',           requireNivel('supervisor'), ctrl.despachar);
 router.post('/remisiones/:id/anular',requireNivel('supervisor'), ctrl.anularRemision);
 router.post('/devoluciones',         requireNivel('supervisor'), ctrl.devolver);

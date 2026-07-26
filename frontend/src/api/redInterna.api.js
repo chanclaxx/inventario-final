@@ -28,6 +28,15 @@ export const buscarAccesorios = (q = '') =>
 export const resolverItemsCarrito = (items) =>
   api.post('/red-interna/despacho/resolver', { items });
 
+// Muestra a qué referencia del destino iría cada producto ANTES de despachar.
+// Es lo que evita que el sistema cree referencias duplicadas por su cuenta.
+export const previsualizarDestino = (payload) =>
+  api.post('/red-interna/despacho/previsualizar', payload);
+
+// Referencias de una sucursal, para elegir el destino a mano.
+export const buscarReferencias = (sucursalId, { tipo, q } = {}) =>
+  api.get(`/red-interna/referencias/${sucursalId}`, { params: { tipo, q } });
+
 export const despachar = (payload) => api.post('/red-interna/remisiones', payload);
 
 export const recibirRemision = (id, payload = {}) =>

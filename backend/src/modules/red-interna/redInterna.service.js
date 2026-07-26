@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const { pool } = require('../../config/db');
 const repo          = require('./redInterna.repository');
+const referencias   = require('./redInterna.referencias');
 const trasladosRepo = require('../traslados/traslados.repository');
 const tesoreriaRepo = require('../tesoreria/tesoreria.repository');
 const { asignarNumeroDocumento } = require('../../utils/numeracion.util');
@@ -62,72 +63,51 @@ const _exigirBodega = (req) => {
 // local manda sobre su propio precio.
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Normalización equivalente a `_norm` de traslados.repository.js, pero en SQL:
-// minúsculas, sin tildes, guiones y guiones bajos como espacio, espacios
-// internos colapsados y recortada. Sin esto, "Galaxy  A54 " y "Galaxy A54"
-// se ven como productos distintos y el local termina con el catálogo duplicado.
-const NORM = (col) => `
-  regexp_replace(
-    trim(
-      translate(
-        lower(COALESCE(${col}, '')),
-        'áàäâãéèëêíìïîóòöôõúùüûñç-_',
-        'aaaaaeeeeiiiiooooouuuunc  '
-      )
-    ),
-    '[[:space:]]+', ' ', 'g'
-  )
-`;
+// La cascada de resolución vive en `redInterna.referencias.js`. Estos dos
+// envoltorios mantienen la firma que ya usaban recepción y devolución.
+//
+// `preferido` es la referencia que el usuario eligió al despachar (guardada en
+// `lineas_remision.producto_destino_id`): se respeta si sigue siendo válida.
+const _resolverProductoSerialDestino = async (client, productoOrigenId, sucursalDestinoId, negocioId, preferido = null) =>
+  (await referencias.obtenerODcrear(client, {
+    tipo: 'serial', productoOrigenId, sucursalDestinoId, negocioId, preferido,
+  })).producto_id;
 
-const _resolverProductoSerialDestino = async (client, productoOrigenId, sucursalDestinoId) => {
-  const { rows: orig } = await client.query(
-    `SELECT nombre, marca, modelo, precio, linea_id FROM productos_serial WHERE id = $1`,
-    [productoOrigenId]
-  );
-  if (!orig.length) throw { status: 404, message: 'Producto de origen no encontrado' };
-  const o = orig[0];
+const _resolverProductoCantidadDestino = async (client, productoOrigenId, sucursalDestinoId, negocioId, preferido = null) =>
+  (await referencias.obtenerODcrear(client, {
+    tipo: 'cantidad', productoOrigenId, sucursalDestinoId, negocioId, preferido,
+  })).producto_id;
 
-  const { rows: match } = await client.query(`
-    SELECT id FROM productos_serial
-    WHERE sucursal_id = $1
-      AND ${NORM('nombre')} = ${NORM('$2')}
-      AND ${NORM('marca')}  = ${NORM('$3')}
-      AND ${NORM('modelo')} = ${NORM('$4')}
-    ORDER BY id LIMIT 1
-  `, [sucursalDestinoId, o.nombre, o.marca, o.modelo]);
-  if (match.length) return match[0].id;
+/**
+ * Referencia de destino que se guarda en la línea al DESPACHAR.
+ *
+ *   • Si el usuario eligió una en la pantalla, esa manda (validando que sea de
+ *     la sucursal destino — nunca se confía en el id que llega del navegador).
+ *   • Si no, se guarda la que la cascada resuelva con confianza alta.
+ *   • Con confianza baja o sin match se deja NULL: la recepción volverá a
+ *     resolver y, solo entonces, creará la referencia si de verdad no existe.
+ *
+ * No crea nada: despachar no debe tocar el catálogo del destino, porque la
+ * remisión todavía se puede anular.
+ */
+const _destinoElegido = async (client, {
+  tipo, productoOrigenId, sucursalDestinoId, eleccionUsuario,
+}) => {
+  const tabla = tipo === 'serial' ? 'productos_serial' : 'productos_cantidad';
 
-  const { rows: nuevo } = await client.query(`
-    INSERT INTO productos_serial (nombre, marca, modelo, precio, sucursal_id, linea_id)
-    VALUES ($1, $2, $3, $4, $5, $6) RETURNING id
-  `, [o.nombre, o.marca, o.modelo, o.precio, sucursalDestinoId, o.linea_id]);
-  return nuevo[0].id;
-};
+  if (eleccionUsuario) {
+    const { rows } = await client.query(
+      `SELECT id FROM ${tabla} WHERE id = $1 AND sucursal_id = $2`,
+      [Number(eleccionUsuario), sucursalDestinoId]
+    );
+    if (!rows.length) {
+      throw { status: 400, message: 'La referencia de destino elegida no es de esa sucursal' };
+    }
+    return rows[0].id;
+  }
 
-const _resolverProductoCantidadDestino = async (client, productoOrigenId, sucursalDestinoId) => {
-  const { rows: orig } = await client.query(
-    `SELECT nombre, unidad_medida, precio, costo_unitario, linea_id, stock_minimo
-     FROM productos_cantidad WHERE id = $1`,
-    [productoOrigenId]
-  );
-  if (!orig.length) throw { status: 404, message: 'Producto de origen no encontrado' };
-  const o = orig[0];
-
-  const { rows: match } = await client.query(`
-    SELECT id FROM productos_cantidad
-    WHERE sucursal_id = $1 AND activo = true
-      AND ${NORM('nombre')} = ${NORM('$2')}
-    ORDER BY id LIMIT 1
-  `, [sucursalDestinoId, o.nombre]);
-  if (match.length) return match[0].id;
-
-  const { rows: nuevo } = await client.query(`
-    INSERT INTO productos_cantidad
-      (nombre, stock, stock_minimo, unidad_medida, costo_unitario, precio, sucursal_id, linea_id)
-    VALUES ($1, 0, $2, $3, $4, $5, $6, $7) RETURNING id
-  `, [o.nombre, o.stock_minimo || 0, o.unidad_medida || 'unidad',
-      o.costo_unitario, o.precio, sucursalDestinoId, o.linea_id]);
-  return nuevo[0].id;
+  const r = await referencias.resolver(client, { tipo, productoOrigenId, sucursalDestinoId });
+  return referencias.esSeguro(r.nivel) && r.destino ? r.destino.id : null;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -191,6 +171,15 @@ const despachar = async (req, { sucursal_destino_id, lineas, notas, clave_idempo
           throw { status: 409, message: `El equipo ${s.imei} ya está en otra remisión activa` };
         }
 
+        // A qué referencia del destino va. Se decide AQUÍ, no al recibir:
+        // quien conoce el catálogo es el de la bodega. Si el usuario eligió
+        // una, manda; si no, se usa la que la cascada resuelva con confianza.
+        // Sin match seguro queda NULL y se resuelve/crea en la recepción.
+        const destinoSerial = await _destinoElegido(client, {
+          tipo: 'serial', productoOrigenId: s.producto_id,
+          sucursalDestinoId: destinoId, eleccionUsuario: l.producto_destino_id,
+        });
+
         // MODO A (a costo): el valor interno es el costo real del negocio.
         // `seriales.costo_compra` NUNCA se modifica — es la verdad del costo
         // para los reportes, aquí solo se fotografía.
@@ -198,6 +187,7 @@ const despachar = async (req, { sucursal_destino_id, lineas, notas, clave_idempo
           remision_id: remision.id, tipo: 'serial',
           serial_id: s.id, imei: s.imei,
           producto_origen_id: s.producto_id,
+          producto_destino_id: destinoSerial,
           valor_interno: _num(s.costo_compra),
           estado_linea: 'Pendiente',
           nombre_producto: [s.nombre, s.marca, s.modelo].filter(Boolean).join(' '),
@@ -219,9 +209,15 @@ const despachar = async (req, { sucursal_destino_id, lineas, notas, clave_idempo
           throw { status: 400, message: `Stock insuficiente de "${p.nombre}". Hay ${p.stock}, pides ${cant}` };
         }
 
+        const destinoCantidad = await _destinoElegido(client, {
+          tipo: 'cantidad', productoOrigenId: p.id,
+          sucursalDestinoId: destinoId, eleccionUsuario: l.producto_destino_id,
+        });
+
         await repo.insertarLineaRemision(client, {
           remision_id: remision.id, tipo: 'cantidad',
           producto_origen_id: p.id, cantidad: cant,
+          producto_destino_id: destinoCantidad,
           valor_interno: _num(p.costo_unitario),
           estado_linea: 'Pendiente',
           nombre_producto: p.nombre,
@@ -315,7 +311,9 @@ const _ejecutarRecepcion = async (client, {
       if (s.vendido)  throw { status: 409, message: `El equipo ${s.imei} fue vendido en la bodega; no se puede recibir` };
       if (s.prestado) throw { status: 409, message: `El equipo ${s.imei} está prestado; no se puede recibir` };
 
-      const productoDestinoId = await _resolverProductoSerialDestino(client, s.producto_id, destinoId);
+      const productoDestinoId = await _resolverProductoSerialDestino(
+        client, s.producto_id, destinoId, negocioId, l.producto_destino_id
+      );
       await trasladosRepo.moverSerial(client, s.id, productoDestinoId);
       await trasladosRepo.insertarLineaTraslado(client, {
         traslado_id: traslado.id, tipo: 'serial',
@@ -348,7 +346,9 @@ const _ejecutarRecepcion = async (client, {
         throw { status: 409, message: `Stock insuficiente de "${rows[0].nombre}" en la bodega (hay ${rows[0].stock})` };
       }
 
-      const productoDestinoId = await _resolverProductoCantidadDestino(client, l.producto_origen_id, destinoId);
+      const productoDestinoId = await _resolverProductoCantidadDestino(
+        client, l.producto_origen_id, destinoId, negocioId, l.producto_destino_id
+      );
 
       // Costo promedio ponderado en el destino. El flujo viejo de traslados NO
       // hace esto y desvía el costo del destino; aquí se hace bien porque de
@@ -539,7 +539,9 @@ const devolver = async (req, { lineas, notas }) => {
         if (s.vendido)  throw { status: 400, message: `El equipo ${s.imei} ya fue vendido` };
         if (s.prestado) throw { status: 400, message: `El equipo ${s.imei} está prestado` };
 
-        const productoDestinoId = await _resolverProductoSerialDestino(client, s.producto_id, destinoId);
+        const productoDestinoId = await _resolverProductoSerialDestino(
+          client, s.producto_id, destinoId, negocioId
+        );
         await trasladosRepo.moverSerial(client, s.id, productoDestinoId);
         await trasladosRepo.insertarLineaTraslado(client, {
           traslado_id: traslado.id, tipo: 'serial', serial_id: s.id,
@@ -580,7 +582,9 @@ const devolver = async (req, { lineas, notas }) => {
         if (rows[0].stock < cant) {
           throw { status: 400, message: `Stock insuficiente de "${rows[0].nombre}"` };
         }
-        const productoDestinoId = await _resolverProductoCantidadDestino(client, l.producto_id, destinoId);
+        const productoDestinoId = await _resolverProductoCantidadDestino(
+          client, l.producto_id, destinoId, negocioId
+        );
 
         await trasladosRepo.ajustarStockEnTransaccion(client, l.producto_id, -cant);
         await trasladosRepo.ajustarStockEnTransaccion(client, productoDestinoId, cant);
@@ -1033,6 +1037,13 @@ const getConciliacion = async (req, sucursalId) => {
   };
 };
 
+// Referencias duplicadas que YA existen en el catálogo. Solo señala; corregir
+// (fusionar stock e historial) es decisión de una persona, no del sistema.
+const getReferenciasDuplicadas = async (req) => {
+  _exigirBodega(req);
+  return repo.getReferenciasDuplicadas(req.user.negocio_id);
+};
+
 const getSalud = async (req) => {
   _exigirBodega(req);
   const chequeos = await repo.getChequeosSalud(req.user.negocio_id);
@@ -1128,6 +1139,83 @@ const buscarParaDespacho = async (req, texto) => {
   throw { status: 404, message: `"${q}" no está en la bodega (ni como IMEI ni como código)` };
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// PREVISUALIZAR — a qué referencia del destino va cada producto.
+//
+// Deja ver, ANTES de despachar, cuáles se resuelven solos y cuáles necesitan
+// que alguien decida. Es lo que evita que el sistema invente referencias
+// duplicadas a espaldas del usuario.
+// ─────────────────────────────────────────────────────────────────────────────
+const previsualizarDestino = async (req, { sucursal_destino_id, lineas }) => {
+  _exigirBodega(req);
+  const negocioId = req.user.negocio_id;
+  const destinoId = Number(sucursal_destino_id);
+  if (!destinoId) throw { status: 400, message: 'Falta la sucursal destino' };
+  if (destinoId === Number(req.sucursal_id)) {
+    throw { status: 400, message: 'La bodega no puede despacharse a sí misma' };
+  }
+  await _verificarSucursal(null, destinoId, negocioId);
+  if (!Array.isArray(lineas) || !lineas.length) {
+    throw { status: 400, message: 'No hay productos para revisar' };
+  }
+
+  const client = await pool.connect();
+  try {
+    const salida = [];
+    for (const l of lineas) {
+      const tipo = l.tipo === 'serial' ? 'serial' : 'cantidad';
+      // El id del producto de origen: para seriales viene del serial.
+      let productoOrigenId = l.producto_id || null;
+      if (tipo === 'serial' && l.serial_id) {
+        const { rows } = await client.query(
+          `SELECT producto_id FROM seriales WHERE id = $1`, [l.serial_id]
+        );
+        productoOrigenId = rows[0]?.producto_id || null;
+      }
+      if (!productoOrigenId) {
+        salida.push({ ...l, nivel: 'nuevo', destino: null, seguro: false });
+        continue;
+      }
+
+      const r = await referencias.resolver(client, {
+        tipo, productoOrigenId, sucursalDestinoId: destinoId,
+      });
+      salida.push({
+        tipo,
+        serial_id:   l.serial_id   || null,
+        producto_id: productoOrigenId,
+        cantidad:    l.cantidad    || 1,
+        nombre_origen: r.origen?.nombre || l.nombre || null,
+        codigo_origen: r.origen?.codigo || null,
+        nivel:       r.nivel,
+        seguro:      referencias.esSeguro(r.nivel),
+        destino:     r.destino || null,
+        sugerencias: r.sugerencias || (r.destino ? [r.destino] : []),
+      });
+    }
+
+    const dudosos = salida.filter((s) => !s.seguro).length;
+    return {
+      sucursal_destino_id: destinoId,
+      items: salida,
+      dudosos,
+      // La UI solo interrumpe si hay algo que decidir.
+      requiere_confirmacion: dudosos > 0,
+    };
+  } finally {
+    client.release();
+  }
+};
+
+// Catálogo de referencias de una sucursal, para que el usuario elija a mano
+// cuando la cascada no está segura.
+const catalogoReferencias = async (req, { sucursalId, tipo, q }) => {
+  _exigirBodega(req);
+  const negocioId = req.user.negocio_id;
+  await _verificarSucursal(null, Number(sucursalId), negocioId);
+  return repo.buscarReferencias(negocioId, Number(sucursalId), tipo === 'serial' ? 'serial' : 'cantidad', q || '');
+};
+
 // Catálogo de accesorios de la bodega, para elegir a mano los que no tienen
 // código impreso.
 const catalogoCantidad = async (req, q) => {
@@ -1220,8 +1308,10 @@ module.exports = {
   enviarRemesa, confirmarRemesa, anularRemesa,
   registrarGastoAutorizado, registrarAjuste,
   getPanelLocal, getPanelBodega, getConciliacion, getSalud,
+  getReferenciasDuplicadas,
   getRemision, listarRemisiones, listarRemesas,
   buscarParaDespacho, catalogoCantidad, resolverItems,
+  previsualizarDestino, catalogoReferencias,
   getSucursalesRed, getContexto, getMovimientosCuenta,
   ETIQUETAS_ESTADO,
 };
