@@ -25,6 +25,7 @@ router.get('/remisiones/:id',           ctrl.getRemision);
 router.get('/remesas',                  ctrl.listarRemesas);
 router.get('/cuenta/movimientos',       ctrl.getMovimientosCuenta);
 router.get('/conciliacion/:sucursalId', ctrl.getConciliacion);
+router.get('/estado-cuenta/:sucursalId', ctrl.getEstadoCuenta);
 router.get('/salud',                    requireNivel('supervisor'), ctrl.getSalud);
 router.get('/referencias-duplicadas',   requireNivel('supervisor'), ctrl.getReferenciasDuplicadas);
 

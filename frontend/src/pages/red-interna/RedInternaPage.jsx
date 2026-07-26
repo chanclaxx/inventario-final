@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  getPanel, getSucursales, confirmarRemesa, anularRemision, getConciliacion, getSalud,
+  getPanel, getSucursales, confirmarRemesa, anularRemision, getSalud,
 } from '../../api/redInterna.api';
 import { formatCOP, formatFechaHora } from '../../utils/formatters';
 import { Button }     from '../../components/ui/Button';
@@ -12,6 +12,7 @@ import { EmptyState } from '../../components/ui/EmptyState';
 import { ModalDespachar } from './ModalDespachar';
 import { ModalRecibir }   from './ModalRecibir';
 import { ModalRemesa }    from './ModalRemesa';
+import { EstadoCuentaLocal } from './EstadoCuentaLocal';
 import {
   Package, PackageCheck, Truck, Send, Store, AlertTriangle, CheckCircle,
   Wallet, ShieldCheck, ChevronRight, X, Clock,
@@ -52,10 +53,9 @@ function Tarjeta({ children, className = '' }) {
 // CARA DEL LOCAL — dos botones y nada más
 // ═══════════════════════════════════════════════════════════════════════════
 
-function PanelLocal({ data, onRefrescar, onAviso }) {
+function PanelLocal({ data, onRefrescar, onAviso, onVerCuenta }) {
   const [recibirId, setRecibirId] = useState(null);
   const [remesa,    setRemesa]    = useState(false);
-  const [detalle,   setDetalle]   = useState(false);
 
   const t = data.totales;
   const porRecibir = data.por_recibir || [];
@@ -172,10 +172,12 @@ function PanelLocal({ data, onRefrescar, onAviso }) {
           )}
 
           <button
-            onClick={() => setDetalle(true)}
+            onClick={() => onVerCuenta(data.sucursal_id)}
             className="w-full flex items-center justify-between px-5 py-3.5 hover:bg-gray-50 transition-colors"
           >
-            <span className="text-sm text-blue-600 font-medium">Ver detalle equipo por equipo</span>
+            <span className="text-sm text-blue-600 font-medium">
+              Ver estado de cuenta completo
+            </span>
             <ChevronRight size={16} className="text-gray-300" />
           </button>
         </div>
@@ -195,9 +197,6 @@ function PanelLocal({ data, onRefrescar, onAviso }) {
           onListo={() => { setRemesa(false); onAviso('Remesa enviada'); onRefrescar(); }}
         />
       )}
-      {detalle && (
-        <ModalConciliacion sucursalId={data.sucursal_id} onCerrar={() => setDetalle(false)} />
-      )}
     </>
   );
 }
@@ -206,9 +205,8 @@ function PanelLocal({ data, onRefrescar, onAviso }) {
 // CARA DE LA BODEGA — panel de control
 // ═══════════════════════════════════════════════════════════════════════════
 
-function PanelBodega({ data, locales, onRefrescar, onAviso }) {
+function PanelBodega({ data, locales, onRefrescar, onAviso, onVerCuenta }) {
   const [despachar, setDespachar] = useState(false);
-  const [detalle,   setDetalle]   = useState(null);
   const [salud,     setSalud]     = useState(false);
 
   const confirmar = useMutation({
@@ -253,7 +251,7 @@ function PanelBodega({ data, locales, onRefrescar, onAviso }) {
             return (
               <button
                 key={l.sucursal_id}
-                onClick={() => setDetalle(l.sucursal_id)}
+                onClick={() => onVerCuenta(l.sucursal_id, l.sucursal_nombre)}
                 className="w-full flex items-center gap-3 px-5 py-4 hover:bg-gray-50 transition-colors text-left"
               >
                 <div className="w-10 h-10 rounded-xl bg-gray-100 flex items-center justify-center flex-shrink-0">
@@ -362,7 +360,6 @@ function PanelBodega({ data, locales, onRefrescar, onAviso }) {
           onListo={() => { setDespachar(false); onAviso('Remisión enviada'); onRefrescar(); }}
         />
       )}
-      {detalle && <ModalConciliacion sucursalId={detalle} onCerrar={() => setDetalle(null)} />}
       {salud   && <ModalSalud onCerrar={() => setSalud(false)} />}
     </>
   );
@@ -370,103 +367,6 @@ function PanelBodega({ data, locales, onRefrescar, onAviso }) {
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Conciliación equipo por equipo — "¿cuál ya se vendió y no se ha pagado?"
-// ═══════════════════════════════════════════════════════════════════════════
-
-const COLOR_ESTADO = {
-  'En consignacion': 'gray',
-  'Por liquidar':    'yellow',
-  'En recaudo':      'purple',
-  'En prestamo':     'blue',
-  'Devuelta':        'green',
-  'Faltante':        'red',
-  'Sin ubicar':      'red',
-  'Movida':          'red',
-  'En transito':     'blue',
-};
-
-function ModalConciliacion({ sucursalId, onCerrar }) {
-  const { data, isLoading } = useQuery({
-    queryKey: ['red-conciliacion', sucursalId],
-    queryFn:  () => getConciliacion(sucursalId).then((r) => r.data.data),
-  });
-
-  return (
-    <Modal open onClose={onCerrar} title="Detalle equipo por equipo" size="lg">
-      {isLoading || !data ? (
-        <div className="py-10 flex justify-center"><Spinner /></div>
-      ) : (
-        <div className="flex flex-col gap-4">
-          <div className="grid grid-cols-2 gap-2">
-            <div className="bg-gray-50 rounded-xl px-4 py-3">
-              <p className="text-xs text-gray-400">Por liquidar</p>
-              <p className="text-lg font-bold text-gray-900">
-                {formatCOP(Math.max(0, data.totales.saldo_por_liquidar))}
-              </p>
-            </div>
-            <div className="bg-gray-50 rounded-xl px-4 py-3">
-              <p className="text-xs text-gray-400">Ya remesado</p>
-              <p className="text-lg font-bold text-gray-500">
-                {formatCOP(data.totales.remesado_recibido)}
-              </p>
-            </div>
-          </div>
-
-          <div>
-            <p className="text-xs font-semibold text-gray-400 uppercase mb-2">
-              Vendidos ({data.liquidaciones.length})
-            </p>
-            {data.liquidaciones.length === 0 ? (
-              <p className="text-sm text-gray-400 py-4 text-center">
-                Todavía no se ha vendido nada de lo entregado.
-              </p>
-            ) : (
-              <div className="border border-gray-100 rounded-xl overflow-hidden max-h-64 overflow-y-auto">
-                {data.liquidaciones.map((u) => (
-                  <div key={u.linea_id}
-                    className="flex items-center gap-3 px-3 py-2.5 border-b border-gray-50 last:border-0">
-                    <div className={`w-2 h-2 rounded-full flex-shrink-0
-                      ${u.liquidada ? 'bg-green-400' : 'bg-amber-400'}`} />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-gray-800 truncate">{u.nombre_producto}</p>
-                      <p className="text-xs text-gray-400 font-mono">{u.imei}</p>
-                    </div>
-                    <div className="text-right flex-shrink-0">
-                      <p className="text-sm font-semibold text-gray-700">{formatCOP(u.liquidable)}</p>
-                      <p className={`text-xs ${u.liquidada ? 'text-green-600' : 'text-amber-600'}`}>
-                        {u.liquidada ? 'Pagado' : 'Pendiente'}
-                      </p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div>
-            <p className="text-xs font-semibold text-gray-400 uppercase mb-2">
-              Todo lo entregado ({data.unidades.length})
-            </p>
-            <div className="border border-gray-100 rounded-xl overflow-hidden max-h-64 overflow-y-auto">
-              {data.unidades.map((u) => (
-                <div key={u.linea_id}
-                  className="flex items-center gap-3 px-3 py-2.5 border-b border-gray-50 last:border-0">
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-800 truncate">{u.nombre_producto}</p>
-                    <p className="text-xs text-gray-400 font-mono">{u.imei}</p>
-                  </div>
-                  <Badge variant={COLOR_ESTADO[u.estado_unidad] || 'gray'}>
-                    {u.etiqueta_estado}
-                  </Badge>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-    </Modal>
-  );
-}
-
 // ═══════════════════════════════════════════════════════════════════════════
 // Panel de salud — los invariantes, verificables a demanda
 // ═══════════════════════════════════════════════════════════════════════════
@@ -538,7 +438,9 @@ function ModalSalud({ onCerrar }) {
 
 export default function RedInternaPage() {
   const qc = useQueryClient();
-  const [aviso, setAviso] = useState('');
+  const [aviso,  setAviso]  = useState('');
+  // Cuando hay una cuenta abierta, la pantalla se dedica a ella.
+  const [cuenta, setCuenta] = useState(null); // { id, nombre }
 
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ['red-panel'],
@@ -553,7 +455,7 @@ export default function RedInternaPage() {
 
   const refrescar = () => {
     qc.invalidateQueries({ queryKey: ['red-panel'] });
-    qc.invalidateQueries({ queryKey: ['red-conciliacion'] });
+    qc.invalidateQueries({ queryKey: ['red-estado-cuenta'] });
     qc.invalidateQueries({ queryKey: ['red-salud'] });
     // El movimiento afecta inventario y dinero: refrescar lo que el usuario
     // podría estar mirando en otra pestaña.
@@ -602,9 +504,19 @@ export default function RedInternaPage() {
 
       <Aviso mensaje={aviso} onCerrar={() => setAviso('')} />
 
-      {data.es_bodega
-        ? <PanelBodega data={data} locales={locales} onRefrescar={refrescar} onAviso={setAviso} />
-        : <PanelLocal  data={data} onRefrescar={refrescar} onAviso={setAviso} />}
+      {cuenta ? (
+        <EstadoCuentaLocal
+          sucursalId={cuenta.id}
+          nombre={cuenta.nombre}
+          onVolver={() => setCuenta(null)}
+        />
+      ) : data.es_bodega ? (
+        <PanelBodega data={data} locales={locales} onRefrescar={refrescar} onAviso={setAviso}
+          onVerCuenta={(id, nombre) => setCuenta({ id, nombre })} />
+      ) : (
+        <PanelLocal data={data} onRefrescar={refrescar} onAviso={setAviso}
+          onVerCuenta={(id) => setCuenta({ id, nombre: 'Mi cuenta' })} />
+      )}
     </div>
   );
 }

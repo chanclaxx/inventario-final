@@ -91,6 +91,9 @@ export function Carrito({ onFacturar, onPrestar, sinHeader = false }) {
         producto_id: i.producto_id,
         cantidad:    i.cantidad || 1,
         nombre:      i.nombre,
+        // El precio del carrito es de VENTA, no de costo: viaja solo como
+        // sugerencia para que la pantalla de despacho lo ofrezca con un toque.
+        precio_carrito: i.precioFinal ?? i.precio ?? null,
       }))
     ).then((r) => r.data.data),
     onSuccess: (data) => {

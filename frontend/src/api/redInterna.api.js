@@ -69,4 +69,9 @@ export const getMovimientosCuenta = (sucursal) =>
 export const getConciliacion = (sucursalId) =>
   api.get(`/red-interna/conciliacion/${sucursalId}`);
 
+// Estado de cuenta completo de un local: extracto con saldo corrido, mercancía
+// rastreable con filtros, y los documentos de respaldo.
+export const getEstadoCuenta = (sucursalId, params = {}) =>
+  api.get(`/red-interna/estado-cuenta/${sucursalId}`, { params });
+
 export const getSalud = () => api.get('/red-interna/salud');

@@ -79,6 +79,25 @@ const _resolverProductoCantidadDestino = async (client, productoOrigenId, sucurs
   })).producto_id;
 
 /**
+ * Valor con el que sale una línea de la remisión.
+ *
+ * Por defecto es el COSTO real (modo "a costo"): es lo que el local tendrá que
+ * liquidar cuando venda. Pero la bodega puede ajustarlo desde la pantalla —
+ * hace falta, por ejemplo, cuando el equipo entró sin costo registrado y saldría
+ * en $0, o cuando se acuerda otro valor para esa entrega.
+ *
+ * El override es explícito y por línea: si no viene, manda el costo.
+ */
+const _valorLinea = (costoReal, override) => {
+  if (override === undefined || override === null || override === '') return _num(costoReal);
+  const v = Number(override);
+  if (!Number.isFinite(v) || v < 0) {
+    throw { status: 400, message: 'El valor de la línea no puede ser negativo' };
+  }
+  return Math.round(v * 100) / 100;
+};
+
+/**
  * Referencia de destino que se guarda en la línea al DESPACHAR.
  *
  *   • Si el usuario eligió una en la pantalla, esa manda (validando que sea de
@@ -188,7 +207,7 @@ const despachar = async (req, { sucursal_destino_id, lineas, notas, clave_idempo
           serial_id: s.id, imei: s.imei,
           producto_origen_id: s.producto_id,
           producto_destino_id: destinoSerial,
-          valor_interno: _num(s.costo_compra),
+          valor_interno: _valorLinea(s.costo_compra, l.valor_interno),
           estado_linea: 'Pendiente',
           nombre_producto: [s.nombre, s.marca, s.modelo].filter(Boolean).join(' '),
         });
@@ -218,7 +237,7 @@ const despachar = async (req, { sucursal_destino_id, lineas, notas, clave_idempo
           remision_id: remision.id, tipo: 'cantidad',
           producto_origen_id: p.id, cantidad: cant,
           producto_destino_id: destinoCantidad,
-          valor_interno: _num(p.costo_unitario),
+          valor_interno: _valorLinea(p.costo_unitario, l.valor_interno),
           estado_linea: 'Pendiente',
           nombre_producto: p.nombre,
         });
@@ -1044,6 +1063,62 @@ const getReferenciasDuplicadas = async (req) => {
   return repo.getReferenciasDuplicadas(req.user.negocio_id);
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// ESTADO DE CUENTA de un local — todo lo que hay que saber en una sola llamada.
+//
+// Estructura de extracto bancario: saldo, movimientos con saldo corrido,
+// mercancía rastreable unidad por unidad, y los documentos de respaldo.
+// ─────────────────────────────────────────────────────────────────────────────
+const getEstadoCuenta = async (req, sucursalId, filtros = {}) => {
+  const negocioId = req.user.negocio_id;
+  const objetivo  = Number(sucursalId || req.sucursal_id);
+
+  // Un local solo ve lo suyo; la bodega ve cualquiera.
+  if (!req.esBodega && objetivo !== Number(req.sucursal_id)) {
+    throw { status: 403, message: 'Solo puedes ver el estado de cuenta de tu sucursal' };
+  }
+  const sucursal = await _verificarSucursal(null, objetivo, negocioId);
+
+  const { desde = null, hasta = null, q = '', estado = null, limit = 100, offset = 0 } = filtros;
+
+  const [totales, extracto, mercancia, remisiones, remesas, movimientos] = await Promise.all([
+    getEstadoLocal(negocioId, objetivo),
+    repo.getExtracto(negocioId, objetivo, { desde, hasta }),
+    repo.buscarUnidades(negocioId, objetivo, {
+      estado: estado || null, q, desde, hasta,
+      limit: Math.min(Number(limit) || 100, 500),
+      offset: Math.max(Number(offset) || 0, 0),
+    }),
+    repo.findRemisiones(negocioId, { sucursalId: objetivo, rol: 'destino', limit: 100 }),
+    repo.findRemesas(negocioId,    { sucursalId: objetivo, rol: 'origen',  limit: 100 }),
+    repo.findMovimientosCuenta(negocioId, objetivo, 100),
+  ]);
+
+  return {
+    sucursal: { id: sucursal.id, nombre: sucursal.nombre },
+    ...totales,
+    extracto: extracto.map((e) => ({
+      ...e,
+      valor: Number(e.valor),
+      saldo: Number(e.saldo),
+    })),
+    mercancia: {
+      ...mercancia,
+      items: mercancia.items.map((u) => ({
+        ...u,
+        etiqueta_estado: ETIQUETAS_ESTADO[u.estado_unidad] || u.estado_unidad,
+        valor_interno:   _num(u.valor_interno),
+        liquidable:      _num(u.liquidable),
+      })),
+    },
+    // Conteo por estado, para pintar los filtros con su número.
+    conteo_estados: Object.fromEntries(
+      Object.entries(totales.por_estado).map(([k, v]) => [k, v.unidades])
+    ),
+    remisiones, remesas, movimientos_cuenta: movimientos,
+  };
+};
+
 const getSalud = async (req) => {
   _exigirBodega(req);
   const chequeos = await repo.getChequeosSalud(req.user.negocio_id);
@@ -1118,22 +1193,37 @@ const buscarParaDespacho = async (req, texto) => {
   const negocioId  = req.user.negocio_id;
   const sucursalId = Number(req.sucursal_id);
 
-  // 1) ¿Es un IMEI?
-  const s = await repo.buscarSerialDisponible(negocioId, sucursalId, q);
-  if (s) {
-    if (s.vendido)        throw { status: 409, message: `El equipo ${s.imei} ya fue vendido` };
-    if (s.prestado)       throw { status: 409, message: `El equipo ${s.imei} está prestado` };
-    if (s.ya_remisionado) throw { status: 409, message: `El equipo ${s.imei} ya está en una remisión activa` };
-    return _formatoSerial(s);
-  }
+  // Se consultan LAS DOS pistas antes de decidir. Si se cortara en la primera,
+  // un código de accesorio que coincide con el IMEI de un equipo ya vendido
+  // devolvería "ese equipo ya fue vendido" y el accesorio nunca se encontraría.
+  const [s, p] = await Promise.all([
+    repo.buscarSerialDisponible(negocioId, sucursalId, q),
+    repo.buscarCantidadPorCodigo(negocioId, sucursalId, q),
+  ]);
 
-  // 2) ¿Es un código único de accesorio?
-  const p = await repo.buscarCantidadPorCodigo(negocioId, sucursalId, q);
-  if (p) {
-    if (Number(p.stock) <= 0) {
-      throw { status: 409, message: `"${p.nombre}" está sin stock en la bodega` };
-    }
-    return _formatoCantidad(p);
+  const serialUsable   = s && !s.vendido && !s.prestado && !s.ya_remisionado;
+  const cantidadUsable = p && Number(p.stock) > 0;
+
+  // Primero lo que SÍ se puede despachar.
+  if (serialUsable)   return _formatoSerial(s);
+  if (cantidadUsable) return _formatoCantidad(p);
+
+  // Nada usable. Si el texto coincide con las dos cosas (un código de accesorio
+  // y el IMEI de un equipo), se explican AMBAS: quedarse con una sola manda al
+  // usuario a buscar un problema que no era el suyo.
+  const motivos = [];
+  if (s) {
+    if (s.vendido)        motivos.push(`el equipo ${s.imei} ya fue vendido`);
+    if (s.prestado)       motivos.push(`el equipo ${s.imei} está prestado`);
+    if (s.ya_remisionado) motivos.push(`el equipo ${s.imei} ya está en una remisión activa`);
+  }
+  if (p) motivos.push(`"${p.nombre}" está sin stock en la bodega`);
+
+  if (motivos.length) {
+    const texto = motivos.length === 1
+      ? motivos[0]
+      : `${motivos.slice(0, -1).join(', ')} y ${motivos[motivos.length - 1]}`;
+    throw { status: 409, message: `No se puede despachar: ${texto}.` };
   }
 
   throw { status: 404, message: `"${q}" no está en la bodega (ni como IMEI ni como código)` };
@@ -1245,6 +1335,15 @@ const resolverItems = async (req, items) => {
   const resueltos = [];
   const descartados = [];
 
+  // El precio que el usuario puso en el carrito es un PRECIO DE VENTA, no un
+  // costo: usarlo como valor de la remisión le cobraría de más al local. Se
+  // devuelve aparte, como sugerencia, para que la pantalla lo ofrezca con un
+  // toque si de verdad quiere despachar por ese valor.
+  const sugerido = (it) => {
+    const p = Number(it.precio_carrito ?? it.precio);
+    return Number.isFinite(p) && p > 0 ? Math.round(p) : null;
+  };
+
   for (const it of items) {
     if (it.tipo === 'serial' && it.serial_id) {
       const s = await repo.findSerialById(negocioId, sucursalId, Number(it.serial_id));
@@ -1252,7 +1351,7 @@ const resolverItems = async (req, items) => {
       if (s.vendido)            { descartados.push({ nombre: s.imei, motivo: 'ya fue vendido' }); continue; }
       if (s.prestado)           { descartados.push({ nombre: s.imei, motivo: 'está prestado' }); continue; }
       if (s.ya_remisionado)     { descartados.push({ nombre: s.imei, motivo: 'ya está en otra remisión' }); continue; }
-      resueltos.push(_formatoSerial(s));
+      resueltos.push({ ..._formatoSerial(s), precio_carrito: sugerido(it) });
 
     } else if (it.tipo === 'cantidad' && it.producto_id) {
       const p = await repo.findCantidadById(negocioId, sucursalId, Number(it.producto_id));
@@ -1261,7 +1360,11 @@ const resolverItems = async (req, items) => {
       if (Number(p.stock) <= 0) { descartados.push({ nombre: p.nombre, motivo: 'sin stock' }); continue; }
       // Se recorta al stock disponible en vez de fallar: el usuario ve cuánto
       // quedó y decide.
-      resueltos.push({ ..._formatoCantidad(p), cantidad: Math.min(pedida, Number(p.stock)) });
+      resueltos.push({
+        ..._formatoCantidad(p),
+        cantidad: Math.min(pedida, Number(p.stock)),
+        precio_carrito: sugerido(it),
+      });
 
     } else {
       descartados.push({ nombre: it.nombre || 'Producto', motivo: 'tipo no reconocido' });
@@ -1307,7 +1410,7 @@ module.exports = {
   despachar, recibir, anularRemision, devolver,
   enviarRemesa, confirmarRemesa, anularRemesa,
   registrarGastoAutorizado, registrarAjuste,
-  getPanelLocal, getPanelBodega, getConciliacion, getSalud,
+  getPanelLocal, getPanelBodega, getConciliacion, getEstadoCuenta, getSalud,
   getReferenciasDuplicadas,
   getRemision, listarRemisiones, listarRemesas,
   buscarParaDespacho, catalogoCantidad, resolverItems,

@@ -239,6 +239,18 @@ const getReferenciasDuplicadas = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+// Estado de cuenta completo de un local (extracto + mercancía + documentos).
+const getEstadoCuenta = async (req, res, next) => {
+  try {
+    const { desde, hasta, q, estado, limit, offset } = req.query;
+    const data = await service.getEstadoCuenta(req, req.params.sucursalId, {
+      desde: desde || null, hasta: hasta || null,
+      q: q || '', estado: estado || null, limit, offset,
+    });
+    res.json({ ok: true, data });
+  } catch (err) { next(err); }
+};
+
 const getSalud = async (req, res, next) => {
   try {
     res.json({ ok: true, data: await service.getSalud(req) });
@@ -253,5 +265,5 @@ module.exports = {
   listarRemisiones, getRemision,
   enviarRemesa, confirmarRemesa, anularRemesa, listarRemesas,
   gastoAutorizado, ajuste, getMovimientosCuenta,
-  getConciliacion, getSalud, getReferenciasDuplicadas,
+  getConciliacion, getEstadoCuenta, getSalud, getReferenciasDuplicadas,
 };

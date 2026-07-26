@@ -66,9 +66,21 @@ function BuscadorReferencia({ sucursalId, tipo, onElegir, onCerrar }) {
   );
 }
 
+const nombreRef = (r) => [r.nombre, r.marca, r.modelo].filter(Boolean).join(' ');
+
 function FilaDudosa({ item, sucursalId, decision, onDecidir }) {
   const [buscando, setBuscando] = useState(false);
+
+  // Las opciones son las sugerencias del backend MÁS la que el usuario haya
+  // buscado a mano. Sin esto, al elegir del buscador la decisión se guardaba
+  // pero no se resaltaba nada y parecía que el clic no había funcionado.
   const sugerencias = item.sugerencias || [];
+  const elegidaFuera =
+    decision?.tipo === 'existente' &&
+    !sugerencias.some((s) => Number(s.id) === Number(decision.id));
+  const opciones = elegidaFuera
+    ? [...sugerencias, { id: decision.id, nombre: decision.nombre, ...(decision.ref || {}) }]
+    : sugerencias;
 
   return (
     <div className="border border-amber-200 bg-amber-50/40 rounded-xl p-3">
@@ -86,24 +98,24 @@ function FilaDudosa({ item, sucursalId, decision, onDecidir }) {
       </div>
 
       <div className="mt-2.5 flex flex-col gap-1.5 pl-6">
-        {sugerencias.map((s) => {
-          const elegida = decision?.tipo === 'existente' && decision.id === s.id;
+        {opciones.map((s) => {
+          const elegida =
+            decision?.tipo === 'existente' && Number(decision.id) === Number(s.id);
           return (
             <button
               key={s.id}
-              onClick={() => onDecidir({ tipo: 'existente', id: s.id, nombre: s.nombre })}
+              onClick={() => onDecidir({ tipo: 'existente', id: s.id, nombre: s.nombre, ref: s })}
               className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-left transition-all
                 ${elegida ? 'bg-blue-600 border-blue-600 text-white'
                           : 'bg-white border-gray-200 hover:border-blue-300'}`}
             >
               <ArrowRight size={13} className="flex-shrink-0" />
               <div className="flex-1 min-w-0">
-                <p className="text-sm truncate">
-                  {[s.nombre, s.marca, s.modelo].filter(Boolean).join(' ')}
-                </p>
+                <p className="text-sm truncate">{nombreRef(s)}</p>
                 <p className={`text-xs ${elegida ? 'text-blue-100' : 'text-gray-400'}`}>
                   {s.codigo ? `${s.codigo} · ` : ''}
-                  {s.stock != null ? `${s.stock} en stock` : `${s.disponibles ?? 0} disponibles`}
+                  {s.stock != null ? `${s.stock} en stock`
+                    : s.disponibles != null ? `${s.disponibles} disponibles` : 'del catálogo'}
                 </p>
               </div>
               {elegida && <Check size={14} className="flex-shrink-0" />}
@@ -139,7 +151,9 @@ function FilaDudosa({ item, sucursalId, decision, onDecidir }) {
             tipo={item.tipo}
             onCerrar={() => setBuscando(false)}
             onElegir={(r) => {
-              onDecidir({ tipo: 'existente', id: r.id, nombre: r.nombre });
+              // `ref` guarda la fila completa para poder pintarla como opción
+              // elegida aunque no venga entre las sugerencias.
+              onDecidir({ tipo: 'existente', id: r.id, nombre: r.nombre, ref: r });
               setBuscando(false);
             }}
           />

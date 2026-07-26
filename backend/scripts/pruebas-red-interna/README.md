@@ -22,6 +22,8 @@ node scripts/pruebas-red-interna/01-circuito-completo.mjs
 node scripts/pruebas-red-interna/02-seguridad-produccion.mjs
 node scripts/pruebas-red-interna/03-accesorios-y-codigos.mjs
 node scripts/pruebas-red-interna/04-referencias-sin-duplicar.mjs
+node scripts/pruebas-red-interna/05-bugs-despacho.mjs
+node scripts/pruebas-red-interna/06-estado-cuenta.mjs
 ```
 
 ### Diagnóstico sobre datos reales (solo lectura)
@@ -129,6 +131,34 @@ encontraba, y corregirla a mano tiraba un 409.
 | 6 | Ninguna sucursal queda con el producto repetido ni con referencias mudas |
 | 7 | El usuario puede forzar el destino a mano |
 | 8 | Un id de otra sucursal se rechaza |
+
+### `05-bugs-despacho.mjs` — 16 verificaciones
+
+Regresión de tres fallos reportados en producción.
+
+| # | Escenario |
+|---|---|
+| A | Buscar por código cuando ese texto coincide con el IMEI de un equipo vendido: devuelve el accesorio, y si ninguno sirve explica **ambos** motivos |
+| B | El valor de la línea es editable y manda sobre el costo; negativo se rechaza |
+| C | El valor editado es el que el local termina liquidando |
+| D | El precio del carrito llega como sugerencia, nunca aplicado solo |
+
+### `06-estado-cuenta.mjs` — 43 verificaciones
+
+El extracto tipo bancario de cada local.
+
+| # | Escenario |
+|---|---|
+| 1 | Recién recibido: el envío es un apunte informativo y el saldo sigue en 0 |
+| 2 | Cada venta genera un cargo con cliente, factura y valor interno |
+| 3 | La remesa solo abona cuando la bodega la confirma |
+| 4 | Los gastos por cuenta de bodega abonan |
+| 5 | **La suma de los movimientos cuadra con el saldo del panel** |
+| 6 | Búsqueda por IMEI y por cliente; filtros por estado con sus totales |
+| 7 | Cada unidad trae trazabilidad completa (envío, recepción, venta, cliente) |
+| 8 | Un local no ve la cuenta de otro; la bodega ve todas |
+| 9 | El rango de fechas filtra el extracto sin alterar los totales |
+| 10 | **Recepción confirmada tarde**: la venta intermedia sí genera cargo |
 
 ## Nota sobre `esquema.sql`
 

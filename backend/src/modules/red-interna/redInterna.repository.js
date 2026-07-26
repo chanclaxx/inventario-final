@@ -88,7 +88,12 @@ const SQL_UNIDADES = `
     WHERE b.imei IS NOT NULL
       AND f.sucursal_id = b.sucursal_destino_id
       AND f.estado <> 'Cancelada'
-      AND f.fecha  >= COALESCE(b.fecha_recepcion, b.fecha_emision)
+      -- El piso es la fecha de DESPACHO, no la de recepción: si el local
+      -- confirma la llegada con retraso (mercancía el lunes, confirmada el
+      -- miércoles) las ventas del martes deben contar igual. Y sigue
+      -- descartando ventas viejas del mismo IMEI: ninguna venta legítima de
+      -- esta unidad puede ser anterior a que la bodega la despachara.
+      AND f.fecha  >= b.fecha_emision
     ORDER BY b.linea_id, f.fecha DESC, f.id DESC
   ),
   calc AS (
@@ -126,6 +131,148 @@ const getUnidades = async (negocioId, sucursalId = null) => {
     `${SQL_UNIDADES} ORDER BY c.factura_fecha DESC NULLS LAST, c.linea_id DESC`,
     [negocioId, sucursalId]
   );
+  return rows;
+};
+
+// ── Unidades con búsqueda y filtros (pestaña "Mercancía") ────────────────────
+//   $3 estado (NULL = todos)   $4 texto libre   $5 desde   $6 hasta
+//   $7 limit   $8 offset
+const buscarUnidades = async (negocioId, sucursalId, {
+  estado = null, q = '', desde = null, hasta = null, limit = 100, offset = 0,
+} = {}) => {
+  const texto = (q || '').trim().toLowerCase().replace(/[%_\\]/g, '\\$&').slice(0, 80);
+  const params = [negocioId, sucursalId, estado, texto, desde, hasta, limit, offset];
+
+  const filtro = `
+    WHERE ($3::text IS NULL OR u.estado_unidad = $3)
+      AND ($4 = '' OR LOWER(COALESCE(u.nombre_producto, '')) LIKE '%' || $4 || '%' ESCAPE '\\'
+                   OR LOWER(COALESCE(u.imei, ''))            LIKE '%' || $4 || '%' ESCAPE '\\'
+                   OR LOWER(COALESCE(u.nombre_cliente, ''))  LIKE '%' || $4 || '%' ESCAPE '\\'
+                   OR COALESCE(u.factura_numero::text, '')   LIKE '%' || $4 || '%' ESCAPE '\\'
+                   OR COALESCE(u.remision_numero::text, '')  LIKE '%' || $4 || '%' ESCAPE '\\')
+      AND ($5::timestamp IS NULL OR COALESCE(u.fecha_recepcion, u.fecha_emision) >= $5)
+      AND ($6::timestamp IS NULL OR COALESCE(u.fecha_recepcion, u.fecha_emision) <= $6)
+  `;
+
+  const [filas, total] = await Promise.all([
+    pool.query(`
+      SELECT u.* FROM (${SQL_UNIDADES}) u
+      ${filtro}
+      ORDER BY COALESCE(u.factura_fecha, u.fecha_recepcion, u.fecha_emision) DESC, u.linea_id DESC
+      LIMIT $7 OFFSET $8
+    `, params),
+    pool.query(`
+      SELECT COUNT(*)::int AS n,
+             COALESCE(SUM(u.valor_interno), 0) AS valor,
+             COALESCE(SUM(u.liquidable), 0)    AS liquidable
+      FROM (${SQL_UNIDADES}) u ${filtro}
+    `, params.slice(0, 6)),
+  ]);
+
+  return {
+    items: filas.rows,
+    total: total.rows[0].n,
+    valor_total: Number(total.rows[0].valor),
+    liquidable_total: Number(total.rows[0].liquidable),
+  };
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EXTRACTO — el movimiento de la cuenta del local, como un extracto bancario.
+//
+// Cada fila es un hecho con fecha, y el saldo se va acumulando. Los CARGOS
+// nacen de las ventas del local (es cuando se vuelve exigible lo consignado);
+// los ABONOS, de las remesas recibidas y los gastos por cuenta de bodega.
+//
+// Las remisiones y devoluciones aparecen como apuntes INFORMATIVOS (valor 0 en
+// el saldo): no mueven la cuenta, pero sin ellos el extracto no se entiende.
+// ─────────────────────────────────────────────────────────────────────────────
+const getExtracto = async (negocioId, sucursalId, { desde = null, hasta = null, limit = 300 } = {}) => {
+  const { rows } = await pool.query(`
+    WITH u AS (${SQL_UNIDADES}),
+    eventos AS (
+      -- CARGO: el local vendió una unidad consignada → se vuelve exigible
+      SELECT
+        u.factura_fecha                              AS fecha,
+        'cargo'                                      AS clase,
+        'venta'                                      AS origen,
+        COALESCE(u.nombre_producto, 'Producto')      AS concepto,
+        u.liquidable                                 AS valor,
+        u.imei                                       AS referencia,
+        u.factura_numero                             AS documento,
+        u.nombre_cliente                             AS tercero,
+        u.estado_unidad                              AS detalle
+      FROM u
+      WHERE u.liquidable > 0 AND u.factura_fecha IS NOT NULL
+
+      UNION ALL
+      -- ABONO: remesa de efectivo confirmada por la bodega
+      SELECT r.fecha_recepcion, 'abono', 'remesa',
+             'Remesa recibida', -r.valor,
+             NULL, r.numero, ur.nombre, r.notas
+      FROM remesas r
+      LEFT JOIN usuarios ur ON ur.id = r.usuario_envia_id
+      WHERE r.negocio_id = $1 AND r.sucursal_origen_id = $2 AND r.estado = 'Recibida'
+
+      UNION ALL
+      -- ABONO: gasto que el local pagó por cuenta de la bodega
+      SELECT m.fecha, 'abono', 'gasto',
+             COALESCE(m.concepto, 'Gasto por cuenta de bodega'), -m.valor,
+             NULL, NULL, um.nombre, NULL
+      FROM movimientos_cuenta_interna m
+      LEFT JOIN usuarios um ON um.id = m.usuario_id
+      WHERE m.negocio_id = $1 AND m.sucursal_id = $2
+        AND NOT m.anulado AND m.tipo = 'GastoAutorizado'
+
+      UNION ALL
+      -- AJUSTE manual (puede sumar o restar)
+      SELECT m.fecha, CASE WHEN m.valor >= 0 THEN 'cargo' ELSE 'abono' END, 'ajuste',
+             COALESCE(m.concepto, 'Ajuste'), -m.valor,
+             NULL, NULL, um.nombre, NULL
+      FROM movimientos_cuenta_interna m
+      LEFT JOIN usuarios um ON um.id = m.usuario_id
+      WHERE m.negocio_id = $1 AND m.sucursal_id = $2
+        AND NOT m.anulado AND m.tipo = 'Ajuste'
+
+      UNION ALL
+      -- INFORMATIVO: mercancía recibida (no mueve el saldo)
+      SELECT rm.fecha_recepcion, 'info', 'remision',
+             'Mercancía recibida', 0,
+             NULL, rm.numero, ue.nombre,
+             (SELECT COUNT(*)::text || ' producto(s)' FROM lineas_remision lr
+              WHERE lr.remision_id = rm.id AND lr.estado_linea = 'Recibida')
+      FROM remisiones rm
+      LEFT JOIN usuarios ue ON ue.id = rm.usuario_emisor_id
+      WHERE rm.negocio_id = $1 AND rm.sucursal_destino_id = $2
+        AND rm.tipo = 'entrega' AND rm.estado IN ('Recibida', 'Parcial')
+
+      UNION ALL
+      -- INFORMATIVO: devoluciones a bodega
+      SELECT rm.fecha_recepcion, 'info', 'devolucion',
+             'Devolución a bodega', 0,
+             NULL, rm.numero, ue.nombre,
+             (SELECT COUNT(*)::text || ' producto(s)' FROM lineas_remision lr
+              WHERE lr.remision_id = rm.id)
+      FROM remisiones rm
+      LEFT JOIN usuarios ue ON ue.id = rm.usuario_emisor_id
+      WHERE rm.negocio_id = $1 AND rm.sucursal_origen_id = $2
+        AND rm.tipo = 'devolucion' AND rm.estado <> 'Anulada'
+    ),
+    filtrados AS (
+      SELECT * FROM eventos
+      WHERE fecha IS NOT NULL
+        AND ($3::timestamp IS NULL OR fecha >= $3)
+        AND ($4::timestamp IS NULL OR fecha <= $4)
+    )
+    SELECT f.*,
+           -- Saldo corrido: cuánto debía el local justo después de este hecho.
+           SUM(f.valor) OVER (ORDER BY f.fecha, f.clase, f.concepto
+                              ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS saldo
+    FROM filtrados f
+    ORDER BY f.fecha DESC, f.clase, f.concepto
+    LIMIT $5
+  `, [negocioId, sucursalId, desde, hasta, limit]);
+
   return rows;
 };
 
@@ -803,7 +950,7 @@ const getChequeosSalud = async (negocioId) => {
 };
 
 module.exports = {
-  getUnidades, getResumenUnidades, getCantidadConsignada,
+  getUnidades, buscarUnidades, getExtracto, getResumenUnidades, getCantidadConsignada,
   getTotalRemesado, getTotalMovimientosCuenta, getConciliacion,
   crearRemision, insertarLineaRemision, actualizarTotalRemision,
   findRemisionById, getLineasRemision, findRemisiones,

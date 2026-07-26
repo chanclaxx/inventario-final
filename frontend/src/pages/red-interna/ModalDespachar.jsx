@@ -11,16 +11,16 @@ import api from '../../api/axios.config';
 import { Modal }   from '../../components/ui/Modal';
 import { Button }  from '../../components/ui/Button';
 import { Spinner } from '../../components/ui/Spinner';
+import { InputMoneda } from '../../components/ui/InputMoneda';
 import {
   Truck, Trash2, Check, AlertTriangle, Store, Package, ShoppingBag,
   Plus, Minus, Search, X,
 } from 'lucide-react';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// DESPACHAR — sin un solo campo de precio.
+// DESPACHAR
 //
-// En modo "a costo" el valor lo pone el sistema, así que el usuario solo elige
-// el local y agrega productos. Dos formas de agregar, ninguna excluyente:
+// Dos formas de agregar productos, ninguna excluyente:
 //
 //   1. ESCÁNER (el camino principal): un único campo que acepta IMEI de equipo
 //      O código único de accesorio. El operario no tiene que decidir cuál es:
@@ -29,9 +29,51 @@ import {
 //
 //   2. LISTA DE ACCESORIOS: para los que no tienen código impreso. Se abre solo
 //      cuando se pide, para no llenar la pantalla de opciones.
+//
+// El VALOR de cada línea viene con el costo real puesto (modo "a costo") pero
+// es editable: es lo que el local tendrá que liquidar al vender, y hay casos
+// —equipos sin costo registrado, valores acordados— donde hay que ajustarlo.
+// Si el producto venía del carrito con un precio distinto, se ofrece aplicarlo
+// con un toque; nunca se aplica solo, porque un precio de VENTA usado como
+// valor de remisión le cobraría de más al local.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const claveDe = (i) => (i.tipo === 'serial' ? `s-${i.serial_id}` : `c-${i.producto_id}`);
+
+// ── Valor de la línea: visible y editable ───────────────────────────────────
+// Es lo que el local tendrá que liquidar cuando venda. Viene con el costo real
+// puesto, pero se puede cambiar: hace falta cuando el equipo entró sin costo
+// (saldría en $0) o cuando se acuerda otro valor para esa entrega.
+function ValorLinea({ item, onCambiar }) {
+  const unitario = Number(item.valor_interno || 0);
+  const cantidad = item.tipo === 'cantidad' ? (item.cantidad || 1) : 1;
+  const sugerido = Number(item.precio_carrito || 0);
+  const difiere  = sugerido > 0 && Math.round(sugerido) !== Math.round(unitario);
+
+  return (
+    <div className="flex flex-col items-end gap-0.5 w-32 flex-shrink-0">
+      <InputMoneda
+        value={Math.round(unitario)}
+        onChange={(v) => onCambiar(v === '' ? 0 : Number(v))}
+        className={`text-right !py-1 !px-2 text-sm ${item.sin_costo ? 'ring-1 ring-amber-300' : ''}`}
+      />
+      {cantidad > 1 && (
+        <span className="text-[11px] text-gray-400">
+          × {cantidad} = {formatCOP(unitario * cantidad)}
+        </span>
+      )}
+      {difiere && (
+        <button
+          onClick={() => onCambiar(Math.round(sugerido))}
+          className="text-[11px] text-blue-600 hover:text-blue-700"
+          title="Usar el precio que pusiste en el carrito"
+        >
+          usar {formatCOP(sugerido)}
+        </button>
+      )}
+    </div>
+  );
+}
 
 // ── Selector de accesorios (progressive disclosure: oculto hasta pedirlo) ────
 function PanelAccesorios({ yaEnLista, onAgregar, onCerrar }) {
@@ -151,6 +193,12 @@ export function ModalDespachar({ locales, itemsIniciales = null, descartados = [
     return { ...i, cantidad: Math.min(tope, Math.max(1, (i.cantidad || 1) + delta)) };
   }));
 
+  // El valor editado viaja al backend en la línea; `sin_costo` deja de aplicar
+  // en cuanto el usuario le pone un valor.
+  const cambiarValor = (k, valor) => setItems((prev) => prev.map((i) =>
+    claveDe(i) === k ? { ...i, valor_interno: valor, sin_costo: Number(valor) === 0 } : i
+  ));
+
   const buscar = useMutation({
     mutationFn: (valor) => buscarParaDespacho(valor).then((r) => r.data.data),
     onSuccess: (encontrado) => { setError(''); agregar(encontrado); setTexto(''); inputRef.current?.focus(); },
@@ -167,6 +215,9 @@ export function ModalDespachar({ locales, itemsIniciales = null, descartados = [
     const base = i.tipo === 'serial'
       ? { tipo: 'serial',   serial_id:   i.serial_id }
       : { tipo: 'cantidad', producto_id: i.producto_id, cantidad: i.cantidad || 1 };
+
+    // Valor con el que sale la línea (editable en pantalla).
+    base.valor_interno = Number(i.valor_interno || 0);
 
     // Si el usuario decidió el destino en la revisión, viaja con la línea.
     // 'nueva' se manda sin destino: el backend creará la referencia al recibir.
@@ -367,10 +418,7 @@ export function ModalDespachar({ locales, itemsIniciales = null, descartados = [
                       </div>
                     )}
 
-                    <span className={`text-sm font-semibold w-24 text-right flex-shrink-0
-                      ${i.sin_costo ? 'text-amber-500' : 'text-gray-700'}`}>
-                      {formatCOP(Number(i.valor_interno || 0) * (esSerial ? 1 : (i.cantidad || 1)))}
-                    </span>
+                    <ValorLinea item={i} onCambiar={(v) => cambiarValor(k, v)} />
                     <button
                       onClick={() => setItems((p) => p.filter((x) => claveDe(x) !== k))}
                       className="text-gray-300 hover:text-red-500 transition-colors flex-shrink-0"
@@ -392,8 +440,8 @@ export function ModalDespachar({ locales, itemsIniciales = null, descartados = [
           {sinCosto > 0 && (
             <p className="text-xs text-amber-600 mt-2 flex items-center gap-1.5">
               <AlertTriangle size={13} />
-              {sinCosto} producto(s) sin costo registrado: se despachan en $0 y el local
-              no tendrá que liquidarlos.
+              {sinCosto} producto(s) van en $0: el local no tendrá que liquidarlos.
+              Escribe el valor a la derecha si quieres cobrárselos.
             </p>
           )}
         </div>
