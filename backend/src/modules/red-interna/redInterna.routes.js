@@ -19,6 +19,7 @@ router.use(requireModulo('red_interna'), requireRedInterna);
 // ── Lectura ──────────────────────────────────────────────────────────────────
 router.get('/panel',                    ctrl.getPanel);
 router.get('/sucursales',               ctrl.getSucursales);
+router.get('/contexto',                 ctrl.getContexto);
 router.get('/remisiones',               ctrl.listarRemisiones);
 router.get('/remisiones/:id',           ctrl.getRemision);
 router.get('/remesas',                  ctrl.listarRemesas);
@@ -28,6 +29,8 @@ router.get('/salud',                    requireNivel('supervisor'), ctrl.getSalu
 
 // ── Mercancía ────────────────────────────────────────────────────────────────
 router.get ('/despacho/buscar',      requireNivel('supervisor'), ctrl.buscarParaDespacho);
+router.get ('/despacho/accesorios',  requireNivel('supervisor'), ctrl.catalogoCantidad);
+router.post('/despacho/resolver',    requireNivel('supervisor'), ctrl.resolverItems);
 router.post('/remisiones',           requireNivel('supervisor'), ctrl.despachar);
 router.post('/remisiones/:id/anular',requireNivel('supervisor'), ctrl.anularRemision);
 router.post('/devoluciones',         requireNivel('supervisor'), ctrl.devolver);

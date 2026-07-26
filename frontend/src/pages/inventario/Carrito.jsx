@@ -1,13 +1,20 @@
 import { useState, useEffect } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { ShoppingCart, Trash2, Plus, Minus, FileText, Handshake, ArrowRightLeft } from 'lucide-react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import {
+  ShoppingCart, Trash2, Plus, Minus, FileText, Handshake, ArrowRightLeft,
+  Truck, Undo2,
+} from 'lucide-react';
 import { Button } from '../../components/ui/Button';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { InputMoneda } from '../../components/ui/InputMoneda';
 import { formatCOP } from '../../utils/formatters';
 import { getSucursales } from '../../api/sucursales.api';
+import api from '../../api/axios.config';
+import { getContextoRed, resolverItemsCarrito } from '../../api/redInterna.api';
 import useCarritoStore from '../../store/carritoStore';
 import { ModalTraslado } from './ModalTraslado';
+import { ModalDespachar } from '../red-interna/ModalDespachar';
+import { ModalDevolver }  from '../red-interna/ModalDevolver';
 
 function CantidadInput({ valor, stock, onCambiar }) {
   const [texto, setTexto] = useState(String(valor));
@@ -39,8 +46,12 @@ export function Carrito({ onFacturar, onPrestar, sinHeader = false }) {
   const { items, eliminarItem, actualizarPrecio, actualizarCantidad, limpiarCarrito, totalCarrito } =
     useCarritoStore();
   const total = totalCarrito();
+  const queryClient = useQueryClient();
 
   const [modalTraslado, setModalTraslado] = useState(false);
+  const [despacho,      setDespacho]      = useState(null); // { items, descartados }
+  const [devolucion,    setDevolucion]    = useState(false);
+  const [errorRed,      setErrorRed]      = useState('');
 
   const { data: sucursalesRaw } = useQuery({
     queryKey: ['sucursales'],
@@ -48,6 +59,59 @@ export function Carrito({ onFacturar, onPrestar, sinHeader = false }) {
   });
   const sucursales       = sucursalesRaw || [];
   const hayMultiSucursal = sucursales.length > 1;
+
+  // ── Red interna ────────────────────────────────────────────────────────────
+  // Con la distribución desde bodega activa, el traslado libre está cerrado en
+  // el backend: dejar el botón "Trasladar" sería un botón muerto. Se reemplaza
+  // por la acción que corresponde a dónde estoy parado.
+  const { data: configData } = useQuery({
+    queryKey: ['config'],
+    queryFn:  () => api.get('/config').then((r) => r.data.data),
+    staleTime: 5 * 60 * 1000,
+  });
+  const redActiva = configData?.red_interna_activa === '1';
+
+  const { data: contextoRed } = useQuery({
+    queryKey: ['red-contexto'],
+    queryFn:  () => getContextoRed().then((r) => r.data.data),
+    enabled:  redActiva,          // sin la feature no se pide nunca
+    retry:    false,
+    staleTime: 5 * 60 * 1000,
+  });
+  const esBodega = contextoRed?.es_bodega === true;
+  const redLista = redActiva && !!contextoRed;
+
+  // El carrito guarda el precio de VENTA; el despacho va al costo. El backend
+  // re-resuelve cada ítem (y de paso valida stock, propiedad y disponibilidad).
+  const prepararDespacho = useMutation({
+    mutationFn: () => resolverItemsCarrito(
+      items.map((i) => ({
+        tipo:        i.tipo,
+        serial_id:   i.serial_id,
+        producto_id: i.producto_id,
+        cantidad:    i.cantidad || 1,
+        nombre:      i.nombre,
+      }))
+    ).then((r) => r.data.data),
+    onSuccess: (data) => {
+      if (!data.items.length) {
+        setErrorRed('Ninguno de los productos del carrito se puede despachar.');
+        return;
+      }
+      setErrorRed('');
+      setDespacho(data);
+    },
+    onError: (err) => setErrorRed(err.response?.data?.error || 'No se pudo preparar el despacho'),
+  });
+
+  const cerrarYLimpiar = () => {
+    setDespacho(null);
+    setDevolucion(false);
+    limpiarCarrito();
+    queryClient.invalidateQueries({ queryKey: ['red-panel'] });
+    queryClient.invalidateQueries({ queryKey: ['productos-serial'],   exact: false });
+    queryClient.invalidateQueries({ queryKey: ['productos-cantidad'], exact: false });
+  };
 
   return (
     <>
@@ -193,17 +257,57 @@ export function Carrito({ onFacturar, onPrestar, sinHeader = false }) {
             <Button variant="secondary" className="w-full" onClick={onPrestar}>
               <Handshake size={16} /> Prestar
             </Button>
-            {hayMultiSucursal && (
-              <Button variant="secondary" className="w-full" onClick={() => setModalTraslado(true)}>
-                <ArrowRightLeft size={16} /> Trasladar a otra sucursal
-              </Button>
+
+            {/* Con la red interna activa el traslado libre no existe: la
+                mercancía se mueve por remisiones. El botón se adapta a dónde
+                estoy — despachar si soy la bodega, devolver si soy un local. */}
+            {redLista ? (
+              esBodega ? (
+                <Button variant="secondary" className="w-full"
+                  loading={prepararDespacho.isPending}
+                  onClick={() => prepararDespacho.mutate()}>
+                  <Truck size={16} /> Despachar a un local
+                </Button>
+              ) : (
+                <Button variant="secondary" className="w-full"
+                  onClick={() => { setErrorRed(''); setDevolucion(true); }}>
+                  <Undo2 size={16} /> Devolver a {contextoRed.bodega_nombre}
+                </Button>
+              )
+            ) : (
+              hayMultiSucursal && !redActiva && (
+                <Button variant="secondary" className="w-full" onClick={() => setModalTraslado(true)}>
+                  <ArrowRightLeft size={16} /> Trasladar a otra sucursal
+                </Button>
+              )
             )}
+
+            {errorRed && <p className="text-xs text-red-500 text-center">{errorRed}</p>}
           </div>
         )}
       </div>
 
       {modalTraslado && (
         <ModalTraslado open={modalTraslado} onClose={() => setModalTraslado(false)} />
+      )}
+
+      {despacho && (
+        <ModalDespachar
+          locales={contextoRed?.locales || []}
+          itemsIniciales={despacho.items}
+          descartados={despacho.descartados}
+          onCerrar={() => setDespacho(null)}
+          onListo={cerrarYLimpiar}
+        />
+      )}
+
+      {devolucion && (
+        <ModalDevolver
+          items={items}
+          bodegaNombre={contextoRed?.bodega_nombre}
+          onCerrar={() => setDevolucion(false)}
+          onListo={cerrarYLimpiar}
+        />
       )}
     </>
   );

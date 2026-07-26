@@ -420,6 +420,77 @@ const marcarLineas = async (client, ids, estado, cantidades = null) => {
 
 // ── Catálogo de la bodega para armar la remisión ─────────────────────────────
 
+// Producto de cantidad por CÓDIGO único (feature `codigo_producto_activo`).
+// Permite despachar accesorios con el mismo lector que se usa para los IMEI.
+const buscarCantidadPorCodigo = async (negocioId, sucursalOrigenId, codigo) => {
+  const { rows } = await pool.query(`
+    SELECT pc.id AS producto_id, pc.nombre, pc.codigo, pc.stock,
+           COALESCE(pc.costo_unitario, 0) AS costo_unitario,
+           pc.unidad_medida, pc.linea_id
+    FROM productos_cantidad pc
+    JOIN sucursales su ON su.id = pc.sucursal_id
+    WHERE su.negocio_id = $1
+      AND pc.sucursal_id = $2
+      AND pc.activo = true
+      AND UPPER(TRIM(pc.codigo)) = UPPER(TRIM($3))
+    ORDER BY pc.id LIMIT 1
+  `, [negocioId, sucursalOrigenId, codigo]);
+  return rows[0] || null;
+};
+
+// Catálogo de accesorios de la bodega para elegir a mano (los que no tienen
+// código, o cuando se prefiere buscar por nombre).
+const buscarCantidadDisponible = async (negocioId, sucursalOrigenId, q = '') => {
+  const filtro = (q || '').trim().toLowerCase().replace(/[%_\\]/g, '\\$&').slice(0, 60);
+  const { rows } = await pool.query(`
+    SELECT pc.id AS producto_id, pc.nombre, pc.codigo, pc.stock,
+           COALESCE(pc.costo_unitario, 0) AS costo_unitario,
+           pc.unidad_medida, pc.linea_id, lp.nombre AS linea_nombre
+    FROM productos_cantidad pc
+    JOIN sucursales su           ON su.id = pc.sucursal_id
+    LEFT JOIN lineas_producto lp ON lp.id = pc.linea_id
+    WHERE su.negocio_id = $1
+      AND pc.sucursal_id = $2
+      AND pc.activo = true
+      AND pc.stock > 0
+      AND ($3 = '' OR LOWER(pc.nombre) LIKE '%' || $3 || '%' ESCAPE '\\'
+                   OR LOWER(COALESCE(pc.codigo, '')) LIKE '%' || $3 || '%' ESCAPE '\\')
+    ORDER BY pc.nombre
+    LIMIT 50
+  `, [negocioId, sucursalOrigenId, filtro]);
+  return rows;
+};
+
+// Datos de un producto de cantidad concreto (para resolver ítems del carrito).
+const findCantidadById = async (negocioId, sucursalOrigenId, productoId) => {
+  const { rows } = await pool.query(`
+    SELECT pc.id AS producto_id, pc.nombre, pc.codigo, pc.stock,
+           COALESCE(pc.costo_unitario, 0) AS costo_unitario, pc.unidad_medida
+    FROM productos_cantidad pc
+    JOIN sucursales su ON su.id = pc.sucursal_id
+    WHERE su.negocio_id = $1 AND pc.sucursal_id = $2 AND pc.id = $3 AND pc.activo = true
+  `, [negocioId, sucursalOrigenId, productoId]);
+  return rows[0] || null;
+};
+
+// Serial por id (para resolver ítems que vienen del carrito, donde no hay IMEI).
+const findSerialById = async (negocioId, sucursalOrigenId, serialId) => {
+  const { rows } = await pool.query(`
+    SELECT s.id AS serial_id, s.imei, s.vendido, s.prestado,
+           COALESCE(s.costo_compra, 0) AS costo_compra,
+           ps.id AS producto_id, ps.nombre, ps.marca, ps.modelo,
+           EXISTS (
+             SELECT 1 FROM lineas_remision lr
+             WHERE lr.serial_id = s.id AND lr.estado_linea IN ('Pendiente', 'Recibida')
+           ) AS ya_remisionado
+    FROM seriales s
+    JOIN productos_serial ps ON ps.id = s.producto_id
+    JOIN sucursales su       ON su.id = ps.sucursal_id
+    WHERE su.negocio_id = $1 AND ps.sucursal_id = $2 AND s.id = $3
+  `, [negocioId, sucursalOrigenId, serialId]);
+  return rows[0] || null;
+};
+
 const buscarSerialDisponible = async (negocioId, sucursalOrigenId, imei) => {
   const { rows } = await pool.query(`
     SELECT s.id AS serial_id, s.imei, s.vendido, s.prestado,
@@ -622,7 +693,8 @@ module.exports = {
   crearRemision, insertarLineaRemision, actualizarTotalRemision,
   findRemisionById, getLineasRemision, findRemisiones,
   marcarRemisionRecibida, marcarRemisionAnulada, marcarLineas,
-  buscarSerialDisponible,
+  buscarSerialDisponible, buscarCantidadPorCodigo, buscarCantidadDisponible,
+  findCantidadById, findSerialById,
   crearRemesa, findRemesaById, findRemesas, marcarRemesaRecibida, marcarRemesaAnulada,
   findRemesaPorClave, findRemisionPorClave,
   insertarMovimientoCuenta, findMovimientosCuenta,

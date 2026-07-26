@@ -13,6 +13,14 @@ const getPanel = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+// Contexto liviano: lo usa el carrito de inventario para saber qué botón
+// mostrar (despachar si estoy en la bodega, devolver si estoy en un local).
+const getContexto = async (req, res, next) => {
+  try {
+    res.json({ ok: true, data: await service.getContexto(req) });
+  } catch (err) { next(err); }
+};
+
 const getSucursales = async (req, res, next) => {
   try {
     res.json({ ok: true, data: await service.getSucursalesRed(req) });
@@ -21,9 +29,26 @@ const getSucursales = async (req, res, next) => {
 
 // ── Remisiones ───────────────────────────────────────────────────────────────
 
+// Un solo campo para el lector: resuelve IMEI o código único de accesorio.
+// `imei` se mantiene como alias por compatibilidad.
 const buscarParaDespacho = async (req, res, next) => {
   try {
-    const data = await service.buscarParaDespacho(req, req.query.imei);
+    const data = await service.buscarParaDespacho(req, req.query.q ?? req.query.imei);
+    res.json({ ok: true, data });
+  } catch (err) { next(err); }
+};
+
+const catalogoCantidad = async (req, res, next) => {
+  try {
+    const data = await service.catalogoCantidad(req, req.query.q || '');
+    res.json({ ok: true, data });
+  } catch (err) { next(err); }
+};
+
+// Traduce los ítems del carrito de inventario a líneas de despacho valorizadas.
+const resolverItems = async (req, res, next) => {
+  try {
+    const data = await service.resolverItems(req, req.body.items);
     res.json({ ok: true, data });
   } catch (err) { next(err); }
 };
@@ -194,8 +219,9 @@ const getSalud = async (req, res, next) => {
 };
 
 module.exports = {
-  getPanel, getSucursales,
-  buscarParaDespacho, despachar, recibir, anularRemision, devolver,
+  getPanel, getSucursales, getContexto,
+  buscarParaDespacho, catalogoCantidad, resolverItems,
+  despachar, recibir, anularRemision, devolver,
   listarRemisiones, getRemision,
   enviarRemesa, confirmarRemesa, anularRemesa, listarRemesas,
   gastoAutorizado, ajuste, getMovimientosCuenta,

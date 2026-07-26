@@ -53,10 +53,31 @@ const _exigirBodega = (req) => {
 //
 // El catálogo es POR SUCURSAL: el mismo modelo de teléfono es una fila distinta
 // en cada sede. El flujo viejo de traslados obliga al usuario a emparejarlos a
-// mano; aquí se resuelve solo (exacto por nombre+marca+modelo, o se crea) para
-// que recibir sea un solo toque. La línea de producto (`linea_id`) es del
-// negocio, así que viaja tal cual.
+// mano; aquí se resuelve solo para que recibir sea un solo toque:
+//   1. busca un producto equivalente en el destino,
+//   2. si no existe, lo crea copiando nombre/marca/modelo/precio/línea.
+// La línea de producto (`linea_id`) es del negocio, así que viaja tal cual.
+//
+// El precio de venta del destino NO se toca si el producto ya existía: cada
+// local manda sobre su propio precio.
 // ─────────────────────────────────────────────────────────────────────────────
+
+// Normalización equivalente a `_norm` de traslados.repository.js, pero en SQL:
+// minúsculas, sin tildes, guiones y guiones bajos como espacio, espacios
+// internos colapsados y recortada. Sin esto, "Galaxy  A54 " y "Galaxy A54"
+// se ven como productos distintos y el local termina con el catálogo duplicado.
+const NORM = (col) => `
+  regexp_replace(
+    trim(
+      translate(
+        lower(COALESCE(${col}, '')),
+        'áàäâãéèëêíìïîóòöôõúùüûñç-_',
+        'aaaaaeeeeiiiiooooouuuunc  '
+      )
+    ),
+    '[[:space:]]+', ' ', 'g'
+  )
+`;
 
 const _resolverProductoSerialDestino = async (client, productoOrigenId, sucursalDestinoId) => {
   const { rows: orig } = await client.query(
@@ -69,9 +90,9 @@ const _resolverProductoSerialDestino = async (client, productoOrigenId, sucursal
   const { rows: match } = await client.query(`
     SELECT id FROM productos_serial
     WHERE sucursal_id = $1
-      AND LOWER(TRIM(nombre))            = LOWER(TRIM($2))
-      AND COALESCE(LOWER(TRIM(marca)),  '') = COALESCE(LOWER(TRIM($3)), '')
-      AND COALESCE(LOWER(TRIM(modelo)), '') = COALESCE(LOWER(TRIM($4)), '')
+      AND ${NORM('nombre')} = ${NORM('$2')}
+      AND ${NORM('marca')}  = ${NORM('$3')}
+      AND ${NORM('modelo')} = ${NORM('$4')}
     ORDER BY id LIMIT 1
   `, [sucursalDestinoId, o.nombre, o.marca, o.modelo]);
   if (match.length) return match[0].id;
@@ -95,7 +116,7 @@ const _resolverProductoCantidadDestino = async (client, productoOrigenId, sucurs
   const { rows: match } = await client.query(`
     SELECT id FROM productos_cantidad
     WHERE sucursal_id = $1 AND activo = true
-      AND LOWER(TRIM(nombre)) = LOWER(TRIM($2))
+      AND ${NORM('nombre')} = ${NORM('$2')}
     ORDER BY id LIMIT 1
   `, [sucursalDestinoId, o.nombre]);
   if (match.length) return match[0].id;
@@ -1047,28 +1068,143 @@ const listarRemesas = (req, { estado, limit } = {}) =>
     estado, limit,
   });
 
-const buscarParaDespacho = async (req, imei) => {
+// ─────────────────────────────────────────────────────────────────────────────
+// Búsqueda para despacho — UN SOLO campo para el lector.
+//
+// El operario no debería tener que decidir si lo que va a escanear es un IMEI o
+// un código de accesorio: se prueban ambos. Primero serial (IMEI exacto) y
+// luego producto de cantidad por código único.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const _formatoSerial = (s) => ({
+  tipo: 'serial',
+  serial_id: s.serial_id,
+  imei: s.imei,
+  nombre: [s.nombre, s.marca, s.modelo].filter(Boolean).join(' '),
+  valor_interno: _num(s.costo_compra),
+  sin_costo: _num(s.costo_compra) === 0,
+  cantidad: 1,
+});
+
+const _formatoCantidad = (p) => ({
+  tipo: 'cantidad',
+  producto_id: p.producto_id,
+  codigo: p.codigo || null,
+  nombre: p.nombre,
+  unidad_medida: p.unidad_medida || 'unidad',
+  stock: Number(p.stock || 0),
+  valor_interno: _num(p.costo_unitario),
+  sin_costo: _num(p.costo_unitario) === 0,
+  cantidad: 1,
+});
+
+const buscarParaDespacho = async (req, texto) => {
   _exigirBodega(req);
-  if (!imei || imei.trim().length < 4) {
-    throw { status: 400, message: 'Escribe al menos 4 caracteres del IMEI' };
+  const q = String(texto || '').trim();
+  if (q.length < 3) {
+    throw { status: 400, message: 'Escribe al menos 3 caracteres' };
   }
-  const s = await repo.buscarSerialDisponible(req.user.negocio_id, Number(req.sucursal_id), imei.trim());
-  if (!s)            throw { status: 404, message: 'Ese IMEI no está en la bodega' };
-  if (s.vendido)     throw { status: 409, message: 'Ese equipo ya fue vendido' };
-  if (s.prestado)    throw { status: 409, message: 'Ese equipo está prestado' };
-  if (s.ya_remisionado) throw { status: 409, message: 'Ese equipo ya está en una remisión activa' };
-  return {
-    serial_id: s.serial_id, imei: s.imei,
-    nombre: [s.nombre, s.marca, s.modelo].filter(Boolean).join(' '),
-    valor_interno: _num(s.costo_compra),
-    sin_costo: _num(s.costo_compra) === 0,
-  };
+  const negocioId  = req.user.negocio_id;
+  const sucursalId = Number(req.sucursal_id);
+
+  // 1) ¿Es un IMEI?
+  const s = await repo.buscarSerialDisponible(negocioId, sucursalId, q);
+  if (s) {
+    if (s.vendido)        throw { status: 409, message: `El equipo ${s.imei} ya fue vendido` };
+    if (s.prestado)       throw { status: 409, message: `El equipo ${s.imei} está prestado` };
+    if (s.ya_remisionado) throw { status: 409, message: `El equipo ${s.imei} ya está en una remisión activa` };
+    return _formatoSerial(s);
+  }
+
+  // 2) ¿Es un código único de accesorio?
+  const p = await repo.buscarCantidadPorCodigo(negocioId, sucursalId, q);
+  if (p) {
+    if (Number(p.stock) <= 0) {
+      throw { status: 409, message: `"${p.nombre}" está sin stock en la bodega` };
+    }
+    return _formatoCantidad(p);
+  }
+
+  throw { status: 404, message: `"${q}" no está en la bodega (ni como IMEI ni como código)` };
+};
+
+// Catálogo de accesorios de la bodega, para elegir a mano los que no tienen
+// código impreso.
+const catalogoCantidad = async (req, q) => {
+  _exigirBodega(req);
+  const filas = await repo.buscarCantidadDisponible(
+    req.user.negocio_id, Number(req.sucursal_id), q
+  );
+  return filas.map((p) => ({ ..._formatoCantidad(p), linea_nombre: p.linea_nombre || null }));
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Resolver ítems que vienen del carrito de inventario.
+//
+// El carrito guarda el PRECIO DE VENTA, que no sirve aquí: el despacho va al
+// costo. Se re-resuelve todo contra la base (y de paso se valida propiedad,
+// stock y que nada esté vendido o ya remisionado) en vez de confiar en lo que
+// mande el navegador.
+// ─────────────────────────────────────────────────────────────────────────────
+const resolverItems = async (req, items) => {
+  _exigirBodega(req);
+  if (!Array.isArray(items) || !items.length) {
+    throw { status: 400, message: 'No hay productos para despachar' };
+  }
+  const negocioId  = req.user.negocio_id;
+  const sucursalId = Number(req.sucursal_id);
+
+  const resueltos = [];
+  const descartados = [];
+
+  for (const it of items) {
+    if (it.tipo === 'serial' && it.serial_id) {
+      const s = await repo.findSerialById(negocioId, sucursalId, Number(it.serial_id));
+      if (!s)                   { descartados.push({ nombre: it.nombre || 'Equipo', motivo: 'no está en la bodega' }); continue; }
+      if (s.vendido)            { descartados.push({ nombre: s.imei, motivo: 'ya fue vendido' }); continue; }
+      if (s.prestado)           { descartados.push({ nombre: s.imei, motivo: 'está prestado' }); continue; }
+      if (s.ya_remisionado)     { descartados.push({ nombre: s.imei, motivo: 'ya está en otra remisión' }); continue; }
+      resueltos.push(_formatoSerial(s));
+
+    } else if (it.tipo === 'cantidad' && it.producto_id) {
+      const p = await repo.findCantidadById(negocioId, sucursalId, Number(it.producto_id));
+      if (!p) { descartados.push({ nombre: it.nombre || 'Producto', motivo: 'no está en la bodega' }); continue; }
+      const pedida = Math.max(1, Number(it.cantidad) || 1);
+      if (Number(p.stock) <= 0) { descartados.push({ nombre: p.nombre, motivo: 'sin stock' }); continue; }
+      // Se recorta al stock disponible en vez de fallar: el usuario ve cuánto
+      // quedó y decide.
+      resueltos.push({ ..._formatoCantidad(p), cantidad: Math.min(pedida, Number(p.stock)) });
+
+    } else {
+      descartados.push({ nombre: it.nombre || 'Producto', motivo: 'tipo no reconocido' });
+    }
+  }
+
+  return { items: resueltos, descartados };
 };
 
 const getSucursalesRed = async (req) => {
   const bodegaId = Number(req.red.bodega_id);
   const todas = await repo.getSucursales(req.user.negocio_id);
   return todas.map((s) => ({ ...s, es_bodega: s.id === bodegaId }));
+};
+
+// Contexto liviano para pantallas que solo necesitan saber "dónde estoy".
+// Lo consume el carrito de inventario para decidir qué botón mostrar sin
+// depender del store de sucursal del navegador (que para un vendedor puede no
+// coincidir con su sucursal real: el backend la resuelve desde el token).
+const getContexto = async (req) => {
+  const bodegaId  = Number(req.red.bodega_id);
+  const sucursalId = Number(req.sucursal_id);
+  const todas = await repo.getSucursales(req.user.negocio_id);
+  return {
+    activa:      true,
+    sucursal_id: sucursalId,
+    bodega_id:   bodegaId,
+    es_bodega:   sucursalId === bodegaId,
+    bodega_nombre: todas.find((s) => s.id === bodegaId)?.nombre || 'Bodega',
+    locales:     todas.filter((s) => s.id !== bodegaId),
+  };
 };
 
 const getMovimientosCuenta = async (req, sucursalId) => {
@@ -1085,6 +1221,7 @@ module.exports = {
   registrarGastoAutorizado, registrarAjuste,
   getPanelLocal, getPanelBodega, getConciliacion, getSalud,
   getRemision, listarRemisiones, listarRemesas,
-  buscarParaDespacho, getSucursalesRed, getMovimientosCuenta,
+  buscarParaDespacho, catalogoCantidad, resolverItems,
+  getSucursalesRed, getContexto, getMovimientosCuenta,
   ETIQUETAS_ESTADO,
 };

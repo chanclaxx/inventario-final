@@ -19,6 +19,7 @@ npm install --no-save @electric-sql/pglite   # o: npm i -D @electric-sql/pglite
 
 node scripts/pruebas-red-interna/01-circuito-completo.mjs
 node scripts/pruebas-red-interna/02-seguridad-produccion.mjs
+node scripts/pruebas-red-interna/03-accesorios-y-codigos.mjs
 ```
 
 Ambos salen con código 0 si todo pasa.
@@ -58,6 +59,19 @@ Ambos salen con código 0 si todo pasa.
 | H | **Idempotencia de remesas** (el error que costaría plata) |
 | I | Anular remesa desactiva los movimientos, nunca los borra |
 | J | Apagar el flag revierte el comportamiento sin migrar nada |
+
+### `03-accesorios-y-codigos.mjs` — 31 verificaciones
+
+| # | Escenario |
+|---|---|
+| 1 | Un solo campo de escáner resuelve IMEI **y** código único |
+| 2 | Catálogo de accesorios: solo los que tienen stock, busca por nombre o código |
+| 3 | Ítems del carrito se re-resuelven **al costo**, no al precio de venta |
+| 4 | Despacho mixto: equipo + accesorios en la misma remisión |
+| 5 | Recepción parcial de accesorios (llegaron 7 de 10) |
+| 6 | Liquidación de accesorios anclada en el stock del local |
+| 7 | Devolución de accesorios rebaja la consignación |
+| 8 | Un local no puede despachar: solo la bodega |
 
 ## Nota sobre `esquema.sql`
 

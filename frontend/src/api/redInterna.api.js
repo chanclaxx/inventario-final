@@ -10,9 +10,23 @@ import api from './axios.config';
 export const getPanel      = () => api.get('/red-interna/panel');
 export const getSucursales = () => api.get('/red-interna/sucursales');
 
+// Contexto liviano: "¿dónde estoy?". Lo usa el carrito de inventario para
+// decidir si mostrar "Despachar" (bodega) o "Devolver" (local), sin depender
+// del store de sucursal del navegador.
+export const getContextoRed = () => api.get('/red-interna/contexto');
+
 // ── Mercancía ────────────────────────────────────────────────────────────────
-export const buscarParaDespacho = (imei) =>
-  api.get('/red-interna/despacho/buscar', { params: { imei } });
+// Un solo campo para el lector: resuelve IMEI o código único de accesorio.
+export const buscarParaDespacho = (q) =>
+  api.get('/red-interna/despacho/buscar', { params: { q } });
+
+// Accesorios de la bodega (para los que no tienen código impreso).
+export const buscarAccesorios = (q = '') =>
+  api.get('/red-interna/despacho/accesorios', { params: { q } });
+
+// Traduce los ítems del carrito de inventario a líneas valorizadas al costo.
+export const resolverItemsCarrito = (items) =>
+  api.post('/red-interna/despacho/resolver', { items });
 
 export const despachar = (payload) => api.post('/red-interna/remisiones', payload);
 
