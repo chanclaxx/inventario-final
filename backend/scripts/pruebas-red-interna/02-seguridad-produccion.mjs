@@ -18,6 +18,7 @@ const db = new PGlite();
 const AQUI = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'));
 await db.exec(readFileSync(path.join(AQUI, 'esquema.sql'), 'utf8'));
 await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260725_red_interna.sql'), 'utf8'));
+await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260726_red_interna_v2.sql'), 'utf8'));
 
 const conectar = (t) => ({ query: (s, p) => t.query(s, p ?? []) });
 const pool = { ...conectar(db), connect: async () => ({ ...conectar(db), release() {} }) };
@@ -59,7 +60,7 @@ await db.exec(`
 `);
 
 const bodega = { user:{id:1,negocio_id:1,rol:'admin_negocio'}, sucursal_id:1, esBodega:true,
-  red:{activa:true,bodega_id:1,modo_precio:'costo',confirmar_recepcion:true,confirmar_remesa:true} };
+  red:{activa:true,bodega_id:1,modo_precio:'costo',confirmar_recepcion:true,confirmar_remesa:true, ocultar_costos: false } };
 const centro = { user:{id:2,negocio_id:1,rol:'vendedor'}, sucursal_id:2, esBodega:false, red:{...bodega.red} };
 
 console.log('\n═══ A. El cliente SIN el flag no nota NADA ═══');
@@ -140,14 +141,27 @@ let ajeno = false;
 try { await service.recibir(otro, r4.id, {}); } catch (e) { ajeno = e.status === 403; }
 ok('★ Rechazado por sucursal ajena', ajeno);
 
-console.log('\n═══ G. Devolución local → bodega ═══');
+console.log('\n═══ G. Devolución local → bodega (con confirmación) ═══');
 let est = await service.getPanelLocal(centro);
 const antes = est.totales.en_consignacion_unidades;
-await service.devolver({ ...centro, user:{...centro.user, rol:'supervisor'} }, {
+const supervisorLocal = { ...centro, user: { ...centro.user, rol: 'supervisor' } };
+
+const devol = await service.devolver(supervisorLocal, {
   lineas: [{ tipo: 'serial', serial_id: 1, nombre_producto: 'iPhone 13' }],
 });
+ok('★ Nace en tránsito, sin mover nada', devol.estado === 'En transito');
+const enCamino = await q(`SELECT ps.sucursal_id FROM seriales s
+  JOIN productos_serial ps ON ps.id=s.producto_id WHERE s.id=1`);
+ok('  el equipo sigue en el local', enCamino[0].sucursal_id === 2);
+
+// La bodega la confirma: ahí sí se mueve.
+const lDev = await repo.getLineasRemision(devol.id);
+await service.confirmarDevolucion(bodega, devol.id, {
+  lineas_recibidas: lDev.map((x) => Number(x.id)),
+});
 est = await service.getPanelLocal(centro);
-ok('★ Sale de la consignación del local', est.totales.en_consignacion_unidades === antes - 1);
+ok('★ Confirmada: sale de la consignación del local',
+   est.totales.en_consignacion_unidades === antes - 1);
 const vuelta = await q(`SELECT ps.sucursal_id FROM seriales s
   JOIN productos_serial ps ON ps.id=s.producto_id WHERE s.id=1`);
 ok('  y el equipo volvió físicamente a la bodega', vuelta[0].sucursal_id === 1);

@@ -17,6 +17,7 @@ const db = new PGlite();
 const AQUI = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'));
 await db.exec(readFileSync(path.join(AQUI, 'esquema.sql'), 'utf8'));
 await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260725_red_interna.sql'), 'utf8'));
+await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260726_red_interna_v2.sql'), 'utf8'));
 
 // ── Pool falso: PGlite con la misma interfaz que `pg` ───────────────────────
 const conectar = (target) => ({
@@ -80,7 +81,7 @@ const reqBodega = {
   user: { id: 1, negocio_id: 1, rol: 'admin_negocio' },
   sucursal_id: 1, esBodega: true,
   red: { activa: true, bodega_id: 1, modo_precio: 'costo',
-         confirmar_recepcion: true, confirmar_remesa: true },
+         confirmar_recepcion: true, confirmar_remesa: true, ocultar_costos: false },
 };
 const reqCentro = {
   user: { id: 2, negocio_id: 1, rol: 'vendedor' },

@@ -44,7 +44,23 @@ export const recibirRemision = (id, payload = {}) =>
 
 export const anularRemision = (id) => api.post(`/red-interna/remisiones/${id}/anular`);
 
+// Dice de dónde viene cada unidad que se va a devolver (de bodega o propia
+// del local), para pedir la decisión solo donde hace falta.
+export const previsualizarDevolucion = (lineas) =>
+  api.post('/red-interna/devoluciones/previsualizar', { lineas });
+
 export const devolverABodega = (payload) => api.post('/red-interna/devoluciones', payload);
+
+// La bodega confirma: aquí sí se mueve el inventario.
+export const confirmarDevolucion = (id, payload = {}) =>
+  api.post(`/red-interna/devoluciones/${id}/confirmar`, payload);
+
+// Corrige el valor de una línea (directo si va en tránsito, con nota si no).
+export const corregirValorLinea = (lineaId, payload) =>
+  api.post(`/red-interna/lineas/${lineaId}/corregir-valor`, payload);
+
+// Cuentas desde las que el local puede remitir (efectivo, Nequi, banco…).
+export const getCuentasParaRemesa = () => api.get('/red-interna/remesas/cuentas');
 
 export const listarRemisiones = (params = {}) =>
   api.get('/red-interna/remisiones', { params });

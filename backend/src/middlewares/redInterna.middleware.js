@@ -22,6 +22,7 @@ const CLAVES = {
   confirmarRecepcion:'red_interna_confirmar_recepcion',// '1' = el local confirma
   confirmarRemesa:   'red_interna_confirmar_remesa',   // '1' = la bodega confirma
   bloquearTraslados: 'red_interna_bloquear_traslados', // '1' = traslado libre off
+  ocultarCostos:     'red_interna_ocultar_costos',     // '1' = vendedor sin costos
 };
 
 const DEFAULTS = {
@@ -68,6 +69,10 @@ const getConfigRed = async (negocioId) => {
     // mercancía pudiera moverse por fuera, la bodega perdería su rastro y la
     // consignación dejaría de cuadrar.
     bloquear_traslados:  map[CLAVES.bloquearTraslados]  !== '0',
+    // Los costos son información comercial sensible. Por defecto un vendedor
+    // no los ve: confirma entregas y remite el dinero, pero no sabe a cuánto
+    // le compró la bodega cada equipo.
+    ocultar_costos:      map[CLAVES.ocultarCostos]      !== '0',
   };
 
   _cache.set(negocioId, { valor, expira: Date.now() + TTL_MS });

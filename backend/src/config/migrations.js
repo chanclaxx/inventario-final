@@ -143,6 +143,46 @@ const runMigrations = async () => {
       CREATE INDEX IF NOT EXISTS idx_mci_sucursal
         ON movimientos_cuenta_interna (negocio_id, sucursal_id, fecha DESC) WHERE NOT anulado;
     `);
+    // v2 — devoluciones auditables y corrección de valores.
+    // Ver migrations/20260726_red_interna_v2.sql. Solo toca tablas de la red
+    // interna; ninguna tabla del sistema original se modifica.
+    await pool.query(`
+      ALTER TABLE IF EXISTS lineas_remision ADD COLUMN IF NOT EXISTS origen_unidad TEXT;
+      ALTER TABLE IF EXISTS lineas_remision ADD COLUMN IF NOT EXISTS genera_saldo_favor BOOLEAN NOT NULL DEFAULT FALSE;
+      ALTER TABLE IF EXISTS lineas_remision ADD COLUMN IF NOT EXISTS valor_original NUMERIC(14,2);
+      ALTER TABLE IF EXISTS lineas_remision ADD COLUMN IF NOT EXISTS remision_tipo TEXT;
+
+      UPDATE lineas_remision lr SET remision_tipo = r.tipo
+      FROM remisiones r
+      WHERE r.id = lr.remision_id AND lr.remision_tipo IS DISTINCT FROM r.tipo;
+
+      DROP INDEX IF EXISTS uq_lineas_remision_serial_viva;
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_lineas_remision_serial_viva
+        ON lineas_remision (serial_id)
+        WHERE serial_id IS NOT NULL AND remision_tipo = 'entrega'
+          AND estado_linea IN ('Pendiente', 'Recibida');
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_lineas_remision_serial_devolviendo
+        ON lineas_remision (serial_id)
+        WHERE serial_id IS NOT NULL AND remision_tipo = 'devolucion'
+          AND estado_linea = 'Pendiente';
+
+      CREATE TABLE IF NOT EXISTS correcciones_remision (
+        id             BIGSERIAL     PRIMARY KEY,
+        negocio_id     INTEGER       NOT NULL REFERENCES negocios(id)   ON DELETE RESTRICT,
+        sucursal_id    INTEGER       NOT NULL REFERENCES sucursales(id) ON DELETE RESTRICT,
+        linea_id       BIGINT        NOT NULL REFERENCES lineas_remision(id) ON DELETE CASCADE,
+        valor_anterior NUMERIC(14,2) NOT NULL,
+        valor_nuevo    NUMERIC(14,2) NOT NULL,
+        diferencia     NUMERIC(14,2) NOT NULL,
+        motivo         TEXT,
+        usuario_id     INTEGER,
+        fecha          TIMESTAMP     NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_correcciones_sucursal
+        ON correcciones_remision (negocio_id, sucursal_id, fecha DESC);
+      CREATE INDEX IF NOT EXISTS idx_correcciones_linea
+        ON correcciones_remision (linea_id);
+    `);
   } catch (err) {
     console.error('⚠️  Migración red interna no aplicada (el resto del sistema sigue normal):', err.message);
   }

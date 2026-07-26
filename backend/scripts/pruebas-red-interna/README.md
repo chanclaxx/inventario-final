@@ -24,7 +24,12 @@ node scripts/pruebas-red-interna/03-accesorios-y-codigos.mjs
 node scripts/pruebas-red-interna/04-referencias-sin-duplicar.mjs
 node scripts/pruebas-red-interna/05-bugs-despacho.mjs
 node scripts/pruebas-red-interna/06-estado-cuenta.mjs
+node scripts/pruebas-red-interna/07-devolucion-costos-medios.mjs
 ```
+
+> Las suites cargan **las dos migraciones**: `20260725_red_interna.sql` y
+> `20260726_red_interna_v2.sql`. Si se agrega una tercera hay que sumarla a
+> todas, o fallarán con columnas inexistentes.
 
 ### Diagnóstico sobre datos reales (solo lectura)
 
@@ -159,6 +164,21 @@ El extracto tipo bancario de cada local.
 | 8 | Un local no ve la cuenta de otro; la bodega ve todas |
 | 9 | El rango de fechas filtra el extracto sin alterar los totales |
 | 10 | **Recepción confirmada tarde**: la venta intermedia sí genera cargo |
+
+### `07-devolucion-costos-medios.mjs` — 46 verificaciones
+
+| # | Escenario |
+|---|---|
+| 1 | La devolución distingue si cada equipo vino de bodega o es del local |
+| 2 | Emitirla **no mueve inventario**: queda en tránsito |
+| 3 | La bodega confirma → se mueve todo y lo propio genera **saldo a favor** |
+| 4 | Las devoluciones sin confirmar salen en la bandeja de la bodega |
+| 5 | **Un vendedor no ve costos** pero sí cuánto debe remitir |
+| 6 | Remesas por Nequi/banco: cuenta correcta, sin espejo en caja física |
+| 7 | Corrección de valor: directa en tránsito, con nota si ya se recibió |
+| 8 | Detalle del envío con estado por línea y resumen de lo que ya es deuda |
+| 9 | El desglose explica el saldo y por qué medio ha pagado |
+| 10 | Un local no puede confirmar su propia devolución |
 
 ## Nota sobre `esquema.sql`
 

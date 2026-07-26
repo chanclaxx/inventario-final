@@ -17,6 +17,7 @@ const RAIZ = path.resolve(AQUI, '../..');
 const db = new PGlite();
 await db.exec(readFileSync(path.join(AQUI, 'esquema.sql'), 'utf8'));
 await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260725_red_interna.sql'), 'utf8'));
+await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260726_red_interna_v2.sql'), 'utf8'));
 
 const conectar = (t) => ({ query: (s, p) => t.query(s, p ?? []) });
 const pool = { ...conectar(db), connect: async () => ({ ...conectar(db), release() {} }) };
@@ -62,7 +63,7 @@ await db.exec(`
 `);
 
 const bodega = { user:{id:1,negocio_id:1,rol:'admin_negocio'}, sucursal_id:1, esBodega:true,
-  red:{activa:true,bodega_id:1,confirmar_recepcion:true,confirmar_remesa:true} };
+  red:{activa:true,bodega_id:1,confirmar_recepcion:true,confirmar_remesa:true, ocultar_costos: false } };
 const centro = { user:{id:1,negocio_id:1,rol:'vendedor'}, sucursal_id:2, esBodega:false, red:{...bodega.red} };
 
 console.log('\n═══ 1. El escáner acepta IMEI Y código en el mismo campo ═══');
@@ -184,8 +185,14 @@ console.log('\n═══ 7. Devolver accesorios rebaja la consignación ══�
 const vidrioLocal = (await q(
   `SELECT id FROM productos_cantidad WHERE sucursal_id = 2 AND nombre = 'Vidrio templado'`
 ))[0].id;
-await service.devolver({...centro, user:{...centro.user, rol:'supervisor'}}, {
+// La devolución nace en tránsito; la bodega la confirma y ahí se mueve.
+const devolVidrio = await service.devolver({...centro, user:{...centro.user, rol:'supervisor'}}, {
   lineas: [{ tipo:'cantidad', producto_id: vidrioLocal, cantidad: 20 }],
+});
+ok('★ La devolución nace en tránsito', devolVidrio.estado === 'En transito');
+const lVidrio = await repo.getLineasRemision(devolVidrio.id);
+await service.confirmarDevolucion(bodega, devolVidrio.id, {
+  lineas_recibidas: lVidrio.map((x) => Number(x.id)),
 });
 const stocks2 = await q(`SELECT sucursal_id, nombre, stock FROM productos_cantidad
                          WHERE nombre='Vidrio templado' ORDER BY sucursal_id`);

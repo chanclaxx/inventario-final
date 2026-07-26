@@ -225,14 +225,30 @@ const getExtracto = async (negocioId, sucursalId, { desde = null, hasta = null, 
         AND NOT m.anulado AND m.tipo = 'GastoAutorizado'
 
       UNION ALL
-      -- AJUSTE manual (puede sumar o restar)
-      SELECT m.fecha, CASE WHEN m.valor >= 0 THEN 'cargo' ELSE 'abono' END, 'ajuste',
+      -- AJUSTE manual y saldos a favor.
+      -- Convención (la misma de _armarSaldo: saldo = liquidable menos ajustes):
+      -- un ajuste POSITIVO baja la deuda, así que en el extracto es un ABONO.
+      SELECT m.fecha, CASE WHEN m.valor >= 0 THEN 'abono' ELSE 'cargo' END, 'ajuste',
              COALESCE(m.concepto, 'Ajuste'), -m.valor,
              NULL, NULL, um.nombre, NULL
       FROM movimientos_cuenta_interna m
       LEFT JOIN usuarios um ON um.id = m.usuario_id
       WHERE m.negocio_id = $1 AND m.sucursal_id = $2
         AND NOT m.anulado AND m.tipo = 'Ajuste'
+
+      UNION ALL
+      -- INFORMATIVO: correcciones de valor sobre una línea ya recibida.
+      -- No mueven el saldo por sí solas (el cargo de la venta ya usa el valor
+      -- corregido), pero sin verlas nadie entendería por qué cambió una cifra.
+      SELECT c.fecha, 'info', 'correccion',
+             'Corrección de valor: ' || COALESCE(lr.nombre_producto, 'producto'), 0,
+             lr.imei, NULL, uc.nombre,
+             'de ' || c.valor_anterior::text || ' a ' || c.valor_nuevo::text
+               || COALESCE(' · ' || c.motivo, '')
+      FROM correcciones_remision c
+      JOIN lineas_remision lr ON lr.id = c.linea_id
+      LEFT JOIN usuarios uc   ON uc.id = c.usuario_id
+      WHERE c.negocio_id = $1 AND c.sucursal_id = $2
 
       UNION ALL
       -- INFORMATIVO: mercancía recibida (no mueve el saldo)
@@ -256,7 +272,7 @@ const getExtracto = async (negocioId, sucursalId, { desde = null, hasta = null, 
       FROM remisiones rm
       LEFT JOIN usuarios ue ON ue.id = rm.usuario_emisor_id
       WHERE rm.negocio_id = $1 AND rm.sucursal_origen_id = $2
-        AND rm.tipo = 'devolucion' AND rm.estado <> 'Anulada'
+        AND rm.tipo = 'devolucion' AND rm.estado IN ('Recibida', 'Parcial')
     ),
     filtrados AS (
       SELECT * FROM eventos
@@ -447,13 +463,17 @@ const insertarLineaRemision = async (client, l) => {
   const { rows } = await client.query(`
     INSERT INTO lineas_remision
       (remision_id, tipo, serial_id, imei, producto_origen_id, producto_destino_id,
-       cantidad, cantidad_recibida, valor_interno, estado_linea, nombre_producto)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+       cantidad, cantidad_recibida, valor_interno, estado_linea, nombre_producto,
+       origen_unidad, genera_saldo_favor, remision_tipo)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
+            COALESCE($14, (SELECT tipo FROM remisiones WHERE id = $1)))
     RETURNING *
   `, [l.remision_id, l.tipo, l.serial_id || null, l.imei || null,
       l.producto_origen_id || null, l.producto_destino_id || null,
       l.cantidad || 1, l.cantidad_recibida ?? null, l.valor_interno || 0,
-      l.estado_linea || 'Pendiente', l.nombre_producto || null]);
+      l.estado_linea || 'Pendiente', l.nombre_producto || null,
+      l.origen_unidad || null, l.genera_saldo_favor === true,
+      l.remision_tipo || null]);
   return rows[0];
 };
 
@@ -502,9 +522,68 @@ const getLineasRemision = async (remisionId) => {
   return rows;
 };
 
-const findRemisiones = async (negocioId, { sucursalId, rol, estado, limit = 50 } = {}) => {
+// ── Detalle de una remisión, línea por línea, con su estado ACTUAL ───────────
+// Cruza con el motor de estados para saber, de cada cosa enviada, si sigue en
+// vitrina, ya se vendió o se devolvió — y cuánto de ese envío ya es deuda.
+const getLineasDetalladas = async (negocioId, remisionId) => {
+  const { rows } = await pool.query(`
+    WITH u AS (${SQL_UNIDADES})
+    SELECT
+      lr.*,
+      COALESCE(ps.nombre, pc.nombre)                    AS producto_nombre,
+      COALESCE(ps.marca, '')                            AS marca,
+      COALESCE(ps.modelo, '')                           AS modelo,
+      pc.codigo                                         AS codigo,
+      pc.unidad_medida,
+      COALESCE(pcd.stock, 0)                            AS stock_destino,
+      u.estado_unidad,
+      COALESCE(u.liquidable, 0)                         AS liquidable,
+      u.factura_numero, u.nombre_cliente, u.factura_fecha,
+      s.vendido, s.prestado
+    FROM lineas_remision lr
+    LEFT JOIN u                    ON u.linea_id = lr.id
+    LEFT JOIN seriales s           ON s.id  = lr.serial_id
+    LEFT JOIN productos_serial ps  ON ps.id = lr.producto_origen_id AND lr.tipo = 'serial'
+    LEFT JOIN productos_cantidad pc  ON pc.id  = lr.producto_origen_id  AND lr.tipo = 'cantidad'
+    LEFT JOIN productos_cantidad pcd ON pcd.id = lr.producto_destino_id AND lr.tipo = 'cantidad'
+    WHERE lr.remision_id = $2
+      AND EXISTS (SELECT 1 FROM remisiones r WHERE r.id = lr.remision_id AND r.negocio_id = $1)
+    ORDER BY lr.tipo, lr.id
+  `, [negocioId, remisionId]);
+  return rows;
+};
+
+// ── Correcciones de valor ────────────────────────────────────────────────────
+const insertarCorreccion = async (client, c) => {
+  const { rows } = await (client || pool).query(`
+    INSERT INTO correcciones_remision
+      (negocio_id, sucursal_id, linea_id, valor_anterior, valor_nuevo, diferencia, motivo, usuario_id)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+    RETURNING *
+  `, [c.negocio_id, c.sucursal_id, c.linea_id, c.valor_anterior, c.valor_nuevo,
+      c.diferencia, c.motivo || null, c.usuario_id || null]);
+  return rows[0];
+};
+
+const getCorreccionesRemision = async (negocioId, remisionId) => {
+  const { rows } = await pool.query(`
+    SELECT c.*, u.nombre AS usuario_nombre, lr.nombre_producto, lr.imei
+    FROM correcciones_remision c
+    JOIN lineas_remision lr ON lr.id = c.linea_id
+    LEFT JOIN usuarios u    ON u.id = c.usuario_id
+    WHERE c.negocio_id = $1 AND lr.remision_id = $2
+    ORDER BY c.fecha DESC
+  `, [negocioId, remisionId]);
+  return rows;
+};
+
+const findRemisiones = async (negocioId, { sucursalId, rol, estado, tipo, limit = 50 } = {}) => {
   const cond = [];
   const params = [negocioId];
+  // Por defecto solo entregas: las devoluciones tienen su propia bandeja y
+  // mezclarlas confundiría el listado de envíos.
+  params.push(tipo || 'entrega');
+  cond.push(`r.tipo = $${params.length}`);
   if (sucursalId) {
     params.push(sucursalId);
     // 'destino' = bandeja del local · 'origen' = despachos de la bodega
@@ -953,7 +1032,8 @@ module.exports = {
   getUnidades, buscarUnidades, getExtracto, getResumenUnidades, getCantidadConsignada,
   getTotalRemesado, getTotalMovimientosCuenta, getConciliacion,
   crearRemision, insertarLineaRemision, actualizarTotalRemision,
-  findRemisionById, getLineasRemision, findRemisiones,
+  findRemisionById, getLineasRemision, getLineasDetalladas, findRemisiones,
+  insertarCorreccion, getCorreccionesRemision,
   marcarRemisionRecibida, marcarRemisionAnulada, marcarLineas,
   buscarSerialDisponible, buscarCantidadPorCodigo, buscarCantidadDisponible,
   findCantidadById, findSerialById, buscarReferencias, getReferenciasDuplicadas,

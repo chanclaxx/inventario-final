@@ -7,7 +7,7 @@ import { Spinner }    from '../../components/ui/Spinner';
 import { EmptyState } from '../../components/ui/EmptyState';
 import {
   ChevronLeft, Search, X, TrendingUp, TrendingDown, Package, Truck,
-  Wallet, FileText, AlertTriangle, Receipt, Filter, Store,
+  Wallet, FileText, AlertTriangle, Receipt, Filter, Store, Info,
 } from 'lucide-react';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -66,7 +66,9 @@ function Kpis({ t }) {
       <div className="rounded-2xl px-4 py-3 border border-gray-100 bg-white">
         <p className="text-xs text-gray-500">En consignación</p>
         <p className="text-xl font-bold text-gray-700 mt-0.5">
-          {formatCOP(t.en_consignacion_valor)}
+          {t.en_consignacion_valor != null
+            ? formatCOP(t.en_consignacion_valor)
+            : `${t.en_consignacion_unidades}`}
         </p>
         <p className="text-xs text-gray-400">{t.en_consignacion_unidades} equipo(s)</p>
       </div>
@@ -90,6 +92,60 @@ function Kpis({ t }) {
         </p>
         {t.sin_ubicar_unidades > 0 && (
           <p className="text-xs text-red-500">{formatCOP(t.sin_ubicar_valor)}</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Desglose: por qué debe lo que debe ──────────────────────────────────────
+// La pregunta más común del local no es "cuánto" sino "por qué". Cada renglón
+// suma o resta hasta llegar al saldo, y se dice explícitamente lo que NO debe.
+function Desglose({ d, ocultos }) {
+  if (!d) return null;
+  return (
+    <div className="bg-white border border-gray-100 rounded-2xl p-4 mb-4">
+      <p className="text-xs font-semibold text-gray-400 uppercase mb-2">
+        Por qué debe {formatCOP(Math.abs(d.saldo))}
+      </p>
+      <div className="flex flex-col gap-1.5">
+        {d.lineas.map((l) => (
+          <div key={l.clave} className="flex items-start justify-between gap-3">
+            <div className="flex-1 min-w-0">
+              <p className="text-sm text-gray-700">{l.etiqueta}</p>
+              {l.medios && Object.keys(l.medios).length > 0 && (
+                <p className="text-xs text-gray-400">
+                  {Object.entries(l.medios)
+                    .map(([m, v]) => `${m}: ${ocultos ? '' : formatCOP(v)}`.trim())
+                    .join(' · ')}
+                  {l.ultima_fecha ? ` · última ${formatFecha(l.ultima_fecha)}` : ''}
+                </p>
+              )}
+            </div>
+            {!ocultos && (
+              <span className={`text-sm font-semibold flex-shrink-0
+                ${l.valor >= 0 ? 'text-amber-600' : 'text-green-600'}`}>
+                {l.valor >= 0 ? '+' : '−'}{formatCOP(Math.abs(l.valor))}
+              </span>
+            )}
+          </div>
+        ))}
+        <div className="border-t border-gray-100 mt-1 pt-2 flex items-center justify-between">
+          <span className="text-sm font-semibold text-gray-900">Total</span>
+          <span className="text-base font-bold text-gray-900">{formatCOP(d.saldo)}</span>
+        </div>
+      </div>
+
+      <div className="mt-3 bg-gray-50 rounded-xl px-3 py-2">
+        <p className="text-xs text-gray-500">
+          <strong>No debe:</strong> {d.no_debe.unidades} equipo(s) en vitrina
+          {d.no_debe.valor != null ? ` (${formatCOP(d.no_debe.valor)})` : ''} —
+          solo se liquidan al venderlos.
+        </p>
+        {d.en_transito > 0 && (
+          <p className="text-xs text-amber-600 mt-0.5">
+            {formatCOP(d.en_transito)} en remesas sin confirmar.
+          </p>
         )}
       </div>
     </div>
@@ -139,14 +195,18 @@ function Extracto({ filas, q }) {
             </div>
 
             <div className="text-right flex-shrink-0">
-              {esInfo ? (
-                <span className="text-xs text-gray-300">informativo</span>
+              {esInfo || f.valor === null ? (
+                <span className="text-xs text-gray-300">
+                  {esInfo ? 'informativo' : (esCargo ? 'cargo' : 'abono')}
+                </span>
               ) : (
                 <p className={`text-sm font-semibold ${esCargo ? 'text-amber-600' : 'text-green-600'}`}>
                   {esCargo ? '+' : '−'}{formatCOP(Math.abs(f.valor))}
                 </p>
               )}
-              <p className="text-xs text-gray-400">saldo {formatCOP(f.saldo)}</p>
+              {f.saldo !== null && (
+                <p className="text-xs text-gray-400">saldo {formatCOP(f.saldo)}</p>
+              )}
             </div>
           </div>
         );
@@ -187,10 +247,12 @@ function Mercancia({ data, estado, onEstado, conteos }) {
 
       <div className="flex items-center justify-between text-xs text-gray-400 px-1">
         <span>{data.total} unidad(es)</span>
-        <span>
-          valor {formatCOP(data.valor_total)}
-          {data.liquidable_total > 0 && ` · por liquidar ${formatCOP(data.liquidable_total)}`}
-        </span>
+        {data.valor_total != null && (
+          <span>
+            valor {formatCOP(data.valor_total)}
+            {data.liquidable_total > 0 && ` · por liquidar ${formatCOP(data.liquidable_total)}`}
+          </span>
+        )}
       </div>
 
       {data.items.length === 0 ? (
@@ -215,7 +277,9 @@ function Mercancia({ data, estado, onEstado, conteos }) {
                 <Badge variant={COLOR_ESTADO[u.estado_unidad] || 'gray'}>
                   {u.etiqueta_estado}
                 </Badge>
-                <p className="text-sm font-semibold text-gray-700">{formatCOP(u.valor_interno)}</p>
+                {u.valor_interno != null && (
+                  <p className="text-sm font-semibold text-gray-700">{formatCOP(u.valor_interno)}</p>
+                )}
                 {u.liquidable > 0 && (
                   <p className="text-xs text-amber-600">debe {formatCOP(u.liquidable)}</p>
                 )}
@@ -343,6 +407,13 @@ export function EstadoCuentaLocal({ sucursalId, nombre, onVolver }) {
       ) : (
         <>
           <Kpis t={data.totales} />
+          <Desglose d={data.desglose} ocultos={data.costos_ocultos === true} />
+
+          {data.costos_ocultos && (
+            <p className="text-xs text-gray-400 mb-3 flex items-center gap-1.5">
+              <Info size={12} /> Los costos de la mercancía no se muestran en tu perfil.
+            </p>
+          )}
 
           {/* Controles */}
           <div className="flex flex-col sm:flex-row gap-2 mb-3">

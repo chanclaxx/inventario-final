@@ -50,6 +50,81 @@ const _exigirBodega = (req) => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// COSTOS OCULTOS PARA VENDEDORES
+//
+// El costo al que la bodega compró cada equipo es información comercial: un
+// vendedor no tiene por qué saberlo. Pero SÍ necesita confirmar las entregas y
+// entregar el dinero, así que el TOTAL a remitir se conserva — sin él no podría
+// hacer su trabajo.
+//
+// El recorte va aquí, en el backend, y no en la pantalla: si solo se escondiera
+// en el frontend el dato viajaría igual y se vería en la consola del navegador.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const _puedeVerCostos = (req) =>
+  req.user?.rol !== 'vendedor' || req.red?.ocultar_costos === false;
+
+// Quita las claves de valor de un objeto, dejando el resto intacto.
+const _sinValores = (obj, claves) => {
+  if (!obj) return obj;
+  const copia = { ...obj };
+  for (const k of claves) if (k in copia) copia[k] = null;
+  return copia;
+};
+
+const CLAVES_VALOR_UNIDAD = [
+  'valor_interno', 'liquidable', 'subtotal_linea', 'recaudado_prorrateado',
+];
+
+/**
+ * Recorta un estado de cuenta / panel para un vendedor.
+ * Se conserva: unidades, estados, fechas, documentos y el TOTAL a remitir.
+ * Se borra: costos unitarios, valores de mercancía y el detalle monetario
+ * de los movimientos.
+ */
+const _recortarParaVendedor = (data) => {
+  const t = data.totales || {};
+  return {
+    ...data,
+    costos_ocultos: true,
+    totales: {
+      // Lo único monetario que sobrevive: cuánto hay que entregarle a la bodega.
+      saldo_por_liquidar:  t.saldo_por_liquidar,
+      remesado_recibido:   t.remesado_recibido,
+      remesas_en_transito: t.remesas_en_transito,
+      gastos_autorizados:  t.gastos_autorizados,
+      en_consignacion_unidades: t.en_consignacion_unidades,
+      en_recaudo_unidades:      t.en_recaudo_unidades,
+      sin_ubicar_unidades:      t.sin_ubicar_unidades,
+      // Valores de mercancía: fuera.
+      en_consignacion_valor: null,
+      en_recaudo_valor:      null,
+      sin_ubicar_valor:      null,
+      liquidable_total:      null,
+      ajustes:               t.ajustes,
+    },
+    por_estado: Object.fromEntries(
+      Object.entries(data.por_estado || {}).map(([k, v]) => [
+        k, { ...v, valor_interno: null, liquidable: null },
+      ])
+    ),
+    cantidad_consignada: undefined,
+    extracto: (data.extracto || []).map((e) => ({
+      ...e,
+      // El movimiento se ve (qué pasó y cuándo), el monto no.
+      valor: e.clase === 'info' ? 0 : null,
+      saldo: null,
+    })),
+    mercancia: data.mercancia && {
+      ...data.mercancia,
+      valor_total: null, liquidable_total: null,
+      items: data.mercancia.items.map((u) => _sinValores(u, CLAVES_VALOR_UNIDAD)),
+    },
+    remisiones: (data.remisiones || []).map((r) => ({ ...r, valor_total: null })),
+  };
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Resolución del producto equivalente en la sucursal destino
 //
 // El catálogo es POR SUCURSAL: el mismo modelo de teléfono es una fila distinta
@@ -512,11 +587,102 @@ const anularRemision = async (req, remisionId) => {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // DEVOLUCIÓN — el local regresa mercancía a la bodega
-// Se recibe de inmediato (el equipo va en la mano de quien la registra) y las
-// unidades devueltas dejan de contar en la consignación del local.
+//
+// SIMÉTRICA AL DESPACHO: el local la emite y queda EN TRÁNSITO; el inventario
+// se mueve cuando la bodega CONFIRMA que la recibió. Antes se autoconfirmaba y
+// la bodega se enteraba con la mercancía ya adentro, sin poder revisarla.
+//
+// ORIGEN DE CADA UNIDAD — no todo lo que hay en un local vino de bodega:
+//   'bodega' → llegó en una remisión. Devolverla cancela su consignación.
+//   'propio' → es del local (retoma, compra propia, inventario inicial).
+//              La bodega la recibe igual, pero NO toca la cuenta salvo que se
+//              pida explícitamente `genera_saldo_favor` (la bodega se la compra).
+//
+// Nada financiero ocurre en silencio: el saldo a favor se pide línea por línea.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const devolver = async (req, { lineas, notas }) => {
+// ¿Esta unidad está viva en una consignación de este local?
+const _origenUnidadSerial = async (client, serialId, negocioId) => {
+  const { rows } = await client.query(`
+    SELECT lr.id, lr.valor_interno, r.numero AS remision_numero
+    FROM lineas_remision lr
+    JOIN remisiones r ON r.id = lr.remision_id
+    WHERE lr.serial_id = $1 AND r.negocio_id = $2
+      AND r.tipo = 'entrega' AND lr.estado_linea IN ('Pendiente', 'Recibida')
+    ORDER BY lr.id DESC LIMIT 1
+  `, [serialId, negocioId]);
+  return rows[0] || null;
+};
+
+/**
+ * Previsualiza una devolución: para cada unidad dice de dónde viene, para que
+ * la pantalla pueda mostrarlo y pedir la decisión solo donde hace falta.
+ */
+const previsualizarDevolucion = async (req, { lineas }) => {
+  const negocioId = req.user.negocio_id;
+  const origenId  = Number(req.sucursal_id);
+  if (!Array.isArray(lineas) || !lineas.length) {
+    throw { status: 400, message: 'Selecciona al menos un producto' };
+  }
+
+  const client = await pool.connect();
+  try {
+    const items = [];
+    for (const l of lineas) {
+      if (l.tipo === 'serial') {
+        const { rows } = await client.query(`
+          SELECT s.id, s.imei, s.vendido, s.prestado,
+                 COALESCE(s.costo_compra, 0) AS costo_compra,
+                 ps.nombre, ps.marca, ps.modelo
+          FROM seriales s
+          JOIN productos_serial ps ON ps.id = s.producto_id
+          WHERE s.id = $1 AND ps.sucursal_id = $2
+        `, [l.serial_id, origenId]);
+        if (!rows.length) {
+          items.push({ ...l, error: 'No está en este local' });
+          continue;
+        }
+        const s = rows[0];
+        const consignada = await _origenUnidadSerial(client, s.id, negocioId);
+        items.push({
+          tipo: 'serial', serial_id: s.id, imei: s.imei,
+          nombre: [s.nombre, s.marca, s.modelo].filter(Boolean).join(' '),
+          origen: consignada ? 'bodega' : 'propio',
+          remision_numero: consignada?.remision_numero ?? null,
+          valor_interno: _num(consignada?.valor_interno ?? s.costo_compra),
+          bloqueado: s.vendido ? 'Ya fue vendido' : s.prestado ? 'Está prestado' : null,
+        });
+      } else {
+        const { rows } = await client.query(
+          `SELECT id, nombre, codigo, stock, COALESCE(costo_unitario, 0) AS costo_unitario
+           FROM productos_cantidad WHERE id = $1 AND sucursal_id = $2 AND activo = true`,
+          [l.producto_id, origenId]
+        );
+        if (!rows.length) { items.push({ ...l, error: 'No está en este local' }); continue; }
+        const p = rows[0];
+        // Los productos de cantidad son fungibles: no se puede saber si esta
+        // unidad concreta vino de bodega. Se ofrecen las dos opciones.
+        items.push({
+          tipo: 'cantidad', producto_id: p.id, nombre: p.nombre, codigo: p.codigo,
+          cantidad: Math.min(Number(l.cantidad) || 1, Number(p.stock)),
+          stock: Number(p.stock), origen: 'indeterminado',
+          valor_interno: _num(p.costo_unitario),
+          bloqueado: Number(p.stock) <= 0 ? 'Sin stock' : null,
+        });
+      }
+    }
+    const propios = items.filter((i) => i.origen === 'propio' || i.origen === 'indeterminado');
+    return { items, requiere_decision: propios.length > 0, propios: propios.length };
+  } finally {
+    client.release();
+  }
+};
+
+/**
+ * El local emite la devolución. NO mueve inventario: queda en tránsito hasta
+ * que la bodega confirme.
+ */
+const devolver = async (req, { lineas, notas, clave_idempotencia }) => {
   const negocioId = req.user.negocio_id;
   const origenId  = Number(req.sucursal_id);          // el local
   const destinoId = Number(req.red.bodega_id);        // la bodega
@@ -524,6 +690,10 @@ const devolver = async (req, { lineas, notas }) => {
   if (origenId === destinoId) throw { status: 400, message: 'La bodega no se devuelve a sí misma' };
   if (!Array.isArray(lineas) || !lineas.length) {
     throw { status: 400, message: 'Selecciona al menos un producto para devolver' };
+  }
+  if (clave_idempotencia) {
+    const previa = await repo.findRemisionPorClave(clave_idempotencia);
+    if (previa) return { ...previa, repetido: true };
   }
 
   const client = await pool.connect();
@@ -533,21 +703,17 @@ const devolver = async (req, { lineas, notas }) => {
     const remision = await repo.crearRemision(client, {
       negocio_id: negocioId, tipo: 'devolucion',
       sucursal_origen_id: origenId, sucursal_destino_id: destinoId,
-      usuario_emisor_id: req.user.id, notas, estado: 'En transito',
-    });
-
-    const traslado = await trasladosRepo.crearTraslado(client, {
-      negocio_id: negocioId,
-      sucursal_origen_id: origenId, sucursal_destino_id: destinoId,
-      usuario_id: req.user.id,
-      notas: `Devolución a bodega — remisión #${remision.id}`,
+      usuario_emisor_id: req.user.id, notas, clave_idempotencia,
+      estado: 'En transito',
     });
 
     for (const l of lineas) {
       if (l.tipo === 'serial') {
+        // FOR UPDATE: nadie puede venderlo mientras va en camino.
         const { rows } = await client.query(`
           SELECT s.id, s.imei, s.vendido, s.prestado, s.producto_id,
-                 COALESCE(s.costo_compra, 0) AS costo_compra
+                 COALESCE(s.costo_compra, 0) AS costo_compra,
+                 ps.nombre, ps.marca, ps.modelo
           FROM seriales s
           JOIN productos_serial ps ON ps.id = s.producto_id
           WHERE s.id = $1 AND ps.sucursal_id = $2
@@ -558,35 +724,20 @@ const devolver = async (req, { lineas, notas }) => {
         if (s.vendido)  throw { status: 400, message: `El equipo ${s.imei} ya fue vendido` };
         if (s.prestado) throw { status: 400, message: `El equipo ${s.imei} está prestado` };
 
-        const productoDestinoId = await _resolverProductoSerialDestino(
-          client, s.producto_id, destinoId, negocioId
-        );
-        await trasladosRepo.moverSerial(client, s.id, productoDestinoId);
-        await trasladosRepo.insertarLineaTraslado(client, {
-          traslado_id: traslado.id, tipo: 'serial', serial_id: s.id,
-          producto_serial_origen_id: s.producto_id,
-          producto_serial_destino_id: productoDestinoId,
-          imei: s.imei, nombre_producto: l.nombre_producto || s.imei,
-        });
+        const consignada = await _origenUnidadSerial(client, s.id, negocioId);
+        const origenUnidad = consignada ? 'bodega' : 'propio';
+        // El saldo a favor solo aplica a mercancía propia y solo si se pide.
+        const saldoFavor = origenUnidad === 'propio' && l.genera_saldo_favor === true;
 
-        // ORDEN IMPORTANTE: primero se cierra la línea de ENTREGA (la unidad
-        // sale de la consignación del local) y solo después se inserta la de
-        // devolución. El índice `uq_lineas_remision_serial_viva` solo admite
-        // una línea viva por serial, así que al revés chocaría.
-        await client.query(`
-          UPDATE lineas_remision lr SET estado_linea = 'Devuelta'
-          FROM remisiones r
-          WHERE lr.remision_id = r.id AND r.tipo = 'entrega' AND r.negocio_id = $2
-            AND lr.serial_id = $1 AND lr.estado_linea IN ('Pendiente', 'Recibida')
-        `, [s.id, negocioId]);
-
-        // La línea de la devolución nace 'Devuelta': es un estado terminal y
-        // deja el serial libre para que la bodega lo pueda volver a despachar.
         await repo.insertarLineaRemision(client, {
           remision_id: remision.id, tipo: 'serial', serial_id: s.id, imei: s.imei,
-          producto_origen_id: s.producto_id, producto_destino_id: productoDestinoId,
-          valor_interno: _num(s.costo_compra), cantidad_recibida: 1,
-          estado_linea: 'Devuelta', nombre_producto: l.nombre_producto || s.imei,
+          producto_origen_id: s.producto_id,
+          valor_interno: _valorLinea(consignada?.valor_interno ?? s.costo_compra, l.valor_interno),
+          estado_linea: 'Pendiente',
+          origen_unidad: origenUnidad,
+          genera_saldo_favor: saldoFavor,
+          nombre_producto: l.nombre_producto
+            || [s.nombre, s.marca, s.modelo].filter(Boolean).join(' ') || s.imei,
         });
 
       } else {
@@ -599,49 +750,221 @@ const devolver = async (req, { lineas, notas }) => {
         );
         if (!rows.length) throw { status: 404, message: 'Producto no encontrado en este local' };
         if (rows[0].stock < cant) {
-          throw { status: 400, message: `Stock insuficiente de "${rows[0].nombre}"` };
+          throw { status: 400, message: `Stock insuficiente de "${rows[0].nombre}". Hay ${rows[0].stock}` };
         }
-        const productoDestinoId = await _resolverProductoCantidadDestino(
-          client, l.producto_id, destinoId, negocioId
-        );
 
-        await trasladosRepo.ajustarStockEnTransaccion(client, l.producto_id, -cant);
-        await trasladosRepo.ajustarStockEnTransaccion(client, productoDestinoId, cant);
-        await trasladosRepo.insertarHistorialEnTransaccion(client, {
-          producto_id: l.producto_id, sucursal_id: origenId,
-          cantidad: -cant, costo_unitario: _num(rows[0].costo_unitario),
-          notas: `Devolución a bodega #${remision.id}`,
-        });
-        await trasladosRepo.insertarHistorialEnTransaccion(client, {
-          producto_id: productoDestinoId, sucursal_id: destinoId,
-          cantidad: cant, costo_unitario: _num(rows[0].costo_unitario),
-          notas: `Devolución desde local #${remision.id}`,
-        });
-        await trasladosRepo.insertarLineaTraslado(client, {
-          traslado_id: traslado.id, tipo: 'cantidad',
-          producto_cantidad_origen_id: l.producto_id,
-          producto_cantidad_destino_id: productoDestinoId,
-          cantidad: cant, nombre_producto: rows[0].nombre,
-        });
         await repo.insertarLineaRemision(client, {
           remision_id: remision.id, tipo: 'cantidad',
-          producto_origen_id: l.producto_id, producto_destino_id: productoDestinoId,
-          cantidad: cant, cantidad_recibida: cant,
-          valor_interno: _num(rows[0].costo_unitario),
-          estado_linea: 'Devuelta', nombre_producto: rows[0].nombre,
+          producto_origen_id: l.producto_id, cantidad: cant,
+          valor_interno: _valorLinea(rows[0].costo_unitario, l.valor_interno),
+          estado_linea: 'Pendiente',
+          origen_unidad: l.origen_unidad === 'bodega' ? 'bodega' : 'propio',
+          genera_saldo_favor: l.genera_saldo_favor === true,
+          nombre_producto: rows[0].nombre,
         });
       }
     }
 
     await repo.actualizarTotalRemision(client, remision.id);
     await asignarNumeroDocumento(client, { tipo: 'remision', docId: remision.id, negocioId });
-    await repo.marcarRemisionRecibida(client, {
-      remisionId: remision.id, usuarioId: req.user.id,
-      estado: 'Recibida', trasladoId: traslado.id,
-    });
 
     await client.query('COMMIT');
     return repo.findRemisionById(negocioId, remision.id);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    if (err.code === '23505' && clave_idempotencia) {
+      const previa = await repo.findRemisionPorClave(clave_idempotencia);
+      if (previa) return { ...previa, repetido: true };
+    }
+    throw err;
+  } finally {
+    client.release();
+  }
+};
+
+/**
+ * La bodega confirma la devolución: aquí sí se mueve el inventario, se cierra
+ * la consignación de lo que vino de bodega y se abona el saldo a favor de lo
+ * propio que la bodega decidió comprar.
+ *
+ * Lo NO marcado como recibido queda 'Faltante': no se mueve y sigue en el local.
+ */
+const confirmarDevolucion = async (req, remisionId, { lineas_recibidas } = {}) => {
+  _exigirBodega(req);
+  const negocioId = req.user.negocio_id;
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const remision = await repo.findRemisionById(negocioId, remisionId, client);
+    if (!remision) throw { status: 404, message: 'Devolución no encontrada' };
+    if (remision.tipo !== 'devolucion') {
+      throw { status: 400, message: 'Ese documento no es una devolución' };
+    }
+    if (remision.estado !== 'En transito') {
+      throw { status: 409, message: `Esta devolución ya está en estado "${remision.estado}"` };
+    }
+    if (Number(remision.sucursal_destino_id) !== Number(req.sucursal_id)) {
+      throw { status: 403, message: 'Esta devolución es para otra sucursal' };
+    }
+
+    const { rows: lineas } = await client.query(
+      `SELECT * FROM lineas_remision WHERE remision_id = $1 ORDER BY id`, [remisionId]
+    );
+    const setOk = new Set(
+      (Array.isArray(lineas_recibidas) && lineas_recibidas.length
+        ? lineas_recibidas
+        : lineas.map((l) => l.id)).map(Number)
+    );
+
+    const localId  = remision.sucursal_origen_id;
+    const bodegaId = remision.sucursal_destino_id;
+
+    const traslado = await trasladosRepo.crearTraslado(client, {
+      negocio_id: negocioId,
+      sucursal_origen_id: localId, sucursal_destino_id: bodegaId,
+      usuario_id: req.user.id,
+      notas: `Devolución #${remision.numero ?? remision.id} desde ${remision.sucursal_origen_nombre}`,
+    });
+
+    const idsOk = [], idsFaltante = [];
+    let saldoAFavor = 0;
+
+    for (const l of lineas) {
+      const id = Number(l.id);
+      if (!setOk.has(id)) { idsFaltante.push(id); continue; }
+
+      if (l.tipo === 'serial') {
+        const { rows } = await client.query(`
+          SELECT s.id, s.imei, s.vendido, s.prestado, s.producto_id
+          FROM seriales s
+          JOIN productos_serial ps ON ps.id = s.producto_id
+          WHERE s.id = $1 AND ps.sucursal_id = $2
+          FOR UPDATE OF s
+        `, [l.serial_id, localId]);
+        if (!rows.length) {
+          throw { status: 409, message: `El equipo ${l.imei || ''} ya no está en el local. Actualiza y vuelve a intentar.` };
+        }
+        const s = rows[0];
+        if (s.vendido)  throw { status: 409, message: `El equipo ${s.imei} fue vendido antes de llegar; no se puede recibir` };
+        if (s.prestado) throw { status: 409, message: `El equipo ${s.imei} está prestado` };
+
+        const productoDestinoId = await _resolverProductoSerialDestino(
+          client, s.producto_id, bodegaId, negocioId
+        );
+        await trasladosRepo.moverSerial(client, s.id, productoDestinoId);
+        await trasladosRepo.insertarLineaTraslado(client, {
+          traslado_id: traslado.id, tipo: 'serial', serial_id: s.id,
+          producto_serial_origen_id: s.producto_id,
+          producto_serial_destino_id: productoDestinoId,
+          imei: s.imei, nombre_producto: l.nombre_producto,
+        });
+
+        // Si venía de bodega, su consignación se cierra. ORDEN IMPORTANTE:
+        // primero la línea de entrega, luego la de devolución — el índice
+        // `uq_lineas_remision_serial_viva` solo admite una viva por serial.
+        if (l.origen_unidad === 'bodega') {
+          await client.query(`
+            UPDATE lineas_remision lr SET estado_linea = 'Devuelta'
+            FROM remisiones r
+            WHERE lr.remision_id = r.id AND r.tipo = 'entrega' AND r.negocio_id = $2
+              AND lr.serial_id = $1 AND lr.estado_linea IN ('Pendiente', 'Recibida')
+          `, [s.id, negocioId]);
+        }
+        await client.query(
+          `UPDATE lineas_remision SET producto_destino_id = $2, cantidad_recibida = 1 WHERE id = $1`,
+          [id, productoDestinoId]
+        );
+
+      } else {
+        const cant = Number(l.cantidad);
+        const { rows } = await client.query(
+          `SELECT id, nombre, stock, COALESCE(costo_unitario, 0) AS costo_unitario
+           FROM productos_cantidad WHERE id = $1 FOR UPDATE`,
+          [l.producto_origen_id]
+        );
+        if (!rows.length) throw { status: 404, message: `"${l.nombre_producto}" ya no existe en el local` };
+        if (rows[0].stock < cant) {
+          throw { status: 409, message: `Stock insuficiente de "${rows[0].nombre}" en el local (hay ${rows[0].stock})` };
+        }
+        const productoDestinoId = await _resolverProductoCantidadDestino(
+          client, l.producto_origen_id, bodegaId, negocioId
+        );
+
+        // Costo promedio ponderado en la bodega al recibir de vuelta.
+        const { rows: dest } = await client.query(
+          `SELECT stock, COALESCE(costo_unitario, 0) AS costo_unitario
+           FROM productos_cantidad WHERE id = $1 FOR UPDATE`, [productoDestinoId]
+        );
+        const nuevoCosto = calcularCostoPromedio(
+          Number(dest[0].stock), Number(dest[0].costo_unitario), cant, _num(l.valor_interno)
+        );
+
+        await trasladosRepo.ajustarStockEnTransaccion(client, l.producto_origen_id, -cant);
+        await trasladosRepo.ajustarStockEnTransaccion(client, productoDestinoId, cant);
+        await client.query(
+          `UPDATE productos_cantidad SET costo_unitario = $2 WHERE id = $1`,
+          [productoDestinoId, nuevoCosto]
+        );
+        await trasladosRepo.insertarHistorialEnTransaccion(client, {
+          producto_id: l.producto_origen_id, sucursal_id: localId,
+          cantidad: -cant, costo_unitario: _num(l.valor_interno),
+          notas: `Devolución #${remision.numero ?? remision.id} → bodega`,
+        });
+        await trasladosRepo.insertarHistorialEnTransaccion(client, {
+          producto_id: productoDestinoId, sucursal_id: bodegaId,
+          cantidad: cant, costo_unitario: _num(l.valor_interno),
+          notas: `Devolución #${remision.numero ?? remision.id} ← ${remision.sucursal_origen_nombre}`,
+        });
+        await trasladosRepo.insertarLineaTraslado(client, {
+          traslado_id: traslado.id, tipo: 'cantidad',
+          producto_cantidad_origen_id: l.producto_origen_id,
+          producto_cantidad_destino_id: productoDestinoId,
+          cantidad: cant, nombre_producto: l.nombre_producto,
+        });
+        await client.query(
+          `UPDATE lineas_remision SET producto_destino_id = $2, cantidad_recibida = $3 WHERE id = $1`,
+          [id, productoDestinoId, cant]
+        );
+      }
+
+      // Mercancía propia que la bodega decidió comprar → saldo a favor del local.
+      if (l.genera_saldo_favor) {
+        const unidades = l.tipo === 'cantidad' ? Number(l.cantidad) : 1;
+        saldoAFavor += _num(l.valor_interno) * unidades;
+      }
+      idsOk.push(id);
+    }
+
+    if (idsOk.length)       await repo.marcarLineas(client, idsOk, 'Devuelta');
+    if (idsFaltante.length) await repo.marcarLineas(client, idsFaltante, 'Faltante');
+    if (!idsOk.length) throw { status: 400, message: 'No marcaste ningún producto como recibido' };
+
+    // El saldo a favor baja lo que el local debe: es un Ajuste positivo, la
+    // misma convención que usa `_armarSaldo` (saldo = liquidable − ajustes).
+    if (saldoAFavor > 0) {
+      await repo.insertarMovimientoCuenta(client, {
+        negocio_id: negocioId, sucursal_id: localId,
+        tipo: 'Ajuste', valor: Math.round(saldoAFavor * 100) / 100,
+        concepto: `Mercancía propia comprada por bodega — devolución #${remision.numero ?? remision.id}`,
+        usuario_id: req.user.id,
+      });
+    }
+
+    await repo.marcarRemisionRecibida(client, {
+      remisionId, usuarioId: req.user.id,
+      estado: idsFaltante.length ? 'Parcial' : 'Recibida',
+      trasladoId: traslado.id,
+    });
+    await repo.actualizarTotalRemision(client, remisionId);
+
+    await client.query('COMMIT');
+    return {
+      ...(await repo.findRemisionById(negocioId, remisionId)),
+      recibidas: idsOk.length, faltantes: idsFaltante.length,
+      saldo_a_favor: Math.round(saldoAFavor),
+    };
   } catch (err) {
     await client.query('ROLLBACK');
     throw err;
@@ -697,7 +1020,41 @@ const _espejarCaja = async (client, sucursalId, mov, usuarioId, etiqueta) => {
   });
 };
 
-const enviarRemesa = async (req, { valor, notas, clave_idempotencia }) => {
+/**
+ * Cuenta de la bodega donde debe aterrizar una remesa.
+ *
+ * Se busca la que maneje ese método (si el local remitió por Nequi, entra a la
+ * cuenta Nequi de la bodega). Si la bodega no tiene una cuenta para ese método,
+ * cae al efectivo: el dinero no puede quedarse sin destino, y un arqueo lo
+ * corrige. Es la misma política que ya usa Tesorería con los pagos sin método.
+ */
+const _cuentaDestinoRemesa = async (negocioId, bodegaId, metodo) => {
+  const cuentas = await tesoreriaRepo.findCuentas(negocioId, bodegaId);
+  const porMetodo = cuentas.find(
+    (c) => (c.moneda || 'COP') === 'COP' && (c.metodos_pago || []).includes(metodo)
+  );
+  if (porMetodo) return porMetodo;
+  return _cuentaEfectivo(negocioId, bodegaId);
+};
+
+// Cuentas desde las que un local puede remitir (efectivo, Nequi, banco…).
+// Se excluyen las de divisa: la red interna mueve pesos.
+const getCuentasParaRemesa = async (req) => {
+  const negocioId  = req.user.negocio_id;
+  const sucursalId = Number(req.sucursal_id);
+  await tesoreriaRepo.asegurarCuentaEfectivo(negocioId, sucursalId);
+  const cuentas = await tesoreriaRepo.findCuentas(negocioId, sucursalId);
+  return cuentas
+    .filter((c) => (c.moneda || 'COP') === 'COP' && c.tipo !== 'transito')
+    .map((c) => ({
+      id: c.id, nombre: c.nombre, tipo: c.tipo,
+      es_efectivo: c.tipo === 'efectivo' || (c.metodos_pago || []).includes('Efectivo'),
+      metodo_sugerido: (c.metodos_pago || [])[0]
+        || (c.tipo === 'efectivo' ? 'Efectivo' : c.nombre),
+    }));
+};
+
+const enviarRemesa = async (req, { valor, notas, clave_idempotencia, cuenta_origen_id, metodo }) => {
   const negocioId = req.user.negocio_id;
   const origenId  = Number(req.sucursal_id);
   const bodegaId  = Number(req.red.bodega_id);
@@ -711,10 +1068,31 @@ const enviarRemesa = async (req, { valor, notas, clave_idempotencia }) => {
     if (previa) return { ...previa, repetido: true };
   }
 
-  const [cuentaOrigen, cuentaTransito] = await Promise.all([
-    _cuentaEfectivo(negocioId, origenId),
-    _asegurarCuentaTransito(negocioId, bodegaId),
-  ]);
+  // Si el local eligió una cuenta (Nequi, banco…), se usa esa. Sin elección,
+  // el default sigue siendo el efectivo — el caso más común.
+  let cuentaOrigen;
+  if (cuenta_origen_id) {
+    const c = await tesoreriaRepo.findCuentaById(Number(cuenta_origen_id), negocioId);
+    if (!c || !c.activa) throw { status: 404, message: 'Cuenta no encontrada o inactiva' };
+    if (Number(c.sucursal_id) !== origenId) {
+      throw { status: 403, message: 'Esa cuenta pertenece a otra sucursal' };
+    }
+    if ((c.moneda || 'COP') !== 'COP') {
+      throw { status: 400, message: 'La remesa debe salir de una cuenta en pesos' };
+    }
+    if (c.tipo === 'transito') {
+      throw { status: 400, message: 'No se puede remitir desde una cuenta de tránsito' };
+    }
+    cuentaOrigen = c;
+  } else {
+    cuentaOrigen = await _cuentaEfectivo(negocioId, origenId);
+  }
+
+  const metodoFinal = String(metodo || '').trim()
+    || (cuentaOrigen.metodos_pago || [])[0]
+    || (cuentaOrigen.tipo === 'efectivo' ? 'Efectivo' : cuentaOrigen.nombre);
+
+  const cuentaTransito = await _asegurarCuentaTransito(negocioId, bodegaId);
 
   const confirmar = req.red.confirmar_remesa;
   const grupo = crypto.randomUUID();
@@ -722,14 +1100,20 @@ const enviarRemesa = async (req, { valor, notas, clave_idempotencia }) => {
   try {
     await client.query('BEGIN');
 
-    const concepto = `Remesa a bodega${notas ? ` — ${notas}` : ''}`;
+    const concepto = `Remesa a bodega (${metodoFinal})${notas ? ` — ${notas}` : ''}`;
 
     const salida = await tesoreriaRepo.insertarMovimiento(client, {
       cuenta_id: cuentaOrigen.id, tipo: 'salida', categoria: 'traslado',
       valor: monto, concepto, grupo_traslado: grupo,
       usuario_id: req.user.id, clave_idempotencia,
     });
-    await _espejarCaja(client, origenId, salida, req.user.id, concepto);
+    // El espejo en caja solo tiene sentido si el dinero salió de la caja
+    // física. Una transferencia o un Nequi no pasan por ahí.
+    const origenEsEfectivo = cuentaOrigen.tipo === 'efectivo'
+      || (cuentaOrigen.metodos_pago || []).includes('Efectivo');
+    if (origenEsEfectivo) {
+      await _espejarCaja(client, origenId, salida, req.user.id, concepto);
+    }
 
     let movTransito = null, movEntrada = null, cuentaDestino = null;
 
@@ -741,12 +1125,16 @@ const enviarRemesa = async (req, { valor, notas, clave_idempotencia }) => {
         valor: monto, concepto, grupo_traslado: grupo, usuario_id: req.user.id,
       });
     } else {
-      cuentaDestino = await _cuentaEfectivo(negocioId, bodegaId);
+      cuentaDestino = await _cuentaDestinoRemesa(negocioId, bodegaId, metodoFinal);
       movEntrada = await tesoreriaRepo.insertarMovimiento(client, {
         cuenta_id: cuentaDestino.id, tipo: 'entrada', categoria: 'traslado',
         valor: monto, concepto, grupo_traslado: grupo, usuario_id: req.user.id,
       });
-      await _espejarCaja(client, bodegaId, movEntrada, req.user.id, concepto);
+      const destinoEsEfectivo = cuentaDestino.tipo === 'efectivo'
+        || (cuentaDestino.metodos_pago || []).includes('Efectivo');
+      if (destinoEsEfectivo) {
+        await _espejarCaja(client, bodegaId, movEntrada, req.user.id, concepto);
+      }
     }
 
     const remesa = await repo.crearRemesa(client, {
@@ -755,7 +1143,7 @@ const enviarRemesa = async (req, { valor, notas, clave_idempotencia }) => {
       cuenta_origen_id: cuentaOrigen.id,
       cuenta_transito_id: confirmar ? cuentaTransito.id : null,
       cuenta_destino_id: cuentaDestino?.id || null,
-      valor: monto, metodo: 'Efectivo',
+      valor: monto, metodo: metodoFinal,
       estado: confirmar ? 'En transito' : 'Recibida',
       mov_salida_id: salida.id,
       mov_transito_id: movTransito?.id || null,
@@ -796,9 +1184,11 @@ const confirmarRemesa = async (req, remesaId) => {
       throw { status: 403, message: 'Esta remesa es para otra sucursal' };
     }
 
-    const cuentaDestino = await _cuentaEfectivo(negocioId, bodegaId);
+    // La remesa aterriza en la cuenta que maneje su método (Nequi → Nequi).
+    const cuentaDestino = await _cuentaDestinoRemesa(negocioId, bodegaId, remesa.metodo);
     const grupo    = crypto.randomUUID();
-    const concepto = `Remesa recibida de ${remesa.sucursal_origen_nombre}`;
+    const concepto = `Remesa recibida de ${remesa.sucursal_origen_nombre}`
+      + (remesa.metodo && remesa.metodo !== 'Efectivo' ? ` (${remesa.metodo})` : '');
 
     // Tránsito → efectivo de la bodega: dos patas, saldo total intacto.
     const salidaTransito = await tesoreriaRepo.insertarMovimiento(client, {
@@ -809,7 +1199,12 @@ const confirmarRemesa = async (req, remesaId) => {
       cuenta_id: cuentaDestino.id, tipo: 'entrada', categoria: 'traslado',
       valor: remesa.valor, concepto, grupo_traslado: grupo, usuario_id: req.user.id,
     });
-    await _espejarCaja(client, bodegaId, entrada, req.user.id, concepto);
+    // Solo se espeja en caja si el dinero entra a la caja física.
+    const destinoEsEfectivo = cuentaDestino.tipo === 'efectivo'
+      || (cuentaDestino.metodos_pago || []).includes('Efectivo');
+    if (destinoEsEfectivo) {
+      await _espejarCaja(client, bodegaId, entrada, req.user.id, concepto);
+    }
 
     await client.query(
       `UPDATE remesas SET cuenta_destino_id = $2, mov_transito_id = COALESCE(mov_transito_id, $3) WHERE id = $1`,
@@ -999,7 +1394,9 @@ const getPanelLocal = async (req) => {
     repo.findRemisiones(negocioId, { sucursalId, rol: 'destino', estado: 'En transito', limit: 20 }),
     repo.findRemesas(negocioId, { sucursalId, rol: 'origen', limit: 10 }),
   ]);
-  return { es_bodega: false, sucursal_id: sucursalId, ...estado, por_recibir: porRecibir, remesas };
+  const salida = { es_bodega: false, sucursal_id: sucursalId, ...estado,
+                   por_recibir: porRecibir, remesas };
+  return _puedeVerCostos(req) ? salida : _recortarParaVendedor(salida);
 };
 
 // Vista de la bodega: todos los locales + bandejas de confirmación.
@@ -1013,9 +1410,13 @@ const getPanelBodega = async (req) => {
     ...(await getEstadoLocal(negocioId, s.id)),
   })));
 
-  const [remesasPorConfirmar, enTransito] = await Promise.all([
+  const [remesasPorConfirmar, enTransito, devolucionesPorConfirmar] = await Promise.all([
     repo.findRemesas(negocioId, { sucursalId: bodegaId, rol: 'destino', estado: 'En transito', limit: 50 }),
     repo.findRemisiones(negocioId, { sucursalId: bodegaId, rol: 'origen', estado: 'En transito', limit: 50 }),
+    // Mercancía que los locales están devolviendo y espera revisión de la bodega.
+    repo.findRemisiones(negocioId, {
+      sucursalId: bodegaId, rol: 'destino', estado: 'En transito', tipo: 'devolucion', limit: 50,
+    }),
   ]);
 
   const totales = locales.reduce((acc, l) => ({
@@ -1029,6 +1430,7 @@ const getPanelBodega = async (req) => {
     locales, totales,
     remesas_por_confirmar: remesasPorConfirmar,
     remisiones_en_transito: enTransito,
+    devoluciones_por_confirmar: devolucionesPorConfirmar,
   };
 };
 
@@ -1094,7 +1496,7 @@ const getEstadoCuenta = async (req, sucursalId, filtros = {}) => {
     repo.findMovimientosCuenta(negocioId, objetivo, 100),
   ]);
 
-  return {
+  const salida = {
     sucursal: { id: sucursal.id, nombre: sucursal.nombre },
     ...totales,
     extracto: extracto.map((e) => ({
@@ -1116,6 +1518,70 @@ const getEstadoCuenta = async (req, sucursalId, filtros = {}) => {
       Object.entries(totales.por_estado).map(([k, v]) => [k, v.unidades])
     ),
     remisiones, remesas, movimientos_cuenta: movimientos,
+    // Por qué debe lo que debe, en una línea por concepto.
+    desglose: _desgloseSaldo(totales.totales, remesas),
+  };
+
+  return _puedeVerCostos(req) ? salida : _recortarParaVendedor(salida);
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DESGLOSE — por qué el local debe lo que debe, en lenguaje llano.
+// Cada renglón suma o resta hasta llegar al saldo, para que nadie tenga que
+// reconstruirlo mentalmente desde el extracto.
+// ─────────────────────────────────────────────────────────────────────────────
+const _desgloseSaldo = (t, remesas = []) => {
+  const recibidas = remesas.filter((r) => r.estado === 'Recibida');
+  const porMedio  = recibidas.reduce((acc, r) => {
+    const m = r.metodo || 'Efectivo';
+    acc[m] = (acc[m] || 0) + Number(r.valor || 0);
+    return acc;
+  }, {});
+  const ultima = recibidas
+    .slice()
+    .sort((a, b) => new Date(b.fecha_recepcion) - new Date(a.fecha_recepcion))[0];
+
+  const lineas = [
+    {
+      clave: 'vendido',
+      etiqueta: 'Productos vendidos que aún no ha liquidado',
+      valor: _num(t.liquidable_total),
+      signo: '+',
+    },
+    {
+      clave: 'remesas',
+      etiqueta: `Remesas recibidas${recibidas.length ? ` (${recibidas.length})` : ''}`,
+      valor: -_num(t.remesado_recibido),
+      signo: '−',
+      medios: porMedio,
+      ultima_fecha: ultima?.fecha_recepcion || null,
+    },
+  ];
+  if (_num(t.gastos_autorizados) > 0) {
+    lineas.push({
+      clave: 'gastos',
+      etiqueta: 'Gastos que pagó por cuenta de la bodega',
+      valor: -_num(t.gastos_autorizados), signo: '−',
+    });
+  }
+  if (_num(t.ajustes) !== 0) {
+    lineas.push({
+      clave: 'ajustes',
+      etiqueta: 'Ajustes y saldos a favor',
+      valor: -_num(t.ajustes), signo: _num(t.ajustes) > 0 ? '−' : '+',
+    });
+  }
+
+  return {
+    lineas,
+    saldo: _num(t.saldo_por_liquidar),
+    // Lo que NO debe, dicho explícitamente: es la duda más común del local.
+    no_debe: {
+      etiqueta: 'Mercancía en vitrina — solo se liquida al venderla',
+      unidades: t.en_consignacion_unidades,
+      valor:    t.en_consignacion_valor,
+    },
+    en_transito: _num(t.remesas_en_transito),
   };
 };
 
@@ -1130,14 +1596,149 @@ const getSalud = async (req) => {
 };
 
 const getRemision = async (req, id) => {
-  const remision = await repo.findRemisionById(req.user.negocio_id, id);
+  const negocioId = req.user.negocio_id;
+  const remision = await repo.findRemisionById(negocioId, id);
   if (!remision) throw { status: 404, message: 'Remisión no encontrada' };
   const mias = [Number(remision.sucursal_origen_id), Number(remision.sucursal_destino_id)];
   if (!req.esBodega && !mias.includes(Number(req.sucursal_id))) {
     throw { status: 403, message: 'Esta remisión no es de tu sucursal' };
   }
-  const lineas = await repo.getLineasRemision(id);
-  return { ...remision, lineas };
+
+  // Detalle enriquecido: código, cantidad, estado ACTUAL de cada línea y
+  // cuánto de ese envío ya se convirtió en deuda del local.
+  const [lineas, correcciones] = await Promise.all([
+    repo.getLineasDetalladas(negocioId, id),
+    repo.getCorreccionesRemision(negocioId, id),
+  ]);
+
+  const resumen = lineas.reduce((acc, l) => {
+    const unidades = l.tipo === 'cantidad' ? Number(l.cantidad_recibida ?? l.cantidad ?? 0) : 1;
+    const valor    = _num(l.valor_interno) * unidades;
+    if (l.estado_linea === 'Faltante') { acc.no_llego += valor; return acc; }
+    acc.enviado += valor;
+    acc.liquidable += _num(l.liquidable);
+    if (l.estado_unidad === 'En consignacion') acc.en_vitrina += valor;
+    return acc;
+  }, { enviado: 0, liquidable: 0, en_vitrina: 0, no_llego: 0 });
+
+  const salida = {
+    ...remision,
+    lineas: lineas.map((l) => ({
+      ...l,
+      etiqueta_estado: ETIQUETAS_ESTADO[l.estado_unidad] || l.estado_unidad || l.estado_linea,
+      valor_interno: _num(l.valor_interno),
+      liquidable:    _num(l.liquidable),
+      subtotal: _num(l.valor_interno) *
+        (l.tipo === 'cantidad' ? Number(l.cantidad_recibida ?? l.cantidad ?? 0) : 1),
+    })),
+    correcciones,
+    resumen: {
+      enviado:    Math.round(resumen.enviado),
+      liquidable: Math.round(resumen.liquidable),
+      en_vitrina: Math.round(resumen.en_vitrina),
+      no_llego:   Math.round(resumen.no_llego),
+    },
+    // Con la remisión en tránsito el valor se edita directo; ya recibida, solo
+    // por nota de corrección (nunca se reescribe la historia en silencio).
+    puede_editar_valores: remision.estado === 'En transito' && req.esBodega,
+    puede_corregir:       remision.estado !== 'En transito' && req.esBodega,
+  };
+
+  if (_puedeVerCostos(req)) return salida;
+  return {
+    ...salida,
+    costos_ocultos: true,
+    valor_total: null,
+    resumen: null,
+    correcciones: [],
+    lineas: salida.lineas.map((l) => _sinValores(l, [...CLAVES_VALOR_UNIDAD, 'subtotal'])),
+  };
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CORREGIR EL VALOR DE UNA LÍNEA
+//
+// Dos caminos según dónde esté la remisión:
+//   • EN TRÁNSITO — nada se movió: se edita el valor directamente.
+//   • YA RECIBIDA — se registra una NOTA DE CORRECCIÓN con el valor anterior,
+//     el nuevo, quién y por qué. El valor efectivo cambia (es lo que el local
+//     debe liquidar) pero queda el rastro completo de que se corrigió.
+// ─────────────────────────────────────────────────────────────────────────────
+const corregirValorLinea = async (req, lineaId, { valor_nuevo, motivo }) => {
+  _exigirBodega(req);
+  const negocioId = req.user.negocio_id;
+  const nuevo = Number(valor_nuevo);
+  if (!Number.isFinite(nuevo) || nuevo < 0) {
+    throw { status: 400, message: 'El valor no puede ser negativo' };
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const { rows } = await client.query(`
+      SELECT lr.*, r.estado AS remision_estado, r.negocio_id,
+             r.sucursal_destino_id, r.sucursal_origen_id, r.tipo AS remision_tipo,
+             r.numero AS remision_numero
+      FROM lineas_remision lr
+      JOIN remisiones r ON r.id = lr.remision_id
+      WHERE lr.id = $1 AND r.negocio_id = $2
+      FOR UPDATE OF lr
+    `, [lineaId, negocioId]);
+    if (!rows.length) throw { status: 404, message: 'Línea no encontrada' };
+    const l = rows[0];
+
+    if (l.remision_estado === 'Anulada') {
+      throw { status: 409, message: 'La remisión está anulada' };
+    }
+    const anterior = _num(l.valor_interno);
+    if (Math.abs(anterior - nuevo) < 0.01) {
+      throw { status: 400, message: 'El valor es el mismo que ya tenía' };
+    }
+
+    // En tránsito: edición limpia, sin nota (nada se ha movido ni liquidado).
+    if (l.remision_estado === 'En transito') {
+      await client.query(
+        `UPDATE lineas_remision SET valor_interno = $2 WHERE id = $1`, [lineaId, nuevo]
+      );
+      await repo.actualizarTotalRemision(client, l.remision_id);
+      await client.query('COMMIT');
+      return { linea_id: lineaId, valor_anterior: anterior, valor_nuevo: nuevo, con_nota: false };
+    }
+
+    // Ya recibida: se corrige Y queda la nota.
+    if (!motivo?.trim()) {
+      throw { status: 400, message: 'Explica el motivo de la corrección' };
+    }
+    const sucursalLocal = l.remision_tipo === 'devolucion'
+      ? l.sucursal_origen_id
+      : l.sucursal_destino_id;
+
+    await client.query(`
+      UPDATE lineas_remision
+      SET valor_interno  = $2,
+          valor_original = COALESCE(valor_original, $3)
+      WHERE id = $1
+    `, [lineaId, nuevo, anterior]);
+
+    const nota = await repo.insertarCorreccion(client, {
+      negocio_id: negocioId, sucursal_id: sucursalLocal, linea_id: lineaId,
+      valor_anterior: anterior, valor_nuevo: nuevo, diferencia: nuevo - anterior,
+      motivo: motivo.trim(), usuario_id: req.user.id,
+    });
+    await repo.actualizarTotalRemision(client, l.remision_id);
+
+    await client.query('COMMIT');
+    return {
+      linea_id: lineaId, valor_anterior: anterior, valor_nuevo: nuevo,
+      con_nota: true, correccion: nota,
+    };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
 };
 
 const listarRemisiones = (req, { estado, limit } = {}) =>
@@ -1407,12 +2008,14 @@ const getMovimientosCuenta = async (req, sucursalId) => {
 };
 
 module.exports = {
-  despachar, recibir, anularRemision, devolver,
+  despachar, recibir, anularRemision,
+  devolver, previsualizarDevolucion, confirmarDevolucion,
   enviarRemesa, confirmarRemesa, anularRemesa,
   registrarGastoAutorizado, registrarAjuste,
   getPanelLocal, getPanelBodega, getConciliacion, getEstadoCuenta, getSalud,
   getReferenciasDuplicadas,
-  getRemision, listarRemisiones, listarRemesas,
+  getRemision, corregirValorLinea, listarRemisiones, listarRemesas,
+  getCuentasParaRemesa,
   buscarParaDespacho, catalogoCantidad, resolverItems,
   previsualizarDestino, catalogoReferencias,
   getSucursalesRed, getContexto, getMovimientosCuenta,

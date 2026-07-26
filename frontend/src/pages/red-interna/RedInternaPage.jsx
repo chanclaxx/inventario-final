@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  getPanel, getSucursales, confirmarRemesa, anularRemision, getSalud,
+  getPanel, getSucursales, confirmarRemesa, anularRemision, confirmarDevolucion, getSalud,
 } from '../../api/redInterna.api';
 import { formatCOP, formatFechaHora } from '../../utils/formatters';
 import { Button }     from '../../components/ui/Button';
@@ -15,7 +15,7 @@ import { ModalRemesa }    from './ModalRemesa';
 import { EstadoCuentaLocal } from './EstadoCuentaLocal';
 import {
   Package, PackageCheck, Truck, Send, Store, AlertTriangle, CheckCircle,
-  Wallet, ShieldCheck, ChevronRight, X, Clock,
+  Wallet, ShieldCheck, ChevronRight, X, Clock, Undo2,
 } from 'lucide-react';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -217,9 +217,14 @@ function PanelBodega({ data, locales, onRefrescar, onAviso, onVerCuenta }) {
     mutationFn: (id) => anularRemision(id),
     onSuccess: () => { onAviso('Envío anulado'); onRefrescar(); },
   });
+  const confirmarDev = useMutation({
+    mutationFn: (id) => confirmarDevolucion(id).then((r) => r.data),
+    onSuccess: (res) => { onAviso(res.message || 'Devolución confirmada'); onRefrescar(); },
+  });
 
-  const remesas    = data.remesas_por_confirmar   || [];
-  const enTransito = data.remisiones_en_transito  || [];
+  const remesas     = data.remesas_por_confirmar      || [];
+  const enTransito  = data.remisiones_en_transito     || [];
+  const devoluciones = data.devoluciones_por_confirmar || [];
 
   return (
     <>
@@ -282,6 +287,38 @@ function PanelBodega({ data, locales, onRefrescar, onAviso, onVerCuenta }) {
       </Tarjeta>
 
       {/* Bandejas */}
+      {devoluciones.length > 0 && (
+        <Tarjeta className="mb-4 border-amber-200">
+          <div className="px-5 py-3 border-b border-gray-50 flex items-center gap-2">
+            <Undo2 size={16} className="text-amber-600" />
+            <p className="text-sm font-semibold text-gray-800">
+              {devoluciones.length} devolución(es) por revisar
+            </p>
+          </div>
+          <div className="divide-y divide-gray-50">
+            {devoluciones.map((d) => (
+              <div key={d.id} className="flex items-center gap-3 px-5 py-3">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-gray-800">
+                    #{d.numero ?? d.id} · {d.total_items} producto(s)
+                  </p>
+                  <p className="text-xs text-gray-400">
+                    De {d.sucursal_origen_nombre} · {formatFechaHora(d.fecha_emision)}
+                  </p>
+                  {d.notas && <p className="text-xs text-gray-400 italic">{d.notas}</p>}
+                </div>
+                <Button size="sm" variant="success"
+                  loading={confirmarDev.isPending && confirmarDev.variables === d.id}
+                  onClick={() => confirmarDev.mutate(d.id)}
+                >
+                  <CheckCircle size={14} /> Recibí
+                </Button>
+              </div>
+            ))}
+          </div>
+        </Tarjeta>
+      )}
+
       {remesas.length > 0 && (
         <Tarjeta className="mb-4 border-green-200">
           <div className="px-5 py-3 border-b border-gray-50 flex items-center gap-2">

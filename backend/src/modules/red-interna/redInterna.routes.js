@@ -37,11 +37,15 @@ router.post('/despacho/previsualizar', requireNivel('supervisor'), ctrl.previsua
 router.get ('/referencias/:sucursalId', requireNivel('supervisor'), ctrl.catalogoReferencias);
 router.post('/remisiones',           requireNivel('supervisor'), ctrl.despachar);
 router.post('/remisiones/:id/anular',requireNivel('supervisor'), ctrl.anularRemision);
-router.post('/devoluciones',         requireNivel('supervisor'), ctrl.devolver);
+router.post('/devoluciones',              requireNivel('supervisor'), ctrl.devolver);
+router.post('/devoluciones/previsualizar', requireNivel('supervisor'), ctrl.previsualizarDevolucion);
+router.post('/devoluciones/:id/confirmar', requireNivel('supervisor'), ctrl.confirmarDevolucion);
+router.post('/lineas/:lineaId/corregir-valor', requireNivel('supervisor'), ctrl.corregirValorLinea);
 // Un vendedor puede confirmar la recepción.
 router.post('/remisiones/:id/recibir', ctrl.recibir);
 
 // ── Dinero ───────────────────────────────────────────────────────────────────
+router.get ('/remesas/cuentas',         requireNivel('supervisor'), ctrl.getCuentasParaRemesa);
 router.post('/remesas',                 requireNivel('supervisor'), ctrl.enviarRemesa);
 router.post('/remesas/:id/confirmar',   requireNivel('supervisor'), ctrl.confirmarRemesa);
 router.post('/remesas/:id/anular',      requireNivel('supervisor'), ctrl.anularRemesa);

@@ -133,6 +133,55 @@ const devolver = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+// Previsualiza una devolución: de dónde viene cada unidad (bodega o propia).
+const previsualizarDevolucion = async (req, res, next) => {
+  try {
+    const data = await service.previsualizarDevolucion(req, { lineas: req.body.lineas });
+    res.json({ ok: true, data });
+  } catch (err) { next(err); }
+};
+
+// La bodega confirma una devolución: aquí sí se mueve el inventario.
+const confirmarDevolucion = async (req, res, next) => {
+  try {
+    const data = await service.confirmarDevolucion(req, Number(req.params.id), {
+      lineas_recibidas: req.body.lineas_recibidas,
+    });
+    audit.registrar(req.user.negocio_id, req.user.id, 'Devolución confirmada', 'red_interna', data.id, {
+      sucursal_id: Number(req.sucursal_id),
+      recibidas: data.recibidas, faltantes: data.faltantes,
+      saldo_a_favor: data.saldo_a_favor,
+    });
+    res.json({
+      ok: true, data,
+      message: data.saldo_a_favor > 0
+        ? `Devolución confirmada. Se abonaron ${data.saldo_a_favor} a favor del local.`
+        : 'Devolución confirmada',
+    });
+  } catch (err) { next(err); }
+};
+
+// Corrige el valor de una línea (directo si va en tránsito, con nota si no).
+const corregirValorLinea = async (req, res, next) => {
+  try {
+    const data = await service.corregirValorLinea(req, Number(req.params.lineaId), {
+      valor_nuevo: req.body.valor_nuevo, motivo: req.body.motivo,
+    });
+    audit.registrar(req.user.negocio_id, req.user.id, 'Corrección de valor', 'red_interna', data.linea_id, {
+      sucursal_id: Number(req.sucursal_id),
+      valor_anterior: data.valor_anterior, valor_nuevo: data.valor_nuevo,
+    });
+    res.json({ ok: true, data, message: 'Valor corregido' });
+  } catch (err) { next(err); }
+};
+
+// Cuentas desde las que el local puede remitir.
+const getCuentasParaRemesa = async (req, res, next) => {
+  try {
+    res.json({ ok: true, data: await service.getCuentasParaRemesa(req) });
+  } catch (err) { next(err); }
+};
+
 const listarRemisiones = async (req, res, next) => {
   try {
     const data = await service.listarRemisiones(req, {
@@ -261,7 +310,9 @@ module.exports = {
   getPanel, getSucursales, getContexto,
   buscarParaDespacho, catalogoCantidad, resolverItems,
   previsualizarDestino, catalogoReferencias,
-  despachar, recibir, anularRemision, devolver,
+  despachar, recibir, anularRemision,
+  devolver, previsualizarDevolucion, confirmarDevolucion,
+  corregirValorLinea, getCuentasParaRemesa,
   listarRemisiones, getRemision,
   enviarRemesa, confirmarRemesa, anularRemesa, listarRemesas,
   gastoAutorizado, ajuste, getMovimientosCuenta,
