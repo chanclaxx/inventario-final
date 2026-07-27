@@ -74,13 +74,18 @@ const create = async (negocioId, { nombre, cedula, celular, email, direccion }) 
   return rows[0];
 };
 
+// Actualización parcial: un campo ausente (undefined/null) conserva su valor
+// actual. Así una edición que solo manda el nombre no borra email/dirección.
 const update = async (negocioId, id, { nombre, celular, email, direccion }) => {
   const { rows } = await pool.query(`
     UPDATE clientes
-    SET nombre = $1, celular = $2, email = $3, direccion = $4
+    SET nombre    = COALESCE(NULLIF($1, ''), nombre),
+        celular   = COALESCE($2, celular),
+        email     = COALESCE($3, email),
+        direccion = COALESCE($4, direccion)
     WHERE id = $5 AND negocio_id = $6
     RETURNING *
-  `, [nombre, celular, email, direccion, id, negocioId]);
+  `, [nombre ?? null, celular ?? null, email ?? null, direccion ?? null, id, negocioId]);
   return rows[0] || null;
 };
 

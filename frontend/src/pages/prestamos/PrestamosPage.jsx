@@ -6,6 +6,7 @@ import { exportarCarteraPersonaExcel } from '../../utils/exportarCarteraPersonaE
 import { getPrestamos, registrarAbonoPrestamo, devolverPrestamo, devolverParcialPrestamo, registrarSaldoAFavor as registrarSaldoAFavorApi, intercambiarPrestamo as intercambiarPrestamoApi, anularAbono as anularAbonoApi, getRetomasDirectas as getRetomasDirectasApi, anularRetomaDirecta as anularRetomaDirectaApi, aplicarSaldoAPrestamo as aplicarSaldoAPrestamoApi, getEstadoCuenta as getEstadoCuentaApi, crearAjusteDeuda as crearAjusteDeudaApi, getSaldoSucursal as getSaldoSucursalApi, getHistorialSaldoSucursal as getHistorialSaldoSucursalApi } from '../../api/prestamos.api';
 import { ModalEditarValorPrestamo } from './ModalEditarValorPrestamo';
 import { crearPrestatario as crearPrestatarioApi, getPrestatarios, actualizarPrestatario as actualizarPrestatarioApi } from '../../api/prestatarios.api';
+import { actualizarCliente as actualizarClienteApi } from '../../api/clientes.api';
 import {
   getDomiciliarios,
   getEntregas,
@@ -613,6 +614,75 @@ function ModalEditarPrestatario({ prestatario, onClose }) {
   );
 }
 
+// ─── Modal Editar Cliente ─────────────────────────────────────────────────────
+
+function ModalEditarCliente({ cliente, onClose }) {
+  const queryClient = useQueryClient();
+  const [nombre,  setNombre]  = useState(cliente.nombre);
+  const [celular, setCelular] = useState(cliente.celular || '');
+  const [error,   setError]   = useState('');
+
+  const mutation = useMutation({
+    mutationFn: () => actualizarClienteApi(cliente.id, {
+      nombre:  nombre.trim(),
+      celular: celular.trim() || undefined,
+    }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['clientes'],          exact: false });
+      queryClient.invalidateQueries({ queryKey: ['clientes-prestamo'], exact: false });
+      queryClient.invalidateQueries({ queryKey: ['prestamos'],         exact: false });
+      onClose();
+    },
+    onError: (err) => setError(err.response?.data?.error || 'Error al actualizar el cliente'),
+  });
+
+  const handleGuardar = () => {
+    setError('');
+    if (!nombre.trim()) return setError('El nombre es requerido');
+    mutation.mutate();
+  };
+
+  return (
+    <Modal open onClose={onClose} title="Editar cliente" size="sm">
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-1">
+          <label className="text-sm font-medium text-gray-700">
+            Nombre <span className="text-red-500">*</span>
+          </label>
+          <Input
+            value={nombre}
+            onChange={(e) => setNombre(e.target.value)}
+            placeholder="Nombre completo"
+            autoFocus
+            onKeyDown={(e) => e.key === 'Enter' && handleGuardar()}
+          />
+        </div>
+        <div className="flex flex-col gap-1">
+          <label className="text-sm font-medium text-gray-700">
+            Celular <span className="text-xs text-gray-400">(opcional)</span>
+          </label>
+          <Input
+            value={celular}
+            onChange={(e) => setCelular(e.target.value)}
+            placeholder="Número de celular"
+            onKeyDown={(e) => e.key === 'Enter' && handleGuardar()}
+          />
+        </div>
+        <p className="text-xs text-gray-400">
+          La cédula no se puede modificar: es la que enlaza al cliente con sus facturas.
+        </p>
+        {error && <p className="text-sm text-red-500">{error}</p>}
+        <div className="flex gap-2">
+          <Button variant="secondary" className="flex-1" onClick={onClose}>Cancelar</Button>
+          <Button className="flex-1" loading={mutation.isPending} onClick={handleGuardar}>
+            <Pencil size={14} /> Guardar cambios
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 // ─── Modal Ajuste de Cuentas ──────────────────────────────────────────────────
 
 function ModalAjusteDeuda({ nombre, tipo, personaId, sucursalId, onClose }) {
@@ -1109,7 +1179,7 @@ function CardPersona({ nombre, tipo, prestamos, saldoTotal, ultimoAbono, onSelec
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); onEditar(); }}
-            title="Editar prestamista"
+            title={tipo === 'companero' ? 'Editar prestamista' : 'Editar cliente'}
             className="p-1.5 rounded-lg text-gray-300 hover:text-blue-500 hover:bg-blue-50 transition-colors"
           >
             <Settings size={15} />
@@ -2526,6 +2596,7 @@ export default function PrestamosPage() {
   const [modalAjusteCuentas,  setModalAjusteCuentas]  = useState(null); // { nombre, tipo, personaId, sucursalId }
   const [modalCrearPrestatario,   setModalCrearPrestatario]   = useState(false);
   const [modalEditarPrestatario,  setModalEditarPrestatario]  = useState(null);
+  const [modalEditarCliente,      setModalEditarCliente]      = useState(null);
   const abonosImprimir = useAbonosPrestamo(prestamoImprimir?.id);
 
   const [saldadoFacturaId,   setSaldadoFacturaId]   = useState(null);
@@ -2605,6 +2676,7 @@ export default function PrestamosPage() {
     if (!acc[key]) acc[key] = {
       nombre:      p.cliente_nombre || p.prestatario,
       personaId:   p.cliente_id,
+      celular:     p.cliente_celular || '',
       prestamos:   [],
       saldoTotal:  0,
       saldoAFavor: Number(p.cliente_saldo_a_favor ?? 0),
@@ -2850,11 +2922,17 @@ export default function PrestamosPage() {
                         prestamos={grupo.prestamos} saldoTotal={grupo.saldoTotal}
                         ultimoAbono={grupo.ultimoAbono}
                         onSeleccionar={() => setPersonaSeleccionadaKey(key)}
-                        onEditar={tabPrestamos === 'companeros' ? () => setModalEditarPrestatario({
-                          id:       grupo.personaId,
-                          nombre:   grupo.nombre,
-                          telefono: grupo.telefono || '',
-                        }) : undefined}
+                        onEditar={tabPrestamos === 'companeros'
+                          ? () => setModalEditarPrestatario({
+                              id:       grupo.personaId,
+                              nombre:   grupo.nombre,
+                              telefono: grupo.telefono || '',
+                            })
+                          : () => setModalEditarCliente({
+                              id:      grupo.personaId,
+                              nombre:  grupo.nombre,
+                              celular: grupo.celular || '',
+                            })}
                       />
                     ))}
                   </div>
@@ -2981,6 +3059,13 @@ export default function PrestamosPage() {
         <ModalEditarPrestatario
           prestatario={modalEditarPrestatario}
           onClose={() => setModalEditarPrestatario(null)}
+        />
+      )}
+
+      {modalEditarCliente && (
+        <ModalEditarCliente
+          cliente={modalEditarCliente}
+          onClose={() => setModalEditarCliente(null)}
         />
       )}
 

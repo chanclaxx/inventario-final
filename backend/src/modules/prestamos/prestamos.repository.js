@@ -18,6 +18,7 @@ const findAll = async (sucursalId, negocioId) => {
       pr.nombre AS prestatario_nombre,
       e.nombre  AS empleado_nombre,
       c.nombre  AS cliente_nombre,
+      c.celular AS cliente_celular,
       s.color   AS serial_color,
       COALESCE(pr.saldo_a_favor, 0) AS prestatario_saldo_a_favor,
       COALESCE(c.saldo_a_favor,  0) AS cliente_saldo_a_favor,
