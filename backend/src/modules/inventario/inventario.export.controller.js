@@ -9,9 +9,13 @@ const exportarInventario = async (req, res, next) => {
         error: 'Selecciona una sucursal para exportar su inventario',
       });
     }
+    // `modo=lineas` trae solo lo que ese Excel pinta (mucho más rápido).
+    // Sin el parámetro se responde completo: un frontend viejo cacheado por el
+    // service worker sigue funcionando igual.
     const data = await service.getInventarioCompleto(
       req.sucursal_id,
       req.user.negocio_id,  // ← pasar para segunda capa
+      req.query.modo,
     );
     res.json({ ok: true, data });
   } catch (err) { next(err); }

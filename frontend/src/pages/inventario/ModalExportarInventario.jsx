@@ -23,6 +23,11 @@ const MODOS = [
   },
 ];
 
+// El timeout global (30s) es para peticiones normales de pantalla. Un inventario
+// grande tarda más en armarse del lado del servidor, y cortarlo a los 30s era lo
+// que la clienta veía como "no se pudo exportar".
+const OPCIONES_EXPORT = { timeout: 180000 };
+
 const ALCANCES = [
   {
     id:    'sucursal',
@@ -54,10 +59,15 @@ export function ModalExportarInventario({ open, onClose }) {
     setError('');
     try {
       if (alcance === 'negocio') {
-        const { data } = await api.get('/inventario/exportar-negocio');
+        const { data } = await api.get('/inventario/exportar-negocio', OPCIONES_EXPORT);
         await exportarInventarioPorLineasNegocio(data.data.porLinea, data.data.configMap);
       } else {
-        const { data } = await api.get('/inventario/exportar');
+        // `modo` le dice al backend qué armar: en "líneas" se salta los cruces por
+        // IMEI contra facturas y compras, que es lo que hacía eterna la consulta.
+        const { data } = await api.get('/inventario/exportar', {
+          ...OPCIONES_EXPORT,
+          params: { modo: modoEfectivo },
+        });
         const { porProducto, porLinea, cantidad, configMap } = data.data;
         if (modoEfectivo === 'productos') {
           await exportarInventarioExcel(porProducto, cantidad, configMap);

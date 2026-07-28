@@ -35,6 +35,37 @@ const runMigrations = async () => {
       ON gastos_fijos (sucursal_id) WHERE activo;
   `);
 
+  // Índices para la exportación de inventario — ver migrations/20260727_indices_export_inventario.sql
+  //
+  // La exportación cruza cada serial contra facturas, compras y préstamos POR IMEI
+  // (texto). Sin estos índices cada serial dispara un seq scan de esas tablas, así
+  // que el costo total crece con seriales × líneas_factura: un negocio con miles de
+  // seriales tumba la petición por timeout.
+  //
+  // El índice sobre clientes es funcional porque el JOIN normaliza con
+  // LOWER(TRIM(...)) y un índice normal sobre `nombre` no aplicaría.
+  //
+  // Va en su propio try/catch: son puramente de rendimiento, y un fallo aquí (una BD
+  // vieja sin alguna de estas columnas) no debe impedir que arranque el servidor.
+  try {
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_lineas_factura_imei
+        ON lineas_factura (imei) WHERE imei IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_lineas_compra_imei
+        ON lineas_compra (imei) WHERE imei IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_prestamos_imei_fecha
+        ON prestamos (imei, fecha DESC) WHERE imei IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_seriales_producto
+        ON seriales (producto_id);
+      CREATE INDEX IF NOT EXISTS idx_productos_serial_sucursal
+        ON productos_serial (sucursal_id);
+      CREATE INDEX IF NOT EXISTS idx_clientes_negocio_nombre_norm
+        ON clientes (negocio_id, LOWER(BTRIM(nombre)));
+    `);
+  } catch (err) {
+    console.error('⚠️  Índices de exportación no creados (la exportación sigue, más lenta):', err.message);
+  }
+
   // Red interna (bodega → locales, modelo consignación) — ver migrations/20260725_red_interna.sql
   //
   // 100% aditiva: crea 4 tablas nuevas y NINGÚN ALTER sobre tablas existentes.

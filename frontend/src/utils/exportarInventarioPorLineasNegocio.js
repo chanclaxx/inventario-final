@@ -50,9 +50,11 @@ function colW(col) {
   };
   return m[col] !== undefined ? m[col] : Math.max(col.length + 4, 12);
 }
+var BORDE  = { style: 'thin', color: { argb: A_BORDE } };
+var BORDES = { top: BORDE, bottom: BORDE, left: BORDE, right: BORDE };
+
 function applyBorde(cell) {
-  var b = { style: 'thin', color: { argb: A_BORDE } };
-  cell.border = { top: b, bottom: b, left: b, right: b };
+  cell.border = BORDES;
 }
 function applyHeader(cell) {
   cell.font      = { bold: true, name: 'Arial', size: 10, color: { argb: A_BLANCO } };
@@ -60,11 +62,23 @@ function applyHeader(cell) {
   cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
   applyBorde(cell);
 }
-function applyCell(cell, bg) {
-  cell.font      = { name: 'Arial', size: 9 };
-  cell.fill      = { type: 'pattern', pattern: 'solid', fgColor: { argb: bg } };
-  cell.alignment = { vertical: 'middle' };
-  applyBorde(cell);
+
+// Asignar font/fill/alignment/border uno por uno crea ~10 objetos por celda. En un
+// negocio con miles de seriales eso es cientos de miles de objetos y es la parte
+// cara de armar el archivo. Los fondos posibles son pocos (uno por sucursal, más
+// el de vendido), así que el estilo se construye una vez por color y se comparte
+// por referencia: ExcelJS ya los deduplica al escribir y nunca los mutamos.
+var estilosPorFondo = {};
+function estiloCelda(bg) {
+  if (!estilosPorFondo[bg]) {
+    estilosPorFondo[bg] = {
+      font:      { name: 'Arial', size: 9 },
+      fill:      { type: 'pattern', pattern: 'solid', fgColor: { argb: bg } },
+      alignment: { vertical: 'middle' },
+      border:    BORDES,
+    };
+  }
+  return estilosPorFondo[bg];
 }
 function hojaUnica(nombre, usadas) {
   var h = (nombre || 'Sin nombre').replace(/[\\/?*[\]:]/g, '').trim().slice(0, 31) || 'Sin nombre';
@@ -81,8 +95,13 @@ function hoy() {
 function descargar(buffer, nombre) {
   var blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
   var url  = URL.createObjectURL(blob);
-  var a    = document.createElement('a'); a.href = url; a.download = nombre; a.click();
-  URL.revokeObjectURL(url);
+  var a    = document.createElement('a'); a.href = url; a.download = nombre;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  // Revocar en la línea siguiente al click alcanza a cancelar la descarga cuando el
+  // archivo es grande: el navegador todavía está leyendo el blob. Se libera después.
+  setTimeout(function() { URL.revokeObjectURL(url); }, 40000);
 }
 
 // ── Leyenda dinámica por sucursales ───────────────────────────────────────────
@@ -148,6 +167,15 @@ export async function exportarInventarioPorLineasNegocio(porLinea, configMap) {
   }
   var sucursalesList = Array.from(sucursalesSet).sort(function(a, b) { return a.localeCompare(b, 'es'); });
 
+  // indexOf por serial es O(sucursales) en cada fila y en cada comparación del
+  // ordenamiento; con un mapa queda en una búsqueda directa.
+  var indicesSucursal = new Map();
+  for (var isu = 0; isu < sucursalesList.length; isu++) indicesSucursal.set(sucursalesList[isu], isu);
+  var idxPorSucursal = function(s) {
+    var idx = indicesSucursal.get(s.sucursal_nombre || '');
+    return idx === undefined ? -1 : idx;
+  };
+
   var wb     = new ExcelJS.Workbook();
   var usadas = new Set();
 
@@ -171,33 +199,27 @@ export async function exportarInventarioPorLineasNegocio(porLinea, configMap) {
     }
     ws.autoFilter = { from: { row: 2, column: 1 }, to: { row: 2, column: cols.length } };
 
+    // sucursalesList ya viene ordenada alfabéticamente, así que comparar índices
+    // da el mismo orden que localeCompare y evita miles de llamadas al colador.
     var sorted = seriales.slice().sort(function(a, b) {
       var oa = a.vendido ? 2 : a.prestado ? 1 : 0;
       var ob = b.vendido ? 2 : b.prestado ? 1 : 0;
       if (oa !== ob) return oa - ob;
-      return (a.sucursal_nombre || '').localeCompare(b.sucursal_nombre || '', 'es');
+      return idxPorSucursal(a) - idxPorSucursal(b);
     });
 
     for (var ri = 0; ri < sorted.length; ri++) {
-      var s           = sorted[ri];
-      var sucursalIdx = sucursalesList.indexOf(s.sucursal_nombre || '');
-      var bg          = bgSerial(s, sucursalIdx);
-      var car         = s.caracteristicas || {};
-      var dr          = ws.getRow(ri + 3);
-      var cc2         = 1;
+      var s   = sorted[ri];
+      var car = s.caracteristicas || {};
 
-      var cRef  = dr.getCell(cc2++); cRef.value  = s.producto          || ''; applyCell(cRef, bg);
-      var cSuc  = dr.getCell(cc2++); cSuc.value  = s.sucursal_nombre   || ''; applyCell(cSuc, bg);
-      var cImei = dr.getCell(cc2++); cImei.value = s.imei              || ''; applyCell(cImei, bg);
-      if (colAct) {
-        var cClr = dr.getCell(cc2++); cClr.value = s.color || ''; applyCell(cClr, bg);
-      }
-      for (var cki = 0; cki < carList.length; cki++) {
-        var ck = dr.getCell(cc2++); ck.value = car[carList[cki]] || ''; applyCell(ck, bg);
-      }
-      var cPrest = dr.getCell(cc2++); cPrest.value = s.prestamista            || ''; applyCell(cPrest, bg);
-      var cFecha = dr.getCell(cc2++); cFecha.value = fmtFecha(s.fecha_entrada);       applyCell(cFecha, bg);
-      var cOrig  = dr.getCell(cc2++); cOrig.value  = s.cliente_origen         || ''; applyCell(cOrig, bg);
+      var vals = [s.producto || '', s.sucursal_nombre || '', s.imei || ''];
+      if (colAct) vals.push(s.color || '');
+      for (var cki = 0; cki < carList.length; cki++) vals.push(car[carList[cki]] || '');
+      vals.push(s.prestamista || '', fmtFecha(s.fecha_entrada), s.cliente_origen || '');
+
+      var estilo = estiloCelda(bgSerial(s, idxPorSucursal(s)));
+      var dr     = ws.addRow(vals);
+      for (var cc2 = 1; cc2 <= vals.length; cc2++) dr.getCell(cc2).style = estilo;
     }
   }
 

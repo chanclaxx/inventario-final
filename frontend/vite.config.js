@@ -31,8 +31,11 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
         runtimeCaching: [
           {
-            // Reportes, facturas, dashboard, tesorería — datos en tiempo real: NUNCA cachear
-            urlPattern: /^https:\/\/inventario-final-production\.up\.railway\.app\/api\/(reportes|facturas|dashboard|tesoreria)/i,
+            // Reportes, facturas, dashboard, tesorería — datos en tiempo real: NUNCA cachear.
+            // Inventario va aquí por otro motivo: la exportación devuelve varios MB y
+            // guardarlos en CacheStorage llena la cuota del navegador y hace fallar la
+            // descarga. Además el inventario cambia con cada venta, no sirve cacheado.
+            urlPattern: /^https:\/\/inventario-final-production\.up\.railway\.app\/api\/(reportes|facturas|dashboard|tesoreria|inventario)/i,
             handler: 'NetworkOnly',
           },
           {

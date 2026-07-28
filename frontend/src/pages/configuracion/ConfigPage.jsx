@@ -1131,6 +1131,10 @@ function SeccionNegocio({ valores, set }) {
 }
 
 // ─── Exportar inventario por líneas (solo admin_negocio) ─────────────────────
+// El timeout global (30s) sirve para peticiones de pantalla; un inventario grande
+// tarda más en armarse del lado del servidor y se cortaba antes de tiempo.
+const TIMEOUT_EXPORT = 180000;
+
 function ExportarInventarioConfig() {
   const [alcance,    setAlcance]    = useState('negocio'); // 'negocio' | 'sucursal'
   const [sucursalId, setSucursalId] = useState('');
@@ -1149,11 +1153,14 @@ function ExportarInventarioConfig() {
     setError('');
     try {
       if (alcance === 'negocio') {
-        const { data } = await api.get('/inventario/exportar-negocio');
+        const { data } = await api.get('/inventario/exportar-negocio', { timeout: TIMEOUT_EXPORT });
         await exportarInventarioPorLineasNegocio(data.data.porLinea, data.data.configMap);
       } else {
         const id = Number(efectivoId);
-        const { data } = await api.get('/inventario/exportar', { params: { sucursal_id: id } });
+        const { data } = await api.get('/inventario/exportar', {
+          params:  { sucursal_id: id, modo: 'lineas' },
+          timeout: TIMEOUT_EXPORT,
+        });
         const sucNombre = sucursales.find((s) => s.id === id)?.nombre || '';
         const porLineaConSuc = {};
         for (const [linea, sers] of Object.entries(data.data.porLinea)) {

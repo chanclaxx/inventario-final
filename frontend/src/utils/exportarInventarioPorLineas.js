@@ -30,9 +30,11 @@ function colW(col) {
   var m = { 'Referencia': 28, 'IMEI / Serial': 22, 'Color': 14, 'Prestamista': 22, 'Fecha Entrada': 14, 'Cliente Origen': 22 };
   return m[col] !== undefined ? m[col] : Math.max(col.length + 4, 12);
 }
+var BORDE  = { style: 'thin', color: { argb: A_BORDE } };
+var BORDES = { top: BORDE, bottom: BORDE, left: BORDE, right: BORDE };
+
 function applyBorde(cell) {
-  var b = { style: 'thin', color: { argb: A_BORDE } };
-  cell.border = { top: b, bottom: b, left: b, right: b };
+  cell.border = BORDES;
 }
 function applyHeader(cell) {
   cell.font      = { bold: true, name: 'Arial', size: 10, color: { argb: A_BLANCO } };
@@ -40,11 +42,23 @@ function applyHeader(cell) {
   cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
   applyBorde(cell);
 }
-function applyCell(cell, bg) {
-  cell.font      = { name: 'Arial', size: 9 };
-  cell.fill      = { type: 'pattern', pattern: 'solid', fgColor: { argb: bg } };
-  cell.alignment = { vertical: 'middle' };
-  applyBorde(cell);
+
+// Asignar font/fill/alignment/border uno por uno crea ~10 objetos por celda. En
+// una línea con miles de seriales eso es cientos de miles de objetos y es la parte
+// cara de armar el archivo. Como solo hay tres fondos posibles (disponible,
+// prestado, vendido), el estilo se construye una vez y se comparte por referencia:
+// ExcelJS ya los deduplica al escribir, y nunca los mutamos después de asignarlos.
+var estilosPorFondo = {};
+function estiloCelda(bg) {
+  if (!estilosPorFondo[bg]) {
+    estilosPorFondo[bg] = {
+      font:      { name: 'Arial', size: 9 },
+      fill:      { type: 'pattern', pattern: 'solid', fgColor: { argb: bg } },
+      alignment: { vertical: 'middle' },
+      border:    BORDES,
+    };
+  }
+  return estilosPorFondo[bg];
 }
 function leyenda(ws, n) {
   var lr = ws.getRow(1); lr.height = 18;
@@ -80,8 +94,13 @@ function hoy() {
 function descargar(buffer, nombre) {
   var blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
   var url  = URL.createObjectURL(blob);
-  var a    = document.createElement('a'); a.href = url; a.download = nombre; a.click();
-  URL.revokeObjectURL(url);
+  var a    = document.createElement('a'); a.href = url; a.download = nombre;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  // Revocar en la línea siguiente al click alcanza a cancelar la descarga cuando el
+  // archivo es grande: el navegador todavía está leyendo el blob. Se libera después.
+  setTimeout(function() { URL.revokeObjectURL(url); }, 40000);
 }
 
 export async function exportarInventarioPorLineas(porLinea, configMap) {
@@ -125,20 +144,16 @@ export async function exportarInventarioPorLineas(porLinea, configMap) {
 
     for (var ri = 0; ri < sorted.length; ri++) {
       var s   = sorted[ri];
-      var bg  = bgSerial(s);
       var car = s.caracteristicas || {};
-      var dr  = ws.getRow(ri + 3);
-      var cc  = 1;
 
-      var refCell  = dr.getCell(cc++); refCell.value  = s.producto || ''; applyCell(refCell, bg);
-      var imeiCell = dr.getCell(cc++); imeiCell.value = s.imei     || ''; applyCell(imeiCell, bg);
-      if (colAct) { var clrCell = dr.getCell(cc++); clrCell.value = s.color || ''; applyCell(clrCell, bg); }
-      for (var ki = 0; ki < carList.length; ki++) {
-        var ck = dr.getCell(cc++); ck.value = car[carList[ki]] || ''; applyCell(ck, bg);
-      }
-      var cpCell = dr.getCell(cc++); cpCell.value = s.prestamista            || ''; applyCell(cpCell, bg);
-      var cfCell = dr.getCell(cc++); cfCell.value = fmtFecha(s.fecha_entrada);       applyCell(cfCell, bg);
-      var coCell = dr.getCell(cc++); coCell.value = s.cliente_origen         || ''; applyCell(coCell, bg);
+      var vals = [s.producto || '', s.imei || ''];
+      if (colAct) vals.push(s.color || '');
+      for (var ki = 0; ki < carList.length; ki++) vals.push(car[carList[ki]] || '');
+      vals.push(s.prestamista || '', fmtFecha(s.fecha_entrada), s.cliente_origen || '');
+
+      var estilo = estiloCelda(bgSerial(s));
+      var dr     = ws.addRow(vals);
+      for (var cc = 1; cc <= vals.length; cc++) dr.getCell(cc).style = estilo;
     }
   }
 

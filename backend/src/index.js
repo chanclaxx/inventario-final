@@ -4,6 +4,7 @@ const cors         = require('cors');
 const helmet       = require('helmet');
 const cookieParser = require('cookie-parser');
 const rateLimit    = require('express-rate-limit');
+const compression  = require('compression');
 
 const { validateEnv }      = require('./config/env');
 const { connectDB }        = require('./config/db');
@@ -22,6 +23,10 @@ app.set('trust proxy', 1);
 
 // ── Middlewares globales ──────────────────────────────
 app.use(helmet());
+// Gzip de las respuestas. Pesa poco en JSON chico y hace la diferencia en los
+// payloads grandes (exportación de inventario, reportes), que son puro texto
+// repetido y bajan alrededor de un 90%.
+app.use(compression());
 app.use(cors({
   origin: (origin, callback) => {
     const allowed = [
