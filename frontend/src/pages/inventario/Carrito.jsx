@@ -12,6 +12,8 @@ import { getSucursales } from '../../api/sucursales.api';
 import api from '../../api/axios.config';
 import { getContextoRed, resolverItemsCarrito } from '../../api/redInterna.api';
 import useCarritoStore from '../../store/carritoStore';
+import { useTarifas }   from '../../hooks/useTarifas';
+import { SelectorTarifa, TarifaItem } from '../../components/ui/SelectorTarifa';
 import { ModalTraslado } from './ModalTraslado';
 import { ModalDespachar } from '../red-interna/ModalDespachar';
 import { ModalDevolver }  from '../red-interna/ModalDevolver';
@@ -43,10 +45,27 @@ function CantidadInput({ valor, stock, onCambiar }) {
 }
 
 export function Carrito({ onFacturar, onPrestar, sinHeader = false }) {
-  const { items, eliminarItem, actualizarPrecio, actualizarCantidad, limpiarCarrito, totalCarrito } =
-    useCarritoStore();
+  const {
+    items, eliminarItem, actualizarPrecio, actualizarCantidad, limpiarCarrito, totalCarrito,
+    aplicarTarifa, aplicarTarifaATodos,
+  } = useCarritoStore();
   const total = totalCarrito();
   const queryClient = useQueryClient();
+
+  // ── Tarifas porcentuales sobre el costo (feature opt-in) ──────────────────
+  // Con la feature apagada `activo` es false y nada de esto se renderiza:
+  // el carrito queda exactamente como estaba.
+  const tarifasCfg = useTarifas();
+
+  // Tarifa aplicada a TODO el carrito: solo se marca como activa si todos los
+  // ítems que admiten tarifa comparten la misma, para no mentir cuando el
+  // vendedor mezcla tarifas ítem por ítem.
+  const conTarifa    = items.filter((i) => i.costo != null);
+  const tarifaComun  = conTarifa.length > 0
+    && conTarifa.every((i) => i.tarifa_id && i.tarifa_id === conTarifa[0].tarifa_id)
+    ? conTarifa[0].tarifa_id
+    : null;
+  const sinCosto     = items.length > 0 && conTarifa.length === 0;
 
   const [modalTraslado, setModalTraslado] = useState(false);
   const [despacho,      setDespacho]      = useState(null); // { items, descartados }
@@ -134,6 +153,29 @@ export function Carrito({ onFacturar, onPrestar, sinHeader = false }) {
                 className="text-xs text-red-400 hover:text-red-600 transition-colors">
                 Limpiar
               </button>
+            )}
+          </div>
+        )}
+
+        {/* Tarifa aplicada a todo el carrito (feature opt-in) */}
+        {tarifasCfg.activo && items.length > 0 && (
+          <div className="mb-3 p-3 bg-gray-50 rounded-xl flex flex-col gap-1.5">
+            <SelectorTarifa
+              label="Tarifa para toda la venta"
+              tarifas={tarifasCfg.tarifas}
+              valor={tarifaComun}
+              verPorcentaje={tarifasCfg.verPorcentaje}
+              disabled={sinCosto}
+              motivoDisabled="Ningún producto del carrito admite tarifa"
+              onChange={(t) => aplicarTarifaATodos(t, {
+                modo: tarifasCfg.modo, redondeo: tarifasCfg.redondeo,
+              })}
+            />
+            {!sinCosto && conTarifa.length < items.length && (
+              <span className="text-[11px] text-gray-400">
+                {items.length - conTarifa.length} producto(s) no admiten tarifa y conservan
+                su precio de lista — revísalos abajo uno por uno
+              </span>
             )}
           </div>
         )}
@@ -229,6 +271,15 @@ export function Carrito({ onFacturar, onPrestar, sinHeader = false }) {
                       />
                     </div>
                   </div>
+
+                  {/* Tarifa de este ítem (feature opt-in) */}
+                  {tarifasCfg.activo && (
+                    <TarifaItem
+                      item={item}
+                      config={tarifasCfg}
+                      onAplicar={aplicarTarifa}
+                    />
+                  )}
 
                   {/* Subtotal cuando hay más de 1 unidad */}
                   {item.tipo === 'cantidad' && (item.cantidad || 1) > 1 && (

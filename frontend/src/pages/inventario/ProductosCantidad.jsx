@@ -281,6 +281,8 @@ export function ProductosCantidad() {
       nombre:      producto.nombre,
       producto_id: producto.id,
       precio:      Math.round(Number(producto.precio || producto.costo_unitario || 0)),
+      // Base de las tarifas porcentuales; null si el producto no tiene costo.
+      costo:       Number(producto.costo_unitario) || null,
       stock:       producto.stock,
       cantidad:    1,
       linea_id:    producto.linea_id || null,
@@ -332,6 +334,7 @@ export function ProductosCantidad() {
       nombre:      producto.nombre,
       producto_id: producto.id,
       precio:      Math.round(Number(producto.precio || producto.costo_unitario || 0)),
+      costo:       Number(producto.costo_unitario) || null,
       stock:       producto.stock,
       cantidad:    1,
       linea_id:    producto.linea_id || null,

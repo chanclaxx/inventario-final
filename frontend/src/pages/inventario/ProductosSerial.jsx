@@ -897,6 +897,18 @@ export function ProductosSerial({ onAgregarProducto }) {
       nombre:      productoSeleccionado.nombre,
       imei:        serial.imei,
       precio:      Math.round(Number(serial.precio ?? productoSeleccionado.precio ?? 0)),
+      // El costo de un serial es por UNIDAD: dos equipos del mismo producto
+      // pueden haber costado distinto, así que la tarifa se calcula por ítem.
+      //
+      // En un local de la red interna el backend manda `costo_tarifa` con el
+      // valor interno de la remisión (o null si la unidad es del local). Fuera
+      // de ese caso la clave no viene y se usa el costo de compra propio.
+      costo:       serial.costo_tarifa !== undefined
+        ? serial.costo_tarifa
+        : (Number(serial.costo_compra) || null),
+      motivo_sin_tarifa: serial.origen_red === 'propio'
+        ? 'Viene de retoma o compra del local, no de bodega — pon el precio a mano'
+        : null,
       cantidad:    1,
       serial_id:   serial.id,
       marca:       productoSeleccionado.marca    || null,

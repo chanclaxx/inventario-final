@@ -25,11 +25,16 @@ node scripts/pruebas-red-interna/04-referencias-sin-duplicar.mjs
 node scripts/pruebas-red-interna/05-bugs-despacho.mjs
 node scripts/pruebas-red-interna/06-estado-cuenta.mjs
 node scripts/pruebas-red-interna/07-devolucion-costos-medios.mjs
+node scripts/pruebas-red-interna/08-tarifas-porcentuales.mjs
 ```
 
 > Las suites cargan **las dos migraciones**: `20260725_red_interna.sql` y
 > `20260726_red_interna_v2.sql`. Si se agrega una tercera hay que sumarla a
 > todas, o fallarán con columnas inexistentes.
+
+> La suite `08` es la única que además carga `esquema-completo.sql` (que
+> **complementa** a `esquema.sql`, no lo reemplaza): ejercita el `getSeriales`
+> real de inventario, cuya consulta necesita `prestamos` y `prestatarios`.
 
 ### Diagnóstico sobre datos reales (solo lectura)
 

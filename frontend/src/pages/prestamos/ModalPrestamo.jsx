@@ -13,6 +13,8 @@ import {
 } from '../../api/prestatarios.api';
 import { getClientes, crearCliente } from '../../api/clientes.api';
 import useCarritoStore from '../../store/carritoStore';
+import { useTarifas }  from '../../hooks/useTarifas';
+import { TarifaItem }  from '../../components/ui/SelectorTarifa';
 import { User, Users, Plus, Minus, ChevronLeft, Search } from 'lucide-react';
 import { InputMoneda } from '../../components/ui/InputMoneda';
 
@@ -226,7 +228,7 @@ function ChipSeleccionado({ nombre, onCambiar }) {
 
 // ─── ResumenCarrito ───────────────────────────────────────────────────────────
 
-function ResumenCarrito({ items, onActualizarPrecio, onActualizarCantidad }) {
+function ResumenCarrito({ items, onActualizarPrecio, onActualizarCantidad, tarifasCfg, onAplicarTarifa }) {
   return (
     <div className="bg-gray-50 rounded-xl p-3 flex flex-col gap-3">
       <p className="text-xs font-medium text-gray-500">
@@ -284,6 +286,9 @@ function ResumenCarrito({ items, onActualizarPrecio, onActualizarCantidad }) {
               />
             </div>
           </div>
+          {tarifasCfg?.activo && (
+            <TarifaItem item={item} config={tarifasCfg} onAplicar={onAplicarTarifa} />
+          )}
         </div>
       ))}
     </div>
@@ -294,7 +299,14 @@ function ResumenCarrito({ items, onActualizarPrecio, onActualizarCantidad }) {
 
 export function ModalPrestamo({ open, onClose }) {
   const queryClient = useQueryClient();
-  const { items, totalCarrito, limpiarCarrito, actualizarPrecio, actualizarCantidad } = useCarritoStore();
+  const {
+    items, totalCarrito, limpiarCarrito, actualizarPrecio, actualizarCantidad, aplicarTarifa,
+  } = useCarritoStore();
+
+  // Un préstamo es, en la práctica, una venta con pago diferido: usa el mismo
+  // carrito y por tanto las mismas tarifas. Apagada la feature, `activo` es
+  // false y el resumen queda idéntico a como estaba.
+  const tarifasCfg = useTarifas();
   const total = totalCarrito();
 
   const [tipoCliente,    setTipoCliente]    = useState('companero');
@@ -469,6 +481,8 @@ export function ModalPrestamo({ open, onClose }) {
             items={items}
             onActualizarPrecio={actualizarPrecio}
             onActualizarCantidad={actualizarCantidad}
+            tarifasCfg={tarifasCfg}
+            onAplicarTarifa={aplicarTarifa}
           />
         )}
 

@@ -2007,7 +2007,72 @@ const getMovimientosCuenta = async (req, sucursalId) => {
   return repo.findMovimientosCuenta(req.user.negocio_id, objetivo);
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// BASE DE COSTO PARA LAS TARIFAS PORCENTUALES (feature opt-in `tarifas_*`)
+//
+// En un LOCAL de la red, la tarifa no puede calcularse sobre `costo_compra`:
+// ese es el costo de la BODEGA. El costo del local es el `valor_interno` de la
+// remisión — lo que debe liquidar al vender.
+//
+// Los productos por cantidad ya lo tienen resuelto: al recibir la remisión,
+// `recibir()` reescribe `productos_cantidad.costo_unitario` del destino con el
+// costo promedio ponderado sobre `valor_interno`. Los seriales no, porque
+// `moverSerial` solo cambia `producto_id` y `costo_compra` se conserva a
+// propósito. Este helper cubre justamente ese hueco.
+//
+// Devuelve la lista SIN TOCAR (ni una clave nueva) cuando no aplica: negocio
+// sin red, infraestructura ausente, o la sucursal es la propia bodega. En esos
+// casos el frontend cae a `costo_compra`, que es lo correcto.
+//
+// Cuando sí aplica, cada serial recibe:
+//   origen_red   → 'bodega' (consignada) | 'propio' (retoma, compra del local…)
+//   costo_tarifa → valor_interno, o null si es propia
+//
+// Las unidades propias devuelven null a propósito: en un local no tienen un
+// costo comparable con el de la mercancía consignada, así que no admiten
+// tarifa y el vendedor debe poner el precio a mano.
+// ─────────────────────────────────────────────────────────────────────────────
+const anotarConsignacionSeriales = async (seriales, { negocioId, sucursalId }) => {
+  if (!Array.isArray(seriales) || !seriales.length || !sucursalId) return seriales;
+
+  const { getConfigRed } = require('../../middlewares/redInterna.middleware');
+
+  let config;
+  try {
+    config = await getConfigRed(negocioId);
+  } catch {
+    return seriales;                       // config ilegible → comportamiento de siempre
+  }
+  if (!config.activa || !config.bodega_id) return seriales;
+  if (Number(sucursalId) === Number(config.bodega_id)) return seriales;  // la bodega usa su costo
+
+  let filas;
+  try {
+    filas = await repo.getValorConsignacionSeriales(
+      negocioId, sucursalId, seriales.map((s) => Number(s.id)).filter(Number.isInteger)
+    );
+  } catch (err) {
+    // La migración de la red va en try/catch y puede no haberse aplicado. Un
+    // fallo aquí no puede tumbar el listado de inventario.
+    console.warn('[red-interna] No se pudo resolver el valor de consignación:', err.message);
+    return seriales;
+  }
+
+  const porSerial = new Map(filas.map((f) => [Number(f.serial_id), Number(f.valor_interno)]));
+
+  return seriales.map((s) => {
+    const valor = porSerial.get(Number(s.id));
+    const esDeBodega = valor !== undefined && valor > 0;
+    return {
+      ...s,
+      origen_red:   esDeBodega ? 'bodega' : 'propio',
+      costo_tarifa: esDeBodega ? valor : null,
+    };
+  });
+};
+
 module.exports = {
+  anotarConsignacionSeriales,
   despachar, recibir, anularRemision,
   devolver, previsualizarDevolucion, confirmarDevolucion,
   enviarRemesa, confirmarRemesa, anularRemesa,

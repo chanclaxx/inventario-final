@@ -55,7 +55,17 @@ const actualizarProducto = async (negocioId, id, datos) => {
 const getSeriales = async (negocioId, productoId, vendido) => {
   const producto = await repo.findByIdYNegocio(productoId, negocioId);
   if (!producto) throw { status: 404, message: 'Producto no encontrado' };
-  return repo.getSeriales(productoId, vendido);
+
+  const seriales = await repo.getSeriales(productoId, vendido);
+
+  // En un local de la red interna el costo que vale para calcular tarifas es el
+  // valor interno de la remisión, no `costo_compra` (que es el de la bodega).
+  // Fuera de ese caso devuelve la lista intacta: require lazy para no acoplar
+  // el inventario con la red cuando el negocio no la usa.
+  const { anotarConsignacionSeriales } = require('../red-interna/redInterna.service');
+  return anotarConsignacionSeriales(seriales, {
+    negocioId, sucursalId: producto.sucursal_id,
+  });
 };
 
 const agregarSerial = async (

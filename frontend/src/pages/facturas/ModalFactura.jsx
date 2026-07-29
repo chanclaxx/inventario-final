@@ -23,6 +23,8 @@ import { FacturaTermica }    from '../../components/FacturaTermica';
 import { useSucursalKey }    from '../../hooks/useSucursalKey';
 import api                   from '../../api/axios.config';
 import useCarritoStore       from '../../store/carritoStore';
+import { useTarifas }        from '../../hooks/useTarifas';
+import { TarifaItem }        from '../../components/ui/SelectorTarifa';
 import { SeccionCredito, CREDITO_VACIO } from './SeccionCredito';
 import {
   User, Users, Package, ShoppingBag,
@@ -773,8 +775,12 @@ function SelectorPagos({ metodosPago, metodosSeleccionados, montos, totalNeto, o
 export function ModalFactura({ open, onClose }) {
   const queryClient = useQueryClient();
   const { sucursalKey, sucursalLista } = useSucursalKey();
-  const { items, totalCarrito, limpiarCarrito, actualizarPrecio } = useCarritoStore();
+  const { items, totalCarrito, limpiarCarrito, actualizarPrecio, aplicarTarifa } = useCarritoStore();
   const total = totalCarrito();
+
+  // Tarifas porcentuales: se repiten aquí para poder corregir el precio sin
+  // volver al carrito. Con la feature apagada `activo` es false y no se pinta.
+  const tarifasCfg = useTarifas();
 
   const [facturaCreada,        setFacturaCreada]        = useState(null);
   const [mostrarImpresion,     setMostrarImpresion]     = useState(false);
@@ -1154,14 +1160,19 @@ export function ModalFactura({ open, onClose }) {
           <div className="bg-gray-50 rounded-xl p-3 flex flex-col gap-1.5">
             <p className="text-xs font-medium text-gray-500 mb-1">Productos ({items.length})</p>
             {items.map((item) => (
-              <div key={item.key} className="flex items-center justify-between text-sm gap-2">
-                <span className="text-gray-700 truncate flex-1">{item.nombre}</span>
-                {item.imei && <span className="text-xs text-gray-400 font-mono">{item.imei}</span>}
-                <InputMoneda value={item.precioFinal}
-                  onChange={(val) => actualizarPrecio(item.key, val)}
-                  className="w-28 text-right text-sm font-semibold text-gray-900 bg-white
-                    border border-gray-200 rounded-lg px-2 py-1 focus:outline-none
-                    focus:ring-2 focus:ring-blue-500" />
+              <div key={item.key} className="flex flex-col gap-1">
+                <div className="flex items-center justify-between text-sm gap-2">
+                  <span className="text-gray-700 truncate flex-1">{item.nombre}</span>
+                  {item.imei && <span className="text-xs text-gray-400 font-mono">{item.imei}</span>}
+                  <InputMoneda value={item.precioFinal}
+                    onChange={(val) => actualizarPrecio(item.key, val)}
+                    className="w-28 text-right text-sm font-semibold text-gray-900 bg-white
+                      border border-gray-200 rounded-lg px-2 py-1 focus:outline-none
+                      focus:ring-2 focus:ring-blue-500" />
+                </div>
+                {tarifasCfg.activo && (
+                  <TarifaItem item={item} config={tarifasCfg} onAplicar={aplicarTarifa} />
+                )}
               </div>
             ))}
             <div className="border-t border-gray-200 mt-2 pt-2 flex justify-between">

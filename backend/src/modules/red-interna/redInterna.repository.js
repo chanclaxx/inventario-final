@@ -1028,8 +1028,52 @@ const getChequeosSalud = async (negocioId) => {
   };
 };
 
+// ── Valor de consignación de unidades seriales que están en un local ─────────
+//
+// Para un local, el costo real de una unidad NO es `seriales.costo_compra` (esa
+// es la verdad del costo de la BODEGA, que a propósito nunca se reescribe al
+// remisionar): es el `valor_interno` que la bodega le puso en la remisión, que
+// es lo que el local debe liquidar cuando la venda.
+//
+// Solo devuelve las unidades que siguen EN CONSIGNACIÓN — o sea, las que aún no
+// se han vendido desde este local. Si la unidad ya se vendió y volvió (retoma),
+// su ciclo de consignación se cerró y su costo dejó de ser el valor interno:
+// queda fuera y el llamador la trata como unidad propia.
+//
+// El cruce lineas_remision → seriales va por `serial_id`, nunca por IMEI (un
+// mismo IMEI tiene varias filas históricas en `seriales`). El único cruce por
+// IMEI es contra `lineas_factura`, que no tiene serial_id, y va acotado a las
+// facturas de la sucursal destino posteriores al despacho — el mismo criterio
+// que usa SQL_UNIDADES.
+const getValorConsignacionSeriales = async (negocioId, sucursalId, serialIds) => {
+  if (!serialIds?.length) return [];
+  const { rows } = await pool.query(`
+    SELECT lr.serial_id, lr.valor_interno
+    FROM lineas_remision lr
+    JOIN remisiones r ON r.id = lr.remision_id
+    WHERE r.negocio_id          = $1
+      AND r.sucursal_destino_id = $2
+      AND r.tipo                = 'entrega'
+      AND r.estado             <> 'Anulada'
+      AND lr.tipo               = 'serial'
+      AND lr.estado_linea       = 'Recibida'
+      AND lr.serial_id = ANY($3::int[])
+      AND NOT EXISTS (
+        SELECT 1
+        FROM lineas_factura lf
+        JOIN facturas f ON f.id = lf.factura_id
+        WHERE UPPER(TRIM(lf.imei)) = UPPER(TRIM(lr.imei))
+          AND f.sucursal_id = r.sucursal_destino_id
+          AND f.estado     <> 'Cancelada'
+          AND f.fecha      >= r.fecha_emision
+      )
+  `, [negocioId, sucursalId, serialIds]);
+  return rows;
+};
+
 module.exports = {
   getUnidades, buscarUnidades, getExtracto, getResumenUnidades, getCantidadConsignada,
+  getValorConsignacionSeriales,
   getTotalRemesado, getTotalMovimientosCuenta, getConciliacion,
   crearRemision, insertarLineaRemision, actualizarTotalRemision,
   findRemisionById, getLineasRemision, getLineasDetalladas, findRemisiones,

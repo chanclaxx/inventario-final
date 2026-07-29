@@ -12,6 +12,7 @@ import { RedInternaConfig } from './RedInternaConfig';
 import { VendedoresConfig }  from './VendedoresConfig';
 import { PasswordConfig }    from './PasswordConfig';
 import { MetodosPagoConfig } from './MetodosPagoConfig';
+import { TarifasConfig }    from './TarifasConfig';
 import { TiposCaracteristicaConfig } from './components/TiposCaracteristicaConfig';
 import { Button }   from '../../components/ui/Button';
 import { Input }    from '../../components/ui/Input';
@@ -23,7 +24,7 @@ import {
   Building2, ShieldCheck, FileSliders, BookOpen, Users,
   Printer, Palette, ListChecks, Wallet, Layers,
   ChevronUp, ChevronDown, RotateCcw, Navigation,
-  Upload, X, Image as ImageIcon, Download, Barcode,
+  Upload, X, Image as ImageIcon, Download, Barcode, Percent,
 } from 'lucide-react';
 
 // ─── Navegación principal ─────────────────────────────────────────────────────
@@ -41,6 +42,7 @@ const TABS_CATALOGO = [
   { id: 'seriales',  label: 'Seriales',  Icn: Palette    },
   { id: 'variantes', label: 'Variantes', Icn: Layers     },
   { id: 'codigos',   label: 'Códigos',   Icn: Barcode    },
+  { id: 'tarifas',   label: 'Tarifas',   Icn: Percent    },
   { id: 'pagos',     label: 'Pagos',     Icn: Wallet     },
 ];
 
@@ -1348,6 +1350,12 @@ function SeccionCatalogo({ valores, set }) {
       {tab === 'codigos' && (
         <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
           <CodigoProductoConfig valores={valores} set={set} />
+        </div>
+      )}
+
+      {tab === 'tarifas' && (
+        <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
+          <TarifasConfig valores={valores} set={set} />
         </div>
       )}
 
