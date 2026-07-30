@@ -68,6 +68,7 @@ await db.exec(`
   ALTER TABLE clientes ADD COLUMN IF NOT EXISTS email         TEXT;
   ALTER TABLE clientes ADD COLUMN IF NOT EXISTS direccion     TEXT;
   ALTER TABLE clientes ADD COLUMN IF NOT EXISTS saldo_a_favor NUMERIC DEFAULT 0;
+  ALTER TABLE abonos_totales     ADD COLUMN IF NOT EXISTS usuario_id INTEGER;
   ALTER TABLE domiciliarios      ADD COLUMN IF NOT EXISTS telefono   TEXT;
   ALTER TABLE entregas_domicilio ADD COLUMN IF NOT EXISTS negocio_id INT;
   ALTER TABLE entregas_domicilio ADD COLUMN IF NOT EXISTS usuario_id INT;
@@ -522,6 +523,50 @@ console.log('\n═══ 7c. Cancelar una factura REVIRTIENDO la mora ═══'
   await db.query(`UPDATE movimientos_mora SET anulado = TRUE WHERE credito_id = $1`, [cid]);
   check('★ al revertir, la caja deja de contarla',
     (await caja.getResumenDia(1, 2, 2)).totales.moraCobrada, cajaAntes - 3000);
+}
+
+// ═══ 7d. La LISTA de préstamos debe traer la mora, no solo el detalle ═══════
+//
+// Bug real encontrado en producción: `findAll` de préstamos lista columnas
+// explícitas y no incluía fecha_limite/mora_condicion, así que `anotarLista`
+// creía que ningún préstamo tenía plazo y la pantalla mostraba todo "sin mora".
+// El detalle sí funcionaba (usa p.*), que fue justo lo que ocultó el problema.
+console.log('\n═══ 7d. La lista de préstamos trae la mora (no solo el detalle) ═══');
+{
+  const nuevos = await prestamos.crearPrestamos({
+    sucursal_id: 2, usuario_id: 1, negocio_id: 1,
+    prestatario: 'Ana Cliente', cedula: '111', telefono: '300', cliente_id: 1,
+    items: [{ nombre_producto: 'Cargador 20W', producto_id: 3, cantidad_prestada: 2, valor_prestamo: 60000 }],
+    fecha_limite: desp(10), mora_condicion_id: 'normal',
+  });
+  const pid = nuevos[0].id;
+  await db.query(`UPDATE prestamos SET fecha_limite = $1 WHERE id = $2`, [atras(30), pid]);
+
+  const detalle = await prestamos.getPrestamoById(1, pid);
+  const lista   = await prestamos.getPrestamos(2, 1);
+  const enLista = lista.find((p) => Number(p.id) === Number(pid));
+
+  checkEq('★ el detalle dice que aplica mora', detalle.mora.aplica, true);
+  checkEq('★ y la LISTA también (este era el bug)', enLista?.mora?.aplica, true);
+  check('★ la lista trae la misma mora que el detalle', enLista?.mora?.pendiente, detalle.mora.pendiente);
+  check('la lista trae los días de atraso', enLista?.mora?.dias_vencidos, 30);
+  checkEq('y la condición pactada viaja en la lista', enLista?.mora?.condicion?.id, 'normal');
+
+  // ── El ABONO TOTAL debe cobrar la mora ──────────────────────────────────
+  // Mismo descuido en `getPrestamoActivosPorPersona`: sin fecha_limite el
+  // reparto ignoraba los intereses y el abono total nunca los cobraba.
+  const moraAntes = Number(detalle.mora.pendiente);
+  check('el préstamo tiene mora antes del abono total', moraAntes > 0, true);
+
+  const moraCajaAntes = (await caja.getResumenDia(1, 2, 2)).totales.moraCobrada;
+  const res = await prestamos.registrarAbonoTotal(1, 'cliente', 1, 20000, 'Efectivo', 1, 2);
+  const dist = res.distribucion.find((d) => Number(d.prestamo_id) === Number(pid));
+  check('★ el abono total repartió algo a mora', Number(dist?.abono_mora || 0) > 0, true);
+  check('★ y esa mora entró a la caja',
+    (await caja.getResumenDia(1, 2, 2)).totales.moraCobrada - moraCajaAntes,
+    Number(dist.abono_mora));
+  check('el capital del abono total no incluye la mora',
+    Number(dist.abono_capital) + Number(dist.abono_mora), Number(dist.abono));
 }
 
 // ═══ 8. Tarifas: aislamiento y casos raros ══════════════════════════════════

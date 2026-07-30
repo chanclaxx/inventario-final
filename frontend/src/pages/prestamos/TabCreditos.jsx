@@ -430,6 +430,19 @@ function TarjetaCreditoDetalle({
         {/* Encabezado */}
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
+            {/* Aviso de vencimiento arriba: se ve sin desplegar el panel */}
+            {credito.mora?.aplica && credito.mora.vencido && esActivo && (
+              <span className={`inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5
+                rounded-full mb-1
+                ${credito.mora.pendiente > 0
+                  ? 'bg-red-50 text-red-600 border border-red-200'
+                  : 'bg-amber-50 text-amber-700 border border-amber-200'}`}>
+                <AlertTriangle size={10} />
+                {credito.mora.pendiente > 0
+                  ? `Vencido · mora ${formatCOP(credito.mora.pendiente)}`
+                  : `Vencido hace ${credito.mora.dias_vencidos} día(s)`}
+              </span>
+            )}
             <p className={`text-sm font-semibold ${cerrado ? 'text-gray-500' : 'text-gray-800'}`}>
               Factura #{String(credito.factura_numero ?? credito.factura_id).padStart(6, '0')}
             </p>

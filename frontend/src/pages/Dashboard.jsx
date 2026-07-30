@@ -6,7 +6,7 @@ import { formatCOP } from '../utils/formatters';
 import { Spinner } from '../components/ui/Spinner';
 import {
   TrendingUp, FileText, Package, Handshake,
-  CreditCard, ShoppingCart, AlertTriangle
+  CreditCard, ShoppingCart, AlertTriangle, CalendarClock
 } from 'lucide-react';
 
 function StatCard({ icon, label, valor, sub, color = 'blue', onClick }) {
@@ -51,6 +51,11 @@ export default function Dashboard() {
   const saludo = hora < 12 ? 'Buenos días' : hora < 18 ? 'Buenas tardes' : 'Buenas noches';
 
   if (isLoading) return <Spinner className="py-32" />;
+
+  // Documentos con el plazo ya pasado y saldo pendiente. Un negocio sin la
+  // feature de mora no tiene fechas límite, así que esto es 0 y no se pinta.
+  const vencidos = Number(data?.cartera_vencida?.creditos || 0)
+    + Number(data?.cartera_vencida?.prestamos || 0);
 
   return (
     <div className="flex flex-col gap-6">
@@ -99,6 +104,19 @@ export default function Dashboard() {
           color={data?.stock_bajo > 0 ? 'red' : 'yellow'}
           onClick={() => navigate('/inventario')}
         />
+
+        {/* Cartera vencida — solo si el negocio usa plazos de pago. Sin la
+            feature de mora nadie tiene fecha límite y esta tarjeta no aparece. */}
+        {vencidos > 0 && (
+          <StatCard
+            icon={CalendarClock}
+            label="Cartera vencida"
+            valor={vencidos}
+            sub={`${formatCOP(data?.cartera_vencida?.capital_vencido || 0)} sin cobrar`}
+            color="red"
+            onClick={() => navigate('/prestamos')}
+          />
+        )}
       </div>
 
       {/* Pagos de hoy */}

@@ -12,6 +12,9 @@ const findAll = async (sucursalId, negocioId) => {
       p.valor_prestamo, p.total_abonado, p.estado,
       p.prestatario_id, p.empleado_id, p.cliente_id, p.sucursal_id,
       p.atributo_id, p.variante_id, p.atributo_label, p.variante_label,
+      -- Plazo y condición pactada: sin estas dos, mora.anotarLista cree que
+      -- ningún préstamo tiene plazo y la lista muestra todo "sin mora".
+      p.fecha_limite, p.mora_condicion,
       su.nombre AS sucursal_nombre,
       (p.valor_prestamo - p.total_abonado) AS saldo_pendiente,
       u.nombre  AS usuario_nombre,
@@ -664,7 +667,8 @@ const findActivosPorPersona = async (executor, tipo, personaId, negocioId, sucur
       p.cantidad_prestada, p.valor_prestamo, p.total_abonado,
       (p.valor_prestamo - p.total_abonado) AS saldo_pendiente,
       p.estado, p.sucursal_id, p.prestatario, p.cedula, p.telefono,
-      p.prestatario_id, p.empleado_id, p.cliente_id, p.producto_id
+      p.prestatario_id, p.empleado_id, p.cliente_id, p.producto_id,
+      p.fecha_limite, p.mora_condicion
     FROM prestamos p
     JOIN sucursales su ON su.id = p.sucursal_id
     WHERE ${campo} = $1
@@ -928,10 +932,13 @@ const getPrestamoActivosPorPersona = async (executor, tipo, personaId, negocioId
     filtroSucursal = `AND p.sucursal_id = $${params.length}`;
   }
   const { rows } = await executor.query(`
-    SELECT p.id, p.fecha, p.nombre_producto, p.imei, p.sucursal_id,
+    SELECT p.id, p.numero, p.fecha, p.nombre_producto, p.imei, p.sucursal_id,
            p.valor_prestamo, p.total_abonado, p.estado, p.producto_id,
            p.cedula, p.telefono, p.prestatario, p.cliente_id, p.prestatario_id,
-           p.atributo_id, p.variante_id
+           p.atributo_id, p.variante_id,
+           -- Necesarias para que el ABONO TOTAL sepa cuánta mora debe cada
+           -- préstamo. Sin ellas el reparto ignora los intereses y nunca los cobra.
+           p.fecha_limite, p.mora_condicion
     FROM prestamos p
     JOIN sucursales su ON su.id = p.sucursal_id
     WHERE ${col} = $1 AND su.negocio_id = $2 AND p.estado = 'Activo'

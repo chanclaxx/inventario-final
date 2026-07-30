@@ -2310,6 +2310,25 @@ function TipoPrestamoBadge({ prestatarioId }) {
   );
 }
 
+/**
+ * Aviso compacto de vencimiento, para las tarjetas donde no cabe el PanelMora.
+ * Los números vienen calculados del backend; aquí solo se pintan.
+ */
+function BadgeVencido({ mora }) {
+  if (!mora?.aplica || !mora.vencido) return null;
+  const hayPendiente = Number(mora.pendiente) > 0;
+  return (
+    <span className={`inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full
+      ${hayPendiente ? 'bg-red-50 text-red-600 border border-red-200'
+                     : 'bg-amber-50 text-amber-700 border border-amber-200'}`}>
+      <AlertTriangle size={10} />
+      {hayPendiente
+        ? `Vencido · mora ${formatCOP(mora.pendiente)}`
+        : `Vencido hace ${mora.dias_vencidos} día(s)`}
+    </span>
+  );
+}
+
 function TarjetaResultadoPrestamo({ prestamo, onAbonar, onDevolver, onEditar }) {
   const saldo    = Number(prestamo.saldo_pendiente);
   const progreso = Number(prestamo.valor_prestamo) > 0
@@ -2327,6 +2346,9 @@ function TarjetaResultadoPrestamo({ prestamo, onAbonar, onDevolver, onEditar }) 
             <Badge variant={prestamo.estado === 'Activo' ? 'blue' : esSaldado ? 'green' : 'gray'}>
               {prestamo.estado}
             </Badge>
+            {/* En los resultados de búsqueda no cabe el panel de mora, pero sí
+                el aviso: es donde el vendedor busca a un cliente que llega a pagar. */}
+            <BadgeVencido mora={prestamo.mora} />
           </div>
           <p className="text-sm font-semibold text-gray-900 truncate">{nombre}</p>
           {prestamo.empleado_nombre && (
