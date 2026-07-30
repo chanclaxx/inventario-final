@@ -115,15 +115,19 @@ const create = async (client, {
   nombre_producto, imei, producto_id, cantidad_prestada, valor_prestamo,
   prestatario_id, empleado_id, cliente_id,
   atributo_id, variante_id, atributo_label, variante_label,
+  // Plazo de pago y condición de mora congelada. Nulos = préstamo sin mora,
+  // que es el comportamiento de siempre.
+  fecha_limite = null, mora_condicion = null,
 }) => {
   const { rows } = await client.query(`
     INSERT INTO prestamos(
       sucursal_id, usuario_id, prestatario, cedula, telefono,
       nombre_producto, imei, producto_id, cantidad_prestada, valor_prestamo,
       prestatario_id, empleado_id, cliente_id,
-      atributo_id, variante_id, atributo_label, variante_label
+      atributo_id, variante_id, atributo_label, variante_label,
+      fecha_limite, mora_condicion
     )
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19::jsonb)
     RETURNING *
   `, [
     sucursal_id, usuario_id, prestatario, cedula, telefono,
@@ -131,6 +135,7 @@ const create = async (client, {
     prestatario_id || null, empleado_id || null, cliente_id || null,
     atributo_id   || null, variante_id  || null,
     atributo_label || null, variante_label || null,
+    fecha_limite, mora_condicion ? JSON.stringify(mora_condicion) : null,
   ]);
   rows[0].numero = await asignarNumeroDocumento(client, {
     tipo: 'prestamo', docId: rows[0].id, sucursalId: sucursal_id,
@@ -138,9 +143,14 @@ const create = async (client, {
   return rows[0];
 };
 
+// `valor` es SOLO capital. La parte del pago que va a mora se registra en
+// `movimientos_mora` y nunca entra a `total_abonado`: los reportes calculan la
+// utilidad del producto como (abonado − costo) y la contarían como margen.
+// Devuelve `abono_id` para poder ligarle el movimiento de mora y revertirlos juntos.
 const insertarAbono = async (client, { prestamo_id, valor, metodo, usuario_id }) => {
-  await client.query(
-    'INSERT INTO abonos_prestamo(prestamo_id, valor, metodo, usuario_id) VALUES ($1, $2, $3, $4)',
+  const { rows: abono } = await client.query(
+    `INSERT INTO abonos_prestamo(prestamo_id, valor, metodo, usuario_id)
+     VALUES ($1, $2, $3, $4) RETURNING id`,
     [prestamo_id, valor, metodo || 'Efectivo', usuario_id || null]
   );
   const { rows } = await client.query(`
@@ -148,7 +158,7 @@ const insertarAbono = async (client, { prestamo_id, valor, metodo, usuario_id })
     WHERE id = $2
     RETURNING valor_prestamo, total_abonado
   `, [valor, prestamo_id]);
-  return rows[0];
+  return { ...rows[0], abono_id: abono[0].id };
 };
 
 const updateEstado = async (client, id, estado) => {

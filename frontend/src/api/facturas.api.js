@@ -6,8 +6,11 @@ export const crearFactura   = (data)     => api.post('/facturas', data);
 export const editarFactura  = (id, data) => api.patch(`/facturas/${id}`, data);
 
 // PATCH /:id/cancelar — body enviado directamente (no necesita wrapper { data } como DELETE)
-export const cancelarFactura = (id, eliminarRetoma = false) =>
-  api.patch(`/facturas/${id}/cancelar`, { eliminarRetoma });
+// `revertirMora`: anula la mora que ya se le cobró al crédito de esta factura.
+// Se decide en pantalla porque las dos respuestas son válidas según si al cliente
+// se le devuelve la plata o no.
+export const cancelarFactura = (id, eliminarRetoma = false, revertirMora = false) =>
+  api.patch(`/facturas/${id}/cancelar`, { eliminarRetoma, revertirMora });
 
 export const getFacturasRecientes = (cursor = null, dias = 5) =>
   api.get('/facturas/recientes', { params: { cursor, dias } });

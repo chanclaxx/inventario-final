@@ -113,11 +113,14 @@ const exportarPdfPrestamoIndividual = async (req, res, next) => {
 };
 const registrarAbono = async (req, res, next) => {
   try {
-    const { valor, metodo, color } = req.body;
+    const { valor, metodo, color, modo, valor_mora } = req.body;
     if (!valor || valor <= 0) {
       return res.status(400).json({ ok: false, error: 'El valor del abono debe ser mayor a 0' });
     }
-    const data = await service.registrarAbono(req.user.negocio_id, req.params.id, valor, metodo, req.user.id, color || null);
+    const data = await service.registrarAbono(
+      req.user.negocio_id, req.params.id, valor, metodo, req.user.id, color || null,
+      { modo: modo || 'mora_capital', valorMora: valor_mora || 0 },
+    );
     audit.registrar(req.user.negocio_id, req.user.id, data.saldado ? 'Préstamo saldado con abono' : 'Abono a préstamo', 'prestamos', Number(req.params.id),
       _detallePrestamo(data, {
         monto:  Number(valor),
@@ -533,10 +536,56 @@ const modificarAbonoTotal = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+// ── Mora ─────────────────────────────────────────────────────────────────────
+
+const fijarPlazo = async (req, res, next) => {
+  try {
+    const data = await service.fijarPlazo(req.user.negocio_id, Number(req.params.id), {
+      fecha_limite: req.body.fecha_limite ?? null,
+      condicion_id: req.body.condicion_id,
+      rol:          req.user.rol,
+    });
+    audit.registrar(req.user.negocio_id, req.user.id, 'Plazo de pago de préstamo', 'prestamos', Number(req.params.id), {
+      fecha_limite: data.fecha_limite,
+    });
+    res.json({ ok: true, data, message: data.fecha_limite ? 'Plazo actualizado' : 'Plazo eliminado' });
+  } catch (err) { next(err); }
+};
+
+const condonarMora = async (req, res, next) => {
+  try {
+    const data = await service.condonarMora(req.user.negocio_id, Number(req.params.id), {
+      valor:      req.body.valor,
+      motivo:     req.body.motivo,
+      pin:        req.body.pin,
+      quitar_plazo: req.body.quitar_plazo === true,
+      usuario_id: req.user.id,
+      rol:        req.user.rol,
+    });
+    audit.registrar(req.user.negocio_id, req.user.id, 'Condonación de mora', 'prestamos', Number(req.params.id), {
+      valor:  Number(data.movimiento?.valor ?? 0),
+      motivo: req.body.motivo,
+    });
+    res.json({ ok: true, data, message: 'Mora condonada' });
+  } catch (err) { next(err); }
+};
+
+const cobrarMora = async (req, res, next) => {
+  try {
+    const data = await service.cobrarMora(req.user.negocio_id, Number(req.params.id), {
+      valor:      req.body.valor,
+      metodo:     req.body.metodo,
+      usuario_id: req.user.id,
+    });
+    res.json({ ok: true, data, message: 'Mora cobrada' });
+  } catch (err) { next(err); }
+};
+
 module.exports = {
   getPrestamos, getPrestamoById,
   crearPrestamo, crearPrestamos,
   registrarAbono,
+  fijarPlazo, condonarMora, cobrarMora,
   devolverPrestamo, devolverParcial,
   exportarPdfPorPersona, exportarPdfPrestamoIndividual, exportarPdfEstadoCuenta,
   registrarSaldoAFavor,

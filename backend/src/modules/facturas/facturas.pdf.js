@@ -638,9 +638,69 @@ function seccionGarantias(doc, garantias, y) {
   return y + 14;
 }
 
+// ─── SECCIÓN: Condiciones del crédito (plazo y mora) ──────────────────────────
+//
+// Solo aparece si la venta es a crédito Y se le pactó una fecha límite. Es lo
+// que hace exigible la mora: en Colombia el interés moratorio debe estar pactado
+// por escrito, así que se imprime junto a la firma del cliente.
+function seccionCredito(doc, credito, y) {
+  if (!credito?.fecha_limite) return y;
+
+  const cond    = credito.mora_condicion || null;
+  const mora    = credito.mora || null;
+  const saldo   = Number(credito.valor_total) - Number(credito.cuota_inicial || 0) - Number(credito.total_abonado || 0);
+  const fechaEs = (() => {
+    const f = String(credito.fecha_limite).slice(0, 10);
+    const [a, m, d] = f.split('-');
+    return `${d}/${m}/${a}`;
+  })();
+
+  y = labelSeccion(doc, y, 'CONDICIONES DE PAGO');
+
+  const filas = [
+    ['Saldo a pagar',        formatCOP(Math.max(0, saldo))],
+    ['Fecha límite de pago', fechaEs],
+  ];
+
+  if (cond) {
+    const desc = cond.tipo === 'diaria_fija'
+      ? `${formatCOP(cond.valor)} por cada día de atraso`
+      : `${cond.valor}% mensual sobre el saldo pendiente`;
+    filas.push(['Interés por mora', desc]);
+    if (Number(cond.dias_gracia) > 0) {
+      filas.push(['Días de gracia', `${cond.dias_gracia} día(s) después de la fecha límite`]);
+    }
+    if (cond.tope_pct) {
+      filas.push(['Tope de la mora', `máximo ${cond.tope_pct}% del saldo`]);
+    }
+  }
+
+  // Si YA está vencido, se dice con números: es el dato que el cliente reclama.
+  if (mora?.vencido && mora.pendiente > 0) {
+    filas.push(['Días de atraso a la fecha', String(mora.dias_vencidos)]);
+    filas.push(['Mora causada a la fecha',   formatCOP(mora.pendiente)]);
+  }
+
+  for (const [label, valor] of filas) {
+    y = fila(doc, y, label, valor);
+  }
+
+  y += 6;
+  doc.font(FONT.normal).fontSize(7.5).fillColor(C.grisClaro)
+    .text(
+      cond
+        ? 'El cliente declara conocer y aceptar el plazo y el interés de mora aquí pactados. '
+          + 'La mora se liquida sobre el saldo de capital pendiente, por los días de atraso.'
+        : 'El cliente declara conocer y aceptar el plazo de pago aquí pactado.',
+      MARGIN, y, { width: CONTENT_W, align: 'left' },
+    );
+
+  return y + 22;
+}
+
 // ─── SECCIÓN: Pie de página ───────────────────────────────────────────────────
 
-function seccionPie(doc, y) {
+function seccionPie(doc, y, { esCredito = false, factura = null } = {}) {
   // Línea decorativa
   hLine(doc, y, { color: C.grisBorde });
   y += 20;
@@ -658,6 +718,21 @@ function seccionPie(doc, y) {
   doc.moveTo(firmaX1, firmaY).lineTo(firmaX2, firmaY)
     .strokeColor(C.grisBorde).lineWidth(0.75).stroke();
 
+  // En una venta a crédito la firma es la prueba del pacto, así que se identifica
+  // a quien firma (nombre y cédula) en lugar de un "firma del cliente" genérico.
+  if (esCredito) {
+    doc.font(FONT.bold).fontSize(8).fillColor(C.negro)
+      .text('Firma de aceptación del cliente', MARGIN, firmaY + 6, { width: CONTENT_W, align: 'center' });
+    const ident = [factura?.nombre_cliente, factura?.cedula ? `C.C. ${factura.cedula}` : null]
+      .filter(Boolean).join('  ·  ');
+    if (ident) {
+      doc.font(FONT.normal).fontSize(7.5).fillColor(C.grisClaro)
+        .text(ident, MARGIN, firmaY + 18, { width: CONTENT_W, align: 'center' });
+      return firmaY + 36;
+    }
+    return firmaY + 24;
+  }
+
   doc.font(FONT.normal).fontSize(8).fillColor(C.grisClaro)
     .text('Firma del cliente', MARGIN, firmaY + 6, { width: CONTENT_W, align: 'center' });
 
@@ -671,7 +746,7 @@ function seccionPie(doc, y) {
  *
  * @param {{ factura: object, config: object, garantias: Array, res: object }} params
  */
-function generarPdfFactura({ factura, config, garantias = [], res }) {
+function generarPdfFactura({ factura, config, garantias = [], credito = null, res }) {
   const numFactura = String(factura.numero ?? factura.id).padStart(6, '0');
 
   res.setHeader('Content-Type', 'application/pdf');
@@ -702,9 +777,10 @@ function generarPdfFactura({ factura, config, garantias = [], res }) {
   y = seccionDevoluciones(doc, factura.lineas || [], y);
   y = seccionRetomas(doc, factura.retomas || [], y);
   y = seccionTotalesYPagos(doc, factura, y);
+  y = seccionCredito(doc, credito, y);
   y = seccionNotas(doc, factura.notas, y);
   y = seccionGarantias(doc, garantias, y);
-  seccionPie(doc, y);
+  seccionPie(doc, y, { esCredito: !!credito?.fecha_limite, factura });
 
   doc.end();
 }

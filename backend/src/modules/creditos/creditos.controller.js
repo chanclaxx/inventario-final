@@ -45,4 +45,52 @@ const cancelarCredito = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-module.exports = { getCreditos, getCreditoById, registrarAbono, saldarCredito, cancelarCredito };
+// ── Mora ─────────────────────────────────────────────────────────────────────
+
+const fijarPlazo = async (req, res, next) => {
+  try {
+    const data = await service.fijarPlazo(req.user.negocio_id, Number(req.params.id), {
+      fecha_limite: req.body.fecha_limite ?? null,
+      condicion_id: req.body.condicion_id,
+      rol:          req.user.rol,
+    });
+    audit.registrar(req.user.negocio_id, req.user.id, 'Plazo de pago de crédito', 'creditos', Number(req.params.id), {
+      fecha_limite: data.fecha_limite,
+    });
+    res.json({ ok: true, data, message: data.fecha_limite ? 'Plazo actualizado' : 'Plazo eliminado' });
+  } catch (err) { next(err); }
+};
+
+const condonarMora = async (req, res, next) => {
+  try {
+    const data = await service.condonarMora(req.user.negocio_id, Number(req.params.id), {
+      valor:      req.body.valor,
+      motivo:     req.body.motivo,
+      pin:        req.body.pin,
+      quitar_plazo: req.body.quitar_plazo === true,
+      usuario_id: req.user.id,
+      rol:        req.user.rol,
+    });
+    audit.registrar(req.user.negocio_id, req.user.id, 'Condonación de mora', 'creditos', Number(req.params.id), {
+      valor:  Number(data.movimiento?.valor ?? 0),
+      motivo: req.body.motivo,
+    });
+    res.json({ ok: true, data, message: 'Mora condonada' });
+  } catch (err) { next(err); }
+};
+
+const cobrarMora = async (req, res, next) => {
+  try {
+    const data = await service.cobrarMora(req.user.negocio_id, Number(req.params.id), {
+      valor:      req.body.valor,
+      metodo:     req.body.metodo,
+      usuario_id: req.user.id,
+    });
+    res.json({ ok: true, data, message: 'Mora cobrada' });
+  } catch (err) { next(err); }
+};
+
+module.exports = {
+  getCreditos, getCreditoById, registrarAbono, saldarCredito, cancelarCredito,
+  fijarPlazo, condonarMora, cobrarMora,
+};

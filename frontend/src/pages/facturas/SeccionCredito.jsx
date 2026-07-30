@@ -1,15 +1,21 @@
 import { CreditCard } from 'lucide-react';
 import { InputMoneda } from '../../components/ui/InputMoneda';
 import { formatCOP }   from '../../utils/formatters';
+import { SelectorPlazo } from '../../components/ui/SelectorPlazo';
 
 // ── Estado inicial — usar en ModalFactura con useState ───────────────────────
 export const CREDITO_VACIO = () => ({
   activo:        false,
   cuota_inicial: '',
+  // Plazo de pago (feature opt-in `mora_activa`). Vacíos = sin plazo = sin mora.
+  fecha_limite:  '',
+  condicion_id:  '',
 });
 
 // ── Componente ───────────────────────────────────────────────────────────────
-export function SeccionCredito({ credito, totalNeto, onChange, disabled }) {
+// `configMora` es lo que devuelve useMora(); si la feature está apagada el
+// selector de plazo no se renderiza y esta sección queda igual que antes.
+export function SeccionCredito({ credito, totalNeto, onChange, disabled, configMora }) {
   const cuotaInicial  = Number(credito.cuota_inicial || 0);
   const saldoACredito = Math.max(0, totalNeto - cuotaInicial);
 
@@ -71,6 +77,16 @@ export function SeccionCredito({ credito, totalNeto, onChange, disabled }) {
               <span className="font-bold text-yellow-700">{formatCOP(saldoACredito)}</span>
             </div>
           </div>
+
+          {/* Plazo de pago y mora (solo si el negocio activó la feature) */}
+          <SelectorPlazo
+            config={configMora}
+            fechaLimite={credito.fecha_limite}
+            condicionId={credito.condicion_id}
+            onChange={({ fecha_limite, condicion_id }) =>
+              onChange({ ...credito, fecha_limite, condicion_id })}
+            titulo="Fecha límite de pago"
+          />
 
           {cuotaInicial > totalNeto && totalNeto > 0 && (
             <p className="text-xs text-red-500 bg-red-50 rounded-lg px-3 py-1.5">

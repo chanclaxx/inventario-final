@@ -13,6 +13,7 @@ import { VendedoresConfig }  from './VendedoresConfig';
 import { PasswordConfig }    from './PasswordConfig';
 import { MetodosPagoConfig } from './MetodosPagoConfig';
 import { TarifasConfig }    from './TarifasConfig';
+import { MoraConfig }       from './MoraConfig';
 import { TiposCaracteristicaConfig } from './components/TiposCaracteristicaConfig';
 import { Button }   from '../../components/ui/Button';
 import { Input }    from '../../components/ui/Input';
@@ -24,7 +25,7 @@ import {
   Building2, ShieldCheck, FileSliders, BookOpen, Users,
   Printer, Palette, ListChecks, Wallet, Layers,
   ChevronUp, ChevronDown, RotateCcw, Navigation,
-  Upload, X, Image as ImageIcon, Download, Barcode, Percent,
+  Upload, X, Image as ImageIcon, Download, Barcode, Percent, CalendarClock,
 } from 'lucide-react';
 
 // ─── Navegación principal ─────────────────────────────────────────────────────
@@ -44,6 +45,7 @@ const TABS_CATALOGO = [
   { id: 'codigos',   label: 'Códigos',   Icn: Barcode    },
   { id: 'tarifas',   label: 'Tarifas',   Icn: Percent    },
   { id: 'pagos',     label: 'Pagos',     Icn: Wallet     },
+  { id: 'mora',      label: 'Mora',      Icn: CalendarClock },
 ];
 
 // ─── Campos del formulario de venta ──────────────────────────────────────────
@@ -1362,6 +1364,12 @@ function SeccionCatalogo({ valores, set }) {
       {tab === 'pagos' && (
         <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
           <MetodosPagoConfig valores={valores} set={set} />
+        </div>
+      )}
+
+      {tab === 'mora' && (
+        <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
+          <MoraConfig valores={valores} set={set} />
         </div>
       )}
 

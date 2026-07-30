@@ -152,10 +152,57 @@ const getResumenCaja = async (cajaId) => {
 
 // ─── _buildResumen ────────────────────────────────────────────────────────────
 
-const _buildResumen = ({ pf, ac, ap, cp, aa, mn, rt, dv, ad, sv, fd = [] }) => {
+// ── Movimientos de mora para el resumen de caja ──────────────────────────────
+//
+// La mora es una feature opt-in y su migración va en try/catch, así que puede no
+// estar aplicada en una base vieja. Si la tabla no existe se devuelve vacío en
+// lugar de tumbar TODO el resumen de caja, que es la pantalla del día a día.
+//
+// Filtra por sucursal o por negocio según lo que reciba, para servir a los dos
+// resúmenes (el del día por sucursal y el global).
+const _moraDeCaja = async ({ sucursalId = null, negocioId = null, inicio, fin }) => {
+  try {
+    return await pool.query(`
+      SELECT
+        mm.id, mm.tipo, mm.valor, mm.metodo, mm.motivo, mm.fecha, mm.dias_mora,
+        mm.credito_id, mm.prestamo_id,
+        u.nombre  AS usuario_nombre,
+        su.nombre AS sucursal_nombre,
+        COALESCE(f.nombre_cliente, p.prestatario) AS nombre_cliente,
+        f.numero AS factura_numero,
+        p.numero AS prestamo_numero
+      FROM movimientos_mora mm
+      JOIN sucursales su ON su.id = mm.sucursal_id
+      LEFT JOIN usuarios  u ON u.id = mm.usuario_id
+      LEFT JOIN creditos  c ON c.id = mm.credito_id
+      LEFT JOIN facturas  f ON f.id = c.factura_id
+      LEFT JOIN prestamos p ON p.id = mm.prestamo_id
+      WHERE NOT mm.anulado
+        AND ($1::int IS NULL OR mm.sucursal_id  = $1)
+        AND ($2::int IS NULL OR su.negocio_id   = $2)
+        AND mm.fecha BETWEEN $3 AND $4
+      ORDER BY mm.fecha ASC
+    `, [sucursalId, negocioId, inicio, fin]);
+  } catch (err) {
+    console.warn('[caja] Mora no incluida en el resumen:', err.message);
+    return { rows: [] };
+  }
+};
+
+const _buildResumen = ({ pf, ac, ap, cp, aa, mn, rt, dv, ad, sv, fd = [], mo = [] }) => {
   const sum = (arr) => arr
     .filter((r) => r.activo !== false)
     .reduce((s, r) => s + Number(r.valor || 0), 0);
+
+  // ── Mora (feature opt-in) ────────────────────────────────────────────────
+  // El COBRO de mora es dinero que entró: suma a ingresos y al método de pago,
+  // pero en un grupo propio para no confundirlo con los abonos a capital.
+  // La CONDONACIÓN no mueve plata: queda informativa, para saber cuánto se dejó
+  // de cobrar. Ninguna de las dos toca la utilidad del producto.
+  const moraCobros      = mo.filter((r) => r.tipo === 'Cobro');
+  const moraCondonadas  = mo.filter((r) => r.tipo === 'Condonacion');
+  const totalMoraCobrada   = sum(moraCobros);
+  const totalMoraCondonada = sum(moraCondonadas);
 
   const totalFacturas          = sum(pf);
   const totalAbonosCredito     = sum(ac);
@@ -183,7 +230,8 @@ const _buildResumen = ({ pf, ac, ap, cp, aa, mn, rt, dv, ad, sv, fd = [] }) => {
     .reduce((s, r) => s + Number(r.valor || 0), 0);
 
   const totalIngresosBruto = totalFacturas + totalAbonosCredito + totalAbonosPrestamo
-    + totalAbonosDomicilio + totalAbonosServicio + totalManualesIngreso;
+    + totalAbonosDomicilio + totalAbonosServicio + totalManualesIngreso
+    + totalMoraCobrada;
   // Las retomas NO se restan: los pagos de factura ya vienen NETOS de retoma
   // (el cliente paga total − retoma, y eso es lo que registra pagos_factura).
   // Restarlas aquí descontaba dos veces. El grupo queda solo informativo.
@@ -208,6 +256,7 @@ const _buildResumen = ({ pf, ac, ap, cp, aa, mn, rt, dv, ad, sv, fd = [] }) => {
   ap.filter((r) => r.activo !== false).forEach((r) => sumarAlMetodo(r.metodo, r.valor, 'ingreso'));
   sv.filter((r) => r.activo !== false).forEach((r) => sumarAlMetodo(r.metodo, r.valor, 'ingreso'));
   ad.filter((r) => r.activo !== false).forEach((r) => sumarAlMetodo(r.metodo, r.valor, 'ingreso'));
+  moraCobros.forEach((r) => sumarAlMetodo(r.metodo, r.valor, 'ingreso'));
 
   // Egresos por método
   cp.filter((r) => r.activo !== false).forEach((r) => sumarAlMetodo(r.metodo, r.valor, 'egreso'));
@@ -291,6 +340,21 @@ const _buildResumen = ({ pf, ac, ap, cp, aa, mn, rt, dv, ad, sv, fd = [] }) => {
         items: fd,
         total: totalPendienteDomicilios,
       },
+      // Mora cobrada: dinero que entró, pero es ingreso FINANCIERO, no venta.
+      // Grupo aparte para que no se confunda con los abonos a capital.
+      moraCobrada: {
+        tipo:  'Ingreso',
+        label: 'Intereses de mora cobrados',
+        items: moraCobros,
+        total: totalMoraCobrada,
+      },
+      // Informativo: lo que el administrador decidió no cobrar.
+      moraCondonada: {
+        tipo:  'Informativo',
+        label: 'Mora condonada (no se cobró)',
+        items: moraCondonadas,
+        total: totalMoraCondonada,
+      },
     },
     metodosPago,
     metodosPagoDetalle: metodoMap,
@@ -301,6 +365,10 @@ const _buildResumen = ({ pf, ac, ap, cp, aa, mn, rt, dv, ad, sv, fd = [] }) => {
       egresos:             totalEgresos,
       saldo:               totalIngresos - totalEgresos,
       pendienteDomicilios: totalPendienteDomicilios,
+      // Van aparte a propósito: la mora cobrada ya está dentro de `ingresos`,
+      // pero se expone sola para poder mostrarla como ingreso financiero.
+      moraCobrada:         totalMoraCobrada,
+      moraCondonada:       totalMoraCondonada,
     },
   };
 };
@@ -338,7 +406,7 @@ const getResumenDia = async (cajaId, sucursalId, negocioId) => {
   if (!rango) return null;
   const { inicio, fin } = rango;
 
-  const [pf, ac, ap, cp, aa, mn, dv, rt, ad, sv, fd] = await Promise.all([
+  const [pf, ac, ap, cp, aa, mn, dv, rt, ad, sv, fd, mo] = await Promise.all([
 
     pool.query(`
       SELECT pf.id, pf.metodo, pf.valor, f.nombre_cliente, f.id AS factura_id,
@@ -498,12 +566,18 @@ const getResumenDia = async (cajaId, sucursalId, negocioId) => {
         AND (e.valor_total - e.total_abonado) > 0
       ORDER BY e.fecha_asignacion ASC
     `, [sucursalId]),
+
+    // Mora (feature opt-in). Un negocio que no la usa no tiene filas aquí, así
+    // que la consulta devuelve vacío y el grupo queda en cero.
+    // El LEFT JOIN a la tabla se hace con to_regclass para no reventar si la
+    // migración de mora aún no se aplicó en una base vieja.
+    _moraDeCaja({ sucursalId, inicio, fin }),
   ]);
 
   return _buildResumen({
     pf: pf.rows, ac: ac.rows, ap: ap.rows, cp: cp.rows,
     aa: aa.rows, mn: mn.rows, dv: dv.rows, rt: rt.rows,
-    ad: ad.rows, sv: sv.rows, fd: fd.rows,
+    ad: ad.rows, sv: sv.rows, fd: fd.rows, mo: mo.rows,
   });
 };
 
@@ -518,7 +592,7 @@ const getResumenGlobal = async (negocioId) => {
   const inicio = `${yyyy}-${mm}-${dd} 00:00:00.000`;
   const fin    = `${yyyy}-${mm}-${dd} 23:59:59.999`;
 
-  const [pf, ac, ap, cp, aa, mn, dv, rt, ad, sv, fd] = await Promise.all([
+  const [pf, ac, ap, cp, aa, mn, dv, rt, ad, sv, fd, mo] = await Promise.all([
 
     pool.query(`
       SELECT pf.id, pf.metodo, pf.valor, f.nombre_cliente,
@@ -705,12 +779,14 @@ const getResumenGlobal = async (negocioId) => {
         AND (e.valor_total - e.total_abonado) > 0
       ORDER BY e.fecha_asignacion ASC
     `, [negocioId]),
+
+    _moraDeCaja({ negocioId, inicio, fin }),
   ]);
 
   return _buildResumen({
     pf: pf.rows, ac: ac.rows, ap: ap.rows, cp: cp.rows,
     aa: aa.rows, mn: mn.rows, dv: dv.rows, rt: rt.rows,
-    ad: ad.rows, sv: sv.rows, fd: fd.rows,
+    ad: ad.rows, sv: sv.rows, fd: fd.rows, mo: mo.rows,
   });
 };
 

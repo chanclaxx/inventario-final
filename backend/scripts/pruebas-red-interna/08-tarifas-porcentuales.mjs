@@ -167,6 +167,28 @@ checkEq('★ Con la factura cancelada vuelve a ser mercancía de bodega',
   porImei(enLocal, '350000000000001').origen_red, 'bodega');
 check('Y recupera su valor interno', porImei(enLocal, '350000000000001').costo_tarifa, 1800000);
 
+console.log('\n═══ 6b. Salud: entrega + devolución del mismo IMEI NO es duplicado ═══');
+// Regresión detectada en la base real: el chequeo contaba COUNT(*) sobre el join
+// lineas_remision × seriales, así que una pareja legítima entrega+devolución
+// reportaba "2 filas" con una sola fila en `seriales`.
+const devuelto = await service.devolver(reqCentro, {
+  lineas: [{ tipo: 'serial', serial_id: 2 }],
+  notas: 'devolución de prueba',
+});
+{
+  const lineasDev = await repo.getLineasRemision(devuelto.id);
+  await service.confirmarDevolucion(reqBodega, devuelto.id, {
+    lineas_recibidas: lineasDev.map((l) => Number(l.id)),
+  });
+}
+const filasImei = await q(`SELECT COUNT(*)::int c FROM seriales WHERE imei='350000000000002'`);
+checkEq('Sigue habiendo UNA sola fila en seriales para ese IMEI', filasImei[0].c, 1);
+const lineasDelImei = await q(
+  `SELECT COUNT(*)::int c FROM lineas_remision WHERE imei='350000000000002'`);
+checkEq('Y DOS líneas de remisión (entrega + devolución)', lineasDelImei[0].c, 2);
+const salud = await repo.getChequeosSalud(1);
+checkEq('★ El chequeo NO lo reporta como IMEI duplicado', salud.imeis_duplicados.length, 0);
+
 console.log('\n═══ 7. ADITIVIDAD: negocio SIN red interna no cambia en nada ═══');
 invalidarCache();
 const sinRed = await serialService.getSeriales(2, 2, false);

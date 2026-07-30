@@ -85,7 +85,23 @@ const getFacturaById = async (negocioId, id) => {
     domiciliariosRepo.findEntregaByFacturaId(id, negocioId),
   ]);
 
-  return { ...factura, lineas, pagos, retomas, domicilio: entrega || null };
+  // El crédito asociado, con su estado de mora ya resuelto. Lo necesitan la
+  // pantalla de cancelación (para preguntar si se revierte la mora cobrada) y el
+  // PDF (para imprimir las condiciones pactadas).
+  // Va en try/catch: la migración de mora puede no estar aplicada, y el detalle
+  // de la factura no puede fallar por eso.
+  let credito = null;
+  try {
+    const { rows } = await pool.query(`SELECT * FROM creditos WHERE factura_id = $1`, [id]);
+    if (rows.length) {
+      const moraService = require('../mora/mora.service');
+      credito = await moraService.anotarDocumento(rows[0], 'credito');
+    }
+  } catch (err) {
+    console.warn('[facturas] Crédito no incluido en el detalle:', err.message);
+  }
+
+  return { ...factura, lineas, pagos, retomas, domicilio: entrega || null, credito };
 };
 
 // ── Crear factura ─────────────────────────────────────────────────────────────
@@ -96,6 +112,9 @@ const crearFactura = async ({
   lineas, pagos, retomas = [],
   domicilio,
   es_credito, cuota_inicial,
+  // Plazo de pago y condición de mora (feature opt-in `mora_activa`). Sin fecha,
+  // el crédito no tiene mora — que es el comportamiento de siempre.
+  fecha_limite, mora_condicion_id,
 }) => {
   const { pool }             = require('../../config/db');
   const facturasRepo         = require('./facturas.repository');
@@ -393,12 +412,21 @@ const crearFactura = async ({
 
     // ── Crear crédito si la venta es a crédito ──────────────────────────────
     if (es_credito) {
+      // La condición de mora se CONGELA en el crédito: si el negocio sube la
+      // tasa mañana, no puede aplicarla a lo ya otorgado. Devuelve nulos si la
+      // feature está apagada o si no se pidió plazo.
+      const moraService = require('../mora/mora.service');
+      const datosMora = await moraService.datosParaNuevoDocumento(negocio_id, {
+        fecha_limite, mora_condicion_id,
+      });
+
       await creditosRepo.create(client, {
         factura_id:    factura.id,
         cliente_id:    cliente_id,
         sucursal_id:   sucursal_id,
         valor_total:   totalLineas,
         cuota_inicial: Number(cuota_inicial || 0),
+        ...datosMora,
       });
     }
 
@@ -441,7 +469,12 @@ const crearFactura = async ({
 
 // ── Cancelar factura ──────────────────────────────────────────────────────────
 
-const cancelarFactura = async (negocioId, id, eliminarRetoma = false, _desdeDevolucion = false) => {
+// `revertirMora`: si la factura es a crédito y ya se le cobró mora, anula esos
+// movimientos. Se pregunta al usuario en vez de decidirlo solo, porque las dos
+// respuestas son válidas: si al cliente se le devuelve toda la plata hay que
+// revertirla (o quedaría inflando los ingresos), pero si el negocio se queda con
+// los intereses ya causados, no.
+const cancelarFactura = async (negocioId, id, eliminarRetoma = false, _desdeDevolucion = false, revertirMora = false) => {
   const factura = await facturasRepo.findByIdYNegocio(id, negocioId);
   if (!factura) throw { status: 404, message: 'Factura no encontrada' };
   if (factura.estado === 'Cancelada') throw { status: 400, message: 'La factura ya está cancelada' };
@@ -523,6 +556,32 @@ const cancelarFactura = async (negocioId, id, eliminarRetoma = false, _desdeDevo
 
     await facturasRepo.cancelar(client, id);
 
+    // ── Mora cobrada en el crédito de esta factura ─────────────────────────
+    // Se anula (no se borra) para que quede la traza de la reversión. Con la
+    // feature apagada no hay filas y esto no hace nada.
+    let moraRevertida = 0;
+    if (revertirMora) {
+      try {
+        const { rows: cr } = await client.query(
+          `SELECT id FROM creditos WHERE factura_id = $1`, [id]
+        );
+        if (cr.length) {
+          const { rows: anulados } = await client.query(`
+            UPDATE movimientos_mora SET anulado = TRUE
+            WHERE credito_id = $1 AND NOT anulado
+            RETURNING valor, tipo
+          `, [cr[0].id]);
+          moraRevertida = anulados
+            .filter((m) => m.tipo === 'Cobro')
+            .reduce((s, m) => s + Number(m.valor || 0), 0);
+        }
+      } catch (err) {
+        // La tabla puede no existir si la migración de mora no se aplicó: la
+        // cancelación no puede fallar por eso.
+        console.warn('[facturas] Mora no revertida al cancelar:', err.message);
+      }
+    }
+
     // ── Devolución en caja ────────────────────────────────────────────────
     // Modelo de cierre congelado: la caja del día en que entró el dinero es la
     // que lo contabilizó. Por eso solo se registra un EGRESO de devolución por
@@ -581,6 +640,7 @@ const cancelarFactura = async (negocioId, id, eliminarRetoma = false, _desdeDevo
     }
 
     await client.query('COMMIT');
+    return { mora_revertida: moraRevertida };
   } catch (err) {
     await client.query('ROLLBACK');
     throw err;

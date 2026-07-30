@@ -218,6 +218,66 @@ const runMigrations = async () => {
     console.error('⚠️  Migración red interna no aplicada (el resto del sistema sigue normal):', err.message);
   }
 
+  // Mora por pago tardío en créditos y préstamos — ver migrations/20260730_mora_credito.sql
+  //
+  // 100% aditiva: 4 columnas nullable (sin DEFAULT, así que no reescriben filas)
+  // y 1 tabla nueva. `fecha_limite IS NULL` ⇒ el documento no tiene mora, así que
+  // los créditos y préstamos que ya existen no cambian ni al migrar ni al activar
+  // la feature con `mora_activa`.
+  //
+  // La mora vive en `movimientos_mora` y NUNCA en `total_abonado`: los reportes
+  // calculan la utilidad del producto como (abonado − costo), así que sumarla ahí
+  // la contaría como margen comercial. Es un ingreso financiero y se reporta aparte.
+  //
+  // Propio try/catch, por la misma razón que la red interna: un fallo aquí no
+  // puede dejar el servidor sin arrancar para todos los negocios.
+  try {
+    await pool.query(`
+      ALTER TABLE IF EXISTS creditos  ADD COLUMN IF NOT EXISTS fecha_limite   DATE;
+      ALTER TABLE IF EXISTS creditos  ADD COLUMN IF NOT EXISTS mora_condicion JSONB;
+      ALTER TABLE IF EXISTS prestamos ADD COLUMN IF NOT EXISTS fecha_limite   DATE;
+      ALTER TABLE IF EXISTS prestamos ADD COLUMN IF NOT EXISTS mora_condicion JSONB;
+
+      CREATE INDEX IF NOT EXISTS idx_creditos_fecha_limite
+        ON creditos (fecha_limite) WHERE fecha_limite IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_prestamos_fecha_limite
+        ON prestamos (fecha_limite) WHERE fecha_limite IS NOT NULL;
+
+      CREATE TABLE IF NOT EXISTS movimientos_mora (
+        id                BIGSERIAL     PRIMARY KEY,
+        negocio_id        INTEGER       NOT NULL REFERENCES negocios(id)   ON DELETE RESTRICT,
+        sucursal_id       INTEGER       NOT NULL REFERENCES sucursales(id) ON DELETE RESTRICT,
+        credito_id        INTEGER       REFERENCES creditos(id)  ON DELETE CASCADE,
+        prestamo_id       INTEGER       REFERENCES prestamos(id) ON DELETE CASCADE,
+        tipo              TEXT          NOT NULL,
+        valor             NUMERIC(14,2) NOT NULL CHECK (valor > 0),
+        dias_mora         INTEGER,
+        saldo_base        NUMERIC(14,2),
+        condicion         JSONB,
+        metodo            TEXT,
+        motivo            TEXT,
+        abono_credito_id  INTEGER       REFERENCES abonos_credito(id)  ON DELETE SET NULL,
+        abono_prestamo_id INTEGER       REFERENCES abonos_prestamo(id) ON DELETE SET NULL,
+        usuario_id        INTEGER,
+        fecha             TIMESTAMP     NOT NULL DEFAULT NOW(),
+        anulado           BOOLEAN       NOT NULL DEFAULT FALSE,
+        CONSTRAINT movimientos_mora_tipo_chk
+          CHECK (tipo IN ('Cobro', 'Condonacion')),
+        CONSTRAINT movimientos_mora_un_origen_chk
+          CHECK ((credito_id IS NOT NULL) <> (prestamo_id IS NOT NULL))
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_mov_mora_credito
+        ON movimientos_mora (credito_id)  WHERE credito_id  IS NOT NULL AND NOT anulado;
+      CREATE INDEX IF NOT EXISTS idx_mov_mora_prestamo
+        ON movimientos_mora (prestamo_id) WHERE prestamo_id IS NOT NULL AND NOT anulado;
+      CREATE INDEX IF NOT EXISTS idx_mov_mora_sucursal_fecha
+        ON movimientos_mora (sucursal_id, fecha DESC) WHERE NOT anulado;
+    `);
+  } catch (err) {
+    console.error('⚠️  Migración de mora no aplicada (el resto del sistema sigue normal):', err.message);
+  }
+
   // Aplicadas manualmente en producción:
   // - lineas_traslado: revertida_por_usuario_id, fecha_reversion
   // - traslados: revertido_por_usuario_id, fecha_reversion

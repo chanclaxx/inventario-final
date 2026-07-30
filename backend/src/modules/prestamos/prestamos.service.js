@@ -1,6 +1,8 @@
 const { pool }     = require('../../config/db');
 const repo         = require('./prestamos.repository');
+const moraService  = require('../mora/mora.service');
 const { asignarNumeroDocumento } = require('../../utils/numeracion.util');
+const { repartirAbono } = require('../../utils/mora.util');
 
 // ─── Helpers privados ─────────────────────────────────────────────────────────
 
@@ -204,7 +206,13 @@ const _crearFacturaDesdePrestamo = async (client, prestamo, metodo, negocioId) =
 
 // ─── Servicio: obtener ────────────────────────────────────────────────────────
 
-const getPrestamos = (sucursalId, negocioId) => repo.findAll(sucursalId, negocioId);
+// `anotarLista` resuelve la mora de todos en UNA consulta; con 1.793 préstamos
+// activos, hacerlo uno por uno serían 1.793 viajes a la base. Si ninguno tiene
+// plazo (negocio sin la feature) no consulta nada.
+const getPrestamos = async (sucursalId, negocioId) => {
+  const prestamos = await repo.findAll(sucursalId, negocioId);
+  return moraService.anotarLista(prestamos, 'prestamo');
+};
 
 const getPrestamoById = async (negocioId, id) => {
   const prestamo = await repo.findByIdYNegocio(id, negocioId);
@@ -213,7 +221,51 @@ const getPrestamoById = async (negocioId, id) => {
     repo.getAbonos(id),
     repo.getRetomasPorPrestamo(id),
   ]);
-  return { ...prestamo, abonos, retomas };
+  const conMora = await moraService.anotarDocumento(prestamo, 'prestamo');
+  return { ...conMora, abonos, retomas };
+};
+
+// ─── Mora ─────────────────────────────────────────────────────────────────────
+// Delegan en el servicio compartido con créditos.
+
+/** Fija, cambia o quita el plazo de pago de un préstamo ya existente. */
+const fijarPlazo = (negocioId, prestamoId, datos) =>
+  moraService.fijarPlazo(negocioId, 'prestamo', prestamoId, datos);
+
+/** Condona mora, total o parcial. Solo admin, con motivo y PIN. */
+const condonarMora = (negocioId, prestamoId, datos) =>
+  moraService.condonar(negocioId, 'prestamo', prestamoId, datos);
+
+/** Cobra SOLO mora, sin tocar el capital. */
+const cobrarMora = async (negocioId, prestamoId, { valor, metodo, usuario_id }) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { documento, mora } = await moraService.estadoDe('prestamo', prestamoId, negocioId, client);
+
+    if (!mora.aplica)        throw { status: 400, message: 'Este préstamo no tiene plazo ni mora pactada' };
+    if (mora.pendiente <= 0) throw { status: 400, message: 'No hay mora pendiente por cobrar' };
+
+    const aCobrar = valor == null || valor === '' ? mora.pendiente : Math.round(Number(valor));
+    if (!(aCobrar > 0)) throw { status: 400, message: 'El valor a cobrar debe ser mayor a 0' };
+    if (aCobrar > mora.pendiente) {
+      throw { status: 400, message: `No puedes cobrar más de la mora pendiente ($${mora.pendiente.toLocaleString('es-CO')})` };
+    }
+
+    const mov = await moraService.registrarCobroEnTx(client, {
+      tipo: 'prestamo', documento, negocioId,
+      valor: aCobrar, metodo, usuarioId: usuario_id, estadoMora: mora,
+    });
+    await client.query('COMMIT');
+
+    const despues = await moraService.estadoDe('prestamo', prestamoId, negocioId);
+    return { movimiento: mov, mora: despues.mora };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
 };
 
 // ─── Servicio: crear un préstamo ──────────────────────────────────────────────
@@ -279,12 +331,21 @@ const crearPrestamos = async ({
   prestatario_id, empleado_id, cliente_id,
   items,
   aplicar_saldo_favor = false,
+  // Plazo y condición de mora del pacto. Aplican a TODOS los ítems del mismo
+  // préstamo: es un solo acuerdo con la persona, aunque se lleve varios equipos.
+  fecha_limite, mora_condicion_id,
 }) => {
   if (!items?.length) throw { status: 400, message: 'Se requiere al menos un ítem para el préstamo' };
 
   await _verificarSucursal(sucursal_id, negocio_id);
   await _verificarCliente(cliente_id, negocio_id);
   await _verificarPrestatario(prestatario_id, negocio_id);
+
+  // Se resuelve ANTES de abrir la transacción: si la fecha es inválida, mejor
+  // fallar sin haber tocado inventario.
+  const datosMora = await moraService.datosParaNuevoDocumento(negocio_id, {
+    fecha_limite, mora_condicion_id,
+  });
 
   const client = await pool.connect();
   try {
@@ -310,6 +371,7 @@ const crearPrestamos = async ({
         variante_id:       item.variante_id  || null,
         atributo_label:    item.atributo_label || null,
         variante_label:    item.variante_label || null,
+        ...datosMora,
       });
 
       await _procesarItemPrestamo(client, {
@@ -412,21 +474,64 @@ const registrarSaldoAFavor = async (negocioId, tipo, personaId, monto, sucursalI
 
 // ─── Servicio: registrar abono ────────────────────────────────────────────────
 
-const registrarAbono = async (negocioId, prestamoId, valor, metodo, usuarioId, color) => {
+// `modo` y `valorMora` solo importan si el préstamo tiene plazo pactado:
+//   'mora_capital'  → primero la mora, resto a capital (orden del Art. 1653 C.C.)
+//   'solo_capital'  → todo a capital; la mora queda PENDIENTE, no condonada
+//   'personalizado' → `valorMora` a mora, el resto a capital
+// Sin plazo, la mora pendiente es 0 y los tres se comportan como siempre.
+const registrarAbono = async (
+  negocioId, prestamoId, valor, metodo, usuarioId, color,
+  { modo = 'mora_capital', valorMora = 0 } = {},
+) => {
   const prestamo = await repo.findByIdYNegocio(prestamoId, negocioId);
   if (!prestamo) throw { status: 404, message: 'Préstamo no encontrado' };
   if (prestamo.estado !== 'Activo') throw { status: 400, message: 'El préstamo no está activo' };
-
-  const saldoPendiente = Number(prestamo.valor_prestamo) - Number(prestamo.total_abonado);
-  if (valor > saldoPendiente) {
-    throw { status: 400, message: `El abono supera el saldo pendiente (${saldoPendiente.toFixed(2)})` };
-  }
 
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
-    const resultado = await repo.insertarAbono(client, { prestamo_id: prestamoId, valor, metodo, usuario_id: usuarioId || null });
+    // Dentro de la transacción: si entran dos abonos a la vez, cada uno ve el
+    // saldo y la mora que dejó el otro.
+    const { documento, saldo_capital, mora } = await moraService.estadoDe(
+      'prestamo', prestamoId, negocioId, client
+    );
+
+    const reparto = repartirAbono({
+      valor, mora_pendiente: mora.pendiente, saldo_capital, modo, valor_mora: valorMora,
+    });
+
+    // El tope ahora es capital + mora: antes rechazaba cualquier pago que
+    // incluyera los intereses, porque no los conocía.
+    if (reparto.excedente > 0) {
+      const total = saldo_capital + mora.pendiente;
+      throw {
+        status: 400,
+        message: `El abono supera lo que se debe. Capital $${Math.round(saldo_capital).toLocaleString('es-CO')}`
+          + (mora.pendiente > 0 ? ` + mora $${mora.pendiente.toLocaleString('es-CO')}` : '')
+          + ` = $${Math.round(total).toLocaleString('es-CO')}`,
+      };
+    }
+
+    let resultado = {
+      valor_prestamo: documento.valor_prestamo,
+      total_abonado:  documento.total_abonado,
+      abono_id:       null,
+    };
+    if (reparto.a_capital > 0) {
+      resultado = await repo.insertarAbono(client, {
+        prestamo_id: prestamoId, valor: reparto.a_capital, metodo, usuario_id: usuarioId || null,
+      });
+    }
+
+    let movimientoMora = null;
+    if (reparto.a_mora > 0) {
+      movimientoMora = await moraService.registrarCobroEnTx(client, {
+        tipo: 'prestamo', documento, negocioId,
+        valor: reparto.a_mora, metodo, usuarioId, estadoMora: mora,
+        abonoPrestamoId: resultado.abono_id ?? null,
+      });
+    }
 
     if (color && prestamo.imei) {
       await client.query(
@@ -438,6 +543,8 @@ const registrarAbono = async (negocioId, prestamoId, valor, metodo, usuarioId, c
     let saldado    = false;
     let factura_id = null;
 
+    // Se salda cuando el CAPITAL queda cubierto. Una mora pendiente no bloquea
+    // el cierre: es una deuda aparte que sigue visible en el estado de cuenta.
     if (Number(resultado.total_abonado) >= Number(resultado.valor_prestamo)) {
       saldado = true;
       await repo.updateEstado(client, prestamoId, 'Saldado');
@@ -448,10 +555,15 @@ const registrarAbono = async (negocioId, prestamoId, valor, metodo, usuarioId, c
 
     await client.query('COMMIT');
 
+    const despues = await moraService.estadoDe('prestamo', prestamoId, negocioId);
     return {
       ...resultado,
       saldado,
       factura_id,
+      abonado_capital: reparto.a_capital,
+      abonado_mora:    reparto.a_mora,
+      movimiento_mora: movimientoMora,
+      mora:            despues.mora,
       sucursal_id:     prestamo.sucursal_id     ?? null,
       prestatario:     prestamo.prestatario     ?? null,
       nombre_producto: prestamo.nombre_producto ?? null,
@@ -1121,6 +1233,12 @@ const anularAbono = async (negocioId, prestamoId, abonoId, retomaId = null) => {
       }
     }
 
+    // La mora que se cobró DENTRO de este abono se anula en cascada: si no, el
+    // cliente quedaría con la mora "pagada" después de revertirse el pago.
+    // Se anula (no se borra) para que quede la traza de la reversión.
+    const moraRepo = require('../mora/mora.repository');
+    const moraAnulada = await moraRepo.anularPorAbono(client, { abono_prestamo_id: abonoId });
+
     // Eliminar el abono y ajustar total_abonado
     await repo.eliminarAbono(client, abonoId);
     const prestamoDespues = await repo.restarTotalAbonado(client, prestamoId, Number(abono.valor));
@@ -1168,7 +1286,10 @@ const anularAbono = async (negocioId, prestamoId, abonoId, retomaId = null) => {
     }
 
     await client.query('COMMIT');
-    return { saldado_revertido, factura_cancelada_id };
+    return {
+      saldado_revertido, factura_cancelada_id,
+      mora_anulada: moraAnulada.reduce((s, m) => s + Number(m.valor || 0), 0),
+    };
   } catch (err) {
     await client.query('ROLLBACK');
     throw err;
@@ -1403,18 +1524,59 @@ const editarValorPrestamo = async (negocioId, prestamoId, nuevoValor) => {
 // Distribuye un pago único entre los préstamos activos más antiguos primero.
 // No genera facturas individuales — un solo entry en estado de cuenta.
 
-const registrarAbonoTotal = async (negocioId, tipo, personaId, valorTotal, metodo, usuarioId, sucursalId) => {
+// `modo` aplica DENTRO de cada préstamo; el recorrido entre préstamos siempre es
+// del más viejo al más nuevo. `distribucion_manual` permite que el vendedor
+// ajuste cuánto va a cada préstamo (el negocio pidió poder pactarlo con el
+// cliente en el momento del pago para evitar inconvenientes).
+const registrarAbonoTotal = async (
+  negocioId, tipo, personaId, valorTotal, metodo, usuarioId, sucursalId,
+  { modo = 'mora_capital', distribucion_manual = null } = {},
+) => {
   if (tipo === 'prestatario') await _verificarPrestatario(personaId, negocioId);
   else await _verificarCliente(personaId, negocioId);
 
   const prestamosActivos = await repo.getPrestamoActivosPorPersona(pool, tipo, personaId, negocioId, sucursalId);
   if (!prestamosActivos.length) throw { status: 400, message: 'Esta persona no tiene préstamos activos en esta sucursal' };
 
-  const totalPendiente = prestamosActivos.reduce(
-    (s, p) => s + Number(p.valor_prestamo) - Number(p.total_abonado), 0
+  // El tope incluye la mora pendiente de cada préstamo: si solo se contara el
+  // capital, un pago que cubre los intereses sería rechazado.
+  const conMora = await moraService.anotarLista(prestamosActivos, 'prestamo');
+  const moraPorPrestamo = new Map(conMora.map((p) => [Number(p.id), p.mora]));
+
+  const totalPendiente = conMora.reduce(
+    (s, p) => s + Number(p.valor_prestamo) - Number(p.total_abonado) + Number(p.mora?.pendiente || 0), 0
   );
   if (valorTotal > totalPendiente) {
     throw { status: 400, message: `El abono (${valorTotal}) supera el saldo total pendiente (${totalPendiente.toFixed(2)})` };
+  }
+
+  // Distribución elegida en pantalla: { [prestamo_id]: valor }. Se valida que
+  // sume el abono y que ningún préstamo reciba más de lo que debe.
+  let planManual = null;
+  if (distribucion_manual && typeof distribucion_manual === 'object') {
+    planManual = new Map();
+    let suma = 0;
+    for (const p of conMora) {
+      const v = Math.max(0, Math.round(Number(distribucion_manual[p.id] ?? 0)));
+      if (!v) continue;
+      const debe = Number(p.valor_prestamo) - Number(p.total_abonado) + Number(p.mora?.pendiente || 0);
+      if (v > debe) {
+        throw {
+          status: 400,
+          message: `Al préstamo #${p.numero ?? p.id} le asignaste $${v.toLocaleString('es-CO')} `
+            + `pero solo debe $${Math.round(debe).toLocaleString('es-CO')}`,
+        };
+      }
+      planManual.set(Number(p.id), v);
+      suma += v;
+    }
+    if (Math.round(suma) !== Math.round(valorTotal)) {
+      throw {
+        status: 400,
+        message: `La distribución suma $${suma.toLocaleString('es-CO')} y el abono es `
+          + `$${Math.round(valorTotal).toLocaleString('es-CO')}. Deben coincidir.`,
+      };
+    }
   }
 
   const sucId = sucursalId;
@@ -1439,21 +1601,51 @@ const registrarAbonoTotal = async (negocioId, tipo, personaId, valorTotal, metod
       if (remaining <= 0) break;
 
       const saldoPendiente = Number(prestamo.valor_prestamo) - Number(prestamo.total_abonado);
-      if (saldoPendiente <= 0) continue;
+      const mora           = moraPorPrestamo.get(Number(prestamo.id)) || { pendiente: 0 };
+      const debeEste       = saldoPendiente + Number(mora.pendiente || 0);
+      if (debeEste <= 0) continue;
 
-      const abonoEste = Math.min(remaining, saldoPendiente);
+      // Con plan manual, este préstamo recibe exactamente lo asignado; si no,
+      // se le da todo lo que quepa (FIFO del más viejo).
+      const paraEste = planManual
+        ? Math.min(planManual.get(Number(prestamo.id)) || 0, remaining)
+        : Math.min(remaining, debeEste);
+      if (paraEste <= 0) continue;
 
-      await client.query(
-        `INSERT INTO abonos_prestamo(prestamo_id, valor, metodo, usuario_id, abono_total_id)
-         VALUES ($1, $2, $3, $4, $5)`,
-        [prestamo.id, abonoEste, metodo, usuarioId || null, abonoTotal.id]
-      );
+      // El reparto interno mora/capital usa la MISMA función que el abono
+      // individual, así los dos caminos no pueden divergir.
+      const reparto = repartirAbono({
+        valor: paraEste,
+        mora_pendiente: Number(mora.pendiente || 0),
+        saldo_capital:  saldoPendiente,
+        modo,
+      });
 
-      const { rows: upd } = await client.query(
-        `UPDATE prestamos SET total_abonado = total_abonado + $1
-         WHERE id = $2 RETURNING valor_prestamo, total_abonado`,
-        [abonoEste, prestamo.id]
-      );
+      let abonoId = null;
+      let upd = [{ valor_prestamo: prestamo.valor_prestamo, total_abonado: prestamo.total_abonado }];
+
+      if (reparto.a_capital > 0) {
+        const { rows: ab } = await client.query(
+          `INSERT INTO abonos_prestamo(prestamo_id, valor, metodo, usuario_id, abono_total_id)
+           VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+          [prestamo.id, reparto.a_capital, metodo, usuarioId || null, abonoTotal.id]
+        );
+        abonoId = ab[0].id;
+
+        ({ rows: upd } = await client.query(
+          `UPDATE prestamos SET total_abonado = total_abonado + $1
+           WHERE id = $2 RETURNING valor_prestamo, total_abonado`,
+          [reparto.a_capital, prestamo.id]
+        ));
+      }
+
+      if (reparto.a_mora > 0) {
+        await moraService.registrarCobroEnTx(client, {
+          tipo: 'prestamo', documento: prestamo, negocioId,
+          valor: reparto.a_mora, metodo, usuarioId,
+          estadoMora: mora, abonoPrestamoId: abonoId,
+        });
+      }
 
       const saldado = Number(upd[0].total_abonado) >= Number(upd[0].valor_prestamo);
       if (saldado) {
@@ -1469,8 +1661,15 @@ const registrarAbonoTotal = async (negocioId, tipo, personaId, valorTotal, metod
         }
       }
 
-      distribucion.push({ prestamo_id: prestamo.id, nombre_producto: prestamo.nombre_producto, abono: abonoEste, saldado });
-      remaining -= abonoEste;
+      distribucion.push({
+        prestamo_id:     prestamo.id,
+        nombre_producto: prestamo.nombre_producto,
+        abono:           paraEste,
+        abono_capital:   reparto.a_capital,
+        abono_mora:      reparto.a_mora,
+        saldado,
+      });
+      remaining -= paraEste;
     }
 
     await client.query('COMMIT');
@@ -1513,7 +1712,13 @@ const modificarAbonoTotal = async (negocioId, abonoTotalId, nuevoValor, metodo) 
     }
 
     // 2. Revertir cada abono individual
+    const moraRepo = require('../mora/mora.repository');
     for (const abono of abonosExistentes) {
+      // La mora cobrada dentro de este abono se anula antes de revertir el
+      // capital: si no, quedaría "pagada" sobre un abono que ya no existe. La
+      // redistribución de más abajo la vuelve a causar y cobrar si corresponde.
+      await moraRepo.anularPorAbono(client, { abono_prestamo_id: abono.id });
+
       await client.query(
         'UPDATE prestamos SET total_abonado = total_abonado - $1 WHERE id = $2',
         [abono.valor, abono.prestamo_id]
@@ -1608,4 +1813,5 @@ module.exports = {
   getEstadoCuenta, crearAjusteDeuda, editarValorPrestamo,
   getSaldoSucursalPersona, getHistorialSaldoSucursalPersona,
   registrarAbonoTotal, modificarAbonoTotal,
+  fijarPlazo, condonarMora, cobrarMora,
 };

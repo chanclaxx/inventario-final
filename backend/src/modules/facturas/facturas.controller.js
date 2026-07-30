@@ -70,11 +70,21 @@ const crearFactura = async (req, res, next) => {
 const cancelarFactura = async (req, res, next) => {
   try {
     const eliminarRetoma = req.body?.eliminarRetoma === true;
-    await service.cancelarFactura(req.user.negocio_id, req.params.id, eliminarRetoma);
+    const revertirMora   = req.body?.revertirMora   === true;
+    const r = await service.cancelarFactura(
+      req.user.negocio_id, req.params.id, eliminarRetoma, false, revertirMora
+    );
     audit.registrar(req.user.negocio_id, req.user.id, 'Venta cancelada', 'facturas', Number(req.params.id), {
-      sucursal_id: req.sucursal_id,
+      sucursal_id:    req.sucursal_id,
+      mora_revertida: Number(r?.mora_revertida ?? 0),
     });
-    res.json({ ok: true, message: 'Factura cancelada correctamente' });
+    res.json({
+      ok: true,
+      data: r,
+      message: Number(r?.mora_revertida ?? 0) > 0
+        ? 'Factura cancelada y mora revertida'
+        : 'Factura cancelada correctamente',
+    });
   } catch (err) { next(err); }
 };
 

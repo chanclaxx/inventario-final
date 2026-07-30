@@ -2,6 +2,7 @@ const router = require('express').Router();
 const { body } = require('express-validator');
 const { validate }      = require('../../middlewares/validate.middleware');
 const { requireModulo } = require('../../middlewares/modulo.middleware');
+const { requireNivel }  = require('../../middlewares/role.middleware');
 const ctrl = require('./prestamos.controller');
 
 const validarPrestamo = [
@@ -84,6 +85,13 @@ router.patch( '/:id/valor',            requireModulo('prestamos'),
 router.post(  '/:id/aplicar-saldo',    requireModulo('prestamos'), ctrl.aplicarSaldoAPrestamo);
 router.get(   '/:id',                  requireModulo('prestamos'), ctrl.getPrestamoById);
 router.post(  '/:id/abonos',           requireModulo('prestamos'), validarAbono,            validate, ctrl.registrarAbono);
+
+// ── Mora ─────────────────────────────────────────────────────────────────────
+// El plazo lo puede fijar un supervisor; condonar es solo del admin y además
+// pide el PIN (se valida en el service para que el error traiga motivo).
+router.patch( '/:id/plazo',            requireModulo('prestamos'), requireNivel('supervisor'),    ctrl.fijarPlazo);
+router.post(  '/:id/mora/cobrar',      requireModulo('prestamos'), requireNivel('vendedor'),      ctrl.cobrarMora);
+router.post(  '/:id/mora/condonar',    requireModulo('prestamos'), requireNivel('admin_negocio'), ctrl.condonarMora);
 router.delete('/:id/abonos/:abonoId',  requireModulo('prestamos'), ctrl.anularAbono);
 router.post(  '/:id/intercambio',      requireModulo('prestamos'), validarIntercambio,       validate, ctrl.intercambiarPrestamo);
 router.patch( '/:id/devolver',         requireModulo('prestamos'), ctrl.devolverPrestamo);

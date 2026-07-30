@@ -32,6 +32,11 @@ import { ModalRetomaDirecta }                   from './ModalRetomaDirecta';
 import { EstadoDeCuenta }                       from './EstadoDeCuenta';
 import { ModalAbonoTotal }                      from './ModalAbonoTotal';
 import { useMetodosPago }                       from '../../hooks/useMetodosPago';
+import { useMora }                              from '../../hooks/useMora';
+import { PanelMora }                            from '../../components/ui/PanelMora';
+import {
+  fijarPlazoPrestamo, cobrarMoraPrestamo, condonarMoraPrestamo,
+} from '../../api/prestamos.api';
 import { ModalExportarPdfPrestamos }             from './ModalExportarPdfPrestamos';
 import api                                      from '../../api/axios.config';
 import useSucursalStore                         from '../../store/sucursalStore';
@@ -1342,6 +1347,9 @@ function HistorialPrestamo({ prestamoId, prestamoEstado }) {
 }
 
 function TarjetaPrestamoDetalle({ prestamo, onAbonar, onDevolver, onImprimir, onIntercambiar, onAplicarSaldo, onEditar, saldoAFavor = 0, aplicandoSaldo = false, coloresActivo, cerrado = false }) {
+  const configMora = useMora();
+  // useMetodosPago devuelve {id,label}; PanelMora solo necesita los ids.
+  const metodosPagoMora = useMetodosPago().map((m) => m.id);
   const [historialAbierto, setHistorialAbierto] = useState(false);
 
   const saldo    = Number(prestamo.valor_prestamo) - Number(prestamo.total_abonado);
@@ -1423,6 +1431,22 @@ function TarjetaPrestamoDetalle({ prestamo, onAbonar, onDevolver, onImprimir, on
             )}
           </div>
         </div>
+
+        {/* Plazo de pago y mora (solo si el negocio activó la feature).
+            Los números vienen calculados del backend en prestamo.mora. */}
+        {prestamo.estado === 'Activo' && (
+          <PanelMora
+            documento={prestamo}
+            configMora={configMora}
+            metodosPago={metodosPagoMora}
+            invalidar={[['prestamos'], ['estado-cuenta'], ['caja']]}
+            api={{
+              fijarPlazo:   (d) => fijarPlazoPrestamo(prestamo.id, d),
+              cobrarMora:   (d) => cobrarMoraPrestamo(prestamo.id, d),
+              condonarMora: (d) => condonarMoraPrestamo(prestamo.id, d),
+            }}
+          />
+        )}
 
         {/* Acciones — solo préstamos activos */}
         {prestamo.estado === 'Activo' && (

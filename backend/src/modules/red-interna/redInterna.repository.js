@@ -1005,8 +1005,15 @@ const getChequeosSalud = async (negocioId) => {
     `, [negocioId]),
 
     // Un IMEI remisionado no puede tener dos filas vivas en `seriales`.
+    //
+    // Cuenta DISTINCT s.id, no COUNT(*): un mismo IMEI aparece en varias
+    // `lineas_remision` en cuanto se despacha y luego se devuelve (una línea de
+    // entrega + una de devolución, ambas legítimas). Con COUNT(*) el join
+    // multiplicaba líneas × seriales y reportaba "2 filas" con una sola fila en
+    // `seriales` — un falso positivo que dejaba el panel de salud en rojo para
+    // cualquier negocio que devuelva mercancía a la bodega.
     pool.query(`
-      SELECT lr.imei, COUNT(*)::int AS filas
+      SELECT lr.imei, COUNT(DISTINCT s.id)::int AS filas
       FROM lineas_remision lr
       JOIN remisiones r ON r.id = lr.remision_id
       JOIN seriales s   ON UPPER(TRIM(s.imei)) = UPPER(TRIM(lr.imei))
@@ -1015,7 +1022,7 @@ const getChequeosSalud = async (negocioId) => {
       WHERE r.negocio_id = $1 AND su.negocio_id = $1
         AND lr.tipo = 'serial' AND lr.imei IS NOT NULL
       GROUP BY lr.imei
-      HAVING COUNT(*) > 1
+      HAVING COUNT(DISTINCT s.id) > 1
     `, [negocioId]),
   ]);
 

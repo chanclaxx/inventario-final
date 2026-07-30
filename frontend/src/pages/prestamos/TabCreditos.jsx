@@ -3,12 +3,16 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   getCreditos, getCreditoById,
   registrarAbonoCredito, saldarCredito, cancelarCredito,
+  fijarPlazoCredito, cobrarMoraCredito, condonarMoraCredito,
 } from '../../api/creditos.api';
 import { getFacturaById }          from '../../api/facturas.api';
 import { getGarantiasPorFactura }  from '../../api/garantias.api';
 import api from '../../api/axios.config';
 import { formatCOP, formatFechaHora } from '../../utils/formatters';
 import { useMetodosPago } from '../../hooks/useMetodosPago';
+import { useMora }        from '../../hooks/useMora';
+import { PanelMora }      from '../../components/ui/PanelMora';
+import { MODOS_ABONO }    from '../../utils/mora';
 import { Badge }       from '../../components/ui/Badge';
 import { Button }      from '../../components/ui/Button';
 import { Modal }       from '../../components/ui/Modal';
@@ -17,6 +21,7 @@ import { Spinner }     from '../../components/ui/Spinner';
 import { EmptyState }  from '../../components/ui/EmptyState';
 import { ModalImprimirFactura } from '../../components/ui/ModalImprimirFactura';
 import { FacturaTermica }       from '../../components/FacturaTermica';
+import { ReciboAbono }          from '../../components/ReciboAbono';
 import { ModalDevolucionParcialCredito } from '../facturas/ModalDevolucionParcialCredito';
 import {
   CreditCard, Plus, CheckCircle, XCircle, AlertTriangle,
@@ -43,23 +48,75 @@ function ModalAbonoCredito({ credito, onClose }) {
   const [metodo, setMetodo] = useState('Efectivo');
   const [notas,  setNotas]  = useState('');
   const [error,  setError]  = useState('');
+  // Imputación del abono cuando hay mora pendiente (los 3 modos que pidió el
+  // negocio). Sin mora, el modo es irrelevante y no se muestra.
+  const [modo,      setModo]      = useState('mora_capital');
+  const [valorMora, setValorMora] = useState('');
+  // Recibo del abono con desglose capital/mora.
+  const [recibo,    setRecibo]    = useState(null);
 
   const cuotaInicial   = Number(credito.cuota_inicial || 0);
   const totalAbonado   = Number(credito.total_abonado || 0);
   const valorTotal     = Number(credito.valor_total);
   const saldoPendiente = Number(credito.saldo_pendiente ?? (valorTotal - cuotaInicial - totalAbonado));
+  const moraPendiente  = Number(credito.mora?.pendiente || 0);
 
   const metodosPago = useMetodosPago();
+  // Parámetros de la impresora térmica, para el recibo.
+  const { data: configImpresion } = useQuery({
+    queryKey: ['config'],
+    queryFn:  () => api.get('/config').then((r) => r.data.data),
+    staleTime: 5 * 60 * 1000,
+  });
 
   const mutation = useMutation({
-    mutationFn: () => registrarAbonoCredito(credito.id, { valor: Number(valor), metodo, notas: notas || null }),
-    onSuccess: () => {
+    mutationFn: () => registrarAbonoCredito(credito.id, {
+      valor: Number(valor), metodo, notas: notas || null,
+      modo, valor_mora: modo === 'personalizado' ? Number(valorMora || 0) : 0,
+    }),
+    onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ['creditos'],        exact: false });
       queryClient.invalidateQueries({ queryKey: ['credito-detalle'], exact: false });
-      onClose();
+      const d = res.data?.data;
+      // Si el pago incluyó mora, se ofrece el recibo con el desglose. Sin mora
+      // el flujo queda igual que antes: se cierra sin fricción.
+      if (Number(d?.abonado_mora || 0) > 0) {
+        setRecibo({
+          abono: {
+            valor: Number(valor),
+            capital: Number(d.abonado_capital || 0),
+            mora:    Number(d.abonado_mora || 0),
+            metodo, notas: notas || null, fecha: new Date(),
+            saldo_antes:    saldoPendiente,
+            saldo_despues:  Number(d.saldo ?? 0),
+            mora_pendiente: Number(d.mora?.pendiente ?? 0),
+          },
+          deuda: {
+            tipo: 'credito',
+            numero: credito.factura_numero ?? credito.factura_id,
+            persona: credito.nombre_cliente, cedula: credito.cedula,
+            fecha_limite: d.mora?.fecha_limite ?? null,
+            dias_mora:    d.mora?.dias_vencidos ?? 0,
+          },
+        });
+      } else {
+        onClose();
+      }
     },
     onError: (err) => setError(err.response?.data?.error || 'Error al registrar abono'),
   });
+
+  // Recibo con el desglose capital/mora, tras un abono que cobró intereses.
+  if (recibo) {
+    return (
+      <ReciboAbono
+        abono={recibo.abono}
+        deuda={recibo.deuda}
+        config={configImpresion}
+        onClose={onClose}
+      />
+    );
+  }
 
   return (
     <Modal open onClose={onClose} title="Registrar Abono" size="sm">
@@ -72,7 +129,42 @@ function ModalAbonoCredito({ credito, onClose }) {
             <span className="text-xs text-gray-400">Saldo pendiente</span>
             <span className="text-sm font-bold text-red-500">{formatCOP(saldoPendiente)}</span>
           </div>
+          {moraPendiente > 0 && (
+            <div className="flex justify-between">
+              <span className="text-xs text-amber-600">
+                + mora ({credito.mora.dias_vencidos} día{credito.mora.dias_vencidos === 1 ? '' : 's'} de atraso)
+              </span>
+              <span className="text-sm font-bold text-amber-600">{formatCOP(moraPendiente)}</span>
+            </div>
+          )}
         </div>
+
+        {/* Cómo se reparte el abono. Solo aparece si hay mora que repartir. */}
+        {moraPendiente > 0 && (
+          <div className="flex flex-col gap-2">
+            <span className="text-xs font-medium text-gray-600">¿A qué se aplica el pago?</span>
+            <div className="flex gap-1 bg-gray-100 p-1 rounded-xl">
+              {MODOS_ABONO.map((o) => (
+                <button key={o.id} type="button" onClick={() => setModo(o.id)}
+                  className={`flex-1 py-1.5 px-1 rounded-lg text-[11px] font-medium transition-all
+                    ${modo === o.id ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}>
+                  {o.label}
+                </button>
+              ))}
+            </div>
+            <span className="text-[11px] text-gray-400">
+              {MODOS_ABONO.find((o) => o.id === modo)?.descripcion}
+            </span>
+            {modo === 'personalizado' && (
+              <div className="flex flex-col gap-1">
+                <label className="text-[11px] text-gray-500">Cuánto va a la mora</label>
+                <InputMoneda value={valorMora} onChange={setValorMora} placeholder="0"
+                  className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm
+                    focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="flex flex-wrap gap-2">
           {metodosPago.map((m) => (
@@ -317,6 +409,8 @@ function TarjetaCreditoDetalle({
   credito, onAbonar, onSaldar, onCancelar, onDevolucion, onImprimir, cerrado = false,
 }) {
   const [historialAbierto, setHistorialAbierto] = useState(false);
+  const configMora  = useMora();
+  const metodosPago = useMetodosPago();
 
   const cuotaInicial   = Number(credito.cuota_inicial || 0);
   const totalAbonado   = Number(credito.total_abonado || 0);
@@ -450,6 +544,24 @@ function TarjetaCreditoDetalle({
           </div>
         )}
       </div>
+
+      {/* Plazo de pago y mora (solo si el negocio activó la feature).
+          Los números vienen calculados del backend en credito.mora. */}
+      {esActivo && (
+        <div className="px-4 pb-4 -mt-1">
+          <PanelMora
+            documento={credito}
+            configMora={configMora}
+            metodosPago={metodosPago}
+            invalidar={[['creditos'], ['credito-detalle'], ['caja']]}
+            api={{
+              fijarPlazo:   (d) => fijarPlazoCredito(credito.id, d),
+              cobrarMora:   (d) => cobrarMoraCredito(credito.id, d),
+              condonarMora: (d) => condonarMoraCredito(credito.id, d),
+            }}
+          />
+        </div>
+      )}
 
       {/* Historial de abonos desplegable */}
       {tieneMovimientos && (

@@ -17,4 +17,11 @@ router.post('/:id/abonos',   requireModulo('prestamos'), validarAbono, validate,
 router.patch('/:id/saldar',  requireModulo('prestamos'), requireNivel('vendedor'),      ctrl.saldarCredito);
 router.patch('/:id/cancelar',requireModulo('prestamos'), requireNivel('admin_negocio'), ctrl.cancelarCredito);
 
+// ── Mora ─────────────────────────────────────────────────────────────────────
+// El plazo lo puede fijar un supervisor; condonar es solo del admin y además
+// pide el PIN (se valida en el service, no aquí, para que el 403 traiga motivo).
+router.patch('/:id/plazo',        requireModulo('prestamos'), requireNivel('supervisor'),    ctrl.fijarPlazo);
+router.post('/:id/mora/cobrar',   requireModulo('prestamos'), requireNivel('vendedor'),      ctrl.cobrarMora);
+router.post('/:id/mora/condonar', requireModulo('prestamos'), requireNivel('admin_negocio'), ctrl.condonarMora);
+
 module.exports = router;

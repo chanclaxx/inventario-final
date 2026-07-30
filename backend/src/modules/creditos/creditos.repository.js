@@ -9,6 +9,8 @@ const findAll = async (sucursalId, negocioId) => {
     SELECT
       c.id, c.valor_total, c.cuota_inicial, c.total_abonado,
       c.estado, c.creado_en, c.sucursal_id,
+      -- Mora: solo el pacto. Lo causado/pendiente lo deriva mora.service.
+      c.fecha_limite, c.mora_condicion,
       su.nombre  AS sucursal_nombre,
       f.id       AS factura_id,
       f.numero   AS factura_numero,
@@ -65,20 +67,34 @@ const getAbonos = async (creditoId) => {
 };
 
 // ── Crear crédito (dentro de transacción externa) ────────────────────────────
-const create = async (client, { factura_id, cliente_id, sucursal_id, valor_total, cuota_inicial }) => {
+// `fecha_limite`/`mora_condicion` son opcionales: sin ellos el crédito no tiene
+// mora, que es el comportamiento de siempre.
+const create = async (client, {
+  factura_id, cliente_id, sucursal_id, valor_total, cuota_inicial,
+  fecha_limite = null, mora_condicion = null,
+}) => {
   const { rows } = await client.query(`
-    INSERT INTO creditos(factura_id, cliente_id, sucursal_id, valor_total, cuota_inicial, total_abonado, estado)
-    VALUES ($1, $2, $3, $4, $5, 0, 'Activo')
+    INSERT INTO creditos(factura_id, cliente_id, sucursal_id, valor_total, cuota_inicial,
+                         total_abonado, estado, fecha_limite, mora_condicion)
+    VALUES ($1, $2, $3, $4, $5, 0, 'Activo', $6, $7::jsonb)
     RETURNING *
-  `, [factura_id, cliente_id, sucursal_id, valor_total, cuota_inicial ?? 0]);
+  `, [
+    factura_id, cliente_id, sucursal_id, valor_total, cuota_inicial ?? 0,
+    fecha_limite, mora_condicion ? JSON.stringify(mora_condicion) : null,
+  ]);
   return rows[0];
 };
 
 // ── Insertar abono (dentro de transacción externa) ───────────────────────────
+//
+// `valor` es SOLO el capital. La parte que va a mora la registra mora.service en
+// `movimientos_mora` y no pasa por aquí: si entrara a `total_abonado`, los
+// reportes la contarían como margen del producto.
 const insertarAbono = async (client, { credito_id, usuario_id, valor, metodo, notas }) => {
-  await client.query(`
+  const { rows: abono } = await client.query(`
     INSERT INTO abonos_credito(credito_id, usuario_id, valor, metodo, notas)
     VALUES ($1, $2, $3, $4, $5)
+    RETURNING id
   `, [credito_id, usuario_id, valor, metodo, notas || null]);
 
   const { rows } = await client.query(`
@@ -86,7 +102,7 @@ const insertarAbono = async (client, { credito_id, usuario_id, valor, metodo, no
     WHERE id = $2
     RETURNING valor_total, cuota_inicial, total_abonado
   `, [valor, credito_id]);
-  return rows[0];
+  return { ...rows[0], abono_id: abono[0].id };
 };
 
 // ── Cambiar estado ───────────────────────────────────────────────────────────

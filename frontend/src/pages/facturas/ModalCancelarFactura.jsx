@@ -9,6 +9,7 @@ import { cancelarFactura } from '../../api/facturas.api';
 import { getFacturaById }  from '../../api/facturas.api';
 import { verificarPin }    from '../../api/config.api';
 import { getEntregas }     from '../../api/domiciliarios.api';
+import { formatCOP }       from '../../utils/formatters';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -127,6 +128,10 @@ export function ModalCancelarFactura({ factura, onClose, onSuccess }) {
   const tieneRetomaEnInventario = retomasEnInventario.length > 0;
 
   const [eliminarRetoma, setEliminarRetoma] = useState(null);
+  // Mora ya cobrada del crédito de esta factura. Si existe, se pregunta si se
+  // revierte: dejarla contaría como ingreso de una venta que ya no existe.
+  const moraCobrada  = Number(detalle?.credito?.mora?.cobrada || 0);
+  const [revertirMora, setRevertirMora] = useState(true);
   const [pin,            setPin]            = useState('');
   const [error,          setError]          = useState('');
   const [verificando,    setVerificando]    = useState(false);
@@ -136,7 +141,7 @@ export function ModalCancelarFactura({ factura, onClose, onSuccess }) {
     : 'pin';
 
   const mutation = useMutation({
-    mutationFn: () => cancelarFactura(factura.id, eliminarRetoma === true),
+    mutationFn: () => cancelarFactura(factura.id, eliminarRetoma === true, revertirMora),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['facturas'],           exact: false });
       queryClient.invalidateQueries({ queryKey: ['productos-serial'],   exact: false });
@@ -307,6 +312,34 @@ export function ModalCancelarFactura({ factura, onClose, onSuccess }) {
             <p className="text-xs text-blue-700">
               La retoma permanecerá en el inventario.
             </p>
+          </div>
+        )}
+
+        {/* Mora ya cobrada: se pregunta qué hacer con ella. Dejarla contaría
+            como ingreso de una venta que ya no existe; revertirla es lo correcto
+            si al cliente se le devuelve todo. */}
+        {moraCobrada > 0 && (
+          <div className="flex flex-col gap-2 bg-amber-50 border border-amber-200 rounded-xl p-3">
+            <div className="flex items-start gap-2.5">
+              <AlertTriangle size={15} className="text-amber-500 flex-shrink-0 mt-0.5" />
+              <p className="text-xs text-amber-800">
+                A este crédito ya se le cobraron{' '}
+                <span className="font-bold">{formatCOP(moraCobrada)}</span> de mora.
+              </p>
+            </div>
+            <label className="flex items-start gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={revertirMora}
+                onChange={(e) => setRevertirMora(e.target.checked)}
+                className="mt-0.5 accent-amber-600"
+              />
+              <span className="text-xs text-amber-700">
+                <span className="font-medium">También revertir la mora cobrada.</span>{' '}
+                Márcalo si le vas a devolver la plata al cliente; así no queda contada
+                como ingreso. Déjalo sin marcar si el negocio se queda con los intereses.
+              </span>
+            </label>
           </div>
         )}
 

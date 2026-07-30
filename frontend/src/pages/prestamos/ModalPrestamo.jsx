@@ -15,6 +15,8 @@ import { getClientes, crearCliente } from '../../api/clientes.api';
 import useCarritoStore from '../../store/carritoStore';
 import { useTarifas }  from '../../hooks/useTarifas';
 import { TarifaItem }  from '../../components/ui/SelectorTarifa';
+import { useMora }        from '../../hooks/useMora';
+import { SelectorPlazo }  from '../../components/ui/SelectorPlazo';
 import { User, Users, Plus, Minus, ChevronLeft, Search } from 'lucide-react';
 import { InputMoneda } from '../../components/ui/InputMoneda';
 
@@ -315,6 +317,10 @@ export function ModalPrestamo({ open, onClose }) {
   const [clienteSel,     setClienteSel]     = useState(null);
   const [aplicarSaldo,   setAplicarSaldo]   = useState(false);
   const [error,          setError]          = useState('');
+  // Plazo de pago del préstamo (feature opt-in). Vacío = sin plazo = sin mora,
+  // que es lo natural para un compañero.
+  const [plazo,          setPlazo]          = useState({ fecha_limite: '', condicion_id: '' });
+  const configMora = useMora();
 
   const { data: prestatariosData, isLoading: loadingPrestatarios } = useQuery({
     queryKey: ['prestatarios'],
@@ -389,6 +395,7 @@ export function ModalPrestamo({ open, onClose }) {
     setEmpleadoSel(null);
     setClienteSel(null);
     setAplicarSaldo(false);
+    setPlazo({ fecha_limite: '', condicion_id: '' });
     setError('');
   };
 
@@ -425,6 +432,9 @@ export function ModalPrestamo({ open, onClose }) {
         cliente_id:          null,
         aplicar_saldo_favor: aplicarSaldo,
         items:               buildItems(),
+        // Sin fecha el backend crea el préstamo sin plazo y por tanto sin mora.
+        fecha_limite:      plazo.fecha_limite || null,
+        mora_condicion_id: plazo.condicion_id || null,
       });
     } else {
       if (!clienteSel) return setError('Selecciona o crea un cliente');
@@ -437,6 +447,9 @@ export function ModalPrestamo({ open, onClose }) {
         cliente_id:          clienteSel.id,
         aplicar_saldo_favor: aplicarSaldo,
         items:               buildItems(),
+        // Sin fecha el backend crea el préstamo sin plazo y por tanto sin mora.
+        fecha_limite:      plazo.fecha_limite || null,
+        mora_condicion_id: plazo.condicion_id || null,
       });
     }
   };
@@ -483,6 +496,19 @@ export function ModalPrestamo({ open, onClose }) {
             onActualizarCantidad={actualizarCantidad}
             tarifasCfg={tarifasCfg}
             onAplicarTarifa={aplicarTarifa}
+          />
+        )}
+
+        {/* Plazo de pago y mora (solo si el negocio activó la feature).
+            Aplica a todo el préstamo: es un solo acuerdo con la persona,
+            aunque se lleve varios equipos. */}
+        {items.length > 0 && (
+          <SelectorPlazo
+            config={configMora}
+            fechaLimite={plazo.fecha_limite}
+            condicionId={plazo.condicion_id}
+            onChange={setPlazo}
+            titulo="Fecha límite de pago"
           />
         )}
 

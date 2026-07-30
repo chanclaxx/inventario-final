@@ -199,7 +199,58 @@ const getDashboard = async (sucursalId) => {
       deuda_total: creditosActivos.rows[0].deuda_total,
     },
     pagos_hoy: pagosMethods.rows,
+    // Cartera vencida (feature opt-in de mora). Se cuenta a partir de la fecha
+    // límite en hora de Colombia; un documento sin plazo nunca cuenta, así que
+    // un negocio sin la feature ve ceros. Los ingresos por mora del día van
+    // aparte del margen de producto, nunca sumados a `utilidad_hoy`.
+    cartera_vencida: await _getCarteraVencida(sucursalId),
   };
+};
+
+// Documentos con el plazo ya pasado y saldo pendiente. Solo informativo para el
+// Dashboard: no calcula la mora en pesos (eso lo hace mora.util por documento),
+// solo cuántos hay y cuánto capital está vencido.
+const _getCarteraVencida = async (sucursalId) => {
+  const vacio = { creditos: 0, prestamos: 0, capital_vencido: 0 };
+  try {
+    const { rows } = await pool.query(`
+      SELECT
+        (SELECT COUNT(*)::int FROM creditos c
+          WHERE c.sucursal_id = $1 AND c.estado = 'Activo'
+            AND c.fecha_limite IS NOT NULL
+            AND c.fecha_limite < (NOW() AT TIME ZONE 'America/Bogota')::date
+            AND (c.valor_total - c.cuota_inicial - c.total_abonado) > 0
+        ) AS creditos,
+        (SELECT COUNT(*)::int FROM prestamos p
+          WHERE p.sucursal_id = $1 AND p.estado = 'Activo'
+            AND p.fecha_limite IS NOT NULL
+            AND p.fecha_limite < (NOW() AT TIME ZONE 'America/Bogota')::date
+            AND (p.valor_prestamo - p.total_abonado) > 0
+        ) AS prestamos,
+        (
+          COALESCE((SELECT SUM(c.valor_total - c.cuota_inicial - c.total_abonado) FROM creditos c
+            WHERE c.sucursal_id = $1 AND c.estado = 'Activo'
+              AND c.fecha_limite IS NOT NULL
+              AND c.fecha_limite < (NOW() AT TIME ZONE 'America/Bogota')::date
+              AND (c.valor_total - c.cuota_inicial - c.total_abonado) > 0), 0)
+          +
+          COALESCE((SELECT SUM(p.valor_prestamo - p.total_abonado) FROM prestamos p
+            WHERE p.sucursal_id = $1 AND p.estado = 'Activo'
+              AND p.fecha_limite IS NOT NULL
+              AND p.fecha_limite < (NOW() AT TIME ZONE 'America/Bogota')::date
+              AND (p.valor_prestamo - p.total_abonado) > 0), 0)
+        )::numeric AS capital_vencido
+    `, [sucursalId]);
+    return {
+      creditos:        Number(rows[0].creditos),
+      prestamos:       Number(rows[0].prestamos),
+      capital_vencido: Number(rows[0].capital_vencido),
+    };
+  } catch (err) {
+    // La columna fecha_limite puede no existir si la migración no se aplicó.
+    console.warn('[reportes] Cartera vencida no disponible:', err.message);
+    return vacio;
+  }
 };
 
 // ─── getServiciosRango ────────────────────────────────────────────────────────
@@ -334,6 +385,79 @@ const getServiciosRango = async (sucursalId, desde, hasta) => {
       por_estado:      activosPorEstado,
     },
   };
+};
+
+// ─── getMoraRango ─────────────────────────────────────────────────────────────
+//
+// Intereses de mora cobrados y mora condonada en el rango.
+//
+// IMPORTANTE: esto NO se mezcla con la utilidad del producto. La utilidad de
+// créditos y préstamos se calcula como (abonado − costo) y la mora nunca entra
+// en `total_abonado`; aquí se reporta aparte como ingreso financiero. Sumarla al
+// margen comercial distorsionaría el margen %, la Proyección y el punto de
+// equilibrio.
+//
+// La feature es opt-in y su migración va en try/catch, así que un negocio sin
+// ella (o una base donde no se aplicó) recibe ceros en lugar de un error que
+// tumbaría todo el reporte.
+const getMoraRango = async (sucursalId, desde, hasta) => {
+  const vacio = {
+    detalle: [],
+    resumen: { cobrada: 0, condonada: 0, cobros: 0, condonaciones: 0 },
+  };
+
+  try {
+    const { rows } = await pool.query(`
+      SELECT
+        mm.id, mm.tipo, mm.valor, mm.metodo, mm.motivo, mm.fecha, mm.dias_mora,
+        mm.credito_id, mm.prestamo_id,
+        u.nombre AS usuario_nombre,
+        COALESCE(f.nombre_cliente, p.prestatario) AS persona,
+        f.numero AS factura_numero,
+        p.numero AS prestamo_numero,
+        p.nombre_producto
+      FROM movimientos_mora mm
+      LEFT JOIN usuarios  u ON u.id = mm.usuario_id
+      LEFT JOIN creditos  c ON c.id = mm.credito_id
+      LEFT JOIN facturas  f ON f.id = c.factura_id
+      LEFT JOIN prestamos p ON p.id = mm.prestamo_id
+      WHERE mm.sucursal_id = $1
+        AND NOT mm.anulado
+        AND mm.fecha::date BETWEEN $2 AND $3
+      ORDER BY mm.fecha ASC
+    `, [sucursalId, desde, hasta]);
+
+    const detalle = rows.map((r) => ({
+      id:              Number(r.id),
+      tipo:            r.tipo,
+      valor:           Number(r.valor),
+      metodo:          r.metodo,
+      motivo:          r.motivo,
+      fecha:           r.fecha,
+      dias_mora:       r.dias_mora != null ? Number(r.dias_mora) : null,
+      persona:         r.persona,
+      usuario_nombre:  r.usuario_nombre,
+      // De dónde viene: una factura a crédito o un préstamo.
+      origen:          r.credito_id != null ? 'credito' : 'prestamo',
+      documento:       r.credito_id != null ? r.factura_numero : r.prestamo_numero,
+      nombre_producto: r.nombre_producto || null,
+    }));
+
+    const suma = (t) => detalle.filter((d) => d.tipo === t).reduce((s, d) => s + d.valor, 0);
+
+    return {
+      detalle,
+      resumen: {
+        cobrada:       suma('Cobro'),
+        condonada:     suma('Condonacion'),
+        cobros:        detalle.filter((d) => d.tipo === 'Cobro').length,
+        condonaciones: detalle.filter((d) => d.tipo === 'Condonacion').length,
+      },
+    };
+  } catch (err) {
+    console.warn('[reportes] Mora no incluida en el reporte:', err.message);
+    return vacio;
+  }
 };
 
 // ─── getVentasRango ───────────────────────────────────────────────────────────
@@ -508,6 +632,8 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
   const servicios = await getServiciosRango(sucursalId, desde, hasta);
 
   if (!facturas.length) {
+    // Sin ventas puede haber igual cobros de mora de créditos viejos, así que la
+    // mora se consulta también aquí y la forma del objeto se mantiene idéntica.
     return {
       facturas: [],
       resumen:  null,
@@ -518,6 +644,7 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
         activos:  { total: 0, saldo_pendiente: 0 },
         resumen:  { utilidad_confirmada: 0, total_saldados: 0 },
       },
+      mora: await getMoraRango(sucursalId, desde, hasta),
     };
   }
 
@@ -811,6 +938,14 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
     },
   };
 
+  // ── Mora (feature opt-in) ─────────────────────────────────────────────────
+  //
+  // Va en su PROPIO renglón y NO se suma a la utilidad del producto. La utilidad
+  // de créditos y préstamos se calcula como (abonado − costo); la mora nunca
+  // entra en `total_abonado`, así que aquí solo se reporta como lo que es: un
+  // ingreso financiero, más lo que se dejó de cobrar.
+  const mora = await getMoraRango(sucursalId, desde, hasta);
+
   const resumen = {
     total_ventas:               facturasCompletas.reduce((s, f) => s + f.total_venta, 0),
     total_facturas:             facturasCompletas.length,
@@ -820,9 +955,12 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
     facturas_credito:           soloCreditos.length,
     utilidad_pendiente:         0,
     utilidad_creditos_saldados: utilidadCreditosSaldados,
+    // Ingreso financiero, separado del margen comercial a propósito.
+    ingresos_mora:              mora.resumen.cobrada,
+    mora_condonada:             mora.resumen.condonada,
   };
 
-  return { facturas: facturasCompletas, resumen, prestamos, servicios, creditos: creditosData };
+  return { facturas: facturasCompletas, resumen, prestamos, servicios, creditos: creditosData, mora };
 };
 
 // ─── getProductosTop ──────────────────────────────────────────────────────────
@@ -1753,6 +1891,7 @@ const eliminarGastoFijo = async (sucursalId, id) => {
 module.exports = {
   getDashboard,
   getVentasRango,
+  getMoraRango,
   getServiciosRango,
   getAnalisis,
   getProyeccion,

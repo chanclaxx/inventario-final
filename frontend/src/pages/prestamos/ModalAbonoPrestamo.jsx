@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
-import { Calculator }         from 'lucide-react';
+import { Calculator, AlertTriangle, Printer } from 'lucide-react';
 import { Modal }              from '../../components/ui/Modal';
 import { Button }             from '../../components/ui/Button';
 import { InputMoneda }        from '../../components/ui/InputMoneda';
@@ -8,10 +8,12 @@ import { Calculadora }        from '../../components/ui/Calculadora';
 import { formatCOP }          from '../../utils/formatters';
 import { ModalImprimirFactura } from '../../components/ui/ModalImprimirFactura';
 import { FacturaTermica }     from '../../components/FacturaTermica';
+import { ReciboAbono }        from '../../components/ReciboAbono';
 import { registrarAbonoPrestamo } from '../../api/prestamos.api';
 import { getFacturaById }         from '../../api/facturas.api';
 import { getGarantiasPorFactura } from '../../api/garantias.api';
 import { useMetodosPago }         from '../../hooks/useMetodosPago';
+import { MODOS_ABONO }            from '../../utils/mora';
 import api from '../../api/axios.config';
 
 function useConfigColores() {
@@ -77,29 +79,89 @@ export function ModalAbonoPrestamo({ prestamo, onClose }) {
   const [pantalla,   setPantalla]= useState('abono'); // 'abono' | 'confirmar' | 'imprimir' | 'pos'
   const [facturaId,  setFacturaId]  = useState(null);
   const [datosPos,   setDatosPos]   = useState(null); // { factura, garantias }
+  // Imputación del abono cuando el préstamo tiene mora pendiente.
+  const [modo,      setModo]      = useState('mora_capital');
+  const [valorMora, setValorMora] = useState('');
+  // Datos para el recibo de abono con desglose capital/mora.
+  const [datosRecibo, setDatosRecibio] = useState(null);
+
+  // Config del negocio para los parámetros de la impresora térmica. Se pide
+  // aquí y no dentro de useFacturaSaldada porque ese solo carga si hubo factura,
+  // y el recibo del abono puede imprimirse sin que el préstamo se salde.
+  const { data: configImpresion } = useQuery({
+    queryKey: ['config'],
+    queryFn:  () => api.get('/config').then((r) => r.data.data),
+    staleTime: 5 * 60 * 1000,
+  });
 
   const { facturaConConfig, garantias } = useFacturaSaldada(facturaId);
 
   const saldoPendiente    = Number(prestamo.valor_prestamo) - Number(prestamo.total_abonado);
   const mostrarColores    = coloresActivo && !!prestamo.imei && colores.length > 0;
+  const moraPendiente     = Number(prestamo.mora?.pendiente || 0);
 
   const mutation = useMutation({
-    mutationFn: () => registrarAbonoPrestamo(prestamo.id, Number(valor), metodo, color || null),
+    mutationFn: () => registrarAbonoPrestamo(prestamo.id, Number(valor), metodo, color || null, {
+      modo,
+      valor_mora: modo === 'personalizado' ? Number(valorMora || 0) : 0,
+    }),
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ['prestamos'], exact: false });
       queryClient.invalidateQueries({ queryKey: ['facturas'],  exact: false });
       const data = res.data?.data;
+
+      // Datos del recibo: se guardan aquí porque el backend es el que sabe cómo
+      // quedó repartido el pago entre capital y mora.
+      setDatosRecibio({
+        abono: {
+          valor:          Number(valor),
+          capital:        Number(data?.abonado_capital ?? valor),
+          mora:           Number(data?.abonado_mora ?? 0),
+          metodo,
+          fecha:          new Date(),
+          saldo_antes:    saldoPendiente,
+          saldo_despues:  Math.max(0, Number(data?.valor_prestamo ?? 0) - Number(data?.total_abonado ?? 0)),
+          mora_pendiente: Number(data?.mora?.pendiente ?? 0),
+        },
+        deuda: {
+          tipo: 'prestamo', numero: prestamo.numero ?? prestamo.id,
+          persona: prestamo.prestatario, cedula: prestamo.cedula,
+          descripcion: prestamo.nombre_producto,
+          fecha_limite: data?.mora?.fecha_limite ?? prestamo.mora?.fecha_limite ?? null,
+          dias_mora:    data?.mora?.dias_vencidos ?? 0,
+        },
+      });
+
       if (data?.saldado && data?.factura_id) {
         // Primero seteamos el id para que las queries arranquen inmediatamente
         setFacturaId(data.factura_id);
         // Pequeño delay para que React procese el estado antes de cambiar pantalla
         setTimeout(() => setPantalla('confirmar'), 0);
       } else {
-        onClose();
+        // Si hubo mora en el pago, se ofrece el recibo con el desglose; si no,
+        // el flujo queda igual que antes (se cierra sin fricción).
+        if (Number(data?.abonado_mora ?? 0) > 0) setPantalla('recibo');
+        else onClose();
       }
     },
     onError: (err) => setError(err.response?.data?.error || 'Error al registrar abono'),
   });
+
+  // Un préstamo se salda cuando el CAPITAL queda cubierto, aunque quede mora.
+  // Si va a pasar eso, se avisa ANTES de registrar: el equipo se marca vendido y
+  // se genera la factura, y después la mora solo se puede cobrar con "cobrar
+  // mora" (ya no con un abono, porque el préstamo deja de estar activo).
+  const repartoPrevisto = (() => {
+    const v = Number(valor || 0);
+    if (v <= 0) return { a_mora: 0, a_capital: 0 };
+    const aMora = modo === 'solo_capital' ? 0
+      : modo === 'personalizado' ? Math.min(Number(valorMora || 0), moraPendiente, v)
+      : Math.min(moraPendiente, v);
+    return { a_mora: aMora, a_capital: Math.min(saldoPendiente, v - aMora) };
+  })();
+  const saldariaConMora = moraPendiente > 0
+    && repartoPrevisto.a_capital >= saldoPendiente
+    && repartoPrevisto.a_mora < moraPendiente;
 
   const handleRegistrar = () => {
     setError('');
@@ -122,7 +184,43 @@ export function ModalAbonoPrestamo({ prestamo, onClose }) {
               <span className="text-xs text-gray-400">Saldo pendiente</span>
               <span className="text-sm font-bold text-red-500">{formatCOP(saldoPendiente)}</span>
             </div>
+            {moraPendiente > 0 && (
+              <div className="flex justify-between">
+                <span className="text-xs text-amber-600">
+                  + mora ({prestamo.mora.dias_vencidos} día{prestamo.mora.dias_vencidos === 1 ? '' : 's'} de atraso)
+                </span>
+                <span className="text-sm font-bold text-amber-600">{formatCOP(moraPendiente)}</span>
+              </div>
+            )}
           </div>
+
+          {/* Cómo se reparte el pago. Solo aparece si hay mora que repartir. */}
+          {moraPendiente > 0 && (
+            <div className="flex flex-col gap-2">
+              <span className="text-xs font-medium text-gray-600">¿A qué se aplica el pago?</span>
+              <div className="flex gap-1 bg-gray-100 p-1 rounded-xl">
+                {MODOS_ABONO.map((o) => (
+                  <button key={o.id} type="button" onClick={() => setModo(o.id)}
+                    className={`flex-1 py-1.5 px-1 rounded-lg text-[11px] font-medium transition-all
+                      ${modo === o.id ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}>
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+              <span className="text-[11px] text-gray-400">
+                {MODOS_ABONO.find((o) => o.id === modo)?.descripcion}
+              </span>
+              {modo === 'personalizado' && (
+                <div className="flex flex-col gap-1">
+                  <label className="text-[11px] text-gray-500">Cuánto va a la mora</label>
+                  <InputMoneda value={valorMora} onChange={setValorMora} placeholder="0"
+                    className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm
+                      focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="flex flex-col gap-1">
             <div className="flex items-center justify-between">
               <label className="text-sm font-medium text-gray-700">Valor del abono</label>
@@ -190,6 +288,24 @@ export function ModalAbonoPrestamo({ prestamo, onClose }) {
               </div>
             </div>
           )}
+          {/* Aviso: este abono cierra el préstamo pero deja mora sin cobrar */}
+          {saldariaConMora && (
+            <div className="flex gap-2.5 bg-amber-50 border border-amber-200 rounded-xl p-3">
+              <AlertTriangle size={15} className="text-amber-500 flex-shrink-0 mt-0.5" />
+              <div className="flex flex-col gap-1">
+                <p className="text-xs font-semibold text-amber-800">
+                  Con este pago el préstamo queda saldado, pero quedarán{' '}
+                  {formatCOP(moraPendiente - repartoPrevisto.a_mora)} de mora sin cobrar
+                </p>
+                <p className="text-xs text-amber-700">
+                  El equipo se marcará como vendido y se generará la factura. Después ya no
+                  podrás registrar abonos: la mora solo se podrá cobrar con el botón
+                  “Cobrar mora”, o condonarla.
+                </p>
+              </div>
+            </div>
+          )}
+
           {error && <p className="text-sm text-red-500">{error}</p>}
           <div className="flex gap-2">
             <Button variant="secondary" className="flex-1" onClick={onClose}>Cancelar</Button>
@@ -199,6 +315,18 @@ export function ModalAbonoPrestamo({ prestamo, onClose }) {
           </div>
         </div>
       </Modal>
+    );
+  }
+
+  // ── Pantalla: recibo del abono con desglose capital/mora ──────────────────
+  if (pantalla === 'recibo') {
+    return (
+      <ReciboAbono
+        abono={datosRecibo?.abono}
+        deuda={datosRecibo?.deuda}
+        config={configImpresion}
+        onClose={onClose}
+      />
     );
   }
 
@@ -215,6 +343,17 @@ export function ModalAbonoPrestamo({ prestamo, onClose }) {
               {prestamo.nombre_producto} — {prestamo.prestatario}
             </p>
           </div>
+          {/* Si el pago incluyó mora, se ofrece el recibo con el desglose: es el
+              comprobante de que los intereses se cobraron. */}
+          {Number(datosRecibo?.abono?.mora || 0) > 0 && (
+            <button
+              onClick={() => setPantalla('recibo')}
+              className="flex items-center justify-center gap-1.5 text-xs font-medium
+                text-blue-600 hover:text-blue-700"
+            >
+              <Printer size={13} /> Imprimir recibo del abono (capital y mora)
+            </button>
+          )}
           <p className="text-sm text-gray-600 text-center">
             ¿Deseas generar una factura por este pago?
           </p>

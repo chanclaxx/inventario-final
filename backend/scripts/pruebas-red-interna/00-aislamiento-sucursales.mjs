@@ -153,7 +153,10 @@ ok('★ Utilidad de Centro = 2.600.000 − 1.800.000',
    Number(dashCentro.utilidad_hoy) === 800000, money(dashCentro.utilidad_hoy));
 ok('★ Utilidad de Norte = 0', Number(dashNorte.utilidad_hoy) === 0);
 
-const hoy = new Date().toISOString().slice(0, 10);
+// La fecha del negocio es la de Colombia, no la UTC: entre las 19:00 y la
+// medianoche de Bogotá `toISOString()` ya devuelve el día siguiente y el rango
+// dejaba fuera las facturas de hoy, haciendo fallar la suite cada tarde.
+const hoy = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
 const ventasCentro = await svcReportes.getVentasRango(1, hoy, hoy);
 const ventasNorte  = await svcReportes.getVentasRango(2, hoy, hoy);
 ok('★ Centro reporta 1 factura', ventasCentro.facturas.length === 1);

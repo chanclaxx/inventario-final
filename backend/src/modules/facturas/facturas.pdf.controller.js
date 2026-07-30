@@ -31,7 +31,15 @@ const getPdfFactura = async (req, res, next) => {
     // Carga garantías activas para este negocio
     const garantias = await garantiasRepo.findPorFactura(factura.id);
 
-    generarPdfFactura({ factura, config, garantias, res });
+    // Si la venta es a crédito y tiene plazo pactado, el PDF imprime las
+    // condiciones (fecha límite e interés de mora) junto a la firma: en Colombia
+    // el interés moratorio solo es exigible si se pactó por escrito.
+    //
+    // `getFacturaById` ya devuelve el crédito con su mora resuelta; sin plazo
+    // pactado el bloque no se dibuja y el PDF sale exactamente como antes.
+    const credito = factura.credito?.fecha_limite ? factura.credito : null;
+
+    generarPdfFactura({ factura, config, garantias, credito, res });
   } catch (err) {
     next(err);
   }

@@ -50,6 +50,59 @@ const _validarTarifasLista = (raw) => {
   }
 };
 
+// ── Validación de condiciones de mora ────────────────────────────────────────
+// Aquí no se re-implementa la validación: se reutiliza `normalizarCondicion` de
+// mora.util, que es la MISMA función que usa el cálculo. Así es imposible que
+// se guarde una condición que el motor luego descarte en silencio (y que el
+// negocio crea que está cobrando mora cuando no).
+const { normalizarCondicion, MAX_CONDICIONES } = require('../../utils/mora.util');
+
+const _validarMoraLista = (raw) => {
+  let lista;
+  try {
+    lista = JSON.parse(raw);
+  } catch {
+    throw { status: 400, message: 'La lista de condiciones de mora no es un JSON válido' };
+  }
+  if (!Array.isArray(lista)) {
+    throw { status: 400, message: 'La lista de condiciones de mora debe ser un arreglo' };
+  }
+  if (lista.length > MAX_CONDICIONES) {
+    throw { status: 400, message: `No puedes tener más de ${MAX_CONDICIONES} condiciones de mora` };
+  }
+
+  const ids = new Set();
+  for (const cruda of lista) {
+    const c = normalizarCondicion(cruda);
+    if (!c) {
+      const etiqueta = cruda?.nombre ? `"${cruda.nombre}"` : 'una de las condiciones';
+      throw {
+        status: 400,
+        message: `Revisa ${etiqueta}: necesita nombre y un valor válido `
+          + `(porcentaje mensual entre 0 y 100, o un valor fijo por día).`,
+      };
+    }
+    if (typeof cruda.id !== 'string' || !cruda.id.trim()) {
+      throw { status: 400, message: `La condición "${c.nombre}" no tiene identificador` };
+    }
+    if (ids.has(c.id)) {
+      throw { status: 400, message: `Hay dos condiciones de mora con el mismo identificador (${c.id})` };
+    }
+    ids.add(c.id);
+  }
+};
+
+// El techo de aviso existe para no pasarse de la tasa de usura, que publica la
+// Superintendencia Financiera cada mes. No se valida contra un valor fijo aquí
+// a propósito: ese número cambia y quedaría desactualizado en el código.
+const _validarTechoMora = (raw) => {
+  const v = Number(raw);
+  if (raw === '' || raw === null) return;
+  if (!Number.isFinite(v) || v <= 0 || v > 100) {
+    throw { status: 400, message: 'El techo de la tasa de mora debe ser un porcentaje mensual entre 0 y 100' };
+  }
+};
+
 const getConfig = (negocioId) => repo.getMap(negocioId);
 
 const saveConfig = async (negocioId, datos) => {
@@ -57,6 +110,12 @@ const saveConfig = async (negocioId, datos) => {
 
   if (datosProcesados.tarifas_lista !== undefined) {
     _validarTarifasLista(String(datosProcesados.tarifas_lista));
+  }
+  if (datosProcesados.mora_lista !== undefined) {
+    _validarMoraLista(String(datosProcesados.mora_lista));
+  }
+  if (datosProcesados.mora_tope_tasa_mensual !== undefined) {
+    _validarTechoMora(datosProcesados.mora_tope_tasa_mensual);
   }
 
   // Hashear las claves privadas antes de persistir

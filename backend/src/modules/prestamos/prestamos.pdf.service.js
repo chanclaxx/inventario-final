@@ -524,6 +524,87 @@ const _tablaAbonos = (doc, abonos, y) => {
 
 // ── Bloque de totales ─────────────────────────────────────────────────────────
 
+// ─── Condiciones de pago y firma (solo si hay plazo pactado) ─────────────────
+//
+// La mora solo es exigible si se pactó por escrito, así que cuando el préstamo
+// tiene fecha límite el comprobante imprime el plazo, el interés y una línea de
+// firma con la identificación de quien recibe. Un préstamo sin plazo (lo normal
+// hasta ahora, y siempre para los compañeros) no muestra nada de esto.
+const _bloqueCondicionesCredito = (doc, prestamo, mora, y) => {
+  if (!prestamo?.fecha_limite) return y;
+
+  const cond  = prestamo.mora_condicion || null;
+  const saldo = Number(prestamo.valor_prestamo) - Number(prestamo.total_abonado || 0);
+  const fechaEs = (() => {
+    const f = String(prestamo.fecha_limite).slice(0, 10);
+    const [a, m, d] = f.split('-');
+    return `${d}/${m}/${a}`;
+  })();
+
+  y = labelSeccion(doc, y, 'Condiciones de pago');
+
+  const filas = [
+    { label: 'Saldo a pagar',        val: formatCOP(Math.max(0, saldo)) },
+    { label: 'Fecha límite de pago', val: fechaEs },
+  ];
+  if (cond) {
+    filas.push({
+      label: 'Interés por mora',
+      val: cond.tipo === 'diaria_fija'
+        ? `${formatCOP(cond.valor)} por día de atraso`
+        : `${cond.valor}% mensual sobre el saldo`,
+    });
+    if (Number(cond.dias_gracia) > 0) {
+      filas.push({ label: 'Días de gracia', val: `${cond.dias_gracia} día(s)` });
+    }
+  }
+  if (mora?.vencido && mora.pendiente > 0) {
+    filas.push({ label: 'Días de atraso',  val: String(mora.dias_vencidos) });
+    filas.push({ label: 'Mora a la fecha', val: formatCOP(mora.pendiente) });
+  }
+
+  const altBloque = 16 + filas.length * 16;
+  rectFillStroke(doc, MARGIN, y, COL_WIDTH, altBloque, C.grisFondo, C.grisBorde, 8);
+  let yFila = y + 8;
+  filas.forEach((f, i) => {
+    if (i > 0) hLine(doc, yFila - 3, { x1: MARGIN + 14, x2: PAGE_WIDTH - MARGIN - 14, color: C.grisBorde, width: 0.4 });
+    doc.font(FONT.normal).fontSize(8.5).fillColor(C.grisOscuro)
+      .text(f.label, MARGIN + 14, yFila, { width: COL_WIDTH * 0.55, lineBreak: false });
+    doc.font(FONT.bold).fontSize(8.5).fillColor(C.negro)
+      .text(f.val, MARGIN, yFila, { width: COL_WIDTH - 14, align: 'right', lineBreak: false });
+    yFila += 16;
+  });
+  y += altBloque + 8;
+
+  doc.font(FONT.normal).fontSize(7.5).fillColor(C.grisClaro)
+    .text(
+      cond
+        ? 'Declaro conocer y aceptar el plazo y el interés de mora aquí pactados. La mora se '
+          + 'liquida sobre el saldo pendiente, por los días de atraso.'
+        : 'Declaro conocer y aceptar el plazo de pago aquí pactado.',
+      MARGIN + 2, y, { width: COL_WIDTH - 4 },
+    );
+  y += 26;
+
+  // Línea de firma con identificación
+  const fx1 = MARGIN + 40;
+  const fx2 = MARGIN + 240;
+  doc.moveTo(fx1, y).lineTo(fx2, y).strokeColor(C.grisBorde).lineWidth(0.75).stroke();
+  doc.font(FONT.bold).fontSize(8).fillColor(C.negro)
+    .text('Firma de quien recibe', fx1, y + 5, { width: fx2 - fx1, align: 'center' });
+  const ident = [
+    prestamo.cliente_nombre || prestamo.prestatario,
+    (prestamo.cliente_cedula || prestamo.cedula) && prestamo.cedula !== 'COMPANERO'
+      ? `C.C. ${prestamo.cliente_cedula || prestamo.cedula}` : null,
+  ].filter(Boolean).join('  ·  ');
+  if (ident) {
+    doc.font(FONT.normal).fontSize(7.5).fillColor(C.grisClaro)
+      .text(ident, fx1, y + 17, { width: fx2 - fx1, align: 'center' });
+  }
+
+  return y + 34;
+};
+
 const _bloqueTotales = (doc, prestamo, y) => {
   const saldo      = Number(prestamo.valor_prestamo) - Number(prestamo.total_abonado);
   const esSaldado  = saldo <= 0;
@@ -654,6 +735,19 @@ const generarPdfPrestamoIndividual = async ({ prestamoId, negocioId, negocioNomb
   const abonos    = await repo.getAbonos(prestamoId);
   const garantias = await repo.getGarantiasPorPrestamo(datos.imei, datos.producto_id, negocioId);
 
+  // Estado de mora, solo si el préstamo tiene plazo pactado. Va en try/catch
+  // porque la migración de mora puede no estar aplicada en una base vieja: el
+  // comprobante debe salir igual, solo sin el bloque de condiciones.
+  let mora = null;
+  if (datos.fecha_limite) {
+    try {
+      const moraService = require('../mora/mora.service');
+      ({ mora } = await moraService.estadoDe('prestamo', prestamoId, negocioId));
+    } catch (err) {
+      console.warn('[pdf-prestamo] Mora no incluida:', err.message);
+    }
+  }
+
   const fechaGeneracion = new Date().toLocaleDateString('es-CO', {
     day: '2-digit', month: '2-digit', year: 'numeric',
     hour: '2-digit', minute: '2-digit', timeZone: 'America/Bogota',
@@ -672,6 +766,7 @@ const generarPdfPrestamoIndividual = async ({ prestamoId, negocioId, negocioNomb
   y     = _tablaDatosProducto(doc, datos, y);
   y     = _tablaAbonos(doc, abonos, y);
   y     = _bloqueTotales(doc, datos, y);
+  y     = _bloqueCondicionesCredito(doc, datos, mora, y);
   y     = _bloqueGarantias(doc, garantias, y);
 
   const totalPages = doc.bufferedPageRange().count;

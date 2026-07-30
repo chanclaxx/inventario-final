@@ -24,6 +24,7 @@ import { useSucursalKey }    from '../../hooks/useSucursalKey';
 import api                   from '../../api/axios.config';
 import useCarritoStore       from '../../store/carritoStore';
 import { useTarifas }        from '../../hooks/useTarifas';
+import { useMora }           from '../../hooks/useMora';
 import { TarifaItem }        from '../../components/ui/SelectorTarifa';
 import { SeccionCredito, CREDITO_VACIO } from './SeccionCredito';
 import {
@@ -154,6 +155,10 @@ function buildPayloadFactura({ tipoCliente, form, items, totalNeto, metodosSelec
     domicilio:      domicilioPayload,
     es_credito:     credito.activo || false,
     cuota_inicial:  credito.activo ? Number(credito.cuota_inicial || 0) : 0,
+    // Plazo de pago: solo viaja si la venta es a crédito Y se puso fecha. Sin
+    // fecha el backend crea el crédito sin plazo y por tanto sin mora.
+    fecha_limite:      credito.activo ? (credito.fecha_limite || null) : null,
+    mora_condicion_id: credito.activo ? (credito.condicion_id || null) : null,
     vendedor_id:    vendedorId || null,
   };
 }
@@ -782,6 +787,10 @@ export function ModalFactura({ open, onClose }) {
   // volver al carrito. Con la feature apagada `activo` es false y no se pinta.
   const tarifasCfg = useTarifas();
 
+  // Plazo de pago y mora. Apagada la feature, `activa` es false y el selector
+  // de plazo no se renderiza.
+  const configMora = useMora();
+
   const [facturaCreada,        setFacturaCreada]        = useState(null);
   const [mostrarImpresion,     setMostrarImpresion]     = useState(false);
   const [tipoCliente,          setTipoCliente]          = useState('cliente');
@@ -1256,6 +1265,7 @@ export function ModalFactura({ open, onClose }) {
           <SeccionCredito
             credito={credito}
             totalNeto={totalNeto}
+            configMora={configMora}
             onChange={(nuevoCredito) => {
               setCredito(nuevoCredito);
               if (nuevoCredito.activo && !credito.activo) {

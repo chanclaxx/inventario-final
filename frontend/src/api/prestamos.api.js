@@ -3,8 +3,9 @@ import api from './axios.config';
 export const getPrestamos = () => api.get('/prestamos');
 export const getPrestamoById = (id) => api.get(`/prestamos/${id}`);
 export const crearPrestamo = (data) => api.post('/prestamos', data);
-export const registrarAbonoPrestamo = (id, valor, metodo, color = null) =>
-  api.post(`/prestamos/${id}/abonos`, { valor, metodo, ...(color && { color }) });
+// `extra` lleva la imputación cuando hay mora: { modo, valor_mora }.
+export const registrarAbonoPrestamo = (id, valor, metodo, color = null, extra = {}) =>
+  api.post(`/prestamos/${id}/abonos`, { valor, metodo, ...(color && { color }), ...extra });
 export const devolverPrestamo = (id) => api.patch(`/prestamos/${id}/devolver`);
 export const crearPrestamos = (data) => api.post('/prestamos/batch', data);
 export const devolverParcialPrestamo = (id, cantidad_devuelta) =>
@@ -44,7 +45,27 @@ export const descargarPdfPrestamosActivos = (tipo, id) =>
 export const descargarPdfEstadoCuenta = (tipo, id) =>
   api.get(`/prestamos/pdf/${tipo}/${id}/estado-cuenta`, { responseType: 'blob' });
 
-export const registrarAbonoTotal = (tipo, personaId, valor_total, metodo) =>
-  api.post(`/prestamos/personas/${tipo}/${personaId}/abono-total`, { valor_total, metodo });
+// `modo` reparte el abono total dentro de cada préstamo (mora/capital);
+// `distribucion_manual` es opcional: { [prestamo_id]: valor } y debe sumar el total.
+export const registrarAbonoTotal = (tipo, personaId, valor_total, metodo, extra = {}) =>
+  api.post(`/prestamos/personas/${tipo}/${personaId}/abono-total`, { valor_total, metodo, ...extra });
 export const modificarAbonoTotal = (abonoTotalId, valor_total, metodo) =>
   api.patch(`/prestamos/abonos-totales/${abonoTotalId}`, { valor_total, metodo });
+
+// ── Mora (feature opt-in) ────────────────────────────────────────────────────
+
+/** Fija, cambia o quita el plazo. `fecha_limite: null` lo quita. */
+export const fijarPlazoPrestamo = (id, { fecha_limite, condicion_id }) =>
+  api.patch(`/prestamos/${id}/plazo`, { fecha_limite, condicion_id });
+
+/** Cobra mora sin tocar el capital. Sin `valor` cobra todo lo pendiente. */
+export const cobrarMoraPrestamo = (id, { valor, metodo }) =>
+  api.post(`/prestamos/${id}/mora/cobrar`, { valor, metodo });
+
+/**
+ * Condona mora. Solo admin; exige motivo y PIN. Sin `valor` condona todo.
+ * `quitar_plazo` además borra la fecha límite, para que no se vuelva a causar
+ * mora (condonar solo perdona lo acumulado hasta hoy).
+ */
+export const condonarMoraPrestamo = (id, { valor, motivo, pin, quitar_plazo }) =>
+  api.post(`/prestamos/${id}/mora/condonar`, { valor, motivo, pin, quitar_plazo });
