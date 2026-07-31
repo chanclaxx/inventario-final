@@ -4,6 +4,7 @@ import {
   getCreditos, getCreditoById,
   registrarAbonoCredito, saldarCredito, cancelarCredito,
   fijarPlazoCredito, cobrarMoraCredito, condonarMoraCredito,
+  getEstadoCuentaCredito, descargarPdfEstadoCuentaCredito,
 } from '../../api/creditos.api';
 import { getFacturaById }          from '../../api/facturas.api';
 import { getGarantiasPorFactura }  from '../../api/garantias.api';
@@ -23,8 +24,11 @@ import { ModalImprimirFactura } from '../../components/ui/ModalImprimirFactura';
 import { FacturaTermica }       from '../../components/FacturaTermica';
 import { ReciboAbono }          from '../../components/ReciboAbono';
 import { ModalDevolucionParcialCredito } from '../facturas/ModalDevolucionParcialCredito';
+import { ModalExportarCuenta }   from '../../components/ui/ModalExportarCuenta';
+import { EstadoCuentaCredito }   from './EstadoCuentaCredito';
+import { exportarCuentaCreditoExcel } from '../../utils/exportarCuentaCreditoExcel';
 import {
-  CreditCard, Plus, CheckCircle, XCircle, AlertTriangle,
+  CreditCard, Plus, CheckCircle, XCircle, AlertTriangle, LayoutList, FileDown,
   ChevronLeft, ChevronDown, ChevronUp, RotateCcw, ChevronRight, Loader2, Printer,
 } from 'lucide-react';
 
@@ -599,12 +603,81 @@ function TarjetaCreditoDetalle({
   );
 }
 
+// ─── Exportaciones (mismo par de botones que en Préstamos) ───────────────────
+
+function BotonExportarPdfCredito({ clave, nombre }) {
+  const [modalAbierto, setModalAbierto] = useState(false);
+
+  const opciones = [{
+    id:          'cuenta',
+    Icn:         LayoutList,
+    titulo:      'Estado de cuenta',
+    descripcion: 'Todos los movimientos (facturas, cuotas iniciales, abonos, devoluciones y ajustes) con saldo acumulado en 5 columnas.',
+    color:       'purple',
+    archivo:     `estado-cuenta-${nombre || clave}.pdf`,
+    descargar:   () => descargarPdfEstadoCuentaCredito(clave),
+  }];
+
+  return (
+    <>
+      <button
+        onClick={(e) => { e.stopPropagation(); setModalAbierto(true); }}
+        className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium
+          border border-blue-200 text-blue-600 bg-blue-50 hover:bg-blue-100
+          hover:border-blue-300 transition-colors flex-shrink-0">
+        <FileDown size={12} />
+        PDF
+      </button>
+      {modalAbierto && (
+        <ModalExportarCuenta
+          opciones={opciones}
+          personaNombre={nombre}
+          onClose={() => setModalAbierto(false)}
+        />
+      )}
+    </>
+  );
+}
+
+function BotonExportarExcelCredito({ clave, nombre, cedula, telefono, creditos }) {
+  const [cargando, setCargando] = useState(false);
+
+  // Los movimientos se piden al backend en el momento: así el Excel sale con
+  // exactamente las mismas cifras que la pestaña Estado de cuenta y el PDF.
+  const handleClick = async (e) => {
+    e.stopPropagation();
+    if (cargando) return;
+    setCargando(true);
+    try {
+      const res = await getEstadoCuentaCredito(clave);
+      exportarCuentaCreditoExcel({
+        nombre, cedula, telefono, creditos, movimientos: res.data.data || [],
+      });
+    } catch {
+      alert('No se pudo generar el Excel. Intenta de nuevo.');
+    } finally {
+      setCargando(false);
+    }
+  };
+
+  return (
+    <button onClick={handleClick} disabled={cargando}
+      className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium
+        border border-emerald-200 text-emerald-700 bg-emerald-50 hover:bg-emerald-100
+        hover:border-emerald-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0">
+      {cargando ? <Loader2 size={12} className="animate-spin" /> : <FileDown size={12} />}
+      Excel
+    </button>
+  );
+}
+
 // ─── Vista detalle de persona ─────────────────────────────────────────────────
 
 function VistaDetallePersonaCredito({
   persona, onVolver, onAbonar, onSaldar, onCancelar, onDevolucion, onImprimir,
 }) {
   const [cerradosAbiertos, setCerradosAbiertos] = useState(false);
+  const [tabDetalle,       setTabDetalle]       = useState('creditos'); // 'creditos' | 'cuenta'
 
   const creditosActivos  = persona.creditos.filter((c) => c.estado === 'Activo');
   const creditosCerrados = persona.creditos.filter((c) => c.estado !== 'Activo');
@@ -648,6 +721,16 @@ function VistaDetallePersonaCredito({
               {persona.celular && <p className="text-xs text-gray-400">Tel: {persona.celular}</p>}
             </div>
           </div>
+          <div className="flex items-center gap-1.5 flex-shrink-0">
+            <BotonExportarPdfCredito clave={persona.key} nombre={persona.nombre_cliente} />
+            <BotonExportarExcelCredito
+              clave={persona.key}
+              nombre={persona.nombre_cliente}
+              cedula={persona.cedula}
+              telefono={persona.celular}
+              creditos={persona.creditos}
+            />
+          </div>
         </div>
 
         {/* Métricas */}
@@ -666,6 +749,29 @@ function VistaDetallePersonaCredito({
           </div>
         </div>
       </div>
+
+      {/* Tabs: Créditos / Estado de cuenta — mismo patrón que Préstamos */}
+      <div className="flex gap-1 bg-gray-100 p-1 rounded-xl w-fit">
+        {[
+          { id: 'creditos', label: 'Créditos' },
+          { id: 'cuenta',   label: 'Estado de cuenta' },
+        ].map((tab) => (
+          <button key={tab.id} onClick={() => setTabDetalle(tab.id)}
+            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all
+              ${tabDetalle === tab.id
+                ? 'bg-white text-gray-900 shadow-sm'
+                : 'text-gray-500 hover:text-gray-700'}`}>
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {/* ── Tab: Estado de cuenta ── */}
+      {tabDetalle === 'cuenta' && <EstadoCuentaCredito clave={persona.key} />}
+
+      {/* ── Tab: Créditos ── */}
+      {tabDetalle === 'creditos' && (
+        <>
 
       {/* Créditos activos */}
       {creditosActivos.length > 0 && (
@@ -729,6 +835,9 @@ function VistaDetallePersonaCredito({
             </div>
           )}
         </div>
+      )}
+
+        </>
       )}
     </div>
   );

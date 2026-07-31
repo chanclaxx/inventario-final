@@ -13,6 +13,17 @@ export const saldarCredito = (creditoId) =>
 export const cancelarCredito = (creditoId) =>
   api.patch(`/creditos/${creditoId}/cancelar`);
 
+// ── Estado de cuenta ─────────────────────────────────────────────────────────
+//
+// `clave` identifica al cliente igual que la pantalla agrupa sus tarjetas:
+// la cédula si la tiene, y si no el nombre.
+
+export const getEstadoCuentaCredito = (clave) =>
+  api.get('/creditos/estado-cuenta', { params: { clave } });
+
+export const descargarPdfEstadoCuentaCredito = (clave) =>
+  api.get('/creditos/estado-cuenta/pdf', { params: { clave }, responseType: 'blob' });
+
 // ── Mora (feature opt-in) ────────────────────────────────────────────────────
 
 /** Fija, cambia o quita el plazo. `fecha_limite: null` lo quita (y con él la mora). */

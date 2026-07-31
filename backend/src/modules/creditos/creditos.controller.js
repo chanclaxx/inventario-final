@@ -1,5 +1,19 @@
-const service = require('./creditos.service');
-const audit   = require('../../utils/auditoria.util');
+const service    = require('./creditos.service');
+const pdfService = require('./creditos.pdf.service');
+const audit      = require('../../utils/auditoria.util');
+const { pool }   = require('../../config/db');
+
+// La clave del cliente es `cedula` o, si no tiene, su nombre: la misma con la
+// que la pantalla agrupa las tarjetas.
+const _clave = (req) => String(req.query.clave ?? '').trim();
+
+const _getLogoNegocio = async (negocioId) => {
+  const { rows } = await pool.query(
+    `SELECT valor FROM config_negocio WHERE negocio_id = $1 AND clave = 'logo_negocio'`,
+    [negocioId]
+  );
+  return rows[0]?.valor || null;
+};
 
 const getCreditos = async (req, res, next) => {
   try {
@@ -42,6 +56,42 @@ const cancelarCredito = async (req, res, next) => {
   try {
     await service.cancelarCredito(req.user.negocio_id, Number(req.params.id));
     res.json({ ok: true, message: 'Crédito cancelado correctamente' });
+  } catch (err) { next(err); }
+};
+
+// ── Estado de cuenta ─────────────────────────────────────────────────────────
+
+const getEstadoCuenta = async (req, res, next) => {
+  try {
+    const clave = _clave(req);
+    if (!clave) return res.status(400).json({ ok: false, error: 'Falta la cédula o el nombre del cliente' });
+
+    const sucursalId = req.todasSucursales ? null : req.sucursal_id;
+    const data = await service.getEstadoCuenta(req.user.negocio_id, clave, sucursalId);
+    res.json({ ok: true, data });
+  } catch (err) { next(err); }
+};
+
+const exportarPdfEstadoCuenta = async (req, res, next) => {
+  try {
+    const clave = _clave(req);
+    if (!clave) return res.status(400).json({ ok: false, error: 'Falta la cédula o el nombre del cliente' });
+
+    const sucursalId  = req.todasSucursales ? null : req.sucursal_id;
+    const logoNegocio = await _getLogoNegocio(req.user.negocio_id);
+
+    const pdfStream = await pdfService.generarPdfEstadoCuenta({
+      clave,
+      negocioId:     req.user.negocio_id,
+      negocioNombre: req.user?.negocio_nombre || '',
+      logoNegocio,
+      sucursalId,
+    });
+
+    const filename = `estado-cuenta-credito-${Date.now()}.pdf`;
+    res.setHeader('Content-Type',        'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    pdfStream.pipe(res);
   } catch (err) { next(err); }
 };
 
@@ -92,5 +142,6 @@ const cobrarMora = async (req, res, next) => {
 
 module.exports = {
   getCreditos, getCreditoById, registrarAbono, saldarCredito, cancelarCredito,
+  getEstadoCuenta, exportarPdfEstadoCuenta,
   fijarPlazo, condonarMora, cobrarMora,
 };

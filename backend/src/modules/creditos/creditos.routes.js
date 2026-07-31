@@ -12,6 +12,12 @@ const validarAbono = [
 
 // Créditos viven dentro del módulo de préstamos
 router.get('/',              requireModulo('prestamos'), ctrl.getCreditos);
+
+// Estado de cuenta del cliente. Van ANTES de '/:id' o Express interpretaría
+// 'estado-cuenta' como el id de un crédito.
+router.get('/estado-cuenta',     requireModulo('prestamos'), ctrl.getEstadoCuenta);
+router.get('/estado-cuenta/pdf', requireModulo('prestamos'), ctrl.exportarPdfEstadoCuenta);
+
 router.get('/:id',           requireModulo('prestamos'), ctrl.getCreditoById);
 router.post('/:id/abonos',   requireModulo('prestamos'), validarAbono, validate,    ctrl.registrarAbono);
 router.patch('/:id/saldar',  requireModulo('prestamos'), requireNivel('vendedor'),      ctrl.saldarCredito);

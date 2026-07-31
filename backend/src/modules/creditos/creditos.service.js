@@ -167,6 +167,57 @@ const cancelarCredito = async (negocioId, creditoId) => {
   }
 };
 
+// ── Estado de cuenta del cliente ─────────────────────────────────────────────
+//
+// ÚNICA fuente de verdad del saldo acumulado: la usan la pantalla, el Excel y
+// el PDF. Ninguno vuelve a sumar por su cuenta (el PDF de préstamos sí lo hacía
+// y era un riesgo de que la exportación mostrara otro número que la pantalla).
+//
+// Un crédito Cancelado se muestra en gris y queda FUERA del acumulado: la
+// factura se anuló y el stock volvió, así que no hay deuda que arrastrar. Es el
+// mismo trato que reciben los préstamos devueltos.
+const getEstadoCuenta = async (negocioId, clave, sucursalId = null) => {
+  const rows = await repo.getEstadoCuenta(negocioId, clave, sucursalId);
+
+  const INFORMATIVOS = new Set(['mora_cobro', 'mora_condonacion']);
+
+  let saldo = 0;
+  return rows.map((row) => {
+    const cargo = Number(row.cargo || 0);
+    const abono = Number(row.abono || 0);
+    const anulado    = row.credito_estado === 'Cancelado';
+    const fueraDeSaldo = anulado || INFORMATIVOS.has(row.tipo);
+
+    if (!fueraDeSaldo) saldo = saldo + cargo - abono;
+
+    return {
+      fecha:          row.fecha,
+      tipo:           row.tipo,
+      concepto:       row.concepto,
+      cargo:          cargo || null,
+      abono:          abono || null,
+      saldo:          fueraDeSaldo ? null : saldo,
+      referencia_id:  Number(row.referencia_id),
+      credito_id:     row.credito_id ? Number(row.credito_id) : null,
+      factura_numero: row.factura_numero ? Number(row.factura_numero) : null,
+      credito_estado: row.credito_estado || null,
+      anulable:       row.anulable,
+    };
+  });
+};
+
+/** Identidad del cliente + saldo final, para encabezados de PDF/Excel. */
+const getResumenCuenta = async (negocioId, clave, sucursalId = null) => {
+  const persona = await repo.findPersonaPorClave(negocioId, clave, sucursalId);
+  if (!persona) throw { status: 404, message: 'Cliente sin créditos registrados' };
+
+  const movimientos = await getEstadoCuenta(negocioId, clave, sucursalId);
+  const conSaldo    = movimientos.filter((m) => m.saldo != null);
+  const saldoFinal  = conSaldo.length ? conSaldo[conSaldo.length - 1].saldo : 0;
+
+  return { persona, movimientos, saldoFinal };
+};
+
 // ── Mora ─────────────────────────────────────────────────────────────────────
 // Delegan en el servicio compartido: la misma lógica sirve para préstamos.
 
@@ -212,5 +263,6 @@ const cobrarMora = async (negocioId, creditoId, { valor, metodo, usuario_id }) =
 
 module.exports = {
   getCreditos, getCreditoById, registrarAbono, saldarCredito, cancelarCredito,
+  getEstadoCuenta, getResumenCuenta,
   fijarPlazo, condonarMora, cobrarMora,
 };
