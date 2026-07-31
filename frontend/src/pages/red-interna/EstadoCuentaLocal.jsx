@@ -1,25 +1,29 @@
 import { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { getEstadoCuenta } from '../../api/redInterna.api';
+import { getEstadoCuenta, getRemision } from '../../api/redInterna.api';
 import { formatCOP, formatFecha, formatFechaHora } from '../../utils/formatters';
 import { Badge }      from '../../components/ui/Badge';
 import { Spinner }    from '../../components/ui/Spinner';
 import { EmptyState } from '../../components/ui/EmptyState';
 import {
-  ChevronLeft, Search, X, TrendingUp, TrendingDown, Package, Truck,
-  Wallet, FileText, AlertTriangle, Receipt, Filter, Store, Info,
+  ChevronLeft, ChevronDown, Search, X, TrendingUp, TrendingDown, Package, Truck,
+  Wallet, FileText, AlertTriangle, Receipt, Filter, Store, Info, HandCoins,
+  ShoppingBag, Undo2, LayoutDashboard,
 } from 'lucide-react';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ESTADO DE CUENTA DE UN LOCAL
 //
-// Pensado como un extracto bancario: arriba el saldo, y debajo el detalle de
-// cómo se llegó a él. Cuatro pestañas para que nada quede escondido:
+// Pensado como un extracto bancario, pero contestando en este orden las tres
+// preguntas que el local hace de verdad:
 //
-//   Extracto   — cada hecho con su fecha y el saldo corrido después de él
-//   Mercancía  — unidad por unidad, con buscador y filtro por estado
-//   Envíos     — las remisiones recibidas
-//   Remesas    — el efectivo enviado y su estado
+//   1. ¿Cuánto debo y por qué?          → Resumen
+//   2. ¿De cuál envío viene esa deuda,
+//      y qué pasó con cada equipo?      → Envíos  (el corazón de la pantalla)
+//   3. ¿Qué he pagado y cuándo?         → Pagos
+//
+// Mercancía (unidad por unidad, con buscador) y Extracto (hecho por hecho, con
+// saldo corrido) quedan detrás para quien necesite auditar.
 //
 // El buscador y el rango de fechas aplican a Extracto y Mercancía, que es donde
 // se acumula el volumen.
@@ -33,6 +37,9 @@ const COLOR_ESTADO = {
   'En transito':     'blue',
 };
 
+// Lo que para el local es UNA idea puede ser dos estados del motor.
+const VENDIDOS = 'Por liquidar,En recaudo';
+
 const ICONO_ORIGEN = {
   venta:      Receipt,
   remesa:     Wallet,
@@ -43,11 +50,22 @@ const ICONO_ORIGEN = {
 };
 
 const TABS = [
-  { id: 'extracto',  label: 'Extracto',  Icn: FileText },
-  { id: 'mercancia', label: 'Mercancía', Icn: Package  },
+  { id: 'resumen',   label: 'Resumen',   Icn: LayoutDashboard },
   { id: 'envios',    label: 'Envíos',    Icn: Truck    },
-  { id: 'remesas',   label: 'Remesas',   Icn: Wallet   },
+  { id: 'mercancia', label: 'Mercancía', Icn: Package  },
+  { id: 'pagos',     label: 'Pagos',     Icn: Wallet   },
+  { id: 'extracto',  label: 'Extracto',  Icn: FileText },
 ];
+
+// Tailwind necesita las clases completas en el código: nada de `bg-${x}-50`,
+// que el compilador no puede ver y termina sin generar.
+const TONO = {
+  amber: { icono: 'text-amber-500', chip: 'bg-amber-50 text-amber-700' },
+  blue:  { icono: 'text-blue-500',  chip: 'bg-blue-50 text-blue-700'   },
+  gray:  { icono: 'text-gray-400',  chip: 'bg-gray-100 text-gray-600'  },
+  green: { icono: 'text-green-500', chip: 'bg-green-50 text-green-700' },
+  red:   { icono: 'text-red-500',   chip: 'bg-red-50 text-red-700'     },
+};
 
 // ── Tarjetas de resumen ─────────────────────────────────────────────────────
 function Kpis({ t }) {
@@ -90,7 +108,7 @@ function Kpis({ t }) {
           ${t.sin_ubicar_unidades > 0 ? 'text-red-600' : 'text-gray-300'}`}>
           {t.sin_ubicar_unidades}
         </p>
-        {t.sin_ubicar_unidades > 0 && (
+        {t.sin_ubicar_unidades > 0 && t.sin_ubicar_valor != null && (
           <p className="text-xs text-red-500">{formatCOP(t.sin_ubicar_valor)}</p>
         )}
       </div>
@@ -148,6 +166,291 @@ function Desglose({ d, ocultos }) {
           </p>
         )}
       </div>
+    </div>
+  );
+}
+
+// ── Resumen: dónde está toda la mercancía que la bodega entregó ─────────────
+// Cada bloque es un botón: lleva a la pestaña Mercancía ya filtrada, para que
+// "tengo 4 prestados" se pueda convertir en "¿cuáles?" con un toque.
+function Situacion({ conteos, porEstado, onFiltrar }) {
+  const n = (k) => conteos[k] || 0;
+  const valor = (k) => porEstado?.[k]?.valor_interno;
+
+  const bloques = [
+    {
+      clave: VENDIDOS, Icn: ShoppingBag, color: 'amber',
+      titulo: 'Vendidos', nota: 'generan la deuda',
+      unidades: n('Por liquidar') + n('En recaudo'),
+      valor: (valor('Por liquidar') ?? 0) + (valor('En recaudo') ?? 0),
+      hayValor: valor('Por liquidar') != null || valor('En recaudo') != null,
+      detalle: [
+        n('Por liquidar') > 0 && `${n('Por liquidar')} de contado`,
+        n('En recaudo')   > 0 && `${n('En recaudo')} a crédito`,
+      ].filter(Boolean).join(' · '),
+    },
+    {
+      clave: 'En prestamo', Icn: HandCoins, color: 'blue',
+      titulo: 'Prestados', nota: 'no son deuda todavía',
+      unidades: n('En prestamo'), valor: valor('En prestamo'),
+      hayValor: valor('En prestamo') != null,
+      detalle: 'Fuera del local, sin vender',
+    },
+    {
+      clave: 'En consignacion', Icn: Store, color: 'gray',
+      titulo: 'Disponibles', nota: 'en vitrina',
+      unidades: n('En consignacion'), valor: valor('En consignacion'),
+      hayValor: valor('En consignacion') != null,
+      detalle: 'Se liquidan al venderlos',
+    },
+    {
+      clave: 'Devuelta', Icn: Undo2, color: 'green',
+      titulo: 'Devueltos', nota: 'volvieron a bodega',
+      unidades: n('Devuelta'), valor: valor('Devuelta'),
+      hayValor: valor('Devuelta') != null,
+      detalle: 'Ya no responde por ellos',
+    },
+  ];
+
+  const alerta = n('Sin ubicar') + n('Movida');
+
+  return (
+    <div className="mb-4">
+      <p className="text-xs font-semibold text-gray-400 uppercase mb-2">
+        Dónde está la mercancía de la bodega
+      </p>
+      <div className="grid grid-cols-2 gap-2">
+        {bloques.map((b) => {
+          const Icono = b.Icn;
+          const vacio = b.unidades === 0;
+          return (
+            <button
+              key={b.clave}
+              disabled={vacio}
+              onClick={() => onFiltrar(b.clave)}
+              className={`text-left rounded-2xl border px-4 py-3 transition-all
+                ${vacio ? 'bg-white border-gray-100 opacity-50 cursor-default'
+                        : 'bg-white border-gray-100 hover:border-blue-300 hover:shadow-sm'}`}
+            >
+              <div className="flex items-center gap-1.5 mb-1">
+                <Icono size={13} className={TONO[b.color].icono} />
+                <span className="text-xs font-medium text-gray-500">{b.titulo}</span>
+              </div>
+              <p className="text-2xl font-bold text-gray-900 leading-none">{b.unidades}</p>
+              {b.hayValor && b.unidades > 0 && (
+                <p className="text-xs text-gray-500 mt-1">{formatCOP(b.valor)}</p>
+              )}
+              <p className="text-xs text-gray-400 mt-0.5 truncate">
+                {b.detalle || b.nota}
+              </p>
+            </button>
+          );
+        })}
+      </div>
+
+      {alerta > 0 && (
+        <button
+          onClick={() => onFiltrar('Sin ubicar')}
+          className="mt-2 w-full flex items-center gap-2 bg-red-50 border border-red-200
+            rounded-xl px-4 py-2.5 text-left hover:bg-red-100 transition-colors"
+        >
+          <AlertTriangle size={15} className="text-red-500 flex-shrink-0" />
+          <span className="text-sm text-red-700 flex-1">
+            {alerta} equipo(s) sin ubicar — entregados, pero no están en inventario
+            ni aparecen vendidos
+          </span>
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ── Envíos: una tarjeta por cada "factura" que dio la bodega ────────────────
+// Es la vista que el local pedía: de este envío, qué vendí, qué presté, qué me
+// queda — y cuánto de ese envío sigo debiendo.
+function ChipEstado({ n, label, color }) {
+  if (!n) return null;
+  return (
+    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-xs
+      font-medium ${TONO[color].chip}`}>
+      <strong>{n}</strong> {label}
+    </span>
+  );
+}
+
+function DetalleEnvio({ remisionId }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ['red-remision', remisionId],
+    queryFn:  () => getRemision(remisionId).then((r) => r.data.data),
+    staleTime: 60 * 1000,
+  });
+
+  if (isLoading || !data) {
+    return <div className="py-6 flex justify-center"><Spinner /></div>;
+  }
+
+  return (
+    <div className="bg-gray-50/70 border-t border-gray-100">
+      {data.lineas.map((l) => (
+        <div key={l.id}
+          className="flex items-start gap-3 px-4 py-2.5 border-b border-gray-100 last:border-0">
+          <div className="flex-1 min-w-0">
+            <p className="text-sm text-gray-800 truncate">
+              {l.nombre_producto || l.producto_nombre}
+              {l.tipo === 'cantidad' && (
+                <span className="text-gray-400"> × {l.cantidad_recibida ?? l.cantidad}</span>
+              )}
+            </p>
+            <p className="text-xs text-gray-400 font-mono truncate">
+              {l.imei || l.codigo || ''}
+            </p>
+            {l.factura_numero && (
+              <p className="text-xs text-gray-400">
+                Vendido en #{l.factura_numero}
+                {l.nombre_cliente ? ` a ${l.nombre_cliente}` : ''}
+                {l.factura_fecha ? ` · ${formatFecha(l.factura_fecha)}` : ''}
+              </p>
+            )}
+          </div>
+          <div className="text-right flex-shrink-0 flex flex-col items-end gap-1">
+            <Badge variant={COLOR_ESTADO[l.estado_unidad] || 'gray'}>
+              {l.etiqueta_estado}
+            </Badge>
+            {l.subtotal != null && (
+              <p className="text-xs text-gray-500">{formatCOP(l.subtotal)}</p>
+            )}
+          </div>
+        </div>
+      ))}
+
+      {data.correcciones?.length > 0 && (
+        <div className="px-4 py-2.5 bg-amber-50/60 border-t border-amber-100">
+          <p className="text-xs font-semibold text-amber-700 mb-1">
+            Correcciones de valor
+          </p>
+          {data.correcciones.map((c) => (
+            <p key={c.id} className="text-xs text-amber-700">
+              {c.nombre_producto}: {formatCOP(c.valor_anterior)} → {formatCOP(c.valor_nuevo)}
+              {c.motivo ? ` · ${c.motivo}` : ''} · {formatFecha(c.fecha)}
+            </p>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Envios({ envios, resumen, ocultos }) {
+  const [abierto, setAbierto] = useState(null);
+
+  if (!envios.length) {
+    return <EmptyState icon={Truck} titulo="Sin envíos"
+      descripcion="Todavía no ha recibido mercancía de la bodega." />;
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      {!ocultos && resumen && (
+        <div className="bg-blue-50/60 border border-blue-100 rounded-xl px-4 py-2.5">
+          <p className="text-xs text-blue-800">
+            De estos {resumen.total} envío(s) quedan{' '}
+            <strong>{formatCOP(resumen.pendiente_en_envios)}</strong> por liquidar.
+            {resumen.accesorios_pendiente > 0 && (
+              <> Más <strong>{formatCOP(resumen.accesorios_pendiente)}</strong> de
+              accesorios, que no cuelgan de un envío concreto.</>
+            )}
+          </p>
+          <p className="text-xs text-blue-600/70 mt-0.5">
+            Los pagos cubren las ventas en orden cronológico, de la más antigua
+            a la más reciente.
+          </p>
+        </div>
+      )}
+
+      {envios.map((e) => {
+        const abre = abierto === e.id;
+        const anulado = e.estado === 'Anulada';
+        return (
+          <div key={e.id}
+            className={`border rounded-2xl overflow-hidden bg-white
+              ${e.deuda_pendiente > 0 ? 'border-amber-200' : 'border-gray-100'}`}>
+            <button
+              onClick={() => setAbierto(abre ? null : e.id)}
+              className="w-full text-left px-4 py-3 hover:bg-gray-50 transition-colors"
+            >
+              <div className="flex items-start gap-3">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-gray-900">
+                    Envío #{e.numero ?? e.id}
+                    <span className="font-normal text-gray-400">
+                      {' · '}{e.unidades} equipo(s)
+                      {e.accesorios_unidades > 0 && ` + ${e.accesorios_unidades} accesorio(s)`}
+                    </span>
+                  </p>
+                  <p className="text-xs text-gray-400">
+                    {formatFecha(e.fecha_emision)}
+                    {e.fecha_recepcion ? ` · recibido ${formatFecha(e.fecha_recepcion)}` : ''}
+                    {e.usuario_receptor_nombre ? ` por ${e.usuario_receptor_nombre}` : ''}
+                  </p>
+                </div>
+                <div className="text-right flex-shrink-0">
+                  {!ocultos && !anulado && (
+                    <>
+                      {e.deuda_pendiente > 0 ? (
+                        <p className="text-sm font-bold text-amber-600">
+                          debe {formatCOP(e.deuda_pendiente)}
+                        </p>
+                      ) : e.deuda_generada > 0 ? (
+                        <p className="text-sm font-semibold text-green-600">al día</p>
+                      ) : (
+                        <p className="text-sm text-gray-300">sin deuda</p>
+                      )}
+                      {e.valor_recibido > 0 && (
+                        <p className="text-xs text-gray-400">
+                          recibió {formatCOP(e.valor_recibido)}
+                        </p>
+                      )}
+                    </>
+                  )}
+                  {anulado && <Badge variant="red">Anulado</Badge>}
+                  {e.estado === 'En transito' && <Badge variant="blue">En tránsito</Badge>}
+                  {e.estado === 'Parcial' && <Badge variant="yellow">Parcial</Badge>}
+                </div>
+                <ChevronDown size={16}
+                  className={`text-gray-300 flex-shrink-0 mt-0.5 transition-transform
+                    ${abre ? 'rotate-180' : ''}`} />
+              </div>
+
+              {!anulado && (
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  <ChipEstado n={e.vendidas}    label="vendidos"    color="amber" />
+                  <ChipEstado n={e.prestadas}   label="prestados"   color="blue"  />
+                  <ChipEstado n={e.disponibles} label="disponibles" color="gray"  />
+                  <ChipEstado n={e.devueltas}   label="devueltos"   color="green" />
+                  <ChipEstado n={e.en_transito} label="en tránsito" color="blue"  />
+                  <ChipEstado n={e.faltantes}   label="no llegaron" color="red"   />
+                  <ChipEstado n={e.sin_ubicar}  label="sin ubicar"  color="red"   />
+                </div>
+              )}
+
+              {!ocultos && e.vendidas > 0 && e.vendidas_credito > 0 && (
+                <p className="text-xs text-gray-400 mt-1.5">
+                  {e.vendidas_contado > 0 && `${e.vendidas_contado} de contado`}
+                  {e.vendidas_contado > 0 && e.vendidas_credito > 0 && ' · '}
+                  {e.vendidas_credito > 0 &&
+                    `${e.vendidas_credito} a crédito (liquida a medida que cobra)`}
+                </p>
+              )}
+
+              {e.notas && (
+                <p className="text-xs text-gray-400 italic mt-1">{e.notas}</p>
+              )}
+            </button>
+
+            {abre && <DetalleEnvio remisionId={e.id} />}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -217,21 +520,22 @@ function Extracto({ filas, q }) {
 
 // ── Mercancía: unidad por unidad ────────────────────────────────────────────
 function Mercancia({ data, estado, onEstado, conteos }) {
+  const vendidos = (conteos['Por liquidar'] || 0) + (conteos['En recaudo'] || 0);
   const chips = [
-    ['',                 'Todo'],
-    ['En consignacion',  'En vitrina'],
-    ['Por liquidar',     'Por liquidar'],
-    ['En recaudo',       'A crédito'],
-    ['En prestamo',      'Prestado'],
-    ['Devuelta',         'Devuelto'],
-    ['Sin ubicar',       'Sin ubicar'],
+    ['',                 'Todo',         null],
+    [VENDIDOS,           'Vendidos',     vendidos],
+    ['En consignacion',  'En vitrina',   conteos['En consignacion'] || 0],
+    ['En prestamo',      'Prestados',    conteos['En prestamo']     || 0],
+    ['Por liquidar',     'De contado',   conteos['Por liquidar']    || 0],
+    ['En recaudo',       'A crédito',    conteos['En recaudo']      || 0],
+    ['Devuelta',         'Devueltos',    conteos['Devuelta']        || 0],
+    ['Sin ubicar',       'Sin ubicar',   conteos['Sin ubicar']      || 0],
   ];
 
   return (
     <div className="flex flex-col gap-3">
       <div className="flex gap-1.5 flex-wrap">
-        {chips.map(([valor, label]) => {
-          const n = valor ? (conteos[valor] || 0) : null;
+        {chips.map(([valor, label, n]) => {
           if (valor && !n) return null;
           const activo = estado === valor;
           return (
@@ -292,70 +596,119 @@ function Mercancia({ data, estado, onEstado, conteos }) {
   );
 }
 
-// ── Envíos y remesas ────────────────────────────────────────────────────────
-function Envios({ remisiones }) {
-  if (!remisiones.length) {
-    return <EmptyState icon={Truck} titulo="Sin envíos" descripcion="Todavía no ha recibido mercancía." />;
-  }
-  return (
-    <div className="border border-gray-100 rounded-2xl overflow-hidden bg-white">
-      {remisiones.map((r) => (
-        <div key={r.id} className="flex items-center gap-3 px-4 py-3 border-b border-gray-50 last:border-0">
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-gray-900">
-              Envío #{r.numero ?? r.id} · {r.total_items} producto(s)
-            </p>
-            <p className="text-xs text-gray-400">
-              De {r.sucursal_origen_nombre} · {formatFechaHora(r.fecha_emision)}
-              {r.fecha_recepcion ? ` · recibido ${formatFecha(r.fecha_recepcion)}` : ''}
-            </p>
-            {r.notas && <p className="text-xs text-gray-400 italic mt-0.5">{r.notas}</p>}
-          </div>
-          <div className="text-right flex-shrink-0">
-            <p className="text-sm font-semibold text-gray-700">{formatCOP(r.valor_total)}</p>
-            <Badge variant={
-              r.estado === 'Recibida' ? 'green' :
-              r.estado === 'Parcial'  ? 'yellow' :
-              r.estado === 'Anulada'  ? 'red' : 'blue'}>
-              {r.estado}
-            </Badge>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
+// ── Pagos: todo lo que ha bajado la deuda, con su fecha ─────────────────────
+// Remesas, gastos por cuenta de bodega y ajustes en una sola línea de tiempo:
+// para el local los tres son "lo que ya no debo", aunque por dentro sean
+// tablas distintas.
+function Pagos({ remesas, movimientos, totales }) {
+  const filas = useMemo(() => {
+    const deRemesas = remesas.map((r) => ({
+      clave:   `rem-${r.id}`,
+      tipo:    'remesa',
+      titulo:  `Remesa #${r.numero ?? r.id}`,
+      valor:   Number(r.valor || 0),
+      estado:  r.estado,
+      fecha:   r.fecha_recepcion || r.fecha_envio,
+      detalle: [
+        r.metodo || 'Efectivo',
+        `enviada ${formatFechaHora(r.fecha_envio)}`,
+        r.usuario_envia_nombre && `por ${r.usuario_envia_nombre}`,
+        r.fecha_recepcion && `confirmada ${formatFecha(r.fecha_recepcion)}`,
+        r.usuario_recibe_nombre && `por ${r.usuario_recibe_nombre}`,
+      ].filter(Boolean).join(' · '),
+      notas: r.notas,
+    }));
 
-function Remesas({ remesas }) {
-  if (!remesas.length) {
-    return <EmptyState icon={Wallet} titulo="Sin remesas" descripcion="Todavía no ha enviado efectivo." />;
+    const deMovimientos = movimientos.map((m) => ({
+      clave:   `mov-${m.id}`,
+      tipo:    m.tipo === 'GastoAutorizado' ? 'gasto' : 'ajuste',
+      titulo:  m.concepto || (m.tipo === 'GastoAutorizado'
+                 ? 'Gasto por cuenta de bodega' : 'Ajuste'),
+      valor:   Number(m.valor || 0),
+      estado:  'Recibida',
+      fecha:   m.fecha,
+      detalle: [
+        m.tipo === 'GastoAutorizado' ? 'Gasto por cuenta de bodega' : 'Ajuste de la bodega',
+        m.usuario_nombre && `registrado por ${m.usuario_nombre}`,
+        formatFechaHora(m.fecha),
+      ].filter(Boolean).join(' · '),
+    }));
+
+    return [...deRemesas, ...deMovimientos]
+      .sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
+  }, [remesas, movimientos]);
+
+  if (!filas.length) {
+    return <EmptyState icon={Wallet} titulo="Sin pagos"
+      descripcion="Todavía no ha entregado dinero ni tiene gastos a favor." />;
   }
+
+  const ICONO = { remesa: Wallet, gasto: TrendingDown, ajuste: Filter };
+
   return (
-    <div className="border border-gray-100 rounded-2xl overflow-hidden bg-white">
-      {remesas.map((r) => (
-        <div key={r.id} className="flex items-center gap-3 px-4 py-3 border-b border-gray-50 last:border-0">
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-gray-900">
-              Remesa #{r.numero ?? r.id}
-            </p>
-            <p className="text-xs text-gray-400">
-              Enviada {formatFechaHora(r.fecha_envio)}
-              {r.usuario_envia_nombre ? ` por ${r.usuario_envia_nombre}` : ''}
-              {r.fecha_recepcion ? ` · confirmada ${formatFecha(r.fecha_recepcion)}` : ''}
-              {r.usuario_recibe_nombre ? ` por ${r.usuario_recibe_nombre}` : ''}
-            </p>
-            {r.notas && <p className="text-xs text-gray-400 italic mt-0.5">{r.notas}</p>}
-          </div>
-          <div className="text-right flex-shrink-0">
-            <p className="text-sm font-semibold text-green-600">{formatCOP(r.valor)}</p>
-            <Badge variant={
-              r.estado === 'Recibida' ? 'green' :
-              r.estado === 'Anulada'  ? 'red' : 'yellow'}>
-              {r.estado === 'En transito' ? 'En tránsito' : r.estado}
-            </Badge>
-          </div>
+    <div className="flex flex-col gap-3">
+      <div className="grid grid-cols-3 gap-2">
+        <div className="rounded-xl border border-gray-100 bg-white px-3 py-2">
+          <p className="text-xs text-gray-400">Remesado</p>
+          <p className="text-sm font-bold text-green-600">
+            {formatCOP(totales.remesado_recibido)}
+          </p>
         </div>
-      ))}
+        <div className="rounded-xl border border-gray-100 bg-white px-3 py-2">
+          <p className="text-xs text-gray-400">En tránsito</p>
+          <p className={`text-sm font-bold ${
+            totales.remesas_en_transito > 0 ? 'text-amber-600' : 'text-gray-300'}`}>
+            {formatCOP(totales.remesas_en_transito)}
+          </p>
+        </div>
+        <div className="rounded-xl border border-gray-100 bg-white px-3 py-2">
+          <p className="text-xs text-gray-400">Gastos a favor</p>
+          <p className="text-sm font-bold text-gray-700">
+            {formatCOP(totales.gastos_autorizados)}
+          </p>
+        </div>
+      </div>
+
+      <div className="border border-gray-100 rounded-2xl overflow-hidden bg-white">
+        {filas.map((f) => {
+          const Icn = ICONO[f.tipo] || Wallet;
+          const pendiente = f.estado === 'En transito';
+          const anulada   = f.estado === 'Anulada';
+          return (
+            <div key={f.clave}
+              className="flex items-start gap-3 px-4 py-3 border-b border-gray-50 last:border-0">
+              <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5
+                ${anulada ? 'bg-gray-100' : pendiente ? 'bg-amber-50' : 'bg-green-50'}`}>
+                <Icn size={14} className={
+                  anulada ? 'text-gray-400' : pendiente ? 'text-amber-600' : 'text-green-600'} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-gray-900 truncate">{f.titulo}</p>
+                <p className="text-xs text-gray-400">{f.detalle}</p>
+                {f.notas && <p className="text-xs text-gray-400 italic">{f.notas}</p>}
+              </div>
+              <div className="text-right flex-shrink-0">
+                <p className={`text-sm font-semibold
+                  ${anulada ? 'text-gray-300 line-through' : 'text-green-600'}`}>
+                  {formatCOP(f.valor)}
+                </p>
+                {f.tipo === 'remesa' && (
+                  <Badge variant={
+                    f.estado === 'Recibida' ? 'green' :
+                    f.estado === 'Anulada'  ? 'red' : 'yellow'}>
+                    {f.estado === 'En transito' ? 'Sin confirmar' : f.estado}
+                  </Badge>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <p className="text-xs text-gray-400 flex items-center gap-1.5">
+        <Info size={12} />
+        Una remesa solo baja la deuda cuando la bodega confirma que la recibió.
+      </p>
     </div>
   );
 }
@@ -363,7 +716,7 @@ function Remesas({ remesas }) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 export function EstadoCuentaLocal({ sucursalId, nombre, onVolver }) {
-  const [tab,    setTab]    = useState('extracto');
+  const [tab,    setTab]    = useState('resumen');
   const [q,      setQ]      = useState('');
   const [estado, setEstado] = useState('');
   const [desde,  setDesde]  = useState('');
@@ -381,6 +734,11 @@ export function EstadoCuentaLocal({ sucursalId, nombre, onVolver }) {
   });
 
   const hayFiltro = q.trim() || estado || desde || hasta;
+  // El buscador y las fechas solo aplican donde hay volumen; en las demás
+  // pestañas estorban.
+  const conFiltros = tab === 'mercancia' || tab === 'extracto';
+
+  const verMercancia = (filtro) => { setEstado(filtro); setTab('mercancia'); };
 
   return (
     <div>
@@ -407,43 +765,12 @@ export function EstadoCuentaLocal({ sucursalId, nombre, onVolver }) {
       ) : (
         <>
           <Kpis t={data.totales} />
-          <Desglose d={data.desglose} ocultos={data.costos_ocultos === true} />
 
           {data.costos_ocultos && (
             <p className="text-xs text-gray-400 mb-3 flex items-center gap-1.5">
               <Info size={12} /> Los costos de la mercancía no se muestran en tu perfil.
             </p>
           )}
-
-          {/* Controles */}
-          <div className="flex flex-col sm:flex-row gap-2 mb-3">
-            <div className="flex-1 flex items-center gap-2 bg-gray-100 rounded-xl px-3 py-2">
-              <Search size={15} className="text-gray-400 flex-shrink-0" />
-              <input
-                value={q} onChange={(e) => setQ(e.target.value)}
-                placeholder="Buscar por producto, IMEI, cliente o número de documento…"
-                className="flex-1 bg-transparent text-sm focus:outline-none placeholder-gray-400"
-              />
-              {q && <button onClick={() => setQ('')}><X size={14} className="text-gray-400" /></button>}
-            </div>
-            <div className="flex items-center gap-1.5">
-              <input type="date" value={desde} onChange={(e) => setDesde(e.target.value)}
-                className="px-2.5 py-2 bg-gray-100 rounded-xl text-sm focus:outline-none
-                  focus:ring-2 focus:ring-blue-500 text-gray-600" />
-              <span className="text-gray-300 text-sm">–</span>
-              <input type="date" value={hasta} onChange={(e) => setHasta(e.target.value)}
-                className="px-2.5 py-2 bg-gray-100 rounded-xl text-sm focus:outline-none
-                  focus:ring-2 focus:ring-blue-500 text-gray-600" />
-              {hayFiltro && (
-                <button
-                  onClick={() => { setQ(''); setEstado(''); setDesde(''); setHasta(''); }}
-                  className="px-2.5 py-2 text-xs text-blue-600 hover:text-blue-700 whitespace-nowrap"
-                >
-                  Limpiar
-                </button>
-              )}
-            </div>
-          </div>
 
           {/* Pestañas */}
           <div className="flex gap-1 mb-3 border-b border-gray-100 overflow-x-auto">
@@ -458,23 +785,80 @@ export function EstadoCuentaLocal({ sucursalId, nombre, onVolver }) {
                     ${tab === t.id ? 'border-blue-600 text-blue-600'
                                    : 'border-transparent text-gray-400 hover:text-gray-600'}`}>
                   <Icono size={14} /> {t.label}
+                  {t.id === 'envios'    && ` (${(data.envios || []).length})`}
                   {t.id === 'mercancia' && ` (${data.mercancia.total})`}
-                  {t.id === 'envios'    && ` (${data.remisiones.length})`}
-                  {t.id === 'remesas'   && ` (${data.remesas.length})`}
+                  {t.id === 'pagos'     && ` (${data.remesas.length +
+                                                (data.movimientos_cuenta || []).length})`}
                 </button>
               );
             })}
           </div>
 
+          {/* Controles — solo donde sirven */}
+          {conFiltros && (
+            <div className="flex flex-col sm:flex-row gap-2 mb-3">
+              <div className="flex-1 flex items-center gap-2 bg-gray-100 rounded-xl px-3 py-2">
+                <Search size={15} className="text-gray-400 flex-shrink-0" />
+                <input
+                  value={q} onChange={(e) => setQ(e.target.value)}
+                  placeholder="Buscar por producto, IMEI, cliente o número de documento…"
+                  className="flex-1 bg-transparent text-sm focus:outline-none placeholder-gray-400"
+                />
+                {q && <button onClick={() => setQ('')}><X size={14} className="text-gray-400" /></button>}
+              </div>
+              <div className="flex items-center gap-1.5">
+                <input type="date" value={desde} onChange={(e) => setDesde(e.target.value)}
+                  className="px-2.5 py-2 bg-gray-100 rounded-xl text-sm focus:outline-none
+                    focus:ring-2 focus:ring-blue-500 text-gray-600" />
+                <span className="text-gray-300 text-sm">–</span>
+                <input type="date" value={hasta} onChange={(e) => setHasta(e.target.value)}
+                  className="px-2.5 py-2 bg-gray-100 rounded-xl text-sm focus:outline-none
+                    focus:ring-2 focus:ring-blue-500 text-gray-600" />
+                {hayFiltro && (
+                  <button
+                    onClick={() => { setQ(''); setEstado(''); setDesde(''); setHasta(''); }}
+                    className="px-2.5 py-2 text-xs text-blue-600 hover:text-blue-700 whitespace-nowrap"
+                  >
+                    Limpiar
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
           {isLoading && <div className="py-2 flex justify-center"><Spinner /></div>}
 
-          {tab === 'extracto'  && <Extracto filas={data.extracto} q={q} />}
+          {tab === 'resumen' && (
+            <>
+              <Desglose d={data.desglose} ocultos={data.costos_ocultos === true} />
+              <Situacion
+                conteos={data.conteo_estados}
+                porEstado={data.por_estado}
+                onFiltrar={verMercancia}
+              />
+              <p className="text-xs text-gray-400 flex items-center gap-1.5">
+                <TrendingUp size={12} />
+                La deuda nace cuando el local vende; la mercancía en vitrina y la
+                prestada todavía no se liquidan.
+              </p>
+            </>
+          )}
+          {tab === 'envios' && (
+            <Envios
+              envios={data.envios || []}
+              resumen={data.envios_resumen}
+              ocultos={data.costos_ocultos === true}
+            />
+          )}
           {tab === 'mercancia' && (
             <Mercancia data={data.mercancia} estado={estado} onEstado={setEstado}
               conteos={data.conteo_estados} />
           )}
-          {tab === 'envios'  && <Envios remisiones={data.remisiones} />}
-          {tab === 'remesas' && <Remesas remesas={data.remesas} />}
+          {tab === 'pagos' && (
+            <Pagos remesas={data.remesas} movimientos={data.movimientos_cuenta || []}
+              totales={data.totales} />
+          )}
+          {tab === 'extracto' && <Extracto filas={data.extracto} q={q} />}
 
           {tab === 'extracto' && data.extracto.length > 0 && (
             <p className="text-xs text-gray-400 mt-3 flex items-center gap-1.5">

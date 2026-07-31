@@ -137,6 +137,9 @@ const getUnidades = async (negocioId, sucursalId = null) => {
 // ── Unidades con búsqueda y filtros (pestaña "Mercancía") ────────────────────
 //   $3 estado (NULL = todos)   $4 texto libre   $5 desde   $6 hasta
 //   $7 limit   $8 offset
+//
+// `estado` admite varios separados por coma ('Por liquidar,En recaudo'): lo que
+// para el local es UNA idea ("lo que vendí") son dos estados distintos aquí.
 const buscarUnidades = async (negocioId, sucursalId, {
   estado = null, q = '', desde = null, hasta = null, limit = 100, offset = 0,
 } = {}) => {
@@ -144,7 +147,7 @@ const buscarUnidades = async (negocioId, sucursalId, {
   const params = [negocioId, sucursalId, estado, texto, desde, hasta, limit, offset];
 
   const filtro = `
-    WHERE ($3::text IS NULL OR u.estado_unidad = $3)
+    WHERE ($3::text IS NULL OR u.estado_unidad = ANY(string_to_array($3, ',')))
       AND ($4 = '' OR LOWER(COALESCE(u.nombre_producto, '')) LIKE '%' || $4 || '%' ESCAPE '\\'
                    OR LOWER(COALESCE(u.imei, ''))            LIKE '%' || $4 || '%' ESCAPE '\\'
                    OR LOWER(COALESCE(u.nombre_cliente, ''))  LIKE '%' || $4 || '%' ESCAPE '\\'
@@ -438,6 +441,129 @@ const getConciliacion = async (negocioId, sucursalId) => {
     FROM ordenadas o CROSS JOIN cubierto c
     ORDER BY o.factura_fecha DESC, o.linea_id DESC
   `, [negocioId, sucursalId]);
+  return rows;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RESUMEN POR ENVÍO — "¿qué pasó con lo que me mandaron en cada remisión?"
+//
+// Es la misma derivación de siempre (SQL_UNIDADES) agrupada por remisión, para
+// responder la pregunta que el local hace de verdad: no "cuánto debo" sino
+// "de este envío, qué vendí, qué presté y qué me queda".
+//
+// IMPUTACIÓN DE PAGOS: se reusa el FIFO de getConciliacion — los pagos cubren
+// las ventas en orden cronológico. La porción pendiente de una unidad es la
+// parte de su liquidable que queda por encima de lo ya cubierto:
+//     pendiente = LEAST(liquidable, GREATEST(0, acumulado − cubierto))
+// Sumada sobre todas las unidades da exactamente `liquidable_serial − cubierto`
+// (acotado en 0), así que el desglose por envío CUADRA con el saldo del panel.
+//
+// `cubierto` incluye los tres términos que restan en _armarSaldo (remesas,
+// gastos autorizados y ajustes). Si esa fórmula cambia, cambiarla también aquí.
+//
+// Los ACCESORIOS no se atribuyen a un envío: su liquidación se ancla en el
+// stock actual del producto, que es global. Se cuentan las unidades entregadas
+// (dato cierto) y nada más; su deuda vive en el resumen general.
+// ─────────────────────────────────────────────────────────────────────────────
+const getResumenPorRemision = async (negocioId, sucursalId, { limit = 100 } = {}) => {
+  const { rows } = await pool.query(`
+    WITH u AS (${SQL_UNIDADES}),
+    cubierto AS (
+      SELECT
+        COALESCE((SELECT SUM(valor) FROM remesas
+                  WHERE negocio_id = $1 AND sucursal_origen_id = $2 AND estado = 'Recibida'), 0)
+      + COALESCE((SELECT SUM(valor) FROM movimientos_cuenta_interna
+                  WHERE negocio_id = $1 AND sucursal_id = $2 AND NOT anulado
+                    AND tipo IN ('GastoAutorizado', 'Ajuste')), 0) AS total
+    ),
+    ordenadas AS (
+      SELECT u.remision_id, u.liquidable,
+             SUM(u.liquidable) OVER (
+               ORDER BY u.factura_fecha, u.linea_id
+               ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+             ) AS acumulado
+      FROM u
+      WHERE u.liquidable > 0
+    ),
+    pendiente AS (
+      SELECT o.remision_id,
+             SUM(LEAST(o.liquidable, GREATEST(0, o.acumulado - c.total))) AS pendiente
+      FROM ordenadas o CROSS JOIN cubierto c
+      GROUP BY o.remision_id
+    ),
+    seriales_rollup AS (
+      SELECT
+        u.remision_id,
+        COUNT(*)::int                                                       AS unidades,
+        COUNT(*) FILTER (WHERE u.estado_unidad = 'En consignacion')::int    AS disponibles,
+        COUNT(*) FILTER (WHERE u.estado_unidad IN ('Por liquidar','En recaudo'))::int AS vendidas,
+        COUNT(*) FILTER (WHERE u.estado_unidad = 'Por liquidar')::int       AS vendidas_contado,
+        COUNT(*) FILTER (WHERE u.estado_unidad = 'En recaudo')::int         AS vendidas_credito,
+        COUNT(*) FILTER (WHERE u.estado_unidad = 'En prestamo')::int        AS prestadas,
+        COUNT(*) FILTER (WHERE u.estado_unidad = 'Devuelta')::int           AS devueltas,
+        COUNT(*) FILTER (WHERE u.estado_unidad = 'Faltante')::int           AS faltantes,
+        COUNT(*) FILTER (WHERE u.estado_unidad = 'En transito')::int        AS en_transito,
+        COUNT(*) FILTER (WHERE u.estado_unidad IN ('Sin ubicar','Movida'))::int AS sin_ubicar,
+        COALESCE(SUM(u.valor_interno) FILTER (WHERE u.estado_unidad = 'En consignacion'), 0) AS disponibles_valor,
+        COALESCE(SUM(u.valor_interno) FILTER (WHERE u.estado_unidad IN ('Por liquidar','En recaudo')), 0) AS vendidas_valor,
+        COALESCE(SUM(u.valor_interno) FILTER (WHERE u.estado_unidad = 'En prestamo'), 0) AS prestadas_valor,
+        COALESCE(SUM(u.valor_interno) FILTER (WHERE u.estado_unidad IN ('Sin ubicar','Movida')), 0) AS sin_ubicar_valor,
+        -- Lo que efectivamente quedó en poder del local (lo faltante nunca llegó)
+        COALESCE(SUM(u.valor_interno) FILTER (WHERE u.estado_unidad <> 'Faltante'), 0) AS valor_recibido,
+        COALESCE(SUM(u.liquidable), 0)                                      AS deuda_generada
+      FROM u
+      GROUP BY u.remision_id
+    ),
+    accesorios_rollup AS (
+      SELECT
+        lr.remision_id,
+        COALESCE(SUM(COALESCE(lr.cantidad_recibida, lr.cantidad, 0)), 0)::int AS unidades,
+        COALESCE(SUM(lr.valor_interno * COALESCE(lr.cantidad_recibida, lr.cantidad, 0)), 0) AS valor
+      FROM lineas_remision lr
+      JOIN remisiones r ON r.id = lr.remision_id
+      WHERE lr.tipo = 'cantidad' AND lr.estado_linea <> 'Faltante'
+        AND r.negocio_id = $1 AND r.tipo = 'entrega'
+        AND r.sucursal_destino_id = $2 AND r.estado <> 'Anulada'
+      GROUP BY lr.remision_id
+    )
+    SELECT
+      r.id, r.numero, r.estado, r.fecha_emision, r.fecha_recepcion, r.notas,
+      r.valor_total,
+      so.nombre AS sucursal_origen_nombre,
+      ue.nombre AS usuario_emisor_nombre,
+      ur.nombre AS usuario_receptor_nombre,
+      COALESCE(sr.unidades, 0)          AS unidades,
+      COALESCE(sr.disponibles, 0)       AS disponibles,
+      COALESCE(sr.vendidas, 0)          AS vendidas,
+      COALESCE(sr.vendidas_contado, 0)  AS vendidas_contado,
+      COALESCE(sr.vendidas_credito, 0)  AS vendidas_credito,
+      COALESCE(sr.prestadas, 0)         AS prestadas,
+      COALESCE(sr.devueltas, 0)         AS devueltas,
+      COALESCE(sr.faltantes, 0)         AS faltantes,
+      COALESCE(sr.en_transito, 0)       AS en_transito,
+      COALESCE(sr.sin_ubicar, 0)        AS sin_ubicar,
+      COALESCE(sr.disponibles_valor, 0) AS disponibles_valor,
+      COALESCE(sr.vendidas_valor, 0)    AS vendidas_valor,
+      COALESCE(sr.prestadas_valor, 0)   AS prestadas_valor,
+      COALESCE(sr.sin_ubicar_valor, 0)  AS sin_ubicar_valor,
+      COALESCE(sr.valor_recibido, 0)    AS valor_recibido,
+      COALESCE(sr.deuda_generada, 0)    AS deuda_generada,
+      COALESCE(p.pendiente, 0)          AS deuda_pendiente,
+      COALESCE(ar.unidades, 0)          AS accesorios_unidades,
+      COALESCE(ar.valor, 0)             AS accesorios_valor
+    FROM remisiones r
+    JOIN sucursales so             ON so.id = r.sucursal_origen_id
+    LEFT JOIN usuarios ue          ON ue.id = r.usuario_emisor_id
+    LEFT JOIN usuarios ur          ON ur.id = r.usuario_receptor_id
+    LEFT JOIN seriales_rollup sr   ON sr.remision_id = r.id
+    LEFT JOIN pendiente p          ON p.remision_id  = r.id
+    LEFT JOIN accesorios_rollup ar ON ar.remision_id = r.id
+    WHERE r.negocio_id = $1
+      AND r.tipo = 'entrega'
+      AND r.sucursal_destino_id = $2
+    ORDER BY r.fecha_emision DESC
+    LIMIT $3
+  `, [negocioId, sucursalId, limit]);
   return rows;
 };
 
@@ -1081,7 +1207,7 @@ const getValorConsignacionSeriales = async (negocioId, sucursalId, serialIds) =>
 module.exports = {
   getUnidades, buscarUnidades, getExtracto, getResumenUnidades, getCantidadConsignada,
   getValorConsignacionSeriales,
-  getTotalRemesado, getTotalMovimientosCuenta, getConciliacion,
+  getTotalRemesado, getTotalMovimientosCuenta, getConciliacion, getResumenPorRemision,
   crearRemision, insertarLineaRemision, actualizarTotalRemision,
   findRemisionById, getLineasRemision, getLineasDetalladas, findRemisiones,
   insertarCorreccion, getCorreccionesRemision,

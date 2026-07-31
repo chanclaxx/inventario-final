@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   getPanel, getSucursales, confirmarRemesa, anularRemision, confirmarDevolucion, getSalud,
 } from '../../api/redInterna.api';
-import { formatCOP, formatFechaHora } from '../../utils/formatters';
+import { formatCOP, formatFecha, formatFechaHora } from '../../utils/formatters';
 import { Button }     from '../../components/ui/Button';
 import { Badge }      from '../../components/ui/Badge';
 import { Modal }      from '../../components/ui/Modal';
@@ -59,6 +59,16 @@ function PanelLocal({ data, onRefrescar, onAviso, onVerCuenta }) {
 
   const t = data.totales;
   const porRecibir = data.por_recibir || [];
+
+  // Dónde está la mercancía. Sale de `por_estado`, que el panel ya traía: no
+  // hace falta pedir nada más para que el local deje de ver solo un número.
+  const u = (k) => data.por_estado?.[k]?.unidades || 0;
+  const vendidos = u('Por liquidar') + u('En recaudo');
+
+  // Los últimos pagos, con su fecha: "¿cuándo fue la última vez que remití?".
+  const pagos = (data.remesas || [])
+    .filter((r) => r.estado !== 'Anulada')
+    .slice(0, 3);
 
   return (
     <>
@@ -127,42 +137,63 @@ function PanelLocal({ data, onRefrescar, onAviso, onVerCuenta }) {
         </div>
       </Tarjeta>
 
-      {/* Informativo — sin botones */}
-      <Tarjeta>
-        <div className="divide-y divide-gray-50">
-          <div className="flex items-center justify-between px-5 py-3.5">
+      {/* Dónde está la mercancía de la bodega — la foto de un vistazo */}
+      <Tarjeta className="mb-4">
+        <button
+          onClick={() => onVerCuenta(data.sucursal_id)}
+          className="w-full px-5 pt-4 pb-2 text-left"
+        >
+          <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-3">
+            De lo que te dio la bodega
+          </p>
+          <div className="grid grid-cols-3 gap-2">
             <div>
-              <p className="text-sm font-medium text-gray-700">En consignación</p>
-              <p className="text-xs text-gray-400">Sin vender — no es deuda</p>
+              <p className="text-2xl font-bold text-amber-600 leading-none">{vendidos}</p>
+              <p className="text-xs text-gray-500 mt-1">Vendidos</p>
+              <p className="text-xs text-gray-400">generan la deuda</p>
             </div>
-            <div className="text-right">
-              <p className="text-sm font-semibold text-gray-900">{formatCOP(t.en_consignacion_valor)}</p>
-              <p className="text-xs text-gray-400">{t.en_consignacion_unidades} equipo(s)</p>
+            <div>
+              <p className="text-2xl font-bold text-blue-600 leading-none">{u('En prestamo')}</p>
+              <p className="text-xs text-gray-500 mt-1">Prestados</p>
+              <p className="text-xs text-gray-400">aún no se liquidan</p>
+            </div>
+            <div>
+              <p className="text-2xl font-bold text-gray-700 leading-none">
+                {t.en_consignacion_unidades}
+              </p>
+              <p className="text-xs text-gray-500 mt-1">Disponibles</p>
+              <p className="text-xs text-gray-400">
+                {t.en_consignacion_valor != null ? formatCOP(t.en_consignacion_valor) : 'en vitrina'}
+              </p>
             </div>
           </div>
+        </button>
 
+        <div className="divide-y divide-gray-50 mt-2">
           {t.en_recaudo_unidades > 0 && (
-            <div className="flex items-center justify-between px-5 py-3.5">
+            <div className="flex items-center justify-between px-5 py-3">
               <div>
                 <p className="text-sm font-medium text-gray-700">Vendido a crédito</p>
                 <p className="text-xs text-gray-400">Liquidas a medida que cobras</p>
               </div>
               <div className="text-right">
-                <p className="text-sm font-semibold text-gray-900">{formatCOP(t.en_recaudo_valor)}</p>
+                {t.en_recaudo_valor != null && (
+                  <p className="text-sm font-semibold text-gray-900">{formatCOP(t.en_recaudo_valor)}</p>
+                )}
                 <p className="text-xs text-gray-400">{t.en_recaudo_unidades} equipo(s)</p>
               </div>
             </div>
           )}
 
           {t.gastos_autorizados > 0 && (
-            <div className="flex items-center justify-between px-5 py-3.5">
+            <div className="flex items-center justify-between px-5 py-3">
               <p className="text-sm font-medium text-gray-700">Gastos por cuenta de bodega</p>
               <p className="text-sm font-semibold text-gray-900">−{formatCOP(t.gastos_autorizados)}</p>
             </div>
           )}
 
           {t.sin_ubicar_unidades > 0 && (
-            <div className="flex items-center justify-between px-5 py-3.5 bg-red-50">
+            <div className="flex items-center justify-between px-5 py-3 bg-red-50">
               <div className="flex items-center gap-2">
                 <AlertTriangle size={15} className="text-red-500" />
                 <p className="text-sm font-medium text-red-700">Sin ubicar</p>
@@ -176,12 +207,49 @@ function PanelLocal({ data, onRefrescar, onAviso, onVerCuenta }) {
             className="w-full flex items-center justify-between px-5 py-3.5 hover:bg-gray-50 transition-colors"
           >
             <span className="text-sm text-blue-600 font-medium">
-              Ver estado de cuenta completo
+              Ver envío por envío y el detalle de cada equipo
             </span>
             <ChevronRight size={16} className="text-gray-300" />
           </button>
         </div>
       </Tarjeta>
+
+      {/* Últimos pagos — con fecha, que es lo que siempre se pregunta */}
+      {pagos.length > 0 && (
+        <Tarjeta>
+          <div className="px-5 py-3 border-b border-gray-50 flex items-center gap-2">
+            <Wallet size={15} className="text-green-600" />
+            <p className="text-sm font-semibold text-gray-800">Tus últimos pagos</p>
+          </div>
+          <div className="divide-y divide-gray-50">
+            {pagos.map((r) => (
+              <div key={r.id} className="flex items-center gap-3 px-5 py-3">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-gray-800">
+                    {formatCOP(r.valor)}
+                    <span className="font-normal text-gray-400"> · {r.metodo || 'Efectivo'}</span>
+                  </p>
+                  <p className="text-xs text-gray-400">
+                    Enviada {formatFechaHora(r.fecha_envio)}
+                    {r.fecha_recepcion ? ` · confirmada ${formatFecha(r.fecha_recepcion)}` : ''}
+                  </p>
+                </div>
+                <Badge variant={r.estado === 'Recibida' ? 'green' : 'yellow'}>
+                  {r.estado === 'En transito' ? 'Sin confirmar' : r.estado}
+                </Badge>
+              </div>
+            ))}
+          </div>
+          <button
+            onClick={() => onVerCuenta(data.sucursal_id)}
+            className="w-full flex items-center justify-between px-5 py-3 hover:bg-gray-50
+              transition-colors border-t border-gray-50"
+          >
+            <span className="text-sm text-blue-600 font-medium">Ver todos los pagos</span>
+            <ChevronRight size={16} className="text-gray-300" />
+          </button>
+        </Tarjeta>
+      )}
 
       {recibirId && (
         <ModalRecibir

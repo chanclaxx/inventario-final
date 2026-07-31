@@ -26,6 +26,9 @@ node scripts/pruebas-red-interna/05-bugs-despacho.mjs
 node scripts/pruebas-red-interna/06-estado-cuenta.mjs
 node scripts/pruebas-red-interna/07-devolucion-costos-medios.mjs
 node scripts/pruebas-red-interna/08-tarifas-porcentuales.mjs
+node scripts/pruebas-red-interna/09-mora-credito.mjs
+node scripts/pruebas-red-interna/10-adversario-mora-tarifas.mjs
+node scripts/pruebas-red-interna/11-envios-por-remision.mjs
 ```
 
 > Las suites cargan **las dos migraciones**: `20260725_red_interna.sql` y
@@ -184,6 +187,29 @@ El extracto tipo bancario de cada local.
 | 8 | Detalle del envío con estado por línea y resumen de lo que ya es deuda |
 | 9 | El desglose explica el saldo y por qué medio ha pagado |
 | 10 | Un local no puede confirmar su propia devolución |
+
+### `11-envios-por-remision.mjs` — 52 verificaciones
+
+El estado de cuenta contado **envío por envío**: de cada remisión que mandó la
+bodega, qué se vendió, qué se prestó y qué sigue en vitrina.
+
+| # | Escenario |
+|---|---|
+| 1 | Tres envíos, uno con accesorios y otro anulado: el anulado se lista sin unidades |
+| 2 | Vendido / prestado / disponible se separan por envío, y el prestado **no** genera deuda |
+| 3 | La devolución descuenta del envío del que salió el equipo |
+| 4 | **Σ pendiente por envío + accesorios = saldo por liquidar** |
+| 5 | Un pago parcial se imputa a las ventas más antiguas (FIFO), no al envío más viejo |
+| 6 | Los gastos por cuenta de bodega también imputan |
+| 7 | Y los ajustes de la bodega |
+| 8 | La deuda de accesorios queda como residuo: **no se cuelga de ningún envío** |
+| 9 | La mercancía se filtra por varios estados a la vez (`Por liquidar,En recaudo`) |
+| 10 | **Un vendedor ve los conteos** (qué vendió, qué prestó) **pero ningún peso** |
+| 11 | La bodega ve lo mismo; un local sigue sin poder ver la cuenta de otro |
+
+> La identidad del punto 4 se vuelve a verificar en los puntos 5, 6, 7 y 8: es
+> la que garantiza que el desglose por envío y el número grande del panel
+> cuenten la misma historia.
 
 ## Nota sobre `esquema.sql`
 

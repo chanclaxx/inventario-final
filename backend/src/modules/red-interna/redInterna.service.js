@@ -76,6 +76,14 @@ const CLAVES_VALOR_UNIDAD = [
   'valor_interno', 'liquidable', 'subtotal_linea', 'recaudado_prorrateado',
 ];
 
+// Lo monetario del resumen por envío. Los conteos por estado NO están aquí a
+// propósito: el vendedor necesita saber qué vendió y qué le queda.
+const CLAVES_VALOR_ENVIO = [
+  'valor_total', 'valor_recibido', 'deuda_generada', 'deuda_pendiente',
+  'disponibles_valor', 'vendidas_valor', 'prestadas_valor', 'sin_ubicar_valor',
+  'accesorios_valor',
+];
+
 /**
  * Recorta un estado de cuenta / panel para un vendedor.
  * Se conserva: unidades, estados, fechas, documentos y el TOTAL a remitir.
@@ -121,6 +129,14 @@ const _recortarParaVendedor = (data) => {
       items: data.mercancia.items.map((u) => _sinValores(u, CLAVES_VALOR_UNIDAD)),
     },
     remisiones: (data.remisiones || []).map((r) => ({ ...r, valor_total: null })),
+    // Por envío sobreviven los CONTEOS (cuántos vendió, prestó y le quedan:
+    // eso lo tiene que saber para trabajar) pero ningún valor en pesos.
+    envios: (data.envios || []).map((e) => _sinValores(e, CLAVES_VALOR_ENVIO)),
+    envios_resumen: data.envios_resumen && {
+      total: data.envios_resumen.total,
+      accesorios_pendiente: null,
+      pendiente_en_envios:  null,
+    },
   };
 };
 
@@ -1483,18 +1499,20 @@ const getEstadoCuenta = async (req, sucursalId, filtros = {}) => {
 
   const { desde = null, hasta = null, q = '', estado = null, limit = 100, offset = 0 } = filtros;
 
-  const [totales, extracto, mercancia, remisiones, remesas, movimientos] = await Promise.all([
-    getEstadoLocal(negocioId, objetivo),
-    repo.getExtracto(negocioId, objetivo, { desde, hasta }),
-    repo.buscarUnidades(negocioId, objetivo, {
-      estado: estado || null, q, desde, hasta,
-      limit: Math.min(Number(limit) || 100, 500),
-      offset: Math.max(Number(offset) || 0, 0),
-    }),
-    repo.findRemisiones(negocioId, { sucursalId: objetivo, rol: 'destino', limit: 100 }),
-    repo.findRemesas(negocioId,    { sucursalId: objetivo, rol: 'origen',  limit: 100 }),
-    repo.findMovimientosCuenta(negocioId, objetivo, 100),
-  ]);
+  const [totales, extracto, mercancia, remisiones, remesas, movimientos, porEnvio] =
+    await Promise.all([
+      getEstadoLocal(negocioId, objetivo),
+      repo.getExtracto(negocioId, objetivo, { desde, hasta }),
+      repo.buscarUnidades(negocioId, objetivo, {
+        estado: estado || null, q, desde, hasta,
+        limit: Math.min(Number(limit) || 100, 500),
+        offset: Math.max(Number(offset) || 0, 0),
+      }),
+      repo.findRemisiones(negocioId, { sucursalId: objetivo, rol: 'destino', limit: 100 }),
+      repo.findRemesas(negocioId,    { sucursalId: objetivo, rol: 'origen',  limit: 100 }),
+      repo.findMovimientosCuenta(negocioId, objetivo, 100),
+      repo.getResumenPorRemision(negocioId, objetivo, { limit: 100 }),
+    ]);
 
   const salida = {
     sucursal: { id: sucursal.id, nombre: sucursal.nombre },
@@ -1518,11 +1536,56 @@ const getEstadoCuenta = async (req, sucursalId, filtros = {}) => {
       Object.entries(totales.por_estado).map(([k, v]) => [k, v.unidades])
     ),
     remisiones, remesas, movimientos_cuenta: movimientos,
+    // Envío por envío: qué se vendió, qué se prestó y qué sigue disponible.
+    ...(_armarEnvios(porEnvio, totales.totales)),
     // Por qué debe lo que debe, en una línea por concepto.
     desglose: _desgloseSaldo(totales.totales, remesas),
   };
 
   return _puedeVerCostos(req) ? salida : _recortarParaVendedor(salida);
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ENVÍOS — la pregunta que el local hace de verdad:
+// "de lo que me mandaron en este envío, ¿qué vendí, qué presté y qué me queda?"
+//
+// La deuda pendiente por envío la imputa el FIFO del repositorio. Lo que queda
+// sin atribuir son los accesorios (su liquidación se ancla en el stock global,
+// no en un envío concreto), así que se devuelven aparte como un residuo — nunca
+// repartidos a ojo entre envíos.
+//
+// INVARIANTE: Σ deuda_pendiente + accesorios_pendiente = saldo_por_liquidar
+// cuando el saldo es positivo (si es negativo el local pagó de más y no queda
+// nada pendiente). Está verificado en las pruebas 11-envios-por-remision.
+// ─────────────────────────────────────────────────────────────────────────────
+const _armarEnvios = (filas, t) => {
+  const envios = filas.map((e) => ({
+    ...e,
+    unidades:          Number(e.unidades),
+    valor_recibido:    Math.round(_num(e.valor_recibido)),
+    deuda_generada:    Math.round(_num(e.deuda_generada)),
+    deuda_pendiente:   Math.round(_num(e.deuda_pendiente)),
+    disponibles_valor: Math.round(_num(e.disponibles_valor)),
+    vendidas_valor:    Math.round(_num(e.vendidas_valor)),
+    prestadas_valor:   Math.round(_num(e.prestadas_valor)),
+    sin_ubicar_valor:  Math.round(_num(e.sin_ubicar_valor)),
+    accesorios_valor:  Math.round(_num(e.accesorios_valor)),
+    valor_total:       _num(e.valor_total),
+  }));
+
+  const pendienteSerial = envios.reduce((s, e) => s + e.deuda_pendiente, 0);
+  const saldo = _num(t.saldo_por_liquidar);
+
+  return {
+    envios,
+    envios_resumen: {
+      total: envios.length,
+      // Deuda que no cuelga de ningún envío: accesorios (fungibles) y, si los
+      // hubiera, redondeos. Se muestra como una línea aparte, no se reparte.
+      accesorios_pendiente: Math.max(0, Math.round(saldo) - pendienteSerial),
+      pendiente_en_envios:  pendienteSerial,
+    },
+  };
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
