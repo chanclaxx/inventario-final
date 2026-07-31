@@ -1,4 +1,11 @@
 const { pool } = require('../../config/db');
+const { hayUbicacion } = require('../../config/columnas');
+
+// Ubicación espacial (feature opt-in). En serial la ubicación pertenece a la
+// REFERENCIA, no a cada IMEI: un modelo vive en un estante, no cada unidad.
+// Solo se interpola si la columna existe — ver src/config/columnas.js.
+// No es entrada de usuario: es un literal SQL fijo.
+const selUbicacion = (alias) => (hayUbicacion() ? `${alias}.ubicacion,` : '');
 
 // ── linea_id incluido en findAll con filtro opcional ─────────────────────
 const findAll = async (sucursalId, negocioId, lineaId) => {
@@ -6,6 +13,7 @@ const findAll = async (sucursalId, negocioId, lineaId) => {
     SELECT
       ps.id, ps.nombre, ps.marca, ps.modelo, ps.precio,
       ps.sucursal_id, ps.proveedor_id, ps.linea_id, ps.nota,
+      ${selUbicacion('ps')}
       su.nombre  AS sucursal_nombre,
       lp.nombre  AS linea_nombre,
       COUNT(s.id) FILTER (WHERE s.vendido = false AND s.prestado = false) AS disponibles,
@@ -68,17 +76,24 @@ const perteneceAlNegocio = async (productoId, negocioId) => {
 };
 
 // ── linea_id incluido en create ───────────────────────────────────────────
-const create = async ({ nombre, marca, modelo, precio, sucursal_id, proveedor_id, linea_id }) => {
+const create = async ({ nombre, marca, modelo, precio, sucursal_id, proveedor_id, linea_id, ubicacion }) => {
+  const conUbicacion = hayUbicacion();
   const { rows } = await pool.query(`
-    INSERT INTO productos_serial(nombre, marca, modelo, precio, sucursal_id, proveedor_id, linea_id)
-    VALUES ($1, $2, $3, $4, $5, $6, $7)
+    INSERT INTO productos_serial(nombre, marca, modelo, precio, sucursal_id, proveedor_id, linea_id${conUbicacion ? ', ubicacion' : ''})
+    VALUES ($1, $2, $3, $4, $5, $6, $7${conUbicacion ? ', $8' : ''})
     RETURNING *
-  `, [nombre, marca || null, modelo || null, precio, sucursal_id, proveedor_id || null, linea_id || null]);
+  `, [
+    nombre, marca || null, modelo || null, precio, sucursal_id, proveedor_id || null, linea_id || null,
+    ...(conUbicacion ? [ubicacion || null] : []),
+  ]);
   return rows[0];
 };
 
 // ── linea_id incluido en update ───────────────────────────────────────────
 const update = async (id, datos) => {
+  // Ubicación con la misma escritura condicional que `nota`: si no viene en el
+  // payload no se toca, así un guardado parcial nunca la borra.
+  const conUbicacion = hayUbicacion();
   const { rows } = await pool.query(`
     UPDATE productos_serial
     SET nombre       = COALESCE($1, nombre),
@@ -88,6 +103,7 @@ const update = async (id, datos) => {
         proveedor_id = COALESCE($5, proveedor_id),
         linea_id     = $6,
         nota         = CASE WHEN $7::boolean THEN $8 ELSE nota END
+        ${conUbicacion ? ', ubicacion = CASE WHEN $10::boolean THEN $11 ELSE ubicacion END' : ''}
     WHERE id = $9
     RETURNING *
   `, [
@@ -96,6 +112,7 @@ const update = async (id, datos) => {
     datos.nota !== undefined,
     datos.nota != null && String(datos.nota).trim() ? String(datos.nota).trim() : null,
     id,
+    ...(conUbicacion ? [datos.ubicacion !== undefined, datos.ubicacion || null] : []),
   ]);
   return rows[0] || null;
 };

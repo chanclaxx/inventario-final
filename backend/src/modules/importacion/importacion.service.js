@@ -1,4 +1,5 @@
 const { pool } = require('../../config/db');
+const { hayUbicacion } = require('../../config/columnas');
 
 const MAX_FILAS = 2000;
 
@@ -86,6 +87,22 @@ const _resolverLinea = async (client, nombre, negocioId) => {
   return nuevo[0].id;
 };
 
+// ── Ubicación espacial (feature opt-in) ──────────────────────────────────────
+// Se aplica en un UPDATE aparte, después de resolver el producto, en vez de
+// meterla en los INSERT/UPDATE existentes: así la importación de un negocio sin
+// la feature ejecuta exactamente el mismo SQL de siempre.
+//
+// Celda vacía = NO tocar. Reimportar la misma plantilla sin llenar la columna
+// nunca borra las ubicaciones ya puestas.
+//
+// `tabla` es un literal fijo del código, jamás entrada del usuario.
+const _aplicarUbicacion = async (client, tabla, productoId, valor) => {
+  if (!hayUbicacion() || !productoId) return;
+  const limpio = String(valor ?? '').trim().replace(/\s+/g, ' ').slice(0, 60);
+  if (!limpio) return;
+  await client.query(`UPDATE ${tabla} SET ubicacion = $1 WHERE id = $2`, [limpio, productoId]);
+};
+
 const _resolverProductoSerial = async (client, { nombre, marca, modelo, precio, sucursalId, proveedorId, lineaId }) => {
   const { rows: existe } = await client.query(
     `SELECT id FROM productos_serial
@@ -169,13 +186,19 @@ const importarSerial = async (hojas, sucursalId, negocioId, config = {}) => {
       const lineaNombre = hoja.filas.find((f) => f.linea?.toString().trim())?.linea?.toString().trim() ?? null;
       const lineaId     = await _resolverLinea(client, lineaNombre, negocioId);
 
+      // La ubicación es del PRODUCTO, no de cada IMEI: se toma la primera fila
+      // de la hoja que la traiga, igual que se hace con la línea.
+      const ubicacionHoja = hoja.filas.find((f) => f.ubicacion?.toString().trim())
+        ?.ubicacion?.toString().trim() ?? null;
+
       // Garantizar que el producto existe aunque la hoja no tenga seriales
       if (hoja.filas.length === 0) {
-        await _resolverProductoSerial(client, {
+        const idVacio = await _resolverProductoSerial(client, {
           nombre: hoja.nombreProducto,
           marca: null, modelo: null, precio: null,
           sucursalId, proveedorId: null, lineaId,
         });
+        await _aplicarUbicacion(client, 'productos_serial', idVacio, ubicacionHoja);
       }
 
       for (const [i, fila] of hoja.filas.entries()) {
@@ -207,6 +230,8 @@ const importarSerial = async (hojas, sucursalId, negocioId, config = {}) => {
             proveedorId,
             lineaId,
           });
+
+          await _aplicarUbicacion(client, 'productos_serial', productoId, ubicacionHoja);
 
           const fechaEntrada  = _formatearFecha(fila.fecha_entrada);
           const costoCompra   = fila.costo_compra   ? Number(fila.costo_compra)   : null;
@@ -511,6 +536,7 @@ const importarCantidad = async (filas, sucursalId, negocioId, config = {}) => {
           const productoId = await _resolverProductoBase(client, {
             nombre, sucursalId, proveedorId, costoUnit, unidad, clienteOrig, precioVenta, lineaId,
           });
+          await _aplicarUbicacion(client, 'productos_cantidad', productoId, fila.ubicacion);
 
           const { id: atributoId, nuevo: atrNuevo } = await _resolverAtributo(
             client, productoId, sucursalId, atributoValor
@@ -558,16 +584,19 @@ const importarCantidad = async (filas, sucursalId, negocioId, config = {}) => {
                WHERE id = $9`,
               [stock, stockMinimo, costoUnit, unidad, clienteOrig, proveedorId, precioVenta, lineaId, existe[0].id]
             );
+            await _aplicarUbicacion(client, 'productos_cantidad', existe[0].id, fila.ubicacion);
             resultado.actualizados++;
           } else {
-            await client.query(
+            const { rows: creado } = await client.query(
               `INSERT INTO productos_cantidad
                  (sucursal_id, proveedor_id, nombre, stock, stock_minimo,
                   costo_unitario, unidad_medida, cliente_origen, precio, linea_id)
-               VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+               VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+               RETURNING id`,
               [sucursalId, proveedorId, nombre, stock, stockMinimo,
                costoUnit, unidad, clienteOrig, precioVenta, lineaId]
             );
+            await _aplicarUbicacion(client, 'productos_cantidad', creado[0]?.id, fila.ubicacion);
             resultado.insertados++;
           }
         }

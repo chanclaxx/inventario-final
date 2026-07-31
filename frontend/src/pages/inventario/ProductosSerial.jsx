@@ -14,6 +14,7 @@ import useCarritoStore               from '../../store/carritoStore';
 import { ModalPinEliminacion }       from './ModalPinEliminacion';
 import { ModalEditarSerial }         from './ModalEditarSerial';
 import { ModalEditarProductoSerial } from './ModalEditarProductoSerial';
+import { UbicacionChip }            from '../../components/ui/InputUbicacion';
 import { AntiguedadBadge }            from './AntiguedadInventario';
 import { NotaStrip, PostItNota }      from './PostItNota';
 import { useAuth }                   from '../../context/useAuth';
@@ -515,6 +516,7 @@ function SelectorModeloMovil({ productos, lineas, productoSeleccionado, onSelecc
                                       <AntiguedadBadge dias={p.dias_en_inventario} />
                                     )}
                                     {p.nota && <StickyNote size={12} className="text-amber-400 flex-shrink-0" />}
+                  <UbicacionChip ubicacion={p.ubicacion} />
                                   </div>
                                 </div>
                                 {seleccionado && (
@@ -589,6 +591,7 @@ function GrupoLinea({ nombre, productos, productoSeleccionado, onSeleccionar, on
                     <AntiguedadBadge dias={p.dias_en_inventario} />
                   )}
                   {p.nota && <StickyNote size={12} className="text-amber-400 flex-shrink-0" />}
+                  <UbicacionChip ubicacion={p.ubicacion} />
                 </div>
               </div>
               <ChevronRight size={14} className="text-gray-300 flex-shrink-0 ml-2" />
@@ -822,6 +825,7 @@ export function ProductosSerial({ onAgregarProducto }) {
   const caracteristicasActivo   = configData?.caracteristicas_serial_activo === '1';
   const caracteristicasLista    = parsearCaracteristicasConfig(configData);
   const pinEliminacion          = configData?.pin_eliminacion ?? '';
+  const ubicacionActiva         = configData?.ubicacion_activa === '1';
 
   const agregarItem = useCarritoStore((s) => s.agregarItem);
 
@@ -935,6 +939,11 @@ export function ProductosSerial({ onAgregarProducto }) {
               </span>
             )}
           </p>
+          {productoSeleccionado.ubicacion && (
+            <div className="mt-1.5">
+              <UbicacionChip ubicacion={productoSeleccionado.ubicacion} />
+            </div>
+          )}
           {productoSeleccionado.nota && (
             <NotaStrip nota={productoSeleccionado.nota} className="mt-1.5" />
           )}
@@ -1049,6 +1058,7 @@ export function ProductosSerial({ onAgregarProducto }) {
                     <AntiguedadBadge dias={p.dias_en_inventario} />
                   )}
                   {p.nota && <StickyNote size={12} className="text-amber-400 flex-shrink-0" />}
+                  <UbicacionChip ubicacion={p.ubicacion} />
                 </div>
               </div>
               <ChevronRight size={14} className="text-gray-300 flex-shrink-0 ml-2" />
@@ -1140,6 +1150,7 @@ export function ProductosSerial({ onAgregarProducto }) {
 
       {productoAEditar && (
         <ModalEditarProductoSerial
+          ubicacionActiva={ubicacionActiva}
           producto={productoAEditar}
           pinEliminacion={pinEliminacion}
           onClose={() => setProductoAEditar(null)}

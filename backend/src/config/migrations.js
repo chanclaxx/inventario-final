@@ -19,6 +19,29 @@ const runMigrations = async () => {
       WHERE codigo IS NOT NULL AND activo;
   `);
 
+  // Ubicación espacial de productos — ver migrations/20260730_ubicacion_producto.sql
+  //
+  // 100% aditiva e idempotente. Columnas nullable: un negocio sin la feature no
+  // las nota. Va en su propio try/catch porque runMigrations() corre antes de
+  // app.listen(): un fallo aquí (permisos, BD antigua) solo debe dejar sin
+  // ubicación a quien la use, nunca sin servidor a los otros negocios.
+  // La detección de src/config/columnas.js se encarga de apagar la feature si
+  // el ALTER no llegó a aplicarse.
+  try {
+    await pool.query(`
+      ALTER TABLE IF EXISTS productos_cantidad ADD COLUMN IF NOT EXISTS ubicacion TEXT;
+      ALTER TABLE IF EXISTS productos_serial   ADD COLUMN IF NOT EXISTS ubicacion TEXT;
+      CREATE INDEX IF NOT EXISTS idx_productos_cantidad_ubicacion
+        ON productos_cantidad (sucursal_id, LOWER(BTRIM(ubicacion)))
+        WHERE ubicacion IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_productos_serial_ubicacion
+        ON productos_serial (sucursal_id, LOWER(BTRIM(ubicacion)))
+        WHERE ubicacion IS NOT NULL;
+    `);
+  } catch (err) {
+    console.error('⚠️  Ubicación de productos no aplicada (el inventario sigue normal):', err.message);
+  }
+
   // Gastos fijos mensuales por sucursal (Proyección) — ver migrations/20260712_gastos_fijos.sql
   // 100% aditiva e idempotente. Alimenta la utilidad neta y el punto de equilibrio.
   await pool.query(`

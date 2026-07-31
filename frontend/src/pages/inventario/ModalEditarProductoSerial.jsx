@@ -6,11 +6,12 @@ import { getLineas }                         from '../../api/productos.api';
 import { Modal }       from '../../components/ui/Modal';
 import { Input }       from '../../components/ui/Input';
 import { InputMoneda } from '../../components/ui/InputMoneda';
+import { InputUbicacion } from '../../components/ui/InputUbicacion';
 import { Button }      from '../../components/ui/Button';
 import { useAuth }     from '../../context/useAuth';
 import { ModalEliminarProducto, TIPO_PRODUCTO_SERIAL } from './ModalEliminarProducto';
 
-export function ModalEditarProductoSerial({ producto, pinEliminacion, onClose, onSaved }) {
+export function ModalEditarProductoSerial({ producto, pinEliminacion, ubicacionActiva, onClose, onSaved }) {
   const { esAdminNegocio, puedeEditarProductos, camposEdicionProductos } = useAuth();
   const esAdmin = esAdminNegocio();
   const campos  = camposEdicionProductos();
@@ -22,6 +23,7 @@ export function ModalEditarProductoSerial({ producto, pinEliminacion, onClose, o
     precio:   producto.precio   != null ? Number(producto.precio)   : '',
     linea_id: producto.linea_id != null ? String(producto.linea_id) : '',
     nota:     producto.nota     || '',
+    ubicacion: producto.ubicacion || '',
   });
   const [error,         setError]         = useState('');
   const [modalEliminar, setModalEliminar] = useState(false);
@@ -40,6 +42,8 @@ export function ModalEditarProductoSerial({ producto, pinEliminacion, onClose, o
       precio:   form.precio   !== '' ? Number(form.precio)   : null,
       linea_id: form.linea_id !== '' ? Number(form.linea_id) : null,
       nota:     form.nota.trim() || null,
+      // Solo si la feature está activa: sin la clave, el backend no toca la columna
+      ...(ubicacionActiva ? { ubicacion: form.ubicacion.trim() || null } : {}),
     }),
     onSuccess: (response) => {
       queryClient.invalidateQueries({ queryKey: ['productos-serial'], exact: false });
@@ -103,6 +107,13 @@ export function ModalEditarProductoSerial({ producto, pinEliminacion, onClose, o
                 ))}
               </select>
             </div>
+          )}
+
+          {ubicacionActiva && (
+            <InputUbicacion
+              value={form.ubicacion}
+              onChange={(val) => setForm({ ...form, ubicacion: val })}
+            />
           )}
 
           <div className="flex flex-col gap-1">

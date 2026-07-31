@@ -1,4 +1,9 @@
 const { pool } = require('../../config/db');
+const { hayUbicacion } = require('../../config/columnas');
+
+// Ubicacion espacial (feature opt-in): solo se selecciona si la columna existe.
+// Literal SQL fijo, no entrada de usuario. Ver src/config/columnas.js.
+const selUbicacion = (alias) => (hayUbicacion() ? `${alias}.ubicacion,` : '');
 
 const getSeriales = async (sucursalId) => {
   const { rows } = await pool.query(`
@@ -6,6 +11,7 @@ const getSeriales = async (sucursalId) => {
       ps.nombre       AS producto,
       ps.marca,
       ps.modelo,
+      ${selUbicacion('ps')}
       lp.nombre       AS linea,
       s.imei,
       s.color,
@@ -185,6 +191,7 @@ const getProductosCantidad = async (sucursalId) => {
       pc.id,
       pc.nombre,
       pc.codigo,
+      ${selUbicacion('pc')}
       pc.stock,
       pc.stock_minimo,
       pc.unidad_medida,

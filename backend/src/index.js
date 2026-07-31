@@ -9,6 +9,7 @@ const compression  = require('compression');
 const { validateEnv }      = require('./config/env');
 const { connectDB }        = require('./config/db');
 const { runMigrations }    = require('./config/migrations');
+const { detectarColumnas } = require('./config/columnas');
 const { auth }             = require('./middlewares/auth.middleware');
 const { verificarPlan }    = require('./middlewares/plan.middleware');
 const { resolveSucursal }  = require('./middlewares/sucursal.middleware');
@@ -93,6 +94,7 @@ app.use('/api/busqueda',           protegida, require('./modules/busqueda/busque
 app.use('/api/tesoreria',          protegida, require('./modules/tesoreria/tesoreria.routes'));
 app.use('/api/tipos-caracteristica', protegida, require('./modules/tipos-caracteristica/tipos-caracteristica.routes'));
 app.use('/api/variantes-producto',   protegida, require('./modules/variantes-producto/variantes-producto.routes'));
+app.use('/api/ubicaciones',          protegida, require('./modules/ubicaciones/ubicaciones.routes'));
 
 // ── Rutas de superadmin (sin protegida) ───────────────
 app.use('/api/superadmin', require('./modules/superadmin/superadmin.routes'));
@@ -114,6 +116,9 @@ const PORT = process.env.PORT || 3001;
 const start = async () => {
   await connectDB();
   await runMigrations();
+  // Después de las migraciones: si alguna columna opcional no llegó a crearse,
+  // su feature se apaga sola en vez de romper las consultas que la usan.
+  await detectarColumnas();
 
   verificarVencimientos();
   setInterval(verificarVencimientos, 24 * 60 * 60 * 1000);

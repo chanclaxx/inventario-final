@@ -6,6 +6,7 @@ import { Input }        from '../../components/ui/Input';
 import { Badge }        from '../../components/ui/Badge';
 import { SearchInput }  from '../../components/ui/SearchInput';
 import { InputMoneda }  from '../../components/ui/InputMoneda';
+import { InputUbicacion } from '../../components/ui/InputUbicacion';
 import { useAuth }      from '../../context/useAuth';
 import { useMetodosPago } from '../../hooks/useMetodosPago';
 import { useSucursalKey } from '../../hooks/useSucursalKey';
@@ -728,7 +729,7 @@ function FilaImei({ index, item, coloresActivo, coloresConfig, caracteristicasAc
 }
 
 // ─── Paso Compra a Cliente ─────────────────────────────────────────────────────
-function PasoCompraCliente({ sucursalKey, sucursalLista, onExito, onDuplicadosEncontrados, coloresActivo, coloresConfig, caracteristicasActivo, caracteristicasLista, codigoActivo }) {
+function PasoCompraCliente({ sucursalKey, sucursalLista, onExito, onDuplicadosEncontrados, coloresActivo, coloresConfig, caracteristicasActivo, caracteristicasLista, codigoActivo, ubicacionActiva }) {
   const queryClient        = useQueryClient();
   const { esAdminNegocio } = useAuth();
   const esAdmin            = esAdminNegocio();
@@ -741,7 +742,7 @@ function PasoCompraCliente({ sucursalKey, sucursalLista, onExito, onDuplicadosEn
   const [filtroLineaSerial, setFiltroLineaSerial] = useState('');  // ← NUEVO
   const [lineaSel,          setLineaSel]         = useState(null);
   const [creandoLinea,      setCreandoLinea]     = useState(false);
-  const [nuevaLinea,        setNuevaLinea]       = useState({ nombre: '', marca: '', modelo: '', precio: '', linea_id: '' });
+  const [nuevaLinea,        setNuevaLinea]       = useState({ nombre: '', marca: '', modelo: '', precio: '', linea_id: '', ubicacion: '' });
   const [items,             setItems]            = useState(['']);
   const [verificando,       setVerificando]      = useState(false);
 
@@ -749,7 +750,7 @@ function PasoCompraCliente({ sucursalKey, sucursalLista, onExito, onDuplicadosEn
   const [filtroLineaCantidad, setFiltroLineaCantidad] = useState('');  // ← NUEVO
   const [productoSel,        setProductoSel]        = useState(null);
   const [creandoProducto,    setCreandoProducto]    = useState(false);
-  const [nuevoProducto,      setNuevoProducto]      = useState({ nombre: '', unidad_medida: 'unidad', precio: '', costo_unitario: '', linea_id: '', codigo: '' });
+  const [nuevoProducto,      setNuevoProducto]      = useState({ nombre: '', unidad_medida: 'unidad', precio: '', costo_unitario: '', linea_id: '', codigo: '', ubicacion: '' });
   const [cantidad,           setCantidad]           = useState(1);
 
   const [costoCompra, setCostoCompra] = useState('');
@@ -805,12 +806,14 @@ function PasoCompraCliente({ sucursalKey, sucursalLista, onExito, onDuplicadosEn
       modelo:   nuevaLinea.modelo,
       precio:   nuevaLinea.precio !== '' ? Number(nuevaLinea.precio) : null,
       linea_id: nuevaLinea.linea_id ? Number(nuevaLinea.linea_id) : null,
+      ...(ubicacionActiva && nuevaLinea.ubicacion?.trim() ? { ubicacion: nuevaLinea.ubicacion.trim() } : {}),
     }),
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ['productos-serial'], exact: false });
+      queryClient.invalidateQueries({ queryKey: ['ubicaciones'],      exact: false });
       setLineaSel(res.data.data);
       setCreandoLinea(false);
-      setNuevaLinea({ nombre: '', marca: '', modelo: '', precio: '', linea_id: '' });
+      setNuevaLinea({ nombre: '', marca: '', modelo: '', precio: '', linea_id: '', ubicacion: '' });
     },
     onError: (e) => setError(e.response?.data?.error || 'Error al crear línea'),
   });
@@ -824,12 +827,14 @@ function PasoCompraCliente({ sucursalKey, sucursalLista, onExito, onDuplicadosEn
       cliente_origen: nombreCliente,
       linea_id:       nuevoProducto.linea_id ? Number(nuevoProducto.linea_id) : null,
       ...(codigoActivo && nuevoProducto.codigo.trim() ? { codigo: nuevoProducto.codigo.trim() } : {}),
+      ...(ubicacionActiva && nuevoProducto.ubicacion?.trim() ? { ubicacion: nuevoProducto.ubicacion.trim() } : {}),
     }),
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ['productos-cantidad'], exact: false });
+      queryClient.invalidateQueries({ queryKey: ['ubicaciones'],        exact: false });
       setProductoSel(res.data.data);
       setCreandoProducto(false);
-      setNuevoProducto({ nombre: '', unidad_medida: 'unidad', precio: '', costo_unitario: '', linea_id: '', codigo: '' });
+      setNuevoProducto({ nombre: '', unidad_medida: 'unidad', precio: '', costo_unitario: '', linea_id: '', codigo: '', ubicacion: '' });
     },
     onError: (e) => setError(e.response?.data?.error || 'Error al crear producto'),
   });
@@ -1008,6 +1013,14 @@ function PasoCompraCliente({ sucursalKey, sucursalLista, onExito, onDuplicadosEn
                     </div>
                   )}
                   <SelectLinea value={nuevaLinea.linea_id} onChange={(val) => setNuevaLinea({ ...nuevaLinea, linea_id: val })} />
+                  {ubicacionActiva && (
+                    <InputUbicacion
+                      label={null}
+                      placeholder="Ubicación: Estante A-3, Vitrina 2... (opcional)"
+                      value={nuevaLinea.ubicacion}
+                      onChange={(val) => setNuevaLinea({ ...nuevaLinea, ubicacion: val })}
+                    />
+                  )}
                   <div className="flex gap-2">
                     <Button variant="secondary" size="sm" className="flex-1" onClick={() => setCreandoLinea(false)}>Cancelar</Button>
                     <Button size="sm" className="flex-1" loading={mutCrearLinea.isPending} disabled={!nuevaLinea.linea_id} onClick={() => mutCrearLinea.mutate()}>Crear y seleccionar</Button>
@@ -1094,6 +1107,14 @@ function PasoCompraCliente({ sucursalKey, sucursalLista, onExito, onDuplicadosEn
                   {codigoActivo && (
                     <Input placeholder="Código único / de barras (opcional, puedes escanearlo)" value={nuevoProducto.codigo} onChange={(e) => setNuevoProducto({ ...nuevoProducto, codigo: e.target.value })} />
                   )}
+                  {ubicacionActiva && (
+                    <InputUbicacion
+                      label={null}
+                      placeholder="Ubicación: Estante A-3, Vitrina 2... (opcional)"
+                      value={nuevoProducto.ubicacion}
+                      onChange={(val) => setNuevoProducto({ ...nuevoProducto, ubicacion: val })}
+                    />
+                  )}
                   {puedeVerCosto && (
                     <div className="flex gap-2">
                       <div className="flex-1 flex flex-col gap-1">
@@ -1159,7 +1180,7 @@ function PasoCompraCliente({ sucursalKey, sucursalLista, onExito, onDuplicadosEn
 }
 
 // ─── Paso Serial (proveedor) ───────────────────────────────────────────────────
-function PasoSerial({ sucursalKey, onExito, onDuplicadosEncontrados, coloresActivo, coloresConfig, caracteristicasActivo, caracteristicasLista }) {
+function PasoSerial({ sucursalKey, onExito, onDuplicadosEncontrados, coloresActivo, coloresConfig, caracteristicasActivo, caracteristicasLista, ubicacionActiva }) {
   const queryClient   = useQueryClient();
   const puedeVerCosto = true;
 
@@ -1167,7 +1188,7 @@ function PasoSerial({ sucursalKey, onExito, onDuplicadosEncontrados, coloresActi
   const [filtroLineaId,  setFiltroLineaId]  = useState('');  // ← NUEVO
   const [lineaSel,       setLineaSel]       = useState(null);
   const [creandoLinea,   setCreandoLinea]   = useState(false);
-  const [nuevaLinea,     setNuevaLinea]     = useState({ nombre: '', marca: '', modelo: '', precio: '', linea_id: '' });
+  const [nuevaLinea,     setNuevaLinea]     = useState({ nombre: '', marca: '', modelo: '', precio: '', linea_id: '', ubicacion: '' });
   const [items,          setItems]          = useState(['']);
   const [proveedorId,       setProveedorId]       = useState('');
   const [registrarEnCaja,   setRegistrarEnCaja]   = useState(true);
@@ -1208,12 +1229,15 @@ function PasoSerial({ sucursalKey, onExito, onDuplicadosEncontrados, coloresActi
       precio:       nuevaLinea.precio !== '' ? Number(nuevaLinea.precio) : null,
       proveedor_id: proveedorId ? Number(proveedorId) : null,
       linea_id:     nuevaLinea.linea_id ? Number(nuevaLinea.linea_id) : null,
+      // La ubicación es de la referencia (el modelo), no de cada IMEI
+      ...(ubicacionActiva ? { ubicacion: nuevaLinea.ubicacion.trim() || null } : {}),
     }),
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ['productos-serial'], exact: false });
+      queryClient.invalidateQueries({ queryKey: ['ubicaciones'],      exact: false });
       setLineaSel(res.data.data);
       setCreandoLinea(false);
-      setNuevaLinea({ nombre: '', marca: '', modelo: '', precio: '', linea_id: '' });
+      setNuevaLinea({ nombre: '', marca: '', modelo: '', precio: '', linea_id: '', ubicacion: '' });
     },
     onError: (e) => setError(e.response?.data?.error || 'Error al crear linea'),
   });
@@ -1385,6 +1409,13 @@ function PasoSerial({ sucursalKey, onExito, onDuplicadosEncontrados, coloresActi
                 </div>
               )}
               <SelectLinea value={nuevaLinea.linea_id} onChange={(val) => setNuevaLinea({ ...nuevaLinea, linea_id: val })} />
+              {ubicacionActiva && (
+                <InputUbicacion
+                  id="sl-ubicacion"
+                  value={nuevaLinea.ubicacion}
+                  onChange={(val) => setNuevaLinea({ ...nuevaLinea, ubicacion: val })}
+                />
+              )}
               <div className="flex gap-2">
                 <Button variant="secondary" size="sm" className="flex-1" onClick={() => setCreandoLinea(false)}>Cancelar</Button>
                 <Button size="sm" className="flex-1" loading={mutCrearLinea.isPending} disabled={!nuevaLinea.linea_id} onClick={() => mutCrearLinea.mutate()}>Crear y seleccionar</Button>
@@ -1635,7 +1666,7 @@ function MiniSelectorVariante({ arbolData, nodoSel, onSeleccionar }) {
 }
 
 // ─── Paso Cantidad (proveedor) ─────────────────────────────────────────────────
-function PasoCantidad({ sucursalKey, onExito, variantesActivo, codigoActivo }) {
+function PasoCantidad({ sucursalKey, onExito, variantesActivo, codigoActivo, ubicacionActiva }) {
   const queryClient   = useQueryClient();
   const puedeVerCosto = true;
 
@@ -1643,7 +1674,7 @@ function PasoCantidad({ sucursalKey, onExito, variantesActivo, codigoActivo }) {
   const [filtroLineaId,  setFiltroLineaId]  = useState('');  // ← NUEVO
   const [productoSel,    setProductoSel]    = useState(null);
   const [creandoNuevo,   setCreandoNuevo]   = useState(false);
-  const [nuevoProducto,  setNuevoProducto]  = useState({ nombre: '', unidad_medida: 'unidad', precio: '', costo_unitario: '', linea_id: '', codigo: '' });
+  const [nuevoProducto,  setNuevoProducto]  = useState({ nombre: '', unidad_medida: 'unidad', precio: '', costo_unitario: '', linea_id: '', codigo: '', ubicacion: '' });
   const [cantidad,       setCantidad]       = useState(1);
   const [proveedorId,       setProveedorId]       = useState('');
   const [registrarEnCaja,   setRegistrarEnCaja]   = useState(true);
@@ -1721,9 +1752,11 @@ function PasoCantidad({ sucursalKey, onExito, variantesActivo, codigoActivo }) {
       proveedor_id:   proveedorId                  ? Number(proveedorId)                          : null,
       linea_id:       nuevoProducto.linea_id       ? Number(nuevoProducto.linea_id)               : null,
       ...(codigoActivo && nuevoProducto.codigo.trim() ? { codigo: nuevoProducto.codigo.trim() } : {}),
+      ...(ubicacionActiva && nuevoProducto.ubicacion.trim() ? { ubicacion: nuevoProducto.ubicacion.trim() } : {}),
     }),
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ['productos-cantidad'], exact: false });
+      queryClient.invalidateQueries({ queryKey: ['ubicaciones'],        exact: false });
       setProductoSel(res.data.data);
       setCreandoNuevo(false);
     },
@@ -1873,6 +1906,14 @@ function PasoCantidad({ sucursalKey, onExito, variantesActivo, codigoActivo }) {
               <Input placeholder="Nombre del producto" value={nuevoProducto.nombre} onChange={(e) => setNuevoProducto({ ...nuevoProducto, nombre: e.target.value })} />
               {codigoActivo && (
                 <Input placeholder="Código único / de barras (opcional, puedes escanearlo)" value={nuevoProducto.codigo} onChange={(e) => setNuevoProducto({ ...nuevoProducto, codigo: e.target.value })} />
+              )}
+              {ubicacionActiva && (
+                <InputUbicacion
+                  label={null}
+                  placeholder="Ubicación: Estante A-3, Vitrina 2... (opcional)"
+                  value={nuevoProducto.ubicacion}
+                  onChange={(val) => setNuevoProducto({ ...nuevoProducto, ubicacion: val })}
+                />
               )}
               {puedeVerCosto && (
                 <div className="flex gap-2">
@@ -2361,6 +2402,7 @@ export function ModalAgregarProducto({ onClose }) {
   const caracteristicasLista  = parsearCaracteristicasConfig(configData);
   const variantesActivo       = configData?.variantes_activo === '1';
   const codigoActivo          = configData?.codigo_producto_activo === '1';
+  const ubicacionActiva       = configData?.ubicacion_activa       === '1';
 
   const handleDuplicadosEncontrados = ({ disponibles, paraReactivar, prestados = [] }, confirmarFn) => {
     confirmarReactivarRef.current = confirmarFn;
@@ -2408,6 +2450,7 @@ export function ModalAgregarProducto({ onClose }) {
             coloresConfig={coloresConfig}
             caracteristicasActivo={caracteristicasActivo}
             caracteristicasLista={caracteristicasLista}
+            ubicacionActiva={ubicacionActiva}
           />
         )}
         {tipo === 'cantidad' && (
@@ -2416,6 +2459,7 @@ export function ModalAgregarProducto({ onClose }) {
             sucursalLista={sucursalLista}
             variantesActivo={variantesActivo}
             codigoActivo={codigoActivo}
+            ubicacionActiva={ubicacionActiva}
             onExito={() => setExito(true)}
           />
         )}
@@ -2430,6 +2474,7 @@ export function ModalAgregarProducto({ onClose }) {
             caracteristicasActivo={caracteristicasActivo}
             caracteristicasLista={caracteristicasLista}
             codigoActivo={codigoActivo}
+            ubicacionActiva={ubicacionActiva}
           />
         )}
         {tipo === 'prestatario' && (

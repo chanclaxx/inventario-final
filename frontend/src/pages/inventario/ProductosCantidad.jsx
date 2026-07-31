@@ -1,6 +1,6 @@
 import { useState }                                      from 'react';
 import { useQuery, useMutation, useQueryClient }         from '@tanstack/react-query';
-import { ShoppingBag, Plus, AlertTriangle, Trash2, ChevronDown, ChevronRight, Layers, Settings, Barcode } from 'lucide-react';
+import { ShoppingBag, Plus, AlertTriangle, Trash2, ChevronDown, ChevronRight, Layers, Settings, Barcode, MapPin } from 'lucide-react';
 import { getProductosCantidad, ajustarStockCantidad, getLineas } from '../../api/productos.api';
 import { buscarPorCodigo }                               from '../../api/busqueda.api';
 import { SearchInput }                                   from '../../components/ui/SearchInput';
@@ -14,6 +14,8 @@ import { ModalPinEliminacion }                           from './ModalPinElimina
 import { ModalEditarProductoCantidad }                   from './ModalEditarProductoCantidad';
 import { UltimaVentaBadge }                               from './AntiguedadInventario';
 import { NotaStrip }                                     from './PostItNota';
+import { UbicacionChip }                                 from '../../components/ui/InputUbicacion';
+import { getUbicaciones }                                from '../../api/ubicaciones.api';
 import { VistaVariantesProducto }                        from './VistaVariantesProducto';
 import { useAuth }                                       from '../../context/useAuth';
 import { useSucursalKey }                                from '../../hooks/useSucursalKey';
@@ -69,6 +71,11 @@ function TarjetaProducto({ p, esAdmin, onAgregar, onReducir, onEditar, variantes
               <Barcode size={11} className="flex-shrink-0" />
               {p.codigo}
             </p>
+          )}
+          {p.ubicacion && (
+            <div className="mt-1">
+              <UbicacionChip ubicacion={p.ubicacion} />
+            </div>
           )}
           {p.dias_en_inventario != null && (
             <UltimaVentaBadge
@@ -215,6 +222,8 @@ export function ProductosCantidad() {
   const [cantidadReducir,  setCantidadReducir]  = useState('1');
   const [productoAEditar,  setProductoAEditar]  = useState(null);
   const [productoArbol,    setProductoArbol]    = useState(null);
+  // Filtro por sitio: el bodeguero quiere ver de una vez todo lo del Estante A-3.
+  const [filtroUbicacion,  setFiltroUbicacion]  = useState('');
 
   const { data: productosData, isLoading } = useQuery({
     queryKey:  ['productos-cantidad', ...sucursalKey],
@@ -238,6 +247,14 @@ export function ProductosCantidad() {
   const variantesActivo         = configData?.variantes_activo === '1';
   const ajusteStockSinVariantes = configData?.ajuste_stock_sin_variantes !== '0';
   const codigoActivo            = configData?.codigo_producto_activo === '1';
+  const ubicacionActiva         = configData?.ubicacion_activa       === '1';
+
+  const { data: ubicaciones = [] } = useQuery({
+    queryKey: ['ubicaciones', ...sucursalKey],
+    queryFn:  () => getUbicaciones().then((r) => r.data.data),
+    enabled:  ubicacionActiva && sucursalLista,
+    staleTime: 60_000,
+  });
 
   const agregarItem         = useCarritoStore((s) => s.agregarItem);
   const agregarOIncrementar = useCarritoStore((s) => s.agregarOIncrementar);
@@ -263,7 +280,11 @@ export function ProductosCantidad() {
     const q = busqueda.toLowerCase();
     return p.nombre.toLowerCase().includes(q)
       || p.linea_nombre?.toLowerCase().includes(q)
-      || p.codigo?.toLowerCase().includes(q);
+      || p.codigo?.toLowerCase().includes(q)
+      || p.ubicacion?.toLowerCase().includes(q);
+  }).filter((p) => {
+    if (!filtroUbicacion) return true;
+    return (p.ubicacion || '').trim().toLowerCase() === filtroUbicacion.trim().toLowerCase();
   });
 
   const sinLinea = productosFiltrados.filter((p) => !p.linea_id);
@@ -406,6 +427,34 @@ export function ProductosCantidad() {
           </div>
         )}
 
+        {/* Filtro por ubicación: aislar un estante para revisarlo o contarlo */}
+        {ubicacionActiva && ubicaciones.length > 0 && (
+          <div className="flex items-center gap-2">
+            <MapPin size={15} className="text-gray-400 flex-shrink-0" />
+            <select
+              value={filtroUbicacion}
+              onChange={(e) => setFiltroUbicacion(e.target.value)}
+              className="flex-1 px-3 py-2 bg-gray-100 border-0 rounded-xl text-sm text-gray-800
+                focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"
+            >
+              <option value="">Todas las ubicaciones</option>
+              {ubicaciones.map((u) => (
+                <option key={u.ubicacion} value={u.ubicacion}>
+                  {u.ubicacion} ({u.productos})
+                </option>
+              ))}
+            </select>
+            {filtroUbicacion && (
+              <button
+                onClick={() => setFiltroUbicacion('')}
+                className="text-xs text-gray-400 hover:text-gray-600 flex-shrink-0 px-1"
+              >
+                Quitar
+              </button>
+            )}
+          </div>
+        )}
+
         {esAdmin && !variantesActivo && (
           <p className="text-xs text-gray-400 px-1">Doble click en una card para editar el producto</p>
         )}
@@ -468,6 +517,7 @@ export function ProductosCantidad() {
 
       {productoAEditar && (
         <ModalEditarProductoCantidad
+          ubicacionActiva={ubicacionActiva}
           producto={productoAEditar}
           pinEliminacion={pinEliminacion}
           variantesActivo={variantesActivo}

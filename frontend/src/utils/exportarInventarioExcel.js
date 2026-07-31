@@ -25,7 +25,9 @@ function colW(col) {
   var m = { 'IMEI / Serial': 22, 'Estado': 12, 'Color': 14, 'Prestamista': 22,
             'Fecha Entrada': 14, 'Fecha Salida': 14, 'Cliente Venta': 22,
             'Cédula Venta': 14, 'Cliente Origen': 22,
-            'Nombre': 28, 'Stock': 10, 'Stock Mínimo': 12, 'Unidad Medida': 14 };
+            'Nombre': 28, 'Stock': 10, 'Stock Mínimo': 12, 'Unidad Medida': 14,
+            'Ubicación': 20, 'Producto': 32, 'Tipo': 12,
+            'Cantidad esperada': 18, 'Contado': 12, 'Diferencia': 12 };
   return m[col] !== undefined ? m[col] : Math.max(col.length + 4, 12);
 }
 function bgSerial(s) {
@@ -104,6 +106,7 @@ export async function exportarInventarioExcel(porProducto, cantidad, configMap) 
   var colAct  = cfg.colores_serial_activo         === '1';
   var carAct  = cfg.caracteristicas_serial_activo === '1';
   var codAct  = cfg.codigo_producto_activo        === '1';
+  var ubiAct  = cfg.ubicacion_activa              === '1';
   var carList = carAct ? parseLista(cfg.caracteristicas_serial_lista) : [];
 
   var wb     = new ExcelJS.Workbook();
@@ -157,6 +160,7 @@ export async function exportarInventarioExcel(porProducto, cantidad, configMap) 
     var wsCant   = wb.addWorksheet('Por Cantidad');
     var cantCols = ['Nombre'];
     if (codAct) cantCols.push('Código');
+    if (ubiAct) cantCols.push('Ubicación');
     cantCols.push('Stock', 'Stock Mínimo', 'Unidad Medida', 'Cliente Origen');
     wsCant.columns = cantCols.map(function(c) { return { width: colW(c) }; });
 
@@ -175,6 +179,9 @@ export async function exportarInventarioExcel(porProducto, cantidad, configMap) 
         // Texto explícito: preserva ceros a la izquierda de códigos EAN/UPC
         var cak = cdr.getCell(ccn++); cak.value = p.codigo != null ? String(p.codigo) : ''; applyCell(cak, bgCant);
       }
+      if (ubiAct) {
+        var cau = cdr.getCell(ccn++); cau.value = p.ubicacion || ''; applyCell(cau, bgCant);
+      }
       var ca1 = cdr.getCell(ccn++); ca1.value = Number(p.stock)        || 0;  applyCellNum(ca1, bgCant);
       var ca2 = cdr.getCell(ccn++); ca2.value = Number(p.stock_minimo) || 0;  applyCellNum(ca2, bgCant);
       var ca3 = cdr.getCell(ccn++); ca3.value = p.unidad_medida        || ''; applyCell(ca3, bgCant);
@@ -182,6 +189,88 @@ export async function exportarInventarioExcel(porProducto, cantidad, configMap) 
     }
   }
 
+  // ── Hoja Ubicaciones (planilla de conteo físico) ──
+  // Es la razón de ser de la feature: el bodeguero la imprime, recorre estante
+  // por estante y anota lo que encuentra. "Contado" va en blanco a propósito y
+  // "Diferencia" es una fórmula, para que al digitar salte solo lo que no cuadra.
+  if (ubiAct) hojaUbicaciones(wb, porProducto, cantidad);
+
   var buffer = await wb.xlsx.writeBuffer();
   descargar(buffer, 'inventario_' + hoy() + '.xlsx');
+}
+
+// ─── Planilla de conteo por ubicación ────────────────────────────────────────
+
+function hojaUbicaciones(wb, porProducto, cantidad) {
+  var filas = [];
+
+  // Productos por cantidad: la cantidad esperada es su stock.
+  for (var i = 0; i < (cantidad || []).length; i++) {
+    var p = cantidad[i];
+    if (!p.ubicacion || !String(p.ubicacion).trim()) continue;
+    filas.push({
+      ubicacion: String(p.ubicacion).trim(),
+      producto:  p.nombre || '',
+      tipo:      'Cantidad',
+      esperada:  Number(p.stock) || 0,
+    });
+  }
+
+  // Seriales: la ubicación es de la referencia, así que se agrupa por producto
+  // y se cuentan las unidades que deberían estar físicamente ahí — las vendidas
+  // y las prestadas no están en el estante, así que no se cuentan.
+  var nombres = Object.keys(porProducto || {});
+  for (var j = 0; j < nombres.length; j++) {
+    var seriales = porProducto[nombres[j]] || [];
+    var ubic = '';
+    var disponibles = 0;
+    for (var k = 0; k < seriales.length; k++) {
+      var s = seriales[k];
+      if (!ubic && s.ubicacion) ubic = String(s.ubicacion).trim();
+      if (!s.vendido && !s.prestado) disponibles++;
+    }
+    if (!ubic) continue;
+    filas.push({
+      ubicacion: ubic,
+      producto:  nombres[j],
+      tipo:      'Serial',
+      esperada:  disponibles,
+    });
+  }
+
+  if (!filas.length) return;
+
+  filas.sort(function(a, b) {
+    var u = a.ubicacion.localeCompare(b.ubicacion, 'es');
+    return u !== 0 ? u : a.producto.localeCompare(b.producto, 'es');
+  });
+
+  var ws   = wb.addWorksheet('Ubicaciones');
+  var cols = ['Ubicación', 'Producto', 'Tipo', 'Cantidad esperada', 'Contado', 'Diferencia'];
+  ws.columns = cols.map(function(c) { return { width: colW(c) }; });
+
+  var hr = ws.getRow(1); hr.height = 22;
+  for (var h = 0; h < cols.length; h++) {
+    var hc = hr.getCell(h + 1); hc.value = cols[h]; applyHeader(hc);
+  }
+  ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: cols.length } };
+
+  for (var r = 0; r < filas.length; r++) {
+    var f  = filas[r];
+    var nf = r + 2;
+    var dr = ws.getRow(nf);
+
+    var c1 = dr.getCell(1); c1.value = f.ubicacion; applyCell(c1, A_DISPONIBLE);
+    var c2 = dr.getCell(2); c2.value = f.producto;  applyCell(c2, A_DISPONIBLE);
+    var c3 = dr.getCell(3); c3.value = f.tipo;      applyCell(c3, A_DISPONIBLE);
+    var c4 = dr.getCell(4); c4.value = f.esperada;  applyCellNum(c4, A_DISPONIBLE);
+    var c5 = dr.getCell(5); c5.value = null;        applyCellNum(c5, A_LEY_BG);
+    // Vacía mientras no se anote nada, para que la columna no se llene de ceros
+    // antes del conteo.
+    var c6 = dr.getCell(6);
+    c6.value = { formula: 'IF(E' + nf + '="","",E' + nf + '-D' + nf + ')' };
+    applyCellNum(c6, A_DISPONIBLE);
+  }
+
+  ws.views = [{ state: 'frozen', ySplit: 1 }];
 }

@@ -1,6 +1,7 @@
 const { pool } = require('../../config/db');
 const repo     = require('./productosSerial.repository');
 const { fechaHoyColombia } = require('../../utils/fecha.util');
+const { normalizarUbicacion } = require('../../utils/ubicacion.util');
 
 // ── Verifica que linea_id pertenece al negocio ────────────────────────────
 const _verificarLineaNegocio = async (lineaId, negocioId) => {
@@ -30,7 +31,8 @@ const crearProducto = async (negocioId, datos) => {
   if (!datos.linea_id) throw { status: 400, message: 'La línea es requerida' };
   await _verificarLineaNegocio(datos.linea_id, negocioId);
 
-  return repo.create(datos);
+  // La ubicación es de la referencia, no de cada IMEI.
+  return repo.create({ ...datos, ubicacion: normalizarUbicacion(datos.ubicacion) });
 };
 
 const actualizarProducto = async (negocioId, id, datos) => {
@@ -41,7 +43,7 @@ const actualizarProducto = async (negocioId, id, datos) => {
     await _verificarLineaNegocio(datos.linea_id, negocioId);
   }
 
-  const actualizado = await repo.update(id, datos);
+  const actualizado = await repo.update(id, { ...datos, ubicacion: normalizarUbicacion(datos.ubicacion) });
   if (!actualizado) throw { status: 404, message: 'Producto no encontrado' };
 
   // When product price is explicitly set, reset individual serial prices so all serials use the new price

@@ -26,6 +26,7 @@ import {
   Printer, Palette, ListChecks, Wallet, Layers,
   ChevronUp, ChevronDown, RotateCcw, Navigation,
   Upload, X, Image as ImageIcon, Download, Barcode, Percent, CalendarClock,
+  MapPin,
 } from 'lucide-react';
 
 // ─── Navegación principal ─────────────────────────────────────────────────────
@@ -43,6 +44,7 @@ const TABS_CATALOGO = [
   { id: 'seriales',  label: 'Seriales',  Icn: Palette    },
   { id: 'variantes', label: 'Variantes', Icn: Layers     },
   { id: 'codigos',   label: 'Códigos',   Icn: Barcode    },
+  { id: 'ubicacion', label: 'Ubicación', Icn: MapPin     },
   { id: 'tarifas',   label: 'Tarifas',   Icn: Percent    },
   { id: 'pagos',     label: 'Pagos',     Icn: Wallet     },
   { id: 'mora',      label: 'Mora',      Icn: CalendarClock },
@@ -658,6 +660,55 @@ function CodigoProductoConfig({ valores, set }) {
           <p className="text-xs text-blue-700">
             • Los lectores USB/Bluetooth funcionan sin configuración: escanea sobre el campo
             de búsqueda por código del inventario y el producto se agrega al carrito.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Ubicación espacial de productos ─────────────────────────────────────────
+function UbicacionProductoConfig({ valores, set }) {
+  const activo = valores['ubicacion_activa'] === '1';
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex items-center gap-2">
+        <MapPin size={15} className="text-gray-400" />
+        <h3 className="text-sm font-semibold text-gray-700">Ubicación en bodega</h3>
+      </div>
+      <p className="text-xs text-gray-400 -mt-2">
+        Registra en qué estante, vitrina o zona está guardado cada producto, para
+        encontrarlo sin tener que recordar dónde quedó.
+      </p>
+
+      <Toggle
+        label="Activar ubicación"
+        description="Muestra el campo Ubicación al crear/editar productos y permite filtrar el inventario por sitio"
+        enabled={activo}
+        onChange={(val) => set('ubicacion_activa', val ? '1' : '0')}
+      />
+
+      {activo && (
+        <div className="bg-blue-50 rounded-xl p-4 flex flex-col gap-1.5">
+          <p className="text-xs font-medium text-blue-800">Cómo funciona</p>
+          <p className="text-xs text-blue-700">
+            • Escribe la ubicación como quieras («Estante A-3», «Vitrina 2», «Bodega fondo»).
+            El campo te sugiere las que ya usaste para que no se repita la misma
+            escrita de dos formas distintas.
+          </p>
+          <p className="text-xs text-blue-700">
+            • Cada sucursal tiene sus propias ubicaciones: un producto puede estar en
+            el estante A de una sede y en la vitrina de otra.
+          </p>
+          <p className="text-xs text-blue-700">
+            • En productos con serial la ubicación es de la referencia (el modelo),
+            no de cada IMEI: todas las unidades del mismo modelo están juntas.
+          </p>
+          <p className="text-xs text-blue-700">
+            • Para cargar muchas de golpe: exporta el inventario a Excel, llena la
+            columna Ubicación y vuelve a importarlo. El Excel trae además una hoja
+            «Ubicaciones» que sirve de planilla para el conteo físico.
           </p>
         </div>
       )}
@@ -1352,6 +1403,12 @@ function SeccionCatalogo({ valores, set }) {
       {tab === 'codigos' && (
         <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
           <CodigoProductoConfig valores={valores} set={set} />
+        </div>
+      )}
+
+      {tab === 'ubicacion' && (
+        <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
+          <UbicacionProductoConfig valores={valores} set={set} />
         </div>
       )}
 

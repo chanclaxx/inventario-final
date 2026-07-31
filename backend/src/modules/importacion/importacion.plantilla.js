@@ -70,7 +70,7 @@ const NUM_FILAS_DATOS = 200;
 // ─── Hoja serial ─────────────────────────────────────────────────────────────
 // Estructura: fila 0 = título, fila 1 = claves (usadas como headers por sheet_to_json),
 //             fila 2 = descripciones (slice(1) la descarta), filas 3+ = datos vacíos
-function hojaSerial(nombreProducto, coloresActivo, coloresLista, caracteristicasActivo, caracteristicasLista, lineas = []) {
+function hojaSerial(nombreProducto, coloresActivo, coloresLista, caracteristicasActivo, caracteristicasLista, lineas = [], ubicacionActiva = false) {
   const ws = {};
 
   // ── Columnas dinámicas ────────────────────────────────────────────────────
@@ -113,6 +113,16 @@ function hojaSerial(nombreProducto, coloresActivo, coloresLista, caracteristicas
         num:   false,
       });
     }
+  }
+
+  if (ubicacionActiva) {
+    // Es de la REFERENCIA, no de cada IMEI: basta ponerla en una fila de la hoja.
+    columnas.push({
+      clave: 'Ubicacion',
+      desc:  'Opcional · Dónde está guardado (ej: Estante A-3). Aplica a todo el producto',
+      bg:    C.headerFondo,
+      num:   false,
+    });
   }
 
   columnas.push(
@@ -199,7 +209,7 @@ function hojaSerial(nombreProducto, coloresActivo, coloresLista, caracteristicas
 }
 
 // ─── Hoja cantidad ────────────────────────────────────────────────────────────
-function hojaCantidad(variantesActivo = false, lineas = [], codigoActivo = false) {
+function hojaCantidad(variantesActivo = false, lineas = [], codigoActivo = false, ubicacionActiva = false) {
   const columnas = [
     { clave: 'Nombre *',       desc: 'Requerido · Nombre del producto',                             bg: C.requerido,         num: false, wch: 30 },
   ];
@@ -211,6 +221,16 @@ function hojaCantidad(variantesActivo = false, lineas = [], codigoActivo = false
       bg:    C.headerFondo,
       num:   false,
       wch:   18,
+    });
+  }
+
+  if (ubicacionActiva) {
+    columnas.push({
+      clave: 'Ubicacion',
+      desc:  'Opcional · Dónde está guardado (ej: Estante A-3, Vitrina 2)',
+      bg:    C.headerFondo,
+      num:   false,
+      wch:   20,
     });
   }
 
@@ -297,6 +317,7 @@ function hojaInstrucciones(config) {
   const caracteristicasActivo = config.caracteristicas_serial_activo === '1';
   const variantesActivo       = config.variantes_activo === '1';
   const codigoActivo          = config.codigo_producto_activo === '1';
+  const ubicacionActiva       = config.ubicacion_activa === '1';
   const coloresLista          = _parseLista(config.colores_serial_lista);
   const caracteristicasLista  = _parseLista(config.caracteristicas_serial_lista);
 
@@ -331,7 +352,7 @@ function hojaInstrucciones(config) {
   linea('   Columna Nombre * es obligatoria en la hoja de cantidad.');
   linea('');
 
-  if (coloresActivo || caracteristicasActivo || variantesActivo || codigoActivo) {
+  if (coloresActivo || caracteristicasActivo || variantesActivo || codigoActivo || ubicacionActiva) {
     linea('CONFIGURACIÓN ACTIVA EN TU NEGOCIO', C.headerFondo, true, 10);
     if (coloresActivo) {
       linea(`✅  Colores de serial ACTIVOS — Colores válidos: ${coloresLista.join(', ') || 'ninguno configurado'}`);
@@ -343,6 +364,13 @@ function hojaInstrucciones(config) {
       linea('✅  Código único de producto ACTIVO — La hoja "Productos Cantidad" incluye la columna Codigo.');
       linea('   • Escribe el código como TEXTO (formato de celda Texto) para no perder ceros a la izquierda.');
       linea('   • Un código debe apuntar a UN solo producto dentro del negocio.');
+    }
+    if (ubicacionActiva) {
+      linea('✅  Ubicación en bodega ACTIVA — Ambas hojas incluyen la columna Ubicacion.');
+      linea('   • Escribe dónde está guardado: "Estante A-3", "Vitrina 2", "Bodega fondo".');
+      linea('   • En hojas de serial la ubicación es del PRODUCTO completo, no de cada IMEI:');
+      linea('     basta llenarla en una fila; si hay varias, se usa la primera que tenga valor.');
+      linea('   • Si dejas la columna vacía NO se borra la ubicación que ya tenga el producto.');
     }
     if (variantesActivo) {
       linea('✅  Variantes ACTIVAS — La hoja "Productos Cantidad" incluye columnas Atributo y Variante.');
@@ -415,6 +443,7 @@ function generarPlantillaBuffer(config = {}, lineas = []) {
   const caracteristicasActivo = config.caracteristicas_serial_activo === '1';
   const variantesActivo       = config.variantes_activo === '1';
   const codigoActivo          = config.codigo_producto_activo === '1';
+  const ubicacionActiva       = config.ubicacion_activa === '1';
   const coloresLista          = _parseLista(config.colores_serial_lista);
   const caracteristicasLista  = _parseLista(config.caracteristicas_serial_lista);
 
@@ -424,11 +453,11 @@ function generarPlantillaBuffer(config = {}, lineas = []) {
 
   XLSX.utils.book_append_sheet(
     wb,
-    hojaSerial('Ejemplo Producto', coloresActivo, coloresLista, caracteristicasActivo, caracteristicasLista, lineas),
+    hojaSerial('Ejemplo Producto', coloresActivo, coloresLista, caracteristicasActivo, caracteristicasLista, lineas, ubicacionActiva),
     'Ejemplo Producto'
   );
 
-  XLSX.utils.book_append_sheet(wb, hojaCantidad(variantesActivo, lineas, codigoActivo), 'Productos Cantidad');
+  XLSX.utils.book_append_sheet(wb, hojaCantidad(variantesActivo, lineas, codigoActivo, ubicacionActiva), 'Productos Cantidad');
 
   return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx', cellStyles: true });
 }

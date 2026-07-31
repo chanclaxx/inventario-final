@@ -1,4 +1,11 @@
 const { pool } = require('../../config/db');
+const { hayUbicacion } = require('../../config/columnas');
+
+// Ubicación espacial (feature opt-in). Se interpola solo si la columna existe
+// en la BD: si la migración no llegó a aplicarse, estas consultas quedan
+// exactamente como estaban en vez de reventar el inventario entero.
+// No es entrada de usuario — es un literal SQL fijo.
+const selUbicacion = (alias) => (hayUbicacion() ? `${alias}.ubicacion,` : '');
 
 const findAll = async (sucursalId, negocioId, lineaId) => {
   if (sucursalId) {
@@ -8,6 +15,7 @@ const findAll = async (sucursalId, negocioId, lineaId) => {
         pc.unidad_medida, pc.costo_unitario, pc.precio,
         pc.cliente_origen, pc.activo, pc.sucursal_id, pc.proveedor_id,
         pc.linea_id, pc.creado_en, pc.nota, pc.codigo,
+        ${selUbicacion('pc')}
         lp.nombre AS linea_nombre,
         p.nombre  AS proveedor_nombre,
         su.nombre AS sucursal_nombre,
@@ -58,6 +66,7 @@ const findAll = async (sucursalId, negocioId, lineaId) => {
           'proveedor_id',     pc.proveedor_id,
           'proveedor_nombre', p.nombre,
           'codigo',           pc.codigo,
+          ${hayUbicacion() ? `'ubicacion', pc.ubicacion,` : ''}
           'stock_bajo',       pc.stock <= pc.stock_minimo
         ) ORDER BY su.nombre
       ) AS sucursales
@@ -99,19 +108,21 @@ const perteneceAlNegocio = async (id, negocioId) => {
 // ── linea_id incluido en create ───────────────────────────────────────────
 const create = async ({
   nombre, stock, stock_minimo, unidad_medida,
-  costo_unitario, precio, sucursal_id, proveedor_id, linea_id, codigo,
+  costo_unitario, precio, sucursal_id, proveedor_id, linea_id, codigo, ubicacion,
 }) => {
+  const conUbicacion = hayUbicacion();
   const { rows } = await pool.query(`
     INSERT INTO productos_cantidad
       (nombre, stock, stock_minimo, unidad_medida,
-       costo_unitario, precio, sucursal_id, proveedor_id, linea_id, codigo)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       costo_unitario, precio, sucursal_id, proveedor_id, linea_id, codigo${conUbicacion ? ', ubicacion' : ''})
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10${conUbicacion ? ', $11' : ''})
     RETURNING *
   `, [
     nombre, stock || 0, stock_minimo || 0, unidad_medida || 'unidad',
     costo_unitario || null, precio || null,
     sucursal_id, proveedor_id || null, linea_id || null,
     codigo || null,
+    ...(conUbicacion ? [ubicacion || null] : []),
   ]);
   return rows[0];
 };
@@ -119,8 +130,11 @@ const create = async ({
 // ── linea_id incluido en update ───────────────────────────────────────────
 const update = async (id, {
   nombre, stock_minimo, unidad_medida,
-  costo_unitario, precio, proveedor_id, linea_id, nota, codigo,
+  costo_unitario, precio, proveedor_id, linea_id, nota, codigo, ubicacion,
 }) => {
+  // Misma escritura condicional que `nota` y `codigo`: si el campo no viene en
+  // el payload no se toca. Así un guardado parcial nunca borra la ubicación.
+  const conUbicacion = hayUbicacion();
   const { rows } = await pool.query(`
     UPDATE productos_cantidad
     SET nombre         = $1,
@@ -130,8 +144,9 @@ const update = async (id, {
         precio         = $5,
         proveedor_id   = $6,
         linea_id       = $7,
-        nota           = CASE WHEN $8::boolean THEN $9 ELSE nota END,
+        nota           = CASE WHEN $8::boolean  THEN $9  ELSE nota   END,
         codigo         = CASE WHEN $10::boolean THEN $11 ELSE codigo END
+        ${conUbicacion ? ', ubicacion = CASE WHEN $13::boolean THEN $14 ELSE ubicacion END' : ''}
     WHERE id = $12
     RETURNING *
   `, [
@@ -143,6 +158,7 @@ const update = async (id, {
     codigo !== undefined,
     codigo || null,
     id,
+    ...(conUbicacion ? [ubicacion !== undefined, ubicacion || null] : []),
   ]);
   return rows[0] || null;
 };

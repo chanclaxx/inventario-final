@@ -103,7 +103,16 @@ const _validarTechoMora = (raw) => {
   }
 };
 
-const getConfig = (negocioId) => repo.getMap(negocioId);
+const { hayUbicacion } = require('../../config/columnas');
+
+// La ubicación de productos solo puede reportarse activa si la columna existe
+// realmente en la BD. Si la migración no llegó a aplicarse, el flag sale en '0'
+// y el frontend no pinta el campo: la feature se apaga sola en vez de fallar.
+const getConfig = async (negocioId) => {
+  const config = await repo.getMap(negocioId);
+  if (!hayUbicacion()) config.ubicacion_activa = '0';
+  return config;
+};
 
 const saveConfig = async (negocioId, datos) => {
   const datosProcesados = { ...datos };

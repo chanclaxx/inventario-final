@@ -1,6 +1,7 @@
 const { pool }              = require('../../config/db');
 const repo                  = require('./productosCantidad.repository');
 const { calcularCostoPromedio } = require('../../utils/costoPromedio.util');
+const { normalizarUbicacion }   = require('../../utils/ubicacion.util');
 
 // ── Verifica que linea_id pertenece al negocio ────────────────────────────
 const _verificarLineaNegocio = async (lineaId, negocioId) => {
@@ -71,7 +72,11 @@ const crearProducto = async (negocioId, datos) => {
     codigo = await repo.codigoHeredado(negocioId, datos.nombre, datos.sucursal_id);
   }
 
-  const creado = await repo.create({ ...datos, codigo }).catch(_traducirCodigoDuplicado);
+  // A diferencia del código, la ubicación NO se hereda de otra sucursal:
+  // describe un lugar físico y el "Estante A-3" de una sede no existe en otra.
+  const ubicacion = normalizarUbicacion(datos.ubicacion);
+
+  const creado = await repo.create({ ...datos, codigo, ubicacion }).catch(_traducirCodigoDuplicado);
   if (codigo) await repo.sincronizarCodigoPorNombre(negocioId, creado.nombre, codigo);
   return creado;
 };
@@ -91,7 +96,9 @@ const actualizarProducto = async (negocioId, id, datos) => {
     await _validarCodigoUnico(negocioId, codigo, datos.nombre ?? producto.nombre, producto.id);
   }
 
-  const actualizado = await repo.update(id, { ...datos, codigo }).catch(_traducirCodigoDuplicado);
+  const ubicacion = normalizarUbicacion(datos.ubicacion);
+
+  const actualizado = await repo.update(id, { ...datos, codigo, ubicacion }).catch(_traducirCodigoDuplicado);
   if (!actualizado) throw { status: 404, message: 'Producto no encontrado' };
   if (codigo !== undefined) {
     await repo.sincronizarCodigoPorNombre(negocioId, actualizado.nombre, codigo);

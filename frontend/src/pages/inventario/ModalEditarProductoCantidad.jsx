@@ -8,11 +8,12 @@ import { getArbol, actualizarAtributo, actualizarVariante } from '../../api/vari
 import { Modal }        from '../../components/ui/Modal';
 import { Input }        from '../../components/ui/Input';
 import { InputMoneda }  from '../../components/ui/InputMoneda';
+import { InputUbicacion } from '../../components/ui/InputUbicacion';
 import { Button }       from '../../components/ui/Button';
 import { useAuth }      from '../../context/useAuth';
 import { ModalEliminarProducto, TIPO_PRODUCTO_CANTIDAD } from './ModalEliminarProducto';
 
-export function ModalEditarProductoCantidad({ producto, pinEliminacion, variantesActivo, codigoActivo, onClose }) {
+export function ModalEditarProductoCantidad({ producto, pinEliminacion, variantesActivo, codigoActivo, ubicacionActiva, onClose }) {
   const { esAdminNegocio, puedeEditarProductos, camposEdicionProductos } = useAuth();
   const esAdmin    = esAdminNegocio();
   const campos     = camposEdicionProductos(); // null = todos, array = permitidos
@@ -73,6 +74,7 @@ export function ModalEditarProductoCantidad({ producto, pinEliminacion, variante
     linea_id      : producto.linea_id       != null ? String(producto.linea_id)       : '',
     nota          : producto.nota           || '',
     codigo        : producto.codigo         || '',
+    ubicacion     : producto.ubicacion      || '',
   });
   const [error,         setError]         = useState('');
   const [modalEliminar, setModalEliminar] = useState(false);
@@ -105,6 +107,8 @@ export function ModalEditarProductoCantidad({ producto, pinEliminacion, variante
         nota          : form.nota.trim() || null,
         // Solo se envía si la feature está activa: negocios sin código no tocan la columna
         ...(codigoActivo ? { codigo: form.codigo.trim() || null } : {}),
+        // Igual con la ubicación: si no viene en el payload, el backend no la toca
+        ...(ubicacionActiva ? { ubicacion: form.ubicacion.trim() || null } : {}),
       });
       if (tieneAtributos && hojas.length > 0) {
         const pendientes = hojas.filter((h) => {
@@ -172,6 +176,14 @@ export function ModalEditarProductoCantidad({ producto, pinEliminacion, variante
               value={form.codigo}
               onChange={(e) => setForm({ ...form, codigo: e.target.value })}
               onKeyDown={(e) => handleKeyDown(e, 'edit-unidad-cant')}
+            />
+          )}
+
+          {ubicacionActiva && (
+            <InputUbicacion
+              id="edit-ubicacion-cant"
+              value={form.ubicacion}
+              onChange={(val) => setForm({ ...form, ubicacion: val })}
             />
           )}
 
