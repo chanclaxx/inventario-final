@@ -190,7 +190,7 @@ El extracto tipo bancario de cada local.
 | 9 | El desglose explica el saldo y por qué medio ha pagado |
 | 10 | Un local no puede confirmar su propia devolución |
 
-### `11-envios-por-remision.mjs` — 52 verificaciones
+### `11-envios-por-remision.mjs` — 60 verificaciones
 
 El estado de cuenta contado **envío por envío**: de cada remisión que mandó la
 bodega, qué se vendió, qué se prestó y qué sigue en vitrina.
@@ -205,9 +205,11 @@ bodega, qué se vendió, qué se prestó y qué sigue en vitrina.
 | 6 | Los gastos por cuenta de bodega también imputan |
 | 7 | Y los ajustes de la bodega |
 | 8 | La deuda de accesorios queda como residuo: **no se cuelga de ningún envío** |
+| 8b | **DEUDA TOTAL ≠ POR REMITIR**: `deuda_total = por_remitir + lo que aún no se cobra` |
 | 9 | La mercancía se filtra por varios estados a la vez (`Por liquidar,En recaudo`) |
 | 10 | **Un vendedor ve los conteos** (qué vendió, qué prestó) **pero ningún peso** |
 | 11 | La bodega ve lo mismo; un local sigue sin poder ver la cuenta de otro |
+| 12 | Devolver mercancía **baja la deuda pero no lo exigible** (nunca se vendió) |
 
 > La identidad del punto 4 se vuelve a verificar en los puntos 5, 6, 7 y 8: es
 > la que garantiza que el desglose por envío y el número grande del panel

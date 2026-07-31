@@ -161,7 +161,12 @@ const _recortarParaVendedor = (data) => {
     costos_ocultos: true,
     totales: {
       // Lo único monetario que sobrevive: cuánto hay que entregarle a la bodega.
+      // La DEUDA TOTAL no: es la suma de los costos de toda la mercancía, o sea
+      // justo el dato que este recorte existe para esconder.
       saldo_por_liquidar:  t.saldo_por_liquidar,
+      deuda_total:         null,
+      valor_en_poder:      null,
+      por_vender:          null,
       remesado_recibido:   t.remesado_recibido,
       remesas_en_transito: t.remesas_en_transito,
       gastos_autorizados:  t.gastos_autorizados,
@@ -1408,6 +1413,14 @@ const registrarAjuste = async (req, { sucursal_id, valor, concepto }) => {
 // LECTURAS — todo derivado
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Estados en los que la mercancía sigue bajo responsabilidad del local: la
+// tiene, la vendió o no aparece. Fuera quedan 'En transito' (no ha llegado),
+// 'Faltante' (nunca llegó) y 'Devuelta' (volvió a la bodega).
+const ESTADOS_EN_PODER = [
+  'En consignacion', 'Por liquidar', 'En recaudo', 'En prestamo',
+  'Sin ubicar', 'Movida',
+];
+
 const _armarSaldo = ({ resumen, cantidad, remesado, movimientos }) => {
   const porEstado = {};
   let liquidableSerial = 0;
@@ -1428,6 +1441,15 @@ const _armarSaldo = ({ resumen, cantidad, remesado, movimientos }) => {
   const enTransito  = _num(remesado?.en_transito);
   const gastos      = _num(movimientos?.gastos);
   const ajustes     = _num(movimientos?.ajustes);
+  const pagado      = recibido + gastos + ajustes;
+
+  // VALOR EN PODER DEL LOCAL: todo lo que la bodega le entregó y sigue siendo
+  // responsabilidad suya. Se excluye lo que nunca llegó ('Faltante'), lo que
+  // todavía viaja ('En transito') y lo que ya regresó ('Devuelta').
+  const valorEnPoder =
+    ESTADOS_EN_PODER.reduce((s, e) => s + (porEstado[e]?.valor_interno || 0), 0)
+    + cantidad.reduce((s, c) =>
+        s + (_num(c.entregado) - _num(c.devuelto)) * _num(c.valor_unitario), 0);
 
   return {
     por_estado: porEstado,
@@ -1438,8 +1460,24 @@ const _armarSaldo = ({ resumen, cantidad, remesado, movimientos }) => {
       remesas_en_transito:Math.round(enTransito),
       gastos_autorizados: Math.round(gastos),
       ajustes:            Math.round(ajustes),
-      // Lo que el local todavía le debe entregar a la bodega.
+
+      // ── DOS NÚMEROS DISTINTOS, Y NO INTERCAMBIABLES ────────────────────────
+      //
+      // DEUDA TOTAL: por cuánta mercancía responde el local hoy. Cuenta todo lo
+      // que tiene en la mano, esté vendido o no, menos lo que ya pagó. Es la
+      // cifra de RESPONSABILIDAD: sube cuando la bodega despacha.
+      deuda_total:        Math.round(valorEnPoder - pagado),
+      valor_en_poder:     Math.round(valorEnPoder),
+
+      // POR REMITIR: cuánto tiene que entregar YA. Solo lo vendido, menos lo
+      // pagado. Es la cifra EXIGIBLE: sube cuando el local vende, no cuando
+      // recibe. Es la que manda en las remesas y en la conciliación.
       saldo_por_liquidar: Math.round(totalLiquidable - recibido - gastos - ajustes),
+
+      // La diferencia entre las dos, dicha explícitamente para que nadie tenga
+      // que restarlas mentalmente: mercancía que aún no se ha vuelto exigible
+      // (vitrina, prestados, y la parte no recaudada de los créditos).
+      por_vender:         Math.round(valorEnPoder - totalLiquidable),
       // Informativo, NO exigible: mercancía que sigue en vitrina.
       en_consignacion_valor:    porEstado['En consignacion']?.valor_interno || 0,
       en_consignacion_unidades: porEstado['En consignacion']?.unidades      || 0,

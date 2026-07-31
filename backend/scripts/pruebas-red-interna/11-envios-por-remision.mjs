@@ -237,6 +237,26 @@ x = cuadra(cuenta);
 ok('★★ La identidad aguanta con accesorios de por medio',
    Math.abs(x.suma - x.saldo) < 1, `${money(x.suma)} vs ${money(x.saldo)}`);
 
+console.log('\n═══ 8b. ★ DEUDA TOTAL y POR REMITIR son cosas distintas ═══');
+// La deuda es por cuánta mercancía responde el local (esté vendida o no);
+// por remitir es lo que tiene que entregar YA (solo lo vendido). Confundirlas
+// era el reclamo del cliente.
+cuenta = await service.getEstadoCuenta(centro, 2);
+let tt = cuenta.totales;
+ok('★ La deuda es MAYOR que lo exigible mientras quede mercancía sin vender',
+   Number(tt.deuda_total) > Number(tt.saldo_por_liquidar),
+   `${money(tt.deuda_total)} vs ${money(tt.saldo_por_liquidar)}`);
+ok('★★ deuda_total = por_remitir + lo que todavía no se cobra',
+   Math.abs(Number(tt.deuda_total)
+            - Number(tt.saldo_por_liquidar) - Number(tt.por_vender)) < 1,
+   `${money(tt.deuda_total)} = ${money(tt.saldo_por_liquidar)} + ${money(tt.por_vender)}`);
+ok('★★ valor_en_poder = deuda_total + todo lo pagado',
+   Math.abs(Number(tt.valor_en_poder) - Number(tt.deuda_total)
+            - Number(tt.remesado_recibido) - Number(tt.gastos_autorizados)
+            - Number(tt.ajustes)) < 1,
+   money(tt.valor_en_poder));
+ok('  y lo que no se cobra nunca es negativo', Number(tt.por_vender) >= 0);
+
 console.log('\n═══ 9. Filtrar la mercancía por varios estados a la vez ═══');
 const vendidos = await service.getEstadoCuenta(centro, 2, { estado: 'Por liquidar,En recaudo' });
 ok('★ "Vendidos" trae contado y crédito juntos', vendidos.mercancia.total === 3,
@@ -277,6 +297,26 @@ ok('★ Mismo pendiente por envío',
 let bloqueado = false;
 try { await service.getEstadoCuenta(centro, 1); } catch (e) { bloqueado = e.status === 403; }
 ok('★ Y un local sigue sin poder ver la cuenta de otro', bloqueado);
+
+console.log('\n═══ 12. Devolver mercancía baja la DEUDA, no lo exigible ═══');
+// Va al final porque mueve el inventario: el equipo 4 (E1-DDD) estaba en
+// vitrina y al devolverlo deja de ser responsabilidad del local.
+const antesDeuda   = Number(cuenta.totales.deuda_total);
+const antesRemitir = Number(cuenta.totales.saldo_por_liquidar);
+const devExtra = await service.devolver(centro, { lineas: [{ tipo: 'serial', serial_id: 4 }] });
+await service.confirmarDevolucion(bodega, devExtra.id, {});
+cuenta = await service.getEstadoCuenta(centro, 2);
+tt = cuenta.totales;
+ok('★ Devolver un equipo BAJA la deuda total en su valor',
+   Number(tt.deuda_total) === antesDeuda - 1000000,
+   `${money(antesDeuda)} → ${money(tt.deuda_total)}`);
+ok('★ Pero NO cambia lo exigible: ese equipo nunca se vendió',
+   Number(tt.saldo_por_liquidar) === antesRemitir, money(tt.saldo_por_liquidar));
+ok('★★ Y la identidad se mantiene después de devolver',
+   Math.abs(Number(tt.deuda_total)
+            - Number(tt.saldo_por_liquidar) - Number(tt.por_vender)) < 1);
+x = cuadra(cuenta);
+ok('★★ Igual que el reparto por envío', Math.abs(x.suma - x.saldo) < 1);
 
 console.log(`\n${'─'.repeat(60)}`);
 console.log(`  ${pasados} pasaron · ${fallos} fallaron`);

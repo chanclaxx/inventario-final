@@ -10,8 +10,7 @@ import { Modal }      from '../../components/ui/Modal';
 import { Spinner }    from '../../components/ui/Spinner';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { ModalDespachar } from './ModalDespachar';
-import { PanelLocal }        from './PanelLocal';
-import { EstadoCuentaLocal } from './EstadoCuentaLocal';
+import { CuentaLocal }   from './CuentaLocal';
 import {
   Package, PackageCheck, Truck, Store, AlertTriangle, CheckCircle,
   Wallet, ShieldCheck, ChevronRight, X, Undo2,
@@ -24,10 +23,10 @@ import {
 // El usuario de un local NUNCA ve las opciones de la bodega y viceversa: esa es
 // la razón por la que esta pantalla no abruma pese a cubrir todo el circuito.
 //
-// La cara del LOCAL vive en PanelLocal.jsx: tres bloques (deuda, mercancía,
-// pagos) que se recorren con scroll, sin pestañas.
+// La cara del LOCAL es su cuenta con la bodega (CuentaLocal.jsx): las dos
+// cifras arriba —lo que debe y lo que tiene que remitir— y cinco pestañas.
 // La cara de la BODEGA es un panel de control: bandejas de confirmación y la
-// lista de locales, cada uno con su estado de cuenta detrás.
+// lista de locales, y abre ESA MISMA cuenta para revisar cualquiera de ellos.
 // ─────────────────────────────────────────────────────────────────────────────
 
 function Aviso({ mensaje, onCerrar }) {
@@ -390,18 +389,27 @@ export default function RedInternaPage() {
 
       <Aviso mensaje={aviso} onCerrar={() => setAviso('')} />
 
+      {/* La bodega abre la cuenta de un local; el local ve la suya de entrada,
+          con los botones de recibir y pagar que la bodega no necesita. */}
       {cuenta ? (
-        <EstadoCuentaLocal
+        <CuentaLocal
           sucursalId={cuenta.id}
           nombre={cuenta.nombre}
           onVolver={() => setCuenta(null)}
+          onRefrescar={refrescar}
+          onAviso={setAviso}
         />
       ) : data.es_bodega ? (
         <PanelBodega data={data} locales={locales} onRefrescar={refrescar} onAviso={setAviso}
           onVerCuenta={(id, nombre) => setCuenta({ id, nombre })} />
       ) : (
-        <PanelLocal panel={data} onRefrescar={refrescar} onAviso={setAviso}
-          onVerCuenta={(id) => setCuenta({ id, nombre: 'Mi cuenta' })} />
+        <CuentaLocal
+          sucursalId={data.sucursal_id}
+          propia
+          panel={data}
+          onRefrescar={refrescar}
+          onAviso={setAviso}
+        />
       )}
     </div>
   );
