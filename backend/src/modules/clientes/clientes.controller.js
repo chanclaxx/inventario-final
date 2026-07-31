@@ -7,6 +7,13 @@ const getClientes = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+const buscarClientes = async (req, res, next) => {
+  try {
+    const data = await service.buscarClientes(req.user.negocio_id, req.query.q);
+    res.json({ ok: true, data });
+  } catch (err) { next(err); }
+};
+
 const getClienteById = async (req, res, next) => {
   try {
     const data = await service.getClienteById(req.user.negocio_id, req.params.id);
@@ -61,4 +68,4 @@ const quitarFrecuente = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-module.exports = { getClientes, getClienteById, buscarPorCedula, crearCliente, actualizarCliente,getFrecuentes,agregarFrecuente,quitarFrecuente };
+module.exports = { getClientes, buscarClientes, getClienteById, buscarPorCedula, crearCliente, actualizarCliente,getFrecuentes,agregarFrecuente,quitarFrecuente };

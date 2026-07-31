@@ -11,7 +11,7 @@ import { useCedulaCliente }         from '../../hooks/useCedulaCliente';
 import { useMetodosPago }           from '../../hooks/useMetodosPago';
 import { crearFactura, getFacturaById } from '../../api/facturas.api';
 import { getGarantiasPorFactura }   from '../../api/garantias.api';
-import { buscarPorCedula, getClientes } from '../../api/clientes.api';
+import { buscarPorCedula, getClientes, buscarClientes } from '../../api/clientes.api';
 import {
   getProductosSerial,
   getProductosCantidad,
@@ -31,7 +31,7 @@ import {
   User, Users, Package, ShoppingBag,
   Loader2, CheckCircle, XCircle, AlertCircle,
   AlertTriangle, X, Plus, Trash2, RefreshCw,
-  Bike, ChevronLeft,
+  Bike, ChevronLeft, Search,
 } from 'lucide-react';
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
@@ -724,6 +724,107 @@ function ItemRetoma({ retoma, index, total, productosSerial, productosCantidad,
   );
 }
 
+// ─── Buscador de cliente registrado ───────────────────────────────────────────
+//
+// Existe para el cliente de siempre, al que da pereza volver a pedirle la
+// cédula. NO reemplaza al campo Cédula: esa sigue siendo la llave con la que el
+// backend identifica al cliente en facturas, créditos y garantías — este
+// buscador solo la rellena por ti cuando el cliente ya está registrado.
+//
+// El aislamiento entre negocios lo garantiza el backend: /clientes/buscar filtra
+// por el negocio_id del JWT, así que nunca puede devolver clientes de otro.
+
+function BuscadorClienteRegistrado({ onSeleccionar }) {
+  const [texto,   setTexto]   = useState('');
+  const [termino, setTermino] = useState('');
+  const [abierto, setAbierto] = useState(false);
+
+  // Debounce: sin esto se dispararía una consulta por cada tecla.
+  useEffect(() => {
+    const t = setTimeout(() => setTermino(texto.trim()), 250);
+    return () => clearTimeout(t);
+  }, [texto]);
+
+  const habilitada = termino.length >= 2;
+
+  const { data: resultados = [], isFetching } = useQuery({
+    queryKey:  ['clientes-buscar-factura', termino],
+    queryFn:   () => buscarClientes(termino).then((r) => r.data.data),
+    enabled:   habilitada,
+    staleTime: 30_000,
+  });
+
+  const elegir = (cli) => {
+    onSeleccionar(cli);
+    setTexto(''); setTermino(''); setAbierto(false);
+  };
+
+  // Enter toma el primer resultado — en el mostrador se teclea más rápido de lo
+  // que se apunta con el mouse. Escape cierra sin seleccionar nada.
+  const handleKeyDownBusqueda = (e) => {
+    if (e.key === 'Escape') { setAbierto(false); return; }
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    if (abierto && resultados.length > 0) elegir(resultados[0]);
+  };
+
+  return (
+    <div className="flex flex-col gap-1">
+      <label className="text-sm font-medium text-gray-700 flex items-center gap-1.5">
+        <Search size={14} className="text-gray-400" />
+        Buscar cliente registrado
+        <span className="text-gray-400 font-normal text-xs">(opcional)</span>
+      </label>
+
+      <div className="relative">
+        <input
+          type="text"
+          autoComplete="off"
+          placeholder="Nombre, cédula o celular..."
+          value={texto}
+          onChange={(e) => { setTexto(e.target.value); setAbierto(true); }}
+          onFocus={() => setAbierto(true)}
+          onBlur={() => setTimeout(() => setAbierto(false), 150)}
+          onKeyDown={handleKeyDownBusqueda}
+          className="w-full px-3 py-2.5 pr-9 bg-gray-100 border-0 rounded-xl text-sm text-gray-900
+            placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500
+            focus:bg-white transition-all"
+        />
+        {habilitada && isFetching && (
+          <Loader2 size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 animate-spin" />
+        )}
+
+        {abierto && habilitada && (
+          <div className="absolute z-20 left-0 right-0 mt-1 flex flex-col max-h-56
+            overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-lg">
+            {resultados.length === 0 ? (
+              <p className="text-xs text-gray-400 px-3 py-2.5">
+                {isFetching
+                  ? 'Buscando...'
+                  : `Sin resultados para «${termino}» — escribe los datos abajo`}
+              </p>
+            ) : resultados.map((cli) => (
+              <button
+                key={cli.id}
+                type="button"
+                // onMouseDown + preventDefault: con onClick el blur del input
+                // cerraría la lista antes de que el clic llegue al botón.
+                onMouseDown={(e) => { e.preventDefault(); elegir(cli); }}
+                className="text-left px-3 py-2 hover:bg-blue-50 transition-colors"
+              >
+                <span className="text-sm font-medium text-gray-800">{cli.nombre}</span>
+                <span className="block text-xs text-gray-400">
+                  CC {cli.cedula}{cli.celular ? ` · ${cli.celular}` : ''}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── SelectorPagos ────────────────────────────────────────────────────────────
 
 function SelectorPagos({ metodosPago, metodosSeleccionados, montos, totalNeto, onToggleMetodo, onCambioMonto }) {
@@ -807,6 +908,9 @@ export function ModalFactura({ open, onClose }) {
   const [buscandoCedula,       setBuscandoCedula]       = useState(false);
   const [mostrarSugerencias,   setMostrarSugerencias]   = useState(false);
   const [cedulaBusqueda,       setCedulaBusqueda]       = useState('');
+  // Cliente traído de la base por el buscador. Solo sirve para mostrar la
+  // tarjeta de confirmación; lo que se factura siempre es lo que hay en `form`.
+  const [clienteSel,           setClienteSel]           = useState(null);
   const metodosPago = useMetodosPago();
 
   // Debounce del texto de la cédula para el autocompletado de clientes
@@ -906,7 +1010,30 @@ export function ModalFactura({ open, onClose }) {
       email:     cli.email     || f.email,
       direccion: cli.direccion || f.direccion,
     }));
+    setClienteSel(cli);
     setMostrarSugerencias(false);
+  };
+
+  // Selección desde el buscador: rellena el formulario completo. Se sobrescribe
+  // con '' lo que el cliente no tenga registrado, para no mezclar los datos de
+  // un cliente con los que hubieran quedado escritos de otro.
+  const seleccionarClienteRegistrado = (cli) => {
+    setForm((f) => ({
+      ...f,
+      cedula:    cli.cedula    || '',
+      nombre:    cli.nombre    || '',
+      celular:   cli.celular   || '',
+      email:     cli.email     || '',
+      direccion: cli.direccion || '',
+    }));
+    setClienteSel(cli);
+    setMostrarSugerencias(false);
+    setError('');
+  };
+
+  const quitarClienteRegistrado = () => {
+    setClienteSel(null);
+    setForm((f) => ({ ...f, cedula: '', nombre: '', celular: '', email: '', direccion: '' }));
   };
 
   const handleChangeRetoma = useCallback((key, campo, valor) => {
@@ -947,6 +1074,7 @@ export function ModalFactura({ open, onClose }) {
     setError(''); setTipoCliente('cliente');
     setVerificandoCedula(false);
     setMostrarSugerencias(false); setCedulaBusqueda('');
+    setClienteSel(null);
   };
 
   const handleToggleMetodo = (metodoId) => {
@@ -1072,12 +1200,47 @@ export function ModalFactura({ open, onClose }) {
 
           {/* Datos del cliente */}
           <div className="flex flex-col gap-3">
+
+            {/* Buscador de cliente ya registrado — evita pedir la cédula al
+                cliente de siempre. Al elegir uno se rellena todo el formulario. */}
+            {tipoCliente === 'cliente' && !clienteSel && (
+              <BuscadorClienteRegistrado onSeleccionar={seleccionarClienteRegistrado} />
+            )}
+
+            {tipoCliente === 'cliente' && clienteSel && (
+              <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200
+                rounded-xl px-3 py-2">
+                <div className="w-7 h-7 rounded-full bg-emerald-100 flex items-center
+                  justify-center flex-shrink-0">
+                  <User size={13} className="text-emerald-600" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-emerald-800 truncate">
+                    {form.nombre || clienteSel.nombre}
+                  </p>
+                  <p className="text-xs text-emerald-500 truncate">
+                    CC {form.cedula || '—'}{form.celular ? ` · ${form.celular}` : ''}
+                  </p>
+                </div>
+                <button type="button" onClick={quitarClienteRegistrado}
+                  className="text-xs text-emerald-400 hover:text-emerald-600 underline flex-shrink-0">
+                  Quitar
+                </button>
+              </div>
+            )}
+
             {tipoCliente === 'cliente' && (
               <div className="relative">
                 <Input id="cedula" label="Cédula" placeholder="123456789"
                   autoComplete="off"
                   value={form.cedula}
-                  onChange={(e) => { setForm({ ...form, cedula: e.target.value }); setMostrarSugerencias(true); }}
+                  onChange={(e) => {
+                    setForm({ ...form, cedula: e.target.value });
+                    setMostrarSugerencias(true);
+                    // Si se edita la cédula a mano, deja de ser el registro que
+                    // trajo el buscador: la tarjeta ya no diría la verdad.
+                    if (clienteSel && e.target.value !== clienteSel.cedula) setClienteSel(null);
+                  }}
                   onFocus={() => setMostrarSugerencias(true)}
                   onBlur={() => { handleBlurCedula(); setTimeout(() => setMostrarSugerencias(false), 150); }}
                   onKeyDown={(e) => handleKeyDown(e, 'nombre')} />

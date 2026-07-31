@@ -2,6 +2,11 @@ const repo = require('./clientes.repository');
 
 const getClientes = (negocioId, filtro) => repo.findAll(negocioId, filtro);
 
+// Autocompletado al facturar: busca por nombre, cédula o celular dentro del
+// negocio. Devuelve lista vacía (nunca error) si el término es muy corto, para
+// que el frontend no tenga que distinguir «sin escribir» de «sin resultados».
+const buscarClientes = (negocioId, termino) => repo.buscar(negocioId, termino);
+
 const getClienteById = async (negocioId, id) => {
   const cliente = await repo.findById(negocioId, id);
   if (!cliente) throw { status: 404, message: 'Cliente no encontrado' };
@@ -33,4 +38,4 @@ const agregarFrecuente = async (negocioId, sucursalId, clienteId) => {
 const quitarFrecuente = (sucursalId, clienteId) =>
   repo.quitarFrecuente(sucursalId, clienteId);
 
-module.exports = { getClientes, getClienteById, buscarPorCedula, crearCliente, actualizarCliente,agregarFrecuente,quitarFrecuente,getFrecuentes };
+module.exports = { getClientes, buscarClientes, getClienteById, buscarPorCedula, crearCliente, actualizarCliente,agregarFrecuente,quitarFrecuente,getFrecuentes };

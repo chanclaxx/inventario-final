@@ -34,6 +34,60 @@ const findAll = async (negocioId, filtro) => {
   return rows;
 };
 
+// Búsqueda para el autocompletado de clientes al facturar.
+//
+// Deliberadamente NO reusa findAll: aquel cruza facturas + lineas_factura y
+// agrupa para calcular total_compras/total_gastado, un costo que crece con el
+// historial del negocio. Aquí se dispara una consulta por cada tecleo, así que
+// solo se leen los datos que rellenan el formulario, con LIMIT.
+//
+// El aislamiento es el mismo del resto del módulo: negocio_id sale del JWT,
+// nunca del request, así que un negocio jamás ve clientes de otro.
+const BUSQUEDA_MIN = 2;
+const BUSQUEDA_LIMITE = 12;
+
+// Acentos: la columna se normaliza con TRANSLATE (no requiere la extensión
+// unaccent, que puede no estar instalada) y el término se normaliza en JS con
+// el mismo criterio, para que "maria" encuentre a "María".
+const NOMBRE_NORMALIZADO = `TRANSLATE(LOWER(nombre), 'áéíóúüñ', 'aeiouun')`;
+
+const buscar = async (negocioId, termino) => {
+  const q = (termino || '').trim();
+  if (q.length < BUSQUEDA_MIN) return [];
+
+  // Mismo escape que findAll/acreedores + normalización de acentos.
+  // El recorte va ANTES del escape: cortar después podría partir un `\`
+  // introducido por el escape y dejar un patrón LIKE inválido.
+  const filtroSeguro = q
+    .slice(0, 100)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[%_\\]/g, '\\$&');
+
+  const { rows } = await pool.query(`
+    SELECT id, nombre, cedula, celular, email, direccion
+    FROM clientes
+    WHERE negocio_id = $1
+      AND cedula IS DISTINCT FROM 'COMPANERO'
+      AND (
+        ${NOMBRE_NORMALIZADO} LIKE $2 ESCAPE '\\'
+        OR LOWER(cedula)  LIKE $2 ESCAPE '\\'
+        OR LOWER(celular) LIKE $2 ESCAPE '\\'
+      )
+    ORDER BY
+      CASE
+        WHEN ${NOMBRE_NORMALIZADO} LIKE $3 ESCAPE '\\' THEN 0
+        WHEN LOWER(cedula)         LIKE $3 ESCAPE '\\' THEN 1
+        ELSE 2
+      END,
+      nombre
+    LIMIT ${BUSQUEDA_LIMITE}
+  `, [negocioId, `%${filtroSeguro}%`, `${filtroSeguro}%`]);
+
+  return rows;
+};
+
 const findById = async (negocioId, id) => {
   const { rows } = await pool.query(
     `SELECT * FROM clientes WHERE id = $1 AND negocio_id = $2`,
@@ -119,4 +173,4 @@ const quitarFrecuente = async (sucursalId, clienteId) => {
   return rows[0] || null;
 };
 
-module.exports = { findAll, findById, findByCedula, getHistorialCompras, create, update,findFrecuentes,agregarFrecuente,quitarFrecuente };
+module.exports = { findAll, buscar, findById, findByCedula, getHistorialCompras, create, update,findFrecuentes,agregarFrecuente,quitarFrecuente };

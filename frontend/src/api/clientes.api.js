@@ -2,6 +2,9 @@ import api from './axios.config';
 
 export const getClientes = (filtro) =>
   api.get('/clientes', { params: { filtro } });
+// Autocompletado ligero para facturar: nombre, cédula o celular. A diferencia
+// de getClientes no trae totales de compra, así que sirve para teclear en vivo.
+export const buscarClientes = (q) => api.get('/clientes/buscar', { params: { q } });
 export const getClienteById = (id) => api.get(`/clientes/${id}`);
 export const buscarPorCedula = (cedula) => api.get(`/clientes/cedula/${cedula}`);
 export const crearCliente = (data) => api.post('/clientes', data);
