@@ -1,171 +1,159 @@
 // src/components/ui/ModalImprimirPrestamo.jsx
 import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Modal }   from './Modal';
-import { Button }  from './Button';
-import { Printer, FileDown, Share2 } from 'lucide-react';
+import { Spinner } from './Spinner';
+import { Printer, FileDown, Share2, Loader2 } from 'lucide-react';
 import useImprimirPrestamo from '../../hooks/useImprimirPrestamo';
+import api from '../../api/axios.config';
+import {
+  getDocumentoPrestamo, descargarPdfAvisoMoraPrestamo, descargarPdfPazYSalvoPrestamo,
+} from '../../api/prestamos.api';
+import { formatCOP, formatFechaHora } from '../../utils/formatters';
+import {
+  DocumentoTermico, EncabezadoNegocio, Divisor, Fila, Firma,
+} from '../documentos/DocumentoTermico';
+import {
+  EstadoObligacionTermico, HistorialAbonosTermico, CondicionesTermico,
+} from '../documentos/BloqueObligacionTermico';
+import { ModalDocumentosObligacion } from '../documentos/ModalDocumentosObligacion';
 
-// ─── Componente POS térmico para préstamo ─────────────────────────────────────
+// ─── Comprobante de préstamo en ticket térmico ────────────────────────────────
+//
+// Antes esto era una vista previa en pantalla que llamaba a window.print() sobre
+// toda la página: salía el layout de la app, no un ticket. Ahora usa la misma
+// base térmica que la factura y el recibo de abono, y las mismas cifras que el
+// PDF (el `resumen` que calcula el backend).
 
-function PrestamoTermico({ prestamo, abonos, onClose }) {
-  const formatCOP = (v) =>
-    new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(Number(v) || 0);
-
-  const formatFecha = (f) => {
-    if (!f) return '—';
-    return new Date(f).toLocaleDateString('es-CO', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'America/Bogota' });
-  };
-
-  const saldo = Number(prestamo.valor_prestamo) - Number(prestamo.total_abonado);
-
+function PrestamoTermico({ prestamo, persona, resumen, descripcion, config, onClose }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full flex flex-col gap-3 overflow-hidden">
-        {/* Header */}
-        <div className="bg-[#1E3A5F] px-5 py-4 flex items-center justify-between">
-          <div>
-            <p className="text-white font-bold text-sm">Comprobante de Préstamo</p>
-            <p className="text-blue-300 text-xs mt-0.5">#{String(prestamo.numero ?? prestamo.id).padStart(6, '0')}</p>
-          </div>
-          <span className={`text-xs font-bold px-3 py-1 rounded-full
-            ${prestamo.estado === 'Saldado' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}`}>
-            {prestamo.estado}
-          </span>
-        </div>
+    <DocumentoTermico
+      id="prestamo-termico"
+      config={config}
+      tituloModal="Comprobante listo para imprimir"
+      descripcionModal="Se enviará a la impresora térmica."
+      onClose={onClose}
+    >
+      {({ fuenteSize }) => (
+        <>
+          <EncabezadoNegocio config={config} titulo="COMPROBANTE DE PRÉSTAMO" fuenteSize={fuenteSize} />
 
-        <div className="px-5 flex flex-col gap-3 max-h-[60vh] overflow-y-auto">
-          {/* Prestatario */}
-          <div className="bg-gray-50 rounded-xl p-3">
-            <p className="text-xs text-gray-400">Prestatario</p>
-            <p className="text-sm font-semibold text-gray-800">{prestamo.prestatario}</p>
-            {prestamo.empleado_nombre && (
-              <p className="text-xs text-blue-500">Empleado: {prestamo.empleado_nombre}</p>
-            )}
-            {prestamo.cedula && prestamo.cedula !== 'COMPANERO' && (
-              <p className="text-xs text-gray-500">CC: {prestamo.cedula}</p>
-            )}
-          </div>
+          <Fila label="No." valor={`#${String(resumen.numero).padStart(6, '0')}`} />
+          <Fila label="Fecha:" valor={formatFechaHora(prestamo.fecha)} />
+          <Fila label="Emitido:" valor={formatFechaHora(new Date())} />
 
-          {/* Producto */}
-          <div className="bg-gray-50 rounded-xl p-3">
-            <p className="text-xs text-gray-400">Producto</p>
-            <p className="text-sm font-semibold text-gray-800">{prestamo.nombre_producto}</p>
-            {prestamo.imei && <p className="text-xs text-gray-400 font-mono">{prestamo.imei}</p>}
-            <p className="text-xs text-gray-400">{formatFecha(prestamo.fecha)}</p>
-          </div>
+          <Divisor />
 
-          {/* Abonos */}
-          {abonos?.length > 0 && (
-            <div className="flex flex-col gap-1">
-              <p className="text-xs font-semibold text-gray-500 uppercase">Abonos</p>
-              {abonos.map((a) => {
-                const abonoId = a.id;
-                return (
-                  <div key={abonoId} className="flex justify-between items-center bg-gray-50 rounded-lg px-3 py-1.5">
-                    <span className="text-xs text-gray-500">{formatFecha(a.fecha)}</span>
-                    <span className="text-xs font-semibold text-blue-600">+ {formatCOP(a.valor)}</span>
-                  </div>
-                );
-              })}
-            </div>
+          <div className="negrita">PRESTATARIO</div>
+          <Fila label="Nombre:" valor={persona?.nombre || prestamo.prestatario} />
+          {persona?.cedula && persona.cedula !== 'COMPANERO' && (
+            <Fila label="CC:" valor={persona.cedula} />
+          )}
+          {persona?.celular && persona.celular !== '0000000000' && (
+            <Fila label="Tel:" valor={persona.celular} />
+          )}
+          {prestamo.empleado_nombre && (
+            <Fila label="Empleado:" valor={prestamo.empleado_nombre} />
           )}
 
-          {/* Totales */}
-          <div className="bg-blue-50 rounded-xl p-3 flex flex-col gap-1.5">
-            <div className="flex justify-between text-xs">
-              <span className="text-gray-500">Valor préstamo</span>
-              <span className="font-medium text-gray-800">{formatCOP(prestamo.valor_prestamo)}</span>
-            </div>
-            <div className="flex justify-between text-xs">
-              <span className="text-gray-500">Total abonado</span>
-              <span className="font-medium text-green-700">{formatCOP(prestamo.total_abonado)}</span>
-            </div>
-            <div className="border-t border-blue-200 pt-1.5 flex justify-between">
-              <span className="text-sm font-bold text-gray-700">Saldo pendiente</span>
-              <span className={`text-sm font-bold ${saldo > 0 ? 'text-red-600' : 'text-green-700'}`}>
-                {formatCOP(saldo)}
-              </span>
-            </div>
-          </div>
-        </div>
+          <Divisor />
 
-        <div className="px-5 pb-4">
-          <button onClick={() => { window.print(); onClose(); }}
-            className="w-full py-2.5 rounded-xl bg-[#1E3A5F] text-white text-sm font-medium
-              hover:bg-[#1e4a7f] transition-colors mb-2">
-            Imprimir ahora
-          </button>
-          <button onClick={onClose}
-            className="w-full py-2 rounded-xl border border-gray-200 text-gray-500 text-sm hover:bg-gray-50 transition-colors">
-            Cerrar
-          </button>
-        </div>
-      </div>
-    </div>
+          <div className="negrita">ARTÍCULO PRESTADO</div>
+          <div className="negrita">{prestamo.nombre_producto}</div>
+          {prestamo.imei && <div style={{ fontSize: '9px' }}>IMEI: {prestamo.imei}</div>}
+          {!prestamo.imei && Number(prestamo.cantidad_prestada) > 1 && (
+            <Fila label="Cantidad:" valor={String(prestamo.cantidad_prestada)} />
+          )}
+          {descripcion && descripcion !== prestamo.nombre_producto && (
+            <div className="suave" style={{ fontSize: '11px' }}>{descripcion}</div>
+          )}
+
+          <EstadoObligacionTermico resumen={resumen} fuenteSize={fuenteSize} />
+          <HistorialAbonosTermico  resumen={resumen} />
+          <CondicionesTermico      resumen={resumen} />
+
+          <Divisor />
+
+          <div className="centrado" style={{ fontSize: '11px' }}>
+            {resumen.pagada
+              ? 'Préstamo cancelado en su totalidad. Gracias.'
+              : 'Este comprobante es válido como constancia del préstamo.'}
+          </div>
+
+          <Firma
+            titulo={resumen.fecha_limite ? 'Firma de aceptación' : 'Firma de recibido'}
+            identificacion={[persona?.nombre || prestamo.prestatario,
+              persona?.cedula && persona.cedula !== 'COMPANERO' ? `C.C. ${persona.cedula}` : null]
+              .filter(Boolean).join(' · ')}
+          />
+          <div style={{ height: '10mm' }} />
+        </>
+      )}
+    </DocumentoTermico>
   );
 }
 
-// ─── Modal selector POS / PDF ─────────────────────────────────────────────────
+// ─── Modal selector de documentos ─────────────────────────────────────────────
 
-export function ModalImprimirPrestamo({ prestamo, abonos, onClose }) {
+export function ModalImprimirPrestamo({ prestamo, onClose }) {
   const { descargando, descargarPdf, compartirPdf } = useImprimirPrestamo();
-  const [mostrarPos, setMostrarPos] = useState(false);
+  const [vista, setVista] = useState('menu'); // 'menu' | 'comprobante' | 'pos'
 
-  if (mostrarPos) {
+  // Resumen y persona: los mismos que imprime el PDF.
+  const { data: doc, isLoading } = useQuery({
+    queryKey: ['documento-obligacion', prestamo.id],
+    queryFn:  () => getDocumentoPrestamo(prestamo.id).then((r) => r.data.data),
+    enabled:  !!prestamo.id,
+    staleTime: 0,
+  });
+  const { data: config } = useQuery({
+    queryKey: ['config'],
+    queryFn:  () => api.get('/config').then((r) => r.data.data),
+  });
+
+  if (vista === 'pos') {
     return (
       <PrestamoTermico
         prestamo={prestamo}
-        abonos={abonos}
-        onClose={() => { setMostrarPos(false); onClose(); }}
+        persona={doc?.persona}
+        resumen={doc?.resumen}
+        descripcion={doc?.descripcion}
+        config={config}
+        onClose={onClose}
       />
     );
   }
 
-  return (
-    <Modal open onClose={onClose} title="Imprimir préstamo" size="sm">
-      <div className="flex flex-col gap-4">
-        <p className="text-sm text-gray-500 text-center">
-          ¿Cómo deseas imprimir el comprobante?
-        </p>
+  if (vista === 'comprobante') {
+    return (
+      <Modal open onClose={onClose} title="Imprimir comprobante" size="sm">
+        <div className="flex flex-col gap-4">
+          <p className="text-sm text-gray-500 text-center">
+            ¿Cómo deseas imprimir el comprobante?
+          </p>
 
-        {/* Opción POS */}
-        <button
-          onClick={() => setMostrarPos(true)}
-          className="flex items-center gap-4 p-4 rounded-xl border-2 border-gray-200
-            hover:border-blue-300 hover:bg-blue-50/30 transition-all text-left group"
-        >
-          <div className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center flex-shrink-0
-            group-hover:bg-blue-200 transition-colors">
-            <Printer size={20} className="text-blue-600" />
-          </div>
-          <div>
-            <p className="text-sm font-semibold text-gray-800">Impresora POS</p>
-            <p className="text-xs text-gray-400">Comprobante para impresora térmica</p>
-          </div>
-        </button>
-
-        {/* Opción PDF */}
-        <button
-          onClick={() => descargarPdf(prestamo.id, prestamo.numero ?? prestamo.id)}
-          disabled={descargando}
-          className="flex items-center gap-4 p-4 rounded-xl border-2 border-gray-200
-            hover:border-green-300 hover:bg-green-50/30 transition-all text-left group
-            disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          <div className="w-10 h-10 rounded-xl bg-green-100 flex items-center justify-center flex-shrink-0
-            group-hover:bg-green-200 transition-colors">
-            <FileDown size={20} className="text-green-600" />
-          </div>
-          <div>
-            <p className="text-sm font-semibold text-gray-800">Descargar PDF</p>
-            <p className="text-xs text-gray-400">Documento PDF completo con abonos</p>
-          </div>
-        </button>
-
-        {/* Opción compartir (móvil) */}
-        {navigator.canShare && (
           <button
-            onClick={() => compartirPdf(prestamo.id, prestamo.numero ?? prestamo.id)}
+            onClick={() => setVista('pos')}
+            disabled={!doc?.resumen}
+            className="flex items-center gap-4 p-4 rounded-xl border-2 border-gray-200
+              hover:border-blue-300 hover:bg-blue-50/30 transition-all text-left group
+              disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <div className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center flex-shrink-0
+              group-hover:bg-blue-200 transition-colors">
+              {isLoading ? <Loader2 size={20} className="text-blue-600 animate-spin" />
+                         : <Printer size={20} className="text-blue-600" />}
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-gray-800">Impresora POS</p>
+              <p className="text-xs text-gray-400">
+                Ticket térmico con saldo, historial de abonos y condiciones
+              </p>
+            </div>
+          </button>
+
+          <button
+            onClick={() => descargarPdf(prestamo.id, prestamo.numero ?? prestamo.id)}
             disabled={descargando}
             className="flex items-center gap-4 p-4 rounded-xl border-2 border-gray-200
               hover:border-purple-300 hover:bg-purple-50/30 transition-all text-left group
@@ -173,19 +161,76 @@ export function ModalImprimirPrestamo({ prestamo, abonos, onClose }) {
           >
             <div className="w-10 h-10 rounded-xl bg-purple-100 flex items-center justify-center flex-shrink-0
               group-hover:bg-purple-200 transition-colors">
-              <Share2 size={20} className="text-purple-600" />
+              {descargando ? <Loader2 size={20} className="text-purple-600 animate-spin" />
+                           : <FileDown size={20} className="text-purple-600" />}
             </div>
             <div>
-              <p className="text-sm font-semibold text-gray-800">Compartir PDF</p>
-              <p className="text-xs text-gray-400">Enviar por WhatsApp, correo u otra app</p>
+              <p className="text-sm font-semibold text-gray-800">Formato PDF</p>
+              <p className="text-xs text-gray-400">Documento A4 con la misma información</p>
             </div>
           </button>
-        )}
 
-        <Button variant="secondary" className="w-full" onClick={onClose}>
-          Cancelar
-        </Button>
+          {typeof navigator !== 'undefined' && navigator.share && (
+            <button
+              onClick={() => compartirPdf(prestamo.id, prestamo.prestatario, prestamo.numero ?? prestamo.id)}
+              disabled={descargando}
+              className="flex items-center justify-center gap-2 w-full py-2.5 rounded-xl
+                text-sm font-medium border-2 border-dashed border-green-300
+                text-green-700 bg-green-50 hover:bg-green-100 transition-colors
+                disabled:opacity-50"
+            >
+              <Share2 size={15} /> Compartir (WhatsApp, Telegram…)
+            </button>
+          )}
+
+          <button onClick={() => setVista('menu')}
+            className="w-full py-2 rounded-xl border border-gray-200 text-gray-500 text-sm
+              hover:bg-gray-50 transition-colors">
+            Volver
+          </button>
+        </div>
+      </Modal>
+    );
+  }
+
+  // ── Menú: comprobante + aviso de mora / paz y salvo ───────────────────────
+  if (isLoading) {
+    return (
+      <Modal open onClose={onClose} title="Documentos del préstamo" size="sm">
+        <Spinner className="py-10" />
+      </Modal>
+    );
+  }
+
+  const tarjetaComprobante = (
+    <button
+      onClick={() => setVista('comprobante')}
+      className="rounded-xl border border-blue-200 bg-blue-50 p-3 flex items-start gap-2.5 text-left
+        hover:shadow-sm transition-all">
+      <Printer size={18} className="text-blue-500 flex-shrink-0 mt-0.5" />
+      <div className="min-w-0">
+        <p className="text-sm font-semibold text-blue-700">Comprobante de préstamo</p>
+        <p className="text-xs text-gray-500 mt-0.5 leading-snug">
+          Artículo, estado de la deuda, historial de abonos y condiciones. POS o PDF.
+          {doc?.resumen && ` Saldo ${formatCOP(doc.resumen.saldo)}.`}
+        </p>
       </div>
-    </Modal>
+    </button>
+  );
+
+  return (
+    <ModalDocumentosObligacion
+      id={prestamo.id}
+      config={config}
+      onClose={onClose}
+      extra={tarjetaComprobante}
+      api={{
+        getDocumento: getDocumentoPrestamo,
+        pdfAvisoMora: descargarPdfAvisoMoraPrestamo,
+        pdfPazYSalvo: descargarPdfPazYSalvoPrestamo,
+      }}
+    />
   );
 }
+
+export default ModalImprimirPrestamo;

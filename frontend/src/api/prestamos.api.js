@@ -45,6 +45,14 @@ export const descargarPdfPrestamosActivos = (tipo, id) =>
 export const descargarPdfEstadoCuenta = (tipo, id) =>
   api.get(`/prestamos/pdf/${tipo}/${id}/estado-cuenta`, { responseType: 'blob' });
 
+// ── Documentos de la obligación (iguales a los de facturas a crédito) ────────
+export const getDocumentoPrestamo = (prestamoId) =>
+  api.get(`/prestamos/${prestamoId}/documento`);
+export const descargarPdfAvisoMoraPrestamo = (prestamoId) =>
+  api.get(`/prestamos/${prestamoId}/pdf/aviso-mora`, { responseType: 'blob' });
+export const descargarPdfPazYSalvoPrestamo = (prestamoId) =>
+  api.get(`/prestamos/${prestamoId}/pdf/paz-y-salvo`, { responseType: 'blob' });
+
 // `modo` reparte el abono total dentro de cada préstamo (mora/capital);
 // `distribucion_manual` es opcional: { [prestamo_id]: valor } y debe sumar el total.
 export const registrarAbonoTotal = (tipo, personaId, valor_total, metodo, extra = {}) =>

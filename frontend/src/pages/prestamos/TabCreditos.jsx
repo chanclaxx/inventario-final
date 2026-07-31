@@ -5,6 +5,7 @@ import {
   registrarAbonoCredito, saldarCredito, cancelarCredito,
   fijarPlazoCredito, cobrarMoraCredito, condonarMoraCredito,
   getEstadoCuentaCredito, descargarPdfEstadoCuentaCredito,
+  getDocumentoCredito, descargarPdfAvisoMora, descargarPdfPazYSalvo,
 } from '../../api/creditos.api';
 import { getFacturaById }          from '../../api/facturas.api';
 import { getGarantiasPorFactura }  from '../../api/garantias.api';
@@ -25,6 +26,7 @@ import { FacturaTermica }       from '../../components/FacturaTermica';
 import { ReciboAbono }          from '../../components/ReciboAbono';
 import { ModalDevolucionParcialCredito } from '../facturas/ModalDevolucionParcialCredito';
 import { ModalExportarCuenta }   from '../../components/ui/ModalExportarCuenta';
+import { ModalDocumentosObligacion } from '../../components/documentos/ModalDocumentosObligacion';
 import { EstadoCuentaCredito }   from './EstadoCuentaCredito';
 import { exportarCuentaCreditoExcel } from '../../utils/exportarCuentaCreditoExcel';
 import {
@@ -316,13 +318,19 @@ function ModalCancelarCredito({ credito, onClose }) {
   );
 }
 
-// ─── Imprimir factura del crédito (POS o PDF) ────────────────────────────────
-// Reutiliza el mismo flujo de FacturarPage: ModalImprimirFactura → FacturaTermica.
+// ─── Documentos del crédito (factura, aviso de mora, paz y salvo) ────────────
+//
+// Un solo punto de entrada para los tres documentos, en POS y en PDF. La
+// factura sigue usando el flujo de FacturarPage (ModalImprimirFactura →
+// FacturaTermica); los otros dos los aporta ModalDocumentosObligacion, que es el
+// mismo componente que usan los préstamos.
 
-function ImprimirFacturaCredito({ facturaId, onClose }) {
+function DocumentosCredito({ credito, onClose }) {
+  const facturaId = credito.factura_id;
+  const [vista, setVista] = useState('menu'); // 'menu' | 'factura' | 'pos'
   const [posData, setPosData] = useState(null);
 
-  const { data: f, isLoading } = useQuery({
+  const { data: f } = useQuery({
     queryKey: ['factura-detalle', facturaId],
     queryFn:  () => getFacturaById(facturaId).then((r) => r.data.data),
     enabled:  !!facturaId,
@@ -340,31 +348,59 @@ function ImprimirFacturaCredito({ facturaId, onClose }) {
 
   if (posData) {
     return (
-      <FacturaTermica
-        factura={posData.factura}
-        garantias={posData.garantias}
+      <FacturaTermica factura={posData.factura} garantias={posData.garantias} onClose={onClose} />
+    );
+  }
+
+  // La factura viaja con su `credito.resumen` (lo calcula el backend), que es lo
+  // que hace que el ticket imprima el saldo y el historial de abonos.
+  const facturaConConfig = f ? { ...f, config: configData } : null;
+
+  if (vista === 'factura') {
+    if (!facturaConConfig) {
+      return (
+        <Modal open onClose={onClose} title="Imprimir factura" size="sm">
+          <Spinner className="py-10" />
+        </Modal>
+      );
+    }
+    return (
+      <ModalImprimirFactura
+        open
         onClose={onClose}
+        factura={facturaConConfig}
+        garantias={garantias}
+        onImprimirPos={(fa, g) => setPosData({ factura: fa, garantias: g })}
       />
     );
   }
 
-  if (isLoading || !f) {
-    return (
-      <Modal open onClose={onClose} title="Imprimir factura" size="sm">
-        <Spinner className="py-10" />
-      </Modal>
-    );
-  }
-
-  const facturaConConfig = { ...f, config: configData };
+  const tarjetaFactura = (
+    <button
+      onClick={() => setVista('factura')}
+      className="rounded-xl border border-blue-200 bg-blue-50 p-3 flex items-start gap-2.5 text-left
+        hover:shadow-sm transition-all">
+      <Printer size={18} className="text-blue-500 flex-shrink-0 mt-0.5" />
+      <div className="min-w-0">
+        <p className="text-sm font-semibold text-blue-700">Factura a crédito</p>
+        <p className="text-xs text-gray-500 mt-0.5 leading-snug">
+          Productos, estado de la deuda, historial de abonos y condiciones de pago. POS o PDF.
+        </p>
+      </div>
+    </button>
+  );
 
   return (
-    <ModalImprimirFactura
-      open
+    <ModalDocumentosObligacion
+      id={credito.id}
+      config={configData}
       onClose={onClose}
-      factura={facturaConConfig}
-      garantias={garantias}
-      onImprimirPos={(fa, g) => setPosData({ factura: fa, garantias: g })}
+      extra={tarjetaFactura}
+      api={{
+        getDocumento:  getDocumentoCredito,
+        pdfAvisoMora:  descargarPdfAvisoMora,
+        pdfPazYSalvo:  descargarPdfPazYSalvo,
+      }}
     />
   );
 }
@@ -461,7 +497,7 @@ function TarjetaCreditoDetalle({
             {credito.estado !== 'Cancelado' && (
               <button onClick={() => onImprimir(credito)}
                 className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-blue-500 transition-colors"
-                title="Imprimir factura (POS o PDF)">
+                title="Documentos: factura, aviso de mora, paz y salvo (POS o PDF)">
                 <Printer size={14} />
               </button>
             )}
@@ -1032,7 +1068,7 @@ export function TabCreditos() {
           onClose={() => setCreditoDevolucion(null)} />
       )}
       {creditoImprimir && (
-        <ImprimirFacturaCredito facturaId={creditoImprimir.factura_id}
+        <DocumentosCredito credito={creditoImprimir}
           onClose={() => setCreditoImprimir(null)} />
       )}
     </>

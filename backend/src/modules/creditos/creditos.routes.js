@@ -19,6 +19,12 @@ router.get('/estado-cuenta',     requireModulo('prestamos'), ctrl.getEstadoCuent
 router.get('/estado-cuenta/pdf', requireModulo('prestamos'), ctrl.exportarPdfEstadoCuenta);
 
 router.get('/:id',           requireModulo('prestamos'), ctrl.getCreditoById);
+
+// Documentos de la obligación. `/documento` alimenta la impresión POS con el
+// mismo resumen que usan los PDF, para que impreso y pantalla coincidan.
+router.get('/:id/documento',       requireModulo('prestamos'), ctrl.getDocumento);
+router.get('/:id/pdf/aviso-mora',  requireModulo('prestamos'), ctrl.exportarPdfAvisoMora);
+router.get('/:id/pdf/paz-y-salvo', requireModulo('prestamos'), ctrl.exportarPdfPazYSalvo);
 router.post('/:id/abonos',   requireModulo('prestamos'), validarAbono, validate,    ctrl.registrarAbono);
 router.patch('/:id/saldar',  requireModulo('prestamos'), requireNivel('vendedor'),      ctrl.saldarCredito);
 router.patch('/:id/cancelar',requireModulo('prestamos'), requireNivel('admin_negocio'), ctrl.cancelarCredito);

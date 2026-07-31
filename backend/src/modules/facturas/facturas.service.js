@@ -85,17 +85,37 @@ const getFacturaById = async (negocioId, id) => {
     domiciliariosRepo.findEntregaByFacturaId(id, negocioId),
   ]);
 
-  // El crédito asociado, con su estado de mora ya resuelto. Lo necesitan la
-  // pantalla de cancelación (para preguntar si se revierte la mora cobrada) y el
-  // PDF (para imprimir las condiciones pactadas).
+  // El crédito asociado, con su mora resuelta, sus abonos y el RESUMEN de la
+  // obligación (estado, saldo, plazo, historial con saldo corrido).
+  //
+  // El resumen se calcula aquí, en el servidor, y de él beben por igual el PDF,
+  // el ticket POS y la pantalla: es lo que garantiza que los tres muestren
+  // exactamente las mismas cifras. Ver utils/obligacion.js.
+  //
   // Va en try/catch: la migración de mora puede no estar aplicada, y el detalle
   // de la factura no puede fallar por eso.
   let credito = null;
   try {
     const { rows } = await pool.query(`SELECT * FROM creditos WHERE factura_id = $1`, [id]);
     if (rows.length) {
-      const moraService = require('../mora/mora.service');
+      const moraService  = require('../mora/mora.service');
+      const creditosRepo = require('../creditos/creditos.repository');
+      const { resumirObligacion } = require('../../utils/obligacion');
+
       credito = await moraService.anotarDocumento(rows[0], 'credito');
+      const abonos = await creditosRepo.getAbonos(credito.id);
+
+      const devuelto = lineas.reduce(
+        (s, l) => s + Number(l.cantidad_devuelta || 0) * Number(l.precio), 0);
+
+      credito.abonos  = abonos;
+      credito.resumen = resumirObligacion({
+        tipo: 'credito',
+        documento: { ...credito, factura_numero: factura.numero, factura_id: factura.id },
+        abonos,
+        mora: credito.mora || null,
+        devuelto,
+      });
     }
   } catch (err) {
     console.warn('[facturas] Crédito no incluido en el detalle:', err.message);

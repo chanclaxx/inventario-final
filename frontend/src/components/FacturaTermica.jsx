@@ -1,6 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
 import { formatCOP, formatFechaHora } from '../utils/formatters';
+import { DocumentoTermico, Firma } from './documentos/DocumentoTermico';
+import {
+  EstadoObligacionTermico, HistorialAbonosTermico, CondicionesTermico,
+} from './documentos/BloqueObligacionTermico';
 
 // ─── Utilidades ───────────────────────────────────────────────────────────────
 
@@ -51,7 +53,11 @@ function BloqueRetoma({ retoma }) {
 
 // ─── Contenido de impresión (se renderiza dentro del portal) ──────────────────
 
-function ContenidoFactura({ factura, garantias, config }) {
+function ContenidoFactura({ factura, garantias, config, fuenteSize }) {
+  // Resumen de la obligación calculado por el backend. Es el mismo objeto que
+  // imprime el PDF, así que ticket y PDF no pueden mostrar cifras distintas.
+  const resumen = factura.credito?.resumen || null;
+
   const retomas = Array.isArray(factura.retomas)
     ? factura.retomas
     : factura.retoma
@@ -78,7 +84,7 @@ function ContenidoFactura({ factura, garantias, config }) {
   const cambio       = totalPagado - (total - totalRetomas);
 
   return (
-    <div id="factura-termica">
+    <>
       {/* Encabezado */}
       <div className="centrado negrita" style={{ fontSize: '14px' }}>
         {config?.nombre_negocio || 'MI TIENDA'}
@@ -89,7 +95,9 @@ function ContenidoFactura({ factura, garantias, config }) {
 
       <div className="linea-divisor" />
 
-      <div className="centrado negrita">FACTURA DE VENTA</div>
+      <div className="centrado negrita">
+        {resumen ? 'FACTURA DE VENTA A CRÉDITO' : 'FACTURA DE VENTA'}
+      </div>
       <div className="fila">
         <span>No.</span>
         <span>{String(factura.numero ?? factura.id).padStart(6, '0')}</span>
@@ -203,6 +211,17 @@ function ContenidoFactura({ factura, garantias, config }) {
         </div>
       )}
 
+      {/* ── Venta a crédito: estado de la deuda, historial y condiciones ──
+          Mismos bloques y mismas cifras que el PDF: el cliente puede saber en
+          qué va su obligación sin entrar al sistema. */}
+      {resumen && (
+        <>
+          <EstadoObligacionTermico resumen={resumen} fuenteSize={fuenteSize} />
+          <HistorialAbonosTermico  resumen={resumen} />
+          <CondicionesTermico      resumen={resumen} />
+        </>
+      )}
+
       <div className="linea-divisor" />
 
       {/* Garantías */}
@@ -227,149 +246,49 @@ function ContenidoFactura({ factura, garantias, config }) {
       <div className="centrado" style={{ marginTop: '8px', fontSize: '11px' }}>
         ¡Gracias por su compra!
       </div>
-      <div style={{ marginTop: '20px', textAlign: 'center', fontSize: '10px' }}>
-        Firma: ___________________________
-      </div>
+      {/* En una venta a crédito la firma es la prueba del pacto, así que se
+          identifica a quien firma. La venta de contado conserva su línea de
+          siempre: no había motivo para cambiarle el pie. */}
+      {resumen ? (
+        <Firma
+          titulo="Firma de aceptación del cliente"
+          identificacion={[factura.nombre_cliente,
+            factura.cedula && factura.cedula !== 'COMPANERO' ? `C.C. ${factura.cedula}` : null]
+            .filter(Boolean).join(' · ')}
+        />
+      ) : (
+        <div style={{ marginTop: '20px', textAlign: 'center', fontSize: '10px' }}>
+          Firma: ___________________________
+        </div>
+      )}
       <div style={{ height: '10mm' }} />
-    </div>
+    </>
   );
 }
 
 // ─── Componente principal ─────────────────────────────────────────────────────
 
 export function FacturaTermica({ factura, garantias = [], onClose }) {
-  const yaImprimio = useRef(false);
-  const [portalContainer] = useState(() => {
-    // Crear un div aislado que se monta directamente en document.body
-    const el = document.createElement('div');
-    el.id = 'factura-termica-portal';
-    return el;
-  });
-
-  // Montar/desmontar el portal container
-  useEffect(() => {
-    document.body.appendChild(portalContainer);
-    return () => {
-      document.body.removeChild(portalContainer);
-    };
-  }, [portalContainer]);
-
-  // Imprimir una sola vez
-  useEffect(() => {
-    if (yaImprimio.current || !factura) return;
-    yaImprimio.current = true;
-    const timer = setTimeout(() => {
-      window.print();
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [factura]);
-
   if (!factura) return null;
 
-  const config     = factura.config || {};
-  const escala     = Number(config.impresion_escala      || 1.5);
-  const anchoPapel = Number(config.impresion_ancho_papel || 80);
-  const fuenteSize = Number(config.impresion_fuente_size || 13);
-  const padding    = Number(config.impresion_padding     || 2);
+  const config = factura.config || {};
 
-  const anchoPapelStr = `${anchoPapel}mm`;
-  const fuenteSizeStr = `${fuenteSize}px`;
-  const paddingStr    = `${padding}mm`;
-
-  return createPortal(
-    <>
-      <style>{`
-        #factura-termica-portal #factura-termica,
-        #factura-termica-portal #factura-termica * {
-          color: #000000 !important;
-          font-weight: 600;
-          -webkit-font-smoothing: none;
-          font-smoothing: none;
-          -webkit-print-color-adjust: exact;
-          print-color-adjust: exact;
-        }
-
-        #factura-termica-portal #factura-termica {
-          width: ${anchoPapelStr};
-          font-family: 'Courier New', monospace;
-          font-size: ${fuenteSizeStr};
-          padding: ${paddingStr};
-          box-sizing: border-box;
-        }
-
-        #factura-termica-portal .negrita {
-          font-weight: 900 !important;
-        }
-
-        #factura-termica-portal .garantia-texto,
-        #factura-termica-portal .retoma-linea {
-          font-weight: 600 !important;
-        }
-
-        #factura-termica-portal .linea-divisor { border-top: 1.5px solid #000; margin: 5px 0; }
-        #factura-termica-portal .centrado      { text-align: center; }
-        #factura-termica-portal .fila          { display: flex; justify-content: space-between; margin: 3px 0; gap: 4px; }
-        #factura-termica-portal .fila span:last-child { text-align: right; flex-shrink: 0; max-width: 45mm; word-break: break-word; }
-        #factura-termica-portal .garantia-titulo { font-weight: 900 !important; margin-top: 6px; font-size: 12px; text-align: center; }
-        #factura-termica-portal .garantia-texto  { font-size: 11px; line-height: 1.5; white-space: pre-wrap; text-align: justify; word-break: break-word; width: 100%; display: block; }
-        #factura-termica-portal .retoma-bloque   { margin: 4px 0; }
-        #factura-termica-portal .retoma-linea    { font-size: 12px; margin: 2px 0; }
-        #factura-termica-portal .retoma-separador { border-top: 1px dashed #000; margin: 4px 0; }
-
-        @media print {
-          @page {
-            margin: 0;
-            size: ${anchoPapelStr} auto;
-          }
-          /* Ocultar TODO */
-          body > * {
-            display: none !important;
-          }
-          /* Mostrar SOLO el portal */
-          body > #factura-termica-portal {
-            display: block !important;
-          }
-          #factura-termica-portal #factura-termica {
-            position: static;
-            width: ${anchoPapelStr};
-            padding: ${paddingStr};
-            font-size: ${fuenteSizeStr};
-            font-family: 'Courier New', monospace;
-            transform: scale(${escala});
-            transform-origin: top left;
-          }
-          /* Ocultar overlay de pantalla en impresión */
-          #factura-termica-portal .no-print {
-            display: none !important;
-          }
-        }
-      `}</style>
-
-      {/* Overlay pantalla */}
-      <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center no-print">
-        <div className="bg-white rounded-2xl p-6 max-w-sm w-full mx-4 flex flex-col gap-4">
-          <h2 className="font-bold text-gray-900">Factura lista para imprimir</h2>
-          <p className="text-sm text-gray-500">La factura se enviará a la impresora térmica.</p>
-          <div className="flex gap-2">
-            <button
-              onClick={onClose}
-              className="flex-1 py-2 bg-gray-100 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-200"
-            >
-              Cerrar
-            </button>
-            <button
-              onClick={() => window.print()}
-              className="flex-1 py-2 bg-blue-600 rounded-xl text-sm font-medium text-white hover:bg-blue-700"
-            >
-              Reimprimir
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Contenido factura */}
-      <ContenidoFactura factura={factura} garantias={garantias} config={config} />
-    </>,
-    portalContainer
+  return (
+    <DocumentoTermico
+      id="factura-termica"
+      config={config}
+      tituloModal="Factura lista para imprimir"
+      descripcionModal="La factura se enviará a la impresora térmica."
+      onClose={onClose}
+    >
+      {({ fuenteSize }) => (
+        <ContenidoFactura
+          factura={factura}
+          garantias={garantias}
+          config={config}
+          fuenteSize={fuenteSize}
+        />
+      )}
+    </DocumentoTermico>
   );
 }

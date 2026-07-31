@@ -2266,18 +2266,6 @@ function TabDomiciliarios() {
   );
 }
 
-// ─── Hook: obtener abonos de un préstamo para impresión ───────────────────────
-
-function useAbonosPrestamo(prestamoId) {
-  const { data = [] } = useQuery({
-    queryKey: ['abonos-prestamo', prestamoId],
-    queryFn:  () => api.get(`/prestamos/${prestamoId}`).then((r) => r.data.data?.abonos || []),
-    enabled:  !!prestamoId,
-    staleTime: 0,
-  });
-  return data;
-}
-
 // ─── Tab: Búsqueda de préstamos ──────────────────────────────────────────────
 
 const ESTADOS_FILTRO = [
@@ -2643,7 +2631,8 @@ export default function PrestamosPage() {
   const [modalCrearPrestatario,   setModalCrearPrestatario]   = useState(false);
   const [modalEditarPrestatario,  setModalEditarPrestatario]  = useState(null);
   const [modalEditarCliente,      setModalEditarCliente]      = useState(null);
-  const abonosImprimir = useAbonosPrestamo(prestamoImprimir?.id);
+  // Los abonos del comprobante ya no se piden aquí: ModalImprimirPrestamo carga
+  // el `resumen` completo del backend (con el saldo corrido de cada abono).
 
   const [saldadoFacturaId,   setSaldadoFacturaId]   = useState(null);
   const [saldadoPrestamo,    setSaldadoPrestamo]     = useState(null);
@@ -3028,7 +3017,6 @@ export default function PrestamosPage() {
       {prestamoImprimir && (
         <ModalImprimirPrestamo
           prestamo={prestamoImprimir}
-          abonos={abonosImprimir}
           onClose={() => setPrestamoImprimir(null)}
         />
       )}

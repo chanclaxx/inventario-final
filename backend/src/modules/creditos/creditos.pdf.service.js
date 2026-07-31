@@ -11,6 +11,7 @@
 
 const { pool } = require('../../config/db');
 const { construirPdfEstadoCuenta } = require('../../utils/estadoCuenta.pdf');
+const { generarAvisoMora, generarPazYSalvo } = require('../../utils/obligacion.pdf');
 const service = require('./creditos.service');
 
 // Mismos colores que los badges de la pantalla (EstadoCuentaCredito.jsx).
@@ -54,4 +55,41 @@ const generarPdfEstadoCuenta = async ({ clave, negocioId, negocioNombre, logoNeg
   });
 };
 
-module.exports = { generarPdfEstadoCuenta, TIPO_LABEL };
+// ─── Documentos por crédito: aviso de mora y paz y salvo ─────────────────────
+//
+// Los dos salen del MISMO resumen que imprime la factura y muestra la pantalla
+// (creditos.service.getDocumento), así que las cifras no pueden divergir.
+
+const _configNegocio = async (negocioId) => {
+  const { rows } = await pool.query(
+    `SELECT clave, valor FROM config_negocio WHERE negocio_id = $1`, [negocioId]);
+  const config = {};
+  for (const row of rows) config[row.clave] = row.valor;
+  return config;
+};
+
+const generarPdfAvisoMora = async ({ creditoId, negocioId }) => {
+  const { persona, resumen, descripcion } = await service.getDocumento(negocioId, creditoId);
+
+  if (!resumen.vencido) {
+    throw { status: 400, message: 'Esta factura no está vencida: no procede un aviso de mora' };
+  }
+
+  const config = await _configNegocio(negocioId);
+  return generarAvisoMora({ config, persona, resumen, descripcion });
+};
+
+const generarPdfPazYSalvo = async ({ creditoId, negocioId }) => {
+  const { persona, resumen, descripcion } = await service.getDocumento(negocioId, creditoId);
+
+  if (!resumen.pagada) {
+    throw { status: 400, message: 'La factura aún tiene saldo pendiente: no se puede expedir paz y salvo' };
+  }
+
+  const config = await _configNegocio(negocioId);
+  return generarPazYSalvo({ config, persona, resumen, descripcion });
+};
+
+module.exports = {
+  generarPdfEstadoCuenta, generarPdfAvisoMora, generarPdfPazYSalvo, TIPO_LABEL,
+};

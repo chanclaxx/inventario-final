@@ -4,6 +4,15 @@ const PDFDocument = require('pdfkit');
 const { pool }    = require('../../config/db');
 const repo        = require('./prestamos.repository');
 
+// Núcleo compartido con los créditos: mismo cálculo del estado de la deuda y
+// mismos bloques de dibujo, para que préstamo y crédito produzcan documentos
+// idénticos en estructura y en cifras.
+const { resumirObligacion } = require('../../utils/obligacion');
+const {
+  bloqueEstadoObligacion, bloqueFechas, tablaAbonos, bloqueCondiciones,
+  generarAvisoMora, generarPazYSalvo,
+} = require('../../utils/obligacion.pdf');
+
 // ─── Helpers de formato ───────────────────────────────────────────────────────
 
 const formatCOP = (valor) =>
@@ -478,178 +487,13 @@ const _tablaDatosProducto = (doc, prestamo, y) => {
 
 // ── Historial de abonos ───────────────────────────────────────────────────────
 
-const _tablaAbonos = (doc, abonos, y) => {
-
-  y = labelSeccion(doc, y, 'Historial de abonos');
-
-  const altTotal = 22 + (abonos.length === 0 ? 18 : abonos.length * 16);
-  rectFillStroke(doc, MARGIN, y, COL_WIDTH, altTotal, C.blanco, C.grisBorde, 8);
-
-  // Encabezado
-  rectFill(doc, MARGIN, y, COL_WIDTH, 22, C.negro, 8);
-  doc.rect(MARGIN, y + 12, COL_WIDTH, 10).fill(C.negro);
-
-  const COL_F = COL_WIDTH * 0.32;
-  const COL_M = COL_WIDTH * 0.32;
-  const COL_V = COL_WIDTH - COL_F - COL_M;
-
-  doc.font(FONT.bold).fontSize(7.5).fillColor(C.blanco)
-    .text('Fecha',  MARGIN + 14,          y + 7, { width: COL_F,  characterSpacing: 0.5 })
-    .text('Método', MARGIN + COL_F + 4,   y + 7, { width: COL_M,  characterSpacing: 0.5 })
-    .text('Valor',  MARGIN + COL_F + COL_M, y + 7, { width: COL_V - 14, align: 'right', characterSpacing: 0.5 });
-
-  let yFila = y + 22;
-
-  if (abonos.length === 0) {
-    doc.font(FONT.normal).fontSize(8).fillColor(C.grisClaro)
-      .text('Sin abonos registrados', MARGIN + 14, yFila + 4, { width: COL_WIDTH - 28 });
-  } else {
-    abonos.forEach((abono, i) => {
-      if (i > 0) hLine(doc, yFila, { color: C.grisBorde, width: 0.4 });
-      if (i % 2 === 1) doc.rect(MARGIN, yFila, COL_WIDTH, 16).fill('#F8FAFC');
-
-      doc.font(FONT.normal).fontSize(8).fillColor(C.grisOscuro)
-        .text(formatFecha(abono.fecha),    MARGIN + 14,          yFila + 4, { width: COL_F,  lineBreak: false })
-        .text(abono.metodo || 'Efectivo',  MARGIN + COL_F + 4,   yFila + 4, { width: COL_M,  lineBreak: false });
-      doc.font(FONT.bold).fontSize(8).fillColor(C.verde)
-        .text(formatCOP(abono.valor), MARGIN + COL_F + COL_M, yFila + 4, {
-          width: COL_V - 14, align: 'right', lineBreak: false,
-        });
-      yFila += 16;
-    });
-  }
-
-  return y + altTotal + 12;
-};
-
-// ── Bloque de totales ─────────────────────────────────────────────────────────
-
-// ─── Condiciones de pago y firma (solo si hay plazo pactado) ─────────────────
+// ── Estado de la obligación, abonos y condiciones ────────────────────────────
 //
-// La mora solo es exigible si se pactó por escrito, así que cuando el préstamo
-// tiene fecha límite el comprobante imprime el plazo, el interés y una línea de
-// firma con la identificación de quien recibe. Un préstamo sin plazo (lo normal
-// hasta ahora, y siempre para los compañeros) no muestra nada de esto.
-const _bloqueCondicionesCredito = (doc, prestamo, mora, y) => {
-  if (!prestamo?.fecha_limite) return y;
+// Estos tres bloques son EXACTAMENTE los mismos que imprime la factura a
+// crédito (utils/obligacion.pdf.js). El comprobante de préstamo dejó de tener
+// su propia tabla de abonos y su propio cálculo de saldo: ahora un préstamo y
+// un crédito se ven y se calculan igual.
 
-  const cond  = prestamo.mora_condicion || null;
-  const saldo = Number(prestamo.valor_prestamo) - Number(prestamo.total_abonado || 0);
-  const fechaEs = (() => {
-    const f = String(prestamo.fecha_limite).slice(0, 10);
-    const [a, m, d] = f.split('-');
-    return `${d}/${m}/${a}`;
-  })();
-
-  y = labelSeccion(doc, y, 'Condiciones de pago');
-
-  const filas = [
-    { label: 'Saldo a pagar',        val: formatCOP(Math.max(0, saldo)) },
-    { label: 'Fecha límite de pago', val: fechaEs },
-  ];
-  if (cond) {
-    filas.push({
-      label: 'Interés por mora',
-      val: cond.tipo === 'diaria_fija'
-        ? `${formatCOP(cond.valor)} por día de atraso`
-        : `${cond.valor}% mensual sobre el saldo`,
-    });
-    if (Number(cond.dias_gracia) > 0) {
-      filas.push({ label: 'Días de gracia', val: `${cond.dias_gracia} día(s)` });
-    }
-  }
-  if (mora?.vencido && mora.pendiente > 0) {
-    filas.push({ label: 'Días de atraso',  val: String(mora.dias_vencidos) });
-    filas.push({ label: 'Mora a la fecha', val: formatCOP(mora.pendiente) });
-  }
-
-  const altBloque = 16 + filas.length * 16;
-  rectFillStroke(doc, MARGIN, y, COL_WIDTH, altBloque, C.grisFondo, C.grisBorde, 8);
-  let yFila = y + 8;
-  filas.forEach((f, i) => {
-    if (i > 0) hLine(doc, yFila - 3, { x1: MARGIN + 14, x2: PAGE_WIDTH - MARGIN - 14, color: C.grisBorde, width: 0.4 });
-    doc.font(FONT.normal).fontSize(8.5).fillColor(C.grisOscuro)
-      .text(f.label, MARGIN + 14, yFila, { width: COL_WIDTH * 0.55, lineBreak: false });
-    doc.font(FONT.bold).fontSize(8.5).fillColor(C.negro)
-      .text(f.val, MARGIN, yFila, { width: COL_WIDTH - 14, align: 'right', lineBreak: false });
-    yFila += 16;
-  });
-  y += altBloque + 8;
-
-  doc.font(FONT.normal).fontSize(7.5).fillColor(C.grisClaro)
-    .text(
-      cond
-        ? 'Declaro conocer y aceptar el plazo y el interés de mora aquí pactados. La mora se '
-          + 'liquida sobre el saldo pendiente, por los días de atraso.'
-        : 'Declaro conocer y aceptar el plazo de pago aquí pactado.',
-      MARGIN + 2, y, { width: COL_WIDTH - 4 },
-    );
-  y += 26;
-
-  // Línea de firma con identificación
-  const fx1 = MARGIN + 40;
-  const fx2 = MARGIN + 240;
-  doc.moveTo(fx1, y).lineTo(fx2, y).strokeColor(C.grisBorde).lineWidth(0.75).stroke();
-  doc.font(FONT.bold).fontSize(8).fillColor(C.negro)
-    .text('Firma de quien recibe', fx1, y + 5, { width: fx2 - fx1, align: 'center' });
-  const ident = [
-    prestamo.cliente_nombre || prestamo.prestatario,
-    (prestamo.cliente_cedula || prestamo.cedula) && prestamo.cedula !== 'COMPANERO'
-      ? `C.C. ${prestamo.cliente_cedula || prestamo.cedula}` : null,
-  ].filter(Boolean).join('  ·  ');
-  if (ident) {
-    doc.font(FONT.normal).fontSize(7.5).fillColor(C.grisClaro)
-      .text(ident, fx1, y + 17, { width: fx2 - fx1, align: 'center' });
-  }
-
-  return y + 34;
-};
-
-const _bloqueTotales = (doc, prestamo, y) => {
-  const saldo      = Number(prestamo.valor_prestamo) - Number(prestamo.total_abonado);
-  const esSaldado  = saldo <= 0;
-
-  // Bloque total destacado (igual al de facturas)
-  const colorTotalBg  = esSaldado ? C.verdeFondo : C.negro;
-  const colorTotalTxt = esSaldado ? C.verde      : C.blanco;
-
-  rectFill(doc, MARGIN, y, COL_WIDTH, 36, colorTotalBg, 8);
-  doc.font(FONT.bold).fontSize(10).fillColor(colorTotalTxt)
-    .text(esSaldado ? 'PRÉSTAMO SALDADO' : 'SALDO PENDIENTE', MARGIN + 16, y + 11, {
-      width: COL_WIDTH * 0.5, lineBreak: false,
-    });
-  doc.font(FONT.bold).fontSize(14).fillColor(colorTotalTxt)
-    .text(formatCOP(Math.abs(saldo)), MARGIN, y + 9, {
-      width: COL_WIDTH - 16, align: 'right', lineBreak: false,
-    });
-
-  y += 36 + 10;
-
-  // Desglose
-  y = labelSeccion(doc, y, 'Resumen');
-
-  const altBloque = 18 + 3 * 16;
-  rectFillStroke(doc, MARGIN, y, COL_WIDTH, altBloque, C.grisFondo, C.grisBorde, 8);
-
-  let yFila = y + 8;
-
-  const filas = [
-    { label: 'Valor del préstamo', val: formatCOP(prestamo.valor_prestamo), color: C.negro },
-    { label: 'Total abonado',      val: formatCOP(prestamo.total_abonado),  color: C.verde },
-    { label: 'Saldo pendiente',    val: formatCOP(saldo),                   color: esSaldado ? C.verde : C.rojo },
-  ];
-
-  filas.forEach((f, i) => {
-    if (i > 0) hLine(doc, yFila - 3, { x1: MARGIN + 14, x2: PAGE_WIDTH - MARGIN - 14, color: C.grisBorde, width: 0.4 });
-    doc.font(FONT.normal).fontSize(8.5).fillColor(C.grisOscuro)
-      .text(f.label, MARGIN + 14, yFila, { width: COL_WIDTH * 0.5, lineBreak: false });
-    doc.font(FONT.bold).fontSize(8.5).fillColor(f.color)
-      .text(f.val, MARGIN, yFila, { width: COL_WIDTH - 14, align: 'right', lineBreak: false });
-    yFila += 16;
-  });
-
-  return y + altBloque + 12;
-};
 
 // ── Bloque de garantías del producto ─────────────────────────────────────────
 
@@ -764,9 +608,12 @@ const generarPdfPrestamoIndividual = async ({ prestamoId, negocioId, negocioNomb
   let y = _encabezadoIndividual(doc, { negocioNombre, prestamo: datos, fechaGeneracion, logoNegocio });
   y     = _bloquePrestatario(doc, datos, y);
   y     = _tablaDatosProducto(doc, datos, y);
-  y     = _tablaAbonos(doc, abonos, y);
-  y     = _bloqueTotales(doc, datos, y);
-  y     = _bloqueCondicionesCredito(doc, datos, mora, y);
+  // Mismos bloques que la factura a crédito, alimentados por el mismo resumen.
+  const resumen = resumirObligacion({ tipo: 'prestamo', documento: datos, abonos, mora });
+  y     = bloqueEstadoObligacion(doc, resumen, y, { titulo: 'Estado del préstamo' });
+  y     = bloqueFechas(doc, resumen, y);
+  y     = tablaAbonos(doc, resumen, y);
+  y     = bloqueCondiciones(doc, resumen, y);
   y     = _bloqueGarantias(doc, garantias, y);
 
   const totalPages = doc.bufferedPageRange().count;
@@ -839,5 +686,88 @@ const generarPdfEstadoCuenta = async ({ tipo, personaId, negocioId, negocioNombr
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// SECCIÓN 4: Aviso de mora y paz y salvo — idénticos a los de créditos
+// ─────────────────────────────────────────────────────────────────────────────
 
-module.exports = { generarPdfPrestamosActivos, generarPdfPrestamoIndividual, generarPdfEstadoCuenta };
+/** Carga el préstamo con su persona, abonos y mora, y arma el resumen. */
+const _documentoPrestamo = async (prestamoId, negocioId) => {
+  const prestamo = await repo.findByIdYNegocio(prestamoId, negocioId);
+  if (!prestamo) {
+    const err = new Error('Préstamo no encontrado');
+    err.status = 404;
+    throw err;
+  }
+
+  const { rows } = await pool.query(`
+    SELECT p.*,
+           COALESCE(pr.nombre, c.nombre, p.prestatario) AS persona_nombre,
+           COALESCE(c.cedula,  p.cedula)                AS persona_cedula,
+           COALESCE(c.celular, p.telefono)              AS persona_celular
+    FROM prestamos p
+    LEFT JOIN prestatarios pr ON pr.id = p.prestatario_id
+    LEFT JOIN clientes     c  ON c.id  = p.cliente_id
+    WHERE p.id = $1
+  `, [prestamoId]);
+  const datos = rows[0];
+
+  const abonos = await repo.getAbonos(prestamoId);
+
+  let mora = null;
+  if (datos.fecha_limite) {
+    try {
+      const moraService = require('../mora/mora.service');
+      ({ mora } = await moraService.estadoDe('prestamo', prestamoId, negocioId));
+    } catch (err) {
+      console.warn('[pdf-prestamo] Mora no incluida:', err.message);
+    }
+  }
+
+  const { rows: configRows } = await pool.query(
+    `SELECT clave, valor FROM config_negocio WHERE negocio_id = $1`, [negocioId]);
+  const config = {};
+  for (const row of configRows) config[row.clave] = row.valor;
+
+  const descripcion = [
+    datos.nombre_producto,
+    datos.imei ? `IMEI ${datos.imei}` : null,
+    (!datos.imei && Number(datos.cantidad_prestada) > 1) ? `${datos.cantidad_prestada} unidades` : null,
+  ].filter(Boolean).join(' · ');
+
+  return {
+    config,
+    persona: {
+      nombre:  datos.persona_nombre,
+      cedula:  datos.persona_cedula !== 'COMPANERO' ? datos.persona_cedula : null,
+      celular: datos.persona_celular !== '0000000000' ? datos.persona_celular : null,
+    },
+    resumen: resumirObligacion({ tipo: 'prestamo', documento: datos, abonos, mora }),
+    descripcion: descripcion || null,
+  };
+};
+
+const generarPdfAvisoMoraPrestamo = async ({ prestamoId, negocioId }) => {
+  const { config, persona, resumen, descripcion } = await _documentoPrestamo(prestamoId, negocioId);
+  if (!resumen.vencido) {
+    const err = new Error('Este préstamo no está vencido: no procede un aviso de mora');
+    err.status = 400;
+    throw err;
+  }
+  return generarAvisoMora({ config, persona, resumen, descripcion });
+};
+
+const generarPdfPazYSalvoPrestamo = async ({ prestamoId, negocioId }) => {
+  const { config, persona, resumen, descripcion } = await _documentoPrestamo(prestamoId, negocioId);
+  if (!resumen.pagada) {
+    const err = new Error('El préstamo aún tiene saldo pendiente: no se puede expedir paz y salvo');
+    err.status = 400;
+    throw err;
+  }
+  return generarPazYSalvo({ config, persona, resumen, descripcion });
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+module.exports = {
+  generarPdfPrestamosActivos, generarPdfPrestamoIndividual, generarPdfEstadoCuenta,
+  generarPdfAvisoMoraPrestamo, generarPdfPazYSalvoPrestamo, _documentoPrestamo,
+};

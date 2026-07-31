@@ -7,67 +7,24 @@
 
 const PDFDocument = require('pdfkit');
 
-// ─── Paleta de colores ────────────────────────────────────────────────────────
+// Base gráfica compartida por TODOS los documentos (paleta, tipografía, medidas
+// y primitivas de dibujo). Antes estaba copiada aquí, en prestamos.pdf.service y
+// en estadoCuenta.pdf: ahora un cambio de línea gráfica se aplica a los cinco.
+const {
+  PAGE_W, PAGE_H, MARGIN, CONTENT_W, FONT, C,
+  formatCOP, formatFechaHora,
+  rectFill, rectFillStroke, hLine,
+  labelSeccion, fila, textoUnaLinea, dibujarLogo,
+  badgeEstado, asegurarEspacio,
+} = require('../../utils/pdf.base');
 
-const C = {
-  // Encabezado
-  headerBg:     '#111827',  // gris muy oscuro casi negro
-  headerText:   '#FFFFFF',
-  headerSub:    '#9CA3AF',
+// Bloques de obligación (estado, fechas, abonos, condiciones), compartidos con
+// el comprobante de préstamo, el aviso de mora y el paz y salvo.
+const {
+  bloqueEstadoObligacion, bloqueFechas, tablaAbonos, bloqueCondiciones,
+} = require('../../utils/obligacion.pdf');
 
-  // Cuerpo
-  negro:        '#111827',
-  grisOscuro:   '#374151',
-  gris:         '#6B7280',
-  grisClaro:    '#9CA3AF',
-  grisFondo:    '#F9FAFB',
-  grisBorde:    '#E5E7EB',
-  blanco:       '#FFFFFF',
-
-  // Acentos
-  acento:       '#111827',  // mismo que header para consistencia
-  acentoLine:   '#D1D5DB',
-
-  // Estados
-  verde:        '#059669',
-  verdeFondo:   '#ECFDF5',
-  rojo:         '#DC2626',
-  rojoFondo:    '#FEF2F2',
-  naranja:      '#D97706',
-  naranjaFondo: '#FFFBEB',
-  morado:       '#7C3AED',
-  moradoFondo:  '#F5F3FF',
-};
-
-const FONT = {
-  normal: 'Helvetica',
-  bold:   'Helvetica-Bold',
-};
-
-// Medidas A4
-const PAGE_W    = 595.28;
-const PAGE_H    = 841.89;
-const MARGIN    = 52;
-const CONTENT_W = PAGE_W - MARGIN * 2;
-
-// ─── Formato COP ──────────────────────────────────────────────────────────────
-
-function formatCOP(valor) {
-  return new Intl.NumberFormat('es-CO', {
-    style:                 'currency',
-    currency:              'COP',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(Number(valor || 0));
-}
-
-function formatFechaHora(fecha) {
-  if (!fecha) return '';
-  return new Date(fecha).toLocaleString('es-CO', {
-    year:   'numeric', month:  '2-digit', day:    '2-digit',
-    hour:   '2-digit', minute: '2-digit', hour12: false,
-  });
-}
+// ─── Helpers propios de la factura ────────────────────────────────────────────
 
 function labelTipoRetoma(retoma) {
   return retoma.imei ? 'Equipo con serial / IMEI' : 'Producto por cantidad';
@@ -77,136 +34,27 @@ function calcularValorRetoma(retoma) {
   return Number(retoma?.valor_retoma || 0);
 }
 
-// ─── Helpers de dibujo ────────────────────────────────────────────────────────
-
-/**
- * Rectángulo redondeado relleno.
- */
-function rectFill(doc, x, y, w, h, color, radius = 6) {
-  doc.roundedRect(x, y, w, h, radius).fill(color);
-}
-
-/**
- * Rectángulo redondeado con borde (sin relleno).
- */
-function rectStroke(doc, x, y, w, h, color, radius = 6, lineWidth = 0.75) {
-  doc.roundedRect(x, y, w, h, radius)
-    .strokeColor(color).lineWidth(lineWidth).stroke();
-}
-
-/**
- * Rectángulo redondeado relleno + borde.
- */
-function rectFillStroke(doc, x, y, w, h, fillColor, strokeColor, radius = 6, lineWidth = 0.75) {
-  doc.roundedRect(x, y, w, h, radius)
-    .fillAndStroke(fillColor, strokeColor);
-  doc.lineWidth(lineWidth);
-}
-
-/**
- * Línea horizontal.
- */
-function hLine(doc, y, { x1 = MARGIN, x2 = PAGE_W - MARGIN, color = C.grisBorde, width = 0.5 } = {}) {
-  doc.moveTo(x1, y).lineTo(x2, y)
-    .strokeColor(color).lineWidth(width).stroke();
-}
-
-/**
- * Fila de dos columnas dentro de un bloque.
- * Retorna el nuevo y.
- */
-function fila(doc, y, label, valor, {
-  labelColor  = C.gris,
-  valorColor  = C.negro,
-  labelFont   = FONT.normal,
-  valorFont   = FONT.normal,
-  labelSize   = 8.5,
-  valorSize   = 8.5,
-  x           = MARGIN,
-  w           = CONTENT_W,
-  paddingLeft = 0,
-} = {}) {
-  const xL = x + paddingLeft;
-  const wL = w * 0.52;
-  const xR = x + w * 0.52;
-  const wR = w * 0.48;
-
-  doc.font(labelFont).fontSize(labelSize).fillColor(labelColor)
-    .text(label, xL, y, { width: wL, lineBreak: false });
-
-  doc.font(valorFont).fontSize(valorSize).fillColor(valorColor)
-    .text(valor, xR, y, { width: wR, align: 'right', lineBreak: false });
-
-  return y + 16;
-}
-
-/**
- * Etiqueta de sección pequeña (CLIENTE, PRODUCTOS, etc.)
- */
-function labelSeccion(doc, y, texto) {
-  doc.font(FONT.bold).fontSize(7).fillColor(C.grisClaro)
-    .text(texto.toUpperCase(), MARGIN, y, {
-      characterSpacing: 1.2,
-      width: CONTENT_W,
-    });
-  return y + 14;
-}
-
-// ─── Helper: logo en cabecera ─────────────────────────────────────────────────
-
 function dibujarLogoHeader(doc, config, headerH) {
-  const raw = config?.logo_negocio;
-  if (!raw) return 0;
-  try {
-    const base64 = raw.replace(/^data:image\/[a-z+]+;base64,/, '');
-    const buf = Buffer.from(base64, 'base64');
-    if (!buf.length) return 0;
-    const LOGO_MAX = 60;
-    const logoY = Math.round((headerH - LOGO_MAX) / 2);
-    doc.image(buf, MARGIN, logoY, { fit: [LOGO_MAX, LOGO_MAX], align: 'center', valign: 'center' });
-    return LOGO_MAX + 10;
-  } catch {
-    return 0;
-  }
+  return dibujarLogo(doc, config?.logo_negocio, headerH);
 }
 
-// ─── Helper: texto de una sola línea que se encoge hasta caber ────────────────
-
-/**
- * Escribe un texto en UNA sola línea, reduciendo el tamaño de fuente hasta que
- * su ancho real quepa en maxW. Si ni con el mínimo cabe, se recorta con "…".
- */
-function textoUnaLinea(doc, texto, x, y, maxW, {
-  max = 22, min = 10, font = FONT.bold, color = C.headerText,
-} = {}) {
-  doc.font(font);
-  let size = max;
-  while (size > min && doc.fontSize(size).widthOfString(texto) > maxW) {
-    size -= 0.5;
-  }
-  doc.fontSize(size);
-
-  // Si ni en el tamaño mínimo cabe, recortar para no invadir la otra columna.
-  let salida = texto;
-  if (doc.widthOfString(salida) > maxW) {
-    while (salida.length > 1 && doc.widthOfString(`${salida.trimEnd()}…`) > maxW) {
-      salida = salida.slice(0, -1);
-    }
-    salida = `${salida.trimEnd()}…`;
-  }
-
-  doc.fillColor(color).text(salida, x, y, { width: maxW, lineBreak: false });
-  return size;
-}
 
 // ─── SECCIÓN: Encabezado ──────────────────────────────────────────────────────
 
-function seccionEncabezado(doc, config, factura) {
+function seccionEncabezado(doc, config, factura, resumen = null) {
   const HEADER_H = 110;
+
+  // La franja y el título cambian según sea contado o crédito: se reconoce el
+  // tipo de documento de un vistazo.
+  const esCredito = !!resumen;
+  const franja = !esCredito ? C.verde
+    : resumen.pagada  ? C.verde
+    : resumen.vencido ? C.rojo
+    : C.naranja;
 
   // ── Fondo del encabezado ──────────────────────────────────────────────────
   rectFill(doc, 0, 0, PAGE_W, HEADER_H, C.headerBg, 0);
-  doc.rect(0, HEADER_H - 3, PAGE_W, 3).fill(C.verde);
+  doc.rect(0, HEADER_H - 3, PAGE_W, 3).fill(franja);
 
   // ── Logo (se dibuja encima del fondo) ─────────────────────────────────────
   const logoOffset = dibujarLogoHeader(doc, config, HEADER_H);
@@ -241,24 +89,33 @@ function seccionEncabezado(doc, config, factura) {
     .text(numFactura, rightX, 22, { width: rightW, align: 'right' });
 
   doc.font(FONT.normal).fontSize(8).fillColor(C.headerSub)
-    .text('FACTURA DE VENTA', rightX, 54, { width: rightW, align: 'right' });
+    .text(esCredito ? 'FACTURA DE VENTA A CRÉDITO' : 'FACTURA DE VENTA',
+      rightX, 54, { width: rightW, align: 'right' });
 
   doc.font(FONT.normal).fontSize(8).fillColor(C.headerSub)
     .text(formatFechaHora(factura.fecha), rightX, 66, { width: rightW, align: 'right' });
 
-  // Badge de estado
-  const estadoConfig = {
-    Activa:   { bg: C.verde,   texto: 'ACTIVA'    },
-    Credito:  { bg: C.naranja, texto: 'CRÉDITO'   },
-    Cancelada:{ bg: C.rojo,    texto: 'CANCELADA' },
-  };
-  const est = estadoConfig[factura.estado] || { bg: C.gris, texto: factura.estado?.toUpperCase() };
-
-  const badgeW = 68;
-  const badgeX = PAGE_W - MARGIN - badgeW;
-  rectFill(doc, badgeX, 79, badgeW, 18, est.bg, 4);
-  doc.font(FONT.bold).fontSize(7.5).fillColor(C.blanco)
-    .text(est.texto, badgeX, 84, { width: badgeW, align: 'center', characterSpacing: 0.8 });
+  // Badge de estado. En una venta a crédito lo que importa no es que la factura
+  // esté "Activa", sino en qué va la deuda: pendiente, abonada, pagada o vencida.
+  if (esCredito) {
+    badgeEstado(doc, resumen.estado_label, resumen.estado_tono,
+      PAGE_W - MARGIN - 92, 78, { w: 92, h: 19 });
+  } else {
+    // `Credito` sigue aquí para el caso degradado en que la venta es a crédito
+    // pero no se pudo resolver su resumen (p. ej. sin la migración de mora):
+    // el PDF sale como antes en vez de perder el color del badge.
+    const estadoConfig = {
+      Activa:    { bg: C.verde,   texto: 'ACTIVA'    },
+      Credito:   { bg: C.naranja, texto: 'CRÉDITO'   },
+      Cancelada: { bg: C.rojo,    texto: 'CANCELADA' },
+    };
+    const est = estadoConfig[factura.estado] || { bg: C.gris, texto: factura.estado?.toUpperCase() };
+    const badgeW = 68;
+    const badgeX = PAGE_W - MARGIN - badgeW;
+    rectFill(doc, badgeX, 79, badgeW, 18, est.bg, 4);
+    doc.font(FONT.bold).fontSize(7.5).fillColor(C.blanco)
+      .text(est.texto, badgeX, 84, { width: badgeW, align: 'center', characterSpacing: 0.8 });
+  }
 
   return HEADER_H + 28;
 }
@@ -638,64 +495,28 @@ function seccionGarantias(doc, garantias, y) {
   return y + 14;
 }
 
-// ─── SECCIÓN: Condiciones del crédito (plazo y mora) ──────────────────────────
+// ─── SECCIÓN: Estado de la obligación a crédito ───────────────────────────────
 //
-// Solo aparece si la venta es a crédito Y se le pactó una fecha límite. Es lo
-// que hace exigible la mora: en Colombia el interés moratorio debe estar pactado
-// por escrito, así que se imprime junto a la firma del cliente.
+// Todo lo que el cliente necesita para entender su deuda sin entrar al sistema:
+// estado, valor financiado, saldo, plazo, mora e historial de abonos con el
+// saldo que quedó después de cada uno.
+//
+// Los bloques y las cifras salen de utils/obligacion*.js, los mismos que usan el
+// ticket POS, el aviso de mora y el paz y salvo: no hay forma de que un
+// documento diga una cosa y otro diga otra.
 function seccionCredito(doc, credito, y) {
-  if (!credito?.fecha_limite) return y;
+  const resumen = credito?.resumen;
+  if (!resumen) return y;
 
-  const cond    = credito.mora_condicion || null;
-  const mora    = credito.mora || null;
-  const saldo   = Number(credito.valor_total) - Number(credito.cuota_inicial || 0) - Number(credito.total_abonado || 0);
-  const fechaEs = (() => {
-    const f = String(credito.fecha_limite).slice(0, 10);
-    const [a, m, d] = f.split('-');
-    return `${d}/${m}/${a}`;
-  })();
+  // Salto de página si el bloque no cabe: es información que no se puede partir.
+  y = asegurarEspacio(doc, y, 200);
 
-  y = labelSeccion(doc, y, 'CONDICIONES DE PAGO');
+  y = bloqueEstadoObligacion(doc, resumen, y, { titulo: 'Estado del crédito' });
+  y = bloqueFechas(doc, resumen, y);
+  y = tablaAbonos(doc, resumen, y);
+  y = bloqueCondiciones(doc, resumen, y);
 
-  const filas = [
-    ['Saldo a pagar',        formatCOP(Math.max(0, saldo))],
-    ['Fecha límite de pago', fechaEs],
-  ];
-
-  if (cond) {
-    const desc = cond.tipo === 'diaria_fija'
-      ? `${formatCOP(cond.valor)} por cada día de atraso`
-      : `${cond.valor}% mensual sobre el saldo pendiente`;
-    filas.push(['Interés por mora', desc]);
-    if (Number(cond.dias_gracia) > 0) {
-      filas.push(['Días de gracia', `${cond.dias_gracia} día(s) después de la fecha límite`]);
-    }
-    if (cond.tope_pct) {
-      filas.push(['Tope de la mora', `máximo ${cond.tope_pct}% del saldo`]);
-    }
-  }
-
-  // Si YA está vencido, se dice con números: es el dato que el cliente reclama.
-  if (mora?.vencido && mora.pendiente > 0) {
-    filas.push(['Días de atraso a la fecha', String(mora.dias_vencidos)]);
-    filas.push(['Mora causada a la fecha',   formatCOP(mora.pendiente)]);
-  }
-
-  for (const [label, valor] of filas) {
-    y = fila(doc, y, label, valor);
-  }
-
-  y += 6;
-  doc.font(FONT.normal).fontSize(7.5).fillColor(C.grisClaro)
-    .text(
-      cond
-        ? 'El cliente declara conocer y aceptar el plazo y el interés de mora aquí pactados. '
-          + 'La mora se liquida sobre el saldo de capital pendiente, por los días de atraso.'
-        : 'El cliente declara conocer y aceptar el plazo de pago aquí pactado.',
-      MARGIN, y, { width: CONTENT_W, align: 'left' },
-    );
-
-  return y + 22;
+  return y;
 }
 
 // ─── SECCIÓN: Pie de página ───────────────────────────────────────────────────
@@ -769,9 +590,11 @@ function generarPdfFactura({ factura, config, garantias = [], credito = null, re
 
   doc.pipe(res);
 
+  const resumen = credito?.resumen || null;
+
   let y = 0;
 
-  y = seccionEncabezado(doc, config, factura);
+  y = seccionEncabezado(doc, config, factura, resumen);
   y = seccionCliente(doc, factura, y);
   y = seccionProductos(doc, factura.lineas || [], y);
   y = seccionDevoluciones(doc, factura.lineas || [], y);
@@ -780,7 +603,9 @@ function generarPdfFactura({ factura, config, garantias = [], credito = null, re
   y = seccionCredito(doc, credito, y);
   y = seccionNotas(doc, factura.notas, y);
   y = seccionGarantias(doc, garantias, y);
-  seccionPie(doc, y, { esCredito: !!credito?.fecha_limite, factura });
+  // En una venta a crédito la firma es la prueba del pacto, así que se pide
+  // siempre que haya crédito, no solo cuando además se pactó una fecha límite.
+  seccionPie(doc, y, { esCredito: !!resumen, factura });
 
   doc.end();
 }

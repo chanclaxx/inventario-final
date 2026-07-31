@@ -95,6 +95,44 @@ const exportarPdfEstadoCuenta = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+// ── Documentos por crédito ───────────────────────────────────────────────────
+
+/** Datos para imprimir en POS: el MISMO resumen que usa el PDF. */
+const getDocumento = async (req, res, next) => {
+  try {
+    const data = await service.getDocumento(req.user.negocio_id, Number(req.params.id));
+    res.json({ ok: true, data });
+  } catch (err) { next(err); }
+};
+
+const _enviarPdf = (res, pdfStream, filename) => {
+  res.setHeader('Content-Type',        'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  pdfStream.pipe(res);
+};
+
+const exportarPdfAvisoMora = async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const pdfStream = await pdfService.generarPdfAvisoMora({
+      creditoId: id, negocioId: req.user.negocio_id,
+    });
+    audit.registrar(req.user.negocio_id, req.user.id, 'Aviso de mora emitido', 'creditos', id, {});
+    _enviarPdf(res, pdfStream, `aviso-mora-${id}.pdf`);
+  } catch (err) { next(err); }
+};
+
+const exportarPdfPazYSalvo = async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const pdfStream = await pdfService.generarPdfPazYSalvo({
+      creditoId: id, negocioId: req.user.negocio_id,
+    });
+    audit.registrar(req.user.negocio_id, req.user.id, 'Paz y salvo emitido', 'creditos', id, {});
+    _enviarPdf(res, pdfStream, `paz-y-salvo-${id}.pdf`);
+  } catch (err) { next(err); }
+};
+
 // ── Mora ─────────────────────────────────────────────────────────────────────
 
 const fijarPlazo = async (req, res, next) => {
@@ -143,5 +181,6 @@ const cobrarMora = async (req, res, next) => {
 module.exports = {
   getCreditos, getCreditoById, registrarAbono, saldarCredito, cancelarCredito,
   getEstadoCuenta, exportarPdfEstadoCuenta,
+  getDocumento, exportarPdfAvisoMora, exportarPdfPazYSalvo,
   fijarPlazo, condonarMora, cobrarMora,
 };

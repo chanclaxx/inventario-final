@@ -13,12 +13,13 @@ const getCreditos = async (sucursalId, negocioId) => {
 };
 
 // ── Detalle con abonos ───────────────────────────────────────────────────────
+//
+// Incluye `resumen` y `persona` para que la impresión POS (que se arma en el
+// navegador) use exactamente las mismas cifras que el PDF, sin recalcular nada.
 const getCreditoById = async (negocioId, id) => {
-  const credito = await repo.findByIdYNegocio(id, negocioId);
-  if (!credito) throw { status: 404, message: 'Crédito no encontrado' };
-  const abonos = await repo.getAbonos(id);
-  const conMora = await moraService.anotarDocumento(credito, 'credito');
-  return { ...conMora, abonos };
+  const { credito, abonos, resumen, persona, lineas, descripcion } =
+    await getDocumento(negocioId, id).then((d) => ({ ...d, abonos: d.resumen.abonos }));
+  return { ...credito, abonos, resumen, persona, lineas, descripcion };
 };
 
 // ── Registrar abono ──────────────────────────────────────────────────────────
@@ -167,6 +168,55 @@ const cancelarCredito = async (negocioId, creditoId) => {
   }
 };
 
+// ── Documento de un crédito (factura, aviso de mora, paz y salvo) ────────────
+//
+// Devuelve el RESUMEN de la obligación calculado por utils/obligacion.js. Es la
+// única fuente de verdad para los tres documentos y para el ticket POS: ninguno
+// vuelve a deducir un saldo, un estado ni el saldo que quedó tras cada abono.
+const getDocumento = async (negocioId, creditoId) => {
+  const credito = await repo.findByIdYNegocio(creditoId, negocioId);
+  if (!credito) throw { status: 404, message: 'Crédito no encontrado' };
+
+  const conMora = await moraService.anotarDocumento(credito, 'credito');
+  const abonos  = await repo.getAbonos(creditoId);
+
+  // Productos y devoluciones de la factura: describen la obligación y permiten
+  // reconstruir su valor original.
+  const { rows: lineas } = await pool.query(`
+    SELECT nombre_producto, imei, cantidad, COALESCE(cantidad_devuelta, 0) AS cantidad_devuelta, precio
+    FROM lineas_factura WHERE factura_id = $1 ORDER BY id
+  `, [credito.factura_id]);
+
+  const devuelto = lineas.reduce(
+    (s, l) => s + Number(l.cantidad_devuelta || 0) * Number(l.precio), 0);
+
+  const { resumirObligacion } = require('../../utils/obligacion');
+  const resumen = resumirObligacion({
+    tipo: 'credito',
+    documento: conMora,
+    abonos,
+    mora: conMora.mora || null,
+    devuelto,
+  });
+
+  const descripcion = lineas
+    .filter((l) => Number(l.cantidad) - Number(l.cantidad_devuelta) > 0)
+    .map((l) => `${l.nombre_producto}${l.imei ? ` (IMEI ${l.imei})` : ''}`)
+    .join(', ');
+
+  return {
+    credito: conMora,
+    persona: {
+      nombre:  credito.nombre_cliente,
+      cedula:  credito.cedula,
+      celular: credito.celular,
+    },
+    resumen,
+    lineas,
+    descripcion: descripcion || null,
+  };
+};
+
 // ── Estado de cuenta del cliente ─────────────────────────────────────────────
 //
 // ÚNICA fuente de verdad del saldo acumulado: la usan la pantalla, el Excel y
@@ -263,6 +313,6 @@ const cobrarMora = async (negocioId, creditoId, { valor, metodo, usuario_id }) =
 
 module.exports = {
   getCreditos, getCreditoById, registrarAbono, saldarCredito, cancelarCredito,
-  getEstadoCuenta, getResumenCuenta,
+  getEstadoCuenta, getResumenCuenta, getDocumento,
   fijarPlazo, condonarMora, cobrarMora,
 };

@@ -77,6 +77,10 @@ router.post(   '/ajuste-deuda',                            requireModulo('presta
 router.get('/pdf/:tipo/:personaId',              requireModulo('prestamos'), ctrl.exportarPdfPorPersona);
 router.get('/pdf/:tipo/:personaId/estado-cuenta', requireModulo('prestamos'), ctrl.exportarPdfEstadoCuenta);
 router.get('/:id/pdf',                           requireModulo('prestamos'), ctrl.exportarPdfPrestamoIndividual);
+// Documentos de la obligación, iguales a los de facturas a crédito.
+router.get('/:id/documento',       requireModulo('prestamos'), ctrl.getDocumentoPrestamo);
+router.get('/:id/pdf/aviso-mora',  requireModulo('prestamos'), ctrl.exportarPdfAvisoMoraPrestamo);
+router.get('/:id/pdf/paz-y-salvo', requireModulo('prestamos'), ctrl.exportarPdfPazYSalvoPrestamo);
 
 // Rutas con :id dinámico — AL FINAL
 router.patch( '/:id/valor',            requireModulo('prestamos'),

@@ -439,6 +439,43 @@ const anularRetomaDirecta = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+// ── Documentos de la obligación (mismos que en facturas a crédito) ───────────
+
+const getDocumentoPrestamo = async (req, res, next) => {
+  try {
+    const data = await pdfService._documentoPrestamo(Number(req.params.id), req.user.negocio_id);
+    // La config del negocio no viaja aquí: la impresión POS ya la tiene cargada.
+    const { config, ...resto } = data;
+    res.json({ ok: true, data: resto });
+  } catch (err) { next(err); }
+};
+
+const _enviarPdf = (res, pdfStream, filename) => {
+  res.setHeader('Content-Type',        'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  pdfStream.pipe(res);
+};
+
+const exportarPdfAvisoMoraPrestamo = async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const pdfStream = await pdfService.generarPdfAvisoMoraPrestamo({
+      prestamoId: id, negocioId: req.user.negocio_id,
+    });
+    _enviarPdf(res, pdfStream, `aviso-mora-prestamo-${id}.pdf`);
+  } catch (err) { next(err); }
+};
+
+const exportarPdfPazYSalvoPrestamo = async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const pdfStream = await pdfService.generarPdfPazYSalvoPrestamo({
+      prestamoId: id, negocioId: req.user.negocio_id,
+    });
+    _enviarPdf(res, pdfStream, `paz-y-salvo-prestamo-${id}.pdf`);
+  } catch (err) { next(err); }
+};
+
 const getEstadoCuenta = async (req, res, next) => {
   try {
     const { tipo, id } = req.params;
@@ -588,6 +625,7 @@ module.exports = {
   fijarPlazo, condonarMora, cobrarMora,
   devolverPrestamo, devolverParcial,
   exportarPdfPorPersona, exportarPdfPrestamoIndividual, exportarPdfEstadoCuenta,
+  getDocumentoPrestamo, exportarPdfAvisoMoraPrestamo, exportarPdfPazYSalvoPrestamo,
   registrarSaldoAFavor,
   intercambiarPrestamo,
   retomaDirecta, aplicarSaldoAPrestamos, aplicarSaldoAPrestamo, getResumenCartera,

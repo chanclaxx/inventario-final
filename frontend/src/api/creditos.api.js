@@ -24,6 +24,21 @@ export const getEstadoCuentaCredito = (clave) =>
 export const descargarPdfEstadoCuentaCredito = (clave) =>
   api.get('/creditos/estado-cuenta/pdf', { params: { clave }, responseType: 'blob' });
 
+// ── Documentos de la obligación ──────────────────────────────────────────────
+//
+// `getDocumentoCredito` trae el resumen que calcula el backend (estado, saldo,
+// historial con saldo corrido). Es el mismo que imprime el PDF, así que la
+// impresión POS no recalcula nada.
+
+export const getDocumentoCredito = (creditoId) =>
+  api.get(`/creditos/${creditoId}/documento`);
+
+export const descargarPdfAvisoMora = (creditoId) =>
+  api.get(`/creditos/${creditoId}/pdf/aviso-mora`, { responseType: 'blob' });
+
+export const descargarPdfPazYSalvo = (creditoId) =>
+  api.get(`/creditos/${creditoId}/pdf/paz-y-salvo`, { responseType: 'blob' });
+
 // ── Mora (feature opt-in) ────────────────────────────────────────────────────
 
 /** Fija, cambia o quita el plazo. `fecha_limite: null` lo quita (y con él la mora). */
