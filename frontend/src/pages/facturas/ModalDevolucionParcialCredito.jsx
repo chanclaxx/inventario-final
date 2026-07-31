@@ -181,6 +181,8 @@ export function ModalDevolucionParcialCredito({ credito, onClose }) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['creditos'],            exact: false });
       queryClient.invalidateQueries({ queryKey: ['credito-detalle'],     exact: false });
+      // La devolución rebaja la deuda: el estado de cuenta debe reflejarlo ya.
+      queryClient.invalidateQueries({ queryKey: ['estado-cuenta-credito'], exact: false });
       queryClient.invalidateQueries({ queryKey: ['facturas'],            exact: false });
       queryClient.invalidateQueries({ queryKey: ['productos-serial'],    exact: false });
       queryClient.invalidateQueries({ queryKey: ['productos-cantidad'],  exact: false });

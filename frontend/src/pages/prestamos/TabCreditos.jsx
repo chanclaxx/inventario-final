@@ -79,8 +79,9 @@ function ModalAbonoCredito({ credito, onClose }) {
       modo, valor_mora: modo === 'personalizado' ? Number(valorMora || 0) : 0,
     }),
     onSuccess: (res) => {
-      queryClient.invalidateQueries({ queryKey: ['creditos'],        exact: false });
-      queryClient.invalidateQueries({ queryKey: ['credito-detalle'], exact: false });
+      queryClient.invalidateQueries({ queryKey: ['creditos'],             exact: false });
+      queryClient.invalidateQueries({ queryKey: ['credito-detalle'],      exact: false });
+      queryClient.invalidateQueries({ queryKey: ['estado-cuenta-credito'], exact: false });
       const d = res.data?.data;
       // Si el pago incluyó mora, se ofrece el recibo con el desglose. Sin mora
       // el flujo queda igual que antes: se cierra sin fricción.
@@ -229,8 +230,9 @@ function ModalSaldarCredito({ credito, onClose }) {
   const mutation = useMutation({
     mutationFn: () => saldarCredito(credito.id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['creditos'],        exact: false });
-      queryClient.invalidateQueries({ queryKey: ['credito-detalle'], exact: false });
+      queryClient.invalidateQueries({ queryKey: ['creditos'],             exact: false });
+      queryClient.invalidateQueries({ queryKey: ['credito-detalle'],      exact: false });
+      queryClient.invalidateQueries({ queryKey: ['estado-cuenta-credito'], exact: false });
       onClose();
     },
     onError: (err) => setError(err.response?.data?.error || 'Error al saldar crédito'),
@@ -272,8 +274,9 @@ function ModalCancelarCredito({ credito, onClose }) {
   const mutation = useMutation({
     mutationFn: () => cancelarCredito(credito.id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['creditos'],           exact: false });
-      queryClient.invalidateQueries({ queryKey: ['credito-detalle'],    exact: false });
+      queryClient.invalidateQueries({ queryKey: ['creditos'],            exact: false });
+      queryClient.invalidateQueries({ queryKey: ['credito-detalle'],     exact: false });
+      queryClient.invalidateQueries({ queryKey: ['estado-cuenta-credito'], exact: false });
       queryClient.invalidateQueries({ queryKey: ['facturas'],           exact: false });
       queryClient.invalidateQueries({ queryKey: ['productos-serial'],   exact: false });
       queryClient.invalidateQueries({ queryKey: ['productos-cantidad'], exact: false });
@@ -570,7 +573,7 @@ function TarjetaCreditoDetalle({
             documento={credito}
             configMora={configMora}
             metodosPago={metodosPago}
-            invalidar={[['creditos'], ['credito-detalle'], ['caja']]}
+            invalidar={[['creditos'], ['credito-detalle'], ['estado-cuenta-credito'], ['caja']]}
             api={{
               fijarPlazo:   (d) => fijarPlazoCredito(credito.id, d),
               cobrarMora:   (d) => cobrarMoraCredito(credito.id, d),
