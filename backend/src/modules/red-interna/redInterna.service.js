@@ -32,6 +32,70 @@ const ETIQUETAS_ESTADO = {
 
 const _num = (v) => Number(v || 0);
 
+// ─────────────────────────────────────────────────────────────────────────────
+// ¿A DÓNDE FUE EL EQUIPO?
+//
+// El estado dice QUÉ pasó; el destino dice A QUIÉN. Sin el destino, "vendido"
+// y "prestado" son igual de opacos para quien tiene que responderle a la
+// bodega. Se arma aquí, en un solo lugar, para que todas las pantallas digan
+// lo mismo con las mismas palabras.
+// ─────────────────────────────────────────────────────────────────────────────
+const _destinoUnidad = (u) => {
+  switch (u.estado_unidad) {
+    case 'Por liquidar':
+    case 'En recaudo':
+      return {
+        tipo: 'venta',
+        quien: u.nombre_cliente || 'Cliente sin nombre',
+        documento: u.factura_numero != null ? `Factura #${u.factura_numero}` : null,
+        fecha: u.factura_fecha || null,
+        nota: u.estado_unidad === 'En recaudo' ? 'Se liquida a medida que cobras' : null,
+      };
+    case 'En prestamo':
+      return {
+        tipo: 'prestamo',
+        // Un préstamo sin prestatario resuelto no es un error: pudo prestarse
+        // a un empleado o el cruce por IMEI no encontró uno vivo.
+        quien: u.prestatario_nombre || 'Sin registrar',
+        documento: u.prestamo_numero != null ? `Préstamo #${u.prestamo_numero}` : null,
+        fecha: u.prestamo_fecha || null,
+        nota: 'Fuera del local, todavía no genera deuda',
+      };
+    case 'Devuelta':
+      return {
+        tipo: 'devolucion',
+        quien: 'Bodega',
+        documento: u.devolucion_numero != null ? `Devolución #${u.devolucion_numero}` : null,
+        fecha: u.fecha_devolucion || null,
+        nota: 'Ya no responde por él',
+      };
+    case 'En consignacion':
+      return { tipo: 'vitrina', quien: null, documento: null, fecha: null,
+               nota: 'Disponible para vender' };
+    case 'En transito':
+      return { tipo: 'transito', quien: null, documento: null, fecha: null,
+               nota: 'Todavía no lo has recibido' };
+    case 'Faltante':
+      return { tipo: 'faltante', quien: null, documento: null, fecha: null,
+               nota: 'No llegó en el envío' };
+    default: // Sin ubicar · Movida
+      return { tipo: 'alerta', quien: null, documento: null, fecha: null,
+               nota: 'No está en tu inventario y no aparece vendido' };
+  }
+};
+
+// Compara el nombre con el que la bodega despachó contra el que tiene el
+// producto en el local. Se ignoran mayúsculas, tildes y espacios de más: solo
+// interesa la diferencia REAL, la que delata un despacho equivocado.
+const _normalizarNombre = (s) => (s || '')
+  .normalize('NFD').replace(/[̀-ͯ]/g, '')   // tildes fuera
+  .toLowerCase().replace(/\s+/g, ' ').trim();
+
+const _referenciaDifiere = (enBodega, enLocal) => {
+  if (!enBodega || !enLocal) return false;
+  return _normalizarNombre(enBodega) !== _normalizarNombre(enLocal);
+};
+
 // ── Validaciones compartidas ─────────────────────────────────────────────────
 
 const _verificarSucursal = async (client, sucursalId, negocioId) => {
@@ -1529,6 +1593,10 @@ const getEstadoCuenta = async (req, sucursalId, filtros = {}) => {
         etiqueta_estado: ETIQUETAS_ESTADO[u.estado_unidad] || u.estado_unidad,
         valor_interno:   _num(u.valor_interno),
         liquidable:      _num(u.liquidable),
+        destino:         _destinoUnidad(u),
+        // Bandera, no error: puede ser que el local lo escriba distinto o que
+        // el despacho se haya equivocado de referencia. Decide una persona.
+        referencia_difiere: _referenciaDifiere(u.nombre_producto_bodega, u.nombre_producto_local),
       })),
     },
     // Conteo por estado, para pintar los filtros con su número.
@@ -1669,8 +1737,15 @@ const getRemision = async (req, id) => {
 
   // Detalle enriquecido: código, cantidad, estado ACTUAL de cada línea y
   // cuánto de ese envío ya se convirtió en deuda del local.
+  // La sucursal del LOCAL: en una entrega es el destino, en una devolución es
+  // de donde salió. Es la que el motor de estados necesita para ubicar las
+  // unidades de esta remisión.
+  const sucursalUnidades = remision.tipo === 'devolucion'
+    ? remision.sucursal_origen_id
+    : remision.sucursal_destino_id;
+
   const [lineas, correcciones] = await Promise.all([
-    repo.getLineasDetalladas(negocioId, id),
+    repo.getLineasDetalladas(negocioId, id, sucursalUnidades),
     repo.getCorreccionesRemision(negocioId, id),
   ]);
 
@@ -1693,6 +1768,8 @@ const getRemision = async (req, id) => {
       liquidable:    _num(l.liquidable),
       subtotal: _num(l.valor_interno) *
         (l.tipo === 'cantidad' ? Number(l.cantidad_recibida ?? l.cantidad ?? 0) : 1),
+      destino: _destinoUnidad(l),
+      referencia_difiere: _referenciaDifiere(l.nombre_producto_bodega, l.nombre_producto_local),
     })),
     correcciones,
     resumen: {
@@ -2141,6 +2218,9 @@ module.exports = {
   enviarRemesa, confirmarRemesa, anularRemesa,
   registrarGastoAutorizado, registrarAjuste,
   getPanelLocal, getPanelBodega, getConciliacion, getEstadoCuenta, getSalud,
+  // Lo usa el Dashboard para mostrarle la deuda al local sin duplicar la
+  // fórmula del saldo (ver _armarSaldo).
+  getEstadoLocal,
   getReferenciasDuplicadas,
   getRemision, corregirValorLinea, listarRemisiones, listarRemesas,
   getCuentasParaRemesa,

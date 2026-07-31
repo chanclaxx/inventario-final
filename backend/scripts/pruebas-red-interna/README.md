@@ -29,15 +29,17 @@ node scripts/pruebas-red-interna/08-tarifas-porcentuales.mjs
 node scripts/pruebas-red-interna/09-mora-credito.mjs
 node scripts/pruebas-red-interna/10-adversario-mora-tarifas.mjs
 node scripts/pruebas-red-interna/11-envios-por-remision.mjs
+node scripts/pruebas-red-interna/12-destino-y-referencias.mjs
 ```
 
 > Las suites cargan **las dos migraciones**: `20260725_red_interna.sql` y
 > `20260726_red_interna_v2.sql`. Si se agrega una tercera hay que sumarla a
 > todas, o fallarán con columnas inexistentes.
 
-> La suite `08` es la única que además carga `esquema-completo.sql` (que
-> **complementa** a `esquema.sql`, no lo reemplaza): ejercita el `getSeriales`
-> real de inventario, cuya consulta necesita `prestamos` y `prestatarios`.
+> **Todas** las suites cargan además `esquema-completo.sql`, que **complementa**
+> a `esquema.sql` en vez de reemplazarlo. Hace falta en todas desde que el
+> estado de una unidad dice también a quién se le prestó: ese cruce toca
+> `prestamos` y `prestatarios`, que viven en el complemento.
 
 ### Diagnóstico sobre datos reales (solo lectura)
 
@@ -210,6 +212,28 @@ bodega, qué se vendió, qué se prestó y qué sigue en vitrina.
 > La identidad del punto 4 se vuelve a verificar en los puntos 5, 6, 7 y 8: es
 > la que garantiza que el desglose por envío y el número grande del panel
 > cuenten la misma historia.
+
+### `12-destino-y-referencias.mjs` — 42 verificaciones
+
+A dónde fue cada equipo y bajo qué nombre quedó, más la deuda en el Dashboard.
+
+| # | Escenario |
+|---|---|
+| 1 | "Recibí todo" de un solo toque recibe el envío completo, sin faltantes |
+| 2 | Vendido: cliente, factura y fecha |
+| 3 | **Prestado: a quién, con su número de préstamo** (antes no se veía) |
+| 4 | El cruce del préstamo respeta los candados: uno de otra sucursal no contamina |
+| 5 | Devuelto: cuándo volvió a la bodega y con qué documento |
+| 6 | **La referencia de la bodega vs la del local**: solo se marca la diferencia REAL |
+| 7 | Tildes, mayúsculas y espacios de más no cuentan como diferencia |
+| 8 | El detalle del envío dice lo mismo que la lista — y su resumen ya no da 0 |
+| 9 | Un vendedor ve el destino y los dos nombres, pero ningún peso |
+| 10 | **La deuda del Dashboard es exactamente la del panel** (una sola fórmula) |
+| 11 | No aparece para la bodega, ni para un negocio sin la feature, ni si se apaga |
+
+> El punto 8 es una regresión: `getLineasDetalladas` recibía el id de la
+> remisión donde el motor de estados esperaba la sucursal, así que el detalle
+> de un envío mostraba siempre el estado de la línea y `liquidable = 0`.
 
 ## Nota sobre `esquema.sql`
 

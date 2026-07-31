@@ -3,19 +3,18 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   getPanel, getSucursales, confirmarRemesa, anularRemision, confirmarDevolucion, getSalud,
 } from '../../api/redInterna.api';
-import { formatCOP, formatFecha, formatFechaHora } from '../../utils/formatters';
+import { formatCOP, formatFechaHora } from '../../utils/formatters';
 import { Button }     from '../../components/ui/Button';
 import { Badge }      from '../../components/ui/Badge';
 import { Modal }      from '../../components/ui/Modal';
 import { Spinner }    from '../../components/ui/Spinner';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { ModalDespachar } from './ModalDespachar';
-import { ModalRecibir }   from './ModalRecibir';
-import { ModalRemesa }    from './ModalRemesa';
+import { PanelLocal }        from './PanelLocal';
 import { EstadoCuentaLocal } from './EstadoCuentaLocal';
 import {
-  Package, PackageCheck, Truck, Send, Store, AlertTriangle, CheckCircle,
-  Wallet, ShieldCheck, ChevronRight, X, Clock, Undo2,
+  Package, PackageCheck, Truck, Store, AlertTriangle, CheckCircle,
+  Wallet, ShieldCheck, ChevronRight, X, Undo2,
 } from 'lucide-react';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -25,8 +24,10 @@ import {
 // El usuario de un local NUNCA ve las opciones de la bodega y viceversa: esa es
 // la razón por la que esta pantalla no abruma pese a cubrir todo el circuito.
 //
-// Regla de diseño: máximo DOS acciones visibles a la vez. Todo lo demás es
-// informativo o vive detrás de "Ver detalle".
+// La cara del LOCAL vive en PanelLocal.jsx: tres bloques (deuda, mercancía,
+// pagos) que se recorren con scroll, sin pestañas.
+// La cara de la BODEGA es un panel de control: bandejas de confirmación y la
+// lista de locales, cada uno con su estado de cuenta detrás.
 // ─────────────────────────────────────────────────────────────────────────────
 
 function Aviso({ mensaje, onCerrar }) {
@@ -46,226 +47,6 @@ function Tarjeta({ children, className = '' }) {
     <div className={`bg-white border border-gray-100 rounded-2xl ${className}`}>
       {children}
     </div>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// CARA DEL LOCAL — dos botones y nada más
-// ═══════════════════════════════════════════════════════════════════════════
-
-function PanelLocal({ data, onRefrescar, onAviso, onVerCuenta }) {
-  const [recibirId, setRecibirId] = useState(null);
-  const [remesa,    setRemesa]    = useState(false);
-
-  const t = data.totales;
-  const porRecibir = data.por_recibir || [];
-
-  // Dónde está la mercancía. Sale de `por_estado`, que el panel ya traía: no
-  // hace falta pedir nada más para que el local deje de ver solo un número.
-  const u = (k) => data.por_estado?.[k]?.unidades || 0;
-  const vendidos = u('Por liquidar') + u('En recaudo');
-
-  // Los últimos pagos, con su fecha: "¿cuándo fue la última vez que remití?".
-  const pagos = (data.remesas || [])
-    .filter((r) => r.estado !== 'Anulada')
-    .slice(0, 3);
-
-  return (
-    <>
-      {/* Acción 1 — hay algo por recibir */}
-      {porRecibir.length > 0 && (
-        <Tarjeta className="mb-4 border-blue-200 bg-blue-50/50">
-          <div className="p-5">
-            <div className="flex items-start gap-3">
-              <div className="w-11 h-11 rounded-xl bg-blue-100 flex items-center justify-center flex-shrink-0">
-                <Package size={20} className="text-blue-600" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-base font-semibold text-gray-900">
-                  {porRecibir.length} envío{porRecibir.length > 1 ? 's' : ''} por recibir
-                </p>
-                {porRecibir.slice(0, 3).map((r) => (
-                  <button
-                    key={r.id}
-                    onClick={() => setRecibirId(r.id)}
-                    className="mt-2 w-full flex items-center justify-between gap-2
-                      bg-white rounded-xl px-3 py-2.5 hover:bg-blue-50 transition-colors text-left"
-                  >
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-gray-800">
-                        Envío #{r.numero ?? r.id} · {r.total_items} producto(s)
-                      </p>
-                      <p className="text-xs text-gray-400">
-                        {formatFechaHora(r.fecha_emision)}
-                      </p>
-                    </div>
-                    <ChevronRight size={16} className="text-gray-300 flex-shrink-0" />
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        </Tarjeta>
-      )}
-
-      {/* Acción 2 — remitir efectivo */}
-      <Tarjeta className="mb-4">
-        <div className="p-5 text-center">
-          <p className="text-xs font-medium text-gray-400 uppercase tracking-wide">
-            {t.saldo_por_liquidar < 0 ? 'La bodega te debe' : 'Por remitir a bodega'}
-          </p>
-          <p className={`text-3xl font-bold mt-1 ${
-            t.saldo_por_liquidar > 0 ? 'text-gray-900'
-            : t.saldo_por_liquidar < 0 ? 'text-blue-600' : 'text-green-600'}`}>
-            {formatCOP(Math.abs(t.saldo_por_liquidar))}
-          </p>
-          <p className="text-sm text-gray-400 mt-1">
-            {t.saldo_por_liquidar > 0  ? 'de los productos que ya vendiste'
-             : t.saldo_por_liquidar < 0 ? 'remitiste de más (o hubo una anulación)'
-             : 'Estás al día ✓'}
-          </p>
-
-          {t.remesas_en_transito > 0 && (
-            <p className="text-xs text-amber-600 mt-2 flex items-center justify-center gap-1.5">
-              <Clock size={13} /> {formatCOP(t.remesas_en_transito)} en tránsito, sin confirmar
-            </p>
-          )}
-
-          <Button className="mt-4 w-full" onClick={() => setRemesa(true)}>
-            <Send size={15} /> Enviar remesa
-          </Button>
-        </div>
-      </Tarjeta>
-
-      {/* Dónde está la mercancía de la bodega — la foto de un vistazo */}
-      <Tarjeta className="mb-4">
-        <button
-          onClick={() => onVerCuenta(data.sucursal_id)}
-          className="w-full px-5 pt-4 pb-2 text-left"
-        >
-          <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-3">
-            De lo que te dio la bodega
-          </p>
-          <div className="grid grid-cols-3 gap-2">
-            <div>
-              <p className="text-2xl font-bold text-amber-600 leading-none">{vendidos}</p>
-              <p className="text-xs text-gray-500 mt-1">Vendidos</p>
-              <p className="text-xs text-gray-400">generan la deuda</p>
-            </div>
-            <div>
-              <p className="text-2xl font-bold text-blue-600 leading-none">{u('En prestamo')}</p>
-              <p className="text-xs text-gray-500 mt-1">Prestados</p>
-              <p className="text-xs text-gray-400">aún no se liquidan</p>
-            </div>
-            <div>
-              <p className="text-2xl font-bold text-gray-700 leading-none">
-                {t.en_consignacion_unidades}
-              </p>
-              <p className="text-xs text-gray-500 mt-1">Disponibles</p>
-              <p className="text-xs text-gray-400">
-                {t.en_consignacion_valor != null ? formatCOP(t.en_consignacion_valor) : 'en vitrina'}
-              </p>
-            </div>
-          </div>
-        </button>
-
-        <div className="divide-y divide-gray-50 mt-2">
-          {t.en_recaudo_unidades > 0 && (
-            <div className="flex items-center justify-between px-5 py-3">
-              <div>
-                <p className="text-sm font-medium text-gray-700">Vendido a crédito</p>
-                <p className="text-xs text-gray-400">Liquidas a medida que cobras</p>
-              </div>
-              <div className="text-right">
-                {t.en_recaudo_valor != null && (
-                  <p className="text-sm font-semibold text-gray-900">{formatCOP(t.en_recaudo_valor)}</p>
-                )}
-                <p className="text-xs text-gray-400">{t.en_recaudo_unidades} equipo(s)</p>
-              </div>
-            </div>
-          )}
-
-          {t.gastos_autorizados > 0 && (
-            <div className="flex items-center justify-between px-5 py-3">
-              <p className="text-sm font-medium text-gray-700">Gastos por cuenta de bodega</p>
-              <p className="text-sm font-semibold text-gray-900">−{formatCOP(t.gastos_autorizados)}</p>
-            </div>
-          )}
-
-          {t.sin_ubicar_unidades > 0 && (
-            <div className="flex items-center justify-between px-5 py-3 bg-red-50">
-              <div className="flex items-center gap-2">
-                <AlertTriangle size={15} className="text-red-500" />
-                <p className="text-sm font-medium text-red-700">Sin ubicar</p>
-              </div>
-              <p className="text-sm font-semibold text-red-700">{t.sin_ubicar_unidades} equipo(s)</p>
-            </div>
-          )}
-
-          <button
-            onClick={() => onVerCuenta(data.sucursal_id)}
-            className="w-full flex items-center justify-between px-5 py-3.5 hover:bg-gray-50 transition-colors"
-          >
-            <span className="text-sm text-blue-600 font-medium">
-              Ver envío por envío y el detalle de cada equipo
-            </span>
-            <ChevronRight size={16} className="text-gray-300" />
-          </button>
-        </div>
-      </Tarjeta>
-
-      {/* Últimos pagos — con fecha, que es lo que siempre se pregunta */}
-      {pagos.length > 0 && (
-        <Tarjeta>
-          <div className="px-5 py-3 border-b border-gray-50 flex items-center gap-2">
-            <Wallet size={15} className="text-green-600" />
-            <p className="text-sm font-semibold text-gray-800">Tus últimos pagos</p>
-          </div>
-          <div className="divide-y divide-gray-50">
-            {pagos.map((r) => (
-              <div key={r.id} className="flex items-center gap-3 px-5 py-3">
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-gray-800">
-                    {formatCOP(r.valor)}
-                    <span className="font-normal text-gray-400"> · {r.metodo || 'Efectivo'}</span>
-                  </p>
-                  <p className="text-xs text-gray-400">
-                    Enviada {formatFechaHora(r.fecha_envio)}
-                    {r.fecha_recepcion ? ` · confirmada ${formatFecha(r.fecha_recepcion)}` : ''}
-                  </p>
-                </div>
-                <Badge variant={r.estado === 'Recibida' ? 'green' : 'yellow'}>
-                  {r.estado === 'En transito' ? 'Sin confirmar' : r.estado}
-                </Badge>
-              </div>
-            ))}
-          </div>
-          <button
-            onClick={() => onVerCuenta(data.sucursal_id)}
-            className="w-full flex items-center justify-between px-5 py-3 hover:bg-gray-50
-              transition-colors border-t border-gray-50"
-          >
-            <span className="text-sm text-blue-600 font-medium">Ver todos los pagos</span>
-            <ChevronRight size={16} className="text-gray-300" />
-          </button>
-        </Tarjeta>
-      )}
-
-      {recibirId && (
-        <ModalRecibir
-          remisionId={recibirId}
-          onCerrar={() => setRecibirId(null)}
-          onListo={(msg) => { setRecibirId(null); onAviso(msg); onRefrescar(); }}
-        />
-      )}
-      {remesa && (
-        <ModalRemesa
-          sugerido={Math.max(0, t.saldo_por_liquidar)}
-          onCerrar={() => setRemesa(false)}
-          onListo={() => { setRemesa(false); onAviso('Remesa enviada'); onRefrescar(); }}
-        />
-      )}
-    </>
   );
 }
 
@@ -619,7 +400,7 @@ export default function RedInternaPage() {
         <PanelBodega data={data} locales={locales} onRefrescar={refrescar} onAviso={setAviso}
           onVerCuenta={(id, nombre) => setCuenta({ id, nombre })} />
       ) : (
-        <PanelLocal data={data} onRefrescar={refrescar} onAviso={setAviso}
+        <PanelLocal panel={data} onRefrescar={refrescar} onAviso={setAviso}
           onVerCuenta={(id) => setCuenta({ id, nombre: 'Mi cuenta' })} />
       )}
     </div>

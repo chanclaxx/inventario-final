@@ -56,11 +56,24 @@ const SQL_UNIDADES = `
       r.sucursal_destino_id,
       r.fecha_emision, r.fecha_recepcion,
       s.vendido, s.prestado,
-      ps.sucursal_id AS sucursal_actual
+      ps.sucursal_id AS sucursal_actual,
+      -- DOS NOMBRES PARA EL MISMO EQUIPO. El catálogo es por sucursal, así que
+      -- la bodega y el local pueden escribir distinto el mismo modelo:
+      --   po.nombre → la referencia de la BODEGA
+      --   ps.nombre → la referencia de donde está el equipo HOY
+      -- Si no coinciden, o el local lo escribe distinto o el despacho se
+      -- equivocó de referencia. La pantalla lo muestra para que alguien mire.
+      --
+      -- Se comparan los dos nombres del CATÁLOGO y no lr.nombre_producto: ese
+      -- guarda "nombre marca modelo" concatenados, así que enfrentarlo contra
+      -- un nombre pelado marcaría diferencia en TODAS las unidades.
+      po.nombre AS nombre_producto_bodega,
+      ps.nombre AS nombre_producto_local
     FROM lineas_remision lr
     JOIN remisiones r             ON r.id  = lr.remision_id
     LEFT JOIN seriales s          ON s.id  = lr.serial_id
     LEFT JOIN productos_serial ps ON ps.id = s.producto_id
+    LEFT JOIN productos_serial po ON po.id = lr.producto_origen_id
     WHERE r.negocio_id = $1
       AND r.tipo    = 'entrega'
       AND r.estado <> 'Anulada'
@@ -159,7 +172,48 @@ const buscarUnidades = async (negocioId, sucursalId, {
 
   const [filas, total] = await Promise.all([
     pool.query(`
-      SELECT u.* FROM (${SQL_UNIDADES}) u
+      SELECT
+        u.*,
+        pv.prestatario_nombre, pv.prestamo_numero, pv.prestamo_fecha,
+        dv.devolucion_numero,  dv.fecha_devolucion
+      FROM (${SQL_UNIDADES}) u
+
+      -- ¿A DÓNDE FUE EL EQUIPO? De una venta ya se sabe (factura y cliente
+      -- vienen del cruce principal); de un préstamo no se sabía. Los LATERAL
+      -- van aquí y no en SQL_UNIDADES a propósito: solo corren sobre la página
+      -- que se está mostrando, no sobre los agregados de toda la sucursal.
+      LEFT JOIN LATERAL (
+        SELECT COALESCE(pr.nombre, p.prestatario) AS prestatario_nombre,
+               p.numero AS prestamo_numero, p.fecha AS prestamo_fecha
+        FROM prestamos p
+        LEFT JOIN prestatarios pr ON pr.id = p.prestatario_id
+        -- Mismos candados que el cruce de ventas: préstamos de ESTA sucursal,
+        -- vivos, y posteriores al despacho. Sin ellos el fan-out de IMEI
+        -- traería préstamos viejos de otro equipo con el mismo número.
+        WHERE u.estado_unidad = 'En prestamo'
+          AND u.imei IS NOT NULL
+          AND UPPER(TRIM(p.imei)) = UPPER(TRIM(u.imei))
+          AND p.sucursal_id = u.sucursal_destino_id
+          AND p.estado      = 'Activo'
+          AND p.fecha      >= u.fecha_emision
+        ORDER BY p.fecha DESC, p.id DESC
+        LIMIT 1
+      ) pv ON TRUE
+
+      -- Cuándo volvió a la bodega. Va por serial_id, nunca por IMEI.
+      LEFT JOIN LATERAL (
+        SELECT r2.numero AS devolucion_numero,
+               COALESCE(r2.fecha_recepcion, r2.fecha_emision) AS fecha_devolucion
+        FROM lineas_remision lr2
+        JOIN remisiones r2 ON r2.id = lr2.remision_id
+        WHERE u.estado_unidad = 'Devuelta'
+          AND lr2.serial_id = u.serial_id
+          AND r2.tipo   = 'devolucion'
+          AND r2.estado <> 'Anulada'
+        ORDER BY r2.fecha_emision DESC
+        LIMIT 1
+      ) dv ON TRUE
+
       ${filtro}
       ORDER BY COALESCE(u.factura_fecha, u.fecha_recepcion, u.fecha_emision) DESC, u.linea_id DESC
       LIMIT $7 OFFSET $8
@@ -651,7 +705,13 @@ const getLineasRemision = async (remisionId) => {
 // ── Detalle de una remisión, línea por línea, con su estado ACTUAL ───────────
 // Cruza con el motor de estados para saber, de cada cosa enviada, si sigue en
 // vitrina, ya se vendió o se devolvió — y cuánto de ese envío ya es deuda.
-const getLineasDetalladas = async (negocioId, remisionId) => {
+//
+// `sucursalUnidades` es la sucursal del LOCAL (destino de la entrega, u origen
+// si lo que se mira es una devolución). Va explícito porque SQL_UNIDADES lo usa
+// como segundo parámetro: cuando aquí se pasaba el id de la remisión en su
+// lugar, el motor de estados filtraba por una sucursal inexistente y el detalle
+// caía siempre al estado de la línea, con liquidable 0.
+const getLineasDetalladas = async (negocioId, remisionId, sucursalUnidades = null) => {
   const { rows } = await pool.query(`
     WITH u AS (${SQL_UNIDADES})
     SELECT
@@ -665,17 +725,34 @@ const getLineasDetalladas = async (negocioId, remisionId) => {
       u.estado_unidad,
       COALESCE(u.liquidable, 0)                         AS liquidable,
       u.factura_numero, u.nombre_cliente, u.factura_fecha,
+      u.nombre_producto_local,
+      pv.prestatario_nombre, pv.prestamo_numero, pv.prestamo_fecha,
       s.vendido, s.prestado
     FROM lineas_remision lr
     LEFT JOIN u                    ON u.linea_id = lr.id
+    -- A quién se le prestó, con los mismos candados que en buscarUnidades.
+    LEFT JOIN LATERAL (
+      SELECT COALESCE(pr.nombre, p.prestatario) AS prestatario_nombre,
+             p.numero AS prestamo_numero, p.fecha AS prestamo_fecha
+      FROM prestamos p
+      LEFT JOIN prestatarios pr ON pr.id = p.prestatario_id
+      WHERE u.estado_unidad = 'En prestamo'
+        AND u.imei IS NOT NULL
+        AND UPPER(TRIM(p.imei)) = UPPER(TRIM(u.imei))
+        AND p.sucursal_id = u.sucursal_destino_id
+        AND p.estado      = 'Activo'
+        AND p.fecha      >= u.fecha_emision
+      ORDER BY p.fecha DESC, p.id DESC
+      LIMIT 1
+    ) pv ON TRUE
     LEFT JOIN seriales s           ON s.id  = lr.serial_id
     LEFT JOIN productos_serial ps  ON ps.id = lr.producto_origen_id AND lr.tipo = 'serial'
     LEFT JOIN productos_cantidad pc  ON pc.id  = lr.producto_origen_id  AND lr.tipo = 'cantidad'
     LEFT JOIN productos_cantidad pcd ON pcd.id = lr.producto_destino_id AND lr.tipo = 'cantidad'
-    WHERE lr.remision_id = $2
+    WHERE lr.remision_id = $3
       AND EXISTS (SELECT 1 FROM remisiones r WHERE r.id = lr.remision_id AND r.negocio_id = $1)
     ORDER BY lr.tipo, lr.id
-  `, [negocioId, remisionId]);
+  `, [negocioId, sucursalUnidades, remisionId]);
   return rows;
 };
 

@@ -16,6 +16,8 @@ const RAIZ = path.resolve(AQUI, '../..');
 
 const db = new PGlite();
 await db.exec(readFileSync(path.join(AQUI, 'esquema.sql'), 'utf8'));
+// El cruce de 'a quien se presto' toca prestamos/prestatarios, que viven aqui.
+await db.exec(readFileSync(path.join(AQUI, 'esquema-completo.sql'), 'utf8'));
 await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260725_red_interna.sql'), 'utf8'));
 await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260726_red_interna_v2.sql'), 'utf8'));
 

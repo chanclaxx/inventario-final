@@ -17,6 +17,8 @@ const RAIZ = path.resolve(path.dirname(new URL(import.meta.url).pathname.replace
 const db = new PGlite();
 const AQUI = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'));
 await db.exec(readFileSync(path.join(AQUI, 'esquema.sql'), 'utf8'));
+// El cruce de 'a quien se presto' toca prestamos/prestatarios, que viven aqui.
+await db.exec(readFileSync(path.join(AQUI, 'esquema-completo.sql'), 'utf8'));
 await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260725_red_interna.sql'), 'utf8'));
 await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260726_red_interna_v2.sql'), 'utf8'));
 

@@ -5,6 +5,8 @@ import { formatCOP, formatFecha, formatFechaHora } from '../../utils/formatters'
 import { Badge }      from '../../components/ui/Badge';
 import { Spinner }    from '../../components/ui/Spinner';
 import { EmptyState } from '../../components/ui/EmptyState';
+import { CardEquipo } from './CardEquipo';
+import { VENDIDOS }   from './estados';
 import {
   ChevronLeft, ChevronDown, Search, X, TrendingUp, TrendingDown, Package, Truck,
   Wallet, FileText, AlertTriangle, Receipt, Filter, Store, Info, HandCoins,
@@ -36,9 +38,6 @@ const COLOR_ESTADO = {
   'Sin ubicar':      'red',    'Movida':       'red',
   'En transito':     'blue',
 };
-
-// Lo que para el local es UNA idea puede ser dos estados del motor.
-const VENDIDOS = 'Por liquidar,En recaudo';
 
 const ICONO_ORIGEN = {
   venta:      Receipt,
@@ -291,36 +290,9 @@ function DetalleEnvio({ remisionId }) {
 
   return (
     <div className="bg-gray-50/70 border-t border-gray-100">
+      {/* El envío ya está en el encabezado del acordeón: no repetirlo por línea */}
       {data.lineas.map((l) => (
-        <div key={l.id}
-          className="flex items-start gap-3 px-4 py-2.5 border-b border-gray-100 last:border-0">
-          <div className="flex-1 min-w-0">
-            <p className="text-sm text-gray-800 truncate">
-              {l.nombre_producto || l.producto_nombre}
-              {l.tipo === 'cantidad' && (
-                <span className="text-gray-400"> × {l.cantidad_recibida ?? l.cantidad}</span>
-              )}
-            </p>
-            <p className="text-xs text-gray-400 font-mono truncate">
-              {l.imei || l.codigo || ''}
-            </p>
-            {l.factura_numero && (
-              <p className="text-xs text-gray-400">
-                Vendido en #{l.factura_numero}
-                {l.nombre_cliente ? ` a ${l.nombre_cliente}` : ''}
-                {l.factura_fecha ? ` · ${formatFecha(l.factura_fecha)}` : ''}
-              </p>
-            )}
-          </div>
-          <div className="text-right flex-shrink-0 flex flex-col items-end gap-1">
-            <Badge variant={COLOR_ESTADO[l.estado_unidad] || 'gray'}>
-              {l.etiqueta_estado}
-            </Badge>
-            {l.subtotal != null && (
-              <p className="text-xs text-gray-500">{formatCOP(l.subtotal)}</p>
-            )}
-          </div>
-        </div>
+        <CardEquipo key={l.id} u={{ ...l, valor_interno: l.subtotal }} mostrarEnvio={false} />
       ))}
 
       {data.correcciones?.length > 0 && (
@@ -564,32 +536,7 @@ function Mercancia({ data, estado, onEstado, conteos }) {
           descripcion="Prueba con otro texto o quita los filtros." />
       ) : (
         <div className="border border-gray-100 rounded-2xl overflow-hidden bg-white">
-          {data.items.map((u) => (
-            <div key={u.linea_id}
-              className="flex items-start gap-3 px-4 py-3 border-b border-gray-50 last:border-0">
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-gray-900 truncate">{u.nombre_producto}</p>
-                <p className="text-xs text-gray-400 font-mono truncate">{u.imei}</p>
-                <p className="text-xs text-gray-400 mt-0.5">
-                  Envío #{u.remision_numero ?? u.remision_id}
-                  {u.fecha_recepcion ? ` · recibido ${formatFecha(u.fecha_recepcion)}` : ''}
-                  {u.factura_numero  ? ` · vendido en #${u.factura_numero}` : ''}
-                  {u.nombre_cliente  ? ` a ${u.nombre_cliente}` : ''}
-                </p>
-              </div>
-              <div className="text-right flex-shrink-0 flex flex-col items-end gap-1">
-                <Badge variant={COLOR_ESTADO[u.estado_unidad] || 'gray'}>
-                  {u.etiqueta_estado}
-                </Badge>
-                {u.valor_interno != null && (
-                  <p className="text-sm font-semibold text-gray-700">{formatCOP(u.valor_interno)}</p>
-                )}
-                {u.liquidable > 0 && (
-                  <p className="text-xs text-amber-600">debe {formatCOP(u.liquidable)}</p>
-                )}
-              </div>
-            </div>
-          ))}
+          {data.items.map((u) => <CardEquipo key={u.linea_id} u={u} />)}
         </div>
       )}
     </div>

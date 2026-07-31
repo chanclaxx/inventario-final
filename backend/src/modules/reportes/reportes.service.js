@@ -39,7 +39,7 @@ const _costoPorImei = (imeiAlias, sucursalAlias) => `
 const CANT_EFECTIVA     = `(l.cantidad - COALESCE(l.cantidad_devuelta, 0))`;
 const SUBTOTAL_EFECTIVO = `(${CANT_EFECTIVA} * l.precio)`;
 
-const getDashboard = async (sucursalId) => {
+const getDashboard = async (sucursalId, negocioId = null) => {
   const [
     ventasHoy,
     facturasHoy,
@@ -204,7 +204,42 @@ const getDashboard = async (sucursalId) => {
     // un negocio sin la feature ve ceros. Los ingresos por mora del día van
     // aparte del margen de producto, nunca sumados a `utilidad_hoy`.
     cartera_vencida: await _getCarteraVencida(sucursalId),
+    // Deuda con la bodega (feature opt-in de red interna). `null` para quien no
+    // la tiene activa y para la bodega misma, que no se debe a sí misma.
+    deuda_bodega: await _getDeudaBodega(sucursalId, negocioId),
   };
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DEUDA CON LA BODEGA — para que el local la vea al entrar, sin buscarla.
+//
+// El saldo NO se recalcula aquí: se pide al service de red interna, que es
+// donde vive la fórmula. Duplicarla sería tener dos verdades.
+//
+// Todo el bloque va en try/catch y devuelve `null` ante cualquier problema: el
+// Dashboard es la primera pantalla del día y no puede caerse porque un negocio
+// no tenga las tablas de la red interna instaladas.
+// ─────────────────────────────────────────────────────────────────────────────
+const _getDeudaBodega = async (sucursalId, negocioId) => {
+  if (!negocioId || !sucursalId) return null;
+  try {
+    const { getConfigRed } = require('../../middlewares/redInterna.middleware');
+    const config = await getConfigRed(negocioId);
+    if (!config.activa || !config.bodega_id) return null;
+    if (Number(config.bodega_id) === Number(sucursalId)) return null;
+
+    const redInterna = require('../red-interna/redInterna.service');
+    const { totales, por_estado } = await redInterna.getEstadoLocal(negocioId, sucursalId);
+    return {
+      saldo:               totales.saldo_por_liquidar,
+      remesas_en_transito: totales.remesas_en_transito,
+      // Cuántos equipos sostienen esa deuda, para dar contexto al número.
+      unidades_vendidas:   (por_estado['Por liquidar']?.unidades || 0)
+                         + (por_estado['En recaudo']?.unidades   || 0),
+    };
+  } catch {
+    return null;
+  }
 };
 
 // Documentos con el plazo ya pasado y saldo pendiente. Solo informativo para el

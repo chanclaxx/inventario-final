@@ -6,7 +6,7 @@ import { formatCOP } from '../utils/formatters';
 import { Spinner } from '../components/ui/Spinner';
 import {
   TrendingUp, FileText, Package, Handshake,
-  CreditCard, ShoppingCart, AlertTriangle, CalendarClock
+  CreditCard, ShoppingCart, AlertTriangle, CalendarClock, Truck
 } from 'lucide-react';
 
 function StatCard({ icon, label, valor, sub, color = 'blue', onClick }) {
@@ -57,6 +57,11 @@ export default function Dashboard() {
   const vencidos = Number(data?.cartera_vencida?.creditos || 0)
     + Number(data?.cartera_vencida?.prestamos || 0);
 
+  // Deuda con la bodega. El backend manda `null` cuando el negocio no usa la
+  // red interna y cuando la sucursal activa ES la bodega — así que basta con
+  // preguntar si vino, sin repetir aquí ninguna regla de negocio.
+  const bodega = data?.deuda_bodega;
+
   return (
     <div className="flex flex-col gap-6">
 
@@ -69,6 +74,42 @@ export default function Dashboard() {
           {new Date().toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long' })}
         </p>
       </div>
+
+      {/* Deuda con la bodega — primero y ancho completo: es la obligación que
+          el local tiene con la casa, no un indicador más del día. */}
+      {bodega && (
+        <button
+          onClick={() => navigate('/bodega')}
+          className={`w-full text-left rounded-2xl border p-4 sm:p-5 shadow-sm
+            hover:shadow-md transition-all duration-200 flex items-center gap-4
+            ${bodega.saldo > 0 ? 'bg-amber-50 border-amber-200'
+             : bodega.saldo < 0 ? 'bg-blue-50 border-blue-200'
+                                : 'bg-green-50 border-green-200'}`}
+        >
+          <div className={`w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0
+            ${bodega.saldo > 0 ? 'bg-amber-100 text-amber-600'
+             : bodega.saldo < 0 ? 'bg-blue-100 text-blue-600'
+                                : 'bg-green-100 text-green-600'}`}>
+            <Truck size={20} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-xs text-gray-500 font-medium">
+              {bodega.saldo < 0 ? 'La bodega te debe' : 'Deuda con la bodega'}
+            </p>
+            <p className="text-xl sm:text-2xl font-bold text-gray-900 leading-tight">
+              {formatCOP(Math.abs(bodega.saldo))}
+            </p>
+            <p className="text-xs text-gray-400 truncate">
+              {bodega.saldo > 0
+                ? `${bodega.unidades_vendidas} equipo(s) vendidos sin liquidar`
+                : bodega.saldo < 0 ? 'pagaste de más' : 'estás al día ✓'}
+              {bodega.remesas_en_transito > 0 &&
+                ` · ${formatCOP(bodega.remesas_en_transito)} sin confirmar`}
+            </p>
+          </div>
+          <span className="text-xs font-medium text-blue-600 flex-shrink-0">Ver detalle</span>
+        </button>
+      )}
 
       {/* Stats principales */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">

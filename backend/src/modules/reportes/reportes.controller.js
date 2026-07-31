@@ -4,7 +4,7 @@ const { pool }   = require('../../config/db');
 
 const getDashboard = async (req, res, next) => {
   try {
-    const data = await service.getDashboard(req.sucursal_id);
+    const data = await service.getDashboard(req.sucursal_id, req.user?.negocio_id);
     res.json({ ok: true, data });
   } catch (err) { next(err); }
 };
