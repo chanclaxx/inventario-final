@@ -204,6 +204,55 @@ const _crearFacturaDesdePrestamo = async (client, prestamo, metodo, negocioId) =
   return facturaId;
 };
 
+// ─── Cierre del préstamo: capital Y mora en cero ──────────────────────────────
+//
+// ÚNICO lugar donde un préstamo pasa a 'Saldado'. Lo llaman los tres caminos
+// por los que puede terminar de pagarse: el abono (capital), el cobro de mora y
+// la condonación de mora.
+//
+// Antes bastaba con cubrir el capital: el préstamo se cerraba, se facturaba y
+// la mora quedaba colgando de un documento ya cerrado. Ahora capital y mora son
+// deudas separadas y el préstamo sigue Activo mientras quede cualquiera de las
+// dos; al pagar la última se salda y se genera la factura.
+//
+// `crearFactura: false` es para el abono total, que por diseño no factura cada
+// préstamo (deja un solo movimiento en el estado de cuenta); en ese caso el
+// serial se marca vendido igual.
+const cerrarSiPagadoEnTx = async (
+  client, prestamoId, negocioId, { metodo = 'Efectivo', crearFactura = true } = {},
+) => {
+  const { documento, saldo_capital, mora } = await moraService.estadoDe(
+    'prestamo', prestamoId, negocioId, client
+  );
+
+  const capitalPendiente = Math.max(0, Math.round(Number(saldo_capital) || 0));
+  const moraPendiente    = Math.max(0, Math.round(Number(mora?.pendiente) || 0));
+  const base = {
+    saldado: false, factura_id: null,
+    capital_pendiente: capitalPendiente,
+    mora_pendiente:    moraPendiente,
+  };
+
+  if (documento.estado !== 'Activo') return base;
+  if (capitalPendiente > 0 || moraPendiente > 0) return base;
+
+  await repo.updateEstado(client, prestamoId, 'Saldado');
+
+  let facturaId = null;
+  if (crearFactura) {
+    facturaId = await _crearFacturaDesdePrestamo(client, documento, metodo, negocioId);
+  } else if (documento.imei) {
+    await client.query(`
+      UPDATE seriales s
+      SET vendido = true, prestado = false, fecha_salida = CURRENT_DATE
+      FROM productos_serial ps
+      WHERE s.imei = $1 AND ps.id = s.producto_id AND ps.sucursal_id = $2
+    `, [documento.imei, documento.sucursal_id]);
+  }
+
+  return { ...base, saldado: true, factura_id: facturaId };
+};
+
 // ─── Servicio: obtener ────────────────────────────────────────────────────────
 
 // `anotarLista` resuelve la mora de todos en UNA consulta; con 1.793 préstamos
@@ -236,7 +285,13 @@ const fijarPlazo = (negocioId, prestamoId, datos) =>
 const condonarMora = (negocioId, prestamoId, datos) =>
   moraService.condonar(negocioId, 'prestamo', prestamoId, datos);
 
-/** Cobra SOLO mora, sin tocar el capital. */
+/**
+ * Cobra SOLO mora, sin tocar el capital.
+ *
+ * Es el camino por el que se pagan los intereses, y desde que capital y mora
+ * son deudas separadas también es el que cierra el préstamo cuando el producto
+ * ya estaba pagado y lo único que faltaba era la mora.
+ */
 const cobrarMora = async (negocioId, prestamoId, { valor, metodo, usuario_id }) => {
   const client = await pool.connect();
   try {
@@ -256,10 +311,18 @@ const cobrarMora = async (negocioId, prestamoId, { valor, metodo, usuario_id }) 
       tipo: 'prestamo', documento, negocioId,
       valor: aCobrar, metodo, usuarioId: usuario_id, estadoMora: mora,
     });
+
+    // Si con este cobro ya no se debe nada, el préstamo queda saldado y se
+    // genera su factura: es el momento en que el cliente terminó de pagar.
+    const cierre = await cerrarSiPagadoEnTx(client, prestamoId, negocioId, { metodo });
+
     await client.query('COMMIT');
 
     const despues = await moraService.estadoDe('prestamo', prestamoId, negocioId);
-    return { movimiento: mov, mora: despues.mora };
+    return {
+      movimiento: mov, mora: despues.mora,
+      saldado: cierre.saldado, factura_id: cierre.factura_id,
+    };
   } catch (err) {
     await client.query('ROLLBACK');
     throw err;
@@ -474,14 +537,20 @@ const registrarSaldoAFavor = async (negocioId, tipo, personaId, monto, sucursalI
 
 // ─── Servicio: registrar abono ────────────────────────────────────────────────
 
-// `modo` y `valorMora` solo importan si el préstamo tiene plazo pactado:
+// El abono es un pago del PRODUCTO: por defecto baja el capital y nada más.
+// La mora se cobra aparte, con su propia acción, y hasta que se cobre (o se
+// condone) el préstamo no queda saldado. Así el vendedor no tiene que adivinar
+// en qué se convirtió su pago.
+//
+// `modo` y `valorMora` siguen disponibles para el caso en que el negocio SÍ
+// quiera repartir el pago desde la misma pantalla:
+//   'solo_capital'  → (por defecto) todo a capital; la mora queda PENDIENTE
 //   'mora_capital'  → primero la mora, resto a capital (orden del Art. 1653 C.C.)
-//   'solo_capital'  → todo a capital; la mora queda PENDIENTE, no condonada
 //   'personalizado' → `valorMora` a mora, el resto a capital
-// Sin plazo, la mora pendiente es 0 y los tres se comportan como siempre.
+// Sin plazo, la mora pendiente es 0 y los tres se comportan igual.
 const registrarAbono = async (
   negocioId, prestamoId, valor, metodo, usuarioId, color,
-  { modo = 'mora_capital', valorMora = 0 } = {},
+  { modo = 'solo_capital', valorMora = 0 } = {},
 ) => {
   const prestamo = await repo.findByIdYNegocio(prestamoId, negocioId);
   if (!prestamo) throw { status: 404, message: 'Préstamo no encontrado' };
@@ -497,8 +566,15 @@ const registrarAbono = async (
       'prestamo', prestamoId, negocioId, client
     );
 
+    // Si el producto ya está pagado, lo único que queda por pagar es la mora:
+    // el abono se imputa entero ahí. Sin esto, un cliente que vuelve a pagar
+    // los intereses recibiría "el abono supera lo que se debe" y quedaría sin
+    // forma de cerrar el préstamo desde esta pantalla.
+    const modoEfectivo = (saldo_capital <= 0 && mora.pendiente > 0) ? 'mora_capital' : modo;
+
     const reparto = repartirAbono({
-      valor, mora_pendiente: mora.pendiente, saldo_capital, modo, valor_mora: valorMora,
+      valor, mora_pendiente: mora.pendiente, saldo_capital,
+      modo: modoEfectivo, valor_mora: valorMora,
     });
 
     // El tope ahora es capital + mora: antes rechazaba cualquier pago que
@@ -540,26 +616,21 @@ const registrarAbono = async (
       );
     }
 
-    let saldado    = false;
-    let factura_id = null;
-
-    // Se salda cuando el CAPITAL queda cubierto. Una mora pendiente no bloquea
-    // el cierre: es una deuda aparte que sigue visible en el estado de cuenta.
-    if (Number(resultado.total_abonado) >= Number(resultado.valor_prestamo)) {
-      saldado = true;
-      await repo.updateEstado(client, prestamoId, 'Saldado');
-
-      // Crear factura automáticamente al saldar
-      factura_id = await _crearFacturaDesdePrestamo(client, prestamo, metodo, negocioId);
-    }
+    // El préstamo se cierra solo si NO queda nada por cobrar: capital y mora en
+    // cero. Con intereses pendientes sigue Activo y la factura se genera después,
+    // cuando se cobre (o se condone) esa mora.
+    const cierre = await cerrarSiPagadoEnTx(client, prestamoId, negocioId, { metodo });
 
     await client.query('COMMIT');
 
     const despues = await moraService.estadoDe('prestamo', prestamoId, negocioId);
     return {
       ...resultado,
-      saldado,
-      factura_id,
+      saldado:    cierre.saldado,
+      factura_id: cierre.factura_id,
+      // Capital cubierto pero con mora debiéndose: la pantalla lo usa para
+      // ofrecer el cobro de la mora sin que el vendedor tenga que buscarlo.
+      solo_falta_mora: !cierre.saldado && cierre.capital_pendiente <= 0 && cierre.mora_pendiente > 0,
       abonado_capital: reparto.a_capital,
       abonado_mora:    reparto.a_mora,
       movimiento_mora: movimientoMora,
@@ -1246,9 +1317,16 @@ const anularAbono = async (negocioId, prestamoId, abonoId, retomaId = null) => {
     let saldado_revertido = false;
     let factura_cancelada_id = null;
 
-    // Si el préstamo estaba Saldado y ya no lo está → revertir
-    if (prestamo.estado === 'Saldado' &&
-        Number(prestamoDespues.total_abonado) < Number(prestamoDespues.valor_prestamo)) {
+    // Si el préstamo estaba Saldado y ya no lo está → revertir.
+    // Vuelve a deberse tanto si falta capital como si la mora que se cobró
+    // dentro de este abono acaba de anularse: con cualquiera de las dos el
+    // préstamo ya no está pagado y no puede seguir cerrado ni facturado.
+    const moraTrasAnular = await moraService.estadoDe('prestamo', prestamoId, negocioId, client);
+    const vuelveADeber =
+      Number(prestamoDespues.total_abonado) < Number(prestamoDespues.valor_prestamo)
+      || Number(moraTrasAnular.mora?.pendiente || 0) > 0;
+
+    if (prestamo.estado === 'Saldado' && vuelveADeber) {
       await repo.updateEstado(client, prestamoId, 'Activo');
       saldado_revertido = true;
 
@@ -1391,12 +1469,18 @@ const getEstadoCuenta = async (negocioId, tipo, personaId, sucursalId = null) =>
 
   const rows = await repo.getEstadoCuenta(pool, negocioId, tipo, personaId, sucursalId);
 
+  // Movimientos que se listan pero NO mueven el saldo de la deuda: la compra de
+  // artículo (genera saldo a favor) y la mora (deuda financiera aparte, igual
+  // que en el estado de cuenta de créditos).
+  const INFORMATIVOS = new Set(['compra_directa', 'mora_cobro', 'mora_condonacion']);
+
   let saldoDeuda = 0;
   return rows.map((row) => {
     const cargo = Number(row.cargo || 0);
     const abono = Number(row.abono || 0);
-    const esDevuelto = row.tipo === 'prestamo' && row.prestamo_estado === 'Devuelto';
-    if (row.tipo !== 'compra_directa' && !esDevuelto) {
+    const esDevuelto   = row.tipo === 'prestamo' && row.prestamo_estado === 'Devuelto';
+    const fueraDeSaldo = INFORMATIVOS.has(row.tipo) || esDevuelto;
+    if (!fueraDeSaldo) {
       saldoDeuda = saldoDeuda + cargo - abono;
     }
     return {
@@ -1405,7 +1489,7 @@ const getEstadoCuenta = async (negocioId, tipo, personaId, sucursalId = null) =>
       concepto:        row.concepto,
       cargo:           cargo || null,
       abono:           abono || null,
-      saldo:           (row.tipo === 'compra_directa' || esDevuelto) ? null : saldoDeuda,
+      saldo:           fueraDeSaldo ? null : saldoDeuda,
       referencia_id:   Number(row.referencia_id),
       prestamo_id:     row.prestamo_id ? Number(row.prestamo_id) : null,
       anulable:        row.anulable,
@@ -1622,7 +1706,6 @@ const registrarAbonoTotal = async (
       });
 
       let abonoId = null;
-      let upd = [{ valor_prestamo: prestamo.valor_prestamo, total_abonado: prestamo.total_abonado }];
 
       if (reparto.a_capital > 0) {
         const { rows: ab } = await client.query(
@@ -1632,11 +1715,10 @@ const registrarAbonoTotal = async (
         );
         abonoId = ab[0].id;
 
-        ({ rows: upd } = await client.query(
-          `UPDATE prestamos SET total_abonado = total_abonado + $1
-           WHERE id = $2 RETURNING valor_prestamo, total_abonado`,
+        await client.query(
+          `UPDATE prestamos SET total_abonado = total_abonado + $1 WHERE id = $2`,
           [reparto.a_capital, prestamo.id]
-        ));
+        );
       }
 
       if (reparto.a_mora > 0) {
@@ -1647,19 +1729,13 @@ const registrarAbonoTotal = async (
         });
       }
 
-      const saldado = Number(upd[0].total_abonado) >= Number(upd[0].valor_prestamo);
-      if (saldado) {
-        await repo.updateEstado(client, prestamo.id, 'Saldado');
-        if (prestamo.imei) {
-          await client.query(
-            `UPDATE seriales s
-             SET vendido = true, prestado = false, fecha_salida = CURRENT_DATE
-             FROM productos_serial ps
-             WHERE s.imei = $1 AND ps.id = s.producto_id AND ps.sucursal_id = $2`,
-            [prestamo.imei, prestamo.sucursal_id]
-          );
-        }
-      }
+      // Mismo criterio que el abono individual: solo se salda si no queda
+      // capital NI mora. El pago total no factura cada préstamo (deja un único
+      // movimiento en el estado de cuenta), pero sí marca el equipo vendido.
+      const cierre = await cerrarSiPagadoEnTx(client, prestamo.id, negocioId, {
+        metodo, crearFactura: false,
+      });
+      const saldado = cierre.saldado;
 
       distribucion.push({
         prestamo_id:     prestamo.id,
@@ -1764,24 +1840,16 @@ const modificarAbonoTotal = async (negocioId, abonoTotalId, nuevoValor, metodo) 
         [prestamo.id, abonoEste, metodo || abonoTotal.metodo, null, abonoTotalId]
       );
 
-      const { rows: upd } = await client.query(
-        `UPDATE prestamos SET total_abonado = total_abonado + $1
-         WHERE id = $2 RETURNING valor_prestamo, total_abonado`,
+      await client.query(
+        `UPDATE prestamos SET total_abonado = total_abonado + $1 WHERE id = $2`,
         [abonoEste, prestamo.id]
       );
 
-      if (Number(upd[0].total_abonado) >= Number(upd[0].valor_prestamo)) {
-        await repo.updateEstado(client, prestamo.id, 'Saldado');
-        if (prestamo.imei) {
-          await client.query(
-            `UPDATE seriales s
-             SET vendido = true, prestado = false, fecha_salida = CURRENT_DATE
-             FROM productos_serial ps
-             WHERE s.imei = $1 AND ps.id = s.producto_id AND ps.sucursal_id = $2`,
-            [prestamo.imei, prestamo.sucursal_id]
-          );
-        }
-      }
+      // Mismo criterio que en todos los demás caminos: se salda solo si no
+      // queda capital ni mora pendiente.
+      await cerrarSiPagadoEnTx(client, prestamo.id, negocioId, {
+        metodo: metodo || abonoTotal.metodo, crearFactura: false,
+      });
       remaining -= abonoEste;
     }
 
@@ -1814,4 +1882,7 @@ module.exports = {
   getSaldoSucursalPersona, getHistorialSaldoSucursalPersona,
   registrarAbonoTotal, modificarAbonoTotal,
   fijarPlazo, condonarMora, cobrarMora,
+  // Lo usa mora.service para cerrar el préstamo cuando se cobra o se condona
+  // la última mora pendiente.
+  cerrarSiPagadoEnTx,
 };

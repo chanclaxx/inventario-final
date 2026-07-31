@@ -47,6 +47,26 @@ const _doc = (tipo) => {
 /** Config de mora del negocio (cacheada por request no hace falta: es una fila). */
 const getConfigNegocio = async (negocioId) => leerConfigMora(await configRepo.getMap(negocioId));
 
+/**
+ * Movimientos de mora + abonos a capital de un documento.
+ *
+ * Con `client` (dentro de una transacción) van en serie: un client de pg atiende
+ * una consulta a la vez. Sin él, cada consulta toma su propia conexión del pool
+ * y sí pueden ir en paralelo.
+ */
+const _movimientosYAbonos = async (client, clave) => {
+  if (client) {
+    const movimientos = await repo.findPorDocumento(client, clave);
+    const abonos      = await repo.findAbonosCapital(client, clave);
+    return { movimientos, abonos };
+  }
+  const [movimientos, abonos] = await Promise.all([
+    repo.findPorDocumento(null, clave),
+    repo.findAbonosCapital(null, clave),
+  ]);
+  return { movimientos, abonos };
+};
+
 // ── Lectura ──────────────────────────────────────────────────────────────────
 
 /**
@@ -63,12 +83,9 @@ const anotarDocumento = async (documento, tipo, { client = null } = {}) => {
     credito_id:  tipo === 'credito'  ? documento.id : null,
     prestamo_id: tipo === 'prestamo' ? documento.id : null,
   };
-  const [movimientos, abonos] = await Promise.all([
-    repo.findPorDocumento(client, clave),
-    // Los abonos a capital hacen falta para acumular la mora por tramos: sin
-    // ellos, pagar el capital borraría la mora ya causada.
-    repo.findAbonosCapital(client, clave),
-  ]);
+  // Los abonos a capital hacen falta para acumular la mora por tramos: sin
+  // ellos, pagar el capital borraría la mora ya causada.
+  const { movimientos, abonos } = await _movimientosYAbonos(client, clave);
 
   const mora = resolverEstadoMora({
     saldo:        cfg.saldoDe(documento),
@@ -144,10 +161,10 @@ const estadoDe = async (tipo, id, negocioId, client = null) => {
     credito_id:  tipo === 'credito'  ? id : null,
     prestamo_id: tipo === 'prestamo' ? id : null,
   };
-  const [movimientos, abonos] = await Promise.all([
-    repo.findPorDocumento(client, clave),
-    repo.findAbonosCapital(client, clave),
-  ]);
+  // Secuencial cuando va dentro de una transacción: un client de pg atiende una
+  // consulta a la vez, y lanzarlas en paralelo sobre el mismo client es un
+  // patrón que pg ya marca como deprecado.
+  const { movimientos, abonos } = await _movimientosYAbonos(client, clave);
   return {
     documento: doc,
     saldo_capital: cfg.saldoDe(doc),
@@ -158,7 +175,28 @@ const estadoDe = async (tipo, id, negocioId, client = null) => {
       movimientos,
       abonos,
     }),
+    movimientos,
   };
+};
+
+/**
+ * Cierra el documento si ya no se debe NADA — capital en cero Y mora en cero.
+ *
+ * Es el único lugar que decide que una obligación quedó saldada, y lo llaman
+ * los tres caminos por los que puede terminar de pagarse: el abono (baja el
+ * capital), el cobro de mora y la condonación. Antes bastaba con cubrir el
+ * capital, y un préstamo con intereses sin cobrar se cerraba dejando la mora
+ * huérfana; ahora se cierra —y se genera su factura— justo cuando el cliente
+ * termina de pagar todo.
+ *
+ * Delega en el service de cada módulo (que es el que sabe crear la factura del
+ * préstamo). El `require` va dentro para no crear un ciclo al cargar.
+ */
+const cerrarSiPagadoEnTx = async (client, tipo, id, negocioId, opciones = {}) => {
+  const modulo = tipo === 'credito'
+    ? require('../creditos/creditos.service')
+    : require('../prestamos/prestamos.service');
+  return modulo.cerrarSiPagadoEnTx(client, id, negocioId, opciones);
 };
 
 // ── Escritura ────────────────────────────────────────────────────────────────
@@ -275,10 +313,18 @@ const condonar = async (negocioId, tipo, id, { valor, motivo, usuario_id, pin, r
       plazoQuitado = true;
     }
 
+    // Condonar es una forma de terminar de pagar: si el capital ya estaba
+    // cubierto y esta condonación deja la mora en cero, el documento se cierra
+    // aquí mismo (y el préstamo genera su factura).
+    const cierre = await cerrarSiPagadoEnTx(client, tipo, id, negocioId, {});
+
     await client.query('COMMIT');
 
     const despues = await estadoDe(tipo, id, negocioId);
-    return { movimiento: mov, mora: despues.mora, plazo_quitado: plazoQuitado };
+    return {
+      movimiento: mov, mora: despues.mora, plazo_quitado: plazoQuitado,
+      saldado: !!cierre?.saldado, factura_id: cierre?.factura_id ?? null,
+    };
   } catch (err) {
     await client.query('ROLLBACK');
     throw err;
@@ -406,7 +452,7 @@ const datosParaNuevoDocumento = async (negocioId, { fecha_limite, mora_condicion
 
 module.exports = {
   DOCS, getConfigNegocio,
-  anotarDocumento, anotarLista, cargarDocumento, estadoDe,
+  anotarDocumento, anotarLista, cargarDocumento, estadoDe, cerrarSiPagadoEnTx,
   registrarCobroEnTx, condonar, anularMovimiento, fijarPlazo,
   resolverCondicionPactada, datosParaNuevoDocumento,
 };

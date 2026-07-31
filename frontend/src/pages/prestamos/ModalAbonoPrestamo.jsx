@@ -9,7 +9,7 @@ import { formatCOP }          from '../../utils/formatters';
 import { ModalImprimirFactura } from '../../components/ui/ModalImprimirFactura';
 import { FacturaTermica }     from '../../components/FacturaTermica';
 import { ReciboAbono }        from '../../components/ReciboAbono';
-import { registrarAbonoPrestamo } from '../../api/prestamos.api';
+import { registrarAbonoPrestamo, cobrarMoraPrestamo } from '../../api/prestamos.api';
 import { getFacturaById }         from '../../api/facturas.api';
 import { getGarantiasPorFactura } from '../../api/garantias.api';
 import { useMetodosPago }         from '../../hooks/useMetodosPago';
@@ -79,11 +79,16 @@ export function ModalAbonoPrestamo({ prestamo, onClose }) {
   const [pantalla,   setPantalla]= useState('abono'); // 'abono' | 'confirmar' | 'imprimir' | 'pos'
   const [facturaId,  setFacturaId]  = useState(null);
   const [datosPos,   setDatosPos]   = useState(null); // { factura, garantias }
-  // Imputación del abono cuando el préstamo tiene mora pendiente.
-  const [modo,      setModo]      = useState('mora_capital');
+  // Imputación del abono cuando el préstamo tiene mora pendiente. Por defecto
+  // el abono paga SOLO el producto: la mora se cobra aparte y es lo último que
+  // cierra el préstamo.
+  const [modo,      setModo]      = useState('solo_capital');
   const [valorMora, setValorMora] = useState('');
   // Datos para el recibo de abono con desglose capital/mora.
   const [datosRecibo, setDatosRecibio] = useState(null);
+  // Mora que queda debiéndose cuando el abono ya cubrió todo el producto: es lo
+  // único que impide cerrar el préstamo, y se ofrece cobrarla ahí mismo.
+  const [moraRestante, setMoraRestante] = useState(0);
 
   // Config del negocio para los parámetros de la impresora térmica. Se pide
   // aquí y no dentro de useFacturaSaldada porque ese solo carga si hubo factura,
@@ -137,6 +142,11 @@ export function ModalAbonoPrestamo({ prestamo, onClose }) {
         setFacturaId(data.factura_id);
         // Pequeño delay para que React procese el estado antes de cambiar pantalla
         setTimeout(() => setPantalla('confirmar'), 0);
+      } else if (data?.solo_falta_mora) {
+        // El producto quedó pagado pero la mora sigue debiéndose: el préstamo
+        // NO se cierra por eso, así que se ofrece cobrarla en el mismo paso.
+        setMoraRestante(Number(data?.mora?.pendiente ?? 0));
+        setPantalla('falta_mora');
       } else {
         // Si hubo mora en el pago, se ofrece el recibo con el desglose; si no,
         // el flujo queda igual que antes (se cierra sin fricción).
@@ -147,10 +157,30 @@ export function ModalAbonoPrestamo({ prestamo, onClose }) {
     onError: (err) => setError(err.response?.data?.error || 'Error al registrar abono'),
   });
 
-  // Un préstamo se salda cuando el CAPITAL queda cubierto, aunque quede mora.
-  // Si va a pasar eso, se avisa ANTES de registrar: el equipo se marca vendido y
-  // se genera la factura, y después la mora solo se puede cobrar con "cobrar
-  // mora" (ya no con un abono, porque el préstamo deja de estar activo).
+  // Cobro de la mora que quedó tras el abono. Es lo que cierra el préstamo y
+  // dispara la factura, así que reusa el mismo flujo de impresión.
+  const mutCobrarMora = useMutation({
+    mutationFn: () => cobrarMoraPrestamo(prestamo.id, { valor: null, metodo }),
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: ['prestamos'],     exact: false });
+      queryClient.invalidateQueries({ queryKey: ['facturas'],      exact: false });
+      queryClient.invalidateQueries({ queryKey: ['estado-cuenta'], exact: false });
+      queryClient.invalidateQueries({ queryKey: ['caja'],          exact: false });
+      const data = res.data?.data;
+      if (data?.saldado && data?.factura_id) {
+        setFacturaId(data.factura_id);
+        setTimeout(() => setPantalla('confirmar'), 0);
+      } else {
+        onClose();
+      }
+    },
+    onError: (err) => setError(err.response?.data?.error || 'No se pudo cobrar la mora'),
+  });
+
+  // Un préstamo solo se salda cuando NO se debe nada: producto y mora. Si este
+  // abono va a cubrir el producto pero deja mora, se avisa ANTES de registrar
+  // para que el vendedor sepa que el préstamo seguirá abierto (y que la factura
+  // se generará al cobrar esa mora, no ahora).
   const repartoPrevisto = (() => {
     const v = Number(valor || 0);
     if (v <= 0) return { a_mora: 0, a_capital: 0 };
@@ -288,19 +318,20 @@ export function ModalAbonoPrestamo({ prestamo, onClose }) {
               </div>
             </div>
           )}
-          {/* Aviso: este abono cierra el préstamo pero deja mora sin cobrar */}
+          {/* Aviso: este abono paga el producto pero deja mora, así que el
+              préstamo sigue abierto hasta cobrarla */}
           {saldariaConMora && (
             <div className="flex gap-2.5 bg-amber-50 border border-amber-200 rounded-xl p-3">
               <AlertTriangle size={15} className="text-amber-500 flex-shrink-0 mt-0.5" />
               <div className="flex flex-col gap-1">
                 <p className="text-xs font-semibold text-amber-800">
-                  Con este pago el préstamo queda saldado, pero quedarán{' '}
-                  {formatCOP(moraPendiente - repartoPrevisto.a_mora)} de mora sin cobrar
+                  Con este pago el producto queda pagado, pero quedarán{' '}
+                  {formatCOP(moraPendiente - repartoPrevisto.a_mora)} de mora
                 </p>
                 <p className="text-xs text-amber-700">
-                  El equipo se marcará como vendido y se generará la factura. Después ya no
-                  podrás registrar abonos: la mora solo se podrá cobrar con el botón
-                  “Cobrar mora”, o condonarla.
+                  El préstamo NO queda saldado todavía: sigue abierto hasta que cobres
+                  (o no cobres) esa mora. Al hacerlo se marca el equipo como vendido y
+                  se genera la factura. Te lo ofrecemos en el paso siguiente.
                 </p>
               </div>
             </div>
@@ -311,6 +342,49 @@ export function ModalAbonoPrestamo({ prestamo, onClose }) {
             <Button variant="secondary" className="flex-1" onClick={onClose}>Cancelar</Button>
             <Button className="flex-1" loading={mutation.isPending} onClick={handleRegistrar}>
               Registrar
+            </Button>
+          </div>
+        </div>
+      </Modal>
+    );
+  }
+
+  // ── Pantalla: el producto quedó pagado pero falta la mora ─────────────────
+  // El préstamo sigue abierto a propósito. Aquí se ofrece cerrarlo cobrando la
+  // mora, que es el paso que además genera la factura.
+  if (pantalla === 'falta_mora') {
+    return (
+      <Modal open onClose={onClose} title="Falta la mora" size="sm">
+        <div className="flex flex-col gap-4">
+          <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+            <p className="text-sm font-semibold text-amber-800">
+              El producto quedó pagado
+            </p>
+            <p className="text-xs text-amber-700 mt-1">
+              {prestamo.nombre_producto} — {prestamo.prestatario}
+            </p>
+          </div>
+
+          <div className="flex items-center justify-between bg-gray-50 rounded-xl px-4 py-3">
+            <span className="text-xs text-gray-500">Mora pendiente</span>
+            <span className="text-base font-bold text-red-500">{formatCOP(moraRestante)}</span>
+          </div>
+
+          <p className="text-xs text-gray-500">
+            El préstamo sigue abierto hasta que se cobre esta mora. Al cobrarla queda
+            saldado, el equipo se marca como vendido y se genera la factura. Si prefieres
+            no cobrarla, un administrador puede condonarla desde el préstamo.
+          </p>
+
+          {error && <p className="text-sm text-red-500">{error}</p>}
+
+          <div className="flex gap-2">
+            <Button variant="secondary" className="flex-1" onClick={onClose}>
+              Ahora no
+            </Button>
+            <Button className="flex-1" loading={mutCobrarMora.isPending}
+              onClick={() => { setError(''); mutCobrarMora.mutate(); }}>
+              Cobrar mora ({metodo})
             </Button>
           </div>
         </div>

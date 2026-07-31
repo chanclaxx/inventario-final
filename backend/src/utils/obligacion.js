@@ -56,9 +56,12 @@ const diasEntre = (desde, hasta) => {
  * @param {object} opts.documento  — fila de `creditos` o de `prestamos`
  * @param {Array}  opts.abonos     — filas de abonos_credito / abonos_prestamo (cronológicas)
  * @param {object} [opts.mora]     — estado de mora ya calculado por mora.service
+ * @param {Array}  [opts.mora_movimientos] — filas de `movimientos_mora` del documento
  * @param {number} [opts.devuelto] — valor devuelto (solo créditos), para el valor original
  */
-const resumirObligacion = ({ tipo, documento, abonos = [], mora = null, devuelto = 0 }) => {
+const resumirObligacion = ({
+  tipo, documento, abonos = [], mora = null, mora_movimientos = null, devuelto = 0,
+}) => {
   const esCredito = tipo === 'credito';
 
   // ── Cifras base ───────────────────────────────────────────────────────────
@@ -78,14 +81,44 @@ const resumirObligacion = ({ tipo, documento, abonos = [], mora = null, devuelto
   const fechaLimite  = documento.fecha_limite || null;
   const plazoDias    = fechaLimite ? diasEntre(fechaEmision, fechaLimite) : null;
 
+  // ── Mora ──────────────────────────────────────────────────────────────────
+  // Deuda financiera aparte del capital. Se muestra siempre junto a él porque
+  // la obligación no se cierra mientras quede mora por cobrar.
+  const moraPendiente = num(mora?.pendiente);
+  const moraCausada   = num(mora?.causada);
+  const moraCobrada   = num(mora?.cobrada);
+  const moraCondonada = num(mora?.condonada);
+  const totalAPagar   = saldo + moraPendiente;
+
+  // Historial de cobros y condonaciones, para que los documentos lo listen.
+  // Los anulados quedan fuera: no se cobraron.
+  const movimientosMora = (mora_movimientos || documento.mora_movimientos || [])
+    .filter((m) => m && !m.anulado)
+    .map((m) => ({
+      id:        m.id,
+      fecha:     m.fecha,
+      tipo:      m.tipo,                                  // 'Cobro' | 'Condonacion'
+      es_cobro:  m.tipo === 'Cobro',
+      valor:     num(m.valor),
+      metodo:    m.metodo || null,
+      motivo:    m.motivo || null,
+      dias_mora: m.dias_mora ?? null,
+      usuario_nombre: m.usuario_nombre || null,
+    }))
+    .sort((a, b) => new Date(a.fecha) - new Date(b.fecha));
+
   // ── Estado ────────────────────────────────────────────────────────────────
   const anulado = esCredito
     ? documento.estado === 'Cancelado'
     : documento.estado === 'Devuelto';
 
+  // Pagada exige capital Y mora en cero: con intereses pendientes la deuda
+  // sigue viva, y por eso tampoco procede el paz y salvo.
+  const pagadaDelTodo = saldo <= 0 && moraPendiente <= 0;
+
   let clave;
   if (anulado)                     clave = 'anulada';
-  else if (saldo <= 0)             clave = 'pagada';
+  else if (pagadaDelTodo)          clave = 'pagada';
   else if (mora?.vencido)          clave = 'vencida';
   else if (pagado > 0)             clave = 'parcial';
   else                             clave = 'pendiente';
@@ -123,7 +156,10 @@ const resumirObligacion = ({ tipo, documento, abonos = [], mora = null, devuelto
     estado_tono:   ESTADOS[clave].tono,
     estado_desc:   ESTADOS[clave].descripcion,
     anulado,
-    pagada:        saldo <= 0 && !anulado,
+    pagada:        pagadaDelTodo && !anulado,
+    // Capital cubierto pero con intereses debiéndose: el documento sigue
+    // abierto y lo único que falta es cobrar (o condonar) la mora.
+    solo_falta_mora: saldo <= 0 && moraPendiente > 0 && !anulado,
 
     valor_original: valorOriginal,
     valor_actual:   valorActual,
@@ -144,8 +180,17 @@ const resumirObligacion = ({ tipo, documento, abonos = [], mora = null, devuelto
     dias_atraso:    mora?.dias_vencidos ?? 0,
     vencido:        !!mora?.vencido,
 
-    mora:           mora || null,
-    condicion:      documento.mora_condicion || null,
+    mora:            mora || null,
+    condicion:       documento.mora_condicion || null,
+    // Cifras de mora ya desglosadas, para que ningún documento las recalcule.
+    mora_causada:    moraCausada,
+    mora_cobrada:    moraCobrada,
+    mora_condonada:  moraCondonada,
+    mora_pendiente:  moraPendiente,
+    // Lo que el cliente debe hoy en total: capital + intereses.
+    total_a_pagar:   totalAPagar,
+    mora_movimientos: movimientosMora,
+    num_mora_movs:    movimientosMora.length,
 
     abonos:         historial,
     num_abonos:     historial.length,

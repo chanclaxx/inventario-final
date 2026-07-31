@@ -20,6 +20,9 @@ const TIPO_META = {
   pago_producto: { bg: 'DBEAFE', tx: '1E40AF', label: '🔄 Pago en producto',    desc: 'Entrega de artículo como pago'                         },
   saldo_aplicado:{ bg: 'CCFBF1', tx: '0F766E', label: '🏦 Saldo aplicado',      desc: 'Saldo a favor utilizado para pagar'                    },
   compra_directa:{ bg: 'EDE9FE', tx: '5B21B6', label: '🛍️ Compra de artículo', desc: 'Artículo comprado → genera saldo a favor'              },
+  // Mora: informativa, igual que en la exportación de facturas a crédito.
+  mora_cobro:      { bg: 'FEE2E2', tx: 'B91C1C', label: '⏰ Mora cobrada',   desc: 'Interés por pago tardío — NO hace parte del capital' },
+  mora_condonacion:{ bg: 'F3F4F6', tx: '4B5563', label: '🕊️ Mora condonada', desc: 'Interés perdonado — NO hace parte del capital'       },
 };
 
 // ─── Hoja 1: Resumen ──────────────────────────────────────────────────────────
@@ -31,12 +34,18 @@ function hojaResumen({ nombre, tipo, cedula, telefono, prestamos, movimientos, s
   const activos     = prestamos.filter((p) => p.estado === 'Activo');
   const cerrados    = prestamos.filter((p) => p.estado !== 'Activo');
   const deudaTotal  = activos.reduce((s, p) => s + (Number(p.valor_prestamo) - Number(p.total_abonado)), 0);
+  // La mora va aparte del "total pagado": es un ingreso financiero, no un pago
+  // del producto. Sumarla ahí haría creer que el cliente abonó más de lo que
+  // abonó a su deuda.
+  const ES_MORA     = (t) => t === 'mora_cobro' || t === 'mora_condonacion';
   const cargos      = movimientos.filter((m) => m.tipo === 'prestamo');
-  const abonos      = movimientos.filter((m) => m.tipo !== 'prestamo' && m.tipo !== 'compra_directa');
+  const abonos      = movimientos.filter((m) => m.tipo !== 'prestamo' && m.tipo !== 'compra_directa' && !ES_MORA(m.tipo));
   const compras     = movimientos.filter((m) => m.tipo === 'compra_directa');
+  const morasCobro  = movimientos.filter((m) => m.tipo === 'mora_cobro');
   const sumaCargos  = cargos.reduce((s, m) => s + Number(m.cargo  || 0), 0);
   const sumaAbonos  = abonos.reduce((s, m) => s + Number(m.abono  || 0), 0);
   const sumaCompras = compras.reduce((s, m) => s + Number(m.abono || 0), 0);
+  const sumaMora    = morasCobro.reduce((s, m) => s + Number(m.abono || 0), 0);
 
   const tipoLabel = tipo === 'prestatario' || tipo === 'companero' ? 'Compañero' : 'Cliente';
 
@@ -65,6 +74,7 @@ function hojaResumen({ nombre, tipo, cedula, telefono, prestamos, movimientos, s
     ['Total préstamos',      'n', sumaCargos,         C.headerOscuro, true ],
     ['Total pagado',         'n', sumaAbonos,         '16A34A',       true ],
     ['Compras de artículos', 'n', sumaCompras,        '5B21B6',       true ],
+    ['Mora cobrada',         'n', sumaMora,           sumaMora > 0 ? 'B91C1C' : C.gris600, true ],
     ['Préstamos activos',    'n', activos.length,     'DC2626',       false],
     ['Préstamos cerrados',   'n', cerrados.length,    '16A34A',       false],
     ['Movimientos totales',  'n', movimientos.length, C.gris600,      false],

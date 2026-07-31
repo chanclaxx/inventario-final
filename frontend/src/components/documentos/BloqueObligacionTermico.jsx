@@ -61,6 +61,23 @@ export function EstadoObligacionTermico({ resumen, fuenteSize = 13 }) {
       <div className="linea-punteada" />
       <Fila label="SALDO PENDIENTE:" valor={formatCOP(resumen.saldo)} negrita grande />
 
+      {/* La mora es deuda aparte del producto: se lista debajo del saldo y con
+          el total real que el cliente debe pagar. Sin esto, un documento con el
+          producto pagado se veía en cero aunque siguiera debiendo intereses. */}
+      {(Number(resumen.mora_causada || 0) > 0 || Number(resumen.mora_pendiente || 0) > 0) && (
+        <>
+          <Fila label="Mora causada:" valor={formatCOP(resumen.mora_causada)} />
+          {Number(resumen.mora_cobrada || 0) > 0 && (
+            <Fila label="Mora cobrada:" valor={`- ${formatCOP(resumen.mora_cobrada)}`} />
+          )}
+          {Number(resumen.mora_condonada || 0) > 0 && (
+            <Fila label="Mora condonada:" valor={`- ${formatCOP(resumen.mora_condonada)}`} />
+          )}
+          <Fila label="Mora pendiente:" valor={formatCOP(resumen.mora_pendiente)} negrita />
+          <Fila label="TOTAL A PAGAR:" valor={formatCOP(resumen.total_a_pagar)} negrita grande />
+        </>
+      )}
+
       {/* Fechas y plazo */}
       {(resumen.fecha_limite || resumen.fecha_ultimo_abono) && (
         <>
@@ -79,9 +96,6 @@ export function EstadoObligacionTermico({ resumen, fuenteSize = 13 }) {
           )}
           {resumen.vencido && resumen.dias_atraso > 0 && (
             <Fila label="Días de atraso:" valor={String(resumen.dias_atraso)} negrita />
-          )}
-          {Number(resumen.mora?.pendiente || 0) > 0 && (
-            <Fila label="Mora causada:" valor={formatCOP(resumen.mora.pendiente)} negrita />
           )}
         </>
       )}
@@ -146,6 +160,47 @@ export function HistorialAbonosTermico({ resumen }) {
       <div className="linea-punteada" />
       <Fila label="Total abonado:" valor={formatCOP(resumen.total_abonado)} negrita />
       <Fila label="Saldo restante:" valor={formatCOP(resumen.saldo)} negrita />
+
+      <MovimientosMoraTermico resumen={resumen} />
+    </>
+  );
+}
+
+// ─── Cobros y condonaciones de mora ───────────────────────────────────────────
+//
+// Van en su propio bloque, nunca dentro del historial de abonos: el abono baja
+// el precio del producto y la mora es un ingreso financiero. Mezclarlos haría
+// creer que el cliente pagó más del producto de lo que pagó.
+
+export function MovimientosMoraTermico({ resumen }) {
+  const movs = resumen?.mora_movimientos || [];
+  if (!movs.length && !(Number(resumen?.mora_pendiente || 0) > 0)) return null;
+
+  return (
+    <>
+      <div className="linea-punteada" />
+      <div className="negrita">INTERESES DE MORA</div>
+      {movs.length > 0 && (
+        <table className="tabla-abonos">
+          <thead>
+            <tr>
+              <th>Fecha</th>
+              <th>Concepto</th>
+              <th className="der">Valor</th>
+            </tr>
+          </thead>
+          <tbody>
+            {movs.map((m, i) => (
+              <tr key={m.id ?? i}>
+                <td>{formatFecha(m.fecha)}</td>
+                <td>{m.es_cobro ? `Cobro${m.metodo ? ` ${m.metodo}` : ''}` : 'Condonada'}</td>
+                <td className="der">{formatCOP(m.valor)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <Fila label="Mora pendiente:" valor={formatCOP(resumen.mora_pendiente)} negrita />
     </>
   );
 }

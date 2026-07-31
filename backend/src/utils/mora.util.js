@@ -28,6 +28,12 @@
 //   5. Los días se cuentan en America/Bogota, no en UTC. A partir de las 19:00
 //      de Colombia `toISOString()` ya devuelve el día siguiente.
 //
+//   6. Capital y mora son deudas SEPARADAS, y la obligación no se cierra hasta
+//      que las dos estén en cero. El abono baja el capital; la mora se cobra
+//      con su propia acción. Un préstamo con el producto pagado pero con
+//      intereses pendientes sigue Activo (`solo_falta_mora`), y es al cobrar o
+//      condonar esa mora cuando queda saldado y se genera su factura.
+//
 // Este módulo es PURO: sin base de datos, sin red. Es la ÚNICA implementación
 // de la fórmula — el frontend no la duplica, recibe los valores ya calculados.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -300,6 +306,12 @@ const resolverEstadoMora = ({ saldo, fecha_limite, condicion, movimientos = [], 
   const cobrada   = Math.round(sumar('Cobro'));
   const condonada = Math.round(sumar('Condonacion'));
 
+  // El capital que queda debiéndose. Se expone junto al estado de mora porque
+  // de los dos juntos depende si la obligación puede cerrarse: desde julio de
+  // 2026 un documento con mora pendiente NO queda saldado aunque el capital
+  // esté en cero (ver `solo_falta_mora`).
+  const capital = Math.max(0, Math.round(Number(saldo) || 0));
+
   // Sin plazo o sin condición pactada: el documento simplemente no tiene mora.
   if (!limite || !cond) {
     return {
@@ -307,6 +319,7 @@ const resolverEstadoMora = ({ saldo, fecha_limite, condicion, movimientos = [], 
       dias_vencidos: 0, dias_cobrables: 0,
       causada: 0, cobrada, condonada, pendiente: 0,
       vencido: false, descripcion: '',
+      saldo_capital: capital, total_a_pagar: capital, solo_falta_mora: false,
     };
   }
 
@@ -314,6 +327,10 @@ const resolverEstadoMora = ({ saldo, fecha_limite, condicion, movimientos = [], 
   const causada = calcularMoraCausada({
     saldo, fecha_limite: limite, condicion: cond, hoy, abonos,
   });
+
+  // Nunca negativa: si se condonó/cobró más de lo causado (porque el saldo
+  // bajó después), el pendiente es 0, no un saldo a favor sorpresa.
+  const pendiente = Math.max(0, causada - cobrada - condonada);
 
   return {
     aplica:        true,
@@ -324,11 +341,16 @@ const resolverEstadoMora = ({ saldo, fecha_limite, condicion, movimientos = [], 
     causada,
     cobrada,
     condonada,
-    // Nunca negativa: si se condonó/cobró más de lo causado (porque el saldo
-    // bajó después), el pendiente es 0, no un saldo a favor sorpresa.
-    pendiente:     Math.max(0, causada - cobrada - condonada),
+    pendiente,
     vencido:       dias_vencidos > 0,
     descripcion:   describirCondicion(cond),
+
+    // Capital y mora, separados y sumados. `solo_falta_mora` es el caso nuevo:
+    // el cliente ya pagó todo el producto pero debe los intereses, así que el
+    // documento sigue abierto y no se le puede dar paz y salvo.
+    saldo_capital:   capital,
+    total_a_pagar:   capital + pendiente,
+    solo_falta_mora: capital <= 0 && pendiente > 0,
   };
 };
 

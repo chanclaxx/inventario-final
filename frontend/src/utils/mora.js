@@ -14,11 +14,17 @@ export const TIPO_DIARIA_FIJA = 'diaria_fija';
 
 export const MAX_CONDICIONES = 12;
 
-/** Modos de imputación de un abono, tal como los pidió el negocio. */
+/**
+ * Modos de imputación de un abono.
+ *
+ * El primero es el que se usa por defecto: el abono paga el PRODUCTO y nada
+ * más. La mora se cobra aparte, con su propio botón, para que el vendedor no
+ * tenga que adivinar en qué se convirtió el pago que acaba de recibir.
+ */
 export const MODOS_ABONO = [
-  { id: 'mora_capital',  label: 'Mora y capital', descripcion: 'Cubre primero los intereses y el resto baja la deuda' },
-  { id: 'solo_capital',  label: 'Solo capital',   descripcion: 'Todo baja la deuda; la mora queda pendiente' },
-  { id: 'personalizado', label: 'Personalizada',  descripcion: 'Tú decides cuánto va a mora' },
+  { id: 'solo_capital',  label: 'Solo el préstamo', descripcion: 'Todo baja la deuda del producto; la mora se cobra aparte' },
+  { id: 'mora_capital',  label: 'Mora y préstamo',  descripcion: 'Cubre primero los intereses y el resto baja la deuda' },
+  { id: 'personalizado', label: 'Personalizada',    descripcion: 'Tú decides cuánto va a mora' },
 ];
 
 /** Lee `mora_lista` sin lanzar: un JSON corrupto degrada a lista vacía. */
@@ -97,6 +103,10 @@ export const sumarDias = (iso, dias) => {
  */
 export const estadoVisual = (mora) => {
   if (!mora?.aplica) return null;
+  if (mora.solo_falta_mora) {
+    // El producto ya se pagó; la deuda que queda es solo de intereses.
+    return { tono: 'ambar', texto: 'Producto pagado · solo falta la mora' };
+  }
   if (mora.pendiente > 0) {
     return { tono: 'rojo', texto: `Vencido hace ${mora.dias_vencidos} día(s)` };
   }

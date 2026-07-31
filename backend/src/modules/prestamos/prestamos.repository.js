@@ -726,7 +726,8 @@ const getEstadoCuenta = async (executor, negocioId, tipo, personaId, sucursalId 
   }
 
   const { rows } = await executor.query(`
-    SELECT fecha, tipo, concepto, cargo, abono, referencia_id, anulable, prestamo_estado
+    SELECT fecha, tipo, concepto, cargo, abono, referencia_id, anulable,
+           prestamo_id, prestamo_estado
     FROM (
 
       -- Préstamos otorgados (aumentan deuda)
@@ -813,6 +814,34 @@ const getEstadoCuenta = async (executor, negocioId, tipo, personaId, sucursalId 
         AND r.persona_id   = $2
         AND (r.sucursal_id IS NULL OR su.negocio_id = $1)
         ${filtroSucursalRetoma}
+
+      UNION ALL
+
+      -- Mora: cobros y condonaciones de intereses por pago tardío.
+      -- Son INFORMATIVOS: la mora es una deuda financiera aparte y no entra en
+      -- el saldo de capital que acumula esta cuenta (igual que en créditos).
+      -- Antes no aparecían y el cliente no tenía cómo ver qué se le cobró.
+      SELECT
+        mm.fecha,
+        CASE mm.tipo WHEN 'Cobro' THEN 'mora_cobro' ELSE 'mora_condonacion' END::text AS tipo,
+        CASE mm.tipo
+          WHEN 'Cobro' THEN 'Mora cobrada ' || COALESCE(mm.metodo, '')
+          ELSE 'Mora condonada' || COALESCE(' — ' || mm.motivo, '')
+        END || ' — préstamo #' || COALESCE(p.numero, p.id)::text
+             || COALESCE(' (' || NULLIF(mm.dias_mora, 0)::text || ' días de atraso)', '')
+                                                       AS concepto,
+        NULL::numeric                                  AS cargo,
+        mm.valor::numeric                              AS abono,
+        mm.id                                          AS referencia_id,
+        false                                          AS anulable,
+        mm.prestamo_id                                 AS prestamo_id,
+        NULL::text                                     AS prestamo_estado
+      FROM movimientos_mora mm
+      JOIN prestamos  p  ON p.id  = mm.prestamo_id
+      JOIN sucursales su ON su.id = p.sucursal_id
+      WHERE su.negocio_id = $1 AND ${filtroPersona}
+        AND NOT mm.anulado
+        ${filtroSucursalPrestamo}
 
     ) movs
     ORDER BY fecha ASC NULLS LAST, referencia_id ASC

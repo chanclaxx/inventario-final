@@ -21,7 +21,7 @@ const {
 // Bloques de obligación (estado, fechas, abonos, condiciones), compartidos con
 // el comprobante de préstamo, el aviso de mora y el paz y salvo.
 const {
-  bloqueEstadoObligacion, bloqueFechas, tablaAbonos, bloqueCondiciones,
+  bloqueEstadoObligacion, bloqueFechas, tablaAbonos, tablaMovimientosMora, bloqueCondiciones,
 } = require('../../utils/obligacion.pdf');
 
 // ─── Helpers propios de la factura ────────────────────────────────────────────
@@ -514,6 +514,9 @@ function seccionCredito(doc, credito, y) {
   y = bloqueEstadoObligacion(doc, resumen, y, { titulo: 'Estado del crédito' });
   y = bloqueFechas(doc, resumen, y);
   y = tablaAbonos(doc, resumen, y);
+  // Los intereses de mora van en su propia tabla: no se mezclan con los abonos
+  // al producto (que son los que definen la utilidad de la venta).
+  y = tablaMovimientosMora(doc, resumen, y);
   y = bloqueCondiciones(doc, resumen, y);
 
   return y;

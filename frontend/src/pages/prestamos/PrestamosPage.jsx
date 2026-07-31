@@ -1439,7 +1439,7 @@ function TarjetaPrestamoDetalle({ prestamo, onAbonar, onDevolver, onImprimir, on
             documento={prestamo}
             configMora={configMora}
             metodosPago={metodosPagoMora}
-            invalidar={[['prestamos'], ['estado-cuenta'], ['caja']]}
+            invalidar={[['prestamos'], ['estado-cuenta'], ['caja'], ['facturas']]}
             api={{
               fijarPlazo:   (d) => fijarPlazoPrestamo(prestamo.id, d),
               cobrarMora:   (d) => cobrarMoraPrestamo(prestamo.id, d),
@@ -2305,6 +2305,19 @@ function TipoPrestamoBadge({ prestatarioId }) {
 function BadgeVencido({ mora }) {
   if (!mora?.aplica || !mora.vencido) return null;
   const hayPendiente = Number(mora.pendiente) > 0;
+
+  // Producto ya pagado y solo faltan los intereses: el préstamo sigue abierto
+  // por eso y no por el equipo, así que conviene decirlo con esas palabras.
+  if (mora.solo_falta_mora) {
+    return (
+      <span className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full
+        bg-amber-50 text-amber-700 border border-amber-200">
+        <AlertTriangle size={10} />
+        Solo falta la mora · {formatCOP(mora.pendiente)}
+      </span>
+    );
+  }
+
   return (
     <span className={`inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full
       ${hayPendiente ? 'bg-red-50 text-red-600 border border-red-200'

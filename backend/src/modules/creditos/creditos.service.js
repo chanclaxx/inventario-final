@@ -22,17 +22,46 @@ const getCreditoById = async (negocioId, id) => {
   return { ...credito, abonos, resumen, persona, lineas, descripcion };
 };
 
+// ── Cierre del crédito: capital Y mora en cero ───────────────────────────────
+//
+// ÚNICO lugar donde un crédito pasa a 'Saldado'. Lo llaman el abono, el cobro
+// de mora y la condonación. Antes bastaba con cubrir el capital y la mora
+// quedaba colgando de una factura ya cerrada; ahora son dos deudas y el crédito
+// sigue abierto mientras quede cualquiera de las dos.
+const cerrarSiPagadoEnTx = async (client, creditoId, negocioId) => {
+  const { documento, saldo_capital, mora } = await moraService.estadoDe(
+    'credito', creditoId, negocioId, client
+  );
+
+  const capitalPendiente = Math.max(0, Math.round(Number(saldo_capital) || 0));
+  const moraPendiente    = Math.max(0, Math.round(Number(mora?.pendiente) || 0));
+  const base = {
+    saldado: false, factura_id: null,
+    capital_pendiente: capitalPendiente,
+    mora_pendiente:    moraPendiente,
+  };
+
+  if (documento.estado === 'Saldado' || documento.estado === 'Cancelado') return base;
+  if (capitalPendiente > 0 || moraPendiente > 0) return base;
+
+  await repo.updateEstado(client, creditoId, 'Saldado');
+  return { ...base, saldado: true };
+};
+
 // ── Registrar abono ──────────────────────────────────────────────────────────
 //
-// `modo` decide cómo se reparte el pago entre mora y capital:
+// El abono paga el PRODUCTO: por defecto baja el capital y nada más. La mora se
+// cobra aparte (o se condona), y hasta entonces el crédito no queda saldado.
+//
+// `modo` sigue permitiendo repartirlo desde la misma pantalla:
+//   'solo_capital'  → (por defecto) todo a capital; la mora queda PENDIENTE
 //   'mora_capital'  → primero la mora (orden del Art. 1653 C.C.), resto a capital
-//   'solo_capital'  → todo a capital; la mora queda PENDIENTE, no condonada
 //   'personalizado' → `valor_mora` va a mora, el resto a capital
 //
 // Si el crédito no tiene plazo, la mora pendiente es 0 y los tres modos se
 // comportan igual que antes de existir esta feature.
 const registrarAbono = async (negocioId, creditoId, {
-  usuario_id, valor, metodo, notas, modo = 'mora_capital', valor_mora = 0,
+  usuario_id, valor, metodo, notas, modo = 'solo_capital', valor_mora = 0,
 }) => {
   const credito = await repo.findByIdYNegocio(creditoId, negocioId);
   if (!credito) throw { status: 404, message: 'Crédito no encontrado' };
@@ -50,11 +79,15 @@ const registrarAbono = async (negocioId, creditoId, {
       'credito', creditoId, negocioId, client
     );
 
+    // Con el capital ya cubierto lo único que queda por pagar es la mora: el
+    // abono se imputa entero ahí en vez de rebotar por "excedente".
+    const modoEfectivo = (saldo_capital <= 0 && mora.pendiente > 0) ? 'mora_capital' : modo;
+
     const reparto = repartirAbono({
       valor,
       mora_pendiente: mora.pendiente,
       saldo_capital,
-      modo,
+      modo: modoEfectivo,
       valor_mora,
     });
 
@@ -98,12 +131,9 @@ const registrarAbono = async (negocioId, creditoId, {
       });
     }
 
-    // Se cierra solo cuando el CAPITAL queda en cero. La mora pendiente no
-    // impide saldar el crédito: es una deuda aparte y visible.
+    // Se cierra solo si no queda NADA por cobrar: capital y mora en cero.
     const nuevoSaldo = Number(resultado.valor_total) - Number(resultado.cuota_inicial) - Number(resultado.total_abonado);
-    if (nuevoSaldo <= 0) {
-      await repo.updateEstado(client, creditoId, 'Saldado');
-    }
+    const cierre = await cerrarSiPagadoEnTx(client, creditoId, negocioId);
 
     await client.query('COMMIT');
 
@@ -112,6 +142,10 @@ const registrarAbono = async (negocioId, creditoId, {
       ...resultado,
       sucursal_id:  documento.sucursal_id,
       saldo:        Math.max(0, nuevoSaldo),
+      saldado:      cierre.saldado,
+      // Producto pagado pero con intereses debiéndose: la pantalla lo usa para
+      // ofrecer el cobro de la mora en vez de dar la deuda por cerrada.
+      solo_falta_mora: !cierre.saldado && cierre.capital_pendiente <= 0 && cierre.mora_pendiente > 0,
       abonado_capital: reparto.a_capital,
       abonado_mora:    reparto.a_mora,
       movimiento_mora: movimientoMora,
@@ -299,10 +333,14 @@ const cobrarMora = async (negocioId, creditoId, { valor, metodo, usuario_id }) =
       tipo: 'credito', documento, negocioId,
       valor: aCobrar, metodo, usuarioId: usuario_id, estadoMora: mora,
     });
+
+    // Si con este cobro ya no se debe nada, el crédito queda saldado.
+    const cierre = await cerrarSiPagadoEnTx(client, creditoId, negocioId);
+
     await client.query('COMMIT');
 
     const despues = await moraService.estadoDe('credito', creditoId, negocioId);
-    return { movimiento: mov, mora: despues.mora };
+    return { movimiento: mov, mora: despues.mora, saldado: cierre.saldado };
   } catch (err) {
     await client.query('ROLLBACK');
     throw err;
@@ -315,4 +353,7 @@ module.exports = {
   getCreditos, getCreditoById, registrarAbono, saldarCredito, cancelarCredito,
   getEstadoCuenta, getResumenCuenta, getDocumento,
   fijarPlazo, condonarMora, cobrarMora,
+  // Lo usa mora.service para cerrar el crédito cuando se cobra o se condona la
+  // última mora pendiente.
+  cerrarSiPagadoEnTx,
 };

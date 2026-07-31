@@ -45,7 +45,18 @@ const bloqueEstadoObligacion = (doc, resumen, y, { titulo = 'Estado de la obliga
   filas.push([`Total abonado (${resumen.num_abonos} abono${resumen.num_abonos === 1 ? '' : 's'})`,
     `- ${formatCOP(resumen.total_abonado)}`]);
 
-  const H = 52 + filas.length * 16 + 30;
+  // Mora: se muestra dentro del estado, no en un anexo. Es deuda del cliente y
+  // el documento tiene que decirlo aunque el capital ya esté en cero — de hecho
+  // sobre todo en ese caso, que es cuando la obligación sigue abierta solo por
+  // los intereses.
+  const conMora = resumen.mora_causada > 0 || resumen.mora_pendiente > 0;
+  if (conMora) {
+    filas.push(['Mora causada', formatCOP(resumen.mora_causada)]);
+    if (resumen.mora_cobrada > 0)   filas.push(['Mora cobrada',   `- ${formatCOP(resumen.mora_cobrada)}`]);
+    if (resumen.mora_condonada > 0) filas.push(['Mora condonada', `- ${formatCOP(resumen.mora_condonada)}`]);
+  }
+
+  const H = 52 + filas.length * 16 + 30 + (conMora ? 34 : 0);
   rectFillStroke(doc, MARGIN, y, CONTENT_W, H, C.grisFondo, C.grisBorde, 8);
 
   // Badge de estado arriba a la derecha
@@ -73,11 +84,27 @@ const bloqueEstadoObligacion = (doc, resumen, y, { titulo = 'Estado de la obliga
   // Saldo pendiente: la cifra que importa, resaltada
   hLine(doc, yf + 2, { x1: MARGIN + 14, x2: PAGE_W - MARGIN - 14, color: C.grisBorde });
   doc.font(FONT.bold).fontSize(10).fillColor(C.grisOscuro)
-    .text(resumen.pagada ? 'SALDO PENDIENTE' : 'SALDO PENDIENTE', MARGIN + 14, yf + 12,
+    .text('SALDO PENDIENTE', MARGIN + 14, yf + 12,
       { width: CONTENT_W * 0.5, lineBreak: false });
-  doc.font(FONT.bold).fontSize(14).fillColor(resumen.pagada ? C.verde : tono.fg)
+  doc.font(FONT.bold).fontSize(14).fillColor(resumen.saldo > 0 ? tono.fg : C.verde)
     .text(formatCOP(resumen.saldo), MARGIN, yf + 9,
       { width: CONTENT_W - 14, align: 'right', lineBreak: false });
+
+  // Con mora pendiente, el saldo de capital NO es lo que el cliente debe pagar:
+  // se agrega el renglón de intereses y el total real de la deuda.
+  if (conMora) {
+    doc.font(FONT.normal).fontSize(8.5).fillColor(C.grisOscuro)
+      .text('Mora pendiente', MARGIN + 14, yf + 30, { width: CONTENT_W * 0.5, lineBreak: false });
+    doc.font(FONT.bold).fontSize(9).fillColor(resumen.mora_pendiente > 0 ? C.rojo : C.verde)
+      .text(formatCOP(resumen.mora_pendiente), MARGIN, yf + 30,
+        { width: CONTENT_W - 14, align: 'right', lineBreak: false });
+
+    doc.font(FONT.bold).fontSize(9).fillColor(C.grisOscuro)
+      .text('TOTAL A PAGAR', MARGIN + 14, yf + 44, { width: CONTENT_W * 0.5, lineBreak: false });
+    doc.font(FONT.bold).fontSize(11).fillColor(resumen.total_a_pagar > 0 ? tono.fg : C.verde)
+      .text(formatCOP(resumen.total_a_pagar), MARGIN, yf + 42,
+        { width: CONTENT_W - 14, align: 'right', lineBreak: false });
+  }
 
   return y + H + 20;
 };
@@ -197,6 +224,80 @@ const tablaAbonos = (doc, resumen, y, { titulo = 'Historial de abonos' } = {}) =
       .text(formatCOP(resumen.saldo), MARGIN + COL_F + COL_M + COL_V, yf + 6.5,
         { width: COL_S - 12, align: 'right', lineBreak: false });
   }
+
+  return y + H + 20;
+};
+
+// ─── Bloque: movimientos de mora ─────────────────────────────────────────────
+
+/**
+ * Cobros y condonaciones de mora del documento.
+ *
+ * Va aparte del historial de abonos a propósito: un abono baja el precio del
+ * producto y la mora es un ingreso financiero, y mezclarlos haría creer que el
+ * cliente pagó más del producto de lo que pagó. Sin este bloque, el cliente que
+ * pagó intereses no tenía dónde verlos.
+ */
+const tablaMovimientosMora = (doc, resumen, y, { titulo = 'Intereses de mora' } = {}) => {
+  const movs = resumen.mora_movimientos || [];
+  if (!movs.length && !(resumen.mora_pendiente > 0)) return y;
+
+  y = labelSeccion(doc, y, `${titulo}${movs.length ? ` (${movs.length})` : ''}`);
+
+  const HEAD_H = 22;
+  const ROW_H  = 17;
+  const nFilas = movs.length || 1;
+  const H = HEAD_H + nFilas * ROW_H + 22;
+
+  y = asegurarEspacio(doc, y, Math.min(H + 20, 260));
+  rectFillStroke(doc, MARGIN, y, CONTENT_W, H, C.blanco, C.grisBorde, 8);
+
+  const COL_F = CONTENT_W * 0.24;   // fecha
+  const COL_C = CONTENT_W * 0.46;   // concepto
+  const COL_V = CONTENT_W - COL_F - COL_C; // valor
+
+  rectFill(doc, MARGIN, y, CONTENT_W, HEAD_H, C.negro, 8);
+  doc.rect(MARGIN, y + 12, CONTENT_W, HEAD_H - 12).fill(C.negro);
+  doc.font(FONT.bold).fontSize(7).fillColor(C.blanco)
+    .text('Fecha',    MARGIN + 12,            y + 7.5, { width: COL_F - 12, characterSpacing: 0.4 })
+    .text('Concepto', MARGIN + COL_F,         y + 7.5, { width: COL_C,      characterSpacing: 0.4 })
+    .text('Valor',    MARGIN + COL_F + COL_C, y + 7.5, { width: COL_V - 12, align: 'right', characterSpacing: 0.4 });
+
+  let yf = y + HEAD_H;
+
+  if (!movs.length) {
+    doc.font(FONT.normal).fontSize(8).fillColor(C.grisClaro)
+      .text('Sin cobros de mora registrados', MARGIN + 12, yf + 5, { width: CONTENT_W - 24 });
+    yf += ROW_H;
+  } else {
+    movs.forEach((m, i) => {
+      if (i % 2 === 1) doc.rect(MARGIN, yf, CONTENT_W, ROW_H).fill(C.filaAlterna);
+      if (i > 0) hLine(doc, yf, { color: C.grisBorde, width: 0.4 });
+
+      const concepto = m.es_cobro
+        ? `Cobro de mora${m.metodo ? ` · ${m.metodo}` : ''}`
+        : `Condonada${m.motivo ? ` · ${m.motivo}` : ''}`;
+
+      doc.font(FONT.normal).fontSize(7.5).fillColor(C.grisOscuro)
+        .text(formatFecha(m.fecha), MARGIN + 12, yf + 5, { width: COL_F - 12, lineBreak: false });
+      doc.font(FONT.normal).fontSize(7.5).fillColor(C.grisOscuro)
+        .text(concepto, MARGIN + COL_F, yf + 5, { width: COL_C, lineBreak: false, ellipsis: true });
+      doc.font(FONT.bold).fontSize(8).fillColor(m.es_cobro ? C.verde : C.grisClaro)
+        .text(formatCOP(m.valor), MARGIN + COL_F + COL_C, yf + 5,
+          { width: COL_V - 12, align: 'right', lineBreak: false });
+
+      yf += ROW_H;
+    });
+  }
+
+  // Cierre: lo que todavía se debe de intereses.
+  rectFill(doc, MARGIN, yf, CONTENT_W, 22, C.grisFondo, 0);
+  hLine(doc, yf, { color: C.grisBorde });
+  doc.font(FONT.bold).fontSize(8).fillColor(C.grisOscuro)
+    .text('MORA PENDIENTE', MARGIN + 12, yf + 7, { width: COL_F + COL_C - 12, lineBreak: false });
+  doc.font(FONT.bold).fontSize(8.5).fillColor(resumen.mora_pendiente > 0 ? C.rojo : C.verde)
+    .text(formatCOP(resumen.mora_pendiente), MARGIN + COL_F + COL_C, yf + 6.5,
+      { width: COL_V - 12, align: 'right', lineBreak: false });
 
   return y + H + 20;
 };
@@ -486,6 +587,7 @@ const generarPazYSalvo = ({ config, persona, resumen, descripcion, logo = null }
 };
 
 module.exports = {
-  bloqueEstadoObligacion, bloqueFechas, tablaAbonos, bloqueCondiciones, bloquePersona,
+  bloqueEstadoObligacion, bloqueFechas, tablaAbonos, tablaMovimientosMora,
+  bloqueCondiciones, bloquePersona,
   generarAvisoMora, generarPazYSalvo,
 };

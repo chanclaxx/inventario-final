@@ -54,9 +54,9 @@ function ModalAbonoCredito({ credito, onClose }) {
   const [metodo, setMetodo] = useState('Efectivo');
   const [notas,  setNotas]  = useState('');
   const [error,  setError]  = useState('');
-  // Imputación del abono cuando hay mora pendiente (los 3 modos que pidió el
-  // negocio). Sin mora, el modo es irrelevante y no se muestra.
-  const [modo,      setModo]      = useState('mora_capital');
+  // Imputación del abono cuando hay mora pendiente. Por defecto el abono paga
+  // SOLO la venta: la mora se cobra aparte y es lo último que cierra el crédito.
+  const [modo,      setModo]      = useState('solo_capital');
   const [valorMora, setValorMora] = useState('');
   // Recibo del abono con desglose capital/mora.
   const [recibo,    setRecibo]    = useState(null);

@@ -189,6 +189,18 @@ export function PanelMora({
         </span>
       </div>
 
+      {/* El producto ya está pagado y lo único que mantiene abierta la deuda son
+          los intereses: decirlo evita que el vendedor crea que el sistema no
+          cerró el documento por error. */}
+      {mora.solo_falta_mora && (
+        <div className="bg-white/70 rounded-lg px-2.5 py-2">
+          <p className="text-[11px] text-gray-600">
+            El capital ya está pagado. Al cobrar (o no cobrar) esta mora, el documento
+            queda saldado.
+          </p>
+        </div>
+      )}
+
       {/* Acciones */}
       {hayPendiente && !vista && (
         <div className="flex gap-2">

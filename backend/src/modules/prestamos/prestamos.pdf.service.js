@@ -9,7 +9,7 @@ const repo        = require('./prestamos.repository');
 // idénticos en estructura y en cifras.
 const { resumirObligacion } = require('../../utils/obligacion');
 const {
-  bloqueEstadoObligacion, bloqueFechas, tablaAbonos, bloqueCondiciones,
+  bloqueEstadoObligacion, bloqueFechas, tablaAbonos, tablaMovimientosMora, bloqueCondiciones,
   generarAvisoMora, generarPazYSalvo,
 } = require('../../utils/obligacion.pdf');
 
@@ -583,10 +583,15 @@ const generarPdfPrestamoIndividual = async ({ prestamoId, negocioId, negocioNomb
   // porque la migración de mora puede no estar aplicada en una base vieja: el
   // comprobante debe salir igual, solo sin el bloque de condiciones.
   let mora = null;
+  let moraMovimientos = [];
   if (datos.fecha_limite) {
     try {
       const moraService = require('../mora/mora.service');
-      ({ mora } = await moraService.estadoDe('prestamo', prestamoId, negocioId));
+      const estado = await moraService.estadoDe('prestamo', prestamoId, negocioId);
+      mora = estado.mora;
+      // Los cobros y condonaciones se imprimen en su propia tabla: el cliente
+      // tiene que poder ver qué intereses se le cobraron y cuándo.
+      moraMovimientos = estado.movimientos || [];
     } catch (err) {
       console.warn('[pdf-prestamo] Mora no incluida:', err.message);
     }
@@ -609,10 +614,13 @@ const generarPdfPrestamoIndividual = async ({ prestamoId, negocioId, negocioNomb
   y     = _bloquePrestatario(doc, datos, y);
   y     = _tablaDatosProducto(doc, datos, y);
   // Mismos bloques que la factura a crédito, alimentados por el mismo resumen.
-  const resumen = resumirObligacion({ tipo: 'prestamo', documento: datos, abonos, mora });
+  const resumen = resumirObligacion({
+    tipo: 'prestamo', documento: datos, abonos, mora, mora_movimientos: moraMovimientos,
+  });
   y     = bloqueEstadoObligacion(doc, resumen, y, { titulo: 'Estado del préstamo' });
   y     = bloqueFechas(doc, resumen, y);
   y     = tablaAbonos(doc, resumen, y);
+  y     = tablaMovimientosMora(doc, resumen, y);
   y     = bloqueCondiciones(doc, resumen, y);
   y     = _bloqueGarantias(doc, garantias, y);
 
@@ -640,6 +648,9 @@ const TIPO_LABEL = {
   pago_producto:  { label: 'Pago producto',   bg: '#EFF6FF', text: '#2563EB' },
   saldo_aplicado: { label: 'Saldo aplicado',  bg: '#F0FDFA', text: '#0D9488' },
   compra_directa: { label: 'Compra artículo', bg: '#F5F3FF', text: '#7C3AED' },
+  // Mismos colores que en el estado de cuenta de créditos.
+  mora_cobro:       { label: 'Mora',       bg: '#FEF2F2', text: '#DC2626' },
+  mora_condonacion: { label: 'Mora cond.', bg: '#F3F4F6', text: '#6B7280' },
 };
 
 const generarPdfEstadoCuenta = async ({ tipo, personaId, negocioId, negocioNombre, logoNegocio, sucursalId = null }) => {
@@ -713,10 +724,13 @@ const _documentoPrestamo = async (prestamoId, negocioId) => {
   const abonos = await repo.getAbonos(prestamoId);
 
   let mora = null;
+  let moraMovimientos = [];
   if (datos.fecha_limite) {
     try {
       const moraService = require('../mora/mora.service');
-      ({ mora } = await moraService.estadoDe('prestamo', prestamoId, negocioId));
+      const estado = await moraService.estadoDe('prestamo', prestamoId, negocioId);
+      mora = estado.mora;
+      moraMovimientos = estado.movimientos || [];
     } catch (err) {
       console.warn('[pdf-prestamo] Mora no incluida:', err.message);
     }
@@ -740,7 +754,9 @@ const _documentoPrestamo = async (prestamoId, negocioId) => {
       cedula:  datos.persona_cedula !== 'COMPANERO' ? datos.persona_cedula : null,
       celular: datos.persona_celular !== '0000000000' ? datos.persona_celular : null,
     },
-    resumen: resumirObligacion({ tipo: 'prestamo', documento: datos, abonos, mora }),
+    resumen: resumirObligacion({
+      tipo: 'prestamo', documento: datos, abonos, mora, mora_movimientos: moraMovimientos,
+    }),
     descripcion: descripcion || null,
   };
 };

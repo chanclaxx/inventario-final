@@ -8,7 +8,9 @@ import {
 import { formatCOP } from '../../utils/formatters';
 import { EstadoCuentaBase } from '../../components/EstadoCuenta/EstadoCuentaBase';
 import { ModalEditarValorPrestamo } from './ModalEditarValorPrestamo';
-import { TrendingDown, TrendingUp, ArrowLeftRight, Wallet, Layers, Pencil } from 'lucide-react';
+import {
+  TrendingDown, TrendingUp, ArrowLeftRight, Wallet, Layers, Pencil, AlertTriangle,
+} from 'lucide-react';
 
 // lado: 'derecha' = acción del negocio | 'izquierda' = acción del deudor
 const TIPO_CONFIG = {
@@ -60,6 +62,27 @@ const TIPO_CONFIG = {
     lado:       'izquierda',
     bubbleBg:   'bg-indigo-50 border border-indigo-200',
     montoClass: 'text-indigo-700',
+  },
+  // Mora: mismos colores y textos que en el estado de cuenta de créditos. Son
+  // informativos (no mueven el saldo de capital) pero tienen que aparecer: es
+  // plata que el cliente pagó o que el negocio dejó de cobrar.
+  mora_cobro: {
+    badge:      'bg-red-100 text-red-700',
+    label:      'Mora cobrada',
+    Icn:        AlertTriangle,
+    lado:       'izquierda',
+    bubbleBg:   'bg-red-50 border border-red-200',
+    montoClass: 'text-red-600',
+    sufijo:     'aparte del capital',
+  },
+  mora_condonacion: {
+    badge:      'bg-gray-100 text-gray-600',
+    label:      'Mora condonada',
+    Icn:        AlertTriangle,
+    lado:       'derecha',
+    bubbleBg:   'bg-gray-50 border border-gray-200',
+    montoClass: 'text-gray-500',
+    sufijo:     'aparte del capital',
   },
 };
 
