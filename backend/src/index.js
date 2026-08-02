@@ -131,6 +131,11 @@ const start = async () => {
     ? '🔔 Notificaciones push activas'
     : '🔕 Notificaciones push desactivadas (faltan VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY)');
 
+  // Avisos diarios (cartera vencida, plan por vencer, stock bajo). Si las
+  // notificaciones están apagadas, el cron ni se registra.
+  const { iniciarCronNotificaciones } = require('./modules/notificaciones/notificaciones.cron');
+  iniciarCronNotificaciones();
+
   app.listen(PORT, () => {
     console.log(`🚀 Servidor corriendo en http://localhost:${PORT}`);
   });

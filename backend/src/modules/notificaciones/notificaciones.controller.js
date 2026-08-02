@@ -42,6 +42,34 @@ const desuscribir = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+/**
+ * Cobros del día: los clientes vencidos, para llamarlos.
+ *
+ * Es la pantalla a la que lleva el aviso de cartera vencida, y sale de la MISMA
+ * función que usa el cron para contarlos: si el aviso dice 5, aquí salen esos 5.
+ *
+ * El vendedor y el supervisor solo ven su sucursal (`req.sucursal_id` lo resuelve
+ * el middleware). El admin ve TODO el negocio salvo que pida una sucursal
+ * explícita: para cobrar, lo útil es la lista completa, no la de una sede.
+ */
+const getCobros = async (req, res, next) => {
+  try {
+    const alertas = require('./notificaciones.alertas');
+    const sucursalId = req.user.rol === 'admin_negocio'
+      ? (req.query.sucursal_id ? Number(req.query.sucursal_id) : null)
+      : (req.sucursal_id ?? req.user.sucursal_id ?? null);
+
+    const data = await alertas.carteraVencida(req.user.negocio_id, sucursalId);
+
+    // El nombre del negocio va en el mensaje de WhatsApp que arma la pantalla:
+    // un cobro que llega firmado por la tienda se responde; uno anónimo, no.
+    const { pool } = require('../../config/db');
+    const { rows } = await pool.query('SELECT nombre FROM negocios WHERE id = $1', [req.user.negocio_id]);
+
+    res.json({ ok: true, data: { ...data, negocio_nombre: rows[0]?.nombre ?? null } });
+  } catch (err) { next(err); }
+};
+
 const prueba = async (req, res, next) => {
   try {
     const data = await service.enviarPrueba(req.user);
@@ -49,4 +77,4 @@ const prueba = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-module.exports = { getEstado, suscribir, desuscribir, prueba };
+module.exports = { getEstado, suscribir, desuscribir, prueba, getCobros };

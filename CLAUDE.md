@@ -73,6 +73,10 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > service worker viven en `frontend/public/push-sw.js`, inyectados con
 > `workbox.importScripts` (el SW lo genera Workbox y no se puede editar a mano).
 > En iOS solo funciona con la PWA instalada en la pantalla de inicio.
+> Los avisos automáticos (cartera vencida, plan por vencer, stock bajo) salen de
+> `notificaciones.alertas.js` — **la misma función que alimenta la pantalla
+> `/cobros`**, para que el aviso y la lista nunca digan cifras distintas — y los
+> dispara `notificaciones.cron.js` a las 8:00 America/Bogota (`NOTIF_CRON`).
 
 > **Tesorería**: los saldos por cuenta (efectivo/banco/billetera/corresponsal/divisa USD) se **derivan** de las tablas transaccionales existentes mapeando método de pago → cuenta, anclados en arqueos. Solo traslados/retiros/gastos se escriben en `movimientos_dinero`. Si cambian las reglas de qué entra/sale en `caja.repository.js`, replicarlas en `tesoreria.repository.js` (ramas marcadas). Los movimientos de efectivo se espejan en `movimientos_caja` con `referencia_tipo='tesoreria'`. Un pago de compra desde Tesorería crea un **Abono espejo** en `movimientos_acreedor` (`registrar_en_caja=FALSE`, `mov_dinero_id`) que salda la deuda del acreedor sin doble descuento; anular el pago elimina/recrea el espejo en cascada.
 

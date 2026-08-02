@@ -24,3 +24,12 @@ export const desuscribirPush = (endpoint) =>
 
 /** Envía un aviso de prueba al propio usuario. */
 export const enviarNotificacionPrueba = () => api.post('/notificaciones/prueba');
+
+/**
+ * Clientes con el plazo vencido, para llamarlos.
+ *
+ * Vive en este archivo (y no en creditos/prestamos) porque mezcla los dos y es
+ * la misma consulta que alimenta el aviso de cartera vencida: la pantalla y la
+ * notificación no pueden mostrar cuentas distintas.
+ */
+export const getCobros = (params = {}) => api.get('/notificaciones/cobros', { params });

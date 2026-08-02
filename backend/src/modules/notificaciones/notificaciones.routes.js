@@ -21,6 +21,10 @@ const validarSuscripcion = [
 ];
 
 router.get('/estado', ctrl.getEstado);
+// Cobros del día: es la pantalla a la que lleva el aviso de cartera vencida.
+// Vive en este módulo (y no en créditos o préstamos) porque mezcla los dos y es
+// la misma consulta que usa el cron para contar los vencidos.
+router.get('/cobros', ctrl.getCobros);
 router.post('/suscribir',   validarSuscripcion, validate, ctrl.suscribir);
 router.delete('/suscribir', ctrl.desuscribir);
 router.post('/prueba',      ctrl.prueba);

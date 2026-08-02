@@ -229,7 +229,7 @@ const enviarPrueba = async (usuario) => {
     usuario_id: usuario.id,
     titulo: 'Notificaciones activadas ✓',
     cuerpo: 'Si ves esto, tu dispositivo ya puede recibir avisos del sistema.',
-    url:    '/configuracion',
+    url:    '/config',
     tag:    'prueba',
     tipo:   'prueba',
   });

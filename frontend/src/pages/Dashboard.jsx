@@ -155,7 +155,9 @@ export default function Dashboard() {
             valor={vencidos}
             sub={`${formatCOP(data?.cartera_vencida?.capital_vencido || 0)} sin cobrar`}
             color="red"
-            onClick={() => navigate('/prestamos')}
+            // Lleva a Cobros, no a Préstamos: desde aquí lo que se quiere es
+            // llamar a los clientes, no revisar la lista completa de préstamos.
+            onClick={() => navigate('/cobros')}
           />
         )}
       </div>
