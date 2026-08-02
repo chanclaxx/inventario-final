@@ -14,6 +14,7 @@ import { PasswordConfig }    from './PasswordConfig';
 import { MetodosPagoConfig } from './MetodosPagoConfig';
 import { TarifasConfig }    from './TarifasConfig';
 import { MoraConfig }       from './MoraConfig';
+import { NotificacionesConfig } from './NotificacionesConfig';
 import { TiposCaracteristicaConfig } from './components/TiposCaracteristicaConfig';
 import { Button }   from '../../components/ui/Button';
 import { Input }    from '../../components/ui/Input';
@@ -26,13 +27,17 @@ import {
   Printer, Palette, ListChecks, Wallet, Layers,
   ChevronUp, ChevronDown, RotateCcw, Navigation,
   Upload, X, Image as ImageIcon, Download, Barcode, Percent, CalendarClock,
-  MapPin,
+  MapPin, Bell,
 } from 'lucide-react';
 
 // ─── Navegación principal ─────────────────────────────────────────────────────
 const SECCIONES = [
   { id: 'negocio',   label: 'Negocio',   Icn: Building2   },
   { id: 'catalogo',  label: 'Catálogo',  Icn: BookOpen    },
+  // Avisos va como sección propia y no dentro de Catálogo porque no configura el
+  // negocio: activa las notificaciones de ESTE dispositivo, y cada usuario del
+  // equipo entra a activarlas en el suyo.
+  { id: 'avisos',    label: 'Avisos',    Icn: Bell        },
   { id: 'seguridad', label: 'Seguridad', Icn: ShieldCheck },
   { id: 'equipo',    label: 'Equipo',    Icn: Users       },
 ];
@@ -1587,6 +1592,7 @@ export default function ConfigPage() {
           />
           {seccionActiva === 'negocio'   && <SeccionNegocio   valores={valores} set={set} />}
           {seccionActiva === 'catalogo'  && <SeccionCatalogo  valores={valores} set={set} />}
+          {seccionActiva === 'avisos'    && <NotificacionesConfig />}
           {seccionActiva === 'seguridad' && <SeccionSeguridad form={form}       set={set} />}
           {seccionActiva === 'equipo'    && <SeccionEquipo valores={valores} set={set} />}
         </div>

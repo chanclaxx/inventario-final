@@ -12,8 +12,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Backend (`/backend`)
 ```bash
-npm run dev      # nodemon dev server on port 3001
-npm start        # production
+pnpm dev         # nodemon dev server on port 3001
+pnpm start       # production
 ```
 
 ### Frontend (`/frontend`)
@@ -24,7 +24,11 @@ pnpm lint        # ESLint
 pnpm preview     # preview production build
 ```
 
-> Frontend uses **pnpm**, backend uses **npm**.
+> Ambos usan **pnpm** (el único lockfile versionado en los dos es `pnpm-lock.yaml`).
+> El `backend/package.json` declara `packageManager: npm`, que ya no corresponde: hay
+> que instalar con `pnpm add <pkg> --config.package-manager-strict=false`. Correr `npm
+> install` ahí revienta con `Cannot read properties of null (reading 'matches')`, porque
+> el árbol de `node_modules` es de pnpm.
 
 ---
 
@@ -56,7 +60,19 @@ All 27 feature modules under `backend/src/` follow the same layered structure:
   repository.js   → Raw SQL queries via pg pool
 ```
 
-Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `facturas`, `caja`, `creditos`, `prestamos`, `reportes`, `sucursales`, `superadmin`, `tesoreria`.
+Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `facturas`, `caja`, `creditos`, `prestamos`, `reportes`, `sucursales`, `superadmin`, `tesoreria`, `notificaciones`.
+
+> **Notificaciones push** (`notificaciones`): Web Push con VAPID (`web-push`), sin
+> Firebase. La suscripción se identifica por **endpoint**, no por usuario (una persona
+> tiene varios dispositivos). Todo envío pasa por `notificaciones.service.enviar()`, que
+> **nunca lanza** (un aviso fallido no puede tumbar la venta que lo disparó), resuelve
+> destinatarios **siempre dentro de un `negocio_id`**, y borra la suscripción ante un
+> 404/410 del navegador. `unico_por_dia` deduplica contra `notificaciones_enviadas` para
+> que un reinicio de Railway no reenvíe el mismo aviso. Sin `VAPID_PUBLIC_KEY` /
+> `VAPID_PRIVATE_KEY` el módulo queda apagado y la app funciona igual. Los handlers del
+> service worker viven en `frontend/public/push-sw.js`, inyectados con
+> `workbox.importScripts` (el SW lo genera Workbox y no se puede editar a mano).
+> En iOS solo funciona con la PWA instalada en la pantalla de inicio.
 
 > **Tesorería**: los saldos por cuenta (efectivo/banco/billetera/corresponsal/divisa USD) se **derivan** de las tablas transaccionales existentes mapeando método de pago → cuenta, anclados en arqueos. Solo traslados/retiros/gastos se escriben en `movimientos_dinero`. Si cambian las reglas de qué entra/sale en `caja.repository.js`, replicarlas en `tesoreria.repository.js` (ramas marcadas). Los movimientos de efectivo se espejan en `movimientos_caja` con `referencia_tipo='tesoreria'`. Un pago de compra desde Tesorería crea un **Abono espejo** en `movimientos_acreedor` (`registrar_en_caja=FALSE`, `mov_dinero_id`) que salda la deuda del acreedor sin doble descuento; anular el pago elimina/recrea el espejo en cascada.
 
@@ -100,6 +116,12 @@ DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD
 JWT_SECRET, JWT_REFRESH_SECRET, JWT_SA_SECRET
 PORT, NODE_ENV, FRONTEND_URL
 EMAIL_USER, EMAIL_PASS
+```
+
+Opcionales (si faltan, su feature queda apagada y el resto funciona igual):
+```
+VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_SUBJECT   # notificaciones push
+SUPABASE_URL, SUPABASE_SERVICE_KEY                   # backup automático
 ```
 
 ---

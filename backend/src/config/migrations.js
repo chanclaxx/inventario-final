@@ -301,6 +301,56 @@ const runMigrations = async () => {
     console.error('⚠️  Migración de mora no aplicada (el resto del sistema sigue normal):', err.message);
   }
 
+  // Notificaciones push (Web Push / VAPID) — ver migrations/20260801_push_notificaciones.sql
+  //
+  // 100% aditiva e idempotente. Un negocio que no active las notificaciones no
+  // escribe una sola fila, y sin las variables VAPID_* el módulo ni se monta.
+  // Va en su propio try/catch por la misma razón que las demás: un fallo aquí
+  // (permisos, BD antigua) solo debe dejar sin notificaciones a quien las use,
+  // nunca sin servidor a los otros negocios.
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS push_suscripciones (
+        id            SERIAL PRIMARY KEY,
+        usuario_id    INTEGER     NOT NULL REFERENCES usuarios(id)   ON DELETE CASCADE,
+        negocio_id    INTEGER     NOT NULL REFERENCES negocios(id)   ON DELETE CASCADE,
+        sucursal_id   INTEGER              REFERENCES sucursales(id) ON DELETE SET NULL,
+        endpoint      TEXT        NOT NULL UNIQUE,
+        p256dh        TEXT        NOT NULL,
+        auth          TEXT        NOT NULL,
+        user_agent    TEXT,
+        preferencias  JSONB       NOT NULL DEFAULT '{}'::jsonb,
+        activa        BOOLEAN     NOT NULL DEFAULT TRUE,
+        creado_en     TIMESTAMP   NOT NULL DEFAULT NOW(),
+        ultimo_ok     TIMESTAMP,
+        fallos        INTEGER     NOT NULL DEFAULT 0
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_push_susc_negocio
+        ON push_suscripciones (negocio_id, sucursal_id) WHERE activa;
+      CREATE INDEX IF NOT EXISTS idx_push_susc_usuario
+        ON push_suscripciones (usuario_id) WHERE activa;
+
+      CREATE TABLE IF NOT EXISTS notificaciones_enviadas (
+        id            SERIAL PRIMARY KEY,
+        negocio_id    INTEGER     NOT NULL REFERENCES negocios(id) ON DELETE CASCADE,
+        tipo          TEXT        NOT NULL,
+        referencia_id TEXT        NOT NULL DEFAULT '',
+        dia           DATE        NOT NULL DEFAULT (NOW() AT TIME ZONE 'America/Bogota')::date,
+        titulo        TEXT,
+        cuerpo        TEXT,
+        enviados      INTEGER     NOT NULL DEFAULT 0,
+        fallidos      INTEGER     NOT NULL DEFAULT 0,
+        creado_en     TIMESTAMP   NOT NULL DEFAULT NOW()
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_notif_enviadas_dia
+        ON notificaciones_enviadas (negocio_id, tipo, referencia_id, dia);
+    `);
+  } catch (err) {
+    console.error('⚠️  Migración de notificaciones push no aplicada (el resto del sistema sigue normal):', err.message);
+  }
+
   // Aplicadas manualmente en producción:
   // - lineas_traslado: revertida_por_usuario_id, fecha_reversion
   // - traslados: revertido_por_usuario_id, fecha_reversion

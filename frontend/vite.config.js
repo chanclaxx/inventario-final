@@ -24,6 +24,11 @@ export default defineConfig({
       },
       workbox: {
         maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
+        // Handlers de notificaciones push (public/push-sw.js). En modo
+        // `generateSW` el service worker lo escribe Workbox y no se puede editar
+        // a mano; importScripts inyecta nuestro código DENTRO de ese mismo SW
+        // sin tocar ninguna regla de caché de aquí abajo.
+        importScripts: ['/push-sw.js'],
         // Activa el nuevo SW inmediatamente sin esperar a que se cierren todas las pestañas
         skipWaiting: true,
         // El nuevo SW toma control de todas las pestañas abiertas al instante

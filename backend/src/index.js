@@ -95,6 +95,7 @@ app.use('/api/tesoreria',          protegida, require('./modules/tesoreria/tesor
 app.use('/api/tipos-caracteristica', protegida, require('./modules/tipos-caracteristica/tipos-caracteristica.routes'));
 app.use('/api/variantes-producto',   protegida, require('./modules/variantes-producto/variantes-producto.routes'));
 app.use('/api/ubicaciones',          protegida, require('./modules/ubicaciones/ubicaciones.routes'));
+app.use('/api/notificaciones',       protegida, require('./modules/notificaciones/notificaciones.routes'));
 
 // ── Rutas de superadmin (sin protegida) ───────────────
 app.use('/api/superadmin', require('./modules/superadmin/superadmin.routes'));
@@ -122,6 +123,13 @@ const start = async () => {
 
   verificarVencimientos();
   setInterval(verificarVencimientos, 24 * 60 * 60 * 1000);
+
+  // Notificaciones push: solo informa en qué estado arrancó. Sin las variables
+  // VAPID_* la feature queda apagada y el resto del sistema funciona igual.
+  const notificaciones = require('./modules/notificaciones/notificaciones.service');
+  console.log(notificaciones.estaActivo()
+    ? '🔔 Notificaciones push activas'
+    : '🔕 Notificaciones push desactivadas (faltan VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY)');
 
   app.listen(PORT, () => {
     console.log(`🚀 Servidor corriendo en http://localhost:${PORT}`);
