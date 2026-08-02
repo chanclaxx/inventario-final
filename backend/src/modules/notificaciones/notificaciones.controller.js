@@ -43,9 +43,9 @@ const desuscribir = async (req, res, next) => {
 };
 
 /**
- * Cobros del día: los clientes vencidos, para llamarlos.
+ * Cobros del día: los vencidos y los que están por vencer, para llamarlos.
  *
- * Es la pantalla a la que lleva el aviso de cartera vencida, y sale de la MISMA
+ * Es la pantalla a la que llevan los dos avisos de cartera, y sale de la MISMA
  * función que usa el cron para contarlos: si el aviso dice 5, aquí salen esos 5.
  *
  * El vendedor y el supervisor solo ven su sucursal (`req.sucursal_id` lo resuelve
@@ -59,7 +59,7 @@ const getCobros = async (req, res, next) => {
       ? (req.query.sucursal_id ? Number(req.query.sucursal_id) : null)
       : (req.sucursal_id ?? req.user.sucursal_id ?? null);
 
-    const data = await alertas.carteraVencida(req.user.negocio_id, sucursalId);
+    const data = await alertas.cartera(req.user.negocio_id, sucursalId);
 
     // El nombre del negocio va en el mensaje de WhatsApp que arma la pantalla:
     // un cobro que llega firmado por la tienda se responde; uno anónimo, no.

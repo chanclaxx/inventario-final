@@ -16,7 +16,7 @@ import { formatCOP } from '../../utils/formatters';
 //
 // Claves de `config_negocio`:
 //   mora_activa · mora_lista · mora_default_id · mora_plazo_default_dias
-//   mora_tope_tasa_mensual
+//   mora_tope_tasa_mensual · mora_aviso_previo_dias
 //
 // Un negocio que no encienda el flag no ve absolutamente nada de esto: ni el
 // campo de plazo en la venta, ni la mora en los cobros. Y sus créditos y
@@ -86,6 +86,7 @@ export function MoraConfig({ valores, set }) {
   const defaultId   = valores.mora_default_id || '';
   const plazoDef    = valores.mora_plazo_default_dias ?? '';
   const techo       = valores.mora_tope_tasa_mensual ?? '';
+  const avisoPrevio = valores.mora_aviso_previo_dias ?? '';
 
   const [nombre, setNombre] = useState('');
   const [tipo,   setTipo]   = useState(TIPO_MENSUAL);
@@ -280,6 +281,19 @@ export function MoraConfig({ valores, set }) {
                   placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white" />
               <span className="text-[11px] text-gray-400">
                 La fecha límite llega precargada con estos días, y el vendedor la puede cambiar o dejar vacía.
+              </span>
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <span className="text-xs font-medium text-gray-500">Avisar antes del vencimiento (días)</span>
+              <input type="number" min="1" max="30" value={avisoPrevio}
+                onChange={(e) => set('mora_aviso_previo_dias', e.target.value)}
+                placeholder="3"
+                className="w-full px-3 py-2 bg-gray-100 border-0 rounded-xl text-sm
+                  placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white" />
+              <span className="text-[11px] text-gray-400">
+                Cuántos días antes te llega la notificación de los pagos que se acercan, para
+                recordárselos al cliente antes de que se venzan. Por defecto 3.
               </span>
             </div>
 

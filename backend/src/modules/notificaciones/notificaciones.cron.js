@@ -5,6 +5,10 @@ const service = require('./notificaciones.service');
 // ─────────────────────────────────────────────────────────────────────────────
 // AVISOS AUTOMÁTICOS — una pasada diaria por los negocios con dispositivos.
 //
+// Cuatro avisos: pagos POR VENCER, cartera VENCIDA, plan por vencer y stock bajo.
+// Los dos primeros van separados porque son dos trabajos distintos: al que
+// todavía no vence se le recuerda, al vencido se le cobra.
+//
 // Se manda a las 8:00 de Colombia por defecto: temprano para que dé tiempo de
 // llamar a los clientes en el día, pero no de madrugada. Configurable con
 // NOTIF_CRON sin tocar código.
@@ -38,25 +42,32 @@ const _resolverExpresion = () => {
   return CRON_POR_DEFECTO;
 };
 
+/** Agrupa una lista de cobros por sucursal. */
+const _porSucursal = (items) => {
+  const mapa = new Map();
+  for (const it of items) {
+    if (!mapa.has(it.sucursal_id)) mapa.set(it.sucursal_id, []);
+    mapa.get(it.sucursal_id).push(it);
+  }
+  return mapa;
+};
+
+const _clientesDistintos = (docs) =>
+  new Set(docs.map((d) => `${d.persona}|${d.telefono ?? ''}`)).size;
+
 // ── Aviso 1: cartera vencida (a quién hay que llamar hoy) ────────────────────
 //
 // Va por SUCURSAL, no por negocio: el supervisor de un local no puede hacer nada
 // con los vencidos del otro, y el dueño (admin_negocio) los recibe todos porque
 // el reparto de destinatarios siempre lo incluye.
-const _avisarCarteraVencida = async (negocioId) => {
-  const { items } = await alertas.carteraVencida(negocioId);
+const _avisarCarteraVencida = async (negocioId, cartera) => {
+  const items = cartera.vencidos.items;
   if (!items.length) return 0;
 
-  const porSucursal = new Map();
-  for (const it of items) {
-    if (!porSucursal.has(it.sucursal_id)) porSucursal.set(it.sucursal_id, []);
-    porSucursal.get(it.sucursal_id).push(it);
-  }
-
   let enviados = 0;
-  for (const [sucursalId, docs] of porSucursal) {
+  for (const [sucursalId, docs] of _porSucursal(items)) {
     const total    = docs.reduce((s, d) => s + d.total, 0);
-    const clientes = new Set(docs.map((d) => `${d.persona}|${d.telefono ?? ''}`)).size;
+    const clientes = _clientesDistintos(docs);
     const peor     = docs[0];   // ya vienen ordenados por días de atraso
 
     const res = await service.enviar({
@@ -70,6 +81,53 @@ const _avisarCarteraVencida = async (negocioId) => {
       url:  '/cobros',
       tag:  `cartera-${sucursalId}`,
       tipo: 'cartera_vencida',
+      referencia_id: String(sucursalId),
+      unico_por_dia: true,
+    });
+    enviados += res.enviados || 0;
+  }
+  return enviados;
+};
+
+// ── Aviso 2: pagos que están por vencer ──────────────────────────────────────
+//
+// El aviso que evita la mora en vez de perseguirla: se llama al cliente ANTES de
+// la fecha, cuando todavía puede pagar sin intereses y la llamada es un
+// recordatorio y no un reclamo.
+//
+// Va en un aviso SEPARADO del de vencidos (y con otro `tag`) a propósito: son
+// dos trabajos distintos y mezclarlos en un solo texto haría que el urgente se
+// pierda entre los que todavía no deben nada.
+const _avisarPorVencer = async (negocioId, cartera) => {
+  const items = cartera.por_vencer.items;
+  if (!items.length) return 0;
+
+  let enviados = 0;
+  for (const [sucursalId, docs] of _porSucursal(items)) {
+    const total    = docs.reduce((s, d) => s + d.total, 0);
+    const clientes = _clientesDistintos(docs);
+    const hoyMismo = docs.filter((d) => d.dias_restantes === 0).length;
+    const proximo  = docs[0];   // ordenados del más próximo al más lejano
+
+    // El titular cambia si hay algo venciendo HOY: es lo único que no puede
+    // esperar a mañana.
+    const titulo = hoyMismo > 0
+      ? (hoyMismo === 1 ? '1 pago vence hoy' : `${hoyMismo} pagos vencen hoy`)
+      : (clientes === 1 ? '1 pago está por vencer' : `${clientes} pagos están por vencer`);
+
+    const cuando = proximo.dias_restantes === 0 ? 'hoy'
+      : proximo.dias_restantes === 1            ? 'mañana'
+      : `en ${proximo.dias_restantes} días`;
+
+    const res = await service.enviar({
+      negocio_id:  negocioId,
+      sucursal_id: sucursalId,
+      roles:       ['admin_negocio', 'supervisor'],
+      titulo,
+      cuerpo: `${_pesos(total)} en total · el más próximo vence ${cuando}. Recuérdaselos antes de que se venzan.`,
+      url:  '/cobros?tab=proximos',
+      tag:  `porvencer-${sucursalId}`,
+      tipo: 'cartera_por_vencer',
       referencia_id: String(sucursalId),
       unico_por_dia: true,
     });
@@ -157,7 +215,11 @@ const ejecutar = async () => {
 
   for (const n of negocios) {
     try {
-      enviados += await _avisarCarteraVencida(n.id);
+      // Una sola consulta de cartera para los dos avisos: vencidos y próximos
+      // salen del mismo recorrido.
+      const cartera = await alertas.cartera(n.id);
+      enviados += await _avisarCarteraVencida(n.id, cartera);
+      enviados += await _avisarPorVencer(n.id, cartera);
       enviados += await _avisarPlan(n.id);
       enviados += await _avisarStockBajo(n.id);
     } catch (err) {

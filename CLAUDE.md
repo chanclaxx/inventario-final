@@ -73,7 +73,7 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > service worker viven en `frontend/public/push-sw.js`, inyectados con
 > `workbox.importScripts` (el SW lo genera Workbox y no se puede editar a mano).
 > En iOS solo funciona con la PWA instalada en la pantalla de inicio.
-> Los avisos automáticos (cartera vencida, plan por vencer, stock bajo) salen de
+> Los avisos automáticos (cartera **por vencer** y **vencida**, plan por vencer, stock bajo) salen de
 > `notificaciones.alertas.js` — **la misma función que alimenta la pantalla
 > `/cobros`**, para que el aviso y la lista nunca digan cifras distintas — y los
 > dispara `notificaciones.cron.js` a las 8:00 America/Bogota (`NOTIF_CRON`).

@@ -17,10 +17,31 @@ const hoyBogota = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Amer
 
 const num = (v) => Number(v || 0);
 
-// ── 1. Cartera vencida (clientes a los que hay que cobrarles) ────────────────
+// ── 1. Cartera: lo vencido y lo que está por vencer ──────────────────────────
+
+/** Días de anticipación por defecto para avisar de un pago que se acerca. */
+const DIAS_AVISO_PREVIO = 3;
+
+/** Cuántos días antes quiere el negocio que se le avise. Configurable en Ajustes. */
+const diasAvisoPrevio = async (negocioId) => {
+  try {
+    const configRepo = require('../config/config.repository');
+    const cfg = await configRepo.getMap(negocioId);
+    const n = Number(cfg?.mora_aviso_previo_dias);
+    // Tope de 30: más allá el aviso deja de ser "se acerca" y se vuelve ruido
+    // diario sobre deudas que todavía nadie tiene que pagar.
+    if (Number.isFinite(n) && n >= 1 && n <= 30) return Math.floor(n);
+  } catch { /* sin config utilizable: se queda con el valor por defecto */ }
+  return DIAS_AVISO_PREVIO;
+};
 
 /**
- * Documentos con el plazo ya pasado y que todavía deben algo.
+ * Documentos con plazo que hay que trabajar: los VENCIDOS y los que están POR
+ * VENCER dentro de la ventana de aviso.
+ *
+ * Los dos grupos salen de la misma consulta a propósito. Avisar solo de lo
+ * vencido llega tarde: el negocio quería llamar ANTES, que es cuando el cliente
+ * todavía puede pagar sin mora y la llamada es un recordatorio y no un reclamo.
  *
  * DOS COSAS QUE NO SON OBVIAS:
  *
@@ -32,17 +53,20 @@ const num = (v) => Number(v || 0);
  *   · La mora la calcula `mora.service` con la fórmula real (acumulada por
  *     tramos), no una cuenta rápida aquí. Duplicarla daría un número distinto al
  *     que ve el usuario en la pantalla del préstamo, y en plata eso no se
- *     perdona.
+ *     perdona. En los que aún no vencen da 0, como debe ser.
  *
  * @param {number} negocioId
  * @param {number|null} sucursalId — limita a una sucursal (para supervisor/vendedor)
+ * @param {number|null} diasAviso  — ventana de "por vencer"; si no se pasa, la del negocio
  */
-const carteraVencida = async (negocioId, sucursalId = null) => {
-  const vacio = { items: [], total_clientes: 0, capital: 0, mora: 0, total: 0 };
+const cartera = async (negocioId, sucursalId = null, diasAviso = null) => {
+  const grupoVacio = { items: [], total_clientes: 0, capital: 0, mora: 0, total: 0 };
+  const vacio = { vencidos: grupoVacio, por_vencer: grupoVacio, dias_aviso: DIAS_AVISO_PREVIO };
   if (!negocioId) return vacio;
 
   try {
-    const hoy = hoyBogota();
+    const hoy  = hoyBogota();
+    const dias = diasAviso ?? await diasAvisoPrevio(negocioId);
 
     // Préstamos vencidos. El nombre y el teléfono salen de la persona ligada
     // (prestatario o cliente) y, si no hay, de lo que se escribió en el préstamo.
@@ -65,8 +89,8 @@ const carteraVencida = async (negocioId, sucursalId = null) => {
         AND ($2::int IS NULL OR p.sucursal_id = $2)
         AND p.estado = 'Activo'
         AND p.fecha_limite IS NOT NULL
-        AND p.fecha_limite < $3::date
-    `, [negocioId, sucursalId, hoy]);
+        AND p.fecha_limite <= ($3::date + $4::int)
+    `, [negocioId, sucursalId, hoy, dias]);
 
     // Créditos vencidos. La persona vive en la factura (o en el cliente ligado).
     const { rows: creditos } = await pool.query(`
@@ -85,10 +109,10 @@ const carteraVencida = async (negocioId, sucursalId = null) => {
         AND ($2::int IS NULL OR c.sucursal_id = $2)
         AND c.estado = 'Activo'
         AND c.fecha_limite IS NOT NULL
-        AND c.fecha_limite < $3::date
-    `, [negocioId, sucursalId, hoy]);
+        AND c.fecha_limite <= ($3::date + $4::int)
+    `, [negocioId, sucursalId, hoy, dias]);
 
-    if (!prestamos.length && !creditos.length) return vacio;
+    if (!prestamos.length && !creditos.length) return { ...vacio, dias_aviso: dias };
 
     // La mora, con la fórmula real y en lote (una consulta para todos).
     const [prestamosConMora, creditosConMora] = await Promise.all([
@@ -96,13 +120,33 @@ const carteraVencida = async (negocioId, sucursalId = null) => {
       moraService.anotarLista(creditos,  'credito'),
     ]);
 
-    const items = [];
+    const vencidos  = [];
+    const porVencer = [];
+
+    // Días entre hoy y la fecha límite, en calendario puro (sin horas ni zonas).
+    // Negativo = ya venció.
+    const diasHasta = (fechaLimite) => {
+      const f = String(fechaLimite instanceof Date ? fechaLimite.toISOString() : fechaLimite).slice(0, 10);
+      const [ay, am, ad] = hoy.split('-').map(Number);
+      const [by, bm, bd] = f.split('-').map(Number);
+      return Math.round((Date.UTC(by, bm - 1, bd) - Date.UTC(ay, am - 1, ad)) / 86400000);
+    };
+
+    const clasificar = (item) => {
+      const restantes = diasHasta(item.fecha_limite);
+      if (restantes < 0) {
+        vencidos.push({ ...item, estado: 'vencido', dias_restantes: 0 });
+      } else {
+        // Lo que aún no vence no causa mora: `dias_vencidos` es 0 por definición.
+        porVencer.push({ ...item, estado: 'por_vencer', dias_restantes: restantes, dias_vencidos: 0 });
+      }
+    };
 
     for (const p of prestamosConMora) {
       const capital = Math.max(0, num(p.valor_prestamo) - num(p.total_abonado));
       const mora    = num(p.mora?.pendiente);
       if (capital + mora <= 0) continue;      // ya no debe nada: no es cobro
-      items.push({
+      clasificar({
         tipo: 'prestamo',
         id: Number(p.id),
         numero: p.numero ?? p.id,
@@ -121,7 +165,7 @@ const carteraVencida = async (negocioId, sucursalId = null) => {
       const capital = Math.max(0, num(c.valor_total) - num(c.cuota_inicial) - num(c.total_abonado));
       const mora    = num(c.mora?.pendiente);
       if (capital + mora <= 0) continue;
-      items.push({
+      clasificar({
         tipo: 'credito',
         id: Number(c.id),
         numero: c.numero ?? c.factura_id,
@@ -136,21 +180,30 @@ const carteraVencida = async (negocioId, sucursalId = null) => {
       });
     }
 
-    // El más atrasado primero: es a quien hay que llamar hoy.
-    items.sort((a, b) => b.dias_vencidos - a.dias_vencidos || b.total - a.total);
+    // Vencidos: el más atrasado primero (es a quien hay que llamar ya).
+    vencidos.sort((a, b) => b.dias_vencidos - a.dias_vencidos || b.total - a.total);
+    // Por vencer: el más próximo primero (el que vence hoy antes que el de 3 días).
+    porVencer.sort((a, b) => a.dias_restantes - b.dias_restantes || b.total - a.total);
 
     return {
-      items,
-      total_clientes: new Set(items.map((i) => `${i.persona}|${i.telefono ?? ''}`)).size,
-      capital: items.reduce((s, i) => s + i.capital, 0),
-      mora:    items.reduce((s, i) => s + i.mora, 0),
-      total:   items.reduce((s, i) => s + i.total, 0),
+      vencidos:   _resumirGrupo(vencidos),
+      por_vencer: _resumirGrupo(porVencer),
+      dias_aviso: dias,
     };
   } catch (err) {
-    console.warn('[alertas] Cartera vencida no disponible:', err.message);
+    console.warn('[alertas] Cartera no disponible:', err.message);
     return vacio;
   }
 };
+
+/** Totales de un grupo de cobros. Los clientes se cuentan sin repetir. */
+const _resumirGrupo = (items) => ({
+  items,
+  total_clientes: new Set(items.map((i) => `${i.persona}|${i.telefono ?? ''}`)).size,
+  capital: items.reduce((s, i) => s + i.capital, 0),
+  mora:    items.reduce((s, i) => s + i.mora, 0),
+  total:   items.reduce((s, i) => s + i.total, 0),
+});
 
 // ── 2. Plan por vencer ───────────────────────────────────────────────────────
 
@@ -283,4 +336,7 @@ const negociosANotificar = async () => {
   return rows;
 };
 
-module.exports = { carteraVencida, planPorVencer, stockBajo, negociosANotificar, hoyBogota };
+module.exports = {
+  cartera, diasAvisoPrevio, DIAS_AVISO_PREVIO,
+  planPorVencer, stockBajo, negociosANotificar, hoyBogota,
+};
