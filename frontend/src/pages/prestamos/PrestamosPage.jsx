@@ -1,4 +1,5 @@
 import { useState, useContext } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { buscarPrestamos as buscarPrestamosApi } from '../../api/busqueda.api';
 import { exportarPrestamosExcel } from '../../utils/exportarPrestamosExcel';
@@ -2625,9 +2626,32 @@ export default function PrestamosPage() {
   const { coloresActivo }  = useColoresConfig();
   const sucursalActiva     = useSucursalStore((s) => s.sucursalActiva);
 
-  const [tabPrincipal,         setTabPrincipal]         = useState('prestamos');
-  const [tabPrestamos,         setTabPrestamos]         = useState('companeros');
-  const [personaSeleccionadaKey, setPersonaSeleccionadaKey] = useState(null);
+  // ── Entrada desde una notificación ────────────────────────────────────────
+  //
+  // Los avisos de cobro traen a quién hay que cobrarle:
+  //   /prestamos?tab=prestamos&persona=prestatario_12
+  //   /prestamos?tab=creditos&persona=1032456789
+  //
+  // Se lee SOLO en el primer render (inicializador perezoso de useState). Si se
+  // leyera en cada render, cerrar la ficha volvería a abrirla sola y el usuario
+  // quedaría atrapado en esa pantalla.
+  const [params] = useSearchParams();
+  const paramTab     = params.get('tab');
+  const paramPersona = params.get('persona');
+
+  const [tabPrincipal,         setTabPrincipal]         = useState(
+    () => (paramTab === 'creditos' ? 'creditos' : 'prestamos'));
+  const [tabPrestamos,         setTabPrestamos]         = useState(
+    // La ficha se abre igual con cualquiera de los dos sub-tabs (el detalle
+    // busca en los dos grupos), pero arrancar en el correcto evita que al
+    // volver atrás la lista se vea vacía.
+    () => (String(paramPersona || '').startsWith('cliente_') ? 'clientes' : 'companeros'));
+  const [personaSeleccionadaKey, setPersonaSeleccionadaKey] = useState(
+    () => (paramTab === 'creditos' ? null : (paramPersona || null)));
+
+  // Cliente que debe quedar abierto en la pestaña de créditos, si el aviso venía
+  // de una factura a crédito.
+  const personaCreditoInicial = paramTab === 'creditos' ? paramPersona : null;
   const [prestamoAbono,        setPrestamoAbono]        = useState(null);
   const [prestamoDevol,        setPrestamoDevol]        = useState(null);
   const [busquedaPersonas,     setBusquedaPersonas]     = useState('');
@@ -3014,7 +3038,7 @@ export default function PrestamosPage() {
         </div>
       )}
 
-      {tabPrincipal === 'creditos'      && <TabCreditos />}
+      {tabPrincipal === 'creditos'      && <TabCreditos personaInicial={personaCreditoInicial} />}
       {tabPrincipal === 'domiciliarios' && <TabDomiciliarios />}
       {tabPrincipal === 'busqueda'      && <TabBusquedaPrestamos />}
 

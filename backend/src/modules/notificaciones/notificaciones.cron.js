@@ -42,6 +42,24 @@ const _resolverExpresion = () => {
   return CRON_POR_DEFECTO;
 };
 
+// ── Avisos 1 y 2: cobros, UNO POR DEUDA ─────────────────────────────────────
+//
+// Cada aviso abre DIRECTO la ficha del cliente en la pantalla donde está su
+// deuda (préstamo → Préstamos con la persona ya seleccionada; crédito → la
+// pestaña de Créditos). Por eso van uno por documento y no un resumen: un
+// resumen no puede llevar a cinco lugares distintos, y el punto es que quien
+// recibe el aviso no tenga que buscar a nadie.
+//
+// Se agrupan POR DESTINO: un cliente con tres préstamos vencidos recibe UN aviso
+// con el total, no tres idénticos. Si además tiene una factura a crédito, esa va
+// aparte porque abre otra pantalla.
+//
+// TOPE DE 5 POR SUCURSAL Y POR TIPO: con veinte vencidos, veinte notificaciones
+// seguidas se convierten en algo que se descarta sin leer. Se mandan las más
+// urgentes (las listas ya vienen ordenadas) y la última avisa cuántas quedaron
+// fuera, llevando a la lista completa.
+const MAX_AVISOS_POR_SUCURSAL = 5;
+
 /** Agrupa una lista de cobros por sucursal. */
 const _porSucursal = (items) => {
   const mapa = new Map();
@@ -52,86 +70,135 @@ const _porSucursal = (items) => {
   return mapa;
 };
 
-const _clientesDistintos = (docs) =>
-  new Set(docs.map((d) => `${d.persona}|${d.telefono ?? ''}`)).size;
+/** Cómo se nombra el documento en el texto, con su artículo. */
+const _etiquetaDoc = (d) =>
+  d.tipo === 'prestamo' ? `del préstamo #${d.numero}` : `de la factura #${d.numero}`;
 
-// ── Aviso 1: cartera vencida (a quién hay que llamar hoy) ────────────────────
-//
-// Va por SUCURSAL, no por negocio: el supervisor de un local no puede hacer nada
-// con los vencidos del otro, y el dueño (admin_negocio) los recibe todos porque
-// el reparto de destinatarios siempre lo incluye.
+/**
+ * Agrupa por DESTINO (la ficha que abre el aviso).
+ *
+ * Un cliente con tres préstamos vencidos tenía tres notificaciones idénticas que
+ * abrían el mismo lugar. Agrupadas, recibe una sola con el total de lo que debe
+ * ahí. Si además tiene una factura a crédito, esa sí va aparte: es otra pantalla.
+ */
+const _porDestino = (docs) => {
+  const mapa = new Map();
+  for (const d of docs) {
+    if (!mapa.has(d.url)) mapa.set(d.url, []);
+    mapa.get(d.url).push(d);
+  }
+  return [...mapa.values()];
+};
+
+/** Texto de "qué debe" según sea una deuda o varias en el mismo lugar. */
+const _detalleDeudas = (grupo) => {
+  const total = grupo.reduce((s, d) => s + d.total, 0);
+  if (grupo.length === 1) return `${_pesos(total)} ${_etiquetaDoc(grupo[0])}`;
+  const tipo = grupo.every((d) => d.tipo === 'prestamo') ? 'préstamos'
+    : grupo.every((d) => d.tipo === 'credito')           ? 'facturas'
+    :                                                      'deudas';
+  return `${_pesos(total)} en ${grupo.length} ${tipo}`;
+};
+
 const _avisarCarteraVencida = async (negocioId, cartera) => {
   const items = cartera.vencidos.items;
   if (!items.length) return 0;
 
   let enviados = 0;
   for (const [sucursalId, docs] of _porSucursal(items)) {
-    const total    = docs.reduce((s, d) => s + d.total, 0);
-    const clientes = _clientesDistintos(docs);
-    const peor     = docs[0];   // ya vienen ordenados por días de atraso
+    const destinos = _porDestino(docs);
 
-    const res = await service.enviar({
-      negocio_id:  negocioId,
-      sucursal_id: sucursalId,
-      roles:       ['admin_negocio', 'supervisor'],
-      titulo: clientes === 1
-        ? '1 cliente por cobrar'
-        : `${clientes} clientes por cobrar`,
-      cuerpo: `${_pesos(total)} vencidos · el más atrasado lleva ${peor.dias_vencidos} día${peor.dias_vencidos === 1 ? '' : 's'}. Toca para llamarlos.`,
-      url:  '/cobros',
-      tag:  `cartera-${sucursalId}`,
-      tipo: 'cartera_vencida',
-      referencia_id: String(sucursalId),
-      unico_por_dia: true,
-    });
-    enviados += res.enviados || 0;
+    for (const grupo of destinos.slice(0, MAX_AVISOS_POR_SUCURSAL)) {
+      const d    = grupo[0];                                   // el más atrasado
+      const dias = Math.max(...grupo.map((x) => x.dias_vencidos));
+
+      const res = await service.enviar({
+        negocio_id:  negocioId,
+        sucursal_id: sucursalId,
+        roles:       ['admin_negocio', 'supervisor'],
+        titulo: `${d.persona} · ${dias} día${dias === 1 ? '' : 's'} de atraso`,
+        cuerpo: `Debe ${_detalleDeudas(grupo)}. Toca para abrir su cuenta y cobrarle.`,
+        // Directo a la ficha de esa persona.
+        url:  d.url,
+        // Un tag por destino: dos clientes no se pisan la notificación, pero el
+        // mismo cliente no acumula una por cada deuda.
+        tag:  `cobro-${d.url}`,
+        tipo: 'cartera_vencida',
+        referencia_id: d.url,
+        unico_por_dia: true,
+      });
+      enviados += res.enviados || 0;
+    }
+
+    const sobran = destinos.length - MAX_AVISOS_POR_SUCURSAL;
+    if (sobran > 0) {
+      const res = await service.enviar({
+        negocio_id:  negocioId,
+        sucursal_id: sucursalId,
+        roles:       ['admin_negocio', 'supervisor'],
+        titulo: `y ${sobran} cobro${sobran === 1 ? '' : 's'} más vencido${sobran === 1 ? '' : 's'}`,
+        cuerpo: `Además de los anteriores. Toca para ver la lista completa.`,
+        url:  '/prestamos',
+        tag:  `cartera-resto-${sucursalId}`,
+        tipo: 'cartera_vencida_resto',
+        referencia_id: String(sucursalId),
+        unico_por_dia: true,
+      });
+      enviados += res.enviados || 0;
+    }
   }
   return enviados;
 };
 
-// ── Aviso 2: pagos que están por vencer ──────────────────────────────────────
-//
 // El aviso que evita la mora en vez de perseguirla: se llama al cliente ANTES de
 // la fecha, cuando todavía puede pagar sin intereses y la llamada es un
-// recordatorio y no un reclamo.
-//
-// Va en un aviso SEPARADO del de vencidos (y con otro `tag`) a propósito: son
-// dos trabajos distintos y mezclarlos en un solo texto haría que el urgente se
-// pierda entre los que todavía no deben nada.
+// recordatorio y no un reclamo. Va aparte de los vencidos (otro `tag`, otro
+// texto) porque son dos trabajos distintos.
 const _avisarPorVencer = async (negocioId, cartera) => {
   const items = cartera.por_vencer.items;
   if (!items.length) return 0;
 
   let enviados = 0;
   for (const [sucursalId, docs] of _porSucursal(items)) {
-    const total    = docs.reduce((s, d) => s + d.total, 0);
-    const clientes = _clientesDistintos(docs);
-    const hoyMismo = docs.filter((d) => d.dias_restantes === 0).length;
-    const proximo  = docs[0];   // ordenados del más próximo al más lejano
+    const destinos = _porDestino(docs);
 
-    // El titular cambia si hay algo venciendo HOY: es lo único que no puede
-    // esperar a mañana.
-    const titulo = hoyMismo > 0
-      ? (hoyMismo === 1 ? '1 pago vence hoy' : `${hoyMismo} pagos vencen hoy`)
-      : (clientes === 1 ? '1 pago está por vencer' : `${clientes} pagos están por vencer`);
+    for (const grupo of destinos.slice(0, MAX_AVISOS_POR_SUCURSAL)) {
+      const d = grupo[0];                                    // el más próximo
+      const cuando = d.dias_restantes === 0 ? 'vence hoy'
+        : d.dias_restantes === 1            ? 'vence mañana'
+        : `vence en ${d.dias_restantes} días`;
 
-    const cuando = proximo.dias_restantes === 0 ? 'hoy'
-      : proximo.dias_restantes === 1            ? 'mañana'
-      : `en ${proximo.dias_restantes} días`;
+      const res = await service.enviar({
+        negocio_id:  negocioId,
+        sucursal_id: sucursalId,
+        roles:       ['admin_negocio', 'supervisor'],
+        titulo: `${d.persona} · ${cuando}`,
+        cuerpo: `${_detalleDeudas(grupo)}. Recuérdaselo antes de que se venza.`,
+        url:  d.url,
+        tag:  `porvencer-${d.url}`,
+        tipo: 'cartera_por_vencer',
+        referencia_id: d.url,
+        unico_por_dia: true,
+      });
+      enviados += res.enviados || 0;
+    }
 
-    const res = await service.enviar({
-      negocio_id:  negocioId,
-      sucursal_id: sucursalId,
-      roles:       ['admin_negocio', 'supervisor'],
-      titulo,
-      cuerpo: `${_pesos(total)} en total · el más próximo vence ${cuando}. Recuérdaselos antes de que se venzan.`,
-      url:  '/cobros?tab=proximos',
-      tag:  `porvencer-${sucursalId}`,
-      tipo: 'cartera_por_vencer',
-      referencia_id: String(sucursalId),
-      unico_por_dia: true,
-    });
-    enviados += res.enviados || 0;
+    const sobran = destinos.length - MAX_AVISOS_POR_SUCURSAL;
+    if (sobran > 0) {
+      const res = await service.enviar({
+        negocio_id:  negocioId,
+        sucursal_id: sucursalId,
+        roles:       ['admin_negocio', 'supervisor'],
+        titulo: `y ${sobran} pago${sobran === 1 ? '' : 's'} más por vencer`,
+        cuerpo: 'Además de los anteriores. Toca para ver la lista completa.',
+        url:  '/prestamos',
+        tag:  `porvencer-resto-${sucursalId}`,
+        tipo: 'cartera_por_vencer_resto',
+        referencia_id: String(sucursalId),
+        unico_por_dia: true,
+      });
+      enviados += res.enviados || 0;
+    }
   }
   return enviados;
 };

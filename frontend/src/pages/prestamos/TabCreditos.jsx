@@ -1011,8 +1011,15 @@ function SeccionPersonasSinDeuda({ personas, onSeleccionar }) {
 
 // ─── Componente principal ─────────────────────────────────────────────────────
 
-export function TabCreditos() {
+/**
+ * @param {string} [personaInicial] — cédula (o nombre) del cliente que hay que
+ *   abrir apenas entra. Lo manda la notificación de cobro: el vendedor no tiene
+ *   que buscar a nadie, llega directo a la cuenta del cliente.
+ */
+export function TabCreditos({ personaInicial = null }) {
   const [personaSeleccionada, setPersonaSeleccionada] = useState(null);
+  // Marca que el usuario ya cerró la ficha que abrió la notificación.
+  const [cerroInicial,        setCerroInicial]        = useState(false);
   const [creditoAbono,        setCreditoAbono]        = useState(null);
   const [creditoSaldar,       setCreditoSaldar]       = useState(null);
   const [creditoCancelar,     setCreditoCancelar]     = useState(null);
@@ -1047,10 +1054,20 @@ export function TabCreditos() {
   const personasActivas  = creditosPorPersona.filter((p) => p.creditos.some((c) => c.estado === 'Activo'));
   const personasCerradas = creditosPorPersona.filter((p) => p.creditos.every((c) => c.estado !== 'Activo'));
 
+  // Apertura automática desde una notificación de cobro.
+  //
+  // Se DERIVA en el render en vez de hacerse con un efecto que llame a
+  // setState: así no hay un parpadeo de la lista antes de abrir la ficha, ni el
+  // riesgo de que vuelva a abrirse sola. `cerroInicial` es lo que permite
+  // cerrarla: sin esa marca, volver atrás la reabriría en el siguiente render.
+  const personaAuto = (!cerroInicial && personaInicial && !personaSeleccionada)
+    ? creditosPorPersona.find((p) => String(p.key) === String(personaInicial)) ?? null
+    : null;
+
   // Mantiene la persona en sync con los datos actualizados tras mutaciones
   const personaActualizada = personaSeleccionada
     ? creditosPorPersona.find((p) => p.key === personaSeleccionada.key) ?? personaSeleccionada
-    : null;
+    : personaAuto;
 
   const modales = (
     <>
@@ -1075,12 +1092,14 @@ export function TabCreditos() {
   );
 
   // ── Vista detalle de persona ──────────────────────────────────────────────
-  if (personaSeleccionada && personaActualizada) {
+  // `personaActualizada` cubre los dos caminos: la que el usuario abrió y la que
+  // trajo la notificación.
+  if (personaActualizada) {
     return (
       <>
         <VistaDetallePersonaCredito
           persona={personaActualizada}
-          onVolver={() => setPersonaSeleccionada(null)}
+          onVolver={() => { setPersonaSeleccionada(null); setCerroInicial(true); }}
           onAbonar={setCreditoAbono}
           onSaldar={setCreditoSaldar}
           onCancelar={setCreditoCancelar}

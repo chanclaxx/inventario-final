@@ -7,13 +7,11 @@ import {
   LayoutDashboard, Package, FileText, Handshake,
   Wallet, BarChart2, Settings, LogOut, ShoppingCart,
   Users, Truck, Wrench, ArrowRightLeft, Search, Activity, HandCoins, Warehouse,
-  PhoneCall,
 } from 'lucide-react';
 import { getSucursales } from '../../api/sucursales.api.js';
 import useCarritoStore  from '../../store/carritoStore.js';
 import useSucursalStore from '../../store/sucursalStore.js';
 import api from '../../api/axios.config.js';
-import { leerConfigMora } from '../../utils/mora.js';
 import { SucursalSelector } from './SucursalSelector.jsx';
 
 const NAV_ITEMS = [
@@ -23,10 +21,6 @@ const NAV_ITEMS = [
   { path: '/servicios',   label: 'Servicios',   Icn: Wrench,          modulo: 'servicios'                     },
   { path: '/proveedores', label: 'Proveedores', Icn: Truck,           modulo: 'proveedores'                   },
   { path: '/prestamos',    label: 'Préstamos',    Icn: Handshake,   modulo: 'prestamos'                     },
-  // Cobros solo aparece si el negocio usa plazos de pago: sin la feature de mora
-  // nadie tiene fecha límite, la pantalla saldría siempre vacía y sería un ítem
-  // de menú que estorba.
-  { path: '/cobros',      label: 'Cobros',      Icn: PhoneCall,       modulo: 'prestamos', soloSiMora: true },
   { path: '/caja',        label: 'Caja',        Icn: Wallet,          modulo: 'caja'                          },
   { path: '/tesoreria',   label: 'Tesorería',   Icn: HandCoins,       modulo: 'tesoreria'                     },
   { path: '/traslados',   label: 'Traslados',   Icn: ArrowRightLeft,  modulo: 'traslados', multiSucursal: true, ocultarSiRed: true },
@@ -41,10 +35,9 @@ const NAV_ITEMS = [
   { path: '/config',             label: 'Config',    Icn: Settings, soloAdmin: true                         },
 ];
 
-function esItemVisible(item, puedeVer, esAdmin, totalSucursales, esModoVista, redActiva, moraActiva) {
+function esItemVisible(item, puedeVer, esAdmin, totalSucursales, esModoVista, redActiva) {
   // En modo vista solo se muestra el inventario
   if (esModoVista) return item.path === '/inventario';
-  if (item.soloSiMora && !moraActiva) return false;
   // Red interna encendida: "Bodega" entra y "Traslados" sale (la mercancía se
   // mueve por remisiones). Apagada: todo queda exactamente como estaba.
   if (item.soloSiRed   && !redActiva) return false;
@@ -149,11 +142,9 @@ export function Navbar() {
   // La config del negocio ya se consulta arriba para `nav_config`: el flag de
   // red interna sale de ahí sin una petición extra.
   const redActiva = configData?.red_interna_activa === '1';
-  // Mismo criterio que el backend: encendida sin condiciones cuenta como apagada.
-  const moraActiva = leerConfigMora(configData).activa;
 
   const itemsVisibles = itemsBase.filter((item) =>
-    esItemVisible(item, puedeVer, esAdmin, totalSucursales, esModoVista, redActiva, moraActiva)
+    esItemVisible(item, puedeVer, esAdmin, totalSucursales, esModoVista, redActiva)
   );
 
   return (

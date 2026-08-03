@@ -26,7 +26,6 @@ import TrasladosPage        from './pages/traslados/TrasladosPage';
 import RedInternaPage       from './pages/red-interna/RedInternaPage';
 import TesoreriaPage        from './pages/tesoreria/TesoreriaPage';
 import BusquedaPage         from './pages/busqueda/BusquedaPage';
-import CobrosPage           from './pages/cobros/CobrosPage';
 
 export default function App() {
   return (
@@ -58,12 +57,6 @@ export default function App() {
               } />
               <Route path="/prestamos" element={
                 <ModuloGuard modulo="prestamos"><PrestamosPage /></ModuloGuard>
-              } />
-              {/* Cobros del día: la pantalla que abre el aviso de cartera
-                  vencida. Va bajo el permiso de préstamos porque es la misma
-                  cartera (créditos + préstamos vencidos). */}
-              <Route path="/cobros" element={
-                <ModuloGuard modulo="prestamos"><CobrosPage /></ModuloGuard>
               } />
               <Route path="/servicios" element={
                 <ModuloGuard modulo="servicios"><ServiciosPage /></ModuloGuard>

@@ -75,6 +75,7 @@ const cartera = async (negocioId, sucursalId = null, diasAviso = null) => {
         p.id, p.numero, p.sucursal_id, su.nombre AS sucursal_nombre,
         p.valor_prestamo, p.total_abonado, p.fecha_limite, p.mora_condicion,
         p.nombre_producto AS detalle,
+        p.prestatario_id, p.cliente_id,
         COALESCE(pr.nombre, cl.nombre, p.prestatario) AS persona,
         -- '0000000000' es el comodín de "sin teléfono" que usa el sistema para
         -- compañeros y clientes sin datos. Dejarlo pasar pintaría un botón de
@@ -98,6 +99,10 @@ const cartera = async (negocioId, sucursalId = null, diasAviso = null) => {
         c.id, c.sucursal_id, su.nombre AS sucursal_nombre,
         c.valor_total, c.cuota_inicial, c.total_abonado, c.fecha_limite, c.mora_condicion,
         f.numero AS numero, c.factura_id,
+        -- La pantalla de créditos agrupa por (cedula o nombre_cliente) tomados
+        -- de la FACTURA (ver creditos.repository.findAll). El enlace del aviso
+        -- tiene que usar exactamente esa clave o no abre a nadie.
+        f.cedula AS factura_cedula, f.nombre_cliente AS factura_nombre,
         COALESCE(cl.nombre, f.nombre_cliente) AS persona,
         COALESCE(NULLIF(NULLIF(cl.celular, ''), '0000000000'),
                  NULLIF(NULLIF(f.celular,  ''), '0000000000')) AS telefono
@@ -122,6 +127,31 @@ const cartera = async (negocioId, sucursalId = null, diasAviso = null) => {
 
     const vencidos  = [];
     const porVencer = [];
+
+    // ── A dónde lleva el aviso ────────────────────────────────────────────
+    //
+    // Directo a la ficha de la persona en la pantalla donde está su deuda: un
+    // préstamo abre la lista de préstamos con ese compañero/cliente ya
+    // seleccionado, y un crédito abre la pestaña de créditos con ese cliente.
+    // El vendedor no tiene que buscar a nadie.
+    //
+    // Las claves son las MISMAS que arma cada pantalla al agrupar
+    // (`prestatario_<id>` / `cliente_<id>` en préstamos, `cédula o nombre` en
+    // créditos). Si alguna cambia allá, este enlace deja de abrir la ficha.
+    const urlPrestamo = (p) => {
+      const clave = p.prestatario_id ? `prestatario_${p.prestatario_id}`
+        : p.cliente_id               ? `cliente_${p.cliente_id}`
+        : null;
+      return clave
+        ? `/prestamos?tab=prestamos&persona=${encodeURIComponent(clave)}`
+        : '/prestamos';
+    };
+    const urlCredito = (c) => {
+      const clave = c.factura_cedula || c.factura_nombre;
+      return clave
+        ? `/prestamos?tab=creditos&persona=${encodeURIComponent(clave)}`
+        : '/prestamos?tab=creditos';
+    };
 
     // Días entre hoy y la fecha límite, en calendario puro (sin horas ni zonas).
     // Negativo = ya venció.
@@ -158,6 +188,7 @@ const cartera = async (negocioId, sucursalId = null, diasAviso = null) => {
         fecha_limite: p.fecha_limite,
         dias_vencidos: num(p.mora?.dias_vencidos),
         capital, mora, total: capital + mora,
+        url: urlPrestamo(p),
       });
     }
 
@@ -177,6 +208,7 @@ const cartera = async (negocioId, sucursalId = null, diasAviso = null) => {
         fecha_limite: c.fecha_limite,
         dias_vencidos: num(c.mora?.dias_vencidos),
         capital, mora, total: capital + mora,
+        url: urlCredito(c),
       });
     }
 
