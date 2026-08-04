@@ -877,7 +877,7 @@ mensaje explícito y la interfaz avisa antes de dejar intentarlo.
 R2_ACCOUNT_ID=<tu account id de Cloudflare>
 R2_ACCESS_KEY_ID=<del token de R2>
 R2_SECRET_ACCESS_KEY=<del token de R2>
-R2_PUBLIC_URL=https://fotos.tudominio.com
+R2_PUBLIC_URL=https://fotos.tudominio.com    # ← tu dominio real, ver §14.6
 R2_BUCKET=catalogo          # opcional, es el valor por defecto
 ```
 
@@ -886,6 +886,10 @@ se apaga entero en vez de dejar fotos subidas que nadie puede ver.
 
 > `SUPABASE_URL` / `SUPABASE_SERVICE_KEY` **no** se usan para el catálogo. Siguen
 > siendo del módulo de backup.
+
+> ⚠️ **En todo este runbook, `tudominio.com` es un MARCADOR DE POSICIÓN.**
+> No lo copies literal: es un dominio de otra persona. Sustitúyelo por tu dominio
+> real, o usa la URL gratuita de Vercel — ver §14.6.
 
 ### 14.3 Desplegar la app pública en Vercel
 
@@ -929,6 +933,40 @@ sistema sigue normal. Habría que aplicar
 `migrations/20260803_catalogo_publico.sql` a mano.
 
 ---
+
+### 14.6 Si todavía no tienes dominio propio
+
+No hace falta comprar nada para poner el catálogo a funcionar. Vercel asigna una
+URL gratuita del tipo `<nombre-del-proyecto>.vercel.app`, y sirve igual para
+compartir por WhatsApp.
+
+En **Settings → Domains** del proyecto puedes reclamar cualquier subdominio
+`.vercel.app` que esté libre, así que se puede dejar algo presentable
+(`catalogo-minegocio.vercel.app`) en vez del nombre autogenerado.
+
+Con eso, las variables quedan:
+
+```
+# Proyecto del catálogo
+NEXT_PUBLIC_SITE_URL = https://catalogo-minegocio.vercel.app
+
+# Proyecto del frontend interno  (y recuerda REDESPLEGAR)
+VITE_CATALOGO_URL    = https://catalogo-minegocio.vercel.app
+```
+
+**El punto que sí queda cojo sin dominio son las FOTOS.** R2 necesita un dominio
+propio en Cloudflare para servir el bucket públicamente; su URL de desarrollo
+`pub-<hash>.r2.dev` está limitada por Cloudflare a propósito y no está pensada
+para tráfico real. Dos salidas:
+
+| Camino | Cuándo sirve |
+|---|---|
+| Publicar **sin fotos** por ahora | Funciona hoy, sin configurar nada. La ficha muestra nombre, precio, línea, marca y descripción. Es lo que recomiendo para empezar. |
+| Usar la URL `r2.dev` en `R2_PUBLIC_URL` | Solo para probar el flujo de subida con unas pocas visitas. **No dejarlo así en producción.** |
+
+Un dominio cuesta del orden de USD 10-12 al año y desbloquea las dos cosas a la
+vez: una URL decente para el catálogo y el dominio de R2 para las fotos. Es la
+inversión más rentable de esta feature — pero no es un requisito para arrancar.
 
 ### Cómo probarlo, en orden
 

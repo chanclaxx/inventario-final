@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Fortunes - Moluska</title>
+  <!-- Google Fonts: Montserrat para una tipografía geométrica y limpia -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <!-- FontAwesome para los íconos de redes sociales -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+  <style>
+    /* ==========================================================================
+       VARIABLES Y ESTILOS BASE
+       ========================================================================== */
+    :root {
+      --bg-color: #f7f7f8;
+      --panel-bg: #e2e4e6;
+      --card-bg: #e8e8e8;
+      --text-main: #111111;
+      --text-muted: #888888;
+      --text-light: #aaaaaa;
+      --accent-color: #4cd5bd; /* Turquesa característico del diseño */
+      --font-family: 'Montserrat', sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: var(--font-family);
+      background-color: var(--bg-color);
+      color: var(--text-main);
+      overflow-x: hidden;
+      min-height: 100vh;
+      display: flex;
+    }
+
+    /* ==========================================================================
+       LAYOUT PRINCIPAL
+       ========================================================================== */
+    .app-container {
+      display: flex;
+      width: 100vw;
+      min-height: 100vh;
+      position: relative;
+    }
+
+    .main-content {
+      flex: 1;
+      padding: 40px 60px 20px 60px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+
+    /* Sidebar derecho sutil */
+    .right-sidebar {
+      width: 100px;
+      background-color: var(--panel-bg);
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      align-items: center;
+      padding: 40px 0;
+      position: relative;
+    }
+
+    .vertical-text {
+      writing-mode: vertical-rl;
+      transform: rotate(180deg);
+      font-size: 0.65rem;
+      letter-spacing: 1.5px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+    }
+
+    /* ==========================================================================
+       HEADER Y NAVEGACIÓN
+       ========================================================================== */
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      width: 100%;
+      margin-bottom: 50px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    /* Logo de hexágono con triángulo turquesa */
+    .logo-icon {
+      width: 38px;
+      height: 38px;
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .logo-icon svg {
+      width: 100%;
+      height: 100%;
+    }
+
+    .brand-name {
+      font-size: 1.4rem;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+    }
+
+    .nav-container {
+      display: flex;
+      align-items: center;
+      gap: 50px;
+    }
+
+    nav {
+      display: flex;
+      gap: 35px;
+    }
+
+    nav a {
+      text-decoration: none;
+      color: var(--text-muted);
+      font-size: 0.85rem;
+      font-weight: 600;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      position: relative;
+      padding-bottom: 6px;
+      transition: color 0.3s ease;
+    }
+
+    nav a.active {
+      color: var(--text-main);
+    }
+
+    /* Indicador turquesa bajo la pestaña activa */
+    nav a.active::after {
+      content: '';
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      width: 25px;
+      height: 2px;
+      background-color: var(--accent-color);
+    }
+
+    .search-box {
+      background-color: #e5e5e6;
+      border-radius: 20px;
+      padding: 8px 20px;
+      display: flex;
+      align-items: center;
+      width: 220px;
+    }
+
+    .search-box input {
+      border: none;
+      background: transparent;
+      outline: none;
+      font-family: var(--font-family);
+      font-size: 0.65rem;
+      letter-spacing: 1px;
+      color: var(--text-main);
+      width: 100%;
+      text-transform: uppercase;
+    }
+
+    .search-box input::placeholder {
+      color: #a8a8a8;
+    }
+
+    /* ==========================================================================
+       HERO SECTION (MOLUSKA)
+       ========================================================================== */
+    .hero-section {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 40px;
+      position: relative;
+    }
+
+    .hero-title-container {
+      display: flex;
+      align-items: flex-start;
+      gap: 40px;
+    }
+
+    .hero-title {
+      font-size: 5rem;
+      font-weight: 700;
+      line-height: 0.9;
+      letter-spacing: -2px;
+    }
+
+    .hero-description {
+      max-width: 420px;
+      font-size: 0.72rem;
+      line-height: 1.6;
+      color: var(--text-muted);
+      margin-top: 10px;
+    }
+
+    .learn-more-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 15px;
+      text-decoration: none;
+      color: var(--text-main);
+      font-size: 0.8rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .play-arrow {
+      width: 0;
+      height: 0;
+      border-top: 5px solid transparent;
+      border-bottom: 5px solid transparent;
+      border-left: 8px solid var(--accent-color);
+    }
+
+    /* Paginación de la esquina superior derecha */
+    .page-indicator {
+      text-align: right;
+    }
+
+    .page-indicator .label {
+      font-size: 0.6rem;
+      color: var(--text-light);
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    .page-indicator .numbers {
+      font-size: 1.5rem;
+      font-weight: 600;
+    }
+
+    .page-indicator .current {
+      color: var(--accent-color);
+    }
+
+    .page-indicator .total {
+      color: #cccccc;
+    }
+
+    /* ==========================================================================
+       SECCIÓN INFERIOR: INFO + CATÁLOGO
+       ========================================================================== */
+    .content-grid {
+      display: grid;
+      grid-template-columns: 180px 1fr;
+      gap: 40px;
+      align-items: end;
+    }
+
+    /* Información de la izquierda (Contacto / Dirección) */
+    .info-sidebar {
+      display: flex;
+      flex-direction: column;
+      gap: 25px;
+      font-size: 0.7rem;
+    }
+
+    .info-block h4 {
+      font-size: 0.65rem;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      margin-bottom: 4px;
+      color: var(--text-main);
+    }
+
+    .info-block p {
+      color: var(--text-light);
+      line-height: 1.4;
+    }
+
+    .social-icons {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      margin-top: 10px;
+    }
+
+    .social-icons a {
+      color: var(--text-main);
+      text-decoration: none;
+      font-size: 0.85rem;
+      transition: color 0.2s;
+    }
+
+    .social-icons a.facebook {
+      color: var(--accent-color);
+    }
+
+    /* Grid de tarjetas de productos */
+    .products-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 20px;
+    }
+
+    .product-card {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .image-container {
+      width: 100%;
+      height: 250px;
+      background-color: var(--card-bg);
+      position: relative;
+      margin-bottom: 15px;
+      overflow: hidden;
+    }
+
+    .image-container img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      mix-blend-mode: multiply; /* Para integrar las imágenes suavemente con el fondo */
+    }
+
+    .card-number {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      font-size: 0.8rem;
+      font-weight: 700;
+      color: var(--text-main);
+    }
+
+    .product-info h3 {
+      font-size: 0.95rem;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+
+    .product-info p {
+      font-size: 0.65rem;
+      color: var(--text-muted);
+      line-height: 1.5;
+      margin-bottom: 12px;
+      display: -webkit-box;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+
+    /* ==========================================================================
+       TEXTO ROTADO INFERIOR IZQUIERDO
+       ========================================================================== */
+    .left-vertical-text {
+      position: absolute;
+      bottom: 40px;
+      left: 20px;
+      writing-mode: vertical-rl;
+      transform: rotate(180deg);
+      font-size: 0.55rem;
+      color: #d0d0d0;
+      letter-spacing: 1px;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="app-container">
+    <span class="left-vertical-text">Connect with our social media</span>
+
+    <main class="main-content">
+      <!-- HEADER -->
+      <header>
+        <div class="brand">
+          <div class="logo-icon">
+            <svg viewBox="0 0 100 100">
+              <polygon points="50,5 95,27.5 95,72.5 50,95 5,72.5 5,27.5" fill="none" stroke="#111" stroke-width="5"/>
+              <polygon points="50,20 80,35 80,65 50,80 20,65 20,35" fill="none" stroke="#111" stroke-width="3"/>
+              <polygon points="50,40 68,70 32,70" fill="var(--accent-color)"/>
+            </svg>
+          </div>
+          <span class="brand-name">fortunes</span>
+        </div>
+
+        <div class="nav-container">
+          <nav>
+            <a href="#" class="active">HOME</a>
+            <a href="#">WORK</a>
+            <a href="#">STUDIO</a>
+          </nav>
+          <div class="search-box">
+            <input type="text" placeholder="SEARCHING THE PRODUCT">
+          </div>
+        </div>
+      </header>
+
+      <!-- HERO SECTION -->
+      <section class="hero-section">
+        <div class="hero-title-container">
+          <h1 class="hero-title">Moluska</h1>
+          <div class="hero-description">
+            <p>Lorem ipsum dolor sit amet, consectetuer adipiscing elit, sed diam nonummy nibh euismod tincidunt ut laoreet dolore magna aliquam erat volutpat. Ut wisi enim ad minim veniam, quis nostrud exerci tation ullamcorper suscipit lobor</p>
+            <a href="#" class="learn-more-btn">
+              <span class="play-arrow"></span>
+              learn more
+            </a>
+          </div>
+        </div>
+
+        <div class="page-indicator">
+          <span class="label">PAGES OF</span>
+          <div class="numbers">
+            <span class="current" id="current-page">01</span><span class="total">/04</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- SECCIÓN INFERIOR -->
+      <div class="content-grid">
+        <!-- SIDEBAR IZQUIERDO DE DATOS -->
+        <aside class="info-sidebar">
+          <div class="info-block">
+            <h4>CONTACT US</h4>
+            <p>+02.45.346.33</p>
+          </div>
+          <div class="info-block">
+            <h4>ADDRESS</h4>
+            <p>WASHINGTON uK<br>02. 4503</p>
+          </div>
+          <div class="info-block">
+            <h4>WEBSITE</h4>
+            <p>WWW.SENS.COM</p>
+          </div>
+
+          <div class="social-icons">
+            <a href="#"><i class="fa-solid fa-b"></i></a>
+            <a href="#"><i class="fa-brands fa-twitter"></i></a>
+            <a href="#"><i class="fa-brands fa-instagram"></i></a>
+            <a href="#" class="facebook"><i class="fa-brands fa-facebook-f"></i></a>
+          </div>
+        </aside>
+
+        <!-- CARDS DE PRODUCTOS -->
+        <section class="products-grid" id="products-container">
+          <!-- Las tarjetas se renderizan vía JS -->
+        </section>
+      </div>
+    </main>
+
+    <!-- SIDEBAR DERECHO -->
+    <aside class="right-sidebar">
+      <div></div>
+      <span class="vertical-text">home | industries</span>
+      <div></div>
+    </aside>
+  </div>
+
+  <!-- SCRIPT DINÁMICO -->
+  <script>
+    // Datos de productos para popular las tarjetas
+    const products = [
+      {
+        id: "01",
+        title: "Swooden.",
+        description: "Lorem ipsum dolor sit amet, consectetuer adipiscing elit, sed diam nonummy nibh euismod tincidunt ut laoreet dolore magna aliquam erat.",
+        image: "https://images.unsplash.com/photo-1503602642458-232111445657?auto=format&fit=crop&q=80&w=400"
+      },
+      {
+        id: "02",
+        title: "Chairs",
+        description: "Lorem ipsum dolor sit amet, consectetuer adipiscing elit, sed diam nonummy nibh euismod tincidunt ut laoreet dolore magna aliquam erat.",
+        image: "https://images.unsplash.com/photo-1567538096630-e0c55bd6374c?auto=format&fit=crop&q=80&w=400"
+      },
+      {
+        id: "03",
+        title: "Browns",
+        description: "Lorem ipsum dolor sit amet, consectetuer adipiscing elit, sed diam nonummy nibh euismod tincidunt ut laoreet dolore magna aliquam erat.",
+        image: "https://images.unsplash.com/photo-1580481072645-022f9a6d83d0?auto=format&fit=crop&q=80&w=400"
+      },
+      {
+        id: "04",
+        title: "Hoirs",
+        description: "Lorem ipsum dolor sit amet, consectetuer adipiscing elit, sed diam nonummy nibh euismod tincidunt ut laoreet dolore magna aliquam erat.",
+        image: "https://images.unsplash.com/photo-1519947486511-46149fa0a254?auto=format&fit=crop&q=80&w=400"
+      }
+    ];
+
+    // Función para renderizar las tarjetas
+    function renderProducts() {
+      const container = document.getElementById('products-container');
+      container.innerHTML = products.map(product => `
+        <article class="product-card">
+          <div class="image-container">
+            <span class="card-number">${product.id}</span>
+            <img src="${product.image}" alt="${product.title}" loading="lazy">
+          </div>
+          <div class="product-info">
+            <h3>${product.title}</h3>
+            <p>${product.description}</p>
+            <a href="#" class="learn-more-btn">
+              <span class="play-arrow"></span>
+              learn more
+            </a>
+          </div>
+        </article>
+      `).join('');
+    }
+
+    // Inicialización al cargar el DOM
+    document.addEventListener('DOMContentLoaded', () => {
+      renderProducts();
+
+      // Interactividad básica para el menú
+      const navLinks = document.querySelectorAll('nav a');
+      navLinks.forEach(link => {
+        link.addEventListener('click', (e) => {
+          e.preventDefault();
+          navLinks.forEach(l => l.classList.remove('active'));
+          link.classList.add('active');
+        });
+      });
+    });
+  </script>
+</body>
+</html>
