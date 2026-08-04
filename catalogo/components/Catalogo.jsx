@@ -37,6 +37,8 @@ const dosDigitos = (n) => String(n).padStart(2, '0');
 // El template traía FontAwesome por CDN solo para los iconos sociales. Se
 // reemplaza por SVG inline: una petición externa menos y nada que pueda fallar.
 
+// Isotipo por defecto: solo se usa cuando el negocio no ha subido su logo en
+// Ajustes → Negocio. Es el mismo del diseño de referencia.
 const LogoHexagono = () => (
   <svg viewBox="0 0 100 100" aria-hidden="true">
     <polygon points="50,5 95,27.5 95,72.5 50,95 5,72.5 5,27.5" fill="none" stroke="#111" strokeWidth="5" />
@@ -44,6 +46,25 @@ const LogoHexagono = () => (
     <polygon points="50,40 68,70 32,70" fill="var(--accent-color)" />
   </svg>
 );
+
+/**
+ * Marca del negocio. Si subió logo, manda el logo; si no, el isotipo del diseño.
+ *
+ * El logo es el MISMO de las facturas (`config_negocio.logo_negocio`), así que
+ * el negocio no tiene que subirlo dos veces ni mantener dos versiones.
+ */
+function Marca({ vitrina }) {
+  return (
+    <div className="brand">
+      <div className={vitrina.logo ? 'logo-negocio' : 'logo-icon'}>
+        {vitrina.logo
+          ? <img src={vitrina.logo} alt={vitrina.titulo} />
+          : <LogoHexagono />}
+      </div>
+      <span className="brand-name">{vitrina.titulo}</span>
+    </div>
+  );
+}
 
 const IconoWhatsApp = ({ size = 18 }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -207,10 +228,7 @@ export function Catalogo({ data }) {
 
           {/* ── HEADER ── */}
           <header>
-            <div className="brand">
-              <div className="logo-icon"><LogoHexagono /></div>
-              <span className="brand-name">{vitrina.titulo}</span>
-            </div>
+            <Marca vitrina={vitrina} />
 
             <div className="nav-container">
               <nav>

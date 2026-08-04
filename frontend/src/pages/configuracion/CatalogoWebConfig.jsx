@@ -2,8 +2,9 @@ import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Globe, Copy, Check, ExternalLink, AlertCircle, Save, MessageCircle,
-  ToggleLeft, ToggleRight, Store,
+  ToggleLeft, ToggleRight, Store, Image as ImageIcon,
 } from 'lucide-react';
+import api from '../../api/axios.config';
 import { getVitrina, guardarVitrina } from '../../api/catalogo.api';
 import { getSucursales } from '../../api/sucursales.api';
 import { Input }   from '../../components/ui/Input';
@@ -86,6 +87,14 @@ function VitrinaForm({ sucursalActiva }) {
     queryKey: ['sucursales'],
     queryFn:  () => getSucursales().then((r) => r.data.data),
   });
+
+  // Solo para mostrar en qué queda la cabecera del catálogo. El logo se sube en
+  // Ajustes → Negocio, no aquí: es el mismo que va en las facturas.
+  const { data: configNegocio } = useQuery({
+    queryKey: ['config'],
+    queryFn:  () => api.get('/config').then((r) => r.data.data),
+  });
+  const logoNegocio = configNegocio?.logo_negocio || '';
 
   const { data: res, isLoading } = useQuery({
     queryKey: ['catalogo-vitrina', 'config', sucursalActiva],
@@ -239,6 +248,32 @@ function VitrinaForm({ sucursalActiva }) {
       {/* ── Presentación ── */}
       <div className="bg-white border border-gray-100 rounded-2xl p-5 flex flex-col gap-3">
         <h4 className="text-sm font-semibold text-gray-900">Presentación</h4>
+
+        {/* El logo NO se sube aquí a propósito: es el mismo del negocio que ya
+            sale en las facturas. Un segundo logo solo por el catálogo sería un
+            archivo más que mantener y que se desincroniza. */}
+        <div className="flex items-center gap-3 p-3 bg-gray-50 border border-gray-100 rounded-xl">
+          {logoNegocio ? (
+            <img
+              src={logoNegocio}
+              alt="Logo del negocio"
+              className="w-14 h-14 object-contain bg-white border border-gray-200 rounded-lg p-1 flex-shrink-0"
+            />
+          ) : (
+            <div className="w-14 h-14 flex items-center justify-center bg-white border
+              border-dashed border-gray-200 rounded-lg flex-shrink-0">
+              <ImageIcon size={18} className="text-gray-300" />
+            </div>
+          )}
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-gray-700">Logo</p>
+            <p className="text-xs text-gray-400 mt-0.5">
+              {logoNegocio
+                ? 'Se usa el mismo logo de tus facturas. Para cambiarlo, ve a Ajustes → Negocio.'
+                : 'Sin logo, el catálogo muestra un ícono genérico. Puedes subirlo en Ajustes → Negocio.'}
+            </p>
+          </div>
+        </div>
 
         <Input
           label="Título"

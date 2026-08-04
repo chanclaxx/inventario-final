@@ -298,6 +298,7 @@ const getCatalogoPublico = async (slug) => {
       direccion:   vitrina.direccion,
       horario:     vitrina.horario,
       color:       vitrina.color_primario,
+      logo:        _logoPublicable(vitrina.logo),
     },
     lineas,
     productos: visibles,
@@ -306,6 +307,27 @@ const getCatalogoPublico = async (slug) => {
 };
 
 const listarSlugsActivos = () => repoPublico.listarSlugsActivos();
+
+// ── Logo del negocio para la vitrina ────────────────────────────────────────
+//
+// Se reutiliza `config_negocio.logo_negocio`, el mismo que ya sale en los PDF
+// de facturas. Dos filtros defensivos antes de publicarlo:
+//
+//   1. Solo se acepta un data URI de imagen. La config la escribe el admin del
+//      negocio, y si alguien pusiera ahí una URL externa, el catálogo público
+//      estaría filtrando la IP de cada visitante a ese tercero sin que nadie lo
+//      note. Un data URI no puede pedirle nada a nadie.
+//   2. Tope de tamaño. El formulario comprime a 400px, pero un valor heredado
+//      o manipulado podría inflar la respuesta de TODAS las visitas. Ante la
+//      duda se omite el logo y la cabecera cae al isotipo por defecto.
+const MAX_LOGO_BYTES = 500 * 1024;
+
+const _logoPublicable = (valor) => {
+  if (typeof valor !== 'string') return null;
+  if (!/^data:image\/(png|jpeg|jpg|webp|gif);base64,/i.test(valor)) return null;
+  if (valor.length > MAX_LOGO_BYTES) return null;
+  return valor;
+};
 
 module.exports = {
   getVitrina, listarVitrinas, guardarVitrina,

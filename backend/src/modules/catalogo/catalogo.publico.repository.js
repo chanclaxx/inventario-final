@@ -26,10 +26,18 @@ const getVitrinaPorSlug = async (slug) => {
             COALESCE(NULLIF(BTRIM(cs.titulo), ''), n.nombre) AS titulo,
             cs.descripcion, cs.whatsapp, cs.direccion, cs.horario,
             cs.color_primario, cs.mostrar_precios, cs.mostrar_disponibilidad,
-            cs.ocultar_agotados
+            cs.ocultar_agotados,
+            -- Logo del negocio: el MISMO que ya se sube en Ajustes → Negocio y
+            -- que sale en los PDF de facturas. Se reutiliza en vez de pedir uno
+            -- nuevo: es el logo del negocio, no uno distinto por vitrina.
+            -- Es un data URI, así que viaja dentro de la respuesta y la cabecera
+            -- del catálogo pinta sin una petición extra.
+            cfg.valor AS logo
      FROM catalogo_sucursal cs
      JOIN sucursales su ON su.id = cs.sucursal_id
      JOIN negocios   n  ON n.id  = cs.negocio_id
+     LEFT JOIN config_negocio cfg
+       ON cfg.negocio_id = cs.negocio_id AND cfg.clave = 'logo_negocio'
      WHERE LOWER(cs.slug) = LOWER($1)
        AND cs.activo   = true
        AND su.activa   = true
