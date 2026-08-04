@@ -525,6 +525,7 @@ productos, no millones, y así abrir una ficha no cuesta un viaje al servidor.
 | `POST` | `/api/catalogo/items/:id/imagenes` | subida (`multer` memoryStorage, 5 MB) | `supervisor` |
 | `PATCH` | `/api/catalogo/items/:id/imagenes` | reordena / fija portada | `supervisor` |
 | `DELETE` | `/api/catalogo/imagenes/:id` | borra del bucket y de la tabla | `supervisor` |
+| `POST` | `/api/catalogo/refrescar` | fuerza el refresco inmediato del catálogo público | `vendedor` |
 
 ### 6.4 Rate limiting propio
 
@@ -578,25 +579,53 @@ Nombre, línea, marca, precio y stock salen en vivo de las tablas de inventario 
 regeneración de la página. Si el vendedor cambia un precio, el catálogo lo refleja en la
 siguiente revalidación. **No hay job, no hay cron, no hay tabla espejo, no hay deriva.**
 
-### 7.2 Frescura
+### 7.2 Frescura en dos capas
 
 ```
-Venta / cambio de precio / foto nueva en el POS
-        │
-        └─ ISR: la página se regenera sola cada 300 s
+Cambio desde el módulo del catálogo          Cambio desde Inventario
+(publicar, ficha, foto, vitrina)             (precio, venta que agota stock)
+        │                                            │
+        ▼                                            ▼
+  catalogo.revalidar.js                     ISR: hasta 30 min
+  POST /api/revalidar                                │
+        │                                            │  o bien
+        ▼                                            ▼
+  INMEDIATO                                   botón "Actualizar ahora"
+                                                     │
+                                                     ▼
+                                                INMEDIATO
 ```
 
-Cinco minutos de desfase en un catálogo que ni siquiera vende es irrelevante
-para el negocio, y a cambio el POS queda protegido.
+**Capa 1 — ISR de 30 minutos.** Es el piso de frescura: sin que nadie toque
+nada, la página se regenera sola. Es lo que protege la base de datos, que está
+en el plan gratuito de Supabase con cupo de salida compartido con la
+facturación.
 
-**Deliberadamente NO se revalida en cada venta.** Un negocio con 200 ventas al
-día generaría 200 regeneraciones y anularía el beneficio del caché.
+**Capa 2 — invalidación bajo demanda.** Todo lo que se hace desde el módulo del
+catálogo (publicar, retirar, editar la ficha, subir o borrar fotos, guardar la
+vitrina) dispara un `POST /api/revalidar` contra la app pública, que purga el
+HTML de esa ruta. El siguiente visitante ve el cambio.
 
-> **Pendiente (fase 2):** un botón "Actualizar catálogo ya" que dispare la
-> revalidación bajo demanda de Next.js. Hoy **no existe**: tras subir una foto
-> hay que esperar hasta 5 minutos para verla en la página pública. Se decidió
-> dejarlo fuera de la fase 1 porque exige un secreto compartido entre backend y
-> app pública, y el desfase de 5 minutos no bloquea el uso real.
+Detalles que importan:
+
+- **`catalogo.revalidar.js` NUNCA lanza.** Mismo criterio que
+  `notificaciones.service.enviar()`: que el catálogo tarde en refrescarse es un
+  inconveniente; que falle el guardado de un producto porque la app pública está
+  caída sería un desastre. Va con `try/catch` y `AbortSignal.timeout(4000)`.
+- **Se dispara en segundo plano.** El vendedor no espera los 4 segundos del
+  peor caso.
+- **Al cambiar el slug se purgan los DOS**, el nuevo y el anterior. Si no, el
+  HTML de la dirección vieja seguiría respondiendo media hora en una URL que ya
+  no debería existir.
+- **El secreto se compara en tiempo constante** (`timingSafeEqual`). Con `===`,
+  el tiempo de respuesta varía según cuántos caracteres coinciden y el secreto
+  se puede adivinar carácter por carácter midiendo.
+- **Deliberadamente NO se revalida en cada venta.** Un negocio con 200 ventas al
+  día generaría 200 regeneraciones y anularía el caché. Para eso está el botón
+  manual.
+
+Sin `CATALOGO_URL` / `CATALOGO_REVALIDATE_SECRET` la capa 2 queda apagada, el
+botón no se ofrece y todo funciona con el ISR de siempre.
 
 ---
 
@@ -763,6 +792,7 @@ frente al cupo.
 - [x] Ruta pública con CORS abierto, limiter propio y cabeceras de caché
 - [x] Validación de slug (formato + reservados + unicidad) y de WhatsApp en el service
 - [x] Auditoría de activación de vitrina y de publicación masiva
+- [x] Refresco inmediato del catálogo público (§7.2) + botón manual
 
 **Frontend interno**
 - [x] `catalogo.api.js` y `utils/imagen.js` (compresión a WebP en el navegador)
@@ -784,7 +814,6 @@ Requiere la configuración de §14.
 
 ### Fase 2 — pendiente
 
-- Botón "Actualizar catálogo ya" (revalidación bajo demanda, §7.2)
 - Subdominios wildcard con 301 desde la ruta
 - Logo del negocio en la cabecera de la vitrina
 - JSON-LD `Product` + `Offer` para resultados enriquecidos
@@ -933,6 +962,37 @@ sistema sigue normal. Habría que aplicar
 `migrations/20260803_catalogo_publico.sql` a mano.
 
 ---
+
+### 14.5b Refresco inmediato · **opcional pero muy recomendado**
+
+Sin esto, un cambio tarda hasta 30 minutos en verse en el catálogo. Con esto es
+instantáneo.
+
+**Paso 1 — generar el secreto** (una sola vez):
+
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
+
+**Paso 2 — el MISMO valor en los dos lados:**
+
+| Dónde | Variable |
+|---|---|
+| Vercel, proyecto del catálogo | `REVALIDATE_SECRET` |
+| Railway, backend | `CATALOGO_REVALIDATE_SECRET` |
+
+**Paso 3 — decirle al backend dónde vive el catálogo**, en Railway:
+
+```
+CATALOGO_URL=https://catalogo-minegocio.vercel.app
+```
+
+Con las tres puestas, publicar un producto o subirle una foto refresca la
+vitrina al instante, y en la pestaña Catálogo web aparece un botón de
+**Actualizar ahora** para forzarlo cuando el cambio vino de Inventario.
+
+Si falta cualquiera de las tres, la feature queda apagada sin ruido: el botón no
+se muestra y el catálogo se refresca solo cada 30 minutos.
 
 ### 14.6 Si todavía no tienes dominio propio
 

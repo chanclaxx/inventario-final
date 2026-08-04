@@ -1,4 +1,5 @@
 import { Montserrat } from 'next/font/google';
+import { iconosDe } from '../lib/iconos';
 import './globals.css';
 
 // Montserrat, la tipografía del diseño. Vía next/font en vez del <link> a Google
@@ -15,6 +16,9 @@ const montserrat = Montserrat({
 export const metadata = {
   title: 'Catálogo',
   description: 'Catálogo de productos',
+  // Ícono base. Cada vitrina lo sobreescribe con su propio logo desde
+  // `generateMetadata` en app/[slug]/page.jsx.
+  icons: iconosDe(null),
 };
 
 export const viewport = {

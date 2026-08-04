@@ -1,6 +1,7 @@
-const service = require('./catalogo.service');
-const storage = require('./catalogo.storage');
-const audit   = require('../../utils/auditoria.util');
+const service  = require('./catalogo.service');
+const storage  = require('./catalogo.storage');
+const refresco = require('./catalogo.revalidar');
+const audit    = require('../../utils/auditoria.util');
 
 // ── Vitrina ─────────────────────────────────────────────────────────────────
 
@@ -13,6 +14,9 @@ const getVitrina = async (req, res, next) => {
       // El frontend necesita saber si puede ofrecer la subida de fotos antes de
       // que el usuario intente subir una y se lleve un 503.
       imagenes_activas: storage.estaActivo(),
+      // Mismo criterio para el botón de "Actualizar ahora": si el refresco
+      // inmediato no está configurado, no se ofrece.
+      refresco_activo:  refresco.estaActivo(),
     });
   } catch (err) { next(err); }
 };
@@ -104,6 +108,13 @@ const reordenarImagenes = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+const refrescar = async (req, res, next) => {
+  try {
+    const data = await service.refrescarManual(req.sucursal_id);
+    res.json({ ok: true, data, message: 'Catálogo actualizado' });
+  } catch (err) { next(err); }
+};
+
 // ── Públicos (sin sesión) ───────────────────────────────────────────────────
 
 const getPublico = async (req, res, next) => {
@@ -129,6 +140,6 @@ const listarSlugsPublicos = async (req, res, next) => {
 module.exports = {
   getVitrina, listarVitrinas, guardarVitrina,
   listarItems, getItem, guardarItem, publicarMasivo,
-  subirImagen, eliminarImagen, reordenarImagenes,
+  subirImagen, eliminarImagen, reordenarImagenes, refrescar,
   getPublico, listarSlugsPublicos,
 };

@@ -40,6 +40,16 @@ const listarVitrinas = async (negocioId) => {
   return rows;
 };
 
+// Slug de la vitrina de una sucursal. Es lo que necesita saber el refresco bajo
+// demanda para purgar la ruta correcta en la app pública.
+const slugDeSucursal = async (sucursalId) => {
+  const { rows } = await pool.query(
+    'SELECT slug FROM catalogo_sucursal WHERE sucursal_id = $1',
+    [sucursalId]
+  );
+  return rows[0]?.slug || null;
+};
+
 const slugOcupado = async (slug, sucursalId) => {
   const { rows } = await pool.query(
     `SELECT sucursal_id FROM catalogo_sucursal
@@ -279,7 +289,7 @@ const reordenarImagenes = async (itemId, idsEnOrden) => {
 };
 
 module.exports = {
-  getVitrina, listarVitrinas, slugOcupado, upsertVitrina,
+  getVitrina, listarVitrinas, slugOcupado, slugDeSucursal, upsertVitrina,
   listarItemsCantidad, listarItemsSerial, productoExisteEnSucursal,
   getItem, upsertItem, publicarMasivo,
   contarImagenes, crearImagen, getImagen, eliminarImagen, reordenarImagenes,

@@ -1,5 +1,6 @@
 import { notFound } from 'next/navigation';
 import { getCatalogo, getSlugs } from '../../lib/api';
+import { iconosDe } from '../../lib/iconos';
 import { Catalogo } from '../../components/Catalogo';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -32,7 +33,7 @@ export async function generateMetadata({ params }) {
   const { slug } = await params;
   const data = await getCatalogo(slug).catch(() => null);
 
-  if (!data) return { title: 'Catálogo no encontrado' };
+  if (!data) return { title: 'Catálogo no encontrado', icons: iconosDe(null) };
 
   const titulo      = data.vitrina.titulo;
   const descripcion = data.vitrina.descripcion
@@ -43,6 +44,8 @@ export async function generateMetadata({ params }) {
   return {
     title:       titulo,
     description: descripcion,
+    // Favicon: el logo del negocio si lo tiene, si no el isotipo del diseño.
+    icons:       iconosDe(data.vitrina.logo),
     openGraph: {
       title:       titulo,
       description: descripcion,

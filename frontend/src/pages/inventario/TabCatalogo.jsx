@@ -3,8 +3,9 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Globe, Package, ShoppingBag, Copy, Check, ExternalLink, Eye, EyeOff,
   ImageOff, Image as ImageIcon, Star, Settings, AlertCircle, CheckSquare, Square,
+  RefreshCw,
 } from 'lucide-react';
-import { getVitrina, getItemsCatalogo, publicarMasivo } from '../../api/catalogo.api';
+import { getVitrina, getItemsCatalogo, publicarMasivo, refrescarCatalogo } from '../../api/catalogo.api';
 import { SearchInput }  from '../../components/ui/SearchInput';
 import { Button }       from '../../components/ui/Button';
 import { Spinner }      from '../../components/ui/Spinner';
@@ -44,8 +45,13 @@ const normalizar = (texto) =>
   String(texto || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 
 // ── Enlace público, listo para pegar en WhatsApp ────────────────────────────
-function EnlacePublico({ vitrina }) {
+function EnlacePublico({ vitrina, refrescoActivo }) {
   const [copiado, setCopiado] = useState(false);
+
+  // El catálogo público cachea su HTML: los cambios hechos desde aquí lo
+  // refrescan solos, pero un precio editado en Inventario no. Este botón lo
+  // fuerza sin esperar los 30 minutos del refresco automático.
+  const refrescar = useMutation({ mutationFn: refrescarCatalogo });
 
   if (!vitrina) return null;
 
@@ -83,16 +89,35 @@ function EnlacePublico({ vitrina }) {
         )}
       </div>
 
-      {vitrina.activo && url && (
+      {vitrina.activo && (
         <div className="flex items-center gap-1 flex-shrink-0">
-          <button onClick={copiar} title="Copiar enlace"
-            className="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-white transition-colors">
-            {copiado ? <Check size={14} className="text-green-600" /> : <Copy size={14} />}
-          </button>
-          <a href={url} target="_blank" rel="noopener noreferrer" title="Abrir catálogo"
-            className="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-white transition-colors">
-            <ExternalLink size={14} />
-          </a>
+          {refrescoActivo && (
+            <button
+              onClick={() => refrescar.mutate()}
+              disabled={refrescar.isPending}
+              title={refrescar.isSuccess
+                ? 'Catálogo actualizado'
+                : 'Actualizar ahora el catálogo público'}
+              className="p-1.5 rounded-lg text-gray-400 hover:text-blue-600
+                hover:bg-white transition-colors disabled:opacity-50"
+            >
+              {refrescar.isSuccess
+                ? <Check size={14} className="text-green-600" />
+                : <RefreshCw size={14} className={refrescar.isPending ? 'animate-spin' : ''} />}
+            </button>
+          )}
+          {url && (
+            <>
+              <button onClick={copiar} title="Copiar enlace"
+                className="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-white transition-colors">
+                {copiado ? <Check size={14} className="text-green-600" /> : <Copy size={14} />}
+              </button>
+              <a href={url} target="_blank" rel="noopener noreferrer" title="Abrir catálogo"
+                className="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-white transition-colors">
+                <ExternalLink size={14} />
+              </a>
+            </>
+          )}
         </div>
       )}
     </div>
@@ -255,7 +280,10 @@ export function TabCatalogo() {
   return (
     <div className="flex flex-col gap-3">
 
-      <EnlacePublico vitrina={vitrinaRes?.data} />
+      <EnlacePublico
+        vitrina={vitrinaRes?.data}
+        refrescoActivo={vitrinaRes?.refresco_activo === true}
+      />
 
       {vitrinaRes && vitrinaRes.imagenes_activas === false && (
         <p className="flex items-start gap-2 text-xs text-amber-700 bg-amber-50

@@ -130,7 +130,17 @@ VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_SUBJECT   # notificaciones push
 SUPABASE_URL, SUPABASE_SERVICE_KEY                   # backup automático
 R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_PUBLIC_URL, R2_BUCKET
                                                      # fotos del catálogo web
+CATALOGO_URL, CATALOGO_REVALIDATE_SECRET             # refresco inmediato del catálogo
 ```
+
+> **Refresco del catálogo web.** La app pública cachea su HTML 30 min (ISR) para
+> proteger la BD del tráfico anónimo. `catalogo.revalidar.js` purga esa caché al
+> instante después de publicar, editar o subir una foto — y **nunca lanza**: que
+> el catálogo tarde en refrescarse no puede tumbar el guardado de un producto.
+> Sin `CATALOGO_URL` / `CATALOGO_REVALIDATE_SECRET` la feature queda apagada y
+> el catálogo solo se refresca por ISR. Los cambios hechos desde Inventario (un
+> precio, una venta que agota el stock) no disparan refresco: para esos está el
+> botón "Actualizar ahora" de la pestaña Catálogo web.
 
 > **Las fotos del catálogo van a Cloudflare R2, NO a Supabase Storage.** La BD
 > está en el plan gratuito de Supabase, cuyo cupo de salida es compartido con la

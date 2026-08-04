@@ -23,6 +23,10 @@ router.get('/vitrina',      requireNivel('vendedor'),      ctrl.getVitrina);
 router.get('/vitrinas',     requireNivel('admin_negocio'), ctrl.listarVitrinas);
 router.put('/vitrina',      requireNivel('admin_negocio'), ctrl.guardarVitrina);
 
+// Refresco manual. Lo puede disparar cualquiera del equipo: quien cambia un
+// precio desde Inventario es el mismo que quiere verlo ya en el catálogo.
+router.post('/refrescar',   requireModulo('inventario'), requireNivel('vendedor'), ctrl.refrescar);
+
 // ── Fichas de producto — quien administra el inventario ────────────────────
 // No se crea una clave de módulo nueva a propósito: publicar es una acción
 // sobre el inventario, así que hereda ese permiso y no cambia los permisos de

@@ -16,6 +16,11 @@ export const getVitrina     = ()      => api.get('/catalogo/vitrina');
 export const getVitrinas    = ()      => api.get('/catalogo/vitrinas');
 export const guardarVitrina = (datos) => api.put('/catalogo/vitrina', datos);
 
+// Fuerza el refresco inmediato del catálogo público. El refresco automático ya
+// cubre lo que se hace desde el módulo del catálogo; esto cubre el resto (un
+// precio cambiado desde Inventario) y la impaciencia de querer verlo ya.
+export const refrescarCatalogo = () => api.post('/catalogo/refrescar');
+
 // ── Fichas de producto ───────────────────────────────────────────────────────
 // `tipo` opcional: 'serial' | 'cantidad' | undefined (ambos).
 export const getItemsCatalogo = (tipo) =>

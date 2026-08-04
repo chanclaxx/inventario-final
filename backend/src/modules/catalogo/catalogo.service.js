@@ -1,6 +1,17 @@
 const repo        = require('./catalogo.repository');
 const repoPublico = require('./catalogo.publico.repository');
 const storage     = require('./catalogo.storage');
+const refresco    = require('./catalogo.revalidar');
+
+// Refresca la vitrina de una sucursal en la app pública, sin bloquear la
+// respuesta. Nunca lanza: si la app pública no contesta, el cambio igual quedó
+// guardado y el catálogo se pondrá al día solo con el ISR de 30 minutos.
+const _refrescarSucursal = async (sucursalId) => {
+  try {
+    const slug = await repo.slugDeSucursal(sucursalId);
+    if (slug) refresco.revalidarEnSegundoPlano(slug);
+  } catch { /* el refresco es best-effort, jamás tumba la operación */ }
+};
 
 // ── Límites ─────────────────────────────────────────────────────────────────
 const MAX_IMAGENES        = 6;
@@ -106,7 +117,12 @@ const guardarVitrina = async (negocioId, sucursalId, datos) => {
     throw { status: 409, message: `La dirección "${slug}" ya está en uso. Elige otra.` };
   }
 
-  return repo.upsertVitrina(negocioId, sucursalId, {
+  // Se lee ANTES de escribir: si el negocio cambió de dirección, hay que purgar
+  // también la vieja, o su HTML cacheado seguiría respondiendo media hora más
+  // en una URL que ya no debería existir.
+  const slugAnterior = await repo.slugDeSucursal(sucursalId);
+
+  const vitrina = await repo.upsertVitrina(negocioId, sucursalId, {
     slug,
     activo:                 _bool(datos.activo, false),
     titulo:                 _texto(datos.titulo, MAX_TITULO),
@@ -119,6 +135,12 @@ const guardarVitrina = async (negocioId, sucursalId, datos) => {
     mostrar_disponibilidad: _bool(datos.mostrar_disponibilidad, true),
     ocultar_agotados:       _bool(datos.ocultar_agotados, false),
   });
+
+  refresco.revalidarEnSegundoPlano(
+    slugAnterior && slugAnterior !== slug ? [slug, slugAnterior] : [slug]
+  );
+
+  return vitrina;
 };
 
 // ── Fichas ──────────────────────────────────────────────────────────────────
@@ -162,7 +184,7 @@ const guardarItem = async (negocioId, sucursalId, datos) => {
     throw { status: 404, message: 'El producto no existe en esta sucursal' };
   }
 
-  return repo.upsertItem(negocioId, sucursalId, tipo, productoId, {
+  const item = await repo.upsertItem(negocioId, sucursalId, tipo, productoId, {
     publicado:      _bool(datos.publicado, false),
     titulo:         _texto(datos.titulo, MAX_TITULO),
     descripcion:    _texto(datos.descripcion, MAX_DESCRIPCION),
@@ -172,6 +194,9 @@ const guardarItem = async (negocioId, sucursalId, datos) => {
     destacado:      _bool(datos.destacado, false),
     orden:          Number.isFinite(Number(datos.orden)) ? Number(datos.orden) : 0,
   });
+
+  await _refrescarSucursal(sucursalId);
+  return item;
 };
 
 const publicarMasivo = async (negocioId, sucursalId, datos) => {
@@ -202,6 +227,8 @@ const publicarMasivo = async (negocioId, sucursalId, datos) => {
   const afectados = await repo.publicarMasivo(
     negocioId, sucursalId, tipo, validos, _bool(datos.publicado, true)
   );
+
+  await _refrescarSucursal(sucursalId);
   return { afectados, ignorados: ids.length - validos.length };
 };
 
@@ -221,11 +248,13 @@ const subirImagen = async (negocioId, itemId, archivo, usuarioId) => {
   const subida = await storage.subir(archivo.buffer, { negocioId, itemId });
 
   try {
-    return await repo.crearImagen(itemId, {
+    const imagen = await repo.crearImagen(itemId, {
       ...subida,
       alt:        item.titulo || null,
       usuario_id: usuarioId,
     });
+    await _refrescarSucursal(item.sucursal_id);
+    return imagen;
   } catch (err) {
     // Si la fila no se pudo guardar, el archivo ya subido no debe quedarse
     // ocupando espacio sin que nada lo referencie.
@@ -242,6 +271,9 @@ const eliminarImagen = async (negocioId, imagenId) => {
   // la vitrina, que es lo que el usuario pidió. El huérfano es recuperable.
   await repo.eliminarImagen(imagenId);
   await storage.borrar(imagen.storage_path);
+
+  const item = await repo.getItem(imagen.item_id, negocioId);
+  if (item) await _refrescarSucursal(item.sucursal_id);
   return true;
 };
 
@@ -257,7 +289,39 @@ const reordenarImagenes = async (negocioId, itemId, ids) => {
   if (!orden.length) throw { status: 400, message: 'Orden de imágenes no válido' };
 
   await repo.reordenarImagenes(itemId, orden);
+  await _refrescarSucursal(item.sucursal_id);
   return repo.getItem(itemId, negocioId);
+};
+
+// ── Refresco manual ─────────────────────────────────────────────────────────
+//
+// El refresco automático cubre todo lo que se hace desde el módulo del
+// catálogo. Este botón cubre el resto: un cambio de precio o de stock hecho
+// desde Inventario, o simplemente la impaciencia de querer verlo YA.
+//
+// A diferencia de los demás, este SÍ espera la respuesta: el usuario pulsó un
+// botón y merece saber si funcionó.
+const refrescarManual = async (sucursalId) => {
+  const slug = await repo.slugDeSucursal(sucursalId);
+  if (!slug) throw { status: 404, message: 'Esta sucursal no tiene catálogo web' };
+
+  if (!refresco.estaActivo()) {
+    throw {
+      status: 503,
+      message: 'El refresco inmediato no está configurado. El catálogo se '
+             + 'actualizará solo dentro de 30 minutos.',
+    };
+  }
+
+  const ok = await refresco.revalidar(slug);
+  if (!ok) {
+    throw {
+      status: 502,
+      message: 'No se pudo contactar al catálogo público. Se actualizará solo '
+             + 'dentro de 30 minutos.',
+    };
+  }
+  return { slug };
 };
 
 // ── Lectura pública ─────────────────────────────────────────────────────────
@@ -332,7 +396,7 @@ const _logoPublicable = (valor) => {
 module.exports = {
   getVitrina, listarVitrinas, guardarVitrina,
   listarItems, getItemDetalle, guardarItem, publicarMasivo,
-  subirImagen, eliminarImagen, reordenarImagenes,
+  subirImagen, eliminarImagen, reordenarImagenes, refrescarManual,
   getCatalogoPublico, listarSlugsActivos,
   slugify, MAX_IMAGENES,
 };
