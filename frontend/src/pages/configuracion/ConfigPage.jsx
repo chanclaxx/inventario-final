@@ -15,6 +15,7 @@ import { MetodosPagoConfig } from './MetodosPagoConfig';
 import { TarifasConfig }    from './TarifasConfig';
 import { MoraConfig }       from './MoraConfig';
 import { NotificacionesConfig } from './NotificacionesConfig';
+import { CatalogoWebConfig } from './CatalogoWebConfig';
 import { TiposCaracteristicaConfig } from './components/TiposCaracteristicaConfig';
 import { Button }   from '../../components/ui/Button';
 import { Input }    from '../../components/ui/Input';
@@ -27,13 +28,17 @@ import {
   Printer, Palette, ListChecks, Wallet, Layers,
   ChevronUp, ChevronDown, RotateCcw, Navigation,
   Upload, X, Image as ImageIcon, Download, Barcode, Percent, CalendarClock,
-  MapPin, Bell,
+  MapPin, Bell, Globe,
 } from 'lucide-react';
 
 // ─── Navegación principal ─────────────────────────────────────────────────────
 const SECCIONES = [
   { id: 'negocio',   label: 'Negocio',   Icn: Building2   },
   { id: 'catalogo',  label: 'Catálogo',  Icn: BookOpen    },
+  // "Catálogo web" es la vitrina pública, distinta del "Catálogo" de arriba,
+  // que son los datos maestros (líneas, garantías, variantes…). Va como sección
+  // propia porque se configura por SUCURSAL, no por negocio.
+  { id: 'web',       label: 'Catálogo web', Icn: Globe    },
   // Avisos va como sección propia y no dentro de Catálogo porque no configura el
   // negocio: activa las notificaciones de ESTE dispositivo, y cada usuario del
   // equipo entra a activarlas en el suyo.
@@ -1592,6 +1597,7 @@ export default function ConfigPage() {
           />
           {seccionActiva === 'negocio'   && <SeccionNegocio   valores={valores} set={set} />}
           {seccionActiva === 'catalogo'  && <SeccionCatalogo  valores={valores} set={set} />}
+          {seccionActiva === 'web'       && <CatalogoWebConfig />}
           {seccionActiva === 'avisos'    && <NotificacionesConfig />}
           {seccionActiva === 'seguridad' && <SeccionSeguridad form={form}       set={set} />}
           {seccionActiva === 'equipo'    && <SeccionEquipo valores={valores} set={set} />}

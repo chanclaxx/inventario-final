@@ -28,6 +28,35 @@ app.use(helmet());
 // payloads grandes (exportación de inventario, reportes), que son puro texto
 // repetido y bajan alrededor de un 90%.
 app.use(compression());
+
+// ── Catálogo web público ──────────────────────────────
+//
+// Se monta ANTES del CORS con whitelist y del rate limiter global, y por eso
+// va tan arriba. Tres razones concretas:
+//
+//   1. CORS: la whitelist de abajo rechaza cualquier origen que no sea la app
+//      interna. El catálogo se sirve desde otro dominio y es contenido público
+//      de solo lectura, sin cookies ni credenciales, así que lleva su propio
+//      CORS abierto. La whitelist estricta del resto de /api no se toca.
+//   2. Rate limit: los 60 req/min de abajo están pensados para una sesión
+//      humana. Aquí las peticiones llegan desde el renderizador de la app
+//      pública — pocas IPs con el volumen de todos los visitantes agregado.
+//   3. No puede pasar por [auth, verificarPlan, resolveSucursal]: no hay sesión
+//      ni sucursal que resolver.
+//
+// Con el caché del CDN el backend ve ~1 petición cada 5 minutos por vitrina,
+// así que 300/min sobra y a la vez sigue frenando un abuso.
+app.use('/api/publico/catalogo',
+  cors({ origin: '*', credentials: false, methods: ['GET'] }),
+  rateLimit({
+    windowMs:        60 * 1000,
+    max:             300,
+    standardHeaders: true,
+    legacyHeaders:   false,
+    message:         { ok: false, error: 'Demasiadas solicitudes. Intenta más tarde.' },
+  }),
+  require('./modules/catalogo/catalogo.publico.routes'));
+
 app.use(cors({
   origin: (origin, callback) => {
     const allowed = [
@@ -96,6 +125,7 @@ app.use('/api/tipos-caracteristica', protegida, require('./modules/tipos-caracte
 app.use('/api/variantes-producto',   protegida, require('./modules/variantes-producto/variantes-producto.routes'));
 app.use('/api/ubicaciones',          protegida, require('./modules/ubicaciones/ubicaciones.routes'));
 app.use('/api/notificaciones',       protegida, require('./modules/notificaciones/notificaciones.routes'));
+app.use('/api/catalogo',             protegida, require('./modules/catalogo/catalogo.routes'));
 
 // ── Rutas de superadmin (sin protegida) ───────────────
 app.use('/api/superadmin', require('./modules/superadmin/superadmin.routes'));

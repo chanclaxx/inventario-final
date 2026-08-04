@@ -351,6 +351,93 @@ const runMigrations = async () => {
     console.error('⚠️  Migración de notificaciones push no aplicada (el resto del sistema sigue normal):', err.message);
   }
 
+  // Catálogo web público — ver migrations/20260803_catalogo_publico.sql
+  //
+  // 100% aditiva: crea 3 tablas nuevas y NINGÚN ALTER sobre tablas existentes.
+  // La vitrina es DELIBERADAMENTE independiente del inventario: la marca, la
+  // descripción comercial y las fotos viven solo aquí, así que publicar un
+  // producto no cambia ni un byte de `productos_cantidad` / `productos_serial`.
+  //
+  // El catálogo es POR SUCURSAL: cada sucursal tiene su propio slug y publica
+  // sus propias filas. Como los productos ya cuelgan de `sucursal_id`, la ficha
+  // se ata al id real del producto y no hay ninguna clave por nombre que se
+  // pueda romper al renombrar.
+  //
+  // Un negocio que no cree una vitrina no escribe una sola fila: para él son 3
+  // tablas vacías sin costo ni efecto. Propio try/catch por la misma razón que
+  // la red interna: un fallo aquí no puede dejar el servidor sin arrancar.
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS catalogo_sucursal (
+        id                     SERIAL      PRIMARY KEY,
+        negocio_id             INTEGER     NOT NULL REFERENCES negocios(id)   ON DELETE CASCADE,
+        sucursal_id            INTEGER     NOT NULL UNIQUE REFERENCES sucursales(id) ON DELETE CASCADE,
+        slug                   TEXT        NOT NULL,
+        activo                 BOOLEAN     NOT NULL DEFAULT FALSE,
+        titulo                 TEXT,
+        descripcion            TEXT,
+        whatsapp               TEXT,
+        direccion              TEXT,
+        horario                TEXT,
+        color_primario         TEXT,
+        mostrar_precios        BOOLEAN     NOT NULL DEFAULT TRUE,
+        mostrar_disponibilidad BOOLEAN     NOT NULL DEFAULT TRUE,
+        ocultar_agotados       BOOLEAN     NOT NULL DEFAULT FALSE,
+        creado_en              TIMESTAMP   NOT NULL DEFAULT NOW(),
+        actualizado_en         TIMESTAMP   NOT NULL DEFAULT NOW()
+      );
+
+      -- El slug es la URL pública: único en TODA la plataforma, no por negocio.
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_catalogo_sucursal_slug
+        ON catalogo_sucursal (LOWER(slug));
+      CREATE INDEX IF NOT EXISTS idx_catalogo_sucursal_negocio
+        ON catalogo_sucursal (negocio_id);
+
+      CREATE TABLE IF NOT EXISTS catalogo_items (
+        id              BIGSERIAL     PRIMARY KEY,
+        negocio_id      INTEGER       NOT NULL REFERENCES negocios(id)   ON DELETE CASCADE,
+        sucursal_id     INTEGER       NOT NULL REFERENCES sucursales(id) ON DELETE CASCADE,
+        tipo            TEXT          NOT NULL,
+        producto_id     INTEGER       NOT NULL,
+        publicado       BOOLEAN       NOT NULL DEFAULT FALSE,
+        titulo          TEXT,
+        descripcion     TEXT,
+        marca           TEXT,
+        precio_publico  NUMERIC(14,2),
+        mostrar_precio  BOOLEAN       NOT NULL DEFAULT TRUE,
+        destacado       BOOLEAN       NOT NULL DEFAULT FALSE,
+        orden           INTEGER       NOT NULL DEFAULT 0,
+        creado_en       TIMESTAMP     NOT NULL DEFAULT NOW(),
+        actualizado_en  TIMESTAMP     NOT NULL DEFAULT NOW(),
+        CONSTRAINT catalogo_items_tipo_chk CHECK (tipo IN ('serial', 'cantidad'))
+      );
+
+      -- Una ficha por producto y sucursal. Sin FK a productos_* porque el tipo
+      -- decide la tabla destino; la validación de pertenencia vive en el service.
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_catalogo_items_producto
+        ON catalogo_items (sucursal_id, tipo, producto_id);
+      CREATE INDEX IF NOT EXISTS idx_catalogo_items_publicados
+        ON catalogo_items (sucursal_id, destacado DESC, orden, id) WHERE publicado;
+
+      CREATE TABLE IF NOT EXISTS catalogo_imagenes (
+        id           BIGSERIAL   PRIMARY KEY,
+        item_id      BIGINT      NOT NULL REFERENCES catalogo_items(id) ON DELETE CASCADE,
+        storage_path TEXT        NOT NULL,
+        url          TEXT        NOT NULL,
+        alt          TEXT,
+        bytes        INTEGER,
+        orden        INTEGER     NOT NULL DEFAULT 0,
+        usuario_id   INTEGER,
+        creado_en    TIMESTAMP   NOT NULL DEFAULT NOW()
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_catalogo_imagenes_item
+        ON catalogo_imagenes (item_id, orden);
+    `);
+  } catch (err) {
+    console.error('⚠️  Migración del catálogo público no aplicada (el resto del sistema sigue normal):', err.message);
+  }
+
   // Aplicadas manualmente en producción:
   // - lineas_traslado: revertida_por_usuario_id, fecha_reversion
   // - traslados: revertido_por_usuario_id, fecha_reversion

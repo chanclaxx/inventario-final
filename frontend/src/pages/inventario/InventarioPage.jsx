@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import {
   Package, ShoppingBag, Plus, Download,
-  ShoppingCart, ChevronUp, Upload, AlertCircle, X,
+  ShoppingCart, ChevronUp, Upload, AlertCircle, X, Globe,
 } from 'lucide-react';
 import { useQueryClient }          from '@tanstack/react-query';
 import { ProductosSerial }         from './ProductosSerial';
@@ -16,11 +16,16 @@ import useCarritoStore             from '../../store/carritoStore';
 import useSucursalStore            from '../../store/sucursalStore';
 import { useAuth }                 from '../../context/useAuth';
 import { ModalImportarInventario } from './ModalImportarInventario';
+import { TabCatalogo }             from './TabCatalogo';
 import { formatCOP }               from '../../utils/formatters';
 
 const TABS = [
   { id: 'serial',   label: 'Con Serial',   icon: Package    },
   { id: 'cantidad', label: 'Por Cantidad', icon: ShoppingBag },
+  // El catálogo web vive aquí, y no en su propio módulo, a propósito: publicar
+  // es una decisión sobre el inventario y hereda su permiso. Así no cambia el
+  // acceso de ningún usuario existente.
+  { id: 'catalogo', label: 'Catálogo web', icon: Globe      },
 ];
 
 export default function InventarioPage() {
@@ -68,7 +73,7 @@ export default function InventarioPage() {
 
       {/* ── Contenido principal ── */}
       {/* pb-28 en móvil para que la barra fija del carrito no tape el contenido */}
-      <div className={`flex-1 min-w-0 ${soloLectura ? '' : 'pb-28 lg:pb-0'}`}>
+      <div className={`flex-1 min-w-0 ${soloLectura || tabActiva === 'catalogo' ? '' : 'pb-28 lg:pb-0'}`}>
 
         {bloquearCreacion && (
           <div className="flex items-start gap-2 px-3 py-2.5 mb-3 bg-purple-50
@@ -103,7 +108,7 @@ export default function InventarioPage() {
             })}
           </div>
 
-          {!soloLectura && (
+          {!soloLectura && tabActiva !== 'catalogo' && (
             <div className="flex items-center gap-2">
               {puedeExportar && (
                 <Button size="sm" variant="secondary" onClick={() => setModalExportar(true)}
@@ -132,10 +137,11 @@ export default function InventarioPage() {
 
         {tabActiva === 'serial'   && <ProductosSerial />}
         {tabActiva === 'cantidad' && <ProductosCantidad />}
+        {tabActiva === 'catalogo' && <TabCatalogo />}
       </div>
 
-      {/* ── Carrito (oculto en modo lectura) ── */}
-      {!soloLectura && (
+      {/* ── Carrito (oculto en modo lectura y en el catálogo, que no vende) ── */}
+      {!soloLectura && tabActiva !== 'catalogo' && (
         <>
           {/* Desktop: columna fija derecha */}
           <div className="hidden lg:block w-72 flex-shrink-0">

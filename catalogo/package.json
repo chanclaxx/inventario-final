@@ -1,0 +1,17 @@
+{
+  "name": "inventario-catalogo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Catálogo web público de las sucursales — solo lectura, sin sesión",
+  "scripts": {
+    "dev": "next dev -p 3002",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "next": "^15.1.6",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  }
+}

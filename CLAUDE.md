@@ -128,7 +128,16 @@ Opcionales (si faltan, su feature queda apagada y el resto funciona igual):
 ```
 VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_SUBJECT   # notificaciones push
 SUPABASE_URL, SUPABASE_SERVICE_KEY                   # backup automático
+R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_PUBLIC_URL, R2_BUCKET
+                                                     # fotos del catálogo web
 ```
+
+> **Las fotos del catálogo van a Cloudflare R2, NO a Supabase Storage.** La BD
+> está en el plan gratuito de Supabase, cuyo cupo de salida es compartido con la
+> base que corre la facturación: un catálogo viral podría hacer que Supabase
+> restrinja el proyecto y con él el punto de venta. R2 no cobra egress. Todo el
+> almacenamiento está aislado en `catalogo.storage.js` (`estaActivo`, `subir`,
+> `borrar`): cambiar de proveedor toca ese único archivo.
 
 ---
 

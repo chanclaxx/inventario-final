@@ -39,12 +39,56 @@ const detectarColumnas = async () => {
     _ubicacionDisponible = false;
     console.error('⚠️  No se pudo verificar la columna `ubicacion` (feature desactivada):', err.message);
   }
+  // Independiente de lo anterior: cada detección apaga solo su propia feature.
+  await _detectarCatalogo();
   return _ubicacionDisponible;
 };
 
 const hayUbicacion = () => _ubicacionDisponible;
 
+// ── Catálogo web público ─────────────────────────────────────────────────────
+//
+// Mismo criterio que la ubicación, pero a nivel de TABLA: si la migración del
+// catálogo no llegó a aplicarse, la feature se apaga sola y sus rutas responden
+// 503 en vez de reventar con "relation does not exist". El resto del sistema no
+// se entera, porque ninguna consulta del inventario toca estas tablas.
+
+const TABLAS_CATALOGO = ['catalogo_sucursal', 'catalogo_items', 'catalogo_imagenes'];
+
+let _catalogoDisponible = false;
+
+const _detectarCatalogo = async () => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT table_name
+       FROM information_schema.tables
+       WHERE table_schema = 'public'
+         AND table_type   = 'BASE TABLE'
+         AND table_name   = ANY($1::text[])`,
+      [TABLAS_CATALOGO]
+    );
+    const encontradas = new Set(rows.map((r) => r.table_name));
+    // Se exigen las TRES: con dos de ellas, media feature funcionaría y la otra
+    // mitad reventaría — peor que tenerla apagada.
+    _catalogoDisponible = TABLAS_CATALOGO.every((t) => encontradas.has(t));
+
+    if (!_catalogoDisponible) {
+      console.warn('⚠️  Tablas del catálogo ausentes: el catálogo web queda desactivado.');
+    }
+  } catch (err) {
+    _catalogoDisponible = false;
+    console.error('⚠️  No se pudieron verificar las tablas del catálogo (feature desactivada):', err.message);
+  }
+  return _catalogoDisponible;
+};
+
+const hayCatalogo = () => _catalogoDisponible;
+
 // Solo para pruebas: permite simular una BD sin la columna sin tocar la BD real.
 const _setUbicacionDisponible = (valor) => { _ubicacionDisponible = !!valor; };
+const _setCatalogoDisponible  = (valor) => { _catalogoDisponible  = !!valor; };
 
-module.exports = { detectarColumnas, hayUbicacion, _setUbicacionDisponible };
+module.exports = {
+  detectarColumnas, hayUbicacion, _setUbicacionDisponible,
+  hayCatalogo, _setCatalogoDisponible,
+};
