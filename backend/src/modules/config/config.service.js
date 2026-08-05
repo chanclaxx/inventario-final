@@ -56,6 +56,7 @@ const _validarTarifasLista = (raw) => {
 // se guarde una condición que el motor luego descarte en silencio (y que el
 // negocio crea que está cobrando mora cuando no).
 const { normalizarCondicion, MAX_CONDICIONES } = require('../../utils/mora.util');
+const { normalizarPlanInteres, MAX_PLANES }    = require('../../utils/interes.util');
 
 const _validarMoraLista = (raw) => {
   let lista;
@@ -103,6 +104,45 @@ const _validarTechoMora = (raw) => {
   }
 };
 
+// Los planes de interés corriente. Mismo criterio que la mora: se rechaza lo que
+// no puede ser un pacto real, y se deja pasar lo que el negocio quiera cobrar
+// (para eso está el techo de aviso, que avisa pero no bloquea).
+const _validarInteresLista = (raw) => {
+  let lista;
+  try {
+    lista = JSON.parse(raw);
+  } catch {
+    throw { status: 400, message: 'La lista de planes de interés no es un JSON válido' };
+  }
+  if (!Array.isArray(lista)) {
+    throw { status: 400, message: 'La lista de planes de interés debe ser un arreglo' };
+  }
+  if (lista.length > MAX_PLANES) {
+    throw { status: 400, message: `No puedes tener más de ${MAX_PLANES} planes de interés` };
+  }
+
+  const ids = new Set();
+  for (const cruda of lista) {
+    const p = normalizarPlanInteres(cruda);
+    if (!p) {
+      const etiqueta = cruda?.nombre ? `"${cruda.nombre}"` : 'uno de los planes';
+      throw {
+        status: 400,
+        message: `Revisa ${etiqueta}: necesita nombre, un valor válido `
+          + `(porcentaje entre 0 y 100, o un valor fijo en pesos) y una periodicidad. `
+          + `Si elegiste "cada N días", indica cuántos.`,
+      };
+    }
+    if (typeof cruda.id !== 'string' || !cruda.id.trim()) {
+      throw { status: 400, message: `El plan "${p.nombre}" no tiene identificador` };
+    }
+    if (ids.has(p.id)) {
+      throw { status: 400, message: `Hay dos planes de interés con el mismo identificador (${p.id})` };
+    }
+    ids.add(p.id);
+  }
+};
+
 const { hayUbicacion } = require('../../config/columnas');
 
 // La ubicación de productos solo puede reportarse activa si la columna existe
@@ -125,6 +165,12 @@ const saveConfig = async (negocioId, datos) => {
   }
   if (datosProcesados.mora_tope_tasa_mensual !== undefined) {
     _validarTechoMora(datosProcesados.mora_tope_tasa_mensual);
+  }
+  if (datosProcesados.interes_lista !== undefined) {
+    _validarInteresLista(String(datosProcesados.interes_lista));
+  }
+  if (datosProcesados.interes_techo_mensual !== undefined) {
+    _validarTechoMora(datosProcesados.interes_techo_mensual);
   }
 
   // Hashear las claves privadas antes de persistir

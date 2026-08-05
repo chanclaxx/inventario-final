@@ -2,6 +2,7 @@ import { CreditCard } from 'lucide-react';
 import { InputMoneda } from '../../components/ui/InputMoneda';
 import { formatCOP }   from '../../utils/formatters';
 import { SelectorPlazo } from '../../components/ui/SelectorPlazo';
+import { SelectorInteres } from '../../components/ui/SelectorInteres';
 
 // ── Estado inicial — usar en ModalFactura con useState ───────────────────────
 export const CREDITO_VACIO = () => ({
@@ -10,12 +11,16 @@ export const CREDITO_VACIO = () => ({
   // Plazo de pago (feature opt-in `mora_activa`). Vacíos = sin plazo = sin mora.
   fecha_limite:  '',
   condicion_id:  '',
+  // Plan de interés (feature opt-in `interes_activa`), INDEPENDIENTE del plazo:
+  // se puede financiar sin fecha límite y poner fecha límite sin cobrar interés.
+  interes_plan_id: '',
 });
 
 // ── Componente ───────────────────────────────────────────────────────────────
-// `configMora` es lo que devuelve useMora(); si la feature está apagada el
-// selector de plazo no se renderiza y esta sección queda igual que antes.
-export function SeccionCredito({ credito, totalNeto, onChange, disabled, configMora }) {
+// `configMora`/`configInteres` son lo que devuelven useMora() y useInteres(); si
+// una feature está apagada su selector no se renderiza y esta sección queda
+// igual que antes.
+export function SeccionCredito({ credito, totalNeto, onChange, disabled, configMora, configInteres }) {
   const cuotaInicial  = Number(credito.cuota_inicial || 0);
   const saldoACredito = Math.max(0, totalNeto - cuotaInicial);
 
@@ -86,6 +91,14 @@ export function SeccionCredito({ credito, totalNeto, onChange, disabled, configM
             onChange={({ fecha_limite, condicion_id }) =>
               onChange({ ...credito, fecha_limite, condicion_id })}
             titulo="Fecha límite de pago"
+          />
+
+          {/* Interés por financiar (independiente del plazo) */}
+          <SelectorInteres
+            config={configInteres}
+            planId={credito.interes_plan_id}
+            onChange={(interes_plan_id) => onChange({ ...credito, interes_plan_id })}
+            valorBase={saldoACredito}
           />
 
           {cuotaInicial > totalNeto && totalNeto > 0 && (

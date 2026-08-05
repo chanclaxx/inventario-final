@@ -164,7 +164,7 @@ const _moraDeCaja = async ({ sucursalId = null, negocioId = null, inicio, fin })
   try {
     return await pool.query(`
       SELECT
-        mm.id, mm.tipo, mm.valor, mm.metodo, mm.motivo, mm.fecha, mm.dias_mora,
+        mm.id, mm.concepto, mm.tipo, mm.valor, mm.metodo, mm.motivo, mm.fecha, mm.dias_mora,
         mm.credito_id, mm.prestamo_id,
         u.nombre  AS usuario_nombre,
         su.nombre AS sucursal_nombre,
@@ -199,10 +199,19 @@ const _buildResumen = ({ pf, ac, ap, cp, aa, mn, rt, dv, ad, sv, fd = [], mo = [
   // pero en un grupo propio para no confundirlo con los abonos a capital.
   // La CONDONACIÓN no mueve plata: queda informativa, para saber cuánto se dejó
   // de cobrar. Ninguna de las dos toca la utilidad del producto.
-  const moraCobros      = mo.filter((r) => r.tipo === 'Cobro');
-  const moraCondonadas  = mo.filter((r) => r.tipo === 'Condonacion');
-  const totalMoraCobrada   = sum(moraCobros);
-  const totalMoraCondonada = sum(moraCondonadas);
+  // `movimientos_mora` guarda los dos cargos financieros. Se separan aquí para
+  // que el cajero vea de dónde viene cada peso: la mora es sanción por atraso,
+  // el interés corriente es el precio del plazo. Las filas anteriores a la
+  // columna `concepto` son de mora (es lo único que existía).
+  const esInteres = (r) => r.concepto === 'interes';
+  const moraCobros         = mo.filter((r) => r.tipo === 'Cobro'       && !esInteres(r));
+  const moraCondonadas     = mo.filter((r) => r.tipo === 'Condonacion' && !esInteres(r));
+  const interesCobros      = mo.filter((r) => r.tipo === 'Cobro'       &&  esInteres(r));
+  const interesCondonados  = mo.filter((r) => r.tipo === 'Condonacion' &&  esInteres(r));
+  const totalMoraCobrada      = sum(moraCobros);
+  const totalMoraCondonada    = sum(moraCondonadas);
+  const totalInteresCobrado   = sum(interesCobros);
+  const totalInteresCondonado = sum(interesCondonados);
 
   const totalFacturas          = sum(pf);
   const totalAbonosCredito     = sum(ac);
@@ -231,7 +240,7 @@ const _buildResumen = ({ pf, ac, ap, cp, aa, mn, rt, dv, ad, sv, fd = [], mo = [
 
   const totalIngresosBruto = totalFacturas + totalAbonosCredito + totalAbonosPrestamo
     + totalAbonosDomicilio + totalAbonosServicio + totalManualesIngreso
-    + totalMoraCobrada;
+    + totalMoraCobrada + totalInteresCobrado;
   // Las retomas NO se restan: los pagos de factura ya vienen NETOS de retoma
   // (el cliente paga total − retoma, y eso es lo que registra pagos_factura).
   // Restarlas aquí descontaba dos veces. El grupo queda solo informativo.
@@ -257,6 +266,7 @@ const _buildResumen = ({ pf, ac, ap, cp, aa, mn, rt, dv, ad, sv, fd = [], mo = [
   sv.filter((r) => r.activo !== false).forEach((r) => sumarAlMetodo(r.metodo, r.valor, 'ingreso'));
   ad.filter((r) => r.activo !== false).forEach((r) => sumarAlMetodo(r.metodo, r.valor, 'ingreso'));
   moraCobros.forEach((r) => sumarAlMetodo(r.metodo, r.valor, 'ingreso'));
+  interesCobros.forEach((r) => sumarAlMetodo(r.metodo, r.valor, 'ingreso'));
 
   // Egresos por método
   cp.filter((r) => r.activo !== false).forEach((r) => sumarAlMetodo(r.metodo, r.valor, 'egreso'));
@@ -355,6 +365,22 @@ const _buildResumen = ({ pf, ac, ap, cp, aa, mn, rt, dv, ad, sv, fd = [], mo = [
         items: moraCondonadas,
         total: totalMoraCondonada,
       },
+      // Interés corriente: también ingreso financiero, pero va en su propio
+      // grupo porque es otra cosa. La mora sanciona el atraso; esto es lo que
+      // se cobró por financiar. Mezclarlos impediría saber cuánto del ingreso
+      // vino de clientes que pagaron mal y cuánto del negocio de prestar.
+      interesCobrado: {
+        tipo:  'Ingreso',
+        label: 'Intereses de financiación cobrados',
+        items: interesCobros,
+        total: totalInteresCobrado,
+      },
+      interesCondonado: {
+        tipo:  'Informativo',
+        label: 'Interés condonado (no se cobró)',
+        items: interesCondonados,
+        total: totalInteresCondonado,
+      },
     },
     metodosPago,
     metodosPagoDetalle: metodoMap,
@@ -368,6 +394,8 @@ const _buildResumen = ({ pf, ac, ap, cp, aa, mn, rt, dv, ad, sv, fd = [], mo = [
       // Van aparte a propósito: la mora cobrada ya está dentro de `ingresos`,
       // pero se expone sola para poder mostrarla como ingreso financiero.
       moraCobrada:         totalMoraCobrada,
+      interesCobrado:      totalInteresCobrado,
+      interesCondonado:    totalInteresCondonado,
       moraCondonada:       totalMoraCondonada,
     },
   };

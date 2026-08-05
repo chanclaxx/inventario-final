@@ -18,6 +18,7 @@ const {
   labelSeccion, fila, encabezado, badgeEstado, bloqueFirma, pieDocumento, asegurarEspacio,
 } = require('./pdf.base');
 const { describirCondicion } = require('./obligacion');
+const { describirPlanInteres } = require('./interes.util');
 
 // ─── Bloque: estado de la obligación ─────────────────────────────────────────
 
@@ -45,18 +46,33 @@ const bloqueEstadoObligacion = (doc, resumen, y, { titulo = 'Estado de la obliga
   filas.push([`Total abonado (${resumen.num_abonos} abono${resumen.num_abonos === 1 ? '' : 's'})`,
     `- ${formatCOP(resumen.total_abonado)}`]);
 
-  // Mora: se muestra dentro del estado, no en un anexo. Es deuda del cliente y
-  // el documento tiene que decirlo aunque el capital ya esté en cero — de hecho
-  // sobre todo en ese caso, que es cuando la obligación sigue abierta solo por
-  // los intereses.
-  const conMora = resumen.mora_causada > 0 || resumen.mora_pendiente > 0;
+  // Los cargos financieros se muestran DENTRO del estado, no en un anexo. Son
+  // deuda del cliente y el documento tiene que decirlo aunque el capital ya esté
+  // en cero — de hecho sobre todo en ese caso, que es cuando la obligación sigue
+  // abierta solo por ellos.
+  //
+  // Van separados a propósito: el interés es el precio de la financiación y la
+  // mora es la sanción por el atraso. El cliente tiene derecho a ver cuánto le
+  // costó cada cosa, y juntarlos en un solo renglón lo escondería.
+  const conInteres = resumen.interes_causado > 0 || resumen.interes_pendiente > 0;
+  const conMora    = resumen.mora_causada    > 0 || resumen.mora_pendiente    > 0;
+  const conCargos  = conInteres || conMora;
+
+  if (conInteres) {
+    filas.push(['Interés de financiación', formatCOP(resumen.interes_causado)]);
+    if (resumen.interes_cobrado   > 0) filas.push(['Interés pagado',    `- ${formatCOP(resumen.interes_cobrado)}`]);
+    if (resumen.interes_condonado > 0) filas.push(['Interés condonado', `- ${formatCOP(resumen.interes_condonado)}`]);
+  }
   if (conMora) {
     filas.push(['Mora causada', formatCOP(resumen.mora_causada)]);
     if (resumen.mora_cobrada > 0)   filas.push(['Mora cobrada',   `- ${formatCOP(resumen.mora_cobrada)}`]);
     if (resumen.mora_condonada > 0) filas.push(['Mora condonada', `- ${formatCOP(resumen.mora_condonada)}`]);
   }
 
-  const H = 52 + filas.length * 16 + 30 + (conMora ? 34 : 0);
+  // El cierre lleva un renglón por cada cargo pendiente más el total. Se mide
+  // aquí para que la caja crezca con el contenido en vez de recortarlo.
+  const lineasCierre = (conInteres ? 1 : 0) + (conMora ? 1 : 0) + (conCargos ? 1 : 0);
+  const H = 52 + filas.length * 16 + 30 + (conCargos ? lineasCierre * 15 + 4 : 0);
   rectFillStroke(doc, MARGIN, y, CONTENT_W, H, C.grisFondo, C.grisBorde, 8);
 
   // Badge de estado arriba a la derecha
@@ -90,19 +106,25 @@ const bloqueEstadoObligacion = (doc, resumen, y, { titulo = 'Estado de la obliga
     .text(formatCOP(resumen.saldo), MARGIN, yf + 9,
       { width: CONTENT_W - 14, align: 'right', lineBreak: false });
 
-  // Con mora pendiente, el saldo de capital NO es lo que el cliente debe pagar:
-  // se agrega el renglón de intereses y el total real de la deuda.
-  if (conMora) {
-    doc.font(FONT.normal).fontSize(8.5).fillColor(C.grisOscuro)
-      .text('Mora pendiente', MARGIN + 14, yf + 30, { width: CONTENT_W * 0.5, lineBreak: false });
-    doc.font(FONT.bold).fontSize(9).fillColor(resumen.mora_pendiente > 0 ? C.rojo : C.verde)
-      .text(formatCOP(resumen.mora_pendiente), MARGIN, yf + 30,
-        { width: CONTENT_W - 14, align: 'right', lineBreak: false });
+  // Con cargos pendientes, el saldo de capital NO es lo que el cliente debe
+  // pagar: se agregan los renglones de interés y mora, y el total real.
+  if (conCargos) {
+    let yc = yf + 30;
+    const renglonCargo = (label, valor) => {
+      doc.font(FONT.normal).fontSize(8.5).fillColor(C.grisOscuro)
+        .text(label, MARGIN + 14, yc, { width: CONTENT_W * 0.5, lineBreak: false });
+      doc.font(FONT.bold).fontSize(9).fillColor(valor > 0 ? C.rojo : C.verde)
+        .text(formatCOP(valor), MARGIN, yc, { width: CONTENT_W - 14, align: 'right', lineBreak: false });
+      yc += 15;
+    };
+
+    if (conInteres) renglonCargo('Interés pendiente', resumen.interes_pendiente);
+    if (conMora)    renglonCargo('Mora pendiente',    resumen.mora_pendiente);
 
     doc.font(FONT.bold).fontSize(9).fillColor(C.grisOscuro)
-      .text('TOTAL A PAGAR', MARGIN + 14, yf + 44, { width: CONTENT_W * 0.5, lineBreak: false });
+      .text('TOTAL A PAGAR', MARGIN + 14, yc, { width: CONTENT_W * 0.5, lineBreak: false });
     doc.font(FONT.bold).fontSize(11).fillColor(resumen.total_a_pagar > 0 ? tono.fg : C.verde)
-      .text(formatCOP(resumen.total_a_pagar), MARGIN, yf + 42,
+      .text(formatCOP(resumen.total_a_pagar), MARGIN, yc - 2,
         { width: CONTENT_W - 14, align: 'right', lineBreak: false });
   }
 
@@ -231,16 +253,31 @@ const tablaAbonos = (doc, resumen, y, { titulo = 'Historial de abonos' } = {}) =
 // ─── Bloque: movimientos de mora ─────────────────────────────────────────────
 
 /**
- * Cobros y condonaciones de mora del documento.
+ * Cobros y condonaciones de los CARGOS FINANCIEROS del documento — interés
+ * corriente y mora, en una sola tabla y con cada renglón diciendo cuál es.
  *
  * Va aparte del historial de abonos a propósito: un abono baja el precio del
- * producto y la mora es un ingreso financiero, y mezclarlos haría creer que el
+ * producto y los cargos son ingreso financiero, y mezclarlos haría creer que el
  * cliente pagó más del producto de lo que pagó. Sin este bloque, el cliente que
  * pagó intereses no tenía dónde verlos.
  */
-const tablaMovimientosMora = (doc, resumen, y, { titulo = 'Intereses de mora' } = {}) => {
+const tablaMovimientosMora = (doc, resumen, y, { titulo = null } = {}) => {
   const movs = resumen.mora_movimientos || [];
-  if (!movs.length && !(resumen.mora_pendiente > 0)) return y;
+  const pendiente = (resumen.cargos_pendientes != null)
+    ? resumen.cargos_pendientes
+    : (resumen.mora_pendiente || 0);
+  if (!movs.length && !(pendiente > 0)) return y;
+
+  const hayInteres = resumen.interes_causado > 0 || resumen.interes_pendiente > 0
+    || movs.some((m) => m.concepto === 'interes');
+  const hayMora = resumen.mora_causada > 0 || resumen.mora_pendiente > 0
+    || movs.some((m) => m.concepto !== 'interes');
+
+  // El título dice de qué habla la tabla, para que el cliente no tenga que
+  // deducirlo de los renglones.
+  titulo = titulo || (hayInteres && hayMora ? 'Intereses y mora'
+    : hayInteres ? 'Intereses de financiación'
+    : 'Intereses de mora');
 
   y = labelSeccion(doc, y, `${titulo}${movs.length ? ` (${movs.length})` : ''}`);
 
@@ -267,16 +304,19 @@ const tablaMovimientosMora = (doc, resumen, y, { titulo = 'Intereses de mora' } 
 
   if (!movs.length) {
     doc.font(FONT.normal).fontSize(8).fillColor(C.grisClaro)
-      .text('Sin cobros de mora registrados', MARGIN + 12, yf + 5, { width: CONTENT_W - 24 });
+      .text('Sin cobros registrados', MARGIN + 12, yf + 5, { width: CONTENT_W - 24 });
     yf += ROW_H;
   } else {
     movs.forEach((m, i) => {
       if (i % 2 === 1) doc.rect(MARGIN, yf, CONTENT_W, ROW_H).fill(C.filaAlterna);
       if (i > 0) hLine(doc, yf, { color: C.grisBorde, width: 0.4 });
 
+      // Cada renglón dice de qué cargo es: son deudas con causa distinta y el
+      // cliente tiene derecho a distinguirlas en su comprobante.
+      const cual = m.concepto === 'interes' ? 'interés' : 'mora';
       const concepto = m.es_cobro
-        ? `Cobro de mora${m.metodo ? ` · ${m.metodo}` : ''}`
-        : `Condonada${m.motivo ? ` · ${m.motivo}` : ''}`;
+        ? `Cobro de ${cual}${m.metodo ? ` · ${m.metodo}` : ''}`
+        : `${cual === 'interés' ? 'Interés' : 'Mora'} condonada${m.motivo ? ` · ${m.motivo}` : ''}`;
 
       doc.font(FONT.normal).fontSize(7.5).fillColor(C.grisOscuro)
         .text(formatFecha(m.fecha), MARGIN + 12, yf + 5, { width: COL_F - 12, lineBreak: false });
@@ -290,13 +330,18 @@ const tablaMovimientosMora = (doc, resumen, y, { titulo = 'Intereses de mora' } 
     });
   }
 
-  // Cierre: lo que todavía se debe de intereses.
+  // Cierre: lo que todavía se debe. La etiqueta se adapta para no mentir cuando
+  // solo hay uno de los dos cargos.
+  const etiquetaCierre = hayInteres && hayMora ? 'PENDIENTE (INTERÉS + MORA)'
+    : hayInteres ? 'INTERÉS PENDIENTE'
+    : 'MORA PENDIENTE';
+
   rectFill(doc, MARGIN, yf, CONTENT_W, 22, C.grisFondo, 0);
   hLine(doc, yf, { color: C.grisBorde });
   doc.font(FONT.bold).fontSize(8).fillColor(C.grisOscuro)
-    .text('MORA PENDIENTE', MARGIN + 12, yf + 7, { width: COL_F + COL_C - 12, lineBreak: false });
-  doc.font(FONT.bold).fontSize(8.5).fillColor(resumen.mora_pendiente > 0 ? C.rojo : C.verde)
-    .text(formatCOP(resumen.mora_pendiente), MARGIN + COL_F + COL_C, yf + 6.5,
+    .text(etiquetaCierre, MARGIN + 12, yf + 7, { width: COL_F + COL_C - 12, lineBreak: false });
+  doc.font(FONT.bold).fontSize(8.5).fillColor(pendiente > 0 ? C.rojo : C.verde)
+    .text(formatCOP(pendiente), MARGIN + COL_F + COL_C, yf + 6.5,
       { width: COL_V - 12, align: 'right', lineBreak: false });
 
   return y + H + 20;
@@ -304,36 +349,57 @@ const tablaMovimientosMora = (doc, resumen, y, { titulo = 'Intereses de mora' } 
 
 // ─── Bloque: condiciones de pago pactadas ────────────────────────────────────
 //
-// En Colombia el interés moratorio solo es exigible si se pactó por escrito, así
-// que este bloque acompaña a la firma en los documentos de crédito.
+// En Colombia NI el interés corriente NI el moratorio son exigibles si no se
+// pactaron por escrito, así que este bloque acompaña a la firma en los
+// documentos de crédito. Se imprime si hay plazo O si hay interés: un préstamo
+// puede causar interés sin tener fecha límite, y en ese caso el pacto del
+// interés es justamente lo único que hay que dejar por escrito.
 const bloqueCondiciones = (doc, resumen, y, { compacto = false } = {}) => {
-  if (!resumen.fecha_limite) return y;
+  const descMora    = describirCondicion(resumen.condicion);
+  const descInteres = describirPlanInteres(resumen.condicion_interes);
+  if (!resumen.fecha_limite && !descInteres) return y;
 
   y = labelSeccion(doc, y, 'Condiciones de pago');
 
-  const filas = [
-    ['Saldo a pagar',        formatCOP(resumen.saldo)],
-    ['Fecha límite de pago', resumen.fecha_limite_txt],
-  ];
+  const filas = [['Saldo a pagar', formatCOP(resumen.saldo)]];
 
-  const desc = describirCondicion(resumen.condicion);
-  if (desc) filas.push(['Interés por mora', desc]);
+  // El interés va PRIMERO: es el precio del crédito, lo que el cliente paga por
+  // el solo hecho de financiarse. La mora es la excepción, no la regla.
+  if (descInteres) {
+    filas.push(['Interés de financiación', descInteres]);
+    if (resumen.interes_causado > 0) {
+      filas.push(['Interés causado a la fecha', formatCOP(resumen.interes_causado)]);
+    }
+  }
 
-  if (resumen.vencido && resumen.mora?.pendiente > 0) {
-    filas.push(['Días de atraso a la fecha', String(resumen.dias_atraso)]);
-    filas.push(['Mora causada a la fecha',   formatCOP(resumen.mora.pendiente)]);
+  if (resumen.fecha_limite) {
+    filas.push(['Fecha límite de pago', resumen.fecha_limite_txt]);
+    if (descMora) filas.push(['Interés por mora', descMora]);
+    if (resumen.vencido && resumen.mora?.pendiente > 0) {
+      filas.push(['Días de atraso a la fecha', String(resumen.dias_atraso)]);
+      filas.push(['Mora causada a la fecha',   formatCOP(resumen.mora.pendiente)]);
+    }
   }
 
   for (const [label, valor] of filas) y = fila(doc, y, label, valor);
 
   if (!compacto) {
+    // La declaración menciona SOLO lo que de verdad se pactó: firmar que se
+    // acepta un interés de mora en un documento que no lo lleva es lo que hacía
+    // el texto anterior si se usaba el plazo como excusa para cobrar interés.
+    const partes = [];
+    if (descInteres) partes.push('el interés de financiación');
+    if (resumen.fecha_limite) partes.push(descMora ? 'el plazo y el interés de mora' : 'el plazo de pago');
+
+    const detalle = [
+      descInteres ? 'El interés de financiación se causa desde la entrega, según la periodicidad pactada.' : null,
+      descMora    ? 'La mora se liquida sobre el saldo de capital pendiente, por los días de atraso.'      : null,
+    ].filter(Boolean).join(' ');
+
     y += 6;
     doc.font(FONT.normal).fontSize(7.5).fillColor(C.grisClaro)
       .text(
-        desc
-          ? 'El cliente declara conocer y aceptar el plazo y el interés de mora aquí pactados. '
-            + 'La mora se liquida sobre el saldo de capital pendiente, por los días de atraso.'
-          : 'El cliente declara conocer y aceptar el plazo de pago aquí pactado.',
+        `El cliente declara conocer y aceptar ${partes.join(' y ')} aquí pactado${partes.length > 1 ? 's' : ''}. ${detalle}`,
         MARGIN, y, { width: CONTENT_W },
       );
     y += 22;
@@ -397,7 +463,11 @@ const generarAvisoMora = ({ config, persona, resumen, descripcion, terminos = []
   y += 24;
 
   // ── Franja de alerta: el dato que motiva el documento ─────────────────────
-  const moraPendiente = Number(resumen.mora?.pendiente || 0);
+  // El aviso lo dispara la MORA, pero lo que se le cobra al cliente son las tres
+  // cubetas: cobrarle solo capital + mora dejaría el interés sin reclamar.
+  const moraPendiente    = Number(resumen.mora?.pendiente || 0);
+  const interesPendiente = Number(resumen.interes_pendiente || 0);
+  const totalHoy         = resumen.saldo + moraPendiente + interesPendiente;
   const ALERT_H = 66;
   rectFillStroke(doc, MARGIN, y, CONTENT_W, ALERT_H, C.rojoFondo, C.rojoBorde, 8);
   rectFill(doc, MARGIN, y, 4, ALERT_H, C.rojo, 0);
@@ -416,7 +486,7 @@ const generarAvisoMora = ({ config, persona, resumen, descripcion, terminos = []
     .text('TOTAL A PAGAR HOY', MARGIN + CONTENT_W * 0.60, y + 14,
       { width: CONTENT_W * 0.40 - 14, align: 'right' });
   doc.font(FONT.bold).fontSize(17).fillColor(C.rojo)
-    .text(formatCOP(resumen.saldo + moraPendiente), MARGIN + CONTENT_W * 0.55, y + 28,
+    .text(formatCOP(totalHoy), MARGIN + CONTENT_W * 0.55, y + 28,
       { width: CONTENT_W * 0.45 - 14, align: 'right' });
 
   y += ALERT_H + 22;
@@ -432,10 +502,9 @@ const generarAvisoMora = ({ config, persona, resumen, descripcion, terminos = []
 
   // ── Desglose de lo adeudado ───────────────────────────────────────────────
   y = labelSeccion(doc, y, 'Detalle de la deuda');
-  const detalle = [
-    ['Saldo de capital pendiente', formatCOP(resumen.saldo)],
-    ['Intereses de mora causados', formatCOP(moraPendiente)],
-  ];
+  const detalle = [['Saldo de capital pendiente', formatCOP(resumen.saldo)]];
+  if (interesPendiente > 0) detalle.push(['Interés de financiación pendiente', formatCOP(interesPendiente)]);
+  detalle.push(['Intereses de mora causados', formatCOP(moraPendiente)]);
   const H = detalle.length * 16 + 52;
   rectFillStroke(doc, MARGIN, y, CONTENT_W, H, C.blanco, C.grisBorde, 8);
   let yd = y + 12;
@@ -445,7 +514,7 @@ const generarAvisoMora = ({ config, persona, resumen, descripcion, terminos = []
   doc.font(FONT.bold).fontSize(10).fillColor(C.grisOscuro)
     .text('TOTAL A PAGAR', MARGIN + 14, yd + 14, { width: CONTENT_W * 0.5, lineBreak: false });
   doc.font(FONT.bold).fontSize(14).fillColor(C.rojo)
-    .text(formatCOP(resumen.saldo + moraPendiente), MARGIN, yd + 11,
+    .text(formatCOP(totalHoy), MARGIN, yd + 11,
       { width: CONTENT_W - 14, align: 'right', lineBreak: false });
   y += H + 20;
 

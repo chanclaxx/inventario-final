@@ -48,7 +48,7 @@ CREATE TABLE IF NOT EXISTS prestamos (
   id SERIAL PRIMARY KEY, numero INT, sucursal_id INT, usuario_id INT,
   prestatario TEXT, cedula TEXT, telefono TEXT, imei TEXT,
   producto_id INT, prestatario_id INT, empleado_id INT, cliente_id INT,
-  valor NUMERIC, valor_prestamo NUMERIC, interes NUMERIC DEFAULT 0,
+  valor NUMERIC, valor_prestamo NUMERIC,
   costo_producto NUMERIC,
   total_abonado NUMERIC DEFAULT 0, estado TEXT DEFAULT 'Activo',
   nombre_producto TEXT, cantidad INT DEFAULT 1, cantidad_prestada INT DEFAULT 1,

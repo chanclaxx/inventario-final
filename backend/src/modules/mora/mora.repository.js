@@ -1,20 +1,30 @@
 const { pool } = require('../../config/db');
 
 // ─────────────────────────────────────────────────────────────────────────────
-// MORA — repositorio compartido por créditos y préstamos.
+// CARGOS FINANCIEROS — repositorio compartido por créditos y préstamos.
 //
-// Solo se escriben COBROS y CONDONACIONES. La mora pendiente NO se guarda: se
-// deriva con `mora.util.resolverEstadoMora()` a partir del saldo, la fecha
-// límite, la condición pactada y estos movimientos. Un solo lado, así que no
-// hay nada que pueda quedar desincronizado.
+// La tabla se llama `movimientos_mora` por historia: nació cuando la mora era el
+// único cargo. Hoy guarda los DOS, discriminados por `concepto`:
 //
-// La mora jamás toca `creditos.total_abonado` ni `prestamos.total_abonado`:
+//   'mora'    → sanción por pagar tarde   (ancla: la fecha límite)
+//   'interes' → precio del plazo          (ancla: la entrega del crédito)
+//
+// Comparten tabla porque comparten ciclo de vida completo: se derivan, se
+// cobran, se condonan con motivo y PIN, se anulan en cascada con el abono, y
+// aparecen en caja y reportes como ingreso financiero. Renombrar la tabla sería
+// una migración destructiva sobre datos de producción a cambio de nada.
+//
+// Solo se escriben COBROS y CONDONACIONES. Lo PENDIENTE no se guarda: se deriva
+// a partir del saldo, el pacto congelado y estos movimientos. Un solo lado, así
+// que no hay nada que pueda quedar desincronizado.
+//
+// Ninguno de los dos toca `creditos.total_abonado` ni `prestamos.total_abonado`:
 // los reportes calculan la utilidad del producto como (abonado − costo) y
-// sumarla ahí la contaría como margen comercial.
+// sumarlos ahí los contaría como margen comercial.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const CAMPOS = [
-  'id', 'negocio_id', 'sucursal_id', 'credito_id', 'prestamo_id', 'tipo', 'valor',
+  'id', 'negocio_id', 'sucursal_id', 'credito_id', 'prestamo_id', 'concepto', 'tipo', 'valor',
   'dias_mora', 'saldo_base', 'condicion', 'metodo', 'motivo',
   'abono_credito_id', 'abono_prestamo_id', 'usuario_id', 'fecha', 'anulado',
 ];
@@ -51,7 +61,7 @@ const findPorDocumentos = async ({ creditoIds = [], prestamoIds = [] }) => {
   if (!creditoIds.length && !prestamoIds.length) return { creditos, prestamos };
 
   const { rows } = await pool.query(`
-    SELECT credito_id, prestamo_id, tipo, valor, anulado
+    SELECT credito_id, prestamo_id, concepto, tipo, valor, anulado
     FROM movimientos_mora
     WHERE (credito_id  = ANY($1::int[]))
        OR (prestamo_id = ANY($2::int[]))
@@ -69,19 +79,19 @@ const findPorDocumentos = async ({ creditoIds = [], prestamoIds = [] }) => {
 /** Inserta un movimiento. Siempre dentro de la transacción del llamador. */
 const insertar = async (client, {
   negocio_id, sucursal_id, credito_id = null, prestamo_id = null,
-  tipo, valor, dias_mora = null, saldo_base = null, condicion = null,
+  concepto = 'mora', tipo, valor, dias_mora = null, saldo_base = null, condicion = null,
   metodo = null, motivo = null,
   abono_credito_id = null, abono_prestamo_id = null, usuario_id = null,
 }) => {
   const { rows } = await client.query(`
     INSERT INTO movimientos_mora
-      (negocio_id, sucursal_id, credito_id, prestamo_id, tipo, valor,
+      (negocio_id, sucursal_id, credito_id, prestamo_id, concepto, tipo, valor,
        dias_mora, saldo_base, condicion, metodo, motivo,
        abono_credito_id, abono_prestamo_id, usuario_id)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10,$11,$12,$13,$14)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13,$14,$15)
     RETURNING ${COLS_RET}
   `, [
-    negocio_id, sucursal_id, credito_id, prestamo_id, tipo, valor,
+    negocio_id, sucursal_id, credito_id, prestamo_id, concepto, tipo, valor,
     dias_mora, saldo_base,
     condicion ? JSON.stringify(condicion) : null,
     metodo, motivo, abono_credito_id, abono_prestamo_id, usuario_id,
@@ -189,7 +199,7 @@ const findByIdYNegocio = async (id, negocioId) => {
 const findPorSucursalRango = async (sucursalId, desde, hasta) => {
   const { rows } = await pool.query(`
     SELECT
-      mm.id, mm.tipo, mm.valor, mm.metodo, mm.motivo, mm.fecha, mm.dias_mora,
+      mm.id, mm.concepto, mm.tipo, mm.valor, mm.metodo, mm.motivo, mm.fecha, mm.dias_mora,
       mm.credito_id, mm.prestamo_id,
       u.nombre AS usuario_nombre,
       COALESCE(f.nombre_cliente, p.prestatario) AS persona,
@@ -208,14 +218,20 @@ const findPorSucursalRango = async (sucursalId, desde, hasta) => {
   return rows;
 };
 
-/** Totales de mora del negocio en un rango, para el resumen de reportes. */
+/**
+ * Totales de cargos financieros del negocio en un rango, para el resumen de
+ * reportes. Mora e interés van separados: el primero mide qué tan mal paga la
+ * cartera, el segundo cuánto rinde financiar. Sumarlos escondería las dos cosas.
+ */
 const getTotalesRango = async (negocioId, sucursalId, desde, hasta) => {
   const { rows } = await pool.query(`
     SELECT
-      COALESCE(SUM(mm.valor) FILTER (WHERE mm.tipo = 'Cobro'),       0)::numeric AS cobrada,
-      COALESCE(SUM(mm.valor) FILTER (WHERE mm.tipo = 'Condonacion'), 0)::numeric AS condonada,
-      COUNT(*) FILTER (WHERE mm.tipo = 'Cobro')::int       AS cobros,
-      COUNT(*) FILTER (WHERE mm.tipo = 'Condonacion')::int AS condonaciones
+      COALESCE(SUM(mm.valor) FILTER (WHERE mm.tipo = 'Cobro'       AND mm.concepto = 'mora'),    0)::numeric AS cobrada,
+      COALESCE(SUM(mm.valor) FILTER (WHERE mm.tipo = 'Condonacion' AND mm.concepto = 'mora'),    0)::numeric AS condonada,
+      COUNT(*) FILTER (WHERE mm.tipo = 'Cobro'       AND mm.concepto = 'mora')::int    AS cobros,
+      COUNT(*) FILTER (WHERE mm.tipo = 'Condonacion' AND mm.concepto = 'mora')::int    AS condonaciones,
+      COALESCE(SUM(mm.valor) FILTER (WHERE mm.tipo = 'Cobro'       AND mm.concepto = 'interes'), 0)::numeric AS interes_cobrado,
+      COALESCE(SUM(mm.valor) FILTER (WHERE mm.tipo = 'Condonacion' AND mm.concepto = 'interes'), 0)::numeric AS interes_condonado
     FROM movimientos_mora mm
     JOIN sucursales su ON su.id = mm.sucursal_id
     WHERE su.negocio_id = $1

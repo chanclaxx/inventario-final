@@ -583,17 +583,21 @@ const generarPdfPrestamoIndividual = async ({ prestamoId, negocioId, negocioNomb
   // porque la migración de mora puede no estar aplicada en una base vieja: el
   // comprobante debe salir igual, solo sin el bloque de condiciones.
   let mora = null;
+  let interes = null;
   let moraMovimientos = [];
-  if (datos.fecha_limite) {
+  // Basta con que exista CUALQUIERA de los dos pactos: un préstamo puede causar
+  // interés sin tener fecha límite.
+  if (datos.fecha_limite || datos.interes_condicion) {
     try {
       const moraService = require('../mora/mora.service');
       const estado = await moraService.estadoDe('prestamo', prestamoId, negocioId);
-      mora = estado.mora;
+      mora    = estado.mora;
+      interes = estado.interes;
       // Los cobros y condonaciones se imprimen en su propia tabla: el cliente
       // tiene que poder ver qué intereses se le cobraron y cuándo.
       moraMovimientos = estado.movimientos || [];
     } catch (err) {
-      console.warn('[pdf-prestamo] Mora no incluida:', err.message);
+      console.warn('[pdf-prestamo] Cargos no incluidos:', err.message);
     }
   }
 
@@ -615,7 +619,7 @@ const generarPdfPrestamoIndividual = async ({ prestamoId, negocioId, negocioNomb
   y     = _tablaDatosProducto(doc, datos, y);
   // Mismos bloques que la factura a crédito, alimentados por el mismo resumen.
   const resumen = resumirObligacion({
-    tipo: 'prestamo', documento: datos, abonos, mora, mora_movimientos: moraMovimientos,
+    tipo: 'prestamo', documento: datos, abonos, mora, interes, mora_movimientos: moraMovimientos,
   });
   y     = bloqueEstadoObligacion(doc, resumen, y, { titulo: 'Estado del préstamo' });
   y     = bloqueFechas(doc, resumen, y);
@@ -724,15 +728,17 @@ const _documentoPrestamo = async (prestamoId, negocioId) => {
   const abonos = await repo.getAbonos(prestamoId);
 
   let mora = null;
+  let interes = null;
   let moraMovimientos = [];
-  if (datos.fecha_limite) {
+  if (datos.fecha_limite || datos.interes_condicion) {
     try {
       const moraService = require('../mora/mora.service');
       const estado = await moraService.estadoDe('prestamo', prestamoId, negocioId);
-      mora = estado.mora;
+      mora    = estado.mora;
+      interes = estado.interes;
       moraMovimientos = estado.movimientos || [];
     } catch (err) {
-      console.warn('[pdf-prestamo] Mora no incluida:', err.message);
+      console.warn('[pdf-prestamo] Cargos no incluidos:', err.message);
     }
   }
 
@@ -755,7 +761,7 @@ const _documentoPrestamo = async (prestamoId, negocioId) => {
       celular: datos.persona_celular !== '0000000000' ? datos.persona_celular : null,
     },
     resumen: resumirObligacion({
-      tipo: 'prestamo', documento: datos, abonos, mora, mora_movimientos: moraMovimientos,
+      tipo: 'prestamo', documento: datos, abonos, mora, interes, mora_movimientos: moraMovimientos,
     }),
     descripcion: descripcion || null,
   };

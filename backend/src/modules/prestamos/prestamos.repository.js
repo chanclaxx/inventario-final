@@ -15,6 +15,9 @@ const findAll = async (sucursalId, negocioId) => {
       -- Plazo y condición pactada: sin estas dos, mora.anotarLista cree que
       -- ningún préstamo tiene plazo y la lista muestra todo "sin mora".
       p.fecha_limite, p.mora_condicion,
+      -- Lo mismo para el interés corriente: sin el pacto, anotarLista lo da
+      -- por inexistente y el saldo saldría sin los intereses causados.
+      p.interes_condicion, p.interes_desde,
       su.nombre AS sucursal_nombre,
       (p.valor_prestamo - p.total_abonado) AS saldo_pendiente,
       u.nombre  AS usuario_nombre,
@@ -121,6 +124,9 @@ const create = async (client, {
   // Plazo de pago y condición de mora congelada. Nulos = préstamo sin mora,
   // que es el comportamiento de siempre.
   fecha_limite = null, mora_condicion = null,
+  // Plan de interés corriente congelado. Nulo = préstamo sin interés. Es
+  // independiente del plazo: se puede tener uno sin el otro.
+  interes_condicion = null, interes_desde = null,
 }) => {
   const { rows } = await client.query(`
     INSERT INTO prestamos(
@@ -128,9 +134,9 @@ const create = async (client, {
       nombre_producto, imei, producto_id, cantidad_prestada, valor_prestamo,
       prestatario_id, empleado_id, cliente_id,
       atributo_id, variante_id, atributo_label, variante_label,
-      fecha_limite, mora_condicion
+      fecha_limite, mora_condicion, interes_condicion, interes_desde
     )
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19::jsonb)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19::jsonb,$20::jsonb,$21)
     RETURNING *
   `, [
     sucursal_id, usuario_id, prestatario, cedula, telefono,
@@ -139,6 +145,7 @@ const create = async (client, {
     atributo_id   || null, variante_id  || null,
     atributo_label || null, variante_label || null,
     fecha_limite, mora_condicion ? JSON.stringify(mora_condicion) : null,
+    interes_condicion ? JSON.stringify(interes_condicion) : null, interes_desde,
   ]);
   rows[0].numero = await asignarNumeroDocumento(client, {
     tipo: 'prestamo', docId: rows[0].id, sucursalId: sucursal_id,
@@ -965,9 +972,9 @@ const getPrestamoActivosPorPersona = async (executor, tipo, personaId, negocioId
            p.valor_prestamo, p.total_abonado, p.estado, p.producto_id,
            p.cedula, p.telefono, p.prestatario, p.cliente_id, p.prestatario_id,
            p.atributo_id, p.variante_id,
-           -- Necesarias para que el ABONO TOTAL sepa cuánta mora debe cada
-           -- préstamo. Sin ellas el reparto ignora los intereses y nunca los cobra.
-           p.fecha_limite, p.mora_condicion
+           -- Necesarias para que el ABONO TOTAL sepa cuántos cargos debe cada
+           -- préstamo. Sin ellas el reparto los ignora y nunca los cobra.
+           p.fecha_limite, p.mora_condicion, p.interes_condicion, p.interes_desde
     FROM prestamos p
     JOIN sucursales su ON su.id = p.sucursal_id
     WHERE ${col} = $1 AND su.negocio_id = $2 AND p.estado = 'Activo'

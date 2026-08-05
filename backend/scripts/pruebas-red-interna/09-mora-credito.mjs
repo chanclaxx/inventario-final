@@ -45,6 +45,12 @@ await db.exec(`
 `);
 
 await db.exec(readFileSync(path.join(RAIZ, 'migrations/20260730_mora_credito.sql'), 'utf8'));
+// El interés corriente comparte tabla con la mora (`movimientos_mora.concepto`),
+// así que su migración también hace falta para que los repositorios reales
+// encuentren las columnas. Esta suite NO prueba el interés: sigue verificando
+// exactamente lo mismo que antes, y que siga en verde es la prueba de que
+// agregar el segundo cargo no le cambió nada a la mora.
+await db.exec(readFileSync(path.join(RAIZ, 'migrations/20260804_interes_corriente.sql'), 'utf8'));
 
 // PGlite devuelve `affectedRows`; el driver real de `pg` devuelve `rowCount`.
 // Varios candados anti-carrera del código dependen de `rowCount` (p. ej.

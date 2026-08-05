@@ -60,7 +60,7 @@ const diasAvisoPrevio = async (negocioId) => {
  * @param {number|null} diasAviso  — ventana de "por vencer"; si no se pasa, la del negocio
  */
 const cartera = async (negocioId, sucursalId = null, diasAviso = null) => {
-  const grupoVacio = { items: [], total_clientes: 0, capital: 0, mora: 0, total: 0 };
+  const grupoVacio = { items: [], total_clientes: 0, capital: 0, mora: 0, interes: 0, total: 0 };
   const vacio = { vencidos: grupoVacio, por_vencer: grupoVacio, dias_aviso: DIAS_AVISO_PREVIO };
   if (!negocioId) return vacio;
 
@@ -74,6 +74,10 @@ const cartera = async (negocioId, sucursalId = null, diasAviso = null) => {
       SELECT
         p.id, p.numero, p.sucursal_id, su.nombre AS sucursal_nombre,
         p.valor_prestamo, p.total_abonado, p.fecha_limite, p.mora_condicion,
+        -- Sin el pacto de interés, anotarLista lo da por inexistente y el total
+        -- del cobro saldría corto. Las consultas de préstamos listan columnas
+        -- explícitas: hay que acordarse de agregarlas en cada una.
+        p.interes_condicion, p.interes_desde, p.fecha,
         p.nombre_producto AS detalle,
         p.prestatario_id, p.cliente_id,
         COALESCE(pr.nombre, cl.nombre, p.prestatario) AS persona,
@@ -98,6 +102,7 @@ const cartera = async (negocioId, sucursalId = null, diasAviso = null) => {
       SELECT
         c.id, c.sucursal_id, su.nombre AS sucursal_nombre,
         c.valor_total, c.cuota_inicial, c.total_abonado, c.fecha_limite, c.mora_condicion,
+        c.interes_condicion, c.interes_desde, c.creado_en,
         f.numero AS numero, c.factura_id,
         -- La pantalla de créditos agrupa por (cedula o nombre_cliente) tomados
         -- de la FACTURA (ver creditos.repository.findAll). El enlace del aviso
@@ -172,10 +177,14 @@ const cartera = async (negocioId, sucursalId = null, diasAviso = null) => {
       }
     };
 
+    // Lo que hay que cobrarle a esta persona son las TRES cubetas. Dejar el
+    // interés por fuera haría que el vendedor llamara pidiendo menos de lo que
+    // el cliente realmente debe.
     for (const p of prestamosConMora) {
       const capital = Math.max(0, num(p.valor_prestamo) - num(p.total_abonado));
       const mora    = num(p.mora?.pendiente);
-      if (capital + mora <= 0) continue;      // ya no debe nada: no es cobro
+      const interes = num(p.interes?.pendiente);
+      if (capital + mora + interes <= 0) continue;   // ya no debe nada: no es cobro
       clasificar({
         tipo: 'prestamo',
         id: Number(p.id),
@@ -187,7 +196,7 @@ const cartera = async (negocioId, sucursalId = null, diasAviso = null) => {
         detalle: p.detalle || null,
         fecha_limite: p.fecha_limite,
         dias_vencidos: num(p.mora?.dias_vencidos),
-        capital, mora, total: capital + mora,
+        capital, mora, interes, total: capital + mora + interes,
         url: urlPrestamo(p),
       });
     }
@@ -195,7 +204,8 @@ const cartera = async (negocioId, sucursalId = null, diasAviso = null) => {
     for (const c of creditosConMora) {
       const capital = Math.max(0, num(c.valor_total) - num(c.cuota_inicial) - num(c.total_abonado));
       const mora    = num(c.mora?.pendiente);
-      if (capital + mora <= 0) continue;
+      const interes = num(c.interes?.pendiente);
+      if (capital + mora + interes <= 0) continue;
       clasificar({
         tipo: 'credito',
         id: Number(c.id),
@@ -207,7 +217,7 @@ const cartera = async (negocioId, sucursalId = null, diasAviso = null) => {
         detalle: null,
         fecha_limite: c.fecha_limite,
         dias_vencidos: num(c.mora?.dias_vencidos),
-        capital, mora, total: capital + mora,
+        capital, mora, interes, total: capital + mora + interes,
         url: urlCredito(c),
       });
     }
@@ -234,6 +244,7 @@ const _resumirGrupo = (items) => ({
   total_clientes: new Set(items.map((i) => `${i.persona}|${i.telefono ?? ''}`)).size,
   capital: items.reduce((s, i) => s + i.capital, 0),
   mora:    items.reduce((s, i) => s + i.mora, 0),
+  interes: items.reduce((s, i) => s + (i.interes || 0), 0),
   total:   items.reduce((s, i) => s + i.total, 0),
 });
 

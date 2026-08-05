@@ -12,25 +12,34 @@ import { MODOS_ABONO } from '../../utils/mora';
 
 // Simula la distribución FIFO igual que el backend.
 //
-// Con la mora activa, cada préstamo debe capital + mora, y el tope de lo que
-// puede recibir es la suma de los dos. `modo` decide, dentro de cada préstamo,
-// cuánto va a intereses — el mismo reparto que hace el backend, para que lo que
-// se ve en pantalla sea exactamente lo que se va a registrar.
+// Cada préstamo debe capital + mora + interés, y el tope de lo que puede recibir
+// es la suma de los tres. Contar solo el capital (o solo capital + mora) haría
+// que la pantalla rechazara un pago que el backend sí acepta.
+//
+// `modo` decide, dentro de cada préstamo, cuánto va a los cargos — el mismo
+// reparto en cascada que hace el backend (mora → interés → capital), para que lo
+// que se ve en pantalla sea exactamente lo que se va a registrar.
+const _repartir = (abono, mora, interes, saldo, modo) => {
+  const aMora    = modo === 'solo_capital' ? 0 : Math.min(mora, abono);
+  const aInteres = modo === 'solo_capital' ? 0 : Math.min(interes, abono - aMora);
+  return { aMora, aInteres, aCapital: Math.min(saldo, abono - aMora - aInteres) };
+};
+
 function simularDistribucion(prestamosActivos, valorTotal, modo = 'mora_capital') {
   let remaining = valorTotal;
   return prestamosActivos
     .filter((p) => p.estado === 'Activo')
     .sort((a, b) => new Date(a.fecha) - new Date(b.fecha))
     .map((p) => {
-      const saldo = Number(p.valor_prestamo) - Number(p.total_abonado);
-      const mora  = Number(p.mora?.pendiente || 0);
-      const debe  = saldo + mora;
+      const saldo   = Number(p.valor_prestamo) - Number(p.total_abonado);
+      const mora    = Number(p.mora?.pendiente || 0);
+      const interes = Number(p.interes?.pendiente || 0);
+      const debe    = saldo + mora + interes;
       if (debe <= 0 || remaining <= 0) return null;
-      const abono   = Math.min(remaining, debe);
-      remaining    -= abono;
-      const aMora    = modo === 'solo_capital' ? 0 : Math.min(mora, abono);
-      const aCapital = Math.min(saldo, abono - aMora);
-      return { prestamo: p, abono, saldo, mora, aMora, aCapital, saldado: aCapital >= saldo };
+      const abono = Math.min(remaining, debe);
+      remaining  -= abono;
+      const { aMora, aInteres, aCapital } = _repartir(abono, mora, interes, saldo, modo);
+      return { prestamo: p, abono, saldo, mora, interes, aMora, aInteres, aCapital, saldado: aCapital >= saldo };
     })
     .filter(Boolean);
 }
@@ -62,12 +71,14 @@ export function ModalAbonoTotal({ nombre, tipo, personaId, prestamos, onClose, m
     [prestamos]
   );
 
-  // El tope incluye la mora pendiente de cada préstamo: si solo se contara el
-  // capital, un pago que cubre los intereses se rechazaría.
-  const totalMora = prestamosActivos.reduce((s, p) => s + Number(p.mora?.pendiente || 0), 0);
+  // El tope incluye los cargos pendientes de cada préstamo: si solo se contara
+  // el capital, un pago que cubre los intereses se rechazaría en pantalla aunque
+  // el backend lo aceptara.
+  const totalMora    = prestamosActivos.reduce((s, p) => s + Number(p.mora?.pendiente || 0), 0);
+  const totalInteres = prestamosActivos.reduce((s, p) => s + Number(p.interes?.pendiente || 0), 0);
   const totalPendiente = prestamosActivos.reduce(
     (s, p) => s + Number(p.valor_prestamo) - Number(p.total_abonado), 0
-  ) + totalMora;
+  ) + totalMora + totalInteres;
 
   const valorNum = Number(valor) || 0;
 
@@ -78,14 +89,14 @@ export function ModalAbonoTotal({ nombre, tipo, personaId, prestamos, onClose, m
   const distribucion = ajustada
     ? prestamosActivos
         .map((p) => {
-          const saldo = Number(p.valor_prestamo) - Number(p.total_abonado);
-          const mora  = Number(p.mora?.pendiente || 0);
-          const abono = Math.max(0, Number(manual[p.id] ?? 0));
-          const aMora    = modo === 'solo_capital' ? 0 : Math.min(mora, abono);
-          const aCapital = Math.min(saldo, abono - aMora);
-          return { prestamo: p, abono, saldo, mora, aMora, aCapital, saldado: aCapital >= saldo && saldo > 0 };
+          const saldo   = Number(p.valor_prestamo) - Number(p.total_abonado);
+          const mora    = Number(p.mora?.pendiente || 0);
+          const interes = Number(p.interes?.pendiente || 0);
+          const abono   = Math.max(0, Number(manual[p.id] ?? 0));
+          const { aMora, aInteres, aCapital } = _repartir(abono, mora, interes, saldo, modo);
+          return { prestamo: p, abono, saldo, mora, interes, aMora, aInteres, aCapital, saldado: aCapital >= saldo && saldo > 0 };
         })
-        .filter((d) => d.abono > 0 || d.saldo + d.mora > 0)
+        .filter((d) => d.abono > 0 || d.saldo + d.mora + d.interes > 0)
     : sugerida;
 
   const sumaManual = ajustada

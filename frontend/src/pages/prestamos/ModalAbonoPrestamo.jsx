@@ -14,6 +14,7 @@ import { getFacturaById }         from '../../api/facturas.api';
 import { getGarantiasPorFactura } from '../../api/garantias.api';
 import { useMetodosPago }         from '../../hooks/useMetodosPago';
 import { MODOS_ABONO }            from '../../utils/mora';
+import { MODOS_ABONO_CARGOS }     from '../../utils/interes';
 import api from '../../api/axios.config';
 
 function useConfigColores() {
@@ -84,6 +85,7 @@ export function ModalAbonoPrestamo({ prestamo, onClose }) {
   // cierra el préstamo.
   const [modo,      setModo]      = useState('solo_capital');
   const [valorMora, setValorMora] = useState('');
+  const [valorInteres, setValorInteres] = useState('');
   // Datos para el recibo de abono con desglose capital/mora.
   const [datosRecibo, setDatosRecibio] = useState(null);
   // Mora que queda debiéndose cuando el abono ya cubrió todo el producto: es lo
@@ -104,11 +106,14 @@ export function ModalAbonoPrestamo({ prestamo, onClose }) {
   const saldoPendiente    = Number(prestamo.valor_prestamo) - Number(prestamo.total_abonado);
   const mostrarColores    = coloresActivo && !!prestamo.imei && colores.length > 0;
   const moraPendiente     = Number(prestamo.mora?.pendiente || 0);
+  const interesPendiente  = Number(prestamo.interes?.pendiente || 0);
+  const cargosPendientes  = moraPendiente + interesPendiente;
 
   const mutation = useMutation({
     mutationFn: () => registrarAbonoPrestamo(prestamo.id, Number(valor), metodo, color || null, {
       modo,
-      valor_mora: modo === 'personalizado' ? Number(valorMora || 0) : 0,
+      valor_mora:    modo === 'personalizado' ? Number(valorMora || 0)    : 0,
+      valor_interes: modo === 'personalizado' ? Number(valorInteres || 0) : 0,
     }),
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ['prestamos'], exact: false });
@@ -116,17 +121,19 @@ export function ModalAbonoPrestamo({ prestamo, onClose }) {
       const data = res.data?.data;
 
       // Datos del recibo: se guardan aquí porque el backend es el que sabe cómo
-      // quedó repartido el pago entre capital y mora.
+      // quedó repartido el pago entre capital, mora e interés.
       setDatosRecibio({
         abono: {
           valor:          Number(valor),
           capital:        Number(data?.abonado_capital ?? valor),
           mora:           Number(data?.abonado_mora ?? 0),
+          interes:        Number(data?.abonado_interes ?? 0),
           metodo,
           fecha:          new Date(),
           saldo_antes:    saldoPendiente,
           saldo_despues:  Math.max(0, Number(data?.valor_prestamo ?? 0) - Number(data?.total_abonado ?? 0)),
-          mora_pendiente: Number(data?.mora?.pendiente ?? 0),
+          mora_pendiente:    Number(data?.mora?.pendiente ?? 0),
+          interes_pendiente: Number(data?.interes?.pendiente ?? 0),
         },
         deuda: {
           tipo: 'prestamo', numero: prestamo.numero ?? prestamo.id,
@@ -181,17 +188,39 @@ export function ModalAbonoPrestamo({ prestamo, onClose }) {
   // abono va a cubrir el producto pero deja mora, se avisa ANTES de registrar
   // para que el vendedor sepa que el préstamo seguirá abierto (y que la factura
   // se generará al cobrar esa mora, no ahora).
+  // Reparto previsto (mora -> interes -> capital), replica del backend SOLO
+  // para avisar antes de registrar. El reparto real lo hace el servidor.
   const repartoPrevisto = (() => {
     const v = Number(valor || 0);
-    if (v <= 0) return { a_mora: 0, a_capital: 0 };
-    const aMora = modo === 'solo_capital' ? 0
-      : modo === 'personalizado' ? Math.min(Number(valorMora || 0), moraPendiente, v)
-      : Math.min(moraPendiente, v);
-    return { a_mora: aMora, a_capital: Math.min(saldoPendiente, v - aMora) };
+    if (v <= 0) return { a_mora: 0, a_interes: 0, a_capital: 0 };
+    let aMora = 0, aInteres = 0;
+    if (modo === 'solo_capital') {
+      aMora = 0; aInteres = 0;
+    } else if (modo === 'personalizado') {
+      aMora    = Math.min(Number(valorMora || 0), moraPendiente, v);
+      aInteres = Math.min(Number(valorInteres || 0), interesPendiente, v - aMora);
+    } else {
+      aMora    = Math.min(moraPendiente, v);
+      aInteres = Math.min(interesPendiente, v - aMora);
+    }
+    return {
+      a_mora: aMora, a_interes: aInteres,
+      a_capital: Math.min(saldoPendiente, v - aMora - aInteres),
+    };
   })();
-  const saldariaConMora = moraPendiente > 0
+  const saldariaConMora = cargosPendientes > 0
     && repartoPrevisto.a_capital >= saldoPendiente
-    && repartoPrevisto.a_mora < moraPendiente;
+    && (repartoPrevisto.a_mora + repartoPrevisto.a_interes) < cargosPendientes;
+
+  // LA TRAMPA DE LA DEUDA INMORTAL. Con interes sobre el saldo y reparto en
+  // cascada, un cliente que abona justo lo que costaron los intereses paga
+  // todos los meses y NUNCA baja la deuda. El calculo es correcto; lo que esta
+  // mal es que nadie se entere. Aqui se le dice, y se le da el monto minimo que
+  // si moveria el capital.
+  const noBajaLaDeuda = Number(valor || 0) > 0
+    && repartoPrevisto.a_capital === 0
+    && saldoPendiente > 0
+    && (repartoPrevisto.a_mora + repartoPrevisto.a_interes) > 0;
 
   const handleRegistrar = () => {
     setError('');
@@ -214,6 +243,12 @@ export function ModalAbonoPrestamo({ prestamo, onClose }) {
               <span className="text-xs text-gray-400">Saldo pendiente</span>
               <span className="text-sm font-bold text-red-500">{formatCOP(saldoPendiente)}</span>
             </div>
+            {interesPendiente > 0 && (
+              <div className="flex justify-between">
+                <span className="text-xs text-teal-700">+ interés por financiar</span>
+                <span className="text-sm font-bold text-teal-700">{formatCOP(interesPendiente)}</span>
+              </div>
+            )}
             {moraPendiente > 0 && (
               <div className="flex justify-between">
                 <span className="text-xs text-amber-600">
@@ -222,34 +257,99 @@ export function ModalAbonoPrestamo({ prestamo, onClose }) {
                 <span className="text-sm font-bold text-amber-600">{formatCOP(moraPendiente)}</span>
               </div>
             )}
+            {cargosPendientes > 0 && (
+              <div className="flex justify-between border-t border-gray-200 mt-1.5 pt-1.5">
+                <span className="text-xs font-medium text-gray-600">Total a pagar</span>
+                <span className="text-sm font-bold text-gray-800">
+                  {formatCOP(saldoPendiente + cargosPendientes)}
+                </span>
+              </div>
+            )}
           </div>
 
-          {/* Cómo se reparte el pago. Solo aparece si hay mora que repartir. */}
-          {moraPendiente > 0 && (
-            <div className="flex flex-col gap-2">
-              <span className="text-xs font-medium text-gray-600">¿A qué se aplica el pago?</span>
-              <div className="flex gap-1 bg-gray-100 p-1 rounded-xl">
-                {MODOS_ABONO.map((o) => (
-                  <button key={o.id} type="button" onClick={() => setModo(o.id)}
-                    className={`flex-1 py-1.5 px-1 rounded-lg text-[11px] font-medium transition-all
-                      ${modo === o.id ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}>
-                    {o.label}
-                  </button>
-                ))}
-              </div>
-              <span className="text-[11px] text-gray-400">
-                {MODOS_ABONO.find((o) => o.id === modo)?.descripcion}
-              </span>
-              {modo === 'personalizado' && (
-                <div className="flex flex-col gap-1">
-                  <label className="text-[11px] text-gray-500">Cuánto va a la mora</label>
-                  <InputMoneda value={valorMora} onChange={setValorMora} placeholder="0"
-                    className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm
-                      focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          {/* Cómo se reparte el pago. Solo aparece si hay cargos que repartir.
+              Las etiquetas cambian según haya solo mora o también interés. */}
+          {cargosPendientes > 0 && (() => {
+            const MODOS = interesPendiente > 0 ? MODOS_ABONO_CARGOS : MODOS_ABONO;
+            return (
+              <div className="flex flex-col gap-2">
+                <span className="text-xs font-medium text-gray-600">¿A qué se aplica el pago?</span>
+                <div className="flex gap-1 bg-gray-100 p-1 rounded-xl">
+                  {MODOS.map((o) => (
+                    <button key={o.id} type="button" onClick={() => setModo(o.id)}
+                      className={`flex-1 py-1.5 px-1 rounded-lg text-[11px] font-medium transition-all
+                        ${modo === o.id ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}>
+                      {o.label}
+                    </button>
+                  ))}
                 </div>
-              )}
-            </div>
-          )}
+                <span className="text-[11px] text-gray-400">
+                  {MODOS.find((o) => o.id === modo)?.descripcion}
+                </span>
+
+                {modo === 'personalizado' && (
+                  <div className="flex flex-col gap-2">
+                    {moraPendiente > 0 && (
+                      <div className="flex flex-col gap-1">
+                        <label className="text-[11px] text-gray-500">
+                          Cuánto va a la mora (debe {formatCOP(moraPendiente)})
+                        </label>
+                        <InputMoneda value={valorMora} onChange={setValorMora} placeholder="0"
+                          className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm
+                            focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                      </div>
+                    )}
+                    {interesPendiente > 0 && (
+                      <div className="flex flex-col gap-1">
+                        <label className="text-[11px] text-gray-500">
+                          Cuánto va al interés (debe {formatCOP(interesPendiente)})
+                        </label>
+                        <InputMoneda value={valorInteres} onChange={setValorInteres} placeholder="0"
+                          className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm
+                            focus:outline-none focus:ring-2 focus:ring-teal-500" />
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Desglose en vivo: el vendedor ve en qué se convierte el pago
+                    ANTES de registrarlo, no después. */}
+                {Number(valor || 0) > 0 && (
+                  <div className="bg-gray-50 rounded-lg p-2 flex flex-col gap-0.5">
+                    {repartoPrevisto.a_mora > 0 && (
+                      <div className="flex justify-between text-[11px]">
+                        <span className="text-amber-600">A la mora</span>
+                        <span className="font-medium text-amber-600">{formatCOP(repartoPrevisto.a_mora)}</span>
+                      </div>
+                    )}
+                    {repartoPrevisto.a_interes > 0 && (
+                      <div className="flex justify-between text-[11px]">
+                        <span className="text-teal-700">Al interés</span>
+                        <span className="font-medium text-teal-700">{formatCOP(repartoPrevisto.a_interes)}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between text-[11px]">
+                      <span className="text-gray-600">Baja la deuda</span>
+                      <span className="font-semibold text-gray-800">{formatCOP(repartoPrevisto.a_capital)}</span>
+                    </div>
+                  </div>
+                )}
+
+                {noBajaLaDeuda && (
+                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-2.5">
+                    <p className="text-[11px] text-amber-800 font-medium">
+                      Este abono no baja la deuda.
+                    </p>
+                    <p className="text-[11px] text-amber-700 mt-0.5">
+                      Se va completo a los intereses, así que el cliente seguirá debiendo{' '}
+                      <strong>{formatCOP(saldoPendiente)}</strong>. Para que empiece a bajar tiene
+                      que abonar más de <strong>{formatCOP(cargosPendientes)}</strong>.
+                    </p>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           <div className="flex flex-col gap-1">
             <div className="flex items-center justify-between">

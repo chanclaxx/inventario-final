@@ -60,7 +60,8 @@ const diasEntre = (desde, hasta) => {
  * @param {number} [opts.devuelto] — valor devuelto (solo créditos), para el valor original
  */
 const resumirObligacion = ({
-  tipo, documento, abonos = [], mora = null, mora_movimientos = null, devuelto = 0,
+  tipo, documento, abonos = [], mora = null, interes = null,
+  mora_movimientos = null, devuelto = 0,
 }) => {
   const esCredito = tipo === 'credito';
 
@@ -81,14 +82,22 @@ const resumirObligacion = ({
   const fechaLimite  = documento.fecha_limite || null;
   const plazoDias    = fechaLimite ? diasEntre(fechaEmision, fechaLimite) : null;
 
-  // ── Mora ──────────────────────────────────────────────────────────────────
-  // Deuda financiera aparte del capital. Se muestra siempre junto a él porque
-  // la obligación no se cierra mientras quede mora por cobrar.
+  // ── Cargos financieros ────────────────────────────────────────────────────
+  // Dos deudas aparte del capital, con naturalezas distintas: la MORA sanciona
+  // el atraso, el INTERÉS cobra el plazo. Se muestran siempre junto al capital
+  // porque la obligación no se cierra mientras quede cualquiera de las tres.
   const moraPendiente = num(mora?.pendiente);
   const moraCausada   = num(mora?.causada);
   const moraCobrada   = num(mora?.cobrada);
   const moraCondonada = num(mora?.condonada);
-  const totalAPagar   = saldo + moraPendiente;
+
+  const interesPendiente = num(interes?.pendiente ?? documento.interes?.pendiente);
+  const interesCausado   = num(interes?.causado   ?? documento.interes?.causado);
+  const interesCobrado   = num(interes?.cobrado   ?? documento.interes?.cobrado);
+  const interesCondonado = num(interes?.condonado ?? documento.interes?.condonado);
+
+  const cargosPendientes = moraPendiente + interesPendiente;
+  const totalAPagar      = saldo + cargosPendientes;
 
   // Historial de cobros y condonaciones, para que los documentos lo listen.
   // Los anulados quedan fuera: no se cobraron.
@@ -98,6 +107,8 @@ const resumirObligacion = ({
       id:        m.id,
       fecha:     m.fecha,
       tipo:      m.tipo,                                  // 'Cobro' | 'Condonacion'
+      // 'mora' | 'interes'. Las filas anteriores a la columna son de mora.
+      concepto:  m.concepto || 'mora',
       es_cobro:  m.tipo === 'Cobro',
       valor:     num(m.valor),
       metodo:    m.metodo || null,
@@ -112,9 +123,9 @@ const resumirObligacion = ({
     ? documento.estado === 'Cancelado'
     : documento.estado === 'Devuelto';
 
-  // Pagada exige capital Y mora en cero: con intereses pendientes la deuda
-  // sigue viva, y por eso tampoco procede el paz y salvo.
-  const pagadaDelTodo = saldo <= 0 && moraPendiente <= 0;
+  // Pagada exige capital, mora E interés en cero: con cualquier cargo pendiente
+  // la deuda sigue viva, y por eso tampoco procede el paz y salvo.
+  const pagadaDelTodo = saldo <= 0 && cargosPendientes <= 0;
 
   let clave;
   if (anulado)                     clave = 'anulada';
@@ -157,9 +168,9 @@ const resumirObligacion = ({
     estado_desc:   ESTADOS[clave].descripcion,
     anulado,
     pagada:        pagadaDelTodo && !anulado,
-    // Capital cubierto pero con intereses debiéndose: el documento sigue
-    // abierto y lo único que falta es cobrar (o condonar) la mora.
-    solo_falta_mora: saldo <= 0 && moraPendiente > 0 && !anulado,
+    // Capital cubierto pero con cargos debiéndose: el documento sigue abierto y
+    // lo único que falta es cobrarlos (o condonarlos).
+    solo_falta_mora: saldo <= 0 && cargosPendientes > 0 && !anulado,
 
     valor_original: valorOriginal,
     valor_actual:   valorActual,
@@ -187,8 +198,20 @@ const resumirObligacion = ({
     mora_cobrada:    moraCobrada,
     mora_condonada:  moraCondonada,
     mora_pendiente:  moraPendiente,
-    // Lo que el cliente debe hoy en total: capital + intereses.
-    total_a_pagar:   totalAPagar,
+
+    // Interés corriente, con el mismo desglose. Va aparte de la mora en todos
+    // los documentos: son cargos con causa distinta y el cliente tiene derecho
+    // a ver cuánto le cobraron por financiar y cuánto por atrasarse.
+    interes:            interes || null,
+    condicion_interes:  documento.interes_condicion || null,
+    interes_causado:    interesCausado,
+    interes_cobrado:    interesCobrado,
+    interes_condonado:  interesCondonado,
+    interes_pendiente:  interesPendiente,
+
+    // Lo que el cliente debe hoy en total: capital + mora + interés.
+    cargos_pendientes: cargosPendientes,
+    total_a_pagar:     totalAPagar,
     mora_movimientos: movimientosMora,
     num_mora_movs:    movimientosMora.length,
 

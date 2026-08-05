@@ -14,6 +14,7 @@ import { PasswordConfig }    from './PasswordConfig';
 import { MetodosPagoConfig } from './MetodosPagoConfig';
 import { TarifasConfig }    from './TarifasConfig';
 import { MoraConfig }       from './MoraConfig';
+import { InteresConfig }    from './InteresConfig';
 import { NotificacionesConfig } from './NotificacionesConfig';
 import { CatalogoWebConfig } from './CatalogoWebConfig';
 import { TiposCaracteristicaConfig } from './components/TiposCaracteristicaConfig';
@@ -58,6 +59,7 @@ const TABS_CATALOGO = [
   { id: 'tarifas',   label: 'Tarifas',   Icn: Percent    },
   { id: 'pagos',     label: 'Pagos',     Icn: Wallet     },
   { id: 'mora',      label: 'Mora',      Icn: CalendarClock },
+  { id: 'interes',   label: 'Interés',   Icn: Percent    },
 ];
 
 // ─── Campos del formulario de venta ──────────────────────────────────────────
@@ -1437,6 +1439,12 @@ function SeccionCatalogo({ valores, set }) {
       {tab === 'mora' && (
         <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
           <MoraConfig valores={valores} set={set} />
+        </div>
+      )}
+
+      {tab === 'interes' && (
+        <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
+          <InteresConfig valores={valores} set={set} />
         </div>
       )}
 

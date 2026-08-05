@@ -438,13 +438,16 @@ const getServiciosRango = async (sucursalId, desde, hasta) => {
 const getMoraRango = async (sucursalId, desde, hasta) => {
   const vacio = {
     detalle: [],
-    resumen: { cobrada: 0, condonada: 0, cobros: 0, condonaciones: 0 },
+    resumen: {
+      cobrada: 0, condonada: 0, cobros: 0, condonaciones: 0,
+      interes_cobrado: 0, interes_condonado: 0,
+    },
   };
 
   try {
     const { rows } = await pool.query(`
       SELECT
-        mm.id, mm.tipo, mm.valor, mm.metodo, mm.motivo, mm.fecha, mm.dias_mora,
+        mm.id, mm.concepto, mm.tipo, mm.valor, mm.metodo, mm.motivo, mm.fecha, mm.dias_mora,
         mm.credito_id, mm.prestamo_id,
         u.nombre AS usuario_nombre,
         COALESCE(f.nombre_cliente, p.prestatario) AS persona,
@@ -464,6 +467,8 @@ const getMoraRango = async (sucursalId, desde, hasta) => {
 
     const detalle = rows.map((r) => ({
       id:              Number(r.id),
+      // 'mora' | 'interes'. Las filas anteriores a la columna son de mora.
+      concepto:        r.concepto || 'mora',
       tipo:            r.tipo,
       valor:           Number(r.valor),
       metodo:          r.metodo,
@@ -478,15 +483,27 @@ const getMoraRango = async (sucursalId, desde, hasta) => {
       nombre_producto: r.nombre_producto || null,
     }));
 
-    const suma = (t) => detalle.filter((d) => d.tipo === t).reduce((s, d) => s + d.valor, 0);
+    // Los dos cargos financieros viven en la misma tabla pero se reportan
+    // aparte: la mora dice cuánto se cobró por pagar tarde, el interés cuánto
+    // se cobró por financiar. Sumarlos escondería cuál de los dos negocios
+    // está generando la plata.
+    const suma = (t, concepto) => detalle
+      .filter((d) => d.tipo === t && d.concepto === concepto)
+      .reduce((s, d) => s + d.valor, 0);
+    const cuenta = (t, concepto) => detalle
+      .filter((d) => d.tipo === t && d.concepto === concepto).length;
 
     return {
       detalle,
       resumen: {
-        cobrada:       suma('Cobro'),
-        condonada:     suma('Condonacion'),
-        cobros:        detalle.filter((d) => d.tipo === 'Cobro').length,
-        condonaciones: detalle.filter((d) => d.tipo === 'Condonacion').length,
+        // Se conservan los nombres históricos para la mora: los consumen el
+        // resumen de reportes y el PDF.
+        cobrada:           suma('Cobro', 'mora'),
+        condonada:         suma('Condonacion', 'mora'),
+        cobros:            cuenta('Cobro', 'mora'),
+        condonaciones:     cuenta('Condonacion', 'mora'),
+        interes_cobrado:   suma('Cobro', 'interes'),
+        interes_condonado: suma('Condonacion', 'interes'),
       },
     };
   } catch (err) {
@@ -990,9 +1007,13 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
     facturas_credito:           soloCreditos.length,
     utilidad_pendiente:         0,
     utilidad_creditos_saldados: utilidadCreditosSaldados,
-    // Ingreso financiero, separado del margen comercial a propósito.
+    // Ingresos financieros, separados del margen comercial a propósito y
+    // separados entre sí: la mora es sanción por atraso, el interés es el
+    // precio del plazo.
     ingresos_mora:              mora.resumen.cobrada,
     mora_condonada:             mora.resumen.condonada,
+    ingresos_interes:           mora.resumen.interes_cobrado,
+    interes_condonado:          mora.resumen.interes_condonado,
   };
 
   return { facturas: facturasCompletas, resumen, prestamos, servicios, creditos: creditosData, mora };

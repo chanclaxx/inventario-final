@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   getCreditos, getCreditoById,
   registrarAbonoCredito, saldarCredito, cancelarCredito,
-  fijarPlazoCredito, cobrarMoraCredito, condonarMoraCredito,
+  fijarPlazoCredito, cobrarMoraCredito, condonarMoraCredito, fijarInteresCredito,
   getEstadoCuentaCredito, descargarPdfEstadoCuentaCredito,
   getDocumentoCredito, descargarPdfAvisoMora, descargarPdfPazYSalvo,
 } from '../../api/creditos.api';
@@ -13,7 +13,9 @@ import api from '../../api/axios.config';
 import { formatCOP, formatFechaHora } from '../../utils/formatters';
 import { useMetodosPago } from '../../hooks/useMetodosPago';
 import { useMora }        from '../../hooks/useMora';
+import { useInteres }     from '../../hooks/useInteres';
 import { PanelMora }      from '../../components/ui/PanelMora';
+import { PanelInteres }   from '../../components/ui/PanelInteres';
 import { MODOS_ABONO }    from '../../utils/mora';
 import { Badge }       from '../../components/ui/Badge';
 import { Button }      from '../../components/ui/Button';
@@ -452,7 +454,8 @@ function TarjetaCreditoDetalle({
   credito, onAbonar, onSaldar, onCancelar, onDevolucion, onImprimir, cerrado = false,
 }) {
   const [historialAbierto, setHistorialAbierto] = useState(false);
-  const configMora  = useMora();
+  const configMora    = useMora();
+  const configInteres = useInteres();
   const metodosPago = useMetodosPago();
 
   const cuotaInicial   = Number(credito.cuota_inicial || 0);
@@ -616,6 +619,20 @@ function TarjetaCreditoDetalle({
               condonarMora: (d) => condonarMoraCredito(credito.id, d),
             }}
           />
+          {/* Interés por financiar: cargo aparte, panel aparte. */}
+          <div className="mt-2">
+            <PanelInteres
+              documento={credito}
+              configInteres={configInteres}
+              metodosPago={metodosPago}
+              invalidar={[['creditos'], ['credito-detalle'], ['estado-cuenta-credito'], ['caja']]}
+              api={{
+                fijarInteres:  (d) => fijarInteresCredito(credito.id, d),
+                cobrarCargo:   (d) => cobrarMoraCredito(credito.id, d),
+                condonarCargo: (d) => condonarMoraCredito(credito.id, d),
+              }}
+            />
+          </div>
         </div>
       )}
 

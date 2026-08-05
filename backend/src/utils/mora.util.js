@@ -6,6 +6,13 @@
 // junto con la fecha límite de pago. Si el cliente se pasa del plazo, se causa
 // mora sobre el SALDO DE CAPITAL pendiente.
 //
+// EL CÁLCULO YA NO VIVE AQUÍ. Desde que se agregó el interés corriente, la
+// fórmula está en `devengo.util.js`, que la comparten los dos cargos. Este
+// archivo se quedó con lo que sí es propio de la mora: sus condiciones, su
+// vocabulario y su ancla temporal (la fecha límite + los días de gracia).
+// La traducción a la regla del motor es una identidad exacta, no una
+// aproximación — ver `_reglaDe()`.
+//
 // REGLAS DE DISEÑO, en orden de importancia:
 //
 //   1. La mora NUNCA entra en `total_abonado` ni en `cuota_inicial`. Los reportes
@@ -34,11 +41,14 @@
 //      intereses pendientes sigue Activo (`solo_falta_mora`), y es al cobrar o
 //      condonar esa mora cuando queda saldado y se genera su factura.
 //
-// Este módulo es PURO: sin base de datos, sin red. Es la ÚNICA implementación
-// de la fórmula — el frontend no la duplica, recibe los valores ya calculados.
+// Este módulo es PURO: sin base de datos, sin red. El frontend no duplica la
+// fórmula, recibe los valores ya calculados.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const ZONA = 'America/Bogota';
+const {
+  ZONA, hoyBogota, aFecha, aFechaInstante, sumarDias, diasEntre,
+  calcularDevengo, TIPO_FIJO, TIPO_PORCENTAJE, DEVENGO_DIARIO, BASE_SALDO,
+} = require('./devengo.util');
 
 /** Tipos de condición soportados. */
 const TIPO_MENSUAL     = 'mensual';      // % mensual sobre el saldo
@@ -46,74 +56,12 @@ const TIPO_DIARIA_FIJA = 'diaria_fija';  // valor fijo en pesos por día
 
 const MAX_CONDICIONES = 12;
 
-// ── Fechas ───────────────────────────────────────────────────────────────────
-
-/** Hoy en Colombia como 'YYYY-MM-DD'. */
-const hoyBogota = () => new Date().toLocaleDateString('en-CA', { timeZone: ZONA });
-
-/**
- * Normaliza una fecha de CALENDARIO a 'YYYY-MM-DD'. Acepta Date o string.
- *
- * OJO con los objetos Date: el driver de Postgres entrega las columnas `DATE`
- * como un Date a medianoche UTC. Convertirlo a la zona de Bogotá (UTC−5) lo
- * correría un día hacia atrás — un plazo del 29 se leería como del 28 y la mora
- * saldría con un día extra. Por eso aquí se leen los componentes UTC.
- *
- * Para "ahora" NO se usa esta función: eso es `hoyBogota()`, que sí debe mirar
- * la zona del negocio.
- */
-const _aFecha = (v) => {
-  if (!v) return null;
-  if (v instanceof Date) {
-    if (Number.isNaN(v.getTime())) return null;
-    const y = v.getUTCFullYear();
-    const m = String(v.getUTCMonth() + 1).padStart(2, '0');
-    const d = String(v.getUTCDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
-  }
-  const s = String(v).trim();
-  const m = s.match(/^(\d{4}-\d{2}-\d{2})/);
-  return m ? m[1] : null;
-};
-
-/**
- * Normaliza un INSTANTE (columna TIMESTAMP: la fecha de un abono, de un
- * movimiento) al día de calendario en Bogotá.
- *
- * Va aparte de `_aFecha` a propósito, y la diferencia importa:
- *   · `fecha_limite` es un DATE → el driver lo entrega a medianoche UTC y hay
- *     que leer los componentes UTC (si no, se corre un día atrás).
- *   · la fecha de un abono es un TIMESTAMP → es un momento real, y el día que
- *     cuenta es el del negocio. A las 19:00 de Bogotá el UTC ya es el día
- *     siguiente, así que leerlo en UTC adelantaría el abono un día y lo dejaría
- *     "en el futuro" — con eso el abono quedaba fuera del cálculo y la mora
- *     causada se perdía.
- */
-const _aFechaInstante = (v) => {
-  if (!v) return null;
-  if (v instanceof Date) {
-    if (Number.isNaN(v.getTime())) return null;
-    return v.toLocaleDateString('en-CA', { timeZone: ZONA });
-  }
-  const s = String(v).trim();
-  const m = s.match(/^(\d{4}-\d{2}-\d{2})/);
-  return m ? m[1] : null;
-};
-
-/** Suma días a 'YYYY-MM-DD' en aritmética de calendario (sin zonas ni DST). */
-const _sumarDias = (iso, dias) => {
-  const [a, m, d] = String(iso).slice(0, 10).split('-').map(Number);
-  return new Date(Date.UTC(a, m - 1, d + Number(dias || 0))).toISOString().slice(0, 10);
-};
-
-/** Días calendario entre dos 'YYYY-MM-DD' (b − a). Sin horas: evita DST. */
-const _diasEntre = (a, b) => {
-  const [ay, am, ad] = a.split('-').map(Number);
-  const [by, bm, bd] = b.split('-').map(Number);
-  const ua = Date.UTC(ay, am - 1, ad);
-  const ub = Date.UTC(by, bm - 1, bd);
-  return Math.round((ub - ua) / 86400000);
-};
+// Se conservan los nombres privados históricos: el resto del archivo ya los usaba
+// así y renombrarlos solo agregaría ruido al diff.
+const _aFecha         = aFecha;
+const _aFechaInstante = aFechaInstante;
+const _sumarDias      = sumarDias;
+const _diasEntre      = diasEntre;
 
 // ── Condiciones ──────────────────────────────────────────────────────────────
 
@@ -150,6 +98,31 @@ const normalizarCondicion = (cruda, indice = 0) => {
     color:       typeof cruda.color === 'string' ? cruda.color : 'amber',
   };
 };
+
+/**
+ * Traduce una condición de mora a la regla del motor de devengo.
+ *
+ * ESTA ES LA IDENTIDAD QUE HAY QUE PRESERVAR. Las dos condiciones que existen
+ * son casos particulares exactos del motor, no aproximaciones:
+ *
+ *   'mensual'     → 30 días de período, porcentaje, proporcional al día
+ *                   ⇒ saldo × (v/100) × (dias/30)
+ *   'diaria_fija' →  1 día  de período, valor fijo,  proporcional al día
+ *                   ⇒ v × (dias/1) = v × dias
+ *
+ * La mora siempre corre sobre el SALDO (nunca sobre el valor original): es
+ * indemnizatoria, y lo que indemniza es el dinero que sigue retenido. Y siempre
+ * es proporcional al día — nadie pacta que la mora suba a escalones.
+ */
+const _reglaDe = (cond) => ({
+  tipo:         cond.tipo === TIPO_DIARIA_FIJA ? TIPO_FIJO : TIPO_PORCENTAJE,
+  valor:        cond.valor,
+  dias_periodo: cond.tipo === TIPO_DIARIA_FIJA ? 1 : 30,
+  devengo:      DEVENGO_DIARIO,
+  base:         BASE_SALDO,
+  max_periodos: null,
+  tope_pct:     cond.tope_pct,
+});
 
 /** Lee `mora_lista` (string JSON). Nunca lanza: un JSON corrupto degrada a []. */
 const parsearCondiciones = (raw) => {
@@ -215,12 +188,10 @@ const diasDeAtraso = (fechaLimite, condicion, hoy = hoyBogota()) => {
 /**
  * Mora causada a la fecha. Interés SIMPLE sobre el capital que ESTUVO vencido.
  *
- * OJO — por qué se reconstruye la historia y no se usa solo el saldo actual:
- * si se calculara sobre el saldo de hoy, un cliente que se atrasa 35 días y
- * después paga todo el capital dejaría la base en 0 y la mora ya causada
- * DESAPARECERÍA. El negocio perdería los intereses justo en el caso más común
- * (el cliente que salda). Por eso se acumula por tramos: entre dos abonos el
- * saldo es constante, así que basta sumar tramo × tasa.
+ * El cómo lo hace el motor (`devengo.util.js`); lo que aporta esta función es
+ * el ANCLA: la mora arranca en la fecha límite + los días de gracia, nunca antes.
+ * Eso es lo que impide que activar la feature genere cargos retroactivos sobre
+ * la cartera vieja.
  *
  * `abonos` son los abonos a CAPITAL con su fecha ([{ fecha, valor }]). Si no se
  * pasan, se asume que el saldo actual estuvo vigente todo el atraso (que es lo
@@ -238,54 +209,14 @@ const calcularMoraCausada = ({ saldo, fecha_limite, condicion, hoy, abonos = [] 
   const limite = _aFecha(fecha_limite);
   if (!limite) return 0;
 
-  const hoyF   = _aFecha(hoy) || hoyBogota();
-  // Día en que la mora empieza a correr (vencimiento + gracia).
-  const inicio = _sumarDias(limite, cond.dias_gracia || 0);
-  if (_diasEntre(inicio, hoyF) <= 0) return 0;
-
-  // Abonos a capital posteriores al inicio del atraso, en orden.
-  const posteriores = (abonos || [])
-    // `_aFechaInstante`: la fecha de un abono es un TIMESTAMP, no un DATE.
-    .map((a) => ({ fecha: _aFechaInstante(a.fecha), valor: Number(a.valor) || 0 }))
-    .filter((a) => a.fecha && a.valor > 0 && _diasEntre(inicio, a.fecha) > 0
-                   && _diasEntre(a.fecha, hoyF) >= 0)
-    .sort((a, b) => (a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : 0));
-
-  // El saldo al inicio del atraso: al de hoy se le devuelven los abonos que se
-  // hicieron después. Así no hace falta guardar nada.
-  const saldoInicial = saldoHoy + posteriores.reduce((s, a) => s + a.valor, 0);
-  if (saldoInicial <= 0) return 0;   // nunca hubo deuda vencida
-
-  // Tramos de saldo constante entre abonos.
-  const tramos = [];
-  let cursor = inicio;
-  let saldoTramo = saldoInicial;
-  for (const ab of posteriores) {
-    const dias = _diasEntre(cursor, ab.fecha);
-    if (dias > 0) tramos.push({ dias, saldo: saldoTramo });
-    saldoTramo = Math.max(0, saldoTramo - ab.valor);
-    cursor = ab.fecha;
-  }
-  const diasFinal = _diasEntre(cursor, hoyF);
-  if (diasFinal > 0) tramos.push({ dias: diasFinal, saldo: saldoTramo });
-
-  let bruto = 0;
-  for (const t of tramos) {
-    if (t.saldo <= 0) continue;      // sin deuda ese tramo no causa mora
-    bruto += cond.tipo === TIPO_DIARIA_FIJA
-      ? cond.valor * t.dias                                  // fijo por día en mora
-      : t.saldo * (cond.valor / 100) * (t.dias / 30);         // % mensual proporcional
-  }
-
-  if (!Number.isFinite(bruto) || bruto <= 0) return 0;
-
-  // Tope opcional: se mide contra el capital que estuvo vencido, no contra el
-  // saldo de hoy (que puede ser 0 y anularía el tope).
-  const conTope = cond.tope_pct != null
-    ? Math.min(bruto, saldoInicial * (cond.tope_pct / 100))
-    : bruto;
-
-  return Math.round(conTope);
+  return calcularDevengo({
+    // Día en que la mora empieza a correr (vencimiento + gracia).
+    inicio: _sumarDias(limite, cond.dias_gracia || 0),
+    hasta:  hoy,
+    saldo:  saldoHoy,
+    abonos,
+    regla:  _reglaDe(cond),
+  });
 };
 
 /**
@@ -299,8 +230,12 @@ const resolverEstadoMora = ({ saldo, fecha_limite, condicion, movimientos = [], 
   const cond   = normalizarCondicion(condicion);
   const limite = _aFecha(fecha_limite);
 
+  // Solo los movimientos de MORA. Desde que `movimientos_mora` guarda también
+  // los del interés corriente, un movimiento sin `concepto` es de mora: así se
+  // leen correctamente las filas que existían antes de la columna.
   const sumar = (tipo) => (movimientos || [])
-    .filter((m) => m && !m.anulado && m.tipo === tipo)
+    .filter((m) => m && !m.anulado && m.tipo === tipo
+                   && (m.concepto == null || m.concepto === 'mora'))
     .reduce((s, m) => s + Number(m.valor || 0), 0);
 
   const cobrada   = Math.round(sumar('Cobro'));
@@ -355,35 +290,53 @@ const resolverEstadoMora = ({ saldo, fecha_limite, condicion, movimientos = [], 
 };
 
 /**
- * Reparte un abono entre mora y capital según el modo elegido.
+ * Reparte un abono entre mora, interés corriente y capital.
  *
- * Modos (los tres que pidió el negocio):
- *   'mora_capital' → paga primero la mora y el resto a capital. Es el orden que
- *                    fija el Art. 1653 del Código Civil.
- *   'solo_capital' → todo a capital; la mora queda pendiente (NO condonada:
- *                    sigue debiéndose y visible).
- *   'personalizado'→ el usuario dice cuánto va a mora; el resto a capital.
+ * ORDEN DE IMPUTACIÓN — el Art. 1653 del Código Civil manda pagar primero
+ * intereses y luego capital. Con los dos cargos separados el orden canónico es
+ * mora → interés → capital: se salda antes lo que penaliza que lo que remunera.
  *
- * @returns {{ a_mora: number, a_capital: number, excedente: number }}
+ * Modos:
+ *   'mora_capital'  → cascada completa. Es el default legal. (Nombre histórico:
+ *                     nació cuando solo había dos cubetas y se conserva para no
+ *                     romper a quien ya lo manda desde el frontend.)
+ *   'solo_capital'  → todo a capital; los cargos quedan pendientes (NO
+ *                     condonados: siguen debiéndose y visibles).
+ *   'personalizado' → el usuario dice cuánto va a cada cargo; el resto a capital.
+ *
+ * COMPATIBILIDAD: si no se pasa `interes_pendiente`, el reparto es exactamente
+ * el de dos cubetas que había antes. Ningún llamador viejo cambia de conducta.
+ *
+ * @returns {{ a_mora:number, a_interes:number, a_capital:number, excedente:number }}
  */
-const repartirAbono = ({ valor, mora_pendiente = 0, saldo_capital = 0, modo = 'mora_capital', valor_mora = 0 } = {}) => {
-  const total = Math.max(0, Math.round(Number(valor) || 0));
-  const mora  = Math.max(0, Math.round(Number(mora_pendiente) || 0));
-  const cap   = Math.max(0, Math.round(Number(saldo_capital) || 0));
+const repartirAbono = ({
+  valor, mora_pendiente = 0, interes_pendiente = 0, saldo_capital = 0,
+  modo = 'mora_capital', valor_mora = 0, valor_interes = 0,
+} = {}) => {
+  const total   = Math.max(0, Math.round(Number(valor) || 0));
+  const mora    = Math.max(0, Math.round(Number(mora_pendiente) || 0));
+  const interes = Math.max(0, Math.round(Number(interes_pendiente) || 0));
+  const cap     = Math.max(0, Math.round(Number(saldo_capital) || 0));
 
   let aMora = 0;
+  let aInteres = 0;
+
   if (modo === 'solo_capital') {
     aMora = 0;
+    aInteres = 0;
   } else if (modo === 'personalizado') {
-    aMora = Math.min(Math.max(0, Math.round(Number(valor_mora) || 0)), mora, total);
+    aMora    = Math.min(Math.max(0, Math.round(Number(valor_mora) || 0)), mora, total);
+    aInteres = Math.min(Math.max(0, Math.round(Number(valor_interes) || 0)), interes, total - aMora);
   } else {
-    aMora = Math.min(mora, total);
+    // Cascada: primero la mora, después el interés, lo que sobre a capital.
+    aMora    = Math.min(mora, total);
+    aInteres = Math.min(interes, total - aMora);
   }
 
-  const aCapital  = Math.min(cap, total - aMora);
-  const excedente = total - aMora - aCapital;   // va a saldo a favor
+  const aCapital  = Math.min(cap, total - aMora - aInteres);
+  const excedente = total - aMora - aInteres - aCapital;   // va a saldo a favor
 
-  return { a_mora: aMora, a_capital: aCapital, excedente };
+  return { a_mora: aMora, a_interes: aInteres, a_capital: aCapital, excedente };
 };
 
 module.exports = {

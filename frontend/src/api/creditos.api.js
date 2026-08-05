@@ -45,14 +45,24 @@ export const descargarPdfPazYSalvo = (creditoId) =>
 export const fijarPlazoCredito = (creditoId, { fecha_limite, condicion_id }) =>
   api.patch(`/creditos/${creditoId}/plazo`, { fecha_limite, condicion_id });
 
-/** Cobra mora sin tocar el capital. Sin `valor` cobra todo lo pendiente. */
-export const cobrarMoraCredito = (creditoId, { valor, metodo }) =>
-  api.post(`/creditos/${creditoId}/mora/cobrar`, { valor, metodo });
+/**
+ * Cobra un cargo financiero sin tocar el capital. Sin `valor` cobra todo lo
+ * pendiente. `concepto` distingue mora de interés — por defecto mora.
+ */
+export const cobrarMoraCredito = (creditoId, { valor, metodo, concepto = 'mora' }) =>
+  api.post(`/creditos/${creditoId}/mora/cobrar`, { valor, metodo, concepto });
 
 /**
- * Condona mora. Solo admin; exige motivo y PIN. Sin `valor` condona todo.
- * `quitar_plazo` además borra la fecha límite, para que no se vuelva a causar
- * mora (condonar solo perdona lo acumulado hasta hoy).
+ * Condona un cargo. Solo admin; exige motivo y PIN. Sin `valor` condona todo.
+ * `quitar_plazo` / `quitar_interes` además apagan el cargo hacia adelante:
+ * condonar solo perdona lo acumulado hasta hoy.
  */
-export const condonarMoraCredito = (creditoId, { valor, motivo, pin, quitar_plazo }) =>
-  api.post(`/creditos/${creditoId}/mora/condonar`, { valor, motivo, pin, quitar_plazo });
+export const condonarMoraCredito = (creditoId, { valor, motivo, pin, quitar_plazo, quitar_interes, concepto = 'mora' }) =>
+  api.post(`/creditos/${creditoId}/mora/condonar`, { valor, motivo, pin, quitar_plazo, quitar_interes, concepto });
+
+/**
+ * Fija, cambia o quita el plan de interés. `plan_id: null` lo quita.
+ * El interés corre desde `desde` (por defecto hoy) hacia adelante, nunca hacia atrás.
+ */
+export const fijarInteresCredito = (creditoId, { plan_id, desde }) =>
+  api.patch(`/creditos/${creditoId}/interes`, { plan_id, desde });

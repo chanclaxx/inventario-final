@@ -34,9 +34,11 @@ import { EstadoDeCuenta }                       from './EstadoDeCuenta';
 import { ModalAbonoTotal }                      from './ModalAbonoTotal';
 import { useMetodosPago }                       from '../../hooks/useMetodosPago';
 import { useMora }                              from '../../hooks/useMora';
+import { useInteres }                           from '../../hooks/useInteres';
 import { PanelMora }                            from '../../components/ui/PanelMora';
+import { PanelInteres }                         from '../../components/ui/PanelInteres';
 import {
-  fijarPlazoPrestamo, cobrarMoraPrestamo, condonarMoraPrestamo,
+  fijarPlazoPrestamo, cobrarMoraPrestamo, condonarMoraPrestamo, fijarInteresPrestamo,
 } from '../../api/prestamos.api';
 import { ModalExportarPdfPrestamos }             from './ModalExportarPdfPrestamos';
 import api                                      from '../../api/axios.config';
@@ -1348,7 +1350,8 @@ function HistorialPrestamo({ prestamoId, prestamoEstado }) {
 }
 
 function TarjetaPrestamoDetalle({ prestamo, onAbonar, onDevolver, onImprimir, onIntercambiar, onAplicarSaldo, onEditar, saldoAFavor = 0, aplicandoSaldo = false, coloresActivo, cerrado = false }) {
-  const configMora = useMora();
+  const configMora    = useMora();
+  const configInteres = useInteres();
   // useMetodosPago devuelve {id,label}; PanelMora solo necesita los ids.
   const metodosPagoMora = useMetodosPago().map((m) => m.id);
   const [historialAbierto, setHistorialAbierto] = useState(false);
@@ -1445,6 +1448,22 @@ function TarjetaPrestamoDetalle({ prestamo, onAbonar, onDevolver, onImprimir, on
               fijarPlazo:   (d) => fijarPlazoPrestamo(prestamo.id, d),
               cobrarMora:   (d) => cobrarMoraPrestamo(prestamo.id, d),
               condonarMora: (d) => condonarMoraPrestamo(prestamo.id, d),
+            }}
+          />
+        )}
+
+        {/* Interés por financiar. Panel aparte porque es un cargo distinto:
+            se puede perdonar la mora y seguir cobrando el interés pactado. */}
+        {prestamo.estado === 'Activo' && (
+          <PanelInteres
+            documento={prestamo}
+            configInteres={configInteres}
+            metodosPago={metodosPagoMora}
+            invalidar={[['prestamos'], ['estado-cuenta'], ['caja'], ['facturas']]}
+            api={{
+              fijarInteres:  (d) => fijarInteresPrestamo(prestamo.id, d),
+              cobrarCargo:   (d) => cobrarMoraPrestamo(prestamo.id, d),
+              condonarCargo: (d) => condonarMoraPrestamo(prestamo.id, d),
             }}
           />
         )}

@@ -149,32 +149,59 @@ const fijarPlazo = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+/** Fija, cambia o quita el plan de interés corriente. */
+const fijarInteres = async (req, res, next) => {
+  try {
+    const data = await service.fijarInteres(req.user.negocio_id, Number(req.params.id), {
+      plan_id: req.body.plan_id ?? null,
+      desde:   req.body.desde,
+      rol:     req.user.rol,
+    });
+    audit.registrar(req.user.negocio_id, req.user.id, 'Interés de crédito', 'creditos', Number(req.params.id), {
+      plan: data.interes_condicion?.nombre ?? null,
+    });
+    res.json({
+      ok: true, data,
+      message: data.interes_condicion ? 'Interés actualizado' : 'Interés eliminado',
+    });
+  } catch (err) { next(err); }
+};
+
+// Sirve para los DOS cargos: `concepto` llega en el body y por defecto es mora,
+// así los clientes que ya existían no cambian de conducta.
 const condonarMora = async (req, res, next) => {
   try {
+    const concepto = req.body.concepto === 'interes' ? 'interes' : 'mora';
     const data = await service.condonarMora(req.user.negocio_id, Number(req.params.id), {
       valor:      req.body.valor,
       motivo:     req.body.motivo,
       pin:        req.body.pin,
-      quitar_plazo: req.body.quitar_plazo === true,
+      concepto,
+      quitar_plazo:   req.body.quitar_plazo   === true,
+      quitar_interes: req.body.quitar_interes === true,
       usuario_id: req.user.id,
       rol:        req.user.rol,
     });
-    audit.registrar(req.user.negocio_id, req.user.id, 'Condonación de mora', 'creditos', Number(req.params.id), {
+    const etiqueta = concepto === 'interes' ? 'interés' : 'mora';
+    audit.registrar(req.user.negocio_id, req.user.id, `Condonación de ${etiqueta}`, 'creditos', Number(req.params.id), {
       valor:  Number(data.movimiento?.valor ?? 0),
       motivo: req.body.motivo,
+      concepto,
     });
-    res.json({ ok: true, data, message: 'Mora condonada' });
+    res.json({ ok: true, data, message: concepto === 'interes' ? 'Interés condonado' : 'Mora condonada' });
   } catch (err) { next(err); }
 };
 
 const cobrarMora = async (req, res, next) => {
   try {
+    const concepto = req.body.concepto === 'interes' ? 'interes' : 'mora';
     const data = await service.cobrarMora(req.user.negocio_id, Number(req.params.id), {
       valor:      req.body.valor,
       metodo:     req.body.metodo,
+      concepto,
       usuario_id: req.user.id,
     });
-    res.json({ ok: true, data, message: 'Mora cobrada' });
+    res.json({ ok: true, data, message: concepto === 'interes' ? 'Interés cobrado' : 'Mora cobrada' });
   } catch (err) { next(err); }
 };
 
@@ -182,5 +209,5 @@ module.exports = {
   getCreditos, getCreditoById, registrarAbono, saldarCredito, cancelarCredito,
   getEstadoCuenta, exportarPdfEstadoCuenta,
   getDocumento, exportarPdfAvisoMora, exportarPdfPazYSalvo,
-  fijarPlazo, condonarMora, cobrarMora,
+  fijarPlazo, fijarInteres, condonarMora, cobrarMora,
 };

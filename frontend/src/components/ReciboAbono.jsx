@@ -27,8 +27,9 @@ export function ReciboAbono({ abono, deuda, config = {}, onClose }) {
 
   const capital     = Number(abono.capital || 0);
   const mora        = Number(abono.mora    || 0);
-  const total       = capital + mora;
-  const hubieronDos = capital > 0 && mora > 0;
+  const interes     = Number(abono.interes || 0);
+  const total       = capital + mora + interes;
+  const hubieronDos = capital > 0 && (mora + interes) > 0;
   const esCredito   = deuda.tipo === 'credito';
   const saldado     = Number(abono.saldo_despues ?? 0) <= 0
                    && Number(abono.mora_pendiente || 0) <= 0;
@@ -73,6 +74,7 @@ export function ReciboAbono({ abono, deuda, config = {}, onClose }) {
           {/* ── El desglose: es la razón de ser de este recibo ── */}
           <div className="negrita">DETALLE DEL PAGO</div>
           <Fila label="Abono a capital:" valor={formatCOP(capital)} />
+          {interes > 0 && <Fila label="Interés financiación:" valor={formatCOP(interes)} />}
           {mora > 0 && <Fila label="Intereses de mora:" valor={formatCOP(mora)} />}
           <Fila label="TOTAL RECIBIDO:" valor={formatCOP(total)} negrita grande />
 
@@ -84,6 +86,9 @@ export function ReciboAbono({ abono, deuda, config = {}, onClose }) {
             <Fila label="Deuda anterior:" valor={formatCOP(abono.saldo_antes)} />
           )}
           <Fila label="Deuda actual:" valor={formatCOP(abono.saldo_despues ?? 0)} negrita />
+          {Number(abono.interes_pendiente || 0) > 0 && (
+            <Fila label="Interés pendiente:" valor={formatCOP(abono.interes_pendiente)} negrita />
+          )}
           {Number(abono.mora_pendiente || 0) > 0 && (
             <Fila label="Mora pendiente:" valor={formatCOP(abono.mora_pendiente)} negrita />
           )}

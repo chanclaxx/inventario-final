@@ -35,5 +35,8 @@ router.patch('/:id/cancelar',requireModulo('prestamos'), requireNivel('admin_neg
 router.patch('/:id/plazo',        requireModulo('prestamos'), requireNivel('supervisor'),    ctrl.fijarPlazo);
 router.post('/:id/mora/cobrar',   requireModulo('prestamos'), requireNivel('vendedor'),      ctrl.cobrarMora);
 router.post('/:id/mora/condonar', requireModulo('prestamos'), requireNivel('admin_negocio'), ctrl.condonarMora);
+// Interés corriente. Cobrar y condonar reusan las rutas de arriba con
+// `concepto: 'interes'` en el body: es el mismo movimiento con otra causa.
+router.patch('/:id/interes',      requireModulo('prestamos'), requireNivel('supervisor'),    ctrl.fijarInteres);
 
 module.exports = router;

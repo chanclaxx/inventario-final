@@ -9,8 +9,9 @@ const findAll = async (sucursalId, negocioId) => {
     SELECT
       c.id, c.valor_total, c.cuota_inicial, c.total_abonado,
       c.estado, c.creado_en, c.sucursal_id,
-      -- Mora: solo el pacto. Lo causado/pendiente lo deriva mora.service.
+      -- Cargos: solo el pacto. Lo causado/pendiente lo deriva mora.service.
       c.fecha_limite, c.mora_condicion,
+      c.interes_condicion, c.interes_desde,
       su.nombre  AS sucursal_nombre,
       f.id       AS factura_id,
       f.numero   AS factura_numero,
@@ -68,19 +69,23 @@ const getAbonos = async (creditoId) => {
 
 // ── Crear crédito (dentro de transacción externa) ────────────────────────────
 // `fecha_limite`/`mora_condicion` son opcionales: sin ellos el crédito no tiene
-// mora, que es el comportamiento de siempre.
+// mora, que es el comportamiento de siempre. Lo mismo con `interes_condicion`,
+// y las dos cosas son independientes entre sí.
 const create = async (client, {
   factura_id, cliente_id, sucursal_id, valor_total, cuota_inicial,
   fecha_limite = null, mora_condicion = null,
+  interes_condicion = null, interes_desde = null,
 }) => {
   const { rows } = await client.query(`
     INSERT INTO creditos(factura_id, cliente_id, sucursal_id, valor_total, cuota_inicial,
-                         total_abonado, estado, fecha_limite, mora_condicion)
-    VALUES ($1, $2, $3, $4, $5, 0, 'Activo', $6, $7::jsonb)
+                         total_abonado, estado, fecha_limite, mora_condicion,
+                         interes_condicion, interes_desde)
+    VALUES ($1, $2, $3, $4, $5, 0, 'Activo', $6, $7::jsonb, $8::jsonb, $9)
     RETURNING *
   `, [
     factura_id, cliente_id, sucursal_id, valor_total, cuota_inicial ?? 0,
     fecha_limite, mora_condicion ? JSON.stringify(mora_condicion) : null,
+    interes_condicion ? JSON.stringify(interes_condicion) : null, interes_desde,
   ]);
   return rows[0];
 };

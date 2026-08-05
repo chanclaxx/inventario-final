@@ -301,6 +301,58 @@ const runMigrations = async () => {
     console.error('⚠️  Migración de mora no aplicada (el resto del sistema sigue normal):', err.message);
   }
 
+  // Interés corriente en créditos y préstamos — ver migrations/20260804_interes_corriente.sql
+  //
+  // Hermana de la mora: aquella sanciona el ATRASO, esta cobra el PLAZO. Son
+  // independientes — se puede tener una, la otra, las dos o ninguna.
+  //
+  // 100% aditiva: 4 columnas nullable, 3 índices parciales y una columna
+  // discriminadora en `movimientos_mora`. `concepto` es la única con DEFAULT, y
+  // al ser constante NO reescribe la tabla (PostgreSQL 11+); las filas que ya
+  // existen quedan como 'mora', que es exactamente lo que son.
+  //
+  // `interes_condicion IS NULL` ⇒ el documento no causa interés, así que los
+  // créditos y préstamos que ya existen no cambian ni al migrar ni al activar la
+  // feature con `interes_activa`.
+  //
+  // El interés cobrado vive en `movimientos_mora` y NUNCA en `total_abonado`,
+  // por la misma razón que la mora: los reportes calculan la utilidad como
+  // (abonado − costo) y lo contarían como margen comercial. Es ingreso financiero.
+  //
+  // Propio try/catch: un fallo aquí no puede dejar el servidor sin arrancar.
+  try {
+    await pool.query(`
+      ALTER TABLE IF EXISTS creditos  ADD COLUMN IF NOT EXISTS interes_condicion JSONB;
+      ALTER TABLE IF EXISTS creditos  ADD COLUMN IF NOT EXISTS interes_desde     DATE;
+      ALTER TABLE IF EXISTS prestamos ADD COLUMN IF NOT EXISTS interes_condicion JSONB;
+      ALTER TABLE IF EXISTS prestamos ADD COLUMN IF NOT EXISTS interes_desde     DATE;
+
+      CREATE INDEX IF NOT EXISTS idx_creditos_interes
+        ON creditos (id) WHERE interes_condicion IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_prestamos_interes
+        ON prestamos (id) WHERE interes_condicion IS NOT NULL;
+
+      ALTER TABLE IF EXISTS movimientos_mora
+        ADD COLUMN IF NOT EXISTS concepto TEXT NOT NULL DEFAULT 'mora';
+
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_constraint WHERE conname = 'movimientos_mora_concepto_chk'
+        ) THEN
+          ALTER TABLE movimientos_mora
+            ADD CONSTRAINT movimientos_mora_concepto_chk
+            CHECK (concepto IN ('mora', 'interes'));
+        END IF;
+      END $$;
+
+      CREATE INDEX IF NOT EXISTS idx_mov_mora_concepto
+        ON movimientos_mora (sucursal_id, concepto, fecha DESC) WHERE NOT anulado;
+    `);
+  } catch (err) {
+    console.error('⚠️  Migración de interés no aplicada (el resto del sistema sigue normal):', err.message);
+  }
+
   // Notificaciones push (Web Push / VAPID) — ver migrations/20260801_push_notificaciones.sql
   //
   // 100% aditiva e idempotente. Un negocio que no active las notificaciones no

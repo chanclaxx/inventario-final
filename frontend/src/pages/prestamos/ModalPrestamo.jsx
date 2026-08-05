@@ -16,7 +16,9 @@ import useCarritoStore from '../../store/carritoStore';
 import { useTarifas }  from '../../hooks/useTarifas';
 import { TarifaItem }  from '../../components/ui/SelectorTarifa';
 import { useMora }        from '../../hooks/useMora';
+import { useInteres }     from '../../hooks/useInteres';
 import { SelectorPlazo }  from '../../components/ui/SelectorPlazo';
+import { SelectorInteres } from '../../components/ui/SelectorInteres';
 import { User, Users, Plus, Minus, ChevronLeft, Search } from 'lucide-react';
 import { InputMoneda } from '../../components/ui/InputMoneda';
 
@@ -320,7 +322,10 @@ export function ModalPrestamo({ open, onClose }) {
   // Plazo de pago del préstamo (feature opt-in). Vacío = sin plazo = sin mora,
   // que es lo natural para un compañero.
   const [plazo,          setPlazo]          = useState({ fecha_limite: '', condicion_id: '' });
-  const configMora = useMora();
+  // El interés va aparte del plazo a propósito: son dos pactos independientes.
+  const [interesPlanId,  setInteresPlanId]  = useState('');
+  const configMora    = useMora();
+  const configInteres = useInteres();
 
   const { data: prestatariosData, isLoading: loadingPrestatarios } = useQuery({
     queryKey: ['prestatarios'],
@@ -396,6 +401,7 @@ export function ModalPrestamo({ open, onClose }) {
     setClienteSel(null);
     setAplicarSaldo(false);
     setPlazo({ fecha_limite: '', condicion_id: '' });
+    setInteresPlanId('');
     setError('');
   };
 
@@ -435,6 +441,7 @@ export function ModalPrestamo({ open, onClose }) {
         // Sin fecha el backend crea el préstamo sin plazo y por tanto sin mora.
         fecha_limite:      plazo.fecha_limite || null,
         mora_condicion_id: plazo.condicion_id || null,
+        interes_plan_id:   interesPlanId || null,
       });
     } else {
       if (!clienteSel) return setError('Selecciona o crea un cliente');
@@ -450,6 +457,7 @@ export function ModalPrestamo({ open, onClose }) {
         // Sin fecha el backend crea el préstamo sin plazo y por tanto sin mora.
         fecha_limite:      plazo.fecha_limite || null,
         mora_condicion_id: plazo.condicion_id || null,
+        interes_plan_id:   interesPlanId || null,
       });
     }
   };
@@ -509,6 +517,15 @@ export function ModalPrestamo({ open, onClose }) {
             condicionId={plazo.condicion_id}
             onChange={setPlazo}
             titulo="Fecha límite de pago"
+          />
+        )}
+
+        {items.length > 0 && (
+          <SelectorInteres
+            config={configInteres}
+            planId={interesPlanId}
+            onChange={setInteresPlanId}
+            valorBase={total}
           />
         )}
 

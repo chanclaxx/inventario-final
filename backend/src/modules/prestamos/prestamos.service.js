@@ -221,20 +221,26 @@ const _crearFacturaDesdePrestamo = async (client, prestamo, metodo, negocioId) =
 const cerrarSiPagadoEnTx = async (
   client, prestamoId, negocioId, { metodo = 'Efectivo', crearFactura = true } = {},
 ) => {
-  const { documento, saldo_capital, mora } = await moraService.estadoDe(
+  const { documento, saldo_capital, mora, interes } = await moraService.estadoDe(
     'prestamo', prestamoId, negocioId, client
   );
 
   const capitalPendiente = Math.max(0, Math.round(Number(saldo_capital) || 0));
   const moraPendiente    = Math.max(0, Math.round(Number(mora?.pendiente) || 0));
+  const interesPendiente = Math.max(0, Math.round(Number(interes?.pendiente) || 0));
   const base = {
     saldado: false, factura_id: null,
     capital_pendiente: capitalPendiente,
     mora_pendiente:    moraPendiente,
+    interes_pendiente: interesPendiente,
+    cargos_pendientes: moraPendiente + interesPendiente,
   };
 
   if (documento.estado !== 'Activo') return base;
-  if (capitalPendiente > 0 || moraPendiente > 0) return base;
+  // Las TRES cubetas en cero. Cerrar con interés pendiente dejaría la deuda
+  // huérfana y generaría la factura antes de tiempo — el mismo error que se
+  // corrigió en julio para la mora, ahora también para el interés.
+  if (capitalPendiente > 0 || moraPendiente > 0 || interesPendiente > 0) return base;
 
   await repo.updateEstado(client, prestamoId, 'Saldado');
 
@@ -286,30 +292,44 @@ const condonarMora = (negocioId, prestamoId, datos) =>
   moraService.condonar(negocioId, 'prestamo', prestamoId, datos);
 
 /**
- * Cobra SOLO mora, sin tocar el capital.
+ * Cobra SOLO un cargo financiero (mora o interés), sin tocar el capital.
  *
- * Es el camino por el que se pagan los intereses, y desde que capital y mora
+ * Es el camino por el que se pagan los intereses, y desde que capital y cargos
  * son deudas separadas también es el que cierra el préstamo cuando el producto
- * ya estaba pagado y lo único que faltaba era la mora.
+ * ya estaba pagado y lo único que faltaba era el cargo.
+ *
+ * `concepto` por defecto es 'mora' para no cambiarle la conducta a los
+ * llamadores que existían antes del interés corriente.
  */
-const cobrarMora = async (negocioId, prestamoId, { valor, metodo, usuario_id }) => {
+const cobrarMora = async (negocioId, prestamoId, { valor, metodo, usuario_id, concepto = 'mora' }) => {
+  const esInteres = concepto === 'interes';
+  const nombre    = esInteres ? 'interés' : 'mora';
+
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const { documento, mora } = await moraService.estadoDe('prestamo', prestamoId, negocioId, client);
+    const { documento, mora, interes } = await moraService.estadoDe('prestamo', prestamoId, negocioId, client);
+    const cargo = esInteres ? interes : mora;
 
-    if (!mora.aplica)        throw { status: 400, message: 'Este préstamo no tiene plazo ni mora pactada' };
-    if (mora.pendiente <= 0) throw { status: 400, message: 'No hay mora pendiente por cobrar' };
+    if (!cargo.aplica) {
+      throw {
+        status: 400,
+        message: esInteres
+          ? 'Este préstamo no tiene interés pactado'
+          : 'Este préstamo no tiene plazo ni mora pactada',
+      };
+    }
+    if (cargo.pendiente <= 0) throw { status: 400, message: `No hay ${nombre} pendiente por cobrar` };
 
-    const aCobrar = valor == null || valor === '' ? mora.pendiente : Math.round(Number(valor));
+    const aCobrar = valor == null || valor === '' ? cargo.pendiente : Math.round(Number(valor));
     if (!(aCobrar > 0)) throw { status: 400, message: 'El valor a cobrar debe ser mayor a 0' };
-    if (aCobrar > mora.pendiente) {
-      throw { status: 400, message: `No puedes cobrar más de la mora pendiente ($${mora.pendiente.toLocaleString('es-CO')})` };
+    if (aCobrar > cargo.pendiente) {
+      throw { status: 400, message: `No puedes cobrar más de ${esInteres ? 'el interés' : 'la mora'} pendiente ($${cargo.pendiente.toLocaleString('es-CO')})` };
     }
 
     const mov = await moraService.registrarCobroEnTx(client, {
-      tipo: 'prestamo', documento, negocioId,
-      valor: aCobrar, metodo, usuarioId: usuario_id, estadoMora: mora,
+      tipo: 'prestamo', documento, negocioId, concepto,
+      valor: aCobrar, metodo, usuarioId: usuario_id, estadoMora: cargo,
     });
 
     // Si con este cobro ya no se debe nada, el préstamo queda saldado y se
@@ -320,7 +340,7 @@ const cobrarMora = async (negocioId, prestamoId, { valor, metodo, usuario_id }) 
 
     const despues = await moraService.estadoDe('prestamo', prestamoId, negocioId);
     return {
-      movimiento: mov, mora: despues.mora,
+      movimiento: mov, mora: despues.mora, interes: despues.interes,
       saldado: cierre.saldado, factura_id: cierre.factura_id,
     };
   } catch (err) {
@@ -394,9 +414,10 @@ const crearPrestamos = async ({
   prestatario_id, empleado_id, cliente_id,
   items,
   aplicar_saldo_favor = false,
-  // Plazo y condición de mora del pacto. Aplican a TODOS los ítems del mismo
-  // préstamo: es un solo acuerdo con la persona, aunque se lleve varios equipos.
-  fecha_limite, mora_condicion_id,
+  // Plazo, condición de mora y plan de interés del pacto. Aplican a TODOS los
+  // ítems del mismo préstamo: es un solo acuerdo con la persona, aunque se
+  // lleve varios equipos.
+  fecha_limite, mora_condicion_id, interes_plan_id,
 }) => {
   if (!items?.length) throw { status: 400, message: 'Se requiere al menos un ítem para el préstamo' };
 
@@ -407,7 +428,7 @@ const crearPrestamos = async ({
   // Se resuelve ANTES de abrir la transacción: si la fecha es inválida, mejor
   // fallar sin haber tocado inventario.
   const datosMora = await moraService.datosParaNuevoDocumento(negocio_id, {
-    fecha_limite, mora_condicion_id,
+    fecha_limite, mora_condicion_id, interes_plan_id,
   });
 
   const client = await pool.connect();
@@ -550,7 +571,7 @@ const registrarSaldoAFavor = async (negocioId, tipo, personaId, monto, sucursalI
 // Sin plazo, la mora pendiente es 0 y los tres se comportan igual.
 const registrarAbono = async (
   negocioId, prestamoId, valor, metodo, usuarioId, color,
-  { modo = 'solo_capital', valorMora = 0 } = {},
+  { modo = 'solo_capital', valorMora = 0, valorInteres = 0 } = {},
 ) => {
   const prestamo = await repo.findByIdYNegocio(prestamoId, negocioId);
   if (!prestamo) throw { status: 404, message: 'Préstamo no encontrado' };
@@ -562,29 +583,34 @@ const registrarAbono = async (
 
     // Dentro de la transacción: si entran dos abonos a la vez, cada uno ve el
     // saldo y la mora que dejó el otro.
-    const { documento, saldo_capital, mora } = await moraService.estadoDe(
+    const { documento, saldo_capital, mora, interes } = await moraService.estadoDe(
       'prestamo', prestamoId, negocioId, client
     );
 
-    // Si el producto ya está pagado, lo único que queda por pagar es la mora:
-    // el abono se imputa entero ahí. Sin esto, un cliente que vuelve a pagar
-    // los intereses recibiría "el abono supera lo que se debe" y quedaría sin
-    // forma de cerrar el préstamo desde esta pantalla.
-    const modoEfectivo = (saldo_capital <= 0 && mora.pendiente > 0) ? 'mora_capital' : modo;
+    // Si el producto ya está pagado, lo único que queda por pagar son los
+    // cargos: el abono se imputa entero ahí. Sin esto, un cliente que vuelve a
+    // pagar los intereses recibiría "el abono supera lo que se debe" y quedaría
+    // sin forma de cerrar el préstamo desde esta pantalla.
+    const cargosPendientes = mora.pendiente + interes.pendiente;
+    const modoEfectivo = (saldo_capital <= 0 && cargosPendientes > 0) ? 'mora_capital' : modo;
 
     const reparto = repartirAbono({
-      valor, mora_pendiente: mora.pendiente, saldo_capital,
-      modo: modoEfectivo, valor_mora: valorMora,
+      valor,
+      mora_pendiente:    mora.pendiente,
+      interes_pendiente: interes.pendiente,
+      saldo_capital,
+      modo: modoEfectivo, valor_mora: valorMora, valor_interes: valorInteres,
     });
 
-    // El tope ahora es capital + mora: antes rechazaba cualquier pago que
-    // incluyera los intereses, porque no los conocía.
+    // El tope es capital + los dos cargos: antes rechazaba cualquier pago que
+    // los incluyera, porque no los conocía.
     if (reparto.excedente > 0) {
-      const total = saldo_capital + mora.pendiente;
+      const total = saldo_capital + cargosPendientes;
       throw {
         status: 400,
         message: `El abono supera lo que se debe. Capital $${Math.round(saldo_capital).toLocaleString('es-CO')}`
-          + (mora.pendiente > 0 ? ` + mora $${mora.pendiente.toLocaleString('es-CO')}` : '')
+          + (mora.pendiente    > 0 ? ` + mora $${mora.pendiente.toLocaleString('es-CO')}` : '')
+          + (interes.pendiente > 0 ? ` + interés $${interes.pendiente.toLocaleString('es-CO')}` : '')
           + ` = $${Math.round(total).toLocaleString('es-CO')}`,
       };
     }
@@ -603,8 +629,17 @@ const registrarAbono = async (
     let movimientoMora = null;
     if (reparto.a_mora > 0) {
       movimientoMora = await moraService.registrarCobroEnTx(client, {
-        tipo: 'prestamo', documento, negocioId,
+        tipo: 'prestamo', documento, negocioId, concepto: 'mora',
         valor: reparto.a_mora, metodo, usuarioId, estadoMora: mora,
+        abonoPrestamoId: resultado.abono_id ?? null,
+      });
+    }
+
+    let movimientoInteres = null;
+    if (reparto.a_interes > 0) {
+      movimientoInteres = await moraService.registrarCobroEnTx(client, {
+        tipo: 'prestamo', documento, negocioId, concepto: 'interes',
+        valor: reparto.a_interes, metodo, usuarioId, estadoMora: interes,
         abonoPrestamoId: resultado.abono_id ?? null,
       });
     }
@@ -616,9 +651,9 @@ const registrarAbono = async (
       );
     }
 
-    // El préstamo se cierra solo si NO queda nada por cobrar: capital y mora en
-    // cero. Con intereses pendientes sigue Activo y la factura se genera después,
-    // cuando se cobre (o se condone) esa mora.
+    // El préstamo se cierra solo si NO queda nada por cobrar: capital, mora e
+    // interés en cero. Con cargos pendientes sigue Activo y la factura se genera
+    // después, cuando se cobren (o se condonen).
     const cierre = await cerrarSiPagadoEnTx(client, prestamoId, negocioId, { metodo });
 
     await client.query('COMMIT');
@@ -628,13 +663,16 @@ const registrarAbono = async (
       ...resultado,
       saldado:    cierre.saldado,
       factura_id: cierre.factura_id,
-      // Capital cubierto pero con mora debiéndose: la pantalla lo usa para
-      // ofrecer el cobro de la mora sin que el vendedor tenga que buscarlo.
-      solo_falta_mora: !cierre.saldado && cierre.capital_pendiente <= 0 && cierre.mora_pendiente > 0,
+      // Capital cubierto pero con cargos debiéndose: la pantalla lo usa para
+      // ofrecer el cobro sin que el vendedor tenga que buscarlo.
+      solo_falta_mora: !cierre.saldado && cierre.capital_pendiente <= 0 && cierre.cargos_pendientes > 0,
       abonado_capital: reparto.a_capital,
       abonado_mora:    reparto.a_mora,
-      movimiento_mora: movimientoMora,
+      abonado_interes: reparto.a_interes,
+      movimiento_mora:    movimientoMora,
+      movimiento_interes: movimientoInteres,
       mora:            despues.mora,
+      interes:         despues.interes,
       sucursal_id:     prestamo.sucursal_id     ?? null,
       prestatario:     prestamo.prestatario     ?? null,
       nombre_producto: prestamo.nombre_producto ?? null,
@@ -1622,14 +1660,17 @@ const registrarAbonoTotal = async (
   const prestamosActivos = await repo.getPrestamoActivosPorPersona(pool, tipo, personaId, negocioId, sucursalId);
   if (!prestamosActivos.length) throw { status: 400, message: 'Esta persona no tiene préstamos activos en esta sucursal' };
 
-  // El tope incluye la mora pendiente de cada préstamo: si solo se contara el
-  // capital, un pago que cubre los intereses sería rechazado.
+  // El tope incluye los cargos pendientes de cada préstamo: si solo se contara
+  // el capital, un pago que cubre los intereses sería rechazado.
   const conMora = await moraService.anotarLista(prestamosActivos, 'prestamo');
-  const moraPorPrestamo = new Map(conMora.map((p) => [Number(p.id), p.mora]));
+  const moraPorPrestamo    = new Map(conMora.map((p) => [Number(p.id), p.mora]));
+  const interesPorPrestamo = new Map(conMora.map((p) => [Number(p.id), p.interes]));
 
-  const totalPendiente = conMora.reduce(
-    (s, p) => s + Number(p.valor_prestamo) - Number(p.total_abonado) + Number(p.mora?.pendiente || 0), 0
-  );
+  /** Lo que se debe por un préstamo: capital + mora + interés. */
+  const _debeDe = (p) => Number(p.valor_prestamo) - Number(p.total_abonado)
+    + Number(p.mora?.pendiente || 0) + Number(p.interes?.pendiente || 0);
+
+  const totalPendiente = conMora.reduce((s, p) => s + _debeDe(p), 0);
   if (valorTotal > totalPendiente) {
     throw { status: 400, message: `El abono (${valorTotal}) supera el saldo total pendiente (${totalPendiente.toFixed(2)})` };
   }
@@ -1643,7 +1684,7 @@ const registrarAbonoTotal = async (
     for (const p of conMora) {
       const v = Math.max(0, Math.round(Number(distribucion_manual[p.id] ?? 0)));
       if (!v) continue;
-      const debe = Number(p.valor_prestamo) - Number(p.total_abonado) + Number(p.mora?.pendiente || 0);
+      const debe = _debeDe(p);
       if (v > debe) {
         throw {
           status: 400,
@@ -1685,8 +1726,9 @@ const registrarAbonoTotal = async (
       if (remaining <= 0) break;
 
       const saldoPendiente = Number(prestamo.valor_prestamo) - Number(prestamo.total_abonado);
-      const mora           = moraPorPrestamo.get(Number(prestamo.id)) || { pendiente: 0 };
-      const debeEste       = saldoPendiente + Number(mora.pendiente || 0);
+      const mora           = moraPorPrestamo.get(Number(prestamo.id))    || { pendiente: 0 };
+      const interes        = interesPorPrestamo.get(Number(prestamo.id)) || { pendiente: 0 };
+      const debeEste       = saldoPendiente + Number(mora.pendiente || 0) + Number(interes.pendiente || 0);
       if (debeEste <= 0) continue;
 
       // Con plan manual, este préstamo recibe exactamente lo asignado; si no,
@@ -1696,12 +1738,13 @@ const registrarAbonoTotal = async (
         : Math.min(remaining, debeEste);
       if (paraEste <= 0) continue;
 
-      // El reparto interno mora/capital usa la MISMA función que el abono
-      // individual, así los dos caminos no pueden divergir.
+      // El reparto interno mora/interés/capital usa la MISMA función que el
+      // abono individual, así los dos caminos no pueden divergir.
       const reparto = repartirAbono({
         valor: paraEste,
-        mora_pendiente: Number(mora.pendiente || 0),
-        saldo_capital:  saldoPendiente,
+        mora_pendiente:    Number(mora.pendiente || 0),
+        interes_pendiente: Number(interes.pendiente || 0),
+        saldo_capital:     saldoPendiente,
         modo,
       });
 
@@ -1723,14 +1766,22 @@ const registrarAbonoTotal = async (
 
       if (reparto.a_mora > 0) {
         await moraService.registrarCobroEnTx(client, {
-          tipo: 'prestamo', documento: prestamo, negocioId,
+          tipo: 'prestamo', documento: prestamo, negocioId, concepto: 'mora',
           valor: reparto.a_mora, metodo, usuarioId,
           estadoMora: mora, abonoPrestamoId: abonoId,
         });
       }
 
+      if (reparto.a_interes > 0) {
+        await moraService.registrarCobroEnTx(client, {
+          tipo: 'prestamo', documento: prestamo, negocioId, concepto: 'interes',
+          valor: reparto.a_interes, metodo, usuarioId,
+          estadoMora: interes, abonoPrestamoId: abonoId,
+        });
+      }
+
       // Mismo criterio que el abono individual: solo se salda si no queda
-      // capital NI mora. El pago total no factura cada préstamo (deja un único
+      // capital NI cargos. El pago total no factura cada préstamo (deja un único
       // movimiento en el estado de cuenta), pero sí marca el equipo vendido.
       const cierre = await cerrarSiPagadoEnTx(client, prestamo.id, negocioId, {
         metodo, crearFactura: false,

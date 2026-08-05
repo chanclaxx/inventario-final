@@ -113,7 +113,8 @@ const getFacturaById = async (negocioId, id) => {
         tipo: 'credito',
         documento: { ...credito, factura_numero: factura.numero, factura_id: factura.id },
         abonos,
-        mora: credito.mora || null,
+        mora:    credito.mora    || null,
+        interes: credito.interes || null,
         devuelto,
       });
     }
@@ -135,6 +136,9 @@ const crearFactura = async ({
   // Plazo de pago y condición de mora (feature opt-in `mora_activa`). Sin fecha,
   // el crédito no tiene mora — que es el comportamiento de siempre.
   fecha_limite, mora_condicion_id,
+  // Plan de interés corriente (feature opt-in `interes_activa`), independiente
+  // del plazo: un crédito puede causar interés sin tener fecha límite.
+  interes_plan_id,
 }) => {
   const { pool }             = require('../../config/db');
   const facturasRepo         = require('./facturas.repository');
@@ -432,12 +436,12 @@ const crearFactura = async ({
 
     // ── Crear crédito si la venta es a crédito ──────────────────────────────
     if (es_credito) {
-      // La condición de mora se CONGELA en el crédito: si el negocio sube la
-      // tasa mañana, no puede aplicarla a lo ya otorgado. Devuelve nulos si la
-      // feature está apagada o si no se pidió plazo.
+      // El pacto (mora e interés) se CONGELA en el crédito: si el negocio sube
+      // la tasa mañana, no puede aplicarla a lo ya otorgado. Devuelve nulos si
+      // las features están apagadas o si no se pidieron.
       const moraService = require('../mora/mora.service');
       const datosMora = await moraService.datosParaNuevoDocumento(negocio_id, {
-        fecha_limite, mora_condicion_id,
+        fecha_limite, mora_condicion_id, interes_plan_id,
       });
 
       await creditosRepo.create(client, {

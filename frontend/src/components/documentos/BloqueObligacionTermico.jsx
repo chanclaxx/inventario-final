@@ -10,6 +10,8 @@ import { Divisor, Fila } from './DocumentoTermico';
  * distintas y el cliente se quedaría con el papel que le convenga.
  */
 
+import { describirPlanCompleto } from '../../utils/interes';
+
 /** Texto legible de la condición de mora pactada (espejo del backend). */
 function describirCondicion(cond) {
   if (!cond) return null;
@@ -61,22 +63,46 @@ export function EstadoObligacionTermico({ resumen, fuenteSize = 13 }) {
       <div className="linea-punteada" />
       <Fila label="SALDO PENDIENTE:" valor={formatCOP(resumen.saldo)} negrita grande />
 
-      {/* La mora es deuda aparte del producto: se lista debajo del saldo y con
-          el total real que el cliente debe pagar. Sin esto, un documento con el
-          producto pagado se veía en cero aunque siguiera debiendo intereses. */}
-      {(Number(resumen.mora_causada || 0) > 0 || Number(resumen.mora_pendiente || 0) > 0) && (
-        <>
-          <Fila label="Mora causada:" valor={formatCOP(resumen.mora_causada)} />
-          {Number(resumen.mora_cobrada || 0) > 0 && (
-            <Fila label="Mora cobrada:" valor={`- ${formatCOP(resumen.mora_cobrada)}`} />
-          )}
-          {Number(resumen.mora_condonada || 0) > 0 && (
-            <Fila label="Mora condonada:" valor={`- ${formatCOP(resumen.mora_condonada)}`} />
-          )}
-          <Fila label="Mora pendiente:" valor={formatCOP(resumen.mora_pendiente)} negrita />
-          <Fila label="TOTAL A PAGAR:" valor={formatCOP(resumen.total_a_pagar)} negrita grande />
-        </>
-      )}
+      {/* Los cargos son deuda aparte del producto: se listan debajo del saldo y
+          con el total real que el cliente debe pagar. Sin esto, un documento con
+          el producto pagado se veía en cero aunque siguiera debiendo intereses.
+          Interés y mora van separados: son cobros con causa distinta. */}
+      {(() => {
+        const conInteres = Number(resumen.interes_causado || 0) > 0
+          || Number(resumen.interes_pendiente || 0) > 0;
+        const conMora = Number(resumen.mora_causada || 0) > 0
+          || Number(resumen.mora_pendiente || 0) > 0;
+        if (!conInteres && !conMora) return null;
+        return (
+          <>
+            {conInteres && (
+              <>
+                <Fila label="Interés financiación:" valor={formatCOP(resumen.interes_causado)} />
+                {Number(resumen.interes_cobrado || 0) > 0 && (
+                  <Fila label="Interés pagado:" valor={`- ${formatCOP(resumen.interes_cobrado)}`} />
+                )}
+                {Number(resumen.interes_condonado || 0) > 0 && (
+                  <Fila label="Interés condonado:" valor={`- ${formatCOP(resumen.interes_condonado)}`} />
+                )}
+                <Fila label="Interés pendiente:" valor={formatCOP(resumen.interes_pendiente)} negrita />
+              </>
+            )}
+            {conMora && (
+              <>
+                <Fila label="Mora causada:" valor={formatCOP(resumen.mora_causada)} />
+                {Number(resumen.mora_cobrada || 0) > 0 && (
+                  <Fila label="Mora cobrada:" valor={`- ${formatCOP(resumen.mora_cobrada)}`} />
+                )}
+                {Number(resumen.mora_condonada || 0) > 0 && (
+                  <Fila label="Mora condonada:" valor={`- ${formatCOP(resumen.mora_condonada)}`} />
+                )}
+                <Fila label="Mora pendiente:" valor={formatCOP(resumen.mora_pendiente)} negrita />
+              </>
+            )}
+            <Fila label="TOTAL A PAGAR:" valor={formatCOP(resumen.total_a_pagar)} negrita grande />
+          </>
+        );
+      })()}
 
       {/* Fechas y plazo */}
       {(resumen.fecha_limite || resumen.fecha_ultimo_abono) && (
@@ -174,12 +200,22 @@ export function HistorialAbonosTermico({ resumen }) {
 
 export function MovimientosMoraTermico({ resumen }) {
   const movs = resumen?.mora_movimientos || [];
-  if (!movs.length && !(Number(resumen?.mora_pendiente || 0) > 0)) return null;
+  const pendiente = Number(resumen?.cargos_pendientes ?? resumen?.mora_pendiente ?? 0);
+  if (!movs.length && !(pendiente > 0)) return null;
+
+  // El titulo dice de que habla la tabla: puede traer los dos cargos.
+  const hayInteres = Number(resumen?.interes_causado || 0) > 0
+    || movs.some((m) => m.concepto === 'interes');
+  const hayMora = Number(resumen?.mora_causada || 0) > 0
+    || movs.some((m) => m.concepto !== 'interes');
+  const titulo = hayInteres && hayMora ? 'INTERESES Y MORA'
+    : hayInteres ? 'INTERESES DE FINANCIACION'
+    : 'INTERESES DE MORA';
 
   return (
     <>
       <div className="linea-punteada" />
-      <div className="negrita">INTERESES DE MORA</div>
+      <div className="negrita">{titulo}</div>
       {movs.length > 0 && (
         <table className="tabla-abonos">
           <thead>
@@ -193,14 +229,22 @@ export function MovimientosMoraTermico({ resumen }) {
             {movs.map((m, i) => (
               <tr key={m.id ?? i}>
                 <td>{formatFecha(m.fecha)}</td>
-                <td>{m.es_cobro ? `Cobro${m.metodo ? ` ${m.metodo}` : ''}` : 'Condonada'}</td>
+                <td>
+                  {m.es_cobro
+                    ? `Cobro ${m.concepto === 'interes' ? 'interés' : 'mora'}${m.metodo ? ` ${m.metodo}` : ''}`
+                    : `Condonad${m.concepto === 'interes' ? 'o interés' : 'a mora'}`}
+                </td>
                 <td className="der">{formatCOP(m.valor)}</td>
               </tr>
             ))}
           </tbody>
         </table>
       )}
-      <Fila label="Mora pendiente:" valor={formatCOP(resumen.mora_pendiente)} negrita />
+      <Fila
+        label={hayInteres && hayMora ? 'Pendiente (int.+mora):' : hayInteres ? 'Interés pendiente:' : 'Mora pendiente:'}
+        valor={formatCOP(pendiente)}
+        negrita
+      />
     </>
   );
 }
@@ -208,25 +252,38 @@ export function MovimientosMoraTermico({ resumen }) {
 // ─── Condiciones de pago ──────────────────────────────────────────────────────
 
 export function CondicionesTermico({ resumen }) {
-  if (!resumen?.fecha_limite) return null;
-  const desc = describirCondicion(resumen.condicion);
+  const desc = describirCondicion(resumen?.condicion);
+  const descInteres = describirPlanCompleto(resumen?.condicion_interes);
+  // Se imprime si hay plazo O si hay interes: un prestamo puede causar interes
+  // sin fecha limite, y en ese caso el pacto del interes es justamente lo unico
+  // que hay que dejar por escrito para que sea exigible.
+  if (!resumen?.fecha_limite && !descInteres) return null;
+
+  const partes = [];
+  if (descInteres) partes.push('el interés de financiación');
+  if (resumen.fecha_limite) partes.push(desc ? 'el plazo y el interés de mora' : 'el plazo de pago');
 
   return (
     <>
       <Divisor />
       <div className="negrita">CONDICIONES DE PAGO</div>
       <Fila label="Saldo a pagar:" valor={formatCOP(resumen.saldo)} />
-      <Fila label="Fecha límite:"  valor={resumen.fecha_limite_txt} />
+      {descInteres && (
+        <div className="suave" style={{ fontSize: '11px', margin: '2px 0' }}>
+          Interés financiación: {descInteres}
+        </div>
+      )}
+      {resumen.fecha_limite && (
+        <Fila label="Fecha límite:" valor={resumen.fecha_limite_txt} />
+      )}
       {desc && (
         <div className="suave" style={{ fontSize: '11px', margin: '2px 0' }}>
           Interés por mora: {desc}
         </div>
       )}
       <div className="suave" style={{ fontSize: '10px', marginTop: '3px', textAlign: 'justify' }}>
-        {desc
-          ? 'El cliente declara conocer y aceptar el plazo y el interés de mora aquí pactados. '
-            + 'La mora se liquida sobre el saldo de capital pendiente, por los días de atraso.'
-          : 'El cliente declara conocer y aceptar el plazo de pago aquí pactado.'}
+        {`El cliente declara conocer y aceptar ${partes.join(' y ')} aquí pactado${partes.length > 1 ? 's' : ''}.`}
+        {desc ? ' La mora se liquida sobre el saldo de capital pendiente, por los días de atraso.' : ''}
       </div>
     </>
   );

@@ -79,6 +79,9 @@ await db.exec(`
 await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260725_red_interna.sql'), 'utf8'));
 await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260726_red_interna_v2.sql'), 'utf8'));
 await db.exec(readFileSync(path.join(RAIZ, 'migrations/20260730_mora_credito.sql'), 'utf8'));
+// Ver la nota en 09: el interés vive en la misma tabla, así que su migración
+// hace falta. Los casos adversarios de abajo no cambian ni una cifra.
+await db.exec(readFileSync(path.join(RAIZ, 'migrations/20260804_interes_corriente.sql'), 'utf8'));
 
 const conectar = (t) => ({
   query: async (text, params) => {

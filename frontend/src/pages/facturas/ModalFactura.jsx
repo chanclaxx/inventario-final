@@ -25,6 +25,7 @@ import api                   from '../../api/axios.config';
 import useCarritoStore       from '../../store/carritoStore';
 import { useTarifas }        from '../../hooks/useTarifas';
 import { useMora }           from '../../hooks/useMora';
+import { useInteres }        from '../../hooks/useInteres';
 import { TarifaItem }        from '../../components/ui/SelectorTarifa';
 import { SeccionCredito, CREDITO_VACIO } from './SeccionCredito';
 import {
@@ -159,6 +160,7 @@ function buildPayloadFactura({ tipoCliente, form, items, totalNeto, metodosSelec
     // fecha el backend crea el crédito sin plazo y por tanto sin mora.
     fecha_limite:      credito.activo ? (credito.fecha_limite || null) : null,
     mora_condicion_id: credito.activo ? (credito.condicion_id || null) : null,
+    interes_plan_id:   credito.activo ? (credito.interes_plan_id || null) : null,
     vendedor_id:    vendedorId || null,
   };
 }
@@ -890,7 +892,8 @@ export function ModalFactura({ open, onClose }) {
 
   // Plazo de pago y mora. Apagada la feature, `activa` es false y el selector
   // de plazo no se renderiza.
-  const configMora = useMora();
+  const configMora    = useMora();
+  const configInteres = useInteres();
 
   const [facturaCreada,        setFacturaCreada]        = useState(null);
   const [mostrarImpresion,     setMostrarImpresion]     = useState(false);
@@ -1429,6 +1432,7 @@ export function ModalFactura({ open, onClose }) {
             credito={credito}
             totalNeto={totalNeto}
             configMora={configMora}
+            configInteres={configInteres}
             onChange={(nuevoCredito) => {
               setCredito(nuevoCredito);
               if (nuevoCredito.activo && !credito.activo) {

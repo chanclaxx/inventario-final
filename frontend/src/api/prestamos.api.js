@@ -66,14 +66,27 @@ export const modificarAbonoTotal = (abonoTotalId, valor_total, metodo) =>
 export const fijarPlazoPrestamo = (id, { fecha_limite, condicion_id }) =>
   api.patch(`/prestamos/${id}/plazo`, { fecha_limite, condicion_id });
 
-/** Cobra mora sin tocar el capital. Sin `valor` cobra todo lo pendiente. */
-export const cobrarMoraPrestamo = (id, { valor, metodo }) =>
-  api.post(`/prestamos/${id}/mora/cobrar`, { valor, metodo });
+/**
+ * Cobra un cargo financiero sin tocar el capital. Sin `valor` cobra todo lo
+ * pendiente. `concepto` distingue mora de interés — por defecto mora, para no
+ * cambiarle la conducta a las pantallas que ya existían.
+ */
+export const cobrarMoraPrestamo = (id, { valor, metodo, concepto = 'mora' }) =>
+  api.post(`/prestamos/${id}/mora/cobrar`, { valor, metodo, concepto });
 
 /**
- * Condona mora. Solo admin; exige motivo y PIN. Sin `valor` condona todo.
- * `quitar_plazo` además borra la fecha límite, para que no se vuelva a causar
- * mora (condonar solo perdona lo acumulado hasta hoy).
+ * Condona un cargo. Solo admin; exige motivo y PIN. Sin `valor` condona todo.
+ * `quitar_plazo` / `quitar_interes` además apagan el cargo hacia adelante:
+ * condonar solo perdona lo acumulado hasta hoy, y si el pacto sigue vivo mañana
+ * se vuelve a causar.
  */
-export const condonarMoraPrestamo = (id, { valor, motivo, pin, quitar_plazo }) =>
-  api.post(`/prestamos/${id}/mora/condonar`, { valor, motivo, pin, quitar_plazo });
+export const condonarMoraPrestamo = (id, { valor, motivo, pin, quitar_plazo, quitar_interes, concepto = 'mora' }) =>
+  api.post(`/prestamos/${id}/mora/condonar`, { valor, motivo, pin, quitar_plazo, quitar_interes, concepto });
+
+/**
+ * Fija, cambia o quita el plan de interés. `plan_id: null` lo quita.
+ * `desde` es opcional (por defecto hoy) y NUNCA puede ser anterior a hoy: el
+ * interés no se aplica hacia atrás.
+ */
+export const fijarInteresPrestamo = (id, { plan_id, desde }) =>
+  api.patch(`/prestamos/${id}/interes`, { plan_id, desde });

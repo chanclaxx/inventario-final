@@ -80,6 +80,40 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > esas claves son las mismas que arman `PrestamosPage` y `TabCreditos` al agrupar, así que
 > si cambian allá, los enlaces dejan de abrir la ficha.
 
+> **Cargos financieros — mora e interés** (`mora/`, `utils/devengo.util.js`,
+> `utils/mora.util.js`, `utils/interes.util.js`): dos cargos **independientes**
+> sobre créditos y préstamos. La **mora** sanciona el atraso (ancla: `fecha_limite`);
+> el **interés corriente** cobra el plazo (ancla: la entrega). Se puede tener uno,
+> el otro, los dos o ninguno — los interruptores son la ausencia de datos, no un
+> flag: `fecha_limite IS NULL` ⇒ nunca hay mora, `interes_condicion IS NULL` ⇒
+> nunca hay interés. Por eso las features son aditivas.
+> El cálculo de los dos sale del **mismo motor** (`devengo.util.calcularDevengo`),
+> que reconstruye tramos de saldo constante entre abonos: calcular sobre el saldo
+> de hoy haría **desaparecer** lo causado cuando el cliente salda el capital.
+> El interés soporta arranque diferido, periodicidad libre (diaria/semanal/
+> quincenal/mensual/cada N días), causación **proporcional al día o a escalón**
+> (`devengo: 'periodo_cumplido'` — "pasa el mes y sube 2% de una vez"), base
+> **saldo o valor original**, topes de períodos y porcentual, y qué hacer al
+> vencerse (`al_vencer: 'sustituye'` por defecto — el interés se detiene y entra
+> la mora, porque no se cobran plazo y mora sobre la misma suma y el mismo
+> período; `'continua'` los deja correr juntos). **Nunca capitaliza**: sería
+> anatocismo.
+> Los dos pactos se **congelan** en el documento (jsonb): subir la tasa en Ajustes
+> no toca lo ya otorgado. Lo pendiente se **deriva** siempre (causado − cobrado −
+> condonado); solo se escriben cobros y condonaciones, en `movimientos_mora`
+> discriminados por **`concepto`** (`'mora'` | `'interes'`).
+> **Ninguno entra jamás en `total_abonado`**: los reportes calculan la utilidad
+> como (abonado − costo) y los contarían como margen comercial. Son ingreso
+> financiero y salen en grupos propios de caja y reportes.
+> El abono se imputa en cascada **mora → interés → capital** (Art. 1653 C.C.), y
+> la obligación **no se cierra hasta que las tres cubetas estén en cero**.
+> Pruebas: `13-devengo-identidad` (el refactor del motor no cambió una cifra de
+> la mora — 12.566 corridas), `14-interes-corriente` (fórmula), `15-interes-integracion`
+> (cableado contra Postgres real). Las suites `09` y `10` siguen cubriendo la mora.
+> Cuidado con las fechas: `interes_desde`/`fecha_limite` son **DATE** (leer en UTC)
+> y `prestamos.fecha`/`creditos.creado_en` son **TIMESTAMP** (leer en Bogotá) —
+> confundirlos corre un día y ya mordió dos veces (`mora.service._inicioInteres`).
+
 > **Tesorería**: los saldos por cuenta (efectivo/banco/billetera/corresponsal/divisa USD) se **derivan** de las tablas transaccionales existentes mapeando método de pago → cuenta, anclados en arqueos. Solo traslados/retiros/gastos se escriben en `movimientos_dinero`. Si cambian las reglas de qué entra/sale en `caja.repository.js`, replicarlas en `tesoreria.repository.js` (ramas marcadas). Los movimientos de efectivo se espejan en `movimientos_caja` con `referencia_tipo='tesoreria'`. Un pago de compra desde Tesorería crea un **Abono espejo** en `movimientos_acreedor` (`registrar_en_caja=FALSE`, `mov_dinero_id`) que salda la deuda del acreedor sin doble descuento; anular el pago elimina/recrea el espejo en cascada.
 
 ### Frontend API Layer
@@ -102,7 +136,13 @@ Routes under `/api/reportes` and `/api/facturas` use **NetworkOnly** (always fre
 ### Database
 
 - PostgreSQL, timezone forced to `America/Bogota`.
-- Schema source of truth: `schema_v2.sql` at the project root.
+- **No hay un archivo único de esquema.** El esquema real se reconstruye entre
+  `backend/migrations/*.sql` (cambios incrementales, aplicados al arranque desde
+  `src/config/migrations.js`) y `backend/scripts/pruebas-red-interna/esquema.sql`
+  + `esquema-completo.sql`, que son fixtures **escritos a mano** para las pruebas.
+  Esos fixtures solo contienen las columnas que tocan las consultas bajo prueba y
+  pueden desviarse de producción: si dudas de una columna, créele a la migración,
+  no al fixture.
 - Billing states: `trial`, `mensual`, `premium`, `vencido`, `suspendido`.
 - A separate `superadmin` table exists for platform owners (distinct from `admin_negocio`).
 
