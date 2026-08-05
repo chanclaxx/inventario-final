@@ -387,6 +387,22 @@ nav button[data-active='true']::after {
   color: var(--text-main);
 }
 
+/* Contador de fotos en la tarjeta: la pista de que hay más adentro. */
+.card-fotos {
+  position: absolute;
+  bottom: 10px;
+  right: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 7px;
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--text-main);
+  font-size: 0.6rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
 .card-badge {
   position: absolute;
   top: 12px;
@@ -480,6 +496,16 @@ nav button[data-active='true']::after {
 .ficha-cuerpo { display: grid; grid-template-columns: 1fr; }
 @media (min-width: 700px) { .ficha-cuerpo { grid-template-columns: 1fr 1fr; } }
 
+/* ── Galería de la ficha ──────────────────────────────────────────────────
+   El desplazamiento es nativo (scroll-snap). Todo lo demás de esta sección
+   existe para SEÑALIZAR que hay más de una foto: sin contador, miniaturas ni
+   flechas, una tira que se desplaza sin barra visible parece una sola imagen. */
+.galeria-marco { display: flex; flex-direction: column; }
+/* El visor ancla el contador y las flechas. Va aparte del marco a propósito:
+   si colgaran del marco, la tira de miniaturas correría el centro vertical y
+   las flechas quedarían por debajo de la imagen. */
+.galeria-visor { position: relative; }
+
 .galeria {
   display: flex;
   overflow-x: auto;
@@ -488,6 +514,7 @@ nav button[data-active='true']::after {
   scrollbar-width: none;
 }
 .galeria::-webkit-scrollbar { display: none; }
+.galeria:focus-visible { outline: 2px solid var(--accent-color); outline-offset: -2px; }
 .galeria img {
   flex: 0 0 100%;
   scroll-snap-align: center;
@@ -500,6 +527,64 @@ nav button[data-active='true']::after {
   display: flex; align-items: center; justify-content: center;
   color: #c4c4c4; font-size: 0.65rem; letter-spacing: 1px; text-transform: uppercase;
 }
+
+.galeria-contador {
+  position: absolute;
+  top: 12px; left: 12px;
+  padding: 4px 9px;
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--text-main);
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  pointer-events: none;
+}
+
+.galeria-flecha {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 34px; height: 34px;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--text-main);
+  font-size: 1.4rem;
+  line-height: 1;
+  transition: opacity 0.15s;
+}
+.galeria-flecha[data-lado='izq'] { left: 10px; }
+.galeria-flecha[data-lado='der'] { right: 10px; }
+.galeria-flecha:disabled { opacity: 0; pointer-events: none; }
+.galeria-flecha:hover:not(:disabled) { background: #fff; }
+
+/* En pantallas táctiles las flechas estorban: ahí se arrastra con el dedo y las
+   miniaturas ya indican cuántas fotos hay. */
+@media (hover: none) {
+  .galeria-flecha { display: none; }
+}
+
+.miniaturas {
+  display: flex;
+  gap: 6px;
+  padding: 8px;
+  background: var(--card-bg);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.miniaturas::-webkit-scrollbar { display: none; }
+
+.miniatura {
+  flex: 0 0 auto;
+  width: 46px; height: 46px;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid transparent;
+  opacity: 0.55;
+  transition: opacity 0.15s, border-color 0.15s;
+}
+.miniatura img { width: 100%; height: 100%; object-fit: cover; mix-blend-mode: multiply; }
+.miniatura:hover { opacity: 0.85; }
+.miniatura[data-activa='true'] { opacity: 1; border-color: var(--accent-color); }
 
 .ficha-datos { padding: 34px 30px 30px; display: flex; flex-direction: column; gap: 12px; }
 .ficha-datos .marca {

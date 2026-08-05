@@ -884,41 +884,78 @@ faltan cinco pasos de infraestructura, ninguno de código.
 
 ### 14.1 Crear el bucket en Cloudflare R2 · **obligatorio para fotos**
 
-1. Cuenta en Cloudflare → **R2** → **Create bucket**, nombre `catalogo`.
-2. **R2 → Manage API Tokens → Create API Token**, con permiso *Object Read &
-   Write* sobre ese bucket. Anota `Access Key ID` y `Secret Access Key` (el
-   secreto se muestra **una sola vez**).
-3. Anota tu **Account ID** (aparece en el panel de R2).
-4. **Exponer el bucket públicamente.** Los objetos de R2 no son públicos por sí
-   solos. En **Settings del bucket → Public access → Custom domain**, conecta un
-   subdominio, por ejemplo `fotos.tudominio.com`. Requiere que el dominio esté
-   gestionado por Cloudflare.
+1. Cuenta en [dash.cloudflare.com](https://dash.cloudflare.com). No hace falta
+   agregar ningún sitio.
+2. **Storage & databases → R2 → Overview**. Completa el flujo de checkout para
+   agregar la suscripción de R2, eligiendo el plan **gratuito**.
 
-> ⚠️ **No uses la URL `r2.dev`.** Cloudflare la limita a propósito y no está
-> pensada para producción.
+   > Pide método de pago aunque el tier gratuito no cobre. Con 10 GB de
+   > almacenamiento y **cero cargo por salida**, el catálogo proyectado
+   > (~3,6 GB, §9.3) no llega a facturar.
 
-Sin esto, publicar productos funciona; subir fotos devuelve un 503 con un
-mensaje explícito y la interfaz avisa antes de dejar intentarlo.
+3. **Create bucket**, nombre **`catalogo`** (minúsculas, exacto: es el valor por
+   defecto que espera el código). Location *Automatic*.
+4. **Token de API.** En la página de R2 → panel **Account Details** → junto a
+   **API Tokens**, **Manage** → **Create Account API token** → permisos
+   **Object Read and Write**, limitado al bucket `catalogo`.
+
+   > El **Secret Access Key** se muestra **una sola vez**. Cópialo enseguida.
+
+5. **Account ID.** Está en ese mismo panel **Account Details**, y también dentro
+   del endpoint que muestra: `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`.
+
+6. **Exponer el bucket públicamente.** Los objetos de R2 no son públicos por sí
+   solos. Hay dos caminos:
+
+   **a) Sin dominio (gratis) — Public Development URL:**
+   bucket → **Settings** → **Public Development URL** → **Enable** → escribe
+   `allow` para confirmar. Queda una URL tipo `https://pub-<hash>.r2.dev`.
+
+   > Cloudflare la limita por tasa y la documenta como "solo para desarrollo".
+   > Sirve para arrancar y para los primeros clientes. La señal de que se quedó
+   > corta es que las fotos tarden o fallen cuando varias personas abren el
+   > catálogo a la vez. Juega a favor que las fotos se sirven con
+   > `Cache-Control: immutable` a un año y nombre con UUID, así que la CDN las
+   > cachea y las visitas repetidas casi no tocan el origen.
+
+   **b) Con dominio propio — Custom Domain (recomendado a futuro):**
+   bucket → **Settings** → **Custom Domains** → **Add** → `fotos.tudominio.com`
+   → **Continue** → **Connect Domain**. Requiere el dominio en Cloudflare.
+   Cloudflare Registrar los vende a precio de costo y el dominio queda ya dentro
+   de su DNS, sin tocar nameservers.
+
+   Migrar de (a) a (b) después es solo cambiar `R2_PUBLIC_URL`: las fotos ya
+   subidas se quedan donde están y solo cambia el prefijo de su URL.
 
 ### 14.2 Variables de entorno del backend (Railway)
 
 ```
-R2_ACCOUNT_ID=<tu account id de Cloudflare>
-R2_ACCESS_KEY_ID=<del token de R2>
-R2_SECRET_ACCESS_KEY=<del token de R2>
-R2_PUBLIC_URL=https://fotos.tudominio.com    # ← tu dominio real, ver §14.6
-R2_BUCKET=catalogo          # opcional, es el valor por defecto
+R2_ACCOUNT_ID=<Account ID del paso 5>
+R2_ACCESS_KEY_ID=<del token del paso 4>
+R2_SECRET_ACCESS_KEY=<del token del paso 4>
+R2_PUBLIC_URL=https://pub-<hash>.r2.dev     # o https://fotos.tudominio.com
+R2_BUCKET=catalogo                          # opcional, es el valor por defecto
 ```
 
 Las cuatro primeras son obligatorias: si falta cualquiera, el módulo de imágenes
 se apaga entero en vez de dejar fotos subidas que nadie puede ver.
 
+> ⚠️ **El error más común:** poner en `R2_PUBLIC_URL` el endpoint
+> `...r2.cloudflarestorage.com`. Ese es para **subir**, no para **ver**. Ahí va
+> la URL pública del paso 6.
+
 > `SUPABASE_URL` / `SUPABASE_SERVICE_KEY` **no** se usan para el catálogo. Siguen
 > siendo del módulo de backup.
 
-> ⚠️ **En todo este runbook, `tudominio.com` es un MARCADOR DE POSICIÓN.**
-> No lo copies literal: es un dominio de otra persona. Sustitúyelo por tu dominio
-> real, o usa la URL gratuita de Vercel — ver §14.6.
+**Verificar sin tocar la app:**
+
+```bash
+cd backend
+node scripts/probar-r2.js
+```
+
+Sube un PNG de 1×1, comprueba que la URL pública responde y lo borra. Ante un
+fallo dice qué variable revisar en vez de soltar un error críptico del SDK.
 
 ### 14.3 Desplegar la app pública en Vercel
 
@@ -1021,8 +1058,8 @@ para tráfico real. Dos salidas:
 
 | Camino | Cuándo sirve |
 |---|---|
-| Publicar **sin fotos** por ahora | Funciona hoy, sin configurar nada. La ficha muestra nombre, precio, línea, marca y descripción. Es lo que recomiendo para empezar. |
-| Usar la URL `r2.dev` en `R2_PUBLIC_URL` | Solo para probar el flujo de subida con unas pocas visitas. **No dejarlo así en producción.** |
+| **Public Development URL de R2** (`pub-<hash>.r2.dev`) | Gratis, sin comprar nada, y las fotos funcionan. Limitada por tasa: sirve para arrancar y para los primeros clientes. **Es el camino elegido.** Ver §14.1 paso 6a. |
+| Publicar **sin fotos** | Funciona sin configurar R2 en absoluto. La ficha muestra nombre, precio, línea, marca y descripción. |
 
 Un dominio cuesta del orden de USD 10-12 al año y desbloquea las dos cosas a la
 vez: una URL decente para el catálogo y el dominio de R2 para las fotos. Es la

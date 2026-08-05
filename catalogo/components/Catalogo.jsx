@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Vitrina pública — estilo editorial minimalista, adaptado de Template.html.
@@ -109,6 +109,19 @@ function Tarjeta({ producto, numero, onAbrir }) {
         {portada
           ? <img src={portada.url} alt={portada.alt || producto.nombre} loading="lazy" />
           : <div className="sin-foto">Sin foto</div>}
+
+        {/* Avisa que hay más fotos ANTES de abrir la ficha: si no, nadie sabe
+            que vale la pena entrar a mirar. */}
+        {producto.imagenes?.length > 1 && (
+          <span className="card-fotos">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none"
+                 stroke="currentColor" strokeWidth="2.5" aria-hidden="true">
+              <rect x="8" y="3" width="13" height="13" rx="2" />
+              <path d="M4 8v11a2 2 0 0 0 2 2h11" />
+            </svg>
+            {producto.imagenes.length}
+          </span>
+        )}
       </div>
 
       <div className="product-info">
@@ -130,6 +143,115 @@ function Tarjeta({ producto, numero, onAbrir }) {
   );
 }
 
+// ── Galería ─────────────────────────────────────────────────────────────────
+//
+// El desplazamiento horizontal es nativo (scroll-snap): en el celular se
+// arrastra con el dedo, con inercia y sin código de gestos propio, que es donde
+// siempre aparecen los bugs raros.
+//
+// Lo que se agrega encima es SEÑALIZACIÓN. Una tira que se desplaza sin barra
+// visible no le dice a nadie que hay más fotos: el contador, las miniaturas y
+// las flechas existen para que se note que se puede seguir.
+function Galeria({ imagenes, nombre }) {
+  const [activa, setActiva] = useState(0);
+  const pista = useRef(null);
+
+  if (!imagenes?.length) {
+    return (
+      <div className="galeria-marco">
+        <div className="galeria-visor">
+          <div className="galeria"><div className="sin-foto">Sin foto</div></div>
+        </div>
+      </div>
+    );
+  }
+
+  const varias = imagenes.length > 1;
+
+  const irA = (i) => {
+    const el = pista.current;
+    if (!el) return;
+    const destino = Math.max(0, Math.min(i, imagenes.length - 1));
+    el.scrollTo({ left: destino * el.clientWidth, behavior: 'smooth' });
+    setActiva(destino);
+  };
+
+  // La posición real manda: si el usuario arrastró con el dedo, el índice se
+  // deduce de dónde quedó el scroll, no de lo que creíamos nosotros.
+  const alDesplazar = () => {
+    const el = pista.current;
+    if (!el || !el.clientWidth) return;
+    const i = Math.round(el.scrollLeft / el.clientWidth);
+    const acotado = Math.max(0, Math.min(i, imagenes.length - 1));
+    if (acotado !== activa) setActiva(acotado);
+  };
+
+  return (
+    <div className="galeria-marco">
+      {/* El visor es el contexto de posicionamiento del contador y las flechas:
+          si colgaran del marco, las miniaturas correrían el centro y las
+          flechas quedarían por debajo de la imagen. */}
+      <div className="galeria-visor">
+      <div
+        className="galeria"
+        ref={pista}
+        onScroll={alDesplazar}
+        tabIndex={varias ? 0 : -1}
+        onKeyDown={(e) => {
+          if (e.key === 'ArrowRight') { e.preventDefault(); irA(activa + 1); }
+          if (e.key === 'ArrowLeft')  { e.preventDefault(); irA(activa - 1); }
+        }}
+        aria-label={varias ? `Galería de ${nombre}, ${imagenes.length} fotos` : undefined}
+      >
+        {imagenes.map((img, i) => (
+          <img
+            key={i}
+            src={img.url}
+            alt={img.alt || `${nombre} — foto ${i + 1}`}
+            loading={i === 0 ? 'eager' : 'lazy'}
+          />
+        ))}
+      </div>
+
+      {varias && (
+        <>
+          <span className="galeria-contador">{activa + 1} / {imagenes.length}</span>
+
+          <button
+            className="galeria-flecha" data-lado="izq"
+            onClick={() => irA(activa - 1)}
+            disabled={activa === 0}
+            aria-label="Foto anterior"
+          >‹</button>
+          <button
+            className="galeria-flecha" data-lado="der"
+            onClick={() => irA(activa + 1)}
+            disabled={activa === imagenes.length - 1}
+            aria-label="Foto siguiente"
+          >›</button>
+        </>
+      )}
+      </div>
+
+      {varias && (
+        <div className="miniaturas">
+          {imagenes.map((img, i) => (
+            <button
+              key={i}
+              className="miniatura"
+              data-activa={i === activa}
+              onClick={() => irA(i)}
+              aria-label={`Ver foto ${i + 1}`}
+            >
+              <img src={img.url} alt="" loading="lazy" />
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Ficha ───────────────────────────────────────────────────────────────────
 function Ficha({ producto, whatsapp, onCerrar }) {
   const wa = enlaceWhatsApp(whatsapp, producto);
@@ -140,13 +262,7 @@ function Ficha({ producto, whatsapp, onCerrar }) {
         <button className="cerrar" onClick={onCerrar} aria-label="Cerrar">×</button>
 
         <div className="ficha-cuerpo">
-          <div className="galeria">
-            {producto.imagenes?.length
-              ? producto.imagenes.map((img, i) => (
-                  <img key={i} src={img.url} alt={img.alt || producto.nombre} />
-                ))
-              : <div className="sin-foto">Sin foto</div>}
-          </div>
+          <Galeria imagenes={producto.imagenes} nombre={producto.nombre} />
 
           <div className="ficha-datos">
             {producto.marca && <span className="marca">{producto.marca}</span>}
