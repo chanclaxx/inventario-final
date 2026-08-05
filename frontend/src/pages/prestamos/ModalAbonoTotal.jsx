@@ -8,7 +8,6 @@ import { formatCOP }   from '../../utils/formatters';
 import { registrarAbonoTotal, modificarAbonoTotal } from '../../api/prestamos.api';
 import { useMetodosPago } from '../../hooks/useMetodosPago';
 import { CheckCircle, ArrowRight, Calculator, Pencil } from 'lucide-react';
-import { MODOS_ABONO } from '../../utils/mora';
 
 // Simula la distribución FIFO igual que el backend.
 //
@@ -16,16 +15,24 @@ import { MODOS_ABONO } from '../../utils/mora';
 // es la suma de los tres. Contar solo el capital (o solo capital + mora) haría
 // que la pantalla rechazara un pago que el backend sí acepta.
 //
-// `modo` decide, dentro de cada préstamo, cuánto va a los cargos — el mismo
-// reparto en cascada que hace el backend (mora → interés → capital), para que lo
-// que se ve en pantalla sea exactamente lo que se va a registrar.
-const _repartir = (abono, mora, interes, saldo, modo) => {
-  const aMora    = modo === 'solo_capital' ? 0 : Math.min(mora, abono);
-  const aInteres = modo === 'solo_capital' ? 0 : Math.min(interes, abono - aMora);
-  return { aMora, aInteres, aCapital: Math.min(saldo, abono - aMora - aInteres) };
+// ORDEN, decidido por el negocio: en CADA préstamo se cubre primero el producto
+// y después sus cargos, y solo entonces se pasa al siguiente. Es el mismo
+// reparto que hace el backend (`modo: 'capital_primero'`), para que lo que se ve
+// en pantalla sea exactamente lo que se va a registrar.
+//
+// El Art. 1653 del Código Civil pone los intereses antes que el capital, pero
+// admite pacto en contrario y este orden favorece al deudor: le baja la deuda
+// antes. Es el que el negocio le explica al cliente.
+const MODO_TOTAL = 'capital_primero';
+
+const _repartir = (abono, mora, interes, saldo) => {
+  const aCapital = Math.min(saldo, abono);
+  const aMora    = Math.min(mora, abono - aCapital);
+  const aInteres = Math.min(interes, abono - aCapital - aMora);
+  return { aMora, aInteres, aCapital };
 };
 
-function simularDistribucion(prestamosActivos, valorTotal, modo = 'mora_capital') {
+function simularDistribucion(prestamosActivos, valorTotal) {
   let remaining = valorTotal;
   return prestamosActivos
     .filter((p) => p.estado === 'Activo')
@@ -38,7 +45,7 @@ function simularDistribucion(prestamosActivos, valorTotal, modo = 'mora_capital'
       if (debe <= 0 || remaining <= 0) return null;
       const abono = Math.min(remaining, debe);
       remaining  -= abono;
-      const { aMora, aInteres, aCapital } = _repartir(abono, mora, interes, saldo, modo);
+      const { aMora, aInteres, aCapital } = _repartir(abono, mora, interes, saldo);
       return { prestamo: p, abono, saldo, mora, interes, aMora, aInteres, aCapital, saldado: aCapital >= saldo };
     })
     .filter(Boolean);
@@ -58,7 +65,6 @@ export function ModalAbonoTotal({ nombre, tipo, personaId, prestamos, onClose, m
   const [mostrarCalc, setMostrarCalc] = useState(false);
   // Reparto mora/capital dentro de cada préstamo, y distribución manual entre
   // préstamos: { [prestamo_id]: valor }. `ajustada` la activa el vendedor.
-  const [modo,     setModo]     = useState('mora_capital');
   const [ajustada, setAjustada] = useState(false);
   const [manual,   setManual]   = useState({});
 
@@ -85,7 +91,7 @@ export function ModalAbonoTotal({ nombre, tipo, personaId, prestamos, onClose, m
   // Distribución sugerida (FIFO del más viejo). Si el vendedor la ajusta, manda
   // lo que él puso: el negocio pidió poder pactarlo con el cliente en el momento
   // del pago para evitar inconvenientes.
-  const sugerida = valorNum > 0 ? simularDistribucion(prestamosActivos, valorNum, modo) : [];
+  const sugerida = valorNum > 0 ? simularDistribucion(prestamosActivos, valorNum) : [];
   const distribucion = ajustada
     ? prestamosActivos
         .map((p) => {
@@ -93,7 +99,7 @@ export function ModalAbonoTotal({ nombre, tipo, personaId, prestamos, onClose, m
           const mora    = Number(p.mora?.pendiente || 0);
           const interes = Number(p.interes?.pendiente || 0);
           const abono   = Math.max(0, Number(manual[p.id] ?? 0));
-          const { aMora, aInteres, aCapital } = _repartir(abono, mora, interes, saldo, modo);
+          const { aMora, aInteres, aCapital } = _repartir(abono, mora, interes, saldo);
           return { prestamo: p, abono, saldo, mora, interes, aMora, aInteres, aCapital, saldado: aCapital >= saldo && saldo > 0 };
         })
         .filter((d) => d.abono > 0 || d.saldo + d.mora + d.interes > 0)
@@ -110,7 +116,7 @@ export function ModalAbonoTotal({ nombre, tipo, personaId, prestamos, onClose, m
     mutationFn: () =>
       mode === 'crear'
         ? registrarAbonoTotal(tipoApi, personaId, valorNum, metodo, {
-            modo,
+            modo: MODO_TOTAL,
             ...(ajustada && { distribucion_manual: manual }),
           })
         : modificarAbonoTotal(abonoTotalId, valorNum, metodo),
@@ -179,26 +185,28 @@ export function ModalAbonoTotal({ nombre, tipo, personaId, prestamos, onClose, m
         </p>
 
         {/* Reparto mora/capital. Solo si alguno de los préstamos tiene mora. */}
-        {mode === 'crear' && totalMora > 0 && (
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-medium text-gray-700">¿A qué se aplica el pago?</span>
-              <span className="text-xs text-amber-600 font-medium">
-                mora total: {formatCOP(totalMora)}
-              </span>
+        {/* Cómo se aplica el pago. No es una decisión del vendedor: el orden lo
+            fijó el negocio (producto y luego intereses, préstamo por préstamo),
+            así que aquí solo se explica para que sepa qué va a pasar. */}
+        {(totalMora + totalInteres) > 0 && (
+          <div className="flex flex-col gap-1.5 bg-blue-50 border border-blue-100 rounded-xl px-3 py-2.5">
+            <p className="text-[11px] font-medium text-blue-800">Cómo se reparte</p>
+            <p className="text-[11px] text-blue-700">
+              Se empieza por el préstamo más viejo: primero se paga el producto y después
+              sus intereses, y recién ahí se pasa al siguiente.
+            </p>
+            <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-0.5">
+              {totalInteres > 0 && (
+                <span className="text-[11px] text-teal-700">
+                  Interés total: <strong>{formatCOP(totalInteres)}</strong>
+                </span>
+              )}
+              {totalMora > 0 && (
+                <span className="text-[11px] text-amber-700">
+                  Mora total: <strong>{formatCOP(totalMora)}</strong>
+                </span>
+              )}
             </div>
-            <div className="flex gap-1 bg-gray-100 p-1 rounded-xl">
-              {MODOS_ABONO.filter((o) => o.id !== 'personalizado').map((o) => (
-                <button key={o.id} type="button" onClick={() => setModo(o.id)}
-                  className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-medium transition-all
-                    ${modo === o.id ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}>
-                  {o.label}
-                </button>
-              ))}
-            </div>
-            <span className="text-[11px] text-gray-400">
-              {MODOS_ABONO.find((o) => o.id === modo)?.descripcion}
-            </span>
           </div>
         )}
 

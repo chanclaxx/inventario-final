@@ -292,45 +292,80 @@ const condonarMora = (negocioId, prestamoId, datos) =>
   moraService.condonar(negocioId, 'prestamo', prestamoId, datos);
 
 /**
- * Cobra SOLO un cargo financiero (mora o interés), sin tocar el capital.
+ * Qué cargos entran en un cobro, según el `concepto` pedido.
+ *
+ * 'todos' es lo que usa el botón "cobrar lo que falta": el cliente terminó de
+ * pagar el producto y quiere cerrar la deuda de una, sin que el vendedor tenga
+ * que adivinar cuánto era de mora y cuánto de interés.
+ */
+const _cargosObjetivo = (concepto, mora, interes) => {
+  const vivos = [
+    { concepto: 'mora',    cargo: mora },
+    { concepto: 'interes', cargo: interes },
+  ].filter((o) => o.cargo?.aplica && o.cargo.pendiente > 0);
+
+  if (concepto === 'todos') return vivos;
+  return vivos.filter((o) => o.concepto === concepto);
+};
+
+/** Mensaje de error que explica POR QUÉ no hay nada que cobrar. */
+const _mensajeSinCargo = (concepto, mora, interes, doc) => {
+  if (concepto === 'interes') {
+    return interes?.aplica ? 'No hay interés pendiente por cobrar'
+      : `Este ${doc} no tiene interés pactado`;
+  }
+  if (concepto === 'mora') {
+    return mora?.aplica ? 'No hay mora pendiente por cobrar'
+      : `Este ${doc} no tiene plazo ni mora pactada`;
+  }
+  return 'No hay intereses ni mora pendientes por cobrar';
+};
+
+/**
+ * Cobra cargos financieros (mora, interés o los dos) sin tocar el capital.
  *
  * Es el camino por el que se pagan los intereses, y desde que capital y cargos
  * son deudas separadas también es el que cierra el préstamo cuando el producto
  * ya estaba pagado y lo único que faltaba era el cargo.
  *
- * `concepto` por defecto es 'mora' para no cambiarle la conducta a los
- * llamadores que existían antes del interés corriente.
+ * `concepto`: 'mora' (por defecto, para no cambiarle la conducta a los
+ * llamadores anteriores) · 'interes' · 'todos'.
  */
 const cobrarMora = async (negocioId, prestamoId, { valor, metodo, usuario_id, concepto = 'mora' }) => {
-  const esInteres = concepto === 'interes';
-  const nombre    = esInteres ? 'interés' : 'mora';
-
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     const { documento, mora, interes } = await moraService.estadoDe('prestamo', prestamoId, negocioId, client);
-    const cargo = esInteres ? interes : mora;
 
-    if (!cargo.aplica) {
+    const objetivos = _cargosObjetivo(concepto, mora, interes);
+    if (!objetivos.length) {
+      throw { status: 400, message: _mensajeSinCargo(concepto, mora, interes, 'préstamo') };
+    }
+
+    const totalPendiente = objetivos.reduce((s, o) => s + o.cargo.pendiente, 0);
+    const aCobrar = valor == null || valor === '' ? totalPendiente : Math.round(Number(valor));
+    if (!(aCobrar > 0)) throw { status: 400, message: 'El valor a cobrar debe ser mayor a 0' };
+    if (aCobrar > totalPendiente) {
       throw {
         status: 400,
-        message: esInteres
-          ? 'Este préstamo no tiene interés pactado'
-          : 'Este préstamo no tiene plazo ni mora pactada',
+        message: `No puedes cobrar más de lo pendiente ($${totalPendiente.toLocaleString('es-CO')})`,
       };
     }
-    if (cargo.pendiente <= 0) throw { status: 400, message: `No hay ${nombre} pendiente por cobrar` };
 
-    const aCobrar = valor == null || valor === '' ? cargo.pendiente : Math.round(Number(valor));
-    if (!(aCobrar > 0)) throw { status: 400, message: 'El valor a cobrar debe ser mayor a 0' };
-    if (aCobrar > cargo.pendiente) {
-      throw { status: 400, message: `No puedes cobrar más de ${esInteres ? 'el interés' : 'la mora'} pendiente ($${cargo.pendiente.toLocaleString('es-CO')})` };
+    // Se reparte entre los cargos en orden: la mora antes que el interés. Todo
+    // dentro de la MISMA transacción, para que un cobro conjunto no pueda
+    // quedar a medias.
+    let restante = aCobrar;
+    const movimientos = [];
+    for (const { concepto: conc, cargo } of objetivos) {
+      const parte = Math.min(cargo.pendiente, restante);
+      if (parte <= 0) continue;
+      restante -= parte;
+      movimientos.push(await moraService.registrarCobroEnTx(client, {
+        tipo: 'prestamo', documento, negocioId, concepto: conc,
+        valor: parte, metodo, usuarioId: usuario_id, estadoMora: cargo,
+      }));
     }
-
-    const mov = await moraService.registrarCobroEnTx(client, {
-      tipo: 'prestamo', documento, negocioId, concepto,
-      valor: aCobrar, metodo, usuarioId: usuario_id, estadoMora: cargo,
-    });
 
     // Si con este cobro ya no se debe nada, el préstamo queda saldado y se
     // genera su factura: es el momento en que el cliente terminó de pagar.
@@ -340,7 +375,9 @@ const cobrarMora = async (negocioId, prestamoId, { valor, metodo, usuario_id, co
 
     const despues = await moraService.estadoDe('prestamo', prestamoId, negocioId);
     return {
-      movimiento: mov, mora: despues.mora, interes: despues.interes,
+      movimiento: movimientos[0] ?? null, movimientos,
+      cobrado: aCobrar,
+      mora: despues.mora, interes: despues.interes,
       saldado: cierre.saldado, factura_id: cierre.factura_id,
     };
   } catch (err) {
@@ -602,9 +639,21 @@ const registrarAbono = async (
       modo: modoEfectivo, valor_mora: valorMora, valor_interes: valorInteres,
     });
 
-    // El tope es capital + los dos cargos: antes rechazaba cualquier pago que
-    // los incluyera, porque no los conocía.
+    // El tope depende del modo, y el mensaje tiene que decir POR QUÉ sobró.
+    // Con 'solo_capital' (el del botón de abonar) el tope es el producto: los
+    // cargos se cobran con su propio botón, así que decir "capital + mora +
+    // interés" ahí confundiría — el vendedor creería que puede pagarlo todo
+    // desde esta pantalla.
     if (reparto.excedente > 0) {
+      if (modoEfectivo === 'solo_capital') {
+        throw {
+          status: 400,
+          message: `El abono supera el saldo del producto ($${Math.round(saldo_capital).toLocaleString('es-CO')}).`
+            + (cargosPendientes > 0
+              ? ` Los intereses ($${Math.round(cargosPendientes).toLocaleString('es-CO')}) se cobran con el botón de cobrar del préstamo.`
+              : ''),
+        };
+      }
       const total = saldo_capital + cargosPendientes;
       throw {
         status: 400,
@@ -1650,9 +1699,15 @@ const editarValorPrestamo = async (negocioId, prestamoId, nuevoValor) => {
 // del más viejo al más nuevo. `distribucion_manual` permite que el vendedor
 // ajuste cuánto va a cada préstamo (el negocio pidió poder pactarlo con el
 // cliente en el momento del pago para evitar inconvenientes).
+// ORDEN DEL ABONO TOTAL, decidido por el negocio: se recorren los préstamos del
+// más viejo al más nuevo (FIFO) y en CADA UNO se cubre primero el producto y
+// después sus cargos, antes de pasar al siguiente. Es distinto del orden legal
+// supletivo (Art. 1653: intereses antes que capital), pero el Art. 1653 admite
+// pacto en contrario y este orden favorece al deudor —le baja la deuda antes—,
+// así que es exigible y es el que el negocio le explica al cliente.
 const registrarAbonoTotal = async (
   negocioId, tipo, personaId, valorTotal, metodo, usuarioId, sucursalId,
-  { modo = 'mora_capital', distribucion_manual = null } = {},
+  { modo = 'capital_primero', distribucion_manual = null } = {},
 ) => {
   if (tipo === 'prestatario') await _verificarPrestatario(personaId, negocioId);
   else await _verificarCliente(personaId, negocioId);

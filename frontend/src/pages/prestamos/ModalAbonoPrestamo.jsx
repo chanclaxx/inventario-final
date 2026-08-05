@@ -80,17 +80,17 @@ export function ModalAbonoPrestamo({ prestamo, onClose }) {
   const [pantalla,   setPantalla]= useState('abono'); // 'abono' | 'confirmar' | 'imprimir' | 'pos'
   const [facturaId,  setFacturaId]  = useState(null);
   const [datosPos,   setDatosPos]   = useState(null); // { factura, garantias }
-  // Imputación del abono cuando el préstamo tiene mora pendiente. Por defecto
-  // el abono paga SOLO el producto: la mora se cobra aparte y es lo último que
-  // cierra el préstamo.
-  const [modo,      setModo]      = useState('solo_capital');
-  const [valorMora, setValorMora] = useState('');
-  const [valorInteres, setValorInteres] = useState('');
+  // El abono paga SIEMPRE el producto y nada más. Los intereses y la mora se
+  // cobran con el botón de cobrar de la tarjeta del préstamo, donde el vendedor
+  // escribe cuánto recibe. Tener dos cosas en el mismo botón era justo lo que
+  // hacía que el vendedor no supiera en qué se convirtió el pago.
+  const MODO_ABONO = 'solo_capital';
   // Datos para el recibo de abono con desglose capital/mora.
   const [datosRecibo, setDatosRecibio] = useState(null);
-  // Mora que queda debiéndose cuando el abono ya cubrió todo el producto: es lo
-  // único que impide cerrar el préstamo, y se ofrece cobrarla ahí mismo.
-  const [moraRestante, setMoraRestante] = useState(0);
+  // Cargos que quedan debiéndose cuando el abono ya cubrió todo el producto: es
+  // lo único que impide cerrar el préstamo, y se ofrece cobrarlos ahí mismo.
+  // Se guardan separados para poder mostrar el desglose.
+  const [restante, setRestante] = useState({ mora: 0, interes: 0, total: 0 });
 
   // Config del negocio para los parámetros de la impresora térmica. Se pide
   // aquí y no dentro de useFacturaSaldada porque ese solo carga si hubo factura,
@@ -111,9 +111,7 @@ export function ModalAbonoPrestamo({ prestamo, onClose }) {
 
   const mutation = useMutation({
     mutationFn: () => registrarAbonoPrestamo(prestamo.id, Number(valor), metodo, color || null, {
-      modo,
-      valor_mora:    modo === 'personalizado' ? Number(valorMora || 0)    : 0,
-      valor_interes: modo === 'personalizado' ? Number(valorInteres || 0) : 0,
+      modo: MODO_ABONO,
     }),
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ['prestamos'], exact: false });
@@ -150,14 +148,17 @@ export function ModalAbonoPrestamo({ prestamo, onClose }) {
         // Pequeño delay para que React procese el estado antes de cambiar pantalla
         setTimeout(() => setPantalla('confirmar'), 0);
       } else if (data?.solo_falta_mora) {
-        // El producto quedó pagado pero la mora sigue debiéndose: el préstamo
-        // NO se cierra por eso, así que se ofrece cobrarla en el mismo paso.
-        setMoraRestante(Number(data?.mora?.pendiente ?? 0));
+        // El producto quedó pagado pero quedan cargos: el préstamo NO se cierra
+        // por eso, así que se ofrece cobrarlos en el mismo paso.
+        const m = Number(data?.mora?.pendiente ?? 0);
+        const i = Number(data?.interes?.pendiente ?? 0);
+        setRestante({ mora: m, interes: i, total: m + i });
         setPantalla('falta_mora');
       } else {
-        // Si hubo mora en el pago, se ofrece el recibo con el desglose; si no,
-        // el flujo queda igual que antes (se cierra sin fricción).
-        if (Number(data?.abonado_mora ?? 0) > 0) setPantalla('recibo');
+        // Si el pago tocó algún cargo, se ofrece el recibo con el desglose; si
+        // no, el flujo queda igual que antes (se cierra sin fricción).
+        const toco = Number(data?.abonado_mora ?? 0) + Number(data?.abonado_interes ?? 0);
+        if (toco > 0) setPantalla('recibo');
         else onClose();
       }
     },
@@ -167,7 +168,9 @@ export function ModalAbonoPrestamo({ prestamo, onClose }) {
   // Cobro de la mora que quedó tras el abono. Es lo que cierra el préstamo y
   // dispara la factura, así que reusa el mismo flujo de impresión.
   const mutCobrarMora = useMutation({
-    mutationFn: () => cobrarMoraPrestamo(prestamo.id, { valor: null, metodo }),
+    // `concepto: 'todos'` cobra mora e interés en UNA transacción del backend:
+    // dos llamadas seguidas podrían dejar la deuda a medias si la segunda falla.
+    mutationFn: () => cobrarMoraPrestamo(prestamo.id, { valor: null, metodo, concepto: 'todos' }),
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ['prestamos'],     exact: false });
       queryClient.invalidateQueries({ queryKey: ['facturas'],      exact: false });
@@ -181,50 +184,25 @@ export function ModalAbonoPrestamo({ prestamo, onClose }) {
         onClose();
       }
     },
-    onError: (err) => setError(err.response?.data?.error || 'No se pudo cobrar la mora'),
+    onError: (err) => setError(err.response?.data?.error || 'No se pudo cobrar'),
   });
 
-  // Un préstamo solo se salda cuando NO se debe nada: producto y mora. Si este
-  // abono va a cubrir el producto pero deja mora, se avisa ANTES de registrar
-  // para que el vendedor sepa que el préstamo seguirá abierto (y que la factura
-  // se generará al cobrar esa mora, no ahora).
-  // Reparto previsto (mora -> interes -> capital), replica del backend SOLO
-  // para avisar antes de registrar. El reparto real lo hace el servidor.
-  const repartoPrevisto = (() => {
-    const v = Number(valor || 0);
-    if (v <= 0) return { a_mora: 0, a_interes: 0, a_capital: 0 };
-    let aMora = 0, aInteres = 0;
-    if (modo === 'solo_capital') {
-      aMora = 0; aInteres = 0;
-    } else if (modo === 'personalizado') {
-      aMora    = Math.min(Number(valorMora || 0), moraPendiente, v);
-      aInteres = Math.min(Number(valorInteres || 0), interesPendiente, v - aMora);
-    } else {
-      aMora    = Math.min(moraPendiente, v);
-      aInteres = Math.min(interesPendiente, v - aMora);
-    }
-    return {
-      a_mora: aMora, a_interes: aInteres,
-      a_capital: Math.min(saldoPendiente, v - aMora - aInteres),
-    };
-  })();
-  const saldariaConMora = cargosPendientes > 0
-    && repartoPrevisto.a_capital >= saldoPendiente
-    && (repartoPrevisto.a_mora + repartoPrevisto.a_interes) < cargosPendientes;
-
-  // LA TRAMPA DE LA DEUDA INMORTAL. Con interes sobre el saldo y reparto en
-  // cascada, un cliente que abona justo lo que costaron los intereses paga
-  // todos los meses y NUNCA baja la deuda. El calculo es correcto; lo que esta
-  // mal es que nadie se entere. Aqui se le dice, y se le da el monto minimo que
-  // si moveria el capital.
-  const noBajaLaDeuda = Number(valor || 0) > 0
-    && repartoPrevisto.a_capital === 0
-    && saldoPendiente > 0
-    && (repartoPrevisto.a_mora + repartoPrevisto.a_interes) > 0;
+  // Lo que este abono va a hacer. Con el abono en modo "solo producto" es
+  // directo, pero se calcula igual para poder avisar ANTES de enviar si el valor
+  // se pasa del saldo (el backend lo rechazaría y el vendedor perdería el tipeo).
+  const seExcede = Number(valor || 0) > saldoPendiente;
 
   const handleRegistrar = () => {
     setError('');
     if (!valor || Number(valor) <= 0) return setError('El valor debe ser mayor a 0');
+    if (seExcede) {
+      return setError(
+        `Este abono paga el producto, y del producto solo faltan ${formatCOP(saldoPendiente)}.`
+        + (cargosPendientes > 0
+          ? ` Los intereses se cobran con el botón "Cobrar" del préstamo.`
+          : '')
+      );
+    }
     mutation.mutate();
   };
 
@@ -267,89 +245,23 @@ export function ModalAbonoPrestamo({ prestamo, onClose }) {
             )}
           </div>
 
-          {/* Cómo se reparte el pago. Solo aparece si hay cargos que repartir.
-              Las etiquetas cambian según haya solo mora o también interés. */}
-          {cargosPendientes > 0 && (() => {
-            const MODOS = interesPendiente > 0 ? MODOS_ABONO_CARGOS : MODOS_ABONO;
-            return (
-              <div className="flex flex-col gap-2">
-                <span className="text-xs font-medium text-gray-600">¿A qué se aplica el pago?</span>
-                <div className="flex gap-1 bg-gray-100 p-1 rounded-xl">
-                  {MODOS.map((o) => (
-                    <button key={o.id} type="button" onClick={() => setModo(o.id)}
-                      className={`flex-1 py-1.5 px-1 rounded-lg text-[11px] font-medium transition-all
-                        ${modo === o.id ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}>
-                      {o.label}
-                    </button>
-                  ))}
-                </div>
-                <span className="text-[11px] text-gray-400">
-                  {MODOS.find((o) => o.id === modo)?.descripcion}
-                </span>
-
-                {modo === 'personalizado' && (
-                  <div className="flex flex-col gap-2">
-                    {moraPendiente > 0 && (
-                      <div className="flex flex-col gap-1">
-                        <label className="text-[11px] text-gray-500">
-                          Cuánto va a la mora (debe {formatCOP(moraPendiente)})
-                        </label>
-                        <InputMoneda value={valorMora} onChange={setValorMora} placeholder="0"
-                          className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm
-                            focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                      </div>
-                    )}
-                    {interesPendiente > 0 && (
-                      <div className="flex flex-col gap-1">
-                        <label className="text-[11px] text-gray-500">
-                          Cuánto va al interés (debe {formatCOP(interesPendiente)})
-                        </label>
-                        <InputMoneda value={valorInteres} onChange={setValorInteres} placeholder="0"
-                          className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm
-                            focus:outline-none focus:ring-2 focus:ring-teal-500" />
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Desglose en vivo: el vendedor ve en qué se convierte el pago
-                    ANTES de registrarlo, no después. */}
-                {Number(valor || 0) > 0 && (
-                  <div className="bg-gray-50 rounded-lg p-2 flex flex-col gap-0.5">
-                    {repartoPrevisto.a_mora > 0 && (
-                      <div className="flex justify-between text-[11px]">
-                        <span className="text-amber-600">A la mora</span>
-                        <span className="font-medium text-amber-600">{formatCOP(repartoPrevisto.a_mora)}</span>
-                      </div>
-                    )}
-                    {repartoPrevisto.a_interes > 0 && (
-                      <div className="flex justify-between text-[11px]">
-                        <span className="text-teal-700">Al interés</span>
-                        <span className="font-medium text-teal-700">{formatCOP(repartoPrevisto.a_interes)}</span>
-                      </div>
-                    )}
-                    <div className="flex justify-between text-[11px]">
-                      <span className="text-gray-600">Baja la deuda</span>
-                      <span className="font-semibold text-gray-800">{formatCOP(repartoPrevisto.a_capital)}</span>
-                    </div>
-                  </div>
-                )}
-
-                {noBajaLaDeuda && (
-                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-2.5">
-                    <p className="text-[11px] text-amber-800 font-medium">
-                      Este abono no baja la deuda.
-                    </p>
-                    <p className="text-[11px] text-amber-700 mt-0.5">
-                      Se va completo a los intereses, así que el cliente seguirá debiendo{' '}
-                      <strong>{formatCOP(saldoPendiente)}</strong>. Para que empiece a bajar tiene
-                      que abonar más de <strong>{formatCOP(cargosPendientes)}</strong>.
-                    </p>
-                  </div>
-                )}
-              </div>
-            );
-          })()}
+          {/* Este botón paga el PRODUCTO. Los cargos se ven aquí solo para que
+              el vendedor sepa que existen, pero se cobran con su propio botón:
+              mezclarlos era lo que hacía que el pago se sintiera "mordido". */}
+          {cargosPendientes > 0 && (
+            <div className="bg-blue-50 border border-blue-100 rounded-xl px-3 py-2.5 flex flex-col gap-1">
+              <p className="text-[11px] font-medium text-blue-800">
+                Este abono baja la deuda del producto
+              </p>
+              <p className="text-[11px] text-blue-700">
+                Aparte tiene {interesPendiente > 0 && (<><strong>{formatCOP(interesPendiente)}</strong> de interés</>)}
+                {interesPendiente > 0 && moraPendiente > 0 && ' y '}
+                {moraPendiente > 0 && (<><strong>{formatCOP(moraPendiente)}</strong> de mora</>)}
+                . Eso se cobra con el botón <strong>Cobrar</strong> de la tarjeta del préstamo,
+                o al terminar de pagar el producto.
+              </p>
+            </div>
+          )}
 
           <div className="flex flex-col gap-1">
             <div className="flex items-center justify-between">
@@ -418,20 +330,23 @@ export function ModalAbonoPrestamo({ prestamo, onClose }) {
               </div>
             </div>
           )}
-          {/* Aviso: este abono paga el producto pero deja mora, así que el
-              préstamo sigue abierto hasta cobrarla */}
-          {saldariaConMora && (
+          {/* Aviso: este abono deja el producto pagado pero quedan cargos, así
+              que el préstamo sigue abierto hasta cobrarlos. Se dice ANTES de
+              registrar para que el vendedor no crea que el sistema falló. */}
+          {cargosPendientes > 0 && Number(valor || 0) >= saldoPendiente && saldoPendiente > 0 && (
             <div className="flex gap-2.5 bg-amber-50 border border-amber-200 rounded-xl p-3">
               <AlertTriangle size={15} className="text-amber-500 flex-shrink-0 mt-0.5" />
               <div className="flex flex-col gap-1">
                 <p className="text-xs font-semibold text-amber-800">
                   Con este pago el producto queda pagado, pero quedarán{' '}
-                  {formatCOP(moraPendiente - repartoPrevisto.a_mora)} de mora
+                  {formatCOP(cargosPendientes)} de {interesPendiente > 0 && moraPendiente > 0
+                    ? 'intereses y mora'
+                    : interesPendiente > 0 ? 'intereses' : 'mora'}
                 </p>
                 <p className="text-xs text-amber-700">
-                  El préstamo NO queda saldado todavía: sigue abierto hasta que cobres
-                  (o no cobres) esa mora. Al hacerlo se marca el equipo como vendido y
-                  se genera la factura. Te lo ofrecemos en el paso siguiente.
+                  El préstamo NO queda saldado todavía: sigue abierto hasta que lo cobres
+                  (o lo condones). Al hacerlo se marca el equipo como vendido y se genera
+                  la factura. Te lo ofrecemos en el paso siguiente.
                 </p>
               </div>
             </div>
@@ -453,27 +368,52 @@ export function ModalAbonoPrestamo({ prestamo, onClose }) {
   // El préstamo sigue abierto a propósito. Aquí se ofrece cerrarlo cobrando la
   // mora, que es el paso que además genera la factura.
   if (pantalla === 'falta_mora') {
+    // El título y el botón dicen exactamente lo que falta: a veces es solo
+    // interés, a veces solo mora, a veces las dos. Decir siempre "mora" era
+    // mentira en dos de los tres casos — y el botón fallaba en uno.
+    const soloInteres = restante.interes > 0 && restante.mora <= 0;
+    const soloMora    = restante.mora > 0 && restante.interes <= 0;
+    const queFalta    = soloInteres ? 'el interés' : soloMora ? 'la mora' : 'los intereses';
+
     return (
-      <Modal open onClose={onClose} title="Falta la mora" size="sm">
+      <Modal open onClose={onClose} title={`Falta ${queFalta}`} size="sm">
         <div className="flex flex-col gap-4">
-          <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
-            <p className="text-sm font-semibold text-amber-800">
+          <div className="bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3">
+            <p className="text-sm font-semibold text-emerald-800">
               El producto quedó pagado
             </p>
-            <p className="text-xs text-amber-700 mt-1">
+            <p className="text-xs text-emerald-700 mt-1">
               {prestamo.nombre_producto} — {prestamo.prestatario}
             </p>
           </div>
 
-          <div className="flex items-center justify-between bg-gray-50 rounded-xl px-4 py-3">
-            <span className="text-xs text-gray-500">Mora pendiente</span>
-            <span className="text-base font-bold text-red-500">{formatCOP(moraRestante)}</span>
+          {/* Desglose: el vendedor tiene que poder decirle al cliente de qué es
+              cada peso, sobre todo si son dos cobros con causas distintas. */}
+          <div className="bg-gray-50 rounded-xl px-4 py-3 flex flex-col gap-1.5">
+            {restante.interes > 0 && (
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-teal-700">Interés por financiar</span>
+                <span className="text-sm font-semibold text-teal-700">{formatCOP(restante.interes)}</span>
+              </div>
+            )}
+            {restante.mora > 0 && (
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-amber-700">Mora por atraso</span>
+                <span className="text-sm font-semibold text-amber-700">{formatCOP(restante.mora)}</span>
+              </div>
+            )}
+            {restante.interes > 0 && restante.mora > 0 && (
+              <div className="flex items-center justify-between border-t border-gray-200 pt-1.5 mt-0.5">
+                <span className="text-xs font-medium text-gray-600">Falta por cobrar</span>
+                <span className="text-base font-bold text-gray-800">{formatCOP(restante.total)}</span>
+              </div>
+            )}
           </div>
 
           <p className="text-xs text-gray-500">
-            El préstamo sigue abierto hasta que se cobre esta mora. Al cobrarla queda
-            saldado, el equipo se marca como vendido y se genera la factura. Si prefieres
-            no cobrarla, un administrador puede condonarla desde el préstamo.
+            El préstamo sigue abierto hasta que se cobre esto. Al cobrarlo queda saldado,
+            el equipo se marca como vendido y se genera la factura. Si prefieres no
+            cobrarlo, un administrador puede condonarlo desde el préstamo.
           </p>
 
           {error && <p className="text-sm text-red-500">{error}</p>}
@@ -484,9 +424,12 @@ export function ModalAbonoPrestamo({ prestamo, onClose }) {
             </Button>
             <Button className="flex-1" loading={mutCobrarMora.isPending}
               onClick={() => { setError(''); mutCobrarMora.mutate(); }}>
-              Cobrar mora ({metodo})
+              Cobrar {formatCOP(restante.total)}
             </Button>
           </div>
+          <p className="text-[11px] text-gray-400 -mt-2 text-center">
+            Se registra como {metodo}
+          </p>
         </div>
       </Modal>
     );

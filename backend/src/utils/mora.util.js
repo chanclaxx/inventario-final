@@ -297,12 +297,20 @@ const resolverEstadoMora = ({ saldo, fecha_limite, condicion, movimientos = [], 
  * mora → interés → capital: se salda antes lo que penaliza que lo que remunera.
  *
  * Modos:
- *   'mora_capital'  → cascada completa. Es el default legal. (Nombre histórico:
- *                     nació cuando solo había dos cubetas y se conserva para no
- *                     romper a quien ya lo manda desde el frontend.)
- *   'solo_capital'  → todo a capital; los cargos quedan pendientes (NO
- *                     condonados: siguen debiéndose y visibles).
- *   'personalizado' → el usuario dice cuánto va a cada cargo; el resto a capital.
+ *   'mora_capital'    → cascada completa. Es el orden del Art. 1653. (Nombre
+ *                       histórico: nació cuando solo había dos cubetas y se
+ *                       conserva para no romper a quien ya lo manda.)
+ *   'capital_primero' → capital, y lo que sobre a los cargos (mora, luego
+ *                       interés). Es el orden que pidió el negocio para el ABONO
+ *                       TOTAL: cubrir el producto de un préstamo, después sus
+ *                       intereses, y recién ahí pasar al siguiente. El Art. 1653
+ *                       admite pacto en contrario y este orden favorece al
+ *                       deudor, así que es exigible.
+ *   'solo_capital'    → todo a capital; los cargos quedan pendientes (NO
+ *                       condonados: siguen debiéndose y visibles). Es el modo
+ *                       del abono individual: ese botón paga el producto y nada
+ *                       más, y los cargos se cobran con su propio botón.
+ *   'personalizado'   → el usuario dice cuánto va a cada cargo; el resto a capital.
  *
  * COMPATIBILIDAD: si no se pasa `interes_pendiente`, el reparto es exactamente
  * el de dos cubetas que había antes. Ningún llamador viejo cambia de conducta.
@@ -320,20 +328,27 @@ const repartirAbono = ({
 
   let aMora = 0;
   let aInteres = 0;
+  let aCapital = 0;
 
   if (modo === 'solo_capital') {
-    aMora = 0;
-    aInteres = 0;
+    aCapital = Math.min(cap, total);
+  } else if (modo === 'capital_primero') {
+    // El producto primero; lo que sobre cubre los cargos (mora antes que
+    // interés, que es el orden entre ellos cuando hay que elegir).
+    aCapital = Math.min(cap, total);
+    aMora    = Math.min(mora, total - aCapital);
+    aInteres = Math.min(interes, total - aCapital - aMora);
   } else if (modo === 'personalizado') {
     aMora    = Math.min(Math.max(0, Math.round(Number(valor_mora) || 0)), mora, total);
     aInteres = Math.min(Math.max(0, Math.round(Number(valor_interes) || 0)), interes, total - aMora);
+    aCapital = Math.min(cap, total - aMora - aInteres);
   } else {
     // Cascada: primero la mora, después el interés, lo que sobre a capital.
     aMora    = Math.min(mora, total);
     aInteres = Math.min(interes, total - aMora);
+    aCapital = Math.min(cap, total - aMora - aInteres);
   }
 
-  const aCapital  = Math.min(cap, total - aMora - aInteres);
   const excedente = total - aMora - aInteres - aCapital;   // va a saldo a favor
 
   return { a_mora: aMora, a_interes: aInteres, a_capital: aCapital, excedente };

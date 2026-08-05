@@ -17,8 +17,7 @@ import { useTarifas }  from '../../hooks/useTarifas';
 import { TarifaItem }  from '../../components/ui/SelectorTarifa';
 import { useMora }        from '../../hooks/useMora';
 import { useInteres }     from '../../hooks/useInteres';
-import { SelectorPlazo }  from '../../components/ui/SelectorPlazo';
-import { SelectorInteres } from '../../components/ui/SelectorInteres';
+import { SelectorCargos } from '../../components/ui/SelectorCargos';
 import { User, Users, Plus, Minus, ChevronLeft, Search } from 'lucide-react';
 import { InputMoneda } from '../../components/ui/InputMoneda';
 
@@ -507,24 +506,21 @@ export function ModalPrestamo({ open, onClose }) {
           />
         )}
 
-        {/* Plazo de pago y mora (solo si el negocio activó la feature).
-            Aplica a todo el préstamo: es un solo acuerdo con la persona,
-            aunque se lleve varios equipos. */}
+        {/* Interés y mora. Aplican a todo el préstamo: es un solo acuerdo con
+            la persona, aunque se lleve varios equipos. */}
         {items.length > 0 && (
-          <SelectorPlazo
-            config={configMora}
-            fechaLimite={plazo.fecha_limite}
-            condicionId={plazo.condicion_id}
-            onChange={setPlazo}
-            titulo="Fecha límite de pago"
-          />
-        )}
-
-        {items.length > 0 && (
-          <SelectorInteres
-            config={configInteres}
-            planId={interesPlanId}
-            onChange={setInteresPlanId}
+          <SelectorCargos
+            configMora={configMora}
+            configInteres={configInteres}
+            valor={{
+              fecha_limite:    plazo.fecha_limite,
+              condicion_id:    plazo.condicion_id,
+              interes_plan_id: interesPlanId,
+            }}
+            onChange={({ fecha_limite, condicion_id, interes_plan_id }) => {
+              setPlazo({ fecha_limite, condicion_id });
+              setInteresPlanId(interes_plan_id);
+            }}
             valorBase={total}
           />
         )}

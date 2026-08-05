@@ -97,10 +97,19 @@ const registrarAbono = async (negocioId, creditoId, {
       valor_interes,
     });
 
-    // El tope es capital + cargos, no solo capital: si no, un pago que los
-    // incluye sería rechazado (era el comportamiento anterior, que no los conocía).
+    // El tope depende del modo, y el mensaje tiene que decir POR QUÉ sobró.
+    // Ver la nota equivalente en prestamos.service.
     const totalDebido = saldo_capital + cargosPendientes;
     if (reparto.excedente > 0) {
+      if (modoEfectivo === 'solo_capital') {
+        throw {
+          status: 400,
+          message: `El abono supera el saldo de la venta ($${Math.round(saldo_capital).toLocaleString('es-CO')}).`
+            + (cargosPendientes > 0
+              ? ` Los intereses ($${Math.round(cargosPendientes).toLocaleString('es-CO')}) se cobran con el botón de cobrar del crédito.`
+              : ''),
+        };
+      }
       throw {
         status: 400,
         message: `El abono supera lo que se debe. Capital $${Math.round(saldo_capital).toLocaleString('es-CO')}`
@@ -337,41 +346,65 @@ const fijarInteres = (negocioId, creditoId, datos) =>
 const condonarMora = (negocioId, creditoId, datos) =>
   moraService.condonar(negocioId, 'credito', creditoId, datos);
 
+/** Ver `prestamos.service`: la misma regla para los dos vehículos. */
+const _cargosObjetivo = (concepto, mora, interes) => {
+  const vivos = [
+    { concepto: 'mora',    cargo: mora },
+    { concepto: 'interes', cargo: interes },
+  ].filter((o) => o.cargo?.aplica && o.cargo.pendiente > 0);
+  if (concepto === 'todos') return vivos;
+  return vivos.filter((o) => o.concepto === concepto);
+};
+
+const _mensajeSinCargo = (concepto, mora, interes) => {
+  if (concepto === 'interes') {
+    return interes?.aplica ? 'No hay interés pendiente por cobrar'
+      : 'Este crédito no tiene interés pactado';
+  }
+  if (concepto === 'mora') {
+    return mora?.aplica ? 'No hay mora pendiente por cobrar'
+      : 'Este crédito no tiene plazo ni mora pactada';
+  }
+  return 'No hay intereses ni mora pendientes por cobrar';
+};
+
 /**
- * Cobra SOLO un cargo financiero, sin tocar el capital (el cliente vino a pagar
- * los intereses). `concepto` distingue mora de interés; por defecto 'mora' para
- * no cambiarle la conducta a los llamadores anteriores.
+ * Cobra cargos financieros (mora, interés o los dos) sin tocar el capital.
+ * `concepto`: 'mora' (por defecto) · 'interes' · 'todos'.
  */
 const cobrarMora = async (negocioId, creditoId, { valor, metodo, usuario_id, concepto = 'mora' }) => {
-  const esInteres = concepto === 'interes';
-  const nombre    = esInteres ? 'interés' : 'mora';
-
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     const { documento, mora, interes } = await moraService.estadoDe('credito', creditoId, negocioId, client);
-    const cargo = esInteres ? interes : mora;
 
-    if (!cargo.aplica) {
+    const objetivos = _cargosObjetivo(concepto, mora, interes);
+    if (!objetivos.length) {
+      throw { status: 400, message: _mensajeSinCargo(concepto, mora, interes) };
+    }
+
+    const totalPendiente = objetivos.reduce((s, o) => s + o.cargo.pendiente, 0);
+    const aCobrar = valor == null || valor === '' ? totalPendiente : Math.round(Number(valor));
+    if (!(aCobrar > 0)) throw { status: 400, message: 'El valor a cobrar debe ser mayor a 0' };
+    if (aCobrar > totalPendiente) {
       throw {
         status: 400,
-        message: esInteres
-          ? 'Este crédito no tiene interés pactado'
-          : 'Este crédito no tiene plazo ni mora pactada',
+        message: `No puedes cobrar más de lo pendiente ($${totalPendiente.toLocaleString('es-CO')})`,
       };
     }
-    if (cargo.pendiente <= 0) throw { status: 400, message: `No hay ${nombre} pendiente por cobrar` };
 
-    const aCobrar = valor == null || valor === '' ? cargo.pendiente : Math.round(Number(valor));
-    if (!(aCobrar > 0)) throw { status: 400, message: 'El valor a cobrar debe ser mayor a 0' };
-    if (aCobrar > cargo.pendiente) {
-      throw { status: 400, message: `No puedes cobrar más de ${esInteres ? 'el interés' : 'la mora'} pendiente ($${cargo.pendiente.toLocaleString('es-CO')})` };
+    // Mora antes que interés, y todo en la MISMA transacción.
+    let restante = aCobrar;
+    const movimientos = [];
+    for (const { concepto: conc, cargo } of objetivos) {
+      const parte = Math.min(cargo.pendiente, restante);
+      if (parte <= 0) continue;
+      restante -= parte;
+      movimientos.push(await moraService.registrarCobroEnTx(client, {
+        tipo: 'credito', documento, negocioId, concepto: conc,
+        valor: parte, metodo, usuarioId: usuario_id, estadoMora: cargo,
+      }));
     }
-
-    const mov = await moraService.registrarCobroEnTx(client, {
-      tipo: 'credito', documento, negocioId, concepto,
-      valor: aCobrar, metodo, usuarioId: usuario_id, estadoMora: cargo,
-    });
 
     // Si con este cobro ya no se debe nada, el crédito queda saldado.
     const cierre = await cerrarSiPagadoEnTx(client, creditoId, negocioId);
@@ -380,7 +413,9 @@ const cobrarMora = async (negocioId, creditoId, { valor, metodo, usuario_id, con
 
     const despues = await moraService.estadoDe('credito', creditoId, negocioId);
     return {
-      movimiento: mov, mora: despues.mora, interes: despues.interes,
+      movimiento: movimientos[0] ?? null, movimientos,
+      cobrado: aCobrar,
+      mora: despues.mora, interes: despues.interes,
       saldado: cierre.saldado,
     };
   } catch (err) {

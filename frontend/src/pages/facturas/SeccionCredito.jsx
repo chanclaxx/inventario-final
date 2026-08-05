@@ -1,8 +1,7 @@
 import { CreditCard } from 'lucide-react';
 import { InputMoneda } from '../../components/ui/InputMoneda';
 import { formatCOP }   from '../../utils/formatters';
-import { SelectorPlazo } from '../../components/ui/SelectorPlazo';
-import { SelectorInteres } from '../../components/ui/SelectorInteres';
+import { SelectorCargos } from '../../components/ui/SelectorCargos';
 
 // ── Estado inicial — usar en ModalFactura con useState ───────────────────────
 export const CREDITO_VACIO = () => ({
@@ -83,21 +82,17 @@ export function SeccionCredito({ credito, totalNeto, onChange, disabled, configM
             </div>
           </div>
 
-          {/* Plazo de pago y mora (solo si el negocio activó la feature) */}
-          <SelectorPlazo
-            config={configMora}
-            fechaLimite={credito.fecha_limite}
-            condicionId={credito.condicion_id}
-            onChange={({ fecha_limite, condicion_id }) =>
-              onChange({ ...credito, fecha_limite, condicion_id })}
-            titulo="Fecha límite de pago"
-          />
-
-          {/* Interés por financiar (independiente del plazo) */}
-          <SelectorInteres
-            config={configInteres}
-            planId={credito.interes_plan_id}
-            onChange={(interes_plan_id) => onChange({ ...credito, interes_plan_id })}
+          {/* Interés y mora: dos pasos, nada preseleccionado. Con las dos
+              features apagadas no renderiza nada. */}
+          <SelectorCargos
+            configMora={configMora}
+            configInteres={configInteres}
+            valor={{
+              fecha_limite:    credito.fecha_limite,
+              condicion_id:    credito.condicion_id,
+              interes_plan_id: credito.interes_plan_id,
+            }}
+            onChange={(cargos) => onChange({ ...credito, ...cargos })}
             valorBase={saldoACredito}
           />
 

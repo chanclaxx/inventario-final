@@ -376,9 +376,9 @@ await creditos.fijarPlazo(1, credA, { fecha_limite: atras(40), condicion_id: 'no
   check('valor_mora gigante se topa en la mora pendiente', abo2.abonado_mora <= 50000, true);
   check('nunca se abona más de lo entregado', abo2.abonado_mora + abo2.abonado_capital, 50000);
 
-  await debeBloquear('Un abono mayor a capital + mora se rechaza',
+  await debeBloquear('Un abono mayor a lo que se debe se rechaza',
     () => creditos.registrarAbono(1, credA, { usuario_id: 1, valor: saldo + 99999999, metodo: 'Efectivo' }),
-    'supera lo que se debe');
+    'supera');
 }
 
 // Invariante contable: los abonos suman EXACTAMENTE total_abonado
@@ -555,21 +555,42 @@ console.log('\n═══ 7d. La lista de préstamos trae la mora (no solo el det
   check('la lista trae los días de atraso', enLista?.mora?.dias_vencidos, 30);
   checkEq('y la condición pactada viaja en la lista', enLista?.mora?.condicion?.id, 'normal');
 
-  // ── El ABONO TOTAL debe cobrar la mora ──────────────────────────────────
+  // ── El ABONO TOTAL debe VER y cobrar los cargos ────────────────────────
   // Mismo descuido en `getPrestamoActivosPorPersona`: sin fecha_limite el
-  // reparto ignoraba los intereses y el abono total nunca los cobraba.
+  // reparto ignoraba los intereses y el abono total nunca los cobraba. Eso es
+  // lo que vigila este caso y sigue vigilándolo.
+  //
+  // OJO — EL ORDEN CAMBIÓ (ago-2026, decisión del negocio): dentro de cada
+  // préstamo el abono total cubre PRIMERO el producto y después sus cargos,
+  // antes de pasar al siguiente. Antes iba mora → capital. Por eso un pago que
+  // no alcanza a cubrir el producto ya no toca la mora, y hace falta un segundo
+  // pago que sí llegue para comprobar que los cargos se cobran.
   const moraAntes = Number(detalle.mora.pendiente);
   check('el préstamo tiene mora antes del abono total', moraAntes > 0, true);
 
-  const moraCajaAntes = (await caja.getResumenDia(1, 2, 2)).totales.moraCobrada;
   const res = await prestamos.registrarAbonoTotal(1, 'cliente', 1, 20000, 'Efectivo', 1, 2);
   const dist = res.distribucion.find((d) => Number(d.prestamo_id) === Number(pid));
-  check('★ el abono total repartió algo a mora', Number(dist?.abono_mora || 0) > 0, true);
+  check('★ el abono total paga primero el producto', Number(dist?.abono_capital || 0) > 0, true);
+  check('★ y no toca la mora mientras quede producto', Number(dist?.abono_mora || 0), 0);
+
+  // Segundo pago, dirigido a este préstamo y por lo que exactamente le falta:
+  // producto + mora. Aquí sí tiene que cobrarse la mora.
+  const trasPrimero  = await prestamos.getPrestamoById(1, pid);
+  const faltaCapital = Number(trasPrimero.valor_prestamo) - Number(trasPrimero.total_abonado);
+  const faltaMora    = Number(trasPrimero.mora.pendiente);
+  const moraCajaAntes = (await caja.getResumenDia(1, 2, 2)).totales.moraCobrada;
+
+  const res2 = await prestamos.registrarAbonoTotal(
+    1, 'cliente', 1, faltaCapital + faltaMora, 'Efectivo', 1, 2,
+    { distribucion_manual: { [pid]: faltaCapital + faltaMora } },
+  );
+  const dist2 = res2.distribucion.find((d) => Number(d.prestamo_id) === Number(pid));
+  check('★ cuando alcanza, el abono total SÍ cobra la mora', Number(dist2?.abono_mora || 0), faltaMora);
   check('★ y esa mora entró a la caja',
     (await caja.getResumenDia(1, 2, 2)).totales.moraCobrada - moraCajaAntes,
-    Number(dist.abono_mora));
+    Number(dist2.abono_mora));
   check('el capital del abono total no incluye la mora',
-    Number(dist.abono_capital) + Number(dist.abono_mora), Number(dist.abono));
+    Number(dist2.abono_capital) + Number(dist2.abono_mora), Number(dist2.abono));
 }
 
 // ═══ 8. Tarifas: aislamiento y casos raros ══════════════════════════════════
