@@ -44,6 +44,11 @@ await db.exec(`
   ALTER TABLE retomas   ADD COLUMN IF NOT EXISTS producto_serial_id   INTEGER;
   ALTER TABLE retomas   ADD COLUMN IF NOT EXISTS producto_cantidad_id INTEGER;
   ALTER TABLE retomas   ADD COLUMN IF NOT EXISTS sucursal_id          INTEGER;
+  -- El estado de cuenta une retomas, saldos y movimientos; el esquema de
+  -- pruebas está recortado y le faltan estas columnas.
+  ALTER TABLE retomas   ADD COLUMN IF NOT EXISTS fecha        TIMESTAMP DEFAULT NOW();
+  ALTER TABLE retomas   ADD COLUMN IF NOT EXISTS tipo_persona TEXT;
+  ALTER TABLE retomas   ADD COLUMN IF NOT EXISTS persona_id   INTEGER;
 `);
 
 await db.exec(readFileSync(path.join(RAIZ, 'migrations/20260730_mora_credito.sql'), 'utf8'));
@@ -314,6 +319,48 @@ const cfgApagada = await moraService.getConfigInteres(2);
 checkEq('config apagada', cfgApagada.activa, false);
 const datos = await moraService.datosParaNuevoDocumento(2, { interes_plan_id: 'fin2' });
 checkEq('★ un plan pedido con la feature apagada se ignora', datos.interes_condicion, null);
+
+// ═══ 10b. El estado de cuenta no puede llamarle "mora" al interés ═════════
+//
+// Bug real: la consulta del estado de cuenta etiquetaba TODA fila de
+// movimientos_mora como 'mora_cobro'/'mora_condonacion' sin mirar `concepto`,
+// así que un cobro de interés le decía al cliente que se había atrasado cuando
+// no lo hizo. Los totales estaban bien; la etiqueta mentía.
+//
+// Y lo que más duele si se rompe: los tipos nuevos tienen que estar en el Set
+// INFORMATIVOS del service. Si no, el interés entra al saldo acumulado y el
+// estado de cuenta muestra una deuda que no existe.
+console.log('\n═══ 10b. Estado de cuenta: el interés se etiqueta como interés ═══');
+
+const cuenta = await prestamos.getEstadoCuenta(1, 'prestatario', 1, 1);
+const tiposCuenta = cuenta.map((m) => m.tipo);
+
+const cobrosInteres = cuenta.filter((m) => m.tipo === 'interes_cobro');
+const condInteres   = cuenta.filter((m) => m.tipo === 'interes_condonacion');
+
+check('★ el cobro de interés sale como interes_cobro', cobrosInteres.length > 0, true);
+check('★ y la condonación como interes_condonacion',   condInteres.length > 0, true);
+console.log(`     (tipos en la cuenta: ${[...new Set(tiposCuenta)].join(', ')})`);
+
+// Ninguna fila de interés puede estar rotulada como mora.
+const interesComoMora = cuenta.filter(
+  (m) => (m.tipo === 'mora_cobro' || m.tipo === 'mora_condonacion')
+      && /inter[ée]s/i.test(String(m.concepto || ''))
+);
+check('★ ninguna fila de interés quedó rotulada como mora', interesComoMora.length, 0);
+
+// El concepto legible tiene que hablar de financiación, no de atraso.
+const textoOk = cobrosInteres.every((m) => /financiaci[óo]n/i.test(String(m.concepto)));
+check('★ el texto dice "financiación", no "mora"', textoOk, true);
+
+// EL INVARIANTE DE PLATA: los cargos son informativos y no mueven el acumulado.
+const interesEnSaldo = [...cobrosInteres, ...condInteres].filter((m) => m.saldo != null);
+check('★★ el interés NO entra en el saldo acumulado (saldo null)', interesEnSaldo.length, 0);
+
+const moraEnSaldo = cuenta.filter(
+  (m) => (m.tipo === 'mora_cobro' || m.tipo === 'mora_condonacion') && m.saldo != null
+);
+check('★ la mora tampoco (no se rompió al agregar el interés)', moraEnSaldo.length, 0);
 
 // ═══ 11. Invariantes ══════════════════════════════════════════════════════
 console.log('\n═══ 11. Invariantes ═══');

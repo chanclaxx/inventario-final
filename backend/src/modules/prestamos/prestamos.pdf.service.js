@@ -655,6 +655,8 @@ const TIPO_LABEL = {
   // Mismos colores que en el estado de cuenta de créditos.
   mora_cobro:       { label: 'Mora',       bg: '#FEF2F2', text: '#DC2626' },
   mora_condonacion: { label: 'Mora cond.', bg: '#F3F4F6', text: '#6B7280' },
+  interes_cobro:       { label: 'Interés',       bg: '#ECFDF5', text: '#0F766E' },
+  interes_condonacion: { label: 'Interés cond.', bg: '#F3F4F6', text: '#6B7280' },
 };
 
 const generarPdfEstadoCuenta = async ({ tipo, personaId, negocioId, negocioNombre, logoNegocio, sucursalId = null }) => {

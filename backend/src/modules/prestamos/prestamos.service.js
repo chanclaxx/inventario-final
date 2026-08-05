@@ -1559,7 +1559,13 @@ const getEstadoCuenta = async (negocioId, tipo, personaId, sucursalId = null) =>
   // Movimientos que se listan pero NO mueven el saldo de la deuda: la compra de
   // artículo (genera saldo a favor) y la mora (deuda financiera aparte, igual
   // que en el estado de cuenta de créditos).
-  const INFORMATIVOS = new Set(['compra_directa', 'mora_cobro', 'mora_condonacion']);
+  // Los cargos financieros NO participan del saldo de capital. Olvidar aquí
+  // un tipo nuevo hace que entre al acumulado y la cuenta salga mal.
+  const INFORMATIVOS = new Set([
+    'compra_directa',
+    'mora_cobro', 'mora_condonacion',
+    'interes_cobro', 'interes_condonacion',
+  ]);
 
   let saldoDeuda = 0;
   return rows.map((row) => {

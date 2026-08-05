@@ -292,7 +292,12 @@ const getDocumento = async (negocioId, creditoId) => {
 const getEstadoCuenta = async (negocioId, clave, sucursalId = null) => {
   const rows = await repo.getEstadoCuenta(negocioId, clave, sucursalId);
 
-  const INFORMATIVOS = new Set(['mora_cobro', 'mora_condonacion']);
+  // Los cargos financieros NO participan del saldo de capital. Olvidar aquí
+  // un tipo nuevo hace que entre al acumulado y la cuenta salga mal.
+  const INFORMATIVOS = new Set([
+    'mora_cobro', 'mora_condonacion',
+    'interes_cobro', 'interes_condonacion',
+  ]);
 
   let saldo = 0;
   return rows.map((row) => {

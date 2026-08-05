@@ -329,14 +329,32 @@ const getEstadoCuenta = async (negocioId, clave, sucursalId = null) => {
 
       UNION ALL
 
-      -- 7. Mora: informativa. NO toca el saldo de capital (el service la deja
-      --    con saldo nulo) porque es un ingreso financiero, no del producto.
+      -- 7. Cargos financieros (mora e interés): informativos. NO tocan el saldo
+      --    de capital (el service los deja con saldo nulo) porque son ingreso
+      --    financiero, no del producto.
+      --
+      --    Se discriminan por concepto: llamarle "mora" a un cobro de interés
+      --    es decirle al cliente que se atrasó cuando no lo hizo. Los tipos
+      --    nuevos tienen que estar en el Set INFORMATIVOS del service.
       SELECT
         mm.fecha,
-        CASE mm.tipo WHEN 'Cobro' THEN 'mora_cobro' ELSE 'mora_condonacion' END::text,
-        CASE mm.tipo
-          WHEN 'Cobro' THEN 'Mora cobrada ' || COALESCE(mm.metodo, '')
-          ELSE 'Mora condonada' || COALESCE(' — ' || mm.motivo, '')
+        (CASE
+          WHEN mm.concepto = 'interes' THEN
+            CASE mm.tipo WHEN 'Cobro' THEN 'interes_cobro' ELSE 'interes_condonacion' END
+          ELSE
+            CASE mm.tipo WHEN 'Cobro' THEN 'mora_cobro' ELSE 'mora_condonacion' END
+        END)::text,
+        CASE
+          WHEN mm.concepto = 'interes' THEN
+            CASE mm.tipo
+              WHEN 'Cobro' THEN 'Interés de financiación cobrado ' || COALESCE(mm.metodo, '')
+              ELSE 'Interés condonado' || COALESCE(' — ' || mm.motivo, '')
+            END
+          ELSE
+            CASE mm.tipo
+              WHEN 'Cobro' THEN 'Mora cobrada ' || COALESCE(mm.metodo, '')
+              ELSE 'Mora condonada' || COALESCE(' — ' || mm.motivo, '')
+            END
         END || ' — factura #' || LPAD(COALESCE(cred.factura_numero, cred.factura_id)::text, 6, '0'),
         NULL::numeric, mm.valor::numeric,
         mm.id, cred.id, COALESCE(cred.factura_numero, cred.factura_id),

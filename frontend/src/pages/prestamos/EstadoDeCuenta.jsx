@@ -84,6 +84,24 @@ const TIPO_CONFIG = {
     montoClass: 'text-gray-500',
     sufijo:     'aparte del capital',
   },
+  interes_cobro: {
+    badge:      'bg-teal-100 text-teal-700',
+    label:      'Interés cobrado',
+    Icn:        AlertTriangle,
+    lado:       'izquierda',
+    bubbleBg:   'bg-teal-50 border border-teal-200',
+    montoClass: 'text-teal-700',
+    sufijo:     'aparte del capital',
+  },
+  interes_condonacion: {
+    badge:      'bg-gray-100 text-gray-600',
+    label:      'Interés condonado',
+    Icn:        AlertTriangle,
+    lado:       'derecha',
+    bubbleBg:   'bg-gray-50 border border-gray-200',
+    montoClass: 'text-gray-500',
+    sufijo:     'aparte del capital',
+  },
 };
 
 // ─── EstadoDeCuenta ───────────────────────────────────────────────────────────

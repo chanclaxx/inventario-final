@@ -824,19 +824,36 @@ const getEstadoCuenta = async (executor, negocioId, tipo, personaId, sucursalId 
 
       UNION ALL
 
-      -- Mora: cobros y condonaciones de intereses por pago tardío.
-      -- Son INFORMATIVOS: la mora es una deuda financiera aparte y no entra en
-      -- el saldo de capital que acumula esta cuenta (igual que en créditos).
-      -- Antes no aparecían y el cliente no tenía cómo ver qué se le cobró.
+      -- Cargos financieros: cobros y condonaciones de MORA e INTERÉS.
+      -- Son INFORMATIVOS: son deuda financiera aparte y no entran en el saldo
+      -- de capital que acumula esta cuenta (igual que en créditos).
+      --
+      -- Se discriminan por concepto: llamarle "mora" a un cobro de interés en
+      -- el estado de cuenta del cliente es decirle que se atrasó cuando no lo
+      -- hizo. Los tipos nuevos ('interes_cobro'/'interes_condonacion') tienen
+      -- que estar en el Set INFORMATIVOS del service, o el interés entraría al
+      -- saldo acumulado y la cuenta daría mal.
       SELECT
         mm.fecha,
-        CASE mm.tipo WHEN 'Cobro' THEN 'mora_cobro' ELSE 'mora_condonacion' END::text AS tipo,
-        CASE mm.tipo
-          WHEN 'Cobro' THEN 'Mora cobrada ' || COALESCE(mm.metodo, '')
-          ELSE 'Mora condonada' || COALESCE(' — ' || mm.motivo, '')
-        END || ' — préstamo #' || COALESCE(p.numero, p.id)::text
-             || COALESCE(' (' || NULLIF(mm.dias_mora, 0)::text || ' días de atraso)', '')
-                                                       AS concepto,
+        (CASE
+          WHEN mm.concepto = 'interes' THEN
+            CASE mm.tipo WHEN 'Cobro' THEN 'interes_cobro' ELSE 'interes_condonacion' END
+          ELSE
+            CASE mm.tipo WHEN 'Cobro' THEN 'mora_cobro' ELSE 'mora_condonacion' END
+        END)::text                                     AS tipo,
+        CASE
+          WHEN mm.concepto = 'interes' THEN
+            CASE mm.tipo
+              WHEN 'Cobro' THEN 'Interés de financiación cobrado ' || COALESCE(mm.metodo, '')
+              ELSE 'Interés condonado' || COALESCE(' — ' || mm.motivo, '')
+            END || ' — préstamo #' || COALESCE(p.numero, p.id)::text
+          ELSE
+            (CASE mm.tipo
+              WHEN 'Cobro' THEN 'Mora cobrada ' || COALESCE(mm.metodo, '')
+              ELSE 'Mora condonada' || COALESCE(' — ' || mm.motivo, '')
+            END || ' — préstamo #' || COALESCE(p.numero, p.id)::text
+               || COALESCE(' (' || NULLIF(mm.dias_mora, 0)::text || ' días de atraso)', ''))
+        END                                            AS concepto,
         NULL::numeric                                  AS cargo,
         mm.valor::numeric                              AS abono,
         mm.id                                          AS referencia_id,

@@ -20,6 +20,8 @@ const TIPO_META = {
   ajuste:          { bg: 'EDE9FE', label: '⚖️ Ajuste',            desc: 'Saldo condonado al marcar la factura como saldada'         },
   mora_cobro:      { bg: 'FEE2E2', label: '⏰ Mora cobrada',      desc: 'Interés por pago tardío — NO hace parte del capital'       },
   mora_condonacion:{ bg: 'F3F4F6', label: '🕊️ Mora condonada',    desc: 'Interés perdonado — NO hace parte del capital'             },
+  interes_cobro:      { bg: 'CCFBF1', label: '％ Interés cobrado',   desc: 'Interés por financiar — NO hace parte del capital'      },
+  interes_condonacion:{ bg: 'F3F4F6', label: '🕊️ Interés condonado', desc: 'Interés perdonado — NO hace parte del capital'          },
 };
 
 const ESTADO_BG = {
@@ -50,6 +52,9 @@ function hojaResumen({ nombre, cedula, telefono, creditos, movimientos }) {
     .reduce((s, m) => s + Number(m.abono || 0), 0);
   const sumaMora   = movimientos.filter((m) => m.tipo === 'mora_cobro')
     .reduce((s, m) => s + Number(m.abono || 0), 0);
+  // Aparte de la mora: el interés por financiar tampoco hace parte del capital.
+  const sumaInteres = movimientos.filter((m) => m.tipo === 'interes_cobro')
+    .reduce((s, m) => s + Number(m.abono || 0), 0);
 
   put(ws, r, 0, 's', `CUENTA A CRÉDITO — ${nombre}`, sSeccion()); r++;
   put(ws, r, 0, 's', `Cliente  ·  Generado el ${hoy()}`, sC(C.blanco)); r += 2;
@@ -75,6 +80,7 @@ function hojaResumen({ nombre, cedula, telefono, creditos, movimientos }) {
     ['Total facturado',      'n', sumaCargos,         C.headerOscuro, true ],
     ['Total pagado',         'n', totalPagado,        '16A34A',       true ],
     ['Total devuelto',       'n', sumaDevol,          'EA580C',       true ],
+    ['Interés cobrado (aparte)', 'n', sumaInteres,    '0F766E',       true ],
     ['Mora cobrada (aparte)', 'n', sumaMora,          'DC2626',       true ],
     ['Facturas activas',     'n', activos.length,     'DC2626',       false],
     ['Facturas cerradas',    'n', cerrados.length,    '16A34A',       false],
