@@ -97,35 +97,105 @@ const findById = async (negocioId, id) => {
   return rows[0] || null;
 };
 
+// Estado de cuenta del acreedor.
+//
+// Un pago total se guarda repartido entre los cargos abiertos (una fila de Abono
+// por cargo) y así sigue: la contabilidad no cambia. Lo que cambia es cómo se
+// LEE — las filas que comparten `pago_total_id` se colapsan en un movimiento
+// único, para que un pago de $10.000.000 se vea como el usuario lo hizo y no
+// como cinco abonos sueltos. El importe mostrado se DERIVA con SUM sobre esas
+// mismas filas (nunca hay un total guardado que pueda quedar desfasado), así que
+// anular una compra —que borra sus abonos— o editar uno ajusta el pago mostrado
+// solo, y el saldo corrido sigue cuadrando con el de la tabla.
+//
+// El detalle del reparto viaja en `detalle` para poder desplegarlo sin otra
+// consulta; caja, tesorería y los cargos siguen leyendo las filas individuales.
 const getMovimientos = async (negocioId, acreedorId) => {
   const { rows } = await pool.query(`
+    WITH movs AS (
+      SELECT
+        m.id, m.acreedor_id, m.usuario_id, m.tipo, m.valor,
+        m.descripcion, m.firma, m.fecha, m.compra_id, m.registrar_en_caja,
+        m.cargo_id, m.metodo, m.pago_total_id,
+        co.numero         AS compra_numero,
+        cargo.descripcion AS cargo_descripcion,
+        cargo.fecha       AS cargo_fecha,
+        ccargo.numero     AS cargo_compra_numero,
+        cargo.compra_id   AS cargo_compra_id
+      FROM movimientos_acreedor m
+      LEFT JOIN movimientos_acreedor cargo ON cargo.id = m.cargo_id
+      LEFT JOIN compras co     ON co.id     = m.compra_id
+      LEFT JOIN compras ccargo ON ccargo.id = cargo.compra_id
+      JOIN acreedores a ON a.id = m.acreedor_id
+      WHERE m.acreedor_id = $1 AND a.negocio_id = $2
+    ),
+    agrupados AS (
+      -- Movimientos sueltos: cargos, compras, abonos normales y saldo a favor
+      SELECT
+        id, acreedor_id, usuario_id, tipo, valor, descripcion, firma, fecha,
+        compra_id, registrar_en_caja, compra_numero, cargo_id, metodo,
+        cargo_descripcion, cargo_fecha,
+        NULL::bigint  AS pago_total_id,
+        FALSE         AS es_pago_total,
+        NULL::json    AS detalle
+      FROM movs
+      WHERE pago_total_id IS NULL
+
+      UNION ALL
+
+      -- Pagos totales: una fila por pago, con el reparto adentro
+      SELECT
+        MIN(id)                                     AS id,
+        acreedor_id,
+        MIN(usuario_id)                             AS usuario_id,
+        'Abono'::text                               AS tipo,
+        SUM(valor)                                  AS valor,
+        CASE WHEN COUNT(*) = 1 THEN 'Pago total'
+             ELSE 'Pago total — ' || COUNT(*) || ' cargos'
+        END::text                                   AS descripcion,
+        NULL::text                                  AS firma,
+        MIN(fecha)                                  AS fecha,
+        NULL::integer                               AS compra_id,
+        BOOL_AND(registrar_en_caja)                 AS registrar_en_caja,
+        NULL::integer                               AS compra_numero,
+        NULL::integer                               AS cargo_id,
+        MIN(metodo)                                 AS metodo,
+        NULL::text                                  AS cargo_descripcion,
+        NULL::timestamp                             AS cargo_fecha,
+        pago_total_id,
+        TRUE                                        AS es_pago_total,
+        json_agg(json_build_object(
+          'id',                  id,
+          'valor',               valor,
+          'fecha',               fecha,
+          'metodo',              metodo,
+          'cargo_id',            cargo_id,
+          'cargo_descripcion',   cargo_descripcion,
+          'cargo_compra_id',     cargo_compra_id,
+          'cargo_compra_numero', cargo_compra_numero
+        ) ORDER BY id)                              AS detalle
+      FROM movs
+      WHERE pago_total_id IS NOT NULL
+      GROUP BY acreedor_id, pago_total_id
+    )
     SELECT
-      m.id, m.acreedor_id, m.usuario_id, m.tipo, m.valor,
-      m.descripcion, m.firma, m.fecha, m.compra_id, m.registrar_en_caja,
-      co.numero         AS compra_numero,
-      m.cargo_id, m.metodo,
-      cargo.descripcion AS cargo_descripcion,
-      cargo.fecha       AS cargo_fecha,
+      g.*,
       COALESCE(
-        SUM(CASE WHEN m.tipo = 'Cargo' THEN m.valor ELSE -m.valor END)
+        SUM(CASE WHEN g.tipo = 'Cargo' THEN g.valor ELSE -g.valor END)
         OVER (
-          PARTITION BY m.acreedor_id
-          ORDER BY m.fecha, m.id
+          PARTITION BY g.acreedor_id
+          ORDER BY g.fecha, g.id
           ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
         ), 0
       ) AS saldo_antes,
-      SUM(CASE WHEN m.tipo = 'Cargo' THEN m.valor ELSE -m.valor END)
+      SUM(CASE WHEN g.tipo = 'Cargo' THEN g.valor ELSE -g.valor END)
       OVER (
-        PARTITION BY m.acreedor_id
-        ORDER BY m.fecha, m.id
+        PARTITION BY g.acreedor_id
+        ORDER BY g.fecha, g.id
         ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
       ) AS saldo_despues
-    FROM movimientos_acreedor m
-    LEFT JOIN movimientos_acreedor cargo ON cargo.id = m.cargo_id
-    LEFT JOIN compras co ON co.id = m.compra_id
-    JOIN acreedores a ON a.id = m.acreedor_id
-    WHERE m.acreedor_id = $1 AND a.negocio_id = $2
-    ORDER BY m.fecha, m.id
+    FROM agrupados g
+    ORDER BY g.fecha, g.id
   `, [acreedorId, negocioId]);
   return rows;
 };
@@ -364,6 +434,12 @@ const registrarAbonoTotal = async (negocioId, acreedorId, { valor, metodo, regis
       throw { status: 400, message: `El pago (${valor}) supera la deuda total pendiente (${totalPendiente.toFixed(2)})` };
     }
 
+    // Marca compartida por todas las filas de este pago. Solo agrupa: el importe
+    // del pago se deriva después con SUM sobre estas mismas filas, nunca se
+    // guarda aparte (ver getMovimientos y migrations/20260805_pago_total_acreedor.sql).
+    const { rows: seq } = await client.query(`SELECT nextval('pago_total_acreedor_seq') AS id`);
+    const pagoTotalId = seq[0].id;
+
     let restante = valor;
     const distribucion = [];
     for (const cargo of cargos) {
@@ -372,15 +448,15 @@ const registrarAbonoTotal = async (negocioId, acreedorId, { valor, metodo, regis
       if (pend <= 0) continue;
       const aplica = Math.min(restante, pend);
       await client.query(`
-        INSERT INTO movimientos_acreedor(acreedor_id, usuario_id, tipo, valor, descripcion, cargo_id, metodo, registrar_en_caja, sucursal_id)
-        VALUES ($1, $2, 'Abono', $3, $4, $5, $6, $7, $8)
-      `, [acreedorId, usuario_id || null, aplica, 'Pago total distribuido', cargo.id, metodo || null, registrar_en_caja !== false, sucursal_id || null]);
+        INSERT INTO movimientos_acreedor(acreedor_id, usuario_id, tipo, valor, descripcion, cargo_id, metodo, registrar_en_caja, sucursal_id, pago_total_id)
+        VALUES ($1, $2, 'Abono', $3, $4, $5, $6, $7, $8, $9)
+      `, [acreedorId, usuario_id || null, aplica, 'Pago total distribuido', cargo.id, metodo || null, registrar_en_caja !== false, sucursal_id || null, pagoTotalId]);
       distribucion.push({ cargo_id: cargo.id, valor: aplica });
       restante -= aplica;
     }
 
     await client.query('COMMIT');
-    return { distribucion, total_aplicado: valor - restante };
+    return { pago_total_id: pagoTotalId, distribucion, total_aplicado: valor - restante };
   } catch (err) {
     await client.query('ROLLBACK');
     throw err;

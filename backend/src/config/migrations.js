@@ -353,6 +353,52 @@ const runMigrations = async () => {
     console.error('⚠️  Migración de interés no aplicada (el resto del sistema sigue normal):', err.message);
   }
 
+  // Pago total a acreedores: marca de agrupación — ver migrations/20260805_pago_total_acreedor.sql
+  //
+  // El pago se sigue repartiendo entre los cargos abiertos (una fila por cargo);
+  // esta columna solo dice cuáles filas salieron del mismo pago para que el
+  // estado de cuenta las muestre como un movimiento. No guarda importes: el
+  // total se DERIVA con SUM sobre las hijas, así que anular una compra o editar
+  // un abono ajusta el pago mostrado sin descuadrar el saldo.
+  //
+  // 100% aditiva e idempotente. Sin la columna todo funciona como antes.
+  try {
+    await pool.query(`
+      CREATE SEQUENCE IF NOT EXISTS pago_total_acreedor_seq;
+
+      ALTER TABLE IF EXISTS movimientos_acreedor
+        ADD COLUMN IF NOT EXISTS pago_total_id BIGINT;
+
+      CREATE INDEX IF NOT EXISTS idx_mov_acreedor_pago_total
+        ON movimientos_acreedor (pago_total_id) WHERE pago_total_id IS NOT NULL;
+    `);
+
+    // Backfill de los pagos ya registrados. Las filas de un mismo pago se
+    // insertaron en una transacción, así que comparten `fecha` al microsegundo.
+    await pool.query(`
+      WITH grupos AS (
+        SELECT acreedor_id, fecha, metodo,
+               nextval('pago_total_acreedor_seq') AS nuevo_id
+        FROM movimientos_acreedor
+        WHERE tipo          = 'Abono'
+          AND descripcion   = 'Pago total distribuido'
+          AND pago_total_id IS NULL
+        GROUP BY acreedor_id, fecha, metodo
+      )
+      UPDATE movimientos_acreedor m
+      SET pago_total_id = g.nuevo_id
+      FROM grupos g
+      WHERE m.tipo          = 'Abono'
+        AND m.descripcion   = 'Pago total distribuido'
+        AND m.pago_total_id IS NULL
+        AND m.acreedor_id   = g.acreedor_id
+        AND m.fecha         = g.fecha
+        AND m.metodo        IS NOT DISTINCT FROM g.metodo
+    `);
+  } catch (err) {
+    console.error('⚠️  Migración de pago total a acreedores no aplicada (el resto del sistema sigue normal):', err.message);
+  }
+
   // Notificaciones push (Web Push / VAPID) — ver migrations/20260801_push_notificaciones.sql
   //
   // 100% aditiva e idempotente. Un negocio que no active las notificaciones no

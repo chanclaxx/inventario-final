@@ -9,7 +9,7 @@ import { Badge }   from '../../components/ui/Badge';
 import {
   XCircle, TrendingDown, TrendingUp, Wallet,
   ChevronLeft, ChevronRight, ArrowUpDown, ShoppingBag,
-  MessageSquare, Table2,
+  MessageSquare, Table2, ChevronDown, ChevronUp, Layers,
 } from 'lucide-react';
 
 const PAGE_SIZE = 20;
@@ -47,12 +47,35 @@ const TIPO_CONFIG = {
     bubbleBg:   'bg-teal-50 border border-teal-200',
     montoClass: 'text-teal-600',
   },
+  pago_total: {
+    badge:      'bg-indigo-100 text-indigo-700',
+    label:      'Pago total',
+    Icn:        Layers,
+    lado:       'derecha',
+    bubbleBg:   'bg-indigo-50 border border-indigo-200',
+    montoClass: 'text-indigo-600',
+  },
 };
 
 function resolverTipo(mov) {
+  // El pago total llega ya colapsado del backend: se repartió entre varios
+  // cargos pero se muestra como el único movimiento que hizo el usuario.
+  if (mov.es_pago_total) return 'pago_total';
   if (mov.tipo === 'Cargo') return mov.compra_id ? 'cargo_compra' : 'cargo';
   if (mov.tipo === 'Abono') return mov.cargo_id ? 'abono' : 'saldo_favor';
   return 'abono';
+}
+
+function detalleDe(mov) {
+  return Array.isArray(mov.detalle) ? mov.detalle : [];
+}
+
+// Nombre del cargo al que se aplicó una porción del pago total
+function etiquetaCargo(d) {
+  if (d.cargo_compra_id) {
+    return `Compra #${String(d.cargo_compra_numero ?? d.cargo_compra_id).padStart(5, '0')}`;
+  }
+  return d.cargo_descripcion || 'Cargo';
 }
 
 function formatFecha(fechaStr) {
@@ -147,75 +170,121 @@ function ModalCompraDetalle({ compraId, onClose }) {
 // ─── Fila de cuadrícula contable ─────────────────────────────────────────────
 
 function FilaTablaAcreedor({ mov, onAnular, onVerCompra, isOdd, esAdmin }) {
-  const tipoKey  = resolverTipo(mov);
-  const cfg      = TIPO_CONFIG[tipoKey];
-  const saldo    = Number(mov.saldo_despues);
-  const esCompra = tipoKey === 'cargo_compra' && !!mov.compra_id;
-  const esCargo  = mov.tipo === 'Cargo';
+  const [abierto, setAbierto] = useState(false);
+
+  const tipoKey     = resolverTipo(mov);
+  const cfg         = TIPO_CONFIG[tipoKey];
+  const saldo       = Number(mov.saldo_despues);
+  const esCompra    = tipoKey === 'cargo_compra' && !!mov.compra_id;
+  const esCargo     = mov.tipo === 'Cargo';
+  const esPagoTotal = tipoKey === 'pago_total';
+  const detalle     = detalleDe(mov);
 
   return (
-    <tr
-      onClick={esCompra ? () => onVerCompra(mov.compra_id) : undefined}
-      className={`${isOdd ? 'bg-gray-50/60' : 'bg-white'} ${esCompra ? 'cursor-pointer hover:bg-purple-50/40 transition-colors' : ''}`}>
-      <td className="px-3 py-2 text-xs text-gray-400 whitespace-nowrap align-middle">
-        {formatFecha(mov.fecha)}
-      </td>
-      <td className="px-3 py-2 align-middle">
-        <div className="flex items-center gap-1.5 flex-wrap">
-          <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full whitespace-nowrap ${cfg.badge}`}>
-            {cfg.label}
-          </span>
-          <span className="text-xs text-gray-700 leading-tight">
-            {mov.descripcion || (esCargo ? 'Cargo' : 'Abono')}
-          </span>
-          {esCompra && (
-            <span className="text-[10px] text-purple-400">#{String(mov.compra_numero ?? mov.compra_id).padStart(5, '0')}</span>
+    <>
+      <tr
+        onClick={esCompra ? () => onVerCompra(mov.compra_id)
+               : esPagoTotal ? () => setAbierto((v) => !v) : undefined}
+        className={`${isOdd ? 'bg-gray-50/60' : 'bg-white'} ${
+          esCompra    ? 'cursor-pointer hover:bg-purple-50/40 transition-colors' :
+          esPagoTotal ? 'cursor-pointer hover:bg-indigo-50/40 transition-colors' : ''
+        }`}>
+        <td className="px-3 py-2 text-xs text-gray-400 whitespace-nowrap align-middle">
+          {formatFecha(mov.fecha)}
+        </td>
+        <td className="px-3 py-2 align-middle">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full whitespace-nowrap ${cfg.badge}`}>
+              {cfg.label}
+            </span>
+            <span className="text-xs text-gray-700 leading-tight">
+              {mov.descripcion || (esCargo ? 'Cargo' : 'Abono')}
+            </span>
+            {esCompra && (
+              <span className="text-[10px] text-purple-400">#{String(mov.compra_numero ?? mov.compra_id).padStart(5, '0')}</span>
+            )}
+            {esPagoTotal && detalle.length > 0 && (
+              <span className="flex items-center gap-0.5 text-[10px] text-indigo-400">
+                {abierto ? 'ocultar reparto' : 'ver reparto'}
+                {abierto ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
+              </span>
+            )}
+          </div>
+        </td>
+        <td className="px-3 py-2 text-right text-xs font-semibold text-green-600 whitespace-nowrap align-middle">
+          {!esCargo ? formatCOP(mov.valor) : <span className="text-gray-200">—</span>}
+        </td>
+        <td className="px-3 py-2 text-right text-xs font-semibold text-amber-700 whitespace-nowrap align-middle">
+          {esCargo ? formatCOP(mov.valor) : <span className="text-gray-200">—</span>}
+        </td>
+        <td className={`px-3 py-2 text-right text-xs font-bold whitespace-nowrap align-middle ${
+          saldo > 0 ? 'text-red-500' : 'text-green-600'
+        }`}>
+          {formatCOP(saldo)}
+        </td>
+        <td className="px-2 py-2 align-middle">
+          {/* El pago total no se borra de un tirón: cada porción se elimina desde
+              el reparto, que es donde vive el movimiento real. */}
+          {esAdmin && mov.tipo === 'Abono' && !esPagoTotal && onAnular && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onAnular(mov); }}
+              title="Eliminar abono"
+              className="text-gray-300 hover:text-red-400 transition-colors">
+              <XCircle size={12} />
+            </button>
           )}
-        </div>
-      </td>
-      <td className="px-3 py-2 text-right text-xs font-semibold text-green-600 whitespace-nowrap align-middle">
-        {!esCargo ? formatCOP(mov.valor) : <span className="text-gray-200">—</span>}
-      </td>
-      <td className="px-3 py-2 text-right text-xs font-semibold text-amber-700 whitespace-nowrap align-middle">
-        {esCargo ? formatCOP(mov.valor) : <span className="text-gray-200">—</span>}
-      </td>
-      <td className={`px-3 py-2 text-right text-xs font-bold whitespace-nowrap align-middle ${
-        saldo > 0 ? 'text-red-500' : 'text-green-600'
-      }`}>
-        {formatCOP(saldo)}
-      </td>
-      <td className="px-2 py-2 align-middle">
-        {esAdmin && mov.tipo === 'Abono' && onAnular && (
-          <button
-            onClick={(e) => { e.stopPropagation(); onAnular(mov); }}
-            title="Eliminar abono"
-            className="text-gray-300 hover:text-red-400 transition-colors">
-            <XCircle size={12} />
-          </button>
-        )}
-      </td>
-    </tr>
+        </td>
+      </tr>
+
+      {esPagoTotal && abierto && detalle.map((d) => (
+        <tr key={`det-${d.id}`} className="bg-indigo-50/40">
+          <td className="px-3 py-1.5" />
+          <td className="px-3 py-1.5" colSpan={2}>
+            <span className="text-[11px] text-indigo-500 pl-3">↳ aplicado a {etiquetaCargo(d)}</span>
+          </td>
+          <td className="px-3 py-1.5 text-right text-[11px] font-semibold text-indigo-600 whitespace-nowrap">
+            {formatCOP(d.valor)}
+          </td>
+          <td className="px-3 py-1.5" />
+          <td className="px-2 py-1.5">
+            {esAdmin && onAnular && (
+              <button
+                onClick={(e) => { e.stopPropagation(); onAnular({ ...d, descripcion: `Porción aplicada a ${etiquetaCargo(d)}` }); }}
+                title="Eliminar esta porción del pago"
+                className="text-gray-300 hover:text-red-400 transition-colors">
+                <XCircle size={12} />
+              </button>
+            )}
+          </td>
+        </tr>
+      ))}
+    </>
   );
 }
 
 // ─── Burbuja de chat ──────────────────────────────────────────────────────────
 
 function BurbujaMensaje({ mov, onAnular, onVerCompra }) {
-  const tipoKey   = resolverTipo(mov);
-  const cfg       = TIPO_CONFIG[tipoKey];
-  const Icn       = cfg.Icn;
-  const esDerecha = cfg.lado === 'derecha';
-  const saldo     = Number(mov.saldo_despues);
-  const esCompra  = tipoKey === 'cargo_compra' && !!mov.compra_id;
+  const [abierto, setAbierto] = useState(false);
+
+  const tipoKey     = resolverTipo(mov);
+  const cfg         = TIPO_CONFIG[tipoKey];
+  const Icn         = cfg.Icn;
+  const esDerecha   = cfg.lado === 'derecha';
+  const saldo       = Number(mov.saldo_despues);
+  const esCompra    = tipoKey === 'cargo_compra' && !!mov.compra_id;
+  const esPagoTotal = tipoKey === 'pago_total';
+  const detalle     = detalleDe(mov);
 
   return (
     <div className={`flex ${esDerecha ? 'justify-end' : 'justify-start'} px-2`}>
       <div className={`max-w-[78%] flex flex-col ${esDerecha ? 'items-end' : 'items-start'}`}>
         <div
-          onClick={esCompra ? () => onVerCompra(mov.compra_id) : undefined}
+          onClick={esCompra ? () => onVerCompra(mov.compra_id)
+                 : esPagoTotal ? () => setAbierto((v) => !v) : undefined}
           className={`relative px-3.5 py-2.5 rounded-2xl shadow-sm ${cfg.bubbleBg} ${
             esDerecha ? 'rounded-tr-sm' : 'rounded-tl-sm'
-          } ${esCompra ? 'cursor-pointer hover:shadow-md hover:brightness-95 transition-all' : ''}`}>
+          } ${esCompra || esPagoTotal ? 'cursor-pointer hover:shadow-md hover:brightness-95 transition-all' : ''}`}>
 
           {/* Badge tipo */}
           <div className="flex items-center gap-1.5 mb-1">
@@ -226,6 +295,12 @@ function BurbujaMensaje({ mov, onAnular, onVerCompra }) {
             {esCompra && (
               <span className="text-[10px] text-purple-500 font-medium">
                 #{String(mov.compra_numero ?? mov.compra_id).padStart(5, '0')} · ver detalle →
+              </span>
+            )}
+            {esPagoTotal && detalle.length > 0 && (
+              <span className="flex items-center gap-0.5 text-[10px] text-indigo-500 font-medium">
+                {abierto ? 'ocultar reparto' : 'ver reparto'}
+                {abierto ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
               </span>
             )}
           </div>
@@ -251,10 +326,32 @@ function BurbujaMensaje({ mov, onAnular, onVerCompra }) {
             <p className="text-[10px] text-gray-400 mt-0.5">{mov.metodo}</p>
           )}
 
+          {/* Reparto del pago total: informativo, el pago sigue siendo uno */}
+          {esPagoTotal && abierto && detalle.length > 0 && (
+            <div className="mt-2 pt-2 border-t border-indigo-200 flex flex-col gap-1">
+              {detalle.map((d) => (
+                <div key={`det-${d.id}`} className="flex items-center justify-between gap-3">
+                  <span className="text-[10px] text-indigo-500 truncate">{etiquetaCargo(d)}</span>
+                  <span className="text-[11px] font-semibold text-indigo-600 flex-shrink-0">
+                    {formatCOP(d.valor)}
+                  </span>
+                  {onAnular && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); onAnular({ ...d, descripcion: `Porción aplicada a ${etiquetaCargo(d)}` }); }}
+                      title="Eliminar esta porción del pago"
+                      className="text-indigo-200 hover:text-red-400 transition-colors flex-shrink-0">
+                      <XCircle size={11} />
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* Footer: fecha + acción anular */}
           <div className={`flex items-center gap-2 mt-1.5 ${esDerecha ? 'justify-end' : 'justify-start'}`}>
             <span className="text-[10px] text-gray-400">{formatFecha(mov.fecha)}</span>
-            {mov.tipo === 'Abono' && onAnular && (
+            {mov.tipo === 'Abono' && !esPagoTotal && onAnular && (
               <button
                 onClick={(e) => { e.stopPropagation(); onAnular(mov); }}
                 title="Eliminar abono"

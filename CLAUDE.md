@@ -114,6 +114,21 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > y `prestamos.fecha`/`creditos.creado_en` son **TIMESTAMP** (leer en Bogotá) —
 > confundirlos corre un día y ya mordió dos veces (`mora.service._inicioInteres`).
 
+> **Pago total a un acreedor** (`acreedores/`): el pago se reparte entre los cargos
+> abiertos (FIFO) creando **una fila de `movimientos_acreedor` por cargo** — eso no
+> cambió. Lo que cambia es la **lectura**: las filas que comparten `pago_total_id`
+> se colapsan en `getMovimientos` en un solo movimiento (`es_pago_total`, con el
+> reparto en `detalle`), para que el estado de cuenta muestre el pago tal como lo
+> hizo el usuario. El importe mostrado se **deriva con `SUM`**, nunca se guarda:
+> cancelar una compra borra sus abonos (`compras.service`: `DELETE ... WHERE
+> cargo_id`), y un total guardado quedaría inflado contra un saldo ya bajado.
+> Caja, tesorería, `getComprasConSaldo` y `getAbonosPorCargo` siguen leyendo las
+> filas individuales — no tocar. Quien resuelva la etiqueta del movimiento debe
+> mirar `es_pago_total` **antes** que `cargo_id`, o un pago total se rotula "Pago
+> adelantado": pasa en tres sitios (`EstadoCuentaAcreedor.resolverTipo`,
+> `acreedores.pdf.resolverTipoLabel`, `exportarCuentaAcreedorExcel.metaMovimiento`).
+> Prueba: `17-pago-total-acreedor`.
+
 > **Tesorería**: los saldos por cuenta (efectivo/banco/billetera/corresponsal/divisa USD) se **derivan** de las tablas transaccionales existentes mapeando método de pago → cuenta, anclados en arqueos. Solo traslados/retiros/gastos se escriben en `movimientos_dinero`. Si cambian las reglas de qué entra/sale en `caja.repository.js`, replicarlas en `tesoreria.repository.js` (ramas marcadas). Los movimientos de efectivo se espejan en `movimientos_caja` con `referencia_tipo='tesoreria'`. Un pago de compra desde Tesorería crea un **Abono espejo** en `movimientos_acreedor` (`registrar_en_caja=FALSE`, `mov_dinero_id`) que salda la deuda del acreedor sin doble descuento; anular el pago elimina/recrea el espejo en cascada.
 
 ### Frontend API Layer

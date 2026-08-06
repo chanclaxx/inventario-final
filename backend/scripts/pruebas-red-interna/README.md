@@ -30,6 +30,7 @@ node scripts/pruebas-red-interna/09-mora-credito.mjs
 node scripts/pruebas-red-interna/10-adversario-mora-tarifas.mjs
 node scripts/pruebas-red-interna/11-envios-por-remision.mjs
 node scripts/pruebas-red-interna/12-destino-y-referencias.mjs
+node scripts/pruebas-red-interna/17-pago-total-acreedor.mjs
 ```
 
 > Las suites cargan **las dos migraciones**: `20260725_red_interna.sql` y
@@ -236,6 +237,31 @@ A dónde fue cada equipo y bajo qué nombre quedó, más la deuda en el Dashboar
 > El punto 8 es una regresión: `getLineasDetalladas` recibía el id de la
 > remisión donde el motor de estados esperaba la sucursal, así que el detalle
 > de un envío mostraba siempre el estado de la línea y `liquidable = 0`.
+
+### `17-pago-total-acreedor.mjs` — 44 verificaciones
+
+El pago total a un proveedor se sigue repartiendo entre los cargos abiertos,
+pero el estado de cuenta lo muestra como el movimiento único que hizo el
+usuario. La suite comprueba que esa mejora sea solo de lectura.
+
+No usa `esquema.sql`: monta su propio esquema mínimo (acreedores, movimientos,
+compras) y aplica `migrations/20260805_pago_total_acreedor.sql`.
+
+| # | Escenario |
+|---|---|
+| 1-2 | Cargos y abonos parciales normales se siguen viendo uno por uno |
+| 3 | Un pago de $10.000.000 **por dentro** son 3 filas, repartidas FIFO |
+| 4 | **En el extracto es UNA línea** de $10.000.000, con el reparto adentro |
+| 5 | El saldo corrido es idéntico al que da la suma cruda de la tabla |
+| 6 | Cargos, caja e historial por cargo siguen viendo las porciones reales |
+| 7 | **Borrar una porción** (anular una compra) baja el pago mostrado y cuadra |
+| 8 | Un pago que cae en un solo cargo no se confunde con un pago adelantado |
+| 9 | Los pagos de dos acreedores no se mezclan |
+| 10 | El backfill agrupa los pagos viejos y es idempotente |
+
+> El punto 7 es la razón de no guardar el total en una tabla aparte: cancelar
+> una compra borra sus abonos, y un total guardado quedaría inflado contra un
+> saldo que ya bajó. Derivarlo con `SUM` lo hace imposible por construcción.
 
 ## Nota sobre `esquema.sql`
 

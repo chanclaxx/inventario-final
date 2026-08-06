@@ -27,6 +27,8 @@ const C = {
   morado:       '#7C3AED',
   moradoFondo:  '#F5F3FF',
   teal:         '#0D9488',
+  indigo:       '#4338CA',
+  indigoFondo:  '#EEF2FF',
 };
 
 const FONT   = { normal: 'Helvetica', bold: 'Helvetica-Bold' };
@@ -72,6 +74,9 @@ function hLine(doc, y, x1 = MARGIN, x2 = PAGE_W - MARGIN, color = C.grisBorde) {
 
 // Devuelve la etiqueta de tipo igual que el frontend
 function resolverTipoLabel(mov) {
+  // Viene colapsado del repositorio: un solo movimiento por pago, aunque por
+  // dentro se repartió entre varios cargos.
+  if (mov.es_pago_total)    return 'Pago total';
   if (mov.tipo === 'Cargo') return mov.compra_id ? 'Compra'          : 'Cargo';
   if (mov.tipo === 'Abono') return mov.cargo_id  ? 'Abono'           : 'Pago adelantado';
   return 'Abono';
@@ -263,6 +268,7 @@ function dibujarTabla(doc, movimientos, startY) {
       'Compra':         { bg: C.moradoFondo,  text: C.morado  },
       'Abono':          { bg: C.verdeFondo,   text: C.verde   },
       'Pago adelantado':{ bg: '#F0FDFA',      text: C.teal    },
+      'Pago total':     { bg: C.indigoFondo,  text: C.indigo  },
     };
     const bc = badgeColors[tipoLabel] || badgeColors['Abono'];
     const badgeW = 46; const badgeH = 13;

@@ -20,6 +20,8 @@ const C = {
   abono_tx:       '065F46',
   saldoFavor_bg:  'CCFBF1',   // teal — pago adelantado
   saldoFavor_tx:  '0F766E',
+  pagoTotal_bg:   'E0E7FF',   // índigo — pago total repartido entre varios cargos
+  pagoTotal_tx:   '4338CA',
 
   pendiente_bg:   'FEE2E2',
   parcial_bg:     'FEF3C7',
@@ -92,6 +94,9 @@ const sLeyenda = (bg) => ({
 
 // ─── Tipo de movimiento ───────────────────────────────────────────────────────
 function metaMovimiento(m) {
+  // El pago total llega colapsado: una línea por pago, aunque por dentro se
+  // repartió entre varios cargos (el reparto se ve en la hoja "Cargos").
+  if (m.es_pago_total) return { bg: C.pagoTotal_bg, label: '🧾 Pago total' };
   if (m.tipo === 'Cargo') {
     return m.compra_id
       ? { bg: C.compra_bg, label: '🛒 Compra' }
@@ -182,6 +187,7 @@ function hojaResumen({ nombre, cedula, telefono, esProveedor, movimientos, cargo
     [C.compra_bg,     'Compra — deuda generada por una compra'],
     [C.abono_bg,      'Abono — pago aplicado a un cargo'],
     [C.saldoFavor_bg, 'Pago adelantado — genera saldo a favor'],
+    [C.pagoTotal_bg,  'Pago total — un pago repartido entre varios cargos (ver hoja Cargos)'],
   ].forEach(([bg, desc]) => {
     put(ws, r, 0, 's', ' ', sLeyenda(bg));
     put(ws, r, 1, 's', desc, sC(C.blanco));
