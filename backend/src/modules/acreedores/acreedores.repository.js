@@ -129,54 +129,59 @@ const getMovimientos = async (negocioId, acreedorId) => {
       JOIN acreedores a ON a.id = m.acreedor_id
       WHERE m.acreedor_id = $1 AND a.negocio_id = $2
     ),
+    -- Se agrupa TODO por la misma clave: las filas de un pago total caen juntas
+    -- y cualquier otro movimiento forma su propio grupo de uno. Sin UNION a
+    -- propósito: un UNION obliga a escribir a mano el tipo de cada columna NULL
+    -- y basta que en la BD real una sea timestamptz o bigint para que
+    -- Postgres rechace la consulta entera. Aquí los tipos salen de las columnas.
+    --
+    -- Los campos que solo tienen sentido en un movimiento suelto (firma, cargo,
+    -- compra) se anulan con FILTER en vez de castear un NULL.
     agrupados AS (
-      -- Movimientos sueltos: cargos, compras, abonos normales y saldo a favor
       SELECT
-        id, acreedor_id, usuario_id, tipo, valor, descripcion, firma, fecha,
-        compra_id, registrar_en_caja, compra_numero, cargo_id, metodo,
-        cargo_descripcion, cargo_fecha,
-        NULL::bigint  AS pago_total_id,
-        FALSE         AS es_pago_total,
-        NULL::json    AS detalle
-      FROM movs
-      WHERE pago_total_id IS NULL
+        MIN(m.id)                            AS id,
+        m.acreedor_id,
+        MIN(m.tipo)                          AS tipo,
+        SUM(m.valor)                         AS valor,
+        MIN(m.fecha)                         AS fecha,
+        MIN(m.metodo)                        AS metodo,
+        BOOL_AND(m.registrar_en_caja)        AS registrar_en_caja,
+        MIN(m.pago_total_id)                 AS pago_total_id,
+        MIN(m.pago_total_id) IS NOT NULL     AS es_pago_total,
+        CASE
+          WHEN MIN(m.pago_total_id) IS NULL THEN MIN(m.descripcion)
+          WHEN COUNT(*) = 1                 THEN 'Pago total'
+          ELSE 'Pago total — ' || COUNT(*) || ' cargos'
+        END                                  AS descripcion,
 
-      UNION ALL
+        MIN(m.usuario_id)        FILTER (WHERE m.pago_total_id IS NULL) AS usuario_id,
+        MIN(m.compra_id)         FILTER (WHERE m.pago_total_id IS NULL) AS compra_id,
+        MIN(m.compra_numero)     FILTER (WHERE m.pago_total_id IS NULL) AS compra_numero,
+        MIN(m.cargo_id)          FILTER (WHERE m.pago_total_id IS NULL) AS cargo_id,
+        MIN(m.cargo_descripcion) FILTER (WHERE m.pago_total_id IS NULL) AS cargo_descripcion,
+        MIN(m.cargo_fecha)       FILTER (WHERE m.pago_total_id IS NULL) AS cargo_fecha,
 
-      -- Pagos totales: una fila por pago, con el reparto adentro
-      SELECT
-        MIN(id)                                     AS id,
-        acreedor_id,
-        MIN(usuario_id)                             AS usuario_id,
-        'Abono'::text                               AS tipo,
-        SUM(valor)                                  AS valor,
-        CASE WHEN COUNT(*) = 1 THEN 'Pago total'
-             ELSE 'Pago total — ' || COUNT(*) || ' cargos'
-        END::text                                   AS descripcion,
-        NULL::text                                  AS firma,
-        MIN(fecha)                                  AS fecha,
-        NULL::integer                               AS compra_id,
-        BOOL_AND(registrar_en_caja)                 AS registrar_en_caja,
-        NULL::integer                               AS compra_numero,
-        NULL::integer                               AS cargo_id,
-        MIN(metodo)                                 AS metodo,
-        NULL::text                                  AS cargo_descripcion,
-        NULL::timestamp                             AS cargo_fecha,
-        pago_total_id,
-        TRUE                                        AS es_pago_total,
-        json_agg(json_build_object(
-          'id',                  id,
-          'valor',               valor,
-          'fecha',               fecha,
-          'metodo',              metodo,
-          'cargo_id',            cargo_id,
-          'cargo_descripcion',   cargo_descripcion,
-          'cargo_compra_id',     cargo_compra_id,
-          'cargo_compra_numero', cargo_compra_numero
-        ) ORDER BY id)                              AS detalle
-      FROM movs
-      WHERE pago_total_id IS NOT NULL
-      GROUP BY acreedor_id, pago_total_id
+        -- La firma es BYTEA en producción: MIN() sobre bytea solo existe desde
+        -- Postgres 14, y castearla en un UNION rompía el estado de cuenta
+        -- ("UNION types bytea and text cannot be matched"). array_agg traga
+        -- cualquier tipo y conserva el suyo, sin depender de la versión.
+        (array_agg(m.firma ORDER BY m.id)
+           FILTER (WHERE m.pago_total_id IS NULL))[1]                   AS firma,
+
+        CASE WHEN MIN(m.pago_total_id) IS NOT NULL THEN
+          json_agg(json_build_object(
+            'id',                  m.id,
+            'valor',               m.valor,
+            'fecha',               m.fecha,
+            'metodo',              m.metodo,
+            'cargo_id',            m.cargo_id,
+            'cargo_descripcion',   m.cargo_descripcion,
+            'cargo_compra_id',     m.cargo_compra_id,
+            'cargo_compra_numero', m.cargo_compra_numero
+          ) ORDER BY m.id)
+        END                                  AS detalle
+      FROM movs m
+      GROUP BY m.acreedor_id, COALESCE('p' || m.pago_total_id, 'm' || m.id)
     )
     SELECT
       g.*,

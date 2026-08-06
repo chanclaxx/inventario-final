@@ -128,6 +128,14 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > adelantado": pasa en tres sitios (`EstadoCuentaAcreedor.resolverTipo`,
 > `acreedores.pdf.resolverTipoLabel`, `exportarCuentaAcreedorExcel.metaMovimiento`).
 > Prueba: `17-pago-total-acreedor`.
+> **Nada de `UNION` en `getMovimientos`**: obliga a castear a mano el NULL de cada
+> columna, y `movimientos_acreedor.firma` es **BYTEA** en producción (el fixture de
+> pruebas la declara TEXT). Un `NULL::text` ahí tumbó el estado de cuenta entero con
+> `UNION types bytea and text cannot be matched`. Por eso se agrupa todo con un
+> `GROUP BY` sobre `COALESCE('p'||pago_total_id, 'm'||id)`: los tipos salen de las
+> columnas. La firma se resuelve con `array_agg(...)[1]`, no `MIN()` — `min(bytea)`
+> solo existe desde Postgres 14. La sección 11 de la prueba monta una base con los
+> tipos reales (bytea/timestamptz/bigserial) justo para cazar esto.
 
 > **Tesorería**: los saldos por cuenta (efectivo/banco/billetera/corresponsal/divisa USD) se **derivan** de las tablas transaccionales existentes mapeando método de pago → cuenta, anclados en arqueos. Solo traslados/retiros/gastos se escriben en `movimientos_dinero`. Si cambian las reglas de qué entra/sale en `caja.repository.js`, replicarlas en `tesoreria.repository.js` (ramas marcadas). Los movimientos de efectivo se espejan en `movimientos_caja` con `referencia_tipo='tesoreria'`. Un pago de compra desde Tesorería crea un **Abono espejo** en `movimientos_acreedor` (`registrar_en_caja=FALSE`, `mov_dinero_id`) que salda la deuda del acreedor sin doble descuento; anular el pago elimina/recrea el espejo en cascada.
 

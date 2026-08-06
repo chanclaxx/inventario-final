@@ -48,8 +48,12 @@ await db.exec(`
 // La migración de la mejora, tal cual se aplica en producción.
 await db.exec(readFileSync(path.join(RAIZ, 'migrations/20260805_pago_total_acreedor.sql'), 'utf8'));
 
-const conectar = (t) => ({ query: (s, p) => t.query(s, p ?? []) });
-const pool = { ...conectar(db), connect: async () => ({ ...conectar(db), release() {} }) };
+// El pool apunta a `activa`, que se puede cambiar: la sección 11 monta una
+// segunda base con los tipos que puede traer producción (timestamptz, bigserial)
+// para comprobar que la consulta no depende de los tipos del fixture.
+let activa = db;
+const conectar = () => ({ query: (s, p) => activa.query(s, p ?? []) });
+const pool = { ...conectar(), connect: async () => ({ ...conectar(), release() {} }) };
 require.cache[require.resolve(path.join(RAIZ, 'src/config/db.js'))] =
   { id: 'db', filename: 'db', loaded: true, exports: { pool, connectDB: async () => {} } };
 
@@ -229,6 +233,62 @@ ok('por 1.000.000', pagoViejo && Number(pagoViejo.valor) === 1000000, money(pago
 ok('la cuenta sigue en cero', Number(trasBackfill.at(-1).saldo_despues) === 0);
 ok('la migración es idempotente: no re-agrupa lo ya agrupado',
   (await repo.getMovimientos(1, 1)).filter((m) => m.es_pago_total).length === 1);
+
+console.log('\n═══ 11. Tipos de columna distintos a los del fixture ═══');
+// REGRESIÓN REAL (500 en producción). La primera versión de la consulta usaba
+// UNION ALL con NULLs casteados a mano, entre ellos NULL::text para la firma.
+// En producción `firma` es BYTEA, así que Postgres rechazaba la consulta entera:
+//   UNION types bytea and text cannot be matched   (SQLSTATE 42804)
+// y el estado de cuenta devolvía 500 para TODO acreedor.
+//
+// El fixture del resto de esta suite declara firma TEXT, así que no lo detectaba.
+// Esta base reproduce los tipos reales: bytea, timestamptz, bigserial, varchar.
+// Ojo: MIN(bytea) solo existe desde Postgres 14 — por eso la firma se resuelve
+// con array_agg, que no depende de la versión del servidor.
+const dbTipos = new PGlite();
+await dbTipos.exec(`
+  CREATE TABLE acreedores (
+    id BIGSERIAL PRIMARY KEY, negocio_id BIGINT, nombre TEXT, cedula TEXT,
+    telefono TEXT, proveedor_id BIGINT
+  );
+  CREATE TABLE compras (id BIGSERIAL PRIMARY KEY, numero BIGINT, total NUMERIC);
+  CREATE TABLE movimientos_acreedor (
+    id BIGSERIAL PRIMARY KEY, acreedor_id BIGINT, usuario_id BIGINT,
+    tipo VARCHAR(20), valor NUMERIC(14,2), descripcion VARCHAR(500), firma BYTEA,
+    fecha TIMESTAMPTZ DEFAULT NOW(), compra_id BIGINT, cargo_id BIGINT,
+    registrar_en_caja BOOLEAN DEFAULT TRUE, metodo VARCHAR(50), sucursal_id BIGINT
+  );
+`);
+await dbTipos.exec(readFileSync(path.join(RAIZ, 'migrations/20260805_pago_total_acreedor.sql'), 'utf8'));
+await dbTipos.exec(`
+  INSERT INTO acreedores (negocio_id, nombre, cedula) VALUES (1, 'Proveedor', '900');
+  INSERT INTO compras (numero, total) VALUES (7, 6000000), (8, 4000000);
+  INSERT INTO movimientos_acreedor (acreedor_id, tipo, valor, descripcion, compra_id, fecha, firma) VALUES
+    (1, 'Cargo', 6000000, 'Compra a crédito', 1, '2026-07-01 09:00:00-05', NULL),
+    (1, 'Cargo', 4000000, 'Compra a crédito', 2, '2026-07-05 09:00:00-05', '\\x89504e47'::bytea);
+`);
+
+activa = dbTipos;
+let movsTipos = null;
+let errorTipos = null;
+try {
+  await repo.registrarAbonoTotal(1, 1, {
+    valor: 10000000, metodo: 'Transferencia', registrar_en_caja: true, usuario_id: 1, sucursal_id: 1,
+  });
+  movsTipos = await repo.getMovimientos(1, 1);
+} catch (err) {
+  errorTipos = err;
+}
+ok('la consulta corre con firma BYTEA, timestamptz, bigserial y varchar',
+  errorTipos === null, errorTipos ? errorTipos.message : 'sin error');
+ok('la firma del cargo llega intacta (no se pierde al agrupar)',
+  movsTipos != null && movsTipos.some((m) => m.firma != null));
+ok('el pago se ve como una sola línea de 10.000.000',
+  movsTipos?.filter((m) => m.es_pago_total).length === 1 &&
+  Number(movsTipos.find((m) => m.es_pago_total).valor) === 10000000);
+ok('la cuenta queda saldada', movsTipos && Number(movsTipos.at(-1).saldo_despues) === 0,
+  movsTipos && money(movsTipos.at(-1).saldo_despues));
+activa = db;
 
 console.log(`\n${fallos === 0 ? '✅' : '❌'} ${pasados} pasadas, ${fallos} fallidas\n`);
 process.exit(fallos === 0 ? 0 : 1);
