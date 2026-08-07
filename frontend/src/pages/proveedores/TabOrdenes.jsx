@@ -6,6 +6,7 @@ import {
 import { getProveedores } from '../../api/proveedores.api';
 import { formatCOP, formatFecha, formatFechaHora } from '../../utils/formatters';
 import { Button }      from '../../components/ui/Button';
+import { Input }       from '../../components/ui/Input';
 import { Modal }       from '../../components/ui/Modal';
 import { Spinner }     from '../../components/ui/Spinner';
 import { EmptyState }  from '../../components/ui/EmptyState';
