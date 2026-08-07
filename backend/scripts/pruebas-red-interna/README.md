@@ -289,7 +289,7 @@ permisivo dejaría pasar justo lo que se quiere cazar.
 | 7 | Variantes: el costo baja hasta atributo y variante |
 | 8 | Las mismas columnas con las features apagadas |
 | 9 | Código único: herencia entre sedes y conflictos |
-| 10 | Hojas basura, hoja de seriales vacía, hoja plana con columna Producto |
+| 10 | Hojas basura, hoja de seriales vacía, varias hojas de producto en un libro |
 | 11 | `1.500` / `1,500` / `1.500,50` y fechas `dd/mm/aaaa` |
 | 12 | Sin costo: **avisa, nunca bloquea** |
 | 13 | El preview no escribe ni con errores de por medio |

@@ -71,25 +71,13 @@ const NUM_FILAS_DATOS = 200;
 // ─── Hoja serial ─────────────────────────────────────────────────────────────
 // Estructura: fila 0 = título, fila 1 = claves (usadas como headers por sheet_to_json),
 //             fila 2 = descripciones (slice(1) la descarta), filas 3+ = datos vacíos
-function hojaSerial(nombreProducto, coloresActivo, coloresLista, caracteristicasActivo, caracteristicasLista, lineas = [], ubicacionActiva = false, plana = false) {
+function hojaSerial(nombreProducto, coloresActivo, coloresLista, caracteristicasActivo, caracteristicasLista, lineas = [], ubicacionActiva = false) {
   const ws = {};
 
   // ── Columnas dinámicas ────────────────────────────────────────────────────
   // La CLAVE (fila 1) debe normalizarse (lowercase + spaces→_) al valor que
   // el service leerá desde fila.*. El normalizer hace: trim().toLowerCase().replace(/\s+/g,'_')
   const columnas = [];
-
-  // Formato PLANO: una sola hoja para todos los productos, cada fila dice a
-  // cuál pertenece. La alternativa (una hoja por producto) sigue funcionando;
-  // con 50 modelos son 50 pestañas, que es la queja más común.
-  if (plana) {
-    columnas.push({
-      clave: 'Producto *',
-      desc:  'Requerido · Nombre del producto al que pertenece este IMEI',
-      bg:    C.requerido,
-      num:   false,
-    });
-  }
 
   columnas.push(
     { clave: 'IMEI *',         desc: 'Requerido · Número único de serie',                 bg: C.requerido,  num: false },
@@ -155,11 +143,8 @@ function hojaSerial(nombreProducto, coloresActivo, coloresLista, caracteristicas
   const numCols = columnas.length;
 
   // Fila 0: Título del producto (celda fusionada visualmente)
-  const titulo = plana
-    ? '📦  Seriales — todos los productos en una sola hoja'
-    : `📦  ${nombreProducto} — Hoja de Seriales`;
   columnas.forEach((_, c) => {
-    put(ws, 0, c, 's', c === 0 ? titulo : '', sT(C.tituloFondo, C.blanco, 11));
+    put(ws, 0, c, 's', c === 0 ? `📦  ${nombreProducto} — Hoja de Seriales` : '', sT(C.tituloFondo, C.blanco, 11));
   });
 
   // Fila 1: Claves (usadas por sheet_to_json como headers de columna)
@@ -219,7 +204,6 @@ function hojaSerial(nombreProducto, coloresActivo, coloresLista, caracteristicas
   seal(ws, 3 + NUM_FILAS_DATOS - 1, numCols);
   freeze(ws);
   ws['!cols'] = columnas.map(({ clave }) => {
-    if (clave.includes('Producto')) return { wch: 32 };
     if (clave.includes('IMEI'))   return { wch: 22 };
     if (clave === 'Fecha Entrada') return { wch: 16 };
     if (clave === 'Color')         return { wch: 16 };
@@ -376,12 +360,9 @@ function hojaInstrucciones(config) {
   linea('Nada se escribe hasta que le des a Confirmar.');
   linea('');
   linea('CÓMO USAR ESTA PLANTILLA', C.headerFondo, true, 10);
-  linea('1. Para productos CON serial/IMEI tienes dos formas. Usa la que te sirva:');
-  linea('   • Una hoja por producto: renombra "Ejemplo Producto" con el nombre real y');
-  linea('     agrega más hojas si tienes más productos.');
-  linea('   • Todo en una sola hoja: usa "Seriales en lista" y escribe en cada fila a qué');
-  linea('     producto pertenece el IMEI. Con muchos modelos es mucho más cómodo.');
-  linea('   Si llenas las dos, se importan las dos.');
+  linea('1. Cada hoja con nombre de producto = seriales de ese producto.');
+  linea('   • Renombra la hoja "Ejemplo Producto" con el nombre real del producto.');
+  linea('   • Puedes agregar más hojas para más productos (una hoja por producto).');
   linea('');
   linea('2. La hoja "Productos Cantidad" es para productos SIN serial (accesorios, cajas…).');
   linea('');
@@ -579,16 +560,6 @@ function generarPlantillaBuffer(config = {}, lineas = [], proveedores = []) {
     wb,
     hojaSerial('Ejemplo Producto', coloresActivo, coloresLista, caracteristicasActivo, caracteristicasLista, lineas, ubicacionActiva),
     'Ejemplo Producto'
-  );
-
-  // Formato alternativo: TODOS los seriales en una sola hoja, con columna
-  // Producto. El importador detecta cuál se usó por la presencia de esa
-  // columna, así que los dos formatos conviven en el mismo libro y el usuario
-  // llena el que le sirva. Si se deja vacía, no importa nada.
-  XLSX.utils.book_append_sheet(
-    wb,
-    hojaSerial('', coloresActivo, coloresLista, caracteristicasActivo, caracteristicasLista, lineas, ubicacionActiva, true),
-    'Seriales en lista'
   );
 
   XLSX.utils.book_append_sheet(wb, hojaCantidad(variantesActivo, lineas, codigoActivo, ubicacionActiva), 'Productos Cantidad');

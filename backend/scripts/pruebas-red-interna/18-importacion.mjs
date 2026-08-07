@@ -14,7 +14,7 @@
 //   · variantes con costo propagado
 //   · código único, heredado entre sedes y en conflicto
 //   · ubicación y nota (columnas nuevas)
-//   · hojas sin IMEI, hoja plana con columna Producto
+//   · hojas sin IMEI ni datos, varias hojas de producto en un libro
 //   · números "1.500" / "1,500" y fechas dd/mm/aaaa
 //   · aislamiento entre negocios
 //
@@ -143,7 +143,6 @@ const CAB_CANT_SIMPLE = ['Nombre *', 'Linea', 'Stock', 'Stock Minimo', 'Costo Un
 const CAB_CANT_FULL   = ['Nombre *', 'Codigo', 'Ubicacion', 'Linea', 'Atributo', 'Variante', 'Stock', 'Stock Minimo', 'Costo Unitario', 'Precio Venta', 'Unidad Medida', 'Proveedor', 'Cliente Origen', 'Nota'];
 const CAB_SERIAL_FULL = ['IMEI *', 'Fecha Entrada', 'Proveedor', 'Marca', 'Modelo', 'Linea', 'Color', 'Bateria', 'Tecnico', 'Ubicacion', 'Precio', 'Costo Compra', 'Cliente Origen', 'Nota'];
 const CAB_SERIAL_MIN  = ['IMEI *', 'Fecha Entrada', 'Proveedor', 'Marca', 'Modelo', 'Linea', 'Precio', 'Costo Compra', 'Cliente Origen', 'Nota'];
-const CAB_PLANA       = ['Producto *', 'IMEI *', 'Fecha Entrada', 'Proveedor', 'Marca', 'Modelo', 'Linea', 'Precio', 'Costo Compra', 'Cliente Origen', 'Nota'];
 
 // ═════════════════════════════════════════════════════════════════════════════
 seccion('1. NEGOCIO SIN NINGUNA FEATURE — alta inicial en la sucursal 1');
@@ -488,23 +487,25 @@ await importar(
 check('una hoja de seriales vacía sí crea la referencia',
   (await q(`SELECT COUNT(*)::int n FROM productos_serial WHERE nombre='Modelo Sin Stock'`))[0].n, 1);
 
-// Hoja plana: un solo tab para varios productos.
-const rp = await importar(
-  libro([{ nombre: 'Seriales en lista', ws: hoja('📦 Seriales', CAB_PLANA, [
-    ['Xiaomi A3', 'PL-1', '', '', '', '', '', '', '', '', ''],
-    ['Xiaomi A3', 'PL-2', '', '', '', '', '', '', '', '', ''],
-    ['Moto G54',  'PL-3', '', '', '', '', '', '', '', '', ''],
-    ['',          'PL-4', '', '', '', '', '', '', '', '', ''],
-  ]) }]),
-  { sucursalId: 1, negocioId: 1 }
-);
-check('hoja plana: 3 seriales importados', rp.body.data.resumen.seriales_nuevos, 3);
-check('hoja plana: agrupó en 2 productos', rp.body.data.resumen.productos_serial, 2);
+// Varias hojas de producto en el MISMO libro: es el formato oficial cuando el
+// negocio da de alta varios modelos a la vez.
+const rp = await importar(libro([
+  { nombre: 'Xiaomi A3', ws: hoja('📦  Xiaomi A3 — Hoja de Seriales', CAB_SERIAL_MIN, [
+    ['PL-1', '', '', '', '', '', '', '', '', ''],
+    ['PL-2', '', '', '', '', '', '', '', '', ''],
+  ]) },
+  { nombre: 'Moto G54', ws: hoja('📦  Moto G54 — Hoja de Seriales', CAB_SERIAL_MIN, [
+    ['PL-3', '', '', '', '', '', '', '', '', ''],
+  ]) },
+]), { sucursalId: 1, negocioId: 1 });
+check('varias hojas: 3 seriales importados', rp.body.data.resumen.seriales_nuevos, 3);
+check('varias hojas: 2 productos', rp.body.data.resumen.productos_serial, 2);
 check('Xiaomi A3 quedó con 2 IMEI',
   (await q(`SELECT COUNT(*)::int n FROM seriales s JOIN productos_serial p ON p.id=s.producto_id
             WHERE p.nombre='Xiaomi A3'`))[0].n, 2);
-checkQue('la fila sin producto se avisó', hayTipo(rp.body.data.informe.avisos, 'hoja_ignorada'),
-  JSON.stringify(tipos(rp.body.data.informe.avisos)));
+check('Moto G54 quedó con 1 IMEI',
+  (await q(`SELECT COUNT(*)::int n FROM seriales s JOIN productos_serial p ON p.id=s.producto_id
+            WHERE p.nombre='Moto G54'`))[0].n, 1);
 
 // ═════════════════════════════════════════════════════════════════════════════
 seccion('11. NÚMEROS Y FECHAS COMO LOS ESCRIBE LA GENTE');
@@ -688,7 +689,7 @@ await setConfig(1, TODO_APAGADO);
 const plantillaOff = XLSX.read(await descargar(1), { type: 'buffer', cellDates: true });
 check('plantilla (features off): hojas',
   plantillaOff.SheetNames,
-  ['Instrucciones', 'Ejemplo Producto', 'Seriales en lista', 'Productos Cantidad', 'Referencia']);
+  ['Instrucciones', 'Ejemplo Producto', 'Productos Cantidad', 'Referencia']);
 
 const cabsOff = llenar(plantillaOff, 'Productos Cantidad', [
   { nombre: 'Teclado RT', linea: 'Accesorios', stock: 6, costo_unitario: 20000, precio_venta: 45000, nota: 'del kit' },
@@ -739,11 +740,16 @@ checkQue('la hoja de seriales trae Color, las características y Nota',
   ['color', 'bateria', 'tecnico', 'nota', 'ubicacion'].every((c) => cabsSerOn.includes(c)),
   JSON.stringify(cabsSerOn));
 
-// Y también usa la hoja plana, en el mismo libro.
-llenar(plantillaOn, 'Seriales en lista', [
-  { producto: 'Realme C75', imei: 'RT-200', costo_compra: 400000 },
-  { producto: 'Realme C75', imei: 'RT-201', costo_compra: 400000 },
-]);
+// Y agrega una segunda hoja de producto a mano, como dicen las instrucciones.
+XLSX.utils.book_append_sheet(plantillaOn,
+  XLSX.utils.aoa_to_sheet([
+    ['📦  Realme C75 — Hoja de Seriales'],
+    cabsSerOn.map((c) => c),           // mismas claves que la hoja de la plantilla
+    cabsSerOn.map(() => 'descripción'),
+    ['RT-200', '', '', '', '', '', '', '', '', '', '', '', 400000, '', ''],
+    ['RT-201', '', '', '', '', '', '', '', '', '', '', '', 400000, '', ''],
+  ]),
+  'Realme C75');
 
 const bufferOn = XLSX.write(plantillaOn, { type: 'buffer', bookType: 'xlsx' });
 const prevOn = await analizar(bufferOn, { sucursalId: 3, negocioId: 1 });
@@ -751,7 +757,7 @@ const rt2 = await importar(bufferOn, { sucursalId: 3, negocioId: 1 });
 
 check('preview y aplicación coinciden en el ida y vuelta', rt2.body.data.resumen, prevOn.body.data.resumen);
 check('sin conflictos', rt2.body.data.informe.conflictos.length, 0);
-check('4 seriales (2 de la hoja por producto + 2 de la hoja plana)', rt2.body.data.resumen.seriales_nuevos, 4);
+check('4 seriales, repartidos en las 2 hojas de producto', rt2.body.data.resumen.seriales_nuevos, 4);
 check('1 producto por cantidad', rt2.body.data.resumen.productos_nuevos, 1);
 
 const gorra = (await q(`SELECT id, stock, codigo, ubicacion FROM productos_cantidad
@@ -770,7 +776,7 @@ check('color leído de la plantilla', redmi.map((r) => r.color), ['Negro', 'Azul
 check('características leídas de la plantilla', redmi[0].caracteristicas, { Bateria: '100%', Tecnico: 'Ana' });
 check('fecha de la plantilla', redmi[0].f, '2026-01-02');
 check('nota de la plantilla', redmi[0].nota, 'sellado');
-check('la hoja plana agrupó su producto',
+check('la segunda hoja de producto entró completa',
   (await q(`SELECT COUNT(*)::int n FROM seriales s JOIN productos_serial p ON p.id=s.producto_id
             WHERE p.nombre='Realme C75'`))[0].n, 2);
 check('la hoja Referencia no se interpretó como producto',

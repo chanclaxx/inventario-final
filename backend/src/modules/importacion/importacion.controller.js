@@ -145,32 +145,6 @@ const _leerLibro = (wb, informe) => {
       .map((f, i) => ({ ..._normalizarFila(f), _fila: i + 4 }))
       .filter((f) => f.imei?.toString().trim());
 
-    // ── Formato plano: una sola hoja con columna «Producto» ──────────────────
-    // El formato original es UNA HOJA POR PRODUCTO, que con 50 modelos son 50
-    // hojas. Si la hoja trae columna Producto, cada fila dice a qué producto
-    // pertenece y se agrupa aquí. Los dos formatos conviven.
-    if (cabeceras.includes('producto')) {
-      const grupos = new Map();
-      for (const fila of datos) {
-        const nombre = fila.producto?.toString().trim();
-        if (!nombre) {
-          aviso(informe, {
-            hoja: nombreHoja, fila: fila._fila, columna: 'Producto', valor: fila.imei,
-            tipo: AVISO.HOJA_IGNORADA,
-            mensaje: 'La fila no dice a qué producto pertenece y se omite.',
-            sugerencia: 'Llena la columna Producto.',
-          });
-          continue;
-        }
-        if (!grupos.has(nombre)) grupos.set(nombre, []);
-        grupos.get(nombre).push(fila);
-      }
-      for (const [nombreProducto, filas] of grupos) {
-        hojas.push({ nombreProducto, nombreHoja, filas });
-      }
-      continue;
-    }
-
     const nombreProducto = _nombreProducto(ws, nombreHoja);
     if (!nombreProducto.trim()) {
       informe.hojas_ignoradas.push(nombreHoja);
