@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  getOrdenes, getOrdenById, emitirOrden, cerrarOrden, anularOrden,
+  getOrdenes, getOrdenById, emitirOrden, editarOrden, cerrarOrden, anularOrden,
 } from '../../api/ordenesCompra.api';
 import { getProveedores } from '../../api/proveedores.api';
 import { formatCOP, formatFecha, formatFechaHora } from '../../utils/formatters';
@@ -148,6 +148,99 @@ function LineaTiempo({ orden }) {
   );
 }
 
+// ─── Registrar la factura del proveedor ───────────────────────────────────────
+//
+// La factura del PROVEEDOR: el papel donde él dice cuánto le debes. No tiene
+// nada que ver con las facturas que tú le haces a tus clientes.
+//
+// Va en su propio modal y no dentro de "Editar" porque son dos momentos
+// distintos: los productos se definen antes de emitir, y la factura llega
+// después —a veces con la mercancía, a veces antes—. Una orden ya emitida no
+// puede cambiar lo pedido, pero sí tiene que poder recibir su factura.
+function ModalFactura({ open, orden, obligatoria, onClose }) {
+  const queryClient = useQueryClient();
+  const [numero, setNumero] = useState(orden?.numero_factura || '');
+  const [fecha,  setFecha]  = useState(orden?.fecha_factura?.slice(0, 10) || '');
+  const [plazo,  setPlazo]  = useState(orden?.dias_plazo ?? '');
+  const [error,  setError]  = useState('');
+
+  const mut = useMutation({
+    mutationFn: () => editarOrden(orden.id, {
+      numero_factura: numero.trim() || null,
+      fecha_factura:  fecha || null,
+      dias_plazo:     plazo !== '' ? Number(plazo) : null,
+    }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['ordenes-compra'], exact: false });
+      onClose();
+    },
+    onError: (e) => setError(e.response?.data?.error || 'No se pudo guardar la factura'),
+  });
+
+  // Se muestra el vencimiento que va a quedar antes de guardar, para que nadie
+  // tenga que calcularlo de cabeza.
+  const vencimiento = (() => {
+    if (!fecha || plazo === '') return null;
+    const d = new Date(`${fecha}T00:00:00Z`);
+    if (Number.isNaN(d.getTime())) return null;
+    d.setUTCDate(d.getUTCDate() + Number(plazo));
+    return d.toISOString().slice(0, 10);
+  })();
+
+  return (
+    <Modal open={open} onClose={onClose} title="Factura del proveedor">
+      <div className="flex flex-col gap-4">
+        {obligatoria && (
+          <div className="bg-amber-50 rounded-xl px-3 py-2.5 flex items-start gap-2">
+            <AlertTriangle size={14} className="text-amber-500 flex-shrink-0 mt-0.5" />
+            <p className="text-xs text-amber-800">
+              Tu negocio está configurado para deberle al proveedor desde que te
+              factura el pedido completo. Registra aquí su factura y ya podrás
+              recibir la mercancía.
+            </p>
+          </div>
+        )}
+
+        <Input label="N° de factura" value={numero} autoFocus
+          onChange={(e) => setNumero(e.target.value)}
+          placeholder="El número que trae el papel del proveedor" />
+
+        <div className="grid grid-cols-2 gap-3">
+          <div className="flex flex-col gap-1">
+            <label className="text-sm font-medium text-gray-700">Fecha de la factura</label>
+            <input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)}
+              className="px-3 py-2.5 text-sm bg-gray-100 border-0 rounded-xl text-gray-700
+                         focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white" />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-sm font-medium text-gray-700">Plazo (días)</label>
+            <input type="number" min="0" max="365" value={plazo} placeholder="30"
+              onChange={(e) => setPlazo(e.target.value)}
+              className="px-3 py-2.5 text-sm tabular-nums bg-gray-100 border-0 rounded-xl
+                         focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white" />
+          </div>
+        </div>
+
+        {vencimiento && (
+          <p className="text-xs text-gray-500">
+            Le tienes que pagar antes del <strong>{formatFecha(vencimiento)}</strong>.
+          </p>
+        )}
+
+        {error && <p className="text-xs text-red-500">{error}</p>}
+
+        <div className="flex gap-2 justify-end">
+          <Button variant="secondary" onClick={onClose}>Cancelar</Button>
+          <Button loading={mut.isPending} onClick={() => mut.mutate()}
+            disabled={!numero.trim()}>
+            Guardar factura
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 // ─── Modal de cierre ──────────────────────────────────────────────────────────
 function ModalCerrar({ open, orden, onClose }) {
   const queryClient = useQueryClient();
@@ -197,11 +290,12 @@ function ModalCerrar({ open, orden, onClose }) {
 }
 
 // ─── Ficha de la orden ────────────────────────────────────────────────────────
-function FichaOrden({ ordenId, garantiaActiva, onVolver }) {
+function FichaOrden({ ordenId, garantiaActiva, modoCargo, onVolver }) {
   const queryClient = useQueryClient();
   const { esAdminNegocio } = useAuth();
   const [recibiendo, setRecibiendo] = useState(false);
   const [editando,   setEditando]   = useState(false);
+  const [facturando, setFacturando] = useState(false);
   const [cerrando,   setCerrando]   = useState(false);
   const [error,      setError]      = useState('');
 
@@ -230,6 +324,14 @@ function FichaOrden({ ordenId, garantiaActiva, onVolver }) {
 
   const pendientes = Number(orden.unidades_pedidas) - Number(orden.unidades_recibidas);
   const puedeRecibir = orden.estado === 'Emitida' && pendientes > 0;
+
+  // Con el modo "al facturar la orden", la deuda nace con la factura del
+  // proveedor y las entregas solo traen la mercancía. Sin esa factura no se
+  // puede recibir: crear la deuda al recibir la duplicaría cuando llegue el
+  // papel, y no crearla dejaría mercancía adentro sin nada que deber.
+  const faltaFactura = modoCargo === 'orden'
+    && orden.estado === 'Emitida'
+    && !orden.numero_factura;
 
   return (
     <div className="flex flex-col gap-4">
@@ -273,6 +375,17 @@ function FichaOrden({ ordenId, garantiaActiva, onVolver }) {
           <p className="text-xs text-gray-500 bg-amber-50 rounded-xl px-3 py-2">{orden.notas}</p>
         )}
 
+        {faltaFactura && (
+          <div className="bg-amber-50 rounded-xl px-3 py-2.5 flex items-start gap-2">
+            <AlertTriangle size={14} className="text-amber-500 flex-shrink-0 mt-0.5" />
+            <p className="text-xs text-amber-800">
+              Falta la factura del proveedor. Tu negocio le debe desde que él factura
+              el pedido completo, así que hay que registrarla antes de recibir la
+              mercancía.
+            </p>
+          </div>
+        )}
+
         {error && <p className="text-xs text-red-500">{error}</p>}
 
         <div className="flex flex-wrap gap-2">
@@ -286,8 +399,18 @@ function FichaOrden({ ordenId, garantiaActiva, onVolver }) {
               </Button>
             </>
           )}
+          {/* Una orden emitida ya no cambia lo pedido, pero SÍ tiene que poder
+              recibir su factura: llega después, y a veces días después. */}
+          {orden.estado === 'Emitida' && (
+            <Button size="sm" variant={faltaFactura ? 'primary' : 'secondary'}
+              onClick={() => setFacturando(true)}>
+              <FileText size={14} />
+              {orden.numero_factura ? 'Editar factura' : 'Registrar factura'}
+            </Button>
+          )}
           {puedeRecibir && (
-            <Button size="sm" onClick={() => setRecibiendo(true)}>
+            <Button size="sm" variant={faltaFactura ? 'secondary' : 'primary'}
+              onClick={() => setRecibiendo(true)}>
               <PackageCheck size={14} /> Recibir mercancía
             </Button>
           )}
@@ -350,6 +473,10 @@ function FichaOrden({ ordenId, garantiaActiva, onVolver }) {
           proveedor={{ id: orden.proveedor_id, nombre: orden.proveedor_nombre }}
           onClose={() => setEditando(false)} />
       )}
+      {facturando && (
+        <ModalFactura open orden={orden} obligatoria={faltaFactura}
+          onClose={() => setFacturando(false)} />
+      )}
       {cerrando && (
         <ModalCerrar open orden={orden} onClose={() => setCerrando(false)} />
       )}
@@ -358,7 +485,7 @@ function FichaOrden({ ordenId, garantiaActiva, onVolver }) {
 }
 
 // ─── Pestaña ──────────────────────────────────────────────────────────────────
-export function TabOrdenes({ garantiaActiva }) {
+export function TabOrdenes({ garantiaActiva, modoCargo }) {
   const { sucursalKey, sucursalLista } = useSucursalKey();
   const [ordenAbierta, setOrdenAbierta] = useState(null);
   const [creando,      setCreando]      = useState(false);
@@ -386,7 +513,7 @@ export function TabOrdenes({ garantiaActiva }) {
   if (ordenAbierta) {
     return (
       <FichaOrden ordenId={ordenAbierta} garantiaActiva={garantiaActiva}
-        onVolver={() => setOrdenAbierta(null)} />
+        modoCargo={modoCargo} onVolver={() => setOrdenAbierta(null)} />
     );
   }
 

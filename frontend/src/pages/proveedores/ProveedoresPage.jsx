@@ -2302,6 +2302,9 @@ export default function ProveedoresPage() {
   });
   const ordenesActivas = configData?.ordenes_compra_activas === '1';
   const garantiaActiva = configData?.garantia_proveedor_activa === '1';
+  // 'recepcion' (cada entrega su deuda) o 'orden' (la deuda nace con la factura
+  // del proveedor). Cambia qué se puede hacer sin factura registrada.
+  const modoCargo      = configData?.ordenes_compra_modo_cargo === 'orden' ? 'orden' : 'recepcion';
 
   const tabs = [
     { id: 'proveedores', label: 'Proveedores', Icn: Truck        },
@@ -2342,7 +2345,7 @@ export default function ProveedoresPage() {
         <TabProveedores sucursalKey={sucursalKey} sucursalLista={sucursalLista} />
       )}
       {tabActivo === 'retomas'    && <TabRetomas />}
-      {tabActivo === 'ordenes'    && <TabOrdenes garantiaActiva={garantiaActiva} />}
+      {tabActivo === 'ordenes'    && <TabOrdenes garantiaActiva={garantiaActiva} modoCargo={modoCargo} />}
       {tabActivo === 'compras'    && <TabCompras />}
       {tabActivo === 'busqueda'   && <TabBusquedaCompras />}
     </div>
