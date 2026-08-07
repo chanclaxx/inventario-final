@@ -144,14 +144,27 @@ const getFacturasPorVencer = async (req, res, next) => {
     const data = await service.getFacturasPorVencer(req.user.negocio_id, {
       sucursalId:     req.todasSucursales ? null : req.sucursal_id,
       incluirPagadas: req.query.pagadas === '1',
+      // Las que se registraron sin plazo, para poder ponérselo después.
+      soloSinPlazo:   req.query.sin_plazo === '1',
       proveedorIds:   _proveedorIds(req.user),
     });
     res.json({ ok: true, data });
   } catch (err) { next(err); }
 };
 
+const ponerPlazoACargo = async (req, res, next) => {
+  try {
+    const data = await service.ponerPlazoACargo(
+      req.user.negocio_id,
+      Number(req.params.cargoId),
+      req.body,
+    );
+    res.json({ ok: true, data, message: 'Plazo actualizado' });
+  } catch (err) { next(err); }
+};
+
 module.exports = {
-  getFacturasPorVencer,
+  getFacturasPorVencer, ponerPlazoACargo,
   getAcreedores, getAcreedoresCruces, getAcreedorById,
   crearAcreedor, registrarMovimiento, getCargosAbiertos,
   getComprasConSaldo, getAbonosPorCargo,

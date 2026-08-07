@@ -19,6 +19,15 @@ const validarMovimiento = [
 router.get('/cruces',              requireModulo('acreedores'), ctrl.getAcreedoresCruces);
 // Va ANTES de /:id — si no, Express toma "facturas" como el id de un acreedor.
 router.get('/facturas',            requireModulo('acreedores'), ctrl.getFacturasPorVencer);
+// Poner o corregir el plazo de un cargo ya registrado. Mismo nivel que
+// registrar una compra: cambia cuándo hay que pagar, no cuánto.
+router.patch('/facturas/:cargoId/plazo', requireModulo('acreedores'), requireNivel('supervisor'),
+  [
+    body('fecha_factura').optional({ values: 'null' }).isISO8601().withMessage('Fecha de factura inválida'),
+    body('dias_plazo').optional({ values: 'null' }).isInt({ min: 0, max: 365 }).withMessage('Plazo inválido (0 a 365 días)'),
+    body('fecha_vencimiento').optional({ values: 'null' }).isISO8601().withMessage('Fecha de vencimiento inválida'),
+  ],
+  validate, ctrl.ponerPlazoACargo);
 
 router.get('/',                    requireModulo('acreedores'), ctrl.getAcreedores);
 router.get('/:id',                 requireModulo('acreedores'), ctrl.getAcreedorById);

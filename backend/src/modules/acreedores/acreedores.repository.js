@@ -110,6 +110,7 @@ const findByCruces = async (negocioId, filtro) => {
 // «¿le debo $2.000.000 de una orden que solo me entregó la mitad?».
 const findFacturasPorVencer = async (negocioId, {
   sucursalId = null, incluirPagadas = false, proveedorIds = null,
+  soloSinPlazo = false,
 } = {}) => {
   const params = [negocioId];
   let i = 2;
@@ -138,7 +139,11 @@ const findFacturasPorVencer = async (negocioId, {
       LEFT JOIN proveedores p ON p.id = a.proveedor_id
       WHERE a.negocio_id = $1
         AND m.tipo = 'Cargo'
-        AND m.fecha_vencimiento IS NOT NULL
+        -- "Sin plazo" son los cargos a los que nadie les puso vencimiento: se
+        -- listan aparte para poder ponérselo después. Sin esta vista, olvidar
+        -- el plazo al registrar la compra dejaba la deuda invisible para
+        -- siempre, y la única salida era anular la compra y rehacerla.
+        AND m.fecha_vencimiento IS ${soloSinPlazo ? 'NULL' : 'NOT NULL'}
         ${filtroSucursal}
         ${filtroProveedores}
     ),
@@ -206,6 +211,30 @@ const findAvanceOrdenes = async (ordenIds) => {
     GROUP BY loc.orden_id
   `, [ordenIds]);
   return rows;
+};
+
+/**
+ * Pone (o corrige) el plazo de pago de un cargo ya registrado.
+ *
+ * Solo toca `fecha_vencimiento`: el valor de la deuda no se puede cambiar por
+ * aquí — para eso está la corrección de precios de la compra, que hace la
+ * cascada completa a costo e inventario.
+ *
+ * Acotado por negocio en la misma consulta: sin el JOIN a `acreedores` un id de
+ * cargo de otro negocio pasaría.
+ */
+const actualizarVencimientoCargo = async (negocioId, cargoId, fechaVencimiento) => {
+  const { rows } = await pool.query(`
+    UPDATE movimientos_acreedor m
+    SET fecha_vencimiento = $3::date
+    FROM acreedores a
+    WHERE m.id = $2
+      AND m.acreedor_id = a.id
+      AND a.negocio_id = $1
+      AND m.tipo = 'Cargo'
+    RETURNING m.id, m.fecha_vencimiento
+  `, [negocioId, cargoId, fechaVencimiento]);
+  return rows[0] || null;
 };
 
 const findById = async (negocioId, id) => {
@@ -658,5 +687,5 @@ module.exports = {
   registrarAbonoTotal,
   getMaxAbonoEditable, editarAbono, eliminarAbono,
   create, insertarMovimiento, eliminarSeguro,
-  findFacturasPorVencer, findAvanceOrdenes,
+  findFacturasPorVencer, findAvanceOrdenes, actualizarVencimientoCargo,
 };

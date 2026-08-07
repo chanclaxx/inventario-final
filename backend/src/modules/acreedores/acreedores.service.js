@@ -174,6 +174,28 @@ const _estadoPago = (dias, diasAviso) => {
   return 'al_dia';
 };
 
+/**
+ * Pone el plazo a un cargo que se registró sin él.
+ *
+ * Existe porque olvidar el plazo al registrar una compra es normal, y sin esto
+ * la única salida era anular la compra y rehacerla —moviendo inventario y
+ * deuda— para arreglar una fecha.
+ *
+ * El cálculo es el MISMO que usan las órdenes y las compras
+ * (`utils/vencimiento.util`): la misma factura no puede vencer en días
+ * distintos según por dónde se le puso el plazo.
+ */
+const ponerPlazoACargo = async (negocioId, cargoId, { fecha_factura, dias_plazo, fecha_vencimiento }) => {
+  const { resolverVencimiento } = require('../../utils/vencimiento.util');
+  const vencimiento = resolverVencimiento({ fecha_factura, dias_plazo, fecha_vencimiento });
+
+  // `null` es un valor legítimo: sirve para QUITARLE el plazo a un cargo al que
+  // se le puso por error, y sacarlo del semáforo sin tocar la deuda.
+  const fila = await repo.actualizarVencimientoCargo(negocioId, cargoId, vencimiento);
+  if (!fila) throw { status: 404, message: 'Cargo no encontrado' };
+  return fila;
+};
+
 const getFacturasPorVencer = async (negocioId, opciones = {}) => {
   const cfg = await getConfigOrdenes(negocioId);
   const filas = await repo.findFacturasPorVencer(negocioId, opciones);
@@ -235,7 +257,7 @@ const getFacturasPorVencer = async (negocioId, opciones = {}) => {
 };
 
 module.exports = {
-  getFacturasPorVencer,
+  getFacturasPorVencer, ponerPlazoACargo,
   getAcreedores, getAcreedoresParaUsuario, getAcreedoresCruces, getAcreedorById,
   crearAcreedor, registrarMovimiento, getCargosAbiertos,
   getComprasConSaldo, getAbonosPorCargo,

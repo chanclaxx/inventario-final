@@ -720,6 +720,53 @@ ok('pero se puede ver en "Todas"',
   conPagadas.items.some((f) => f.compra_id === compraSuelta.id));
 
 // ═══════════════════════════════════════════════════════════════════════════
+console.log('\n═══ 20. Se olvidó el plazo: se puede poner después ═══');
+// ═══════════════════════════════════════════════════════════════════════════
+// El caso real: se registra una compra a crédito sin plazo. Sin esto la deuda
+// queda invisible para el semáforo y la única salida era anular la compra y
+// rehacerla —moviendo inventario y dinero— para arreglar una fecha.
+const olvidada = await comprasSvc.registrarCompra({
+  negocio_id: 1, sucursal_id: 1, usuario_id: 1, proveedor_id: 2,
+  numero_factura: 'OLVIDADA-1',
+  lineas: [{ nombre_producto: 'Cargador USB-C 65W', producto_id: 1, cantidad: 3, precio_unitario: 40000 }],
+});
+
+const sinPlazo = await acreedSvc.getFacturasPorVencer(1, { soloSinPlazo: true });
+const laOlvidada = sinPlazo.items.find((f) => f.compra_id === olvidada.id);
+ok('aparece en la lista de "sin plazo"', Boolean(laOlvidada), `${sinPlazo.items.length} sin plazo`);
+ok('con su saldo completo', Number(laOlvidada?.saldo) === 120000, money(laOlvidada?.saldo));
+ok('y marcada como sin_plazo', laOlvidada?.estado_pago === 'sin_plazo', laOlvidada?.estado_pago);
+
+const conPlazoNormal = await acreedSvc.getFacturasPorVencer(1, {});
+ok('NO ensucia la lista normal',
+  !conPlazoNormal.items.some((f) => f.compra_id === olvidada.id));
+
+await acreedSvc.ponerPlazoACargo(1, laOlvidada.cargo_id, {
+  fecha_factura: '2026-08-07', dias_plazo: 10,
+});
+const yaConPlazo = await acreedSvc.getFacturasPorVencer(1, {});
+const arreglada = yaConPlazo.items.find((f) => f.compra_id === olvidada.id);
+ok('tras ponerle el plazo pasa a la lista normal', Boolean(arreglada));
+ok('con el vencimiento correcto (17-ago)',
+  arreglada && new Date(arreglada.fecha_vencimiento).toISOString().slice(0, 10) === '2026-08-17',
+  arreglada ? new Date(arreglada.fecha_vencimiento).toISOString().slice(0, 10) : '—');
+ok('y ya no está en "sin plazo"',
+  !(await acreedSvc.getFacturasPorVencer(1, { soloSinPlazo: true }))
+    .items.some((f) => f.compra_id === olvidada.id));
+
+// Quitar el plazo lo devuelve a "sin plazo" sin tocar la deuda.
+const valorAntes = Number(arreglada.valor);
+await acreedSvc.ponerPlazoACargo(1, laOlvidada.cargo_id, {});
+const trasQuitar = await acreedSvc.getFacturasPorVencer(1, { soloSinPlazo: true });
+const devuelta = trasQuitar.items.find((f) => f.compra_id === olvidada.id);
+ok('quitar el plazo lo devuelve a "sin plazo"', Boolean(devuelta));
+ok('y no toca el valor de la deuda', Number(devuelta?.valor) === valorAntes, money(devuelta?.valor));
+
+await falla('otro negocio no puede tocar este cargo',
+  () => acreedSvc.ponerPlazoACargo(2, laOlvidada.cargo_id, { fecha_factura: '2026-08-07', dias_plazo: 5 }),
+  'no encontrado');
+
+// ═══════════════════════════════════════════════════════════════════════════
 console.log(`\n${'═'.repeat(62)}`);
 console.log(`  ${pasados} verificaciones pasaron · ${fallos} fallaron`);
 console.log('═'.repeat(62));

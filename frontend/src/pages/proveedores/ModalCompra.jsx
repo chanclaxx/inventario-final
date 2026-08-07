@@ -23,7 +23,7 @@ import api from '../../api/axios.config';
 import { getArbol } from '../../api/variantesProductoApi';
 import {
   Trash2, Package, ShoppingBag, ChevronRight, ChevronDown,
-  RefreshCw, AlertTriangle, X, ChevronLeft, Layers, LayoutGrid,
+  RefreshCw, AlertTriangle, X, ChevronLeft, Layers, LayoutGrid, CalendarClock,
 } from 'lucide-react';
 import { CuadriculaImei } from './CuadriculaImei';
 // Compartidas con ModalRecibir: una sola implementación de la captura de un
@@ -1362,34 +1362,60 @@ function PasoPago({ proveedor, productos, tipo, ordenesActivas, onConfirmar, onV
       <Input label="N° Factura proveedor (opcional)" placeholder="FAC-001"
         value={numeroFactura} onChange={(e) => setNumeroFactura(e.target.value)} />
 
-      {/* Plazo de pago. Solo si el negocio activó las órdenes de compra: es ahí
-          donde vive el semáforo de vencimientos, y sin él estos dos campos no
-          alimentarían ninguna pantalla.
-          Va también en la compra SUELTA a propósito — que a alguien se le haya
-          olvidado crear la orden no hace que la factura del proveedor deje de
-          vencer. */}
-      {ordenesActivas && numeroFactura.trim() && (
-        <div className="grid grid-cols-2 gap-2">
-          <div className="flex flex-col gap-1">
-            <label className="text-sm font-medium text-gray-700">Fecha de la factura</label>
-            <input type="date" value={fechaFactura}
-              onChange={(e) => setFechaFactura(e.target.value)}
-              className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-sm
-                text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+      {/* Plazo de pago de una compra SUELTA. Solo si el negocio activó las
+          órdenes de compra: es ahí donde vive el semáforo de vencimientos, y sin
+          él estos campos no alimentarían ninguna pantalla.
+
+          Va SIEMPRE visible mientras el flag esté encendido — antes solo
+          aparecía después de escribir el N° de factura, y quien no lo escribía
+          nunca se enteraba de que la feature existía. Un campo que no se ve no
+          se usa.
+
+          Que se registre aquí y no solo en las órdenes es deliberado: que a
+          alguien se le haya olvidado crear la orden no hace que la factura del
+          proveedor deje de vencer. */}
+      {ordenesActivas && (
+        <div className="bg-gray-50 rounded-xl p-3 flex flex-col gap-2.5">
+          <div className="flex items-center gap-1.5">
+            <CalendarClock size={13} className="text-gray-400" />
+            <p className="text-sm font-medium text-gray-700">
+              ¿Te dieron plazo para pagarla?
+            </p>
           </div>
-          <div className="flex flex-col gap-1">
-            <label className="text-sm font-medium text-gray-700">Plazo (días)</label>
-            <input type="number" min="0" max="365" value={diasPlazo} placeholder="30"
-              onChange={(e) => setDiasPlazo(e.target.value)}
-              className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-sm
-                tabular-nums focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          <p className="text-xs text-gray-400 -mt-1.5">
+            Déjalo vacío si la pagaste de contado. Si le pones plazo, la factura
+            aparece en Acreedores › Facturas y te avisamos antes de que se venza.
+          </p>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="flex flex-col gap-1">
+              <label className="text-xs text-gray-500">Fecha de la factura</label>
+              <input type="date" value={fechaFactura}
+                onChange={(e) => setFechaFactura(e.target.value)}
+                className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-sm
+                  text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-xs text-gray-500">Plazo (días)</label>
+              <input type="number" min="0" max="365" value={diasPlazo} placeholder="30"
+                onChange={(e) => setDiasPlazo(e.target.value)}
+                className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-sm
+                  tabular-nums focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
           </div>
+          {vencimientoCalculado && (
+            <p className="text-xs text-gray-600">
+              Le tienes que pagar antes del <strong>{vencimientoCalculado}</strong>.
+            </p>
+          )}
+          {/* Un plazo sin fecha de factura no produce vencimiento: el backend
+              necesita las dos para calcularlo. Se dice aquí en vez de dejar que
+              se guarde en silencio sin efecto. */}
+          {diasPlazo !== '' && !fechaFactura && (
+            <p className="text-xs text-amber-600">
+              Falta la fecha de la factura para poder calcular el vencimiento.
+            </p>
+          )}
         </div>
-      )}
-      {ordenesActivas && numeroFactura.trim() && vencimientoCalculado && (
-        <p className="text-xs text-gray-500 -mt-2">
-          Le tienes que pagar antes del <strong>{vencimientoCalculado}</strong>.
-        </p>
       )}
 
       <div>

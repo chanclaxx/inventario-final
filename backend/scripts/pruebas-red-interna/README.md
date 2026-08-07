@@ -309,7 +309,7 @@ permisivo dejaría pasar justo lo que se quiere cazar.
 > que el sistema **sabe leer**. Si la plantilla y el parser se separan, todo lo
 > demás sigue en verde y el usuario no puede importar nada.
 
-### `19-ordenes-compra.mjs` — 108 verificaciones
+### `19-ordenes-compra.mjs` — 118 verificaciones
 
 Órdenes de compra, recepción parcial, procedencia y garantía de proveedor.
 Aplica `migrations/20260806_ordenes_compra.sql` tal cual va a producción.
@@ -335,6 +335,7 @@ Aplica `migrations/20260806_ordenes_compra.sql` tal cual va a producción.
 | 17 | Seriales con color y características al recibir |
 | 18 | Compra SUELTA con plazo: también vence |
 | 19 | Pantalla de facturas: órdenes y compras sueltas juntas |
+| 20 | **Se olvidó el plazo: se puede poner después** |
 
 > El 5 y el 6 son los que justifican todo el diseño: el avance de la orden se
 > **deriva** de `lineas_compra` en cada lectura. Un contador guardado quedaría
