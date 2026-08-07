@@ -26,50 +26,22 @@ import {
   RefreshCw, AlertTriangle, X, ChevronLeft, Layers, LayoutGrid,
 } from 'lucide-react';
 import { CuadriculaImei } from './CuadriculaImei';
+// Compartidas con ModalRecibir: una sola implementación de la captura de un
+// IMEI (con su color y sus características) y del reparto por variante. Si cada
+// modal tuviera la suya, un equipo recibido contra una orden acabaría guardando
+// datos distintos a uno comprado sin orden.
+import { FilaImeiCompra, MultiSelectorCompra } from './capturaMercancia';
+import {
+  hojasDelArbol, extraerImei, extraerColor, extraerCaracteristicas,
+  parsearColoresConfig, parsearCaracteristicasConfig,
+  itemSerialVacio, usaItemObjeto,
+} from './capturaMercancia.utils';
 
 // ─── Utilidad: normalizar respuesta de productos a array ─────────────────────
 function normalizarProductos(data) {
   if (Array.isArray(data)) return data;
   if (data?.items && Array.isArray(data.items)) return data.items;
   return [];
-}
-
-// ─── Helper: parsear lista de colores desde config ────────────────────────────
-function parsearColoresConfig(configData) {
-  try {
-    const lista = JSON.parse(configData?.colores_serial_lista || '[]');
-    return Array.isArray(lista) ? lista : [];
-  } catch {
-    return [];
-  }
-}
-
-function parsearCaracteristicasConfig(configData) {
-  try {
-    const lista = JSON.parse(configData?.caracteristicas_serial_lista || '[]');
-    return Array.isArray(lista) ? lista : [];
-  } catch {
-    return [];
-  }
-}
-
-// ─── Helper: extraer string de imei desde item (string o { imei, color }) ────
-function extraerImei(item) {
-  if (typeof item === 'string') return item;
-  return item.imei || '';
-}
-
-// ─── Helper: extraer color desde item ────────────────────────────────────────
-function extraerColor(item) {
-  if (typeof item === 'string') return null;
-  return item.color?.trim() || null;
-}
-
-function extraerCaracteristicas(item) {
-  if (typeof item === 'string') return {};
-  return (item.caracteristicas && typeof item.caracteristicas === 'object')
-    ? item.caracteristicas
-    : {};
 }
 
 // ─── Utilidad: bloquear ruedita en inputs numéricos ──────────────────────────
@@ -306,99 +278,6 @@ function PanelConversion({ factor, traida, onChange, onAplicarATodos }) {
 }
 
 // ─── Multi-selector de variantes para compras ─────────────────────────────────
-function MultiSelectorCompra({ hojas, nodosData, onActualizar }) {
-  const [seleccionadas, setSeleccionadas] = useState(
-    () => new Set(hojas.filter((h) => Number(nodosData[h.key]?.cantidad) > 0).map((h) => h.key))
-  );
-
-  const base = (h) => ({
-    label: h.label, labelPadre: h.labelPadre, tipo: h.tipo, id: h.id,
-    cantidad: '', costo: '',
-    ...(nodosData[h.key] || {}),
-  });
-
-  const toggle = (h) => {
-    setSeleccionadas((prev) => {
-      const next = new Set(prev);
-      if (next.has(h.key)) {
-        next.delete(h.key);
-        onActualizar(h.key, { ...base(h), cantidad: '', costo: '' });
-      } else {
-        next.add(h.key);
-      }
-      return next;
-    });
-  };
-
-  const hojasSel    = hojas.filter((h) => seleccionadas.has(h.key));
-  const nodosActivos = hojasSel.filter((h) => Number(nodosData[h.key]?.cantidad) > 0);
-  const totalUds    = nodosActivos.reduce((s, h) => s + Number(nodosData[h.key]?.cantidad || 0), 0);
-
-  return (
-    <div className="flex flex-col gap-3">
-      {/* Chips de selección */}
-      <div className="flex flex-wrap gap-1.5">
-        {hojas.map((h) => {
-          const activa = seleccionadas.has(h.key);
-          const chipLabel = h.labelPadre ? `${h.labelPadre} / ${h.label}` : h.label;
-          return (
-            <button key={h.key} type="button" onClick={() => toggle(h)}
-              className={`flex items-center gap-1 px-2.5 py-1 rounded-xl text-xs font-medium border transition-all
-                ${activa
-                  ? 'bg-blue-50 border-blue-300 text-blue-700'
-                  : 'bg-white border-gray-200 text-gray-600 hover:border-blue-200 hover:bg-blue-50/50'}`}>
-              {chipLabel}
-              {activa && <X size={9} />}
-            </button>
-          );
-        })}
-      </div>
-
-      {/* Inputs solo para las seleccionadas */}
-      {hojasSel.length > 0 && (
-        <div className="flex flex-col gap-1.5">
-          <div className="flex items-center gap-2 px-1">
-            <p className="flex-1 text-[11px] font-medium text-gray-400 uppercase tracking-wide">Variante</p>
-            <p className="w-14 text-[11px] font-medium text-gray-400 text-center">Cant.</p>
-            <p className="w-24 text-[11px] font-medium text-gray-400 text-center">Precio unit.</p>
-          </div>
-          <div className="flex flex-col gap-1.5">
-            {hojasSel.map((h) => {
-              const data = base(h);
-              return (
-                <div key={h.key}
-                  className="flex items-center gap-2 p-2 rounded-xl border border-blue-200 bg-blue-50/50">
-                  <div className="flex-1 min-w-0">
-                    {h.labelPadre && <p className="text-[10px] text-gray-400 leading-none mb-0.5">{h.labelPadre}</p>}
-                    <p className="text-xs font-medium text-gray-800 leading-tight">{h.label}</p>
-                    <p className="text-[10px] text-gray-400">{h.stock} en stock</p>
-                  </div>
-                  <input type="number" min="0" value={data.cantidad}
-                    onChange={(e) => onActualizar(h.key, { ...base(h), cantidad: e.target.value })}
-                    onWheel={noWheel} placeholder="0"
-                    className="w-14 px-2 py-1.5 text-xs text-center bg-white border border-gray-200
-                      rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400" />
-                  <InputMoneda value={data.costo}
-                    onChange={(val) => onActualizar(h.key, { ...base(h), costo: val })}
-                    placeholder="$0"
-                    className="w-24 px-2 py-1.5 text-xs bg-white border border-gray-200 rounded-lg
-                      focus:outline-none focus:ring-2 focus:ring-blue-400" />
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {nodosActivos.length > 0 && (
-        <p className="text-xs text-blue-600 font-medium px-1">
-          {nodosActivos.length} variante(s) — {totalUds} unidades totales
-        </p>
-      )}
-    </div>
-  );
-}
-
 // ─── Selector de variante/atributo (árbol navegable) ─────────────────────────
 function MiniSelectorVariante({ arbolData, nodoSel, onSeleccionar }) {
   const [nivel,          setNivel]          = useState('atributos');
@@ -496,16 +375,7 @@ function FilaProductoCantidad({
   });
   const tieneArbol = variantesActivo && arbolData.length > 0;
 
-  const labelNodo = (n) => n.tipo_nombre ? `${n.tipo_nombre}: ${n.valor}` : n.valor;
-  const hojas = tieneArbol ? arbolData.flatMap((atr) => {
-    if (atr.variantes?.length > 0) {
-      return atr.variantes.map((v) => ({
-        key: `v-${v.id}`, id: v.id, tipo: 'variante',
-        labelPadre: labelNodo(atr), label: labelNodo(v), stock: v.stock,
-      }));
-    }
-    return [{ key: `a-${atr.id}`, id: atr.id, tipo: 'atributo', label: labelNodo(atr), stock: atr.stock }];
-  }) : [];
+  const hojas = tieneArbol ? hojasDelArbol(arbolData) : [];
 
   return (
     <div className="bg-gray-50 rounded-xl p-3 flex flex-col gap-2">
@@ -636,90 +506,6 @@ function SelectFiltroLinea({ value, onChange }) {
 }
 
 // ─── Fila de IMEI con color + características expandibles ────────────────────
-function FilaImeiCompra({
-  index, item, coloresActivo, coloresConfig,
-  caracteristicasActivo, caracteristicasLista,
-  esDuplicado, inputRef, onChange, onKeyDown, onEliminar, mostrarEliminar,
-}) {
-  const [expandido, setExpandido] = useState(false);
-
-  const imeiValor      = extraerImei(item);
-  const colorValor     = extraerColor(item) || '';
-  const caracteristicas = extraerCaracteristicas(item);
-
-  const usaObjeto = coloresActivo || (caracteristicasActivo && caracteristicasLista?.length > 0);
-
-  const handleImeiChange = (valor) => {
-    if (!usaObjeto) { onChange(valor); return; }
-    onChange({ imei: valor, color: colorValor, caracteristicas });
-  };
-
-  const handleColorChange = (valor) => {
-    onChange({ imei: imeiValor, color: valor, caracteristicas });
-  };
-
-  const handleCaracteristicaChange = (nombre, valor) => {
-    onChange({ imei: imeiValor, color: colorValor, caracteristicas: { ...caracteristicas, [nombre]: valor } });
-  };
-
-  const tieneCaracteristicas = caracteristicasActivo && caracteristicasLista?.length > 0;
-
-  return (
-    <div className="flex flex-col gap-1">
-      <div className="flex gap-1.5 items-center">
-        <input
-          ref={inputRef}
-          type="text"
-          value={imeiValor}
-          onChange={(e) => handleImeiChange(e.target.value)}
-          onKeyDown={onKeyDown}
-          placeholder={`IMEI ${index + 1}`}
-          className={`flex-1 px-2 py-1.5 border rounded-lg text-sm font-mono
-            focus:outline-none focus:ring-2
-            ${esDuplicado
-              ? 'bg-red-50 border-red-400 text-red-700 focus:ring-red-400'
-              : 'bg-white border-gray-200 focus:ring-blue-500'}`}
-        />
-        {coloresActivo && coloresConfig.length > 0 && (
-          <select value={colorValor} onChange={(e) => handleColorChange(e.target.value)}
-            className="w-24 px-2 py-1.5 bg-white border border-gray-200 rounded-lg text-xs
-              text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-400 flex-shrink-0">
-            <option value="">Color...</option>
-            {coloresConfig.map((c) => <option key={c} value={c}>{c}</option>)}
-          </select>
-        )}
-        {tieneCaracteristicas && (
-          <button type="button" onClick={() => setExpandido((v) => !v)}
-            className={`p-2 rounded-lg border transition-colors flex-shrink-0
-              ${expandido ? 'bg-blue-50 border-blue-200 text-blue-600' : 'bg-white border-gray-200 text-gray-400 hover:text-gray-600'}`}>
-            <ChevronDown size={13} className={`transition-transform ${expandido ? 'rotate-180' : ''}`} />
-          </button>
-        )}
-        {mostrarEliminar && (
-          <button onClick={onEliminar}
-            className="p-1.5 rounded-lg hover:bg-red-50 text-gray-300 hover:text-red-400 flex-shrink-0">
-            <Trash2 size={12} />
-          </button>
-        )}
-      </div>
-      {expandido && tieneCaracteristicas && (
-        <div className="flex flex-col gap-1.5 pl-3 border-l-2 border-blue-100 ml-1">
-          {caracteristicasLista.map((nombre) => (
-            <div key={nombre} className="flex items-center gap-2">
-              <span className="text-xs text-gray-500 w-24 flex-shrink-0 truncate">{nombre}</span>
-              <input type="text" value={caracteristicas[nombre] || ''}
-                onChange={(e) => handleCaracteristicaChange(nombre, e.target.value)}
-                placeholder={`${nombre}...`}
-                className="flex-1 px-2 py-1.5 bg-white border border-gray-200 rounded-lg
-                  text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-700" />
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ─── Resumen compacto de IMEIs guardados con cuadrícula ──────────────────────
 function ResumenImeis({ imeis, caracteristicasActivo, caracteristicasLista, onEditar }) {
   const [pagina, setPagina] = useState(0);
@@ -944,9 +730,7 @@ function PasoLineaSerial({
   const queryClient = useQueryClient();
 
   const itemVacio = () =>
-    (coloresActivo || (caracteristicasActivo && caracteristicasLista?.length > 0))
-      ? { imei: '', color: '', caracteristicas: {} }
-      : '';
+    itemSerialVacio(coloresActivo, caracteristicasActivo, caracteristicasLista);
 
   const { data: productosData } = useQuery({
     queryKey: ['productos-serial', ...sucursalKey],
@@ -1020,7 +804,7 @@ function PasoLineaSerial({
   }, [factor, traida]);
 
   const handleGuardarCuadricula = (lineaId, rows, costoGrupal) => {
-    const usaObjeto = coloresActivo || (caracteristicasActivo && caracteristicasLista?.length > 0);
+    const usaObjeto = usaItemObjeto(coloresActivo, caracteristicasActivo, caracteristicasLista);
     const itemsImei = rows.map((r) =>
       usaObjeto
         ? {
@@ -1414,7 +1198,7 @@ function PasoCantidad({
 }
 
 // ─── Paso 3: Pago y confirmación ──────────────────────────────────────────────
-function PasoPago({ proveedor, productos, tipo, onConfirmar, onVolver, loading }) {
+function PasoPago({ proveedor, productos, tipo, ordenesActivas, onConfirmar, onVolver, loading }) {
   const [pagos,               setPagos]               = useState([{ metodo: 'Contado', valor: '' }]);
   const [totalCompra,         setTotalCompra]          = useState(() => {
     if (tipo === 'serial') {
@@ -1436,6 +1220,8 @@ function PasoPago({ proveedor, productos, tipo, onConfirmar, onVolver, loading }
   });
   const [registrarEnCaja,   setRegistrarEnCaja]   = useState(proveedor.tipo !== 'proveedor');
   const [numeroFactura,     setNumeroFactura]      = useState('');
+  const [fechaFactura,      setFechaFactura]       = useState('');
+  const [diasPlazo,         setDiasPlazo]          = useState('');
   const [notas,             setNotas]              = useState('');
   const [error,             setError]              = useState('');
   const metodosPago = useMetodosPago();
@@ -1452,6 +1238,17 @@ function PasoPago({ proveedor, productos, tipo, onConfirmar, onVolver, loading }
   const acreedoresData    = normalizarProductos(acreedoresRaw);
   const acreedorVinculado = acreedoresData.find((a) => a.proveedor_id === proveedor.id) || null;
   const saldoActual       = acreedorVinculado ? Number(acreedorVinculado.saldo || 0) : 0;
+
+  // Se muestra el vencimiento que va a quedar ANTES de guardar, para que nadie
+  // tenga que contar 30 días de cabeza. El backend lo recalcula igual con el
+  // mismo criterio (utils/vencimiento.util) — esto es solo la vista previa.
+  const vencimientoCalculado = (() => {
+    if (!fechaFactura || diasPlazo === '') return null;
+    const d = new Date(`${fechaFactura}T00:00:00Z`);
+    if (Number.isNaN(d.getTime())) return null;
+    d.setUTCDate(d.getUTCDate() + Number(diasPlazo));
+    return d.toISOString().slice(0, 10).split('-').reverse().join('/');
+  })();
 
   const handleConfirmar = () => {
     setError('');
@@ -1491,7 +1288,12 @@ function PasoPago({ proveedor, productos, tipo, onConfirmar, onVolver, loading }
         return setError(`El total asignado (${formatCOP(pagado)}) no coincide con el total (${formatCOP(totalCompra)})`);
       }
     }
-    onConfirmar({ pagos: pagosFinales, totalCompra: Number(totalCompra), registrarEnCaja, numeroFactura, notas });
+    onConfirmar({
+      pagos: pagosFinales, totalCompra: Number(totalCompra), registrarEnCaja,
+      numeroFactura, notas,
+      fechaFactura: fechaFactura || null,
+      diasPlazo:    diasPlazo !== '' ? Number(diasPlazo) : null,
+    });
   };
 
    const resumen = tipo === 'serial'
@@ -1559,6 +1361,36 @@ function PasoPago({ proveedor, productos, tipo, onConfirmar, onVolver, loading }
 
       <Input label="N° Factura proveedor (opcional)" placeholder="FAC-001"
         value={numeroFactura} onChange={(e) => setNumeroFactura(e.target.value)} />
+
+      {/* Plazo de pago. Solo si el negocio activó las órdenes de compra: es ahí
+          donde vive el semáforo de vencimientos, y sin él estos dos campos no
+          alimentarían ninguna pantalla.
+          Va también en la compra SUELTA a propósito — que a alguien se le haya
+          olvidado crear la orden no hace que la factura del proveedor deje de
+          vencer. */}
+      {ordenesActivas && numeroFactura.trim() && (
+        <div className="grid grid-cols-2 gap-2">
+          <div className="flex flex-col gap-1">
+            <label className="text-sm font-medium text-gray-700">Fecha de la factura</label>
+            <input type="date" value={fechaFactura}
+              onChange={(e) => setFechaFactura(e.target.value)}
+              className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-sm
+                text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-sm font-medium text-gray-700">Plazo (días)</label>
+            <input type="number" min="0" max="365" value={diasPlazo} placeholder="30"
+              onChange={(e) => setDiasPlazo(e.target.value)}
+              className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-sm
+                tabular-nums focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          </div>
+        </div>
+      )}
+      {ordenesActivas && numeroFactura.trim() && vencimientoCalculado && (
+        <p className="text-xs text-gray-500 -mt-2">
+          Le tienes que pagar antes del <strong>{vencimientoCalculado}</strong>.
+        </p>
+      )}
 
       <div>
         <p className="text-sm font-medium text-gray-700 mb-2">Método de pago</p>
@@ -1749,6 +1581,9 @@ export function ModalCompra({ proveedor, onClose }) {
   const caracteristicasActivo  = configData?.caracteristicas_serial_activo === '1';
   const caracteristicasLista   = parsearCaracteristicasConfig(configData);
   const variantesActivo        = configData?.variantes_activo === '1';
+  // Con las órdenes activas, una compra suelta también puede llevar plazo: que
+  // se haya olvidado crear la orden no hace que la factura deje de vencer.
+  const ordenesActivas         = configData?.ordenes_compra_activas === '1';
 
   const {
     verificando, verificarYProceder,
@@ -1864,6 +1699,11 @@ export function ModalCompra({ proveedor, onClose }) {
     mutCompra.mutate({
       proveedor_id:        proveedor.id,
       numero_factura:      pagoData.numeroFactura,
+      // El backend deriva la fecha de vencimiento y la escribe en el cargo del
+      // acreedor. Sin plazo simplemente no hay vencimiento, que es lo normal en
+      // una compra de contado.
+      fecha_factura:       pagoData.fechaFactura,
+      dias_plazo:          pagoData.diasPlazo,
       total:               pagoData.totalCompra,
       estado:              'Completada',
       notas:               pagoData.notas,
@@ -1875,7 +1715,7 @@ export function ModalCompra({ proveedor, onClose }) {
 
   const titulos = ['Tipo de producto', 'Productos e IMEIs', 'Pago y confirmación'];
 
-  const usaObjeto = coloresActivo || (caracteristicasActivo && caracteristicasLista?.length > 0);
+  const usaObjeto = usaItemObjeto(coloresActivo, caracteristicasActivo, caracteristicasLista);
   const lineasParaPaso2 = productos.map((l) => ({
     ...l,
     imeis: (l.imeis || []).map((i) => {
@@ -1942,6 +1782,7 @@ export function ModalCompra({ proveedor, onClose }) {
             proveedor={proveedor}
             productos={productos}
             tipo={tipo}
+            ordenesActivas={ordenesActivas}
             onConfirmar={handleConfirmar}
             onVolver={handleVolverA2}
             loading={mutCompra.isPending}

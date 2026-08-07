@@ -535,6 +535,191 @@ ok('con las órdenes apagadas no consulta nada', cartProv.vencidas.length === 0
 await configurar(1, { ordenes_compra_activas: '1' });
 
 // ═══════════════════════════════════════════════════════════════════════════
+console.log('\n═══ 16. Recibir con variantes: el stock va a la HOJA, no al padre ═══');
+// ═══════════════════════════════════════════════════════════════════════════
+// El stock de un producto con variantes es la SUMA de sus hojas. Escribirlo en
+// el padre lo borra la siguiente sincronización — el bug que motivó esta sección.
+//
+// Se vuelve al modo por defecto: lo de aquí en adelante es el flujo normal, y
+// la sección 10 dejó el negocio cobrando por orden.
+await configurar(1, { ordenes_compra_modo_cargo: 'recepcion' });
+
+await db.exec(`
+  INSERT INTO productos_cantidad (nombre, stock, costo_unitario, precio, sucursal_id, activo)
+    VALUES ('Camiseta', 0, 0, 45000, 1, TRUE);
+  INSERT INTO atributos_producto (producto_id, sucursal_id, valor, stock, costo_unitario, activo)
+    VALUES (3, 1, 'Talla M', 0, 0, TRUE);
+  INSERT INTO variantes_atributo (atributo_id, producto_id, valor, stock, costo_unitario, activo)
+    VALUES (1, 3, 'Rojo', 0, 0, TRUE), (1, 3, 'Azul', 0, 0, TRUE);
+`);
+
+const ordenV = await ordenesSvc.crear({
+  negocio_id: 1, sucursal_id: 1, usuario_id: 1, proveedor_id: 1, emitir: true,
+  lineas: [{ tipo: 'cantidad', producto_id: 3, nombre_producto: 'Camiseta', cantidad_pedida: 30, precio_estimado: 20000 }],
+});
+const lineaV = (await ordenesRepo.getLineas(ordenV.id))[0];
+
+await comprasSvc.registrarCompra({
+  negocio_id: 1, sucursal_id: 1, usuario_id: 1, proveedor_id: 1,
+  orden_compra_id: ordenV.id,
+  lineas: [
+    { nombre_producto: 'Camiseta', producto_id: 3, cantidad: 12, precio_unitario: 20000, variante_id: 1, orden_linea_id: lineaV.id },
+    { nombre_producto: 'Camiseta', producto_id: 3, cantidad: 8,  precio_unitario: 21000, variante_id: 2, orden_linea_id: lineaV.id },
+  ],
+});
+
+const vars = await db.query('SELECT id, valor, stock, costo_unitario FROM variantes_atributo ORDER BY id');
+ok('la variante Rojo recibió 12', Number(vars.rows[0].stock) === 12, `${vars.rows[0].stock}`);
+ok('la variante Azul recibió 8',  Number(vars.rows[1].stock) === 8,  `${vars.rows[1].stock}`);
+ok('cada variante guardó SU costo',
+  Number(vars.rows[0].costo_unitario) === 20000 && Number(vars.rows[1].costo_unitario) === 21000,
+  `${vars.rows[0].costo_unitario} / ${vars.rows[1].costo_unitario}`);
+
+const padre = await db.query('SELECT stock FROM productos_cantidad WHERE id = 3');
+ok('el padre quedó sincronizado con la suma (20)', Number(padre.rows[0].stock) === 20, `${padre.rows[0].stock}`);
+
+const avanceV = await ordenesSvc.obtener(1, await cfg(1), ordenV.id);
+ok('la orden cuenta las 20 aunque vinieran repartidas',
+  Number(avanceV.unidades_recibidas) === 20, `${avanceV.unidades_recibidas}/30`);
+
+await falla('el reparto por variantes tampoco puede exceder lo pedido',
+  () => comprasSvc.registrarCompra({
+    negocio_id: 1, sucursal_id: 1, usuario_id: 1, proveedor_id: 1,
+    orden_compra_id: ordenV.id,
+    lineas: [
+      { nombre_producto: 'Camiseta', producto_id: 3, cantidad: 7, precio_unitario: 20000, variante_id: 1, orden_linea_id: lineaV.id },
+      { nombre_producto: 'Camiseta', producto_id: 3, cantidad: 7, precio_unitario: 20000, variante_id: 2, orden_linea_id: lineaV.id },
+    ],
+  }), 'solo faltan');
+
+// ═══════════════════════════════════════════════════════════════════════════
+console.log('\n═══ 17. Seriales con color y características al recibir ═══');
+// ═══════════════════════════════════════════════════════════════════════════
+await db.exec(`
+  INSERT INTO productos_serial (nombre, precio, sucursal_id, activo)
+    VALUES ('iPhone 11 Pro', 1800000, 1, TRUE);
+`);
+const ordenS = await ordenesSvc.crear({
+  negocio_id: 1, sucursal_id: 1, usuario_id: 1, proveedor_id: 1, emitir: true,
+  lineas: [{ tipo: 'serial', producto_id: 1, nombre_producto: 'iPhone 11 Pro', cantidad_pedida: 3, precio_estimado: 1500000, garantia_dias: 365 }],
+});
+const lineaS = (await ordenesRepo.getLineas(ordenS.id))[0];
+ok('la orden pide seriales por modelo y cantidad, sin IMEI',
+  lineaS.tipo === 'serial' && Number(lineaS.cantidad_pedida) === 3);
+
+await comprasSvc.registrarCompra({
+  negocio_id: 1, sucursal_id: 1, usuario_id: 1, proveedor_id: 1,
+  orden_compra_id: ordenS.id,
+  lineas: [
+    { nombre_producto: 'iPhone 11 Pro', producto_id: 1, imei: '351111111111111', cantidad: 1, precio_unitario: 1500000,
+      color: 'Gris', caracteristicas: { Almacenamiento: '64GB', Batería: '89%' }, orden_linea_id: lineaS.id, garantia_dias: 365 },
+    { nombre_producto: 'iPhone 11 Pro', producto_id: 1, imei: '351222222222222', cantidad: 1, precio_unitario: 1500000,
+      color: 'Azul', caracteristicas: { Almacenamiento: '128GB' }, orden_linea_id: lineaS.id, garantia_dias: 365 },
+  ],
+});
+
+const ser = await db.query(`SELECT imei, color, caracteristicas FROM seriales ORDER BY imei`);
+ok('los dos equipos entraron al inventario', ser.rows.length === 2);
+ok('guardó el color de cada uno',
+  ser.rows[0].color === 'Gris' && ser.rows[1].color === 'Azul',
+  ser.rows.map((s) => s.color).join(' / '));
+
+const car0 = typeof ser.rows[0].caracteristicas === 'string'
+  ? JSON.parse(ser.rows[0].caracteristicas) : ser.rows[0].caracteristicas;
+ok('guardó las características', car0?.Almacenamiento === '64GB' && car0?.['Batería'] === '89%',
+  JSON.stringify(car0));
+
+const avanceS = await ordenesSvc.obtener(1, await cfg(1), ordenS.id);
+ok('la orden va 2 de 3 (un IMEI = una unidad)',
+  Number(avanceS.unidades_recibidas) === 2, `${avanceS.unidades_recibidas}/3`);
+
+// ═══════════════════════════════════════════════════════════════════════════
+console.log('\n═══ 18. Compra SUELTA con plazo: también vence ═══');
+// ═══════════════════════════════════════════════════════════════════════════
+const { resolverVencimiento } = require(path.join(RAIZ, 'src/utils/vencimiento.util.js'));
+ok('30 días sobre el 6-ago dan el 5-sep',
+  resolverVencimiento({ fecha_factura: '2026-08-06', dias_plazo: 30 }) === '2026-09-05',
+  resolverVencimiento({ fecha_factura: '2026-08-06', dias_plazo: 30 }));
+ok('una fecha explícita manda sobre el plazo',
+  resolverVencimiento({ fecha_factura: '2026-08-06', dias_plazo: 30, fecha_vencimiento: '2026-08-20' }) === '2026-08-20');
+ok('sin plazo no inventa vencimiento',
+  resolverVencimiento({ fecha_factura: '2026-08-06' }) === null);
+
+const compraSuelta = await comprasSvc.registrarCompra({
+  negocio_id: 1, sucursal_id: 1, usuario_id: 1, proveedor_id: 2,
+  numero_factura: 'SUELTA-1', fecha_factura: '2026-08-06', dias_plazo: 15,
+  lineas: [{ nombre_producto: 'Cargador USB-C 65W', producto_id: 1, cantidad: 5, precio_unitario: 40000 }],
+});
+const cargoSuelto = await db.query(
+  `SELECT fecha_vencimiento, orden_compra_id FROM movimientos_acreedor WHERE compra_id = $1 AND tipo = 'Cargo'`,
+  [compraSuelta.id]
+);
+const vencSuelto = new Date(cargoSuelto.rows[0].fecha_vencimiento).toISOString().slice(0, 10);
+ok('la compra suelta guardó su vencimiento', vencSuelto === '2026-08-21', vencSuelto);
+ok('y no quedó atada a ninguna orden', cargoSuelto.rows[0].orden_compra_id === null);
+
+// ═══════════════════════════════════════════════════════════════════════════
+console.log('\n═══ 19. Pantalla de facturas: órdenes y compras sueltas juntas ═══');
+// ═══════════════════════════════════════════════════════════════════════════
+const acreedSvc = require(path.join(RAIZ, 'src/modules/acreedores/acreedores.service.js'));
+
+// El caso que el usuario quiere ver: una factura de ORDEN con entrega parcial.
+// En modo 'recepcion' el cargo lo crea la entrega y HEREDA el vencimiento de la
+// orden — la factura del proveedor vence el mismo día llegue en una entrega o
+// en tres.
+const ordenF = await ordenesSvc.crear({
+  negocio_id: 1, sucursal_id: 1, usuario_id: 1, proveedor_id: 1, emitir: true,
+  numero_factura: 'FV-900', fecha_factura: '2026-08-06', dias_plazo: 20,
+  lineas: [{ tipo: 'cantidad', producto_id: 2, nombre_producto: 'Vidrio templado 6.7', cantidad_pedida: 100, precio_estimado: 5000 }],
+});
+const lineaF = (await ordenesRepo.getLineas(ordenF.id))[0];
+await comprasSvc.registrarCompra({
+  negocio_id: 1, sucursal_id: 1, usuario_id: 1, proveedor_id: 1,
+  orden_compra_id: ordenF.id,
+  lineas: [{ nombre_producto: 'Vidrio templado 6.7', producto_id: 2, cantidad: 40, precio_unitario: 5000, orden_linea_id: lineaF.id }],
+});
+
+const facturas = await acreedSvc.getFacturasPorVencer(1, {});
+ok('lista facturas de los dos orígenes',
+  facturas.items.some((f) => f.origen === 'orden') && facturas.items.some((f) => f.origen === 'compra'),
+  facturas.items.map((f) => f.origen).join(', '));
+
+const deSuelta = facturas.items.find((f) => f.compra_id === compraSuelta.id);
+ok('la compra suelta aparece con su proveedor', deSuelta?.proveedor_nombre === 'Tecnocel', deSuelta?.proveedor_nombre);
+ok('trae su saldo derivado', Number(deSuelta?.saldo) === 200000, money(deSuelta?.saldo));
+ok('una compra suelta no reporta avance de recepción', deSuelta?.unidades_pedidas === null);
+
+const deOrden = facturas.items.find((f) => Number(f.orden_id) === Number(ordenF.id));
+ok('la de una orden muestra la entrega parcial',
+  deOrden && Number(deOrden.unidades_recibidas) === 40 && Number(deOrden.unidades_pedidas) === 100,
+  deOrden ? `${deOrden.unidades_recibidas}/${deOrden.unidades_pedidas}` : 'ninguna');
+ok('el cargo de la entrega heredó el vencimiento de la orden',
+  deOrden && new Date(deOrden.fecha_vencimiento).toISOString().slice(0, 10) === '2026-08-26',
+  deOrden ? new Date(deOrden.fecha_vencimiento).toISOString().slice(0, 10) : '—');
+ok('y trae el número de factura de la orden', deOrden?.numero_factura === 'FV-900', deOrden?.numero_factura);
+
+ok('el resumen suma lo mismo que las filas',
+  Math.abs(facturas.resumen.total - facturas.items.reduce((s, f) => s + f.saldo, 0)) < 0.01,
+  money(facturas.resumen.total));
+
+// Pagar una factura la saca de la lista: el saldo se DERIVA, no se marca.
+const cargoDeSuelta = (await db.query(
+  `SELECT id, acreedor_id FROM movimientos_acreedor WHERE compra_id = $1 AND tipo = 'Cargo'`, [compraSuelta.id]
+)).rows[0];
+await db.query(`
+  INSERT INTO movimientos_acreedor(acreedor_id, tipo, valor, descripcion, cargo_id, sucursal_id)
+  VALUES ($1, 'Abono', 200000, 'Pago', $2, 1)
+`, [cargoDeSuelta.acreedor_id, cargoDeSuelta.id]);
+
+const trasPagar = await acreedSvc.getFacturasPorVencer(1, {});
+ok('una vez pagada sale de la lista',
+  !trasPagar.items.some((f) => f.compra_id === compraSuelta.id));
+
+const conPagadas = await acreedSvc.getFacturasPorVencer(1, { incluirPagadas: true });
+ok('pero se puede ver en "Todas"',
+  conPagadas.items.some((f) => f.compra_id === compraSuelta.id));
+
+// ═══════════════════════════════════════════════════════════════════════════
 console.log(`\n${'═'.repeat(62)}`);
 console.log(`  ${pasados} verificaciones pasaron · ${fallos} fallaron`);
 console.log('═'.repeat(62));

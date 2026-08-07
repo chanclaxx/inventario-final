@@ -18,6 +18,9 @@ const validarCompra = [
   body('orden_compra_id').optional({ values: 'null' }).isInt({ gt: 0 }).withMessage('Orden de compra inválida'),
   body('lineas.*.orden_linea_id').optional({ values: 'null' }).isInt({ gt: 0 }).withMessage('Línea de orden inválida'),
   body('lineas.*.garantia_dias').optional({ values: 'null' }).isInt({ min: 0, max: 3650 }).withMessage('Garantía inválida (0 a 3650 días)'),
+  // Compromiso de pago de una compra suelta: la factura del proveedor vence
+  // aunque nadie haya creado una orden.
+  body('dias_plazo').optional({ values: 'null' }).isInt({ min: 0, max: 365 }).withMessage('Plazo inválido (0 a 365 días)'),
 ];
 
 // Compras viven dentro del módulo de proveedores

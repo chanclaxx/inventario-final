@@ -1,5 +1,17 @@
 const service = require('./acreedores.service');
 
+// Proveedores que el usuario tiene permitido ver (null = sin restricción).
+// Misma regla que en compras y órdenes: un usuario con la lista acotada no ve
+// las facturas de proveedores que no le tocan.
+const _proveedorIds = (user) => {
+  if (user.rol === 'admin_negocio') return null;
+  const p = user.permisos_proveedores;
+  if (p && !p.ver_todos && Array.isArray(p.ver_lista) && p.ver_lista.length > 0) {
+    return p.ver_lista;
+  }
+  return null;
+};
+
 const getAcreedores = async (req, res, next) => {
   try {
     const { negocio_id, rol, permisos_proveedores } = req.user;
@@ -124,7 +136,22 @@ const getHistorial = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+// Facturas de proveedor con plazo. Solo lectura y solo agrega: si la feature
+// está apagada la consulta devuelve la lista vacía porque ningún cargo tiene
+// vencimiento, así que no hace falta candado extra aquí.
+const getFacturasPorVencer = async (req, res, next) => {
+  try {
+    const data = await service.getFacturasPorVencer(req.user.negocio_id, {
+      sucursalId:     req.todasSucursales ? null : req.sucursal_id,
+      incluirPagadas: req.query.pagadas === '1',
+      proveedorIds:   _proveedorIds(req.user),
+    });
+    res.json({ ok: true, data });
+  } catch (err) { next(err); }
+};
+
 module.exports = {
+  getFacturasPorVencer,
   getAcreedores, getAcreedoresCruces, getAcreedorById,
   crearAcreedor, registrarMovimiento, getCargosAbiertos,
   getComprasConSaldo, getAbonosPorCargo,

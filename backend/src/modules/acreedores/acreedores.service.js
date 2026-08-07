@@ -154,7 +154,88 @@ const getHistorial = async (negocioId, acreedorId) => {
   return repo.getMovimientos(negocioId, acreedorId);
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// FACTURAS DE PROVEEDOR POR VENCER
+//
+// La pregunta que no tenía dónde responderse: «¿qué facturas me van a vencer?».
+// Incluye las de órdenes y las de compras sueltas — que a alguien se le haya
+// olvidado crear la orden no hace que su factura deje de vencer.
+//
+// El semáforo usa el MISMO umbral que el aviso de la mañana
+// (`ordenes_compra_dias_aviso`): si la pantalla dijera "por vencer" y la
+// notificación no llegara, o al revés, el usuario dejaría de creerle a las dos.
+// ─────────────────────────────────────────────────────────────────────────────
+const { getConfigOrdenes } = require('../../middlewares/ordenesCompra.middleware');
+
+const _estadoPago = (dias, diasAviso) => {
+  if (dias == null) return 'sin_plazo';
+  if (dias < 0)          return 'vencida';
+  if (dias <= diasAviso) return 'por_vencer';
+  return 'al_dia';
+};
+
+const getFacturasPorVencer = async (negocioId, opciones = {}) => {
+  const cfg = await getConfigOrdenes(negocioId);
+  const filas = await repo.findFacturasPorVencer(negocioId, opciones);
+
+  // El avance de recepción se pide de una sola vez para todas las órdenes
+  // involucradas: una consulta por factura sería N+1 sobre una pantalla que se
+  // abre todos los días.
+  const ordenIds = [...new Set(filas.map((f) => f.orden_id).filter(Boolean))];
+  const avances  = await repo.findAvanceOrdenes(ordenIds);
+  const avancePorOrden = new Map(avances.map((a) => [Number(a.orden_id), a]));
+
+  const items = filas.map((f) => {
+    const dias = f.dias_para_vencer == null ? null : Number(f.dias_para_vencer);
+    const av   = f.orden_id ? avancePorOrden.get(Number(f.orden_id)) : null;
+
+    return {
+      cargo_id:         f.id,
+      acreedor_id:      f.acreedor_id,
+      acreedor_nombre:  f.acreedor_nombre,
+      proveedor_id:     f.proveedor_id,
+      proveedor_nombre: f.proveedor_nombre || f.acreedor_nombre,
+      sucursal_id:      f.sucursal_id,
+      sucursal_nombre:  f.sucursal_nombre,
+      numero_factura:   f.numero_factura,
+      fecha:            f.fecha,
+      fecha_vencimiento: f.fecha_vencimiento,
+      dias_para_vencer: dias,
+      estado_pago:      _estadoPago(dias, cfg.dias_aviso),
+      valor:            Number(f.valor),
+      abonado:          Number(f.abonado),
+      saldo:            Number(f.saldo),
+      // De dónde viene: una orden, o una compra suelta. La interfaz lo necesita
+      // para saber si puede mostrar avance de recepción o no.
+      origen:           f.orden_id ? 'orden' : 'compra',
+      orden_id:         f.orden_id,
+      orden_numero:     f.orden_numero,
+      orden_estado:     f.orden_estado,
+      compra_id:        f.compra_id,
+      compra_numero:    f.compra_numero,
+      // Solo tiene sentido en facturas que vienen de una orden: una compra
+      // suelta ya llegó completa por definición (se registra al recibirla).
+      unidades_pedidas:   av ? Number(av.pedidas)   : null,
+      unidades_recibidas: av ? Number(av.recibidas) : null,
+    };
+  });
+
+  const total = (pred) => items.filter(pred).reduce((s, i) => s + i.saldo, 0);
+
+  return {
+    items,
+    dias_aviso: cfg.dias_aviso,
+    resumen: {
+      vencidas:    { cuantas: items.filter((i) => i.estado_pago === 'vencida').length,    valor: total((i) => i.estado_pago === 'vencida') },
+      por_vencer:  { cuantas: items.filter((i) => i.estado_pago === 'por_vencer').length, valor: total((i) => i.estado_pago === 'por_vencer') },
+      al_dia:      { cuantas: items.filter((i) => i.estado_pago === 'al_dia').length,     valor: total((i) => i.estado_pago === 'al_dia') },
+      total:       total(() => true),
+    },
+  };
+};
+
 module.exports = {
+  getFacturasPorVencer,
   getAcreedores, getAcreedoresParaUsuario, getAcreedoresCruces, getAcreedorById,
   crearAcreedor, registrarMovimiento, getCargosAbiertos,
   getComprasConSaldo, getAbonosPorCargo,

@@ -89,6 +89,125 @@ const findByCruces = async (negocioId, filtro) => {
   return rows;
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// FACTURAS DE PROVEEDOR CON PLAZO — lo que el negocio debe y cuándo lo debe
+//
+// Es el espejo de la cartera de clientes: aquí el deudor es el negocio. Sale de
+// los CARGOS que tienen `fecha_vencimiento`, vengan de donde vengan:
+//
+//   · de una ORDEN de compra (modo 'orden': un cargo por la orden completa)
+//   · de una COMPRA contra una orden (modo 'recepcion': un cargo por entrega,
+//     que hereda el vencimiento de la orden)
+//   · de una COMPRA SUELTA con plazo — a alguien se le olvidó crear la orden,
+//     o el negocio no las usa, pero la factura vence igual
+//
+// El saldo se DERIVA (cargo − abonos). Los abonos se siguen por `cargo_id` y no
+// por la compra: un pago hecho desde la cuenta del proveedor —la vía normal—
+// solo lleva cargo_id, y buscarlo de otra forma dejaría la factura marcada como
+// pendiente después de haberla pagado.
+//
+// El avance de recepción viaja al lado porque es la otra mitad de la pregunta:
+// «¿le debo $2.000.000 de una orden que solo me entregó la mitad?».
+const findFacturasPorVencer = async (negocioId, {
+  sucursalId = null, incluirPagadas = false, proveedorIds = null,
+} = {}) => {
+  const params = [negocioId];
+  let i = 2;
+
+  let filtroSucursal = '';
+  if (sucursalId) {
+    filtroSucursal = `AND m.sucursal_id = $${i++}`;
+    params.push(sucursalId);
+  }
+
+  let filtroProveedores = '';
+  if (proveedorIds && proveedorIds.length) {
+    filtroProveedores = `AND a.proveedor_id = ANY($${i++}::int[])`;
+    params.push(proveedorIds);
+  }
+
+  const { rows } = await pool.query(`
+    WITH cargos AS (
+      SELECT
+        m.id, m.acreedor_id, m.valor, m.fecha, m.fecha_vencimiento,
+        m.compra_id, m.orden_compra_id, m.sucursal_id, m.descripcion,
+        a.nombre AS acreedor_nombre, a.proveedor_id,
+        p.nombre AS proveedor_nombre
+      FROM      movimientos_acreedor m
+      JOIN      acreedores  a ON a.id = m.acreedor_id
+      LEFT JOIN proveedores p ON p.id = a.proveedor_id
+      WHERE a.negocio_id = $1
+        AND m.tipo = 'Cargo'
+        AND m.fecha_vencimiento IS NOT NULL
+        ${filtroSucursal}
+        ${filtroProveedores}
+    ),
+    saldos AS (
+      SELECT c.id,
+             COALESCE(SUM(ab.valor), 0) AS abonado
+      FROM cargos c
+      LEFT JOIN movimientos_acreedor ab
+             ON ab.cargo_id = c.id AND ab.tipo = 'Abono'
+      GROUP BY c.id
+    )
+    SELECT
+      c.*,
+      s.abonado,
+      (c.valor - s.abonado)                         AS saldo,
+      (c.fecha_vencimiento - CURRENT_DATE)          AS dias_para_vencer,
+      su.nombre                                     AS sucursal_nombre,
+      -- Datos de la orden, si el cargo viene de una. NULL en compra suelta.
+      COALESCE(oc.id, oc2.id)                       AS orden_id,
+      COALESCE(oc.numero, oc2.numero)               AS orden_numero,
+      COALESCE(oc.numero_factura, oc2.numero_factura, co.numero_factura) AS numero_factura,
+      COALESCE(oc.estado, oc2.estado)               AS orden_estado,
+      co.numero                                     AS compra_numero
+    FROM      cargos  c
+    JOIN      saldos  s  ON s.id = c.id
+    LEFT JOIN sucursales su ON su.id = c.sucursal_id
+    LEFT JOIN ordenes_compra oc  ON oc.id  = c.orden_compra_id
+    LEFT JOIN compras        co  ON co.id  = c.compra_id
+    LEFT JOIN ordenes_compra oc2 ON oc2.id = co.orden_compra_id
+    WHERE ${incluirPagadas ? 'TRUE' : '(c.valor - s.abonado) > 0'}
+    ORDER BY c.fecha_vencimiento ASC, c.id ASC
+  `, params);
+
+  return rows;
+};
+
+/**
+ * Avance de recepción de las órdenes indicadas, para pintarlo al lado de su
+ * factura. Va en una consulta aparte y no dentro de la anterior a propósito:
+ * mezclarlas obligaría a agrupar los cargos por orden y el saldo de cada cargo
+ * dejaría de ser legible.
+ *
+ * Mismo cálculo derivado que en el módulo de órdenes, con el mismo FILTER: sin
+ * él las recepciones canceladas seguirían contando como recibidas.
+ */
+const findAvanceOrdenes = async (ordenIds) => {
+  if (!ordenIds || !ordenIds.length) return [];
+  const { rows } = await pool.query(`
+    SELECT loc.orden_id,
+           SUM(loc.cantidad_pedida) AS pedidas,
+           SUM(LEAST(
+             COALESCE(av.recibida, 0), loc.cantidad_pedida
+           )) AS recibidas
+    FROM lineas_orden_compra loc
+    LEFT JOIN (
+      SELECT lc.orden_linea_id,
+             COALESCE(SUM(lc.cantidad - COALESCE(lc.cantidad_devuelta, 0))
+               FILTER (WHERE c.id IS NOT NULL), 0) AS recibida
+      FROM      lineas_compra lc
+      LEFT JOIN compras c ON c.id = lc.compra_id AND c.estado <> 'Cancelada'
+      WHERE lc.orden_linea_id IS NOT NULL
+      GROUP BY lc.orden_linea_id
+    ) av ON av.orden_linea_id = loc.id
+    WHERE loc.orden_id = ANY($1::bigint[])
+    GROUP BY loc.orden_id
+  `, [ordenIds]);
+  return rows;
+};
+
 const findById = async (negocioId, id) => {
   const { rows } = await pool.query(
     `SELECT * FROM acreedores WHERE id = $1 AND negocio_id = $2`,
@@ -539,4 +658,5 @@ module.exports = {
   registrarAbonoTotal,
   getMaxAbonoEditable, editarAbono, eliminarAbono,
   create, insertarMovimiento, eliminarSeguro,
+  findFacturasPorVencer, findAvanceOrdenes,
 };

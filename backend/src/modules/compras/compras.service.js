@@ -3,6 +3,7 @@ const comprasRepo               = require('./compras.repository');
 const { calcularCostoPromedio } = require('../../utils/costoPromedio.util');
 const variantesRepo             = require('../variantes-producto/variantes-producto.repository');
 const { getConfigOrdenes }      = require('../../middlewares/ordenesCompra.middleware');
+const { resolverVencimiento }   = require('../../utils/vencimiento.util');
 
 const getCompras = (sucursalId, negocioId, proveedorIds = null) =>
   comprasRepo.findAll(sucursalId, negocioId, proveedorIds);
@@ -117,6 +118,13 @@ const registrarCompra = async ({
   total: totalRecibido, pagos = [],
   registrar_en_caja = true,
   orden_compra_id = null,
+  // Compromiso de pago de una compra SUELTA (sin orden). Se le olvidó a alguien
+  // crear la orden, o el negocio no las usa, pero la factura del proveedor
+  // igual vence: sin esto esa deuda no saldría nunca en el semáforo ni en el
+  // aviso de la mañana.
+  fecha_factura = null,
+  dias_plazo = null,
+  fecha_vencimiento = null,
 }) => {
   // ── Verificar sucursal pertenece al negocio ──────────────────────────────
   const { rows: sucRows } = await pool.query(
@@ -395,14 +403,20 @@ const registrarCompra = async ({
       }
 
       if (!cargoId) {
-        // Cargo por el total completo de esta compra. Si viene de una orden con
-        // plazo pactado, hereda su vencimiento: la factura del proveedor vence
-        // el mismo día llegue la mercancía en una entrega o en tres.
+        // Vencimiento del cargo, en este orden:
+        //   1. el que se registró en ESTA compra (una compra suelta con plazo)
+        //   2. el de la orden, si viene de una — la factura del proveedor vence
+        //      el mismo día llegue la mercancía en una entrega o en tres
+        //   3. ninguno: no todas las compras tienen plazo, y eso está bien
+        const vencimientoPropio = resolverVencimiento({
+          fecha_factura, dias_plazo, fecha_vencimiento,
+        });
+
         const { rows: cargoRows } = await client.query(
           `INSERT INTO movimientos_acreedor(acreedor_id, usuario_id, tipo, descripcion, valor, compra_id, sucursal_id, orden_compra_id, fecha_vencimiento)
            VALUES ($1, $2, 'Cargo', $3, $4, $5, $6, $7, $8) RETURNING id`,
           [acreedorId, usuario_id, `Compra #${compra.numero ?? compra.id} — mercancía`, total, compra.id, sucursal_id, orden_compra_id,
-           ordenDeLaCompra?.fecha_vencimiento || null]
+           vencimientoPropio || ordenDeLaCompra?.fecha_vencimiento || null]
         );
         cargoId = cargoRows[0].id;
       }

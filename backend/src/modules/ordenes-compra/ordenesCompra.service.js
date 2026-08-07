@@ -57,21 +57,10 @@ const _decorar = (orden, cfg) => ({
   ..._estadoPago(orden, cfg.dias_aviso),
 });
 
-// ── Validación de la cabecera ────────────────────────────────────────────────
-// El plazo y el vencimiento son dos formas de decir lo mismo: si viene el plazo
-// y hay fecha de factura, se deriva el vencimiento; si el usuario escribió una
-// fecha explícita, esa manda (puede haber pactado algo distinto al plazo
-// nominal). Nunca se inventa una factura que no existe.
-const _resolverVencimiento = ({ fecha_factura, dias_plazo, fecha_vencimiento }) => {
-  if (fecha_vencimiento) return fecha_vencimiento;
-  if (fecha_factura && Number.isInteger(Number(dias_plazo))) {
-    const base = new Date(`${String(fecha_factura).slice(0, 10)}T00:00:00Z`);
-    if (Number.isNaN(base.getTime())) return null;
-    base.setUTCDate(base.getUTCDate() + Number(dias_plazo));
-    return base.toISOString().slice(0, 10);
-  }
-  return null;
-};
+// El cálculo del vencimiento es compartido con las compras sueltas: si cada uno
+// hiciera su cuenta, la misma factura vencería en días distintos según por dónde
+// se hubiera registrado.
+const { resolverVencimiento: _resolverVencimiento } = require('../../utils/vencimiento.util');
 
 const _validarLineas = (lineas) => {
   if (!Array.isArray(lineas) || lineas.length === 0) {

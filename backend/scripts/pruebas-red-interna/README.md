@@ -309,7 +309,7 @@ permisivo dejaría pasar justo lo que se quiere cazar.
 > que el sistema **sabe leer**. Si la plantilla y el parser se separan, todo lo
 > demás sigue en verde y el usuario no puede importar nada.
 
-### `19-ordenes-compra.mjs` — 82 verificaciones
+### `19-ordenes-compra.mjs` — 108 verificaciones
 
 Órdenes de compra, recepción parcial, procedencia y garantía de proveedor.
 Aplica `migrations/20260806_ordenes_compra.sql` tal cual va a producción.
@@ -331,6 +331,10 @@ Aplica `migrations/20260806_ordenes_compra.sql` tal cual va a producción.
 | 13 | **No existe ninguna columna de avance guardado** |
 | 14 | Códigos del proveedor: la equivalencia se aprende, no se captura |
 | 15 | Alerta de facturas de proveedor por pagar |
+| 16 | **Recibir con variantes: el stock va a la HOJA, no al padre** |
+| 17 | Seriales con color y características al recibir |
+| 18 | Compra SUELTA con plazo: también vence |
+| 19 | Pantalla de facturas: órdenes y compras sueltas juntas |
 
 > El 5 y el 6 son los que justifican todo el diseño: el avance de la orden se
 > **deriva** de `lineas_compra` en cada lectura. Un contador guardado quedaría
@@ -340,6 +344,13 @@ Aplica `migrations/20260806_ordenes_compra.sql` tal cual va a producción.
 > El 13 es un candado sobre el diseño mismo: consulta
 > `information_schema.columns` para que nadie agregue un `cantidad_recibida` más
 > adelante «para que sea más rápido».
+
+> El 16 es el que cierra un fallo silencioso: el stock de un producto con
+> variantes es la **suma de sus hojas**, así que escribirlo en el producto padre
+> lo borra la siguiente `sincronizarStockProductoEnTx`. La mercancía recibida se
+> perdería sin un solo mensaje de error. La recepción reparte por variante igual
+> que la compra normal, con el **mismo componente** (`capturaMercancia.jsx`), no
+> con una copia.
 
 > El 15 cubre un error fácil de cometer: los abonos de la cartera de proveedores
 > se siguen por **`cargo_id`**, no por la orden. Un pago hecho desde la cuenta del

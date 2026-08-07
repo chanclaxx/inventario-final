@@ -24,3 +24,7 @@ export const exportarCuentaPdf = (id, formato) =>
   api.get(`/acreedores/${id}/pdf`, { params: { formato }, responseType: 'blob' });
 
 export const getHistorialAcreedor = (id) => api.get(`/acreedores/${id}/historial`);
+
+// Facturas de proveedor con plazo de pago: las de órdenes y las de compras
+// sueltas. `pagadas=1` incluye las que ya están saldadas.
+export const getFacturasPorVencer = (params) => api.get('/acreedores/facturas', { params });

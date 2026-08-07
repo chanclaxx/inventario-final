@@ -32,11 +32,12 @@ import { ReciboAcreedor } from '../../components/Reciboacreedor';
 import {
   Users, Plus, ChevronDown, ChevronUp, ChevronLeft, ChevronRight,
   Trash2, AlertTriangle, Calculator, PenLine, Wallet, Search, FileDown,
-  FileSpreadsheet, Layers, Clock,
+  FileSpreadsheet, Layers, Clock, FileText,
 } from 'lucide-react';
 import api from '../../api/axios.config';
 import { getCompraById } from '../../api/compras.api';
 import { EstadoCuentaAcreedor } from './EstadoCuentaAcreedor';
+import { TabFacturas } from './TabFacturas';
 
 // ─── utils ────────────────────────────────────────────────────────────────────
 
@@ -1844,7 +1845,17 @@ export default function AcreedoresPage() {
   const [acreedorSel, setAcreedorSel]  = useState(null);
   const [modalNuevo, setModalNuevo]    = useState(false);
   const [acreedorEliminar, setEliminar] = useState(null);
+  const [tab, setTab]                   = useState('acreedores');
   const queryClient                     = useQueryClient();
+
+  // El tab de Facturas solo aparece si el negocio activó las órdenes de compra:
+  // sin esa feature ningún cargo lleva fecha de vencimiento y la pantalla
+  // saldría siempre vacía.
+  const { data: configFacturas } = useQuery({
+    queryKey: ['config'],
+    queryFn:  () => api.get('/config').then((r) => r.data.data),
+  });
+  const facturasActivas = configFacturas?.ordenes_compra_activas === '1';
 
   const mutEliminar = useMutation({
     mutationFn: () => eliminarAcreedor(acreedorEliminar.id),
@@ -1869,6 +1880,33 @@ export default function AcreedoresPage() {
     <>
       {!acreedorSel ? (
         <div className="flex flex-col gap-4">
+          {facturasActivas && (
+            <div className="flex gap-1 bg-gray-100 p-1 rounded-xl">
+              {[
+                { id: 'acreedores', label: 'Acreedores', Icn: Users    },
+                { id: 'facturas',   label: 'Facturas',   Icn: FileText },
+              ].map((t) => {
+                const TabIcon = t.Icn;
+                return (
+                  <button key={t.id} onClick={() => setTab(t.id)}
+                    className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg
+                      text-sm font-medium transition-all
+                      ${tab === t.id ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+                    <TabIcon size={15} /> {t.label}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {facturasActivas && tab === 'facturas' ? (
+            <TabFacturas onAbrirAcreedor={(f) => {
+              // Se abre la ficha del acreedor con lo mínimo que necesita: la
+              // pantalla recarga sus datos completos por id.
+              setAcreedorSel({ id: f.acreedor_id, nombre: f.acreedor_nombre });
+            }} />
+          ) : (
+          <>
           <div className="flex items-center gap-3">
             <div className="flex-1">
               <SearchInput value={busqueda} onChange={setBusqueda} placeholder="Buscar acreedor..." />
@@ -1895,6 +1933,8 @@ export default function AcreedoresPage() {
                 <FilaAcreedor key={a.id} acreedor={a} onClick={() => setAcreedorSel(a)} />
               ))}
             </div>
+          )}
+          </>
           )}
         </div>
       ) : (

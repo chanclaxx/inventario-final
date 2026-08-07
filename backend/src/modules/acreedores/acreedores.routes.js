@@ -17,6 +17,8 @@ const validarMovimiento = [
 ];
 
 router.get('/cruces',              requireModulo('acreedores'), ctrl.getAcreedoresCruces);
+// Va ANTES de /:id — si no, Express toma "facturas" como el id de un acreedor.
+router.get('/facturas',            requireModulo('acreedores'), ctrl.getFacturasPorVencer);
 
 router.get('/',                    requireModulo('acreedores'), ctrl.getAcreedores);
 router.get('/:id',                 requireModulo('acreedores'), ctrl.getAcreedorById);
