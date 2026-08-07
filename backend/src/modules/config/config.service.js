@@ -143,6 +143,34 @@ const _validarInteresLista = (raw) => {
   }
 };
 
+// ── Validación de la compra por órdenes ──────────────────────────────────────
+// El modo de cargo decide CUÁNDO nace la deuda con el proveedor, así que un
+// valor corrupto aquí produciría compras sin cargo o cargos duplicados. Se
+// valida contra la lista cerrada que entiende compras.service.
+const MODOS_CARGO = new Set(['recepcion', 'orden']);
+
+const _validarModoCargo = (raw) => {
+  if (raw === '' || raw === null) return;
+  if (!MODOS_CARGO.has(String(raw))) {
+    throw {
+      status: 400,
+      message: 'El modo de cargo debe ser "recepcion" (el proveedor factura cada '
+        + 'entrega) u "orden" (factura el pedido completo por adelantado)',
+    };
+  }
+};
+
+// Días de aviso previo de los semáforos (vencimiento de factura, garantía).
+// Cota superior generosa: hay proveedores que dan garantías de años y un negocio
+// puede querer que le avisen con dos meses.
+const _validarDiasAviso = (raw, etiqueta) => {
+  if (raw === '' || raw === null) return;
+  const v = Number(raw);
+  if (!Number.isInteger(v) || v < 0 || v > 365) {
+    throw { status: 400, message: `${etiqueta} debe ser un número entero de días entre 0 y 365` };
+  }
+};
+
 const { hayUbicacion } = require('../../config/columnas');
 
 // La ubicación de productos solo puede reportarse activa si la columna existe
@@ -172,6 +200,37 @@ const saveConfig = async (negocioId, datos) => {
   if (datosProcesados.interes_techo_mensual !== undefined) {
     _validarTechoMora(datosProcesados.interes_techo_mensual);
   }
+  if (datosProcesados.ordenes_compra_modo_cargo !== undefined) {
+    _validarModoCargo(datosProcesados.ordenes_compra_modo_cargo);
+  }
+  if (datosProcesados.ordenes_compra_dias_aviso !== undefined) {
+    _validarDiasAviso(datosProcesados.ordenes_compra_dias_aviso, 'El aviso previo de vencimiento');
+  }
+  if (datosProcesados.garantia_proveedor_dias_aviso !== undefined) {
+    _validarDiasAviso(datosProcesados.garantia_proveedor_dias_aviso, 'El aviso previo de garantía');
+  }
+
+  // Los códigos del proveedor resuelven contra el código interno del producto
+  // (codigo_proveedor → codigo_interno → producto). Sin códigos internos no hay
+  // a dónde apuntar, y permitir un fallback por producto_id crearía una SEGUNDA
+  // noción de identidad de producto — el repositorio ya tiene tres conviviendo y
+  // de ahí salen los duplicados que hay hoy en producción.
+  //
+  // saveConfig recibe cambios parciales, así que el prerrequisito puede venir en
+  // el mismo payload o estar ya guardado: hay que mirar los dos.
+  if (datosProcesados.codigos_proveedor_activos === '1') {
+    const codigosInternos = datosProcesados.codigo_producto_activo !== undefined
+      ? datosProcesados.codigo_producto_activo
+      : (await repo.getMap(negocioId)).codigo_producto_activo;
+
+    if (codigosInternos !== '1') {
+      throw {
+        status: 400,
+        message: 'Para usar los códigos del proveedor primero tienes que activar el '
+          + 'código único de producto: la referencia del proveedor apunta a tu código interno.',
+      };
+    }
+  }
 
   // Hashear las claves privadas antes de persistir
   for (const clave of CLAVES_A_HASHEAR) {
@@ -190,6 +249,13 @@ const saveConfig = async (negocioId, datos) => {
   // Ajustes hay que invalidar para que el cambio se sienta de inmediato.
   if (Object.keys(datosProcesados).some((k) => k.startsWith('red_interna_'))) {
     require('../../middlewares/redInterna.middleware').invalidarCache(negocioId);
+  }
+
+  // Misma razón para la compra por órdenes: su middleware cachea 60s y el
+  // interruptor tiene que sentirse al instante al guardarlo desde Ajustes.
+  const CLAVES_COMPRA = ['ordenes_compra_', 'garantia_proveedor_', 'codigos_proveedor_'];
+  if (Object.keys(datosProcesados).some((k) => CLAVES_COMPRA.some((p) => k.startsWith(p)))) {
+    require('../../middlewares/ordenesCompra.middleware').invalidarCache(negocioId);
   }
 
   return resultado;

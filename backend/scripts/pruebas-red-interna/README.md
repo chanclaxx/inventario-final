@@ -32,6 +32,7 @@ node scripts/pruebas-red-interna/11-envios-por-remision.mjs
 node scripts/pruebas-red-interna/12-destino-y-referencias.mjs
 node scripts/pruebas-red-interna/17-pago-total-acreedor.mjs
 node scripts/pruebas-red-interna/18-importacion.mjs
+node scripts/pruebas-red-interna/19-ordenes-compra.mjs
 ```
 
 > Las suites cargan **las dos migraciones**: `20260725_red_interna.sql` y
@@ -307,6 +308,51 @@ permisivo dejaría pasar justo lo que se quiere cazar.
 > El 16 es el único que prueba que el `.xlsx` que el sistema **entrega** sea el
 > que el sistema **sabe leer**. Si la plantilla y el parser se separan, todo lo
 > demás sigue en verde y el usuario no puede importar nada.
+
+### `19-ordenes-compra.mjs` — 82 verificaciones
+
+Órdenes de compra, recepción parcial, procedencia y garantía de proveedor.
+Aplica `migrations/20260806_ordenes_compra.sql` tal cual va a producción.
+
+| # | Qué verifica |
+|---|---|
+| 1 | Doble candado: apagado por defecto; los códigos de proveedor no se encienden sin código interno |
+| 2 | **Con la feature apagada, `registrarCompra()` se comporta igual que siempre** |
+| 3 | Una orden en borrador no admite recepciones |
+| 4 | Recepciones parciales suman exacto; recibir de más se rechaza |
+| 5 | **Cancelar una recepción reabre SU parte, sin tocar las otras** |
+| 6 | **Devolver reabre el pendiente** — el caso que falla sin `cantidad_devuelta` |
+| 7 | Procedencia: proveedores reales de un producto, descontando lo devuelto |
+| 8 | El vencimiento de garantía no corre un día entre `TIMESTAMP` y `DATE` |
+| 9 | Cerrar («ya no va a llegar») no toca inventario ni deuda |
+| 10 | **Los dos modos de cargo**: `recepcion` y `orden` |
+| 11 | Aislamiento entre sucursales y entre negocios |
+| 12 | Anular solo sin recepciones; se lleva su cargo |
+| 13 | **No existe ninguna columna de avance guardado** |
+| 14 | Códigos del proveedor: la equivalencia se aprende, no se captura |
+| 15 | Alerta de facturas de proveedor por pagar |
+
+> El 5 y el 6 son los que justifican todo el diseño: el avance de la orden se
+> **deriva** de `lineas_compra` en cada lectura. Un contador guardado quedaría
+> inflado contra recepciones canceladas y contra mercancía devuelta, y la orden
+> nunca volvería a pedir lo que se devolvió.
+
+> El 13 es un candado sobre el diseño mismo: consulta
+> `information_schema.columns` para que nadie agregue un `cantidad_recibida` más
+> adelante «para que sea más rápido».
+
+> El 15 cubre un error fácil de cometer: los abonos de la cartera de proveedores
+> se siguen por **`cargo_id`**, no por la orden. Un pago hecho desde la cuenta del
+> proveedor —la vía normal— solo lleva `cargo_id`; buscándolo por
+> `orden_compra_id` o `compra_id`, pagar una factura no apagaría su aviso y el
+> dueño seguiría viendo «vencida» sobre algo que ya pagó.
+
+> Ojo con el `FILTER (WHERE c.id IS NOT NULL)` del cálculo de avance. Poner
+> `c.estado <> 'Cancelada'` en el `WHERE` convertiría el `LEFT JOIN` en `INNER` y
+> las líneas sin recepciones desaparecerían; ponerlo solo en el `JOIN` no basta,
+> porque un `LEFT JOIN` que no empareja **no descarta la fila de
+> `lineas_compra`**, solo deja `c.*` en `NULL`. Sin el `FILTER`, las recepciones
+> canceladas siguen sumando. Las dos versiones equivocadas fallan aquí.
 
 ## Nota sobre `esquema.sql`
 

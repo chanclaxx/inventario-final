@@ -14,6 +14,7 @@ import { Spinner }     from '../../components/ui/Spinner';
 import { EmptyState }  from '../../components/ui/EmptyState';
 import { SearchInput } from '../../components/ui/SearchInput';
 import { ModalCompra } from './ModalCompra';
+import { TabOrdenes }  from './TabOrdenes';
 import { useSucursalKey } from '../../hooks/useSucursalKey';
 import { useMetodosPago } from '../../hooks/useMetodosPago';
 import api from '../../api/axios.config';
@@ -21,7 +22,7 @@ import { useAuth } from '../../context/useAuth';
 import {
   Truck, Plus, ShoppingCart, ChevronRight, ChevronLeft, ChevronDown, ChevronUp,
   Package, Hash, User, RefreshCw, ArrowLeftRight, ShoppingBag, Repeat,
-  Search, ScanLine, Calculator, Undo2, Pencil,
+  Search, ScanLine, Calculator, Undo2, Pencil, ClipboardList,
 } from 'lucide-react';
 
 // ─── API helpers ──────────────────────────────────────────────────────────────
@@ -2292,9 +2293,23 @@ export default function ProveedoresPage() {
 
   const verCompras = esAdmin || usuario?.permisos_proveedores?.ver_compras === true;
 
+  // Las órdenes de compra son opt-in por negocio. Sin el flag el backend
+  // responde 404 y aquí ni siquiera aparece la pestaña: para ese negocio el
+  // flujo sigue siendo registrar la mercancía cuando llega, sin pedido previo.
+  const { data: configData } = useQuery({
+    queryKey: ['config'],
+    queryFn:  () => api.get('/config').then((r) => r.data.data),
+  });
+  const ordenesActivas = configData?.ordenes_compra_activas === '1';
+  const garantiaActiva = configData?.garantia_proveedor_activa === '1';
+
   const tabs = [
     { id: 'proveedores', label: 'Proveedores', Icn: Truck        },
     { id: 'retomas',     label: 'Retomas',     Icn: RefreshCw    },
+    // Órdenes va ANTES de Compras: en el flujo real se pide primero y se recibe
+    // después, y las pestañas se leen de izquierda a derecha.
+    ...(verCompras && ordenesActivas
+      ? [{ id: 'ordenes', label: 'Órdenes', Icn: ClipboardList }] : []),
     ...(verCompras ? [{ id: 'compras', label: 'Compras', Icn: ShoppingCart }] : []),
     { id: 'busqueda',    label: 'Búsqueda',    Icn: Search       },
   ];
@@ -2327,6 +2342,7 @@ export default function ProveedoresPage() {
         <TabProveedores sucursalKey={sucursalKey} sucursalLista={sucursalLista} />
       )}
       {tabActivo === 'retomas'    && <TabRetomas />}
+      {tabActivo === 'ordenes'    && <TabOrdenes garantiaActiva={garantiaActiva} />}
       {tabActivo === 'compras'    && <TabCompras />}
       {tabActivo === 'busqueda'   && <TabBusquedaCompras />}
     </div>

@@ -536,6 +536,178 @@ const runMigrations = async () => {
     console.error('⚠️  Migración del catálogo público no aplicada (el resto del sistema sigue normal):', err.message);
   }
 
+  // Órdenes de compra, recepción parcial, procedencia y garantía de proveedor
+  // — ver migrations/20260806_ordenes_compra.sql para el detalle del diseño.
+  //
+  // 100% aditiva: 4 tablas nuevas y solo columnas NULL-ables (más una con
+  // DEFAULT 0) sobre las existentes. Un negocio sin los flags jamás escribe en
+  // ellas, así que para el resto son tablas vacías sin costo ni efecto.
+  //
+  // Va en su propio try/catch A PROPÓSITO: runMigrations() corre antes de
+  // app.listen(), así que un fallo aquí (permisos, tipo de FK inesperado en una
+  // BD vieja) dejaría el servidor sin arrancar para TODOS los negocios. Ante un
+  // error se registra y se sigue: solo esta feature queda sin infraestructura,
+  // y su middleware ya responde 503 si las tablas no existen.
+  try {
+    await pool.query(`
+      -- cantidad_devuelta va primero porque es la única que toca código vivo:
+      -- devolverCompra() revierte inventario y emite la nota crédito, pero hoy
+      -- no registra QUÉ unidades volvieron. Sin esto, una orden marcaría 100/100
+      -- tras devolver 40, y la procedencia le atribuiría a un proveedor unidades
+      -- que ya le regresaron. Backfill 0: las devoluciones históricas solo
+      -- existen como texto libre y adivinarlas sería peor que no saberlas.
+      ALTER TABLE IF EXISTS lineas_compra
+        ADD COLUMN IF NOT EXISTS cantidad_devuelta INTEGER NOT NULL DEFAULT 0;
+
+      CREATE TABLE IF NOT EXISTS ordenes_compra (
+        id                 BIGSERIAL     PRIMARY KEY,
+        negocio_id         INTEGER       NOT NULL REFERENCES negocios(id)    ON DELETE RESTRICT,
+        numero             INTEGER,
+        sucursal_id        INTEGER       NOT NULL REFERENCES sucursales(id)  ON DELETE RESTRICT,
+        proveedor_id       INTEGER       NOT NULL REFERENCES proveedores(id) ON DELETE RESTRICT,
+        usuario_id         INTEGER,
+        -- Solo decisiones humanas. Parcial/Completa se DERIVAN de lineas_compra:
+        -- cancelarCompra() nunca iría a corregir un contador guardado aquí.
+        estado             TEXT          NOT NULL DEFAULT 'Borrador',
+        fecha_emision      TIMESTAMP     NOT NULL DEFAULT NOW(),
+        fecha_esperada     DATE,
+        numero_factura     TEXT,
+        fecha_factura      DATE,
+        dias_plazo         INTEGER,
+        fecha_vencimiento  DATE,
+        total_estimado     NUMERIC(14,2) NOT NULL DEFAULT 0,
+        notas              TEXT,
+        motivo_cierre      TEXT,
+        cerrada_en         TIMESTAMP,
+        usuario_cierre_id  INTEGER,
+        clave_idempotencia TEXT,
+        CONSTRAINT ordenes_compra_estado_chk
+          CHECK (estado IN ('Borrador', 'Emitida', 'Cerrada', 'Anulada'))
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_ordenes_compra_idem
+        ON ordenes_compra (clave_idempotencia) WHERE clave_idempotencia IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_ordenes_compra_negocio
+        ON ordenes_compra (negocio_id, estado, fecha_emision DESC);
+      CREATE INDEX IF NOT EXISTS idx_ordenes_compra_sucursal
+        ON ordenes_compra (sucursal_id, fecha_emision DESC);
+      CREATE INDEX IF NOT EXISTS idx_ordenes_compra_proveedor
+        ON ordenes_compra (proveedor_id, fecha_emision DESC);
+      CREATE INDEX IF NOT EXISTS idx_ordenes_compra_vencimiento
+        ON ordenes_compra (negocio_id, fecha_vencimiento)
+        WHERE fecha_vencimiento IS NOT NULL AND estado = 'Emitida';
+
+      CREATE TABLE IF NOT EXISTS lineas_orden_compra (
+        id              BIGSERIAL     PRIMARY KEY,
+        orden_id        BIGINT        NOT NULL REFERENCES ordenes_compra(id) ON DELETE CASCADE,
+        tipo            TEXT          NOT NULL,
+        producto_id     INTEGER,
+        nombre_producto TEXT          NOT NULL,
+        variante_id     INTEGER,
+        atributo_id     INTEGER,
+        cantidad_pedida INTEGER       NOT NULL,
+        -- Referencia, NUNCA costo: el costo promedio se calcula siempre con el
+        -- precio efectivamente recibido.
+        precio_estimado NUMERIC(14,2),
+        garantia_dias   INTEGER,
+        notas           TEXT,
+        orden           INTEGER       NOT NULL DEFAULT 0,
+        CONSTRAINT lineas_orden_compra_tipo_chk CHECK (tipo IN ('serial', 'cantidad')),
+        CONSTRAINT lineas_orden_compra_cant_chk CHECK (cantidad_pedida > 0)
+      );
+      CREATE INDEX IF NOT EXISTS idx_lineas_orden_compra_orden
+        ON lineas_orden_compra (orden_id, orden, id);
+      CREATE INDEX IF NOT EXISTS idx_lineas_orden_compra_producto
+        ON lineas_orden_compra (producto_id) WHERE producto_id IS NOT NULL;
+
+      -- Una compra pasa a ser una RECEPCIÓN. Ambas columnas NULL-ables: la
+      -- compra suelta de siempre las deja vacías y nadie más las consulta.
+      ALTER TABLE IF EXISTS compras
+        ADD COLUMN IF NOT EXISTS orden_compra_id BIGINT REFERENCES ordenes_compra(id) ON DELETE RESTRICT;
+      ALTER TABLE IF EXISTS lineas_compra
+        ADD COLUMN IF NOT EXISTS orden_linea_id BIGINT REFERENCES lineas_orden_compra(id) ON DELETE SET NULL;
+      CREATE INDEX IF NOT EXISTS idx_compras_orden
+        ON compras (orden_compra_id) WHERE orden_compra_id IS NOT NULL;
+      -- El índice que sostiene TODO el cálculo de avance de la orden.
+      CREATE INDEX IF NOT EXISTS idx_lineas_compra_orden_linea
+        ON lineas_compra (orden_linea_id) WHERE orden_linea_id IS NOT NULL;
+
+      -- Hoy NINGÚN cargo de acreedor tiene fecha límite. orden_compra_id existe
+      -- para el modo de cargo POR ORDEN: ahí el Cargo nace al registrar la
+      -- factura y las recepciones no crean cargo propio.
+      ALTER TABLE IF EXISTS movimientos_acreedor
+        ADD COLUMN IF NOT EXISTS fecha_vencimiento DATE;
+      ALTER TABLE IF EXISTS movimientos_acreedor
+        ADD COLUMN IF NOT EXISTS orden_compra_id BIGINT REFERENCES ordenes_compra(id) ON DELETE RESTRICT;
+      CREATE INDEX IF NOT EXISTS idx_mov_acreedor_vencimiento
+        ON movimientos_acreedor (fecha_vencimiento)
+        WHERE fecha_vencimiento IS NOT NULL AND tipo = 'Cargo';
+      CREATE INDEX IF NOT EXISTS idx_mov_acreedor_orden
+        ON movimientos_acreedor (orden_compra_id) WHERE orden_compra_id IS NOT NULL;
+
+      -- Garantía del PROVEEDOR. Nada que ver con el módulo garantias (a secas),
+      -- que es un catálogo de textos que van del negocio HACIA EL CLIENTE. Ese
+      -- va en la dirección contraria a este. El plazo se
+      -- congela en la línea de compra: subir el default del proveedor no puede
+      -- alterar una garantía ya otorgada.
+      ALTER TABLE IF EXISTS lineas_compra
+        ADD COLUMN IF NOT EXISTS garantia_dias INTEGER;
+      ALTER TABLE IF EXISTS proveedores
+        ADD COLUMN IF NOT EXISTS garantia_dias_default INTEGER;
+
+      -- Bitácora. NO cuelga de la orden a propósito: un lote malo aparece meses
+      -- después, en una compra que quizá nunca tuvo orden, y los negocios con
+      -- las órdenes apagadas también reclaman garantías.
+      CREATE TABLE IF NOT EXISTS novedades_proveedor (
+        id           BIGSERIAL   PRIMARY KEY,
+        negocio_id   INTEGER     NOT NULL REFERENCES negocios(id)    ON DELETE RESTRICT,
+        proveedor_id INTEGER     NOT NULL REFERENCES proveedores(id) ON DELETE RESTRICT,
+        tipo         TEXT        NOT NULL,
+        orden_id     BIGINT      REFERENCES ordenes_compra(id) ON DELETE CASCADE,
+        compra_id    INTEGER,
+        producto_id  INTEGER,
+        imei         TEXT,
+        cantidad     INTEGER,
+        texto        TEXT,
+        usuario_id   INTEGER,
+        fecha        TIMESTAMP   NOT NULL DEFAULT NOW(),
+        resuelta_en  TIMESTAMP,
+        CONSTRAINT novedades_proveedor_tipo_chk
+          CHECK (tipo IN ('faltante', 'demora', 'garantia', 'acuerdo', 'cierre', 'nota'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_novedades_proveedor_prov
+        ON novedades_proveedor (negocio_id, proveedor_id, fecha DESC);
+      CREATE INDEX IF NOT EXISTS idx_novedades_proveedor_orden
+        ON novedades_proveedor (orden_id, fecha DESC) WHERE orden_id IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_novedades_proveedor_abiertas
+        ON novedades_proveedor (negocio_id, fecha DESC) WHERE resuelta_en IS NULL;
+
+      -- Códigos del proveedor. Apunta al CÓDIGO INTERNO, no al producto_id: un
+      -- proveedor le vende al negocio, pero productos_cantidad tiene una fila
+      -- por sucursal. Con producto_id harían falta N filas por equivalencia y
+      -- derivarían a la primera sucursal nueva.
+      CREATE TABLE IF NOT EXISTS codigos_proveedor (
+        id                    BIGSERIAL  PRIMARY KEY,
+        negocio_id            INTEGER    NOT NULL REFERENCES negocios(id)    ON DELETE RESTRICT,
+        proveedor_id          INTEGER    NOT NULL REFERENCES proveedores(id) ON DELETE CASCADE,
+        codigo_proveedor      TEXT       NOT NULL,
+        codigo_interno        TEXT       NOT NULL,
+        descripcion_proveedor TEXT,
+        usuario_id            INTEGER,
+        creado_en             TIMESTAMP  NOT NULL DEFAULT NOW()
+      );
+      -- Case-insensitive: las remisiones llegan en mayúsculas o minúsculas
+      -- según quién las imprima.
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_codigos_proveedor_codigo
+        ON codigos_proveedor (proveedor_id, UPPER(BTRIM(codigo_proveedor)));
+      -- NO único a propósito: tres proveedores venden el mismo cargador con tres
+      -- referencias distintas, y esa es justamente la información que se guarda.
+      CREATE INDEX IF NOT EXISTS idx_codigos_proveedor_interno
+        ON codigos_proveedor (negocio_id, codigo_interno);
+    `);
+  } catch (err) {
+    console.error('⚠️  Órdenes de compra no aplicadas (el resto del sistema sigue normal):', err.message);
+  }
+
   // Aplicadas manualmente en producción:
   // - lineas_traslado: revertida_por_usuario_id, fecha_reversion
   // - traslados: revertido_por_usuario_id, fecha_reversion

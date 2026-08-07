@@ -15,6 +15,7 @@ import { MetodosPagoConfig } from './MetodosPagoConfig';
 import { TarifasConfig }    from './TarifasConfig';
 import { MoraConfig }       from './MoraConfig';
 import { InteresConfig }    from './InteresConfig';
+import { ComprasConfig }    from './ComprasConfig';
 import { NotificacionesConfig } from './NotificacionesConfig';
 import { CatalogoWebConfig } from './CatalogoWebConfig';
 import { TiposCaracteristicaConfig } from './components/TiposCaracteristicaConfig';
@@ -29,7 +30,7 @@ import {
   Printer, Palette, ListChecks, Wallet, Layers,
   ChevronUp, ChevronDown, RotateCcw, Navigation,
   Upload, X, Image as ImageIcon, Download, Barcode, Percent, CalendarClock,
-  MapPin, Bell, Globe,
+  MapPin, Bell, Globe, ClipboardList,
 } from 'lucide-react';
 
 // ─── Navegación principal ─────────────────────────────────────────────────────
@@ -55,6 +56,10 @@ const TABS_CATALOGO = [
   { id: 'seriales',  label: 'Seriales',  Icn: Palette    },
   { id: 'variantes', label: 'Variantes', Icn: Layers     },
   { id: 'codigos',   label: 'Códigos',   Icn: Barcode    },
+  // Compras va en Catálogo y no en una sección propia porque configura datos
+  // maestros del negocio (cómo se le pide y se le debe a un proveedor), igual
+  // que las líneas o las tarifas. La feature en sí vive en Proveedores.
+  { id: 'compras',   label: 'Compras',   Icn: ClipboardList },
   { id: 'ubicacion', label: 'Ubicación', Icn: MapPin     },
   { id: 'tarifas',   label: 'Tarifas',   Icn: Percent    },
   { id: 'pagos',     label: 'Pagos',     Icn: Wallet     },
@@ -1415,6 +1420,12 @@ function SeccionCatalogo({ valores, set }) {
       {tab === 'codigos' && (
         <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
           <CodigoProductoConfig valores={valores} set={set} />
+        </div>
+      )}
+
+      {tab === 'compras' && (
+        <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
+          <ComprasConfig valores={valores} set={set} />
         </div>
       )}
 

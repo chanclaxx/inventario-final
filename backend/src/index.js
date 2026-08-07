@@ -105,6 +105,9 @@ app.use('/api/proveedores',        protegida, require('./modules/proveedores/pro
 app.use('/api/cruces',             protegida, require('./modules/cruces/cruces.routes'));
 app.use('/api/prestatarios',       protegida, require('./modules/prestatarios/prestatarios.routes'));
 app.use('/api/compras',            protegida, require('./modules/compras/compras.routes'));
+app.use('/api/ordenes-compra',     protegida, require('./modules/ordenes-compra/ordenesCompra.routes'));
+app.use('/api/procedencia',        protegida, require('./modules/procedencia/procedencia.routes'));
+app.use('/api/codigos-proveedor',  protegida, require('./modules/codigos-proveedor/codigosProveedor.routes'));
 app.use('/api/acreedores',         protegida, require('./modules/acreedores/acreedores.routes'));
 app.use('/api/reportes',           protegida, require('./modules/reportes/reportes.routes'));
 app.use('/api/clientes',           protegida, require('./modules/clientes/clientes.routes'));

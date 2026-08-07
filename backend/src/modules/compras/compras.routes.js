@@ -10,6 +10,14 @@ const validarCompra = [
   body('lineas').isArray({ min: 1 }).withMessage('Debe incluir al menos una línea'),
   body('lineas.*.precio_unitario').isFloat({ gt: 0 }).withMessage('Precio unitario inválido'),
   body('lineas.*.cantidad').isInt({ gt: 0 }).withMessage('Cantidad inválida'),
+  // Una compra contra una orden es una RECEPCIÓN. Ambos campos son opcionales:
+  // la compra suelta de siempre —el único flujo con las órdenes apagadas— los
+  // deja vacíos. No hace falta candado de configuración aquí: sin órdenes
+  // creadas no hay ningún id que mandar, y el service valida que la orden sea
+  // del negocio y de la sucursal antes de tocar nada.
+  body('orden_compra_id').optional({ values: 'null' }).isInt({ gt: 0 }).withMessage('Orden de compra inválida'),
+  body('lineas.*.orden_linea_id').optional({ values: 'null' }).isInt({ gt: 0 }).withMessage('Línea de orden inválida'),
+  body('lineas.*.garantia_dias').optional({ values: 'null' }).isInt({ min: 0, max: 3650 }).withMessage('Garantía inválida (0 a 3650 días)'),
 ];
 
 // Compras viven dentro del módulo de proveedores

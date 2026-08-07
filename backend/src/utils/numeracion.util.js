@@ -14,6 +14,9 @@ const TABLAS = {
   prestamo:       'prestamos',
   orden_servicio: 'ordenes_servicio',
   compra:         'compras',
+  // Consecutivo propio: una orden de compra NO es una compra (todavía no ha
+  // entrado nada) y no puede consumir números del consecutivo de compras.
+  orden_compra:   'ordenes_compra',
   // Red interna. Consecutivos propios: una remisión NO es una venta y no puede
   // consumir números del consecutivo de facturas.
   remision:       'remisiones',

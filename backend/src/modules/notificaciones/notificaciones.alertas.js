@@ -358,6 +358,114 @@ const stockBajo = async (negocioId, sucursalId = null) => {
   }
 };
 
+// ── Cartera de PROVEEDORES: lo que el negocio debe, no lo que le deben ───────
+//
+// Misma forma que `cartera` pero en la dirección contraria: aquí el negocio es
+// el deudor. Sale de las órdenes de compra con factura y plazo pactado, cruzadas
+// contra lo que ya se abonó al cargo del acreedor.
+//
+// Está detrás del flag `ordenes_compra_activas`: un negocio sin órdenes no tiene
+// ninguna fecha de vencimiento registrada (antes de agosto de 2026 NINGÚN cargo
+// de acreedor tenía plazo), así que recorrerlo sería trabajo perdido.
+//
+// Devuelve vacío ante cualquier problema —tabla inexistente, migración sin
+// aplicar— igual que las demás: un aviso que no se pudo calcular no puede dejar
+// sin avisos a los otros 27 negocios.
+const carteraProveedores = async (negocioId) => {
+  const vacio = { vencidas: [], por_vencer: [], dias_aviso: 3 };
+  if (!negocioId) return vacio;
+
+  try {
+    const { getConfigOrdenes } = require('../../middlewares/ordenesCompra.middleware');
+    const cfg = await getConfigOrdenes(negocioId);
+    if (!cfg.activas) return vacio;
+
+    const dias = cfg.dias_aviso;
+
+    // El saldo se DERIVA del cargo menos sus abonos: no hay ni puede haber un
+    // "saldo pendiente" guardado que se desfase cuando se anula una compra.
+    //
+    // Va en dos pasos, y el segundo NO es opcional:
+    //
+    //   1. Los CARGOS de la orden. Se buscan por las dos vías porque los dos
+    //      modos conviven: en modo 'orden' el cargo cuelga de orden_compra_id, y
+    //      en modo 'recepcion' hay uno por cada compra de la orden.
+    //
+    //   2. Los ABONOS, que se siguen por `cargo_id` y NO por la orden. Un pago
+    //      hecho desde la cuenta del proveedor —la vía normal— solo lleva
+    //      cargo_id: ni orden_compra_id ni compra_id. Buscándolos por la orden,
+    //      pagar una factura no apagaría su aviso y el dueño seguiría viendo
+    //      "vencida" sobre algo que ya pagó.
+    //
+    // Los abonos de saldo a favor (una devolución que excedió la deuda, con
+    // cargo_id NULL) quedan fuera a propósito: son un crédito general del
+    // proveedor, no el pago de ESTA factura. Avisar de más es preferible a
+    // callar una factura que sí está pendiente.
+    const { rows } = await pool.query(`
+      WITH vivas AS (
+        SELECT o.*
+        FROM ordenes_compra o
+        WHERE o.negocio_id = $1
+          AND o.estado = 'Emitida'
+          AND o.fecha_vencimiento IS NOT NULL
+          AND o.fecha_vencimiento <= $2::date + $3::int
+      ),
+      cargos AS (
+        SELECT DISTINCT v.id AS orden_id, m.id AS cargo_id, m.valor
+        FROM      vivas   v
+        LEFT JOIN compras c ON c.orden_compra_id = v.id AND c.estado <> 'Cancelada'
+        JOIN      movimientos_acreedor m
+               ON m.tipo = 'Cargo'
+              AND (m.orden_compra_id = v.id OR m.compra_id = c.id)
+      ),
+      saldos AS (
+        SELECT cg.orden_id,
+               SUM(cg.valor)                        AS cargado,
+               COALESCE(SUM(ab.abonado), 0)         AS abonado
+        FROM cargos cg
+        LEFT JOIN LATERAL (
+          SELECT COALESCE(SUM(a.valor), 0) AS abonado
+          FROM movimientos_acreedor a
+          WHERE a.cargo_id = cg.cargo_id AND a.tipo = 'Abono'
+        ) ab ON TRUE
+        GROUP BY cg.orden_id
+      )
+      SELECT
+        v.id, v.numero, v.sucursal_id, su.nombre AS sucursal_nombre,
+        v.fecha_vencimiento, v.numero_factura,
+        p.nombre AS proveedor_nombre,
+        (v.fecha_vencimiento - $2::date) AS dias_para_vencer,
+        (s.cargado - s.abonado)          AS saldo
+      FROM vivas v
+      JOIN saldos      s  ON s.orden_id = v.id
+      JOIN sucursales  su ON su.id = v.sucursal_id
+      JOIN proveedores p  ON p.id  = v.proveedor_id
+      WHERE s.cargado - s.abonado > 0
+      ORDER BY v.fecha_vencimiento
+    `, [negocioId, hoyBogota(), dias]);
+
+    const items = rows.map((r) => ({
+      id:               r.id,
+      numero:           r.numero,
+      sucursal_id:      r.sucursal_id,
+      sucursal_nombre:  r.sucursal_nombre,
+      proveedor:        r.proveedor_nombre,
+      numero_factura:   r.numero_factura,
+      dias_para_vencer: Number(r.dias_para_vencer),
+      saldo:            num(r.saldo),
+    }));
+
+    return {
+      vencidas:   items.filter((i) => i.dias_para_vencer < 0),
+      por_vencer: items.filter((i) => i.dias_para_vencer >= 0),
+      dias_aviso: dias,
+    };
+  } catch (err) {
+    console.warn('[alertas] Cartera de proveedores no disponible:', err.message);
+    return vacio;
+  }
+};
+
 // ── Negocios a los que hay que revisarles las alertas ────────────────────────
 
 /**
@@ -381,5 +489,6 @@ const negociosANotificar = async () => {
 
 module.exports = {
   cartera, diasAvisoPrevio, DIAS_AVISO_PREVIO,
+  carteraProveedores,
   planPorVencer, stockBajo, negociosANotificar, hoyBogota,
 };

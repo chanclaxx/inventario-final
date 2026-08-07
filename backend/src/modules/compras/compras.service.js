@@ -2,6 +2,7 @@ const { pool }                  = require('../../config/db');
 const comprasRepo               = require('./compras.repository');
 const { calcularCostoPromedio } = require('../../utils/costoPromedio.util');
 const variantesRepo             = require('../variantes-producto/variantes-producto.repository');
+const { getConfigOrdenes }      = require('../../middlewares/ordenesCompra.middleware');
 
 const getCompras = (sucursalId, negocioId, proveedorIds = null) =>
   comprasRepo.findAll(sucursalId, negocioId, proveedorIds);
@@ -25,11 +26,97 @@ const _fechaHoy = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 
+// ── Recepción contra una orden de compra ──────────────────────────────────────
+// Valida que la orden sea recibible y que ninguna línea reciba de más. Se corre
+// DENTRO de la transacción y con FOR UPDATE sobre la orden: sin el lock, dos
+// recepciones simultáneas de la misma orden podrían pasar las dos validaciones
+// y entre ambas recibir el doble de lo pedido.
+//
+// Lo recibido se DERIVA de lineas_compra (nunca hay un contador guardado que
+// pueda quedar desfasado cuando se cancela o se devuelve una recepción).
+const _validarRecepcionContraOrden = async (client, { orden_compra_id, negocio_id, sucursal_id, lineas }) => {
+  const { rows: ordenRows } = await client.query(
+    `SELECT id, numero, estado, sucursal_id, proveedor_id, fecha_vencimiento
+     FROM ordenes_compra
+     WHERE id = $1 AND negocio_id = $2
+     FOR UPDATE`,
+    [orden_compra_id, negocio_id]
+  );
+  const orden = ordenRows[0];
+  if (!orden) throw { status: 404, message: 'Orden de compra no encontrada' };
+
+  if (orden.sucursal_id !== sucursal_id) {
+    throw { status: 400, message: 'La orden pertenece a otra sucursal' };
+  }
+  if (orden.estado === 'Borrador') {
+    throw { status: 409, message: `La orden #${orden.numero ?? orden.id} todavía es un borrador. Emítela antes de recibir mercancía.` };
+  }
+  if (orden.estado !== 'Emitida') {
+    throw { status: 409, message: `La orden #${orden.numero ?? orden.id} está ${orden.estado.toLowerCase()}; no admite más recepciones` };
+  }
+
+  // Cuánto se ha recibido ya en cada línea pedida (descontando devoluciones y
+  // recepciones canceladas).
+  // El FILTER es lo que descuenta las recepciones canceladas: el LEFT JOIN no
+  // descarta la fila de lineas_compra cuando la compra está cancelada, solo deja
+  // `c.*` en NULL, así que sin él una cancelación no devolvería nada a pendiente.
+  //
+  // Y tiene que ser FILTER y no un WHERE: con un WHERE, una línea cuyas
+  // recepciones fueron TODAS canceladas se caería del resultado entero y esta
+  // validación la rechazaría como ajena a la orden — justo la línea que hay que
+  // poder volver a recibir.
+  const { rows: avance } = await client.query(
+    `SELECT loc.id,
+            loc.nombre_producto,
+            loc.cantidad_pedida,
+            COALESCE(
+              SUM(lc.cantidad - COALESCE(lc.cantidad_devuelta, 0))
+                FILTER (WHERE c.id IS NOT NULL),
+              0
+            ) AS recibida
+     FROM      lineas_orden_compra loc
+     LEFT JOIN lineas_compra lc ON lc.orden_linea_id = loc.id
+     LEFT JOIN compras       c  ON c.id = lc.compra_id AND c.estado <> 'Cancelada'
+     WHERE loc.orden_id = $1
+     GROUP BY loc.id`,
+    [orden_compra_id]
+  );
+  const porLinea = new Map(avance.map((a) => [Number(a.id), a]));
+
+  // Se agrupa por línea pedida: una misma línea de la orden puede llegar
+  // repartida en varias líneas de la recepción (típico con seriales, donde cada
+  // IMEI es su propia fila).
+  const solicitado = new Map();
+  for (const l of lineas) {
+    if (l.orden_linea_id == null) continue;
+    const id = Number(l.orden_linea_id);
+    solicitado.set(id, (solicitado.get(id) || 0) + Number(l.cantidad || 0));
+  }
+
+  for (const [lineaId, cantidad] of solicitado) {
+    const linea = porLinea.get(lineaId);
+    if (!linea) {
+      throw { status: 400, message: `Una de las líneas no pertenece a la orden #${orden.numero ?? orden.id}` };
+    }
+    const pendiente = Number(linea.cantidad_pedida) - Number(linea.recibida);
+    if (cantidad > pendiente) {
+      throw {
+        status: 400,
+        message: `De ${linea.nombre_producto} solo faltan ${pendiente} de ${linea.cantidad_pedida} `
+          + `y estás recibiendo ${cantidad}. Si llegaron de más, recíbelas como compra aparte.`,
+      };
+    }
+  }
+
+  return orden;
+};
+
 const registrarCompra = async ({
   negocio_id, sucursal_id, usuario_id, proveedor_id,
   numero_factura, notas, lineas,
   total: totalRecibido, pagos = [],
   registrar_en_caja = true,
+  orden_compra_id = null,
 }) => {
   // ── Verificar sucursal pertenece al negocio ──────────────────────────────
   const { rows: sucRows } = await pool.query(
@@ -51,6 +138,14 @@ const registrarCompra = async ({
   try {
     await client.query('BEGIN');
 
+    // Recepción contra una orden: valida y bloquea la orden antes de tocar nada.
+    let ordenDeLaCompra = null;
+    if (orden_compra_id) {
+      ordenDeLaCompra = await _validarRecepcionContraOrden(client, {
+        orden_compra_id, negocio_id, sucursal_id, lineas,
+      });
+    }
+
     const total = totalRecibido ||
       lineas.reduce((sum, l) => sum + l.cantidad * l.precio_unitario, 0);
 
@@ -58,7 +153,7 @@ const registrarCompra = async ({
 
     const compra = await comprasRepo.create(client, {
       sucursal_id, proveedor_id, usuario_id, numero_factura, total, notas,
-      registrar_en_caja, metodo: metodoPago,
+      registrar_en_caja, metodo: metodoPago, orden_compra_id,
     });
 
     for (const linea of lineas) {
@@ -75,6 +170,11 @@ const registrarCompra = async ({
         atributo_id:       linea.atributo_id       || null,
         // Solo para productos de cantidad; los seriales se identifican por imei
         producto_id:       linea.imei ? null : (linea.producto_id || null),
+        orden_linea_id:    linea.orden_linea_id    || null,
+        // El plazo se CONGELA aquí: el reloj de la garantía arranca cuando la
+        // mercancía entra, y cambiar después el default del proveedor no puede
+        // alterar una garantía ya otorgada.
+        garantia_dias:     linea.garantia_dias     ?? null,
       });
 
       if (linea.imei) {
@@ -255,23 +355,71 @@ const registrarCompra = async ({
         acreedorId = nuevoRows[0].id;
       }
 
-      // Cargo siempre por el total completo de la compra
-      const { rows: cargoRows } = await client.query(
-        `INSERT INTO movimientos_acreedor(acreedor_id, usuario_id, tipo, descripcion, valor, compra_id, sucursal_id)
-         VALUES ($1, $2, 'Cargo', $3, $4, $5, $6) RETURNING id`,
-        [acreedorId, usuario_id, `Compra #${compra.numero ?? compra.id} — mercancía`, total, compra.id, sucursal_id]
-      );
-      const cargoId = cargoRows[0].id;
+      // ── ¿Cuándo nace la deuda? ────────────────────────────────────────────
+      // Dos modos, configurables por negocio en Ajustes:
+      //
+      //   'recepcion' (default) → cada recepción crea su propio Cargo. Es el
+      //       comportamiento de siempre y el único que existe sin órdenes. Sirve
+      //       cuando el proveedor factura cada entrega, que es lo normal en
+      //       distribución.
+      //
+      //   'orden' → el Cargo nació al registrar la factura de la orden, antes de
+      //       que llegara nada, y las recepciones NO crean cargo propio. Sirve
+      //       cuando el proveedor factura el pedido completo por adelantado.
+      //
+      // Solo se consulta el modo si esta compra viene de una orden: una compra
+      // suelta siempre crea su cargo, sin importar la configuración.
+      let cargoId = null;
+
+      if (orden_compra_id) {
+        const { modo_cargo } = await getConfigOrdenes(negocio_id);
+        if (modo_cargo === 'orden') {
+          const { rows: cargoOrden } = await client.query(
+            `SELECT id FROM movimientos_acreedor
+             WHERE orden_compra_id = $1 AND tipo = 'Cargo' LIMIT 1`,
+            [orden_compra_id]
+          );
+          if (!cargoOrden.length) {
+            // Sin cargo en la orden, esta recepción metería mercancía sin deuda
+            // asociada. Crear uno aquí produciría doble cobro cuando se registre
+            // la factura, así que se para y se dice qué falta.
+            throw {
+              status: 409,
+              code: 'ORDEN_SIN_FACTURA',
+              message: 'Tu negocio registra la deuda al facturar la orden completa, '
+                + 'y esta orden todavía no tiene factura. Regístrala antes de recibir la mercancía.',
+            };
+          }
+          cargoId = cargoOrden[0].id;
+        }
+      }
+
+      if (!cargoId) {
+        // Cargo por el total completo de esta compra. Si viene de una orden con
+        // plazo pactado, hereda su vencimiento: la factura del proveedor vence
+        // el mismo día llegue la mercancía en una entrega o en tres.
+        const { rows: cargoRows } = await client.query(
+          `INSERT INTO movimientos_acreedor(acreedor_id, usuario_id, tipo, descripcion, valor, compra_id, sucursal_id, orden_compra_id, fecha_vencimiento)
+           VALUES ($1, $2, 'Cargo', $3, $4, $5, $6, $7, $8) RETURNING id`,
+          [acreedorId, usuario_id, `Compra #${compra.numero ?? compra.id} — mercancía`, total, compra.id, sucursal_id, orden_compra_id,
+           ordenDeLaCompra?.fecha_vencimiento || null]
+        );
+        cargoId = cargoRows[0].id;
+      }
+
       acreedorIdCompra = acreedorId;
       cargoIdCompra    = cargoId;
 
-      // Si hubo pago inmediato (Contado / Transferencia / mezcla), crear Abono vinculado al cargo
+      // Si hubo pago inmediato (Contado / Transferencia / mezcla), crear Abono
+      // vinculado al cargo. Lleva compra_id además de cargo_id porque en modo
+      // 'orden' el cargo es de la orden y es compartido: sin compra_id, cancelar
+      // esta recepción no sabría cuál de los abonos borrar.
       if (totalPagado > 0) {
         const metodoPagoInmediato = pagosEfectivos.map((p) => p.metodo).join('/') || null;
         await client.query(
-          `INSERT INTO movimientos_acreedor(acreedor_id, usuario_id, tipo, descripcion, valor, cargo_id, metodo, registrar_en_caja, sucursal_id)
-           VALUES ($1, $2, 'Abono', $3, $4, $5, $6, $7, $8)`,
-          [acreedorId, usuario_id, 'Pago al momento de la compra', totalPagado, cargoId, metodoPagoInmediato, registrar_en_caja !== false, sucursal_id]
+          `INSERT INTO movimientos_acreedor(acreedor_id, usuario_id, tipo, descripcion, valor, cargo_id, compra_id, metodo, registrar_en_caja, sucursal_id)
+           VALUES ($1, $2, 'Abono', $3, $4, $5, $6, $7, $8, $9)`,
+          [acreedorId, usuario_id, 'Pago al momento de la compra', totalPagado, cargoId, compra.id, metodoPagoInmediato, registrar_en_caja !== false, sucursal_id]
         );
       }
     }
@@ -378,22 +526,29 @@ const cancelarCompra = async (negocioId, compraId) => {
     // 1. Marcar compra como cancelada
     await comprasRepo.marcarCancelada(client, compraId);
 
-    // 2. Eliminar cargo y abonos del acreedor vinculados a esta compra
+    // 2. Eliminar cargo y abonos del acreedor vinculados a esta compra.
+    //
+    // Los abonos se borran SIEMPRE por compra_id, no solo cuando hay cargo
+    // propio: en modo de cargo 'orden' esta compra es una recepción sin cargo
+    // suyo, y sus pagos y notas crédito cuelgan del cargo compartido de la
+    // orden. Sin esta rama, cancelar la recepción dejaría vivos unos abonos que
+    // seguirían saldando una deuda de la que ya no hay mercancía.
+    await client.query(
+      `DELETE FROM movimientos_acreedor WHERE compra_id = $1 AND tipo = 'Abono'`,
+      [compraId]
+    );
+
     const { rows: cargoRows } = await client.query(
       `SELECT id FROM movimientos_acreedor WHERE compra_id = $1 AND tipo = 'Cargo' LIMIT 1`,
       [compraId]
     );
     if (cargoRows.length) {
       const cargoId = cargoRows[0].id;
-      // Abonos que apuntan a este cargo (pagos + devoluciones ligadas al cargo)
+      // Abonos que apuntan a este cargo sin llevar compra_id (los históricos, y
+      // los pagos hechos después desde la cuenta del proveedor).
       await client.query(
         `DELETE FROM movimientos_acreedor WHERE cargo_id = $1`,
         [cargoId]
-      );
-      // Notas crédito de devolución que quedaron como saldo a favor (sin cargo)
-      await client.query(
-        `DELETE FROM movimientos_acreedor WHERE compra_id = $1 AND cargo_id IS NULL AND tipo = 'Abono'`,
-        [compraId]
       );
       // Luego el cargo mismo
       await client.query(
@@ -492,18 +647,36 @@ const devolverCompra = async (negocioId, compraId, { lineas: lineasDevol, motivo
   const lineasCompra = await comprasRepo.getLineas(compraId);
   const lineasById = new Map(lineasCompra.map((l) => [Number(l.id), l]));
 
-  // Validar y normalizar las solicitudes de devolución
+  // Validar y normalizar las solicitudes de devolución.
+  //
+  // El tope es lo que queda SIN devolver, no la cantidad original: de lo
+  // contrario dos devoluciones parciales de 30 sobre una línea de 40 pasarían
+  // las dos y se le descontarían 60 unidades al proveedor.
   const solicitudes = [];
   for (const req of lineasDevol) {
     const linea = lineasById.get(Number(req.linea_id));
     if (!linea) throw { status: 400, message: `La línea ${req.linea_id} no pertenece a esta compra` };
 
+    const yaDevuelta = Number(linea.cantidad_devuelta || 0);
+    const pendiente  = Number(linea.cantidad) - yaDevuelta;
+
+    if (pendiente <= 0) {
+      throw {
+        status: 400,
+        message: `${linea.nombre_producto} ya fue devuelto en su totalidad en esta compra`,
+      };
+    }
+
     if (linea.imei) {
       solicitudes.push({ linea, cantidad: 1 });
     } else {
       const cant = Number(req.cantidad);
-      if (!Number.isInteger(cant) || cant < 1 || cant > Number(linea.cantidad)) {
-        throw { status: 400, message: `Cantidad inválida para ${linea.nombre_producto} (entre 1 y ${linea.cantidad})` };
+      if (!Number.isInteger(cant) || cant < 1 || cant > pendiente) {
+        throw {
+          status: 400,
+          message: `Cantidad inválida para ${linea.nombre_producto} (entre 1 y ${pendiente}`
+            + `${yaDevuelta > 0 ? `; ya devolviste ${yaDevuelta} de ${linea.cantidad}` : ''})`,
+        };
       }
       solicitudes.push({ linea, cantidad: cant });
     }
@@ -565,17 +738,44 @@ const devolverCompra = async (negocioId, compraId, { lineas: lineasDevol, motivo
         await client.query(`UPDATE productos_cantidad SET stock = stock - $1 WHERE id = $2`, [cantidad, linea.producto_id]);
       }
 
+      // Dejar registrado en la LÍNEA qué unidades volvieron. Antes esto solo
+      // existía como texto libre en la descripción del movimiento del acreedor,
+      // y eso rompía dos cosas: el avance de una orden marcaba 100/100 después
+      // de devolver 40 unidades, y la procedencia le atribuía a un proveedor
+      // unidades que ya le habían regresado — el peor error posible en una
+      // pantalla cuyo propósito es señalar responsables.
+      await client.query(
+        `UPDATE lineas_compra
+         SET cantidad_devuelta = COALESCE(cantidad_devuelta, 0) + $1
+         WHERE id = $2`,
+        [cantidad, linea.id]
+      );
+
       const sub = cantidad * Number(linea.precio_unitario);
       valorDevuelto += sub;
       detalle.push({ linea_id: linea.id, nombre: linea.nombre_producto, cantidad, valor: sub });
     }
 
     // ── Nota crédito en el acreedor ─────────────────────────────────────────
+    // El cargo contra el que se abona depende del modo de cargo del negocio:
+    //   'recepcion' → cada compra tiene el suyo (lo normal, y lo único que
+    //                 existía antes de las órdenes)
+    //   'orden'     → la compra es una recepción sin cargo propio; la deuda
+    //                 nació al facturar la orden, y ahí va la nota crédito
+    // Se busca en ese orden para que el modo 'recepcion' ni se entere.
     const { rows: cargoRows } = await client.query(
       `SELECT id, acreedor_id, valor FROM movimientos_acreedor
        WHERE compra_id = $1 AND tipo = 'Cargo' LIMIT 1`,
       [compraId]
     );
+    if (!cargoRows.length && compra.orden_compra_id) {
+      const { rows: cargoOrden } = await client.query(
+        `SELECT id, acreedor_id, valor FROM movimientos_acreedor
+         WHERE orden_compra_id = $1 AND tipo = 'Cargo' LIMIT 1`,
+        [compra.orden_compra_id]
+      );
+      cargoRows.push(...cargoOrden);
+    }
 
     if (cargoRows.length && valorDevuelto > 0) {
       const cargo = cargoRows[0];

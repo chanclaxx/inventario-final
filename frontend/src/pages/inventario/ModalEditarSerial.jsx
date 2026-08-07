@@ -1,6 +1,6 @@
 import { useState }                           from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Pencil, StickyNote }                from 'lucide-react';
+import { Pencil, StickyNote, Truck, ChevronDown, ChevronUp } from 'lucide-react';
 import { actualizarSerial }                  from '../../api/productos.api';
 import { getProveedores }                    from '../../api/proveedores.api';
 import { Modal }       from '../../components/ui/Modal';
@@ -8,6 +8,7 @@ import { Input }       from '../../components/ui/Input';
 import { InputMoneda } from '../../components/ui/InputMoneda';
 import { Button }      from '../../components/ui/Button';
 import { useAuth }     from '../../context/useAuth';
+import { PanelProcedenciaImei } from '../../components/ui/PanelProcedencia';
 import api             from '../../api/axios.config';
 
 function parsearLista(raw) {
@@ -24,6 +25,7 @@ export function ModalEditarSerial({ serial, precioProducto, productoId, onClose 
   const campos = camposEdicionProductos();
   const tiene  = (c) => campos === null || campos.includes(c);
   const queryClient = useQueryClient();
+  const [verProcedencia, setVerProcedencia] = useState(false);
 
   const [form, setForm] = useState({
     imei:            serial.imei         || '',
@@ -49,6 +51,9 @@ export function ModalEditarSerial({ serial, precioProducto, productoId, onClose 
   const coloresConfig          = parsearLista(configData?.colores_serial_lista);
   const caracteristicasActivo  = configData?.caracteristicas_serial_activo === '1';
   const caracteristicasLista   = parsearLista(configData?.caracteristicas_serial_lista);
+  // Solo decide si el panel de procedencia muestra el chip de garantía; el
+  // historial de compras del equipo sale igual con la feature apagada.
+  const garantiaActiva         = configData?.garantia_proveedor_activa === '1';
 
   const { data: proveedoresData } = useQuery({
     queryKey: ['proveedores'],
@@ -244,6 +249,34 @@ export function ModalEditarSerial({ serial, precioProducto, productoId, onClose 
               focus:outline-none focus:ring-2 focus:ring-amber-400 transition-all"
           />
         </div>
+
+        {/* ── ¿De quién vino? ────────────────────────────────────────────────
+            Con IMEI la trazabilidad es exacta: el equipo identifica a su
+            proveedor sin ambigüedad. Colapsado porque es una consulta puntual,
+            no parte de editar el serial. */}
+        {serial.imei && (
+          <div className="border border-gray-100 rounded-xl overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setVerProcedencia((v) => !v)}
+              className="w-full flex items-center justify-between gap-2 px-3 py-2.5
+                hover:bg-gray-50 transition-colors"
+            >
+              <span className="flex items-center gap-1.5 text-sm font-medium text-gray-700">
+                <Truck size={14} className="text-gray-400" />
+                ¿De quién vino?
+              </span>
+              {verProcedencia
+                ? <ChevronUp size={15} className="text-gray-400" />
+                : <ChevronDown size={15} className="text-gray-400" />}
+            </button>
+            {verProcedencia && (
+              <div className="px-3 pb-3 border-t border-gray-100 pt-3">
+                <PanelProcedenciaImei imei={serial.imei} mostrarGarantia={garantiaActiva} />
+              </div>
+            )}
+          </div>
+        )}
 
         {error && <p className="text-sm text-red-500">{error}</p>}
 

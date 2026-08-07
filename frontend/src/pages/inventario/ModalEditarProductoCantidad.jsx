@@ -1,6 +1,6 @@
 import { useState, useMemo }                  from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Pencil, Trash2, StickyNote }        from 'lucide-react';
+import { Pencil, Trash2, StickyNote, Truck, ChevronDown, ChevronUp } from 'lucide-react';
 import { actualizarProductoCantidad }        from '../../api/productos.api';
 import { getProveedores }                    from '../../api/proveedores.api';
 import { getLineas }                         from '../../api/productos.api';
@@ -11,9 +11,11 @@ import { InputMoneda }  from '../../components/ui/InputMoneda';
 import { InputUbicacion } from '../../components/ui/InputUbicacion';
 import { Button }       from '../../components/ui/Button';
 import { useAuth }      from '../../context/useAuth';
+import { PanelProcedencia } from '../../components/ui/PanelProcedencia';
 import { ModalEliminarProducto, TIPO_PRODUCTO_CANTIDAD } from './ModalEliminarProducto';
 
-export function ModalEditarProductoCantidad({ producto, pinEliminacion, variantesActivo, codigoActivo, ubicacionActiva, onClose }) {
+export function ModalEditarProductoCantidad({ producto, pinEliminacion, variantesActivo, codigoActivo, ubicacionActiva, garantiaActiva, onClose }) {
+  const [verProcedencia, setVerProcedencia] = useState(false);
   const { esAdminNegocio, puedeEditarProductos, camposEdicionProductos } = useAuth();
   const esAdmin    = esAdminNegocio();
   const campos     = camposEdicionProductos(); // null = todos, array = permitidos
@@ -290,8 +292,12 @@ export function ModalEditarProductoCantidad({ producto, pinEliminacion, variante
 
           {tiene('proveedor') && (
             <div className="flex flex-col gap-1">
+              {/* "Habitual" y no "Proveedor" a secas: este campo guarda UNO solo,
+                  el que se dejó escrito, y no se actualiza con cada compra. Quien
+                  quiera saber de dónde salió un lote tiene que mirar el panel de
+                  abajo, que sí lee las compras reales. */}
               <label className="text-sm font-medium text-gray-700">
-                Proveedor <span className="text-gray-400 font-normal">(opcional)</span>
+                Proveedor habitual <span className="text-gray-400 font-normal">(opcional)</span>
               </label>
               <select
                 id="edit-proveedor-cant"
@@ -305,8 +311,37 @@ export function ModalEditarProductoCantidad({ producto, pinEliminacion, variante
                   <option key={p.id} value={p.id}>{p.nombre}</option>
                 ))}
               </select>
+              <p className="text-xs text-gray-400">
+                Es solo una referencia. Para saber de quién vino cada lote, mira abajo.
+              </p>
             </div>
           )}
+
+          {/* ── ¿De quién vino? ──────────────────────────────────────────────
+              Colapsado por defecto: es una consulta puntual, no parte de editar
+              el producto. No depende de ningún flag — lee compras que el negocio
+              ya tiene registradas desde siempre. */}
+          <div className="border border-gray-100 rounded-xl overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setVerProcedencia((v) => !v)}
+              className="w-full flex items-center justify-between gap-2 px-3 py-2.5
+                hover:bg-gray-50 transition-colors"
+            >
+              <span className="flex items-center gap-1.5 text-sm font-medium text-gray-700">
+                <Truck size={14} className="text-gray-400" />
+                ¿De quién vino?
+              </span>
+              {verProcedencia
+                ? <ChevronUp size={15} className="text-gray-400" />
+                : <ChevronDown size={15} className="text-gray-400" />}
+            </button>
+            {verProcedencia && (
+              <div className="px-3 pb-3 border-t border-gray-100 pt-3">
+                <PanelProcedencia productoId={producto.id} mostrarGarantia={garantiaActiva} />
+              </div>
+            )}
+          </div>
 
           <div className="flex flex-col gap-1">
             <label className="flex items-center gap-1.5 text-sm font-medium text-gray-700">

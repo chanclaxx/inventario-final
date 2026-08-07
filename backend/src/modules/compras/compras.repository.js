@@ -95,28 +95,36 @@ const findByProveedor = async (proveedorId, sucursalId, negocioId) => {
   return rows;
 };
 
-const create = async (client, { sucursal_id, proveedor_id, usuario_id, numero_factura, total, notas, registrar_en_caja, metodo }) => {
+// `orden_compra_id` es NULL en la compra suelta de siempre —que es el único
+// flujo que existe con las órdenes apagadas— y apunta a la orden cuando la
+// compra es en realidad una RECEPCIÓN contra ella.
+const create = async (client, { sucursal_id, proveedor_id, usuario_id, numero_factura, total, notas, registrar_en_caja, metodo, orden_compra_id }) => {
   const { rows } = await client.query(`
-    INSERT INTO compras(sucursal_id, proveedor_id, usuario_id, numero_factura, total, notas, registrar_en_caja, metodo)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    INSERT INTO compras(sucursal_id, proveedor_id, usuario_id, numero_factura, total, notas, registrar_en_caja, metodo, orden_compra_id)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
     RETURNING *
-  `, [sucursal_id, proveedor_id, usuario_id, numero_factura, total, notas, registrar_en_caja !== false, metodo || null]);
+  `, [sucursal_id, proveedor_id, usuario_id, numero_factura, total, notas, registrar_en_caja !== false, metodo || null, orden_compra_id || null]);
   rows[0].numero = await asignarNumeroDocumento(client, {
     tipo: 'compra', docId: rows[0].id, sucursalId: sucursal_id,
   });
   return rows[0];
 };
 
+// `orden_linea_id` ata la línea recibida a la pedida: es lo que hace DERIVABLE
+// el avance de la orden, sin ningún contador guardado que pueda desfasarse.
+// `garantia_dias` congela el plazo del proveedor en el momento de la entrada.
 const insertarLinea = async (client, {
   compra_id, nombre_producto, imei, cantidad, precio_unitario,
   precio_usd, factor_conversion, valor_traida, variante_id, atributo_id, producto_id,
+  orden_linea_id, garantia_dias,
 }) => {
   const { rows } = await client.query(`
     INSERT INTO lineas_compra(
       compra_id, nombre_producto, imei, cantidad, precio_unitario,
-      precio_usd, factor_conversion, valor_traida, variante_id, atributo_id, producto_id
+      precio_usd, factor_conversion, valor_traida, variante_id, atributo_id, producto_id,
+      orden_linea_id, garantia_dias
     )
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
     RETURNING *
   `, [
     compra_id, nombre_producto, imei || null, cantidad, precio_unitario,
@@ -126,6 +134,10 @@ const insertarLinea = async (client, {
     variante_id       || null,
     atributo_id       || null,
     producto_id       || null,
+    orden_linea_id    || null,
+    // ?? y no ||: una garantía de 0 días es "sin garantía", un dato válido que
+    // no es lo mismo que "nadie lo registró" (NULL).
+    garantia_dias     ?? null,
   ]);
   return rows[0];
 };

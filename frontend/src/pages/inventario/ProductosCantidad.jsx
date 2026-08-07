@@ -247,6 +247,9 @@ export function ProductosCantidad() {
   const variantesActivo         = configData?.variantes_activo === '1';
   const ajusteStockSinVariantes = configData?.ajuste_stock_sin_variantes !== '0';
   const codigoActivo            = configData?.codigo_producto_activo === '1';
+  // Solo decide si el panel de procedencia muestra el chip de garantía: el
+  // listado de compras del producto sale igual con la feature apagada.
+  const garantiaActiva          = configData?.garantia_proveedor_activa === '1';
   const ubicacionActiva         = configData?.ubicacion_activa       === '1';
 
   const { data: ubicaciones = [] } = useQuery({
@@ -522,6 +525,7 @@ export function ProductosCantidad() {
           pinEliminacion={pinEliminacion}
           variantesActivo={variantesActivo}
           codigoActivo={codigoActivo}
+          garantiaActiva={garantiaActiva}
           onClose={() => setProductoAEditar(null)}
         />
       )}

@@ -5,9 +5,11 @@ const service = require('./notificaciones.service');
 // ─────────────────────────────────────────────────────────────────────────────
 // AVISOS AUTOMÁTICOS — una pasada diaria por los negocios con dispositivos.
 //
-// Cuatro avisos: pagos POR VENCER, cartera VENCIDA, plan por vencer y stock bajo.
-// Los dos primeros van separados porque son dos trabajos distintos: al que
-// todavía no vence se le recuerda, al vencido se le cobra.
+// Cinco avisos: pagos POR VENCER, cartera VENCIDA, plan por vencer, stock bajo y
+// facturas de proveedor por pagar. Los dos primeros van separados porque son dos
+// trabajos distintos: al que todavía no vence se le recuerda, al vencido se le
+// cobra. El de proveedores va en la dirección contraria a todos los demás —ahí
+// el que debe es el negocio— y por eso abre otra pantalla.
 //
 // Se manda a las 8:00 de Colombia por defecto: temprano para que dé tiempo de
 // llamar a los clientes en el día, pero no de madrugada. Configurable con
@@ -235,6 +237,92 @@ const _avisarPlan = async (negocioId) => {
   return res.enviados || 0;
 };
 
+// ── Aviso 4: facturas de proveedor por pagar ─────────────────────────────────
+//
+// El espejo de los avisos de cobro: aquí el que debe es el negocio. Va aparte de
+// la cartera de clientes porque abre otra pantalla y es otro trabajo — a un
+// cliente se le cobra, a un proveedor se le paga.
+//
+// Solo al dueño y al supervisor: un vendedor no decide qué facturas se pagan.
+//
+// Con las órdenes apagadas `carteraProveedores` devuelve vacío sin consultar
+// nada, así que para los negocios que no usan la feature esto no cuesta.
+const _avisarPagosProveedor = async (negocioId) => {
+  const cartera = await alertas.carteraProveedores(negocioId);
+  const { vencidas, por_vencer: porVencer } = cartera;
+  if (!vencidas.length && !porVencer.length) return 0;
+
+  let enviados = 0;
+
+  // Las vencidas van una por una: cada una abre su orden, y con el proveedor
+  // esperando el pago el detalle importa más que el resumen.
+  for (const [sucursalId, docs] of _porSucursal(vencidas)) {
+    for (const o of docs.slice(0, MAX_AVISOS_POR_SUCURSAL)) {
+      const dias = Math.abs(o.dias_para_vencer);
+      const res = await service.enviar({
+        negocio_id:  negocioId,
+        sucursal_id: sucursalId,
+        roles:       ['admin_negocio', 'supervisor'],
+        titulo: `${o.proveedor} · factura vencida hace ${dias} día${dias === 1 ? '' : 's'}`,
+        cuerpo: `Le debes ${_pesos(o.saldo)}${o.numero_factura ? ` de la factura ${o.numero_factura}` : ''}. Toca para abrir la orden.`,
+        url:  '/proveedores',
+        tag:  `pago-prov-${o.id}`,
+        tipo: 'pago_proveedor_vencido',
+        referencia_id: String(o.id),
+        unico_por_dia: true,
+      });
+      enviados += res.enviados || 0;
+    }
+
+    const sobran = docs.length - MAX_AVISOS_POR_SUCURSAL;
+    if (sobran > 0) {
+      const res = await service.enviar({
+        negocio_id:  negocioId,
+        sucursal_id: sucursalId,
+        roles:       ['admin_negocio', 'supervisor'],
+        titulo: `y ${sobran} factura${sobran === 1 ? '' : 's'} más vencida${sobran === 1 ? '' : 's'}`,
+        cuerpo: 'Además de las anteriores. Toca para ver las órdenes.',
+        url:  '/proveedores',
+        tag:  `pago-prov-resto-${sucursalId}`,
+        tipo: 'pago_proveedor_vencido_resto',
+        referencia_id: String(sucursalId),
+        unico_por_dia: true,
+      });
+      enviados += res.enviados || 0;
+    }
+  }
+
+  // Las que aún no vencen van en UN resumen por sucursal: son un plan de pagos,
+  // no una urgencia, y una notificación por cada una sería ruido.
+  for (const [sucursalId, docs] of _porSucursal(porVencer)) {
+    const total = docs.reduce((s, o) => s + o.saldo, 0);
+    const proxima = docs[0];
+    const cuando = proxima.dias_para_vencer === 0 ? 'vence hoy'
+      : proxima.dias_para_vencer === 1            ? 'vence mañana'
+      : `vence en ${proxima.dias_para_vencer} días`;
+
+    const res = await service.enviar({
+      negocio_id:  negocioId,
+      sucursal_id: sucursalId,
+      roles:       ['admin_negocio', 'supervisor'],
+      titulo: docs.length === 1
+        ? `${proxima.proveedor} · ${cuando}`
+        : `${docs.length} facturas por pagar esta semana`,
+      cuerpo: docs.length === 1
+        ? `Le debes ${_pesos(total)}. Prepara el pago antes de que se venza.`
+        : `${_pesos(total)} en total. La de ${proxima.proveedor} ${cuando}.`,
+      url:  '/proveedores',
+      tag:  `pago-prov-porvencer-${sucursalId}`,
+      tipo: 'pago_proveedor_por_vencer',
+      referencia_id: String(sucursalId),
+      unico_por_dia: true,
+    });
+    enviados += res.enviados || 0;
+  }
+
+  return enviados;
+};
+
 // ── Aviso 3: stock bajo ──────────────────────────────────────────────────────
 const _avisarStockBajo = async (negocioId) => {
   const grupos = await alertas.stockBajo(negocioId);
@@ -289,6 +377,7 @@ const ejecutar = async () => {
       enviados += await _avisarPorVencer(n.id, cartera);
       enviados += await _avisarPlan(n.id);
       enviados += await _avisarStockBajo(n.id);
+      enviados += await _avisarPagosProveedor(n.id);
     } catch (err) {
       // Un negocio con datos raros no puede dejar sin avisos a los otros 27.
       console.error(`[notif-cron] Negocio ${n.id} (${n.nombre}) omitido:`, err.message);
