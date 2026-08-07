@@ -137,6 +137,41 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > solo existe desde Postgres 14. La sección 11 de la prueba monta una base con los
 > tipos reales (bytea/timestamptz/bigserial) justo para cazar esto.
 
+> **Importación de inventario** (`importacion/`): se corre prácticamente **una
+> vez por negocio**, cuando arrancan. Por eso el diseño es **informativo, no
+> correctivo**: el importador no arregla nombres, no fusiona productos y no
+> adivina — dice qué va a pasar y el usuario corrige su Excel.
+> El flujo es de dos pasos: `POST /importacion/analizar` corre **el importador
+> de verdad** dentro de una transacción que termina en `ROLLBACK` y devuelve el
+> informe; `POST /importacion/inventario` lo aplica. **Nunca escribir un
+> validador paralelo**: se desincroniza del importador y acaba mintiendo.
+> Dos categorías, y la diferencia importa: **conflicto** = la fila no se
+> escribe (IMEI en otra sede, unidad vendida, código tomado); **aviso** = sí se
+> escribe pero puede sorprender (se suma stock, hay un nombre casi idéntico, el
+> producto entra sin costo). El costo **jamás bloquea**: hay negocios que a
+> propósito no lo registran.
+> **La identidad del producto NO se unifica.** Conviven tres nociones: el índice
+> único de la BD es `(nombre, sucursal_id)` **exacto**, el importador busca con
+> `LOWER(nombre)` y la UI no valida nada. De ahí salen los duplicados reales
+> (`[11PRO]`/`[11Pro]`, `cargador 3ds ` con espacio final). Se **detectan y se
+> reportan**, nunca se tocan: son negocios operando y su historia de ventas
+> cuelga de esas filas. `_NORM` solo sirve para avisar, jamás para decidir a qué
+> fila se escribe.
+> El **IMEI es único por negocio** (es físico). La misma sucursal actualiza
+> (re-import correctivo); otra sucursal es conflicto — antes hacía `UPDATE`
+> sobre la fila de la otra sede y el equipo no aparecía en la destino.
+> Las unidades vendidas o prestadas no se tocan: reescribirles el costo cambia
+> la utilidad de una venta ya hecha.
+> El nombre de columna de una característica se resuelve con
+> `nombreColumnaCaracteristica` / `clavesCaracteristica` en
+> `importacion.informe.js`, compartidas por la plantilla y el service: si se
+> separan, la característica se importa vacía. Existe porque una característica
+> puede llamarse igual que una columna fija (negocio 4: característica «Color»
+> **y** colores de serial activos → dos columnas `Color`, y SheetJS renombra la
+> segunda a `Color_1`, que no lee nadie).
+> Prueba: `18-importacion` (212 verificaciones, incluye el ida y vuelta con la
+> plantilla real y tres sucursales del mismo negocio).
+
 > **Tesorería**: los saldos por cuenta (efectivo/banco/billetera/corresponsal/divisa USD) se **derivan** de las tablas transaccionales existentes mapeando método de pago → cuenta, anclados en arqueos. Solo traslados/retiros/gastos se escriben en `movimientos_dinero`. Si cambian las reglas de qué entra/sale en `caja.repository.js`, replicarlas en `tesoreria.repository.js` (ramas marcadas). Los movimientos de efectivo se espejan en `movimientos_caja` con `referencia_tipo='tesoreria'`. Un pago de compra desde Tesorería crea un **Abono espejo** en `movimientos_acreedor` (`registrar_en_caja=FALSE`, `mov_dinero_id`) que salda la deuda del acreedor sin doble descuento; anular el pago elimina/recrea el espejo en cascada.
 
 ### Frontend API Layer

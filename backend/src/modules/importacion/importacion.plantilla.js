@@ -1,4 +1,5 @@
 const XLSX = require('xlsx');
+const { nombreColumnaCaracteristica } = require('./importacion.informe');
 
 // ─── Paleta ───────────────────────────────────────────────────────────────────
 const C = {
@@ -70,13 +71,27 @@ const NUM_FILAS_DATOS = 200;
 // ─── Hoja serial ─────────────────────────────────────────────────────────────
 // Estructura: fila 0 = título, fila 1 = claves (usadas como headers por sheet_to_json),
 //             fila 2 = descripciones (slice(1) la descarta), filas 3+ = datos vacíos
-function hojaSerial(nombreProducto, coloresActivo, coloresLista, caracteristicasActivo, caracteristicasLista, lineas = [], ubicacionActiva = false) {
+function hojaSerial(nombreProducto, coloresActivo, coloresLista, caracteristicasActivo, caracteristicasLista, lineas = [], ubicacionActiva = false, plana = false) {
   const ws = {};
 
   // ── Columnas dinámicas ────────────────────────────────────────────────────
   // La CLAVE (fila 1) debe normalizarse (lowercase + spaces→_) al valor que
   // el service leerá desde fila.*. El normalizer hace: trim().toLowerCase().replace(/\s+/g,'_')
-  const columnas = [
+  const columnas = [];
+
+  // Formato PLANO: una sola hoja para todos los productos, cada fila dice a
+  // cuál pertenece. La alternativa (una hoja por producto) sigue funcionando;
+  // con 50 modelos son 50 pestañas, que es la queja más común.
+  if (plana) {
+    columnas.push({
+      clave: 'Producto *',
+      desc:  'Requerido · Nombre del producto al que pertenece este IMEI',
+      bg:    C.requerido,
+      num:   false,
+    });
+  }
+
+  columnas.push(
     { clave: 'IMEI *',         desc: 'Requerido · Número único de serie',                 bg: C.requerido,  num: false },
     { clave: 'Fecha Entrada',  desc: 'Opcional · dd/mm/aaaa (deja vacío = hoy)',          bg: C.headerFondo, num: false },
     { clave: 'Proveedor',      desc: 'Opcional · Nombre del proveedor',                   bg: C.headerFondo, num: false },
@@ -90,7 +105,7 @@ function hojaSerial(nombreProducto, coloresActivo, coloresLista, caracteristicas
       bg:    C.lineaFondo,
       num:   false,
     },
-  ];
+  );
 
   if (coloresActivo) {
     const opciones = coloresLista.length > 0
@@ -106,8 +121,13 @@ function hojaSerial(nombreProducto, coloresActivo, coloresLista, caracteristicas
 
   if (caracteristicasActivo && caracteristicasLista.length > 0) {
     for (const nombre of caracteristicasLista) {
+      // Una característica puede llamarse igual que una columna fija — pasa de
+      // verdad: hay negocios con la característica «Color» Y los colores de
+      // serial activos. Dos columnas con la misma clave hacen que Excel las
+      // colapse y el dato se pierda sin que nadie lo note, así que la
+      // característica se desambigua. El importador entiende las dos formas.
       columnas.push({
-        clave: nombre,
+        clave: nombreColumnaCaracteristica(nombre, coloresActivo),
         desc:  `Característica: ${nombre}`,
         bg:    C.caracterFondo,
         num:   false,
@@ -127,15 +147,19 @@ function hojaSerial(nombreProducto, coloresActivo, coloresLista, caracteristicas
 
   columnas.push(
     { clave: 'Precio',         desc: 'Opcional · Precio de venta (COP)',                  bg: C.precioFondo,  num: true },
-    { clave: 'Costo Compra',   desc: 'Opcional · Costo al que fue adquirido (COP)',       bg: C.headerFondo,  num: true },
+    { clave: 'Costo Compra',   desc: 'Opcional · Costo de adquisición (COP). Sin él, la venta no muestra utilidad', bg: C.headerFondo,  num: true },
     { clave: 'Cliente Origen', desc: 'Opcional · Nombre del cliente si es retoma',        bg: C.headerFondo,  num: false },
+    { clave: 'Nota',           desc: 'Opcional · Observación libre de esta unidad',       bg: C.headerFondo,  num: false },
   );
 
   const numCols = columnas.length;
 
   // Fila 0: Título del producto (celda fusionada visualmente)
+  const titulo = plana
+    ? '📦  Seriales — todos los productos en una sola hoja'
+    : `📦  ${nombreProducto} — Hoja de Seriales`;
   columnas.forEach((_, c) => {
-    put(ws, 0, c, 's', c === 0 ? `📦  ${nombreProducto} — Hoja de Seriales` : '', sT(C.tituloFondo, C.blanco, 11));
+    put(ws, 0, c, 's', c === 0 ? titulo : '', sT(C.tituloFondo, C.blanco, 11));
   });
 
   // Fila 1: Claves (usadas por sheet_to_json como headers de columna)
@@ -195,12 +219,14 @@ function hojaSerial(nombreProducto, coloresActivo, coloresLista, caracteristicas
   seal(ws, 3 + NUM_FILAS_DATOS - 1, numCols);
   freeze(ws);
   ws['!cols'] = columnas.map(({ clave }) => {
+    if (clave.includes('Producto')) return { wch: 32 };
     if (clave.includes('IMEI'))   return { wch: 22 };
     if (clave === 'Fecha Entrada') return { wch: 16 };
     if (clave === 'Color')         return { wch: 16 };
     if (clave === 'Linea')         return { wch: 22 };
     if (clave === 'Precio' || clave === 'Costo Compra') return { wch: 16 };
     if (clave === 'Cliente Origen') return { wch: 22 };
+    if (clave === 'Nota')          return { wch: 30 };
     return { wch: 18 };
   });
   ws['!rows'] = [{ hpt: 20 }, { hpt: 22 }, { hpt: 30 }];
@@ -254,13 +280,20 @@ function hojaCantidad(variantesActivo = false, lineas = [], codigoActivo = false
   }
 
   columnas.push(
-    { clave: 'Stock',          desc: 'Cantidad (se suma al existente, 0 si es nuevo)',              bg: C.cantidadFondo,     num: true,  wch: 10 },
+    { clave: 'Stock',          desc: 'Cantidad (se SUMA al existente, 0 si es nuevo)',              bg: C.cantidadFondo,     num: true,  wch: 10 },
     { clave: 'Stock Minimo',   desc: 'Alerta de stock bajo (toma el mayor)',                        bg: C.cantidadFondo,     num: true,  wch: 14 },
-    { clave: 'Costo Unitario', desc: 'Costo de compra por unidad (COP)',                            bg: C.headerFondo,       num: true,  wch: 16 },
+    {
+      clave: 'Costo Unitario',
+      desc:  variantesActivo
+        ? 'Costo de compra por unidad (COP). Si la fila tiene Atributo/Variante, es el costo DE ESA variante'
+        : 'Costo de compra por unidad (COP). Sin él, la venta no muestra utilidad',
+      bg: C.headerFondo, num: true, wch: 16,
+    },
     { clave: 'Precio Venta',   desc: 'Precio de venta al público (COP)',                            bg: C.precioFondo,       num: true,  wch: 14 },
     { clave: 'Unidad Medida',  desc: 'Ej: unidad, caja, kg, litro (defecto: unidad)',              bg: C.headerFondo,       num: false, wch: 16 },
     { clave: 'Proveedor',      desc: 'Opcional · Nombre del proveedor habitual',                    bg: C.headerFondo,       num: false, wch: 20 },
     { clave: 'Cliente Origen', desc: 'Opcional · Solo si proviene de un cliente',                   bg: C.headerFondo,       num: false, wch: 22 },
+    { clave: 'Nota',           desc: 'Opcional · Observación libre del producto',                   bg: C.headerFondo,       num: false, wch: 30 },
   );
 
   const ws      = {};
@@ -336,20 +369,43 @@ function hojaInstrucciones(config) {
 
   linea('📋  INSTRUCCIONES DE IMPORTACIÓN', C.tituloFondo, true, 13);
   linea('');
-  linea('CÓMO USAR ESTA PLANTILLA', C.headerFondo, true, 10);
-  linea('1. Cada hoja con nombre de producto = seriales de ese producto.');
-  linea('   • Renombra la hoja de ejemplo con el nombre real del producto.');
-  linea('   • Puedes agregar más hojas para más productos (una hoja por producto).');
-  linea('   • La hoja "Productos Cantidad" es para productos SIN serial (cajas, accesorios, etc.).');
+  linea('ANTES DE IMPORTAR VAS A VER UN RESUMEN', C.headerFondo, true, 10);
+  linea('Al subir el archivo, el sistema primero te MUESTRA qué va a pasar (cuántos productos');
+  linea('nuevos, a cuáles se les suma stock, qué filas tienen problema) sin guardar nada.');
+  linea('Revisa ese resumen, corrige el Excel si hace falta, y recién ahí confirmas.');
+  linea('Nada se escribe hasta que le des a Confirmar.');
   linea('');
-  linea('2. No borres ni muevas las primeras 3 filas de cada hoja.');
+  linea('CÓMO USAR ESTA PLANTILLA', C.headerFondo, true, 10);
+  linea('1. Para productos CON serial/IMEI tienes dos formas. Usa la que te sirva:');
+  linea('   • Una hoja por producto: renombra "Ejemplo Producto" con el nombre real y');
+  linea('     agrega más hojas si tienes más productos.');
+  linea('   • Todo en una sola hoja: usa "Seriales en lista" y escribe en cada fila a qué');
+  linea('     producto pertenece el IMEI. Con muchos modelos es mucho más cómodo.');
+  linea('   Si llenas las dos, se importan las dos.');
+  linea('');
+  linea('2. La hoja "Productos Cantidad" es para productos SIN serial (accesorios, cajas…).');
+  linea('');
+  linea('3. No borres ni muevas las primeras 3 filas de cada hoja.');
   linea('   • Fila 1: Título (informativa)');
   linea('   • Fila 2: Nombres de campo (¡NO modificar!)');
   linea('   • Fila 3: Descripción de cada columna (informativa)');
   linea('   • Fila 4 en adelante: tus datos');
   linea('');
-  linea('3. Columna IMEI *  es obligatoria en hojas de serial.');
+  linea('4. Columna IMEI *  es obligatoria en hojas de serial.');
   linea('   Columna Nombre * es obligatoria en la hoja de cantidad.');
+  linea('   Las hojas que no tengan columna IMEI se ignoran (puedes dejar tus apuntes ahí).');
+  linea('');
+  linea('LO QUE DEBES SABER', C.headerFondo, true, 10);
+  linea('• El Stock se SUMA al que ya tenga el producto. Si subes el mismo archivo dos veces,');
+  linea('  el stock queda doble. El resumen previo te avisa a qué productos se les va a sumar.');
+  linea('• Escribe los nombres SIEMPRE igual. "iPhone 13" y "iphone 13 " (con espacio al final)');
+  linea('  quedan como dos productos distintos. El resumen te avisa si detecta parecidos.');
+  linea('• Un IMEI no puede estar en dos sedes. Si ya existe en otra sucursal, esa fila no se');
+  linea('  importa y te lo dice: para mover un equipo de sede se usa un traslado.');
+  linea('• Las unidades ya vendidas o prestadas nunca se modifican.');
+  linea('• El costo es opcional. Sin costo, esa venta no mostrará utilidad en los reportes.');
+  linea('• Mira la hoja "Referencia": tiene las líneas y proveedores que ya existen, para que');
+  linea('  los escribas igual y no se creen duplicados por un typo.');
   linea('');
 
   if (coloresActivo || caracteristicasActivo || variantesActivo || codigoActivo || ubicacionActiva) {
@@ -418,6 +474,74 @@ function hojaInstrucciones(config) {
   return ws;
 }
 
+// ─── Hoja de referencia ───────────────────────────────────────────────────────
+// Los valores que YA existen en el negocio. Sin esto el usuario escribe
+// "Accesorios" donde la línea se llama "ACCESORIOS", y aunque la búsqueda es
+// insensible a mayúsculas, un typo real ("Acesorios") crea una línea nueva sin
+// que nadie se entere. Aquí los ve y los copia.
+function hojaReferencia(config, lineas = [], proveedores = []) {
+  const ws = {};
+  let r = 0;
+
+  const titulo = (texto) => {
+    put(ws, r, 0, 's', texto, sT(C.headerFondo, C.blanco, 10));
+    put(ws, r, 1, 's', '',    sT(C.headerFondo, C.blanco, 10));
+    r++;
+  };
+  const item = (a, b = '') => {
+    put(ws, r, 0, 's', a, sCelda(C.datoFondo));
+    put(ws, r, 1, 's', b, sCelda(C.datoFondo));
+    r++;
+  };
+  const vacio = () => { r++; };
+
+  put(ws, r, 0, 's', '📚  VALORES QUE YA EXISTEN EN TU NEGOCIO', sT(C.tituloFondo, C.blanco, 12));
+  put(ws, r, 1, 's', '', sT(C.tituloFondo, C.blanco, 12));
+  r++;
+  vacio();
+
+  titulo('LÍNEAS / CATEGORÍAS');
+  if (lineas.length) lineas.forEach((l) => item(l.nombre));
+  else item('(ninguna creada todavía)');
+  vacio();
+
+  titulo('PROVEEDORES');
+  if (proveedores.length) proveedores.slice(0, 200).forEach((p) => item(p.nombre));
+  else item('(ninguno creado todavía)');
+  vacio();
+
+  const coloresLista = _parseLista(config.colores_serial_lista);
+  if (config.colores_serial_activo === '1') {
+    titulo('COLORES DE SERIAL');
+    if (coloresLista.length) coloresLista.forEach((c) => item(c));
+    else item('(ninguno configurado en Ajustes)');
+    vacio();
+  }
+
+  const caracteristicasLista = _parseLista(config.caracteristicas_serial_lista);
+  if (config.caracteristicas_serial_activo === '1') {
+    titulo('CARACTERÍSTICAS DE SERIAL');
+    if (caracteristicasLista.length) {
+      caracteristicasLista.forEach((c) => item(c, 'Es una columna en las hojas de seriales'));
+    } else item('(ninguna configurada en Ajustes)');
+    vacio();
+  }
+
+  if (config.tarifas_activo === '1') {
+    const tarifas = _parseLista(config.tarifas_lista);
+    titulo('TARIFAS (precio calculado desde el costo)');
+    if (tarifas.length) {
+      tarifas.forEach((t) => item(t?.nombre ?? '', `+${t?.porcentaje ?? 0}% sobre el costo`));
+      item('', 'Un producto SIN costo no se puede cotizar por tarifa.');
+    } else item('(ninguna configurada en Ajustes)');
+    vacio();
+  }
+
+  ws['!ref']  = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: Math.max(r, 1), c: 1 } });
+  ws['!cols'] = [{ wch: 40 }, { wch: 50 }];
+  return ws;
+}
+
 function _parseLista(valor) {
   try { return JSON.parse(valor || '[]'); }
   catch { return []; }
@@ -438,7 +562,7 @@ function _listaDropdown(nombres, maxLen = 250) {
 }
 
 // ─── Export principal ─────────────────────────────────────────────────────────
-function generarPlantillaBuffer(config = {}, lineas = []) {
+function generarPlantillaBuffer(config = {}, lineas = [], proveedores = []) {
   const coloresActivo         = config.colores_serial_activo === '1';
   const caracteristicasActivo = config.caracteristicas_serial_activo === '1';
   const variantesActivo       = config.variantes_activo === '1';
@@ -457,7 +581,19 @@ function generarPlantillaBuffer(config = {}, lineas = []) {
     'Ejemplo Producto'
   );
 
+  // Formato alternativo: TODOS los seriales en una sola hoja, con columna
+  // Producto. El importador detecta cuál se usó por la presencia de esa
+  // columna, así que los dos formatos conviven en el mismo libro y el usuario
+  // llena el que le sirva. Si se deja vacía, no importa nada.
+  XLSX.utils.book_append_sheet(
+    wb,
+    hojaSerial('', coloresActivo, coloresLista, caracteristicasActivo, caracteristicasLista, lineas, ubicacionActiva, true),
+    'Seriales en lista'
+  );
+
   XLSX.utils.book_append_sheet(wb, hojaCantidad(variantesActivo, lineas, codigoActivo, ubicacionActiva), 'Productos Cantidad');
+
+  XLSX.utils.book_append_sheet(wb, hojaReferencia(config, lineas, proveedores), 'Referencia');
 
   return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx', cellStyles: true });
 }

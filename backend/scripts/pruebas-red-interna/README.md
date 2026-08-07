@@ -31,6 +31,7 @@ node scripts/pruebas-red-interna/10-adversario-mora-tarifas.mjs
 node scripts/pruebas-red-interna/11-envios-por-remision.mjs
 node scripts/pruebas-red-interna/12-destino-y-referencias.mjs
 node scripts/pruebas-red-interna/17-pago-total-acreedor.mjs
+node scripts/pruebas-red-interna/18-importacion.mjs
 ```
 
 > Las suites cargan **las dos migraciones**: `20260725_red_interna.sql` y
@@ -262,6 +263,50 @@ compras) y aplica `migrations/20260805_pago_total_acreedor.sql`.
 > El punto 7 es la razón de no guardar el total en una tabla aparte: cancelar
 > una compra borra sus abonos, y un total guardado quedaría inflado contra un
 > saldo que ya bajó. Derivarlo con `SUM` lo hace imposible por construcción.
+
+### `18-importacion.mjs` — 212 verificaciones
+
+Importación de inventario desde Excel, probada **como la usa una persona**: se
+generan bytes `.xlsx` de verdad y se entregan al controller real con un req/res
+falsos, así que también se ejercita la detección de hojas y la lectura de
+cabeceras — donde vivían la mitad de los fallos.
+
+No usa `esquema.sql`: monta `esquema-importacion.sql`, que replica las
+**restricciones reales** de producción (verificadas con `pg_index`), no un
+mínimo cómodo. Importa: `productos_cantidad UNIQUE (nombre, sucursal_id)` es
+**exacto** mientras el importador busca con `LOWER(nombre)` — de ese desajuste
+nacen los duplicados `[11PRO]`/`[11Pro]` que hay en producción. Un fixture más
+permisivo dejaría pasar justo lo que se quiere cazar.
+
+| # | Escenario |
+|---|---|
+| 1 | Alta inicial sin features · **el preview no escribe nada** |
+| 2 | El mismo archivo en otra sucursal: cada sede recibe lo suyo |
+| 3 | Re-subir el archivo **duplica el stock**, y el preview lo anuncia |
+| 4 | Duplicados que ya existen: se detectan, **jamás se tocan** |
+| 5 | IMEI en otra sede / vendido / repetido en el archivo → conflicto |
+| 6 | El mismo IMEI en OTRO negocio sí puede |
+| 7 | Variantes: el costo baja hasta atributo y variante |
+| 8 | Las mismas columnas con las features apagadas |
+| 9 | Código único: herencia entre sedes y conflictos |
+| 10 | Hojas basura, hoja de seriales vacía, hoja plana con columna Producto |
+| 11 | `1.500` / `1,500` / `1.500,50` y fechas `dd/mm/aaaa` |
+| 12 | Sin costo: **avisa, nunca bloquea** |
+| 13 | El preview no escribe ni con errores de por medio |
+| 14 | **El preview promete exactamente lo que hace la corrida real** |
+| 15 | Integridad: nadie se pisó con nadie |
+| 16 | **Ida y vuelta real**: descargar la plantilla, llenarla y subirla |
+| 16b | Característica que se llama igual que una columna fija (`Color`) |
+| 17 | **Un negocio, tres sucursales**: aritmética de stock exacta |
+| 17b | **Mismo nombre en dos sedes con stock distinto** — cantidad Y serial |
+
+> El punto 14 es el que sostiene todo lo demás: el preview no es un validador
+> paralelo (esos se desincronizan y acaban mintiendo), es el importador de
+> verdad corriendo dentro de una transacción que termina en `ROLLBACK`.
+
+> El 16 es el único que prueba que el `.xlsx` que el sistema **entrega** sea el
+> que el sistema **sabe leer**. Si la plantilla y el parser se separan, todo lo
+> demás sigue en verde y el usuario no puede importar nada.
 
 ## Nota sobre `esquema.sql`
 
