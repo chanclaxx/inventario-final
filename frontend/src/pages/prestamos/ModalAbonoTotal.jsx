@@ -55,12 +55,15 @@ function simularDistribucion(prestamosActivos, valorTotal) {
 // mode: 'crear' | 'editar'
 // Si mode='editar' se requieren: abonoTotalId, valorActual, metodoActual
 
-export function ModalAbonoTotal({ nombre, tipo, personaId, prestamos, onClose, mode = 'crear', abonoTotalId, valorActual = '', metodoActual = 'Efectivo' }) {
+const MAX_DESCRIPCION = 200;
+
+export function ModalAbonoTotal({ nombre, tipo, personaId, prestamos, onClose, mode = 'crear', abonoTotalId, valorActual = '', metodoActual = 'Efectivo', descripcionActual = '' }) {
   const queryClient = useQueryClient();
   const metodosPago = useMetodosPago();
 
   const [valor,  setValor]  = useState(mode === 'editar' ? String(valorActual) : '');
   const [metodo, setMetodo] = useState(mode === 'editar' ? metodoActual : 'Efectivo');
+  const [descripcion, setDescripcion] = useState(descripcionActual || '');
   const [error,  setError]  = useState('');
   const [mostrarCalc, setMostrarCalc] = useState(false);
   // Reparto mora/capital dentro de cada préstamo, y distribución manual entre
@@ -117,9 +120,10 @@ export function ModalAbonoTotal({ nombre, tipo, personaId, prestamos, onClose, m
       mode === 'crear'
         ? registrarAbonoTotal(tipoApi, personaId, valorNum, metodo, {
             modo: MODO_TOTAL,
+            descripcion: descripcion.trim() || null,
             ...(ajustada && { distribucion_manual: manual }),
           })
-        : modificarAbonoTotal(abonoTotalId, valorNum, metodo),
+        : modificarAbonoTotal(abonoTotalId, valorNum, metodo, descripcion.trim() || null),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['prestamos'],    exact: false });
       queryClient.invalidateQueries({ queryKey: ['facturas'],     exact: false });
@@ -255,6 +259,32 @@ export function ModalAbonoTotal({ nombre, tipo, personaId, prestamos, onClose, m
               </button>
             ))}
           </div>
+        </div>
+
+        {/* Descripción: por qué se hizo el pago. Texto libre, no toca el reparto. */}
+        <div className="flex flex-col gap-1">
+          <div className="flex items-center justify-between">
+            <label className="text-sm font-medium text-gray-700">
+              Descripción <span className="text-gray-400 font-normal">(opcional)</span>
+            </label>
+            {descripcion.length > 0 && (
+              <span className="text-[11px] text-gray-400">
+                {descripcion.length}/{MAX_DESCRIPCION}
+              </span>
+            )}
+          </div>
+          <input
+            type="text"
+            value={descripcion}
+            maxLength={MAX_DESCRIPCION}
+            onChange={(e) => setDescripcion(e.target.value)}
+            placeholder="Ej: pagó la mamá, cierre de mes, acuerdo del 12 de agosto…"
+            className="w-full px-3 py-2 bg-gray-100 rounded-xl text-sm
+              focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"
+          />
+          <p className="text-[11px] text-gray-400">
+            Queda visible en el estado de cuenta, el PDF y el Excel.
+          </p>
         </div>
 
         {/* Preview de distribución — solo en modo crear */}

@@ -547,13 +547,19 @@ const registrarAbonoTotal = async (req, res, next) => {
     if (!sucursal_id) {
       return res.status(400).json({ ok: false, error: 'Debes indicar la sucursal' });
     }
+    // OJO: `modo` y `distribucion_manual` llegan en el body y NO se reenvían al
+    // service (nunca se hizo). Cambiarlo alteraría cómo se reparte la plata
+    // entre préstamos, así que no se toca aquí: solo se agrega la descripción,
+    // que es texto y no mueve un peso.
     const data = await service.registrarAbonoTotal(
-      req.user.negocio_id, tipo, id, Number(valor_total), metodo, req.user.id, sucursal_id
+      req.user.negocio_id, tipo, id, Number(valor_total), metodo, req.user.id, sucursal_id,
+      { descripcion: req.body.descripcion ?? null },
     );
     audit.registrar(req.user.negocio_id, req.user.id, 'Abono total a préstamos', 'prestamos', Number(id) || null, {
       sucursal_id: sucursal_id ?? null,
       monto:       Number(valor_total),
       metodo:      metodo ?? null,
+      descripcion: req.body.descripcion ?? null,
     });
     res.json({ ok: true, data, message: 'Abono total registrado correctamente' });
   } catch (err) { next(err); }
@@ -562,16 +568,17 @@ const registrarAbonoTotal = async (req, res, next) => {
 const modificarAbonoTotal = async (req, res, next) => {
   try {
     const { abonoTotalId } = req.params;
-    const { valor_total, metodo } = req.body;
+    const { valor_total, metodo, descripcion } = req.body;
     if (!valor_total || valor_total <= 0) {
       return res.status(400).json({ ok: false, error: 'El valor total debe ser mayor a 0' });
     }
     const data = await service.modificarAbonoTotal(
-      req.user.negocio_id, abonoTotalId, Number(valor_total), metodo
+      req.user.negocio_id, abonoTotalId, Number(valor_total), metodo, descripcion
     );
     audit.registrar(req.user.negocio_id, req.user.id, 'Abono total modificado', 'prestamos', Number(abonoTotalId) || null, {
-      monto:  Number(valor_total),
-      metodo: metodo ?? null,
+      monto:       Number(valor_total),
+      metodo:      metodo ?? null,
+      descripcion: descripcion ?? null,
     });
     res.json({ ok: true, data, message: 'Abono total modificado correctamente' });
   } catch (err) { next(err); }

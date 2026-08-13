@@ -240,14 +240,15 @@ A dónde fue cada equipo y bajo qué nombre quedó, más la deuda en el Dashboar
 > remisión donde el motor de estados esperaba la sucursal, así que el detalle
 > de un envío mostraba siempre el estado de la línea y `liquidable = 0`.
 
-### `17-pago-total-acreedor.mjs` — 44 verificaciones
+### `17-pago-total-acreedor.mjs` — 59 verificaciones
 
 El pago total a un proveedor se sigue repartiendo entre los cargos abiertos,
 pero el estado de cuenta lo muestra como el movimiento único que hizo el
 usuario. La suite comprueba que esa mejora sea solo de lectura.
 
 No usa `esquema.sql`: monta su propio esquema mínimo (acreedores, movimientos,
-compras) y aplica `migrations/20260805_pago_total_acreedor.sql`.
+compras) y aplica `migrations/20260805_pago_total_acreedor.sql` y
+`migrations/20260813_descripcion_pago_total.sql`.
 
 | # | Escenario |
 |---|---|
@@ -260,6 +261,14 @@ compras) y aplica `migrations/20260805_pago_total_acreedor.sql`.
 | 8 | Un pago que cae en un solo cargo no se confunde con un pago adelantado |
 | 9 | Los pagos de dos acreedores no se mezclan |
 | 10 | El backfill agrupa los pagos viejos y es idempotente |
+| 11 | La consulta corre con los **tipos reales** (firma BYTEA, timestamptz, bigserial) |
+| 12 | La **descripción** del pago se ve pegada a la etiqueta y no toca la contabilidad |
+
+> El punto 12 verifica lo que NO cambia: la columna `descripcion` de cada fila
+> hija sigue siendo `'Pago total distribuido'` —la marca que reconoce el
+> backfill del punto 10 y la que edita el usuario desde el historial del
+> cargo—, y un pago sin nota (o anterior a la columna) se rotula exactamente
+> igual que antes.
 
 > El punto 7 es la razón de no guardar el total en una tabla aparte: cancelar
 > una compra borra sus abonos, y un total guardado quedaría inflado contra un

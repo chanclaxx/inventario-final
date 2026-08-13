@@ -88,7 +88,8 @@ const getAbonos = async (prestamoId) => {
     SELECT
       ap.id, ap.prestamo_id, ap.fecha, ap.valor, ap.metodo,
       ap.abono_total_id,
-      at.valor_total AS abono_total_valor,
+      at.valor_total  AS abono_total_valor,
+      at.descripcion  AS abono_total_descripcion,
       u.nombre AS usuario_nombre
     FROM abonos_prestamo ap
     LEFT JOIN usuarios      u  ON u.id  = ap.usuario_id
@@ -734,7 +735,7 @@ const getEstadoCuenta = async (executor, negocioId, tipo, personaId, sucursalId 
 
   const { rows } = await executor.query(`
     SELECT fecha, tipo, concepto, cargo, abono, referencia_id, anulable,
-           prestamo_id, prestamo_estado
+           prestamo_id, prestamo_estado, descripcion
     FROM (
 
       -- Préstamos otorgados (aumentan deuda)
@@ -747,7 +748,8 @@ const getEstadoCuenta = async (executor, negocioId, tipo, personaId, sucursalId 
         p.id                                           AS referencia_id,
         false                                          AS anulable,
         NULL::integer                                  AS prestamo_id,
-        p.estado::text                                 AS prestamo_estado
+        p.estado::text                                 AS prestamo_estado,
+        NULL::text                                     AS descripcion
       FROM prestamos p
       JOIN sucursales su ON su.id = p.sucursal_id
       WHERE su.negocio_id = $1 AND ${filtroPersona}
@@ -773,7 +775,8 @@ const getEstadoCuenta = async (executor, negocioId, tipo, personaId, sucursalId 
         ap.id                                          AS referencia_id,
         true                                           AS anulable,
         ap.prestamo_id                                 AS prestamo_id,
-        NULL::text                                     AS prestamo_estado
+        NULL::text                                     AS prestamo_estado,
+        NULL::text                                     AS descripcion
       FROM abonos_prestamo ap
       JOIN prestamos  p  ON p.id  = ap.prestamo_id
       JOIN sucursales su ON su.id = p.sucursal_id
@@ -784,6 +787,10 @@ const getEstadoCuenta = async (executor, negocioId, tipo, personaId, sucursalId 
       UNION ALL
 
       -- Abonos totales (un solo entry por pago masivo)
+      --
+      -- La descripción del usuario viaja en columna propia y NO pegada al
+      -- concepto: la pantalla saca de ahí el método de pago para precargar el
+      -- modal de edición, y cualquier texto extra se lo llevaría por delante.
       SELECT
         at.fecha,
         'abono_total'::text                            AS tipo,
@@ -793,7 +800,8 @@ const getEstadoCuenta = async (executor, negocioId, tipo, personaId, sucursalId 
         at.id                                          AS referencia_id,
         false                                          AS anulable,
         NULL::integer                                  AS prestamo_id,
-        NULL::text                                     AS prestamo_estado
+        NULL::text                                     AS prestamo_estado,
+        NULLIF(BTRIM(at.descripcion), '')              AS descripcion
       FROM abonos_totales at
       JOIN sucursales su ON su.id = at.sucursal_id
       WHERE su.negocio_id = $1
@@ -813,7 +821,8 @@ const getEstadoCuenta = async (executor, negocioId, tipo, personaId, sucursalId 
         r.id                                           AS referencia_id,
         true                                           AS anulable,
         NULL::integer                                  AS prestamo_id,
-        NULL::text                                     AS prestamo_estado
+        NULL::text                                     AS prestamo_estado,
+        NULL::text                                     AS descripcion
       FROM retomas r
       LEFT JOIN sucursales su ON su.id = r.sucursal_id
       WHERE r.prestamo_id IS NULL
@@ -859,7 +868,8 @@ const getEstadoCuenta = async (executor, negocioId, tipo, personaId, sucursalId 
         mm.id                                          AS referencia_id,
         false                                          AS anulable,
         mm.prestamo_id                                 AS prestamo_id,
-        NULL::text                                     AS prestamo_estado
+        NULL::text                                     AS prestamo_estado,
+        NULL::text                                     AS descripcion
       FROM movimientos_mora mm
       JOIN prestamos  p  ON p.id  = mm.prestamo_id
       JOIN sucursales su ON su.id = p.sucursal_id
@@ -965,12 +975,17 @@ const sincronizarStockArbolEnTx = async (client, productoId) => {
 };
 
 // ── Abono total: insertar registro maestro ────────────────────────────────────
-const insertarAbonoTotal = async (client, { tipo_persona, persona_id, sucursal_id, valor_total, metodo, usuario_id }) => {
+// `descripcion` es texto libre del usuario (por qué se hizo el pago). No entra
+// en ningún cálculo; solo se muestra junto al movimiento.
+const insertarAbonoTotal = async (client, { tipo_persona, persona_id, sucursal_id, valor_total, metodo, usuario_id, descripcion }) => {
   const { rows } = await client.query(`
-    INSERT INTO abonos_totales(tipo_persona, persona_id, sucursal_id, valor_total, metodo, usuario_id)
-    VALUES ($1, $2, $3, $4, $5, $6)
+    INSERT INTO abonos_totales(tipo_persona, persona_id, sucursal_id, valor_total, metodo, usuario_id, descripcion)
+    VALUES ($1, $2, $3, $4, $5, $6, $7)
     RETURNING *
-  `, [tipo_persona, persona_id, sucursal_id, valor_total, metodo || 'Efectivo', usuario_id || null]);
+  `, [
+    tipo_persona, persona_id, sucursal_id, valor_total, metodo || 'Efectivo', usuario_id || null,
+    String(descripcion ?? '').trim().slice(0, 200) || null,
+  ]);
   return rows[0];
 };
 

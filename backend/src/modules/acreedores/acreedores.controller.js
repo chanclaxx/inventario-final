@@ -99,6 +99,7 @@ const registrarAbonoTotal = async (req, res, next) => {
       valor:             req.body.valor,
       metodo:            req.body.metodo,
       registrar_en_caja: req.body.registrar_en_caja,
+      descripcion:       req.body.descripcion,
       usuario_id:        req.user.id,
       sucursal_id:       req.sucursal_id,
     });

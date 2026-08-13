@@ -57,8 +57,8 @@ export const descargarPdfPazYSalvoPrestamo = (prestamoId) =>
 // `distribucion_manual` es opcional: { [prestamo_id]: valor } y debe sumar el total.
 export const registrarAbonoTotal = (tipo, personaId, valor_total, metodo, extra = {}) =>
   api.post(`/prestamos/personas/${tipo}/${personaId}/abono-total`, { valor_total, metodo, ...extra });
-export const modificarAbonoTotal = (abonoTotalId, valor_total, metodo) =>
-  api.patch(`/prestamos/abonos-totales/${abonoTotalId}`, { valor_total, metodo });
+export const modificarAbonoTotal = (abonoTotalId, valor_total, metodo, descripcion) =>
+  api.patch(`/prestamos/abonos-totales/${abonoTotalId}`, { valor_total, metodo, descripcion });
 
 // ── Mora (feature opt-in) ────────────────────────────────────────────────────
 

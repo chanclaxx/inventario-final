@@ -14,8 +14,11 @@ import {
  * cuadrícula/conversación, paginación, saldo final— sea idéntica en los dos.
  *
  * Un movimiento tiene la forma:
- *   { fecha, tipo, concepto, cargo, abono, saldo, referencia_id, anulable }
+ *   { fecha, tipo, concepto, cargo, abono, saldo, referencia_id, anulable,
+ *     descripcion? }
  * `saldo: null` significa "no entra al acumulado" (informativo o anulado).
+ * `descripcion` es la nota libre de quien registró el movimiento (hoy la del
+ * pago total): se muestra si viene, y los módulos que no la mandan no cambian.
  */
 
 const PAGE_SIZE_MOVS = 20;
@@ -68,6 +71,11 @@ function BurbujaMensaje({ mov, cfg, etiqueta, onAnular, acciones }) {
 
           {/* Concepto */}
           <p className="text-sm font-medium text-gray-800 leading-snug">{mov.concepto}</p>
+
+          {/* Descripción escrita por quien registró el movimiento */}
+          {mov.descripcion && (
+            <p className="text-xs text-gray-500 italic leading-snug mt-0.5">{mov.descripcion}</p>
+          )}
 
           {/* Monto */}
           <p className={`text-base font-bold mt-0.5 ${cfg.montoClass}`}>
@@ -129,6 +137,9 @@ function FilaTabla({ mov, cfg, etiqueta, onAnular, acciones, isOdd }) {
             </span>
           )}
           <span className="text-xs text-gray-700 leading-tight">{mov.concepto}</span>
+          {mov.descripcion && (
+            <span className="text-xs text-gray-400 italic leading-tight">· {mov.descripcion}</span>
+          )}
         </div>
       </td>
       <td className="px-3 py-2 text-right text-xs font-semibold text-green-600 whitespace-nowrap align-middle">

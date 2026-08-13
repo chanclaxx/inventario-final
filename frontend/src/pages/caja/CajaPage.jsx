@@ -30,6 +30,18 @@ function nombreVisible(nombreReal, tipoProveedor, esAdmin) {
   return 'Proveedor';
 }
 
+// ─── Helper: cómo se lee un ingreso de préstamos en el arqueo ────────────────
+// La lista mezcla dos cosas: el abono a UN préstamo y el pago total, que no
+// tiene préstamo porque se repartió entre varios (por eso venía como
+// "Préstamo #null"). El pago total puede traer la descripción que escribió
+// quien lo registró.
+function etiquetaAbonoPrestamo(item) {
+  const base = item.prestamo_id || item.prestamo_numero
+    ? `Préstamo #${String(item.prestamo_numero ?? item.prestamo_id).padStart(4, '0')} — ${item.prestatario}`
+    : `Pago total — ${item.prestatario}`;
+  return item.descripcion ? `${base} · ${item.descripcion}` : base;
+}
+
 const CONFIG_GRUPOS = {
   facturas: {
     icono:      Receipt,
@@ -62,7 +74,7 @@ const CONFIG_GRUPOS = {
   textHeader: 'text-purple-700',
   borderColor:'border-purple-100',
   renderItem: (item) => ({
-    descripcion: `Préstamo #${String(item.prestamo_numero ?? item.prestamo_id).padStart(4, '0')} — ${item.prestatario}`,
+    descripcion: etiquetaAbonoPrestamo(item),
     detalle:     item.metodo || null,
     fecha:       item.fecha,
   }),
@@ -691,7 +703,7 @@ function _buildItemsPorMetodo(grupos) {
     add(item, `Crédito Factura #${String(item.factura_numero ?? item.factura_id).padStart(6, '0')} — ${item.nombre_cliente}`, 'Ingreso')
   );
   (grupos.abonosPrestamo?.items || []).forEach((item) =>
-    add(item, `Préstamo #${String(item.prestamo_numero ?? item.prestamo_id).padStart(4, '0')} — ${item.prestatario}`, 'Ingreso')
+    add(item, etiquetaAbonoPrestamo(item), 'Ingreso')
   );
   (grupos.abonosServicio?.items || []).forEach((item) => {
     const partes = [

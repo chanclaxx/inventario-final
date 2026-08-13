@@ -1587,6 +1587,10 @@ const getEstadoCuenta = async (negocioId, tipo, personaId, sucursalId = null) =>
       prestamo_id:     row.prestamo_id ? Number(row.prestamo_id) : null,
       anulable:        row.anulable,
       prestamo_estado: row.prestamo_estado || null,
+      // Nota que escribió el usuario (hoy solo la del pago total). Va aparte
+      // del concepto porque la pantalla parsea el concepto para precargar el
+      // modal de edición.
+      descripcion:     row.descripcion || null,
     };
   });
 };
@@ -1713,7 +1717,7 @@ const editarValorPrestamo = async (negocioId, prestamoId, nuevoValor) => {
 // así que es exigible y es el que el negocio le explica al cliente.
 const registrarAbonoTotal = async (
   negocioId, tipo, personaId, valorTotal, metodo, usuarioId, sucursalId,
-  { modo = 'capital_primero', distribucion_manual = null } = {},
+  { modo = 'capital_primero', distribucion_manual = null, descripcion = null } = {},
 ) => {
   if (tipo === 'prestatario') await _verificarPrestatario(personaId, negocioId);
   else await _verificarCliente(personaId, negocioId);
@@ -1778,6 +1782,7 @@ const registrarAbonoTotal = async (
       valor_total:  valorTotal,
       metodo,
       usuario_id:   usuarioId || null,
+      descripcion,
     });
 
     let remaining = valorTotal;
@@ -1873,7 +1878,10 @@ const registrarAbonoTotal = async (
 // ─── Servicio: modificar abono total ─────────────────────────────────────────
 // Revierte todos los abonos individuales del total y re-distribuye con el nuevo valor.
 
-const modificarAbonoTotal = async (negocioId, abonoTotalId, nuevoValor, metodo) => {
+// `descripcion` sin enviar (undefined) deja la que tenía; enviarla vacía la
+// borra. Es texto libre y no participa del reparto: cambiarla no vuelve a
+// tocar un solo abono.
+const modificarAbonoTotal = async (negocioId, abonoTotalId, nuevoValor, metodo, descripcion) => {
   const abonoTotal = await repo.getAbonoTotalById(abonoTotalId, negocioId);
   if (!abonoTotal) throw { status: 404, message: 'Abono total no encontrado' };
 
@@ -1966,9 +1974,13 @@ const modificarAbonoTotal = async (negocioId, abonoTotalId, nuevoValor, metodo) 
     }
 
     // 4. Actualizar registro maestro
+    const nuevaDescripcion = descripcion === undefined
+      ? abonoTotal.descripcion ?? null
+      : (String(descripcion ?? '').trim().slice(0, 200) || null);
+
     await client.query(
-      'UPDATE abonos_totales SET valor_total = $1, metodo = $2 WHERE id = $3',
-      [nuevoValor, metodo || abonoTotal.metodo, abonoTotalId]
+      'UPDATE abonos_totales SET valor_total = $1, metodo = $2, descripcion = $3 WHERE id = $4',
+      [nuevoValor, metodo || abonoTotal.metodo, nuevaDescripcion, abonoTotalId]
     );
 
     await client.query('COMMIT');

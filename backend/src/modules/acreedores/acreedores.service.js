@@ -87,12 +87,12 @@ const aplicarSaldoAFavor = async (negocioId, acreedorId, cargoId, valor) => {
   return repo.aplicarSaldoAFavor(negocioId, acreedorId, cargoId, valor);
 };
 
-const registrarAbonoTotal = async (negocioId, acreedorId, { valor, metodo, registrar_en_caja, usuario_id, sucursal_id }) => {
+const registrarAbonoTotal = async (negocioId, acreedorId, { valor, metodo, registrar_en_caja, usuario_id, sucursal_id, descripcion }) => {
   const acreedor = await repo.findById(negocioId, acreedorId);
   if (!acreedor) throw { status: 404, message: 'Acreedor no encontrado' };
   if (!valor || Number(valor) <= 0) throw { status: 400, message: 'El valor debe ser mayor a 0' };
   return repo.registrarAbonoTotal(negocioId, acreedorId, {
-    valor: Number(valor), metodo, registrar_en_caja, usuario_id, sucursal_id,
+    valor: Number(valor), metodo, registrar_en_caja, usuario_id, sucursal_id, descripcion,
   });
 };
 

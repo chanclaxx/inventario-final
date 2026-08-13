@@ -264,7 +264,7 @@ const getMovimientos = async (negocioId, acreedorId) => {
       SELECT
         m.id, m.acreedor_id, m.usuario_id, m.tipo, m.valor,
         m.descripcion, m.firma, m.fecha, m.compra_id, m.registrar_en_caja,
-        m.cargo_id, m.metodo, m.pago_total_id,
+        m.cargo_id, m.metodo, m.pago_total_id, m.pago_total_descripcion,
         co.numero         AS compra_numero,
         cargo.descripcion AS cargo_descripcion,
         cargo.fecha       AS cargo_fecha,
@@ -296,10 +296,19 @@ const getMovimientos = async (negocioId, acreedorId) => {
         BOOL_AND(m.registrar_en_caja)        AS registrar_en_caja,
         MIN(m.pago_total_id)                 AS pago_total_id,
         MIN(m.pago_total_id) IS NOT NULL     AS es_pago_total,
+        -- La descripción del pago se COMPONE aquí, sobre la etiqueta generada.
+        -- Así aparece sola en los cuatro sitios que leen la descripción —la
+        -- cuadrícula, la conversación, el PDF y el Excel— sin que cada uno
+        -- tenga que acordarse de pintarla. Se repite en todas las filas hijas
+        -- del pago, así que MIN() la devuelve tal cual; en los pagos anteriores
+        -- a la columna es NULL y la etiqueta queda como estaba.
         CASE
           WHEN MIN(m.pago_total_id) IS NULL THEN MIN(m.descripcion)
-          WHEN COUNT(*) = 1                 THEN 'Pago total'
-          ELSE 'Pago total — ' || COUNT(*) || ' cargos'
+          ELSE
+            CASE WHEN COUNT(*) = 1 THEN 'Pago total'
+                 ELSE 'Pago total — ' || COUNT(*) || ' cargos'
+            END
+            || COALESCE(' · ' || NULLIF(BTRIM(MIN(m.pago_total_descripcion)), ''), '')
         END                                  AS descripcion,
 
         MIN(m.usuario_id)        FILTER (WHERE m.pago_total_id IS NULL) AS usuario_id,
@@ -556,7 +565,13 @@ const aplicarSaldoAFavor = async (negocioId, acreedorId, cargoId, valor) => {
 
 // Distribuye un pago único entre los cargos abiertos del acreedor (FIFO: más
 // antiguo primero). Crea un Abono vinculado a cada cargo afectado. Atómico.
-const registrarAbonoTotal = async (negocioId, acreedorId, { valor, metodo, registrar_en_caja, usuario_id, sucursal_id }) => {
+//
+// `descripcion` es la nota del usuario sobre el pago (por qué se hizo). Se
+// guarda repetida en cada fila hija, igual que la marca `pago_total_id`, y la
+// lectura la colapsa. NO va en la columna `descripcion` de la fila: esa es la
+// del abono individual, la puede editar el usuario desde el historial del
+// cargo, y su valor fijo identifica los pagos totales anteriores a la marca.
+const registrarAbonoTotal = async (negocioId, acreedorId, { valor, metodo, registrar_en_caja, usuario_id, sucursal_id, descripcion }) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -592,6 +607,7 @@ const registrarAbonoTotal = async (negocioId, acreedorId, { valor, metodo, regis
     // guarda aparte (ver getMovimientos y migrations/20260805_pago_total_acreedor.sql).
     const { rows: seq } = await client.query(`SELECT nextval('pago_total_acreedor_seq') AS id`);
     const pagoTotalId = seq[0].id;
+    const nota = String(descripcion ?? '').trim().slice(0, 200) || null;
 
     let restante = valor;
     const distribucion = [];
@@ -601,9 +617,9 @@ const registrarAbonoTotal = async (negocioId, acreedorId, { valor, metodo, regis
       if (pend <= 0) continue;
       const aplica = Math.min(restante, pend);
       await client.query(`
-        INSERT INTO movimientos_acreedor(acreedor_id, usuario_id, tipo, valor, descripcion, cargo_id, metodo, registrar_en_caja, sucursal_id, pago_total_id)
-        VALUES ($1, $2, 'Abono', $3, $4, $5, $6, $7, $8, $9)
-      `, [acreedorId, usuario_id || null, aplica, 'Pago total distribuido', cargo.id, metodo || null, registrar_en_caja !== false, sucursal_id || null, pagoTotalId]);
+        INSERT INTO movimientos_acreedor(acreedor_id, usuario_id, tipo, valor, descripcion, cargo_id, metodo, registrar_en_caja, sucursal_id, pago_total_id, pago_total_descripcion)
+        VALUES ($1, $2, 'Abono', $3, $4, $5, $6, $7, $8, $9, $10)
+      `, [acreedorId, usuario_id || null, aplica, 'Pago total distribuido', cargo.id, metodo || null, registrar_en_caja !== false, sucursal_id || null, pagoTotalId, nota]);
       distribucion.push({ cargo_id: cargo.id, valor: aplica });
       restante -= aplica;
     }
@@ -622,6 +638,10 @@ const getAbonosPorCargo = async (negocioId, acreedorId, cargoId) => {
   const { rows } = await pool.query(`
     SELECT
       m.id, m.fecha, m.valor, m.descripcion, m.metodo, m.registrar_en_caja,
+      -- En columna aparte a propósito: esta lista alimenta el modal de edición
+      -- del abono, que devuelve la descripción tal cual la recibió. Mezclarlas
+      -- guardaría la nota del pago total como descripción del abono.
+      m.pago_total_descripcion,
       u.nombre AS usuario_nombre
     FROM movimientos_acreedor m
     JOIN  acreedores ac ON ac.id  = m.acreedor_id

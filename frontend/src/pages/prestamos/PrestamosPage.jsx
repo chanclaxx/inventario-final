@@ -1272,6 +1272,11 @@ function HistorialPrestamo({ prestamoId, prestamoEstado }) {
                     Pago total {formatCOP(abono.abono_total_valor)}
                   </span>
                 )}
+                {abono.abono_total_descripcion && (
+                  <span className="text-xs text-indigo-400 italic">
+                    {abono.abono_total_descripcion}
+                  </span>
+                )}
                 <span className="text-xs text-gray-400">{formatFechaHora(abono.fecha)}</span>
               </div>
               <div className="flex items-center gap-2">
@@ -1752,7 +1757,10 @@ function VistaDetallePersona({ nombre, tipo, personaId, prestamos, saldoAFavor =
             mode:         'editar',
             abonoTotalId: mov.referencia_id,
             valorActual:  mov.abono,
+            // El método sale del concepto, así que la descripción viaja aparte:
+            // pegada ahí se colaría dentro del método al reabrir el pago.
             metodoActual: mov.concepto?.replace('Pago total ', '') || 'Efectivo',
+            descripcionActual: mov.descripcion || '',
           })}
         />
       )}
@@ -2003,6 +2011,7 @@ function VistaDetallePersona({ nombre, tipo, personaId, prestamos, saldoAFavor =
           abonoTotalId={modalAbonoTotal.abonoTotalId}
           valorActual={modalAbonoTotal.valorActual}
           metodoActual={modalAbonoTotal.metodoActual}
+          descripcionActual={modalAbonoTotal.descripcionActual}
           onClose={() => setModalAbonoTotal(null)}
         />
       )}

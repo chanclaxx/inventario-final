@@ -399,6 +399,28 @@ const runMigrations = async () => {
     console.error('⚠️  Migración de pago total a acreedores no aplicada (el resto del sistema sigue normal):', err.message);
   }
 
+  // Descripción del pago total — ver migrations/20260813_descripcion_pago_total.sql
+  //
+  // Texto libre para los dos pagos que se reparten en FIFO (abono total a los
+  // préstamos de una persona y pago total a un acreedor): por qué se hizo. No
+  // entra en ningún cálculo.
+  //
+  // 100% aditiva e idempotente: dos columnas nullable y sin DEFAULT, así que no
+  // reescriben una sola fila. Lo ya registrado queda con NULL, es decir, igual
+  // que hoy. En `movimientos_acreedor` va en columna propia y no en
+  // `descripcion`, que es la del abono individual y la que usa el backfill de
+  // 20260805 para reconocer los pagos totales viejos.
+  try {
+    await pool.query(`
+      ALTER TABLE IF EXISTS abonos_totales
+        ADD COLUMN IF NOT EXISTS descripcion TEXT;
+      ALTER TABLE IF EXISTS movimientos_acreedor
+        ADD COLUMN IF NOT EXISTS pago_total_descripcion TEXT;
+    `);
+  } catch (err) {
+    console.error('⚠️  Descripción del pago total no aplicada (los pagos totales siguen normales):', err.message);
+  }
+
   // Notificaciones push (Web Push / VAPID) — ver migrations/20260801_push_notificaciones.sql
   //
   // 100% aditiva e idempotente. Un negocio que no active las notificaciones no

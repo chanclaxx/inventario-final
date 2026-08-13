@@ -185,7 +185,12 @@ export function hojaEstadoCuenta(movimientos, tipoMeta) {
     put(ws, r, 0, 'n', i + 1,            sNat(bg));
     put(ws, r, 1, 's', fmtFecha(m.fecha), sC(bg));
     put(ws, r, 2, 's', meta.label,        sC(bg));
-    put(ws, r, 3, 's', m.concepto || '',  sC(bg));
+    // La descripción libre del movimiento (hoy la del pago total) va pegada al
+    // concepto: la hoja tiene una sola columna de justificación.
+    const justificacion = m.descripcion
+      ? `${m.concepto || ''} · ${m.descripcion}`
+      : (m.concepto || '');
+    put(ws, r, 3, 's', justificacion,     sC(bg));
 
     if (cargo > 0) put(ws, r, 4, 'n', cargo, sN(bg));
     else           put(ws, r, 4, 's', '',    sC(bg));

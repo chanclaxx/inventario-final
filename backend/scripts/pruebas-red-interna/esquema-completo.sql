@@ -61,7 +61,9 @@ CREATE TABLE IF NOT EXISTS abonos_prestamo (
 );
 CREATE TABLE IF NOT EXISTS abonos_totales (
   id SERIAL PRIMARY KEY, sucursal_id INT, persona_id INT, tipo_persona TEXT,
-  valor_total NUMERIC, metodo TEXT, fecha TIMESTAMP DEFAULT NOW()
+  valor_total NUMERIC, metodo TEXT, fecha TIMESTAMP DEFAULT NOW(),
+  -- Nota libre del usuario sobre el pago (20260813_descripcion_pago_total.sql)
+  descripcion TEXT
 );
 CREATE TABLE IF NOT EXISTS saldo_a_favor_sucursal (
   id SERIAL PRIMARY KEY, sucursal_id INT, persona_id INT, tipo_persona TEXT, saldo NUMERIC DEFAULT 0

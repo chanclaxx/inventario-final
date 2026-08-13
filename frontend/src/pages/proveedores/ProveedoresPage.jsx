@@ -1191,6 +1191,10 @@ function AbonosHistorial({ acreedorId, cargoId }) {
             rounded-xl px-3 py-2">
           <div className="min-w-0">
             <p className="text-xs font-medium text-gray-700 truncate">{a.descripcion || 'Abono'}</p>
+            {/* Nota del pago total del que salió esta porción, si aplica */}
+            {a.pago_total_descripcion && (
+              <p className="text-xs text-indigo-500 italic truncate">{a.pago_total_descripcion}</p>
+            )}
             <p className="text-xs text-gray-400 mt-0.5">
               {formatFechaHora(a.fecha)}{a.usuario_nombre && ` · ${a.usuario_nombre}`}
             </p>

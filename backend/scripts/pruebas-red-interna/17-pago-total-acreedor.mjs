@@ -45,8 +45,9 @@ await db.exec(`
   );
 `);
 
-// La migración de la mejora, tal cual se aplica en producción.
+// Las migraciones de la mejora, tal cual se aplican en producción.
 await db.exec(readFileSync(path.join(RAIZ, 'migrations/20260805_pago_total_acreedor.sql'), 'utf8'));
+await db.exec(readFileSync(path.join(RAIZ, 'migrations/20260813_descripcion_pago_total.sql'), 'utf8'));
 
 // El pool apunta a `activa`, que se puede cambiar: la sección 11 monta una
 // segunda base con los tipos que puede traer producción (timestamptz, bigserial)
@@ -260,6 +261,7 @@ await dbTipos.exec(`
   );
 `);
 await dbTipos.exec(readFileSync(path.join(RAIZ, 'migrations/20260805_pago_total_acreedor.sql'), 'utf8'));
+await dbTipos.exec(readFileSync(path.join(RAIZ, 'migrations/20260813_descripcion_pago_total.sql'), 'utf8'));
 await dbTipos.exec(`
   INSERT INTO acreedores (negocio_id, nombre, cedula) VALUES (1, 'Proveedor', '900');
   INSERT INTO compras (numero, total) VALUES (7, 6000000), (8, 4000000);
@@ -289,6 +291,65 @@ ok('el pago se ve como una sola línea de 10.000.000',
 ok('la cuenta queda saldada', movsTipos && Number(movsTipos.at(-1).saldo_despues) === 0,
   movsTipos && money(movsTipos.at(-1).saldo_despues));
 activa = db;
+
+console.log('\n═══ 12. Descripción del pago: se ve, y no toca la contabilidad ═══');
+// La nota del usuario ("por qué se hizo este pago") se guarda repetida en cada
+// fila hija, igual que la marca, y la lectura la muestra pegada a la etiqueta.
+await db.exec(`
+  INSERT INTO acreedores (negocio_id, nombre, cedula) VALUES (1, 'Con nota', '333');
+  INSERT INTO movimientos_acreedor (acreedor_id, tipo, valor, descripcion, fecha, sucursal_id) VALUES
+    (4, 'Cargo', 300000, 'Cargo C', '2026-06-01 09:00:00', 1),
+    (4, 'Cargo', 200000, 'Cargo D', '2026-06-02 09:00:00', 1);
+`);
+const resNota = await repo.registrarAbonoTotal(1, 4, {
+  valor: 500000, metodo: 'Efectivo', registrar_en_caja: true, usuario_id: 1, sucursal_id: 1,
+  descripcion: '  Consignación del hijo  ',
+});
+const movsNota  = await repo.getMovimientos(1, 4);
+const pagoNota  = movsNota.find((m) => m.es_pago_total);
+ok('la descripción sale pegada a la etiqueta del pago',
+  pagoNota?.descripcion === 'Pago total — 2 cargos · Consignación del hijo', pagoNota?.descripcion);
+ok('el valor mostrado no cambia por llevar nota', Number(pagoNota?.valor) === 500000, money(pagoNota?.valor));
+ok('el reparto sigue siendo FIFO por cargo', resNota.distribucion.length === 2,
+  resNota.distribucion.map((d) => money(d.valor)).join(' · '));
+ok('la cuenta queda en cero', Number(movsNota.at(-1).saldo_despues) === 0, money(movsNota.at(-1).saldo_despues));
+
+const { rows: hijas } = await db.query(
+  `SELECT descripcion, pago_total_descripcion FROM movimientos_acreedor
+   WHERE acreedor_id = 4 AND tipo = 'Abono' ORDER BY id`);
+ok('la nota se repite en las dos filas hijas',
+  hijas.length === 2 && hijas.every((h) => h.pago_total_descripcion === 'Consignación del hijo'));
+ok('la nota se guarda recortada (sin espacios de más)',
+  hijas.every((h) => h.pago_total_descripcion === h.pago_total_descripcion.trim()));
+ok('la columna descripcion de la fila NO se toca: sigue siendo la marca que reconoce el backfill',
+  hijas.every((h) => h.descripcion === 'Pago total distribuido'));
+
+const { rows: cargosNota } = await db.query(
+  `SELECT id FROM movimientos_acreedor WHERE acreedor_id = 4 AND tipo = 'Cargo' ORDER BY id`);
+const abonosNota = await repo.getAbonosPorCargo(1, 4, cargosNota[0].id);
+ok('el historial del cargo trae la nota aparte, sin mezclarla con la descripción del abono',
+  abonosNota.length === 1 &&
+  abonosNota[0].descripcion === 'Pago total distribuido' &&
+  abonosNota[0].pago_total_descripcion === 'Consignación del hijo');
+
+ok('un pago SIN nota se rotula exactamente como antes',
+  (await repo.getMovimientos(1, 2)).find((m) => m.es_pago_total)?.descripcion === 'Pago total');
+ok('un pago viejo (nota NULL) se rotula exactamente como antes',
+  (await repo.getMovimientos(1, 3)).find((m) => m.es_pago_total)?.descripcion === 'Pago total — 2 cargos');
+
+// Tope de 200: la nota es texto de pantalla, no un campo de notas largo.
+await db.exec(`
+  INSERT INTO acreedores (negocio_id, nombre, cedula) VALUES (1, 'Nota larga', '444');
+  INSERT INTO movimientos_acreedor (acreedor_id, tipo, valor, descripcion, fecha, sucursal_id)
+    VALUES (5, 'Cargo', 100000, 'Cargo E', '2026-06-01 09:00:00', 1);
+`);
+await repo.registrarAbonoTotal(1, 5, {
+  valor: 100000, metodo: 'Efectivo', registrar_en_caja: true, usuario_id: 1, sucursal_id: 1,
+  descripcion: 'x'.repeat(500),
+});
+const { rows: larga } = await db.query(
+  `SELECT pago_total_descripcion AS n FROM movimientos_acreedor WHERE acreedor_id = 5 AND tipo = 'Abono'`);
+ok('una nota kilométrica se corta en 200 caracteres', larga[0].n.length === 200, `${larga[0].n.length}`);
 
 console.log(`\n${fallos === 0 ? '✅' : '❌'} ${pasados} pasadas, ${fallos} fallidas\n`);
 process.exit(fallos === 0 ? 0 : 1);

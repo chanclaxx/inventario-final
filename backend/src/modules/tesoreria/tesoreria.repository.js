@@ -90,7 +90,8 @@ const UNION_EVENTOS = `
     UNION ALL
     -- Abonos totales de préstamos (≈ caja: abonos_totales)
     SELECT at.fecha, 'entrada', at.valor_total, 'abono_prestamo',
-           'Abono total — ' || COALESCE(pr.nombre, cl.nombre, 'préstamos'),
+           'Abono total — ' || COALESCE(pr.nombre, cl.nombre, 'préstamos')
+             || COALESCE(' · ' || NULLIF(BTRIM(at.descripcion), ''), ''),
            at.metodo, NULL::bigint AS mov_id
     FROM abonos_totales at
     LEFT JOIN prestatarios pr ON pr.id = at.persona_id AND at.tipo_persona = 'prestatario'

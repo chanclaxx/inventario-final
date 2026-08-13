@@ -44,6 +44,8 @@ router.post('/:id/abono-total',    requireModulo('acreedores'),
     body('valor').isFloat({ gt: 0 }).withMessage('El valor debe ser mayor a 0'),
     body('metodo').optional({ values: 'null' }).isString(),
     body('registrar_en_caja').optional().toBoolean(),
+    body('descripcion').optional({ values: 'null' }).isString()
+      .isLength({ max: 200 }).withMessage('La descripción no puede pasar de 200 caracteres'),
   ],
   validate, ctrl.registrarAbonoTotal,
 );

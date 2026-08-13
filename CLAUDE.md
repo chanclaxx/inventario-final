@@ -128,6 +128,18 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > adelantado": pasa en tres sitios (`EstadoCuentaAcreedor.resolverTipo`,
 > `acreedores.pdf.resolverTipoLabel`, `exportarCuentaAcreedorExcel.metaMovimiento`).
 > Prueba: `17-pago-total-acreedor`.
+> La **descripción** del pago (por qué se hizo) es texto libre, tope 200, y no
+> entra en ningún cálculo. Va en `movimientos_acreedor.pago_total_descripcion`
+> —repetida en cada fila hija, como la marca— y **nunca** en `descripcion`: esa
+> columna es la del abono individual (la edita el usuario desde el historial del
+> cargo) y su valor fijo `'Pago total distribuido'` es lo que reconoce el
+> backfill de 20260805. `getMovimientos` la **compone** sobre la etiqueta
+> (`Pago total — N cargos · nota`) para que aparezca sola en los cuatro sitios
+> que leen la descripción: cuadrícula, conversación, PDF y Excel.
+> El gemelo en préstamos es `abonos_totales.descripcion`, que viaja en columna
+> propia hasta el frontend (**no** pegada al concepto: `PrestamosPage` saca el
+> método de pago parseando `concepto` para precargar el modal de edición, y
+> cualquier texto extra se colaría dentro del método).
 > **Nada de `UNION` en `getMovimientos`**: obliga a castear a mano el NULL de cada
 > columna, y `movimientos_acreedor.firma` es **BYTEA** en producción (el fixture de
 > pruebas la declara TEXT). Un `NULL::text` ahí tumbó el estado de cuenta entero con

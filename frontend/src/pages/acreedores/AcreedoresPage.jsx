@@ -495,12 +495,15 @@ function ModalSaldoAFavor({ acreedor, onClose }) {
 
 // ─── modal pago total (distribuye un pago entre los cargos más antiguos) ──────
 
+const MAX_DESCRIPCION_PAGO = 200;
+
 function ModalAbonoTotal({ acreedor, cargos, onClose }) {
   const queryClient = useQueryClient();
   const metodosPago = useMetodosPago();
   const [valor,           setValor]           = useState('');
   const [metodo,          setMetodo]          = useState(() => metodosPago[0]?.id ?? 'Efectivo');
   const [registrarEnCaja, setRegistrarEnCaja] = useState(true);
+  const [descripcion,     setDescripcion]     = useState('');
   const [error,           setError]           = useState('');
 
   const totalPendiente = cargos.reduce((s, c) => s + Number(c.saldo_pendiente || 0), 0);
@@ -526,6 +529,7 @@ function ModalAbonoTotal({ acreedor, cargos, onClose }) {
       valor:             Number(valor),
       metodo,
       registrar_en_caja: registrarEnCaja,
+      descripcion:       descripcion.trim() || null,
     }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['compras-con-saldo', acreedor.id], exact: false });
@@ -600,6 +604,32 @@ function ModalAbonoTotal({ acreedor, cargos, onClose }) {
               </button>
             ))}
           </div>
+        </div>
+
+        {/* Descripción: por qué se hizo el pago. Texto libre, no toca el reparto. */}
+        <div className="flex flex-col gap-1.5">
+          <div className="flex items-center justify-between">
+            <label className="text-sm font-medium text-gray-700">
+              Descripción <span className="text-gray-400 font-normal">(opcional)</span>
+            </label>
+            {descripcion.length > 0 && (
+              <span className="text-[11px] text-gray-400">
+                {descripcion.length}/{MAX_DESCRIPCION_PAGO}
+              </span>
+            )}
+          </div>
+          <input
+            type="text"
+            value={descripcion}
+            maxLength={MAX_DESCRIPCION_PAGO}
+            onChange={(e) => setDescripcion(e.target.value)}
+            placeholder="Ej: consignación del 12 de agosto, cierre de mes…"
+            className="w-full px-3 py-2 bg-gray-100 rounded-xl text-sm
+              focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all"
+          />
+          <p className="text-[11px] text-gray-400">
+            Queda visible en el estado de cuenta, el PDF y el Excel.
+          </p>
         </div>
 
         <div className={`rounded-xl p-3 border transition-all
@@ -952,6 +982,10 @@ function AbonosHistorial({ acreedorId, cargoId, esAdmin }) {
               rounded-xl px-3 py-2">
             <div className="min-w-0 flex-1">
               <p className="text-xs font-medium text-gray-700 truncate">{a.descripcion || 'Abono'}</p>
+              {/* Nota del pago total del que salió esta porción, si aplica */}
+              {a.pago_total_descripcion && (
+                <p className="text-xs text-indigo-500 italic truncate">{a.pago_total_descripcion}</p>
+              )}
               <p className="text-xs text-gray-400 mt-0.5">
                 {formatFechaHora(a.fecha)}{a.usuario_nombre && ` · ${a.usuario_nombre}`}
                 {a.metodo && ` · ${a.metodo}`}

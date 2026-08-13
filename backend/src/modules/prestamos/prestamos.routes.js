@@ -62,9 +62,13 @@ router.get(    '/personas/:tipo/:id/resumen',              requireModulo('presta
 router.post(   '/personas/:tipo/:id/aplicar-saldo',        requireModulo('prestamos'), ctrl.aplicarSaldoAPrestamos);
 router.post(   '/personas/:tipo/:id/abono-total',          requireModulo('prestamos'),
   body('valor_total').isFloat({ gt: 0 }).withMessage('El valor total debe ser mayor a 0'),
+  body('descripcion').optional({ values: 'null' }).isString()
+    .isLength({ max: 200 }).withMessage('La descripción no puede pasar de 200 caracteres'),
   validate, ctrl.registrarAbonoTotal);
 router.patch(  '/abonos-totales/:abonoTotalId',            requireModulo('prestamos'),
   body('valor_total').isFloat({ gt: 0 }).withMessage('El valor total debe ser mayor a 0'),
+  body('descripcion').optional({ values: 'null' }).isString()
+    .isLength({ max: 200 }).withMessage('La descripción no puede pasar de 200 caracteres'),
   validate, ctrl.modificarAbonoTotal);
 router.get(    '/personas/:tipo/:id/retomas-directas',     requireModulo('prestamos'), ctrl.getRetomasDirectas);
 router.get(    '/personas/:tipo/:id/estado-cuenta',        requireModulo('prestamos'), ctrl.getEstadoCuenta);

@@ -475,7 +475,8 @@ const getResumenDia = async (cajaId, sucursalId, negocioId) => {
 
     pool.query(`
       SELECT ab.id, ab.valor, ab.metodo, ab.fecha, p.prestatario, p.id AS prestamo_id,
-             p.numero AS prestamo_numero
+             p.numero AS prestamo_numero,
+             NULL::text AS descripcion
       FROM abonos_prestamo ab
       JOIN prestamos p ON p.id = ab.prestamo_id
       WHERE p.sucursal_id = $1 AND ab.fecha BETWEEN $2 AND $3
@@ -485,7 +486,8 @@ const getResumenDia = async (cajaId, sucursalId, negocioId) => {
       SELECT at.id, at.valor_total AS valor, at.metodo, at.fecha,
              COALESCE(pr.nombre, cl.nombre) AS prestatario,
              NULL AS prestamo_id,
-             NULL::integer AS prestamo_numero
+             NULL::integer AS prestamo_numero,
+             NULLIF(BTRIM(at.descripcion), '') AS descripcion
       FROM abonos_totales at
       JOIN sucursales su ON su.id = at.sucursal_id
       LEFT JOIN prestatarios pr ON pr.id = at.persona_id AND at.tipo_persona = 'prestatario'
@@ -666,7 +668,8 @@ const getResumenGlobal = async (negocioId) => {
     pool.query(`
       SELECT ab.id, ab.valor, ab.metodo, ab.fecha, p.prestatario, p.id AS prestamo_id,
              p.numero AS prestamo_numero,
-             su.nombre AS sucursal_nombre
+             su.nombre AS sucursal_nombre,
+             NULL::text AS descripcion
       FROM abonos_prestamo ab
       JOIN prestamos  p  ON p.id  = ab.prestamo_id
       JOIN sucursales su ON su.id = p.sucursal_id
@@ -678,7 +681,8 @@ const getResumenGlobal = async (negocioId) => {
              COALESCE(pr.nombre, cl.nombre) AS prestatario,
              NULL AS prestamo_id,
              NULL::integer AS prestamo_numero,
-             su.nombre AS sucursal_nombre
+             su.nombre AS sucursal_nombre,
+             NULLIF(BTRIM(at.descripcion), '') AS descripcion
       FROM abonos_totales at
       JOIN sucursales su ON su.id = at.sucursal_id
       LEFT JOIN prestatarios pr ON pr.id = at.persona_id AND at.tipo_persona = 'prestatario'

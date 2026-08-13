@@ -684,7 +684,15 @@ const generarPdfEstadoCuenta = async ({ tipo, personaId, negocioId, negocioNombr
   const movimientos = (await service.getEstadoCuenta(negocioId, tipo, personaId, sucursalId))
     .map((m) => {
       const devuelto = m.tipo === 'prestamo' && m.prestamo_estado === 'Devuelto';
-      return { ...m, nota: devuelto ? 'Devuelto' : null, atenuado: devuelto };
+      // `nota` es el sufijo entre paréntesis del concepto. Lo usa el aviso
+      // "Devuelto" y, cuando no aplica, la descripción que escribió el usuario
+      // (hoy solo la del pago total): los dos casos nunca coinciden en la misma
+      // fila, porque uno es de préstamos y el otro de abonos totales.
+      return {
+        ...m,
+        nota:     devuelto ? 'Devuelto' : (m.descripcion || null),
+        atenuado: devuelto,
+      };
     });
 
   const conSaldo   = movimientos.filter((m) => m.saldo != null);
