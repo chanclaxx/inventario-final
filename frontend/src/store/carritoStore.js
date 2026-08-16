@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { calcularPrecioTarifa, ORIGEN_LISTA, ORIGEN_TARIFA, ORIGEN_MANUAL } from '../utils/tarifas';
-import { choca } from '../utils/reservas';
+import { choca, mismasReservas } from '../utils/reservas';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Carrito compartido por facturas, préstamos, traslados y despachos de red.
@@ -83,7 +83,16 @@ const useCarritoStore = create(
       // Con la feature apagada `reservas` es {} y agregarItem se comporta
       // exactamente como antes de que esto existiera.
       reservas: {},
-      setReservas: (reservas) => set({ reservas }),
+
+      // No escribe si el contenido no cambió. `construirIndiceReservas` devuelve
+      // siempre un objeto nuevo, así que sin esta guarda cada render de más se
+      // vuelve una escritura al store, y esa escritura otro render: el bucle
+      // infinito que ya tumbó la app (React #185). La causa de aquella vez está
+      // arreglada en useBorradores, pero esto la hace imposible de repetir.
+      setReservas: (reservas) => {
+        if (mismasReservas(get().reservas, reservas)) return;
+        set({ reservas });
+      },
 
       // Choque pendiente de resolver. Un único <ModalConflictoBorrador/>
       // montado en InventarioPage lo consume; por eso el estado va en el store

@@ -16,7 +16,7 @@
 // Correr:  node scripts/pruebas-reservas.mjs
 // ─────────────────────────────────────────────────────────────────────────────
 import {
-  construirIndiceReservas, choca, unidadesLibres,
+  construirIndiceReservas, choca, unidadesLibres, mismasReservas,
 } from '../src/utils/reservas.js';
 
 let fallos = 0, pasados = 0;
@@ -155,6 +155,54 @@ ok('stock desconocido → null', unidadesLibres(undefined, idx['cant-1']) === nu
 ok('puede dar negativo si se vendió lo apartado',
   unidadesLibres(2, idx['cant-2']) === -2,
   'el stock manda; la reserva es blanda y no impidió la venta');
+
+// ═══════════════════════════════════════════════════════════════════════════
+console.log('\n═══ 8. mismasReservas: el candado contra el bucle infinito ═══');
+// ═══════════════════════════════════════════════════════════════════════════
+// El bug real: `borradores: data || []` creaba un array nuevo en cada render,
+// el índice se recalculaba, el efecto escribía en el store, el store provocaba
+// otro render… React #185. La causa está arreglada en useBorradores; esto hace
+// que no pueda repetirse aunque alguien vuelva a meter una entrada inestable.
+
+const idxA = construirIndiceReservas(BORRADORES);
+const idxB = construirIndiceReservas(BORRADORES);   // mismos datos, objeto NUEVO
+
+ok('dos índices de los mismos datos son objetos distintos',
+  idxA !== idxB, 'si no, la prueba no probaría nada');
+ok('…pero mismasReservas dice que son iguales', mismasReservas(idxA, idxB) === true);
+ok('la misma referencia es igual', mismasReservas(idxA, idxA) === true);
+ok('dos vacíos son iguales (el caso del render sin datos)',
+  mismasReservas({}, {}) === true);
+
+// Cambios que SÍ tienen que propagarse.
+const menosUno = construirIndiceReservas(BORRADORES.slice(0, 1));
+ok('quitar un borrador se detecta', mismasReservas(idxA, menosUno) === false);
+
+const otraCantidad = construirIndiceReservas([
+  { ...BORRADORES[0], items: [{ id: 11, item_key: 'cant-1', tipo: 'cantidad', cantidad: 9 }] },
+]);
+const soloUno = construirIndiceReservas([
+  { ...BORRADORES[0], items: [{ id: 11, item_key: 'cant-1', tipo: 'cantidad', cantidad: 2 }] },
+]);
+ok('cambiar la cantidad apartada se detecta',
+  mismasReservas(soloUno, otraCantidad) === false);
+
+const renombrado = construirIndiceReservas([
+  { ...BORRADORES[0], titulo: 'Juan P. Gómez',
+    items: [{ id: 11, item_key: 'cant-1', tipo: 'cantidad', cantidad: 2 }] },
+]);
+ok('renombrar el borrador se detecta (el modal muestra ese título)',
+  mismasReservas(soloUno, renombrado) === false);
+
+const otroItemId = construirIndiceReservas([
+  { ...BORRADORES[0],
+    items: [{ id: 77, item_key: 'cant-1', tipo: 'cantidad', cantidad: 2 }] },
+]);
+ok('cambiar el item_id se detecta (es con lo que se libera)',
+  mismasReservas(soloUno, otroItemId) === false);
+
+ok('vacío contra no-vacío se detecta', mismasReservas({}, idxA) === false);
+ok('null nunca se considera igual', mismasReservas(null, idxA) === false);
 
 // ═══════════════════════════════════════════════════════════════════════════
 console.log(`\n${'═'.repeat(72)}`);

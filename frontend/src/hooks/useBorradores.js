@@ -25,6 +25,14 @@ import { useSucursalKey } from './useSucursalKey';
 // invalida todas las queries y la lista se recarga sola.
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Identidad estable para "no hay borradores".
+//
+// NO cambiar por un `|| []` en línea: ese literal crea un array NUEVO en cada
+// render, y como `borradores` alimenta el useMemo que arma el índice de
+// reservas, cada render producía un índice nuevo → efecto → setReservas →
+// re-render → bucle infinito (React #185, "Maximum update depth exceeded").
+const SIN_BORRADORES = [];
+
 /**
  * ¿El negocio encendió los borradores?
  *
@@ -89,7 +97,7 @@ export function useBorradores() {
 
   return {
     activo,
-    borradores: data || [],
+    borradores: data ?? SIN_BORRADORES,
     isLoading,
     guardar,
     editar,

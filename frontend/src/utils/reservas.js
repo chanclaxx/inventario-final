@@ -91,6 +91,40 @@ export function choca(item, reserva, pedida = 1) {
   return pedida > libre;
 }
 
+/**
+ * ¿Dos índices de reservas dicen lo mismo?
+ *
+ * Existe para que `setReservas` pueda no hacer nada cuando el contenido no
+ * cambió. `construirIndiceReservas` devuelve SIEMPRE un objeto nuevo, así que
+ * sin esta comparación cualquier render de más se convierte en una escritura al
+ * store, y una escritura al store en otro render: es el bucle infinito que ya
+ * tumbó la app una vez (React #185).
+ *
+ * Compara lo que la UI realmente usa: qué está apartado, cuánto, y de qué
+ * borrador — el título y el item_id alimentan el modal de conflicto.
+ */
+export function mismasReservas(a, b) {
+  if (a === b) return true;
+  if (!a || !b) return false;
+
+  const clavesA = Object.keys(a);
+  const clavesB = Object.keys(b);
+  if (clavesA.length !== clavesB.length) return false;
+
+  for (const clave of clavesA) {
+    const ra = a[clave];
+    const rb = b[clave];
+    if (!rb) return false;
+    if (ra.total !== rb.total) return false;
+    if (ra.entradas.length !== rb.entradas.length) return false;
+    for (let i = 0; i < ra.entradas.length; i++) {
+      if (ra.entradas[i].item_id !== rb.entradas[i].item_id) return false;
+      if (ra.entradas[i].titulo  !== rb.entradas[i].titulo)  return false;
+    }
+  }
+  return true;
+}
+
 /** Unidades que quedan sin apartar. null si el stock no se conoce. */
 export function unidadesLibres(stock, reserva) {
   const s = Number(stock);
