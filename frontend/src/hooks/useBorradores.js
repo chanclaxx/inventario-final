@@ -108,6 +108,62 @@ export function useBorradores() {
 }
 
 /**
+ * Guarda el carrito + el formulario a medio llenar como borrador, desde DENTRO
+ * del modal de factura o préstamo.
+ *
+ * No abre ningún modal secundario ni pide nada: el título sale del nombre del
+ * cliente que ya se tecleó y el destino de en qué modal estamos. El cliente que
+ * dice "espero a mi esposa" no puede costarle al vendedor cerrar la pantalla y
+ * volver a escribir la cédula.
+ *
+ * Si el carrito venía de un borrador, lo ACTUALIZA en vez de crear otro: si no,
+ * quedarían dos apartando el mismo IMEI.
+ */
+export function useGuardarBorradorDesdeModal(destino) {
+  const { activo, guardar, editar, descartar } = useBorradores();
+  const items             = useCarritoStore((s) => s.items);
+  const borradorOrigenId  = useCarritoStore((s) => s.borradorOrigenId);
+  const limpiarCarrito    = useCarritoStore((s) => s.limpiarCarrito);
+
+  const guardarBorrador = ({ titulo, datos, nota }, { onSuccess, onError } = {}) => {
+    if (!items.length) {
+      onError?.('El carrito está vacío');
+      return;
+    }
+    guardar.mutate(
+      {
+        // Vacío es válido: el service lo guarda como "Sin nombre". El cliente
+        // pudo interrumpir antes de decir cómo se llama.
+        titulo: (titulo || '').trim(),
+        destino,
+        nota:   nota || null,
+        datos:  datos || null,
+        items,
+      },
+      {
+        onSuccess: () => {
+          if (borradorOrigenId) descartar.mutate(borradorOrigenId, { onError: () => {} });
+          limpiarCarrito();
+          onSuccess?.();
+        },
+        onError: (e) => onError?.(
+          e.response?.data?.error || 'No se pudo guardar el borrador'
+        ),
+      }
+    );
+  };
+
+  return {
+    activo,
+    guardarBorrador,
+    guardando: guardar.isPending,
+    // `editar` viaja para quien quiera actualizar solo la cabecera sin tocar
+    // los ítems (hoy nadie: guardar desde el modal reemplaza el borrador entero).
+    editar,
+  };
+}
+
+/**
  * Vuelca el índice de reservas al carritoStore.
  *
  * Se monta UNA sola vez (en InventarioPage). A partir de ahí, el chequeo vive

@@ -21,6 +21,11 @@ const MAX_TITULO = 120;
 const MAX_NOTA   = 500;
 const MAX_ITEMS  = 200;   // un carrito real no pasa de 30; esto solo frena abusos
 
+// Tope del formulario guardado. Un modal de factura lleno —cliente, pagos,
+// retomas, domicilio, crédito— no llega a 8 KB; 64 KB deja margen de sobra y
+// evita que alguien use la columna como almacén.
+const MAX_DATOS_BYTES = 64 * 1024;
+
 // ── Normalización de lo que llega del carrito ────────────────────────────────
 
 const _num = (v) => {
@@ -126,6 +131,38 @@ const _normalizarItems = (items) => {
     throw { status: 400, message: 'El borrador necesita al menos un producto' };
   }
   return salida;
+};
+
+/**
+ * Serializa el formulario a medio llenar del modal.
+ *
+ * Es un BLOB OPACO: el backend no mira lo que hay dentro ni lo valida campo por
+ * campo, y no debe hacerlo. Es un borrador — nada de esto entra en un cálculo.
+ * Cuando la venta se hace de verdad, el payload se arma desde el formulario
+ * vivo del modal y `facturas.service` lo revalida entero (stock, seriales,
+ * precios, cupos). Validar aquí sería duplicar esas reglas en un sitio que no
+ * puede mantenerlas al día.
+ *
+ * Lo único que se controla es el tamaño.
+ */
+const _normalizarDatos = (datos) => {
+  if (datos === null || datos === undefined) return null;
+  if (typeof datos !== 'object' || Array.isArray(datos)) {
+    throw { status: 400, message: 'Formato de datos inválido' };
+  }
+
+  let texto;
+  try {
+    texto = JSON.stringify(datos);
+  } catch {
+    // Referencias circulares: el cliente mandó algo que no es serializable.
+    throw { status: 400, message: 'Formato de datos inválido' };
+  }
+
+  if (Buffer.byteLength(texto, 'utf8') > MAX_DATOS_BYTES) {
+    throw { status: 400, message: 'Los datos del formulario son demasiado grandes' };
+  }
+  return texto;
 };
 
 // ── Decoración de lectura ────────────────────────────────────────────────────
@@ -261,11 +298,13 @@ const _evaluar = (item, mapas) => {
   return { estado: 'disponible', stock };
 };
 
-const crear = async ({ sucursalId, negocioId, usuarioId, titulo, destino, nota, items }, cfg) => {
-  const tituloLimpio = _texto(titulo, MAX_TITULO);
-  if (!tituloLimpio) {
-    throw { status: 400, message: 'Ponle un nombre al borrador (el cliente, por ejemplo)' };
-  }
+const crear = async ({ sucursalId, negocioId, usuarioId, titulo, destino, nota, datos, items }, cfg) => {
+  // El título ya no lo escribe nadie: sale del nombre del cliente que el
+  // vendedor alcanzó a teclear en el modal. Si el cliente interrumpió antes de
+  // decir su nombre, se guarda igual con una etiqueta genérica — pedirle un
+  // título al vendedor en ese momento es justo la fricción que la feature
+  // existe para quitar.
+  const tituloLimpio = _texto(titulo, MAX_TITULO) || 'Sin nombre';
 
   const destinoLimpio = DESTINOS.has(destino) ? destino : 'indefinido';
   const filas = _normalizarItems(items);
@@ -276,6 +315,7 @@ const crear = async ({ sucursalId, negocioId, usuarioId, titulo, destino, nota, 
     titulo:  tituloLimpio,
     destino: destinoLimpio,
     nota:    _texto(nota, MAX_NOTA),
+    datos:   _normalizarDatos(datos),
     dias:    cfg.vencen ? cfg.dias : 0,
     items:   filas,
   });
@@ -297,6 +337,7 @@ const actualizar = async (id, sucursalId, negocioId, datos) => {
     campos.destino = datos.destino;
   }
   if (datos.nota !== undefined) campos.nota = _texto(datos.nota, MAX_NOTA);
+  if (datos.datos !== undefined) campos.datos = _normalizarDatos(datos.datos);
 
   if (!Object.keys(campos).length) {
     throw { status: 400, message: 'No hay nada que actualizar' };

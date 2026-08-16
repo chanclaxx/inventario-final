@@ -69,6 +69,7 @@ const _selectBase = (extraWhere = '') => `
          b.titulo,
          b.destino,
          b.nota,
+         b.datos,
          b.expira_en,
          b.creado_en,
          b.actualizado_en,
@@ -120,16 +121,16 @@ const obtener = async (id, sucursalId, negocioId) => {
 const EXPIRA_SQL = (idx) =>
   `CASE WHEN $${idx}::int > 0 THEN NOW() + ($${idx}::int || ' days')::interval ELSE NULL END`;
 
-const crear = async ({ sucursalId, usuarioId, titulo, destino, nota, dias, items }) => {
+const crear = async ({ sucursalId, usuarioId, titulo, destino, nota, datos, dias, items }) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
     const { rows } = await client.query(
-      `INSERT INTO borradores (sucursal_id, usuario_id, titulo, destino, nota, expira_en)
-       VALUES ($1, $2, $3, $4, $5, ${EXPIRA_SQL(6)})
+      `INSERT INTO borradores (sucursal_id, usuario_id, titulo, destino, nota, datos, expira_en)
+       VALUES ($1, $2, $3, $4, $5, $6::jsonb, ${EXPIRA_SQL(7)})
        RETURNING id`,
-      [sucursalId, usuarioId, titulo, destino, nota, dias]
+      [sucursalId, usuarioId, titulo, destino, nota, datos, dias]
     );
     const borradorId = rows[0].id;
 

@@ -751,6 +751,9 @@ const runMigrations = async () => {
         titulo         TEXT        NOT NULL,
         destino        TEXT        NOT NULL DEFAULT 'indefinido',
         nota           TEXT,
+        -- Lo diligenciado en el modal de factura/préstamo cuando el cliente
+        -- interrumpió. Blob opaco: el backend no lo interpreta.
+        datos          JSONB,
         expira_en      TIMESTAMP,
         creado_en      TIMESTAMP   NOT NULL DEFAULT NOW(),
         actualizado_en TIMESTAMP   NOT NULL DEFAULT NOW(),
@@ -795,6 +798,10 @@ const runMigrations = async () => {
         ON borradores_items (serial_id) WHERE serial_id IS NOT NULL;
       CREATE INDEX IF NOT EXISTS idx_borradores_items_producto
         ON borradores_items (producto_id) WHERE producto_id IS NOT NULL;
+
+      -- Para las bases donde la tabla ya se creó sin esta columna: el
+      -- CREATE TABLE IF NOT EXISTS de arriba no la habría agregado.
+      ALTER TABLE borradores ADD COLUMN IF NOT EXISTS datos JSONB;
     `);
   } catch (err) {
     console.error('⚠️  Borradores no aplicados (el resto del sistema sigue normal):', err.message);

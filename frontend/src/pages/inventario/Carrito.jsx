@@ -18,7 +18,6 @@ import { ModalTraslado } from './ModalTraslado';
 import { ModalDespachar } from '../red-interna/ModalDespachar';
 import { ModalDevolver }  from '../red-interna/ModalDevolver';
 import { ListaBorradores }      from './ListaBorradores';
-import { ModalGuardarBorrador } from './ModalGuardarBorrador';
 import { useBorradores }        from '../../hooks/useBorradores';
 import { unidadesLibres }       from '../../utils/reservas';
 
@@ -80,7 +79,7 @@ function CantidadInput({ valor, stock, onCambiar }) {
   );
 }
 
-export function Carrito({ onFacturar, onPrestar, sinHeader = false }) {
+export function Carrito({ onFacturar, onPrestar, onBorradorCargado, sinHeader = false }) {
   const {
     items, eliminarItem, actualizarPrecio, actualizarCantidad, limpiarCarrito, totalCarrito,
     aplicarTarifa, aplicarTarifaATodos,
@@ -109,44 +108,11 @@ export function Carrito({ onFacturar, onPrestar, sinHeader = false }) {
   const [errorRed,      setErrorRed]      = useState('');
 
   // ── Borradores de venta (feature opt-in) ──────────────────────────────────
-  // Con la feature apagada `activo` es false, no se pide nada al backend y ni
-  // el botón ni la lista se renderizan: el carrito queda idéntico al de hoy.
-  const { activo: borradoresActivos, guardar, descartar, borradores } = useBorradores();
-  const borradorOrigenId = useCarritoStore((s) => s.borradorOrigenId);
-  // Si el carrito vino de un borrador, guardar lo ACTUALIZA: el modal arranca
-  // con sus datos en vez de en blanco, para que no parezca que se crea otro.
-  const borradorOrigen = borradorOrigenId
-    ? borradores.find((b) => b.id === borradorOrigenId)
-    : null;
-  const [modalBorrador,  setModalBorrador]  = useState(false);
-  const [errorBorrador,  setErrorBorrador]  = useState('');
-
-  const handleGuardarBorrador = (datos) => {
-    setErrorBorrador('');
-    guardar.mutate(
-      { ...datos, items },
-      {
-        onSuccess: () => {
-          // Si este carrito venía de un borrador, guardar equivale a
-          // ACTUALIZARLO: el viejo se descarta. Sin esto quedarían dos
-          // borradores apartando la misma mercancía —el mismo IMEI en dos
-          // sitios—, que es justo lo que la reserva existe para evitar.
-          // Silencioso: el borrador nuevo ya está guardado y un error aquí solo
-          // deja uno de más, que el usuario puede borrar.
-          if (borradorOrigenId) {
-            descartar.mutate(borradorOrigenId, { onError: () => {} });
-          }
-          setModalBorrador(false);
-          // El carrito se vacía: la mercancía queda apartada en el borrador y
-          // el vendedor puede atender al siguiente cliente de una vez, que es
-          // justo para lo que se guarda. (limpiarCarrito resetea también
-          // borradorOrigenId.)
-          limpiarCarrito();
-        },
-        onError: (e) => setErrorBorrador(e.response?.data?.error || 'No se pudo guardar el borrador'),
-      }
-    );
-  };
+  // Aquí SOLO se lista. El botón de guardar vive dentro de ModalFactura y
+  // ModalPrestamo, no aquí: cuando el cliente interrumpe, el modal ya está
+  // abierto con su cédula a medio escribir, y mandarlo al carrito a rellenar
+  // otro formulario es exactamente la fricción que la feature evita.
+  const { activo: borradoresActivos } = useBorradores();
 
   const { data: sucursalesRaw } = useQuery({
     queryKey: ['sucursales'],
@@ -415,17 +381,13 @@ export function Carrito({ onFacturar, onPrestar, sinHeader = false }) {
               )
             )}
 
-            {/* Guardar el carrito para después. Va al final y en ghost: es la
-                salida secundaria, no compite con Facturar ni Prestar. */}
+            {/* "Guardar como borrador" NO va aquí: está dentro de los modales
+                de Factura y Préstamo, junto a los datos del cliente. */}
             {borradoresActivos && (
-              <button
-                onClick={() => { setErrorBorrador(''); setModalBorrador(true); }}
-                className="w-full flex items-center justify-center gap-2 py-2 text-xs
-                  font-medium text-amber-700 bg-amber-50 hover:bg-amber-100
-                  border border-amber-100 rounded-xl transition-colors"
-              >
-                <Bookmark size={14} /> Guardar como borrador
-              </button>
+              <p className="text-[11px] text-gray-400 text-center leading-snug">
+                ¿El cliente vuelve luego? Guarda el borrador desde Factura o Préstamo,
+                con sus datos incluidos.
+              </p>
             )}
 
             {errorRed && <p className="text-xs text-red-500 text-center">{errorRed}</p>}
@@ -435,27 +397,11 @@ export function Carrito({ onFacturar, onPrestar, sinHeader = false }) {
         {/* Borradores guardados de esta sucursal. Se renderiza fuera del bloque
             de arriba a propósito: la lista tiene que verse también con el
             carrito vacío, que es justo cuando se va a cargar uno. */}
-        <ListaBorradores />
+        <ListaBorradores onCargado={onBorradorCargado} />
       </div>
 
       {modalTraslado && (
         <ModalTraslado open={modalTraslado} onClose={() => setModalTraslado(false)} />
-      )}
-
-      {/* Montado solo mientras está abierto: al cerrarse se desmonta y el
-          formulario queda limpio para el siguiente cliente, sin un efecto que
-          lo resetee a mano. */}
-      {borradoresActivos && modalBorrador && (
-        <ModalGuardarBorrador
-          open={modalBorrador}
-          onClose={() => setModalBorrador(false)}
-          items={items}
-          total={total}
-          origen={borradorOrigen}
-          guardando={guardar.isPending}
-          error={errorBorrador}
-          onGuardar={handleGuardarBorrador}
-        />
       )}
 
       {despacho && (

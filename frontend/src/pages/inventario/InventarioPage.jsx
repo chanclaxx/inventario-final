@@ -68,6 +68,17 @@ export default function InventarioPage() {
   const puedeExportar    = puedeExportarInventario();
 
 
+  // Un borrador cargado abre el modal que corresponde a su destino, ya
+  // rehidratado con los datos del cliente. Es el otro extremo de guardar sin
+  // fricción: si al volver hubiera que buscar el botón y reescribir la cédula,
+  // no habríamos ahorrado nada. "Sin definir" deja elegir, que es lo que
+  // significa.
+  const handleBorradorCargado = (borrador) => {
+    setCarritoAbierto(false);
+    if (borrador?.destino === 'factura')  setModalFactura(true);
+    if (borrador?.destino === 'prestamo') setModalPrestamo(true);
+  };
+
   const handleCerrarModalAgregar = () => {
     setModalAgregar(false);
     queryClient.invalidateQueries({ queryKey: ['productos-serial'],   exact: false });
@@ -163,6 +174,7 @@ export default function InventarioPage() {
               <Carrito
                 onFacturar={() => setModalFactura(true)}
                 onPrestar={() => setModalPrestamo(true)}
+                onBorradorCargado={handleBorradorCargado}
               />
             </div>
           </div>
@@ -251,6 +263,7 @@ export default function InventarioPage() {
                     sinHeader
                     onFacturar={() => { setModalFactura(true);  setCarritoAbierto(false); }}
                     onPrestar={() =>  { setModalPrestamo(true); setCarritoAbierto(false); }}
+                    onBorradorCargado={handleBorradorCargado}
                   />
                 </div>
               </div>

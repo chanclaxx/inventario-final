@@ -61,8 +61,17 @@ const useCarritoStore = create(
       // que cerrar el navegador o cambiar de sucursal no lo pierdan.
       borradorOrigenId: null,
 
-      cargarDesdeBorrador: (items, borradorId) =>
-        set({ items, borradorOrigenId: borradorId }),
+      // Lo que estaba diligenciado en el modal cuando se guardó: cliente,
+      // método de pago, retoma a medio llenar. Lo consume ModalFactura /
+      // ModalPrestamo al abrirse, para que el vendedor no reescriba nada.
+      datosBorrador: null,
+
+      cargarDesdeBorrador: (items, borradorId, datos = null) =>
+        set({ items, borradorOrigenId: borradorId, datosBorrador: datos }),
+
+      // El modal ya se hidrató. Se limpia para que no se vuelva a aplicar si el
+      // vendedor cierra y reabre el modal habiendo cambiado cosas a mano.
+      consumirDatosBorrador: () => set({ datosBorrador: null }),
 
       // La venta se concretó: el carrito se vacía y el borrador ya se descartó
       // en el backend. Equivale a limpiarCarrito, pero se nombra aparte porque
@@ -209,7 +218,8 @@ const useCarritoStore = create(
       // sucursal, y las reservas de Sansur no pueden seguir bloqueando
       // productos de Principal durante el segundo que tarda el refetch.
       limpiarCarrito: () => set({
-        items: [], borradorOrigenId: null, reservas: {}, conflicto: null,
+        items: [], borradorOrigenId: null, datosBorrador: null,
+        reservas: {}, conflicto: null,
       }),
 
       totalCarrito: () => {
@@ -231,6 +241,7 @@ const useCarritoStore = create(
       partialize: (state) => ({
         items:            state.items,
         borradorOrigenId: state.borradorOrigenId,
+        datosBorrador:    state.datosBorrador,
       }),
     }
   )

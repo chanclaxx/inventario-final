@@ -13,13 +13,13 @@ import {
 } from '../../api/prestatarios.api';
 import { getClientes, crearCliente } from '../../api/clientes.api';
 import useCarritoStore from '../../store/carritoStore';
-import { useBorradores } from '../../hooks/useBorradores';
+import { useBorradores, useGuardarBorradorDesdeModal } from '../../hooks/useBorradores';
 import { useTarifas }  from '../../hooks/useTarifas';
 import { TarifaItem }  from '../../components/ui/SelectorTarifa';
 import { useMora }        from '../../hooks/useMora';
 import { useInteres }     from '../../hooks/useInteres';
 import { SelectorCargos } from '../../components/ui/SelectorCargos';
-import { User, Users, Plus, Minus, ChevronLeft, Search } from 'lucide-react';
+import { User, Users, Plus, Minus, ChevronLeft, Search, Bookmark } from 'lucide-react';
 import { InputMoneda } from '../../components/ui/InputMoneda';
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
@@ -318,6 +318,11 @@ export function ModalPrestamo({ open, onClose }) {
   // cuando el préstamo ya existe.
   const borradorOrigenId = useCarritoStore((s) => s.borradorOrigenId);
   const { descartar: descartarBorrador } = useBorradores();
+  const { activo: borradoresActivos, guardarBorrador, guardando: guardandoBorrador } =
+    useGuardarBorradorDesdeModal('prestamo');
+
+  // Formulario que venía en el borrador cargado, para rehidratar este modal.
+  const datosBorrador = useCarritoStore((s) => s.datosBorrador);
 
   const [tipoCliente,    setTipoCliente]    = useState('companero');
   const [prestatarioSel, setPrestatarioSel] = useState(null);
@@ -405,6 +410,52 @@ export function ModalPrestamo({ open, onClose }) {
       }
     },
   });
+
+  // ── Rehidratación desde el borrador cargado ────────────────────────────────
+  //
+  // Va en RENDER y no en un efecto a propósito: esto no es "sincronizar con un
+  // sistema externo", es ajustar el estado cuando cambia una entrada — el
+  // patrón que React documenta para este caso. Con un efecto habría un render
+  // de más con el formulario vacío antes de rellenarlo, y el linter lo marca
+  // con razón.
+  //
+  // La guarda es el propio objeto: se aplica una vez por borrador. Si el
+  // vendedor cierra el modal, cambia algo y lo reabre, no se le pisa; si carga
+  // OTRO borrador, `datosBorrador` es otro objeto y sí se aplica.
+  const [borradorAplicado, setBorradorAplicado] = useState(null);
+  if (open && datosBorrador && borradorAplicado !== datosBorrador) {
+    const d = datosBorrador;
+    setBorradorAplicado(datosBorrador);
+    if (d.tipoCliente)    setTipoCliente(d.tipoCliente);
+    if (d.prestatarioSel) setPrestatarioSel(d.prestatarioSel);
+    if (d.empleadoSel)    setEmpleadoSel(d.empleadoSel);
+    if (d.clienteSel)     setClienteSel(d.clienteSel);
+    if (d.aplicarSaldo != null)  setAplicarSaldo(d.aplicarSaldo);
+    if (d.plazo)          setPlazo(d.plazo);
+    if (d.interesPlanId != null) setInteresPlanId(d.interesPlanId);
+  }
+
+  // ── Guardar como borrador, sin salir de aquí ───────────────────────────────
+  // El compañero dice que vuelve por el equipo más tarde: un clic guarda el
+  // carrito y a quién se le iba a prestar, sin pedir nada dos veces.
+  const guardarComoBorrador = () => {
+    setError('');
+    guardarBorrador(
+      {
+        // El nombre de a quién se le presta. Si aún no se eligió, el backend
+        // guarda "Sin nombre" en vez de rechazarlo.
+        titulo: prestatarioSel?.nombre || clienteSel?.nombre || '',
+        datos: {
+          tipoCliente, prestatarioSel, empleadoSel, clienteSel,
+          aplicarSaldo, plazo, interesPlanId,
+        },
+      },
+      {
+        onSuccess: () => { onClose(); resetForm(); },
+        onError:   (msg) => setError(msg),
+      }
+    );
+  };
 
   const resetForm = () => {
     setTipoCliente('companero');
@@ -642,6 +693,20 @@ export function ModalPrestamo({ open, onClose }) {
           <div className="bg-red-50 border border-red-100 rounded-xl px-3 py-2">
             <p className="text-sm text-red-600">{error}</p>
           </div>
+        )}
+
+        {borradoresActivos && items.length > 0 && (
+          <button
+            onClick={guardarComoBorrador}
+            disabled={guardandoBorrador}
+            className="w-full flex items-center justify-center gap-2 py-2.5 text-sm
+              font-medium text-amber-700 bg-amber-50 hover:bg-amber-100
+              border border-amber-200 rounded-xl transition-colors
+              disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <Bookmark size={15} />
+            {guardandoBorrador ? 'Guardando…' : 'Guardar como borrador'}
+          </button>
         )}
 
         <div className="flex gap-2">

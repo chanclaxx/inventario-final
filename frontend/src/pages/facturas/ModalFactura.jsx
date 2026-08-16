@@ -23,7 +23,7 @@ import { FacturaTermica }    from '../../components/FacturaTermica';
 import { useSucursalKey }    from '../../hooks/useSucursalKey';
 import api                   from '../../api/axios.config';
 import useCarritoStore       from '../../store/carritoStore';
-import { useBorradores }     from '../../hooks/useBorradores';
+import { useBorradores, useGuardarBorradorDesdeModal } from '../../hooks/useBorradores';
 import { useTarifas }        from '../../hooks/useTarifas';
 import { useMora }           from '../../hooks/useMora';
 import { useInteres }        from '../../hooks/useInteres';
@@ -33,7 +33,7 @@ import {
   User, Users, Package, ShoppingBag,
   Loader2, CheckCircle, XCircle, AlertCircle,
   AlertTriangle, X, Plus, Trash2, RefreshCw,
-  Bike, ChevronLeft, Search,
+  Bike, ChevronLeft, Search, Bookmark,
 } from 'lucide-react';
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
@@ -892,6 +892,11 @@ export function ModalFactura({ open, onClose }) {
   // cuando la venta ya existe.
   const borradorOrigenId = useCarritoStore((s) => s.borradorOrigenId);
   const { descartar: descartarBorrador } = useBorradores();
+  const { activo: borradoresActivos, guardarBorrador, guardando: guardandoBorrador } =
+    useGuardarBorradorDesdeModal('factura');
+
+  // Formulario que venía en el borrador cargado, para rehidratar este modal.
+  const datosBorrador = useCarritoStore((s) => s.datosBorrador);
 
   // Tarifas porcentuales: se repiten aquí para poder corregir el precio sin
   // volver al carrito. Con la feature apagada `activo` es false y no se pinta.
@@ -922,6 +927,35 @@ export function ModalFactura({ open, onClose }) {
   // tarjeta de confirmación; lo que se factura siempre es lo que hay en `form`.
   const [clienteSel,           setClienteSel]           = useState(null);
   const metodosPago = useMetodosPago();
+
+  // ── Rehidratación desde el borrador cargado ────────────────────────────────
+  //
+  // Va en RENDER y no en un efecto a propósito: esto no es "sincronizar con un
+  // sistema externo", es ajustar el estado cuando cambia una entrada — el
+  // patrón que React documenta para este caso. Con un efecto habría un render
+  // de más con el formulario vacío antes de rellenarlo, y el linter lo marca
+  // con razón.
+  //
+  // La guarda es el propio objeto: se aplica una vez por borrador. Si el
+  // vendedor cierra el modal, cambia algo y lo reabre, no se le pisa; si carga
+  // OTRO borrador, `datosBorrador` es otro objeto y sí se aplica.
+  // Es la otra mitad de "no pedir información repetida": guardar sin fricción
+  // no sirve de nada si al volver hay que reescribir la cédula.
+  const [borradorAplicado, setBorradorAplicado] = useState(null);
+  if (open && datosBorrador && borradorAplicado !== datosBorrador) {
+    const d = datosBorrador;
+    setBorradorAplicado(datosBorrador);
+    if (d.form)        setForm((f) => ({ ...f, ...d.form }));
+    if (d.tipoCliente) setTipoCliente(d.tipoCliente);
+    if (Array.isArray(d.metodosSeleccionados)) setMetodosSeleccionados(d.metodosSeleccionados);
+    if (d.montos)      setMontos(d.montos);
+    if (d.conRetoma != null) setConRetoma(d.conRetoma);
+    if (Array.isArray(d.retomas) && d.retomas.length) setRetomas(d.retomas);
+    if (d.domicilio)   setDomicilio(d.domicilio);
+    if (d.credito)     setCredito(d.credito);
+    if (d.vendedorId != null) setVendedorId(d.vendedorId);
+    if (d.clienteSel)  setClienteSel(d.clienteSel);
+  }
 
   // Debounce del texto de la cédula para el autocompletado de clientes
   useEffect(() => {
@@ -1093,6 +1127,34 @@ export function ModalFactura({ open, onClose }) {
     setVerificandoCedula(false);
     setMostrarSugerencias(false); setCedulaBusqueda('');
     setClienteSel(null);
+  };
+
+  // ── Guardar como borrador, sin salir de aquí ───────────────────────────────
+  //
+  // El cliente dice "espero a mi esposa" con la cédula a medio escribir. Un
+  // clic guarda TODO lo diligenciado —carrito y formulario— y libera la
+  // pantalla. Sin modal secundario y sin volver a pedir el nombre: ya está
+  // arriba, y de ahí sale el título del borrador.
+  const guardarComoBorrador = () => {
+    setError('');
+    guardarBorrador(
+      {
+        titulo: form.nombre.trim() || form.cedula.trim(),
+        nota:   form.notas?.trim() || null,
+        // El formulario completo tal como está. No se filtra ni se valida: es
+        // un borrador, y cuando la venta se haga de verdad el payload se arma
+        // desde este mismo formulario y el backend lo revalida entero.
+        datos: {
+          form, tipoCliente, metodosSeleccionados, montos,
+          conRetoma, retomas, domicilio, credito, vendedorId,
+          clienteSel,
+        },
+      },
+      {
+        onSuccess: () => { onClose(); resetForm(); },
+        onError:   (msg) => setError(msg),
+      }
+    );
   };
 
   const handleToggleMetodo = (metodoId) => {
@@ -1542,6 +1604,23 @@ export function ModalFactura({ open, onClose }) {
             <div className="bg-red-50 border border-red-100 rounded-xl px-3 py-2">
               <p className="text-sm text-red-600">{error}</p>
             </div>
+          )}
+
+          {/* El cliente se fue a esperar a alguien: un clic guarda todo lo
+              diligenciado y libera la pantalla. Va ARRIBA de los botones de
+              cierre y en ámbar para que se vea sin competir con Confirmar. */}
+          {borradoresActivos && items.length > 0 && (
+            <button
+              onClick={guardarComoBorrador}
+              disabled={guardandoBorrador}
+              className="w-full flex items-center justify-center gap-2 py-2.5 text-sm
+                font-medium text-amber-700 bg-amber-50 hover:bg-amber-100
+                border border-amber-200 rounded-xl transition-colors
+                disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Bookmark size={15} />
+              {guardandoBorrador ? 'Guardando…' : 'Guardar como borrador'}
+            </button>
           )}
 
           <div className="flex gap-2">

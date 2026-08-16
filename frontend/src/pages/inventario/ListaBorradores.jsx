@@ -164,13 +164,16 @@ export function ListaBorradores({ onCargado }) {
         return;
       }
 
-      cargarDesdeBorrador(nuevos, borrador.id);
+      cargarDesdeBorrador(nuevos, borrador.id, borrador.datos || null);
       // El borrador que se sigue trabajando no debería vencerse por el camino.
       // Si falla, da igual: es una comodidad, no parte de la carga.
       renovarBorrador(borrador.id).catch(() => {});
 
-      if (fuera.length) setNoDisponibles({ titulo: borrador.titulo, lista: fuera });
-      onCargado?.();
+      // Sin ítems fuera se abre de una el modal que corresponde; con ítems
+      // fuera, primero el aviso — abrir un modal encima de otro escondería lo
+      // que ya no se puede vender.
+      if (fuera.length) setNoDisponibles({ titulo: borrador.titulo, lista: fuera, borrador });
+      else onCargado?.(borrador);
     } catch (e) {
       setError(e.response?.data?.error || 'No se pudo cargar el borrador');
     } finally {
@@ -348,7 +351,11 @@ export function ListaBorradores({ onCargado }) {
               ))}
             </div>
             <div className="p-5 pt-0">
-              <Button className="w-full" onClick={() => setNoDisponibles(null)}>
+              <Button className="w-full" onClick={() => {
+                const b = noDisponibles.borrador;
+                setNoDisponibles(null);
+                if (b) onCargado?.(b);
+              }}>
                 Entendido
               </Button>
             </div>

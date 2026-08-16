@@ -21,12 +21,20 @@ router.use(requireModulo('inventario'));
 router.use(requireBorradores);
 
 const validarBorrador = [
-  body('titulo').isString().trim().notEmpty().withMessage('Ponle un nombre al borrador')
-    .isLength({ max: 120 }).withMessage('El nombre es demasiado largo'),
+  // El título NO es obligatorio: sale del nombre del cliente que el vendedor
+  // alcanzó a teclear en el modal, y el cliente pudo interrumpir antes de
+  // decirlo. El service pone "Sin nombre" en ese caso. Exigirlo aquí obligaría
+  // a abrir un formulario extra, que es justo lo que esta feature evita.
+  body('titulo').optional({ values: 'null' })
+    .isString().trim().isLength({ max: 120 }).withMessage('El nombre es demasiado largo'),
   body('destino').optional({ values: 'null' })
     .isIn(['factura', 'prestamo', 'indefinido']).withMessage('Destino inválido'),
   body('nota').optional({ values: 'null' })
     .isString().trim().isLength({ max: 500 }),
+  // Lo diligenciado en el modal. Blob opaco: solo se comprueba que sea un
+  // objeto; el tope de tamaño lo pone el service.
+  body('datos').optional({ values: 'null' })
+    .isObject().withMessage('Formato de datos inválido'),
   body('items').isArray({ min: 1 }).withMessage('El borrador necesita al menos un producto'),
   body('items.*.key').isString().trim().notEmpty().withMessage('Producto sin identificador'),
   body('items.*.nombre').isString().trim().notEmpty().withMessage('Producto sin nombre'),
@@ -46,6 +54,7 @@ router.patch('/:id',
     body('titulo').optional().isString().trim().notEmpty().isLength({ max: 120 }),
     body('destino').optional().isIn(['factura', 'prestamo', 'indefinido']),
     body('nota').optional({ values: 'null' }).isString().trim().isLength({ max: 500 }),
+    body('datos').optional({ values: 'null' }).isObject().withMessage('Formato de datos inválido'),
   ],
   validate, ctrl.editarBorrador);
 

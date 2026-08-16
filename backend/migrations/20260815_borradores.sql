@@ -33,6 +33,18 @@ CREATE TABLE IF NOT EXISTS borradores (
   titulo         TEXT        NOT NULL,          -- cliente o identificador libre
   destino        TEXT        NOT NULL DEFAULT 'indefinido',
   nota           TEXT,
+
+  -- Lo que el vendedor alcanzó a diligenciar en el modal de factura o préstamo
+  -- cuando el cliente interrumpió: nombre, cédula, celular, método de pago,
+  -- retoma a medio llenar… todo lo que NO es el carrito.
+  --
+  -- Es un blob opaco a propósito: el backend lo guarda y lo devuelve sin
+  -- interpretarlo. Cada modal decide qué mete y cómo se rehidrata, así que
+  -- agregar un campo al formulario de facturación no necesita una migración.
+  -- Nada aquí entra en ningún cálculo; cuando la venta se hace de verdad, el
+  -- payload se arma desde el formulario vivo y el backend lo revalida entero.
+  datos          JSONB,
+
   -- NULL = no vence. El plazo sale de config_negocio.borradores_dias y se
   -- renueva al cargar el borrador al carrito.
   expira_en      TIMESTAMP,
@@ -106,3 +118,7 @@ CREATE INDEX IF NOT EXISTS idx_borradores_items_serial
 
 CREATE INDEX IF NOT EXISTS idx_borradores_items_producto
   ON borradores_items (producto_id) WHERE producto_id IS NOT NULL;
+
+-- Para bases donde la tabla ya se creó sin esta columna (el CREATE TABLE
+-- IF NOT EXISTS de arriba no la agregaría).
+ALTER TABLE borradores ADD COLUMN IF NOT EXISTS datos JSONB;

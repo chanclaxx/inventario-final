@@ -31,6 +31,9 @@ const crearBorrador = async (req, res, next) => {
       titulo:     req.body.titulo,
       destino:    req.body.destino,
       nota:       req.body.nota,
+      // Lo que el vendedor alcanzó a diligenciar en el modal antes de que el
+      // cliente interrumpiera.
+      datos:      req.body.datos,
       items:      req.body.items,
     }, req.configBorradores);
 

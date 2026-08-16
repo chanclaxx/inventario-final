@@ -380,9 +380,17 @@ ok('borrar el producto del inventario se lleva su renglón del borrador (CASCADE
 // ═══════════════════════════════════════════════════════════════════════════
 console.log('\n═══ 10. Validación de entrada ═══');
 // ═══════════════════════════════════════════════════════════════════════════
-await falla('un borrador sin título se rechaza',
-  () => svc.crear({ sucursalId: 1, negocioId: 1, titulo: '  ', items: [CANT(1, 'X', 1, 100)] }, cfg),
-  'nombre');
+// El título dejó de ser obligatorio cuando el botón se movió DENTRO del modal
+// de factura: sale del nombre del cliente, y el cliente pudo interrumpir antes
+// de decirlo. Exigirlo obligaría a abrir el formulario extra que la feature
+// existe para evitar. Ver sección 13.
+const sinTitulo = await svc.crear({
+  sucursalId: 1, negocioId: 1, titulo: '  ', items: [CANT(2, 'Vidrio', 1, 12000)],
+}, cfg);
+ok('un borrador sin título se guarda como "Sin nombre"',
+  sinTitulo.titulo === 'Sin nombre', sinTitulo.titulo);
+await svc.eliminar(sinTitulo.id, 1, 1);
+
 await falla('un borrador sin productos se rechaza',
   () => svc.crear({ sucursalId: 1, negocioId: 1, titulo: 'X', items: [] }, cfg),
   'al menos un producto');
@@ -453,7 +461,95 @@ ok('solo los 2 seriales que se vendieron/prestaron a mano están marcados',
   escrituras.n === 2, `${escrituras.n} marcados`);
 
 // ═══════════════════════════════════════════════════════════════════════════
-console.log('\n═══ 13. Mantenimiento: purga y aviso de vencimiento ═══');
+console.log('\n═══ 13. El formulario a medio llenar viaja con el borrador ═══');
+// ═══════════════════════════════════════════════════════════════════════════
+// El caso real: el cliente dice "espero a mi esposa" con el modal de factura
+// abierto y media cédula escrita. Guardar no puede obligar a cerrar el modal ni
+// a volver a teclear nada.
+const FORM = {
+  form: { nombre: 'Pedro Gómez', cedula: '1088123456', celular: '3001234567',
+          email: '', direccion: 'Cra 5 # 10-20', notas: 'Espera a la esposa' },
+  tipoCliente: 'cliente',
+  metodosSeleccionados: ['efectivo'],
+  montos: { efectivo: 2400000 },
+  conRetoma: true,
+  retomas: [{ _key: 'r1', tipo_retoma: 'serial', imei: '99999', descripcion: 'iPhone X' }],
+  vendedorId: '3',
+};
+
+const conForm = await svc.crear({
+  sucursalId: 1, negocioId: 1, usuarioId: 1,
+  titulo: 'Pedro Gómez', destino: 'factura', datos: FORM,
+  items: [CANT(2, 'Vidrio', 1, 12000)],
+}, cfg);
+
+ok('el borrador guarda el formulario', !!conForm.datos);
+ok('conserva los datos del cliente tecleados',
+  conForm.datos.form.cedula === '1088123456', conForm.datos.form.cedula);
+ok('conserva estructuras anidadas (retomas)',
+  conForm.datos.retomas[0].imei === '99999');
+ok('conserva el método de pago a medio elegir',
+  conForm.datos.montos.efectivo === 2400000);
+
+const releido = await svc.obtener(conForm.id, 1, 1);
+ok('el formulario sobrevive a la relectura con revalidación',
+  releido.datos?.form?.nombre === 'Pedro Gómez', releido.datos?.form?.nombre);
+ok('y sigue trayendo los ítems del carrito', releido.items.length === 1);
+
+const enLista = (await svc.listar(1, 1)).find((b) => b.id === conForm.id);
+ok('la lista también lo trae', enLista?.datos?.form?.celular === '3001234567');
+
+// Sin datos: el flujo de siempre no cambia.
+const sinForm = await svc.crear({
+  sucursalId: 1, negocioId: 1, usuarioId: 1,
+  titulo: 'Sin formulario', items: [CANT(2, 'Vidrio', 1, 12000)],
+}, cfg);
+ok('un borrador sin formulario guarda datos = null', sinForm.datos === null);
+
+// El cliente interrumpió antes de decir su nombre.
+const anonimo = await svc.crear({
+  sucursalId: 1, negocioId: 1, usuarioId: 1,
+  titulo: '   ', destino: 'factura', items: [CANT(2, 'Vidrio', 1, 12000)],
+}, cfg);
+ok('sin nombre del cliente NO se rechaza: se guarda igual',
+  anonimo.titulo === 'Sin nombre', anonimo.titulo);
+
+const sinTituloAlguno = await svc.crear({
+  sucursalId: 1, negocioId: 1, usuarioId: 1,
+  destino: 'prestamo', items: [CANT(2, 'Vidrio', 1, 12000)],
+}, cfg);
+ok('ni siquiera mandando el título', sinTituloAlguno.titulo === 'Sin nombre');
+
+// Actualizar el formulario (volver a guardar tras seguir diligenciando).
+const actualizado = await svc.actualizar(conForm.id, 1, 1, {
+  datos: { ...FORM, form: { ...FORM.form, email: 'pedro@correo.com' } },
+});
+ok('actualizar reemplaza el formulario',
+  actualizado.datos.form.email === 'pedro@correo.com');
+ok('y no toca el título', actualizado.titulo === 'Pedro Gómez');
+
+// Topes y basura.
+await falla('un formulario gigante se rechaza',
+  () => svc.crear({ sucursalId: 1, negocioId: 1, titulo: 'X',
+    datos: { basura: 'x'.repeat(70 * 1024) },
+    items: [CANT(2, 'Vidrio', 1, 12000)] }, cfg),
+  'demasiado grandes');
+await falla('datos que no son objeto se rechazan',
+  () => svc.crear({ sucursalId: 1, negocioId: 1, titulo: 'X', datos: 'texto suelto',
+    items: [CANT(2, 'Vidrio', 1, 12000)] }, cfg),
+  'inválido');
+await falla('un arreglo tampoco es un formulario',
+  () => svc.crear({ sucursalId: 1, negocioId: 1, titulo: 'X', datos: [1, 2, 3],
+    items: [CANT(2, 'Vidrio', 1, 12000)] }, cfg),
+  'inválido');
+
+// Limpieza para no descuadrar los conteos de la sección siguiente.
+for (const b of [conForm, sinForm, anonimo, sinTituloAlguno]) {
+  await svc.eliminar(b.id, 1, 1);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+console.log('\n═══ 14. Mantenimiento: purga y aviso de vencimiento ═══');
 // ═══════════════════════════════════════════════════════════════════════════
 // Un borrador vencido ya es invisible y no reserva, pero su fila se quedaría
 // para siempre. Se barre con un mes de gracia, no el mismo día: así un error
