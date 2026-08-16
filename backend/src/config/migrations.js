@@ -730,6 +730,76 @@ const runMigrations = async () => {
     console.error('⚠️  Órdenes de compra no aplicadas (el resto del sistema sigue normal):', err.message);
   }
 
+  // Borradores de venta (carritos guardados) — ver migrations/20260815_borradores.sql
+  //
+  // 100% aditiva e idempotente. Tablas nuevas: ningún negocio las nota hasta
+  // encender `borradores_activo` en Configuración.
+  //
+  // El inventario NO se toca desde aquí: la reserva se DERIVA leyendo estas
+  // tablas. Un serial en un borrador sigue vendido=false y sigue siendo
+  // vendible — el bloqueo es blando a propósito.
+  //
+  // Va en su propio try/catch porque runMigrations() corre antes de app.listen():
+  // un fallo aquí solo debe dejar sin borradores a quien los use, nunca sin
+  // servidor a los otros negocios.
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS borradores (
+        id             SERIAL      PRIMARY KEY,
+        sucursal_id    INTEGER     NOT NULL REFERENCES sucursales(id) ON DELETE CASCADE,
+        usuario_id     INTEGER,
+        titulo         TEXT        NOT NULL,
+        destino        TEXT        NOT NULL DEFAULT 'indefinido',
+        nota           TEXT,
+        expira_en      TIMESTAMP,
+        creado_en      TIMESTAMP   NOT NULL DEFAULT NOW(),
+        actualizado_en TIMESTAMP   NOT NULL DEFAULT NOW(),
+        CONSTRAINT borradores_destino_chk
+          CHECK (destino IN ('factura', 'prestamo', 'indefinido'))
+      );
+
+      -- El total no se guarda: se deriva con SUM. Quitar un ítem tiene que
+      -- bajarlo, y un total guardado quedaría inflado contra el contenido real.
+      CREATE TABLE IF NOT EXISTS borradores_items (
+        id             SERIAL       PRIMARY KEY,
+        borrador_id    INTEGER      NOT NULL REFERENCES borradores(id) ON DELETE CASCADE,
+        item_key       TEXT         NOT NULL,
+        tipo           TEXT         NOT NULL,
+        nombre         TEXT         NOT NULL,
+        serial_id      INTEGER      REFERENCES seriales(id)           ON DELETE CASCADE,
+        imei           TEXT,
+        producto_id    INTEGER      REFERENCES productos_cantidad(id) ON DELETE CASCADE,
+        atributo_id    INTEGER,
+        variante_id    INTEGER,
+        atributo_label TEXT,
+        variante_label TEXT,
+        cantidad       INTEGER      NOT NULL DEFAULT 1,
+        precio         NUMERIC(14,2),
+        precio_final   NUMERIC(14,2) NOT NULL,
+        costo          NUMERIC(14,2),
+        tarifa_id      INTEGER,
+        origen_precio  TEXT,
+        linea_id       INTEGER,
+        CONSTRAINT borradores_items_tipo_chk     CHECK (tipo IN ('serial', 'cantidad')),
+        CONSTRAINT borradores_items_cantidad_chk CHECK (cantidad > 0),
+        CONSTRAINT borradores_items_key_unica    UNIQUE (borrador_id, item_key)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_borradores_sucursal
+        ON borradores (sucursal_id, creado_en DESC);
+      CREATE INDEX IF NOT EXISTS idx_borradores_expira
+        ON borradores (expira_en) WHERE expira_en IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_borradores_items_borrador
+        ON borradores_items (borrador_id);
+      CREATE INDEX IF NOT EXISTS idx_borradores_items_serial
+        ON borradores_items (serial_id) WHERE serial_id IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_borradores_items_producto
+        ON borradores_items (producto_id) WHERE producto_id IS NOT NULL;
+    `);
+  } catch (err) {
+    console.error('⚠️  Borradores no aplicados (el resto del sistema sigue normal):', err.message);
+  }
+
   // Aplicadas manualmente en producción:
   // - lineas_traslado: revertida_por_usuario_id, fecha_reversion
   // - traslados: revertido_por_usuario_id, fecha_reversion

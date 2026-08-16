@@ -13,6 +13,7 @@ import {
 } from '../../api/prestatarios.api';
 import { getClientes, crearCliente } from '../../api/clientes.api';
 import useCarritoStore from '../../store/carritoStore';
+import { useBorradores } from '../../hooks/useBorradores';
 import { useTarifas }  from '../../hooks/useTarifas';
 import { TarifaItem }  from '../../components/ui/SelectorTarifa';
 import { useMora }        from '../../hooks/useMora';
@@ -312,6 +313,12 @@ export function ModalPrestamo({ open, onClose }) {
   const tarifasCfg = useTarifas();
   const total = totalCarrito();
 
+  // Borradores: de qué borrador salió este carrito, si salió de alguno. El
+  // borrador sobrevive mientras se trabaja el carrito y solo se descarta
+  // cuando el préstamo ya existe.
+  const borradorOrigenId = useCarritoStore((s) => s.borradorOrigenId);
+  const { descartar: descartarBorrador } = useBorradores();
+
   const [tipoCliente,    setTipoCliente]    = useState('companero');
   const [prestatarioSel, setPrestatarioSel] = useState(null);
   const [empleadoSel,    setEmpleadoSel]    = useState(null);
@@ -377,6 +384,12 @@ export function ModalPrestamo({ open, onClose }) {
   const mutPrestamos = useMutation({
     mutationFn: crearPrestamos,
     onSuccess: () => {
+      // El préstamo existe: el borrador que lo originó ya cumplió su función.
+      // Silenciado a propósito — un borrador de más es basura en una lista, un
+      // error aquí tumbaría el cierre de un préstamo que YA se registró.
+      if (borradorOrigenId) {
+        descartarBorrador.mutate(borradorOrigenId, { onError: () => {} });
+      }
       queryClient.invalidateQueries({ queryKey: ['productos-serial'],   exact: false });
       queryClient.invalidateQueries({ queryKey: ['productos-cantidad'],  exact: false });
       queryClient.invalidateQueries({ queryKey: ['prestamos'],           exact: false });

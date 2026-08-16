@@ -33,7 +33,15 @@ node scripts/pruebas-red-interna/12-destino-y-referencias.mjs
 node scripts/pruebas-red-interna/17-pago-total-acreedor.mjs
 node scripts/pruebas-red-interna/18-importacion.mjs
 node scripts/pruebas-red-interna/19-ordenes-compra.mjs
+node scripts/pruebas-red-interna/20-borradores.mjs
 ```
+
+> `20-borradores` verifica sobre todo una invariante negativa: guardar un
+> borrador **no escribe nada en el inventario**. No hay UPDATE a `seriales` ni a
+> `productos_cantidad` en todo el módulo, y la sección 12 lo comprueba al final,
+> después de doce secciones creando y borrando borradores. Si esa prueba se cae,
+> la reserva dejó de ser blanda y la mercancía apalabrada está desapareciendo de
+> reportes, catálogo y alertas de stock.
 
 > Las suites cargan **las dos migraciones**: `20260725_red_interna.sql` y
 > `20260726_red_interna_v2.sql`. Si se agrega una tercera hay que sumarla a

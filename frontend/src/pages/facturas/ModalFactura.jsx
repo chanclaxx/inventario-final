@@ -23,6 +23,7 @@ import { FacturaTermica }    from '../../components/FacturaTermica';
 import { useSucursalKey }    from '../../hooks/useSucursalKey';
 import api                   from '../../api/axios.config';
 import useCarritoStore       from '../../store/carritoStore';
+import { useBorradores }     from '../../hooks/useBorradores';
 import { useTarifas }        from '../../hooks/useTarifas';
 import { useMora }           from '../../hooks/useMora';
 import { useInteres }        from '../../hooks/useInteres';
@@ -886,6 +887,12 @@ export function ModalFactura({ open, onClose }) {
   const { items, totalCarrito, limpiarCarrito, actualizarPrecio, aplicarTarifa } = useCarritoStore();
   const total = totalCarrito();
 
+  // Borradores: de qué borrador salió este carrito, si salió de alguno. El
+  // borrador sobrevive mientras se trabaja el carrito y solo se descarta aquí,
+  // cuando la venta ya existe.
+  const borradorOrigenId = useCarritoStore((s) => s.borradorOrigenId);
+  const { descartar: descartarBorrador } = useBorradores();
+
   // Tarifas porcentuales: se repiten aquí para poder corregir el precio sin
   // volver al carrito. Con la feature apagada `activo` es false y no se pinta.
   const tarifasCfg = useTarifas();
@@ -1049,6 +1056,14 @@ export function ModalFactura({ open, onClose }) {
   const mutation = useMutation({
     mutationFn: crearFactura,
     onSuccess: async (res) => {
+      // La venta existe: el borrador que la originó ya cumplió su función.
+      // Va antes de todo lo demás para que la lista se refresque de una, y
+      // silenciado a propósito: un borrador que sobreviva es basura en una
+      // lista, pero un error aquí tumbaría la impresión de una factura que YA
+      // se creó. El usuario siempre puede descartarlo a mano.
+      if (borradorOrigenId) {
+        descartarBorrador.mutate(borradorOrigenId, { onError: () => {} });
+      }
       queryClient.invalidateQueries({ queryKey: ['productos-serial'],   exact: false });
       queryClient.invalidateQueries({ queryKey: ['productos-cantidad'],  exact: false });
       queryClient.invalidateQueries({ queryKey: ['seriales'],            exact: false });

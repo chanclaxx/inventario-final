@@ -18,6 +18,8 @@ import { useAuth }                 from '../../context/useAuth';
 import { ModalImportarInventario } from './ModalImportarInventario';
 import { TabCatalogo }             from './TabCatalogo';
 import { formatCOP }               from '../../utils/formatters';
+import { useBorradores, useSincronizarReservas } from '../../hooks/useBorradores';
+import { ModalConflictoBorrador }  from './ModalConflictoBorrador';
 
 const TABS = [
   { id: 'serial',   label: 'Con Serial',   icon: Package    },
@@ -46,6 +48,18 @@ export default function InventarioPage() {
   const { items, totalCarrito } = useCarritoStore();
   const totalItems = items.length;
   const total      = totalCarrito();
+
+  // En móvil el carrito vive detrás de un botón: sin este contador no habría
+  // forma de saber que hay borradores esperando sin abrir el panel. La lista en
+  // sí vive dentro de <Carrito>, justo debajo de los ítems.
+  const { borradores } = useBorradores();
+  const totalBorradores = borradores.length;
+
+  // Vuelca el índice de mercancía apalabrada al carritoStore. Se monta aquí y
+  // solo aquí: a partir de este punto el aviso de reserva vive dentro de
+  // agregarItem, así que lo heredan los nueve sitios que agregan al carrito
+  // —incluidos traslado, despacho y devolución— sin tocar ninguno.
+  useSincronizarReservas();
 
   const esVistaGlobal   = useSucursalStore((s) => s.esVistaGlobal());
   const esUnicaSucursal = useSucursalStore((s) => s.esUnicaSucursal());
@@ -174,11 +188,18 @@ export default function InventarioPage() {
                     </span>
                   )}
                 </div>
-                <span className="text-sm font-semibold">
-                  {totalItems > 0
-                    ? `${totalItems} producto${totalItems !== 1 ? 's' : ''} en carrito`
-                    : 'Carrito vacío'}
-                </span>
+                <div className="flex flex-col items-start">
+                  <span className="text-sm font-semibold">
+                    {totalItems > 0
+                      ? `${totalItems} producto${totalItems !== 1 ? 's' : ''} en carrito`
+                      : 'Carrito vacío'}
+                  </span>
+                  {totalBorradores > 0 && (
+                    <span className={`text-[11px] font-medium ${totalItems > 0 ? 'text-blue-100' : 'text-amber-600'}`}>
+                      {totalBorradores} borrador{totalBorradores !== 1 ? 'es' : ''} guardado{totalBorradores !== 1 ? 's' : ''}
+                    </span>
+                  )}
+                </div>
               </div>
               {totalItems > 0 ? (
                 <div className="flex items-center gap-2">
@@ -237,6 +258,11 @@ export default function InventarioPage() {
           )}
         </>
       )}
+
+      {/* Montado una sola vez: cualquier intento de agregar mercancía apalabrada
+          —desde la lista de seriales, la de cantidad, el árbol de variantes o el
+          escáner— aterriza aquí. */}
+      <ModalConflictoBorrador />
 
       <ModalFactura  open={modalFactura}  onClose={() => setModalFactura(false)}  />
       <ModalPrestamo open={modalPrestamo} onClose={() => setModalPrestamo(false)} />

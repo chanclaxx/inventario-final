@@ -5,11 +5,13 @@ const service = require('./notificaciones.service');
 // ─────────────────────────────────────────────────────────────────────────────
 // AVISOS AUTOMÁTICOS — una pasada diaria por los negocios con dispositivos.
 //
-// Cinco avisos: pagos POR VENCER, cartera VENCIDA, plan por vencer, stock bajo y
-// facturas de proveedor por pagar. Los dos primeros van separados porque son dos
-// trabajos distintos: al que todavía no vence se le recuerda, al vencido se le
-// cobra. El de proveedores va en la dirección contraria a todos los demás —ahí
-// el que debe es el negocio— y por eso abre otra pantalla.
+// Seis avisos: pagos POR VENCER, cartera VENCIDA, plan por vencer, stock bajo,
+// facturas de proveedor por pagar y borradores de venta por vencer. Los dos
+// primeros van separados porque son dos trabajos distintos: al que todavía no
+// vence se le recuerda, al vencido se le cobra. El de proveedores va en la
+// dirección contraria a todos los demás —ahí el que debe es el negocio— y por
+// eso abre otra pantalla. El de borradores es el único que avisa de algo que va
+// a DESHACERSE solo: si nadie lo atiende, la mercancía apartada se libera.
 //
 // Se manda a las 8:00 de Colombia por defecto: temprano para que dé tiempo de
 // llamar a los clientes en el día, pero no de madrugada. Configurable con
@@ -353,6 +355,44 @@ const _avisarStockBajo = async (negocioId) => {
   return enviados;
 };
 
+// ── Aviso 6: borradores de venta por vencer ─────────────────────────────────
+//
+// Cuando un borrador vence, la mercancía que se le prometió a un cliente vuelve
+// a estar libre sin que nadie se entere. Este aviso existe para que alguien
+// decida: llamar al cliente, renovar el borrador o descartarlo.
+//
+// Va a vendedores también, y no solo a admin y supervisor como el de stock: el
+// borrador lo guardó un vendedor y es quien sabe quién es ese cliente.
+const _avisarBorradoresPorVencer = async (negocioId) => {
+  const grupos = await alertas.borradoresPorVencer(negocioId);
+  if (!grupos.length) return 0;
+
+  let enviados = 0;
+  for (const g of grupos) {
+    const res = await service.enviar({
+      negocio_id:  negocioId,
+      sucursal_id: g.sucursal_id,
+      roles:       ['admin_negocio', 'supervisor', 'vendedor'],
+      titulo: g.cuantos === 1
+        ? '1 borrador vence hoy'
+        : `${g.cuantos} borradores vencen hoy`,
+      // Los títulos de borrador SON nombres de cliente: van sin apellido ni
+      // monto, por la regla 3 de este archivo (esto se lee en la pantalla
+      // bloqueada). Con más de dos se resume en vez de listarlos.
+      cuerpo: `${g.sucursal_nombre} · ${
+        g.cuantos <= 2 ? g.ejemplos.slice(0, 2).join(', ') : 'Revísalos antes de que se liberen'
+      }`,
+      url:  '/inventario',
+      tag:  `borradores-${g.sucursal_id}`,
+      tipo: 'borradores_por_vencer',
+      referencia_id: String(g.sucursal_id),
+      unico_por_dia: true,
+    });
+    enviados += res.enviados || 0;
+  }
+  return enviados;
+};
+
 // ── Pasada completa ──────────────────────────────────────────────────────────
 
 /**
@@ -378,6 +418,7 @@ const ejecutar = async () => {
       enviados += await _avisarPlan(n.id);
       enviados += await _avisarStockBajo(n.id);
       enviados += await _avisarPagosProveedor(n.id);
+      enviados += await _avisarBorradoresPorVencer(n.id);
     } catch (err) {
       // Un negocio con datos raros no puede dejar sin avisos a los otros 27.
       console.error(`[notif-cron] Negocio ${n.id} (${n.nombre}) omitido:`, err.message);

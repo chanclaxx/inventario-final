@@ -19,6 +19,7 @@ import { Modal }      from '../../components/ui/Modal';
 import { formatCOP }      from '../../utils/formatters';
 import { InputMoneda }    from '../../components/ui/InputMoneda';
 import useCarritoStore from '../../store/carritoStore';
+import { ChipApartado } from './ChipApartado';
 
 function labelNodo(nodo) {
   return nodo.tipo_nombre ? `${nodo.tipo_nombre}: ${nodo.valor}` : nodo.valor;
@@ -179,6 +180,10 @@ function TarjetaNodo({
   nodo, tieneHijos, esAdmin,
   onDrillDown, onAgregar, onEditar, onReducir,
   precioPadre,
+  // La tarjeta sirve tanto para atributos como para variantes, y cada uno arma
+  // su clave de carrito distinto. La manda quien la usa, que es el único que
+  // sabe en qué nivel está.
+  itemKey,
 }) {
   const sinStock  = nodo.stock === 0;
   const stockBajo = !sinStock && nodo.stock_minimo > 0 && nodo.stock <= nodo.stock_minimo;
@@ -253,6 +258,12 @@ function TarjetaNodo({
             )}
           </div>
         </div>
+
+        {/* Un nodo con hijos no se agrega al carrito (se entra a él), así que no
+            hay reserva que mostrar: la mercancía se aparta en las hojas. */}
+        {!tieneHijos && itemKey && (
+          <ChipApartado itemKey={itemKey} stock={nodo.stock} />
+        )}
 
         {nodo.stock_minimo > 0 && (
           <div className="flex flex-col gap-1">
@@ -489,6 +500,7 @@ export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose,
               <TarjetaNodo
                 key={v.id}
                 nodo={v}
+                itemKey={`cant-${producto.id}-v-${v.id}`}
                 tieneHijos={false}
                 esAdmin={esAdmin}
                 precioPadre={atributoActualizado?.precio || producto.precio}
@@ -662,6 +674,7 @@ export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose,
               <TarjetaNodo
                 key={atributo.id}
                 nodo={atributo}
+                itemKey={`cant-${producto.id}-a-${atributo.id}`}
                 tieneHijos={tieneHijos}
                 esAdmin={esAdmin}
                 precioPadre={producto.precio}

@@ -14,6 +14,7 @@ import { Input }   from '../../components/ui/Input';
 import { Spinner } from '../../components/ui/Spinner';
 import { formatCOP } from '../../utils/formatters';
 import useCarritoStore from '../../store/carritoStore';
+import { ChipApartado } from './ChipApartado';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -175,6 +176,13 @@ function FilaVariante({ variante, atributo, producto, sucursalId, tipos, esAdmin
             <span className="text-xs text-gray-500 ml-1">{formatCOP(variante.precio)}</span>
           )}
         </div>
+        {/* La clave tiene que coincidir con la que arma handleAgregarVariante,
+            o el chip diría una cosa y el bloqueo haría otra. */}
+        <ChipApartado
+          itemKey={`cant-${producto.id}-v-${variante.id}`}
+          stock={variante.stock}
+          className="mt-1"
+        />
       </div>
 
       <div className="flex items-center gap-1.5 flex-shrink-0">
@@ -305,6 +313,11 @@ function FilaAtributo({ atributo, producto, sucursalId, tipos, esAdmin }) {
               <AlertTriangle size={11} className="text-amber-400" />
             )}
           </div>
+          <ChipApartado
+            itemKey={`cant-${producto.id}-a-${atributo.id}`}
+            stock={atributo.stock}
+            className="mt-1"
+          />
         </div>
 
         <div className="flex items-center gap-1.5 flex-shrink-0">

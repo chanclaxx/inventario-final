@@ -209,6 +209,11 @@ const saveConfig = async (negocioId, datos) => {
   if (datosProcesados.garantia_proveedor_dias_aviso !== undefined) {
     _validarDiasAviso(datosProcesados.garantia_proveedor_dias_aviso, 'El aviso previo de garantía');
   }
+  // Vigencia de los borradores de venta. 0 = no vencen nunca (la lista se
+  // limpia solo a mano). Mismo rango 0–365 que los demás plazos.
+  if (datosProcesados.borradores_dias !== undefined) {
+    _validarDiasAviso(datosProcesados.borradores_dias, 'La vigencia de los borradores');
+  }
 
   // Los códigos del proveedor resuelven contra el código interno del producto
   // (codigo_proveedor → codigo_interno → producto). Sin códigos internos no hay
@@ -256,6 +261,13 @@ const saveConfig = async (negocioId, datos) => {
   const CLAVES_COMPRA = ['ordenes_compra_', 'garantia_proveedor_', 'codigos_proveedor_'];
   if (Object.keys(datosProcesados).some((k) => CLAVES_COMPRA.some((p) => k.startsWith(p)))) {
     require('../../middlewares/ordenesCompra.middleware').invalidarCache(negocioId);
+  }
+
+  // Y lo mismo para los borradores de venta: su middleware cachea 60s, y apagar
+  // la feature tiene que sentirse al instante — no un minuto después, con las
+  // reservas todavía advirtiendo.
+  if (Object.keys(datosProcesados).some((k) => k.startsWith('borradores_'))) {
+    require('../../middlewares/borradores.middleware').invalidarCache(negocioId);
   }
 
   return resultado;

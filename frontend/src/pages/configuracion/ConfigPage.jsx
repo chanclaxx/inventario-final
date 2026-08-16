@@ -29,7 +29,7 @@ import {
   Building2, ShieldCheck, FileSliders, BookOpen, Users,
   Printer, Palette, ListChecks, Wallet, Layers,
   ChevronUp, ChevronDown, RotateCcw, Navigation,
-  Upload, X, Image as ImageIcon, Download, Barcode, Percent, CalendarClock,
+  Upload, X, Image as ImageIcon, Download, Barcode, Percent, CalendarClock, Bookmark,
   MapPin, Bell, Globe, ClipboardList,
 } from 'lucide-react';
 
@@ -65,6 +65,7 @@ const TABS_CATALOGO = [
   { id: 'pagos',     label: 'Pagos',     Icn: Wallet     },
   { id: 'mora',      label: 'Mora',      Icn: CalendarClock },
   { id: 'interes',   label: 'Interés',   Icn: Percent    },
+  { id: 'borradores', label: 'Borradores', Icn: Bookmark },
 ];
 
 // ─── Campos del formulario de venta ──────────────────────────────────────────
@@ -679,6 +680,77 @@ function CodigoProductoConfig({ valores, set }) {
             de búsqueda por código del inventario y el producto se agrega al carrito.
           </p>
         </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Borradores de venta (carritos guardados) ────────────────────────────────
+function BorradoresConfig({ valores, set }) {
+  const activo = valores['borradores_activo'] === '1';
+  // 7 días si nunca se tocó. '0' es un valor legítimo (no vencen), así que no
+  // se puede usar `||` para el default: convertiría el 0 en 7.
+  const diasRaw = valores['borradores_dias'];
+  const dias    = diasRaw === undefined || diasRaw === '' ? '7' : String(diasRaw);
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex items-center gap-2">
+        <Bookmark size={15} className="text-gray-400" />
+        <h3 className="text-sm font-semibold text-gray-700">Borradores de venta</h3>
+      </div>
+      <p className="text-xs text-gray-400 -mt-2">
+        Guarda el carrito del cliente que dijo «ya vuelvo», con el precio que le
+        cotizaste, y avisa a los demás vendedores de que esa mercancía está apartada.
+      </p>
+
+      <Toggle
+        label="Activar borradores"
+        description="Añade el botón Guardar como borrador y la lista debajo del carrito"
+        enabled={activo}
+        onChange={(val) => set('borradores_activo', val ? '1' : '0')}
+      />
+
+      {activo && (
+        <>
+          <div className="flex flex-col gap-1">
+            <label className="text-sm font-medium text-gray-700">Vigencia</label>
+            <div className="flex items-center gap-2">
+              <input
+                type="number" min={0} max={365} value={dias}
+                onChange={(e) => set('borradores_dias', e.target.value)}
+                className="w-24 px-3 py-2 bg-gray-100 border-0 rounded-xl text-gray-900
+                  focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white
+                  transition-all text-sm"
+              />
+              <span className="text-sm text-gray-500">
+                {dias === '0' ? 'días — no vencen nunca' : 'días'}
+              </span>
+            </div>
+            <p className="text-xs text-gray-400">
+              Pasado ese tiempo el borrador desaparece de la lista y su mercancía deja de
+              estar apartada. Cargarlo al carrito renueva el plazo. Escribe 0 si prefieres
+              borrarlos siempre a mano.
+            </p>
+          </div>
+
+          <div className="bg-blue-50 rounded-xl p-4 flex flex-col gap-1.5">
+            <p className="text-xs font-medium text-blue-800">Cómo funciona</p>
+            <p className="text-xs text-blue-700">
+              • El inventario <strong>no se toca</strong>: un producto apartado sigue
+              contando en tu stock, en los reportes y en el catálogo web, y se puede
+              vender igual. El borrador solo avisa.
+            </p>
+            <p className="text-xs text-blue-700">
+              • Los borradores son <strong>de cada sucursal</strong>: al cambiar de
+              sucursal verás los de esa sede, no los de la otra.
+            </p>
+            <p className="text-xs text-blue-700">
+              • Al cargar un borrador al carrito, el borrador se mantiene hasta que
+              factures o prestes de verdad. Si cierras el navegador, no se pierde.
+            </p>
+          </div>
+        </>
       )}
     </div>
   );
@@ -1432,6 +1504,12 @@ function SeccionCatalogo({ valores, set }) {
       {tab === 'ubicacion' && (
         <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
           <UbicacionProductoConfig valores={valores} set={set} />
+        </div>
+      )}
+
+      {tab === 'borradores' && (
+        <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
+          <BorradoresConfig valores={valores} set={set} />
         </div>
       )}
 

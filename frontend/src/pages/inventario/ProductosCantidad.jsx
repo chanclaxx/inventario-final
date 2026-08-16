@@ -10,6 +10,7 @@ import { Spinner }                                       from '../../components/
 import { EmptyState }                                    from '../../components/ui/EmptyState';
 import { formatCOP }                                     from '../../utils/formatters';
 import useCarritoStore                                   from '../../store/carritoStore';
+import { ChipApartado }                                  from './ChipApartado';
 import { ModalPinEliminacion }                           from './ModalPinEliminacion';
 import { ModalEditarProductoCantidad }                   from './ModalEditarProductoCantidad';
 import { UltimaVentaBadge }                               from './AntiguedadInventario';
@@ -26,6 +27,7 @@ import api                                               from '../../api/axios.c
 function TarjetaProducto({ p, esAdmin, onAgregar, onReducir, onEditar, variantesActivo, onVerArbol }) {
   const sinStock  = p.stock === 0;
   const stockBajo = !sinStock && p.stock_bajo;
+
 
   const cardBg     = sinStock  ? 'bg-gray-50'
                    : stockBajo ? 'bg-amber-50/40'
@@ -77,6 +79,7 @@ function TarjetaProducto({ p, esAdmin, onAgregar, onReducir, onEditar, variantes
               <UbicacionChip ubicacion={p.ubicacion} />
             </div>
           )}
+          <ChipApartado itemKey={`cant-${p.id}`} stock={p.stock} className="mt-1" />
           {p.dias_en_inventario != null && (
             <UltimaVentaBadge
               tieneVentas={p.ultima_venta != null}
@@ -363,6 +366,13 @@ export function ProductosCantidad() {
       cantidad:    1,
       linea_id:    producto.linea_id || null,
     });
+    // 'reservado' no es ni éxito ni error: el producto está apalabrado en un
+    // borrador y el modal de conflicto ya está preguntando qué hacer. Decir
+    // "en el carrito" sería mentir, porque todavía no entró.
+    if (res === 'reservado') {
+      setScanMsg(null);
+      return;
+    }
     setScanMsg(res === 'sin_stock'
       ? { tipo: 'error', texto: `"${producto.nombre}": ya está todo el stock en el carrito` }
       : { tipo: 'ok', texto: `✓ ${producto.nombre} — en el carrito` });

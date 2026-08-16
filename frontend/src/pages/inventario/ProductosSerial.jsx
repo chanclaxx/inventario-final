@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { getProductosSerial, getSeriales, eliminarSerial, getLineas, buscarImei, actualizarSerial } from '../../api/productos.api';
 import { Badge }                     from '../../components/ui/Badge';
+import { ChipApartado }              from './ChipApartado';
 import { Button }                    from '../../components/ui/Button';
 import { Spinner }                   from '../../components/ui/Spinner';
 import { EmptyState }                from '../../components/ui/EmptyState';
@@ -119,6 +120,10 @@ function CabeceraGrupoColor({ color, cantidad }) {
 function TarjetaSerial({ serial, precio, onAgregar, onEliminar, onEditar, onGuardarNota, notaEditable }) {
   const prestado = serial.prestado && !serial.vendido;
 
+  // Un equipo ya vendido o prestado no puede estar apartado para nadie: el
+  // chip sobraría y confundiría.
+  const puedeApartarse = !serial.vendido && !prestado;
+
   const estiloContenedor = prestado
     ? 'bg-blue-50 border-blue-200 hover:border-blue-300'
     : 'bg-white border-gray-100 hover:border-blue-200 hover:bg-blue-50/30';
@@ -142,6 +147,7 @@ function TarjetaSerial({ serial, precio, onAgregar, onEliminar, onEditar, onGuar
               <Lock size={10} className="inline mr-0.5" /> Prestado
             </Badge>
           )}
+          {puedeApartarse && <ChipApartado itemKey={serial.imei} tipo="serial" />}
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-xs text-gray-400">Entrada: {formatFecha(serial.fecha_entrada)}</span>

@@ -487,8 +487,41 @@ const negociosANotificar = async () => {
   return rows;
 };
 
+// ── Borradores de venta por vencer ───────────────────────────────────────────
+//
+// Un borrador que vence deja de reservar sin que nadie se entere: la mercancía
+// que el vendedor le prometió a un cliente vuelve a estar libre en silencio.
+// Este es el único aviso de la casa que se manda para que alguien DECIDA —
+// llamar al cliente, renovar el borrador o descartarlo.
+//
+// Solo para negocios que encendieron la feature: sin el flag no hay borradores
+// y la consulta ni se hace.
+const borradoresPorVencer = async (negocioId, dias = 1) => {
+  const vacio = [];
+  if (!negocioId) return vacio;
+
+  try {
+    const { rows: cfg } = await pool.query(
+      `SELECT valor FROM config_negocio
+        WHERE negocio_id = $1 AND clave = 'borradores_activo'`,
+      [negocioId]
+    );
+    if (cfg[0]?.valor !== '1') return vacio;
+
+    const repo = require('../borradores/borradores.repository');
+    return await repo.porVencer(negocioId, dias);
+  } catch (err) {
+    // Sin la migración aplicada (42P01) el negocio simplemente no recibe este
+    // aviso; los otros cuatro siguen saliendo igual.
+    if (err?.code !== '42P01') {
+      console.error(`[alertas] borradoresPorVencer negocio ${negocioId}:`, err.message);
+    }
+    return vacio;
+  }
+};
+
 module.exports = {
   cartera, diasAvisoPrevio, DIAS_AVISO_PREVIO,
   carteraProveedores,
-  planPorVencer, stockBajo, negociosANotificar, hoyBogota,
+  planPorVencer, stockBajo, borradoresPorVencer, negociosANotificar, hoyBogota,
 };
