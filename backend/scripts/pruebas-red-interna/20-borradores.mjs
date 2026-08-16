@@ -549,7 +549,94 @@ for (const b of [conForm, sinForm, anonimo, sinTituloAlguno]) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-console.log('\n═══ 14. Mantenimiento: purga y aviso de vencimiento ═══');
+console.log('\n═══ 14. Reemplazo atómico: nunca dos borradores iguales ═══');
+// ═══════════════════════════════════════════════════════════════════════════
+// El caso: cargo un borrador al carrito, le agrego un producto y vuelvo a
+// pulsar "guardar como borrador". Antes esto CREABA otro y borraba el viejo —
+// dos borradores apartando el mismo IMEI mientras tanto, y los dos para siempre
+// si el borrado fallaba.
+
+const antesDeTodo = (await svc.listar(1, 1)).length;
+
+const original = await svc.crear({
+  sucursalId: 1, negocioId: 1, usuarioId: 1,
+  titulo: 'Marta', destino: 'factura',
+  datos: { form: { nombre: 'Marta', cedula: '111' } },
+  items: [CANT(2, 'Vidrio', 1, 12000)],
+}, cfg);
+
+ok('la lista creció en uno', (await svc.listar(1, 1)).length === antesDeTodo + 1);
+
+const reemplazado = await svc.reemplazar(original.id, 1, 1, {
+  titulo: 'Marta Restrepo', destino: 'prestamo',
+  datos: { form: { nombre: 'Marta Restrepo', cedula: '111', celular: '300' } },
+  items: [CANT(2, 'Vidrio', 2, 12000), CANT(3, 'Cargador', 1, 45000)],
+});
+
+ok('reemplazar NO crea un borrador nuevo',
+  (await svc.listar(1, 1)).length === antesDeTodo + 1,
+  `${(await svc.listar(1, 1)).length} en lista`);
+ok('conserva el MISMO id', reemplazado.id === original.id);
+ok('conserva la antigüedad original',
+  new Date(reemplazado.creado_en).getTime() === new Date(original.creado_en).getTime(),
+  'el "hace 3 días" del cliente es información real');
+ok('actualiza el título',  reemplazado.titulo === 'Marta Restrepo');
+ok('actualiza el destino', reemplazado.destino === 'prestamo');
+ok('actualiza el formulario',
+  reemplazado.datos.form.celular === '300', reemplazado.datos?.form?.celular);
+ok('sustituye los ítems, no los suma',
+  reemplazado.num_items === 2, `${reemplazado.num_items} ítems`);
+ok('el total refleja el contenido nuevo',
+  Number(reemplazado.total) === 69000, money(reemplazado.total));
+
+// No quedan ítems del contenido anterior.
+const filas = await uno(
+  'SELECT COUNT(*)::int AS n FROM borradores_items WHERE borrador_id = $1', [original.id]);
+ok('en la BD hay exactamente los ítems nuevos', filas.n === 2, `${filas.n} filas`);
+
+// Reemplazar N veces sigue dejando UNO.
+for (let i = 0; i < 4; i++) {
+  await svc.reemplazar(original.id, 1, 1, {
+    titulo: `Marta v${i}`, destino: 'factura',
+    items: [CANT(2, 'Vidrio', 1, 12000)],
+  });
+}
+ok('cuatro guardados seguidos siguen dejando UN borrador',
+  (await svc.listar(1, 1)).length === antesDeTodo + 1);
+ok('con el contenido del último', (await svc.obtener(original.id, 1, 1)).titulo === 'Marta v3');
+
+// Aislamiento: el reemplazo respeta sucursal y negocio como todo lo demás.
+ok('no se puede reemplazar el borrador de otra sucursal',
+  (await svc.reemplazar(b2.id, 1, 1, {
+    titulo: 'Robado', items: [CANT(2, 'Vidrio', 1, 12000)],
+  })) === null);
+ok('el borrador de la otra sucursal quedó intacto',
+  (await svc.obtener(b2.id, 2, 1)).titulo === 'Sra. del Ford');
+ok('otro negocio tampoco lo reemplaza',
+  (await svc.reemplazar(original.id, 3, 2, {
+    titulo: 'Ajeno', items: [CANT(2, 'Vidrio', 1, 12000)],
+  })) === null);
+
+// Borrador inexistente: devuelve null en vez de lanzar, para que el frontend
+// cree uno nuevo si otro usuario lo borró mientras tanto.
+ok('un borrador que ya no existe devuelve null (no revienta)',
+  (await svc.reemplazar(999999, 1, 1, {
+    titulo: 'Fantasma', items: [CANT(2, 'Vidrio', 1, 12000)],
+  })) === null);
+
+// El reemplazo es transaccional: si los ítems son inválidos, no se pierde nada.
+await falla('un reemplazo con ítems inválidos se rechaza',
+  () => svc.reemplazar(original.id, 1, 1, { titulo: 'X', items: [] }),
+  'al menos un producto');
+const trasFallo = await svc.obtener(original.id, 1, 1);
+ok('y el borrador conserva su contenido anterior',
+  trasFallo.titulo === 'Marta v3' && trasFallo.num_items === 1,
+  `${trasFallo.titulo} · ${trasFallo.num_items} ítems`);
+
+await svc.eliminar(original.id, 1, 1);
+
+// ═══════════════════════════════════════════════════════════════════════════
+console.log('\n═══ 15. Mantenimiento: purga y aviso de vencimiento ═══');
 // ═══════════════════════════════════════════════════════════════════════════
 // Un borrador vencido ya es invisible y no reserva, pero su fila se quedaría
 // para siempre. Se barre con un mes de gracia, no el mismo día: así un error

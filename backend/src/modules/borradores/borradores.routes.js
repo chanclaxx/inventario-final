@@ -58,6 +58,10 @@ router.patch('/:id',
   ],
   validate, ctrl.editarBorrador);
 
+// Reemplazo completo: es el guardado de un borrador que ya estaba cargado en
+// el carrito. PUT y no PATCH porque sustituye el recurso entero, ítems incluidos.
+router.put('/:id', validarBorrador, validate, ctrl.reemplazarBorrador);
+
 router.patch('/:id/renovar', ctrl.renovarBorrador);
 
 router.delete('/:id', ctrl.eliminarBorrador);

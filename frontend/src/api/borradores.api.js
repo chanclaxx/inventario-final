@@ -33,6 +33,13 @@ export const crearBorrador = (datos) => api.post('/borradores', datos);
 // cambiarlos se carga el borrador al carrito y se vuelve a guardar.
 export const editarBorrador = (id, datos) => api.patch(`/borradores/${id}`, datos);
 
+// Reemplazo COMPLETO: cabecera, formulario e ítems, en una sola transacción.
+// Es lo que corre al volver a guardar un borrador que ya estaba en el carrito.
+// Nunca coexisten dos borradores con la misma mercancía, y no hay un borrado
+// posterior que pueda fallar.
+// Si el borrador ya no existe responde 404 con code 'BORRADOR_NO_EXISTE'.
+export const reemplazarBorrador = (id, datos) => api.put(`/borradores/${id}`, datos);
+
 // Renueva la vigencia. Se llama al cargar el borrador al carrito: el que se
 // sigue trabajando no debería vencerse por el camino.
 export const renovarBorrador = (id) => api.patch(`/borradores/${id}/renovar`);

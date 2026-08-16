@@ -4,7 +4,7 @@ import api from '../api/axios.config';
 import useCarritoStore from '../store/carritoStore';
 import { construirIndiceReservas } from '../utils/reservas';
 import {
-  getBorradores, getBorrador, crearBorrador, editarBorrador,
+  getBorradores, getBorrador, crearBorrador, editarBorrador, reemplazarBorrador,
   renovarBorrador, eliminarBorrador, quitarItemBorrador,
 } from '../api/borradores.api';
 import { useSucursalKey } from './useSucursalKey';
@@ -87,6 +87,14 @@ export function useBorradores() {
     onSuccess:  invalidar,
   });
 
+  // Reemplazo atómico: es el guardado de un borrador que ya estaba cargado en
+  // el carrito. Sustituye al viejo crear-y-borrar, que dejaba dos borradores
+  // apartando el mismo IMEI si el borrado fallaba.
+  const reemplazar = useMutation({
+    mutationFn: ({ id, ...datos }) => reemplazarBorrador(id, datos).then((r) => r.data.data),
+    onSuccess:  invalidar,
+  });
+
   // El "robo": el producto estaba apalabrado en otro borrador y el vendedor se
   // lo lleva a este carrito. Lo usa el modal de conflicto de la Fase 3.
   const liberarItem = useMutation({
@@ -101,6 +109,7 @@ export function useBorradores() {
     isLoading,
     guardar,
     editar,
+    reemplazar,
     descartar,
     liberarItem,
     invalidar,
@@ -120,46 +129,67 @@ export function useBorradores() {
  * quedarían dos apartando el mismo IMEI.
  */
 export function useGuardarBorradorDesdeModal(destino) {
-  const { activo, guardar, editar, descartar } = useBorradores();
-  const items             = useCarritoStore((s) => s.items);
-  const borradorOrigenId  = useCarritoStore((s) => s.borradorOrigenId);
-  const limpiarCarrito    = useCarritoStore((s) => s.limpiarCarrito);
+  const { activo, guardar, reemplazar } = useBorradores();
+  const items            = useCarritoStore((s) => s.items);
+  const borradorOrigenId = useCarritoStore((s) => s.borradorOrigenId);
+  const limpiarCarrito   = useCarritoStore((s) => s.limpiarCarrito);
 
   const guardarBorrador = ({ titulo, datos, nota }, { onSuccess, onError } = {}) => {
     if (!items.length) {
       onError?.('El carrito está vacío');
       return;
     }
-    guardar.mutate(
-      {
-        // Vacío es válido: el service lo guarda como "Sin nombre". El cliente
-        // pudo interrumpir antes de decir cómo se llama.
-        titulo: (titulo || '').trim(),
-        destino,
-        nota:   nota || null,
-        datos:  datos || null,
-        items,
-      },
-      {
-        onSuccess: () => {
-          if (borradorOrigenId) descartar.mutate(borradorOrigenId, { onError: () => {} });
-          limpiarCarrito();
-          onSuccess?.();
-        },
-        onError: (e) => onError?.(
-          e.response?.data?.error || 'No se pudo guardar el borrador'
-        ),
-      }
+    // Si ya se está guardando, no se manda otra vez: el doble clic en un botón
+    // que tarda medio segundo es la forma más fácil de acabar con dos
+    // borradores iguales.
+    if (guardar.isPending || reemplazar.isPending) return;
+
+    const payload = {
+      // Vacío es válido: el service lo guarda como "Sin nombre". El cliente
+      // pudo interrumpir antes de decir cómo se llama.
+      titulo: (titulo || '').trim(),
+      destino,
+      nota:   nota || null,
+      datos:  datos || null,
+      items,
+    };
+
+    const terminar = () => { limpiarCarrito(); onSuccess?.(); };
+    const fallar   = (e) => onError?.(
+      e.response?.data?.error || 'No se pudo guardar el borrador'
     );
+
+    const crearNuevo = () => guardar.mutate(payload, { onSuccess: terminar, onError: fallar });
+
+    // El carrito venía de un borrador: se REEMPLAZA en una sola transacción.
+    // Conserva su id y su antigüedad, y en ningún instante existen dos.
+    if (borradorOrigenId) {
+      reemplazar.mutate(
+        { id: borradorOrigenId, ...payload },
+        {
+          onSuccess: terminar,
+          onError: (e) => {
+            // Otro usuario lo borró, o venció y se purgó mientras este lo
+            // trabajaba. Crear uno nuevo es lo que el vendedor esperaba: el
+            // trabajo no se pierde por algo que pasó a sus espaldas.
+            if (e.response?.data?.code === 'BORRADOR_NO_EXISTE') return crearNuevo();
+            fallar(e);
+          },
+        }
+      );
+      return;
+    }
+
+    crearNuevo();
   };
 
   return {
     activo,
     guardarBorrador,
-    guardando: guardar.isPending,
-    // `editar` viaja para quien quiera actualizar solo la cabecera sin tocar
-    // los ítems (hoy nadie: guardar desde el modal reemplaza el borrador entero).
-    editar,
+    guardando: guardar.isPending || reemplazar.isPending,
+    // true cuando se está actualizando uno existente: sirve para la etiqueta
+    // del botón ("Actualizar borrador" en vez de "Guardar como borrador").
+    actualizando: !!borradorOrigenId,
   };
 }
 

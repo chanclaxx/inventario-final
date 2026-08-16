@@ -50,6 +50,33 @@ const editarBorrador = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+// Volver a guardar un borrador que ya estaba en el carrito. Reemplaza su
+// contenido en una sola transacción en vez de crear otro y borrar el viejo:
+// así nunca existen dos borradores apartando la misma mercancía.
+//
+// Si el borrador ya no existe responde 404 con un código propio, para que el
+// frontend cree uno nuevo en vez de mostrarle un error al vendedor.
+const reemplazarBorrador = async (req, res, next) => {
+  try {
+    const data = await service.reemplazar(
+      req.params.id, req.sucursal_id, req.user.negocio_id,
+      {
+        titulo:  req.body.titulo,
+        destino: req.body.destino,
+        nota:    req.body.nota,
+        datos:   req.body.datos,
+        items:   req.body.items,
+      }
+    );
+    if (!data) {
+      return res.status(404).json({
+        ok: false, code: 'BORRADOR_NO_EXISTE', error: 'Ese borrador ya no existe',
+      });
+    }
+    res.json({ ok: true, data, message: 'Borrador actualizado' });
+  } catch (err) { next(err); }
+};
+
 // Se llama al cargar el borrador al carrito: el que se sigue trabajando no
 // debería vencerse por el camino.
 const renovarBorrador = async (req, res, next) => {
@@ -90,6 +117,7 @@ module.exports = {
   getBorradorById,
   crearBorrador,
   editarBorrador,
+  reemplazarBorrador,
   renovarBorrador,
   eliminarBorrador,
   quitarItem,

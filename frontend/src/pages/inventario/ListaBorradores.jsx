@@ -45,14 +45,24 @@ const avisoVencimiento = (dias) => {
   return dias === 1 ? 'vence mañana' : `vence en ${dias} días`;
 };
 
-function TarjetaBorrador({ borrador, onCargar, onDescartar, cargando, descartando }) {
+function TarjetaBorrador({
+  borrador, onCargar, onDescartar, cargando, descartando,
+  // Este borrador es el que está ahora mismo en el carrito. No se vuelve a
+  // cargar: ya está ahí, y volver a traerlo pisaría los cambios que el vendedor
+  // le haya hecho (un precio ajustado, un producto agregado).
+  enCarrito,
+  // Hay OTRA carga en curso. Se bloquean todas para que dos clics rápidos en
+  // tarjetas distintas no dejen el carrito con la que respondió de última.
+  bloqueado,
+}) {
   const [abierto, setAbierto] = useState(false);
   const chip = DESTINO_CHIP[borrador.destino] || DESTINO_CHIP.indefinido;
   const ChipIcon = chip.icon;
   const vence = avisoVencimiento(borrador.dias_para_vencer);
 
   return (
-    <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+    <div className={`rounded-xl overflow-hidden border transition-colors
+      ${enCarrito ? 'bg-blue-50/40 border-blue-300 ring-1 ring-blue-200' : 'bg-white border-gray-200'}`}>
       {/* Cabecera: pulsable para desplegar los productos */}
       <button
         onClick={() => setAbierto((v) => !v)}
@@ -68,6 +78,12 @@ function TarjetaBorrador({ borrador, onCargar, onDescartar, cargando, descartand
               px-1.5 py-0.5 rounded-full border ${chip.clase}`}>
               <ChipIcon size={9} /> {chip.label}
             </span>
+            {enCarrito && (
+              <span className="inline-flex items-center gap-1 text-[10px] font-medium
+                px-1.5 py-0.5 rounded-full border bg-blue-100 text-blue-700 border-blue-200">
+                <ShoppingCart size={9} /> En el carrito
+              </span>
+            )}
           </div>
           <p className="text-xs text-gray-500 mt-0.5">
             {borrador.num_items} producto{borrador.num_items !== 1 ? 's' : ''}
@@ -119,10 +135,21 @@ function TarjetaBorrador({ borrador, onCargar, onDescartar, cargando, descartand
       )}
 
       {/* Acciones */}
-      <div className="flex items-center gap-2 px-3 py-2 bg-gray-50 border-t border-gray-100">
-        <Button size="sm" className="flex-1" onClick={() => onCargar(borrador)} loading={cargando}>
-          <ShoppingCart size={13} /> Cargar al carrito
-        </Button>
+      <div className={`flex items-center gap-2 px-3 py-2 border-t
+        ${enCarrito ? 'bg-blue-50/60 border-blue-100' : 'bg-gray-50 border-gray-100'}`}>
+        {enCarrito ? (
+          // Ya está cargado: el botón lleva a terminar la venta, no a volver a
+          // traerlo. Recargarlo borraría lo que el vendedor haya ajustado.
+          <Button size="sm" className="flex-1" onClick={() => onCargar(borrador)}>
+            {borrador.destino === 'prestamo' ? <Handshake size={13} /> : <FileText size={13} />}
+            {borrador.destino === 'prestamo' ? 'Continuar préstamo' : 'Continuar factura'}
+          </Button>
+        ) : (
+          <Button size="sm" className="flex-1" onClick={() => onCargar(borrador)}
+            loading={cargando} disabled={bloqueado}>
+            <ShoppingCart size={13} /> Cargar al carrito
+          </Button>
+        )}
         <button
           onClick={() => onDescartar(borrador)}
           disabled={descartando}
@@ -140,6 +167,7 @@ function TarjetaBorrador({ borrador, onCargar, onDescartar, cargando, descartand
 export function ListaBorradores({ onCargado }) {
   const { activo, borradores, isLoading, descartar } = useBorradores();
   const items               = useCarritoStore((s) => s.items);
+  const borradorOrigenId    = useCarritoStore((s) => s.borradorOrigenId);
   const cargarDesdeBorrador = useCarritoStore((s) => s.cargarDesdeBorrador);
 
   const [abierta,       setAbierta]       = useState(true);
@@ -153,6 +181,9 @@ export function ListaBorradores({ onCargado }) {
   if (!activo) return null;
 
   const ejecutarCarga = async (borrador) => {
+    // Cierra la puerta a la segunda pulsación: el botón de confirmar puede
+    // recibir dos clics antes de que el diálogo desaparezca.
+    if (cargandoId) return;
     setConfirmando(null);
     setError('');
     setCargandoId(borrador.id);
@@ -184,7 +215,18 @@ export function ListaBorradores({ onCargado }) {
   // Cargar reemplaza el carrito. Si hay algo dentro, se avisa antes: perder un
   // carrito a medio armar sin preguntar es de las cosas que hacen que la gente
   // deje de usar una feature.
+  //
+  // Tres casos, y la diferencia importa para que no estorbe:
+  //
+  //   1. Ya es el borrador del carrito → NO se recarga. Se abre el modal para
+  //      terminar la venta. Volver a traerlo pisaría el precio que el vendedor
+  //      acaba de ajustar, y preguntarle "¿reemplazo el carrito?" por su propio
+  //      borrador es ruido.
+  //   2. El carrito tiene otra cosa → se pregunta antes de pisarla.
+  //   3. Carrito vacío → se carga directo.
   const handleCargar = (borrador) => {
+    if (borradorOrigenId === borrador.id) { onCargado?.(borrador); return; }
+    if (cargandoId) return;                       // ya hay una carga en vuelo
     if (items.length > 0) setConfirmando(borrador);
     else ejecutarCarga(borrador);
   };
@@ -209,6 +251,13 @@ export function ListaBorradores({ onCargado }) {
   // Sin borradores no se ocupa espacio: el carrito se ve igual que siempre.
   if (!borradores.length && !error) return null;
 
+  // El que está en el carrito va primero: es sobre el que el vendedor está
+  // trabajando ahora mismo.
+  const ordenados = borradorOrigenId
+    ? [...borradores].sort((a, b) =>
+        (b.id === borradorOrigenId ? 1 : 0) - (a.id === borradorOrigenId ? 1 : 0))
+    : borradores;
+
   return (
     <div className="border-t border-gray-100 mt-4 pt-3">
       <button
@@ -231,11 +280,13 @@ export function ListaBorradores({ onCargado }) {
 
       {abierta && (
         <div className="flex flex-col gap-2">
-          {borradores.map((b) => (
+          {ordenados.map((b) => (
             <TarjetaBorrador
               key={b.id}
               borrador={b}
+              enCarrito={borradorOrigenId === b.id}
               cargando={cargandoId === b.id}
+              bloqueado={!!cargandoId && cargandoId !== b.id}
               descartando={descartar.isPending && aDescartar?.id === b.id}
               onCargar={handleCargar}
               onDescartar={handleDescartar}

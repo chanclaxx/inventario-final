@@ -318,7 +318,8 @@ export function ModalPrestamo({ open, onClose }) {
   // cuando el préstamo ya existe.
   const borradorOrigenId = useCarritoStore((s) => s.borradorOrigenId);
   const { descartar: descartarBorrador } = useBorradores();
-  const { activo: borradoresActivos, guardarBorrador, guardando: guardandoBorrador } =
+  const { activo: borradoresActivos, guardarBorrador, guardando: guardandoBorrador,
+          actualizando: actualizandoBorrador } =
     useGuardarBorradorDesdeModal('prestamo');
 
   // Formulario que venía en el borrador cargado, para rehidratar este modal.
@@ -705,7 +706,9 @@ export function ModalPrestamo({ open, onClose }) {
               disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Bookmark size={15} />
-            {guardandoBorrador ? 'Guardando…' : 'Guardar como borrador'}
+            {guardandoBorrador
+              ? 'Guardando…'
+              : actualizandoBorrador ? 'Actualizar borrador' : 'Guardar como borrador'}
           </button>
         )}
 

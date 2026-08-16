@@ -221,6 +221,59 @@ const actualizar = async (id, sucursalId, negocioId, campos) => {
 };
 
 /**
+ * Reemplaza el contenido completo de un borrador: cabecera, formulario e ítems.
+ *
+ * Existe para que volver a guardar un borrador que ya está en el carrito lo
+ * ACTUALICE, en vez del crear-y-luego-borrar que hacía antes. Aquello tenía dos
+ * fallos: entre las dos llamadas existían dos borradores apartando el mismo
+ * IMEI, y si el borrado fallaba (red, o que otro usuario ya lo había borrado)
+ * los dos se quedaban para siempre.
+ *
+ * Todo en UNA transacción, y conservando el `id` y el `creado_en`: la
+ * antigüedad del borrador es información real ("este cliente lleva tres días")
+ * y el id estable evita que el índice de reservas parpadee.
+ *
+ * Devuelve false si el borrador no existe o es de otra sucursal — quien llama
+ * decide si crear uno nuevo.
+ */
+const reemplazar = async (id, sucursalId, negocioId, { titulo, destino, nota, datos, items }) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // El acotamiento va aquí, en el UPDATE de la cabecera: si no empareja, se
+    // aborta antes de tocar un solo ítem.
+    const { rowCount } = await client.query(
+      `UPDATE borradores b
+          SET titulo = $4, destino = $5, nota = $6, datos = $7::jsonb,
+              actualizado_en = NOW()
+         FROM sucursales su
+        WHERE b.id = $1
+          AND b.sucursal_id = $2
+          AND su.id = b.sucursal_id
+          AND su.negocio_id = $3`,
+      [id, sucursalId, negocioId, titulo, destino, nota, datos]
+    );
+
+    if (!rowCount) {
+      await client.query('ROLLBACK');
+      return false;
+    }
+
+    await client.query('DELETE FROM borradores_items WHERE borrador_id = $1', [id]);
+    await _insertarItems(client, id, items);
+
+    await client.query('COMMIT');
+    return true;
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+};
+
+/**
  * Renueva el plazo: el borrador que se sigue trabajando no debería vencerse.
  * Se llama al cargarlo al carrito.
  */
@@ -430,6 +483,7 @@ module.exports = {
   obtener,
   crear,
   actualizar,
+  reemplazar,
   renovar,
   eliminar,
   eliminarItem,

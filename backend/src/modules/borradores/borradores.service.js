@@ -349,6 +349,32 @@ const actualizar = async (id, sucursalId, negocioId, datos) => {
   return _decorar(await repo.obtener(id, sucursalId, negocioId));
 };
 
+/**
+ * Reemplaza el borrador entero: cabecera, formulario e ítems, en una sola
+ * transacción.
+ *
+ * Es lo que corre cuando el vendedor vuelve a guardar un borrador que ya tenía
+ * cargado en el carrito. Antes se hacía creando uno nuevo y borrando el viejo,
+ * lo que dejaba dos borradores apartando el mismo IMEI si el borrado fallaba.
+ *
+ * Devuelve null si el borrador ya no existe (lo borró otro, o venció y se
+ * purgó): quien llama crea uno nuevo en vez de fallarle al usuario.
+ */
+const reemplazar = async (id, sucursalId, negocioId, { titulo, destino, nota, datos, items }) => {
+  const filas = _normalizarItems(items);
+
+  const ok = await repo.reemplazar(id, sucursalId, negocioId, {
+    titulo:  _texto(titulo, MAX_TITULO) || 'Sin nombre',
+    destino: DESTINOS.has(destino) ? destino : 'indefinido',
+    nota:    _texto(nota, MAX_NOTA),
+    datos:   _normalizarDatos(datos),
+    items:   filas,
+  });
+
+  if (!ok) return null;
+  return _decorar(await repo.obtener(id, sucursalId, negocioId));
+};
+
 /** El borrador que se sigue trabajando no debería vencerse. */
 const renovar = async (id, sucursalId, negocioId, cfg) => {
   const ok = await repo.renovar(id, sucursalId, negocioId, cfg.vencen ? cfg.dias : 0);
@@ -384,6 +410,7 @@ module.exports = {
   obtener,
   crear,
   actualizar,
+  reemplazar,
   renovar,
   eliminar,
   quitarItem,
