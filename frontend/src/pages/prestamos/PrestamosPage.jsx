@@ -2860,7 +2860,7 @@ export default function PrestamosPage() {
         </div>
         <Button size="sm" variant="secondary" className="flex-shrink-0"
           disabled={!prestamos.length}
-          onClick={() => exportarPrestamosExcel(prestamos, 'prestamos')}>
+          onClick={() => exportarPrestamosExcel({ prestamos }, 'prestamos')}>
           <FileDown size={14} /> Exportar Excel
         </Button>
       </div>
