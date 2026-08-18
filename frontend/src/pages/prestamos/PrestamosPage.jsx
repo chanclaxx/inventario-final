@@ -8,6 +8,7 @@ import { getPrestamos, registrarAbonoPrestamo, devolverPrestamo, devolverParcial
 import { ModalEditarValorPrestamo } from './ModalEditarValorPrestamo';
 import { crearPrestatario as crearPrestatarioApi, getPrestatarios, actualizarPrestatario as actualizarPrestatarioApi } from '../../api/prestatarios.api';
 import { actualizarCliente as actualizarClienteApi } from '../../api/clientes.api';
+import { getCreditos } from '../../api/creditos.api';
 import {
   getDomiciliarios,
   getEntregas,
@@ -2604,7 +2605,11 @@ function TabBusquedaPrestamos() {
               )}
             </div>
             <Button size="sm" variant="secondary"
-              onClick={() => exportarPrestamosExcel({ prestamos: resultados, abonosTotales }, 'prestamos-filtrados')}>
+              onClick={() => exportarPrestamosExcel({
+                prestamos: resultados, abonosTotales,
+                titulo:  'PRÉSTAMOS FILTRADOS',
+                archivo: 'prestamos-filtrados',
+              })}>
               <FileDown size={14} /> Exportar Excel
             </Button>
           </div>
@@ -2649,6 +2654,43 @@ function TabBusquedaPrestamos() {
 }
 
 // ─── Página principal ─────────────────────────────────────────────────────────
+
+/**
+ * Exporta la cartera completa de la pantalla: los préstamos que ya están en
+ * memoria, más los créditos, que se piden recién al hacer clic. Se usa
+ * `fetchQuery` con la MISMA clave que TabCreditos para reusar su caché en vez
+ * de montar una segunda consulta permanente en la página.
+ */
+function BotonExportarCartera({ prestamos, prestatarios }) {
+  const queryClient = useQueryClient();
+  const [cargando, setCargando] = useState(false);
+
+  const handleClick = async () => {
+    if (cargando) return;
+    setCargando(true);
+    try {
+      const creditos = await queryClient.fetchQuery({
+        queryKey: ['creditos'],
+        queryFn:  () => getCreditos().then((r) => r.data.data),
+      });
+      exportarPrestamosExcel({ prestamos, prestatarios, creditos: creditos || [] });
+    } catch {
+      // Si los créditos no llegan, se exporta igual lo que sí hay: el usuario
+      // pidió su Excel, no una consulta.
+      exportarPrestamosExcel({ prestamos, prestatarios });
+    } finally {
+      setCargando(false);
+    }
+  };
+
+  return (
+    <Button size="sm" variant="secondary" className="flex-shrink-0"
+      disabled={cargando || !prestamos.length} onClick={handleClick}>
+      {cargando ? <Loader2 size={14} className="animate-spin" /> : <FileDown size={14} />}
+      Exportar Excel
+    </Button>
+  );
+}
 
 export default function PrestamosPage() {
   const { coloresActivo }  = useColoresConfig();
@@ -2858,11 +2900,7 @@ export default function PrestamosPage() {
           <h1 className="text-xl font-bold text-gray-900">Préstamos</h1>
           <p className="text-sm text-gray-400 mt-0.5">Gestiona préstamos, créditos y domicilios</p>
         </div>
-        <Button size="sm" variant="secondary" className="flex-shrink-0"
-          disabled={!prestamos.length}
-          onClick={() => exportarPrestamosExcel({ prestamos }, 'prestamos')}>
-          <FileDown size={14} /> Exportar Excel
-        </Button>
+        <BotonExportarCartera prestamos={prestamos} prestatarios={prestatariosData} />
       </div>
 
       {/* ── Tabs principales ── */}
