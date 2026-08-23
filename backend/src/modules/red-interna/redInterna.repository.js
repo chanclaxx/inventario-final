@@ -248,19 +248,61 @@ const getExtracto = async (negocioId, sucursalId, { desde = null, hasta = null, 
   const { rows } = await pool.query(`
     WITH u AS (${SQL_UNIDADES}),
     eventos AS (
-      -- CARGO: el local vendió una unidad consignada → se vuelve exigible
+      -- CARGO: la bodega le entregó un envío. Es el hecho que genera la deuda
+      -- desde el cambio de modelo: el local paga lo que recibe, no lo que vende.
+      --
+      -- El valor es el ORIGINAL del envío (lo recibido MÁS lo que después
+      -- devolvió), y la devolución baja aparte, con su propia fecha. Si se
+      -- usara el cargo de hoy —que ya excluye lo devuelto— una devolución
+      -- reescribiría hacia atrás un cargo que el local ya había visto.
       SELECT
-        u.factura_fecha                              AS fecha,
+        rm.fecha_recepcion                           AS fecha,
         'cargo'                                      AS clase,
-        'venta'                                      AS origen,
-        COALESCE(u.nombre_producto, 'Producto')      AS concepto,
-        u.liquidable                                 AS valor,
-        u.imei                                       AS referencia,
-        u.factura_numero                             AS documento,
-        u.nombre_cliente                             AS tercero,
-        u.estado_unidad                              AS detalle
-      FROM u
-      WHERE u.liquidable > 0 AND u.factura_fecha IS NOT NULL
+        'remision'                                   AS origen,
+        'Envío recibido'                             AS concepto,
+        cargo.total                                  AS valor,
+        NULL                                         AS referencia,
+        rm.numero                                    AS documento,
+        ue.nombre                                    AS tercero,
+        cargo.items::text || ' producto(s)'          AS detalle
+      FROM remisiones rm
+      LEFT JOIN usuarios ue ON ue.id = rm.usuario_emisor_id
+      JOIN LATERAL (
+        SELECT
+          COALESCE(SUM(
+            lr.valor_interno * CASE WHEN lr.tipo = 'serial'
+                                    THEN 1
+                                    ELSE COALESCE(lr.cantidad_recibida, lr.cantidad, 0) END
+          ), 0) AS total,
+          COUNT(*)::int AS items
+        FROM lineas_remision lr
+        WHERE lr.remision_id = rm.id
+          AND lr.estado_linea IN ('Recibida', 'Devuelta')
+      ) cargo ON cargo.total > 0
+      WHERE rm.negocio_id = $1 AND rm.sucursal_destino_id = $2
+        AND rm.tipo = 'entrega' AND rm.estado IN ('Recibida', 'Parcial')
+
+      UNION ALL
+      -- NOTA CRÉDITO: mercancía que el local devolvió y la bodega recibió.
+      -- Baja la deuda porque el cargo de su envío deja de contarla.
+      -- Solo los SERIALES que vinieron de bodega: los accesorios y la mercancía
+      -- propia se acreditan con un Ajuste, y contarlos aquí los duplicaría.
+      SELECT rd.fecha_recepcion, 'abono', 'devolucion',
+             'Devolución recibida en bodega', -dev.total,
+             NULL, rd.numero, ud.nombre,
+             dev.items::text || ' equipo(s)'
+      FROM remisiones rd
+      LEFT JOIN usuarios ud ON ud.id = rd.usuario_emisor_id
+      JOIN LATERAL (
+        SELECT COALESCE(SUM(lr.valor_interno), 0) AS total, COUNT(*)::int AS items
+        FROM lineas_remision lr
+        WHERE lr.remision_id = rd.id
+          AND lr.estado_linea = 'Devuelta'
+          AND lr.tipo = 'serial'
+          AND lr.origen_unidad = 'bodega'
+      ) dev ON dev.total > 0
+      WHERE rd.negocio_id = $1 AND rd.sucursal_origen_id = $2
+        AND rd.tipo = 'devolucion' AND rd.estado IN ('Recibida', 'Parcial')
 
       UNION ALL
       -- ABONO: remesa de efectivo confirmada por la bodega
@@ -308,28 +350,19 @@ const getExtracto = async (negocioId, sucursalId, { desde = null, hasta = null, 
       WHERE c.negocio_id = $1 AND c.sucursal_id = $2
 
       UNION ALL
-      -- INFORMATIVO: mercancía recibida (no mueve el saldo)
-      SELECT rm.fecha_recepcion, 'info', 'remision',
-             'Mercancía recibida', 0,
-             NULL, rm.numero, ue.nombre,
-             (SELECT COUNT(*)::text || ' producto(s)' FROM lineas_remision lr
-              WHERE lr.remision_id = rm.id AND lr.estado_linea = 'Recibida')
-      FROM remisiones rm
-      LEFT JOIN usuarios ue ON ue.id = rm.usuario_emisor_id
-      WHERE rm.negocio_id = $1 AND rm.sucursal_destino_id = $2
-        AND rm.tipo = 'entrega' AND rm.estado IN ('Recibida', 'Parcial')
-
-      UNION ALL
-      -- INFORMATIVO: devoluciones a bodega
-      SELECT rm.fecha_recepcion, 'info', 'devolucion',
-             'Devolución a bodega', 0,
-             NULL, rm.numero, ue.nombre,
-             (SELECT COUNT(*)::text || ' producto(s)' FROM lineas_remision lr
-              WHERE lr.remision_id = rm.id)
-      FROM remisiones rm
-      LEFT JOIN usuarios ue ON ue.id = rm.usuario_emisor_id
-      WHERE rm.negocio_id = $1 AND rm.sucursal_origen_id = $2
-        AND rm.tipo = 'devolucion' AND rm.estado IN ('Recibida', 'Parcial')
+      -- INFORMATIVO: el local vendió una unidad de la bodega.
+      --
+      -- Ya NO mueve el saldo: la deuda nació cuando el envío llegó. Sigue en el
+      -- extracto porque es lo que el local quiere ver ("¿de dónde salió la
+      -- plata que estoy entregando?"), con el valor en 0 para que no sume.
+      SELECT
+        u.factura_fecha, 'info', 'venta',
+        'Vendido: ' || COALESCE(u.nombre_producto, 'producto'), 0,
+        u.imei, u.factura_numero, u.nombre_cliente,
+        CASE WHEN u.credito_id IS NOT NULL THEN 'a crédito' ELSE 'de contado' END
+      FROM u
+      WHERE u.factura_fecha IS NOT NULL
+        AND u.estado_unidad IN ('Por liquidar', 'En recaudo')
     ),
     filtrados AS (
       SELECT * FROM eventos
@@ -476,7 +509,12 @@ const getConciliacion = async (negocioId, sucursalId) => {
                   WHERE negocio_id = $1 AND sucursal_origen_id = $2 AND estado = 'Recibida'), 0)
       + COALESCE((SELECT SUM(valor) FROM movimientos_cuenta_interna
                   WHERE negocio_id = $1 AND sucursal_id = $2 AND NOT anulado
-                    AND tipo = 'GastoAutorizado'), 0) AS total
+                    -- Los AJUSTES también restan (así lo hace _armarSaldo).
+                    -- Omitirlos aquí hacía que esta vista marcara como "no
+                    -- liquidada" una unidad que el saldo del panel ya daba por
+                    -- pagada — y los ajustes se crean solos cuando una
+                    -- devolución genera saldo a favor.
+                    AND tipo IN ('GastoAutorizado', 'Ajuste')), 0) AS total
     ),
     ordenadas AS (
       SELECT u.*,
@@ -498,53 +536,266 @@ const getConciliacion = async (negocioId, sucursalId) => {
   return rows;
 };
 
+// ═════════════════════════════════════════════════════════════════════════════
+// LA CUENTA DEL ENVÍO — cargo, abonos y saldo
+//
+// Desde el cambio de modelo (agosto 2026) el ENVÍO es el documento de deuda:
+// el local paga todo lo que la bodega le entrega, esté vendido o no. Que se
+// haya vendido sigue calculándose (SQL_UNIDADES) pero ya solo informa.
+//
+// CARGO — derivado, nunca escrito.
+//   Es la suma de las líneas que el local RECIBIÓ. Las que nunca llegaron
+//   ('Faltante') y las que devolvió ('Devuelta') no cargan, y eso lo resuelve
+//   el propio estado de la línea: una devolución confirmada marca la línea de
+//   entrega como 'Devuelta' y el cargo baja solo. No hay contra-asiento que
+//   pueda quedar desincronizado.
+//
+// ABONO — escrito, porque es una decisión de una persona.
+//   A qué envío se imputa un pago no se puede derivar de ninguna otra tabla.
+//   Vive en `abonos_remision` (20260822_red_interna_envios.sql).
+// ═════════════════════════════════════════════════════════════════════════════
+
+// Cargo por remisión. Un serial vale su `valor_interno`; un accesorio, el
+// valor por la cantidad que efectivamente entró.
+const SQL_CARGO_ENVIO = `
+  SELECT lr.remision_id,
+         COALESCE(SUM(
+           lr.valor_interno * CASE WHEN lr.tipo = 'serial'
+                                   THEN 1
+                                   ELSE COALESCE(lr.cantidad_recibida, lr.cantidad, 0) END
+         ), 0) AS cargo
+  FROM lineas_remision lr
+  WHERE lr.estado_linea = 'Recibida'
+  GROUP BY lr.remision_id
+`;
+
+// Abonos que de verdad cuentan.
+//
+// Una remesa EN TRÁNSITO no baja la deuda —esa regla no cambió—, pero su
+// imputación ya está elegida y guardada desde que el local la envió. Por eso
+// el abono se escribe al pagar y solo se vuelve efectivo cuando la bodega
+// confirma: así el local no tiene que volver a decidir a qué envío iba.
+const SQL_ABONOS_EFECTIVOS = `
+  SELECT a.*
+  FROM abonos_remision a
+  LEFT JOIN remesas rm ON rm.id = a.remesa_id
+  WHERE NOT a.anulado
+    AND (a.origen <> 'remesa' OR rm.estado = 'Recibida')
+`;
+
+// Abonos RESERVADOS: los mismos, más los de las remesas que van en camino.
+//
+// Solo se usan para repartir un pago nuevo. Sin esto, un local que manda dos
+// remesas seguidas antes de que la bodega confirme la primera imputaría las
+// dos al mismo envío y lo pagaría dos veces: la segunda no vería la reserva
+// de la primera. Para MOSTRAR el saldo manda SQL_ABONOS_EFECTIVOS — una remesa
+// sin confirmar no baja la deuda, y esa regla no cambió.
+const SQL_ABONOS_RESERVADOS = `
+  SELECT a.*
+  FROM abonos_remision a
+  LEFT JOIN remesas rm ON rm.id = a.remesa_id
+  WHERE NOT a.anulado
+    AND (a.origen <> 'remesa' OR rm.estado <> 'Anulada')
+`;
+
+// Cargo, abonado y saldo de cada envío de un local.
+//   $1 negocio_id   $2 sucursal_destino_id (NULL = todas)
+const _sqlEnviosCuenta = (fuenteAbonos) => `
+  SELECT
+    r.id AS remision_id,
+    COALESCE(c.cargo, 0)                                          AS cargo,
+    COALESCE(a.abonado, 0)                                        AS abonado,
+    GREATEST(0, COALESCE(c.cargo, 0) - COALESCE(a.abonado, 0))    AS saldo,
+    -- Se pagó más de lo que el envío terminó valiendo: pasa cuando el local
+    -- devuelve mercancía que ya había pagado. Es crédito suyo.
+    GREATEST(0, COALESCE(a.abonado, 0) - COALESCE(c.cargo, 0))    AS excedente
+  FROM remisiones r
+  LEFT JOIN (${SQL_CARGO_ENVIO}) c ON c.remision_id = r.id
+  LEFT JOIN (
+    SELECT e.remision_id, SUM(e.valor) AS abonado
+    FROM (${fuenteAbonos}) e
+    GROUP BY e.remision_id
+  ) a ON a.remision_id = r.id
+  WHERE r.negocio_id = $1
+    AND r.tipo = 'entrega'
+    AND r.estado <> 'Anulada'
+    AND ($2::int IS NULL OR r.sucursal_destino_id = $2)
+`;
+
+const SQL_ENVIOS_CUENTA  = _sqlEnviosCuenta(SQL_ABONOS_EFECTIVOS);
+const SQL_ENVIOS_RESERVA = _sqlEnviosCuenta(SQL_ABONOS_RESERVADOS);
+
+/**
+ * Totales de la cuenta de un local bajo el modelo de envío a crédito.
+ *
+ * DEUDA = Σ saldo de los envíos. Nunca negativa: lo pagado de más no se resta
+ * de otro envío por su cuenta, se acumula como SALDO A FAVOR y se aplica
+ * explícitamente. Así la cifra grande siempre responde "cuánto tiene que pagar"
+ * sin que un crédito escondido la haga mentir.
+ *
+ * SALDO A FAVOR = lo pagado de más en envíos ya cerrados (devoluciones
+ * posteriores al pago) + la plata que llegó y todavía no se imputó a nada
+ * (el local pagó más que su deuda total) − lo que ya se consumió.
+ */
+const getTotalesEnvios = async (negocioId, sucursalId, client = null) => {
+  const { rows } = await (client || pool).query(`
+    WITH env AS (${SQL_ENVIOS_CUENTA}),
+    ab AS (SELECT * FROM (${SQL_ABONOS_EFECTIVOS}) x
+           WHERE x.negocio_id = $1 AND x.sucursal_id = $2)
+    SELECT
+      COALESCE(SUM(env.cargo), 0)     AS cargo_total,
+      COALESCE(SUM(env.abonado), 0)   AS abonado_total,
+      COALESCE(SUM(env.saldo), 0)     AS deuda,
+      COALESCE(SUM(env.excedente), 0) AS excedente,
+      COUNT(*) FILTER (WHERE env.saldo > 0)::int AS envios_abiertos,
+      COUNT(*)::int                              AS envios_total,
+      -- Plata recibida que no llegó a imputarse a ningún envío.
+      GREATEST(0,
+        COALESCE((SELECT SUM(valor) FROM remesas
+                  WHERE negocio_id = $1 AND sucursal_origen_id = $2
+                    AND estado = 'Recibida'), 0)
+      + COALESCE((SELECT SUM(valor) FROM movimientos_cuenta_interna
+                  WHERE negocio_id = $1 AND sucursal_id = $2
+                    AND NOT anulado AND tipo IN ('GastoAutorizado', 'Ajuste')
+                    AND valor > 0), 0)
+      - COALESCE((SELECT SUM(valor) FROM ab WHERE origen <> 'saldo_favor'), 0)
+      )                               AS sin_imputar,
+      COALESCE((SELECT SUM(valor) FROM ab WHERE origen = 'saldo_favor'), 0) AS favor_usado,
+      -- Un ajuste NEGATIVO sube la deuda (una rotura que la bodega le cobra al
+      -- local). No cuelga de ningún envío, así que se suma aparte en vez de
+      -- repartirse a ojo entre envíos que no tienen nada que ver.
+      COALESCE((SELECT SUM(-valor) FROM movimientos_cuenta_interna
+                WHERE negocio_id = $1 AND sucursal_id = $2
+                  AND NOT anulado AND tipo = 'Ajuste' AND valor < 0), 0)
+                                      AS cargos_sueltos
+    FROM env
+  `, [negocioId, sucursalId]);
+  return rows[0];
+};
+
+/** Los abonos de un envío, para su estado de cuenta. */
+const getAbonosDeEnvio = async (negocioId, remisionId) => {
+  const { rows } = await pool.query(`
+    SELECT a.id, a.origen, a.valor, a.fecha, a.notas, a.anulado,
+           a.remesa_id, a.movimiento_id,
+           rm.numero AS remesa_numero, rm.metodo, rm.estado AS remesa_estado,
+           m.concepto AS movimiento_concepto, m.tipo AS movimiento_tipo,
+           u.nombre  AS usuario_nombre
+    FROM abonos_remision a
+    LEFT JOIN remesas rm                    ON rm.id = a.remesa_id
+    LEFT JOIN movimientos_cuenta_interna m  ON m.id  = a.movimiento_id
+    LEFT JOIN usuarios u                    ON u.id  = a.usuario_id
+    WHERE a.negocio_id = $1 AND a.remision_id = $2
+    ORDER BY a.fecha, a.id
+  `, [negocioId, remisionId]);
+  return rows;
+};
+
+/** Todos los abonos de un local, para el extracto y la pestaña de pagos. */
+const findAbonosLocal = async (negocioId, sucursalId, limit = 300) => {
+  const { rows } = await pool.query(`
+    SELECT a.id, a.remision_id, a.origen, a.valor, a.fecha, a.notas, a.anulado,
+           a.remesa_id, a.movimiento_id,
+           r.numero  AS remision_numero,
+           rm.numero AS remesa_numero, rm.metodo, rm.estado AS remesa_estado,
+           m.concepto AS movimiento_concepto,
+           u.nombre   AS usuario_nombre
+    FROM abonos_remision a
+    JOIN remisiones r                       ON r.id  = a.remision_id
+    LEFT JOIN remesas rm                    ON rm.id = a.remesa_id
+    LEFT JOIN movimientos_cuenta_interna m  ON m.id  = a.movimiento_id
+    LEFT JOIN usuarios u                    ON u.id  = a.usuario_id
+    WHERE a.negocio_id = $1 AND a.sucursal_id = $2 AND NOT a.anulado
+    ORDER BY a.fecha DESC, a.id DESC
+    LIMIT $3
+  `, [negocioId, sucursalId, limit]);
+  return rows;
+};
+
+/**
+ * Envíos con saldo, del más viejo al más nuevo. Es la cola del FIFO con la que
+ * se reparte un pago total.
+ *
+ * Se lee DENTRO de la transacción del pago (por eso recibe `client`): entre
+ * calcular el reparto y escribirlo no puede colarse otro abono.
+ */
+const getEnviosAbiertos = async (client, negocioId, sucursalId) => {
+  const { rows } = await client.query(`
+    WITH env AS (${SQL_ENVIOS_RESERVA})
+    SELECT env.remision_id, env.cargo, env.abonado, env.saldo,
+           r.numero, r.fecha_recepcion, r.fecha_emision
+    FROM env
+    JOIN remisiones r ON r.id = env.remision_id
+    WHERE env.saldo > 0
+    ORDER BY COALESCE(r.fecha_recepcion, r.fecha_emision), r.id
+  `, [negocioId, sucursalId]);
+  return rows;
+};
+
+/**
+ * El saldo de UN envío, para imputarle un pago dirigido. Cuenta las reservas
+ * (ver SQL_ABONOS_RESERVADOS), así que no deja pagar dos veces lo mismo.
+ * Devuelve también la sucursal, porque quien imputa tiene que comprobar que el
+ * envío sea de ese local y no de otro.
+ */
+const getSaldoEnvio = async (client, negocioId, remisionId) => {
+  const { rows } = await client.query(`
+    WITH env AS (${SQL_ENVIOS_RESERVA})
+    SELECT env.*, r.numero, r.estado, r.sucursal_destino_id
+    FROM env JOIN remisiones r ON r.id = env.remision_id
+    WHERE env.remision_id = $3
+  `, [negocioId, null, remisionId]);
+  return rows[0] || null;
+};
+
+const insertarAbonoRemision = async (client, {
+  negocio_id, sucursal_id, remision_id, origen,
+  remesa_id = null, movimiento_id = null, valor, usuario_id = null, notas = null,
+}) => {
+  const { rows } = await client.query(`
+    INSERT INTO abonos_remision
+      (negocio_id, sucursal_id, remision_id, origen, remesa_id, movimiento_id,
+       valor, usuario_id, notas)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+    RETURNING *
+  `, [negocio_id, sucursal_id, remision_id, origen, remesa_id, movimiento_id,
+      valor, usuario_id, notas]);
+  return rows[0];
+};
+
+/** Anula la imputación de una remesa (al anular la remesa misma). */
+const anularAbonosDeRemesa = async (client, remesaId) => {
+  const { rowCount } = await client.query(
+    `UPDATE abonos_remision SET anulado = TRUE WHERE remesa_id = $1 AND NOT anulado`,
+    [remesaId]
+  );
+  return rowCount;
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // RESUMEN POR ENVÍO — "¿qué pasó con lo que me mandaron en cada remisión?"
 //
-// Es la misma derivación de siempre (SQL_UNIDADES) agrupada por remisión, para
-// responder la pregunta que el local hace de verdad: no "cuánto debo" sino
-// "de este envío, qué vendí, qué presté y qué me queda".
+// Dos cosas distintas en una sola consulta, y conviene no confundirlas:
 //
-// IMPUTACIÓN DE PAGOS: se reusa el FIFO de getConciliacion — los pagos cubren
-// las ventas en orden cronológico. La porción pendiente de una unidad es la
-// parte de su liquidable que queda por encima de lo ya cubierto:
-//     pendiente = LEAST(liquidable, GREATEST(0, acumulado − cubierto))
-// Sumada sobre todas las unidades da exactamente `liquidable_serial − cubierto`
-// (acotado en 0), así que el desglose por envío CUADRA con el saldo del panel.
+//   LA CUENTA (cargo, abonado, saldo) — sale de SQL_ENVIOS_CUENTA. Es dinero:
+//   lo que el local debe por ese envío y lo que ya pagó de él. Desde el cambio
+//   de modelo el saldo es REAL, no una imputación: los abonos están escritos
+//   contra este envío concreto, no repartidos por un FIFO virtual que cambiaba
+//   de resultado cada vez que el local vendía algo.
 //
-// `cubierto` incluye los tres términos que restan en _armarSaldo (remesas,
-// gastos autorizados y ajustes). Si esa fórmula cambia, cambiarla también aquí.
+//   EL ESTADO DE LA MERCANCÍA (vendidas, prestadas, disponibles…) — sale de
+//   SQL_UNIDADES. Es INFORMATIVO: responde "de este envío qué vendí y qué me
+//   queda", y no toca un peso de la cuenta.
 //
-// Los ACCESORIOS no se atribuyen a un envío: su liquidación se ancla en el
-// stock actual del producto, que es global. Se cuentan las unidades entregadas
-// (dato cierto) y nada más; su deuda vive en el resumen general.
+// Los ACCESORIOS sí cuelgan de su envío ahora: valen cantidad_recibida ×
+// valor_interno, que es un dato cierto de la línea. Antes se estimaban contra
+// el stock global del local y la deuda bajaba sola si el local le compraba el
+// mismo accesorio a otro proveedor.
 // ─────────────────────────────────────────────────────────────────────────────
 const getResumenPorRemision = async (negocioId, sucursalId, { limit = 100 } = {}) => {
   const { rows } = await pool.query(`
     WITH u AS (${SQL_UNIDADES}),
-    cubierto AS (
-      SELECT
-        COALESCE((SELECT SUM(valor) FROM remesas
-                  WHERE negocio_id = $1 AND sucursal_origen_id = $2 AND estado = 'Recibida'), 0)
-      + COALESCE((SELECT SUM(valor) FROM movimientos_cuenta_interna
-                  WHERE negocio_id = $1 AND sucursal_id = $2 AND NOT anulado
-                    AND tipo IN ('GastoAutorizado', 'Ajuste')), 0) AS total
-    ),
-    ordenadas AS (
-      SELECT u.remision_id, u.liquidable,
-             SUM(u.liquidable) OVER (
-               ORDER BY u.factura_fecha, u.linea_id
-               ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-             ) AS acumulado
-      FROM u
-      WHERE u.liquidable > 0
-    ),
-    pendiente AS (
-      SELECT o.remision_id,
-             SUM(LEAST(o.liquidable, GREATEST(0, o.acumulado - c.total))) AS pendiente
-      FROM ordenadas o CROSS JOIN cubierto c
-      GROUP BY o.remision_id
-    ),
+    cuenta AS (${SQL_ENVIOS_CUENTA}),
     seriales_rollup AS (
       SELECT
         u.remision_id,
@@ -563,8 +814,7 @@ const getResumenPorRemision = async (negocioId, sucursalId, { limit = 100 } = {}
         COALESCE(SUM(u.valor_interno) FILTER (WHERE u.estado_unidad = 'En prestamo'), 0) AS prestadas_valor,
         COALESCE(SUM(u.valor_interno) FILTER (WHERE u.estado_unidad IN ('Sin ubicar','Movida')), 0) AS sin_ubicar_valor,
         -- Lo que efectivamente quedó en poder del local (lo faltante nunca llegó)
-        COALESCE(SUM(u.valor_interno) FILTER (WHERE u.estado_unidad <> 'Faltante'), 0) AS valor_recibido,
-        COALESCE(SUM(u.liquidable), 0)                                      AS deuda_generada
+        COALESCE(SUM(u.valor_interno) FILTER (WHERE u.estado_unidad <> 'Faltante'), 0) AS valor_recibido
       FROM u
       GROUP BY u.remision_id
     ),
@@ -601,16 +851,19 @@ const getResumenPorRemision = async (negocioId, sucursalId, { limit = 100 } = {}
       COALESCE(sr.prestadas_valor, 0)   AS prestadas_valor,
       COALESCE(sr.sin_ubicar_valor, 0)  AS sin_ubicar_valor,
       COALESCE(sr.valor_recibido, 0)    AS valor_recibido,
-      COALESCE(sr.deuda_generada, 0)    AS deuda_generada,
-      COALESCE(p.pendiente, 0)          AS deuda_pendiente,
       COALESCE(ar.unidades, 0)          AS accesorios_unidades,
-      COALESCE(ar.valor, 0)             AS accesorios_valor
+      COALESCE(ar.valor, 0)             AS accesorios_valor,
+      -- La cuenta del envío. El cargo incluye equipos Y accesorios recibidos.
+      COALESCE(cu.cargo, 0)             AS cargo,
+      COALESCE(cu.abonado, 0)           AS abonado,
+      COALESCE(cu.saldo, 0)             AS saldo,
+      COALESCE(cu.excedente, 0)         AS excedente
     FROM remisiones r
     JOIN sucursales so             ON so.id = r.sucursal_origen_id
     LEFT JOIN usuarios ue          ON ue.id = r.usuario_emisor_id
     LEFT JOIN usuarios ur          ON ur.id = r.usuario_receptor_id
     LEFT JOIN seriales_rollup sr   ON sr.remision_id = r.id
-    LEFT JOIN pendiente p          ON p.remision_id  = r.id
+    LEFT JOIN cuenta cu            ON cu.remision_id = r.id
     LEFT JOIN accesorios_rollup ar ON ar.remision_id = r.id
     WHERE r.negocio_id = $1
       AND r.tipo = 'entrega'
@@ -1285,6 +1538,9 @@ module.exports = {
   getUnidades, buscarUnidades, getExtracto, getResumenUnidades, getCantidadConsignada,
   getValorConsignacionSeriales,
   getTotalRemesado, getTotalMovimientosCuenta, getConciliacion, getResumenPorRemision,
+  // Cuenta por envío (modelo "el envío es la deuda")
+  getTotalesEnvios, getAbonosDeEnvio, findAbonosLocal, getEnviosAbiertos,
+  getSaldoEnvio, insertarAbonoRemision, anularAbonosDeRemesa,
   crearRemision, insertarLineaRemision, actualizarTotalRemision,
   findRemisionById, getLineasRemision, getLineasDetalladas, findRemisiones,
   insertarCorreccion, getCorreccionesRemision,

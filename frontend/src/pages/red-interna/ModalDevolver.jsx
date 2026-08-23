@@ -166,8 +166,13 @@ export function ModalDevolver({ items, bodegaNombre = 'la bodega', onCerrar, onL
                 );
               })}
             </div>
+            {/* No manda `origen_unidad`: el backend lo resuelve. Para un
+                accesorio (que es fungible) mira cuántas unidades le mandó la
+                bodega y todavía no le ha devuelto. */}
             <p className="text-xs text-gray-400 mt-1.5">
-              Al confirmarlas, salen de tu consignación.
+              Cuando la bodega las reciba, tu deuda baja{' '}
+              {formatCOP(deBodega.reduce(
+                (s, i) => s + Number(i.valor_interno || 0) * (i.cantidad || 1), 0))}.
             </p>
           </div>
         )}

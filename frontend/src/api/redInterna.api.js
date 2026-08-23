@@ -68,6 +68,9 @@ export const listarRemisiones = (params = {}) =>
 export const getRemision = (id) => api.get(`/red-interna/remisiones/${id}`);
 
 // ── Dinero ───────────────────────────────────────────────────────────────────
+// `remision_id` dirige el pago a UN envío (el botón "Abonar" de su tarjeta).
+// Sin él, el backend lo reparte entre los envíos abiertos, del más viejo al más
+// nuevo, y devuelve el reparto en `data.reparto`.
 export const enviarRemesa    = (payload) => api.post('/red-interna/remesas', payload);
 export const confirmarRemesa = (id) => api.post(`/red-interna/remesas/${id}/confirmar`);
 export const anularRemesa    = (id) => api.post(`/red-interna/remesas/${id}/anular`);

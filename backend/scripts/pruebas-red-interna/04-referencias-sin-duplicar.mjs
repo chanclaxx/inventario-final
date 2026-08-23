@@ -22,6 +22,7 @@ await db.exec(readFileSync(path.join(AQUI, 'esquema.sql'), 'utf8'));
 await db.exec(readFileSync(path.join(AQUI, 'esquema-completo.sql'), 'utf8'));
 await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260725_red_interna.sql'), 'utf8'));
 await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260726_red_interna_v2.sql'), 'utf8'));
+await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260822_red_interna_envios.sql'), 'utf8'));
 
 const conectar = (t) => ({ query: (s, p) => t.query(s, p ?? []) });
 const pool = { ...conectar(db), connect: async () => ({ ...conectar(db), release() {} }) };

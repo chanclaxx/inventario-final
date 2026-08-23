@@ -20,6 +20,7 @@ await db.exec(readFileSync(path.join(AQUI, 'esquema.sql'), 'utf8'));
 await db.exec(readFileSync(path.join(AQUI, 'esquema-completo.sql'), 'utf8'));
 await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260725_red_interna.sql'), 'utf8'));
 await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260726_red_interna_v2.sql'), 'utf8'));
+await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260822_red_interna_envios.sql'), 'utf8'));
 
 const conectar = (t) => ({ query: (s, p) => t.query(s, p ?? []) });
 const pool = { ...conectar(db), connect: async () => ({ ...conectar(db), release() {} }) };
@@ -159,9 +160,15 @@ ok('★ Llegaron 7 al local', loc('Cargador tipo C').stock === 7);
 ok('  los vidrios llegaron completos', loc('Vidrio templado').stock === 20);
 check('★ El costo del accesorio viajó correcto al local', loc('Cargador tipo C').costo_unitario, 8000);
 
-console.log('\n═══ 6. Consignación de accesorios: no es deuda hasta vender ═══');
+console.log('\n═══ 6. Los accesorios se deben desde que llegan ═══');
+// Antes la deuda por accesorios se ESTIMABA contra el stock del local
+// (entregado − devuelto − stock), y por eso bajaba sola si el local le compraba
+// el mismo accesorio a otro proveedor. Ahora vale cantidad_recibida × valor.
 let est = await service.getPanelLocal(centro);
-check('★ Saldo por liquidar = 0 (nada vendido)', est.totales.saldo_por_liquidar, 0);
+const deudaInicial = Number(est.totales.deuda_total);
+// Ojo: llegaron 7 de los 10 cargadores. Lo Faltante nunca carga.
+check('★ La deuda incluye los accesorios desde la entrega, sin vender nada',
+      deudaInicial, 1800000 + 7 * 8000 + 20 * 3000);
 const cant = est.cantidad_consignada;
 ok('Los accesorios aparecen en consignación', cant.length === 2);
 
@@ -169,8 +176,16 @@ console.log('\n   … el local vende 3 cargadores (el stock baja de 7 a 4)');
 await db.exec(`UPDATE productos_cantidad SET stock = 4
                WHERE sucursal_id = 2 AND nombre = 'Cargador tipo C'`);
 est = await service.getPanelLocal(centro);
-check('★ Ahora debe liquidar 3 × $8.000 (anclado en el stock)',
-      est.totales.saldo_por_liquidar, 24000);
+check('★ Venderlos no cambia nada: ya los debía', est.totales.deuda_total, deudaInicial);
+
+console.log('\n   … el local le compra 30 cargadores a OTRO proveedor');
+await db.exec(`UPDATE productos_cantidad SET stock = stock + 30
+               WHERE sucursal_id = 2 AND nombre = 'Cargador tipo C'`);
+est = await service.getPanelLocal(centro);
+check('★ Y comprarle a otro proveedor tampoco: antes esto BAJABA la deuda',
+      est.totales.deuda_total, deudaInicial);
+await db.exec(`UPDATE productos_cantidad SET stock = stock - 30
+               WHERE sucursal_id = 2 AND nombre = 'Cargador tipo C'`);
 
 console.log('\n   … y vende el iPhone de contado');
 await db.exec(`
@@ -181,9 +196,9 @@ await db.exec(`
   UPDATE seriales SET vendido = TRUE WHERE id = 1;
 `);
 est = await service.getPanelLocal(centro);
-check('★ Suma equipo + accesorios vendidos', est.totales.saldo_por_liquidar, 1800000 + 24000);
+check('★ Vender el equipo tampoco la mueve', est.totales.deuda_total, deudaInicial);
 
-console.log('\n═══ 7. Devolver accesorios rebaja la consignación ═══');
+console.log('\n═══ 7. Devolver accesorios de bodega SÍ baja la deuda ═══');
 const vidrioLocal = (await q(
   `SELECT id FROM productos_cantidad WHERE sucursal_id = 2 AND nombre = 'Vidrio templado'`
 ))[0].id;
@@ -202,8 +217,11 @@ ok('★ Los vidrios volvieron a la bodega',
    Number(stocks2.find(s=>s.sucursal_id===1).stock) === 50 &&
    Number(stocks2.find(s=>s.sucursal_id===2).stock) === 0);
 est = await service.getPanelLocal(centro);
-check('★ El saldo por liquidar no cambió (no se habían vendido)',
-      est.totales.saldo_por_liquidar, 1800000 + 24000);
+// El accesorio no tiene línea de entrega propia que marcar 'Devuelta', así que
+// se le acredita: 20 vidrios × $3.000 = $60.000. Sin esto el local devolvería
+// la mercancía y la seguiría debiendo.
+check('★ Devolverlos le acredita lo que le cobraron por ellos',
+      est.totales.deuda_total, deudaInicial - 20 * 3000);
 
 console.log('\n═══ 8. Un local NO puede despachar (solo la bodega) ═══');
 let soloBodega = false;

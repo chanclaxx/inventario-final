@@ -30,6 +30,7 @@ node scripts/pruebas-red-interna/09-mora-credito.mjs
 node scripts/pruebas-red-interna/10-adversario-mora-tarifas.mjs
 node scripts/pruebas-red-interna/11-envios-por-remision.mjs
 node scripts/pruebas-red-interna/12-destino-y-referencias.mjs
+node scripts/pruebas-red-interna/21-backfill-envios.mjs
 node scripts/pruebas-red-interna/17-pago-total-acreedor.mjs
 node scripts/pruebas-red-interna/18-importacion.mjs
 node scripts/pruebas-red-interna/19-ordenes-compra.mjs
@@ -201,30 +202,35 @@ El extracto tipo bancario de cada local.
 | 9 | El desglose explica el saldo y por qué medio ha pagado |
 | 10 | Un local no puede confirmar su propia devolución |
 
-### `11-envios-por-remision.mjs` — 60 verificaciones
+### `11-envios-por-remision.mjs` — 64 verificaciones
 
-El estado de cuenta contado **envío por envío**: de cada remisión que mandó la
-bodega, qué se vendió, qué se prestó y qué sigue en vitrina.
+**La cuenta de cada envío.** Desde el cambio de modelo (agosto 2026) el envío es
+el documento de deuda: el local paga todo lo que recibe, esté vendido o no. Cada
+envío tiene su cargo (derivado de sus líneas) y sus abonos (escritos, porque a
+qué envío se imputa un pago lo decide una persona).
 
 | # | Escenario |
 |---|---|
-| 1 | Tres envíos, uno con accesorios y otro anulado: el anulado se lista sin unidades |
-| 2 | Vendido / prestado / disponible se separan por envío, y el prestado **no** genera deuda |
-| 3 | La devolución descuenta del envío del que salió el equipo |
-| 4 | **Σ pendiente por envío + accesorios = saldo por liquidar** |
-| 5 | Un pago parcial se imputa a las ventas más antiguas (FIFO), no al envío más viejo |
-| 6 | Los gastos por cuenta de bodega también imputan |
-| 7 | Y los ajustes de la bodega |
-| 8 | La deuda de accesorios queda como residuo: **no se cuelga de ningún envío** |
-| 8b | **DEUDA TOTAL ≠ POR REMITIR**: `deuda_total = por_remitir + lo que aún no se cobra` |
-| 9 | La mercancía se filtra por varios estados a la vez (`Por liquidar,En recaudo`) |
-| 10 | **Un vendedor ve los conteos** (qué vendió, qué prestó) **pero ningún peso** |
-| 11 | La bodega ve lo mismo; un local sigue sin poder ver la cuenta de otro |
-| 12 | Devolver mercancía **baja la deuda pero no lo exigible** (nunca se vendió) |
+| 1 | El cargo del envío = lo que el local recibió, accesorios incluidos |
+| 2 | **Vender NO mueve la cuenta**: ni de contado ni a crédito a medio recaudar |
+| 3 | Devolver un equipo baja el cargo de SU envío, sin contra-asiento |
+| 4 | **Abono dirigido**: paga el envío que el local elija, aunque no sea el más viejo |
+| 5 | **Pago total**: se reparte del envío más viejo al más nuevo, un abono por envío |
+| 6 | Gastos y ajustes entran por el mismo reparto |
+| 7 | Una remesa sin confirmar **reserva** pero no baja la deuda; anularla la libera |
+| 8 | Devolver algo ya pagado deja **saldo a favor**, que el próximo envío consume solo |
+| 9 | Un ajuste **en contra** no cuelga de ningún envío: suma aparte |
+| 10 | El extracto cuadra con la cuenta; las ventas van en 0 |
+| 11 | La mercancía se filtra por varios estados a la vez (`Por liquidar,En recaudo`) |
+| 12 | Un vendedor **ve la cuenta** (la tiene que pagar) pero no el costo de la mercancía |
+| 13 | La bodega ve lo mismo; un local sigue sin poder ver la cuenta de otro |
 
-> La identidad del punto 4 se vuelve a verificar en los puntos 5, 6, 7 y 8: es
-> la que garantiza que el desglose por envío y el número grande del panel
-> cuenten la misma historia.
+> **La identidad** `Σ saldo(envío) + cargos sueltos = deuda_total` se vuelve a
+> verificar en los puntos 3, 5, 6 y 9: es la que garantiza que las tarjetas de
+> abajo y el número grande cuenten la misma historia.
+>
+> El punto 12 cubre una fuga real: el `desglose` viajaba sin recortar y repetía
+> los mismos valores que el recorte pone en `null` unas líneas más arriba.
 
 ### `12-destino-y-referencias.mjs` — 42 verificaciones
 
@@ -382,6 +388,21 @@ Aplica `migrations/20260806_ordenes_compra.sql` tal cual va a producción.
 > porque un `LEFT JOIN` que no empareja **no descarta la fila de
 > `lineas_compra`**, solo deja `c.*` en `NULL`. Sin el `FILTER`, las recepciones
 > canceladas siguen sumando. Las dos versiones equivocadas fallan aquí.
+
+### `21-backfill-envios.mjs` — 14 verificaciones
+
+El **backfill** que migra a los negocios que ya venían operando con la regla
+vieja. Es un `DO` en plpgsql (`20260822_red_interna_envios_backfill.sql`) que
+imputa los pagos existentes a los envíos, en orden cronológico y FIFO.
+
+| # | Escenario |
+|---|---|
+| 1 | El bloque plpgsql corre contra un Postgres real |
+| 2 | Reparte del envío más viejo al más nuevo; la remesa anulada no se imputa |
+| 3 | La cuenta que ve el usuario queda coherente: Σ saldo por envío = deuda |
+| 4 | **Es idempotente**: correrlo dos veces no duplica un peso |
+| 5 | Un negocio que nunca activó la red interna **no se toca** |
+| 6 | Lo que sobre queda sin imputar y se lee como saldo a favor |
 
 ## Nota sobre `esquema.sql`
 

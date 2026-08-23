@@ -202,14 +202,25 @@ const getRemision = async (req, res, next) => {
 
 const enviarRemesa = async (req, res, next) => {
   try {
-    const { valor, notas, clave_idempotencia } = req.body;
-    const data = await service.enviarRemesa(req, { valor, notas, clave_idempotencia });
+    const {
+      valor, notas, clave_idempotencia, cuenta_origen_id, metodo, remision_id,
+    } = req.body;
+    const data = await service.enviarRemesa(req, {
+      valor, notas, clave_idempotencia, cuenta_origen_id, metodo, remision_id,
+    });
     if (!data.repetido) {
       audit.registrar(req.user.negocio_id, req.user.id, 'Remesa enviada', 'red_interna', data.id, {
         sucursal_id: Number(req.sucursal_id), valor: data.valor,
+        // A qué envíos se imputó: sin esto la auditoría no explicaría por qué
+        // bajó el saldo de un envío concreto.
+        reparto: (data.reparto || []).map((r) => r.numero ?? r.remision_id),
       });
     }
-    res.status(201).json({ ok: true, data, message: 'Remesa enviada' });
+    const n = (data.reparto || []).length;
+    res.status(201).json({
+      ok: true, data,
+      message: n > 1 ? `Pago enviado — cubre ${n} envíos` : 'Pago enviado a la bodega',
+    });
   } catch (err) { next(err); }
 };
 

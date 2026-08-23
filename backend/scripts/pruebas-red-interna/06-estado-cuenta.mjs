@@ -21,6 +21,7 @@ await db.exec(readFileSync(path.join(AQUI, 'esquema.sql'), 'utf8'));
 await db.exec(readFileSync(path.join(AQUI, 'esquema-completo.sql'), 'utf8'));
 await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260725_red_interna.sql'), 'utf8'));
 await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260726_red_interna_v2.sql'), 'utf8'));
+await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260822_red_interna_envios.sql'), 'utf8'));
 
 const conectar = (t) => ({ query: (s, p) => t.query(s, p ?? []) });
 const pool = { ...conectar(db), connect: async () => ({ ...conectar(db), release() {} }) };
@@ -66,13 +67,16 @@ const r1 = await service.despachar(bodega, {
 const l1 = await repo.getLineasRemision(r1.id);
 await service.recibir(centro, r1.id, { lineas_recibidas: l1.map((x) => Number(x.id)) });
 
-console.log('\n═══ 1. Recién recibido: el extracto muestra el envío, sin deuda ═══');
+console.log('\n═══ 1. Recién recibido: el envío YA es el cargo ═══');
 let cuenta = await service.getEstadoCuenta(centro, 2);
 ok('Trae el nombre de la sucursal', cuenta.sucursal.nombre === 'Centro');
-ok('★ Saldo en 0 (nada vendido)', Number(cuenta.totales.saldo_por_liquidar) === 0);
+ok('★ La deuda nace con el envío, sin vender nada',
+   Number(cuenta.totales.saldo_por_liquidar) === 5550000,
+   money(cuenta.totales.saldo_por_liquidar));
 const infoEnvio = cuenta.extracto.filter((e) => e.origen === 'remision');
-ok('★ El envío aparece como apunte informativo', infoEnvio.length === 1);
-ok('  y no mueve el saldo', Number(infoEnvio[0].valor) === 0);
+ok('★ El envío es EL cargo del extracto', infoEnvio.length === 1 && infoEnvio[0].clase === 'cargo');
+ok('  por el valor completo de lo recibido',
+   Number(infoEnvio[0].valor) === 5550000, money(infoEnvio[0].valor));
 ok('★ La mercancía lista los 3 equipos', cuenta.mercancia.total === 3);
 ok('  todos en consignación', cuenta.conteo_estados['En consignacion'] === 3);
 
@@ -88,17 +92,21 @@ await db.exec(`
 `);
 
 cuenta = await service.getEstadoCuenta(centro, 2);
-const cargos = cuenta.extracto.filter((e) => e.clase === 'cargo');
-ok('★ Dos cargos, uno por venta', cargos.length === 2);
-ok('  con el valor interno de cada equipo',
-   cargos.some((c) => Number(c.valor) === 1800000) &&
-   cargos.some((c) => Number(c.valor) === 1850000));
-ok('★ Cada cargo trae el cliente', cargos.every((c) => !!c.tercero),
-   cargos.map((c) => c.tercero).join(', '));
-ok('★ Y el número de factura', cargos.every((c) => c.documento != null));
-ok('★ Saldo por liquidar = 1.800.000 + 1.850.000',
-   Number(cuenta.totales.saldo_por_liquidar) === 3650000,
+// Las ventas siguen en el extracto, pero como INFORMATIVO: le cuentan al local
+// de dónde va a salir la plata, no le generan deuda nueva.
+const ventas = cuenta.extracto.filter((e) => e.origen === 'venta');
+ok('★ Dos ventas anotadas', ventas.length === 2);
+ok('  y ninguna mueve el saldo',
+   ventas.every((v) => v.clase === 'info' && Number(v.valor) === 0));
+ok('★ Cada venta trae el cliente', ventas.every((v) => !!v.tercero),
+   ventas.map((v) => v.tercero).join(', '));
+ok('★ Y el número de factura', ventas.every((v) => v.documento != null));
+ok('★ La deuda no se movió: sigue siendo la del envío',
+   Number(cuenta.totales.saldo_por_liquidar) === 5550000,
    money(cuenta.totales.saldo_por_liquidar));
+ok('  lo que cambió es el informativo de lo vendido',
+   Number(cuenta.totales.vendido_valor) === 3650000,
+   money(cuenta.totales.vendido_valor));
 
 console.log('\n═══ 3. El local remite $2.000.000 y la bodega confirma ═══');
 const rem = await service.enviarRemesa(centro, { valor: 2000000, notas: 'Va con Pedro' });
@@ -113,8 +121,8 @@ cuenta = await service.getEstadoCuenta(centro, 2);
 const abonos = cuenta.extracto.filter((e) => e.origen === 'remesa');
 ok('★ Confirmada, ya es un abono en el extracto', abonos.length === 1);
 ok('  con signo negativo', Number(abonos[0].valor) === -2000000, money(abonos[0].valor));
-ok('★ Saldo baja a 1.650.000',
-   Number(cuenta.totales.saldo_por_liquidar) === 1650000,
+ok('★ Saldo baja a 3.550.000',
+   Number(cuenta.totales.saldo_por_liquidar) === 5550000 - 2000000,
    money(cuenta.totales.saldo_por_liquidar));
 
 console.log('\n═══ 4. Gasto por cuenta de bodega ═══');
@@ -123,8 +131,8 @@ cuenta = await service.getEstadoCuenta(centro, 2);
 const gasto = cuenta.extracto.find((e) => e.origen === 'gasto');
 ok('★ Aparece como abono', gasto && Number(gasto.valor) === -150000, money(gasto?.valor));
 ok('  con su concepto', /Domicilio urgente/.test(gasto.concepto), gasto.concepto);
-ok('★ Saldo baja a 1.500.000',
-   Number(cuenta.totales.saldo_por_liquidar) === 1500000,
+ok('★ Saldo baja a 3.400.000',
+   Number(cuenta.totales.saldo_por_liquidar) === 5550000 - 2000000 - 150000,
    money(cuenta.totales.saldo_por_liquidar));
 
 console.log('\n═══ 5. ★ El saldo corrido del extracto cuadra con el panel ═══');
@@ -184,7 +192,8 @@ console.log('\n═══ 9. Rango de fechas ═══');
 const futuro = await service.getEstadoCuenta(centro, 2, { desde: '2099-01-01' });
 ok('★ Un rango sin datos devuelve extracto vacío', futuro.extracto.length === 0);
 ok('  pero los totales siguen siendo los reales (no dependen del filtro)',
-   Number(futuro.totales.saldo_por_liquidar) === 1500000);
+   Number(futuro.totales.saldo_por_liquidar) === 5550000 - 2000000 - 150000,
+   money(futuro.totales.saldo_por_liquidar));
 
 console.log('\n═══ 10. Recepción confirmada TARDE: la venta intermedia sí cuenta ═══');
 // Caso real: la mercancía llega el lunes y se vende, pero el local confirma la
@@ -215,11 +224,17 @@ await service.recibir(centro, rTarde.id, { lineas_recibidas: lTarde.map((x) => N
 await db.exec(`UPDATE seriales SET vendido = TRUE WHERE imei = 'BBB999'`);
 
 const cuentaTarde = await service.getEstadoCuenta(centro, 2);
-const cargoTardio = cuentaTarde.extracto.find((e) => e.referencia === 'BBB999');
-ok('★ La venta anterior a la confirmación SÍ genera cargo',
-   !!cargoTardio && Number(cargoTardio.valor) === 900000, money(cargoTardio?.valor));
-ok('  y el saldo lo incluye',
-   Number(cuentaTarde.totales.saldo_por_liquidar) === 1500000 + 900000,
+// El cruce venta↔unidad ya no decide la deuda, pero sigue decidiendo el ESTADO
+// que ve el local, y su piso sigue siendo la fecha de DESPACHO: si se usara la
+// de recepción, esta venta se perdería y el equipo saldría "sin ubicar".
+const ventaTardia = cuentaTarde.extracto.find((e) => e.referencia === 'BBB999');
+ok('★ La venta anterior a la confirmación SÍ se reconoce',
+   !!ventaTardia && ventaTardia.origen === 'venta');
+const galaxy = cuentaTarde.mercancia.items.find((u) => u.imei === 'BBB999');
+ok('  y el equipo queda "Por liquidar", no "Sin ubicar"',
+   galaxy?.estado_unidad === 'Por liquidar', galaxy?.etiqueta_estado);
+ok('★ La deuda sube por el ENVÍO nuevo, no por la venta',
+   Number(cuentaTarde.totales.saldo_por_liquidar) === 5550000 - 2000000 - 150000 + 900000,
    money(cuentaTarde.totales.saldo_por_liquidar));
 
 console.log(`\n${'═'.repeat(62)}`);

@@ -16,6 +16,7 @@ await db.exec(readFileSync(path.join(AQUI, 'esquema.sql'), 'utf8'));
 await db.exec(readFileSync(path.join(AQUI, 'esquema-completo.sql'), 'utf8'));
 await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260725_red_interna.sql'), 'utf8'));
 await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260726_red_interna_v2.sql'), 'utf8'));
+await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260822_red_interna_envios.sql'), 'utf8'));
 
 const conectar = (t) => ({ query: (s, p) => t.query(s, p ?? []) });
 const pool = { ...conectar(db), connect: async () => ({ ...conectar(db), release() {} }) };
@@ -97,6 +98,7 @@ ok('★ El equipo sigue en el local hasta que la bodega confirme',
 let estado = await service.getPanelLocal(superv);
 ok('  y sigue contando en la consignación del local',
    estado.totales.en_consignacion_unidades === 2);
+const deudaAntesDev = Number(estado.totales.deuda_total);
 
 console.log('\n═══ 3. La bodega la confirma: ahí sí se mueve todo ═══');
 const lDev = await repo.getLineasRemision(dev.id);
@@ -114,9 +116,16 @@ estado = await service.getPanelLocal(superv);
 ok('★ El de bodega salió de la consignación',
    estado.totales.en_consignacion_unidades === 1);
 ok('★ El propio generó saldo a favor', conf.saldo_a_favor === 600000, money(conf.saldo_a_favor));
-ok('★ Y el saldo del local queda a su favor (negativo)',
-   Number(estado.totales.saldo_por_liquidar) === -600000,
-   money(estado.totales.saldo_por_liquidar));
+// La devolución baja la deuda por dos vías distintas y no intercambiables:
+//   el equipo DE BODEGA deja de cargar en su envío (su línea queda 'Devuelta'),
+//   el equipo PROPIO que la bodega compró entra como crédito de $600.000.
+// La deuda nunca queda negativa: el crédito que sobre se guarda a favor y se
+// aplica solo cuando llegue el próximo envío.
+ok('★ La deuda baja por el equipo devuelto Y por el crédito',
+   Number(estado.totales.deuda_total) === deudaAntesDev - 1800000 - 600000,
+   money(estado.totales.deuda_total));
+ok('★ Y nunca queda negativa (la bodega no le queda debiendo plata)',
+   Number(estado.totales.deuda_total) >= 0 && Number(estado.totales.saldo_por_liquidar) >= 0);
 
 console.log('\n═══ 4. Una devolución sin confirmar se ve en la bandeja de bodega ═══');
 const dev2 = await service.devolver(superv, { lineas: [{ tipo:'serial', serial_id: 2 }] });
@@ -149,8 +158,11 @@ ok('  viene marcado para que la pantalla lo sepa', paraVende.costos_ocultos === 
 
 const cuentaVende  = await service.getEstadoCuenta(vende, 2);
 const cuentaSuperv = await service.getEstadoCuenta(superv, 2);
-ok('★ En el extracto el vendedor ve QUÉ pasó pero no cuánto',
-   cuentaVende.extracto.every((e) => e.valor === null || e.clase === 'info') &&
+// El extracto del vendedor ya NO viene en blanco: los cargos y abonos son su
+// cuenta con la bodega y los necesita. Lo que se le borra es el valor de la
+// mercancía, que viaja en las filas informativas (una venta).
+ok('★ En el extracto el vendedor ve la cuenta, pero no el valor de lo vendido',
+   cuentaVende.extracto.every((e) => e.clase !== 'info' || Number(e.valor) === 0) &&
    cuentaVende.extracto.length === cuentaSuperv.extracto.length);
 ok('★ En la mercancía tampoco ve valores',
    cuentaVende.mercancia.items.every((u) => u.valor_interno === null));
@@ -229,8 +241,16 @@ ok('★ La bodega puede corregir si ya se recibió', detalle.puede_corregir === 
 ok('  y no editar en crudo', detalle.puede_editar_valores === false);
 
 const detalleVende = await service.getRemision(vende, r3.id);
-ok('★ El vendedor ve el detalle SIN valores',
-   detalleVende.lineas.every((l) => l.valor_interno === null) && detalleVende.resumen === null);
+// El vendedor ya no pierde el resumen entero: la CUENTA del envío (cargo,
+// abonado, saldo) es la plata que tiene que entregar y sin verla no podría
+// pagar. Lo que sigue oculto es la valorización de la mercancía.
+ok('★ El vendedor ve el detalle SIN el valor de cada equipo',
+   detalleVende.lineas.every((l) => l.valor_interno === null)
+   && detalleVende.resumen.en_vitrina === null
+   && detalleVende.resumen.enviado === null);
+ok('  pero SÍ ve lo que debe de ese envío',
+   detalleVende.resumen.saldo === detalle.resumen.saldo,
+   money(detalleVende.resumen.saldo));
 
 console.log('\n═══ 9. El desglose explica POR QUÉ debe eso ═══');
 const cuenta = await service.getEstadoCuenta(superv, 2);
@@ -240,9 +260,9 @@ ok('★ Trae los renglones que suman al saldo', d.lineas.length >= 2,
 const suma = d.lineas.reduce((s, x) => s + Number(x.valor), 0);
 ok('★ La suma del desglose = el saldo', Math.abs(suma - d.saldo) < 1,
    `${money(suma)} vs ${money(d.saldo)}`);
-ok('★ Dice explícitamente lo que NO debe', d.no_debe.unidades >= 0,
-   `${d.no_debe.unidades} en vitrina`);
-const remesaLinea = d.lineas.find((x) => x.clave === 'remesas');
+ok('★ Dice de dónde va a salir la plata', d.respaldo.unidades >= 0,
+   `${d.respaldo.unidades} en vitrina`);
+const remesaLinea = d.lineas.find((x) => x.clave === 'pagos');
 ok('★ Y por qué medio ha pagado', Object.keys(remesaLinea.medios).length === 2,
    Object.entries(remesaLinea.medios).map(([m, v]) => `${m}: ${money(v)}`).join(' · '));
 

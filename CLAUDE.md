@@ -184,6 +184,47 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > Prueba: `18-importacion` (212 verificaciones, incluye el ida y vuelta con la
 > plantilla real y tres sucursales del mismo negocio).
 
+> **Red interna — el ENVÍO es la deuda** (`red-interna/`): una sucursal-bodega
+> surte a los locales. Feature opt-in (`config_negocio.red_interna_activa`),
+> nunca activa para clientes existentes.
+> Hasta agosto 2026 el modelo era **consignación**: entregar no generaba deuda,
+> la deuda nacía al VENDER y se derivaba de las ventas. Desde
+> `20260822_red_interna_envios.sql` el local **paga todo lo que recibe**, esté
+> vendido o no, y cada envío es un documento de deuda con su saldo y sus abonos
+> —como una factura a crédito de un cliente. Que la unidad se haya vendido
+> **sigue calculándose y se muestra, pero ya no mueve un peso**.
+> El cambio cerró tres agujeros: el equipo que desaparecía del local ('Sin
+> ubicar') dejaba de cobrarse; una devolución parcial de una venta a crédito
+> seguía generando deuda sobre un equipo devuelto a la vitrina; y la deuda por
+> accesorios se estimaba contra el **stock global** del local, así que bajaba
+> sola si el local le compraba el mismo accesorio a otro proveedor.
+> **Qué se deriva y qué se escribe**: el CARGO se deriva de las líneas en estado
+> `'Recibida'` (una devolución marca la línea `'Devuelta'` y el cargo baja solo,
+> sin contra-asiento); el ABONO se **escribe** en `abonos_remision`, porque a
+> qué envío se imputa un pago no se puede derivar de ninguna tabla — lo decide
+> una persona. Todo pago entra por **un solo motor**, `_imputarFIFO`: pago
+> dirigido a un envío, pago total repartido del más viejo al más nuevo, gasto
+> autorizado, ajuste a favor y saldo a favor aplicado. Un accesorio devuelto no
+> tiene línea de entrega que marcar, así que se acredita con un `Ajuste`.
+> **La deuda nunca queda negativa**: si el crédito del local supera lo que debe,
+> la bodega no le queda debiendo plata sino MERCANCÍA — el excedente vive en
+> `saldo_a_favor` y `_aplicarSaldoAFavor` lo consume al recibir el próximo envío,
+> dentro de la misma transacción de la recepción.
+> Una remesa **en tránsito** no baja la deuda (esa regla no cambió) pero su
+> imputación ya está escrita y **reserva** el envío: sin `SQL_ABONOS_RESERVADOS`
+> dos pagos seguidos sin confirmar taparían el mismo envío dos veces.
+> **Invariante probado**: `Σ saldo(envío) + cargos_sueltos = deuda_total`, y
+> `Σ movimientos del extracto = totales.neto`.
+> **Costos ocultos a vendedores** (`red_interna_ocultar_costos`, default on): el
+> recorte va en el backend (`_recortarParaVendedor`), nunca solo en la pantalla.
+> Desde el cambio de modelo el vendedor **sí ve la cuenta** (la tiene que pagar);
+> lo que se esconde es la valorización de la mercancía. Todo campo monetario
+> nuevo hay que decidirlo ahí — el `desglose` se colaba entero y repetía justo
+> los valores que el recorte anula.
+> Pruebas: `11-envios-por-remision` (la cuenta y sus invariantes),
+> `21-backfill-envios` (la migración de los negocios que ya operaban). Las
+> suites `01`, `03`, `05`, `06` y `07` siguen cubriendo el circuito.
+
 > **Tesorería**: los saldos por cuenta (efectivo/banco/billetera/corresponsal/divisa USD) se **derivan** de las tablas transaccionales existentes mapeando método de pago → cuenta, anclados en arqueos. Solo traslados/retiros/gastos se escriben en `movimientos_dinero`. Si cambian las reglas de qué entra/sale en `caja.repository.js`, replicarlas en `tesoreria.repository.js` (ramas marcadas). Los movimientos de efectivo se espejan en `movimientos_caja` con `referencia_tipo='tesoreria'`. Un pago de compra desde Tesorería crea un **Abono espejo** en `movimientos_acreedor` (`registrar_en_caja=FALSE`, `mov_dinero_id`) que salda la deuda del acreedor sin doble descuento; anular el pago elimina/recrea el espejo en cascada.
 
 ### Frontend API Layer

@@ -1,15 +1,21 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// ESTADO DE CUENTA POR ENVÍO
+// LA CUENTA DE CADA ENVÍO
 //
-// El local no pregunta "cuánto debo": pregunta "de lo que me mandaron en este
-// envío, qué vendí, qué presté y qué me queda". Esta suite verifica que la
-// respuesta salga bien y —lo importante— que CUADRE con el saldo del panel:
+// Desde agosto de 2026 el ENVÍO es el documento de deuda: el local paga todo lo
+// que la bodega le entrega, esté vendido o no. Cada envío tiene su cargo
+// (derivado de sus líneas) y sus abonos (escritos, porque a qué envío se imputa
+// un pago lo decide una persona).
 //
-//   Σ deuda_pendiente(envío) + accesorios_pendiente = saldo_por_liquidar
+// LA IDENTIDAD QUE SOSTIENE LA PANTALLA:
 //
-// Si esa identidad se rompe, el desglose por envío estaría contando una
-// historia distinta a la del número grande, que es exactamente el descuadre
-// que el modelo derivado existe para evitar.
+//   Σ saldo(envío) + cargos sueltos = deuda_total
+//
+// Si se rompe, la cifra grande estaría contando una historia distinta a la de
+// las tarjetas de abajo — el descuadre que este módulo existe para evitar.
+//
+// Y la de la venta, que ahora es al revés: vender NO mueve un peso de esta
+// cuenta. Se sigue calculando para contarle al local qué vendió y qué le queda,
+// pero el dinero ya no depende de eso.
 // ─────────────────────────────────────────────────────────────────────────────
 import { PGlite } from '@electric-sql/pglite';
 import { readFileSync } from 'node:fs';
@@ -25,6 +31,7 @@ await db.exec(readFileSync(path.join(AQUI, 'esquema.sql'), 'utf8'));
 await db.exec(readFileSync(path.join(AQUI, 'esquema-completo.sql'), 'utf8'));
 await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260725_red_interna.sql'), 'utf8'));
 await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260726_red_interna_v2.sql'), 'utf8'));
+await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260822_red_interna_envios.sql'), 'utf8'));
 
 const conectar = (t) => ({ query: (s, p) => t.query(s, p ?? []) });
 const pool = { ...conectar(db), connect: async () => ({ ...conectar(db), release() {} }) };
@@ -55,9 +62,9 @@ await db.exec(`
     (1,'E1-BBB', 1000000),   -- id 2 · envío 1 · se vende a crédito
     (1,'E1-CCC', 1000000),   -- id 3 · envío 1 · se presta
     (1,'E1-DDD', 1000000),   -- id 4 · envío 1 · queda en vitrina
-    (1,'E2-AAA', 2000000),   -- id 5 · envío 2 · se vende de contado
+    (1,'E2-AAA', 2000000),   -- id 5 · envío 2 · se vende y luego se devuelve
     (1,'E2-BBB', 2000000),   -- id 6 · envío 2 · se devuelve
-    (1,'E3-AAA',  500000);   -- id 7 · envío 3 · se anula el envío
+    (1,'E3-AAA',  500000);   -- id 7 · envío 3 anulado, reusado en el envío 4
 
   INSERT INTO productos_cantidad (nombre, codigo, precio, costo_unitario, stock, sucursal_id, linea_id)
     VALUES ('Cargador 20W','CARG20', 60000, 30000, 10, 1, 2);
@@ -84,7 +91,14 @@ const recibirTodo = async (remisionId) => {
   });
 };
 
-console.log('\n═══ 1. Tres envíos: el segundo con accesorios, el tercero anulado ═══');
+// Valores del montaje, para no repetirlos en cada cuenta:
+//   Envío 1 → 4 equipos × $1.000.000               = $4.000.000
+//   Envío 2 → 2 equipos × $2.000.000 + 4 × $30.000 = $4.120.000
+//   Envío 3 → anulado, no cobra nada
+const CARGO_E1 = 4 * 1000000;
+const CARGO_E2 = 2 * 2000000 + 4 * 30000;
+
+console.log('\n═══ 1. El cargo del envío = lo que el local recibió ═══');
 
 const e1 = await service.despachar(bodega, {
   sucursal_destino_id: 2,
@@ -109,23 +123,37 @@ const e3 = await service.despachar(bodega, {
 await service.anularRemision(bodega, e3.id);
 
 let cuenta = await service.getEstadoCuenta(centro, 2);
+const env  = (id) => cuenta.envios.find((e) => e.id === id);
+const env1 = () => env(e1.id);
+const env2 = () => env(e2.id);
+
 ok('★ Aparecen los tres envíos, incluido el anulado', cuenta.envios.length === 3);
-ok('  el anulado se lista como Anulada',
-   cuenta.envios.find((e) => e.id === e3.id)?.estado === 'Anulada');
-ok('  y no cuenta ninguna unidad',
-   Number(cuenta.envios.find((e) => e.id === e3.id).unidades) === 0);
+ok('  el anulado se lista como Anulada', env(e3.id)?.estado === 'Anulada');
+ok('  y no cobra nada', Number(env(e3.id).cargo) === 0);
 
-const env1 = () => cuenta.envios.find((e) => e.id === e1.id);
-const env2 = () => cuenta.envios.find((e) => e.id === e2.id);
+ok('★ Envío 1: cargo por sus 4 equipos',
+   Number(env1().cargo) === CARGO_E1, money(env1().cargo));
+ok('  con saldo completo: nadie ha pagado', Number(env1().saldo) === CARGO_E1);
+ok('★ Envío 2: los accesorios entran en SU cargo',
+   Number(env2().cargo) === CARGO_E2, money(env2().cargo));
+ok('  y se cuentan aparte de los equipos',
+   Number(env2().accesorios_unidades) === 4 && Number(env2().unidades) === 2);
 
-ok('★ El envío 1 trae sus 4 equipos', Number(env1().unidades) === 4);
-ok('  todos disponibles todavía',     Number(env1().disponibles) === 4);
-ok('  y sin deuda generada',          Number(env1().deuda_generada) === 0);
-ok('★ El envío 2 cuenta sus accesorios aparte',
-   Number(env2().accesorios_unidades) === 4, `${env2().accesorios_unidades} unidades`);
-ok('  los accesorios no se cuentan como equipos', Number(env2().unidades) === 2);
+// La identidad que sostiene toda la pantalla: la cifra grande no es otra cosa
+// que la suma de los saldos de los envíos.
+const cuadra = (c) => {
+  const suma = c.envios.reduce((s, e) => s + Number(e.saldo), 0)
+             + Number(c.totales.cargos_sueltos);
+  return { suma, deuda: Number(c.totales.deuda_total) };
+};
+let x = cuadra(cuenta);
+ok('★★ Σ saldo de los envíos + cargos sueltos = deuda_total',
+   Math.abs(x.suma - x.deuda) < 1, `${money(x.suma)} vs ${money(x.deuda)}`);
+ok('  y la deuda es todo lo entregado',
+   Number(cuenta.totales.deuda_total) === CARGO_E1 + CARGO_E2,
+   money(cuenta.totales.deuda_total));
 
-console.log('\n═══ 2. Vendido, prestado y disponible se separan por envío ═══');
+console.log('\n═══ 2. Vender NO mueve la cuenta: solo informa ═══');
 
 await db.exec(`
   INSERT INTO facturas (numero, sucursal_id, nombre_cliente, estado, fecha)
@@ -136,7 +164,9 @@ await db.exec(`
     VALUES (1, 'iPhone 13', 'E1-AAA', 1, 1500000),
            (2, 'iPhone 13', 'E1-BBB', 1, 1600000),
            (3, 'iPhone 13', 'E2-AAA', 1, 2800000);
-  -- La 2 es a crédito: abonaron 400.000 de 1.600.000
+  -- La 2 es a crédito y solo abonaron 400.000 de 1.600.000. Antes eso decidía
+  -- cuánto debía el local; ahora el riesgo del crédito es suyo y a la bodega le
+  -- debe el equipo completo desde que lo recibió.
   INSERT INTO creditos (factura_id, valor_total, cuota_inicial, total_abonado)
     VALUES (2, 1600000, 400000, 0);
   UPDATE seriales SET vendido = TRUE  WHERE imei IN ('E1-AAA','E1-BBB','E2-AAA');
@@ -151,172 +181,174 @@ ok('★ Envío 1: 1 prestado',    Number(env1().prestadas) === 1);
 ok('★ Envío 1: 1 disponible',  Number(env1().disponibles) === 1);
 ok('  con su valor en vitrina', Number(env1().disponibles_valor) === 1000000,
    money(env1().disponibles_valor));
-ok('★ El prestado NO genera deuda (nada se ha vendido)',
-   Number(env1().prestadas_valor) === 1000000 &&
-   Number(env1().deuda_generada) === 1400000,
-   `generó ${money(env1().deuda_generada)}`);
-ok('  = 1.000.000 del contado + 400.000 recaudado del crédito',
-   Number(env1().deuda_generada) === 1000000 + 400000);
-ok('★ Envío 2: 1 vendido de 2.000.000', Number(env2().deuda_generada) === 2000000,
-   money(env2().deuda_generada));
+ok('★★ Y el saldo del envío 1 no se movió ni un peso',
+   Number(env1().saldo) === CARGO_E1, money(env1().saldo));
+ok('★★ Tampoco el del envío 2, con su venta a crédito a medio recaudar',
+   Number(env2().saldo) === CARGO_E2, money(env2().saldo));
 
-console.log('\n═══ 3. La devolución sale del envío del que salió el equipo ═══');
+console.log('\n═══ 3. Devolver un equipo baja el cargo de SU envío ═══');
 const dev = await service.devolver(centro, { lineas: [{ tipo: 'serial', serial_id: 6 }] });
 await service.confirmarDevolucion(bodega, dev.id, {});
 cuenta = await service.getEstadoCuenta(centro, 2);
+const CARGO_E2B = CARGO_E2 - 2000000;   // 2.120.000
+
 ok('★ Envío 2 marca 1 devuelto', Number(env2().devueltas) === 1);
-ok('  y ya no lo cuenta como disponible', Number(env2().disponibles) === 0);
-ok('  la deuda del envío 2 no cambia (lo devuelto nunca se vendió)',
-   Number(env2().deuda_generada) === 2000000);
-
-console.log('\n═══ 4. ★ Sin pagos, lo pendiente por envío = lo generado ═══');
-ok('Envío 1 pendiente = generado',
-   Number(env1().deuda_pendiente) === Number(env1().deuda_generada), money(env1().deuda_pendiente));
-ok('Envío 2 pendiente = generado',
-   Number(env2().deuda_pendiente) === Number(env2().deuda_generada), money(env2().deuda_pendiente));
-
-const cuadra = (c) => {
-  const suma = c.envios.reduce((s, e) => s + Number(e.deuda_pendiente), 0)
-             + Number(c.envios_resumen.accesorios_pendiente);
-  return { suma, saldo: Math.max(0, Number(c.totales.saldo_por_liquidar)) };
-};
-let x = cuadra(cuenta);
-ok('★★ Σ pendiente por envío + accesorios = saldo por liquidar',
-   Math.abs(x.suma - x.saldo) < 1, `${money(x.suma)} vs ${money(x.saldo)}`);
-
-console.log('\n═══ 5. Un pago parcial se imputa a las ventas más antiguas ═══');
-// Ventas en orden: E1-AAA (1.000.000) → E1-BBB (400.000) → E2-AAA (2.000.000).
-// Una remesa de 1.200.000 cubre la primera completa y 200.000 de la segunda.
-const rem = await service.enviarRemesa(centro, { valor: 1200000 });
-await service.confirmarRemesa(bodega, rem.id);
-cuenta = await service.getEstadoCuenta(centro, 2);
-
-ok('★ El envío 1 queda debiendo 200.000',
-   Number(env1().deuda_pendiente) === 200000, money(env1().deuda_pendiente));
-ok('  (generó 1.400.000 y le imputaron 1.200.000)',
-   Number(env1().deuda_generada) === 1400000);
-ok('★ El envío 2 sigue debiendo todo: es la venta más nueva',
-   Number(env2().deuda_pendiente) === 2000000, money(env2().deuda_pendiente));
-
+ok('★★ Y su cargo baja el valor del equipo, sin contra-asiento',
+   Number(env2().cargo) === CARGO_E2B, money(env2().cargo));
+ok('  el envío 1 ni se entera', Number(env1().cargo) === CARGO_E1);
 x = cuadra(cuenta);
-ok('★★ Con pagos de por medio, la identidad se mantiene',
-   Math.abs(x.suma - x.saldo) < 1, `${money(x.suma)} vs ${money(x.saldo)}`);
-ok('  y el resumen reporta lo mismo que la suma',
-   Number(cuenta.envios_resumen.pendiente_en_envios) ===
-     cuenta.envios.reduce((s, e) => s + Number(e.deuda_pendiente), 0));
+ok('★★ La identidad aguanta tras la devolución',
+   Math.abs(x.suma - x.deuda) < 1, `${money(x.suma)} vs ${money(x.deuda)}`);
 
-console.log('\n═══ 6. Los gastos por cuenta de bodega también imputan ═══');
+console.log('\n═══ 4. Abono DIRIGIDO: paga el envío que el local elija ═══');
+const abono1 = await service.enviarRemesa(centro, { valor: 1000000, remision_id: e2.id });
+await service.confirmarRemesa(bodega, abono1.id);
+cuenta = await service.getEstadoCuenta(centro, 2);
+ok('★ Se imputó al envío 2, que es el que se eligió',
+   Number(env2().abonado) === 1000000 && Number(env2().saldo) === CARGO_E2B - 1000000,
+   money(env2().saldo));
+ok('★ El envío 1 sigue intacto, aunque sea el más viejo',
+   Number(env1().abonado) === 0, money(env1().saldo));
+ok('  y el reparto viene en la respuesta', abono1.reparto.length === 1);
+
+console.log('\n═══ 5. Pago TOTAL: del envío más viejo al más nuevo ═══');
+const total = await service.enviarRemesa(centro, { valor: 4500000 });
+await service.confirmarRemesa(bodega, total.id);
+cuenta = await service.getEstadoCuenta(centro, 2);
+ok('★ Tapó el envío 1 completo primero', Number(env1().saldo) === 0, money(env1().saldo));
+ok('  y quedó marcado como pagado', env1().pagado === true);
+ok('★ Y el resto se fue al envío 2',
+   Number(env2().saldo) === CARGO_E2B - 1000000 - 500000, money(env2().saldo));
+ok('★ Un solo pago produjo DOS abonos, uno por envío', total.reparto.length === 2);
+ok('  sin guardar el total en ninguna parte: se deriva sumando',
+   total.reparto.reduce((s, r) => s + r.valor, 0) === 4500000);
+x = cuadra(cuenta);
+ok('★★ La identidad aguanta con pagos de por medio',
+   Math.abs(x.suma - x.deuda) < 1, `${money(x.suma)} vs ${money(x.deuda)}`);
+
+console.log('\n═══ 6. Gastos y ajustes entran por el MISMO reparto ═══');
 await service.registrarGastoAutorizado(centro, { valor: 200000, concepto: 'Domicilio' });
+await service.registrarAjuste(bodega, { sucursal_id: 2, valor: 100000, concepto: 'Garantía' });
 cuenta = await service.getEstadoCuenta(centro, 2);
-ok('★ El envío 1 queda al día', Number(env1().deuda_pendiente) === 0,
-   money(env1().deuda_pendiente));
+const SALDO_E2 = CARGO_E2B - 1000000 - 500000 - 200000 - 100000;   // 320.000
+ok('★ El gasto y el ajuste taparon el envío abierto',
+   Number(env2().saldo) === SALDO_E2, money(env2().saldo));
+ok('  el envío 1, ya pagado, no recibe nada', Number(env1().saldo) === 0);
 x = cuadra(cuenta);
-ok('★★ La identidad aguanta con gastos', Math.abs(x.suma - x.saldo) < 1,
-   `${money(x.suma)} vs ${money(x.saldo)}`);
+ok('★★ La identidad aguanta con gastos y ajustes',
+   Math.abs(x.suma - x.deuda) < 1, `${money(x.suma)} vs ${money(x.deuda)}`);
 
-console.log('\n═══ 7. Un ajuste de la bodega también baja lo pendiente ═══');
-await service.registrarAjuste(bodega, { sucursal_id: 2, valor: 500000, concepto: 'Garantía' });
+console.log('\n═══ 7. Una remesa sin confirmar reserva, pero no baja la deuda ═══');
+const pendiente = await service.enviarRemesa(centro, { valor: 100000 });
 cuenta = await service.getEstadoCuenta(centro, 2);
-ok('★ El envío 2 baja a 1.500.000', Number(env2().deuda_pendiente) === 1500000,
-   money(env2().deuda_pendiente));
+ok('★ El saldo del envío NO baja hasta que la bodega confirme',
+   Number(env2().saldo) === SALDO_E2, money(env2().saldo));
+ok('  pero se ve en tránsito', Number(cuenta.totales.remesas_en_transito) === 100000);
+// La reserva existe para que un segundo pago no vuelva a tapar lo mismo.
+const segundo = await service.enviarRemesa(centro, { valor: 100000 });
+ok('★★ Un segundo pago NO vuelve a imputar lo que el primero ya reservó',
+   segundo.reparto.reduce((s, r) => s + r.valor, 0) === 100000
+   && Number(segundo.sobrante) === 0);
+
+console.log('\n   … y anular la remesa libera su imputación');
+await service.anularRemesa(centro, pendiente.id);
+await service.anularRemesa(centro, segundo.id);
+cuenta = await service.getEstadoCuenta(centro, 2);
+ok('★ El envío vuelve a deber lo mismo', Number(env2().saldo) === SALDO_E2,
+   money(env2().saldo));
+
+console.log('\n═══ 8. Devolver algo YA PAGADO deja saldo a favor ═══');
+// El equipo 5 (E2-AAA) está vendido; para devolverlo hay que deshacer la venta.
+await db.exec(`
+  UPDATE seriales SET vendido = FALSE WHERE imei = 'E2-AAA';
+  UPDATE facturas SET estado = 'Cancelada' WHERE id = 3;
+`);
+const devPagada = await service.devolver(centro, { lineas: [{ tipo: 'serial', serial_id: 5 }] });
+await service.confirmarDevolucion(bodega, devPagada.id, {});
+cuenta = await service.getEstadoCuenta(centro, 2);
+const FAVOR = 2000000 - SALDO_E2;   // el cargo cayó 2.000.000 sobre un saldo de 320.000
+ok('★ El envío 2 queda sobre-pagado', Number(env2().excedente) === FAVOR,
+   money(env2().excedente));
+ok('  y su saldo se queda en 0, nunca negativo', Number(env2().saldo) === 0);
+ok('★★ El exceso se vuelve saldo a favor del local',
+   Number(cuenta.totales.saldo_a_favor) === FAVOR, money(cuenta.totales.saldo_a_favor));
+ok('★★ Y lo por pagar nunca queda negativo: la bodega no le debe plata',
+   Number(cuenta.totales.saldo_por_liquidar) === 0);
+
+console.log('\n   … y el próximo envío se lo descuenta solo');
+const e4 = await service.despachar(bodega, {
+  sucursal_destino_id: 2, lineas: [{ tipo: 'serial', serial_id: 7 }],   // $500.000
+});
+const rec4 = await recibirTodo(e4.id);
+cuenta = await service.getEstadoCuenta(centro, 2);
+ok('★ Al recibirlo se aplicó el crédito sin que nadie hiciera nada',
+   Number(rec4.saldo_favor_aplicado) === 500000, money(rec4.saldo_favor_aplicado));
+ok('  el envío nuevo nace pagado', Number(env(e4.id).saldo) === 0);
+ok('  y el crédito baja en esos 500.000',
+   Number(cuenta.totales.saldo_a_favor) === FAVOR - 500000,
+   money(cuenta.totales.saldo_a_favor));
+
+console.log('\n═══ 9. Un ajuste EN CONTRA no cuelga de ningún envío ═══');
+await service.registrarAjuste(bodega, {
+  sucursal_id: 2, valor: -300000, concepto: 'Equipo roto en el local',
+});
+cuenta = await service.getEstadoCuenta(centro, 2);
+ok('★ Suma como cargo suelto', Number(cuenta.totales.cargos_sueltos) === 300000,
+   money(cuenta.totales.cargos_sueltos));
+ok('  y ningún envío se lo atribuye',
+   cuenta.envios.every((e) => Number(e.saldo) === 0));
 x = cuadra(cuenta);
-ok('★★ La identidad aguanta con ajustes', Math.abs(x.suma - x.saldo) < 1,
-   `${money(x.suma)} vs ${money(x.saldo)}`);
+ok('★★ La identidad aguanta con cargos sueltos',
+   Math.abs(x.suma - x.deuda) < 1, `${money(x.suma)} vs ${money(x.deuda)}`);
 
-console.log('\n═══ 8. La deuda de accesorios no se cuelga de ningún envío ═══');
-// El local vendió 3 de los 4 cargadores: su stock baja, y esa deuda es del
-// producto (fungible), no de un envío. Debe aparecer como residuo.
-await db.exec(`UPDATE productos_cantidad SET stock = 1 WHERE sucursal_id = 2`);
-cuenta = await service.getEstadoCuenta(centro, 2);
-ok('★ Aparece deuda de accesorios fuera de los envíos',
-   Number(cuenta.envios_resumen.accesorios_pendiente) === 90000,
-   money(cuenta.envios_resumen.accesorios_pendiente));
-ok('  y ningún envío se la atribuye',
-   cuenta.envios.every((e) => Number(e.deuda_pendiente) % 30000 !== 30000));
-x = cuadra(cuenta);
-ok('★★ La identidad aguanta con accesorios de por medio',
-   Math.abs(x.suma - x.saldo) < 1, `${money(x.suma)} vs ${money(x.saldo)}`);
+console.log('\n═══ 10. El extracto cuadra con la cuenta ═══');
+const sumaExtracto = cuenta.extracto.reduce((s, e) => s + Number(e.valor), 0);
+ok('★★ Σ movimientos del extracto = posición neta del local',
+   Math.abs(sumaExtracto - Number(cuenta.totales.neto)) < 1,
+   `${money(sumaExtracto)} vs ${money(cuenta.totales.neto)}`);
+ok('  y las ventas van en 0 (son informativas)',
+   cuenta.extracto.filter((e) => e.origen === 'venta').every((e) => Number(e.valor) === 0));
 
-console.log('\n═══ 8b. ★ DEUDA TOTAL y POR REMITIR son cosas distintas ═══');
-// La deuda es por cuánta mercancía responde el local (esté vendida o no);
-// por remitir es lo que tiene que entregar YA (solo lo vendido). Confundirlas
-// era el reclamo del cliente.
-cuenta = await service.getEstadoCuenta(centro, 2);
-let tt = cuenta.totales;
-ok('★ La deuda es MAYOR que lo exigible mientras quede mercancía sin vender',
-   Number(tt.deuda_total) > Number(tt.saldo_por_liquidar),
-   `${money(tt.deuda_total)} vs ${money(tt.saldo_por_liquidar)}`);
-ok('★★ deuda_total = por_remitir + lo que todavía no se cobra',
-   Math.abs(Number(tt.deuda_total)
-            - Number(tt.saldo_por_liquidar) - Number(tt.por_vender)) < 1,
-   `${money(tt.deuda_total)} = ${money(tt.saldo_por_liquidar)} + ${money(tt.por_vender)}`);
-ok('★★ valor_en_poder = deuda_total + todo lo pagado',
-   Math.abs(Number(tt.valor_en_poder) - Number(tt.deuda_total)
-            - Number(tt.remesado_recibido) - Number(tt.gastos_autorizados)
-            - Number(tt.ajustes)) < 1,
-   money(tt.valor_en_poder));
-ok('  y lo que no se cobra nunca es negativo', Number(tt.por_vender) >= 0);
-
-console.log('\n═══ 9. Filtrar la mercancía por varios estados a la vez ═══');
+console.log('\n═══ 11. Filtrar la mercancía por varios estados a la vez ═══');
 const vendidos = await service.getEstadoCuenta(centro, 2, { estado: 'Por liquidar,En recaudo' });
-ok('★ "Vendidos" trae contado y crédito juntos', vendidos.mercancia.total === 3,
+ok('★ "Vendidos" trae contado y crédito juntos', vendidos.mercancia.total === 2,
    `${vendidos.mercancia.total} unidades`);
-const soloContado = await service.getEstadoCuenta(centro, 2, { estado: 'Por liquidar' });
-ok('  y un solo estado sigue funcionando igual', soloContado.mercancia.total === 2);
 const prestados = await service.getEstadoCuenta(centro, 2, { estado: 'En prestamo' });
 ok('★ "En prestamo" trae el equipo prestado', prestados.mercancia.total === 1,
    prestados.mercancia.items[0]?.imei);
-ok('  que no genera deuda', Number(prestados.mercancia.liquidable_total) === 0);
 
-console.log('\n═══ 10. ★ Un vendedor ve los conteos, nunca los pesos ═══');
+console.log('\n═══ 12. ★ Un vendedor ve la CUENTA, nunca el costo de la mercancía ═══');
 const comoVendedor = await service.getEstadoCuenta(vende, 2);
 const v1 = comoVendedor.envios.find((e) => e.id === e1.id);
 ok('★ Sigue viendo cuántos vendió',    Number(v1.vendidas) === 2);
 ok('  cuántos prestó',                 Number(v1.prestadas) === 1);
 ok('  y cuántos le quedan',            Number(v1.disponibles) === 1);
-ok('★ Pero no cuánto generó de deuda', v1.deuda_generada === null);
-ok('  ni cuánto queda pendiente',      v1.deuda_pendiente === null);
-ok('  ni el valor de lo disponible',   v1.disponibles_valor === null);
-ok('  ni el valor del envío',          v1.valor_total === null);
-ok('★ El resumen tampoco filtra pesos',
-   comoVendedor.envios_resumen.pendiente_en_envios === null &&
-   comoVendedor.envios_resumen.accesorios_pendiente === null);
-ok('  pero sí cuántos envíos son', comoVendedor.envios_resumen.total === 3);
-ok('★ Y conserva lo único que necesita: cuánto remitir',
+ok('★★ Y SÍ ve lo que debe de cada envío: sin eso no podría pagar',
+   Number(v1.saldo) === Number(env1().saldo) && Number(v1.cargo) === Number(env1().cargo),
+   money(v1.cargo));
+ok('★ Pero no el valor de lo disponible', v1.disponibles_valor === null);
+ok('  ni el valor de lo vendido',        v1.vendidas_valor === null);
+ok('  ni el valor total del envío',      v1.valor_total === null);
+ok('★ Ni la valorización de la mercancía en los totales',
+   comoVendedor.totales.en_vitrina_valor === null &&
+   comoVendedor.totales.vendido_valor === null);
+ok('★ Y el desglose tampoco la filtra por la puerta de atrás',
+   comoVendedor.desglose.respaldo.valor === null,
+   'esta era la fuga: el desglose se colaba sin recortar');
+ok('★ Conserva lo único que necesita: cuánto pagar',
    Number(comoVendedor.totales.saldo_por_liquidar) ===
      Number(cuenta.totales.saldo_por_liquidar),
    money(comoVendedor.totales.saldo_por_liquidar));
 
-console.log('\n═══ 11. La bodega ve lo mismo desde su lado ═══');
+console.log('\n═══ 13. La bodega ve lo mismo desde su lado ═══');
 const desdeBodega = await service.getEstadoCuenta(bodega, 2);
 ok('★ Mismos envíos', desdeBodega.envios.length === cuenta.envios.length);
-ok('★ Mismo pendiente por envío',
+ok('★ Mismo saldo por envío',
    desdeBodega.envios.every((e) =>
-     Number(e.deuda_pendiente) ===
-     Number(cuenta.envios.find((c) => c.id === e.id).deuda_pendiente)));
+     Number(e.saldo) === Number(cuenta.envios.find((c) => c.id === e.id).saldo)));
 let bloqueado = false;
 try { await service.getEstadoCuenta(centro, 1); } catch (e) { bloqueado = e.status === 403; }
 ok('★ Y un local sigue sin poder ver la cuenta de otro', bloqueado);
-
-console.log('\n═══ 12. Devolver mercancía baja la DEUDA, no lo exigible ═══');
-// Va al final porque mueve el inventario: el equipo 4 (E1-DDD) estaba en
-// vitrina y al devolverlo deja de ser responsabilidad del local.
-const antesDeuda   = Number(cuenta.totales.deuda_total);
-const antesRemitir = Number(cuenta.totales.saldo_por_liquidar);
-const devExtra = await service.devolver(centro, { lineas: [{ tipo: 'serial', serial_id: 4 }] });
-await service.confirmarDevolucion(bodega, devExtra.id, {});
-cuenta = await service.getEstadoCuenta(centro, 2);
-tt = cuenta.totales;
-ok('★ Devolver un equipo BAJA la deuda total en su valor',
-   Number(tt.deuda_total) === antesDeuda - 1000000,
-   `${money(antesDeuda)} → ${money(tt.deuda_total)}`);
-ok('★ Pero NO cambia lo exigible: ese equipo nunca se vendió',
-   Number(tt.saldo_por_liquidar) === antesRemitir, money(tt.saldo_por_liquidar));
-ok('★★ Y la identidad se mantiene después de devolver',
-   Math.abs(Number(tt.deuda_total)
-            - Number(tt.saldo_por_liquidar) - Number(tt.por_vender)) < 1);
-x = cuadra(cuenta);
-ok('★★ Igual que el reparto por envío', Math.abs(x.suma - x.saldo) < 1);
 
 console.log(`\n${'─'.repeat(60)}`);
 console.log(`  ${pasados} pasaron · ${fallos} fallaron`);

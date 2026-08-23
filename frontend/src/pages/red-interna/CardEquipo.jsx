@@ -74,16 +74,14 @@ export function CardEquipo({ u, mostrarEnvio = true }) {
           </div>
         </div>
 
-        {/* Plata a la derecha — ausente para quien no puede ver costos */}
+        {/* Plata a la derecha — ausente para quien no puede ver costos.
+            Es el valor con el que la bodega se lo cargó al local, y se muestra
+            igual esté vendido o no: desde el cambio de modelo la deuda no
+            depende de la venta, así que ya no hay un "por pagar" por unidad. */}
         <div className="text-right flex-shrink-0">
-          {u.liquidable > 0 ? (
-            <>
-              <p className="text-sm font-bold text-amber-600">{formatCOP(u.liquidable)}</p>
-              <p className="text-xs text-gray-400">por pagar</p>
-            </>
-          ) : u.valor_interno != null ? (
+          {u.valor_interno != null && (
             <p className="text-sm font-semibold text-gray-500">{formatCOP(u.valor_interno)}</p>
-          ) : null}
+          )}
         </div>
       </div>
 

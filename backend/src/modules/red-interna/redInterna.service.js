@@ -140,46 +140,70 @@ const CLAVES_VALOR_UNIDAD = [
   'valor_interno', 'liquidable', 'subtotal_linea', 'recaudado_prorrateado',
 ];
 
-// Lo monetario del resumen por envío. Los conteos por estado NO están aquí a
-// propósito: el vendedor necesita saber qué vendió y qué le queda.
+// Lo monetario del resumen por envío que NO puede ver un vendedor.
+//
+// `cargo`, `abonado` y `saldo` NO están aquí: desde el cambio de modelo son la
+// deuda de ese envío, o sea la plata que el vendedor tiene que entregar. Sin
+// verlos no podría pagar. Lo que sigue oculto es la valorización de la
+// mercancía por estado —de ahí se deduce el costo unidad por unidad— y el
+// valor de cada línea.
 const CLAVES_VALOR_ENVIO = [
-  'valor_total', 'valor_recibido', 'deuda_generada', 'deuda_pendiente',
+  'valor_total', 'valor_recibido',
   'disponibles_valor', 'vendidas_valor', 'prestadas_valor', 'sin_ubicar_valor',
   'accesorios_valor',
 ];
 
 /**
  * Recorta un estado de cuenta / panel para un vendedor.
- * Se conserva: unidades, estados, fechas, documentos y el TOTAL a remitir.
- * Se borra: costos unitarios, valores de mercancía y el detalle monetario
- * de los movimientos.
+ *
+ * QUÉ SOBREVIVE: unidades, estados, fechas, documentos y todo lo que sea DEUDA
+ *   (la del local y la de cada envío). Es su trabajo: recibir mercancía y
+ *   entregar plata, y no puede hacerlo a ciegas.
+ * QUÉ SE BORRA: el costo de cada equipo y la valorización de la mercancía por
+ *   estado, que es de donde se deduce el costo unidad por unidad.
+ *
+ * El recorte va en el BACKEND. Si solo se escondiera en la pantalla el dato
+ * viajaría igual y se vería en la consola del navegador — por eso cada campo
+ * monetario nuevo hay que decidirlo aquí, no allá.
  */
 const _recortarParaVendedor = (data) => {
   const t = data.totales || {};
-  return {
-    ...data,
-    costos_ocultos: true,
-    totales: {
-      // Lo único monetario que sobrevive: cuánto hay que entregarle a la bodega.
-      // La DEUDA TOTAL no: es la suma de los costos de toda la mercancía, o sea
-      // justo el dato que este recorte existe para esconder.
+  const totales = {
+      // La deuda y lo que hay que pagar sobreviven: ya no son "la suma de los
+      // costos de la mercancía" sino la obligación del local, que el vendedor
+      // necesita conocer para entregar el dinero.
+      deuda_total:         t.deuda_total,
+      saldo_a_favor:       t.saldo_a_favor,
       saldo_por_liquidar:  t.saldo_por_liquidar,
-      deuda_total:         null,
-      valor_en_poder:      null,
-      por_vender:          null,
+      neto:                t.neto,
+      cargo_total:         t.cargo_total,
+      abonado_total:       t.abonado_total,
+      cargos_sueltos:      t.cargos_sueltos,
+      envios_abiertos:     t.envios_abiertos,
+      envios_total:        t.envios_total,
       remesado_recibido:   t.remesado_recibido,
       remesas_en_transito: t.remesas_en_transito,
       gastos_autorizados:  t.gastos_autorizados,
+      ajustes:             t.ajustes,
       en_consignacion_unidades: t.en_consignacion_unidades,
       en_recaudo_unidades:      t.en_recaudo_unidades,
       sin_ubicar_unidades:      t.sin_ubicar_unidades,
-      // Valores de mercancía: fuera.
+      vendido_unidades:         t.vendido_unidades,
+      // Valorización de la mercancía por estado: fuera.
+      vendido_valor:         null,
+      en_vitrina_valor:      null,
+      prestado_valor:        null,
+      valor_en_poder:        null,
+      liquidable_total:      null,
       en_consignacion_valor: null,
       en_recaudo_valor:      null,
       sin_ubicar_valor:      null,
-      liquidable_total:      null,
-      ajustes:               t.ajustes,
-    },
+  };
+
+  return {
+    ...data,
+    costos_ocultos: true,
+    totales,
     por_estado: Object.fromEntries(
       Object.entries(data.por_estado || {}).map(([k, v]) => [
         k, { ...v, valor_interno: null, liquidable: null },
@@ -188,9 +212,10 @@ const _recortarParaVendedor = (data) => {
     cantidad_consignada: undefined,
     extracto: (data.extracto || []).map((e) => ({
       ...e,
-      // El movimiento se ve (qué pasó y cuándo), el monto no.
-      valor: e.clase === 'info' ? 0 : null,
-      saldo: null,
+      // Los cargos y abonos son la cuenta: se ven. Lo informativo (una venta)
+      // lleva el valor de la mercancía, y ese no.
+      valor: e.clase === 'info' ? 0 : e.valor,
+      saldo: e.saldo,
     })),
     mercancia: data.mercancia && {
       ...data.mercancia,
@@ -198,14 +223,12 @@ const _recortarParaVendedor = (data) => {
       items: data.mercancia.items.map((u) => _sinValores(u, CLAVES_VALOR_UNIDAD)),
     },
     remisiones: (data.remisiones || []).map((r) => ({ ...r, valor_total: null })),
-    // Por envío sobreviven los CONTEOS (cuántos vendió, prestó y le quedan:
-    // eso lo tiene que saber para trabajar) pero ningún valor en pesos.
     envios: (data.envios || []).map((e) => _sinValores(e, CLAVES_VALOR_ENVIO)),
-    envios_resumen: data.envios_resumen && {
-      total: data.envios_resumen.total,
-      accesorios_pendiente: null,
-      pendiente_en_envios:  null,
-    },
+    // El desglose se recalcula sobre los totales YA RECORTADOS. Antes se
+    // colaba entero, con los mismos valores que este recorte acaba de poner en
+    // null: bastaba abrir la pestaña de red del navegador para leerlos.
+    // Por eso se le pasa `totales` y no `t`.
+    desglose: data.desglose && _desgloseSaldo(totales, data.remesas || []),
   };
 };
 
@@ -590,7 +613,22 @@ const _ejecutarRecepcion = async (client, {
   });
   await repo.actualizarTotalRemision(client, remision.id);
 
-  return { traslado_id: traslado.id, recibidas: hubo, faltantes: idsFaltante.length };
+  // El envío acaba de nacer con saldo. Si el local traía crédito a favor (pagó
+  // de más antes, o devolvió algo que ya había pagado) se le aplica aquí
+  // mismo: es lo que el cliente pidió, "que se descuente del siguiente envío".
+  // Va dentro de esta transacción para que dos recepciones al tiempo no se
+  // repartan el mismo crédito.
+  const favor = await _aplicarSaldoAFavor(client, {
+    negocioId,
+    sucursalId: Number(remision.sucursal_destino_id),
+    remisionId: remision.id,
+    usuarioId,
+  });
+
+  return {
+    traslado_id: traslado.id, recibidas: hubo, faltantes: idsFaltante.length,
+    saldo_favor_aplicado: favor ? _num(favor.valor) : 0,
+  };
 };
 
 // ── Recibir (lo llama el local; un vendedor puede hacerlo) ───────────────────
@@ -686,6 +724,51 @@ const anularRemision = async (req, remisionId) => {
 // Nada financiero ocurre en silencio: el saldo a favor se pide línea por línea.
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * ¿Este accesorio vino de la bodega?
+ *
+ * Un accesorio es fungible: no hay forma de saber si ESTA unidad concreta salió
+ * de un envío. Pero sí se sabe cuántas le mandó la bodega y cuántas devolvió, y
+ * mientras queden pendientes lo razonable es asumir que sí — es lo que pasa
+ * casi siempre, y ahora la respuesta mueve plata: desde el cambio de modelo un
+ * accesorio de bodega devuelto tiene que generarle crédito al local, o
+ * devolvería 20 vidrios y los seguiría debiendo.
+ *
+ * Devuelve el valor con el que se los cargaron (promedio ponderado de los
+ * envíos), no el costo del local: es lo que hay que acreditarle.
+ */
+const _origenUnidadCantidad = async (client, productoLocalId, sucursalId, negocioId) => {
+  const { rows } = await client.query(`
+    SELECT
+      COALESCE(SUM(COALESCE(lr.cantidad_recibida, 0)), 0)::int AS entregado,
+      CASE WHEN SUM(COALESCE(lr.cantidad_recibida, 0)) > 0
+        THEN SUM(lr.valor_interno * COALESCE(lr.cantidad_recibida, 0))
+             / SUM(COALESCE(lr.cantidad_recibida, 0))
+        ELSE 0 END AS valor_unitario
+    FROM lineas_remision lr
+    JOIN remisiones r ON r.id = lr.remision_id
+    WHERE r.negocio_id = $1 AND r.sucursal_destino_id = $2
+      AND r.tipo = 'entrega' AND r.estado <> 'Anulada'
+      AND lr.tipo = 'cantidad' AND lr.estado_linea = 'Recibida'
+      AND lr.producto_destino_id = $3
+  `, [negocioId, sucursalId, productoLocalId]);
+  const { rows: dev } = await client.query(`
+    SELECT COALESCE(SUM(COALESCE(lr.cantidad_recibida, lr.cantidad, 0)), 0)::int AS devuelto
+    FROM lineas_remision lr
+    JOIN remisiones r ON r.id = lr.remision_id
+    WHERE r.negocio_id = $1 AND r.sucursal_origen_id = $2
+      AND r.tipo = 'devolucion' AND r.estado <> 'Anulada'
+      AND lr.tipo = 'cantidad' AND lr.producto_origen_id = $3
+  `, [negocioId, sucursalId, productoLocalId]);
+
+  const pendiente = Number(rows[0].entregado) - Number(dev[0].devuelto);
+  return {
+    de_bodega: pendiente > 0,
+    pendiente: Math.max(0, pendiente),
+    valor_unitario: _num(rows[0].valor_unitario),
+  };
+};
+
 // ¿Esta unidad está viva en una consignación de este local?
 const _origenUnidadSerial = async (client, serialId, negocioId) => {
   const { rows } = await client.query(`
@@ -745,13 +828,18 @@ const previsualizarDevolucion = async (req, { lineas }) => {
         );
         if (!rows.length) { items.push({ ...l, error: 'No está en este local' }); continue; }
         const p = rows[0];
-        // Los productos de cantidad son fungibles: no se puede saber si esta
-        // unidad concreta vino de bodega. Se ofrecen las dos opciones.
+        // Fungible: no se sabe si ESTA unidad vino de bodega, pero sí si quedan
+        // unidades pendientes de las que la bodega mandó. Con eso se propone un
+        // origen; el usuario puede cambiarlo. El valor que se ofrece es el de
+        // la remisión (lo que le cobraron), no el costo del local.
+        const cant = await _origenUnidadCantidad(client, p.id, origenId, negocioId);
         items.push({
           tipo: 'cantidad', producto_id: p.id, nombre: p.nombre, codigo: p.codigo,
           cantidad: Math.min(Number(l.cantidad) || 1, Number(p.stock)),
-          stock: Number(p.stock), origen: 'indeterminado',
-          valor_interno: _num(p.costo_unitario),
+          stock: Number(p.stock),
+          origen: cant.de_bodega ? 'bodega' : 'propio',
+          pendiente_de_bodega: cant.pendiente,
+          valor_interno: cant.de_bodega ? cant.valor_unitario : _num(p.costo_unitario),
           bloqueado: Number(p.stock) <= 0 ? 'Sin stock' : null,
         });
       }
@@ -838,12 +926,26 @@ const devolver = async (req, { lineas, notas, clave_idempotencia }) => {
           throw { status: 400, message: `Stock insuficiente de "${rows[0].nombre}". Hay ${rows[0].stock}` };
         }
 
+        // Si el usuario no dice de dónde viene, se resuelve con lo que la
+        // bodega le mandó y todavía no le ha devuelto. Antes el default era
+        // 'propio' a secas, y con el modelo nuevo eso significaba devolver
+        // mercancía de bodega sin que le bajara la deuda.
+        const cantOrigen = await _origenUnidadCantidad(client, l.producto_id, origenId, negocioId);
+        const origenUnidad = l.origen_unidad
+          ? (l.origen_unidad === 'bodega' ? 'bodega' : 'propio')
+          : (cantOrigen.de_bodega ? 'bodega' : 'propio');
+        // Lo que la bodega le cobró, no lo que al local le costó: es lo que hay
+        // que acreditarle al recibirlo de vuelta.
+        const base = origenUnidad === 'bodega' && cantOrigen.valor_unitario > 0
+          ? cantOrigen.valor_unitario
+          : rows[0].costo_unitario;
+
         await repo.insertarLineaRemision(client, {
           remision_id: remision.id, tipo: 'cantidad',
           producto_origen_id: l.producto_id, cantidad: cant,
-          valor_interno: _valorLinea(rows[0].costo_unitario, l.valor_interno),
+          valor_interno: _valorLinea(base, l.valor_interno),
           estado_linea: 'Pendiente',
-          origen_unidad: l.origen_unidad === 'bodega' ? 'bodega' : 'propio',
+          origen_unidad: origenUnidad,
           genera_saldo_favor: l.genera_saldo_favor === true,
           nombre_producto: rows[0].nombre,
         });
@@ -1014,9 +1116,22 @@ const confirmarDevolucion = async (req, remisionId, { lineas_recibidas } = {}) =
         );
       }
 
-      // Mercancía propia que la bodega decidió comprar → saldo a favor del local.
-      if (l.genera_saldo_favor) {
-        const unidades = l.tipo === 'cantidad' ? Number(l.cantidad) : 1;
+      // ── Qué de esta devolución le baja la deuda al local ──────────────────
+      //
+      // SERIAL DE BODEGA: nada que hacer aquí. Su línea de entrega quedó
+      //   'Devuelta' unas líneas más arriba, y el cargo de ese envío deja de
+      //   contarla solo. Acreditarlo además sería cobrárselo dos veces al revés.
+      //
+      // ACCESORIO DE BODEGA: sí hay que acreditarlo. Es fungible, no tiene
+      //   línea de entrega propia que marcar, así que el cargo de su envío no
+      //   se entera. Sin este abono el local devolvería 5 cargadores y los
+      //   seguiría debiendo.
+      //
+      // MERCANCÍA PROPIA: solo si la bodega decidió comprársela.
+      const unidades = l.tipo === 'cantidad' ? Number(l.cantidad) : 1;
+      if (l.tipo === 'cantidad' && l.origen_unidad === 'bodega') {
+        saldoAFavor += _num(l.valor_interno) * unidades;
+      } else if (l.genera_saldo_favor) {
         saldoAFavor += _num(l.valor_interno) * unidades;
       }
       idsOk.push(id);
@@ -1026,14 +1141,19 @@ const confirmarDevolucion = async (req, remisionId, { lineas_recibidas } = {}) =
     if (idsFaltante.length) await repo.marcarLineas(client, idsFaltante, 'Faltante');
     if (!idsOk.length) throw { status: 400, message: 'No marcaste ningún producto como recibido' };
 
-    // El saldo a favor baja lo que el local debe: es un Ajuste positivo, la
-    // misma convención que usa `_armarSaldo` (saldo = liquidable − ajustes).
+    // El crédito baja lo que el local debe: es un Ajuste positivo, y se imputa
+    // a sus envíos abiertos con el mismo FIFO que un pago. Lo que sobre le
+    // queda a favor y se aplicará solo cuando llegue el próximo envío.
     if (saldoAFavor > 0) {
-      await repo.insertarMovimientoCuenta(client, {
+      const mov = await repo.insertarMovimientoCuenta(client, {
         negocio_id: negocioId, sucursal_id: localId,
         tipo: 'Ajuste', valor: Math.round(saldoAFavor * 100) / 100,
-        concepto: `Mercancía propia comprada por bodega — devolución #${remision.numero ?? remision.id}`,
+        concepto: `Devolución #${remision.numero ?? remision.id} recibida en bodega`,
         usuario_id: req.user.id,
+      });
+      await _imputarFIFO(client, {
+        negocioId, sucursalId: localId, valor: mov.valor, origen: 'ajuste',
+        movimientoId: mov.id, usuarioId: req.user.id, notas: mov.concepto,
       });
     }
 
@@ -1056,6 +1176,94 @@ const confirmarDevolucion = async (req, remisionId, { lineas_recibidas } = {}) =
   } finally {
     client.release();
   }
+};
+
+// ═════════════════════════════════════════════════════════════════════════════
+// IMPUTACIÓN — a qué envío entra cada peso
+//
+// Es lo ÚNICO del lado del dinero que no se puede derivar: qué envío paga un
+// billete es una decisión de una persona, no un hecho que se pueda leer de
+// otra tabla. Por eso se escribe (`abonos_remision`) y por eso pasa por un
+// solo motor: el pago del local, el gasto que hizo por cuenta de la bodega, el
+// ajuste que le abonan y el saldo a favor que se le aplica entran todos por
+// aquí. Cuatro caminos, una sola regla de reparto.
+//
+// REGLA: del envío más viejo al más nuevo. Si el pago viene dirigido a un
+// envío concreto, ese va primero y lo que sobre sigue la fila.
+// ═════════════════════════════════════════════════════════════════════════════
+
+const _centavos = (v) => Math.round(_num(v) * 100) / 100;
+
+const _imputarFIFO = async (client, {
+  negocioId, sucursalId, valor, origen,
+  remesaId = null, movimientoId = null, usuarioId = null, notas = null,
+  remisionId = null,
+}) => {
+  let resto = _centavos(valor);
+  const reparto = [];
+
+  const cola = [];
+  if (remisionId) {
+    const e = await repo.getSaldoEnvio(client, negocioId, remisionId);
+    if (!e) throw { status: 404, message: 'Envío no encontrado' };
+    if (Number(e.sucursal_destino_id) !== Number(sucursalId)) {
+      throw { status: 403, message: 'Ese envío es de otra sucursal' };
+    }
+    if (_num(e.saldo) <= 0) {
+      throw { status: 409, message: `El envío #${e.numero ?? remisionId} ya está pagado` };
+    }
+    cola.push({ remision_id: Number(remisionId), numero: e.numero, saldo: _num(e.saldo) });
+  }
+
+  for (const e of await repo.getEnviosAbiertos(client, negocioId, sucursalId)) {
+    if (remisionId && Number(e.remision_id) === Number(remisionId)) continue;
+    cola.push({ remision_id: Number(e.remision_id), numero: e.numero, saldo: _num(e.saldo) });
+  }
+
+  for (const e of cola) {
+    if (resto <= 0) break;
+    const aplica = _centavos(Math.min(resto, e.saldo));
+    if (aplica <= 0) continue;
+    await repo.insertarAbonoRemision(client, {
+      negocio_id: negocioId, sucursal_id: sucursalId, remision_id: e.remision_id,
+      origen, remesa_id: remesaId, movimiento_id: movimientoId,
+      valor: aplica, usuario_id: usuarioId, notas,
+    });
+    reparto.push({ remision_id: e.remision_id, numero: e.numero, valor: aplica });
+    resto = _centavos(resto - aplica);
+  }
+
+  // Lo que sobra NO se escribe: queda como saldo a favor derivado (plata
+  // recibida menos plata imputada). Guardarlo sería un segundo lado que
+  // mantener sincronizado, justo lo que este módulo evita.
+  return { reparto, sobrante: resto };
+};
+
+/**
+ * Aplica el crédito que el local tenga a favor contra un envío recién llegado.
+ *
+ * Corre dentro de la transacción de la recepción, que es el único momento en
+ * que un envío nace con saldo: hacerlo aquí evita que dos recepciones
+ * simultáneas se repartan el mismo crédito.
+ */
+const _aplicarSaldoAFavor = async (client, { negocioId, sucursalId, remisionId, usuarioId }) => {
+  const t = await repo.getTotalesEnvios(negocioId, sucursalId, client);
+  const disponible = Math.max(0,
+    _num(t.excedente) + _num(t.sin_imputar) - _num(t.favor_usado));
+  if (disponible <= 0) return null;
+
+  const envio = await repo.getSaldoEnvio(client, negocioId, remisionId);
+  const saldo = _num(envio?.saldo);
+  if (saldo <= 0) return null;
+
+  const aplica = _centavos(Math.min(disponible, saldo));
+  if (aplica <= 0) return null;
+
+  return repo.insertarAbonoRemision(client, {
+    negocio_id: negocioId, sucursal_id: sucursalId, remision_id: remisionId,
+    origen: 'saldo_favor', valor: aplica, usuario_id: usuarioId,
+    notas: 'Saldo a favor aplicado automáticamente',
+  });
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1139,7 +1347,17 @@ const getCuentasParaRemesa = async (req) => {
     }));
 };
 
-const enviarRemesa = async (req, { valor, notas, clave_idempotencia, cuenta_origen_id, metodo }) => {
+/**
+ * El local paga.
+ *
+ * `remision_id` dirige el pago a un envío concreto (el botón "Abonar" de la
+ * tarjeta de ese envío). Sin él, el pago se reparte entre los envíos abiertos
+ * del más viejo al más nuevo — el botón "Pagar" de la cabecera. Lo que sobre
+ * en cualquiera de los dos casos queda como saldo a favor.
+ */
+const enviarRemesa = async (req, {
+  valor, notas, clave_idempotencia, cuenta_origen_id, metodo, remision_id,
+}) => {
   const negocioId = req.user.negocio_id;
   const origenId  = Number(req.sucursal_id);
   const bodegaId  = Number(req.red.bodega_id);
@@ -1238,8 +1456,18 @@ const enviarRemesa = async (req, { valor, notas, clave_idempotencia, cuenta_orig
     });
     await asignarNumeroDocumento(client, { tipo: 'remesa', docId: remesa.id, negocioId });
 
+    // A qué envío(s) va esta plata. Se decide y se guarda AHORA, aunque la
+    // remesa todavía tenga que confirmarse: así el local no tiene que volver a
+    // elegir, y la reserva impide que un segundo pago tape el mismo envío.
+    const { reparto, sobrante } = await _imputarFIFO(client, {
+      negocioId, sucursalId: origenId, valor: monto, origen: 'remesa',
+      remesaId: remesa.id, usuarioId: req.user.id,
+      remisionId: remision_id ? Number(remision_id) : null,
+      notas: notas || null,
+    });
+
     await client.query('COMMIT');
-    return repo.findRemesaById(negocioId, remesa.id);
+    return { ...(await repo.findRemesaById(negocioId, remesa.id)), reparto, sobrante };
   } catch (err) {
     await client.query('ROLLBACK');
     if (err.code === '23505' && clave_idempotencia) {
@@ -1343,6 +1571,10 @@ const anularRemesa = async (req, remesaId) => {
       }
     }
     await repo.marcarRemesaAnulada(client, remesaId);
+    // Y su imputación se cae con ella: los envíos que estaba tapando vuelven a
+    // quedar abiertos. Se marca anulada en vez de borrarse para que el envío
+    // conserve el rastro de que hubo un pago y se deshizo.
+    await repo.anularAbonosDeRemesa(client, remesaId);
 
     await client.query('COMMIT');
     return { id: remesaId, estado: 'Anulada' };
@@ -1381,9 +1613,15 @@ const registrarGastoAutorizado = async (req, { valor, concepto }) => {
       tipo: 'GastoAutorizado', valor: monto,
       mov_dinero_id: mov.id, concepto: concepto.trim(), usuario_id: req.user.id,
     });
+    // Y se imputa como cualquier otro pago: gastó plata de la bodega, así que
+    // tapa envíos. Sin esto la cifra grande bajaría y ningún envío se movería.
+    const { reparto, sobrante } = await _imputarFIFO(client, {
+      negocioId, sucursalId, valor: monto, origen: 'gasto',
+      movimientoId: movCuenta.id, usuarioId: req.user.id, notas: concepto.trim(),
+    });
 
     await client.query('COMMIT');
-    return movCuenta;
+    return { ...movCuenta, reparto, sobrante };
   } catch (err) {
     await client.query('ROLLBACK');
     throw err;
@@ -1392,7 +1630,15 @@ const registrarGastoAutorizado = async (req, { valor, concepto }) => {
   }
 };
 
-const registrarAjuste = async (req, { sucursal_id, valor, concepto }) => {
+/**
+ * Ajuste de la bodega sobre la cuenta de un local.
+ *
+ *   POSITIVO → le abona: se reparte entre los envíos abiertos como cualquier
+ *              pago, y lo que sobre le queda a favor.
+ *   NEGATIVO → le cobra (una rotura, un faltante). NO cuelga de ningún envío
+ *              —no vino de uno—, así que suma aparte en la deuda del local.
+ */
+const registrarAjuste = async (req, { sucursal_id, valor, concepto, remision_id }) => {
   _exigirBodega(req);
   const negocioId = req.user.negocio_id;
   const monto = Number(valor);
@@ -1401,12 +1647,34 @@ const registrarAjuste = async (req, { sucursal_id, valor, concepto }) => {
   }
   if (!concepto?.trim()) throw { status: 400, message: 'Explica el motivo del ajuste' };
   await _verificarSucursal(null, sucursal_id, negocioId);
+  const sucursalId = Number(sucursal_id);
 
-  return repo.insertarMovimientoCuenta(null, {
-    negocio_id: negocioId, sucursal_id: Number(sucursal_id),
-    tipo: 'Ajuste', valor: monto,
-    concepto: concepto.trim(), usuario_id: req.user.id,
-  });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const mov = await repo.insertarMovimientoCuenta(client, {
+      negocio_id: negocioId, sucursal_id: sucursalId,
+      tipo: 'Ajuste', valor: monto,
+      concepto: concepto.trim(), usuario_id: req.user.id,
+    });
+
+    let reparto = [], sobrante = 0;
+    if (monto > 0) {
+      ({ reparto, sobrante } = await _imputarFIFO(client, {
+        negocioId, sucursalId, valor: monto, origen: 'ajuste',
+        movimientoId: mov.id, usuarioId: req.user.id, notas: concepto.trim(),
+        remisionId: remision_id ? Number(remision_id) : null,
+      }));
+    }
+
+    await client.query('COMMIT');
+    return { ...mov, reparto, sobrante };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1421,7 +1689,19 @@ const ESTADOS_EN_PODER = [
   'Sin ubicar', 'Movida',
 ];
 
-const _armarSaldo = ({ resumen, cantidad, remesado, movimientos }) => {
+// ─────────────────────────────────────────────────────────────────────────────
+// EL SALDO — desde agosto 2026, la deuda es la de los ENVÍOS
+//
+// Antes el local solo debía lo vendido y la deuda salía de cruzar las unidades
+// contra las ventas. Ahora debe todo lo que recibió, y la cuenta la llevan los
+// envíos: cada uno tiene su cargo (derivado de sus líneas) y sus abonos
+// (escritos, porque a qué envío se imputa un pago lo decide una persona).
+//
+// El cruce contra las ventas SIGUE CORRIENDO, pero ya no toca un peso: sirve
+// para contarle al local qué vendió y qué le queda en vitrina. Cuando algo
+// aquí diga "informativo", quiere decir exactamente eso.
+// ─────────────────────────────────────────────────────────────────────────────
+const _armarSaldo = ({ resumen, cantidad, remesado, movimientos, envios }) => {
   const porEstado = {};
   let liquidableSerial = 0;
   for (const r of resumen) {
@@ -1435,69 +1715,99 @@ const _armarSaldo = ({ resumen, cantidad, remesado, movimientos }) => {
     liquidableSerial += _num(r.liquidable);
   }
   const liquidableCantidad = cantidad.reduce((s, c) => s + _num(c.liquidable), 0);
-
   const totalLiquidable = liquidableSerial + liquidableCantidad;
-  const recibido    = _num(remesado?.recibido);
-  const enTransito  = _num(remesado?.en_transito);
-  const gastos      = _num(movimientos?.gastos);
-  const ajustes     = _num(movimientos?.ajustes);
-  const pagado      = recibido + gastos + ajustes;
 
-  // VALOR EN PODER DEL LOCAL: todo lo que la bodega le entregó y sigue siendo
-  // responsabilidad suya. Se excluye lo que nunca llegó ('Faltante'), lo que
-  // todavía viaja ('En transito') y lo que ya regresó ('Devuelta').
+  const recibido   = _num(remesado?.recibido);
+  const enTransito = _num(remesado?.en_transito);
+  const gastos     = _num(movimientos?.gastos);
+  const ajustes    = _num(movimientos?.ajustes);
+
+  // Valor de envío de la mercancía que el local todavía tiene sin vender. Es
+  // informativo: la debe igual, pero le dice de dónde va a salir la plata.
+  const enVitrina = porEstado['En consignacion']?.valor_interno || 0;
+  const prestado  = porEstado['En prestamo']?.valor_interno     || 0;
+  const vendido   = (porEstado['Por liquidar']?.valor_interno || 0)
+                  + (porEstado['En recaudo']?.valor_interno   || 0);
+
   const valorEnPoder =
     ESTADOS_EN_PODER.reduce((s, e) => s + (porEstado[e]?.valor_interno || 0), 0)
     + cantidad.reduce((s, c) =>
         s + (_num(c.entregado) - _num(c.devuelto)) * _num(c.valor_unitario), 0);
 
+  // ── La cuenta ──────────────────────────────────────────────────────────────
+  const deudaEnvios   = _num(envios?.deuda);
+  const cargosSueltos = _num(envios?.cargos_sueltos);
+  // Crédito del local: lo que pagó de más en envíos que después encogieron por
+  // una devolución, más la plata que llegó sin imputarse a nada, menos lo que
+  // ya se consumió contra envíos nuevos.
+  const aFavor = Math.max(0,
+    _num(envios?.excedente) + _num(envios?.sin_imputar) - _num(envios?.favor_usado));
+
+  const deudaTotal = deudaEnvios + cargosSueltos;
+
   return {
     por_estado: porEstado,
     cantidad_consignada: cantidad,
     totales: {
-      liquidable_total:   Math.round(totalLiquidable),
+      // ── LO QUE DEBE ────────────────────────────────────────────────────────
+      // DEUDA TOTAL: la suma de los saldos de sus envíos. Sube al RECIBIR
+      // mercancía y baja al pagar o al devolver. Es exigible completa: el
+      // local paga lo que le entregan, esté vendido o no.
+      deuda_total:        Math.round(deudaTotal),
+      saldo_a_favor:      Math.round(aFavor),
+      // Lo que tiene que entregar de verdad hoy, ya descontado su crédito.
+      // Conserva el nombre viejo porque lo leen el Dashboard y los reportes.
+      //
+      // NUNCA NEGATIVO, y es una decisión, no un descuido: si el crédito del
+      // local supera su deuda, la bodega no le queda debiendo plata — le queda
+      // debiendo MERCANCÍA. El excedente vive en `saldo_a_favor` y se aplica
+      // solo cuando llegue el próximo envío.
+      saldo_por_liquidar: Math.max(0, Math.round(deudaTotal - aFavor)),
+      // La posición neta con signo, para cuadrar el extracto (que sí puede
+      // quedar en negativo). No se muestra como "lo que debe".
+      neto:               Math.round(deudaTotal - aFavor),
+
+      cargo_total:        Math.round(_num(envios?.cargo_total)),
+      abonado_total:      Math.round(_num(envios?.abonado_total)),
+      cargos_sueltos:     Math.round(cargosSueltos),
+      envios_abiertos:    Number(envios?.envios_abiertos || 0),
+      envios_total:       Number(envios?.envios_total    || 0),
+
       remesado_recibido:  Math.round(recibido),
       remesas_en_transito:Math.round(enTransito),
       gastos_autorizados: Math.round(gastos),
       ajustes:            Math.round(ajustes),
 
-      // ── DOS NÚMEROS DISTINTOS, Y NO INTERCAMBIABLES ────────────────────────
-      //
-      // DEUDA TOTAL: por cuánta mercancía responde el local hoy. Cuenta todo lo
-      // que tiene en la mano, esté vendido o no, menos lo que ya pagó. Es la
-      // cifra de RESPONSABILIDAD: sube cuando la bodega despacha.
-      deuda_total:        Math.round(valorEnPoder - pagado),
-      valor_en_poder:     Math.round(valorEnPoder),
-
-      // POR REMITIR: cuánto tiene que entregar YA. Solo lo vendido, menos lo
-      // pagado. Es la cifra EXIGIBLE: sube cuando el local vende, no cuando
-      // recibe. Es la que manda en las remesas y en la conciliación.
-      saldo_por_liquidar: Math.round(totalLiquidable - recibido - gastos - ajustes),
-
-      // La diferencia entre las dos, dicha explícitamente para que nadie tenga
-      // que restarlas mentalmente: mercancía que aún no se ha vuelto exigible
-      // (vitrina, prestados, y la parte no recaudada de los créditos).
-      por_vender:         Math.round(valorEnPoder - totalLiquidable),
-      // Informativo, NO exigible: mercancía que sigue en vitrina.
-      en_consignacion_valor:    porEstado['En consignacion']?.valor_interno || 0,
-      en_consignacion_unidades: porEstado['En consignacion']?.unidades      || 0,
-      en_recaudo_valor:         porEstado['En recaudo']?.valor_interno      || 0,
-      en_recaudo_unidades:      porEstado['En recaudo']?.unidades           || 0,
-      sin_ubicar_unidades:      porEstado['Sin ubicar']?.unidades           || 0,
-      sin_ubicar_valor:         porEstado['Sin ubicar']?.valor_interno      || 0,
+      // ── INFORMATIVO: dónde está la mercancía que ya debe ───────────────────
+      // Ninguno de estos entra en la deuda. Responden "¿de dónde sale la plata
+      // para pagarla?": lo vendido ya la tiene, lo demás todavía no.
+      vendido_valor:            Math.round(vendido),
+      vendido_unidades:         (porEstado['Por liquidar']?.unidades || 0)
+                              + (porEstado['En recaudo']?.unidades   || 0),
+      en_vitrina_valor:         Math.round(enVitrina),
+      prestado_valor:           Math.round(prestado),
+      valor_en_poder:           Math.round(valorEnPoder),
+      liquidable_total:         Math.round(totalLiquidable),
+      en_consignacion_valor:    enVitrina,
+      en_consignacion_unidades: porEstado['En consignacion']?.unidades || 0,
+      en_recaudo_valor:         porEstado['En recaudo']?.valor_interno || 0,
+      en_recaudo_unidades:      porEstado['En recaudo']?.unidades      || 0,
+      sin_ubicar_unidades:      porEstado['Sin ubicar']?.unidades      || 0,
+      sin_ubicar_valor:         porEstado['Sin ubicar']?.valor_interno || 0,
     },
   };
 };
 
 const getEstadoLocal = async (negocioId, sucursalId) => {
-  const [resumen, cantidad, remesado, movimientos] = await Promise.all([
+  const [resumen, cantidad, remesado, movimientos, envios] = await Promise.all([
     repo.getResumenUnidades(negocioId, sucursalId),
     repo.getCantidadConsignada(negocioId, sucursalId),
     repo.getTotalRemesado(negocioId, sucursalId),
     repo.getTotalMovimientosCuenta(negocioId, sucursalId),
+    repo.getTotalesEnvios(negocioId, sucursalId),
   ]);
   return _armarSaldo({
-    resumen, cantidad,
+    resumen, cantidad, envios,
     remesado:    remesado[0],
     movimientos: movimientos[0],
   });
@@ -1538,10 +1848,16 @@ const getPanelBodega = async (req) => {
   ]);
 
   const totales = locales.reduce((acc, l) => ({
+    // Lo que la red le debe a la bodega, sumando local por local.
+    deuda:              acc.deuda              + l.totales.saldo_por_liquidar,
+    saldo_a_favor:      acc.saldo_a_favor      + l.totales.saldo_a_favor,
+    envios_abiertos:    acc.envios_abiertos    + l.totales.envios_abiertos,
+    // Se conserva con el nombre viejo por si alguna pantalla lo lee todavía.
     saldo_por_liquidar: acc.saldo_por_liquidar + l.totales.saldo_por_liquidar,
     en_consignacion:    acc.en_consignacion    + l.totales.en_consignacion_valor,
     sin_ubicar:         acc.sin_ubicar         + l.totales.sin_ubicar_unidades,
-  }), { saldo_por_liquidar: 0, en_consignacion: 0, sin_ubicar: 0 });
+  }), { deuda: 0, saldo_a_favor: 0, envios_abiertos: 0,
+        saldo_por_liquidar: 0, en_consignacion: 0, sin_ubicar: 0 });
 
   return {
     es_bodega: true, sucursal_id: bodegaId,
@@ -1564,7 +1880,7 @@ const getConciliacion = async (req, sucursalId) => {
     getEstadoLocal(negocioId, objetivo),
     repo.getUnidades(negocioId, objetivo),
   ]);
-  return {
+  const salida = {
     sucursal_id: objetivo,
     ...estado,
     liquidaciones: detalle.map((d) => ({ ...d, liquidable: _num(d.liquidable) })),
@@ -1573,6 +1889,18 @@ const getConciliacion = async (req, sucursalId) => {
       etiqueta_estado: ETIQUETAS_ESTADO[u.estado_unidad] || u.estado_unidad,
       liquidable: _num(u.liquidable),
     })),
+  };
+
+  // Esta lectura también se recorta. Le faltaba: sus rutas no exigen nivel, así
+  // que un vendedor podía pedirla y recibir el `valor_interno` de cada equipo
+  // —justo lo que el recorte del estado de cuenta esconde— por la puerta de al
+  // lado. El recorte tiene que estar en TODAS las salidas, no en la principal.
+  if (_puedeVerCostos(req)) return salida;
+  const recortado = _recortarParaVendedor(salida);
+  return {
+    ...recortado,
+    liquidaciones: salida.liquidaciones.map((d) => _sinValores(d, CLAVES_VALOR_UNIDAD)),
+    unidades:      salida.unidades.map((u) => _sinValores(u, CLAVES_VALOR_UNIDAD)),
   };
 };
 
@@ -1601,7 +1929,7 @@ const getEstadoCuenta = async (req, sucursalId, filtros = {}) => {
 
   const { desde = null, hasta = null, q = '', estado = null, limit = 100, offset = 0 } = filtros;
 
-  const [totales, extracto, mercancia, remisiones, remesas, movimientos, porEnvio] =
+  const [totales, extracto, mercancia, remisiones, remesas, movimientos, porEnvio, abonos] =
     await Promise.all([
       getEstadoLocal(negocioId, objetivo),
       repo.getExtracto(negocioId, objetivo, { desde, hasta }),
@@ -1614,6 +1942,7 @@ const getEstadoCuenta = async (req, sucursalId, filtros = {}) => {
       repo.findRemesas(negocioId,    { sucursalId: objetivo, rol: 'origen',  limit: 100 }),
       repo.findMovimientosCuenta(negocioId, objetivo, 100),
       repo.getResumenPorRemision(negocioId, objetivo, { limit: 100 }),
+      repo.findAbonosLocal(negocioId, objetivo, 300),
     ]);
 
   const salida = {
@@ -1642,7 +1971,11 @@ const getEstadoCuenta = async (req, sucursalId, filtros = {}) => {
       Object.entries(totales.por_estado).map(([k, v]) => [k, v.unidades])
     ),
     remisiones, remesas, movimientos_cuenta: movimientos,
-    // Envío por envío: qué se vendió, qué se prestó y qué sigue disponible.
+    // Los abonos, con el envío al que se imputó cada uno. Es lo que permite
+    // contar el pago como lo hizo el usuario ("pagué $2M y taparon 3 envíos")
+    // en vez de como una cifra suelta.
+    abonos: abonos.map((a) => ({ ...a, valor: _num(a.valor) })),
+    // Envío por envío: su cuenta y, aparte, qué se vendió y qué queda.
     ...(_armarEnvios(porEnvio, totales.totales)),
     // Por qué debe lo que debe, en una línea por concepto.
     desglose: _desgloseSaldo(totales.totales, remesas),
@@ -1652,25 +1985,30 @@ const getEstadoCuenta = async (req, sucursalId, filtros = {}) => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ENVÍOS — la pregunta que el local hace de verdad:
-// "de lo que me mandaron en este envío, ¿qué vendí, qué presté y qué me queda?"
+// ENVÍOS — cada uno es una cuenta, como una factura a crédito de un cliente
 //
-// La deuda pendiente por envío la imputa el FIFO del repositorio. Lo que queda
-// sin atribuir son los accesorios (su liquidación se ancla en el stock global,
-// no en un envío concreto), así que se devuelven aparte como un residuo — nunca
-// repartidos a ojo entre envíos.
+// Dos capas en la misma tarjeta, y no conviene mezclarlas:
+//   LA CUENTA      cargo · abonado · saldo. Es la plata, y es lo que se paga.
+//   LA MERCANCÍA   cuántos vendió, prestó y le quedan. Es INFORMATIVO: el
+//                  local debe el envío completo desde que lo recibe, venda o no.
 //
-// INVARIANTE: Σ deuda_pendiente + accesorios_pendiente = saldo_por_liquidar
-// cuando el saldo es positivo (si es negativo el local pagó de más y no queda
-// nada pendiente). Está verificado en las pruebas 11-envios-por-remision.
+// INVARIANTE: Σ saldo de los envíos + ajustes en contra = deuda_total.
+// Los accesorios ya no quedan fuera del reparto: cuelgan de su envío como
+// cualquier otra línea, porque ahora valen cantidad × valor, no una estimación
+// contra el stock. Verificado en 11-envios-por-remision.
 // ─────────────────────────────────────────────────────────────────────────────
 const _armarEnvios = (filas, t) => {
   const envios = filas.map((e) => ({
     ...e,
     unidades:          Number(e.unidades),
+    // ── La cuenta del envío ──
+    cargo:             Math.round(_num(e.cargo)),
+    abonado:           Math.round(_num(e.abonado)),
+    saldo:             Math.round(_num(e.saldo)),
+    excedente:         Math.round(_num(e.excedente)),
+    pagado:            _num(e.cargo) > 0 && _num(e.saldo) <= 0,
+    // ── La mercancía (informativo) ──
     valor_recibido:    Math.round(_num(e.valor_recibido)),
-    deuda_generada:    Math.round(_num(e.deuda_generada)),
-    deuda_pendiente:   Math.round(_num(e.deuda_pendiente)),
     disponibles_valor: Math.round(_num(e.disponibles_valor)),
     vendidas_valor:    Math.round(_num(e.vendidas_valor)),
     prestadas_valor:   Math.round(_num(e.prestadas_valor)),
@@ -1679,17 +2017,16 @@ const _armarEnvios = (filas, t) => {
     valor_total:       _num(e.valor_total),
   }));
 
-  const pendienteSerial = envios.reduce((s, e) => s + e.deuda_pendiente, 0);
-  const saldo = _num(t.saldo_por_liquidar);
-
   return {
     envios,
     envios_resumen: {
-      total: envios.length,
-      // Deuda que no cuelga de ningún envío: accesorios (fungibles) y, si los
-      // hubiera, redondeos. Se muestra como una línea aparte, no se reparte.
-      accesorios_pendiente: Math.max(0, Math.round(saldo) - pendienteSerial),
-      pendiente_en_envios:  pendienteSerial,
+      total:    envios.length,
+      abiertos: envios.filter((e) => e.saldo > 0).length,
+      // Se toman de los totales del local, no de la suma de esta lista: la
+      // lista viene topada y sumarla daría menos deuda de la que hay.
+      saldo_total:    Math.max(0, _num(t.deuda_total) - _num(t.cargos_sueltos)),
+      cargos_sueltos: _num(t.cargos_sueltos),
+      saldo_a_favor:  _num(t.saldo_a_favor),
     },
   };
 };
@@ -1712,43 +2049,50 @@ const _desgloseSaldo = (t, remesas = []) => {
 
   const lineas = [
     {
-      clave: 'vendido',
-      etiqueta: 'Productos vendidos que aún no ha liquidado',
-      valor: _num(t.liquidable_total),
+      clave: 'envios',
+      etiqueta: `Mercancía que la bodega le entregó${t.envios_total ? ` (${t.envios_total} envío/s)` : ''}`,
+      detalle: 'lo devuelto ya está descontado',
+      valor: _num(t.cargo_total),
       signo: '+',
     },
     {
-      clave: 'remesas',
-      etiqueta: `Remesas recibidas${recibidas.length ? ` (${recibidas.length})` : ''}`,
-      valor: -_num(t.remesado_recibido),
+      clave: 'pagos',
+      etiqueta: 'Lo que ya le pagó',
+      detalle: recibidas.length ? `${recibidas.length} remesa(s), gastos y abonos` : null,
+      valor: -_num(t.abonado_total),
       signo: '−',
       medios: porMedio,
       ultima_fecha: ultima?.fecha_recepcion || null,
     },
   ];
-  if (_num(t.gastos_autorizados) > 0) {
+  if (_num(t.cargos_sueltos) > 0) {
     lineas.push({
-      clave: 'gastos',
-      etiqueta: 'Gastos que pagó por cuenta de la bodega',
-      valor: -_num(t.gastos_autorizados), signo: '−',
+      clave: 'cargos_sueltos',
+      etiqueta: 'Cargos que la bodega le hizo aparte',
+      detalle: 'roturas, faltantes u otros ajustes en contra',
+      valor: _num(t.cargos_sueltos), signo: '+',
     });
   }
-  if (_num(t.ajustes) !== 0) {
+  if (_num(t.saldo_a_favor) > 0) {
     lineas.push({
-      clave: 'ajustes',
-      etiqueta: 'Ajustes y saldos a favor',
-      valor: -_num(t.ajustes), signo: _num(t.ajustes) > 0 ? '−' : '+',
+      clave: 'favor',
+      etiqueta: 'Saldo a favor sin usar',
+      detalle: 'se aplica solo cuando llegue el próximo envío',
+      valor: -_num(t.saldo_a_favor), signo: '−',
     });
   }
 
   return {
     lineas,
     saldo: _num(t.saldo_por_liquidar),
-    // Lo que NO debe, dicho explícitamente: es la duda más común del local.
-    no_debe: {
-      etiqueta: 'Mercancía en vitrina — solo se liquida al venderla',
+    // De lo que debe, de dónde va a salir la plata. Es informativo y es la
+    // duda más común del local ahora que paga todo lo que recibe.
+    respaldo: {
+      etiqueta: 'De esa deuda, esto todavía está en vitrina',
       unidades: t.en_consignacion_unidades,
-      valor:    t.en_consignacion_valor,
+      valor:    t.en_vitrina_valor,
+      vendido:  t.vendido_valor,
+      vendido_unidades: t.vendido_unidades,
     },
     en_transito: _num(t.remesas_en_transito),
   };
@@ -1782,20 +2126,29 @@ const getRemision = async (req, id) => {
     ? remision.sucursal_origen_id
     : remision.sucursal_destino_id;
 
-  const [lineas, correcciones] = await Promise.all([
+  const [lineas, correcciones, abonos] = await Promise.all([
     repo.getLineasDetalladas(negocioId, id, sucursalUnidades),
     repo.getCorreccionesRemision(negocioId, id),
+    // Los abonos que ha recibido este envío: son su estado de cuenta.
+    repo.getAbonosDeEnvio(negocioId, id),
   ]);
 
   const resumen = lineas.reduce((acc, l) => {
     const unidades = l.tipo === 'cantidad' ? Number(l.cantidad_recibida ?? l.cantidad ?? 0) : 1;
     const valor    = _num(l.valor_interno) * unidades;
     if (l.estado_linea === 'Faltante') { acc.no_llego += valor; return acc; }
+    if (l.estado_linea === 'Devuelta') { acc.devuelto += valor; return acc; }
     acc.enviado += valor;
+    // El CARGO del envío: lo recibido y no devuelto. Es la deuda que generó.
+    if (l.estado_linea === 'Recibida') acc.cargo += valor;
     acc.liquidable += _num(l.liquidable);
     if (l.estado_unidad === 'En consignacion') acc.en_vitrina += valor;
     return acc;
-  }, { enviado: 0, liquidable: 0, en_vitrina: 0, no_llego: 0 });
+  }, { enviado: 0, cargo: 0, liquidable: 0, en_vitrina: 0, no_llego: 0, devuelto: 0 });
+
+  const abonadoEfectivo = abonos
+    .filter((a) => !a.anulado && (a.origen !== 'remesa' || a.remesa_estado === 'Recibida'))
+    .reduce((s, a) => s + _num(a.valor), 0);
 
   const salida = {
     ...remision,
@@ -1810,8 +2163,15 @@ const getRemision = async (req, id) => {
       referencia_difiere: _referenciaDifiere(l.nombre_producto_bodega, l.nombre_producto_local),
     })),
     correcciones,
+    abonos: abonos.map((a) => ({ ...a, valor: _num(a.valor) })),
     resumen: {
       enviado:    Math.round(resumen.enviado),
+      // La cuenta del envío, calculada con las MISMAS reglas que el listado:
+      // cargo = líneas 'Recibida'; abono efectivo = el que ya confirmó bodega.
+      cargo:      Math.round(resumen.cargo),
+      abonado:    Math.round(abonadoEfectivo),
+      saldo:      Math.max(0, Math.round(resumen.cargo - abonadoEfectivo)),
+      devuelto:   Math.round(resumen.devuelto),
       liquidable: Math.round(resumen.liquidable),
       en_vitrina: Math.round(resumen.en_vitrina),
       no_llego:   Math.round(resumen.no_llego),
@@ -1827,7 +2187,16 @@ const getRemision = async (req, id) => {
     ...salida,
     costos_ocultos: true,
     valor_total: null,
-    resumen: null,
+    // La CUENTA del envío sobrevive: es la plata que el vendedor tiene que
+    // entregar. Lo que se va es la valorización de la mercancía, que revela el
+    // costo de cada equipo.
+    resumen: {
+      cargo:      salida.resumen.cargo,
+      abonado:    salida.resumen.abonado,
+      saldo:      salida.resumen.saldo,
+      enviado:    null, devuelto: null, liquidable: null,
+      en_vitrina: null, no_llego: null,
+    },
     correcciones: [],
     lineas: salida.lineas.map((l) => _sinValores(l, [...CLAVES_VALOR_UNIDAD, 'subtotal'])),
   };

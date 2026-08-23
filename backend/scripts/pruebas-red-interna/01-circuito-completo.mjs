@@ -20,6 +20,7 @@ await db.exec(readFileSync(path.join(AQUI, 'esquema.sql'), 'utf8'));
 await db.exec(readFileSync(path.join(AQUI, 'esquema-completo.sql'), 'utf8'));
 await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260725_red_interna.sql'), 'utf8'));
 await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260726_red_interna_v2.sql'), 'utf8'));
+await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260822_red_interna_envios.sql'), 'utf8'));
 
 // ── Pool falso: PGlite con la misma interfaz que `pg` ───────────────────────
 const conectar = (target) => ({
@@ -135,11 +136,17 @@ checkN('Cargadores que quedan en bodega', stocks.find((r) => r.sucursal_id === 1
 checkN('Cargadores que llegaron al local', stocks.find((r) => r.sucursal_id === 2).stock, 10);
 check('Costo promedio correcto en el local', stocks.find((r) => r.sucursal_id === 2).costo_unitario, 8000);
 
-console.log('\n═══ 3. Estado del local: en consignación, SIN deuda ═══');
+console.log('\n═══ 3. Estado del local: recibir YA es deber ═══');
+// Cambio de modelo (agosto 2026): el local paga lo que la bodega le entrega,
+// esté vendido o no. Antes esta misma prueba exigía saldo 0 hasta la venta.
 let estado = await service.getPanelLocal(reqCentro);
-check('En consignación (informativo)', estado.totales.en_consignacion_valor, 1800000 + 1850000);
-checkN('Equipos en consignación', estado.totales.en_consignacion_unidades, 2);
-check('★ Saldo por liquidar = 0 (no vendió nada todavía)', estado.totales.saldo_por_liquidar, 0);
+check('En vitrina (informativo)', estado.totales.en_consignacion_valor, 1800000 + 1850000);
+checkN('Equipos en vitrina', estado.totales.en_consignacion_unidades, 2);
+check('★ La deuda nace con el envío: 2 equipos + 10 cargadores',
+      estado.totales.deuda_total, 1800000 + 1850000 + 10 * 8000);
+check('★ Y es exigible completa, sin haber vendido nada',
+      estado.totales.saldo_por_liquidar, 3730000);
+checkN('Un solo envío, y está abierto', estado.totales.envios_abiertos, 1);
 
 console.log('\n═══ 4. El local vende un iPhone de CONTADO por $2.600.000 ═══');
 await db.exec(`
@@ -151,8 +158,11 @@ await db.exec(`
   UPDATE seriales SET vendido = TRUE, fecha_salida = CURRENT_DATE WHERE id = 1;
 `);
 estado = await service.getPanelLocal(reqCentro);
-check('★ Ahora SÍ debe liquidar: el costo del equipo vendido', estado.totales.saldo_por_liquidar, 1800000);
-check('En consignación baja al equipo restante', estado.totales.en_consignacion_valor, 1850000);
+check('★ Vender NO mueve la deuda: ya la debía desde que recibió',
+      estado.totales.saldo_por_liquidar, 3730000);
+check('★ Solo cambia el informativo: el equipo sale de la vitrina',
+      estado.totales.en_consignacion_valor, 1850000);
+check('Y aparece como vendido', estado.totales.vendido_valor, 1800000);
 
 console.log('\n═══ 5. Vende el otro iPhone a CRÉDITO ($2.700.000, abonado $500.000) ═══');
 await db.exec(`
@@ -165,24 +175,24 @@ await db.exec(`
   UPDATE seriales SET vendido = TRUE WHERE id = 2;
 `);
 estado = await service.getPanelLocal(reqCentro);
-// Regla confirmada: la bodega recupera primero → mín(recaudado, costo).
-// Recaudado = 300.000 + 200.000 = 500.000  <  costo 1.850.000 → liquida 500.000
-check('★ Crédito: liquida solo lo recaudado (mín(recaudado, costo))',
-      estado.totales.saldo_por_liquidar, 1800000 + 500000);
-checkN('Aparece como "en recaudo"', estado.totales.en_recaudo_unidades, 1);
+// El riesgo del crédito es del LOCAL: le fió a su cliente, pero a la bodega ya
+// le debía el equipo completo desde que lo recibió. Antes la deuda con bodega
+// crecía al ritmo del recaudo (mín(recaudado, costo)); eso se acabó.
+check('★ Vender a crédito tampoco mueve la deuda con la bodega',
+      estado.totales.saldo_por_liquidar, 3730000);
+checkN('Aparece como "en recaudo" (informativo)', estado.totales.en_recaudo_unidades, 1);
 
 console.log('\n   … el cliente abona $1.600.000 más (total recaudado $2.100.000)');
 await db.exec(`UPDATE creditos SET total_abonado = 1800000 WHERE id = 1;`);
 estado = await service.getPanelLocal(reqCentro);
-// Recaudado = 300.000 + 1.800.000 = 2.100.000 > costo 1.850.000 → tope en el costo
-check('★ Ya recaudó más que el costo: se topa en el costo, el resto es margen del local',
-      estado.totales.saldo_por_liquidar, 1800000 + 1850000);
+check('★ Que el cliente del local abone no cambia nada de esta cuenta',
+      estado.totales.saldo_por_liquidar, 3730000);
 
 console.log('\n═══ 6. El local remite $2.000.000 a la bodega ═══');
 const remesa = await service.enviarRemesa(reqCentro, { valor: 2000000 });
 checkN('Remesa en tránsito', remesa.estado === 'En transito' ? 1 : 0, 1);
 estado = await service.getPanelLocal(reqCentro);
-check('Saldo NO baja todavía (la bodega no ha confirmado)', estado.totales.saldo_por_liquidar, 3650000);
+check('Saldo NO baja todavía (la bodega no ha confirmado)', estado.totales.saldo_por_liquidar, 3730000);
 check('Se muestra en tránsito', estado.totales.remesas_en_transito, 2000000);
 
 const cuentas = await q(`SELECT c.nombre, c.tipo, c.sucursal_id,
@@ -197,7 +207,7 @@ check('★ Total del negocio intacto', cuentas.reduce((s, c) => s + Number(c.sal
 console.log('\n   … la bodega confirma que recibió');
 await service.confirmarRemesa(reqBodega, remesa.id);
 estado = await service.getPanelLocal(reqCentro);
-check('★ Ahora sí baja el saldo por liquidar', estado.totales.saldo_por_liquidar, 3650000 - 2000000);
+check('★ Ahora sí baja el saldo por liquidar', estado.totales.saldo_por_liquidar, 3730000 - 2000000);
 
 const cuentas2 = await q(`SELECT c.tipo, c.sucursal_id,
    COALESCE(SUM(CASE WHEN m.tipo='entrada' THEN m.valor ELSE -m.valor END),0) saldo
@@ -308,18 +318,20 @@ try {
   console.log(`     "${e.message}"`);
 }
 
-console.log('\n═══ 11. Si el local ANULA una factura, la deuda se corrige sola ═══');
-// Esta es la ventaja de DERIVAR en vez de guardar: no hay contra-asiento que
-// hacer. cancelarFactura() pone vendido=false y la unidad vuelve a consignación.
+console.log('\n═══ 11. Si el local ANULA una factura, la cuenta con bodega NO se mueve ═══');
+// Antes anular una venta bajaba la deuda con la bodega, porque la deuda salía
+// de las ventas. Ahora sale del envío: lo que el local haga con su cliente es
+// asunto suyo. Lo que sí se corrige solo —y esa ventaja de derivar sigue
+// intacta— es el informativo: el equipo vuelve a la vitrina.
 const antesAnular = (await service.getPanelLocal(reqCentro)).totales.saldo_por_liquidar;
 await db.exec(`
   UPDATE facturas SET estado = 'Cancelada' WHERE id = 1;
   UPDATE seriales SET vendido = FALSE, fecha_salida = NULL WHERE id = 1;
 `);
 const trasAnular = await service.getPanelLocal(reqCentro);
-check('★ El saldo se corrige solo, sin ningún ajuste manual',
-      trasAnular.totales.saldo_por_liquidar, antesAnular - 1800000);
-checkN('★ El equipo vuelve a contarse como consignación',
+check('★ La deuda con la bodega no se toca: no nació de esa venta',
+      trasAnular.totales.saldo_por_liquidar, antesAnular);
+checkN('★ El equipo vuelve a contarse en vitrina, sin ajuste manual',
        trasAnular.totales.en_consignacion_unidades, 1);
 const saludAnular = await service.getSalud(reqBodega);
 checkN('★ Y NO aparece como "sin ubicar" (falsa alarma evitada)',

@@ -83,26 +83,27 @@ export default function Dashboard() {
           className={`w-full text-left rounded-2xl border p-4 sm:p-5 shadow-sm
             hover:shadow-md transition-all duration-200 flex items-center gap-4
             ${bodega.saldo > 0 ? 'bg-amber-50 border-amber-200'
-             : bodega.saldo < 0 ? 'bg-blue-50 border-blue-200'
-                                : 'bg-green-50 border-green-200'}`}
+                               : 'bg-green-50 border-green-200'}`}
         >
           <div className={`w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0
             ${bodega.saldo > 0 ? 'bg-amber-100 text-amber-600'
-             : bodega.saldo < 0 ? 'bg-blue-100 text-blue-600'
-                                : 'bg-green-100 text-green-600'}`}>
+                               : 'bg-green-100 text-green-600'}`}>
             <Truck size={20} />
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-xs text-gray-500 font-medium">
-              {bodega.saldo < 0 ? 'La bodega te debe' : 'Deuda con la bodega'}
-            </p>
+            {/* El saldo ya no puede ser negativo: si el local pagó de más, eso
+                es saldo A FAVOR y se aplica al próximo envío. La bodega no le
+                queda debiendo plata. */}
+            <p className="text-xs text-gray-500 font-medium">Deuda con la bodega</p>
             <p className="text-xl sm:text-2xl font-bold text-gray-900 leading-tight">
-              {formatCOP(Math.abs(bodega.saldo))}
+              {formatCOP(bodega.saldo)}
             </p>
             <p className="text-xs text-gray-400 truncate">
               {bodega.saldo > 0
-                ? `${bodega.unidades_vendidas} equipo(s) vendidos sin liquidar`
-                : bodega.saldo < 0 ? 'pagaste de más' : 'estás al día ✓'}
+                ? `${bodega.envios_abiertos} envío(s) por pagar`
+                : bodega.saldo_a_favor > 0
+                  ? `${formatCOP(bodega.saldo_a_favor)} a tu favor`
+                  : 'estás al día ✓'}
               {bodega.remesas_en_transito > 0 &&
                 ` · ${formatCOP(bodega.remesas_en_transito)} sin confirmar`}
             </p>

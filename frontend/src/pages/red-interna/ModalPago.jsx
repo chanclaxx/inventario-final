@@ -6,25 +6,32 @@ import { useClaveIdempotencia } from '../../utils/claveIdempotencia';
 import { Modal }  from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
 import { InputMoneda } from '../../components/ui/InputMoneda';
-import { Send, Info } from 'lucide-react';
+import { Send, Info, Truck, Layers } from 'lucide-react';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ENVIAR REMESA — el efectivo del local vuelve a la bodega.
+// PAGARLE A LA BODEGA — un solo modal para los dos gestos
 //
-// Un solo campo. El sugerido viene precargado con lo que el local debe
-// liquidar, así el caso normal es: abrir, confirmar.
+//   ABONAR A UN ENVÍO   se abre desde la tarjeta del envío y lleva `envio`.
+//                       El pago entra ahí y nada más, como el abono a un
+//                       crédito de un cliente.
+//
+//   PAGAR TODO          se abre desde la cabecera, sin `envio`. El backend lo
+//                       reparte entre los envíos abiertos, del más viejo al más
+//                       nuevo, y devuelve el reparto para poder contarlo.
+//
+// Lo que sobre en cualquiera de los dos casos queda como saldo a favor y se
+// aplica solo cuando llegue el próximo envío.
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function ModalRemesa({ sugerido = 0, onCerrar, onListo }) {
-  const [valor, setValor] = useState(sugerido > 0 ? Math.round(sugerido) : '');
+export function ModalPago({ envio = null, sugerido = 0, onCerrar, onListo }) {
+  const tope = envio ? Number(envio.saldo || 0) : Number(sugerido || 0);
+  const [valor, setValor] = useState(tope > 0 ? Math.round(tope) : '');
   const [notas, setNotas] = useState('');
   const [error, setError] = useState('');
   const [cuentaId, setCuentaId] = useState(null);
-  // Evita remesas duplicadas por doble toque o reintento de red.
+  // Evita pagos duplicados por doble toque o reintento de red.
   const clave = useClaveIdempotencia();
 
-  // Cuentas del local: efectivo, Nequi, banco… Antes toda remesa asumía
-  // efectivo y un local que remitía por transferencia no tenía cómo registrarlo.
   const { data: cuentas = [] } = useQuery({
     queryKey: ['red-cuentas-remesa'],
     queryFn:  () => getCuentasParaRemesa().then((r) => r.data.data),
@@ -41,15 +48,39 @@ export function ModalRemesa({ sugerido = 0, onCerrar, onListo }) {
       notas: notas.trim() || null,
       cuenta_origen_id: cuenta?.id || undefined,
       metodo: cuenta?.metodo_sugerido || undefined,
+      remision_id: envio?.id || undefined,
       clave_idempotencia: clave(),
-    }).then((r) => r.data.data),
-    onSuccess: onListo,
-    onError: (err) => setError(err.response?.data?.error || 'No se pudo enviar la remesa'),
+    }).then((r) => r.data),
+    onSuccess: (res) => onListo(res?.message, res?.data),
+    onError: (err) => setError(err.response?.data?.error || 'No se pudo enviar el pago'),
   });
 
+  const monto = Number(valor) || 0;
+  const excede = tope > 0 && monto > Math.round(tope);
+
   return (
-    <Modal open onClose={onCerrar} title="Enviar efectivo a bodega" size="sm">
+    <Modal
+      open onClose={onCerrar} size="sm"
+      title={envio ? `Abonar al envío #${envio.numero ?? envio.id}` : 'Pagarle a la bodega'}
+    >
       <div className="flex flex-col gap-4">
+        {envio ? (
+          <div className="flex items-center gap-2.5 bg-gray-50 rounded-xl px-3.5 py-2.5">
+            <Truck size={15} className="text-gray-400 flex-shrink-0" />
+            <div className="flex-1 min-w-0 text-xs text-gray-500">
+              Este envío debe <strong className="text-gray-800">{formatCOP(envio.saldo)}</strong>
+              {Number(envio.abonado) > 0 && <> · ya abonó {formatCOP(envio.abonado)}</>}
+            </div>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2.5 bg-gray-50 rounded-xl px-3.5 py-2.5">
+            <Layers size={15} className="text-gray-400 flex-shrink-0" />
+            <div className="flex-1 min-w-0 text-xs text-gray-500">
+              Se reparte entre tus envíos abiertos, del más viejo al más nuevo.
+            </div>
+          </div>
+        )}
+
         <div className="flex flex-col gap-1">
           <label className="text-sm font-medium text-gray-700">¿Cuánto envías?</label>
           <InputMoneda
@@ -59,13 +90,23 @@ export function ModalRemesa({ sugerido = 0, onCerrar, onListo }) {
           />
         </div>
 
-        {sugerido > 0 && Number(valor) !== Math.round(sugerido) && (
+        {tope > 0 && monto !== Math.round(tope) && (
           <button
-            onClick={() => setValor(Math.round(sugerido))}
+            onClick={() => setValor(Math.round(tope))}
             className="text-xs text-blue-600 hover:text-blue-700 text-left"
           >
-            Usar lo pendiente por liquidar: {formatCOP(sugerido)}
+            {envio ? 'Pagar este envío completo' : 'Pagar todo lo que debes'}: {formatCOP(tope)}
           </button>
+        )}
+
+        {excede && (
+          <p className="text-xs text-amber-600 flex items-start gap-1.5">
+            <Info size={12} className="flex-shrink-0 mt-0.5" />
+            Estás enviando {formatCOP(monto - Math.round(tope))} de más.
+            {envio
+              ? ' Lo que sobre pasará a tus otros envíos abiertos.'
+              : ' Lo que sobre te queda a favor para el próximo envío.'}
+          </p>
         )}
 
         {cuentas.length > 1 && (
@@ -99,7 +140,7 @@ export function ModalRemesa({ sugerido = 0, onCerrar, onListo }) {
             <Info size={14} className="mt-0.5 flex-shrink-0" />
             <span>
               {cuenta?.es_efectivo
-                ? <>Sale de tu caja ahora y queda <strong>en tránsito</strong> hasta que la bodega confirme que la recibió.</>
+                ? <>Sale de tu caja ahora y queda <strong>en tránsito</strong> hasta que la bodega confirme que lo recibió.</>
                 : <>Sale de <strong>{cuenta?.nombre || 'la cuenta'}</strong> y queda <strong>en tránsito</strong> hasta que la bodega confirme. No pasa por la caja física.</>}
             </span>
           </p>
@@ -111,7 +152,7 @@ export function ModalRemesa({ sugerido = 0, onCerrar, onListo }) {
           <Button variant="secondary" className="flex-1" onClick={onCerrar}>Cancelar</Button>
           <Button
             className="flex-1"
-            disabled={!(Number(valor) > 0)}
+            disabled={!(monto > 0)}
             loading={enviar.isPending}
             onClick={() => enviar.mutate()}
           >

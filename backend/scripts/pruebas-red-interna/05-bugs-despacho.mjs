@@ -23,6 +23,7 @@ await db.exec(readFileSync(path.join(AQUI, 'esquema.sql'), 'utf8'));
 await db.exec(readFileSync(path.join(AQUI, 'esquema-completo.sql'), 'utf8'));
 await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260725_red_interna.sql'), 'utf8'));
 await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260726_red_interna_v2.sql'), 'utf8'));
+await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260822_red_interna_envios.sql'), 'utf8'));
 
 const conectar = (t) => ({ query: (s, p) => t.query(s, p ?? []) });
 const pool = { ...conectar(db), connect: async () => ({ ...conectar(db), release() {} }) };
@@ -149,8 +150,15 @@ await db.exec(`
   UPDATE seriales SET vendido = TRUE WHERE imei = 'AAA111';
 `);
 const estado = await service.getPanelLocal(centro);
-ok('★ El local liquida el valor que se le puso, no $0',
-   Number(estado.totales.saldo_por_liquidar) === 1750000, money(estado.totales.saldo_por_liquidar));
+// La deuda ya no depende de la venta (ver el cambio de modelo), pero lo que se
+// verifica aquí sigue siendo lo mismo: que el equipo se cobre al valor EDITADO
+// y no en $0 por no tener costo registrado.
+const detalleR1 = await service.getRemision(bodega, r1.id);
+const lineaIphone = detalleR1.lineas.find((l) => l.imei === 'AAA111');
+ok('★ Al local se le cobra el valor que se le puso, no $0',
+   Number(lineaIphone.valor_interno) === 1750000, money(lineaIphone.valor_interno));
+ok('  y ese valor entra en la deuda del envío',
+   Number(estado.totales.deuda_total) >= 1750000, money(estado.totales.deuda_total));
 
 console.log('\n═══ D. El precio del carrito llega como sugerencia, no aplicado ═══');
 const resuelto = await service.resolverItems(bodega, [

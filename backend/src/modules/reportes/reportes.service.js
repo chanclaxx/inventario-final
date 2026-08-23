@@ -231,9 +231,15 @@ const _getDeudaBodega = async (sucursalId, negocioId) => {
     const redInterna = require('../red-interna/redInterna.service');
     const { totales, por_estado } = await redInterna.getEstadoLocal(negocioId, sucursalId);
     return {
+      // Lo que tiene que pagar, ya descontado su saldo a favor. Nunca negativo:
+      // desde el cambio de modelo, si el crédito supera la deuda la bodega no
+      // le queda debiendo plata sino mercancía (ver _armarSaldo).
       saldo:               totales.saldo_por_liquidar,
+      saldo_a_favor:       totales.saldo_a_favor,
       remesas_en_transito: totales.remesas_en_transito,
-      // Cuántos equipos sostienen esa deuda, para dar contexto al número.
+      // Cuántos envíos sostienen esa deuda, para dar contexto al número.
+      envios_abiertos:     totales.envios_abiertos,
+      // Y cuántos equipos de esos ya se vendieron: de ahí sale la plata.
       unidades_vendidas:   (por_estado['Por liquidar']?.unidades || 0)
                          + (por_estado['En recaudo']?.unidades   || 0),
     };

@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  getPanel, getSucursales, confirmarRemesa, anularRemision, confirmarDevolucion, getSalud,
+  getPanel, getSucursales, confirmarRemesa, anularRemesa, anularRemision,
+  confirmarDevolucion, getSalud,
 } from '../../api/redInterna.api';
 import { formatCOP, formatFechaHora } from '../../utils/formatters';
 import { Button }     from '../../components/ui/Button';
@@ -59,7 +60,14 @@ function PanelBodega({ data, locales, onRefrescar, onAviso, onVerCuenta }) {
 
   const confirmar = useMutation({
     mutationFn: (id) => confirmarRemesa(id),
-    onSuccess: () => { onAviso('Remesa confirmada'); onRefrescar(); },
+    onSuccess: () => { onAviso('Pago confirmado'); onRefrescar(); },
+  });
+  // "No me llegó": deshace el pago y libera los envíos que estaba tapando.
+  // El backend lo soportaba desde julio y no había botón en ninguna pantalla.
+  const rechazar = useMutation({
+    mutationFn: (id) => anularRemesa(id),
+    onSuccess: () => { onAviso('Pago anulado — los envíos vuelven a quedar abiertos'); onRefrescar(); },
+    onError: (e) => onAviso(e?.response?.data?.error || 'No se pudo anular'),
   });
   const anular = useMutation({
     mutationFn: (id) => anularRemision(id),
@@ -79,12 +87,12 @@ function PanelBodega({ data, locales, onRefrescar, onAviso, onVerCuenta }) {
       <div className="flex items-center justify-between mb-4 gap-2">
         <div className="flex gap-2 text-sm">
           <div>
-            <p className="text-xs text-gray-400">Por liquidar</p>
-            <p className="text-lg font-bold text-gray-900">{formatCOP(data.totales.saldo_por_liquidar)}</p>
+            <p className="text-xs text-gray-400">Te deben</p>
+            <p className="text-lg font-bold text-gray-900">{formatCOP(data.totales.deuda)}</p>
           </div>
           <div className="ml-5">
-            <p className="text-xs text-gray-400">En consignación</p>
-            <p className="text-lg font-bold text-gray-500">{formatCOP(data.totales.en_consignacion)}</p>
+            <p className="text-xs text-gray-400">Envíos abiertos</p>
+            <p className="text-lg font-bold text-gray-500">{data.totales.envios_abiertos}</p>
           </div>
         </div>
         <Button onClick={() => setDespachar(true)}>
@@ -113,8 +121,10 @@ function PanelBodega({ data, locales, onRefrescar, onAviso, onVerCuenta }) {
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold text-gray-900">{l.sucursal_nombre}</p>
                   <p className="text-xs text-gray-400 mt-0.5">
-                    {t.en_consignacion_unidades} en consignación
-                    {t.en_recaudo_unidades > 0 && ` · ${t.en_recaudo_unidades} a crédito`}
+                    {t.envios_abiertos > 0
+                      ? `${t.envios_abiertos} envío(s) sin pagar`
+                      : `${t.envios_total} envío(s), todos pagados`}
+                    {t.en_consignacion_unidades > 0 && ` · ${t.en_consignacion_unidades} en vitrina`}
                     {t.sin_ubicar_unidades > 0 && (
                       <span className="text-red-500 font-medium"> · {t.sin_ubicar_unidades} sin ubicar ⚠</span>
                     )}
@@ -123,8 +133,8 @@ function PanelBodega({ data, locales, onRefrescar, onAviso, onVerCuenta }) {
                 <div className="text-right flex-shrink-0">
                   {t.saldo_por_liquidar > 0
                     ? <p className="text-sm font-bold text-gray-900">{formatCOP(t.saldo_por_liquidar)}</p>
-                    : t.saldo_por_liquidar < 0
-                      ? <Badge variant="blue">Le debes {formatCOP(Math.abs(t.saldo_por_liquidar))}</Badge>
+                    : t.saldo_a_favor > 0
+                      ? <Badge variant="blue">{formatCOP(t.saldo_a_favor)} a favor</Badge>
                       : <Badge variant="green">Al día</Badge>}
                 </div>
                 <ChevronRight size={16} className="text-gray-300 flex-shrink-0" />
@@ -172,7 +182,7 @@ function PanelBodega({ data, locales, onRefrescar, onAviso, onVerCuenta }) {
           <div className="px-5 py-3 border-b border-gray-50 flex items-center gap-2">
             <Wallet size={16} className="text-green-600" />
             <p className="text-sm font-semibold text-gray-800">
-              {remesas.length} remesa(s) por confirmar
+              {remesas.length} pago(s) por confirmar
             </p>
           </div>
           <div className="divide-y divide-gray-50">
@@ -192,6 +202,12 @@ function PanelBodega({ data, locales, onRefrescar, onAviso, onVerCuenta }) {
                   onClick={() => confirmar.mutate(r.id)}
                 >
                   <CheckCircle size={14} /> Recibí
+                </Button>
+                <Button size="sm" variant="ghost"
+                  loading={rechazar.isPending && rechazar.variables === r.id}
+                  onClick={() => rechazar.mutate(r.id)}
+                >
+                  No llegó
                 </Button>
               </div>
             ))}
@@ -395,6 +411,7 @@ export default function RedInternaPage() {
         <CuentaLocal
           sucursalId={cuenta.id}
           nombre={cuenta.nombre}
+          esBodega={data.es_bodega === true}
           onVolver={() => setCuenta(null)}
           onRefrescar={refrescar}
           onAviso={setAviso}
