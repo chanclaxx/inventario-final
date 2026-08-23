@@ -238,6 +238,19 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > cargo" y usarlo ahí encogía hacia atrás el cargo original del envío *además*
 > de generar la nota de crédito, contando la baja dos veces. El "nunca llegó"
 > vive en `remisiones.motivo`.
+> **Un CARGO también es un documento que se paga** (v5,
+> `20260823_red_interna_cargos_pagables.sql`). Reportado desde producción: *"Todos
+> tus envíos están pagados. Más $830.000 de cargos. Y $586.010 a tu favor."*
+> Deber y tener a favor a la vez, porque un ajuste en contra subía la deuda pero
+> no era un documento: `_imputarFIFO` solo repartía entre ENVÍOS, así que el
+> cargo **no se podía pagar nunca** — con los envíos al día el dinero se volvía
+> saldo a favor y el cargo se quedaba ahí. Ahora `abonos_remision` apunta a un
+> envío **o** a un cargo (`cargo_id`, CHECK de exactamente uno), el FIFO los
+> reparte juntos por fecha, y el cargo sale como tarjeta propia en la pestaña de
+> Envíos. **INVARIANTE: si hay saldo a favor, no hay deuda abierta** — el
+> crédito se aplica en cuanto aparece (`_aplicarSaldoAFavor` corre al recibir,
+> al cargar y al confirmar una devolución), no espera un envío que quizá no
+> llega. La identidad pasó a ser `Σ saldo de TODOS los documentos = deuda_total`.
 > **Avisos push** (`_avisar`, nunca lanza): despacho, recepción —que ahora
 > genera la deuda y la puede confirmar un vendedor—, gasto por aprobar y su
 > decisión, ajuste y anulación. Antes el módulo no usaba `notificaciones` en

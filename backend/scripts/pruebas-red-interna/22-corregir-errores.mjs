@@ -34,6 +34,7 @@ await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260725_red_interna.s
 await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260726_red_interna_v2.sql'), 'utf8'));
 await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260822_red_interna_envios.sql'), 'utf8'));
 await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260823_red_interna_control.sql'), 'utf8'));
+await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260823_red_interna_cargos_pagables.sql'), 'utf8'));
 
 const conectar = (t) => ({ query: (s, p) => t.query(s, p ?? []) });
 const pool = { ...conectar(db), connect: async () => ({ ...conectar(db), release() {} }) };
@@ -271,11 +272,73 @@ const dondeEsta = await q(`
 ok('★ El equipo vuelve al inventario de la bodega, que es donde estaba',
    dondeEsta[0].sucursal_id === 1);
 
-console.log('\n═══ 7. La identidad aguanta después de todo esto ═══');
+console.log('\n═══ 7. Un CARGO es un documento que se paga ═══');
+// EL BUG REPORTADO DESDE PRODUCCIÓN:
+//     "Todos tus envíos están pagados.
+//      Más $830.000 de cargos que no vienen de un envío.
+//      Y $586.010 a tu favor para el próximo."
+//
+// Deber y tener a favor al mismo tiempo. El motivo: un ajuste en contra subía
+// la deuda pero no era un documento, así que `_imputarFIFO` —que solo repartía
+// entre ENVÍOS— nunca lo tocaba. Con los envíos al día, el dinero se volvía
+// saldo a favor y el cargo se quedaba ahí. Impagable.
+const cargoRoto = await service.registrarAjuste(bodega, {
+  sucursal_id: 2, valor: -800000, concepto: 'Equipo roto en el local',
+});
+let cta = await service.getEstadoCuenta(centro, 2);
+ok('★ El cargo aparece como un documento con su saldo',
+   (cta.cargos || []).some((c) => c.cargo_id === cargoRoto.id && Number(c.saldo) === 800000),
+   `${(cta.cargos || []).length} cargo(s)`);
+ok('  y suma a la deuda por su saldo', Number(cta.totales.cargos_sueltos) === 800000,
+   money(cta.totales.cargos_sueltos));
+
+console.log('\n   … y se puede PAGAR, que antes era imposible');
+const pagoCargo = await service.enviarRemesa(centro, {
+  valor: 300000, cargo_id: cargoRoto.id,
+});
+await service.confirmarRemesa(bodega, pagoCargo.id);
+cta = await service.getEstadoCuenta(centro, 2);
+const elCargo = cta.cargos.find((c) => c.cargo_id === cargoRoto.id);
+ok('★★ El abono entró al cargo', Number(elCargo.abonado) === 300000, money(elCargo.abonado));
+ok('  y su saldo baja', Number(elCargo.saldo) === 500000, money(elCargo.saldo));
+ok('  igual que la deuda', Number(cta.totales.cargos_sueltos) === 500000,
+   money(cta.totales.cargos_sueltos));
+
+console.log('\n   … el FIFO lo reparte junto con los envíos');
+const pagoTotal = await service.enviarRemesa(centro, { valor: 10000000 });
+await service.confirmarRemesa(bodega, pagoTotal.id);
+ok('★★ Un pago total también tapa el cargo',
+   pagoTotal.reparto.some((r) => r.tipo === 'cargo'),
+   pagoTotal.reparto.map((r) => r.tipo).join(', '));
+cta = await service.getEstadoCuenta(centro, 2);
+ok('★★ Y ya no queda nada debiendo', Number(cta.totales.deuda_total) === 0,
+   money(cta.totales.deuda_total));
+
+console.log('\n═══ 7b. ★★ Deber y tener a favor NO pueden convivir ═══');
+// Lo que sobró del pago total quedó a favor. Si ahora la bodega hace un cargo,
+// ese crédito tiene que consumirlo de inmediato — no esperar a un envío que
+// quizá no llega nunca.
+const favorAntes = Number(cta.totales.saldo_a_favor);
+ok('El local quedó con saldo a favor', favorAntes > 0, money(favorAntes));
+
+await service.registrarAjuste(bodega, {
+  sucursal_id: 2, valor: -200000, concepto: 'Otra rotura',
+});
+cta = await service.getEstadoCuenta(centro, 2);
+ok('★★ El cargo nuevo se cubre solo con el crédito que ya tenía',
+   Number(cta.totales.cargos_sueltos) === 0, money(cta.totales.cargos_sueltos));
+ok('  y el crédito baja en ese valor',
+   Number(cta.totales.saldo_a_favor) === favorAntes - 200000,
+   money(cta.totales.saldo_a_favor));
+ok('★★ INVARIANTE: si hay saldo a favor, no hay deuda abierta',
+   !(Number(cta.totales.saldo_a_favor) > 0 && Number(cta.totales.deuda_total) > 0),
+   `deuda ${money(cta.totales.deuda_total)} · a favor ${money(cta.totales.saldo_a_favor)}`);
+
+console.log('\n═══ 8. La identidad aguanta después de todo esto ═══');
 const final = await service.getEstadoCuenta(centro, 2);
 const suma = final.envios.reduce((s, e) => s + Number(e.saldo), 0)
-           + Number(final.totales.cargos_sueltos);
-ok('★★ Σ saldo por envío + cargos sueltos = deuda_total',
+           + final.cargos.reduce((s, c) => s + Number(c.saldo), 0);
+ok('★★ Σ saldo de TODOS los documentos (envíos y cargos) = deuda_total',
    Math.abs(suma - Number(final.totales.deuda_total)) < 1,
    `${money(suma)} vs ${money(final.totales.deuda_total)}`);
 const sumaExtracto = final.extracto.reduce((s, e) => s + Number(e.valor), 0);

@@ -642,6 +642,38 @@ const _sqlEnviosCuenta = (fuenteAbonos) => `
 const SQL_ENVIOS_CUENTA  = _sqlEnviosCuenta(SQL_ABONOS_EFECTIVOS);
 const SQL_ENVIOS_RESERVA = _sqlEnviosCuenta(SQL_ABONOS_RESERVADOS);
 
+// La cuenta de un CARGO SUELTO: un ajuste en contra (una rotura, un faltante
+// que la bodega le cobra al local).
+//
+// Se trata igual que un envío —cargo, abonado, saldo— porque es lo mismo: una
+// deuda con su propio documento. Antes era una cifra suelta que nadie podía
+// pagar: el FIFO solo repartía entre envíos, así que con los envíos al día el
+// dinero se volvía saldo a favor y el cargo se quedaba ahí para siempre.
+//   $1 negocio_id   $2 sucursal_id
+const _sqlCargosCuenta = (fuenteAbonos) => `
+  SELECT
+    m.id                                                       AS cargo_id,
+    (-m.valor)                                                 AS cargo,
+    COALESCE(a.abonado, 0)                                     AS abonado,
+    GREATEST(0, (-m.valor) - COALESCE(a.abonado, 0))           AS saldo,
+    GREATEST(0, COALESCE(a.abonado, 0) - (-m.valor))           AS excedente,
+    m.concepto, m.fecha
+  FROM movimientos_cuenta_interna m
+  LEFT JOIN (
+    SELECT e.cargo_id, SUM(e.valor) AS abonado
+    FROM (${fuenteAbonos}) e
+    WHERE e.cargo_id IS NOT NULL
+    GROUP BY e.cargo_id
+  ) a ON a.cargo_id = m.id
+  WHERE m.negocio_id = $1
+    AND ($2::int IS NULL OR m.sucursal_id = $2)
+    AND m.tipo = 'Ajuste' AND m.valor < 0
+    AND NOT m.anulado AND m.estado = 'Aprobado'
+`;
+
+const SQL_CARGOS_CUENTA  = _sqlCargosCuenta(SQL_ABONOS_EFECTIVOS);
+const SQL_CARGOS_RESERVA = _sqlCargosCuenta(SQL_ABONOS_RESERVADOS);
+
 /**
  * Totales de la cuenta de un local bajo el modelo de envío a crédito.
  *
@@ -657,6 +689,7 @@ const SQL_ENVIOS_RESERVA = _sqlEnviosCuenta(SQL_ABONOS_RESERVADOS);
 const getTotalesEnvios = async (negocioId, sucursalId, client = null) => {
   const { rows } = await (client || pool).query(`
     WITH env AS (${SQL_ENVIOS_CUENTA}),
+    car AS (${SQL_CARGOS_CUENTA}),
     ab AS (SELECT * FROM (${SQL_ABONOS_EFECTIVOS}) x
            WHERE x.negocio_id = $1 AND x.sucursal_id = $2)
     SELECT
@@ -666,6 +699,11 @@ const getTotalesEnvios = async (negocioId, sucursalId, client = null) => {
       COALESCE(SUM(env.excedente), 0) AS excedente,
       COUNT(*) FILTER (WHERE env.saldo > 0)::int AS envios_abiertos,
       COUNT(*)::int                              AS envios_total,
+      -- Los cargos sueltos, con su propia cuenta.
+      COALESCE((SELECT SUM(cargo)     FROM car), 0) AS cargos_valor,
+      COALESCE((SELECT SUM(abonado)   FROM car), 0) AS cargos_abonado,
+      COALESCE((SELECT SUM(excedente) FROM car), 0) AS cargos_excedente,
+      COALESCE((SELECT COUNT(*) FILTER (WHERE saldo > 0) FROM car), 0)::int AS cargos_abiertos,
       -- Plata recibida que no llegó a imputarse a ningún envío.
       GREATEST(0,
         COALESCE((SELECT SUM(valor) FROM remesas
@@ -679,14 +717,10 @@ const getTotalesEnvios = async (negocioId, sucursalId, client = null) => {
       - COALESCE((SELECT SUM(valor) FROM ab WHERE origen <> 'saldo_favor'), 0)
       )                               AS sin_imputar,
       COALESCE((SELECT SUM(valor) FROM ab WHERE origen = 'saldo_favor'), 0) AS favor_usado,
-      -- Un ajuste NEGATIVO sube la deuda (una rotura que la bodega le cobra al
-      -- local). No cuelga de ningún envío, así que se suma aparte en vez de
-      -- repartirse a ojo entre envíos que no tienen nada que ver.
-      COALESCE((SELECT SUM(-valor) FROM movimientos_cuenta_interna
-                WHERE negocio_id = $1 AND sucursal_id = $2
-                  AND NOT anulado AND estado = 'Aprobado'
-                  AND tipo = 'Ajuste' AND valor < 0), 0)
-                                      AS cargos_sueltos
+      -- Lo que queda debiendo por cargos. Es su SALDO, no su valor: un cargo se
+      -- puede abonar como cualquier envío, y contarlo entero mostraría deuda
+      -- que ya está pagada.
+      COALESCE((SELECT SUM(saldo) FROM car), 0) AS cargos_sueltos
     FROM env
   `, [negocioId, sucursalId]);
   return rows[0];
@@ -696,7 +730,7 @@ const getTotalesEnvios = async (negocioId, sucursalId, client = null) => {
 const getAbonosDeEnvio = async (negocioId, remisionId) => {
   const { rows } = await pool.query(`
     SELECT a.id, a.origen, a.valor, a.fecha, a.notas, a.anulado,
-           a.remesa_id, a.movimiento_id,
+           a.remesa_id, a.movimiento_id, a.cargo_id,
            rm.numero AS remesa_numero, rm.metodo, rm.estado AS remesa_estado,
            m.concepto AS movimiento_concepto, m.tipo AS movimiento_tipo,
            u.nombre  AS usuario_nombre
@@ -704,7 +738,7 @@ const getAbonosDeEnvio = async (negocioId, remisionId) => {
     LEFT JOIN remesas rm                    ON rm.id = a.remesa_id
     LEFT JOIN movimientos_cuenta_interna m  ON m.id  = a.movimiento_id
     LEFT JOIN usuarios u                    ON u.id  = a.usuario_id
-    WHERE a.negocio_id = $1 AND a.remision_id = $2
+    WHERE a.negocio_id = $1 AND (a.remision_id = $2 OR a.cargo_id = $2)
     ORDER BY a.fecha, a.id
   `, [negocioId, remisionId]);
   return rows;
@@ -750,14 +784,14 @@ const getLineasDeEnvios = async (negocioId, sucursalId, { limit = 600 } = {}) =>
 /** Todos los abonos de un local, para el extracto y la pestaña de pagos. */
 const findAbonosLocal = async (negocioId, sucursalId, limit = 300) => {
   const { rows } = await pool.query(`
-    SELECT a.id, a.remision_id, a.origen, a.valor, a.fecha, a.notas, a.anulado,
-           a.remesa_id, a.movimiento_id,
+    SELECT a.id, a.remision_id, a.cargo_id, a.origen, a.valor, a.fecha,
+           a.notas, a.anulado, a.remesa_id, a.movimiento_id,
            r.numero  AS remision_numero,
            rm.numero AS remesa_numero, rm.metodo, rm.estado AS remesa_estado,
            m.concepto AS movimiento_concepto,
            u.nombre   AS usuario_nombre
     FROM abonos_remision a
-    JOIN remisiones r                       ON r.id  = a.remision_id
+    LEFT JOIN remisiones r                  ON r.id  = a.remision_id
     LEFT JOIN remesas rm                    ON rm.id = a.remesa_id
     LEFT JOIN movimientos_cuenta_interna m  ON m.id  = a.movimiento_id
     LEFT JOIN usuarios u                    ON u.id  = a.usuario_id
@@ -775,17 +809,54 @@ const findAbonosLocal = async (negocioId, sucursalId, limit = 300) => {
  * Se lee DENTRO de la transacción del pago (por eso recibe `client`): entre
  * calcular el reparto y escribirlo no puede colarse otro abono.
  */
+/**
+ * La cola del FIFO: TODO lo que el local debe, del más viejo al más nuevo.
+ *
+ * Envíos y cargos juntos, ordenados por fecha. Un cargo es tan pagable como un
+ * envío: dejarlo fuera era lo que lo volvía impagable — el dinero pasaba de
+ * largo y se convertía en saldo a favor mientras el cargo seguía ahí.
+ */
 const getEnviosAbiertos = async (client, negocioId, sucursalId) => {
   const { rows } = await client.query(`
-    WITH env AS (${SQL_ENVIOS_RESERVA})
-    SELECT env.remision_id, env.cargo, env.abonado, env.saldo,
-           r.numero, r.fecha_recepcion, r.fecha_emision
-    FROM env
-    JOIN remisiones r ON r.id = env.remision_id
-    WHERE env.saldo > 0
-    ORDER BY COALESCE(r.fecha_recepcion, r.fecha_emision), r.id
+    WITH env AS (${SQL_ENVIOS_RESERVA}), car AS (${SQL_CARGOS_RESERVA})
+    SELECT * FROM (
+      SELECT 'envio'::text AS tipo, env.remision_id, NULL::bigint AS cargo_id,
+             env.saldo, r.numero::text AS etiqueta,
+             COALESCE(r.fecha_recepcion, r.fecha_emision) AS fecha, r.id AS orden
+      FROM env JOIN remisiones r ON r.id = env.remision_id
+      WHERE env.saldo > 0
+      UNION ALL
+      SELECT 'cargo', NULL::bigint, car.cargo_id,
+             car.saldo, car.concepto, car.fecha, car.cargo_id
+      FROM car WHERE car.saldo > 0
+    ) d
+    ORDER BY d.fecha, d.orden
   `, [negocioId, sucursalId]);
   return rows;
+};
+
+/** Los cargos sueltos de un local, para mostrarlos junto a los envíos. */
+const getCargosCuenta = async (negocioId, sucursalId) => {
+  const { rows } = await pool.query(`
+    WITH car AS (${SQL_CARGOS_CUENTA})
+    SELECT car.*, u.nombre AS usuario_nombre
+    FROM car
+    JOIN movimientos_cuenta_interna m ON m.id = car.cargo_id
+    LEFT JOIN usuarios u ON u.id = m.usuario_id
+    ORDER BY car.fecha DESC
+  `, [negocioId, sucursalId]);
+  return rows;
+};
+
+/** El saldo de UN cargo, para imputarle un pago dirigido. */
+const getSaldoCargo = async (client, negocioId, cargoId) => {
+  const { rows } = await client.query(`
+    WITH car AS (${SQL_CARGOS_RESERVA})
+    SELECT car.*, m.sucursal_id
+    FROM car JOIN movimientos_cuenta_interna m ON m.id = car.cargo_id
+    WHERE car.cargo_id = $3
+  `, [negocioId, null, cargoId]);
+  return rows[0] || null;
 };
 
 /**
@@ -805,17 +876,17 @@ const getSaldoEnvio = async (client, negocioId, remisionId) => {
 };
 
 const insertarAbonoRemision = async (client, {
-  negocio_id, sucursal_id, remision_id, origen,
+  negocio_id, sucursal_id, remision_id = null, cargo_id = null, origen,
   remesa_id = null, movimiento_id = null, valor, usuario_id = null, notas = null,
 }) => {
   const { rows } = await client.query(`
     INSERT INTO abonos_remision
-      (negocio_id, sucursal_id, remision_id, origen, remesa_id, movimiento_id,
-       valor, usuario_id, notas)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+      (negocio_id, sucursal_id, remision_id, cargo_id, origen, remesa_id,
+       movimiento_id, valor, usuario_id, notas)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
     RETURNING *
-  `, [negocio_id, sucursal_id, remision_id, origen, remesa_id, movimiento_id,
-      valor, usuario_id, notas]);
+  `, [negocio_id, sucursal_id, remision_id, cargo_id, origen, remesa_id,
+      movimiento_id, valor, usuario_id, notas]);
   return rows[0];
 };
 
@@ -1525,12 +1596,12 @@ const anularAbonosDeMovimiento = async (client, movimientoId) => {
  * Es para el pago que entró a la tarjeta equivocada, que hasta ahora no tenía
  * arreglo — la plata quedaba bien contada en el total y mal en el detalle.
  */
-const moverAbono = async (client, { abonoId, remisionId, negocioId }) => {
+const moverAbono = async (client, { abonoId, remisionId = null, cargoId = null, negocioId }) => {
   const { rows } = await client.query(`
-    UPDATE abonos_remision SET remision_id = $2
-    WHERE id = $1 AND negocio_id = $3 AND NOT anulado
+    UPDATE abonos_remision SET remision_id = $2, cargo_id = $3
+    WHERE id = $1 AND negocio_id = $4 AND NOT anulado
     RETURNING *
-  `, [abonoId, remisionId, negocioId]);
+  `, [abonoId, remisionId, cargoId, negocioId]);
   return rows[0] || null;
 };
 
@@ -1677,6 +1748,7 @@ module.exports = {
   // Cuenta por envío (modelo "el envío es la deuda")
   getTotalesEnvios, getAbonosDeEnvio, findAbonosLocal, getEnviosAbiertos,
   getLineasDeEnvios, findAbonoById, moverAbono,
+  getCargosCuenta, getSaldoCargo,
   findMovimientosPorAprobar, findMovimientoCuentaById,
   decidirMovimientoCuenta, anularMovimientoCuenta, anularAbonosDeMovimiento,
   getSaldoEnvio, insertarAbonoRemision, anularAbonosDeRemesa,

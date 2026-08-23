@@ -8,7 +8,7 @@
 //
 // LA IDENTIDAD QUE SOSTIENE LA PANTALLA:
 //
-//   Σ saldo(envío) + cargos sueltos = deuda_total
+//   Σ saldo de todos los documentos (envíos y cargos) = deuda_total
 //
 // Si se rompe, la cifra grande estaría contando una historia distinta a la de
 // las tarjetas de abajo — el descuadre que este módulo existe para evitar.
@@ -33,6 +33,7 @@ await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260725_red_interna.s
 await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260726_red_interna_v2.sql'), 'utf8'));
 await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260822_red_interna_envios.sql'), 'utf8'));
 await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260823_red_interna_control.sql'), 'utf8'));
+await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260823_red_interna_cargos_pagables.sql'), 'utf8'));
 
 const conectar = (t) => ({ query: (s, p) => t.query(s, p ?? []) });
 const pool = { ...conectar(db), connect: async () => ({ ...conectar(db), release() {} }) };
@@ -143,12 +144,14 @@ ok('  y se cuentan aparte de los equipos',
 // La identidad que sostiene toda la pantalla: la cifra grande no es otra cosa
 // que la suma de los saldos de los envíos.
 const cuadra = (c) => {
+  // Los cargos sueltos también son documentos con su propio saldo, así que
+  // entran en la suma igual que un envío.
   const suma = c.envios.reduce((s, e) => s + Number(e.saldo), 0)
-             + Number(c.totales.cargos_sueltos);
+             + (c.cargos || []).reduce((s, x) => s + Number(x.saldo), 0);
   return { suma, deuda: Number(c.totales.deuda_total) };
 };
 let x = cuadra(cuenta);
-ok('★★ Σ saldo de los envíos + cargos sueltos = deuda_total',
+ok('★★ Σ saldo de todos los documentos = deuda_total',
    Math.abs(x.suma - x.deuda) < 1, `${money(x.suma)} vs ${money(x.deuda)}`);
 ok('  y la deuda es todo lo entregado',
    Number(cuenta.totales.deuda_total) === CARGO_E1 + CARGO_E2,
@@ -304,17 +307,28 @@ ok('  y el crédito baja en esos 500.000',
    Number(cuenta.totales.saldo_a_favor) === FAVOR - 500000,
    money(cuenta.totales.saldo_a_favor));
 
-console.log('\n═══ 9. Un ajuste EN CONTRA no cuelga de ningún envío ═══');
+console.log('\n═══ 9. Un ajuste EN CONTRA es su propio documento ═══');
+// El local viene con saldo a favor de la sección anterior. Un cargo nuevo lo
+// consume DE UNA: deber y tener a favor al mismo tiempo era el descuadre que se
+// vio en producción ("$830.000 de cargos" y "$586.010 a tu favor").
+const favorPrevio = Number(cuenta.totales.saldo_a_favor);
 await service.registrarAjuste(bodega, {
   sucursal_id: 2, valor: -300000, concepto: 'Equipo roto en el local',
 });
 cuenta = await service.getEstadoCuenta(centro, 2);
-ok('★ Suma como cargo suelto', Number(cuenta.totales.cargos_sueltos) === 300000,
-   money(cuenta.totales.cargos_sueltos));
+ok('★ El cargo es un documento con su propia cuenta',
+   (cuenta.cargos || []).some((c) => Number(c.cargo) === 300000),
+   `${(cuenta.cargos || []).length} cargo(s)`);
+ok('★★ Y el saldo a favor lo cubre solo, sin esperar un envío',
+   Number(cuenta.totales.cargos_sueltos) === 0
+   && Number(cuenta.totales.saldo_a_favor) === favorPrevio - 300000,
+   `a favor ${money(cuenta.totales.saldo_a_favor)}`);
 ok('  y ningún envío se lo atribuye',
    cuenta.envios.every((e) => Number(e.saldo) === 0));
+ok('★★ INVARIANTE: si hay saldo a favor, no hay deuda abierta',
+   !(Number(cuenta.totales.saldo_a_favor) > 0 && Number(cuenta.totales.deuda_total) > 0));
 x = cuadra(cuenta);
-ok('★★ La identidad aguanta con cargos sueltos',
+ok('★★ La identidad aguanta con cargos de por medio',
    Math.abs(x.suma - x.deuda) < 1, `${money(x.suma)} vs ${money(x.deuda)}`);
 
 console.log('\n═══ 10. El extracto cuadra con la cuenta ═══');

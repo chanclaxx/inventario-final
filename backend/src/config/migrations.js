@@ -392,6 +392,21 @@ const runMigrations = async () => {
         WHERE estado = 'Por aprobar' AND NOT anulado;
     `);
 
+    // v5 — un CARGO también es un documento que se paga.
+    // Ver migrations/20260823_red_interna_cargos_pagables.sql.
+    //
+    // Un ajuste en contra subía la deuda pero no era un documento: nadie le
+    // podía imputar un abono, así que no se podía pagar NUNCA. Con los envíos
+    // al día, el dinero que entraba se volvía saldo a favor y el cargo se
+    // quedaba ahí — deber y tener a favor al mismo tiempo.
+    await pool.query(`
+      ALTER TABLE IF EXISTS abonos_remision ALTER COLUMN remision_id DROP NOT NULL;
+      ALTER TABLE IF EXISTS abonos_remision ADD COLUMN IF NOT EXISTS cargo_id BIGINT
+        REFERENCES movimientos_cuenta_interna(id) ON DELETE CASCADE;
+      CREATE INDEX IF NOT EXISTS idx_abonos_remision_cargo
+        ON abonos_remision (cargo_id) WHERE cargo_id IS NOT NULL AND NOT anulado;
+    `);
+
     // Los CHECK van aparte: ADD CONSTRAINT no admite IF NOT EXISTS.
     await pool.query(`
       DO $chk$
@@ -403,6 +418,11 @@ const runMigrations = async () => {
         IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'remisiones_motivo_chk') THEN
           ALTER TABLE remisiones ADD CONSTRAINT remisiones_motivo_chk
             CHECK (motivo IS NULL OR motivo IN ('devolucion', 'faltante'));
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'abonos_remision_destino_chk') THEN
+          ALTER TABLE abonos_remision ADD CONSTRAINT abonos_remision_destino_chk
+            CHECK ((remision_id IS NOT NULL AND cargo_id IS NULL)
+                OR (remision_id IS NULL     AND cargo_id IS NOT NULL));
         END IF;
       END
       $chk$;

@@ -226,6 +226,9 @@ const _recortarParaVendedor = (data) => {
       items: data.mercancia.items.map((u) => _sinValores(u, CLAVES_VALOR_UNIDAD)),
     },
     remisiones: (data.remisiones || []).map((r) => ({ ...r, valor_total: null })),
+    // El cargo es deuda: su valor y su saldo se ven (hay que pagarlos). No hay
+    // valorización de mercancía que esconder aquí.
+    cargos: data.cargos,
     envios: (data.envios || []).map((e) => ({
       ..._sinValores(e, CLAVES_VALOR_ENVIO),
       // Las líneas del envío llevan el costo de cada equipo: se ven los
@@ -666,13 +669,12 @@ const _ejecutarRecepcion = async (client, {
   const favor = await _aplicarSaldoAFavor(client, {
     negocioId,
     sucursalId: Number(remision.sucursal_destino_id),
-    remisionId: remision.id,
     usuarioId,
   });
 
   return {
     traslado_id: traslado.id, recibidas: hubo, faltantes: idsFaltante.length,
-    saldo_favor_aplicado: favor ? _num(favor.valor) : 0,
+    saldo_favor_aplicado: favor.aplicado,
   };
 };
 
@@ -1239,6 +1241,13 @@ const confirmarDevolucion = async (req, remisionId, { lineas_recibidas } = {}) =
       });
     }
 
+    // Devolver mercancía ya pagada deja crédito. Se aplica de inmediato a lo que
+    // siga abierto —otros envíos, cargos— en vez de quedarse esperando a que
+    // llegue un envío nuevo.
+    await _aplicarSaldoAFavor(client, {
+      negocioId, sucursalId: localId, usuarioId: req.user.id,
+    });
+
     await repo.marcarRemisionRecibida(client, {
       remisionId, usuarioId: req.user.id,
       estado: idsFaltante.length ? 'Parcial' : 'Recibida',
@@ -1300,12 +1309,16 @@ const _avisar = ({ negocioId, sucursalId = null, roles = null, titulo, cuerpo, u
 const _imputarFIFO = async (client, {
   negocioId, sucursalId, valor, origen,
   remesaId = null, movimientoId = null, usuarioId = null, notas = null,
-  remisionId = null,
+  remisionId = null, cargoId = null,
 }) => {
   let resto = _centavos(valor);
   const reparto = [];
 
+  // La cola es TODO lo que el local debe: envíos y cargos, del más viejo al más
+  // nuevo. Dejar los cargos fuera era lo que los volvía impagables — el dinero
+  // pasaba de largo y se convertía en saldo a favor mientras el cargo seguía.
   const cola = [];
+
   if (remisionId) {
     const e = await repo.getSaldoEnvio(client, negocioId, remisionId);
     if (!e) throw { status: 404, message: 'Envío no encontrado' };
@@ -1315,12 +1328,30 @@ const _imputarFIFO = async (client, {
     if (_num(e.saldo) <= 0) {
       throw { status: 409, message: `El envío #${e.numero ?? remisionId} ya está pagado` };
     }
-    cola.push({ remision_id: Number(remisionId), numero: e.numero, saldo: _num(e.saldo) });
+    cola.push({ tipo: 'envio', remision_id: Number(remisionId), etiqueta: e.numero,
+                saldo: _num(e.saldo) });
   }
 
-  for (const e of await repo.getEnviosAbiertos(client, negocioId, sucursalId)) {
-    if (remisionId && Number(e.remision_id) === Number(remisionId)) continue;
-    cola.push({ remision_id: Number(e.remision_id), numero: e.numero, saldo: _num(e.saldo) });
+  if (cargoId) {
+    const c = await repo.getSaldoCargo(client, negocioId, cargoId);
+    if (!c) throw { status: 404, message: 'Cargo no encontrado' };
+    if (Number(c.sucursal_id) !== Number(sucursalId)) {
+      throw { status: 403, message: 'Ese cargo es de otra sucursal' };
+    }
+    if (_num(c.saldo) <= 0) throw { status: 409, message: 'Ese cargo ya está pagado' };
+    cola.push({ tipo: 'cargo', cargo_id: Number(cargoId), etiqueta: c.concepto,
+                saldo: _num(c.saldo) });
+  }
+
+  for (const d of await repo.getEnviosAbiertos(client, negocioId, sucursalId)) {
+    if (remisionId && Number(d.remision_id) === Number(remisionId)) continue;
+    if (cargoId    && Number(d.cargo_id)    === Number(cargoId))    continue;
+    cola.push({
+      tipo: d.tipo,
+      remision_id: d.remision_id != null ? Number(d.remision_id) : null,
+      cargo_id:    d.cargo_id    != null ? Number(d.cargo_id)    : null,
+      etiqueta: d.etiqueta, saldo: _num(d.saldo),
+    });
   }
 
   for (const e of cola) {
@@ -1328,11 +1359,18 @@ const _imputarFIFO = async (client, {
     const aplica = _centavos(Math.min(resto, e.saldo));
     if (aplica <= 0) continue;
     await repo.insertarAbonoRemision(client, {
-      negocio_id: negocioId, sucursal_id: sucursalId, remision_id: e.remision_id,
+      negocio_id: negocioId, sucursal_id: sucursalId,
+      remision_id: e.remision_id ?? null,
+      cargo_id:    e.cargo_id ?? null,
       origen, remesa_id: remesaId, movimiento_id: movimientoId,
       valor: aplica, usuario_id: usuarioId, notas,
     });
-    reparto.push({ remision_id: e.remision_id, numero: e.numero, valor: aplica });
+    reparto.push({
+      tipo: e.tipo, remision_id: e.remision_id ?? null, cargo_id: e.cargo_id ?? null,
+      numero: e.tipo === 'envio' ? e.etiqueta : null,
+      concepto: e.tipo === 'cargo' ? e.etiqueta : null,
+      valor: aplica,
+    });
     resto = _centavos(resto - aplica);
   }
 
@@ -1349,24 +1387,22 @@ const _imputarFIFO = async (client, {
  * que un envío nace con saldo: hacerlo aquí evita que dos recepciones
  * simultáneas se repartan el mismo crédito.
  */
-const _aplicarSaldoAFavor = async (client, { negocioId, sucursalId, remisionId, usuarioId }) => {
+const _aplicarSaldoAFavor = async (client, { negocioId, sucursalId, usuarioId }) => {
   const t = await repo.getTotalesEnvios(negocioId, sucursalId, client);
   const disponible = Math.max(0,
-    _num(t.excedente) + _num(t.sin_imputar) - _num(t.favor_usado));
-  if (disponible <= 0) return null;
+    _num(t.excedente) + _num(t.cargos_excedente) + _num(t.sin_imputar) - _num(t.favor_usado));
+  if (disponible <= 0) return { aplicado: 0, reparto: [] };
 
-  const envio = await repo.getSaldoEnvio(client, negocioId, remisionId);
-  const saldo = _num(envio?.saldo);
-  if (saldo <= 0) return null;
-
-  const aplica = _centavos(Math.min(disponible, saldo));
-  if (aplica <= 0) return null;
-
-  return repo.insertarAbonoRemision(client, {
-    negocio_id: negocioId, sucursal_id: sucursalId, remision_id: remisionId,
-    origen: 'saldo_favor', valor: aplica, usuario_id: usuarioId,
-    notas: 'Saldo a favor aplicado automáticamente',
+  // Se reparte entre TODO lo abierto —envíos y cargos— con el mismo FIFO.
+  //
+  // Antes solo se aplicaba al envío que se acababa de recibir, y por eso podían
+  // convivir "$830.000 de cargos" y "$586.010 a tu favor": el crédito esperaba
+  // un envío que quizá no llegaba nunca mientras el cargo seguía sin pagar.
+  const { reparto } = await _imputarFIFO(client, {
+    negocioId, sucursalId, valor: disponible, origen: 'saldo_favor',
+    usuarioId, notas: 'Saldo a favor aplicado automáticamente',
   });
+  return { aplicado: reparto.reduce((s, r) => s + r.valor, 0), reparto };
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1459,7 +1495,7 @@ const getCuentasParaRemesa = async (req) => {
  * en cualquiera de los dos casos queda como saldo a favor.
  */
 const enviarRemesa = async (req, {
-  valor, notas, clave_idempotencia, cuenta_origen_id, metodo, remision_id,
+  valor, notas, clave_idempotencia, cuenta_origen_id, metodo, remision_id, cargo_id,
 }) => {
   const negocioId = req.user.negocio_id;
   const origenId  = Number(req.sucursal_id);
@@ -1566,6 +1602,7 @@ const enviarRemesa = async (req, {
       negocioId, sucursalId: origenId, valor: monto, origen: 'remesa',
       remesaId: remesa.id, usuarioId: req.user.id,
       remisionId: remision_id ? Number(remision_id) : null,
+      cargoId:    cargo_id    ? Number(cargo_id)    : null,
       notas: notas || null,
     });
 
@@ -1946,7 +1983,7 @@ const anularMovimientoCuenta = async (req, movimientoId, { motivo } = {}) => {
  * bien contada en el total y mal en el detalle, y no había forma de corregirlo.
  * No toca tesorería ni la caja — solo a qué envío se aplica.
  */
-const moverAbono = async (req, abonoId, { remision_id }) => {
+const moverAbono = async (req, abonoId, { remision_id, cargo_id }) => {
   const negocioId = req.user.negocio_id;
 
   const client = await pool.connect();
@@ -1958,18 +1995,34 @@ const moverAbono = async (req, abonoId, { remision_id }) => {
     if (!req.esBodega && Number(abono.sucursal_id) !== Number(req.sucursal_id)) {
       throw { status: 403, message: 'Ese abono es de otra sucursal' };
     }
-    if (Number(abono.remision_id) === Number(remision_id)) {
+    if (!remision_id && !cargo_id) {
+      throw { status: 400, message: 'Falta el documento al que se mueve' };
+    }
+    if (remision_id && Number(abono.remision_id) === Number(remision_id)) {
       throw { status: 400, message: 'El abono ya está en ese envío' };
     }
+    if (cargo_id && Number(abono.cargo_id) === Number(cargo_id)) {
+      throw { status: 400, message: 'El abono ya está en ese cargo' };
+    }
 
-    const destino = await repo.getSaldoEnvio(client, negocioId, Number(remision_id));
-    if (!destino) throw { status: 404, message: 'Envío no encontrado' };
-    if (Number(destino.sucursal_destino_id) !== Number(abono.sucursal_id)) {
-      throw { status: 403, message: 'Ese envío es de otra sucursal' };
+    if (remision_id) {
+      const destino = await repo.getSaldoEnvio(client, negocioId, Number(remision_id));
+      if (!destino) throw { status: 404, message: 'Envío no encontrado' };
+      if (Number(destino.sucursal_destino_id) !== Number(abono.sucursal_id)) {
+        throw { status: 403, message: 'Ese envío es de otra sucursal' };
+      }
+    } else {
+      const destino = await repo.getSaldoCargo(client, negocioId, Number(cargo_id));
+      if (!destino) throw { status: 404, message: 'Cargo no encontrado' };
+      if (Number(destino.sucursal_id) !== Number(abono.sucursal_id)) {
+        throw { status: 403, message: 'Ese cargo es de otra sucursal' };
+      }
     }
 
     const movido = await repo.moverAbono(client, {
-      abonoId, remisionId: Number(remision_id), negocioId,
+      abonoId, negocioId,
+      remisionId: remision_id ? Number(remision_id) : null,
+      cargoId:    cargo_id    ? Number(cargo_id)    : null,
     });
     await client.query('COMMIT');
     return movido;
@@ -2016,6 +2069,11 @@ const registrarAjuste = async (req, { sucursal_id, valor, concepto, remision_id 
         movimientoId: mov.id, usuarioId: req.user.id, notas: concepto.trim(),
         remisionId: remision_id ? Number(remision_id) : null,
       }));
+    } else {
+      // El cargo acaba de abrir una deuda. Si el local traía saldo a favor, se
+      // le aplica YA: tener crédito y deber al mismo tiempo era justo lo que se
+      // veía en pantalla ("$830.000 de cargos" y "$586.010 a tu favor").
+      await _aplicarSaldoAFavor(client, { negocioId, sucursalId, usuarioId: req.user.id });
     }
 
     await client.query('COMMIT');
@@ -2094,12 +2152,16 @@ const _armarSaldo = ({ resumen, cantidad, remesado, movimientos, envios }) => {
 
   // ── La cuenta ──────────────────────────────────────────────────────────────
   const deudaEnvios   = _num(envios?.deuda);
+  // Lo que queda debiendo por cargos sueltos: su SALDO, no su valor. Desde v5
+  // un cargo es un documento que se paga como cualquier envío, así que contar
+  // su valor entero mostraría deuda ya saldada.
   const cargosSueltos = _num(envios?.cargos_sueltos);
-  // Crédito del local: lo que pagó de más en envíos que después encogieron por
-  // una devolución, más la plata que llegó sin imputarse a nada, menos lo que
-  // ya se consumió contra envíos nuevos.
+  // Crédito del local: lo que pagó de más en documentos que después encogieron
+  // por una devolución, más la plata que llegó sin imputarse a nada, menos lo
+  // que ya se consumió.
   const aFavor = Math.max(0,
-    _num(envios?.excedente) + _num(envios?.sin_imputar) - _num(envios?.favor_usado));
+    _num(envios?.excedente) + _num(envios?.cargos_excedente)
+    + _num(envios?.sin_imputar) - _num(envios?.favor_usado));
 
   const deudaTotal = deudaEnvios + cargosSueltos;
 
@@ -2130,6 +2192,9 @@ const _armarSaldo = ({ resumen, cantidad, remesado, movimientos, envios }) => {
       cargos_sueltos:     Math.round(cargosSueltos),
       envios_abiertos:    Number(envios?.envios_abiertos || 0),
       envios_total:       Number(envios?.envios_total    || 0),
+      cargos_abiertos:    Number(envios?.cargos_abiertos || 0),
+      cargos_valor:       Math.round(_num(envios?.cargos_valor)),
+      cargos_abonado:     Math.round(_num(envios?.cargos_abonado)),
 
       remesado_recibido:  Math.round(recibido),
       remesas_en_transito:Math.round(enTransito),
@@ -2293,7 +2358,7 @@ const getEstadoCuenta = async (req, sucursalId, filtros = {}) => {
   const { desde = null, hasta = null, q = '', estado = null, limit = 100, offset = 0 } = filtros;
 
   const [totales, extracto, mercancia, remisiones, remesas, movimientos, porEnvio,
-         abonos, lineasEnvios] = await Promise.all([
+         abonos, lineasEnvios, cargos] = await Promise.all([
       getEstadoLocal(negocioId, objetivo),
       repo.getExtracto(negocioId, objetivo, { desde, hasta }),
       repo.buscarUnidades(negocioId, objetivo, {
@@ -2309,6 +2374,9 @@ const getEstadoCuenta = async (req, sucursalId, filtros = {}) => {
       // Las líneas de todos los envíos, juntas: la tarjeta las muestra sin
       // desplegar nada y pedirlas una por una serían N consultas por pantalla.
       repo.getLineasDeEnvios(negocioId, objetivo, { limit: 600 }),
+      // Los cargos sueltos, como documentos con su cuenta: se muestran junto a
+      // los envíos para que se vea qué se está pagando.
+      repo.getCargosCuenta(negocioId, objetivo),
     ]);
 
   const salida = {
@@ -2341,6 +2409,15 @@ const getEstadoCuenta = async (req, sucursalId, filtros = {}) => {
     // contar el pago como lo hizo el usuario ("pagué $2M y taparon 3 envíos")
     // en vez de como una cifra suelta.
     abonos: abonos.map((a) => ({ ...a, valor: _num(a.valor) })),
+    // Los cargos que no vienen de un envío, con su saldo y sus abonos.
+    cargos: cargos.map((c) => ({
+      ...c,
+      cargo:     Math.round(_num(c.cargo)),
+      abonado:   Math.round(_num(c.abonado)),
+      saldo:     Math.round(_num(c.saldo)),
+      excedente: Math.round(_num(c.excedente)),
+      pagado:    _num(c.saldo) <= 0,
+    })),
     // Envío por envío: su cuenta y, aparte, qué se vendió y qué queda.
     ...(_armarEnvios(porEnvio, totales.totales, lineasEnvios)),
     // Por qué debe lo que debe, en una línea por concepto.

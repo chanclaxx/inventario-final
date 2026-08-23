@@ -288,9 +288,11 @@ export function CuentaLocal({
 
       {tab === 'envios' && (
         <TabEnvios
-          envios={data.envios || []} resumen={data.envios_resumen}
+          envios={data.envios || []} cargos={data.cargos || []}
+          resumen={data.envios_resumen}
           ocultos={ocultos} propia={propia}
           onAbonar={(envio) => setPago({ envio })}
+          onAbonarCargo={(cargo) => setPago({ cargo })}
           onCambio={(msg) => { if (msg) onAviso(msg); onRefrescar(); }}
         />
       )}
@@ -329,6 +331,7 @@ export function CuentaLocal({
       {pago && (
         <ModalPago
           envio={pago.envio || null}
+          cargo={pago.cargo || null}
           sugerido={t.saldo_por_liquidar}
           onCerrar={() => setPago(null)}
           onListo={cerrarPago}

@@ -205,10 +205,12 @@ const getRemision = async (req, res, next) => {
 const enviarRemesa = async (req, res, next) => {
   try {
     const {
-      valor, notas, clave_idempotencia, cuenta_origen_id, metodo, remision_id,
+      valor, notas, clave_idempotencia, cuenta_origen_id, metodo,
+      remision_id, cargo_id,
     } = req.body;
     const data = await service.enviarRemesa(req, {
-      valor, notas, clave_idempotencia, cuenta_origen_id, metodo, remision_id,
+      valor, notas, clave_idempotencia, cuenta_origen_id, metodo,
+      remision_id, cargo_id,
     });
     if (!data.repetido) {
       audit.registrar(req.user.negocio_id, req.user.id, 'Remesa enviada', 'red_interna', data.id, {
@@ -312,7 +314,7 @@ const anularMovimientoCuenta = async (req, res, next) => {
 const moverAbono = async (req, res, next) => {
   try {
     const data = await service.moverAbono(req, Number(req.params.id), {
-      remision_id: req.body.remision_id,
+      remision_id: req.body.remision_id, cargo_id: req.body.cargo_id,
     });
     audit.registrar(req.user.negocio_id, req.user.id, 'Abono reimputado',
       'red_interna', data.id, {

@@ -23,8 +23,10 @@ import { Send, Info, Truck, Layers } from 'lucide-react';
 // aplica solo cuando llegue el próximo envío.
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function ModalPago({ envio = null, sugerido = 0, onCerrar, onListo }) {
-  const tope = envio ? Number(envio.saldo || 0) : Number(sugerido || 0);
+export function ModalPago({ envio = null, cargo = null, sugerido = 0, onCerrar, onListo }) {
+  // Un cargo se paga igual que un envío: es la misma deuda con otro documento.
+  const doc  = envio || cargo;
+  const tope = doc ? Number(doc.saldo || 0) : Number(sugerido || 0);
   const [valor, setValor] = useState(tope > 0 ? Math.round(tope) : '');
   const [notas, setNotas] = useState('');
   const [error, setError] = useState('');
@@ -49,6 +51,7 @@ export function ModalPago({ envio = null, sugerido = 0, onCerrar, onListo }) {
       cuenta_origen_id: cuenta?.id || undefined,
       metodo: cuenta?.metodo_sugerido || undefined,
       remision_id: envio?.id || undefined,
+      cargo_id:    cargo?.cargo_id || undefined,
       clave_idempotencia: clave(),
     }).then((r) => r.data),
     onSuccess: (res) => onListo(res?.message, res?.data),
@@ -61,15 +64,18 @@ export function ModalPago({ envio = null, sugerido = 0, onCerrar, onListo }) {
   return (
     <Modal
       open onClose={onCerrar} size="sm"
-      title={envio ? `Abonar al envío #${envio.numero ?? envio.id}` : 'Pagarle a la bodega'}
+      title={envio ? `Abonar al envío #${envio.numero ?? envio.id}`
+             : cargo ? 'Abonar a este cargo'
+             : 'Pagarle a la bodega'}
     >
       <div className="flex flex-col gap-4">
-        {envio ? (
+        {doc ? (
           <div className="flex items-center gap-2.5 bg-gray-50 rounded-xl px-3.5 py-2.5">
             <Truck size={15} className="text-gray-400 flex-shrink-0" />
             <div className="flex-1 min-w-0 text-xs text-gray-500">
-              Este envío debe <strong className="text-gray-800">{formatCOP(envio.saldo)}</strong>
-              {Number(envio.abonado) > 0 && <> · ya abonó {formatCOP(envio.abonado)}</>}
+              {cargo && <span className="block text-gray-700">{cargo.concepto}</span>}
+              Debe <strong className="text-gray-800">{formatCOP(doc.saldo)}</strong>
+              {Number(doc.abonado) > 0 && <> · ya abonó {formatCOP(doc.abonado)}</>}
             </div>
           </div>
         ) : (
@@ -99,7 +105,7 @@ export function ModalPago({ envio = null, sugerido = 0, onCerrar, onListo }) {
             onClick={() => setValor(Math.round(tope))}
             className="text-xs text-blue-600 hover:text-blue-700 text-left"
           >
-            {envio ? 'Pagar este envío completo' : 'Pagar todo lo que debes'}: {formatCOP(tope)}
+            {doc ? 'Pagar esto completo' : 'Pagar todo lo que debes'}: {formatCOP(tope)}
           </button>
         )}
 
@@ -107,9 +113,9 @@ export function ModalPago({ envio = null, sugerido = 0, onCerrar, onListo }) {
           <p className="text-xs text-amber-600 flex items-start gap-1.5">
             <Info size={12} className="flex-shrink-0 mt-0.5" />
             Estás enviando {formatCOP(monto - Math.round(tope))} de más.
-            {envio
-              ? ' Lo que sobre pasará a tus otros envíos abiertos.'
-              : ' Lo que sobre te queda a favor para el próximo envío.'}
+            {doc
+              ? ' Lo que sobre pasará a lo demás que tengas abierto.'
+              : ' Lo que sobre te queda a favor.'}
           </p>
         )}
 

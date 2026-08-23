@@ -17,7 +17,7 @@ import {
   ChevronDown, Search, X, TrendingUp, TrendingDown, Package, Truck,
   Wallet, FileText, Receipt, Filter, Info, HandCoins, ShoppingBag, Undo2,
   Store, AlertTriangle, CheckCircle2, Send, PiggyBank, Undo2 as Deshacer,
-  Clock, XCircle, ArrowRightLeft, PackageX, Pencil,
+  Clock, XCircle, ArrowRightLeft, PackageX, Pencil, SlidersHorizontal,
 } from 'lucide-react';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -618,7 +618,61 @@ function CuentaDelEnvio({ envio, onCambio }) {
   );
 }
 
-export function TabEnvios({ envios, resumen, ocultos, propia, onAbonar, onCambio }) {
+// Un cargo que la bodega le hizo al local (una rotura, un faltante). Se muestra
+// entre los envíos, con su saldo y su botón de abonar, porque es exactamente lo
+// mismo: una deuda con su documento.
+//
+// Antes era una línea suelta en el resumen que decía "tienes este cargo" y ya:
+// no se podía pagar y ni siquiera se veía de dónde salía. Peor, convivía con el
+// saldo a favor — "debes $830.000" y "tienes $586.010 a tu favor" a la vez.
+function TarjetaCargo({ c, propia, onAbonar }) {
+  const debe = c.saldo > 0;
+  return (
+    <div className={`border rounded-2xl overflow-hidden bg-white
+      ${debe ? 'border-red-200' : 'border-gray-100'}`}>
+      <div className="px-4 py-3">
+        <div className="flex items-start gap-3">
+          <div className="w-9 h-9 rounded-xl bg-red-50 flex items-center justify-center flex-shrink-0">
+            <SlidersHorizontal size={16} className="text-red-500" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-gray-900 truncate">
+              {c.concepto || 'Cargo de la bodega'}
+            </p>
+            <p className="text-xs text-gray-400">
+              Cargo · {formatFecha(c.fecha)}
+              {c.usuario_nombre ? ` · ${c.usuario_nombre}` : ''}
+            </p>
+          </div>
+          <div className="text-right flex-shrink-0">
+            {debe ? (
+              <>
+                <p className="text-lg font-bold text-red-600">{formatCOP(c.saldo)}</p>
+                <p className="text-xs text-gray-400">por pagar</p>
+              </>
+            ) : (
+              <span className="inline-flex items-center gap-1 text-sm font-semibold text-green-600">
+                <CheckCircle2 size={14} /> Pagado
+              </span>
+            )}
+          </div>
+        </div>
+        <Avance cargo={c.cargo} abonado={c.abonado} />
+      </div>
+      {propia && debe && (
+        <div className="px-4 py-2.5 border-t border-gray-50">
+          <Button size="sm" onClick={() => onAbonar(c)}>
+            <Send size={14} /> Abonar
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function TabEnvios({
+  envios, cargos = [], resumen, ocultos, propia, onAbonar, onAbonarCargo, onCambio,
+}) {
   const [abierto, setAbierto] = useState(null);
   const [verPagados, setVerPagados] = useState(false);
   // "Recibí todo" y faltaba una caja: el error más caro del día a día del local
@@ -634,6 +688,8 @@ export function TabEnvios({ envios, resumen, ocultos, propia, onAbonar, onCambio
   // saldado se despliega aparte para que no compita por la atención.
   const abiertos = envios.filter((e) => e.saldo > 0 || e.estado === 'En transito');
   const cerrados = envios.filter((e) => !(e.saldo > 0 || e.estado === 'En transito'));
+  const cargosAbiertos = cargos.filter((c) => c.saldo > 0);
+  const cargosCerrados = cargos.filter((c) => c.saldo <= 0);
 
   const tarjeta = (e) => {
     const abre = abierto === e.id;
@@ -741,13 +797,13 @@ export function TabEnvios({ envios, resumen, ocultos, propia, onAbonar, onCambio
       {!ocultos && resumen && (
         <div className="bg-blue-50/60 border border-blue-100 rounded-xl px-4 py-2.5">
           <p className="text-xs text-blue-800">
-            {resumen.abiertos > 0
+            {resumen.abiertos > 0 || cargosAbiertos.length > 0
               ? <>Tienes <strong>{resumen.abiertos}</strong> envío(s) sin pagar por{' '}
                  <strong>{formatCOP(resumen.saldo_total)}</strong>.</>
               : <>Todos tus envíos están pagados.</>}
             {resumen.cargos_sueltos > 0 && (
               <> Más <strong>{formatCOP(resumen.cargos_sueltos)}</strong> de cargos
-              que no vienen de un envío.</>
+              que la bodega te hizo aparte — abajo, con su tarjeta.</>
             )}
             {resumen.saldo_a_favor > 0 && (
               <> Y <strong>{formatCOP(resumen.saldo_a_favor)}</strong> a tu favor
@@ -757,9 +813,16 @@ export function TabEnvios({ envios, resumen, ocultos, propia, onAbonar, onCambio
         </div>
       )}
 
+      {/* Los cargos abiertos van con los envíos abiertos: es la misma deuda y
+          se paga igual. Separarlos era lo que hacía que un cargo pareciera un
+          aviso y no algo que hay que pagar. */}
+      {cargosAbiertos.map((c) => (
+        <TarjetaCargo key={`c-${c.cargo_id}`} c={c} propia={propia} onAbonar={onAbonarCargo} />
+      ))}
+
       {abiertos.map(tarjeta)}
 
-      {abiertos.length === 0 && (
+      {abiertos.length + cargosAbiertos.length === 0 && (
         <div className="bg-green-50 border border-green-100 rounded-xl px-4 py-3 text-center">
           <p className="text-green-700 text-sm font-medium">✓ Sin envíos por pagar</p>
         </div>
@@ -773,7 +836,7 @@ export function TabEnvios({ envios, resumen, ocultos, propia, onAbonar, onCambio
         />
       )}
 
-      {cerrados.length > 0 && (
+      {cerrados.length + cargosCerrados.length > 0 && (
         <div className="border border-gray-100 rounded-2xl overflow-hidden">
           <button
             onClick={() => setVerPagados((v) => !v)}
@@ -781,13 +844,18 @@ export function TabEnvios({ envios, resumen, ocultos, propia, onAbonar, onCambio
               bg-gray-50 hover:bg-gray-100 transition-colors"
           >
             <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-              Envíos cerrados ({cerrados.length})
+              Cerrados ({cerrados.length + cargosCerrados.length})
             </span>
             <ChevronDown size={15}
               className={`text-gray-400 transition-transform ${verPagados ? 'rotate-180' : ''}`} />
           </button>
           {verPagados && (
-            <div className="flex flex-col gap-2 p-3">{cerrados.map(tarjeta)}</div>
+            <div className="flex flex-col gap-2 p-3">
+              {cargosCerrados.map((c) => (
+                <TarjetaCargo key={`c-${c.cargo_id}`} c={c} propia={false} />
+              ))}
+              {cerrados.map(tarjeta)}
+            </div>
           )}
         </div>
       )}
