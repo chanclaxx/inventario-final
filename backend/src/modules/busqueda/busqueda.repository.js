@@ -200,23 +200,83 @@ const buscarCantidad = async (q, negocioId, sucursalId) => {
   return rows;
 };
 
-// ─── Código único de producto (escaneo POS) ─────────────────────────────────
-// Match EXACTO (el lector manda el código completo): resuelve a un único
-// producto por sucursal gracias al índice uq_productos_cantidad_codigo.
+// ─── Código único (escaneo POS) ─────────────────────────────────────────────
+//
+// Match EXACTO (el lector manda el código completo). El código identifica un
+// NODO, y con variantes activas ese nodo casi nunca es el producto: es la talla
+// 38MM de la correa. Por eso se buscan los tres niveles.
+//
+// Forma de la respuesta, pensada para que el POS agregue al carrito sin otra
+// consulta y sin romper a quien ya la consumía:
+//   * `id`, `nombre`, `linea_id`, `unidad_medida` → siempre el PRODUCTO
+//     (el nivel 'producto' devuelve exactamente lo mismo que antes);
+//   * `nivel` + `atributo_id` / `variante_id`     → qué se escaneó;
+//   * `stock`, `precio`, `costo_unitario`         → los del NODO, ya resueltos
+//     con COALESCE hacia arriba (una talla sin precio propio hereda el del
+//     producto, igual que hace la pantalla del árbol).
+//
+// Los NULL van casteados a mano: en un UNION los tipos salen de la primera rama
+// y un NULL sin tipo la vuelve `text`, que luego revienta contra un int.
 const buscarCantidadPorCodigo = async (codigo, negocioId, sucursalId) => {
   const { rows } = await pool.query(`
-    SELECT
-      pc.id, pc.nombre, pc.stock, pc.stock_minimo, pc.precio,
-      pc.unidad_medida, pc.costo_unitario, pc.codigo, pc.linea_id,
-      su.id   AS sucursal_id,
-      su.nombre AS sucursal_nombre
-    FROM productos_cantidad pc
-    JOIN sucursales su ON su.id = pc.sucursal_id
-    WHERE su.negocio_id = $1
-      AND pc.activo = true
-      AND UPPER(pc.codigo) = UPPER($2)
-      AND ($3::int IS NULL OR pc.sucursal_id = $3)
-    ORDER BY su.nombre
+    SELECT * FROM (
+      SELECT
+        'producto'::text AS nivel,
+        pc.id, pc.nombre, pc.stock, pc.stock_minimo,
+        pc.precio, pc.costo_unitario,
+        pc.unidad_medida, pc.codigo, pc.linea_id,
+        NULL::int  AS atributo_id, NULL::text AS atributo_valor,
+        NULL::int  AS variante_id, NULL::text AS variante_valor,
+        su.id AS sucursal_id, su.nombre AS sucursal_nombre
+      FROM productos_cantidad pc
+      JOIN sucursales su ON su.id = pc.sucursal_id
+      WHERE su.negocio_id = $1
+        AND pc.activo = true
+        AND UPPER(pc.codigo) = UPPER($2)
+        AND ($3::int IS NULL OR pc.sucursal_id = $3)
+
+      UNION ALL
+
+      SELECT
+        'atributo',
+        pc.id, pc.nombre, ap.stock, ap.stock_minimo,
+        COALESCE(ap.precio, pc.precio), COALESCE(ap.costo_unitario, pc.costo_unitario),
+        pc.unidad_medida, ap.codigo, pc.linea_id,
+        ap.id, COALESCE(tc.nombre || ': ', '') || ap.valor,
+        NULL::int, NULL::text,
+        su.id, su.nombre
+      FROM atributos_producto ap
+      JOIN productos_cantidad pc ON pc.id = ap.producto_id
+      JOIN sucursales su ON su.id = ap.sucursal_id
+      LEFT JOIN tipos_caracteristica tc ON tc.id = ap.tipo_id
+      WHERE su.negocio_id = $1
+        AND ap.activo = true AND pc.activo = true
+        AND UPPER(ap.codigo) = UPPER($2)
+        AND ($3::int IS NULL OR ap.sucursal_id = $3)
+
+      UNION ALL
+
+      SELECT
+        'variante',
+        pc.id, pc.nombre, v.stock, v.stock_minimo,
+        COALESCE(v.precio, ap.precio, pc.precio),
+        COALESCE(v.costo_unitario, ap.costo_unitario, pc.costo_unitario),
+        pc.unidad_medida, v.codigo, pc.linea_id,
+        ap.id, COALESCE(tca.nombre || ': ', '') || ap.valor,
+        v.id, COALESCE(tcv.nombre || ': ', '') || v.valor,
+        su.id, su.nombre
+      FROM variantes_atributo v
+      JOIN atributos_producto ap ON ap.id = v.atributo_id
+      JOIN productos_cantidad pc ON pc.id = ap.producto_id
+      JOIN sucursales su ON su.id = ap.sucursal_id
+      LEFT JOIN tipos_caracteristica tca ON tca.id = ap.tipo_id
+      LEFT JOIN tipos_caracteristica tcv ON tcv.id = v.tipo_id
+      WHERE su.negocio_id = $1
+        AND v.activo = true AND ap.activo = true AND pc.activo = true
+        AND UPPER(v.codigo) = UPPER($2)
+        AND ($3::int IS NULL OR ap.sucursal_id = $3)
+    ) nodos
+    ORDER BY sucursal_nombre
     LIMIT 10
   `, [negocioId, codigo, sucursalId ?? null]);
   return rows;

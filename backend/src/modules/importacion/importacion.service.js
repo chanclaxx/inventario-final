@@ -4,6 +4,7 @@ const {
   CONFLICTO, AVISO, crearInforme, conflicto, aviso, avisoUnico, limpiar,
   clavesCaracteristica,
 } = require('./importacion.informe');
+const { codigoTomadoPorOtroNodo, heredarCodigo, propagarCodigo } = require('../../utils/codigo.util');
 
 const MAX_FILAS = 2000;
 
@@ -745,14 +746,14 @@ const _ajustarVariante = async (client, atributoId, valor, stock, stockMinimo, p
        WHERE id = $5`,
       [stock, stockMinimo, precioVenta, costoUnit, rows[0].id]
     );
-    return 'actualizado';
+    return { id: rows[0].id, accion: 'actualizado' };
   }
-  await client.query(
+  const { rows: ins } = await client.query(
     `INSERT INTO variantes_atributo (atributo_id, valor, stock, stock_minimo, precio, costo_unitario)
-     VALUES($1, $2, $3, $4, $5, $6)`,
+     VALUES($1, $2, $3, $4, $5, $6) RETURNING id`,
     [atributoId, valor.trim(), stock, stockMinimo, precioVenta, costoUnit]
   );
-  return 'insertado';
+  return { id: ins[0].id, accion: 'insertado' };
 };
 
 // Recalcula stock en cascada: variantes → atributo → producto
@@ -871,37 +872,45 @@ const importarCantidad = async (filas, sucursalId, negocioId, config = {}, opcio
           mensaje: 'El archivo trae códigos pero la feature "Código único de producto" está apagada en Ajustes. Se guardan igual.',
         });
       }
+      // El código identifica el NODO que describe la fila, no el producto: con
+      // variantes activas, la fila «Correa / 38MM» le pone código a esa talla.
+      // Por eso la identidad para detectar choques lleva los tres valores.
+      const atributoValor = variantesActivo ? fila.atributo?.toString().trim() || null : null;
+      const varianteValor = atributoValor   ? fila.variante?.toString().trim() || null : null;
+      const identidadNodo = { producto: nombre, atributo: atributoValor, variante: varianteValor };
+      const claveNodo = [nombre, atributoValor ?? '', varianteValor ?? ''].join(' ').toLowerCase();
+      const etiquetaNodo = [nombre, atributoValor, varianteValor].filter(Boolean).join(' / ');
+
       if (codigo) {
-        const nombrePrevio = codigosArchivo.get(codigo);
-        if (nombrePrevio && nombrePrevio !== nombre.toLowerCase()) {
+        const nodoPrevio = codigosArchivo.get(codigo);
+        if (nodoPrevio && nodoPrevio.clave !== claveNodo) {
           conflicto(informe, {
             hoja: 'Productos Cantidad', fila: nFila, columna: 'Codigo', valor: codigo,
             tipo: CONFLICTO.CODIGO_ARCHIVO,
-            mensaje: `El código ${codigo} aparece en el archivo con otro producto («${nombrePrevio}»). Se omite la fila.`,
-            sugerencia: 'Un código debe apuntar a un solo producto.',
+            mensaje: `El código ${codigo} aparece en el archivo con otra fila («${nodoPrevio.etiqueta}»). Se omite la fila.`,
+            sugerencia: 'Un código debe apuntar a una sola variante.',
           });
-          resultado.errores.push({ fila: nFila, error: `El código ${codigo} aparece en el archivo con otro producto` });
+          resultado.errores.push({ fila: nFila, error: `El código ${codigo} aparece en el archivo con otra variante` });
           resultado.omitidos++;
           continue;
         }
-        codigosArchivo.set(codigo, nombre.toLowerCase());
+        codigosArchivo.set(codigo, { clave: claveNodo, etiqueta: etiquetaNodo });
 
-        const { rows: conflictoCodigo } = await client.query(
-          `SELECT pc.nombre FROM productos_cantidad pc
-           JOIN sucursales su ON su.id = pc.sucursal_id
-           WHERE su.negocio_id = $1 AND pc.activo = true
-             AND UPPER(pc.codigo) = $2 AND LOWER(pc.nombre) <> LOWER($3)
-           LIMIT 1`,
-          [negocioId, codigo, nombre]
-        );
-        if (conflictoCodigo.length) {
+        // Contra la BD: el MISMO nodo en otra sucursal comparte código a
+        // propósito (así el lector funciona en las dos sedes), así que la
+        // comparación es por identidad y no por id — que además todavía no
+        // existe si el nodo se va a crear en esta misma fila.
+        const tomado = await codigoTomadoPorOtroNodo(client, {
+          negocioId, codigo, identidad: identidadNodo,
+        });
+        if (tomado) {
           conflicto(informe, {
             hoja: 'Productos Cantidad', fila: nFila, columna: 'Codigo', valor: codigo,
             tipo: CONFLICTO.CODIGO_EN_USO,
-            mensaje: `El código ${codigo} ya está en uso por «${conflictoCodigo[0].nombre}». Se omite la fila.`,
-            sugerencia: 'Cambia el código en el Excel o corrige el nombre del producto.',
+            mensaje: `El código ${codigo} ya está en uso por «${tomado.etiqueta}» (${tomado.sucursal_nombre}). Se omite la fila.`,
+            sugerencia: 'Cambia el código en el Excel o corrige el nombre de la fila.',
           });
-          resultado.errores.push({ fila: nFila, error: `El código ${codigo} ya está en uso por "${conflictoCodigo[0].nombre}"` });
+          resultado.errores.push({ fila: nFila, error: `El código ${codigo} ya está en uso por "${tomado.etiqueta}"` });
           resultado.omitidos++;
           continue;
         }
@@ -947,8 +956,11 @@ const importarCantidad = async (filas, sucursalId, negocioId, config = {}, opcio
           });
         }
 
-        const atributoValor = variantesActivo ? fila.atributo?.toString().trim() || null : null;
-        const varianteValor = atributoValor   ? fila.variante?.toString().trim() || null : null;
+        // Nodo al que pertenece el código de esta fila: se llena más abajo,
+        // cuando ya se sabe si el stock fue al producto, al atributo o a la
+        // sub-variante. { tabla, id }
+        let nodoDelCodigo = null;
+
         if (!variantesActivo && fila.atributo?.toString().trim()) {
           avisoUnico(informe, {
             hoja: 'Productos Cantidad', fila: nFila, columna: 'Atributo', valor: fila.atributo,
@@ -976,9 +988,10 @@ const importarCantidad = async (filas, sucursalId, negocioId, config = {}, opcio
 
           if (varianteValor) {
             // Stock → variante (nivel 2); luego sincronizar hacia arriba
-            const accion = await _ajustarVariante(
+            const { id: varianteId, accion } = await _ajustarVariante(
               client, atributoId, varianteValor, stock, stockMinimo, precioVenta, costoUnit
             );
+            nodoDelCodigo = { tabla: 'variantes_atributo', id: varianteId };
             await _recalcularStockProducto(client, productoId);
             if (accion === 'insertado') {
               resultado.insertados++;
@@ -1004,6 +1017,7 @@ const importarCantidad = async (filas, sucursalId, negocioId, config = {}, opcio
                WHERE id = $4`,
               [stock, stockMinimo, precioVenta, atributoId]
             );
+            nodoDelCodigo = { tabla: 'atributos_producto', id: atributoId };
             await _recalcularStockProducto(client, productoId);
             if (atrNuevo) {
               resultado.insertados++;
@@ -1044,6 +1058,7 @@ const importarCantidad = async (filas, sucursalId, negocioId, config = {}, opcio
             );
             await _aplicarUbicacion(client, 'productos_cantidad', existe[0].id, fila.ubicacion, ubicacionActiva);
             await _aplicarNota(client, 'productos_cantidad', existe[0].id, fila.nota);
+            nodoDelCodigo = { tabla: 'productos_cantidad', id: existe[0].id };
             resultado.actualizados++;
             resultado.unidades_sumadas += stock;
             if (stock > 0) {
@@ -1066,84 +1081,48 @@ const importarCantidad = async (filas, sucursalId, negocioId, config = {}, opcio
             );
             await _aplicarUbicacion(client, 'productos_cantidad', creado[0]?.id, fila.ubicacion, ubicacionActiva);
             await _aplicarNota(client, 'productos_cantidad', creado[0]?.id, fila.nota);
+            nodoDelCodigo = { tabla: 'productos_cantidad', id: creado[0]?.id };
             resultado.insertados++;
           }
         }
 
-        // Código único: si la fila no trae código pero el producto ya existe con
-        // uno en otra sucursal, se hereda (un código = un producto en el negocio).
+        // ── Código único del NODO ────────────────────────────────────────
+        // El código pertenece a lo que la fila describe: si la fila trae
+        // Atributo, el código es de esa talla/color, no del producto. Antes
+        // todo iba a `productos_cantidad` y "ganaba la última fila", así que un
+        // producto con 30 atributos terminaba con un solo código y el lector
+        // solo podía abrir el árbol para que alguien eligiera a mano.
+        //
+        // Sin código en la fila se hereda el del mismo nodo en otra sucursal,
+        // para que el escaneo funcione igual en todas las sedes.
         let codigoFinal = codigo;
         if (!codigoFinal) {
-          // Se busca el código del mismo producto en otra sucursal y, aparte, si
-          // en la sucursal destino ese código ya lo tiene OTRO producto.
-          //
-          // Antes las dos cosas iban juntas en un NOT EXISTS: cuando el código
-          // estaba ocupado, la consulta simplemente no devolvía nada y el
-          // producto quedaba sin código sin que nadie se enterara — el escaneo
-          // dejaba de funcionar en esa sede y no había forma de saber por qué.
-          // Ahora se distingue "no hay código que heredar" de "lo hay pero está
-          // ocupado", y el segundo caso se avisa.
-          const { rows: her } = await client.query(
-            `SELECT pc.codigo,
-                    EXISTS (
-                      SELECT 1 FROM productos_cantidad x
-                      WHERE x.sucursal_id = $3 AND x.activo = true
-                        AND x.codigo = pc.codigo
-                        AND LOWER(x.nombre) <> LOWER($2)
-                    ) AS bloqueado
-             FROM productos_cantidad pc
-             JOIN sucursales su ON su.id = pc.sucursal_id
-             WHERE su.negocio_id = $1
-               AND pc.activo = true
-               AND pc.codigo IS NOT NULL
-               AND LOWER(pc.nombre) = LOWER($2)
-             ORDER BY pc.id ASC
-             LIMIT 1`,
-            [negocioId, nombre, sucursalId]
-          );
-          if (her[0]?.bloqueado) {
-            aviso(informe, {
-              hoja: 'Productos Cantidad', fila: nFila, columna: 'Codigo', valor: her[0].codigo,
-              tipo: AVISO.CODIGO_NO_APLICADO,
-              mensaje: `«${nombre}» se importó sin código: en esta sucursal el código ${her[0].codigo} ya lo tiene otro producto.`,
-              sugerencia: 'Escribe un código distinto en el Excel, o libera el que está ocupado.',
-            });
-          } else {
-            codigoFinal = her[0]?.codigo || null;
-          }
+          codigoFinal = await heredarCodigo(client, {
+            negocioId, sucursalId, identidad: identidadNodo,
+          });
         }
 
-        // Se asigna por nombre a TODAS las filas del producto lógico en el negocio
-        // (cubre insert, update y producto base de variantes, y mantiene el
-        // escaneo funcionando en las demás sucursales).
-        //
-        // Va en su PROPIO savepoint: este UPDATE puede chocar con
-        // `uq_productos_cantidad_codigo (sucursal_id, codigo)` si otra sucursal
-        // ya tiene ese código en un producto distinto. Antes ese 23505 reventaba
-        // el savepoint de la fila entera y se perdía el producto recién
-        // insertado, con un "Registro duplicado" que no decía de qué.
-        if (codigoFinal) {
+        // Va en su PROPIO savepoint: este UPDATE puede chocar con el índice
+        // único si otra sucursal ya tiene ese código en un nodo distinto. Antes
+        // ese 23505 reventaba el savepoint de la fila entera y se perdía el
+        // producto recién insertado, con un "Registro duplicado" que no decía
+        // de qué.
+        if (codigoFinal && nodoDelCodigo?.id) {
           await client.query('SAVEPOINT codigo_sp');
           try {
             await client.query(
-              `UPDATE productos_cantidad pc
-               SET codigo = $3
-               FROM sucursales su
-               WHERE su.id = pc.sucursal_id
-                 AND su.negocio_id = $1
-                 AND LOWER(pc.nombre) = LOWER($2)
-                 AND pc.activo = true
-                 AND pc.codigo IS DISTINCT FROM $3`,
-              [negocioId, nombre, codigoFinal]
+              `UPDATE ${nodoDelCodigo.tabla} SET codigo = $1 WHERE id = $2`,
+              [codigoFinal, nodoDelCodigo.id]
             );
             await client.query('RELEASE SAVEPOINT codigo_sp');
+            await propagarCodigo(client, { negocioId, identidad: identidadNodo, codigo: codigoFinal });
           } catch (errCodigo) {
             await client.query('ROLLBACK TO SAVEPOINT codigo_sp');
             aviso(informe, {
               hoja: 'Productos Cantidad', fila: nFila, columna: 'Codigo', valor: codigoFinal,
               tipo: AVISO.CODIGO_NO_APLICADO,
-              mensaje: `El producto se importó, pero no se le pudo poner el código ${codigoFinal}: ya está tomado en otra sucursal.`,
-              sugerencia: 'Revisa el código de este producto después de importar.',
+              mensaje: `La fila se importó, pero no se le pudo poner el código ${codigoFinal}: ya está tomado.`,
+              sugerencia: 'Revisa el código de esta variante después de importar.',
             });
           }
         }

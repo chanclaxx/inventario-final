@@ -227,7 +227,9 @@ function hojaCantidad(variantesActivo = false, lineas = [], codigoActivo = false
   if (codigoActivo) {
     columnas.push({
       clave: 'Codigo',
-      desc:  'Opcional · Código único / de barras (escríbelo como TEXTO, no número)',
+      desc:  variantesActivo
+        ? 'Opcional · Código de barras DE ESTA FILA: si escribes Atributo/Variante, el código es de esa variante. TEXTO, no número'
+        : 'Opcional · Código único / de barras (escríbelo como TEXTO, no número)',
       bg:    C.headerFondo,
       num:   false,
       wch:   18,

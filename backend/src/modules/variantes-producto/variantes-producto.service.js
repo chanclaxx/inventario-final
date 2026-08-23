@@ -1,5 +1,27 @@
 const repo = require('./variantes-producto.repository');
 const { calcularCostoPromedio } = require('../../utils/costoPromedio.util');
+const { normalizarCodigo, exigirCodigoLibre, propagarCodigo } = require('../../utils/codigo.util');
+
+// ── Código escaneable del nodo (feature opt-in `codigo_producto_activo`) ─────
+// El código identifica lo que se escanea. Con variantes activas eso es el
+// atributo o la sub-variante, no el producto. La unicidad se verifica contra
+// los TRES niveles de la sucursal: dos nodos con el mismo código dejarían al
+// lector sin forma de decidir cuál es.
+const _resolverCodigo = async (datos, sucursalId, excluir) => {
+  const codigo = normalizarCodigo(datos.codigo);
+  if (codigo) await exigirCodigoLibre(null, { sucursalId, codigo, excluir });
+  return codigo;
+};
+
+// Los índices únicos pueden saltar en una carrera de dos escrituras
+// simultáneas; se traduce a un error claro en vez de un 500.
+const _traducirCodigoDuplicado = (err) => {
+  const c = String(err?.constraint || '');
+  if (err?.code === '23505' && (c.includes('uq_atributos_producto_codigo') || c.includes('uq_variantes_atributo_codigo'))) {
+    throw { status: 409, message: 'Ese código ya está en uso en esta sucursal' };
+  }
+  throw err;
+};
 
 const getArbol = async (negocioId, productoId, sucursalId) => {
   const producto = await repo.verificarProductoNegocio(productoId, negocioId);
@@ -12,19 +34,36 @@ const crearAtributo = async (negocioId, productoId, datos) => {
   if (!producto) throw { status: 404, message: 'Producto no encontrado' };
   if (!datos.valor?.trim()) throw { status: 400, message: 'El valor es requerido' };
   if (Number(datos.stock || 0) < 0) throw { status: 400, message: 'El stock inicial no puede ser negativo' };
-  const atributo = await repo.crearAtributo(productoId, producto.sucursal_id, datos);
+
+  const codigo = await _resolverCodigo(datos, producto.sucursal_id, {});
+  const atributo = await repo.crearAtributo(productoId, producto.sucursal_id, { ...datos, codigo })
+    .catch(_traducirCodigoDuplicado);
+
   await repo.sincronizarStockProducto(productoId);
   await repo.sincronizarCostoProducto(productoId, atributo.costo_unitario);
+  if (codigo) {
+    const ctx = await repo.contextoAtributo(atributo.id);
+    if (ctx) await propagarCodigo(null, { negocioId, identidad: { producto: ctx.producto_nombre, atributo: ctx.valor }, codigo });
+  }
   return atributo;
 };
 
 const actualizarAtributo = async (negocioId, atributoId, datos) => {
   const atributo = await repo.verificarAtributoNegocio(atributoId, negocioId);
   if (!atributo) throw { status: 404, message: 'Atributo no encontrado' };
-  const actualizado = await repo.actualizarAtributo(atributoId, datos);
+
+  const codigo = await _resolverCodigo(datos, atributo.sucursal_id, { atributo: atributoId });
+  const actualizado = await repo.actualizarAtributo(atributoId, { ...datos, codigo })
+    .catch(_traducirCodigoDuplicado);
   if (!actualizado) throw { status: 404, message: 'Atributo no encontrado' };
+
   if (datos.costo_unitario !== undefined) {
     await repo.sincronizarCostoProducto(atributo.producto_id, actualizado.costo_unitario);
+  }
+  // `undefined` = el cliente no mandó el campo: no se toca ni se propaga.
+  if (codigo !== undefined) {
+    const ctx = await repo.contextoAtributo(atributoId);
+    if (ctx) await propagarCodigo(null, { negocioId, identidad: { producto: ctx.producto_nombre, atributo: ctx.valor }, codigo });
   }
   return actualizado;
 };
@@ -44,19 +83,35 @@ const crearVariante = async (negocioId, atributoId, datos) => {
   if (!atributo) throw { status: 404, message: 'Atributo no encontrado' };
   if (!datos.valor?.trim()) throw { status: 400, message: 'El valor es requerido' };
   if (Number(datos.stock || 0) < 0) throw { status: 400, message: 'El stock inicial no puede ser negativo' };
-  const variante = await repo.crearVariante(atributoId, datos);
+
+  const codigo = await _resolverCodigo(datos, atributo.sucursal_id, {});
+  const variante = await repo.crearVariante(atributoId, { ...datos, codigo })
+    .catch(_traducirCodigoDuplicado);
+
   await repo.sincronizarStockProducto(atributo.producto_id);
   await repo.sincronizarCostoProducto(atributo.producto_id, variante.costo_unitario);
+  if (codigo) {
+    const ctx = await repo.contextoVariante(variante.id);
+    if (ctx) await propagarCodigo(null, { negocioId, identidad: { producto: ctx.producto_nombre, atributo: ctx.atributo_valor, variante: ctx.valor }, codigo });
+  }
   return variante;
 };
 
 const actualizarVariante = async (negocioId, varianteId, datos) => {
   const variante = await repo.verificarVarianteNegocio(varianteId, negocioId);
   if (!variante) throw { status: 404, message: 'Variante no encontrada' };
-  const actualizado = await repo.actualizarVariante(varianteId, datos);
+
+  const codigo = await _resolverCodigo(datos, variante.sucursal_id, { variante: varianteId });
+  const actualizado = await repo.actualizarVariante(varianteId, { ...datos, codigo })
+    .catch(_traducirCodigoDuplicado);
   if (!actualizado) throw { status: 404, message: 'Variante no encontrada' };
+
   if (datos.costo_unitario !== undefined) {
     await repo.sincronizarCostoProducto(variante.producto_id, actualizado.costo_unitario);
+  }
+  if (codigo !== undefined) {
+    const ctx = await repo.contextoVariante(varianteId);
+    if (ctx) await propagarCodigo(null, { negocioId, identidad: { producto: ctx.producto_nombre, atributo: ctx.atributo_valor, variante: ctx.valor }, codigo });
   }
   return actualizado;
 };

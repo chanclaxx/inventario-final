@@ -19,6 +19,24 @@ const runMigrations = async () => {
       WHERE codigo IS NOT NULL AND activo;
   `);
 
+  // Código único en variantes — ver migrations/20260823_codigo_variantes.sql
+  // 100% aditiva e idempotente, sin backfill: quien ya tenía código en el
+  // producto sigue escaneando igual. Con variantes activas lo que se escanea es
+  // el atributo (la talla 38MM), no el producto, y antes no había dónde ponerlo.
+  // `variantes_atributo` no tiene sucursal_id, así que su índice es por atributo;
+  // el alcance de sucursal y la unicidad entre los tres niveles la impone
+  // src/utils/codigo.util.js.
+  await pool.query(`
+    ALTER TABLE IF EXISTS atributos_producto ADD COLUMN IF NOT EXISTS codigo TEXT;
+    ALTER TABLE IF EXISTS variantes_atributo ADD COLUMN IF NOT EXISTS codigo TEXT;
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_atributos_producto_codigo
+      ON atributos_producto (sucursal_id, codigo)
+      WHERE codigo IS NOT NULL AND activo;
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_variantes_atributo_codigo
+      ON variantes_atributo (atributo_id, codigo)
+      WHERE codigo IS NOT NULL AND activo;
+  `);
+
   // Ubicación espacial de productos — ver migrations/20260730_ubicacion_producto.sql
   //
   // 100% aditiva e idempotente. Columnas nullable: un negocio sin la feature no

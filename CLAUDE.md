@@ -184,6 +184,38 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > Prueba: `18-importacion` (212 verificaciones, incluye el ida y vuelta con la
 > plantilla real y tres sucursales del mismo negocio).
 
+> **Código único — lo escaneable es el NODO, no el producto**
+> (`utils/codigo.util.js`, `20260823_codigo_variantes.sql`): el código vive en
+> los **tres** niveles del árbol de cantidad — `productos_cantidad.codigo`,
+> `atributos_producto.codigo` y `variantes_atributo.codigo`. La primera versión
+> (20260714) solo lo puso en el producto, y con la feature «Variantes» activa un
+> producto con 30 tallas tenía **un** código: el lector solo podía abrir el árbol
+> para que alguien eligiera a mano, justo el trabajo que el código venía a quitar.
+> **La regla es una: un código = un nodo escaneable por sucursal, sin importar el
+> nivel.** Si el mismo código estuviera en un producto y en el atributo de otro,
+> el lector no tendría cómo decidir. La BD la garantiza por tabla (índices
+> parciales); **entre niveles no es expresable como constraint —son tres tablas—**
+> y la impone `buscarCodigoEnUso`, igual que ya pasaba con «un código = un solo
+> nombre de producto». `variantes_atributo` no tiene `sucursal_id` (cuelga de
+> `atributo_id`), así que su índice es por atributo y el alcance de sucursal
+> también lo cubre el service.
+> El **importador** le pone el código de cada fila al nodo que esa fila describe:
+> con Atributo, el código es de esa talla. Antes iba todo a `productos_cantidad`
+> con «gana la última fila». Al validar compara por **identidad lógica**
+> (nombre + valor del atributo + valor de la variante), nunca por id: re-importar
+> el mismo archivo no puede chocar consigo mismo, y el mismo nodo en otra sede
+> comparte código **a propósito** (así el lector funciona en las dos) — para eso
+> están `heredarCodigo` y `propagarCodigo`, que viven en el util porque los
+> comparten el módulo de variantes y el importador, que corre todo con su propio
+> `client` en transacción.
+> Al escanear, `buscarCantidadPorCodigo` devuelve el nodo con su `nivel` y el
+> `precio`/`costo` ya resueltos con `COALESCE` hacia arriba; el POS agrega la
+> variante al carrito **con la misma `key`** que arma `VistaVariantesProducto`
+> (`cant-<prod>-a-<atr>` / `cant-<prod>-v-<var>`) o el carrito guardaría dos
+> líneas para la misma variante. El buscador de texto de la pantalla filtra
+> también por `codigos_variantes` (agregado en `findAll`): sin eso, mover los
+> códigos a las variantes los volvía inbuscables.
+
 > **Red interna — el ENVÍO es la deuda** (`red-interna/`): una sucursal-bodega
 > surte a los locales. Feature opt-in (`config_negocio.red_interna_activa`),
 > nunca activa para clientes existentes.

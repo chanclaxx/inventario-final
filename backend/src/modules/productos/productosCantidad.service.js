@@ -2,6 +2,7 @@ const { pool }              = require('../../config/db');
 const repo                  = require('./productosCantidad.repository');
 const { calcularCostoPromedio } = require('../../utils/costoPromedio.util');
 const { normalizarUbicacion }   = require('../../utils/ubicacion.util');
+const { normalizarCodigo: _normalizarCodigo, exigirCodigoLibre } = require('../../utils/codigo.util');
 
 // ── Verifica que linea_id pertenece al negocio ────────────────────────────
 const _verificarLineaNegocio = async (lineaId, negocioId) => {
@@ -13,19 +14,17 @@ const _verificarLineaNegocio = async (lineaId, negocioId) => {
 };
 
 // ── Código único de producto (feature opt-in tipo supermercado) ──────────
-// undefined → no tocar (clientes que no envían el campo no notan nada);
-// ''/null   → limpiar; texto → trim + mayúsculas (el lector siempre manda
-// la misma cadena; la entrada manual puede variar en mayúsculas).
-const _normalizarCodigo = (codigo) => {
-  if (codigo === undefined) return undefined;
-  const limpio = String(codigo ?? '').trim().toUpperCase();
-  if (!limpio) return null;
-  if (/\s/.test(limpio)) throw { status: 400, message: 'El código no puede contener espacios' };
-  if (limpio.length > 50) throw { status: 400, message: 'El código no puede superar 50 caracteres' };
-  return limpio;
-};
-
-const _validarCodigoUnico = async (negocioId, codigo, nombre, excluirId = null) => {
+// La normalización vive en utils/codigo.util.js, compartida con los atributos
+// y sub-variantes: el mismo código escrito en dos sitios distintos tiene que
+// quedar idéntico en la BD o el lector no lo encuentra.
+//
+// Son DOS reglas, y las dos hacen falta:
+//   1. un código = un solo nombre de producto dentro del NEGOCIO
+//      (el mismo producto en dos sedes comparte código a propósito);
+//   2. un código = un solo nodo escaneable dentro de la SUCURSAL, contando
+//      productos, atributos y variantes — si no, el lector no sabría si el
+//      código es del producto o de la talla 38MM de otro.
+const _validarCodigoUnico = async (negocioId, sucursalId, codigo, nombre, excluirId = null) => {
   const conflicto = await repo.codigoEnConflicto(negocioId, codigo, nombre, excluirId);
   if (conflicto) {
     throw {
@@ -33,6 +32,7 @@ const _validarCodigoUnico = async (negocioId, codigo, nombre, excluirId = null) 
       message: `El código ${codigo} ya está en uso por "${conflicto.nombre}" (${conflicto.sucursal_nombre})`,
     };
   }
+  await exigirCodigoLibre(null, { sucursalId, codigo, excluir: { producto: excluirId ?? undefined } });
 };
 
 // El índice único (sucursal_id, codigo) puede saltar en una carrera de dos
@@ -65,7 +65,7 @@ const crearProducto = async (negocioId, datos) => {
 
   let codigo = _normalizarCodigo(datos.codigo);
   if (codigo) {
-    await _validarCodigoUnico(negocioId, codigo, datos.nombre);
+    await _validarCodigoUnico(negocioId, datos.sucursal_id, codigo, datos.nombre);
   } else {
     // Mismo producto (mismo nombre) ya creado en otra sucursal → hereda su código,
     // para que el escaneo funcione igual en todas las sucursales del negocio.
@@ -93,7 +93,7 @@ const actualizarProducto = async (negocioId, id, datos) => {
   // Solo se valida cuando el código realmente cambia: reguardar un producto con
   // el código que ya tenía no debe fallar (no está tomando el código de nadie).
   if (codigo && codigo !== producto.codigo) {
-    await _validarCodigoUnico(negocioId, codigo, datos.nombre ?? producto.nombre, producto.id);
+    await _validarCodigoUnico(negocioId, producto.sucursal_id, codigo, datos.nombre ?? producto.nombre, producto.id);
   }
 
   const ubicacion = normalizarUbicacion(datos.ubicacion);

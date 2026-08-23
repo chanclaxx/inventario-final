@@ -214,7 +214,7 @@ const getVariantesPorSucursal = async (sucursalId) => {
     SELECT
       ap.id, ap.producto_id,
       ap.tipo_id, tc.nombre AS tipo_nombre,
-      ap.valor, ap.stock, ap.stock_minimo, ap.precio
+      ap.valor, ap.stock, ap.stock_minimo, ap.precio, ap.codigo
     FROM atributos_producto ap
     JOIN productos_cantidad  pc ON pc.id  = ap.producto_id
     LEFT JOIN tipos_caracteristica tc ON tc.id = ap.tipo_id
@@ -229,7 +229,7 @@ const getVariantesPorSucursal = async (sucursalId) => {
     SELECT
       v.id, v.atributo_id,
       v.tipo_id, tc.nombre AS tipo_nombre,
-      v.valor, v.stock, v.stock_minimo, v.precio
+      v.valor, v.stock, v.stock_minimo, v.precio, v.codigo
     FROM variantes_atributo v
     LEFT JOIN tipos_caracteristica tc ON tc.id = v.tipo_id
     WHERE v.atributo_id = ANY($1) AND v.activo = true

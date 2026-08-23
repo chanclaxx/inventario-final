@@ -6,7 +6,7 @@ const getArbol = async (productoId, sucursalId) => {
   const { rows: atributos } = await pool.query(
     `SELECT
        ap.id, ap.tipo_id, tc.nombre AS tipo_nombre, ap.valor,
-       ap.stock, ap.stock_minimo, ap.precio, ap.costo_unitario, ap.activo
+       ap.stock, ap.stock_minimo, ap.precio, ap.costo_unitario, ap.codigo, ap.activo
      FROM atributos_producto ap
      LEFT JOIN tipos_caracteristica tc ON tc.id = ap.tipo_id
      WHERE ap.producto_id = $1 AND ap.sucursal_id = $2 AND ap.activo = true
@@ -19,7 +19,7 @@ const getArbol = async (productoId, sucursalId) => {
   const { rows: variantes } = await pool.query(
     `SELECT
        v.id, v.atributo_id, v.tipo_id, tc.nombre AS tipo_nombre, v.valor,
-       v.stock, v.stock_minimo, v.precio, v.costo_unitario, v.activo
+       v.stock, v.stock_minimo, v.precio, v.costo_unitario, v.codigo, v.activo
      FROM variantes_atributo v
      LEFT JOIN tipos_caracteristica tc ON tc.id = v.tipo_id
      WHERE v.atributo_id = ANY($1) AND v.activo = true
@@ -74,28 +74,31 @@ const verificarVarianteNegocio = async (varianteId, negocioId) => {
 
 // ── CRUD de atributos ─────────────────────────────────────────────────────────
 
-const crearAtributo = async (productoId, sucursalId, { tipo_id, valor, stock = 0, stock_minimo = 0, precio, costo_unitario }) => {
+const crearAtributo = async (productoId, sucursalId, { tipo_id, valor, stock = 0, stock_minimo = 0, precio, costo_unitario, codigo }) => {
   const { rows } = await pool.query(
-    `INSERT INTO atributos_producto (producto_id, sucursal_id, tipo_id, valor, stock, stock_minimo, precio, costo_unitario)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-     RETURNING id, tipo_id, valor, stock, stock_minimo, precio, costo_unitario, activo`,
-    [productoId, sucursalId, tipo_id || null, valor.trim(), stock, stock_minimo, precio || null, costo_unitario || null]
+    `INSERT INTO atributos_producto (producto_id, sucursal_id, tipo_id, valor, stock, stock_minimo, precio, costo_unitario, codigo)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+     RETURNING id, tipo_id, valor, stock, stock_minimo, precio, costo_unitario, codigo, activo`,
+    [productoId, sucursalId, tipo_id || null, valor.trim(), stock, stock_minimo, precio || null, costo_unitario || null, codigo ?? null]
   );
   return rows[0];
 };
 
-const actualizarAtributo = async (id, { valor, stock_minimo, precio, costo_unitario }) => {
+// `codigo` sigue la semántica de tres estados: undefined no toca la columna
+// (un cliente viejo que no manda el campo no borra el código), null la limpia.
+const actualizarAtributo = async (id, { valor, stock_minimo, precio, costo_unitario, codigo }) => {
   const sets = [];
   const params = [id];
   if (valor !== undefined) { sets.push(`valor = $${params.length + 1}`); params.push(valor.trim()); }
   if (stock_minimo !== undefined) { sets.push(`stock_minimo = $${params.length + 1}`); params.push(stock_minimo); }
   if (precio !== undefined) { sets.push(`precio = $${params.length + 1}`); params.push(precio || null); }
   if (costo_unitario !== undefined) { sets.push(`costo_unitario = $${params.length + 1}`); params.push(costo_unitario || null); }
+  if (codigo !== undefined) { sets.push(`codigo = $${params.length + 1}`); params.push(codigo); }
   if (!sets.length) return null;
   const { rows } = await pool.query(
     `UPDATE atributos_producto SET ${sets.join(', ')}
      WHERE id = $1
-     RETURNING id, valor, stock, stock_minimo, precio, costo_unitario`,
+     RETURNING id, valor, stock, stock_minimo, precio, costo_unitario, codigo`,
     params
   );
   return rows[0] || null;
@@ -107,28 +110,29 @@ const eliminarAtributo = async (id) => {
 
 // ── CRUD de variantes ─────────────────────────────────────────────────────────
 
-const crearVariante = async (atributoId, { tipo_id, valor, stock = 0, stock_minimo = 0, precio, costo_unitario }) => {
+const crearVariante = async (atributoId, { tipo_id, valor, stock = 0, stock_minimo = 0, precio, costo_unitario, codigo }) => {
   const { rows } = await pool.query(
-    `INSERT INTO variantes_atributo (atributo_id, tipo_id, valor, stock, stock_minimo, precio, costo_unitario)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)
-     RETURNING id, tipo_id, valor, stock, stock_minimo, precio, costo_unitario, activo`,
-    [atributoId, tipo_id || null, valor.trim(), stock, stock_minimo, precio || null, costo_unitario || null]
+    `INSERT INTO variantes_atributo (atributo_id, tipo_id, valor, stock, stock_minimo, precio, costo_unitario, codigo)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+     RETURNING id, tipo_id, valor, stock, stock_minimo, precio, costo_unitario, codigo, activo`,
+    [atributoId, tipo_id || null, valor.trim(), stock, stock_minimo, precio || null, costo_unitario || null, codigo ?? null]
   );
   return rows[0];
 };
 
-const actualizarVariante = async (id, { valor, stock_minimo, precio, costo_unitario }) => {
+const actualizarVariante = async (id, { valor, stock_minimo, precio, costo_unitario, codigo }) => {
   const sets = [];
   const params = [id];
   if (valor !== undefined) { sets.push(`valor = $${params.length + 1}`); params.push(valor.trim()); }
   if (stock_minimo !== undefined) { sets.push(`stock_minimo = $${params.length + 1}`); params.push(stock_minimo); }
   if (precio !== undefined) { sets.push(`precio = $${params.length + 1}`); params.push(precio || null); }
   if (costo_unitario !== undefined) { sets.push(`costo_unitario = $${params.length + 1}`); params.push(costo_unitario || null); }
+  if (codigo !== undefined) { sets.push(`codigo = $${params.length + 1}`); params.push(codigo); }
   if (!sets.length) return null;
   const { rows } = await pool.query(
     `UPDATE variantes_atributo SET ${sets.join(', ')}
      WHERE id = $1
-     RETURNING id, valor, stock, stock_minimo, precio, costo_unitario`,
+     RETURNING id, valor, stock, stock_minimo, precio, costo_unitario, codigo`,
     params
   );
   return rows[0] || null;
@@ -136,6 +140,34 @@ const actualizarVariante = async (id, { valor, stock_minimo, precio, costo_unita
 
 const eliminarVariante = async (id) => {
   await pool.query('UPDATE variantes_atributo SET activo = false WHERE id = $1', [id]);
+};
+
+// ── Identidad lógica del nodo, para propagar el código a las demás sucursales ─
+//
+// El UPDATE de propagación vive en utils/codigo.util.js porque lo comparte con
+// el importador; aquí solo se resuelve de qué nodo estamos hablando (los ids
+// son distintos en cada sede, el nombre y los valores no).
+const contextoAtributo = async (atributoId) => {
+  const { rows } = await pool.query(
+    `SELECT ap.valor, ap.sucursal_id, pc.nombre AS producto_nombre
+     FROM atributos_producto ap
+     JOIN productos_cantidad pc ON pc.id = ap.producto_id
+     WHERE ap.id = $1`,
+    [atributoId]
+  );
+  return rows[0] || null;
+};
+
+const contextoVariante = async (varianteId) => {
+  const { rows } = await pool.query(
+    `SELECT v.valor, ap.valor AS atributo_valor, ap.sucursal_id, pc.nombre AS producto_nombre
+     FROM variantes_atributo v
+     JOIN atributos_producto ap ON ap.id = v.atributo_id
+     JOIN productos_cantidad pc ON pc.id = ap.producto_id
+     WHERE v.id = $1`,
+    [varianteId]
+  );
+  return rows[0] || null;
 };
 
 // ── Ajustes de stock con historial ───────────────────────────────────────────
@@ -325,6 +357,7 @@ module.exports = {
   verificarVarianteNegocio,
   crearAtributo, actualizarAtributo, eliminarAtributo,
   crearVariante, actualizarVariante, eliminarVariante,
+  contextoAtributo, contextoVariante,
   ajustarStockAtributo, ajustarStockVariante,
   sincronizarStockProducto, sincronizarCostoProducto,
   ajustarStockAtributoEnTx, ajustarStockVarianteEnTx, sincronizarStockProductoEnTx,

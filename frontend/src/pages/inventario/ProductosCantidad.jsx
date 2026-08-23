@@ -287,6 +287,8 @@ export function ProductosCantidad() {
     return p.nombre.toLowerCase().includes(q)
       || p.linea_nombre?.toLowerCase().includes(q)
       || p.codigo?.toLowerCase().includes(q)
+      // Con variantes activas el código vive en el atributo, no en el producto
+      || p.codigos_variantes?.toLowerCase().includes(q)
       || p.ubicacion?.toLowerCase().includes(q);
   }).filter((p) => {
     if (!filtroUbicacion) return true;
@@ -325,26 +327,68 @@ export function ProductosCantidad() {
     if (!codigo) return;
     setScan('');
 
-    // Match exacto local (la lista de la sucursal ya está cargada);
-    // si no aparece (p. ej. recién importado), se consulta al backend.
-    let producto = productos.find((p) => (p.codigo || '').toUpperCase() === codigo);
-    if (!producto) {
+    // El código puede ser del producto O de una de sus variantes. La lista
+    // local solo tiene productos, así que resuelve el caso simple sin ir al
+    // servidor; las variantes las resuelve el backend, que busca en los tres
+    // niveles y devuelve el nodo exacto.
+    let nodo = null;
+    const local = productos.find((p) => (p.codigo || '').toUpperCase() === codigo);
+    if (local) nodo = { nivel: 'producto', ...local };
+
+    if (!nodo) {
       try {
         const r = await buscarPorCodigo(codigo);
-        const remoto = r.data?.data?.[0];
-        if (remoto) producto = productos.find((p) => p.id === remoto.id) || remoto;
+        nodo = r.data?.data?.[0] || null;
       } catch { /* 404 = no existe */ }
     }
 
-    if (!producto) {
+    if (!nodo) {
       setScanMsg({ tipo: 'error', texto: `Código ${codigo} no encontrado` });
       return;
     }
     // Vista global (todas las sucursales): los grupos no tienen id de producto
-    if (!producto.id) {
+    if (!nodo.id) {
       setScanMsg({ tipo: 'error', texto: 'Selecciona una sucursal para agregar con el escáner' });
       return;
     }
+
+    // ── El código es de una variante: va DERECHO al carrito ──────────────
+    // Identifica exactamente qué se está vendiendo. Antes el escaneo solo
+    // podía abrir el árbol para que alguien eligiera la talla a mano, que es
+    // justo el trabajo que el código venía a quitar.
+    if (nodo.atributo_id) {
+      const etiqueta = [nodo.nombre, nodo.atributo_valor, nodo.variante_valor].filter(Boolean).join(' · ');
+      if (!nodo.stock || Number(nodo.stock) <= 0) {
+        setScanMsg({ tipo: 'error', texto: `"${etiqueta}" está sin stock` });
+        return;
+      }
+      // La misma `key` que arma la pantalla del árbol, o el carrito guardaría
+      // dos líneas para la misma variante.
+      const res = agregarOIncrementar({
+        key:            nodo.variante_id ? `cant-${nodo.id}-v-${nodo.variante_id}` : `cant-${nodo.id}-a-${nodo.atributo_id}`,
+        tipo:           'cantidad',
+        nombre:         nodo.nombre,
+        producto_id:    nodo.id,
+        atributo_id:    nodo.atributo_id,
+        variante_id:    nodo.variante_id || undefined,
+        atributo_label: nodo.atributo_valor || undefined,
+        variante_label: nodo.variante_valor || undefined,
+        precio:         Math.round(Number(nodo.precio || nodo.costo_unitario || 0)),
+        costo:          Number(nodo.costo_unitario) || null,
+        stock:          nodo.stock,
+        cantidad:       1,
+        linea_id:       nodo.linea_id || null,
+      });
+      if (res === 'reservado') { setScanMsg(null); return; }
+      setScanMsg(res === 'sin_stock'
+        ? { tipo: 'error', texto: `"${etiqueta}": ya está todo el stock en el carrito` }
+        : { tipo: 'ok', texto: `✓ ${etiqueta} — en el carrito` });
+      return;
+    }
+
+    // ── El código es del producto ────────────────────────────────────────
+    // Con variantes activas no dice cuál se vende: hay que abrir el árbol.
+    const producto = productos.find((p) => p.id === nodo.id) || nodo;
     if (variantesActivo) {
       setScanMsg(null);
       setProductoArbol(producto);
@@ -402,6 +446,7 @@ export function ProductosCantidad() {
         esAdmin={esAdmin}
         onClose={() => setProductoArbol(null)}
         ajusteStockSinVariantes={ajusteStockSinVariantes}
+        codigoActivo={codigoActivo}
       />
     );
   }

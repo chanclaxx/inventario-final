@@ -38,11 +38,12 @@ function colorBarra(stock, minimo) {
 }
 
 // ─── Modal crear/editar nodo ──────────────────────────────────────────────────
-function ModalNodo({ open, onClose, titulo, tipos = [], datoInicial, onGuardar, isPending, error, onEliminar, ocultarCosto = false }) {
+function ModalNodo({ open, onClose, titulo, tipos = [], datoInicial, onGuardar, isPending, error, onEliminar, ocultarCosto = false, codigoActivo = false }) {
   const [valor,         setValor]         = useState(datoInicial?.valor || '');
   const [stockMin,      setStockMin]      = useState(datoInicial?.stock_minimo ?? 0);
   const [precio,        setPrecio]        = useState(datoInicial?.precio || '');
   const [costoUnitario, setCostoUnitario] = useState(datoInicial?.costo_unitario != null ? Number(datoInicial.costo_unitario) : '');
+  const [codigo,        setCodigo]        = useState(datoInicial?.codigo || '');
   const [tipoId,        setTipoId]        = useState(String(datoInicial?.tipo_id || ''));
   const [stock,         setStock]         = useState('');
 
@@ -58,6 +59,7 @@ function ModalNodo({ open, onClose, titulo, tipos = [], datoInicial, onGuardar, 
       costo_unitario: costoUnitario !== '' ? Number(costoUnitario) : null,
       tipo_id:       tipoId ? Number(tipoId) : null,
       stock:         Number(stock) || undefined,
+      codigo:        codigoActivo ? codigo.trim().toUpperCase() : undefined,
     });
   };
 
@@ -103,6 +105,20 @@ function ModalNodo({ open, onClose, titulo, tipos = [], datoInicial, onGuardar, 
           onChange={(e) => setValor(e.target.value)}
           autoFocus={tipos.length === 0}
         />
+
+        {codigoActivo && (
+          <div className="flex flex-col gap-1">
+            <Input
+              label="Código de barras de esta variante"
+              placeholder="Ej: ACC-360-38M-001"
+              value={codigo}
+              onChange={(e) => setCodigo(e.target.value.toUpperCase())}
+            />
+            <p className="text-xs text-gray-400">
+              Es el que lee el escáner. Déjalo vacío si esta variante no tiene código propio.
+            </p>
+          </div>
+        )}
 
         {!datoInicial && (
           <Input
@@ -211,10 +227,15 @@ function TarjetaNodo({
     >
       {/* Nombre + acciones */}
       <div className="flex items-start justify-between gap-2">
-        <p className={`font-medium text-sm break-words leading-snug flex-1 min-w-0
-          ${sinStock ? 'text-gray-400' : 'text-gray-900'}`}>
-          {labelNodo(nodo)}
-        </p>
+        <div className="flex-1 min-w-0">
+          <p className={`font-medium text-sm break-words leading-snug
+            ${sinStock ? 'text-gray-400' : 'text-gray-900'}`}>
+            {labelNodo(nodo)}
+          </p>
+          {nodo.codigo && (
+            <p className="text-[11px] font-mono text-gray-400 mt-0.5 break-all">{nodo.codigo}</p>
+          )}
+        </div>
         <div className="flex items-center gap-0.5 flex-shrink-0">
           {esAdmin && (
             <button
@@ -304,7 +325,7 @@ function TarjetaNodo({
 }
 
 // ─── Componente principal ─────────────────────────────────────────────────────
-export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose, ajusteStockSinVariantes = false }) {
+export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose, ajusteStockSinVariantes = false, codigoActivo = false }) {
   const queryClient = useQueryClient();
   const agregarItem = useCarritoStore((s) => s.agregarItem);
 
@@ -534,6 +555,7 @@ export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose,
             onGuardar={(d) => mutCrearVar.mutate({ atributoId: modalNodo.atributoId, datos: d })}
             isPending={mutCrearVar.isPending}
             error={errorM}
+            codigoActivo={codigoActivo}
           />
         )}
         {modalNodo?.modo === 'editar-var' && (
@@ -546,6 +568,7 @@ export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose,
             onGuardar={(d) => mutEditarVar.mutate({ id: modalNodo.dato.id, datos: d })}
             isPending={mutEditarVar.isPending}
             error={errorM}
+            codigoActivo={codigoActivo}
             onEliminar={() => { mutEliminarVar.mutate(modalNodo.dato.id); cerrarModal(); }}
           />
         )}
@@ -709,6 +732,7 @@ export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose,
           onGuardar={(d) => mutCrearAtr.mutate(d)}
           isPending={mutCrearAtr.isPending}
           error={errorM}
+          codigoActivo={codigoActivo}
         />
       )}
       {modalNodo?.modo === 'editar-atr' && (
@@ -721,6 +745,7 @@ export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose,
           onGuardar={(d) => mutEditarAtr.mutate({ id: modalNodo.dato.id, datos: d })}
           isPending={mutEditarAtr.isPending}
           error={errorM}
+          codigoActivo={codigoActivo}
           onEliminar={() => { mutEliminarAtr.mutate(modalNodo.dato.id); cerrarModal(); }}
           ocultarCosto={modalNodo.dato.variantes?.length > 0}
         />

@@ -24,7 +24,11 @@ const findAll = async (sucursalId, negocioId, lineaId) => {
         (CURRENT_DATE - pc.creado_en::date)::int AS dias_en_inventario,
         -- Última venta y días transcurridos desde ella (para detectar productos que no rotan)
         uv.ultima_venta,
-        (CURRENT_DATE - uv.ultima_venta::date)::int AS dias_sin_venta
+        (CURRENT_DATE - uv.ultima_venta::date)::int AS dias_sin_venta,
+        -- Códigos de las variantes, para que el buscador de la pantalla los
+        -- encuentre: con variantes activas el código vive en el atributo, y sin
+        -- esto escribir un código dejaba de dar resultados aunque existiera.
+        cv.codigos_variantes
       FROM productos_cantidad pc
       LEFT JOIN proveedores    p  ON p.id  = pc.proveedor_id
       LEFT JOIN lineas_producto lp ON lp.id = pc.linea_id
@@ -35,6 +39,19 @@ const findAll = async (sucursalId, negocioId, lineaId) => {
         JOIN facturas f ON f.id = lf.factura_id AND f.estado <> 'Cancelada'
         WHERE lf.producto_id = pc.id
       ) uv ON true
+      LEFT JOIN LATERAL (
+        SELECT string_agg(c, ' ') AS codigos_variantes FROM (
+          SELECT ap.codigo AS c
+          FROM atributos_producto ap
+          WHERE ap.producto_id = pc.id AND ap.activo = true AND ap.codigo IS NOT NULL
+          UNION ALL
+          SELECT v.codigo
+          FROM variantes_atributo v
+          JOIN atributos_producto ap2 ON ap2.id = v.atributo_id
+          WHERE ap2.producto_id = pc.id AND ap2.activo = true
+            AND v.activo = true AND v.codigo IS NOT NULL
+        ) t
+      ) cv ON true
       WHERE pc.sucursal_id = $1
         AND pc.activo = true
         AND ($2::int IS NULL OR pc.linea_id = $2)
