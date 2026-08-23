@@ -75,9 +75,11 @@ const resolverItems = async (req, res, next) => {
 
 const despachar = async (req, res, next) => {
   try {
-    const { sucursal_destino_id, lineas, notas, clave_idempotencia } = req.body;
+    const {
+      sucursal_destino_id, lineas, notas, clave_idempotencia, permitir_valor_cero,
+    } = req.body;
     const data = await service.despachar(req, {
-      sucursal_destino_id, lineas, notas, clave_idempotencia,
+      sucursal_destino_id, lineas, notas, clave_idempotencia, permitir_valor_cero,
     });
     if (!data.repetido) {
       audit.registrar(req.user.negocio_id, req.user.id, 'Remisión despachada', 'red_interna', data.id, {
@@ -258,7 +260,10 @@ const listarRemesas = async (req, res, next) => {
 
 const gastoAutorizado = async (req, res, next) => {
   try {
-    const data = await service.registrarGastoAutorizado(req, req.body);
+    const { valor, concepto, cuenta_origen_id } = req.body;
+    const data = await service.registrarGastoAutorizado(req, {
+      valor, concepto, cuenta_origen_id,
+    });
     audit.registrar(req.user.negocio_id, req.user.id, 'Gasto por cuenta de bodega', 'red_interna', data.id, {
       sucursal_id: Number(req.sucursal_id), valor: data.valor,
     });

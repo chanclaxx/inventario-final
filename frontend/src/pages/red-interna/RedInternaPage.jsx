@@ -100,6 +100,11 @@ function PanelBodega({ data, locales, onRefrescar, onAviso, onVerCuenta }) {
         </Button>
       </div>
 
+      {/* En pantalla grande, dos columnas: los locales —la lista que se
+          consulta a diario— y a un lado las bandejas de confirmación, que
+          antes obligaban a bajar hasta el final para verlas. */}
+      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] gap-4 items-start">
+      <div>
       {/* Locales */}
       <Tarjeta className="mb-4">
         <div className="divide-y divide-gray-50">
@@ -143,7 +148,9 @@ function PanelBodega({ data, locales, onRefrescar, onAviso, onVerCuenta }) {
           })}
         </div>
       </Tarjeta>
+      </div>
 
+      <div>
       {/* Bandejas */}
       {devoluciones.length > 0 && (
         <Tarjeta className="mb-4 border-amber-200">
@@ -245,6 +252,15 @@ function PanelBodega({ data, locales, onRefrescar, onAviso, onVerCuenta }) {
           </div>
         </Tarjeta>
       )}
+
+      {devoluciones.length + remesas.length + enTransito.length === 0 && (
+        <div className="rounded-2xl border border-gray-100 bg-white px-5 py-8 text-center">
+          <CheckCircle size={20} className="text-green-500 mx-auto mb-1.5" />
+          <p className="text-sm text-gray-500">Nada pendiente por confirmar</p>
+        </div>
+      )}
+      </div>
+      </div>
 
       <button
         onClick={() => setSalud(true)}
@@ -372,7 +388,7 @@ export default function RedInternaPage() {
   if (isError) {
     const status = error?.response?.status;
     return (
-      <div className="max-w-2xl mx-auto px-4 py-10">
+      <div className="max-w-3xl mx-auto px-4 py-10">
         <EmptyState
           icon={Package}
           titulo={status === 409 ? 'Falta configurar la bodega' : 'Red interna no disponible'}
@@ -388,7 +404,7 @@ export default function RedInternaPage() {
   const locales = (sucursales || []).filter((s) => !s.es_bodega);
 
   return (
-    <div className="max-w-2xl mx-auto px-4 py-5">
+    <div className="max-w-6xl mx-auto px-4 sm:px-6 py-5">
       <div className="flex items-center gap-2 mb-5">
         <div className="w-9 h-9 rounded-xl bg-blue-50 flex items-center justify-center">
           {data.es_bodega

@@ -175,6 +175,10 @@ ok('★ Lista las cuentas del local', cuentas.length === 2,
 ok('  sin cuentas de tránsito ni divisa', cuentas.every((c) => c.tipo !== 'transito'));
 
 const nequiLocal = cuentas.find((c) => c.nombre === 'Nequi');
+// Una cuenta de la BODEGA, para comprobar que el local no puede gastar de ella.
+const cuentaBodegaEfectivo = (await q(
+  `SELECT id FROM cuentas_dinero WHERE sucursal_id = 1 AND tipo = 'efectivo' LIMIT 1`
+))[0].id;
 const remNequi = await service.enviarRemesa(superv, {
   valor: 500000, cuenta_origen_id: nequiLocal.id, metodo: 'Nequi',
 });
@@ -198,6 +202,38 @@ const remEfvo = await service.enviarRemesa(superv, {
 await service.confirmarRemesa(bodega, remEfvo.id);
 const espejos2 = await q(`SELECT COUNT(*)::int c FROM movimientos_caja WHERE activo`);
 ok('★ Dos espejos: egreso del local e ingreso de la bodega', espejos2[0].c === 2);
+
+console.log('\n═══ 6b. El gasto por cuenta de bodega también elige de dónde sale ═══');
+// Antes siempre se asumía la caja de efectivo: un gasto pagado por Nequi
+// descuadraba la caja física del local.
+const gastoNequi = await service.registrarGastoAutorizado(superv, {
+  valor: 120000, concepto: 'Domicilio pagado por Nequi', cuenta_origen_id: nequiLocal.id,
+});
+const movGasto = await q(
+  `SELECT cuenta_id, tipo, categoria FROM movimientos_dinero WHERE id = $1`,
+  [gastoNequi.mov_dinero_id]
+);
+ok('★ Salió de la cuenta elegida, no de la caja', movGasto[0].cuenta_id === nequiLocal.id);
+ok('  y como salida de categoría gasto',
+   movGasto[0].tipo === 'salida' && movGasto[0].categoria === 'gasto');
+const espejos3 = await q(`SELECT COUNT(*)::int c FROM movimientos_caja WHERE activo`);
+ok('★ Un gasto por Nequi NO se espeja en la caja física', espejos3[0].c === 2);
+
+const gastoEfvo = await service.registrarGastoAutorizado(superv, {
+  valor: 50000, concepto: 'Transporte en efectivo', cuenta_origen_id: efvo.id,
+});
+const espejos4 = await q(`SELECT COUNT(*)::int c FROM movimientos_caja WHERE activo`);
+ok('★ Pero uno en efectivo SÍ', espejos4[0].c === 3, `${espejos4[0].c} espejos`);
+ok('  y los dos bajan la deuda con la bodega',
+   Number(gastoNequi.valor) === 120000 && Number(gastoEfvo.valor) === 50000);
+
+let cuentaAjena = false;
+try {
+  await service.registrarGastoAutorizado(superv, {
+    valor: 1000, concepto: 'Prueba', cuenta_origen_id: cuentaBodegaEfectivo,
+  });
+} catch (e) { cuentaAjena = e.status === 403; }
+ok('★ No se puede gastar desde una cuenta de otra sucursal', cuentaAjena);
 
 console.log('\n═══ 7. Corregir el valor de una línea ═══');
 const r3 = await service.despachar(bodega, {

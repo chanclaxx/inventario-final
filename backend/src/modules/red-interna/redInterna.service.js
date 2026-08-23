@@ -223,7 +223,12 @@ const _recortarParaVendedor = (data) => {
       items: data.mercancia.items.map((u) => _sinValores(u, CLAVES_VALOR_UNIDAD)),
     },
     remisiones: (data.remisiones || []).map((r) => ({ ...r, valor_total: null })),
-    envios: (data.envios || []).map((e) => _sinValores(e, CLAVES_VALOR_ENVIO)),
+    envios: (data.envios || []).map((e) => ({
+      ..._sinValores(e, CLAVES_VALOR_ENVIO),
+      // Las líneas del envío llevan el costo de cada equipo: se ven los
+      // productos y su estado, nunca su valor.
+      lineas: (e.lineas || []).map((l) => _sinValores(l, ['valor_interno', 'subtotal'])),
+    })),
     // El desglose se recalcula sobre los totales YA RECORTADOS. Antes se
     // colaba entero, con los mismos valores que este recorte acaba de poner en
     // null: bastaba abrir la pestaña de red del navegador para leerlos.
@@ -317,7 +322,9 @@ const _destinoElegido = async (client, {
 // No mueve inventario ni deuda: solo crea el documento y lo pone en tránsito.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const despachar = async (req, { sucursal_destino_id, lineas, notas, clave_idempotencia }) => {
+const despachar = async (req, {
+  sucursal_destino_id, lineas, notas, clave_idempotencia, permitir_valor_cero,
+}) => {
   _exigirBodega(req);
   const negocioId = req.user.negocio_id;
   const origenId  = Number(req.sucursal_id);
@@ -329,6 +336,12 @@ const despachar = async (req, { sucursal_destino_id, lineas, notas, clave_idempo
     throw { status: 400, message: 'Agrega al menos un producto' };
   }
   await _verificarSucursal(null, destinoId, negocioId);
+
+  // Los productos que terminen valiendo $0 se recogen dentro del bucle y se
+  // revisan al final: hay que mirar el valor RESUELTO, no el que llegó del
+  // navegador. El caso peligroso es justamente el que no manda valor — un
+  // equipo sin costo registrado, que sale en 0 sin que nadie lo escriba.
+  const enCero = [];
 
   // Idempotencia: un segundo POST con la misma clave devuelve la original.
   if (clave_idempotencia) {
@@ -385,12 +398,14 @@ const despachar = async (req, { sucursal_destino_id, lineas, notas, clave_idempo
         // MODO A (a costo): el valor interno es el costo real del negocio.
         // `seriales.costo_compra` NUNCA se modifica — es la verdad del costo
         // para los reportes, aquí solo se fotografía.
+        const valorSerial = _valorLinea(s.costo_compra, l.valor_interno);
+        if (valorSerial === 0) enCero.push(s.imei || s.nombre);
         await repo.insertarLineaRemision(client, {
           remision_id: remision.id, tipo: 'serial',
           serial_id: s.id, imei: s.imei,
           producto_origen_id: s.producto_id,
           producto_destino_id: destinoSerial,
-          valor_interno: _valorLinea(s.costo_compra, l.valor_interno),
+          valor_interno: valorSerial,
           estado_linea: 'Pendiente',
           nombre_producto: [s.nombre, s.marca, s.modelo].filter(Boolean).join(' '),
         });
@@ -416,17 +431,36 @@ const despachar = async (req, { sucursal_destino_id, lineas, notas, clave_idempo
           sucursalDestinoId: destinoId, eleccionUsuario: l.producto_destino_id,
         });
 
+        const valorCantidad = _valorLinea(p.costo_unitario, l.valor_interno);
+        if (valorCantidad === 0) enCero.push(p.nombre);
         await repo.insertarLineaRemision(client, {
           remision_id: remision.id, tipo: 'cantidad',
           producto_origen_id: p.id, cantidad: cant,
           producto_destino_id: destinoCantidad,
-          valor_interno: _valorLinea(p.costo_unitario, l.valor_interno),
+          valor_interno: valorCantidad,
           estado_linea: 'Pendiente',
           nombre_producto: p.nombre,
         });
       } else {
         throw { status: 400, message: `Tipo de línea inválido: ${l.tipo}` };
       }
+    }
+
+    // ── Nada sale en $0 por descuido ──────────────────────────────────────
+    // El valor de la línea ES lo que el local va a deber por ese producto. Un 0
+    // le regala la mercancía y deja el envío cobrando de menos para siempre:
+    // corregirlo después exige una nota de corrección. Se puede hacer a
+    // propósito (una muestra, un obsequio), pero hay que decirlo — por eso la
+    // pantalla pide confirmar en vez de dejarlo pasar en silencio.
+    // El ROLLBACK del catch deshace las líneas que ya se insertaron.
+    if (enCero.length && !permitir_valor_cero) {
+      throw {
+        status: 400,
+        message: `${enCero.length} producto(s) saldrían en $0 (${enCero.slice(0, 3).join(', ')}`
+          + `${enCero.length > 3 ? '…' : ''}). Escribe su valor o confirma que los entregas sin cobro.`,
+        codigo: 'VALOR_CERO',
+        productos: enCero,
+      };
     }
 
     await repo.actualizarTotalRemision(client, remision.id);
@@ -1588,7 +1622,15 @@ const anularRemesa = async (req, remesaId) => {
 
 // ── Gasto autorizado: el local paga algo con plata de la bodega ──────────────
 
-const registrarGastoAutorizado = async (req, { valor, concepto }) => {
+/**
+ * El local paga algo con plata de la bodega.
+ *
+ * `cuenta_origen_id` dice DE DÓNDE sale: efectivo, Nequi, banco… Antes se
+ * asumía siempre la caja de efectivo, así que un gasto pagado por transferencia
+ * descuadraba la caja física del local. La cuenta se valida contra la sucursal
+ * como en `enviarRemesa` — nunca se confía en el id que llega del navegador.
+ */
+const registrarGastoAutorizado = async (req, { valor, concepto, cuenta_origen_id }) => {
   const negocioId = req.user.negocio_id;
   const sucursalId = Number(req.sucursal_id);
   const monto = Number(valor);
@@ -1596,7 +1638,24 @@ const registrarGastoAutorizado = async (req, { valor, concepto }) => {
   if (!concepto?.trim()) throw { status: 400, message: 'Escribe en qué se gastó' };
   if (req.esBodega) throw { status: 400, message: 'La bodega registra sus gastos en Tesorería' };
 
-  const cuenta = await _cuentaEfectivo(negocioId, sucursalId);
+  let cuenta;
+  if (cuenta_origen_id) {
+    const c = await tesoreriaRepo.findCuentaById(Number(cuenta_origen_id), negocioId);
+    if (!c || !c.activa) throw { status: 404, message: 'Cuenta no encontrada o inactiva' };
+    if (Number(c.sucursal_id) !== sucursalId) {
+      throw { status: 403, message: 'Esa cuenta pertenece a otra sucursal' };
+    }
+    if ((c.moneda || 'COP') !== 'COP') {
+      throw { status: 400, message: 'El gasto debe salir de una cuenta en pesos' };
+    }
+    if (c.tipo === 'transito') {
+      throw { status: 400, message: 'No se puede gastar desde una cuenta de tránsito' };
+    }
+    cuenta = c;
+  } else {
+    cuenta = await _cuentaEfectivo(negocioId, sucursalId);
+  }
+
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -1605,7 +1664,11 @@ const registrarGastoAutorizado = async (req, { valor, concepto }) => {
       valor: monto, concepto: `[Por cuenta de bodega] ${concepto.trim()}`,
       usuario_id: req.user.id,
     });
-    await _espejarCaja(client, sucursalId, mov, req.user.id, concepto.trim());
+    // El espejo en caja solo si la plata salió de la caja física: una
+    // transferencia o un Nequi no pasan por ahí.
+    const esEfectivo = cuenta.tipo === 'efectivo'
+      || (cuenta.metodos_pago || []).includes('Efectivo');
+    if (esEfectivo) await _espejarCaja(client, sucursalId, mov, req.user.id, concepto.trim());
 
     // Espejo en la cuenta interna: descuenta de lo que el local debe liquidar.
     const movCuenta = await repo.insertarMovimientoCuenta(client, {
@@ -1929,8 +1992,8 @@ const getEstadoCuenta = async (req, sucursalId, filtros = {}) => {
 
   const { desde = null, hasta = null, q = '', estado = null, limit = 100, offset = 0 } = filtros;
 
-  const [totales, extracto, mercancia, remisiones, remesas, movimientos, porEnvio, abonos] =
-    await Promise.all([
+  const [totales, extracto, mercancia, remisiones, remesas, movimientos, porEnvio,
+         abonos, lineasEnvios] = await Promise.all([
       getEstadoLocal(negocioId, objetivo),
       repo.getExtracto(negocioId, objetivo, { desde, hasta }),
       repo.buscarUnidades(negocioId, objetivo, {
@@ -1943,6 +2006,9 @@ const getEstadoCuenta = async (req, sucursalId, filtros = {}) => {
       repo.findMovimientosCuenta(negocioId, objetivo, 100),
       repo.getResumenPorRemision(negocioId, objetivo, { limit: 100 }),
       repo.findAbonosLocal(negocioId, objetivo, 300),
+      // Las líneas de todos los envíos, juntas: la tarjeta las muestra sin
+      // desplegar nada y pedirlas una por una serían N consultas por pantalla.
+      repo.getLineasDeEnvios(negocioId, objetivo, { limit: 600 }),
     ]);
 
   const salida = {
@@ -1976,7 +2042,7 @@ const getEstadoCuenta = async (req, sucursalId, filtros = {}) => {
     // en vez de como una cifra suelta.
     abonos: abonos.map((a) => ({ ...a, valor: _num(a.valor) })),
     // Envío por envío: su cuenta y, aparte, qué se vendió y qué queda.
-    ...(_armarEnvios(porEnvio, totales.totales)),
+    ...(_armarEnvios(porEnvio, totales.totales, lineasEnvios)),
     // Por qué debe lo que debe, en una línea por concepto.
     desglose: _desgloseSaldo(totales.totales, remesas),
   };
@@ -1997,9 +2063,32 @@ const getEstadoCuenta = async (req, sucursalId, filtros = {}) => {
 // cualquier otra línea, porque ahora valen cantidad × valor, no una estimación
 // contra el stock. Verificado en 11-envios-por-remision.
 // ─────────────────────────────────────────────────────────────────────────────
-const _armarEnvios = (filas, t) => {
+const _armarEnvios = (filas, t, lineas = []) => {
+  // Las líneas llegan en una sola consulta para toda la pantalla; aquí se
+  // reparten a su envío.
+  const porEnvio = new Map();
+  for (const l of lineas) {
+    const k = Number(l.remision_id);
+    if (!porEnvio.has(k)) porEnvio.set(k, []);
+    porEnvio.get(k).push({
+      linea_id:        Number(l.linea_id),
+      tipo:            l.tipo,
+      imei:            l.imei,
+      nombre_producto: l.nombre_producto,
+      cantidad:        Number(l.cantidad),
+      valor_interno:   Math.round(_num(l.valor_interno)),
+      subtotal:        Math.round(_num(l.valor_interno) * (l.tipo === 'cantidad' ? Number(l.cantidad) : 1)),
+      estado_linea:    l.estado_linea,
+      estado_unidad:   l.estado_unidad,
+      etiqueta_estado: ETIQUETAS_ESTADO[l.estado_unidad] || l.estado_unidad || l.estado_linea,
+      factura_numero:  l.factura_numero,
+      nombre_cliente:  l.nombre_cliente,
+    });
+  }
+
   const envios = filas.map((e) => ({
     ...e,
+    lineas: porEnvio.get(Number(e.id)) || [],
     unidades:          Number(e.unidades),
     // ── La cuenta del envío ──
     cargo:             Math.round(_num(e.cargo)),

@@ -8,9 +8,8 @@ import { EmptyState } from '../../components/ui/EmptyState';
 import { ModalRecibir } from './ModalRecibir';
 import { ModalPago }    from './ModalPago';
 import { ModalMovimientoCuenta } from './ModalMovimientoCuenta';
-import {
-  TabResumen, TabMercancia, TabEnvios, TabPagos, TabExtracto,
-} from './CuentaSecciones';
+import { TabResumen, TabMercancia, TabEnvios, TabPagos } from './CuentaSecciones';
+import { EstadoCuentaBodega } from './EstadoCuentaBodega';
 import {
   ChevronLeft, Package, Truck, Wallet, FileText, AlertTriangle, Store,
   LayoutDashboard, CheckCircle, Send, Info, PiggyBank, Receipt, SlidersHorizontal,
@@ -180,17 +179,16 @@ export function CuentaLocal({
   const [movim,  setMovim]  = useState(null);   // null | 'gasto' | 'ajuste'
   const [estado, setEstado] = useState('');
   const [q,      setQ]      = useState('');
-  const [qExt,   setQExt]   = useState('');
-  const [desde,  setDesde]  = useState('');
-  const [hasta,  setHasta]  = useState('');
 
   const { data, isLoading, isError, error, isFetching } = useQuery({
-    queryKey: ['red-estado-cuenta', sucursalId, q, estado, desde, hasta],
+    // El extracto NO se filtra por fecha en el servidor: EstadoCuentaBase trae
+    // sus propios filtros y, sobre todo, el saldo corrido tiene que calcularse
+    // sobre TODOS los movimientos. Filtrando en SQL, el "saldo" de la primera
+    // fila del rango arrancaba en cero y parecía el saldo real.
+    queryKey: ['red-estado-cuenta', sucursalId, q, estado],
     queryFn:  () => getEstadoCuenta(sucursalId, {
       q: q.trim() || undefined,
       estado: estado || undefined,
-      desde: desde || undefined,
-      hasta: hasta ? `${hasta} 23:59:59` : undefined,
     }).then((r) => r.data.data),
     keepPreviousData: true,
   });
@@ -210,13 +208,6 @@ export function CuentaLocal({
 
   // Ir a un estado concreto desde el resumen: filtra y cambia de pestaña.
   const verMercancia = (filtro) => { setEstado(filtro); setTab('mercancia'); };
-
-  // El extracto filtra por texto en el cliente; la mercancía, en el servidor.
-  const extractoVisible = qExt.trim()
-    ? data.extracto.filter((f) =>
-        [f.concepto, f.referencia, f.tercero, f.documento, f.detalle]
-          .some((v) => String(v ?? '').toLowerCase().includes(qExt.toLowerCase())))
-    : data.extracto;
 
   const cerrarPago = (msg) => {
     setPago(null);
@@ -318,11 +309,10 @@ export function CuentaLocal({
           abonos={data.abonos || []} totales={t} />
       )}
 
+      {/* El mismo estado de cuenta de Créditos y Préstamos: cuadrícula o
+          conversación, filtros por tipo y fecha, saldo corrido. */}
       {tab === 'extracto' && (
-        <TabExtracto
-          filas={extractoVisible} q={qExt} onQ={setQExt}
-          desde={desde} hasta={hasta} onDesde={setDesde} onHasta={setHasta}
-        />
+        <EstadoCuentaBodega extracto={data.extracto || []} isLoading={isFetching} />
       )}
 
       {ocultos && (

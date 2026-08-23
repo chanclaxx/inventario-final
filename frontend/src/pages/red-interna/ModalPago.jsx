@@ -87,6 +87,10 @@ export function ModalPago({ envio = null, sugerido = 0, onCerrar, onListo }) {
             value={valor}
             onChange={(v) => { setValor(v); setError(''); }}
             autoFocus
+            // InputMoneda no trae estilos propios: la clase la pone quien lo
+            // usa. Sin ella el campo sale desnudo, distinto a todos los demás
+            // de la aplicación.
+            className="w-full px-3 py-2.5 bg-gray-100 border-0 rounded-xl text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
         </div>
 

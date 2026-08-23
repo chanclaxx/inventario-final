@@ -153,6 +153,15 @@ ok('  y la deuda es todo lo entregado',
    Number(cuenta.totales.deuda_total) === CARGO_E1 + CARGO_E2,
    money(cuenta.totales.deuda_total));
 
+// La tarjeta del envío muestra sus productos sin desplegar nada, así que las
+// líneas tienen que venir con el envío y no en una consulta aparte por tarjeta.
+ok('★ Cada envío trae sus líneas', (env1().lineas || []).length === 4,
+   `${(env1().lineas || []).length} líneas`);
+ok('  con nombre, estado y subtotal',
+   env1().lineas.every((l) => l.nombre_producto && l.etiqueta_estado && l.subtotal > 0));
+ok('  y el envío 2 incluye la línea de accesorios',
+   env2().lineas.some((l) => l.tipo === 'cantidad' && Number(l.cantidad) === 4));
+
 console.log('\n═══ 2. Vender NO mueve la cuenta: solo informa ═══');
 
 await db.exec(`
@@ -326,6 +335,10 @@ ok('  y cuántos le quedan',            Number(v1.disponibles) === 1);
 ok('★★ Y SÍ ve lo que debe de cada envío: sin eso no podría pagar',
    Number(v1.saldo) === Number(env1().saldo) && Number(v1.cargo) === Number(env1().cargo),
    money(v1.cargo));
+ok('★★ Las líneas del envío llegan sin valor',
+   v1.lineas.every((l) => l.valor_interno === null && l.subtotal === null));
+ok('  pero con el producto y su estado',
+   v1.lineas.every((l) => l.nombre_producto && l.etiqueta_estado));
 ok('★ Pero no el valor de lo disponible', v1.disponibles_valor === null);
 ok('  ni el valor de lo vendido',        v1.vendidas_valor === null);
 ok('  ni el valor total del envío',      v1.valor_total === null);

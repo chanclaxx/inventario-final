@@ -691,6 +691,43 @@ const getAbonosDeEnvio = async (negocioId, remisionId) => {
   return rows;
 };
 
+/**
+ * Las líneas de TODOS los envíos de un local, en UNA consulta.
+ *
+ * La tarjeta de cada envío muestra sus productos sin desplegar nada, así que
+ * pedirlas envío por envío serían N consultas por pantalla. Se traen juntas y
+ * el service las agrupa.
+ *
+ * Trae el estado derivado de la unidad (vendida, prestada, en vitrina…), que es
+ * informativo: desde el cambio de modelo no toca la cuenta.
+ */
+const getLineasDeEnvios = async (negocioId, sucursalId, { limit = 600 } = {}) => {
+  const { rows } = await pool.query(`
+    WITH u AS (${SQL_UNIDADES})
+    SELECT
+      lr.remision_id,
+      lr.id            AS linea_id,
+      lr.tipo,
+      lr.imei,
+      lr.nombre_producto,
+      lr.valor_interno,
+      lr.estado_linea,
+      COALESCE(lr.cantidad_recibida, lr.cantidad, 1) AS cantidad,
+      u.estado_unidad,
+      u.factura_numero,
+      u.nombre_cliente
+    FROM lineas_remision lr
+    JOIN remisiones r ON r.id = lr.remision_id
+    LEFT JOIN u       ON u.linea_id = lr.id
+    WHERE r.negocio_id = $1
+      AND r.tipo = 'entrega'
+      AND r.sucursal_destino_id = $2
+    ORDER BY lr.remision_id DESC, lr.id
+    LIMIT $3
+  `, [negocioId, sucursalId, limit]);
+  return rows;
+};
+
 /** Todos los abonos de un local, para el extracto y la pestaña de pagos. */
 const findAbonosLocal = async (negocioId, sucursalId, limit = 300) => {
   const { rows } = await pool.query(`
@@ -1540,6 +1577,7 @@ module.exports = {
   getTotalRemesado, getTotalMovimientosCuenta, getConciliacion, getResumenPorRemision,
   // Cuenta por envío (modelo "el envío es la deuda")
   getTotalesEnvios, getAbonosDeEnvio, findAbonosLocal, getEnviosAbiertos,
+  getLineasDeEnvios,
   getSaldoEnvio, insertarAbonoRemision, anularAbonosDeRemesa,
   crearRemision, insertarLineaRemision, actualizarTotalRemision,
   findRemisionById, getLineasRemision, getLineasDetalladas, findRemisiones,

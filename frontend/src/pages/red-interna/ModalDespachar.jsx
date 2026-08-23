@@ -50,13 +50,31 @@ function ValorLinea({ item, onCambiar }) {
   const sugerido = Number(item.precio_carrito || 0);
   const difiere  = sugerido > 0 && Math.round(sugerido) !== Math.round(unitario);
 
+  // Un dedazo típico es un cero de más o de menos. Si el valor se aleja diez
+  // veces del costo real, se avisa — sin bloquear: hay entregas con valores
+  // acordados que se salen del costo a propósito.
+  const costoReal = Number(item.costo_real || 0);
+  const dedazo = costoReal > 0 && unitario > 0
+    && (unitario >= costoReal * 10 || unitario * 10 <= costoReal);
+
   return (
-    <div className="flex flex-col items-end gap-0.5 w-32 flex-shrink-0">
+    <div className="flex flex-col items-end gap-0.5 w-36 flex-shrink-0">
       <InputMoneda
         value={Math.round(unitario)}
         onChange={(v) => onCambiar(v === '' ? 0 : Number(v))}
-        className={`text-right !py-1 !px-2 text-sm ${item.sin_costo ? 'ring-1 ring-amber-300' : ''}`}
+        className={`w-full px-2.5 py-1.5 bg-gray-100 border rounded-lg text-sm text-right
+          tabular-nums focus:outline-none focus:ring-2 focus:ring-blue-500
+          ${item.sin_costo ? 'border-amber-400 bg-amber-50'
+            : dedazo ? 'border-red-300 bg-red-50' : 'border-transparent'}`}
       />
+      {item.sin_costo && (
+        <span className="text-[11px] text-amber-600 font-medium">sin costo — escríbelo</span>
+      )}
+      {dedazo && !item.sin_costo && (
+        <span className="text-[11px] text-red-500 font-medium">
+          ¿seguro? el costo es {formatCOP(costoReal)}
+        </span>
+      )}
       {cantidad > 1 && (
         <span className="text-[11px] text-gray-400">
           × {cantidad} = {formatCOP(unitario * cantidad)}
@@ -142,6 +160,8 @@ export function ModalDespachar({ locales, itemsIniciales = null, descartados = [
   const [error,       setError]       = useState('');
   const [aviso,       setAviso]       = useState('');
   const [notas,       setNotas]       = useState('');
+  // Confirmación explícita de entregar productos sin cobrarlos.
+  const [sinCobro,    setSinCobro]    = useState(false);
   const [verAccesorios, setVerAccesorios] = useState(false);
   // Revisión de destino: null = no se ha pedido; objeto = hay dudas que resolver.
   const [revision,   setRevision]   = useState(null);
@@ -168,7 +188,13 @@ export function ModalDespachar({ locales, itemsIniciales = null, descartados = [
     const existente = items.find((i) => claveDe(i) === k);
 
     if (!existente) {
-      setItems((prev) => [...prev, { ...nuevo, cantidad: nuevo.cantidad || 1 }]);
+      // `costo_real` se congela al agregar: es contra lo que se compara el
+      // valor que escriba el usuario para avisar de un dedazo (un 0 de más).
+      setItems((prev) => [...prev, {
+        ...nuevo,
+        cantidad: nuevo.cantidad || 1,
+        costo_real: Number(nuevo.valor_interno || 0),
+      }]);
       setAviso(`${nuevo.nombre} agregado`);
       return;
     }
@@ -250,18 +276,25 @@ export function ModalDespachar({ locales, itemsIniciales = null, descartados = [
       })),
     }).then((r) => r.data.data),
     onSuccess: (data) => {
-      if (!data.requiere_confirmacion) { enviar.mutate(); return; }
+      if (!data.requiere_confirmacion) { enviar.mutate(sinCobro); return; }
       setRevision(data);
     },
     onError: (err) => setError(err.response?.data?.error || 'No se pudo revisar el destino'),
   });
 
+  // Productos que saldrían en $0. El valor de la línea ES lo que el local va a
+  // deber, así que un 0 se los regala; el backend lo bloquea y aquí se pide
+  // confirmar. Entregarlos sin cobro es legítimo (una muestra, un obsequio),
+  // pero tiene que ser una decisión y no un descuido.
+  const enCero = items.filter((i) => Number(i.valor_interno || 0) === 0);
+
   const enviar = useMutation({
-    mutationFn: () => despachar({
+    mutationFn: (confirmadoSinCobro = false) => despachar({
       sucursal_destino_id: destino,
       lineas: construirLineas(),
       notas: notas.trim() || null,
       clave_idempotencia: clave(),
+      permitir_valor_cero: confirmadoSinCobro,
     }).then((r) => r.data.data),
     onSuccess: onListo,
     onError: (err) => setError(err.response?.data?.error || 'No se pudo despachar'),
@@ -290,7 +323,7 @@ export function ModalDespachar({ locales, itemsIniciales = null, descartados = [
           decisiones={decisiones}
           onDecidir={(k, d) => setDecisiones((p) => ({ ...p, [k]: d }))}
           onVolver={() => { setRevision(null); setError(''); }}
-          onConfirmar={() => enviar.mutate()}
+          onConfirmar={() => enviar.mutate(sinCobro)}
           enviando={enviar.isPending}
         />
         {error && <p className="text-sm text-red-500 mt-3">{error}</p>}
@@ -457,11 +490,29 @@ export function ModalDespachar({ locales, itemsIniciales = null, descartados = [
           />
         )}
 
+        {enCero.length > 0 && (
+          <label className="flex items-start gap-2.5 bg-amber-50 border border-amber-200
+            rounded-xl px-4 py-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={sinCobro}
+              onChange={(e) => { setSinCobro(e.target.checked); setError(''); }}
+              className="mt-0.5 w-4 h-4 accent-amber-600 flex-shrink-0"
+            />
+            <span className="text-xs text-amber-800">
+              <strong>{enCero.length} producto(s) van en $0</strong> y el local no
+              los va a deber: {enCero.slice(0, 3).map((i) => i.nombre).join(', ')}
+              {enCero.length > 3 ? '…' : ''}. Escribe su valor arriba, o marca esta
+              casilla si de verdad se los entregas sin cobro.
+            </span>
+          </label>
+        )}
+
         <div className="flex gap-2 pt-1">
           <Button variant="secondary" className="flex-1" onClick={onCerrar}>Cancelar</Button>
           <Button
             className="flex-1"
-            disabled={!destino || items.length === 0}
+            disabled={!destino || items.length === 0 || (enCero.length > 0 && !sinCobro)}
             loading={revisar.isPending || enviar.isPending}
             onClick={() => { setError(''); revisar.mutate(); }}
           >

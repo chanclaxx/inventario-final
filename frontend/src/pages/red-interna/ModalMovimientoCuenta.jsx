@@ -1,6 +1,8 @@
 import { useState } from 'react';
-import { useMutation } from '@tanstack/react-query';
-import { registrarGastoAutorizado, registrarAjuste } from '../../api/redInterna.api';
+import { useMutation, useQuery } from '@tanstack/react-query';
+import {
+  registrarGastoAutorizado, registrarAjuste, getCuentasParaRemesa,
+} from '../../api/redInterna.api';
 import { formatCOP } from '../../utils/formatters';
 import { Modal }  from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
@@ -33,13 +35,29 @@ export function ModalMovimientoCuenta({
   const [valor,    setValor]    = useState('');
   const [concepto, setConcepto] = useState('');
   const [signo,    setSigno]    = useState('favor'); // solo ajustes
+  const [cuentaId, setCuentaId] = useState(null);    // solo gastos
   const [error,    setError]    = useState('');
+
+  // De DÓNDE sale la plata del gasto. Antes se asumía siempre la caja de
+  // efectivo, así que un gasto pagado por Nequi o transferencia descuadraba la
+  // caja física del local.
+  const { data: cuentas = [] } = useQuery({
+    queryKey: ['red-cuentas-remesa'],
+    queryFn:  () => getCuentasParaRemesa().then((r) => r.data.data),
+    staleTime: 5 * 60 * 1000,
+    enabled:   esGasto,
+  });
+  const porDefecto = cuentas.find((c) => c.es_efectivo) || cuentas[0] || null;
+  const cuenta = cuentas.find((c) => c.id === cuentaId) || porDefecto;
 
   const guardar = useMutation({
     mutationFn: () => {
       const monto = Number(valor);
       if (esGasto) {
-        return registrarGastoAutorizado({ valor: monto, concepto: concepto.trim() });
+        return registrarGastoAutorizado({
+          valor: monto, concepto: concepto.trim(),
+          cuenta_origen_id: cuenta?.id || undefined,
+        });
       }
       return registrarAjuste({
         sucursal_id: sucursalId,
@@ -94,7 +112,12 @@ export function ModalMovimientoCuenta({
           <label className="text-sm font-medium text-gray-700">
             {esGasto ? '¿Cuánto pagaste?' : '¿De cuánto es el ajuste?'}
           </label>
-          <InputMoneda value={valor} onChange={(v) => { setValor(v); setError(''); }} autoFocus />
+          <InputMoneda
+            value={valor}
+            onChange={(v) => { setValor(v); setError(''); }}
+            autoFocus
+            className="w-full px-3 py-2.5 bg-gray-100 border-0 rounded-xl text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
         </div>
 
         <div className="flex flex-col gap-1">
@@ -111,6 +134,24 @@ export function ModalMovimientoCuenta({
           />
         </div>
 
+        {esGasto && cuentas.length > 1 && (
+          <div className="flex flex-col gap-1.5">
+            <label className="text-sm font-medium text-gray-700">¿De dónde salió?</label>
+            <div className="flex flex-wrap gap-1.5">
+              {cuentas.map((c) => (
+                <button
+                  key={c.id} onClick={() => setCuentaId(c.id)}
+                  className={`px-3 py-2 rounded-xl text-sm font-medium border transition-all
+                    ${cuenta?.id === c.id ? 'bg-blue-600 border-blue-600 text-white'
+                                        : 'bg-white border-gray-200 text-gray-700 hover:border-blue-300'}`}
+                >
+                  {c.nombre}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className={`rounded-xl px-4 py-3 ${
           !esGasto && signo === 'contra' ? 'bg-red-50' : 'bg-blue-50'}`}>
           <p className={`text-xs flex items-start gap-2 ${
@@ -119,8 +160,10 @@ export function ModalMovimientoCuenta({
                      : <Info size={14} className="mt-0.5 flex-shrink-0" />}
             <span>
               {esGasto ? (
-                <>Sale de tu caja y baja tu deuda en {monto > 0 ? formatCOP(monto) : 'ese valor'}.
-                Se reparte entre tus envíos abiertos, del más viejo al más nuevo.</>
+                <>Sale de <strong>{cuenta?.nombre || 'tu caja'}</strong> y baja tu deuda
+                en {monto > 0 ? formatCOP(monto) : 'ese valor'}, repartido entre tus
+                envíos abiertos del más viejo al más nuevo.
+                {cuenta && !cuenta.es_efectivo && ' No pasa por la caja física.'}</>
               ) : signo === 'contra' ? (
                 <>Le SUBE la deuda al local en {monto > 0 ? formatCOP(monto) : 'ese valor'}.
                 No cuelga de ningún envío: aparece como un cargo aparte.</>

@@ -432,7 +432,57 @@ function MovimientosEnvio({ envio, abonos }) {
   );
 }
 
-function DetalleEnvio({ envio }) {
+// Un renglón por producto del envío. Compacto a propósito: la tarjeta muestra
+// TODOS sus productos sin desplegar nada, así que cada uno tiene que caber en
+// una línea. La ficha completa de un equipo vive en la pestaña Mercancía.
+const PUNTO_ESTADO = {
+  'Por liquidar':    'bg-amber-500',
+  'En recaudo':      'bg-purple-500',
+  'En prestamo':     'bg-blue-500',
+  'En consignacion': 'bg-gray-300',
+  'Devuelta':        'bg-green-500',
+  'En transito':     'bg-blue-400',
+  'Faltante':        'bg-red-500',
+  'Sin ubicar':      'bg-red-500',
+  'Movida':          'bg-red-500',
+};
+
+function LineaEnvio({ l }) {
+  const devuelta = l.estado_linea === 'Devuelta';
+  const faltante = l.estado_linea === 'Faltante';
+  const tachado  = devuelta || faltante;
+  return (
+    <div className={`flex items-center gap-2.5 px-4 py-1.5 text-sm ${tachado ? 'opacity-55' : ''}`}>
+      <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0
+        ${PUNTO_ESTADO[l.estado_unidad] || 'bg-gray-300'}`} />
+      <span className="flex-1 min-w-0 truncate text-gray-800">
+        {l.nombre_producto}
+        {l.tipo === 'cantidad' && l.cantidad > 1 && (
+          <span className="text-gray-400"> × {l.cantidad}</span>
+        )}
+      </span>
+      {l.imei && (
+        <span className="hidden md:inline text-xs text-gray-400 font-mono truncate max-w-[9rem]">
+          {l.imei}
+        </span>
+      )}
+      <span className="hidden sm:block text-xs text-gray-500 w-28 text-right truncate">
+        {faltante ? 'no llegó' : devuelta ? 'devuelto' : l.etiqueta_estado}
+      </span>
+      {l.subtotal != null && (
+        <span className={`text-xs w-24 text-right tabular-nums
+          ${tachado ? 'text-gray-400 line-through' : 'text-gray-600'}`}>
+          {formatCOP(l.subtotal)}
+        </span>
+      )}
+    </div>
+  );
+}
+
+// El desplegable ya NO guarda los productos —esos están siempre a la vista—
+// sino la CUENTA del envío: su cargo y sus abonos. Se pide al abrir porque solo
+// se miran cuando alguien pregunta "¿por qué debo esto todavía?".
+function CuentaDelEnvio({ envio }) {
   const { data, isLoading } = useQuery({
     queryKey: ['red-remision', envio.id],
     queryFn:  () => getRemision(envio.id).then((r) => r.data.data),
@@ -445,17 +495,7 @@ function DetalleEnvio({ envio }) {
 
   return (
     <div className="bg-gray-50/70 border-t border-gray-100">
-      {envio.cargo > 0 && (
-        <MovimientosEnvio envio={envio} abonos={data.abonos || []} />
-      )}
-
-      <p className="px-4 pt-3 pb-1 text-xs font-semibold text-gray-400 uppercase">
-        Qué venía en el envío
-      </p>
-      {/* El envío ya está en el encabezado del acordeón: no repetirlo por línea */}
-      {data.lineas.map((l) => (
-        <CardEquipo key={l.id} u={{ ...l, valor_interno: l.subtotal }} mostrarEnvio={false} />
-      ))}
+      <MovimientosEnvio envio={envio} abonos={data.abonos || []} />
 
       {data.correcciones?.length > 0 && (
         <div className="px-4 py-2.5 bg-amber-50/60 border-t border-amber-100">
@@ -490,14 +530,12 @@ export function TabEnvios({ envios, resumen, ocultos, propia, onAbonar }) {
     const abre = abierto === e.id;
     const anulado = e.estado === 'Anulada';
     const debe = e.saldo > 0;
+    const lineas = e.lineas || [];
     return (
       <div key={e.id}
         className={`border rounded-2xl overflow-hidden bg-white
           ${debe ? 'border-amber-200' : 'border-gray-100'}`}>
-        <button
-          onClick={() => setAbierto(abre ? null : e.id)}
-          className="w-full text-left px-4 py-3 hover:bg-gray-50 transition-colors"
-        >
+        <div className="px-4 py-3">
           <div className="flex items-start gap-3">
             <div className="flex-1 min-w-0">
               <p className="text-sm font-semibold text-gray-900">
@@ -518,7 +556,7 @@ export function TabEnvios({ envios, resumen, ocultos, propia, onAbonar }) {
                : e.estado === 'En transito' ? <Badge variant="blue">En tránsito</Badge>
                : debe ? (
                   <>
-                    <p className="text-base font-bold text-amber-700">{formatCOP(e.saldo)}</p>
+                    <p className="text-lg font-bold text-amber-700">{formatCOP(e.saldo)}</p>
                     <p className="text-xs text-gray-400">por pagar</p>
                   </>
                 ) : e.cargo > 0 ? (
@@ -527,9 +565,6 @@ export function TabEnvios({ envios, resumen, ocultos, propia, onAbonar }) {
                   </span>
                 ) : <p className="text-sm text-gray-300">sin cargo</p>}
             </div>
-            <ChevronDown size={16}
-              className={`text-gray-300 flex-shrink-0 mt-0.5 transition-transform
-                ${abre ? 'rotate-180' : ''}`} />
           </div>
 
           {!anulado && e.cargo > 0 && <Avance cargo={e.cargo} abonado={e.abonado} />}
@@ -548,17 +583,37 @@ export function TabEnvios({ envios, resumen, ocultos, propia, onAbonar }) {
           )}
 
           {e.notas && <p className="text-xs text-gray-400 italic mt-1">{e.notas}</p>}
-        </button>
+        </div>
 
-        {propia && debe && (
-          <div className="px-4 pb-3">
-            <Button size="sm" className="w-full" onClick={() => onAbonar(e)}>
-              <Send size={14} /> Abonar a este envío
-            </Button>
+        {/* Los productos, SIEMPRE a la vista. "¿Qué me mandaron?" es lo primero
+            que el local pregunta; esconderlo tras un desplegable costaba un
+            clic por envío para el dato más consultado de la pantalla. */}
+        {lineas.length > 0 && (
+          <div className="border-t border-gray-50 bg-gray-50/40 py-1">
+            {lineas.map((l) => <LineaEnvio key={l.linea_id} l={l} />)}
           </div>
         )}
 
-        {abre && <DetalleEnvio envio={e} />}
+        <div className="flex items-center gap-2 px-4 py-2.5 border-t border-gray-50">
+          {propia && debe && (
+            <Button size="sm" onClick={() => onAbonar(e)}>
+              <Send size={14} /> Abonar
+            </Button>
+          )}
+          {e.cargo > 0 && (
+            <button
+              onClick={() => setAbierto(abre ? null : e.id)}
+              className="ml-auto flex items-center gap-1 text-xs font-medium text-gray-500
+                hover:text-gray-700 transition-colors"
+            >
+              {abre ? 'Ocultar' : 'Ver'} movimientos
+              <ChevronDown size={13}
+                className={`transition-transform ${abre ? 'rotate-180' : ''}`} />
+            </button>
+          )}
+        </div>
+
+        {abre && <CuentaDelEnvio envio={e} />}
       </div>
     );
   };
@@ -757,90 +812,6 @@ export function TabPagos({ remesas, movimientos, abonos, totales }) {
       <p className="text-xs text-gray-400 flex items-center gap-1.5">
         <Info size={12} />
         Un pago solo baja la deuda cuando la bodega confirma que lo recibió.
-      </p>
-    </div>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// EXTRACTO — hecho por hecho, con el saldo corrido
-// ═══════════════════════════════════════════════════════════════════════════
-
-export function TabExtracto({ filas, q, onQ, desde, hasta, onDesde, onHasta }) {
-  const filtrando = Boolean(desde || hasta);
-  return (
-    <div className="flex flex-col gap-3">
-      <div className="flex flex-col sm:flex-row gap-2">
-        <div className="flex-1 flex items-center gap-2 bg-gray-100 rounded-xl px-3 py-2">
-          <Search size={15} className="text-gray-400 flex-shrink-0" />
-          <input
-            value={q} onChange={(e) => onQ(e.target.value)}
-            placeholder="Buscar en los movimientos…"
-            className="flex-1 bg-transparent text-sm focus:outline-none placeholder-gray-400"
-          />
-          {q && <button onClick={() => onQ('')}><X size={14} className="text-gray-400" /></button>}
-        </div>
-        <div className="flex items-center gap-1.5">
-          <input type="date" value={desde} onChange={(e) => onDesde(e.target.value)}
-            className="px-2.5 py-2 bg-gray-100 rounded-xl text-sm focus:outline-none
-              focus:ring-2 focus:ring-blue-500 text-gray-600" />
-          <span className="text-gray-300 text-sm">–</span>
-          <input type="date" value={hasta} onChange={(e) => onHasta(e.target.value)}
-            className="px-2.5 py-2 bg-gray-100 rounded-xl text-sm focus:outline-none
-              focus:ring-2 focus:ring-blue-500 text-gray-600" />
-        </div>
-      </div>
-
-      {filas.length === 0 ? (
-        <EmptyState icon={FileText} titulo="Sin movimientos"
-          descripcion="No hay hechos registrados en este periodo." />
-      ) : (
-        <div className="border border-gray-100 rounded-2xl overflow-hidden bg-white">
-          {filas.map((f, n) => {
-            const Icn = ICONO_ORIGEN[f.origen] || Receipt;
-            const esCargo = f.clase === 'cargo';
-            const esInfo  = f.clase === 'info';
-            return (
-              <div key={n}
-                className="flex items-start gap-3 px-4 py-3 border-b border-gray-50 last:border-0">
-                <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5
-                  ${esInfo ? 'bg-gray-100' : esCargo ? 'bg-amber-50' : 'bg-green-50'}`}>
-                  <Icn size={14} className={
-                    esInfo ? 'text-gray-400' : esCargo ? 'text-amber-600' : 'text-green-600'} />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-gray-900 truncate">{f.concepto}</p>
-                  <p className="text-xs text-gray-400 truncate">
-                    {formatFecha(f.fecha)}
-                    {f.documento  ? ` · #${f.documento}` : ''}
-                    {f.referencia ? ` · ${f.referencia}` : ''}
-                    {f.tercero    ? ` · ${f.tercero}`    : ''}
-                    {f.detalle ? ` · ${f.detalle}` : ''}
-                  </p>
-                </div>
-                <div className="text-right flex-shrink-0">
-                  {esInfo || f.valor === null ? (
-                    <span className="text-xs text-gray-300">informativo</span>
-                  ) : (
-                    <p className={`text-sm font-semibold ${esCargo ? 'text-amber-600' : 'text-green-600'}`}>
-                      {esCargo ? '+' : '−'}{formatCOP(Math.abs(f.valor))}
-                    </p>
-                  )}
-                  {f.saldo !== null && !filtrando && (
-                    <p className="text-xs text-gray-400">saldo {formatCOP(f.saldo)}</p>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      <p className="text-xs text-gray-400 flex items-center gap-1.5">
-        <TrendingUp size={12} />
-        {filtrando
-          ? 'Con un rango de fechas el saldo corrido se oculta: sería un acumulado parcial, no el saldo real.'
-          : 'Los cargos nacen cuando llega un envío; los abonos, cuando la bodega confirma el pago. Las ventas se anotan pero no mueven la cuenta.'}
       </p>
     </div>
   );

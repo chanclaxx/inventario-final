@@ -199,14 +199,29 @@ const ADMIN_B = { usuario_id: 3, rol: 'admin_negocio' };
 
 // ═══ 1. La bodega despacha celulares y accesorios a Centro ═══════════════════
 console.log('\n═══ 1. Bodega despacha 3 celulares + 40 cargadores a Centro ═══');
+const LINEAS_ENVIO = [
+  { tipo: 'serial', serial_id: 1 },
+  { tipo: 'serial', serial_id: 2, valor_interno: 1600000 },   // con sobreprecio interno
+  { tipo: 'serial', serial_id: 5 },                            // el que NO tiene costo
+  { tipo: 'cantidad', producto_id: 1, cantidad: 40 },
+];
+
+// El valor de la línea es lo que el local va a DEBER por ese producto, así que
+// un 0 se lo regala. Antes pasaba en silencio (esta suite lo reportaba como
+// riesgo); ahora hay que confirmarlo.
+let bloqueoCero = null;
+try {
+  await red.despachar(reqA(1), { sucursal_destino_id: 2, lineas: LINEAS_ENVIO });
+} catch (e) { bloqueoCero = e; }
+checkEq('★ Despachar con un producto en $0 se bloquea', bloqueoCero?.codigo, 'VALOR_CERO');
+checkEq('  y dice cuál es', bloqueoCero?.productos?.[0], 'CEL-005');
+
 const rem = await red.despachar(reqA(1), {
   sucursal_destino_id: 2,
-  lineas: [
-    { tipo: 'serial', serial_id: 1 },
-    { tipo: 'serial', serial_id: 2, valor_interno: 1600000 },   // con sobreprecio interno
-    { tipo: 'serial', serial_id: 5 },                            // el que NO tiene costo
-    { tipo: 'cantidad', producto_id: 1, cantidad: 40 },
-  ],
+  lineas: LINEAS_ENVIO,
+  // Entregarlo sin cobro es válido (una muestra, un obsequio): lo que no vale
+  // es que se cuele sin que nadie lo decida.
+  permitir_valor_cero: true,
 });
 const lineasRem = await redRepo.getLineasRemision(rem.id);
 await red.recibir(reqA(2, 'supervisor'), rem.id, { lineas_recibidas: lineasRem.map((l) => Number(l.id)) });
@@ -218,8 +233,10 @@ const porImei = (l, i) => l.find((s) => s.imei === i);
 check('Tarifa del celular normal usa el valor interno', porImei(enCentro, 'CEL-001')?.costo_tarifa, 1400000);
 check('Tarifa del celular con sobreprecio usa 1.600.000', porImei(enCentro, 'CEL-002')?.costo_tarifa, 1600000);
 checkEq('★ El celular SIN costo no admite tarifa', porImei(enCentro, 'CEL-005')?.costo_tarifa, null);
-riesgo('Un equipo despachado con valor interno 0 llega al local sin poder aplicarle tarifa: '
-  + 'el vendedor debe poner el precio a mano. Conviene que la bodega no despache con costo 0.');
+riesgo('Un equipo despachado en $0 sigue llegando al local sin poder aplicarle tarifa: '
+  + 'el vendedor debe poner el precio a mano. Ya no puede pasar por descuido '
+  + '(el despacho lo bloquea), pero si se confirma la entrega sin cobro, el '
+  + 'producto queda sin base para calcular su precio de venta.');
 
 // ═══ 2. AISLAMIENTO ENTRE NEGOCIOS ══════════════════════════════════════════
 console.log('\n═══ 2. Aislamiento entre negocios ═══');
