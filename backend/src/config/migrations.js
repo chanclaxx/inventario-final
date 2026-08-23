@@ -237,6 +237,135 @@ const runMigrations = async () => {
       CREATE INDEX IF NOT EXISTS idx_correcciones_linea
         ON correcciones_remision (linea_id);
     `);
+
+    // v3 — EL ENVÍO ES LA DEUDA. Ver migrations/20260822_red_interna_envios.sql.
+    //
+    // El local pasa a pagar todo lo que recibe (antes solo lo vendido), y cada
+    // envío lleva su propia cuenta. El CARGO se sigue derivando de las líneas;
+    // lo que hay que guardar es el ABONO, porque a qué envío se imputa un pago
+    // lo decide una persona y no se puede leer de ninguna otra tabla.
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS abonos_remision (
+        id            BIGSERIAL     PRIMARY KEY,
+        negocio_id    INTEGER       NOT NULL REFERENCES negocios(id)   ON DELETE RESTRICT,
+        sucursal_id   INTEGER       NOT NULL REFERENCES sucursales(id) ON DELETE RESTRICT,
+        remision_id   BIGINT        NOT NULL REFERENCES remisiones(id) ON DELETE CASCADE,
+        origen        TEXT          NOT NULL,
+        remesa_id     BIGINT        REFERENCES remesas(id)                    ON DELETE CASCADE,
+        movimiento_id BIGINT        REFERENCES movimientos_cuenta_interna(id) ON DELETE CASCADE,
+        valor         NUMERIC(14,2) NOT NULL CHECK (valor > 0),
+        fecha         TIMESTAMP     NOT NULL DEFAULT NOW(),
+        usuario_id    INTEGER,
+        notas         TEXT,
+        anulado       BOOLEAN       NOT NULL DEFAULT FALSE,
+        CONSTRAINT abonos_remision_origen_chk
+          CHECK (origen IN ('remesa', 'gasto', 'ajuste', 'saldo_favor')),
+        CONSTRAINT abonos_remision_fuente_chk
+          CHECK ((origen = 'remesa' AND remesa_id IS NOT NULL)
+              OR (origen IN ('gasto', 'ajuste') AND movimiento_id IS NOT NULL)
+              OR  origen = 'saldo_favor')
+      );
+      CREATE INDEX IF NOT EXISTS idx_abonos_remision_remision
+        ON abonos_remision (remision_id) WHERE NOT anulado;
+      CREATE INDEX IF NOT EXISTS idx_abonos_remision_local
+        ON abonos_remision (negocio_id, sucursal_id, fecha DESC) WHERE NOT anulado;
+      CREATE INDEX IF NOT EXISTS idx_abonos_remision_remesa
+        ON abonos_remision (remesa_id) WHERE remesa_id IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_abonos_remision_movimiento
+        ON abonos_remision (movimiento_id) WHERE movimiento_id IS NOT NULL;
+    `);
+
+    // Backfill del cambio de modelo. Ver
+    // migrations/20260822_red_interna_envios_backfill.sql — este bloque es el
+    // mismo, replicado aquí porque es lo que corre de verdad en producción.
+    //
+    // Imputa los pagos que ya existían a los envíos, en orden cronológico y
+    // FIFO. Se salta cualquier local que YA tenga abonos, así que después de la
+    // primera pasada es un no-op: puede correr en cada arranque sin duplicar
+    // un peso. Lo que sobre queda sin imputar y se lee como saldo a favor.
+    await pool.query(`
+      DO $backfill$
+      DECLARE
+        v_local  RECORD; v_pago RECORD; v_envio RECORD;
+        v_resto NUMERIC(14,2); v_aplica NUMERIC(14,2);
+      BEGIN
+        FOR v_local IN
+          SELECT DISTINCT r.negocio_id, r.sucursal_destino_id AS sucursal_id
+          FROM remisiones r
+          JOIN config_negocio c ON c.negocio_id = r.negocio_id
+                               AND c.clave = 'red_interna_activa' AND c.valor = '1'
+          WHERE r.tipo = 'entrega' AND r.estado <> 'Anulada'
+            AND NOT EXISTS (
+              SELECT 1 FROM abonos_remision a
+              WHERE a.negocio_id = r.negocio_id
+                AND a.sucursal_id = r.sucursal_destino_id
+            )
+          ORDER BY 1, 2
+        LOOP
+          FOR v_pago IN
+            SELECT * FROM (
+              SELECT 'remesa'::text AS origen, r.id AS ref_id, r.valor AS valor,
+                     COALESCE(r.fecha_recepcion, r.fecha_envio) AS fecha
+              FROM remesas r
+              WHERE r.negocio_id = v_local.negocio_id
+                AND r.sucursal_origen_id = v_local.sucursal_id
+                AND r.estado = 'Recibida'
+              UNION ALL
+              SELECT CASE WHEN m.tipo = 'GastoAutorizado' THEN 'gasto' ELSE 'ajuste' END,
+                     m.id, m.valor, m.fecha
+              FROM movimientos_cuenta_interna m
+              WHERE m.negocio_id = v_local.negocio_id
+                AND m.sucursal_id = v_local.sucursal_id
+                AND NOT m.anulado
+                AND m.tipo IN ('GastoAutorizado', 'Ajuste')
+                AND m.valor > 0
+            ) p
+            ORDER BY p.fecha, p.origen, p.ref_id
+          LOOP
+            v_resto := v_pago.valor;
+            FOR v_envio IN
+              SELECT r.id, (cargo.total - COALESCE(ab.total, 0)) AS saldo
+              FROM remisiones r
+              JOIN LATERAL (
+                SELECT COALESCE(SUM(
+                  lr.valor_interno * CASE WHEN lr.tipo = 'serial' THEN 1
+                                          ELSE COALESCE(lr.cantidad_recibida, lr.cantidad, 0) END
+                ), 0) AS total
+                FROM lineas_remision lr
+                WHERE lr.remision_id = r.id AND lr.estado_linea = 'Recibida'
+              ) cargo ON TRUE
+              LEFT JOIN LATERAL (
+                SELECT COALESCE(SUM(a.valor), 0) AS total
+                FROM abonos_remision a
+                WHERE a.remision_id = r.id AND NOT a.anulado
+              ) ab ON TRUE
+              WHERE r.negocio_id = v_local.negocio_id
+                AND r.sucursal_destino_id = v_local.sucursal_id
+                AND r.tipo = 'entrega' AND r.estado <> 'Anulada'
+                AND (cargo.total - COALESCE(ab.total, 0)) > 0
+              ORDER BY COALESCE(r.fecha_recepcion, r.fecha_emision), r.id
+            LOOP
+              EXIT WHEN v_resto <= 0;
+              v_aplica := LEAST(v_resto, v_envio.saldo);
+              IF v_aplica > 0 THEN
+                INSERT INTO abonos_remision
+                  (negocio_id, sucursal_id, remision_id, origen,
+                   remesa_id, movimiento_id, valor, fecha, notas)
+                VALUES (
+                  v_local.negocio_id, v_local.sucursal_id, v_envio.id, v_pago.origen,
+                  CASE WHEN v_pago.origen = 'remesa'  THEN v_pago.ref_id END,
+                  CASE WHEN v_pago.origen <> 'remesa' THEN v_pago.ref_id END,
+                  v_aplica, v_pago.fecha,
+                  'Imputado al migrar al modelo de envío a crédito'
+                );
+                v_resto := v_resto - v_aplica;
+              END IF;
+            END LOOP;
+          END LOOP;
+        END LOOP;
+      END
+      $backfill$;
+    `);
   } catch (err) {
     console.error('⚠️  Migración red interna no aplicada (el resto del sistema sigue normal):', err.message);
   }

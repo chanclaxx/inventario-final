@@ -171,6 +171,64 @@ ok('★ Y el sobrante se lee como saldo a favor',
 ok('  sin que la bodega le quede debiendo plata',
    Number(cuenta2.totales.saldo_por_liquidar) === 0);
 
+// ═════════════════════════════════════════════════════════════════════════════
+// 7. LO QUE DE VERDAD CORRE EN PRODUCCIÓN
+//
+// Los archivos de `/migrations` son la referencia legible, pero quien crea las
+// tablas en Railway es `src/config/migrations.js`, que replica ese SQL inline.
+// Escribir el .sql y olvidar el runner deja el despliegue con el código nuevo
+// contra una base vieja: toda lectura de la cuenta revienta con
+// `relation "abonos_remision" does not exist`. Ya pasó una vez.
+//
+// Esta sección extrae el SQL del runner y lo corre contra una base limpia.
+// ═════════════════════════════════════════════════════════════════════════════
+console.log('\n═══ 7. El runner de arranque crea lo mismo que el .sql ═══');
+
+const runner = readFileSync(path.join(RAIZ, 'src/config/migrations.js'), 'utf8');
+const marca  = '// v3 — EL ENVÍO ES LA DEUDA';
+ok('★ El runner incluye la migración v3', runner.includes(marca),
+   marca);
+
+const bloqueV3 = runner.slice(runner.indexOf(marca));
+const sqlV3 = [...bloqueV3.matchAll(/await pool\.query\(`([\s\S]*?)`\);/g)]
+  .slice(0, 2)
+  .map((m) => m[1]);
+ok('  y trae sus dos sentencias (tabla + backfill)', sqlV3.length === 2);
+
+// Base virgen con solo lo que el runner necesita para llegar hasta la v3.
+const db2 = new PGlite();
+await db2.exec(readFileSync(path.join(AQUI, 'esquema.sql'), 'utf8'));
+await db2.exec(readFileSync(path.join(AQUI, 'esquema-completo.sql'), 'utf8'));
+await db2.exec(readFileSync(path.join(RAIZ, '../migrations/20260725_red_interna.sql'), 'utf8'));
+await db2.exec(readFileSync(path.join(RAIZ, '../migrations/20260726_red_interna_v2.sql'), 'utf8'));
+
+let runnerOk = true, runnerErr = '';
+try {
+  for (const sql of sqlV3) await db2.exec(sql);
+} catch (e) { runnerOk = false; runnerErr = e.message; }
+ok('★★ El SQL del runner corre sin error', runnerOk, runnerErr);
+
+const tabla = (await db2.query(`SELECT to_regclass('public.abonos_remision') AS t`)).rows[0].t;
+ok('★★ Y deja creada `abonos_remision`', tabla !== null, String(tabla));
+
+// Las columnas que el repositorio consulta tienen que existir todas: si el
+// runner se quedara corto contra el .sql, aquí se ve.
+const cols = (await db2.query(`
+  SELECT column_name FROM information_schema.columns
+  WHERE table_name = 'abonos_remision' ORDER BY column_name`)).rows.map((r) => r.column_name);
+const esperadas = ['anulado', 'fecha', 'id', 'movimiento_id', 'negocio_id', 'notas',
+                   'origen', 'remesa_id', 'remision_id', 'sucursal_id', 'usuario_id', 'valor'];
+ok('★★ Con las mismas columnas que el .sql',
+   esperadas.every((c) => cols.includes(c)),
+   `${cols.length} columnas`);
+
+// Y es re-ejecutable: el arranque corre las migraciones en CADA despliegue.
+let reejecutable = true;
+try {
+  for (const sql of sqlV3) await db2.exec(sql);
+} catch (e) { reejecutable = false; runnerErr = e.message; }
+ok('★★ Re-ejecutable: el arranque lo corre en cada despliegue', reejecutable, runnerErr);
+
 console.log(`\n${'─'.repeat(60)}`);
 console.log(`  ${pasados} pasaron · ${fallos} fallaron`);
 console.log('─'.repeat(60));

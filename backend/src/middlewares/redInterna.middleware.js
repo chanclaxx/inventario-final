@@ -91,9 +91,14 @@ const _hayInfra = async () => {
     SELECT to_regclass('public.remisiones')                 AS a,
            to_regclass('public.lineas_remision')            AS b,
            to_regclass('public.remesas')                    AS c,
-           to_regclass('public.movimientos_cuenta_interna') AS d
+           to_regclass('public.movimientos_cuenta_interna') AS d,
+           -- abonos_remision es de la v3 (el envío es la deuda). Sin ella
+           -- TODA lectura de la cuenta revienta con un 500 desde el fondo de
+           -- una consulta, que es justo lo que este chequeo existe para evitar:
+           -- la migración corre dentro de un try/catch y puede no haber pasado.
+           to_regclass('public.abonos_remision')            AS e
   `);
-  _infraLista = Boolean(rows[0].a && rows[0].b && rows[0].c && rows[0].d);
+  _infraLista = Boolean(rows[0].a && rows[0].b && rows[0].c && rows[0].d && rows[0].e);
   return _infraLista;
 };
 
