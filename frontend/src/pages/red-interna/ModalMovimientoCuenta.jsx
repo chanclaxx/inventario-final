@@ -18,7 +18,9 @@ import { Info, Receipt, Plus, Minus } from 'lucide-react';
 // sola una devolución. Esto cierra ese hueco.
 //
 //   GASTO   lo registra el LOCAL: pagó algo con plata de la bodega (un
-//           domicilio, un repuesto). Sale de su caja y le baja la deuda.
+//           domicilio, un repuesto). Sale de su caja YA, pero la deuda no baja
+//           hasta que la bodega lo apruebe. Antes bajaba sola, así que un local
+//           podía rebajarse la deuda sin que nadie se enterara.
 //
 //   AJUSTE  lo registra la BODEGA sobre la cuenta de un local:
 //             a favor  → le abona (una garantía, un acuerdo)
@@ -69,7 +71,7 @@ export function ModalMovimientoCuenta({
       const d = res.data?.data;
       const n = (d?.reparto || []).length;
       onListo(esGasto
-        ? (n > 1 ? `Gasto registrado — cubrió ${n} envíos` : 'Gasto registrado')
+        ? 'Gasto registrado — la bodega tiene que aprobarlo para que baje tu deuda'
         : signo === 'contra' ? 'Cargo registrado en la cuenta del local'
         : (n > 1 ? `Abono registrado — cubrió ${n} envíos` : 'Abono registrado'));
     },
@@ -160,8 +162,10 @@ export function ModalMovimientoCuenta({
                      : <Info size={14} className="mt-0.5 flex-shrink-0" />}
             <span>
               {esGasto ? (
-                <>Sale de <strong>{cuenta?.nombre || 'tu caja'}</strong> y baja tu deuda
-                en {monto > 0 ? formatCOP(monto) : 'ese valor'}, repartido entre tus
+                <>Sale de <strong>{cuenta?.nombre || 'tu caja'}</strong> ahora.
+                Tu deuda <strong>no baja todavía</strong>: la bodega tiene que
+                aprobarlo. Cuando lo haga, esos
+                {monto > 0 ? ` ${formatCOP(monto)}` : ' pesos'} se reparten entre tus
                 envíos abiertos del más viejo al más nuevo.
                 {cuenta && !cuenta.es_efectivo && ' No pasa por la caja física.'}</>
               ) : signo === 'contra' ? (

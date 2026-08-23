@@ -366,6 +366,47 @@ const runMigrations = async () => {
       END
       $backfill$;
     `);
+
+    // v4 — que nadie cambie la cuenta a espaldas del otro.
+    // Ver migrations/20260823_red_interna_control.sql.
+    //
+    // Aprobación de los movimientos de cuenta (un gasto del local ya no baja su
+    // deuda hasta que la bodega lo apruebe) y motivo de la devolución, para
+    // distinguir "lo regresé" de "nunca llegó".
+    //
+    // 'Aprobado' por DEFAULT y no 'Por aprobar': al revés, todo lo ya
+    // registrado quedaría en el limbo y la deuda de cada local cambiaría solo
+    // por aplicar la migración.
+    await pool.query(`
+      ALTER TABLE IF EXISTS movimientos_cuenta_interna
+        ADD COLUMN IF NOT EXISTS estado TEXT NOT NULL DEFAULT 'Aprobado';
+      ALTER TABLE IF EXISTS movimientos_cuenta_interna
+        ADD COLUMN IF NOT EXISTS usuario_aprueba_id INTEGER;
+      ALTER TABLE IF EXISTS movimientos_cuenta_interna
+        ADD COLUMN IF NOT EXISTS fecha_aprobacion TIMESTAMP;
+      ALTER TABLE IF EXISTS remisiones
+        ADD COLUMN IF NOT EXISTS motivo TEXT;
+
+      CREATE INDEX IF NOT EXISTS idx_mci_por_aprobar
+        ON movimientos_cuenta_interna (negocio_id, estado)
+        WHERE estado = 'Por aprobar' AND NOT anulado;
+    `);
+
+    // Los CHECK van aparte: ADD CONSTRAINT no admite IF NOT EXISTS.
+    await pool.query(`
+      DO $chk$
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'mci_estado_chk') THEN
+          ALTER TABLE movimientos_cuenta_interna ADD CONSTRAINT mci_estado_chk
+            CHECK (estado IN ('Por aprobar', 'Aprobado', 'Rechazado'));
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'remisiones_motivo_chk') THEN
+          ALTER TABLE remisiones ADD CONSTRAINT remisiones_motivo_chk
+            CHECK (motivo IS NULL OR motivo IN ('devolucion', 'faltante'));
+        END IF;
+      END
+      $chk$;
+    `);
   } catch (err) {
     console.error('⚠️  Migración red interna no aplicada (el resto del sistema sigue normal):', err.message);
   }

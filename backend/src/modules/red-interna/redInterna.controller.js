@@ -125,8 +125,8 @@ const anularRemision = async (req, res, next) => {
 
 const devolver = async (req, res, next) => {
   try {
-    const { lineas, notas } = req.body;
-    const data = await service.devolver(req, { lineas, notas });
+    const { lineas, notas, motivo } = req.body;
+    const data = await service.devolver(req, { lineas, notas, motivo });
     audit.registrar(req.user.negocio_id, req.user.id, 'Devolución a bodega', 'red_interna', data.id, {
       sucursal_id: Number(req.sucursal_id),
       items:       (lineas || []).length,
@@ -281,6 +281,48 @@ const ajuste = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+// La bodega decide sobre un gasto que el local le pasó.
+const decidirGasto = async (req, res, next) => {
+  try {
+    const aprobar = req.body.aprobar !== false;
+    const data = await service.decidirGasto(req, Number(req.params.id), {
+      aprobar, motivo: req.body.motivo,
+    });
+    audit.registrar(req.user.negocio_id, req.user.id,
+      aprobar ? 'Gasto aprobado' : 'Gasto rechazado', 'red_interna', data.id, {
+        sucursal_id: Number(data.sucursal_id), valor: data.valor,
+      });
+    res.json({ ok: true, data, message: aprobar ? 'Gasto aprobado' : 'Gasto rechazado' });
+  } catch (err) { next(err); }
+};
+
+// Anular un gasto o un ajuste mal registrado.
+const anularMovimientoCuenta = async (req, res, next) => {
+  try {
+    const data = await service.anularMovimientoCuenta(req, Number(req.params.id), {
+      motivo: req.body?.motivo,
+    });
+    audit.registrar(req.user.negocio_id, req.user.id, 'Movimiento de cuenta anulado',
+      'red_interna', data.id, { sucursal_id: Number(req.sucursal_id), motivo: req.body?.motivo });
+    res.json({ ok: true, data, message: 'Movimiento anulado' });
+  } catch (err) { next(err); }
+};
+
+// Mueve un abono al envío correcto.
+const moverAbono = async (req, res, next) => {
+  try {
+    const data = await service.moverAbono(req, Number(req.params.id), {
+      remision_id: req.body.remision_id,
+    });
+    audit.registrar(req.user.negocio_id, req.user.id, 'Abono reimputado',
+      'red_interna', data.id, {
+        sucursal_id: Number(req.sucursal_id),
+        remision_id: data.remision_id, valor: data.valor,
+      });
+    res.json({ ok: true, data, message: 'Abono movido al otro envío' });
+  } catch (err) { next(err); }
+};
+
 const getMovimientosCuenta = async (req, res, next) => {
   try {
     const data = await service.getMovimientosCuenta(req, req.query.sucursal);
@@ -332,5 +374,6 @@ module.exports = {
   listarRemisiones, getRemision,
   enviarRemesa, confirmarRemesa, anularRemesa, listarRemesas,
   gastoAutorizado, ajuste, getMovimientosCuenta,
+  decidirGasto, anularMovimientoCuenta, moverAbono,
   getConciliacion, getEstadoCuenta, getSalud, getReferenciasDuplicadas,
 };

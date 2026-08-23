@@ -49,6 +49,8 @@ export const anularRemision = (id) => api.post(`/red-interna/remisiones/${id}/an
 export const previsualizarDevolucion = (lineas) =>
   api.post('/red-interna/devoluciones/previsualizar', { lineas });
 
+// `motivo: 'faltante'` = nunca llegó (el local confirmó de más). Hace lo mismo
+// con la cuenta que una devolución, pero queda escrito como lo que fue.
 export const devolverABodega = (payload) => api.post('/red-interna/devoluciones', payload);
 
 // La bodega confirma: aquí sí se mueve el inventario.
@@ -80,6 +82,19 @@ export const registrarGastoAutorizado = (payload) =>
   api.post('/red-interna/cuenta/gasto-autorizado', payload);
 
 export const registrarAjuste = (payload) => api.post('/red-interna/cuenta/ajuste', payload);
+
+// ── Corregir lo que salió mal ────────────────────────────────────────────────
+// La bodega decide sobre un gasto que el local pagó por su cuenta.
+export const decidirGasto = (id, payload) =>
+  api.post(`/red-interna/cuenta/movimientos/${id}/decidir`, payload);
+
+// Anula un gasto o un ajuste mal registrado (y tumba su imputación).
+export const anularMovimientoCuenta = (id, payload = {}) =>
+  api.post(`/red-interna/cuenta/movimientos/${id}/anular`, payload);
+
+// Mueve un abono al envío correcto. No toca tesorería ni caja.
+export const moverAbono = (id, remisionId) =>
+  api.post(`/red-interna/abonos/${id}/mover`, { remision_id: remisionId });
 
 export const getMovimientosCuenta = (sucursal) =>
   api.get('/red-interna/cuenta/movimientos', { params: { sucursal } });

@@ -1,6 +1,11 @@
 import { useState, useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { getRemision } from '../../api/redInterna.api';
+import { useQuery, useMutation } from '@tanstack/react-query';
+import {
+  getRemision, anularMovimientoCuenta, anularRemesa, moverAbono,
+  corregirValorLinea,
+} from '../../api/redInterna.api';
+import { InputMoneda } from '../../components/ui/InputMoneda';
+import { ModalReportarFaltante } from './ModalReportarFaltante';
 import { formatCOP, formatFecha, formatFechaHora } from '../../utils/formatters';
 import { Badge }      from '../../components/ui/Badge';
 import { Button }     from '../../components/ui/Button';
@@ -11,7 +16,8 @@ import { CHIPS, contar, VENDIDOS } from './estados';
 import {
   ChevronDown, Search, X, TrendingUp, TrendingDown, Package, Truck,
   Wallet, FileText, Receipt, Filter, Info, HandCoins, ShoppingBag, Undo2,
-  Store, AlertTriangle, CheckCircle2, Send, PiggyBank,
+  Store, AlertTriangle, CheckCircle2, Send, PiggyBank, Undo2 as Deshacer,
+  Clock, XCircle, ArrowRightLeft, PackageX, Pencil,
 } from 'lucide-react';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -482,8 +488,81 @@ function LineaEnvio({ l }) {
 // El desplegable ya NO guarda los productos —esos están siempre a la vista—
 // sino la CUENTA del envío: su cargo y sus abonos. Se pide al abrir porque solo
 // se miran cuando alguien pregunta "¿por qué debo esto todavía?".
-function CuentaDelEnvio({ envio }) {
-  const { data, isLoading } = useQuery({
+// Corregir el valor de un producto ya entregado.
+//
+// El backend lo soporta desde julio —con nota de quién, cuándo y por qué— y
+// nunca tuvo pantalla: `getRemision` devolvía `puede_corregir` y no lo leía
+// nadie. Era el único mecanismo limpio para arreglar un precio mal puesto, y
+// estaba inalcanzable desde la aplicación.
+function CorregirLinea({ linea, enTransito, onListo }) {
+  const [abierto, setAbierto] = useState(false);
+  const [valor,   setValor]   = useState(Math.round(Number(linea.valor_interno || 0)));
+  const [motivo,  setMotivo]  = useState('');
+  const [error,   setError]   = useState('');
+
+  const guardar = useMutation({
+    mutationFn: () => corregirValorLinea(linea.id, {
+      valor_nuevo: Number(valor), motivo: motivo.trim() || undefined,
+    }),
+    onSuccess: () => { setAbierto(false); onListo?.(); },
+    onError: (e) => setError(e?.response?.data?.error || 'No se pudo corregir'),
+  });
+
+  if (!abierto) {
+    return (
+      <button
+        onClick={() => setAbierto(true)}
+        className="inline-flex items-center gap-1 text-xs text-gray-400
+          hover:text-blue-600 transition-colors"
+      >
+        <Pencil size={11} /> Corregir valor
+      </button>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-2 bg-white border border-blue-200 rounded-xl p-3 mt-1">
+      <p className="text-xs text-gray-500">
+        {linea.nombre_producto} · hoy vale {formatCOP(linea.valor_interno)}
+      </p>
+      <InputMoneda
+        value={valor} onChange={(v) => { setValor(v === '' ? 0 : Number(v)); setError(''); }}
+        className="w-full px-3 py-2 bg-gray-100 border-0 rounded-lg text-sm text-right
+          tabular-nums focus:outline-none focus:ring-2 focus:ring-blue-500"
+      />
+      {/* En tránsito se edita limpio; ya recibido, el motivo es obligatorio y
+          queda la nota de corrección en el extracto. */}
+      {!enTransito && (
+        <input
+          value={motivo} onChange={(e) => { setMotivo(e.target.value); setError(''); }}
+          maxLength={200}
+          placeholder="¿Por qué se corrige? (obligatorio)"
+          className="w-full px-3 py-2 bg-gray-100 border-0 rounded-lg text-sm
+            placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+        />
+      )}
+      {!enTransito && (
+        <p className="text-xs text-amber-600">
+          Cambia lo que el local debe por este producto. Queda la nota de quién y
+          por qué.
+        </p>
+      )}
+      {error && <p className="text-xs text-red-500">{error}</p>}
+      <div className="flex gap-2">
+        <Button size="sm" variant="secondary" className="flex-1"
+          onClick={() => setAbierto(false)}>Cancelar</Button>
+        <Button size="sm" className="flex-1"
+          disabled={!enTransito && !motivo.trim()}
+          loading={guardar.isPending} onClick={() => guardar.mutate()}>
+          Guardar
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function CuentaDelEnvio({ envio, onCambio }) {
+  const { data, isLoading, refetch } = useQuery({
     queryKey: ['red-remision', envio.id],
     queryFn:  () => getRemision(envio.id).then((r) => r.data.data),
     staleTime: 30 * 1000,
@@ -493,9 +572,36 @@ function CuentaDelEnvio({ envio }) {
     return <div className="py-6 flex justify-center"><Spinner /></div>;
   }
 
+  const puedeCorregir = data.puede_corregir || data.puede_editar_valores;
+
   return (
     <div className="bg-gray-50/70 border-t border-gray-100">
       <MovimientosEnvio envio={envio} abonos={data.abonos || []} />
+
+      {puedeCorregir && (
+        <div className="px-4 py-3 border-t border-gray-100">
+          <p className="text-xs font-semibold text-gray-400 uppercase mb-2">
+            Corregir el valor de un producto
+          </p>
+          <div className="flex flex-col gap-2">
+            {(data.lineas || []).filter((l) => l.estado_linea !== 'Faltante').map((l) => (
+              <div key={l.id} className="flex items-center justify-between gap-3">
+                <span className="text-sm text-gray-700 truncate min-w-0">
+                  {l.nombre_producto}
+                  {l.valor_interno != null && (
+                    <span className="text-gray-400"> · {formatCOP(l.valor_interno)}</span>
+                  )}
+                </span>
+                <CorregirLinea
+                  linea={l}
+                  enTransito={data.puede_editar_valores === true}
+                  onListo={() => { refetch(); onCambio?.(); }}
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {data.correcciones?.length > 0 && (
         <div className="px-4 py-2.5 bg-amber-50/60 border-t border-amber-100">
@@ -512,9 +618,12 @@ function CuentaDelEnvio({ envio }) {
   );
 }
 
-export function TabEnvios({ envios, resumen, ocultos, propia, onAbonar }) {
+export function TabEnvios({ envios, resumen, ocultos, propia, onAbonar, onCambio }) {
   const [abierto, setAbierto] = useState(null);
   const [verPagados, setVerPagados] = useState(false);
+  // "Recibí todo" y faltaba una caja: el error más caro del día a día del local
+  // desde que recibir genera la deuda.
+  const [reclamando, setReclamando] = useState(null);
 
   if (!envios.length) {
     return <EmptyState icon={Truck} titulo="Sin envíos"
@@ -600,6 +709,15 @@ export function TabEnvios({ envios, resumen, ocultos, propia, onAbonar }) {
               <Send size={14} /> Abonar
             </Button>
           )}
+          {propia && !anulado && e.cargo > 0 && (
+            <button
+              onClick={() => setReclamando(e)}
+              className="inline-flex items-center gap-1 text-xs text-gray-400
+                hover:text-amber-600 transition-colors"
+            >
+              <PackageX size={12} /> ¿Algo no llegó?
+            </button>
+          )}
           {e.cargo > 0 && (
             <button
               onClick={() => setAbierto(abre ? null : e.id)}
@@ -613,7 +731,7 @@ export function TabEnvios({ envios, resumen, ocultos, propia, onAbonar }) {
           )}
         </div>
 
-        {abre && <CuentaDelEnvio envio={e} />}
+        {abre && <CuentaDelEnvio envio={e} onCambio={onCambio} />}
       </div>
     );
   };
@@ -647,6 +765,14 @@ export function TabEnvios({ envios, resumen, ocultos, propia, onAbonar }) {
         </div>
       )}
 
+      {reclamando && (
+        <ModalReportarFaltante
+          envio={reclamando}
+          onCerrar={() => setReclamando(null)}
+          onListo={(msg) => { setReclamando(null); onCambio?.(msg); }}
+        />
+      )}
+
       {cerrados.length > 0 && (
         <div className="border border-gray-100 rounded-2xl overflow-hidden">
           <button
@@ -673,7 +799,27 @@ export function TabEnvios({ envios, resumen, ocultos, propia, onAbonar }) {
 // PAGOS — cada pago con los envíos que tapó
 // ═══════════════════════════════════════════════════════════════════════════
 
-export function TabPagos({ remesas, movimientos, abonos, totales }) {
+export function TabPagos({
+  remesas, movimientos, abonos, totales, envios = [], esBodega, onHecho,
+}) {
+  // Todo lo que se puede deshacer pasa por aquí. La regla de quién puede qué la
+  // decide el backend; la pantalla solo ofrece lo que tiene sentido ofrecer.
+  const [moviendo, setMoviendo] = useState(null);   // abono a reimputar
+
+  const deshacer = useMutation({
+    mutationFn: ({ tipo, id }) => (tipo === 'remesa'
+      ? anularRemesa(id)
+      : anularMovimientoCuenta(id, {})),
+    onSuccess: () => onHecho?.('Movimiento deshecho'),
+    onError: (e) => onHecho?.(e?.response?.data?.error || 'No se pudo deshacer', true),
+  });
+
+  const reimputar = useMutation({
+    mutationFn: ({ abonoId, remisionId }) => moverAbono(abonoId, remisionId),
+    onSuccess: () => { setMoviendo(null); onHecho?.('Abono movido al otro envío'); },
+    onError: (e) => onHecho?.(e?.response?.data?.error || 'No se pudo mover', true),
+  });
+
   // Los abonos vienen sueltos, uno por envío. Se agrupan por su remesa para
   // mostrar el pago tal como lo hizo el usuario: "entregué $2M y cubrió tres
   // envíos". El total NO se guarda en ninguna parte, se suma aquí — es el
@@ -711,6 +857,11 @@ export function TabPagos({ remesas, movimientos, abonos, totales }) {
       valor: Number(r.valor || 0), estado: r.estado,
       fecha: r.fecha_recepcion || r.fecha_envio,
       reparto: destino(porRemesa.get(Number(r.id)) || porRemesa.get(r.id)),
+      abonos:  porRemesa.get(Number(r.id)) || porRemesa.get(r.id) || [],
+      // En tránsito lo anula cualquiera de los dos; ya confirmado, solo la
+      // bodega — es la que dijo que lo tenía.
+      puedeDeshacer: r.estado === 'En transito' || (r.estado === 'Recibida' && esBodega),
+      ref: r.id,
       detalle: [
         r.metodo || 'Efectivo',
         `enviado ${formatFechaHora(r.fecha_envio)}`,
@@ -726,6 +877,15 @@ export function TabPagos({ remesas, movimientos, abonos, totales }) {
         ? 'Gasto por cuenta de bodega' : 'Ajuste'),
       valor: Number(m.valor || 0), estado: 'Recibida', fecha: m.fecha,
       reparto: destino(porMovimiento.get(Number(m.id)) || porMovimiento.get(m.id)),
+      abonos:  [],
+      estadoAprobacion: m.estado,
+      aprobadoPor: m.aprobado_por,
+      // Un ajuste solo lo anula la bodega. Un gasto lo anula ella siempre, y el
+      // local solo mientras nadie lo haya aprobado.
+      puedeDeshacer: m.tipo === 'Ajuste'
+        ? esBodega
+        : (esBodega || m.estado !== 'Aprobado'),
+      ref: m.id,
       detalle: [
         m.tipo === 'GastoAutorizado' ? 'Gasto por cuenta de bodega'
           : Number(m.valor) < 0 ? 'Cargo de la bodega' : 'Abono de la bodega',
@@ -734,7 +894,9 @@ export function TabPagos({ remesas, movimientos, abonos, totales }) {
       ].filter(Boolean).join(' · '),
     })),
   ].sort((a, b) => new Date(b.fecha) - new Date(a.fecha)),
-  [remesas, movimientos, porRemesa, porMovimiento]);
+  // `esBodega` entra en las dependencias porque decide `puedeDeshacer`: una
+  // remesa ya confirmada solo la revierte la bodega.
+  [remesas, movimientos, porRemesa, porMovimiento, esBodega]);
 
   return (
     <div className="flex flex-col gap-3">
@@ -784,10 +946,35 @@ export function TabPagos({ remesas, movimientos, abonos, totales }) {
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-gray-900 truncate">{f.titulo}</p>
                   <p className="text-xs text-gray-400">{f.detalle}</p>
-                  {f.reparto && !anulada && (
+                  {f.reparto && !anulada && f.estadoAprobacion !== 'Rechazado' && (
                     <p className="text-xs text-blue-600">{f.reparto}</p>
                   )}
                   {f.notas && <p className="text-xs text-gray-400 italic">{f.notas}</p>}
+
+                  {/* Acciones de deshacer. Se ofrecen aquí, junto al movimiento
+                      que hay que corregir, y no en un menú aparte. */}
+                  <div className="flex flex-wrap items-center gap-2 mt-1">
+                    {f.puedeDeshacer && (
+                      <button
+                        onClick={() => deshacer.mutate({ tipo: f.tipo, id: f.ref })}
+                        disabled={deshacer.isPending}
+                        className="inline-flex items-center gap-1 text-xs text-gray-400
+                          hover:text-red-500 transition-colors disabled:opacity-50"
+                      >
+                        <Deshacer size={11} />
+                        {f.tipo === 'remesa' && f.estado === 'Recibida' ? 'Revertir' : 'Anular'}
+                      </button>
+                    )}
+                    {f.abonos.length === 1 && f.estado === 'Recibida' && (
+                      <button
+                        onClick={() => setMoviendo(f.abonos[0])}
+                        className="inline-flex items-center gap-1 text-xs text-gray-400
+                          hover:text-blue-600 transition-colors"
+                      >
+                        <ArrowRightLeft size={11} /> Cambiar de envío
+                      </button>
+                    )}
+                  </div>
                 </div>
                 <div className="text-right flex-shrink-0">
                   <p className={`text-sm font-semibold
@@ -802,6 +989,18 @@ export function TabPagos({ remesas, movimientos, abonos, totales }) {
                       {f.estado === 'En transito' ? 'Sin confirmar' : f.estado}
                     </Badge>
                   )}
+                  {/* Un gasto no baja la deuda hasta que la bodega lo apruebe:
+                      el local tiene que ver en qué quedó el suyo. */}
+                  {f.estadoAprobacion === 'Por aprobar' && (
+                    <Badge variant="yellow">
+                      <Clock size={10} /> Por aprobar
+                    </Badge>
+                  )}
+                  {f.estadoAprobacion === 'Rechazado' && (
+                    <Badge variant="red">
+                      <XCircle size={10} /> Rechazado
+                    </Badge>
+                  )}
                 </div>
               </div>
             );
@@ -811,8 +1010,72 @@ export function TabPagos({ remesas, movimientos, abonos, totales }) {
 
       <p className="text-xs text-gray-400 flex items-center gap-1.5">
         <Info size={12} />
-        Un pago solo baja la deuda cuando la bodega confirma que lo recibió.
+        Un pago solo baja la deuda cuando la bodega confirma que lo recibió, y un
+        gasto cuando ella lo aprueba.
       </p>
+
+      {moviendo && (
+        <ModalMoverAbono
+          abono={moviendo}
+          envios={envios}
+          cargando={reimputar.isPending}
+          onCerrar={() => setMoviendo(null)}
+          onMover={(remisionId) => reimputar.mutate({ abonoId: moviendo.id, remisionId })}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── Mover un abono al envío correcto ────────────────────────────────────────
+// El arreglo del pago que entró a la tarjeta equivocada: la plata estaba bien
+// contada en el total y mal en el detalle. No toca tesorería ni caja.
+function ModalMoverAbono({ abono, envios, cargando, onCerrar, onMover }) {
+  const candidatos = envios.filter(
+    (e) => e.id !== abono.remision_id && e.estado !== 'Anulada' && e.cargo > 0
+  );
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center
+      bg-black/40 p-0 sm:p-4" onClick={onCerrar}>
+      <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full sm:max-w-md
+        max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="px-5 py-4 border-b border-gray-100">
+          <p className="text-base font-bold text-gray-900">Mover este abono</p>
+          <p className="text-xs text-gray-400 mt-0.5">
+            {formatCOP(abono.valor)} · hoy está en el envío
+            #{abono.remision_numero ?? abono.remision_id}
+          </p>
+        </div>
+        {candidatos.length === 0 ? (
+          <p className="px-5 py-8 text-sm text-gray-400 text-center">
+            No hay otro envío al que moverlo.
+          </p>
+        ) : (
+          <div className="divide-y divide-gray-50">
+            {candidatos.map((e) => (
+              <button
+                key={e.id} disabled={cargando}
+                onClick={() => onMover(e.id)}
+                className="w-full flex items-center gap-3 px-5 py-3 hover:bg-gray-50
+                  transition-colors text-left disabled:opacity-50"
+              >
+                <Truck size={15} className="text-gray-400 flex-shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-gray-900">
+                    Envío #{e.numero ?? e.id}
+                  </p>
+                  <p className="text-xs text-gray-400">
+                    {formatFecha(e.fecha_emision)} · debe {formatCOP(e.saldo)}
+                  </p>
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+        <div className="px-5 py-3 border-t border-gray-100">
+          <Button variant="secondary" className="w-full" onClick={onCerrar}>Cancelar</Button>
+        </div>
+      </div>
     </div>
   );
 }

@@ -22,6 +22,7 @@ await db.exec(readFileSync(path.join(AQUI, 'esquema-completo.sql'), 'utf8'));
 await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260725_red_interna.sql'), 'utf8'));
 await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260726_red_interna_v2.sql'), 'utf8'));
 await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260822_red_interna_envios.sql'), 'utf8'));
+await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260823_red_interna_control.sql'), 'utf8'));
 
 const conectar = (t) => ({ query: (s, p) => t.query(s, p ?? []) });
 const pool = { ...conectar(db), connect: async () => ({ ...conectar(db), release() {} }) };
@@ -125,11 +126,28 @@ ok('★ Saldo baja a 3.550.000',
    Number(cuenta.totales.saldo_por_liquidar) === 5550000 - 2000000,
    money(cuenta.totales.saldo_por_liquidar));
 
-console.log('\n═══ 4. Gasto por cuenta de bodega ═══');
-await service.registrarGastoAutorizado(centro, { valor: 150000, concepto: 'Domicilio urgente' });
+console.log('\n═══ 4. Gasto por cuenta de bodega: lo aprueba la bodega ═══');
+// El local pagó algo con plata de la bodega. La plata YA salió de su caja, pero
+// la deuda no baja hasta que la bodega lo acepte: antes bajaba sola y un local
+// podía rebajarse la deuda sin que nadie se enterara.
+const gastoMov = await service.registrarGastoAutorizado(centro, {
+  valor: 150000, concepto: 'Domicilio urgente',
+});
+ok('★ Nace por aprobar', gastoMov.estado === 'Por aprobar', gastoMov.estado);
+cuenta = await service.getEstadoCuenta(centro, 2);
+ok('★★ Y el saldo NO baja todavía',
+   Number(cuenta.totales.saldo_por_liquidar) === 5550000 - 2000000,
+   money(cuenta.totales.saldo_por_liquidar));
+
+const bandeja = await service.getPanelBodega(bodega);
+ok('★ Le aparece a la bodega en su bandeja',
+   (bandeja.gastos_por_aprobar || []).some((g) => g.id === gastoMov.id),
+   `${(bandeja.gastos_por_aprobar || []).length} por aprobar`);
+
+await service.decidirGasto(bodega, gastoMov.id, { aprobar: true });
 cuenta = await service.getEstadoCuenta(centro, 2);
 const gasto = cuenta.extracto.find((e) => e.origen === 'gasto');
-ok('★ Aparece como abono', gasto && Number(gasto.valor) === -150000, money(gasto?.valor));
+ok('★ Aprobado, ya aparece como abono', gasto && Number(gasto.valor) === -150000, money(gasto?.valor));
 ok('  con su concepto', /Domicilio urgente/.test(gasto.concepto), gasto.concepto);
 ok('★ Saldo baja a 3.400.000',
    Number(cuenta.totales.saldo_por_liquidar) === 5550000 - 2000000 - 150000,

@@ -291,6 +291,7 @@ export function CuentaLocal({
           envios={data.envios || []} resumen={data.envios_resumen}
           ocultos={ocultos} propia={propia}
           onAbonar={(envio) => setPago({ envio })}
+          onCambio={(msg) => { if (msg) onAviso(msg); onRefrescar(); }}
         />
       )}
 
@@ -305,8 +306,12 @@ export function CuentaLocal({
       )}
 
       {tab === 'pagos' && (
-        <TabPagos remesas={data.remesas} movimientos={data.movimientos_cuenta || []}
-          abonos={data.abonos || []} totales={t} />
+        <TabPagos
+          remesas={data.remesas} movimientos={data.movimientos_cuenta || []}
+          abonos={data.abonos || []} totales={t}
+          envios={data.envios || []} esBodega={esBodega}
+          onHecho={(msg, error) => { onAviso(msg); if (!error) onRefrescar(); }}
+        />
       )}
 
       {/* El mismo estado de cuenta de Créditos y Préstamos: cuadrícula o

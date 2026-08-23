@@ -221,9 +221,36 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > lo que se esconde es la valorización de la mercancía. Todo campo monetario
 > nuevo hay que decidirlo ahí — el `desglose` se colaba entero y repetía justo
 > los valores que el recorte anula.
+> **Nada cambia la cuenta a espaldas del otro** (v4, `20260823_red_interna_control.sql`):
+> la regla de "la otra parte confirma" se extendió a lo que toca la cuenta.
+> Un GASTO del local nace `'Por aprobar'` y no le baja la deuda hasta que la
+> bodega lo acepte — antes bajaba sola y un local podía rebajarse la deuda sin
+> que nadie se enterara. Rechazarlo tumba su imputación pero **no devuelve la
+> plata**: el local la gastó de verdad y se la come. Los abonos de un gasto se
+> escriben igual que los de una remesa en tránsito (reservan, no cuentan).
+> **Todo error tiene salida**: anular un gasto o un ajuste (la columna `anulado`
+> existía desde 20260725 y ningún código la usaba), revertir una remesa que la
+> bodega ya confirmó, mover un abono al envío correcto, reportar después lo que
+> nunca llegó y corregir el valor de una línea entregada. Quién puede deshacer
+> qué lo decide el service, no la ruta: el local solo su gasto sin aprobar.
+> El **reclamo por faltante** viaja por el circuito de la devolución y deja la
+> línea `'Devuelta'`, no `'Faltante'` — ese estado significa "nunca entró al
+> cargo" y usarlo ahí encogía hacia atrás el cargo original del envío *además*
+> de generar la nota de crédito, contando la baja dos veces. El "nunca llegó"
+> vive en `remisiones.motivo`.
+> **Avisos push** (`_avisar`, nunca lanza): despacho, recepción —que ahora
+> genera la deuda y la puede confirmar un vendedor—, gasto por aprobar y su
+> decisión, ajuste y anulación. Antes el módulo no usaba `notificaciones` en
+> ningún punto.
 > Pruebas: `11-envios-por-remision` (la cuenta y sus invariantes),
-> `21-backfill-envios` (la migración de los negocios que ya operaban). Las
-> suites `01`, `03`, `05`, `06` y `07` siguen cubriendo el circuito.
+> `21-backfill-envios` (la migración de los negocios que ya operaban, y que el
+> runner de arranque cree lo mismo que el `.sql`), `22-corregir-errores` (la
+> aprobación y todo lo que se puede deshacer). Las suites `01`, `03`, `05`, `06`
+> y `07` siguen cubriendo el circuito.
+> **Las migraciones de este módulo NO son manuales**: están replicadas inline en
+> `src/config/migrations.js`, que corre en cada arranque. Escribir el `.sql` y
+> olvidar el runner deja el despliegue con el código nuevo contra una base vieja
+> — ya pasó con `abonos_remision`.
 
 > **Tesorería**: los saldos por cuenta (efectivo/banco/billetera/corresponsal/divisa USD) se **derivan** de las tablas transaccionales existentes mapeando método de pago → cuenta, anclados en arqueos. Solo traslados/retiros/gastos se escriben en `movimientos_dinero`. Si cambian las reglas de qué entra/sale en `caja.repository.js`, replicarlas en `tesoreria.repository.js` (ramas marcadas). Los movimientos de efectivo se espejan en `movimientos_caja` con `referencia_tipo='tesoreria'`. Un pago de compra desde Tesorería crea un **Abono espejo** en `movimientos_acreedor` (`registrar_en_caja=FALSE`, `mov_dinero_id`) que salda la deuda del acreedor sin doble descuento; anular el pago elimina/recrea el espejo en cascada.
 

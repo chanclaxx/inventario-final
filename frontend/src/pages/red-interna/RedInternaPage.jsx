@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   getPanel, getSucursales, confirmarRemesa, anularRemesa, anularRemision,
-  confirmarDevolucion, getSalud,
+  confirmarDevolucion, getSalud, decidirGasto,
 } from '../../api/redInterna.api';
 import { formatCOP, formatFechaHora } from '../../utils/formatters';
 import { Button }     from '../../components/ui/Button';
@@ -14,7 +14,7 @@ import { ModalDespachar } from './ModalDespachar';
 import { CuentaLocal }   from './CuentaLocal';
 import {
   Package, PackageCheck, Truck, Store, AlertTriangle, CheckCircle,
-  Wallet, ShieldCheck, ChevronRight, X, Undo2,
+  Wallet, ShieldCheck, ChevronRight, X, Undo2, Receipt, XCircle,
 } from 'lucide-react';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -77,10 +77,21 @@ function PanelBodega({ data, locales, onRefrescar, onAviso, onVerCuenta }) {
     mutationFn: (id) => confirmarDevolucion(id).then((r) => r.data),
     onSuccess: (res) => { onAviso(res.message || 'Devolución confirmada'); onRefrescar(); },
   });
+  // Un gasto que el local pagó por cuenta de la bodega. Hasta que se apruebe no
+  // le baja la deuda: antes bajaba sola y la bodega solo se enteraba mirando.
+  const decidir = useMutation({
+    mutationFn: ({ id, aprobar }) => decidirGasto(id, { aprobar }),
+    onSuccess: (_r, v) => {
+      onAviso(v.aprobar ? 'Gasto aprobado — la deuda del local bajó' : 'Gasto rechazado');
+      onRefrescar();
+    },
+    onError: (e) => onAviso(e?.response?.data?.error || 'No se pudo registrar la decisión'),
+  });
 
   const remesas     = data.remesas_por_confirmar      || [];
   const enTransito  = data.remisiones_en_transito     || [];
   const devoluciones = data.devoluciones_por_confirmar || [];
+  const gastos       = data.gastos_por_aprobar         || [];
 
   return (
     <>
@@ -152,6 +163,53 @@ function PanelBodega({ data, locales, onRefrescar, onAviso, onVerCuenta }) {
 
       <div>
       {/* Bandejas */}
+      {gastos.length > 0 && (
+        <Tarjeta className="mb-4 border-teal-200">
+          <div className="px-5 py-3 border-b border-gray-50 flex items-center gap-2">
+            <Receipt size={16} className="text-teal-600" />
+            <p className="text-sm font-semibold text-gray-800">
+              {gastos.length} gasto(s) por aprobar
+            </p>
+          </div>
+          <div className="divide-y divide-gray-50">
+            {gastos.map((g) => {
+              const ocupado = decidir.isPending && decidir.variables?.id === g.id;
+              return (
+                <div key={g.id} className="px-5 py-3">
+                  <div className="flex items-start gap-3">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-800">
+                        {formatCOP(g.valor)}
+                        <span className="font-normal text-gray-400"> · {g.sucursal_nombre}</span>
+                      </p>
+                      <p className="text-xs text-gray-500">{g.concepto}</p>
+                      <p className="text-xs text-gray-400">
+                        {formatFechaHora(g.fecha)}
+                        {g.usuario_nombre ? ` · ${g.usuario_nombre}` : ''}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex gap-2 mt-2.5">
+                    <Button size="sm" variant="success" className="flex-1" loading={ocupado}
+                      onClick={() => decidir.mutate({ id: g.id, aprobar: true })}>
+                      <CheckCircle size={14} /> Aprobar
+                    </Button>
+                    <Button size="sm" variant="ghost" loading={ocupado}
+                      onClick={() => decidir.mutate({ id: g.id, aprobar: false })}>
+                      <XCircle size={14} /> Rechazar
+                    </Button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <p className="px-5 py-2 text-xs text-gray-400 border-t border-gray-50">
+            Hasta que apruebes, la deuda del local no baja. Si rechazas, el gasto
+            se lo come él: la plata ya salió de su caja.
+          </p>
+        </Tarjeta>
+      )}
+
       {devoluciones.length > 0 && (
         <Tarjeta className="mb-4 border-amber-200">
           <div className="px-5 py-3 border-b border-gray-50 flex items-center gap-2">
@@ -253,7 +311,7 @@ function PanelBodega({ data, locales, onRefrescar, onAviso, onVerCuenta }) {
         </Tarjeta>
       )}
 
-      {devoluciones.length + remesas.length + enTransito.length === 0 && (
+      {devoluciones.length + remesas.length + enTransito.length + gastos.length === 0 && (
         <div className="rounded-2xl border border-gray-100 bg-white px-5 py-8 text-center">
           <CheckCircle size={20} className="text-green-500 mx-auto mb-1.5" />
           <p className="text-sm text-gray-500">Nada pendiente por confirmar</p>

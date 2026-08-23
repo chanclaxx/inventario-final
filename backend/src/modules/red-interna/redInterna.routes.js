@@ -52,4 +52,13 @@ router.post('/remesas/:id/anular',      requireNivel('supervisor'), ctrl.anularR
 router.post('/cuenta/gasto-autorizado', requireNivel('supervisor'), ctrl.gastoAutorizado);
 router.post('/cuenta/ajuste',           requireNivel('admin_negocio'), ctrl.ajuste);
 
+// ── Corregir lo que salió mal ────────────────────────────────────────────────
+// Aprobar/rechazar un gasto es de la bodega; el service exige `esBodega`.
+router.post('/cuenta/movimientos/:id/decidir', requireNivel('supervisor'), ctrl.decidirGasto);
+// Anular un gasto o un ajuste. El service decide quién puede qué: el local solo
+// su propio gasto y solo mientras nadie lo haya aprobado.
+router.post('/cuenta/movimientos/:id/anular',  requireNivel('supervisor'), ctrl.anularMovimientoCuenta);
+// Reimputar un abono que entró al envío equivocado.
+router.post('/abonos/:id/mover',               requireNivel('supervisor'), ctrl.moverAbono);
+
 module.exports = router;

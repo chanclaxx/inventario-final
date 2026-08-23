@@ -32,6 +32,9 @@ const ETIQUETAS_ESTADO = {
 
 const _num = (v) => Number(v || 0);
 
+// Pesos con separador de miles, para el texto de los avisos push.
+const _dinero = (v) => '$' + Math.round(_num(v)).toLocaleString('es-CO');
+
 // ─────────────────────────────────────────────────────────────────────────────
 // ¿A DÓNDE FUE EL EQUIPO?
 //
@@ -486,6 +489,14 @@ const despachar = async (req, {
     }
 
     await client.query('COMMIT');
+
+    // El local se entera de que viene mercancía sin tener que estar mirando.
+    _avisar({
+      negocioId, sucursalId: destinoId,
+      titulo: `Envío #${final.numero ?? final.id} en camino`,
+      cuerpo: `${lineas.length} producto(s) por ${_dinero(final.valor_total)}`,
+    });
+
     return final;
   } catch (err) {
     await client.query('ROLLBACK');
@@ -699,7 +710,27 @@ const recibir = async (req, remisionId, { lineas_recibidas, cantidades } = {}) =
     });
 
     await client.query('COMMIT');
-    return { ...(await repo.findRemisionById(negocioId, remisionId)), ...res };
+    const recibida = { ...(await repo.findRemisionById(negocioId, remisionId)), ...res };
+
+    // Recibir GENERA LA DEUDA desde el cambio de modelo, y lo puede hacer un
+    // vendedor. Que la deuda nazca en silencio sería el peor de los descuidos:
+    // se avisa al supervisor del local y a la bodega, con el valor.
+    _avisar({
+      negocioId, sucursalId: Number(remision.sucursal_destino_id),
+      roles: ['admin_negocio', 'supervisor'],
+      titulo: `Envío #${recibida.numero ?? remisionId} recibido`,
+      cuerpo: `${res.recibidas} producto(s) por ${_dinero(recibida.valor_total)}`
+        + (res.faltantes ? ` · ${res.faltantes} reportados como no llegados` : ''),
+    });
+    _avisar({
+      negocioId, sucursalId: Number(remision.sucursal_origen_id),
+      titulo: `${remision.sucursal_destino_nombre || 'El local'} recibió el envío #${recibida.numero ?? remisionId}`,
+      cuerpo: res.faltantes
+        ? `${res.faltantes} producto(s) no llegaron`
+        : `${res.recibidas} producto(s) por ${_dinero(recibida.valor_total)}`,
+    });
+
+    return recibida;
   } catch (err) {
     await client.query('ROLLBACK');
     throw err;
@@ -889,7 +920,7 @@ const previsualizarDevolucion = async (req, { lineas }) => {
  * El local emite la devolución. NO mueve inventario: queda en tránsito hasta
  * que la bodega confirme.
  */
-const devolver = async (req, { lineas, notas, clave_idempotencia }) => {
+const devolver = async (req, { lineas, notas, clave_idempotencia, motivo }) => {
   const negocioId = req.user.negocio_id;
   const origenId  = Number(req.sucursal_id);          // el local
   const destinoId = Number(req.red.bodega_id);        // la bodega
@@ -912,6 +943,10 @@ const devolver = async (req, { lineas, notas, clave_idempotencia }) => {
       sucursal_origen_id: origenId, sucursal_destino_id: destinoId,
       usuario_emisor_id: req.user.id, notas, clave_idempotencia,
       estado: 'En transito',
+      // 'faltante' = nunca llegó (el local tocó "Recibí todo" de más). Hace lo
+      // mismo con la cuenta y con el inventario que una devolución, pero
+      // contarlo bien importa: un faltante es un problema de despacho.
+      motivo: motivo === 'faltante' ? 'faltante' : 'devolucion',
     });
 
     for (const l of lineas) {
@@ -1041,6 +1076,19 @@ const confirmarDevolucion = async (req, remisionId, { lineas_recibidas } = {}) =
 
     const localId  = remision.sucursal_origen_id;
     const bodegaId = remision.sucursal_destino_id;
+    // Un reclamo por faltante y una devolución hacen LO MISMO con la cuenta y
+    // con el inventario: la línea de entrega queda 'Devuelta' y su envío deja
+    // de cobrarla.
+    //
+    // Y la línea queda 'Devuelta' en los dos casos a propósito. 'Faltante'
+    // significa otra cosa —NUNCA entró al cargo, porque el local lo rechazó al
+    // recibir— y usarlo aquí encogía hacia atrás el cargo original del envío
+    // además de generar la nota de crédito: la baja se contaba dos veces y el
+    // extracto dejaba de cuadrar con la deuda.
+    //
+    // El "nunca llegó" no se pierde: vive en `remisiones.motivo`, que es de
+    // donde lo leen la pantalla y el historial.
+    const esFaltante = remision.motivo === 'faltante';
 
     const traslado = await trasladosRepo.crearTraslado(client, {
       negocio_id: negocioId,
@@ -1227,6 +1275,27 @@ const confirmarDevolucion = async (req, remisionId, { lineas_recibidas } = {}) =
 // ═════════════════════════════════════════════════════════════════════════════
 
 const _centavos = (v) => Math.round(_num(v) * 100) / 100;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AVISOS — la cuenta no cambia en silencio
+//
+// Toda acción de un lado que le mueve la cuenta al otro manda un aviso. Es la
+// pieza que faltaba para que "no pueda modificar cuentas y la bodega no se
+// entere": el control no es solo poder deshacer, es enterarse a tiempo.
+//
+// NUNCA lanza ni se espera: quien llamó estaba despachando, recibiendo o
+// pagando, y eso tiene que terminar bien aunque el aviso falle. Es la misma
+// regla del módulo de notificaciones.
+// ─────────────────────────────────────────────────────────────────────────────
+const _avisar = ({ negocioId, sucursalId = null, roles = null, titulo, cuerpo, url = '/bodega' }) => {
+  try {
+    const notif = require('../notificaciones/notificaciones.service');
+    notif.enviar({
+      negocio_id: negocioId, sucursal_id: sucursalId, roles,
+      titulo, cuerpo, url, tag: 'red-interna', tipo: 'red_interna',
+    }).catch(() => {});
+  } catch { /* sin módulo de notificaciones, el circuito sigue igual */ }
+};
 
 const _imputarFIFO = async (client, {
   negocioId, sucursalId, valor, origen,
@@ -1578,13 +1647,21 @@ const anularRemesa = async (req, remesaId) => {
     await client.query('BEGIN');
     const remesa = await repo.findRemesaById(negocioId, remesaId, client);
     if (!remesa) throw { status: 404, message: 'Remesa no encontrada' };
-    if (remesa.estado !== 'En transito') {
+    if (remesa.estado === 'Anulada') {
+      throw { status: 409, message: 'Esa remesa ya está anulada' };
+    }
+    // EN TRÁNSITO la anula cualquiera de los dos: nadie ha dado nada por
+    // recibido. YA CONFIRMADA solo la bodega, porque es ella la que dijo que la
+    // tenía y la única que puede desdecirse. Antes esto no se podía deshacer y
+    // el único arreglo era un ajuste suelto, que dejaba la lectura descuadrada.
+    if (remesa.estado === 'Recibida' && !req.esBodega) {
       throw {
-        status: 409,
-        message: 'Solo se puede anular una remesa que sigue en tránsito. Si la bodega ya la recibió, registra un ajuste.',
+        status: 403,
+        message: 'La bodega ya confirmó este pago. Solo ella puede revertirlo.',
       };
     }
-    if (Number(remesa.sucursal_origen_id) !== Number(req.sucursal_id) && !req.esBodega) {
+    if (remesa.estado === 'En transito'
+        && Number(remesa.sucursal_origen_id) !== Number(req.sucursal_id) && !req.esBodega) {
       throw { status: 403, message: 'Solo el local que la envió o la bodega pueden anularla' };
     }
 
@@ -1593,7 +1670,27 @@ const anularRemesa = async (req, remesaId) => {
     // El espejo en caja guarda el id del movimiento de dinero en
     // `referencia_id` con `referencia_tipo='tesoreria'` (ver
     // tesoreria.repository.insertarEspejoCaja) — por ahí se desactiva.
-    for (const movId of [remesa.mov_salida_id, remesa.mov_transito_id]) {
+    // Al revertir una remesa CONFIRMADA hay que tumbar también las dos patas
+    // que creó la confirmación (salida de tránsito + entrada a la bodega). La
+    // salida de tránsito no se guarda en ninguna columna, pero comparte
+    // `grupo_traslado` con la entrada: por ahí se alcanza.
+    if (remesa.mov_entrada_id) {
+      await client.query(`
+        UPDATE movimientos_dinero SET activo = FALSE
+        WHERE grupo_traslado = (SELECT grupo_traslado FROM movimientos_dinero WHERE id = $1)
+          AND grupo_traslado IS NOT NULL
+      `, [remesa.mov_entrada_id]);
+      await client.query(`
+        UPDATE movimientos_caja SET activo = FALSE
+        WHERE referencia_tipo = 'tesoreria' AND referencia_id IN (
+          SELECT id FROM movimientos_dinero
+          WHERE grupo_traslado = (SELECT grupo_traslado FROM movimientos_dinero WHERE id = $1)
+            AND grupo_traslado IS NOT NULL
+        )
+      `, [remesa.mov_entrada_id]);
+    }
+
+    for (const movId of [remesa.mov_salida_id, remesa.mov_transito_id, remesa.mov_entrada_id]) {
       if (movId) {
         await client.query(
           `UPDATE movimientos_dinero SET activo = FALSE WHERE id = $1`, [movId]
@@ -1611,6 +1708,14 @@ const anularRemesa = async (req, remesaId) => {
     await repo.anularAbonosDeRemesa(client, remesaId);
 
     await client.query('COMMIT');
+
+    _avisar({
+      negocioId,
+      sucursalId: req.esBodega ? Number(remesa.sucursal_origen_id) : Number(req.red.bodega_id),
+      titulo: 'Pago anulado',
+      cuerpo: `${_dinero(remesa.valor)} — los envíos que cubría vuelven a quedar abiertos`,
+    });
+
     return { id: remesaId, estado: 'Anulada' };
   } catch (err) {
     await client.query('ROLLBACK');
@@ -1670,21 +1775,204 @@ const registrarGastoAutorizado = async (req, { valor, concepto, cuenta_origen_id
       || (cuenta.metodos_pago || []).includes('Efectivo');
     if (esEfectivo) await _espejarCaja(client, sucursalId, mov, req.user.id, concepto.trim());
 
-    // Espejo en la cuenta interna: descuenta de lo que el local debe liquidar.
+    // Espejo en la cuenta interna. Nace POR APROBAR: la plata ya salió de la
+    // caja del local (eso es un hecho suyo), pero la deuda con la bodega no
+    // baja hasta que la bodega lo acepte. Antes bajaba sola, así que un local
+    // podía rebajarse la deuda y la bodega solo se enteraba si entraba a mirar.
     const movCuenta = await repo.insertarMovimientoCuenta(client, {
       negocio_id: negocioId, sucursal_id: sucursalId,
       tipo: 'GastoAutorizado', valor: monto,
       mov_dinero_id: mov.id, concepto: concepto.trim(), usuario_id: req.user.id,
+      estado: 'Por aprobar',
     });
-    // Y se imputa como cualquier otro pago: gastó plata de la bodega, así que
-    // tapa envíos. Sin esto la cifra grande bajaría y ningún envío se movería.
+    // La imputación se escribe YA aunque todavía no cuente, igual que la de una
+    // remesa en tránsito: así el local no tiene que volver a decidir nada y la
+    // reserva impide que otro pago tape el mismo envío.
     const { reparto, sobrante } = await _imputarFIFO(client, {
       negocioId, sucursalId, valor: monto, origen: 'gasto',
       movimientoId: movCuenta.id, usuarioId: req.user.id, notas: concepto.trim(),
     });
 
     await client.query('COMMIT');
+
+    _avisar({
+      negocioId, sucursalId: Number(req.red.bodega_id), roles: ['admin_negocio', 'supervisor'],
+      titulo: 'Gasto por aprobar',
+      cuerpo: `${req.user.nombre || 'Un local'} registró ${_dinero(monto)}: ${concepto.trim()}`,
+    });
+
     return { ...movCuenta, reparto, sobrante };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+};
+
+/**
+ * La bodega decide sobre un gasto que el local le pasó.
+ *
+ * Aprobar lo vuelve efectivo (sus abonos empiezan a contar y la deuda baja);
+ * rechazar lo deja como constancia y tumba su imputación. En los dos casos el
+ * dinero YA salió de la caja del local: eso no se toca, porque pasó de verdad.
+ */
+const decidirGasto = async (req, movimientoId, { aprobar, motivo }) => {
+  _exigirBodega(req);
+  const negocioId = req.user.negocio_id;
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const mov = await repo.findMovimientoCuentaById(negocioId, movimientoId, client);
+    if (!mov) throw { status: 404, message: 'Movimiento no encontrado' };
+    if (mov.anulado) throw { status: 409, message: 'Ese movimiento está anulado' };
+    if (mov.estado !== 'Por aprobar') {
+      throw { status: 409, message: `Ese gasto ya está "${mov.estado}"` };
+    }
+
+    const estado = aprobar ? 'Aprobado' : 'Rechazado';
+    const actualizado = await repo.decidirMovimientoCuenta(client, {
+      id: movimientoId, estado, usuarioId: req.user.id,
+    });
+    if (!aprobar) {
+      // Su imputación se cae y los envíos que reservaba vuelven a quedar
+      // abiertos. La PLATA no se devuelve: el local la gastó de verdad, y al
+      // rechazarlo se la come él. Lo que sí se corrige es el concepto en
+      // tesorería, que si no seguiría diciendo que era por cuenta de la bodega.
+      await repo.anularAbonosDeMovimiento(client, movimientoId);
+      if (mov.mov_dinero_id) {
+        await client.query(`
+          UPDATE movimientos_dinero
+          SET concepto = $2
+          WHERE id = $1
+        `, [mov.mov_dinero_id,
+            `[Gasto propio — la bodega lo rechazó] ${mov.concepto || ''}`.slice(0, 200)]);
+      }
+    }
+
+    await client.query('COMMIT');
+
+    _avisar({
+      negocioId, sucursalId: Number(mov.sucursal_id),
+      titulo: aprobar ? 'Gasto aprobado' : 'Gasto rechazado',
+      cuerpo: aprobar
+        ? `La bodega aprobó ${_dinero(mov.valor)}: ${mov.concepto || ''}`
+        : `La bodega rechazó ${_dinero(mov.valor)}${motivo ? ` — ${motivo}` : ''}. Tu deuda no bajó.`,
+    });
+
+    return actualizado;
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+};
+
+/**
+ * Anular un gasto o un ajuste mal registrado.
+ *
+ * La columna `anulado` existía desde la primera migración y ningún código la
+ * ponía en TRUE: un ajuste con un cero de más se quedaba ahí para siempre. Se
+ * marca en vez de borrarse para que quede el rastro de que existió y se
+ * deshizo, y su imputación se cae con él.
+ *
+ * Puede la BODEGA siempre; el LOCAL solo su propio gasto y solo mientras nadie
+ * lo haya aprobado — después ya es un acuerdo entre los dos.
+ */
+const anularMovimientoCuenta = async (req, movimientoId, { motivo } = {}) => {
+  const negocioId = req.user.negocio_id;
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const mov = await repo.findMovimientoCuentaById(negocioId, movimientoId, client);
+    if (!mov) throw { status: 404, message: 'Movimiento no encontrado' };
+    if (mov.anulado) throw { status: 409, message: 'Ese movimiento ya está anulado' };
+
+    if (!req.esBodega) {
+      if (Number(mov.sucursal_id) !== Number(req.sucursal_id)) {
+        throw { status: 403, message: 'Ese movimiento es de otra sucursal' };
+      }
+      if (mov.tipo !== 'GastoAutorizado') {
+        throw { status: 403, message: 'Solo la bodega puede anular un ajuste' };
+      }
+      if (mov.estado === 'Aprobado') {
+        throw {
+          status: 409,
+          message: 'La bodega ya aprobó este gasto. Pídele que lo anule ella.',
+        };
+      }
+    }
+
+    await repo.anularMovimientoCuenta(client, movimientoId);
+    await repo.anularAbonosDeMovimiento(client, movimientoId);
+
+    // El movimiento de dinero también se desactiva: la plata vuelve a la
+    // cuenta de donde salió, y con ella su espejo en caja.
+    if (mov.mov_dinero_id) {
+      await client.query(
+        `UPDATE movimientos_dinero SET activo = FALSE WHERE id = $1`, [mov.mov_dinero_id]
+      );
+      await client.query(
+        `UPDATE movimientos_caja SET activo = FALSE
+         WHERE referencia_tipo = 'tesoreria' AND referencia_id = $1`, [mov.mov_dinero_id]
+      );
+    }
+
+    await client.query('COMMIT');
+
+    _avisar({
+      negocioId,
+      sucursalId: req.esBodega ? Number(mov.sucursal_id) : Number(req.red.bodega_id),
+      titulo: mov.tipo === 'Ajuste' ? 'Ajuste anulado' : 'Gasto anulado',
+      cuerpo: `${_dinero(mov.valor)} — ${mov.concepto || ''}${motivo ? ` · ${motivo}` : ''}`,
+    });
+
+    return { id: movimientoId, anulado: true };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+};
+
+/**
+ * Mueve un abono de un envío a otro.
+ *
+ * Es el arreglo del pago que entró a la tarjeta equivocada: la plata estaba
+ * bien contada en el total y mal en el detalle, y no había forma de corregirlo.
+ * No toca tesorería ni la caja — solo a qué envío se aplica.
+ */
+const moverAbono = async (req, abonoId, { remision_id }) => {
+  const negocioId = req.user.negocio_id;
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const abono = await repo.findAbonoById(negocioId, abonoId, client);
+    if (!abono) throw { status: 404, message: 'Abono no encontrado' };
+    if (abono.anulado) throw { status: 409, message: 'Ese abono está anulado' };
+    if (!req.esBodega && Number(abono.sucursal_id) !== Number(req.sucursal_id)) {
+      throw { status: 403, message: 'Ese abono es de otra sucursal' };
+    }
+    if (Number(abono.remision_id) === Number(remision_id)) {
+      throw { status: 400, message: 'El abono ya está en ese envío' };
+    }
+
+    const destino = await repo.getSaldoEnvio(client, negocioId, Number(remision_id));
+    if (!destino) throw { status: 404, message: 'Envío no encontrado' };
+    if (Number(destino.sucursal_destino_id) !== Number(abono.sucursal_id)) {
+      throw { status: 403, message: 'Ese envío es de otra sucursal' };
+    }
+
+    const movido = await repo.moverAbono(client, {
+      abonoId, remisionId: Number(remision_id), negocioId,
+    });
+    await client.query('COMMIT');
+    return movido;
   } catch (err) {
     await client.query('ROLLBACK');
     throw err;
@@ -1731,6 +2019,13 @@ const registrarAjuste = async (req, { sucursal_id, valor, concepto, remision_id 
     }
 
     await client.query('COMMIT');
+
+    _avisar({
+      negocioId, sucursalId,
+      titulo: monto > 0 ? 'La bodega te abonó' : 'La bodega te hizo un cargo',
+      cuerpo: `${_dinero(Math.abs(monto))} — ${concepto.trim()}`,
+    });
+
     return { ...mov, reparto, sobrante };
   } catch (err) {
     await client.query('ROLLBACK');
@@ -1901,13 +2196,17 @@ const getPanelBodega = async (req) => {
     ...(await getEstadoLocal(negocioId, s.id)),
   })));
 
-  const [remesasPorConfirmar, enTransito, devolucionesPorConfirmar] = await Promise.all([
+  const [remesasPorConfirmar, enTransito, devolucionesPorConfirmar, gastosPorAprobar] =
+    await Promise.all([
     repo.findRemesas(negocioId, { sucursalId: bodegaId, rol: 'destino', estado: 'En transito', limit: 50 }),
     repo.findRemisiones(negocioId, { sucursalId: bodegaId, rol: 'origen', estado: 'En transito', limit: 50 }),
     // Mercancía que los locales están devolviendo y espera revisión de la bodega.
     repo.findRemisiones(negocioId, {
       sucursalId: bodegaId, rol: 'destino', estado: 'En transito', tipo: 'devolucion', limit: 50,
     }),
+    // Gastos que los locales pagaron por cuenta de la bodega y esperan visto
+    // bueno. Sin esta bandeja, aprobar dependería de que alguien se acordara.
+    repo.findMovimientosPorAprobar(negocioId),
   ]);
 
   const totales = locales.reduce((acc, l) => ({
@@ -1928,6 +2227,7 @@ const getPanelBodega = async (req) => {
     remesas_por_confirmar: remesasPorConfirmar,
     remisiones_en_transito: enTransito,
     devoluciones_por_confirmar: devolucionesPorConfirmar,
+    gastos_por_aprobar: gastosPorAprobar,
   };
 };
 
@@ -2713,6 +3013,7 @@ module.exports = {
   devolver, previsualizarDevolucion, confirmarDevolucion,
   enviarRemesa, confirmarRemesa, anularRemesa,
   registrarGastoAutorizado, registrarAjuste,
+  decidirGasto, anularMovimientoCuenta, moverAbono,
   getPanelLocal, getPanelBodega, getConciliacion, getEstadoCuenta, getSalud,
   // Lo usa el Dashboard para mostrarle la deuda al local sin duplicar la
   // fórmula del saldo (ver _armarSaldo).

@@ -314,9 +314,20 @@ const getExtracto = async (negocioId, sucursalId, { desde = null, hasta = null, 
       WHERE r.negocio_id = $1 AND r.sucursal_origen_id = $2 AND r.estado = 'Recibida'
 
       UNION ALL
-      -- ABONO: gasto que el local pagó por cuenta de la bodega
-      SELECT m.fecha, 'abono', 'gasto',
-             COALESCE(m.concepto, 'Gasto por cuenta de bodega'), -m.valor,
+      -- ABONO: gasto que el local pagó por cuenta de la bodega.
+      --
+      -- Solo el APROBADO mueve el saldo. El que espera visto bueno y el
+      -- rechazado igual se listan —el local tiene que ver en qué quedó lo que
+      -- registró— pero con valor 0, como cualquier informativo. Si contaran,
+      -- el extracto dejaría de cuadrar con la deuda.
+      SELECT m.fecha,
+             CASE WHEN m.estado = 'Aprobado' THEN 'abono' ELSE 'info' END,
+             'gasto',
+             COALESCE(m.concepto, 'Gasto por cuenta de bodega')
+               || CASE m.estado WHEN 'Por aprobar' THEN ' (esperando visto bueno)'
+                                WHEN 'Rechazado'   THEN ' (rechazado por la bodega)'
+                                ELSE '' END,
+             CASE WHEN m.estado = 'Aprobado' THEN -m.valor ELSE 0 END,
              NULL, NULL, um.nombre, NULL
       FROM movimientos_cuenta_interna m
       LEFT JOIN usuarios um ON um.id = m.usuario_id
@@ -333,7 +344,7 @@ const getExtracto = async (negocioId, sucursalId, { desde = null, hasta = null, 
       FROM movimientos_cuenta_interna m
       LEFT JOIN usuarios um ON um.id = m.usuario_id
       WHERE m.negocio_id = $1 AND m.sucursal_id = $2
-        AND NOT m.anulado AND m.tipo = 'Ajuste'
+        AND NOT m.anulado AND m.estado = 'Aprobado' AND m.tipo = 'Ajuste'
 
       UNION ALL
       -- INFORMATIVO: correcciones de valor sobre una línea ya recibida.
@@ -487,7 +498,7 @@ const getTotalMovimientosCuenta = async (negocioId, sucursalId = null) => {
       COALESCE(SUM(valor) FILTER (WHERE tipo = 'GastoAutorizado'), 0) AS gastos,
       COALESCE(SUM(valor) FILTER (WHERE tipo = 'Ajuste'),          0) AS ajustes
     FROM movimientos_cuenta_interna
-    WHERE negocio_id = $1 AND NOT anulado
+    WHERE negocio_id = $1 AND NOT anulado AND estado = 'Aprobado'
       AND ($2::int IS NULL OR sucursal_id = $2)
     GROUP BY sucursal_id
   `, [negocioId, sucursalId]);
@@ -578,9 +589,13 @@ const SQL_CARGO_ENVIO = `
 const SQL_ABONOS_EFECTIVOS = `
   SELECT a.*
   FROM abonos_remision a
-  LEFT JOIN remesas rm ON rm.id = a.remesa_id
+  LEFT JOIN remesas rm                    ON rm.id = a.remesa_id
+  LEFT JOIN movimientos_cuenta_interna mc ON mc.id = a.movimiento_id
   WHERE NOT a.anulado
     AND (a.origen <> 'remesa' OR rm.estado = 'Recibida')
+    -- Un gasto o un ajuste solo baja la deuda cuando está aprobado y vivo. Es
+    -- la misma regla de la remesa en tránsito, aplicada al otro lado.
+    AND (a.movimiento_id IS NULL OR (mc.estado = 'Aprobado' AND NOT mc.anulado))
 `;
 
 // Abonos RESERVADOS: los mismos, más los de las remesas que van en camino.
@@ -593,9 +608,11 @@ const SQL_ABONOS_EFECTIVOS = `
 const SQL_ABONOS_RESERVADOS = `
   SELECT a.*
   FROM abonos_remision a
-  LEFT JOIN remesas rm ON rm.id = a.remesa_id
+  LEFT JOIN remesas rm                    ON rm.id = a.remesa_id
+  LEFT JOIN movimientos_cuenta_interna mc ON mc.id = a.movimiento_id
   WHERE NOT a.anulado
     AND (a.origen <> 'remesa' OR rm.estado <> 'Anulada')
+    AND (a.movimiento_id IS NULL OR (mc.estado <> 'Rechazado' AND NOT mc.anulado))
 `;
 
 // Cargo, abonado y saldo de cada envío de un local.
@@ -656,7 +673,8 @@ const getTotalesEnvios = async (negocioId, sucursalId, client = null) => {
                     AND estado = 'Recibida'), 0)
       + COALESCE((SELECT SUM(valor) FROM movimientos_cuenta_interna
                   WHERE negocio_id = $1 AND sucursal_id = $2
-                    AND NOT anulado AND tipo IN ('GastoAutorizado', 'Ajuste')
+                    AND NOT anulado AND estado = 'Aprobado'
+                    AND tipo IN ('GastoAutorizado', 'Ajuste')
                     AND valor > 0), 0)
       - COALESCE((SELECT SUM(valor) FROM ab WHERE origen <> 'saldo_favor'), 0)
       )                               AS sin_imputar,
@@ -666,7 +684,8 @@ const getTotalesEnvios = async (negocioId, sucursalId, client = null) => {
       -- repartirse a ojo entre envíos que no tienen nada que ver.
       COALESCE((SELECT SUM(-valor) FROM movimientos_cuenta_interna
                 WHERE negocio_id = $1 AND sucursal_id = $2
-                  AND NOT anulado AND tipo = 'Ajuste' AND valor < 0), 0)
+                  AND NOT anulado AND estado = 'Aprobado'
+                  AND tipo = 'Ajuste' AND valor < 0), 0)
                                       AS cargos_sueltos
     FROM env
   `, [negocioId, sucursalId]);
@@ -915,17 +934,17 @@ const getResumenPorRemision = async (negocioId, sucursalId, { limit = 100 } = {}
 
 const crearRemision = async (client, {
   negocio_id, tipo, sucursal_origen_id, sucursal_destino_id,
-  usuario_emisor_id, clave_idempotencia, notas, estado,
+  usuario_emisor_id, clave_idempotencia, notas, estado, motivo,
 }) => {
   const { rows } = await client.query(`
     INSERT INTO remisiones
       (negocio_id, tipo, sucursal_origen_id, sucursal_destino_id,
-       usuario_emisor_id, clave_idempotencia, notas, estado)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       usuario_emisor_id, clave_idempotencia, notas, estado, motivo)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
     RETURNING *
   `, [negocio_id, tipo, sucursal_origen_id, sucursal_destino_id,
       usuario_emisor_id, clave_idempotencia || null, notas || null,
-      estado || 'En transito']);
+      estado || 'En transito', motivo || null]);
   return rows[0];
 };
 
@@ -1436,21 +1455,101 @@ const findRemisionPorClave = async (clave) => {
 // ── Cuenta interna (gastos autorizados / ajustes / cortes) ───────────────────
 
 const insertarMovimientoCuenta = async (client, m) => {
+  const pendiente = m.estado === 'Por aprobar';
   const { rows } = await (client || pool).query(`
     INSERT INTO movimientos_cuenta_interna
-      (negocio_id, sucursal_id, tipo, valor, saldo_congelado, mov_dinero_id, concepto, usuario_id)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+      (negocio_id, sucursal_id, tipo, valor, saldo_congelado, mov_dinero_id,
+       concepto, usuario_id, estado, fecha_aprobacion, usuario_aprueba_id)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
     RETURNING *
   `, [m.negocio_id, m.sucursal_id, m.tipo, m.valor || 0, m.saldo_congelado ?? null,
-      m.mov_dinero_id || null, m.concepto || null, m.usuario_id || null]);
+      m.mov_dinero_id || null, m.concepto || null, m.usuario_id || null,
+      m.estado || 'Aprobado',
+      pendiente ? null : new Date(),
+      pendiente ? null : (m.usuario_id || null)]);
   return rows[0];
+};
+
+/** La bandeja de la bodega: gastos que los locales esperan que apruebe. */
+const findMovimientosPorAprobar = async (negocioId) => {
+  const { rows } = await pool.query(`
+    SELECT m.*, u.nombre AS usuario_nombre, s.nombre AS sucursal_nombre
+    FROM movimientos_cuenta_interna m
+    LEFT JOIN usuarios   u ON u.id = m.usuario_id
+    JOIN      sucursales s ON s.id = m.sucursal_id
+    WHERE m.negocio_id = $1 AND m.estado = 'Por aprobar' AND NOT m.anulado
+    ORDER BY m.fecha
+  `, [negocioId]);
+  return rows;
+};
+
+const findMovimientoCuentaById = async (negocioId, id, client = null) => {
+  const { rows } = await (client || pool).query(
+    `SELECT * FROM movimientos_cuenta_interna WHERE id = $1 AND negocio_id = $2`,
+    [id, negocioId]
+  );
+  return rows[0] || null;
+};
+
+const decidirMovimientoCuenta = async (client, { id, estado, usuarioId }) => {
+  const { rows } = await client.query(`
+    UPDATE movimientos_cuenta_interna
+    SET estado = $2, usuario_aprueba_id = $3, fecha_aprobacion = NOW()
+    WHERE id = $1
+    RETURNING *
+  `, [id, estado, usuarioId]);
+  return rows[0];
+};
+
+const anularMovimientoCuenta = async (client, id) => {
+  const { rows } = await client.query(
+    `UPDATE movimientos_cuenta_interna SET anulado = TRUE WHERE id = $1 RETURNING *`,
+    [id]
+  );
+  return rows[0];
+};
+
+/** Al anular o rechazar un movimiento, su imputación se cae con él. */
+const anularAbonosDeMovimiento = async (client, movimientoId) => {
+  const { rowCount } = await client.query(
+    `UPDATE abonos_remision SET anulado = TRUE WHERE movimiento_id = $1 AND NOT anulado`,
+    [movimientoId]
+  );
+  return rowCount;
+};
+
+/**
+ * Mueve un abono de un envío a otro.
+ *
+ * Solo cambia A QUÉ ENVÍO se aplica: no toca tesorería, ni la caja, ni el valor.
+ * Es para el pago que entró a la tarjeta equivocada, que hasta ahora no tenía
+ * arreglo — la plata quedaba bien contada en el total y mal en el detalle.
+ */
+const moverAbono = async (client, { abonoId, remisionId, negocioId }) => {
+  const { rows } = await client.query(`
+    UPDATE abonos_remision SET remision_id = $2
+    WHERE id = $1 AND negocio_id = $3 AND NOT anulado
+    RETURNING *
+  `, [abonoId, remisionId, negocioId]);
+  return rows[0] || null;
+};
+
+const findAbonoById = async (negocioId, id, client = null) => {
+  const { rows } = await (client || pool).query(
+    `SELECT * FROM abonos_remision WHERE id = $1 AND negocio_id = $2`,
+    [id, negocioId]
+  );
+  return rows[0] || null;
 };
 
 const findMovimientosCuenta = async (negocioId, sucursalId, limit = 100) => {
   const { rows } = await pool.query(`
-    SELECT m.*, u.nombre AS usuario_nombre
+    SELECT m.*, u.nombre AS usuario_nombre, ua.nombre AS aprobado_por
     FROM movimientos_cuenta_interna m
-    LEFT JOIN usuarios u ON u.id = m.usuario_id
+    LEFT JOIN usuarios u  ON u.id  = m.usuario_id
+    LEFT JOIN usuarios ua ON ua.id = m.usuario_aprueba_id
+    -- Los 'Por aprobar' SÍ se listan: el local tiene que ver que su gasto está
+    -- esperando visto bueno, igual que ve una remesa en tránsito.
     WHERE m.negocio_id = $1 AND m.sucursal_id = $2 AND NOT m.anulado
     ORDER BY m.fecha DESC
     LIMIT $3
@@ -1577,7 +1676,9 @@ module.exports = {
   getTotalRemesado, getTotalMovimientosCuenta, getConciliacion, getResumenPorRemision,
   // Cuenta por envío (modelo "el envío es la deuda")
   getTotalesEnvios, getAbonosDeEnvio, findAbonosLocal, getEnviosAbiertos,
-  getLineasDeEnvios,
+  getLineasDeEnvios, findAbonoById, moverAbono,
+  findMovimientosPorAprobar, findMovimientoCuentaById,
+  decidirMovimientoCuenta, anularMovimientoCuenta, anularAbonosDeMovimiento,
   getSaldoEnvio, insertarAbonoRemision, anularAbonosDeRemesa,
   crearRemision, insertarLineaRemision, actualizarTotalRemision,
   findRemisionById, getLineasRemision, getLineasDetalladas, findRemisiones,

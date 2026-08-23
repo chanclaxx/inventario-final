@@ -32,6 +32,7 @@ await db.exec(readFileSync(path.join(AQUI, 'esquema-completo.sql'), 'utf8'));
 await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260725_red_interna.sql'), 'utf8'));
 await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260726_red_interna_v2.sql'), 'utf8'));
 await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260822_red_interna_envios.sql'), 'utf8'));
+await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260823_red_interna_control.sql'), 'utf8'));
 
 const conectar = (t) => ({ query: (s, p) => t.query(s, p ?? []) });
 const pool = { ...conectar(db), connect: async () => ({ ...conectar(db), release() {} }) };
@@ -236,7 +237,13 @@ ok('★★ La identidad aguanta con pagos de por medio',
    Math.abs(x.suma - x.deuda) < 1, `${money(x.suma)} vs ${money(x.deuda)}`);
 
 console.log('\n═══ 6. Gastos y ajustes entran por el MISMO reparto ═══');
-await service.registrarGastoAutorizado(centro, { valor: 200000, concepto: 'Domicilio' });
+// El gasto lo aprueba la bodega; el ajuste lo hace ella misma y cuenta de una.
+const gasto6 = await service.registrarGastoAutorizado(centro, { valor: 200000, concepto: 'Domicilio' });
+ok('★ El gasto nace por aprobar y no baja nada todavía',
+   gasto6.estado === 'Por aprobar'
+   && Number((await service.getEstadoCuenta(centro, 2)).totales.deuda_total)
+      === Number(cuenta.totales.deuda_total));
+await service.decidirGasto(bodega, gasto6.id, { aprobar: true });
 await service.registrarAjuste(bodega, { sucursal_id: 2, valor: 100000, concepto: 'Garantía' });
 cuenta = await service.getEstadoCuenta(centro, 2);
 const SALDO_E2 = CARGO_E2B - 1000000 - 500000 - 200000 - 100000;   // 320.000

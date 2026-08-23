@@ -31,6 +31,7 @@ node scripts/pruebas-red-interna/10-adversario-mora-tarifas.mjs
 node scripts/pruebas-red-interna/11-envios-por-remision.mjs
 node scripts/pruebas-red-interna/12-destino-y-referencias.mjs
 node scripts/pruebas-red-interna/21-backfill-envios.mjs
+node scripts/pruebas-red-interna/22-corregir-errores.mjs
 node scripts/pruebas-red-interna/17-pago-total-acreedor.mjs
 node scripts/pruebas-red-interna/18-importacion.mjs
 node scripts/pruebas-red-interna/19-ordenes-compra.mjs
@@ -403,6 +404,31 @@ imputa los pagos existentes a los envíos, en orden cronológico y FIFO.
 | 4 | **Es idempotente**: correrlo dos veces no duplica un peso |
 | 5 | Un negocio que nunca activó la red interna **no se toca** |
 | 6 | Lo que sobre queda sin imputar y se lee como saldo a favor |
+
+### `22-corregir-errores.mjs` — 39 verificaciones
+
+**Que nadie cambie la cuenta a espaldas del otro, y que todo error tenga
+salida.** El módulo ya exigía que la otra parte confirmara cualquier movimiento
+de mercancía o de plata; esta suite cubre haber extendido esa regla a lo que
+toca la cuenta directamente.
+
+| # | Escenario |
+|---|---|
+| 1 | Un GASTO del local **no le baja la deuda** hasta que la bodega lo apruebe; le aparece en su bandeja |
+|   | Rechazarlo tumba su imputación — y la plata NO se devuelve: el local la gastó de verdad |
+| 2 | Un gasto o un ajuste mal tecleado se **anulan**, y con ellos su imputación y su egreso de caja |
+| 3 | Cada quien deshace lo suyo: el local su gasto sin aprobar, nunca uno aprobado ni un ajuste |
+| 4 | Una remesa **ya confirmada** la revierte la bodega, con toda su tesorería; el local no |
+| 5 | Un abono que entró al envío equivocado se **mueve**, sin tocar tesorería ni caja |
+| 6 | Lo que "se recibió" y nunca llegó se **reclama después**; la bodega confirma y el cargo baja |
+| 7 | Las dos identidades aguantan después de todo eso |
+
+> El punto 6 usa el circuito de la devolución a propósito: hace lo mismo con la
+> cuenta y con el inventario. La línea queda `'Devuelta'` y no `'Faltante'`
+> —`'Faltante'` significa "nunca entró al cargo", y usarlo aquí encogía hacia
+> atrás el cargo original del envío *además* de generar la nota de crédito, con
+> lo que la baja se contaba dos veces. El "nunca llegó" vive en
+> `remisiones.motivo`, que es de donde lo leen la pantalla y el historial.
 
 ## Nota sobre `esquema.sql`
 
