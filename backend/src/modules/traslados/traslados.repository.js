@@ -274,14 +274,21 @@ const ajustarStockEnTransaccion = async (client, productoId, cantidad) => {
   return rows[0];
 };
 
+// `atributo_id` / `variante_id` dicen QUÉ nodo se movió. Sin ellos, el traslado
+// de un producto por variantes dejaba en el historial un movimiento sin talla:
+// el resto del sistema sí las registra, y el rastro se cortaba justo aquí.
+// Van al final y son opcionales: un traslado de producto simple los deja NULL,
+// que es lo que significaban todas las filas anteriores.
 const insertarHistorialEnTransaccion = async (client, datos) => {
   await client.query(`
     INSERT INTO historial_stock_cantidad
-      (producto_id, sucursal_id, cantidad, costo_unitario, tipo, notas)
-    VALUES ($1, $2, $3, $4, $5, $6)
+      (producto_id, sucursal_id, cantidad, costo_unitario, tipo, notas,
+       atributo_id, variante_id)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
   `, [
     datos.producto_id, datos.sucursal_id, datos.cantidad,
     datos.costo_unitario ?? null, 'traslado', datos.notas || null,
+    datos.atributo_id ?? null, datos.variante_id ?? null,
   ]);
 };
 

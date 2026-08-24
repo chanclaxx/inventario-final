@@ -216,6 +216,35 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > también por `codigos_variantes` (agregado en `findAll`): sin eso, mover los
 > códigos a las variantes los volvía inbuscables.
 
+> **La línea de remisión mueve un NODO, no un producto**
+> (`20260823_remision_variantes.sql`, `redInterna.service._resolverNodoOrigen`):
+> la red interna se escribió cuando el stock de un producto por cantidad vivía en
+> `productos_cantidad.stock`. La feature «Variantes» lo bajó a
+> `atributos_producto` / `variantes_atributo` y convirtió el del producto en un
+> **derivado**; la red interna no se enteró y siguió moviendo el nivel de arriba.
+> En un catálogo por variantes eso hacía cuatro daños **silenciosos**: no se
+> podía decir qué talla se despachaba; tras recibir, el producto decía 5 y sus
+> variantes sumaban 0; el valor interno se escribía como costo del producto y no
+> de la variante, así que la tarifa del local se quedaba sin base; y el primer
+> ajuste sobre CUALQUIER variante disparaba `sincronizarStockProducto`, que
+> recalcula producto = Σ variantes y **borraba lo recibido** mientras el local lo
+> seguía debiendo.
+> **La regla: el stock se mueve siempre en la HOJA (variante > atributo >
+> producto) y el producto se recalcula después.** Si el producto tiene variantes
+> activas, la línea está obligada a decir cuál (`VARIANTE_REQUERIDA`) — antes se
+> aceptaba en silencio y de ahí salía todo el descuadre.
+> La línea guarda el nodo de origen y el de destino; entre sedes la identidad es
+> el **valor** («38MM»), nunca el id, y `_resolverNodoDestino` lo crea si falta.
+> El buscador del despacho y el escaneo por código devuelven **nodos**: cada rama
+> excluye a los que tienen hijos activos, porque un contenedor no es despachable.
+> El historial de stock ya tenía `atributo_id`/`variante_id` —los ajustes
+> normales los llenaban— y el traslado no: ahí se cortaba el rastro.
+> Es el mismo error que tuvo el código escaneable, en el mismo sitio y por la
+> misma razón: algo que vivía en el producto tuvo que bajar a los tres niveles.
+> Prueba: `24-remision-por-variante` (24 verificaciones, día completo: despacho →
+> recepción → tarifa → ajuste → devolución, con el invariante
+> `producto = Σ variantes` comprobado en las dos sedes en cada paso).
+
 > **El costo de un LOCAL es el valor_interno, no el de la bodega**
 > (`reportes.service.js: _valorInternoSerial`): cuando la bodega despacha, le
 > cobra al local por encima de lo que a ella le costó. El costo del local es el

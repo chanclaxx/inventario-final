@@ -3,6 +3,7 @@ const { pool } = require('../../config/db');
 const repo          = require('./redInterna.repository');
 const referencias   = require('./redInterna.referencias');
 const trasladosRepo = require('../traslados/traslados.repository');
+const variantesRepo = require('../variantes-producto/variantes-producto.repository');
 const tesoreriaRepo = require('../tesoreria/tesoreria.repository');
 const { asignarNumeroDocumento } = require('../../utils/numeracion.util');
 const { calcularCostoPromedio }  = require('../../utils/costoPromedio.util');
@@ -272,6 +273,210 @@ const _resolverProductoCantidadDestino = async (client, productoOrigenId, sucurs
     tipo: 'cantidad', productoOrigenId, sucursalDestinoId, negocioId, preferido,
   })).producto_id;
 
+// ─────────────────────────────────────────────────────────────────────────────
+// EL NODO QUE SE MUEVE — LEER ANTES DE TOCAR EL STOCK DE CANTIDAD
+//
+// Con la feature "Variantes" activa, el stock de un producto NO vive en
+// `productos_cantidad.stock`: vive en sus `atributos_producto` (talla, color) y,
+// un nivel más abajo, en `variantes_atributo`. `productos_cantidad.stock` pasa a
+// ser un DERIVADO — la suma de sus hijos, que `sincronizarStockProducto`
+// recalcula cada vez que alguien toca una variante.
+//
+// La red interna se escribió antes de esa feature y movía el stock en el nivel
+// del producto. En un catálogo por variantes eso dejaba el inventario
+// descuadrado en las dos sedes y, peor, el primer ajuste sobre cualquier
+// variante recalculaba el producto y BORRABA lo recibido, mientras el local
+// seguía debiendo la mercancía.
+//
+// Regla: el stock se mueve SIEMPRE en la hoja (variante > atributo > producto)
+// y el producto se recalcula después. Si el producto tiene variantes activas,
+// la línea está OBLIGADA a decir cuál — antes se aceptaba en silencio y de ahí
+// salía el descuadre.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const _etiquetaNodo = (nombre, atributoValor, varianteValor) =>
+  [nombre, atributoValor, varianteValor].filter(Boolean).join(' / ');
+
+/**
+ * Valida el nodo que la línea quiere mover en el ORIGEN y devuelve su stock,
+ * su costo (resuelto con COALESCE hacia arriba, como hace la pantalla del
+ * árbol) y su etiqueta.
+ */
+const _resolverNodoOrigen = async (client, { productoId, atributoId, varianteId, sucursalId }) => {
+  const { rows: prod } = await client.query(
+    `SELECT id, nombre, stock, COALESCE(costo_unitario, 0) AS costo_unitario
+     FROM productos_cantidad
+     WHERE id = $1 AND sucursal_id = $2 AND activo = true
+     FOR UPDATE`,
+    [productoId, sucursalId]
+  );
+  if (!prod.length) throw { status: 404, message: 'Producto no encontrado en la bodega' };
+  const p = prod[0];
+
+  const { rows: hijos } = await client.query(
+    `SELECT count(*)::int AS n FROM atributos_producto
+     WHERE producto_id = $1 AND sucursal_id = $2 AND activo = true`,
+    [productoId, sucursalId]
+  );
+  const tieneVariantes = hijos[0].n > 0;
+
+  if (varianteId) {
+    const { rows } = await client.query(
+      `SELECT v.id, v.valor, v.stock,
+              COALESCE(v.costo_unitario, ap.costo_unitario, pc.costo_unitario, 0) AS costo,
+              ap.id AS atributo_id, ap.valor AS atributo_valor
+       FROM variantes_atributo v
+       JOIN atributos_producto ap ON ap.id = v.atributo_id
+       JOIN productos_cantidad pc ON pc.id = ap.producto_id
+       WHERE v.id = $1 AND ap.producto_id = $2 AND ap.sucursal_id = $3
+         AND v.activo = true AND ap.activo = true
+       FOR UPDATE OF v`,
+      [varianteId, productoId, sucursalId]
+    );
+    if (!rows.length) throw { status: 404, message: 'La variante no existe en este producto' };
+    const v = rows[0];
+    return {
+      productoId, atributoId: v.atributo_id, varianteId: v.id,
+      nombreProducto: p.nombre, atributoValor: v.atributo_valor, varianteValor: v.valor,
+      stock: Number(v.stock), costo: Number(v.costo),
+      etiqueta: _etiquetaNodo(p.nombre, v.atributo_valor, v.valor),
+    };
+  }
+
+  if (atributoId) {
+    const { rows } = await client.query(
+      `SELECT ap.id, ap.valor, ap.stock,
+              COALESCE(ap.costo_unitario, pc.costo_unitario, 0) AS costo,
+              (SELECT count(*)::int FROM variantes_atributo v
+               WHERE v.atributo_id = ap.id AND v.activo = true) AS n_variantes
+       FROM atributos_producto ap
+       JOIN productos_cantidad pc ON pc.id = ap.producto_id
+       WHERE ap.id = $1 AND ap.producto_id = $2 AND ap.sucursal_id = $3 AND ap.activo = true
+       FOR UPDATE OF ap`,
+      [atributoId, productoId, sucursalId]
+    );
+    if (!rows.length) throw { status: 404, message: 'La variante no existe en este producto' };
+    const a = rows[0];
+    if (a.n_variantes > 0) {
+      throw {
+        status: 400,
+        message: `"${_etiquetaNodo(p.nombre, a.valor)}" tiene sub-variantes: elige cuál vas a despachar`,
+      };
+    }
+    return {
+      productoId, atributoId: a.id, varianteId: null,
+      nombreProducto: p.nombre, atributoValor: a.valor, varianteValor: null,
+      stock: Number(a.stock), costo: Number(a.costo),
+      etiqueta: _etiquetaNodo(p.nombre, a.valor),
+    };
+  }
+
+  // Sin nodo: solo vale si el producto de verdad no tiene variantes.
+  if (tieneVariantes) {
+    throw {
+      status: 400,
+      message: `"${p.nombre}" se maneja por variantes: elige cuál vas a despachar`,
+      codigo: 'VARIANTE_REQUERIDA',
+    };
+  }
+  return {
+    productoId, atributoId: null, varianteId: null,
+    nombreProducto: p.nombre, atributoValor: null, varianteValor: null,
+    stock: Number(p.stock), costo: Number(p.costo_unitario),
+    etiqueta: p.nombre,
+  };
+};
+
+/**
+ * Encuentra —o crea— el mismo nodo bajo el producto del DESTINO. La identidad
+ * entre sedes es el VALOR (el texto "38MM"), nunca el id: cada sucursal tiene
+ * los suyos. Se crea con stock 0 y sin costo; el costo lo pone la recepción con
+ * el valor interno, que es lo que el local debe.
+ */
+const _resolverNodoDestino = async (client, { productoDestinoId, sucursalDestinoId, atributoValor, varianteValor }) => {
+  if (!atributoValor) return { atributoId: null, varianteId: null };
+
+  const { rows: ex } = await client.query(
+    `SELECT id FROM atributos_producto
+     WHERE producto_id = $1 AND sucursal_id = $2 AND LOWER(valor) = LOWER($3) AND activo = true
+     ORDER BY id LIMIT 1`,
+    [productoDestinoId, sucursalDestinoId, atributoValor]
+  );
+  let atributoId = ex[0]?.id;
+  if (!atributoId) {
+    const { rows } = await client.query(
+      `INSERT INTO atributos_producto (producto_id, sucursal_id, valor, stock, stock_minimo)
+       VALUES ($1, $2, $3, 0, 0) RETURNING id`,
+      [productoDestinoId, sucursalDestinoId, String(atributoValor).trim()]
+    );
+    atributoId = rows[0].id;
+  }
+
+  if (!varianteValor) return { atributoId, varianteId: null };
+
+  const { rows: exv } = await client.query(
+    `SELECT id FROM variantes_atributo
+     WHERE atributo_id = $1 AND LOWER(valor) = LOWER($2) AND activo = true
+     ORDER BY id LIMIT 1`,
+    [atributoId, varianteValor]
+  );
+  let varianteId = exv[0]?.id;
+  if (!varianteId) {
+    const { rows } = await client.query(
+      `INSERT INTO variantes_atributo (atributo_id, valor, stock, stock_minimo)
+       VALUES ($1, $2, 0, 0) RETURNING id`,
+      [atributoId, String(varianteValor).trim()]
+    );
+    varianteId = rows[0].id;
+  }
+  return { atributoId, varianteId };
+};
+
+/** Mueve stock en la HOJA correcta y deja el producto recalculado. */
+const _moverStockNodo = async (client, { productoId, atributoId, varianteId }, delta) => {
+  if (varianteId) {
+    await client.query('UPDATE variantes_atributo SET stock = stock + $1 WHERE id = $2', [delta, varianteId]);
+  } else if (atributoId) {
+    await client.query('UPDATE atributos_producto SET stock = stock + $1 WHERE id = $2', [delta, atributoId]);
+  } else {
+    await trasladosRepo.ajustarStockEnTransaccion(client, productoId, delta);
+    return;
+  }
+  await variantesRepo.sincronizarStockProductoEnTx(client, productoId);
+};
+
+/** Escribe el costo del valor interno en la hoja, y lo refleja en el padre. */
+const _fijarCostoNodo = async (client, { productoId, atributoId, varianteId }, costo) => {
+  if (varianteId) {
+    await client.query('UPDATE variantes_atributo SET costo_unitario = $1 WHERE id = $2', [costo, varianteId]);
+  } else if (atributoId) {
+    await client.query('UPDATE atributos_producto SET costo_unitario = $1 WHERE id = $2', [costo, atributoId]);
+  }
+  // El producto refleja el último costo conocido, igual que hace el módulo de
+  // variantes: sirve de base cuando alguien mira el producto sin abrir el árbol.
+  await client.query('UPDATE productos_cantidad SET costo_unitario = $1 WHERE id = $2', [costo, productoId]);
+};
+
+/** Stock actual de la hoja, para el costo promedio ponderado del destino. */
+const _stockYCostoNodo = async (client, { productoId, atributoId, varianteId }) => {
+  if (varianteId) {
+    const { rows } = await client.query(
+      `SELECT stock, COALESCE(costo_unitario, 0) AS costo FROM variantes_atributo WHERE id = $1 FOR UPDATE`,
+      [varianteId]);
+    return { stock: Number(rows[0]?.stock ?? 0), costo: Number(rows[0]?.costo ?? 0) };
+  }
+  if (atributoId) {
+    const { rows } = await client.query(
+      `SELECT stock, COALESCE(costo_unitario, 0) AS costo FROM atributos_producto WHERE id = $1 FOR UPDATE`,
+      [atributoId]);
+    return { stock: Number(rows[0]?.stock ?? 0), costo: Number(rows[0]?.costo ?? 0) };
+  }
+  const { rows } = await client.query(
+    `SELECT stock, COALESCE(costo_unitario, 0) AS costo FROM productos_cantidad WHERE id = $1 FOR UPDATE`,
+    [productoId]);
+  return { stock: Number(rows[0]?.stock ?? 0), costo: Number(rows[0]?.costo ?? 0) };
+};
+
 /**
  * Valor con el que sale una línea de la remisión.
  *
@@ -420,32 +625,36 @@ const despachar = async (req, {
         const cant = Number(l.cantidad);
         if (!cant || cant < 1) throw { status: 400, message: 'Cantidad inválida' };
 
-        const { rows } = await client.query(`
-          SELECT id, nombre, stock, COALESCE(costo_unitario, 0) AS costo_unitario
-          FROM productos_cantidad
-          WHERE id = $1 AND sucursal_id = $2 AND activo = true
-          FOR UPDATE
-        `, [l.producto_id, origenId]);
-        if (!rows.length) throw { status: 404, message: 'Producto no encontrado en la bodega' };
-        const p = rows[0];
-        if (p.stock < cant) {
-          throw { status: 400, message: `Stock insuficiente de "${p.nombre}". Hay ${p.stock}, pides ${cant}` };
+        // El stock y el costo salen del NODO, no del producto: con variantes
+        // activas `productos_cantidad.stock` es un derivado y descontarlo ahí
+        // deja el inventario descuadrado contra sus propias variantes.
+        const nodo = await _resolverNodoOrigen(client, {
+          productoId: l.producto_id, atributoId: l.atributo_id,
+          varianteId: l.variante_id, sucursalId: origenId,
+        });
+        if (nodo.stock < cant) {
+          throw { status: 400, message: `Stock insuficiente de "${nodo.etiqueta}". Hay ${nodo.stock}, pides ${cant}` };
         }
 
         const destinoCantidad = await _destinoElegido(client, {
-          tipo: 'cantidad', productoOrigenId: p.id,
+          tipo: 'cantidad', productoOrigenId: nodo.productoId,
           sucursalDestinoId: destinoId, eleccionUsuario: l.producto_destino_id,
         });
 
-        const valorCantidad = _valorLinea(p.costo_unitario, l.valor_interno);
-        if (valorCantidad === 0) enCero.push(p.nombre);
+        const valorCantidad = _valorLinea(nodo.costo, l.valor_interno);
+        if (valorCantidad === 0) enCero.push(nodo.etiqueta);
         await repo.insertarLineaRemision(client, {
           remision_id: remision.id, tipo: 'cantidad',
-          producto_origen_id: p.id, cantidad: cant,
+          producto_origen_id: nodo.productoId, cantidad: cant,
           producto_destino_id: destinoCantidad,
+          atributo_origen_id: nodo.atributoId,
+          variante_origen_id: nodo.varianteId,
           valor_interno: valorCantidad,
           estado_linea: 'Pendiente',
-          nombre_producto: p.nombre,
+          // Con la variante en el nombre: es lo que ve quien recibe y quien
+          // revisa el envío, y sin ella dos líneas del mismo producto en tallas
+          // distintas se ven idénticas.
+          nombre_producto: nodo.etiqueta,
         });
       } else {
         throw { status: 400, message: `Tipo de línea inválido: ${l.tipo}` };
@@ -586,47 +795,56 @@ const _ejecutarRecepcion = async (client, {
       );
       if (recibida <= 0) { idsFaltante.push(id); continue; }
 
-      const { rows } = await client.query(
-        `SELECT id, nombre, stock, COALESCE(costo_unitario, 0) AS costo_unitario
-         FROM productos_cantidad WHERE id = $1 FOR UPDATE`,
-        [l.producto_origen_id]
-      );
-      if (!rows.length) throw { status: 404, message: `Producto "${l.nombre_producto}" ya no existe en la bodega` };
-      if (rows[0].stock < recibida) {
-        throw { status: 409, message: `Stock insuficiente de "${rows[0].nombre}" en la bodega (hay ${rows[0].stock})` };
+      // El nodo que salió de la bodega. La línea lo guardó al despachar; una
+      // línea vieja (sin nodo) sigue significando "el producto entero".
+      const nodoOrigen = await _resolverNodoOrigen(client, {
+        productoId: l.producto_origen_id, atributoId: l.atributo_origen_id,
+        varianteId: l.variante_origen_id, sucursalId: origenId,
+      });
+      if (nodoOrigen.stock < recibida) {
+        throw { status: 409, message: `Stock insuficiente de "${nodoOrigen.etiqueta}" en la bodega (hay ${nodoOrigen.stock})` };
       }
 
       const productoDestinoId = await _resolverProductoCantidadDestino(
         client, l.producto_origen_id, destinoId, negocioId, l.producto_destino_id
       );
+      // El mismo nodo bajo el producto del destino; se crea si no existía.
+      const nodoDestino = {
+        productoId: productoDestinoId,
+        ...(await _resolverNodoDestino(client, {
+          productoDestinoId, sucursalDestinoId: destinoId,
+          atributoValor: nodoOrigen.atributoValor, varianteValor: nodoOrigen.varianteValor,
+        })),
+      };
 
-      // Costo promedio ponderado en el destino. El flujo viejo de traslados NO
-      // hace esto y desvía el costo del destino; aquí se hace bien porque de
-      // ese costo depende la utilidad que reportará el local.
-      const { rows: dest } = await client.query(
-        `SELECT stock, COALESCE(costo_unitario, 0) AS costo_unitario
-         FROM productos_cantidad WHERE id = $1 FOR UPDATE`,
-        [productoDestinoId]
-      );
+      // Costo promedio ponderado EN EL NODO del destino. El flujo viejo de
+      // traslados no lo hace y desvía el costo; aquí importa doble, porque de
+      // ese costo salen la utilidad que reporta el local y la base de su tarifa.
+      const previo = await _stockYCostoNodo(client, nodoDestino);
       const nuevoCosto = calcularCostoPromedio(
-        Number(dest[0].stock), Number(dest[0].costo_unitario),
-        recibida, _num(l.valor_interno)
+        previo.stock, previo.costo, recibida, _num(l.valor_interno)
       );
 
-      await trasladosRepo.ajustarStockEnTransaccion(client, l.producto_origen_id, -recibida);
-      await trasladosRepo.ajustarStockEnTransaccion(client, productoDestinoId,     recibida);
+      await _moverStockNodo(client, nodoOrigen, -recibida);
+      await _moverStockNodo(client, nodoDestino,  recibida);
+      await _fijarCostoNodo(client, nodoDestino, nuevoCosto);
+
       await client.query(
-        `UPDATE productos_cantidad SET costo_unitario = $2 WHERE id = $1`,
-        [productoDestinoId, nuevoCosto]
+        `UPDATE lineas_remision
+         SET atributo_destino_id = $2, variante_destino_id = $3
+         WHERE id = $1`,
+        [id, nodoDestino.atributoId, nodoDestino.varianteId]
       );
 
       await trasladosRepo.insertarHistorialEnTransaccion(client, {
         producto_id: l.producto_origen_id, sucursal_id: origenId,
+        atributo_id: nodoOrigen.atributoId, variante_id: nodoOrigen.varianteId,
         cantidad: -recibida, costo_unitario: _num(l.valor_interno),
         notas: `Remisión #${remision.numero ?? remision.id} → ${destinoId}`,
       });
       await trasladosRepo.insertarHistorialEnTransaccion(client, {
         producto_id: productoDestinoId, sucursal_id: destinoId,
+        atributo_id: nodoDestino.atributoId, variante_id: nodoDestino.varianteId,
         cantidad: recibida, costo_unitario: _num(l.valor_interno),
         notas: `Remisión #${remision.numero ?? remision.id} ← bodega`,
       });
@@ -888,26 +1106,33 @@ const previsualizarDevolucion = async (req, { lineas }) => {
           bloqueado: s.vendido ? 'Ya fue vendido' : s.prestado ? 'Está prestado' : null,
         });
       } else {
-        const { rows } = await client.query(
-          `SELECT id, nombre, codigo, stock, COALESCE(costo_unitario, 0) AS costo_unitario
-           FROM productos_cantidad WHERE id = $1 AND sucursal_id = $2 AND activo = true`,
-          [l.producto_id, origenId]
-        );
-        if (!rows.length) { items.push({ ...l, error: 'No está en este local' }); continue; }
-        const p = rows[0];
+        // Se devuelve el NODO que el carrito trae (una talla), no el producto:
+        // el stock que se puede devolver es el de esa talla.
+        let nodo;
+        try {
+          nodo = await _resolverNodoOrigen(client, {
+            productoId: l.producto_id, atributoId: l.atributo_id,
+            varianteId: l.variante_id, sucursalId: origenId,
+          });
+        } catch (e) {
+          items.push({ ...l, error: e.message || 'No está en este local' });
+          continue;
+        }
         // Fungible: no se sabe si ESTA unidad vino de bodega, pero sí si quedan
         // unidades pendientes de las que la bodega mandó. Con eso se propone un
         // origen; el usuario puede cambiarlo. El valor que se ofrece es el de
         // la remisión (lo que le cobraron), no el costo del local.
-        const cant = await _origenUnidadCantidad(client, p.id, origenId, negocioId);
+        const cant = await _origenUnidadCantidad(client, nodo.productoId, origenId, negocioId);
         items.push({
-          tipo: 'cantidad', producto_id: p.id, nombre: p.nombre, codigo: p.codigo,
-          cantidad: Math.min(Number(l.cantidad) || 1, Number(p.stock)),
-          stock: Number(p.stock),
+          tipo: 'cantidad', producto_id: nodo.productoId,
+          atributo_id: nodo.atributoId, variante_id: nodo.varianteId,
+          nombre: nodo.etiqueta, codigo: null,
+          cantidad: Math.min(Number(l.cantidad) || 1, nodo.stock),
+          stock: nodo.stock,
           origen: cant.de_bodega ? 'bodega' : 'propio',
           pendiente_de_bodega: cant.pendiente,
-          valor_interno: cant.de_bodega ? cant.valor_unitario : _num(p.costo_unitario),
-          bloqueado: Number(p.stock) <= 0 ? 'Sin stock' : null,
+          valor_interno: cant.de_bodega ? cant.valor_unitario : nodo.costo,
+          bloqueado: nodo.stock <= 0 ? 'Sin stock' : null,
         });
       }
     }
@@ -987,15 +1212,16 @@ const devolver = async (req, { lineas, notas, clave_idempotencia, motivo }) => {
       } else {
         const cant = Number(l.cantidad);
         if (!cant || cant < 1) throw { status: 400, message: 'Cantidad inválida' };
-        const { rows } = await client.query(
-          `SELECT id, nombre, stock, COALESCE(costo_unitario, 0) AS costo_unitario
-           FROM productos_cantidad WHERE id = $1 AND sucursal_id = $2 FOR UPDATE`,
-          [l.producto_id, origenId]
-        );
-        if (!rows.length) throw { status: 404, message: 'Producto no encontrado en este local' };
-        if (rows[0].stock < cant) {
-          throw { status: 400, message: `Stock insuficiente de "${rows[0].nombre}". Hay ${rows[0].stock}` };
+        // Se devuelve un NODO, igual que se despachó uno: con variantes activas
+        // el local tiene que decir qué talla está devolviendo.
+        const nodo = await _resolverNodoOrigen(client, {
+          productoId: l.producto_id, atributoId: l.atributo_id,
+          varianteId: l.variante_id, sucursalId: origenId,
+        });
+        if (nodo.stock < cant) {
+          throw { status: 400, message: `Stock insuficiente de "${nodo.etiqueta}". Hay ${nodo.stock}` };
         }
+        const rows = [{ id: nodo.productoId, nombre: nodo.etiqueta, costo_unitario: nodo.costo }];
 
         // Si el usuario no dice de dónde viene, se resuelve con lo que la
         // bodega le mandó y todavía no le ha devuelto. Antes el default era
@@ -1013,12 +1239,14 @@ const devolver = async (req, { lineas, notas, clave_idempotencia, motivo }) => {
 
         await repo.insertarLineaRemision(client, {
           remision_id: remision.id, tipo: 'cantidad',
-          producto_origen_id: l.producto_id, cantidad: cant,
+          producto_origen_id: nodo.productoId, cantidad: cant,
+          atributo_origen_id: nodo.atributoId,
+          variante_origen_id: nodo.varianteId,
           valor_interno: _valorLinea(base, l.valor_interno),
           estado_linea: 'Pendiente',
           origen_unidad: origenUnidad,
           genera_saldo_favor: l.genera_saldo_favor === true,
-          nombre_producto: rows[0].nombre,
+          nombre_producto: nodo.etiqueta,
         });
       }
     }
@@ -1150,41 +1378,45 @@ const confirmarDevolucion = async (req, remisionId, { lineas_recibidas } = {}) =
 
       } else {
         const cant = Number(l.cantidad);
-        const { rows } = await client.query(
-          `SELECT id, nombre, stock, COALESCE(costo_unitario, 0) AS costo_unitario
-           FROM productos_cantidad WHERE id = $1 FOR UPDATE`,
-          [l.producto_origen_id]
-        );
-        if (!rows.length) throw { status: 404, message: `"${l.nombre_producto}" ya no existe en el local` };
-        if (rows[0].stock < cant) {
-          throw { status: 409, message: `Stock insuficiente de "${rows[0].nombre}" en el local (hay ${rows[0].stock})` };
+        // La mercancía vuelve desde el mismo NODO del que salió (la línea de la
+        // devolución lo guardó al crearse), no desde el producto entero.
+        const nodoOrigen = await _resolverNodoOrigen(client, {
+          productoId: l.producto_origen_id, atributoId: l.atributo_origen_id,
+          varianteId: l.variante_origen_id, sucursalId: localId,
+        });
+        if (nodoOrigen.stock < cant) {
+          throw { status: 409, message: `Stock insuficiente de "${nodoOrigen.etiqueta}" en el local (hay ${nodoOrigen.stock})` };
         }
         const productoDestinoId = await _resolverProductoCantidadDestino(
           client, l.producto_origen_id, bodegaId, negocioId
         );
+        const nodoDestino = {
+          productoId: productoDestinoId,
+          ...(await _resolverNodoDestino(client, {
+            productoDestinoId, sucursalDestinoId: bodegaId,
+            atributoValor: nodoOrigen.atributoValor, varianteValor: nodoOrigen.varianteValor,
+          })),
+        };
 
         // Costo promedio ponderado en la bodega al recibir de vuelta.
-        const { rows: dest } = await client.query(
-          `SELECT stock, COALESCE(costo_unitario, 0) AS costo_unitario
-           FROM productos_cantidad WHERE id = $1 FOR UPDATE`, [productoDestinoId]
-        );
+        const previo = await _stockYCostoNodo(client, nodoDestino);
         const nuevoCosto = calcularCostoPromedio(
-          Number(dest[0].stock), Number(dest[0].costo_unitario), cant, _num(l.valor_interno)
+          previo.stock, previo.costo, cant, _num(l.valor_interno)
         );
 
-        await trasladosRepo.ajustarStockEnTransaccion(client, l.producto_origen_id, -cant);
-        await trasladosRepo.ajustarStockEnTransaccion(client, productoDestinoId, cant);
-        await client.query(
-          `UPDATE productos_cantidad SET costo_unitario = $2 WHERE id = $1`,
-          [productoDestinoId, nuevoCosto]
-        );
+        await _moverStockNodo(client, nodoOrigen, -cant);
+        await _moverStockNodo(client, nodoDestino,  cant);
+        await _fijarCostoNodo(client, nodoDestino, nuevoCosto);
+
         await trasladosRepo.insertarHistorialEnTransaccion(client, {
           producto_id: l.producto_origen_id, sucursal_id: localId,
+          atributo_id: nodoOrigen.atributoId, variante_id: nodoOrigen.varianteId,
           cantidad: -cant, costo_unitario: _num(l.valor_interno),
           notas: `Devolución #${remision.numero ?? remision.id} → bodega`,
         });
         await trasladosRepo.insertarHistorialEnTransaccion(client, {
           producto_id: productoDestinoId, sucursal_id: bodegaId,
+          atributo_id: nodoDestino.atributoId, variante_id: nodoDestino.varianteId,
           cantidad: cant, costo_unitario: _num(l.valor_interno),
           notas: `Devolución #${remision.numero ?? remision.id} ← ${remision.sucursal_origen_nombre}`,
         });
@@ -1195,8 +1427,11 @@ const confirmarDevolucion = async (req, remisionId, { lineas_recibidas } = {}) =
           cantidad: cant, nombre_producto: l.nombre_producto,
         });
         await client.query(
-          `UPDATE lineas_remision SET producto_destino_id = $2, cantidad_recibida = $3 WHERE id = $1`,
-          [id, productoDestinoId, cant]
+          `UPDATE lineas_remision
+           SET producto_destino_id = $2, cantidad_recibida = $3,
+               atributo_destino_id = $4, variante_destino_id = $5
+           WHERE id = $1`,
+          [id, productoDestinoId, cant, nodoDestino.atributoId, nodoDestino.varianteId]
         );
       }
 
@@ -2786,11 +3021,18 @@ const _formatoSerial = (s) => ({
   cantidad: 1,
 });
 
+// El buscador devuelve NODOS. `variante_label` viene con la talla cuando la hay;
+// el `nombre` la incluye para que dos tallas del mismo producto no se vean
+// idénticas en la lista del despacho.
 const _formatoCantidad = (p) => ({
   tipo: 'cantidad',
   producto_id: p.producto_id,
+  atributo_id: p.atributo_id ?? null,
+  variante_id: p.variante_id ?? null,
+  variante_label: p.variante_label ?? null,
   codigo: p.codigo || null,
-  nombre: p.nombre,
+  nombre: p.variante_label ? `${p.nombre} / ${p.variante_label}` : p.nombre,
+  nombre_base: p.nombre,
   unidad_medida: p.unidad_medida || 'unidad',
   stock: Number(p.stock || 0),
   valor_interno: _num(p.costo_unitario),

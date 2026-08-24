@@ -38,7 +38,11 @@ import {
 // valor de remisión le cobraría de más al local.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const claveDe = (i) => (i.tipo === 'serial' ? `s-${i.serial_id}` : `c-${i.producto_id}`);
+// Identifica el NODO, no el producto: dos tallas del mismo producto son dos
+// líneas distintas del envío, con su propio stock y su propio valor.
+const claveDe = (i) => (i.tipo === 'serial'
+  ? `s-${i.serial_id}`
+  : `c-${i.producto_id}-${i.atributo_id ?? ''}-${i.variante_id ?? ''}`);
 
 // ── Valor de la línea: visible y editable ───────────────────────────────────
 // Es lo que el local tendrá que liquidar cuando venda. Viene con el costo real
@@ -125,10 +129,10 @@ function PanelAccesorios({ yaEnLista, onAgregar, onCerrar }) {
             {q ? 'Nada con ese nombre o código' : 'La bodega no tiene accesorios con stock'}
           </p>
         ) : accesorios.map((a) => {
-          const puesto = yaEnLista.has(`c-${a.producto_id}`);
+          const puesto = yaEnLista.has(claveDe(a));
           return (
             <button
-              key={a.producto_id}
+              key={claveDe(a)}
               onClick={() => onAgregar(a)}
               className="w-full flex items-center gap-3 px-3 py-2.5 border-b border-gray-50
                 last:border-0 hover:bg-blue-50 transition-colors text-left"
@@ -240,7 +244,13 @@ export function ModalDespachar({ locales, itemsIniciales = null, descartados = [
   const construirLineas = () => items.map((i) => {
     const base = i.tipo === 'serial'
       ? { tipo: 'serial',   serial_id:   i.serial_id }
-      : { tipo: 'cantidad', producto_id: i.producto_id, cantidad: i.cantidad || 1 };
+      : {
+          tipo: 'cantidad', producto_id: i.producto_id, cantidad: i.cantidad || 1,
+          // Sin esto el backend no sabe qué talla sale, y con variantes activas
+          // la rechaza (VARIANTE_REQUERIDA).
+          atributo_id: i.atributo_id ?? null,
+          variante_id: i.variante_id ?? null,
+        };
 
     // Valor con el que sale la línea (editable en pantalla).
     base.valor_interno = Number(i.valor_interno || 0);

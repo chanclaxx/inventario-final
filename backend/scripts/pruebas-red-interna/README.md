@@ -37,6 +37,7 @@ node scripts/pruebas-red-interna/18-importacion.mjs
 node scripts/pruebas-red-interna/19-ordenes-compra.mjs
 node scripts/pruebas-red-interna/20-borradores.mjs
 node scripts/pruebas-red-interna/23-costo-serial-en-local.mjs
+node scripts/pruebas-red-interna/24-remision-por-variante.mjs
 ```
 
 > `20-borradores` verifica sobre todo una invariante negativa: guardar un
@@ -46,9 +47,13 @@ node scripts/pruebas-red-interna/23-costo-serial-en-local.mjs
 > la reserva dejó de ser blanda y la mercancía apalabrada está desapareciendo de
 > reportes, catálogo y alertas de stock.
 
-> Las suites cargan **las dos migraciones**: `20260725_red_interna.sql` y
-> `20260726_red_interna_v2.sql`. Si se agrega una tercera hay que sumarla a
-> todas, o fallarán con columnas inexistentes.
+> Las suites cargan **toda la cadena de migraciones** de la red interna, hoy
+> seis: `20260725_red_interna`, `20260726_red_interna_v2`,
+> `20260822_red_interna_envios`, `20260823_red_interna_control`,
+> `20260823_red_interna_cargos_pagables` y `20260823_remision_variantes`. Si se
+> agrega otra hay que sumarla a **todas** las suites que carguen la cadena, o
+> fallarán con columnas inexistentes — pasó al añadir la de variantes: catorce
+> suites reventaron con `column "atributo_origen_id" does not exist`.
 
 > **Todas** las suites cargan además `esquema-completo.sql`, que **complementa**
 > a `esquema.sql` en vez de reemplazarlo. Hace falta en todas desde que el
@@ -446,6 +451,21 @@ Las cuatro barandas importan tanto como el arreglo: la BODEGA sigue usando su
 costo, una unidad PROPIA del local (retoma) también, un negocio SIN red interna
 no cambia en nada, y una remisión anulada o no recibida no cuenta. Contra el
 código anterior esta suite falla 3 de 7; las 4 barandas pasan en ambos.
+
+### `24-remision-por-variante.mjs` — 24 verificaciones
+
+Con la feature "Variantes" activa el stock NO vive en `productos_cantidad.stock`:
+ese pasa a ser un derivado (Σ de sus hojas). La red interna se escribió antes y
+movía el nivel de arriba, con cuatro daños silenciosos: no se podía decir qué
+talla se despachaba; el producto quedaba descuadrado contra sus variantes en las
+dos sedes; el valor interno se escribía como costo del producto y la tarifa del
+local se quedaba sin base; y el primer ajuste sobre cualquier variante borraba lo
+recibido mientras el local lo seguía debiendo.
+
+Recorre el día completo —despacho → recepción → tarifa → ajuste → devolución— y
+comprueba el invariante `producto = Σ variantes` en las dos sucursales **en cada
+paso**. Las dos primeras secciones son las barandas: despachar sin decir la talla
+se rechaza, y un producto SIN variantes se sigue despachando exactamente igual.
 
 ## Nota sobre `esquema.sql`
 

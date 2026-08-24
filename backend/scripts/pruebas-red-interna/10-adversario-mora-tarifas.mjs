@@ -81,6 +81,7 @@ await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260726_red_interna_v
 await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260822_red_interna_envios.sql'), 'utf8'));
 await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260823_red_interna_control.sql'), 'utf8'));
 await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260823_red_interna_cargos_pagables.sql'), 'utf8'));
+await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260823_remision_variantes.sql'), 'utf8'));
 await db.exec(readFileSync(path.join(RAIZ, 'migrations/20260730_mora_credito.sql'), 'utf8'));
 // Ver la nota en 09: el interés vive en la misma tabla, así que su migración
 // hace falta. Los casos adversarios de abajo no cambian ni una cifra.

@@ -90,6 +90,24 @@ const aplicarMigraciones = async (client) => {
       WHERE codigo IS NOT NULL AND activo;
   `);
 
+  // La línea de remisión apunta a un NODO — ver migrations/20260823_remision_variantes.sql
+  // Sin esto, despachar un producto por variantes movía stock y costo en el
+  // nivel del producto: el inventario quedaba descuadrado en las dos sedes, la
+  // tarifa del local se quedaba sin base, y el primer ajuste sobre cualquier
+  // variante borraba lo recibido mientras el local lo seguía debiendo.
+  await migrar(client, 'Variantes en remisiones', `
+    ALTER TABLE IF EXISTS lineas_remision ADD COLUMN IF NOT EXISTS atributo_origen_id  INT;
+    ALTER TABLE IF EXISTS lineas_remision ADD COLUMN IF NOT EXISTS variante_origen_id  INT;
+    ALTER TABLE IF EXISTS lineas_remision ADD COLUMN IF NOT EXISTS atributo_destino_id INT;
+    ALTER TABLE IF EXISTS lineas_remision ADD COLUMN IF NOT EXISTS variante_destino_id INT;
+    CREATE INDEX IF NOT EXISTS idx_lineas_remision_atributo_origen
+      ON lineas_remision (atributo_origen_id) WHERE atributo_origen_id IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_lineas_remision_atributo_destino
+      ON lineas_remision (atributo_destino_id) WHERE atributo_destino_id IS NOT NULL;
+    ALTER TABLE IF EXISTS historial_stock_cantidad ADD COLUMN IF NOT EXISTS atributo_id INT;
+    ALTER TABLE IF EXISTS historial_stock_cantidad ADD COLUMN IF NOT EXISTS variante_id INT;
+  `);
+
   // Ubicación espacial de productos — ver migrations/20260730_ubicacion_producto.sql
   //
   // 100% aditiva e idempotente. Columnas nullable: un negocio sin la feature no

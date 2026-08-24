@@ -25,7 +25,11 @@ import {
 // confirma que la recibió, igual que un despacho al revés.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const clave = (i) => (i.tipo === 'serial' ? `s-${i.serial_id}` : `c-${i.producto_id}`);
+// Identifica el NODO: con variantes activas se devuelve una talla, no "el
+// producto", y dos tallas del mismo producto son dos líneas distintas.
+const clave = (i) => (i.tipo === 'serial'
+  ? `s-${i.serial_id}`
+  : `c-${i.producto_id}-${i.atributo_id ?? ''}-${i.variante_id ?? ''}`);
 
 function FilaPropia({ item, decision, onDecidir }) {
   const compra = decision?.saldo_favor === true;
@@ -82,6 +86,7 @@ export function ModalDevolver({ items, bodegaNombre = 'la bodega', onCerrar, onL
       items.map((i) => ({
         tipo: i.tipo, serial_id: i.serial_id,
         producto_id: i.producto_id, cantidad: i.cantidad || 1,
+        atributo_id: i.atributo_id ?? null, variante_id: i.variante_id ?? null,
       }))
     ).then((r) => r.data.data),
     onError: (err) => setError(err.response?.data?.error || 'No se pudo revisar la devolución'),
@@ -97,6 +102,8 @@ export function ModalDevolver({ items, bodegaNombre = 'la bodega', onCerrar, onL
         tipo: i.tipo,
         serial_id: i.serial_id,
         producto_id: i.producto_id,
+        atributo_id: i.atributo_id ?? null,
+        variante_id: i.variante_id ?? null,
         cantidad: i.cantidad || 1,
         nombre_producto: i.nombre,
         // El saldo a favor solo aplica a lo propio, y solo si se pidió.

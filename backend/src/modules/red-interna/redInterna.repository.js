@@ -1024,16 +1024,22 @@ const insertarLineaRemision = async (client, l) => {
     INSERT INTO lineas_remision
       (remision_id, tipo, serial_id, imei, producto_origen_id, producto_destino_id,
        cantidad, cantidad_recibida, valor_interno, estado_linea, nombre_producto,
-       origen_unidad, genera_saldo_favor, remision_tipo)
+       origen_unidad, genera_saldo_favor, remision_tipo,
+       atributo_origen_id, variante_origen_id, atributo_destino_id, variante_destino_id)
     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
-            COALESCE($14, (SELECT tipo FROM remisiones WHERE id = $1)))
+            COALESCE($14, (SELECT tipo FROM remisiones WHERE id = $1)),
+            $15, $16, $17, $18)
     RETURNING *
   `, [l.remision_id, l.tipo, l.serial_id || null, l.imei || null,
       l.producto_origen_id || null, l.producto_destino_id || null,
       l.cantidad || 1, l.cantidad_recibida ?? null, l.valor_interno || 0,
       l.estado_linea || 'Pendiente', l.nombre_producto || null,
       l.origen_unidad || null, l.genera_saldo_favor === true,
-      l.remision_tipo || null]);
+      l.remision_tipo || null,
+      // El NODO que se mueve. NULL = la línea es del producto entero, que es lo
+      // que significaban todas las líneas antes de 20260823_remision_variantes.
+      l.atributo_origen_id || null, l.variante_origen_id || null,
+      l.atributo_destino_id || null, l.variante_destino_id || null]);
   return rows[0];
 };
 
@@ -1231,18 +1237,55 @@ const marcarLineas = async (client, ids, estado, cantidades = null) => {
 
 // Producto de cantidad por CÓDIGO único (feature `codigo_producto_activo`).
 // Permite despachar accesorios con el mismo lector que se usa para los IMEI.
+// Lo escaneable es el NODO: con variantes activas el código vive en la talla,
+// no en el producto. Devuelve atributo_id/variante_id para que la línea de la
+// remisión sepa exactamente qué se despacha. Si el mismo código apareciera en
+// dos niveles, gana el más específico (`orden DESC`).
 const buscarCantidadPorCodigo = async (negocioId, sucursalOrigenId, codigo) => {
   const { rows } = await pool.query(`
-    SELECT pc.id AS producto_id, pc.nombre, pc.codigo, pc.stock,
-           COALESCE(pc.costo_unitario, 0) AS costo_unitario,
-           pc.unidad_medida, pc.linea_id
-    FROM productos_cantidad pc
-    JOIN sucursales su ON su.id = pc.sucursal_id
-    WHERE su.negocio_id = $1
-      AND pc.sucursal_id = $2
-      AND pc.activo = true
-      AND UPPER(TRIM(pc.codigo)) = UPPER(TRIM($3))
-    ORDER BY pc.id LIMIT 1
+    SELECT * FROM (
+      SELECT pc.id AS producto_id, NULL::int AS atributo_id, NULL::int AS variante_id,
+             pc.nombre, NULL::text AS variante_label, pc.codigo, pc.stock,
+             COALESCE(pc.costo_unitario, 0) AS costo_unitario,
+             pc.unidad_medida, pc.linea_id, 0 AS orden
+      FROM productos_cantidad pc
+      JOIN sucursales su ON su.id = pc.sucursal_id
+      WHERE su.negocio_id = $1 AND pc.sucursal_id = $2 AND pc.activo = true
+        AND UPPER(TRIM(pc.codigo)) = UPPER(TRIM($3))
+        AND NOT EXISTS (SELECT 1 FROM atributos_producto x
+                        WHERE x.producto_id = pc.id AND x.activo = true)
+
+      UNION ALL
+
+      SELECT pc.id, ap.id, NULL::int,
+             pc.nombre, ap.valor, ap.codigo, ap.stock,
+             COALESCE(ap.costo_unitario, pc.costo_unitario, 0),
+             pc.unidad_medida, pc.linea_id, 1
+      FROM atributos_producto ap
+      JOIN productos_cantidad pc ON pc.id = ap.producto_id
+      JOIN sucursales su ON su.id = ap.sucursal_id
+      WHERE su.negocio_id = $1 AND ap.sucursal_id = $2
+        AND ap.activo = true AND pc.activo = true
+        AND UPPER(TRIM(ap.codigo)) = UPPER(TRIM($3))
+        AND NOT EXISTS (SELECT 1 FROM variantes_atributo v
+                        WHERE v.atributo_id = ap.id AND v.activo = true)
+
+      UNION ALL
+
+      SELECT pc.id, ap.id, v.id,
+             pc.nombre, ap.valor || ' / ' || v.valor, v.codigo, v.stock,
+             COALESCE(v.costo_unitario, ap.costo_unitario, pc.costo_unitario, 0),
+             pc.unidad_medida, pc.linea_id, 2
+      FROM variantes_atributo v
+      JOIN atributos_producto ap ON ap.id = v.atributo_id
+      JOIN productos_cantidad pc ON pc.id = ap.producto_id
+      JOIN sucursales su ON su.id = ap.sucursal_id
+      WHERE su.negocio_id = $1 AND ap.sucursal_id = $2
+        AND v.activo = true AND ap.activo = true AND pc.activo = true
+        AND UPPER(TRIM(v.codigo)) = UPPER(TRIM($3))
+    ) nodos
+    ORDER BY orden DESC, producto_id
+    LIMIT 1
   `, [negocioId, sucursalOrigenId, codigo]);
   return rows[0] || null;
 };
@@ -1251,20 +1294,63 @@ const buscarCantidadPorCodigo = async (negocioId, sucursalOrigenId, codigo) => {
 // código, o cuando se prefiere buscar por nombre).
 const buscarCantidadDisponible = async (negocioId, sucursalOrigenId, q = '') => {
   const filtro = (q || '').trim().toLowerCase().replace(/[%_\\]/g, '\\$&').slice(0, 60);
+  // Devuelve NODOS, no productos: un producto con variantes se lista por talla,
+  // porque es la talla la que tiene el stock y la que se despacha. Un producto
+  // sin variantes se lista tal cual, como siempre. Cada rama excluye los nodos
+  // que tienen hijos activos: esos son contenedores, no cosas despachables.
   const { rows } = await pool.query(`
-    SELECT pc.id AS producto_id, pc.nombre, pc.codigo, pc.stock,
-           COALESCE(pc.costo_unitario, 0) AS costo_unitario,
-           pc.unidad_medida, pc.linea_id, lp.nombre AS linea_nombre
-    FROM productos_cantidad pc
-    JOIN sucursales su           ON su.id = pc.sucursal_id
-    LEFT JOIN lineas_producto lp ON lp.id = pc.linea_id
-    WHERE su.negocio_id = $1
-      AND pc.sucursal_id = $2
-      AND pc.activo = true
-      AND pc.stock > 0
-      AND ($3 = '' OR LOWER(pc.nombre) LIKE '%' || $3 || '%' ESCAPE '\\'
-                   OR LOWER(COALESCE(pc.codigo, '')) LIKE '%' || $3 || '%' ESCAPE '\\')
-    ORDER BY pc.nombre
+    SELECT * FROM (
+      SELECT pc.id AS producto_id, NULL::int AS atributo_id, NULL::int AS variante_id,
+             pc.nombre, NULL::text AS variante_label, pc.codigo, pc.stock,
+             COALESCE(pc.costo_unitario, 0) AS costo_unitario,
+             pc.unidad_medida, pc.linea_id, lp.nombre AS linea_nombre
+      FROM productos_cantidad pc
+      JOIN sucursales su           ON su.id = pc.sucursal_id
+      LEFT JOIN lineas_producto lp ON lp.id = pc.linea_id
+      WHERE su.negocio_id = $1 AND pc.sucursal_id = $2
+        AND pc.activo = true AND pc.stock > 0
+        AND NOT EXISTS (SELECT 1 FROM atributos_producto x
+                        WHERE x.producto_id = pc.id AND x.activo = true)
+        AND ($3 = '' OR LOWER(pc.nombre) LIKE '%' || $3 || '%' ESCAPE '\\'
+                     OR LOWER(COALESCE(pc.codigo, '')) LIKE '%' || $3 || '%' ESCAPE '\\')
+
+      UNION ALL
+
+      SELECT pc.id, ap.id, NULL::int,
+             pc.nombre, ap.valor, ap.codigo, ap.stock,
+             COALESCE(ap.costo_unitario, pc.costo_unitario, 0),
+             pc.unidad_medida, pc.linea_id, lp.nombre
+      FROM atributos_producto ap
+      JOIN productos_cantidad pc   ON pc.id = ap.producto_id
+      JOIN sucursales su           ON su.id = ap.sucursal_id
+      LEFT JOIN lineas_producto lp ON lp.id = pc.linea_id
+      WHERE su.negocio_id = $1 AND ap.sucursal_id = $2
+        AND ap.activo = true AND pc.activo = true AND ap.stock > 0
+        AND NOT EXISTS (SELECT 1 FROM variantes_atributo v
+                        WHERE v.atributo_id = ap.id AND v.activo = true)
+        AND ($3 = '' OR LOWER(pc.nombre) LIKE '%' || $3 || '%' ESCAPE '\\'
+                     OR LOWER(ap.valor)  LIKE '%' || $3 || '%' ESCAPE '\\'
+                     OR LOWER(COALESCE(ap.codigo, '')) LIKE '%' || $3 || '%' ESCAPE '\\')
+
+      UNION ALL
+
+      SELECT pc.id, ap.id, v.id,
+             pc.nombre, ap.valor || ' / ' || v.valor, v.codigo, v.stock,
+             COALESCE(v.costo_unitario, ap.costo_unitario, pc.costo_unitario, 0),
+             pc.unidad_medida, pc.linea_id, lp.nombre
+      FROM variantes_atributo v
+      JOIN atributos_producto ap   ON ap.id = v.atributo_id
+      JOIN productos_cantidad pc   ON pc.id = ap.producto_id
+      JOIN sucursales su           ON su.id = ap.sucursal_id
+      LEFT JOIN lineas_producto lp ON lp.id = pc.linea_id
+      WHERE su.negocio_id = $1 AND ap.sucursal_id = $2
+        AND v.activo = true AND ap.activo = true AND pc.activo = true AND v.stock > 0
+        AND ($3 = '' OR LOWER(pc.nombre) LIKE '%' || $3 || '%' ESCAPE '\\'
+                     OR LOWER(ap.valor)  LIKE '%' || $3 || '%' ESCAPE '\\'
+                     OR LOWER(v.valor)   LIKE '%' || $3 || '%' ESCAPE '\\'
+                     OR LOWER(COALESCE(v.codigo, '')) LIKE '%' || $3 || '%' ESCAPE '\\')
+    ) nodos
+    ORDER BY nombre, variante_label NULLS FIRST
     LIMIT 50
   `, [negocioId, sucursalOrigenId, filtro]);
   return rows;
