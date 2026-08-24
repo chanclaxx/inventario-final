@@ -20,6 +20,7 @@ import { useMora }        from '../../hooks/useMora';
 import { useInteres }     from '../../hooks/useInteres';
 import { SelectorCargos } from '../../components/ui/SelectorCargos';
 import { User, Users, Plus, Minus, ChevronLeft, Search, Bookmark } from 'lucide-react';
+import { ChipsVariante }        from '../../components/ui/ChipsVariante';
 import { InputMoneda } from '../../components/ui/InputMoneda';
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
@@ -244,20 +245,7 @@ function ResumenCarrito({ items, onActualizarPrecio, onActualizarCantidad, tarif
           {item.imei && (
             <p className="text-xs text-gray-400 font-mono">{item.imei}</p>
           )}
-          {(item.atributo_label || item.variante_label) && (
-            <div className="flex flex-wrap gap-1">
-              {item.atributo_label && (
-                <span className="text-xs bg-blue-50 text-blue-600 border border-blue-100 px-2 py-0.5 rounded-full">
-                  {item.atributo_label}
-                </span>
-              )}
-              {item.variante_label && (
-                <span className="text-xs bg-purple-50 text-purple-600 border border-purple-100 px-2 py-0.5 rounded-full">
-                  {item.variante_label}
-                </span>
-              )}
-            </div>
-          )}
+          <ChipsVariante item={item} />
           <div className="flex items-center gap-2">
             {item.tipo === 'cantidad' && (
               <div className="flex items-center gap-1">

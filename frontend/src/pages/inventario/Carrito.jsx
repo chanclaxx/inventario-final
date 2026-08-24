@@ -15,6 +15,7 @@ import useCarritoStore from '../../store/carritoStore';
 import { useTarifas }   from '../../hooks/useTarifas';
 import { SelectorTarifa, TarifaItem } from '../../components/ui/SelectorTarifa';
 import { BarraEscaneo }   from '../../components/ui/BarraEscaneo';
+import { ChipsVariante } from '../../components/ui/ChipsVariante';
 import { useEscanerCarrito } from '../../hooks/useEscanerCarrito';
 import { ModalTraslado } from './ModalTraslado';
 import { ModalDespachar } from '../red-interna/ModalDespachar';
@@ -283,20 +284,7 @@ export function Carrito({ onFacturar, onPrestar, onBorradorCargado, sinHeader = 
                           {item.imei}
                         </span>
                       )}
-                      {(item.atributo_label || item.variante_label) && (
-                        <div className="flex flex-wrap gap-1 mt-1">
-                          {item.atributo_label && (
-                            <span className="text-xs bg-blue-50 text-blue-600 border border-blue-100 px-2 py-0.5 rounded-full">
-                              {item.atributo_label}
-                            </span>
-                          )}
-                          {item.variante_label && (
-                            <span className="text-xs bg-purple-50 text-purple-600 border border-purple-100 px-2 py-0.5 rounded-full">
-                              {item.variante_label}
-                            </span>
-                          )}
-                        </div>
-                      )}
+                      <ChipsVariante item={item} className="mt-1" />
                     </div>
                     <button onClick={() => eliminarItem(item.key)}
                       className="text-gray-300 hover:text-red-400 transition-colors flex-shrink-0 p-0.5">

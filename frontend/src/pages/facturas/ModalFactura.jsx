@@ -28,6 +28,8 @@ import { useTarifas }        from '../../hooks/useTarifas';
 import { useMora }           from '../../hooks/useMora';
 import { useInteres }        from '../../hooks/useInteres';
 import { TarifaItem }        from '../../components/ui/SelectorTarifa';
+import { ChipsVariante }     from '../../components/ui/ChipsVariante';
+import { nombreConVariante } from '../../utils/variantes';
 import { SeccionCredito, CREDITO_VACIO } from './SeccionCredito';
 import {
   User, Users, Package, ShoppingBag,
@@ -109,9 +111,10 @@ function buildPayloadFactura({ tipoCliente, form, items, totalNeto, metodosSelec
   );
 
   const lineas = items.map((item) => {
-    const varLabel = [item.atributo_label, item.variante_label].filter(Boolean).join(' / ');
     return {
-      nombre_producto: varLabel ? `${item.nombre} (${varLabel})` : item.nombre,
+      // El nombre viaja con la variante pegada: es lo que verá la factura, el
+      // PDF y el reporte, donde ya no existe el carrito para desambiguar.
+      nombre_producto: nombreConVariante(item),
       imei:            item.imei        || null,
       producto_id:     item.imei ? null : (item.producto_id || null),
       atributo_id:     item.atributo_id || null,
@@ -1414,9 +1417,23 @@ export function ModalFactura({ open, onClose }) {
             <p className="text-xs font-medium text-gray-500 mb-1">Productos ({items.length})</p>
             {items.map((item) => (
               <div key={item.key} className="flex flex-col gap-1">
-                <div className="flex items-center justify-between text-sm gap-2">
-                  <span className="text-gray-700 truncate flex-1">{item.nombre}</span>
-                  {item.imei && <span className="text-xs text-gray-400 font-mono">{item.imei}</span>}
+                <div className="flex items-start justify-between text-sm gap-2">
+                  {/* Dos líneas del mismo producto solo se distinguen por la
+                      variante y el IMEI: van bajo el nombre, no a su lado, o el
+                      truncado se los come cuando el nombre es largo. */}
+                  <div className="flex-1 min-w-0 flex flex-col gap-1">
+                    <span className="text-gray-700 leading-snug line-clamp-2">{item.nombre}</span>
+                    <ChipsVariante item={item} />
+                    {item.imei && (
+                      <span className="text-xs text-gray-400 font-mono truncate">{item.imei}</span>
+                    )}
+                  </div>
+                  {(item.cantidad || 1) > 1 && (
+                    <span className="text-xs font-semibold text-gray-500 bg-white border
+                      border-gray-200 rounded-lg px-1.5 py-1 flex-shrink-0">
+                      ×{item.cantidad}
+                    </span>
+                  )}
                   <InputMoneda value={item.precioFinal}
                     onChange={(val) => actualizarPrecio(item.key, val)}
                     className="w-28 text-right text-sm font-semibold text-gray-900 bg-white
