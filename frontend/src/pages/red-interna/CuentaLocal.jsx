@@ -13,6 +13,7 @@ import { EstadoCuentaBodega } from './EstadoCuentaBodega';
 import {
   ChevronLeft, Package, Truck, Wallet, FileText, AlertTriangle, Store,
   LayoutDashboard, CheckCircle, Send, Info, PiggyBank, Receipt, SlidersHorizontal,
+  Undo2,
 } from 'lucide-react';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -215,6 +216,12 @@ export function CuentaLocal({
     onRefrescar();
   };
 
+  // Devoluciones que este local mandó y la bodega todavía no revisa. En la vista
+  // propia vienen del panel; mirando el local desde la bodega, del estado de
+  // cuenta (que las trae en cualquier estado, por eso se filtra aquí).
+  const devolucionesPendientes = panel?.devoluciones_enviadas
+    ?? (data?.devoluciones || []).filter((d) => d.estado === 'En transito');
+
   return (
     <div>
       {onVolver && (
@@ -244,6 +251,42 @@ export function CuentaLocal({
           onAviso={onAviso}
           onRefrescar={onRefrescar}
         />
+      )}
+
+      {/* Lo que este local devolvió y la bodega todavía no ha revisado.
+          Sin esto, devolver mercancía no dejaba rastro en ninguna pantalla: el
+          envío no cambia y la deuda no baja hasta que la bodega confirme, así
+          que parecía que el botón no había hecho nada. */}
+      {devolucionesPendientes.length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4">
+          <div className="flex items-center gap-2 mb-2">
+            <Undo2 size={15} className="text-amber-600 flex-shrink-0" />
+            <p className="text-sm font-semibold text-amber-900">
+              {devolucionesPendientes.length} devolución(es) esperando a la bodega
+            </p>
+          </div>
+          <p className="text-xs text-amber-800 mb-3">
+            Ya la enviaste. Tu deuda baja cuando la bodega revise y confirme que
+            tiene la mercancía.
+          </p>
+          <div className="flex flex-col gap-1.5">
+            {devolucionesPendientes.map((d) => (
+              <div key={d.id}
+                className="flex items-center gap-2 bg-white rounded-xl px-3 py-2 border border-amber-100">
+                <span className="text-sm font-medium text-gray-800">
+                  Devolución #{d.numero ?? d.id}
+                </span>
+                <span className="text-xs text-gray-400">
+                  {d.total_items} producto(s)
+                  {d.motivo === 'faltante' ? ' · reclamo por faltante' : ''}
+                </span>
+                <span className="ml-auto text-xs text-amber-700 font-medium">
+                  {d.estado}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
       )}
 
       <Cabecera t={t} propia={propia} onPagar={() => setPago({})} />

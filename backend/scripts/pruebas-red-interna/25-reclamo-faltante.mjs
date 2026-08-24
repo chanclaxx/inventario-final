@@ -205,6 +205,32 @@ console.log('\n═══ 6. Sin stock que sacar, no hay nada que reclamar ══
      v.bloqueadas.length === 2, `${v.bloqueadas.length} bloqueada(s)`);
 }
 
+
+console.log('\n═══ 7. Trazabilidad: la devolución pendiente se VE en las dos puntas ═══');
+{
+  // Antes no aparecía en ninguna de las tres pantallas: el local devolvía
+  // mercancía, la deuda no bajaba (correcto, falta que la bodega confirme) y no
+  // le quedaba rastro de nada. Parecía que el botón no hacía nada.
+  await q(`UPDATE atributos_producto SET stock = 5 WHERE id = 2`);
+  await q(`UPDATE productos_cantidad SET stock = 5 WHERE id = 2`);
+  const dev = await red.devolver(reqLocal, {
+    lineas: [{ tipo: 'cantidad', producto_id: 2, atributo_id: 2, cantidad: 1 }],
+  });
+
+  const bodega = await red.getPanelBodega(reqBodega);
+  ok('★ la BODEGA la ve en su bandeja de "por confirmar"',
+     (bodega.devoluciones_por_confirmar || []).some((d) => Number(d.id) === Number(dev.id)));
+
+  const panel = await red.getPanelLocal(reqLocal);
+  ok('★ el LOCAL la ve en su panel',
+     (panel.devoluciones_enviadas || []).some((d) => Number(d.id) === Number(dev.id)));
+
+  const cta = await red.getEstadoCuenta(reqLocal, 2);
+  ok('★ y en su estado de cuenta, con su estado',
+     (cta.devoluciones || []).some((d) => Number(d.id) === Number(dev.id) && d.estado === 'En transito'));
+  ok('   con el contador de pendientes', Number(cta.devoluciones_pendientes) > 0,
+     String(cta.devoluciones_pendientes));
+}
 console.log(`\n${'═'.repeat(72)}`);
 console.log(`  ${pasados} verificaciones pasaron · ${fallos} fallaron`);
 console.log('═'.repeat(72));

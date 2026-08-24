@@ -189,6 +189,8 @@ const listarRemisiones = async (req, res, next) => {
     const data = await service.listarRemisiones(req, {
       estado: req.query.estado,
       limit:  Math.min(Number(req.query.limit) || 50, 200),
+      // 'devolucion' para la bandeja de devoluciones; sin él, entregas.
+      tipo:   req.query.tipo === 'devolucion' ? 'devolucion' : undefined,
     });
     res.json({ ok: true, data });
   } catch (err) { next(err); }

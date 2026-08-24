@@ -227,6 +227,11 @@ const _recortarParaVendedor = (data) => {
       items: data.mercancia.items.map((u) => _sinValores(u, CLAVES_VALOR_UNIDAD)),
     },
     remisiones: (data.remisiones || []).map((r) => ({ ...r, valor_total: null })),
+    // Las devoluciones se ven —el vendedor necesita saber que mandó algo y que
+    // sigue esperando el visto bueno de la bodega— pero su valor es la
+    // valorización de la mercancía que va dentro, y eso no.
+    devoluciones: (data.devoluciones || []).map((d) => ({ ...d, valor_total: null })),
+    devoluciones_enviadas: (data.devoluciones_enviadas || []).map((d) => ({ ...d, valor_total: null })),
     // El cargo es deuda: su valor y su saldo se ven (hay que pagarlos). No hay
     // valorización de mercancía que esconder aquí.
     cargos: data.cargos,
@@ -2483,13 +2488,21 @@ const getEstadoLocal = async (negocioId, sucursalId) => {
 const getPanelLocal = async (req) => {
   const negocioId  = req.user.negocio_id;
   const sucursalId = Number(req.sucursal_id);
-  const [estado, porRecibir, remesas] = await Promise.all([
+  const [estado, porRecibir, remesas, devolucionesEnviadas] = await Promise.all([
     getEstadoLocal(negocioId, sucursalId),
     repo.findRemisiones(negocioId, { sucursalId, rol: 'destino', estado: 'En transito', limit: 20 }),
     repo.findRemesas(negocioId, { sucursalId, rol: 'origen', limit: 10 }),
+    // Lo que este local devolvió y la bodega todavía no ha revisado. Su deuda
+    // no baja hasta esa confirmación, así que sin verlo aquí el local devuelve
+    // mercancía y no le queda rastro de nada: ni el envío cambia, ni la cuenta
+    // se mueve. Parecía que el botón no hacía nada.
+    repo.findRemisiones(negocioId, {
+      sucursalId, rol: 'origen', tipo: 'devolucion', estado: 'En transito', limit: 20,
+    }),
   ]);
   const salida = { es_bodega: false, sucursal_id: sucursalId, ...estado,
-                   por_recibir: porRecibir, remesas };
+                   por_recibir: porRecibir, remesas,
+                   devoluciones_enviadas: devolucionesEnviadas };
   return _puedeVerCostos(req) ? salida : _recortarParaVendedor(salida);
 };
 
@@ -2601,7 +2614,7 @@ const getEstadoCuenta = async (req, sucursalId, filtros = {}) => {
   const { desde = null, hasta = null, q = '', estado = null, limit = 100, offset = 0 } = filtros;
 
   const [totales, extracto, mercancia, remisiones, remesas, movimientos, porEnvio,
-         abonos, lineasEnvios, cargos] = await Promise.all([
+         abonos, lineasEnvios, cargos, devoluciones] = await Promise.all([
       getEstadoLocal(negocioId, objetivo),
       repo.getExtracto(negocioId, objetivo, { desde, hasta }),
       repo.buscarUnidades(negocioId, objetivo, {
@@ -2620,6 +2633,13 @@ const getEstadoCuenta = async (req, sucursalId, filtros = {}) => {
       // Los cargos sueltos, como documentos con su cuenta: se muestran junto a
       // los envíos para que se vea qué se está pagando.
       repo.getCargosCuenta(negocioId, objetivo),
+      // Las devoluciones que esta sucursal MANDÓ, en cualquier estado. Sin esto
+      // el local devolvía mercancía y no le quedaba rastro en ninguna pantalla:
+      // el envío no cambia y la cuenta no se mueve hasta que la bodega
+      // confirme, así que parecía que el botón no había hecho nada.
+      repo.findRemisiones(negocioId, {
+        sucursalId: objetivo, rol: 'origen', tipo: 'devolucion', limit: 100,
+      }),
     ]);
 
   const salida = {
@@ -2648,6 +2668,11 @@ const getEstadoCuenta = async (req, sucursalId, filtros = {}) => {
       Object.entries(totales.por_estado).map(([k, v]) => [k, v.unidades])
     ),
     remisiones, remesas, movimientos_cuenta: movimientos,
+    // Lo que esta sucursal devolvió, con su estado. Una devolución 'En transito'
+    // es la que está esperando que la bodega la revise: hasta entonces no baja
+    // la deuda, y verla aquí es lo que explica por qué.
+    devoluciones,
+    devoluciones_pendientes: devoluciones.filter((d) => d.estado === 'En transito').length,
     // Los abonos, con el envío al que se imputó cada uno. Es lo que permite
     // contar el pago como lo hizo el usuario ("pagué $2M y taparon 3 envíos")
     // en vez de como una cifra suelta.
@@ -2997,12 +3022,21 @@ const corregirValorLinea = async (req, lineaId, { valor_nuevo, motivo }) => {
   }
 };
 
-const listarRemisiones = (req, { estado, limit } = {}) =>
-  repo.findRemisiones(req.user.negocio_id, {
+// `tipo` permite pedir las DEVOLUCIONES además de las entregas. El rol se
+// invierte para ellas: una entrega la despacha la bodega (origen) y la recibe el
+// local (destino); una devolución la manda el local (origen) y la recibe la
+// bodega (destino). Sin esa vuelta, cada quien pedía las devoluciones "del otro
+// lado" y le salía la lista vacía.
+const listarRemisiones = (req, { estado, limit, tipo } = {}) => {
+  const esDevolucion = tipo === 'devolucion';
+  const rol = esDevolucion
+    ? (req.esBodega ? 'destino' : 'origen')
+    : (req.esBodega ? 'origen'  : 'destino');
+  return repo.findRemisiones(req.user.negocio_id, {
     sucursalId: Number(req.sucursal_id),
-    rol: req.esBodega ? 'origen' : 'destino',
-    estado, limit,
+    rol, estado, limit, tipo,
   });
+};
 
 const listarRemesas = (req, { estado, limit } = {}) =>
   repo.findRemesas(req.user.negocio_id, {

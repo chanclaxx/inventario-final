@@ -511,6 +511,10 @@ equivalente fungible del `'Devuelta'` de un serial, sin contra-asiento. Lo que n
 calce contra ningún lote es del local y no se acredita, salvo que la bodega
 decida comprárselo.
 
+La sección 7 de `25-reclamo-faltante` cubre la trazabilidad: una devolución pendiente
+tiene que verse en las TRES pantallas (bandeja de la bodega, panel del local y su
+estado de cuenta).
+
 La sección 4 es la que más importa vigilar: devolver más de lo que queda en un
 lote **cruza al siguiente** y cobra cada tramo a su propio precio.
 
