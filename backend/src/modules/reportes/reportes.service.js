@@ -1038,79 +1038,140 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
 // (su costo es ese mismo valor interno). El margen del grupo se perdía en el
 // camino entre las dos sucursales.
 //
-// Qué cuenta como venta: exactamente lo que le genera CARGO al local — líneas
-// `'Recibida'` de una entrega no anulada, descontando lo devuelto (un serial
-// devuelto sale entero; de una línea de cantidad bajan solo las unidades que
-// volvieron). Es la misma expresión que `SQL_CARGO_ENVIO`: si las dos se
-// separan, la bodega reportaría una venta que el local no debe.
+// CUÁNDO HAY UTILIDAD: cuando el local PAGA, no cuando recibe. Es una venta a
+// crédito y se mide igual que un crédito a un cliente
+// (`utilidad_parcial = MAX(0, cobrado − costo)`): lo que entra cubre primero el
+// costo y solo el excedente es ganancia. Un envío entregado y no pagado no le
+// ha dejado un peso a la bodega todavía, y decir lo contrario sería reportar
+// una utilidad que está en la calle.
 //
-// Qué cuenta como costo: lo que le costó A LA BODEGA. Para un serial se lee en
+// QUÉ CUENTA COMO VENTA: exactamente lo que le genera CARGO al local — líneas
+// `'Recibida'` de una entrega no anulada, descontando lo devuelto. La
+// definición NO se copia: se importa de `redInterna.repository`
+// (`SQL_ABONOS_EFECTIVOS`), porque dos versiones separadas acabarían diciendo
+// que la bodega vendió algo que el local no debe. Un abono de una remesa EN
+// TRÁNSITO no cuenta: reserva el envío, pero no baja la deuda hasta que la
+// bodega confirma.
+//
+// QUÉ CUENTA COMO COSTO: lo que le costó A LA BODEGA. Para un serial se lee en
 // vivo de `seriales.costo_compra` —así una corrección del admin se refleja
 // sola— y para cantidad, el `costo_origen` congelado al despachar, porque el
 // promedio ponderado del nodo ya se movió.
 //
 // La fecha es la de RECEPCIÓN: es cuando nace la deuda. Una remesa despachada
-// el 30 y recibida el 2 es venta del mes siguiente, igual para las dos partes.
+// el 30 y recibida el 2 es del mes siguiente, igual para las dos partes.
 //
 // Devuelve null cuando no hay nada — negocio sin red, sucursal que no es la
 // bodega, o un período sin despachos — y el frontend no pinta nada.
 const getVentasALocales = async (sucursalId, desde, hasta) => {
+  const redRepo = require('../red-interna/redInterna.repository');
+
+  // Una línea de envío: unidades efectivas (lo recibido menos lo devuelto), lo
+  // que se le cobró al local y lo que le costó a la bodega.
+  const SQL_LINEAS = `
+    SELECT
+      lr.id,
+      lr.remision_id,
+      lr.tipo,
+      lr.nombre_producto,
+      lr.imei,
+      CASE WHEN lr.tipo = 'serial' THEN 1
+           ELSE GREATEST(COALESCE(lr.cantidad_recibida, lr.cantidad, 0)
+                          - COALESCE(lr.cantidad_devuelta, 0), 0) END AS unidades,
+      lr.valor_interno,
+      CASE WHEN lr.tipo = 'serial'
+           THEN COALESCE(s.costo_compra, lr.costo_origen)
+           ELSE lr.costo_origen END AS costo_unitario
+    FROM lineas_remision lr
+    LEFT JOIN seriales s ON s.id = lr.serial_id
+    WHERE lr.estado_linea = 'Recibida'
+  `;
+
   const { rows } = await pool.query(`
-    WITH lineas AS (
-      SELECT
-        r.id                       AS remision_id,
-        r.numero,
-        r.sucursal_destino_id,
-        COALESCE(r.fecha_recepcion, r.fecha_emision) AS fecha,
-        CASE WHEN lr.tipo = 'serial' THEN 1
-             ELSE GREATEST(COALESCE(lr.cantidad_recibida, lr.cantidad, 0)
-                            - COALESCE(lr.cantidad_devuelta, 0), 0) END AS unidades,
-        lr.valor_interno,
-        CASE WHEN lr.tipo = 'serial'
-             THEN COALESCE(s.costo_compra, lr.costo_origen)
-             ELSE lr.costo_origen END AS costo_unitario
-      FROM lineas_remision lr
-      JOIN remisiones r ON r.id = lr.remision_id
-      LEFT JOIN seriales s ON s.id = lr.serial_id
+    WITH envios AS (
+      SELECT r.id, r.numero, r.sucursal_destino_id,
+             COALESCE(r.fecha_recepcion, r.fecha_emision) AS fecha
+      FROM remisiones r
       WHERE r.sucursal_origen_id = $1
-        AND r.tipo          = 'entrega'
-        AND r.estado       <> 'Anulada'
-        AND lr.estado_linea = 'Recibida'
+        AND r.tipo    = 'entrega'
+        AND r.estado <> 'Anulada'
         AND DATE(COALESCE(r.fecha_recepcion, r.fecha_emision)
               AT TIME ZONE 'UTC' AT TIME ZONE 'America/Bogota') BETWEEN $2 AND $3
+    ),
+    lin AS (SELECT * FROM (${SQL_LINEAS}) l WHERE l.remision_id IN (SELECT id FROM envios)),
+    tot AS (
+      SELECT
+        l.remision_id,
+        SUM(l.unidades)::int                            AS unidades,
+        SUM(l.unidades * l.valor_interno)               AS valor,
+        -- Los totales se arman con las líneas MEDIBLES: descartar un envío
+        -- entero porque una de sus líneas no tiene costo botaría la utilidad
+        -- de las que sí lo tienen.
+        COALESCE(SUM(l.unidades * l.valor_interno)
+          FILTER (WHERE l.costo_unitario IS NOT NULL), 0) AS valor_medible,
+        COALESCE(SUM(l.unidades * l.costo_unitario)
+          FILTER (WHERE l.costo_unitario IS NOT NULL), 0) AS costo,
+        COALESCE(SUM(l.unidades * l.valor_interno)
+          FILTER (WHERE l.costo_unitario IS NULL), 0)     AS valor_sin_costo,
+        COUNT(*) FILTER (WHERE l.costo_unitario IS NULL)::int AS lineas_sin_costo
+      FROM lin l
+      WHERE l.unidades > 0
+      GROUP BY l.remision_id
+    ),
+    abo AS (
+      SELECT a.remision_id, SUM(a.valor) AS abonado
+      FROM (${redRepo.SQL_ABONOS_EFECTIVOS}) a
+      WHERE a.remision_id IN (SELECT id FROM envios)
+      GROUP BY a.remision_id
     )
     SELECT
-      l.remision_id,
-      l.numero,
-      l.sucursal_destino_id,
-      su.nombre                                        AS sucursal_nombre,
-      MIN(l.fecha)                                     AS fecha,
-      SUM(l.unidades)::int                             AS unidades,
-      SUM(l.unidades * l.valor_interno)                AS valor,
-      -- Los totales se arman con las líneas MEDIBLES, no con el envío entero:
-      -- descartar un envío completo porque una de sus líneas no tiene costo
-      -- botaría la utilidad de las que sí lo tienen.
-      COALESCE(SUM(l.unidades * l.valor_interno)
-        FILTER (WHERE l.costo_unitario IS NOT NULL), 0)  AS valor_medible,
-      COALESCE(SUM(l.unidades * l.costo_unitario)
-        FILTER (WHERE l.costo_unitario IS NOT NULL), 0)  AS costo,
-      COALESCE(SUM(l.unidades * l.valor_interno)
-        FILTER (WHERE l.costo_unitario IS NULL), 0)      AS valor_sin_costo,
-      COUNT(*) FILTER (WHERE l.costo_unitario IS NULL)::int AS lineas_sin_costo
-    FROM lineas l
-    JOIN sucursales su ON su.id = l.sucursal_destino_id
-    WHERE l.unidades > 0
-    GROUP BY l.remision_id, l.numero, l.sucursal_destino_id, su.nombre
-    ORDER BY MIN(l.fecha) DESC
+      e.id AS remision_id, e.numero, e.sucursal_destino_id, e.fecha,
+      su.nombre AS sucursal_nombre,
+      t.unidades, t.valor, t.valor_medible, t.costo, t.valor_sin_costo, t.lineas_sin_costo,
+      COALESCE(ab.abonado, 0) AS abonado
+    FROM envios e
+    JOIN tot t         ON t.remision_id = e.id
+    JOIN sucursales su ON su.id = e.sucursal_destino_id
+    LEFT JOIN abo ab   ON ab.remision_id = e.id
+    ORDER BY e.fecha DESC, e.id DESC
   `, [sucursalId, desde, hasta]);
 
   if (!rows.length) return null;
 
+  // Desglose por producto. Va en una consulta aparte y no en un `json_agg`
+  // dentro de la anterior para no arrastrar el detalle por los GROUP BY.
+  const ids = rows.map((r) => Number(r.remision_id));
+  const { rows: lineas } = await pool.query(`
+    SELECT * FROM (${SQL_LINEAS}) l
+    WHERE l.remision_id = ANY($1::bigint[]) AND l.unidades > 0
+    ORDER BY l.remision_id, l.id
+  `, [ids]);
+
+  const porEnvio = new Map(ids.map((id) => [id, []]));
+  for (const l of lineas) {
+    const unidades = Number(l.unidades);
+    const valorU   = Number(l.valor_interno);
+    const costoU   = l.costo_unitario == null ? null : Number(l.costo_unitario);
+    porEnvio.get(Number(l.remision_id))?.push({
+      id:              Number(l.id),
+      tipo:            l.tipo,
+      nombre_producto: l.nombre_producto,
+      imei:            l.imei,
+      unidades,
+      costo_unitario:  costoU,
+      valor_unitario:  valorU,
+      costo_total:     costoU == null ? null : costoU * unidades,
+      valor_total:     valorU * unidades,
+      utilidad:        costoU == null ? null : (valorU - costoU) * unidades,
+    });
+  }
+
   const envios = rows.map((r) => {
-    const valor          = Number(r.valor);
-    const costo          = Number(r.costo);
-    const valorMedible   = Number(r.valor_medible);
-    const valorSinCosto  = Number(r.valor_sin_costo);
+    const valor        = Number(r.valor);
+    const costo        = Number(r.costo);
+    const valorMedible = Number(r.valor_medible);
+    const cobrado      = Number(r.abonado);
+    const saldo        = Math.max(0, valor - cobrado);
     return {
       remision_id:      Number(r.remision_id),
       numero:           r.numero,
@@ -1120,29 +1181,43 @@ const getVentasALocales = async (sucursalId, desde, hasta) => {
       unidades:         Number(r.unidades),
       valor,
       costo,
-      // La fila muestra utilidad solo si TODAS sus líneas tienen costo: una
-      // utilidad parcial presentada como la del envío diría que la bodega ganó
-      // menos de lo que ganó. En los totales sí entra lo medible de esta fila.
-      utilidad:         r.lineas_sin_costo > 0 ? null : valor - costo,
+      cobrado,
+      saldo,
+      pagado:             saldo === 0,
+      // Lo que ya se ganó: el cobro cubre primero el costo (mismo criterio que
+      // un crédito a un cliente) y solo lo que sobra es utilidad.
+      utilidad_realizada: Math.max(0, cobrado - costo),
+      falta_para_cubrir:  Math.max(0, costo - cobrado),
+      // Lo que dejará cuando el local termine de pagar. Null si alguna línea no
+      // tiene costo: presentar una utilidad parcial como si fuera la del envío
+      // diría que la bodega gana menos de lo que gana.
+      utilidad_total:   r.lineas_sin_costo > 0 ? null : valor - costo,
       utilidad_medible: valorMedible - costo,
-      valor_sin_costo:  valorSinCosto,
+      valor_sin_costo:  Number(r.valor_sin_costo),
       lineas_sin_costo: r.lineas_sin_costo,
+      lineas:           porEnvio.get(Number(r.remision_id)) || [],
     };
   });
 
   const suma = (f) => envios.reduce((a, e) => a + f(e), 0);
+  const utilidadRealizada = suma((e) => e.utilidad_realizada);
   return {
     envios,
     resumen: {
-      envios:           envios.length,
-      unidades:         suma((e) => e.unidades),
-      valor_total:      suma((e) => e.valor),
-      costo_total:      suma((e) => e.costo),
-      utilidad_total:   suma((e) => e.utilidad_medible),
+      envios:             envios.length,
+      unidades:           suma((e) => e.unidades),
+      valor_total:        suma((e) => e.valor),
+      costo_total:        suma((e) => e.costo),
+      cobrado_total:      suma((e) => e.cobrado),
+      por_cobrar:         suma((e) => e.saldo),
+      // Ganancia ya hecha (el local pagó) contra la que falta por realizarse.
+      utilidad_realizada: utilidadRealizada,
+      utilidad_pendiente: Math.max(0, suma((e) => e.utilidad_medible) - utilidadRealizada),
+      envios_pagados:     envios.filter((e) => e.pagado).length,
       // Lo que se despachó sin saber qué costó: no entra en la utilidad y hay
       // que decirlo, o el margen se lee como si fuera del total.
-      valor_sin_costo:  suma((e) => e.valor_sin_costo),
-      envios_sin_costo: envios.filter((e) => e.lineas_sin_costo > 0).length,
+      valor_sin_costo:    suma((e) => e.valor_sin_costo),
+      envios_sin_costo:   envios.filter((e) => e.lineas_sin_costo > 0).length,
     },
   };
 };

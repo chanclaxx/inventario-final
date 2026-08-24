@@ -19,6 +19,8 @@
 //   · una unidad consignada SIN costo de compra ya no se acusa de "sin costo"
 //   · el costo de una unidad consignada no se puede pisar desde el local
 //   · la utilidad de la bodega = valor interno − lo que le costó a ella
+//   · esa utilidad se realiza CUANDO EL LOCAL PAGA, no cuando recibe
+//   · el desglose dice, producto por producto, qué costó y a cuánto se pasó
 //   · una devolución baja esa venta; una remisión anulada no cuenta
 //   · un negocio SIN red interna no cambia en nada
 //
@@ -41,6 +43,9 @@ await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260725_red_interna.s
 await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260726_red_interna_v2.sql'), 'utf8'));
 // Las dos columnas que este reporte necesita en la línea: lo devuelto de un
 // lote y el costo que tenía la bodega al despacharlo.
+await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260822_red_interna_envios.sql'), 'utf8'));
+await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260823_red_interna_control.sql'), 'utf8'));
+await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260823_red_interna_cargos_pagables.sql'), 'utf8'));
 await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260823_remision_variantes.sql'), 'utf8'));
 await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260823_lotes_cantidad.sql'), 'utf8'));
 await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260824_costo_origen_remision.sql'), 'utf8'));
@@ -141,7 +146,8 @@ console.log('\n═══ 5. La utilidad de la BODEGA por lo que despacha ══�
 const ventasB = await reportes.getVentasALocales(1, '2026-06-01', '2026-06-30');
 check('Le vendió al local (valor interno de lo recibido)', ventasB.resumen.valor_total, 2900000);
 check('★ Su costo: 1.800.000 del que sí lo tenía', ventasB.resumen.costo_total, 1800000);
-check('★ Utilidad de la bodega = 2.000.000 − 1.800.000', ventasB.resumen.utilidad_total, 200000);
+check('★ Utilidad de la bodega = 2.000.000 − 1.800.000 (aún sin cobrar)',
+  ventasB.resumen.utilidad_pendiente, 200000);
 checkTexto('El envío con una línea sin costo no infla la utilidad: se aparta',
   ventasB.resumen.envios_sin_costo, 1);
 
@@ -169,7 +175,7 @@ const ventasC = await reportes.getVentasALocales(1, '2026-06-10', '2026-06-30');
 check('★ Vendió 3, no 5: lo devuelto sale del cargo y de la venta',
   ventasC.resumen.valor_total, 30000);
 check('★ Su costo son esas mismas 3 unidades', ventasC.resumen.costo_total, 21000);
-check('★ Utilidad = 3 × (10.000 − 7.000)', ventasC.resumen.utilidad_total, 9000);
+check('★ Utilidad = 3 × (10.000 − 7.000)', ventasC.resumen.utilidad_pendiente, 9000);
 console.log('    (el costo sale del `costo_origen` congelado: el promedio ponderado');
 console.log('     del nodo en la bodega ya se movió con la siguiente compra)');
 
@@ -177,6 +183,102 @@ console.log('\n═══ 8. Una remisión anulada no le vendió nada a nadie ═
 await db.exec(`UPDATE remisiones SET estado = 'Anulada' WHERE id = 2;`);
 const ventasAnulada = await reportes.getVentasALocales(1, '2026-06-10', '2026-06-30');
 checkTexto('★ Anulada → no queda venta en el período', ventasAnulada, null);
+
+console.log('\n═══ 9. La utilidad se realiza CUANDO EL LOCAL PAGA ═══');
+// Envío nuevo y limpio: 1 equipo con costo 1.000.000, pasado al local a 1.500.000.
+await db.exec(`
+  INSERT INTO seriales (id, producto_id, imei, costo_compra) VALUES (6, 2,'IMEI-COBRO', 1000000);
+  SELECT setval('seriales_id_seq', 6);
+  INSERT INTO remisiones (id, negocio_id, numero, tipo, sucursal_origen_id, sucursal_destino_id,
+                          estado, fecha_emision, fecha_recepcion)
+    VALUES (3, 1, 3, 'entrega', 1, 2, 'Recibida', '2026-07-01', '2026-07-02');
+  INSERT INTO lineas_remision (remision_id, tipo, serial_id, imei, cantidad, valor_interno,
+                               costo_origen, estado_linea, nombre_producto)
+    VALUES (3,'serial',6,'IMEI-COBRO',1, 1500000, 1000000,'Recibida','iPhone 13');
+  SELECT setval('remisiones_id_seq', 3);
+`);
+
+const julio = () => reportes.getVentasALocales(1, '2026-07-01', '2026-07-31');
+
+let v = await julio();
+check('★ Sin pagar: no hay utilidad todavía', v.resumen.utilidad_realizada, 0);
+check('   pero se ve la que dejará al cobrarse', v.resumen.utilidad_pendiente, 500000);
+check('   y lo que falta por cobrar', v.resumen.por_cobrar, 1500000);
+console.log('    (entregado y sin pagar no le ha dejado un peso a la bodega:');
+console.log('     reportarlo como ganancia sería contar plata que está en la calle)');
+
+// Primer abono: 600.000. No alcanza a cubrir el costo (1.000.000).
+// El local paga remitiendo efectivo: el abono cuelga de una remesa CONFIRMADA
+// (una en tránsito reserva el envío pero no lo paga — se prueba en la sección 10).
+await db.exec(`
+  INSERT INTO remesas (id, negocio_id, sucursal_origen_id, sucursal_destino_id, valor, estado)
+    VALUES (10, 1, 2, 1, 600000, 'Recibida');
+  INSERT INTO abonos_remision (negocio_id, sucursal_id, remision_id, remesa_id, valor, origen, fecha)
+    VALUES (1, 2, 3, 10, 600000, 'remesa', '2026-07-10');
+`);
+v = await julio();
+check('★ Abona 600.000 (menos que el costo): aún no hay utilidad',
+  v.resumen.utilidad_realizada, 0);
+check('   faltan 400.000 para cubrir el costo', v.envios[0].falta_para_cubrir, 400000);
+
+// Segundo abono: 700.000. Total cobrado 1.300.000 → cubre el costo y sobra.
+await db.exec(`
+  INSERT INTO remesas (id, negocio_id, sucursal_origen_id, sucursal_destino_id, valor, estado)
+    VALUES (11, 1, 2, 1, 700000, 'Recibida');
+  INSERT INTO abonos_remision (negocio_id, sucursal_id, remision_id, remesa_id, valor, origen, fecha)
+    VALUES (1, 2, 3, 11, 700000, 'remesa', '2026-07-15');
+`);
+v = await julio();
+check('★ Cobrado 1.300.000: la utilidad es lo que pasó del costo',
+  v.resumen.utilidad_realizada, 300000);
+check('   y queda pendiente el resto', v.resumen.utilidad_pendiente, 200000);
+checkTexto('   el envío todavía no está pagado', v.envios[0].pagado, false);
+
+// Se salda.
+await db.exec(`
+  INSERT INTO remesas (id, negocio_id, sucursal_origen_id, sucursal_destino_id, valor, estado)
+    VALUES (12, 1, 2, 1, 200000, 'Recibida');
+  INSERT INTO abonos_remision (negocio_id, sucursal_id, remision_id, remesa_id, valor, origen, fecha)
+    VALUES (1, 2, 3, 12, 200000, 'remesa', '2026-07-20');
+`);
+v = await julio();
+check('★ Pagado completo: utilidad total realizada', v.resumen.utilidad_realizada, 500000);
+check('   nada pendiente', v.resumen.utilidad_pendiente, 0);
+checkTexto('   marcado como pagado', v.envios[0].pagado, true);
+check('   sin saldo', v.envios[0].saldo, 0);
+
+console.log('\n═══ 10. Un abono de remesa EN TRÁNSITO no realiza utilidad ═══');
+await db.exec(`
+  INSERT INTO remesas (id, negocio_id, sucursal_origen_id, sucursal_destino_id, valor, estado)
+    VALUES (1, 1, 2, 1, 500000, 'En transito');
+  INSERT INTO seriales (id, producto_id, imei, costo_compra) VALUES (7, 2,'IMEI-TRANSITO', 400000);
+  INSERT INTO remisiones (id, negocio_id, numero, tipo, sucursal_origen_id, sucursal_destino_id,
+                          estado, fecha_emision, fecha_recepcion)
+    VALUES (4, 1, 4, 'entrega', 1, 2, 'Recibida', '2026-08-01', '2026-08-02');
+  INSERT INTO lineas_remision (remision_id, tipo, serial_id, imei, cantidad, valor_interno,
+                               costo_origen, estado_linea, nombre_producto)
+    VALUES (4,'serial',7,'IMEI-TRANSITO',1, 500000, 400000,'Recibida','iPhone 13');
+  INSERT INTO abonos_remision (negocio_id, sucursal_id, remision_id, remesa_id, valor, origen, fecha)
+    VALUES (1, 2, 4, 1, 500000, 'remesa', '2026-08-05');
+`);
+const agosto = await reportes.getVentasALocales(1, '2026-08-01', '2026-08-31');
+check('★ La remesa va en camino: reserva el envío pero no lo paga',
+  agosto.resumen.utilidad_realizada, 0);
+check('   el envío sigue debiéndose entero', agosto.envios[0].saldo, 500000);
+await db.exec(`UPDATE remesas SET estado = 'Recibida' WHERE id = 1;`);
+const agostoOk = await reportes.getVentasALocales(1, '2026-08-01', '2026-08-31');
+check('★ La bodega confirma la remesa: ahí sí se realiza',
+  agostoOk.resumen.utilidad_realizada, 100000);
+console.log('    (es la misma regla del estado de cuenta: si el reporte contara');
+console.log('     la remesa en tránsito, la bodega vería ganancia que no ha recibido)');
+
+console.log('\n═══ 11. El desglose dice qué costó y a cuánto se pasó ═══');
+const envAgo = agostoOk.envios[0];
+checkTexto('★ Una línea por producto del envío', envAgo.lineas.length, 1);
+checkTexto('   con su IMEI', envAgo.lineas[0].imei, 'IMEI-TRANSITO');
+check('   lo que le costó a la bodega', envAgo.lineas[0].costo_unitario, 400000);
+check('   a cuánto se le dio al local', envAgo.lineas[0].valor_unitario, 500000);
+check('   y la utilidad de esa línea', envAgo.lineas[0].utilidad, 100000);
 
 console.log(`\n${'═'.repeat(72)}`);
 console.log(`  ${pasados} verificaciones pasaron · ${fallos} fallaron`);

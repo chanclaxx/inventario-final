@@ -348,7 +348,8 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > ni eso con `red_interna_ocultar_costos`.
 > El de la BODEGA no existía en ningún reporte: despachar es venderle al local
 > pero no hay factura, así que su inventario salía y su utilidad no subía. Sale
-> como grupo propio del resumen (`red_interna`), **nunca sumado a `resumen`**:
+> como grupo propio en la pestaña **Ventas** (`red_interna`, arriba de
+> préstamos), **nunca sumado a `resumen`**:
 > son ventas sin factura y el total dejaría de cuadrar con la lista de arriba.
 > Cuenta lo mismo que le genera cargo al local —líneas `'Recibida'` menos lo
 > devuelto, la misma expresión de `SQL_CARGO_ENVIO`, o la bodega reportaría una
@@ -359,7 +360,23 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > ponderado del nodo se mueve con la siguiente compra y después no hay cómo
 > reconstruirlo. Los totales se arman **por línea, no por envío**: descartar un
 > envío entero porque una línea no tiene costo botaría la utilidad de las demás.
-> Prueba: `27-costo-y-utilidad-bodega` (22 verificaciones).
+> **La utilidad de la bodega se realiza cuando el local PAGA, no cuando
+> recibe** — es una venta a crédito y se mide con la misma fórmula que un
+> crédito a un cliente (`utilidad = MAX(0, cobrado − costo)`: lo que entra cubre
+> primero el costo y solo el excedente es ganancia). Un envío entregado y no
+> pagado no le ha dejado un peso: contarlo sería reportar plata que está en la
+> calle. Por eso el resumen trae **dos** cifras, `utilidad_realizada` y
+> `utilidad_pendiente`, y cada envío se puede abrir para ver el desglose por
+> producto (qué costó, a cuánto se le pasó al local, cuánto deja).
+> `SQL_ABONOS_EFECTIVOS` se **importa** de `redInterna.repository`, no se copia:
+> una remesa en tránsito reserva el envío pero no lo paga, y dos definiciones
+> separadas acabarían diciendo que la bodega cobró algo que el local no ha
+> pagado. Todo se refresca solo — el `MutationCache` global de `main.jsx`
+> invalida `ventas-rango` tras cualquier mutación, incluidos los pagos que se
+> registran desde las pantallas de Red interna.
+> Prueba: `27-costo-y-utilidad-bodega` (42 verificaciones; la sección 9 recorre
+> el envío desde sin pagar hasta saldado, y la 10 comprueba que una remesa en
+> tránsito no realiza utilidad).
 
 > **Red interna — el ENVÍO es la deuda** (`red-interna/`): una sucursal-bodega
 > surte a los locales. Feature opt-in (`config_negocio.red_interna_activa`),

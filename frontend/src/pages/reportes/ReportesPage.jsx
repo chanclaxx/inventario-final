@@ -987,7 +987,93 @@ const SeccionCreditos = ({ creditos }) => {
 // dejaría de cuadrar con la lista— y va en su propio grupo, como préstamos y
 // servicios. `red_interna` llega en null para todo el que no sea la bodega, así
 // que el bloque simplemente no existe para el resto.
+//
+// La utilidad se cuenta cuando el local PAGA, igual que en un crédito a un
+// cliente: lo cobrado cubre primero el costo y solo el excedente es ganancia.
+// Por eso hay dos cifras y no una: la realizada y la que sigue en la calle.
 // ─────────────────────────────────────────────
+const FilaEnvioLocal = ({ envio }) => {
+  const [abierto, setAbierto] = useState(false);
+  const cubierto = envio.falta_para_cubrir === 0;
+
+  return (
+    <div className="bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden">
+      <button
+        onClick={() => setAbierto(!abierto)}
+        className="w-full px-3.5 py-2.5 flex items-center justify-between gap-3 hover:bg-gray-50 transition-colors text-left"
+      >
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-gray-800 truncate">
+            Envío #{String(envio.numero ?? envio.remision_id).padStart(4, '0')} → {envio.sucursal_nombre}
+          </p>
+          <p className="text-xs text-gray-400">
+            {formatFecha(envio.fecha)} · {envio.unidades} u. · costo {formatCOP(envio.costo)}
+            {envio.saldo > 0 && ` · debe ${formatCOP(envio.saldo)}`}
+          </p>
+        </div>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <span className="text-sm font-semibold text-gray-900">{formatCOP(envio.valor)}</span>
+          {envio.pagado
+            ? <UtilidadBadge valor={envio.utilidad_realizada} />
+            : (
+              <span className={`text-xs px-2 py-0.5 rounded-full ${cubierto
+                ? 'bg-amber-50 text-amber-700 border border-amber-100'
+                : 'bg-gray-100 text-gray-500'}`}>
+                {cubierto
+                  ? `+${formatCOP(envio.utilidad_realizada)} cobrado`
+                  : 'sin cubrir costo'}
+              </span>
+            )}
+          {abierto ? <ChevronUp size={14} className="text-gray-400" /> : <ChevronDown size={14} className="text-gray-400" />}
+        </div>
+      </button>
+
+      {abierto && (
+        <div className="border-t border-gray-100 bg-gray-50/60 px-3.5 py-3 flex flex-col gap-2">
+          {/* Estado de cobro: es lo que decide cuánta utilidad está realizada */}
+          <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500">
+            <span>Cobrado: <span className="font-medium text-gray-700">{formatCOP(envio.cobrado)}</span></span>
+            <span>Por cobrar: <span className="font-medium text-gray-700">{formatCOP(envio.saldo)}</span></span>
+            {envio.falta_para_cubrir > 0 && (
+              <span className="text-amber-600">
+                Faltan {formatCOP(envio.falta_para_cubrir)} para cubrir el costo
+              </span>
+            )}
+            {envio.utilidad_total !== null && (
+              <span>Utilidad al pagarse todo: <span className="font-medium text-gray-700">{formatCOP(envio.utilidad_total)}</span></span>
+            )}
+          </div>
+
+          {/* Desglose: qué costó cada producto y a cuánto se le pasó al local */}
+          <div className="flex flex-col gap-1">
+            {envio.lineas.map((l) => (
+              <div key={l.id} className="flex items-center justify-between gap-3 text-xs
+                bg-white border border-gray-100 rounded-lg px-2.5 py-1.5">
+                <div className="min-w-0">
+                  <p className="text-gray-700 truncate">{l.nombre_producto}</p>
+                  {l.imei && <p className="text-gray-400 font-mono text-[11px]">{l.imei}</p>}
+                </div>
+                <div className="flex items-center gap-3 flex-shrink-0 text-right">
+                  {l.unidades > 1 && <span className="text-gray-400">×{l.unidades}</span>}
+                  <span className="text-gray-500">
+                    costo {l.costo_unitario == null ? '—' : formatCOP(l.costo_unitario)}
+                  </span>
+                  <span className="text-gray-800 font-medium w-24">
+                    al local {formatCOP(l.valor_unitario)}
+                  </span>
+                  {l.utilidad === null
+                    ? <span className="text-amber-600 w-20">sin costo</span>
+                    : <span className="text-green-600 font-medium w-20">+{formatCOP(l.utilidad)}</span>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 const SeccionVentasLocales = ({ red }) => {
   if (!red || !red.envios?.length) return null;
 
@@ -1000,10 +1086,11 @@ const SeccionVentasLocales = ({ red }) => {
         Ventas a locales
         <span className="text-xs font-normal text-gray-400">
           {resumen.envios} envío{resumen.envios !== 1 ? 's' : ''} recibido{resumen.envios !== 1 ? 's' : ''} en el período
+          {resumen.envios_pagados > 0 && ` · ${resumen.envios_pagados} pagado${resumen.envios_pagados !== 1 ? 's' : ''}`}
         </span>
       </h3>
 
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <div className="bg-cyan-50 text-cyan-700 rounded-xl p-3">
           <p className="text-xs font-medium opacity-70">Despachado a locales</p>
           <p className="text-lg font-bold mt-0.5">{formatCOP(resumen.valor_total)}</p>
@@ -1014,37 +1101,22 @@ const SeccionVentasLocales = ({ red }) => {
           <p className="text-lg font-bold mt-0.5">{formatCOP(resumen.costo_total)}</p>
         </div>
         <div className="bg-green-50 text-green-700 rounded-xl p-3">
-          <p className="text-xs font-medium opacity-70">Utilidad</p>
-          <p className="text-lg font-bold mt-0.5">{formatCOP(resumen.utilidad_total)}</p>
-          {resumen.valor_sin_costo > 0 && (
-            <p className="text-xs opacity-60 mt-0.5">
-              sin medir {formatCOP(resumen.valor_sin_costo)} despachado sin costo registrado
-            </p>
-          )}
+          <p className="text-xs font-medium opacity-70">Utilidad cobrada</p>
+          <p className="text-lg font-bold mt-0.5">{formatCOP(resumen.utilidad_realizada)}</p>
+          <p className="text-xs opacity-60 mt-0.5">de {formatCOP(resumen.cobrado_total)} recibidos</p>
+        </div>
+        <div className="bg-amber-50 text-amber-700 rounded-xl p-3">
+          <p className="text-xs font-medium opacity-70">Utilidad por cobrar</p>
+          <p className="text-lg font-bold mt-0.5">{formatCOP(resumen.utilidad_pendiente)}</p>
+          <p className="text-xs opacity-60 mt-0.5">
+            {formatCOP(resumen.por_cobrar)} pendiente
+            {resumen.valor_sin_costo > 0 && ` · ${formatCOP(resumen.valor_sin_costo)} sin costo`}
+          </p>
         </div>
       </div>
 
       <div className="flex flex-col gap-2">
-        {envios.map((e) => (
-          <div key={e.remision_id}
-            className="bg-white border border-gray-100 rounded-xl px-3.5 py-2.5 flex items-center
-              justify-between gap-3 shadow-sm">
-            <div className="min-w-0">
-              <p className="text-sm font-medium text-gray-800 truncate">
-                Envío #{String(e.numero ?? e.remision_id).padStart(4, '0')} → {e.sucursal_nombre}
-              </p>
-              <p className="text-xs text-gray-400">
-                {formatFecha(e.fecha)} · {e.unidades} u. · costo {formatCOP(e.costo)}
-              </p>
-            </div>
-            <div className="flex items-center gap-3 flex-shrink-0">
-              <span className="text-sm font-semibold text-gray-900">{formatCOP(e.valor)}</span>
-              {e.utilidad !== null
-                ? <UtilidadBadge valor={e.utilidad} />
-                : <span className="text-xs text-amber-600">sin costo</span>}
-            </div>
-          </div>
-        ))}
+        {envios.map((e) => <FilaEnvioLocal key={e.remision_id} envio={e} />)}
       </div>
     </div>
   );
@@ -1203,6 +1275,9 @@ const PanelVentas = ({ desde, hasta, onDesde, onHasta, esAdmin }) => {
             </>
           )}
 
+          {/* Lo que la bodega le vendió a sus locales */}
+          <SeccionVentasLocales red={redInterna} />
+
           {/* Utilidad de préstamos */}
           <SeccionPrestamos prestamos={prestamos} />
 
@@ -1211,9 +1286,6 @@ const PanelVentas = ({ desde, hasta, onDesde, onHasta, esAdmin }) => {
 
           {/* Utilidad de créditos */}
           <SeccionCreditos creditos={creditos} />
-
-          {/* Lo que la bodega le vendió a sus locales */}
-          <SeccionVentasLocales red={redInterna} />
 
         </div>
       )}

@@ -2076,6 +2076,12 @@ const getValorConsignacionSeriales = async (negocioId, sucursalId, serialIds) =>
 };
 
 module.exports = {
+  // Definiciones compartidas de "qué le genera cargo al local" y "qué abono
+  // cuenta de verdad". Las exporta para que los REPORTES midan la venta de la
+  // bodega con la misma vara con la que el local ve su deuda: dos definiciones
+  // separadas terminarían diciendo que la bodega vendió algo que el local no
+  // debe, y no habría forma de saber cuál de las dos miente.
+  SQL_CARGO_ENVIO, SQL_ABONOS_EFECTIVOS,
   getUnidades, buscarUnidades, getExtracto, getResumenUnidades, getCantidadConsignada,
   getValorConsignacionSeriales,
   getTotalRemesado, getTotalMovimientosCuenta, getConciliacion, getResumenPorRemision,
