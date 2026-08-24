@@ -25,6 +25,28 @@ CREATE TABLE productos_cantidad (
   sucursal_id INT REFERENCES sucursales(id), linea_id INT, proveedor_id INT,
   activo BOOLEAN DEFAULT TRUE, codigo TEXT
 );
+-- Árbol de variantes. Aquí solo hace falta que EXISTA: `productosCantidad.findAll`
+-- agrega los códigos de las variantes para que el buscador de la pantalla los
+-- encuentre, y sin estas tablas esa consulta no resuelve ni con la feature
+-- apagada. Ver migrations/20260823_codigo_variantes.sql.
+CREATE TABLE atributos_producto (
+  id SERIAL PRIMARY KEY, producto_id INT, sucursal_id INT, tipo_id INT,
+  valor TEXT, stock INT DEFAULT 0, stock_minimo INT DEFAULT 0,
+  precio NUMERIC, costo_unitario NUMERIC, activo BOOLEAN DEFAULT TRUE,
+  codigo TEXT
+);
+-- Las columnas deben coincidir con las de `esquema-completo.sql`: varias suites
+-- cargan los DOS archivos, este primero, y el `CREATE TABLE IF NOT EXISTS` del
+-- otro queda en nada. Si aquí falta una columna, allá revienta el INSERT.
+-- (`producto_id` es del fixture, no de producción: allá la variante cuelga solo
+-- del atributo.)
+CREATE TABLE variantes_atributo (
+  id SERIAL PRIMARY KEY, atributo_id INT, producto_id INT, tipo_id INT,
+  valor TEXT, stock INT DEFAULT 0, stock_minimo INT DEFAULT 0,
+  precio NUMERIC, costo_unitario NUMERIC, activo BOOLEAN DEFAULT TRUE,
+  codigo TEXT
+);
+
 CREATE TABLE historial_stock_cantidad (
   id SERIAL PRIMARY KEY, producto_id INT, sucursal_id INT, cantidad INT,
   costo_unitario NUMERIC, tipo TEXT, notas TEXT, fecha TIMESTAMP DEFAULT NOW()

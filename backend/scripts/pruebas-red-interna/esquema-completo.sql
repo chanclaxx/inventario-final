@@ -26,15 +26,25 @@ CREATE TABLE IF NOT EXISTS proveedores (
   tipo TEXT DEFAULT 'proveedor', activo BOOLEAN DEFAULT TRUE
 );
 
+-- `codigo` en los dos niveles: lo escaneable es el NODO, no el producto
+-- (ver migrations/20260823_codigo_variantes.sql).
 CREATE TABLE IF NOT EXISTS atributos_producto (
   id SERIAL PRIMARY KEY, producto_id INT, sucursal_id INT, tipo_id INT,
   valor TEXT, stock INT DEFAULT 0, stock_minimo INT DEFAULT 0,
-  precio NUMERIC, costo_unitario NUMERIC, activo BOOLEAN DEFAULT TRUE
+  precio NUMERIC, costo_unitario NUMERIC, activo BOOLEAN DEFAULT TRUE,
+  codigo TEXT
 );
 CREATE TABLE IF NOT EXISTS variantes_atributo (
   id SERIAL PRIMARY KEY, atributo_id INT, producto_id INT, tipo_id INT,
   valor TEXT, stock INT DEFAULT 0, stock_minimo INT DEFAULT 0,
-  precio NUMERIC, costo_unitario NUMERIC, activo BOOLEAN DEFAULT TRUE
+  precio NUMERIC, costo_unitario NUMERIC, activo BOOLEAN DEFAULT TRUE,
+  codigo TEXT
+);
+
+-- Nombre del tipo de característica (Talla, Color…). El escaneo lo usa para
+-- rotular el nodo que devuelve: "Talla: M" en vez de "M" a secas.
+CREATE TABLE IF NOT EXISTS tipos_caracteristica (
+  id SERIAL PRIMARY KEY, negocio_id INT, nombre TEXT, orden INT DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS prestatarios (

@@ -826,10 +826,46 @@ const importarCantidad = async (filas, sucursalId, negocioId, config = {}, opcio
 
   const resultado = { insertados: 0, actualizados: 0, omitidos: 0, errores: [], unidades_sumadas: 0 };
 
-  // codigo → nombre (lower) ya visto en el archivo, para detectar el mismo
-  // código apuntando a dos productos distintos dentro del mismo Excel.
+  // codigo → identidad ya vista en el archivo, para detectar el mismo código
+  // apuntando a dos cosas distintas dentro del mismo Excel.
   const codigosArchivo = new Map();
   const nombresArchivo = new Map();
+
+  // ── ¿Los códigos de este producto son del PRODUCTO o de sus VARIANTES? ────
+  //
+  // Las dos formas existen y las dos son legítimas:
+  //   · códigos DISTINTOS en varias filas del mismo producto → cada código
+  //     identifica ESA variante. Es lo que pedía el lector: escanear la talla
+  //     38MM, no "la correa".
+  //   · un solo código (repetido o en una sola fila) → identifica el PRODUCTO,
+  //     como venían los archivos hasta hoy.
+  //
+  // Mirando una fila sola es imposible distinguirlas: hay que ver el archivo
+  // entero antes de empezar. Y la regla tiene que ser conservadora, porque
+  // mover un código del producto a una variante no es gratis — `red-interna`
+  // empareja el mismo producto entre sedes por `productos_cantidad.codigo`, y
+  // vaciarlo lo dejaría emparejando solo por nombre.
+  //
+  // Sin esta pasada previa, un archivo con el mismo código repetido en las
+  // filas de un producto perdía todas menos la primera, rechazadas por "código
+  // repetido" y EN SILENCIO — justo el daño que este importador existe para
+  // no hacer.
+  const productosConCodigoPorVariante = new Set();
+  {
+    const porProducto = new Map();
+    for (const f of filas) {
+      let c;
+      try { c = _normalizarCodigoImport(f.codigo ?? f['código']); } catch { continue; }
+      const nom = f.nombre?.toString().trim();
+      if (!c || !nom) continue;
+      const k = nom.toLowerCase();
+      if (!porProducto.has(k)) porProducto.set(k, new Set());
+      porProducto.get(k).add(c);
+    }
+    for (const [k, codigos] of porProducto) {
+      if (codigos.size > 1) productosConCodigoPorVariante.add(k);
+    }
+  }
 
   const ctx = await _abrir(opciones.client);
   const client = ctx.client;
@@ -878,8 +914,21 @@ const importarCantidad = async (filas, sucursalId, negocioId, config = {}, opcio
       const atributoValor = variantesActivo ? fila.atributo?.toString().trim() || null : null;
       const varianteValor = atributoValor   ? fila.variante?.toString().trim() || null : null;
       const identidadNodo = { producto: nombre, atributo: atributoValor, variante: varianteValor };
-      const claveNodo = [nombre, atributoValor ?? '', varianteValor ?? ''].join(' ').toLowerCase();
-      const etiquetaNodo = [nombre, atributoValor, varianteValor].filter(Boolean).join(' / ');
+
+      // …salvo que el archivo repita ese código en varias filas del mismo
+      // producto: entonces el código es DEL PRODUCTO (la forma de siempre), y
+      // esa es la identidad que manda en todo lo que sigue: la detección de
+      // choques, la herencia y la propagación.
+      const codigoEsDelProducto = !productosConCodigoPorVariante.has(nombre.toLowerCase());
+      const identidadCodigo = codigoEsDelProducto
+        ? { producto: nombre, atributo: null, variante: null }
+        : identidadNodo;
+      const claveNodo = codigoEsDelProducto
+        ? nombre.toLowerCase()
+        : [nombre, atributoValor ?? '', varianteValor ?? ''].join('|').toLowerCase();
+      const etiquetaNodo = codigoEsDelProducto
+        ? nombre
+        : [nombre, atributoValor, varianteValor].filter(Boolean).join(' / ');
 
       if (codigo) {
         const nodoPrevio = codigosArchivo.get(codigo);
@@ -901,7 +950,7 @@ const importarCantidad = async (filas, sucursalId, negocioId, config = {}, opcio
         // comparación es por identidad y no por id — que además todavía no
         // existe si el nodo se va a crear en esta misma fila.
         const tomado = await codigoTomadoPorOtroNodo(client, {
-          negocioId, codigo, identidad: identidadNodo,
+          negocioId, codigo, identidad: identidadCodigo,
         });
         if (tomado) {
           conflicto(informe, {
@@ -960,6 +1009,9 @@ const importarCantidad = async (filas, sucursalId, negocioId, config = {}, opcio
         // cuando ya se sabe si el stock fue al producto, al atributo o a la
         // sub-variante. { tabla, id }
         let nodoDelCodigo = null;
+        // Id del producto de esta fila, para cuando el código es del producto
+        // aunque el stock haya ido a una variante.
+        let productoDeLaFila = null;
 
         if (!variantesActivo && fila.atributo?.toString().trim()) {
           avisoUnico(informe, {
@@ -975,6 +1027,7 @@ const importarCantidad = async (filas, sucursalId, negocioId, config = {}, opcio
             nombre, sucursalId, proveedorId, costoUnit, unidad, clienteOrig, precioVenta, lineaId,
           });
           const productoId = base.id;
+          productoDeLaFila = productoId;
           await _avisarSobreNombre(client, 'productos_cantidad', {
             informe, hoja: 'Productos Cantidad', fila: nFila, nombre,
             sucursalId, coincidencias: base.coincidencias, vistosArchivo: nombresArchivo,
@@ -1059,6 +1112,7 @@ const importarCantidad = async (filas, sucursalId, negocioId, config = {}, opcio
             await _aplicarUbicacion(client, 'productos_cantidad', existe[0].id, fila.ubicacion, ubicacionActiva);
             await _aplicarNota(client, 'productos_cantidad', existe[0].id, fila.nota);
             nodoDelCodigo = { tabla: 'productos_cantidad', id: existe[0].id };
+            productoDeLaFila = existe[0].id;
             resultado.actualizados++;
             resultado.unidades_sumadas += stock;
             if (stock > 0) {
@@ -1082,6 +1136,7 @@ const importarCantidad = async (filas, sucursalId, negocioId, config = {}, opcio
             await _aplicarUbicacion(client, 'productos_cantidad', creado[0]?.id, fila.ubicacion, ubicacionActiva);
             await _aplicarNota(client, 'productos_cantidad', creado[0]?.id, fila.nota);
             nodoDelCodigo = { tabla: 'productos_cantidad', id: creado[0]?.id };
+            productoDeLaFila = creado[0]?.id;
             resultado.insertados++;
           }
         }
@@ -1097,9 +1152,26 @@ const importarCantidad = async (filas, sucursalId, negocioId, config = {}, opcio
         // para que el escaneo funcione igual en todas las sedes.
         let codigoFinal = codigo;
         if (!codigoFinal) {
-          codigoFinal = await heredarCodigo(client, {
-            negocioId, sucursalId, identidad: identidadNodo,
+          const { codigo: heredado, bloqueadoPor } = await heredarCodigo(client, {
+            negocioId, sucursalId, identidad: identidadCodigo,
           });
+          codigoFinal = heredado;
+          // "No hay código que heredar" y "lo hay pero está ocupado" NO son lo
+          // mismo: callar el segundo deja el escaneo roto en esta sede sin que
+          // nadie sepa por qué.
+          if (bloqueadoPor) {
+            aviso(informe, {
+              hoja: 'Productos Cantidad', fila: nFila, columna: 'Codigo', valor: bloqueadoPor.codigo,
+              tipo: AVISO.CODIGO_NO_APLICADO,
+              mensaje: `«${etiquetaNodo}» se importó sin código: en esta sucursal el código ${bloqueadoPor.codigo} ya lo tiene «${bloqueadoPor.etiqueta}».`,
+              sugerencia: 'Escribe un código distinto en el Excel, o libera el que está ocupado.',
+            });
+          }
+        }
+        // Si el código es del producto (el archivo lo repite en varias de sus
+        // filas), va al producto aunque el stock haya ido a una variante.
+        if (codigoEsDelProducto && productoDeLaFila) {
+          nodoDelCodigo = { tabla: 'productos_cantidad', id: productoDeLaFila };
         }
 
         // Va en su PROPIO savepoint: este UPDATE puede chocar con el índice
@@ -1115,7 +1187,7 @@ const importarCantidad = async (filas, sucursalId, negocioId, config = {}, opcio
               [codigoFinal, nodoDelCodigo.id]
             );
             await client.query('RELEASE SAVEPOINT codigo_sp');
-            await propagarCodigo(client, { negocioId, identidad: identidadNodo, codigo: codigoFinal });
+            await propagarCodigo(client, { negocioId, identidad: identidadCodigo, codigo: codigoFinal });
           } catch (errCodigo) {
             await client.query('ROLLBACK TO SAVEPOINT codigo_sp');
             aviso(informe, {

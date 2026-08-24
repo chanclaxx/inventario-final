@@ -192,7 +192,11 @@ ok('★ El runner incluye la migración v3', runner.includes(marca),
    marca);
 
 const bloqueV3 = runner.slice(runner.indexOf(marca));
-const sqlV3 = [...bloqueV3.matchAll(/await pool\.query\(`([\s\S]*?)`\);/g)]
+// `pool` o `client`: desde que runMigrations corre sobre un client dedicado
+// (para poder ponerle lock_timeout una sola vez), el nombre cambió. Lo que esta
+// prueba vigila es que el runner CREE lo mismo que el .sql, no cómo se llama la
+// variable — así que acepta las dos formas en vez de romperse en un renombre.
+const sqlV3 = [...bloqueV3.matchAll(/await (?:pool|client)\.query\(`([\s\S]*?)`\);/g)]
   .slice(0, 2)
   .map((m) => m[1]);
 ok('  y trae sus dos sentencias (tabla + backfill)', sqlV3.length === 2);

@@ -98,6 +98,10 @@ CREATE UNIQUE INDEX uq_productos_cantidad_codigo
   ON productos_cantidad (sucursal_id, codigo)
   WHERE codigo IS NOT NULL AND activo;
 
+-- `codigo` en los tres niveles: lo escaneable es el NODO, no el producto
+-- (ver migrations/20260823_codigo_variantes.sql). Los índices únicos van con
+-- los mismos predicados que producción — sin ellos, la prueba no cazaría un
+-- código repetido.
 CREATE TABLE atributos_producto (
   id SERIAL PRIMARY KEY,
   producto_id INT REFERENCES productos_cantidad(id) ON DELETE CASCADE,
@@ -105,8 +109,13 @@ CREATE TABLE atributos_producto (
   valor TEXT, stock INT DEFAULT 0, stock_minimo INT DEFAULT 0,
   precio NUMERIC, activo BOOLEAN DEFAULT TRUE,
   creado_en TIMESTAMP DEFAULT NOW(),
-  costo_unitario NUMERIC
+  costo_unitario NUMERIC,
+  codigo TEXT
 );
+
+CREATE UNIQUE INDEX uq_atributos_producto_codigo
+  ON atributos_producto (sucursal_id, codigo)
+  WHERE codigo IS NOT NULL AND activo;
 
 CREATE TABLE variantes_atributo (
   id SERIAL PRIMARY KEY,
@@ -115,5 +124,10 @@ CREATE TABLE variantes_atributo (
   valor TEXT, stock INT DEFAULT 0, stock_minimo INT DEFAULT 0,
   precio NUMERIC, activo BOOLEAN DEFAULT TRUE,
   creado_en TIMESTAMP DEFAULT NOW(),
-  costo_unitario NUMERIC
+  costo_unitario NUMERIC,
+  codigo TEXT
 );
+
+CREATE UNIQUE INDEX uq_variantes_atributo_codigo
+  ON variantes_atributo (atributo_id, codigo)
+  WHERE codigo IS NOT NULL AND activo;

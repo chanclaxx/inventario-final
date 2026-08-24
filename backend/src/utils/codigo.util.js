@@ -214,6 +214,12 @@ const propagarCodigo = async (ejecutor, { negocioId, identidad, codigo }) => {
 // escaneo funcione igual en todas. Solo lo hereda si en la sucursal destino ese
 // código está libre (evita chocar con el índice único ante datos heredados
 // inconsistentes).
+//
+// Devuelve `{ codigo, bloqueadoPor }` y NO solo el código: hay que poder
+// distinguir "no hay nada que heredar" de "lo hay pero está ocupado". Si se
+// devuelve null en los dos casos, el nodo se queda sin código sin que nadie se
+// entere, el escaneo deja de funcionar en esa sede y no hay forma de saber por
+// qué. El llamador reporta el segundo caso al informe.
 const heredarCodigo = async (ejecutor, { negocioId, sucursalId, identidad }) => {
   const db = ejecutor || pool;
   const { producto, atributo = null, variante = null } = identidad;
@@ -245,10 +251,12 @@ const heredarCodigo = async (ejecutor, { negocioId, sucursalId, identidad }) => 
     [negocioId, producto, atributo, variante]
   );
   const codigo = rows[0]?.codigo || null;
-  if (!codigo) return null;
+  if (!codigo) return { codigo: null, bloqueadoPor: null };
 
   const [ocupado] = await buscarCodigoEnUso(db, { sucursalId, codigo });
-  return ocupado ? null : codigo;
+  return ocupado
+    ? { codigo: null, bloqueadoPor: { ...ocupado, codigo } }
+    : { codigo, bloqueadoPor: null };
 };
 
 module.exports = {

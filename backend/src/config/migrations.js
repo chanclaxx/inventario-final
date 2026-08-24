@@ -1,9 +1,62 @@
 const { pool } = require('./db');
 
+// ── Aplicar DDL de arranque sin poder tumbar el servidor ─────────────────────
+//
+// `ALTER TABLE` pide ACCESS EXCLUSIVE sobre la tabla. Si hay UNA transacción
+// abierta encima —una importación larga, una consulta colgada, una sesión que
+// quedó `idle in transaction`— el ALTER se queda esperando. Sin tope esperaba
+// hasta el statement_timeout y el arranque moría con **57014 (query_canceled)**,
+// dejando a los 28 negocios sin backend por una migración que además ya estaba
+// aplicada. Pasó en producción el 23-ago-2026, y murió en el PRIMER bloque
+// (`nota`), que toca `productos_cantidad` y `seriales` — las tablas más
+// calientes del sistema.
+//
+// Con `lock_timeout` falla en 3 segundos, se anota en el log y el servidor
+// arranca igual; en el siguiente despliegue se aplica. Una feature apagada es un
+// problema de una feature; un backend que no arranca es un problema de todos.
+//
+// Va sobre un client DEDICADO, no sobre `pool.query`: si un multi-statement con
+// BEGIN falla a la mitad, la sesión queda en "aborted transaction", y un
+// `pool.query('ROLLBACK')` suelto podría tomar OTRA conexión y dejar la rota en
+// el pool para que la herede la primera consulta real. El `finally` devuelve el
+// `lock_timeout` a su valor normal antes de soltar la conexión: nadie más debe
+// heredar un tope de 3s.
+const migrar = async (client, etiqueta, sql) => {
+  try {
+    await client.query('BEGIN');
+    await client.query(sql);
+    await client.query('COMMIT');
+    return true;
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error(`⚠️  ${etiqueta}: no aplicada, se reintenta en el próximo arranque —`, err.message);
+    return false;
+  }
+};
+
+// Un solo client para TODA la migración, con el tope de espera puesto una vez:
+// así los bloques que NO pasan por `migrar()` —los que ya traen su propio
+// try/catch— tampoco se quedan colgados esperando un lock. Sin esto no mataban
+// el arranque, pero cada uno esperaba hasta el statement_timeout y el
+// despliegue quedaba detenido igual.
+//
+// El `finally` devuelve el tope a su valor normal antes de soltar la conexión:
+// ninguna consulta de la app debe heredar un lock_timeout de 3 segundos.
 const runMigrations = async () => {
+  const client = await pool.connect();
+  try {
+    await client.query("SET lock_timeout = '3s'");
+    await aplicarMigraciones(client);
+  } finally {
+    await client.query('SET lock_timeout = DEFAULT').catch(() => {});
+    client.release();
+  }
+};
+
+const aplicarMigraciones = async (client) => {
   // ── Auto-aplicadas al arrancar (100% aditivas e idempotentes) ──────────────
   // Notas / post-it de inventario — ver migrations/20260710_notas_inventario.sql
-  await pool.query(`
+  await migrar(client, 'Notas de inventario', `
     ALTER TABLE IF EXISTS seriales           ADD COLUMN IF NOT EXISTS nota TEXT;
     ALTER TABLE IF EXISTS productos_serial   ADD COLUMN IF NOT EXISTS nota TEXT;
     ALTER TABLE IF EXISTS productos_cantidad ADD COLUMN IF NOT EXISTS nota TEXT;
@@ -12,7 +65,7 @@ const runMigrations = async () => {
   // Código único de producto (tipo supermercado) — ver migrations/20260714_codigo_producto.sql
   // 100% aditiva e idempotente. Columna nullable: negocios sin la feature no la notan.
   // Unicidad por sucursal solo entre productos activos (permite reusar código tras borrado lógico).
-  await pool.query(`
+  await migrar(client, 'Código único de producto', `
     ALTER TABLE IF EXISTS productos_cantidad ADD COLUMN IF NOT EXISTS codigo TEXT;
     CREATE UNIQUE INDEX IF NOT EXISTS uq_productos_cantidad_codigo
       ON productos_cantidad (sucursal_id, codigo)
@@ -26,7 +79,7 @@ const runMigrations = async () => {
   // `variantes_atributo` no tiene sucursal_id, así que su índice es por atributo;
   // el alcance de sucursal y la unicidad entre los tres niveles la impone
   // src/utils/codigo.util.js.
-  await pool.query(`
+  await migrar(client, 'Código en variantes', `
     ALTER TABLE IF EXISTS atributos_producto ADD COLUMN IF NOT EXISTS codigo TEXT;
     ALTER TABLE IF EXISTS variantes_atributo ADD COLUMN IF NOT EXISTS codigo TEXT;
     CREATE UNIQUE INDEX IF NOT EXISTS uq_atributos_producto_codigo
@@ -46,7 +99,7 @@ const runMigrations = async () => {
   // La detección de src/config/columnas.js se encarga de apagar la feature si
   // el ALTER no llegó a aplicarse.
   try {
-    await pool.query(`
+    await client.query(`
       ALTER TABLE IF EXISTS productos_cantidad ADD COLUMN IF NOT EXISTS ubicacion TEXT;
       ALTER TABLE IF EXISTS productos_serial   ADD COLUMN IF NOT EXISTS ubicacion TEXT;
       CREATE INDEX IF NOT EXISTS idx_productos_cantidad_ubicacion
@@ -62,7 +115,7 @@ const runMigrations = async () => {
 
   // Gastos fijos mensuales por sucursal (Proyección) — ver migrations/20260712_gastos_fijos.sql
   // 100% aditiva e idempotente. Alimenta la utilidad neta y el punto de equilibrio.
-  await pool.query(`
+  await client.query(`
     CREATE TABLE IF NOT EXISTS gastos_fijos (
       id             SERIAL        PRIMARY KEY,
       sucursal_id    INTEGER       NOT NULL,
@@ -89,7 +142,7 @@ const runMigrations = async () => {
   // Va en su propio try/catch: son puramente de rendimiento, y un fallo aquí (una BD
   // vieja sin alguna de estas columnas) no debe impedir que arranque el servidor.
   try {
-    await pool.query(`
+    await client.query(`
       CREATE INDEX IF NOT EXISTS idx_lineas_factura_imei
         ON lineas_factura (imei) WHERE imei IS NOT NULL;
       CREATE INDEX IF NOT EXISTS idx_lineas_compra_imei
@@ -119,7 +172,7 @@ const runMigrations = async () => {
   // error se registra y se sigue: solo la red interna queda sin infraestructura,
   // y su middleware ya responde 503 si las tablas no existen.
   try {
-    await pool.query(`
+    await client.query(`
       CREATE TABLE IF NOT EXISTS remisiones (
         id                  BIGSERIAL     PRIMARY KEY,
         negocio_id          INTEGER       NOT NULL REFERENCES negocios(id)   ON DELETE RESTRICT,
@@ -218,7 +271,7 @@ const runMigrations = async () => {
     // v2 — devoluciones auditables y corrección de valores.
     // Ver migrations/20260726_red_interna_v2.sql. Solo toca tablas de la red
     // interna; ninguna tabla del sistema original se modifica.
-    await pool.query(`
+    await client.query(`
       ALTER TABLE IF EXISTS lineas_remision ADD COLUMN IF NOT EXISTS origen_unidad TEXT;
       ALTER TABLE IF EXISTS lineas_remision ADD COLUMN IF NOT EXISTS genera_saldo_favor BOOLEAN NOT NULL DEFAULT FALSE;
       ALTER TABLE IF EXISTS lineas_remision ADD COLUMN IF NOT EXISTS valor_original NUMERIC(14,2);
@@ -262,7 +315,7 @@ const runMigrations = async () => {
     // envío lleva su propia cuenta. El CARGO se sigue derivando de las líneas;
     // lo que hay que guardar es el ABONO, porque a qué envío se imputa un pago
     // lo decide una persona y no se puede leer de ninguna otra tabla.
-    await pool.query(`
+    await client.query(`
       CREATE TABLE IF NOT EXISTS abonos_remision (
         id            BIGSERIAL     PRIMARY KEY,
         negocio_id    INTEGER       NOT NULL REFERENCES negocios(id)   ON DELETE RESTRICT,
@@ -301,7 +354,7 @@ const runMigrations = async () => {
     // FIFO. Se salta cualquier local que YA tenga abonos, así que después de la
     // primera pasada es un no-op: puede correr en cada arranque sin duplicar
     // un peso. Lo que sobre queda sin imputar y se lee como saldo a favor.
-    await pool.query(`
+    await client.query(`
       DO $backfill$
       DECLARE
         v_local  RECORD; v_pago RECORD; v_envio RECORD;
@@ -395,7 +448,7 @@ const runMigrations = async () => {
     // 'Aprobado' por DEFAULT y no 'Por aprobar': al revés, todo lo ya
     // registrado quedaría en el limbo y la deuda de cada local cambiaría solo
     // por aplicar la migración.
-    await pool.query(`
+    await client.query(`
       ALTER TABLE IF EXISTS movimientos_cuenta_interna
         ADD COLUMN IF NOT EXISTS estado TEXT NOT NULL DEFAULT 'Aprobado';
       ALTER TABLE IF EXISTS movimientos_cuenta_interna
@@ -417,7 +470,7 @@ const runMigrations = async () => {
     // podía imputar un abono, así que no se podía pagar NUNCA. Con los envíos
     // al día, el dinero que entraba se volvía saldo a favor y el cargo se
     // quedaba ahí — deber y tener a favor al mismo tiempo.
-    await pool.query(`
+    await client.query(`
       ALTER TABLE IF EXISTS abonos_remision ALTER COLUMN remision_id DROP NOT NULL;
       ALTER TABLE IF EXISTS abonos_remision ADD COLUMN IF NOT EXISTS cargo_id BIGINT
         REFERENCES movimientos_cuenta_interna(id) ON DELETE CASCADE;
@@ -426,7 +479,7 @@ const runMigrations = async () => {
     `);
 
     // Los CHECK van aparte: ADD CONSTRAINT no admite IF NOT EXISTS.
-    await pool.query(`
+    await client.query(`
       DO $chk$
       BEGIN
         IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'mci_estado_chk') THEN
@@ -463,7 +516,7 @@ const runMigrations = async () => {
   // Propio try/catch, por la misma razón que la red interna: un fallo aquí no
   // puede dejar el servidor sin arrancar para todos los negocios.
   try {
-    await pool.query(`
+    await client.query(`
       ALTER TABLE IF EXISTS creditos  ADD COLUMN IF NOT EXISTS fecha_limite   DATE;
       ALTER TABLE IF EXISTS creditos  ADD COLUMN IF NOT EXISTS mora_condicion JSONB;
       ALTER TABLE IF EXISTS prestamos ADD COLUMN IF NOT EXISTS fecha_limite   DATE;
@@ -529,7 +582,7 @@ const runMigrations = async () => {
   //
   // Propio try/catch: un fallo aquí no puede dejar el servidor sin arrancar.
   try {
-    await pool.query(`
+    await client.query(`
       ALTER TABLE IF EXISTS creditos  ADD COLUMN IF NOT EXISTS interes_condicion JSONB;
       ALTER TABLE IF EXISTS creditos  ADD COLUMN IF NOT EXISTS interes_desde     DATE;
       ALTER TABLE IF EXISTS prestamos ADD COLUMN IF NOT EXISTS interes_condicion JSONB;
@@ -571,7 +624,7 @@ const runMigrations = async () => {
   //
   // 100% aditiva e idempotente. Sin la columna todo funciona como antes.
   try {
-    await pool.query(`
+    await client.query(`
       CREATE SEQUENCE IF NOT EXISTS pago_total_acreedor_seq;
 
       ALTER TABLE IF EXISTS movimientos_acreedor
@@ -583,7 +636,7 @@ const runMigrations = async () => {
 
     // Backfill de los pagos ya registrados. Las filas de un mismo pago se
     // insertaron en una transacción, así que comparten `fecha` al microsegundo.
-    await pool.query(`
+    await client.query(`
       WITH grupos AS (
         SELECT acreedor_id, fecha, metodo,
                nextval('pago_total_acreedor_seq') AS nuevo_id
@@ -619,7 +672,7 @@ const runMigrations = async () => {
   // `descripcion`, que es la del abono individual y la que usa el backfill de
   // 20260805 para reconocer los pagos totales viejos.
   try {
-    await pool.query(`
+    await client.query(`
       ALTER TABLE IF EXISTS abonos_totales
         ADD COLUMN IF NOT EXISTS descripcion TEXT;
       ALTER TABLE IF EXISTS movimientos_acreedor
@@ -637,7 +690,7 @@ const runMigrations = async () => {
   // (permisos, BD antigua) solo debe dejar sin notificaciones a quien las use,
   // nunca sin servidor a los otros negocios.
   try {
-    await pool.query(`
+    await client.query(`
       CREATE TABLE IF NOT EXISTS push_suscripciones (
         id            SERIAL PRIMARY KEY,
         usuario_id    INTEGER     NOT NULL REFERENCES usuarios(id)   ON DELETE CASCADE,
@@ -695,7 +748,7 @@ const runMigrations = async () => {
   // tablas vacías sin costo ni efecto. Propio try/catch por la misma razón que
   // la red interna: un fallo aquí no puede dejar el servidor sin arrancar.
   try {
-    await pool.query(`
+    await client.query(`
       CREATE TABLE IF NOT EXISTS catalogo_sucursal (
         id                     SERIAL      PRIMARY KEY,
         negocio_id             INTEGER     NOT NULL REFERENCES negocios(id)   ON DELETE CASCADE,
@@ -779,7 +832,7 @@ const runMigrations = async () => {
   // error se registra y se sigue: solo esta feature queda sin infraestructura,
   // y su middleware ya responde 503 si las tablas no existen.
   try {
-    await pool.query(`
+    await client.query(`
       -- cantidad_devuelta va primero porque es la única que toca código vivo:
       -- devolverCompra() revierte inventario y emite la nota crédito, pero hoy
       -- no registra QUÉ unidades volvieron. Sin esto, una orden marcaría 100/100
@@ -951,7 +1004,7 @@ const runMigrations = async () => {
   // un fallo aquí solo debe dejar sin borradores a quien los use, nunca sin
   // servidor a los otros negocios.
   try {
-    await pool.query(`
+    await client.query(`
       CREATE TABLE IF NOT EXISTS borradores (
         id             SERIAL      PRIMARY KEY,
         sucursal_id    INTEGER     NOT NULL REFERENCES sucursales(id) ON DELETE CASCADE,
