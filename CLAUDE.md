@@ -216,6 +216,33 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > también por `codigos_variantes` (agregado en `findAll`): sin eso, mover los
 > códigos a las variantes los volvía inbuscables.
 
+> **El costo de un LOCAL es el valor_interno, no el de la bodega**
+> (`reportes.service.js: _valorInternoSerial`): cuando la bodega despacha, le
+> cobra al local por encima de lo que a ella le costó. El costo del local es el
+> `valor_interno` de la línea de la remisión — lo que tendrá que liquidar al
+> vender. Los productos por **cantidad** ya lo resolvían solos: la recepción
+> reescribe `productos_cantidad.costo_unitario` del destino con el promedio
+> ponderado sobre `valor_interno`. Los **seriales NO**, porque `moverSerial` solo
+> cambia `producto_id` y `seriales.costo_compra` **se conserva a propósito**: es
+> la verdad del costo del NEGOCIO (lo que se le pagó a un proveedor externo), y
+> para el margen consolidado del grupo eso es lo correcto — el traspaso interno
+> se anula solo.
+> El hueco estaba en los reportes por sucursal, que calculaban el costo de una
+> venta con IMEI desde `costo_compra` sin mirar si esa sucursal era un local:
+> el local reportaba utilidad inflada en los equipos y correcta en los
+> accesorios, con dos varas de medir en el mismo reporte. **El arreglo NO
+> reescribe `costo_compra`** —se perdería el costo externo real—: el reporte
+> prefiere el `valor_interno` de la entrega más reciente **anterior a la venta**
+> (una unidad puede enviarse, devolverse y reenviarse con otro valor) y cae a
+> `costo_compra` cuando no aplica. `r.tipo = 'entrega'` es lo que excluye a la
+> bodega. Alimenta los 6 reportes que pasan por `_costoPorImei`, más préstamos y
+> productos más vendidos. El cruce va por IMEI —no por `serial_id`— porque se
+> parte de `lineas_factura`, que no lo guarda; acotarlo a la sucursal destino y
+> a la fecha es lo que evita el fan-out del IMEI.
+> Prueba: `23-costo-serial-en-local` (falla 3 de 7 contra el código anterior;
+> las 4 barandas —bodega, unidad propia, negocio sin red, remisión anulada—
+> pasan en ambos).
+
 > **Red interna — el ENVÍO es la deuda** (`red-interna/`): una sucursal-bodega
 > surte a los locales. Feature opt-in (`config_negocio.red_interna_activa`),
 > nunca activa para clientes existentes.

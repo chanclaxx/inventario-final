@@ -6,9 +6,57 @@ const HOY   = `DATE(fecha   AT TIME ZONE 'UTC' AT TIME ZONE 'America/Bogota') = 
 // Helper timezone: columnas "timestamp without time zone" almacenadas en UTC
 const fechaBogota = (col) => `(${col} AT TIME ZONE 'UTC' AT TIME ZONE 'America/Bogota')::date`;
 
+// ── Costo de una unidad serial en un LOCAL de la red interna ─────────────────
+//
+// En un local, el costo real de un equipo consignado NO es `seriales.costo_compra`
+// —esa es la verdad del costo de la BODEGA, que a propósito nunca se reescribe
+// al remisionar— sino el `valor_interno` que la bodega le puso en la remisión:
+// lo que el local tendrá que liquidarle cuando lo venda.
+//
+// Los productos por CANTIDAD ya lo resolvían solos: al recibir, la recepción
+// reescribe `productos_cantidad.costo_unitario` del destino con el promedio
+// ponderado sobre `valor_interno`. Los seriales no, porque `moverSerial` solo
+// cambia `producto_id`. Sin esto, el local vendía un equipo consignado y su
+// utilidad salía contra el costo de la bodega —inflada, porque la bodega le
+// cobra por encima— mientras que la de los accesorios salía bien: el mismo
+// reporte midiendo con dos varas.
+//
+// Devuelve NULL cuando no aplica (negocio sin red, unidad propia del local,
+// retoma) y entonces el llamador cae a `costo_compra`, que ahí sí es lo correcto.
+// `r.tipo = 'entrega'` es lo que excluye a la BODEGA: las entregas van
+// bodega → local, y en las devoluciones el destino es la bodega, que debe seguir
+// usando su propio costo.
+//
+// Se toma la entrega más reciente ANTERIOR a la venta: una unidad puede haberse
+// enviado, devuelto y vuelto a enviar con otro valor interno.
+//
+// El cruce va por IMEI y no por `serial_id` a propósito: aquí se parte de
+// `lineas_factura`, que no guarda serial_id. Acotarlo a la sucursal destino y a
+// la fecha es lo que evita el fan-out del IMEI (un mismo IMEI tiene varias filas
+// históricas en `seriales`).
+const _valorInternoSerial = (imeiAlias, sucursalAlias, fechaAlias) => `
+    (
+      SELECT lr.valor_interno
+      FROM lineas_remision lr
+      JOIN remisiones r ON r.id = lr.remision_id
+      WHERE r.sucursal_destino_id = ${sucursalAlias}
+        AND r.tipo          = 'entrega'
+        AND r.estado       <> 'Anulada'
+        AND lr.tipo         = 'serial'
+        AND lr.estado_linea = 'Recibida'
+        AND lr.valor_interno IS NOT NULL
+        AND UPPER(TRIM(lr.imei)) = UPPER(TRIM(${imeiAlias}))
+        ${fechaAlias ? `AND r.fecha_emision <= ${fechaAlias}` : ''}
+      ORDER BY r.fecha_emision DESC, lr.id DESC
+      LIMIT 1
+    )`;
+
 // ── Helper: subquery de costo de serial anclada al negocio ───────────────────
-const _costoPorImei = (imeiAlias, sucursalAlias) => `
+// El valor interno manda cuando la unidad vino de la bodega de la red; si no,
+// el costo de compra de siempre.
+const _costoPorImei = (imeiAlias, sucursalAlias, fechaAlias = null) => `
   COALESCE(
+    ${_valorInternoSerial(imeiAlias, sucursalAlias, fechaAlias)},
     (
       SELECT s.costo_compra
       FROM seriales s
@@ -106,7 +154,7 @@ const getDashboard = async (sucursalId, negocioId = null) => {
             l.subtotal
             - CASE
                 WHEN l.imei IS NOT NULL THEN
-                  ${_costoPorImei('l.imei', 'f.sucursal_id')}
+                  ${_costoPorImei('l.imei', 'f.sucursal_id', 'f.fecha')}
                 ELSE
                   COALESCE(
                     (SELECT v.costo_unitario FROM variantes_atributo v WHERE v.id = l.variante_id),
@@ -155,7 +203,7 @@ const getDashboard = async (sucursalId, negocioId = null) => {
           SUM(
             CASE
               WHEN l.imei IS NOT NULL THEN
-                ${_costoPorImei('l.imei', 'f.sucursal_id')} * ${CANT_EFECTIVA}
+                ${_costoPorImei('l.imei', 'f.sucursal_id', 'f.fecha')} * ${CANT_EFECTIVA}
               ELSE
                 COALESCE(
                   (SELECT v.costo_unitario FROM variantes_atributo v WHERE v.id = l.variante_id),
@@ -546,11 +594,14 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
   const costoProductoCase = `
     CASE
       WHEN p.imei IS NOT NULL THEN
-        (SELECT s.costo_compra
-         FROM seriales s
-         JOIN productos_serial ps ON ps.id = s.producto_id
-         WHERE s.imei = p.imei AND ps.sucursal_id = p.sucursal_id
-         LIMIT 1)
+        COALESCE(
+          ${_valorInternoSerial('p.imei', 'p.sucursal_id', 'p.fecha')},
+          (SELECT s.costo_compra
+           FROM seriales s
+           JOIN productos_serial ps ON ps.id = s.producto_id
+           WHERE s.imei = p.imei AND ps.sucursal_id = p.sucursal_id
+           LIMIT 1)
+        )
       WHEN p.variante_id IS NOT NULL THEN
         (SELECT v.costo_unitario * p.cantidad_prestada
          FROM variantes_atributo v WHERE v.id = p.variante_id LIMIT 1)
@@ -721,7 +772,7 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
       l.variante_id,
       CASE
         WHEN l.imei IS NOT NULL THEN
-          ${_costoPorImei('l.imei', 'f.sucursal_id')}
+          ${_costoPorImei('l.imei', 'f.sucursal_id', 'f.fecha')}
         WHEN l.variante_id IS NOT NULL THEN
           (SELECT v.costo_unitario FROM variantes_atributo v WHERE v.id = l.variante_id)
         WHEN l.atributo_id IS NOT NULL THEN
@@ -931,7 +982,7 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
         SUM(
           CASE
             WHEN l.imei IS NOT NULL THEN
-              ${_costoPorImei('l.imei', 'f.sucursal_id')} * ${CANT_EFECTIVA}
+              ${_costoPorImei('l.imei', 'f.sucursal_id', 'f.fecha')} * ${CANT_EFECTIVA}
             ELSE
               COALESCE(
                 (SELECT v.costo_unitario FROM variantes_atributo v WHERE v.id = l.variante_id),
@@ -1037,6 +1088,7 @@ const getProductosTop = async (sucursalId, desde, hasta) => {
         WHEN MAX(l.imei) IS NOT NULL THEN (
           SELECT AVG(
             COALESCE(
+              ${_valorInternoSerial('s.imei', '$1', 'ff.fecha')},
               s.costo_compra,
               (SELECT AVG(s2.costo_compra)
                FROM seriales s2
@@ -1135,7 +1187,7 @@ const getVentasPorVendedor = async (sucursalId, desde, hasta) => {
   const costoLineaCase = `
     CASE
       WHEN l.imei IS NOT NULL THEN
-        ${_costoPorImei('l.imei', 'f.sucursal_id')} * ${CANT_EFECTIVA}
+        ${_costoPorImei('l.imei', 'f.sucursal_id', 'f.fecha')} * ${CANT_EFECTIVA}
       ELSE
         COALESCE(
           (SELECT v.costo_unitario FROM variantes_atributo v WHERE v.id = l.variante_id),
@@ -1283,7 +1335,7 @@ const getAnalisis = async (sucursalId, desde, hasta, agrupacion) => {
   const costoLineaCase = `
     CASE
       WHEN l.imei IS NOT NULL THEN
-        ${_costoPorImei('l.imei', 'f.sucursal_id')} * ${CANT_EFECTIVA}
+        ${_costoPorImei('l.imei', 'f.sucursal_id', 'f.fecha')} * ${CANT_EFECTIVA}
       ELSE
         COALESCE(
           (SELECT v.costo_unitario FROM variantes_atributo v WHERE v.id = l.variante_id),

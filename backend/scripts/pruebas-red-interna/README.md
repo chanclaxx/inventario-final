@@ -36,6 +36,7 @@ node scripts/pruebas-red-interna/17-pago-total-acreedor.mjs
 node scripts/pruebas-red-interna/18-importacion.mjs
 node scripts/pruebas-red-interna/19-ordenes-compra.mjs
 node scripts/pruebas-red-interna/20-borradores.mjs
+node scripts/pruebas-red-interna/23-costo-serial-en-local.mjs
 ```
 
 > `20-borradores` verifica sobre todo una invariante negativa: guardar un
@@ -429,6 +430,22 @@ toca la cuenta directamente.
 > atrás el cargo original del envío *además* de generar la nota de crédito, con
 > lo que la baja se contaba dos veces. El "nunca llegó" vive en
 > `remisiones.motivo`, que es de donde lo leen la pantalla y el historial.
+
+### `23-costo-serial-en-local.mjs` — 7 verificaciones
+
+En un LOCAL de la red, el costo de un equipo que vino de la bodega es el
+`valor_interno` de la remisión, no `seriales.costo_compra` (ese es el costo de
+la BODEGA, y a propósito nunca se reescribe al remisionar). Los productos por
+cantidad ya lo resolvían solos —la recepción reescribe `costo_unitario` con el
+promedio ponderado sobre `valor_interno`—; los seriales no, porque `moverSerial`
+solo cambia `producto_id`. El local vendía un equipo consignado y su utilidad
+salía contra el costo de la bodega, inflada, mientras la de los accesorios salía
+bien: el mismo reporte con dos varas de medir.
+
+Las cuatro barandas importan tanto como el arreglo: la BODEGA sigue usando su
+costo, una unidad PROPIA del local (retoma) también, un negocio SIN red interna
+no cambia en nada, y una remisión anulada o no recibida no cuenta. Contra el
+código anterior esta suite falla 3 de 7; las 4 barandas pasan en ambos.
 
 ## Nota sobre `esquema.sql`
 
