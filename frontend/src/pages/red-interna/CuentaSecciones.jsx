@@ -458,7 +458,8 @@ function LineaEnvio({ l }) {
   const faltante = l.estado_linea === 'Faltante';
   const tachado  = devuelta || faltante;
   return (
-    <div className={`flex items-center gap-2.5 px-4 py-1.5 text-sm ${tachado ? 'opacity-55' : ''}`}>
+    <>
+      <div className={`flex items-center gap-2.5 px-4 py-1.5 text-sm ${tachado ? 'opacity-55' : ''}`}>
       <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0
         ${PUNTO_ESTADO[l.estado_unidad] || 'bg-gray-300'}`} />
       <span className="flex-1 min-w-0 truncate text-gray-800">
@@ -481,7 +482,24 @@ function LineaEnvio({ l }) {
           {formatCOP(l.subtotal)}
         </span>
       )}
-    </div>
+      </div>
+      {/* Lo que de esta línea ya volvió a la bodega. Se muestra APARTE en vez de
+          bajar la cantidad en silencio: el local tiene que ver por qué le bajó
+          el cargo, no encontrarse con otro número. */}
+      {Number(l.cantidad_devuelta) > 0 && (
+        <div className="flex items-center gap-2.5 px-4 pb-1.5 pl-11 text-xs">
+          <Undo2 size={11} className="text-amber-500 flex-shrink-0" />
+          <span className="flex-1 min-w-0 truncate text-amber-700">
+            {l.cantidad_devuelta} devuelta(s) a la bodega
+          </span>
+          {l.valor_devuelto != null && (
+            <span className="w-24 text-right tabular-nums text-amber-700 font-medium">
+              −{formatCOP(l.valor_devuelto)}
+            </span>
+          )}
+        </div>
+      )}
+    </>
   );
 }
 
@@ -670,8 +688,86 @@ function TarjetaCargo({ c, propia, onAbonar }) {
   );
 }
 
+// ── Una devolución, con lo que llevaba dentro ───────────────────────────────
+//
+// El local devuelve mercancía y su deuda baja. Sin esta tarjeta el movimiento
+// era un número suelto en el extracto: no se podía saber qué productos iban,
+// cuántas unidades, ni por qué bajó — o por qué NO bajó, cuando la mercancía era
+// del propio local y la bodega nunca se la había vendido.
+function TarjetaDevolucion({ d }) {
+  const [abierto, setAbierto] = useState(false);
+  const pendiente = d.estado === 'En transito';
+  return (
+    <div className={`border rounded-2xl overflow-hidden ${pendiente
+      ? 'border-amber-200 bg-amber-50/40' : 'border-gray-100 bg-white'}`}>
+      <button onClick={() => setAbierto((v) => !v)}
+        className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-black/[0.02]">
+        <Undo2 size={15} className={pendiente ? 'text-amber-600' : 'text-gray-400'} />
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium text-gray-900">
+            Devolución #{d.numero ?? d.id}
+            {d.motivo === 'faltante' && (
+              <span className="ml-2 text-xs font-normal text-amber-700">reclamo por faltante</span>
+            )}
+          </p>
+          <p className="text-xs text-gray-400">{d.unidades} unidad(es)</p>
+        </div>
+        <div className="text-right flex-shrink-0">
+          {pendiente ? (
+            <span className="text-xs font-medium text-amber-700">Esperando a la bodega</span>
+          ) : (
+            <>
+              <p className="text-sm font-semibold text-green-700 tabular-nums">
+                −{formatCOP(d.valor_acreditado)}
+              </p>
+              <p className="text-[11px] text-gray-400">acreditado</p>
+            </>
+          )}
+        </div>
+        <ChevronDown size={15}
+          className={`text-gray-300 transition-transform ${abierto ? 'rotate-180' : ''}`} />
+      </button>
+
+      {abierto && (
+        <div className="border-t border-gray-100 divide-y divide-gray-50">
+          {(d.lineas || []).map((l) => (
+            <div key={l.linea_id} className="flex items-center gap-2.5 px-4 py-2 text-sm">
+              <span className="flex-1 min-w-0 truncate text-gray-800">
+                {l.nombre_producto}
+                {l.tipo === 'cantidad' && l.cantidad > 1 && (
+                  <span className="text-gray-400"> × {l.cantidad}</span>
+                )}
+              </span>
+              {l.imei && (
+                <span className="hidden md:inline text-xs text-gray-400 font-mono truncate max-w-[9rem]">
+                  {l.imei}
+                </span>
+              )}
+              {/* Lo propio del local no baja deuda: la bodega no se lo había
+                  vendido, así que no hay cargo que descontar. Decirlo evita que
+                  parezca un error. */}
+              {!l.acredita ? (
+                <span className="text-xs text-gray-400 w-32 text-right">
+                  del local · no baja deuda
+                </span>
+              ) : pendiente ? (
+                <span className="text-xs text-amber-600 w-32 text-right">por confirmar</span>
+              ) : (
+                <span className="text-xs text-green-700 w-32 text-right tabular-nums">
+                  −{formatCOP(l.valor_acreditado)}
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function TabEnvios({
   envios, cargos = [], resumen, ocultos, propia, onAbonar, onAbonarCargo, onCambio,
+  devoluciones = [],
 }) {
   const [abierto, setAbierto] = useState(null);
   const [verPagados, setVerPagados] = useState(false);
@@ -679,7 +775,10 @@ export function TabEnvios({
   // desde que recibir genera la deuda.
   const [reclamando, setReclamando] = useState(null);
 
-  if (!envios.length) {
+  // Solo se sale temprano si no hay NADA que mostrar: un local puede no tener
+  // envíos abiertos y sí devoluciones en curso, y esconderlas era justo el
+  // problema — devolvía mercancía y no le quedaba rastro en ninguna pantalla.
+  if (!envios.length && !devoluciones.length) {
     return <EmptyState icon={Truck} titulo="Sin envíos"
       descripcion="Todavía no ha recibido mercancía de la bodega." />;
   }
@@ -857,6 +956,18 @@ export function TabEnvios({
               {cerrados.map(tarjeta)}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Las devoluciones, con su detalle. Van aquí y no en una pestaña aparte
+          porque se leen contra los envíos: lo que bajó de la deuda salió de
+          alguno de ellos. */}
+      {devoluciones.length > 0 && (
+        <div className="flex flex-col gap-2 mt-4">
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide px-1">
+            Devoluciones ({devoluciones.length})
+          </p>
+          {devoluciones.map((d) => <TarjetaDevolucion key={d.id} d={d} />)}
         </div>
       )}
     </div>

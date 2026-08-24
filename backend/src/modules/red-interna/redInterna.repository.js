@@ -778,6 +778,37 @@ const getAbonosDeEnvio = async (negocioId, remisionId) => {
  * Trae el estado derivado de la unidad (vendida, prestada, en vitrina…), que es
  * informativo: desde el cambio de modelo no toca la cuenta.
  */
+// Líneas de las DEVOLUCIONES que una sucursal mandó, para poder mostrar el
+// detalle de cada una: qué productos, cuántas unidades y cuánto se acreditó.
+// Sin esto la devolución era un número suelto en el extracto y no había forma de
+// saber qué llevaba dentro.
+const getLineasDeDevoluciones = async (negocioId, sucursalId, { limit = 600 } = {}) => {
+  const { rows } = await pool.query(`
+    SELECT
+      lr.remision_id,
+      lr.id      AS linea_id,
+      lr.tipo,
+      lr.imei,
+      lr.nombre_producto,
+      lr.cantidad,
+      lr.valor_interno,
+      lr.estado_linea,
+      lr.origen_unidad,
+      -- Lo que de verdad se le acreditó: para un serial su valor; para una línea
+      -- de cantidad, el reparto FIFO real (cada tramo al valor de su lote).
+      CASE WHEN lr.tipo = 'serial' THEN lr.valor_interno
+           ELSE lr.valor_acreditado END               AS valor_acreditado
+    FROM lineas_remision lr
+    JOIN remisiones r ON r.id = lr.remision_id
+    WHERE r.negocio_id = $1
+      AND r.tipo = 'devolucion'
+      AND r.sucursal_origen_id = $2
+    ORDER BY lr.remision_id DESC, lr.id
+    LIMIT $3
+  `, [negocioId, sucursalId, limit]);
+  return rows;
+};
+
 const getLineasDeEnvios = async (negocioId, sucursalId, { limit = 600 } = {}) => {
   const { rows } = await pool.query(`
     WITH u AS (${SQL_UNIDADES})
@@ -790,6 +821,12 @@ const getLineasDeEnvios = async (negocioId, sucursalId, { limit = 600 } = {}) =>
       lr.valor_interno,
       lr.estado_linea,
       COALESCE(lr.cantidad_recibida, lr.cantidad, 1) AS cantidad,
+      -- Lo que de ESTA línea ya volvió a la bodega, con su plata. La tarjeta lo
+      -- muestra al lado de lo entregado ("5 entregadas · 2 devueltas −$10.000")
+      -- en vez de bajar el número en silencio: el local tiene que ver POR QUÉ
+      -- bajó su cargo, no encontrarse con otra cifra.
+      COALESCE(lr.cantidad_devuelta, 0)              AS cantidad_devuelta,
+      COALESCE(lr.cantidad_devuelta, 0) * lr.valor_interno AS valor_devuelto,
       u.estado_unidad,
       u.factura_numero,
       u.nombre_cliente
@@ -2038,7 +2075,7 @@ module.exports = {
   getTotalRemesado, getTotalMovimientosCuenta, getConciliacion, getResumenPorRemision,
   // Cuenta por envío (modelo "el envío es la deuda")
   getTotalesEnvios, getAbonosDeEnvio, findAbonosLocal, getEnviosAbiertos,
-  getLineasDeEnvios, findAbonoById, moverAbono,
+  getLineasDeEnvios, getLineasDeDevoluciones, findAbonoById, moverAbono,
   getCargosCuenta, getSaldoCargo,
   findMovimientosPorAprobar, findMovimientoCuentaById,
   decidirMovimientoCuenta, anularMovimientoCuenta, anularAbonosDeMovimiento,

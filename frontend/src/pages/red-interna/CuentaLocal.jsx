@@ -320,7 +320,10 @@ export function CuentaLocal({
                 ${tab === x.id ? 'border-blue-600 text-blue-600'
                                : 'border-transparent text-gray-400 hover:text-gray-600'}`}>
               <Icono size={14} /> {x.label}
-              {x.id === 'envios'    && ` (${(data.envios || []).length})`}
+              {/* Las devoluciones viven en esta pestaña, así que cuentan en su
+                  número: si no, el local ve "Envíos (0)" con devoluciones dentro. */}
+              {x.id === 'envios'    && ` (${(data.envios || []).length
+                                            + (data.devoluciones || []).length})`}
               {x.id === 'mercancia' && ` (${data.mercancia.total})`}
               {x.id === 'pagos'     && ` (${data.remesas.length +
                                             (data.movimientos_cuenta || []).length})`}
@@ -332,6 +335,7 @@ export function CuentaLocal({
       {tab === 'envios' && (
         <TabEnvios
           envios={data.envios || []} cargos={data.cargos || []}
+          devoluciones={data.devoluciones || []}
           resumen={data.envios_resumen}
           ocultos={ocultos} propia={propia}
           onAbonar={(envio) => setPago({ envio })}

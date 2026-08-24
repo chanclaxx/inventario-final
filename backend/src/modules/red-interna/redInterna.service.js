@@ -230,7 +230,14 @@ const _recortarParaVendedor = (data) => {
     // Las devoluciones se ven —el vendedor necesita saber que mandó algo y que
     // sigue esperando el visto bueno de la bodega— pero su valor es la
     // valorización de la mercancía que va dentro, y eso no.
-    devoluciones: (data.devoluciones || []).map((d) => ({ ...d, valor_total: null })),
+    // La devolución se ve —el vendedor necesita saber qué mandó y en qué quedó—
+    // pero el valor de la MERCANCÍA no. Lo acreditado sí: eso es la cuenta, y
+    // es justo lo que explica por qué le bajó la deuda.
+    devoluciones: (data.devoluciones || []).map((d) => ({
+      ...d,
+      valor_total: null,
+      lineas: (d.lineas || []).map((l) => ({ ...l, valor_interno: null })),
+    })),
     devoluciones_enviadas: (data.devoluciones_enviadas || []).map((d) => ({ ...d, valor_total: null })),
     // El cargo es deuda: su valor y su saldo se ven (hay que pagarlos). No hay
     // valorización de mercancía que esconder aquí.
@@ -2623,7 +2630,7 @@ const getEstadoCuenta = async (req, sucursalId, filtros = {}) => {
   const { desde = null, hasta = null, q = '', estado = null, limit = 100, offset = 0 } = filtros;
 
   const [totales, extracto, mercancia, remisiones, remesas, movimientos, porEnvio,
-         abonos, lineasEnvios, cargos, devoluciones] = await Promise.all([
+         abonos, lineasEnvios, cargos, devoluciones, lineasDevoluciones] = await Promise.all([
       getEstadoLocal(negocioId, objetivo),
       repo.getExtracto(negocioId, objetivo, { desde, hasta }),
       repo.buscarUnidades(negocioId, objetivo, {
@@ -2649,6 +2656,8 @@ const getEstadoCuenta = async (req, sucursalId, filtros = {}) => {
       repo.findRemisiones(negocioId, {
         sucursalId: objetivo, rol: 'origen', tipo: 'devolucion', limit: 100,
       }),
+      // Sus líneas, para poder abrir cada devolución y ver qué llevaba dentro.
+      repo.getLineasDeDevoluciones(negocioId, objetivo, { limit: 600 }),
     ]);
 
   const salida = {
@@ -2680,7 +2689,29 @@ const getEstadoCuenta = async (req, sucursalId, filtros = {}) => {
     // Lo que esta sucursal devolvió, con su estado. Una devolución 'En transito'
     // es la que está esperando que la bodega la revise: hasta entonces no baja
     // la deuda, y verla aquí es lo que explica por qué.
-    devoluciones,
+    // Cada devolución CON SU DETALLE: qué productos llevaba, cuántas unidades y
+    // cuánto se le acreditó. Sin las líneas era un número suelto en el extracto
+    // y no había forma de saber qué había dentro.
+    devoluciones: devoluciones.map((d) => {
+      const suyas = lineasDevoluciones.filter((l) => Number(l.remision_id) === Number(d.id));
+      return {
+        ...d,
+        confirmada: d.estado === 'Recibida' || d.estado === 'Parcial',
+        unidades: suyas.reduce((n, l) => n + Number(l.cantidad || 1), 0),
+        // Lo acreditado solo existe cuando la bodega confirmó: antes de eso la
+        // devolución no ha movido un peso y mostrar un importe sería mentir.
+        valor_acreditado: suyas.reduce((n, l) => n + _num(l.valor_acreditado), 0),
+        lineas: suyas.map((l) => ({
+          ...l,
+          cantidad:         Number(l.cantidad || 1),
+          valor_interno:    _num(l.valor_interno),
+          valor_acreditado: _num(l.valor_acreditado),
+          // La mercancía propia del local no baja deuda: la bodega no se la
+          // había vendido. Se marca para que la pantalla lo diga.
+          acredita: l.origen_unidad === 'bodega',
+        })),
+      };
+    }),
     devoluciones_pendientes: devoluciones.filter((d) => d.estado === 'En transito').length,
     // Los abonos, con el envío al que se imputó cada uno. Es lo que permite
     // contar el pago como lo hizo el usuario ("pagué $2M y taparon 3 envíos")
@@ -2730,6 +2761,11 @@ const _armarEnvios = (filas, t, lineas = []) => {
       imei:            l.imei,
       nombre_producto: l.nombre_producto,
       cantidad:        Number(l.cantidad),
+      // Lo devuelto va APARTE, nunca restado de `cantidad`: la tarjeta muestra
+      // "5 entregadas · 2 devueltas −$10.000" en vez de bajar el número en
+      // silencio. El local tiene que ver POR QUÉ le bajó el cargo del envío.
+      cantidad_devuelta: Number(l.cantidad_devuelta || 0),
+      valor_devuelto:    Math.round(_num(l.valor_devuelto)),
       valor_interno:   Math.round(_num(l.valor_interno)),
       subtotal:        Math.round(_num(l.valor_interno) * (l.tipo === 'cantidad' ? Number(l.cantidad) : 1)),
       estado_linea:    l.estado_linea,

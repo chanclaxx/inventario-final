@@ -231,6 +231,45 @@ console.log('\n═══ 7. El EXTRACTO explica la baja y cuadra con la deuda �
   check('★ crédito por línea: FIFO real las de bodega, 0 las propias',
     acred.map((a) => Number(a.valor_acreditado)), [10000, 23000, 0, 0]);
 }
+
+console.log('\n═══ 8. La pantalla puede MOSTRAR la devolución y su detalle ═══');
+{
+  // Lo pedido: que en el estado de cuenta salga la devolución con su detalle, y
+  // que el envío muestre en su línea que bajó por una devolución — no que el
+  // número baje solo.
+  const cta = await red.getEstadoCuenta(reqLocal, 2);
+
+  const devs = cta.devoluciones || [];
+  ok('★ el estado de cuenta trae las devoluciones', devs.length > 0, `${devs.length}`);
+
+  const conDetalle = devs.find((d) => (d.lineas || []).length > 0);
+  ok('★ cada una con SU DETALLE (qué productos llevaba)', !!conDetalle,
+     conDetalle ? conDetalle.lineas.map((l) => `${l.nombre_producto} ×${l.cantidad}`).join(', ') : '');
+  // Se busca una de mercancía de BODEGA: las de mercancía propia acreditan 0 con
+  // razón, y tomar cualquiera haría fallar la prueba por el motivo equivocado.
+  const deBodega = devs.find((d) => (d.lineas || []).some((l) => l.acredita));
+  ok('   y con las unidades y lo acreditado en la cabecera',
+     Number(deBodega?.unidades) > 0 && Number(deBodega?.valor_acreditado) > 0,
+     `${deBodega?.unidades} u · ${money(deBodega?.valor_acreditado)}`);
+
+  // La línea del envío tiene que decir cuánto se devolvió y por cuánta plata,
+  // en vez de mostrar una cantidad más baja sin explicación.
+  const envios = cta.envios || [];
+  const lineasConDev = envios.flatMap((e) => (e.lineas || []))
+    .filter((l) => Number(l.cantidad_devuelta) > 0);
+  ok('★ la línea del envío dice cuántas se devolvieron', lineasConDev.length > 0,
+     lineasConDev.map((l) => `${l.nombre_producto}: ${l.cantidad} entregadas, ${l.cantidad_devuelta} devueltas`).join(' | '));
+  ok('★ y con cuánta plata bajó ese envío',
+     lineasConDev.every((l) => Number(l.valor_devuelto) > 0),
+     lineasConDev.map((l) => money(l.valor_devuelto)).join(', '));
+  ok('   la cantidad entregada NO se toca: se muestra al lado, no se reescribe',
+     lineasConDev.every((l) => Number(l.cantidad) >= Number(l.cantidad_devuelta)));
+
+  // Lo propio del local se marca para que no parezca un error que no baje nada.
+  const propias = devs.flatMap((d) => d.lineas || []).filter((l) => !l.acredita);
+  ok('★ lo devuelto que era del local se marca como "no baja deuda"',
+     propias.length > 0, `${propias.length} línea(s)`);
+}
 console.log(`\n${'═'.repeat(72)}`);
 console.log(`  ${pasados} verificaciones pasaron · ${fallos} fallaron`);
 console.log('═'.repeat(72));
