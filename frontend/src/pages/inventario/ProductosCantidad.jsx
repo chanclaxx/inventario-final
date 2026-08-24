@@ -2,8 +2,8 @@ import { useState }                                      from 'react';
 import { useQuery, useMutation, useQueryClient }         from '@tanstack/react-query';
 import { ShoppingBag, Plus, AlertTriangle, Trash2, ChevronDown, ChevronRight, Layers, Settings, Barcode, MapPin } from 'lucide-react';
 import { getProductosCantidad, ajustarStockCantidad, getLineas } from '../../api/productos.api';
-import { buscarPorCodigo }                               from '../../api/busqueda.api';
 import { SearchInput }                                   from '../../components/ui/SearchInput';
+import { BarraEscaneo }                                  from '../../components/ui/BarraEscaneo';
 import { Button }                                        from '../../components/ui/Button';
 import { Input }                                         from '../../components/ui/Input';
 import { Spinner }                                       from '../../components/ui/Spinner';
@@ -20,6 +20,7 @@ import { getUbicaciones }                                from '../../api/ubicaci
 import { VistaVariantesProducto }                        from './VistaVariantesProducto';
 import { useAuth }                                       from '../../context/useAuth';
 import { useSucursalKey }                                from '../../hooks/useSucursalKey';
+import { useEscanerCarrito }                             from '../../hooks/useEscanerCarrito';
 import useSucursalStore                                  from '../../store/sucursalStore';
 import api                                               from '../../api/axios.config';
 
@@ -263,7 +264,6 @@ export function ProductosCantidad() {
   });
 
   const agregarItem         = useCarritoStore((s) => s.agregarItem);
-  const agregarOIncrementar = useCarritoStore((s) => s.agregarOIncrementar);
 
   const mutReducir = useMutation({
     mutationFn: ({ productoId, cantidad }) =>
@@ -318,109 +318,21 @@ export function ProductosCantidad() {
     });
   };
 
-  // ── Escaneo de código único (lector USB/BT = teclado + Enter) ─────────────
-  const [scan,    setScan]    = useState('');
-  const [scanMsg, setScanMsg] = useState(null); // { tipo: 'ok'|'error', texto }
-
-  const handleScan = async () => {
-    const codigo = scan.trim().toUpperCase();
-    if (!codigo) return;
-    setScan('');
-
-    // El código puede ser del producto O de una de sus variantes. La lista
-    // local solo tiene productos, así que resuelve el caso simple sin ir al
-    // servidor; las variantes las resuelve el backend, que busca en los tres
-    // niveles y devuelve el nodo exacto.
-    let nodo = null;
-    const local = productos.find((p) => (p.codigo || '').toUpperCase() === codigo);
-    if (local) nodo = { nivel: 'producto', ...local };
-
-    if (!nodo) {
-      try {
-        const r = await buscarPorCodigo(codigo);
-        nodo = r.data?.data?.[0] || null;
-      } catch { /* 404 = no existe */ }
-    }
-
-    if (!nodo) {
-      setScanMsg({ tipo: 'error', texto: `Código ${codigo} no encontrado` });
-      return;
-    }
-    // Vista global (todas las sucursales): los grupos no tienen id de producto
-    if (!nodo.id) {
-      setScanMsg({ tipo: 'error', texto: 'Selecciona una sucursal para agregar con el escáner' });
-      return;
-    }
-
-    // ── El código es de una variante: va DERECHO al carrito ──────────────
-    // Identifica exactamente qué se está vendiendo. Antes el escaneo solo
-    // podía abrir el árbol para que alguien eligiera la talla a mano, que es
-    // justo el trabajo que el código venía a quitar.
-    if (nodo.atributo_id) {
-      const etiqueta = [nodo.nombre, nodo.atributo_valor, nodo.variante_valor].filter(Boolean).join(' · ');
-      if (!nodo.stock || Number(nodo.stock) <= 0) {
-        setScanMsg({ tipo: 'error', texto: `"${etiqueta}" está sin stock` });
-        return;
-      }
-      // La misma `key` que arma la pantalla del árbol, o el carrito guardaría
-      // dos líneas para la misma variante.
-      const res = agregarOIncrementar({
-        key:            nodo.variante_id ? `cant-${nodo.id}-v-${nodo.variante_id}` : `cant-${nodo.id}-a-${nodo.atributo_id}`,
-        tipo:           'cantidad',
-        nombre:         nodo.nombre,
-        producto_id:    nodo.id,
-        atributo_id:    nodo.atributo_id,
-        variante_id:    nodo.variante_id || undefined,
-        atributo_label: nodo.atributo_valor || undefined,
-        variante_label: nodo.variante_valor || undefined,
-        precio:         Math.round(Number(nodo.precio || nodo.costo_unitario || 0)),
-        costo:          Number(nodo.costo_unitario) || null,
-        stock:          nodo.stock,
-        cantidad:       1,
-        linea_id:       nodo.linea_id || null,
-      });
-      if (res === 'reservado') { setScanMsg(null); return; }
-      setScanMsg(res === 'sin_stock'
-        ? { tipo: 'error', texto: `"${etiqueta}": ya está todo el stock en el carrito` }
-        : { tipo: 'ok', texto: `✓ ${etiqueta} — en el carrito` });
-      return;
-    }
-
-    // ── El código es del producto ────────────────────────────────────────
-    // Con variantes activas no dice cuál se vende: hay que abrir el árbol.
-    const producto = productos.find((p) => p.id === nodo.id) || nodo;
-    if (variantesActivo) {
-      setScanMsg(null);
-      setProductoArbol(producto);
-      return;
-    }
-    if (!producto.stock || Number(producto.stock) <= 0) {
-      setScanMsg({ tipo: 'error', texto: `"${producto.nombre}" está sin stock` });
-      return;
-    }
-
-    const res = agregarOIncrementar({
-      key:         `cant-${producto.id}`,
-      tipo:        'cantidad',
-      nombre:      producto.nombre,
-      producto_id: producto.id,
-      precio:      Math.round(Number(producto.precio || producto.costo_unitario || 0)),
-      costo:       Number(producto.costo_unitario) || null,
-      stock:       producto.stock,
-      cantidad:    1,
-      linea_id:    producto.linea_id || null,
-    });
-    // 'reservado' no es ni éxito ni error: el producto está apalabrado en un
-    // borrador y el modal de conflicto ya está preguntando qué hacer. Decir
-    // "en el carrito" sería mentir, porque todavía no entró.
-    if (res === 'reservado') {
-      setScanMsg(null);
-      return;
-    }
-    setScanMsg(res === 'sin_stock'
-      ? { tipo: 'error', texto: `"${producto.nombre}": ya está todo el stock en el carrito` }
-      : { tipo: 'ok', texto: `✓ ${producto.nombre} — en el carrito` });
-  };
+  // ── Escaneo de código o IMEI (lector USB/BT = teclado + Enter) ───────────
+  //
+  // La lista de esta pantalla ya está en memoria, así que el código de un
+  // producto se resuelve sin ir al servidor; las variantes y los IMEI los
+  // resuelve el backend, que busca en los tres niveles del árbol y en los
+  // seriales. Aquí sí se puede abrir el árbol cuando el código es del producto
+  // y el negocio vende por variantes — el carrito no puede.
+  const escaner = useEscanerCarrito({
+    variantesActivo,
+    onProducto:    (nodo) => setProductoArbol(productos.find((p) => p.id === nodo.id) || nodo),
+    resolverLocal: (codigo) => {
+      const local = productos.find((p) => (p.codigo || '').toUpperCase() === codigo);
+      return local ? { nivel: 'producto', ...local } : null;
+    },
+  });
 
   const handleAbrirReducir = (e, producto) => {
     e.stopPropagation();
@@ -461,28 +373,14 @@ export function ProductosCantidad() {
         />
 
         {codigoActivo && (
-          <div className="flex flex-col gap-1">
-            <div className="relative">
-              <Barcode size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-              <input
-                type="text"
-                inputMode="text"
-                autoComplete="off"
-                value={scan}
-                onChange={(e) => { setScan(e.target.value); if (scanMsg) setScanMsg(null); }}
-                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleScan(); } }}
-                placeholder="Escanear código y Enter → agrega al carrito"
-                className="w-full pl-9 pr-3 py-2 bg-blue-50/60 border border-blue-200 rounded-xl text-sm
-                  text-gray-800 placeholder-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-500
-                  focus:bg-white transition-all"
-              />
-            </div>
-            {scanMsg && (
-              <p className={`text-xs px-1 ${scanMsg.tipo === 'ok' ? 'text-green-600' : 'text-red-500'}`}>
-                {scanMsg.texto}
-              </p>
-            )}
-          </div>
+          <BarraEscaneo
+            value={escaner.scan}
+            onChange={(v) => { escaner.setScan(v); if (escaner.scanMsg) escaner.setScanMsg(null); }}
+            onEnter={escaner.handleScan}
+            mensaje={escaner.scanMsg}
+            buscando={escaner.buscando}
+            placeholder="Escanear código o IMEI y Enter → agrega al carrito"
+          />
         )}
 
         {/* Filtro por ubicación: aislar un estante para revisarlo o contarlo */}

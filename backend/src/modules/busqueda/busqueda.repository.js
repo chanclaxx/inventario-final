@@ -282,6 +282,46 @@ const buscarCantidadPorCodigo = async (codigo, negocioId, sucursalId) => {
   return rows;
 };
 
+// ─── IMEI exacto para el escáner del carrito ─────────────────────────────────
+//
+// El lector manda la cadena completa: aquí NO se busca por LIKE. Un match
+// parcial agregaría al carrito un equipo que no es el que está en el mostrador.
+//
+// Solo unidades disponibles (`vendido = false`): un IMEI ya vendido no se
+// vuelve a vender, y devolverlo obligaría a que el escáner decidiera. `prestado`
+// sí viaja, para poder decir POR QUÉ no se puede agregar.
+const buscarSerialPorCodigoExacto = async (codigo, negocioId, sucursalId) => {
+  const { rows } = await pool.query(`
+    SELECT
+      s.id, s.imei, s.vendido, s.prestado,
+      s.precio       AS precio_serial,
+      s.costo_compra,
+      ps.id          AS producto_id,
+      ps.nombre      AS producto_nombre,
+      ps.marca, ps.modelo, ps.linea_id,
+      ps.precio      AS precio_producto,
+      su.id          AS sucursal_id,
+      su.nombre      AS sucursal_nombre,
+      CASE WHEN s.prestado = true
+        THEN COALESCE(pr.nombre, c.nombre, p.prestatario)
+        ELSE NULL
+      END AS prestado_a
+    FROM seriales s
+    JOIN productos_serial ps ON ps.id = s.producto_id
+    JOIN sucursales       su ON su.id = ps.sucursal_id
+    LEFT JOIN prestamos    p  ON p.imei = s.imei AND p.estado = 'Activo'
+    LEFT JOIN prestatarios pr ON pr.id  = p.prestatario_id
+    LEFT JOIN clientes     c  ON c.id   = p.cliente_id
+    WHERE su.negocio_id = $1
+      AND UPPER(TRIM(s.imei)) = UPPER(TRIM($2))
+      AND s.vendido = false
+      AND ($3::int IS NULL OR ps.sucursal_id = $3)
+    ORDER BY s.prestado ASC
+    LIMIT 1
+  `, [negocioId, codigo, sucursalId ?? null]);
+  return rows[0] || null;
+};
+
 const getHistorialCantidad = async (productoId, negocioId) => {
   const { rows } = await pool.query(`
     SELECT
@@ -524,7 +564,8 @@ const buscarAbonosTotales = async ({ fechaDesde, fechaHasta, tipo }, negocioId, 
 module.exports = {
   buscarSerialPorIMEI, getVentasPorIMEI, getRetomasPorIMEI,
   getPrestamosPorIMEI, getTrasladosPorIMEI,
-  buscarSeriales, buscarCantidad, buscarCantidadPorCodigo, getHistorialCantidad,
+  buscarSeriales, buscarCantidad, buscarCantidadPorCodigo, buscarSerialPorCodigoExacto,
+  getHistorialCantidad,
   buscarComprasPorIMEI, buscarComprasPorTexto,
   buscarPrestamos, buscarAbonosTotales,
 };

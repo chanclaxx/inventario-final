@@ -14,6 +14,8 @@ import { getContextoRed, resolverItemsCarrito } from '../../api/redInterna.api';
 import useCarritoStore from '../../store/carritoStore';
 import { useTarifas }   from '../../hooks/useTarifas';
 import { SelectorTarifa, TarifaItem } from '../../components/ui/SelectorTarifa';
+import { BarraEscaneo }   from '../../components/ui/BarraEscaneo';
+import { useEscanerCarrito } from '../../hooks/useEscanerCarrito';
 import { ModalTraslado } from './ModalTraslado';
 import { ModalDespachar } from '../red-interna/ModalDespachar';
 import { ModalDevolver }  from '../red-interna/ModalDevolver';
@@ -130,7 +132,20 @@ export function Carrito({ onFacturar, onPrestar, onBorradorCargado, sinHeader = 
     queryFn:  () => api.get('/config').then((r) => r.data.data),
     staleTime: 5 * 60 * 1000,
   });
-  const redActiva = configData?.red_interna_activa === '1';
+  const redActiva      = configData?.red_interna_activa === '1';
+  const variantesActivo = configData?.variantes_activo    === '1';
+  const codigoActivo    = configData?.codigo_producto_activo === '1';
+
+  // ── Escáner: el atajo más corto entre el mostrador y la venta ─────────────
+  //
+  // Aquí no hay lista en memoria ni forma de abrir el árbol de variantes (el
+  // carrito es una columna al lado del inventario, no una pantalla): todo lo
+  // resuelve el backend, y un código de producto con variantes activas se
+  // explica en vez de agregarse a ciegas.
+  //
+  // Se muestra siempre, no solo con el código único encendido: el IMEI existe
+  // en todos los negocios que venden seriales, sin configurar nada.
+  const escaner = useEscanerCarrito({ variantesActivo });
 
   const { data: contextoRed } = useQuery({
     queryKey: ['red-contexto'],
@@ -202,6 +217,18 @@ export function Carrito({ onFacturar, onPrestar, onBorradorCargado, sinHeader = 
             )}
           </div>
         )}
+
+        {/* Escaneo directo al carrito: código único o IMEI */}
+        <div className="mb-3">
+          <BarraEscaneo
+            value={escaner.scan}
+            onChange={(v) => { escaner.setScan(v); if (escaner.scanMsg) escaner.setScanMsg(null); }}
+            onEnter={escaner.handleScan}
+            mensaje={escaner.scanMsg}
+            buscando={escaner.buscando}
+            placeholder={codigoActivo ? 'Escanear código o IMEI…' : 'Escanear IMEI…'}
+          />
+        </div>
 
         {/* Tarifa aplicada a todo el carrito (feature opt-in) */}
         {tarifasCfg.activo && items.length > 0 && (

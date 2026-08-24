@@ -147,6 +147,37 @@ const buscarPorCodigo = async (codigo, negocioId, sucursalId, rol) => {
   return resultados;
 };
 
+// ─── Escaneo del carrito: código único O IMEI ───────────────────────────────
+//
+// Un solo campo para los dos catálogos. El lector no dice qué escaneó, así que
+// se resuelve por orden: primero el código único (que puede ser del producto,
+// del atributo o de la variante) y solo si no existe se prueba como IMEI.
+//
+// El orden importa: el código único es de este negocio y lo asignó el usuario,
+// mientras que el IMEI viene de fábrica. Si alguien usara un IMEI como código
+// interno, gana el código — que es lo que configuró a propósito.
+//
+// Devuelve siempre la misma forma: { tipo: 'cantidad', nodos } |
+// { tipo: 'serial', serial } | null si no existe ninguno de los dos.
+const escanear = async (codigo, negocioId, sucursalId, rol) => {
+  const nodos = await buscarPorCodigo(codigo, negocioId, sucursalId, rol);
+  if (nodos.length) return { tipo: 'cantidad', nodos };
+
+  const serial = await repo.buscarSerialPorCodigoExacto(codigo, negocioId, sucursalId || null);
+  if (!serial) return null;
+
+  // En un local de la red interna el costo que vale para calcular la tarifa es
+  // el valor interno de la remisión, no `costo_compra` (que es el de la
+  // bodega). El helper devuelve la lista intacta cuando no aplica; require
+  // lazy para no acoplar la búsqueda con la red en negocios que no la usan.
+  const { anotarConsignacionSeriales } = require('../red-interna/redInterna.service');
+  const [anotado] = await anotarConsignacionSeriales([serial], {
+    negocioId, sucursalId: serial.sucursal_id,
+  });
+
+  return { tipo: 'serial', serial: anotado };
+};
+
 // ─── Búsqueda de compras a proveedores ───────────────────────────────────────
 
 const buscarCompras = async (q, modo, negocioId, sucursalId, rol, proveedorIds = null) => {
@@ -183,4 +214,4 @@ const buscarPrestamos = async (filtros, negocioId, sucursalId, rol) => {
 const getHistorialCantidad = async (productoId, negocioId) =>
   repo.getHistorialCantidad(productoId, negocioId);
 
-module.exports = { buscarPorIMEI, buscarProductos, buscarPorCodigo, buscarCompras, buscarPrestamos, getHistorialCantidad };
+module.exports = { buscarPorIMEI, buscarProductos, buscarPorCodigo, escanear, buscarCompras, buscarPrestamos, getHistorialCantidad };

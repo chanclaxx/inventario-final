@@ -677,7 +677,8 @@ function CodigoProductoConfig({ valores, set }) {
           </p>
           <p className="text-xs text-blue-700">
             • Los lectores USB/Bluetooth funcionan sin configuración: escanea sobre el campo
-            de búsqueda por código del inventario y el producto se agrega al carrito.
+            de código del inventario —o sobre el que está encima del carrito— y el producto
+            se agrega a la venta. Ese mismo campo acepta el IMEI de un equipo con serial.
           </p>
         </div>
       )}

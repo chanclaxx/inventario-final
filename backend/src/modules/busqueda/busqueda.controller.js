@@ -50,6 +50,24 @@ const buscarPorCodigo = async (req, res, next) => {
   }
 };
 
+// Escaneo desde el carrito: un solo campo resuelve código único e IMEI.
+const escanear = async (req, res, next) => {
+  try {
+    const codigo = req.params.codigo?.trim();
+    if (!codigo) return res.status(400).json({ ok: false, error: 'Código requerido' });
+
+    const { negocio_id, rol } = req.user;
+    const resultado = await service.escanear(codigo, negocio_id, req.sucursal_id, rol);
+
+    if (!resultado) {
+      return res.status(404).json({ ok: false, error: 'Código o IMEI no encontrado en este negocio' });
+    }
+    res.json({ ok: true, data: resultado });
+  } catch (err) {
+    next(err);
+  }
+};
+
 const buscarCompras = async (req, res, next) => {
   try {
     const q    = req.query.q?.trim();
@@ -111,4 +129,4 @@ const getHistorialCantidad = async (req, res, next) => {
   }
 };
 
-module.exports = { buscarPorIMEI, buscarProductos, buscarPorCodigo, buscarCompras, buscarPrestamos, getHistorialCantidad };
+module.exports = { buscarPorIMEI, buscarProductos, buscarPorCodigo, escanear, buscarCompras, buscarPrestamos, getHistorialCantidad };

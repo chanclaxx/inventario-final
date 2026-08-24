@@ -215,6 +215,19 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > líneas para la misma variante. El buscador de texto de la pantalla filtra
 > también por `codigos_variantes` (agregado en `findAll`): sin eso, mover los
 > códigos a las variantes los volvía inbuscables.
+> **El escaneo hacia el carrito es UN solo campo** (`/busqueda/escaneo/:codigo`,
+> `useEscanerCarrito`, `BarraEscaneo`): el lector es un teclado y no dice qué
+> leyó, así que el backend resuelve primero el **código único** (los tres
+> niveles) y solo si no existe lo prueba como **IMEI** de un serial disponible
+> —exacto, nunca LIKE: un match parcial agregaría al carrito un equipo que no es
+> el del mostrador—. Gana el código porque lo asignó el usuario a propósito.
+> La barra vive en el inventario **y encima del carrito**; la lógica está en el
+> hook porque duplicarla dejaría a uno de los dos mintiendo tras el primer
+> arreglo. El serial pasa por `anotarConsignacionSeriales`, o en un local de la
+> red la tarifa se calcularía sobre el costo de la BODEGA. Solo el inventario
+> puede abrir el árbol cuando el código es del producto y hay variantes activas
+> (`onProducto`): el carrito es una columna, no una pantalla, y lo explica en
+> vez de agregar a ciegas.
 
 > **La línea de entrega por CANTIDAD es un LOTE — FIFO por nodo**
 > (`20260823_lotes_cantidad.sql`, `repo.consumirLotesFIFO`): un SERIAL tiene
