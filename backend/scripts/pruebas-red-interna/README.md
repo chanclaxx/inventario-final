@@ -50,10 +50,11 @@ node scripts/pruebas-red-interna/26-lotes-cantidad.mjs
 > reportes, catálogo y alertas de stock.
 
 > Las suites cargan **toda la cadena de migraciones** de la red interna, hoy
-> ocho: `20260725_red_interna`, `20260726_red_interna_v2`,
+> nueve: `20260725_red_interna`, `20260726_red_interna_v2`,
 > `20260822_red_interna_envios`, `20260823_red_interna_control`,
 > `20260823_red_interna_cargos_pagables`, `20260823_remision_variantes` y
-> `20260823_lotes_cantidad`. Si se
+> `20260823_lotes_cantidad` y
+> `20260823_valor_acreditado`. Si se
 > agrega otra hay que sumarla a **todas** las suites que carguen la cadena, o
 > fallarán con columnas inexistentes — pasó al añadir la de variantes: catorce
 > suites reventaron con `column "atributo_origen_id" does not exist`.
@@ -514,6 +515,15 @@ decida comprárselo.
 La sección 7 de `25-reclamo-faltante` cubre la trazabilidad: una devolución pendiente
 tiene que verse en las TRES pantallas (bandeja de la bodega, panel del local y su
 estado de cuenta).
+
+La sección 7 vigila el invariante contable: **Σ movimientos del extracto = la
+deuda**. Al pasar a lotes el cargo bajaba solo (bien), pero la nota crédito del
+extracto solo contaba seriales —los accesorios iban antes por un `Ajuste` que
+este modelo eliminó por duplicado—, así que el extracto mostraba el cargo entero
+sin ningún movimiento que explicara la baja y su saldo se separaba de la deuda.
+`valor_acreditado` guarda el crédito FIFO real de cada línea: no se puede
+derivar del `valor_interno` de la devolución, porque una que cruza dos lotes se
+acredita a dos precios.
 
 La sección 4 es la que más importa vigilar: devolver más de lo que queda en un
 lote **cruza al siguiente** y cobra cada tramo a su propio precio.

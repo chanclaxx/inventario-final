@@ -36,7 +36,7 @@ await db.exec(readFileSync(path.join(AQUI, 'esquema-completo.sql'), 'utf8'));
 for (const m of ['20260725_red_interna.sql', '20260726_red_interna_v2.sql',
                  '20260822_red_interna_envios.sql', '20260823_red_interna_control.sql',
                  '20260823_red_interna_cargos_pagables.sql', '20260823_remision_variantes.sql',
-                 '20260823_lotes_cantidad.sql']) {
+                 '20260823_lotes_cantidad.sql', '20260823_valor_acreditado.sql']) {
   await db.exec(readFileSync(path.join(RAIZ, '../migrations', m), 'utf8'));
 }
 

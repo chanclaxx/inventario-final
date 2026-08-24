@@ -38,7 +38,7 @@ await db.exec(readFileSync(path.join(AQUI, 'esquema-completo.sql'), 'utf8'));
 for (const m of ['20260725_red_interna.sql', '20260726_red_interna_v2.sql',
                  '20260822_red_interna_envios.sql', '20260823_red_interna_control.sql',
                  '20260823_red_interna_cargos_pagables.sql',
-                 '20260823_remision_variantes.sql', '20260823_lotes_cantidad.sql']) {
+                 '20260823_remision_variantes.sql', '20260823_lotes_cantidad.sql', '20260823_valor_acreditado.sql']) {
   await db.exec(readFileSync(path.join(RAIZ, '../migrations', m), 'utf8'));
 }
 
@@ -195,6 +195,42 @@ console.log('\n═══ 6. Si la bodega decide comprársela, ahí sí se acredi
   ok('   y la cuenta lo refleja', await deuda() < antes || Number(res.saldo_a_favor) > 0);
 }
 
+
+console.log('\n═══ 7. El EXTRACTO explica la baja y cuadra con la deuda ═══');
+{
+  // Reportado desde producción: "no veo las devoluciones, lo veo desincronizado
+  // con la deuda real y en los envíos no sale ningún movimiento que diga que se
+  // descontó por devolución".
+  //
+  // Al pasar a lotes, el cargo bajaba solo (bien) pero la nota crédito del
+  // extracto solo contaba SERIALES —los accesorios iban antes por un Ajuste que
+  // este modelo eliminó—, así que el extracto mostraba el cargo entero, ningún
+  // movimiento que lo explicara, y su saldo dejaba de cuadrar con la deuda.
+  const cta = await red.getEstadoCuenta(reqLocal, 2);
+  const notas = (cta.extracto || []).filter((e) => e.origen === 'devolucion');
+  ok('★ hay movimientos de devolución en el extracto', notas.length > 0,
+     `${notas.length} · ${notas.map((n) => `${n.concepto} ${money(n.valor)}`).join(' | ')}`);
+
+  // INVARIANTE: la suma del extracto ES la deuda. Si se separan, el local ve una
+  // cifra que sus movimientos no explican.
+  const suma = (cta.extracto || []).reduce((s, e) => s + Number(e.valor), 0);
+  const neto = Number(cta.totales.neto ?? cta.totales.deuda_total);
+  ok('★ Σ movimientos del extracto = la deuda', Math.abs(suma - neto) < 1,
+     `${money(suma)} vs ${money(neto)}`);
+
+  // Y el crédito guardado es el del FIFO real, no un promedio ni el valor
+  // ofrecido al crear la devolución.
+  const acred = await q(`SELECT lr.valor_acreditado FROM lineas_remision lr
+                         JOIN remisiones r ON r.id = lr.remision_id
+                         WHERE r.tipo='devolucion' AND lr.tipo='cantidad'
+                           AND lr.valor_acreditado IS NOT NULL ORDER BY lr.id`);
+  // Las dos primeras son las de la sección 3 y 4 (mercancía de bodega); las dos
+  // últimas son las de la 5 y 6, mercancía PROPIA del local: no consumen ningún
+  // lote, así que su crédito contra la deuda es 0 — lo que la bodega decida
+  // pagarle por ellas va por saldo a favor, no por aquí.
+  check('★ crédito por línea: FIFO real las de bodega, 0 las propias',
+    acred.map((a) => Number(a.valor_acreditado)), [10000, 23000, 0, 0]);
+}
 console.log(`\n${'═'.repeat(72)}`);
 console.log(`  ${pasados} verificaciones pasaron · ${fallos} fallaron`);
 console.log('═'.repeat(72));

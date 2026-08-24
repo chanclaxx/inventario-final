@@ -120,6 +120,16 @@ const aplicarMigraciones = async (client) => {
       WHERE tipo = 'cantidad' AND estado_linea = 'Recibida';
   `);
 
+  // Crédito real de una línea de devolución — ver migrations/20260823_valor_acreditado.sql
+  // El extracto necesita un movimiento que explique por qué bajó la deuda: sin
+  // él, el cargo bajaba solo y el saldo del extracto dejaba de cuadrar con
+  // `deuda_total`. No se puede derivar del `valor_interno` de la línea, porque
+  // una devolución que cruza dos lotes se acredita a dos precios distintos.
+  await migrar(client, 'Crédito de devolución', `
+    ALTER TABLE IF EXISTS lineas_remision
+      ADD COLUMN IF NOT EXISTS valor_acreditado NUMERIC(14,2);
+  `);
+
   // Ubicación espacial de productos — ver migrations/20260730_ubicacion_producto.sql
   //
   // 100% aditiva e idempotente. Columnas nullable: un negocio sin la feature no

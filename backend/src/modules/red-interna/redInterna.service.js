@@ -1452,7 +1452,7 @@ const confirmarDevolucion = async (req, remisionId, { lineas_recibidas } = {}) =
       //   PRODUCTO, así que devolver una talla que la bodega nunca mandó le
       //   bajaba la deuda igual.
       if (l.tipo === 'cantidad') {
-        const { sin_lote } = await repo.consumirLotesFIFO(client, {
+        const { sin_lote, credito } = await repo.consumirLotesFIFO(client, {
           negocioId, sucursalLocalId: localId, cantidad: Number(l.cantidad),
           nodo: {
             productoId: l.producto_origen_id,
@@ -1460,6 +1460,15 @@ const confirmarDevolucion = async (req, remisionId, { lineas_recibidas } = {}) =
             varianteId: l.variante_origen_id ?? null,
           },
         });
+        // Se guarda el crédito REAL de la línea: es lo que el extracto muestra
+        // como nota de crédito, y sin ese movimiento la deuda bajaba sola y el
+        // saldo del extracto dejaba de cuadrar con `deuda_total`. No se puede
+        // derivar del `valor_interno` de la línea: eso es solo lo que se ofreció
+        // al crearla, y una devolución que cruza dos lotes vale dos precios.
+        await client.query(
+          `UPDATE lineas_remision SET valor_acreditado = $2 WHERE id = $1`,
+          [id, Math.round(credito * 100) / 100]
+        );
         if (sin_lote > 0 && l.genera_saldo_favor) {
           saldoAFavor += _num(l.valor_interno) * sin_lote;
         }

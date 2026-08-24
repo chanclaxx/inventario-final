@@ -37,6 +37,7 @@ await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260823_red_interna_c
 await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260823_red_interna_cargos_pagables.sql'), 'utf8'));
 await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260823_remision_variantes.sql'), 'utf8'));
 await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260823_lotes_cantidad.sql'), 'utf8'));
+await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260823_valor_acreditado.sql'), 'utf8'));
 
 const conectar = (t) => ({ query: (text, params) => t.query(text, params ?? []) });
 const pool = { ...conectar(db), connect: async () => ({ ...conectar(db), release() {} }) };

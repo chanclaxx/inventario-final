@@ -285,21 +285,36 @@ const getExtracto = async (negocioId, sucursalId, { desde = null, hasta = null, 
       UNION ALL
       -- NOTA CRÉDITO: mercancía que el local devolvió y la bodega recibió.
       -- Baja la deuda porque el cargo de su envío deja de contarla.
-      -- Solo los SERIALES que vinieron de bodega: los accesorios y la mercancía
-      -- propia se acreditan con un Ajuste, y contarlos aquí los duplicaría.
+      --
+      -- Cubre los dos tipos, y cada uno con su fuente:
+      --   · SERIAL   → su valor_interno. Al confirmarse, su línea de entrega
+      --     pasó a 'Devuelta' y salió del cargo por ese mismo importe.
+      --   · CANTIDAD → valor_acreditado, el reparto FIFO real (cada tramo al
+      --     valor de SU lote). El valor_interno de la línea de devolución no
+      --     sirve: es solo lo que se ofreció al crearla, y una devolución que
+      --     cruza dos lotes se acredita a dos precios.
+      --
+      -- Antes solo contaba seriales, porque los accesorios se acreditaban con un
+      -- Ajuste. Al pasar a lotes ese Ajuste desapareció (habría duplicado la
+      -- baja) y nadie extendió esta rama: el cargo bajaba y el extracto no
+      -- mostraba ningún movimiento que lo explicara, así que su saldo dejaba de
+      -- cuadrar con la deuda.
       SELECT rd.fecha_recepcion, 'abono', 'devolucion',
              'Devolución recibida en bodega', -dev.total,
              NULL, rd.numero, ud.nombre,
-             dev.items::text || ' equipo(s)'
+             dev.items::text || ' producto(s)'
       FROM remisiones rd
       LEFT JOIN usuarios ud ON ud.id = rd.usuario_emisor_id
       JOIN LATERAL (
-        SELECT COALESCE(SUM(lr.valor_interno), 0) AS total, COUNT(*)::int AS items
+        SELECT COALESCE(SUM(
+                 CASE WHEN lr.tipo = 'serial' THEN lr.valor_interno
+                      ELSE COALESCE(lr.valor_acreditado, 0) END
+               ), 0) AS total,
+               COUNT(*)::int AS items
         FROM lineas_remision lr
         WHERE lr.remision_id = rd.id
           AND lr.estado_linea = 'Devuelta'
-          AND lr.tipo = 'serial'
-          AND lr.origen_unidad = 'bodega'
+          AND (lr.tipo = 'cantidad' OR lr.origen_unidad = 'bodega')
       ) dev ON dev.total > 0
       WHERE rd.negocio_id = $1 AND rd.sucursal_origen_id = $2
         AND rd.tipo = 'devolucion' AND rd.estado IN ('Recibida', 'Parcial')
