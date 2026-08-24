@@ -26,29 +26,56 @@ import { PackageX, Info } from 'lucide-react';
 
 export function ModalReportarFaltante({ envio, onCerrar, onListo }) {
   const [marcadas, setMarcadas] = useState({});
+  const [cantidades, setCantidades] = useState({});   // linea_id → cuántas no llegaron
   const [notas, setNotas] = useState('');
   const [error, setError] = useState('');
   const clave = useClaveIdempotencia();
 
   // Solo lo que sigue en poder del local puede no haber llegado.
+  //
+  // Las dos mitades se deciden distinto y no es un capricho: un SERIAL se sigue
+  // unidad por unidad (`estado_unidad` sabe si se vendió, se prestó o dónde
+  // está), y eso no existe para mercancía fungible. Una línea de CANTIDAD se
+  // reclama por unidades: el backend manda `reclamable`, que es lo que entregó
+  // la línea acotado a lo que el local todavía tiene de esa talla.
+  //
+  // Antes este filtro exigía `tipo === 'serial'`, así que las líneas de cantidad
+  // no eran ni candidatas ni bloqueadas: desaparecían, y un negocio con catálogo
+  // por variantes veía siempre "no hay nada que reportar".
   const RECLAMABLES = ['En consignacion', 'Sin ubicar', 'Movida'];
-  const candidatos = (envio.lineas || []).filter(
-    (l) => l.estado_linea === 'Recibida'
-      && l.tipo === 'serial'
-      && RECLAMABLES.includes(l.estado_unidad)
-  );
-  const bloqueadas = (envio.lineas || []).filter(
-    (l) => l.estado_linea === 'Recibida'
-      && l.tipo === 'serial'
-      && !RECLAMABLES.includes(l.estado_unidad)
-  );
+  const recibidas = (envio.lineas || []).filter((l) => l.estado_linea === 'Recibida');
+
+  const esCandidato = (l) => (l.tipo === 'serial'
+    ? RECLAMABLES.includes(l.estado_unidad)
+    : Number(l.reclamable || 0) > 0);
+
+  const candidatos = recibidas.filter(esCandidato);
+  const bloqueadas = recibidas.filter((l) => !esCandidato(l));
 
   const elegidas = candidatos.filter((l) => marcadas[l.linea_id]);
-  const total = elegidas.reduce((s, l) => s + Number(l.subtotal || 0), 0);
+  // Un serial es una unidad; una línea de cantidad vale por las que se marquen.
+  const cantidadDe = (l) => (l.tipo === 'serial'
+    ? 1
+    : Math.max(1, Math.min(Number(cantidades[l.linea_id] ?? l.reclamable), Number(l.reclamable))));
+  const unidades = elegidas.reduce((n, l) => n + cantidadDe(l), 0);
+  const total = elegidas.reduce((s, l) => {
+    if (l.tipo === 'serial') return s + Number(l.subtotal || 0);
+    // El subtotal de la línea es por TODAS sus unidades: se prorratea.
+    const porUnidad = Number(l.valor_interno || 0);
+    return s + porUnidad * cantidadDe(l);
+  }, 0);
 
   const reportar = useMutation({
     mutationFn: () => devolverABodega({
-      lineas: elegidas.map((l) => ({ tipo: 'serial', serial_id: l.serial_id })),
+      lineas: elegidas.map((l) => (l.tipo === 'serial'
+        ? { tipo: 'serial', serial_id: l.serial_id }
+        : {
+            tipo: 'cantidad',
+            producto_id: l.producto_destino_id,
+            atributo_id: l.atributo_destino_id ?? null,
+            variante_id: l.variante_destino_id ?? null,
+            cantidad: cantidadDe(l),
+          })),
       motivo: 'faltante',
       notas: notas.trim() || 'No llegó en el envío',
       clave_idempotencia: clave(),
@@ -77,8 +104,9 @@ export function ModalReportarFaltante({ envio, onCerrar, onListo }) {
 
         {candidatos.length === 0 ? (
           <p className="text-sm text-gray-400 text-center py-6">
-            No hay nada que reportar: todo lo de este envío ya se vendió, se prestó
-            o se devolvió.
+            {bloqueadas.length > 0
+              ? 'No hay nada que reportar: todo lo de este envío ya se vendió, se prestó o se devolvió.'
+              : 'No hay nada que reportar en este envío.'}
           </p>
         ) : (
           <div className="border border-gray-100 rounded-xl overflow-hidden">
@@ -103,7 +131,23 @@ export function ModalReportarFaltante({ envio, onCerrar, onListo }) {
                     <p className="text-xs text-gray-400 font-mono">{l.imei}</p>
                   )}
                 </div>
-                {l.subtotal != null && (
+                {l.tipo !== 'serial' && (
+                  <div className="flex items-center gap-1.5 flex-shrink-0"
+                       onClick={(e) => e.preventDefault()}>
+                    <span className="text-xs text-gray-400">no llegaron</span>
+                    <input
+                      type="number" min={1} max={Number(l.reclamable)}
+                      value={cantidades[l.linea_id] ?? l.reclamable}
+                      onChange={(e) => setCantidades((c) => ({
+                        ...c, [l.linea_id]: e.target.value,
+                      }))}
+                      className="w-14 px-2 py-1 bg-gray-100 border-0 rounded-lg text-sm
+                        text-center tabular-nums focus:outline-none focus:ring-2 focus:ring-amber-500"
+                    />
+                    <span className="text-xs text-gray-400">de {l.reclamable}</span>
+                  </div>
+                )}
+                {l.tipo === 'serial' && l.subtotal != null && (
                   <span className="text-xs text-gray-500 tabular-nums flex-shrink-0">
                     {formatCOP(l.subtotal)}
                   </span>
@@ -116,7 +160,7 @@ export function ModalReportarFaltante({ envio, onCerrar, onListo }) {
         {bloqueadas.length > 0 && (
           <p className="text-xs text-gray-400">
             {bloqueadas.length} producto(s) de este envío no se pueden reclamar:
-            ya se vendieron o se prestaron, así que sí llegaron.
+            ya se vendieron, se prestaron o se devolvieron, así que sí llegaron.
           </p>
         )}
 
@@ -131,7 +175,7 @@ export function ModalReportarFaltante({ envio, onCerrar, onListo }) {
 
         {elegidas.length > 0 && (
           <p className="text-sm text-gray-600">
-            Vas a reclamar <strong>{elegidas.length}</strong> producto(s) por{' '}
+            Vas a reclamar <strong>{unidades}</strong> unidad(es) por{' '}
             <strong>{formatCOP(total)}</strong>.
           </p>
         )}

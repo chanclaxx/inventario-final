@@ -1108,6 +1108,25 @@ const getLineasDetalladas = async (negocioId, remisionId, sucursalUnidades = nul
       pc.codigo                                         AS codigo,
       pc.unidad_medida,
       COALESCE(pcd.stock, 0)                            AS stock_destino,
+      -- ── Cuánto de esta línea se puede RECLAMAR como no llegado ────────────
+      --
+      -- estado_unidad solo existe para seriales: el motor de estados sigue
+      -- unidad por unidad (vendida, prestada, dónde está hoy) y eso no se puede
+      -- hacer con mercancía fungible. Sin esto, las líneas de CANTIDAD no eran
+      -- ni candidatas ni bloqueadas: desaparecían de la pantalla de reclamo, y
+      -- el negocio cuyo catálogo es todo variantes no podía reclamar NADA.
+      --
+      -- Un reclamo saca del local unidades que en realidad nunca llegaron, así
+      -- que el tope es lo que la línea entregó Y lo que el local todavía tiene
+      -- de ese nodo: si ya lo vendió, no hay nada que sacar.
+      CASE WHEN lr.tipo = 'cantidad' AND lr.estado_linea = 'Recibida'
+        THEN LEAST(
+          COALESCE(lr.cantidad_recibida, lr.cantidad, 0),
+          COALESCE(nd.stock, 0)
+        )
+        ELSE 0
+      END                                               AS reclamable,
+      COALESCE(nd.stock, 0)                             AS stock_nodo_destino,
       u.estado_unidad,
       COALESCE(u.liquidable, 0)                         AS liquidable,
       u.factura_numero, u.nombre_cliente, u.factura_fecha,
@@ -1135,6 +1154,17 @@ const getLineasDetalladas = async (negocioId, remisionId, sucursalUnidades = nul
     LEFT JOIN productos_serial ps  ON ps.id = lr.producto_origen_id AND lr.tipo = 'serial'
     LEFT JOIN productos_cantidad pc  ON pc.id  = lr.producto_origen_id  AND lr.tipo = 'cantidad'
     LEFT JOIN productos_cantidad pcd ON pcd.id = lr.producto_destino_id AND lr.tipo = 'cantidad'
+    -- Stock del NODO que recibió la línea (la talla), no el del producto: con
+    -- variantes el del producto es la suma de todas y no dice nada de esta.
+    LEFT JOIN LATERAL (
+      SELECT CASE
+        WHEN lr.variante_destino_id IS NOT NULL
+          THEN (SELECT v.stock FROM variantes_atributo v WHERE v.id = lr.variante_destino_id AND v.activo)
+        WHEN lr.atributo_destino_id IS NOT NULL
+          THEN (SELECT a.stock FROM atributos_producto a WHERE a.id = lr.atributo_destino_id AND a.activo)
+        ELSE pcd.stock
+      END AS stock
+    ) nd ON lr.tipo = 'cantidad'
     WHERE lr.remision_id = $3
       AND EXISTS (SELECT 1 FROM remisiones r WHERE r.id = lr.remision_id AND r.negocio_id = $1)
     ORDER BY lr.tipo, lr.id

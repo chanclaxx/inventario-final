@@ -38,6 +38,7 @@ node scripts/pruebas-red-interna/19-ordenes-compra.mjs
 node scripts/pruebas-red-interna/20-borradores.mjs
 node scripts/pruebas-red-interna/23-costo-serial-en-local.mjs
 node scripts/pruebas-red-interna/24-remision-por-variante.mjs
+node scripts/pruebas-red-interna/25-reclamo-faltante.mjs
 ```
 
 > `20-borradores` verifica sobre todo una invariante negativa: guardar un
@@ -466,6 +467,29 @@ Recorre el día completo —despacho → recepción → tarifa → ajuste → de
 comprueba el invariante `producto = Σ variantes` en las dos sucursales **en cada
 paso**. Las dos primeras secciones son las barandas: despachar sin decir la talla
 se rechaza, y un producto SIN variantes se sigue despachando exactamente igual.
+
+### `25-reclamo-faltante.mjs` — 18 verificaciones
+
+El local confirma un envío de más y luego descubre que algo no venía en la caja.
+Lo marca como faltante y su deuda **no baja sola**: baja cuando la bodega lo
+revisa y confirma que la mercancía la tiene ella.
+
+Reportado desde producción: la pantalla decía **siempre** "no hay nada que
+reportar: todo lo de este envío ya se vendió, se prestó o se devolvió", con el
+envío recién recibido y nada vendido. Eran dos fallos encadenados. El filtro de
+candidatos exigía `tipo === 'serial'` — y `estado_unidad` solo existe para
+seriales, porque el motor de estados sigue unidad por unidad y eso no se puede
+hacer con mercancía fungible —, así que las líneas de CANTIDAD no eran ni
+candidatas ni bloqueadas: desaparecían. Para un negocio con el catálogo por
+variantes, eso es **todo** su envío. Y el mensaje de "no hay nada" afirmaba que
+ya se había vendido sin haber mirado si había algo vendido.
+
+Ahora una línea de cantidad se reclama por unidades: el backend calcula
+`reclamable` = lo que entregó la línea acotado a lo que el local todavía tiene de
+esa talla (un reclamo saca del local unidades que nunca llegaron; si ya las
+vendió, no hay nada que sacar). Las secciones 5 y 6 son las que sostienen el
+mensaje: lo vendido queda bloqueado **con motivo**, y solo cuando de verdad no
+queda nada la pantalla dice que todo se vendió.
 
 ## Nota sobre `esquema.sql`
 

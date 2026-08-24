@@ -216,6 +216,26 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > también por `codigos_variantes` (agregado en `findAll`): sin eso, mover los
 > códigos a las variantes los volvía inbuscables.
 
+> **El reclamo por faltante también cubre la mercancía por CANTIDAD**
+> (`getLineasDetalladas.reclamable`, `ModalReportarFaltante`): `estado_unidad`
+> solo existe para SERIALES — el motor de estados sigue unidad por unidad
+> (vendida, prestada, dónde está hoy) y eso no se puede hacer con mercancía
+> fungible. La pantalla de reclamo filtraba por `tipo === 'serial'`, así que las
+> líneas de cantidad no eran ni candidatas ni bloqueadas: **desaparecían**, y un
+> negocio con el catálogo por variantes no podía reclamar nada. Encima el mensaje
+> de vacío afirmaba «todo ya se vendió» sin haber mirado si había algo vendido.
+> Ahora una línea de cantidad se reclama **por unidades**: `reclamable` = lo que
+> entregó la línea acotado a lo que el local todavía tiene **de ese nodo** (un
+> reclamo saca del local unidades que nunca llegaron; si ya las vendió, no hay
+> nada que sacar). El stock se mira en la talla, no en el producto: el del
+> producto es la suma de todas y no dice nada de esta.
+> El circuito no cambia — sigue siendo el de la devolución, la línea queda
+> `'Devuelta'` y el «nunca llegó» vive en `remisiones.motivo` — y la deuda del
+> local **no baja hasta que la bodega confirma**.
+> Prueba: `25-reclamo-faltante` (18 verificaciones; las secciones 5 y 6 son las
+> que sostienen el mensaje: lo vendido queda bloqueado con motivo, y solo cuando
+> de verdad no queda nada la pantalla dice que todo se vendió).
+
 > **La línea de remisión mueve un NODO, no un producto**
 > (`20260823_remision_variantes.sql`, `redInterna.service._resolverNodoOrigen`):
 > la red interna se escribió cuando el stock de un producto por cantidad vivía en
