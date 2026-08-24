@@ -18,7 +18,7 @@ import { useAuth }    from '../../context/useAuth';
 import {
   BarChart2, TrendingUp, Package, AlertTriangle,
   ChevronDown, ChevronUp, Info, Pencil, Check, X,
-  Warehouse, Handshake, Wrench, CreditCard, LineChart, Users, Target,
+  Warehouse, Handshake, Wrench, CreditCard, LineChart, Users, Target, Truck,
 } from 'lucide-react';
 const PanelAnalisis   = lazy(() => import('./PanelAnalisis'));
 const PanelVendedores = lazy(() => import('./PanelVendedores'));
@@ -979,6 +979,77 @@ const SeccionCreditos = ({ creditos }) => {
 // ─────────────────────────────────────────────
 // PANEL RESUMEN
 // ─────────────────────────────────────────────
+// ─────────────────────────────────────────────
+// VENTAS A LOS LOCALES (solo la BODEGA de la red interna)
+//
+// Despachar ES vender: el local paga todo lo que recibe. Pero no hay factura de
+// por medio, así que esto no puede ir mezclado con las de arriba —el total
+// dejaría de cuadrar con la lista— y va en su propio grupo, como préstamos y
+// servicios. `red_interna` llega en null para todo el que no sea la bodega, así
+// que el bloque simplemente no existe para el resto.
+// ─────────────────────────────────────────────
+const SeccionVentasLocales = ({ red }) => {
+  if (!red || !red.envios?.length) return null;
+
+  const { envios, resumen } = red;
+
+  return (
+    <div className="flex flex-col gap-3 border-t border-gray-100 pt-4">
+      <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+        <Truck size={15} className="text-cyan-600" />
+        Ventas a locales
+        <span className="text-xs font-normal text-gray-400">
+          {resumen.envios} envío{resumen.envios !== 1 ? 's' : ''} recibido{resumen.envios !== 1 ? 's' : ''} en el período
+        </span>
+      </h3>
+
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+        <div className="bg-cyan-50 text-cyan-700 rounded-xl p-3">
+          <p className="text-xs font-medium opacity-70">Despachado a locales</p>
+          <p className="text-lg font-bold mt-0.5">{formatCOP(resumen.valor_total)}</p>
+          <p className="text-xs opacity-60 mt-0.5">{resumen.unidades} unidad(es)</p>
+        </div>
+        <div className="bg-orange-50 text-orange-700 rounded-xl p-3">
+          <p className="text-xs font-medium opacity-70">Costo de la bodega</p>
+          <p className="text-lg font-bold mt-0.5">{formatCOP(resumen.costo_total)}</p>
+        </div>
+        <div className="bg-green-50 text-green-700 rounded-xl p-3">
+          <p className="text-xs font-medium opacity-70">Utilidad</p>
+          <p className="text-lg font-bold mt-0.5">{formatCOP(resumen.utilidad_total)}</p>
+          {resumen.valor_sin_costo > 0 && (
+            <p className="text-xs opacity-60 mt-0.5">
+              sin medir {formatCOP(resumen.valor_sin_costo)} despachado sin costo registrado
+            </p>
+          )}
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-2">
+        {envios.map((e) => (
+          <div key={e.remision_id}
+            className="bg-white border border-gray-100 rounded-xl px-3.5 py-2.5 flex items-center
+              justify-between gap-3 shadow-sm">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-gray-800 truncate">
+                Envío #{String(e.numero ?? e.remision_id).padStart(4, '0')} → {e.sucursal_nombre}
+              </p>
+              <p className="text-xs text-gray-400">
+                {formatFecha(e.fecha)} · {e.unidades} u. · costo {formatCOP(e.costo)}
+              </p>
+            </div>
+            <div className="flex items-center gap-3 flex-shrink-0">
+              <span className="text-sm font-semibold text-gray-900">{formatCOP(e.valor)}</span>
+              {e.utilidad !== null
+                ? <UtilidadBadge valor={e.utilidad} />
+                : <span className="text-xs text-amber-600">sin costo</span>}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
 const PanelResumen = ({ dashboard, loading }) => {
   if (loading) return <Spinner className="py-20" />;
 
@@ -1062,11 +1133,14 @@ const PanelVentas = ({ desde, hasta, onDesde, onHasta, esAdmin }) => {
   const prestamos = ventasData?.prestamos ?? null;
   const servicios = ventasData?.servicios ?? null;
   const creditos  = ventasData?.creditos  ?? null;
+  // Solo llega con datos en la bodega de un negocio con red interna.
+  const redInterna = ventasData?.red_interna ?? null;
 
   const hayContenido = facturas.length > 0
     || (prestamos && (prestamos.saldados.length > 0 || prestamos.activos.length > 0))
     || (servicios && (servicios.cerrados.length > 0 || servicios.activos.total > 0))
-    || (creditos && (creditos.saldados.length > 0 || creditos.activos.total > 0));
+    || (creditos && (creditos.saldados.length > 0 || creditos.activos.total > 0))
+    || (redInterna && redInterna.envios.length > 0);
 
   return (
     <div className="flex flex-col gap-4">
@@ -1137,6 +1211,9 @@ const PanelVentas = ({ desde, hasta, onDesde, onHasta, esAdmin }) => {
 
           {/* Utilidad de créditos */}
           <SeccionCreditos creditos={creditos} />
+
+          {/* Lo que la bodega le vendió a sus locales */}
+          <SeccionVentasLocales red={redInterna} />
 
         </div>
       )}
@@ -1359,6 +1436,23 @@ const PanelInventario = () => {
             sub={formatCOP(data.totales.precio_venta_total - data.totales.costo_total)} />
         )}
       </div>
+      {/* En un LOCAL de la red, parte de la vitrina es mercancía de la bodega y
+          está valorada al valor interno de la remisión: es exactamente lo que
+          el local le debe por ella. En la bodega y en un negocio sin red este
+          bloque no existe (unidades_bodega = 0). */}
+      {data.serial.unidades_bodega > 0 && (
+        <div className="bg-amber-50 border border-amber-100 rounded-xl px-4 py-3 flex flex-col gap-1">
+          <p className="text-xs font-semibold text-amber-800">
+            {data.serial.unidades_bodega} de {data.serial.unidades} equipo(s) vinieron de la bodega
+          </p>
+          <p className="text-xs text-amber-700">
+            Valorados en {formatCOP(data.serial.costo_bodega)} — el valor con el que te los
+            entregaron, que es lo que tendrás que liquidarle a la bodega. El resto es
+            mercancía propia (retomas o compras tuyas), valorada a su costo.
+          </p>
+        </div>
+      )}
+
       <div className="flex flex-col gap-3">
         <FilaInventario label="Productos con serial / IMEI" datos={data.serial}
           colorCosto="bg-blue-50 text-blue-700" colorVenta="bg-blue-100 text-blue-800" />

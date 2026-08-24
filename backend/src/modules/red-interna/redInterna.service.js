@@ -629,6 +629,9 @@ const despachar = async (req, {
           producto_origen_id: s.producto_id,
           producto_destino_id: destinoSerial,
           valor_interno: valorSerial,
+          // Lo que le costó a la BODEGA. Se guarda para poder calcular después
+          // su utilidad por el despacho; `seriales.costo_compra` sigue intacto.
+          costo_origen: s.costo_compra ?? null,
           estado_linea: 'Pendiente',
           nombre_producto: [s.nombre, s.marca, s.modelo].filter(Boolean).join(' '),
         });
@@ -662,6 +665,10 @@ const despachar = async (req, {
           atributo_origen_id: nodo.atributoId,
           variante_origen_id: nodo.varianteId,
           valor_interno: valorCantidad,
+          // El costo del nodo en la bodega HOY. Aquí sí hay que fotografiarlo:
+          // es un promedio ponderado que se mueve con cada compra, así que en
+          // un mes ya no se puede reconstruir el que tenía al salir.
+          costo_origen: nodo.costo ?? null,
           estado_linea: 'Pendiente',
           // Con la variante en el nombre: es lo que ve quien recibe y quien
           // revisa el envío, y sin ella dos líneas del mismo producto en tallas

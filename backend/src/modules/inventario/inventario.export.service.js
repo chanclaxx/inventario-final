@@ -13,7 +13,34 @@ const agruparPorLinea = (seriales) => {
   return porLinea;
 };
 
-const getInventarioCompleto = async (sucursalId, negocioId, modo) => {
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Qué costos puede ver quien exporta.
+//
+// `costo_compra` es lo que el NEGOCIO le pagó a un proveedor externo. Con la red
+// interna encendida, en un local ese número es el costo de la BODEGA:
+// información comercial de la casa matriz que un local no tiene por qué
+// conocer. Solo lo ve `admin_negocio`.
+//
+// `costo_local` (el valor interno de la remisión) sí es del local —es lo que
+// debe— pero sigue mandando `red_interna_ocultar_costos`, activo por defecto:
+// con esa opción puesta, un vendedor confirma entregas y remite dinero sin ver
+// la valorización de la mercancía.
+//
+// El recorte va aquí, en el BACKEND: quitar la columna solo del Excel dejaría
+// el dato viajando en el JSON de la respuesta.
+// ─────────────────────────────────────────────────────────────────────────────
+const _recortarCostos = (seriales, { rol, ocultarCostos }) => {
+  const esAdmin = rol === 'admin_negocio';
+  if (esAdmin) return seriales;
+
+  return seriales.map((s) => {
+    const { costo_compra, costo_local, ...resto } = s;
+    return ocultarCostos ? resto : { ...resto, costo_local };
+  });
+};
+
+const getInventarioCompleto = async (sucursalId, negocioId, modo, rol = null) => {
   // ── Segunda capa: verificar que sucursal pertenece al negocio ──
   const { rows } = await pool.query(
     `SELECT id FROM sucursales WHERE id = $1 AND negocio_id = $2 AND activa = true`,
@@ -32,13 +59,19 @@ const getInventarioCompleto = async (sucursalId, negocioId, modo) => {
     return { porLinea: agruparPorLinea(seriales), configMap };
   }
 
+  // Ausente = activado: el default seguro es no mostrar costos al que no es admin.
+  const ocultarCostos = configMap.red_interna_activa === '1'
+    && configMap.red_interna_ocultar_costos !== '0';
+
   const variantesActivo = configMap.variantes_activo === '1';
 
-  const [seriales, cantidad, variantesPorProducto] = await Promise.all([
+  const [serialesCrudos, cantidad, variantesPorProducto] = await Promise.all([
     repo.getSeriales(sucursalId),
     repo.getProductosCantidad(sucursalId),
     variantesActivo ? repo.getVariantesPorSucursal(sucursalId) : Promise.resolve({}),
   ]);
+
+  const seriales = _recortarCostos(serialesCrudos, { rol, ocultarCostos });
 
   const porProducto = {};
   for (const s of seriales) {

@@ -1,6 +1,7 @@
 const { pool } = require('../../config/db');
 const repo     = require('./productosSerial.repository');
 const { fechaHoyColombia } = require('../../utils/fecha.util');
+const costoRed = require('../../utils/costoRed.util');
 const { normalizarUbicacion } = require('../../utils/ubicacion.util');
 
 // ── Verifica que linea_id pertenece al negocio ────────────────────────────
@@ -124,6 +125,37 @@ const agregarSerial = async (
 const actualizarSerial = async (negocioId, serialId, { imei, costo_compra, precio, color, caracteristicas, nota }) => {
   const serial = await repo.findSerialByIdYNegocio(serialId, negocioId);
   if (!serial) throw { status: 404, message: 'Serial no encontrado' };
+
+  // ── El costo de una unidad consignada no se edita desde el inventario ────
+  //
+  // `costo_compra` es lo que el NEGOCIO le pagó a un proveedor externo. En un
+  // local de la red, el costo del equipo es el `valor_interno` de la remisión,
+  // y sus reportes ya lo usan: escribir aquí pisaría el dato de la bodega sin
+  // mover una sola cifra de lo que el local ve. El precio de venta, el color y
+  // la nota sí se editan — son del local.
+  //
+  // La comprobación va en el BACKEND y no solo en la pantalla: es el mismo
+  // criterio del recorte de costos a vendedores.
+  // Solo si de verdad lo está CAMBIANDO: el modal manda el formulario completo,
+  // así que editar el color reenvía el costo tal como está y eso no puede
+  // bloquear una edición legítima.
+  const cambiaCosto = costo_compra !== undefined
+    && Number(costo_compra ?? -1) !== Number(serial.costo_compra ?? -1);
+  if (cambiaCosto) {
+    const { rows } = await pool.query(`
+      SELECT ${costoRed.sqlValorInternoEnStock('s.id', 'ps.sucursal_id')} AS valor_interno
+      FROM seriales s
+      JOIN productos_serial ps ON ps.id = s.producto_id
+      WHERE s.id = $1
+    `, [serialId]);
+    if (rows[0]?.valor_interno != null) {
+      throw {
+        status: 409,
+        code: 'COSTO_DE_BODEGA',
+        message: 'Este equipo vino de la bodega: su costo es el valor de la remisión. Corrígelo desde Red interna → el envío → "Corregir valor de la línea".',
+      };
+    }
+  }
 
   // Price is stored on the individual serial (not on the product) so other serials are unaffected
   const actualizado = await repo.actualizarSerial(serialId, { imei, costo_compra, precio, color, caracteristicas, nota });

@@ -55,9 +55,19 @@ function EventoEntrada({ d }) {
           <span className="font-medium">Proveedor:</span> {d.proveedor_nombre}
         </p>
       )}
+      {/* Con la red interna, el costo que rige en un LOCAL es el valor interno
+          de la remisión —lo que le tendrá que liquidar a la bodega—, y el de
+          compra es el de la casa matriz. Se muestran los dos, etiquetados: el
+          mismo número sin apellido en dos sucursales significa cosas distintas. */}
+      {d.costo_local != null && (
+        <p className="text-sm text-gray-600">
+          <span className="font-medium">Costo en esta sede:</span> {formatCOP(d.costo_local)}
+          <span className="text-gray-400"> (valor de la remisión)</span>
+        </p>
+      )}
       {d.costo_compra != null && (
         <p className="text-sm text-gray-600">
-          <span className="font-medium">Costo:</span> {formatCOP(d.costo_compra)}
+          <span className="font-medium">{d.costo_local != null ? 'Costo de la bodega' : 'Costo'}:</span> {formatCOP(d.costo_compra)}
         </p>
       )}
       {!d.proveedor_nombre && d.costo_compra == null && (
@@ -291,13 +301,19 @@ function TarjetaSerial({ serial }) {
           )}
 
           {/* Info admin: costo y proveedor */}
-          {(serial.costo_compra != null || serial.proveedor_nombre) && (
+          {(serial.costo_compra != null || serial.costo_local != null || serial.proveedor_nombre) && (
             <div className="mt-2 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-gray-400 border-t border-dashed border-gray-100 pt-2">
               {serial.proveedor_nombre && (
                 <span>Proveedor: <span className="font-medium text-gray-600">{serial.proveedor_nombre}</span></span>
               )}
+              {serial.costo_local != null && (
+                <span>Costo en esta sede: <span className="font-medium text-gray-600">{formatCOP(serial.costo_local)}</span></span>
+              )}
               {serial.costo_compra != null && (
-                <span>Costo: <span className="font-medium text-gray-600">{formatCOP(serial.costo_compra)}</span></span>
+                <span>
+                  {serial.costo_local != null ? 'Costo bodega' : 'Costo'}:{' '}
+                  <span className="font-medium text-gray-600">{formatCOP(serial.costo_compra)}</span>
+                </span>
               )}
             </div>
           )}

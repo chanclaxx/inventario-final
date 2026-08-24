@@ -16,6 +16,7 @@ const exportarInventario = async (req, res, next) => {
       req.sucursal_id,
       req.user.negocio_id,  // ← pasar para segunda capa
       req.query.modo,
+      req.user.rol,         // ← decide qué costos viajan (ver _recortarCostos)
     );
     res.json({ ok: true, data });
   } catch (err) { next(err); }

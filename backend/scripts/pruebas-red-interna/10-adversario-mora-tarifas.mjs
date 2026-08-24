@@ -83,6 +83,7 @@ await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260823_red_interna_c
 await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260823_red_interna_cargos_pagables.sql'), 'utf8'));
 await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260823_remision_variantes.sql'), 'utf8'));
 await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260823_lotes_cantidad.sql'), 'utf8'));
+await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260824_costo_origen_remision.sql'), 'utf8'));
 await db.exec(readFileSync(path.join(RAIZ, '../migrations/20260823_valor_acreditado.sql'), 'utf8'));
 await db.exec(readFileSync(path.join(RAIZ, 'migrations/20260730_mora_credito.sql'), 'utf8'));
 // Ver la nota en 09: el interés vive en la misma tabla, así que su migración

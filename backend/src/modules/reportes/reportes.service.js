@@ -1,4 +1,5 @@
 const { pool } = require('../../config/db');
+const costoRed = require('../../utils/costoRed.util');
 
 const HOY_F = `DATE(f.fecha AT TIME ZONE 'UTC' AT TIME ZONE 'America/Bogota') = (NOW() AT TIME ZONE 'America/Bogota')::date`;
 const HOY   = `DATE(fecha   AT TIME ZONE 'UTC' AT TIME ZONE 'America/Bogota') = (NOW() AT TIME ZONE 'America/Bogota')::date`;
@@ -11,72 +12,15 @@ const fechaBogota = (col) => `(${col} AT TIME ZONE 'UTC' AT TIME ZONE 'America/B
 // En un local, el costo real de un equipo consignado NO es `seriales.costo_compra`
 // —esa es la verdad del costo de la BODEGA, que a propósito nunca se reescribe
 // al remisionar— sino el `valor_interno` que la bodega le puso en la remisión:
-// lo que el local tendrá que liquidarle cuando lo venda.
+// lo que el local tendrá que liquidarle cuando lo venda. Sin esto, el local
+// vendía un equipo consignado y su utilidad salía contra el costo de la bodega
+// —inflada— mientras que la de los accesorios salía bien: el mismo reporte
+// midiendo con dos varas.
 //
-// Los productos por CANTIDAD ya lo resolvían solos: al recibir, la recepción
-// reescribe `productos_cantidad.costo_unitario` del destino con el promedio
-// ponderado sobre `valor_interno`. Los seriales no, porque `moverSerial` solo
-// cambia `producto_id`. Sin esto, el local vendía un equipo consignado y su
-// utilidad salía contra el costo de la bodega —inflada, porque la bodega le
-// cobra por encima— mientras que la de los accesorios salía bien: el mismo
-// reporte midiendo con dos varas.
-//
-// Devuelve NULL cuando no aplica (negocio sin red, unidad propia del local,
-// retoma) y entonces el llamador cae a `costo_compra`, que ahí sí es lo correcto.
-// `r.tipo = 'entrega'` es lo que excluye a la BODEGA: las entregas van
-// bodega → local, y en las devoluciones el destino es la bodega, que debe seguir
-// usando su propio costo.
-//
-// Se toma la entrega más reciente ANTERIOR a la venta: una unidad puede haberse
-// enviado, devuelto y vuelto a enviar con otro valor interno.
-//
-// El cruce va por IMEI y no por `serial_id` a propósito: aquí se parte de
-// `lineas_factura`, que no guarda serial_id. Acotarlo a la sucursal destino y a
-// la fecha es lo que evita el fan-out del IMEI (un mismo IMEI tiene varias filas
-// históricas en `seriales`).
-const _valorInternoSerial = (imeiAlias, sucursalAlias, fechaAlias) => `
-    (
-      SELECT lr.valor_interno
-      FROM lineas_remision lr
-      JOIN remisiones r ON r.id = lr.remision_id
-      WHERE r.sucursal_destino_id = ${sucursalAlias}
-        AND r.tipo          = 'entrega'
-        AND r.estado       <> 'Anulada'
-        AND lr.tipo         = 'serial'
-        AND lr.estado_linea = 'Recibida'
-        AND lr.valor_interno IS NOT NULL
-        AND UPPER(TRIM(lr.imei)) = UPPER(TRIM(${imeiAlias}))
-        ${fechaAlias ? `AND r.fecha_emision <= ${fechaAlias}` : ''}
-      ORDER BY r.fecha_emision DESC, lr.id DESC
-      LIMIT 1
-    )`;
-
-// ── Helper: subquery de costo de serial anclada al negocio ───────────────────
-// El valor interno manda cuando la unidad vino de la bodega de la red; si no,
-// el costo de compra de siempre.
-const _costoPorImei = (imeiAlias, sucursalAlias, fechaAlias = null) => `
-  COALESCE(
-    ${_valorInternoSerial(imeiAlias, sucursalAlias, fechaAlias)},
-    (
-      SELECT s.costo_compra
-      FROM seriales s
-      JOIN productos_serial ps ON ps.id = s.producto_id
-      WHERE s.imei = ${imeiAlias}
-        AND ps.sucursal_id = ${sucursalAlias}
-      LIMIT 1
-    ),
-    (
-      SELECT AVG(s2.costo_compra)
-      FROM seriales s2
-      JOIN productos_serial ps2 ON ps2.id = s2.producto_id
-      JOIN seriales s3 ON s3.imei = ${imeiAlias}
-      WHERE s2.producto_id = s3.producto_id
-        AND ps2.sucursal_id = ${sucursalAlias}
-        AND s2.costo_compra IS NOT NULL
-    ),
-    0
-  )
-`;
+// La consulta vive en `utils/costoRed.util.js` porque la comparten los reportes
+// y la valorización del inventario; el porqué de cada filtro está allá.
+const _valorInternoSerial = costoRed.sqlValorInternoPorImei;
+const _costoPorImei       = costoRed.sqlCostoPorImei;
 
 // ── Devoluciones parciales (solo créditos): cantidad y subtotal EFECTIVOS ─────
 // Tras una devolución parcial de crédito, la línea queda con cantidad_devuelta > 0
@@ -1073,7 +1017,134 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
     interes_condonado:          mora.resumen.interes_condonado,
   };
 
-  return { facturas: facturasCompletas, resumen, prestamos, servicios, creditos: creditosData, mora };
+  // Lo que la bodega le vendió a sus locales en el período. Va en su propio
+  // bloque y NO se suma a `resumen`: son ventas sin factura y mezclarlas
+  // rompería el cuadre entre el total y la lista de facturas de arriba. La
+  // pantalla las muestra como un grupo aparte, igual que préstamos y servicios.
+  const redInterna = await getVentasALocales(sucursalId, desde, hasta);
+
+  return {
+    facturas: facturasCompletas, resumen, prestamos, servicios,
+    creditos: creditosData, mora, red_interna: redInterna,
+  };
+};
+
+// ─── Ventas a los locales de la red (solo aplica a la BODEGA) ────────────────
+//
+// Con el modelo "el envío es la deuda", despachar ES vender: la bodega entrega
+// mercancía a `valor_interno` y se la cobra al local. Esa operación no genera
+// factura, así que no aparecía en ningún reporte — la bodega veía salir su
+// inventario y su utilidad no se movía, mientras el local sí reportaba bien
+// (su costo es ese mismo valor interno). El margen del grupo se perdía en el
+// camino entre las dos sucursales.
+//
+// Qué cuenta como venta: exactamente lo que le genera CARGO al local — líneas
+// `'Recibida'` de una entrega no anulada, descontando lo devuelto (un serial
+// devuelto sale entero; de una línea de cantidad bajan solo las unidades que
+// volvieron). Es la misma expresión que `SQL_CARGO_ENVIO`: si las dos se
+// separan, la bodega reportaría una venta que el local no debe.
+//
+// Qué cuenta como costo: lo que le costó A LA BODEGA. Para un serial se lee en
+// vivo de `seriales.costo_compra` —así una corrección del admin se refleja
+// sola— y para cantidad, el `costo_origen` congelado al despachar, porque el
+// promedio ponderado del nodo ya se movió.
+//
+// La fecha es la de RECEPCIÓN: es cuando nace la deuda. Una remesa despachada
+// el 30 y recibida el 2 es venta del mes siguiente, igual para las dos partes.
+//
+// Devuelve null cuando no hay nada — negocio sin red, sucursal que no es la
+// bodega, o un período sin despachos — y el frontend no pinta nada.
+const getVentasALocales = async (sucursalId, desde, hasta) => {
+  const { rows } = await pool.query(`
+    WITH lineas AS (
+      SELECT
+        r.id                       AS remision_id,
+        r.numero,
+        r.sucursal_destino_id,
+        COALESCE(r.fecha_recepcion, r.fecha_emision) AS fecha,
+        CASE WHEN lr.tipo = 'serial' THEN 1
+             ELSE GREATEST(COALESCE(lr.cantidad_recibida, lr.cantidad, 0)
+                            - COALESCE(lr.cantidad_devuelta, 0), 0) END AS unidades,
+        lr.valor_interno,
+        CASE WHEN lr.tipo = 'serial'
+             THEN COALESCE(s.costo_compra, lr.costo_origen)
+             ELSE lr.costo_origen END AS costo_unitario
+      FROM lineas_remision lr
+      JOIN remisiones r ON r.id = lr.remision_id
+      LEFT JOIN seriales s ON s.id = lr.serial_id
+      WHERE r.sucursal_origen_id = $1
+        AND r.tipo          = 'entrega'
+        AND r.estado       <> 'Anulada'
+        AND lr.estado_linea = 'Recibida'
+        AND DATE(COALESCE(r.fecha_recepcion, r.fecha_emision)
+              AT TIME ZONE 'UTC' AT TIME ZONE 'America/Bogota') BETWEEN $2 AND $3
+    )
+    SELECT
+      l.remision_id,
+      l.numero,
+      l.sucursal_destino_id,
+      su.nombre                                        AS sucursal_nombre,
+      MIN(l.fecha)                                     AS fecha,
+      SUM(l.unidades)::int                             AS unidades,
+      SUM(l.unidades * l.valor_interno)                AS valor,
+      -- Los totales se arman con las líneas MEDIBLES, no con el envío entero:
+      -- descartar un envío completo porque una de sus líneas no tiene costo
+      -- botaría la utilidad de las que sí lo tienen.
+      COALESCE(SUM(l.unidades * l.valor_interno)
+        FILTER (WHERE l.costo_unitario IS NOT NULL), 0)  AS valor_medible,
+      COALESCE(SUM(l.unidades * l.costo_unitario)
+        FILTER (WHERE l.costo_unitario IS NOT NULL), 0)  AS costo,
+      COALESCE(SUM(l.unidades * l.valor_interno)
+        FILTER (WHERE l.costo_unitario IS NULL), 0)      AS valor_sin_costo,
+      COUNT(*) FILTER (WHERE l.costo_unitario IS NULL)::int AS lineas_sin_costo
+    FROM lineas l
+    JOIN sucursales su ON su.id = l.sucursal_destino_id
+    WHERE l.unidades > 0
+    GROUP BY l.remision_id, l.numero, l.sucursal_destino_id, su.nombre
+    ORDER BY MIN(l.fecha) DESC
+  `, [sucursalId, desde, hasta]);
+
+  if (!rows.length) return null;
+
+  const envios = rows.map((r) => {
+    const valor          = Number(r.valor);
+    const costo          = Number(r.costo);
+    const valorMedible   = Number(r.valor_medible);
+    const valorSinCosto  = Number(r.valor_sin_costo);
+    return {
+      remision_id:      Number(r.remision_id),
+      numero:           r.numero,
+      sucursal_id:      Number(r.sucursal_destino_id),
+      sucursal_nombre:  r.sucursal_nombre,
+      fecha:            r.fecha,
+      unidades:         Number(r.unidades),
+      valor,
+      costo,
+      // La fila muestra utilidad solo si TODAS sus líneas tienen costo: una
+      // utilidad parcial presentada como la del envío diría que la bodega ganó
+      // menos de lo que ganó. En los totales sí entra lo medible de esta fila.
+      utilidad:         r.lineas_sin_costo > 0 ? null : valor - costo,
+      utilidad_medible: valorMedible - costo,
+      valor_sin_costo:  valorSinCosto,
+      lineas_sin_costo: r.lineas_sin_costo,
+    };
+  });
+
+  const suma = (f) => envios.reduce((a, e) => a + f(e), 0);
+  return {
+    envios,
+    resumen: {
+      envios:           envios.length,
+      unidades:         suma((e) => e.unidades),
+      valor_total:      suma((e) => e.valor),
+      costo_total:      suma((e) => e.costo),
+      utilidad_total:   suma((e) => e.utilidad_medible),
+      // Lo que se despachó sin saber qué costó: no entra en la utilidad y hay
+      // que decirlo, o el margen se lee como si fuera del total.
+      valor_sin_costo:  suma((e) => e.valor_sin_costo),
+      envios_sin_costo: envios.filter((e) => e.lineas_sin_costo > 0).length,
+    },
+  };
 };
 
 // ─── getProductosTop ──────────────────────────────────────────────────────────
@@ -1520,7 +1591,8 @@ const getInventarioBajo = async (sucursalId) => {
 const actualizarCostoCompra = async (sucursalId, tipo, imei, nombreProducto, nuevoCosto, productoId, varianteId, atributoId) => {
   if (tipo === 'serial') {
     const { rows: check } = await pool.query(`
-      SELECT s.id
+      SELECT s.id,
+             ${costoRed.sqlValorInternoEnStock('s.id', 'ps.sucursal_id')} AS valor_interno
       FROM seriales s
       JOIN productos_serial ps ON ps.id = s.producto_id
       WHERE s.imei = $1 AND ps.sucursal_id = $2
@@ -1529,6 +1601,21 @@ const actualizarCostoCompra = async (sucursalId, tipo, imei, nombreProducto, nue
 
     if (!check.length) {
       throw Object.assign(new Error('Serial no encontrado en esta sucursal'), { status: 404 });
+    }
+    // ── Una unidad consignada NO se corrige desde aquí ─────────────────────
+    //
+    // `costo_compra` es lo que el NEGOCIO le pagó a un proveedor externo: la
+    // verdad de la bodega y la base del margen consolidado del grupo.
+    // Escribirla desde el local hacía dos daños a la vez: pisaba ese dato y no
+    // cambiaba una sola cifra de lo que el local ve —sus reportes toman el
+    // `valor_interno`—, así que el usuario creía que no se había guardado y lo
+    // repetía. Lo que hay que corregir es el valor de la línea de la remisión,
+    // que tiene su propio circuito (la otra parte se entera).
+    if (check[0].valor_interno != null) {
+      throw Object.assign(
+        new Error('Este equipo vino de la bodega: su costo es el valor de la remisión, no un costo de compra. Corrígelo desde Red interna → el envío → "Corregir valor de la línea".'),
+        { status: 409, code: 'COSTO_DE_BODEGA' },
+      );
     }
     await pool.query(
       'UPDATE seriales SET costo_compra = $1 WHERE id = $2',
@@ -1600,15 +1687,28 @@ const actualizarCostoCompra = async (sucursalId, tipo, imei, nombreProducto, nue
 const getValorInventario = async (sucursalId) => {
   const [serialResult, sinVariantesResult, atributosResult, variantesResult, sinCostoResult] = await Promise.all([
 
-    // Productos seriales: sin cambios
+    // ── Productos seriales ────────────────────────────────────────────────
+    // En un LOCAL de la red, una unidad consignada no vale lo que le costó a la
+    // bodega sino el `valor_interno` con el que se la entregaron: eso es lo que
+    // el local tendrá que liquidar, y desde agosto/2026 lo debe desde que la
+    // recibe. Valorarla al costo de la bodega subvalúa justo la mercancía que
+    // ya es una deuda. En la bodega y en un negocio sin red el LATERAL da NULL
+    // y manda `costo_compra`, como siempre.
     pool.query(`
       SELECT
-        COUNT(se.id)::int                                         AS unidades,
-        COALESCE(SUM(se.costo_compra),   0)::numeric             AS costo_total,
-        COALESCE(SUM(ps.precio),         0)::numeric             AS precio_venta_total,
-        COUNT(CASE WHEN se.costo_compra IS NULL THEN 1 END)::int AS sin_costo
+        COUNT(se.id)::int                                             AS unidades,
+        COALESCE(SUM(COALESCE(vi.valor, se.costo_compra)), 0)::numeric AS costo_total,
+        COALESCE(SUM(ps.precio),         0)::numeric                  AS precio_venta_total,
+        COUNT(CASE WHEN COALESCE(vi.valor, se.costo_compra) IS NULL THEN 1 END)::int AS sin_costo,
+        -- Desglose para el local: cuánto de su vitrina es mercancía de bodega
+        -- (que debe) y cuánto es suya (retomas, compras propias).
+        COUNT(vi.valor)::int                                          AS unidades_bodega,
+        COALESCE(SUM(vi.valor), 0)::numeric                           AS costo_bodega
       FROM seriales        se
       JOIN productos_serial ps ON ps.id = se.producto_id
+      CROSS JOIN LATERAL (
+        SELECT ${costoRed.sqlValorInternoEnStock('se.id', 'ps.sucursal_id')} AS valor
+      ) vi
       WHERE se.vendido     = false
         AND se.prestado    = false
         AND ps.activo      = true
@@ -1743,6 +1843,11 @@ const getValorInventario = async (sucursalId) => {
       WHERE se.vendido = false AND se.prestado = false
         AND ps.activo = true AND ps.sucursal_id = $1
         AND se.costo_compra IS NULL
+        -- Una unidad consignada SÍ tiene costo —el valor interno—, aunque la
+        -- bodega no haya registrado el suyo. Listarla aquí mandaba al local a
+        -- "arreglar" un costo que no está roto, y el arreglo escribía sobre el
+        -- dato de la bodega.
+        AND ${costoRed.sqlValorInternoEnStock('se.id', 'ps.sucursal_id')} IS NULL
 
       ORDER BY nombre, atributo_valor NULLS FIRST, variante_valor NULLS FIRST, imei NULLS FIRST
     `, [sucursalId]),
@@ -1767,6 +1872,10 @@ const getValorInventario = async (sucursalId) => {
       costo_total:        serialCosto,
       precio_venta_total: serialVenta,
       sin_costo:          serial.sin_costo,
+      // Solo tienen valor en un local de la red; en la bodega y en un negocio
+      // sin red son 0 y el frontend no pinta nada.
+      unidades_bodega:    Number(serial.unidades_bodega || 0),
+      costo_bodega:       Number(serial.costo_bodega    || 0),
     },
     cantidad: {
       unidades:           cantidadUnidades,
@@ -2003,6 +2112,7 @@ const eliminarGastoFijo = async (sucursalId, id) => {
 };
 
 module.exports = {
+  getVentasALocales,
   getDashboard,
   getVentasRango,
   getMoraRango,

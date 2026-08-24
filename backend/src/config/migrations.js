@@ -120,6 +120,15 @@ const aplicarMigraciones = async (client) => {
       WHERE tipo = 'cantidad' AND estado_linea = 'Recibida';
   `);
 
+  // Costo de la BODEGA congelado en la línea — ver migrations/20260824_costo_origen_remision.sql
+  // Sin esto, la utilidad de la bodega por lo que despacha no se puede calcular
+  // para la mercancía por cantidad: su costo es un promedio ponderado que se
+  // mueve con cada compra y no hay forma de reconstruir el que tenía al salir.
+  await migrar(client, 'Costo de origen en la remisión', `
+    ALTER TABLE IF EXISTS lineas_remision
+      ADD COLUMN IF NOT EXISTS costo_origen NUMERIC(14,2);
+  `);
+
   // Crédito real de una línea de devolución — ver migrations/20260823_valor_acreditado.sql
   // El extracto necesita un movimiento que explique por qué bajó la deuda: sin
   // él, el cargo bajaba solo y el saldo del extracto dejaba de cuadrar con

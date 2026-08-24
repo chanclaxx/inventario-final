@@ -36,12 +36,18 @@ const buscarPorIMEI = async (query, negocioId, rol) => {
 
   // Capturar info sensible antes de borrarla del objeto serial
   const entradaDetalle = admin
-    ? { costo_compra: serial.costo_compra, proveedor_nombre: serial.proveedor_nombre }
+    ? {
+        costo_compra:     serial.costo_compra,
+        // El costo que de verdad rige en esta sucursal si es un local de la red.
+        costo_local:      serial.costo_local,
+        proveedor_nombre: serial.proveedor_nombre,
+      }
     : {};
 
   // Eliminar campos sensibles para no-admin
   if (!admin) {
     delete serial.costo_compra;
+    delete serial.costo_local;
     delete serial.proveedor_id;
     delete serial.proveedor_nombre;
   }

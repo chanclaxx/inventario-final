@@ -331,6 +331,35 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > Prueba: `23-costo-serial-en-local` (falla 3 de 7 contra el código anterior;
 > las 4 barandas —bodega, unidad propia, negocio sin red, remisión anulada—
 > pasan en ambos).
+> **Las DOS utilidades de la misma operación** (`utils/costoRed.util.js`,
+> `reportes.getVentasALocales`): la bodega compra barato y le despacha caro al
+> local; el local vuelve a vender. Son dos márgenes y hay que reportar los dos.
+> El del LOCAL ya salía bien en ventas; faltaban tres cosas y ya están:
+> **(1)** `getValorInventario` valoraba su vitrina al costo de la BODEGA —
+> subvaluando justo lo que ya debe— y de paso listaba como «sin costo» las
+> unidades consignadas cuya bodega nunca registró el suyo, invitando a
+> «corregirlas»; **(2)** ese arreglo escribía en `seriales.costo_compra`, o sea
+> pisaba la verdad del negocio **sin mover una cifra de lo que el local ve**
+> (sus reportes ya usan el valor interno), así que el usuario creía que no se
+> guardaba y lo repetía: hoy responde **409 `COSTO_DE_BODEGA`** y manda a
+> corregir el valor de la LÍNEA, que tiene su circuito; **(3)** el `costo_compra`
+> de la bodega solo viaja al `admin_negocio` (`_recortarCostos` en el export;
+> `buscarPorIMEI` ya lo hacía) — para los demás, como mucho, el valor interno, y
+> ni eso con `red_interna_ocultar_costos`.
+> El de la BODEGA no existía en ningún reporte: despachar es venderle al local
+> pero no hay factura, así que su inventario salía y su utilidad no subía. Sale
+> como grupo propio del resumen (`red_interna`), **nunca sumado a `resumen`**:
+> son ventas sin factura y el total dejaría de cuadrar con la lista de arriba.
+> Cuenta lo mismo que le genera cargo al local —líneas `'Recibida'` menos lo
+> devuelto, la misma expresión de `SQL_CARGO_ENVIO`, o la bodega reportaría una
+> venta que el local no debe— con fecha de **recepción**, que es cuando nace la
+> deuda. El costo de un serial se lee **en vivo** de `costo_compra` (así una
+> corrección se refleja sola); el de cantidad **se congela** en
+> `lineas_remision.costo_origen` al despachar (20260824), porque el promedio
+> ponderado del nodo se mueve con la siguiente compra y después no hay cómo
+> reconstruirlo. Los totales se arman **por línea, no por envío**: descartar un
+> envío entero porque una línea no tiene costo botaría la utilidad de las demás.
+> Prueba: `27-costo-y-utilidad-bodega` (22 verificaciones).
 
 > **Red interna — el ENVÍO es la deuda** (`red-interna/`): una sucursal-bodega
 > surte a los locales. Feature opt-in (`config_negocio.red_interna_activa`),

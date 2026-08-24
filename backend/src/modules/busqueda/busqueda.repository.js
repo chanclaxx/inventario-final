@@ -1,4 +1,5 @@
 const { pool } = require('../../config/db');
+const costoRed = require('../../utils/costoRed.util');
 
 // ─── Normalización de texto para búsquedas ────────────────────────────────────
 
@@ -22,6 +23,10 @@ const buscarSerialPorIMEI = async (query, negocioId) => {
     SELECT
       s.id, s.imei, s.fecha_entrada, s.vendido, s.prestado,
       s.costo_compra, s.color, s.caracteristicas,
+      -- Lo que esta unidad le cuesta AL LOCAL cuando vino de la bodega de la
+      -- red: el valor interno de la remisión. NULL en la bodega, en una unidad
+      -- propia y en un negocio sin red.
+      ${costoRed.sqlValorInternoEnStock('s.id', 'ps.sucursal_id')} AS costo_local,
       s.proveedor_id,
       prov.nombre  AS proveedor_nombre,
       ps.id        AS producto_id,

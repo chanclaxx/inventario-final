@@ -41,6 +41,10 @@ export function ModalEditarSerial({ serial, precioProducto, productoId, onClose 
   });
   const [error, setError] = useState('');
 
+  // La unidad vino de la bodega de la red interna: `getSeriales` la marca así
+  // (la clave no existe en negocios sin red ni en la propia bodega).
+  const esDeBodega = serial.origen_red === 'bodega';
+
   const { data: configData } = useQuery({
     queryKey: ['config'],
     queryFn:  () => api.get('/config').then((r) => r.data.data),
@@ -160,11 +164,24 @@ export function ModalEditarSerial({ serial, precioProducto, productoId, onClose 
               value={form.costo_compra}
               onChange={(val) => setForm({ ...form, costo_compra: val })}
               placeholder="0"
+              disabled={esDeBodega}
               onKeyDown={(e) => handleKeyDown(e, 'edit-proveedor-serial')}
-              className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl
-                text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500
-                transition-all"
+              className={`w-full px-3 py-2 border border-gray-200 rounded-xl
+                text-sm focus:outline-none focus:ring-2 focus:ring-blue-500
+                transition-all ${esDeBodega
+                  ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                  : 'bg-white text-gray-700'}`}
             />
+            {/* El equipo vino de la bodega: su costo aquí es el valor de la
+                remisión, no un costo de compra. Escribir este campo pisaría el
+                dato de la bodega sin mover una cifra de lo que ve el local, así
+                que el backend lo rechaza — la pantalla solo lo explica antes. */}
+            {esDeBodega && (
+              <p className="text-xs text-amber-600">
+                Este equipo vino de la bodega. Su costo en esta sede es el valor de la
+                remisión; corrígelo desde Red interna → el envío → «Corregir valor de la línea».
+              </p>
+            )}
           </div>
         )}
 

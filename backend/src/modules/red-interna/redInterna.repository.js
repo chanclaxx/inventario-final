@@ -1086,10 +1086,11 @@ const insertarLineaRemision = async (client, l) => {
       (remision_id, tipo, serial_id, imei, producto_origen_id, producto_destino_id,
        cantidad, cantidad_recibida, valor_interno, estado_linea, nombre_producto,
        origen_unidad, genera_saldo_favor, remision_tipo,
-       atributo_origen_id, variante_origen_id, atributo_destino_id, variante_destino_id)
+       atributo_origen_id, variante_origen_id, atributo_destino_id, variante_destino_id,
+       costo_origen)
     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
             COALESCE($14, (SELECT tipo FROM remisiones WHERE id = $1)),
-            $15, $16, $17, $18)
+            $15, $16, $17, $18, $19)
     RETURNING *
   `, [l.remision_id, l.tipo, l.serial_id || null, l.imei || null,
       l.producto_origen_id || null, l.producto_destino_id || null,
@@ -1100,7 +1101,12 @@ const insertarLineaRemision = async (client, l) => {
       // El NODO que se mueve. NULL = la línea es del producto entero, que es lo
       // que significaban todas las líneas antes de 20260823_remision_variantes.
       l.atributo_origen_id || null, l.variante_origen_id || null,
-      l.atributo_destino_id || null, l.variante_destino_id || null]);
+      l.atributo_destino_id || null, l.variante_destino_id || null,
+      // Lo que la unidad le costó A LA BODEGA, congelado: con él se calcula
+      // después su utilidad por haber despachado. NULL es legítimo (mercancía
+      // sin costo registrado, o una línea creada antes de la migración) y el
+      // reporte lo dice en vez de inventar una cifra.
+      l.costo_origen ?? null]);
   return rows[0];
 };
 

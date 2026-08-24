@@ -1,5 +1,6 @@
 const { pool } = require('../../config/db');
 const { hayUbicacion } = require('../../config/columnas');
+const costoRed = require('../../utils/costoRed.util');
 
 // Ubicacion espacial (feature opt-in): solo se selecciona si la columna existe.
 // Literal SQL fijo, no entrada de usuario. Ver src/config/columnas.js.
@@ -17,6 +18,10 @@ const getSeriales = async (sucursalId) => {
       s.color,
       s.caracteristicas,
       s.costo_compra,
+      -- Costo del LOCAL: si la unidad vino de la bodega de la red, lo que vale
+      -- es el valor interno de la remisión (lo que tendrá que liquidar), no lo
+      -- que la bodega pagó por ella. NULL en la bodega y en negocios sin red.
+      vi.valor        AS costo_local,
       COALESCE(s.precio, ps.precio) AS precio_venta,
       s.fecha_entrada,
       s.vendido,
@@ -51,6 +56,9 @@ const getSeriales = async (sucursalId) => {
 
     FROM seriales s
     JOIN productos_serial ps ON ps.id = s.producto_id
+    CROSS JOIN LATERAL (
+      SELECT ${costoRed.sqlValorInternoEnStock('s.id', 'ps.sucursal_id')} AS valor
+    ) vi
 
     -- Línea del producto
     LEFT JOIN lineas_producto lp ON lp.id = ps.linea_id
