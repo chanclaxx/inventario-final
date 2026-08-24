@@ -3210,10 +3210,29 @@ const resolverItems = async (req, items) => {
       resueltos.push({ ..._formatoSerial(s), precio_carrito: sugerido(it) });
 
     } else if (it.tipo === 'cantidad' && it.producto_id) {
-      const p = await repo.findCantidadById(negocioId, sucursalId, Number(it.producto_id));
+      // El carrito ya sabe qué talla eligió el usuario: hay que conservarla.
+      // Resolver solo por producto la perdía, y el despacho volvía a pedirla
+      // (VARIANTE_REQUERIDA) mostrando además el producto sin la talla.
+      const p = await repo.findNodoCantidadById(negocioId, sucursalId, {
+        productoId: Number(it.producto_id),
+        atributoId: it.atributo_id ? Number(it.atributo_id) : null,
+        varianteId: it.variante_id ? Number(it.variante_id) : null,
+      });
       if (!p) { descartados.push({ nombre: it.nombre || 'Producto', motivo: 'no está en la bodega' }); continue; }
+      // Producto por variantes sin variante elegida: se descarta con un motivo
+      // claro en vez de dejar que reviente al despachar.
+      if (p.tiene_variantes) {
+        descartados.push({ nombre: p.nombre, motivo: 'se maneja por variantes: elige la talla en el inventario' });
+        continue;
+      }
       const pedida = Math.max(1, Number(it.cantidad) || 1);
-      if (Number(p.stock) <= 0) { descartados.push({ nombre: p.nombre, motivo: 'sin stock' }); continue; }
+      if (Number(p.stock) <= 0) {
+        descartados.push({
+          nombre: p.variante_label ? `${p.nombre} / ${p.variante_label}` : p.nombre,
+          motivo: 'sin stock',
+        });
+        continue;
+      }
       // Se recorta al stock disponible en vez de fallar: el usuario ve cuánto
       // quedó y decide.
       resueltos.push({

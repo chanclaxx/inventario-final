@@ -1475,12 +1475,59 @@ const getReferenciasDuplicadas = async (negocioId) => {
 const findCantidadById = async (negocioId, sucursalOrigenId, productoId) => {
   const { rows } = await pool.query(`
     SELECT pc.id AS producto_id, pc.nombre, pc.codigo, pc.stock,
-           COALESCE(pc.costo_unitario, 0) AS costo_unitario, pc.unidad_medida
+           COALESCE(pc.costo_unitario, 0) AS costo_unitario, pc.unidad_medida,
+           EXISTS (SELECT 1 FROM atributos_producto x
+                   WHERE x.producto_id = pc.id AND x.activo = true) AS tiene_variantes
     FROM productos_cantidad pc
     JOIN sucursales su ON su.id = pc.sucursal_id
     WHERE su.negocio_id = $1 AND pc.sucursal_id = $2 AND pc.id = $3 AND pc.activo = true
   `, [negocioId, sucursalOrigenId, productoId]);
   return rows[0] || null;
+};
+
+// Un NODO del árbol de cantidad por sus ids. Lo usa la traducción de los ítems
+// del CARRITO al despacho: el carrito ya sabe qué talla eligió el usuario, y
+// perder ese dato aquí obligaba a elegirla otra vez en el modal (y encima el
+// modal mostraba el producto pelado, sin la talla).
+//
+// El costo baja con COALESCE, igual que en la pantalla del árbol: una talla sin
+// costo propio hereda el del producto.
+const findNodoCantidadById = async (negocioId, sucursalOrigenId, { productoId, atributoId, varianteId }) => {
+  if (varianteId) {
+    const { rows } = await pool.query(`
+      SELECT pc.id AS producto_id, ap.id AS atributo_id, v.id AS variante_id,
+             pc.nombre, ap.valor || ' / ' || v.valor AS variante_label,
+             v.codigo, v.stock,
+             COALESCE(v.costo_unitario, ap.costo_unitario, pc.costo_unitario, 0) AS costo_unitario,
+             pc.unidad_medida
+      FROM variantes_atributo v
+      JOIN atributos_producto ap ON ap.id = v.atributo_id
+      JOIN productos_cantidad pc ON pc.id = ap.producto_id
+      JOIN sucursales su ON su.id = ap.sucursal_id
+      WHERE su.negocio_id = $1 AND ap.sucursal_id = $2
+        AND v.id = $3 AND ap.producto_id = $4
+        AND v.activo = true AND ap.activo = true AND pc.activo = true
+    `, [negocioId, sucursalOrigenId, varianteId, productoId]);
+    return rows[0] || null;
+  }
+  if (atributoId) {
+    const { rows } = await pool.query(`
+      SELECT pc.id AS producto_id, ap.id AS atributo_id, NULL::int AS variante_id,
+             pc.nombre, ap.valor AS variante_label, ap.codigo, ap.stock,
+             COALESCE(ap.costo_unitario, pc.costo_unitario, 0) AS costo_unitario,
+             pc.unidad_medida
+      FROM atributos_producto ap
+      JOIN productos_cantidad pc ON pc.id = ap.producto_id
+      JOIN sucursales su ON su.id = ap.sucursal_id
+      WHERE su.negocio_id = $1 AND ap.sucursal_id = $2
+        AND ap.id = $3 AND ap.producto_id = $4
+        AND ap.activo = true AND pc.activo = true
+        AND NOT EXISTS (SELECT 1 FROM variantes_atributo x
+                        WHERE x.atributo_id = ap.id AND x.activo = true)
+    `, [negocioId, sucursalOrigenId, atributoId, productoId]);
+    return rows[0] || null;
+  }
+  return findCantidadById(negocioId, sucursalOrigenId, productoId);
 };
 
 // Serial por id (para resolver ítems que vienen del carrito, donde no hay IMEI).
@@ -1843,7 +1890,7 @@ module.exports = {
   insertarCorreccion, getCorreccionesRemision,
   marcarRemisionRecibida, marcarRemisionAnulada, marcarLineas,
   buscarSerialDisponible, buscarCantidadPorCodigo, buscarCantidadDisponible,
-  findCantidadById, findSerialById, buscarReferencias, getReferenciasDuplicadas,
+  findCantidadById, findNodoCantidadById, findSerialById, buscarReferencias, getReferenciasDuplicadas,
   crearRemesa, findRemesaById, findRemesas, marcarRemesaRecibida, marcarRemesaAnulada,
   findRemesaPorClave, findRemisionPorClave,
   insertarMovimientoCuenta, findMovimientosCuenta,

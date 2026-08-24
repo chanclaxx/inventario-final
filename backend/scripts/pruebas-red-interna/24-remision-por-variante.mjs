@@ -222,6 +222,31 @@ console.log('\n═══ 8. El local devuelve 2 unidades de esa misma talla ═�
   ok('★ las dos siguen cuadrando', cb.ok && cl.ok, `bodega ${cb.producto}=${cb.suma} · local ${cl.producto}=${cl.suma}`);
 }
 
+
+console.log('\n═══ 9. La vía del CARRITO conserva la talla ═══');
+{
+  // El carrito manda producto + atributo; `resolverItems` debe devolver el NODO,
+  // no el producto pelado. Si se pierde aquí, el despacho vuelve a pedir la talla
+  // (VARIANTE_REQUERIDA) y el modal la muestra sin variante — que es justo lo que
+  // se reportó desde producción.
+  const r = await red.resolverItems(reqBodega, [
+    { tipo: 'cantidad', producto_id: 1, atributo_id: 2, cantidad: 4, nombre: '360 NEGRO' },
+  ]);
+  const it = r.items[0];
+  check('★ conserva el atributo que venía del carrito', Number(it?.atributo_id), 2);
+  check('★ y lo muestra en el nombre', it?.nombre, '360 NEGRO / 40MM');
+  check('  con la talla también aparte, para pintarla como etiqueta', it?.variante_label, '40MM');
+  check('★ y el stock de ESA talla, no el del producto', Number(it?.stock), 19);
+
+  // Sin talla, un producto por variantes se descarta con un motivo legible en
+  // vez de dejar que reviente más adelante.
+  const r2 = await red.resolverItems(reqBodega, [
+    { tipo: 'cantidad', producto_id: 1, cantidad: 1, nombre: '360 NEGRO' },
+  ]);
+  ok('★ sin talla lo descarta con un motivo claro, no revienta',
+     r2.items.length === 0 && /variantes/.test(r2.descartados[0]?.motivo || ''),
+     r2.descartados[0]?.motivo);
+}
 console.log(`\n${'═'.repeat(72)}`);
 console.log(`  ${pasados} verificaciones pasaron · ${fallos} fallaron`);
 console.log('═'.repeat(72));

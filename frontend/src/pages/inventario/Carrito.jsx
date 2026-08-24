@@ -150,6 +150,10 @@ export function Carrito({ onFacturar, onPrestar, onBorradorCargado, sinHeader = 
         tipo:        i.tipo,
         serial_id:   i.serial_id,
         producto_id: i.producto_id,
+        // La talla que el usuario ya eligió en el inventario. Sin esto el
+        // backend resolvía solo el producto y el despacho la volvía a pedir.
+        atributo_id: i.atributo_id ?? null,
+        variante_id: i.variante_id ?? null,
         cantidad:    i.cantidad || 1,
         nombre:      i.nombre,
         // El precio del carrito es de VENTA, no de costo: viaja solo como

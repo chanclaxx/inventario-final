@@ -139,7 +139,17 @@ function PanelAccesorios({ yaEnLista, onAgregar, onCerrar }) {
             >
               <ShoppingBag size={15} className="text-green-500 flex-shrink-0" />
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-gray-800 truncate">{a.nombre}</p>
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <p className="text-sm font-medium text-gray-800 truncate">
+                    {a.nombre_base || a.nombre}
+                  </p>
+                  {a.variante_label && (
+                    <span className="flex-shrink-0 px-1.5 py-0.5 rounded-md bg-blue-50
+                      text-blue-600 text-[11px] font-semibold">
+                      {a.variante_label}
+                    </span>
+                  )}
+                </div>
                 <p className="text-xs text-gray-400">
                   {a.codigo && <span className="font-mono">{a.codigo} · </span>}
                   {a.stock} disponible(s){a.linea_nombre ? ` · ${a.linea_nombre}` : ''}
@@ -435,7 +445,19 @@ export function ModalDespachar({ locales, itemsIniciales = null, descartados = [
                     className="flex items-center gap-3 px-3 py-2.5 border-b border-gray-50 last:border-0">
                     <Icono size={15} className={`flex-shrink-0 ${esSerial ? 'text-blue-500' : 'text-green-500'}`} />
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-gray-800 truncate">{i.nombre}</p>
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <p className="text-sm font-medium text-gray-800 truncate">
+                          {i.nombre_base || i.nombre}
+                        </p>
+                        {/* La talla, explícita: dos líneas del mismo producto en
+                            tallas distintas tienen que distinguirse de un vistazo. */}
+                        {i.variante_label && (
+                          <span className="flex-shrink-0 px-1.5 py-0.5 rounded-md bg-blue-50
+                            text-blue-600 text-[11px] font-semibold">
+                            {i.variante_label}
+                          </span>
+                        )}
+                      </div>
                       <p className="text-xs text-gray-400 font-mono">
                         {esSerial ? i.imei : (i.codigo || `${i.stock} en bodega`)}
                       </p>
