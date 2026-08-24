@@ -108,6 +108,18 @@ const aplicarMigraciones = async (client) => {
     ALTER TABLE IF EXISTS historial_stock_cantidad ADD COLUMN IF NOT EXISTS variante_id INT;
   `);
 
+  // La línea de entrega por cantidad es un LOTE — ver migrations/20260823_lotes_cantidad.sql
+  // Sin esto, devolver mercancía fungible se acreditaba con agregados por
+  // producto y promedios: el local podía bajar su deuda devolviendo una talla
+  // que la bodega nunca le envió, y a un precio que no era el de ninguna unidad.
+  await migrar(client, 'Lotes de cantidad', `
+    ALTER TABLE IF EXISTS lineas_remision
+      ADD COLUMN IF NOT EXISTS cantidad_devuelta INT NOT NULL DEFAULT 0;
+    CREATE INDEX IF NOT EXISTS idx_lineas_remision_lote_pendiente
+      ON lineas_remision (producto_destino_id, atributo_destino_id, variante_destino_id)
+      WHERE tipo = 'cantidad' AND estado_linea = 'Recibida';
+  `);
+
   // Ubicación espacial de productos — ver migrations/20260730_ubicacion_producto.sql
   //
   // 100% aditiva e idempotente. Columnas nullable: un negocio sin la feature no

@@ -39,6 +39,7 @@ node scripts/pruebas-red-interna/20-borradores.mjs
 node scripts/pruebas-red-interna/23-costo-serial-en-local.mjs
 node scripts/pruebas-red-interna/24-remision-por-variante.mjs
 node scripts/pruebas-red-interna/25-reclamo-faltante.mjs
+node scripts/pruebas-red-interna/26-lotes-cantidad.mjs
 ```
 
 > `20-borradores` verifica sobre todo una invariante negativa: guardar un
@@ -49,9 +50,10 @@ node scripts/pruebas-red-interna/25-reclamo-faltante.mjs
 > reportes, catálogo y alertas de stock.
 
 > Las suites cargan **toda la cadena de migraciones** de la red interna, hoy
-> seis: `20260725_red_interna`, `20260726_red_interna_v2`,
+> ocho: `20260725_red_interna`, `20260726_red_interna_v2`,
 > `20260822_red_interna_envios`, `20260823_red_interna_control`,
-> `20260823_red_interna_cargos_pagables` y `20260823_remision_variantes`. Si se
+> `20260823_red_interna_cargos_pagables`, `20260823_remision_variantes` y
+> `20260823_lotes_cantidad`. Si se
 > agrega otra hay que sumarla a **todas** las suites que carguen la cadena, o
 > fallarán con columnas inexistentes — pasó al añadir la de variantes: catorce
 > suites reventaron con `column "atributo_origen_id" does not exist`.
@@ -490,6 +492,27 @@ esa talla (un reclamo saca del local unidades que nunca llegaron; si ya las
 vendió, no hay nada que sacar). Las secciones 5 y 6 son las que sostienen el
 mensaje: lo vendido queda bloqueado **con motivo**, y solo cuando de verdad no
 queda nada la pantalla dice que todo se vendió.
+
+### `26-lotes-cantidad.mjs` — 16 verificaciones
+
+Un SERIAL tiene identidad y por eso todo es exacto: `serial_id` une la línea de
+entrega con la de devolución. La mercancía por CANTIDAD no la tiene, y el sistema
+lo resolvía con agregados **por producto** y **promedios ponderados**. Tres
+defectos, los tres silenciosos y los tres sobre dinero: devolver una talla que la
+bodega nunca envió bajaba la deuda (el producto tenía pendientes en otra talla);
+se acreditaba un precio promedio que no era el de ninguna unidad real; y lo
+reclamable de cada línea se medía contra el stock completo, así que con dos
+envíos de la misma talla se podía reclamar el doble de lo que había.
+
+Ahora cada línea de entrega es un **lote** (cantidad + su valor). Devolver
+consume lotes del más viejo al más nuevo escribiendo `cantidad_devuelta`, y el
+cargo de cada envío baja solo por lo que salió de él y **a su precio** — el
+equivalente fungible del `'Devuelta'` de un serial, sin contra-asiento. Lo que no
+calce contra ningún lote es del local y no se acredita, salvo que la bodega
+decida comprárselo.
+
+La sección 4 es la que más importa vigilar: devolver más de lo que queda en un
+lote **cruza al siguiente** y cobra cada tramo a su propio precio.
 
 ## Nota sobre `esquema.sql`
 

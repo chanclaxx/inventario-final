@@ -566,14 +566,23 @@ const getConciliacion = async (negocioId, sucursalId) => {
 //   Vive en `abonos_remision` (20260822_red_interna_envios.sql).
 // ═════════════════════════════════════════════════════════════════════════════
 
-// Cargo por remisión. Un serial vale su `valor_interno`; un accesorio, el
-// valor por la cantidad que efectivamente entró.
+// Cargo por remisión. Un serial vale su `valor_interno`; una línea de cantidad,
+// el valor por lo que efectivamente entró MENOS lo que ya se devolvió de ese
+// lote.
+//
+// El descuento por `cantidad_devuelta` es el equivalente fungible del
+// 'Devuelta' de un serial: un serial se devuelve entero y su línea sale del
+// cargo; de una línea de cantidad se devuelven 2 de 5 y el cargo tiene que
+// bajar solo esas 2. Sin esto habría que acreditarlo aparte y el cargo del
+// envío seguiría diciendo que el local debe las 5.
 const SQL_CARGO_ENVIO = `
   SELECT lr.remision_id,
          COALESCE(SUM(
            lr.valor_interno * CASE WHEN lr.tipo = 'serial'
                                    THEN 1
-                                   ELSE COALESCE(lr.cantidad_recibida, lr.cantidad, 0) END
+                                   ELSE GREATEST(
+                                     COALESCE(lr.cantidad_recibida, lr.cantidad, 0)
+                                       - COALESCE(lr.cantidad_devuelta, 0), 0) END
          ), 0) AS cargo
   FROM lineas_remision lr
   WHERE lr.estado_linea = 'Recibida'
@@ -1117,13 +1126,21 @@ const getLineasDetalladas = async (negocioId, remisionId, sucursalUnidades = nul
       -- el negocio cuyo catálogo es todo variantes no podía reclamar NADA.
       --
       -- Un reclamo saca del local unidades que en realidad nunca llegaron, así
-      -- que el tope es lo que la línea entregó Y lo que el local todavía tiene
-      -- de ese nodo: si ya lo vendió, no hay nada que sacar.
+      -- que el tope son tres cosas a la vez:
+      --   · lo que ESTE lote todavía tiene pendiente (recibido − ya devuelto);
+      --   · lo que el local todavía tiene de ese nodo — si ya lo vendió, no hay
+      --     nada que sacar;
+      --   · menos lo que los lotes MÁS VIEJOS del mismo nodo ya están
+      --     reclamando contra ese mismo stock.
+      --
+      -- El tercero no es un detalle: sin él, dos envíos de la misma talla
+      -- ofrecían cada uno todo el stock disponible y se podía reclamar el doble
+      -- de lo que había en el local.
       CASE WHEN lr.tipo = 'cantidad' AND lr.estado_linea = 'Recibida'
-        THEN LEAST(
-          COALESCE(lr.cantidad_recibida, lr.cantidad, 0),
-          COALESCE(nd.stock, 0)
-        )
+        THEN GREATEST(0, LEAST(
+          COALESCE(lr.cantidad_recibida, lr.cantidad, 0) - COALESCE(lr.cantidad_devuelta, 0),
+          COALESCE(nd.stock, 0) - COALESCE(viejos.pendiente, 0)
+        ))
         ELSE 0
       END                                               AS reclamable,
       COALESCE(nd.stock, 0)                             AS stock_nodo_destino,
@@ -1165,6 +1182,24 @@ const getLineasDetalladas = async (negocioId, remisionId, sucursalUnidades = nul
         ELSE pcd.stock
       END AS stock
     ) nd ON lr.tipo = 'cantidad'
+    -- Pendiente de los lotes MÁS VIEJOS del mismo nodo en esta sucursal: es lo
+    -- que ya está comprometido contra el stock disponible, y por tanto lo que
+    -- esta línea no puede volver a ofrecer.
+    LEFT JOIN LATERAL (
+      SELECT COALESCE(SUM(
+               COALESCE(v.cantidad_recibida, v.cantidad, 0) - COALESCE(v.cantidad_devuelta, 0)
+             ), 0) AS pendiente
+      FROM lineas_remision v
+      JOIN remisiones rv ON rv.id = v.remision_id
+      WHERE v.tipo = 'cantidad' AND v.estado_linea = 'Recibida'
+        AND rv.tipo = 'entrega' AND rv.estado <> 'Anulada'
+        AND rv.sucursal_destino_id = (SELECT sucursal_destino_id FROM remisiones WHERE id = lr.remision_id)
+        AND v.producto_destino_id             = lr.producto_destino_id
+        AND v.atributo_destino_id IS NOT DISTINCT FROM lr.atributo_destino_id
+        AND v.variante_destino_id IS NOT DISTINCT FROM lr.variante_destino_id
+        AND (rv.fecha_emision, v.id) < (
+          (SELECT fecha_emision FROM remisiones WHERE id = lr.remision_id), lr.id)
+    ) viejos ON lr.tipo = 'cantidad'
     WHERE lr.remision_id = $3
       AND EXISTS (SELECT 1 FROM remisiones r WHERE r.id = lr.remision_id AND r.negocio_id = $1)
     ORDER BY lr.tipo, lr.id
@@ -1513,6 +1548,84 @@ const findCantidadById = async (negocioId, sucursalOrigenId, productoId) => {
     WHERE su.negocio_id = $1 AND pc.sucursal_id = $2 AND pc.id = $3 AND pc.activo = true
   `, [negocioId, sucursalOrigenId, productoId]);
   return rows[0] || null;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LOTES DE MERCANCÍA POR CANTIDAD — LEER ANTES DE TOCAR LA DEUDA DE UN LOCAL
+//
+// Un SERIAL tiene identidad y por eso todo es exacto: `serial_id` une la línea
+// de entrega con la de devolución. La mercancía por CANTIDAD no la tiene, así
+// que el vínculo se establece por FIFO sobre el NODO: cada línea de entrega es
+// un LOTE con su cantidad y su valor propio, y lo que se devuelve consume lotes
+// del más viejo al más nuevo, acreditando cada uno A SU VALOR.
+//
+// Por NODO y no por producto: el producto agrega todas sus tallas, y con eso el
+// local podía devolver una talla que la bodega nunca le envió y verla
+// acreditada contra su deuda porque OTRA talla sí tenía unidades pendientes.
+//
+// Si no quedan lotes pendientes, lo que se devuelve es del local: no se
+// acredita nada (salvo que la bodega decida comprárselo, `genera_saldo_favor`).
+// ─────────────────────────────────────────────────────────────────────────────
+
+const _MISMO_NODO = `
+  lr.producto_destino_id             = $3
+  AND lr.atributo_destino_id IS NOT DISTINCT FROM $4
+  AND lr.variante_destino_id IS NOT DISTINCT FROM $5
+`;
+
+/** Lotes con saldo pendiente de un nodo, en orden FIFO (el más viejo primero). */
+const getLotesPendientes = async (ejecutor, { negocioId, sucursalLocalId, nodo }) => {
+  const { rows } = await (ejecutor || pool).query(`
+    SELECT lr.id, lr.valor_interno,
+           (COALESCE(lr.cantidad_recibida, lr.cantidad, 0) - COALESCE(lr.cantidad_devuelta, 0)) AS pendiente,
+           r.numero AS remision_numero, r.fecha_emision
+    FROM lineas_remision lr
+    JOIN remisiones r ON r.id = lr.remision_id
+    WHERE r.negocio_id = $1
+      AND r.sucursal_destino_id = $2
+      AND r.tipo = 'entrega' AND r.estado <> 'Anulada'
+      AND lr.tipo = 'cantidad' AND lr.estado_linea = 'Recibida'
+      AND ${_MISMO_NODO}
+      AND (COALESCE(lr.cantidad_recibida, lr.cantidad, 0) - COALESCE(lr.cantidad_devuelta, 0)) > 0
+    ORDER BY r.fecha_emision, lr.id
+  `, [negocioId, sucursalLocalId, nodo.productoId, nodo.atributoId ?? null, nodo.varianteId ?? null]);
+  return rows;
+};
+
+/**
+ * Consume `cantidad` unidades de los lotes de un nodo, del más viejo al más
+ * nuevo, y devuelve el reparto: `[{ linea_id, unidades, valor_interno }]` más
+ * `sin_lote`, que son las unidades que no correspondían a ningún envío de la
+ * bodega — o sea, mercancía propia del local.
+ *
+ * Escribe `cantidad_devuelta` en cada lote: eso es lo que hace que el cargo del
+ * envío baje solo, igual que marcar 'Devuelta' la línea de un serial.
+ */
+const consumirLotesFIFO = async (client, { negocioId, sucursalLocalId, nodo, cantidad }) => {
+  const lotes = await getLotesPendientes(client, { negocioId, sucursalLocalId, nodo });
+  const reparto = [];
+  let restante = Number(cantidad);
+
+  for (const lote of lotes) {
+    if (restante <= 0) break;
+    const toma = Math.min(restante, Number(lote.pendiente));
+    if (toma <= 0) continue;
+    await client.query(
+      `UPDATE lineas_remision SET cantidad_devuelta = COALESCE(cantidad_devuelta, 0) + $2 WHERE id = $1`,
+      [lote.id, toma]
+    );
+    reparto.push({
+      linea_id: lote.id, unidades: toma,
+      valor_interno: Number(lote.valor_interno),
+      remision_numero: lote.remision_numero,
+    });
+    restante -= toma;
+  }
+  return {
+    reparto,
+    sin_lote: restante,
+    credito: reparto.reduce((s, r) => s + r.valor_interno * r.unidades, 0),
+  };
 };
 
 // Un NODO del árbol de cantidad por sus ids. Lo usa la traducción de los ítems
@@ -1920,7 +2033,8 @@ module.exports = {
   insertarCorreccion, getCorreccionesRemision,
   marcarRemisionRecibida, marcarRemisionAnulada, marcarLineas,
   buscarSerialDisponible, buscarCantidadPorCodigo, buscarCantidadDisponible,
-  findCantidadById, findNodoCantidadById, findSerialById, buscarReferencias, getReferenciasDuplicadas,
+  findCantidadById, findNodoCantidadById, findSerialById,
+  getLotesPendientes, consumirLotesFIFO, buscarReferencias, getReferenciasDuplicadas,
   crearRemesa, findRemesaById, findRemesas, marcarRemesaRecibida, marcarRemesaAnulada,
   findRemesaPorClave, findRemisionPorClave,
   insertarMovimientoCuenta, findMovimientosCuenta,

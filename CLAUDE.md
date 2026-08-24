@@ -216,6 +216,33 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > también por `codigos_variantes` (agregado en `findAll`): sin eso, mover los
 > códigos a las variantes los volvía inbuscables.
 
+> **La línea de entrega por CANTIDAD es un LOTE — FIFO por nodo**
+> (`20260823_lotes_cantidad.sql`, `repo.consumirLotesFIFO`): un SERIAL tiene
+> identidad y por eso todo es exacto — `serial_id` une la entrega con la
+> devolución y marcar esa línea `'Devuelta'` saca su valor del cargo. La
+> mercancía por CANTIDAD **no tiene identidad**, y el sistema lo resolvía con
+> agregados por PRODUCTO y promedios ponderados. Tres defectos, los tres
+> silenciosos y los tres sobre dinero: devolver una talla que la bodega **nunca
+> envió** bajaba la deuda (el producto tenía pendientes en otra talla); se
+> acreditaba el promedio de todos los envíos, un precio que no era el de ninguna
+> unidad real; y lo reclamable de cada línea se medía contra el stock completo,
+> así que con dos envíos de la misma talla se podía reclamar **el doble** de lo
+> que había.
+> Ahora cada línea de entrega es un **lote** (cantidad + su valor propio) y
+> `cantidad_devuelta` es el equivalente fungible del `'Devuelta'`: devolver
+> consume lotes **del más viejo al más nuevo** y el cargo de cada envío baja solo
+> por lo que salió de él y **a su precio**. **Sin contra-asiento** — un `Ajuste`
+> además sería cobrárselo dos veces al revés, igual que con un serial. Lo que no
+> calce contra ningún lote es del local: no se acredita salvo que la bodega
+> decida comprárselo (`genera_saldo_favor`), y ahí sí va como saldo a favor
+> porque no hay cargo que bajar.
+> `reclamable` de una línea = su pendiente, acotado al stock del nodo **menos lo
+> que los lotes más viejos ya comprometen** — sin ese tercer tope vuelve el
+> sobre-reclamo.
+> Prueba: `26-lotes-cantidad` (16 verificaciones; la sección 4 es la que hay que
+> vigilar: devolver más de lo que queda en un lote cruza al siguiente y cobra
+> cada tramo a su propio precio).
+
 > **El reclamo por faltante también cubre la mercancía por CANTIDAD**
 > (`getLineasDetalladas.reclamable`, `ModalReportarFaltante`): `estado_unidad`
 > solo existe para SERIALES — el motor de estados sigue unidad por unidad

@@ -1022,35 +1022,26 @@ const anularRemision = async (req, remisionId) => {
  * Devuelve el valor con el que se los cargaron (promedio ponderado de los
  * envíos), no el costo del local: es lo que hay que acreditarle.
  */
-const _origenUnidadCantidad = async (client, productoLocalId, sucursalId, negocioId) => {
-  const { rows } = await client.query(`
-    SELECT
-      COALESCE(SUM(COALESCE(lr.cantidad_recibida, 0)), 0)::int AS entregado,
-      CASE WHEN SUM(COALESCE(lr.cantidad_recibida, 0)) > 0
-        THEN SUM(lr.valor_interno * COALESCE(lr.cantidad_recibida, 0))
-             / SUM(COALESCE(lr.cantidad_recibida, 0))
-        ELSE 0 END AS valor_unitario
-    FROM lineas_remision lr
-    JOIN remisiones r ON r.id = lr.remision_id
-    WHERE r.negocio_id = $1 AND r.sucursal_destino_id = $2
-      AND r.tipo = 'entrega' AND r.estado <> 'Anulada'
-      AND lr.tipo = 'cantidad' AND lr.estado_linea = 'Recibida'
-      AND lr.producto_destino_id = $3
-  `, [negocioId, sucursalId, productoLocalId]);
-  const { rows: dev } = await client.query(`
-    SELECT COALESCE(SUM(COALESCE(lr.cantidad_recibida, lr.cantidad, 0)), 0)::int AS devuelto
-    FROM lineas_remision lr
-    JOIN remisiones r ON r.id = lr.remision_id
-    WHERE r.negocio_id = $1 AND r.sucursal_origen_id = $2
-      AND r.tipo = 'devolucion' AND r.estado <> 'Anulada'
-      AND lr.tipo = 'cantidad' AND lr.producto_origen_id = $3
-  `, [negocioId, sucursalId, productoLocalId]);
-
-  const pendiente = Number(rows[0].entregado) - Number(dev[0].devuelto);
+// Razona por NODO y sobre los LOTES pendientes, no por producto ni con
+// promedios. Dos cosas dependen de esto y las dos son dinero:
+//   · si lo que se devuelve es de la bodega (baja la deuda) o del local (no);
+//   · a cuánto se acredita cada unidad.
+//
+// Antes agregaba por `producto_destino_id`, así que todas las tallas de un
+// producto se mezclaban: devolver una talla que la bodega NUNCA envió salía
+// como consignada porque OTRA talla sí tenía pendientes. Y el valor era el
+// promedio ponderado de todos los envíos, que no es el precio de ninguna unidad
+// real. El valor que se ofrece ahora es el del lote más viejo — el primero que
+// consumiría el FIFO.
+const _origenUnidadCantidad = async (client, nodo, sucursalId, negocioId) => {
+  const lotes = await repo.getLotesPendientes(client, {
+    negocioId, sucursalLocalId: sucursalId, nodo,
+  });
+  const pendiente = lotes.reduce((s, l) => s + Number(l.pendiente), 0);
   return {
     de_bodega: pendiente > 0,
-    pendiente: Math.max(0, pendiente),
-    valor_unitario: _num(rows[0].valor_unitario),
+    pendiente,
+    valor_unitario: lotes.length ? Number(lotes[0].valor_interno) : 0,
   };
 };
 
@@ -1122,7 +1113,7 @@ const previsualizarDevolucion = async (req, { lineas }) => {
         // unidades pendientes de las que la bodega mandó. Con eso se propone un
         // origen; el usuario puede cambiarlo. El valor que se ofrece es el de
         // la remisión (lo que le cobraron), no el costo del local.
-        const cant = await _origenUnidadCantidad(client, nodo.productoId, origenId, negocioId);
+        const cant = await _origenUnidadCantidad(client, nodo, origenId, negocioId);
         items.push({
           tipo: 'cantidad', producto_id: nodo.productoId,
           atributo_id: nodo.atributoId, variante_id: nodo.varianteId,
@@ -1227,7 +1218,7 @@ const devolver = async (req, { lineas, notas, clave_idempotencia, motivo }) => {
         // bodega le mandó y todavía no le ha devuelto. Antes el default era
         // 'propio' a secas, y con el modelo nuevo eso significaba devolver
         // mercancía de bodega sin que le bajara la deuda.
-        const cantOrigen = await _origenUnidadCantidad(client, l.producto_id, origenId, negocioId);
+        const cantOrigen = await _origenUnidadCantidad(client, nodo, origenId, negocioId);
         const origenUnidad = l.origen_unidad
           ? (l.origen_unidad === 'bodega' ? 'bodega' : 'propio')
           : (cantOrigen.de_bodega ? 'bodega' : 'propio');
@@ -1441,17 +1432,34 @@ const confirmarDevolucion = async (req, remisionId, { lineas_recibidas } = {}) =
       //   'Devuelta' unas líneas más arriba, y el cargo de ese envío deja de
       //   contarla solo. Acreditarlo además sería cobrárselo dos veces al revés.
       //
-      // ACCESORIO DE BODEGA: sí hay que acreditarlo. Es fungible, no tiene
-      //   línea de entrega propia que marcar, así que el cargo de su envío no
-      //   se entera. Sin este abono el local devolvería 5 cargadores y los
-      //   seguiría debiendo.
+      // CANTIDAD DE BODEGA: tampoco se acredita aparte. Se consumen sus LOTES
+      //   por FIFO —del envío más viejo al más nuevo— escribiendo
+      //   `cantidad_devuelta`, y con eso el cargo de cada envío baja solo por
+      //   las unidades que de verdad salieron de él y AL VALOR DE ESE ENVÍO.
+      //   Es el equivalente fungible del 'Devuelta' de un serial: un
+      //   contra-asiento además sería cobrárselo dos veces al revés.
+      //   Antes se abonaba la cantidad × un promedio ponderado de todos los
+      //   envíos, que no es el precio de ninguna unidad real.
       //
-      // MERCANCÍA PROPIA: solo si la bodega decidió comprársela.
-      const unidades = l.tipo === 'cantidad' ? Number(l.cantidad) : 1;
-      if (l.tipo === 'cantidad' && l.origen_unidad === 'bodega') {
-        saldoAFavor += _num(l.valor_interno) * unidades;
+      // MERCANCÍA PROPIA: lo que no calce contra ningún lote es del local —la
+      //   bodega nunca se lo envió, así que no hay cargo que bajar— y solo se
+      //   le paga si ella decidió comprárselo. Antes esto se resolvía por
+      //   PRODUCTO, así que devolver una talla que la bodega nunca mandó le
+      //   bajaba la deuda igual.
+      if (l.tipo === 'cantidad') {
+        const { sin_lote } = await repo.consumirLotesFIFO(client, {
+          negocioId, sucursalLocalId: localId, cantidad: Number(l.cantidad),
+          nodo: {
+            productoId: l.producto_origen_id,
+            atributoId: l.atributo_origen_id ?? null,
+            varianteId: l.variante_origen_id ?? null,
+          },
+        });
+        if (sin_lote > 0 && l.genera_saldo_favor) {
+          saldoAFavor += _num(l.valor_interno) * sin_lote;
+        }
       } else if (l.genera_saldo_favor) {
-        saldoAFavor += _num(l.valor_interno) * unidades;
+        saldoAFavor += _num(l.valor_interno);
       }
       idsOk.push(id);
     }
