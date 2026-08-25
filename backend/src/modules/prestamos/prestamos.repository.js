@@ -4,8 +4,42 @@ const { asignarNumeroDocumento } = require('../../utils/numeracion.util');
 const findAll = async (sucursalId, negocioId) => {
   const filtro = sucursalId ? 'p.sucursal_id = $1' : 'su.negocio_id = $1';
   const param  = sucursalId ?? negocioId;
+  // El "último abono" es de la PERSONA y abarca el NEGOCIO entero, no la
+  // sucursal que se esté mirando. Filtrando por sucursal, el negocio se deriva
+  // de ella — exactamente lo que hacía `su.negocio_id` cuando esto vivía en una
+  // subconsulta por fila. Así la consulta sigue teniendo UN solo parámetro y no
+  // pasa a confiar en el negocio_id del token, que es otra fuente.
+  const alcanceNegocio = sucursalId
+    ? '(SELECT negocio_id FROM sucursales WHERE id = $1)'
+    : '$1';
 
   const { rows } = await pool.query(`
+    -- El último abono depende de la PERSONA, no del préstamo, y aquí se calcula
+    -- UNA vez por persona. Antes era una subconsulta correlacionada, o sea que
+    -- se recomputaba una vez por FILA: en un negocio con 8.480 préstamos y 590
+    -- prestamistas eran 8.480 recorridos de abonos_prestamo para 590 valores
+    -- distintos. La consulta tardaba 46 s — más que el timeout de 30 s del
+    -- axios del frontend, así que la petición se abortaba, la página se quedaba
+    -- con la lista vacía y el negocio veía a sus prestamistas SIN préstamos.
+    -- Agrupado por persona da la misma respuesta en ~130 ms.
+    WITH ult_prestatario AS (
+      SELECT p2.prestatario_id AS pid, MAX(ap.fecha) AS ultimo
+        FROM abonos_prestamo ap
+        JOIN prestamos       p2  ON p2.id  = ap.prestamo_id
+        JOIN sucursales      su2 ON su2.id = p2.sucursal_id
+       WHERE su2.negocio_id = ${alcanceNegocio}
+         AND p2.prestatario_id IS NOT NULL
+       GROUP BY p2.prestatario_id
+    ),
+    ult_cliente AS (
+      SELECT p2.cliente_id AS cid, MAX(ap.fecha) AS ultimo
+        FROM abonos_prestamo ap
+        JOIN prestamos       p2  ON p2.id  = ap.prestamo_id
+        JOIN sucursales      su2 ON su2.id = p2.sucursal_id
+       WHERE su2.negocio_id = ${alcanceNegocio}
+         AND p2.cliente_id IS NOT NULL
+       GROUP BY p2.cliente_id
+    )
     SELECT
       p.id, p.numero, p.fecha, p.prestatario, p.cedula, p.telefono,
       p.nombre_producto, p.imei, p.cantidad_prestada,
@@ -29,20 +63,8 @@ const findAll = async (sucursalId, negocioId) => {
       COALESCE(pr.saldo_a_favor, 0) AS prestatario_saldo_a_favor,
       COALESCE(c.saldo_a_favor,  0) AS cliente_saldo_a_favor,
       COALESCE(lps.nombre, lpc.nombre) AS linea_nombre,
-      (SELECT MAX(ap.fecha)
-       FROM abonos_prestamo ap
-       JOIN prestamos       p2  ON p2.id  = ap.prestamo_id
-       JOIN sucursales      su2 ON su2.id = p2.sucursal_id
-       WHERE p2.prestatario_id = p.prestatario_id
-         AND p2.prestatario_id IS NOT NULL
-         AND su2.negocio_id    = su.negocio_id) AS ultimo_abono_prestatario,
-      (SELECT MAX(ap.fecha)
-       FROM abonos_prestamo ap
-       JOIN prestamos       p2  ON p2.id  = ap.prestamo_id
-       JOIN sucursales      su2 ON su2.id = p2.sucursal_id
-       WHERE p2.cliente_id   = p.cliente_id
-         AND p2.cliente_id   IS NOT NULL
-         AND su2.negocio_id  = su.negocio_id) AS ultimo_abono_cliente
+      up.ultimo AS ultimo_abono_prestatario,
+      uc.ultimo AS ultimo_abono_cliente
     FROM prestamos p
     JOIN  sucursales                su  ON su.id  = p.sucursal_id
     LEFT JOIN usuarios               u   ON u.id   = p.usuario_id
@@ -55,6 +77,8 @@ const findAll = async (sucursalId, negocioId) => {
     LEFT JOIN lineas_producto        lps ON lps.id = ps2.linea_id
     LEFT JOIN productos_cantidad     pc  ON pc.id  = p.producto_id AND p.imei IS NULL
     LEFT JOIN lineas_producto        lpc ON lpc.id = pc.linea_id
+    LEFT JOIN ult_prestatario        up  ON up.pid = p.prestatario_id
+    LEFT JOIN ult_cliente            uc  ON uc.cid = p.cliente_id
     WHERE ${filtro}
       AND (p.imei IS NULL OR ps2.sucursal_id IS NOT NULL)  -- ← filtra duplicados
     ORDER BY
