@@ -93,7 +93,8 @@ function PrecioYGarantia({ linea, estado, onCambiar, garantiaActiva, ocultarPrec
       {!ocultarPrecio && (
         <div className="flex flex-col gap-1">
           <label className="text-xs text-gray-400">Precio real</label>
-          <InputMoneda value={estado.precio} onChange={(v) => onCambiar('precio', v)} placeholder="0" />
+          <InputMoneda value={estado.precio} onChange={(v) => onCambiar('precio', v)} placeholder="0"
+            className="w-full px-2.5 py-1.5 text-sm tabular-nums border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-400" />
           {linea.precio_estimado != null && Number(linea.precio_estimado) > 0
             && Number(estado.precio) > 0
             && Math.abs(Number(estado.precio) - Number(linea.precio_estimado)) > 0.5 && (
@@ -536,7 +537,8 @@ export function ModalRecibir({ open, orden, garantiaActiva, onClose, onRecibida 
                 <div className="grid grid-cols-2 gap-2 pl-6">
                   <div className="flex flex-col gap-1">
                     <label className="text-xs text-gray-400">Cuánto</label>
-                    <InputMoneda value={valorPago} onChange={setValorPago} placeholder="0" />
+                    <InputMoneda value={valorPago} onChange={setValorPago} placeholder="0"
+                      className="w-full px-2.5 py-1.5 text-sm tabular-nums border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-400" />
                   </div>
                   <div className="flex flex-col gap-1">
                     <label className="text-xs text-gray-400">Cómo</label>

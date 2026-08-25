@@ -149,6 +149,20 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > solo existe desde Postgres 14. La sección 11 de la prueba monta una base con los
 > tipos reales (bytea/timestamptz/bigserial) justo para cazar esto.
 
+> **Los NUMERIC de Postgres llegan como STRING con decimales** (`InputMoneda`):
+> node-postgres no castea `numeric` a number para no perder precisión, así que
+> un precio de 7.000 viaja como `"7000.00"`. `InputMoneda` limpiaba el valor con
+> `replace(/\D/g,'')` —a ciegas— y eso convertía `"7000.00"` en **700000**: el
+> precio ×100. No era cosmético: al tocar el campo, ese display corrupto se
+> volvía el valor real y **se guardaba así**. Ahora normaliza con `Number()`
+> primero y solo cae a "dígitos sueltos" cuando eso da NaN (un string ya
+> formateado). Cualquier campo que reciba un numeric crudo de la API pasa por
+> ahí, así que el arreglo cubre los que aún no existen.
+> Su `className` **reemplaza**, no suma: un `<InputMoneda />` sin clases salía
+> como input del navegador —sin borde ni padding— al lado de campos con estilo.
+> Por eso hay un `CLASES_BASE` que se usa solo cuando no se pasa `className`
+> (sumarlas rompería a los 55 sitios que ya mandan las suyas).
+
 > **Importación de inventario** (`importacion/`): se corre prácticamente **una
 > vez por negocio**, cuando arrancan. Por eso el diseño es **informativo, no
 > correctivo**: el importador no arregla nombres, no fusiona productos y no

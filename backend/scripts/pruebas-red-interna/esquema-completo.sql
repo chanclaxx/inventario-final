@@ -121,6 +121,21 @@ CREATE TABLE IF NOT EXISTS compras (
   numero_factura TEXT, total NUMERIC, notas TEXT, estado TEXT DEFAULT 'Activa',
   registrar_en_caja BOOLEAN DEFAULT TRUE, metodo TEXT, fecha TIMESTAMP DEFAULT NOW()
 );
+-- Líneas de compra: de aquí sale la garantía del proveedor, que el listado de
+-- seriales resuelve con un LATERAL para pintar el semáforo de vencimiento.
+-- Solo las columnas que esa consulta toca (ver productosSerial.repository).
+-- OJO: las suites 10 y 19 declaran su propia lineas_compra con MÁS columnas.
+-- Como este archivo se carga primero, su CREATE TABLE IF NOT EXISTS queda en
+-- nada; por eso esta definición tiene que ser la UNIÓN de todas. Si aquí falta
+-- una columna, el INSERT de esas suites revienta.
+CREATE TABLE IF NOT EXISTS lineas_compra (
+  id SERIAL PRIMARY KEY, compra_id INT, producto_id INT, nombre_producto TEXT,
+  imei TEXT, cantidad INT DEFAULT 1, cantidad_devuelta INT DEFAULT 0,
+  precio_unitario NUMERIC DEFAULT 0, precio_usd NUMERIC,
+  factor_conversion NUMERIC, valor_traida NUMERIC,
+  variante_id INT, atributo_id INT, orden_linea_id INT,
+  garantia_dias INT
+);
 CREATE TABLE IF NOT EXISTS vendedores (
   id SERIAL PRIMARY KEY, negocio_id INT, sucursal_id INT, nombre TEXT, activo BOOLEAN DEFAULT TRUE
 );

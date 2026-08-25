@@ -142,7 +142,8 @@ function FilaLinea({ linea, onCambiar, onQuitar, garantiaActiva }) {
         <div className="flex flex-col gap-1">
           <label className="text-xs text-gray-400">Precio estimado</label>
           <InputMoneda value={linea.precio_estimado}
-            onChange={(v) => onCambiar('precio_estimado', v)} placeholder="0" />
+            onChange={(v) => onCambiar('precio_estimado', v)} placeholder="0"
+            className="w-full px-2.5 py-1.5 text-sm tabular-nums border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-400" />
         </div>
       </div>
 

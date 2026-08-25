@@ -133,11 +133,35 @@ const getSeriales = async (productoId, vendido) => {
         WHEN s.prestado = true
         THEN COALESCE(pr.nombre, c.nombre, p.prestatario)
         ELSE NULL
-      END AS prestado_a
+      END AS prestado_a,
+      -- Hasta cuándo responde el PROVEEDOR por esta unidad (feature opt-in).
+      --
+      -- Se DERIVA, nunca se guarda, igual que en el panel de procedencia: el
+      -- plazo se congela en la línea de compra y el vencimiento se calcula.
+      -- El AT TIME ZONE no es decorativo: compras.fecha es TIMESTAMP leído en
+      -- Bogotá y el resultado es DATE leído en UTC; sin él una compra de las
+      -- 8 p.m. vence un día antes.
+      --
+      -- LATERAL y no JOIN: un mismo IMEI tiene varias filas de compra (re-import,
+      -- retoma, reactivación) y un JOIN plano multiplicaría la unidad y mezclaría
+      -- garantías viejas. Manda la compra más reciente.
+      g.garantia_hasta,
+      g.garantia_dias
     FROM seriales s
     LEFT JOIN prestamos      p  ON p.imei  = s.imei AND p.estado = 'Activo'
     LEFT JOIN prestatarios   pr ON pr.id   = p.prestatario_id
     LEFT JOIN clientes       c  ON c.id    = p.cliente_id
+    LEFT JOIN LATERAL (
+      SELECT lc.garantia_dias,
+             (cc.fecha AT TIME ZONE 'America/Bogota')::date + lc.garantia_dias AS garantia_hasta
+      FROM lineas_compra lc
+      JOIN compras cc ON cc.id = lc.compra_id
+      WHERE UPPER(BTRIM(lc.imei)) = UPPER(BTRIM(s.imei))
+        AND lc.garantia_dias IS NOT NULL
+        AND cc.estado <> 'Cancelada'
+      ORDER BY cc.fecha DESC, lc.id DESC
+      LIMIT 1
+    ) g ON TRUE
     WHERE s.producto_id = $1
       AND ($2::boolean IS NULL OR s.vendido = $2)
     ORDER BY s.fecha_entrada DESC

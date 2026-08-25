@@ -27,6 +27,20 @@ const buscarSerialPorIMEI = async (query, negocioId) => {
       -- red: el valor interno de la remisión. NULL en la bodega, en una unidad
       -- propia y en un negocio sin red.
       ${costoRed.sqlValorInternoEnStock('s.id', 'ps.sucursal_id')} AS costo_local,
+      -- Hasta cuándo responde el PROVEEDOR por esta unidad. Se deriva de la
+      -- compra más reciente (un IMEI tiene varias filas: re-import, retoma,
+      -- reactivación) y es la pregunta que trae el cliente cuando aparece con
+      -- el equipo dañado.
+      (
+        SELECT (cc.fecha AT TIME ZONE 'America/Bogota')::date + lc.garantia_dias
+        FROM lineas_compra lc
+        JOIN compras cc ON cc.id = lc.compra_id
+        WHERE UPPER(BTRIM(lc.imei)) = UPPER(BTRIM(s.imei))
+          AND lc.garantia_dias IS NOT NULL
+          AND cc.estado <> 'Cancelada'
+        ORDER BY cc.fecha DESC, lc.id DESC
+        LIMIT 1
+      ) AS garantia_hasta,
       s.proveedor_id,
       prov.nombre  AS proveedor_nombre,
       ps.id        AS producto_id,

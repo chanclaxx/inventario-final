@@ -59,7 +59,29 @@ const getSeriales = async (negocioId, productoId, vendido) => {
   const producto = await repo.findByIdYNegocio(productoId, negocioId);
   if (!producto) throw { status: 404, message: 'Producto no encontrado' };
 
-  const seriales = await repo.getSeriales(productoId, vendido);
+  const serialesCrudos = await repo.getSeriales(productoId, vendido);
+
+  // ── Semáforo de garantía del proveedor (feature opt-in) ─────────────────
+  // Con la feature apagada la clave ni siquiera viaja: el listado queda igual
+  // que antes. La ventana de aviso sale de la config del negocio, la misma que
+  // usa el panel de procedencia — si se separaran, la misma unidad sería "por
+  // vencer" en una pantalla y "vigente" en la otra.
+  const { getConfigOrdenes } = require('../../middlewares/ordenesCompra.middleware');
+  let seriales = serialesCrudos;
+  try {
+    const cfg = await getConfigOrdenes(negocioId);
+    if (cfg.garantia_activa) {
+      const { estadoGarantia } = require('../procedencia/procedencia.service');
+      seriales = serialesCrudos.map((s) => ({
+        ...s,
+        ...estadoGarantia(s.garantia_hasta, cfg.garantia_dias_aviso),
+      }));
+    }
+  } catch (err) {
+    // Un fallo leyendo la config no puede tumbar el inventario: sin semáforo,
+    // la lista sigue funcionando exactamente como antes.
+    console.warn('[garantia] No se pudo resolver el semáforo:', err.message);
+  }
 
   // En un local de la red interna el costo que vale para calcular tarifas es el
   // valor interno de la remisión, no `costo_compra` (que es el de la bodega).

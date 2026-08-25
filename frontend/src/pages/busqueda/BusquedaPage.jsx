@@ -8,6 +8,7 @@ import {
   TrendingUp, RefreshCw, Truck,
 } from 'lucide-react';
 import { buscarPorIMEI, buscarProductos, getHistorialCantidad } from '../../api/busqueda.api';
+import { ChipGarantia } from '../proveedores/indicadoresOrden';
 import { formatCOP, formatFecha } from '../../utils/formatters';
 import { useAuth } from '../../context/useAuth';
 import useBusquedaStore from '../../store/busquedaStore';
@@ -297,6 +298,15 @@ function TarjetaSerial({ serial }) {
                   <span className="font-medium">{k}:</span> {v}
                 </span>
               ))}
+            </div>
+          )}
+
+          {/* Garantía del proveedor: la pregunta con la que llega el cliente.
+              Antes había que abrir el inventario, buscar la unidad y desplegar
+              el panel de procedencia para saberlo. */}
+          {serial.estado && serial.estado !== 'sin_garantia' && (
+            <div className="mt-2">
+              <ChipGarantia estado={serial.estado} dias={serial.dias_restantes} />
             </div>
           )}
 

@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { getProductosSerial, getSeriales, eliminarSerial, getLineas, buscarImei, actualizarSerial } from '../../api/productos.api';
 import { Badge }                     from '../../components/ui/Badge';
+import { ChipGarantia }                                  from '../proveedores/indicadoresOrden';
 import { ChipApartado }              from './ChipApartado';
 import { Button }                    from '../../components/ui/Button';
 import { Spinner }                   from '../../components/ui/Spinner';
@@ -153,6 +154,15 @@ function TarjetaSerial({ serial, precio, onAgregar, onEliminar, onEditar, onGuar
           <span className="text-xs text-gray-400">Entrada: {formatFecha(serial.fecha_entrada)}</span>
           {!serial.vendido && serial.dias_en_inventario != null && (
             <AntiguedadBadge dias={serial.dias_en_inventario} />
+          )}
+          {/* Hasta cuándo responde el proveedor por ESTA unidad. Antes solo se
+              veía abriendo el panel de procedencia de a un IMEI por vez, así
+              que una garantía a punto de vencerse no se descubría a tiempo —
+              y el reclamo se pierde por no mirar. Vencida y por vencer se ven
+              de un vistazo; `vigente` con margen y `sin_garantia` no se pintan
+              para no llenar la fila de ruido. */}
+          {(serial.estado === 'vencida' || serial.estado === 'por_vencer') && !serial.vendido && (
+            <ChipGarantia estado={serial.estado} dias={serial.dias_restantes} />
           )}
           {serial.cliente_origen && !prestado && (
             <Badge variant="purple">Retoma: {serial.cliente_origen}</Badge>

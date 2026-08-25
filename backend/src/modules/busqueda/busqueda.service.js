@@ -52,6 +52,23 @@ const buscarPorIMEI = async (query, negocioId, rol) => {
     delete serial.proveedor_nombre;
   }
 
+  // ── Semáforo de garantía del proveedor (feature opt-in) ──────────────────
+  // No es un dato sensible —no revela costos— así que lo ve cualquier rol: es
+  // justo lo que necesita quien atiende al cliente que llega con el equipo.
+  try {
+    const { getConfigOrdenes } = require('../../middlewares/ordenesCompra.middleware');
+    const cfg = await getConfigOrdenes(negocioId);
+    if (cfg.garantia_activa) {
+      const { estadoGarantia } = require('../procedencia/procedencia.service');
+      Object.assign(serial, estadoGarantia(serial.garantia_hasta, cfg.garantia_dias_aviso));
+    } else {
+      delete serial.garantia_hasta;
+    }
+  } catch {
+    // Sin config legible no hay semáforo, y la ficha sigue funcionando igual.
+    delete serial.garantia_hasta;
+  }
+
   // Construir línea de tiempo unificada (tipo + fecha + detalle)
   const historial = [
     {

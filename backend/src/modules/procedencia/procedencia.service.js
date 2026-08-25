@@ -114,4 +114,12 @@ const getPorImei = async (negocioId, imeiCrudo) => {
   };
 };
 
-module.exports = { getPorProducto, getPorImei };
+module.exports = {
+  getPorProducto, getPorImei,
+  // El semáforo lo necesita también el listado de seriales del inventario:
+  // ver la garantía exige abrir el panel de procedencia unidad por unidad,
+  // y una que venció mañana no se puede descubrir así. Se exporta en vez de
+  // copiarse para que las dos pantallas nunca discrepen sobre qué es
+  // "por vencer".
+  estadoGarantia: _estadoGarantia,
+};
