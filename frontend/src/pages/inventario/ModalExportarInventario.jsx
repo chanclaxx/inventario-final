@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Download, FileSpreadsheet, Layers, Building2, MapPin } from 'lucide-react';
+import { Download, FileSpreadsheet, Layers, Building2, MapPin, Tags } from 'lucide-react';
 import { Modal }  from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
 import api        from '../../api/axios.config';
@@ -7,6 +7,17 @@ import { useAuth } from '../../context/useAuth';
 import { exportarInventarioExcel }              from '../../utils/exportarInventarioExcel';
 import { exportarInventarioPorLineas }           from '../../utils/exportarInventarioPorLineas';
 import { exportarInventarioPorLineasNegocio }    from '../../utils/exportarInventarioPorLineasNegocio';
+
+// La elección se recuerda entre exportaciones: quien exporta para hacer
+// seguimiento lo hace todas las semanas y no tiene por qué volver a marcarla.
+// Si el navegador bloquea el almacenamiento, se cae al default y ya.
+const CLAVE_CAR = 'export_inventario_caracteristicas';
+const leerPreferencia = () => {
+  try { return localStorage.getItem(CLAVE_CAR) === '1'; } catch { return false; }
+};
+const guardarPreferencia = (v) => {
+  try { localStorage.setItem(CLAVE_CAR, v ? '1' : '0'); } catch { /* sin memoria, da igual */ }
+};
 
 const MODOS = [
   {
@@ -51,6 +62,7 @@ export function ModalExportarInventario({ open, onClose }) {
   const [modo,       setModo]       = useState('productos');
   const [exportando, setExportando] = useState(false);
   const [error,      setError]      = useState('');
+  const [conCaracteristicas, setConCaracteristicas] = useState(leerPreferencia);
 
   const modoEfectivo = alcance === 'negocio' ? 'lineas' : modo;
 
@@ -58,9 +70,10 @@ export function ModalExportarInventario({ open, onClose }) {
     setExportando(true);
     setError('');
     try {
+      const opts = { caracteristicas: conCaracteristicas };
       if (alcance === 'negocio') {
         const { data } = await api.get('/inventario/exportar-negocio', OPCIONES_EXPORT);
-        await exportarInventarioPorLineasNegocio(data.data.porLinea, data.data.configMap);
+        await exportarInventarioPorLineasNegocio(data.data.porLinea, data.data.configMap, opts);
       } else {
         // `modo` le dice al backend qué armar: en "líneas" se salta los cruces por
         // IMEI contra facturas y compras, que es lo que hacía eterna la consulta.
@@ -70,9 +83,9 @@ export function ModalExportarInventario({ open, onClose }) {
         });
         const { porProducto, porLinea, cantidad, configMap } = data.data;
         if (modoEfectivo === 'productos') {
-          await exportarInventarioExcel(porProducto, cantidad, configMap);
+          await exportarInventarioExcel(porProducto, cantidad, configMap, opts);
         } else {
-          await exportarInventarioPorLineas(porLinea, configMap);
+          await exportarInventarioPorLineas(porLinea, configMap, opts);
         }
       }
       onClose();
@@ -149,6 +162,44 @@ export function ModalExportarInventario({ open, onClose }) {
             </div>
           </div>
         )}
+
+        {/* ── Características de los productos ── */}
+        {/*
+          Apagada por defecto: encendida, el Excel puede crecer bastante (una
+          columna por característica y una hoja con el desglose por variante), y
+          quien solo quiere ver stock no tiene por qué cargar con eso.
+        */}
+        <button
+          type="button"
+          onClick={() => {
+            const v = !conCaracteristicas;
+            setConCaracteristicas(v);
+            guardarPreferencia(v);
+          }}
+          className={`flex items-start gap-3 p-3 rounded-xl border-2 text-left transition-all
+            ${conCaracteristicas
+              ? 'border-blue-500 bg-blue-50'
+              : 'border-gray-200 bg-white hover:border-gray-300'}`}
+        >
+          <div className={`mt-0.5 w-4 h-4 rounded flex-shrink-0 border-2 flex items-center justify-center
+            ${conCaracteristicas ? 'bg-blue-600 border-blue-600' : 'border-gray-300'}`}>
+            {conCaracteristicas && (
+              <svg viewBox="0 0 12 12" className="w-3 h-3 text-white" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <path d="M2.5 6.5l2.5 2.5 4.5-5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            )}
+          </div>
+          <div className="flex flex-col gap-0.5 min-w-0">
+            <span className="text-sm font-semibold text-gray-700 flex items-center gap-1.5">
+              <Tags size={14} className={conCaracteristicas ? 'text-blue-600' : 'text-gray-400'} />
+              Incluir características
+            </span>
+            <span className="text-xs text-gray-400">
+              Todas las de cada unidad (aunque ya no estén en Ajustes) y una hoja con
+              el stock por talla, color o variante.
+            </span>
+          </div>
+        </button>
 
         {/* ── Leyenda de colores ── */}
         <div className="flex flex-col gap-2">

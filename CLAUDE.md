@@ -149,6 +149,26 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > solo existe desde Postgres 14. La sección 11 de la prueba monta una base con los
 > tipos reales (bytea/timestamptz/bigserial) justo para cazar esto.
 
+> **Exportar inventario — la opción "Incluir características"**
+> (`ModalExportarInventario`, los tres `exportarInventario*.js`): el Excel sacó
+> siempre las características de un serial **solo si estaban en la lista de
+> Ajustes**, así que las de una configuración anterior o las que entraron por
+> importación se perdían en silencio; y la hoja "Por Cantidad" mostraba el stock
+> TOTAL del producto — 30 tallas en una fila, sin decir cuántas hay de cada una,
+> aunque el backend ya manda el árbol (`cantidad[].atributos`).
+> La opción es **por exportación**, no una clave de `config_negocio`: no toca la
+> BD y se recuerda en `localStorage`. Apagada, el archivo sale **idéntico** al de
+> siempre (es la primera sección de la prueba). Encendida hace dos cosas: las
+> columnas de cada hoja salen de la **unión** de la lista configurada y las
+> claves que traen esas unidades —calculadas por HOJA, para que un producto no
+> arrastre columnas vacías de otro—, y aparece una hoja **Características** con
+> una fila por nodo HOJA del árbol (la variante si la hay, si no el atributo):
+> ahí es donde vive el stock de verdad, el del producto es la suma.
+> Esa hoja **no se ordena por valor**: el backend ya los devuelve por el orden
+> del tipo, y reordenar alfabéticamente pondría las tallas como L, M, S, XL.
+> Prueba: `frontend/scripts/prueba-export-caracteristicas.mjs` (14
+> verificaciones; genera el xlsx real con ExcelJS y le lee las celdas).
+
 > **Los NUMERIC de Postgres llegan como STRING con decimales** (`InputMoneda`):
 > node-postgres no castea `numeric` a number para no perder precisión, así que
 > un precio de 7.000 viaja como `"7000.00"`. `InputMoneda` limpiaba el valor con

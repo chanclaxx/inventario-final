@@ -15,6 +15,44 @@ function parseLista(val) {
   try { var p = JSON.parse(val); return Array.isArray(p) ? p : []; }
   catch { return String(val).split(',').map(function(v) { return v.trim(); }).filter(Boolean); }
 }
+// ─── Columnas de características ─────────────────────────────────────────────
+//
+// Unión de la lista configurada en Ajustes y las claves que de verdad traen los
+// seriales: solo con la lista se pierden en silencio las de una configuración
+// anterior y las que entraron por importación, que es justo lo que uno busca al
+// exportar para hacer seguimiento. Con la opción apagada devuelve la lista tal
+// cual y el Excel sale idéntico al de siempre.
+function clavesCaracteristicas(lista, seriales, incluirTodas) {
+  var claves = (lista || []).slice();
+  if (!incluirTodas) return claves;
+
+  var vistas = {};
+  for (var i = 0; i < claves.length; i++) vistas[claves[i]] = true;
+
+  for (var j = 0; j < (seriales || []).length; j++) {
+    var car = seriales[j].caracteristicas;
+    if (!car || typeof car !== 'object') continue;
+    var ks = Object.keys(car);
+    for (var k = 0; k < ks.length; k++) {
+      var clave = ks[k];
+      if (vistas[clave]) continue;
+      var val = car[clave];
+      if (val === null || val === undefined || String(val).trim() === '') continue;
+      vistas[clave] = true;
+      claves.push(clave);
+    }
+  }
+  return claves;
+}
+
+/** ¿Alguna unidad de la lista tiene color registrado? */
+function hayColor(seriales) {
+  for (var i = 0; i < (seriales || []).length; i++) {
+    if (seriales[i].color && String(seriales[i].color).trim()) return true;
+  }
+  return false;
+}
+
 function fmtFecha(val) {
   if (!val) return '';
   var d = new Date(val);
@@ -103,11 +141,13 @@ function descargar(buffer, nombre) {
   setTimeout(function() { URL.revokeObjectURL(url); }, 40000);
 }
 
-export async function exportarInventarioPorLineas(porLinea, configMap) {
+export async function exportarInventarioPorLineas(porLinea, configMap, opciones) {
   var cfg     = configMap || {};
   var colAct  = cfg.colores_serial_activo         === '1';
   var carAct  = cfg.caracteristicas_serial_activo === '1';
   var carList = carAct ? parseLista(cfg.caracteristicas_serial_lista) : [];
+  // Opción del modal, apagada por defecto.
+  var todoCar = (opciones || {}).caracteristicas === true;
 
   var wb     = new ExcelJS.Workbook();
   var usadas = new Set();
@@ -122,9 +162,12 @@ export async function exportarInventarioPorLineas(porLinea, configMap) {
     var seriales = porLinea[linea];
     var ws       = wb.addWorksheet(hojaUnica(linea, usadas));
 
+    var carHoja  = clavesCaracteristicas(carList, seriales, todoCar);
+    var verColor = colAct || (todoCar && hayColor(seriales));
+
     var cols = ['Referencia', 'IMEI / Serial'];
-    if (colAct) cols.push('Color');
-    for (var ci = 0; ci < carList.length; ci++) cols.push(carList[ci]);
+    if (verColor) cols.push('Color');
+    for (var ci = 0; ci < carHoja.length; ci++) cols.push(carHoja[ci]);
     cols.push('Prestamista', 'Fecha Entrada', 'Cliente Origen');
 
     ws.columns = cols.map(function(c) { return { width: colW(c) }; });
@@ -148,7 +191,7 @@ export async function exportarInventarioPorLineas(porLinea, configMap) {
 
       var vals = [s.producto || '', s.imei || ''];
       if (colAct) vals.push(s.color || '');
-      for (var ki = 0; ki < carList.length; ki++) vals.push(car[carList[ki]] || '');
+      for (var ki = 0; ki < carHoja.length; ki++) vals.push(car[carHoja[ki]] || '');
       vals.push(s.prestamista || '', fmtFecha(s.fecha_entrada), s.cliente_origen || '');
 
       var estilo = estiloCelda(bgSerial(s));
