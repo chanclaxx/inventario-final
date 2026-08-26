@@ -465,16 +465,24 @@ const findActivosPorPrestatario = async (prestatarioId, negocioId) => {
     JOIN  sucursales               su  ON su.id  = p.sucursal_id
     JOIN  prestatarios             pr  ON pr.id  = p.prestatario_id
     LEFT JOIN empleados_prestatario e  ON e.id   = p.empleado_id
-    LEFT JOIN seriales              s  ON s.imei = p.imei
-    LEFT JOIN productos_serial      ps ON ps.id  = s.producto_id
-                                      AND ps.sucursal_id = p.sucursal_id
-    LEFT JOIN lineas_producto       lps ON lps.id = ps.linea_id
+    -- Mismo LATERAL que en findAll: escoge UNA fila de serial (prefiriendo la
+    -- de la sucursal del préstamo) en vez de unir a ciegas y después descartar.
+    -- El filtro que había aquí borraba del PDF préstamos ACTIVOS del cliente:
+    -- se le entregaba un documento con menos deuda de la que tiene.
+    LEFT JOIN LATERAL (
+      SELECT ps4.linea_id
+        FROM seriales s4
+        LEFT JOIN productos_serial ps4 ON ps4.id = s4.producto_id
+       WHERE s4.imei = p.imei
+       ORDER BY (ps4.sucursal_id = p.sucursal_id) DESC NULLS LAST, s4.id
+       LIMIT 1
+    ) s ON p.imei IS NOT NULL
+    LEFT JOIN lineas_producto       lps ON lps.id = s.linea_id
     LEFT JOIN productos_cantidad    pc  ON pc.id  = p.producto_id AND p.imei IS NULL
     LEFT JOIN lineas_producto       lpc ON lpc.id = pc.linea_id
     WHERE p.prestatario_id = $1
       AND su.negocio_id    = $2
       AND p.estado         = 'Activo'
-      AND (p.imei IS NULL OR ps.sucursal_id IS NOT NULL)
     ORDER BY p.fecha DESC
   `, [prestatarioId, negocioId]);
 
@@ -508,16 +516,24 @@ const findActivosPorCliente = async (clienteId, negocioId) => {
     FROM prestamos p
     JOIN  sucursales su ON su.id = p.sucursal_id
     JOIN  clientes   c  ON c.id  = p.cliente_id
-    LEFT JOIN seriales              s  ON s.imei = p.imei
-    LEFT JOIN productos_serial      ps ON ps.id  = s.producto_id
-                                      AND ps.sucursal_id = p.sucursal_id
-    LEFT JOIN lineas_producto       lps ON lps.id = ps.linea_id
+    -- Mismo LATERAL que en findAll: escoge UNA fila de serial (prefiriendo la
+    -- de la sucursal del préstamo) en vez de unir a ciegas y después descartar.
+    -- El filtro que había aquí borraba del PDF préstamos ACTIVOS del cliente:
+    -- se le entregaba un documento con menos deuda de la que tiene.
+    LEFT JOIN LATERAL (
+      SELECT ps4.linea_id
+        FROM seriales s4
+        LEFT JOIN productos_serial ps4 ON ps4.id = s4.producto_id
+       WHERE s4.imei = p.imei
+       ORDER BY (ps4.sucursal_id = p.sucursal_id) DESC NULLS LAST, s4.id
+       LIMIT 1
+    ) s ON p.imei IS NOT NULL
+    LEFT JOIN lineas_producto       lps ON lps.id = s.linea_id
     LEFT JOIN productos_cantidad    pc  ON pc.id  = p.producto_id AND p.imei IS NULL
     LEFT JOIN lineas_producto       lpc ON lpc.id = pc.linea_id
     WHERE p.cliente_id = $1
       AND su.negocio_id = $2
       AND p.estado      = 'Activo'
-      AND (p.imei IS NULL OR ps.sucursal_id IS NOT NULL)
     ORDER BY p.fecha DESC
   `, [clienteId, negocioId]);
 
