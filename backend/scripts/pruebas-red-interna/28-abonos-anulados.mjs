@@ -54,6 +54,19 @@ await db.exec(`
   ALTER TABLE retomas   ADD COLUMN IF NOT EXISTS tipo_persona TEXT;
   ALTER TABLE retomas   ADD COLUMN IF NOT EXISTS persona_id   INTEGER;
   ALTER TABLE abonos_totales ADD COLUMN IF NOT EXISTS usuario_id INTEGER;
+  -- La LISTA de prestamos (findAll) pide estas columnas; el fixture las recorta
+  -- porque ninguna suite la ejercitaba hasta ahora.
+  ALTER TABLE clientes ADD COLUMN IF NOT EXISTS celular TEXT;
+  ALTER TABLE clientes ADD COLUMN IF NOT EXISTS saldo_a_favor NUMERIC DEFAULT 0;
+  ALTER TABLE productos_serial   ADD COLUMN IF NOT EXISTS linea_id INT;
+  ALTER TABLE productos_cantidad ADD COLUMN IF NOT EXISTS linea_id INT;
+  ALTER TABLE seriales ADD COLUMN IF NOT EXISTS color TEXT;
+  CREATE TABLE IF NOT EXISTS lineas_producto (
+    id SERIAL PRIMARY KEY, negocio_id INT, nombre TEXT
+  );
+  CREATE TABLE IF NOT EXISTS empleados_prestatario (
+    id SERIAL PRIMARY KEY, prestatario_id INT, nombre TEXT
+  );
   -- El extracto de creditos lee la auditoria para fechar las devoluciones.
   CREATE TABLE IF NOT EXISTS auditoria (
     id SERIAL PRIMARY KEY, negocio_id INT, usuario_id INT, fecha TIMESTAMP DEFAULT NOW(),
@@ -490,6 +503,72 @@ console.log('\n═══ 9. Pago total: se anula solo la parte devuelta ══�
   const bajo = i > 0 ? Number(conSaldo[i - 1].saldo) - Number(conSaldo[i].saldo) : null;
   check('★ el saldo baja solo por lo que sigue vivo', bajo, 5400000);
   check('★ y extracto = deuda al final', await saldoExtracto(id), await deudaReal(id));
+}
+
+// ═══ 10. La lista no puede OCULTAR préstamos ════════════════════════════════
+//
+// Un IMEI puede estar en varias filas de `seriales` — el mismo equipo cargado
+// en dos productos, o en dos sucursales. Un LEFT JOIN plano multiplica el
+// préstamo, y la consulta lo resolvía descartando las filas cuyo serial no
+// estuviera en la sucursal del préstamo.
+//
+// El efecto: préstamos que EXISTEN y no salían en la lista. 11 en
+// VideoTiendaGafas y 345 en Cellsite, uno de ellos con deuda viva. El usuario
+// abonó a un iPad, lo fue a buscar y no estaba.
+//
+// La regla: la lista devuelve TODOS los préstamos del negocio, ni uno menos,
+// y ninguno repetido.
+console.log('\n═══ 10. Ningún préstamo se oculta de la lista ═══');
+{
+  await db.exec(`
+    INSERT INTO sucursales (negocio_id, nombre) VALUES (1, 'Otra Sede');
+    INSERT INTO prestatarios (negocio_id, nombre, cedula, saldo_a_favor)
+      VALUES (1,'BUSCA','200', 0);
+    -- El producto vive en la sucursal 2; el préstamo se hará en la 1.
+    INSERT INTO productos_serial (nombre, precio, sucursal_id)
+      VALUES ('Equipo Otra Sede', 1000000, 2);
+  `);
+  const idProd = (await q(`SELECT id FROM productos_serial WHERE nombre='Equipo Otra Sede'`))[0].id;
+  await db.query(`INSERT INTO seriales (producto_id, imei, costo_compra) VALUES ($1,'IMEI-HUERFANO',500000)`, [idProd]);
+  const id = (await q(`SELECT id FROM prestatarios WHERE nombre='BUSCA'`))[0].id;
+
+  // Préstamo en la sucursal 1 con un IMEI cuyo producto está en la 2.
+  // Se inserta directo a propósito: el service HOY impide crearlo así (valida
+  // que el serial sea de la sucursal), pero en producción hay préstamos viejos
+  // en ese estado — un equipo que se movió de sede después de prestarse. La
+  // lista tiene que mostrarlos igual.
+  await db.query(`
+    INSERT INTO prestamos (sucursal_id, usuario_id, prestatario, cedula, telefono,
+                           nombre_producto, imei, cantidad_prestada, valor_prestamo,
+                           total_abonado, estado, prestatario_id)
+    VALUES (1, 1, 'BUSCA', '200', '300', 'Equipo Otra Sede', 'IMEI-HUERFANO', 1, 700000,
+            0, 'Activo', $1)`, [id]);
+  const pOculto = (await q(`SELECT id FROM prestamos WHERE imei='IMEI-HUERFANO'`))[0].id;
+
+  const lista = await prestamos.getPrestamos(null, 1);
+  const [{ total }] = await q(`
+    SELECT COUNT(*)::int AS total FROM prestamos p
+      JOIN sucursales su ON su.id = p.sucursal_id WHERE su.negocio_id = 1`);
+
+  checkEq('★ la lista devuelve TODOS los préstamos del negocio', lista.length, total);
+  checkEq('★ y el del serial en otra sucursal SÍ aparece',
+    lista.some((x) => Number(x.id) === Number(pOculto)), true);
+
+  const ids = new Set(lista.map((x) => Number(x.id)));
+  checkEq('★ sin duplicar ninguno (el IMEI no multiplica filas)', lista.length, ids.size);
+
+  // El mismo IMEI en DOS seriales: el caso que originó el filtro.
+  await db.exec(`
+    INSERT INTO productos_serial (nombre, precio, sucursal_id) VALUES ('Equipo Duplicado', 900000, 1);
+  `);
+  const idProd2 = (await q(`SELECT id FROM productos_serial WHERE nombre='Equipo Duplicado'`))[0].id;
+  await db.query(`INSERT INTO seriales (producto_id, imei, costo_compra) VALUES ($1,'IMEI-HUERFANO',400000)`, [idProd2]);
+
+  const lista2 = await prestamos.getPrestamos(null, 1);
+  const ids2 = new Set(lista2.map((x) => Number(x.id)));
+  checkEq('★ con el IMEI en DOS seriales, sigue sin duplicarse', lista2.length, ids2.size);
+  checkEq('   y el préstamo sigue apareciendo una sola vez',
+    lista2.filter((x) => Number(x.id) === Number(pOculto)).length, 1);
 }
 
 console.log('\n' + '─'.repeat(62));

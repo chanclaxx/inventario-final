@@ -71,16 +71,31 @@ const findAll = async (sucursalId, negocioId) => {
     LEFT JOIN prestatarios           pr  ON pr.id  = p.prestatario_id
     LEFT JOIN empleados_prestatario  e   ON e.id   = p.empleado_id
     LEFT JOIN clientes               c   ON c.id   = p.cliente_id
-    LEFT JOIN seriales               s   ON s.imei = p.imei
-    LEFT JOIN productos_serial       ps2 ON ps2.id = s.producto_id
-                                        AND ps2.sucursal_id = p.sucursal_id
-    LEFT JOIN lineas_producto        lps ON lps.id = ps2.linea_id
+    -- Un IMEI puede estar en VARIAS filas de seriales (el mismo equipo
+    -- registrado en dos productos, o en dos sucursales), así que un LEFT JOIN
+    -- plano multiplica el préstamo. Antes eso se resolvía descartando las filas
+    -- cuyo serial no estuviera en la misma sucursal — y con ello se BORRABAN de
+    -- la lista préstamos que sí existen: 11 en VideoTiendaGafas, 328 en
+    -- Cellsite, uno de ellos con deuda viva. El usuario los buscaba y no
+    -- aparecían.
+    --
+    -- El LATERAL escoge UNA sola fila, prefiriendo la de la sucursal del
+    -- préstamo. No multiplica y no descarta: si no hay serial en esa sucursal,
+    -- el préstamo igual sale, solo que sin color ni línea.
+    LEFT JOIN LATERAL (
+      SELECT s2.color, ps3.linea_id
+        FROM seriales s2
+        LEFT JOIN productos_serial ps3 ON ps3.id = s2.producto_id
+       WHERE s2.imei = p.imei
+       ORDER BY (ps3.sucursal_id = p.sucursal_id) DESC NULLS LAST, s2.id
+       LIMIT 1
+    ) s ON p.imei IS NOT NULL
+    LEFT JOIN lineas_producto        lps ON lps.id = s.linea_id
     LEFT JOIN productos_cantidad     pc  ON pc.id  = p.producto_id AND p.imei IS NULL
     LEFT JOIN lineas_producto        lpc ON lpc.id = pc.linea_id
     LEFT JOIN ult_prestatario        up  ON up.pid = p.prestatario_id
     LEFT JOIN ult_cliente            uc  ON uc.cid = p.cliente_id
     WHERE ${filtro}
-      AND (p.imei IS NULL OR ps2.sucursal_id IS NOT NULL)  -- ← filtra duplicados
     ORDER BY
       CASE p.estado WHEN 'Activo' THEN 0 WHEN 'Saldado' THEN 1 ELSE 2 END,
       p.fecha DESC
