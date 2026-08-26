@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { buscarPrestamos as buscarPrestamosApi } from '../../api/busqueda.api';
 import { exportarPrestamosExcel } from '../../utils/exportarPrestamosExcel';
 import { exportarCarteraPersonaExcel } from '../../utils/exportarCarteraPersonaExcel';
-import { getPrestamos, registrarAbonoPrestamo, devolverPrestamo, devolverParcialPrestamo, registrarSaldoAFavor as registrarSaldoAFavorApi, intercambiarPrestamo as intercambiarPrestamoApi, anularAbono as anularAbonoApi, getRetomasDirectas as getRetomasDirectasApi, anularRetomaDirecta as anularRetomaDirectaApi, aplicarSaldoAPrestamo as aplicarSaldoAPrestamoApi, getEstadoCuenta as getEstadoCuentaApi, crearAjusteDeuda as crearAjusteDeudaApi, getSaldoSucursal as getSaldoSucursalApi, getHistorialSaldoSucursal as getHistorialSaldoSucursalApi } from '../../api/prestamos.api';
+import { getPrestamos, getPrestamoById, registrarAbonoPrestamo, devolverPrestamo, devolverParcialPrestamo, registrarSaldoAFavor as registrarSaldoAFavorApi, intercambiarPrestamo as intercambiarPrestamoApi, anularAbono as anularAbonoApi, getRetomasDirectas as getRetomasDirectasApi, anularRetomaDirecta as anularRetomaDirectaApi, aplicarSaldoAPrestamo as aplicarSaldoAPrestamoApi, getEstadoCuenta as getEstadoCuentaApi, crearAjusteDeuda as crearAjusteDeudaApi, getSaldoSucursal as getSaldoSucursalApi, getHistorialSaldoSucursal as getHistorialSaldoSucursalApi } from '../../api/prestamos.api';
 import { ModalEditarValorPrestamo } from './ModalEditarValorPrestamo';
 import { crearPrestatario as crearPrestatarioApi, getPrestatarios, actualizarPrestatario as actualizarPrestatarioApi } from '../../api/prestatarios.api';
 import { actualizarCliente as actualizarClienteApi } from '../../api/clientes.api';
@@ -294,19 +294,52 @@ function ModalDevolucion({ prestamo, onClose }) {
   const queryClient = useQueryClient();
   const [cantidad, setCantidad] = useState('');
   const [error,    setError]    = useState('');
+  const [decision, setDecision] = useState('anular');
+
+  // El detalle trae los abonos, y de ahí sale si el pago lo escogió el vendedor
+  // o lo repartió el programa. Solo se pide cuando el préstamo tiene abonos.
+  const { data: detalle } = useQuery({
+    queryKey: ['prestamo-detalle', prestamo.id],
+    queryFn:  () => getPrestamoById(prestamo.id).then((r) => r.data.data),
+    enabled:  Number(prestamo.total_abonado) > 0,
+    staleTime: 0,
+  });
 
   const esPorCantidad = !prestamo.imei;
   const cantidadMax   = Number(prestamo.cantidad_prestada) || 1;
+  // Lo que la persona YA pagó por este préstamo. Al devolver el producto ese
+  // cobro sale de su cuenta y el pago se queda sin nada que pagar, así que hay
+  // que decidir qué se hace con él — y decidirlo AHORA, no después.
+  const yaAbonado     = Number(prestamo.total_abonado) || 0;
+
+  // Al devolver TODO hay que resolver el abonado completo; en una devolución
+  // parcial el préstamo sigue vivo con lo que queda.
+  const devuelveTodo  = !esPorCantidad || cantidadMax === 1 || Number(cantidad) === cantidadMax;
+  const hayQueDecidir = yaAbonado > 0 && devuelveTodo;
+
+  // De dónde salió el pago cambia las opciones. Con un abono INDIVIDUAL el
+  // vendedor escogió a mano este préstamo. Con un PAGO TOTAL fue el programa el
+  // que repartió: nadie eligió que esa plata cayera aquí, y por eso aparece la
+  // opción de devolverla al reparto.
+  const dePagoTotal = detalle?.abonos?.some((a) => a.abono_total_id) ?? false;
+
+  const invalidarTodo = () => {
+    queryClient.invalidateQueries({ queryKey: ['prestamos'],               exact: false });
+    queryClient.invalidateQueries({ queryKey: ['prestatarios'],            exact: false });
+    queryClient.invalidateQueries({ queryKey: ['saldo-sucursal'],          exact: false });
+    queryClient.invalidateQueries({ queryKey: ['historial-saldo-sucursal'], exact: false });
+    queryClient.invalidateQueries({ queryKey: ['estado-cuenta'],           exact: false });
+  };
 
   const mutDevolver = useMutation({
-    mutationFn: () => devolverPrestamo(prestamo.id),
-    onSuccess:  () => { queryClient.invalidateQueries(['prestamos']); onClose(); },
+    mutationFn: () => devolverPrestamo(prestamo.id, decision),
+    onSuccess:  () => { invalidarTodo(); onClose(); },
     onError:    (err) => setError(err.response?.data?.error || 'Error al registrar devolución'),
   });
 
   const mutDevolverParcial = useMutation({
-    mutationFn: (cant) => devolverParcialPrestamo(prestamo.id, cant),
-    onSuccess:  () => { queryClient.invalidateQueries(['prestamos']); onClose(); },
+    mutationFn: (cant) => devolverParcialPrestamo(prestamo.id, cant, decision),
+    onSuccess:  () => { invalidarTodo(); onClose(); },
     onError:    (err) => setError(err.response?.data?.error || 'Error al registrar devolución'),
   });
 
@@ -345,6 +378,49 @@ function ModalDevolucion({ prestamo, onClose }) {
           </div>
         ) : (
           <p className="text-sm text-gray-600">¿Confirmas que el equipo fue devuelto?</p>
+        )}
+        {hayQueDecidir && (
+          <div className="flex flex-col gap-2">
+            <div className="bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5 flex flex-col gap-1">
+              <p className="text-xs font-semibold text-amber-800">
+                Ya pagó {formatCOP(yaAbonado)} por este préstamo
+              </p>
+              <p className="text-xs text-amber-700">
+                Al devolver el producto, ese cobro sale de su cuenta y ese pago queda
+                sin nada que pagar. <strong>¿Qué se hace con esa plata?</strong>
+              </p>
+              {dePagoTotal && (
+                <p className="text-xs text-amber-700 bg-white/70 rounded-lg px-2 py-1.5 mt-1">
+                  Ese pago vino de un <strong>pago total</strong>: lo repartió el programa
+                  entre lo que la persona debía, nadie escogió que cayera en este producto.
+                </p>
+              )}
+            </div>
+
+            {[
+              { id: 'anular', titulo: 'No se le devuelve',
+                texto: 'La plata se queda con el negocio. Su deuda no cambia.' },
+              { id: 'saldo_a_favor', titulo: 'Dejársela a favor',
+                texto: 'Queda como crédito a su nombre para usarlo después.' },
+              ...(dePagoTotal ? [{ id: 'reasignar', titulo: 'Pasarla a sus otros préstamos',
+                texto: 'Vuelve al reparto y le baja lo que debe, como si el pago se hubiera hecho hoy.' }] : []),
+            ].map((o) => (
+              <button
+                key={o.id} type="button"
+                onClick={() => { setDecision(o.id); setError(''); }}
+                className={`text-left rounded-xl border p-2.5 transition ${
+                  decision === o.id ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:border-gray-300'
+                }`}>
+                <p className="text-sm font-medium text-gray-900">{o.titulo}</p>
+                <p className="text-xs text-gray-500">{o.texto}</p>
+              </button>
+            ))}
+
+            <p className="text-[11px] text-gray-400">
+              Quede lo que quede, el pago no se borra: aparece en el estado de cuenta
+              marcado y con la razón anotada.
+            </p>
+          </div>
         )}
         {error && <p className="text-sm text-red-500">{error}</p>}
         <div className="flex gap-2">
@@ -1554,7 +1630,6 @@ function VistaDetallePersona({ nombre, tipo, personaId, prestamos, saldoAFavor =
   const [resultadoSaldo,      setResultadoSaldo]      = useState(null);
   const [editandoPrestamo,    setEditandoPrestamo]    = useState(null);
   const [modalAbonoTotal,     setModalAbonoTotal]     = useState(null); // null | { mode, abonoTotalId?, valorActual?, metodoActual? }
-
   const tipoApi = tipo === 'companero' ? 'prestatario' : tipo;
 
   // Saldo real de esta sucursal (no el global de prestatarios/clientes)

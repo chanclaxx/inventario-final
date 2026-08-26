@@ -6,10 +6,14 @@ export const crearPrestamo = (data) => api.post('/prestamos', data);
 // `extra` lleva la imputación cuando hay mora: { modo, valor_mora }.
 export const registrarAbonoPrestamo = (id, valor, metodo, color = null, extra = {}) =>
   api.post(`/prestamos/${id}/abonos`, { valor, metodo, ...(color && { color }), ...extra });
-export const devolverPrestamo = (id) => api.patch(`/prestamos/${id}/devolver`);
+// `decision` dice qué se hace con los abonos del producto que se devuelve:
+// 'anular' (no se le devuelve), 'saldo_a_favor', o 'reasignar' a sus otros
+// préstamos — esta última solo aplica cuando el pago vino de un pago total.
+export const devolverPrestamo = (id, decision = 'anular') =>
+  api.patch(`/prestamos/${id}/devolver`, { decision });
 export const crearPrestamos = (data) => api.post('/prestamos/batch', data);
-export const devolverParcialPrestamo = (id, cantidad_devuelta) =>
-  api.patch(`/prestamos/${id}/devolver-parcial`, { cantidad_devuelta });
+export const devolverParcialPrestamo = (id, cantidad_devuelta, decision = 'anular') =>
+  api.patch(`/prestamos/${id}/devolver-parcial`, { cantidad_devuelta, decision });
 export const registrarSaldoAFavor = (tipo, id, monto) =>
   api.patch(`/prestamos/personas/${tipo}/${id}/saldo-a-favor`, { monto });
 export const intercambiarPrestamo = (id, data) =>

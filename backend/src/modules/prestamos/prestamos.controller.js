@@ -136,13 +136,25 @@ const registrarAbono = async (req, res, next) => {
 
 const devolverPrestamo = async (req, res, next) => {
   try {
-    const data = await service.devolverPrestamo(req.user.negocio_id, req.params.id);
+    const data = await service.devolverPrestamo(req.user.negocio_id, req.params.id,
+      { decision: req.body?.decision });
+    const anulado = Number(data?.abonos_anulados ?? 0);
     audit.registrar(req.user.negocio_id, req.user.id, 'Préstamo devuelto', 'prestamos', Number(req.params.id),
       _detallePrestamo(data, {
         valor:    Number(data?.valor_prestamo ?? 0),
         cantidad: data?.cantidad != null ? Number(data.cantidad) : null,
+        // Queda en la auditoría porque mueve plata: los abonos del producto
+        // devuelto dejan de contar.
+        abonos_anulados: anulado,
+        decision:        data?.decision ?? null,
       }));
-    res.json({ ok: true, message: 'Préstamo marcado como devuelto' });
+    res.json({
+      ok: true,
+      data,
+      message: anulado > 0
+        ? `Préstamo devuelto. Se anularon los abonos del producto (queda la razón anotada en el estado de cuenta).`
+        : 'Préstamo marcado como devuelto',
+    });
   } catch (err) { next(err); }
 };
 
@@ -157,13 +169,23 @@ const devolverParcial = async (req, res, next) => {
       req.user.negocio_id,
       req.params.id,
       Number(cantidad_devuelta),
+      { decision: req.body?.decision },
     );
+    const anulado = Number(data?.abonos_anulados ?? 0);
     audit.registrar(req.user.negocio_id, req.user.id, 'Devolución parcial de préstamo', 'prestamos', Number(req.params.id),
       _detallePrestamo(data, {
         cantidad_devuelta:  Number(data.devuelto  ?? cantidad_devuelta),
         cantidad_pendiente: Number(data.pendiente ?? 0),
+        abonos_anulados: anulado,
+        decision:        data?.decision ?? null,
       }));
-    res.json({ ok: true, data, message: 'Devolución registrada correctamente' });
+    res.json({
+      ok: true,
+      data,
+      message: anulado > 0
+        ? `Devolución registrada. Se anularon los abonos del producto (queda la razón anotada).`
+        : 'Devolución registrada correctamente',
+    });
   } catch (err) { next(err); }
 };
 const exportarPdfPorPersona = async (req, res, next) => {

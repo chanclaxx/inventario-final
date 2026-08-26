@@ -683,14 +683,22 @@ const generarPdfEstadoCuenta = async ({ tipo, personaId, negocioId, negocioNombr
   const service     = require('./prestamos.service');
   const movimientos = (await service.getEstadoCuenta(negocioId, tipo, personaId, sucursalId))
     .map((m) => {
-      const devuelto = m.tipo === 'prestamo' && m.prestamo_estado === 'Devuelto';
+      // Igual que en la pantalla: fuera del saldo va el préstamo devuelto, sus
+      // abonos, y cualquier abono anulado del todo. Un pago total con solo una
+      // PARTE anulada sigue contando por el resto, así que no se atenúa: se le
+      // pone la nota diciendo cuánto de él no cuenta.
+      const anuladoParcial = Number(m.valor_anulado || 0);
+      const devuelto = m.anulado_total === true || m.prestamo_estado === 'Devuelto';
       // `nota` es el sufijo entre paréntesis del concepto. Lo usa el aviso
       // "Devuelto" y, cuando no aplica, la descripción que escribió el usuario
       // (hoy solo la del pago total): los dos casos nunca coinciden en la misma
       // fila, porque uno es de préstamos y el otro de abonos totales.
       return {
         ...m,
-        nota:     devuelto ? 'Devuelto' : (m.descripcion || null),
+        nota:     m.anulado_total  ? (m.motivo_anulacion || 'Anulado')
+                : anuladoParcial > 0 ? `${formatCOP(anuladoParcial)} no cuenta — ${m.motivo_anulacion || 'anulado'}`
+                : devuelto           ? 'Devuelto'
+                : (m.descripcion || null),
         atenuado: devuelto,
       };
     });

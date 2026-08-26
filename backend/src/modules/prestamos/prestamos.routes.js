@@ -22,6 +22,15 @@ const validarAbono = [
 
 const validarDevolucionParcial = [
   body('cantidad_devuelta').isInt({ min: 1 }).withMessage('La cantidad a devolver debe ser mayor a 0'),
+  body('decision').optional({ values: 'null' })
+    .isIn(['anular', 'saldo_a_favor', 'reasignar']).withMessage('decision inválida'),
+];
+
+// Qué se hace con los abonos del producto que se devuelve. Sin dato, 'anular':
+// es lo que deja la deuda tal cual y alinea el extracto con ella.
+const validarDecisionDevolucion = [
+  body('decision').optional({ values: 'null' })
+    .isIn(['anular', 'saldo_a_favor', 'reasignar']).withMessage('decision inválida'),
 ];
 
 const validarSaldoAFavor = [
@@ -105,7 +114,7 @@ router.post(  '/:id/mora/condonar',    requireModulo('prestamos'), requireNivel(
 router.patch( '/:id/interes',          requireModulo('prestamos'), requireNivel('supervisor'),    ctrl.fijarInteres);
 router.delete('/:id/abonos/:abonoId',  requireModulo('prestamos'), ctrl.anularAbono);
 router.post(  '/:id/intercambio',      requireModulo('prestamos'), validarIntercambio,       validate, ctrl.intercambiarPrestamo);
-router.patch( '/:id/devolver',         requireModulo('prestamos'), ctrl.devolverPrestamo);
+router.patch( '/:id/devolver',         requireModulo('prestamos'), validarDecisionDevolucion, validate, ctrl.devolverPrestamo);
 router.patch( '/:id/devolver-parcial', requireModulo('prestamos'), validarDevolucionParcial, validate, ctrl.devolverParcial);
 
 module.exports = router;

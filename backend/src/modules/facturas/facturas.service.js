@@ -648,6 +648,7 @@ const cancelarFactura = async (negocioId, id, eliminarRetoma = false, _desdeDevo
           .filter((a) => !METODOS_NO_CAJA.includes(a.metodo) && new Date(a.fecha) < apertura)
           .reduce((s, a) => s + Number(a.valor || 0), 0);
       }
+      void credito;
 
       if (totalDevolucion > 0) {
         await client.query(
@@ -659,6 +660,21 @@ const cancelarFactura = async (negocioId, id, eliminarRetoma = false, _desdeDevo
             totalDevolucion,
             id,
           ]
+        );
+      }
+    }
+
+    // Cancelar la factura saca el cobro de la cuenta del cliente. Sus abonos se
+    // quedaban vivos restando contra nada — el mismo error que tenía préstamos
+    // al devolver un producto abonado, y que dejaba el estado de cuenta por
+    // debajo de la deuda real. Se anulan con el motivo a la vista.
+    {
+      const creditosRepoCancel = require('../creditos/creditos.repository');
+      const creditoCancel = await creditosRepoCancel.findByFacturaId(client, id);
+      if (creditoCancel) {
+        await creditosRepoCancel.anularAbonosDeCredito(
+          client, creditoCancel.id,
+          `Anulado: se canceló la factura #${String(factura.numero ?? id).padStart(6, '0')}`,
         );
       }
     }
@@ -918,11 +934,27 @@ const devolverLineasCredito = async (negocioId, facturaId, lineasDevolver) => {
     );
 
     if (todasDevueltas) {
-      // Cancelar factura y crédito completos
+      // Cancelar factura y crédito completos. Los abonos se anulan: ya no hay
+      // cobro contra el cual pagar.
       await facturasRepo.cancelar(client, facturaId);
       await client.query(`UPDATE creditos SET estado = 'Cancelado' WHERE id = $1`, [credito.id]);
-    } else if (nuevoSaldo <= 0 && creditoActualizado.estado === 'Activo') {
-      await client.query(`UPDATE creditos SET estado = 'Saldado' WHERE id = $1`, [credito.id]);
+      await creditosRepo.anularAbonosDeCredito(
+        client, credito.id, 'Anulado: se devolvió toda la venta',
+      );
+    } else {
+      // Devolución PARCIAL: el crédito bajó de valor y lo ya pagado puede quedar
+      // por encima. Ese sobrante se anula, o el crédito mostraría más pagado de
+      // lo que vale — el mismo descuadre que dejan los pagos duplicados.
+      const sobrante = (cuotaInicial + totalAbonado) - nuevoValorTotal;
+      if (sobrante > 0) {
+        await creditosRepo.anularSobranteDeAbonosCredito(
+          client, credito.id, sobrante,
+          `Anulado: se devolvieron productos y el crédito bajó a ${nuevoValorTotal}`,
+        );
+      }
+      if (nuevoSaldo <= 0 && creditoActualizado.estado === 'Activo') {
+        await client.query(`UPDATE creditos SET estado = 'Saldado' WHERE id = $1`, [credito.id]);
+      }
     }
 
     await client.query('COMMIT');

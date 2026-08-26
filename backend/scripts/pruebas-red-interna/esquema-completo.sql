@@ -67,7 +67,15 @@ CREATE TABLE IF NOT EXISTS prestamos (
 );
 CREATE TABLE IF NOT EXISTS abonos_prestamo (
   id SERIAL PRIMARY KEY, prestamo_id INT, usuario_id INT, valor NUMERIC,
-  metodo TEXT, abono_total_id INT, fecha TIMESTAMP DEFAULT NOW()
+  metodo TEXT, abono_total_id INT, fecha TIMESTAMP DEFAULT NOW(),
+  -- Anulación con motivo (20260825_abonos_anulados.sql). Un abono deja de
+  -- contar sin desaparecer: la fila es la explicación de por qué la cuenta
+  -- cuadra así. `valor_anulado` permite anular solo una PARTE, que es lo que
+  -- hace falta cuando una devolución parcial baja el valor del préstamo.
+  anulado BOOLEAN NOT NULL DEFAULT FALSE,
+  valor_anulado NUMERIC(14,2) NOT NULL DEFAULT 0,
+  motivo_anulacion TEXT,
+  anulado_en TIMESTAMPTZ
 );
 CREATE TABLE IF NOT EXISTS abonos_totales (
   id SERIAL PRIMARY KEY, sucursal_id INT, persona_id INT, tipo_persona TEXT,
@@ -75,12 +83,33 @@ CREATE TABLE IF NOT EXISTS abonos_totales (
   -- Nota libre del usuario sobre el pago (20260813_descripcion_pago_total.sql)
   descripcion TEXT
 );
+-- OJO: estas dos calcan producción a propósito. El fixture las tenía con
+-- `valor`/`tipo` y sin el índice único, columnas que NO existen en la base
+-- real: el repositorio escribe concepto/monto/tipo_movimiento y hace
+-- `ON CONFLICT (tipo_persona, persona_id, sucursal_id)`. Con el esquema viejo
+-- cualquier prueba que acreditara saldo a favor por sucursal reventaba por el
+-- arnés y no por el producto — y ninguna suite lo hacía, así que el desfase
+-- llevaba ahí sin que nadie lo notara.
 CREATE TABLE IF NOT EXISTS saldo_a_favor_sucursal (
-  id SERIAL PRIMARY KEY, sucursal_id INT, persona_id INT, tipo_persona TEXT, saldo NUMERIC DEFAULT 0
+  id SERIAL PRIMARY KEY,
+  tipo_persona   TEXT NOT NULL,
+  persona_id     INT  NOT NULL,
+  sucursal_id    INT  NOT NULL,
+  saldo          NUMERIC NOT NULL DEFAULT 0,
+  actualizado_en TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (tipo_persona, persona_id, sucursal_id)
 );
 CREATE TABLE IF NOT EXISTS historial_saldo_sucursal (
-  id SERIAL PRIMARY KEY, sucursal_id INT, persona_id INT, tipo_persona TEXT,
-  valor NUMERIC, tipo TEXT, fecha TIMESTAMP DEFAULT NOW()
+  id SERIAL PRIMARY KEY,
+  tipo_persona    TEXT NOT NULL,
+  persona_id      INT  NOT NULL,
+  sucursal_id     INT  NOT NULL,
+  concepto        TEXT NOT NULL,
+  monto           NUMERIC NOT NULL,
+  tipo_movimiento TEXT NOT NULL,
+  referencia_id   INT,
+  usuario_id      INT,
+  creado_en       TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS garantias (

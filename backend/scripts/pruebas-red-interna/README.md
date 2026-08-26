@@ -40,6 +40,7 @@ node scripts/pruebas-red-interna/23-costo-serial-en-local.mjs
 node scripts/pruebas-red-interna/24-remision-por-variante.mjs
 node scripts/pruebas-red-interna/25-reclamo-faltante.mjs
 node scripts/pruebas-red-interna/26-lotes-cantidad.mjs
+node scripts/pruebas-red-interna/28-abonos-anulados.mjs
 ```
 
 > `20-borradores` verifica sobre todo una invariante negativa: guardar un
@@ -533,3 +534,45 @@ lote **cruza al siguiente** y cobra cada tramo a su propio precio.
 Es un recorte del esquema real: solo las tablas y columnas que tocan las
 consultas bajo prueba. Si en producción cambia alguna de esas columnas, hay que
 reflejarlo aquí o las pruebas dejarán de representar la realidad.
+
+### `28-abonos-anulados.mjs` — 57 verificaciones
+
+Dos errores distintos dejaban la cuenta de un cliente mintiendo, y los dos se
+arreglan con el mismo mecanismo: **el abono deja de contar pero NO desaparece**,
+y queda con su motivo escrito al lado.
+
+**1. Devoluciones.** Reportado desde producción (Cellsite): el prestamista
+TIENDA mostraba **$362.400.000** en su estado de cuenta y **$363.580.000** de
+deuda total. Al devolver un producto su cobro sale de la cuenta, pero los
+abonos se quedaban vivos y el extracto los seguía restando: daba **por debajo**
+de la deuda real, a 23 personas, y a varias en negativo — como si el negocio les
+debiera plata.
+
+**2. Pagos duplicados.** Un doble clic en "guardar" registraba el mismo pago dos
+veces: 45 parejas por $106.887.760, con pagos totales de id consecutivo creados
+en el mismo segundo. La sección 5 vigila la baranda que lo impide, y comprueba
+que un abono por OTRO valor sí entra — la baranda no puede estorbar la operación
+real.
+
+**La regla del negocio: el valor correcto de toda cuenta es la deuda total.** El
+extracto se alinea hacia ella; la deuda no se mueve por un abono anulado. La
+sección 6 es el invariante que lo sostiene y el que hay que vigilar.
+
+La sección 4 cubre la devolución PARCIAL: devolver unidades baja el valor del
+préstamo y lo ya pagado puede quedar por encima. Para eso existe `valor_anulado`
+— se anula solo el pedazo sobrante, sin inventar filas que nadie registró.
+
+La sección 7 cubre **créditos**, que tenían el mismo hueco sin que nadie lo
+supiera: cancelar la factura ponía el crédito en 'Cancelado' y dejaba sus abonos
+vivos. Hay $3.250.000 así en producción.
+
+La sección 8 cubre las **tres salidas del modal** que aparece al devolver algo
+con abonos: no devolverlo, dejarlo a favor, o —solo si el pago vino de un pago
+total— reasignarlo a sus otros préstamos. Ojo con lo que verifica: devolver un
+producto **sí** baja la deuda por lo que faltaba de ESE producto; lo que nunca
+puede pasar es que el ABONO la mueva por su cuenta.
+
+> Esta suite fue la primera en ejercitar `saldo_a_favor_sucursal` e
+> `historial_saldo_sucursal`, y ahí se descubrió que el fixture las declaraba con
+> `valor`/`tipo` y sin el índice único — columnas que **no existen** en
+> producción. Ya están corregidas en `esquema-completo.sql`.

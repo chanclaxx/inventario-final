@@ -111,7 +111,7 @@ const getAbonos = async (prestamoId) => {
   const { rows } = await pool.query(`
     SELECT
       ap.id, ap.prestamo_id, ap.fecha, ap.valor, ap.metodo,
-      ap.abono_total_id,
+      ap.abono_total_id, ap.anulado, ap.valor_anulado, ap.motivo_anulacion,
       at.valor_total  AS abono_total_valor,
       at.descripcion  AS abono_total_descripcion,
       u.nombre AS usuario_nombre
@@ -194,6 +194,147 @@ const insertarAbono = async (client, { prestamo_id, valor, metodo, usuario_id })
     RETURNING valor_prestamo, total_abonado
   `, [valor, prestamo_id]);
   return { ...rows[0], abono_id: abono[0].id };
+};
+
+/**
+ * Anula los abonos VIVOS de un préstamo dejando el motivo a la vista, y baja
+ * `total_abonado` por lo que se anuló.
+ *
+ * No se borran: la fila se queda en el estado de cuenta marcada, para que se
+ * pueda leer POR QUÉ la cuenta cambió. Borrarla cuadraría el número y destruiría
+ * la explicación, que es justo lo que hace imposible responderle a un cliente
+ * seis meses después.
+ *
+ * Idempotente: los que ya estaban anulados no se vuelven a contar, así que
+ * llamarla dos veces no baja `total_abonado` dos veces.
+ */
+const anularAbonosDePrestamo = async (client, prestamoId, motivo) => {
+  const { rows } = await client.query(`
+    -- El pendiente se calcula ANTES del UPDATE: RETURNING entrega los valores
+    -- YA modificados, así que leerlo después daría siempre cero.
+    WITH previos AS (
+      SELECT id, (valor - valor_anulado) AS pendiente
+        FROM abonos_prestamo
+       WHERE prestamo_id = $1 AND NOT anulado
+    )
+    UPDATE abonos_prestamo a
+       SET anulado = TRUE, valor_anulado = a.valor,
+           motivo_anulacion = $2, anulado_en = NOW()
+      FROM previos pv
+     WHERE a.id = pv.id
+     RETURNING a.id, pv.pendiente AS valor
+  `, [prestamoId, motivo]);
+
+  const total = rows.reduce((s, r) => s + Number(r.valor), 0);
+  if (total > 0) {
+    await client.query(
+      `UPDATE prestamos SET total_abonado = GREATEST(0, total_abonado - $1) WHERE id = $2`,
+      [total, prestamoId],
+    );
+  }
+  return { anulados: rows.length, total };
+};
+
+/**
+ * Anula abonos hasta cubrir un SOBRANTE, del más nuevo al más viejo.
+ *
+ * Es el caso de la devolución parcial: se devuelven unidades, el préstamo baja
+ * de valor y lo ya abonado queda por encima. Se empieza por el más reciente
+ * porque el sobrante lo produjo el último pago, no el primero.
+ *
+ * Si un abono es MÁS GRANDE que el sobrante no se parte en dos —eso inventaría
+ * una fila que nadie registró—: se deja vivo y el resto se acomoda bajando
+ * `total_abonado`. El préstamo queda exactamente en su nuevo valor, que es lo
+ * que tiene que cuadrar.
+ */
+const anularSobranteDeAbonos = async (client, prestamoId, sobrante, motivo) => {
+  let restante = Number(sobrante);
+  if (restante <= 0) return { anulados: 0, total: 0 };
+
+  const { rows } = await client.query(
+    `SELECT id, (valor - valor_anulado) AS disponible FROM abonos_prestamo
+      WHERE prestamo_id = $1 AND NOT anulado AND (valor - valor_anulado) > 0
+      ORDER BY fecha DESC, id DESC`,
+    [prestamoId],
+  );
+
+  let anulados = 0, total = 0;
+  for (const a of rows) {
+    if (restante <= 0) break;
+    const disponible = Number(a.disponible);
+    const quita = Math.min(disponible, restante);
+    // Si se lleva el abono entero queda ANULADO; si solo se lleva un pedazo, la
+    // fila sigue viva y contando por lo que queda. Así no hay que partir el
+    // abono en dos filas que nadie registró.
+    await client.query(
+      `UPDATE abonos_prestamo
+          SET valor_anulado = valor_anulado + $2,
+              anulado = (valor_anulado + $2) >= valor,
+              motivo_anulacion = $3, anulado_en = NOW()
+        WHERE id = $1`,
+      [a.id, quita, motivo],
+    );
+    restante -= quita; total += quita;
+    if (quita >= disponible) anulados++;
+  }
+
+  await client.query(
+    `UPDATE prestamos SET total_abonado = GREATEST(0, total_abonado - $1) WHERE id = $2`,
+    [total, prestamoId],
+  );
+  return { anulados, total };
+};
+
+/** Anula UN abono puntual (el caso del pago duplicado). Misma regla. */
+const anularAbonoConMotivo = async (client, abonoId, motivo) => {
+  const { rows } = await client.query(`
+    WITH previo AS (
+      SELECT id, prestamo_id, (valor - valor_anulado) AS pendiente
+        FROM abonos_prestamo WHERE id = $1 AND NOT anulado
+    )
+    UPDATE abonos_prestamo a
+       SET anulado = TRUE, valor_anulado = a.valor,
+           motivo_anulacion = $2, anulado_en = NOW()
+      FROM previo pv
+     WHERE a.id = pv.id
+     RETURNING pv.prestamo_id, pv.pendiente AS valor
+  `, [abonoId, motivo]);
+  if (!rows.length) return null;
+  await client.query(
+    `UPDATE prestamos SET total_abonado = GREATEST(0, total_abonado - $1) WHERE id = $2`,
+    [rows[0].valor, rows[0].prestamo_id],
+  );
+  return { prestamo_id: rows[0].prestamo_id, valor: Number(rows[0].valor) };
+};
+
+/**
+ * ¿Ya existe un abono idéntico recién registrado? Es la baranda contra el doble
+ * clic: mismo préstamo, mismo valor, mismo método, dentro de una ventana corta.
+ * Nadie paga dos veces lo mismo en el mismo minuto — cuando pasa, es el
+ * formulario enviándose dos veces, no el cliente pagando dos veces.
+ */
+const buscarAbonoGemelo = async (executor, { prestamo_id, valor, metodo, segundos = 90 }) => {
+  const { rows } = await executor.query(`
+    SELECT id, fecha FROM abonos_prestamo
+     WHERE prestamo_id = $1 AND valor = $2
+       AND COALESCE(metodo, '') = COALESCE($3, '')
+       AND NOT anulado
+       AND fecha > NOW() - ($4 || ' seconds')::interval
+     LIMIT 1
+  `, [prestamo_id, valor, metodo || null, String(segundos)]);
+  return rows[0] || null;
+};
+
+/** El gemelo de un PAGO TOTAL: misma persona, mismo valor, misma ventana. */
+const buscarAbonoTotalGemelo = async (executor, { tipo_persona, persona_id, valor_total, metodo, segundos = 90 }) => {
+  const { rows } = await executor.query(`
+    SELECT id, fecha FROM abonos_totales
+     WHERE tipo_persona = $1 AND persona_id = $2 AND valor_total = $3
+       AND COALESCE(metodo, '') = COALESCE($4, '')
+       AND fecha > NOW() - ($5 || ' seconds')::interval
+     LIMIT 1
+  `, [tipo_persona, persona_id, valor_total, metodo || null, String(segundos)]);
+  return rows[0] || null;
 };
 
 const updateEstado = async (client, id, estado) => {
@@ -758,8 +899,9 @@ const getEstadoCuenta = async (executor, negocioId, tipo, personaId, sucursalId 
   }
 
   const { rows } = await executor.query(`
-    SELECT fecha, tipo, concepto, cargo, abono, referencia_id, anulable,
-           prestamo_id, prestamo_estado, descripcion
+    SELECT fecha, tipo, concepto, cargo, abono, abono_capital, valor_anulado,
+           referencia_id, anulable,
+           prestamo_id, prestamo_estado, descripcion, anulado, anulado_total, motivo_anulacion
     FROM (
 
       -- Préstamos otorgados (aumentan deuda)
@@ -769,11 +911,16 @@ const getEstadoCuenta = async (executor, negocioId, tipo, personaId, sucursalId 
         ('Préstamo — ' || p.nombre_producto)           AS concepto,
         p.valor_prestamo::numeric                      AS cargo,
         NULL::numeric                                  AS abono,
+        NULL::numeric                                  AS abono_capital,
         p.id                                           AS referencia_id,
         false                                          AS anulable,
         NULL::integer                                  AS prestamo_id,
         p.estado::text                                 AS prestamo_estado,
-        NULL::text                                     AS descripcion
+        NULL::text                                     AS descripcion,
+        false                                          AS anulado,
+        false                                          AS anulado_total,
+        0::numeric                                     AS valor_anulado,
+        NULL::text                                     AS motivo_anulacion
       FROM prestamos p
       JOIN sucursales su ON su.id = p.sucursal_id
       WHERE su.negocio_id = $1 AND ${filtroPersona}
@@ -796,11 +943,23 @@ const getEstadoCuenta = async (executor, negocioId, tipo, personaId, sucursalId 
         END                                            AS concepto,
         NULL::numeric                                  AS cargo,
         ap.valor::numeric                              AS abono,
+        -- Un abono ANULADO no baja la deuda. Se sigue mostrando —con su motivo
+        -- al lado— porque la fila es la explicación de por qué la cuenta cuadra
+        -- así. Los dos casos que anulan son la devolución del producto y el
+        -- pago registrado dos veces por un doble clic.
+        (ap.valor - COALESCE(ap.valor_anulado, 0))::numeric AS abono_capital,
         ap.id                                          AS referencia_id,
         true                                           AS anulable,
         ap.prestamo_id                                 AS prestamo_id,
-        NULL::text                                     AS prestamo_estado,
-        NULL::text                                     AS descripcion
+        p.estado::text                                 AS prestamo_estado,
+        NULL::text                                     AS descripcion,
+        -- El primero marca la fila en pantalla en cuanto se anuló ALGO de ella;
+        -- el segundo es el que la saca del saldo corrido. Confundirlos hace que
+        -- una anulación PARCIAL descarte el abono entero.
+        (COALESCE(ap.valor_anulado, 0) > 0)            AS anulado,
+        ap.anulado                                     AS anulado_total,
+        COALESCE(ap.valor_anulado, 0)::numeric         AS valor_anulado,
+        ap.motivo_anulacion                            AS motivo_anulacion
       FROM abonos_prestamo ap
       JOIN prestamos  p  ON p.id  = ap.prestamo_id
       JOIN sucursales su ON su.id = p.sucursal_id
@@ -821,11 +980,33 @@ const getEstadoCuenta = async (executor, negocioId, tipo, personaId, sucursalId 
         'Pago total ' || at.metodo                    AS concepto,
         NULL::numeric                                  AS cargo,
         at.valor_total::numeric                        AS abono,
+        -- Un pago total se muestra ENTERO (es lo que pagó la persona) pero se
+        -- repartió entre varios préstamos, y alguna de esas partes pudo
+        -- anularse — porque su producto se devolvió, o porque el pago entró dos
+        -- veces. Esa porción ya no baja capital. Aquí no se puede excluir la
+        -- fila completa: solo el pedazo anulado.
+        (at.valor_total - COALESCE((
+          SELECT SUM(ap2.valor_anulado)
+          FROM abonos_prestamo ap2
+          WHERE ap2.abono_total_id = at.id
+        ), 0))::numeric                                AS abono_capital,
         at.id                                          AS referencia_id,
         false                                          AS anulable,
         NULL::integer                                  AS prestamo_id,
         NULL::text                                     AS prestamo_estado,
-        NULLIF(BTRIM(at.descripcion), '')              AS descripcion
+        NULLIF(BTRIM(at.descripcion), '')              AS descripcion,
+        -- Un pago total queda marcado solo si TODO lo que repartió se anuló.
+        (NOT EXISTS (SELECT 1 FROM abonos_prestamo ap3
+                      WHERE ap3.abono_total_id = at.id AND NOT ap3.anulado)) AS anulado,
+        (NOT EXISTS (SELECT 1 FROM abonos_prestamo ap5
+                      WHERE ap5.abono_total_id = at.id AND NOT ap5.anulado)) AS anulado_total,
+        -- Cuánto de ESTE pago dejó de contar. Sin este dato la fila muestra
+        -- $8.800.000 y el saldo baja $5.400.000, sin nada que explique la
+        -- diferencia — justo el número sin explicación que se quería evitar.
+        COALESCE((SELECT SUM(ap6.valor_anulado) FROM abonos_prestamo ap6
+                   WHERE ap6.abono_total_id = at.id), 0)::numeric AS valor_anulado,
+        (SELECT MIN(ap4.motivo_anulacion) FROM abonos_prestamo ap4
+          WHERE ap4.abono_total_id = at.id AND ap4.anulado)  AS motivo_anulacion
       FROM abonos_totales at
       JOIN sucursales su ON su.id = at.sucursal_id
       WHERE su.negocio_id = $1
@@ -842,11 +1023,16 @@ const getEstadoCuenta = async (executor, negocioId, tipo, personaId, sucursalId 
         ('Compra de artículo — ' || COALESCE(r.nombre_producto, 'artículo')) AS concepto,
         NULL::numeric                                  AS cargo,
         r.valor_retoma::numeric                        AS abono,
+        NULL::numeric                                  AS abono_capital,
         r.id                                           AS referencia_id,
         true                                           AS anulable,
         NULL::integer                                  AS prestamo_id,
         NULL::text                                     AS prestamo_estado,
-        NULL::text                                     AS descripcion
+        NULL::text                                     AS descripcion,
+        false                                          AS anulado,
+        false                                          AS anulado_total,
+        0::numeric                                     AS valor_anulado,
+        NULL::text                                     AS motivo_anulacion
       FROM retomas r
       LEFT JOIN sucursales su ON su.id = r.sucursal_id
       WHERE r.prestamo_id IS NULL
@@ -889,11 +1075,16 @@ const getEstadoCuenta = async (executor, negocioId, tipo, personaId, sucursalId 
         END                                            AS concepto,
         NULL::numeric                                  AS cargo,
         mm.valor::numeric                              AS abono,
+        NULL::numeric                                  AS abono_capital,
         mm.id                                          AS referencia_id,
         false                                          AS anulable,
         mm.prestamo_id                                 AS prestamo_id,
         NULL::text                                     AS prestamo_estado,
-        NULL::text                                     AS descripcion
+        NULL::text                                     AS descripcion,
+        false                                          AS anulado,
+        false                                          AS anulado_total,
+        0::numeric                                     AS valor_anulado,
+        NULL::text                                     AS motivo_anulacion
       FROM movimientos_mora mm
       JOIN prestamos  p  ON p.id  = mm.prestamo_id
       JOIN sucursales su ON su.id = p.sucursal_id
@@ -1089,4 +1280,6 @@ module.exports = {
   getGarantiasPorPrestamo,
   // abono total
   insertarAbonoTotal, getPrestamoActivosPorPersona, getAbonoTotalById, getAbonosPorTotal,
+  anularAbonosDePrestamo, anularAbonoConMotivo, anularSobranteDeAbonos,
+  buscarAbonoGemelo, buscarAbonoTotalGemelo,
 };

@@ -72,6 +72,25 @@ const registrarAbono = async (negocioId, creditoId, {
   if (credito.estado === 'Cancelado') throw { status: 400, message: 'El crédito está cancelado' };
   if (!(Number(valor) > 0)) throw { status: 400, message: 'El valor del abono debe ser mayor a 0' };
 
+  // Baranda contra el doble clic — la misma que en préstamos. Un abono idéntico
+  // (mismo crédito, mismo valor, mismo método) dentro de la ventana no es un
+  // segundo pago: es el formulario enviándose dos veces. En préstamos eso dejó
+  // 45 pagos duplicados por $106.887.760 antes de que nadie lo notara.
+  const { rows: gemelo } = await pool.query(`
+    SELECT id FROM abonos_credito
+     WHERE credito_id = $1 AND valor = $2
+       AND COALESCE(metodo, '') = COALESCE($3, '')
+       AND NOT anulado
+       AND fecha > NOW() - INTERVAL '90 seconds'
+     LIMIT 1
+  `, [creditoId, valor, metodo || null]);
+  if (gemelo.length) {
+    throw {
+      status: 409,
+      message: 'Este mismo abono ya se registró hace un momento. Si de verdad son dos pagos distintos, espera un minuto y vuelve a intentarlo.',
+    };
+  }
+
   const client = await pool.connect();
   try {
     await client.query('BEGIN');

@@ -75,6 +75,13 @@ CREATE TABLE creditos (
 CREATE TABLE abonos_credito (
   id SERIAL PRIMARY KEY, credito_id INT, usuario_id INT, valor NUMERIC,
   metodo TEXT, notas TEXT, fecha TIMESTAMP DEFAULT NOW()
+,
+  -- Anulación con motivo (20260825_abonos_anulados.sql): un abono puede dejar
+  -- de contar sin desaparecer, y la razón queda escrita.
+  anulado BOOLEAN NOT NULL DEFAULT FALSE,
+  valor_anulado NUMERIC(14,2) NOT NULL DEFAULT 0,
+  motivo_anulacion TEXT,
+  anulado_en TIMESTAMPTZ
 );
 
 CREATE TABLE traslados (

@@ -139,6 +139,27 @@ const aplicarMigraciones = async (client) => {
       ADD COLUMN IF NOT EXISTS valor_acreditado NUMERIC(14,2);
   `);
 
+  // Abonos anulados con motivo — ver migrations/20260825_abonos_anulados.sql
+  // Un abono puede dejar de contar sin desaparecer: cuando su producto se
+  // devuelve, y cuando el mismo pago se registró dos veces por un doble clic.
+  // Borrar la fila cuadraría el número pero borraría la explicación.
+  await migrar(client, 'Abonos anulados con motivo', `
+    ALTER TABLE abonos_prestamo
+      ADD COLUMN IF NOT EXISTS anulado          BOOLEAN NOT NULL DEFAULT FALSE,
+      ADD COLUMN IF NOT EXISTS valor_anulado    NUMERIC(14,2) NOT NULL DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS motivo_anulacion TEXT,
+      ADD COLUMN IF NOT EXISTS anulado_en       TIMESTAMPTZ;
+    ALTER TABLE abonos_credito
+      ADD COLUMN IF NOT EXISTS anulado          BOOLEAN NOT NULL DEFAULT FALSE,
+      ADD COLUMN IF NOT EXISTS valor_anulado    NUMERIC(14,2) NOT NULL DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS motivo_anulacion TEXT,
+      ADD COLUMN IF NOT EXISTS anulado_en       TIMESTAMPTZ;
+    CREATE INDEX IF NOT EXISTS idx_abonos_prestamo_anulado
+      ON abonos_prestamo (prestamo_id) WHERE anulado;
+    CREATE INDEX IF NOT EXISTS idx_abonos_credito_anulado
+      ON abonos_credito (credito_id) WHERE anulado;
+  `);
+
   // Ubicación espacial de productos — ver migrations/20260730_ubicacion_producto.sql
   //
   // 100% aditiva e idempotente. Columnas nullable: un negocio sin la feature no

@@ -279,6 +279,10 @@ const getEstadoCuenta = async (negocioId, clave, sucursalId = null) => {
         cred.estado::text, false, 2
       FROM abonos_credito ac
       JOIN cred ON cred.id = ac.credito_id
+      -- Un abono ANULADO no baja la deuda: su cobro ya no está en la cuenta
+      -- (se canceló la factura, o se devolvieron los productos). Mismo criterio
+      -- que en préstamos.
+      WHERE NOT ac.anulado
 
       UNION ALL
 
@@ -370,9 +374,86 @@ const getEstadoCuenta = async (negocioId, clave, sucursalId = null) => {
   return rows;
 };
 
+/**
+ * Anula los abonos VIVOS de un crédito dejando el motivo a la vista, y baja
+ * `total_abonado`.
+ *
+ * Espejo exacto de lo que hace préstamos al devolver un producto. Cancelar una
+ * factura a crédito ponía el crédito en 'Cancelado' pero dejaba sus abonos
+ * vivos: el cobro salía de la cuenta y los pagos se quedaban restando contra
+ * nada, igual que pasaba en préstamos. Se anulan, no se borran — la fila es la
+ * explicación de por qué la cuenta cuadra así.
+ *
+ * Idempotente: lo ya anulado no se vuelve a descontar.
+ */
+const anularAbonosDeCredito = async (client, creditoId, motivo) => {
+  const { rows } = await client.query(`
+    WITH previos AS (
+      SELECT id, (valor - valor_anulado) AS pendiente
+        FROM abonos_credito WHERE credito_id = $1 AND NOT anulado
+    )
+    UPDATE abonos_credito a
+       SET anulado = TRUE, valor_anulado = a.valor,
+           motivo_anulacion = $2, anulado_en = NOW()
+      FROM previos pv
+     WHERE a.id = pv.id
+     RETURNING pv.pendiente AS valor
+  `, [creditoId, motivo]);
+
+  const total = rows.reduce((s, r) => s + Number(r.valor), 0);
+  if (total > 0) {
+    await client.query(
+      `UPDATE creditos SET total_abonado = GREATEST(0, total_abonado - $1) WHERE id = $2`,
+      [total, creditoId],
+    );
+  }
+  return { anulados: rows.length, total };
+};
+
+/**
+ * Anula abonos hasta cubrir un SOBRANTE, del más nuevo al más viejo. Es el caso
+ * de la devolución PARCIAL de una venta a crédito: el crédito baja de valor y
+ * lo ya pagado puede quedar por encima.
+ */
+const anularSobranteDeAbonosCredito = async (client, creditoId, sobrante, motivo) => {
+  let restante = Number(sobrante);
+  if (restante <= 0) return { anulados: 0, total: 0 };
+
+  const { rows } = await client.query(
+    `SELECT id, (valor - valor_anulado) AS disponible FROM abonos_credito
+      WHERE credito_id = $1 AND NOT anulado AND (valor - valor_anulado) > 0
+      ORDER BY fecha DESC, id DESC`,
+    [creditoId],
+  );
+
+  let anulados = 0, total = 0;
+  for (const a of rows) {
+    if (restante <= 0) break;
+    const disponible = Number(a.disponible);
+    const quita = Math.min(disponible, restante);
+    await client.query(
+      `UPDATE abonos_credito
+          SET valor_anulado = valor_anulado + $2,
+              anulado = (valor_anulado + $2) >= valor,
+              motivo_anulacion = $3, anulado_en = NOW()
+        WHERE id = $1`,
+      [a.id, quita, motivo],
+    );
+    restante -= quita; total += quita;
+    if (quita >= disponible) anulados++;
+  }
+
+  await client.query(
+    `UPDATE creditos SET total_abonado = GREATEST(0, total_abonado - $1) WHERE id = $2`,
+    [total, creditoId],
+  );
+  return { anulados, total };
+};
+
 module.exports = {
   findAll, findByIdYNegocio,
   getAbonos, create, insertarAbono, updateEstado,
   findByFacturaId, reducirValorTotal,
   findPersonaPorClave, getEstadoCuenta,
+  anularAbonosDeCredito, anularSobranteDeAbonosCredito,
 };

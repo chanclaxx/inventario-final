@@ -606,6 +606,19 @@ const registrarSaldoAFavor = async (negocioId, tipo, personaId, monto, sucursalI
 //   'mora_capital'  → primero la mora, resto a capital (orden del Art. 1653 C.C.)
 //   'personalizado' → `valorMora` a mora, el resto a capital
 // Sin plazo, la mora pendiente es 0 y los tres se comportan igual.
+// ─── Baranda contra el doble clic ────────────────────────────────────────────
+//
+// Un doble clic en "guardar" —o un reenvío del formulario cuando la red va
+// lenta— registraba el mismo pago DOS veces. En Cellsite quedaron 45 parejas
+// por $106.887.760, la última del 24-ago-2026: pagos idénticos, mismo usuario,
+// mismo segundo, con pagos totales de id consecutivo. Al cliente se le borraba
+// deuda que sí debía.
+//
+// Nadie paga dos veces exactamente lo mismo en el mismo minuto. Cuando pasa, es
+// el formulario, no el cliente. Se rechaza con un mensaje que explica qué mirar,
+// en vez de dejar entrar la plata y descuadrar la cuenta.
+const VENTANA_DUPLICADO_SEG = 90;
+
 const registrarAbono = async (
   negocioId, prestamoId, valor, metodo, usuarioId, color,
   { modo = 'solo_capital', valorMora = 0, valorInteres = 0 } = {},
@@ -613,6 +626,16 @@ const registrarAbono = async (
   const prestamo = await repo.findByIdYNegocio(prestamoId, negocioId);
   if (!prestamo) throw { status: 404, message: 'Préstamo no encontrado' };
   if (prestamo.estado !== 'Activo') throw { status: 400, message: 'El préstamo no está activo' };
+
+  const gemelo = await repo.buscarAbonoGemelo(pool, {
+    prestamo_id: prestamoId, valor, metodo, segundos: VENTANA_DUPLICADO_SEG,
+  });
+  if (gemelo) {
+    throw {
+      status: 409,
+      message: 'Este mismo abono ya se registró hace un momento. Si de verdad son dos pagos distintos, espera un minuto y vuelve a intentarlo.',
+    };
+  }
 
   const client = await pool.connect();
   try {
@@ -736,7 +759,73 @@ const registrarAbono = async (
 
 // ─── Servicio: devolver préstamo completo ─────────────────────────────────────
 
-const devolverPrestamo = async (negocioId, prestamoId) => {
+/**
+ * Qué hacer con los abonos de un producto que se devuelve.
+ *
+ * Al marcar 'Devuelto' el cobro sale de la cuenta, así que esos pagos se quedan
+ * sin nada que pagar. Antes se quedaban vivos y el estado de cuenta los seguía
+ * restando: la cuenta daba POR DEBAJO de la deuda real —a 23 personas, y a
+ * varias negativa, como si el negocio les debiera plata—.
+ *
+ * Ahora lo decide QUIEN ESTÁ ATENDIENDO, en el momento, porque el sistema no
+ * puede saber qué se acordó con el cliente:
+ *
+ *   · 'anular'        → esa plata no se le devuelve. La deuda queda igual y el
+ *                       extracto sube a coincidir con ella. Es el default.
+ *   · 'saldo_a_favor' → queda como crédito a su nombre.
+ *   · 'reasignar'     → SOLO cuando vino de un PAGO TOTAL: esa porción vuelve al
+ *                       reparto y se aplica a sus otros préstamos. Es lo que el
+ *                       programa habría hecho si el préstamo ya hubiera estado
+ *                       devuelto el día del pago — el vendedor nunca escogió que
+ *                       cayera ahí.
+ *
+ * Los abonos se ANULAN, no se borran: la fila sigue en el extracto con su motivo
+ * a la vista, para que la cuenta se explique sola.
+ */
+const DECISIONES_DEVOLUCION = ['anular', 'saldo_a_favor', 'reasignar'];
+
+const _resolverAbonosDevueltos = async (client, prestamo, negocioId, decision) => {
+  const motivo = decision === 'reasignar'
+    ? `Reasignado: se devolvió ${prestamo.nombre_producto || 'el producto'} y el pago pasó a sus otros préstamos`
+    : decision === 'saldo_a_favor'
+    ? `Anulado: se devolvió ${prestamo.nombre_producto || 'el producto'}; el pago quedó a favor`
+    : `Anulado: se devolvió ${prestamo.nombre_producto || 'el producto'}`;
+
+  const { total } = await repo.anularAbonosDePrestamo(client, prestamo.id, motivo);
+  if (total <= 0) return { abonos_anulados: 0, decision, aplicado: null };
+
+  const tipo      = prestamo.prestatario_id ? 'prestatario' : 'cliente';
+  const personaId = prestamo.prestatario_id || prestamo.cliente_id;
+
+  // 'anular' no mueve un peso más: la plata se queda con el negocio.
+  if (decision === 'anular' || !personaId) {
+    return { abonos_anulados: total, decision: 'anular', aplicado: null };
+  }
+
+  // Las otras dos pasan por el saldo a favor, que es el único registro con
+  // historial propio. 'reasignar' además lo aplica de una a lo que debe.
+  const saldoActual = await repo.getSaldoAFavorPersona(client, tipo, personaId);
+  await repo.setearSaldoAFavorPersona(client, tipo, personaId, saldoActual + total);
+  const saldoSuc = await repo.getSaldoSucursal(client, tipo, personaId, prestamo.sucursal_id);
+  await repo.setSaldoSucursal(client, tipo, personaId, prestamo.sucursal_id, saldoSuc + total);
+  await repo.registrarMovSaldoSucursal(client, {
+    tipo_persona: tipo, persona_id: personaId, sucursal_id: prestamo.sucursal_id,
+    concepto: motivo, monto: total, tipo_movimiento: 'credito',
+    referencia_id: prestamo.id, usuario_id: null,
+  });
+
+  let aplicado = null;
+  if (decision === 'reasignar') {
+    // Si no tiene a qué aplicarlo, se queda a favor en vez de fallar: devolver
+    // el producto no puede tumbarse porque el cliente ya no deba nada.
+    try {
+      aplicado = await _repartirSaldoEnTx(client, negocioId, tipo, personaId);
+    } catch { aplicado = null; }
+  }
+  return { abonos_anulados: total, decision, aplicado };
+};
+
+const devolverPrestamo = async (negocioId, prestamoId, { decision = 'anular' } = {}) => {
   const prestamo = await repo.findByIdYNegocio(prestamoId, negocioId);
   if (!prestamo) throw { status: 404, message: 'Préstamo no encontrado' };
   if (prestamo.estado === 'Devuelto') throw { status: 400, message: 'El préstamo ya fue devuelto' };
@@ -772,6 +861,10 @@ const devolverPrestamo = async (negocioId, prestamoId) => {
     }
 
     await repo.updateEstado(client, prestamoId, 'Devuelto');
+
+    const res = await _resolverAbonosDevueltos(client, prestamo, negocioId, decision);
+    const { abonos_anulados } = res;
+
     await client.query('COMMIT');
 
     return {
@@ -782,6 +875,11 @@ const devolverPrestamo = async (negocioId, prestamoId) => {
       imei:            prestamo.imei              ?? null,
       cantidad:        prestamo.cantidad_prestada ?? null,
       valor_prestamo:  prestamo.valor_prestamo    ?? null,
+      // Para que la pantalla pueda decir qué pasó con la plata ya abonada.
+      total_abonado:   Number(prestamo.total_abonado || 0),
+      abonos_anulados,
+      decision:        res.decision,
+      aplicado:        res.aplicado,
     };
   } catch (err) {
     await client.query('ROLLBACK');
@@ -793,7 +891,7 @@ const devolverPrestamo = async (negocioId, prestamoId) => {
 
 // ─── Servicio: devolución parcial ─────────────────────────────────────────────
 
-const devolverParcial = async (negocioId, prestamoId, cantidad_devuelta) => {
+const devolverParcial = async (negocioId, prestamoId, cantidad_devuelta, { decision = 'anular' } = {}) => {
   const prestamo = await repo.findByIdYNegocio(prestamoId, negocioId);
   if (!prestamo) throw { status: 404, message: 'Préstamo no encontrado' };
   if (prestamo.estado === 'Devuelto') throw { status: 400, message: 'El préstamo ya fue devuelto' };
@@ -822,8 +920,11 @@ const devolverParcial = async (negocioId, prestamoId, cantidad_devuelta) => {
       await repo.ajustarStock(client, prestamo.producto_id, cantidad_devuelta);
     }
 
+    let abonos_anulados = 0;
     if (cantidad_devuelta === cantidadActual) {
+      // Devolvió todo: es el mismo caso que `devolverPrestamo`.
       await repo.updateEstado(client, prestamoId, 'Devuelto');
+      abonos_anulados = (await _resolverAbonosDevueltos(client, prestamo, negocioId, decision)).abonos_anulados;
     } else {
       const valorTotal       = Number(prestamo.valor_prestamo);
       const cantidadRestante = cantidadActual - cantidad_devuelta;
@@ -832,7 +933,20 @@ const devolverParcial = async (negocioId, prestamoId, cantidad_devuelta) => {
 
       await repo.actualizarCantidadYValor(client, prestamoId, cantidadRestante, nuevoValor);
 
+      // Devolver unidades baja el valor del préstamo, y lo ya abonado puede
+      // quedar POR ENCIMA de lo que ahora vale. Antes se marcaba 'Saldado' y el
+      // excedente se quedaba dentro de `total_abonado`: el préstamo mostraba
+      // más pagado de lo que costaba, que es el mismo descuadre que dejan los
+      // pagos duplicados. Ese sobrante se ANULA con su motivo, para que la
+      // cuenta cierre exacta y se pueda leer por qué.
       if (Number(prestamo.total_abonado) >= nuevoValor) {
+        const sobrante = Number(prestamo.total_abonado) - nuevoValor;
+        if (sobrante > 0) {
+          await repo.anularSobranteDeAbonos(
+            client, prestamoId, sobrante,
+            `Anulado: se devolvieron ${cantidad_devuelta} unidad(es) y el préstamo bajó a ${nuevoValor}`,
+          );
+        }
         await repo.updateEstado(client, prestamoId, 'Saldado');
       }
     }
@@ -844,6 +958,8 @@ const devolverParcial = async (negocioId, prestamoId, cantidad_devuelta) => {
       sucursal_id:     prestamo.sucursal_id     ?? null,
       prestatario:     prestamo.prestatario     ?? null,
       nombre_producto: prestamo.nombre_producto ?? null,
+      total_abonado:   Number(prestamo.total_abonado || 0),
+      abonos_anulados,
     };
   } catch (err) {
     await client.query('ROLLBACK');
@@ -1221,6 +1337,86 @@ const retomaDirecta = async (negocioId, {
 
 // ─── Servicio: aplicar saldo a favor a préstamos activos (FIFO) ───────────────
 
+/**
+ * Reparte el saldo a favor de una persona sobre sus préstamos activos, DENTRO
+ * de una transacción que abre quien llama.
+ *
+ * Se extrajo de `aplicarSaldoAPrestamos` para que el aviso de devoluciones con
+ * abono pueda acreditar y aplicar en UNA sola transacción. Duplicar el reparto
+ * habría sido peor que el refactor: son dos caminos moviendo la misma plata, y
+ * el primer arreglo que se aplicara a uno solo dejaría al otro mintiendo.
+ */
+const _repartirSaldoEnTx = async (client, negocioId, tipo, personaId) => {
+  let saldoRestante = await repo.getSaldoAFavorPersona(client, tipo, personaId);
+  if (saldoRestante <= 0) {
+    throw { status: 400, message: 'La persona no tiene saldo a favor disponible' };
+  }
+
+  const activos = await repo.findActivosPorPersona(client, tipo, personaId, negocioId);
+  if (!activos.length) {
+    throw { status: 400, message: 'No hay préstamos activos a los que aplicar el saldo' };
+  }
+
+  const prestamosAfectados = [];
+  const deduccionesPorSucursal = {};
+
+  for (const prestamo of activos) {
+    if (saldoRestante <= 0) break;
+
+    const saldoPendiente = Number(prestamo.saldo_pendiente);
+    if (saldoPendiente <= 0) continue;
+
+    const montoAbono = Math.min(saldoRestante, saldoPendiente);
+    const resultado  = await repo.insertarAbono(client, {
+      prestamo_id: prestamo.id,
+      valor:       montoAbono,
+      metodo:      'Saldo a favor',
+      usuario_id:  null,
+    });
+    saldoRestante -= montoAbono;
+
+    const sid = prestamo.sucursal_id;
+    deduccionesPorSucursal[sid] = (deduccionesPorSucursal[sid] || 0) + montoAbono;
+
+    let saldado    = false;
+    let factura_id = null;
+
+    if (Number(resultado.total_abonado) >= Number(resultado.valor_prestamo)) {
+      saldado = true;
+      await repo.updateEstado(client, prestamo.id, 'Saldado');
+      factura_id = await _crearFacturaDesdePrestamo(client, prestamo, 'Saldo a favor', negocioId);
+    }
+
+    prestamosAfectados.push({
+      id:             prestamo.id,
+      nombre:         prestamo.nombre_producto,
+      abono_aplicado: montoAbono,
+      saldado,
+      factura_id,
+    });
+  }
+
+  await repo.setearSaldoAFavorPersona(client, tipo, personaId, saldoRestante);
+
+  for (const [sucId, totalDeducido] of Object.entries(deduccionesPorSucursal)) {
+    const sucursalId = Number(sucId);
+    const saldoSuc   = await repo.getSaldoSucursal(client, tipo, personaId, sucursalId);
+    await repo.setSaldoSucursal(client, tipo, personaId, sucursalId, Math.max(0, saldoSuc - totalDeducido));
+    await repo.registrarMovSaldoSucursal(client, {
+      tipo_persona:    tipo,
+      persona_id:      personaId,
+      sucursal_id:     sucursalId,
+      concepto:        'Saldo aplicado a préstamos activos',
+      monto:           totalDeducido,
+      tipo_movimiento: 'debito',
+      referencia_id:   null,
+      usuario_id:      null,
+    });
+  }
+
+  return { prestamos_afectados: prestamosAfectados, saldo_restante: saldoRestante };
+};
+
 const aplicarSaldoAPrestamos = async (negocioId, tipo, personaId) => {
   if (tipo === 'prestatario') {
     await _verificarPrestatario(personaId, negocioId);
@@ -1231,77 +1427,9 @@ const aplicarSaldoAPrestamos = async (negocioId, tipo, personaId) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-
-    let saldoRestante = await repo.getSaldoAFavorPersona(client, tipo, personaId);
-    if (saldoRestante <= 0) {
-      throw { status: 400, message: 'La persona no tiene saldo a favor disponible' };
-    }
-
-    const activos = await repo.findActivosPorPersona(client, tipo, personaId, negocioId);
-    if (!activos.length) {
-      throw { status: 400, message: 'No hay préstamos activos a los que aplicar el saldo' };
-    }
-
-    const prestamosAfectados = [];
-    const deduccionesPorSucursal = {}; // { sucursalId: totalDeducido }
-
-    for (const prestamo of activos) {
-      if (saldoRestante <= 0) break;
-
-      const saldoPendiente = Number(prestamo.saldo_pendiente);
-      if (saldoPendiente <= 0) continue;
-
-      const montoAbono = Math.min(saldoRestante, saldoPendiente);
-      const resultado  = await repo.insertarAbono(client, {
-        prestamo_id: prestamo.id,
-        valor:       montoAbono,
-        metodo:      'Saldo a favor',
-        usuario_id:  null,
-      });
-      saldoRestante -= montoAbono;
-
-      const sid = prestamo.sucursal_id;
-      deduccionesPorSucursal[sid] = (deduccionesPorSucursal[sid] || 0) + montoAbono;
-
-      let saldado    = false;
-      let factura_id = null;
-
-      if (Number(resultado.total_abonado) >= Number(resultado.valor_prestamo)) {
-        saldado = true;
-        await repo.updateEstado(client, prestamo.id, 'Saldado');
-        factura_id = await _crearFacturaDesdePrestamo(client, prestamo, 'Saldo a favor', negocioId);
-      }
-
-      prestamosAfectados.push({
-        id:           prestamo.id,
-        nombre:       prestamo.nombre_producto,
-        abono_aplicado: montoAbono,
-        saldado,
-        factura_id,
-      });
-    }
-
-    await repo.setearSaldoAFavorPersona(client, tipo, personaId, saldoRestante);
-
-    for (const [sucId, totalDeducido] of Object.entries(deduccionesPorSucursal)) {
-      const sucursalId = Number(sucId);
-      const saldoSuc   = await repo.getSaldoSucursal(client, tipo, personaId, sucursalId);
-      const nuevoSuc   = Math.max(0, saldoSuc - totalDeducido);
-      await repo.setSaldoSucursal(client, tipo, personaId, sucursalId, nuevoSuc);
-      await repo.registrarMovSaldoSucursal(client, {
-        tipo_persona:    tipo,
-        persona_id:      personaId,
-        sucursal_id:     sucursalId,
-        concepto:        'Saldo aplicado a préstamos activos',
-        monto:           totalDeducido,
-        tipo_movimiento: 'debito',
-        referencia_id:   null,
-        usuario_id:      null,
-      });
-    }
-
+    const resultado = await _repartirSaldoEnTx(client, negocioId, tipo, personaId);
     await client.query('COMMIT');
-    return { prestamos_afectados: prestamosAfectados, saldo_restante: saldoRestante };
+    return resultado;
   } catch (err) {
     await client.query('ROLLBACK');
     throw err;
@@ -1571,10 +1699,23 @@ const getEstadoCuenta = async (negocioId, tipo, personaId, sucursalId = null) =>
   return rows.map((row) => {
     const cargo = Number(row.cargo || 0);
     const abono = Number(row.abono || 0);
-    const esDevuelto   = row.tipo === 'prestamo' && row.prestamo_estado === 'Devuelto';
-    const fueraDeSaldo = INFORMATIVOS.has(row.tipo) || esDevuelto;
+    // Cuánto de este abono baja realmente el capital. Casi siempre es el abono
+    // entero; lo calcula el SQL porque hay un caso que no se puede resolver
+    // fila por fila: un pago total repartido entre varios préstamos donde uno
+    // quedó devuelto — ahí solo una PARTE del pago sigue bajando la deuda.
+    const abonoCapital = row.abono_capital != null ? Number(row.abono_capital) : abono;
+    // Fuera del saldo, por tres razones distintas:
+    //   · el cargo de un préstamo DEVUELTO ya no se debe;
+    //   · un abono ANULADO no paga nada (producto devuelto, o pago duplicado);
+    //   · los informativos nunca movieron capital.
+    // Antes la condición del devuelto pedía `tipo === 'prestamo'`, así que
+    // sacaba el cargo y dejaba el abono restando: la cuenta quedaba por debajo
+    // de la deuda real —a TIENDA, de Cellsite, por $1.180.000—. La fila del
+    // abono NO desaparece: se muestra marcada y con el motivo al lado.
+    const esDevuelto   = row.prestamo_estado === 'Devuelto';
+    const fueraDeSaldo = INFORMATIVOS.has(row.tipo) || esDevuelto || row.anulado_total === true;
     if (!fueraDeSaldo) {
-      saldoDeuda = saldoDeuda + cargo - abono;
+      saldoDeuda = saldoDeuda + cargo - abonoCapital;
     }
     return {
       fecha:           row.fecha,
@@ -1587,6 +1728,15 @@ const getEstadoCuenta = async (negocioId, tipo, personaId, sucursalId = null) =>
       prestamo_id:     row.prestamo_id ? Number(row.prestamo_id) : null,
       anulable:        row.anulable,
       prestamo_estado: row.prestamo_estado || null,
+      // Por qué este movimiento no cuenta. Es lo que la pantalla muestra al
+      // lado para que la cuenta se explique sola.
+      anulado:         row.anulado === true,
+      anulado_total:   row.anulado_total === true,
+      // Cuánto de este movimiento dejó de contar. En un pago total repartido
+      // puede ser solo una PARTE: la pantalla lo necesita para explicar por qué
+      // el saldo bajó menos que el monto que muestra la fila.
+      valor_anulado:   Number(row.valor_anulado || 0),
+      motivo_anulacion: row.motivo_anulacion || null,
       // Nota que escribió el usuario (hoy solo la del pago total). Va aparte
       // del concepto porque la pantalla parsea el concepto para precargar el
       // modal de edición.
@@ -1721,6 +1871,19 @@ const registrarAbonoTotal = async (
 ) => {
   if (tipo === 'prestatario') await _verificarPrestatario(personaId, negocioId);
   else await _verificarCliente(personaId, negocioId);
+
+  // Misma baranda que en el abono individual: dos pagos totales idénticos en el
+  // mismo minuto son un doble clic, y cada uno reparte por su cuenta.
+  const gemeloTotal = await repo.buscarAbonoTotalGemelo(pool, {
+    tipo_persona: tipo, persona_id: personaId, valor_total: valorTotal,
+    metodo, segundos: VENTANA_DUPLICADO_SEG,
+  });
+  if (gemeloTotal) {
+    throw {
+      status: 409,
+      message: 'Este mismo pago total ya se registró hace un momento. Revisa el estado de cuenta antes de volver a intentarlo.',
+    };
+  }
 
   const prestamosActivos = await repo.getPrestamoActivosPorPersona(pool, tipo, personaId, negocioId, sucursalId);
   if (!prestamosActivos.length) throw { status: 400, message: 'Esta persona no tiene préstamos activos en esta sucursal' };

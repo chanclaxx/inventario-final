@@ -54,6 +54,26 @@ const registrarMovimiento = async (negocioId, acreedorId, datos) => {
     }
   }
 
+  // Baranda contra el doble clic, igual que en préstamos y créditos: un
+  // movimiento idéntico (mismo acreedor, mismo tipo, mismo valor, mismo cargo)
+  // dentro de la ventana es el formulario enviándose dos veces, no un segundo
+  // pago. Aquí duele igual: duplicar un abono le borra al proveedor una deuda
+  // que el negocio sí tiene.
+  const { rows: gemelo } = await pool.query(`
+    SELECT id FROM movimientos_acreedor
+     WHERE acreedor_id = $1 AND tipo = $2 AND valor = $3
+       AND COALESCE(cargo_id, -1) = COALESCE($4, -1)
+       AND COALESCE(metodo, '')   = COALESCE($5, '')
+       AND fecha > NOW() - INTERVAL '90 seconds'
+     LIMIT 1
+  `, [acreedorId, datos.tipo, datos.valor, datos.cargo_id ?? null, datos.metodo || null]);
+  if (gemelo.length) {
+    throw {
+      status: 409,
+      message: 'Este mismo movimiento ya se registró hace un momento. Revisa el estado de cuenta del acreedor antes de volver a intentarlo.',
+    };
+  }
+
   return repo.insertarMovimiento({ ...datos, acreedor_id: acreedorId });
 };
 

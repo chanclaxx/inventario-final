@@ -159,8 +159,23 @@ export function EstadoDeCuenta({ tipo, personaId, onEditarAbonoTotal }) {
     }
   };
 
-  const getEtiqueta = (mov) =>
-    (mov.tipo === 'prestamo' && mov.prestamo_estado === 'Devuelto') ? 'Devuelto' : null;
+  // La etiqueta explica por qué el movimiento no mueve el saldo, o por qué lo
+  // mueve MENOS de lo que dice su monto.
+  //
+  // El caso que obliga a distinguir es el PAGO TOTAL: la persona pagó una suma
+  // y el programa la repartió entre varios préstamos. Si uno de ellos se
+  // devolvió, solo esa PARTE deja de contar — la fila sigue mostrando el pago
+  // completo (es lo que pagó) pero el saldo baja menos. Sin decirlo, quedan dos
+  // números que no cuadran y nada que los explique.
+  const getEtiqueta = (mov) => {
+    const anuladoParcial = Number(mov.valor_anulado || 0);
+    if (mov.anulado_total) return mov.motivo_anulacion || 'Anulado';
+    if (anuladoParcial > 0) {
+      return `${formatCOP(anuladoParcial)} de este pago no cuenta — ${mov.motivo_anulacion || 'anulado'}`;
+    }
+    if (mov.prestamo_estado === 'Devuelto') return 'Devuelto';
+    return null;
+  };
 
   const getAcciones = (mov) => {
     const acciones = [];
