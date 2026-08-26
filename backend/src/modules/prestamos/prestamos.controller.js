@@ -123,6 +123,9 @@ const registrarAbono = async (req, res, next) => {
         modo: modo || 'mora_capital',
         valorMora:    valor_mora    || 0,
         valorInteres: valor_interes || 0,
+        // El aislamiento se decide con la sucursal ya resuelta por el
+        // middleware, nunca con lo que mande el cliente.
+        sucursalId:   req.sucursal_id,
       },
     );
     audit.registrar(req.user.negocio_id, req.user.id, data.saldado ? 'Préstamo saldado con abono' : 'Abono a préstamo', 'prestamos', Number(req.params.id),
@@ -432,7 +435,7 @@ const anularAbono = async (req, res, next) => {
       return res.status(400).json({ ok: false, error: 'IDs inválidos' });
     }
 
-    const data = await service.anularAbono(req.user.negocio_id, prestamoId, abonoId, retomaId);
+    const data = await service.anularAbono(req.user.negocio_id, prestamoId, abonoId, retomaId, req.sucursal_id);
     audit.registrar(req.user.negocio_id, req.user.id, 'Abono de préstamo anulado', 'prestamos', prestamoId, {
       abono_id:  abonoId,
       retoma_id: retomaId,
@@ -595,7 +598,7 @@ const modificarAbonoTotal = async (req, res, next) => {
       return res.status(400).json({ ok: false, error: 'El valor total debe ser mayor a 0' });
     }
     const data = await service.modificarAbonoTotal(
-      req.user.negocio_id, abonoTotalId, Number(valor_total), metodo, descripcion
+      req.user.negocio_id, abonoTotalId, Number(valor_total), metodo, descripcion, req.sucursal_id
     );
     audit.registrar(req.user.negocio_id, req.user.id, 'Abono total modificado', 'prestamos', Number(abonoTotalId) || null, {
       monto:       Number(valor_total),
@@ -678,6 +681,31 @@ const cobrarMora = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+
+// ── Anular un pago total completo ───────────────────────────────────────────
+// Un pedazo suelto no se puede anular (dejaría el reparto a medias); el pago
+// entero sí. Es la salida cuando se digita mal el monto o se registra en la
+// persona equivocada.
+const anularAbonoTotal = async (req, res, next) => {
+  try {
+    const data = await service.anularAbonoTotal(
+      req.user.negocio_id, Number(req.params.abonoTotalId),
+      { motivo: req.body?.motivo, usuario_id: req.user.id, sucursal_id: req.sucursal_id },
+    );
+    audit.registrar(req.user.negocio_id, req.user.id, 'Pago total anulado', 'prestamos',
+      data.abono_total_id, {
+        valor: data.valor, motivo: data.motivo,
+        pedazos: data.pedazos, prestamos_reabiertos: data.reabiertos,
+      });
+    res.json({
+      ok: true, data,
+      message: data.reabiertos > 0
+        ? `Pago total anulado. ${data.reabiertos} préstamo(s) volvieron a quedar activos.`
+        : 'Pago total anulado',
+    });
+  } catch (err) { next(err); }
+};
+
 module.exports = {
   getPrestamos, getPrestamoById,
   crearPrestamo, crearPrestamos,
@@ -692,5 +720,5 @@ module.exports = {
   anularAbono, getRetomasDirectas, anularRetomaDirecta,
   getEstadoCuenta, crearAjusteDeuda, editarValorPrestamo,
   getSaldoSucursal, getHistorialSaldoSucursal,
-  registrarAbonoTotal, modificarAbonoTotal,
+  registrarAbonoTotal, modificarAbonoTotal, anularAbonoTotal,
 };

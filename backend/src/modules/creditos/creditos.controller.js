@@ -35,6 +35,9 @@ const registrarAbono = async (req, res, next) => {
     const data = await service.registrarAbono(req.user.negocio_id, Number(req.params.id), {
       ...req.body,
       usuario_id: req.user.id,
+      // El aislamiento se decide en el backend con la sucursal ya resuelta por
+      // el middleware, nunca con lo que mande el cliente.
+      sucursal_id: req.sucursal_id,
     });
     audit.registrar(req.user.negocio_id, req.user.id, 'Abono a crédito', 'creditos', Number(req.params.id), {
       sucursal_id: data.sucursal_id ?? null,
@@ -235,7 +238,7 @@ const registrarAbonoTotal = async (req, res, next) => {
 const anularAbono = async (req, res, next) => {
   try {
     const data = await service.anularAbonoCredito(req.user.negocio_id, Number(req.params.abonoId), {
-      motivo: req.body?.motivo, usuario_id: req.user.id,
+      motivo: req.body?.motivo, usuario_id: req.user.id, sucursal_id: req.sucursal_id,
     });
     audit.registrar(req.user.negocio_id, req.user.id, 'Abono de crédito anulado', 'creditos',
       data.credito_id, {
@@ -252,8 +255,32 @@ const anularAbono = async (req, res, next) => {
 };
 
 
+
+// ── Anular un pago total completo ───────────────────────────────────────────
+// Un pedazo suelto no se puede anular; el pago entero sí. Es la salida cuando
+// alguien se equivoca digitando el monto o lo registra en la persona que no era.
+const anularAbonoTotal = async (req, res, next) => {
+  try {
+    const data = await service.anularAbonoTotalCredito(
+      req.user.negocio_id, Number(req.params.abonoTotalId),
+      { motivo: req.body?.motivo, usuario_id: req.user.id, sucursal_id: req.sucursal_id },
+    );
+    audit.registrar(req.user.negocio_id, req.user.id, 'Pago total a créditos anulado', 'creditos',
+      data.abono_total_id, {
+        valor: data.valor, motivo: data.motivo,
+        pedazos: data.pedazos, creditos_reabiertos: data.reabiertos,
+      });
+    res.json({
+      ok: true, data,
+      message: data.reabiertos > 0
+        ? `Pago total anulado. ${data.reabiertos} crédito(s) volvieron a quedar activos.`
+        : 'Pago total anulado',
+    });
+  } catch (err) { next(err); }
+};
+
 module.exports = {
-  registrarAbonoTotal, anularAbono,
+  registrarAbonoTotal, anularAbono, anularAbonoTotal,
   getCreditos, getCreditoById, registrarAbono, saldarCredito, cancelarCredito,
   getEstadoCuenta, exportarPdfEstadoCuenta,
   getDocumento, exportarPdfAvisoMora, exportarPdfPazYSalvo,

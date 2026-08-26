@@ -83,3 +83,9 @@ export const registrarAbonoTotalCredito = (cliente_id, valor_total, metodo, desc
 // razón, y por eso el estado de cuenta puede explicar por qué cambió la cuenta.
 export const anularAbonoCredito = (abonoId, motivo) =>
   api.patch(`/creditos/abonos/${abonoId}/anular`, { motivo });
+
+// Anular el pago total ENTERO. Un pedazo suelto no se puede anular (dejaría el
+// reparto a medias); el pago completo sí — es la salida cuando se digita mal el
+// monto o se registra en la persona equivocada.
+export const anularAbonoTotalCredito = (abonoTotalId, motivo) =>
+  api.patch(`/creditos/abonos-totales/${abonoTotalId}/anular`, { motivo });

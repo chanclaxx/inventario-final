@@ -253,7 +253,7 @@ const getEstadoCuenta = async (negocioId, clave, sucursalId = null) => {
     SELECT fecha, tipo, concepto, cargo, abono, referencia_id,
            credito_id, factura_numero, credito_estado, anulable, orden,
            abono_total_id, pago_total_valor, descripcion,
-           anulado, motivo_anulacion, es_pago_total, detalle
+           anulado, motivo_anulacion, es_pago_total, detalle, valor_anulado
     FROM (
 
       -- 1. Factura a crédito otorgada (aumenta la deuda) — valor ORIGINAL
@@ -276,7 +276,8 @@ const getEstadoCuenta = async (negocioId, clave, sucursalId = null) => {
         false                                           AS anulado,
         NULL::text                                      AS motivo_anulacion,
         false                                           AS es_pago_total,
-        NULL::jsonb                                     AS detalle
+        NULL::jsonb                                     AS detalle,
+        0::numeric                                      AS valor_anulado
       FROM cred
 
       UNION ALL
@@ -289,7 +290,7 @@ const getEstadoCuenta = async (negocioId, clave, sucursalId = null) => {
         cred.id, cred.id, COALESCE(cred.factura_numero, cred.factura_id),
         cred.estado::text, false, 1,
         NULL::integer, NULL::numeric, NULL::text, false, NULL::text,
-        false, NULL::jsonb
+        false, NULL::jsonb, 0::numeric
       FROM cred
       WHERE cred.cuota_inicial > 0
 
@@ -359,7 +360,15 @@ const getEstadoCuenta = async (negocioId, clave, sucursalId = null) => {
               'motivo_anulacion', ac.motivo_anulacion
             ) ORDER BY cred.creado_en, cred.id
           )
-        END
+        END,
+        -- Cuanto de este movimiento dejo de contar. Se SUMA de la columna, que
+        -- es el dato de verdad, y cubre los dos casos de una sola vez: el abono
+        -- suelto anulado en PARTE (una devolucion parcial baja el credito por
+        -- debajo de lo ya pagado y ese sobrante se anula) y el pago total con
+        -- un pedazo anulado. Derivarlo del reparto dejaba el primer caso en
+        -- cero, y esos pesos seguian restando en el extracto sin restar en la
+        -- deuda: el descuadre exacto que esta sesion vino a cerrar.
+        COALESCE(SUM(ac.valor_anulado), 0)::numeric
       FROM abonos_credito ac
       JOIN cred ON cred.id = ac.credito_id
       LEFT JOIN abonos_totales at ON at.id = ac.abono_total_id
@@ -380,7 +389,7 @@ const getEstadoCuenta = async (negocioId, clave, sucursalId = null) => {
         d.id, cred.id, COALESCE(cred.factura_numero, cred.factura_id),
         cred.estado::text, false, 3,
         NULL::integer, NULL::numeric, NULL::text, false, NULL::text,
-        false, NULL::jsonb
+        false, NULL::jsonb, 0::numeric
       FROM dev_aud d
       JOIN cred ON cred.id = d.credito_id
 
@@ -396,7 +405,7 @@ const getEstadoCuenta = async (negocioId, clave, sucursalId = null) => {
         cred.id, cred.id, COALESCE(cred.factura_numero, cred.factura_id),
         cred.estado::text, false, 4,
         NULL::integer, NULL::numeric, NULL::text, false, NULL::text,
-        false, NULL::jsonb
+        false, NULL::jsonb, 0::numeric
       FROM cred
       LEFT JOIN LATERAL (
         SELECT SUM(d.valor) AS total FROM dev_aud d WHERE d.credito_id = cred.id
@@ -415,7 +424,7 @@ const getEstadoCuenta = async (negocioId, clave, sucursalId = null) => {
         cred.id, cred.id, COALESCE(cred.factura_numero, cred.factura_id),
         cred.estado::text, false, 5,
         NULL::integer, NULL::numeric, NULL::text, false, NULL::text,
-        false, NULL::jsonb
+        false, NULL::jsonb, 0::numeric
       FROM cred
       LEFT JOIN LATERAL (
         SELECT MAX(ac.fecha) AS fecha FROM abonos_credito ac WHERE ac.credito_id = cred.id
@@ -456,7 +465,7 @@ const getEstadoCuenta = async (negocioId, clave, sucursalId = null) => {
         mm.id, cred.id, COALESCE(cred.factura_numero, cred.factura_id),
         cred.estado::text, false, 6,
         NULL::integer, NULL::numeric, NULL::text, false, NULL::text,
-        false, NULL::jsonb
+        false, NULL::jsonb, 0::numeric
       FROM movimientos_mora mm
       JOIN cred ON cred.id = mm.credito_id
       WHERE NOT mm.anulado
@@ -633,6 +642,36 @@ const anularAbonoCredito = async (client, abonoId, creditoId, motivo) => {
   return { valor };
 };
 
+// ── Un pago total de creditos, con sus pedazos ───────────────────────────────
+//
+// Se acota por NEGOCIO y ademas se devuelve la sucursal del pago, para que el
+// service pueda exigir que quien lo anula este parado en esa misma sede.
+const findAbonoTotalCreditoById = async (executor, abonoTotalId, negocioId) => {
+  const { rows } = await executor.query(`
+    SELECT at.*, su.negocio_id
+      FROM abonos_totales at
+      JOIN sucursales su ON su.id = at.sucursal_id
+     WHERE at.id = $1
+       AND su.negocio_id = $2
+       AND COALESCE(at.destino, 'prestamo') = 'credito'
+  `, [abonoTotalId, negocioId]);
+  return rows[0] || null;
+};
+
+// Los pedazos vigentes de un pago total. Los ya anulados no se devuelven: no
+// hay nada que anular en ellos y volver a restarlos bajaria la deuda dos veces.
+const findPedazosDeAbonoTotalCredito = async (executor, abonoTotalId) => {
+  const { rows } = await executor.query(`
+    SELECT ac.id, ac.credito_id, ac.valor::numeric AS valor, ac.anulado,
+           c.sucursal_id, c.estado AS credito_estado
+      FROM abonos_credito ac
+      JOIN creditos c ON c.id = ac.credito_id
+     WHERE ac.abono_total_id = $1
+     ORDER BY c.creado_en, c.id
+  `, [abonoTotalId]);
+  return rows;
+};
+
 const findAbonoCreditoById = async (executor, abonoId, negocioId) => {
   const { rows } = await executor.query(`
     SELECT ac.*, c.estado AS credito_estado, c.sucursal_id, c.factura_id,
@@ -653,4 +692,5 @@ module.exports = {
   anularAbonosDeCredito, anularSobranteDeAbonosCredito,
   findCreditosActivosDeCliente, insertarAbonoTotalCredito, insertarAbonoDeTotal,
   buscarAbonoTotalCreditoGemelo, anularAbonoCredito, findAbonoCreditoById,
+  findAbonoTotalCreditoById, findPedazosDeAbonoTotalCredito,
 };

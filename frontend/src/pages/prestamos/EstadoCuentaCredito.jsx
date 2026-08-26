@@ -1,9 +1,13 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getEstadoCuentaCredito, anularAbonoCredito } from '../../api/creditos.api';
+import {
+  getEstadoCuentaCredito, anularAbonoCredito, anularAbonoTotalCredito,
+} from '../../api/creditos.api';
 import { EstadoCuentaBase } from '../../components/EstadoCuenta/EstadoCuentaBase';
 import { formatCOP } from '../../utils/formatters';
-import { FileText, TrendingDown, RotateCcw, Wallet, AlertTriangle, HandCoins } from 'lucide-react';
+import {
+  FileText, TrendingDown, RotateCcw, Wallet, AlertTriangle, HandCoins, XCircle,
+} from 'lucide-react';
 
 /**
  * Estado de cuenta de un cliente a crédito.
@@ -109,8 +113,13 @@ export function EstadoCuentaCredito({ clave }) {
     staleTime: 30_000,
   });
 
+  // Un pago total se anula ENTERO y un abono suelto de a uno. Es la misma
+  // pantalla y el mismo motivo obligatorio; lo único que cambia es a qué
+  // endpoint va, y eso lo decide el propio movimiento.
   const anular = useMutation({
-    mutationFn: () => anularAbonoCredito(anulando.referencia_id, motivo.trim()),
+    mutationFn: () => (anulando.es_pago_total
+      ? anularAbonoTotalCredito(anulando.referencia_id, motivo.trim())
+      : anularAbonoCredito(anulando.referencia_id, motivo.trim())),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['estado-cuenta-credito'], exact: false });
       queryClient.invalidateQueries({ queryKey: ['creditos'], exact: false });
@@ -127,12 +136,34 @@ export function EstadoCuentaCredito({ clave }) {
   // Sin la etiqueta, el usuario ve un movimiento que no suma y no sabe por qué:
   // es exactamente el descuadre que se corrigió en préstamos.
   const getEtiqueta = (mov) => {
-    if (mov.anulado) return mov.motivo_anulacion || 'Anulado';
+    const parcial = Number(mov.valor_anulado || 0);
+    // Anulado del TODO vs. anulado en PARTE son cosas distintas y el usuario
+    // tiene que poder distinguirlas: en el segundo caso la fila muestra el
+    // monto completo pero el saldo baja menos, y sin decir cuánto quedan dos
+    // números que no cuadran y nada que los explique.
+    if (mov.anulado_total) return mov.motivo_anulacion || 'Anulado';
+    if (parcial > 0) {
+      return `${formatCOP(parcial)} de este pago no cuenta — ${mov.motivo_anulacion || 'anulado'}`;
+    }
     if (mov.credito_estado === 'Cancelado') return 'Anulada';
     return null;
   };
 
+  // El botón de anular de la fila se rige por `anulable`, que para un pago total
+  // es false a propósito: anular medio reparto deja la cuenta a medias. El pago
+  // completo se anula con su propia acción, para que quede claro qué se deshace.
+  const getAcciones = (mov) => (mov.es_pago_total && !mov.anulado
+    ? [{
+        id: 'anular-pago-total',
+        Icn: XCircle,
+        title: 'Anular el pago total completo',
+        hoverClass: 'hover:text-red-400',
+        onClick: (m) => { setAnulando(m); setMotivo(''); setError(''); },
+      }]
+    : []);
+
   const puedeConfirmar = motivo.trim().length >= MIN_MOTIVO && !anular.isPending;
+  const esPagoTotal = anulando?.es_pago_total === true;
 
   return (
     <EstadoCuentaBase
@@ -141,6 +172,7 @@ export function EstadoCuentaCredito({ clave }) {
       tipoConfig={TIPO_CONFIG_CREDITO}
       onAnular={(mov) => { setAnulando(mov); setMotivo(''); setError(''); }}
       getEtiqueta={getEtiqueta}
+      getAcciones={getAcciones}
       labelIzquierda="← Cliente"
       labelDerecha="Negocio →"
       vacioTexto="Sin movimientos de crédito registrados">
@@ -150,7 +182,9 @@ export function EstadoCuentaCredito({ clave }) {
       {anulando && (
         <div className="fixed inset-0 bg-black/40 flex items-end sm:items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl w-full max-w-sm p-5 flex flex-col gap-4 shadow-xl">
-            <p className="text-sm font-semibold text-gray-800">¿Anular este abono?</p>
+            <p className="text-sm font-semibold text-gray-800">
+              {esPagoTotal ? '¿Anular este pago total?' : '¿Anular este abono?'}
+            </p>
 
             <div className="bg-gray-50 rounded-xl px-3 py-2">
               <p className="text-xs text-gray-500">{anulando.concepto}</p>
@@ -160,9 +194,29 @@ export function EstadoCuentaCredito({ clave }) {
             </div>
 
             <p className="text-xs text-gray-500">
-              El abono no se borra: queda marcado con el motivo y deja de bajar la
-              deuda. Si el crédito estaba saldado, vuelve a quedar activo.
+              {esPagoTotal
+                ? `Se deshace el pago completo y sus ${(anulando.detalle || []).length} porciones,
+                   todo de una vez. No se borra: queda marcado con el motivo. Los créditos
+                   que estaban saldados vuelven a quedar activos.`
+                : `El abono no se borra: queda marcado con el motivo y deja de bajar la
+                   deuda. Si el crédito estaba saldado, vuelve a quedar activo.`}
             </p>
+
+            {/* A qué facturas se le va a quitar */}
+            {esPagoTotal && (anulando.detalle || []).length > 0 && (
+              <div className="bg-red-50 border border-red-100 rounded-xl px-3 py-2 flex flex-col gap-0.5">
+                {(anulando.detalle || []).map((d) => (
+                  <div key={d.id} className="flex items-center justify-between">
+                    <span className="text-[11px] text-red-600">
+                      factura #{String(d.factura ?? '').padStart(6, '0')}
+                    </span>
+                    <span className="text-[11px] font-semibold text-red-700">
+                      −{formatCOP(d.valor)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
 
             <div className="flex flex-col gap-1">
               <label className="text-xs font-medium text-gray-700">
@@ -194,7 +248,7 @@ export function EstadoCuentaCredito({ clave }) {
                 disabled={!puedeConfirmar}
                 className="flex-1 py-2 rounded-xl text-sm font-medium text-white bg-red-500
                   hover:bg-red-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
-                {anular.isPending ? 'Anulando…' : 'Anular abono'}
+                {anular.isPending ? 'Anulando…' : (esPagoTotal ? 'Anular pago total' : 'Anular abono')}
               </button>
             </div>
           </div>

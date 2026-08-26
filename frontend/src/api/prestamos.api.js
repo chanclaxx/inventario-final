@@ -94,3 +94,8 @@ export const condonarMoraPrestamo = (id, { valor, motivo, pin, quitar_plazo, qui
  */
 export const fijarInteresPrestamo = (id, { plan_id, desde }) =>
   api.patch(`/prestamos/${id}/interes`, { plan_id, desde });
+// Anular el pago total ENTERO, con su motivo. Deshace todos sus pedazos en una
+// sola transacción: reabre los préstamos que dejen de estar pagados, cancela la
+// factura que se generó al saldarlos y devuelve el equipo a 'prestado'.
+export const anularAbonoTotal = (abonoTotalId, motivo) =>
+  api.patch(`/prestamos/abonos-totales/${abonoTotalId}/anular`, { motivo });

@@ -778,6 +778,126 @@ console.log('\n═══ 11. Pago total y anulación en créditos ═══');
     Number(movPdf.abono || 0) - sinContar, 0);
 }
 
+// ═══ 12. AISLAMIENTO ENTRE SUCURSALES y ANULAR UN PAGO TOTAL ════════════════
+//
+// El mismo cliente puede tener deuda en dos sedes del mismo negocio (hoy pasa
+// en produccion: 4 personas con prestamos activos en 2 sucursales). Nada de una
+// sede puede aparecer, sumarse ni escribirse en la otra:
+//
+//   · el estado de cuenta de una sede no muestra abonos de la otra;
+//   · un abono no se puede registrar contra un documento de otra sede;
+//   · un pago total reparte SOLO entre lo de su sede;
+//   · si un pago llegara a cruzarse, cada sede muestra lo que se aplico EN
+//     ELLA y las dos juntas suman el pago (ninguna infla, ninguna esconde).
+//
+// Y la salida para el error de digitacion: anular el pago total ENTERO.
+console.log('\n═══ 12. Aislamiento entre sucursales y anular pago total ═══');
+{
+  const creditos = require(path.join(RAIZ, 'src/modules/creditos/creditos.service.js'));
+  const crRepo   = require(path.join(RAIZ, 'src/modules/creditos/creditos.repository.js'));
+
+  // Segunda sucursal del MISMO negocio.
+  await db.exec(`INSERT INTO sucursales (negocio_id, nombre) VALUES (1, 'Sede Norte');`);
+  const sucB = (await q(`SELECT id FROM sucursales WHERE nombre='Sede Norte'`))[0].id;
+
+  // Un mismo cliente con credito en las DOS sedes.
+  await db.exec(`
+    INSERT INTO clientes (negocio_id, nombre, cedula) VALUES (1, 'DOS SEDES', '999');
+    INSERT INTO facturas (numero, sucursal_id, nombre_cliente, cedula, estado, fecha)
+      VALUES (910, 1, 'DOS SEDES', '999', 'Credito', NOW() - INTERVAL '9 days'),
+             (911, 1, 'DOS SEDES', '999', 'Credito', NOW() - INTERVAL '8 days');
+  `);
+  await db.query(
+    `INSERT INTO facturas (numero, sucursal_id, nombre_cliente, cedula, estado, fecha)
+     VALUES (912, $1, 'DOS SEDES', '999', 'Credito', NOW() - INTERVAL '7 days')`, [sucB]);
+
+  const cliDos = (await q(`SELECT id FROM clientes WHERE cedula='999'`))[0].id;
+  const fid = {};
+  for (const n of [910, 911, 912]) fid[n] = (await q(`SELECT id FROM facturas WHERE numero=$1`, [n]))[0].id;
+
+  const cz = await pool.connect();
+  await crRepo.create(cz, { factura_id: fid[910], cliente_id: cliDos, sucursal_id: 1,    valor_total: 400000, cuota_inicial: 0 });
+  await crRepo.create(cz, { factura_id: fid[911], cliente_id: cliDos, sucursal_id: 1,    valor_total: 300000, cuota_inicial: 0 });
+  await crRepo.create(cz, { factura_id: fid[912], cliente_id: cliDos, sucursal_id: sucB, valor_total: 900000, cuota_inicial: 0 });
+  cz.release();
+  const cA1 = (await q(`SELECT id FROM creditos WHERE factura_id=$1`, [fid[910]]))[0].id;
+  const cB  = (await q(`SELECT id FROM creditos WHERE factura_id=$1`, [fid[912]]))[0].id;
+
+  // ── El extracto de cada sede solo ve LO SUYO ─────────────────────────────
+  const ecA = await creditos.getEstadoCuenta(1, '999', 1);
+  const ecB = await creditos.getEstadoCuenta(1, '999', sucB);
+  checkEq('★ el extracto de la sede A solo trae sus 2 facturas',
+    ecA.filter((m) => m.tipo === 'credito').length, 2);
+  checkEq('★ el de la sede B solo trae la suya', ecB.filter((m) => m.tipo === 'credito').length, 1);
+  checkEq('★ ninguna factura de B se cuela en A',
+    ecA.some((m) => Number(m.factura_numero) === 912), false);
+
+  // ── Un abono NO se puede registrar contra un credito de otra sede ────────
+  await debeFallar('★ un abono no cae en un crédito de OTRA sucursal',
+    () => creditos.registrarAbono(1, cB, { usuario_id: 1, valor: 50000, metodo: 'Efectivo', sucursal_id: 1 }),
+    'otra sucursal');
+  check('   y el crédito de la otra sede sigue intacto',
+    (await q(`SELECT total_abonado FROM creditos WHERE id=$1`, [cB]))[0].total_abonado, 0);
+
+  // Parado en su propia sede si funciona.
+  await creditos.registrarAbono(1, cB, { usuario_id: 1, valor: 50000, metodo: 'Efectivo', sucursal_id: sucB });
+  check('★ el mismo abono SÍ entra estando en su sede',
+    (await q(`SELECT total_abonado FROM creditos WHERE id=$1`, [cB]))[0].total_abonado, 50000);
+
+  // ── El pago total reparte SOLO en su sede ────────────────────────────────
+  await debeFallar('★ el pago total no puede cubrir la deuda de la otra sede',
+    () => creditos.registrarAbonoTotalCredito(1, cliDos, 1500000, 'Efectivo', 1, 1),
+    'supera lo que el cliente debe');
+
+  const pt = await creditos.registrarAbonoTotalCredito(
+    1, cliDos, 700000, 'Efectivo', 1, 1, { descripcion: 'saldo sede A' });
+  checkEq('★ repartió solo entre los créditos de la sede A', pt.distribucion.length, 2);
+  check('★ el crédito de la sede B quedó como estaba',
+    (await q(`SELECT total_abonado FROM creditos WHERE id=$1`, [cB]))[0].total_abonado, 50000);
+
+  const ecB2 = await creditos.getEstadoCuenta(1, '999', sucB);
+  checkEq('★ el pago de la sede A NO aparece en el extracto de B',
+    ecB2.some((m) => m.es_pago_total), false);
+  const ecA2 = await creditos.getEstadoCuenta(1, '999', 1);
+  checkEq('   y sí aparece en el de A', ecA2.some((m) => m.es_pago_total), true);
+
+  // ── Anular el pago total ENTERO (el error de digitación) ─────────────────
+  const ptId = pt.abono_total_id;
+  await debeFallar('★ anular el pago total EXIGE motivo',
+    () => creditos.anularAbonoTotalCredito(1, ptId, { motivo: '' }), 'motivo');
+
+  await debeFallar('★ no se puede anular parado en otra sucursal',
+    () => creditos.anularAbonoTotalCredito(1, ptId, { motivo: 'me equivoqué digitando', sucursal_id: sucB }),
+    'otra sucursal');
+
+  const an = await creditos.anularAbonoTotalCredito(1, ptId,
+    { motivo: 'me equivoqué digitando el monto', usuario_id: 1, sucursal_id: 1 });
+  check('★ se anuló el pago completo', an.valor, 700000);
+  checkEq('★ deshizo sus DOS pedazos', an.pedazos, 2);
+  check('★ el primer crédito volvió a deber todo',
+    (await q(`SELECT total_abonado FROM creditos WHERE id=$1`, [cA1]))[0].total_abonado, 0);
+  checkEq('★ y volvió a estar Activo',
+    (await q(`SELECT estado FROM creditos WHERE id=$1`, [cA1]))[0].estado, 'Activo');
+  check('★ el crédito de la OTRA sede sigue sin tocarse',
+    (await q(`SELECT total_abonado FROM creditos WHERE id=$1`, [cB]))[0].total_abonado, 50000);
+
+  const ecA3 = await creditos.getEstadoCuenta(1, '999', 1);
+  const ptAnulado = ecA3.find((m) => m.es_pago_total);
+  checkEq('★ el pago anulado SIGUE visible con su motivo',
+    Boolean(ptAnulado) && String(ptAnulado.motivo_anulacion).includes('digitando'), true);
+  checkEq('★ pero ya no cuenta en el saldo', ptAnulado?.saldo, null);
+  await debeFallar('no se puede anular dos veces',
+    () => creditos.anularAbonoTotalCredito(1, ptId, { motivo: 'otra vez', sucursal_id: 1 }),
+    'ya está anulado');
+
+  // La deuda del extracto vuelve a ser la deuda real de esa sede.
+  const [deudaA] = await q(`
+    SELECT COALESCE(SUM(valor_total - cuota_inicial - total_abonado), 0)::numeric AS d
+      FROM creditos WHERE cliente_id = $1 AND sucursal_id = 1 AND estado = 'Activo'`, [cliDos]);
+  const ultA = [...ecA3].reverse().find((m) => m.saldo !== null);
+  check('★ INVARIANTE: extracto de la sede A == su deuda real', ultA?.saldo, Number(deudaA.d));
+}
+
 console.log('\n' + '─'.repeat(62));
 if (fallos) { console.log(`✗ ${fallos} FALLO(S) de ${fallos + pasados}`); process.exit(1); }
 console.log(`✓ TODO OK — ${pasados} verificaciones`);

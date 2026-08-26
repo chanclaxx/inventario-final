@@ -4,12 +4,14 @@ import {
   getEstadoCuenta,
   anularAbono as anularAbonoApi,
   anularRetomaDirecta as anularRetomaDirectaApi,
+  anularAbonoTotal as anularAbonoTotalApi,
 } from '../../api/prestamos.api';
 import { formatCOP } from '../../utils/formatters';
 import { EstadoCuentaBase } from '../../components/EstadoCuenta/EstadoCuentaBase';
 import { ModalEditarValorPrestamo } from './ModalEditarValorPrestamo';
 import {
   TrendingDown, TrendingUp, ArrowLeftRight, Wallet, Layers, Pencil, AlertTriangle,
+  XCircle,
 } from 'lucide-react';
 
 // lado: 'derecha' = acción del negocio | 'izquierda' = acción del deudor
@@ -167,6 +169,23 @@ export function EstadoDeCuenta({ tipo, personaId, onEditarAbonoTotal }) {
   // devolvió, solo esa PARTE deja de contar — la fila sigue mostrando el pago
   // completo (es lo que pagó) pero el saldo baja menos. Sin decirlo, quedan dos
   // números que no cuadran y nada que los explique.
+  // Anular el pago total: exige motivo, igual que en créditos. La corrección
+  // tiene que poder explicarse después.
+  const [anulandoTotal, setAnulandoTotal] = useState(null);
+  const [motivoTotal,   setMotivoTotal]   = useState('');
+  const [errorTotal,    setErrorTotal]    = useState('');
+
+  const anularTotal = useMutation({
+    mutationFn: () => anularAbonoTotalApi(anulandoTotal.referencia_id, motivoTotal.trim()),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['prestamos'], exact: false });
+      queryClient.invalidateQueries({ queryKey: ['estado-cuenta'], exact: false });
+      queryClient.invalidateQueries({ queryKey: ['facturas'], exact: false });
+      setAnulandoTotal(null); setMotivoTotal(''); setErrorTotal('');
+    },
+    onError: (err) => setErrorTotal(err.response?.data?.error || 'No se pudo anular el pago total'),
+  });
+
   const getEtiqueta = (mov) => {
     const anuladoParcial = Number(mov.valor_anulado || 0);
     if (mov.anulado_total) return mov.motivo_anulacion || 'Anulado';
@@ -189,6 +208,16 @@ export function EstadoDeCuenta({ tipo, personaId, onEditarAbonoTotal }) {
       acciones.push({
         id: 'editar-total', Icn: Pencil, title: 'Modificar pago total',
         onClick: onEditarAbonoTotal, hoverClass: 'hover:text-indigo-500',
+      });
+    }
+    // Un pedazo suelto de un pago total no se puede anular —dejaría el reparto a
+    // medias—, pero el pago ENTERO sí: es la salida cuando se digitó mal el
+    // monto o se registró en la persona equivocada.
+    if (mov.tipo === 'abono_total' && !mov.anulado_total) {
+      acciones.push({
+        id: 'anular-total', Icn: XCircle, title: 'Anular el pago total completo',
+        onClick: (m) => { setAnulandoTotal(m); setMotivoTotal(''); setErrorTotal(''); },
+        hoverClass: 'hover:text-red-400',
       });
     }
     return acciones;
@@ -215,6 +244,75 @@ export function EstadoDeCuenta({ tipo, personaId, onEditarAbonoTotal }) {
           tipoApi={tipoApi}
           personaId={personaId}
         />
+      )}
+
+      {/* Anular un pago total completo */}
+      {anulandoTotal && (
+        <div className="fixed inset-0 bg-black/40 flex items-end sm:items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl w-full max-w-sm p-5 flex flex-col gap-4 shadow-xl">
+            <p className="text-sm font-semibold text-gray-800">¿Anular este pago total?</p>
+
+            <div className="bg-gray-50 rounded-xl px-3 py-2">
+              <p className="text-xs text-gray-500">{anulandoTotal.concepto}</p>
+              <p className="text-sm font-bold text-gray-800 mt-0.5">
+                {formatCOP(anulandoTotal.abono)}
+              </p>
+            </div>
+
+            <p className="text-xs text-gray-500">
+              Se deshace el pago completo y todas sus porciones de una vez. No se borra:
+              queda marcado con el motivo. Los préstamos que estaban saldados vuelven a
+              quedar activos, se cancela la factura que se generó al saldarlos y el
+              equipo vuelve a figurar como prestado.
+            </p>
+
+            {(anulandoTotal.detalle || []).length > 0 && (
+              <div className="bg-red-50 border border-red-100 rounded-xl px-3 py-2 flex flex-col gap-0.5 max-h-32 overflow-y-auto">
+                {(anulandoTotal.detalle || []).map((d) => (
+                  <div key={d.id} className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] text-red-600 truncate">{d.producto}</span>
+                    <span className="text-[11px] font-semibold text-red-700 whitespace-nowrap">
+                      −{formatCOP(d.valor)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-gray-700">
+                Motivo <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                value={motivoTotal}
+                autoFocus
+                maxLength={200}
+                onChange={(e) => { setMotivoTotal(e.target.value); setErrorTotal(''); }}
+                placeholder="Ej: me equivoqué digitando el monto"
+                className="w-full px-3 py-2 bg-gray-100 rounded-xl text-sm
+                  focus:outline-none focus:ring-2 focus:ring-red-400 focus:bg-white transition-all"
+              />
+            </div>
+
+            {errorTotal && <p className="text-xs text-red-500">{errorTotal}</p>}
+
+            <div className="flex gap-2">
+              <button
+                onClick={() => { setAnulandoTotal(null); setMotivoTotal(''); setErrorTotal(''); }}
+                className="flex-1 py-2 rounded-xl text-sm border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors">
+                Cancelar
+              </button>
+              <button
+                onClick={() => anularTotal.mutate()}
+                disabled={motivoTotal.trim().length < 3 || anularTotal.isPending}
+                className="flex-1 py-2 rounded-xl text-sm font-medium text-white bg-red-500
+                  hover:bg-red-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                {anularTotal.isPending ? 'Anulando…' : 'Anular pago total'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Modal confirmación anulación */}

@@ -921,12 +921,19 @@ const getEstadoCuenta = async (executor, negocioId, tipo, personaId, sucursalId 
   let filtroSucursalPrestamo  = '';
   let filtroSucursalRetoma    = '';
   let filtroSucursalAbonoTotal = '';
+  let filtroSucursalPedazo     = '';
   if (sucursalId) {
     params.push(sucursalId);
     const n = params.length;
     filtroSucursalPrestamo   = `AND p.sucursal_id  = $${n}`;
     filtroSucursalRetoma     = `AND r.sucursal_id  = $${n}`;
     filtroSucursalAbonoTotal = `AND at.sucursal_id = $${n}`;
+    // El reparto de un pago total se acota a la sede en curso. Hoy ningun pago
+    // cruza de sucursal (auditado), pero si alguno lo hiciera, sin esto la sede
+    // del pago mostraria el total ENTERO --inflando-- y la otra no veria nada,
+    // pese a que si le bajo la deuda. Cada sede debe mostrar lo que se aplico
+    // en ella, y las dos juntas sumar el pago.
+    filtroSucursalPedazo = `AND p.sucursal_id = $${n}`;
   }
 
   const { rows } = await executor.query(`
@@ -1015,53 +1022,66 @@ const getEstadoCuenta = async (executor, negocioId, tipo, personaId, sucursalId 
         'abono_total'::text                            AS tipo,
         'Pago total ' || at.metodo                    AS concepto,
         NULL::numeric                                  AS cargo,
-        at.valor_total::numeric                        AS abono,
+        -- Lo que este pago aplico EN ESTA SEDE. Se DERIVA del reparto en vez de
+        -- creerle a valor_total: un total guardado no sabe donde se aplico.
+        COALESCE(rep.aplicado, at.valor_total)::numeric AS abono,
         -- Un pago total se muestra ENTERO (es lo que pagó la persona) pero se
         -- repartió entre varios préstamos, y alguna de esas partes pudo
         -- anularse — porque su producto se devolvió, o porque el pago entró dos
         -- veces. Esa porción ya no baja capital. Aquí no se puede excluir la
         -- fila completa: solo el pedazo anulado.
-        (at.valor_total - COALESCE((
-          SELECT SUM(ap2.valor_anulado)
-          FROM abonos_prestamo ap2
-          WHERE ap2.abono_total_id = at.id
-        ), 0))::numeric                                AS abono_capital,
+        (COALESCE(rep.aplicado, at.valor_total)
+          - COALESCE(rep.anulado, 0))::numeric         AS abono_capital,
         at.id                                          AS referencia_id,
         false                                          AS anulable,
         NULL::integer                                  AS prestamo_id,
         NULL::text                                     AS prestamo_estado,
         NULLIF(BTRIM(at.descripcion), '')              AS descripcion,
         -- Un pago total queda marcado solo si TODO lo que repartió se anuló.
-        (NOT EXISTS (SELECT 1 FROM abonos_prestamo ap3
-                      WHERE ap3.abono_total_id = at.id AND NOT ap3.anulado)) AS anulado,
-        (NOT EXISTS (SELECT 1 FROM abonos_prestamo ap5
-                      WHERE ap5.abono_total_id = at.id AND NOT ap5.anulado)) AS anulado_total,
+        COALESCE(rep.todo_anulado, false)              AS anulado,
+        COALESCE(rep.todo_anulado, false)              AS anulado_total,
         -- Cuánto de ESTE pago dejó de contar. Sin este dato la fila muestra
         -- $8.800.000 y el saldo baja $5.400.000, sin nada que explique la
         -- diferencia — justo el número sin explicación que se quería evitar.
-        COALESCE((SELECT SUM(ap6.valor_anulado) FROM abonos_prestamo ap6
-                   WHERE ap6.abono_total_id = at.id), 0)::numeric AS valor_anulado,
-        (SELECT MIN(ap4.motivo_anulacion) FROM abonos_prestamo ap4
-          WHERE ap4.abono_total_id = at.id AND ap4.anulado)  AS motivo_anulacion,
+        COALESCE(rep.anulado, 0)::numeric              AS valor_anulado,
+        rep.motivo                                     AS motivo_anulacion,
         true                                           AS es_pago_total,
-        -- El reparto, para poder desplegarlo: a que prestamo fue cada pedazo y
-        -- cuanto. El extracto ya mostraba el pago como UNA linea, pero no habia
-        -- forma de ver en que se aplico sin ir prestamo por prestamo.
-        (SELECT JSONB_AGG(
-                  JSONB_BUILD_OBJECT(
-                    'id',               ap7.id,
-                    'prestamo_id',      p7.id,
-                    'factura',          COALESCE(p7.numero, p7.id),
-                    'producto',         p7.nombre_producto,
-                    'valor',            ap7.valor,
-                    'anulado',          ap7.anulado,
-                    'motivo_anulacion', ap7.motivo_anulacion
-                  ) ORDER BY p7.fecha, p7.id)
-           FROM abonos_prestamo ap7
-           JOIN prestamos p7 ON p7.id = ap7.prestamo_id
-          WHERE ap7.abono_total_id = at.id)             AS detalle
+        rep.detalle                                    AS detalle
       FROM abonos_totales at
       JOIN sucursales su ON su.id = at.sucursal_id
+      -- Todo el reparto se resuelve UNA sola vez y ya acotado a la sede en
+      -- curso: el importe que se muestra, lo anulado y el detalle desplegable
+      -- salen de la misma fuente. Con subconsultas sueltas era facil acotar una
+      -- y olvidar otra, y entonces la fila muestra un numero y el saldo baja
+      -- otro distinto.
+      LEFT JOIN LATERAL (
+        SELECT
+          SUM(ap.valor)::numeric                        AS aplicado,
+          COALESCE(SUM(ap.valor_anulado), 0)::numeric   AS anulado,
+          BOOL_AND(ap.anulado)                          AS todo_anulado,
+          MIN(ap.motivo_anulacion) FILTER (WHERE ap.anulado) AS motivo,
+          JSONB_AGG(
+            JSONB_BUILD_OBJECT(
+              'id',               ap.id,
+              'prestamo_id',      p.id,
+              'factura',          COALESCE(p.numero, p.id),
+              'producto',         p.nombre_producto,
+              'valor',            ap.valor,
+              'anulado',          ap.anulado,
+              'motivo_anulacion', ap.motivo_anulacion
+            ) ORDER BY p.fecha, p.id)                   AS detalle
+        FROM abonos_prestamo ap
+        JOIN prestamos p ON p.id = ap.prestamo_id
+        WHERE ap.abono_total_id = at.id
+          ${filtroSucursalPedazo}
+      ) rep ON TRUE
+      -- Cuantos pedazos tiene el pago EN TOTAL (sin acotar). Distingue el pago
+      -- que no repartio nada --queda como saldo a favor y se muestra por su
+      -- valor-- del que repartio en OTRA sede, que aqui no debe aparecer.
+      LEFT JOIN LATERAL (
+        SELECT COUNT(*)::int AS n FROM abonos_prestamo apt
+         WHERE apt.abono_total_id = at.id
+      ) tot ON TRUE
       WHERE su.negocio_id = $1
         AND at.tipo_persona = $3
         AND at.persona_id   = $2
@@ -1069,7 +1089,10 @@ const getEstadoCuenta = async (executor, negocioId, tipo, personaId, sucursalId 
         -- el pago total que un CLIENTE hizo a sus créditos aparecería también
         -- en su extracto de préstamos, restando sin ningún abono detrás.
         AND COALESCE(at.destino, 'prestamo') = 'prestamo'
-        ${filtroSucursalAbonoTotal}
+        -- Se muestra donde APLICO. Un pago que no repartio nada se muestra en
+        -- su propia sede.
+        AND (rep.aplicado IS NOT NULL
+             OR (tot.n = 0 ${filtroSucursalAbonoTotal}))
 
       UNION ALL
 

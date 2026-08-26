@@ -619,12 +619,35 @@ const registrarSaldoAFavor = async (negocioId, tipo, personaId, monto, sucursalI
 // en vez de dejar entrar la plata y descuadrar la cuenta.
 const VENTANA_DUPLICADO_SEG = 90;
 
+// ─── Aislamiento por sucursal ────────────────────────────────────────────────
+//
+// Validar solo por NEGOCIO no alcanza en los caminos que mueven plata: el id de
+// un prestamo de OTRA sede sigue siendo un numero valido. Hay personas con
+// prestamos activos en dos sucursales del mismo negocio, y sin esta
+// comprobacion un abono podia caer en la sede equivocada.
+//
+// La sucursal del request ya viene resuelta y validada por el middleware, asi
+// que esto no estorba a nadie que este operando donde debe. `sucursalId` nulo =
+// sin contexto de sede (llamado interno): no se bloquea.
+const exigirMismaSucursalDoc = (doc, sucursalId, etiqueta) => {
+  if (!sucursalId) return;
+  if (Number(doc.sucursal_id) !== Number(sucursalId)) {
+    throw {
+      status: 403,
+      message: `Este ${etiqueta} es de otra sucursal. Cambia de sucursal para poder registrarlo ahi.`,
+    };
+  }
+};
+const exigirMismaSucursalPago = (pago, sucursalId) =>
+  exigirMismaSucursalDoc(pago, sucursalId, 'pago');
+
 const registrarAbono = async (
   negocioId, prestamoId, valor, metodo, usuarioId, color,
-  { modo = 'solo_capital', valorMora = 0, valorInteres = 0 } = {},
+  { modo = 'solo_capital', valorMora = 0, valorInteres = 0, sucursalId = null } = {},
 ) => {
   const prestamo = await repo.findByIdYNegocio(prestamoId, negocioId);
   if (!prestamo) throw { status: 404, message: 'Préstamo no encontrado' };
+  exigirMismaSucursalDoc(prestamo, sucursalId, 'préstamo');
   if (prestamo.estado !== 'Activo') throw { status: 400, message: 'El préstamo no está activo' };
 
   const gemelo = await repo.buscarAbonoGemelo(pool, {
@@ -1483,9 +1506,10 @@ const getResumenCartera = async (negocioId, tipo, personaId, sucursalId = null) 
 // ─── Servicio: anular abono ───────────────────────────────────────────────────
 // retomaId: solo aplica cuando el abono tiene metodo='Intercambio'
 
-const anularAbono = async (negocioId, prestamoId, abonoId, retomaId = null) => {
+const anularAbono = async (negocioId, prestamoId, abonoId, retomaId = null, sucursalId = null) => {
   const prestamo = await repo.findByIdYNegocio(prestamoId, negocioId);
   if (!prestamo) throw { status: 404, message: 'Préstamo no encontrado' };
+  exigirMismaSucursalDoc(prestamo, sucursalId, 'préstamo');
 
   const client = await pool.connect();
   try {
@@ -2048,9 +2072,10 @@ const registrarAbonoTotal = async (
 // `descripcion` sin enviar (undefined) deja la que tenía; enviarla vacía la
 // borra. Es texto libre y no participa del reparto: cambiarla no vuelve a
 // tocar un solo abono.
-const modificarAbonoTotal = async (negocioId, abonoTotalId, nuevoValor, metodo, descripcion) => {
+const modificarAbonoTotal = async (negocioId, abonoTotalId, nuevoValor, metodo, descripcion, sucursalId = null) => {
   const abonoTotal = await repo.getAbonoTotalById(abonoTotalId, negocioId);
   if (!abonoTotal) throw { status: 404, message: 'Abono total no encontrado' };
+  exigirMismaSucursalPago(abonoTotal, sucursalId);
 
   if (nuevoValor >= Number(abonoTotal.valor_total)) {
     throw { status: 400, message: 'Solo se puede reducir el valor de un abono total. Para aumentar, registra un nuevo abono.' };
@@ -2160,6 +2185,112 @@ const modificarAbonoTotal = async (negocioId, abonoTotalId, nuevoValor, metodo, 
   }
 };
 
+
+// ─── Anular un PAGO TOTAL de préstamos ───────────────────────────────────────
+//
+// El extracto muestra el pago total como UNA línea (es lo que pagó la persona),
+// y por eso un pedazo suelto no se puede anular: dejaría el pago a medias y la
+// línea mostrando un reparto que ya no cuadra. Lo que sí hace falta es deshacer
+// el pago ENTERO — cuando alguien se equivoca digitando el monto, o lo registra
+// en la persona que no era.
+//
+// Se anula todo en UNA transacción: o se deshace el pago completo o no se toca
+// nada. Deshacer la mitad dejaría al cliente debiendo una cifra que no sale de
+// ninguna parte.
+//
+// El abono NO se borra —a diferencia de `modificarAbonoTotal`, que sí lo hace
+// para poder redistribuir—: queda marcado con su motivo, porque esta operación
+// es una corrección y la corrección tiene que poder explicarse después.
+//
+// Tres efectos que hay que deshacer juntos, o el préstamo queda mintiendo:
+//   1. `total_abonado` baja por lo que ese pedazo aportaba.
+//   2. Si el préstamo estaba Saldado y deja de estarlo, vuelve a Activo, se
+//      CANCELA la factura que se generó al saldarlo y el equipo vuelve de
+//      'vendido' a 'prestado'. Sin esto queda una venta que nunca ocurrió.
+//   3. La mora cobrada dentro del pedazo se anula con él.
+const anularAbonoTotal = async (negocioId, abonoTotalId, { motivo, usuario_id, sucursal_id = null } = {}) => {
+  const razon = String(motivo || '').trim();
+  if (razon.length < 3) {
+    throw { status: 400, message: 'Escribe el motivo de la anulación (mínimo 3 caracteres)' };
+  }
+
+  const abonoTotal = await repo.getAbonoTotalById(abonoTotalId, negocioId);
+  if (!abonoTotal) throw { status: 404, message: 'Pago total no encontrado' };
+  if (String(abonoTotal.destino || 'prestamo') !== 'prestamo') {
+    throw { status: 400, message: 'Este pago total es de créditos, no de préstamos' };
+  }
+  exigirMismaSucursalPago(abonoTotal, sucursal_id);
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const pedazos = await repo.getAbonosPorTotal(client, abonoTotalId);
+    if (!pedazos.length) {
+      throw { status: 400, message: 'Este pago total no tiene abonos que anular' };
+    }
+
+    const moraRepo = require('../mora/mora.repository');
+    const detalle = [];
+    let totalAnulado = 0;
+
+    for (const pedazo of pedazos) {
+      // 3. La mora cobrada dentro de este pedazo se anula antes de tocar el
+      //    capital: si no, quedaría "pagada" sobre un abono que ya no aplica.
+      await moraRepo.anularPorAbono(client, { abono_prestamo_id: pedazo.id });
+
+      // 1. Se marca anulado y baja el total_abonado del préstamo.
+      const res = await repo.anularAbonoConMotivo(client, pedazo.id, `Anulado: ${razon}`);
+      if (!res) continue;   // ya estaba anulado
+
+      // 2. ¿Dejó de estar pagado?
+      const { rows: [p] } = await client.query(
+        `SELECT total_abonado, valor_prestamo, estado, imei, sucursal_id
+           FROM prestamos WHERE id = $1`, [pedazo.prestamo_id]);
+
+      let reabierto = false;
+      let factura_cancelada_id = null;
+      if (p.estado === 'Saldado' && Number(p.total_abonado) < Number(p.valor_prestamo)) {
+        await repo.updateEstado(client, pedazo.prestamo_id, 'Activo');
+        reabierto = true;
+        factura_cancelada_id = await repo.cancelarFacturaDePrestamo(client, pedazo.prestamo_id);
+        if (p.imei) {
+          await repo.revertirSerialVendido(client, p.imei, p.sucursal_id);
+        }
+      }
+
+      totalAnulado += Number(res.valor);
+      detalle.push({
+        abono_id:    pedazo.id,
+        prestamo_id: pedazo.prestamo_id,
+        valor:       Number(res.valor),
+        reabierto,
+        factura_cancelada_id,
+      });
+    }
+
+    if (!detalle.length) {
+      throw { status: 400, message: 'Este pago total ya está anulado' };
+    }
+
+    await client.query('COMMIT');
+    return {
+      abono_total_id: Number(abonoTotalId),
+      valor:          totalAnulado,
+      motivo:         razon,
+      pedazos:        detalle.length,
+      reabiertos:     detalle.filter((d) => d.reabierto).length,
+      detalle,
+      usuario_id,
+    };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+};
+
 module.exports = {
   getPrestamos, getPrestamoById,
   crearPrestamo, crearPrestamos,
@@ -2171,7 +2302,7 @@ module.exports = {
   anularAbono, anularRetomaDirecta, getRetomasDirectas,
   getEstadoCuenta, crearAjusteDeuda, editarValorPrestamo,
   getSaldoSucursalPersona, getHistorialSaldoSucursalPersona,
-  registrarAbonoTotal, modificarAbonoTotal,
+  registrarAbonoTotal, modificarAbonoTotal, anularAbonoTotal,
   fijarPlazo, condonarMora, cobrarMora,
   // Lo usa mora.service para cerrar el préstamo cuando se cobra o se condona
   // la última mora pendiente.

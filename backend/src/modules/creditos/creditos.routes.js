@@ -38,6 +38,11 @@ router.patch('/abonos/:abonoId/anular', requireModulo('prestamos'), requireNivel
   body('motivo').isString().isLength({ min: 3, max: 200 })
     .withMessage('Escribe el motivo de la anulación'),
   validate, ctrl.anularAbono);
+// Anular el pago total ENTERO. Va antes de /:id por la misma razon que el POST.
+router.patch('/abonos-totales/:abonoTotalId/anular', requireModulo('prestamos'), requireNivel('supervisor'),
+  body('motivo').isString().isLength({ min: 3, max: 200 })
+    .withMessage('Escribe el motivo de la anulación'),
+  validate, ctrl.anularAbonoTotal);
 
 router.post('/:id/abonos',   requireModulo('prestamos'), validarAbono, validate,    ctrl.registrarAbono);
 router.patch('/:id/saldar',  requireModulo('prestamos'), requireNivel('vendedor'),      ctrl.saldarCredito);

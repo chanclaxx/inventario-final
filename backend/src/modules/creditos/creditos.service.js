@@ -63,11 +63,37 @@ const cerrarSiPagadoEnTx = async (client, creditoId, negocioId) => {
 //
 // Si el crédito no tiene plazo, la mora pendiente es 0 y los tres modos se
 // comportan igual que antes de existir esta feature.
+// ─── Aislamiento por sucursal ────────────────────────────────────────────────
+//
+// Validar solo por NEGOCIO no alcanza en los caminos que mueven plata. Un
+// vendedor tiene su sucursal en el token y la lista que ve esta acotada, pero
+// el id de un credito de OTRA sede sigue siendo un numero valido: sin esta
+// comprobacion, un abono podia caer en la sucursal equivocada — que es
+// exactamente lo que pasa cuando el mismo cliente tiene credito en dos sedes.
+//
+// La sucursal del request ya viene resuelta y validada por el middleware (para
+// un vendedor es la suya; para un admin, la que tiene seleccionada), asi que
+// esto no estorba a nadie que este operando donde debe.
+//
+// `sucursalId` nulo = no hay contexto de sede: no se bloquea, para no romper
+// los llamados internos que no pasan por una request.
+const exigirMismaSucursal = (documento, sucursalId, etiqueta) => {
+  if (!sucursalId) return;
+  if (Number(documento.sucursal_id) !== Number(sucursalId)) {
+    throw {
+      status: 403,
+      message: `Este ${etiqueta} es de otra sucursal. Cambia de sucursal para poder registrarlo ahi.`,
+    };
+  }
+};
+
 const registrarAbono = async (negocioId, creditoId, {
   usuario_id, valor, metodo, notas, modo = 'solo_capital', valor_mora = 0, valor_interes = 0,
+  sucursal_id = null,
 }) => {
   const credito = await repo.findByIdYNegocio(creditoId, negocioId);
   if (!credito) throw { status: 404, message: 'Crédito no encontrado' };
+  exigirMismaSucursal(credito, sucursal_id, 'crédito');
   if (credito.estado === 'Saldado')   throw { status: 400, message: 'El crédito ya está saldado' };
   if (credito.estado === 'Cancelado') throw { status: 400, message: 'El crédito está cancelado' };
   if (!(Number(valor) > 0)) throw { status: 400, message: 'El valor del abono debe ser mayor a 0' };
@@ -331,14 +357,13 @@ const getEstadoCuenta = async (negocioId, clave, sucursalId = null) => {
     // canceló una de las facturas del reparto). En ese caso el movimiento sigue
     // contando, pero solo por lo que quedó vigente: sacarlo entero borraría del
     // saldo lo que se abonó a las facturas vivas.
-    // Cuánto de este movimiento dejó de contar. Se DERIVA del reparto en vez de
-    // arrastrar otra columna por las siete ramas del UNION: el detalle ya trae
-    // qué pedazo se anuló, y dos definiciones separadas acabarían discrepando.
+    // Cuánto de este movimiento dejó de contar. Viene SUMADO de la columna
+    // `valor_anulado`, no derivado del reparto: un abono suelto anulado solo en
+    // PARTE no tiene reparto del cual derivarlo, y calcularlo así lo dejaba en
+    // cero — esos pesos seguían restando en el extracto sin restar en la deuda.
     const reparto = Array.isArray(row.detalle) ? row.detalle : [];
     const abonoAnulado   = row.anulado === true;
-    const anuladoParcial = abonoAnulado
-      ? abono
-      : reparto.reduce((t, d) => t + (d.anulado ? Number(d.valor || 0) : 0), 0);
+    const anuladoParcial = Number(row.valor_anulado || 0);
     const abonoVigente   = Math.max(0, abono - anuladoParcial);
     const fueraDeSaldo = facturaCancelada || abonoAnulado || INFORMATIVOS.has(row.tipo);
 
@@ -604,7 +629,7 @@ const registrarAbonoTotalCredito = async (
 //      falte plata. Es el mismo paso que hizo falta al corregir los duplicados.
 //   3. La MORA que se haya cobrado dentro de ese abono se anula en cascada, o
 //      el cliente queda con la mora "pagada" después de revertirse el pago.
-const anularAbonoCredito = async (negocioId, abonoId, { motivo, usuario_id } = {}) => {
+const anularAbonoCredito = async (negocioId, abonoId, { motivo, usuario_id, sucursal_id = null } = {}) => {
   const razon = String(motivo || '').trim();
   if (razon.length < 3) {
     throw { status: 400, message: 'Escribe el motivo de la anulación (mínimo 3 caracteres)' };
@@ -612,6 +637,7 @@ const anularAbonoCredito = async (negocioId, abonoId, { motivo, usuario_id } = {
 
   const abono = await repo.findAbonoCreditoById(pool, abonoId, negocioId);
   if (!abono) throw { status: 404, message: 'Abono no encontrado' };
+  exigirMismaSucursal(abono, sucursal_id, 'abono');
   if (abono.anulado) throw { status: 400, message: 'Este abono ya está anulado' };
 
   const client = await pool.connect();
@@ -656,11 +682,97 @@ const anularAbonoCredito = async (negocioId, abonoId, { motivo, usuario_id } = {
   }
 };
 
+
+// ─── Anular un PAGO TOTAL completo ───────────────────────────────────────────
+//
+// Un pedazo suelto de un pago total NO se puede anular: dejaría el pago a
+// medias y el extracto mostrando un reparto que ya no cuadra. Lo que sí tiene
+// sentido es deshacer el pago ENTERO — que es lo que pasa cuando alguien se
+// equivoca digitando el monto o lo registra en la persona que no era.
+//
+// Se anulan todos sus pedazos en UNA transacción: o se deshace el pago
+// completo, o no se toca nada. Anular la mitad dejaría al cliente debiendo una
+// cifra que no sale de ninguna parte.
+//
+// Los pedazos que YA estaban anulados (porque se canceló esa factura) se dejan
+// como están: volver a restarlos bajaría la deuda dos veces.
+const anularAbonoTotalCredito = async (negocioId, abonoTotalId, { motivo, usuario_id, sucursal_id = null } = {}) => {
+  const razon = String(motivo || '').trim();
+  if (razon.length < 3) {
+    throw { status: 400, message: 'Escribe el motivo de la anulación (mínimo 3 caracteres)' };
+  }
+
+  const pago = await repo.findAbonoTotalCreditoById(pool, abonoTotalId, negocioId);
+  if (!pago) throw { status: 404, message: 'Pago total no encontrado' };
+  exigirMismaSucursal(pago, sucursal_id, 'pago');
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const pedazos = await repo.findPedazosDeAbonoTotalCredito(client, abonoTotalId);
+    const vigentes = pedazos.filter((p) => !p.anulado);
+    if (!vigentes.length) {
+      throw { status: 400, message: 'Este pago total ya está anulado' };
+    }
+
+    const moraRepo = require('../mora/mora.repository');
+    const detalle = [];
+    let totalAnulado = 0;
+
+    for (const pedazo of vigentes) {
+      const res = await repo.anularAbonoCredito(client, pedazo.id, pedazo.credito_id,
+        `Anulado: ${razon}`);
+      if (!res) continue;
+
+      // La mora cobrada dentro de ese pedazo se anula con él.
+      await moraRepo.anularPorAbono(client, { abono_credito_id: pedazo.id });
+
+      // Si el crédito dejó de estar cubierto, vuelve a Activo. Sin esto la
+      // deuda no reaparece: un saldado no cuenta por más que le falte plata.
+      const { rows: [cr] } = await client.query(`
+        SELECT valor_total, cuota_inicial, total_abonado, estado, factura_id
+          FROM creditos WHERE id = $1
+      `, [pedazo.credito_id]);
+      const saldo = Number(cr.valor_total) - Number(cr.cuota_inicial) - Number(cr.total_abonado);
+      let reabierto = false;
+      if (cr.estado === 'Saldado' && saldo > 0) {
+        await client.query(`UPDATE creditos SET estado = 'Activo' WHERE id = $1`, [pedazo.credito_id]);
+        reabierto = true;
+      }
+
+      totalAnulado += Number(res.valor);
+      detalle.push({
+        abono_id:   pedazo.id,
+        credito_id: pedazo.credito_id,
+        valor:      Number(res.valor),
+        reabierto,
+      });
+    }
+
+    await client.query('COMMIT');
+    return {
+      abono_total_id: Number(abonoTotalId),
+      valor:          totalAnulado,
+      motivo:         razon,
+      pedazos:        detalle.length,
+      reabiertos:     detalle.filter((d) => d.reabierto).length,
+      detalle,
+      usuario_id,
+    };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+};
+
 module.exports = {
   getCreditos, getCreditoById, registrarAbono, saldarCredito, cancelarCredito,
   getEstadoCuenta, getResumenCuenta, getDocumento,
   fijarPlazo, fijarInteres, condonarMora, cobrarMora,
-  registrarAbonoTotalCredito, anularAbonoCredito,
+  registrarAbonoTotalCredito, anularAbonoCredito, anularAbonoTotalCredito,
   // Lo usa mora.service para cerrar el crédito cuando se cobra o se condona el
   // último cargo pendiente.
   cerrarSiPagadoEnTx,

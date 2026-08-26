@@ -74,6 +74,12 @@ router.post(   '/personas/:tipo/:id/abono-total',          requireModulo('presta
   body('descripcion').optional({ values: 'null' }).isString()
     .isLength({ max: 200 }).withMessage('La descripción no puede pasar de 200 caracteres'),
   validate, ctrl.registrarAbonoTotal);
+// Anular el pago total ENTERO. Exige motivo: la correccion tiene que poder
+// explicarse despues, igual que en creditos.
+router.patch('/abonos-totales/:abonoTotalId/anular', requireModulo('prestamos'), requireNivel('supervisor'),
+  body('motivo').isString().isLength({ min: 3, max: 200 })
+    .withMessage('Escribe el motivo de la anulación'),
+  validate, ctrl.anularAbonoTotal);
 router.patch(  '/abonos-totales/:abonoTotalId',            requireModulo('prestamos'),
   body('valor_total').isFloat({ gt: 0 }).withMessage('El valor total debe ser mayor a 0'),
   body('descripcion').optional({ values: 'null' }).isString()
