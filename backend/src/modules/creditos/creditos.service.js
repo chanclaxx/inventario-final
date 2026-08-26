@@ -326,10 +326,23 @@ const getEstadoCuenta = async (negocioId, clave, sucursalId = null) => {
     // Un abono ANULADO sigue en la lista, pero no baja la deuda: por eso queda
     // fuera del saldo corrido igual que una factura cancelada. Contarlo seria
     // volver al descuadre entre el extracto y la deuda total.
-    const abonoAnulado = row.anulado === true;
+    //
+    // Un PAGO TOTAL viene colapsado y puede estar anulado solo EN PARTE (se
+    // canceló una de las facturas del reparto). En ese caso el movimiento sigue
+    // contando, pero solo por lo que quedó vigente: sacarlo entero borraría del
+    // saldo lo que se abonó a las facturas vivas.
+    // Cuánto de este movimiento dejó de contar. Se DERIVA del reparto en vez de
+    // arrastrar otra columna por las siete ramas del UNION: el detalle ya trae
+    // qué pedazo se anuló, y dos definiciones separadas acabarían discrepando.
+    const reparto = Array.isArray(row.detalle) ? row.detalle : [];
+    const abonoAnulado   = row.anulado === true;
+    const anuladoParcial = abonoAnulado
+      ? abono
+      : reparto.reduce((t, d) => t + (d.anulado ? Number(d.valor || 0) : 0), 0);
+    const abonoVigente   = Math.max(0, abono - anuladoParcial);
     const fueraDeSaldo = facturaCancelada || abonoAnulado || INFORMATIVOS.has(row.tipo);
 
-    if (!fueraDeSaldo) saldo = saldo + cargo - abono;
+    if (!fueraDeSaldo) saldo = saldo + cargo - abonoVigente;
 
     return {
       fecha:          row.fecha,
@@ -348,12 +361,16 @@ const getEstadoCuenta = async (negocioId, clave, sucursalId = null) => {
       descripcion:     row.descripcion || null,
       abono_total_id:  row.abono_total_id ? Number(row.abono_total_id) : null,
       pago_total_valor: row.pago_total_valor != null ? Number(row.pago_total_valor) : null,
-      anulado:          abonoAnulado,
+      anulado:          abonoAnulado || anuladoParcial > 0,
       // Cuanto de este movimiento dejo de contar. El Excel y el PDF lo usan
       // para no sumarlo en los totales: una fila que se ve pero no cuenta.
       anulado_total:    abonoAnulado,
-      valor_anulado:    abonoAnulado ? Number(row.abono || 0) : 0,
+      valor_anulado:    anuladoParcial,
       motivo_anulacion: row.motivo_anulacion || null,
+      // Un pago total se muestra como UN movimiento; `detalle` es el reparto
+      // que la pantalla despliega (a qué facturas fue y cuánto a cada una).
+      es_pago_total:    row.es_pago_total === true,
+      detalle:          reparto,
     };
   });
 };

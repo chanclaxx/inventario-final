@@ -523,15 +523,37 @@ function HistorialAbonos({ creditoId }) {
     <div className="flex flex-col gap-1.5">
       {abonos.map((abono) => (
         <div key={abono.id}
-          className="flex items-center justify-between bg-gray-50 rounded-xl px-3 py-2">
-          <div>
+          className={`flex items-center justify-between rounded-xl px-3 py-2
+            ${abono.anulado ? 'bg-gray-50 opacity-60' : 'bg-gray-50'}`}>
+          <div className="min-w-0">
             <p className="text-xs text-gray-500">{formatFechaHora(abono.fecha)}</p>
             <p className="text-xs text-gray-400">
               {abono.metodo}{abono.usuario_nombre ? ` · ${abono.usuario_nombre}` : ''}
             </p>
+            {/* Este abono no es todo lo que pagó el cliente: es su porción de un
+                pago total. Sin decirlo, la cifra no cuadra con el recibo que
+                tiene en la mano y parece que falta plata. */}
+            {abono.de_pago_total && (
+              <p className="text-[11px] text-indigo-500 mt-0.5">
+                Parte de un pago total de {formatCOP(abono.pago_total_valor)}
+                {abono.pago_total_facturas > 1 && ` repartido entre ${abono.pago_total_facturas} facturas`}
+              </p>
+            )}
+            {abono.pago_total_descripcion && (
+              <p className="text-[11px] text-gray-400 italic">{abono.pago_total_descripcion}</p>
+            )}
             {abono.notas && <p className="text-xs text-gray-400 italic">{abono.notas}</p>}
+            {abono.anulado && (
+              <p className="text-[11px] text-red-400 mt-0.5">
+                Anulado{abono.motivo_anulacion ? ` — ${abono.motivo_anulacion}` : ''}
+              </p>
+            )}
           </div>
-          <span className="text-sm font-semibold text-green-600">+ {formatCOP(abono.valor)}</span>
+          <span className={`text-sm font-semibold whitespace-nowrap ml-3 ${
+            abono.anulado ? 'text-gray-400 line-through' : 'text-green-600'
+          }`}>
+            + {formatCOP(abono.valor)}
+          </span>
         </div>
       ))}
     </div>

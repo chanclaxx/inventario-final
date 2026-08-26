@@ -1736,6 +1736,10 @@ const getEstadoCuenta = async (negocioId, tipo, personaId, sucursalId = null) =>
       // puede ser solo una PARTE: la pantalla lo necesita para explicar por qué
       // el saldo bajó menos que el monto que muestra la fila.
       valor_anulado:   Number(row.valor_anulado || 0),
+      // Un pago total ya se mostraba como UN movimiento; `detalle` es el reparto
+      // que la pantalla despliega (a qué préstamos fue y cuánto a cada uno).
+      es_pago_total:   row.es_pago_total === true,
+      detalle:         Array.isArray(row.detalle) ? row.detalle : [],
       motivo_anulacion: row.motivo_anulacion || null,
       // Nota que escribió el usuario (hoy solo la del pago total). Va aparte
       // del concepto porque la pantalla parsea el concepto para precargar el

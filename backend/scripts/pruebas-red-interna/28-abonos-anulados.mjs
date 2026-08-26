@@ -634,15 +634,39 @@ console.log('\n═══ 11. Pago total y anulación en créditos ═══');
   checkEq('★ el pago queda marcado como de CRÉDITO', pt.destino, 'credito');
   checkEq('★ y guarda la nota del usuario', pt.descripcion, 'abono de la quincena');
 
-  // ── El extracto ──────────────────────────────────────────────────────────
-  const movs = await crRepo.getEstadoCuenta(1, '777');
+  // ── El extracto: UN movimiento, desplegable ──────────────────────────────
+  //
+  // El usuario hizo UN pago. Verlo partido en dos filas lo manda a buscar una
+  // plata que cree perdida, que es lo que ya paso en prestamos.
+  const movs = await creditos.getEstadoCuenta(1, '777');
   const abonos = movs.filter((m) => m.tipo === 'abono');
-  checkEq('★ el extracto muestra las dos partes del reparto', abonos.length, 2);
-  checkEq('★ y dice que vienen de un pago total',
-    abonos.every((a) => String(a.concepto).includes('parte de un pago total')), true);
+  checkEq('★ el pago total sale como UN solo movimiento', abonos.length, 1);
+  check('★ por el valor completo que se pago', abonos[0]?.abono, 1300000);
+  checkEq('★ marcado como pago total', abonos[0]?.es_pago_total, true);
+  checkEq('   y el concepto lo dice',
+    String(abonos[0]?.concepto).includes('Pago total'), true);
+  checkEq('   diciendo entre cuantas facturas se repartio',
+    String(abonos[0]?.concepto).includes('2 facturas'), true);
   checkEq('   con la nota en columna propia', abonos[0]?.descripcion, 'abono de la quincena');
-  checkEq('★ un pedazo de pago total NO se puede anular suelto',
-    abonos.every((a) => a.anulable === false), true);
+  checkEq('★ un pago total NO se puede anular suelto', abonos[0]?.anulable, false);
+
+  // El reparto, para desplegarlo: a que facturas fue y cuanto a cada una.
+  const reparto = abonos[0]?.detalle || [];
+  checkEq('★ el reparto se puede desplegar', reparto.length, 2);
+  check('★ FIFO tambien en el reparto que se ve', reparto[0]?.valor, 1000000);
+  check('   y el resto en la siguiente factura', reparto[1]?.valor, 300000);
+  checkEq('★ cada linea dice a que factura fue',
+    reparto.every((d) => Number(d.factura) > 0), true);
+  check('★ el reparto suma exactamente el pago',
+    reparto.reduce((t, d) => t + Number(d.valor), 0), 1300000);
+
+  // Un abono suelto NO se colapsa: sigue siendo su propia fila.
+  await creditos.registrarAbono(1, c3.id, { usuario_id: 1, valor: 50000, metodo: 'Efectivo' });
+  const movs3 = await creditos.getEstadoCuenta(1, '777');
+  const suelto = movs3.filter((m) => m.tipo === 'abono' && !m.es_pago_total);
+  checkEq('★ un abono suelto sigue siendo su propia fila', suelto.length, 1);
+  checkEq('   sin reparto que desplegar', suelto[0]?.detalle?.length ?? 0, 0);
+  checkEq('   y ese si se puede anular', suelto[0]?.anulable, true);
 
   // ── La baranda del doble clic ────────────────────────────────────────────
   await debeFallar('★ el mismo pago total no entra dos veces',
@@ -702,6 +726,40 @@ console.log('\n═══ 11. Pago total y anulación en créditos ═══');
 
   await debeFallar('no se puede anular dos veces',
     () => creditos.anularAbonoCredito(1, abonoId, { motivo: 'otra vez' }), 'ya está anulado');
+
+  // ── El pago total de PRESTAMOS tambien se puede desplegar ────────────────
+  //
+  // Prestamos ya mostraba el pago como UNA linea, pero no habia forma de ver en
+  // que se aplico sin abrir prestamo por prestamo. Las dos pantallas son la
+  // misma vista compartida: si una despliega y la otra no, el usuario cree que
+  // le falta informacion en la que no lo hace.
+  {
+    // Se busca a quien SI tenga un pago total, en vez de fijar un id: el orden
+    // de las secciones puede cambiar y una prueba anclada a un id miente en
+    // silencio cuando eso pasa.
+    const [dueno] = await q(`
+      SELECT at.persona_id
+        FROM abonos_totales at
+       WHERE at.tipo_persona = 'prestatario'
+         AND COALESCE(at.destino, 'prestamo') = 'prestamo'
+         AND EXISTS (SELECT 1 FROM abonos_prestamo ap WHERE ap.abono_total_id = at.id)
+       LIMIT 1`);
+    checkEq('★ hay un pago total de préstamos para revisar', Boolean(dueno), true);
+    const movsP = await prestamos.getEstadoCuenta(1, 'prestatario', dueno.persona_id);
+    const pagosTotales = movsP.filter((m) => m.es_pago_total);
+    checkEq('★ prestamos marca sus pagos totales', pagosTotales.length > 0, true);
+    const conReparto = pagosTotales.filter((m) => (m.detalle || []).length > 0);
+    checkEq('★ y traen su reparto para desplegar', conReparto.length > 0, true);
+    const d0 = conReparto[0];
+    check('★ el reparto suma lo que el pago aplico',
+      (d0.detalle || []).reduce((t, x) => t + Number(x.valor), 0), Number(d0.abono));
+    checkEq('★ cada linea dice a que prestamo fue',
+      (d0.detalle || []).every((x) => Number(x.prestamo_id) > 0 && x.producto), true);
+    // Un abono suelto de prestamos NO se marca como pago total.
+    const sueltos = movsP.filter((m) => m.tipo === 'abono' && !m.es_pago_total);
+    checkEq('★ un abono suelto de prestamos no finge ser pago total',
+      sueltos.every((m) => (m.detalle || []).length === 0), true);
+  }
 
   // ── Lo que ve el cliente en papel ────────────────────────────────────────
   // El extracto, el PDF y el Excel salen de la MISMA lista. Mostrar el abono

@@ -60,11 +60,23 @@ const findByIdYNegocio = async (id, negocioId) => {
 };
 
 // ── Abonos de un crédito ─────────────────────────────────────────────────────
+//
+// Un abono que vino de un PAGO TOTAL trae el contexto del pago completo: sin
+// eso, en la ficha de un credito aparece una cifra suelta que no coincide con
+// lo que el cliente pago, y el usuario cree que falta plata. Es exactamente el
+// reclamo que llego de produccion en prestamos.
 const getAbonos = async (creditoId) => {
   const { rows } = await pool.query(`
-    SELECT ac.*, u.nombre AS usuario_nombre
+    SELECT ac.*, u.nombre AS usuario_nombre,
+           (ac.abono_total_id IS NOT NULL)      AS de_pago_total,
+           at.valor_total                       AS pago_total_valor,
+           NULLIF(BTRIM(at.descripcion), '')    AS pago_total_descripcion,
+           -- Entre cuantas facturas se repartio aquel pago.
+           (SELECT COUNT(*) FROM abonos_credito h
+             WHERE h.abono_total_id = ac.abono_total_id)::int AS pago_total_facturas
     FROM abonos_credito ac
     LEFT JOIN usuarios u ON u.id = ac.usuario_id
+    LEFT JOIN abonos_totales at ON at.id = ac.abono_total_id
     WHERE ac.credito_id = $1
     ORDER BY ac.fecha ASC
   `, [creditoId]);
@@ -241,7 +253,7 @@ const getEstadoCuenta = async (negocioId, clave, sucursalId = null) => {
     SELECT fecha, tipo, concepto, cargo, abono, referencia_id,
            credito_id, factura_numero, credito_estado, anulable, orden,
            abono_total_id, pago_total_valor, descripcion,
-           anulado, motivo_anulacion
+           anulado, motivo_anulacion, es_pago_total, detalle
     FROM (
 
       -- 1. Factura a crédito otorgada (aumenta la deuda) — valor ORIGINAL
@@ -262,7 +274,9 @@ const getEstadoCuenta = async (negocioId, clave, sucursalId = null) => {
         NULL::numeric                                   AS pago_total_valor,
         NULL::text                                      AS descripcion,
         false                                           AS anulado,
-        NULL::text                                      AS motivo_anulacion
+        NULL::text                                      AS motivo_anulacion,
+        false                                           AS es_pago_total,
+        NULL::jsonb                                     AS detalle
       FROM cred
 
       UNION ALL
@@ -274,39 +288,78 @@ const getEstadoCuenta = async (negocioId, clave, sucursalId = null) => {
         NULL::numeric, cred.cuota_inicial,
         cred.id, cred.id, COALESCE(cred.factura_numero, cred.factura_id),
         cred.estado::text, false, 1,
-        NULL::integer, NULL::numeric, NULL::text, false, NULL::text
+        NULL::integer, NULL::numeric, NULL::text, false, NULL::text,
+        false, NULL::jsonb
       FROM cred
       WHERE cred.cuota_inicial > 0
 
       UNION ALL
 
-      -- 3. Abonos al capital
+      -- 3. Abonos al capital.
+      --
+      -- Un PAGO TOTAL se escribe como una fila por credito, pero el usuario hizo
+      -- UN pago: mostrarlo despedazado le hace buscar una plata que cree perdida
+      -- —paso exactamente asi en prestamos—. Aqui las filas que comparten
+      -- abono_total_id se COLAPSAN en un solo movimiento y el reparto viaja en
+      -- detalle para poder desplegarlo. Es el mismo criterio que ya usa el
+      -- estado de cuenta de acreedores.
+      --
+      -- El importe se DERIVA con SUM, nunca se guarda: cancelar una factura
+      -- anula uno de los pedazos y un total guardado quedaria inflado contra un
+      -- saldo ya bajado.
+      --
+      -- La clave de agrupacion es el pago cuando existe, y el id del abono
+      -- cuando no: asi un abono suelto sigue siendo su propia fila.
       SELECT
-        ac.fecha, 'abono'::text,
-        -- Cuando el abono es un pedazo de un PAGO TOTAL se dice en el concepto.
-        -- Sin eso, el usuario ve una cifra suelta que no coincide con lo que
-        -- pagó y cree que falta plata — pasó exactamente así en préstamos.
+        MIN(ac.fecha),
+        'abono'::text,
         CASE WHEN ac.abono_total_id IS NOT NULL
-          THEN 'Abono ' || COALESCE(ac.metodo, 'Efectivo')
-               || ' — factura #' || LPAD(COALESCE(cred.factura_numero, cred.factura_id)::text, 6, '0')
-               || ' (parte de un pago total)'
-          ELSE 'Abono ' || COALESCE(ac.metodo, 'Efectivo')
-               || ' — factura #' || LPAD(COALESCE(cred.factura_numero, cred.factura_id)::text, 6, '0')
-               || COALESCE(' (' || NULLIF(ac.notas, '') || ')', '')
+          THEN 'Pago total ' || COALESCE(MIN(ac.metodo), 'Efectivo')
+               || ' — repartido entre ' || COUNT(*)::text
+               || CASE WHEN COUNT(*) = 1 THEN ' factura' ELSE ' facturas' END
+          ELSE 'Abono ' || COALESCE(MIN(ac.metodo), 'Efectivo')
+               || ' — factura #' || LPAD(MIN(COALESCE(cred.factura_numero, cred.factura_id))::text, 6, '0')
+               || COALESCE(' (' || NULLIF(MIN(ac.notas), '') || ')', '')
         END,
-        NULL::numeric, ac.valor::numeric,
-        ac.id, cred.id, COALESCE(cred.factura_numero, cred.factura_id),
-        -- Un abono suelto se puede anular desde el extracto; el pedazo de un
-        -- pago total no, porque anular medio reparto deja la cuenta a medias.
-        cred.estado::text,
+        NULL::numeric,
+        SUM(ac.valor)::numeric,
+        -- referencia_id: el abono cuando es suelto (es lo que anula el service),
+        -- y el pago cuando esta colapsado (no hay una sola fila que representar).
+        COALESCE(ac.abono_total_id, MIN(ac.id)),
+        -- Un pago colapsado abarca VARIOS creditos: no tiene uno solo.
+        CASE WHEN ac.abono_total_id IS NULL THEN MIN(cred.id) END,
+        CASE WHEN ac.abono_total_id IS NULL THEN MIN(COALESCE(cred.factura_numero, cred.factura_id)) END,
+        -- Solo se marca Cancelado si TODOS los creditos del reparto lo estan;
+        -- si solo uno lo esta, su pedazo ya quedo anulado y eso lo cubre
+        -- valor_anulado. Marcar el movimiento entero sacaria del saldo
+        -- tambien lo que se abono a las facturas vivas.
+        CASE WHEN ac.abono_total_id IS NULL THEN MIN(cred.estado::text)
+             WHEN BOOL_AND(cred.estado = 'Cancelado') THEN 'Cancelado'
+        END,
         -- Anulable solo el abono suelto y todavia vigente: anular medio reparto
         -- de un pago total deja la cuenta a medias, y anular dos veces el mismo
         -- abono bajaria la deuda dos veces.
-        (ac.abono_total_id IS NULL AND NOT ac.anulado), 2,
-        ac.abono_total_id, at.valor_total::numeric,
+        (ac.abono_total_id IS NULL AND NOT BOOL_OR(ac.anulado)), 2,
+        ac.abono_total_id, MIN(at.valor_total)::numeric,
         -- La nota viaja en columna PROPIA, no pegada al concepto.
-        NULLIF(BTRIM(at.descripcion), ''),
-        ac.anulado, ac.motivo_anulacion
+        NULLIF(BTRIM(MIN(at.descripcion)), ''),
+        -- El movimiento sale del saldo solo si NO queda nada vigente en el.
+        BOOL_AND(ac.anulado),
+        MIN(ac.motivo_anulacion),
+        (ac.abono_total_id IS NOT NULL),
+        -- El reparto, para desplegarlo. En el orden en que se aplico (FIFO).
+        CASE WHEN ac.abono_total_id IS NOT NULL THEN
+          JSONB_AGG(
+            JSONB_BUILD_OBJECT(
+              'id',               ac.id,
+              'credito_id',       cred.id,
+              'factura',          COALESCE(cred.factura_numero, cred.factura_id),
+              'valor',            ac.valor,
+              'anulado',          ac.anulado,
+              'motivo_anulacion', ac.motivo_anulacion
+            ) ORDER BY cred.creado_en, cred.id
+          )
+        END
       FROM abonos_credito ac
       JOIN cred ON cred.id = ac.credito_id
       LEFT JOIN abonos_totales at ON at.id = ac.abono_total_id
@@ -315,6 +368,7 @@ const getEstadoCuenta = async (negocioId, clave, sucursalId = null) => {
       -- el numero y borraria la explicacion de por que cambio la cuenta, que es
       -- justo con lo que un negocio le responde a un cliente meses despues.
       -- Es el mismo criterio que ya usa prestamos.
+      GROUP BY ac.abono_total_id, (CASE WHEN ac.abono_total_id IS NULL THEN ac.id END)
 
       UNION ALL
 
@@ -325,7 +379,8 @@ const getEstadoCuenta = async (negocioId, clave, sucursalId = null) => {
         NULL::numeric, d.valor,
         d.id, cred.id, COALESCE(cred.factura_numero, cred.factura_id),
         cred.estado::text, false, 3,
-        NULL::integer, NULL::numeric, NULL::text, false, NULL::text
+        NULL::integer, NULL::numeric, NULL::text, false, NULL::text,
+        false, NULL::jsonb
       FROM dev_aud d
       JOIN cred ON cred.id = d.credito_id
 
@@ -340,7 +395,8 @@ const getEstadoCuenta = async (negocioId, clave, sucursalId = null) => {
         NULL::numeric, (cred.devuelto - COALESCE(aud.total, 0)),
         cred.id, cred.id, COALESCE(cred.factura_numero, cred.factura_id),
         cred.estado::text, false, 4,
-        NULL::integer, NULL::numeric, NULL::text, false, NULL::text
+        NULL::integer, NULL::numeric, NULL::text, false, NULL::text,
+        false, NULL::jsonb
       FROM cred
       LEFT JOIN LATERAL (
         SELECT SUM(d.valor) AS total FROM dev_aud d WHERE d.credito_id = cred.id
@@ -358,7 +414,8 @@ const getEstadoCuenta = async (negocioId, clave, sucursalId = null) => {
         NULL::numeric, (cred.valor_total - cred.cuota_inicial - cred.total_abonado),
         cred.id, cred.id, COALESCE(cred.factura_numero, cred.factura_id),
         cred.estado::text, false, 5,
-        NULL::integer, NULL::numeric, NULL::text, false, NULL::text
+        NULL::integer, NULL::numeric, NULL::text, false, NULL::text,
+        false, NULL::jsonb
       FROM cred
       LEFT JOIN LATERAL (
         SELECT MAX(ac.fecha) AS fecha FROM abonos_credito ac WHERE ac.credito_id = cred.id
@@ -398,7 +455,8 @@ const getEstadoCuenta = async (negocioId, clave, sucursalId = null) => {
         NULL::numeric, mm.valor::numeric,
         mm.id, cred.id, COALESCE(cred.factura_numero, cred.factura_id),
         cred.estado::text, false, 6,
-        NULL::integer, NULL::numeric, NULL::text, false, NULL::text
+        NULL::integer, NULL::numeric, NULL::text, false, NULL::text,
+        false, NULL::jsonb
       FROM movimientos_mora mm
       JOIN cred ON cred.id = mm.credito_id
       WHERE NOT mm.anulado

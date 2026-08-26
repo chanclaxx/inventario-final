@@ -932,7 +932,8 @@ const getEstadoCuenta = async (executor, negocioId, tipo, personaId, sucursalId 
   const { rows } = await executor.query(`
     SELECT fecha, tipo, concepto, cargo, abono, abono_capital, valor_anulado,
            referencia_id, anulable,
-           prestamo_id, prestamo_estado, descripcion, anulado, anulado_total, motivo_anulacion
+           prestamo_id, prestamo_estado, descripcion, anulado, anulado_total, motivo_anulacion,
+           es_pago_total, detalle
     FROM (
 
       -- Préstamos otorgados (aumentan deuda)
@@ -951,7 +952,9 @@ const getEstadoCuenta = async (executor, negocioId, tipo, personaId, sucursalId 
         false                                          AS anulado,
         false                                          AS anulado_total,
         0::numeric                                     AS valor_anulado,
-        NULL::text                                     AS motivo_anulacion
+        NULL::text                                     AS motivo_anulacion,
+        false                                          AS es_pago_total,
+        NULL::jsonb                                    AS detalle
       FROM prestamos p
       JOIN sucursales su ON su.id = p.sucursal_id
       WHERE su.negocio_id = $1 AND ${filtroPersona}
@@ -990,7 +993,9 @@ const getEstadoCuenta = async (executor, negocioId, tipo, personaId, sucursalId 
         (COALESCE(ap.valor_anulado, 0) > 0)            AS anulado,
         ap.anulado                                     AS anulado_total,
         COALESCE(ap.valor_anulado, 0)::numeric         AS valor_anulado,
-        ap.motivo_anulacion                            AS motivo_anulacion
+        ap.motivo_anulacion                            AS motivo_anulacion,
+        false                                          AS es_pago_total,
+        NULL::jsonb                                    AS detalle
       FROM abonos_prestamo ap
       JOIN prestamos  p  ON p.id  = ap.prestamo_id
       JOIN sucursales su ON su.id = p.sucursal_id
@@ -1037,7 +1042,24 @@ const getEstadoCuenta = async (executor, negocioId, tipo, personaId, sucursalId 
         COALESCE((SELECT SUM(ap6.valor_anulado) FROM abonos_prestamo ap6
                    WHERE ap6.abono_total_id = at.id), 0)::numeric AS valor_anulado,
         (SELECT MIN(ap4.motivo_anulacion) FROM abonos_prestamo ap4
-          WHERE ap4.abono_total_id = at.id AND ap4.anulado)  AS motivo_anulacion
+          WHERE ap4.abono_total_id = at.id AND ap4.anulado)  AS motivo_anulacion,
+        true                                           AS es_pago_total,
+        -- El reparto, para poder desplegarlo: a que prestamo fue cada pedazo y
+        -- cuanto. El extracto ya mostraba el pago como UNA linea, pero no habia
+        -- forma de ver en que se aplico sin ir prestamo por prestamo.
+        (SELECT JSONB_AGG(
+                  JSONB_BUILD_OBJECT(
+                    'id',               ap7.id,
+                    'prestamo_id',      p7.id,
+                    'factura',          COALESCE(p7.numero, p7.id),
+                    'producto',         p7.nombre_producto,
+                    'valor',            ap7.valor,
+                    'anulado',          ap7.anulado,
+                    'motivo_anulacion', ap7.motivo_anulacion
+                  ) ORDER BY p7.fecha, p7.id)
+           FROM abonos_prestamo ap7
+           JOIN prestamos p7 ON p7.id = ap7.prestamo_id
+          WHERE ap7.abono_total_id = at.id)             AS detalle
       FROM abonos_totales at
       JOIN sucursales su ON su.id = at.sucursal_id
       WHERE su.negocio_id = $1
@@ -1067,7 +1089,9 @@ const getEstadoCuenta = async (executor, negocioId, tipo, personaId, sucursalId 
         false                                          AS anulado,
         false                                          AS anulado_total,
         0::numeric                                     AS valor_anulado,
-        NULL::text                                     AS motivo_anulacion
+        NULL::text                                     AS motivo_anulacion,
+        false                                          AS es_pago_total,
+        NULL::jsonb                                    AS detalle
       FROM retomas r
       LEFT JOIN sucursales su ON su.id = r.sucursal_id
       WHERE r.prestamo_id IS NULL
@@ -1119,7 +1143,9 @@ const getEstadoCuenta = async (executor, negocioId, tipo, personaId, sucursalId 
         false                                          AS anulado,
         false                                          AS anulado_total,
         0::numeric                                     AS valor_anulado,
-        NULL::text                                     AS motivo_anulacion
+        NULL::text                                     AS motivo_anulacion,
+        false                                          AS es_pago_total,
+        NULL::jsonb                                    AS detalle
       FROM movimientos_mora mm
       JOIN prestamos  p  ON p.id  = mm.prestamo_id
       JOIN sucursales su ON su.id = p.sucursal_id

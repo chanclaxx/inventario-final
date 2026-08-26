@@ -2,7 +2,8 @@ import { useState, Fragment } from 'react';
 import { formatCOP, formatFecha } from '../../utils/formatters';
 import { Spinner } from '../ui/Spinner';
 import {
-  XCircle, ChevronLeft, ChevronRight, ArrowUpDown, MessageSquare, Table2,
+  XCircle, ChevronLeft, ChevronRight, ChevronDown, ChevronUp,
+  ArrowUpDown, MessageSquare, Table2,
 } from 'lucide-react';
 
 /**
@@ -19,7 +20,53 @@ import {
  * `saldo: null` significa "no entra al acumulado" (informativo o anulado).
  * `descripcion` es la nota libre de quien registró el movimiento (hoy la del
  * pago total): se muestra si viene, y los módulos que no la mandan no cambian.
+ *
+ * Un PAGO TOTAL llega como UN solo movimiento (`es_pago_total`) con su reparto
+ * en `detalle` — [{ id, factura, valor, anulado }] —, desplegable. El usuario
+ * hizo un pago: verlo partido en varias filas lo manda a buscar una plata que
+ * cree perdida. Los módulos que no mandan `detalle` no cambian en nada.
  */
+
+// ─── Reparto de un pago total ────────────────────────────────────────────────
+//
+// Vive aquí, y no en cada módulo, porque la cuadrícula y la conversación tienen
+// que contar lo mismo: si se duplicara, el primer arreglo dejaría a una de las
+// dos mintiendo.
+
+function lineasReparto(mov) {
+  return Array.isArray(mov.detalle) ? mov.detalle : [];
+}
+
+function BotonReparto({ abierto, n }) {
+  return (
+    <span className="flex items-center gap-0.5 text-[10px] text-indigo-500 font-medium">
+      {abierto ? 'ocultar reparto' : `ver a qué facturas (${n})`}
+      {abierto ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
+    </span>
+  );
+}
+
+// Cada módulo reparte sobre documentos distintos —créditos entre FACTURAS,
+// préstamos entre PRODUCTOS—, así que la línea usa lo que le manden en vez de
+// imponer un nombre que en una de las dos pantallas sería mentira.
+function LineaReparto({ d }) {
+  const etiqueta = d.producto
+    ? `préstamo #${d.factura ?? d.prestamo_id} · ${d.producto}`
+    : `factura #${String(d.factura ?? '').padStart(6, '0')}`;
+
+  return (
+    <div className="flex items-center justify-between gap-3 py-0.5">
+      <span className={`text-[11px] truncate ${d.anulado ? 'text-gray-400 line-through' : 'text-indigo-600'}`}>
+        ↳ {etiqueta}
+      </span>
+      <span className={`text-[11px] font-semibold whitespace-nowrap ${
+        d.anulado ? 'text-gray-400 line-through' : 'text-indigo-700'
+      }`}>
+        {formatCOP(d.valor)}
+      </span>
+    </div>
+  );
+}
 
 const PAGE_SIZE_MOVS = 20;
 
@@ -45,6 +92,8 @@ function SeparadorFecha({ fecha }) {
 function BurbujaMensaje({ mov, cfg, etiqueta, onAnular, acciones }) {
   const Icn = cfg.Icn;
   const esDerecha = cfg.lado === 'derecha';
+  const [abierto, setAbierto] = useState(false);
+  const reparto = lineasReparto(mov);
 
   return (
     <div className={`flex ${esDerecha ? 'justify-end' : 'justify-start'} px-2`}>
@@ -91,6 +140,21 @@ function BurbujaMensaje({ mov, cfg, etiqueta, onAnular, acciones }) {
             </p>
           )}
 
+          {/* Reparto de un pago total */}
+          {reparto.length > 0 && (
+            <>
+              <button type="button" onClick={() => setAbierto((v) => !v)}
+                className="mt-1 hover:opacity-70 transition-opacity">
+                <BotonReparto abierto={abierto} n={reparto.length} />
+              </button>
+              {abierto && (
+                <div className="mt-1 pt-1 border-t border-indigo-100">
+                  {reparto.map((d) => <LineaReparto key={d.id} d={d} />)}
+                </div>
+              )}
+            </>
+          )}
+
           {/* Footer: fecha + acciones */}
           <div className={`flex items-center gap-2 mt-1.5 ${esDerecha ? 'justify-end' : 'justify-start'}`}>
             <span className="text-[10px] text-gray-400">{formatFecha(mov.fecha)}</span>
@@ -121,7 +185,11 @@ function BurbujaMensaje({ mov, cfg, etiqueta, onAnular, acciones }) {
 // ─── Fila de cuadrícula contable ─────────────────────────────────────────────
 
 function FilaTabla({ mov, cfg, etiqueta, onAnular, acciones, isOdd }) {
+  const [abierto, setAbierto] = useState(false);
+  const reparto = lineasReparto(mov);
+
   return (
+    <>
     <tr className={isOdd ? 'bg-gray-50/60' : 'bg-white'}>
       <td className="px-3 py-2 text-xs text-gray-400 whitespace-nowrap align-middle">
         {formatFecha(mov.fecha)}
@@ -139,6 +207,12 @@ function FilaTabla({ mov, cfg, etiqueta, onAnular, acciones, isOdd }) {
           <span className="text-xs text-gray-700 leading-tight">{mov.concepto}</span>
           {mov.descripcion && (
             <span className="text-xs text-gray-400 italic leading-tight">· {mov.descripcion}</span>
+          )}
+          {reparto.length > 0 && (
+            <button type="button" onClick={() => setAbierto((v) => !v)}
+              className="hover:opacity-70 transition-opacity">
+              <BotonReparto abierto={abierto} n={reparto.length} />
+            </button>
           )}
         </div>
       </td>
@@ -170,6 +244,21 @@ function FilaTabla({ mov, cfg, etiqueta, onAnular, acciones, isOdd }) {
         </div>
       </td>
     </tr>
+
+    {/* El reparto va en su propia fila para no romper la cuadrícula contable:
+        las columnas de abono, cargo y saldo siguen alineadas. */}
+    {abierto && reparto.length > 0 && (
+      <tr className="bg-indigo-50/40">
+        <td className="px-3 py-1.5" />
+        <td className="px-3 py-1.5" colSpan={2}>
+          <div className="pl-3 flex flex-col">
+            {reparto.map((d) => <LineaReparto key={d.id} d={d} />)}
+          </div>
+        </td>
+        <td className="px-3 py-1.5" colSpan={3} />
+      </tr>
+    )}
+    </>
   );
 }
 
