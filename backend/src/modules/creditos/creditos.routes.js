@@ -25,6 +25,20 @@ router.get('/:id',           requireModulo('prestamos'), ctrl.getCreditoById);
 router.get('/:id/documento',       requireModulo('prestamos'), ctrl.getDocumento);
 router.get('/:id/pdf/aviso-mora',  requireModulo('prestamos'), ctrl.exportarPdfAvisoMora);
 router.get('/:id/pdf/paz-y-salvo', requireModulo('prestamos'), ctrl.exportarPdfPazYSalvo);
+// Pago total y anulación de abonos. Van ANTES de las rutas con /:id para que
+// 'abono-total' no se lea como el id de un crédito.
+router.post('/abono-total', requireModulo('prestamos'),
+  body('cliente_id').isInt({ min: 1 }).withMessage('cliente_id inválido'),
+  body('valor_total').isFloat({ gt: 0 }).withMessage('El valor del pago debe ser mayor a 0'),
+  body('descripcion').optional({ values: 'null' }).isString()
+    .isLength({ max: 200 }).withMessage('La descripción no puede pasar de 200 caracteres'),
+  validate, ctrl.registrarAbonoTotal);
+// Anular exige MOTIVO: sin él la cuenta cambia y nadie sabe por qué.
+router.patch('/abonos/:abonoId/anular', requireModulo('prestamos'), requireNivel('supervisor'),
+  body('motivo').isString().isLength({ min: 3, max: 200 })
+    .withMessage('Escribe el motivo de la anulación'),
+  validate, ctrl.anularAbono);
+
 router.post('/:id/abonos',   requireModulo('prestamos'), validarAbono, validate,    ctrl.registrarAbono);
 router.patch('/:id/saldar',  requireModulo('prestamos'), requireNivel('vendedor'),      ctrl.saldarCredito);
 router.patch('/:id/cancelar',requireModulo('prestamos'), requireNivel('admin_negocio'), ctrl.cancelarCredito);

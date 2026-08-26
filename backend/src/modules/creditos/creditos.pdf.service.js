@@ -38,11 +38,19 @@ const generarPdfEstadoCuenta = async ({ clave, negocioId, negocioNombre, logoNeg
   const config = {};
   for (const row of configRows) config[row.clave] = row.valor;
 
-  // Los créditos anulados se listan en gris y sin saldo, igual que un préstamo
-  // devuelto: quedan como constancia pero no arrastran deuda.
+  // Lo que no arrastra deuda se lista en gris y sin saldo, con la razon a la
+  // vista. Son dos casos distintos y el cliente tiene que poder distinguirlos:
+  //   - la FACTURA se cancelo: queda como constancia;
+  //   - el ABONO se anulo: se muestra el motivo que escribio la persona.
+  // Un movimiento que no suma y no dice por que es justo lo que hacia que el
+  // extracto y la deuda total no cuadraran.
   const movsPdf = movimientos.map((m) => {
-    const anulado = m.credito_estado === 'Cancelado';
-    return { ...m, nota: anulado ? 'Anulado' : null, atenuado: anulado };
+    const facturaCancelada = m.credito_estado === 'Cancelado';
+    const abonoAnulado     = m.anulado === true;
+    const nota = abonoAnulado     ? (m.motivo_anulacion || 'Anulado')
+               : facturaCancelada ? 'Anulado'
+               : null;
+    return { ...m, nota, atenuado: facturaCancelada || abonoAnulado };
   });
 
   return construirPdfEstadoCuenta({

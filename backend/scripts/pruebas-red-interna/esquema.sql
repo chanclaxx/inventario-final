@@ -76,6 +76,9 @@ CREATE TABLE abonos_credito (
   id SERIAL PRIMARY KEY, credito_id INT, usuario_id INT, valor NUMERIC,
   metodo TEXT, notas TEXT, fecha TIMESTAMP DEFAULT NOW()
 ,
+  -- Ata cada pedazo del reparto con el pago total que lo origino
+  -- (20260825_pago_total_credito.sql).
+  abono_total_id INT,
   -- Anulación con motivo (20260825_abonos_anulados.sql): un abono puede dejar
   -- de contar sin desaparecer, y la razón queda escrita.
   anulado BOOLEAN NOT NULL DEFAULT FALSE,

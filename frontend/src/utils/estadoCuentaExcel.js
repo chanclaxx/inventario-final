@@ -179,17 +179,30 @@ export function hojaEstadoCuenta(movimientos, tipoMeta) {
 
     const cargo = Number(m.cargo || 0);
     const abono = Number(m.abono || 0);
+    // Lo ANULADO se ve en su fila —con el motivo— pero no entra en el total de
+    // la columna: si entrara, la fila de TOTALES diria que el cliente abono mas
+    // de lo que realmente cuenta y no cuadraria contra la columna de saldo.
+    // `anulado_total` cubre el abono anulado entero y `valor_anulado` la parte
+    // de un pago total repartido que dejo de contar.
+    const sinContar = m.anulado_total === true
+      ? abono
+      : Math.min(abono, Number(m.valor_anulado || 0));
     sumaCargos += cargo;
-    sumaAbonos += abono;
+    sumaAbonos += abono - sinContar;
 
     put(ws, r, 0, 'n', i + 1,            sNat(bg));
     put(ws, r, 1, 's', fmtFecha(m.fecha), sC(bg));
     put(ws, r, 2, 's', meta.label,        sC(bg));
     // La descripción libre del movimiento (hoy la del pago total) va pegada al
     // concepto: la hoja tiene una sola columna de justificación.
-    const justificacion = m.descripcion
-      ? `${m.concepto || ''} · ${m.descripcion}`
-      : (m.concepto || '');
+    const partes = [m.concepto || ''];
+    if (m.descripcion) partes.push(m.descripcion);
+    // El motivo de la anulacion va en la misma columna: la hoja no tiene una
+    // propia y sin el queda una fila que no suma y no dice por que.
+    if (m.anulado || m.anulado_total || Number(m.valor_anulado || 0) > 0) {
+      partes.push(`ANULADO — ${m.motivo_anulacion || 'sin motivo registrado'}`);
+    }
+    const justificacion = partes.filter(Boolean).join(' · ');
     put(ws, r, 3, 's', justificacion,     sC(bg));
 
     if (cargo > 0) put(ws, r, 4, 'n', cargo, sN(bg));

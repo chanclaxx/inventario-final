@@ -205,7 +205,55 @@ const cobrarMora = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+
+// ── Pago total: un pago repartido entre los créditos del cliente ────────────
+const registrarAbonoTotal = async (req, res, next) => {
+  try {
+    const { cliente_id, valor_total, metodo, descripcion } = req.body;
+    const sucursal_id = req.todasSucursales ? req.body.sucursal_id : req.sucursal_id;
+    if (!sucursal_id) {
+      return res.status(400).json({ ok: false, error: 'Debes indicar la sucursal del pago' });
+    }
+    const data = await service.registrarAbonoTotalCredito(
+      req.user.negocio_id, Number(cliente_id), valor_total, metodo, req.user.id, sucursal_id,
+      { descripcion },
+    );
+    audit.registrar(req.user.negocio_id, req.user.id, 'Pago total a créditos', 'creditos',
+      data.abono_total_id, {
+        sucursal_id,
+        cliente_id: Number(cliente_id),
+        valor:      data.valor_total,
+        creditos:   data.distribucion.map((d) => d.credito_id),
+        descripcion: descripcion || null,
+      });
+    res.status(201).json({ ok: true, data, message: 'Pago registrado y repartido' });
+  } catch (err) { next(err); }
+};
+
+// ── Anular un abono ─────────────────────────────────────────────────────────
+// Mueve plata: queda en auditoría con el motivo que escribió la persona.
+const anularAbono = async (req, res, next) => {
+  try {
+    const data = await service.anularAbonoCredito(req.user.negocio_id, Number(req.params.abonoId), {
+      motivo: req.body?.motivo, usuario_id: req.user.id,
+    });
+    audit.registrar(req.user.negocio_id, req.user.id, 'Abono de crédito anulado', 'creditos',
+      data.credito_id, {
+        abono_id: data.abono_id, valor: data.valor, motivo: data.motivo,
+        credito_reabierto: data.reabierto, mora_anulada: data.mora_anulada,
+      });
+    res.json({
+      ok: true, data,
+      message: data.reabierto
+        ? 'Abono anulado. El crédito volvió a quedar activo.'
+        : 'Abono anulado',
+    });
+  } catch (err) { next(err); }
+};
+
+
 module.exports = {
+  registrarAbonoTotal, anularAbono,
   getCreditos, getCreditoById, registrarAbono, saldarCredito, cancelarCredito,
   getEstadoCuenta, exportarPdfEstadoCuenta,
   getDocumento, exportarPdfAvisoMora, exportarPdfPazYSalvo,

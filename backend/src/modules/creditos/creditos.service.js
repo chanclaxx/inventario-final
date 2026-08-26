@@ -322,8 +322,12 @@ const getEstadoCuenta = async (negocioId, clave, sucursalId = null) => {
   return rows.map((row) => {
     const cargo = Number(row.cargo || 0);
     const abono = Number(row.abono || 0);
-    const anulado    = row.credito_estado === 'Cancelado';
-    const fueraDeSaldo = anulado || INFORMATIVOS.has(row.tipo);
+    const facturaCancelada = row.credito_estado === 'Cancelado';
+    // Un abono ANULADO sigue en la lista, pero no baja la deuda: por eso queda
+    // fuera del saldo corrido igual que una factura cancelada. Contarlo seria
+    // volver al descuadre entre el extracto y la deuda total.
+    const abonoAnulado = row.anulado === true;
+    const fueraDeSaldo = facturaCancelada || abonoAnulado || INFORMATIVOS.has(row.tipo);
 
     if (!fueraDeSaldo) saldo = saldo + cargo - abono;
 
@@ -339,6 +343,17 @@ const getEstadoCuenta = async (negocioId, clave, sucursalId = null) => {
       factura_numero: row.factura_numero ? Number(row.factura_numero) : null,
       credito_estado: row.credito_estado || null,
       anulable:       row.anulable,
+      // Nota libre del usuario sobre el pago; viaja en columna propia para que
+      // la pantalla, el PDF y el Excel la muestren sin parsear el concepto.
+      descripcion:     row.descripcion || null,
+      abono_total_id:  row.abono_total_id ? Number(row.abono_total_id) : null,
+      pago_total_valor: row.pago_total_valor != null ? Number(row.pago_total_valor) : null,
+      anulado:          abonoAnulado,
+      // Cuanto de este movimiento dejo de contar. El Excel y el PDF lo usan
+      // para no sumarlo en los totales: una fila que se ve pero no cuenta.
+      anulado_total:    abonoAnulado,
+      valor_anulado:    abonoAnulado ? Number(row.abono || 0) : 0,
+      motivo_anulacion: row.motivo_anulacion || null,
     };
   });
 };
@@ -450,10 +465,185 @@ const cobrarMora = async (negocioId, creditoId, { valor, metodo, usuario_id, con
   }
 };
 
+
+// ─── Pago total: un solo pago repartido entre los créditos del cliente ───────
+//
+// Espejo del de préstamos, y con las mismas reglas — que no son cosméticas:
+//
+//   · **Por sucursal.** Un pago hecho en una sede no baja la deuda de otra, o
+//     la cartera de cada una deja de cuadrar. Es lo que confundió al usuario en
+//     préstamos: veía préstamos pendientes que el pago "no tocaba".
+//   · **FIFO**, del crédito más viejo al más nuevo, llenando cada uno.
+//   · **Baranda contra el doble clic**: un pago idéntico dentro de la ventana no
+//     es un segundo pago, es el formulario enviándose dos veces. En préstamos
+//     eso dejó 45 pagos duplicados por $106.887.760 antes de que nadie lo viera.
+//   · **Tope**: no puede superar lo que la persona debe en esa sucursal. Se
+//     rechaza con el monto exacto en el mensaje, en vez de dejar plata suelta.
+//   · **Descripción** libre, tope 200, que viaja en columna propia y no pegada
+//     al concepto.
+const registrarAbonoTotalCredito = async (
+  negocioId, clienteId, valorTotal, metodo, usuarioId, sucursalId, { descripcion = null } = {},
+) => {
+  const valor = Math.round(Number(valorTotal));
+  if (!(valor > 0)) throw { status: 400, message: 'El valor del pago debe ser mayor a 0' };
+  if (!sucursalId)  throw { status: 400, message: 'Debes indicar la sucursal del pago' };
+
+  const gemelo = await repo.buscarAbonoTotalCreditoGemelo(pool, {
+    cliente_id: clienteId, valor_total: valor, metodo,
+  });
+  if (gemelo) {
+    throw {
+      status: 409,
+      message: 'Este mismo pago total ya se registró hace un momento. Revisa el estado de cuenta antes de volver a intentarlo.',
+    };
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const activos = await repo.findCreditosActivosDeCliente(client, clienteId, negocioId, sucursalId);
+    if (!activos.length) {
+      throw { status: 400, message: 'Este cliente no tiene créditos activos en esta sucursal' };
+    }
+
+    // El tope incluye los cargos pendientes: si solo se contara el capital, un
+    // pago que cubre los intereses sería rechazado por "excedente".
+    const conCargos = await moraService.anotarLista(activos, 'credito');
+    const totalDebido = conCargos.reduce((s, c) => {
+      const cargos = Number(c.mora?.pendiente || 0) + Number(c.interes?.pendiente || 0);
+      return s + Math.max(0, Number(c.saldo_pendiente)) + cargos;
+    }, 0);
+
+    if (valor > Math.round(totalDebido)) {
+      throw {
+        status: 400,
+        message: `El pago supera lo que el cliente debe en esta sucursal ($${Math.round(totalDebido).toLocaleString('es-CO')}).`,
+      };
+    }
+
+    const cabecera = await repo.insertarAbonoTotalCredito(client, {
+      cliente_id: clienteId, sucursal_id: sucursalId, valor_total: valor,
+      metodo: metodo || 'Efectivo', usuario_id: usuarioId, descripcion,
+    });
+
+    let restante = valor;
+    const distribucion = [];
+    for (const credito of activos) {
+      if (restante <= 0) break;
+      const pendiente = Math.max(0, Number(credito.saldo_pendiente));
+      if (pendiente <= 0) continue;
+
+      const monto = Math.min(restante, pendiente);
+      await repo.insertarAbonoDeTotal(client, {
+        credito_id: credito.id, usuario_id: usuarioId, valor: monto,
+        metodo: metodo || 'Efectivo', abono_total_id: cabecera.id,
+      });
+      restante -= monto;
+
+      // Cerrar el crédito pasa por el MISMO camino que un abono normal: no se
+      // marca 'Saldado' a mano. Ese helper exige que capital, mora e interés
+      // estén los tres en cero — cerrar con un cargo vivo dejaría la deuda
+      // huérfana y generaría la factura antes de tiempo.
+      // Devuelve un objeto con el detalle del cierre; hacia afuera se expone
+      // como un booleano, que es lo que la pantalla necesita.
+      const cierre = await cerrarSiPagadoEnTx(client, credito.id, negocioId);
+      distribucion.push({
+        credito_id:  credito.id,
+        factura:     credito.factura_numero,
+        abonado:     monto,
+        saldado:     cierre?.saldado === true,
+        factura_id:  cierre?.factura_id ?? null,
+      });
+    }
+
+    await client.query('COMMIT');
+    return {
+      abono_total_id: cabecera.id,
+      fecha:          cabecera.fecha,
+      valor_total:    valor,
+      sobrante:       restante,
+      distribucion,
+    };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+};
+
+// ─── Anular un abono de crédito ──────────────────────────────────────────────
+//
+// El abono NO se borra: queda marcado con su motivo, y por eso el extracto
+// puede explicar por qué la cuenta cambió. Borrarlo cuadraría el número y
+// destruiría la evidencia — que es justo lo que deja a un negocio sin con qué
+// responderle a un cliente meses después.
+//
+// Tres efectos que hay que resolver juntos, o la cuenta queda a medias:
+//   1. `total_abonado` baja por lo que ese abono aportaba.
+//   2. Si el crédito estaba 'Saldado' y deja de estarlo, **vuelve a Activo**.
+//      Sin esto la deuda no reaparece: un saldado no cuenta por más que le
+//      falte plata. Es el mismo paso que hizo falta al corregir los duplicados.
+//   3. La MORA que se haya cobrado dentro de ese abono se anula en cascada, o
+//      el cliente queda con la mora "pagada" después de revertirse el pago.
+const anularAbonoCredito = async (negocioId, abonoId, { motivo, usuario_id } = {}) => {
+  const razon = String(motivo || '').trim();
+  if (razon.length < 3) {
+    throw { status: 400, message: 'Escribe el motivo de la anulación (mínimo 3 caracteres)' };
+  }
+
+  const abono = await repo.findAbonoCreditoById(pool, abonoId, negocioId);
+  if (!abono) throw { status: 404, message: 'Abono no encontrado' };
+  if (abono.anulado) throw { status: 400, message: 'Este abono ya está anulado' };
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const res = await repo.anularAbonoCredito(client, abonoId, abono.credito_id,
+      `Anulado: ${razon}`);
+    if (!res) throw { status: 400, message: 'Este abono ya está anulado' };
+
+    // 3. La mora cobrada dentro de este abono se anula con él.
+    const moraRepo = require('../mora/mora.repository');
+    const moraAnulada = await moraRepo.anularPorAbono(client, { abono_credito_id: abonoId });
+
+    // 2. Si dejó de estar cubierto, el crédito vuelve a Activo.
+    const { rows: [cr] } = await client.query(`
+      SELECT valor_total, cuota_inicial, total_abonado, estado FROM creditos WHERE id = $1
+    `, [abono.credito_id]);
+    const saldo = Number(cr.valor_total) - Number(cr.cuota_inicial) - Number(cr.total_abonado);
+    let reabierto = false;
+    if (cr.estado === 'Saldado' && saldo > 0) {
+      await client.query(`UPDATE creditos SET estado = 'Activo' WHERE id = $1`, [abono.credito_id]);
+      reabierto = true;
+    }
+
+    await client.query('COMMIT');
+    return {
+      abono_id:    abonoId,
+      credito_id:  abono.credito_id,
+      valor:       res.valor,
+      motivo:      razon,
+      reabierto,
+      mora_anulada: Array.isArray(moraAnulada) ? moraAnulada.length : 0,
+      saldo_actual: Math.max(0, saldo),
+      usuario_id,
+    };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+};
+
 module.exports = {
   getCreditos, getCreditoById, registrarAbono, saldarCredito, cancelarCredito,
   getEstadoCuenta, getResumenCuenta, getDocumento,
   fijarPlazo, fijarInteres, condonarMora, cobrarMora,
+  registrarAbonoTotalCredito, anularAbonoCredito,
   // Lo usa mora.service para cerrar el crédito cuando se cobra o se condona el
   // último cargo pendiente.
   cerrarSiPagadoEnTx,

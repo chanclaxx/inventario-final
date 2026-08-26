@@ -29,10 +29,11 @@ import { ModalDevolucionParcialCredito } from '../facturas/ModalDevolucionParcia
 import { ModalExportarCuenta }   from '../../components/ui/ModalExportarCuenta';
 import { ModalDocumentosObligacion } from '../../components/documentos/ModalDocumentosObligacion';
 import { EstadoCuentaCredito }   from './EstadoCuentaCredito';
+import { ModalAbonoTotalCredito } from './ModalAbonoTotalCredito';
 import { exportarCuentaCreditoExcel } from '../../utils/exportarCuentaCreditoExcel';
 import {
   CreditCard, Plus, CheckCircle, XCircle, AlertTriangle, LayoutList, FileDown,
-  ChevronLeft, ChevronDown, ChevronUp, RotateCcw, ChevronRight, Loader2, Printer,
+  ChevronLeft, ChevronDown, ChevronUp, RotateCcw, ChevronRight, Loader2, Printer, Layers,
 } from 'lucide-react';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -820,6 +821,7 @@ function BotonExportarExcelCredito({ clave, nombre, cedula, telefono, creditos }
 
 function VistaDetallePersonaCredito({
   persona, onVolver, onAbonar, onSaldar, onCancelar, onDevolucion, onImprimir,
+  onPagoTotal,
 }) {
   const [cerradosAbiertos, setCerradosAbiertos] = useState(false);
   const [tabDetalle,       setTabDetalle]       = useState('creditos'); // 'creditos' | 'cuenta'
@@ -893,6 +895,19 @@ function VistaDetallePersonaCredito({
             </p>
           </div>
         </div>
+
+        {/* Pago total. Solo con más de un crédito activo: con uno solo el abono
+            normal hace lo mismo y con menos pasos. Misma regla que préstamos. */}
+        {creditosActivos.length > 1 && onPagoTotal && (
+          <div className="px-4 py-3 border-t border-gray-100">
+            <button
+              onClick={onPagoTotal}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium
+                border border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100 transition-colors">
+              <Layers size={12} /> Pago total
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Tabs: Créditos / Estado de cuenta — mismo patrón que Préstamos */}
@@ -1131,6 +1146,9 @@ export function TabCreditos({ personaInicial = null }) {
   const [creditoCancelar,     setCreditoCancelar]     = useState(null);
   const [creditoDevolucion,   setCreditoDevolucion]   = useState(null);
   const [creditoImprimir,     setCreditoImprimir]     = useState(null);
+  // Pago total: guarda la PERSONA, no un crédito — el pago se reparte entre
+  // todos los créditos activos que esa persona tiene en la sucursal.
+  const [personaPagoTotal,    setPersonaPagoTotal]    = useState(null);
 
   const { data: creditosData, isLoading } = useQuery({
     queryKey: ['creditos'],
@@ -1194,6 +1212,13 @@ export function TabCreditos({ personaInicial = null }) {
         <DocumentosCredito credito={creditoImprimir}
           onClose={() => setCreditoImprimir(null)} />
       )}
+      {personaPagoTotal && (
+        <ModalAbonoTotalCredito
+          nombre={personaPagoTotal.nombre_cliente}
+          clienteId={personaPagoTotal.creditos.find((c) => c.cliente_id)?.cliente_id}
+          creditos={personaPagoTotal.creditos}
+          onClose={() => setPersonaPagoTotal(null)} />
+      )}
     </>
   );
 
@@ -1211,6 +1236,7 @@ export function TabCreditos({ personaInicial = null }) {
           onCancelar={setCreditoCancelar}
           onDevolucion={setCreditoDevolucion}
           onImprimir={setCreditoImprimir}
+          onPagoTotal={() => setPersonaPagoTotal(personaActualizada)}
         />
         {modales}
       </>

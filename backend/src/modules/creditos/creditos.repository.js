@@ -9,6 +9,10 @@ const findAll = async (sucursalId, negocioId) => {
     SELECT
       c.id, c.valor_total, c.cuota_inicial, c.total_abonado,
       c.estado, c.creado_en, c.sucursal_id,
+      -- El pago total se dirige al CLIENTE, no a la clave de texto con la que
+      -- la pantalla agrupa las tarjetas. Sin este id habria que resolverlo por
+      -- cedula/nombre y dos personas homonimas compartirian el pago.
+      c.cliente_id,
       -- Cargos: solo el pacto. Lo causado/pendiente lo deriva mora.service.
       c.fecha_limite, c.mora_condicion,
       c.interes_condicion, c.interes_desde,
@@ -235,7 +239,9 @@ const getEstadoCuenta = async (negocioId, clave, sucursalId = null) => {
     )
 
     SELECT fecha, tipo, concepto, cargo, abono, referencia_id,
-           credito_id, factura_numero, credito_estado, anulable, orden
+           credito_id, factura_numero, credito_estado, anulable, orden,
+           abono_total_id, pago_total_valor, descripcion,
+           anulado, motivo_anulacion
     FROM (
 
       -- 1. Factura a crédito otorgada (aumenta la deuda) — valor ORIGINAL
@@ -251,7 +257,12 @@ const getEstadoCuenta = async (negocioId, clave, sucursalId = null) => {
         COALESCE(cred.factura_numero, cred.factura_id)  AS factura_numero,
         cred.estado::text                               AS credito_estado,
         false                                           AS anulable,
-        0                                               AS orden
+        0                                               AS orden,
+        NULL::integer                                   AS abono_total_id,
+        NULL::numeric                                   AS pago_total_valor,
+        NULL::text                                      AS descripcion,
+        false                                           AS anulado,
+        NULL::text                                      AS motivo_anulacion
       FROM cred
 
       UNION ALL
@@ -262,7 +273,8 @@ const getEstadoCuenta = async (negocioId, clave, sucursalId = null) => {
         'Cuota inicial — factura #' || LPAD(COALESCE(cred.factura_numero, cred.factura_id)::text, 6, '0'),
         NULL::numeric, cred.cuota_inicial,
         cred.id, cred.id, COALESCE(cred.factura_numero, cred.factura_id),
-        cred.estado::text, false, 1
+        cred.estado::text, false, 1,
+        NULL::integer, NULL::numeric, NULL::text, false, NULL::text
       FROM cred
       WHERE cred.cuota_inicial > 0
 
@@ -271,18 +283,38 @@ const getEstadoCuenta = async (negocioId, clave, sucursalId = null) => {
       -- 3. Abonos al capital
       SELECT
         ac.fecha, 'abono'::text,
-        'Abono ' || COALESCE(ac.metodo, 'Efectivo')
-          || ' — factura #' || LPAD(COALESCE(cred.factura_numero, cred.factura_id)::text, 6, '0')
-          || COALESCE(' (' || NULLIF(ac.notas, '') || ')', ''),
+        -- Cuando el abono es un pedazo de un PAGO TOTAL se dice en el concepto.
+        -- Sin eso, el usuario ve una cifra suelta que no coincide con lo que
+        -- pagó y cree que falta plata — pasó exactamente así en préstamos.
+        CASE WHEN ac.abono_total_id IS NOT NULL
+          THEN 'Abono ' || COALESCE(ac.metodo, 'Efectivo')
+               || ' — factura #' || LPAD(COALESCE(cred.factura_numero, cred.factura_id)::text, 6, '0')
+               || ' (parte de un pago total)'
+          ELSE 'Abono ' || COALESCE(ac.metodo, 'Efectivo')
+               || ' — factura #' || LPAD(COALESCE(cred.factura_numero, cred.factura_id)::text, 6, '0')
+               || COALESCE(' (' || NULLIF(ac.notas, '') || ')', '')
+        END,
         NULL::numeric, ac.valor::numeric,
         ac.id, cred.id, COALESCE(cred.factura_numero, cred.factura_id),
-        cred.estado::text, false, 2
+        -- Un abono suelto se puede anular desde el extracto; el pedazo de un
+        -- pago total no, porque anular medio reparto deja la cuenta a medias.
+        cred.estado::text,
+        -- Anulable solo el abono suelto y todavia vigente: anular medio reparto
+        -- de un pago total deja la cuenta a medias, y anular dos veces el mismo
+        -- abono bajaria la deuda dos veces.
+        (ac.abono_total_id IS NULL AND NOT ac.anulado), 2,
+        ac.abono_total_id, at.valor_total::numeric,
+        -- La nota viaja en columna PROPIA, no pegada al concepto.
+        NULLIF(BTRIM(at.descripcion), ''),
+        ac.anulado, ac.motivo_anulacion
       FROM abonos_credito ac
       JOIN cred ON cred.id = ac.credito_id
-      -- Un abono ANULADO no baja la deuda: su cobro ya no está en la cuenta
-      -- (se canceló la factura, o se devolvieron los productos). Mismo criterio
-      -- que en préstamos.
-      WHERE NOT ac.anulado
+      LEFT JOIN abonos_totales at ON at.id = ac.abono_total_id
+      -- El abono anulado NO se filtra: se muestra marcado con su motivo y sin
+      -- bajar la deuda (el service lo deja fuera del saldo). Ocultarlo cuadraria
+      -- el numero y borraria la explicacion de por que cambio la cuenta, que es
+      -- justo con lo que un negocio le responde a un cliente meses despues.
+      -- Es el mismo criterio que ya usa prestamos.
 
       UNION ALL
 
@@ -292,7 +324,8 @@ const getEstadoCuenta = async (negocioId, clave, sucursalId = null) => {
         'Devolución de productos — factura #' || LPAD(COALESCE(cred.factura_numero, cred.factura_id)::text, 6, '0'),
         NULL::numeric, d.valor,
         d.id, cred.id, COALESCE(cred.factura_numero, cred.factura_id),
-        cred.estado::text, false, 3
+        cred.estado::text, false, 3,
+        NULL::integer, NULL::numeric, NULL::text, false, NULL::text
       FROM dev_aud d
       JOIN cred ON cred.id = d.credito_id
 
@@ -306,7 +339,8 @@ const getEstadoCuenta = async (negocioId, clave, sucursalId = null) => {
           || ' (fecha no registrada)',
         NULL::numeric, (cred.devuelto - COALESCE(aud.total, 0)),
         cred.id, cred.id, COALESCE(cred.factura_numero, cred.factura_id),
-        cred.estado::text, false, 4
+        cred.estado::text, false, 4,
+        NULL::integer, NULL::numeric, NULL::text, false, NULL::text
       FROM cred
       LEFT JOIN LATERAL (
         SELECT SUM(d.valor) AS total FROM dev_aud d WHERE d.credito_id = cred.id
@@ -323,7 +357,8 @@ const getEstadoCuenta = async (negocioId, clave, sucursalId = null) => {
         'Ajuste por saldo condonado — factura #' || LPAD(COALESCE(cred.factura_numero, cred.factura_id)::text, 6, '0'),
         NULL::numeric, (cred.valor_total - cred.cuota_inicial - cred.total_abonado),
         cred.id, cred.id, COALESCE(cred.factura_numero, cred.factura_id),
-        cred.estado::text, false, 5
+        cred.estado::text, false, 5,
+        NULL::integer, NULL::numeric, NULL::text, false, NULL::text
       FROM cred
       LEFT JOIN LATERAL (
         SELECT MAX(ac.fecha) AS fecha FROM abonos_credito ac WHERE ac.credito_id = cred.id
@@ -362,7 +397,8 @@ const getEstadoCuenta = async (negocioId, clave, sucursalId = null) => {
         END || ' — factura #' || LPAD(COALESCE(cred.factura_numero, cred.factura_id)::text, 6, '0'),
         NULL::numeric, mm.valor::numeric,
         mm.id, cred.id, COALESCE(cred.factura_numero, cred.factura_id),
-        cred.estado::text, false, 6
+        cred.estado::text, false, 6,
+        NULL::integer, NULL::numeric, NULL::text, false, NULL::text
       FROM movimientos_mora mm
       JOIN cred ON cred.id = mm.credito_id
       WHERE NOT mm.anulado
@@ -450,10 +486,113 @@ const anularSobranteDeAbonosCredito = async (client, creditoId, sobrante, motivo
   return { anulados, total };
 };
 
+// ── Pago total: créditos ACTIVOS de un cliente, en orden de antigüedad ───────
+//
+// El reparto va del más viejo al más nuevo y **solo dentro de una sucursal**:
+// un pago hecho en una sede no puede bajar la deuda de otra, o la cartera de
+// cada una deja de cuadrar. Es la misma regla que en préstamos.
+const findCreditosActivosDeCliente = async (executor, clienteId, negocioId, sucursalId) => {
+  const { rows } = await executor.query(`
+    SELECT c.id, c.valor_total, c.cuota_inicial, c.total_abonado, c.estado,
+           c.sucursal_id, c.fecha_limite, c.mora_condicion,
+           c.interes_condicion, c.interes_desde, c.creado_en,
+           (c.valor_total - c.cuota_inicial - c.total_abonado) AS saldo_pendiente,
+           f.numero AS factura_numero, f.nombre_cliente
+      FROM creditos   c
+      JOIN facturas   f  ON f.id  = c.factura_id
+      JOIN sucursales su ON su.id = c.sucursal_id
+     WHERE c.cliente_id = $1
+       AND su.negocio_id = $2
+       AND c.sucursal_id = $3
+       AND c.estado = 'Activo'
+       AND (c.valor_total - c.cuota_inicial - c.total_abonado) > 0
+     ORDER BY c.creado_en ASC
+  `, [clienteId, negocioId, sucursalId]);
+  return rows;
+};
+
+const insertarAbonoTotalCredito = async (client, {
+  cliente_id, sucursal_id, valor_total, metodo, usuario_id, descripcion,
+}) => {
+  const { rows } = await client.query(`
+    INSERT INTO abonos_totales
+      (tipo_persona, persona_id, sucursal_id, valor_total, metodo, usuario_id, descripcion, destino)
+    VALUES ('cliente', $1, $2, $3, $4, $5, $6, 'credito')
+    RETURNING id, fecha
+  `, [cliente_id, sucursal_id, valor_total, metodo, usuario_id || null,
+      descripcion ? String(descripcion).trim().slice(0, 200) : null]);
+  return rows[0];
+};
+
+/** Inserta un pedazo del reparto, atado al pago que lo originó. */
+const insertarAbonoDeTotal = async (client, { credito_id, usuario_id, valor, metodo, abono_total_id }) => {
+  const { rows: abono } = await client.query(`
+    INSERT INTO abonos_credito(credito_id, usuario_id, valor, metodo, abono_total_id)
+    VALUES ($1, $2, $3, $4, $5) RETURNING id
+  `, [credito_id, usuario_id || null, valor, metodo, abono_total_id]);
+  const { rows } = await client.query(`
+    UPDATE creditos SET total_abonado = total_abonado + $1 WHERE id = $2
+    RETURNING valor_total, cuota_inicial, total_abonado
+  `, [valor, credito_id]);
+  return { ...rows[0], abono_id: abono[0].id };
+};
+
+/** El gemelo de un pago total de créditos: misma persona, valor y ventana. */
+const buscarAbonoTotalCreditoGemelo = async (executor, { cliente_id, valor_total, metodo, segundos = 90 }) => {
+  const { rows } = await executor.query(`
+    SELECT id, fecha FROM abonos_totales
+     WHERE destino = 'credito' AND tipo_persona = 'cliente' AND persona_id = $1
+       AND valor_total = $2 AND COALESCE(metodo, '') = COALESCE($3, '')
+       AND fecha > NOW() - ($4 || ' seconds')::interval
+     LIMIT 1
+  `, [cliente_id, valor_total, metodo || null, String(segundos)]);
+  return rows[0] || null;
+};
+
+// ── Anular UN abono de crédito ───────────────────────────────────────────────
+//
+// Se anula, no se borra: la fila queda en el extracto con su motivo, que es la
+// única forma de explicar después por qué la cuenta cambió.
+const anularAbonoCredito = async (client, abonoId, creditoId, motivo) => {
+  const { rows } = await client.query(`
+    WITH previo AS (
+      SELECT id, (valor - valor_anulado) AS pendiente
+        FROM abonos_credito
+       WHERE id = $1 AND credito_id = $2 AND NOT anulado
+    )
+    UPDATE abonos_credito a
+       SET anulado = TRUE, valor_anulado = a.valor,
+           motivo_anulacion = $3, anulado_en = NOW()
+      FROM previo pv WHERE a.id = pv.id
+     RETURNING pv.pendiente AS valor
+  `, [abonoId, creditoId, motivo]);
+  if (!rows.length) return null;
+  const valor = Number(rows[0].valor);
+  await client.query(
+    `UPDATE creditos SET total_abonado = GREATEST(0, total_abonado - $1) WHERE id = $2`,
+    [valor, creditoId],
+  );
+  return { valor };
+};
+
+const findAbonoCreditoById = async (executor, abonoId, negocioId) => {
+  const { rows } = await executor.query(`
+    SELECT ac.*, c.estado AS credito_estado, c.sucursal_id, c.factura_id,
+           c.valor_total, c.cuota_inicial, c.total_abonado
+      FROM abonos_credito ac
+      JOIN creditos   c  ON c.id  = ac.credito_id
+      JOIN sucursales su ON su.id = c.sucursal_id
+     WHERE ac.id = $1 AND su.negocio_id = $2
+  `, [abonoId, negocioId]);
+  return rows[0] || null;
+};
+
 module.exports = {
   findAll, findByIdYNegocio,
   getAbonos, create, insertarAbono, updateEstado,
   findByFacturaId, reducirValorTotal,
   findPersonaPorClave, getEstadoCuenta,
   anularAbonosDeCredito, anularSobranteDeAbonosCredito,
+  findCreditosActivosDeCliente, insertarAbonoTotalCredito, insertarAbonoDeTotal,
+  buscarAbonoTotalCreditoGemelo, anularAbonoCredito, findAbonoCreditoById,
 };

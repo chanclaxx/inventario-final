@@ -1,6 +1,8 @@
-import { useQuery } from '@tanstack/react-query';
-import { getEstadoCuentaCredito } from '../../api/creditos.api';
+import { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { getEstadoCuentaCredito, anularAbonoCredito } from '../../api/creditos.api';
 import { EstadoCuentaBase } from '../../components/EstadoCuenta/EstadoCuentaBase';
+import { formatCOP } from '../../utils/formatters';
 import { FileText, TrendingDown, RotateCcw, Wallet, AlertTriangle, HandCoins } from 'lucide-react';
 
 /**
@@ -91,7 +93,15 @@ const TIPO_CONFIG_CREDITO = {
   },
 };
 
+const MIN_MOTIVO = 3;
+const MAX_MOTIVO = 200;
+
 export function EstadoCuentaCredito({ clave }) {
+  const queryClient = useQueryClient();
+  const [anulando, setAnulando] = useState(null);
+  const [motivo,   setMotivo]   = useState('');
+  const [error,    setError]    = useState('');
+
   const { data: movimientos = [], isLoading } = useQuery({
     queryKey:  ['estado-cuenta-credito', clave],
     queryFn:   () => getEstadoCuentaCredito(clave).then((r) => r.data.data),
@@ -99,19 +109,97 @@ export function EstadoCuentaCredito({ clave }) {
     staleTime: 30_000,
   });
 
-  // Una factura anulada queda como constancia pero no arrastra deuda: el
-  // backend le pone `saldo: null` y aquí se marca para que se entienda por qué.
-  const getEtiqueta = (mov) => (mov.credito_estado === 'Cancelado' ? 'Anulada' : null);
+  const anular = useMutation({
+    mutationFn: () => anularAbonoCredito(anulando.referencia_id, motivo.trim()),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['estado-cuenta-credito'], exact: false });
+      queryClient.invalidateQueries({ queryKey: ['creditos'], exact: false });
+      cerrar();
+    },
+    onError: (err) => setError(err.response?.data?.error || 'No se pudo anular el abono'),
+  });
+
+  const cerrar = () => { setAnulando(null); setMotivo(''); setError(''); };
+
+  // Dos motivos distintos por los que una línea no cuenta, y cada uno se explica:
+  //   · el abono se anuló  → se muestra la razón que escribió la persona;
+  //   · la factura se canceló → queda como constancia sin arrastrar deuda.
+  // Sin la etiqueta, el usuario ve un movimiento que no suma y no sabe por qué:
+  // es exactamente el descuadre que se corrigió en préstamos.
+  const getEtiqueta = (mov) => {
+    if (mov.anulado) return mov.motivo_anulacion || 'Anulado';
+    if (mov.credito_estado === 'Cancelado') return 'Anulada';
+    return null;
+  };
+
+  const puedeConfirmar = motivo.trim().length >= MIN_MOTIVO && !anular.isPending;
 
   return (
     <EstadoCuentaBase
       movimientos={movimientos}
       isLoading={isLoading}
       tipoConfig={TIPO_CONFIG_CREDITO}
+      onAnular={(mov) => { setAnulando(mov); setMotivo(''); setError(''); }}
       getEtiqueta={getEtiqueta}
       labelIzquierda="← Cliente"
       labelDerecha="Negocio →"
-      vacioTexto="Sin movimientos de crédito registrados"
-    />
+      vacioTexto="Sin movimientos de crédito registrados">
+
+      {/* Anular un abono. Exige motivo porque el abono no se borra: queda con la
+          razón escrita, que es con lo que el negocio le responde al cliente. */}
+      {anulando && (
+        <div className="fixed inset-0 bg-black/40 flex items-end sm:items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl w-full max-w-sm p-5 flex flex-col gap-4 shadow-xl">
+            <p className="text-sm font-semibold text-gray-800">¿Anular este abono?</p>
+
+            <div className="bg-gray-50 rounded-xl px-3 py-2">
+              <p className="text-xs text-gray-500">{anulando.concepto}</p>
+              <p className="text-sm font-bold text-gray-800 mt-0.5">
+                {formatCOP(anulando.abono || anulando.cargo)}
+              </p>
+            </div>
+
+            <p className="text-xs text-gray-500">
+              El abono no se borra: queda marcado con el motivo y deja de bajar la
+              deuda. Si el crédito estaba saldado, vuelve a quedar activo.
+            </p>
+
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-gray-700">
+                Motivo <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                value={motivo}
+                autoFocus
+                maxLength={MAX_MOTIVO}
+                onChange={(e) => { setMotivo(e.target.value); setError(''); }}
+                onKeyDown={(e) => e.key === 'Enter' && puedeConfirmar && anular.mutate()}
+                placeholder="Ej: se registró por error, el pago no entró…"
+                className="w-full px-3 py-2 bg-gray-100 rounded-xl text-sm
+                  focus:outline-none focus:ring-2 focus:ring-red-400 focus:bg-white transition-all"
+              />
+            </div>
+
+            {error && <p className="text-xs text-red-500">{error}</p>}
+
+            <div className="flex gap-2">
+              <button
+                onClick={cerrar}
+                className="flex-1 py-2 rounded-xl text-sm border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors">
+                Cancelar
+              </button>
+              <button
+                onClick={() => anular.mutate()}
+                disabled={!puedeConfirmar}
+                className="flex-1 py-2 rounded-xl text-sm font-medium text-white bg-red-500
+                  hover:bg-red-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                {anular.isPending ? 'Anulando…' : 'Anular abono'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </EstadoCuentaBase>
   );
 }

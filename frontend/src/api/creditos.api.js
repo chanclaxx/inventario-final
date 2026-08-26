@@ -66,3 +66,20 @@ export const condonarMoraCredito = (creditoId, { valor, motivo, pin, quitar_plaz
  */
 export const fijarInteresCredito = (creditoId, { plan_id, desde }) =>
   api.patch(`/creditos/${creditoId}/interes`, { plan_id, desde });
+
+// ── Pago total: un pago repartido entre los créditos del cliente ─────────────
+//
+// La sucursal NO viaja aquí: el interceptor de axios ya inyecta `sucursal_id`
+// como parámetro y el backend lo resuelve igual que en préstamos. Mandarla a
+// mano abriría la puerta a que la pantalla y el token digan cosas distintas.
+//
+// El reparto es FIFO (del crédito más viejo al más nuevo) y **solo dentro de
+// esa sucursal**: un pago hecho en una sede no puede bajar la deuda de otra o
+// la cartera de cada una deja de cuadrar.
+export const registrarAbonoTotalCredito = (cliente_id, valor_total, metodo, descripcion = null) =>
+  api.post('/creditos/abono-total', { cliente_id, valor_total, metodo, descripcion });
+
+// Anular un abono. Exige motivo: el abono no se borra, queda marcado con la
+// razón, y por eso el estado de cuenta puede explicar por qué cambió la cuenta.
+export const anularAbonoCredito = (abonoId, motivo) =>
+  api.patch(`/creditos/abonos/${abonoId}/anular`, { motivo });

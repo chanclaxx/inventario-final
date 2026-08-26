@@ -160,6 +160,21 @@ const aplicarMigraciones = async (client) => {
       ON abonos_credito (credito_id) WHERE anulado;
   `);
 
+  // Pago total en créditos — ver migrations/20260825_pago_total_credito.sql
+  // `destino` NO es opcional: `abonos_totales` ya se usa para préstamos hechos
+  // a un cliente, y sin distinguir, un pago total de créditos saldría también
+  // en el extracto de préstamos de esa persona, restando sin nada detrás.
+  await migrar(client, 'Pago total en créditos', `
+    ALTER TABLE abonos_totales
+      ADD COLUMN IF NOT EXISTS destino TEXT NOT NULL DEFAULT 'prestamo';
+    ALTER TABLE abonos_credito
+      ADD COLUMN IF NOT EXISTS abono_total_id INTEGER;
+    CREATE INDEX IF NOT EXISTS idx_abonos_credito_abono_total
+      ON abonos_credito (abono_total_id) WHERE abono_total_id IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_abonos_totales_destino
+      ON abonos_totales (destino, tipo_persona, persona_id);
+  `);
+
   // Ubicación espacial de productos — ver migrations/20260730_ubicacion_producto.sql
   //
   // 100% aditiva e idempotente. Columnas nullable: un negocio sin la feature no

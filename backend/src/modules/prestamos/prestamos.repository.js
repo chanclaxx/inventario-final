@@ -1043,6 +1043,10 @@ const getEstadoCuenta = async (executor, negocioId, tipo, personaId, sucursalId 
       WHERE su.negocio_id = $1
         AND at.tipo_persona = $3
         AND at.persona_id   = $2
+        -- abonos_totales la comparten préstamos y créditos. Sin este filtro,
+        -- el pago total que un CLIENTE hizo a sus créditos aparecería también
+        -- en su extracto de préstamos, restando sin ningún abono detrás.
+        AND COALESCE(at.destino, 'prestamo') = 'prestamo'
         ${filtroSucursalAbonoTotal}
 
       UNION ALL

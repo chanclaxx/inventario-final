@@ -77,6 +77,7 @@ await db.exec(readFileSync(path.join(RAIZ, 'migrations/20260730_mora_credito.sql
 await db.exec(readFileSync(path.join(RAIZ, 'migrations/20260804_interes_corriente.sql'), 'utf8'));
 // La migración bajo prueba: sin ella nada de esto existe.
 await db.exec(readFileSync(path.join(RAIZ, 'migrations/20260825_abonos_anulados.sql'), 'utf8'));
+await db.exec(readFileSync(path.join(RAIZ, 'migrations/20260825_pago_total_credito.sql'), 'utf8'));
 
 // PGlite devuelve `affectedRows`; el driver real devuelve `rowCount`, y varios
 // candados anti-carrera del código dependen de él.
@@ -93,6 +94,7 @@ require.cache[require.resolve(path.join(RAIZ, 'src/config/db.js'))] = {
 
 const prestamos = require(path.join(RAIZ, 'src/modules/prestamos/prestamos.service.js'));
 const creditosRepo = require(path.join(RAIZ, 'src/modules/creditos/creditos.repository.js'));
+const creditosService = require(path.join(RAIZ, 'src/modules/creditos/creditos.service.js'));
 
 let fallos = 0, pasados = 0;
 const q = async (sql, p = []) => (await db.query(sql, p)).rows;
@@ -365,9 +367,13 @@ console.log('\n═══ 7. Créditos: cancelar también anula sus abonos ══
   check('con su valor anulado completo', ab?.valor_anulado, 300000);
   checkEq('★ y con el motivo escrito', String(ab?.motivo_anulacion).includes('se canceló la factura'), true);
 
-  const movs = await creditosRepo.getEstadoCuenta(1, '900');
-  checkEq('★ el extracto del crédito ya no cuenta ese abono',
-    movs.filter((m) => m.tipo === 'abono').length, 0);
+  // Se ve, con su motivo, pero fuera del saldo: el extracto explica el cambio
+  // en vez de esconderlo.
+  const movs = await creditosService.getEstadoCuenta(1, '900');
+  const abs900 = movs.filter((m) => m.tipo === 'abono');
+  checkEq('★ el abono anulado sigue visible en el extracto', abs900.length, 1);
+  checkEq('★ pero NO cuenta en el saldo', abs900[0]?.saldo, null);
+  checkEq('   y dice por que', String(abs900[0]?.motivo_anulacion).includes('se canceló la factura'), true);
 
   // Idempotente: llamarlo dos veces no puede bajar el abonado dos veces.
   const cli3 = await pool.connect();
@@ -569,6 +575,149 @@ console.log('\n═══ 10. Ningún préstamo se oculta de la lista ═══')
   checkEq('★ con el IMEI en DOS seriales, sigue sin duplicarse', lista2.length, ids2.size);
   checkEq('   y el préstamo sigue apareciendo una sola vez',
     lista2.filter((x) => Number(x.id) === Number(pOculto)).length, 1);
+}
+
+// ═══ 11. PAGO TOTAL y ANULAR ABONO en CRÉDITOS ══════════════════════════════
+//
+// Los créditos solo dejaban abonar de a uno. Aquí se les da el mismo pago total
+// que tienen los préstamos, con las mismas barandas que costó descubrir en esta
+// sesión: por sucursal, FIFO, tope, sin doble clic, y con la nota del usuario.
+//
+// Y se agrega poder ANULAR un abono — que es lo que faltaba para poder arreglar
+// un error sin borrar la evidencia.
+console.log('\n═══ 11. Pago total y anulación en créditos ═══');
+{
+  const creditos = require(path.join(RAIZ, 'src/modules/creditos/creditos.service.js'));
+
+  await db.exec(`
+    INSERT INTO clientes (negocio_id, nombre, cedula) VALUES (1, 'CLIENTA PT', '777');
+    INSERT INTO facturas (numero, sucursal_id, nombre_cliente, cedula, estado, fecha)
+      VALUES (901, 1, 'CLIENTA PT', '777', 'Credito', NOW() - INTERVAL '10 days'),
+             (902, 1, 'CLIENTA PT', '777', 'Credito', NOW() - INTERVAL '5 days'),
+             (903, 2, 'CLIENTA PT', '777', 'Credito', NOW() - INTERVAL '3 days');
+  `);
+  const cli = (await q(`SELECT id FROM clientes WHERE cedula='777'`))[0].id;
+  const f = {};
+  for (const n of [901, 902, 903]) f[n] = (await q(`SELECT id FROM facturas WHERE numero=$1`, [n]))[0].id;
+
+  const cx = await pool.connect();
+  // Dos créditos en la sucursal 1 y uno en la 2.
+  const crRepo = require(path.join(RAIZ, 'src/modules/creditos/creditos.repository.js'));
+  await crRepo.create(cx, { factura_id: f[901], cliente_id: cli, sucursal_id: 1, valor_total: 1000000, cuota_inicial: 0 });
+  await crRepo.create(cx, { factura_id: f[902], cliente_id: cli, sucursal_id: 1, valor_total: 600000,  cuota_inicial: 0 });
+  await crRepo.create(cx, { factura_id: f[903], cliente_id: cli, sucursal_id: 2, valor_total: 900000,  cuota_inicial: 0 });
+  cx.release();
+  const ids = await q(`SELECT id, sucursal_id, valor_total FROM creditos WHERE cliente_id=$1 ORDER BY id`, [cli]);
+  const [c1, c2, c3] = ids;
+
+  // ── El tope: no puede pagar más de lo que debe EN ESA SUCURSAL ────────────
+  await debeFallar('★ rechaza un pago mayor a lo que debe en la sucursal',
+    () => creditos.registrarAbonoTotalCredito(1, cli, 2000000, 'Efectivo', 1, 1),
+    'supera lo que el cliente debe');
+
+  // ── El reparto ───────────────────────────────────────────────────────────
+  const res = await creditos.registrarAbonoTotalCredito(
+    1, cli, 1300000, 'Efectivo', 1, 1, { descripcion: 'abono de la quincena' });
+
+  check('★ el pago se registró completo', res.valor_total, 1300000);
+  check('   sin dejar sobrante', res.sobrante, 0);
+  checkEq('★ repartió entre los DOS créditos de esa sucursal', res.distribucion.length, 2);
+  check('★ FIFO: el más viejo se llena primero', res.distribucion[0]?.abonado, 1000000);
+  check('   y el resto va al siguiente', res.distribucion[1]?.abonado, 300000);
+  checkEq('★ el más viejo queda saldado', res.distribucion[0]?.saldado, true);
+
+  const [ec3] = await q(`SELECT total_abonado, estado FROM creditos WHERE id=$1`, [c3.id]);
+  check('★ el crédito de la OTRA sucursal no se tocó', ec3.total_abonado, 0);
+
+  // ── La nota viaja aparte, no pegada al concepto ───────────────────────────
+  const [pt] = await q(`SELECT destino, descripcion, valor_total FROM abonos_totales WHERE id=$1`, [res.abono_total_id]);
+  checkEq('★ el pago queda marcado como de CRÉDITO', pt.destino, 'credito');
+  checkEq('★ y guarda la nota del usuario', pt.descripcion, 'abono de la quincena');
+
+  // ── El extracto ──────────────────────────────────────────────────────────
+  const movs = await crRepo.getEstadoCuenta(1, '777');
+  const abonos = movs.filter((m) => m.tipo === 'abono');
+  checkEq('★ el extracto muestra las dos partes del reparto', abonos.length, 2);
+  checkEq('★ y dice que vienen de un pago total',
+    abonos.every((a) => String(a.concepto).includes('parte de un pago total')), true);
+  checkEq('   con la nota en columna propia', abonos[0]?.descripcion, 'abono de la quincena');
+  checkEq('★ un pedazo de pago total NO se puede anular suelto',
+    abonos.every((a) => a.anulable === false), true);
+
+  // ── La baranda del doble clic ────────────────────────────────────────────
+  await debeFallar('★ el mismo pago total no entra dos veces',
+    () => creditos.registrarAbonoTotalCredito(1, cli, 1300000, 'Efectivo', 1, 1),
+    'ya se registró');
+
+  // ── Anular un abono suelto ───────────────────────────────────────────────
+  await db.exec(`
+    INSERT INTO clientes (negocio_id, nombre, cedula) VALUES (1, 'CLIENTE ANULA', '888');
+    INSERT INTO facturas (numero, sucursal_id, nombre_cliente, cedula, estado, fecha)
+      VALUES (904, 1, 'CLIENTE ANULA', '888', 'Credito', NOW());
+  `);
+  const cli2 = (await q(`SELECT id FROM clientes WHERE cedula='888'`))[0].id;
+  const f904 = (await q(`SELECT id FROM facturas WHERE numero=904`))[0].id;
+  const cy = await pool.connect();
+  await crRepo.create(cy, { factura_id: f904, cliente_id: cli2, sucursal_id: 1, valor_total: 500000, cuota_inicial: 0 });
+  cy.release();
+  const cAnula = (await q(`SELECT id FROM creditos WHERE factura_id=$1`, [f904]))[0].id;
+
+  await creditos.registrarAbono(1, cAnula, { usuario_id: 1, valor: 500000, metodo: 'Efectivo' });
+  const [antes] = await q(`SELECT estado, total_abonado FROM creditos WHERE id=$1`, [cAnula]);
+  checkEq('el crédito quedó saldado con el abono', antes.estado, 'Saldado');
+
+  const abonoId = (await q(`SELECT id FROM abonos_credito WHERE credito_id=$1`, [cAnula]))[0].id;
+
+  await debeFallar('★ anular EXIGE motivo',
+    () => creditos.anularAbonoCredito(1, abonoId, { motivo: '' }), 'motivo');
+
+  const an = await creditos.anularAbonoCredito(1, abonoId, { motivo: 'se registró por error', usuario_id: 1 });
+  check('★ se anuló por su valor', an.valor, 500000);
+  checkEq('★ y el crédito VOLVIÓ a estar activo', an.reabierto, true);
+
+  const [desp] = await q(`SELECT estado, total_abonado FROM creditos WHERE id=$1`, [cAnula]);
+  checkEq('   el estado quedó Activo', desp.estado, 'Activo');
+  check('   y lo abonado bajó', desp.total_abonado, 0);
+
+  const [ab] = await q(`SELECT anulado, valor_anulado, motivo_anulacion FROM abonos_credito WHERE id=$1`, [abonoId]);
+  checkEq('★ el abono NO se borró: quedó marcado', ab.anulado, true);
+  checkEq('★ con el motivo que escribió la persona',
+    String(ab.motivo_anulacion).includes('se registró por error'), true);
+
+  // El abono anulado SE VE (con su motivo) pero NO baja la deuda. Ocultarlo
+  // cuadraria el numero y borraria la explicacion; contarlo devolveria el
+  // descuadre entre el extracto y la deuda total. Mismo criterio que prestamos.
+  const movs2 = await creditos.getEstadoCuenta(1, '888');
+  const abAnul = movs2.filter((m) => m.tipo === 'abono');
+  checkEq('★ el abono anulado SIGUE en el extracto', abAnul.length, 1);
+  checkEq('★ marcado como anulado', abAnul[0]?.anulado, true);
+  checkEq('   con el motivo a la vista',
+    String(abAnul[0]?.motivo_anulacion).includes('se registró por error'), true);
+  checkEq('★ pero NO cuenta en el saldo', abAnul[0]?.saldo, null);
+  checkEq('★ y ya no se puede volver a anular desde el extracto',
+    abAnul[0]?.anulable, false);
+  // La deuda que ve el extracto vuelve a ser la del credito completo.
+  const ultimo = [...movs2].reverse().find((m) => m.saldo !== null);
+  check('★ el extracto vuelve a mostrar la deuda completa', ultimo?.saldo, 500000);
+
+  await debeFallar('no se puede anular dos veces',
+    () => creditos.anularAbonoCredito(1, abonoId, { motivo: 'otra vez' }), 'ya está anulado');
+
+  // ── Lo que ve el cliente en papel ────────────────────────────────────────
+  // El extracto, el PDF y el Excel salen de la MISMA lista. Mostrar el abono
+  // anulado sin marcarlo haria que la fila de totales del Excel dijera que el
+  // cliente abono mas de lo que cuenta, y no cuadraria contra la deuda.
+  const movPdf = abAnul[0];
+  checkEq('★ el PDF lo puede atenuar y explicar', {
+    atenuado: movPdf.anulado === true,
+    hayMotivo: Boolean(movPdf.motivo_anulacion),
+  }, { atenuado: true, hayMotivo: true });
+  // Regla exacta que aplica la hoja de Excel compartida.
+  const sinContar = movPdf.anulado_total === true
+    ? Number(movPdf.abono || 0)
+    : Math.min(Number(movPdf.abono || 0), Number(movPdf.valor_anulado || 0));
+  check('★ el Excel no lo suma en los totales',
+    Number(movPdf.abono || 0) - sinContar, 0);
 }
 
 console.log('\n' + '─'.repeat(62));

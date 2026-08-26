@@ -81,7 +81,12 @@ CREATE TABLE IF NOT EXISTS abonos_totales (
   id SERIAL PRIMARY KEY, sucursal_id INT, persona_id INT, tipo_persona TEXT,
   valor_total NUMERIC, metodo TEXT, fecha TIMESTAMP DEFAULT NOW(),
   -- Nota libre del usuario sobre el pago (20260813_descripcion_pago_total.sql)
-  descripcion TEXT
+  descripcion TEXT,
+  -- A que se aplico el pago (20260825_pago_total_credito.sql). La tabla la
+  -- comparten prestamos y creditos: sin este discriminador, un pago total de
+  -- creditos saldria tambien en el extracto de PRESTAMOS de la misma persona,
+  -- como una linea que resta sin tener ningun abono detras.
+  destino TEXT NOT NULL DEFAULT 'prestamo'
 );
 -- OJO: estas dos calcan producción a propósito. El fixture las tenía con
 -- `valor`/`tipo` y sin el índice único, columnas que NO existen en la base
