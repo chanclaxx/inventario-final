@@ -16,6 +16,18 @@ const ROLES = [
   { value: 'vendedor',      label: 'Vendedor'      },
 ];
 
+// ── Espejo de backend/src/config/modulos.js ──────────────────────────────────
+//
+// Las dos listas TIENEN que decir lo mismo, y no lo decían: aquí faltaba
+// `red_interna` (la pestaña «Bodega»), que el backend sí incluye en MODULOS y en
+// los permisos base de supervisor y vendedor. El daño no era solo que no hubiera
+// casilla para concederlo: `handleToggle` arma el arreglo nuevo a partir de
+// PERMISOS_BASE de ESTE archivo, así que a un usuario con permisos base (el
+// arreglo en null) le bastaba con que alguien tocara CUALQUIER módulo para
+// perder Bodega en silencio y sin forma de devolvérsela desde la pantalla.
+//
+// La prueba `32-modulos-sincronizados` compara los dos archivos y falla si
+// vuelven a separarse.
 const MODULOS = [
   { key: 'inventario',  label: 'Inventario'  },
   { key: 'facturar',    label: 'Facturas'    },
@@ -25,14 +37,18 @@ const MODULOS = [
   { key: 'caja',        label: 'Caja'        },
   { key: 'tesoreria',   label: 'Tesorería'   },
   { key: 'traslados',   label: 'Traslados'   },
+  { key: 'red_interna', label: 'Bodega'      },
   { key: 'reportes',    label: 'Reportes'    },
   { key: 'acreedores',  label: 'Acreedores'  },
 ];
 
 const PERMISOS_BASE = {
   supervisor: ['inventario','facturar','servicios','proveedores',
-               'prestamos','caja','tesoreria','traslados','reportes','acreedores'],
-  vendedor:   ['inventario','facturar','servicios','prestamos'],
+               'prestamos','caja','tesoreria','traslados','red_interna',
+               'reportes','acreedores'],
+  // El vendedor entra a la red interna a propósito: es quien confirma la
+  // recepción de las remisiones en el local.
+  vendedor:   ['inventario','facturar','servicios','prestamos','red_interna'],
 };
 
 const CAMPOS_EDICION = [

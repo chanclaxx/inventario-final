@@ -6,7 +6,7 @@ import { usePermisos } from '../../hooks/usePermisos.js';
 import {
   LayoutDashboard, Package, FileText, Handshake,
   Wallet, BarChart2, Settings, LogOut, ShoppingCart,
-  Users, Truck, Wrench, ArrowRightLeft, Search, Activity, HandCoins, Warehouse,
+  Users, Truck, Wrench, ArrowRightLeft, Search, Activity, HandCoins, Warehouse, PackagePlus,
 } from 'lucide-react';
 import { getSucursales } from '../../api/sucursales.api.js';
 import useCarritoStore  from '../../store/carritoStore.js';
@@ -28,6 +28,10 @@ const NAV_ITEMS = [
   // negocio activa la distribución desde bodega. Así la barra no crece y el
   // usuario nunca ve dos opciones que hacen cosas parecidas.
   { path: '/bodega',      label: 'Bodega',      Icn: Warehouse,       modulo: 'red_interna', soloSiRed: true },
+  // Entradas de bodega: recibir mercancía sin ver precios ni proveedor. Solo
+  // para supervisor o más — es quien actúa de bodeguero, y el backend pide lo
+  // mismo. Un vendedor no la ve, así que la barra no le crece a nadie más.
+  { path: '/entradas',    label: 'Entradas',    Icn: PackagePlus,     modulo: 'inventario', soloSupervisor: true },
   { path: '/reportes',    label: 'Reportes',    Icn: BarChart2,       modulo: 'reportes'                      },
   { path: '/acreedores',  label: 'Acreedores',  Icn: Users,           modulo: 'acreedores'                    },
   { path: '/busqueda',    label: 'Búsqueda',    Icn: Search                                                   },
@@ -35,7 +39,7 @@ const NAV_ITEMS = [
   { path: '/config',             label: 'Config',    Icn: Settings, soloAdmin: true                         },
 ];
 
-function esItemVisible(item, puedeVer, esAdmin, totalSucursales, esModoVista, redActiva) {
+function esItemVisible(item, puedeVer, esAdmin, totalSucursales, esModoVista, redActiva, esSupervisorOMas) {
   // En modo vista solo se muestra el inventario
   if (esModoVista) return item.path === '/inventario';
   // Red interna encendida: "Bodega" entra y "Traslados" sale (la mercancía se
@@ -43,6 +47,7 @@ function esItemVisible(item, puedeVer, esAdmin, totalSucursales, esModoVista, re
   if (item.soloSiRed   && !redActiva) return false;
   if (item.ocultarSiRed && redActiva) return false;
   if (item.multiSucursal && totalSucursales < 2) return false;
+  if (item.soloSupervisor) return esSupervisorOMas;
   if (item.soloAdmin) return esAdmin;
   if (item.modulo)    return puedeVer(item.modulo);
   return true;
@@ -68,6 +73,9 @@ export function Navbar() {
   const sucursalActiva = useSucursalStore((s) => s.sucursalActiva);
   const esModoVista    = esSucursalVista(sucursalActiva);
   const { puedeVer, esAdmin } = usePermisos();
+  // El bodeguero es un supervisor: mismo criterio que exige el backend en
+  // POST /compras/entradas, para no ofrecer una pantalla que iba a dar 403.
+  const esSupervisorOMas = ['admin_negocio', 'supervisor'].includes(usuario?.rol);
   const navigate  = useNavigate();
   const location  = useLocation();
 
@@ -144,7 +152,7 @@ export function Navbar() {
   const redActiva = configData?.red_interna_activa === '1';
 
   const itemsVisibles = itemsBase.filter((item) =>
-    esItemVisible(item, puedeVer, esAdmin, totalSucursales, esModoVista, redActiva)
+    esItemVisible(item, puedeVer, esAdmin, totalSucursales, esModoVista, redActiva, esSupervisorOMas)
   );
 
   return (

@@ -1,5 +1,6 @@
 const service = require('./compras.service');
 const audit   = require('../../utils/auditoria.util');
+const costos  = require('../../utils/costos.util');
 
 // Extrae la lista de proveedores permitidos para el usuario (null = sin restricción)
 const _proveedorIds = (user) => {
@@ -54,6 +55,84 @@ const registrarCompra = async (req, res, next) => {
       estado:          data.estado,
     });
     res.status(201).json({ ok: true, data, message: 'Compra registrada correctamente' });
+  } catch (err) { next(err); }
+};
+
+// ---------------------------------------------------------------------------
+// ENTRADAS DE BODEGA
+//
+// `registrarEntrada` NO recibe proveedor ni precios: los resuelve el service a
+// partir de la orden o del ultimo costo conocido. Si el cuerpo los trae, se
+// ignoran; por eso aqui se arma el payload a mano en vez de esparcir `req.body`.
+// ---------------------------------------------------------------------------
+const registrarEntrada = async (req, res, next) => {
+  try {
+    const sucursal_id = req.todasSucursales ? req.body.sucursal_id : req.sucursal_id;
+    if (!sucursal_id) {
+      return res.status(400).json({ ok: false, error: 'Debes indicar la sucursal donde entra la mercancia' });
+    }
+    const data = await service.registrarEntrada({
+      negocio_id:      req.user.negocio_id,
+      sucursal_id,
+      usuario_id:      req.user.id,
+      lineas:          req.body.lineas,
+      orden_compra_id: req.body.orden_compra_id || null,
+      notas:           req.body.notas || null,
+    });
+    audit.registrar(req.user.negocio_id, req.user.id, 'Entrada de bodega registrada', 'compras', data.id, {
+      sucursal_id,
+      unidades:        (req.body.lineas || []).reduce((n, l) => n + Number(l.cantidad || 0), 0),
+      orden_compra_id: req.body.orden_compra_id ?? null,
+    });
+    // La respuesta va recortada: quien registra la entrada es justo quien no
+    // debe ver el valor provisional que el service acaba de resolver.
+    res.status(201).json({
+      ok: true,
+      data: await costos.recortarSiToca(req.user, { id: data.id, numero: data.numero, estado: data.estado }),
+      message: `Entrada #${data.numero ?? data.id} registrada`,
+    });
+  } catch (err) { next(err); }
+};
+
+const getEntradas = async (req, res, next) => {
+  try {
+    const sucursalId = req.todasSucursales ? null : req.sucursal_id;
+    const data = await service.getEntradas(sucursalId, req.user.negocio_id);
+    res.json({ ok: true, data: await costos.recortarSiToca(req.user, data) });
+  } catch (err) { next(err); }
+};
+
+const getOrdenesParaRecibir = async (req, res, next) => {
+  try {
+    const sucursalId = req.todasSucursales ? null : req.sucursal_id;
+    const data = await service.getOrdenesParaRecibir(sucursalId, req.user.negocio_id);
+    // Ya viene sin plata desde el SQL; el recorte es la segunda baranda por si
+    // alguien agrega una columna monetaria a esa consulta sin acordarse.
+    res.json({ ok: true, data: await costos.recortarSiToca(req.user, data, { anidados: ['lineas'] }) });
+  } catch (err) { next(err); }
+};
+
+const getPorConfirmar = async (req, res, next) => {
+  try {
+    const sucursalId = req.todasSucursales ? null : req.sucursal_id;
+    const data = await service.getPorConfirmar(sucursalId, req.user.negocio_id);
+    res.json({ ok: true, data });
+  } catch (err) { next(err); }
+};
+
+const confirmarEntrada = async (req, res, next) => {
+  try {
+    const data = await service.confirmarEntrada(req.user.negocio_id, req.params.id, {
+      proveedor_id:   req.body.proveedor_id || null,
+      lineas:         req.body.lineas,
+      numero_factura: req.body.numero_factura || null,
+      usuario_id:     req.user.id,
+    });
+    audit.registrar(req.user.negocio_id, req.user.id, 'Entrada confirmada', 'compras', Number(req.params.id), {
+      proveedor_id:   req.body.proveedor_id ?? null,
+      numero_factura: req.body.numero_factura ?? null,
+    });
+    res.json({ ok: true, data, message: 'Entrada confirmada' });
   } catch (err) { next(err); }
 };
 
@@ -151,4 +230,6 @@ const editarPreciosCompra = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-module.exports = { getCompras, getCompraById, getComprasByProveedor, registrarCompra, getComprasPaginadas, cancelarCompra, devolverCompra, editarPreciosCompra };
+module.exports = { getCompras, getCompraById, getComprasByProveedor, registrarCompra, getComprasPaginadas, cancelarCompra, devolverCompra, editarPreciosCompra,
+  registrarEntrada, getEntradas, getOrdenesParaRecibir, getPorConfirmar, confirmarEntrada,
+};

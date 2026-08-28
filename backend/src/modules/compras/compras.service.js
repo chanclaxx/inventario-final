@@ -125,6 +125,8 @@ const registrarCompra = async ({
   fecha_factura = null,
   dias_plazo = null,
   fecha_vencimiento = null,
+  // Una Entrada de bodega nace sin confirmar; todo lo demas nace confirmado.
+  factura_confirmada = true,
 }) => {
   // ── Verificar sucursal pertenece al negocio ──────────────────────────────
   const { rows: sucRows } = await pool.query(
@@ -134,13 +136,21 @@ const registrarCompra = async ({
   if (!sucRows.length) throw { status: 403, message: 'Sucursal no válida para este negocio' };
 
   // ── Verificar proveedor pertenece al negocio ─────────────────────────────
-  const { rows: provRows } = await pool.query(
-    `SELECT id, nombre, nit, telefono FROM proveedores
-     WHERE id = $1 AND negocio_id = $2 AND activo = true`,
-    [proveedor_id, negocio_id]
-  );
-  if (!provRows.length) throw { status: 403, message: 'Proveedor no válido para este negocio' };
-  const prov = provRows[0];
+  // Una Entrada de bodega sin orden previa llega SIN proveedor: lo asigna
+  // administración al confirmar la factura. Todo el cuerpo de abajo ya lo
+  // trataba como opcional (`if (proveedor_id)` alrededor del bloque del
+  // acreedor); lo único que lo impedía era esta verificación y el validador de
+  // la ruta.
+  let prov = null;
+  if (proveedor_id) {
+    const { rows: provRows } = await pool.query(
+      `SELECT id, nombre, nit, telefono FROM proveedores
+       WHERE id = $1 AND negocio_id = $2 AND activo = true`,
+      [proveedor_id, negocio_id]
+    );
+    if (!provRows.length) throw { status: 403, message: 'Proveedor no válido para este negocio' };
+    prov = provRows[0];
+  }
 
   const client = await pool.connect();
   try {
@@ -161,7 +171,7 @@ const registrarCompra = async ({
 
     const compra = await comprasRepo.create(client, {
       sucursal_id, proveedor_id, usuario_id, numero_factura, total, notas,
-      registrar_en_caja, metodo: metodoPago, orden_compra_id,
+      registrar_en_caja, metodo: metodoPago, orden_compra_id, factura_confirmada,
     });
 
     for (const linea of lineas) {
@@ -1017,4 +1027,206 @@ const editarPreciosCompra = async (negocioId, compraId, { lineas: cambios, motiv
   }
 };
 
-module.exports = { getCompras, getCompraById, getComprasByProveedor, registrarCompra, getComprasPaginadas, cancelarCompra, devolverCompra, editarPreciosCompra };
+// -----------------------------------------------------------------------------
+// ENTRADAS DE BODEGA
+//
+// El bodeguero cuenta lo que llego. No teclea precios, no elige proveedor y no
+// los recibe en la respuesta. Todo lo demas lo hace `registrarCompra()`, que ya
+// mete inventario, mueve el costo promedio, crea el cargo al acreedor, ata la
+// recepcion a la orden y sabe revertirse. Esto es una capa delgada encima que
+// RESUELVE lo que el bodeguero no ve, no un ciclo de compra paralelo.
+// -----------------------------------------------------------------------------
+
+// El precio provisional de una linea.
+//
+// Ojo con la tentacion de dejarlo en 0 "y que administracion lo ponga despues":
+// no es reversible. `editarPreciosCompra` reparte el delta sobre el stock ACTUAL
+// y desde 0 da una cifra equivocada.
+//
+// El ultimo costo conocido, en cambio, es NEUTRO: mezclar unidades al mismo
+// costo que el nodo ya tenia deja el promedio identico, y la correccion
+// posterior aterriza exactamente donde habria quedado una compra al precio real.
+// Es una identidad algebraica:
+//
+//     C + (R-C)*cant/(stock+cant)  ==  (stock*C + cant*R)/(stock+cant)
+//
+// Orden: lo pedido en la orden -> el ultimo costo conocido del nodo -> nada.
+// "Nada" (0) es el caso honesto de un producto que nunca tuvo costo: entra sin
+// costo y sale en el panel de productos sin costo de Reportes. No se inventa.
+const _precioProvisional = async (client, linea, estimadoOrden) => {
+  if (estimadoOrden != null && Number(estimadoOrden) > 0) return Number(estimadoOrden);
+
+  // El costo vive en el NODO que recibe, no en el producto: con variantes
+  // activas el del producto es la suma de sus hijos y no dice nada de esta talla.
+  if (linea.variante_id) {
+    const { rows } = await client.query(
+      'SELECT costo_unitario FROM variantes_atributo WHERE id = $1', [linea.variante_id]);
+    if (Number(rows[0]?.costo_unitario) > 0) return Number(rows[0].costo_unitario);
+  }
+  if (linea.atributo_id) {
+    const { rows } = await client.query(
+      'SELECT costo_unitario FROM atributos_producto WHERE id = $1', [linea.atributo_id]);
+    if (Number(rows[0]?.costo_unitario) > 0) return Number(rows[0].costo_unitario);
+  }
+  if (linea.imei) {
+    // Un serial nuevo no tiene costo propio todavia: se toma el de la ultima
+    // unidad registrada de esa misma referencia. Da igual si no es exacto: al
+    // confirmar la factura, la correccion de un serial SOBREESCRIBE el valor
+    // (no es un promedio), asi que aterriza exacto de todos modos.
+    const { rows } = await client.query(
+      `SELECT s.costo_compra FROM seriales s
+       WHERE s.producto_id = $1 AND s.costo_compra IS NOT NULL
+       ORDER BY s.id DESC LIMIT 1`, [linea.producto_id]);
+    if (Number(rows[0]?.costo_compra) > 0) return Number(rows[0].costo_compra);
+    return 0;
+  }
+  if (linea.producto_id) {
+    const { rows } = await client.query(
+      'SELECT costo_unitario FROM productos_cantidad WHERE id = $1', [linea.producto_id]);
+    if (Number(rows[0]?.costo_unitario) > 0) return Number(rows[0].costo_unitario);
+  }
+  return 0;
+};
+
+/**
+ * Registra una Entrada: que llego y cuanto. Sin proveedor ni precios en el
+ * cuerpo; si vienen, se IGNORAN a proposito. Este endpoint existe justo para
+ * quien no debe decidir plata, asi que no se le cree nada de eso al cliente.
+ */
+const registrarEntrada = async ({
+  negocio_id, sucursal_id, usuario_id, lineas, orden_compra_id = null, notas = null,
+}) => {
+  if (!Array.isArray(lineas) || lineas.length === 0) {
+    throw { status: 400, message: 'La entrada necesita al menos un producto' };
+  }
+
+  const client = await pool.connect();
+  let proveedorId = null;
+  let estimados = new Map();   // orden_linea_id -> precio_estimado
+  let conPrecio = [];
+  try {
+    // El proveedor y los estimados salen de la ORDEN, nunca del cuerpo.
+    if (orden_compra_id) {
+      const { rows: ord } = await client.query(
+        `SELECT o.id, o.proveedor_id, o.sucursal_id
+         FROM ordenes_compra o WHERE o.id = $1 AND o.negocio_id = $2`,
+        [orden_compra_id, negocio_id]
+      );
+      if (!ord.length) throw { status: 404, message: 'Orden de compra no encontrada' };
+      if (Number(ord[0].sucursal_id) !== Number(sucursal_id)) {
+        throw { status: 400, message: 'La orden pertenece a otra sucursal' };
+      }
+      proveedorId = ord[0].proveedor_id;
+
+      const { rows: lin } = await client.query(
+        'SELECT id, precio_estimado FROM lineas_orden_compra WHERE orden_id = $1',
+        [orden_compra_id]
+      );
+      estimados = new Map(lin.map((l) => [Number(l.id), l.precio_estimado]));
+    }
+
+    for (const l of lineas) {
+      const cantidad = Number(l.cantidad);
+      if (!Number.isInteger(cantidad) || cantidad <= 0) {
+        throw { status: 400, message: `Cantidad invalida en ${l.nombre_producto || 'una linea'}` };
+      }
+      // Bodega no crea productos: si no esta en el catalogo, no se recibe. Es
+      // deliberado, y el mensaje dice que hacer en vez de solo negarse.
+      if (!l.producto_id) {
+        throw {
+          status: 400,
+          code: 'PRODUCTO_NO_EXISTE',
+          message: `"${l.nombre_producto || 'Ese producto'}" no esta en el catalogo. `
+            + 'Pidele a administracion que lo cree y vuelve a intentarlo.',
+        };
+      }
+      conPrecio.push({
+        ...l,
+        cantidad,
+        precio_unitario: await _precioProvisional(
+          client, l, l.orden_linea_id ? estimados.get(Number(l.orden_linea_id)) : null,
+        ),
+      });
+    }
+  } finally {
+    client.release();
+  }
+
+  // De aqui en adelante es el camino de siempre, con su propia transaccion.
+  return registrarCompra({
+    negocio_id, sucursal_id, usuario_id,
+    proveedor_id: proveedorId,
+    lineas: conPrecio,
+    notas,
+    orden_compra_id,
+    pagos: [],
+    registrar_en_caja: false,     // una entrada no toca caja: nadie pago nada
+    factura_confirmada: false,    // queda esperando la factura
+  });
+};
+
+const getOrdenesParaRecibir = (sucursalId, negocioId) =>
+  comprasRepo.findOrdenesParaRecibir(sucursalId, negocioId);
+
+const getEntradas = (sucursalId, negocioId) =>
+  comprasRepo.findEntradas(sucursalId, negocioId);
+
+const getPorConfirmar = (sucursalId, negocioId) =>
+  comprasRepo.findPorConfirmar(sucursalId, negocioId);
+
+/**
+ * Administracion cierra la entrada contra la factura del proveedor.
+ * Los precios se corrigen con `editarPreciosCompra`, que ya cascadea al costo
+ * promedio, al costo de cada serial, al total de la compra y a la deuda con el
+ * acreedor, todo en una sola transaccion.
+ */
+const confirmarEntrada = async (negocioId, compraId, { proveedor_id, lineas, numero_factura, usuario_id }) => {
+  const compra = await comprasRepo.findByIdYNegocio(compraId, negocioId);
+  if (!compra) throw { status: 404, message: 'Entrada no encontrada' };
+  if (compra.estado === 'Cancelada') {
+    throw { status: 400, message: 'La entrada esta cancelada' };
+  }
+  if (compra.factura_confirmada) {
+    throw { status: 409, message: 'Esta entrada ya fue confirmada' };
+  }
+  if (!compra.proveedor_id && !proveedor_id) {
+    throw { status: 400, message: 'Indica de que proveedor vino esta entrada' };
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    if (!compra.proveedor_id && proveedor_id) {
+      const { rows } = await client.query(
+        'SELECT id FROM proveedores WHERE id = $1 AND negocio_id = $2 AND activo = true',
+        [proveedor_id, negocioId]
+      );
+      if (!rows.length) throw { status: 400, message: 'Proveedor no valido para este negocio' };
+      await comprasRepo.asignarProveedor(client, compraId, proveedor_id);
+    }
+    if (numero_factura) {
+      await client.query('UPDATE compras SET numero_factura = $1 WHERE id = $2',
+        [numero_factura, compraId]);
+    }
+    await comprasRepo.marcarConfirmada(client, compraId);
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+
+  // Fuera de la transaccion de arriba: `editarPreciosCompra` abre la suya y es
+  // idempotente (una linea cuyo precio no cambia se omite). Si no vienen
+  // precios, la entrada queda confirmada a su valor provisional, que es una
+  // decision valida: el estimado era el correcto.
+  if (Array.isArray(lineas) && lineas.length > 0) {
+    return editarPreciosCompra(negocioId, compraId, {
+      lineas, usuario_id, motivo: 'Confirmacion de la factura del proveedor',
+    });
+  }
+  return { compra_id: compraId, confirmada: true, lineas_editadas: [] };
+};
+
+module.exports = { getCompras, getCompraById, getComprasByProveedor, registrarCompra, getComprasPaginadas, cancelarCompra, devolverCompra, editarPreciosCompra, registrarEntrada, getEntradas, getOrdenesParaRecibir, getPorConfirmar, confirmarEntrada };

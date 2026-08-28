@@ -105,6 +105,55 @@ Three roles exist: `admin_negocio`, `supervisor`, `vendedor`. Role determines wh
 > Prueba: `31-costos-solo-admin` (42 verificaciones; la sección 1 falla si
 > alguien invierte el default).
 
+> **Entradas de bodega — el bodeguero recibe sin ver ni teclear precios**
+> (`compras.service.registrarEntrada`, `pages/entradas/EntradasPage.jsx`,
+> `20260828_entradas_bodega.sql`): recibir mercancía y valorizarla son dos actos
+> distintos, los hacen dos personas y ocurren en momentos distintos; el sistema
+> los obligaba a ser el mismo formulario (`POST /compras` exige proveedor y
+> precio > 0).
+> **Una Entrada ES una compra**: misma fila, mismo consecutivo, misma
+> `registrarCompra()`. Todo el modelo nuevo son dos columnas. Lo único que
+> cambia es quién la dispara y qué ve mientras lo hace.
+> **El bodeguero es un SUPERVISOR** — no hay rol ni permiso nuevo. Recibir es
+> estrictamente MENOS poderoso que registrar una compra: no elige proveedor, no
+> elige precios y no toca caja. Las rutas de entrada van por el módulo
+> **`inventario`**, no `proveedores`: pedirle proveedores para recibir le
+> abriría justo la puerta que `costos_solo_admin` cierra. Por eso también
+> existe `GET /compras/entradas/ordenes`, que le da las órdenes por recibir sin
+> proveedor ni precios.
+> **CUIDADO — recibir en cero NO es reversible.** `editarPreciosCompra` reparte
+> el delta sobre el stock ACTUAL: desde 0 da una cifra equivocada (10 uds a
+> $100 + 10 que costaron $180 → da $190 donde la respuesta es $140). Por eso la
+> entrada SE VALORIZA al **último costo conocido del nodo** (o al
+> `precio_estimado` de la orden), que es **neutro** —mezclar unidades al mismo
+> costo deja el promedio idéntico— y hace que la corrección posterior aterrice
+> exacto. Es una identidad algebraica:
+> `C + (R−C)·cant/(stock+cant) == (stock·C + cant·R)/(stock+cant)`.
+> El costo se lee del **nodo** que recibe (variante > atributo > producto): con
+> variantes activas el del producto es la suma y no dice nada de esa talla.
+> **Con orden y sin orden NO son flujos distintos**: la orden es un atajo que
+> llena la lista. Un solo documento, una sola pantalla, ninguna pregunta de
+> "¿esto tiene pedido?". El faltante y el sobrante tampoco son otro flujo:
+> escribir una cantidad distinta a la pedida ya los reporta.
+> **Bodega no crea productos** (decisión del negocio: de los nombres casi
+> iguales salen los duplicados que hay en producción). El backend responde
+> `PRODUCTO_NO_EXISTE` con un mensaje que dice a quién pedírselo.
+> `factura_confirmada` nace en **TRUE** para que ninguna compra existente
+> aparezca de golpe en la bandeja de los 28 negocios.
+> Prueba: `33-entradas-bodega` (21 verificaciones; la sección 1 corre la
+> identidad del costo sobre las dos funciones REALES en 480 combinaciones).
+
+> **La lista de módulos está DUPLICADA a mano** (`backend/src/config/modulos.js`
+> y `MODULOS`/`PERMISOS_BASE` en `UsuariosConfig.jsx`): el frontend no puede
+> importar del backend y las dos copias se separaron. Al frontend le faltaba
+> `red_interna` —la pestaña **«Bodega»**— en las dos listas. No era solo que
+> faltara la casilla: `handleToggle` arma el arreglo nuevo desde el
+> `PERMISOS_BASE` **del frontend**, así que a un usuario con permisos base le
+> bastaba con que un admin tocara CUALQUIER otro módulo para perder Bodega en
+> silencio, sin forma de devolvérsela desde la pantalla. Reportado desde
+> producción. Prueba: `32-modulos-sincronizados`, que lee los dos archivos y
+> falla si vuelven a separarse.
+
 ### Backend Module Pattern
 
 All 27 feature modules under `backend/src/` follow the same layered structure:

@@ -26,6 +26,7 @@ import TrasladosPage        from './pages/traslados/TrasladosPage';
 import RedInternaPage       from './pages/red-interna/RedInternaPage';
 import TesoreriaPage        from './pages/tesoreria/TesoreriaPage';
 import BusquedaPage         from './pages/busqueda/BusquedaPage';
+import EntradasPage         from './pages/entradas/EntradasPage';
 
 export default function App() {
   return (
@@ -51,6 +52,13 @@ export default function App() {
               {/* Módulos con guard de permisos */}
               <Route path="/inventario" element={
                 <ModuloGuard modulo="inventario"><InventarioPage /></ModuloGuard>
+              } />
+              {/* Entradas de bodega. Va bajo el módulo `inventario` y no
+                  `proveedores`: el bodeguero cuenta cajas, no lleva la relación
+                  comercial. Pedirle proveedores para recibir le abriría justo la
+                  puerta que se cerró. El backend además exige supervisor. */}
+              <Route path="/entradas" element={
+                <ModuloGuard modulo="inventario"><EntradasPage /></ModuloGuard>
               } />
               <Route path="/facturar" element={
                 <ModuloGuard modulo="facturar"><FacturarPage /></ModuloGuard>

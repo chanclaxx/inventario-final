@@ -186,6 +186,21 @@ const aplicarMigraciones = async (client) => {
       ADD COLUMN IF NOT EXISTS permisos_facturas JSONB;
   `);
 
+  // Entradas de bodega — ver migrations/20260828_entradas_bodega.sql
+  //
+  // Una Entrada ES una compra: misma fila, mismo consecutivo, misma
+  // `registrarCompra()`. Estas dos columnas son todo el modelo nuevo.
+  // `factura_confirmada` nace en TRUE para que ninguna compra existente
+  // aparezca de golpe en la bandeja de pendientes.
+  await migrar(client, 'Entradas de bodega', `
+    ALTER TABLE compras
+      ADD COLUMN IF NOT EXISTS factura_confirmada BOOLEAN NOT NULL DEFAULT TRUE;
+    ALTER TABLE compras ALTER COLUMN proveedor_id DROP NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_compras_por_confirmar
+      ON compras (sucursal_id, fecha)
+      WHERE factura_confirmada = FALSE;
+  `);
+
   // Ubicación espacial de productos — ver migrations/20260730_ubicacion_producto.sql
   //
   // 100% aditiva e idempotente. Columnas nullable: un negocio sin la feature no
