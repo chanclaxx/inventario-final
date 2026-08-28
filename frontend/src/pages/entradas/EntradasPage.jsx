@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef } from 'react';
+import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   PackagePlus, ChevronLeft, ChevronRight, Trash2, Check, Clock,
@@ -43,6 +43,11 @@ import { useSucursalKey }  from '../../hooks/useSucursalKey';
 // ─────────────────────────────────────────────────────────────────────────────
 
 const norm = (r) => (Array.isArray(r) ? r : (Array.isArray(r?.items) ? r.items : []));
+
+// Tope de campos de IMEI por línea. No es una regla de negocio: es que cada
+// unidad pinta un input, y un dedazo en el campo de cantidad congelaría la
+// pantalla.
+const MAX_IMEI = 200;
 
 // ── Una línea de la entrada ─────────────────────────────────────────────────
 function FilaLinea({ linea, onCantidad, onImei, onQuitar }) {
@@ -100,8 +105,17 @@ function FilaLinea({ linea, onCantidad, onImei, onQuitar }) {
         )}
       </div>
 
-      {/* Los seriales entran de a uno: cada IMEI es su propia unidad. */}
-      {linea.tipo === 'serial' && (
+      {/* Los seriales entran de a uno: cada IMEI es su propia unidad. Se
+          renderiza un campo por unidad, así que la cantidad va acotada: un
+          dedazo de 99999 en el campo pintaría 99999 inputs y congelaría el
+          navegador. */}
+      {linea.tipo === 'serial' && cantidad > MAX_IMEI && (
+        <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
+          Son demasiados equipos para una sola línea ({cantidad}). Regístralos en
+          entradas más pequeñas, de máximo {MAX_IMEI}.
+        </p>
+      )}
+      {linea.tipo === 'serial' && cantidad <= MAX_IMEI && (
         <div className="flex flex-col gap-1.5">
           <label className="text-xs text-gray-500">
             IMEI de cada equipo ({linea.imeis.filter(Boolean).length} de {cantidad})
@@ -125,11 +139,10 @@ function FilaLinea({ linea, onCantidad, onImei, onQuitar }) {
 // ── Vista: registrar una entrada ────────────────────────────────────────────
 function VistaEntrada({ orden, onVolver, onListo }) {
   const queryClient = useQueryClient();
-  const sucursalKey = useSucursalKey();
+  const { sucursalKey, sucursalLista } = useSucursalKey();
   const [busqueda, setBusqueda] = useState('');
   const [notas,    setNotas]    = useState('');
   const [error,    setError]    = useState('');
-  const buscadorRef = useRef(null);
 
   // Con orden, la lista arranca llena con lo que falta por llegar.
   const [lineas, setLineas] = useState(() => {
@@ -153,10 +166,12 @@ function VistaEntrada({ orden, onVolver, onListo }) {
   const { data: cantData } = useQuery({
     queryKey: ['productos-cantidad', ...sucursalKey],
     queryFn:  () => getProductosCantidad().then((r) => norm(r.data.data)),
+    enabled:  sucursalLista,
   });
   const { data: serialData } = useQuery({
     queryKey: ['productos-serial', ...sucursalKey],
     queryFn:  () => getProductosSerial().then((r) => norm(r.data.data)),
+    enabled:  sucursalLista,
   });
 
   // El catálogo entero, ya sin distinguir tipo: el producto sabe si lleva IMEI,
@@ -177,7 +192,6 @@ function VistaEntrada({ orden, onVolver, onListo }) {
   const agregar = (p) => {
     const key = `p-${p.tipo}-${p.id}`;
     setBusqueda('');
-    buscadorRef.current?.focus?.();
     setLineas((ls) => {
       const ya = ls.find((l) => l.key === key);
       if (ya) {
@@ -220,6 +234,9 @@ function VistaEntrada({ orden, onVolver, onListo }) {
         if (cant <= 0) continue;
         if (l.tipo === 'serial') {
           const imeis = l.imeis.filter((x) => x && x.trim());
+          if (cant > MAX_IMEI) {
+            throw new Error(`"${l.nombre_producto}": ${cant} equipos es demasiado para una sola entrada. Regístralos por partes.`);
+          }
           if (imeis.length !== cant) {
             throw new Error(`Faltan IMEI en "${l.nombre_producto}": ${imeis.length} de ${cant}`);
           }
@@ -272,13 +289,11 @@ function VistaEntrada({ orden, onVolver, onListo }) {
         </p>
       </div>
 
-      <div ref={buscadorRef}>
-        <SearchInput
-          value={busqueda}
-          onChange={setBusqueda}
-          placeholder="Escanea el código o busca el producto..."
-        />
-      </div>
+      <SearchInput
+        value={busqueda}
+        onChange={setBusqueda}
+        placeholder="Escanea el código o busca el producto..."
+      />
 
       {resultados.length > 0 && (
         <div className="flex flex-col gap-1 border border-gray-100 rounded-xl p-1.5 bg-white">
@@ -481,7 +496,7 @@ export default function EntradasPage() {
   const [vista, setVista] = useState(null);   // null | { orden }
   const [aviso, setAviso] = useState('');
   const [confirmando, setConfirmando] = useState(null);
-  const sucursalKey = useSucursalKey();
+  const { sucursalKey, sucursalLista } = useSucursalKey();
   const queryClient = useQueryClient();
   const { esAdminNegocio } = useAuth();
   const esAdmin = esAdminNegocio();
@@ -489,11 +504,13 @@ export default function EntradasPage() {
   const { data: ordenes = [], isLoading: cargandoOrdenes } = useQuery({
     queryKey: ['entradas-ordenes', ...sucursalKey],
     queryFn:  () => getOrdenesParaRecibir().then((r) => r.data.data || []),
+    enabled:  sucursalLista,
   });
 
   const { data: entradas = [], isLoading } = useQuery({
     queryKey: ['entradas', ...sucursalKey],
     queryFn:  () => getEntradas().then((r) => r.data.data || []),
+    enabled:  sucursalLista,
   });
 
   // La bandeja solo la pide administración: la ruta exige el permiso de ver
@@ -501,7 +518,7 @@ export default function EntradasPage() {
   const { data: porConfirmar = [] } = useQuery({
     queryKey: ['entradas-por-confirmar', ...sucursalKey],
     queryFn:  () => getEntradasPorConfirmar().then((r) => r.data.data || []),
-    enabled:  esAdmin,
+    enabled:  esAdmin && sucursalLista,
   });
 
   if (vista) {
