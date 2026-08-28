@@ -40,6 +40,90 @@ const archivos = [];
 
 const rel = (p) => path.relative(SRC, p).replace(/\\/g, '/');
 
+// ── Componentes JSX usados pero no definidos ────────────────────────────────
+//
+// `no-undef` de ESLint NO mira los nombres de componentes en JSX: en el AST son
+// `JSXIdentifier`, no `Identifier`. Quien cubre ese hueco es
+// `eslint-plugin-react` (regla `react/jsx-no-undef`), que este proyecto no
+// tiene instalado. Resultado: quitar un import y dejar el `<Componente />`
+// compila limpio y revienta al abrir la pantalla con
+//
+//     Uncaught ReferenceError: Badge is not defined
+//
+// Pasó de verdad, al mover una vista a su propio archivo. Esta comprobación es
+// el sustituto sin dependencias: recorre TODO el frontend, no solo lo nuevo.
+// Se quitan los comentarios antes de mirar nada: un `<CajaPage />` de ejemplo
+// dentro de un comentario no es una referencia.
+//
+// Solo los que ABREN renglon: un barrido global de /* ... */ se comia el
+// archivo entero desde cualquier accept="image/*" de un input de archivo, y
+// con el las funciones definidas mas abajo.
+const sinComentarios = (src) => src
+  .replace(/^[ \t]*\/\*[\s\S]*?\*\//gm, '')          // bloque que abre renglon
+  .replace(/\{\s*\/\*[\s\S]*?\*\/\s*\}/g, '')        // comentario JSX
+  .replace(/^[ \t]*\/\/[^\n]*/gm, '');               // linea entera
+
+const definidosEn = (src) => {
+  const nombres = new Set();
+
+  // import X, { A, B as C }, * as NS from '...'
+  for (const m of src.matchAll(/import\s+([\s\S]*?)\s+from\s+['"][^'"]+['"]/g)) {
+    const clausula = m[1];
+    const llaves = clausula.match(/\{([\s\S]*?)\}/);
+    if (llaves) {
+      for (const parte of llaves[1].split(',')) {
+        const nombre = parte.split(/\s+as\s+/).pop().trim();
+        if (nombre) nombres.add(nombre);
+      }
+    }
+    for (const m2 of clausula.replace(/\{[\s\S]*?\}/g, '').matchAll(/(?:\*\s+as\s+)?([A-Za-z_$][\w$]*)/g)) {
+      nombres.add(m2[1]);
+    }
+  }
+
+  // Definidos en el archivo
+  for (const m of src.matchAll(/(?:function|class)\s+([A-Z][\w$]*)/g)) nombres.add(m[1]);
+  for (const m of src.matchAll(/(?:const|let|var)\s+([A-Z][\w$]*)\s*=/g)) nombres.add(m[1]);
+
+  // Cualquier patrón de desestructuración: `const { A } =`, `({ A }) =>`,
+  // `function f({ A })`. Es de donde salen los componentes que llegan por prop,
+  // que es el caso mas comun de todos (`{ icon: Icon }`).
+  for (const m of src.matchAll(/\{([^{}]*)\}\s*(?:=[^=>]|=>|\)|,)/g)) {
+    for (const parte of m[1].split(',')) {
+      const nombre = parte.split(':').pop().trim().replace(/\s*=[\s\S]*$/, '').replace(/^\.\.\./, '');
+      if (/^[A-Za-z_$][\w$]*$/.test(nombre)) nombres.add(nombre);
+    }
+  }
+
+  // Alias y propiedades: `icon: Icon`, `Icn: Warehouse`. Incluye objetos que no
+  // son desestructuracion, y eso esta bien: este chequeo solo debe QUITAR
+  // falsos positivos, nunca inventar un error.
+  for (const m of src.matchAll(/[\w$]+\s*:\s*([A-Z][\w$]*)/g)) nombres.add(m[1]);
+
+  return nombres;
+};
+
+// Etiquetas que no son componentes del archivo.
+const IGNORAR = new Set(['React', 'Fragment', 'Suspense', 'StrictMode', 'Profiler']);
+
+console.log(`\n0. Componentes JSX definidos (${archivos.length} archivos)`);
+const indefinidos = [];
+for (const f of archivos) {
+  if (!f.endsWith('.jsx')) continue;
+  const limpio    = sinComentarios(readFileSync(f, 'utf8'));
+  const definidos = definidosEn(limpio);
+  const vistos    = new Set();
+  // <Componente ...> — solo los que empiezan en mayuscula son componentes.
+  for (const m of limpio.matchAll(/<([A-Z][\w$]*)(?:\.[\w$]+)*[\s/>]/g)) {
+    const nombre = m[1];
+    if (vistos.has(nombre) || IGNORAR.has(nombre) || definidos.has(nombre)) continue;
+    vistos.add(nombre);
+    indefinidos.push(`${rel(f)} → <${nombre}> no está importado ni definido`);
+  }
+}
+check('★ ningún componente JSX se usa sin estar definido',
+  indefinidos.length === 0, indefinidos.join('\n      '));
+
 // ── Hooks que devuelven un objeto y NO se pueden desparramar ────────────────
 // Para agregar uno: su nombre y las claves que expone.
 const HOOKS_OBJETO = [

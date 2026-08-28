@@ -16,6 +16,7 @@ import { useAuth }        from '../../context/useAuth';
 import { Button }      from '../../components/ui/Button';
 import { Input }       from '../../components/ui/Input';
 import { Spinner }     from '../../components/ui/Spinner';
+import { Badge }       from '../../components/ui/Badge';
 import { EmptyState }  from '../../components/ui/EmptyState';
 import { formatFechaHora, formatCOP } from '../../utils/formatters';
 import { useSucursalKey }  from '../../hooks/useSucursalKey';
