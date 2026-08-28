@@ -129,10 +129,25 @@ const _exigirBodega = (req) => {
 // en el frontend el dato viajaría igual y se vería en la consola del navegador.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const _puedeVerCostos = (req) =>
-  req.user?.rol !== 'vendedor' || req.red?.ocultar_costos === false;
+// La regla propia de la red interna Y el candado global del negocio: las dos
+// tienen que dejar pasar. Nunca al reves — este helper solo puede QUITAR.
+//
+// La regla de la red mira `rol !== 'vendedor'`, asi que a un SUPERVISOR no le
+// escondia nada pasara lo que pasara. Con el bodeguero siendo supervisor, eso
+// dejaba abierta por aqui justo la puerta que `costos_solo_admin` cierra en el
+// resto del sistema: el valor interno de cada unidad de toda la red.
+//
+// Si el negocio no encendio el candado, `puedeVerCostos` devuelve true y esto se
+// comporta EXACTAMENTE como antes.
+const _puedeVerCostos = async (req) => {
+  const reglaDeLaRed = req.user?.rol !== 'vendedor' || req.red?.ocultar_costos === false;
+  if (!reglaDeLaRed) return false;
+  return costosUtil.puedeVerCostos(req.user);
+};
 
 // Quita las claves de valor de un objeto, dejando el resto intacto.
+const costosUtil = require('../../utils/costos.util');
+
 const _sinValores = (obj, claves) => {
   if (!obj) return obj;
   const copia = { ...obj };
@@ -2526,7 +2541,7 @@ const getPanelLocal = async (req) => {
   const salida = { es_bodega: false, sucursal_id: sucursalId, ...estado,
                    por_recibir: porRecibir, remesas,
                    devoluciones_enviadas: devolucionesEnviadas };
-  return _puedeVerCostos(req) ? salida : _recortarParaVendedor(salida);
+  return (await _puedeVerCostos(req)) ? salida : _recortarParaVendedor(salida);
 };
 
 // Vista de la bodega: todos los locales + bandejas de confirmación.
@@ -2602,7 +2617,7 @@ const getConciliacion = async (req, sucursalId) => {
   // que un vendedor podía pedirla y recibir el `valor_interno` de cada equipo
   // —justo lo que el recorte del estado de cuenta esconde— por la puerta de al
   // lado. El recorte tiene que estar en TODAS las salidas, no en la principal.
-  if (_puedeVerCostos(req)) return salida;
+  if (await _puedeVerCostos(req)) return salida;
   const recortado = _recortarParaVendedor(salida);
   return {
     ...recortado,
@@ -2739,7 +2754,7 @@ const getEstadoCuenta = async (req, sucursalId, filtros = {}) => {
     desglose: _desgloseSaldo(totales.totales, remesas),
   };
 
-  return _puedeVerCostos(req) ? salida : _recortarParaVendedor(salida);
+  return (await _puedeVerCostos(req)) ? salida : _recortarParaVendedor(salida);
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2968,7 +2983,7 @@ const getRemision = async (req, id) => {
     puede_corregir:       remision.estado !== 'En transito' && req.esBodega,
   };
 
-  if (_puedeVerCostos(req)) return salida;
+  if (await _puedeVerCostos(req)) return salida;
   return {
     ...salida,
     costos_ocultos: true,

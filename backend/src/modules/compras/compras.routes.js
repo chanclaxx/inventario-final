@@ -26,22 +26,18 @@ const validarCompra = [
 // Compras viven dentro del módulo de proveedores.
 // Las cuatro de lectura devuelven precios de compra, así que exigen además el
 // permiso que hasta ahora solo miraba el frontend.
-router.get('/',                       requireModulo('proveedores'), requirePermisoVerCompras, ctrl.getCompras);
-router.get('/paginadas',              requireModulo('proveedores'), requirePermisoVerCompras, ctrl.getComprasPaginadas);
-router.get('/proveedor/:proveedorId', requireModulo('proveedores'), requirePermisoVerCompras, ctrl.getComprasByProveedor);
-router.get('/:id',                    requireModulo('proveedores'), requirePermisoVerCompras, ctrl.getCompraById);
-router.post('/', requireModulo('proveedores'), requireNivel('supervisor'), validarCompra, validate, ctrl.registrarCompra);
-
-// -- Entradas de bodega ------------------------------------------------------
+// ── Entradas de bodega ──────────────────────────────────────────────────────
+// OJO: van ANTES de `/:id`. Express resuelve por orden de registro, así que
+// `/entradas` declarada después entraría por `/:id` con id="entradas" y moriría
+// en el permiso de ver compras.
 //
-// El bodeguero es un SUPERVISOR: no hace falta un rol ni un permiso nuevo, y
-// justamente por eso estas rutas piden lo mismo que `POST /compras`. Recibir es
-// una operacion estrictamente MENOS poderosa que registrar una compra: no
-// decide proveedor, no decide precios y no toca caja.
+// El bodeguero es un SUPERVISOR: no hace falta rol ni permiso nuevo, y por eso
+// piden lo mismo que POST /compras. Recibir es estrictamente MENOS poderoso que
+// registrar una compra: no decide proveedor, no decide precios y no toca caja.
 //
-// Van bajo el modulo `inventario` y no `proveedores`: el bodeguero cuenta cajas,
-// no lleva la relacion comercial. Pedirle el modulo de proveedores para recibir
-// le abriria la puerta que este trabajo vino a cerrar.
+// Van bajo el módulo `inventario` y no `proveedores`: el bodeguero cuenta cajas,
+// no lleva la relación comercial. Pedirle proveedores para recibir le abriría la
+// puerta que este trabajo vino a cerrar.
 const validarEntrada = [
   body('lineas').isArray({ min: 1 }).withMessage('La entrada necesita al menos un producto'),
   body('lineas.*.cantidad').isInt({ gt: 0 }).withMessage('Cantidad invalida'),
@@ -50,16 +46,21 @@ const validarEntrada = [
   body('notas').optional({ values: 'null' }).isString().trim().isLength({ max: 500 }),
 ];
 
-router.get ('/entradas', requireModulo('inventario'), requireNivel('supervisor'), ctrl.getEntradas);
-// Las ordenes que la bodega puede recibir, sin proveedor ni precios.
+router.get ('/entradas',         requireModulo('inventario'), requireNivel('supervisor'), ctrl.getEntradas);
 router.get ('/entradas/ordenes', requireModulo('inventario'), requireNivel('supervisor'), ctrl.getOrdenesParaRecibir);
-router.post('/entradas', requireModulo('inventario'), requireNivel('supervisor'),
+router.post('/entradas',         requireModulo('inventario'), requireNivel('supervisor'),
   validarEntrada, validate, ctrl.registrarEntrada);
 
-// La bandeja y la confirmacion SI son de administracion: ponen proveedor y
-// precios, y la correccion en cascada toca costo, total y deuda.
-router.get  ('/por-confirmar',   requireModulo('proveedores'), requirePermisoVerCompras, ctrl.getPorConfirmar);
-router.patch('/:id/confirmar',   requireModulo('proveedores'), requireNivel('admin_negocio'),
+// La bandeja y la confirmación SÍ son de administración: ponen proveedor y
+// precios, y la corrección en cascada toca costo, total y deuda.
+router.get('/por-confirmar', requireModulo('proveedores'), requirePermisoVerCompras, ctrl.getPorConfirmar);
+
+router.get('/',                       requireModulo('proveedores'), requirePermisoVerCompras, ctrl.getCompras);
+router.get('/paginadas',              requireModulo('proveedores'), requirePermisoVerCompras, ctrl.getComprasPaginadas);
+router.get('/proveedor/:proveedorId', requireModulo('proveedores'), requirePermisoVerCompras, ctrl.getComprasByProveedor);
+router.get('/:id',                    requireModulo('proveedores'), requirePermisoVerCompras, ctrl.getCompraById);
+
+router.patch('/:id/confirmar', requireModulo('proveedores'), requireNivel('admin_negocio'),
   [
     body('proveedor_id').optional({ values: 'null' }).isInt({ gt: 0 }).withMessage('Proveedor invalido'),
     body('numero_factura').optional({ values: 'null' }).isString().trim().isLength({ max: 60 }),
@@ -68,6 +69,8 @@ router.patch('/:id/confirmar',   requireModulo('proveedores'), requireNivel('adm
     body('lineas.*.precio_unitario').optional().isFloat({ gt: 0 }),
   ],
   validate, ctrl.confirmarEntrada);
+router.post('/', requireModulo('proveedores'), requireNivel('supervisor'), validarCompra, validate, ctrl.registrarCompra);
+
 router.patch('/:id/cancelar', requireModulo('proveedores'), requireNivel('supervisor'), ctrl.cancelarCompra);
 // Corrección de precios de una compra: solo admin_negocio (cascada a costo/deuda)
 router.patch('/:id/precios', requireModulo('proveedores'), requireNivel('admin_negocio'),

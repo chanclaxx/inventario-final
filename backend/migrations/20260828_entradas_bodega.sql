@@ -38,6 +38,13 @@
 ALTER TABLE compras
   ADD COLUMN IF NOT EXISTS factura_confirmada BOOLEAN NOT NULL DEFAULT TRUE;
 
+-- Qué compra entró por bodega. Se marca en vez de deducirse: "sin proveedor" o
+-- "no toca caja" también describen a una compra a crédito registrada desde
+-- Proveedores, y esa no es una Entrada ni tiene por qué salir en la pantalla
+-- del bodeguero. FALSE por defecto deja todo el historial como lo que es.
+ALTER TABLE compras
+  ADD COLUMN IF NOT EXISTS es_entrada BOOLEAN NOT NULL DEFAULT FALSE;
+
 -- Sin orden previa no hay proveedor que asignar: lo pone administración al
 -- confirmar. `registrarCompra` ya trata el proveedor como opcional en todo su
 -- cuerpo (`if (proveedor_id)` alrededor del bloque del acreedor); lo único que

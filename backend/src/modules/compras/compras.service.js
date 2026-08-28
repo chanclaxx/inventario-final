@@ -127,6 +127,7 @@ const registrarCompra = async ({
   fecha_vencimiento = null,
   // Una Entrada de bodega nace sin confirmar; todo lo demas nace confirmado.
   factura_confirmada = true,
+  es_entrada = false,
 }) => {
   // ── Verificar sucursal pertenece al negocio ──────────────────────────────
   const { rows: sucRows } = await pool.query(
@@ -172,6 +173,7 @@ const registrarCompra = async ({
     const compra = await comprasRepo.create(client, {
       sucursal_id, proveedor_id, usuario_id, numero_factura, total, notas,
       registrar_en_caja, metodo: metodoPago, orden_compra_id, factura_confirmada,
+      es_entrada,
     });
 
     for (const linea of lineas) {
@@ -1140,6 +1142,28 @@ const registrarEntrada = async ({
             + 'Pidele a administracion que lo cree y vuelve a intentarlo.',
         };
       }
+      // ── El stock se mueve en la HOJA, nunca en el producto ─────────────
+      // Con variantes activas, el stock del producto es la SUMA de sus hijos y
+      // se recalcula solo. Escribir ahí arriba lo infla y deja el arbol
+      // descuadrado: el producto diria 5 y sus tallas sumarian 0. Es el mismo
+      // error que costo corregir en las remisiones por variante, asi que aqui
+      // se rechaza en vez de aceptarlo en silencio.
+      if (!l.imei && !l.variante_id && !l.atributo_id) {
+        const { rows: hijos } = await client.query(
+          `SELECT 1 FROM atributos_producto
+           WHERE producto_id = $1 AND activo = true LIMIT 1`,
+          [l.producto_id]
+        );
+        if (hijos.length) {
+          throw {
+            status: 400,
+            code: 'VARIANTE_REQUERIDA',
+            message: `"${l.nombre_producto || 'Ese producto'}" se maneja por variantes. `
+              + 'Indica cual llego (talla, color...) antes de registrar la entrada.',
+          };
+        }
+      }
+
       conPrecio.push({
         ...l,
         cantidad,
@@ -1162,7 +1186,48 @@ const registrarEntrada = async ({
     pagos: [],
     registrar_en_caja: false,     // una entrada no toca caja: nadie pago nada
     factura_confirmada: false,    // queda esperando la factura
+    es_entrada: true,             // y es lo que la pantalla de bodega lista
   });
+};
+
+// -- Acreedor de un proveedor: lo encuentra o lo crea -----------------------
+// Mismo criterio que usa `registrarCompra`: primero por proveedor_id, luego por
+// el NIT (hay acreedores viejos creados a mano antes de que existiera el enlace
+// al proveedor), y si no, se crea. Vive aparte porque ahora lo necesitan dos
+// caminos: la compra normal y la confirmacion de una entrada que llego sin orden.
+const _acreedorDe = async (client, negocioId, proveedorId) => {
+  const { rows: prov } = await client.query(
+    'SELECT id, nombre, nit, telefono FROM proveedores WHERE id = $1 AND negocio_id = $2',
+    [proveedorId, negocioId]
+  );
+  const p = prov[0];
+
+  let { rows } = await client.query(
+    'SELECT id FROM acreedores WHERE negocio_id = $1 AND proveedor_id = $2 LIMIT 1',
+    [negocioId, proveedorId]
+  );
+  if (rows.length) return rows[0].id;
+
+  if (p?.nit) {
+    const { rows: porNit } = await client.query(
+      'SELECT id FROM acreedores WHERE negocio_id = $1 AND cedula = $2 LIMIT 1',
+      [negocioId, p.nit]
+    );
+    if (porNit.length) {
+      await client.query(
+        'UPDATE acreedores SET proveedor_id = $1 WHERE id = $2 AND proveedor_id IS NULL',
+        [proveedorId, porNit[0].id]
+      );
+      return porNit[0].id;
+    }
+  }
+
+  const { rows: nuevo } = await client.query(
+    `INSERT INTO acreedores(negocio_id, nombre, cedula, telefono, proveedor_id)
+     VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+    [negocioId, p?.nombre, p?.nit || `prov-${proveedorId}`, p?.telefono || '', proveedorId]
+  );
+  return nuevo[0].id;
 };
 
 const getOrdenesParaRecibir = (sucursalId, negocioId) =>
@@ -1203,6 +1268,32 @@ const confirmarEntrada = async (negocioId, compraId, { proveedor_id, lineas, num
       );
       if (!rows.length) throw { status: 400, message: 'Proveedor no valido para este negocio' };
       await comprasRepo.asignarProveedor(client, compraId, proveedor_id);
+
+      // ── EL AGUJERO QUE ESTO TAPA ──────────────────────────────────────────
+      // Una entrada sin orden llega sin proveedor, asi que `registrarCompra` se
+      // salta entero el bloque del acreedor: no hay Cargo. Y `editarPreciosCompra`
+      // solo ACTUALIZA el cargo existente (`UPDATE ... WHERE compra_id`), no lo
+      // crea. Resultado: la mercancia entraba al inventario y el proveedor nunca
+      // quedaba con su cuenta por pagar. El cargo nace aqui, que es el momento
+      // en que por fin se sabe a quien se le debe.
+      const { rows: yaHay } = await client.query(
+        `SELECT id FROM movimientos_acreedor WHERE compra_id = $1 AND tipo = 'Cargo' LIMIT 1`,
+        [compraId]
+      );
+      if (!yaHay.length) {
+        const acreedorId = await _acreedorDe(client, negocioId, proveedor_id);
+        // El valor sale del total VIGENTE de la compra (el provisional). Si los
+        // precios cambian a continuacion, `editarPreciosCompra` recalcula el
+        // total y pone el cargo al dia: por eso este INSERT va antes.
+        await client.query(
+          `INSERT INTO movimientos_acreedor
+             (acreedor_id, usuario_id, tipo, descripcion, valor, compra_id, sucursal_id)
+           VALUES ($1, $2, 'Cargo', $3, $4, $5, $6)`,
+          [acreedorId, usuario_id || null,
+           `Entrada #${compra.numero ?? compraId} — mercancia`,
+           compra.total, compraId, compra.sucursal_id]
+        );
+      }
     }
     if (numero_factura) {
       await client.query('UPDATE compras SET numero_factura = $1 WHERE id = $2',

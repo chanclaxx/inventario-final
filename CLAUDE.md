@@ -102,6 +102,11 @@ Three roles exist: `admin_negocio`, `supervisor`, `vendedor`. Role determines wh
 > Aparte, `permisos_proveedores.ver_compras` **existía solo en el frontend**:
 > `GET /api/compras` respondía el historial con precios a cualquiera con el
 > módulo. Ahora lo exige `requirePermisoVerCompras`.
+> La red interna también lo respeta: su `_puedeVerCostos` miraba
+> `rol !== 'vendedor'`, así que a un SUPERVISOR no le escondía nada — y el
+> bodeguero es supervisor. Ahora exige las DOS reglas (la de la red y el candado
+> global) y sigue siendo puramente restrictiva: con el candado apagado se
+> comporta igual que siempre.
 > Prueba: `31-costos-solo-admin` (42 verificaciones; la sección 1 falla si
 > alguien invierte el default).
 
@@ -140,8 +145,37 @@ Three roles exist: `admin_negocio`, `supervisor`, `vendedor`. Role determines wh
 > `PRODUCTO_NO_EXISTE` con un mensaje que dice a quién pedírselo.
 > `factura_confirmada` nace en **TRUE** para que ninguna compra existente
 > aparezca de golpe en la bandeja de los 28 negocios.
-> Prueba: `33-entradas-bodega` (21 verificaciones; la sección 1 corre la
-> identidad del costo sobre las dos funciones REALES en 480 combinaciones).
+> **La deuda con el proveedor nace al CONFIRMAR cuando la entrada llegó sin
+> orden.** Sin proveedor, `registrarCompra` se salta entero el bloque del
+> acreedor y no crea Cargo; y `editarPreciosCompra` solo *actualiza* el cargo
+> existente (`UPDATE ... WHERE compra_id`), nunca lo crea. La mercancía entraba
+> al inventario y el proveedor jamás quedaba con su cuenta por pagar. El Cargo
+> se crea en `confirmarEntrada`, que es el momento en que por fin se sabe a
+> quién se le debe, y el `INSERT` va ANTES de la corrección de precios para que
+> `editarPreciosCompra` lo deje al día.
+> **`es_entrada` es una marca explícita, no deducida**: "sin proveedor" o "no
+> toca caja" también describen una compra a crédito registrada desde
+> Proveedores, y esa no es una Entrada ni va en la pantalla del bodeguero.
+> **`VARIANTE_REQUERIDA`**: con variantes activas el stock se mueve en la HOJA.
+> Una línea de cantidad sin nodo se rechaza en vez de escribir arriba y dejar el
+> producto diciendo 5 con sus tallas en 0 — el mismo error que costó corregir en
+> las remisiones por variante.
+> **Las rutas `/entradas`, `/entradas/ordenes` y `/por-confirmar` van ANTES de
+> `/:id`**. Declaradas después, Express las resolvía por `/:id` con
+> id="entradas" y el bodeguero moría en el permiso de ver compras: la entrada se
+> creaba pero la lista salía vacía. El archivo ya lo advertía arriba.
+> La captura (IMEI + color + características, y el reparto por variante) **se
+> reusa** de `capturaMercancia.jsx`, la misma de ModalCompra y ModalRecibir;
+> `MultiSelectorCompra` aprendió `mostrarCosto={false}` en vez de que naciera
+> una tercera copia.
+> **OJO con despachar antes de confirmar**: el valor de una línea de remisión se
+> congela al despachar (`_valorLinea` toma el costo real), y corregir después el
+> precio de la compra NO lo actualiza. Si la bodega despacha una entrada sin
+> confirmar, el local queda debiendo el valor PROVISIONAL para siempre, salvo
+> corrección manual desde Red interna → «Corregir valor de la línea».
+> Prueba: `33-entradas-bodega` (32 verificaciones; la sección 1 corre la
+> identidad del costo sobre las dos funciones REALES en 480 combinaciones) y
+> `34-contratos-frontend`, que revisa estáticamente las pantallas.
 
 > **La lista de módulos está DUPLICADA a mano** (`backend/src/config/modulos.js`
 > y `MODULOS`/`PERMISOS_BASE` en `UsuariosConfig.jsx`): el frontend no puede

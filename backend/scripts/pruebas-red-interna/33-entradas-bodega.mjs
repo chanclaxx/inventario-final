@@ -112,7 +112,7 @@ check('★ y la puede hacer un supervisor (el bodeguero)',
 check('★ confirmar la factura es SOLO de admin',
   /requireNivel\('admin_negocio'\)/.test(linea("router.patch('/:id/confirmar'")), true);
 check('la bandeja exige el permiso de ver compras',
-  /requirePermisoVerCompras/.test(linea("router.get  ('/por-confirmar'")), true);
+  /requirePermisoVerCompras/.test(linea("'/por-confirmar'")), true);
 
 console.log('\n5. Estado inicial y compatibilidad');
 const fuenteRepo = readFileSync(path.join(RAIZ, 'src/modules/compras/compras.repository.js'), 'utf8');
@@ -135,6 +135,48 @@ check('★ una línea sin producto_id se rechaza',
   /PRODUCTO_NO_EXISTE/.test(fuenteService), true);
 check('★ y el mensaje manda a administración, no solo se niega',
   /Pidele a administracion que lo cree/.test(fuenteService), true);
+
+console.log('\n7. Las barandas que hacen correcto el registro');
+
+// El orden de las rutas. `/entradas` declarada DESPUES de `/:id` entraba por
+// ahi con id="entradas" y moria en el permiso de ver compras: la entrada se
+// creaba pero la lista salia vacia. Fue el sintoma reportado desde produccion.
+const iEntradas = fuenteRutas.indexOf("router.get ('/entradas'");
+const iId       = fuenteRutas.indexOf("router.get('/:id'");
+check('★ /entradas se declara ANTES que /:id', iEntradas > 0 && iEntradas < iId, true);
+check('★ /entradas/ordenes también',
+  fuenteRutas.indexOf("'/entradas/ordenes'") < iId, true);
+check('★ y /por-confirmar también',
+  fuenteRutas.indexOf("'/por-confirmar'") < iId, true);
+
+// Con variantes activas el stock se mueve en la HOJA. Aceptar la linea sin nodo
+// escribiria arriba y dejaria el producto diciendo 5 con sus tallas en 0.
+check('★ rechaza una linea de cantidad sin variante si el producto las tiene',
+  /VARIANTE_REQUERIDA/.test(fuenteService), true);
+check('★ y el mensaje dice qué hacer',
+  /Indica cual llego/.test(fuenteService), true);
+
+// La deuda. El proveedor de una entrada sin orden se asigna al CONFIRMAR; si el
+// Cargo no naciera ahi, la mercancia entraria al inventario y el proveedor
+// nunca quedaria con su cuenta por pagar. `editarPreciosCompra` solo ACTUALIZA
+// un cargo existente, no lo crea.
+const confirmar = fuenteService.slice(fuenteService.indexOf('const confirmarEntrada'));
+check('★ el cargo al acreedor nace al confirmar una entrada sin proveedor',
+  /INSERT INTO movimientos_acreedor/.test(confirmar) && /'Cargo'/.test(confirmar), true);
+check('★ y no se duplica si el cargo ya existia',
+  /SELECT id FROM movimientos_acreedor WHERE compra_id/.test(confirmar), true);
+check('★ el acreedor se busca antes de crearse (no se duplica el proveedor)',
+  /_acreedorDe/.test(confirmar), true);
+
+// Solo lo que entro por bodega sale en la pantalla del bodeguero.
+check('★ la lista del bodeguero se acota a las entradas',
+  /es_entrada = TRUE/.test(fuenteRepo), true);
+check('★ y la marca es explícita, no deducida',
+  /es_entrada BOOLEAN NOT NULL DEFAULT FALSE/.test(fuenteMigr), true);
+
+// Saber que llego, sin abrir una por una.
+check('★ la consulta trae un resumen de lo que llego',
+  /AS resumen/.test(fuenteRepo), true);
 
 console.log('\n' + '─'.repeat(62));
 if (fallos) { console.log(`✗ ${fallos} FALLO(S) de ${fallos + pasados}`); process.exit(1); }

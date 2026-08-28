@@ -195,6 +195,11 @@ const aplicarMigraciones = async (client) => {
   await migrar(client, 'Entradas de bodega', `
     ALTER TABLE compras
       ADD COLUMN IF NOT EXISTS factura_confirmada BOOLEAN NOT NULL DEFAULT TRUE;
+    -- Marca explícita en vez de deducirla: sin ella habría que adivinar por
+    -- "no tiene proveedor" o "no toca caja", y una compra a crédito registrada
+    -- desde Proveedores daría los mismos síntomas sin ser una entrada.
+    ALTER TABLE compras
+      ADD COLUMN IF NOT EXISTS es_entrada BOOLEAN NOT NULL DEFAULT FALSE;
     ALTER TABLE compras ALTER COLUMN proveedor_id DROP NOT NULL;
     CREATE INDEX IF NOT EXISTS idx_compras_por_confirmar
       ON compras (sucursal_id, fecha)

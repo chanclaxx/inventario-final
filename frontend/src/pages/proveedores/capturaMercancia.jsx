@@ -106,7 +106,11 @@ export function FilaImeiCompra({
 // un atributo sin variantes debajo). El stock SIEMPRE se mueve sobre la hoja,
 // nunca sobre el producto padre: el padre se recalcula como la suma de sus
 // hojas, así que escribirle directo se pierde en la siguiente sincronización.
-export function MultiSelectorCompra({ hojas, nodosData, onActualizar }) {
+// `mostrarCosto` existe para la pantalla de bodega, que reparte la cantidad por
+// variante igual que una compra pero no puede ver ni escribir precios. Es un
+// prop y no un componente aparte: duplicarlo dejaria a uno de los dos mintiendo
+// tras el primer arreglo, que es lo que ya paso con el codigo escaneable.
+export function MultiSelectorCompra({ hojas, nodosData, onActualizar, mostrarCosto = true }) {
   const [seleccionadas, setSeleccionadas] = useState(
     () => new Set(hojas.filter((h) => Number(nodosData[h.key]?.cantidad) > 0).map((h) => h.key))
   );
@@ -158,7 +162,9 @@ export function MultiSelectorCompra({ hojas, nodosData, onActualizar }) {
           <div className="flex items-center gap-2 px-1">
             <p className="flex-1 text-[11px] font-medium text-gray-400 uppercase tracking-wide">Variante</p>
             <p className="w-14 text-[11px] font-medium text-gray-400 text-center">Cant.</p>
-            <p className="w-24 text-[11px] font-medium text-gray-400 text-center">Precio unit.</p>
+            {mostrarCosto && (
+              <p className="w-24 text-[11px] font-medium text-gray-400 text-center">Precio unit.</p>
+            )}
           </div>
           <div className="flex flex-col gap-1.5">
             {hojasSel.map((h) => {
@@ -176,11 +182,13 @@ export function MultiSelectorCompra({ hojas, nodosData, onActualizar }) {
                     onWheel={noWheel} placeholder="0"
                     className="w-14 px-2 py-1.5 text-xs text-center bg-white border border-gray-200
                       rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400" />
+                  {mostrarCosto && (
                   <InputMoneda value={data.costo}
                     onChange={(val) => onActualizar(h.key, { ...base(h), costo: val })}
                     placeholder="$0"
                     className="w-24 px-2 py-1.5 text-xs bg-white border border-gray-200 rounded-lg
                       focus:outline-none focus:ring-2 focus:ring-blue-400" />
+                  )}
                 </div>
               );
             })}

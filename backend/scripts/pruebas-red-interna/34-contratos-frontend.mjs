@@ -108,23 +108,30 @@ for (const f of archivos) {
 check('★ ningún archivo desparrama el objeto del hook',
   spreadsMalos.length === 0, spreadsMalos.join('\n      '));
 
-// ── La pantalla nueva, en concreto ──────────────────────────────────────────
+// ── Las pantallas nuevas, en concreto ───────────────────────────────────────
 console.log('\n3. Entradas de bodega');
-const entradas = readFileSync(path.join(SRC, 'pages/entradas/EntradasPage.jsx'), 'utf8');
-check('★ desestructura el hook',
-  /const \{ sucursalKey, sucursalLista \} = useSucursalKey\(\)/.test(entradas));
-check('★ y usa sucursalLista para no consultar antes de tiempo',
-  (entradas.match(/enabled:\s*[^,\n]*sucursalLista/g) || []).length >= 3,
-  'las consultas de productos, órdenes y entradas deben esperar a la sucursal');
+const listado = readFileSync(path.join(SRC, 'pages/entradas/EntradasPage.jsx'), 'utf8');
+const vista   = readFileSync(path.join(SRC, 'pages/entradas/VistaEntrada.jsx'), 'utf8');
+
+check('★ el listado desestructura el hook',
+  /const \{ sucursalKey, sucursalLista \} = useSucursalKey\(\)/.test(listado));
+check('★ la vista de captura también',
+  /const \{ sucursalKey, sucursalLista \} = useSucursalKey\(\)/.test(vista));
+check('★ y usan sucursalLista para no consultar antes de tiempo',
+  (listado.match(/enabled:\s*[^,\n]*sucursalLista/g) || []).length >= 2
+  && (vista.match(/enabled:\s*[^,\n]*sucursalLista/g) || []).length >= 2,
+  'las consultas deben esperar a que la sucursal esté resuelta');
 check('★ no pinta un input de IMEI por unidad sin tope',
-  /MAX_IMEI/.test(entradas),
+  /MAX_IMEI/.test(vista),
   'una cantidad grande renderizaría miles de inputs y congelaría el navegador');
+
 // El payload que arma la pantalla del bodeguero, tal cual sale hacia el backend.
-// Si algun dia aparece ahi un precio o un proveedor, el diseno se torcio: esos
+// Si algún día aparece ahí un precio o un proveedor, el diseño se torció: esos
 // los resuelve el servidor justamente porque esta persona no debe decidirlos.
-const inicioMut = entradas.indexOf('const mut = useMutation');
-const finMut    = entradas.indexOf('onSuccess:', inicioMut);
-const payload   = entradas.slice(inicioMut, finMut);
+const payload = vista.slice(
+  vista.indexOf('const construirPayload'),
+  vista.indexOf('const totalUnidades'),
+);
 check('★ el payload de la entrada no lleva precios',
   !/precio|costo/i.test(payload),
   'la pantalla del bodeguero nunca debe mandar cifras de dinero');
@@ -133,6 +140,34 @@ check('★ ni proveedor',
   'el proveedor sale de la orden en el backend, no del cliente');
 check('y sí lleva lo que el bodeguero cuenta',
   /cantidad/.test(payload) && /producto_id/.test(payload));
+
+console.log('\n4. Lo que hace correcto el registro, no solo bonito');
+// Un IMEI identifica una unidad concreta: dos equipos del mismo modelo no son
+// intercambiables. Sin color ni características entran idénticos al inventario.
+check('★ captura color y características de cada IMEI',
+  /extraerColor/.test(vista) && /extraerCaracteristicas/.test(vista),
+  'sin esto, el equipo negro y el azul entran iguales');
+// Con variantes activas el stock se mueve en la HOJA. "Llegaron 5 brasieres" no
+// es una entrada válida si el negocio vende por tallas.
+check('★ reparte la cantidad por variante',
+  /variante_id/.test(payload) && /atributo_id/.test(payload),
+  'con variantes activas hay que decir QUÉ llegó');
+check('★ y saca las hojas con el helper compartido, no con una copia',
+  /hojasDelArbol/.test(vista));
+// Reusar la captura de ModalCompra/ModalRecibir en vez de escribir una tercera.
+check('★ reusa la captura de mercancía compartida',
+  /from '\.\.\/proveedores\/capturaMercancia'/.test(vista),
+  'una captura propia dejaría a una de las tres mintiendo tras el primer arreglo');
+// El selector compartido tuvo que aprender a esconder el costo; si alguien lo
+// quita, la pantalla del bodeguero vuelve a mostrar precios.
+const captura = readFileSync(path.join(SRC, 'pages/proveedores/capturaMercancia.jsx'), 'utf8');
+check('★ el selector compartido acepta ocultar el costo',
+  /mostrarCosto\s*=\s*true/.test(captura) && /mostrarCosto=\{false\}/.test(vista));
+
+console.log('\n5. Saber QUÉ llegó, no solo cuántas unidades');
+check('★ el listado muestra el resumen de la entrada',
+  /e\.resumen/.test(listado),
+  'con solo el número de documento hay que abrirlas una por una');
 
 console.log('\n' + '─'.repeat(62));
 if (fallos) { console.log(`✗ ${fallos} FALLO(S) de ${fallos + pasados}`); process.exit(1); }

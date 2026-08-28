@@ -1,24 +1,21 @@
-import { useState, useMemo } from 'react';
+import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  PackagePlus, ChevronLeft, ChevronRight, Trash2, Check, Clock,
-  ClipboardList, AlertTriangle, FileCheck2,
+  PackagePlus, Check, Clock, ClipboardList, FileCheck2,
 } from 'lucide-react';
 import {
-  getEntradas, getOrdenesParaRecibir, registrarEntrada,
+  getEntradas, getOrdenesParaRecibir,
   getEntradasPorConfirmar, confirmarEntrada,
 } from '../../api/entradas.api';
+import { VistaEntrada } from './VistaEntrada';
 import { getCompraById }  from '../../api/compras.api';
 import { getProveedores } from '../../api/proveedores.api';
 import { Modal }          from '../../components/ui/Modal';
 import { InputMoneda }    from '../../components/ui/InputMoneda';
 import { useAuth }        from '../../context/useAuth';
-import { getProductosCantidad, getProductosSerial } from '../../api/productos.api';
-import { SearchInput } from '../../components/ui/SearchInput';
 import { Button }      from '../../components/ui/Button';
 import { Input }       from '../../components/ui/Input';
 import { Spinner }     from '../../components/ui/Spinner';
-import { Badge }       from '../../components/ui/Badge';
 import { EmptyState }  from '../../components/ui/EmptyState';
 import { formatFechaHora, formatCOP } from '../../utils/formatters';
 import { useSucursalKey }  from '../../hooks/useSucursalKey';
@@ -44,325 +41,6 @@ import { useSucursalKey }  from '../../hooks/useSucursalKey';
 
 const norm = (r) => (Array.isArray(r) ? r : (Array.isArray(r?.items) ? r.items : []));
 
-// Tope de campos de IMEI por línea. No es una regla de negocio: es que cada
-// unidad pinta un input, y un dedazo en el campo de cantidad congelaría la
-// pantalla.
-const MAX_IMEI = 200;
-
-// ── Una línea de la entrada ─────────────────────────────────────────────────
-function FilaLinea({ linea, onCantidad, onImei, onQuitar }) {
-  const pedida    = linea.pedida ?? null;
-  const cantidad  = Number(linea.cantidad) || 0;
-  const difiere   = pedida != null && cantidad !== pedida;
-  const faltan    = pedida != null && cantidad < pedida;
-
-  return (
-    <div className="border border-gray-100 rounded-xl p-3 flex flex-col gap-2 bg-white">
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium text-gray-800 break-words">{linea.nombre_producto}</p>
-          <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-            {linea.etiqueta_nodo && (
-              <span className="text-xs text-gray-400">{linea.etiqueta_nodo}</span>
-            )}
-            {pedida != null && (
-              <span className="text-xs text-gray-400">Pedido: {pedida}</span>
-            )}
-            {linea.tipo === 'serial' && (
-              <Badge variant="blue">IMEI</Badge>
-            )}
-          </div>
-        </div>
-        <button
-          onClick={() => onQuitar(linea.key)}
-          title="Quitar de la entrada"
-          className="p-1.5 rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50 transition-colors flex-shrink-0"
-        >
-          <Trash2 size={15} />
-        </button>
-      </div>
-
-      <div className="flex items-center gap-2 flex-wrap">
-        <label className="text-xs text-gray-500">Llegó</label>
-        <input
-          type="number" min="0"
-          value={linea.cantidad}
-          onChange={(e) => onCantidad(linea.key, e.target.value)}
-          className="w-20 px-2.5 py-1.5 bg-white border-2 border-green-500 rounded-lg
-            text-sm font-semibold text-gray-800 text-center tabular-nums
-            focus:outline-none focus:ring-2 focus:ring-green-400"
-        />
-        {/* El faltante y el sobrante NO son otro flujo: escribir una cantidad
-            distinta a la pedida YA es reportarlos, y viajan solos en la entrada. */}
-        {difiere && (
-          <span className={`text-xs font-medium ${faltan ? 'text-amber-600' : 'text-purple-600'}`}>
-            {faltan ? `faltan ${pedida - cantidad}` : `sobran ${cantidad - pedida}`}
-            <span className="text-gray-400 font-normal"> · queda anotado</span>
-          </span>
-        )}
-        {pedida == null && (
-          <span className="text-xs text-gray-400">no venía en el pedido</span>
-        )}
-      </div>
-
-      {/* Los seriales entran de a uno: cada IMEI es su propia unidad. Se
-          renderiza un campo por unidad, así que la cantidad va acotada: un
-          dedazo de 99999 en el campo pintaría 99999 inputs y congelaría el
-          navegador. */}
-      {linea.tipo === 'serial' && cantidad > MAX_IMEI && (
-        <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
-          Son demasiados equipos para una sola línea ({cantidad}). Regístralos en
-          entradas más pequeñas, de máximo {MAX_IMEI}.
-        </p>
-      )}
-      {linea.tipo === 'serial' && cantidad <= MAX_IMEI && (
-        <div className="flex flex-col gap-1.5">
-          <label className="text-xs text-gray-500">
-            IMEI de cada equipo ({linea.imeis.filter(Boolean).length} de {cantidad})
-          </label>
-          <div className="flex flex-col gap-1 max-h-44 overflow-y-auto pr-1">
-            {Array.from({ length: cantidad }).map((_, i) => (
-              <Input
-                key={i}
-                placeholder={`IMEI ${i + 1}`}
-                value={linea.imeis[i] || ''}
-                onChange={(e) => onImei(linea.key, i, e.target.value)}
-              />
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── Vista: registrar una entrada ────────────────────────────────────────────
-function VistaEntrada({ orden, onVolver, onListo }) {
-  const queryClient = useQueryClient();
-  const { sucursalKey, sucursalLista } = useSucursalKey();
-  const [busqueda, setBusqueda] = useState('');
-  const [notas,    setNotas]    = useState('');
-  const [error,    setError]    = useState('');
-
-  // Con orden, la lista arranca llena con lo que falta por llegar.
-  const [lineas, setLineas] = useState(() => {
-    if (!orden) return [];
-    return (orden.lineas || [])
-      .filter((l) => l.pendiente > 0 && l.producto_id)
-      .map((l) => ({
-        key:             `oc-${l.orden_linea_id}`,
-        producto_id:     l.producto_id,
-        nombre_producto: l.nombre,
-        tipo:            l.tipo,
-        variante_id:     l.variante_id || null,
-        atributo_id:     l.atributo_id || null,
-        orden_linea_id:  l.orden_linea_id,
-        pedida:          l.pendiente,
-        cantidad:        l.pendiente,
-        imeis:           [],
-      }));
-  });
-
-  const { data: cantData } = useQuery({
-    queryKey: ['productos-cantidad', ...sucursalKey],
-    queryFn:  () => getProductosCantidad().then((r) => norm(r.data.data)),
-    enabled:  sucursalLista,
-  });
-  const { data: serialData } = useQuery({
-    queryKey: ['productos-serial', ...sucursalKey],
-    queryFn:  () => getProductosSerial().then((r) => norm(r.data.data)),
-    enabled:  sucursalLista,
-  });
-
-  // El catálogo entero, ya sin distinguir tipo: el producto sabe si lleva IMEI,
-  // así que al bodeguero nunca se le pregunta.
-  const catalogo = useMemo(() => ([
-    ...norm(cantData).map((p)   => ({ id: p.id, nombre: p.nombre, tipo: 'cantidad', codigo: p.codigo })),
-    ...norm(serialData).map((p) => ({ id: p.id, nombre: p.nombre, tipo: 'serial',   codigo: null })),
-  ]), [cantData, serialData]);
-
-  const resultados = useMemo(() => {
-    const q = busqueda.trim().toLowerCase();
-    if (q.length < 2) return [];
-    return catalogo
-      .filter((p) => p.nombre.toLowerCase().includes(q) || (p.codigo || '').toLowerCase().includes(q))
-      .slice(0, 8);
-  }, [busqueda, catalogo]);
-
-  const agregar = (p) => {
-    const key = `p-${p.tipo}-${p.id}`;
-    setBusqueda('');
-    setLineas((ls) => {
-      const ya = ls.find((l) => l.key === key);
-      if (ya) {
-        return ls.map((l) => l.key === key ? { ...l, cantidad: Number(l.cantidad) + 1 } : l);
-      }
-      return [...ls, {
-        key, producto_id: p.id, nombre_producto: p.nombre, tipo: p.tipo,
-        variante_id: null, atributo_id: null, orden_linea_id: null,
-        pedida: null, cantidad: 1, imeis: [],
-      }];
-    });
-  };
-
-  const setCantidad = (key, valor) => setLineas((ls) => ls.map((l) => {
-    if (l.key !== key) return l;
-    const n = Math.max(0, Number(valor) || 0);
-    // Al bajar la cantidad se recortan los IMEI sobrantes: dejar colgando el de
-    // una unidad que ya no llegó mandaría un equipo inexistente al inventario.
-    return { ...l, cantidad: n, imeis: l.imeis.slice(0, n) };
-  }));
-
-  const setImei = (key, i, valor) => setLineas((ls) => ls.map((l) => {
-    if (l.key !== key) return l;
-    const imeis = [...l.imeis];
-    imeis[i] = valor.trim();
-    return { ...l, imeis };
-  }));
-
-  const quitar = (key) => setLineas((ls) => ls.filter((l) => l.key !== key));
-
-  const totalUnidades = lineas.reduce((n, l) => n + (Number(l.cantidad) || 0), 0);
-
-  const mut = useMutation({
-    mutationFn: () => {
-      // Un serial es una línea POR IMEI: así lo espera registrarCompra y así se
-      // identifica cada unidad después.
-      const payload = [];
-      for (const l of lineas) {
-        const cant = Number(l.cantidad) || 0;
-        if (cant <= 0) continue;
-        if (l.tipo === 'serial') {
-          const imeis = l.imeis.filter((x) => x && x.trim());
-          if (cant > MAX_IMEI) {
-            throw new Error(`"${l.nombre_producto}": ${cant} equipos es demasiado para una sola entrada. Regístralos por partes.`);
-          }
-          if (imeis.length !== cant) {
-            throw new Error(`Faltan IMEI en "${l.nombre_producto}": ${imeis.length} de ${cant}`);
-          }
-          for (const imei of imeis) {
-            payload.push({
-              producto_id: l.producto_id, nombre_producto: l.nombre_producto,
-              cantidad: 1, imei, orden_linea_id: l.orden_linea_id,
-            });
-          }
-        } else {
-          payload.push({
-            producto_id: l.producto_id, nombre_producto: l.nombre_producto,
-            cantidad: cant, variante_id: l.variante_id, atributo_id: l.atributo_id,
-            orden_linea_id: l.orden_linea_id,
-          });
-        }
-      }
-      if (!payload.length) throw new Error('No hay nada que registrar');
-      return registrarEntrada({
-        lineas: payload,
-        orden_compra_id: orden?.id || null,
-        notas: notas.trim() || null,
-      });
-    },
-    onSuccess: (res) => {
-      queryClient.invalidateQueries({ queryKey: ['entradas'],            exact: false });
-      queryClient.invalidateQueries({ queryKey: ['entradas-ordenes'],    exact: false });
-      queryClient.invalidateQueries({ queryKey: ['productos-cantidad'],  exact: false });
-      queryClient.invalidateQueries({ queryKey: ['productos-serial'],    exact: false });
-      onListo(res.data?.message || 'Entrada registrada');
-    },
-    onError: (e) => setError(e.response?.data?.error || e.message || 'No se pudo registrar la entrada'),
-  });
-
-  return (
-    <div className="flex flex-col gap-4">
-      <button
-        onClick={onVolver}
-        className="flex items-center gap-1 text-sm text-gray-400 hover:text-gray-700 transition-colors w-fit"
-      >
-        <ChevronLeft size={14} /> Entradas
-      </button>
-
-      <div>
-        <h1 className="text-xl font-bold text-gray-900">
-          {orden ? `Recibir pedido OC-${String(orden.numero ?? orden.id).padStart(4, '0')}` : 'Entrada nueva'}
-        </h1>
-        <p className="text-sm text-gray-400 mt-0.5">
-          Escribe o escanea lo que llegó y cuántas unidades.
-        </p>
-      </div>
-
-      <SearchInput
-        value={busqueda}
-        onChange={setBusqueda}
-        placeholder="Escanea el código o busca el producto..."
-      />
-
-      {resultados.length > 0 && (
-        <div className="flex flex-col gap-1 border border-gray-100 rounded-xl p-1.5 bg-white">
-          {resultados.map((p) => (
-            <button
-              key={`${p.tipo}-${p.id}`}
-              onClick={() => agregar(p)}
-              className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg
-                text-left text-sm hover:bg-green-50 transition-colors"
-            >
-              <span className="text-gray-800">{p.nombre}</span>
-              <ChevronRight size={14} className="text-gray-300 flex-shrink-0" />
-            </button>
-          ))}
-        </div>
-      )}
-      {busqueda.trim().length >= 2 && resultados.length === 0 && (
-        <div className="flex items-start gap-2 text-xs text-amber-700 bg-amber-50
-          border border-amber-100 rounded-xl px-3 py-2.5">
-          <AlertTriangle size={14} className="flex-shrink-0 mt-0.5" />
-          <span>
-            No hay ningún producto con ese nombre en el catálogo. Pídele a
-            administración que lo cree y vuelve a intentarlo — desde bodega no se
-            crean productos, para no acabar con dos versiones del mismo.
-          </span>
-        </div>
-      )}
-
-      {lineas.length === 0 ? (
-        <EmptyState icon={PackagePlus}
-          titulo="Nada todavía"
-          descripcion="Busca arriba el primer producto que llegó." />
-      ) : (
-        <div className="flex flex-col gap-2">
-          {lineas.map((l) => (
-            <FilaLinea key={l.key} linea={l}
-              onCantidad={setCantidad} onImei={setImei} onQuitar={quitar} />
-          ))}
-        </div>
-      )}
-
-      <Input
-        label="Nota (opcional)"
-        placeholder="Ej: la caja 2 llegó abierta"
-        value={notas}
-        onChange={(e) => setNotas(e.target.value)}
-      />
-
-      {error && (
-        <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-xl px-3 py-2">
-          {error}
-        </p>
-      )}
-
-      <div className="flex items-center justify-between gap-3 border-t border-gray-100 pt-3">
-        <span className="text-sm text-gray-500 tabular-nums">
-          {totalUnidades} unidad(es) · {lineas.length} producto(s)
-        </span>
-        <Button
-          loading={mut.isPending}
-          disabled={totalUnidades === 0}
-          onClick={() => { setError(''); mut.mutate(); }}
-        >
-          <Check size={15} /> Registrar entrada
-        </Button>
-      </div>
-    </div>
-  );
-}
 
 // ── Confirmar una entrada contra la factura del proveedor ───────────────────
 //
@@ -566,6 +244,11 @@ export default function EntradasPage() {
                 <p className="text-sm font-semibold text-gray-800">
                   Entrada #{String(e.numero ?? e.id).padStart(4, '0')}
                 </p>
+                {e.resumen && (
+                  <p className="text-xs text-gray-600 truncate">{e.resumen}
+                    {e.lineas > 4 && <span className="text-gray-400"> +{e.lineas - 4} más</span>}
+                  </p>
+                )}
                 <p className="text-xs text-gray-500">
                   {formatFechaHora(e.fecha)} · {e.unidades} uds
                   {e.recibida_por && ` · ${e.recibida_por}`}
@@ -660,6 +343,13 @@ export default function EntradasPage() {
                 Entrada #{String(e.numero ?? e.id).padStart(4, '0')}
                 {e.estado === 'Cancelada' && <span className="ml-2 text-xs text-red-500">cancelada</span>}
               </p>
+              {/* Qué llegó. Con solo el número de documento habría que abrir
+                  las entradas una por una para saber cuál es cuál. */}
+              {e.resumen && (
+                <p className="text-xs text-gray-600 truncate">{e.resumen}
+                  {e.lineas > 4 && <span className="text-gray-400"> +{e.lineas - 4} más</span>}
+                </p>
+              )}
               <p className="text-xs text-gray-400">
                 {formatFechaHora(e.fecha)} · {e.unidades} uds
                 {e.recibida_por && ` · ${e.recibida_por}`}

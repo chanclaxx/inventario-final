@@ -101,12 +101,12 @@ const findByProveedor = async (proveedorId, sucursalId, negocioId) => {
 // `factura_confirmada` por defecto TRUE: una compra que registra administración
 // con sus precios ya está confirmada. Solo una Entrada de bodega la manda en
 // FALSE y se queda esperando la factura del proveedor.
-const create = async (client, { sucursal_id, proveedor_id, usuario_id, numero_factura, total, notas, registrar_en_caja, metodo, orden_compra_id, factura_confirmada = true }) => {
+const create = async (client, { sucursal_id, proveedor_id, usuario_id, numero_factura, total, notas, registrar_en_caja, metodo, orden_compra_id, factura_confirmada = true, es_entrada = false }) => {
   const { rows } = await client.query(`
-    INSERT INTO compras(sucursal_id, proveedor_id, usuario_id, numero_factura, total, notas, registrar_en_caja, metodo, orden_compra_id, factura_confirmada)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+    INSERT INTO compras(sucursal_id, proveedor_id, usuario_id, numero_factura, total, notas, registrar_en_caja, metodo, orden_compra_id, factura_confirmada, es_entrada)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
     RETURNING *
-  `, [sucursal_id, proveedor_id, usuario_id, numero_factura, total, notas, registrar_en_caja !== false, metodo || null, orden_compra_id || null, factura_confirmada !== false]);
+  `, [sucursal_id, proveedor_id, usuario_id, numero_factura, total, notas, registrar_en_caja !== false, metodo || null, orden_compra_id || null, factura_confirmada !== false, es_entrada === true]);
   rows[0].numero = await asignarNumeroDocumento(client, {
     tipo: 'compra', docId: rows[0].id, sucursalId: sucursal_id,
   });
@@ -321,7 +321,13 @@ const findPorConfirmar = async (sucursalId, negocioId) => {
            oc.numero AS orden_numero,
            (CURRENT_DATE - c.fecha::date)::int AS dias_esperando,
            COALESCE(SUM(lc.cantidad), 0)::int  AS unidades,
-           COUNT(lc.id)::int                   AS lineas
+           COUNT(lc.id)::int                   AS lineas,
+           -- Qué llegó, en una línea. Sin esto la lista solo muestra un número
+           -- de documento y hay que abrirlas una por una para saber qué es.
+           (SELECT string_agg(x.txt, ' · ')
+              FROM (SELECT DISTINCT l2.nombre_producto AS txt
+                    FROM lineas_compra l2 WHERE l2.compra_id = c.id LIMIT 4) x
+           ) AS resumen
     FROM compras c
     JOIN sucursales su ON su.id = c.sucursal_id
     LEFT JOIN usuarios       u  ON u.id  = c.usuario_id
@@ -347,7 +353,13 @@ const findEntradas = async (sucursalId, negocioId, limit = 30) => {
            c.orden_compra_id, oc.numero AS orden_numero,
            u.nombre AS recibida_por,
            COALESCE(SUM(lc.cantidad), 0)::int AS unidades,
-           COUNT(lc.id)::int                  AS lineas
+           COUNT(lc.id)::int                  AS lineas,
+           -- Qué llegó, en una línea. Sin esto la lista solo muestra un número
+           -- de documento y hay que abrirlas una por una para saber qué es.
+           (SELECT string_agg(x.txt, ' · ')
+              FROM (SELECT DISTINCT l2.nombre_producto AS txt
+                    FROM lineas_compra l2 WHERE l2.compra_id = c.id LIMIT 4) x
+           ) AS resumen
     FROM compras c
     JOIN sucursales su ON su.id = c.sucursal_id
     LEFT JOIN usuarios       u  ON u.id  = c.usuario_id
@@ -355,6 +367,9 @@ const findEntradas = async (sucursalId, negocioId, limit = 30) => {
     LEFT JOIN lineas_compra  lc ON lc.compra_id = c.id
     WHERE ($1::int IS NULL OR c.sucursal_id = $1)
       AND su.negocio_id = $2
+      -- Solo lo que entró por bodega. Una compra registrada desde Proveedores,
+      -- con su proveedor y sus precios, no es una Entrada.
+      AND c.es_entrada = TRUE
     GROUP BY c.id, oc.numero, u.nombre
     ORDER BY c.fecha DESC
     LIMIT $3
