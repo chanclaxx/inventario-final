@@ -22,6 +22,12 @@ const _buildPayload = (usuario) => ({
   fecha_vencimiento:           usuario.fecha_vencimiento ?? null,
   permisos_proveedores:        usuario.rol === 'admin_negocio' ? null : (usuario.permisos_proveedores ?? null),
   permisos_edicion_productos:  usuario.rol === 'admin_negocio' ? null : (usuario.permisos_edicion_productos ?? null),
+  // Editar / cancelar una factura emitida. `null` NO significa "no puede": el
+  // middleware lo lee como "permisos base del rol" y cae en supervisor+, que es
+  // como funcionaba antes de que existiera la columna. Por eso los tokens ya
+  // emitidos —que no traen la clave— siguen funcionando igual durante el
+  // despliegue.
+  permisos_facturas:           usuario.rol === 'admin_negocio' ? null : (usuario.permisos_facturas ?? null),
   // IDs de sucursales que el usuario puede ver en modo lectura (no admin)
   sucursales_vista:            usuario.rol === 'admin_negocio' ? null : (usuario.sucursales_vista ?? []),
 });
@@ -37,6 +43,7 @@ const QUERY_USUARIO_BASE = `
     u.modulos_permitidos,
     u.permisos_proveedores,
     u.permisos_edicion_productos,
+    u.permisos_facturas,
     u.sucursales_vista
   FROM usuarios u
   JOIN negocios n ON n.id = u.negocio_id

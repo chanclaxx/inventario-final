@@ -1,5 +1,5 @@
 const router = require('express').Router();
-const { requireNivel }  = require('../../middlewares/role.middleware');
+const { requirePermisoFacturas } = require('../../middlewares/role.middleware');
 const { requireModulo } = require('../../middlewares/modulo.middleware');
 const ctrl = require('./facturas.controller');
 const { getPdfFactura } = require('./facturas.pdf.controller');
@@ -30,8 +30,12 @@ router.get('/',            requireModulo('facturar'),                           
 router.get('/:id/pdf',     requireModulo('facturar'),                              getPdfFactura);
 router.get('/:id',         requireModulo('facturar'),                              ctrl.getFacturaById);
 router.post('/',           requireModulo('facturar'), validarFactura, validate,    ctrl.crearFactura);
-router.patch('/:id/cancelar',           requireModulo('facturar'), requireNivel('supervisor'), ctrl.cancelarFactura);
-router.patch('/:id/devolucion-parcial', requireModulo('facturar'), requireNivel('supervisor'), ctrl.devolverLineasCredito);
-router.patch('/:id',                    requireModulo('facturar'), requireNivel('supervisor'), ctrl.editarFactura);
+// Las tres tocan una factura ya emitida y por eso pasan por el permiso
+// granular en vez de por el rol. `devolucion-parcial` cuelga de "cancelar" y no
+// de "editar": quitarle líneas a una factura devuelve stock y baja el crédito —
+// es una cancelación parcial, no una corrección de datos.
+router.patch('/:id/cancelar',           requireModulo('facturar'), requirePermisoFacturas('cancelar'), ctrl.cancelarFactura);
+router.patch('/:id/devolucion-parcial', requireModulo('facturar'), requirePermisoFacturas('cancelar'), ctrl.devolverLineasCredito);
+router.patch('/:id',                    requireModulo('facturar'), requirePermisoFacturas('editar'),   ctrl.editarFactura);
 
 module.exports = router;

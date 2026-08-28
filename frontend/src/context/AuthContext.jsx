@@ -78,6 +78,25 @@ export function AuthProvider({ children }) {
     return usuario?.permisos_edicion_productos?.campos ?? [];
   };
 
+  // ── Facturas ya emitidas: editar / cancelar ────────────────────────────────
+  //
+  // Espeja `requirePermisoFacturas` del backend, incluido su detalle importante:
+  // `permisos_facturas` en null NO es "no puede", es "permisos base del rol",
+  // que es como funcionaba antes de que existiera el permiso. Si esto dijera
+  // `=== true` a secas, aplicar la feature le quitaría el botón a todos los
+  // supervisores del sistema.
+  //
+  // Es solo para pintar la pantalla: quien manda es el backend.
+  const _permisoFactura = (clave) => {
+    if (usuario?.rol === 'admin_negocio') return true;
+    const permisos = usuario?.permisos_facturas;
+    if (permisos && typeof permisos === 'object') return permisos[clave] === true;
+    return usuario?.rol === 'supervisor';
+  };
+
+  const puedeEditarFacturas   = () => _permisoFactura('puede_editar');
+  const puedeCancelarFacturas = () => _permisoFactura('puede_cancelar');
+
   const puedeExportarInventario = () => {
     if (usuario?.rol === 'admin_negocio') return true;
     return usuario?.permisos_edicion_productos?.puede_exportar === true;
@@ -99,6 +118,8 @@ export function AuthProvider({ children }) {
       esSucursalVista,
       puedeEditarProductos,
       camposEdicionProductos,
+      puedeEditarFacturas,
+      puedeCancelarFacturas,
       puedeExportarInventario,
       puedeExportarInventarioGlobal,
     }}>

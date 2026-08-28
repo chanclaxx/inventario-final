@@ -48,6 +48,63 @@ Three roles exist: `admin_negocio`, `supervisor`, `vendedor`. Role determines wh
 2. The Axios instance in `frontend/src/api/` auto-refreshes on 401 via an interceptor.
 3. A 403 with plan status `vencido` or `suspendido` redirects the user to `/plan-bloqueado`.
 
+> **Permisos granulares: `null` = permisos base del rol, NUNCA "no puede".** Las
+> tres columnas `jsonb` de `usuarios` —`permisos_proveedores`,
+> `permisos_edicion_productos` y `permisos_facturas`— comparten la misma regla, y
+> es la que las hace aditivas: mientras la columna esté en NULL manda el ROL,
+> exactamente como antes de que la columna existiera. Un `=== true` a secas en el
+> middleware convierte el despliegue en una degradación masiva —le quitaría el
+> permiso a todos los supervisores del sistema sin que nadie lo pidiera— y por eso
+> `30-permisos-facturas` prueba el caso NULL antes que el caso concedido.
+> `admin_negocio` nunca se lee: pasa siempre y su columna se guarda en NULL.
+> Vale también para el JWT: un token emitido antes del despliegue no trae la clave
+> nueva, y ausente tiene que comportarse igual que NULL o la gente pierde acceso
+> durante las 8 horas que dura su access token.
+>
+> **Editar y cancelar facturas** (`permisos_facturas`, `requirePermisoFacturas`)
+> son dos llaves independientes: editar corrige un dato, cancelar revierte
+> inventario, caja y crédito. `PATCH /facturas/:id/devolucion-parcial` cuelga de
+> **`puede_cancelar`**, no de `puede_editar`: quitarle líneas a una factura
+> devuelve stock y baja el crédito — es una cancelación parcial, y quien solo
+> corrige datos no debe poder revertir mercancía.
+
+> **«¿Puede ver los costos?» tiene UNA sola respuesta** (`utils/costos.util.js`,
+> `hooks/usePuedeVerCostos.js`): antes convivían cuatro reglas para la misma
+> pregunta —`rol === 'admin_negocio'` en búsqueda y export,
+> `permisos_edicion_productos.campos` en los modales, `red_interna_ocultar_costos`
+> en la red interna, y **nada** en las listas de inventario, el árbol de variantes
+> y la procedencia—. De ahí salían las fugas: el costo no se pintaba pero **sí
+> viajaba en el JSON**, visible desde la consola del navegador.
+> Es **opt-in por negocio**: `config_negocio.costos_solo_admin` ausente o `'0'`
+> (el default, y lo que tienen los 28 negocios) deja **todo exactamente igual**;
+> en `'1'` solo ve costos `admin_negocio`. La excepción por usuario **no es una
+> columna nueva**: es el campo «Costo» de `permisos_edicion_productos.campos`, que
+> ya se configura en Ajustes → Usuarios — si el negocio deja editarlo, es que
+> quiere que lo vea.
+> El recorte va en el **backend** (`recortarSiToca` en el controlador): quitarlo
+> solo de la pantalla deja el dato viajando. Se pone a `null`, no se borra la
+> clave, o las destructuraciones del frontend revientan en vez de mostrar vacío.
+> **El helper solo puede QUITAR, nunca dar**: la búsqueda por IMEI y la
+> exportación ya son admin-only pase lo que pase y **no** se pasaron por él —
+> hacerlo, con el candado apagado, les abriría los costos a los supervisores de
+> los 28 negocios de golpe. La sección 6 de la prueba lo vigila.
+> El árbol de variantes es el único con costo **anidado** (las variantes van
+> dentro del atributo): sin `{ anidados: ['variantes'] }` el nivel de abajo se
+> escapa. Es el mismo error que ya se cometió en el código escaneable y en las
+> remisiones por variante.
+> **`costos_solo_admin` y `tarifas_activo` son incompatibles y `saveConfig` lo
+> rechaza**: una tarifa calcula el precio de venta *desde* el costo y ese cálculo
+> corre en el navegador del vendedor. Con las dos encendidas, o el vendedor se
+> queda sin precio o el costo sigue viajando; las dos salidas son mentiras.
+> Consecuencia menor del recorte: `precio || costo_unitario` (el fallback al
+> agregar al carrito un producto **sin precio de venta**) pasa a dar 0 en vez del
+> costo. Ese fallback ya contradecía la tarjeta, que mostraba $0.
+> Aparte, `permisos_proveedores.ver_compras` **existía solo en el frontend**:
+> `GET /api/compras` respondía el historial con precios a cualquiera con el
+> módulo. Ahora lo exige `requirePermisoVerCompras`.
+> Prueba: `31-costos-solo-admin` (42 verificaciones; la sección 1 falla si
+> alguien invierte el default).
+
 ### Backend Module Pattern
 
 All 27 feature modules under `backend/src/` follow the same layered structure:

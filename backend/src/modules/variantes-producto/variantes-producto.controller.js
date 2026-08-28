@@ -1,7 +1,11 @@
-const svc = require('./variantes-producto.service');
+const svc    = require('./variantes-producto.service');
+const costos = require('../../utils/costos.util');
 
+// El árbol es la única consulta con costo ANIDADO: cada atributo trae sus
+// variantes dentro, y el costo existe en los tres niveles. Por eso `anidados`.
 const getArbol = (req, res, next) =>
   svc.getArbol(req.user.negocio_id, req.params.productoId, req.query.sucursal_id)
+    .then((data) => costos.recortarSiToca(req.user, data, { anidados: ['variantes'] }))
     .then((data) => res.json({ ok: true, data }))
     .catch(next);
 

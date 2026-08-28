@@ -1,5 +1,6 @@
 const service = require('./productosSerial.service');
 const audit   = require('../../utils/auditoria.util');
+const costos = require('../../utils/costos.util');
 
 const getProductos = async (req, res, next) => {
   try {
@@ -81,7 +82,8 @@ const getSeriales = async (req, res, next) => {
   try {
     const vendido = req.query.vendido !== undefined ? req.query.vendido === 'true' : null;
     const data    = await service.getSeriales(req.user.negocio_id, req.params.id, vendido);
-    res.json({ ok: true, data });
+    // `SELECT s.*` arrastra costo_compra y proveedor_id de cada unidad.
+    res.json({ ok: true, data: await costos.recortarSiToca(req.user, data) });
   } catch (err) { next(err); }
 };
 

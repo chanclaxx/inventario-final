@@ -9,6 +9,7 @@ import { InputMoneda } from '../../components/ui/InputMoneda';
 import { Button }      from '../../components/ui/Button';
 import { useAuth }     from '../../context/useAuth';
 import { PanelProcedenciaImei } from '../../components/ui/PanelProcedencia';
+import { usePuedeVerCostos }    from '../../hooks/usePuedeVerCostos';
 import api             from '../../api/axios.config';
 
 function parsearLista(raw) {
@@ -22,6 +23,7 @@ function parsearLista(raw) {
 
 export function ModalEditarSerial({ serial, precioProducto, productoId, onClose }) {
   const { puedeEditarProductos, camposEdicionProductos } = useAuth();
+  const puedeVerCostos = usePuedeVerCostos();
   const campos = camposEdicionProductos();
   const tiene  = (c) => campos === null || campos.includes(c);
   const queryClient = useQueryClient();
@@ -270,8 +272,10 @@ export function ModalEditarSerial({ serial, precioProducto, productoId, onClose 
         {/* ── ¿De quién vino? ────────────────────────────────────────────────
             Con IMEI la trazabilidad es exacta: el equipo identifica a su
             proveedor sin ambigüedad. Colapsado porque es una consulta puntual,
-            no parte de editar el serial. */}
-        {serial.imei && (
+            no parte de editar el serial. Y oculto para quien no puede ver
+            costos: el panel lista proveedor y precio de cada entrada, que es
+            justo el dato reservado (el backend responde 403 de todas formas). */}
+        {serial.imei && puedeVerCostos && (
           <div className="border border-gray-100 rounded-xl overflow-hidden">
             <button
               type="button"

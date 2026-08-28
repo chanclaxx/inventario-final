@@ -125,6 +125,68 @@ const requirePermisoProveedores = (tipo) => (req, res, next) => {
   next();
 };
 
+/**
+ * Permiso granular sobre una factura YA EMITIDA: editarla o cancelarla.
+ *
+ * Antes las dos acciones eran `requireNivel('supervisor')` a secas. Eso obligaba
+ * a subir de rol al vendedor que solo necesitaba corregir la cédula de su propia
+ * venta, y no dejaba quitarle a un supervisor la cancelación —que revierte
+ * stock, caja y crédito— sin quitarle todo lo demás.
+ *
+ * `permisos_facturas` viene del JWT y tiene tres estados, no dos:
+ *
+ *   null / ausente  → permisos BASE DEL ROL: supervisor o más, igual que antes.
+ *                     Es lo que ven los tokens emitidos antes de este despliegue
+ *                     y los usuarios a los que nadie les ha tocado el permiso.
+ *   { ... }         → manda el objeto y el rol deja de contar. Así se le puede
+ *                     dar a un vendedor y quitar a un supervisor.
+ *
+ * `admin_negocio` pasa siempre y su columna se guarda en NULL, igual que en los
+ * otros dos bloques de permisos.
+ *
+ * @param {'editar'|'cancelar'} accion
+ */
+const requirePermisoFacturas = (accion) => (req, res, next) => {
+  if (!req.user) return res.status(401).json({ ok: false, error: 'No autenticado' });
+  if (req.user.rol === 'admin_negocio') return next();
+
+  const permisos = req.user.permisos_facturas;
+  const clave    = accion === 'cancelar' ? 'puede_cancelar' : 'puede_editar';
+
+  if (permisos && typeof permisos === 'object') {
+    if (permisos[clave] === true) return next();
+    return res.status(403).json({
+      ok: false,
+      error: accion === 'cancelar'
+        ? 'No tienes permiso para cancelar facturas'
+        : 'No tienes permiso para editar facturas',
+    });
+  }
+
+  // Sin permiso explícito: la regla de siempre.
+  return requireNivel('supervisor')(req, res, next);
+};
+
+/**
+ * Historial de compras — con precios.
+ *
+ * `permisos_proveedores.ver_compras` se configuraba en Ajustes → Usuarios, se
+ * pintaba como insignia en la lista y lo consultaba UNA pantalla del frontend
+ * para esconder una pestaña. El backend nunca lo leyó: `GET /api/compras`
+ * respondía el historial completo, con los precios de cada línea, a cualquiera
+ * que tuviera el módulo de proveedores. El interruptor no protegía nada.
+ *
+ * Esto no le quita el acceso a nadie que lo tuviera de verdad: la pantalla ya
+ * exigía el permiso, así que quien no lo tiene tampoco veía la pestaña. Lo
+ * único que cambia es que ahora tampoco lo ve quien pregunte por la API.
+ */
+const requirePermisoVerCompras = (req, res, next) => {
+  if (!req.user) return res.status(401).json({ ok: false, error: 'No autenticado' });
+  if (req.user.rol === 'admin_negocio') return next();
+  if (req.user.permisos_proveedores?.ver_compras === true) return next();
+  return res.status(403).json({ ok: false, error: 'No tienes permiso para ver el historial de compras' });
+};
+
 const requirePermisoExportarInventario = (req, res, next) => {
   if (!req.user) return res.status(401).json({ ok: false, error: 'No autenticado' });
   if (req.user.rol === 'admin_negocio') return next();
@@ -139,4 +201,4 @@ const requirePermisoExportarNegocio = (req, res, next) => {
   return res.status(403).json({ ok: false, error: 'Sin permiso para exportar el inventario global' });
 };
 
-module.exports = { requireRole, requireNivel, requireSucursal, assertBelongsToNegocio, requirePermisoProveedores, requirePermisoExportarInventario, requirePermisoExportarNegocio };
+module.exports = { requireRole, requireNivel, requireSucursal, assertBelongsToNegocio, requirePermisoProveedores, requirePermisoFacturas, requirePermisoVerCompras, requirePermisoExportarInventario, requirePermisoExportarNegocio };

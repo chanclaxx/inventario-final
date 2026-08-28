@@ -8,6 +8,7 @@ import { SearchInput }  from '../../components/ui/SearchInput';
 import { InputMoneda }  from '../../components/ui/InputMoneda';
 import { InputUbicacion } from '../../components/ui/InputUbicacion';
 import { useAuth }      from '../../context/useAuth';
+import { usePuedeVerCostos } from '../../hooks/usePuedeVerCostos';
 import { useMetodosPago } from '../../hooks/useMetodosPago';
 import { useSucursalKey } from '../../hooks/useSucursalKey';
 import { crearCompra }  from '../../api/compras.api';
@@ -731,9 +732,7 @@ function FilaImei({ index, item, coloresActivo, coloresConfig, caracteristicasAc
 // ─── Paso Compra a Cliente ─────────────────────────────────────────────────────
 function PasoCompraCliente({ sucursalKey, sucursalLista, onExito, onDuplicadosEncontrados, coloresActivo, coloresConfig, caracteristicasActivo, caracteristicasLista, codigoActivo, ubicacionActiva }) {
   const queryClient        = useQueryClient();
-  const { esAdminNegocio } = useAuth();
-  const esAdmin            = esAdminNegocio();
-  const puedeVerCosto      = esAdmin;
+  const puedeVerCosto      = usePuedeVerCostos();
 
   const [clienteSeleccionado, setClienteSeleccionado] = useState(null);
   const [tipoProducto,        setTipoProducto]        = useState('serial');
@@ -1182,7 +1181,7 @@ function PasoCompraCliente({ sucursalKey, sucursalLista, onExito, onDuplicadosEn
 // ─── Paso Serial (proveedor) ───────────────────────────────────────────────────
 function PasoSerial({ sucursalKey, onExito, onDuplicadosEncontrados, coloresActivo, coloresConfig, caracteristicasActivo, caracteristicasLista, ubicacionActiva }) {
   const queryClient   = useQueryClient();
-  const puedeVerCosto = true;
+  const puedeVerCosto = usePuedeVerCostos();
 
   const [busqueda,       setBusqueda]       = useState('');
   const [filtroLineaId,  setFiltroLineaId]  = useState('');  // ← NUEVO
@@ -1668,7 +1667,7 @@ function MiniSelectorVariante({ arbolData, nodoSel, onSeleccionar }) {
 // ─── Paso Cantidad (proveedor) ─────────────────────────────────────────────────
 function PasoCantidad({ sucursalKey, onExito, variantesActivo, codigoActivo, ubicacionActiva }) {
   const queryClient   = useQueryClient();
-  const puedeVerCosto = true;
+  const puedeVerCosto = usePuedeVerCostos();
 
   const [busqueda,       setBusqueda]       = useState('');
   const [filtroLineaId,  setFiltroLineaId]  = useState('');  // ← NUEVO

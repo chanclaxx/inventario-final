@@ -12,11 +12,13 @@ import { InputUbicacion } from '../../components/ui/InputUbicacion';
 import { Button }       from '../../components/ui/Button';
 import { useAuth }      from '../../context/useAuth';
 import { PanelProcedencia } from '../../components/ui/PanelProcedencia';
+import { usePuedeVerCostos } from '../../hooks/usePuedeVerCostos';
 import { ModalEliminarProducto, TIPO_PRODUCTO_CANTIDAD } from './ModalEliminarProducto';
 
 export function ModalEditarProductoCantidad({ producto, pinEliminacion, variantesActivo, codigoActivo, ubicacionActiva, garantiaActiva, onClose }) {
   const [verProcedencia, setVerProcedencia] = useState(false);
   const { esAdminNegocio, puedeEditarProductos, camposEdicionProductos } = useAuth();
+  const puedeVerCostos = usePuedeVerCostos();
   const esAdmin    = esAdminNegocio();
   const campos     = camposEdicionProductos(); // null = todos, array = permitidos
   const tiene      = (c) => campos === null || campos.includes(c);
@@ -319,8 +321,12 @@ export function ModalEditarProductoCantidad({ producto, pinEliminacion, variante
 
           {/* ── ¿De quién vino? ──────────────────────────────────────────────
               Colapsado por defecto: es una consulta puntual, no parte de editar
-              el producto. No depende de ningún flag — lee compras que el negocio
-              ya tiene registradas desde siempre. */}
+              el producto. Lee compras que el negocio ya tiene registradas desde
+              siempre, pero su contenido ES el dato reservado —proveedor y precio
+              de cada lote—, así que desaparece para quien no puede ver costos.
+              El backend responde 403 igual; esto evita ofrecer un panel que iba
+              a fallar. */}
+          {puedeVerCostos && (
           <div className="border border-gray-100 rounded-xl overflow-hidden">
             <button
               type="button"
@@ -342,6 +348,7 @@ export function ModalEditarProductoCantidad({ producto, pinEliminacion, variante
               </div>
             )}
           </div>
+          )}
 
           <div className="flex flex-col gap-1">
             <label className="flex items-center gap-1.5 text-sm font-medium text-gray-700">

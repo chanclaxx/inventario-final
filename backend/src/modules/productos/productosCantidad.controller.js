@@ -1,5 +1,6 @@
 const service = require('./productosCantidad.service');
 const audit   = require('../../utils/auditoria.util');
+const costos  = require('../../utils/costos.util');
 
 const getProductos = async (req, res, next) => {
   try {
@@ -7,14 +8,16 @@ const getProductos = async (req, res, next) => {
     // ── lineaId opcional desde query param ──
     const lineaId = req.query.linea_id ? Number(req.query.linea_id) : null;
     const data = await service.getProductos(sucursalId, req.user.negocio_id, lineaId);
-    res.json({ ok: true, data });
+    // El costo y el proveedor viajaban aquí para cualquier rol: no se pintaban
+    // en la tarjeta, pero estaban en la respuesta.
+    res.json({ ok: true, data: await costos.recortarSiToca(req.user, data) });
   } catch (err) { next(err); }
 };
 
 const getProductoById = async (req, res, next) => {
   try {
     const data = await service.getProductoById(req.user.negocio_id, req.params.id);
-    res.json({ ok: true, data });
+    res.json({ ok: true, data: await costos.recortarSiToca(req.user, data) });
   } catch (err) { next(err); }
 };
 

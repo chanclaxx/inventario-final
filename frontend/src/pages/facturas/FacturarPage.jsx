@@ -143,7 +143,7 @@ function SeccionDomicilio({ facturaId }) {
 // ─── ModalDetalle ─────────────────────────────────────────────────────────────
 
 function ModalDetalle({ facturaId, onClose, onAbrirImprimir, onEditar }) {
-  const { esAdminNegocio } = useAuth();
+  const { esAdminNegocio, puedeEditarFacturas } = useAuth();
   const { data, isLoading } = useQuery({ queryKey: ['factura-detalle', facturaId], queryFn: () => getFacturaById(facturaId).then((r) => r.data.data), enabled: !!facturaId });
   const { data: configData } = useQuery({ queryKey: ['config'], queryFn: () => api.get('/config').then((r) => r.data.data) });
   const { data: garantiasFactura = [] } = useQuery({ queryKey: ['garantias-factura', facturaId], queryFn: () => getGarantiasPorFactura(facturaId).then((r) => r.data.data), enabled: !!facturaId, staleTime: 0 });
@@ -234,7 +234,7 @@ function ModalDetalle({ facturaId, onClose, onAbrirImprimir, onEditar }) {
           <Button variant="secondary" className="flex-1" onClick={() => onAbrirImprimir(facturaConConfig, garantiasFactura)}>
   <Printer size={16} /> Imprimir
 </Button>
-          {f?.estado !== 'Cancelada' && <Button variant="secondary" className="flex-1" onClick={() => onEditar(facturaId)}><Pencil size={16} /> Editar</Button>}
+          {f?.estado !== 'Cancelada' && puedeEditarFacturas() && <Button variant="secondary" className="flex-1" onClick={() => onEditar(facturaId)}><Pencil size={16} /> Editar</Button>}
           <Button variant="secondary" className="flex-1" onClick={onClose}>Cerrar</Button>
         </div>
       </div>
@@ -245,6 +245,10 @@ function ModalDetalle({ facturaId, onClose, onAbrirImprimir, onEditar }) {
 // ─── Fila y Grupo (sin cambios) ───────────────────────────────────────────────
 
 function FilaFactura({ factura, onVerDetalle, onInactivar, onEditar, onAbrirPdf, mostrarSucursal }) {
+  // Estos dos botones siempre se pintaron para todos, aunque el backend exigía
+  // supervisor: al vendedor le respondían 403 después de abrir el modal. Ahora
+  // la pantalla pregunta lo mismo que la ruta.
+  const { puedeEditarFacturas, puedeCancelarFacturas } = useAuth();
   const total = Number(factura.total || 0) - Number(factura.total_retoma || 0);
   return (
     <div className={`bg-white border rounded-xl p-3 flex items-center justify-between gap-3 ${factura.estado === 'Cancelada' ? 'opacity-50 border-gray-100' : 'border-gray-100'}`}>
@@ -270,8 +274,8 @@ function FilaFactura({ factura, onVerDetalle, onInactivar, onEditar, onAbrirPdf,
 >
   <FileDown size={16} />
 </button>
-        {factura.estado !== 'Cancelada' && <button onClick={() => onEditar(factura.id)} className="p-1.5 rounded-lg hover:bg-yellow-50 text-gray-400 hover:text-yellow-500 transition-colors"><Pencil size={16} /></button>}
-        {factura.estado !== 'Cancelada' && <button onClick={() => onInactivar(factura)} className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors"><XCircle size={16} /></button>}
+        {factura.estado !== 'Cancelada' && puedeEditarFacturas()   && <button onClick={() => onEditar(factura.id)} title="Editar factura" className="p-1.5 rounded-lg hover:bg-yellow-50 text-gray-400 hover:text-yellow-500 transition-colors"><Pencil size={16} /></button>}
+        {factura.estado !== 'Cancelada' && puedeCancelarFacturas() && <button onClick={() => onInactivar(factura)} title="Cancelar factura" className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors"><XCircle size={16} /></button>}
       </div>
     </div>
   );

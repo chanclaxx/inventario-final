@@ -15,7 +15,7 @@ const getUsuarioById = async (negocioId, id) => {
 
 const crearUsuario = async (negocioId, {
   nombre, email, password, rol, sucursal_id, modulos_permitidos, permisos_proveedores, permisos_edicion_productos,
-  sucursales_vista,
+  permisos_facturas, sucursales_vista,
 }) => {
   if (rol === 'admin_negocio' && sucursal_id) {
     throw { status: 400, message: 'El admin de negocio no puede tener sucursal asignada' };
@@ -64,6 +64,13 @@ const crearUsuario = async (negocioId, {
     ? permisos_edicion_productos
     : null;
 
+  // NULL aquí no es "sin permiso": el middleware lo lee como los permisos base
+  // del rol. Es el default a propósito — un usuario nuevo se comporta como
+  // siempre se comportó su rol hasta que alguien decida lo contrario.
+  const permisosFacturasAGuardar = (rol !== 'admin_negocio' && permisos_facturas)
+    ? permisos_facturas
+    : null;
+
   const sucursalesVistaAGuardar = (rol !== 'admin_negocio' && Array.isArray(sucursales_vista) && sucursales_vista.length)
     ? sucursales_vista
     : null;
@@ -76,6 +83,7 @@ const crearUsuario = async (negocioId, {
       modulos_permitidos:          modulosAGuardar,
       permisos_proveedores:        permisosProveedoresAGuardar,
       permisos_edicion_productos:  permisosEdicionAGuardar,
+      permisos_facturas:           permisosFacturasAGuardar,
       sucursales_vista:            sucursalesVistaAGuardar,
     });
   } catch (err) {
@@ -131,6 +139,12 @@ const actualizarUsuario = async (negocioId, id, datos) => {
         ? datos.permisos_edicion_productos
         : existe.permisos_edicion_productos);
 
+  const permisosFacturasAGuardar = (rolFinal === 'admin_negocio')
+    ? null
+    : (datos.permisos_facturas !== undefined
+        ? datos.permisos_facturas
+        : existe.permisos_facturas);
+
   const sucursalesVistaAGuardar = (rolFinal === 'admin_negocio')
     ? null
     : (datos.sucursales_vista !== undefined
@@ -142,6 +156,7 @@ const actualizarUsuario = async (negocioId, id, datos) => {
     modulos_permitidos:          modulosAGuardar,
     permisos_proveedores:        permisosProveedoresAGuardar,
     permisos_edicion_productos:  permisosEdicionAGuardar,
+    permisos_facturas:           permisosFacturasAGuardar,
     sucursales_vista:            sucursalesVistaAGuardar,
   });
 };

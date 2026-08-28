@@ -175,6 +175,17 @@ const aplicarMigraciones = async (client) => {
       ON abonos_totales (destino, tipo_persona, persona_id);
   `);
 
+  // Permiso por usuario para editar y cancelar facturas emitidas
+  // — ver migrations/20260828_permisos_facturas.sql
+  //
+  // NULL = permisos base del rol, o sea exactamente lo de antes de la columna:
+  // supervisor y admin pueden, vendedor no. Por eso aplicarla no le cambia el
+  // acceso a nadie; solo habilita ajustarlo usuario por usuario.
+  await migrar(client, 'Permisos de facturas por usuario', `
+    ALTER TABLE usuarios
+      ADD COLUMN IF NOT EXISTS permisos_facturas JSONB;
+  `);
+
   // Ubicación espacial de productos — ver migrations/20260730_ubicacion_producto.sql
   //
   // 100% aditiva e idempotente. Columnas nullable: un negocio sin la feature no

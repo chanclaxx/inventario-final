@@ -1548,7 +1548,7 @@ function SeccionCatalogo({ valores, set }) {
 }
 
 // ─── Sección: Seguridad ───────────────────────────────────────────────────────
-function SeccionSeguridad({ form, set }) {
+function SeccionSeguridad({ form, valores, set }) {
   const [verPin, setVerPin] = useState(false);
   const pinNuevo = form['pin_eliminacion'] || '';
 
@@ -1576,6 +1576,42 @@ function SeccionSeguridad({ form, set }) {
             ? 'Se guardará un nuevo PIN al hacer clic en Guardar.'
             : 'Escribe un nuevo PIN solo si quieres cambiarlo. Vacío mantiene el actual.'}
         </p>
+      </div>
+
+      {/* ── Ocultar costos ──────────────────────────────────────────────────
+          Opt-in. Apagado (el default y lo que tienen todos los negocios hoy) no
+          cambia absolutamente nada. Encendido, el costo de compra deja de VIAJAR
+          —no solo de pintarse— para todo el que no sea administrador. */}
+      <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm flex flex-col gap-3">
+        <Toggle
+          enabled={valores.costos_solo_admin === '1'}
+          onChange={(v) => set('costos_solo_admin', v ? '1' : '0')}
+          label="Ocultar los costos a todo el que no sea administrador"
+          description="El costo de compra deja de aparecer en el inventario, en las variantes, en el detalle de cada equipo y en el panel «¿de quién vino?»."
+        />
+        {valores.costos_solo_admin === '1' ? (
+          <div className="text-xs text-gray-500 bg-gray-50 border border-gray-100 rounded-xl px-3 py-2.5 flex flex-col gap-1.5">
+            <p>
+              El precio de venta se sigue viendo: esto solo esconde a cuánto compraste.
+            </p>
+            <p>
+              ¿Necesitas que alguien en particular sí lo vea? Dale el campo
+              <b> «Costo»</b> en Equipo → Usuarios → editar → permisos de edición de productos.
+            </p>
+          </div>
+        ) : (
+          <p className="text-xs text-gray-400">
+            Ahora mismo cualquier usuario con acceso al inventario puede ver los costos.
+          </p>
+        )}
+        {valores.tarifas_activo === '1' && (
+          <p className="text-xs text-amber-600 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2.5">
+            Tienes las tarifas porcentuales activas. Una tarifa calcula el precio de venta
+            a partir del costo, así que necesita ese dato en la pantalla de quien vende:
+            las dos opciones no se pueden usar a la vez. Apaga las tarifas si quieres
+            ocultar los costos.
+          </p>
+        )}
       </div>
 
       <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
@@ -1697,7 +1733,7 @@ export default function ConfigPage() {
           {seccionActiva === 'catalogo'  && <SeccionCatalogo  valores={valores} set={set} />}
           {seccionActiva === 'web'       && <CatalogoWebConfig />}
           {seccionActiva === 'avisos'    && <NotificacionesConfig />}
-          {seccionActiva === 'seguridad' && <SeccionSeguridad form={form}       set={set} />}
+          {seccionActiva === 'seguridad' && <SeccionSeguridad form={form} valores={valores} set={set} />}
           {seccionActiva === 'equipo'    && <SeccionEquipo valores={valores} set={set} />}
         </div>
 

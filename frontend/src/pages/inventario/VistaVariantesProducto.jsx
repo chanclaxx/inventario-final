@@ -20,6 +20,7 @@ import { formatCOP }      from '../../utils/formatters';
 import { InputMoneda }    from '../../components/ui/InputMoneda';
 import useCarritoStore from '../../store/carritoStore';
 import { ChipApartado } from './ChipApartado';
+import { usePuedeVerCostos } from '../../hooks/usePuedeVerCostos';
 
 function labelNodo(nodo) {
   return nodo.tipo_nombre ? `${nodo.tipo_nombre}: ${nodo.valor}` : nodo.valor;
@@ -38,7 +39,7 @@ function colorBarra(stock, minimo) {
 }
 
 // ─── Modal crear/editar nodo ──────────────────────────────────────────────────
-function ModalNodo({ open, onClose, titulo, tipos = [], datoInicial, onGuardar, isPending, error, onEliminar, ocultarCosto = false, codigoActivo = false }) {
+function ModalNodo({ open, onClose, titulo, tipos = [], datoInicial, onGuardar, isPending, error, onEliminar, ocultarCosto = false, codigoActivo = false, puedeVerCosto = false }) {
   const [valor,         setValor]         = useState(datoInicial?.valor || '');
   const [stockMin,      setStockMin]      = useState(datoInicial?.stock_minimo ?? 0);
   const [precio,        setPrecio]        = useState(datoInicial?.precio || '');
@@ -46,6 +47,12 @@ function ModalNodo({ open, onClose, titulo, tipos = [], datoInicial, onGuardar, 
   const [codigo,        setCodigo]        = useState(datoInicial?.codigo || '');
   const [tipoId,        setTipoId]        = useState(String(datoInicial?.tipo_id || ''));
   const [stock,         setStock]         = useState('');
+
+  // Dos razones distintas para no pintar el costo: que el usuario no tenga
+  // permiso de verlo, o que el nodo tenga hijos (ahí el costo vive en cada
+  // variante). Se resuelven en una sola bandera porque el payload depende de
+  // ella: un campo que no se muestra no puede viajar.
+  const mostrarCosto = puedeVerCosto && !ocultarCosto;
 
   const tipoSel   = tipos.find((t) => String(t.id) === tipoId);
   const sugeridos = tipoSel?.valores || [];
@@ -56,7 +63,11 @@ function ModalNodo({ open, onClose, titulo, tipos = [], datoInicial, onGuardar, 
       valor,
       stock_minimo:  stockMin,
       precio:        precio || null,
-      costo_unitario: costoUnitario !== '' ? Number(costoUnitario) : null,
+      // `undefined` = el repositorio ni menciona la columna (`!== undefined`);
+      // `null` la BORRA. Quien no ve el costo no puede borrarlo sin querer.
+      costo_unitario: mostrarCosto
+        ? (costoUnitario !== '' ? Number(costoUnitario) : null)
+        : undefined,
       tipo_id:       tipoId ? Number(tipoId) : null,
       stock:         Number(stock) || undefined,
       codigo:        codigoActivo ? codigo.trim().toUpperCase() : undefined,
@@ -145,7 +156,7 @@ function ModalNodo({ open, onClose, titulo, tipos = [], datoInicial, onGuardar, 
           placeholder="Dejar vacío para usar el precio del producto"
         />
 
-        {!ocultarCosto && (
+        {mostrarCosto && (
           <div className="flex flex-col gap-1">
             <label className="text-xs font-medium text-gray-600">Costo unitario (opcional)</label>
             <InputMoneda
@@ -158,7 +169,7 @@ function ModalNodo({ open, onClose, titulo, tipos = [], datoInicial, onGuardar, 
             />
           </div>
         )}
-        {ocultarCosto && (
+        {puedeVerCosto && ocultarCosto && (
           <p className="text-xs text-gray-400 bg-gray-50 rounded-xl px-3 py-2 border border-gray-200">
             El costo recae en cada variante — edítalo desde la variante correspondiente.
           </p>
@@ -193,7 +204,7 @@ function ModalNodo({ open, onClose, titulo, tipos = [], datoInicial, onGuardar, 
 
 // ─── Tarjeta de atributo o variante ──────────────────────────────────────────
 function TarjetaNodo({
-  nodo, tieneHijos, esAdmin,
+  nodo, tieneHijos, esAdmin, puedeVerCosto,
   onDrillDown, onAgregar, onEditar, onReducir,
   precioPadre,
   // La tarjeta sirve tanto para atributos como para variantes, y cada uno arma
@@ -274,7 +285,7 @@ function TarjetaNodo({
             {precioMostrar && (
               <span className="text-sm font-semibold text-gray-700">{formatCOP(precioMostrar)}</span>
             )}
-            {esAdmin && nodo.costo_unitario != null && (
+            {puedeVerCosto && nodo.costo_unitario != null && (
               <span className="text-xs text-gray-400">costo: {formatCOP(nodo.costo_unitario)}</span>
             )}
           </div>
@@ -328,6 +339,18 @@ function TarjetaNodo({
 export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose, ajusteStockSinVariantes = false, codigoActivo = false }) {
   const queryClient = useQueryClient();
   const agregarItem = useCarritoStore((s) => s.agregarItem);
+
+  // `esAdmin` aquí significa "puede administrar el catálogo", que NO es lo mismo
+  // que "puede ver el costo": lo llena `puedeEditarProductos()`, verdadero para
+  // cualquier rol al que el negocio le haya dado permiso de edición. Con eso un
+  // supervisor o un vendedor veía el costo impreso en cada tarjeta del árbol —
+  // el único sitio del inventario donde el costo se pinta en una tarjeta.
+  // El costo se rige por la regla única del sistema (`usePuedeVerCostos`), que
+  // es el espejo de `costos.util` en el backend: admin siempre; con el candado
+  // apagado, todos; con el candado puesto, solo quien tenga concedido el campo
+  // «Costo» en Ajustes → Usuarios. Así la tarjeta, el modal de edición y la
+  // respuesta del servidor dicen las tres lo mismo.
+  const puedeVerCosto = usePuedeVerCostos();
 
   const [atributoSel, setAtributoSel] = useState(null);
   const [modalNodo,   setModalNodo]   = useState(null);
@@ -524,6 +547,7 @@ export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose,
                 itemKey={`cant-${producto.id}-v-${v.id}`}
                 tieneHijos={false}
                 esAdmin={esAdmin}
+                puedeVerCosto={puedeVerCosto}
                 precioPadre={atributoActualizado?.precio || producto.precio}
                 onDrillDown={() => {}}
                 onAgregar={() => handleAgregarVariante(v)}
@@ -556,6 +580,7 @@ export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose,
             isPending={mutCrearVar.isPending}
             error={errorM}
             codigoActivo={codigoActivo}
+            puedeVerCosto={puedeVerCosto}
           />
         )}
         {modalNodo?.modo === 'editar-var' && (
@@ -569,6 +594,7 @@ export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose,
             isPending={mutEditarVar.isPending}
             error={errorM}
             codigoActivo={codigoActivo}
+            puedeVerCosto={puedeVerCosto}
             onEliminar={() => { mutEliminarVar.mutate(modalNodo.dato.id); cerrarModal(); }}
           />
         )}
@@ -700,6 +726,7 @@ export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose,
                 itemKey={`cant-${producto.id}-a-${atributo.id}`}
                 tieneHijos={tieneHijos}
                 esAdmin={esAdmin}
+                puedeVerCosto={puedeVerCosto}
                 precioPadre={producto.precio}
                 onDrillDown={() => setAtributoSel(atributo)}
                 onAgregar={() => handleAgregarAtributo(atributo)}
@@ -733,6 +760,7 @@ export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose,
           isPending={mutCrearAtr.isPending}
           error={errorM}
           codigoActivo={codigoActivo}
+          puedeVerCosto={puedeVerCosto}
         />
       )}
       {modalNodo?.modo === 'editar-atr' && (
@@ -746,6 +774,7 @@ export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose,
           isPending={mutEditarAtr.isPending}
           error={errorM}
           codigoActivo={codigoActivo}
+          puedeVerCosto={puedeVerCosto}
           onEliminar={() => { mutEliminarAtr.mutate(modalNodo.dato.id); cerrarModal(); }}
           ocultarCosto={modalNodo.dato.variantes?.length > 0}
         />

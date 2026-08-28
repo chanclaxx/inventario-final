@@ -1,7 +1,7 @@
 const router   = require('express').Router();
 const { body } = require('express-validator');
 const { validate }      = require('../../middlewares/validate.middleware');
-const { requireNivel }  = require('../../middlewares/role.middleware');
+const { requireNivel, requirePermisoVerCompras } = require('../../middlewares/role.middleware');
 const { requireModulo } = require('../../middlewares/modulo.middleware');
 const ctrl     = require('./compras.controller');
 
@@ -23,11 +23,13 @@ const validarCompra = [
   body('dias_plazo').optional({ values: 'null' }).isInt({ min: 0, max: 365 }).withMessage('Plazo inválido (0 a 365 días)'),
 ];
 
-// Compras viven dentro del módulo de proveedores
-router.get('/',                       requireModulo('proveedores'), ctrl.getCompras);
-router.get('/paginadas',              requireModulo('proveedores'), ctrl.getComprasPaginadas);
-router.get('/proveedor/:proveedorId', requireModulo('proveedores'), ctrl.getComprasByProveedor);
-router.get('/:id',                    requireModulo('proveedores'), ctrl.getCompraById);
+// Compras viven dentro del módulo de proveedores.
+// Las cuatro de lectura devuelven precios de compra, así que exigen además el
+// permiso que hasta ahora solo miraba el frontend.
+router.get('/',                       requireModulo('proveedores'), requirePermisoVerCompras, ctrl.getCompras);
+router.get('/paginadas',              requireModulo('proveedores'), requirePermisoVerCompras, ctrl.getComprasPaginadas);
+router.get('/proveedor/:proveedorId', requireModulo('proveedores'), requirePermisoVerCompras, ctrl.getComprasByProveedor);
+router.get('/:id',                    requireModulo('proveedores'), requirePermisoVerCompras, ctrl.getCompraById);
 router.post('/', requireModulo('proveedores'), requireNivel('supervisor'), validarCompra, validate, ctrl.registrarCompra);
 router.patch('/:id/cancelar', requireModulo('proveedores'), requireNivel('supervisor'), ctrl.cancelarCompra);
 // Corrección de precios de una compra: solo admin_negocio (cascada a costo/deuda)

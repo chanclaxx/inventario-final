@@ -6,7 +6,7 @@ import { Modal }   from '../../components/ui/Modal';
 import { Button }  from '../../components/ui/Button';
 import { Input }   from '../../components/ui/Input';
 import { Badge }   from '../../components/ui/Badge';
-import { Plus, Pencil, UserX, UserCheck, Users, ShieldCheck, Truck, PackageSearch, FileDown, Eye } from 'lucide-react';
+import { Plus, Pencil, UserX, UserCheck, Users, ShieldCheck, Truck, PackageSearch, FileDown, Eye, ReceiptText } from 'lucide-react';
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
@@ -61,6 +61,7 @@ const FORM_INICIAL = {
   modulos_permitidos:          null,
   permisos_proveedores:        null,
   permisos_edicion_productos:  null,
+  permisos_facturas:           null,
   sucursales_vista:            [],
 };
 
@@ -345,6 +346,87 @@ function SelectorPermisosEdicionProductos({ permisos, onChange }) {
   );
 }
 
+// ─── SelectorPermisosFacturas ────────────────────────────────────────────────
+//
+// `null` = permisos base del rol, que es lo que trae todo usuario existente y
+// significa: supervisor sí, vendedor no. Por eso el bloque arranca con un
+// interruptor "personalizar" en vez de con dos casillas apagadas — dos casillas
+// apagadas se leerían como "este supervisor no puede", que no es lo guardado.
+function SelectorPermisosFacturas({ permisos, onChange, rol }) {
+  const personalizado = permisos !== null && permisos !== undefined;
+
+  // Lo que hace hoy el rol, para explicarlo y para no cambiarlo al activar.
+  const baseDelRol   = rol === 'supervisor';
+  const puedeEditar   = personalizado ? permisos.puede_editar   === true : baseDelRol;
+  const puedeCancelar = personalizado ? permisos.puede_cancelar === true : baseDelRol;
+
+  const update = (partial) => onChange({ puede_editar: puedeEditar, puede_cancelar: puedeCancelar, ...partial });
+
+  return (
+    <div className="flex flex-col gap-3 bg-rose-50 border border-rose-100 rounded-xl p-3.5">
+      <div className="flex items-center gap-2">
+        <ReceiptText size={13} className="text-rose-500 flex-shrink-0" />
+        <p className="text-xs font-semibold text-rose-700 uppercase tracking-wide">
+          Facturas ya emitidas
+        </p>
+      </div>
+
+      <label className="flex items-center gap-2.5 cursor-pointer select-none">
+        <CheckboxCustom
+          checked={personalizado}
+          // Al activar se congela lo que el rol ya permitía: personalizar no
+          // puede quitar ni dar nada por sí solo, solo abre las casillas.
+          onChange={() => onChange(personalizado
+            ? null
+            : { puede_editar: baseDelRol, puede_cancelar: baseDelRol })}
+          color="indigo"
+        />
+        <span className="text-sm text-gray-700">Definir permiso para este usuario</span>
+      </label>
+
+      {personalizado ? (
+        <div className="ml-6 flex flex-col gap-2">
+          <label className="flex items-center gap-2.5 cursor-pointer select-none">
+            <CheckboxCustom
+              checked={puedeEditar}
+              onChange={() => update({ puede_editar: !puedeEditar })}
+              color="indigo"
+            />
+            <div className="flex flex-col gap-0.5">
+              <span className="text-sm text-gray-700">Puede editar facturas</span>
+              <span className="text-xs text-gray-400">Corregir cliente, productos o pagos de una venta ya hecha</span>
+            </div>
+          </label>
+
+          <label className="flex items-center gap-2.5 cursor-pointer select-none">
+            <CheckboxCustom
+              checked={puedeCancelar}
+              onChange={() => update({ puede_cancelar: !puedeCancelar })}
+              color="indigo"
+            />
+            <div className="flex flex-col gap-0.5">
+              <span className="text-sm text-gray-700">Puede cancelar facturas y devolver productos</span>
+              <span className="text-xs text-gray-400">Revierte el inventario, la caja y el crédito de la venta</span>
+            </div>
+          </label>
+
+          {!puedeEditar && !puedeCancelar && (
+            <p className="text-xs text-gray-400 bg-white rounded-lg px-3 py-1.5 border border-gray-100">
+              No podrá editar ni cancelar facturas — solo crearlas y consultarlas.
+            </p>
+          )}
+        </div>
+      ) : (
+        <p className="text-xs text-gray-400 bg-white rounded-lg px-3 py-1.5 border border-gray-100">
+          {baseDelRol
+            ? 'Permisos del rol: como supervisor, puede editar y cancelar facturas.'
+            : 'Permisos del rol: como vendedor, no puede editar ni cancelar facturas.'}
+        </p>
+      )}
+    </div>
+  );
+}
+
 // ─── SelectorSucursalesVista ──────────────────────────────────────────────────
 
 function SelectorSucursalesVista({ sucursalesVista, sucursalHomeId, onChange, sucursales }) {
@@ -515,6 +597,7 @@ function FilaUsuario({ usuario, onEditar, onToggleActivo }) {
 
   const pp  = usuario.permisos_proveedores;
   const pep = usuario.permisos_edicion_productos;
+  const pf  = usuario.permisos_facturas;
   const tienePermProv     = !esAdmin && pp  && (pp.ver || pp.crear);
   const tienePermEditar   = !esAdmin && pep && pep.puede_editar;
   const tienePermExportar = !esAdmin && pep?.puede_exportar === true;
@@ -566,6 +649,14 @@ function FilaUsuario({ usuario, onEditar, onToggleActivo }) {
               Exporta inventario
             </span>
           )}
+          {/* Solo se muestra si alguien lo personalizó: con `null` manda el rol
+              y ya lo dice el badge del rol. */}
+          {!esAdmin && pf && (
+            <span className="text-xs text-rose-600 flex items-center gap-1">
+              <ReceiptText size={10} />
+              {[pf.puede_editar && 'Edita', pf.puede_cancelar && 'Cancela'].filter(Boolean).join('+') || 'Sin'} facturas
+            </span>
+          )}
           {!esAdmin && usuario.sucursales_vista?.length > 0 && (
             <span className="text-xs text-amber-600 flex items-center gap-1">
               <Eye size={10} />
@@ -610,6 +701,7 @@ function ModalUsuario({ open, onClose, editando, sucursales, onGuardar, cargando
           modulos_permitidos:          editando.modulos_permitidos          ?? null,
           permisos_proveedores:        editando.permisos_proveedores        ?? null,
           permisos_edicion_productos:  editando.permisos_edicion_productos  ?? null,
+          permisos_facturas:           editando.permisos_facturas           ?? null,
           sucursales_vista:            editando.sucursales_vista            ?? [],
         }
       : FORM_INICIAL
@@ -625,8 +717,10 @@ function ModalUsuario({ open, onClose, editando, sucursales, onGuardar, cargando
     : (form.modulos_permitidos ?? PERMISOS_BASE[form.rol] ?? []);
   const tieneModuloProveedores  = modulosEfectivos === null || modulosEfectivos.includes('proveedores');
   const tieneModuloInventario   = modulosEfectivos === null || modulosEfectivos.includes('inventario');
-  const mostrarPermProv   = form.rol !== 'admin_negocio' && tieneModuloProveedores;
-  const mostrarPermEditar = form.rol !== 'admin_negocio' && tieneModuloInventario;
+  const tieneModuloFacturar     = modulosEfectivos === null || modulosEfectivos.includes('facturar');
+  const mostrarPermProv     = form.rol !== 'admin_negocio' && tieneModuloProveedores;
+  const mostrarPermEditar   = form.rol !== 'admin_negocio' && tieneModuloInventario;
+  const mostrarPermFacturas = form.rol !== 'admin_negocio' && tieneModuloFacturar;
 
   // Lista de proveedores para el selector "ver solo algunos"
   const { data: proveedoresLista = [] } = useQuery({
@@ -643,6 +737,9 @@ function ModalUsuario({ open, onClose, editando, sucursales, onGuardar, cargando
       rol:                  nuevoRol,
       modulos_permitidos:   null,
       permisos_proveedores: null,
+      // Vuelve a "base del rol": lo que permite un supervisor no es lo que
+      // permite un vendedor, así que el objeto del rol anterior mentiría.
+      permisos_facturas:    null,
       sucursales_vista:     [],
     }));
   };
@@ -651,9 +748,11 @@ function ModalUsuario({ open, onClose, editando, sucursales, onGuardar, cargando
   const handleModulosChange = (modulos) => {
     const tieneProveedores = modulos === null || modulos.includes('proveedores');
     const tieneInv         = modulos === null || modulos.includes('inventario');
+    const tieneFact        = modulos === null || modulos.includes('facturar');
     set('modulos_permitidos', modulos);
     if (!tieneProveedores) set('permisos_proveedores', null);
     if (!tieneInv)         set('permisos_edicion_productos', null);
+    if (!tieneFact)        set('permisos_facturas', null);
   };
 
   const handleGuardar = () => {
@@ -666,6 +765,7 @@ function ModalUsuario({ open, onClose, editando, sucursales, onGuardar, cargando
     if (payload.rol === 'admin_negocio') {
       payload.permisos_proveedores       = null;
       payload.permisos_edicion_productos = null;
+      payload.permisos_facturas          = null;
       payload.sucursales_vista           = [];
     }
     onGuardar(payload);
@@ -773,6 +873,15 @@ function ModalUsuario({ open, onClose, editando, sucursales, onGuardar, cargando
           />
         )}
 
+        {/* Editar / cancelar facturas emitidas (solo si el módulo facturar está activo) */}
+        {mostrarPermFacturas && (
+          <SelectorPermisosFacturas
+            permisos={form.permisos_facturas}
+            onChange={(p) => set('permisos_facturas', p)}
+            rol={form.rol}
+          />
+        )}
+
         {error && (
           <div className="bg-red-50 border border-red-100 rounded-xl px-3 py-2">
             <p className="text-sm text-red-600">{error}</p>
@@ -825,6 +934,7 @@ export function UsuariosConfig() {
       modulos_permitidos:          usuario.modulos_permitidos,
       permisos_proveedores:        usuario.permisos_proveedores,
       permisos_edicion_productos:  usuario.permisos_edicion_productos,
+      permisos_facturas:           usuario.permisos_facturas,
       sucursales_vista:            usuario.sucursales_vista ?? [],
       activo:                      !usuario.activo,
     }),

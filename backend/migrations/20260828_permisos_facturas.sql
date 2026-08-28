@@ -1,0 +1,34 @@
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Permiso por usuario para EDITAR y CANCELAR facturas ya emitidas
+--
+-- Hasta hoy las dos acciones las decidía el rol y nada más:
+-- `requireNivel('supervisor')` sobre `PATCH /facturas/:id`, `/:id/cancelar` y
+-- `/:id/devolucion-parcial`. Eso deja dos casos sin salida:
+--
+--   1. El vendedor de confianza que corrige la cédula de una factura que acaba
+--      de hacer tiene que llamar al dueño. La única forma de dárselo era
+--      subirlo a supervisor, que le abre TODO lo demás.
+--   2. El supervisor al que el dueño NO quiere dejarle cancelar ventas —
+--      cancelar revierte stock, plata y crédito— no se puede acotar: o es
+--      supervisor con todo, o es vendedor sin nada.
+--
+-- Es una columna `jsonb` NULL, igual que `permisos_edicion_productos`, y el
+-- NULL significa lo mismo aquí: **permisos base del rol**, es decir lo que
+-- pasaba antes de esta migración. Por eso es 100% aditiva — ningún usuario
+-- existente gana ni pierde nada al aplicarla; solo aparece la posibilidad de
+-- ajustarlo por usuario.
+--
+-- Forma:
+--   NULL                                        → base del rol (supervisor+ sí, vendedor no)
+--   { "puede_editar": bool, "puede_cancelar": bool }  → decide el objeto, no el rol
+--
+-- `admin_negocio` nunca se lee: pasa siempre, y el service guarda NULL para él
+-- (mismo trato que los otros dos bloques de permisos).
+--
+-- Las dos llaves son INDEPENDIENTES a propósito: editar una factura corrige un
+-- dato; cancelarla revierte inventario, caja y crédito. Que la segunda sea más
+-- grave que la primera no significa que quien edita deba poder cancelar.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+ALTER TABLE usuarios
+  ADD COLUMN IF NOT EXISTS permisos_facturas JSONB;

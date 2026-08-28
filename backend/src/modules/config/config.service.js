@@ -237,6 +237,38 @@ const saveConfig = async (negocioId, datos) => {
     }
   }
 
+  // ── El candado de costos y las tarifas porcentuales no pueden convivir ─────
+  //
+  // Una tarifa calcula el precio de venta DESDE el costo, y ese cálculo corre en
+  // el navegador del vendedor: para aplicarla, el costo tiene que llegarle. Si
+  // se enciende el candado con las tarifas activas, o el vendedor se queda sin
+  // precio en el punto de venta, o el costo sigue viajando y el candado es
+  // decorativo. Las dos salidas son mentiras distintas, así que se dice.
+  //
+  // saveConfig recibe cambios parciales: el otro extremo puede venir en el mismo
+  // payload o estar guardado, hay que mirar los dos.
+  const _guardado = async (clave) => (
+    datosProcesados[clave] !== undefined
+      ? datosProcesados[clave]
+      : (await repo.getMap(negocioId))[clave]
+  );
+
+  if (datosProcesados.costos_solo_admin === '1' && (await _guardado('tarifas_activo')) === '1') {
+    throw {
+      status: 400,
+      message: 'No puedes ocultar los costos mientras las tarifas porcentuales estén activas: '
+        + 'la tarifa calcula el precio a partir del costo y necesita ese dato en la pantalla de venta. '
+        + 'Apaga las tarifas primero, o deja los costos visibles.',
+    };
+  }
+  if (datosProcesados.tarifas_activo === '1' && (await _guardado('costos_solo_admin')) === '1') {
+    throw {
+      status: 400,
+      message: 'No puedes activar las tarifas porcentuales con los costos ocultos: '
+        + 'la tarifa se calcula desde el costo. Quita primero "Ocultar costos" en Seguridad.',
+    };
+  }
+
   // Hashear las claves privadas antes de persistir
   for (const clave of CLAVES_A_HASHEAR) {
     if (clave in datosProcesados && datosProcesados[clave] !== '') {
@@ -261,6 +293,13 @@ const saveConfig = async (negocioId, datos) => {
   const CLAVES_COMPRA = ['ordenes_compra_', 'garantia_proveedor_', 'codigos_proveedor_'];
   if (Object.keys(datosProcesados).some((k) => CLAVES_COMPRA.some((p) => k.startsWith(p)))) {
     require('../../middlewares/ordenesCompra.middleware').invalidarCache(negocioId);
+  }
+
+  // El candado de costos también se cachea 60s (se consulta en cada listado de
+  // inventario, que es la pantalla más caliente): sin invalidar, apagarlo desde
+  // Ajustes dejaría los costos escondidos hasta un minuto después.
+  if ('costos_solo_admin' in datosProcesados) {
+    require('../../utils/costos.util').invalidarCache(negocioId);
   }
 
   // Y lo mismo para los borradores de venta: su middleware cachea 60s, y apagar

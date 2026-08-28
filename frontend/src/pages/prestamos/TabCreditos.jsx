@@ -14,6 +14,7 @@ import { formatCOP, formatFechaHora } from '../../utils/formatters';
 import { useMetodosPago } from '../../hooks/useMetodosPago';
 import { useMora }        from '../../hooks/useMora';
 import { useInteres }     from '../../hooks/useInteres';
+import { useAuth }        from '../../context/useAuth';
 import { PanelMora }      from '../../components/ui/PanelMora';
 import { PanelInteres }   from '../../components/ui/PanelInteres';
 import { Badge }       from '../../components/ui/Badge';
@@ -566,6 +567,9 @@ function TarjetaCreditoDetalle({
   credito, onAbonar, onSaldar, onCancelar, onDevolucion, onImprimir, cerrado = false,
 }) {
   const [historialAbierto, setHistorialAbierto] = useState(false);
+  // "Devolver" pega en /facturas/:id/devolucion-parcial, que es una cancelación
+  // parcial de la factura: la gobierna el mismo permiso que cancelarla entera.
+  const { puedeCancelarFacturas } = useAuth();
   const configMora    = useMora();
   const configInteres = useInteres();
   const metodosPago = useMetodosPago();
@@ -700,12 +704,14 @@ function TarjetaCreditoDetalle({
             <Button size="sm" variant="secondary" onClick={() => onSaldar(credito)}>
               <CheckCircle size={14} /> Saldado
             </Button>
-            <button onClick={() => onDevolucion(credito)}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium
-                border border-orange-200 text-orange-600 bg-orange-50 hover:bg-orange-100
-                transition-colors">
-              <RotateCcw size={12} /> Devolver
-            </button>
+            {puedeCancelarFacturas() && (
+              <button onClick={() => onDevolucion(credito)}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium
+                  border border-orange-200 text-orange-600 bg-orange-50 hover:bg-orange-100
+                  transition-colors">
+                <RotateCcw size={12} /> Devolver
+              </button>
+            )}
             <button onClick={() => onCancelar(credito)}
               className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium
                 border border-red-200 text-red-500 bg-red-50 hover:bg-red-100
