@@ -56,7 +56,7 @@ const parsearEntero = (valorFormateado) => {
 // ─────────────────────────────────────────────
 
 /**
- * InputMoneda
+ * InputMoned
  *
  * Input de precio con formato de miles colombiano (puntos de miles, sin decimales).
  * Ejemplo: el usuario escribe 1500000 y ve "1.500.000"
