@@ -123,10 +123,14 @@ const getPorConfirmar = async (req, res, next) => {
 const confirmarEntrada = async (req, res, next) => {
   try {
     const data = await service.confirmarEntrada(req.user.negocio_id, req.params.id, {
-      proveedor_id:   req.body.proveedor_id || null,
-      lineas:         req.body.lineas,
-      numero_factura: req.body.numero_factura || null,
-      usuario_id:     req.user.id,
+      proveedor_id:      req.body.proveedor_id || null,
+      lineas:            req.body.lineas,
+      numero_factura:    req.body.numero_factura || null,
+      fecha_factura:     req.body.fecha_factura || null,
+      dias_plazo:        req.body.dias_plazo ?? null,
+      fecha_vencimiento: req.body.fecha_vencimiento || null,
+      pago:              req.body.pago || null,
+      usuario_id:        req.user.id,
     });
     audit.registrar(req.user.negocio_id, req.user.id, 'Entrada confirmada', 'compras', Number(req.params.id), {
       proveedor_id:   req.body.proveedor_id ?? null,

@@ -387,17 +387,36 @@ export function Carrito({ onFacturar, onPrestar, onBorradorCargado, sinHeader = 
                   <Truck size={16} /> Despachar a un local
                 </Button>
               ) : (
-                <Button variant="secondary" className="w-full"
-                  onClick={() => { setErrorRed(''); setDevolucion(true); }}>
-                  <Undo2 size={16} /> Devolver a {contextoRed.bodega_nombre}
-                </Button>
+                <>
+                  <Button variant="secondary" className="w-full"
+                    onClick={() => { setErrorRed(''); setDevolucion(true); }}>
+                    <Undo2 size={16} /> Devolver a {contextoRed.bodega_nombre}
+                  </Button>
+                  {/* Despachar es de la bodega. Decirlo evita la búsqueda de un
+                      botón que nunca va a estar en esta sucursal. */}
+                  <p className="text-[11px] text-gray-400 text-center leading-snug">
+                    Para despachar a un local, entra con la sucursal {contextoRed.bodega_nombre}.
+                  </p>
+                </>
               )
             ) : (
-              hayMultiSucursal && !redActiva && (
-                <Button variant="secondary" className="w-full" onClick={() => setModalTraslado(true)}>
-                  <ArrowRightLeft size={16} /> Trasladar a otra sucursal
-                </Button>
-              )
+              <>
+                {hayMultiSucursal && !redActiva && (
+                  <Button variant="secondary" className="w-full" onClick={() => setModalTraslado(true)}>
+                    <ArrowRightLeft size={16} /> Trasladar a otra sucursal
+                  </Button>
+                )}
+                {/* La red está encendida pero el contexto no llegó: sin esto la
+                    zona quedaba en blanco y parecía que el botón de despachar
+                    no existía. Casi siempre es una de dos cosas concretas. */}
+                {redActiva && !contextoRed && (
+                  <p className="text-[11px] text-amber-600 bg-amber-50 border border-amber-100
+                    rounded-lg px-2.5 py-2 leading-snug">
+                    No se pudo cargar la distribución desde bodega. Revisa que este
+                    usuario tenga el módulo <b>Bodega</b> en Ajustes → Equipo → Usuarios.
+                  </p>
+                )}
+              </>
             )}
 
             {/* "Guardar como borrador" NO va aquí: está dentro de los modales

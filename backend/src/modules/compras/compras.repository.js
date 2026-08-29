@@ -327,18 +327,40 @@ const findPorConfirmar = async (sucursalId, negocioId) => {
            (SELECT string_agg(x.txt, ' · ')
               FROM (SELECT DISTINCT l2.nombre_producto AS txt
                     FROM lineas_compra l2 WHERE l2.compra_id = c.id LIMIT 4) x
-           ) AS resumen
+           ) AS resumen,
+           -- Cómo va la deuda de ESTA entrada. Misma definición que usa
+           -- acreedores.getComprasConSaldo (cargo − abonos por cargo_id): si
+           -- se calculara distinto, la bandeja y el estado de cuenta del
+           -- proveedor dirían cifras diferentes para la misma compra.
+           cg.id                                        AS cargo_id,
+           cg.valor                                     AS cargo_valor,
+           COALESCE(cg.abonado, 0)                      AS abonado,
+           GREATEST(COALESCE(cg.valor, 0) - COALESCE(cg.abonado, 0), 0) AS saldo,
+           CASE
+             WHEN cg.id IS NULL                             THEN 'Sin cargo'
+             WHEN cg.valor - COALESCE(cg.abonado, 0) <= 0   THEN 'Saldada'
+             WHEN COALESCE(cg.abonado, 0)            >  0   THEN 'Parcial'
+             ELSE 'Pendiente'
+           END AS estado_pago
     FROM compras c
     JOIN sucursales su ON su.id = c.sucursal_id
     LEFT JOIN usuarios       u  ON u.id  = c.usuario_id
     LEFT JOIN proveedores    p  ON p.id  = c.proveedor_id
     LEFT JOIN ordenes_compra oc ON oc.id = c.orden_compra_id
     LEFT JOIN lineas_compra  lc ON lc.compra_id = c.id
+    LEFT JOIN LATERAL (
+      SELECT m.id, m.valor,
+             (SELECT COALESCE(SUM(a.valor), 0) FROM movimientos_acreedor a
+              WHERE a.cargo_id = m.id AND a.tipo = 'Abono') AS abonado
+      FROM movimientos_acreedor m
+      WHERE m.compra_id = c.id AND m.tipo = 'Cargo'
+      LIMIT 1
+    ) cg ON TRUE
     WHERE c.factura_confirmada = FALSE
       AND c.estado <> 'Cancelada'
       AND ($1::int IS NULL OR c.sucursal_id = $1)
       AND su.negocio_id = $2
-    GROUP BY c.id, su.nombre, u.nombre, p.nombre, oc.numero
+    GROUP BY c.id, su.nombre, u.nombre, p.nombre, oc.numero, cg.id, cg.valor, cg.abonado
     ORDER BY c.fecha ASC
   `, [sucursalId, negocioId]);
   return rows;
@@ -354,6 +376,12 @@ const findEntradas = async (sucursalId, negocioId, limit = 30) => {
            u.nombre AS recibida_por,
            COALESCE(SUM(lc.cantidad), 0)::int AS unidades,
            COUNT(lc.id)::int                  AS lineas,
+           -- Garantía del proveedor. El AT TIME ZONE no es decorativo:
+           -- compras.fecha es TIMESTAMP leído en Bogotá y el resultado es DATE
+           -- leído en UTC; sin él una entrada de las 8 p.m. vence un día antes.
+           MAX(lc.garantia_dias)              AS garantia_dias,
+           MAX((c.fecha AT TIME ZONE 'America/Bogota')::date + lc.garantia_dias)
+                                              AS garantia_hasta,
            -- Qué llegó, en una línea. Sin esto la lista solo muestra un número
            -- de documento y hay que abrirlas una por una para saber qué es.
            (SELECT string_agg(x.txt, ' · ')

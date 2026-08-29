@@ -78,6 +78,35 @@ function FilaLinea({
   const difiere = pedida != null && unidades !== pedida;
   const faltan  = pedida != null && unidades < pedida;
 
+  // ── Cambiar la cantidad no puede borrar lo ya escrito ────────────────────
+  // Antes la casilla reconstruía el arreglo con la longitud nueva, así que
+  // corregir "12" por "1" —o simplemente vaciar el campo para volver a
+  // escribir— se llevaba por delante todos los IMEI capturados. Ahora el texto
+  // vive aparte (para poder quedar vacío mientras se escribe) y al reducir solo
+  // se quitan las casillas VACÍAS del final: las que ya tienen un IMEI se
+  // conservan y se avisa, porque borrar el trabajo de alguien no puede ser un
+  // efecto secundario de teclear un número.
+  const [textoCantidad, setTextoCantidad] = useState(String(linea.items.length));
+  const [conservados,   setConservados]   = useState(0);
+
+  const cambiarCantidad = (txt) => {
+    setTextoCantidad(txt);
+    if (txt.trim() === '') return;          // sigue escribiendo
+    const n = Math.max(0, Math.min(MAX_IMEI, Number(txt) || 0));
+    const vacio = () => itemSerialVacio(coloresActivo, caracteristicasActivo, caracteristicasLista);
+
+    if (n >= linea.items.length) {
+      setConservados(0);
+      onCambiar(linea.key, {
+        items: [...linea.items, ...Array.from({ length: n - linea.items.length }, vacio)],
+      });
+      return;
+    }
+    const quedan = linea.items.filter((it, i) => i < n || extraerImei(it).trim());
+    setConservados(quedan.length - n);
+    onCambiar(linea.key, { items: quedan });
+  };
+
   return (
     <div className="border border-gray-100 rounded-xl p-3 flex flex-col gap-2.5 bg-white">
       <div className="flex items-start justify-between gap-2">
@@ -103,22 +132,24 @@ function FilaLinea({
       {/* ── Serial: un IMEI por unidad ─────────────────────────────────── */}
       {esSerial && (
         <div className="flex flex-col gap-1.5">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <label className="text-xs text-gray-500">¿Cuántos llegaron?</label>
             <input
               type="number" min="0" max={MAX_IMEI}
-              value={linea.items.length}
-              onChange={(e) => {
-                const n = Math.max(0, Math.min(MAX_IMEI, Number(e.target.value) || 0));
-                const vacio = () => itemSerialVacio(coloresActivo, caracteristicasActivo, caracteristicasLista);
-                const items = Array.from({ length: n }, (_, i) => linea.items[i] ?? vacio());
-                onCambiar(linea.key, { items });
-              }}
+              value={textoCantidad}
+              onChange={(e) => cambiarCantidad(e.target.value)}
+              // Al salir, la casilla muestra la verdad: cuántas filas hay.
+              onBlur={() => setTextoCantidad(String(linea.items.length))}
               className="w-20 px-2.5 py-1.5 bg-white border-2 border-green-500 rounded-lg
                 text-sm font-semibold text-gray-800 text-center tabular-nums
                 focus:outline-none focus:ring-2 focus:ring-green-400"
             />
             <span className="text-xs text-gray-400">{unidades} con IMEI</span>
+            {conservados > 0 && (
+              <span className="text-xs text-amber-600">
+                se conservaron {conservados} que ya tenían IMEI — bórralos con la papelera
+              </span>
+            )}
           </div>
           <div className="flex flex-col gap-1 max-h-56 overflow-y-auto pr-1">
             {linea.items.map((item, i) => (

@@ -178,6 +178,78 @@ check('★ y la marca es explícita, no deducida',
 check('★ la consulta trae un resumen de lo que llego',
   /AS resumen/.test(fuenteRepo), true);
 
+console.log('\n8. La garantia del proveedor');
+// `lineas_compra.garantia_dias` congela el plazo al entrar la mercancia; de ahi
+// se DERIVA el vencimiento. Una entrada que lo dejaba en NULL metia el equipo
+// sin garantia que reclamar, y en silencio: nada fallaba.
+check('★ la entrada congela el plazo de garantia',
+  /garantia_dias: garantiaLinea/.test(fuenteService), true);
+check('★ sale de la linea de la orden, no del bodeguero',
+  /garantias\.get\(Number\(l\.orden_linea_id\)\)/.test(fuenteService), true);
+check('★ y cae al default del proveedor si la orden no lo dice',
+  /garantia_dias_default/.test(fuenteService), true);
+
+console.log('\n9. La entrada no toca la caja');
+// Nadie pago nada al recibir: la compra entra con registrar_en_caja = FALSE y
+// la consulta de caja filtra por esa columna. Si esto se rompe, aparecen
+// egresos de dinero que nunca salio.
+const fuenteCaja = readFileSync(path.join(RAIZ, 'src/modules/caja/caja.repository.js'), 'utf8');
+check('★ caja solo cuenta las compras marcadas para caja',
+  /c\.registrar_en_caja = TRUE/.test(fuenteCaja), true);
+check('★ y la entrada se registra fuera de caja',
+  /registrar_en_caja: false/.test(fuenteService), true);
+
+console.log('\n10. La factura, el vencimiento y el pago');
+const confirmar2 = fuenteService.slice(fuenteService.indexOf('const confirmarEntrada'));
+
+// El vencimiento alimenta el semaforo de cartera y el aviso de las 8:00. Sin
+// el, la deuda de una entrada nunca aparece como proxima a vencer.
+check('★ la confirmacion fija el vencimiento del cargo',
+  /resolverVencimiento/.test(confirmar2) && /fecha_vencimiento = \$1::date/.test(confirmar2), true);
+check('y usa el helper compartido, no una cuenta propia',
+  /const \{ resolverVencimiento \}/.test(fuenteService), true);
+
+// EL PUNTO MAS IMPORTANTE DE ESTA SECCION: el saldo tiene que calcularse igual
+// que en `acreedores.getComprasConSaldo` (cargo - abonos por cargo_id). Si se
+// calculara distinto, la bandeja de entradas y el estado de cuenta del
+// proveedor dirian cifras diferentes para la MISMA compra.
+const fuenteAcre = readFileSync(path.join(RAIZ, 'src/modules/acreedores/acreedores.repository.js'), 'utf8');
+const acreUsaCargoId = /a\.cargo_id = m\.id AND a\.tipo = 'Abono'/.test(fuenteAcre);
+const entradaUsaCargoId = /a\.cargo_id = m\.id AND a\.tipo = 'Abono'/.test(fuenteService);
+check('★ el saldo se calcula igual que en Acreedores', acreUsaCargoId && entradaUsaCargoId, true);
+check('★ y la bandeja usa esa misma expresion',
+  /a\.cargo_id = m\.id AND a\.tipo = 'Abono'/.test(fuenteRepo), true);
+
+// El pago va DESPUES de corregir precios: antes se compararia contra un saldo
+// que esta por cambiar.
+const iPrecios = confirmar2.indexOf('editarPreciosCompra');
+const iPago    = confirmar2.indexOf('if (pago &&');
+check('★ el pago se aplica DESPUES de corregir los precios',
+  iPrecios > 0 && iPago > iPrecios, true);
+
+// Abonos parciales, y nunca por encima del saldo.
+check('★ admite abono parcial', /Math\.min\(Math\.round\(Number\(pago\.valor\)\), estado\.saldo\)/.test(confirmar2), true);
+check('★ una compra ya saldada rechaza el pago', /YA_SALDADA/.test(confirmar2), true);
+// Pagar de mas no es un abono: es un saldo a favor, y ese tiene su circuito.
+check('★ nunca se abona por encima del saldo',
+  /valor >= estado\.saldo \? 'Pago de la factura' : 'Abono a la factura'/.test(confirmar2), true);
+
+// La fecha del abono es HOY: para la caja, la fecha del movimiento es el dia en
+// que salio el dinero, no el dia en que llego la mercancia.
+check('★ el abono NO fija fecha (toma NOW)',
+  !/INSERT INTO movimientos_acreedor[\s\S]{0,400}fecha[\s,)]/.test(
+    confirmar2.slice(confirmar2.indexOf("'Abono'"))), true);
+
+console.log('\n11. Lo que la pantalla deja ver');
+const listado2 = readFileSync(path.join(RAIZ, '../frontend/src/pages/entradas/EntradasPage.jsx'), 'utf8');
+check('★ la garantia se muestra en la lista', /garantia_hasta/.test(listado2), true);
+check('★ hay buscador de entradas', /entradasFiltradas/.test(listado2), true);
+check('★ y la bandeja dice cuanto falta por pagar',
+  /estado_pago === 'Parcial'/.test(listado2) && /e\.saldo/.test(listado2), true);
+check('★ si ya esta saldada no ofrece pagar otra vez', /yaSaldada/.test(listado2), true);
+check('el modal pide numero, fecha y plazo de la factura',
+  /fecha_factura/.test(listado2) && /dias_plazo/.test(listado2), true);
+
 console.log('\n' + '─'.repeat(62));
 if (fallos) { console.log(`✗ ${fallos} FALLO(S) de ${fallos + pasados}`); process.exit(1); }
 console.log(`✓ TODO OK — ${pasados} verificaciones`);

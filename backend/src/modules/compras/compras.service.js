@@ -1105,6 +1105,8 @@ const registrarEntrada = async ({
   const client = await pool.connect();
   let proveedorId = null;
   let estimados = new Map();   // orden_linea_id -> precio_estimado
+  let garantias = new Map();   // orden_linea_id -> garantia_dias
+  let garantiaProveedor = null;
   let conPrecio = [];
   try {
     // El proveedor y los estimados salen de la ORDEN, nunca del cuerpo.
@@ -1120,11 +1122,21 @@ const registrarEntrada = async ({
       }
       proveedorId = ord[0].proveedor_id;
 
+      // Plazo por defecto del proveedor, para las lineas que la orden no
+      // especifica. Se lee una sola vez.
+      if (proveedorId) {
+        const { rows: pv } = await client.query(
+          'SELECT garantia_dias_default FROM proveedores WHERE id = $1', [proveedorId]
+        );
+        garantiaProveedor = pv[0]?.garantia_dias_default ?? null;
+      }
+
       const { rows: lin } = await client.query(
-        'SELECT id, precio_estimado FROM lineas_orden_compra WHERE orden_id = $1',
+        'SELECT id, precio_estimado, garantia_dias FROM lineas_orden_compra WHERE orden_id = $1',
         [orden_compra_id]
       );
       estimados = new Map(lin.map((l) => [Number(l.id), l.precio_estimado]));
+      garantias = new Map(lin.map((l) => [Number(l.id), l.garantia_dias]));
     }
 
     for (const l of lineas) {
@@ -1164,9 +1176,21 @@ const registrarEntrada = async ({
         }
       }
 
+      // ── La garantía del proveedor se CONGELA aquí ──────────────────────
+      // El reloj arranca cuando la mercancía entra, y `lineas_compra.garantia_dias`
+      // es de donde se deriva el vencimiento. Una entrada que lo dejaba en NULL
+      // metía la mercancía sin garantía que reclamar, en silencio.
+      //
+      // No lo decide el bodeguero: el plazo se pacta al comprar. Sale de la
+      // línea de la orden y, si no lo dice, del default del proveedor.
+      const garantiaLinea = l.orden_linea_id
+        ? (garantias.get(Number(l.orden_linea_id)) ?? garantiaProveedor)
+        : garantiaProveedor;
+
       conPrecio.push({
         ...l,
         cantidad,
+        garantia_dias: garantiaLinea ?? null,
         precio_unitario: await _precioProvisional(
           client, l, l.orden_linea_id ? estimados.get(Number(l.orden_linea_id)) : null,
         ),
@@ -1245,7 +1269,29 @@ const getPorConfirmar = (sucursalId, negocioId) =>
  * promedio, al costo de cada serial, al total de la compra y a la deuda con el
  * acreedor, todo en una sola transaccion.
  */
-const confirmarEntrada = async (negocioId, compraId, { proveedor_id, lineas, numero_factura, usuario_id }) => {
+// Saldo vivo de una compra. MISMA definicion que `acreedores.getComprasConSaldo`
+// (cargo - abonos atados a ese cargo). Calcularlo distinto aqui haria que la
+// bandeja y el estado de cuenta del proveedor discrepen sobre la misma compra.
+const _saldoDeCompra = async (client, compraId) => {
+  const { rows } = await client.query(
+    `SELECT m.id, m.valor,
+            (SELECT COALESCE(SUM(a.valor), 0) FROM movimientos_acreedor a
+             WHERE a.cargo_id = m.id AND a.tipo = 'Abono') AS abonado
+     FROM movimientos_acreedor m
+     WHERE m.compra_id = $1 AND m.tipo = 'Cargo' LIMIT 1`,
+    [compraId]
+  );
+  if (!rows.length) return null;
+  const valor   = Number(rows[0].valor);
+  const abonado = Number(rows[0].abonado);
+  return { cargoId: rows[0].id, valor, abonado, saldo: Math.max(valor - abonado, 0) };
+};
+
+const confirmarEntrada = async (negocioId, compraId, {
+  proveedor_id, lineas, numero_factura, usuario_id,
+  fecha_factura = null, dias_plazo = null, fecha_vencimiento = null,
+  pago = null,
+}) => {
   const compra = await comprasRepo.findByIdYNegocio(compraId, negocioId);
   if (!compra) throw { status: 404, message: 'Entrada no encontrada' };
   if (compra.estado === 'Cancelada') {
@@ -1299,6 +1345,22 @@ const confirmarEntrada = async (negocioId, compraId, { proveedor_id, lineas, num
       await client.query('UPDATE compras SET numero_factura = $1 WHERE id = $2',
         [numero_factura, compraId]);
     }
+
+    // ── Cuando vence la factura del proveedor ────────────────────────────
+    // El plazo y la fecha son dos formas de decir lo mismo y el usuario
+    // escribe la que tenga a mano; `resolverVencimiento` decide (una fecha
+    // explicita siempre manda sobre el plazo). Es lo que alimenta el semaforo
+    // de cartera y el aviso de las 8:00 — sin esto, la deuda de una entrada
+    // nunca aparece como proxima a vencer.
+    const vence = resolverVencimiento({ fecha_factura, dias_plazo, fecha_vencimiento });
+    if (vence) {
+      await client.query(
+        `UPDATE movimientos_acreedor SET fecha_vencimiento = $1::date
+         WHERE compra_id = $2 AND tipo = 'Cargo'`,
+        [vence, compraId]
+      );
+    }
+
     await comprasRepo.marcarConfirmada(client, compraId);
     await client.query('COMMIT');
   } catch (err) {
@@ -1312,12 +1374,62 @@ const confirmarEntrada = async (negocioId, compraId, { proveedor_id, lineas, num
   // idempotente (una linea cuyo precio no cambia se omite). Si no vienen
   // precios, la entrada queda confirmada a su valor provisional, que es una
   // decision valida: el estimado era el correcto.
+  let resultado = { compra_id: compraId, confirmada: true, lineas_editadas: [] };
   if (Array.isArray(lineas) && lineas.length > 0) {
-    return editarPreciosCompra(negocioId, compraId, {
+    resultado = await editarPreciosCompra(negocioId, compraId, {
       lineas, usuario_id, motivo: 'Confirmacion de la factura del proveedor',
     });
   }
-  return { compra_id: compraId, confirmada: true, lineas_editadas: [] };
+
+  // ── El pago va DESPUES de corregir los precios ─────────────────────────────
+  // `editarPreciosCompra` recalcula el total y pone el Cargo al dia. Si el abono
+  // se registrara antes, se compararia contra un saldo que esta por cambiar y se
+  // podria abonar de mas o de menos.
+  //
+  // El abono se admite PARCIAL a proposito: casi nunca se paga todo de una, y
+  // obligar a "todo o nada" empujaria a registrar pagos que no ocurrieron.
+  // Nunca supera el saldo: pagar de mas no es un abono, es un saldo a favor, y
+  // ese tiene su propio circuito en Acreedores.
+  if (pago && Number(pago.valor) > 0) {
+    const cliente = await pool.connect();
+    try {
+      const estado = await _saldoDeCompra(cliente, compraId);
+      if (!estado) {
+        throw { status: 400, message: 'Esta entrada no tiene deuda registrada: asignale un proveedor primero' };
+      }
+      if (estado.saldo <= 0) {
+        throw { status: 409, code: 'YA_SALDADA', message: 'Esta compra ya esta saldada' };
+      }
+      const valor = Math.min(Math.round(Number(pago.valor)), estado.saldo);
+
+      // Sin `fecha`: la columna toma NOW(). El dinero sale HOY, no el dia en que
+      // se recibio la mercancia — para la caja, la fecha del movimiento es la
+      // fecha en que ocurrio.
+      await cliente.query(
+        `INSERT INTO movimientos_acreedor
+           (acreedor_id, usuario_id, tipo, descripcion, valor, cargo_id, compra_id,
+            metodo, registrar_en_caja, sucursal_id)
+         SELECT m.acreedor_id, $2, 'Abono', $3, $4, m.id, $1, $5, $6, $7
+         FROM movimientos_acreedor m WHERE m.id = $8`,
+        [compraId, usuario_id || null,
+         valor >= estado.saldo ? 'Pago de la factura' : 'Abono a la factura',
+         valor, pago.metodo || null, pago.registrar_en_caja !== false,
+         compra.sucursal_id, estado.cargoId]
+      );
+
+      const despues = await _saldoDeCompra(cliente, compraId);
+      resultado.pago = {
+        valor,
+        saldo_anterior: estado.saldo,
+        saldo_restante: despues?.saldo ?? 0,
+        estado_pago: (despues?.saldo ?? 0) <= 0 ? 'Saldada' : 'Parcial',
+      };
+    } finally {
+      cliente.release();
+    }
+  }
+
+  return resultado;
 };
 
 module.exports = { getCompras, getCompraById, getComprasByProveedor, registrarCompra, getComprasPaginadas, cancelarCompra, devolverCompra, editarPreciosCompra, registrarEntrada, getEntradas, getOrdenesParaRecibir, getPorConfirmar, confirmarEntrada };

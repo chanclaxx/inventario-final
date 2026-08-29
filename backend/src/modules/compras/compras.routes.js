@@ -67,6 +67,11 @@ router.patch('/:id/confirmar', requireModulo('proveedores'), requireNivel('admin
     body('lineas').optional().isArray(),
     body('lineas.*.linea_id').optional().isInt({ gt: 0 }),
     body('lineas.*.precio_unitario').optional().isFloat({ gt: 0 }),
+    body('fecha_factura').optional({ values: 'null' }).isISO8601().withMessage('Fecha de factura invalida'),
+    body('dias_plazo').optional({ values: 'null' }).isInt({ min: 0, max: 365 }).withMessage('Plazo invalido (0 a 365 dias)'),
+    body('fecha_vencimiento').optional({ values: 'null' }).isISO8601().withMessage('Vencimiento invalido'),
+    body('pago.valor').optional({ values: 'null' }).isFloat({ gt: 0 }).withMessage('Valor del pago invalido'),
+    body('pago.metodo').optional({ values: 'null' }).isString().trim().isLength({ max: 40 }),
   ],
   validate, ctrl.confirmarEntrada);
 router.post('/', requireModulo('proveedores'), requireNivel('supervisor'), validarCompra, validate, ctrl.registrarCompra);
