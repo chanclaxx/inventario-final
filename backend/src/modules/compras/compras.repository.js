@@ -234,14 +234,35 @@ const findAllPaginado = async (sucursalId, negocioId, { page = 1, limit = 20, bu
        c.sucursal_id, su.nombre AS sucursal_nombre,
        p.id AS proveedor_id, p.nombre AS proveedor_nombre, p.tipo AS proveedor_tipo,
        u.nombre AS usuario_nombre,
-       COUNT(lc.id) AS num_lineas
+       COUNT(lc.id) AS num_lineas,
+       c.factura_confirmada, c.es_entrada,
+       -- Cuando vence la factura de ESTA compra, y como va su deuda. Sale del
+       -- Cargo del acreedor, que es donde vive el plazo: la compra no lo guarda.
+       cg.fecha_vencimiento,
+       (cg.fecha_vencimiento - CURRENT_DATE)::int AS dias_para_vencer,
+       GREATEST(COALESCE(cg.valor, 0) - COALESCE(cg.abonado, 0), 0) AS saldo,
+       -- Garantia del proveedor: el plazo se congelo en la linea al entrar la
+       -- mercancia y el vencimiento se DERIVA. El AT TIME ZONE no es
+       -- decorativo: compras.fecha es TIMESTAMP en Bogota y el resultado es
+       -- DATE en UTC; sin el, una compra de las 8 p.m. vence un dia antes.
+       MAX(lc.garantia_dias) AS garantia_dias,
+       MAX((c.fecha AT TIME ZONE 'America/Bogota')::date + lc.garantia_dias) AS garantia_hasta
      FROM compras c
      JOIN sucursales su ON su.id = c.sucursal_id
      JOIN proveedores p  ON p.id  = c.proveedor_id
      LEFT JOIN usuarios u   ON u.id  = c.usuario_id
      LEFT JOIN lineas_compra lc ON lc.compra_id = c.id
+     LEFT JOIN LATERAL (
+       SELECT m.valor, m.fecha_vencimiento,
+              (SELECT COALESCE(SUM(ab.valor), 0) FROM movimientos_acreedor ab
+               WHERE ab.cargo_id = m.id AND ab.tipo = 'Abono') AS abonado
+       FROM movimientos_acreedor m
+       WHERE m.compra_id = c.id AND m.tipo = 'Cargo'
+       LIMIT 1
+     ) cg ON TRUE
      ${where}
-     GROUP BY c.id, su.nombre, p.id, p.nombre, p.tipo, u.nombre
+     GROUP BY c.id, su.nombre, p.id, p.nombre, p.tipo, u.nombre,
+              cg.valor, cg.abonado, cg.fecha_vencimiento
      ORDER BY c.fecha DESC
      LIMIT $${idx++} OFFSET $${idx++}`,
     dataParams

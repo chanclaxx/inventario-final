@@ -5,6 +5,7 @@ import { getProveedores, crearProveedor, actualizarProveedor } from '../../api/p
 import { getComprasByProveedor, getCompraById, getComprasPaginadas, cancelarCompra as cancelarCompraApi, devolverCompra as devolverCompraApi, editarPreciosCompra as editarPreciosCompraApi } from '../../api/compras.api';
 import { getAcreedores, registrarMovimiento as registrarMovAcreedor, getComprasConSaldo, getAbonosPorCargo } from '../../api/acreedores.api';
 import { formatCOP, formatFechaHora } from '../../utils/formatters';
+import { ChipPago, ChipGarantia } from './indicadoresOrden';
 import { Button }      from '../../components/ui/Button';
 import { Input }       from '../../components/ui/Input';
 import { InputMoneda } from '../../components/ui/InputMoneda';
@@ -634,6 +635,39 @@ function ModalDetalleCompra({ compraId, onClose }) {
               <p className="text-xs text-gray-400 mb-0.5">Registrado por</p>
               <p className="text-sm font-medium text-gray-800">{data?.usuario_nombre || '—'}</p>
             </div>
+
+            {/* ── Plazo de pago ────────────────────────────────────────────
+                Estaba guardado en el Cargo del acreedor, así que para saber
+                cuándo vencía esta compra había que salir a otra pantalla. */}
+            {data?.cargo_id && (
+              <div className="bg-gray-50 rounded-xl p-3 flex flex-col gap-1.5">
+                <p className="text-xs text-gray-400">Plazo de pago</p>
+                <ChipPago estado={data.estado_pago} dias={data.dias_para_vencer} />
+                {data.fecha_vencimiento && (
+                  <p className="text-xs text-gray-500">
+                    Vence el {String(data.fecha_vencimiento).slice(0, 10)}
+                  </p>
+                )}
+                <p className="text-xs text-gray-500 tabular-nums">
+                  {Number(data.saldo) > 0
+                    ? <>Faltan <b>{formatCOP(data.saldo)}</b> de {formatCOP(data.total)}</>
+                    : <span className="text-green-600 font-medium">Pagada</span>}
+                </p>
+              </div>
+            )}
+
+            {/* ── Garantía del proveedor ───────────────────────────────────
+                La del envío es la de la línea que vence PRIMERO: es la que
+                marca hasta cuándo se puede reclamar algo de esta compra. */}
+            {data?.garantia_activa && data?.garantia_hasta && (
+              <div className="bg-gray-50 rounded-xl p-3 flex flex-col gap-1.5">
+                <p className="text-xs text-gray-400">Garantía del proveedor</p>
+                <ChipGarantia estado={data.estado} dias={data.dias_restantes} />
+                <p className="text-xs text-gray-500">
+                  Hasta el {String(data.garantia_hasta).slice(0, 10)}
+                </p>
+              </div>
+            )}
             {data?.metodo && (
               <div className={`col-span-2 rounded-xl p-3 ${esCredito ? 'bg-amber-50' : 'bg-green-50'}`}>
                 <p className={`text-xs mb-1 ${esCredito ? 'text-amber-500' : 'text-green-500'}`}>Forma de pago</p>
@@ -655,6 +689,8 @@ function ModalDetalleCompra({ compraId, onClose }) {
             {(data?.lineas || []).length === 0
               ? <p className="text-sm text-gray-400 italic">Sin líneas registradas</p>
               : (data?.lineas || []).map((l) => {
+                  // Cada línea trae su propio plazo congelado: dos productos
+                  // de la misma compra pueden tener garantías distintas.
                   const varianteLabel = l.variante_id
                     ? `${l.variante_tipo_nombre ? l.variante_tipo_nombre + ': ' : ''}${l.variante_valor}`
                     : l.atributo_id
@@ -1893,6 +1929,15 @@ const ESTADOS_COMPRA = ['Completada', 'Pendiente', 'Anulada'];
 const LIMIT = 20;
 
 function TabCompras() {
+  // La garantía es opt-in: apagada, no se pinta el semáforo. Reusa el query
+  // ['config'] que ya comparten media docena de pantallas — sin petición extra.
+  const { data: configCompras } = useQuery({
+    queryKey: ['config'],
+    queryFn:  () => api.get('/config').then((r) => r.data.data),
+    staleTime: 60_000,
+  });
+  const garantiaActiva = configCompras?.garantia_proveedor_activa === '1';
+
   const [busqueda,   setBusqueda]   = useState('');
   const [inputText,  setInputText]  = useState('');
   const [fechaDesde, setFechaDesde] = useState('');
@@ -2065,10 +2110,38 @@ function TabCompras() {
                       <span className="text-xs text-gray-400">{c.num_lineas} producto(s)</span>
                     )}
                   </div>
+                  {/* ── Plazo y garantía, sin abrir la compra ──────────────
+                      Son dos señales INDEPENDIENTES y por eso van juntas pero
+                      separadas: el chip de pago es DINERO (cuándo vence la
+                      factura) y el de garantía es MERCANCÍA (hasta cuándo
+                      responde el proveedor). Una compra puede estar pagada y
+                      con la garantía vencida, o al revés. */}
+                  {(c.fecha_vencimiento || (garantiaActiva && c.garantia_hasta)) && (
+                    <div className="flex items-center gap-2 flex-wrap mt-1.5">
+                      {c.fecha_vencimiento && (
+                        <ChipPago estado={c.estado_pago} dias={c.dias_para_vencer} />
+                      )}
+                      {Number(c.saldo) > 0 && (
+                        <span className="text-xs text-gray-500">
+                          faltan {formatCOP(c.saldo)}
+                        </span>
+                      )}
+                      {garantiaActiva && c.garantia_hasta && (
+                        <ChipGarantia estado={c.estado_garantia} dias={c.garantia_dias_restantes} />
+                      )}
+                    </div>
+                  )}
                 </div>
-                <div className="flex items-center gap-2 flex-shrink-0">
-                  <span className="text-sm font-bold text-emerald-700">{formatCOP(c.total)}</span>
-                  <ChevronRight size={14} className="text-gray-400" />
+                <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-bold text-emerald-700">{formatCOP(c.total)}</span>
+                    <ChevronRight size={14} className="text-gray-400" />
+                  </div>
+                  {c.es_entrada && !c.factura_confirmada && (
+                    <span className="text-[11px] text-amber-600 whitespace-nowrap">
+                      entrada por confirmar
+                    </span>
+                  )}
                 </div>
               </button>
             );

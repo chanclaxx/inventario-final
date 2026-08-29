@@ -8,8 +8,45 @@ const { resolverVencimiento }   = require('../../utils/vencimiento.util');
 const getCompras = (sucursalId, negocioId, proveedorIds = null) =>
   comprasRepo.findAll(sucursalId, negocioId, proveedorIds);
 
-const getComprasPaginadas = (sucursalId, negocioId, filtros) =>
-  comprasRepo.findAllPaginado(sucursalId, negocioId, filtros);
+// El listado de compras trae ahora el vencimiento y la garantia. Los dos
+// estados se resuelven con los MISMOS helpers que la cartera y la procedencia
+// (`_estadoPago` de acreedores y `estadoGarantia` de procedencia): tres
+// pantallas que pintan el mismo semaforo no pueden calcularlo cada una.
+const getComprasPaginadas = async (sucursalId, negocioId, filtros) => {
+  const pagina = await comprasRepo.findAllPaginado(sucursalId, negocioId, filtros);
+
+  const { getConfigOrdenes } = require('../../middlewares/ordenesCompra.middleware');
+  const { estadoGarantia }   = require('../procedencia/procedencia.service');
+  const cfg = await getConfigOrdenes(negocioId);
+
+  const estadoPago = (dias) => {
+    if (dias == null) return 'sin_plazo';
+    if (dias < 0) return 'vencida';
+    if (dias <= cfg.dias_aviso) return 'por_vencer';
+    return 'al_dia';
+  };
+
+  return {
+    ...pagina,
+    // Los dos interruptores son independientes: un negocio puede llevar plazos
+    // de pago sin reclamar garantias, y al reves.
+    garantia_activa: cfg.garantia_activa === true,
+    ordenes_activas: cfg.activas === true,
+    rows: pagina.rows.map((c) => {
+      const dias = c.dias_para_vencer == null ? null : Number(c.dias_para_vencer);
+      const gar  = estadoGarantia(c.garantia_hasta, cfg.garantia_dias_aviso);
+      return {
+        ...c,
+        dias_para_vencer:  dias,
+        // Una compra sin saldo no vence: ya no le debe nada a nadie.
+        estado_pago:       Number(c.saldo) > 0 ? estadoPago(dias) : 'al_dia',
+        saldo:             Number(c.saldo || 0),
+        estado_garantia:   gar.estado,
+        garantia_dias_restantes: gar.dias_restantes,
+      };
+    }),
+  };
+};
 
 const getComprasByProveedor = (proveedorId, sucursalId, negocioId) =>
   comprasRepo.findByProveedor(proveedorId, sucursalId, negocioId);
@@ -18,7 +55,66 @@ const getCompraById = async (negocioId, id) => {
   const compra = await comprasRepo.findByIdYNegocio(id, negocioId);
   if (!compra) throw { status: 404, message: 'Compra no encontrada' };
   const lineas = await comprasRepo.getLineas(id);
-  return { ...compra, lineas };
+
+  // ── La ficha completa: plazo, deuda y garantía ───────────────────────────
+  // Estaban todos guardados, pero repartidos: el plazo vive en el Cargo del
+  // acreedor, la garantía en cada línea, y el saldo se deriva. Para verlos
+  // había que abrir tres pantallas. Se resuelven con los MISMOS helpers que la
+  // cartera y la procedencia — nunca con una cuenta propia.
+  const { getConfigOrdenes } = require('../../middlewares/ordenesCompra.middleware');
+  const { estadoGarantia }   = require('../procedencia/procedencia.service');
+  const cfg = await getConfigOrdenes(negocioId);
+
+  const { rows: cargo } = await pool.query(
+    `SELECT m.id, m.valor, m.fecha_vencimiento,
+            (m.fecha_vencimiento - CURRENT_DATE)::int AS dias_para_vencer,
+            (SELECT COALESCE(SUM(ab.valor), 0) FROM movimientos_acreedor ab
+             WHERE ab.cargo_id = m.id AND ab.tipo = 'Abono') AS abonado
+     FROM movimientos_acreedor m
+     WHERE m.compra_id = $1 AND m.tipo = 'Cargo' LIMIT 1`,
+    [id]
+  );
+
+  const cg    = cargo[0] || null;
+  const dias  = cg?.dias_para_vencer == null ? null : Number(cg.dias_para_vencer);
+  const saldo = cg ? Math.max(Number(cg.valor) - Number(cg.abonado), 0) : 0;
+
+  const estadoPago = () => {
+    if (!cg) return 'sin_factura';
+    if (saldo <= 0) return 'al_dia';       // pagada: conserva fecha pero no vence
+    if (dias == null) return 'sin_plazo';
+    if (dias < 0) return 'vencida';
+    if (dias <= cfg.dias_aviso) return 'por_vencer';
+    return 'al_dia';
+  };
+
+  // La garantía de la compra es la de la línea que vence PRIMERO: es la que
+  // marca hasta cuándo se puede reclamar algo de este envío.
+  const fechaCompra = new Date(compra.fecha);
+  const vencimientos = lineas
+    .filter((l) => l.garantia_dias != null)
+    .map((l) => {
+      const d = new Date(fechaCompra);
+      d.setDate(d.getDate() + Number(l.garantia_dias));
+      return d.toISOString().slice(0, 10);
+    })
+    .sort();
+
+  return {
+    ...compra,
+    lineas,
+    garantia_activa:   cfg.garantia_activa === true,
+    cargo_id:          cg?.id ?? null,
+    fecha_vencimiento: cg?.fecha_vencimiento ?? null,
+    dias_para_vencer:  dias,
+    abonado:           cg ? Number(cg.abonado) : 0,
+    saldo,
+    estado_pago:       estadoPago(),
+    garantia_hasta:    vencimientos[0] ?? null,
+    ...(vencimientos.length
+      ? estadoGarantia(vencimientos[0], cfg.garantia_dias_aviso)
+      : { estado: 'sin_garantia', dias_restantes: null }),
+  };
 };
 
 // ── Helper: fecha local sin desfase UTC ───────────────────────────────────────

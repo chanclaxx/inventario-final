@@ -19,6 +19,7 @@ import { exportarCuentaAcreedorExcel } from '../../utils/exportarCuentaAcreedorE
 import { getConfig, verificarPin } from '../../api/config.api';
 import { useMetodosPago } from '../../hooks/useMetodosPago';
 import { formatCOP, formatFechaHora } from '../../utils/formatters';
+import { ChipPago } from '../proveedores/indicadoresOrden';
 import { useAuth }     from '../../context/useAuth';
 import { Button }      from '../../components/ui/Button';
 import { Input }       from '../../components/ui/Input';
@@ -1688,6 +1689,16 @@ function FilaAcreedor({ acreedor, onClick }) {
             <span className={`text-xs px-2 py-0.5 rounded-full border font-medium flex items-center gap-1 ${PAGO_CLASES[pagoNivel]}`}>
               <Clock size={10} /> {pagoTexto}
             </span>
+          )}
+          {/* La factura ABIERTA que vence primero. Es la pregunta con la que se
+              abre esta pantalla —"¿a quién le tengo que pagar ya?"— y hasta
+              ahora había que entrar acreedor por acreedor para responderla.
+              Mismo chip y mismos colores que la pantalla de cartera y que las
+              órdenes: el rojo significa lo mismo en los tres sitios.
+              `sin_plazo` no se pinta: no es una alerta, es que nadie registró
+              un plazo, y llenaría la lista de chips grises sin información. */}
+          {tieneDeuda && acreedor.estado_pago && acreedor.estado_pago !== 'sin_plazo' && (
+            <ChipPago estado={acreedor.estado_pago} dias={acreedor.dias_para_vencer} />
           )}
         </div>
         {tieneDeuda && totalCargado > 0 && (

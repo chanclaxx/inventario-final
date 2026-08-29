@@ -1,17 +1,50 @@
 const { pool } = require('../../config/db');
 const repo = require('./acreedores.repository');
 
-const getAcreedores = (negocioId, filtro) => repo.findAll(negocioId, filtro);
+const { getConfigOrdenes } = require('../../middlewares/ordenesCompra.middleware');
+
+// Estado de una factura frente a su vencimiento. UNA definición para la
+// pantalla de cartera, la ficha del acreedor y el aviso de las 8:00.
+const _estadoPago = (dias, diasAviso) => {
+  if (dias == null) return 'sin_plazo';
+  if (dias < 0)          return 'vencida';
+  if (dias <= diasAviso) return 'por_vencer';
+  return 'al_dia';
+};
+
+// ── El semáforo de la ficha ─────────────────────────────────────────────────
+//
+// La lista trae la fecha del cargo abierto que vence primero; aquí se traduce a
+// estado. Se usa `_estadoPago` —el MISMO que la pantalla de cartera y el que
+// alimenta el aviso de las 8:00— y el MISMO `dias_aviso` del negocio: si la
+// ficha dijera "por vencer" y la cartera "al día", el usuario dejaría de
+// creerle a las dos.
+//
+// Un acreedor sin cargos con fecha sale en `sin_plazo` y el chip queda gris: no
+// es una alerta, es que nadie registró un plazo.
+const _conSemaforo = async (negocioId, filas) => {
+  const cfg = await getConfigOrdenes(negocioId);
+  return filas.map((a) => {
+    const dias = a.dias_para_vencer == null ? null : Number(a.dias_para_vencer);
+    return { ...a, dias_para_vencer: dias, estado_pago: _estadoPago(dias, cfg.dias_aviso) };
+  });
+};
+
+const getAcreedores = async (negocioId, filtro) =>
+  _conSemaforo(negocioId, await repo.findAll(negocioId, filtro));
 
 // Para usuarios no-admin: filtra por los proveedores que tienen permitidos
-const getAcreedoresParaUsuario = (negocioId, permisos, filtro) => {
-  if (!permisos || !permisos.ver) return Promise.resolve([]);
-  if (permisos.ver_todos) return repo.findAll(negocioId, filtro);
-  return repo.findByProveedorIds(negocioId, permisos.ver_lista || [], filtro);
+const getAcreedoresParaUsuario = async (negocioId, permisos, filtro) => {
+  if (!permisos || !permisos.ver) return [];
+  const filas = permisos.ver_todos
+    ? await repo.findAll(negocioId, filtro)
+    : await repo.findByProveedorIds(negocioId, permisos.ver_lista || [], filtro);
+  return _conSemaforo(negocioId, filas);
 };
 
 // Solo acreedores vinculados a cruces — mantenida por compatibilidad interna
-const getAcreedoresCruces = (negocioId, filtro) => repo.findByCruces(negocioId, filtro);
+const getAcreedoresCruces = async (negocioId, filtro) =>
+  _conSemaforo(negocioId, await repo.findByCruces(negocioId, filtro));
 
 const getAcreedorById = async (negocioId, id) => {
   const acreedor = await repo.findById(negocioId, id);
@@ -185,14 +218,8 @@ const getHistorial = async (negocioId, acreedorId) => {
 // (`ordenes_compra_dias_aviso`): si la pantalla dijera "por vencer" y la
 // notificación no llegara, o al revés, el usuario dejaría de creerle a las dos.
 // ─────────────────────────────────────────────────────────────────────────────
-const { getConfigOrdenes } = require('../../middlewares/ordenesCompra.middleware');
-
-const _estadoPago = (dias, diasAviso) => {
-  if (dias == null) return 'sin_plazo';
-  if (dias < 0)          return 'vencida';
-  if (dias <= diasAviso) return 'por_vencer';
-  return 'al_dia';
-};
+// (`getConfigOrdenes` y `_estadoPago` se declaran al principio del archivo:
+// los usan tanto la cartera como el semáforo de la ficha del acreedor.)
 
 /**
  * Pone el plazo a un cargo que se registró sin él.

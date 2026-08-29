@@ -1,5 +1,38 @@
 const { pool } = require('../../config/db');
 
+// ── La factura ABIERTA más próxima a vencerse de un acreedor ────────────────
+//
+// Se define UNA vez y se pega en las tres consultas que listan acreedores. Si
+// cada una llevara su copia, bastaría con tocar una para que la ficha del
+// proveedor y el semáforo de cartera dijeran cosas distintas del mismo
+// proveedor — el tipo de desacuerdo que ya costó caro en este repositorio.
+//
+// "Abierta" = el cargo todavía tiene saldo. Un cargo pagado no vence: conserva
+// su fecha, pero ya no le debe nada a nadie y no debe pintar el semáforo.
+//
+// LATERAL con LIMIT 1, no un agregado: devuelve UNA fila por acreedor, así que
+// no multiplica el GROUP BY de la consulta que lo hospeda. Sus columnas sí
+// tienen que ir en ese GROUP BY (Postgres no deduce que dependen de a.id).
+// Se apoya en idx_mov_acreedor_vencimiento, que ya existe.
+const SQL_PROXIMO_VENCIMIENTO = `
+  LEFT JOIN LATERAL (
+    SELECT cg.fecha_vencimiento,
+           (cg.fecha_vencimiento - CURRENT_DATE)::int AS dias
+    FROM movimientos_acreedor cg
+    WHERE cg.acreedor_id = a.id
+      AND cg.tipo = 'Cargo'
+      AND cg.fecha_vencimiento IS NOT NULL
+      AND cg.valor > COALESCE((
+            SELECT SUM(ab.valor) FROM movimientos_acreedor ab
+            WHERE ab.cargo_id = cg.id AND ab.tipo = 'Abono'
+          ), 0)
+    ORDER BY cg.fecha_vencimiento ASC
+    LIMIT 1
+  ) venc ON TRUE`;
+
+const SEL_VENCIMIENTO   = 'venc.fecha_vencimiento AS proximo_vencimiento, venc.dias AS dias_para_vencer';
+const GROUP_VENCIMIENTO = 'venc.fecha_vencimiento, venc.dias';
+
 const findAll = async (negocioId, filtro) => {
   let query = `
     SELECT a.id, a.nombre, a.cedula, a.telefono, a.proveedor_id,
@@ -7,10 +40,12 @@ const findAll = async (negocioId, filtro) => {
            COALESCE(SUM(CASE WHEN m.tipo = 'Cargo' THEN m.valor ELSE -m.valor END), 0) AS saldo,
            COALESCE(SUM(CASE WHEN m.tipo = 'Cargo' THEN m.valor ELSE 0 END), 0) AS total_cargado,
            COALESCE(SUM(CASE WHEN m.tipo = 'Abono' THEN m.valor ELSE 0 END), 0) AS total_abonado,
-           MAX(m.fecha) FILTER (WHERE m.tipo = 'Abono') AS ultimo_pago
+           MAX(m.fecha) FILTER (WHERE m.tipo = 'Abono') AS ultimo_pago,
+           ${SEL_VENCIMIENTO}
     FROM acreedores a
     LEFT JOIN proveedores p ON p.id = a.proveedor_id
     LEFT JOIN movimientos_acreedor m ON m.acreedor_id = a.id
+    ${SQL_PROXIMO_VENCIMIENTO}
     WHERE a.negocio_id = $1
       AND (a.proveedor_id IS NULL OR p.activo = TRUE)
   `;
@@ -25,7 +60,7 @@ const findAll = async (negocioId, filtro) => {
     query += ` AND (LOWER(a.nombre) LIKE $2 ESCAPE '\\' OR a.cedula LIKE $2 ESCAPE '\\')`;
   }
 
-  query += ` GROUP BY a.id, p.tipo ORDER BY a.nombre`;
+  query += ` GROUP BY a.id, p.tipo, ${GROUP_VENCIMIENTO} ORDER BY a.nombre`;
   const { rows } = await pool.query(query, params);
   return rows;
 };
@@ -40,10 +75,12 @@ const findByProveedorIds = async (negocioId, proveedorIds, filtro) => {
            COALESCE(SUM(CASE WHEN m.tipo = 'Cargo' THEN m.valor ELSE -m.valor END), 0) AS saldo,
            COALESCE(SUM(CASE WHEN m.tipo = 'Cargo' THEN m.valor ELSE 0 END), 0) AS total_cargado,
            COALESCE(SUM(CASE WHEN m.tipo = 'Abono' THEN m.valor ELSE 0 END), 0) AS total_abonado,
-           MAX(m.fecha) FILTER (WHERE m.tipo = 'Abono') AS ultimo_pago
+           MAX(m.fecha) FILTER (WHERE m.tipo = 'Abono') AS ultimo_pago,
+           ${SEL_VENCIMIENTO}
     FROM acreedores a
     JOIN proveedores p ON p.id = a.proveedor_id
     LEFT JOIN movimientos_acreedor m ON m.acreedor_id = a.id
+    ${SQL_PROXIMO_VENCIMIENTO}
     WHERE a.negocio_id = $1
       AND a.proveedor_id = ANY($2::int[])
       AND p.activo = TRUE
@@ -56,7 +93,7 @@ const findByProveedorIds = async (negocioId, proveedorIds, filtro) => {
     query += ` AND (LOWER(a.nombre) LIKE $3 ESCAPE '\\' OR a.cedula LIKE $3 ESCAPE '\\')`;
   }
 
-  query += ` GROUP BY a.id, p.tipo ORDER BY a.nombre`;
+  query += ` GROUP BY a.id, p.tipo, ${GROUP_VENCIMIENTO} ORDER BY a.nombre`;
   const { rows } = await pool.query(query, params);
   return rows;
 };
@@ -65,10 +102,12 @@ const findByProveedorIds = async (negocioId, proveedorIds, filtro) => {
 const findByCruces = async (negocioId, filtro) => {
   let query = `
     SELECT a.id, a.nombre, a.cedula, a.telefono, a.proveedor_id,
-           COALESCE(SUM(CASE WHEN m.tipo = 'Cargo' THEN m.valor ELSE -m.valor END), 0) AS saldo
+           COALESCE(SUM(CASE WHEN m.tipo = 'Cargo' THEN m.valor ELSE -m.valor END), 0) AS saldo,
+           ${SEL_VENCIMIENTO}
     FROM acreedores a
     JOIN proveedores p ON p.id = a.proveedor_id
     LEFT JOIN movimientos_acreedor m ON m.acreedor_id = a.id
+    ${SQL_PROXIMO_VENCIMIENTO}
     WHERE a.negocio_id = $1
       AND p.tipo = 'cruce'
       AND p.activo = TRUE
@@ -84,7 +123,7 @@ const findByCruces = async (negocioId, filtro) => {
     query += ` AND (LOWER(a.nombre) LIKE $2 ESCAPE '\\' OR a.cedula LIKE $2 ESCAPE '\\')`;
   }
 
-  query += ` GROUP BY a.id ORDER BY a.nombre`;
+  query += ` GROUP BY a.id, ${GROUP_VENCIMIENTO} ORDER BY a.nombre`;
   const { rows } = await pool.query(query, params);
   return rows;
 };

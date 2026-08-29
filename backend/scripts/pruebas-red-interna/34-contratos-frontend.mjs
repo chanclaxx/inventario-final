@@ -310,6 +310,60 @@ const migr = readFileSync(path.join(BACK, 'config/migrations.js'), 'utf8');
 check('★ la migración rellena las entradas viejas',
   /UPDATE compras SET es_entrada = TRUE/.test(migr), true);
 
+// ── Un solo semáforo para todo el sistema ───────────────────────────────────
+//
+// El vencimiento de una factura se pinta ahora en cuatro sitios: la cartera, la
+// ficha del acreedor, el listado de compras y las órdenes. Si cada uno
+// calculara su estado o usara sus colores, el rojo dejaría de significar lo
+// mismo y el usuario dejaría de creerle a todos.
+console.log('\n8. El semáforo de vencimiento es UNO solo');
+const BACK2 = path.resolve(SRC, '../../backend/src');
+const acreSrv = readFileSync(path.join(BACK2, 'modules/acreedores/acreedores.service.js'), 'utf8');
+const compSrv = readFileSync(path.join(BACK2, 'modules/compras/compras.service.js'), 'utf8');
+
+// `_estadoPago` se declara UNA vez en acreedores y lo usan la cartera y la ficha.
+check('★ acreedores declara _estadoPago una sola vez',
+  (acreSrv.match(/const _estadoPago =/g) || []).length === 1, true);
+check('★ la ficha del acreedor lo reusa (no tiene su propia cuenta)',
+  /_estadoPago\(dias, cfg\.dias_aviso\)/.test(acreSrv), true);
+// Los tres usan el MISMO umbral configurable del negocio.
+check('★ los tres usan dias_aviso del negocio',
+  /cfg\.dias_aviso/.test(acreSrv) && /cfg\.dias_aviso/.test(compSrv), true);
+// La garantía sale del helper compartido, nunca de una copia.
+check('★ compras deriva la garantía con el helper de procedencia',
+  /estadoGarantia/.test(compSrv)
+  && /require\('\.\.\/procedencia\/procedencia\.service'\)/.test(compSrv), true);
+
+// Un cargo YA PAGADO no vence: conserva la fecha pero no debe pintar rojo.
+check('★ una compra sin saldo nunca sale vencida',
+  /Number\(c\.saldo\) > 0 \? estadoPago\(dias\) : 'al_dia'/.test(compSrv), true);
+const acreRepo = readFileSync(path.join(BACK2, 'modules/acreedores/acreedores.repository.js'), 'utf8');
+check('★ y la ficha solo mira cargos con saldo',
+  /cg\.valor > COALESCE\(\(/.test(acreRepo), true);
+
+// El fragmento SQL se define una vez y se pega en las tres listas de acreedores.
+check('★ el SQL del vencimiento se define UNA vez',
+  (acreRepo.match(/const SQL_PROXIMO_VENCIMIENTO =/g) || []).length === 1, true);
+check('★ y se usa en las tres consultas que listan acreedores',
+  (acreRepo.match(/\$\{SQL_PROXIMO_VENCIMIENTO\}/g) || []).length === 3, true);
+check('★ con sus columnas en el GROUP BY (o Postgres lo rechaza)',
+  (acreRepo.match(/\$\{GROUP_VENCIMIENTO\}/g) || []).length === 3, true);
+
+// Y en la pantalla, los mismos componentes.
+console.log('\n9. Los mismos chips en todas las pantallas');
+const acrePage = readFileSync(path.join(SRC, 'pages/acreedores/AcreedoresPage.jsx'), 'utf8');
+const provPage = readFileSync(path.join(SRC, 'pages/proveedores/ProveedoresPage.jsx'), 'utf8');
+check('★ la ficha del acreedor usa ChipPago (no un chip propio)',
+  /ChipPago/.test(acrePage) && /from '\.\.\/proveedores\/indicadoresOrden'/.test(acrePage), true);
+check('★ el listado de compras usa ChipPago y ChipGarantia',
+  /ChipPago/.test(provPage) && /ChipGarantia/.test(provPage), true);
+// `sin_plazo` no es una alerta: pintarlo llenaría la lista de chips grises.
+check('★ sin plazo no pinta chip en la ficha',
+  /estado_pago !== 'sin_plazo'/.test(acrePage), true);
+// La garantía es opt-in y la pantalla lo respeta.
+check('★ el chip de garantía respeta el opt-in',
+  /garantiaActiva && c\.garantia_hasta/.test(provPage), true);
+
 console.log('\n' + '─'.repeat(62));
 if (fallos) { console.log(`✗ ${fallos} FALLO(S) de ${fallos + pasados}`); process.exit(1); }
 console.log(`✓ TODO OK — ${pasados} verificaciones`);
