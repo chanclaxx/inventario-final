@@ -250,6 +250,50 @@ check('★ si ya esta saldada no ofrece pagar otra vez', /yaSaldada/.test(listad
 check('el modal pide numero, fecha y plazo de la factura',
   /fecha_factura/.test(listado2) && /dias_plazo/.test(listado2), true);
 
+console.log('\n12. El detalle de una entrada');
+// MISMA trampa que costo el sintoma de produccion, ahora entre hermanas:
+// `/entradas/ordenes` tiene que declararse ANTES de `/entradas/:id`, o Express
+// resuelve la primera por la segunda con id="ordenes".
+const iOrdenes = fuenteRutas.indexOf("'/entradas/ordenes'");
+const iDetalle = fuenteRutas.indexOf("'/entradas/:id'");
+check('★ /entradas/ordenes se declara ANTES que /entradas/:id',
+  iOrdenes > 0 && iDetalle > 0 && iOrdenes < iDetalle, true);
+check('★ y las dos siguen antes de /:id',
+  iDetalle < fuenteRutas.indexOf("router.get('/:id'"), true);
+
+// El detalle es del bodeguero: no puede traer plata.
+const detalleRepo = fuenteRepo.slice(
+  fuenteRepo.indexOf('const findEntradaDetalle'),
+  fuenteRepo.indexOf('const marcarConfirmada'),
+);
+check('★ el detalle no selecciona precios',
+  !/precio_unitario|c\.total|costo/i.test(detalleRepo), true);
+check('★ pero sí trae la garantía de cada línea',
+  /garantia_dias/.test(detalleRepo) && /garantia_hasta/.test(detalleRepo), true);
+check('★ y el IMEI con su color y características',
+  /lc\.imei/.test(detalleRepo) && /se\.color/.test(detalleRepo) && /se\.caracteristicas/.test(detalleRepo), true);
+check('★ y la variante que llegó',
+  /va\.valor/.test(detalleRepo) && /ap\.valor/.test(detalleRepo), true);
+// Solo entradas: una compra de administración no se abre por esta puerta.
+check('★ solo abre entradas de bodega', /c\.es_entrada = TRUE/.test(detalleRepo), true);
+
+// El semáforo de garantía sale del MISMO helper que la procedencia y la
+// búsqueda por IMEI: si cada pantalla calculara el suyo, la misma unidad
+// saldría "vigente" en una y "por vencer" en otra.
+check('★ el semáforo usa el helper compartido',
+  /estadoGarantia/.test(fuenteService)
+  && /require\('\.\.\/procedencia\/procedencia\.service'\)/.test(fuenteService), true);
+// La feature de garantía es opt-in: apagada, la pantalla no finge un semáforo.
+check('★ respeta el opt-in de garantía',
+  /garantia_activa: cfg\.garantia_activa === true/.test(fuenteService), true);
+
+const listado3 = readFileSync(path.join(RAIZ, '../frontend/src/pages/entradas/EntradasPage.jsx'), 'utf8');
+check('★ el detalle se abre con doble clic', /onDoubleClick=\{\(\) => setDetalle/.test(listado3), true);
+check('★ y usa el ChipGarantia del resto del sistema',
+  /ChipGarantia/.test(listado3), true);
+check('si la garantía está apagada, dice dónde se enciende',
+  /Ajustes → Compras/.test(listado3), true);
+
 console.log('\n' + '─'.repeat(62));
 if (fallos) { console.log(`✗ ${fallos} FALLO(S) de ${fallos + pasados}`); process.exit(1); }
 console.log(`✓ TODO OK — ${pasados} verificaciones`);

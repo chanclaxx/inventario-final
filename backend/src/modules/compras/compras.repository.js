@@ -405,6 +405,52 @@ const findEntradas = async (sucursalId, negocioId, limit = 30) => {
   return rows;
 };
 
+// Detalle de una Entrada para el bodeguero. Deliberadamente SIN dinero: lleva
+// que llego, cuanto, de que variante, con que IMEI y hasta cuando responde el
+// proveedor. El recorte de costos actua ademas sobre la respuesta, pero lo
+// importante es que aqui ni siquiera se selecciona un precio.
+const findEntradaDetalle = async (compraId, negocioId) => {
+  const { rows: cab } = await pool.query(`
+    SELECT c.id, c.numero, c.fecha, c.factura_confirmada, c.estado, c.notas,
+           c.orden_compra_id, oc.numero AS orden_numero,
+           u.nombre AS recibida_por, su.nombre AS sucursal_nombre
+    FROM compras c
+    JOIN sucursales su ON su.id = c.sucursal_id
+    LEFT JOIN usuarios       u  ON u.id  = c.usuario_id
+    LEFT JOIN ordenes_compra oc ON oc.id = c.orden_compra_id
+    WHERE c.id = $1 AND su.negocio_id = $2 AND c.es_entrada = TRUE
+  `, [compraId, negocioId]);
+  if (!cab.length) return null;
+
+  const { rows: lineas } = await pool.query(`
+    SELECT lc.id, lc.nombre_producto, lc.imei, lc.cantidad, lc.cantidad_devuelta,
+           lc.garantia_dias, lc.orden_linea_id,
+           va.valor   AS variante_valor,  tva.nombre AS variante_tipo,
+           ap.valor   AS atributo_valor,  tap.nombre AS atributo_tipo,
+           s.color, s.caracteristicas,
+           (c.fecha AT TIME ZONE 'America/Bogota')::date + lc.garantia_dias AS garantia_hasta
+    FROM lineas_compra lc
+    JOIN compras c ON c.id = lc.compra_id
+    LEFT JOIN variantes_atributo   va  ON va.id  = lc.variante_id
+    LEFT JOIN tipos_caracteristica tva ON tva.id = va.tipo_id
+    LEFT JOIN atributos_producto   ap  ON ap.id  = lc.atributo_id
+    LEFT JOIN tipos_caracteristica tap ON tap.id = ap.tipo_id
+    LEFT JOIN LATERAL (
+      SELECT se.color, se.caracteristicas
+      FROM seriales se
+      JOIN productos_serial ps ON ps.id = se.producto_id
+      WHERE lc.imei IS NOT NULL
+        AND UPPER(TRIM(se.imei)) = UPPER(TRIM(lc.imei))
+        AND ps.sucursal_id = c.sucursal_id
+      ORDER BY se.id DESC LIMIT 1
+    ) s ON TRUE
+    WHERE lc.compra_id = $1
+    ORDER BY lc.id
+  `, [compraId]);
+
+  return { ...cab[0], lineas };
+};
+
 const marcarConfirmada = async (client, compraId) => {
   await client.query(
     'UPDATE compras SET factura_confirmada = TRUE WHERE id = $1',
@@ -420,7 +466,7 @@ const asignarProveedor = async (client, compraId, proveedorId) => {
 };
 
 module.exports = {
-  findOrdenesParaRecibir, findPorConfirmar, findEntradas, marcarConfirmada, asignarProveedor,
+  findOrdenesParaRecibir, findPorConfirmar, findEntradaDetalle, findEntradas, marcarConfirmada, asignarProveedor,
   findAll, findById, findByIdYNegocio,
   perteneceAlNegocio, findByProveedor,
   getLineas, create, insertarLinea,

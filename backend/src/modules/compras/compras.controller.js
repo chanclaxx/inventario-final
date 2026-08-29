@@ -102,6 +102,13 @@ const getEntradas = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+const getEntradaDetalle = async (req, res, next) => {
+  try {
+    const data = await service.getEntradaDetalle(req.params.id, req.user.negocio_id);
+    res.json({ ok: true, data: await costos.recortarSiToca(req.user, data, { anidados: ['lineas'] }) });
+  } catch (err) { next(err); }
+};
+
 const getOrdenesParaRecibir = async (req, res, next) => {
   try {
     const sucursalId = req.todasSucursales ? null : req.sucursal_id;
@@ -235,5 +242,5 @@ const editarPreciosCompra = async (req, res, next) => {
 };
 
 module.exports = { getCompras, getCompraById, getComprasByProveedor, registrarCompra, getComprasPaginadas, cancelarCompra, devolverCompra, editarPreciosCompra,
-  registrarEntrada, getEntradas, getOrdenesParaRecibir, getPorConfirmar, confirmarEntrada,
+  registrarEntrada, getEntradas, getEntradaDetalle, getOrdenesParaRecibir, getPorConfirmar, confirmarEntrada,
 };

@@ -4,9 +4,10 @@ import {
   PackagePlus, Check, Clock, ClipboardList, FileCheck2, ShieldCheck,
 } from 'lucide-react';
 import {
-  getEntradas, getOrdenesParaRecibir,
+  getEntradas, getOrdenesParaRecibir, getEntradaDetalle,
   getEntradasPorConfirmar, confirmarEntrada,
 } from '../../api/entradas.api';
+import { ChipGarantia } from '../proveedores/indicadoresOrden';
 import { VistaEntrada } from './VistaEntrada';
 import { getCompraById }  from '../../api/compras.api';
 import { getProveedores } from '../../api/proveedores.api';
@@ -44,6 +45,122 @@ import { useSucursalKey }  from '../../hooks/useSucursalKey';
 
 const norm = (r) => (Array.isArray(r) ? r : (Array.isArray(r?.items) ? r.items : []));
 
+
+// ── Qué llegó exactamente en una entrada ────────────────────────────────────
+//
+// Se abre con doble clic, igual que la ficha de un producto en el inventario.
+// No lleva una sola cifra de dinero: responde "qué entró y hasta cuándo responde
+// el proveedor", que son las dos preguntas que se hacen después.
+function ModalDetalleEntrada({ entradaId, onCerrar }) {
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ['entrada-detalle-bodega', entradaId],
+    queryFn:  () => getEntradaDetalle(entradaId).then((r) => r.data.data),
+  });
+
+  const etiquetaNodo = (l) => {
+    const partes = [];
+    if (l.atributo_valor) partes.push(l.atributo_tipo ? `${l.atributo_tipo}: ${l.atributo_valor}` : l.atributo_valor);
+    if (l.variante_valor) partes.push(l.variante_tipo ? `${l.variante_tipo}: ${l.variante_valor}` : l.variante_valor);
+    return partes.join(' · ');
+  };
+
+  return (
+    <Modal open onClose={onCerrar}
+      title={data ? `Entrada #${String(data.numero ?? data.id).padStart(4, '0')}` : 'Entrada'}
+      size="md">
+      {isLoading ? <Spinner className="py-12" /> : isError || !data ? (
+        <p className="text-sm text-red-600 py-6 text-center">No se pudo cargar el detalle.</p>
+      ) : (
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500
+            bg-gray-50 border border-gray-100 rounded-xl px-3 py-2.5">
+            <span>{formatFechaHora(data.fecha)}</span>
+            {data.recibida_por && <span>· recibida por {data.recibida_por}</span>}
+            {data.sucursal_nombre && <span>· {data.sucursal_nombre}</span>}
+            {data.orden_numero && <span>· OC-{String(data.orden_numero).padStart(4, '0')}</span>}
+            {data.factura_confirmada
+              ? <Badge variant="green">confirmada</Badge>
+              : <span className="flex items-center gap-1 text-amber-600"><Clock size={11} /> por confirmar</span>}
+          </div>
+
+          {data.notas && (
+            <p className="text-sm text-gray-600 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2">
+              {data.notas}
+            </p>
+          )}
+
+          <div className="flex flex-col gap-1.5">
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">
+              Qué llegó ({data.lineas.length} línea(s))
+            </p>
+            <div className="flex flex-col gap-1.5 max-h-96 overflow-y-auto pr-1">
+              {data.lineas.map((l) => (
+                <div key={l.id} className="border border-gray-100 rounded-xl px-3 py-2 flex flex-col gap-1">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="text-sm text-gray-800 break-words">{l.nombre_producto}</p>
+                      {etiquetaNodo(l) && (
+                        <p className="text-xs text-purple-600">{etiquetaNodo(l)}</p>
+                      )}
+                      {l.imei && (
+                        <p className="text-xs font-mono text-gray-500 break-all">{l.imei}</p>
+                      )}
+                      {(l.color || (l.caracteristicas && Object.keys(l.caracteristicas).length > 0)) && (
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {l.color && (
+                            <span className="text-[11px] bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded-md">
+                              {l.color}
+                            </span>
+                          )}
+                          {Object.entries(l.caracteristicas || {}).map(([k, v]) => v && (
+                            <span key={k} className="text-[11px] bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded-md">
+                              <span className="font-medium">{k}:</span> {v}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <span className="text-sm font-semibold text-gray-700 tabular-nums flex-shrink-0">
+                      {l.cantidad}
+                      {Number(l.cantidad_devuelta) > 0 && (
+                        <span className="text-xs text-orange-500 font-normal"> −{l.cantidad_devuelta}</span>
+                      )}
+                    </span>
+                  </div>
+
+                  {/* La garantía del proveedor, línea por línea. El plazo se
+                      congeló al entrar la mercancía; el vencimiento se deriva. */}
+                  {data.garantia_activa && (
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <ChipGarantia estado={l.estado} dias={l.dias_restantes} />
+                      {l.garantia_hasta && (
+                        <span className="text-[11px] text-gray-400">
+                          hasta {String(l.garantia_hasta).slice(0, 10)}
+                          {l.garantia_dias ? ` · ${l.garantia_dias} días` : ''}
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Si la feature está apagada no se finge que existe: se dice dónde
+              se enciende, en vez de mostrar un semáforo vacío. */}
+          {!data.garantia_activa && (
+            <p className="text-xs text-gray-400 bg-gray-50 border border-gray-100 rounded-xl px-3 py-2">
+              La garantía de proveedor está desactivada. Se enciende en
+              Ajustes → Compras → «Garantía del proveedor».
+            </p>
+          )}
+
+          <Button variant="secondary" onClick={onCerrar}>Cerrar</Button>
+        </div>
+      )}
+    </Modal>
+  );
+}
 
 // ── Confirmar una entrada contra la factura del proveedor ───────────────────
 //
@@ -300,6 +417,7 @@ export default function EntradasPage() {
   const [aviso, setAviso] = useState('');
   const [busca, setBusca] = useState('');
   const [confirmando, setConfirmando] = useState(null);
+  const [detalle,     setDetalle]     = useState(null);
   const { sucursalKey, sucursalLista } = useSucursalKey();
   const queryClient = useQueryClient();
   const { esAdminNegocio } = useAuth();
@@ -374,8 +492,10 @@ export default function EntradasPage() {
           </p>
           {porConfirmar.map((e) => (
             <div key={e.id}
+              onDoubleClick={() => setDetalle(e.id)}
+              title="Doble clic para ver qué llegó"
               className="flex items-center justify-between gap-3 p-3 rounded-xl
-                border border-amber-200 bg-amber-50/50">
+                border border-amber-200 bg-amber-50/50 cursor-pointer">
               <div className="min-w-0">
                 <p className="text-sm font-semibold text-gray-800">
                   Entrada #{String(e.numero ?? e.id).padStart(4, '0')}
@@ -415,6 +535,10 @@ export default function EntradasPage() {
             </div>
           ))}
         </div>
+      )}
+
+      {detalle && (
+        <ModalDetalleEntrada entradaId={detalle} onCerrar={() => setDetalle(null)} />
       )}
 
       {confirmando && (
@@ -493,8 +617,11 @@ export default function EntradasPage() {
           </p>
         ) : entradasFiltradas.map((e) => (
           <div key={e.id}
+            onDoubleClick={() => setDetalle(e.id)}
+            title="Doble clic para ver qué llegó"
             className="flex items-center justify-between gap-3 p-3 rounded-xl
-              border border-gray-100 bg-white">
+              border border-gray-100 bg-white cursor-pointer hover:border-green-200
+              transition-colors">
             <div className="min-w-0">
               <p className="text-sm font-semibold text-gray-800">
                 Entrada #{String(e.numero ?? e.id).padStart(4, '0')}

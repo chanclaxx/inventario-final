@@ -48,6 +48,8 @@ const validarEntrada = [
 
 router.get ('/entradas',         requireModulo('inventario'), requireNivel('supervisor'), ctrl.getEntradas);
 router.get ('/entradas/ordenes', requireModulo('inventario'), requireNivel('supervisor'), ctrl.getOrdenesParaRecibir);
+// El detalle: que llego exactamente. Va antes de `/:id` como todas las de aqui.
+router.get ('/entradas/:id', requireModulo('inventario'), requireNivel('supervisor'), ctrl.getEntradaDetalle);
 router.post('/entradas',         requireModulo('inventario'), requireNivel('supervisor'),
   validarEntrada, validate, ctrl.registrarEntrada);
 

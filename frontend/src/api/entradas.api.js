@@ -12,6 +12,9 @@ import api from './axios.config';
 /** Últimas entradas registradas en la sucursal. */
 export const getEntradas = () => api.get('/compras/entradas');
 
+/** Qué llegó exactamente en una entrada: líneas, IMEI, variante y garantía. */
+export const getEntradaDetalle = (id) => api.get(`/compras/entradas/${id}`);
+
 /** Órdenes emitidas con unidades pendientes de recibir. Sin proveedor ni valores. */
 export const getOrdenesParaRecibir = () => api.get('/compras/entradas/ordenes');
 

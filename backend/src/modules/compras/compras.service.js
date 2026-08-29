@@ -1260,6 +1260,30 @@ const getOrdenesParaRecibir = (sucursalId, negocioId) =>
 const getEntradas = (sucursalId, negocioId) =>
   comprasRepo.findEntradas(sucursalId, negocioId);
 
+// El detalle de una entrada, con el semaforo de garantia ya resuelto. Se usa el
+// MISMO helper que la procedencia y la busqueda por IMEI: si cada pantalla
+// calculara su estado, la misma unidad saldria "vigente" en una y "por vencer"
+// en otra.
+const getEntradaDetalle = async (compraId, negocioId) => {
+  const detalle = await comprasRepo.findEntradaDetalle(compraId, negocioId);
+  if (!detalle) throw { status: 404, message: 'Entrada no encontrada' };
+
+  const { estadoGarantia } = require('../procedencia/procedencia.service');
+  const { getConfigOrdenes } = require('../../middlewares/ordenesCompra.middleware');
+  const cfg = await getConfigOrdenes(negocioId);
+
+  return {
+    ...detalle,
+    // La feature de garantia es opt-in: si el negocio no la encendio, la
+    // pantalla no pinta el semaforo (pero el plazo sigue guardado).
+    garantia_activa: cfg.garantia_activa === true,
+    lineas: detalle.lineas.map((l) => ({
+      ...l,
+      ...estadoGarantia(l.garantia_hasta, cfg.garantia_dias_aviso),
+    })),
+  };
+};
+
 const getPorConfirmar = (sucursalId, negocioId) =>
   comprasRepo.findPorConfirmar(sucursalId, negocioId);
 
@@ -1432,4 +1456,4 @@ const confirmarEntrada = async (negocioId, compraId, {
   return resultado;
 };
 
-module.exports = { getCompras, getCompraById, getComprasByProveedor, registrarCompra, getComprasPaginadas, cancelarCompra, devolverCompra, editarPreciosCompra, registrarEntrada, getEntradas, getOrdenesParaRecibir, getPorConfirmar, confirmarEntrada };
+module.exports = { getCompras, getCompraById, getComprasByProveedor, registrarCompra, getComprasPaginadas, cancelarCompra, devolverCompra, editarPreciosCompra, registrarEntrada, getEntradas, getEntradaDetalle, getOrdenesParaRecibir, getPorConfirmar, confirmarEntrada };
