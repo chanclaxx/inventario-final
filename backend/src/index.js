@@ -83,8 +83,19 @@ app.use('/api/', rateLimit({
 }));
 
 // ── Ruta de salud ─────────────────────────────────────
+// El instante en que arranco ESTE proceso. Sirve para responder de un vistazo
+// la pregunta que aparece cada vez que algo "no funciona despues de desplegar":
+// ¿el backend que esta corriendo tiene ya el codigo nuevo?
+const ARRANCADO_EN = new Date().toISOString();
+
 app.get('/api/health', (req, res) => {
-  res.json({ ok: true, message: 'Servidor funcionando correctamente' });
+  res.json({
+    ok: true,
+    message: 'Servidor funcionando correctamente',
+    // Railway expone el commit desplegado; en local no existe y sale null.
+    commit:      (process.env.RAILWAY_GIT_COMMIT_SHA || '').slice(0, 7) || null,
+    arrancado_en: ARRANCADO_EN,
+  });
 });
 
 // ── Rutas públicas (sin auth) ─────────────────────────
@@ -133,6 +144,24 @@ app.use('/api/borradores',           protegida, require('./modules/borradores/bo
 
 // ── Rutas de superadmin (sin protegida) ───────────────
 app.use('/api/superadmin', require('./modules/superadmin/superadmin.routes'));
+
+// ── Ruta de /api que no existe ────────────────────────
+//
+// Sin esto, Express responde su HTML por defecto ("Cannot GET /api/...") con
+// status 404. El frontend recibe un cuerpo sin `error`, muestra un mensaje
+// generico, y no hay forma de distinguir "esta ruta no existe en el backend
+// desplegado" de "el recurso no se encontro" — que es exactamente lo que costo
+// una tarde de diagnostico con el detalle de una entrada.
+//
+// Va DESPUES de todas las rutas y ANTES del manejador de errores. Solo /api:
+// el resto (assets, healthchecks de la plataforma) sigue como estaba.
+app.use('/api', (req, res) => {
+  res.status(404).json({
+    ok: false,
+    error: `La ruta ${req.method} ${req.originalUrl.split('?')[0]} no existe en este servidor.`,
+    code: 'RUTA_NO_EXISTE',
+  });
+});
 
 // ── Middleware de errores (siempre al final) ──────────
 app.use(errorHandler);

@@ -74,14 +74,26 @@ function ModalDetalleEntrada({ entradaId, onCerrar }) {
            navegador para saber qué pasó. Se muestra el motivo real, y para el
            404 se dice la causa más probable: la pantalla es más nueva que el
            backend que está corriendo. */
+        /* Dos 404 muy distintos: "esta ruta no existe en el backend que está
+           corriendo" (el despliegue va atrasado) y "no encontré esa entrada".
+           El backend los distingue con `code`, así que aquí no hay que adivinar
+           — adivinar fue justo lo que mandó a buscar el problema al sitio
+           equivocado la primera vez. */
         <div className="flex flex-col gap-2 py-6">
-          <p className="text-sm text-red-600">
-            {error?.response?.data?.error || 'No se pudo cargar el detalle.'}
-          </p>
-          {error?.response?.status === 404 && (
-            <p className="text-xs text-gray-500 bg-gray-50 border border-gray-100 rounded-xl px-3 py-2.5">
-              El servidor respondió 404. Si acabas de actualizar la aplicación,
-              el backend todavía no tiene esta pantalla: vuelve a desplegarlo.
+          {error?.response?.data?.code === 'RUTA_NO_EXISTE' ? (
+            <>
+              <p className="text-sm text-red-600">
+                El backend que está corriendo todavía no tiene esta pantalla.
+              </p>
+              <p className="text-xs text-gray-500 bg-gray-50 border border-gray-100 rounded-xl px-3 py-2.5">
+                Vuelve a desplegar el servidor. Para comprobar cuál está activo,
+                abre <span className="font-mono">/api/health</span>: ahí sale el
+                commit y desde cuándo lleva arriba.
+              </p>
+            </>
+          ) : (
+            <p className="text-sm text-red-600">
+              {error?.response?.data?.error || 'No se pudo cargar el detalle.'}
             </p>
           )}
           {error?.response?.status && (
