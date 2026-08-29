@@ -45,6 +45,15 @@ ALTER TABLE compras
 ALTER TABLE compras
   ADD COLUMN IF NOT EXISTS es_entrada BOOLEAN NOT NULL DEFAULT FALSE;
 
+-- Backfill de las entradas que se registraron antes de existir esta columna.
+-- Conservador a proposito: una compra normal, y tambien una a credito desde
+-- Proveedores, nacen con factura_confirmada = TRUE. Solo una Entrada de bodega
+-- tiene las dos banderas en FALSE.
+UPDATE compras SET es_entrada = TRUE
+ WHERE es_entrada = FALSE
+   AND factura_confirmada = FALSE
+   AND registrar_en_caja  = FALSE;
+
 -- Sin orden previa no hay proveedor que asignar: lo pone administración al
 -- confirmar. `registrarCompra` ya trata el proveedor como opcional en todo su
 -- cuerpo (`if (proveedor_id)` alrededor del bloque del acreedor); lo único que

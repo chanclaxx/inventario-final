@@ -413,12 +413,17 @@ const findEntradaDetalle = async (compraId, negocioId) => {
   const { rows: cab } = await pool.query(`
     SELECT c.id, c.numero, c.fecha, c.factura_confirmada, c.estado, c.notas,
            c.orden_compra_id, oc.numero AS orden_numero,
+           c.es_entrada,
            u.nombre AS recibida_por, su.nombre AS sucursal_nombre
     FROM compras c
     JOIN sucursales su ON su.id = c.sucursal_id
     LEFT JOIN usuarios       u  ON u.id  = c.usuario_id
     LEFT JOIN ordenes_compra oc ON oc.id = c.orden_compra_id
-    WHERE c.id = $1 AND su.negocio_id = $2 AND c.es_entrada = TRUE
+    -- Sin filtrar por es_entrada: la bandeja de administracion tampoco lo
+    -- hace, y tres consultas que muestran el mismo documento no pueden estar en
+    -- desacuerdo sobre cual existe. Si la lista o la bandeja te lo enseñan, el
+    -- detalle tiene que poder abrirlo. No filtra dinero porque no lo selecciona.
+    WHERE c.id = $1 AND su.negocio_id = $2
   `, [compraId, negocioId]);
   if (!cab.length) return null;
 

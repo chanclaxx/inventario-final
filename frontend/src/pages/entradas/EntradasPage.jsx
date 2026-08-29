@@ -52,9 +52,10 @@ const norm = (r) => (Array.isArray(r) ? r : (Array.isArray(r?.items) ? r.items :
 // No lleva una sola cifra de dinero: responde "qué entró y hasta cuándo responde
 // el proveedor", que son las dos preguntas que se hacen después.
 function ModalDetalleEntrada({ entradaId, onCerrar }) {
-  const { data, isLoading, isError } = useQuery({
+  const { data, isLoading, isError, error } = useQuery({
     queryKey: ['entrada-detalle-bodega', entradaId],
     queryFn:  () => getEntradaDetalle(entradaId).then((r) => r.data.data),
+    retry: false,
   });
 
   const etiquetaNodo = (l) => {
@@ -69,7 +70,25 @@ function ModalDetalleEntrada({ entradaId, onCerrar }) {
       title={data ? `Entrada #${String(data.numero ?? data.id).padStart(4, '0')}` : 'Entrada'}
       size="md">
       {isLoading ? <Spinner className="py-12" /> : isError || !data ? (
-        <p className="text-sm text-red-600 py-6 text-center">No se pudo cargar el detalle.</p>
+        /* Un "no se pudo cargar" a secas obliga a abrir la consola del
+           navegador para saber qué pasó. Se muestra el motivo real, y para el
+           404 se dice la causa más probable: la pantalla es más nueva que el
+           backend que está corriendo. */
+        <div className="flex flex-col gap-2 py-6">
+          <p className="text-sm text-red-600">
+            {error?.response?.data?.error || 'No se pudo cargar el detalle.'}
+          </p>
+          {error?.response?.status === 404 && (
+            <p className="text-xs text-gray-500 bg-gray-50 border border-gray-100 rounded-xl px-3 py-2.5">
+              El servidor respondió 404. Si acabas de actualizar la aplicación,
+              el backend todavía no tiene esta pantalla: vuelve a desplegarlo.
+            </p>
+          )}
+          {error?.response?.status && (
+            <p className="text-[11px] text-gray-400">Código {error.response.status}</p>
+          )}
+          <Button variant="secondary" onClick={onCerrar}>Cerrar</Button>
+        </div>
       ) : (
         <div className="flex flex-col gap-3">
           <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500

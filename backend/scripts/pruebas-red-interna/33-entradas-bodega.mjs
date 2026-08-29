@@ -274,8 +274,15 @@ check('★ y el IMEI con su color y características',
   /lc\.imei/.test(detalleRepo) && /se\.color/.test(detalleRepo) && /se\.caracteristicas/.test(detalleRepo), true);
 check('★ y la variante que llegó',
   /va\.valor/.test(detalleRepo) && /ap\.valor/.test(detalleRepo), true);
-// Solo entradas: una compra de administración no se abre por esta puerta.
-check('★ solo abre entradas de bodega', /c\.es_entrada = TRUE/.test(detalleRepo), true);
+// El detalle YA NO filtra por es_entrada, a proposito: la bandeja de
+// administracion tampoco lo hace, y tres vistas del MISMO documento no pueden
+// discrepar sobre cuales existen — una entrada visible en la bandeja daba 404 al
+// abrirla, y ese fue el sintoma reportado. Lo que lo hace seguro es que esta
+// acotado al negocio y que no selecciona una sola cifra de dinero.
+check('★ el detalle esta acotado al negocio',
+  /su\.negocio_id = \$2/.test(detalleRepo), true);
+check('★ y NO filtra por es_entrada (coherente con la bandeja)',
+  /es_entrada = TRUE/.test(detalleRepo), false);
 
 // El semáforo de garantía sale del MISMO helper que la procedencia y la
 // búsqueda por IMEI: si cada pantalla calculara el suyo, la misma unidad

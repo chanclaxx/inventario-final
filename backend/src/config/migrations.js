@@ -200,6 +200,16 @@ const aplicarMigraciones = async (client) => {
     -- desde Proveedores daría los mismos síntomas sin ser una entrada.
     ALTER TABLE compras
       ADD COLUMN IF NOT EXISTS es_entrada BOOLEAN NOT NULL DEFAULT FALSE;
+    -- Backfill: las entradas registradas ANTES de que existiera esta columna
+    -- quedaron en FALSE, asi que desaparecian de la lista del bodeguero y su
+    -- detalle respondia 404 — aunque si salian en la bandeja de administracion,
+    -- que no filtraba. El predicado es conservador a proposito: una compra
+    -- normal nace con factura_confirmada = TRUE, y una a credito registrada
+    -- desde Proveedores tambien; solo una Entrada tiene las DOS en FALSE.
+    UPDATE compras SET es_entrada = TRUE
+     WHERE es_entrada = FALSE
+       AND factura_confirmada = FALSE
+       AND registrar_en_caja  = FALSE;
     ALTER TABLE compras ALTER COLUMN proveedor_id DROP NOT NULL;
     CREATE INDEX IF NOT EXISTS idx_compras_por_confirmar
       ON compras (sucursal_id, fecha)

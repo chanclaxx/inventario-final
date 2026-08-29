@@ -253,6 +253,63 @@ check('★ el listado muestra el resumen de la entrada',
   /e\.resumen/.test(listado),
   'con solo el número de documento hay que abrirlas una por una');
 
+// ── Backticks dentro de un template literal de SQL ──────────────────────────
+//
+// Escribir un comentario SQL con `algo` dentro de un pool.query(`...`) CIERRA la
+// cadena de JavaScript y el archivo deja de compilar. Node lo reporta como
+// "missing ) after argument list" en una linea que no tiene nada que ver, asi
+// que se pierde tiempo buscando en el sitio equivocado. Me paso dos veces en el
+// mismo archivo.
+//
+// El chequeo es tonto a proposito: dentro de un template literal no puede haber
+// un backtick sin escapar, asi que basta con que el total sea PAR y que ningun
+// comentario SQL (-- ...) contenga uno.
+console.log('\n6. Backticks en el SQL del backend');
+const BACK = path.resolve(SRC, '../../backend/src');
+const jsBackend = [];
+(function recorrerJs(dir) {
+  for (const entrada of readdirSync(dir)) {
+    const f = path.join(dir, entrada);
+    if (statSync(f).isDirectory()) recorrerJs(f);
+    else if (f.endsWith('.js')) jsBackend.push(f);
+  }
+})(BACK);
+
+const conBacktickEnSql = [];
+for (const f of jsBackend) {
+  const src = readFileSync(f, 'utf8');
+  for (const [i, linea] of src.split('\n').entries()) {
+    const comentario = linea.match(/--\s.*$/);
+    if (comentario && comentario[0].includes('`')) {
+      conBacktickEnSql.push(`${path.relative(BACK, f).replace(/\\/g, '/')}:${i + 1}`);
+    }
+  }
+}
+check('★ ningún comentario SQL lleva backtick',
+  conBacktickEnSql.length === 0, conBacktickEnSql.join('\n      '));
+
+const impares = jsBackend.filter((f) => (readFileSync(f, 'utf8').match(/`/g) || []).length % 2 !== 0);
+check('★ ningún archivo del backend tiene backticks impares',
+  impares.length === 0, impares.map((f) => path.relative(BACK, f)).join('\n      '));
+
+// ── Las tres consultas de una entrada tienen que estar de acuerdo ───────────
+// La bandeja de administracion no filtraba por `es_entrada` y la lista y el
+// detalle si. Resultado: una entrada visible en la bandeja daba 404 al abrirla.
+// Tres consultas que muestran el MISMO documento no pueden discrepar sobre
+// cuales existen.
+console.log('\n7. Coherencia entre las vistas de una entrada');
+const repoSrc = readFileSync(path.join(BACK, 'modules/compras/compras.repository.js'), 'utf8');
+const trozo = (desde, hasta) => repoSrc.slice(repoSrc.indexOf(desde), repoSrc.indexOf(hasta));
+const bandeja = trozo('const findPorConfirmar', 'const findEntradas');
+const detalle = trozo('const findEntradaDetalle', 'const marcarConfirmada');
+check('★ si la bandeja no filtra por es_entrada, el detalle tampoco',
+  /es_entrada/.test(bandeja) === /es_entrada = TRUE/.test(detalle),
+  'una entrada visible en una vista debe poder abrirse desde la otra');
+// Y la migracion repara las que quedaron marcadas mal.
+const migr = readFileSync(path.join(BACK, 'config/migrations.js'), 'utf8');
+check('★ la migración rellena las entradas viejas',
+  /UPDATE compras SET es_entrada = TRUE/.test(migr), true);
+
 console.log('\n' + '─'.repeat(62));
 if (fallos) { console.log(`✗ ${fallos} FALLO(S) de ${fallos + pasados}`); process.exit(1); }
 console.log(`✓ TODO OK — ${pasados} verificaciones`);
