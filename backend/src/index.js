@@ -126,6 +126,7 @@ app.use('/api/garantias',          protegida, require('./modules/garantias/garan
 app.use('/api/config',             protegida, require('./modules/config/config.routes'));
 app.use('/api/importacion',        protegida, require('./modules/importacion/importacion.routes'));
 app.use('/api/inventario',         protegida, require('./modules/inventario/inventario.export.routes'));
+app.use('/api/etiquetas',          protegida, require('./modules/etiquetas/etiquetas.routes'));
 app.use('/api/sucursales',         protegida, require('./modules/sucursales/sucursales.routes'));
 app.use('/api/lineas',             protegida, require('./modules/lineas/lineas.routes'));
 app.use('/api/domiciliarios',      protegida, require('./modules/domiciliarios/domiciliarios.routes'));

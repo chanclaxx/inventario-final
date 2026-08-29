@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import {
-  Package, ShoppingBag, Plus, Download,
+  Package, ShoppingBag, Plus, Download, Tags,
   ShoppingCart, ChevronUp, Upload, AlertCircle, X, Globe,
 } from 'lucide-react';
-import { useQueryClient }          from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ProductosSerial }         from './ProductosSerial';
 import { ProductosCantidad }       from './ProductosCantidad';
 import { Carrito }                 from './Carrito';
@@ -20,6 +20,8 @@ import { TabCatalogo }             from './TabCatalogo';
 import { formatCOP }               from '../../utils/formatters';
 import { useBorradores, useSincronizarReservas } from '../../hooks/useBorradores';
 import { ModalConflictoBorrador }  from './ModalConflictoBorrador';
+import { ModalEtiquetas }          from './ModalEtiquetas';
+import api                         from '../../api/axios.config';
 
 const TABS = [
   { id: 'serial',   label: 'Con Serial',   icon: Package    },
@@ -40,6 +42,7 @@ export default function InventarioPage() {
   const [modalExportar,  setModalExportar]  = useState(false);
   const [carritoAbierto, setCarritoAbierto] = useState(false);
   const [modalImportar,  setModalImportar]  = useState(false);
+  const [modalEtiquetas, setModalEtiquetas] = useState(false);
 
   const { puedeExportarInventario, esSucursalVista } = useAuth();
   const sucursalActiva = useSucursalStore((s) => s.sucursalActiva);
@@ -60,6 +63,16 @@ export default function InventarioPage() {
   // agregarItem, así que lo heredan los nueve sitios que agregan al carrito
   // —incluidos traslado, despacho y devolución— sin tocar ninguno.
   useSincronizarReservas();
+
+  // Las etiquetas solo existen si el negocio encendió el código único: sin
+  // código no hay nada que imprimir. Mismo interruptor que ya usa la barra de
+  // escaneo de ProductosCantidad, así que el botón aparece y desaparece con ella.
+  const { data: configData } = useQuery({
+    queryKey: ['config'],
+    queryFn:  () => api.get('/config').then((r) => r.data.data),
+  });
+  const codigoActivo    = configData?.codigo_producto_activo === '1';
+  const ubicacionActiva = configData?.ubicacion_activa === '1';
 
   const esVistaGlobal   = useSucursalStore((s) => s.esVistaGlobal());
   const esUnicaSucursal = useSucursalStore((s) => s.esUnicaSucursal());
@@ -140,6 +153,14 @@ export default function InventarioPage() {
                   title="Descargar inventario completo en Excel">
                   <Download size={16} />
                   <span className="hidden sm:inline">Exportar Excel</span>
+                </Button>
+              )}
+
+              {codigoActivo && tabActiva === 'cantidad' && (
+                <Button size="sm" variant="secondary" onClick={() => setModalEtiquetas(true)}
+                  title="Imprimir códigos de barras o QR para etiquetar la mercancía">
+                  <Tags size={16} />
+                  <span className="hidden sm:inline">Etiquetas</span>
                 </Button>
               )}
 
@@ -286,6 +307,14 @@ export default function InventarioPage() {
       )}
       {modalImportar && !bloquearCreacion && (
         <ModalImportarInventario onClose={handleCerrarModalImportar} />
+      )}
+      {/* Se monta solo cuando se abre: así vuelve limpio cada vez (filtros,
+          marcados y vista previa) sin tener que reiniciarlo a mano. */}
+      {modalEtiquetas && (
+        <ModalEtiquetas
+          ubicacionActiva={ubicacionActiva}
+          onClose={() => setModalEtiquetas(false)}
+        />
       )}
     </div>
   );

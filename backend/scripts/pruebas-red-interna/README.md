@@ -576,3 +576,34 @@ puede pasar es que el ABONO la mueva por su cuenta.
 > `historial_saldo_sucursal`, y ahí se descubrió que el fixture las declaraba con
 > `valor`/`tipo` y sin el índice único — columnas que **no existen** en
 > producción. Ya están corregidas en `esquema-completo.sql`.
+
+
+### `35-etiquetas.mjs` — 70 verificaciones
+
+Etiquetas imprimibles (código de barras y QR) de los productos por cantidad.
+
+**Un código de barras mal generado no se ve mal.** Se ve perfecto, se imprime
+perfecto, se pega en 400 productos y no escanea — o peor, escanea otra cosa. No
+hay forma de detectarlo mirando el PDF, así que la sección 1 hace lo único que
+sirve: un **decodificador Code 128 independiente**, escrito desde el estándar y
+no desde el codificador, que lee de vuelta lo generado y lo compara contra el
+texto original. Son 974 códigos: los catorce casos límite a mano (un carácter,
+ceros a la izquierda, corridas impares de dígitos en medio del texto, todo
+numérico, puntuación) y un barrido de 960.
+
+Las otras dos cosas que solo se descubren cuando ya se gastó la plancha
+adhesiva son la **retícula** (sección 8: que ninguna casilla se salga de su
+página — ahí se cazó que ocho filas de 37,1 mm no caben en una A4) y el **ancho
+del módulo** (sección 5: por debajo de 0,25 mm el lector empieza a fallar de
+forma intermitente, que es peor que fallar siempre).
+
+La sección 6 sostiene la regla de diseño: cuando no cabe todo se sacrifica el
+TEXTO y jamás el símbolo, y el código legible no se cae nunca. La 10 genera los
+22 PDF de verdad (11 formatos × 2 simbologías); ahí se cazó que empezar en media
+plancha (`desde > 1`) dejaba el documento sin ninguna página.
+
+Las secciones **11 y 12 corren contra Postgres** (PGlite) porque el SQL solo
+falla al ejecutarse: la regla del nodo HOJA, la herencia de precio, el
+aislamiento entre negocios, y la asignación masiva de códigos —que no puede
+pisar uno existente, tiene que heredar de la otra sede en vez de inventar, y
+tiene que propagar—. Se omiten solas, con un aviso, si PGlite no está instalado.

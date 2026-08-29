@@ -40,7 +40,10 @@ export default defineConfig({
             // Inventario va aquí por otro motivo: la exportación devuelve varios MB y
             // guardarlos en CacheStorage llena la cuota del navegador y hace fallar la
             // descarga. Además el inventario cambia con cada venta, no sirve cacheado.
-            urlPattern: /^https:\/\/inventario-final-production\.up\.railway\.app\/api\/(reportes|facturas|dashboard|tesoreria|inventario)/i,
+            // Etiquetas por las dos razones a la vez: el PDF pesa, y la lista de nodos
+            // cacheada 5 minutos seguiría diciendo "sin código" justo después de que el
+            // usuario generara los códigos — que es la secuencia normal de la pantalla.
+            urlPattern: /^https:\/\/inventario-final-production\.up\.railway\.app\/api\/(reportes|facturas|dashboard|tesoreria|inventario|etiquetas)/i,
             handler: 'NetworkOnly',
           },
           {

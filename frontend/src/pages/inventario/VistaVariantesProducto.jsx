@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   ChevronLeft, ChevronRight, Plus, ShoppingCart,
-  Settings, Trash2, Layers,
+  Settings, Trash2, Layers, Tags,
 } from 'lucide-react';
 import {
   getArbol,
@@ -21,6 +21,7 @@ import { InputMoneda }    from '../../components/ui/InputMoneda';
 import useCarritoStore from '../../store/carritoStore';
 import { ChipApartado } from './ChipApartado';
 import { usePuedeVerCostos } from '../../hooks/usePuedeVerCostos';
+import { ModalEtiquetas } from './ModalEtiquetas';
 
 function labelNodo(nodo) {
   return nodo.tipo_nombre ? `${nodo.tipo_nombre}: ${nodo.valor}` : nodo.valor;
@@ -206,6 +207,10 @@ function ModalNodo({ open, onClose, titulo, tipos = [], datoInicial, onGuardar, 
 function TarjetaNodo({
   nodo, tieneHijos, esAdmin, puedeVerCosto,
   onDrillDown, onAgregar, onEditar, onReducir,
+  // Solo llega en los nodos HOJA con código: la etiqueta va pegada a la
+  // mercancía, y un contenedor (una talla que a su vez tiene colores) no es una
+  // cosa que exista en el estante.
+  onEtiquetar,
   precioPadre,
   // La tarjeta sirve tanto para atributos como para variantes, y cada uno arma
   // su clave de carrito distinto. La manda quien la usa, que es el único que
@@ -248,6 +253,15 @@ function TarjetaNodo({
           )}
         </div>
         <div className="flex items-center gap-0.5 flex-shrink-0">
+          {onEtiquetar && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onEtiquetar(); }}
+              className="p-1.5 rounded-lg text-gray-300 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+              title="Imprimir etiqueta"
+            >
+              <Tags size={13} />
+            </button>
+          )}
           {esAdmin && (
             <button
               onClick={(e) => { e.stopPropagation(); onEditar(); }}
@@ -338,6 +352,20 @@ function TarjetaNodo({
 // ─── Componente principal ─────────────────────────────────────────────────────
 export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose, ajusteStockSinVariantes = false, codigoActivo = false }) {
   const queryClient = useQueryClient();
+
+  // Etiqueta de UN nodo. `nodoInicial` viaja con la misma forma que devuelve
+  // `/etiquetas/nodos`, para que el modal no tenga que distinguir de dónde vino.
+  const [nodoEtiqueta, setNodoEtiqueta] = useState(null);
+  const abrirEtiqueta = (nodo, nivel, atributoPadre = null) => setNodoEtiqueta({
+    nivel,
+    producto_id: producto.id,
+    atributo_id: nivel === 'atributo' ? nodo.id : (atributoPadre?.id ?? null),
+    variante_id: nivel === 'variante' ? nodo.id : null,
+    nombre: producto.nombre,
+    variante_label: nivel === 'variante' ? `${atributoPadre?.valor} / ${nodo.valor}` : nodo.valor,
+    codigo: nodo.codigo,
+    stock:  nodo.stock,
+  });
   const agregarItem = useCarritoStore((s) => s.agregarItem);
 
   // `esAdmin` aquí significa "puede administrar el catálogo", que NO es lo mismo
@@ -553,6 +581,9 @@ export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose,
                 onAgregar={() => handleAgregarVariante(v)}
                 onEditar={() => { setErrorM(''); setModalNodo({ modo: 'editar-var', dato: v }); }}
                 onReducir={() => abrirReducir(v, 'variante')}
+                onEtiquetar={codigoActivo && v.codigo
+                  ? () => abrirEtiqueta(v, 'variante', atributoSel)
+                  : null}
               />
             ))}
             {esAdmin && (
@@ -616,6 +647,10 @@ export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose,
             }
           />
         )}
+
+        {nodoEtiqueta && (
+          <ModalEtiquetas nodoInicial={nodoEtiqueta} onClose={() => setNodoEtiqueta(null)} />
+        )}
       </div>
     );
   }
@@ -673,6 +708,19 @@ export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose,
           <p className="text-sm text-gray-400 text-center">
             Este producto no tiene atributos aún.
           </p>
+          {codigoActivo && producto.codigo && (
+            <Button
+              variant="secondary" size="sm"
+              onClick={() => setNodoEtiqueta({
+                nivel: 'producto',
+                producto_id: producto.id, atributo_id: null, variante_id: null,
+                nombre: producto.nombre, variante_label: null,
+                codigo: producto.codigo, stock: producto.stock,
+              })}
+            >
+              <Tags size={14} /> Imprimir etiqueta
+            </Button>
+          )}
           <Button
             className="w-full max-w-xs"
             disabled={producto.stock === 0}
@@ -732,6 +780,9 @@ export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose,
                 onAgregar={() => handleAgregarAtributo(atributo)}
                 onEditar={() => { setErrorM(''); setModalNodo({ modo: 'editar-atr', dato: atributo }); }}
                 onReducir={() => abrirReducir(atributo, 'atributo')}
+                onEtiquetar={codigoActivo && atributo.codigo && !tieneHijos
+                  ? () => abrirEtiqueta(atributo, 'atributo')
+                  : null}
               />
             );
           })}
@@ -820,6 +871,10 @@ export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose,
             />
           }
         />
+      )}
+
+      {nodoEtiqueta && (
+        <ModalEtiquetas nodoInicial={nodoEtiqueta} onClose={() => setNodoEtiqueta(null)} />
       )}
     </div>
   );

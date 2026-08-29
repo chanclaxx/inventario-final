@@ -1,6 +1,6 @@
 import { useState }                                      from 'react';
 import { useQuery, useMutation, useQueryClient }         from '@tanstack/react-query';
-import { ShoppingBag, Plus, AlertTriangle, Trash2, ChevronDown, ChevronRight, Layers, Settings, Barcode, MapPin } from 'lucide-react';
+import { ShoppingBag, Plus, AlertTriangle, Trash2, ChevronDown, ChevronRight, Layers, Settings, Barcode, MapPin, Tags } from 'lucide-react';
 import { getProductosCantidad, ajustarStockCantidad, getLineas } from '../../api/productos.api';
 import { SearchInput }                                   from '../../components/ui/SearchInput';
 import { BarraEscaneo }                                  from '../../components/ui/BarraEscaneo';
@@ -13,6 +13,7 @@ import useCarritoStore                                   from '../../store/carri
 import { ChipApartado }                                  from './ChipApartado';
 import { ModalPinEliminacion }                           from './ModalPinEliminacion';
 import { ModalEditarProductoCantidad }                   from './ModalEditarProductoCantidad';
+import { ModalEtiquetas }                                from './ModalEtiquetas';
 import { UltimaVentaBadge }                               from './AntiguedadInventario';
 import { NotaStrip }                                     from './PostItNota';
 import { UbicacionChip }                                 from '../../components/ui/InputUbicacion';
@@ -25,7 +26,7 @@ import useSucursalStore                                  from '../../store/sucur
 import api                                               from '../../api/axios.config';
 
 // ── Tarjeta de producto cantidad ──────────────────────────────────────────────
-function TarjetaProducto({ p, esAdmin, onAgregar, onReducir, onEditar, variantesActivo, onVerArbol }) {
+function TarjetaProducto({ p, esAdmin, onAgregar, onReducir, onEditar, variantesActivo, onVerArbol, onEtiquetar }) {
   const sinStock  = p.stock === 0;
   const stockBajo = !sinStock && p.stock_bajo;
 
@@ -91,6 +92,15 @@ function TarjetaProducto({ p, esAdmin, onAgregar, onReducir, onEditar, variantes
           )}
         </div>
         <div className="flex items-center gap-0.5 flex-shrink-0">
+          {onEtiquetar && p.codigo && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onEtiquetar(p); }}
+              className="p-1.5 rounded-lg text-gray-300 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+              title="Imprimir etiqueta"
+            >
+              <Tags size={15} />
+            </button>
+          )}
           {!variantesActivo && (
             <button
               onClick={(e) => { e.stopPropagation(); onReducir(e, p); }}
@@ -159,7 +169,7 @@ function TarjetaProducto({ p, esAdmin, onAgregar, onReducir, onEditar, variantes
 }
 
 // ── Acordeón de línea ─────────────────────────────────────────────────────────
-function AcordeonLinea({ nombre, productos, esAdmin, onAgregar, onReducir, onEditar, variantesActivo, onVerArbol }) {
+function AcordeonLinea({ nombre, productos, esAdmin, onAgregar, onReducir, onEditar, variantesActivo, onVerArbol, onEtiquetar }) {
   const [abierto, setAbierto] = useState(true);
 
   const alertas    = productos.filter((p) => p.stock_bajo || p.stock === 0).length;
@@ -204,6 +214,7 @@ function AcordeonLinea({ nombre, productos, esAdmin, onAgregar, onReducir, onEdi
               onEditar={onEditar}
               variantesActivo={variantesActivo}
               onVerArbol={onVerArbol}
+              onEtiquetar={onEtiquetar}
             />
           ))}
         </div>
@@ -226,6 +237,7 @@ export function ProductosCantidad() {
   const [cantidadReducir,  setCantidadReducir]  = useState('1');
   const [productoAEditar,  setProductoAEditar]  = useState(null);
   const [productoArbol,    setProductoArbol]    = useState(null);
+  const [productoEtiqueta, setProductoEtiqueta] = useState(null);
   // Filtro por sitio: el bodeguero quiere ver de una vez todo lo del Estante A-3.
   const [filtroUbicacion,  setFiltroUbicacion]  = useState('');
 
@@ -334,6 +346,14 @@ export function ProductosCantidad() {
     },
   });
 
+  // El botón de etiqueta solo sale cuando el PRODUCTO es el nodo escaneable: con
+  // variantes activas la etiqueta va en cada talla, y esas se imprimen desde el
+  // árbol (o en masa desde Inventario → Etiquetas). Ofrecerlo aquí imprimiría el
+  // código de un contenedor, que al escanearse obliga a elegir a mano.
+  const puedeEtiquetar = (codigoActivo && !variantesActivo)
+    ? (p) => { if (p.codigo) setProductoEtiqueta(p); }
+    : null;
+
   const handleAbrirReducir = (e, producto) => {
     e.stopPropagation();
     setProductoAReducir(producto);
@@ -433,6 +453,7 @@ export function ProductosCantidad() {
                 onEditar={soloLectura ? null : setProductoAEditar}
                 variantesActivo={variantesActivo}
                 onVerArbol={setProductoArbol}
+                onEtiquetar={puedeEtiquetar}
               />
             ))}
 
@@ -447,6 +468,7 @@ export function ProductosCantidad() {
                 onEditar={soloLectura ? null : setProductoAEditar}
                 variantesActivo={variantesActivo}
                 onVerArbol={setProductoArbol}
+                onEtiquetar={puedeEtiquetar}
               />
             )}
           </div>
@@ -468,6 +490,22 @@ export function ProductosCantidad() {
               onChange={(e) => setCantidadReducir(e.target.value)}
             />
           }
+        />
+      )}
+
+      {productoEtiqueta && (
+        <ModalEtiquetas
+          onClose={() => setProductoEtiqueta(null)}
+          nodoInicial={{
+            nivel: 'producto',
+            producto_id: productoEtiqueta.id,
+            atributo_id: null,
+            variante_id: null,
+            nombre: productoEtiqueta.nombre,
+            variante_label: null,
+            codigo: productoEtiqueta.codigo,
+            stock:  productoEtiqueta.stock,
+          }}
         />
       )}
 

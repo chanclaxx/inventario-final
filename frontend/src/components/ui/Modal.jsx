@@ -18,6 +18,9 @@ export function Modal({ open, onClose, title, children, size = 'md' }) {
     md: 'max-w-md',
     lg: 'max-w-lg',
     xl: 'max-w-2xl',
+    // Para pantallas de dos columnas (elegir a la izquierda, ver el resultado a
+    // la derecha). Clave nueva: los cuatro tamaños de arriba no cambian.
+    '2xl': 'max-w-5xl',
   };
 
   return (

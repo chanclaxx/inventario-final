@@ -403,6 +403,76 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > (`onProducto`): el carrito es una columna, no una pantalla, y lo explica en
 > vez de agregar a ciegas.
 
+> **Etiquetas imprimibles — el símbolo manda sobre el texto** (`etiquetas/`,
+> `utils/code128.util.js`, `utils/qr.util.js`): el código único ya se podía
+> escanear, pero no había forma de ponerlo FÍSICAMENTE sobre la mercancía. Esto
+> lo imprime, en masa y de a uno, con el mismo modal (`ModalEtiquetas`): abierto
+> desde una tarjeta llega con `nodoInicial` y se salta la selección; abierto
+> desde la barra de Inventario empieza por elegir qué etiquetar.
+> **Lo que va dentro del símbolo es el código pelado**, nunca una URL ni un JSON:
+> el lector de bodega es un teclado —teclea lo que lee y pulsa Enter— y ese texto
+> cae en `BarraEscaneo`, que ya lo resuelve con `GET /busqueda/escaneo/:codigo`
+> contra los tres niveles del árbol y contra los IMEI. Una URL rompería ese
+> camino (el lector escribiría "https://…" en el buscador) y obligaría a mantener
+> una segunda vía de resolución. Con el código pelado, el lector láser sobre el
+> código de barras, el lector 2D sobre el QR y la cámara de un celular acaban
+> todos en el mismo sitio.
+> **Se etiqueta el nodo HOJA**, igual que en el despacho de la red interna: si un
+> producto tiene atributos activos, "la correa" no existe en el estante —existen
+> la 38MM y la 42MM, cada una con su stock—, y el código del contenedor obliga a
+> elegir a mano, que es justo el trabajo que la etiqueta viene a quitar.
+> **Code 128 y QR se dibujan como VECTORES** (un rectángulo por barra, uno por
+> corrida de módulos), no como imagen: un PNG reescalado a 20 mm lleva los bordes
+> de las barras al píxel más cercano, y ese redondeo es justo el margen que un
+> lector láser necesita para distinguir una barra fina de una gruesa. El
+> codificador Code 128 está escrito a mano —cabe en un archivo, no tiene
+> dependencias y, sobre todo, **se puede decodificar de vuelta en la prueba**—;
+> el QR usa `qrcode-generator` (cero dependencias) solo por su matriz.
+> Alterna los juegos B y C porque no es cosmético: 8 dígitos ocupan 90 módulos en
+> B y 57 en C, y en una etiqueta de 38 mm eso es la diferencia entre escanear y
+> no escanear. Por eso los códigos que genera la asignación masiva son
+> **numéricos puros**.
+> **La regla que manda: el símbolo tiene que escanear.** Cuando no cabe todo se
+> sacrifica el TEXTO —precio, encabezado, variante, nombre, en ese orden— y jamás
+> el símbolo; el código LEGIBLE tampoco se cae nunca, porque es la salida de
+> emergencia cuando la etiqueta se raya. Todo lo sacrificado se devuelve como
+> aviso. Y si la barra fina baja de 0,25 mm (0,33 en QR), la pantalla lo dice
+> ANTES de imprimir — un aviso ahí ahorra la plancha entera.
+> **`etiquetas.layout.js` es geometría pura y lo comparten el PDF y la vista
+> previa**; la previa del modal es además el PDF DE VERDAD recortado a una página
+> (`limite`), no un dibujo hecho en el navegador. Es el mismo criterio con el que
+> el importador corre el importador real dentro de una transacción que hace
+> ROLLBACK en vez de escribir un validador paralelo. Por lo mismo, **el catálogo
+> de formatos se sirve desde el backend** (`GET /etiquetas/formatos`) en vez de
+> copiarse al frontend: las dos listas de módulos duplicadas a mano ya se
+> separaron una vez.
+> **La generación masiva de códigos es la puerta de entrada real**: un negocio
+> que acaba de encender la feature tiene cientos de nodos en NULL y nadie los va
+> a escribir a mano. **Nunca pisa un código existente** —uno ya impreso está
+> pegado a la mercancía y cambiarlo convierte esas etiquetas en basura
+> silenciosa—, **hereda antes de inventar** y **propaga** después, con los mismos
+> `heredarCodigo` / `propagarCodigo` que usan el importador y el módulo de
+> variantes. El consecutivo sale de `contadores_documento` con tipo
+> `'codigo_producto'` (columna TEXT libre: sin migración), reservando el bloque
+> entero en un `INSERT … ON CONFLICT … RETURNING`, y se siembra con `GREATEST`
+> contra el mayor código numérico que ya exista — así un negocio que importó
+> códigos por fuera no recibe números repetidos. Va por tandas de 200 desde el
+> frontend porque axios corta a los 30 s.
+> **Este módulo no selecciona NINGÚN costo**: una etiqueta lleva precio de venta
+> y nada más, así que queda fuera del alcance de `costos_solo_admin` sin
+> necesitar recorte propio. Imprimir hereda el permiso de `inventario` (el
+> bodeguero ya puede); **generar códigos exige `admin_negocio`**, porque asignar
+> el código de un atributo uno por uno ya lo exige y en masa no puede pedir
+> menos. Feature opt-in: sin `codigo_producto_activo` las rutas responden 404.
+> **Ojo con los template literals**: el SQL del repositorio vive dentro de uno, y
+> una comilla invertida en un comentario SQL lo cierra a media consulta — el
+> backend deja de arrancar entero. Ya pasó una vez.
+> Prueba: `35-etiquetas` (70 verificaciones; la sección 1 **decodifica** 974
+> códigos de barras generados y los compara contra el texto original — un código
+> mal generado no se ve mal, se ve perfecto y no escanea; las 11 y 12 corren el
+> SQL y la asignación de códigos contra un Postgres real).
+
+
 > **La línea de entrega por CANTIDAD es un LOTE — FIFO por nodo**
 > (`20260823_lotes_cantidad.sql`, `repo.consumirLotesFIFO`): un SERIAL tiene
 > identidad y por eso todo es exacto — `serial_id` une la entrega con la
