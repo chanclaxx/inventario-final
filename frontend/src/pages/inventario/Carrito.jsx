@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   ShoppingCart, Trash2, Plus, Minus, FileText, Handshake, ArrowRightLeft,
-  Truck, Undo2, Bookmark,
+  Truck, Undo2, Bookmark, Route,
 } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
 import { EmptyState } from '../../components/ui/EmptyState';
@@ -18,6 +18,7 @@ import { BarraEscaneo }   from '../../components/ui/BarraEscaneo';
 import { ChipsVariante } from '../../components/ui/ChipsVariante';
 import { useEscanerCarrito } from '../../hooks/useEscanerCarrito';
 import { ModalTraslado } from './ModalTraslado';
+import { ModalRutaRecogida } from './ModalRutaRecogida';
 import { ModalDespachar } from '../red-interna/ModalDespachar';
 import { ModalDevolver }  from '../red-interna/ModalDevolver';
 import { ListaBorradores }      from './ListaBorradores';
@@ -83,6 +84,7 @@ function CantidadInput({ valor, stock, onCambiar }) {
 }
 
 export function Carrito({ onFacturar, onPrestar, onBorradorCargado, sinHeader = false }) {
+  const [modalRuta, setModalRuta] = useState(false);
   const {
     items, eliminarItem, actualizarPrecio, actualizarCantidad, limpiarCarrito, totalCarrito,
     aplicarTarifa, aplicarTarifaATodos,
@@ -136,6 +138,7 @@ export function Carrito({ onFacturar, onPrestar, onBorradorCargado, sinHeader = 
   const redActiva      = configData?.red_interna_activa === '1';
   const variantesActivo = configData?.variantes_activo    === '1';
   const codigoActivo    = configData?.codigo_producto_activo === '1';
+  const ubicacionActiva = configData?.ubicacion_activa       === '1';
 
   // ── Escáner: el atajo más corto entre el mostrador y la venta ─────────────
   //
@@ -230,6 +233,23 @@ export function Carrito({ onFacturar, onPrestar, onBorradorCargado, sinHeader = 
             placeholder={codigoActivo ? 'Escanear código o IMEI…' : 'Escanear IMEI…'}
           />
         </div>
+
+        {/* Ruta de recogida — el carrito es la lista, la bodega el recorrido.
+            En una bodega grande, juntar ocho productos en el orden en que se
+            escribieron significa cruzarla ocho veces. Opt-in con
+            `ubicacion_activa`, igual que el resto de la feature. */}
+        {ubicacionActiva && items.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setModalRuta(true)}
+            className="w-full mb-3 flex items-center justify-center gap-2 px-3 py-2 rounded-xl
+              border border-blue-200 bg-blue-50/60 text-sm text-blue-700
+              hover:bg-blue-100 transition-colors"
+          >
+            <Route size={15} />
+            Ver ruta de recogida
+          </button>
+        )}
 
         {/* Tarifa aplicada a todo el carrito (feature opt-in) */}
         {tarifasCfg.activo && items.length > 0 && (
@@ -458,6 +478,14 @@ export function Carrito({ onFacturar, onPrestar, onBorradorCargado, sinHeader = 
           bodegaNombre={contextoRed?.bodega_nombre}
           onCerrar={() => setDevolucion(false)}
           onListo={cerrarYLimpiar}
+        />
+      )}
+
+      {modalRuta && (
+        <ModalRutaRecogida
+          open
+          onClose={() => setModalRuta(false)}
+          items={items}
         />
       )}
     </>

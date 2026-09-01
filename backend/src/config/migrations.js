@@ -239,6 +239,207 @@ const aplicarMigraciones = async (client) => {
     console.error('⚠️  Ubicación de productos no aplicada (el inventario sigue normal):', err.message);
   }
 
+  // Ubicaciones como entidad — ver migrations/20260831_ubicaciones_estructura.sql
+  //
+  // La ubicación deja de ser un TEXT en el producto y pasa a ser una fila con
+  // identidad, jerarquía y geometría; los productos (y sus atributos, variantes
+  // e IMEI sueltos) se le cuelgan por una tabla puente. Ver la cabecera del .sql
+  // para el porqué de cada decisión.
+  //
+  // 100% aditiva e idempotente, y en su propio try/catch: un fallo aquí solo
+  // deja sin ubicaciones a quien las use — nunca sin servidor a los otros
+  // negocios. La detección de src/config/columnas.js apaga la feature si las
+  // tablas no llegaron a crearse.
+  //
+  // El DDL y el BACKFILL van SEPARADOS a propósito: el backfill es "nice to
+  // have" y no puede impedir que las tablas queden creadas.
+  try {
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS ubicaciones (
+        id           BIGSERIAL PRIMARY KEY,
+        sucursal_id  INTEGER NOT NULL REFERENCES sucursales(id),
+        padre_id     BIGINT REFERENCES ubicaciones(id),
+        nombre       TEXT NOT NULL,
+        tipo         TEXT,
+        descripcion  TEXT,
+        pos_x  NUMERIC,
+        pos_y  NUMERIC,
+        ancho  NUMERIC,
+        alto   NUMERIC,
+        color  TEXT,
+        orden      INTEGER   DEFAULT 0,
+        activo     BOOLEAN   DEFAULT TRUE,
+        creado_en  TIMESTAMP DEFAULT NOW(),
+        usuario_id INTEGER
+      );
+
+      -- Dos trampas: (1) NULL <> NULL en Postgres, así que sin el COALESCE el
+      -- índice no agrupa las raíces y "Bodega A" se podría crear dos veces en
+      -- el primer nivel; (2) BTRIM quita los espacios de los EXTREMOS pero no
+      -- los de dentro, y utils/ubicacion.util.js —que normaliza toda
+      -- escritura— sí los colapsa. Se usa la clase POSIX [[:space:]] y no la
+      -- clase con barra invertida porque esto vive dentro de un template
+      -- literal de JavaScript, donde la barra se pierde antes de llegar a
+      -- Postgres. (Y por lo mismo, aquí NO puede haber comillas invertidas:
+      -- cierran el literal a media consulta y el backend no arranca.)
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_ubicaciones_nombre
+        ON ubicaciones (
+          sucursal_id,
+          COALESCE(padre_id, 0),
+          LOWER(REGEXP_REPLACE(BTRIM(nombre), '[[:space:]]+', ' ', 'g'))
+        )
+        WHERE activo;
+
+      CREATE INDEX IF NOT EXISTS idx_ubicaciones_sucursal
+        ON ubicaciones (sucursal_id) WHERE activo;
+
+      CREATE INDEX IF NOT EXISTS idx_ubicaciones_padre
+        ON ubicaciones (padre_id) WHERE padre_id IS NOT NULL;
+
+      -- Cinco FK nullable con CHECK de exactamente una, como abonos_remision:
+      -- conserva las claves foráneas reales, así que borrar una variante borra
+      -- su asignación sola. Una ubicación puede mezclar productos, atributos,
+      -- variantes, referencias e IMEI de productos distintos.
+      CREATE TABLE IF NOT EXISTS ubicaciones_items (
+        id           BIGSERIAL PRIMARY KEY,
+        ubicacion_id BIGINT NOT NULL REFERENCES ubicaciones(id) ON DELETE CASCADE,
+        producto_cantidad_id INTEGER REFERENCES productos_cantidad(id) ON DELETE CASCADE,
+        atributo_id          INTEGER REFERENCES atributos_producto(id) ON DELETE CASCADE,
+        variante_id          INTEGER REFERENCES variantes_atributo(id) ON DELETE CASCADE,
+        producto_serial_id   INTEGER REFERENCES productos_serial(id)   ON DELETE CASCADE,
+        serial_id            INTEGER REFERENCES seriales(id)           ON DELETE CASCADE,
+        cantidad       INTEGER,
+        usuario_id     INTEGER,
+        actualizado_en TIMESTAMP DEFAULT NOW(),
+        CONSTRAINT ubicaciones_items_uno_chk CHECK (
+          (producto_cantidad_id IS NOT NULL)::int +
+          (atributo_id          IS NOT NULL)::int +
+          (variante_id          IS NOT NULL)::int +
+          (producto_serial_id   IS NOT NULL)::int +
+          (serial_id            IS NOT NULL)::int = 1
+        )
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_ubicaciones_items_ubicacion
+        ON ubicaciones_items (ubicacion_id);
+
+      -- Fase 1: un nodo, un sitio. Quitar estos cinco es lo que abre la fase 2
+      -- (cantidad por ubicación) sin tocar nada más del modelo.
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_ubicaciones_items_producto_cantidad
+        ON ubicaciones_items (producto_cantidad_id) WHERE producto_cantidad_id IS NOT NULL;
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_ubicaciones_items_atributo
+        ON ubicaciones_items (atributo_id)          WHERE atributo_id          IS NOT NULL;
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_ubicaciones_items_variante
+        ON ubicaciones_items (variante_id)          WHERE variante_id          IS NOT NULL;
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_ubicaciones_items_producto_serial
+        ON ubicaciones_items (producto_serial_id)   WHERE producto_serial_id   IS NOT NULL;
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_ubicaciones_items_serial
+        ON ubicaciones_items (serial_id)            WHERE serial_id            IS NOT NULL;
+    `);
+  } catch (err) {
+    console.error('⚠️  Ubicaciones (estructura) no aplicada (el inventario sigue normal):', err.message);
+  }
+
+  // Backfill del texto libre a las tablas nuevas. Corre UNA sola vez por
+  // sucursal —la condición es "esta sucursal todavía no tiene ubicaciones"—
+  // porque las columnas TEXT no se borran: sin esa guarda, un negocio que
+  // renombre un estante vería reaparecer el nombre viejo en cada arranque, y un
+  // producto que alguien quitó de una ubicación a propósito volvería solo.
+  try {
+    await client.query(`
+      WITH nuevas AS (
+        INSERT INTO ubicaciones (sucursal_id, nombre)
+        SELECT
+          t.sucursal_id,
+          REGEXP_REPLACE(BTRIM(MODE() WITHIN GROUP (ORDER BY t.ubicacion)), '[[:space:]]+', ' ', 'g')
+        FROM (
+          SELECT sucursal_id, ubicacion FROM productos_cantidad
+           WHERE activo = true AND BTRIM(COALESCE(ubicacion, '')) <> ''
+          UNION ALL
+          SELECT sucursal_id, ubicacion FROM productos_serial
+           WHERE BTRIM(COALESCE(ubicacion, '')) <> ''
+        ) t
+        WHERE NOT EXISTS (
+          SELECT 1 FROM ubicaciones u WHERE u.sucursal_id = t.sucursal_id
+        )
+        GROUP BY t.sucursal_id, LOWER(REGEXP_REPLACE(BTRIM(t.ubicacion), '[[:space:]]+', ' ', 'g'))
+        ON CONFLICT DO NOTHING
+        RETURNING id, sucursal_id, nombre
+      ),
+      asignar_cantidad AS (
+        INSERT INTO ubicaciones_items (ubicacion_id, producto_cantidad_id)
+        SELECT n.id, pc.id
+        FROM productos_cantidad pc
+        JOIN nuevas n
+          ON n.sucursal_id = pc.sucursal_id
+         AND LOWER(REGEXP_REPLACE(BTRIM(n.nombre),     '[[:space:]]+', ' ', 'g'))
+           = LOWER(REGEXP_REPLACE(BTRIM(pc.ubicacion), '[[:space:]]+', ' ', 'g'))
+        WHERE pc.activo = true AND BTRIM(COALESCE(pc.ubicacion, '')) <> ''
+        ON CONFLICT DO NOTHING
+        RETURNING 1
+      )
+      INSERT INTO ubicaciones_items (ubicacion_id, producto_serial_id)
+      SELECT n.id, ps.id
+      FROM productos_serial ps
+      JOIN nuevas n
+        ON n.sucursal_id = ps.sucursal_id
+       AND LOWER(REGEXP_REPLACE(BTRIM(n.nombre),     '[[:space:]]+', ' ', 'g'))
+         = LOWER(REGEXP_REPLACE(BTRIM(ps.ubicacion), '[[:space:]]+', ' ', 'g'))
+      WHERE BTRIM(COALESCE(ps.ubicacion, '')) <> ''
+      ON CONFLICT DO NOTHING;
+    `);
+  } catch (err) {
+    console.error('⚠️  Backfill de ubicaciones no aplicado (las tablas quedan creadas):', err.message);
+  }
+
+  // Historial de movimientos de ubicación — ver migrations/20260901_movimientos_ubicacion.sql
+  //
+  // 100% aditiva. En su propio try/catch y con su propia bandera en
+  // src/config/columnas.js: si esta tabla faltara, el INSERT abortaría la
+  // transacción del movimiento y mover una caja de estante fallaría por culpa
+  // de su propia bitácora. Sin la tabla, el módulo no registra y ya.
+  //
+  // Los nombres van denormalizados a propósito (ver la cabecera del .sql):
+  // pintar la lista con ids costaría un UNION de cinco ramas más dos JOIN en
+  // cada carga, y NULL en desde_id es ambiguo entre "venía de ningún sitio" y
+  // "esa ubicación ya no existe".
+  try {
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS movimientos_ubicacion (
+        id          BIGSERIAL PRIMARY KEY,
+        sucursal_id INTEGER NOT NULL REFERENCES sucursales(id),
+        producto_cantidad_id INTEGER REFERENCES productos_cantidad(id) ON DELETE CASCADE,
+        atributo_id          INTEGER REFERENCES atributos_producto(id) ON DELETE CASCADE,
+        variante_id          INTEGER REFERENCES variantes_atributo(id) ON DELETE CASCADE,
+        producto_serial_id   INTEGER REFERENCES productos_serial(id)   ON DELETE CASCADE,
+        serial_id            INTEGER REFERENCES seriales(id)           ON DELETE CASCADE,
+        desde_id     BIGINT REFERENCES ubicaciones(id) ON DELETE SET NULL,
+        hacia_id     BIGINT REFERENCES ubicaciones(id) ON DELETE SET NULL,
+        etiqueta     TEXT,
+        desde_nombre TEXT,
+        hacia_nombre TEXT,
+        usuario_id   INTEGER,
+        fecha        TIMESTAMP DEFAULT NOW(),
+        CONSTRAINT movimientos_ubicacion_uno_chk CHECK (
+          (producto_cantidad_id IS NOT NULL)::int +
+          (atributo_id          IS NOT NULL)::int +
+          (variante_id          IS NOT NULL)::int +
+          (producto_serial_id   IS NOT NULL)::int +
+          (serial_id            IS NOT NULL)::int = 1
+        )
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_movimientos_ubicacion_sucursal
+        ON movimientos_ubicacion (sucursal_id, fecha DESC);
+      CREATE INDEX IF NOT EXISTS idx_movimientos_ubicacion_hacia
+        ON movimientos_ubicacion (hacia_id, fecha DESC) WHERE hacia_id IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_movimientos_ubicacion_desde
+        ON movimientos_ubicacion (desde_id, fecha DESC) WHERE desde_id IS NOT NULL;
+    `);
+  } catch (err) {
+    console.error('⚠️  Historial de ubicaciones no aplicado (mover sigue funcionando):', err.message);
+  }
+
   // Gastos fijos mensuales por sucursal (Proyección) — ver migrations/20260712_gastos_fijos.sql
   // 100% aditiva e idempotente. Alimenta la utilidad neta y el punto de equilibrio.
   await client.query(`

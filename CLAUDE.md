@@ -472,6 +472,227 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > mal generado no se ve mal, se ve perfecto y no escanea; las 11 y 12 corren el
 > SQL y la asignación de códigos contra un Postgres real).
 
+> **La UBICACIÓN es una fila, no un atributo del producto**
+> (`ubicaciones/`, `20260831_ubicaciones_estructura.sql`): 20260730 la puso como
+> `TEXT` libre en `productos_cantidad` y `productos_serial`, y el catálogo se
+> DERIVABA de lo que los productos tuvieran escrito. Eso responde «¿en qué
+> estante está esto?» pero no lo contrario, y tenía tres techos: una ubicación
+> **no podía estar vacía** (existía solo mientras alguien la nombrara, así que
+> no hay mapa posible — un mapa que solo dibuja lo lleno no es un mapa);
+> renombrar era un `UPDATE` masivo donde un typo bifurcaba el sitio en silencio
+> (el `MODE()` elegía una grafía para MOSTRAR, pero el filtro compara exacto);
+> y las coordenadas, la jerarquía y el tipo no tenían dónde vivir.
+> **Las columnas `TEXT` NO se borran.** Siguen ahí de respaldo, el rollback es
+> apagar `ubicacion_activa`, y `listarCatalogo` hace **lectura dual**: mezcla las
+> filas nuevas con el texto legado que todavía no tenga fila. Por eso
+> `GET /ubicaciones` conserva su forma `[{ubicacion, productos}]` y
+> `InputUbicacion`, el filtro del inventario y los Excel **siguen funcionando
+> sin tocarlos**. Invertir el modelo y rediseñar las pantallas dejan de ser el
+> mismo riesgo.
+> **Una ubicación contiene CUALQUIER MEZCLA**: el «Cajón B7» tiene la talla 38MM
+> de la correa (una variante) y los estuches (un producto entero) y un IMEI
+> suelto. La puente `ubicaciones_items` son cinco FK nullable con `CHECK` de
+> exactamente una — el patrón de `abonos_remision`, elegido sobre una FK
+> polimórfica porque conserva las claves reales: borrar una variante borra su
+> asignación sola.
+> **Se asigna en CUALQUIER nivel y se resuelve HACIA ABAJO.** Aquí está la
+> diferencia con las remisiones: una remisión **mueve stock** y por eso exige el
+> nodo hoja (`VARIANTE_REQUERIDA`) o descuadra; la ubicación solo **describe**, y
+> «toda la correa está en el Estante A» es verdad y es útil. Igual con los IMEI:
+> la referencia da el valor por defecto y **cada unidad puede sobrescribirlo**
+> (vitrina vs. caja fuerte). Eso hace la granularidad personalizable **sin
+> ningún interruptor nuevo**.
+> **CUIDADO con la consulta INVERSA**: la asignación propia gana sobre la
+> heredada **en las dos direcciones**. Si la referencia está en Vitrina y un IMEI
+> se movió a Caja Fuerte, listar Vitrina tiene que EXCLUIRLO o el mismo equipo
+> sale en dos sitios. El stock de una referencia cuenta solo las unidades que
+> **heredan** (`NOT EXISTS` asignación propia); las demás salen como su fila.
+> **El stock no se reparte** (fase 1): `cantidad` nace y se queda en `NULL`.
+> Repartir unidades lo volvería un derivado y obligaría a que ventas, compras,
+> entradas, remisiones, ajustes, importación y traslados decidieran de qué sitio
+> sale cada unidad — más un invariante que se rompe en silencio, como pasó cuando
+> el stock bajó a las variantes y la red interna siguió moviendo el nivel de
+> arriba. La fase 2 es **quitar los cinco índices únicos parciales**, no un
+> rediseño.
+> **El backfill corre UNA vez por sucursal** (la guarda es «esta sucursal aún no
+> tiene ubicaciones»). Sin eso, como el texto no se borra, un negocio que
+> renombre un estante vería reaparecer el nombre viejo en cada arranque y lo que
+> alguien desasignó volvería solo: una migración de datos que se pelea con el
+> usuario es peor que no tenerla.
+> **`BTRIM` NO colapsa los espacios internos** pero `ubicacion.util.js` sí, así
+> que el backfill y el índice único normalizan con
+> `REGEXP_REPLACE(..., '[[:space:]]+', ' ', 'g')` — con solo `BTRIM`,
+> `Estante  A-3` nacía como sitio aparte con un nombre que la API no sabe
+> reproducir. Se usa la clase POSIX y no `\s` porque este SQL vive replicado
+> dentro de un **template literal** de `migrations.js`, donde la barra invertida
+> se pierde (y donde una comilla invertida en un comentario tumba el arranque
+> entero — pasó otra vez al escribir esto).
+> **No se borra una ubicación con contenido**: `ubicaciones_items` es
+> `ON DELETE CASCADE`, así que un `DELETE` desasignaría todo en silencio. Baja
+> lógica y `409`. Tampoco se cuelga nada de su propia hija — el ciclo colgaría
+> cualquier recorrido del árbol y no es expresable como constraint.
+> **Este módulo no selecciona NINGÚN costo** y por eso queda fuera de
+> `costos_solo_admin` sin recorte propio, igual que las etiquetas; el precio de
+> venta sí viaja. Si algún día hace falta el costo aquí, tiene que pasar por
+> `recortarSiToca` **en el backend**.
+> Permisos: ver el mapa y **mover** un producto van con el módulo `inventario`
+> (el bodeguero es supervisor y es su trabajo; no toca stock ni caja); **crear,
+> renombrar, borrar y dibujar** exigen `admin_negocio`. Y las rutas literales
+> (`/arbol`, `/sin-asignar`, `/items`, `/geometria`) van **ANTES de `/:id`**.
+> **La pantalla es la pestaña «Ubicaciones» del Inventario** (opt-in con
+> `ubicacion_activa`), colgada ahí por la misma razón que el catálogo web:
+> dónde se guarda la mercancía es una decisión sobre el inventario y hereda su
+> permiso, así que no cambia el acceso de nadie. Columna izquierda el espacio
+> (árbol + la bandeja **«Sin ubicar»**), derecha lo que hay dentro; en móvil se
+> navega en profundidad, que es como se usa entre estantes.
+> **Escanear guarda en el sitio abierto** (`BarraEscanearAqui`): reusa
+> `GET /busqueda/escaneo/:codigo`, que ya resuelve los tres niveles del árbol y
+> los IMEI. A diferencia del carrito, aquí **no hace falta bajar al nodo hoja**
+> —la ubicación describe, no mueve stock—, así que escanear el código del
+> producto y decir «toda la correa está aquí» es una respuesta válida.
+> Escribir a mano lo que ya está impreso en la caja no lo hace nadie dos días
+> seguidos: sin esto el mapa se desactualiza en dos semanas.
+> **No hay `useEffect` que sincronice estado**: el panel y el modal se
+> **remontan por `key`**. Además de que el linter lo rechaza
+> (`react-hooks/set-state-in-effect`), arrastrar los marcados de un estante al
+> siguiente termina moviendo cosas que nadie quiso mover.
+> **El icono se saca por acceso a propiedad, nunca de una función**
+> (`ICONOS_UBICACION[tipo] ?? ICONO_POR_DEFECTO`): para el linter una llamada
+> durante el render puede estar creando un componente nuevo cada vez
+> (`react-hooks/static-components`). Y el icono se toma con un `const` en el
+> cuerpo, no destructurando el parámetro del `map`: no hay
+> `eslint-plugin-react`, así que el uso en JSX **no cuenta como referencia** y
+> solo los `const` en mayúscula entran en `varsIgnorePattern`.
+> El tope de lista (`TOPE_LISTA`) vive en el util porque la pestaña y el panel
+> **comparten la queryKey** de «sin ubicar» —para que el contador no cueste una
+> petición extra—: con límites distintos el contador diría 200 o 500 según cuál
+> se montara primero.
+> **El MAPA es una VISTA, no el modelo** (`MapaUbicaciones.jsx`): pestaña Mapa
+> junto a Lista, sobre los mismos datos. Todo lo del mapa se puede hacer en la
+> lista, que es la que funciona en un celular de 5" entre estantes, la que se
+> navega con teclado y la que sirve aunque nadie haya dibujado nada. **El mapa
+> nunca es requisito.**
+> **La cámara, no un modal**: al tocar una ubicación el nivel actual se agranda
+> hasta que esa caja llena la pantalla y entonces aparece lo de dentro — el
+> rectángulo que tocaste crece hacia ti, así que no se pierde el hilo de dónde
+> estás. Se anima con la **Web Animations API**, no con un efecto: `animate()`
+> devuelve una promesa y el cambio de nivel se encadena desde el propio clic;
+> con `useEffect` haría falta sincronizar estado en el efecto (cascada de
+> renders, y el linter lo rechaza). `prefers-reduced-motion` corta la
+> interpolación — un zoom a pantalla completa marea de verdad a parte de la
+> gente. Y hay migas de pan permanentes: una animación dice cómo llegaste, no
+> dónde estás.
+> **Se dibuja SOLO el nivel actual.** Renderizar los cuatro a escala real haría
+> que un bin dentro de un estante dentro de una bodega fuera una mota de tres
+> píxeles. Un nivel del árbol = un nivel de zoom, así que agregar «Nivel 2»
+> dentro de «Estante 1» no toca nada del mapa.
+> **La geometría es OPCIONAL y en unidades relativas 0..1000**, nunca píxeles:
+> cada ubicación es el lienzo de sus hijas. Lo que nadie ha colocado se acomoda
+> solo en cuadrícula (raya discontinua) y **nunca pisa lo dibujado a mano** — se
+> salta la casilla cuyo centro caiga dentro de un rectángulo ya puesto. Eso es
+> lo que permite empezar hoy y dibujar el mapa el mes que viene.
+> **Mirando, el encuadre se ajusta al contenido; editando, se ve el lienzo
+> entero**: si el encuadre siguiera al contenido mientras se arrastra, mover una
+> caja movería los límites y el mapa se escaparía debajo del dedo.
+> La cámara **escala por `min`, no por `max`**: con `max` una caja alargada se
+> sale por los lados justo al terminar la animación (600×120 en un lienzo de
+> 1000 se iría de −2000 a 3000). Por eso la aritmética vive en
+> `utils/ubicaciones.js` y no en el componente — un signo al revés no se ve
+> leyendo el código, se ve como «la animación hace algo raro» en producción.
+> Editar el mapa es un **modo aparte** (`admin_negocio`): mirando, un clic
+> entra; editando, un clic arrastra. Fundirlos hace que el bodeguero mueva un
+> estante sin querer. Se guarda **al soltar** y en lote, nunca por píxel.
+> Prueba: `36-ubicaciones` (102 verificaciones; la 5 sostiene el invariante de
+> los IMEI, la 10 revisa el JSON en busca de fugas de costo, la 14 compara el
+> `.sql` contra la copia del runner **índice por índice, expresión incluida**, y
+> la 15 vigila que el vocabulario de `nivel` y de `estado` no se separe entre
+> backend y frontend — que es lo que ya pasó con las dos listas de módulos).
+> La geometría del mapa se prueba aparte, en node puro:
+> `frontend/scripts/prueba-mapa-ubicaciones.mjs` (74 verificaciones; comprueba
+> que las cajas automáticas **no se encimen** ni entre ellas ni sobre las
+> dibujadas, y que la cámara centre y **encuadre completa** cualquier caja).
+>
+> **Historial de movimientos** (`movimientos_ubicacion`,
+> `20260901_movimientos_ubicacion.sql`): `ubicaciones_items` decía quién tocó
+> por ÚLTIMA vez, no de dónde venía. En una bodega con tres personas esa es la
+> pregunta que aparece cuando algo no está donde debería.
+> **Registrar es un extra; mover es la operación diaria.** El INSERT del log
+> corre DENTRO de la transacción del movimiento, así que si la tabla faltara
+> abortaría la transacción entera y **mover una caja fallaría por culpa de su
+> propia bitácora**. Por eso tiene bandera PROPIA (`hayMovimientosUbicacion`) y
+> se consulta ANTES del INSERT en vez de envolverlo en try/catch: en una
+> transacción abortada, atrapar el error no salva lo que viene después. Y por
+> eso no entra en `TABLAS_UBICACIONES` — un despliegue donde solo fallara esta
+> migración apagaría el módulo entero, que ya estaba operando.
+> **Los nombres van CONGELADOS** (`etiqueta`, `desde_nombre`, `hacia_nombre`),
+> por dos razones distintas: pintarlo con ids costaría un UNION de cinco ramas
+> más dos JOIN en cada carga, y **`NULL` en `desde_id` es ambiguo** entre «venía
+> de ningún sitio» y «esa ubicación ya no existe». Con el nombre al lado, la
+> línea sigue contando la verdad aunque después renombren el estante — con un
+> JOIN, renombrar reescribiría el pasado. Mismo criterio que
+> `lineas_remision.costo_origen`. `usuario_nombre` **sí** se une, y a propósito:
+> quién es una persona es un dato vivo.
+> El origen sale del `DELETE ... RETURNING ubicacion_id` que ya hacía la
+> asignación: preguntarlo aparte costaría una consulta y abriría una ventana
+> entre leer y escribir. Y **volver a guardar algo donde ya estaba no se
+> registra** — con un lector se escanea dos veces la misma caja constantemente,
+> y esas líneas taparían las que sí cuentan.
+> El filtro por ubicación mira los **dos extremos**: un estante tiene dos
+> historias, lo que entró y lo que salió, y filtrar solo por destino escondería
+> justo lo que alguien busca.
+>
+> **«¿Dónde está esto?» — la pregunta inversa** (`buscarNodos`,
+> `GET /ubicaciones/buscar`): el módulo se construyó para responder «¿qué hay en
+> este estante?», pero en una bodega grande la que más se hace es la contraria,
+> y no tenía respuesta desde esta pantalla. Devuelve nodos **HOJA** (lo que de
+> verdad se va a recoger) con la ubicación **ya resuelta hacia arriba**: si la
+> talla no tiene sitio propio pero su producto sí, responde el del producto y lo
+> marca `heredada`. **La respuesta nunca es «no sé».**
+> Las **unidades sueltas** solo salen si su IMEI coincide o si tienen sitio
+> propio: listar los 300 equipos de una referencia al buscar su nombre
+> enterraría el resultado que se busca. Lo que **sí** tiene sitio se ordena
+> primero — quien pregunta «¿dónde está?» quiere una respuesta, no una lista de
+> cosas que tampoco están ubicadas. Mínimo **2 caracteres**: con una letra la
+> respuesta es media bodega y le cuesta una pasada a una base compartida.
+> El **nombre y la ruta de la ubicación NO se resuelven en SQL**: la pantalla ya
+> tiene el árbol en memoria y los saca de ahí con `rutaDe`. Un `WITH RECURSIVE`
+> por fila para pintar migas de pan sería justo la consulta correlacionada que ya
+> se comió el 96 % del CPU de esta base una vez.
+> **`padreId` (el nivel de la cámara) vive en `TabUbicaciones`, no en el mapa**:
+> el buscador tiene que poder llevar el mapa hasta un estante concreto. Con el
+> estado dentro del mapa haría falta un efecto que lo sincronizara desde fuera.
+> Y aterriza en el nivel del **PADRE** con la caja marcada, no dentro: entrar ya
+> escondería el contexto que se busca («está en el Estante 1, que está en la
+> Bodega A»).
+>
+> **La RUTA DE RECOGIDA cuelga del CARRITO** (`ModalRutaRecogida`,
+> `POST /ubicaciones/ruta`, `agruparPorRuta`): en una bodega grande, juntar ocho
+> productos en el orden en que se escribieron significa cruzarla ocho veces.
+> Se engancha al carrito y **no a una pantalla propia** porque el carrito ya es
+> la lista compartida del sistema —lo llenan ventas, préstamos y traslados—: una
+> lista aparte obligaría a teclear otra vez lo que ya está escrito, y entonces
+> nadie la usaría. Por lo mismo no se colgó de la red interna, que es opt-in.
+> `nodoDeItemCarrito` es el **contrato entre los dos mundos** y vive en el util:
+> el carrito lo llenan nueve pantallas y ninguna sabe de ubicaciones. Baja
+> siempre al nodo **más específico** que traiga la línea (variante > atributo >
+> producto), así que la ruta lleva al cajón de esa talla y no al del producto.
+> Los ítems viejos de `localStorage` sin ids devuelven `null` y se quedan fuera
+> en vez de reventar la pantalla.
+> El **orden lo calcula el frontend**, no el SQL: recorrido en profundidad (se
+> termina una bodega antes de pasar a la siguiente) y, dentro de un nivel,
+> arriba-abajo e izquierda-derecha **solo si están dibujadas TODAS** — con la
+> mitad colocada a mano y la mitad automática, ordenar por posición sería un
+> zigzag sin sentido, así que se cae al orden del árbol, que el admin controla.
+> **Lo que no tiene ubicación va al FINAL, en su propia parada**: es lo que hay
+> que buscar a ojo y enterrarlo entre lo demás haría perder justo lo que más
+> tiempo cuesta.
+> El endpoint va por **POST** aunque sea una lectura: un carrito de treinta
+> líneas no cabe con holgura en una URL y el navegador la corta sin avisar. Y
+> resuelve **una consulta por NIVEL presente**, no una por línea.
+> Prueba: la 19 de `36-ubicaciones` (backend, con la herencia y el aislamiento)
+> y las secciones 8-10 de `prueba-mapa-ubicaciones.mjs` (el orden del recorrido
+> y la traducción desde el carrito).
+
 
 > **La línea de entrega por CANTIDAD es un LOTE — FIFO por nodo**
 > (`20260823_lotes_cantidad.sql`, `repo.consumirLotesFIFO`): un SERIAL tiene

@@ -41,6 +41,7 @@ node scripts/pruebas-red-interna/24-remision-por-variante.mjs
 node scripts/pruebas-red-interna/25-reclamo-faltante.mjs
 node scripts/pruebas-red-interna/26-lotes-cantidad.mjs
 node scripts/pruebas-red-interna/28-abonos-anulados.mjs
+node scripts/pruebas-red-interna/36-ubicaciones.mjs
 ```
 
 > `20-borradores` verifica sobre todo una invariante negativa: guardar un
@@ -607,3 +608,76 @@ falla al ejecutarse: la regla del nodo HOJA, la herencia de precio, el
 aislamiento entre negocios, y la asignación masiva de códigos —que no puede
 pisar uno existente, tiene que heredar de la otra sede en vez de inventar, y
 tiene que propagar—. Se omiten solas, con un aviso, si PGlite no está instalado.
+
+
+### `36-ubicaciones.mjs` — 173 verificaciones
+
+Ubicaciones como entidad: la ubicación deja de ser un `TEXT` repetido en cada
+producto y pasa a ser una fila con identidad, jerarquía y geometría, a la que se
+le cuelgan productos, atributos, variantes, referencias con IMEI y unidades
+sueltas. Ver `migrations/20260831_ubicaciones_estructura.sql`.
+
+Lo que de verdad vigila esta suite es lo que **no se ve fallar**:
+
+La **sección 1** comprueba que el backfill no invente ni pierda sitios. Ahí se
+cazó el primer bug real: el agrupado usaba `LOWER(BTRIM(...))`, y `BTRIM` quita
+los espacios de los EXTREMOS pero no los de dentro — así que `Estante  A-3`
+(dos espacios) nacía como un sitio aparte, con un nombre que la propia API es
+incapaz de reproducir, porque `utils/ubicacion.util.js` sí los colapsa. Se
+normaliza igual en los dos lados con `[[:space:]]`.
+
+La **sección 2** es la que impide que una migración de datos se pelee con el
+usuario: las columnas `TEXT` no se borran (son el respaldo del rollback), así
+que un backfill sin guarda recrearía en cada arranque el nombre que alguien
+renombró y devolvería a su sitio lo que alguien quitó a propósito.
+
+La **sección 5** sostiene el invariante de los IMEI: si la referencia está en
+Vitrina y una unidad se movió a Caja Fuerte, la vitrina tiene que dejar de
+contarla. `2 en vitrina + 1 en caja = 3 disponibles` — ni se duplica ni
+desaparece.
+
+La **10** revisa el JSON real en busca de claves de costo. Este módulo no
+selecciona ninguna, y por eso queda fuera del alcance de `costos_solo_admin` sin
+recorte propio; el día que alguien agregue `costo_unitario` al detalle, esta
+sección lo caza antes que la consola del navegador.
+
+La **14** compara el `.sql` contra la copia inline de `src/config/migrations.js`
+columna por columna e **índice por índice, expresión incluida**. No basta con
+"el runner corre sin error": la normalización del nombre vive dentro de una
+expresión de índice, y una copia que dijera `BTRIM` donde la otra dice
+`REGEXP_REPLACE` se ve idéntica a simple vista y solo deja entrar duplicados en
+producción.
+
+La **15** cruza la frontera: los `nivel` ('producto', 'variante', 'unidad'…) y
+los `estado` son dos listas mantenidas a mano, una en el backend y otra en
+`frontend/src/utils/ubicaciones.js`, porque no hay import posible entre los dos
+lados. Es la misma situación que ya separó las dos listas de módulos y le costó
+a un usuario perder la pestaña de Bodega en silencio. También comprueba que las
+rutas literales sigan declaradas **antes** de `/:id` y que no desaparezca el
+`GET /` de compatibilidad del que cuelgan `InputUbicacion` y el filtro del
+inventario.
+
+La **16** es la del historial, y su primera línea es la que importa: comprueba
+que **todo lo anterior funcionó sin la tabla**. El INSERT del log corre dentro
+de la transacción del movimiento, así que una tabla ausente abortaría la
+transacción y mover una caja de estante fallaría por culpa de su propia
+bitácora. También fija que renombrar una ubicación **no reescriba el pasado**
+(los nombres se congelan) y que volver a guardar algo donde ya estaba no genere
+una línea — con un lector eso pasa constantemente.
+
+La **18** cubre la pregunta inversa («¿dónde está esto?»). Lo que fija es que la
+respuesta **nunca sea «no sé»**: una talla sin sitio propio hereda el del
+producto y se dice que es heredado, mientras que la que sí lo tiene gana sobre
+el de arriba. También que un producto con tallas activas no aparezca como tal
+—lo que se va a recoger es la talla, no «la correa»— y que lo que tiene sitio se
+ordene antes que lo que no.
+
+La **19** es la ruta de recogida vista desde el backend: dónde está cada línea
+de una lista que ya existe. Lo que fija es que la herencia funcione también aquí
+—una talla sin sitio propio se busca donde esté su producto— y que una lista con
+ids inválidos responda lo que sí sabe en vez de fallar entera: quien la manda es
+el carrito del propio usuario, no un formulario.
+
+> El **orden** del recorrido no se prueba aquí porque no se calcula aquí: lo
+> arma el frontend con el árbol, y lo cubren las secciones 8 a 10 de
+> `frontend/scripts/prueba-mapa-ubicaciones.mjs` (94 verificaciones en total).

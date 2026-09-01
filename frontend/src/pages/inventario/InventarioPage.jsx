@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import {
   Package, ShoppingBag, Plus, Download, Tags,
-  ShoppingCart, ChevronUp, Upload, AlertCircle, X, Globe,
+  ShoppingCart, ChevronUp, Upload, AlertCircle, X, Globe, MapPin,
 } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ProductosSerial }         from './ProductosSerial';
@@ -17,6 +17,7 @@ import useSucursalStore            from '../../store/sucursalStore';
 import { useAuth }                 from '../../context/useAuth';
 import { ModalImportarInventario } from './ModalImportarInventario';
 import { TabCatalogo }             from './TabCatalogo';
+import { TabUbicaciones }          from './TabUbicaciones';
 import { formatCOP }               from '../../utils/formatters';
 import { useBorradores, useSincronizarReservas } from '../../hooks/useBorradores';
 import { ModalConflictoBorrador }  from './ModalConflictoBorrador';
@@ -31,6 +32,16 @@ const TABS = [
   // acceso de ningún usuario existente.
   { id: 'catalogo', label: 'Catálogo web', icon: Globe      },
 ];
+
+// Las ubicaciones se cuelgan de la misma pestaña por la misma razón que el
+// catálogo, pero además son OPT-IN: solo aparecen si el negocio encendió
+// `ubicacion_activa`, igual que el chip de ubicación en las tarjetas.
+const TAB_UBICACIONES = { id: 'ubicaciones', label: 'Ubicaciones', icon: MapPin };
+
+// Pestañas que no venden: ni barra de acciones de inventario ni carrito. El
+// catálogo publica y las ubicaciones ordenan; ninguna de las dos toca el
+// carrito, y dejarlo ahí ocuparía media pantalla del bodeguero sin razón.
+const TABS_SIN_VENTA = new Set(['catalogo', 'ubicaciones']);
 
 export default function InventarioPage() {
   const queryClient = useQueryClient();
@@ -74,6 +85,14 @@ export default function InventarioPage() {
   const codigoActivo    = configData?.codigo_producto_activo === '1';
   const ubicacionActiva = configData?.ubicacion_activa === '1';
 
+  const tabs = ubicacionActiva ? [...TABS, TAB_UBICACIONES] : TABS;
+
+  // Si un admin apaga la feature mientras alguien está en la pestaña, la
+  // pestaña desaparece pero `tabActiva` seguiría apuntando a ella y la pantalla
+  // quedaría en blanco. Se cae a la primera, que es la que ve todo el mundo.
+  const tabVisible = tabs.some((t) => t.id === tabActiva) ? tabActiva : 'serial';
+  const sinVenta   = TABS_SIN_VENTA.has(tabVisible);
+
   const esVistaGlobal   = useSucursalStore((s) => s.esVistaGlobal());
   const esUnicaSucursal = useSucursalStore((s) => s.esUnicaSucursal());
 
@@ -111,7 +130,7 @@ export default function InventarioPage() {
 
       {/* ── Contenido principal ── */}
       {/* pb-28 en móvil para que la barra fija del carrito no tape el contenido */}
-      <div className={`flex-1 min-w-0 ${soloLectura || tabActiva === 'catalogo' ? '' : 'pb-28 lg:pb-0'}`}>
+      <div className={`flex-1 min-w-0 ${soloLectura || sinVenta ? '' : 'pb-28 lg:pb-0'}`}>
 
         {bloquearCreacion && (
           <div className="flex items-start gap-2 px-3 py-2.5 mb-3 bg-purple-50
@@ -127,7 +146,7 @@ export default function InventarioPage() {
         {/* ── Barra de tabs + acciones ── */}
         <div className="flex items-center justify-between mb-4 gap-2 flex-wrap">
           <div className="flex gap-1 bg-gray-100 p-1 rounded-xl w-fit">
-            {TABS.map((tab) => {
+            {tabs.map((tab) => {
               const TabIcon = tab.icon;
               return (
                 <button
@@ -135,7 +154,7 @@ export default function InventarioPage() {
                   onClick={() => setTabActiva(tab.id)}
                   className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium
                     transition-all duration-150
-                    ${tabActiva === tab.id
+                    ${tabVisible === tab.id
                       ? 'bg-white text-gray-900 shadow-sm'
                       : 'text-gray-500 hover:text-gray-700'}`}
                 >
@@ -146,7 +165,7 @@ export default function InventarioPage() {
             })}
           </div>
 
-          {!soloLectura && tabActiva !== 'catalogo' && (
+          {!soloLectura && !sinVenta && (
             <div className="flex items-center gap-2">
               {puedeExportar && (
                 <Button size="sm" variant="secondary" onClick={() => setModalExportar(true)}
@@ -156,7 +175,7 @@ export default function InventarioPage() {
                 </Button>
               )}
 
-              {codigoActivo && tabActiva === 'cantidad' && (
+              {codigoActivo && tabVisible === 'cantidad' && (
                 <Button size="sm" variant="secondary" onClick={() => setModalEtiquetas(true)}
                   title="Imprimir códigos de barras o QR para etiquetar la mercancía">
                   <Tags size={16} />
@@ -181,13 +200,14 @@ export default function InventarioPage() {
           )}
         </div>
 
-        {tabActiva === 'serial'   && <ProductosSerial />}
-        {tabActiva === 'cantidad' && <ProductosCantidad />}
-        {tabActiva === 'catalogo' && <TabCatalogo />}
+        {tabVisible === 'serial'      && <ProductosSerial />}
+        {tabVisible === 'cantidad'    && <ProductosCantidad />}
+        {tabVisible === 'catalogo'    && <TabCatalogo />}
+        {tabVisible === 'ubicaciones' && <TabUbicaciones />}
       </div>
 
-      {/* ── Carrito (oculto en modo lectura y en el catálogo, que no vende) ── */}
-      {!soloLectura && tabActiva !== 'catalogo' && (
+      {/* ── Carrito (oculto en modo lectura y en las pestañas que no venden) ── */}
+      {!soloLectura && !sinVenta && (
         <>
           {/* Desktop: columna fija derecha */}
           <div className="hidden lg:block w-72 flex-shrink-0">

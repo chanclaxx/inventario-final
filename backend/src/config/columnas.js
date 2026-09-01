@@ -41,10 +41,90 @@ const detectarColumnas = async () => {
   }
   // Independiente de lo anterior: cada detección apaga solo su propia feature.
   await _detectarCatalogo();
+  await _detectarUbicaciones();
+  await _detectarMovimientosUbicacion();
   return _ubicacionDisponible;
 };
 
 const hayUbicacion = () => _ubicacionDisponible;
+
+// ── Ubicaciones como entidad ─────────────────────────────────────────────────
+//
+// Mismo criterio que el catálogo, pero a nivel de TABLA — ver
+// migrations/20260831_ubicaciones_estructura.sql. Es una bandera SEPARADA de
+// `hayUbicacion()` a propósito: aquella guarda las columnas TEXT que siguen
+// leyendo productosCantidad/productosSerial y las exportaciones a Excel, y
+// tienen ciclos de vida distintos. Si esta se apaga, el módulo responde 503 y
+// el inventario sigue mostrando la ubicación de siempre, sin enterarse.
+
+const TABLAS_UBICACIONES = ['ubicaciones', 'ubicaciones_items'];
+
+let _ubicacionesDisponible = false;
+
+const _detectarUbicaciones = async () => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT table_name
+       FROM information_schema.tables
+       WHERE table_schema = 'public'
+         AND table_type   = 'BASE TABLE'
+         AND table_name   = ANY($1::text[])`,
+      [TABLAS_UBICACIONES]
+    );
+    const encontradas = new Set(rows.map((r) => r.table_name));
+    // Se exigen las DOS: con la tabla de ubicaciones y sin la de asignaciones,
+    // se podrían crear estantes que no pueden guardar nada.
+    _ubicacionesDisponible = TABLAS_UBICACIONES.every((t) => encontradas.has(t));
+
+    if (!_ubicacionesDisponible) {
+      console.warn('⚠️  Tablas de ubicaciones ausentes: el mapa de ubicaciones queda desactivado.');
+    }
+  } catch (err) {
+    _ubicacionesDisponible = false;
+    console.error('⚠️  No se pudieron verificar las tablas de ubicaciones (feature desactivada):', err.message);
+  }
+  return _ubicacionesDisponible;
+};
+
+const hayUbicaciones = () => _ubicacionesDisponible;
+
+// ── Historial de movimientos ─────────────────────────────────────────────────
+//
+// Bandera SEPARADA de `hayUbicaciones()`, y esa separación es el punto:
+// registrar un movimiento es un extra, moverlo es la operación diaria del
+// bodeguero. Si la tabla faltara y el INSERT fuera dentro de la transacción,
+// **mover una caja de estante fallaría por culpa de su propia bitácora**. Sin
+// tabla, no se registra y todo lo demás sigue igual.
+//
+// Si en cambio se metiera `movimientos_ubicacion` en TABLAS_UBICACIONES, un
+// despliegue donde solo fallara esta migración apagaría el módulo entero, que
+// ya estaba funcionando. Una feature nueva no puede llevarse por delante a la
+// que ya opera.
+
+let _movimientosUbicacionDisponible = false;
+
+const _detectarMovimientosUbicacion = async () => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT 1
+       FROM information_schema.tables
+       WHERE table_schema = 'public'
+         AND table_type   = 'BASE TABLE'
+         AND table_name   = 'movimientos_ubicacion'`
+    );
+    _movimientosUbicacionDisponible = rows.length > 0;
+
+    if (!_movimientosUbicacionDisponible) {
+      console.warn('⚠️  Tabla `movimientos_ubicacion` ausente: el historial de ubicaciones no se registra.');
+    }
+  } catch (err) {
+    _movimientosUbicacionDisponible = false;
+    console.error('⚠️  No se pudo verificar el historial de ubicaciones (no se registra):', err.message);
+  }
+  return _movimientosUbicacionDisponible;
+};
+
+const hayMovimientosUbicacion = () => _movimientosUbicacionDisponible;
 
 // ── Catálogo web público ─────────────────────────────────────────────────────
 //
@@ -85,10 +165,14 @@ const _detectarCatalogo = async () => {
 const hayCatalogo = () => _catalogoDisponible;
 
 // Solo para pruebas: permite simular una BD sin la columna sin tocar la BD real.
-const _setUbicacionDisponible = (valor) => { _ubicacionDisponible = !!valor; };
-const _setCatalogoDisponible  = (valor) => { _catalogoDisponible  = !!valor; };
+const _setUbicacionDisponible  = (valor) => { _ubicacionDisponible  = !!valor; };
+const _setCatalogoDisponible   = (valor) => { _catalogoDisponible   = !!valor; };
+const _setUbicacionesDisponible = (valor) => { _ubicacionesDisponible = !!valor; };
+const _setMovimientosUbicacionDisponible = (valor) => { _movimientosUbicacionDisponible = !!valor; };
 
 module.exports = {
   detectarColumnas, hayUbicacion, _setUbicacionDisponible,
   hayCatalogo, _setCatalogoDisponible,
+  hayUbicaciones, _setUbicacionesDisponible,
+  hayMovimientosUbicacion, _setMovimientosUbicacionDisponible,
 };
