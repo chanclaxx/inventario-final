@@ -10,7 +10,7 @@ import useCarritoStore   from '../../store/carritoStore';
 import useSucursalStore  from '../../store/sucursalStore';
 import { useAuth }       from '../../context/useAuth';
 import {
-  ArrowRightLeft, ChevronRight, CheckCircle, AlertTriangle,
+  ArrowRightLeft, ChevronRight, ChevronLeft, CheckCircle, AlertTriangle,
   Package, ShoppingBag, Search, X,
 } from 'lucide-react';
 
@@ -143,7 +143,7 @@ function SelectorDestino({ equivalencia, seleccionId, onSeleccionar, sucursalDes
       )}
 
       {/* Lista de productos */}
-      <div className="flex flex-col gap-1 max-h-48 overflow-y-auto">
+      <div className="flex flex-col gap-1 max-h-[46vh] sm:max-h-80 overflow-y-auto">
         {listaVisible.length === 0 ? (
           <p className="text-xs text-gray-400 px-2 py-3 text-center">{msgVacio}</p>
         ) : (
@@ -175,82 +175,118 @@ function SelectorDestino({ equivalencia, seleccionId, onSeleccionar, sucursalDes
   );
 }
 
-// ─── Card de item a trasladar ─────────────────────────────────────────────────
-function ItemTraslado({
-  item, equivalencia, seleccionId, onSeleccionar, sucursalDestinoId, onEliminar,
-  expandido, onToggle,
+// ─── Vista de elección de destino ────────────────────────────────────────────
+// Elegir el destino DENTRO de la tarjeta metía un buscador y una lista con
+// scroll dentro de otra lista con scroll: en un celular no cabía nada. Aquí la
+// elección se lleva el modal entero — y por eso la lista de atrás puede
+// quedarse siempre desplegada, sin esconder productos para hacer sitio.
+function VistaSelectorDestino({
+  item, equivalencia, seleccionId, sucursalDestinoId, onSeleccionar, onVolver, posicion, total,
 }) {
-  // El destino elegido a mano no vive en las sugerencias (salió de una búsqueda
-  // contra el backend), así que se guarda al elegirlo: cerrada, la tarjeta tiene
-  // que poder decir a qué producto quedó vinculada.
-  const [nombreManual, setNombreManual] = useState(null);
-
   const TipoIcon = item.tipo === 'serial' ? Package : ShoppingBag;
-  const sinOpciones = !equivalencia || (equivalencia.sugerencias || []).length === 0;
-  const nombreDestino = seleccionId
-    ? (equivalencia?.sugerencias || []).find((s) => s.id === seleccionId)?.nombre || nombreManual
-    : null;
 
   return (
-    <div className={`rounded-2xl border overflow-hidden transition-all
+    <div className="flex flex-col gap-3">
+      <button onClick={onVolver}
+        className="flex items-center gap-1 self-start text-sm font-medium text-blue-600 hover:text-blue-700">
+        <ChevronLeft size={16} /> Volver a la lista
+      </button>
+
+      {/* Qué se está vinculando — a la vista todo el tiempo */}
+      <div className="flex items-start gap-2.5 bg-gray-50 rounded-xl px-3 py-3">
+        <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0
+          ${item.tipo === 'serial' ? 'bg-blue-100' : 'bg-green-100'}`}>
+          <TipoIcon size={14} className={item.tipo === 'serial' ? 'text-blue-600' : 'text-green-600'} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-xs text-gray-400">Producto {posicion} de {total}</p>
+          <p className="text-sm font-semibold text-gray-900 leading-snug break-words">{item.nombre}</p>
+          <div className="flex items-center gap-1.5 flex-wrap mt-1">
+            {item.imei && <span className="text-xs text-gray-500 font-mono">{item.imei}</span>}
+            {item.tipo === 'cantidad' && <span className="text-xs text-gray-500">×{item.cantidad || 1} und</span>}
+            <BadgeNivel nivel={equivalencia.nivel} />
+          </div>
+        </div>
+      </div>
+
+      <p className="text-xs font-medium text-gray-500">
+        ¿Con cuál producto de la sucursal destino se vincula?
+      </p>
+
+      <SelectorDestino
+        equivalencia={equivalencia}
+        seleccionId={seleccionId}
+        onSeleccionar={onSeleccionar}
+        sucursalDestinoId={sucursalDestinoId}
+      />
+    </div>
+  );
+}
+
+// ─── Fila de un item a trasladar ─────────────────────────────────────────────
+// Nunca se colapsa ni se corta: el nombre completo, el IMEI o la cantidad, el
+// nivel de coincidencia y a qué producto quedó vinculada. Con veinte productos
+// en el carrito, lo que hace falta es poder LEER la lista de un tirón.
+function FilaItem({ item, equivalencia, seleccionId, nombreDestino, onAbrir, onEliminar }) {
+  const TipoIcon    = item.tipo === 'serial' ? Package : ShoppingBag;
+  const sinOpciones = !equivalencia || (equivalencia.sugerencias || []).length === 0;
+
+  return (
+    <div className={`rounded-2xl border
       ${sinOpciones
         ? 'border-red-200 bg-red-50/30'
         : seleccionId
         ? 'border-green-200 bg-green-50/20'
         : 'border-amber-200 bg-amber-50/20'}`}>
 
-      {/* Header del item — el nombre manda: la insignia, el IMEI y la cantidad
-          van DEBAJO en vez de pelearle el ancho en la misma fila (en un celular
-          le dejaban ~90 px y todo salía cortado). */}
-      <div className="flex items-start">
-        <button onClick={onToggle}
-          className="flex-1 flex items-start gap-2.5 sm:gap-3 px-3 sm:px-4 py-3 text-left hover:bg-white/50 transition-colors min-w-0">
-          <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0
-            ${item.tipo === 'serial' ? 'bg-blue-100' : 'bg-green-100'}`}>
-            <TipoIcon size={14} className={item.tipo === 'serial' ? 'text-blue-600' : 'text-green-600'} />
+      <div className="flex items-start gap-2.5 px-3 pt-3">
+        <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0
+          ${item.tipo === 'serial' ? 'bg-blue-100' : 'bg-green-100'}`}>
+          <TipoIcon size={14} className={item.tipo === 'serial' ? 'text-blue-600' : 'text-green-600'} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold text-gray-900 leading-snug break-words">{item.nombre}</p>
+          <div className="flex items-center gap-1.5 flex-wrap mt-1">
+            {item.imei && <span className="text-xs text-gray-500 font-mono">{item.imei}</span>}
+            {item.tipo === 'cantidad' && <span className="text-xs text-gray-500">×{item.cantidad || 1} und</span>}
+            {equivalencia && <BadgeNivel nivel={equivalencia.nivel} />}
           </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold text-gray-900 leading-snug line-clamp-2">{item.nombre}</p>
-            <div className="flex items-center gap-1.5 flex-wrap mt-1">
-              {item.imei && <span className="text-xs text-gray-400 font-mono">{item.imei}</span>}
-              {item.tipo === 'cantidad' && <span className="text-xs text-gray-400">×{item.cantidad || 1}</span>}
-              {equivalencia && <BadgeNivel nivel={equivalencia.nivel} />}
-            </div>
-            {nombreDestino && !expandido && (
-              <p className="text-xs text-green-700 leading-snug line-clamp-1 mt-1">→ {nombreDestino}</p>
-            )}
-          </div>
-          <div className="flex items-center flex-shrink-0 pt-0.5">
-            {seleccionId
-              ? <CheckCircle size={16} className="text-green-500" />
-              : sinOpciones
-              ? <AlertTriangle size={16} className="text-red-400" />
-              : <ChevronRight size={14} className={`text-gray-400 transition-transform ${expandido ? 'rotate-90' : ''}`} />}
-          </div>
-        </button>
+        </div>
         <button
           onClick={() => onEliminar(item.key)}
           title="Quitar del traslado"
-          className="px-2.5 sm:px-3 py-3 text-gray-300 hover:text-red-500 transition-colors flex-shrink-0"
+          className="-mr-1 -mt-1 p-2 text-gray-300 hover:text-red-500 transition-colors flex-shrink-0"
         >
           <X size={14} />
         </button>
       </div>
 
-      {/* Selector expandido */}
-      {expandido && equivalencia && (
-        <div className="px-3 sm:px-4 pb-3 border-t border-gray-100">
-          <p className="text-xs text-gray-500 font-medium py-2">
-            Selecciona el producto destino:
+      {/* En qué quedó — la fila siempre lo dice, vinculada o no */}
+      <div className="px-3 pb-3 pt-2">
+        {sinOpciones ? (
+          <p className="flex items-start gap-1.5 text-xs text-red-600">
+            <AlertTriangle size={13} className="flex-shrink-0 mt-px" />
+            Sin equivalente en la sucursal destino. Créalo allá o quítalo del carrito.
           </p>
-          <SelectorDestino
-            equivalencia={equivalencia}
-            seleccionId={seleccionId}
-            onSeleccionar={(id, nombre) => { setNombreManual(nombre || null); onSeleccionar(id); }}
-            sucursalDestinoId={sucursalDestinoId}
-          />
-        </div>
-      )}
+        ) : seleccionId ? (
+          <button onClick={() => onAbrir(item.key)}
+            className="w-full flex items-center gap-2 bg-white border border-green-200 rounded-xl
+              px-3 py-2 text-left hover:border-green-300 transition-colors">
+            <CheckCircle size={14} className="text-green-500 flex-shrink-0" />
+            <span className="flex-1 min-w-0 text-xs text-gray-700 leading-snug break-words">
+              {nombreDestino || 'Producto destino vinculado'}
+            </span>
+            <span className="text-xs font-medium text-blue-600 flex-shrink-0">Cambiar</span>
+          </button>
+        ) : (
+          <button onClick={() => onAbrir(item.key)}
+            className="w-full flex items-center justify-center gap-1.5 bg-blue-600 text-white
+              text-xs font-medium rounded-xl px-3 py-2.5 hover:bg-blue-700 transition-colors">
+            <Search size={13} /> Elegir producto destino
+            <ChevronRight size={13} />
+          </button>
+        )}
+      </div>
     </div>
   );
 }
@@ -283,37 +319,42 @@ function PasoSucursal({ sucursales, sucursalOrigenId, sucursalDestinoId, onSelec
   );
 }
 
-// ─── Paso 2: Mapear productos ─────────────────────────────────────────────────
-function PasoMapeo({ items, equivalencias, selecciones, onSeleccionar, sucursalDestinoId, onEliminar }) {
+// ─── Paso 2: Mapear productos ────────────────────────────────────────────────
+function PasoMapeo({
+  items, equivalencias, selecciones, nombresDestino, onAbrir, onEliminar,
+  soloPendientes, setSoloPendientes,
+}) {
   const totalItems  = items.length;
   const mapeados    = Object.values(selecciones).filter(Boolean).length;
   const sinOpciones = equivalencias.filter((e) => (e.sugerencias || []).length === 0).length;
 
-  // Acordeón: UNA tarjeta abierta a la vez. Cada tarjeta abierta trae un
-  // buscador y su propia lista con scroll; con veinte productos sin
-  // autoselección se abrían todas de golpe y la pantalla se volvía un muro
-  // — en un celular no se distingue nada. Arranca en el primero pendiente.
-  const [abiertaKey, setAbiertaKey] = useState(
-    () => items.find((i) => !selecciones[i.key])?.key ?? null,
-  );
+  const pendientes = items.filter((i) => !selecciones[i.key]);
+  const visibles   = soloPendientes ? pendientes : items;
 
-  // Al vincular uno, salta al siguiente pendiente: mapear treinta productos a
-  // punta de abrir y cerrar a mano es justo el trabajo que sobra.
-  const handleSeleccionar = (key, productoDestinoId) => {
-    onSeleccionar(key, productoDestinoId);
-    const desde = items.findIndex((i) => i.key === key);
-    setAbiertaKey(items.slice(desde + 1).find((i) => !selecciones[i.key])?.key ?? null);
-  };
+  const chip = (activo) =>
+    `flex-1 text-xs font-medium py-1.5 rounded-lg transition-colors
+     ${activo ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`;
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-2">
         <p className="text-sm text-gray-500">Vincula cada producto con su destino</p>
-        <span className={`text-xs font-semibold px-2.5 py-1 rounded-full
+        <span className={`text-xs font-semibold px-2.5 py-1 rounded-full flex-shrink-0
           ${mapeados === totalItems ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
           {mapeados}/{totalItems}
         </span>
       </div>
+
+      {totalItems > 4 && (
+        <div className="flex gap-1 bg-gray-100 rounded-xl p-1">
+          <button type="button" onClick={() => setSoloPendientes(false)} className={chip(!soloPendientes)}>
+            Todos ({totalItems})
+          </button>
+          <button type="button" onClick={() => setSoloPendientes(true)} className={chip(soloPendientes)}>
+            Faltan ({pendientes.length})
+          </button>
+        </div>
+      )}
 
       {sinOpciones > 0 && (
         <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-xl px-3 py-2">
@@ -325,24 +366,30 @@ function PasoMapeo({ items, equivalencias, selecciones, onSeleccionar, sucursalD
         </div>
       )}
 
-      <div className="flex flex-col gap-2 max-h-[60vh] sm:max-h-[50vh] overflow-y-auto">
-        {items.map((item) => {
-          const equiv = equivalencias.find((e) => e.key === item.key);
-          return (
-            <ItemTraslado
+      {visibles.length === 0 ? (
+        <div className="flex flex-col items-center gap-2 py-6">
+          <CheckCircle size={22} className="text-green-500" />
+          <p className="text-sm text-gray-500">Todos los productos quedaron vinculados</p>
+          <button type="button" onClick={() => setSoloPendientes(false)}
+            className="text-xs font-medium text-blue-600 underline">
+            Ver los {totalItems} productos
+          </button>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-2 max-h-[58vh] sm:max-h-[50vh] overflow-y-auto">
+          {visibles.map((item) => (
+            <FilaItem
               key={item.key}
               item={item}
-              equivalencia={equiv}
+              equivalencia={equivalencias.find((e) => e.key === item.key)}
               seleccionId={selecciones[item.key] || null}
-              onSeleccionar={(id) => handleSeleccionar(item.key, id)}
-              sucursalDestinoId={sucursalDestinoId}
+              nombreDestino={nombresDestino[item.key] || null}
+              onAbrir={onAbrir}
               onEliminar={onEliminar}
-              expandido={abiertaKey === item.key}
-              onToggle={() => setAbiertaKey(abiertaKey === item.key ? null : item.key)}
             />
-          );
-        })}
-      </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -361,6 +408,16 @@ export function ModalTraslado({ open, onClose }) {
   const [sucursalDestinoId, setSucursalDestinoId] = useState(null);
   const [equivalencias, setEquivalencias]       = useState([]);
   const [selecciones, setSelecciones]           = useState({});
+  // El nombre del destino se guarda al elegirlo: el que sale de una búsqueda
+  // manual no está en las sugerencias, y la fila tiene que poder mostrarlo.
+  const [nombresDestino, setNombresDestino]     = useState({});
+  const [itemEditando, setItemEditando]         = useState(null);
+  // Con veinte productos, la mayoría entra vinculada sola por coincidencia
+  // exacta: poder dejar en pantalla únicamente los que faltan es la diferencia
+  // entre atender cuatro y revisar veinte. Vive aquí y no en la lista porque la
+  // lista se desmonta al abrir la vista de elección — dentro, el filtro se
+  // perdería en cada producto vinculado.
+  const [soloPendientes, setSoloPendientes]     = useState(false);
   const [notas, setNotas]                       = useState('');
   const [error, setError]                       = useState('');
 
@@ -391,10 +448,16 @@ export function ModalTraslado({ open, onClose }) {
 
       // Auto-seleccionar los que tienen coincidencia exacta única
       const autoSel = {};
+      const autoNom = {};
       data.forEach((eq) => {
-        if (eq.auto_seleccionado) autoSel[eq.key] = eq.auto_seleccionado;
+        if (!eq.auto_seleccionado) return;
+        autoSel[eq.key] = eq.auto_seleccionado;
+        autoNom[eq.key] = (eq.sugerencias || []).find((sg) => sg.id === eq.auto_seleccionado)?.nombre || null;
       });
       setSelecciones(autoSel);
+      setNombresDestino(autoNom);
+      setItemEditando(null);
+      setSoloPendientes(false);
       setPaso(2);
     },
     onError: (err) => setError(err.response?.data?.error || 'Error al buscar equivalentes'),
@@ -442,6 +505,8 @@ export function ModalTraslado({ open, onClose }) {
     const restantes = items.filter((i) => i.key !== key);
     eliminarItem(key);
     setSelecciones((prev) => { const next = { ...prev }; delete next[key]; return next; });
+    setNombresDestino((prev) => { const next = { ...prev }; delete next[key]; return next; });
+    if (itemEditando === key) setItemEditando(null);
     if (restantes.length === 0) {
       setPaso(1);
       setSucursalDestinoId(null);
@@ -455,8 +520,10 @@ export function ModalTraslado({ open, onClose }) {
     mutBuscar.mutate(id);
   };
 
-  const handleSeleccionarDestino = (key, productoDestinoId) => {
+  const handleSeleccionarDestino = (key, productoDestinoId, nombre) => {
     setSelecciones((prev) => ({ ...prev, [key]: productoDestinoId }));
+    setNombresDestino((prev) => ({ ...prev, [key]: nombre || null }));
+    setItemEditando(null);   // vuelve solo a la lista, con la fila ya en verde
   };
 
   const handleConfirmar = () => {
@@ -467,6 +534,13 @@ export function ModalTraslado({ open, onClose }) {
     }
     mutEjecutar.mutate();
   };
+
+  // Elegir destino es una vista aparte dentro del mismo modal, no un desplegable
+  // dentro de la fila: así la búsqueda tiene la pantalla entera y la lista de
+  // productos nunca tiene que esconder nada para hacerle sitio.
+  const itemEditandoObj  = itemEditando ? items.find((i) => i.key === itemEditando) : null;
+  const equivEditando    = itemEditando ? equivalencias.find((e) => e.key === itemEditando) : null;
+  const editandoDestino  = Boolean(itemEditandoObj && equivEditando);
 
   const sucursalOrigenNombre = sucursales.find((s) => s.id === sucursalOrigenId)?.nombre || '';
   const sucursalDestinoNombre = sucursales.find((s) => s.id === sucursalDestinoId)?.nombre || '';
@@ -514,10 +588,12 @@ export function ModalTraslado({ open, onClose }) {
         </div>
 
         {/* Resumen de items */}
-        <div className="flex items-center gap-2 text-xs text-gray-500">
-          <Package size={12} />
-          <span>{items.length} producto{items.length !== 1 ? 's' : ''} en el carrito</span>
-        </div>
+        {!editandoDestino && (
+          <div className="flex items-center gap-2 text-xs text-gray-500">
+            <Package size={12} />
+            <span>{items.length} producto{items.length !== 1 ? 's' : ''} en el carrito</span>
+          </div>
+        )}
 
         {/* Paso 1: Seleccionar sucursal */}
         {paso === 1 && (
@@ -537,16 +613,32 @@ export function ModalTraslado({ open, onClose }) {
           </>
         )}
 
+        {/* Paso 2a: elegir el destino de UN producto, con el modal entero */}
+        {paso === 2 && editandoDestino && (
+          <VistaSelectorDestino
+            item={itemEditandoObj}
+            equivalencia={equivEditando}
+            seleccionId={selecciones[itemEditando] || null}
+            sucursalDestinoId={sucursalDestinoId}
+            posicion={items.findIndex((i) => i.key === itemEditando) + 1}
+            total={items.length}
+            onVolver={() => setItemEditando(null)}
+            onSeleccionar={(id, nombre) => handleSeleccionarDestino(itemEditando, id, nombre)}
+          />
+        )}
+
         {/* Paso 2: Mapear productos */}
-        {paso === 2 && (
+        {paso === 2 && !editandoDestino && (
           <>
             <PasoMapeo
               items={items}
               equivalencias={equivalencias}
               selecciones={selecciones}
-              onSeleccionar={handleSeleccionarDestino}
-              sucursalDestinoId={sucursalDestinoId}
+              nombresDestino={nombresDestino}
+              onAbrir={setItemEditando}
               onEliminar={handleEliminarItem}
+              soloPendientes={soloPendientes}
+              setSoloPendientes={setSoloPendientes}
             />
 
             <div className="flex flex-col gap-2">
@@ -567,7 +659,10 @@ export function ModalTraslado({ open, onClose }) {
 
             <div className="flex flex-col-reverse sm:flex-row gap-2">
               <Button variant="secondary" className="sm:flex-1"
-                onClick={() => { setPaso(1); setSucursalDestinoId(null); setEquivalencias([]); setSelecciones({}); setError(''); }}>
+                onClick={() => {
+                  setPaso(1); setSucursalDestinoId(null); setEquivalencias([]);
+                  setSelecciones({}); setNombresDestino({}); setItemEditando(null); setError('');
+                }}>
                 Cambiar sucursal
               </Button>
               <Button className="sm:flex-1" loading={mutEjecutar.isPending}
