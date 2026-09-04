@@ -150,22 +150,22 @@ function SelectorDestino({ equivalencia, seleccionId, onSeleccionar, sucursalDes
           listaVisible.map((prod) => {
             const esSel = seleccionId === prod.id;
             return (
-              <button key={prod.id} onClick={() => onSeleccionar(prod.id)}
-                className={`flex items-center justify-between p-2.5 rounded-xl text-left text-sm border transition-all
+              <button key={prod.id} onClick={() => onSeleccionar(prod.id, prod.nombre)}
+                className={`flex items-center justify-between gap-2 p-2.5 rounded-xl text-left text-sm border transition-all
                   ${esSel
                     ? 'bg-blue-50 border-blue-300 ring-1 ring-blue-200'
                     : 'bg-white border-gray-100 hover:border-blue-200 hover:bg-blue-50/30'}`}>
                 <div className="flex-1 min-w-0">
-                  <p className={`font-medium truncate ${esSel ? 'text-blue-800' : 'text-gray-800'}`}>
+                  <p className={`font-medium line-clamp-2 leading-snug ${esSel ? 'text-blue-800' : 'text-gray-800'}`}>
                     {prod.nombre}
                   </p>
-                  <p className="text-xs text-gray-400 truncate">
+                  <p className="text-xs text-gray-400 line-clamp-2 leading-snug">
                     {[prod.marca, prod.modelo, prod.linea_nombre].filter(Boolean).join(' · ')}
                     {prod.stock != null && ` · Stock: ${prod.stock}`}
                     {prod.disponibles != null && ` · ${prod.disponibles} disp.`}
                   </p>
                 </div>
-                {esSel && <CheckCircle size={16} className="text-blue-600 flex-shrink-0 ml-2" />}
+                {esSel && <CheckCircle size={16} className="text-blue-600 flex-shrink-0" />}
               </button>
             );
           })
@@ -176,11 +176,20 @@ function SelectorDestino({ equivalencia, seleccionId, onSeleccionar, sucursalDes
 }
 
 // ─── Card de item a trasladar ─────────────────────────────────────────────────
-function ItemTraslado({ item, equivalencia, seleccionId, onSeleccionar, sucursalDestinoId, onEliminar }) {
-  const [expandido, setExpandido] = useState(!equivalencia?.auto_seleccionado);
+function ItemTraslado({
+  item, equivalencia, seleccionId, onSeleccionar, sucursalDestinoId, onEliminar,
+  expandido, onToggle,
+}) {
+  // El destino elegido a mano no vive en las sugerencias (salió de una búsqueda
+  // contra el backend), así que se guarda al elegirlo: cerrada, la tarjeta tiene
+  // que poder decir a qué producto quedó vinculada.
+  const [nombreManual, setNombreManual] = useState(null);
 
   const TipoIcon = item.tipo === 'serial' ? Package : ShoppingBag;
   const sinOpciones = !equivalencia || (equivalencia.sugerencias || []).length === 0;
+  const nombreDestino = seleccionId
+    ? (equivalencia?.sugerencias || []).find((s) => s.id === seleccionId)?.nombre || nombreManual
+    : null;
 
   return (
     <div className={`rounded-2xl border overflow-hidden transition-all
@@ -190,23 +199,28 @@ function ItemTraslado({ item, equivalencia, seleccionId, onSeleccionar, sucursal
         ? 'border-green-200 bg-green-50/20'
         : 'border-amber-200 bg-amber-50/20'}`}>
 
-      {/* Header del item */}
-      <div className="flex items-center">
-        <button onClick={() => setExpandido(!expandido)}
-          className="flex-1 flex items-center gap-3 px-4 py-3 text-left hover:bg-white/50 transition-colors min-w-0">
+      {/* Header del item — el nombre manda: la insignia, el IMEI y la cantidad
+          van DEBAJO en vez de pelearle el ancho en la misma fila (en un celular
+          le dejaban ~90 px y todo salía cortado). */}
+      <div className="flex items-start">
+        <button onClick={onToggle}
+          className="flex-1 flex items-start gap-2.5 sm:gap-3 px-3 sm:px-4 py-3 text-left hover:bg-white/50 transition-colors min-w-0">
           <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0
             ${item.tipo === 'serial' ? 'bg-blue-100' : 'bg-green-100'}`}>
             <TipoIcon size={14} className={item.tipo === 'serial' ? 'text-blue-600' : 'text-green-600'} />
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold text-gray-900 truncate">{item.nombre}</p>
-            <div className="flex items-center gap-2 flex-wrap">
+            <p className="text-sm font-semibold text-gray-900 leading-snug line-clamp-2">{item.nombre}</p>
+            <div className="flex items-center gap-1.5 flex-wrap mt-1">
               {item.imei && <span className="text-xs text-gray-400 font-mono">{item.imei}</span>}
               {item.tipo === 'cantidad' && <span className="text-xs text-gray-400">×{item.cantidad || 1}</span>}
+              {equivalencia && <BadgeNivel nivel={equivalencia.nivel} />}
             </div>
+            {nombreDestino && !expandido && (
+              <p className="text-xs text-green-700 leading-snug line-clamp-1 mt-1">→ {nombreDestino}</p>
+            )}
           </div>
-          <div className="flex items-center gap-2 flex-shrink-0">
-            {equivalencia && <BadgeNivel nivel={equivalencia.nivel} />}
+          <div className="flex items-center flex-shrink-0 pt-0.5">
             {seleccionId
               ? <CheckCircle size={16} className="text-green-500" />
               : sinOpciones
@@ -217,7 +231,7 @@ function ItemTraslado({ item, equivalencia, seleccionId, onSeleccionar, sucursal
         <button
           onClick={() => onEliminar(item.key)}
           title="Quitar del traslado"
-          className="px-3 py-3 text-gray-300 hover:text-red-500 transition-colors flex-shrink-0"
+          className="px-2.5 sm:px-3 py-3 text-gray-300 hover:text-red-500 transition-colors flex-shrink-0"
         >
           <X size={14} />
         </button>
@@ -225,14 +239,14 @@ function ItemTraslado({ item, equivalencia, seleccionId, onSeleccionar, sucursal
 
       {/* Selector expandido */}
       {expandido && equivalencia && (
-        <div className="px-4 pb-3 border-t border-gray-100">
+        <div className="px-3 sm:px-4 pb-3 border-t border-gray-100">
           <p className="text-xs text-gray-500 font-medium py-2">
             Selecciona el producto destino:
           </p>
           <SelectorDestino
             equivalencia={equivalencia}
             seleccionId={seleccionId}
-            onSeleccionar={(id) => { onSeleccionar(id); setExpandido(false); }}
+            onSeleccionar={(id, nombre) => { setNombreManual(nombre || null); onSeleccionar(id); }}
             sucursalDestinoId={sucursalDestinoId}
           />
         </div>
@@ -275,6 +289,22 @@ function PasoMapeo({ items, equivalencias, selecciones, onSeleccionar, sucursalD
   const mapeados    = Object.values(selecciones).filter(Boolean).length;
   const sinOpciones = equivalencias.filter((e) => (e.sugerencias || []).length === 0).length;
 
+  // Acordeón: UNA tarjeta abierta a la vez. Cada tarjeta abierta trae un
+  // buscador y su propia lista con scroll; con veinte productos sin
+  // autoselección se abrían todas de golpe y la pantalla se volvía un muro
+  // — en un celular no se distingue nada. Arranca en el primero pendiente.
+  const [abiertaKey, setAbiertaKey] = useState(
+    () => items.find((i) => !selecciones[i.key])?.key ?? null,
+  );
+
+  // Al vincular uno, salta al siguiente pendiente: mapear treinta productos a
+  // punta de abrir y cerrar a mano es justo el trabajo que sobra.
+  const handleSeleccionar = (key, productoDestinoId) => {
+    onSeleccionar(key, productoDestinoId);
+    const desde = items.findIndex((i) => i.key === key);
+    setAbiertaKey(items.slice(desde + 1).find((i) => !selecciones[i.key])?.key ?? null);
+  };
+
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center justify-between">
@@ -295,7 +325,7 @@ function PasoMapeo({ items, equivalencias, selecciones, onSeleccionar, sucursalD
         </div>
       )}
 
-      <div className="flex flex-col gap-2 max-h-[50vh] overflow-y-auto">
+      <div className="flex flex-col gap-2 max-h-[60vh] sm:max-h-[50vh] overflow-y-auto">
         {items.map((item) => {
           const equiv = equivalencias.find((e) => e.key === item.key);
           return (
@@ -304,9 +334,11 @@ function PasoMapeo({ items, equivalencias, selecciones, onSeleccionar, sucursalD
               item={item}
               equivalencia={equiv}
               seleccionId={selecciones[item.key] || null}
-              onSeleccionar={(id) => onSeleccionar(item.key, id)}
+              onSeleccionar={(id) => handleSeleccionar(item.key, id)}
               sucursalDestinoId={sucursalDestinoId}
               onEliminar={onEliminar}
+              expandido={abiertaKey === item.key}
+              onToggle={() => setAbiertaKey(abiertaKey === item.key ? null : item.key)}
             />
           );
         })}
@@ -467,15 +499,15 @@ export function ModalTraslado({ open, onClose }) {
       <div className="flex flex-col gap-4">
 
         {/* Header visual */}
-        <div className="flex items-center gap-3 bg-gray-50 rounded-xl px-4 py-3">
-          <div className="flex-1 text-center">
+        <div className="flex items-center gap-2 sm:gap-3 bg-gray-50 rounded-xl px-3 sm:px-4 py-3">
+          <div className="flex-1 min-w-0 text-center">
             <p className="text-xs text-gray-400">Origen</p>
-            <p className="text-sm font-semibold text-gray-800">{sucursalOrigenNombre}</p>
+            <p className="text-sm font-semibold text-gray-800 truncate">{sucursalOrigenNombre}</p>
           </div>
           <ArrowRightLeft size={18} className="text-gray-400 flex-shrink-0" />
-          <div className="flex-1 text-center">
+          <div className="flex-1 min-w-0 text-center">
             <p className="text-xs text-gray-400">Destino</p>
-            <p className={`text-sm font-semibold ${sucursalDestinoId ? 'text-blue-700' : 'text-gray-300'}`}>
+            <p className={`text-sm font-semibold truncate ${sucursalDestinoId ? 'text-blue-700' : 'text-gray-300'}`}>
               {sucursalDestinoNombre || 'Seleccionar...'}
             </p>
           </div>
@@ -533,12 +565,12 @@ export function ModalTraslado({ open, onClose }) {
               </div>
             )}
 
-            <div className="flex gap-2">
-              <Button variant="secondary" className="flex-1"
+            <div className="flex flex-col-reverse sm:flex-row gap-2">
+              <Button variant="secondary" className="sm:flex-1"
                 onClick={() => { setPaso(1); setSucursalDestinoId(null); setEquivalencias([]); setSelecciones({}); setError(''); }}>
                 Cambiar sucursal
               </Button>
-              <Button className="flex-1" loading={mutEjecutar.isPending}
+              <Button className="sm:flex-1" loading={mutEjecutar.isPending}
                 onClick={handleConfirmar} disabled={!todosMapeados}>
                 <ArrowRightLeft size={14} />
                 Trasladar {items.length} producto{items.length !== 1 ? 's' : ''}
