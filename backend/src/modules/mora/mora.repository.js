@@ -55,12 +55,15 @@ const findPorDocumento = async (client, { credito_id = null, prestamo_id = null 
  * Evita el N+1 al listar créditos o los 1.793 préstamos activos de un negocio.
  * @returns {{ creditos: Map<number, rows>, prestamos: Map<number, rows> }}
  */
-const findPorDocumentos = async ({ creditoIds = [], prestamoIds = [] }) => {
+// `executor` permite leer DENTRO de la transacción del llamador. Importa en el
+// pago total: si lee por fuera, lee el saldo de antes del lock y reparte sobre
+// cifras viejas. Por defecto es el pool, así que los demás llamadores no cambian.
+const findPorDocumentos = async ({ creditoIds = [], prestamoIds = [] }, executor = pool) => {
   const creditos  = new Map();
   const prestamos = new Map();
   if (!creditoIds.length && !prestamoIds.length) return { creditos, prestamos };
 
-  const { rows } = await pool.query(`
+  const { rows } = await executor.query(`
     SELECT credito_id, prestamo_id, concepto, tipo, valor, anulado
     FROM movimientos_mora
     WHERE (credito_id  = ANY($1::int[]))
@@ -148,12 +151,12 @@ const findAbonosCapital = async (client, { credito_id = null, prestamo_id = null
  * Abonos a capital de VARIOS documentos, agrupados. Una sola consulta por tipo,
  * para no hacer N+1 al listar los préstamos activos de un negocio.
  */
-const findAbonosCapitalPorDocumentos = async ({ creditoIds = [], prestamoIds = [] }) => {
+const findAbonosCapitalPorDocumentos = async ({ creditoIds = [], prestamoIds = [] }, executor = pool) => {
   const creditos  = new Map();
   const prestamos = new Map();
 
   if (creditoIds.length) {
-    const { rows } = await pool.query(
+    const { rows } = await executor.query(
       `SELECT credito_id, fecha, valor FROM abonos_credito
        WHERE credito_id = ANY($1::int[]) ORDER BY fecha ASC`,
       [creditoIds]
@@ -165,7 +168,7 @@ const findAbonosCapitalPorDocumentos = async ({ creditoIds = [], prestamoIds = [
     }
   }
   if (prestamoIds.length) {
-    const { rows } = await pool.query(
+    const { rows } = await executor.query(
       `SELECT prestamo_id, fecha, valor FROM abonos_prestamo
        WHERE prestamo_id = ANY($1::int[]) ORDER BY fecha ASC`,
       [prestamoIds]

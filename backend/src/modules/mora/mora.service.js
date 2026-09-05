@@ -200,7 +200,7 @@ const anotarDocumento = async (documento, tipo, { client = null } = {}) => {
  * documentos: al listar los 1.793 préstamos activos de un negocio, hacerlo
  * documento por documento serían 1.793 consultas.
  */
-const anotarLista = async (documentos, tipo) => {
+const anotarLista = async (documentos, tipo, { client = null } = {}) => {
   if (!Array.isArray(documentos) || !documentos.length) return documentos;
   const cfg = _doc(tipo);
 
@@ -219,16 +219,22 @@ const anotarLista = async (documentos, tipo) => {
   const esCredito = tipo === 'credito';
   // Dos consultas en lote (movimientos de mora y abonos a capital) en vez de
   // dos por documento: con 1.793 préstamos activos la diferencia es brutal.
-  const [movs, abos] = await Promise.all([
-    repo.findPorDocumentos({
-      creditoIds:  esCredito ? ids : [],
-      prestamoIds: esCredito ? [] : ids,
-    }),
-    repo.findAbonosCapitalPorDocumentos({
-      creditoIds:  esCredito ? ids : [],
-      prestamoIds: esCredito ? [] : ids,
-    }),
-  ]);
+  //
+  // Con `client` van SECUENCIALES y por la conexión de la transacción: un client
+  // de pg atiende una consulta a la vez (lanzarlas en paralelo es el patrón que
+  // pg marca como deprecado), y pedirle una segunda conexión al pool mientras se
+  // tiene una tomada es como se agota el pool bajo carga.
+  const claves = {
+    creditoIds:  esCredito ? ids : [],
+    prestamoIds: esCredito ? [] : ids,
+  };
+  const [movs, abos] = client
+    ? [await repo.findPorDocumentos(claves, client),
+       await repo.findAbonosCapitalPorDocumentos(claves, client)]
+    : await Promise.all([
+        repo.findPorDocumentos(claves),
+        repo.findAbonosCapitalPorDocumentos(claves),
+      ]);
   const mapaMov = esCredito ? movs.creditos : movs.prestamos;
   const mapaAbo = esCredito ? abos.creditos : abos.prestamos;
 

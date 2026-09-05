@@ -3,6 +3,7 @@ const repo         = require('./prestamos.repository');
 const moraService  = require('../mora/mora.service');
 const { asignarNumeroDocumento } = require('../../utils/numeracion.util');
 const { repartirAbono } = require('../../utils/mora.util');
+const { bloquearOperacion } = require('../../utils/idempotencia.util');
 
 // ─── Helpers privados ─────────────────────────────────────────────────────────
 
@@ -650,19 +651,23 @@ const registrarAbono = async (
   exigirMismaSucursalDoc(prestamo, sucursalId, 'préstamo');
   if (prestamo.estado !== 'Activo') throw { status: 400, message: 'El préstamo no está activo' };
 
-  const gemelo = await repo.buscarAbonoGemelo(pool, {
-    prestamo_id: prestamoId, valor, metodo, segundos: VENTANA_DUPLICADO_SEG,
-  });
-  if (gemelo) {
-    throw {
-      status: 409,
-      message: 'Este mismo abono ya se registró hace un momento. Si de verdad son dos pagos distintos, espera un minuto y vuelve a intentarlo.',
-    };
-  }
-
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+
+    // La baranda va DENTRO de la transacción y detrás del lock. Fuera, el
+    // SELECT no ve el abono que la petición gemela todavía no commiteó y las
+    // dos pasan — que es exactamente como entraron los duplicados de agosto.
+    await bloquearOperacion(client, `abono-prestamo:${prestamoId}`);
+    const gemelo = await repo.buscarAbonoGemelo(client, {
+      prestamo_id: prestamoId, valor, metodo, segundos: VENTANA_DUPLICADO_SEG,
+    });
+    if (gemelo) {
+      throw {
+        status: 409,
+        message: 'Este mismo abono ya se registró hace un momento. Si de verdad son dos pagos distintos, espera un minuto y vuelve a intentarlo.',
+      };
+    }
 
     // Dentro de la transacción: si entran dos abonos a la vez, cada uno ve el
     // saldo y la mora que dejó el otro.
@@ -1900,71 +1905,84 @@ const registrarAbonoTotal = async (
   if (tipo === 'prestatario') await _verificarPrestatario(personaId, negocioId);
   else await _verificarCliente(personaId, negocioId);
 
-  // Misma baranda que en el abono individual: dos pagos totales idénticos en el
-  // mismo minuto son un doble clic, y cada uno reparte por su cuenta.
-  const gemeloTotal = await repo.buscarAbonoTotalGemelo(pool, {
-    tipo_persona: tipo, persona_id: personaId, valor_total: valorTotal,
-    metodo, segundos: VENTANA_DUPLICADO_SEG,
-  });
-  if (gemeloTotal) {
-    throw {
-      status: 409,
-      message: 'Este mismo pago total ya se registró hace un momento. Revisa el estado de cuenta antes de volver a intentarlo.',
-    };
-  }
-
-  const prestamosActivos = await repo.getPrestamoActivosPorPersona(pool, tipo, personaId, negocioId, sucursalId);
-  if (!prestamosActivos.length) throw { status: 400, message: 'Esta persona no tiene préstamos activos en esta sucursal' };
-
-  // El tope incluye los cargos pendientes de cada préstamo: si solo se contara
-  // el capital, un pago que cubre los intereses sería rechazado.
-  const conMora = await moraService.anotarLista(prestamosActivos, 'prestamo');
-  const moraPorPrestamo    = new Map(conMora.map((p) => [Number(p.id), p.mora]));
-  const interesPorPrestamo = new Map(conMora.map((p) => [Number(p.id), p.interes]));
-
-  /** Lo que se debe por un préstamo: capital + mora + interés. */
-  const _debeDe = (p) => Number(p.valor_prestamo) - Number(p.total_abonado)
-    + Number(p.mora?.pendiente || 0) + Number(p.interes?.pendiente || 0);
-
-  const totalPendiente = conMora.reduce((s, p) => s + _debeDe(p), 0);
-  if (valorTotal > totalPendiente) {
-    throw { status: 400, message: `El abono (${valorTotal}) supera el saldo total pendiente (${totalPendiente.toFixed(2)})` };
-  }
-
-  // Distribución elegida en pantalla: { [prestamo_id]: valor }. Se valida que
-  // sume el abono y que ningún préstamo reciba más de lo que debe.
-  let planManual = null;
-  if (distribucion_manual && typeof distribucion_manual === 'object') {
-    planManual = new Map();
-    let suma = 0;
-    for (const p of conMora) {
-      const v = Math.max(0, Math.round(Number(distribucion_manual[p.id] ?? 0)));
-      if (!v) continue;
-      const debe = _debeDe(p);
-      if (v > debe) {
-        throw {
-          status: 400,
-          message: `Al préstamo #${p.numero ?? p.id} le asignaste $${v.toLocaleString('es-CO')} `
-            + `pero solo debe $${Math.round(debe).toLocaleString('es-CO')}`,
-        };
-      }
-      planManual.set(Number(p.id), v);
-      suma += v;
-    }
-    if (Math.round(suma) !== Math.round(valorTotal)) {
-      throw {
-        status: 400,
-        message: `La distribución suma $${suma.toLocaleString('es-CO')} y el abono es `
-          + `$${Math.round(valorTotal).toLocaleString('es-CO')}. Deben coincidir.`,
-      };
-    }
-  }
-
   const sucId = sucursalId;
 
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+
+    // ── Baranda contra el doble clic ────────────────────────────────────────
+    //
+    // TODO lo que sigue —la baranda, los préstamos y sus cargos— va DENTRO de
+    // la transacción y detrás del lock, y ese orden es el arreglo entero.
+    //
+    // Antes la baranda miraba por fuera: la segunda petición corría su SELECT
+    // sobre otra conexión mientras la primera seguía sin commitear, no veía
+    // nada y repartía otra vez. Así entraron los TRES pagos de $100.000.000 de
+    // FACTURA JUANSHOP en 2,8 segundos el 29-ago-2026.
+    //
+    // Leer los préstamos aquí adentro importa por sí solo, aunque no haya
+    // duplicado: dos pagos DISTINTOS y simultáneos leían los mismos saldos y
+    // se repartían el mismo cupo dos veces.
+    await bloquearOperacion(client, `abono-total:${tipo}:${personaId}`);
+
+    const gemeloTotal = await repo.buscarAbonoTotalGemelo(client, {
+      tipo_persona: tipo, persona_id: personaId, valor_total: valorTotal,
+      metodo, segundos: VENTANA_DUPLICADO_SEG,
+    });
+    if (gemeloTotal) {
+      throw {
+        status: 409,
+        message: 'Este mismo pago total ya se registró hace un momento. Revisa el estado de cuenta antes de volver a intentarlo.',
+      };
+    }
+
+    const prestamosActivos = await repo.getPrestamoActivosPorPersona(client, tipo, personaId, negocioId, sucursalId);
+    if (!prestamosActivos.length) throw { status: 400, message: 'Esta persona no tiene préstamos activos en esta sucursal' };
+
+    // El tope incluye los cargos pendientes de cada préstamo: si solo se contara
+    // el capital, un pago que cubre los intereses sería rechazado.
+    const conMora = await moraService.anotarLista(prestamosActivos, 'prestamo', { client });
+    const moraPorPrestamo    = new Map(conMora.map((p) => [Number(p.id), p.mora]));
+    const interesPorPrestamo = new Map(conMora.map((p) => [Number(p.id), p.interes]));
+
+    /** Lo que se debe por un préstamo: capital + mora + interés. */
+    const _debeDe = (p) => Number(p.valor_prestamo) - Number(p.total_abonado)
+      + Number(p.mora?.pendiente || 0) + Number(p.interes?.pendiente || 0);
+
+    const totalPendiente = conMora.reduce((s, p) => s + _debeDe(p), 0);
+    if (valorTotal > totalPendiente) {
+      throw { status: 400, message: `El abono (${valorTotal}) supera el saldo total pendiente (${totalPendiente.toFixed(2)})` };
+    }
+
+    // Distribución elegida en pantalla: { [prestamo_id]: valor }. Se valida que
+    // sume el abono y que ningún préstamo reciba más de lo que debe.
+    let planManual = null;
+    if (distribucion_manual && typeof distribucion_manual === 'object') {
+      planManual = new Map();
+      let suma = 0;
+      for (const p of conMora) {
+        const v = Math.max(0, Math.round(Number(distribucion_manual[p.id] ?? 0)));
+        if (!v) continue;
+        const debe = _debeDe(p);
+        if (v > debe) {
+          throw {
+            status: 400,
+            message: `Al préstamo #${p.numero ?? p.id} le asignaste $${v.toLocaleString('es-CO')} `
+              + `pero solo debe $${Math.round(debe).toLocaleString('es-CO')}`,
+          };
+        }
+        planManual.set(Number(p.id), v);
+        suma += v;
+      }
+      if (Math.round(suma) !== Math.round(valorTotal)) {
+        throw {
+          status: 400,
+          message: `La distribución suma $${suma.toLocaleString('es-CO')} y el abono es `
+            + `$${Math.round(valorTotal).toLocaleString('es-CO')}. Deben coincidir.`,
+        };
+      }
+    }
 
     const abonoTotal = await repo.insertarAbonoTotal(client, {
       tipo_persona: tipo,
@@ -1976,8 +1994,17 @@ const registrarAbonoTotal = async (
       descripcion,
     });
 
+    // ── FASE 1: el reparto se decide en memoria, sin tocar la base ──────────
+    //
+    // Antes cada préstamo costaba ~6 viajes a la base (insertar, actualizar,
+    // recargar el documento, releer sus movimientos y sus abonos para volver a
+    // derivar los cargos, cerrar). Con los 27 préstamos de un mayorista eso son
+    // más de 160 idas y vueltas contra una base remota: los segundos que el
+    // vendedor pasa mirando el botón, que es exactamente lo que lo lleva a
+    // hacer clic otra vez. Todo lo que hace falta para decidir el reparto ya
+    // está en memoria, así que primero se decide y después se escribe.
     let remaining = valorTotal;
-    const distribucion = [];
+    const planes = [];
 
     for (const prestamo of prestamosActivos) {
       if (remaining <= 0) break;
@@ -2005,45 +2032,122 @@ const registrarAbonoTotal = async (
         modo,
       });
 
-      let abonoId = null;
+      // Un préstamo SIN plazo y SIN plan de interés no tiene cargos y no puede
+      // tenerlos: con la condición en NULL, `resolverEstadoMora` y
+      // `resolverEstadoInteres` devuelven `aplica:false` y pendiente 0 —es la
+      // regla de la que cuelgan las dos features—. Para esos, «¿queda saldado?»
+      // es una resta que ya está hecha y no hace falta volver a preguntarle a la
+      // base. Los que SÍ tienen cargos siguen pasando por `cerrarSiPagadoEnTx`,
+      // sin un solo cambio.
+      const sinCargos = mora.aplica !== true && interes.aplica !== true;
 
-      if (reparto.a_capital > 0) {
-        const { rows: ab } = await client.query(
-          `INSERT INTO abonos_prestamo(prestamo_id, valor, metodo, usuario_id, abono_total_id)
-           VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-          [prestamo.id, reparto.a_capital, metodo, usuarioId || null, abonoTotal.id]
-        );
-        abonoId = ab[0].id;
+      planes.push({ prestamo, paraEste, reparto, saldoPendiente, mora, interes, sinCargos });
+      remaining -= paraEste;
+    }
 
+    // ── FASE 2: escribir ─────────────────────────────────────────
+    //
+    // Los préstamos sin cargos se escriben en lote (tres consultas para todos);
+    // los que tienen mora o interés conservan su camino de siempre, uno por uno.
+    const enLote = planes.filter((pl) => pl.sinCargos && pl.reparto.a_capital > 0);
+    const saldadosEnLote = new Set();
+
+    if (enLote.length) {
+      const ids     = enLote.map((pl) => Number(pl.prestamo.id));
+      const valores = enLote.map((pl) => pl.reparto.a_capital);
+
+      await client.query(`
+        INSERT INTO abonos_prestamo(prestamo_id, valor, metodo, usuario_id, abono_total_id)
+        SELECT t.id, t.valor, $3, $4, $5
+          FROM unnest($1::int[], $2::numeric[]) AS t(id, valor)
+      `, [ids, valores, metodo, usuarioId || null, abonoTotal.id]);
+
+      await client.query(`
+        UPDATE prestamos p
+           SET total_abonado = p.total_abonado + t.valor
+          FROM unnest($1::int[], $2::numeric[]) AS t(id, valor)
+         WHERE p.id = t.id
+      `, [ids, valores]);
+
+      // El mismo redondeo que aplica `cerrarSiPagadoEnTx` al preguntar si queda
+      // capital: sin él, un centavo de diferencia dejaría abierto un préstamo
+      // que el otro camino sí cerraría.
+      const cerrar = enLote.filter(
+        (pl) => Math.round(pl.saldoPendiente - pl.reparto.a_capital) <= 0
+      );
+      if (cerrar.length) {
+        const idsCerrar = cerrar.map((pl) => Number(pl.prestamo.id));
         await client.query(
-          `UPDATE prestamos SET total_abonado = total_abonado + $1 WHERE id = $2`,
-          [reparto.a_capital, prestamo.id]
+          `UPDATE prestamos SET estado = 'Saldado' WHERE id = ANY($1::int[]) AND estado = 'Activo'`,
+          [idsCerrar]
         );
-      }
+        for (const id of idsCerrar) saldadosEnLote.add(id);
 
-      if (reparto.a_mora > 0) {
-        await moraService.registrarCobroEnTx(client, {
-          tipo: 'prestamo', documento: prestamo, negocioId, concepto: 'mora',
-          valor: reparto.a_mora, metodo, usuarioId,
-          estadoMora: mora, abonoPrestamoId: abonoId,
+        // El pago total no factura cada préstamo (deja un único movimiento en el
+        // estado de cuenta) pero sí marca el equipo vendido, igual que antes.
+        const conImei = cerrar.filter((pl) => pl.prestamo.imei);
+        if (conImei.length) {
+          await client.query(`
+            UPDATE seriales s
+               SET vendido = true, prestado = false, fecha_salida = CURRENT_DATE
+              FROM productos_serial ps, unnest($1::text[], $2::int[]) AS t(imei, sucursal_id)
+             WHERE s.imei = t.imei
+               AND ps.id = s.producto_id
+               AND ps.sucursal_id = t.sucursal_id
+          `, [conImei.map((pl) => pl.prestamo.imei), conImei.map((pl) => Number(pl.prestamo.sucursal_id))]);
+        }
+      }
+    }
+
+    // El orden de `distribucion` es el del reparto (FIFO), no el de los lotes:
+    // es lo que la pantalla le muestra al vendedor.
+    const distribucion = [];
+    for (const pl of planes) {
+      const { prestamo, paraEste, reparto, mora, interes, sinCargos } = pl;
+      let saldado;
+
+      if (sinCargos && reparto.a_capital > 0) {
+        saldado = saldadosEnLote.has(Number(prestamo.id));
+      } else {
+        let abonoId = null;
+
+        if (reparto.a_capital > 0) {
+          const { rows: ab } = await client.query(
+            `INSERT INTO abonos_prestamo(prestamo_id, valor, metodo, usuario_id, abono_total_id)
+             VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+            [prestamo.id, reparto.a_capital, metodo, usuarioId || null, abonoTotal.id]
+          );
+          abonoId = ab[0].id;
+
+          await client.query(
+            `UPDATE prestamos SET total_abonado = total_abonado + $1 WHERE id = $2`,
+            [reparto.a_capital, prestamo.id]
+          );
+        }
+
+        if (reparto.a_mora > 0) {
+          await moraService.registrarCobroEnTx(client, {
+            tipo: 'prestamo', documento: prestamo, negocioId, concepto: 'mora',
+            valor: reparto.a_mora, metodo, usuarioId,
+            estadoMora: mora, abonoPrestamoId: abonoId,
+          });
+        }
+
+        if (reparto.a_interes > 0) {
+          await moraService.registrarCobroEnTx(client, {
+            tipo: 'prestamo', documento: prestamo, negocioId, concepto: 'interes',
+            valor: reparto.a_interes, metodo, usuarioId,
+            estadoMora: interes, abonoPrestamoId: abonoId,
+          });
+        }
+
+        // Mismo criterio que el abono individual: solo se salda si no queda
+        // capital NI cargos.
+        const cierre = await cerrarSiPagadoEnTx(client, prestamo.id, negocioId, {
+          metodo, crearFactura: false,
         });
+        saldado = cierre.saldado;
       }
-
-      if (reparto.a_interes > 0) {
-        await moraService.registrarCobroEnTx(client, {
-          tipo: 'prestamo', documento: prestamo, negocioId, concepto: 'interes',
-          valor: reparto.a_interes, metodo, usuarioId,
-          estadoMora: interes, abonoPrestamoId: abonoId,
-        });
-      }
-
-      // Mismo criterio que el abono individual: solo se salda si no queda
-      // capital NI cargos. El pago total no factura cada préstamo (deja un único
-      // movimiento en el estado de cuenta), pero sí marca el equipo vendido.
-      const cierre = await cerrarSiPagadoEnTx(client, prestamo.id, negocioId, {
-        metodo, crearFactura: false,
-      });
-      const saldado = cierre.saldado;
 
       distribucion.push({
         prestamo_id:     prestamo.id,
@@ -2053,7 +2157,6 @@ const registrarAbonoTotal = async (
         abono_mora:      reparto.a_mora,
         saldado,
       });
-      remaining -= paraEste;
     }
 
     await client.query('COMMIT');

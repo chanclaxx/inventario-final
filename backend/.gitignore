@@ -15,3 +15,8 @@ backend/dist/
 
 # Logs
 *.log
+
+# Respaldos de correcciones sobre datos de produccion (cartera de clientes
+# reales). Se generan al aplicar scripts/anular-pagos-duplicados.js y sirven
+# para deshacer a mano; no van al repositorio.
+scripts/respaldo-*.json

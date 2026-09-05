@@ -146,6 +146,10 @@ export function ModalAbonoTotal({ nombre, tipo, personaId, prestamos, onClose, m
         `Lo repartido suma ${formatCOP(sumaManual)} y el pago es ${formatCOP(valorNum)}. Deben coincidir.`
       );
     }
+    // Segunda barrera contra el doble clic. La primera es que el botón ya se
+    // deshabilita mientras la petición viaja (ver `Button`), y la definitiva
+    // está en el backend; esta evita además el mensaje de error innecesario.
+    if (mutation.isPending) return;
     mutation.mutate();
   };
 

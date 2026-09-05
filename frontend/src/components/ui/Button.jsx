@@ -1,4 +1,12 @@
-export function Button({ children, variant = 'primary', size = 'md', loading, className = '', ...props }) {
+// `disabled` se SACA de props a propósito. Antes no se sacaba, así que el
+// `disabled={loading || props.disabled}` de abajo quedaba pisado por el
+// `{...props}` que venía después —que todavía traía `disabled`— y el botón
+// seguía clicable mientras la petición iba en vuelo: giraba el spinner y
+// aceptaba el segundo y el tercer clic. De ahí salieron los pagos duplicados de
+// agosto (tres de $100.000.000 en 2,8 segundos). Afectaba a los 58 botones que
+// pasan `loading` y `disabled` a la vez, entre ellos "Registrar pago total",
+// "Registrar abono" y "Guardar venta".
+export function Button({ children, variant = 'primary', size = 'md', loading, disabled, className = '', ...props }) {
   const variants = {
     primary:   'bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white',
     secondary: 'bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-700',
@@ -20,8 +28,8 @@ export function Button({ children, variant = 'primary', size = 'md', loading, cl
         transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed
         ${variants[variant]} ${sizes[size]} ${className}
       `}
-      disabled={loading || props.disabled}
       {...props}
+      disabled={loading || disabled}
     >
       {loading && (
         <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">

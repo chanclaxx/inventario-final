@@ -2,6 +2,7 @@ const { pool } = require('../../config/db');
 const repo = require('./creditos.repository');
 const moraService = require('../mora/mora.service');
 const { repartirAbono } = require('../../utils/mora.util');
+const { bloquearOperacion, VENTANA_DUPLICADO_SEG } = require('../../utils/idempotencia.util');
 
 // ── Listar créditos ──────────────────────────────────────────────────────────
 // `anotarLista` resuelve la mora de todos en UNA consulta. Si ningún crédito
@@ -98,28 +99,32 @@ const registrarAbono = async (negocioId, creditoId, {
   if (credito.estado === 'Cancelado') throw { status: 400, message: 'El crédito está cancelado' };
   if (!(Number(valor) > 0)) throw { status: 400, message: 'El valor del abono debe ser mayor a 0' };
 
-  // Baranda contra el doble clic — la misma que en préstamos. Un abono idéntico
-  // (mismo crédito, mismo valor, mismo método) dentro de la ventana no es un
-  // segundo pago: es el formulario enviándose dos veces. En préstamos eso dejó
-  // 45 pagos duplicados por $106.887.760 antes de que nadie lo notara.
-  const { rows: gemelo } = await pool.query(`
-    SELECT id FROM abonos_credito
-     WHERE credito_id = $1 AND valor = $2
-       AND COALESCE(metodo, '') = COALESCE($3, '')
-       AND NOT anulado
-       AND fecha > NOW() - INTERVAL '90 seconds'
-     LIMIT 1
-  `, [creditoId, valor, metodo || null]);
-  if (gemelo.length) {
-    throw {
-      status: 409,
-      message: 'Este mismo abono ya se registró hace un momento. Si de verdad son dos pagos distintos, espera un minuto y vuelve a intentarlo.',
-    };
-  }
-
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+
+    // Baranda contra el doble clic — la misma que en préstamos. Un abono idéntico
+    // (mismo crédito, mismo valor, mismo método) dentro de la ventana no es un
+    // segundo pago: es el formulario enviándose dos veces. En préstamos eso dejó
+    // 45 pagos duplicados por $106.887.760 antes de que nadie lo notara.
+    //
+    // Va DENTRO de la transacción y detrás del lock: por fuera, el SELECT no ve
+    // el abono que la petición gemela todavía no commiteó y las dos entran.
+    await bloquearOperacion(client, `abono-credito:${creditoId}`);
+    const { rows: gemelo } = await client.query(`
+      SELECT id FROM abonos_credito
+       WHERE credito_id = $1 AND valor = $2
+         AND COALESCE(metodo, '') = COALESCE($3, '')
+         AND NOT anulado
+         AND fecha > NOW() - ($4 || ' seconds')::interval
+       LIMIT 1
+    `, [creditoId, valor, metodo || null, String(VENTANA_DUPLICADO_SEG)]);
+    if (gemelo.length) {
+      throw {
+        status: 409,
+        message: 'Este mismo abono ya se registró hace un momento. Si de verdad son dos pagos distintos, espera un minuto y vuelve a intentarlo.',
+      };
+    }
 
     // Se resuelve DENTRO de la transacción: si entran dos abonos a la vez, cada
     // uno ve el saldo y la mora ya actualizados por el otro.
@@ -530,19 +535,22 @@ const registrarAbonoTotalCredito = async (
   if (!(valor > 0)) throw { status: 400, message: 'El valor del pago debe ser mayor a 0' };
   if (!sucursalId)  throw { status: 400, message: 'Debes indicar la sucursal del pago' };
 
-  const gemelo = await repo.buscarAbonoTotalCreditoGemelo(pool, {
-    cliente_id: clienteId, valor_total: valor, metodo,
-  });
-  if (gemelo) {
-    throw {
-      status: 409,
-      message: 'Este mismo pago total ya se registró hace un momento. Revisa el estado de cuenta antes de volver a intentarlo.',
-    };
-  }
-
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+
+    // Detrás del lock y dentro de la transacción: por fuera, la petición gemela
+    // no ve el pago que la primera aún no commiteó y las dos reparten.
+    await bloquearOperacion(client, `abono-total-credito:${clienteId}`);
+    const gemelo = await repo.buscarAbonoTotalCreditoGemelo(client, {
+      cliente_id: clienteId, valor_total: valor, metodo,
+    });
+    if (gemelo) {
+      throw {
+        status: 409,
+        message: 'Este mismo pago total ya se registró hace un momento. Revisa el estado de cuenta antes de volver a intentarlo.',
+      };
+    }
 
     const activos = await repo.findCreditosActivosDeCliente(client, clienteId, negocioId, sucursalId);
     if (!activos.length) {
@@ -551,7 +559,7 @@ const registrarAbonoTotalCredito = async (
 
     // El tope incluye los cargos pendientes: si solo se contara el capital, un
     // pago que cubre los intereses sería rechazado por "excedente".
-    const conCargos = await moraService.anotarLista(activos, 'credito');
+    const conCargos = await moraService.anotarLista(activos, 'credito', { client });
     const totalDebido = conCargos.reduce((s, c) => {
       const cargos = Number(c.mora?.pendiente || 0) + Number(c.interes?.pendiente || 0);
       return s + Math.max(0, Number(c.saldo_pendiente)) + cargos;

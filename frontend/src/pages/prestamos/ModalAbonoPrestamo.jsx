@@ -203,6 +203,9 @@ export function ModalAbonoPrestamo({ prestamo, onClose }) {
           : '')
       );
     }
+    // Segunda barrera contra el doble clic (la primera es el botón, que ya se
+    // deshabilita mientras viaja; la definitiva, la baranda del backend).
+    if (mutation.isPending) return;
     mutation.mutate();
   };
 

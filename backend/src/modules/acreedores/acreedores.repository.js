@@ -432,10 +432,13 @@ const create = async (negocioId, { nombre, cedula, telefono, proveedor_id }) => 
   return rows[0];
 };
 
+// `executor` permite escribir dentro de la transacción del llamador, que es lo
+// que necesita la baranda contra el doble clic: comprobar y escribir tienen que
+// ir en la misma transacción, detrás del mismo lock.
 const insertarMovimiento = async ({
   acreedor_id, usuario_id, tipo, valor, descripcion, firma, compra_id, cargo_id, registrar_en_caja, metodo, sucursal_id,
-}) => {
-  const { rows } = await pool.query(`
+}, executor = pool) => {
+  const { rows } = await executor.query(`
     INSERT INTO movimientos_acreedor(acreedor_id, usuario_id, tipo, valor, descripcion, firma, compra_id, cargo_id, registrar_en_caja, metodo, sucursal_id)
     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
     RETURNING *

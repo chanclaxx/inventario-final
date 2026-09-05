@@ -2,6 +2,7 @@ const { pool } = require('../../config/db');
 const repo = require('./acreedores.repository');
 
 const { getConfigOrdenes } = require('../../middlewares/ordenesCompra.middleware');
+const { bloquearOperacion, VENTANA_DUPLICADO_SEG } = require('../../utils/idempotencia.util');
 
 // Estado de una factura frente a su vencimiento. UNA definición para la
 // pantalla de cartera, la ficha del acreedor y el aviso de las 8:00.
@@ -74,40 +75,57 @@ const registrarMovimiento = async (negocioId, acreedorId, datos) => {
   const acreedor = await repo.findById(negocioId, acreedorId);
   if (!acreedor) throw { status: 404, message: 'Acreedor no encontrado' };
 
-  if (datos.tipo === 'Abono' && datos.cargo_id) {
-    const { rows } = await pool.query(`
-      SELECT GREATEST(m.valor - COALESCE(SUM(a.valor), 0), 0) AS saldo_pendiente
-      FROM movimientos_acreedor m
-      LEFT JOIN movimientos_acreedor a ON a.cargo_id = m.id AND a.tipo = 'Abono'
-      WHERE m.id = $1 AND m.acreedor_id = $2 AND m.tipo = 'Cargo'
-      GROUP BY m.id
-    `, [datos.cargo_id, acreedorId]);
-    if (rows.length && Number(datos.valor) > Number(rows[0].saldo_pendiente)) {
-      throw { status: 400, message: 'El abono no puede superar el saldo pendiente del cargo' };
+  // Comprobar y escribir van en la MISMA transacción y detrás del mismo lock.
+  // Antes eran dos consultas sueltas sobre el pool: entre la una y la otra cabía
+  // entera la petición gemela del segundo clic, que no veía nada escrito todavía
+  // y entraba igual. Aquí duele como en préstamos: duplicar un abono le borra al
+  // proveedor una deuda que el negocio sí tiene.
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await bloquearOperacion(client, `mov-acreedor:${acreedorId}`);
+
+    if (datos.tipo === 'Abono' && datos.cargo_id) {
+      const { rows } = await client.query(`
+        SELECT GREATEST(m.valor - COALESCE(SUM(a.valor), 0), 0) AS saldo_pendiente
+        FROM movimientos_acreedor m
+        LEFT JOIN movimientos_acreedor a ON a.cargo_id = m.id AND a.tipo = 'Abono'
+        WHERE m.id = $1 AND m.acreedor_id = $2 AND m.tipo = 'Cargo'
+        GROUP BY m.id
+      `, [datos.cargo_id, acreedorId]);
+      if (rows.length && Number(datos.valor) > Number(rows[0].saldo_pendiente)) {
+        throw { status: 400, message: 'El abono no puede superar el saldo pendiente del cargo' };
+      }
     }
-  }
 
-  // Baranda contra el doble clic, igual que en préstamos y créditos: un
-  // movimiento idéntico (mismo acreedor, mismo tipo, mismo valor, mismo cargo)
-  // dentro de la ventana es el formulario enviándose dos veces, no un segundo
-  // pago. Aquí duele igual: duplicar un abono le borra al proveedor una deuda
-  // que el negocio sí tiene.
-  const { rows: gemelo } = await pool.query(`
-    SELECT id FROM movimientos_acreedor
-     WHERE acreedor_id = $1 AND tipo = $2 AND valor = $3
-       AND COALESCE(cargo_id, -1) = COALESCE($4, -1)
-       AND COALESCE(metodo, '')   = COALESCE($5, '')
-       AND fecha > NOW() - INTERVAL '90 seconds'
-     LIMIT 1
-  `, [acreedorId, datos.tipo, datos.valor, datos.cargo_id ?? null, datos.metodo || null]);
-  if (gemelo.length) {
-    throw {
-      status: 409,
-      message: 'Este mismo movimiento ya se registró hace un momento. Revisa el estado de cuenta del acreedor antes de volver a intentarlo.',
-    };
-  }
+    // Un movimiento idéntico (mismo acreedor, mismo tipo, mismo valor, mismo
+    // cargo) dentro de la ventana es el formulario enviándose dos veces, no un
+    // segundo pago.
+    const { rows: gemelo } = await client.query(`
+      SELECT id FROM movimientos_acreedor
+       WHERE acreedor_id = $1 AND tipo = $2 AND valor = $3
+         AND COALESCE(cargo_id, -1) = COALESCE($4, -1)
+         AND COALESCE(metodo, '')   = COALESCE($5, '')
+         AND fecha > NOW() - ($6 || ' seconds')::interval
+       LIMIT 1
+    `, [acreedorId, datos.tipo, datos.valor, datos.cargo_id ?? null, datos.metodo || null,
+        String(VENTANA_DUPLICADO_SEG)]);
+    if (gemelo.length) {
+      throw {
+        status: 409,
+        message: 'Este mismo movimiento ya se registró hace un momento. Revisa el estado de cuenta del acreedor antes de volver a intentarlo.',
+      };
+    }
 
-  return repo.insertarMovimiento({ ...datos, acreedor_id: acreedorId });
+    const mov = await repo.insertarMovimiento({ ...datos, acreedor_id: acreedorId }, client);
+    await client.query('COMMIT');
+    return mov;
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
 };
 
 const getCargosAbiertos = async (negocioId, acreedorId) => {
