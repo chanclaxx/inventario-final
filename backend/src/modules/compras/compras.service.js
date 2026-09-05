@@ -200,9 +200,31 @@ const _validarRecepcionContraOrden = async (client, { orden_compra_id, negocio_i
   const solicitado  = new Map();   // orden_linea_id -> unidades de esta recepción
   const sustituidas = new Map();   // orden_linea_id -> { pedido, recibido, cantidad }
   const permiteExceso = new Set(); // orden_linea_id que aceptaron el sobrante
+  const extras      = [];          // llegó sin estar en el pedido
 
   for (const l of lineas) {
-    if (l.orden_linea_id == null) continue;
+    // ── Llegó algo que la orden no pedía ────────────────────────────────────
+    //
+    // Se pidieron 50 blancos y 50 verdes, y además llegaron 20 rosados. No es
+    // una sustitución (nadie dejó de mandar lo pedido) ni un exceso de una línea
+    // (no hay línea de rosado contra la cual excederse): es mercancía adicional,
+    // y entra a la MISMA entrada como una línea suelta.
+    //
+    // No se rechaza —la mercancía está físicamente ahí y hay que meterla al
+    // inventario— pero tampoco pasa callada: queda como novedad del proveedor,
+    // que es donde se responde "¿qué me manda este señor que yo no pedí?".
+    //
+    // Ojo: solo cuenta como novedad cuando la entrada VA contra una orden. Una
+    // entrada suelta es toda "sin pedido" por definición y llenaría la bitácora
+    // de ruido.
+    if (l.orden_linea_id == null) {
+      extras.push({
+        nombre_producto: l.nombre_producto,
+        cantidad: Number(l.cantidad || 0),
+        etiqueta: await etiquetaNodo(client, l),
+      });
+      continue;
+    }
     const id = Number(l.orden_linea_id);
     const pedida = porLinea.get(id);
     if (!pedida) {
@@ -266,7 +288,12 @@ const _validarRecepcionContraOrden = async (client, { orden_compra_id, negocio_i
     excesos.push({ orden_linea_id: lineaId, nombre_producto: linea.nombre_producto, cantidad: sobra });
   }
 
-  return { orden, sustituciones: [...sustituidas.entries()].map(([id, v]) => ({ orden_linea_id: id, ...v })), excesos };
+  return {
+    orden,
+    sustituciones: [...sustituidas.entries()].map(([id, v]) => ({ orden_linea_id: id, ...v })),
+    excesos,
+    extras,
+  };
 };
 
 /**
@@ -282,10 +309,10 @@ const _validarRecepcionContraOrden = async (client, { orden_compra_id, negocio_i
  */
 const _registrarNovedadesRecepcion = async (client, {
   negocio_id, proveedor_id, usuario_id, compra_id, orden_id,
-  sustituciones = [], excesos = [],
+  sustituciones = [], excesos = [], extras = [],
 }) => {
   if (!proveedor_id) return;
-  if (sustituciones.length === 0 && excesos.length === 0) return;
+  if (sustituciones.length === 0 && excesos.length === 0 && extras.length === 0) return;
 
   const { rows: existe } = await client.query(
     `SELECT 1 FROM information_schema.tables
@@ -316,6 +343,21 @@ const _registrarNovedadesRecepcion = async (client, {
        ex.cantidad,
        `${ex.nombre_producto}: llegaron ${ex.cantidad} de más y se recibieron`,
        usuario_id]
+    );
+  }
+
+  // Sin `orden_linea_id`: no hay línea del pedido a la cual atarlo, y ese NULL
+  // es justamente lo que significa "esto no lo pediste".
+  for (const ex of extras) {
+    await client.query(
+      `INSERT INTO novedades_proveedor
+         (negocio_id, proveedor_id, tipo, orden_id, compra_id,
+          cantidad, texto, recibido_etiqueta, usuario_id)
+       VALUES ($1, $2, 'no_pedido', $3, $4, $5, $6, $7, $8)`,
+      [negocio_id, proveedor_id, orden_id, compra_id, ex.cantidad,
+       `${ex.nombre_producto}${ex.etiqueta ? ` (${ex.etiqueta})` : ''}: `
+         + `llegaron ${ex.cantidad} sin estar en el pedido`,
+       ex.etiqueta, usuario_id]
     );
   }
 };

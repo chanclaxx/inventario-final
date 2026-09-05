@@ -136,6 +136,16 @@ await db.exec(`
     VALUES (300, 200, 20, 1, '38MM', 0, 500, true);
 
   INSERT INTO productos_serial(id, sucursal_id, nombre, activo) VALUES (30, 1, 'iPhone', true);
+
+  -- Los audifonos del caso reportado: se piden blanco y verde, y el proveedor
+  -- manda ademas rosados que nadie pidio.
+  INSERT INTO tipos_caracteristica(id, nombre) VALUES (2, 'Color');
+  INSERT INTO productos_cantidad(id, sucursal_id, nombre, stock, costo_unitario, activo)
+    VALUES (40, 1, 'Audifonos', 0, 3000, true);
+  INSERT INTO atributos_producto(id, producto_id, sucursal_id, tipo_id, valor, stock, costo_unitario, activo)
+    VALUES (400, 40, 1, 2, 'Blanco', 0, 3000, true),
+           (401, 40, 1, 2, 'Verde',  0, 3000, true),
+           (402, 40, 1, 2, 'Rosado', 0, 3000, true);
 `);
 
 const stockDe = async (tabla, id) => {
@@ -537,7 +547,76 @@ check('★ y la bandera de columnas.js apaga solo la corrección',
   readFileSync(path.join(RAIZ, 'src/config/columnas.js'), 'utf8').includes('hayCorreccionesEntrada'), true);
 
 // ═══════════════════════════════════════════════════════════════════════════
-seccion('11. Las pantallas dicen lo mismo que el backend');
+seccion('11. Llegó algo que NO se pidió — todo en la misma entrada');
+// ═══════════════════════════════════════════════════════════════════════════
+// El caso reportado, tal cual: se piden 50 blancos y 50 verdes, y llegan 40
+// blancos, 40 verdes y 20 ROSADOS que nadie pidió.
+//
+// Los rosados no son una sustitución (nadie dejó de mandar lo pedido) ni un
+// exceso de una línea (no hay línea de rosado contra la cual excederse). Son
+// mercancía adicional: entran a la MISMA entrada como línea suelta, sin
+// orden_linea_id, y quedan como novedad del proveedor.
+
+const ordenAudio = await ordenesSvc.crear({
+  negocio_id: 1, sucursal_id: 1, usuario_id: 1, proveedor_id: 1, emitir: true, detalleNodo: true,
+  lineas: [
+    { tipo: 'cantidad', producto_id: 40, nombre_producto: 'Audifonos', atributo_id: 400, cantidad_pedida: 50, precio_estimado: 3000 },
+    { tipo: 'cantidad', producto_id: 40, nombre_producto: 'Audifonos', atributo_id: 401, cantidad_pedida: 50, precio_estimado: 3000 },
+  ],
+});
+const lAudio = await ordenesRepo.getLineas(ordenAudio.id);
+check('se pidieron dos colores en la misma orden', lAudio.length, 2);
+
+const entradaAudio = await comprasSvc.registrarEntrada({
+  negocio_id: 1, sucursal_id: 1, usuario_id: 1, orden_compra_id: ordenAudio.id,
+  lineas: [
+    { producto_id: 40, nombre_producto: 'Audifonos', atributo_id: 400, cantidad: 40, orden_linea_id: lAudio[0].id },
+    { producto_id: 40, nombre_producto: 'Audifonos', atributo_id: 401, cantidad: 40, orden_linea_id: lAudio[1].id },
+    // El rosado: sin orden_linea_id, porque no responde a ninguna línea.
+    { producto_id: 40, nombre_producto: 'Audifonos', atributo_id: 402, cantidad: 20 },
+  ],
+});
+check('★ la entrada se registra de una sola vez', Boolean(entradaAudio.id), true);
+
+check('los blancos entraron 40',  (await stockDe('atributos_producto', 400)).stock, 40);
+check('los verdes entraron 40',   (await stockDe('atributos_producto', 401)).stock, 40);
+check('★ y los rosados entraron 20 aunque nadie los pidiera',
+  (await stockDe('atributos_producto', 402)).stock, 20);
+check('producto = Σ variantes', await invarianteProducto(40), true);
+
+const avanceAudio = await ordenesRepo.getLineas(ordenAudio.id);
+check('★★ los rosados NO consumen el pendiente de los blancos',
+  avanceAudio.map((l) => Number(l.pendiente)), [10, 10]);
+check('y lo recibido de cada color es lo suyo',
+  avanceAudio.map((l) => Number(l.recibida)), [40, 40]);
+
+const { rows: novNoPedido } = await db.query(
+  `SELECT cantidad, recibido_etiqueta, orden_linea_id, texto
+   FROM novedades_proveedor WHERE tipo = 'no_pedido'`);
+check('★ queda novedad de "no pedido"', novNoPedido.length, 1);
+check('por las 20 rosadas', Number(novNoPedido[0].cantidad), 20);
+check('con la variante que llegó', novNoPedido[0].recibido_etiqueta, 'Color: Rosado');
+check('★ y SIN linea de orden: ese NULL es lo que significa "no lo pediste"',
+  novNoPedido[0].orden_linea_id, null);
+
+const { rows: sinRuido } = await db.query(
+  `SELECT COUNT(*)::int AS n FROM novedades_proveedor
+   WHERE compra_id = $1 AND tipo IN ('sustitucion', 'exceso')`, [entradaAudio.id]);
+check('★ no se registró ni sustitución ni exceso: son cosas distintas', sinRuido[0].n, 0);
+
+// Una entrada SIN orden es toda "sin pedido" por definición: registrar novedades
+// ahí llenaría la bitácora de ruido y taparía las que sí cuentan.
+const entradaSuelta = await comprasSvc.registrarEntrada({
+  negocio_id: 1, sucursal_id: 1, usuario_id: 1,
+  lineas: [{ producto_id: 40, nombre_producto: 'Audifonos', atributo_id: 402, cantidad: 5 }],
+});
+const { rows: novSuelta } = await db.query(
+  `SELECT COUNT(*)::int AS n FROM novedades_proveedor WHERE compra_id = $1`, [entradaSuelta.id]);
+check('★★ una entrada SIN pedido no genera novedades de "no pedido"', novSuelta[0].n, 0);
+check('pero la mercancía sí entra', (await stockDe('atributos_producto', 402)).stock, 25);
+
+// ═══════════════════════════════════════════════════════════════════════════
+seccion('12. Las pantallas dicen lo mismo que el backend');
 // ═══════════════════════════════════════════════════════════════════════════
 // Revision estatica, al estilo de 34-contratos-frontend. Una pantalla que
 // ofrece algo que el servidor rechaza —o que promete algo que no va a pasar— es
@@ -610,6 +689,36 @@ check('la api apunta a la ruta real de corregir',
   entradasApi.includes('/compras/entradas/${id}/corregir'), true);
 check('y a la del historial',
   entradasApi.includes('/compras/entradas/${id}/correcciones'), true);
+
+// ── El admin tiene que poder DISTINGUIR las lineas al confirmar ────────────
+//
+// Reportado desde produccion: con variantes activas, el modal de confirmacion
+// mostraba dos lineas identicas ("Audifonos · 40 uds" dos veces) y no habia
+// forma de saber cual era la blanca y cual la verde. Como cada variante puede
+// costar distinto, eso no es cosmetico: es no poder confirmar la factura.
+//
+// El backend YA devolvia variante_valor/atributo_valor en getLineas desde que
+// existen las variantes; lo que faltaba era que la pantalla los pintara.
+check('★★ el modal de confirmar pinta la variante de cada linea',
+  entradasPage.includes('etiquetaVariante'), true);
+check('★ y marca lo que llego sin estar en el pedido',
+  entradasPage.includes('no venía en el pedido'), true);
+
+const repoCompras = readFileSync(path.join(RAIZ, 'src/modules/compras/compras.repository.js'), 'utf8');
+check('★ getLineas ya traia el rotulo de la variante (no hubo que tocar el SQL)',
+  /getLineas[\s\S]{0,400}variante_tipo_nombre/.test(repoCompras), true);
+
+// ── Llego una que no se pidio: las DOS pantallas de recepcion ──────────────
+for (const [nombre, fuente] of [['ModalRecibir', modalRecibir], ['VistaEntrada', vistaEntrada]]) {
+  check(`★ ${nombre} deja agregar una variante que no se pidio`,
+    fuente.includes('Llegó otra que no pediste'), true);
+  check(`★★ ${nombre} excluye los nodos que YA estan en la entrada`,
+    fuente.includes('nodosUsados'), true);
+}
+check('★★ VistaEntrada marca la linea extra como tal, no la deduce del id nulo',
+  vistaEntrada.includes('esExtra'), true);
+check('★★ y una linea extra JAMAS manda sustituye (no responde a ninguna linea)',
+  vistaEntrada.includes('l.esExtra ? null :'), true);
 
 const rutas = readFileSync(path.join(RAIZ, 'src/modules/compras/compras.routes.js'), 'utf8');
 check('★ las rutas de correccion van ANTES de /:id',

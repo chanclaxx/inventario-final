@@ -326,7 +326,7 @@ const aplicarMigraciones = async (client) => {
         ALTER TABLE novedades_proveedor DROP CONSTRAINT IF EXISTS novedades_proveedor_tipo_chk;
         ALTER TABLE novedades_proveedor ADD  CONSTRAINT novedades_proveedor_tipo_chk
           CHECK (tipo IN ('faltante', 'demora', 'garantia', 'acuerdo', 'cierre', 'nota',
-                          'sustitucion', 'exceso'));
+                          'sustitucion', 'exceso', 'no_pedido'));
       END IF;
     END $$;
 

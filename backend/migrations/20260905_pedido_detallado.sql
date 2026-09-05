@@ -64,10 +64,21 @@ BEGIN
     ALTER TABLE novedades_proveedor DROP CONSTRAINT IF EXISTS novedades_proveedor_tipo_chk;
     ALTER TABLE novedades_proveedor ADD  CONSTRAINT novedades_proveedor_tipo_chk
       CHECK (tipo IN ('faltante', 'demora', 'garantia', 'acuerdo', 'cierre', 'nota',
-                      'sustitucion', 'exceso'));
+                      'sustitucion', 'exceso', 'no_pedido'));
   END IF;
 END $$;
 
+-- Los tres desenlaces que se salen del guion de la orden:
+--
+--   sustitucion → se pidio 25W y llego 20W (misma linea, otro nodo)
+--   exceso      → se pidieron 50 y llegaron 60 de LO MISMO
+--   no_pedido   → llego una variante que no estaba en la orden. Se pidieron 50
+--                 blancos y 50 verdes, y ademas llegaron 20 rosados: no es
+--                 sustitucion (nadie dejo de mandar lo pedido) ni exceso de una
+--                 linea (no hay linea de rosado contra la cual excederse). Es su
+--                 propia pregunta —"¿que me manda este proveedor que yo no pedi?"—
+--                 y con un solo tipo para las dos cosas no se podria responder.
+--
 -- Que nodo llego cuando no fue el que se pidio. Van en la novedad y no en la
 -- linea de compra porque la linea de compra ya dice que llego: lo que no tenia
 -- donde vivir es la RELACION entre lo pedido y lo recibido.

@@ -259,10 +259,43 @@ Three roles exist: `admin_negocio`, `supervisor`, `vendedor`. Role determines wh
 > **Una línea ya devuelta no se corrige aquí**: tiene su nota crédito y pisarla
 > contaría la baja dos veces. **Quitar todas las líneas manda a cancelar**, que es
 > lo que de verdad se está haciendo y tiene su propio endpoint y su estado.
-> Prueba: `38-pedido-detallado` (104 verificaciones; la sección 1 es la que hay
+>
+> **Un TERCER desenlace: llegó algo que no se pidió** (`novedades_proveedor.tipo
+> = 'no_pedido'`). Se piden 50 audífonos blancos y 50 verdes, y el proveedor
+> manda además 20 rosados. No es sustitución —nadie dejó de mandar lo pedido— ni
+> exceso de una línea —no hay línea de rosado contra la cual excederse—: es
+> mercancía adicional, y entra en **la misma entrada** como línea suelta **sin
+> `orden_linea_id`**. Ese NULL es exactamente lo que significa «esto no lo
+> pediste», y es lo que impide que los rosados consuman el pendiente de los
+> blancos. Un tipo propio y no `'exceso'` porque «¿qué me manda este proveedor
+> que yo no pedí?» y «¿de qué me manda de más?» son dos preguntas distintas y
+> con un solo tipo ninguna se puede responder.
+> El backend ya lo aceptaba (`_validarRecepcionContraOrden` se salta las líneas
+> sin `orden_linea_id`); lo que faltaba era la pantalla y la novedad. En las dos
+> pantallas de recepción el botón vive **junto a su producto**, no en el buscador
+> de arriba —el bodeguero está mirando la caja de los audífonos, no buscando un
+> producto nuevo— y el selector **excluye los nodos que ya están en la entrada**:
+> dos líneas del mismo nodo se sumarían al recibir y nadie sabría después por qué
+> el inventario subió el doble.
+> **`esExtra` es una marca explícita, no se deduce de «no tiene
+> `orden_linea_id`»**: en una entrada SIN pedido todas las líneas carecen de él y
+> ninguna es una novedad. Mismo criterio que `es_entrada`. Y una línea extra
+> **jamás manda `sustituye`**: no responde a ninguna línea del pedido, así que
+> atribuirle un pendiente sería falsear el avance de la orden.
+>
+> **El modal de CONFIRMAR no mostraba la variante** (reportado desde producción):
+> con variantes activas, administración veía dos líneas idénticas —«Audífonos ·
+> 40 uds» dos veces— y no tenía forma de saber cuál era la blanca y cuál la
+> verde. Como cada variante puede costar distinto, eso no es cosmético: es **no
+> poder confirmar la factura**. `getLineas` ya devolvía `variante_valor` y
+> `atributo_valor` desde que existen las variantes; no hubo que tocar una línea
+> de SQL, solo pintarlos. De paso marca las líneas que llegaron sin estar en el
+> pedido, que es justo lo que administración puede decidir no pagar.
+> Prueba: `38-pedido-detallado` (128 verificaciones; la sección 1 es la que hay
 > que mirar primero —nada cambia con la feature apagada—, la 9 comprueba que el
-> costo promedio vuelve EXACTO al corregir un caso no neutro, y la 11 revisa
-> estáticamente que las pantallas no ofrezcan nada que el backend rechace).
+> costo promedio vuelve EXACTO al corregir un caso no neutro, la 11 corre el caso
+> de los audífonos completo, y la 12 revisa estáticamente que las pantallas no
+> ofrezcan nada que el backend rechace).
 > De paso: el fixture de `19-ordenes-compra` no tenía `factura_confirmada` ni
 > `es_entrada` desde 20260828 y la suite reventaba antes de su primera
 > verificación; con esas dos columnas vuelve a correr entera (118).

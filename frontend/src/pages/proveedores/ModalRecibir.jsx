@@ -15,7 +15,7 @@ import {
 import api from '../../api/axios.config';
 import {
   Package, Smartphone, Minus, Plus, PackageCheck, AlertTriangle, ShieldCheck, Layers,
-  Replace, PackagePlus,
+  Replace, PackagePlus, Trash2,
 } from 'lucide-react';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -63,6 +63,13 @@ import {
 //   · LLEGARON DE MAS → antes era un 400 seco que mandaba a "registrarlas como
 //     compra aparte". Ahora se puede recibir el sobrante marcando una casilla, o
 //     dejar el numero en lo pendiente y devolverselas al proveedor.
+//
+//   · LLEGO UNA QUE NO PEDISTE → se pidieron 50 blancos y 50 verdes y ademas
+//     llegaron 20 rosados. Ni sustitucion (nadie dejo de mandar lo pedido) ni
+//     exceso de una linea (no hay linea de rosado): entra en LA MISMA recepcion
+//     como linea suelta, sin orden_linea_id, y queda como novedad del proveedor.
+//     El selector excluye los nodos que ya estan en la recepcion, porque dos
+//     lineas del mismo nodo se sumarian y nadie sabria por que.
 //
 // Las dos exigen un si explicito: el backend responde 409 sin el flag, asi que
 // no hay forma de que ninguna de las dos ocurra por accidente.
@@ -249,7 +256,10 @@ function FilaSerial({ linea, estado, onCambiar, garantiaActiva, cfg }) {
 // stock de un producto con variantes es la suma de ellas, y escribirlo en el
 // padre se pierde en la siguiente sincronización. Cada hoja lleva su propio
 // costo, así que el precio de la línea sobra en ese caso.
-function FilaCantidad({ linea, estado, onCambiar, garantiaActiva, variantesActivo, sucursalId }) {
+function FilaCantidad({
+  linea, estado, onCambiar, garantiaActiva, variantesActivo, sucursalId,
+  extras, onAgregarExtra, onQuitarExtra, nodosUsados,
+}) {
   const pendiente = Number(linea.pendiente);
 
   const { data: arbolData = [] } = useQuery({
@@ -346,6 +356,72 @@ function FilaCantidad({ linea, estado, onCambiar, garantiaActiva, variantesActiv
           </div>
         )}
 
+        {/* ── Llego una que NO se pidio ───────────────────────────────────── */}
+        {tieneArbol && (
+          <div className="flex flex-col gap-1.5">
+            {(extras || []).map((ex) => (
+              <div key={ex.key}
+                className="flex items-center gap-2 border border-amber-200 bg-amber-50/40
+                           rounded-lg px-2.5 py-2">
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium text-amber-800 truncate">{ex.label}</p>
+                  <p className="text-xs text-amber-600">no venía en el pedido</p>
+                </div>
+                <input type="number" min="1" value={ex.cantidad}
+                  onChange={(e) => onAgregarExtra({ ...ex, cantidad: Math.max(1, Number(e.target.value) || 1) })}
+                  className="w-16 px-2 py-1 text-sm text-center tabular-nums bg-white
+                             border border-amber-200 rounded-lg focus:outline-none
+                             focus:ring-1 focus:ring-amber-400" />
+                <button type="button" onClick={() => onQuitarExtra(ex.key)}
+                  className="p-1 rounded-lg text-amber-400 hover:text-red-500 hover:bg-red-50
+                             transition-colors flex-shrink-0">
+                  <Trash2 size={13} />
+                </button>
+              </div>
+            ))}
+
+            {!estado.agregandoExtra ? (
+              <button type="button" onClick={() => onCambiar('agregandoExtra', true)}
+                className="flex items-center gap-1.5 text-xs font-medium text-amber-600
+                           hover:text-amber-700 transition-colors w-fit">
+                <Plus size={12} /> Llegó otra que no pediste
+              </button>
+            ) : (
+              <div className="border border-amber-200 bg-amber-50/40 rounded-lg p-2 flex flex-col gap-1">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs text-amber-800">¿Cuál llegó de más?</p>
+                  <button type="button" onClick={() => onCambiar('agregandoExtra', false)}
+                    className="text-xs text-gray-400 hover:text-gray-600 transition-colors">
+                    cancelar
+                  </button>
+                </div>
+                <div className="max-h-36 overflow-y-auto flex flex-col gap-0.5">
+                  {hojas.filter((h) => !nodosUsados.has(h.key)).length === 0 ? (
+                    <p className="text-xs text-gray-400 py-1.5">
+                      Todas las variantes de este producto ya están en la recepción.
+                    </p>
+                  ) : hojas.filter((h) => !nodosUsados.has(h.key)).map((h) => (
+                    <button key={h.key} type="button"
+                      onClick={() => {
+                        onAgregarExtra({
+                          key: h.key, id: h.id, tipo: h.tipo, cantidad: 1,
+                          label: `${h.labelPadre ? `${h.labelPadre} · ` : ''}${h.label}`,
+                        });
+                        onCambiar('agregandoExtra', false);
+                      }}
+                      className="flex items-center justify-between gap-2 px-2 py-1.5 rounded-md
+                                 text-left text-xs text-gray-700 hover:bg-white transition-colors">
+                      <span className="truncate">
+                        {h.labelPadre ? `${h.labelPadre} · ` : ''}{h.label}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* ── Llegaron de mas ─────────────────────────────────────────────── */}
         {sobra > 0 && (
           <label className="flex items-start gap-2 bg-purple-50 rounded-lg px-2.5 py-2 cursor-pointer">
@@ -425,7 +501,10 @@ function FilaCantidad({ linea, estado, onCambiar, garantiaActiva, variantesActiv
   );
 }
 
-function FilaRecepcion({ linea, estado, onCambiar, garantiaActiva, cfg, sucursalId }) {
+function FilaRecepcion({
+  linea, estado, onCambiar, garantiaActiva, cfg, sucursalId,
+  extras, onAgregarExtra, onQuitarExtra, nodosUsados,
+}) {
   const pendiente = Number(linea.pendiente);
   const agotada   = pendiente <= 0;
   const esSerial  = linea.tipo === 'serial';
@@ -454,7 +533,9 @@ function FilaRecepcion({ linea, estado, onCambiar, garantiaActiva, cfg, sucursal
             garantiaActiva={garantiaActiva} cfg={cfg} />
         : <FilaCantidad linea={linea} estado={estado} onCambiar={onCambiar}
             garantiaActiva={garantiaActiva} variantesActivo={cfg.variantesActivo}
-            sucursalId={sucursalId} />
+            sucursalId={sucursalId}
+            extras={extras} onAgregarExtra={onAgregarExtra}
+            onQuitarExtra={onQuitarExtra} nodosUsados={nodosUsados} />
       )}
     </div>
   );
@@ -497,7 +578,12 @@ export function ModalRecibir({ open, orden, garantiaActiva, onClose, onRecibida 
       // porque el caso normal —llego lo que se pidio— no tiene que tocar nada.
       nodoSust:     null,
       eligiendoNodo: false,
+      agregandoExtra: false,
       excedenteOk:  false,
+      // Lo que llego SIN estar en el pedido, colgado de la linea del producto
+      // desde la que se agrego. Cuelga de ahi y no de una lista global porque
+      // asi el selector sabe que arbol ofrecer y que nodos excluir.
+      extras:       [],
       precio:    l.precio_estimado ?? '',
       garantia:  l.garantia_dias ?? '',
     }]))
@@ -510,6 +596,44 @@ export function ModalRecibir({ open, orden, garantiaActiva, onClose, onRecibida 
 
   const cambiar = (lineaId, campo, valor) =>
     setEstados((prev) => ({ ...prev, [lineaId]: { ...prev[lineaId], [campo]: valor } }));
+
+  // Un extra se reemplaza por clave (asi el input de cantidad edita el existente
+  // en vez de agregar uno nuevo cada tecla).
+  const agregarExtra = (lineaId, ex) =>
+    setEstados((prev) => {
+      const actuales = prev[lineaId]?.extras || [];
+      const i = actuales.findIndex((x) => x.key === ex.key);
+      const nuevos = i < 0 ? [...actuales, ex]
+        : actuales.map((x, j) => (j === i ? ex : x));
+      return { ...prev, [lineaId]: { ...prev[lineaId], extras: nuevos } };
+    });
+
+  const quitarExtra = (lineaId, key) =>
+    setEstados((prev) => ({
+      ...prev,
+      [lineaId]: {
+        ...prev[lineaId],
+        extras: (prev[lineaId]?.extras || []).filter((x) => x.key !== key),
+      },
+    }));
+
+  // Los nodos que YA estan en esta recepcion para un producto: los de las lineas
+  // del pedido (o la variante que las sustituyo) mas los extras ya agregados.
+  // Sin esto se podria agregar dos veces el mismo nodo y el inventario subiria
+  // el doble sin que la pantalla dijera por que.
+  const nodosUsadosDe = (productoId) => {
+    const usados = new Set();
+    for (const l of (orden?.lineas || [])) {
+      if (l.producto_id !== productoId) continue;
+      const e = estados[l.id] || {};
+      const sust = e.nodoSust;
+      if (sust) usados.add(sust.key);
+      else if (l.variante_id) usados.add(`v-${l.variante_id}`);
+      else if (l.atributo_id) usados.add(`a-${l.atributo_id}`);
+      for (const ex of (e.extras || [])) usados.add(ex.key);
+    }
+    return usados;
+  };
 
   const recibirTodo = () => setEstados((prev) => {
     const copia = { ...prev };
@@ -574,6 +698,21 @@ export function ModalRecibir({ open, orden, garantiaActiva, onClose, onRecibida 
             garantia_dias:   garantia,
             ...(sust                        ? { sustituye: true }    : {}),
             ...(e.excedenteOk               ? { excedente_ok: true } : {}),
+          });
+        }
+        // Lo que llego sin estar en el pedido va SIN `orden_linea_id`: no
+        // responde a ninguna linea y por eso no puede consumir su pendiente ni
+        // sustituir nada. El backend lo registra como novedad del proveedor.
+        for (const ex of (e.extras || [])) {
+          if (!(Number(ex.cantidad) > 0)) continue;
+          out.push({
+            nombre_producto: l.nombre_producto,
+            producto_id:     l.producto_id,
+            cantidad:        Number(ex.cantidad),
+            precio_unitario: Number(e.precio || 0),
+            variante_id:     ex.tipo === 'variante' ? ex.id : null,
+            atributo_id:     ex.tipo === 'atributo' ? ex.id : null,
+            garantia_dias:   garantia,
           });
         }
         continue;
@@ -706,7 +845,11 @@ export function ModalRecibir({ open, orden, garantiaActiva, onClose, onRecibida 
             {(orden.lineas || []).map((l) => (
               <FilaRecepcion key={l.id} linea={l} estado={estados[l.id] || {}}
                 garantiaActiva={garantiaActiva} cfg={cfg} sucursalId={orden.sucursal_id}
-                onCambiar={(campo, valor) => cambiar(l.id, campo, valor)} />
+                onCambiar={(campo, valor) => cambiar(l.id, campo, valor)}
+                extras={estados[l.id]?.extras || []}
+                onAgregarExtra={(ex) => agregarExtra(l.id, ex)}
+                onQuitarExtra={(key) => quitarExtra(l.id, key)}
+                nodosUsados={nodosUsadosDe(l.producto_id)} />
             ))}
           </div>
         )}

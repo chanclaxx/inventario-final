@@ -205,6 +205,20 @@ function ModalDetalleEntrada({ entradaId, onCerrar }) {
 // Al guardar corre `editarPreciosCompra`, que ya cascadea en una sola
 // transacción al costo promedio, al costo de cada serial, al total de la compra
 // y a la deuda con el proveedor. No se reimplementa nada de eso.
+// El rótulo de la variante de una línea de compra. `getLineas` ya devuelve el
+// valor y el nombre del tipo desde que existen las variantes; lo que faltaba era
+// que esta pantalla los pintara.
+//
+// Sin esto, un negocio con variantes activas ve DOS líneas idénticas —«Audífonos
+// · 40 uds» y «Audífonos · 40 uds»— y administración no tiene forma de saber
+// cuál es la blanca y cuál la verde. Y como cada variante puede costar distinto,
+// eso no es cosmético: es no poder confirmar la factura.
+const etiquetaVariante = (l) => {
+  if (l.variante_valor) return `${l.variante_tipo_nombre ? `${l.variante_tipo_nombre}: ` : ''}${l.variante_valor}`;
+  if (l.atributo_valor) return `${l.atributo_tipo_nombre ? `${l.atributo_tipo_nombre}: ` : ''}${l.atributo_valor}`;
+  return null;
+};
+
 function ModalConfirmar({ entrada, onCerrar, onListo }) {
   const [proveedorId, setProveedorId] = useState(entrada.proveedor_id ? String(entrada.proveedor_id) : '');
   const [numFactura,  setNumFactura]  = useState(entrada.numero_factura || '');
@@ -322,12 +336,23 @@ function ModalConfirmar({ entrada, onCerrar, onListo }) {
               {(detalle?.lineas || []).map((l) => (
                 <div key={l.id} className="flex items-center gap-2">
                   <div className="flex-1 min-w-0">
-                    <p className="text-xs text-gray-700 truncate">{l.nombre_producto}</p>
+                    <p className="text-xs text-gray-700 truncate">
+                      {l.nombre_producto}
+                      {/* La variante va PEGADA al nombre y en morado: es lo que
+                          distingue dos líneas que si no se leen idénticas. */}
+                      {etiquetaVariante(l) && (
+                        <span className="text-purple-600 font-medium"> · {etiquetaVariante(l)}</span>
+                      )}
+                    </p>
                     <p className="text-[11px] text-gray-400 tabular-nums">
                       {l.imei ? l.imei : `${l.cantidad} uds`}
                       {Number(l.precio_unitario) > 0
                         ? ` · ${l.orden_linea_id ? 'del pedido' : 'provisional'} ${formatCOP(l.precio_unitario)}`
                         : ' · sin costo previo'}
+                      {/* Lo que llegó sin estar en el pedido. Administración
+                          tiene que verlo ANTES de ponerle precio: puede ser lo
+                          que no va a pagar. */}
+                      {entrada.orden_numero && !l.orden_linea_id && ' · no venía en el pedido'}
                       {l.garantia_dias ? ` · garantía ${l.garantia_dias} días` : ''}
                     </p>
                   </div>

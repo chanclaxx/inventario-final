@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   PackagePlus, ChevronLeft, ChevronRight, Trash2, Check, AlertTriangle,
-  Layers, Replace,
+  Layers, Replace, Plus,
 } from 'lucide-react';
 import { registrarEntrada } from '../../api/entradas.api';
 import { getProductosCantidad, getProductosSerial } from '../../api/productos.api';
@@ -56,6 +56,15 @@ import {
 //   · LLEGARON DE MÁS → se marca que se reciben. Antes esta pantalla prometía
 //     que el sobrante "queda anotado en la entrada" y el backend respondía 400:
 //     el bodeguero veía un mensaje tranquilizador y después un error.
+//   · LLEGÓ UNA QUE NO PEDISTE → se pidieron 50 blancos y 50 verdes, y además
+//     llegaron 20 rosados. No es sustitución (nadie dejó de mandar lo pedido) ni
+//     exceso de una línea (no hay línea de rosado): es mercancía adicional, y
+//     entra en LA MISMA entrada como una línea suelta, sin `orden_linea_id`.
+//     Queda como novedad del proveedor.
+//
+// El selector de "otra variante" siempre excluye los nodos que YA están en la
+// entrada: dos líneas del mismo nodo se sumarían al recibir y nadie sabría por
+// qué el inventario subió el doble.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const norm = (r) => (Array.isArray(r) ? r : (Array.isArray(r?.items) ? r.items : []));
@@ -75,7 +84,7 @@ const MAX_IMEI = 200;
 
 // ── Una línea de la entrada ─────────────────────────────────────────────────
 function FilaLinea({
-  linea, sucursalId, onCambiar, onQuitar,
+  linea, sucursalId, onCambiar, onQuitar, onAgregarExtra, nodosUsados,
   variantesActivo, coloresActivo, coloresConfig, caracteristicasActivo, caracteristicasLista,
 }) {
   const esSerial  = linea.tipo === 'serial';
@@ -95,7 +104,12 @@ function FilaLinea({
   // Unidades de la línea: con árbol es la suma de lo repartido por variante.
   // Con un nodo pedido no se reparte nada: ya se sabe QUE se pidio, asi que la
   // cantidad sale de una sola casilla igual que en un producto sin variantes.
-  const pedido = nodoPedido(linea);
+  //
+  // Una línea EXTRA (llegó sin estar en el pedido) también tiene su nodo fijo y
+  // usa la misma casilla, pero no es un "pedido": no hay nada contra qué
+  // compararla y no puede sustituir a nada.
+  const pedido = linea.esExtra ? null : nodoPedido(linea);
+  const nodoFijo = pedido || (linea.esExtra ? nodoPedido(linea) : null);
 
   const unidades = esSerial
     ? linea.items.filter((i) => extraerImei(i).trim()).length
@@ -151,6 +165,13 @@ function FilaLinea({
                 ? <>llegó <span className="font-medium">{linea.nodoSust.label}</span>
                     <span className="text-purple-400">· pediste {pedido.label}</span></>
                 : <>pediste <span className="font-medium">{pedido.label}</span></>}
+            </p>
+          )}
+          {linea.esExtra && (
+            <p className="text-xs text-amber-600 mt-0.5 flex items-center gap-1">
+              <Layers size={11} className="flex-shrink-0" />
+              <span className="font-medium">{nodoPedido(linea)?.label}</span>
+              <span className="text-amber-500">· no venía en el pedido</span>
             </p>
           )}
           <div className="flex items-center gap-2 mt-0.5 flex-wrap">
@@ -219,7 +240,7 @@ function FilaLinea({
 
       {/* ── Cantidad con variantes: hay que decir cuál llegó ───────────── */}
       {!esSerial && variantesActivo && cargandoArbol && <Spinner className="py-3 scale-75" />}
-      {!esSerial && tieneArbol && !pedido && !cargandoArbol && (
+      {!esSerial && tieneArbol && !nodoFijo && !cargandoArbol && (
         <MultiSelectorCompra
           hojas={hojas}
           nodosData={linea.nodos || {}}
@@ -231,7 +252,7 @@ function FilaLinea({
       )}
 
       {/* ── Una sola casilla: sin variantes, o con la variante ya pedida ─ */}
-      {!esSerial && (!tieneArbol || pedido) && !cargandoArbol && (
+      {!esSerial && (!tieneArbol || nodoFijo) && !cargandoArbol && (
         <div className="flex items-center gap-2">
           <label className="text-xs text-gray-500">Llegó</label>
           <input
@@ -248,13 +269,53 @@ function FilaLinea({
       {/* ── Llegó otra variante ────────────────────────────────────────── */}
       {pedido && tieneArbol && !cargandoArbol && (
         <div className="flex flex-col gap-1.5">
-          {!linea.eligiendoNodo ? (
-            <button type="button"
-              onClick={() => onCambiar(linea.key, { eligiendoNodo: true })}
-              className="flex items-center gap-1.5 text-xs font-medium text-purple-600
-                         hover:text-purple-700 transition-colors w-fit">
-              <Replace size={12} /> {linea.nodoSust ? 'Cambiar la que llegó' : 'Llegó otra variante'}
-            </button>
+          {!linea.eligiendoNodo && !linea.agregandoExtra ? (
+            <div className="flex items-center gap-3 flex-wrap">
+              <button type="button"
+                onClick={() => onCambiar(linea.key, { eligiendoNodo: true })}
+                className="flex items-center gap-1.5 text-xs font-medium text-purple-600
+                           hover:text-purple-700 transition-colors w-fit">
+                <Replace size={12} /> {linea.nodoSust ? 'Cambiar la que llegó' : 'Llegó otra variante'}
+              </button>
+              {/* Lo que llegó ADEMÁS de lo pedido. Va aquí, junto a su producto,
+                  y no en el buscador de arriba: el bodeguero está mirando la
+                  caja de los audífonos, no buscando un producto nuevo. */}
+              <button type="button"
+                onClick={() => onCambiar(linea.key, { agregandoExtra: true })}
+                className="flex items-center gap-1.5 text-xs font-medium text-amber-600
+                           hover:text-amber-700 transition-colors w-fit">
+                <Plus size={12} /> Llegó otra que no pediste
+              </button>
+            </div>
+          ) : linea.agregandoExtra ? (
+            <div className="border border-amber-200 bg-amber-50/40 rounded-lg p-2 flex flex-col gap-1">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs text-amber-800">¿Cuál llegó de más?</p>
+                <button type="button" onClick={() => onCambiar(linea.key, { agregandoExtra: false })}
+                  className="text-xs text-gray-400 hover:text-gray-600 transition-colors">
+                  cancelar
+                </button>
+              </div>
+              <div className="max-h-36 overflow-y-auto flex flex-col gap-0.5">
+                {hojas.filter((h) => !nodosUsados.has(h.key)).length === 0 ? (
+                  <p className="text-xs text-gray-400 py-1.5">
+                    Todas las variantes de este producto ya están en la entrada.
+                  </p>
+                ) : hojas.filter((h) => !nodosUsados.has(h.key)).map((h) => (
+                  <button key={h.key} type="button"
+                    onClick={() => {
+                      onAgregarExtra(linea, h);
+                      onCambiar(linea.key, { agregandoExtra: false });
+                    }}
+                    className="flex items-center justify-between gap-2 px-2 py-1.5 rounded-md
+                               text-left text-xs text-gray-700 hover:bg-white transition-colors">
+                    <span className="truncate">
+                      {h.labelPadre ? `${h.labelPadre} · ` : ''}{h.label}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
           ) : (
             <div className="border border-purple-200 bg-purple-50/40 rounded-lg p-2 flex flex-col gap-1">
               <p className="text-xs text-purple-700">¿Cuál llegó de verdad?</p>
@@ -349,6 +410,11 @@ export function VistaEntrada({ orden, onVolver, onListo }) {
     // responde 409, así que el solo hecho de que la línea entre ya prueba que
     // alguien lo confirmó.
     nodoSust: null, eligiendoNodo: false, excedenteOk: false,
+    // Llegó sin estar en el pedido. Es una marca EXPLÍCITA y no algo deducido de
+    // "no tiene orden_linea_id": en una entrada sin pedido TODAS las líneas
+    // carecen de él y ninguna es una novedad — es el mismo criterio por el que
+    // `es_entrada` se marca en vez de deducirse de "sin proveedor".
+    esExtra: false, agregandoExtra: false,
     ...base,
   });
 
@@ -407,6 +473,53 @@ export function VistaEntrada({ orden, onVolver, onListo }) {
     });
   };
 
+  // Los nodos que YA están en la entrada para un producto. El selector de "otra
+  // que no pediste" los excluye: dos líneas del mismo nodo se sumarían al recibir
+  // y nadie sabría después por qué el inventario subió el doble.
+  //
+  // Se calcula sobre `lineas` en cada render y no se memoiza: son unas pocas
+  // decenas de filas y un caché aquí se quedaría viejo justo después de agregar
+  // una, que es el único momento en que importa.
+  const nodosUsadosDe = (productoId) => new Set(
+    lineas
+      .filter((l) => l.producto_id === productoId)
+      .map((l) => (l.variante_id ? `v-${l.variante_id}`
+        : l.atributo_id ? `a-${l.atributo_id}` : null))
+      .filter(Boolean)
+  );
+
+  // ── Llegó una variante que no se pidió ────────────────────────────────────
+  //
+  // Línea NUEVA, sin `orden_linea_id`: no responde a ninguna línea del pedido y
+  // por eso no puede consumir su pendiente. El backend la recibe igual y la
+  // registra como novedad del proveedor.
+  //
+  // Se inserta JUSTO DEBAJO de la línea desde la que se agregó, no al final: son
+  // el mismo producto y leerlas separadas por diez filas obliga a buscar.
+  const agregarExtra = (origen, hoja) => {
+    const key = `extra-${origen.producto_id}-${hoja.key}`;
+    const etq = `${hoja.labelPadre ? `${hoja.labelPadre} · ` : ''}${hoja.label}`;
+    setLineas((ls) => {
+      if (ls.some((l) => l.key === key)) return ls;
+      const nueva = nuevaLinea({
+        key,
+        producto_id:     origen.producto_id,
+        nombre_producto: origen.nombre_producto,
+        tipo:            origen.tipo,
+        esExtra:         true,
+        cantidad:        1,
+        variante_id:     hoja.tipo === 'variante' ? hoja.id : null,
+        atributo_id:     hoja.tipo === 'atributo' ? hoja.id : null,
+        // Con el padre delante: en un arbol de tres niveles "38MM" a secas no
+        // identifica nada — la 38MM negra y la 38MM cafe son dos nodos.
+        variante_valor:  hoja.tipo === 'variante' ? etq : null,
+        atributo_valor:  hoja.tipo === 'atributo' ? etq : null,
+      });
+      const i = ls.findIndex((l) => l.key === origen.key);
+      return i < 0 ? [...ls, nueva] : [...ls.slice(0, i + 1), nueva, ...ls.slice(i + 1)];
+    });
+  };
+
   const cambiar = (key, parche) =>
     setLineas((ls) => ls.map((l) => (l.key === key ? { ...l, ...parche } : l)));
 
@@ -451,17 +564,20 @@ export function VistaEntrada({ orden, onVolver, onListo }) {
         continue;
       }
 
-      // ── La orden pidió un NODO: una sola línea, en el que llegó ────────
-      const pedido = nodoPedido(l);
-      if (pedido) {
+      // ── Nodo fijo: el que pidió la orden, o el de una línea extra ──────
+      const nodo = nodoPedido(l);
+      if (nodo) {
         const cant = Number(l.cantidad) || 0;
         if (cant > 0) {
-          const sust = l.nodoSust || null;
+          // Una línea EXTRA no sustituye a nada —no responde a ninguna línea del
+          // pedido—, así que jamás manda `sustituye`. Mandarlo haría que el
+          // backend la atribuyera a un pendiente que no le corresponde.
+          const sust = l.esExtra ? null : (l.nodoSust || null);
           salida.push({
             ...comun,
             cantidad: cant,
-            variante_id: sust ? (sust.tipo === 'variante' ? sust.id : null) : pedido.variante_id,
-            atributo_id: sust ? (sust.tipo === 'atributo' ? sust.id : null) : pedido.atributo_id,
+            variante_id: sust ? (sust.tipo === 'variante' ? sust.id : null) : nodo.variante_id,
+            atributo_id: sust ? (sust.tipo === 'atributo' ? sust.id : null) : nodo.atributo_id,
             ...(sust ? { sustituye: true } : {}),
           });
         }
@@ -577,6 +693,8 @@ export function VistaEntrada({ orden, onVolver, onListo }) {
               sucursalId={sucursalId}
               onCambiar={cambiar}
               onQuitar={quitar}
+              onAgregarExtra={agregarExtra}
+              nodosUsados={nodosUsadosDe(l.producto_id)}
               variantesActivo={variantesActivo}
               coloresActivo={coloresActivo}
               coloresConfig={coloresConfig}
