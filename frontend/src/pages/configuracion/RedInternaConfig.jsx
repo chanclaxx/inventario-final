@@ -139,6 +139,20 @@ export function RedInternaConfig({ valores, set }) {
             />
           </div>
 
+          {/* Ausente = ENCENDIDO, al revés que casi todo lo demás. Es
+              deliberado: la distribución desde bodega ya se activó a mano
+              arriba, y pedir no compromete inventario, ni caja, ni deuda — no
+              pasa nada hasta que la bodega despacha. El interruptor está aquí
+              para la bodega que NO quiere que los locales pidan. */}
+          <div className="pl-4">
+            <Toggle
+              enabled={valores.red_interna_pedidos !== '0'}
+              onChange={(v) => set('red_interna_pedidos', v ? '1' : '0')}
+              label="Los locales pueden hacer pedidos"
+              description="El local arma su lista y la bodega decide qué despacha. No mueve inventario ni cuentas: la deuda sigue naciendo al recibir el envío."
+            />
+          </div>
+
           <div className="pl-4">
             <div className="bg-blue-50 rounded-xl px-4 py-3">
               <p className="text-xs text-blue-700 leading-relaxed">

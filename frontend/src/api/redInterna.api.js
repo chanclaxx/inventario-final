@@ -37,6 +37,10 @@ export const previsualizarDestino = (payload) =>
 export const buscarReferencias = (sucursalId, { tipo, q } = {}) =>
   api.get(`/red-interna/referencias/${sucursalId}`, { params: { tipo, q } });
 
+// `pedido_id` convierte el despacho en la RESPUESTA a un pedido del local. El
+// vínculo línea a línea lo resuelve el backend: la pantalla no tiene que decir
+// qué línea contesta a cuál, y así el escáner, el carrito y el modal del pedido
+// atribuyen igual.
 export const despachar = (payload) => api.post('/red-interna/remisiones', payload);
 
 export const recibirRemision = (id, payload = {}) =>
@@ -98,6 +102,38 @@ export const moverAbono = (id, remisionId) =>
 
 export const getMovimientosCuenta = (sucursal) =>
   api.get('/red-interna/cuenta/movimientos', { params: { sucursal } });
+
+// ── Pedidos: el sentido inverso (el local le pide a la bodega) ───────────────
+//
+// Una sola ruta de listado y una sola de ficha para los dos lados: el backend
+// decide qué ve cada quien según la sucursal activa, igual que el panel. La UI
+// no manda "soy la bodega".
+//
+// `abiertos: '1'` es la bandeja: enviados y con algo pendiente. Se vacía sola al
+// despachar —el avance es derivado— y vuelve a llenarse si esa remisión se
+// anula o el local reporta un faltante.
+export const listarPedidos = (params = {}) =>
+  api.get('/red-interna/pedidos', { params });
+
+export const getPedido = (id) => api.get(`/red-interna/pedidos/${id}`);
+
+// Qué tiene la bodega, para que el local arme el pedido. Viene SIN costos: el
+// costo de la bodega es justo lo que el local no puede ver.
+export const catalogoPedido = (q = '') =>
+  api.get('/red-interna/pedidos/catalogo', { params: { q } });
+
+// `enviar: false` guarda un borrador; por defecto crea y envía en un paso.
+export const crearPedido    = (payload) => api.post('/red-interna/pedidos', payload);
+export const editarPedido   = (id, payload) => api.patch(`/red-interna/pedidos/${id}`, payload);
+export const enviarPedido   = (id) => api.post(`/red-interna/pedidos/${id}/enviar`);
+export const anularPedido   = (id, motivo) =>
+  api.post(`/red-interna/pedidos/${id}/anular`, { motivo });
+
+// La bodega responde. `respuesta` no es decorativa: sin ella, cerrar un pedido
+// se ve desde el local exactamente igual que ignorarlo.
+export const cerrarPedido   = (id, respuesta) =>
+  api.post(`/red-interna/pedidos/${id}/cerrar`, { respuesta });
+export const reabrirPedido  = (id) => api.post(`/red-interna/pedidos/${id}/reabrir`);
 
 // ── Control ──────────────────────────────────────────────────────────────────
 export const getConciliacion = (sucursalId) =>

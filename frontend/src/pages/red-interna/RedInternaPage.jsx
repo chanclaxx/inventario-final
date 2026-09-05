@@ -11,6 +11,8 @@ import { Modal }      from '../../components/ui/Modal';
 import { Spinner }    from '../../components/ui/Spinner';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { ModalDespachar } from './ModalDespachar';
+import { ModalPedido }    from './ModalPedido';
+import { BandejaPedidos } from './PedidosSecciones';
 import { CuentaLocal }   from './CuentaLocal';
 import {
   Package, PackageCheck, Truck, Store, AlertTriangle, CheckCircle,
@@ -55,7 +57,12 @@ function Tarjeta({ children, className = '' }) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 function PanelBodega({ data, locales, onRefrescar, onAviso, onVerCuenta }) {
-  const [despachar, setDespachar] = useState(false);
+  // `despachar` guarda `true` (despacho suelto) o el paquete que devuelve la
+  // ficha del pedido: `{ pedido, items, descartados }`. Un solo estado para las
+  // dos entradas, porque abren el MISMO modal — tener dos sería tener dos
+  // pantallas de despacho que se separan al primer arreglo.
+  const [despachar, setDespachar] = useState(null);
+  const [pedido,    setPedido]    = useState(null);   // id del pedido abierto
   const [salud,     setSalud]     = useState(false);
 
   const confirmar = useMutation({
@@ -92,6 +99,9 @@ function PanelBodega({ data, locales, onRefrescar, onAviso, onVerCuenta }) {
   const enTransito  = data.remisiones_en_transito     || [];
   const devoluciones = data.devoluciones_por_confirmar || [];
   const gastos       = data.gastos_por_aprobar         || [];
+  // `null` cuando la función está apagada o su migración no llegó a aplicarse:
+  // en los dos casos la bandeja simplemente no aparece.
+  const pedidos      = data.pedidos_por_atender        || [];
 
   return (
     <>
@@ -106,7 +116,7 @@ function PanelBodega({ data, locales, onRefrescar, onAviso, onVerCuenta }) {
             <p className="text-lg font-bold text-gray-500">{data.totales.envios_abiertos}</p>
           </div>
         </div>
-        <Button onClick={() => setDespachar(true)}>
+        <Button onClick={() => setDespachar({})}>
           <Truck size={15} /> Despachar
         </Button>
       </div>
@@ -162,7 +172,10 @@ function PanelBodega({ data, locales, onRefrescar, onAviso, onVerCuenta }) {
       </div>
 
       <div>
-      {/* Bandejas */}
+      {/* Bandejas. Los pedidos van de PRIMEROS: es lo único que llega desde el
+          otro lado, y es trabajo que alguien está esperando. */}
+      <BandejaPedidos pedidos={data.pedidos_por_atender} onAbrir={setPedido} />
+
       {gastos.length > 0 && (
         <Tarjeta className="mb-4 border-teal-200">
           <div className="px-5 py-3 border-b border-gray-50 flex items-center gap-2">
@@ -311,7 +324,8 @@ function PanelBodega({ data, locales, onRefrescar, onAviso, onVerCuenta }) {
         </Tarjeta>
       )}
 
-      {devoluciones.length + remesas.length + enTransito.length + gastos.length === 0 && (
+      {devoluciones.length + remesas.length + enTransito.length + gastos.length
+        + pedidos.length === 0 && (
         <div className="rounded-2xl border border-gray-100 bg-white px-5 py-8 text-center">
           <CheckCircle size={20} className="text-green-500 mx-auto mb-1.5" />
           <p className="text-sm text-gray-500">Nada pendiente por confirmar</p>
@@ -328,11 +342,30 @@ function PanelBodega({ data, locales, onRefrescar, onAviso, onVerCuenta }) {
         <ShieldCheck size={15} /> Verificar consistencia
       </button>
 
+      {/* La ficha del pedido. Al pulsar "Despachar" no abre otro flujo: cierra
+          la ficha y abre el modal de despacho de siempre, ya precargado. */}
+      {pedido && (
+        <ModalPedido
+          pedidoId={pedido}
+          esBodega
+          onCerrar={() => { setPedido(null); onRefrescar(); }}
+          onAviso={onAviso}
+          onDespachar={(paquete) => { setPedido(null); setDespachar(paquete); }}
+        />
+      )}
+
       {despachar && (
         <ModalDespachar
           locales={locales}
-          onCerrar={() => setDespachar(false)}
-          onListo={() => { setDespachar(false); onAviso('Remisión enviada'); onRefrescar(); }}
+          pedido={despachar.pedido || null}
+          itemsIniciales={despachar.items || null}
+          descartados={despachar.descartados || []}
+          onCerrar={() => setDespachar(null)}
+          onListo={() => {
+            setDespachar(null);
+            onAviso(despachar.pedido ? 'Envío despachado — el pedido se actualizó' : 'Remisión enviada');
+            onRefrescar();
+          }}
         />
       )}
       {salud   && <ModalSalud onCerrar={() => setSalud(false)} />}
@@ -432,6 +465,9 @@ export default function RedInternaPage() {
     qc.invalidateQueries({ queryKey: ['red-panel'] });
     qc.invalidateQueries({ queryKey: ['red-estado-cuenta'] });
     qc.invalidateQueries({ queryKey: ['red-salud'] });
+    // El avance de un pedido es DERIVADO: despachar, anular o recibir lo mueven
+    // sin que nadie escriba en él, así que su ficha hay que volver a pedirla.
+    qc.invalidateQueries({ queryKey: ['red-pedido'] });
     // El movimiento afecta inventario y dinero: refrescar lo que el usuario
     // podría estar mirando en otra pestaña.
     qc.invalidateQueries({ queryKey: ['inventario'] });

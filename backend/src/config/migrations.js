@@ -216,6 +216,96 @@ const aplicarMigraciones = async (client) => {
       WHERE factura_confirmada = FALSE;
   `);
 
+  // Pedidos internos: el local le pide a la bodega — ver
+  // migrations/20260904_pedidos_internos.sql (ese archivo lleva el diseño
+  // completo; esto es la copia que corre de verdad en producción).
+  //
+  // El pedido se pone ENCIMA de la remisión, igual que la orden de compra se
+  // pone encima de la compra: un pedido, N remisiones, y el avance se DERIVA
+  // de `lineas_remision` en vez de guardarse — anular, marcar 'Faltante' o
+  // devolver reabren solos lo que falta.
+  //
+  // Bloque PROPIO, fuera del try/catch grande de la red interna y fuera de
+  // `TABLAS_REQUERIDAS` del middleware: si esta migración fallara, el módulo
+  // que YA está operando no puede apagarse entero por una tabla que todavía no
+  // usa nadie. Es la misma decisión que se tomó con `movimientos_ubicacion`.
+  //
+  // Sin backticks ni interpolaciones dentro del template literal: una comilla
+  // invertida en un comentario SQL lo cierra a media consulta y el backend deja
+  // de arrancar. Ya pasó dos veces.
+  await migrar(client, 'Pedidos internos a la bodega', `
+    CREATE TABLE IF NOT EXISTS pedidos_internos (
+      id                 BIGSERIAL PRIMARY KEY,
+      negocio_id         INTEGER   NOT NULL REFERENCES negocios(id)   ON DELETE RESTRICT,
+      numero             INTEGER,
+      -- La bodega se congela en la fila: red_interna_bodega_id se puede cambiar
+      -- en Ajustes y un pedido viejo debe seguir diciendo a quien se le hizo.
+      sucursal_id        INTEGER   NOT NULL REFERENCES sucursales(id) ON DELETE RESTRICT,
+      sucursal_bodega_id INTEGER   NOT NULL REFERENCES sucursales(id) ON DELETE RESTRICT,
+      -- Solo decisiones humanas. Pendiente/Parcial/Completo se derivan al leer.
+      estado             TEXT      NOT NULL DEFAULT 'Borrador',
+      prioridad          TEXT      NOT NULL DEFAULT 'normal',
+      usuario_id         INTEGER,
+      fecha              TIMESTAMP NOT NULL DEFAULT NOW(),
+      fecha_envio        TIMESTAMP,
+      notas              TEXT,
+      respuesta          TEXT,
+      cerrado_en         TIMESTAMP,
+      usuario_cierre_id  INTEGER,
+      clave_idempotencia TEXT,
+      CONSTRAINT pedidos_internos_estado_chk
+        CHECK (estado IN ('Borrador', 'Enviado', 'Cerrado', 'Anulado')),
+      CONSTRAINT pedidos_internos_prioridad_chk
+        CHECK (prioridad IN ('normal', 'urgente')),
+      CONSTRAINT pedidos_internos_suc_distintas_chk
+        CHECK (sucursal_id <> sucursal_bodega_id)
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_pedidos_internos_idem
+      ON pedidos_internos (clave_idempotencia) WHERE clave_idempotencia IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_pedidos_internos_local
+      ON pedidos_internos (negocio_id, sucursal_id, fecha DESC);
+    CREATE INDEX IF NOT EXISTS idx_pedidos_internos_bandeja
+      ON pedidos_internos (negocio_id, sucursal_bodega_id, fecha DESC)
+      WHERE estado = 'Enviado';
+
+    CREATE TABLE IF NOT EXISTS lineas_pedido_interno (
+      id              BIGSERIAL PRIMARY KEY,
+      pedido_id       BIGINT    NOT NULL REFERENCES pedidos_internos(id) ON DELETE CASCADE,
+      tipo            TEXT      NOT NULL,
+      -- Referencia de la BODEGA. Sin FK: es polimorfica entre productos_serial
+      -- y productos_cantidad. NULL = pedido a texto libre, que la bodega
+      -- resuelve a mano al despachar.
+      producto_id     INTEGER,
+      atributo_id     INTEGER,
+      variante_id     INTEGER,
+      nombre_producto TEXT      NOT NULL,
+      cantidad_pedida INTEGER   NOT NULL,
+      notas           TEXT,
+      orden           INTEGER   NOT NULL DEFAULT 0,
+      CONSTRAINT lineas_pedido_interno_tipo_chk CHECK (tipo IN ('serial', 'cantidad')),
+      CONSTRAINT lineas_pedido_interno_cant_chk CHECK (cantidad_pedida > 0)
+    );
+    CREATE INDEX IF NOT EXISTS idx_lineas_pedido_interno_pedido
+      ON lineas_pedido_interno (pedido_id, orden, id);
+    CREATE INDEX IF NOT EXISTS idx_lineas_pedido_interno_producto
+      ON lineas_pedido_interno (producto_id) WHERE producto_id IS NOT NULL;
+
+    -- RESTRICT en la cabecera y SET NULL en la linea, igual que
+    -- compras.orden_compra_id / lineas_compra.orden_linea_id: perder el vinculo
+    -- jamas puede llevarse por delante una linea que movio stock y deuda.
+    ALTER TABLE IF EXISTS remisiones
+      ADD COLUMN IF NOT EXISTS pedido_id BIGINT
+        REFERENCES pedidos_internos(id) ON DELETE RESTRICT;
+    ALTER TABLE IF EXISTS lineas_remision
+      ADD COLUMN IF NOT EXISTS pedido_linea_id BIGINT
+        REFERENCES lineas_pedido_interno(id) ON DELETE SET NULL;
+    CREATE INDEX IF NOT EXISTS idx_remisiones_pedido
+      ON remisiones (pedido_id) WHERE pedido_id IS NOT NULL;
+    -- El indice que sostiene TODO el calculo de avance del pedido.
+    CREATE INDEX IF NOT EXISTS idx_lineas_remision_pedido_linea
+      ON lineas_remision (pedido_linea_id) WHERE pedido_linea_id IS NOT NULL;
+  `);
+
   // Ubicación espacial de productos — ver migrations/20260730_ubicacion_producto.sql
   //
   // 100% aditiva e idempotente. Columnas nullable: un negocio sin la feature no

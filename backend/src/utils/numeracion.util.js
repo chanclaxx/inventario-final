@@ -21,6 +21,9 @@ const TABLAS = {
   // consumir números del consecutivo de facturas.
   remision:       'remisiones',
   remesa:         'remesas',
+  // Un pedido del local a la bodega tampoco es una remisión: se numera aparte
+  // porque un pedido puede responderse con varias remisiones (o con ninguna).
+  pedido_interno: 'pedidos_internos',
 };
 
 // Cache: una vez detectada la infraestructura no se vuelve a consultar.

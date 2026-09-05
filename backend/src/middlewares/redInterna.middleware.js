@@ -23,6 +23,7 @@ const CLAVES = {
   confirmarRemesa:   'red_interna_confirmar_remesa',   // '1' = la bodega confirma
   bloquearTraslados: 'red_interna_bloquear_traslados', // '1' = traslado libre off
   ocultarCostos:     'red_interna_ocultar_costos',     // '1' = vendedor sin costos
+  pedidos:           'red_interna_pedidos',            // '0' = el local no pide
 };
 
 const DEFAULTS = {
@@ -73,6 +74,13 @@ const getConfigRed = async (negocioId) => {
     // no los ve: confirma entregas y remite el dinero, pero no sabe a cuánto
     // le compró la bodega cada equipo.
     ocultar_costos:      map[CLAVES.ocultarCostos]      !== '0',
+    // Ausente = ENCENDIDO, al revés que casi todo lo demás del sistema y a
+    // propósito: la red interna YA es opt-in, así que quien llegó hasta aquí
+    // encendió a mano la distribución desde bodega. Pedir no compromete
+    // inventario, ni caja, ni deuda — no pasa nada hasta que la bodega
+    // despacha. El interruptor existe para la bodega que no quiere que los
+    // locales pidan, no para esconder la función.
+    pedidos:             map[CLAVES.pedidos]            !== '0',
   };
 
   _cache.set(negocioId, { valor, expira: Date.now() + TTL_MS });
@@ -100,6 +108,32 @@ const _hayInfra = async () => {
   `);
   _infraLista = Boolean(rows[0].a && rows[0].b && rows[0].c && rows[0].d && rows[0].e);
   return _infraLista;
+};
+
+/**
+ * Tercer candado, solo para las rutas de pedidos: la infraestructura existe y
+ * la bodega no apagó la función. 404 en los dos casos — para ese negocio no
+ * existe.
+ *
+ * Va DESPUÉS de `requireRedInterna` en el router, así que `req.red` ya está.
+ *
+ * La detección es la de `columnas.js` y NO la de `_hayInfra`, a propósito y por
+ * dos razones distintas:
+ *   • si estuviera dentro de `_hayInfra`, un despliegue donde solo fallara esta
+ *     migración apagaría con un 503 la red interna ENTERA, que ya está
+ *     operando, por una tabla que todavía no usa nadie;
+ *   • y es la MISMA bandera que decide si `crearRemision` nombra la columna
+ *     `pedido_id`. Con dos detecciones separadas podrían discrepar y se
+ *     aceptaría un pedido que ningún despacho podría responder.
+ */
+const requirePedidos = (req, res, next) => {
+  if (!req.red?.pedidos) {
+    return res.status(404).json({ ok: false, error: 'Los pedidos a la bodega están desactivados' });
+  }
+  if (!require('../config/columnas').hayPedidosInternos()) {
+    return res.status(404).json({ ok: false, error: 'Los pedidos a la bodega no están instalados' });
+  }
+  next();
 };
 
 /**
@@ -136,4 +170,7 @@ const requireRedInterna = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-module.exports = { requireRedInterna, getConfigRed, invalidarCache, CLAVES, DEFAULTS };
+module.exports = {
+  requireRedInterna, requirePedidos,
+  getConfigRed, invalidarCache, CLAVES, DEFAULTS,
+};

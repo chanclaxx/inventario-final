@@ -43,6 +43,7 @@ const detectarColumnas = async () => {
   await _detectarCatalogo();
   await _detectarUbicaciones();
   await _detectarMovimientosUbicacion();
+  await _detectarPedidosInternos();
   return _ubicacionDisponible;
 };
 
@@ -164,15 +165,75 @@ const _detectarCatalogo = async () => {
 
 const hayCatalogo = () => _catalogoDisponible;
 
+// ── Pedidos internos (el local le pide a la bodega) ──────────────────────────
+//
+// Ver migrations/20260904_pedidos_internos.sql. Bandera SEPARADA de todo lo
+// demás y por la razón de siempre, pero aquí el riesgo es mayor: además de dos
+// tablas nuevas, la feature agrega DOS COLUMNAS a `remisiones` y
+// `lineas_remision`, que son las que escribe CADA despacho de la red interna.
+//
+// Si esas columnas no existieran y el repositorio ya las nombrara, no se caería
+// una pantalla nueva: se caería DESPACHAR, que es la operación diaria de un
+// módulo que ya está en producción. Por eso `crearRemision` e
+// `insertarLineaRemision` las interpolan solo con esta bandera encendida — sin
+// ella emiten exactamente el SQL de siempre y el vínculo con el pedido
+// simplemente no se guarda.
+//
+// Se exigen las CUATRO piezas: con las tablas y sin las columnas se podrían
+// crear pedidos que ninguna remisión podría responder.
+
+const TABLAS_PEDIDOS   = ['pedidos_internos', 'lineas_pedido_interno'];
+const COLUMNAS_PEDIDOS = [['remisiones', 'pedido_id'], ['lineas_remision', 'pedido_linea_id']];
+
+let _pedidosInternosDisponible = false;
+
+const _detectarPedidosInternos = async () => {
+  try {
+    const { rows: tablas } = await pool.query(
+      `SELECT table_name
+       FROM information_schema.tables
+       WHERE table_schema = 'public'
+         AND table_type   = 'BASE TABLE'
+         AND table_name   = ANY($1::text[])`,
+      [TABLAS_PEDIDOS]
+    );
+    const { rows: cols } = await pool.query(
+      `SELECT table_name, column_name
+       FROM information_schema.columns
+       WHERE table_schema = 'public'
+         AND (table_name, column_name) IN (($1, $2), ($3, $4))`,
+      COLUMNAS_PEDIDOS.flat()
+    );
+    const hayTablas = new Set(tablas.map((r) => r.table_name));
+    const hayCols   = new Set(cols.map((r) => `${r.table_name}.${r.column_name}`));
+
+    _pedidosInternosDisponible =
+      TABLAS_PEDIDOS.every((t) => hayTablas.has(t))
+      && COLUMNAS_PEDIDOS.every(([t, c]) => hayCols.has(`${t}.${c}`));
+
+    if (!_pedidosInternosDisponible) {
+      console.warn('⚠️  Pedidos a la bodega ausentes: la función queda desactivada (la red interna sigue igual).');
+    }
+  } catch (err) {
+    _pedidosInternosDisponible = false;
+    console.error('⚠️  No se pudieron verificar los pedidos internos (función desactivada):', err.message);
+  }
+  return _pedidosInternosDisponible;
+};
+
+const hayPedidosInternos = () => _pedidosInternosDisponible;
+
 // Solo para pruebas: permite simular una BD sin la columna sin tocar la BD real.
 const _setUbicacionDisponible  = (valor) => { _ubicacionDisponible  = !!valor; };
 const _setCatalogoDisponible   = (valor) => { _catalogoDisponible   = !!valor; };
 const _setUbicacionesDisponible = (valor) => { _ubicacionesDisponible = !!valor; };
 const _setMovimientosUbicacionDisponible = (valor) => { _movimientosUbicacionDisponible = !!valor; };
+const _setPedidosInternosDisponible = (valor) => { _pedidosInternosDisponible = !!valor; };
 
 module.exports = {
   detectarColumnas, hayUbicacion, _setUbicacionDisponible,
   hayCatalogo, _setCatalogoDisponible,
   hayUbicaciones, _setUbicacionesDisponible,
   hayMovimientosUbicacion, _setMovimientosUbicacionDisponible,
+  hayPedidosInternos, _setPedidosInternosDisponible,
 };

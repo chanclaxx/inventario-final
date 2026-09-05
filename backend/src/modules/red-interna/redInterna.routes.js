@@ -16,6 +16,12 @@ const ctrl = require('./redInterna.controller');
 // ─────────────────────────────────────────────────────────────────────────────
 router.use(requireModulo('red_interna'), requireRedInterna);
 
+// ── El sentido inverso: el local le pide a la bodega ─────────────────────────
+// Sub-router para que ninguna de sus rutas pueda chocar con las de aquí abajo
+// (empezando por `/remisiones/:id`), y con su propio candado: la bodega puede
+// apagar los pedidos sin apagar la red interna. Ver redInterna.pedidos.routes.js.
+router.use('/pedidos', require('./redInterna.pedidos.routes'));
+
 // ── Lectura ──────────────────────────────────────────────────────────────────
 router.get('/panel',                    ctrl.getPanel);
 router.get('/sucursales',               ctrl.getSucursales);

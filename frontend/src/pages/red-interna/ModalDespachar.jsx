@@ -14,7 +14,7 @@ import { Spinner } from '../../components/ui/Spinner';
 import { InputMoneda } from '../../components/ui/InputMoneda';
 import {
   Truck, Trash2, Check, AlertTriangle, Store, Package, ShoppingBag,
-  Plus, Minus, Search, X,
+  Plus, Minus, Search, X, ClipboardList,
 } from 'lucide-react';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -167,8 +167,15 @@ function PanelAccesorios({ yaEnLista, onAgregar, onCerrar }) {
   );
 }
 
-export function ModalDespachar({ locales, itemsIniciales = null, descartados = [], onCerrar, onListo }) {
-  const [destino,     setDestino]     = useState(locales.length === 1 ? locales[0].id : null);
+// `pedido` (opcional) convierte el despacho en la RESPUESTA a un pedido del
+// local: fija el destino, precarga los accesorios pendientes y viaja como
+// `pedido_id` para que el backend una cada línea con la que la pedía. Todo lo
+// demás —el escáner, los valores, la revisión de destino— funciona igual.
+export function ModalDespachar({
+  locales, itemsIniciales = null, descartados = [], pedido = null, onCerrar, onListo,
+}) {
+  const [destino,     setDestino]     = useState(
+    pedido ? Number(pedido.sucursal_id) : locales.length === 1 ? locales[0].id : null);
   const [items,       setItems]       = useState(itemsIniciales || []);
   const [texto,       setTexto]       = useState('');
   const [error,       setError]       = useState('');
@@ -315,6 +322,10 @@ export function ModalDespachar({ locales, itemsIniciales = null, descartados = [
       notas: notas.trim() || null,
       clave_idempotencia: clave(),
       permitir_valor_cero: confirmadoSinCobro,
+      // Qué línea del pedido responde cada una lo resuelve el backend: así el
+      // escáner, el carrito y esta pantalla atribuyen igual, y una que se
+      // olvidara del vínculo no dejaría el pedido pidiendo lo que ya salió.
+      pedido_id: pedido ? pedido.id : undefined,
     }).then((r) => r.data.data),
     onSuccess: onListo,
     onError: (err) => setError(err.response?.data?.error || 'No se pudo despachar'),
@@ -352,7 +363,9 @@ export function ModalDespachar({ locales, itemsIniciales = null, descartados = [
   }
 
   return (
-    <Modal open onClose={onCerrar} title="Despachar a un local" size="lg">
+    <Modal open onClose={onCerrar}
+      title={pedido ? `Despachar el pedido #${pedido.numero ?? pedido.id}` : 'Despachar a un local'}
+      size="lg">
       <div className="flex flex-col gap-4">
 
         {/* Productos que no se pudieron traer del carrito */}
@@ -367,28 +380,44 @@ export function ModalDespachar({ locales, itemsIniciales = null, descartados = [
           </div>
         )}
 
-        {/* Paso 1 — a cuál local */}
-        <div>
-          <p className="text-xs font-semibold text-gray-400 uppercase mb-2">1 · ¿A cuál local?</p>
-          <div className="flex flex-wrap gap-2">
-            {locales.map((l) => (
-              <button
-                key={l.id}
-                onClick={() => setDestino(l.id)}
-                className={`px-4 py-2.5 rounded-xl text-sm font-medium border transition-all
-                  ${destino === l.id
-                    ? 'bg-blue-600 border-blue-600 text-white'
-                    : 'bg-white border-gray-200 text-gray-700 hover:border-blue-300'}`}
-              >
-                <Store size={14} className="inline mr-1.5 -mt-0.5" />{l.nombre}
-              </button>
-            ))}
+        {/* Paso 1 — a cuál local. Respondiendo un pedido no se elige: el
+            destino es quien lo pidió, y poder cambiarlo solo permitiría mandar
+            a otra parte lo que un local pidió. */}
+        {pedido ? (
+          <div className="flex items-center gap-2 bg-blue-50 border border-blue-200
+            rounded-xl px-4 py-3">
+            <ClipboardList size={15} className="text-blue-600 flex-shrink-0" />
+            <p className="text-xs text-blue-800">
+              Respondiendo el <strong>pedido #{pedido.numero ?? pedido.id}</strong> de{' '}
+              <strong>{pedido.sucursal_nombre}</strong>. Lo que despaches se
+              descuenta solo de lo que pidieron.
+            </p>
           </div>
-        </div>
+        ) : (
+          <div>
+            <p className="text-xs font-semibold text-gray-400 uppercase mb-2">1 · ¿A cuál local?</p>
+            <div className="flex flex-wrap gap-2">
+              {locales.map((l) => (
+                <button
+                  key={l.id}
+                  onClick={() => setDestino(l.id)}
+                  className={`px-4 py-2.5 rounded-xl text-sm font-medium border transition-all
+                    ${destino === l.id
+                      ? 'bg-blue-600 border-blue-600 text-white'
+                      : 'bg-white border-gray-200 text-gray-700 hover:border-blue-300'}`}
+                >
+                  <Store size={14} className="inline mr-1.5 -mt-0.5" />{l.nombre}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Paso 2 — agregar productos */}
         <div className={destino ? '' : 'opacity-40 pointer-events-none'}>
-          <p className="text-xs font-semibold text-gray-400 uppercase mb-2">2 · Agrega los productos</p>
+          <p className="text-xs font-semibold text-gray-400 uppercase mb-2">
+            {pedido ? 'Revisa y completa lo que sale' : '2 · Agrega los productos'}
+          </p>
 
           <form onSubmit={onSubmitScan}>
             <input

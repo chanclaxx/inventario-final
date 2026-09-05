@@ -77,9 +77,11 @@ const despachar = async (req, res, next) => {
   try {
     const {
       sucursal_destino_id, lineas, notas, clave_idempotencia, permitir_valor_cero,
+      pedido_id,
     } = req.body;
     const data = await service.despachar(req, {
       sucursal_destino_id, lineas, notas, clave_idempotencia, permitir_valor_cero,
+      pedido_id,
     });
     if (!data.repetido) {
       audit.registrar(req.user.negocio_id, req.user.id, 'Remisión despachada', 'red_interna', data.id, {
@@ -87,6 +89,7 @@ const despachar = async (req, res, next) => {
         sucursal_destino_id: Number(sucursal_destino_id),
         items:               (lineas || []).length,
         valor_total:         data.valor_total,
+        pedido_id:           data.pedido_id ?? null,
       });
     }
     res.status(201).json({ ok: true, data, message: 'Remisión enviada' });

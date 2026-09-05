@@ -1,4 +1,9 @@
 const { pool } = require('../../config/db');
+// La feature de pedidos agrega dos columnas a `remisiones` y `lineas_remision`.
+// Si su migración no llegó a aplicarse, nombrarlas tumbaría el despacho entero
+// —la operación diaria de un módulo que ya está en producción—, así que se
+// interpolan solo cuando existen. Ver src/config/columnas.js.
+const { hayPedidosInternos } = require('../../config/columnas');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // RED INTERNA — repositorio
@@ -1066,31 +1071,42 @@ const getResumenPorRemision = async (negocioId, sucursalId, { limit = 100 } = {}
 
 const crearRemision = async (client, {
   negocio_id, tipo, sucursal_origen_id, sucursal_destino_id,
-  usuario_emisor_id, clave_idempotencia, notas, estado, motivo,
+  usuario_emisor_id, clave_idempotencia, notas, estado, motivo, pedido_id,
 }) => {
+  // `pedido_id` se interpola solo si la columna existe. Si su migración no
+  // llegó a aplicarse, esta consulta queda EXACTAMENTE como estaba en vez de
+  // reventar el despacho, que es la operación diaria de un módulo que ya está
+  // en producción. Mismo criterio que la columna `ubicacion` del inventario.
+  const conPedido = hayPedidosInternos();
   const { rows } = await client.query(`
     INSERT INTO remisiones
       (negocio_id, tipo, sucursal_origen_id, sucursal_destino_id,
-       usuario_emisor_id, clave_idempotencia, notas, estado, motivo)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       usuario_emisor_id, clave_idempotencia, notas, estado, motivo${conPedido ? ', pedido_id' : ''})
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9${conPedido ? ', $10' : ''})
     RETURNING *
   `, [negocio_id, tipo, sucursal_origen_id, sucursal_destino_id,
       usuario_emisor_id, clave_idempotencia || null, notas || null,
-      estado || 'En transito', motivo || null]);
+      estado || 'En transito', motivo || null,
+      // A qué pedido del local responde este envío. NULL es el caso normal —
+      // la bodega despachando por su cuenta — y es el único que existía antes
+      // de 20260904.
+      ...(conPedido ? [pedido_id || null] : [])]);
   return rows[0];
 };
 
 const insertarLineaRemision = async (client, l) => {
+  // Igual que en `crearRemision`: sin la columna, el SQL de siempre.
+  const conPedido = hayPedidosInternos();
   const { rows } = await client.query(`
     INSERT INTO lineas_remision
       (remision_id, tipo, serial_id, imei, producto_origen_id, producto_destino_id,
        cantidad, cantidad_recibida, valor_interno, estado_linea, nombre_producto,
        origen_unidad, genera_saldo_favor, remision_tipo,
        atributo_origen_id, variante_origen_id, atributo_destino_id, variante_destino_id,
-       costo_origen)
+       costo_origen${conPedido ? ', pedido_linea_id' : ''})
     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
             COALESCE($14, (SELECT tipo FROM remisiones WHERE id = $1)),
-            $15, $16, $17, $18, $19)
+            $15, $16, $17, $18, $19${conPedido ? ', $20' : ''})
     RETURNING *
   `, [l.remision_id, l.tipo, l.serial_id || null, l.imei || null,
       l.producto_origen_id || null, l.producto_destino_id || null,
@@ -1106,7 +1122,11 @@ const insertarLineaRemision = async (client, l) => {
       // después su utilidad por haber despachado. NULL es legítimo (mercancía
       // sin costo registrado, o una línea creada antes de la migración) y el
       // reporte lo dice en vez de inventar una cifra.
-      l.costo_origen ?? null]);
+      l.costo_origen ?? null,
+      // Qué línea de qué pedido responde esta. NULL = la bodega despachó por su
+      // cuenta, que es el caso normal y el único que existía antes de 20260904.
+      // Es el vínculo del que se DERIVA el avance del pedido.
+      ...(conPedido ? [l.pedido_linea_id ?? null] : [])]);
   return rows[0];
 };
 
@@ -1413,25 +1433,43 @@ const buscarCantidadPorCodigo = async (negocioId, sucursalOrigenId, codigo) => {
   return rows[0] || null;
 };
 
-// Catálogo de accesorios de la bodega para elegir a mano (los que no tienen
-// código, o cuando se prefiere buscar por nombre).
-const buscarCantidadDisponible = async (negocioId, sucursalOrigenId, q = '') => {
-  const filtro = (q || '').trim().toLowerCase().replace(/[%_\\]/g, '\\$&').slice(0, 60);
-  // Devuelve NODOS, no productos: un producto con variantes se lista por talla,
-  // porque es la talla la que tiene el stock y la que se despacha. Un producto
-  // sin variantes se lista tal cual, como siempre. Cada rama excluye los nodos
-  // que tienen hijos activos: esos son contenedores, no cosas despachables.
-  const { rows } = await pool.query(`
+// ─────────────────────────────────────────────────────────────────────────────
+// NODOS DE CANTIDAD DE UNA SUCURSAL — la plantilla que comparten dos lecturas
+//
+// Devuelve NODOS, no productos: un producto con variantes se lista por talla,
+// porque es la talla la que tiene el stock y la que se despacha. Un producto
+// sin variantes se lista tal cual. Cada rama excluye los nodos que tienen hijos
+// activos: esos son contenedores, no cosas despachables.
+//
+// Dos parámetros, y los dos son decisiones de seguridad o de producto, no de
+// estilo:
+//
+//   • `conCosto` — el DESPACHO lo necesita (el costo es la base del valor de la
+//     línea). El catálogo que ve el LOCAL para pedir, NO: es el costo de la
+//     bodega, exactamente lo que `red_interna_ocultar_costos` y
+//     `costos_solo_admin` esconden. Aquí ni siquiera se selecciona, en vez de
+//     seleccionarlo y borrarlo después: un recorte olvidado deja el dato
+//     viajando en el JSON y visible desde la consola del navegador.
+//   • `soloConStock` — despachar exige stock; PEDIR no. Un local pide
+//     justamente lo que se acabó, y esconder de su catálogo lo que la bodega
+//     tiene en cero lo dejaría sin poder pedirlo.
+//
+// Una sola plantilla y no dos copias: son 60 líneas de SQL y las dos listas
+// tienen que entender el árbol igual. El mismo criterio de `_sqlEnviosCuenta`.
+const _sqlNodosCantidad = ({ conCosto, soloConStock }) => {
+  const costo = (expr) => (conCosto ? expr : 'NULL::numeric');
+  const stock = (col) => (soloConStock ? `AND ${col} > 0` : '');
+  return `
     SELECT * FROM (
       SELECT pc.id AS producto_id, NULL::int AS atributo_id, NULL::int AS variante_id,
              pc.nombre, NULL::text AS variante_label, pc.codigo, pc.stock,
-             COALESCE(pc.costo_unitario, 0) AS costo_unitario,
+             ${costo('COALESCE(pc.costo_unitario, 0)')} AS costo_unitario,
              pc.unidad_medida, pc.linea_id, lp.nombre AS linea_nombre
       FROM productos_cantidad pc
       JOIN sucursales su           ON su.id = pc.sucursal_id
       LEFT JOIN lineas_producto lp ON lp.id = pc.linea_id
       WHERE su.negocio_id = $1 AND pc.sucursal_id = $2
-        AND pc.activo = true AND pc.stock > 0
+        AND pc.activo = true ${stock('pc.stock')}
         AND NOT EXISTS (SELECT 1 FROM atributos_producto x
                         WHERE x.producto_id = pc.id AND x.activo = true)
         AND ($3 = '' OR LOWER(pc.nombre) LIKE '%' || $3 || '%' ESCAPE '\\'
@@ -1441,14 +1479,14 @@ const buscarCantidadDisponible = async (negocioId, sucursalOrigenId, q = '') => 
 
       SELECT pc.id, ap.id, NULL::int,
              pc.nombre, ap.valor, ap.codigo, ap.stock,
-             COALESCE(ap.costo_unitario, pc.costo_unitario, 0),
+             ${costo('COALESCE(ap.costo_unitario, pc.costo_unitario, 0)')},
              pc.unidad_medida, pc.linea_id, lp.nombre
       FROM atributos_producto ap
       JOIN productos_cantidad pc   ON pc.id = ap.producto_id
       JOIN sucursales su           ON su.id = ap.sucursal_id
       LEFT JOIN lineas_producto lp ON lp.id = pc.linea_id
       WHERE su.negocio_id = $1 AND ap.sucursal_id = $2
-        AND ap.activo = true AND pc.activo = true AND ap.stock > 0
+        AND ap.activo = true AND pc.activo = true ${stock('ap.stock')}
         AND NOT EXISTS (SELECT 1 FROM variantes_atributo v
                         WHERE v.atributo_id = ap.id AND v.activo = true)
         AND ($3 = '' OR LOWER(pc.nombre) LIKE '%' || $3 || '%' ESCAPE '\\'
@@ -1459,7 +1497,7 @@ const buscarCantidadDisponible = async (negocioId, sucursalOrigenId, q = '') => 
 
       SELECT pc.id, ap.id, v.id,
              pc.nombre, ap.valor || ' / ' || v.valor, v.codigo, v.stock,
-             COALESCE(v.costo_unitario, ap.costo_unitario, pc.costo_unitario, 0),
+             ${costo('COALESCE(v.costo_unitario, ap.costo_unitario, pc.costo_unitario, 0)')},
              pc.unidad_medida, pc.linea_id, lp.nombre
       FROM variantes_atributo v
       JOIN atributos_producto ap   ON ap.id = v.atributo_id
@@ -1467,15 +1505,37 @@ const buscarCantidadDisponible = async (negocioId, sucursalOrigenId, q = '') => 
       JOIN sucursales su           ON su.id = ap.sucursal_id
       LEFT JOIN lineas_producto lp ON lp.id = pc.linea_id
       WHERE su.negocio_id = $1 AND ap.sucursal_id = $2
-        AND v.activo = true AND ap.activo = true AND pc.activo = true AND v.stock > 0
+        AND v.activo = true AND ap.activo = true AND pc.activo = true ${stock('v.stock')}
         AND ($3 = '' OR LOWER(pc.nombre) LIKE '%' || $3 || '%' ESCAPE '\\'
                      OR LOWER(ap.valor)  LIKE '%' || $3 || '%' ESCAPE '\\'
                      OR LOWER(v.valor)   LIKE '%' || $3 || '%' ESCAPE '\\'
                      OR LOWER(COALESCE(v.codigo, '')) LIKE '%' || $3 || '%' ESCAPE '\\')
     ) nodos
     ORDER BY nombre, variante_label NULLS FIRST
-    LIMIT 50
-  `, [negocioId, sucursalOrigenId, filtro]);
+    LIMIT 50`;
+};
+
+const SQL_NODOS_DESPACHO = _sqlNodosCantidad({ conCosto: true,  soloConStock: true });
+const SQL_NODOS_PEDIDO   = _sqlNodosCantidad({ conCosto: false, soloConStock: false });
+
+const _normalizarFiltro = (q) =>
+  (q || '').trim().toLowerCase().replace(/[%_\\]/g, '\\$&').slice(0, 60);
+
+// Catálogo de accesorios de la bodega para elegir a mano (los que no tienen
+// código, o cuando se prefiere buscar por nombre).
+const buscarCantidadDisponible = async (negocioId, sucursalOrigenId, q = '') => {
+  const { rows } = await pool.query(
+    SQL_NODOS_DESPACHO, [negocioId, sucursalOrigenId, _normalizarFiltro(q)]
+  );
+  return rows;
+};
+
+// Catálogo que ve el LOCAL para armar un pedido. Sin costos y sin exigir stock:
+// ver los motivos en `_sqlNodosCantidad`.
+const buscarCantidadParaPedido = async (negocioId, bodegaId, q = '') => {
+  const { rows } = await pool.query(
+    SQL_NODOS_PEDIDO, [negocioId, bodegaId, _normalizarFiltro(q)]
+  );
   return rows;
 };
 
@@ -2097,6 +2157,7 @@ module.exports = {
   insertarCorreccion, getCorreccionesRemision,
   marcarRemisionRecibida, marcarRemisionAnulada, marcarLineas,
   buscarSerialDisponible, buscarCantidadPorCodigo, buscarCantidadDisponible,
+  buscarCantidadParaPedido,
   findCantidadById, findNodoCantidadById, findSerialById,
   getLotesPendientes, consumirLotesFIFO, buscarReferencias, getReferenciasDuplicadas,
   crearRemesa, findRemesaById, findRemesas, marcarRemesaRecibida, marcarRemesaAnulada,

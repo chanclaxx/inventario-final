@@ -2,6 +2,10 @@ const crypto = require('crypto');
 const { pool } = require('../../config/db');
 const repo          = require('./redInterna.repository');
 const referencias   = require('./redInterna.referencias');
+// El sentido inverso (el local pide, la bodega despacha). La dependencia va en
+// UN solo sentido: los pedidos no importan este archivo — mandan sus avisos por
+// `redInterna.avisos`, que existe justamente para no cerrar el ciclo.
+const pedidos       = require('./redInterna.pedidos.service');
 const trasladosRepo = require('../traslados/traslados.repository');
 const variantesRepo = require('../variantes-producto/variantes-producto.repository');
 const tesoreriaRepo = require('../tesoreria/tesoreria.repository');
@@ -558,10 +562,18 @@ const _destinoElegido = async (client, {
 // ─────────────────────────────────────────────────────────────────────────────
 // DESPACHAR — la bodega emite la remisión
 // No mueve inventario ni deuda: solo crea el documento y lo pone en tránsito.
+//
+// `pedido_id` (opcional) es la única pieza del flujo inverso que toca esta
+// función: el despacho pasa a ser la RESPUESTA a un pedido del local. No cambia
+// nada de lo que hace —mismo documento, mismo valor, mismas validaciones—, solo
+// deja el vínculo para que el avance del pedido se pueda derivar. Un despacho
+// sin pedido (el único que existe hoy en los negocios que ya operan) recorre
+// exactamente el mismo camino con `pedido` en null.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const despachar = async (req, {
   sucursal_destino_id, lineas, notas, clave_idempotencia, permitir_valor_cero,
+  pedido_id,
 }) => {
   _exigirBodega(req);
   const negocioId = req.user.negocio_id;
@@ -591,11 +603,22 @@ const despachar = async (req, {
   try {
     await client.query('BEGIN');
 
+    // El pedido se bloquea ANTES de crear nada: valida que sea de este local y
+    // de esta bodega, y devuelve el repartidor que une cada línea que sale con
+    // la línea que la pedía. Sin pedido, `pedido` queda en null y todo lo de
+    // abajo se comporta igual que siempre.
+    const pedido = pedido_id
+      ? await pedidos.abrirAtribucion(client, {
+          negocioId, pedidoId: Number(pedido_id), destinoId, bodegaId: origenId,
+        })
+      : null;
+
     const remision = await repo.crearRemision(client, {
       negocio_id: negocioId, tipo: 'entrega',
       sucursal_origen_id: origenId, sucursal_destino_id: destinoId,
       usuario_emisor_id: req.user.id, clave_idempotencia, notas,
       estado: 'En transito',
+      pedido_id: pedido ? pedido.pedido.id : null,
     });
 
     for (const l of lineas) {
@@ -644,6 +667,13 @@ const despachar = async (req, {
           producto_origen_id: s.producto_id,
           producto_destino_id: destinoSerial,
           valor_interno: valorSerial,
+          // Qué línea del pedido responde esta unidad. El pedido dice "2 ×
+          // iPhone 13" y la bodega escanea los IMEI concretos: el vínculo se
+          // resuelve por la REFERENCIA del serial, que es lo único que las dos
+          // puntas comparten.
+          pedido_linea_id: pedido?.atribuir({
+            tipo: 'serial', productoId: s.producto_id, explicita: l.pedido_linea_id ?? null,
+          }) ?? null,
           // Lo que le costó a la BODEGA. Se guarda para poder calcular después
           // su utilidad por el despacho; `seriales.costo_compra` sigue intacto.
           costo_origen: s.costo_compra ?? null,
@@ -680,6 +710,14 @@ const despachar = async (req, {
           atributo_origen_id: nodo.atributoId,
           variante_origen_id: nodo.varianteId,
           valor_interno: valorCantidad,
+          // Se atribuye por NODO, y `abrirAtribucion` acepta que el pedido haya
+          // pedido el nivel de arriba: pidieron "la correa" y sale la 38MM, que
+          // es la respuesta correcta y tiene que contar como tal.
+          pedido_linea_id: pedido?.atribuir({
+            tipo: 'cantidad', productoId: nodo.productoId,
+            atributoId: nodo.atributoId, varianteId: nodo.varianteId,
+            unidades: cant, explicita: l.pedido_linea_id ?? null,
+          }) ?? null,
           // El costo del nodo en la bodega HOY. Aquí sí hay que fotografiarlo:
           // es un promedio ponderado que se mueve con cada compra, así que en
           // un mes ya no se puede reconstruir el que tenía al salir.
@@ -737,10 +775,15 @@ const despachar = async (req, {
     await client.query('COMMIT');
 
     // El local se entera de que viene mercancía sin tener que estar mirando.
+    // Si respondía un pedido, el aviso lo dice: para el local es la diferencia
+    // entre "llegó algo" y "me contestaron lo que pedí".
     _avisar({
       negocioId, sucursalId: destinoId,
       titulo: `Envío #${final.numero ?? final.id} en camino`,
-      cuerpo: `${lineas.length} producto(s) por ${_dinero(final.valor_total)}`,
+      cuerpo: pedido
+        ? `Responde tu pedido #${pedido.pedido.numero ?? pedido.pedido.id}`
+          + ` · ${lineas.length} producto(s)`
+        : `${lineas.length} producto(s) por ${_dinero(final.valor_total)}`,
     });
 
     return final;
@@ -1571,26 +1614,10 @@ const confirmarDevolucion = async (req, remisionId, { lineas_recibidas } = {}) =
 
 const _centavos = (v) => Math.round(_num(v) * 100) / 100;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// AVISOS — la cuenta no cambia en silencio
-//
-// Toda acción de un lado que le mueve la cuenta al otro manda un aviso. Es la
-// pieza que faltaba para que "no pueda modificar cuentas y la bodega no se
-// entere": el control no es solo poder deshacer, es enterarse a tiempo.
-//
-// NUNCA lanza ni se espera: quien llamó estaba despachando, recibiendo o
-// pagando, y eso tiene que terminar bien aunque el aviso falle. Es la misma
-// regla del módulo de notificaciones.
-// ─────────────────────────────────────────────────────────────────────────────
-const _avisar = ({ negocioId, sucursalId = null, roles = null, titulo, cuerpo, url = '/bodega' }) => {
-  try {
-    const notif = require('../notificaciones/notificaciones.service');
-    notif.enviar({
-      negocio_id: negocioId, sucursal_id: sucursalId, roles,
-      titulo, cuerpo, url, tag: 'red-interna', tipo: 'red_interna',
-    }).catch(() => {});
-  } catch { /* sin módulo de notificaciones, el circuito sigue igual */ }
-};
+// Los avisos viven en `redInterna.avisos.js` desde que los pedidos también los
+// mandan: dejarlos aquí obligaba a que el service de pedidos importara este
+// archivo entero y los dos quedaban en ciclo.
+const { avisar: _avisar } = require('./redInterna.avisos');
 
 const _imputarFIFO = async (client, {
   negocioId, sucursalId, valor, origen,
@@ -2522,6 +2549,25 @@ const getEstadoLocal = async (negocioId, sucursalId) => {
   });
 };
 
+/**
+ * Los pedidos que le interesan a este panel, o `null` si la función está
+ * apagada o su migración no llegó a aplicarse.
+ *
+ * NUNCA lanza. El panel es la pantalla de entrada de todo el módulo: si esta
+ * lectura reventara, la bodega se quedaría sin ver su deuda, sus remesas y sus
+ * devoluciones por culpa de una tabla que se agregó después. Es la misma regla
+ * con la que se aisló `movimientos_ubicacion` de las tablas del mapa.
+ */
+const _pedidosDelPanel = async (req, { abiertos }) => {
+  if (!req.red?.pedidos) return null;
+  if (!require('../../config/columnas').hayPedidosInternos()) return null;
+  try {
+    return await pedidos.listar(req, { abiertos, limit: 20 });
+  } catch {
+    return null;
+  }
+};
+
 // Vista del local: lo suyo + lo que tiene pendiente por recibir.
 const getPanelLocal = async (req) => {
   const negocioId  = req.user.negocio_id;
@@ -2540,7 +2586,13 @@ const getPanelLocal = async (req) => {
   ]);
   const salida = { es_bodega: false, sucursal_id: sucursalId, ...estado,
                    por_recibir: porRecibir, remesas,
-                   devoluciones_enviadas: devolucionesEnviadas };
+                   devoluciones_enviadas: devolucionesEnviadas,
+                   // Lo que este local pidió y la bodega todavía no ha
+                   // despachado del todo. No lleva un solo campo monetario —un
+                   // pedido son unidades, no plata— así que atraviesa el
+                   // recorte para vendedores tal cual, y a propósito: pedir es
+                   // justamente lo que un vendedor tiene que poder hacer.
+                   pedidos: await _pedidosDelPanel(req, { abiertos: true }) };
   return (await _puedeVerCostos(req)) ? salida : _recortarParaVendedor(salida);
 };
 
@@ -2587,6 +2639,11 @@ const getPanelBodega = async (req) => {
     remisiones_en_transito: enTransito,
     devoluciones_por_confirmar: devolucionesPorConfirmar,
     gastos_por_aprobar: gastosPorAprobar,
+    // Una bandeja más, y la única que llega desde el otro lado: lo que los
+    // locales pidieron y todavía espera respuesta. Se vacía sola al despachar
+    // —el avance es derivado— y vuelve a llenarse si esa remisión se anula o
+    // el local reporta un faltante.
+    pedidos_por_atender: await _pedidosDelPanel(req, { abiertos: true }),
   };
 };
 
@@ -2927,11 +2984,13 @@ const getRemision = async (req, id) => {
     ? remision.sucursal_origen_id
     : remision.sucursal_destino_id;
 
-  const [lineas, correcciones, abonos] = await Promise.all([
+  const [lineas, correcciones, abonos, pedido] = await Promise.all([
     repo.getLineasDetalladas(negocioId, id, sucursalUnidades),
     repo.getCorreccionesRemision(negocioId, id),
     // Los abonos que ha recibido este envío: son su estado de cuenta.
     repo.getAbonosDeEnvio(negocioId, id),
+    // A qué pedido responde, si respondía a alguno. Es un rótulo y nunca lanza.
+    pedidos.etiquetaDe(negocioId, remision.pedido_id),
   ]);
 
   const resumen = lineas.reduce((acc, l) => {
@@ -2965,6 +3024,9 @@ const getRemision = async (req, id) => {
     })),
     correcciones,
     abonos: abonos.map((a) => ({ ...a, valor: _num(a.valor) })),
+    // No lleva ninguna cifra, así que no pasa por el recorte de más abajo: un
+    // vendedor tiene que poder ver que este envío contesta lo que él pidió.
+    pedido,
     resumen: {
       enviado:    Math.round(resumen.enviado),
       // La cuenta del envío, calculada con las MISMAS reglas que el listado:

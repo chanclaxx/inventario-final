@@ -42,6 +42,7 @@ node scripts/pruebas-red-interna/25-reclamo-faltante.mjs
 node scripts/pruebas-red-interna/26-lotes-cantidad.mjs
 node scripts/pruebas-red-interna/28-abonos-anulados.mjs
 node scripts/pruebas-red-interna/36-ubicaciones.mjs
+node scripts/pruebas-red-interna/37-pedidos-a-bodega.mjs
 ```
 
 > `20-borradores` verifica sobre todo una invariante negativa: guardar un
@@ -689,3 +690,61 @@ ese INSERT corre dentro de la transacción de la importación y contra una tabla
 ausente perdería el archivo completo. También fija que reimportar no duplique
 sitios, que un nombre repetido en dos ramas avise en vez de adivinar, y que con
 `ubicacion_activa` apagada no se cree nada.
+
+
+### `37-pedidos-a-bodega.mjs` — 74 verificaciones
+
+El sentido inverso de la red interna: **el local pide → la bodega despacha (o
+cierra con una razón) → el local recibe**. Ver
+`migrations/20260904_pedidos_internos.sql`.
+
+El pedido se pone **encima** de la remisión —un pedido, N remisiones—, igual que
+la orden de compra se puso encima de la compra. Eso significa que casi nada de
+lo que hay que probar es "¿guarda bien el pedido?", sino **que el circuito de
+siempre no se enteró**.
+
+Las **secciones 5, 6 y 7** son el corazón. El avance de un pedido no está
+guardado en ninguna columna: se deriva de `lineas_remision` en cada lectura, y
+estas tres hacen pasar las cuatro cosas que a una línea ya despachada le pueden
+ocurrir después —**anular** la remisión, quedar **`'Faltante'`** al recibir,
+quedar **`'Devuelta'`**, y subir su **`cantidad_devuelta`** al devolver parte de
+un lote— comprobando que el pendiente REAPARECE solo. Con un contador guardado,
+las cuatro dejarían el pedido "completo" para siempre y el local nunca volvería
+a recibir lo que no llegó.
+
+La **sección 2** lee el JSON del catálogo con una expresión regular buscando
+`costo`, `valor_interno` o `precio`. Ese catálogo es el de la BODEGA, y su costo
+es exactamente lo que `red_interna_ocultar_costos` y `costos_solo_admin`
+esconden: aquí ni se selecciona, porque recortarlo después es lo que deja el
+dato viajando y visible desde la consola del navegador. También fija que un
+producto **agotado** siga apareciendo — lo que se acabó es justamente lo que hay
+que pedir.
+
+La **4** comprueba la atribución automática, y a propósito **no manda ni un
+`pedido_linea_id`**: el despacho puede salir del modal del pedido, del carrito
+de inventario o del escáner, y las tres tienen que unir igual. Una pantalla que
+se olvidara del vínculo dejaría el pedido pidiendo para siempre algo que ya
+salió. También fija que una línea a **texto libre** no se atribuya sola: nadie
+sabe qué es hasta que una persona lo decide.
+
+La **8** es la que sostiene "esto no toca la plata": la deuda del local vale
+exactamente lo que valdría sin pedido — lo recibido, menos lo devuelto, sin un
+peso de diferencia.
+
+La **11** corre el flujo de siempre (despachar SIN pedido) de punta a punta. Es
+el único que existe hoy en los 28 negocios y tiene que quedar idéntico: la
+remisión y sus líneas con el vínculo en `NULL`, y la cuenta cerrando igual.
+
+La **12** apaga la función (`red_interna_pedidos = '0'`) y comprueba que el
+panel de las dos caras siga completo, con la bandeja de pedidos en `null` en vez
+de reventar.
+
+La **13** compara el `.sql` contra la copia inline de `src/config/migrations.js`
+sentencia por sentencia, con sus `CHECK` y sus índices. El `.sql` es lo que se
+lee; la copia es lo que CORRE. Escribir uno y olvidar el otro deja el despliegue
+con el código nuevo contra una base vieja — ya pasó con `abonos_remision`.
+
+> La suite corre `detectarColumnas()` de verdad antes de empezar y **aborta si
+> la detección no encuentra los pedidos**. Sin esa línea, `crearRemision` e
+> `insertarLineaRemision` emitirían el SQL viejo —el que no nombra las columnas
+> nuevas— y la suite pasaría entera sin haber probado el vínculo.

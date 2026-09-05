@@ -8,12 +8,15 @@ import { EmptyState } from '../../components/ui/EmptyState';
 import { ModalRecibir } from './ModalRecibir';
 import { ModalPago }    from './ModalPago';
 import { ModalMovimientoCuenta } from './ModalMovimientoCuenta';
+import { ModalPedirABodega } from './ModalPedirABodega';
+import { ModalPedido }       from './ModalPedido';
+import { MisPedidos }        from './PedidosSecciones';
 import { TabResumen, TabMercancia, TabEnvios, TabPagos } from './CuentaSecciones';
 import { EstadoCuentaBodega } from './EstadoCuentaBodega';
 import {
   ChevronLeft, Package, Truck, Wallet, FileText, AlertTriangle, Store,
   LayoutDashboard, CheckCircle, Send, Info, PiggyBank, Receipt, SlidersHorizontal,
-  Undo2,
+  Undo2, ClipboardList,
 } from 'lucide-react';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -178,6 +181,8 @@ export function CuentaLocal({
   const [tab,    setTab]    = useState('envios');
   const [pago,   setPago]   = useState(null);   // null | { envio? }
   const [movim,  setMovim]  = useState(null);   // null | 'gasto' | 'ajuste'
+  const [pedir,  setPedir]  = useState(false);
+  const [pedido, setPedido] = useState(null);   // id del pedido abierto
   const [estado, setEstado] = useState('');
   const [q,      setQ]      = useState('');
 
@@ -253,6 +258,12 @@ export function CuentaLocal({
         />
       )}
 
+      {/* Lo que este local pidió y la bodega todavía no ha despachado del todo.
+          Va fuera de las pestañas por la misma razón que los envíos por
+          recibir: es algo que está pasando ahora, no información que se
+          consulta. `pedidos` viene en null si la función está apagada. */}
+      {propia && <MisPedidos pedidos={panel?.pedidos} onAbrir={setPedido} />}
+
       {/* Lo que este local devolvió y la bodega todavía no ha revisado.
           Sin esto, devolver mercancía no dejaba rastro en ninguna pantalla: el
           envío no cambia y la deuda no baja hasta que la bodega confirme, así
@@ -294,7 +305,15 @@ export function CuentaLocal({
       {/* Acciones que antes no tenían pantalla: el backend las soportaba desde
           julio y no había forma de llegar a ellas. El local registra lo que
           pagó por cuenta de la bodega; la bodega abona o cobra a mano. */}
-      <div className="flex gap-2 mb-3">
+      <div className="flex flex-wrap gap-2 mb-3">
+        {/* Pedirle a la bodega. Solo aparece si la función está encendida:
+            `panel.pedidos` viene en null cuando no lo está, y el candado de
+            verdad lo pone el backend en `requirePedidos`. */}
+        {propia && panel?.pedidos != null && (
+          <Button size="sm" onClick={() => setPedir(true)}>
+            <ClipboardList size={14} /> Pedir a bodega
+          </Button>
+        )}
         {propia && (
           <Button variant="secondary" size="sm" onClick={() => setMovim('gasto')}>
             <Receipt size={14} /> Gasto por cuenta de bodega
@@ -392,6 +411,24 @@ export function CuentaLocal({
           nombreLocal={data.sucursal?.nombre || nombre}
           onCerrar={() => setMovim(null)}
           onListo={(msg) => { setMovim(null); onAviso(msg); onRefrescar(); }}
+        />
+      )}
+
+      {pedir && (
+        <ModalPedirABodega
+          onCerrar={() => setPedir(false)}
+          onListo={(msg) => { setPedir(false); onAviso(msg); onRefrescar(); }}
+        />
+      )}
+
+      {/* La misma ficha que abre la bodega. Aquí sin sus acciones: el local ve
+          en qué va lo suyo y puede anularlo mientras nada haya salido. */}
+      {pedido && (
+        <ModalPedido
+          pedidoId={pedido}
+          propia={propia}
+          onCerrar={() => { setPedido(null); onRefrescar(); }}
+          onAviso={onAviso}
         />
       )}
     </div>

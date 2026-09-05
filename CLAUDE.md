@@ -945,6 +945,73 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > olvidar el runner deja el despliegue con el código nuevo contra una base vieja
 > — ya pasó con `abonos_remision`.
 
+> **El local PIDE a la bodega — el sentido inverso** (`redInterna.pedidos.*`,
+> `20260904_pedidos_internos.sql`): el circuito nació en una sola dirección —la
+> bodega decide qué mandar, despacha, y el local confirma—, y eso funciona
+> mientras alguien en la bodega sepa qué le falta a cada local, que es justo lo
+> que deja de ser cierto con más de dos. Ahora: **el local pide → la bodega
+> despacha (o cierra con una razón) → el local recibe**.
+> **El pedido se pone ENCIMA de la remisión: un pedido, N remisiones.** Es la
+> misma decisión que tomó `ordenes_compra` frente a `compras` y por la misma
+> razón: `despachar()` YA emite el documento, resuelve el nodo y la referencia
+> de destino, valoriza, bloquea los $0 y sabe anularse; `recibir()` YA mueve el
+> inventario y genera la deuda. Un segundo circuito de mercancía sería una
+> segunda verdad sobre el stock. Despacho parcial = N despachos contra un
+> pedido, sin una línea nueva de lógica de inventario ni de cuenta.
+> **El avance se DERIVA, nunca se guarda** (`AVANCE_POR_LINEA`): a una línea
+> despachada le pueden pasar cuatro cosas —anular la remisión, quedar
+> `'Faltante'` al recibir, quedar `'Devuelta'`, o subir su `cantidad_devuelta`—
+> y ninguna iría a corregir un contador. Guardado, el pedido se quedaría
+> "completo" para siempre y nunca volvería a pedir lo que no llegó. Por eso
+> `pedidos_internos.estado` solo guarda DECISIONES humanas (Borrador / Enviado /
+> Cerrado / Anulado) y Pendiente/Parcial/Despachado se calculan al leer — y por
+> eso la bandeja de la bodega se vacía sola y se vuelve a llenar sola.
+> Ojo con las tres trampas del `LEFT JOIN` que ya costaron en `ordenes_compra`:
+> las condiciones van en el JOIN (en el WHERE lo vuelven INNER y desaparecen las
+> líneas sin despachar), pero un JOIN que no empareja **no descarta** la fila —
+> por eso el `FILTER (WHERE r.id IS NOT NULL)`, y sobre `r.id`, no sobre el
+> estado.
+> **La atribución la hace el BACKEND**, no la pantalla: el despacho puede salir
+> del modal del pedido, del carrito o del escáner, y las tres tienen que unir
+> igual. Cascada: `pedido_linea_id` explícito → mismo NODO exacto → mismo
+> PRODUCTO cuando el pedido no bajó a la talla (pidieron "la correa", sale la
+> 38MM, y eso es la respuesta correcta). El texto libre **no se atribuye solo**.
+> **Un VENDEDOR puede pedir**: recibir una remisión ya lo puede hacer y recibir
+> GENERA la deuda; pedir no compromete un peso y no pasa nada hasta que la
+> bodega despacha. Exigir supervisor para pedir y no para recibir sería exigir
+> más para lo que menos pesa. Cerrar y reabrir sí son de la bodega.
+> **No se exige la variante**, al revés que una remisión: esa mueve stock
+> (`VARIANTE_REQUERIDA`) y un pedido solo DESCRIBE — es el mismo criterio de la
+> ubicación. Y el **pedido a texto libre** (`producto_id NULL`) existe porque un
+> local pide cosas que la bodega todavía no tiene en catálogo; sin esa puerta el
+> pedido solo serviría para reponer, que es la mitad del problema.
+> **El catálogo que ve el local NO trae costos**, y no por recorte: el SQL ni
+> los selecciona (`_sqlNodosCantidad({ conCosto: false })`). Tampoco exige stock
+> —lo que se acabó es justamente lo que hay que pedir—. La plantilla se comparte
+> con `buscarCantidadDisponible` en vez de copiarse.
+> **`red_interna_pedidos` ausente = ENCENDIDO**, al revés que casi todo: la red
+> interna ya es opt-in, así que quien llegó aquí la activó a mano, y pedir no
+> compromete nada. El interruptor es para la bodega que no quiere que le pidan.
+> **La detección va en `columnas.js`, no en `_hayInfra`**: la feature agrega dos
+> columnas (`remisiones.pedido_id`, `lineas_remision.pedido_linea_id`) que
+> escribe CADA despacho. Si la migración fallara y el repositorio ya las
+> nombrara, no se caería una pantalla nueva sino DESPACHAR, la operación diaria
+> de un módulo que ya está en producción — por eso `crearRemision` e
+> `insertarLineaRemision` las interpolan solo si existen, y por eso la bandera
+> es la misma que abre las rutas (dos detecciones separadas podrían discrepar y
+> se aceptaría un pedido que ningún despacho podría responder).
+> La `respuesta` al cerrar no es decorativa: sin ella, cerrar se ve desde el
+> local exactamente igual que ignorarlo, y vuelve a pedir lo mismo. El local
+> puede **anular** solo mientras nada haya salido; con mercancía despachada el
+> backend responde `PEDIDO_CON_ENVIOS` y manda a pedirle a la bodega que lo
+> cierre — anularlo dejaría una remisión viva colgando de un documento anulado.
+> Los avisos salen de `redInterna.avisos.js`, extraído del service para que los
+> pedidos no tuvieran que importarlo entero y quedaran los dos en ciclo.
+> Prueba: `37-pedidos-a-bodega` (74 verificaciones; las secciones 5, 6 y 7 hacen
+> pasar las cuatro cosas que reabren el pendiente, la 2 revisa el JSON del
+> catálogo en busca de fugas de costo, y la 11 comprueba que despachar SIN
+> pedido —el único flujo que existe hoy en los 28 negocios— no cambió).
+
 > **Tesorería**: los saldos por cuenta (efectivo/banco/billetera/corresponsal/divisa USD) se **derivan** de las tablas transaccionales existentes mapeando método de pago → cuenta, anclados en arqueos. Solo traslados/retiros/gastos se escriben en `movimientos_dinero`. Si cambian las reglas de qué entra/sale en `caja.repository.js`, replicarlas en `tesoreria.repository.js` (ramas marcadas). Los movimientos de efectivo se espejan en `movimientos_caja` con `referencia_tipo='tesoreria'`. Un pago de compra desde Tesorería crea un **Abono espejo** en `movimientos_acreedor` (`registrar_en_caja=FALSE`, `mov_dinero_id`) que salda la deuda del acreedor sin doble descuento; anular el pago elimina/recrea el espejo en cascada.
 
 ### Frontend API Layer
