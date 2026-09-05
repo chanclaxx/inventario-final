@@ -658,6 +658,27 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > tiene el árbol en memoria y los saca de ahí con `rutaDe`. Un `WITH RECURSIVE`
 > por fila para pintar migas de pan sería justo la consulta correlacionada que ya
 > se comió el 96 % del CPU de esta base una vez.
+> **La IMPORTACIÓN crea las ubicaciones y asigna el producto**
+> (`_asignadorDeUbicaciones` en `importacion.service.js`): la columna
+> «Ubicacion» de la plantilla existía desde 20260730 pero solo escribía el
+> TEXTO. Con el modelo invertido eso dejaba a los 400 productos importados
+> **fuera del mapa** —el texto estaba, el sitio no existía— y había que crearlos
+> y asignarlos uno por uno, justo el trabajo que la importación viene a quitar.
+> **Se busca en TODA la sucursal antes de crear**, no solo en la raíz: si ya
+> existe «Estante 1» dentro de «Bodega A», el Excel que lo nombra tiene que caer
+> ahí y no fabricar un duplicado suelto. Si el nombre está repetido en dos ramas
+> (legítimo), **no se adivina**: el texto se escribe pero no se asigna, y se
+> reporta como **aviso** (`UBICACION_AMBIGUA`) — la fila entra, así que no es
+> conflicto. Lo nuevo nace en la RAÍZ porque la plantilla no puede expresar
+> jerarquía; moverlo después a su bodega no desasigna nada.
+> El caché es **por importación**: la columna repite el mismo estante en cientos
+> de filas y no puede costar cientos de consultas. Y **no se registra en
+> `movimientos_ubicacion`** a propósito: 400 líneas de importación taparían los
+> movimientos de personas, que es lo que ese historial existe para contar.
+> Sin las tablas del mapa (`hayUbicaciones()` en falso) el importador escribe el
+> texto y **nada más** — el INSERT corre dentro de su transacción y contra una
+> tabla ausente perdería el archivo entero. La sección 18 de `18-importacion`
+> empieza comprobando justo eso.
 > **`padreId` (el nivel de la cámara) vive en `TabUbicaciones`, no en el mapa**:
 > el buscador tiene que poder llevar el mapa hasta un estante concreto. Con el
 > estado dentro del mapa haría falta un efecto que lo sincronizara desde fuera.

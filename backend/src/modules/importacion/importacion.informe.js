@@ -55,6 +55,7 @@ const AVISO = {
   HOJA_IGNORADA:      'hoja_ignorada',
   CODIGO_NO_APLICADO: 'codigo_no_aplicado',
   SERIAL_ACTUALIZADO: 'serial_actualizado',
+  UBICACION_AMBIGUA:  'ubicacion_ambigua',
 };
 
 const crearInforme = () => ({
@@ -64,6 +65,10 @@ const crearInforme = () => ({
   // "voy a crear estos 3 proveedores" se lee mucho mejor que 40 avisos sueltos.
   proveedores_nuevos: [],
   lineas_nuevas:      [],
+  // Mismo criterio: "voy a crear estos 3 estantes" se lee mejor que un aviso
+  // por cada fila que los menciona. La columna Ubicacion de la plantilla suele
+  // repetir el mismo sitio en cientos de filas.
+  ubicaciones_nuevas: [],
   hojas_ignoradas:    [],
 });
 

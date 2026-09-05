@@ -146,11 +146,17 @@ function FilaProducto({ item }) {
   );
 }
 
-/** Referencias que se van a crear (proveedores, líneas) */
+/** Referencias que se van a crear (proveedores, líneas, ubicaciones) */
 function Creaciones({ informe }) {
   const prov   = informe?.proveedores_nuevos || [];
   const lineas = informe?.lineas_nuevas      || [];
-  if (!prov.length && !lineas.length) return null;
+  // La columna «Ubicacion» del Excel es texto, pero una ubicación es una fila
+  // con identidad: el importador la crea y le cuelga el producto, así que
+  // aparece en el mapa sin que nadie la asigne a mano. Se avisa antes de
+  // confirmar, como los proveedores y las líneas — un estante mal escrito es
+  // igual de fácil de corregir en el Excel y igual de molesto de deshacer.
+  const ubis   = informe?.ubicaciones_nuevas || [];
+  if (!prov.length && !lineas.length && !ubis.length) return null;
 
   return (
     <div className="border border-blue-100 bg-blue-50 rounded-xl px-3 py-2.5 flex gap-2">
@@ -161,6 +167,9 @@ function Creaciones({ informe }) {
         )}
         {prov.length > 0 && (
           <p><strong>Se crearán {prov.length} proveedor(es):</strong> {prov.join(', ')}</p>
+        )}
+        {ubis.length > 0 && (
+          <p><strong>Se crearán {ubis.length} ubicación(es):</strong> {ubis.join(', ')}</p>
         )}
         <p className="text-blue-500">Si alguno es un error de escritura, corrígelo en el Excel antes de confirmar.</p>
       </div>

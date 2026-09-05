@@ -1139,6 +1139,170 @@ check('3 filas «Manos Libres X9», una por sede',
   (await q(`SELECT COUNT(*)::int n FROM productos_cantidad WHERE nombre='Manos Libres X9'`))[0].n, 3);
 
 // ═════════════════════════════════════════════════════════════════════════════
+// ═════════════════════════════════════════════════════════════════════════════
+seccion('18. LA COLUMNA UBICACION CREA EL SITIO Y ASIGNA EL PRODUCTO');
+// ═════════════════════════════════════════════════════════════════════════════
+// Hasta ahora la columna «Ubicacion» solo escribía el TEXTO en el producto.
+// Desde 20260831 una ubicación es una FILA con identidad, así que importar 400
+// productos con su estante escrito los dejaba a los 400 fuera del mapa: el
+// texto estaba, el sitio no existía, y había que crearlos y asignarlos a mano —
+// justo el trabajo que la importación viene a quitar.
+//
+// Lo PRIMERO que se prueba es lo contrario: que sin las tablas del mapa, todo
+// lo anterior de esta suite funcionó igual. El INSERT del sitio corre dentro de
+// la transacción de la importación, y contra una tabla ausente la abortaría
+// entera, perdiendo el archivo completo.
+check('hasta aquí no existían las tablas del mapa',
+  (await q(`SELECT to_regclass('public.ubicaciones') AS t`))[0].t, null);
+
+await db.exec(readFileSync(path.join(RAIZ, 'migrations/20260831_ubicaciones_estructura.sql'), 'utf8'));
+columnas._setUbicacionesDisponible(true);
+
+await q(`INSERT INTO negocios (id, nombre) VALUES (4, 'Bodega Grande')`);
+await q(`INSERT INTO sucursales (id, negocio_id, nombre) VALUES (40, 4, 'Central')`);
+await setConfig(4, { ubicacion_activa: '1' });
+
+const libroUbic = () => libro([{
+  nombre: 'Productos Cantidad',
+  ws: hoja('Cantidad', CAB_CANT_FULL, [
+    ['Cable USB-C',  '', 'Estante A-3', 'Accesorios', '', '', 10, 2, 5000,  12000, 'unidad', '', '', ''],
+    ['Vidrio 15',    '', 'Estante A-3', 'Accesorios', '', '', 25, 5, 3000,   8000, 'unidad', '', '', ''],
+    ['Audifonos JBL', '', 'Vitrina 2',  'Audio',      '', '', 4,  1, 45000, 90000, 'unidad', '', '', ''],
+    ['Cargador 20W', '', '',            'Accesorios', '', '', 7,  1, 4000,  15000, 'unidad', '', '', ''],
+  ]),
+}]);
+
+// ── El informe lo dice ANTES de escribir nada ──
+const prevU = await analizar(libroUbic(), { sucursalId: 40, negocioId: 4 });
+check('preview: anuncia las ubicaciones que va a crear',
+  (prevU.body.data.informe.ubicaciones_nuevas || []).slice().sort(),
+  ['Estante A-3', 'Vitrina 2']);
+// Se cuenta SOLO la sucursal nueva: al aplicar la migración, su backfill
+// convirtió en filas el texto que dejaron las 17 secciones anteriores (que es
+// justo lo que tiene que hacer). La sucursal 40 arranca limpia.
+check('preview: y no creó ninguna todavía',
+  (await q('SELECT COUNT(*)::int n FROM ubicaciones WHERE sucursal_id = 40'))[0].n, 0);
+
+// ── Aplicar ──
+await importar(libroUbic(), { sucursalId: 40, negocioId: 4 });
+
+const sitios = await q('SELECT id, nombre, padre_id FROM ubicaciones WHERE sucursal_id = 40 ORDER BY nombre');
+check('se crean los dos sitios, no uno por fila', sitios.map((r) => r.nombre),
+  ['Estante A-3', 'Vitrina 2']);
+check('nacen en la raíz (la plantilla no expresa jerarquía)',
+  sitios.every((r) => r.padre_id === null), true);
+
+const asignados = await q(`
+  SELECT pc.nombre, u.nombre AS sitio
+  FROM ubicaciones_items ui
+  JOIN productos_cantidad pc ON pc.id = ui.producto_cantidad_id
+  JOIN ubicaciones u ON u.id = ui.ubicacion_id
+  WHERE pc.sucursal_id = 40 ORDER BY pc.nombre`);
+check('cada producto queda colgado de su sitio',
+  asignados.map((r) => r.nombre + ' -> ' + r.sitio),
+  ['Audifonos JBL -> Vitrina 2', 'Cable USB-C -> Estante A-3', 'Vidrio 15 -> Estante A-3']);
+check('el que vino con la celda vacía no se inventa un sitio',
+  asignados.some((r) => r.nombre === 'Cargador 20W'), false);
+
+// La columna TEXT sigue escribiéndose: es el respaldo del rollback y lo que
+// leen el autocompletado y las exportaciones a Excel.
+check('el texto de siempre sigue ahí',
+  (await q(`SELECT ubicacion FROM productos_cantidad WHERE nombre = 'Cable USB-C' AND sucursal_id = 40`))[0].ubicacion,
+  'Estante A-3');
+
+// ── Reimportar el mismo archivo no duplica nada ──
+await importar(libroUbic(), { sucursalId: 40, negocioId: 4 });
+check('reimportar no duplica los sitios',
+  (await q('SELECT COUNT(*)::int n FROM ubicaciones WHERE sucursal_id = 40'))[0].n, 2);
+check('ni duplica las asignaciones',
+  (await q(`SELECT COUNT(*)::int n FROM ubicaciones_items ui
+            JOIN productos_cantidad pc ON pc.id = ui.producto_cantidad_id
+            WHERE pc.sucursal_id = 40`))[0].n, 3);
+
+// ── El Excel manda sobre la celda que trae llena: mueve el producto ──
+const libroMueve = () => libro([{
+  nombre: 'Productos Cantidad',
+  ws: hoja('Cantidad', CAB_CANT_FULL, [
+    ['Cable USB-C', '', 'Vitrina 2', 'Accesorios', '', '', 0, 2, 5000, 12000, 'unidad', '', '', ''],
+  ]),
+}]);
+await importar(libroMueve(), { sucursalId: 40, negocioId: 4 });
+const movido = await q(`
+  SELECT u.nombre FROM ubicaciones_items ui
+  JOIN productos_cantidad pc ON pc.id = ui.producto_cantidad_id
+  JOIN ubicaciones u ON u.id = ui.ubicacion_id
+  WHERE pc.nombre = 'Cable USB-C' AND pc.sucursal_id = 40`);
+check('un producto sigue en UN solo sitio tras moverlo', movido.length, 1);
+check('y es el que dice el Excel', movido[0].nombre, 'Vitrina 2');
+
+// ── Nombre repetido en dos ramas: no se adivina ──
+// «Estante 1» dentro de dos bodegas distintas es legítimo. El texto se escribe
+// igual (la fila no se pierde) pero no se asigna al mapa: es un aviso, no un
+// conflicto, porque la fila SÍ entra.
+const bodegaA = (await q(`INSERT INTO ubicaciones (sucursal_id, nombre) VALUES (40, 'Bodega A') RETURNING id`))[0].id;
+const bodegaB = (await q(`INSERT INTO ubicaciones (sucursal_id, nombre) VALUES (40, 'Bodega B') RETURNING id`))[0].id;
+await q(`INSERT INTO ubicaciones (sucursal_id, padre_id, nombre)
+         VALUES (40, $1, 'Estante 1'), (40, $2, 'Estante 1')`, [bodegaA, bodegaB]);
+
+const libroAmbiguo = () => libro([{
+  nombre: 'Productos Cantidad',
+  ws: hoja('Cantidad', CAB_CANT_FULL, [
+    ['Funda gel', '', 'Estante 1', 'Accesorios', '', '', 3, 1, 1000, 4000, 'unidad', '', '', ''],
+  ]),
+}]);
+const ambiguo = await importar(libroAmbiguo(), { sucursalId: 40, negocioId: 4 });
+checkQue('un nombre repetido en dos ramas produce un aviso',
+  (ambiguo.body.data.informe.avisos || []).some((a) => a.tipo === 'ubicacion_ambigua'),
+  JSON.stringify(ambiguo.body.data.informe.avisos));
+check('la fila SÍ se escribe, con su texto',
+  (await q(`SELECT ubicacion FROM productos_cantidad WHERE nombre = 'Funda gel' AND sucursal_id = 40`))[0].ubicacion,
+  'Estante 1');
+check('pero no se asigna a ninguna de las dos',
+  (await q(`SELECT COUNT(*)::int n FROM ubicaciones_items ui
+            JOIN productos_cantidad pc ON pc.id = ui.producto_cantidad_id
+            WHERE pc.nombre = 'Funda gel' AND pc.sucursal_id = 40`))[0].n, 0);
+
+// ── Un sitio que ya existe se reusa, aunque esté anidado ──
+const libroAnidado = () => libro([{
+  nombre: 'Productos Cantidad',
+  ws: hoja('Cantidad', CAB_CANT_FULL, [
+    ['Protector', '', 'Bodega A', 'Accesorios', '', '', 5, 1, 900, 3000, 'unidad', '', '', ''],
+  ]),
+}]);
+await importar(libroAnidado(), { sucursalId: 40, negocioId: 4 });
+check('un sitio que ya existe se reusa, no se duplica',
+  (await q(`SELECT COUNT(*)::int n FROM ubicaciones WHERE sucursal_id = 40 AND nombre = 'Bodega A'`))[0].n, 1);
+
+// ── Seriales: la ubicación es del PRODUCTO, no de cada IMEI ──
+const libroSerialUbic = () => libro([{
+  nombre: 'iPhone 13',
+  ws: hoja('iPhone 13', CAB_SERIAL_FULL, [
+    ['111222333444555', '', '', 'Apple', '13', 'Celulares', '', '', '', 'Vitrina 2', 2000000, 1600000, '', ''],
+    ['111222333444666', '', '', 'Apple', '13', 'Celulares', '', '', '', 'Vitrina 2', 2000000, 1600000, '', ''],
+  ]),
+}]);
+await importar(libroSerialUbic(), { sucursalId: 40, negocioId: 4 });
+const refUbicada = await q(`
+  SELECT u.nombre FROM ubicaciones_items ui
+  JOIN productos_serial ps ON ps.id = ui.producto_serial_id
+  JOIN ubicaciones u ON u.id = ui.ubicacion_id
+  WHERE ps.sucursal_id = 40`);
+check('la referencia con IMEI también queda asignada', refUbicada.map((r) => r.nombre), ['Vitrina 2']);
+check('y no se creó otra Vitrina 2',
+  (await q(`SELECT COUNT(*)::int n FROM ubicaciones WHERE sucursal_id = 40 AND nombre = 'Vitrina 2'`))[0].n, 1);
+
+// ── Con la feature apagada, nada de esto ocurre ──
+await setConfig(4, {});
+const libroApagado = () => libro([{
+  nombre: 'Productos Cantidad',
+  ws: hoja('Cantidad', CAB_CANT_FULL, [
+    ['Sin feature', '', 'Estante Z', 'Accesorios', '', '', 1, 1, 100, 200, 'unidad', '', '', ''],
+  ]),
+}]);
+await importar(libroApagado(), { sucursalId: 40, negocioId: 4 });
+check('con ubicacion_activa apagada no se crea ningún sitio',
+  (await q(`SELECT COUNT(*)::int n FROM ubicaciones WHERE sucursal_id = 40 AND nombre = 'Estante Z'`))[0].n, 0);
+
 console.log(`\n${'═'.repeat(72)}`);
 console.log(`  ${pasados} verificaciones pasaron · ${fallos} fallaron`);
 console.log('═'.repeat(72));

@@ -1,5 +1,5 @@
 const { pool } = require('../../config/db');
-const { hayUbicacion } = require('../../config/columnas');
+const { hayUbicacion, hayUbicaciones } = require('../../config/columnas');
 const {
   CONFLICTO, AVISO, crearInforme, conflicto, aviso, avisoUnico, limpiar,
   clavesCaracteristica,
@@ -184,11 +184,133 @@ const _resolverLinea = async (client, nombre, negocioId) => {
 // decidía con la config; ahora las dos mitades preguntan a lo mismo.
 //
 // `tabla` es un literal fijo del código, jamás entrada del usuario.
-const _aplicarUbicacion = async (client, tabla, productoId, valor, activa) => {
+//
+// `mapa` es la mitad NUEVA (20260831): además de escribir el texto, crea la
+// ubicación como fila y le cuelga el producto, para que aparezca en el mapa sin
+// que nadie lo asigne a mano. Es null cuando las tablas no existen, y entonces
+// esto se comporta exactamente como antes.
+const _aplicarUbicacion = async (client, tabla, productoId, valor, activa, mapa = null) => {
   if (!activa || !productoId) return;
   const limpio = String(valor ?? '').trim().replace(/\s+/g, ' ').slice(0, 60);
   if (!limpio) return;
   await client.query(`UPDATE ${tabla} SET ubicacion = $1 WHERE id = $2`, [limpio, productoId]);
+  if (mapa) await mapa(client, tabla, productoId, limpio);
+};
+
+// ── Del texto de la plantilla a una ubicación del mapa ───────────────────────
+//
+// La columna «Ubicacion» del Excel es texto plano, pero desde 20260831 una
+// ubicación es una FILA con identidad. Sin esto, importar 400 productos con su
+// estante escrito dejaba los 400 fuera del mapa: el texto estaba, el sitio no
+// existía, y había que crearlos y asignarlos uno por uno — justo el trabajo que
+// la importación viene a quitar.
+//
+// Tres decisiones que explican el código:
+//
+//   1. Se BUSCA EN TODA LA SUCURSAL antes de crear, no solo en la raíz. Si el
+//      negocio ya tiene «Estante 1» dentro de «Bodega A», el Excel que dice
+//      «Estante 1» tiene que caer ahí y no fabricar un duplicado suelto.
+//
+//   2. Si el nombre está REPETIDO en dos ramas («Estante 1» en Bodega A y en
+//      Bodega B, que es legítimo), no se adivina: el producto se queda sin
+//      asignar al mapa y se avisa. El texto sí se escribe, así que la fila no
+//      se pierde — es un aviso, no un conflicto.
+//
+//   3. La ubicación nueva nace en la RAÍZ. La plantilla no tiene forma de
+//      expresar jerarquía, y meterla dentro de algo sería adivinar. Moverla
+//      después a su bodega no desasigna nada: los productos van con ella.
+//
+// El caché es por importación: la columna repite el mismo estante en cientos de
+// filas y no puede costar cientos de consultas.
+const _asignadorDeUbicaciones = ({ sucursalId, negocioId, informe }) => {
+  // Sin las tablas nuevas, el importador escribe el texto y no hace nada más.
+  // Esto corre DENTRO de la transacción de la importación: un INSERT contra una
+  // tabla que no existe la abortaría entera y se perdería el archivo completo.
+  if (!hayUbicaciones()) return null;
+
+  const cache = new Map();   // nombre normalizado → id | null (null = ambigua)
+
+  const resolver = async (client, nombre) => {
+    const clave = nombre.toLowerCase();
+    if (cache.has(clave)) return cache.get(clave);
+
+    // Misma normalización que el índice único y que el backfill: BTRIM no
+    // colapsa los espacios internos, y sin eso «Estante  A-3» nacería como un
+    // sitio aparte con un nombre que la propia app no sabe reproducir.
+    const { rows } = await client.query(`
+      SELECT u.id
+      FROM ubicaciones u
+      JOIN sucursales su ON su.id = u.sucursal_id
+      WHERE u.sucursal_id = $1
+        AND su.negocio_id = $2
+        AND u.activo      = true
+        AND LOWER(REGEXP_REPLACE(BTRIM(u.nombre), '[[:space:]]+', ' ', 'g'))
+          = LOWER(REGEXP_REPLACE(BTRIM($3),       '[[:space:]]+', ' ', 'g'))
+    `, [sucursalId, negocioId, nombre]);
+
+    let id = null;
+
+    if (rows.length === 1) {
+      id = Number(rows[0].id);
+
+    } else if (rows.length > 1) {
+      avisoUnico(informe, {
+        tipo:    AVISO.UBICACION_AMBIGUA,
+        columna: 'Ubicacion',
+        valor:   nombre,
+        mensaje: `Hay ${rows.length} ubicaciones llamadas «${nombre}» en esta sucursal.`,
+        sugerencia: 'El producto se guardó con ese texto, pero no se asignó en el mapa. '
+                  + 'Renombra una de las dos o asigna el producto a mano desde Inventario → Ubicaciones.',
+      });
+
+    } else {
+      // ON CONFLICT por si dos importaciones corren a la vez: el índice único
+      // es parcial (solo activas), así que el conflicto se atrapa sin destino.
+      const creada = await client.query(`
+        INSERT INTO ubicaciones (sucursal_id, nombre) VALUES ($1, $2)
+        ON CONFLICT DO NOTHING
+        RETURNING id
+      `, [sucursalId, nombre]);
+
+      if (creada.rows.length) {
+        id = Number(creada.rows[0].id);
+        if (!informe.ubicaciones_nuevas.includes(nombre)) {
+          informe.ubicaciones_nuevas.push(nombre);
+        }
+      } else {
+        // La creó otra transacción entre el SELECT y el INSERT.
+        const { rows: yaEsta } = await client.query(`
+          SELECT id FROM ubicaciones
+          WHERE sucursal_id = $1 AND activo = true
+            AND LOWER(REGEXP_REPLACE(BTRIM(nombre), '[[:space:]]+', ' ', 'g'))
+              = LOWER(REGEXP_REPLACE(BTRIM($2),     '[[:space:]]+', ' ', 'g'))
+          LIMIT 1
+        `, [sucursalId, nombre]);
+        id = yaEsta.length ? Number(yaEsta[0].id) : null;
+      }
+    }
+
+    cache.set(clave, id);
+    return id;
+  };
+
+  return async (client, tabla, productoId, nombre) => {
+    const ubicacionId = await resolver(client, nombre);
+    if (!ubicacionId) return;
+
+    // Un nodo vive en un solo sitio: asignar es quitarlo de donde estuviera y
+    // ponerlo aquí. El Excel manda sobre la celda que trae llena.
+    //
+    // NO se registra en `movimientos_ubicacion` a propósito: una importación de
+    // 400 filas llenaría el historial y taparía los movimientos de personas,
+    // que es justo lo que ese historial existe para contar.
+    const columna = tabla === 'productos_serial' ? 'producto_serial_id' : 'producto_cantidad_id';
+    await client.query(`DELETE FROM ubicaciones_items WHERE ${columna} = $1`, [productoId]);
+    await client.query(
+      `INSERT INTO ubicaciones_items (ubicacion_id, ${columna}) VALUES ($1, $2)`,
+      [ubicacionId, productoId]
+    );
+  };
 };
 
 // Nota libre del producto/serial (columna añadida en 20260710, que hasta ahora
@@ -361,6 +483,10 @@ const importarSerial = async (hojas, sucursalId, negocioId, config = {}, opcione
   const coloresActivo         = config.colores_serial_activo === '1';
   const caracteristicasActivo = config.caracteristicas_serial_activo === '1';
   const ubicacionActiva       = config.ubicacion_activa === '1' && hayUbicacion();
+  // Una sola instancia por importación: lleva el caché de sitios ya resueltos.
+  const mapaUbicaciones       = ubicacionActiva
+    ? _asignadorDeUbicaciones({ sucursalId, negocioId, informe })
+    : null;
   const tarifasActivas        = config.tarifas_activo === '1';
   // Lista de características con su nombre original (para guardar como clave en JSON)
   // y su forma normalizada (para buscarla en la fila importada)
@@ -426,7 +552,7 @@ const importarSerial = async (hojas, sucursalId, negocioId, config = {}, opcione
           informe, hoja: hoja.nombreHoja, fila: null, nombre: hoja.nombreProducto,
           sucursalId, coincidencias: vacio.coincidencias, vistosArchivo: nombresArchivo,
         });
-        await _aplicarUbicacion(client, 'productos_serial', vacio.id, ubicacionHoja, ubicacionActiva);
+        await _aplicarUbicacion(client, 'productos_serial', vacio.id, ubicacionHoja, ubicacionActiva, mapaUbicaciones);
       }
 
       for (const [i, fila] of hoja.filas.entries()) {
@@ -537,7 +663,7 @@ const importarSerial = async (hojas, sucursalId, negocioId, config = {}, opcione
             });
           }
 
-          await _aplicarUbicacion(client, 'productos_serial', productoId, ubicacionHoja, ubicacionActiva);
+          await _aplicarUbicacion(client, 'productos_serial', productoId, ubicacionHoja, ubicacionActiva, mapaUbicaciones);
 
           const { fecha: fechaEntrada, reconocida } = _formatearFecha(fila.fecha_entrada);
           if (!reconocida) {
@@ -815,6 +941,9 @@ const importarCantidad = async (filas, sucursalId, negocioId, config = {}, opcio
   const variantesActivo = config.variantes_activo === '1';
   const codigoActivo    = config.codigo_producto_activo === '1';
   const ubicacionActiva = config.ubicacion_activa === '1' && hayUbicacion();
+  const mapaUbicaciones = ubicacionActiva
+    ? _asignadorDeUbicaciones({ sucursalId, negocioId, informe })
+    : null;
   const tarifasActivas  = config.tarifas_activo === '1';
 
   if (filas.length > MAX_FILAS) {
@@ -1032,7 +1161,7 @@ const importarCantidad = async (filas, sucursalId, negocioId, config = {}, opcio
             informe, hoja: 'Productos Cantidad', fila: nFila, nombre,
             sucursalId, coincidencias: base.coincidencias, vistosArchivo: nombresArchivo,
           });
-          await _aplicarUbicacion(client, 'productos_cantidad', productoId, fila.ubicacion, ubicacionActiva);
+          await _aplicarUbicacion(client, 'productos_cantidad', productoId, fila.ubicacion, ubicacionActiva, mapaUbicaciones);
           await _aplicarNota(client, 'productos_cantidad', productoId, fila.nota);
 
           const { id: atributoId, nuevo: atrNuevo } = await _resolverAtributo(
@@ -1109,7 +1238,7 @@ const importarCantidad = async (filas, sucursalId, negocioId, config = {}, opcio
                WHERE id = $9`,
               [stock, stockMinimo, costoUnit, unidad, clienteOrig, proveedorId, precioVenta, lineaId, existe[0].id]
             );
-            await _aplicarUbicacion(client, 'productos_cantidad', existe[0].id, fila.ubicacion, ubicacionActiva);
+            await _aplicarUbicacion(client, 'productos_cantidad', existe[0].id, fila.ubicacion, ubicacionActiva, mapaUbicaciones);
             await _aplicarNota(client, 'productos_cantidad', existe[0].id, fila.nota);
             nodoDelCodigo = { tabla: 'productos_cantidad', id: existe[0].id };
             productoDeLaFila = existe[0].id;
@@ -1133,7 +1262,7 @@ const importarCantidad = async (filas, sucursalId, negocioId, config = {}, opcio
               [sucursalId, proveedorId, nombre, stock, stockMinimo,
                costoUnit, unidad, clienteOrig, precioVenta, lineaId]
             );
-            await _aplicarUbicacion(client, 'productos_cantidad', creado[0]?.id, fila.ubicacion, ubicacionActiva);
+            await _aplicarUbicacion(client, 'productos_cantidad', creado[0]?.id, fila.ubicacion, ubicacionActiva, mapaUbicaciones);
             await _aplicarNota(client, 'productos_cantidad', creado[0]?.id, fila.nota);
             nodoDelCodigo = { tabla: 'productos_cantidad', id: creado[0]?.id };
             productoDeLaFila = creado[0]?.id;

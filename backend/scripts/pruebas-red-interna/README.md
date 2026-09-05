@@ -301,7 +301,7 @@ compras) y aplica `migrations/20260805_pago_total_acreedor.sql` y
 > una compra borra sus abonos, y un total guardado quedaría inflado contra un
 > saldo que ya bajó. Derivarlo con `SUM` lo hace imposible por construcción.
 
-### `18-importacion.mjs` — 212 verificaciones
+### `18-importacion.mjs` — 231 verificaciones
 
 Importación de inventario desde Excel, probada **como la usa una persona**: se
 generan bytes `.xlsx` de verdad y se entregan al controller real con un req/res
@@ -681,3 +681,11 @@ el carrito del propio usuario, no un formulario.
 > El **orden** del recorrido no se prueba aquí porque no se calcula aquí: lo
 > arma el frontend con el árbol, y lo cubren las secciones 8 a 10 de
 > `frontend/scripts/prueba-mapa-ubicaciones.mjs` (94 verificaciones en total).
+
+La sección **18 de `18-importacion`** cubre que la columna «Ubicacion» de la
+plantilla cree el sitio y le cuelgue el producto. Su primera comprobación es la
+que importa: que **sin las tablas del mapa todo lo anterior funcionó igual** —
+ese INSERT corre dentro de la transacción de la importación y contra una tabla
+ausente perdería el archivo completo. También fija que reimportar no duplique
+sitios, que un nombre repetido en dos ramas avise en vez de adivinar, y que con
+`ubicacion_activa` apagada no se cree nada.
