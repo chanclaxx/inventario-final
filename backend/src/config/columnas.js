@@ -44,6 +44,7 @@ const detectarColumnas = async () => {
   await _detectarUbicaciones();
   await _detectarMovimientosUbicacion();
   await _detectarPedidosInternos();
+  await _detectarCorreccionesEntrada();
   return _ubicacionDisponible;
 };
 
@@ -223,12 +224,53 @@ const _detectarPedidosInternos = async () => {
 
 const hayPedidosInternos = () => _pedidosInternosDisponible;
 
+// ── Corrección de entradas ───────────────────────────────────────────────────
+//
+// Esta bandera apaga la operación ENTERA, no una consulta: sin
+// `correcciones_entrada` no hay dónde escribir la bitácora, y una corrección
+// sin rastro es exactamente lo que no puede pasar. El endpoint responde 503 y
+// la entrada se sigue pudiendo cancelar y rehacer como hasta hoy.
+//
+// Es el caso contrario a `hayMovimientosUbicacion`: allá el log cuelga de la
+// operación diaria de un módulo en producción, así que la bandera existe para
+// que la ausencia de la tabla no tumbe lo que ya funcionaba. Acá la operación
+// nueva es la corrección completa, y sin bitácora no debe existir.
+//
+// Bandera SEPARADA de las órdenes de compra a propósito: si esta migración
+// fallara, recibir contra una orden tiene que seguir funcionando igual.
+
+let _correccionesEntradaDisponible = false;
+
+const _detectarCorreccionesEntrada = async () => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT 1
+       FROM information_schema.tables
+       WHERE table_schema = 'public'
+         AND table_type   = 'BASE TABLE'
+         AND table_name   = 'correcciones_entrada'`
+    );
+    _correccionesEntradaDisponible = rows.length > 0;
+
+    if (!_correccionesEntradaDisponible) {
+      console.warn('⚠️  Tabla `correcciones_entrada` ausente: corregir una entrada queda desactivado (recibir sigue igual).');
+    }
+  } catch (err) {
+    _correccionesEntradaDisponible = false;
+    console.error('⚠️  No se pudo verificar `correcciones_entrada` (corregir desactivado):', err.message);
+  }
+  return _correccionesEntradaDisponible;
+};
+
+const hayCorreccionesEntrada = () => _correccionesEntradaDisponible;
+
 // Solo para pruebas: permite simular una BD sin la columna sin tocar la BD real.
 const _setUbicacionDisponible  = (valor) => { _ubicacionDisponible  = !!valor; };
 const _setCatalogoDisponible   = (valor) => { _catalogoDisponible   = !!valor; };
 const _setUbicacionesDisponible = (valor) => { _ubicacionesDisponible = !!valor; };
 const _setMovimientosUbicacionDisponible = (valor) => { _movimientosUbicacionDisponible = !!valor; };
 const _setPedidosInternosDisponible = (valor) => { _pedidosInternosDisponible = !!valor; };
+const _setCorreccionesEntradaDisponible = (valor) => { _correccionesEntradaDisponible = !!valor; };
 
 module.exports = {
   detectarColumnas, hayUbicacion, _setUbicacionDisponible,
@@ -236,4 +278,5 @@ module.exports = {
   hayUbicaciones, _setUbicacionesDisponible,
   hayMovimientosUbicacion, _setMovimientosUbicacionDisponible,
   hayPedidosInternos, _setPedidosInternosDisponible,
+  hayCorreccionesEntrada, _setCorreccionesEntradaDisponible,
 };

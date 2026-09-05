@@ -301,6 +301,13 @@ const findOrdenesParaRecibir = async (sucursalId, negocioId) => {
                'tipo',           loc.tipo,
                'variante_id',    loc.variante_id,
                'atributo_id',    loc.atributo_id,
+               -- El ROTULO del nodo pedido, no solo su id. Sin esto el bodeguero
+               -- ve que la linea baja a una variante pero no cual, que es peor
+               -- que no bajar: sabe que tiene que fijarse en algo y no en que.
+               -- Se resuelve aqui y no en el frontend porque el arbol se pide
+               -- por producto y esto vendria a costar una peticion por linea.
+               'variante_valor', loc.variante_valor,
+               'atributo_valor', loc.atributo_valor,
                'pedida',         loc.cantidad_pedida,
                'recibida',       loc.recibida,
                'pendiente',      loc.cantidad_pedida - loc.recibida
@@ -310,13 +317,25 @@ const findOrdenesParaRecibir = async (sucursalId, negocioId) => {
     JOIN LATERAL (
       SELECT l.id, l.producto_id, l.nombre_producto, l.tipo, l.orden,
              l.variante_id, l.atributo_id, l.cantidad_pedida,
+             -- Se concatena el tipo aqui (Potencia: 25W) para que el frontend no
+             -- tenga que decidir el formato: la misma etiqueta se pinta en la
+             -- orden, en la recepcion y en la entrada, y tres formatos distintos
+             -- para el mismo nodo se leen como tres cosas distintas.
+             CASE WHEN va.id IS NOT NULL
+                  THEN COALESCE(tva.nombre || ': ', '') || va.valor END AS variante_valor,
+             CASE WHEN ap.id IS NOT NULL
+                  THEN COALESCE(tap.nombre || ': ', '') || ap.valor END AS atributo_valor,
              COALESCE(SUM(lc.cantidad - COALESCE(lc.cantidad_devuelta, 0))
                FILTER (WHERE c.id IS NOT NULL), 0)::int AS recibida
       FROM      lineas_orden_compra l
       LEFT JOIN lineas_compra lc ON lc.orden_linea_id = l.id
       LEFT JOIN compras       c  ON c.id = lc.compra_id AND c.estado <> 'Cancelada'
+      LEFT JOIN variantes_atributo   va  ON va.id  = l.variante_id
+      LEFT JOIN tipos_caracteristica tva ON tva.id = va.tipo_id
+      LEFT JOIN atributos_producto   ap  ON ap.id  = l.atributo_id
+      LEFT JOIN tipos_caracteristica tap ON tap.id = ap.tipo_id
       WHERE l.orden_id = o.id
-      GROUP BY l.id
+      GROUP BY l.id, va.id, tva.nombre, ap.id, tap.nombre
     ) loc ON TRUE
     JOIN sucursales su ON su.id = o.sucursal_id
     WHERE o.estado = 'Emitida'
@@ -435,6 +454,10 @@ const findEntradaDetalle = async (compraId, negocioId) => {
     SELECT c.id, c.numero, c.fecha, c.factura_confirmada, c.estado, c.notas,
            c.orden_compra_id, oc.numero AS orden_numero,
            c.es_entrada,
+           -- La sucursal, para que la pantalla de correccion pueda pedir el
+           -- arbol de variantes del producto que se va a corregir. Es un id, no
+           -- una cifra: el detalle sigue sin seleccionar un solo precio.
+           c.sucursal_id,
            u.nombre AS recibida_por, su.nombre AS sucursal_nombre
     FROM compras c
     JOIN sucursales su ON su.id = c.sucursal_id
@@ -451,6 +474,10 @@ const findEntradaDetalle = async (compraId, negocioId) => {
   const { rows: lineas } = await pool.query(`
     SELECT lc.id, lc.nombre_producto, lc.imei, lc.cantidad, lc.cantidad_devuelta,
            lc.garantia_dias, lc.orden_linea_id,
+           -- Los IDS del nodo, ademas de sus rotulos: corregir necesita saber
+           -- DONDE esta la linea hoy para poder moverla, y el rotulo no sirve
+           -- para eso. Tampoco son dinero.
+           lc.producto_id, lc.variante_id, lc.atributo_id,
            va.valor   AS variante_valor,  tva.nombre AS variante_tipo,
            ap.valor   AS atributo_valor,  tap.nombre AS atributo_tipo,
            s.color, s.caracteristicas,

@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { crearOrden, editarOrden } from '../../api/ordenesCompra.api';
 import { getProductosCantidad, getProductosSerial } from '../../api/productos.api';
+import { getArbol }        from '../../api/variantesProductoApi';
+import { hojasDelArbol }   from './capturaMercancia.utils';
 import { formatCOP }   from '../../utils/formatters';
 import { Modal }       from '../../components/ui/Modal';
 import { Button }      from '../../components/ui/Button';
@@ -12,6 +14,7 @@ import { Spinner }     from '../../components/ui/Spinner';
 import { useSucursalKey } from '../../hooks/useSucursalKey';
 import {
   Plus, Trash2, Package, Smartphone, CalendarClock, Info, ShieldCheck,
+  Layers, ChevronLeft,
 } from 'lucide-react';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -28,6 +31,22 @@ import {
 // La factura es opcional aquí: una orden es un pedido, no una deuda. Solo en el
 // modo de cargo "al facturar la orden" hace falta antes de poder recibir, y en
 // ese caso el aviso lo dice.
+//
+// ── Pedir la VARIANTE (`detalleNodo`) ───────────────────────────────────────
+// Sin esto, una orden solo podía decir "100 cargadores" y era el bodeguero
+// quien, al abrir la caja, decidía cuántos eran de 25W y cuántos de 20W. El
+// pedido no tenía forma de expresar "50 y 50", así que tampoco había forma de
+// saber si el proveedor mandó lo correcto.
+//
+// Es una CAPACIDAD, no una obligación: una misma orden mezcla líneas al nodo y
+// líneas al producto, y "el producto en general" sigue siendo una respuesta
+// válida — es la que dan hoy los 28 negocios. Con la feature apagada esta
+// pantalla es exactamente la de antes.
+//
+// Solo se ofrece para productos POR CANTIDAD con árbol: los equipos con IMEI se
+// piden por modelo, porque el detalle de cada unidad solo se conoce al abrir la
+// caja. El backend lo rechaza igual, pero una pantalla que ofrece algo que el
+// servidor niega es una pantalla que miente.
 // ─────────────────────────────────────────────────────────────────────────────
 
 function normalizar(data) {
@@ -36,9 +55,85 @@ function normalizar(data) {
   return [];
 }
 
-function SelectorProducto({ sucursalKey, sucursalLista, onAgregar, yaAgregados }) {
+// ── Elegir QUE variante se pide ─────────────────────────────────────────────
+//
+// Se listan las HOJAS del arbol, igual que en el despacho de la red interna y en
+// las etiquetas: si "Cargador" tiene 25W y 20W, en el estante no existe "el
+// cargador" —existen las dos potencias, cada una con su stock—, y pedir el
+// contenedor obliga a elegir a mano al recibir, que es justo el trabajo que esto
+// viene a quitar. El backend rechaza el contenedor con NODO_CONTENEDOR.
+//
+// "Todos, sin especificar" sigue estando y es la primera opcion: es lo que hacen
+// hoy los 28 negocios y hay pedidos donde de verdad da igual la variante.
+function PanelVariantes({ producto, yaAgregados, onElegir, onVolver }) {
+  const { data: arbol = [], isLoading } = useQuery({
+    queryKey: ['arbol-producto', producto.id, producto.sucursal_id],
+    queryFn:  () => getArbol(producto.id, producto.sucursal_id).then((r) => r.data.data),
+    enabled:  Boolean(producto.sucursal_id),
+    staleTime: 30_000,
+  });
+
+  const hojas = hojasDelArbol(arbol);
+  const claveProducto = `cantidad-${producto.id}-p`;
+
+  return (
+    <div className="flex flex-col gap-2">
+      <button type="button" onClick={onVolver}
+        className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-700 transition-colors w-fit">
+        <ChevronLeft size={13} /> Otro producto
+      </button>
+
+      <div className="flex items-center gap-2">
+        <Layers size={14} className="text-purple-400 flex-shrink-0" />
+        <span className="text-sm font-medium text-gray-800 truncate">{producto.nombre}</span>
+      </div>
+
+      {isLoading ? <Spinner className="py-6" /> : (
+        <div className="max-h-52 overflow-y-auto flex flex-col gap-1">
+          <button type="button" onClick={() => onElegir(null)}
+            disabled={yaAgregados.has(claveProducto)}
+            className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-left
+              transition-colors hover:bg-blue-50 text-gray-700
+              disabled:bg-gray-50 disabled:text-gray-300 disabled:cursor-default">
+            <span className="text-sm">Todos, sin especificar</span>
+            <span className="text-xs text-gray-400">
+              {yaAgregados.has(claveProducto) ? 'agregado' : 'el producto completo'}
+            </span>
+          </button>
+
+          {hojas.length === 0 ? (
+            <p className="text-xs text-gray-400 text-center py-4">
+              Este producto no tiene variantes configuradas
+            </p>
+          ) : hojas.map((h) => {
+            const clave  = `cantidad-${producto.id}-${h.key}`;
+            const puesto = yaAgregados.has(clave);
+            return (
+              <button key={h.key} type="button" disabled={puesto}
+                onClick={() => onElegir(h)}
+                className={`flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-left transition-colors
+                  ${puesto ? 'bg-gray-50 text-gray-300 cursor-default' : 'hover:bg-blue-50 text-gray-700'}`}>
+                <span className="text-sm truncate">
+                  {h.labelPadre ? `${h.labelPadre} · ` : ''}{h.label}
+                </span>
+                <span className="text-xs text-gray-400 flex-shrink-0 tabular-nums">
+                  {puesto ? 'agregado' : `hay ${h.stock ?? 0}`}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SelectorProducto({ sucursalKey, sucursalLista, onAgregar, yaAgregados, detalleNodo }) {
   const [busqueda, setBusqueda] = useState('');
   const [tipo,     setTipo]     = useState('cantidad');
+  // Que producto esta abierto por variantes. Un estado, no una pantalla aparte:
+  // elegir la potencia es parte de "agregar un producto", no un paso propio.
+  const [abierto,  setAbierto]  = useState(null);
 
   const { data: cantidadData, isLoading: cargandoCant } = useQuery({
     queryKey: ['productos-cantidad', ...sucursalKey],
@@ -59,6 +154,17 @@ function SelectorProducto({ sucursalKey, sucursalLista, onAgregar, yaAgregados }
   const lista = fuente
     .filter((p) => !texto || (p.nombre || '').toLowerCase().includes(texto))
     .slice(0, 40);
+
+  if (abierto) {
+    return (
+      <PanelVariantes
+        producto={abierto}
+        yaAgregados={yaAgregados}
+        onVolver={() => setAbierto(null)}
+        onElegir={(hoja) => { onAgregar(abierto, 'cantidad', hoja); setAbierto(null); }}
+      />
+    );
+  }
 
   return (
     <div className="flex flex-col gap-2">
@@ -96,16 +202,22 @@ function SelectorProducto({ sucursalKey, sucursalLista, onAgregar, yaAgregados }
             {texto ? 'Ningún producto coincide' : 'No hay productos en esta sucursal'}
           </p>
         ) : lista.map((p) => {
-          const clave = `${tipo}-${p.id}`;
-          const puesto = yaAgregados.has(clave);
+          // Un producto por cantidad puede entrar VARIAS veces (una por
+          // variante), asi que "ya esta" solo aplica al producto completo. Los
+          // seriales siguen siendo uno por orden.
+          const clave   = tipo === 'serial' ? `serial-${p.id}` : `cantidad-${p.id}-p`;
+          const porNodo = detalleNodo && tipo === 'cantidad';
+          const puesto  = !porNodo && yaAgregados.has(clave);
           return (
-            <button key={clave} type="button" disabled={puesto}
-              onClick={() => onAgregar(p, tipo)}
+            <button key={`${tipo}-${p.id}`} type="button" disabled={puesto}
+              onClick={() => (porNodo ? setAbierto(p) : onAgregar(p, tipo, null))}
               className={`flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-left transition-colors
                 ${puesto ? 'bg-gray-50 text-gray-300 cursor-default' : 'hover:bg-blue-50 text-gray-700'}`}>
               <span className="text-sm truncate">{p.nombre}</span>
               <span className="text-xs text-gray-400 flex-shrink-0">
-                {puesto ? 'agregado' : (p.costo_unitario ? formatCOP(p.costo_unitario) : '')}
+                {puesto ? 'agregado'
+                  : porNodo ? 'elegir variante…'
+                    : (p.costo_unitario ? formatCOP(p.costo_unitario) : '')}
               </span>
             </button>
           );
@@ -122,8 +234,19 @@ function FilaLinea({ linea, onCambiar, onQuitar, garantiaActiva }) {
         <div className="flex items-center gap-2 min-w-0">
           {linea.tipo === 'serial'
             ? <Smartphone size={14} className="text-gray-300 flex-shrink-0" />
-            : <Package size={14} className="text-gray-300 flex-shrink-0" />}
-          <span className="text-sm font-medium text-gray-800 truncate">{linea.nombre_producto}</span>
+            : linea.nodo_label
+              ? <Layers size={14} className="text-purple-400 flex-shrink-0" />
+              : <Package size={14} className="text-gray-300 flex-shrink-0" />}
+          <div className="min-w-0">
+            <span className="block text-sm font-medium text-gray-800 truncate">
+              {linea.nombre_producto}
+            </span>
+            {/* La variante pedida. Sin esto, dos lineas del mismo producto se
+                verian identicas y no habria forma de saber cual es cual. */}
+            {linea.nodo_label && (
+              <span className="block text-xs text-purple-600 truncate">{linea.nodo_label}</span>
+            )}
+          </div>
         </div>
         <button type="button" onClick={onQuitar}
           className="p-1 rounded-lg hover:bg-red-50 text-gray-300 hover:text-red-500 transition-colors flex-shrink-0">
@@ -171,7 +294,7 @@ function FilaLinea({ linea, onCambiar, onQuitar, garantiaActiva }) {
   );
 }
 
-export function ModalOrden({ open, proveedor, orden = null, garantiaActiva, onClose }) {
+export function ModalOrden({ open, proveedor, orden = null, garantiaActiva, detalleNodo = false, onClose }) {
   const queryClient = useQueryClient();
   const { sucursalKey, sucursalLista } = useSucursalKey();
   const editando = Boolean(orden);
@@ -184,6 +307,16 @@ export function ModalOrden({ open, proveedor, orden = null, garantiaActiva, onCl
       cantidad_pedida: l.cantidad_pedida,
       precio_estimado: l.precio_estimado ?? '',
       garantia_dias:   l.garantia_dias ?? '',
+      // El nodo pedido y su rotulo. `getLineas` ya devuelve los dos valores
+      // resueltos; sin recuperarlos aqui, editar un borrador borraria la
+      // variante en silencio y la orden se convertiria en un pedido al producto.
+      variante_id:     l.variante_id ?? null,
+      atributo_id:     l.atributo_id ?? null,
+      nodo_label:      l.variante_valor
+        ? `${l.variante_tipo_nombre ? `${l.variante_tipo_nombre}: ` : ''}${l.variante_valor}`
+        : l.atributo_valor
+          ? `${l.atributo_tipo_nombre ? `${l.atributo_tipo_nombre}: ` : ''}${l.atributo_valor}`
+          : null,
     }))
   );
   const [fechaEsperada, setFechaEsperada] = useState(orden?.fecha_esperada?.slice(0, 10) || '');
@@ -193,18 +326,30 @@ export function ModalOrden({ open, proveedor, orden = null, garantiaActiva, onCl
   const [notas,         setNotas]         = useState(orden?.notas || '');
   const [error,         setError]         = useState('');
 
-  const yaAgregados = new Set(lineas.map((l) => `${l.tipo}-${l.producto_id}`));
+  // ── La clave INCLUYE el nodo ───────────────────────────────────────────────
+  // Antes era `tipo-producto_id` y por eso el mismo producto no podia entrar dos
+  // veces: "50 de 25W y 50 de 20W" era literalmente inexpresable, aunque las
+  // columnas de la BD existieran desde 20260806.
+  const claveDe = (l) => l.tipo === 'serial'
+    ? `serial-${l.producto_id}`
+    : `cantidad-${l.producto_id}-${l.variante_id ? `v-${l.variante_id}`
+      : l.atributo_id ? `a-${l.atributo_id}` : 'p'}`;
+
+  const yaAgregados = new Set(lineas.map(claveDe));
   const total = lineas.reduce(
     (s, l) => s + Number(l.cantidad_pedida || 0) * Number(l.precio_estimado || 0), 0
   );
 
-  const agregar = (producto, tipo) => setLineas((prev) => [...prev, {
+  const agregar = (producto, tipo, hoja) => setLineas((prev) => [...prev, {
     tipo,
     producto_id:     producto.id,
     nombre_producto: producto.nombre,
     cantidad_pedida: 1,
     precio_estimado: producto.costo_unitario ?? '',
     garantia_dias:   '',
+    variante_id:     hoja?.tipo === 'variante' ? hoja.id : null,
+    atributo_id:     hoja?.tipo === 'atributo' ? hoja.id : null,
+    nodo_label:      hoja ? `${hoja.labelPadre ? `${hoja.labelPadre} · ` : ''}${hoja.label}` : null,
   }]);
 
   const cambiar = (idx, campo, valor) =>
@@ -227,6 +372,12 @@ export function ModalOrden({ open, proveedor, orden = null, garantiaActiva, onCl
       cantidad_pedida: Number(l.cantidad_pedida),
       precio_estimado: l.precio_estimado !== '' ? Number(l.precio_estimado) : null,
       garantia_dias:   l.garantia_dias   !== '' ? Number(l.garantia_dias)   : null,
+      // `nodo_label` NO viaja: es solo para pintar. El backend resuelve la
+      // etiqueta desde la BD y la congela donde hace falta, y mandarla desde
+      // aqui abriria la puerta a que el navegador escribiera un rotulo que no
+      // corresponde al nodo.
+      variante_id:     l.variante_id ?? null,
+      atributo_id:     l.atributo_id ?? null,
     })),
   });
 
@@ -261,7 +412,7 @@ export function ModalOrden({ open, proveedor, orden = null, garantiaActiva, onCl
 
         <SelectorProducto
           sucursalKey={sucursalKey} sucursalLista={sucursalLista}
-          onAgregar={agregar} yaAgregados={yaAgregados}
+          onAgregar={agregar} yaAgregados={yaAgregados} detalleNodo={detalleNodo}
         />
 
         {lineas.length > 0 && (
@@ -273,7 +424,7 @@ export function ModalOrden({ open, proveedor, orden = null, garantiaActiva, onCl
               <span className="text-sm font-semibold text-gray-800 tabular-nums">{formatCOP(total)}</span>
             </div>
             {lineas.map((l, i) => (
-              <FilaLinea key={`${l.tipo}-${l.producto_id}`} linea={l}
+              <FilaLinea key={claveDe(l)} linea={l}
                 garantiaActiva={garantiaActiva}
                 onCambiar={(campo, valor) => cambiar(i, campo, valor)}
                 onQuitar={() => quitar(i)} />

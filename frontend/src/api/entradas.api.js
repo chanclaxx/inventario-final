@@ -30,3 +30,26 @@ export const getEntradasPorConfirmar = () => api.get('/compras/por-confirmar');
 
 export const confirmarEntrada = (id, data) =>
   api.patch(`/compras/${id}/confirmar`, data);
+
+// ── Corregir sin rehacer ─────────────────────────────────────────────────────
+//
+// Solo mientras la entrada siga SIN CONFIRMAR: es la frontera que usa el
+// backend, y la razón es que hasta ahí no hay precios reales ni deuda cerrada
+// que tocar — solo stock provisional. Después, el camino es la devolución al
+// proveedor o la corrección de precios.
+//
+// `operaciones`: [{ linea_id, cantidad? }]                  cambiar cuánto llegó
+//                [{ linea_id, variante_id, atributo_id }]   era otra variante
+//                [{ linea_id, imei }]                       IMEI mal tecleado
+//                [{ linea_id, quitar: true }]                no llegó
+//                [{ agregar: true, producto_id, nombre_producto,
+//                   cantidad, variante_id?, atributo_id?, imei? }]
+//
+// Sigue sin viajar un solo precio: el backend lo resuelve con el MISMO criterio
+// que usó al registrar la entrada.
+export const corregirEntrada = (id, data) =>
+  api.patch(`/compras/entradas/${id}/corregir`, data);
+
+/** Quién cambió qué y cuándo. El "antes" y el "después" van congelados. */
+export const getCorreccionesEntrada = (id) =>
+  api.get(`/compras/entradas/${id}/correcciones`);

@@ -62,6 +62,71 @@ const _decorar = (orden, cfg) => ({
 // se hubiera registrado.
 const { resolverVencimiento: _resolverVencimiento } = require('../../utils/vencimiento.util');
 
+// ── Pedir la VARIANTE, no el producto ────────────────────────────────────────
+//
+// `variante_id` / `atributo_id` existen en `lineas_orden_compra` desde 20260806
+// y hasta ahora ningún frontend los escribía: las columnas estaban, cuatro
+// consultas las leían, y siempre llegaban en NULL. Esto es lo que las conecta.
+//
+// Se valida contra la BD (existe, es de este producto, es una HOJA) porque los
+// ids vienen del navegador. Y solo se acepta con la feature encendida: sin ella
+// una línea con nodo entraría a una orden que ninguna pantalla sabría pintar.
+const { validarNodo, claveNodo } = require('../../utils/nodoPedido.util');
+
+const _validarNodosDeLineas = async (client, lineas, { sucursal_id, detalleNodo }) => {
+  for (const l of lineas) {
+    if (!l.variante_id && !l.atributo_id) continue;
+
+    if (!detalleNodo) {
+      throw {
+        status: 400,
+        message: 'El pedido por variante no está activado en este negocio. '
+          + 'Actívalo en Ajustes o pide el producto completo.',
+      };
+    }
+    // Un serial se pide por MODELO y cantidad: el IMEI —y con él el color y las
+    // características de esa unidad— solo se conoce al abrir la caja. Bajar a un
+    // nodo aquí prometería un detalle que la recepción no puede honrar.
+    if (l.tipo === 'serial') {
+      throw {
+        status: 400,
+        message: `"${l.nombre_producto}" se maneja por IMEI: se pide por modelo y cantidad. `
+          + 'El detalle de cada unidad se captura al recibir, que es cuando se conoce.',
+      };
+    }
+
+    const { etiqueta } = await validarNodo(client, {
+      producto_id: l.producto_id,
+      variante_id: l.variante_id,
+      atributo_id: l.atributo_id,
+      sucursal_id,
+    });
+    l.nodo_etiqueta = etiqueta;
+  }
+
+  // Dos líneas al MISMO nodo son un error de captura, no un pedido de dos
+  // tandas: al recibir, el bodeguero no tendría cómo decidir a cuál imputar lo
+  // que llegó y el avance de las dos quedaría a merced del orden de los ids.
+  //
+  // Ojo: la clave incluye el producto, porque `claveNodo` de una línea SIN nodo
+  // es 'p' para todas — sin el producto delante, dos productos distintos pedidos
+  // completos chocarían entre sí.
+  const vistas = new Set();
+  for (const l of lineas) {
+    const clave = `${l.tipo}-${l.producto_id}-${claveNodo(l)}`;
+    if (l.producto_id && vistas.has(clave)) {
+      throw {
+        status: 400,
+        message: `"${l.nombre_producto}"${l.nodo_etiqueta ? ` (${l.nodo_etiqueta})` : ''} `
+          + 'está repetido en la orden. Súmalo en una sola línea.',
+      };
+    }
+    if (l.producto_id) vistas.add(clave);
+  }
+
+  return lineas;
+};
+
 const _validarLineas = (lineas) => {
   if (!Array.isArray(lineas) || lineas.length === 0) {
     throw { status: 400, message: 'La orden necesita al menos un producto' };
@@ -138,7 +203,7 @@ const crear = async ({
   negocio_id, sucursal_id, usuario_id, proveedor_id,
   lineas, emitir = false, clave_idempotencia = null,
   fecha_esperada, numero_factura, fecha_factura, dias_plazo, fecha_vencimiento,
-  notas,
+  notas, detalleNodo = false,
 }) => {
   const lineasOk = _validarLineas(lineas);
 
@@ -148,6 +213,7 @@ const crear = async ({
 
     await _verificarSucursal(client, sucursal_id, negocio_id);
     const proveedor = await _verificarProveedor(client, proveedor_id, negocio_id);
+    await _validarNodosDeLineas(client, lineasOk, { sucursal_id, detalleNodo });
 
     // La garantía por defecto del proveedor se copia AHORA a cada línea que no
     // traiga la suya. Copiar y no referenciar es deliberado: subir después el
@@ -192,7 +258,7 @@ const crear = async ({
  * emitida, cambiar lo pedido reescribiría la historia contra la que ya se está
  * recibiendo, y el pendiente de cada línea dejaría de significar nada.
  */
-const editar = async (negocioId, id, { lineas, usuario_id, ...cabecera }) => {
+const editar = async (negocioId, id, { lineas, usuario_id, detalleNodo = false, ...cabecera }) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -215,6 +281,9 @@ const editar = async (negocioId, id, { lineas, usuario_id, ...cabecera }) => {
       }
       const lineasOk = _validarLineas(lineas);
       const proveedor = await _verificarProveedor(client, orden.proveedor_id, negocioId);
+      await _validarNodosDeLineas(client, lineasOk, {
+        sucursal_id: orden.sucursal_id, detalleNodo,
+      });
       const conGarantia = lineasOk.map((l) => ({
         ...l,
         garantia_dias: l.garantia_dias ?? proveedor.garantia_dias_default ?? null,

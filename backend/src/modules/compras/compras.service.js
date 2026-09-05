@@ -4,6 +4,10 @@ const { calcularCostoPromedio } = require('../../utils/costoPromedio.util');
 const variantesRepo             = require('../variantes-producto/variantes-producto.repository');
 const { getConfigOrdenes }      = require('../../middlewares/ordenesCompra.middleware');
 const { resolverVencimiento }   = require('../../utils/vencimiento.util');
+// Una sola respuesta a "¿lo que llegó es lo que se pidió?", compartida con las
+// órdenes de compra: si cada módulo la calculara, la misma recepción sería una
+// sustitución en un sitio y una entrega normal en el otro.
+const { esSustitucion, etiquetaNodo } = require('../../utils/nodoPedido.util');
 
 const getCompras = (sucursalId, negocioId, proveedorIds = null) =>
   comprasRepo.findAll(sucursalId, negocioId, proveedorIds);
@@ -166,6 +170,8 @@ const _validarRecepcionContraOrden = async (client, { orden_compra_id, negocio_i
     `SELECT loc.id,
             loc.nombre_producto,
             loc.cantidad_pedida,
+            loc.variante_id,
+            loc.atributo_id,
             COALESCE(
               SUM(lc.cantidad - COALESCE(lc.cantidad_devuelta, 0))
                 FILTER (WHERE c.id IS NOT NULL),
@@ -180,32 +186,138 @@ const _validarRecepcionContraOrden = async (client, { orden_compra_id, negocio_i
   );
   const porLinea = new Map(avance.map((a) => [Number(a.id), a]));
 
-  // Se agrupa por línea pedida: una misma línea de la orden puede llegar
-  // repartida en varias líneas de la recepción (típico con seriales, donde cada
-  // IMEI es su propia fila).
-  const solicitado = new Map();
+  // ── Conciliación por NODO ──────────────────────────────────────────────────
+  //
+  // Hasta ahora esto solo sumaba cantidades por `orden_linea_id` y jamás miraba
+  // QUÉ llegó. Si la orden pedía la variante de 25W y el proveedor mandaba la de
+  // 20W, la recepción escribía el nodo del 20W, lo atribuía a la línea del 25W y
+  // la orden se marcaba cumplida: el inventario quedaba bien y el pedido quedaba
+  // mintiendo, sin que nadie se enterara nunca.
+  //
+  // Los dos desenlaces raros exigen que alguien diga que sí. No se guardan: que
+  // la fila exista ya prueba que se confirmaron, porque sin el flag esto
+  // responde 409 y no se escribe nada.
+  const solicitado  = new Map();   // orden_linea_id -> unidades de esta recepción
+  const sustituidas = new Map();   // orden_linea_id -> { pedido, recibido, cantidad }
+  const permiteExceso = new Set(); // orden_linea_id que aceptaron el sobrante
+
   for (const l of lineas) {
     if (l.orden_linea_id == null) continue;
     const id = Number(l.orden_linea_id);
-    solicitado.set(id, (solicitado.get(id) || 0) + Number(l.cantidad || 0));
-  }
-
-  for (const [lineaId, cantidad] of solicitado) {
-    const linea = porLinea.get(lineaId);
-    if (!linea) {
+    const pedida = porLinea.get(id);
+    if (!pedida) {
       throw { status: 400, message: `Una de las líneas no pertenece a la orden #${orden.numero ?? orden.id}` };
     }
-    const pendiente = Number(linea.cantidad_pedida) - Number(linea.recibida);
-    if (cantidad > pendiente) {
+
+    solicitado.set(id, (solicitado.get(id) || 0) + Number(l.cantidad || 0));
+    if (l.excedente_ok === true) permiteExceso.add(id);
+
+    if (!esSustitucion(pedida, l)) continue;
+
+    // Las etiquetas se leen AQUÍ y se congelan: la novedad tiene que seguir
+    // diciendo la verdad aunque mañana renombren la talla.
+    const [etqPedido, etqRecibido] = await Promise.all([
+      etiquetaNodo(client, pedida),
+      etiquetaNodo(client, l),
+    ]);
+
+    if (l.sustituye !== true) {
       throw {
-        status: 400,
-        message: `De ${linea.nombre_producto} solo faltan ${pendiente} de ${linea.cantidad_pedida} `
-          + `y estás recibiendo ${cantidad}. Si llegaron de más, recíbelas como compra aparte.`,
+        status: 409,
+        code: 'NODO_DISTINTO',
+        message: `De "${pedida.nombre_producto}" pediste ${etqPedido || 'el producto'} `
+          + `y está llegando ${etqRecibido || 'el producto sin variante'}. `
+          + 'Confirma que aceptas el cambio, o recíbelo como compra aparte.',
+        detalle: { orden_linea_id: id, pedido: etqPedido, recibido: etqRecibido },
       };
     }
+
+    const acum = sustituidas.get(id) || { pedido: etqPedido, recibido: etqRecibido, cantidad: 0 };
+    acum.cantidad += Number(l.cantidad || 0);
+    acum.nombre_producto = pedida.nombre_producto;
+    sustituidas.set(id, acum);
   }
 
-  return orden;
+  // ── El exceso deja de ser un muro ─────────────────────────────────────────
+  //
+  // Antes esto era un 400 seco que mandaba a "registrarlas como compra aparte"
+  // —mientras la pantalla del bodeguero le prometía que el sobrante "queda
+  // anotado en la entrada"—. Ahora es una decisión suya: recibirlo o devolverlo.
+  //
+  // Recibirlo NO necesita columna: `recibida - cantidad_pedida` ya lo dice, y
+  // `AVANCE_POR_ORDEN` ya lo acota con LEAST para que la orden no pase del 100 %.
+  const excesos = [];
+  for (const [lineaId, cantidad] of solicitado) {
+    const linea = porLinea.get(lineaId);
+    const pendiente = Number(linea.cantidad_pedida) - Number(linea.recibida);
+    if (cantidad <= pendiente) continue;
+
+    const sobra = cantidad - pendiente;
+    if (!permiteExceso.has(lineaId)) {
+      throw {
+        status: 409,
+        code: 'EXCESO',
+        message: `De ${linea.nombre_producto} solo faltan ${Math.max(pendiente, 0)} de `
+          + `${linea.cantidad_pedida} y estás recibiendo ${cantidad}. `
+          + 'Confirma que recibes las de más, o devuélveselas al proveedor.',
+        detalle: { orden_linea_id: lineaId, pendiente: Math.max(pendiente, 0), recibiendo: cantidad, sobra },
+      };
+    }
+    excesos.push({ orden_linea_id: lineaId, nombre_producto: linea.nombre_producto, cantidad: sobra });
+  }
+
+  return { orden, sustituciones: [...sustituidas.entries()].map(([id, v]) => ({ orden_linea_id: id, ...v })), excesos };
+};
+
+/**
+ * Escribe en `novedades_proveedor` lo que se salió del guion de la orden.
+ *
+ * NUNCA lanza por sí misma: la tabla es de 20260806 y un negocio que no la
+ * tenga no puede quedarse sin poder recibir mercancía por culpa de su bitácora.
+ * Se comprueba ANTES de insertar y no con un try/catch alrededor, porque dentro
+ * de una transacción abortada atrapar el error no salva lo que viene después —
+ * es la misma lección que dejó `movimientos_ubicacion`.
+ *
+ * Las etiquetas llegan ya congeladas desde la conciliación.
+ */
+const _registrarNovedadesRecepcion = async (client, {
+  negocio_id, proveedor_id, usuario_id, compra_id, orden_id,
+  sustituciones = [], excesos = [],
+}) => {
+  if (!proveedor_id) return;
+  if (sustituciones.length === 0 && excesos.length === 0) return;
+
+  const { rows: existe } = await client.query(
+    `SELECT 1 FROM information_schema.tables
+     WHERE table_schema = 'public' AND table_name = 'novedades_proveedor'`
+  );
+  if (!existe.length) return;
+
+  for (const sub of sustituciones) {
+    await client.query(
+      `INSERT INTO novedades_proveedor
+         (negocio_id, proveedor_id, tipo, orden_id, orden_linea_id, compra_id,
+          cantidad, texto, pedido_etiqueta, recibido_etiqueta, usuario_id)
+       VALUES ($1, $2, 'sustitucion', $3, $4, $5, $6, $7, $8, $9, $10)`,
+      [negocio_id, proveedor_id, orden_id, sub.orden_linea_id, compra_id,
+       sub.cantidad,
+       `${sub.nombre_producto}: se pidió ${sub.pedido || 'el producto'} y llegó ${sub.recibido || 'otra cosa'}`,
+       sub.pedido, sub.recibido, usuario_id]
+    );
+  }
+
+  for (const ex of excesos) {
+    await client.query(
+      `INSERT INTO novedades_proveedor
+         (negocio_id, proveedor_id, tipo, orden_id, orden_linea_id, compra_id,
+          cantidad, texto, usuario_id)
+       VALUES ($1, $2, 'exceso', $3, $4, $5, $6, $7, $8)`,
+      [negocio_id, proveedor_id, orden_id, ex.orden_linea_id, compra_id,
+       ex.cantidad,
+       `${ex.nombre_producto}: llegaron ${ex.cantidad} de más y se recibieron`,
+       usuario_id]
+    );
+  }
 };
 
 const registrarCompra = async ({
@@ -255,10 +367,13 @@ const registrarCompra = async ({
 
     // Recepción contra una orden: valida y bloquea la orden antes de tocar nada.
     let ordenDeLaCompra = null;
+    let novedadesOrden  = { sustituciones: [], excesos: [] };
     if (orden_compra_id) {
-      ordenDeLaCompra = await _validarRecepcionContraOrden(client, {
+      const conciliacion = await _validarRecepcionContraOrden(client, {
         orden_compra_id, negocio_id, sucursal_id, lineas,
       });
+      ordenDeLaCompra = conciliacion.orden;
+      novedadesOrden  = conciliacion;
     }
 
     const total = totalRecibido ||
@@ -600,6 +715,21 @@ const registrarCompra = async ({
         );
       }
     }
+
+    // ── La bitácora del proveedor ─────────────────────────────────────────
+    // Va DENTRO de la transacción y a propósito: una sustitución aceptada que
+    // no quedara registrada es exactamente el silencio que este trabajo vino a
+    // romper — el inventario quedaría bien y nadie sabría nunca que el
+    // proveedor mandó otra cosa.
+    //
+    // Cuelga del PROVEEDOR y no de la orden (novedades_proveedor ya era así):
+    // "este proveedor siempre me cambia las características" es la pregunta que
+    // de verdad importa, y con la bitácora dentro de la orden esa historia
+    // quedaría partida en pedazos.
+    await _registrarNovedadesRecepcion(client, {
+      negocio_id, proveedor_id, usuario_id, compra_id: compra.id,
+      orden_id: orden_compra_id, ...novedadesOrden,
+    });
 
     await client.query('COMMIT');
     return compra;
@@ -1552,4 +1682,10 @@ const confirmarEntrada = async (negocioId, compraId, {
   return resultado;
 };
 
-module.exports = { getCompras, getCompraById, getComprasByProveedor, registrarCompra, getComprasPaginadas, cancelarCompra, devolverCompra, editarPreciosCompra, registrarEntrada, getEntradas, getEntradaDetalle, getOrdenesParaRecibir, getPorConfirmar, confirmarEntrada };
+// `precioProvisional` sale exportado para que la CORRECCIÓN de una entrada
+// resuelva el precio con exactamente el mismo criterio que la entrada original.
+// Copiarlo allá haría que corregir la talla cambiara además el costo, que es la
+// clase de efecto secundario invisible que este trabajo vino a eliminar.
+const { corregirEntrada, getCorrecciones } = require('./correccionEntrada');
+
+module.exports = { getCompras, getCompraById, getComprasByProveedor, registrarCompra, getComprasPaginadas, cancelarCompra, devolverCompra, editarPreciosCompra, registrarEntrada, getEntradas, getEntradaDetalle, getOrdenesParaRecibir, getPorConfirmar, confirmarEntrada, corregirEntrada, getCorrecciones, precioProvisional: _precioProvisional };

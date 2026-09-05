@@ -15,6 +15,7 @@ import {
 import api from '../../api/axios.config';
 import {
   Package, Smartphone, Minus, Plus, PackageCheck, AlertTriangle, ShieldCheck, Layers,
+  Replace, PackagePlus,
 } from 'lucide-react';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -48,6 +49,23 @@ import {
 //
 // Un negocio sin nada de esto activado ve exactamente lo de antes: una casilla
 // de IMEI o un contador de cantidad.
+//
+// ── Los dos desenlaces raros, cada uno a un clic ────────────────────────────
+// Cuando la orden pidio una VARIANTE concreta, esta pantalla ya no compara
+// cantidades a ciegas: compara contra lo que se pidio.
+//
+//   · LLEGO OTRA  → "Llego otra variante" abre las hojas del arbol. La linea
+//     sigue respondiendo al mismo pedido (el proveedor respondio) pero entra al
+//     nodo que de verdad llego, y queda como novedad del proveedor. Antes esto
+//     pasaba EN SILENCIO: el stock entraba bien y el pedido se marcaba cumplido
+//     sin que nadie supiera que llego otra cosa.
+//
+//   · LLEGARON DE MAS → antes era un 400 seco que mandaba a "registrarlas como
+//     compra aparte". Ahora se puede recibir el sobrante marcando una casilla, o
+//     dejar el numero en lo pendiente y devolverselas al proveedor.
+//
+// Las dos exigen un si explicito: el backend responde 409 sin el flag, asi que
+// no hay forma de que ninguna de las dos ocurra por accidente.
 // ─────────────────────────────────────────────────────────────────────────────
 
 function parsearLista(raw) {
@@ -59,9 +77,34 @@ function parsearLista(raw) {
   }
 }
 
-function Stepper({ valor, max, onCambiar, disabled }) {
+// El rotulo del nodo que pidio la orden. `getLineas` ya resuelve los valores y
+// el nombre del tipo; aqui solo se arman. Devuelve null cuando la linea pidio el
+// producto completo, que es lo que hacen hoy los 28 negocios.
+const nodoPedido = (linea) => {
+  if (linea.variante_id) {
+    return {
+      key: `v-${linea.variante_id}`, variante_id: linea.variante_id, atributo_id: null,
+      label: linea.variante_tipo_nombre
+        ? `${linea.variante_tipo_nombre}: ${linea.variante_valor}` : linea.variante_valor,
+    };
+  }
+  if (linea.atributo_id) {
+    return {
+      key: `a-${linea.atributo_id}`, variante_id: null, atributo_id: linea.atributo_id,
+      label: linea.atributo_tipo_nombre
+        ? `${linea.atributo_tipo_nombre}: ${linea.atributo_valor}` : linea.atributo_valor,
+    };
+  }
+  return null;
+};
+
+function Stepper({ valor, max, onCambiar, disabled, techo }) {
   const n = Number(valor) || 0;
-  const set = (v) => onCambiar(String(Math.max(0, Math.min(max, v))));
+  // `techo` es el tope duro; `max` es solo lo pendiente. Separarlos es lo que
+  // permite teclear de mas para despues decidir si se recibe o se devuelve: un
+  // input que no deja escribir el numero real obliga a mentir.
+  const limite = techo ?? max;
+  const set = (v) => onCambiar(String(Math.max(0, Math.min(limite, v))));
 
   return (
     <div className={`flex items-stretch border border-gray-200 rounded-lg overflow-hidden bg-gray-50
@@ -72,11 +115,12 @@ function Stepper({ valor, max, onCambiar, disabled }) {
                    disabled:opacity-30 disabled:hover:bg-transparent">
         <Minus size={14} className="mx-auto" />
       </button>
-      <input type="number" min="0" max={max} value={valor} disabled={disabled}
+      <input type="number" min="0" max={limite} value={valor} disabled={disabled}
         onChange={(e) => set(Number(e.target.value))}
-        className="flex-1 w-14 text-center text-sm font-semibold tabular-nums bg-white
-                   border-x border-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-400" />
-      <button type="button" disabled={disabled || n >= max} onClick={() => set(n + 1)}
+        className={`flex-1 w-14 text-center text-sm font-semibold tabular-nums bg-white
+                   border-x border-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-400
+                   ${n > max ? 'text-purple-700' : ''}`} />
+      <button type="button" disabled={disabled || n >= limite} onClick={() => set(n + 1)}
         aria-label="Agregar uno"
         className="w-9 text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition-colors
                    disabled:opacity-30 disabled:hover:bg-transparent">
@@ -217,6 +261,114 @@ function FilaCantidad({ linea, estado, onCambiar, garantiaActiva, variantesActiv
 
   const hojas      = variantesActivo ? hojasDelArbol(arbolData) : [];
   const tieneArbol = hojas.length > 0;
+  const pedido     = nodoPedido(linea);
+
+  // ── La orden pidio una VARIANTE concreta ──────────────────────────────────
+  //
+  // No se reparte nada: ya se sabe QUE se pidio, asi que la pregunta se reduce a
+  // "¿llego eso, y cuanto?". Repartir aqui obligaria a volver a elegir la
+  // variante que la orden ya dijo — y volveria a abrir la puerta a que llegara
+  // otra cosa sin que nadie lo notara.
+  if (pedido) {
+    const sust      = estado.nodoSust || null;          // la que llego, si es otra
+    const recibidas = Number(estado.cantidad || 0);
+    const sobra     = Math.max(0, recibidas - pendiente);
+    const nodoLabel = sust ? `${sust.labelPadre ? `${sust.labelPadre} · ` : ''}${sust.label}` : pedido.label;
+
+    return (
+      <div className="flex flex-col gap-2">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <Layers size={12} className="text-purple-400 flex-shrink-0" />
+            <span className={`text-xs truncate ${sust ? 'text-purple-700 font-medium' : 'text-gray-500'}`}>
+              {nodoLabel}
+            </span>
+            {sust && <span className="text-xs text-purple-500 flex-shrink-0">en vez de {pedido.label}</span>}
+          </div>
+          <div className="w-36">
+            {/* El techo deja teclear hasta el doble de lo pendiente: escribir el
+                numero real es el primer paso para decidir que hacer con el
+                sobrante, y un input que no lo permite obliga a mentir. */}
+            <Stepper valor={estado.cantidad} max={pendiente} techo={pendiente * 2 + 10}
+              onCambiar={(v) => onCambiar('cantidad', v)} />
+            <span className="block text-xs text-gray-400 text-center mt-1 tabular-nums">
+              {sobra > 0        ? `sobran ${sobra}`
+                : recibidas === pendiente ? 'completa'
+                  : recibidas === 0       ? 'no llegó'
+                    : `faltarán ${pendiente - recibidas}`}
+            </span>
+          </div>
+        </div>
+
+        {/* ── Llego otra variante ─────────────────────────────────────────── */}
+        {tieneArbol && (
+          <div className="flex flex-col gap-1.5">
+            {!estado.eligiendoNodo ? (
+              <button type="button" onClick={() => onCambiar('eligiendoNodo', true)}
+                className="flex items-center gap-1.5 text-xs font-medium text-purple-600
+                           hover:text-purple-700 transition-colors w-fit">
+                <Replace size={12} /> {sust ? 'Cambiar la variante que llegó' : 'Llegó otra variante'}
+              </button>
+            ) : (
+              <div className="border border-purple-200 bg-purple-50/40 rounded-lg p-2 flex flex-col gap-1">
+                <p className="text-xs text-purple-700">¿Cuál llegó de verdad?</p>
+                <div className="max-h-36 overflow-y-auto flex flex-col gap-0.5">
+                  {hojas.map((h) => {
+                    const esPedida = h.key === pedido.key;
+                    return (
+                      <button key={h.key} type="button"
+                        onClick={() => {
+                          onCambiar('nodoSust', esPedida ? null : h);
+                          onCambiar('eligiendoNodo', false);
+                        }}
+                        className="flex items-center justify-between gap-2 px-2 py-1.5 rounded-md
+                                   text-left text-xs text-gray-700 hover:bg-white transition-colors">
+                        <span className="truncate">
+                          {h.labelPadre ? `${h.labelPadre} · ` : ''}{h.label}
+                        </span>
+                        {esPedida && <span className="text-gray-400 flex-shrink-0">la que pediste</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Se explica lo que va a pasar ANTES de confirmar. La linea sigue
+                respondiendo al pedido —el proveedor respondio— pero queda
+                anotado que respondio con otra cosa. */}
+            {sust && (
+              <p className="text-xs text-purple-600">
+                Se recibe {nodoLabel} contra lo que pediste. Queda anotado como
+                novedad del proveedor.
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* ── Llegaron de mas ─────────────────────────────────────────────── */}
+        {sobra > 0 && (
+          <label className="flex items-start gap-2 bg-purple-50 rounded-lg px-2.5 py-2 cursor-pointer">
+            <input type="checkbox" checked={Boolean(estado.excedenteOk)}
+              onChange={(e) => onCambiar('excedenteOk', e.target.checked)}
+              className="w-4 h-4 mt-0.5 rounded accent-purple-600 flex-shrink-0" />
+            <span className="text-xs text-purple-800">
+              <PackagePlus size={11} className="inline mr-1 -mt-0.5" />
+              Me quedo con las {sobra} de más. Entran al inventario y quedan anotadas.
+              <span className="block text-purple-600 mt-0.5">
+                Si se las vas a devolver, baja el número a {pendiente}.
+              </span>
+            </span>
+          </label>
+        )}
+
+        {recibidas > 0 && (
+          <PrecioYGarantia linea={linea} estado={estado} onCambiar={onCambiar}
+            garantiaActiva={garantiaActiva} />
+        )}
+      </div>
+    );
+  }
 
   if (!tieneArbol) {
     const recibidas = Number(estado.cantidad || 0);
@@ -255,10 +407,15 @@ function FilaCantidad({ linea, estado, onCambiar, garantiaActiva, variantesActiv
         onActualizar={(key, data) => onCambiar('nodosData', { ...nodos, [key]: data })}
       />
       {total > pendiente && (
-        <p className="text-xs text-red-500">
-          Estás recibiendo {total} y solo faltan {pendiente}. Si llegaron de más,
-          regístralas como compra aparte.
-        </p>
+        <label className="flex items-start gap-2 bg-purple-50 rounded-lg px-2.5 py-2 cursor-pointer">
+          <input type="checkbox" checked={Boolean(estado.excedenteOk)}
+            onChange={(e) => onCambiar('excedenteOk', e.target.checked)}
+            className="w-4 h-4 mt-0.5 rounded accent-purple-600 flex-shrink-0" />
+          <span className="text-xs text-purple-800">
+            Estás recibiendo {total} y solo faltan {pendiente}. Me quedo con las
+            {' '}{total - pendiente} de más.
+          </span>
+        </label>
       )}
       {total > 0 && garantiaActiva && (
         <PrecioYGarantia linea={linea} estado={estado} onCambiar={onCambiar}
@@ -336,6 +493,11 @@ export function ModalRecibir({ open, orden, garantiaActiva, onClose, onRecibida 
         parsearLista(configData?.caracteristicas_serial_lista),
       )],
       nodosData: {},
+      // La variante que de verdad llego, cuando no es la pedida. Empieza en null
+      // porque el caso normal —llego lo que se pidio— no tiene que tocar nada.
+      nodoSust:     null,
+      eligiendoNodo: false,
+      excedenteOk:  false,
       precio:    l.precio_estimado ?? '',
       garantia:  l.garantia_dias ?? '',
     }]))
@@ -391,6 +553,32 @@ export function ModalRecibir({ open, orden, garantiaActiva, onClose, onRecibida 
         continue;
       }
 
+      // ── La orden pidio un NODO: una sola linea, en el nodo que llego ─────
+      //
+      // `sustituye` viaja SOLO cuando de verdad hay sustitucion. Mandarlo
+      // siempre en true convertiria la confirmacion en decorado y el backend
+      // dejaria pasar en silencio justo lo que este trabajo vino a destapar.
+      const pedido = nodoPedido(l);
+      if (pedido) {
+        const cant = Number(e.cantidad || 0);
+        if (cant > 0) {
+          const sust = e.nodoSust || null;
+          out.push({
+            nombre_producto: l.nombre_producto,
+            producto_id:     l.producto_id,
+            cantidad:        cant,
+            precio_unitario: Number(e.precio || 0),
+            variante_id: sust ? (sust.tipo === 'variante' ? sust.id : null) : pedido.variante_id,
+            atributo_id: sust ? (sust.tipo === 'atributo' ? sust.id : null) : pedido.atributo_id,
+            orden_linea_id:  l.id,
+            garantia_dias:   garantia,
+            ...(sust                        ? { sustituye: true }    : {}),
+            ...(e.excedenteOk               ? { excedente_ok: true } : {}),
+          });
+        }
+        continue;
+      }
+
       const nodos = Object.values(e.nodosData || {}).filter((d) => Number(d?.cantidad) > 0);
       if (nodos.length > 0) {
         for (const d of nodos) {
@@ -403,6 +591,7 @@ export function ModalRecibir({ open, orden, garantiaActiva, onClose, onRecibida 
             atributo_id:     d.tipo === 'atributo' ? d.id : null,
             orden_linea_id:  l.id,
             garantia_dias:   garantia,
+            ...(e.excedenteOk ? { excedente_ok: true } : {}),
           });
         }
         continue;
@@ -417,6 +606,7 @@ export function ModalRecibir({ open, orden, garantiaActiva, onClose, onRecibida 
           precio_unitario: Number(e.precio || 0),
           orden_linea_id:  l.id,
           garantia_dias:   garantia,
+          ...(e.excedenteOk ? { excedente_ok: true } : {}),
         });
       }
     }
@@ -432,7 +622,12 @@ export function ModalRecibir({ open, orden, garantiaActiva, onClose, onRecibida 
     .reduce((s, x) => s + Number(x.cantidad), 0);
 
   const quedanPendientes = lineas.some((l) => recibidasDe(l) < Number(l.pendiente));
-  const hayExceso        = lineas.some((l) => recibidasDe(l) > Number(l.pendiente));
+  // Solo importa el exceso SIN confirmar. El confirmado ya es una decision
+  // tomada, y seguir bloqueandolo seria volver al muro de antes con una casilla
+  // decorativa al lado.
+  const excesoSinConfirmar = lineas.some(
+    (l) => recibidasDe(l) > Number(l.pendiente) && !estados[l.id]?.excedenteOk
+  );
 
   const mut = useMutation({
     mutationFn: () => crearCompra({
@@ -464,8 +659,9 @@ export function ModalRecibir({ open, orden, garantiaActiva, onClose, onRecibida 
       setError('No marcaste nada como recibido');
       return;
     }
-    if (hayExceso) {
-      setError('Hay líneas donde estás recibiendo más de lo que falta');
+    if (excesoSinConfirmar) {
+      setError('Hay líneas donde llegaron de más. Marca que te quedas con ellas, '
+        + 'o baja el número a lo que falta y devuélveselas al proveedor.');
       return;
     }
     if (lineasEnvio.some((l) => !(Number(l.precio_unitario) > 0))) {
@@ -554,7 +750,7 @@ export function ModalRecibir({ open, orden, garantiaActiva, onClose, onRecibida 
               )}
             </div>
 
-            {quedanPendientes && !hayExceso && (
+            {quedanPendientes && !excesoSinConfirmar && (
               <div className="bg-amber-50 rounded-xl px-3 py-2.5 flex items-start gap-2">
                 <AlertTriangle size={13} className="text-amber-500 flex-shrink-0 mt-0.5" />
                 <p className="text-xs text-amber-800">

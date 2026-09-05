@@ -127,6 +127,36 @@ const getPorConfirmar = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+// Corregir lo que se capturo mal, sin rehacer la entrada entera. El service
+// exige que siga SIN confirmar: despues de eso hay deuda y precios reales
+// colgando, y el camino es la devolucion o la correccion de precios.
+const corregirEntrada = async (req, res, next) => {
+  try {
+    const data = await service.corregirEntrada(req.user.negocio_id, req.params.id, {
+      operaciones: req.body.operaciones,
+      motivo:      req.body.motivo,
+      usuario_id:  req.user.id,
+    });
+    if (data.sin_cambios) {
+      return res.json({ ok: true, data, message: 'No habia nada que corregir' });
+    }
+    audit.registrar(req.user.negocio_id, req.user.id, 'Entrada corregida', 'compras', data.compra_id, {
+      correcciones: data.correcciones.length,
+      total_anterior: data.total_anterior,
+      total_nuevo:    data.total_nuevo,
+      motivo:         req.body.motivo || null,
+    });
+    res.json({ ok: true, data, message: 'Entrada corregida' });
+  } catch (err) { next(err); }
+};
+
+const getCorrecciones = async (req, res, next) => {
+  try {
+    const data = await service.getCorrecciones(req.user.negocio_id, req.params.id);
+    res.json({ ok: true, data });
+  } catch (err) { next(err); }
+};
+
 const confirmarEntrada = async (req, res, next) => {
   try {
     const data = await service.confirmarEntrada(req.user.negocio_id, req.params.id, {
@@ -243,4 +273,5 @@ const editarPreciosCompra = async (req, res, next) => {
 
 module.exports = { getCompras, getCompraById, getComprasByProveedor, registrarCompra, getComprasPaginadas, cancelarCompra, devolverCompra, editarPreciosCompra,
   registrarEntrada, getEntradas, getEntradaDetalle, getOrdenesParaRecibir, getPorConfirmar, confirmarEntrada,
+  corregirEntrada, getCorrecciones,
 };

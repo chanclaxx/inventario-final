@@ -291,7 +291,7 @@ function ModalCerrar({ open, orden, onClose }) {
 }
 
 // ─── Ficha de la orden ────────────────────────────────────────────────────────
-function FichaOrden({ ordenId, garantiaActiva, modoCargo, onVolver }) {
+function FichaOrden({ ordenId, garantiaActiva, modoCargo, detalleNodo, onVolver }) {
   const queryClient = useQueryClient();
   const { esAdminNegocio } = useAuth();
   const [recibiendo, setRecibiendo] = useState(false);
@@ -470,7 +470,7 @@ function FichaOrden({ ordenId, garantiaActiva, modoCargo, onVolver }) {
           onClose={() => setRecibiendo(false)} />
       )}
       {editando && (
-        <ModalOrden open orden={orden} garantiaActiva={garantiaActiva}
+        <ModalOrden open orden={orden} garantiaActiva={garantiaActiva} detalleNodo={detalleNodo}
           proveedor={{ id: orden.proveedor_id, nombre: orden.proveedor_nombre }}
           onClose={() => setEditando(false)} />
       )}
@@ -486,7 +486,7 @@ function FichaOrden({ ordenId, garantiaActiva, modoCargo, onVolver }) {
 }
 
 // ─── Pestaña ──────────────────────────────────────────────────────────────────
-export function TabOrdenes({ garantiaActiva, modoCargo }) {
+export function TabOrdenes({ garantiaActiva, modoCargo, detalleNodo }) {
   const { sucursalKey, sucursalLista } = useSucursalKey();
   const [ordenAbierta, setOrdenAbierta] = useState(null);
   const [creando,      setCreando]      = useState(false);
@@ -513,7 +513,7 @@ export function TabOrdenes({ garantiaActiva, modoCargo }) {
 
   if (ordenAbierta) {
     return (
-      <FichaOrden ordenId={ordenAbierta} garantiaActiva={garantiaActiva}
+      <FichaOrden ordenId={ordenAbierta} garantiaActiva={garantiaActiva} detalleNodo={detalleNodo}
         modoCargo={modoCargo} onVolver={() => setOrdenAbierta(null)} />
     );
   }
@@ -602,7 +602,7 @@ export function TabOrdenes({ garantiaActiva, modoCargo }) {
       )}
 
       {creando && proveedorSel && (
-        <ModalOrden open proveedor={proveedorSel} garantiaActiva={garantiaActiva}
+        <ModalOrden open proveedor={proveedorSel} garantiaActiva={garantiaActiva} detalleNodo={detalleNodo}
           onClose={() => { setCreando(false); setProveedorSel(null); }} />
       )}
     </div>

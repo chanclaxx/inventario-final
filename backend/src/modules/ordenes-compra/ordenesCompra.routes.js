@@ -24,6 +24,10 @@ const validarOrden = [
   body('lineas.*.nombre_producto').isString().trim().notEmpty().withMessage('Producto sin nombre'),
   body('lineas.*.precio_estimado').optional({ values: 'null' }).isFloat({ min: 0 }),
   body('lineas.*.garantia_dias').optional({ values: 'null' }).isInt({ min: 0, max: 3650 }),
+  // El nodo pedido (pedido detallado). El service valida que exista, sea de este
+  // producto y sea una HOJA; aquí solo se comprueba la forma.
+  body('lineas.*.variante_id').optional({ values: 'null' }).isInt({ gt: 0 }).withMessage('Variante inválida'),
+  body('lineas.*.atributo_id').optional({ values: 'null' }).isInt({ gt: 0 }).withMessage('Característica inválida'),
   body('numero_factura').optional({ values: 'null' }).isString().trim().isLength({ max: 60 }),
   body('dias_plazo').optional({ values: 'null' }).isInt({ min: 0, max: 365 }),
   body('notas').optional({ values: 'null' }).isString().trim().isLength({ max: 1000 }),
@@ -40,6 +44,8 @@ router.put('/:id', requireNivel('supervisor'),
   [
     body('lineas').optional().isArray({ min: 1 }).withMessage('La orden necesita al menos un producto'),
     body('lineas.*.cantidad_pedida').optional().isInt({ gt: 0 }).withMessage('Cantidad inválida'),
+    body('lineas.*.variante_id').optional({ values: 'null' }).isInt({ gt: 0 }).withMessage('Variante inválida'),
+    body('lineas.*.atributo_id').optional({ values: 'null' }).isInt({ gt: 0 }).withMessage('Característica inválida'),
     body('numero_factura').optional({ values: 'null' }).isString().trim().isLength({ max: 60 }),
     body('dias_plazo').optional({ values: 'null' }).isInt({ min: 0, max: 365 }),
     body('notas').optional({ values: 'null' }).isString().trim().isLength({ max: 1000 }),

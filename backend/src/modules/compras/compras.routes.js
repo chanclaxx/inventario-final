@@ -18,6 +18,12 @@ const validarCompra = [
   body('orden_compra_id').optional({ values: 'null' }).isInt({ gt: 0 }).withMessage('Orden de compra inválida'),
   body('lineas.*.orden_linea_id').optional({ values: 'null' }).isInt({ gt: 0 }).withMessage('Línea de orden inválida'),
   body('lineas.*.garantia_dias').optional({ values: 'null' }).isInt({ min: 0, max: 3650 }).withMessage('Garantía inválida (0 a 3650 días)'),
+  // ── Las dos confirmaciones de la conciliación ────────────────────────────
+  // No son estado: no se guardan en ninguna columna. Sin ellas el service
+  // responde 409 y no escribe nada, así que el solo hecho de que la fila exista
+  // ya prueba que alguien dijo que sí. Por eso tampoco necesitan default.
+  body('lineas.*.sustituye').optional({ values: 'null' }).isBoolean().withMessage('Confirmación de sustitución inválida'),
+  body('lineas.*.excedente_ok').optional({ values: 'null' }).isBoolean().withMessage('Confirmación de excedente inválida'),
   // Compromiso de pago de una compra suelta: la factura del proveedor vence
   // aunque nadie haya creado una orden.
   body('dias_plazo').optional({ values: 'null' }).isInt({ min: 0, max: 365 }).withMessage('Plazo inválido (0 a 365 días)'),
@@ -43,6 +49,13 @@ const validarEntrada = [
   body('lineas.*.cantidad').isInt({ gt: 0 }).withMessage('Cantidad invalida'),
   body('lineas.*.producto_id').isInt({ gt: 0 }).withMessage('Producto invalido'),
   body('orden_compra_id').optional({ values: 'null' }).isInt({ gt: 0 }).withMessage('Orden invalida'),
+  body('lineas.*.orden_linea_id').optional({ values: 'null' }).isInt({ gt: 0 }).withMessage('Linea de orden invalida'),
+  body('lineas.*.variante_id').optional({ values: 'null' }).isInt({ gt: 0 }).withMessage('Variante invalida'),
+  body('lineas.*.atributo_id').optional({ values: 'null' }).isInt({ gt: 0 }).withMessage('Caracteristica invalida'),
+  // El bodeguero confirma lo mismo que administracion: que acepta la variante
+  // distinta y que se queda con las de mas. Recibir es la misma operacion.
+  body('lineas.*.sustituye').optional({ values: 'null' }).isBoolean(),
+  body('lineas.*.excedente_ok').optional({ values: 'null' }).isBoolean(),
   body('notas').optional({ values: 'null' }).isString().trim().isLength({ max: 500 }),
 ];
 
@@ -52,6 +65,37 @@ router.get ('/entradas/ordenes', requireModulo('inventario'), requireNivel('supe
 router.get ('/entradas/:id', requireModulo('inventario'), requireNivel('supervisor'), ctrl.getEntradaDetalle);
 router.post('/entradas',         requireModulo('inventario'), requireNivel('supervisor'),
   validarEntrada, validate, ctrl.registrarEntrada);
+
+// ── Corregir una entrada sin rehacerla ──────────────────────────────────────
+// ANTES de `/:id`, como todo lo de aqui: declarada despues, Express la
+// resolveria por `/:id/...` y el bodeguero moriria en el permiso de ver compras.
+//
+// Es del BODEGUERO (supervisor), no de administracion, y esa es la decision de
+// diseno: es su trabajo y es su error, y mientras la entrada siga SIN CONFIRMAR
+// no hay precios reales ni deuda cerrada que tocar — solo stock provisional.
+// Exigirle que espere a un admin para arreglar un dedazo es justo la friccion
+// que hace que la gente cancele la entrada y la reteclee entera.
+//
+// El service comprueba `factura_confirmada = false` y `es_entrada = true`: las
+// dos condiciones que hacen esto seguro. Cada cambio queda en la bitacora con
+// quien, cuando, el antes y el despues.
+const validarCorreccion = [
+  body('operaciones').isArray({ min: 1 }).withMessage('No indicaste ninguna correccion'),
+  body('operaciones.*.linea_id').optional({ values: 'null' }).isInt({ gt: 0 }).withMessage('Linea invalida'),
+  body('operaciones.*.cantidad').optional({ values: 'null' }).isInt({ gt: 0 }).withMessage('Cantidad invalida'),
+  body('operaciones.*.variante_id').optional({ values: 'null' }).isInt({ gt: 0 }).withMessage('Variante invalida'),
+  body('operaciones.*.atributo_id').optional({ values: 'null' }).isInt({ gt: 0 }).withMessage('Caracteristica invalida'),
+  body('operaciones.*.producto_id').optional({ values: 'null' }).isInt({ gt: 0 }).withMessage('Producto invalido'),
+  body('operaciones.*.imei').optional({ values: 'null' }).isString().trim().isLength({ max: 60 }),
+  body('operaciones.*.quitar').optional({ values: 'null' }).isBoolean(),
+  body('operaciones.*.agregar').optional({ values: 'null' }).isBoolean(),
+  body('motivo').optional({ values: 'null' }).isString().trim().isLength({ max: 300 }),
+];
+
+router.get  ('/entradas/:id/correcciones', requireModulo('inventario'), requireNivel('supervisor'),
+  ctrl.getCorrecciones);
+router.patch('/entradas/:id/corregir',     requireModulo('inventario'), requireNivel('supervisor'),
+  validarCorreccion, validate, ctrl.corregirEntrada);
 
 // La bandeja y la confirmación SÍ son de administración: ponen proveedor y
 // precios, y la corrección en cascada toca costo, total y deuda.

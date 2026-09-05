@@ -2382,6 +2382,11 @@ export default function ProveedoresPage() {
   // 'recepcion' (cada entrega su deuda) o 'orden' (la deuda nace con la factura
   // del proveedor). Cambia qué se puede hacer sin factura registrada.
   const modoCargo      = configData?.ordenes_compra_modo_cargo === 'orden' ? 'orden' : 'recepcion';
+  // Pedir la VARIANTE en vez del producto ("50 de 25W y 50 de 20W", no "100
+  // cargadores"). Exige las variantes activas por la misma razón que el backend:
+  // sin árbol no hay nodo que pedir y el selector no podría seleccionar nada.
+  const detalleNodo    = configData?.ordenes_compra_detalle_nodo === '1'
+                      && configData?.variantes_activo            === '1';
 
   const tabs = [
     { id: 'proveedores', label: 'Proveedores', Icn: Truck        },
@@ -2422,7 +2427,7 @@ export default function ProveedoresPage() {
         <TabProveedores sucursalKey={sucursalKey} sucursalLista={sucursalLista} />
       )}
       {tabActivo === 'retomas'    && <TabRetomas />}
-      {tabActivo === 'ordenes'    && <TabOrdenes garantiaActiva={garantiaActiva} modoCargo={modoCargo} />}
+      {tabActivo === 'ordenes'    && <TabOrdenes garantiaActiva={garantiaActiva} modoCargo={modoCargo} detalleNodo={detalleNodo} />}
       {tabActivo === 'compras'    && <TabCompras />}
       {tabActivo === 'busqueda'   && <TabBusquedaCompras />}
     </div>

@@ -134,6 +134,11 @@ export function ComprasConfig({ valores, set }) {
   const garantia    = valores.garantia_proveedor_activa === '1';
   const codigos     = valores.codigos_proveedor_activos === '1';
   const codigoInterno = valores.codigo_producto_activo  === '1';
+  const detalleNodo   = valores.ordenes_compra_detalle_nodo === '1';
+  // Prerrequisito, igual que los códigos del proveedor exigen el código interno:
+  // sin árbol de variantes no hay talla ni color que pedir, y el selector no
+  // podría seleccionar nada. El backend lo vuelve a comprobar al guardar.
+  const variantes     = valores.variantes_activo        === '1';
 
   return (
     <div className="flex flex-col gap-6">
@@ -191,6 +196,51 @@ export function ComprasConfig({ valores, set }) {
               valor={valores.ordenes_compra_dias_aviso ?? ''}
               onChange={(v) => set('ordenes_compra_dias_aviso', v)}
             />
+
+            {/* ── Pedir la variante ──────────────────────────────────────── */}
+            <div className="flex flex-col gap-3">
+              <Toggle
+                label="Pedir la variante, no solo el producto"
+                description="«50 de 25W y 50 de 20W» en vez de «100 cargadores»"
+                enabled={detalleNodo}
+                disabled={!variantes}
+                onChange={(val) => set('ordenes_compra_detalle_nodo', val ? '1' : '0')}
+              />
+
+              {!variantes && (
+                <div className="bg-gray-50 rounded-xl px-4 py-3 flex items-start gap-2">
+                  <Info size={14} className="text-gray-400 flex-shrink-0 mt-0.5" />
+                  <p className="text-xs text-gray-500">
+                    Para esto necesitas primero las <strong>variantes de producto</strong>
+                    {' '}activadas: sin ellas no hay talla ni color que pedir.
+                  </p>
+                </div>
+              )}
+
+              {detalleNodo && (
+                <div className="bg-purple-50 rounded-xl p-4 flex flex-col gap-1.5">
+                  <p className="text-xs font-medium text-purple-800">Qué cambia al recibir</p>
+                  <p className="text-xs text-purple-700">
+                    • Cada línea del pedido puede decir <strong>qué variante</strong> quieres.
+                    Puedes seguir pidiendo «el producto completo» donde de verdad da igual.
+                  </p>
+                  <p className="text-xs text-purple-700">
+                    • Si el proveedor manda <strong>otra variante</strong>, hay que aceptarlo a
+                    propósito y queda anotado como novedad suya. Antes entraba en silencio y
+                    el pedido se marcaba cumplido sin que nadie supiera.
+                  </p>
+                  <p className="text-xs text-purple-700">
+                    • Si llegan <strong>de más</strong>, decides ahí mismo: te quedas con ellas
+                    o se las devuelves. Antes el sistema simplemente no dejaba recibirlas.
+                  </p>
+                  <p className="text-xs text-purple-700">
+                    • Si el bodeguero se equivoca, <strong>corrige la entrada</strong> sin
+                    volver a capturarla — mientras no la hayas confirmado con la factura.
+                    Cada cambio queda registrado con su nombre.
+                  </p>
+                </div>
+              )}
+            </div>
 
             <div className="bg-blue-50 rounded-xl p-4 flex flex-col gap-1.5">
               <p className="text-xs font-medium text-blue-800">Cómo funciona</p>

@@ -237,6 +237,25 @@ const saveConfig = async (negocioId, datos) => {
     }
   }
 
+  // El pedido detallado pide la VARIANTE en vez del producto ("50 de 25W y 50
+  // de 20W", no "100 cargadores"). Sin el árbol de variantes no hay nodo que
+  // pedir y la feature resolvería a nada: sería un selector que no puede
+  // seleccionar. Mismo prerrequisito que los códigos del proveedor, y por la
+  // misma razón — la capacidad no puede existir sin aquello sobre lo que opera.
+  if (datosProcesados.ordenes_compra_detalle_nodo === '1') {
+    const variantes = datosProcesados.variantes_activo !== undefined
+      ? datosProcesados.variantes_activo
+      : (await repo.getMap(negocioId)).variantes_activo;
+
+    if (variantes !== '1') {
+      throw {
+        status: 400,
+        message: 'Para pedir por variante primero tienes que activar las variantes de producto: '
+          + 'sin ellas no hay talla ni color que pedir, solo el producto completo.',
+      };
+    }
+  }
+
   // ── El candado de costos y las tarifas porcentuales no pueden convivir ─────
   //
   // Una tarifa calcula el precio de venta DESDE el costo, y ese cálculo corre en

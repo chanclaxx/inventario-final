@@ -177,6 +177,96 @@ Three roles exist: `admin_negocio`, `supervisor`, `vendedor`. Role determines wh
 > identidad del costo sobre las dos funciones REALES en 480 combinaciones) y
 > `34-contratos-frontend`, que revisa estáticamente las pantallas.
 
+> **El pedido baja a la VARIANTE — y lo que llega se concilia contra ella**
+> (`20260905_pedido_detallado.sql`, `utils/nodoPedido.util.js`,
+> `compras/correccionEntrada.js`): una orden solo podía decir «100 cargadores»,
+> nunca «50 de 25W y 50 de 20W». El detalle lo decidía el bodeguero al abrir la
+> caja, así que **el pedido no tenía contra qué compararse** y de ahí salían tres
+> mentiras silenciosas: si el proveedor mandaba otra variante, la recepción la
+> atribuía a la línea pedida y la orden se marcaba cumplida sin que nadie se
+> enterara; si llegaban de más, `_validarRecepcionContraOrden` respondía 400
+> mandando a «recibirlas como compra aparte» —mientras `VistaEntrada` le prometía
+> al bodeguero que el sobrante «queda anotado en la entrada», o sea que una de
+> las dos mentía—; y si el bodeguero se equivocaba de talla, su única salida era
+> cancelar la entrada COMPLETA y reteclearla con sus treinta IMEI.
+>
+> **No hay modelo nuevo: había un cable suelto.** `lineas_orden_compra.variante_id`
+> y `.atributo_id` existen desde 20260806 y los leían cuatro consultas; lo que
+> nunca existió fue un frontend que los escribiera. `ModalOrden` ni siquiera
+> podía: su clave de deduplicación era `tipo-producto_id`, así que **el mismo
+> producto no cabía dos veces en una orden**. La migración no agrega una sola
+> columna a `lineas_orden_compra` ni a `lineas_compra`.
+>
+> **Las dos nociones nuevas se DERIVAN**, como el avance de la orden y la deuda
+> de la red interna: `SUSTITUCIÓN` = la línea pedida trae nodo y la recibida trae
+> otro; `EXCESO` = `recibida − pedida` cuando es positivo (y `AVANCE_POR_ORDEN` ya
+> lo acota con `LEAST`, así que la orden no pasa del 100 %). Guardarlas dejaría un
+> contador que cancelar o devolver jamás iría a corregir. **Que el usuario lo haya
+> confirmado tampoco necesita columna**: sin `sustituye` / `excedente_ok` en la
+> petición el backend responde **409**, así que la sola existencia de la fila ya
+> prueba que alguien dijo que sí.
+> Lo que sí se escribe es la **novedad** — en `novedades_proveedor`, que ya
+> existía, ya es append-only y ya cuelga del **PROVEEDOR** y no de la orden: «este
+> proveedor siempre me cambia las características» es la pregunta que importa, y
+> con la bitácora dentro de la orden esa historia quedaría partida en pedazos.
+> Las etiquetas van **CONGELADAS** (`pedido_etiqueta`, `recibido_etiqueta`):
+> con un JOIN, renombrar la talla reescribiría el pasado.
+>
+> **La sustitución CUMPLE la línea pedida** (el proveedor respondió) y queda
+> marcada. Dejarla pendiente obligaría a cerrar a mano una orden que ya se
+> atendió; si de verdad todavía hace falta el 25W, se vuelve a pedir.
+>
+> **`ordenes_compra_detalle_nodo` es opt-in y exige `variantes_activo`** —el mismo
+> prerrequisito que los códigos del proveedor con el código interno, y por la
+> misma razón: sin árbol no hay nodo que pedir. Apagado, **todo se comporta
+> exactamente como hoy**, incluida la recepción repartida por variante contra una
+> orden pedida al producto, que NO es una sustitución (la sección 1 de la prueba
+> es la que protege a los 28 negocios). Enciende la CAPACIDAD, no la obliga: una
+> misma orden mezcla líneas al nodo y líneas al producto, porque el nodo en NULL
+> ya significa «el producto en general».
+> Se pide la **HOJA**, igual que en el despacho de la red interna y en las
+> etiquetas: un contenedor con variantes debajo se rechaza (`NODO_CONTENEDOR`)
+> porque obligaría a elegir a mano al recibir, que es el trabajo que esto quita.
+> Un **serial no baja a nodo**: se pide por modelo y cantidad, porque el detalle
+> de cada unidad solo se conoce al abrir la caja.
+>
+> **CORREGIR una entrada sin rehacerla** (`PATCH /compras/entradas/:id/corregir`):
+> la frontera es **`factura_confirmada = false`**, que ya existía y es exactamente
+> el límite correcto — hasta ahí lo que hay es stock provisional, no precios
+> reales ni deuda cerrada. Después, el camino sigue siendo la devolución o
+> `editarPreciosCompra`, cada uno con su rastro en la cuenta del proveedor.
+> Es del **BODEGUERO** (supervisor): es su trabajo y es su error, y exigirle que
+> espere a un admin para arreglar un dedazo es la fricción que hace que la gente
+> deje el inventario mal.
+> Cada operación es **reversa + reaplicación en UNA transacción**, nunca un
+> `UPDATE` a pelo sobre `lineas_compra`: eso cambiaría el papel y dejaría el stock
+> donde estaba, que es la forma más silenciosa de descuadrar un inventario.
+> **`revertirCostoPromedio` (en `costoPromedio.util`) es la clave de que sea
+> seguro**: una entrada se valoriza al último costo conocido del nodo, que es
+> NEUTRO, así que con `P == C` la fórmula devuelve `C` y **no toca nada**; solo
+> hace trabajo real cuando la entrada vino de una orden con `precio_estimado`, y
+> ahí devuelve la cifra EXACTA. Cuando no puede reconstruirla (menos stock del que
+> saca, o un resultado negativo) devuelve `null` y deja el promedio: un error
+> acotado es mejor que escribir basura en el costo, que contaminaría la utilidad
+> de cada venta futura.
+> **La bitácora (`correcciones_entrada`) va DENTRO de la transacción**, al revés
+> que `movimientos_ubicacion`, y a propósito: allá el log cuelga de la operación
+> diaria de un módulo en producción y por eso la bandera se consulta ANTES de
+> insertar; **aquí la operación nueva es la corrección entera**, y una corrección
+> sin rastro es peor que no poder corregir. Sin la tabla, `hayCorreccionesEntrada()`
+> apaga el endpoint (503) y recibir sigue igual. Todo va congelado menos
+> `usuario_id`, que sí se une — quién es una persona es un dato vivo.
+> **Una línea ya devuelta no se corrige aquí**: tiene su nota crédito y pisarla
+> contaría la baja dos veces. **Quitar todas las líneas manda a cancelar**, que es
+> lo que de verdad se está haciendo y tiene su propio endpoint y su estado.
+> Prueba: `38-pedido-detallado` (104 verificaciones; la sección 1 es la que hay
+> que mirar primero —nada cambia con la feature apagada—, la 9 comprueba que el
+> costo promedio vuelve EXACTO al corregir un caso no neutro, y la 11 revisa
+> estáticamente que las pantallas no ofrezcan nada que el backend rechace).
+> De paso: el fixture de `19-ordenes-compra` no tenía `factura_confirmada` ni
+> `es_entrada` desde 20260828 y la suite reventaba antes de su primera
+> verificación; con esas dos columnas vuelve a correr entera (118).
+
 > **La lista de módulos está DUPLICADA a mano** (`backend/src/config/modulos.js`
 > y `MODULOS`/`PERMISOS_BASE` en `UsuariosConfig.jsx`): el frontend no puede
 > importar del backend y las dos copias se separaron. Al frontend le faltaba

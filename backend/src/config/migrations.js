@@ -306,6 +306,77 @@ const aplicarMigraciones = async (client) => {
       ON lineas_remision (pedido_linea_id) WHERE pedido_linea_id IS NOT NULL;
   `);
 
+  // Pedido detallado: pedir la VARIANTE y conciliarla al recibir — ver
+  // migrations/20260905_pedido_detallado.sql (ese archivo lleva el diseño
+  // completo; esto es la copia que corre de verdad en producción).
+  //
+  // NO crea una sola columna en lineas_orden_compra ni en lineas_compra: el
+  // nodo pedido ya existe desde 20260806 y ningún frontend lo escribía. La
+  // sustitución y el exceso se DERIVAN, como el avance de la orden.
+  //
+  // Bloque PROPIO: si esto fallara, las órdenes de compra —que ya operan— no
+  // pueden apagarse enteras por una tabla que todavía no usa nadie. Misma
+  // decisión que con movimientos_ubicacion y con los pedidos internos.
+  //
+  // Sin backticks ni interpolaciones dentro del template literal.
+  await migrar(client, 'Pedido detallado y corrección de entradas', `
+    DO $$
+    BEGIN
+      IF to_regclass('public.novedades_proveedor') IS NOT NULL THEN
+        ALTER TABLE novedades_proveedor DROP CONSTRAINT IF EXISTS novedades_proveedor_tipo_chk;
+        ALTER TABLE novedades_proveedor ADD  CONSTRAINT novedades_proveedor_tipo_chk
+          CHECK (tipo IN ('faltante', 'demora', 'garantia', 'acuerdo', 'cierre', 'nota',
+                          'sustitucion', 'exceso'));
+      END IF;
+    END $$;
+
+    -- Las etiquetas van CONGELADAS, no unidas: renombrar la talla manana no
+    -- puede reescribir lo que el proveedor mando ayer.
+    ALTER TABLE IF EXISTS novedades_proveedor
+      ADD COLUMN IF NOT EXISTS orden_linea_id BIGINT
+        REFERENCES lineas_orden_compra(id) ON DELETE SET NULL;
+    ALTER TABLE IF EXISTS novedades_proveedor
+      ADD COLUMN IF NOT EXISTS pedido_etiqueta   TEXT;
+    ALTER TABLE IF EXISTS novedades_proveedor
+      ADD COLUMN IF NOT EXISTS recibido_etiqueta TEXT;
+    CREATE INDEX IF NOT EXISTS idx_novedades_proveedor_orden_linea
+      ON novedades_proveedor (orden_linea_id) WHERE orden_linea_id IS NOT NULL;
+
+    -- La correccion y su bitacora son la MISMA transaccion: aqui el log no es
+    -- un extra que pueda fallar aparte, es la mitad de la operacion. Ninguna
+    -- recepcion normal toca esta tabla.
+    CREATE TABLE IF NOT EXISTS correcciones_entrada (
+      id               BIGSERIAL  PRIMARY KEY,
+      negocio_id       INTEGER    NOT NULL REFERENCES negocios(id) ON DELETE RESTRICT,
+      compra_id        INTEGER    NOT NULL,
+      -- NULL-able: una correccion que ELIMINA la linea la deja sin id al que
+      -- apuntar. La bitacora tiene que sobrevivir a lo que describe.
+      linea_id         BIGINT,
+      accion           TEXT       NOT NULL,
+      producto_id      INTEGER,
+      nombre_producto  TEXT,
+      antes_cantidad   INTEGER,
+      despues_cantidad INTEGER,
+      antes_variante_id   INTEGER,
+      antes_atributo_id   INTEGER,
+      despues_variante_id INTEGER,
+      despues_atributo_id INTEGER,
+      antes_etiqueta   TEXT,
+      despues_etiqueta TEXT,
+      antes_imei       TEXT,
+      despues_imei     TEXT,
+      motivo           TEXT,
+      usuario_id       INTEGER,
+      fecha            TIMESTAMP  NOT NULL DEFAULT NOW(),
+      CONSTRAINT correcciones_entrada_accion_chk
+        CHECK (accion IN ('cantidad', 'nodo', 'imei', 'agregar', 'quitar'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_correcciones_entrada_compra
+      ON correcciones_entrada (compra_id, fecha DESC);
+    CREATE INDEX IF NOT EXISTS idx_correcciones_entrada_negocio
+      ON correcciones_entrada (negocio_id, fecha DESC);
+  `);
+
   // Ubicación espacial de productos — ver migrations/20260730_ubicacion_producto.sql
   //
   // 100% aditiva e idempotente. Columnas nullable: un negocio sin la feature no

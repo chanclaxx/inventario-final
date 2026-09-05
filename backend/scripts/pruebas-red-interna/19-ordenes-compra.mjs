@@ -62,6 +62,11 @@ await db.exec(`
   ALTER TABLE compras ADD COLUMN IF NOT EXISTS registrar_en_caja BOOLEAN DEFAULT TRUE;
   ALTER TABLE compras ADD COLUMN IF NOT EXISTS metodo TEXT;
   ALTER TABLE compras ADD COLUMN IF NOT EXISTS estado TEXT DEFAULT 'Activa';
+  -- Las trajo 20260828 (entradas de bodega) y el fixture no se actualizo:
+  -- registrarCompra las nombra en su INSERT desde entonces, asi que sin ellas
+  -- esta suite reventaba antes de la primera verificacion.
+  ALTER TABLE compras ADD COLUMN IF NOT EXISTS factura_confirmada BOOLEAN DEFAULT TRUE;
+  ALTER TABLE compras ADD COLUMN IF NOT EXISTS es_entrada BOOLEAN DEFAULT FALSE;
 `);
 
 // La migración real, tal cual se aplica en producción.

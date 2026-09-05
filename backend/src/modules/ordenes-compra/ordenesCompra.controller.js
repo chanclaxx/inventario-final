@@ -49,6 +49,10 @@ const crearOrden = async (req, res, next) => {
       negocio_id: req.user.negocio_id,
       sucursal_id,
       usuario_id: req.user.id,
+      // DESPUÉS del spread, nunca antes: `...req.body` va primero y un cliente
+      // que mandara `detalleNodo: true` se saltaría el interruptor del negocio.
+      // Sale del middleware, que ya lo resolvió contra config_negocio.
+      detalleNodo: req.configOrdenes?.detalle_nodo === true,
     });
 
     audit.registrar(req.user.negocio_id, req.user.id, 'Orden de compra creada', 'ordenes_compra', data.id, {
@@ -66,6 +70,7 @@ const editarOrden = async (req, res, next) => {
     const data = await service.editar(req.user.negocio_id, req.params.id, {
       ...req.body,
       usuario_id: req.user.id,
+      detalleNodo: req.configOrdenes?.detalle_nodo === true,
     });
     res.json({ ok: true, data, message: 'Orden actualizada' });
   } catch (err) { next(err); }

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  PackagePlus, Check, Clock, ClipboardList, FileCheck2, ShieldCheck,
+  PackagePlus, Check, Clock, ClipboardList, FileCheck2, ShieldCheck, Wrench,
 } from 'lucide-react';
 import {
   getEntradas, getOrdenesParaRecibir, getEntradaDetalle,
@@ -9,6 +9,7 @@ import {
 } from '../../api/entradas.api';
 import { ChipGarantia } from '../proveedores/indicadoresOrden';
 import { VistaEntrada } from './VistaEntrada';
+import { ModalCorregirEntrada } from './ModalCorregirEntrada';
 import { getCompraById }  from '../../api/compras.api';
 import { getProveedores } from '../../api/proveedores.api';
 import { Modal }          from '../../components/ui/Modal';
@@ -449,6 +450,10 @@ export default function EntradasPage() {
   const [busca, setBusca] = useState('');
   const [confirmando, setConfirmando] = useState(null);
   const [detalle,     setDetalle]     = useState(null);
+  // La entrada que se está corrigiendo. Se guarda el DETALLE completo, no el id:
+  // corregir necesita las líneas con sus nodos, y pedirlas otra vez dejaría el
+  // modal en blanco mientras carga algo que la lista ya podría tener.
+  const [corrigiendo, setCorrigiendo] = useState(null);
   const { sucursalKey, sucursalLista } = useSucursalKey();
   const queryClient = useQueryClient();
   const { esAdminNegocio } = useAuth();
@@ -473,6 +478,19 @@ export default function EntradasPage() {
     queryFn:  () => getEntradasPorConfirmar().then((r) => r.data.data || []),
     enabled:  esAdmin && sucursalLista,
   });
+
+  // El detalle se pide al abrir y no con la lista: son líneas con sus nodos, y
+  // traerlas para las 30 entradas cuando casi ninguna se va a corregir sería
+  // pagar por adelantado algo que casi nunca se usa.
+  const abrirCorreccion = async (id) => {
+    try {
+      const { data } = await getEntradaDetalle(id);
+      setCorrigiendo(data.data);
+    } catch {
+      setAviso('No se pudo abrir la entrada para corregirla');
+      setTimeout(() => setAviso(''), 4000);
+    }
+  };
 
   // Filtro en memoria: la lista son las ultimas 30, no vale la pena ir al
   // servidor por cada tecla.
@@ -570,6 +588,18 @@ export default function EntradasPage() {
 
       {detalle && (
         <ModalDetalleEntrada entradaId={detalle} onCerrar={() => setDetalle(null)} />
+      )}
+
+      {corrigiendo && (
+        <ModalCorregirEntrada
+          entrada={corrigiendo}
+          onClose={() => setCorrigiendo(null)}
+          onListo={(msg) => {
+            setCorrigiendo(null);
+            setAviso(msg);
+            setTimeout(() => setAviso(''), 4000);
+          }}
+        />
       )}
 
       {confirmando && (
@@ -677,6 +707,18 @@ export default function EntradasPage() {
                 : <span className="flex items-center gap-1 text-xs text-amber-600">
                     <Clock size={11} /> por confirmar
                   </span>}
+              {/* Corregir solo aparece mientras la entrada siga SIN CONFIRMAR y
+                  sin cancelar: es la misma frontera que aplica el backend, y una
+                  pantalla que ofrece un botón que el servidor va a rechazar es
+                  peor que no ofrecerlo. */}
+              {!e.factura_confirmada && e.estado !== 'Cancelada' && (
+                <button
+                  onClick={(ev) => { ev.stopPropagation(); abrirCorreccion(e.id); }}
+                  className="flex items-center gap-1 text-xs font-medium text-blue-600
+                             hover:text-blue-700 transition-colors">
+                  <Wrench size={11} /> Corregir
+                </button>
+              )}
               {/* La garantia del proveedor, a la vista. Es la pregunta con la
                   que llega el cliente, y hasta ahora habia que abrir la ficha
                   de cada equipo para responderla. */}

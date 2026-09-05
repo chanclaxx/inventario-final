@@ -1,6 +1,9 @@
 import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { PackagePlus, ChevronLeft, ChevronRight, Trash2, Check, AlertTriangle } from 'lucide-react';
+import {
+  PackagePlus, ChevronLeft, ChevronRight, Trash2, Check, AlertTriangle,
+  Layers, Replace,
+} from 'lucide-react';
 import { registrarEntrada } from '../../api/entradas.api';
 import { getProductosCantidad, getProductosSerial } from '../../api/productos.api';
 import { getArbol } from '../../api/variantesProductoApi';
@@ -41,9 +44,30 @@ import {
 //   mueve en la HOJA (variante > atributo > producto) y el producto se
 //   recalcula; escribirlo arriba descuadra el árbol entero. "Llegaron 5
 //   brasieres" no es una entrada válida si el negocio vende por tallas.
+//
+// ── Cuando el pedido dijo QUÉ variante ──────────────────────────────────────
+// Si la orden bajó al nodo, la línea llega precargada con esa variante y ya no
+// hay nada que repartir: la pregunta se reduce a "¿llegó eso, y cuánto?".
+//
+// Y los dos desenlaces raros dejan de ser callejones sin salida:
+//
+//   · LLEGÓ OTRA → se elige la que de verdad llegó. La línea sigue respondiendo
+//     al mismo pedido y queda anotada como novedad del proveedor.
+//   · LLEGARON DE MÁS → se marca que se reciben. Antes esta pantalla prometía
+//     que el sobrante "queda anotado en la entrada" y el backend respondía 400:
+//     el bodeguero veía un mensaje tranquilizador y después un error.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const norm = (r) => (Array.isArray(r) ? r : (Array.isArray(r?.items) ? r.items : []));
+
+// El nodo que pidió la orden, ya rotulado. `getOrdenesParaRecibir` devuelve
+// variante_id/atributo_id desde 20260806; lo que faltaba era que alguien los
+// escribiera al crear la orden y que esta pantalla los leyera.
+const nodoPedido = (l) => {
+  if (l.variante_id) return { key: `v-${l.variante_id}`, variante_id: l.variante_id, atributo_id: null, label: l.variante_valor };
+  if (l.atributo_id) return { key: `a-${l.atributo_id}`, variante_id: null, atributo_id: l.atributo_id, label: l.atributo_valor };
+  return null;
+};
 
 // Tope de campos de IMEI por línea. No es una regla de negocio: cada unidad
 // pinta un input, y un dedazo en el campo de cantidad congelaría la pantalla.
@@ -69,14 +93,19 @@ function FilaLinea({
   const tieneArbol = hojas.length > 0;
 
   // Unidades de la línea: con árbol es la suma de lo repartido por variante.
+  // Con un nodo pedido no se reparte nada: ya se sabe QUE se pidio, asi que la
+  // cantidad sale de una sola casilla igual que en un producto sin variantes.
+  const pedido = nodoPedido(linea);
+
   const unidades = esSerial
     ? linea.items.filter((i) => extraerImei(i).trim()).length
-    : tieneArbol
+    : (tieneArbol && !pedido)
       ? Object.values(linea.nodos || {}).reduce((n, d) => n + (Number(d?.cantidad) || 0), 0)
       : Number(linea.cantidad) || 0;
 
   const difiere = pedida != null && unidades !== pedida;
   const faltan  = pedida != null && unidades < pedida;
+  const sobran  = pedida != null && unidades > pedida;
 
   // ── Cambiar la cantidad no puede borrar lo ya escrito ────────────────────
   // Antes la casilla reconstruía el arreglo con la longitud nueva, así que
@@ -112,12 +141,24 @@ function FilaLinea({
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1 min-w-0">
           <p className="text-sm font-medium text-gray-800 break-words">{linea.nombre_producto}</p>
+          {/* La variante que pidio la orden. Va en su propia linea y en morado
+              porque es lo que hay que COMPARAR contra la caja: enterrarla entre
+              los badges la volveria decorado. */}
+          {pedido && (
+            <p className="text-xs text-purple-600 mt-0.5 flex items-center gap-1">
+              <Layers size={11} className="flex-shrink-0" />
+              {linea.nodoSust
+                ? <>llegó <span className="font-medium">{linea.nodoSust.label}</span>
+                    <span className="text-purple-400">· pediste {pedido.label}</span></>
+                : <>pediste <span className="font-medium">{pedido.label}</span></>}
+            </p>
+          )}
           <div className="flex items-center gap-2 mt-0.5 flex-wrap">
             {pedida != null
               ? <span className="text-xs text-gray-400">Pedido: {pedida}</span>
               : <span className="text-xs text-gray-400">no venía en el pedido</span>}
             {esSerial && <Badge variant="blue">por IMEI</Badge>}
-            {tieneArbol && <Badge variant="purple">por variante</Badge>}
+            {tieneArbol && !pedido && <Badge variant="purple">por variante</Badge>}
           </div>
         </div>
         <button
@@ -178,7 +219,7 @@ function FilaLinea({
 
       {/* ── Cantidad con variantes: hay que decir cuál llegó ───────────── */}
       {!esSerial && variantesActivo && cargandoArbol && <Spinner className="py-3 scale-75" />}
-      {!esSerial && tieneArbol && !cargandoArbol && (
+      {!esSerial && tieneArbol && !pedido && !cargandoArbol && (
         <MultiSelectorCompra
           hojas={hojas}
           nodosData={linea.nodos || {}}
@@ -189,8 +230,8 @@ function FilaLinea({
         />
       )}
 
-      {/* ── Cantidad sin variantes: una sola casilla ───────────────────── */}
-      {!esSerial && !tieneArbol && !cargandoArbol && (
+      {/* ── Una sola casilla: sin variantes, o con la variante ya pedida ─ */}
+      {!esSerial && (!tieneArbol || pedido) && !cargandoArbol && (
         <div className="flex items-center gap-2">
           <label className="text-xs text-gray-500">Llegó</label>
           <input
@@ -204,13 +245,64 @@ function FilaLinea({
         </div>
       )}
 
-      {/* El faltante y el sobrante NO son otro flujo: poner una cantidad
-          distinta a la pedida ya los reporta, y viajan solos en la entrada. */}
-      {difiere && (
-        <p className={`text-xs font-medium ${faltan ? 'text-amber-600' : 'text-purple-600'}`}>
-          {faltan ? `faltan ${pedida - unidades}` : `sobran ${unidades - pedida}`}
-          <span className="text-gray-400 font-normal"> · queda anotado en la entrada</span>
+      {/* ── Llegó otra variante ────────────────────────────────────────── */}
+      {pedido && tieneArbol && !cargandoArbol && (
+        <div className="flex flex-col gap-1.5">
+          {!linea.eligiendoNodo ? (
+            <button type="button"
+              onClick={() => onCambiar(linea.key, { eligiendoNodo: true })}
+              className="flex items-center gap-1.5 text-xs font-medium text-purple-600
+                         hover:text-purple-700 transition-colors w-fit">
+              <Replace size={12} /> {linea.nodoSust ? 'Cambiar la que llegó' : 'Llegó otra variante'}
+            </button>
+          ) : (
+            <div className="border border-purple-200 bg-purple-50/40 rounded-lg p-2 flex flex-col gap-1">
+              <p className="text-xs text-purple-700">¿Cuál llegó de verdad?</p>
+              <div className="max-h-36 overflow-y-auto flex flex-col gap-0.5">
+                {hojas.map((h) => {
+                  const esPedida = h.key === pedido.key;
+                  return (
+                    <button key={h.key} type="button"
+                      onClick={() => onCambiar(linea.key, {
+                        nodoSust: esPedida ? null : h, eligiendoNodo: false,
+                      })}
+                      className="flex items-center justify-between gap-2 px-2 py-1.5 rounded-md
+                                 text-left text-xs text-gray-700 hover:bg-white transition-colors">
+                      <span className="truncate">
+                        {h.labelPadre ? `${h.labelPadre} · ` : ''}{h.label}
+                      </span>
+                      {esPedida && <span className="text-gray-400 flex-shrink-0">la que pediste</span>}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── El faltante se registra solo; el SOBRANTE hay que aceptarlo ──
+          Antes esta pantalla decía que el sobrante "queda anotado en la entrada"
+          y el backend respondía 400 mandando a "recibirlas como compra aparte":
+          el bodeguero leía un mensaje tranquilizador y después un error. */}
+      {difiere && faltan && (
+        <p className="text-xs font-medium text-amber-600">
+          faltan {pedida - unidades}
+          <span className="text-gray-400 font-normal"> · queda pendiente en el pedido</span>
         </p>
+      )}
+      {sobran && (
+        <label className="flex items-start gap-2 bg-purple-50 rounded-lg px-2.5 py-2 cursor-pointer">
+          <input type="checkbox" checked={Boolean(linea.excedenteOk)}
+            onChange={(e) => onCambiar(linea.key, { excedenteOk: e.target.checked })}
+            className="w-4 h-4 mt-0.5 rounded accent-purple-600 flex-shrink-0" />
+          <span className="text-xs text-purple-800">
+            Llegaron {unidades - pedida} de más. Me quedo con ellas.
+            <span className="block text-purple-600 mt-0.5">
+              Si se las vas a devolver, baja el número a {pedida}.
+            </span>
+          </span>
+        </label>
       )}
     </div>
   );
@@ -251,7 +343,13 @@ export function VistaEntrada({ orden, onVolver, onListo }) {
 
   const nuevaLinea = (base) => ({
     variante_id: null, atributo_id: null, orden_linea_id: null, pedida: null,
-    cantidad: 1, items: [], nodos: {}, ...base,
+    cantidad: 1, items: [], nodos: {},
+    // La variante que de verdad llegó, cuando no es la pedida, y el sí explícito
+    // al sobrante. Ninguna de las dos se guarda en la BD: sin el flag el backend
+    // responde 409, así que el solo hecho de que la línea entre ya prueba que
+    // alguien lo confirmó.
+    nodoSust: null, eligiendoNodo: false, excedenteOk: false,
+    ...base,
   });
 
   // Con orden, la lista arranca llena con lo que falta por llegar.
@@ -265,6 +363,13 @@ export function VistaEntrada({ orden, onVolver, onListo }) {
         nombre_producto: l.nombre,
         tipo:            l.tipo,
         orden_linea_id:  l.orden_linea_id,
+        // El nodo que pidió la orden. Sin arrastrarlo, la línea llegaría
+        // precargada al producto y el bodeguero tendría que volver a elegir la
+        // variante que el pedido ya dijo.
+        variante_id:     l.variante_id ?? null,
+        atributo_id:     l.atributo_id ?? null,
+        variante_valor:  l.variante_valor ?? null,
+        atributo_valor:  l.atributo_valor ?? null,
         pedida:          l.pendiente,
         cantidad:        l.pendiente,
         // Un serial pedido arranca con sus casillas de IMEI listas.
@@ -318,6 +423,10 @@ export function VistaEntrada({ orden, onVolver, onListo }) {
         producto_id: l.producto_id,
         nombre_producto: l.nombre_producto,
         orden_linea_id: l.orden_linea_id,
+        // `excedente_ok` solo viaja cuando se marcó. Mandarlo siempre en true
+        // convertiría la casilla en decorado y el backend dejaría pasar en
+        // silencio justo lo que se quiere que alguien mire.
+        ...(l.excedenteOk ? { excedente_ok: true } : {}),
       };
 
       if (l.tipo === 'serial') {
@@ -338,6 +447,23 @@ export function VistaEntrada({ orden, onVolver, onListo }) {
         }
         if (l.items.length > 0 && conImei.length === 0) {
           throw new Error(`Escribe los IMEI de "${l.nombre_producto}"`);
+        }
+        continue;
+      }
+
+      // ── La orden pidió un NODO: una sola línea, en el que llegó ────────
+      const pedido = nodoPedido(l);
+      if (pedido) {
+        const cant = Number(l.cantidad) || 0;
+        if (cant > 0) {
+          const sust = l.nodoSust || null;
+          salida.push({
+            ...comun,
+            cantidad: cant,
+            variante_id: sust ? (sust.tipo === 'variante' ? sust.id : null) : pedido.variante_id,
+            atributo_id: sust ? (sust.tipo === 'atributo' ? sust.id : null) : pedido.atributo_id,
+            ...(sust ? { sustituye: true } : {}),
+          });
         }
         continue;
       }

@@ -28,6 +28,8 @@ const CLAVES = {
   garantiaAviso:  'garantia_proveedor_dias_aviso',
   codigos:        'codigos_proveedor_activos',
   codigoInterno:  'codigo_producto_activo',         // prerrequisito de `codigos`
+  detalleNodo:    'ordenes_compra_detalle_nodo',    // pedir la variante, no el producto
+  variantes:      'variantes_activo',               // prerrequisito de `detalleNodo`
 };
 
 const DEFAULTS = {
@@ -92,6 +94,17 @@ const getConfigOrdenes = async (negocioId) => {
     // vuelve a verificar AQUÍ y no solo al guardar: si alguien apaga los códigos
     // internos después, esta feature se apaga sola en vez de resolver a nada.
     codigos_activos: map[CLAVES.codigos] === '1' && map[CLAVES.codigoInterno] === '1',
+
+    // ── Pedir la VARIANTE y conciliarla al recibir ──────────────────────────
+    // Exige `variantes_activo` por la misma razón que los códigos del proveedor
+    // exigen los códigos internos: sin árbol de variantes no hay nodo que pedir,
+    // y la feature resolvería a nada. Se vuelve a verificar AQUÍ y no solo al
+    // guardar, para que apagar las variantes después apague esto solo.
+    //
+    // Enciende la CAPACIDAD, no la obliga: una misma orden mezcla líneas al nodo
+    // y líneas al producto, porque el nodo en NULL ya significa hoy "el producto
+    // en general" y esa lectura no cambia.
+    detalle_nodo: map[CLAVES.detalleNodo] === '1' && map[CLAVES.variantes] === '1',
   };
 
   _cache.set(negocioId, { valor, expira: Date.now() + TTL_MS });
@@ -102,7 +115,7 @@ const getConfigOrdenes = async (negocioId) => {
  * Fábrica de middleware. Exige que la feature indicada esté encendida.
  * Deja la config en `req.configOrdenes` para que el service no la relea.
  *
- * @param {'ordenes'|'garantia'|'codigos'} feature
+ * @param {'ordenes'|'garantia'|'codigos'|'detalle'} feature
  */
 const requireOrdenesCompra = (feature = 'ordenes') => async (req, res, next) => {
   try {
@@ -116,7 +129,8 @@ const requireOrdenesCompra = (feature = 'ordenes') => async (req, res, next) => 
 
     const encendida = feature === 'garantia' ? cfg.garantia_activa
       : feature === 'codigos' ? cfg.codigos_activos
-        : cfg.activas;
+        : feature === 'detalle' ? (cfg.activas && cfg.detalle_nodo)
+          : cfg.activas;
 
     if (!encendida) {
       // 404 y no 403: para un negocio que no activó la feature, esto no existe.
