@@ -24,3 +24,12 @@ export const desuscribirPush = (endpoint) =>
 
 /** Envía un aviso de prueba al propio usuario. */
 export const enviarNotificacionPrueba = () => api.post('/notificaciones/prueba');
+
+/**
+ * El panel de Avisos: las mismas señales que deciden qué se notifica.
+ *
+ * Sale del motor del backend, no de una consulta propia de la pantalla: si cada
+ * uno calculara por su lado, el usuario abriría el resumen que le llegó y
+ * encontraría algo distinto a lo que le avisaron.
+ */
+export const getResumenAvisos = () => api.get('/notificaciones/resumen');

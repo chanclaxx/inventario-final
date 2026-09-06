@@ -1,10 +1,27 @@
 import axios from 'axios';
 import useSucursalStore from '../store/sucursalStore';
 
+// ── La base de la API, en UNA sola definición ────────────────────────────────
+//
+// Existe porque el refresh se hacía con `axios.post('/api/auth/refresh')`: una
+// URL RELATIVA, que en producción no cae en el backend sino en Vercel. Y como
+// `vercel.json` reescribe `/(.*)` a `/index.html`, esa llamada devolvía la
+// página HTML con un 200 — así que `data.accessToken` era `undefined`, se
+// guardaba la cadena "undefined" en sessionStorage y el reintento salía con
+// `Bearer undefined`.
+//
+// Resultado en producción: el access token dura 8 horas y al expirar NO se podía
+// renovar nunca. El usuario simplemente quedaba fuera y tenía que volver a
+// escribir la contraseña. Es la mitad del "cierro la pestaña y pierdo la sesión".
+//
+// Todo lo que hable con la API tiene que salir de aquí; una segunda forma de
+// armar la URL es exactamente lo que se acaba de romper.
+export const API_BASE = import.meta.env.VITE_API_URL
+  ? `${import.meta.env.VITE_API_URL}/api`
+  : '/api';
+
 const api = axios.create({
-  baseURL      : import.meta.env.VITE_API_URL
-    ? `${import.meta.env.VITE_API_URL}/api`
-    : '/api',
+  baseURL      : API_BASE,
   withCredentials : true,
   // Evita peticiones colgadas indefinidamente (sin esto, un request que el
   // servidor nunca responde deja el botón girando para siempre).
@@ -93,11 +110,17 @@ api.interceptors.response.use(
     if (status === 401 && !original._retry) {
       original._retry = true;
       try {
+        // `axios` pelado y no `api`: un 401 aquí volvería a entrar por este mismo
+        // interceptor y se llamaría a sí mismo. Pero con la base CORRECTA.
         const { data } = await axios.post(
-          '/api/auth/refresh',
+          `${API_BASE}/auth/refresh`,
           {},
           { withCredentials: true }
         );
+        // Un refresh que no trae token no es un éxito. Sin esta guarda se
+        // guardaba "undefined" y el siguiente request salía con
+        // `Bearer undefined`, que falla de una forma mucho más difícil de leer.
+        if (!data?.accessToken) throw new Error('refresh sin token');
         sessionStorage.setItem('accessToken', data.accessToken);
         if (data.usuario) {
           sessionStorage.setItem('usuario', JSON.stringify(data.usuario));

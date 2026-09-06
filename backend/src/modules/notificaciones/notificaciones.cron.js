@@ -1,6 +1,7 @@
 const cron    = require('node-cron');
 const alertas = require('./notificaciones.alertas');
 const service = require('./notificaciones.service');
+const motor   = require('./notificaciones.motor');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // AVISOS AUTOMÁTICOS — una pasada diaria por los negocios con dispositivos.
@@ -154,169 +155,100 @@ const _avisarCarteraVencida = async (negocioId, cartera) => {
   return enviados;
 };
 
-// El aviso que evita la mora en vez de perseguirla: se llama al cliente ANTES de
-// la fecha, cuando todavía puede pagar sin intereses y la llamada es un
-// recordatorio y no un reclamo. Va aparte de los vencidos (otro `tag`, otro
-// texto) porque son dos trabajos distintos.
-const _avisarPorVencer = async (negocioId, cartera) => {
-  const items = cartera.por_vencer.items;
-  if (!items.length) return 0;
-
-  let enviados = 0;
-  for (const [sucursalId, docs] of _porSucursal(items)) {
-    const destinos = _porDestino(docs);
-
-    for (const grupo of destinos.slice(0, MAX_AVISOS_POR_SUCURSAL)) {
-      const d = grupo[0];                                    // el más próximo
-      const cuando = d.dias_restantes === 0 ? 'vence hoy'
-        : d.dias_restantes === 1            ? 'vence mañana'
-        : `vence en ${d.dias_restantes} días`;
-
-      const res = await service.enviar({
-        negocio_id:  negocioId,
-        sucursal_id: sucursalId,
-        roles:       ['admin_negocio', 'supervisor'],
-        titulo: `${d.persona} · ${cuando}`,
-        cuerpo: `${_detalleDeudas(grupo)}. Recuérdaselo antes de que se venza.`,
-        url:  d.url,
-        tag:  `porvencer-${d.url}`,
-        tipo: 'cartera_por_vencer',
-        referencia_id: d.url,
-        unico_por_dia: true,
-      });
-      enviados += res.enviados || 0;
-    }
-
-    const sobran = destinos.length - MAX_AVISOS_POR_SUCURSAL;
-    if (sobran > 0) {
-      const res = await service.enviar({
-        negocio_id:  negocioId,
-        sucursal_id: sucursalId,
-        roles:       ['admin_negocio', 'supervisor'],
-        titulo: `y ${sobran} pago${sobran === 1 ? '' : 's'} más por vencer`,
-        cuerpo: 'Además de los anteriores. Toca para ver la lista completa.',
-        url:  '/prestamos',
-        tag:  `porvencer-resto-${sucursalId}`,
-        tipo: 'cartera_por_vencer_resto',
-        referencia_id: String(sucursalId),
-        unico_por_dia: true,
-      });
-      enviados += res.enviados || 0;
-    }
-  }
-  return enviados;
-};
-
-// ── Aviso 2: el plan se acaba ────────────────────────────────────────────────
+// ── Lo que se fue, y por qué ────────────────────────────────────────────────
 //
-// Solo al dueño: es él quien renueva. Y solo en los hitos 7/3/1/0 días, que es
-// lo que decide `alertas.planPorVencer`.
-const _avisarPlan = async (negocioId) => {
-  const plan = await alertas.planPorVencer(negocioId);
-  if (!plan) return 0;
-
-  const { dias } = plan;
-  const titulo = dias === 0 ? 'Tu plan vence hoy'
-    : dias === 1             ? 'Tu plan vence mañana'
-    : `Tu plan vence en ${dias} días`;
-
-  const res = await service.enviar({
-    negocio_id: negocioId,
-    roles:      ['admin_negocio'],
-    titulo,
-    cuerpo: dias === 0
-      ? 'Renuévalo hoy para no perder el acceso al sistema.'
-      : 'Renuévalo con tiempo para que no se te bloquee el sistema.',
-    url:  '/',
-    tag:  'plan',
-    tipo: 'plan_por_vencer',
-    // Los días entran en la clave: así el aviso de "faltan 7" no bloquea el de
-    // "falta 1". Con el día de calendario ya en el índice, cada hito sale una
-    // sola vez.
-    referencia_id: String(dias),
-    unico_por_dia: true,
-  });
-  return res.enviados || 0;
-};
-
-// ── Aviso 4: facturas de proveedor por pagar ─────────────────────────────────
+// Aquí vivían cinco emisores más: por-vencer de clientes, plan, facturas de
+// proveedor, stock bajo y borradores. Cada uno armaba y mandaba su propio push,
+// y por eso un negocio con varias cosas abiertas recibía cinco o seis
+// notificaciones seguidas a las 8:00.
 //
-// El espejo de los avisos de cobro: aquí el que debe es el negocio. Va aparte de
-// la cartera de clientes porque abre otra pantalla y es otro trabajo — a un
-// cliente se le cobra, a un proveedor se le paga.
+// Todos siguen existiendo como SEÑALES en `notificaciones.motor.js`: se siguen
+// calculando, se siguen viendo en el panel de Avisos, y los que son urgentes
+// siguen sonando solos. Lo que cambió es que los que NO son urgentes viajan
+// juntos en un resumen en vez de competir cada uno por la atención.
 //
-// Solo al dueño y al supervisor: un vendedor no decide qué facturas se pagan.
-//
-// Con las órdenes apagadas `carteraProveedores` devuelve vacío sin consultar
-// nada, así que para los negocios que no usan la feature esto no cuesta.
-const _avisarPagosProveedor = async (negocioId) => {
-  const cartera = await alertas.carteraProveedores(negocioId);
-  const { vencidas, por_vencer: porVencer } = cartera;
-  if (!vencidas.length && !porVencer.length) return 0;
+// El de cobros vencidos NO se fue, y esa excepción es deliberada: es el único
+// cuyo valor entero está en llevar a la ficha de UNA persona concreta para
+// llamarla. Un resumen no puede abrir cinco fichas distintas.
 
+// ─────────────────────────────────────────────────────────────────────────────
+// LA PASADA — urgente aparte, el resto en UN resumen
+//
+// Antes cada aviso se mandaba por su cuenta y un negocio con cartera, stock y
+// una factura de proveedor recibía cinco o seis notificaciones seguidas a la
+// misma hora. Ahora el motor decide: lo urgente conserva su notificación propia
+// (es lo que hay que hacer HOY) y todo lo demás se junta en un solo resumen que
+// abre el panel de Avisos.
+//
+// DOS PASADAS AL DÍA:
+//   · la de la mañana manda todo — urgentes y resumen
+//   · la de la tarde manda SOLO urgentes, y solo los que siguen ahí
+//
+// La de la tarde es una segunda oportunidad para el cobro del día, no una
+// repetición: `unico_por_dia` hace que lo que ya salió en la mañana no vuelva a
+// sonar, así que en la tarde solo suena lo que apareció después o lo que nadie
+// atendió y cambió de estado. Repetir el mismo resumen dos veces es la forma más
+// rápida de que dejen de mirarlo.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Manda las señales de UN negocio.
+ *
+ * @param {number} negocioId
+ * @param {boolean} soloUrgentes — la pasada de la tarde
+ */
+const _avisarNegocio = async (negocioId, { soloUrgentes = false } = {}) => {
+  const { urgentes, normales, detalle } = await motor.recolectar(negocioId);
   let enviados = 0;
 
-  // Las vencidas van una por una: cada una abre su orden, y con el proveedor
-  // esperando el pago el detalle importa más que el resumen.
-  for (const [sucursalId, docs] of _porSucursal(vencidas)) {
-    for (const o of docs.slice(0, MAX_AVISOS_POR_SUCURSAL)) {
-      const dias = Math.abs(o.dias_para_vencer);
-      const res = await service.enviar({
-        negocio_id:  negocioId,
-        sucursal_id: sucursalId,
-        roles:       ['admin_negocio', 'supervisor'],
-        titulo: `${o.proveedor} · factura vencida hace ${dias} día${dias === 1 ? '' : 's'}`,
-        cuerpo: `Le debes ${_pesos(o.saldo)}${o.numero_factura ? ` de la factura ${o.numero_factura}` : ''}. Toca para abrir la orden.`,
-        url:  '/proveedores',
-        tag:  `pago-prov-${o.id}`,
-        tipo: 'pago_proveedor_vencido',
-        referencia_id: String(o.id),
-        unico_por_dia: true,
-      });
-      enviados += res.enviados || 0;
+  // Cada urgente conserva su notificación propia. `tag` = la clave, así que un
+  // segundo aviso del mismo asunto REEMPLAZA al anterior en la bandeja en vez de
+  // apilar tres tarjetas de lo mismo.
+  for (const s of urgentes) {
+    // ── La excepción: los cobros vencidos se delegan ──────────────────────
+    //
+    // El motor decide QUÉ es urgente; quién lo entrega puede ser otro. Los
+    // cobros tienen un emisor propio que manda UNO POR CLIENTE con enlace
+    // directo a su ficha, agrupado por destino y acotado a cinco por sucursal.
+    // Reemplazarlo por un "3 cobros vencidos" que lleva a la lista general
+    // sería cambiar un aviso accionable por uno informativo — justo lo
+    // contrario de hacerlo más inteligente.
+    if (s.clave === 'cobros_vencidos') {
+      enviados += await _avisarCarteraVencida(negocioId, detalle.cartera);
+      continue;
     }
-
-    const sobran = docs.length - MAX_AVISOS_POR_SUCURSAL;
-    if (sobran > 0) {
-      const res = await service.enviar({
-        negocio_id:  negocioId,
-        sucursal_id: sucursalId,
-        roles:       ['admin_negocio', 'supervisor'],
-        titulo: `y ${sobran} factura${sobran === 1 ? '' : 's'} más vencida${sobran === 1 ? '' : 's'}`,
-        cuerpo: 'Además de las anteriores. Toca para ver las órdenes.',
-        url:  '/proveedores',
-        tag:  `pago-prov-resto-${sucursalId}`,
-        tipo: 'pago_proveedor_vencido_resto',
-        referencia_id: String(sucursalId),
-        unico_por_dia: true,
-      });
-      enviados += res.enviados || 0;
-    }
-  }
-
-  // Las que aún no vencen van en UN resumen por sucursal: son un plan de pagos,
-  // no una urgencia, y una notificación por cada una sería ruido.
-  for (const [sucursalId, docs] of _porSucursal(porVencer)) {
-    const total = docs.reduce((s, o) => s + o.saldo, 0);
-    const proxima = docs[0];
-    const cuando = proxima.dias_para_vencer === 0 ? 'vence hoy'
-      : proxima.dias_para_vencer === 1            ? 'vence mañana'
-      : `vence en ${proxima.dias_para_vencer} días`;
 
     const res = await service.enviar({
-      negocio_id:  negocioId,
-      sucursal_id: sucursalId,
-      roles:       ['admin_negocio', 'supervisor'],
-      titulo: docs.length === 1
-        ? `${proxima.proveedor} · ${cuando}`
-        : `${docs.length} facturas por pagar esta semana`,
-      cuerpo: docs.length === 1
-        ? `Le debes ${_pesos(total)}. Prepara el pago antes de que se venza.`
-        : `${_pesos(total)} en total. La de ${proxima.proveedor} ${cuando}.`,
-      url:  '/proveedores',
-      tag:  `pago-prov-porvencer-${sucursalId}`,
-      tipo: 'pago_proveedor_por_vencer',
-      referencia_id: String(sucursalId),
+      negocio_id: negocioId,
+      titulo: s.titulo,
+      cuerpo: s.cuerpo,
+      url:    s.url,
+      tag:    s.clave,
+      tipo:   s.clave,
+      referencia_id: String(s.n),
+      // La deduplicación mira `tipo` + `referencia_id`: si el número de
+      // documentos cambia durante el día, el aviso vuelve a salir —porque de
+      // verdad es una situación nueva— y si no cambió, se queda callado.
+      unico_por_dia: true,
+    });
+    enviados += res.enviados || 0;
+  }
+
+  if (soloUrgentes) return enviados;
+
+  const resumen = motor.resumenDiario(normales);
+  // Sin `resumen` no se manda nada. Un "no tienes nada pendiente" diario entrena
+  // a la gente a ignorar el aviso, y entonces el día que sí trae algo tampoco lo
+  // abre.
+  if (resumen) {
+    const res = await service.enviar({
+      negocio_id: negocioId,
+      titulo: resumen.titulo,
+      cuerpo: resumen.cuerpo,
+      url:    resumen.url,
+      tag:    'resumen_diario',
+      tipo:   'resumen_diario',
+      referencia_id: String(normales.length),
       unico_por_dia: true,
     });
     enviados += res.enviados || 0;
@@ -324,82 +256,12 @@ const _avisarPagosProveedor = async (negocioId) => {
 
   return enviados;
 };
-
-// ── Aviso 3: stock bajo ──────────────────────────────────────────────────────
-const _avisarStockBajo = async (negocioId) => {
-  const grupos = await alertas.stockBajo(negocioId);
-  if (!grupos.length) return 0;
-
-  let enviados = 0;
-  for (const g of grupos) {
-    const detalle = g.agotados > 0
-      ? `${g.agotados} ya sin stock. Ej.: ${g.ejemplos.slice(0, 2).join(', ')}`
-      : `Ej.: ${g.ejemplos.slice(0, 2).join(', ')}`;
-
-    const res = await service.enviar({
-      negocio_id:  negocioId,
-      sucursal_id: g.sucursal_id,
-      roles:       ['admin_negocio', 'supervisor'],
-      titulo: g.cuantos === 1
-        ? '1 producto bajo el mínimo'
-        : `${g.cuantos} productos bajo el mínimo`,
-      cuerpo: `${g.sucursal_nombre} · ${detalle}`,
-      url:  '/inventario',
-      tag:  `stock-${g.sucursal_id}`,
-      tipo: 'stock_bajo',
-      referencia_id: String(g.sucursal_id),
-      unico_por_dia: true,
-    });
-    enviados += res.enviados || 0;
-  }
-  return enviados;
-};
-
-// ── Aviso 6: borradores de venta por vencer ─────────────────────────────────
-//
-// Cuando un borrador vence, la mercancía que se le prometió a un cliente vuelve
-// a estar libre sin que nadie se entere. Este aviso existe para que alguien
-// decida: llamar al cliente, renovar el borrador o descartarlo.
-//
-// Va a vendedores también, y no solo a admin y supervisor como el de stock: el
-// borrador lo guardó un vendedor y es quien sabe quién es ese cliente.
-const _avisarBorradoresPorVencer = async (negocioId) => {
-  const grupos = await alertas.borradoresPorVencer(negocioId);
-  if (!grupos.length) return 0;
-
-  let enviados = 0;
-  for (const g of grupos) {
-    const res = await service.enviar({
-      negocio_id:  negocioId,
-      sucursal_id: g.sucursal_id,
-      roles:       ['admin_negocio', 'supervisor', 'vendedor'],
-      titulo: g.cuantos === 1
-        ? '1 borrador vence hoy'
-        : `${g.cuantos} borradores vencen hoy`,
-      // Los títulos de borrador SON nombres de cliente: van sin apellido ni
-      // monto, por la regla 3 de este archivo (esto se lee en la pantalla
-      // bloqueada). Con más de dos se resume en vez de listarlos.
-      cuerpo: `${g.sucursal_nombre} · ${
-        g.cuantos <= 2 ? g.ejemplos.slice(0, 2).join(', ') : 'Revísalos antes de que se liberen'
-      }`,
-      url:  '/inventario',
-      tag:  `borradores-${g.sucursal_id}`,
-      tipo: 'borradores_por_vencer',
-      referencia_id: String(g.sucursal_id),
-      unico_por_dia: true,
-    });
-    enviados += res.enviados || 0;
-  }
-  return enviados;
-};
-
-// ── Pasada completa ──────────────────────────────────────────────────────────
 
 /**
  * Revisa todos los negocios y manda lo que corresponda.
  * Se exporta para poder dispararla a mano (pruebas, o un botón futuro).
  */
-const ejecutar = async () => {
+const ejecutar = async ({ soloUrgentes = false } = {}) => {
   if (!service.estaActivo()) {
     console.log('[notif-cron] Notificaciones apagadas (sin claves VAPID) — no hay nada que enviar');
     return { negocios: 0, enviados: 0 };
@@ -410,24 +272,21 @@ const ejecutar = async () => {
 
   for (const n of negocios) {
     try {
-      // Una sola consulta de cartera para los dos avisos: vencidos y próximos
-      // salen del mismo recorrido.
-      const cartera = await alertas.cartera(n.id);
-      enviados += await _avisarCarteraVencida(n.id, cartera);
-      enviados += await _avisarPorVencer(n.id, cartera);
-      enviados += await _avisarPlan(n.id);
-      enviados += await _avisarStockBajo(n.id);
-      enviados += await _avisarPagosProveedor(n.id);
-      enviados += await _avisarBorradoresPorVencer(n.id);
+      enviados += await _avisarNegocio(n.id, { soloUrgentes });
     } catch (err) {
       // Un negocio con datos raros no puede dejar sin avisos a los otros 27.
       console.error(`[notif-cron] Negocio ${n.id} (${n.nombre}) omitido:`, err.message);
     }
   }
 
-  console.log(`[notif-cron] ✓ ${negocios.length} negocio(s) revisado(s) · ${enviados} notificación(es) entregada(s)`);
+  const etiqueta = soloUrgentes ? 'tarde (solo urgentes)' : 'mañana (completa)';
+  console.log(`[notif-cron] ✓ ${etiqueta} · ${negocios.length} negocio(s) · ${enviados} notificación(es)`);
   return { negocios: negocios.length, enviados };
 };
+
+// La segunda pasada. Solo lo urgente y a media tarde: da tiempo de llamar antes
+// de que cierre el día, sin repetir el ruido de la mañana.
+const CRON_TARDE_POR_DEFECTO = '0 14 * * *';
 
 const iniciarCronNotificaciones = () => {
   if (!service.estaActivo()) {
@@ -437,15 +296,30 @@ const iniciarCronNotificaciones = () => {
   const expresion = _resolverExpresion();
 
   cron.schedule(expresion, async () => {
-    console.log(`[notif-cron] Revisando alertas — ${new Date().toISOString()}`);
+    console.log(`[notif-cron] Pasada de la mañana — ${new Date().toISOString()}`);
     try {
       await ejecutar();
     } catch (err) {
-      console.error('[notif-cron] Error en la pasada diaria:', err.message);
+      console.error('[notif-cron] Error en la pasada de la mañana:', err.message);
     }
   }, { timezone: ZONA });
 
-  console.log(`[notif-cron] Cron de avisos activado — ${expresion} (${ZONA})`);
+  // NOTIF_CRON_TARDE = 'off' la apaga sin tocar código: un negocio de un solo
+  // turno no necesita que le recuerden a las 2 lo que ya vio a las 8.
+  const expresionTarde = process.env.NOTIF_CRON_TARDE || CRON_TARDE_POR_DEFECTO;
+  if (expresionTarde !== 'off' && cron.validate(expresionTarde)) {
+    cron.schedule(expresionTarde, async () => {
+      console.log(`[notif-cron] Pasada de la tarde — ${new Date().toISOString()}`);
+      try {
+        await ejecutar({ soloUrgentes: true });
+      } catch (err) {
+        console.error('[notif-cron] Error en la pasada de la tarde:', err.message);
+      }
+    }, { timezone: ZONA });
+    console.log(`[notif-cron] Cron de avisos activado — ${expresion} y ${expresionTarde} (${ZONA})`);
+  } else {
+    console.log(`[notif-cron] Cron de avisos activado — ${expresion} (${ZONA}), sin pasada de tarde`);
+  }
 };
 
 module.exports = { iniciarCronNotificaciones, ejecutar };

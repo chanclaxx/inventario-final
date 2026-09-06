@@ -1,5 +1,5 @@
 import { useState }            from 'react';
-import { useNavigate, Link }   from 'react-router-dom';
+import { useNavigate, Link, Navigate } from 'react-router-dom';
 import { useAuth }             from '../context/useAuth.js';
 import { Button }              from '../components/ui/Button';
 import { Input }               from '../components/ui/Input';
@@ -61,13 +61,18 @@ function ModalDiasRestantes({ dias, onContinuar }) {
 // ─── Página de Login ──────────────────────────────────────────────────────────
 
 export default function Login() {
-  const { login }    = useAuth();
+  const { login, usuario, restaurando } = useAuth();
   const navigate     = useNavigate();
 
   const [form,          setForm]          = useState({ email: '', password: '' });
   const [error,         setError]         = useState('');
   const [loading,       setLoading]       = useState(false);
   const [diasRestantes, setDiasRestantes] = useState(null); // null = no mostrar modal
+
+  // Si la sesión se restauró sola (cookie de refresco viva), no tiene sentido
+  // pedir la contraseña: la PWA suele reabrirse justo en la última ruta, y sin
+  // esto quedaría un formulario de login encima de una sesión ya válida.
+  if (!restaurando && usuario) return <Navigate to="/" replace />;
 
   const handleContinuar = () => {
     setDiasRestantes(null);

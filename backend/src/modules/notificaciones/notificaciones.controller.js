@@ -1,4 +1,5 @@
 const service = require('./notificaciones.service');
+const motor   = require('./notificaciones.motor');
 
 /**
  * Estado de la feature + clave pública para suscribirse.
@@ -49,4 +50,37 @@ const prueba = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-module.exports = { getEstado, suscribir, desuscribir, prueba };
+/**
+ * El panel de Avisos: lo MISMO que decide las notificaciones.
+ *
+ * Sale del motor y no de una consulta propia, y eso es el punto: si la pantalla
+ * calculara por su cuenta, el usuario abriría el resumen que le llegó y
+ * encontraría algo distinto a lo que le avisaron. Una sola fuente de verdad.
+ *
+ * ── Por qué NO exige rol ────────────────────────────────────────────────────
+ * Cualquiera puede abrir su panel; lo que ve depende de lo que el motor
+ * devuelva para SU negocio. La frontera multi-tenant es `req.user.negocio_id`,
+ * que viene del token y no del cliente — igual que en el envío.
+ *
+ * Ojo: el `detalle` lleva nombres de clientes y montos. Eso está bien en una
+ * pantalla ya autenticada; lo que nunca puede llevarlos es el PUSH, que se ve
+ * en la pantalla bloqueada. Esa distinción vive en el service (su regla 2).
+ */
+const getResumen = async (req, res, next) => {
+  try {
+    const { senales, urgentes, normales, detalle, umbrales } =
+      await motor.recolectar(req.user.negocio_id);
+
+    res.json({
+      ok: true,
+      data: {
+        senales, urgentes, normales, detalle, umbrales,
+        // Para que la pantalla pueda decir "todo al día" sin recorrer nada.
+        total: senales.length,
+        generado_en: new Date().toISOString(),
+      },
+    });
+  } catch (err) { next(err); }
+};
+
+module.exports = { getEstado, suscribir, desuscribir, prueba, getResumen };

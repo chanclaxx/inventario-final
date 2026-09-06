@@ -12,6 +12,7 @@ import NuevaPassword        from './pages/NuevaPassword';
 import SinAccesoPage        from './pages/SinAccesoPage';
 
 import Dashboard            from './pages/Dashboard';
+import AvisosPage           from './pages/avisos/AvisosPage';
 import InventarioPage       from './pages/inventario/InventarioPage';
 import FacturarPage         from './pages/facturas/FacturarPage';
 import PrestamosPage        from './pages/prestamos/PrestamosPage';
@@ -60,6 +61,11 @@ export default function App() {
               <Route path="/entradas" element={
                 <ModuloGuard modulo="inventario"><EntradasPage /></ModuloGuard>
               } />
+              {/* Avisos. SIN ModuloGuard a propósito: no es un módulo, es la
+                  bandeja de lo que ya se notificó. Lo que aparece dentro depende
+                  de lo que el motor devuelva para ese negocio, y cada tarjeta
+                  lleva a una pantalla que sí tiene su propio permiso. */}
+              <Route path="/avisos" element={<AvisosPage />} />
               <Route path="/facturar" element={
                 <ModuloGuard modulo="facturar"><FacturarPage /></ModuloGuard>
               } />

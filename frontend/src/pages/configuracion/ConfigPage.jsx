@@ -1732,7 +1732,7 @@ export default function ConfigPage() {
           {seccionActiva === 'negocio'   && <SeccionNegocio   valores={valores} set={set} />}
           {seccionActiva === 'catalogo'  && <SeccionCatalogo  valores={valores} set={set} />}
           {seccionActiva === 'web'       && <CatalogoWebConfig />}
-          {seccionActiva === 'avisos'    && <NotificacionesConfig />}
+          {seccionActiva === 'avisos'    && <NotificacionesConfig valores={valores} set={set} />}
           {seccionActiva === 'seguridad' && <SeccionSeguridad form={form} valores={valores} set={set} />}
           {seccionActiva === 'equipo'    && <SeccionEquipo valores={valores} set={set} />}
         </div>

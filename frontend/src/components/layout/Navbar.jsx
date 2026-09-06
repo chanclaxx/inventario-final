@@ -7,6 +7,7 @@ import {
   LayoutDashboard, Package, FileText, Handshake,
   Wallet, BarChart2, Settings, LogOut, ShoppingCart,
   Users, Truck, Wrench, ArrowRightLeft, Search, Activity, HandCoins, Warehouse, PackagePlus,
+  Bell,
 } from 'lucide-react';
 import { getSucursales } from '../../api/sucursales.api.js';
 import useCarritoStore  from '../../store/carritoStore.js';
@@ -35,6 +36,11 @@ const NAV_ITEMS = [
   { path: '/reportes',    label: 'Reportes',    Icn: BarChart2,       modulo: 'reportes'                      },
   { path: '/acreedores',  label: 'Acreedores',  Icn: Users,           modulo: 'acreedores'                    },
   { path: '/busqueda',    label: 'Búsqueda',    Icn: Search                                                   },
+  // Avisos: la bandeja de lo que el sistema encontró pendiente. Sin `modulo` a
+  // propósito — no es una función más, es a dónde lleva el resumen que llega al
+  // celular, y cada tarjeta de adentro apunta a una pantalla que sí tiene su
+  // propio permiso. Va después de Búsqueda para no empujar el trabajo diario.
+  { path: '/avisos',      label: 'Avisos',      Icn: Bell,            soloSupervisor: true                    },
   { path: '/actividad-usuarios', label: 'Actividad', Icn: Activity, soloAdmin: true                         },
   { path: '/config',             label: 'Config',    Icn: Settings, soloAdmin: true                         },
 ];

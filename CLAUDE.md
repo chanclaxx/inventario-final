@@ -336,6 +336,85 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > service worker viven en `frontend/public/push-sw.js`, inyectados con
 > `workbox.importScripts` (el SW lo genera Workbox y no se puede editar a mano).
 > En iOS solo funciona con la PWA instalada en la pantalla de inicio.
+>
+> **Avisos INTELIGENTES: urgente aparte, el resto en un resumen**
+> (`notificaciones.motor.js`, `notificaciones.operaciones.js`): había diez tipos
+> de aviso y **todos salían el mismo día a la misma hora, cada uno por su
+> cuenta**. Un negocio con cartera, stock bajo y una factura de proveedor recibía
+> cinco o seis notificaciones seguidas a las 8:00 — que es la forma más rápida de
+> que alguien silencie la app, y entonces la que sí importaba tampoco llega.
+> **El motor es la única fuente de verdad.** Convierte todo en SEÑALES con una
+> misma forma (`clave`, `prioridad`, `titulo`, `cuerpo`, `url`, `valor`) y decide:
+> **urgente** → notificación propia; **normal** → un solo resumen. Lo que fija la
+> prioridad **no es el tipo sino la SITUACIÓN**: la misma garantía es normal a
+> diez días y urgente el día que vence, así que no hay tabla de «tipos
+> importantes» que mantener.
+> El motor **no envía**: lo consumen el cron y `GET /notificaciones/resumen`, que
+> alimenta la pantalla **/avisos**. Si la pantalla calculara por su lado, el
+> usuario abriría el resumen que le llegó y encontraría algo distinto a lo que le
+> avisaron — un panel que contradice a la notificación destruye la confianza en
+> las dos cosas a la vez.
+> **Sin señales NO hay resumen** (`resumenDiario` devuelve `null`): un aviso
+> diario que dice «no tienes nada pendiente» entrena a la gente a ignorarlo, y el
+> día que sí trae algo tampoco lo abre. Es la sección 1 de la prueba.
+> **La excepción deliberada son los COBROS VENCIDOS**: conservan
+> `_avisarCarteraVencida`, que manda **uno por cliente** con enlace directo a su
+> ficha, agrupado por destino y acotado a cinco por sucursal. El motor decide que
+> son urgentes; **quién los entrega es otro**. Cambiar eso por un «3 cobros
+> vencidos» que lleva a la lista general sería cambiar un aviso accionable por uno
+> informativo. Los otros cinco emisores sueltos (por-vencer, plan, proveedor,
+> stock, borradores) **se eliminaron**: siguen existiendo como señales.
+> **DOS PASADAS**: 8:00 completa y 14:00 **solo urgentes** (`NOTIF_CRON_TARDE`,
+> `'off'` la apaga). No es una repetición: `unico_por_dia` hace que lo que ya sonó
+> en la mañana no vuelva a sonar, así que en la tarde solo suena lo que apareció
+> después.
+> **Cuatro alertas nuevas** en `notificaciones.operaciones.js`, todas DERIVADAS y
+> sin una sola columna nueva: **garantías del proveedor por vencer** (la más
+> valiosa —una garantía que se pasa es plata perdida— y no existía de ninguna
+> forma; excluye lo ya vendido o prestado, que es garantía del cliente),
+> **pedidos atrasados** (`fecha_esperada` pasada con pendiente > 0; recibir la
+> orden la saca sola y cancelar la recepción la reabre sola), **entradas sin
+> confirmar** (mientras tanto se vende con costo provisional) y **cajas sin
+> cerrar** (la única que se mide en HORAS, porque no es un vencimiento).
+> **Las fechas se formatean y se restan en SQL, nunca en JavaScript**:
+> node-postgres devuelve un DATE como objeto Date, así que `String(f).slice(0,10)`
+> da «Wed Sep 24» y restar Dates arrastra la zona del servidor (UTC en Railway) —
+> correría un día justo en el aviso que dice «vence HOY».
+> Umbrales por negocio (`notif_garantia_dias`, `notif_entrada_dias`,
+> `notif_caja_horas`) con los **mismos rangos** validados en el motor, en
+> `config.service` y en la pantalla: si se separan, se guardaría un número que el
+> motor descarta en silencio.
+> Prueba: `39-avisos-inteligentes` (45 verificaciones; la sección 1 es la que hay
+> que mirar primero, la 2 comprueba que la MISMA garantía cambia de prioridad al
+> acercarse el vencimiento, y la 8 vigila que el cron y el panel sigan leyendo el
+> mismo motor).
+
+> **La sesión sobrevive a cerrar la PWA — y el refresh estaba ROTO en
+> producción** (`axios.config.js`, `AuthContext.jsx`): el access token vive en
+> `sessionStorage`, que el navegador borra al cerrar la pestaña. En una PWA eso
+> significaba que cerrar la app era cerrar sesión, y que **tocar una notificación
+> dejaba al usuario en el login habiendo perdido el enlace que traía el aviso**.
+> Al leerlo apareció algo peor: el interceptor pedía
+> `axios.post('/api/auth/refresh')` — una URL **relativa**. Con `VITE_API_URL`
+> apuntando a Railway y `vercel.json` reescribiendo `/(.*)` a `/index.html`, esa
+> llamada devolvía **la página HTML con un 200**: `data.accessToken` quedaba
+> `undefined`, se guardaba la cadena `"undefined"` y el reintento salía con
+> `Bearer undefined`. **El access token dura 8 horas y al expirar no se podía
+> renovar nunca.** Ahora hay un solo `API_BASE` exportado del que salen las dos
+> llamadas, y un refresh sin token se trata como fallo y no como éxito.
+> Con eso arreglado, `AuthContext` intenta `restaurarSesion()` al montar cuando no
+> hay usuario en memoria: la cookie de refresco es httpOnly y dura 7 días.
+> `PrivateRoute` **espera** (`if (restaurando) return null`) en vez de mandar al
+> login — sin esa espera el primer render pierde la ruta a la que se iba, que es
+> justo la de la notificación. Va con `axios` pelado y no con `api` porque el
+> interceptor reacciona a un 401 mandando al login con `window.location`, y aquí
+> un 401 es el caso NORMAL (nadie ha entrado nunca en ese navegador).
+> Cerrar sesión a propósito sigue borrando la cookie en el servidor, así que esto
+> **no resucita** una sesión que el usuario cerró.
+> Las notificaciones, por cierto, **nunca dejaron de llegar** al cerrar sesión: la
+> suscripción vive en el navegador y en `push_suscripciones`, y el cron empuja al
+> endpoint sin mirar sesiones. Lo que se rompía era el camino DESDE la
+> notificación.
 > Los avisos automáticos (cartera **por vencer** y **vencida**, plan por vencer, stock bajo) salen de
 > `notificaciones.alertas.js` y los dispara `notificaciones.cron.js` a las 8:00
 > America/Bogota (`NOTIF_CRON`). Los de cobro abren **directo la ficha del cliente**

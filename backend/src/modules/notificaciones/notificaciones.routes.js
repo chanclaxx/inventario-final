@@ -21,6 +21,10 @@ const validarSuscripcion = [
 ];
 
 router.get('/estado', ctrl.getEstado);
+// El panel de Avisos. Va aquí y no en `reportes` porque no es un reporte: es
+// exactamente lo que el sistema decidió notificar, y tiene que salir del mismo
+// motor para que la pantalla y el push nunca se contradigan.
+router.get('/resumen', ctrl.getResumen);
 router.post('/suscribir',   validarSuscripcion, validate, ctrl.suscribir);
 router.delete('/suscribir', ctrl.desuscribir);
 router.post('/prueba',      ctrl.prueba);

@@ -91,7 +91,55 @@ function Bloqueo({ estado, esIOS }) {
   return null;
 }
 
-export function NotificacionesConfig() {
+// ── Cuándo avisar de cada cosa ───────────────────────────────────────────────
+//
+// No son constantes en el código porque no hay un número correcto para todos: un
+// negocio que compra a 90 días necesita otra ventana de garantías que uno que
+// compra de contado, y con el umbral equivocado el aviso o llega tarde o se
+// vuelve ruido diario.
+//
+// Los rangos son los MISMOS que valida el motor en el backend
+// (`notificaciones.motor.js`). Si se separan, la pantalla aceptaría un número
+// que el servidor descarta en silencio y el usuario creería haberlo cambiado.
+const UMBRALES = [
+  {
+    clave: 'notif_garantia_dias', def: 15, min: 1, max: 90, unidad: 'días',
+    label: 'Avisarme de una garantía que vence en',
+    ayuda: 'Una garantía del proveedor que se pasa ya no se puede reclamar: es plata perdida.',
+  },
+  {
+    clave: 'notif_entrada_dias', def: 3, min: 0, max: 30, unidad: 'días',
+    label: 'Avisar de una entrada sin confirmar después de',
+    ayuda: 'Mientras no se confirme, esa mercancía se vende con un costo provisional.',
+  },
+  {
+    clave: 'notif_caja_horas', def: 16, min: 4, max: 72, unidad: 'horas',
+    label: 'Avisar de una caja abierta después de',
+    ayuda: 'Una caja que nadie cerró mezcla el turno de hoy con el de ayer.',
+  },
+];
+
+function CampoUmbral({ def, min, max, unidad, label, ayuda, valor, onChange }) {
+  return (
+    <div className="flex items-start justify-between gap-4">
+      <div className="flex flex-col gap-0.5 min-w-0">
+        <span className="text-sm font-medium text-gray-700">{label}</span>
+        <span className="text-xs text-gray-400">{ayuda}</span>
+      </div>
+      <div className="flex items-center gap-1.5 flex-shrink-0">
+        <input
+          type="number" min={min} max={max} value={valor} placeholder={String(def)}
+          onChange={(e) => onChange(e.target.value)}
+          className="w-16 px-2 py-1.5 text-sm text-right tabular-nums border border-gray-200
+                     rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+        />
+        <span className="text-xs text-gray-400 w-10">{unidad}</span>
+      </div>
+    </div>
+  );
+}
+
+export function NotificacionesConfig({ valores = {}, set = () => {} }) {
   const {
     estado, ocupado, error, aviso, dispositivos, esIOS,
     activar, desactivar, probar,
@@ -196,6 +244,42 @@ export function NotificacionesConfig() {
             Con las notificaciones activadas ya puedes recibir la de prueba. Los avisos
             automáticos (cartera vencida, vencimiento del plan, stock agotado) se irán
             conectando encima de esto.
+          </p>
+        </div>
+      </div>
+
+      {/* ── Cuándo avisar ───────────────────────────────────────────────── */}
+      <div className="border-t border-gray-100 pt-5 flex flex-col gap-4">
+        <div>
+          <h3 className="text-sm font-semibold text-gray-900">Cuándo avisar</h3>
+          <p className="text-xs text-gray-400 mt-0.5">
+            Deja el campo vacío para usar el valor por defecto.
+          </p>
+        </div>
+
+        {UMBRALES.map((u) => (
+          <CampoUmbral
+            key={u.clave}
+            {...u}
+            valor={valores[u.clave] ?? ''}
+            onChange={(v) => set(u.clave, v)}
+          />
+        ))}
+
+        <div className="bg-blue-50 rounded-xl p-4 flex flex-col gap-1.5">
+          <p className="text-xs font-medium text-blue-800">Cómo llegan los avisos</p>
+          <p className="text-xs text-blue-700">
+            • Lo <strong>urgente</strong> (un cobro vencido, una garantía que se vence hoy,
+            una caja abierta) llega como aviso propio. Los cobros llegan uno por cliente
+            y abren directo su ficha.
+          </p>
+          <p className="text-xs text-blue-700">
+            • Todo lo demás llega junto en <strong>un solo resumen</strong> en la mañana.
+            Tocarlo abre la pantalla de Avisos con la lista completa.
+          </p>
+          <p className="text-xs text-blue-700">
+            • En la tarde hay una segunda pasada que manda <strong>solo lo urgente</strong>,
+            y nunca repite lo que ya sonó en la mañana.
           </p>
         </div>
       </div>

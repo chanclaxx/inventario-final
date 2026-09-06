@@ -206,6 +206,28 @@ const saveConfig = async (negocioId, datos) => {
   if (datosProcesados.ordenes_compra_dias_aviso !== undefined) {
     _validarDiasAviso(datosProcesados.ordenes_compra_dias_aviso, 'El aviso previo de vencimiento');
   }
+  // ── Los umbrales del motor de avisos ──────────────────────────────────────
+  //
+  // Los rangos son los MISMOS que aplica `notificaciones.motor.js` al leerlos y
+  // los que ofrece la pantalla. Si se separan, aquí se guardaría un número que
+  // el motor descarta en silencio y el usuario creería haberlo cambiado.
+  //
+  // Vacío es válido y significa "usa el valor por defecto": es la forma de
+  // deshacer un umbral sin tener que recordar cuál era el original.
+  const UMBRALES_NOTIF = {
+    notif_garantia_dias: { min: 1, max: 90, etiqueta: 'El aviso de garantías por vencer' },
+    notif_entrada_dias:  { min: 0, max: 30, etiqueta: 'El aviso de entradas sin confirmar' },
+    notif_caja_horas:    { min: 4, max: 72, etiqueta: 'El aviso de caja sin cerrar' },
+  };
+  for (const [clave, r] of Object.entries(UMBRALES_NOTIF)) {
+    const raw = datosProcesados[clave];
+    if (raw === undefined || raw === '' || raw === null) continue;
+    const v = Number(raw);
+    if (!Number.isInteger(v) || v < r.min || v > r.max) {
+      throw { status: 400, message: `${r.etiqueta} debe ser un número entero entre ${r.min} y ${r.max}` };
+    }
+  }
+
   if (datosProcesados.garantia_proveedor_dias_aviso !== undefined) {
     _validarDiasAviso(datosProcesados.garantia_proveedor_dias_aviso, 'El aviso previo de garantía');
   }
