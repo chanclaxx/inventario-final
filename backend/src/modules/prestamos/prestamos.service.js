@@ -265,10 +265,21 @@ const cerrarSiPagadoEnTx = async (
 // `anotarLista` resuelve la mora de todos en UNA consulta; con 1.793 préstamos
 // activos, hacerlo uno por uno serían 1.793 viajes a la base. Si ninguno tiene
 // plazo (negocio sin la feature) no consulta nada.
-const getPrestamos = async (sucursalId, negocioId) => {
-  const prestamos = await repo.findAll(sucursalId, negocioId);
+const getPrestamos = async (sucursalId, negocioId, opciones = {}) => {
+  const prestamos = await repo.findAll(sucursalId, negocioId, opciones);
   return moraService.anotarLista(prestamos, 'prestamo');
 };
+
+/**
+ * Resumen por persona para la lista de la pantalla.
+ *
+ * No pasa por `anotarLista`: la lista de personas no pinta mora ni interés, y
+ * anotarlos serían dos consultas más para adjuntar dos objetos que nadie lee.
+ * Dentro de la persona abierta, los préstamos siguen llegando anotados por
+ * `getPrestamos` como siempre.
+ */
+const getResumenPersonas = (sucursalId, negocioId) =>
+  repo.findResumenPersonas(sucursalId, negocioId);
 
 const getPrestamoById = async (negocioId, id) => {
   const prestamo = await repo.findByIdYNegocio(id, negocioId);
@@ -2395,7 +2406,7 @@ const anularAbonoTotal = async (negocioId, abonoTotalId, { motivo, usuario_id, s
 };
 
 module.exports = {
-  getPrestamos, getPrestamoById,
+  getPrestamos, getResumenPersonas, getPrestamoById,
   crearPrestamo, crearPrestamos,
   registrarAbono,
   devolverPrestamo, devolverParcial,

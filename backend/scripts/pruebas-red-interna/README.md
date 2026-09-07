@@ -43,6 +43,8 @@ node scripts/pruebas-red-interna/26-lotes-cantidad.mjs
 node scripts/pruebas-red-interna/28-abonos-anulados.mjs
 node scripts/pruebas-red-interna/36-ubicaciones.mjs
 node scripts/pruebas-red-interna/37-pedidos-a-bodega.mjs
+node scripts/pruebas-red-interna/40-simulacion-tesla.mjs
+node scripts/pruebas-red-interna/41-prestamos-por-persona.mjs
 ```
 
 > `20-borradores` verifica sobre todo una invariante negativa: guardar un
@@ -748,3 +750,99 @@ con el código nuevo contra una base vieja — ya pasó con `abonos_remision`.
 > la detección no encuentra los pedidos**. Sin esa línea, `crearRemision` e
 > `insertarLineaRemision` emitirían el SQL viejo —el que no nombra las columnas
 > nuevas— y la suite pasaría entera sin haber probado el vínculo.
+
+
+### `40-simulacion-tesla.mjs` — 52 verificaciones
+
+Reproduce el montaje real del negocio 33 «Tesla SmartPhone Shop» —una bodega
+(BODEGA LAS AMERICAS) surtiendo a tres locales— con su misma configuración
+(`variantes_activo`, `codigo_producto_activo`, `costos_solo_admin`, pedidos) y
+con productos, costos y precios sacados de la plantilla que se le importó. No es
+una suite de regresión de una feature: es el **día completo** del cliente,
+escrito para responder dos preguntas que se hicieron en concreto.
+
+**¿Los costos se solapan?** No, y la sección 5 lo enseña con las dos columnas al
+lado. La bodega compra la correa a $3.700 y la despacha a $4.600:
+
+- `lineas_remision.costo_origen` = **$3.700**, lo que le costó a la BODEGA. Se
+  fotografía al despachar y no sale de ahí.
+- `lineas_remision.valor_interno` = **$4.600**, lo que le cuesta al LOCAL, y es
+  lo que la recepción escribe en `costo_unitario` de su nodo.
+
+Los dos números viven en la **misma fila** sin pisarse, y de ahí salen dos
+utilidades que tampoco se pisan: la de la bodega ($900 por unidad, sección 7) y
+la del local (venta − $4.600, sección 8). La sección 8 comprueba además la cifra
+que NO debe aparecer: la utilidad inflada que saldría si el local midiera contra
+el costo de la bodega.
+
+**¿Los reportes se dan bien?** La sección 6 valora cada punta con SU costo —la
+bodega a $3.700, el local a $4.600, que es justo lo que ya debe— y la 7 sostiene
+lo que más se malinterpreta: **la utilidad de la bodega se realiza cuando el
+local PAGA, no cuando recibe**. Una remesa en tránsito reserva el envío pero no
+realiza un peso.
+
+El resto recorre el circuito entero: el catálogo que ve el local sin un solo
+costo en el JSON (1), el pedido bajando a la talla y despachado con atribución
+automática (2-3), la deuda naciendo en la recepción (4), la devolución
+acreditada al precio de su lote (9), el gasto que no baja la deuda hasta que la
+bodega lo aprueba (10), el invariante `Σ saldo de documentos = deuda_total` (11)
+y el aislamiento entre locales (12-13).
+
+Dos cosas que la suite deja fijadas y que son fáciles de leer al revés:
+
+- **Despachar NO baja el stock** cuando `confirmar_recepcion` está activo: la
+  mercancía sigue siendo de la bodega hasta que el local confirma. Descontarla
+  antes la haría desaparecer de las dos puntas mientras viaja (sección 3 contra
+  sección 4).
+- El **caso PACHA**: `25W`/`45W SAMSUNG ORIGINAL` existen en dos líneas
+  (CARGADORES y PACHAS). Como `productos_cantidad` es único por
+  `(nombre, sucursal_id)`, sin el sufijo `PACHA` colapsan en un solo producto y
+  —si una fila trae atributo y la otra no— `_recalcularStockProducto` borra el
+  stock de la plana. La sección 1 comprueba que el local ve las dos referencias
+  por separado.
+
+
+### `41-prestamos-por-persona.mjs` — 39 verificaciones
+
+`GET /api/prestamos` devolvía **siempre** el historial completo del negocio. En
+Cellsite (negocio 31) eso son 9.976 filas y **13,6 MB de JSON**, y la pantalla
+los volvía a pedir enteros después de **cada abono** —toda mutación invalida
+`['prestamos']`— para pintar diez tarjetas de persona. Ahora el endpoint acepta
+dos recortes **opcionales**: `?vista=personas` (una fila por persona, 144 KB) y
+`?persona_tipo=..&persona_id=..` (los préstamos de esa persona).
+
+La suite protege que sean **exactamente eso: recortes**.
+
+- **La sección 1 es la que hay que mirar primero.** Sin parámetros la respuesta
+  es la de siempre, y cualquier parámetro que no se entienda —texto, `0`,
+  negativo, vacío— **no recorta**: cae en el historial completo. Esa es la regla
+  que protege a los 28 negocios y a cualquier cliente con el bundle viejo en
+  caché.
+- La sección 2 compara el resumen agregado contra **la agrupación que hacía el
+  navegador, copiada tal cual** desde `PrestamosPage`. Las ocho cifras de cada
+  tarjeta tienen que coincidir. El caso que vigila de cerca es el préstamo con
+  `estado` **NULL**: el JavaScript lo contaba como cerrado, y un `<> 'Activo'`
+  en SQL lo habría perdido de los dos contadores sin que nada avisara — por eso
+  el repositorio usa `IS DISTINCT FROM`.
+- La sección 3 comprueba que el filtro por persona da el **mismo subconjunto, en
+  el mismo orden**. De ahí salió el desempate `p.id DESC` del `ORDER BY`: los
+  préstamos de un lote del carrito comparten la fecha al milisegundo y sin él
+  Postgres podía barajarlos entre dos cargas de la misma pantalla.
+- La sección 4 fija que **`anotarLista` no cambia de FORMA según el conjunto**.
+  Era un problema latente: cuando ningún documento tenía plazo ni interés, el
+  atajo devolvía menos claves (`total_a_pagar`, `solo_faltan_cargos`) y
+  `saldo_capital` en 0. O sea que el mismo préstamo llegaba distinto según si
+  **otro** préstamo del negocio tenía plazo — y por lo tanto según qué
+  subconjunto se pidiera. Ahora el atajo se sigue saltando las dos **consultas**
+  (que es el costo real) pero pasa igual por `_resolverCargos` con los
+  movimientos vacíos.
+- La sección 5 comprueba que el recorte va **encima** del alcance de negocio,
+  nunca en su lugar: pedir a una persona de Cellsite desde otro negocio no
+  devuelve nada.
+- La sección 6 extrae del `.jsx` la función **real** `adaptarResumenPersonas` y
+  comprueba que dé lo mismo que el SQL. Existe porque Vercel y Railway se
+  despliegan por separado: hay una ventana en la que el frontend nuevo habla con
+  el backend viejo, que ignora `?vista=personas` y responde el array completo.
+  El frontend lo detecta **por la forma de la respuesta** y agrupa en el
+  navegador, como antes. Un respaldo que se separa del original no sirve, y no se
+  notaría hasta el despliegue siguiente — que es cuando ya no sirve de nada.

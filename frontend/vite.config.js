@@ -43,7 +43,15 @@ export default defineConfig({
             // Etiquetas por las dos razones a la vez: el PDF pesa, y la lista de nodos
             // cacheada 5 minutos seguiría diciendo "sin código" justo después de que el
             // usuario generara los códigos — que es la secuencia normal de la pantalla.
-            urlPattern: /^https:\/\/inventario-final-production\.up\.railway\.app\/api\/(reportes|facturas|dashboard|tesoreria|inventario|etiquetas)/i,
+            //
+            // Préstamos entra por el MISMO motivo que inventario, medido: la lista de
+            // Cellsite (negocio 31) son 9.976 filas = 13,1 MB de JSON. Con NetworkFirst
+            // el Service Worker escribía esos 13 MB en CacheStorage en CADA carga y
+            // después de CADA abono —porque toda mutación invalida ['prestamos']—, y
+            // con `maxEntries: 50` compartido esa sola entrada desalojaba al resto de
+            // la API. Además cachear 5 minutos una pantalla de dinero es lo que hace
+            // que un abono recién registrado se siga viendo pendiente.
+            urlPattern: /^https:\/\/inventario-final-production\.up\.railway\.app\/api\/(reportes|facturas|dashboard|tesoreria|inventario|etiquetas|prestamos)/i,
             handler: 'NetworkOnly',
           },
           {

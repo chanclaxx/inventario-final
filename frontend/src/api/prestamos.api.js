@@ -1,6 +1,16 @@
 import api from './axios.config';
 
 export const getPrestamos = () => api.get('/prestamos');
+
+// Resumen por persona para la lista de la pantalla: una fila por persona en vez
+// del historial completo. En el negocio más grande son 144 KB contra 13,6 MB.
+export const getResumenPersonas = () =>
+  api.get('/prestamos', { params: { vista: 'personas' } });
+
+// Los préstamos de UNA persona, que es lo único que se pinta al abrir su ficha.
+// Devuelve exactamente las mismas filas que antes se recortaban en memoria.
+export const getPrestamosDePersona = (tipo, id) =>
+  api.get('/prestamos', { params: { persona_tipo: tipo, persona_id: id } });
 export const getPrestamoById = (id) => api.get(`/prestamos/${id}`);
 export const crearPrestamo = (data) => api.post('/prestamos', data);
 // `extra` lleva la imputación cuando hay mora: { modo, valor_mora }.

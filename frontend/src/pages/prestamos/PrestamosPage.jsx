@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { buscarPrestamos as buscarPrestamosApi } from '../../api/busqueda.api';
 import { exportarPrestamosExcel } from '../../utils/exportarPrestamosExcel';
 import { exportarCarteraPersonaExcel } from '../../utils/exportarCarteraPersonaExcel';
-import { getPrestamos, getPrestamoById, registrarAbonoPrestamo, devolverPrestamo, devolverParcialPrestamo, registrarSaldoAFavor as registrarSaldoAFavorApi, intercambiarPrestamo as intercambiarPrestamoApi, anularAbono as anularAbonoApi, getRetomasDirectas as getRetomasDirectasApi, anularRetomaDirecta as anularRetomaDirectaApi, aplicarSaldoAPrestamo as aplicarSaldoAPrestamoApi, getEstadoCuenta as getEstadoCuentaApi, crearAjusteDeuda as crearAjusteDeudaApi, getSaldoSucursal as getSaldoSucursalApi, getHistorialSaldoSucursal as getHistorialSaldoSucursalApi } from '../../api/prestamos.api';
+import { getPrestamos, getResumenPersonas, getPrestamosDePersona, getPrestamoById, registrarAbonoPrestamo, devolverPrestamo, devolverParcialPrestamo, registrarSaldoAFavor as registrarSaldoAFavorApi, intercambiarPrestamo as intercambiarPrestamoApi, anularAbono as anularAbonoApi, getRetomasDirectas as getRetomasDirectasApi, anularRetomaDirecta as anularRetomaDirectaApi, aplicarSaldoAPrestamo as aplicarSaldoAPrestamoApi, getEstadoCuenta as getEstadoCuentaApi, crearAjusteDeuda as crearAjusteDeudaApi, getSaldoSucursal as getSaldoSucursalApi, getHistorialSaldoSucursal as getHistorialSaldoSucursalApi } from '../../api/prestamos.api';
 import { ModalEditarValorPrestamo } from './ModalEditarValorPrestamo';
 import { crearPrestatario as crearPrestatarioApi, getPrestatarios, actualizarPrestatario as actualizarPrestatarioApi } from '../../api/prestatarios.api';
 import { actualizarCliente as actualizarClienteApi } from '../../api/clientes.api';
@@ -1193,13 +1193,12 @@ const ABONO_CLASES = {
 
 // ─── Card resumen de persona ──────────────────────────────────────────────────
 
-function CardPersona({ nombre, tipo, prestamos, saldoTotal, ultimoAbono, onSeleccionar, onEditar }) {
-  const activos  = prestamos.filter((p) => p.estado === 'Activo');
-  const cerrados = prestamos.filter((p) => p.estado !== 'Activo');
-
-  const totalVal = activos.reduce((s, p) => s + Number(p.valor_prestamo), 0);
-  const totalAbo = activos.reduce((s, p) => s + Number(p.total_abonado),  0);
-  const pct      = totalVal > 0 ? Math.min(100, (totalAbo / totalVal) * 100) : 0;
+// Recibe las cifras ya agregadas en vez de la lista de préstamos. Las cuentas
+// son las mismas —contar activos y cerrados, y sumar valor y abonado de los
+// activos— solo que ahora las hace la base: para pintar diez tarjetas no hacía
+// falta bajarse los 9.976 préstamos del negocio al navegador.
+function CardPersona({ nombre, tipo, nActivos, nCerrados, valorActivos, abonadoActivos, saldoTotal, ultimoAbono, onSeleccionar, onEditar }) {
+  const pct = valorActivos > 0 ? Math.min(100, (abonadoActivos / valorActivos) * 100) : 0;
 
   const avatarClass = tipo === 'companero'
     ? 'bg-blue-100 text-blue-700'
@@ -1235,24 +1234,24 @@ function CardPersona({ nombre, tipo, prestamos, saldoTotal, ultimoAbono, onSelec
         </div>
 
         <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-          {activos.length > 0 && (
+          {nActivos > 0 && (
             <span className="text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full font-medium">
-              {activos.length} activo{activos.length !== 1 ? 's' : ''}
+              {nActivos} activo{nActivos !== 1 ? 's' : ''}
             </span>
           )}
-          {cerrados.length > 0 && (
+          {nCerrados > 0 && (
             <span className="text-xs bg-gray-50 text-gray-400 px-2 py-0.5 rounded-full">
-              {cerrados.length} cerrado{cerrados.length !== 1 ? 's' : ''}
+              {nCerrados} cerrado{nCerrados !== 1 ? 's' : ''}
             </span>
           )}
-          {activos.length > 0 && (
+          {nActivos > 0 && (
             <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${ABONO_CLASES[abonoNivel]}`}>
               {abonoTexto}
             </span>
           )}
         </div>
 
-        {activos.length > 0 && (
+        {nActivos > 0 && (
           <div className="mt-2 w-full bg-gray-100 rounded-full h-1">
             <div className="bg-blue-400 h-1 rounded-full transition-all" style={{ width: `${pct}%` }} />
           </div>
@@ -2728,15 +2727,76 @@ function TabBusquedaPrestamos() {
   );
 }
 
+/**
+ * Adaptador de despliegue.
+ *
+ * Vercel y Railway se despliegan por SEPARADO, así que existe una ventana —y un
+ * rollback del backend la reabre— en la que este frontend habla con un backend
+ * que todavía no conoce `?vista=personas`. Ese backend ignora el parámetro y
+ * responde el historial completo (un ARRAY). Sin esto la pantalla de Préstamos
+ * mostraría CERO personas hasta que Railway terminara, que es justo el susto que
+ * no puede dar una pantalla de dinero.
+ *
+ * Se detecta por la FORMA de la respuesta, no por una versión: un array es el
+ * backend viejo y se agrupa aquí, que es exactamente lo que esta pantalla hacía
+ * antes. Con el backend nuevo no se ejecuta nada de esto.
+ */
+function adaptarResumenPersonas(data) {
+  if (data && !Array.isArray(data)) return data;
+
+  const acumular = (filas, campoId, campoNombre, campoSaldo, campoAbono, campoCelular) => {
+    const mapa = new Map();
+    for (const p of filas) {
+      const id = p[campoId];
+      if (!id) continue;
+      if (!mapa.has(id)) mapa.set(id, {
+        persona_id:      id,
+        nombre:          p[campoNombre] || p.prestatario,
+        celular:         campoCelular ? (p[campoCelular] || '') : undefined,
+        saldo_a_favor:   Number(p[campoSaldo] ?? 0),
+        ultimo_abono:    p[campoAbono] ?? null,
+        n_activos:       0,
+        n_cerrados:      0,
+        valor_activos:   0,
+        abonado_activos: 0,
+        saldo_total:     0,
+      });
+      const g = mapa.get(id);
+      if (p.estado === 'Activo') {
+        g.n_activos       += 1;
+        g.valor_activos   += Number(p.valor_prestamo);
+        g.abonado_activos += Number(p.total_abonado);
+        g.saldo_total     += Number(p.valor_prestamo) - Number(p.total_abonado);
+      } else {
+        g.n_cerrados += 1;
+      }
+    }
+    return [...mapa.values()];
+  };
+
+  const filas = data ?? [];
+  return {
+    prestatarios: acumular(filas, 'prestatario_id', 'prestatario_nombre',
+      'prestatario_saldo_a_favor', 'ultimo_abono_prestatario', null),
+    clientes: acumular(filas, 'cliente_id', 'cliente_nombre',
+      'cliente_saldo_a_favor', 'ultimo_abono_cliente', 'cliente_celular'),
+  };
+}
+
 // ─── Página principal ─────────────────────────────────────────────────────────
 
 /**
- * Exporta la cartera completa de la pantalla: los préstamos que ya están en
- * memoria, más los créditos, que se piden recién al hacer clic. Se usa
- * `fetchQuery` con la MISMA clave que TabCreditos para reusar su caché en vez
- * de montar una segunda consulta permanente en la página.
+ * Exporta la cartera completa: el historial de préstamos y los créditos, los dos
+ * pedidos recién al hacer clic. Los créditos se piden con `fetchQuery` y la
+ * MISMA clave que TabCreditos, para reusar su caché en vez de montar una segunda
+ * consulta permanente en la página.
+ *
+ * El historial va con la API pelada y NO por el caché: es la única parte de la
+ * pantalla que de verdad necesita las 9.976 filas, son 13,6 MB, y dejarlas
+ * guardadas para un botón que se usa una vez al mes es justo lo que hacía lenta
+ * a esta pantalla. Se piden, se escribe el Excel y se sueltan.
  */
-function BotonExportarCartera({ prestamos, prestatarios }) {
+function BotonExportarCartera({ hayPersonas, prestatarios }) {
   const queryClient = useQueryClient();
   const [cargando, setCargando] = useState(false);
 
@@ -2744,15 +2804,20 @@ function BotonExportarCartera({ prestamos, prestatarios }) {
     if (cargando) return;
     setCargando(true);
     try {
-      const creditos = await queryClient.fetchQuery({
-        queryKey: ['creditos'],
-        queryFn:  () => getCreditos().then((r) => r.data.data),
-      });
+      const prestamos = await getPrestamos().then((r) => r.data.data);
+      let creditos = [];
+      try {
+        creditos = await queryClient.fetchQuery({
+          queryKey: ['creditos'],
+          queryFn:  () => getCreditos().then((r) => r.data.data),
+        });
+      } catch {
+        // Si los créditos no llegan, se exporta igual lo que sí hay: el usuario
+        // pidió su Excel, no una consulta.
+      }
       exportarPrestamosExcel({ prestamos, prestatarios, creditos: creditos || [] });
     } catch {
-      // Si los créditos no llegan, se exporta igual lo que sí hay: el usuario
-      // pidió su Excel, no una consulta.
-      exportarPrestamosExcel({ prestamos, prestatarios });
+      alert('No se pudo descargar la cartera para exportar. Intenta de nuevo.');
     } finally {
       setCargando(false);
     }
@@ -2760,7 +2825,7 @@ function BotonExportarCartera({ prestamos, prestatarios }) {
 
   return (
     <Button size="sm" variant="secondary" className="flex-shrink-0"
-      disabled={cargando || !prestamos.length} onClick={handleClick}>
+      disabled={cargando || !hayPersonas} onClick={handleClick}>
       {cargando ? <Loader2 size={14} className="animate-spin" /> : <FileDown size={14} />}
       Exportar Excel
     </Button>
@@ -2845,9 +2910,14 @@ export default function PrestamosPage() {
     ? { ...facturaDataSaldada, config: configDataSaldado }
     : null;
 
-  const { data: prestamosData, isLoading: loadingP } = useQuery({
-    queryKey: ['prestamos', sucursalActiva],
-    queryFn:  () => getPrestamos().then((r) => r.data.data),
+  // La lista de personas se pide YA AGREGADA. Antes esta misma pantalla bajaba
+  // el historial completo del negocio —13,6 MB y 9.976 filas en Cellsite— para
+  // agrupar en memoria y pintar diez tarjetas, y lo volvía a bajar entero
+  // después de CADA abono, porque toda mutación invalida ['prestamos'].
+  // El resumen son 144 KB y las cuentas son exactamente las mismas.
+  const { data: resumen, isLoading: loadingP } = useQuery({
+    queryKey: ['prestamos', 'resumen-personas', sucursalActiva],
+    queryFn:  () => getResumenPersonas().then((r) => adaptarResumenPersonas(r.data.data)),
   });
 
   const { data: prestatariosData = [] } = useQuery({
@@ -2855,58 +2925,93 @@ export default function PrestamosPage() {
     queryFn:  () => getPrestatarios().then((r) => r.data.data),
   });
 
-  const prestamos = prestamosData || [];
+  // La clave es la misma de siempre ("prestatario_12" / "cliente_1032"), así que
+  // el enlace de las notificaciones de cobro sigue abriendo la ficha igual.
+  const personaAbierta = personaSeleccionadaKey
+    ? {
+        tipo: personaSeleccionadaKey.startsWith('cliente_') ? 'cliente' : 'prestatario',
+        id:   Number(personaSeleccionadaKey.split('_')[1]),
+      }
+    : null;
 
-  const gruposCompaneros = prestamos.filter((p) => p.prestatario_id).reduce((acc, p) => {
-    const key = `prestatario_${p.prestatario_id}`;
-    if (!acc[key]) acc[key] = {
-      nombre:      p.prestatario_nombre || p.prestatario,
-      personaId:   p.prestatario_id,
-      prestamos:   [],
-      saldoTotal:  0,
-      saldoAFavor: Number(p.prestatario_saldo_a_favor ?? 0),
-      ultimoAbono: p.ultimo_abono_prestatario ?? null,
+  // Los préstamos de la persona ABIERTA, que es lo único que se pinta. Son las
+  // mismas filas que antes se recortaban del historial completo en el navegador.
+  const { data: prestamosPersona, isLoading: loadingPersona } = useQuery({
+    queryKey: ['prestamos', 'persona', personaAbierta?.tipo, personaAbierta?.id, sucursalActiva],
+    queryFn:  () => getPrestamosDePersona(personaAbierta.tipo, personaAbierta.id).then((r) => {
+      const { tipo, id } = personaAbierta;
+      // Defensa en profundidad, por la misma ventana de despliegue: un backend
+      // que ignorara el filtro respondería el historial ENTERO, y la ficha de
+      // una persona acabaría mostrando los préstamos de todas. Contra el backend
+      // nuevo este filtro no quita ni una fila.
+      return (r.data.data ?? []).filter(
+        (p) => (tipo === 'cliente' ? p.cliente_id : p.prestatario_id) === id);
+    }),
+    enabled:  !!personaAbierta?.id,
+  });
+
+  // Las claves de los dos queries empiezan por 'prestamos', así que los
+  // invalidateQueries({ queryKey: ['prestamos'], exact: false } ) que ya
+  // existían por toda la pantalla los siguen refrescando a los dos. Ninguna
+  // mutación cambia.
+  const gruposCompaneros = {};
+  for (const r of resumen?.prestatarios ?? []) {
+    gruposCompaneros[`prestatario_${r.persona_id}`] = {
+      nombre:         r.nombre,
+      personaId:      r.persona_id,
+      saldoTotal:     Number(r.saldo_total),
+      saldoAFavor:    Number(r.saldo_a_favor ?? 0),
+      ultimoAbono:    r.ultimo_abono ?? null,
+      nActivos:       Number(r.n_activos),
+      nCerrados:      Number(r.n_cerrados),
+      valorActivos:   Number(r.valor_activos),
+      abonadoActivos: Number(r.abonado_activos),
     };
-    acc[key].prestamos.push(p);
-    if (p.estado === 'Activo') acc[key].saldoTotal += Number(p.valor_prestamo) - Number(p.total_abonado);
-    return acc;
-  }, {});
+  }
 
   // Incluir prestamistas sin préstamos (recién creados) y enriquecer con telefono
   prestatariosData.forEach((pr) => {
     const key = `prestatario_${pr.id}`;
     if (!gruposCompaneros[key]) {
       gruposCompaneros[key] = {
-        nombre:      pr.nombre,
-        personaId:   pr.id,
-        prestamos:   [],
-        saldoTotal:  0,
-        saldoAFavor: Number(pr.saldo_a_favor ?? 0),
-        ultimoAbono: null,
+        nombre:         pr.nombre,
+        personaId:      pr.id,
+        saldoTotal:     0,
+        saldoAFavor:    Number(pr.saldo_a_favor ?? 0),
+        ultimoAbono:    null,
+        nActivos:       0,
+        nCerrados:      0,
+        valorActivos:   0,
+        abonadoActivos: 0,
       };
     }
     gruposCompaneros[key].telefono = pr.telefono || '';
   });
 
-  const gruposClientes = prestamos.filter((p) => p.cliente_id).reduce((acc, p) => {
-    const key = `cliente_${p.cliente_id}`;
-    if (!acc[key]) acc[key] = {
-      nombre:      p.cliente_nombre || p.prestatario,
-      personaId:   p.cliente_id,
-      celular:     p.cliente_celular || '',
-      prestamos:   [],
-      saldoTotal:  0,
-      saldoAFavor: Number(p.cliente_saldo_a_favor ?? 0),
-      ultimoAbono: p.ultimo_abono_cliente ?? null,
+  const gruposClientes = {};
+  for (const r of resumen?.clientes ?? []) {
+    gruposClientes[`cliente_${r.persona_id}`] = {
+      nombre:         r.nombre,
+      personaId:      r.persona_id,
+      celular:        r.celular || '',
+      saldoTotal:     Number(r.saldo_total),
+      saldoAFavor:    Number(r.saldo_a_favor ?? 0),
+      ultimoAbono:    r.ultimo_abono ?? null,
+      nActivos:       Number(r.n_activos),
+      nCerrados:      Number(r.n_cerrados),
+      valorActivos:   Number(r.valor_activos),
+      abonadoActivos: Number(r.abonado_activos),
     };
-    acc[key].prestamos.push(p);
-    if (p.estado === 'Activo') acc[key].saldoTotal += Number(p.valor_prestamo) - Number(p.total_abonado);
-    return acc;
-  }, {});
+  }
 
-  // La persona seleccionada siempre refleja los datos más recientes del query
-  const grupoActual = personaSeleccionadaKey
+  // La persona seleccionada siempre refleja los datos más recientes del query.
+  // `prestamos` se le adjunta desde su propio query: el resto de la ficha (saldo
+  // a favor, nombre, sucursal del ajuste) se lee igual que antes.
+  const grupoBase = personaSeleccionadaKey
     ? (gruposCompaneros[personaSeleccionadaKey] || gruposClientes[personaSeleccionadaKey])
+    : null;
+  const grupoActual = grupoBase
+    ? { ...grupoBase, prestamos: prestamosPersona ?? [] }
     : null;
 
   const handleSaldado = (facturaId, prestamo) => {
@@ -2975,7 +3080,9 @@ export default function PrestamosPage() {
           <h1 className="text-xl font-bold text-gray-900">Préstamos</h1>
           <p className="text-sm text-gray-400 mt-0.5">Gestiona préstamos, créditos y domicilios</p>
         </div>
-        <BotonExportarCartera prestamos={prestamos} prestatarios={prestatariosData} />
+        <BotonExportarCartera
+          hayPersonas={Object.keys(gruposCompaneros).length > 0 || Object.keys(gruposClientes).length > 0}
+          prestatarios={prestatariosData} />
       </div>
 
       {/* ── Tabs principales ── */}
@@ -3021,7 +3128,12 @@ export default function PrestamosPage() {
             })}
           </div>
 
-          {loadingP ? <Spinner className="py-20" /> : (
+          {/* Los préstamos de la persona abierta llegan en su propia consulta, así
+              que la ficha espera a tenerlos. Sin esta espera, VistaDetallePersona
+              se pintaría un instante con la lista vacía y diría que la persona no
+              tiene préstamos. */}
+          {loadingP || (personaAbierta && loadingPersona && !prestamosPersona)
+            ? <Spinner className="py-20" /> : (
 
             /* ── Vista detalle persona ── */
             grupoActual ? (
@@ -3132,7 +3244,9 @@ export default function PrestamosPage() {
                     {gruposPagina.map(([key, grupo]) => (
                       <CardPersona key={key} nombre={grupo.nombre}
                         tipo={tabPrestamos === 'companeros' ? 'companero' : 'cliente'}
-                        prestamos={grupo.prestamos} saldoTotal={grupo.saldoTotal}
+                        nActivos={grupo.nActivos} nCerrados={grupo.nCerrados}
+                        valorActivos={grupo.valorActivos} abonadoActivos={grupo.abonadoActivos}
+                        saldoTotal={grupo.saldoTotal}
                         ultimoAbono={grupo.ultimoAbono}
                         onSeleccionar={() => setPersonaSeleccionadaKey(key)}
                         onEditar={tabPrestamos === 'companeros'

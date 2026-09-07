@@ -97,10 +97,19 @@ const _resolverCargos = (cfg, documento, movimientos, abonos) => {
     abonos,
   });
 
+  // `emisionDe` normaliza un TIMESTAMP a la fecha de Bogotá, y eso pasa por
+  // `toLocaleDateString` con zona horaria: ~36 microsegundos por llamada, que
+  // sobre una lista de 9.976 préstamos son 365 ms de event loop bloqueado en un
+  // contenedor que atiende a todos los negocios.
+  //
+  // Sin pacto de interés, `resolverEstadoInteres` se va por su return temprano y
+  // NO mira `fecha_inicio`, así que calcularlo era trabajo tirado. Se resuelve
+  // solo cuando hay condición pactada — el resultado es idéntico, y la lista de
+  // un negocio que no usa la feature deja de pagar por ella.
   const interes = resolverEstadoInteres({
     saldo,
     valor_original: cfg.originalDe(documento),
-    fecha_inicio:   cfg.emisionDe(documento),
+    fecha_inicio:   documento.interes_condicion ? cfg.emisionDe(documento) : null,
     fecha_limite:   documento.fecha_limite,
     condicion:      documento.interes_condicion,
     movimientos,
@@ -204,15 +213,30 @@ const anotarLista = async (documentos, tipo, { client = null } = {}) => {
   if (!Array.isArray(documentos) || !documentos.length) return documentos;
   const cfg = _doc(tipo);
 
-  // Si ninguno tiene cargos pactados, no hace falta ni consultar. Es el caso de
-  // un negocio que no usa ninguna de las dos features: cero consultas extra.
+  // Si ninguno tiene cargos pactados, no hace falta CONSULTAR. Es el caso de un
+  // negocio que no usa ninguna de las dos features: cero consultas extra.
+  //
+  // Pero el atajo pasa igual por `_resolverCargos` con los movimientos vacíos,
+  // que es puro CPU y no toca la base. Antes devolvía `resolverEstadoMora({})` a
+  // secas y con eso la respuesta cambiaba de FORMA según el conjunto: le
+  // faltaban `total_a_pagar` y `solo_faltan_cargos`, y `saldo_capital` salía en
+  // 0 en vez del capital real. O sea que el mismo préstamo, sin plazo ni
+  // interés, venía distinto según si OTRO préstamo del negocio tenía plazo — y
+  // por lo tanto también según qué subconjunto se pidiera. Un consumidor que
+  // filtre (la pantalla pide los préstamos de UNA persona) recibía una forma
+  // distinta a la del listado completo sin que nada lo advirtiera.
   const conCargos = documentos.filter((d) => d.fecha_limite || d.interes_condicion);
   if (!conCargos.length) {
-    return documentos.map((d) => ({
-      ...d,
-      mora:    resolverEstadoMora({}),
-      interes: resolverEstadoInteres({}),
-    }));
+    return documentos.map((d) => {
+      const cargos = _resolverCargos(cfg, d, [], []);
+      return {
+        ...d,
+        mora:               cargos.mora,
+        interes:            cargos.interes,
+        total_a_pagar:      cargos.total_a_pagar,
+        solo_faltan_cargos: cargos.solo_faltan_cargos,
+      };
+    });
   }
 
   const ids = conCargos.map((d) => Number(d.id));

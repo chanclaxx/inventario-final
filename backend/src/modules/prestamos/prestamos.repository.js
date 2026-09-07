@@ -1,9 +1,33 @@
 const { pool } = require('../../config/db');
 const { asignarNumeroDocumento } = require('../../utils/numeracion.util');
 
-const findAll = async (sucursalId, negocioId) => {
+/**
+ * Historial de préstamos.
+ *
+ * `opciones.personaTipo` / `personaId` acotan la respuesta a UNA persona. Sin
+ * ellos la consulta es EXACTAMENTE la de siempre —mismas columnas, mismo
+ * ORDER BY, mismas filas—, así que ningún consumidor actual cambia de
+ * comportamiento. Con ellos devuelve el SUBCONJUNTO de esa persona, fila por
+ * fila igual a lo que el frontend recortaba en memoria después de bajarse el
+ * historial entero.
+ *
+ * Existe porque en el negocio más grande (Cellsite, 9.976 préstamos) la
+ * respuesta completa son 13,1 MB de JSON, y la pantalla la pedía otra vez tras
+ * CADA abono. El filtro se aplica ENCIMA del alcance de negocio/sucursal, nunca
+ * en su lugar: pedir una persona no puede saltarse el aislamiento entre
+ * negocios.
+ */
+const findAll = async (sucursalId, negocioId, { personaTipo = null, personaId = null } = {}) => {
   const filtro = sucursalId ? 'p.sucursal_id = $1' : 'su.negocio_id = $1';
-  const param  = sucursalId ?? negocioId;
+  const params = [sucursalId ?? negocioId];
+
+  let filtroPersona = '';
+  if (personaTipo && personaId) {
+    params.push(personaId);
+    filtroPersona = personaTipo === 'cliente'
+      ? ` AND p.cliente_id = $${params.length}`
+      : ` AND p.prestatario_id = $${params.length}`;
+  }
   // El "último abono" es de la PERSONA y abarca el NEGOCIO entero, no la
   // sucursal que se esté mirando. Filtrando por sucursal, el negocio se deriva
   // de ella — exactamente lo que hacía `su.negocio_id` cuando esto vivía en una
@@ -95,12 +119,120 @@ const findAll = async (sucursalId, negocioId) => {
     LEFT JOIN lineas_producto        lpc ON lpc.id = pc.linea_id
     LEFT JOIN ult_prestatario        up  ON up.pid = p.prestatario_id
     LEFT JOIN ult_cliente            uc  ON uc.cid = p.cliente_id
-    WHERE ${filtro}
+    WHERE ${filtro}${filtroPersona}
+    -- p.id DESC es un DESEMPATE, no un criterio nuevo: un lote de préstamos
+    -- creado desde el carrito comparte la fecha al milisegundo, y sin él
+    -- Postgres podía devolver esas filas en cualquier orden entre dos cargas de
+    -- la misma pantalla. Solo ordena lo que hasta ahora quedaba al azar.
     ORDER BY
       CASE p.estado WHEN 'Activo' THEN 0 WHEN 'Saldado' THEN 1 ELSE 2 END,
-      p.fecha DESC
-  `, [param]);
+      p.fecha DESC, p.id DESC
+  `, params);
   return rows;
+};
+
+/**
+ * Resumen por PERSONA para la lista de la pantalla de Préstamos.
+ *
+ * Es exactamente la agregación que el frontend hacía en memoria sobre las 9.976
+ * filas del historial: mismo criterio de "activo", mismos sumandos y el mismo
+ * desempate para el nombre. Lo que cambia es dónde se calcula — aquí sobre la
+ * base, en vez de bajarse 13,1 MB al navegador para pintar 10 tarjetas.
+ *
+ * Devuelve SOLO a quien tiene préstamos. Los prestamistas recién creados los
+ * sigue aportando `GET /prestatarios`, igual que antes: esa mezcla se hace en la
+ * pantalla y no cambió.
+ *
+ * No anota mora ni interés a propósito: la lista de personas no los muestra
+ * (el badge de vencido vive en la tarjeta del préstamo, ya dentro de la
+ * persona abierta), y anotarlos costaba dos consultas más y el 32 % del peso
+ * de la respuesta.
+ */
+const findResumenPersonas = async (sucursalId, negocioId) => {
+  const filtro = sucursalId ? 'p.sucursal_id = $1' : 'su.negocio_id = $1';
+  const param  = sucursalId ?? negocioId;
+  // Mismo razonamiento que en findAll: el último abono es de la PERSONA y
+  // abarca el NEGOCIO entero, no la sucursal que se esté mirando.
+  const alcanceNegocio = sucursalId
+    ? '(SELECT negocio_id FROM sucursales WHERE id = $1)'
+    : '$1';
+
+  // `IS DISTINCT FROM 'Activo'` y no `<> 'Activo'`: el JavaScript que esto
+  // reemplaza es `p.estado !== 'Activo'`, que cuenta los NULL como cerrados.
+  // Con `<>` un estado nulo no entraría en NINGUNO de los dos contadores y la
+  // tarjeta mostraría menos préstamos de los que la persona tiene.
+  const agregados = `
+      COUNT(*) FILTER (WHERE p.estado = 'Activo')                  AS n_activos,
+      COUNT(*) FILTER (WHERE p.estado IS DISTINCT FROM 'Activo')   AS n_cerrados,
+      COALESCE(SUM(p.valor_prestamo) FILTER (WHERE p.estado = 'Activo'), 0) AS valor_activos,
+      COALESCE(SUM(p.total_abonado)  FILTER (WHERE p.estado = 'Activo'), 0) AS abonado_activos,
+      COALESCE(SUM(p.valor_prestamo - p.total_abonado)
+               FILTER (WHERE p.estado = 'Activo'), 0)              AS saldo_total`;
+
+  // El nombre se resuelve como en la pantalla: el de la ficha y, si falta, el
+  // texto libre del préstamo que la agrupación veía PRIMERO — o sea el de arriba
+  // del mismo ORDER BY de findAll. Sin replicar ese desempate, una persona con
+  // el nombre escrito distinto en dos préstamos podría cambiar de nombre.
+  // `NULLIF(nombre, '')` y no `COALESCE` a secas: el JavaScript que esto
+  // reemplaza es `p.prestatario_nombre || p.prestatario`, y en JS la cadena
+  // VACÍA es falsy — cae al texto libre del préstamo. `COALESCE` solo mira el
+  // NULL, así que una ficha con el nombre en blanco habría dejado la tarjeta sin
+  // nombre en vez de mostrar el del préstamo.
+  const nombreLibre = `(array_agg(p.prestatario ORDER BY
+        CASE p.estado WHEN 'Activo' THEN 0 WHEN 'Saldado' THEN 1 ELSE 2 END,
+        p.fecha DESC))[1]`;
+
+  const [prestatarios, clientes] = await Promise.all([
+    pool.query(`
+      WITH ult AS (
+        SELECT p2.prestatario_id AS pid, MAX(ap.fecha) AS ultimo
+          FROM abonos_prestamo ap
+          JOIN prestamos       p2  ON p2.id  = ap.prestamo_id
+          JOIN sucursales      su2 ON su2.id = p2.sucursal_id
+         WHERE su2.negocio_id = ${alcanceNegocio}
+           AND p2.prestatario_id IS NOT NULL
+         GROUP BY p2.prestatario_id
+      )
+      SELECT
+        p.prestatario_id                     AS persona_id,
+        COALESCE(NULLIF(pr.nombre, ''), ${nombreLibre}) AS nombre,
+        COALESCE(pr.saldo_a_favor, 0)        AS saldo_a_favor,
+        MAX(u.ultimo)                        AS ultimo_abono,
+        ${agregados}
+      FROM prestamos p
+      JOIN sucursales   su ON su.id = p.sucursal_id
+      LEFT JOIN prestatarios pr ON pr.id  = p.prestatario_id
+      LEFT JOIN ult          u  ON u.pid  = p.prestatario_id
+      WHERE ${filtro} AND p.prestatario_id IS NOT NULL
+      GROUP BY p.prestatario_id, pr.nombre, pr.saldo_a_favor
+    `, [param]),
+    pool.query(`
+      WITH ult AS (
+        SELECT p2.cliente_id AS cid, MAX(ap.fecha) AS ultimo
+          FROM abonos_prestamo ap
+          JOIN prestamos       p2  ON p2.id  = ap.prestamo_id
+          JOIN sucursales      su2 ON su2.id = p2.sucursal_id
+         WHERE su2.negocio_id = ${alcanceNegocio}
+           AND p2.cliente_id IS NOT NULL
+         GROUP BY p2.cliente_id
+      )
+      SELECT
+        p.cliente_id                        AS persona_id,
+        COALESCE(NULLIF(c.nombre, ''), ${nombreLibre}) AS nombre,
+        c.celular                           AS celular,
+        COALESCE(c.saldo_a_favor, 0)        AS saldo_a_favor,
+        MAX(u.ultimo)                       AS ultimo_abono,
+        ${agregados}
+      FROM prestamos p
+      JOIN sucursales su ON su.id = p.sucursal_id
+      LEFT JOIN clientes c ON c.id  = p.cliente_id
+      LEFT JOIN ult      u ON u.cid = p.cliente_id
+      WHERE ${filtro} AND p.cliente_id IS NOT NULL
+      GROUP BY p.cliente_id, c.nombre, c.celular, c.saldo_a_favor
+    `, [param]),
+  ]);
+
+  return { prestatarios: prestatarios.rows, clientes: clientes.rows };
 };
 
 const findById = async (id) => {
@@ -1341,7 +1473,7 @@ const getAbonosPorTotal = async (client, abonoTotalId) => {
 
 module.exports = {
   crearAjusteDeuda,
-  findAll, findById, findByIdYNegocio,
+  findAll, findResumenPersonas, findById, findByIdYNegocio,
   perteneceAlNegocio,
   getAbonos, create, insertarAbono, updateEstado,
   ajustarStock, actualizarCantidadYValor,

@@ -20,10 +20,33 @@ const _getLogoNegocio = async (negocioId) => {
   return rows[0]?.valor || null;
 };
 
+// Sin `vista` ni `persona_id` responde el historial COMPLETO, byte por byte
+// igual que siempre: cualquier consumidor que no conozca los parámetros nuevos
+// (el export de cartera, un cliente viejo con el bundle en caché) sigue viendo
+// lo mismo. Los parámetros solo RECORTAN.
 const getPrestamos = async (req, res, next) => {
   try {
     const sucursalId = req.todasSucursales ? null : req.sucursal_id;
-    const data = await service.getPrestamos(sucursalId, req.user.negocio_id);
+
+    if (req.query.vista === 'personas') {
+      const data = await service.getResumenPersonas(sucursalId, req.user.negocio_id);
+      return res.json({ ok: true, data });
+    }
+
+    // El tipo se normaliza a una de dos opciones conocidas en vez de pasarse
+    // crudo al repositorio: así un valor inesperado cae en 'prestatario' y nunca
+    // llega a decidir sobre qué columna se filtra.
+    // Solo un entero POSITIVO activa el filtro. Cualquier otra cosa —vacío,
+    // texto, 0, negativo— cae en el comportamiento de siempre (historial
+    // completo), que es la regla de todo este endpoint: lo que no se entiende
+    // no recorta.
+    const crudo     = Number(req.query.persona_id);
+    const personaId = Number.isInteger(crudo) && crudo > 0 ? crudo : null;
+    const opciones  = personaId
+      ? { personaId, personaTipo: req.query.persona_tipo === 'cliente' ? 'cliente' : 'prestatario' }
+      : {};
+
+    const data = await service.getPrestamos(sucursalId, req.user.negocio_id, opciones);
     res.json({ ok: true, data });
   } catch (err) { next(err); }
 };

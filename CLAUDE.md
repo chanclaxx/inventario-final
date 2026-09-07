@@ -300,6 +300,80 @@ Three roles exist: `admin_negocio`, `supervisor`, `vendedor`. Role determines wh
 > `es_entrada` desde 20260828 y la suite reventaba antes de su primera
 > verificación; con esas dos columnas vuelve a correr entera (118).
 
+> **La lista de préstamos se pide POR PERSONA — el historial completo era el
+> cuello de botella** (`prestamos.repository.findResumenPersonas`,
+> `PrestamosPage.jsx`): `GET /api/prestamos` devolvía **siempre** todo el
+> historial del negocio. En Cellsite (negocio 31) eso son **9.976 préstamos y
+> 13,6 MB de JSON** — bajados enteros para pintar **diez tarjetas de persona**, y
+> vueltos a bajar después de **cada abono**, porque toda mutación invalida
+> `['prestamos']`. Por eso «cualquier proceso» se sentía lento: el POST era
+> rápido y lo que tardaba era la recarga que venía detrás.
+> **La consulta ya estaba sana**: el arreglo de agosto (agrupar el último abono
+> por persona) sigue en pie y `EXPLAIN ANALYZE` sobre Cellsite da **212 ms**. El
+> problema era el TAMAÑO de la respuesta, no la base.
+> El endpoint gana dos recortes **opcionales** — `?vista=personas` y
+> `?persona_tipo=..&persona_id=..` — y **sin ellos responde exactamente lo de
+> siempre**. Esa es la regla del diseño: *lo que no se entiende no recorta*, así
+> que un `persona_id` en texto, en 0 o negativo cae en el historial completo. Un
+> cliente con el bundle viejo en caché sigue funcionando igual.
+> La carga inicial pasa de **13,6 MB a 144 KB** (96×), y tras un abono se
+> refrescan el resumen y la persona abierta en vez de las 9.976 filas. Las claves
+> de los dos queries empiezan por `'prestamos'`, así que los ~15
+> `invalidateQueries({ queryKey: ['prestamos'], exact: false })` que ya existían
+> **los siguen refrescando a los dos: ninguna mutación cambió**.
+> **El resumen no pasa por `anotarLista`**: la lista de personas no pinta mora ni
+> interés (el badge de vencido vive en la tarjeta del préstamo, ya dentro de la
+> persona), y anotarlo costaba dos consultas más y el **32 % del peso** de la
+> respuesta en objetos que nadie lee.
+> **`IS DISTINCT FROM 'Activo'`, nunca `<> 'Activo'`**: el JavaScript que esto
+> reemplaza es `p.estado !== 'Activo'`, que cuenta los NULL como cerrados. Con
+> `<>` un estado nulo no entraría en NINGUNO de los dos contadores y la tarjeta
+> mostraría menos préstamos de los que la persona tiene.
+> El `ORDER BY` ganó **`p.id DESC` como desempate**: un lote de préstamos creado
+> desde el carrito comparte la fecha al milisegundo, y sin él Postgres podía
+> devolver esas filas en cualquier orden entre dos cargas de la misma pantalla.
+> Solo ordena lo que hasta ahora quedaba al azar.
+> **`anotarLista` ya no cambia de FORMA según el conjunto** (`mora.service`):
+> cuando ningún documento tenía cargos, el atajo devolvía menos claves
+> (`total_a_pagar`, `solo_faltan_cargos`) y `saldo_capital` en 0. El mismo
+> préstamo llegaba distinto según si **otro** préstamo del negocio tenía plazo —
+> y por lo tanto según qué subconjunto se pidiera. Ahora el atajo se sigue
+> saltando las dos **consultas** (el costo real) pero pasa igual por
+> `_resolverCargos` con los movimientos vacíos.
+> El **Service Worker ya no cachea `/api/prestamos`** (`vite.config.js`): con
+> `NetworkFirst` escribía los 13 MB descomprimidos en CacheStorage en cada carga
+> y tras cada abono, y con `maxEntries: 50` compartido esa sola entrada
+> desalojaba al resto de la API. Es el mismo motivo por el que `inventario` ya
+> estaba en `NetworkOnly`; de paso, cachear 5 minutos una pantalla de dinero es
+> lo que hace que un abono recién registrado se siga viendo pendiente.
+> El **export de cartera** es lo único que de verdad necesita las 9.976 filas:
+> las pide con la API pelada al hacer clic, sin pasar por el caché de React
+> Query, y las suelta.
+> **Vercel y Railway se despliegan por SEPARADO**, así que existe una ventana —y
+> un rollback del backend la reabre— en la que este frontend habla con un backend
+> que aún ignora `?vista=personas` y responde el array completo. Sin red, la
+> pantalla mostraría **cero personas**. Por eso `adaptarResumenPersonas` detecta
+> la respuesta vieja **por su FORMA** (un array) y la agrupa en el navegador,
+> exactamente como se hacía antes; y la consulta por persona **filtra igual en el
+> cliente**, para que un backend que no aplicara el recorte no acabe mostrando en
+> la ficha de alguien los préstamos de todo el negocio. Contra el backend nuevo
+> ninguno de los dos quita una sola fila. La sección 6 de la prueba **extrae la
+> función real del `.jsx`** y comprueba que dé lo mismo que el SQL: un respaldo
+> que se separa del original no sirve, y no se notaría hasta el despliegue
+> siguiente.
+> **`_resolverCargos` resuelve `emisionDe` solo si hay interés pactado**: esa
+> normalización pasa por `toLocaleDateString` con zona horaria —**36 µs por
+> llamada**—, y sobre 9.976 préstamos son **365 ms de event loop bloqueado** en
+> un contenedor que atiende a todos los negocios. Sin plan de interés,
+> `resolverEstadoInteres` se va por su return temprano y **no mira**
+> `fecha_inicio`, así que era trabajo tirado. Con el atajo perezoso son **2 ms**,
+> el resultado es idéntico (`13-devengo-identidad` sigue en «IDÉNTICO AL PESO»),
+> y de paso deja de pagarlo cualquier negocio que use mora pero no interés.
+> Prueba: `41-prestamos-por-persona` (39 verificaciones; la sección 1 es la que
+> protege a los 28 negocios, la 2 compara contra la agrupación del navegador
+> copiada tal cual, la 5 comprueba que el recorte va ENCIMA del alcance de
+> negocio y nunca en su lugar, y la 6 vigila el respaldo de despliegue).
+
 > **La lista de módulos está DUPLICADA a mano** (`backend/src/config/modulos.js`
 > y `MODULOS`/`PERMISOS_BASE` en `UsuariosConfig.jsx`): el frontend no puede
 > importar del backend y las dos copias se separaron. Al frontend le faltaba
