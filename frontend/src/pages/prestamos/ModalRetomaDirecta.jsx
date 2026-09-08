@@ -6,6 +6,7 @@ import { formatCOP } from '../../utils/formatters';
 import { Button }     from '../../components/ui/Button';
 import { Modal }      from '../../components/ui/Modal';
 import { InputMoneda } from '../../components/ui/InputMoneda';
+import { SelectorNodoRetoma } from '../../components/ui/SelectorNodoRetoma';
 import { ArrowLeftRight, Package, ShoppingBag } from 'lucide-react';
 import api from '../../api/axios.config';
 
@@ -40,7 +41,12 @@ export function ModalRetomaDirecta({ persona, sucursalId, onClose, onSuccess }) 
   const [busquedaCantidad,      setBusquedaCantidad]       = useState('');
   const [productoCantidadSel,   setProductoCantidadSel]    = useState(null);
   const [cantidadRetoma,        setCantidadRetoma]         = useState('1');
+  const [nodoSel,               setNodoSel]                = useState(null);
   const [valorRetoma,           setValorRetoma]            = useState('');
+  // Precio de venta del usado. Vacío = no se toca el precio que la referencia
+  // tenga. Antes el backend escribía `precio = valor_retoma`, o sea que el
+  // artículo quedaba ofrecido en lo que se acababa de pagar por él.
+  const [precioVenta,           setPrecioVenta]            = useState('');
   const [ingresoInventario,     setIngresoInventario]      = useState(true);
   const [error,                 setError]                  = useState('');
 
@@ -67,6 +73,7 @@ export function ModalRetomaDirecta({ persona, sucursalId, onClose, onSuccess }) 
     setImeiRetoma(''); setBusquedaSerial(''); setProductoSerialSel(null); setColorRetoma('');
     setCaracteristicasRetoma({});
     setBusquedaCantidad(''); setProductoCantidadSel(null); setCantidadRetoma('1');
+    setNodoSel(null); setPrecioVenta('');
   };
 
   const retoma = Number(valorRetoma) || 0;
@@ -86,8 +93,11 @@ export function ModalRetomaDirecta({ persona, sucursalId, onClose, onSuccess }) 
         ? Object.fromEntries(Object.entries(caracteristicasRetoma).filter(([, v]) => v.trim()))
         : null,
       producto_cantidad_id: tipoRetoma === 'cantidad' ? (productoCantidadSel?.id || null) : null,
+      atributo_id:          tipoRetoma === 'cantidad' ? (nodoSel?.atributo_id || null)   : null,
+      variante_id:          tipoRetoma === 'cantidad' ? (nodoSel?.variante_id || null)   : null,
       cantidad_retoma:      tipoRetoma === 'cantidad' ? Number(cantidadRetoma || 1) : 1,
       valor_retoma:         retoma,
+      precio_venta:         Number(precioVenta) > 0 ? Number(precioVenta) : null,
       ingreso_inventario:   ingresoInventario,
     }),
     onSuccess: (res) => {
@@ -225,7 +235,7 @@ export function ModalRetomaDirecta({ persona, sucursalId, onClose, onSuccess }) 
               <div className="flex flex-col gap-1">
                 <label className="text-xs font-medium text-gray-600">Producto {ingresoInventario ? '*' : ''}</label>
                 <input type="text" placeholder="Buscar producto..." value={busquedaCantidad}
-                  onChange={(e) => { setBusquedaCantidad(e.target.value); setProductoCantidadSel(null); }}
+                  onChange={(e) => { setBusquedaCantidad(e.target.value); setProductoCantidadSel(null); setNodoSel(null); }}
                   className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl
                     text-sm focus:outline-none focus:ring-2 focus:ring-purple-400 transition-all" />
                 {busquedaCantidad.length > 0 && !productoCantidadSel && (
@@ -234,7 +244,7 @@ export function ModalRetomaDirecta({ persona, sucursalId, onClose, onSuccess }) 
                       ? <p className="text-xs text-gray-400 px-3 py-2">Sin resultados</p>
                       : filtradosCantidad.map((p) => (
                           <button key={p.id}
-                            onClick={() => { setProductoCantidadSel(p); setBusquedaCantidad(p.nombre); }}
+                            onClick={() => { setProductoCantidadSel(p); setNodoSel(null); setBusquedaCantidad(p.nombre); }}
                             className="text-left px-3 py-2 text-sm hover:bg-purple-50 text-gray-700 border-b border-gray-50 last:border-0">
                             {p.nombre}
                             <span className="text-xs text-gray-400 ml-2">Stock: {p.stock}</span>
@@ -243,8 +253,20 @@ export function ModalRetomaDirecta({ persona, sucursalId, onClose, onSuccess }) 
                     }
                   </div>
                 )}
-                {productoCantidadSel && <p className="text-xs text-purple-600">✓ {productoCantidadSel.nombre}</p>}
+                {productoCantidadSel && (
+                  <p className="text-xs text-purple-600">
+                    ✓ {productoCantidadSel.nombre}{nodoSel?.label ? ` · ${nodoSel.label}` : ''}
+                  </p>
+                )}
               </div>
+              {ingresoInventario && productoCantidadSel && (
+                <SelectorNodoRetoma
+                  productoId={productoCantidadSel.id}
+                  sucursalId={sucursalId}
+                  atributoId={nodoSel?.atributo_id}
+                  varianteId={nodoSel?.variante_id}
+                  onElegir={setNodoSel} />
+              )}
               <div className="flex flex-col gap-1">
                 <label className="text-xs font-medium text-gray-600">Cantidad</label>
                 <input type="number" min="1" placeholder="1" value={cantidadRetoma}
@@ -271,6 +293,23 @@ export function ModalRetomaDirecta({ persona, sucursalId, onClose, onSuccess }) 
             className="w-full px-3 py-2 bg-gray-100 rounded-xl text-sm
               focus:outline-none focus:ring-2 focus:ring-purple-500 focus:bg-white transition-all" />
         </div>
+
+        {/* Precio de venta del usado. Va aparte del valor porque son dos cifras
+            distintas: lo que se paga por él y a cuánto se va a revender. */}
+        {ingresoInventario && (
+          <div className="flex flex-col gap-1">
+            <label className="text-sm font-medium text-gray-700">
+              Precio de venta <span className="text-gray-400 font-normal text-xs">(opcional)</span>
+            </label>
+            <InputMoneda value={precioVenta} onChange={setPrecioVenta}
+              placeholder="Dejar vacío para no cambiarlo"
+              className="w-full px-3 py-2 bg-gray-100 rounded-xl text-sm
+                focus:outline-none focus:ring-2 focus:ring-purple-500 focus:bg-white transition-all" />
+            <p className="text-xs text-gray-400">
+              A cuánto se va a revender. Vacío deja el precio que ya tenía la referencia.
+            </p>
+          </div>
+        )}
 
         {/* Resumen */}
         {retoma > 0 && (

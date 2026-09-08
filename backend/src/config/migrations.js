@@ -377,6 +377,37 @@ const aplicarMigraciones = async (client) => {
       ON correcciones_entrada (negocio_id, fecha DESC);
   `);
 
+  // Retomas: el equipo que YO vendí y vuelve reingresa con su costo de HOY —
+  // ver migrations/20260907_retomas_reingreso.sql (ese archivo lleva el diseño
+  // completo; esto es la copia que corre de verdad en producción).
+  //
+  // El reingreso en sí no necesita ni una columna: es escribir las que ya
+  // existen (costo_compra, fecha_entrada, producto_id, proveedor_id). Estas
+  // tres existen para poder DESHACER — anular una retoma hacía
+  // `DELETE FROM seriales`, y sobre una reactivación eso borraba la unidad
+  // ORIGINAL con su costo, su proveedor y su vínculo con la compra.
+  //
+  // Bloque PROPIO: si esto fallara, retomar tiene que seguir funcionando igual
+  // que hoy. La bandera `hayRetomaReingreso()` de src/config/columnas.js es la
+  // que decide si se guarda el rastro para deshacer.
+  //
+  // Sin backticks ni interpolaciones dentro del template literal.
+  await migrar(client, 'Retomas: reingreso con costo de hoy', `
+    ALTER TABLE IF EXISTS retomas
+      ADD COLUMN IF NOT EXISTS serial_id INTEGER REFERENCES seriales(id) ON DELETE SET NULL;
+    ALTER TABLE IF EXISTS retomas
+      ADD COLUMN IF NOT EXISTS reactivado BOOLEAN NOT NULL DEFAULT FALSE;
+    -- Lo que la retoma pisó, para devolverlo tal cual al anular. No es
+    -- derivable de ningún lado: es justo lo que el UPDATE va a sobrescribir.
+    -- En JSONB y no en seis columnas porque nada de ahí dentro se consulta, se
+    -- suma ni se filtra: se escribe entero al retomar y se lee entero al
+    -- anular. Mismo criterio que borradores.datos.
+    ALTER TABLE IF EXISTS retomas
+      ADD COLUMN IF NOT EXISTS estado_anterior JSONB;
+    CREATE INDEX IF NOT EXISTS idx_retomas_serial
+      ON retomas (serial_id) WHERE serial_id IS NOT NULL;
+  `);
+
   // Ubicación espacial de productos — ver migrations/20260730_ubicacion_producto.sql
   //
   // 100% aditiva e idempotente. Columnas nullable: un negocio sin la feature no

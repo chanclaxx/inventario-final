@@ -496,6 +496,72 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > esas claves son las mismas que arman `PrestamosPage` y `TabCreditos` al agrupar, así que
 > si cambian allá, los enlaces dejan de abrir la ficha.
 
+> **La retoma de MI PROPIO equipo entra con el costo de HOY**
+> (`utils/retomaSerial.util.js`, `20260907_retomas_reingreso.sql`): vendo un
+> equipo, pasan cuatro meses, el cliente lo trae para cambiarlo. Cuando el IMEI
+> ya existe vendido en el negocio, el sistema no crea nada: **REACTIVA** la fila
+> que ya estaba — y esa fila trae encima la historia de la primera vez.
+> Reactivar y crear no escribían los mismos campos aunque físicamente son el
+> mismo hecho: **una unidad que vuelve es una unidad que entra**. El serial nuevo
+> (equipo ajeno) tomaba `costo_compra = valor_retoma` y `fecha_entrada = hoy`; el
+> reactivado se quedaba con el costo, la fecha, el precio y el **proveedor** de
+> la compra original. Y como la utilidad de una venta con IMEI se calcula contra
+> `seriales.costo_compra` (`costoRed.util.js`), la reventa reportaba **pérdida**:
+> vendo en 800.000 algo que costó 600.000, lo retomo por 400.000, lo revendo en
+> 500.000 → el sistema calcula −100.000 donde la respuesta es 100.000. No se ve
+> como un error: se ve como que ese producto da pérdida.
+> **No es una regla nueva**: es la que ya aplica la COMPRA a proveedor al
+> reactivar un serial (`compras.service.js` escribe `costo_compra` y
+> `proveedor_id`). Lo nuevo es que la retoma la cumpla — y que la cumplan las
+> **cuatro** puertas, que se habían separado: venta con retoma, edición de esa
+> factura, intercambio contra un préstamo y retoma directa. Las de préstamos
+> escribían `precio = valor_retoma` y **ningún costo**, o sea al revés que
+> facturas: lo que pagaste acababa en el costo, en el precio de venta o en
+> ninguno de los dos según por qué pantalla hubieras entrado.
+> **La REFERENCIA es cambiable** (decisión del negocio): al reactivar, la unidad
+> se mueve al `producto_id` elegido, así que el equipo puede volver como
+> «iPhone 11 Pro **usado**» en vez de a la referencia de nuevo. Antes se ignoraba
+> lo que el usuario escogía. La búsqueda del IMEI trae **todas** las filas del
+> negocio y prefiere la del producto destino: con `UNIQUE (imei, producto_id)`,
+> mover a una referencia que ya tuvo ese IMEI chocaría contra el índice.
+> **El PRECIO de venta lo decide una persona** (`precio_venta`, opcional): sin él
+> no se toca. Derivarlo del valor de la retoma dejaba el usado ofrecido en lo que
+> se acababa de pagar por él (cero utilidad); dejarlo intacto lo deja al precio
+> de nuevo. Las dos son mentiras, así que se pregunta.
+> **Anular una retoma ya NO borra el equipo.** Hacía `DELETE FROM seriales`, y
+> sobre una reactivación eso no borra lo que la retoma creó: borra la **unidad
+> original** con su costo, su proveedor y su vínculo con la compra, y deja la
+> línea de la factura que la vendió apuntando a un serial inexistente. La tabla
+> no podía distinguir los dos casos, así que la migración agrega **tres
+> columnas**: `serial_id`, `reactivado` (marca **explícita**, no deducida — «el
+> IMEI ya existía» también es verdad de un re-import) y `estado_anterior` JSONB
+> con lo que el UPDATE pisó. En JSONB y no en seis columnas porque nada de ahí
+> dentro se consulta, se suma ni se filtra: se escribe entero al retomar y se lee
+> entero al anular — el criterio de `borradores.datos`.
+> `CAMPOS_PISADOS` es la **misma** lista en el snapshot y en la restauración: si
+> se separan, anular deja alguno con el valor de la retoma.
+> De paso, `findSerialEnInventario` buscaba `WHERE s.imei = $1` **a secas** —el
+> IMEI es único por negocio, no globalmente, y en una base de 28 negocios eso
+> podía alcanzar (y hacer borrar) la fila de otro—.
+> **La retoma por CANTIDAD baja al nodo HOJA**: escribía en
+> `productos_cantidad.stock`, que con variantes activas es un **derivado**, así
+> que la primera sincronización borraba lo retomado. Mismo error que ya costó
+> corregir en la red interna y en el código escaneable. El costo promedio se
+> pondera contra el stock de **ese** nodo (el del producto es la suma de todas
+> las tallas), y en préstamos **no se recalculaba en absoluto**.
+> **El reingreso NO depende de la migración**: escribe columnas que existen desde
+> siempre. `hayRetomaReingreso()` solo apaga el rastro para deshacer — sin las
+> columnas, anular se comporta como hasta hoy y retomar sigue igual. Es el
+> criterio de `hayMovimientosUbicacion`: el extra no puede tumbar la operación
+> diaria.
+> **Sin backfill, a propósito**: las retomas ya registradas se quedan como están.
+> Reescribir el costo de una unidad que quizá ya se revendió cambiaría la
+> utilidad de una venta ya reportada.
+> Prueba: `42-retomas` (60 verificaciones; la sección 1 es la que hay que mirar
+> primero —el equipo ajeno entra como siempre—, la 5 comprueba que anular
+> restaura en vez de borrar, la 7 corre la aritmética del caso completo y la 9
+> que sin migración retomar sigue funcionando).
+
 > **Cargos financieros — mora e interés** (`mora/`, `utils/devengo.util.js`,
 > `utils/mora.util.js`, `utils/interes.util.js`): dos cargos **independientes**
 > sobre créditos y préstamos. La **mora** sanciona el atraso (ancla: `fecha_limite`);

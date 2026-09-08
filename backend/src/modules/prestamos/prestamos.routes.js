@@ -43,8 +43,14 @@ const validarIntercambio = [
   body('imei_retoma').optional({ nullable: true }).isString(),
   body('producto_serial_id').optional({ nullable: true }).isInt({ min: 1 }),
   body('producto_cantidad_id').optional({ nullable: true }).isInt({ min: 1 }),
+  body('atributo_id').optional({ nullable: true }).isInt({ min: 1 }),
+  body('variante_id').optional({ nullable: true }).isInt({ min: 1 }),
   body('cantidad_retoma').optional({ nullable: true }).isInt({ min: 1 }),
   body('color_retoma').optional({ nullable: true }).isString(),
+  // Precio de venta del usado. Opcional: sin el, el precio de la unidad no se
+  // toca. Nunca se deriva del valor de la retoma — eso dejaba el equipo
+  // ofrecido en lo que se acababa de pagar por el.
+  body('precio_venta').optional({ nullable: true }).isFloat({ gt: 0 }),
   body('descripcion').optional({ nullable: true }).isString(),
 ];
 
@@ -56,8 +62,14 @@ const validarRetomaDirecta = [
   body('imei_retoma').optional({ nullable: true }).isString(),
   body('producto_serial_id').optional({ nullable: true }).isInt({ min: 1 }),
   body('producto_cantidad_id').optional({ nullable: true }).isInt({ min: 1 }),
+  body('atributo_id').optional({ nullable: true }).isInt({ min: 1 }),
+  body('variante_id').optional({ nullable: true }).isInt({ min: 1 }),
   body('cantidad_retoma').optional({ nullable: true }).isInt({ min: 1 }),
   body('color_retoma').optional({ nullable: true }).isString(),
+  // Precio de venta del usado. Opcional: sin el, el precio de la unidad no se
+  // toca. Nunca se deriva del valor de la retoma — eso dejaba el equipo
+  // ofrecido en lo que se acababa de pagar por el.
+  body('precio_venta').optional({ nullable: true }).isFloat({ gt: 0 }),
   body('descripcion').optional({ nullable: true }).isString(),
 ];
 

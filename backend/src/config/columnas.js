@@ -45,6 +45,7 @@ const detectarColumnas = async () => {
   await _detectarMovimientosUbicacion();
   await _detectarPedidosInternos();
   await _detectarCorreccionesEntrada();
+  await _detectarRetomaReingreso();
   return _ubicacionDisponible;
 };
 
@@ -264,6 +265,52 @@ const _detectarCorreccionesEntrada = async () => {
 
 const hayCorreccionesEntrada = () => _correccionesEntradaDisponible;
 
+// ── Rastro de la retoma para poder deshacerla ────────────────────────────────
+//
+// Ver migrations/20260907_retomas_reingreso.sql. El REINGRESO en sí no depende
+// de esta bandera: escribir el costo de hoy en la unidad que vuelve usa
+// columnas que existen desde siempre, y eso tiene que pasar igual aunque el
+// ALTER no haya llegado.
+//
+// Lo que apaga es guardar el rastro (`serial_id`, `reactivado`,
+// `estado_anterior`), y con él la capacidad de deshacer bien: sin las columnas,
+// anular una retoma se comporta como hasta hoy. Es el mismo criterio que
+// `hayMovimientosUbicacion`: el extra no puede tumbar la operación diaria, y
+// retomar es la operación diaria de un montón de negocios.
+//
+// Se exigen las TRES: con `serial_id` y sin `estado_anterior` la anulación
+// sabría a qué unidad volver pero no a qué valores, que es peor que no saber
+// nada — restauraría un serial dejándole el costo de la retoma.
+
+const COLUMNAS_RETOMA = ['serial_id', 'reactivado', 'estado_anterior'];
+
+let _retomaReingresoDisponible = false;
+
+const _detectarRetomaReingreso = async () => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT column_name
+       FROM information_schema.columns
+       WHERE table_schema = 'public'
+         AND table_name   = 'retomas'
+         AND column_name  = ANY($1::text[])`,
+      [COLUMNAS_RETOMA]
+    );
+    const encontradas = new Set(rows.map((r) => r.column_name));
+    _retomaReingresoDisponible = COLUMNAS_RETOMA.every((c) => encontradas.has(c));
+
+    if (!_retomaReingresoDisponible) {
+      console.warn('⚠️  Rastro de retomas ausente: anular una retoma se comporta como antes (retomar sigue igual).');
+    }
+  } catch (err) {
+    _retomaReingresoDisponible = false;
+    console.error('⚠️  No se pudo verificar el rastro de retomas (anular se comporta como antes):', err.message);
+  }
+  return _retomaReingresoDisponible;
+};
+
+const hayRetomaReingreso = () => _retomaReingresoDisponible;
+
 // Solo para pruebas: permite simular una BD sin la columna sin tocar la BD real.
 const _setUbicacionDisponible  = (valor) => { _ubicacionDisponible  = !!valor; };
 const _setCatalogoDisponible   = (valor) => { _catalogoDisponible   = !!valor; };
@@ -271,6 +318,7 @@ const _setUbicacionesDisponible = (valor) => { _ubicacionesDisponible = !!valor;
 const _setMovimientosUbicacionDisponible = (valor) => { _movimientosUbicacionDisponible = !!valor; };
 const _setPedidosInternosDisponible = (valor) => { _pedidosInternosDisponible = !!valor; };
 const _setCorreccionesEntradaDisponible = (valor) => { _correccionesEntradaDisponible = !!valor; };
+const _setRetomaReingresoDisponible = (valor) => { _retomaReingresoDisponible = !!valor; };
 
 module.exports = {
   detectarColumnas, hayUbicacion, _setUbicacionDisponible,
@@ -279,4 +327,5 @@ module.exports = {
   hayMovimientosUbicacion, _setMovimientosUbicacionDisponible,
   hayPedidosInternos, _setPedidosInternosDisponible,
   hayCorreccionesEntrada, _setCorreccionesEntradaDisponible,
+  hayRetomaReingreso, _setRetomaReingresoDisponible,
 };

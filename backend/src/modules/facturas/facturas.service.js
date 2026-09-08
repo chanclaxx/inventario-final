@@ -7,6 +7,7 @@ const cajaRepo     = require('../caja/caja.repository');
 const { enviarFactura }      = require('../email/email.service');
 const garantiasRepo          = require('../garantias/garantias.repository');
 const { calcularCostoPromedio } = require('../../utils/costoPromedio.util');
+const { ingresarSerialRetomado, revertirIngresoSerial, rastroParaRetoma } = require('../../utils/retomaSerial.util');
 
 const ES_COMPANERO = (cedula) => cedula === 'COMPANERO';
 
@@ -24,6 +25,65 @@ const _caracteristicasRetomaJson = (valor) => {
     Object.entries(valor).filter(([, v]) => typeof v === 'string' && v.trim() !== '')
   );
   return Object.keys(limpio).length ? JSON.stringify(limpio) : null;
+};
+
+// ── Ingreso al inventario de una retoma por CANTIDAD ─────────────────────────
+//
+// Con la feature «Variantes» activa el stock vive en la HOJA
+// (variante > atributo) y el del producto es un DERIVADO. Escribir arriba —lo
+// que hacía este bloque— deja el producto diciendo 5 con sus tallas en 0, y el
+// primer ajuste sobre cualquier variante dispara `sincronizarStockProducto`,
+// que recalcula producto = Σ variantes y BORRA lo retomado. Es el mismo error
+// que ya costó corregir en la red interna y en el código escaneable.
+//
+// El costo promedio se pondera contra el stock del MISMO nodo: el del producto
+// es la suma de todas las tallas y no dice nada de esta.
+const _ingresarRetomaCantidad = async (client, negocioId, retoma) => {
+  await _verificarProductoCantidadNegocio(client, retoma.producto_cantidad_id, negocioId);
+
+  const cantidad = Number(retoma.cantidad_retoma || 1);
+  const varianteId = retoma.variante_id ? Number(retoma.variante_id) : null;
+  const atributoId = retoma.atributo_id ? Number(retoma.atributo_id) : null;
+
+  // Qué nodo recibe y de dónde se lee su costo actual.
+  let leerNodo;
+  if (varianteId) {
+    leerNodo = ['SELECT stock, costo_unitario FROM variantes_atributo WHERE id = $1', varianteId];
+  } else if (atributoId) {
+    leerNodo = ['SELECT stock, costo_unitario FROM atributos_producto WHERE id = $1', atributoId];
+  } else {
+    leerNodo = ['SELECT stock, costo_unitario FROM productos_cantidad WHERE id = $1', retoma.producto_cantidad_id];
+  }
+
+  const { rows: nodoRows } = await client.query(leerNodo[0], [leerNodo[1]]);
+  const nodo = nodoRows[0] || null;
+  if (!nodo) throw { status: 404, message: 'El nodo de la retoma no existe' };
+
+  if (varianteId) {
+    await facturasRepo.ajustarStockVarianteEnTx(client, varianteId, cantidad);
+  } else if (atributoId) {
+    await facturasRepo.ajustarStockAtributoEnTx(client, atributoId, cantidad);
+  } else {
+    await facturasRepo.ajustarStockCantidad(client, retoma.producto_cantidad_id, cantidad);
+  }
+
+  if (Number(retoma.valor_retoma) > 0) {
+    const costoPromedio = calcularCostoPromedio(
+      nodo.stock, nodo.costo_unitario, cantidad, Number(retoma.valor_retoma) / cantidad,
+    );
+    if (varianteId) {
+      await client.query('UPDATE variantes_atributo SET costo_unitario = $1 WHERE id = $2', [costoPromedio, varianteId]);
+    } else if (atributoId) {
+      await client.query('UPDATE atributos_producto SET costo_unitario = $1 WHERE id = $2', [costoPromedio, atributoId]);
+    } else {
+      await facturasRepo.actualizarCostoPromedio(client, retoma.producto_cantidad_id, costoPromedio);
+    }
+  }
+
+  // El producto se recalcula DESPUÉS, nunca se escribe a mano.
+  if (varianteId || atributoId) {
+    await facturasRepo.sincronizarStockArbolEnTx(client, retoma.producto_cantidad_id);
+  }
 };
 
 const _verificarProductoCantidadNegocio = async (client, productoId, negocioId) => {
@@ -324,102 +384,47 @@ const crearFactura = async ({
     }
 
     for (const retoma of retomas) {
-      const colorRetoma           = retoma.tipo_retoma === 'serial' ? (retoma.color_retoma || null) : null;
-      const caracteristicasRetoma = retoma.tipo_retoma === 'serial'
-        ? _caracteristicasRetomaJson(retoma.caracteristicas_retoma)
-        : null;
+      const esSerial    = retoma.tipo_retoma === 'serial';
+      const colorRetoma = esSerial ? (retoma.color_retoma || null) : null;
+
+      // El ingreso va ANTES de grabar la retoma, y no al reves: hasta ahora la
+      // fila se escribia diciendo `ingreso_inventario = true` y despues se
+      // intentaba ingresar, asi que si el ingreso no ocurria (sin referencia
+      // elegida) la retoma quedaba mintiendo. Ahora se graba lo que de verdad
+      // paso, con el rastro para poder deshacerlo.
+      let rastro = null;
+
+      if (retoma.ingreso_inventario && esSerial && retoma.imei) {
+        rastro = await ingresarSerialRetomado(client, {
+          negocioId:         negocio_id,
+          sucursalId:        sucursal_id,
+          imei:              retoma.imei,
+          productoSerialId:  retoma.producto_serial_id || null,
+          valorRetoma:       retoma.valor_retoma,
+          precioVenta:       retoma.precio_venta ?? null,
+          clienteOrigen:     nombre_cliente,
+          color:             colorRetoma,
+          caracteristicas:   retoma.caracteristicas_retoma,
+          reactivarSerialId: retoma.reactivar_serial_id || null,
+        });
+      }
+
+      if (retoma.ingreso_inventario && !esSerial && retoma.producto_cantidad_id) {
+        await _ingresarRetomaCantidad(client, negocio_id, retoma);
+        rastro = { ingresado: true };
+      }
 
       await facturasRepo.insertarRetoma(client, {
         factura_id:         factura.id,
         descripcion:        retoma.descripcion,
         valor_retoma:       retoma.valor_retoma,
-        ingreso_inventario: retoma.ingreso_inventario || false,
+        ingreso_inventario: !!(retoma.ingreso_inventario && rastro?.ingresado),
         nombre_producto:    retoma.nombre_producto    || null,
         imei:               retoma.imei               || null,
         cantidad_retoma:    retoma.cantidad_retoma     || 1,
         color:              colorRetoma,
+        ...rastroParaRetoma(rastro),
       });
-
-      if (retoma.ingreso_inventario && retoma.tipo_retoma === 'serial' && retoma.imei) {
-        const { rows: existeRows } = await client.query(
-          `SELECT s.id, s.prestado, s.vendido FROM seriales s
-           JOIN productos_serial ps ON ps.id = s.producto_id
-           JOIN sucursales       su ON su.id = ps.sucursal_id
-           WHERE UPPER(TRIM(s.imei)) = UPPER(TRIM($1)) AND su.negocio_id = $2 LIMIT 1`,
-          [retoma.imei, negocio_id]
-        );
-        const existeSerial = existeRows[0] || null;
-
-        if (retoma.reactivar_serial_id) {
-          const { rows: serialCheck } = await client.query(
-            `SELECT s.id, s.vendido, s.prestado FROM seriales s
-             JOIN productos_serial ps ON ps.id = s.producto_id
-             JOIN sucursales       su ON su.id = ps.sucursal_id
-             WHERE s.id = $1 AND su.negocio_id = $2`,
-            [retoma.reactivar_serial_id, negocio_id]
-          );
-          if (!serialCheck.length) throw { status: 403, message: 'El serial a reactivar no pertenece a este negocio' };
-          if (serialCheck[0].prestado) {
-            throw { status: 409, code: 'IMEI_PRESTADO', message: `El IMEI ${retoma.imei} está prestado. Ve a la pestaña de Préstamos y regístralo como devuelto para que regrese al inventario; no se puede ingresar como retoma.` };
-          }
-          if (!serialCheck[0].vendido) {
-            throw { status: 409, message: `El IMEI ${retoma.imei} ya está registrado y disponible en el inventario.` };
-          }
-          await client.query(
-            `UPDATE seriales SET vendido = false, prestado = false,
-             fecha_salida = NULL, cliente_origen = $1,
-             color = COALESCE($2, color),
-             caracteristicas = COALESCE($3::jsonb, caracteristicas)
-             WHERE id = $4`,
-            [nombre_cliente, colorRetoma, caracteristicasRetoma, retoma.reactivar_serial_id]
-          );
-        } else if (existeSerial) {
-          if (existeSerial.prestado) {
-            throw { status: 409, code: 'IMEI_PRESTADO', message: `El IMEI ${retoma.imei} está prestado. Ve a la pestaña de Préstamos y regístralo como devuelto para que regrese al inventario; no se puede ingresar como retoma.` };
-          }
-          if (!existeSerial.vendido) {
-            throw { status: 409, message: `El IMEI ${retoma.imei} ya está registrado y disponible en el inventario.` };
-          }
-          // Solo se reactiva un serial VENDIDO que regresa (IMEI único por negocio).
-          await client.query(
-            `UPDATE seriales SET vendido = false, prestado = false,
-             fecha_salida = NULL, cliente_origen = $1,
-             color = COALESCE($2, color),
-             caracteristicas = COALESCE($3::jsonb, caracteristicas)
-             WHERE id = $4`,
-            [nombre_cliente, colorRetoma, caracteristicasRetoma, existeSerial.id]
-          );
-        } else if (retoma.producto_serial_id) {
-          const { rows: psCheck } = await client.query(
-            `SELECT ps.id FROM productos_serial ps
-             JOIN sucursales su ON su.id = ps.sucursal_id
-             WHERE ps.id = $1 AND su.negocio_id = $2`,
-            [retoma.producto_serial_id, negocio_id]
-          );
-          if (!psCheck.length) throw { status: 403, message: 'El producto de retoma no pertenece a este negocio' };
-          await client.query(
-            `INSERT INTO seriales(producto_id, imei, fecha_entrada, costo_compra, cliente_origen, color, caracteristicas)
-             VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb)`,
-            [retoma.producto_serial_id, retoma.imei, _fechaHoy(), retoma.valor_retoma, nombre_cliente,
-             colorRetoma, caracteristicasRetoma]
-          );
-        }
-      }
-
-      if (retoma.ingreso_inventario && retoma.tipo_retoma === 'cantidad' && retoma.producto_cantidad_id) {
-        await _verificarProductoCantidadNegocio(client, retoma.producto_cantidad_id, negocio_id);
-        const productoActual = await _leerStockYCosto(client, retoma.producto_cantidad_id);
-        await facturasRepo.ajustarStockCantidad(client, retoma.producto_cantidad_id, Number(retoma.cantidad_retoma || 1));
-
-        if (productoActual && Number(retoma.valor_retoma) > 0) {
-          const cantRetoma = Number(retoma.cantidad_retoma || 1);
-          const costoUnitarioRetoma = Number(retoma.valor_retoma) / cantRetoma;
-          const costoPromedio = calcularCostoPromedio(
-            productoActual.stock, productoActual.costo_unitario, cantRetoma, costoUnitarioRetoma,
-          );
-          await facturasRepo.actualizarCostoPromedio(client, retoma.producto_cantidad_id, costoPromedio);
-        }
-      }
     }
 
     if (domicilio?.domiciliario_id) {
@@ -549,21 +554,23 @@ const cancelarFactura = async (negocioId, id, eliminarRetoma = false, _desdeDevo
       }
     }
 
+    // Deshacer el ingreso de la retoma. Antes esto era un `DELETE FROM seriales`
+    // a secas: sobre una REACTIVACIÓN eso no borraba lo que la retoma creó,
+    // borraba la unidad ORIGINAL —con su costo, su proveedor y su vínculo con la
+    // compra— y dejaba la línea de la factura que la vendió apuntando a un
+    // serial inexistente. `revertirIngresoSerial` la devuelve a como estaba.
     if (eliminarRetoma) {
       const retomas = await facturasRepo.getRetomas(id);
       for (const retoma of retomas) {
         if (!retoma.ingreso_inventario) continue;
         if (retoma.imei) {
-          const { rows: serialRows } = await client.query(
-            `SELECT s.id FROM seriales s
-             JOIN productos_serial ps ON ps.id = s.producto_id
-             JOIN sucursales       su ON su.id = ps.sucursal_id
-             WHERE s.imei = $1 AND su.negocio_id = $2 AND s.vendido = false LIMIT 1`,
-            [retoma.imei, negocioId]
-          );
-          if (serialRows.length) {
-            await client.query('DELETE FROM seriales WHERE id = $1', [serialRows[0].id]);
-          }
+          await revertirIngresoSerial(client, {
+            negocioId,
+            imei:           retoma.imei,
+            serialId:       retoma.serial_id ?? null,
+            reactivado:     !!retoma.reactivado,
+            estadoAnterior: retoma.estado_anterior ?? null,
+          });
         } else if (retoma.nombre_producto) {
           const { rows: prodRows } = await client.query(
             `SELECT pc.id FROM productos_cantidad pc
@@ -758,88 +765,41 @@ const editarFactura = async (negocioId, id, {
     }
 
     if (retoma) {
-      const colorRetoma           = retoma.tipo_retoma === 'serial' ? (retoma.color_retoma || null) : null;
-      const caracteristicasRetoma = retoma.tipo_retoma === 'serial'
-        ? _caracteristicasRetomaJson(retoma.caracteristicas_retoma)
-        : null;
+      const esSerial    = retoma.tipo_retoma === 'serial';
+      const colorRetoma = esSerial ? (retoma.color_retoma || null) : null;
+      let   rastro      = null;
+
+      if (retoma.ingreso_inventario && esSerial && retoma.imei) {
+        rastro = await ingresarSerialRetomado(client, {
+          negocioId:         negocioId,
+          sucursalId:        facturaActual.sucursal_id,
+          imei:              retoma.imei,
+          productoSerialId:  retoma.producto_serial_id || null,
+          valorRetoma:       retoma.valor_retoma,
+          precioVenta:       retoma.precio_venta ?? null,
+          clienteOrigen:     nombre_cliente,
+          color:             colorRetoma,
+          caracteristicas:   retoma.caracteristicas_retoma,
+          reactivarSerialId: retoma.reactivar_serial_id || null,
+        });
+      }
+
+      if (retoma.ingreso_inventario && !esSerial && retoma.producto_cantidad_id) {
+        await _ingresarRetomaCantidad(client, negocioId, retoma);
+        rastro = { ingresado: true };
+      }
 
       await facturasRepo.insertarRetoma(client, {
         factura_id:         id,
         descripcion:        retoma.descripcion,
         valor_retoma:       retoma.valor_retoma,
-        ingreso_inventario: retoma.ingreso_inventario || false,
+        ingreso_inventario: !!(retoma.ingreso_inventario && rastro?.ingresado),
         nombre_producto:    retoma.nombre_producto    || null,
         imei:               retoma.imei               || null,
         cantidad_retoma:    retoma.cantidad_retoma     || 1,
         color:              colorRetoma,
+        ...rastroParaRetoma(rastro),
       });
-
-      if (retoma.ingreso_inventario) {
-        if (retoma.tipo_retoma === 'serial' && retoma.imei) {
-          const { rows: existeRows } = await client.query(
-            `SELECT s.id, s.prestado, s.vendido FROM seriales s
-             JOIN productos_serial ps ON ps.id = s.producto_id
-             JOIN sucursales       su ON su.id = ps.sucursal_id
-             WHERE UPPER(TRIM(s.imei)) = UPPER(TRIM($1)) AND su.negocio_id = $2 LIMIT 1`,
-            [retoma.imei, negocioId]
-          );
-          const existeSerial = existeRows[0] || null;
-
-          if (retoma.producto_serial_id) {
-            if (existeSerial) {
-              if (existeSerial.prestado) {
-                throw { status: 409, code: 'IMEI_PRESTADO', message: `El IMEI ${retoma.imei} está prestado. Ve a la pestaña de Préstamos y regístralo como devuelto para que regrese al inventario; no se puede ingresar como retoma.` };
-              }
-              if (!existeSerial.vendido) {
-                throw { status: 409, message: `El IMEI ${retoma.imei} ya está registrado y disponible en el inventario.` };
-              }
-              await client.query(
-                `UPDATE seriales
-                 SET vendido = false, prestado = false, fecha_salida = NULL, cliente_origen = $1,
-                     color = COALESCE($2, color),
-                     caracteristicas = COALESCE($3::jsonb, caracteristicas)
-                 WHERE id = $4`,
-                [nombre_cliente, colorRetoma, caracteristicasRetoma, existeSerial.id]
-              );
-            } else {
-              const { rows: psCheck } = await client.query(
-                `SELECT ps.id FROM productos_serial ps
-                 JOIN sucursales su ON su.id = ps.sucursal_id
-                 WHERE ps.id = $1 AND su.negocio_id = $2`,
-                [retoma.producto_serial_id, negocioId]
-              );
-              if (!psCheck.length) {
-                throw { status: 403, message: 'El producto de retoma no pertenece a este negocio' };
-              }
-              await client.query(
-                `INSERT INTO seriales(producto_id, imei, fecha_entrada, costo_compra, cliente_origen, color, caracteristicas)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)`,
-                [retoma.producto_serial_id, retoma.imei,
-                 _fechaHoy(), retoma.valor_retoma, nombre_cliente,
-                 colorRetoma, caracteristicasRetoma]
-              );
-            }
-          }
-        }
-
-        if (retoma.tipo_retoma === 'cantidad' && retoma.producto_cantidad_id) {
-          await _verificarProductoCantidadNegocio(client, retoma.producto_cantidad_id, negocioId);
-          const productoActual = await _leerStockYCosto(client, retoma.producto_cantidad_id);
-
-          await facturasRepo.ajustarStockCantidad(
-            client, retoma.producto_cantidad_id, Number(retoma.cantidad_retoma || 1)
-          );
-
-          if (productoActual && Number(retoma.valor_retoma) > 0) {
-            const cantRetoma = Number(retoma.cantidad_retoma || 1);
-            const costoUnitarioRetoma = Number(retoma.valor_retoma) / cantRetoma;
-            const costoPromedio = calcularCostoPromedio(
-              productoActual.stock, productoActual.costo_unitario, cantRetoma, costoUnitarioRetoma,
-            );
-            await facturasRepo.actualizarCostoPromedio(client, retoma.producto_cantidad_id, costoPromedio);
-          }
-        }
-      }
     }
 
     await client.query('COMMIT');

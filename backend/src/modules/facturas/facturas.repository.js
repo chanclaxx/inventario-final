@@ -1,5 +1,6 @@
 const { pool } = require('../../config/db');
 const { asignarNumeroDocumento } = require('../../utils/numeracion.util');
+const { hayRetomaReingreso } = require('../../config/columnas');
 
 // ── Subconsulta de proveedores reutilizable ───────────────────────────────────
 //
@@ -261,10 +262,16 @@ const getPagos = async (facturaId) => {
   return rows;
 };
 
+// El rastro del reingreso se pide solo si la migración 20260907 se aplicó: sin
+// ella estas columnas no existen y nombrarlas tumbaría CANCELAR una factura,
+// que es una operación diaria. Ausente, la reversión se comporta como antes.
 const getRetomas = async (facturaId) => {
+  const extra = hayRetomaReingreso()
+    ? ', serial_id, reactivado, estado_anterior'
+    : '';
   const { rows } = await pool.query(`
     SELECT id, factura_id, descripcion, valor_retoma,
-           ingreso_inventario, nombre_producto, imei, cantidad_retoma
+           ingreso_inventario, nombre_producto, imei, cantidad_retoma${extra}
     FROM retomas WHERE factura_id = $1
     ORDER BY id
   `, [facturaId]);
@@ -358,22 +365,37 @@ const insertarPago = async (client, { factura_id, metodo, valor }) => {
   return rows[0];
 };
 
+// El rastro del reingreso (`serial_id`, `reactivado`, `estado_anterior`) se
+// nombra solo si la migración 20260907 llegó a aplicarse. Sin ella, este INSERT
+// es exactamente el de siempre: guardar el rastro es un extra, registrar la
+// retoma es la operación diaria y no puede caerse por una columna que falta.
 const insertarRetoma = async (client, {
   factura_id, descripcion, valor_retoma,
   ingreso_inventario, nombre_producto, imei, cantidad_retoma, color,
+  serial_id = null, reactivado = false, estado_anterior = null,
 }) => {
-  const { rows } = await client.query(`
-    INSERT INTO retomas(factura_id, descripcion, valor_retoma, ingreso_inventario, nombre_producto, imei, cantidad_retoma, color)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-    RETURNING *
-  `, [
+  const columnas = ['factura_id', 'descripcion', 'valor_retoma', 'ingreso_inventario',
+                    'nombre_producto', 'imei', 'cantidad_retoma', 'color'];
+  const valores  = [
     factura_id, descripcion, valor_retoma,
     ingreso_inventario || false,
     nombre_producto    || null,
     imei               || null,
     Number(cantidad_retoma) || 1,
     color              || null,
-  ]);
+  ];
+
+  if (hayRetomaReingreso()) {
+    columnas.push('serial_id', 'reactivado', 'estado_anterior');
+    valores.push(serial_id || null, !!reactivado, estado_anterior || null);
+  }
+
+  const { rows } = await client.query(
+    `INSERT INTO retomas(${columnas.join(', ')})
+     VALUES (${valores.map((_, i) => `$${i + 1}`).join(', ')})
+     RETURNING *`,
+    valores
+  );
   return rows[0];
 };
 

@@ -344,8 +344,8 @@ const intercambiarPrestamo = async (req, res, next) => {
     const id = parseInt(req.params.id, 10);
     const {
       tipo_retoma, imei_retoma, producto_serial_id, color_retoma, caracteristicas_retoma,
-      producto_cantidad_id, cantidad_retoma,
-      valor_retoma, descripcion, ingreso_inventario,
+      producto_cantidad_id, atributo_id, variante_id, cantidad_retoma,
+      valor_retoma, precio_venta, descripcion, ingreso_inventario,
     } = req.body;
 
     const data = await service.intercambiarPrestamo(
@@ -359,8 +359,13 @@ const intercambiarPrestamo = async (req, res, next) => {
         color_retoma:           color_retoma         || null,
         caracteristicas_retoma: caracteristicas_retoma || null,
         producto_cantidad_id:   producto_cantidad_id ? Number(producto_cantidad_id) : null,
+        atributo_id:            atributo_id          ? Number(atributo_id)          : null,
+        variante_id:            variante_id          ? Number(variante_id)          : null,
         cantidad_retoma:        Number(cantidad_retoma || 1),
         valor_retoma:           Number(valor_retoma),
+        // Lo que no se entiende no decide: un precio en texto, en 0 o negativo
+        // deja el precio de la unidad como estaba, que es el default seguro.
+        precio_venta:           Number(precio_venta) > 0 ? Number(precio_venta) : null,
         descripcion:            descripcion          || null,
         ingreso_inventario:     ingreso_inventario !== false,
       },
@@ -385,8 +390,8 @@ const retomaDirecta = async (req, res, next) => {
     const {
       tipo, persona_id,
       tipo_retoma, imei_retoma, producto_serial_id, color_retoma, caracteristicas_retoma,
-      producto_cantidad_id, cantidad_retoma,
-      valor_retoma, descripcion, ingreso_inventario,
+      producto_cantidad_id, atributo_id, variante_id, cantidad_retoma,
+      valor_retoma, precio_venta, descripcion, ingreso_inventario,
     } = req.body;
 
     if (!['prestatario', 'cliente'].includes(tipo)) {
@@ -404,8 +409,13 @@ const retomaDirecta = async (req, res, next) => {
       color_retoma:           color_retoma         || null,
       caracteristicas_retoma: caracteristicas_retoma || null,
       producto_cantidad_id:   producto_cantidad_id ? Number(producto_cantidad_id) : null,
+      atributo_id:            atributo_id          ? Number(atributo_id)          : null,
+      variante_id:            variante_id          ? Number(variante_id)          : null,
       cantidad_retoma:        Number(cantidad_retoma || 1),
       valor_retoma:           Number(valor_retoma),
+      // Lo que no se entiende no decide: un precio en texto, en 0 o negativo
+      // deja el precio de la unidad como estaba, que es el default seguro.
+      precio_venta:           Number(precio_venta) > 0 ? Number(precio_venta) : null,
       descripcion:            descripcion          || null,
       ingreso_inventario:     ingreso_inventario !== false,
     });

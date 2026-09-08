@@ -24,6 +24,7 @@ import { Button }                               from '../../components/ui/Button
 import { Modal }                                from '../../components/ui/Modal';
 import { Input }                                from '../../components/ui/Input';
 import { InputMoneda }                          from '../../components/ui/InputMoneda';
+import { SelectorNodoRetoma }                   from '../../components/ui/SelectorNodoRetoma';
 import { Spinner }                              from '../../components/ui/Spinner';
 import { EmptyState }                           from '../../components/ui/EmptyState';
 import { FacturaTermica }                       from '../../components/FacturaTermica';
@@ -294,7 +295,10 @@ function ModalDevolucion({ prestamo, onClose }) {
   const queryClient = useQueryClient();
   const [cantidad, setCantidad] = useState('');
   const [error,    setError]    = useState('');
-  const [decision, setDecision] = useState('anular');
+  // Arranca sin elegir: la opción por defecto depende de si el pago vino de un
+  // reparto, y eso solo se sabe cuando llega el detalle. Se DERIVA en vez de
+  // sincronizarse con un efecto, que además el linter rechaza.
+  const [decision, setDecision] = useState(null);
 
   // El detalle trae los abonos, y de ahí sale si el pago lo escogió el vendedor
   // o lo repartió el programa. Solo se pide cuando el préstamo tiene abonos.
@@ -323,6 +327,11 @@ function ModalDevolucion({ prestamo, onClose }) {
   // opción de devolverla al reparto.
   const dePagoTotal = detalle?.abonos?.some((a) => a.abono_total_id) ?? false;
 
+  // Con un pago total la salida sana es devolver la plata al reparto: la deuda
+  // de la persona baja de verdad y no queda nadie decidiendo después qué pasó
+  // con un pago anulado. Anular se conserva, pero deja de ser el camino fácil.
+  const decisionEfectiva = decision ?? (dePagoTotal ? 'reasignar' : 'anular');
+
   const invalidarTodo = () => {
     queryClient.invalidateQueries({ queryKey: ['prestamos'],               exact: false });
     queryClient.invalidateQueries({ queryKey: ['prestatarios'],            exact: false });
@@ -332,13 +341,13 @@ function ModalDevolucion({ prestamo, onClose }) {
   };
 
   const mutDevolver = useMutation({
-    mutationFn: () => devolverPrestamo(prestamo.id, decision),
+    mutationFn: () => devolverPrestamo(prestamo.id, decisionEfectiva),
     onSuccess:  () => { invalidarTodo(); onClose(); },
     onError:    (err) => setError(err.response?.data?.error || 'Error al registrar devolución'),
   });
 
   const mutDevolverParcial = useMutation({
-    mutationFn: (cant) => devolverParcialPrestamo(prestamo.id, cant, decision),
+    mutationFn: (cant) => devolverParcialPrestamo(prestamo.id, cant, decisionEfectiva),
     onSuccess:  () => { invalidarTodo(); onClose(); },
     onError:    (err) => setError(err.response?.data?.error || 'Error al registrar devolución'),
   });
@@ -398,18 +407,18 @@ function ModalDevolucion({ prestamo, onClose }) {
             </div>
 
             {[
-              { id: 'anular', titulo: 'No se le devuelve',
-                texto: 'La plata se queda con el negocio. Su deuda no cambia.' },
-              { id: 'saldo_a_favor', titulo: 'Dejársela a favor',
-                texto: 'Queda como crédito a su nombre para usarlo después.' },
               ...(dePagoTotal ? [{ id: 'reasignar', titulo: 'Pasarla a sus otros préstamos',
                 texto: 'Vuelve al reparto y le baja lo que debe, como si el pago se hubiera hecho hoy.' }] : []),
+              { id: 'saldo_a_favor', titulo: 'Dejársela a favor',
+                texto: 'Queda como crédito a su nombre para usarlo después.' },
+              { id: 'anular', titulo: 'No se le devuelve',
+                texto: 'La plata se queda con el negocio. Su deuda no cambia.' },
             ].map((o) => (
               <button
                 key={o.id} type="button"
                 onClick={() => { setDecision(o.id); setError(''); }}
                 className={`text-left rounded-xl border p-2.5 transition ${
-                  decision === o.id ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:border-gray-300'
+                  decisionEfectiva === o.id ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:border-gray-300'
                 }`}>
                 <p className="text-sm font-medium text-gray-900">{o.titulo}</p>
                 <p className="text-xs text-gray-500">{o.texto}</p>
@@ -894,7 +903,12 @@ function ModalIntercambio({ prestamo, onClose, onSaldado }) {
   const [busquedaCantidad,      setBusquedaCantidad]       = useState('');
   const [productoCantidadSel,   setProductoCantidadSel]    = useState(null);
   const [cantidadRetoma,        setCantidadRetoma]         = useState('1');
+  const [nodoSel,               setNodoSel]                = useState(null);
   const [valorRetoma,           setValorRetoma]            = useState('');
+  // Precio de venta del usado. Vacío = no se toca el precio que la referencia
+  // tenga. El backend escribía `precio = valor_retoma`, o sea que el artículo
+  // quedaba ofrecido en lo que se acababa de pagar por él.
+  const [precioVenta,           setPrecioVenta]            = useState('');
   const [ingresoInventario,     setIngresoInventario]      = useState(true);
   const [error,                 setError]                  = useState('');
 
@@ -920,6 +934,7 @@ function ModalIntercambio({ prestamo, onClose, onSaldado }) {
     setImeiRetoma(''); setBusquedaSerial(''); setProductoSerialSel(null); setColorRetoma('');
     setCaracteristicasRetoma({});
     setBusquedaCantidad(''); setProductoCantidadSel(null); setCantidadRetoma('1');
+    setNodoSel(null); setPrecioVenta('');
   };
 
   const saldoPendiente = Number(prestamo.valor_prestamo) - Number(prestamo.total_abonado);
@@ -936,8 +951,11 @@ function ModalIntercambio({ prestamo, onClose, onSaldado }) {
         ? Object.fromEntries(Object.entries(caracteristicasRetoma).filter(([, v]) => v.trim()))
         : null,
       producto_cantidad_id:  tipoRetoma === 'cantidad' ? (productoCantidadSel?.id || null) : null,
+      atributo_id:           tipoRetoma === 'cantidad' ? (nodoSel?.atributo_id || null)    : null,
+      variante_id:           tipoRetoma === 'cantidad' ? (nodoSel?.variante_id || null)    : null,
       cantidad_retoma:       tipoRetoma === 'cantidad' ? Number(cantidadRetoma || 1) : 1,
       valor_retoma:          retoma,
+      precio_venta:          Number(precioVenta) > 0 ? Number(precioVenta) : null,
       ingreso_inventario:    ingresoInventario,
     }),
     onSuccess: (res) => {
@@ -1078,7 +1096,7 @@ function ModalIntercambio({ prestamo, onClose, onSaldado }) {
               <div className="flex flex-col gap-1">
                 <label className="text-xs font-medium text-gray-600">Producto {ingresoInventario ? '*' : ''}</label>
                 <input type="text" placeholder="Buscar producto..." value={busquedaCantidad}
-                  onChange={(e) => { setBusquedaCantidad(e.target.value); setProductoCantidadSel(null); }}
+                  onChange={(e) => { setBusquedaCantidad(e.target.value); setProductoCantidadSel(null); setNodoSel(null); }}
                   className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl
                     text-sm focus:outline-none focus:ring-2 focus:ring-purple-400 transition-all" />
                 {busquedaCantidad.length > 0 && !productoCantidadSel && (
@@ -1087,7 +1105,7 @@ function ModalIntercambio({ prestamo, onClose, onSaldado }) {
                       ? <p className="text-xs text-gray-400 px-3 py-2">Sin resultados</p>
                       : filtradosCantidad.map((p) => (
                           <button key={p.id}
-                            onClick={() => { setProductoCantidadSel(p); setBusquedaCantidad(p.nombre); }}
+                            onClick={() => { setProductoCantidadSel(p); setNodoSel(null); setBusquedaCantidad(p.nombre); }}
                             className="text-left px-3 py-2 text-sm hover:bg-purple-50 text-gray-700 border-b border-gray-50 last:border-0">
                             {p.nombre}
                             <span className="text-xs text-gray-400 ml-2">Stock: {p.stock}</span>
@@ -1096,7 +1114,19 @@ function ModalIntercambio({ prestamo, onClose, onSaldado }) {
                     }
                   </div>
                 )}
-                {productoCantidadSel && <p className="text-xs text-purple-600">✓ {productoCantidadSel.nombre}</p>}
+                {productoCantidadSel && (
+                  <p className="text-xs text-purple-600">
+                    ✓ {productoCantidadSel.nombre}{nodoSel?.label ? ` · ${nodoSel.label}` : ''}
+                  </p>
+                )}
+                {ingresoInventario && productoCantidadSel && (
+                  <SelectorNodoRetoma
+                    productoId={productoCantidadSel.id}
+                    sucursalId={prestamo.sucursal_id}
+                    atributoId={nodoSel?.atributo_id}
+                    varianteId={nodoSel?.variante_id}
+                    onElegir={setNodoSel} />
+                )}
               </div>
               <div className="flex flex-col gap-1">
                 <label className="text-xs font-medium text-gray-600">Cantidad</label>
@@ -1125,8 +1155,27 @@ function ModalIntercambio({ prestamo, onClose, onSaldado }) {
           <InputMoneda value={valorRetoma} onChange={setValorRetoma} placeholder="0" autoFocus
             className="w-full px-3 py-2 bg-gray-100 rounded-xl text-sm
               focus:outline-none focus:ring-2 focus:ring-purple-500 focus:bg-white transition-all" />
-          <p className="text-xs text-gray-400">Este monto se aplica como abono al préstamo</p>
+          <p className="text-xs text-gray-400">
+            Este monto se aplica como abono al préstamo y es el costo con el que el artículo entra al inventario
+          </p>
         </div>
+
+        {/* Precio de venta del usado. Aparte del valor porque son dos cifras
+            distintas: lo que se abona por él y a cuánto se va a revender. */}
+        {ingresoInventario && (
+          <div className="flex flex-col gap-1">
+            <label className="text-sm font-medium text-gray-700">
+              Precio de venta <span className="text-gray-400 font-normal text-xs">(opcional)</span>
+            </label>
+            <InputMoneda value={precioVenta} onChange={setPrecioVenta}
+              placeholder="Dejar vacío para no cambiarlo"
+              className="w-full px-3 py-2 bg-gray-100 rounded-xl text-sm
+                focus:outline-none focus:ring-2 focus:ring-purple-500 focus:bg-white transition-all" />
+            <p className="text-xs text-gray-400">
+              A cuánto se va a revender. Vacío deja el precio que ya tenía la referencia.
+            </p>
+          </div>
+        )}
 
         {/* Resumen */}
         {retoma > 0 && (

@@ -29,6 +29,7 @@ import { useMora }           from '../../hooks/useMora';
 import { useInteres }        from '../../hooks/useInteres';
 import { TarifaItem }        from '../../components/ui/SelectorTarifa';
 import { ChipsVariante }     from '../../components/ui/ChipsVariante';
+import { SelectorNodoRetoma } from '../../components/ui/SelectorNodoRetoma';
 import { nombreConVariante } from '../../utils/variantes';
 import { SeccionCredito, CREDITO_VACIO } from './SeccionCredito';
 import {
@@ -51,6 +52,13 @@ const RETOMA_VACIA = () => ({
   producto_serial_id:   null,
   nombre_producto:      '',
   producto_cantidad_id: null,
+  atributo_id:          null,
+  variante_id:          null,
+  nodo_label:           '',
+  // Precio de venta del usado. Vacío = no se toca el precio que la unidad
+  // tenga; nunca se deriva del valor de la retoma, o el equipo quedaría
+  // ofrecido en lo que se acaba de pagar por él.
+  precio_venta:         '',
   reactivar_serial_id:  null,
   estado_serial:        null, // null | 'vendido' | 'prestado' | 'disponible'
   color_retoma:         '',
@@ -133,6 +141,9 @@ function buildPayloadFactura({ tipoCliente, form, items, totalNeto, metodosSelec
     nombre_producto:      r.tipo_retoma === 'serial'   ? (r.nombre_producto || r.descripcion) : r.nombre_producto,
     producto_serial_id:   r.tipo_retoma === 'serial'   ? r.producto_serial_id                 : null,
     producto_cantidad_id: r.tipo_retoma === 'cantidad' ? r.producto_cantidad_id               : null,
+    atributo_id:          r.tipo_retoma === 'cantidad' ? (r.atributo_id || null)               : null,
+    variante_id:          r.tipo_retoma === 'cantidad' ? (r.variante_id || null)               : null,
+    precio_venta:         Number(r.precio_venta) > 0   ? Number(r.precio_venta)                : null,
     cantidad_retoma:      r.tipo_retoma === 'cantidad' ? Number(r.cantidad_retoma || 1)        : 1,
     reactivar_serial_id:  r.reactivar_serial_id || null,
     color_retoma:           r.tipo_retoma === 'serial' ? (r.color_retoma?.trim() || null)                     : null,
@@ -257,13 +268,19 @@ function AvisoImeiRetoma({ estado, nombreCliente }) {
       <div className="flex items-start gap-2 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
         <RefreshCw size={13} className="text-amber-500 flex-shrink-0 mt-0.5" />
         <div className="flex flex-col gap-0.5">
-          <p className="text-xs font-medium text-amber-700">IMEI vendido — se reactivará automáticamente</p>
+          <p className="text-xs font-medium text-amber-700">Este equipo se lo vendiste tú — vuelve al inventario</p>
           <p className="text-xs text-amber-600">
-            Producto: <span className="font-medium">{serial.producto_nombre}</span>
+            Estaba como: <span className="font-medium">{serial.producto_nombre}</span>
             {serial.marca ? ` · ${serial.marca}` : ''}
           </p>
+          {/* El costo es el punto: la utilidad de la reventa se calcula contra
+              él, y hasta ahora se quedaba en el de la compra original. Decirlo
+              aquí es lo que evita que alguien escriba el valor pensando que solo
+              es el descuento de la factura. */}
           <p className="text-xs text-amber-500">
-            Se registrará a nombre de <span className="font-semibold">{nombreCliente || 'el cliente de la retoma'}</span>.
+            Entra con el <span className="font-semibold">valor de esta retoma como costo</span> y a nombre de{' '}
+            <span className="font-semibold">{nombreCliente || 'el cliente de la retoma'}</span>. Si lo vas a vender
+            como usado, elige abajo esa referencia.
           </p>
         </div>
       </div>
@@ -438,7 +455,7 @@ function SeccionDomicilio({ domicilio, onChange }) {
 // ─── ItemRetoma ───────────────────────────────────────────────────────────────
 
 function ItemRetoma({ retoma, index, total, productosSerial, productosCantidad,
-  onChange, onRemove, nombreCliente,
+  onChange, onRemove, nombreCliente, sucursalId,
   coloresActivo, coloresLista, caracteristicasActivo, caracteristicasLista }) {
 
   const [busqueda, setBusqueda]        = useState('');
@@ -662,6 +679,7 @@ function ItemRetoma({ retoma, index, total, productosSerial, productosCantidad,
               setBusqueda(e.target.value);
               set('producto_cantidad_id', null);
               set('nombre_producto', '');
+              set('atributo_id', null); set('variante_id', null); set('nodo_label', '');
             }}
             className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl
               text-sm focus:outline-none focus:ring-2 focus:ring-purple-400 mb-1" />
@@ -676,6 +694,7 @@ function ItemRetoma({ retoma, index, total, productosSerial, productosCantidad,
                         onClick={() => {
                           set('producto_cantidad_id', pid);
                           set('nombre_producto', p.nombre);
+                          set('atributo_id', null); set('variante_id', null); set('nodo_label', '');
                           setBusqueda(p.nombre);
                         }}
                         className={`text-left px-3 py-2 text-sm transition-all
@@ -691,7 +710,21 @@ function ItemRetoma({ retoma, index, total, productosSerial, productosCantidad,
             </div>
           )}
           {retoma.producto_cantidad_id && (
-            <p className="text-xs text-purple-600">✓ {retoma.nombre_producto}</p>
+            <p className="text-xs text-purple-600">
+              ✓ {retoma.nombre_producto}{retoma.nodo_label ? ` · ${retoma.nodo_label}` : ''}
+            </p>
+          )}
+          {retoma.ingreso_inventario && retoma.producto_cantidad_id && (
+            <SelectorNodoRetoma
+              productoId={retoma.producto_cantidad_id}
+              sucursalId={sucursalId}
+              atributoId={retoma.atributo_id}
+              varianteId={retoma.variante_id}
+              onElegir={(n) => {
+                set('atributo_id', n.atributo_id);
+                set('variante_id', n.variante_id);
+                set('nodo_label',  n.label);
+              }} />
           )}
           <Input label="Cantidad retomada" type="number" min="1" placeholder="1"
             value={retoma.cantidad_retoma}
@@ -712,6 +745,21 @@ function ItemRetoma({ retoma, index, total, productosSerial, productosCantidad,
           className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl
             text-sm focus:outline-none focus:ring-2 focus:ring-purple-400" />
       </div>
+
+      {retoma.ingreso_inventario && (
+        <div className="flex flex-col gap-1">
+          <label className="text-xs font-medium text-gray-600">
+            Precio de venta del usado <span className="text-gray-400 font-normal">(opcional)</span>
+          </label>
+          <InputMoneda value={retoma.precio_venta}
+            onChange={(val) => set('precio_venta', val)} placeholder="Dejar vacío para no cambiarlo"
+            className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl
+              text-sm focus:outline-none focus:ring-2 focus:ring-purple-400" />
+          <p className="text-xs text-gray-400">
+            A cuánto se va a revender. Vacío deja el precio que ya tenía la referencia.
+          </p>
+        </div>
+      )}
 
       {retoma.tipo_retoma === 'cantidad' && Number(retoma.cantidad_retoma) > 1 && Number(retoma.valor_retoma) > 0 && (
         <div className="flex justify-between text-xs text-purple-700 bg-purple-100 rounded-lg px-3 py-1.5">
@@ -887,6 +935,10 @@ function SelectorPagos({ metodosPago, metodosSeleccionados, montos, totalNeto, o
 export function ModalFactura({ open, onClose }) {
   const queryClient = useQueryClient();
   const { sucursalKey, sucursalLista } = useSucursalKey();
+  // El id numérico de la sucursal, para el árbol de variantes de una retoma por
+  // cantidad. Con el admin sin sucursal elegida el segundo segmento es un texto
+  // ('sin-seleccion') y entonces no hay a qué producto pedirle el árbol.
+  const sucursalId = typeof sucursalKey[1] === 'number' ? sucursalKey[1] : null;
   const { items, totalCarrito, limpiarCarrito, actualizarPrecio, aplicarTarifa } = useCarritoStore();
   const total = totalCarrito();
 
@@ -1483,6 +1535,7 @@ export function ModalFactura({ open, onClose }) {
                     total={retomas.length}
                     productosSerial={productosSerial}
                     productosCantidad={productosCantidad}
+                    sucursalId={sucursalId}
                     onChange={handleChangeRetoma}
                     onRemove={handleRemoveRetoma}
                     nombreCliente={nombreClienteRetoma}

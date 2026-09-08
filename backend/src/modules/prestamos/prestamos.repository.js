@@ -1,5 +1,7 @@
 const { pool } = require('../../config/db');
 const { asignarNumeroDocumento } = require('../../utils/numeracion.util');
+const { hayRetomaReingreso } = require('../../config/columnas');
+const { calcularCostoPromedio } = require('../../utils/costoPromedio.util');
 
 /**
  * Historial de préstamos.
@@ -709,18 +711,25 @@ const retornarSerialConOrigen = async (client, imei, sucursalId, clienteOrigen) 
 };
 
 // ── Retoma: insertar registro en tabla retomas ────────────────────────────────
+// El rastro del reingreso (`serial_id`, `reactivado`, `estado_anterior`) se
+// nombra solo si la migración 20260907 llegó a aplicarse: sin ella este INSERT
+// es exactamente el de siempre. Guardar el rastro es un extra; registrar la
+// retoma es la operación diaria y no puede caerse por una columna que falta.
 const insertarRetoma = async (client, {
   prestamo_id, nombre_producto, imei, valor_retoma, cantidad_retoma,
   descripcion, tipo_retoma, producto_serial_id, producto_cantidad_id,
   color, ingreso_inventario,
+  serial_id = null, reactivado = false, estado_anterior = null,
 }) => {
+  const extraCols = hayRetomaReingreso() ? ', serial_id, reactivado, estado_anterior' : '';
+  const extraVals = hayRetomaReingreso() ? ', $12, $13, $14' : '';
   const { rows } = await client.query(`
     INSERT INTO retomas(
       prestamo_id, nombre_producto, imei, valor_retoma, cantidad_retoma,
       descripcion, ingreso_inventario, tipo_retoma,
-      producto_serial_id, producto_cantidad_id, color
+      producto_serial_id, producto_cantidad_id, color${extraCols}
     )
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11${extraVals})
     RETURNING *
   `, [
     prestamo_id,
@@ -734,40 +743,75 @@ const insertarRetoma = async (client, {
     producto_serial_id   || null,
     producto_cantidad_id || null,
     color                || null,
+    ...(hayRetomaReingreso()
+      ? [serial_id || null, !!reactivado, estado_anterior || null]
+      : []),
   ]);
   return rows[0];
 };
 
-// ── Retoma serial: inserta el IMEI al inventario ──────────────────────────────
-const insertarSerialParaRetoma = async (client, {
-  producto_id, imei, precio, color, cliente_origen, caracteristicas,
-}) => {
-  await client.query(`
-    INSERT INTO seriales(producto_id, imei, precio, color, cliente_origen, caracteristicas, prestado, vendido)
-    VALUES ($1, $2, $3, $4, $5, $6, false, false)
-  `, [
-    producto_id, imei, precio || null, color || null, cliente_origen || null,
-    caracteristicas != null ? JSON.stringify(caracteristicas) : null,
-  ]);
-};
-
 // ── Retoma cantidad: incrementa stock e inserta historial (dentro de tx) ──────
+// Ingreso de mercancía por CANTIDAD, con su historial.
+//
+// Baja al nodo HOJA (variante > atributo > producto) porque con la feature
+// «Variantes» activa el stock vive ahí y el del producto es un DERIVADO:
+// escribir arriba deja el producto diciendo 5 con sus tallas en 0, y el primer
+// ajuste sobre cualquier variante dispara la sincronización, que recalcula
+// producto = Σ variantes y BORRA lo retomado. Es el mismo error que ya costó
+// corregir en la red interna.
+//
+// El costo promedio se pondera contra el stock del MISMO nodo: el del producto
+// es la suma de todas las tallas y no dice nada de esta. Antes no se
+// recalculaba en absoluto — la mercancía entraba y el costo se quedaba en el de
+// la compra anterior.
 const ajustarStockConHistorialEnTx = async (client, {
   producto_id, sucursal_id, cantidad, costo_unitario, cliente_origen, tipo,
+  atributo_id = null, variante_id = null,
 }) => {
-  await client.query(
-    'UPDATE productos_cantidad SET stock = stock + $1 WHERE id = $2',
-    [cantidad, producto_id],
+  const nodo = variante_id
+    ? { tabla: 'variantes_atributo',  id: Number(variante_id) }
+    : atributo_id
+      ? { tabla: 'atributos_producto', id: Number(atributo_id) }
+      : { tabla: 'productos_cantidad', id: Number(producto_id) };
+
+  const { rows: antes } = await client.query(
+    `SELECT stock, costo_unitario FROM ${nodo.tabla} WHERE id = $1`, [nodo.id]
   );
+  if (!antes.length) throw { status: 404, message: 'El nodo de la retoma no existe' };
+
+  await client.query(
+    `UPDATE ${nodo.tabla} SET stock = stock + $1 WHERE id = $2`,
+    [cantidad, nodo.id],
+  );
+
+  if (Number(costo_unitario) > 0 && Number(cantidad) > 0) {
+    const promedio = calcularCostoPromedio(
+      antes[0].stock, antes[0].costo_unitario, Number(cantidad), Number(costo_unitario),
+    );
+    await client.query(
+      `UPDATE ${nodo.tabla} SET costo_unitario = $1 WHERE id = $2`,
+      [promedio, nodo.id],
+    );
+  }
+
+  // El producto se recalcula DESPUÉS del movimiento en la hoja, nunca se
+  // escribe a mano.
+  if (variante_id || atributo_id) {
+    await sincronizarStockArbolEnTx(client, producto_id);
+  }
+
   await client.query(`
     INSERT INTO historial_stock_cantidad
-      (producto_id, sucursal_id, cantidad, costo_unitario, tipo, cliente_origen)
-    VALUES ($1, $2, $3, $4, $5, $6)
+      (producto_id, sucursal_id, cantidad, costo_unitario, tipo, cliente_origen,
+       atributo_id, variante_id)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
   `, [
     producto_id, sucursal_id, cantidad,
     costo_unitario ?? null,
     tipo           || 'retoma',
     cliente_origen || null,
+    atributo_id    || null,
+    variante_id    || null,
   ]);
 };
 
@@ -907,18 +951,23 @@ const findRetomaPorId = async (client, retomaId) => {
   return rows[0] || null;
 };
 
-const findSerialEnInventario = async (client, imei) => {
+// Acotado al NEGOCIO. Sin ese filtro la consulta buscaba `WHERE s.imei = $1` a
+// secas sobre una base que comparten 28 negocios: el IMEI es único por negocio,
+// no globalmente, así que podía devolver —y hacer borrar— la fila de otro.
+// Tampoco filtraba `prestado`, aunque quien llama sí lo comprueba.
+const findSerialEnInventario = async (client, imei, negocioId = null) => {
   const { rows } = await client.query(`
     SELECT s.id, s.vendido, s.prestado
     FROM seriales s
-    WHERE s.imei = $1
+    JOIN productos_serial ps ON ps.id = s.producto_id
+    JOIN sucursales       su ON su.id = ps.sucursal_id
+    WHERE UPPER(TRIM(s.imei)) = UPPER(TRIM($1))
       AND s.vendido = false
-  `, [imei]);
+      AND ($2::int IS NULL OR su.negocio_id = $2)
+    ORDER BY s.id DESC
+    LIMIT 1
+  `, [imei, negocioId]);
   return rows[0] || null;
-};
-
-const eliminarSerial = async (client, serialId) => {
-  await client.query('DELETE FROM seriales WHERE id = $1', [serialId]);
 };
 
 const eliminarRetoma = async (client, retomaId) => {
@@ -960,15 +1009,18 @@ const insertarRetomaDirecta = async (client, {
   nombre_producto, imei, valor_retoma, cantidad_retoma,
   descripcion, tipo_retoma, producto_serial_id, producto_cantidad_id,
   color, ingreso_inventario,
+  serial_id = null, reactivado = false, estado_anterior = null,
 }) => {
+  const extraCols = hayRetomaReingreso() ? ', serial_id, reactivado, estado_anterior' : '';
+  const extraVals = hayRetomaReingreso() ? ', $14, $15, $16' : '';
   const { rows } = await client.query(`
     INSERT INTO retomas(
       prestamo_id, nombre_producto, imei, valor_retoma, cantidad_retoma,
       descripcion, ingreso_inventario, tipo_retoma,
       producto_serial_id, producto_cantidad_id, color,
-      tipo_persona, persona_id, sucursal_id
+      tipo_persona, persona_id, sucursal_id${extraCols}
     )
-    VALUES (NULL,$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+    VALUES (NULL,$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13${extraVals})
     RETURNING *
   `, [
     nombre_producto      || null,
@@ -984,6 +1036,9 @@ const insertarRetomaDirecta = async (client, {
     tipo_persona,
     persona_id,
     sucursal_id,
+    ...(hayRetomaReingreso()
+      ? [serial_id || null, !!reactivado, estado_anterior || null]
+      : []),
   ]);
   return rows[0];
 };
@@ -1483,14 +1538,14 @@ module.exports = {
   getSaldoSucursal, setSaldoSucursal, registrarMovSaldoSucursal,
   getHistorialSaldoSucursal, getSaldoSucursalPublico,
   retornarSerialConOrigen,
-  insertarRetoma, insertarRetomaDirecta, insertarSerialParaRetoma, ajustarStockConHistorialEnTx,
+  insertarRetoma, insertarRetomaDirecta, ajustarStockConHistorialEnTx,
   getRetomasPorPrestamo,
   findActivosPorPersona, getResumenPersona, getPrestamoActivoById,
   // anulación
   updateValorPrestamo,
   findAbonoById, eliminarAbono, restarTotalAbonado,
   cancelarFacturaDePrestamo, revertirSerialVendido,
-  findRetomaPorId, findSerialEnInventario, eliminarSerial, eliminarRetoma,
+  findRetomaPorId, findSerialEnInventario, eliminarRetoma,
   findRetomasDirectasPorPersona, getEstadoCuenta,
   ajustarStockAtributoEnTx, ajustarStockVarianteEnTx, sincronizarStockArbolEnTx,
   getGarantiasPorPrestamo,
