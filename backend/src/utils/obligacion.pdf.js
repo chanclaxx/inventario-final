@@ -16,6 +16,7 @@ const {
   formatCOP, formatFecha, formatFechaHora,
   rectFill, rectFillStroke, hLine,
   labelSeccion, fila, encabezado, badgeEstado, bloqueFirma, pieDocumento, asegurarEspacio,
+  textoAcotado, tablaPaginada,
 } = require('./pdf.base');
 const { describirCondicion } = require('./obligacion');
 const { describirPlanInteres } = require('./interes.util');
@@ -28,8 +29,6 @@ const { describirPlanInteres } = require('./interes.util');
  * entrar al sistema.
  */
 const bloqueEstadoObligacion = (doc, resumen, y, { titulo = 'Estado de la obligación' } = {}) => {
-  y = labelSeccion(doc, y, titulo);
-
   const tono = TONOS[resumen.estado_tono] || TONOS.gris;
 
   const filas = [];
@@ -73,6 +72,12 @@ const bloqueEstadoObligacion = (doc, resumen, y, { titulo = 'Estado de la obliga
   // aquí para que la caja crezca con el contenido en vez de recortarlo.
   const lineasCierre = (conInteres ? 1 : 0) + (conMora ? 1 : 0) + (conCargos ? 1 : 0);
   const H = 52 + filas.length * 16 + 30 + (conCargos ? lineasCierre * 15 + 4 : 0);
+
+  // El título se dibuja DESPUÉS de conocer el alto de la tarjeta: así reserva
+  // sitio para ella y no queda un "ESTADO DEL CRÉDITO" solo al pie de página
+  // con sus cifras en la hoja siguiente.
+  y = labelSeccion(doc, y, titulo, { reservar: H });
+
   rectFillStroke(doc, MARGIN, y, CONTENT_W, H, C.grisFondo, C.grisBorde, 8);
 
   // Badge de estado arriba a la derecha
@@ -149,8 +154,8 @@ const bloqueFechas = (doc, resumen, y) => {
     filas.push(['Último abono', formatFecha(resumen.fecha_ultimo_abono)]);
   }
 
-  y = labelSeccion(doc, y, 'Fechas y plazo');
   const H = filas.length * 16 + 20;
+  y = labelSeccion(doc, y, 'Fechas y plazo', { reservar: H });
   rectFillStroke(doc, MARGIN, y, CONTENT_W, H, C.blanco, C.grisBorde, 8);
 
   let yf = y + 12;
@@ -169,85 +174,91 @@ const bloqueFechas = (doc, resumen, y) => {
 const tablaAbonos = (doc, resumen, y, { titulo = 'Historial de abonos' } = {}) => {
   const abonos = resumen.abonos || [];
 
-  y = labelSeccion(doc, y, `${titulo}${abonos.length ? ` (${abonos.length})` : ''}`);
-
   const HEAD_H = 22;
   const ROW_H  = 17;
   const hayInicial = resumen.cuota_inicial > 0;
-  const nFilas = (hayInicial ? 1 : 0) + (abonos.length || 1);
-  const H = HEAD_H + nFilas * ROW_H + (abonos.length ? 22 : 0);
-
-  y = asegurarEspacio(doc, y, Math.min(H + 20, 260));
-
-  rectFillStroke(doc, MARGIN, y, CONTENT_W, H, C.blanco, C.grisBorde, 8);
 
   const COL_F = CONTENT_W * 0.24;   // fecha
   const COL_M = CONTENT_W * 0.28;   // método
   const COL_V = CONTENT_W * 0.22;   // valor
   const COL_S = CONTENT_W - COL_F - COL_M - COL_V; // saldo
 
-  // Cabecera
-  rectFill(doc, MARGIN, y, CONTENT_W, HEAD_H, C.negro, 8);
-  doc.rect(MARGIN, y + 12, CONTENT_W, HEAD_H - 12).fill(C.negro);
-  doc.font(FONT.bold).fontSize(7).fillColor(C.blanco)
-    .text('Fecha',  MARGIN + 12,                       y + 7.5, { width: COL_F - 12, characterSpacing: 0.4 })
-    .text('Método', MARGIN + COL_F,                    y + 7.5, { width: COL_M,      characterSpacing: 0.4 })
-    .text('Valor',  MARGIN + COL_F + COL_M,            y + 7.5, { width: COL_V,      align: 'right', characterSpacing: 0.4 })
-    .text('Saldo',  MARGIN + COL_F + COL_M + COL_V,    y + 7.5, { width: COL_S - 12, align: 'right', characterSpacing: 0.4 });
-
-  let yf = y + HEAD_H;
-  let idx = 0;
-
-  const pintarFila = (fechaTxt, metodo, valor, saldo, { esInicial = false } = {}) => {
-    if (idx % 2 === 1) doc.rect(MARGIN, yf, CONTENT_W, ROW_H).fill(C.filaAlterna);
-    if (idx > 0) hLine(doc, yf, { color: C.grisBorde, width: 0.4 });
-
-    doc.font(FONT.normal).fontSize(7.5).fillColor(C.grisOscuro)
-      .text(fechaTxt, MARGIN + 12, yf + 5, { width: COL_F - 12, lineBreak: false });
-    doc.font(esInicial ? FONT.bold : FONT.normal).fontSize(7.5)
-      .fillColor(esInicial ? C.azul : C.grisOscuro)
-      .text(metodo, MARGIN + COL_F, yf + 5, { width: COL_M, lineBreak: false, ellipsis: true });
-    doc.font(FONT.bold).fontSize(8).fillColor(C.verde)
-      .text(formatCOP(valor), MARGIN + COL_F + COL_M, yf + 5, { width: COL_V, align: 'right', lineBreak: false });
-    doc.font(FONT.normal).fontSize(8).fillColor(saldo > 0 ? C.grisOscuro : C.verde)
-      .text(formatCOP(saldo), MARGIN + COL_F + COL_M + COL_V, yf + 5,
-        { width: COL_S - 12, align: 'right', lineBreak: false });
-
-    yf += ROW_H;
-    idx += 1;
+  const cabecera = (d, yc) => {
+    rectFill(d, MARGIN, yc, CONTENT_W, HEAD_H, C.negro, 8);
+    d.rect(MARGIN, yc + 12, CONTENT_W, HEAD_H - 12).fill(C.negro);
+    const o = { font: FONT.bold, size: 7, color: C.blanco, characterSpacing: 0.4 };
+    textoAcotado(d, 'Fecha',  MARGIN + 12,                    yc + 7.5, COL_F - 12, o);
+    textoAcotado(d, 'Método', MARGIN + COL_F,                 yc + 7.5, COL_M,      o);
+    textoAcotado(d, 'Valor',  MARGIN + COL_F + COL_M,         yc + 7.5, COL_V,      { ...o, align: 'right' });
+    textoAcotado(d, 'Saldo',  MARGIN + COL_F + COL_M + COL_V, yc + 7.5, COL_S - 12, { ...o, align: 'right' });
   };
+
+  const filaAbono = (fechaTxt, metodo, valor, saldo, { esInicial = false } = {}) => ({
+    alto: ROW_H,
+    dibujar: (d, yf) => {
+      textoAcotado(d, fechaTxt, MARGIN + 12, yf + 5, COL_F - 12,
+        { size: 7.5, color: C.grisOscuro });
+      textoAcotado(d, metodo, MARGIN + COL_F, yf + 5, COL_M,
+        { font: esInicial ? FONT.bold : FONT.normal, size: 7.5,
+          color: esInicial ? C.azul : C.grisOscuro });
+      textoAcotado(d, formatCOP(valor), MARGIN + COL_F + COL_M, yf + 5, COL_V,
+        { font: FONT.bold, size: 8, color: C.verde, align: 'right' });
+      textoAcotado(d, formatCOP(saldo), MARGIN + COL_F + COL_M + COL_V, yf + 5, COL_S - 12,
+        { size: 8, color: saldo > 0 ? C.grisOscuro : C.verde, align: 'right' });
+    },
+  });
+
+  const filas = [];
 
   // La cuota inicial es el primer pago de la obligación: va en el historial.
   if (hayInicial) {
-    pintarFila(formatFecha(resumen.fecha_emision), 'Cuota inicial',
-      resumen.cuota_inicial, resumen.financiado, { esInicial: true });
+    filas.push(filaAbono(formatFecha(resumen.fecha_emision), 'Cuota inicial',
+      resumen.cuota_inicial, resumen.financiado, { esInicial: true }));
   }
 
-  if (abonos.length === 0 && !hayInicial) {
-    doc.font(FONT.normal).fontSize(8).fillColor(C.grisClaro)
-      .text('Sin abonos registrados a la fecha', MARGIN + 12, yf + 5, { width: CONTENT_W - 24 });
-    yf += ROW_H;
+  if (!abonos.length && !hayInicial) {
+    filas.push({
+      alto: ROW_H,
+      dibujar: (d, yf) => textoAcotado(d, 'Sin abonos registrados a la fecha',
+        MARGIN + 12, yf + 5, CONTENT_W - 24, { size: 8, color: C.grisClaro }),
+    });
   } else {
     for (const ab of abonos) {
-      pintarFila(formatFecha(ab.fecha), ab.metodo, ab.valor, ab.saldo_despues);
+      filas.push(filaAbono(formatFecha(ab.fecha), ab.metodo, ab.valor, ab.saldo_despues));
     }
   }
 
-  // Totales
+  // Totales: una fila más, con fondo propio, para que viaje con la tabla cuando
+  // esta se parte entre páginas en vez de quedarse colgando en la anterior.
   if (abonos.length) {
-    rectFill(doc, MARGIN, yf, CONTENT_W, 22, C.grisFondo, 0);
-    hLine(doc, yf, { color: C.grisBorde });
-    doc.font(FONT.bold).fontSize(8).fillColor(C.grisOscuro)
-      .text('TOTAL ABONADO', MARGIN + 12, yf + 7, { width: COL_F + COL_M - 12, lineBreak: false });
-    doc.font(FONT.bold).fontSize(8.5).fillColor(C.verde)
-      .text(formatCOP(resumen.total_abonado), MARGIN + COL_F + COL_M, yf + 6.5,
-        { width: COL_V, align: 'right', lineBreak: false });
-    doc.font(FONT.bold).fontSize(8.5).fillColor(resumen.saldo > 0 ? C.rojo : C.verde)
-      .text(formatCOP(resumen.saldo), MARGIN + COL_F + COL_M + COL_V, yf + 6.5,
-        { width: COL_S - 12, align: 'right', lineBreak: false });
+    filas.push({
+      alto: 22,
+      fondo: C.grisFondo,
+      dibujar: (d, yf) => {
+        hLine(d, yf, { color: C.grisBorde });
+        textoAcotado(d, 'TOTAL ABONADO', MARGIN + 12, yf + 7, COL_F + COL_M - 12,
+          { font: FONT.bold, size: 8, color: C.grisOscuro });
+        textoAcotado(d, formatCOP(resumen.total_abonado), MARGIN + COL_F + COL_M, yf + 6.5,
+          COL_V, { font: FONT.bold, size: 8.5, color: C.verde, align: 'right' });
+        textoAcotado(d, formatCOP(resumen.saldo), MARGIN + COL_F + COL_M + COL_V, yf + 6.5,
+          COL_S - 12, { font: FONT.bold, size: 8.5,
+            color: resumen.saldo > 0 ? C.rojo : C.verde, align: 'right' });
+      },
+    });
   }
 
-  return y + H + 20;
+  y = labelSeccion(doc, y, `${titulo}${abonos.length ? ` (${abonos.length})` : ''}`,
+    { reservar: HEAD_H + filas[0].alto });
+
+  // Un historial de 60 abonos es normal en un crédito viejo: la tabla se parte
+  // entre páginas y repite su cabecera, en vez de salirse del papel y arrastrar
+  // una página en blanco por cada renglón que no cabía.
+  return tablaPaginada(doc, y, {
+    cabeceraAlto:    HEAD_H,
+    dibujarCabecera: cabecera,
+    filas,
+    espacioDespues:  20,
+  });
 };
 
 // ─── Bloque: movimientos de mora ─────────────────────────────────────────────
@@ -279,38 +290,32 @@ const tablaMovimientosMora = (doc, resumen, y, { titulo = null } = {}) => {
     : hayInteres ? 'Intereses de financiación'
     : 'Intereses de mora');
 
-  y = labelSeccion(doc, y, `${titulo}${movs.length ? ` (${movs.length})` : ''}`);
-
   const HEAD_H = 22;
   const ROW_H  = 17;
-  const nFilas = movs.length || 1;
-  const H = HEAD_H + nFilas * ROW_H + 22;
-
-  y = asegurarEspacio(doc, y, Math.min(H + 20, 260));
-  rectFillStroke(doc, MARGIN, y, CONTENT_W, H, C.blanco, C.grisBorde, 8);
 
   const COL_F = CONTENT_W * 0.24;   // fecha
   const COL_C = CONTENT_W * 0.46;   // concepto
   const COL_V = CONTENT_W - COL_F - COL_C; // valor
 
-  rectFill(doc, MARGIN, y, CONTENT_W, HEAD_H, C.negro, 8);
-  doc.rect(MARGIN, y + 12, CONTENT_W, HEAD_H - 12).fill(C.negro);
-  doc.font(FONT.bold).fontSize(7).fillColor(C.blanco)
-    .text('Fecha',    MARGIN + 12,            y + 7.5, { width: COL_F - 12, characterSpacing: 0.4 })
-    .text('Concepto', MARGIN + COL_F,         y + 7.5, { width: COL_C,      characterSpacing: 0.4 })
-    .text('Valor',    MARGIN + COL_F + COL_C, y + 7.5, { width: COL_V - 12, align: 'right', characterSpacing: 0.4 });
+  const cabecera = (d, yc) => {
+    rectFill(d, MARGIN, yc, CONTENT_W, HEAD_H, C.negro, 8);
+    d.rect(MARGIN, yc + 12, CONTENT_W, HEAD_H - 12).fill(C.negro);
+    const o = { font: FONT.bold, size: 7, color: C.blanco, characterSpacing: 0.4 };
+    textoAcotado(d, 'Fecha',    MARGIN + 12,            yc + 7.5, COL_F - 12, o);
+    textoAcotado(d, 'Concepto', MARGIN + COL_F,         yc + 7.5, COL_C,      o);
+    textoAcotado(d, 'Valor',    MARGIN + COL_F + COL_C, yc + 7.5, COL_V - 12, { ...o, align: 'right' });
+  };
 
-  let yf = y + HEAD_H;
+  const filas = [];
 
   if (!movs.length) {
-    doc.font(FONT.normal).fontSize(8).fillColor(C.grisClaro)
-      .text('Sin cobros registrados', MARGIN + 12, yf + 5, { width: CONTENT_W - 24 });
-    yf += ROW_H;
+    filas.push({
+      alto: ROW_H,
+      dibujar: (d, yf) => textoAcotado(d, 'Sin cobros registrados',
+        MARGIN + 12, yf + 5, CONTENT_W - 24, { size: 8, color: C.grisClaro }),
+    });
   } else {
-    movs.forEach((m, i) => {
-      if (i % 2 === 1) doc.rect(MARGIN, yf, CONTENT_W, ROW_H).fill(C.filaAlterna);
-      if (i > 0) hLine(doc, yf, { color: C.grisBorde, width: 0.4 });
-
+    for (const m of movs) {
       // Cada renglón dice de qué cargo es: son deudas con causa distinta y el
       // cliente tiene derecho a distinguirlas en su comprobante.
       const cual = m.concepto === 'interes' ? 'interés' : 'mora';
@@ -318,16 +323,18 @@ const tablaMovimientosMora = (doc, resumen, y, { titulo = null } = {}) => {
         ? `Cobro de ${cual}${m.metodo ? ` · ${m.metodo}` : ''}`
         : `${cual === 'interés' ? 'Interés' : 'Mora'} condonada${m.motivo ? ` · ${m.motivo}` : ''}`;
 
-      doc.font(FONT.normal).fontSize(7.5).fillColor(C.grisOscuro)
-        .text(formatFecha(m.fecha), MARGIN + 12, yf + 5, { width: COL_F - 12, lineBreak: false });
-      doc.font(FONT.normal).fontSize(7.5).fillColor(C.grisOscuro)
-        .text(concepto, MARGIN + COL_F, yf + 5, { width: COL_C, lineBreak: false, ellipsis: true });
-      doc.font(FONT.bold).fontSize(8).fillColor(m.es_cobro ? C.verde : C.grisClaro)
-        .text(formatCOP(m.valor), MARGIN + COL_F + COL_C, yf + 5,
-          { width: COL_V - 12, align: 'right', lineBreak: false });
-
-      yf += ROW_H;
-    });
+      filas.push({
+        alto: ROW_H,
+        dibujar: (d, yf) => {
+          textoAcotado(d, formatFecha(m.fecha), MARGIN + 12, yf + 5, COL_F - 12,
+            { size: 7.5, color: C.grisOscuro });
+          textoAcotado(d, concepto, MARGIN + COL_F, yf + 5, COL_C,
+            { size: 7.5, color: C.grisOscuro });
+          textoAcotado(d, formatCOP(m.valor), MARGIN + COL_F + COL_C, yf + 5, COL_V - 12,
+            { font: FONT.bold, size: 8, color: m.es_cobro ? C.verde : C.grisClaro, align: 'right' });
+        },
+      });
+    }
   }
 
   // Cierre: lo que todavía se debe. La etiqueta se adapta para no mentir cuando
@@ -336,15 +343,27 @@ const tablaMovimientosMora = (doc, resumen, y, { titulo = null } = {}) => {
     : hayInteres ? 'INTERÉS PENDIENTE'
     : 'MORA PENDIENTE';
 
-  rectFill(doc, MARGIN, yf, CONTENT_W, 22, C.grisFondo, 0);
-  hLine(doc, yf, { color: C.grisBorde });
-  doc.font(FONT.bold).fontSize(8).fillColor(C.grisOscuro)
-    .text(etiquetaCierre, MARGIN + 12, yf + 7, { width: COL_F + COL_C - 12, lineBreak: false });
-  doc.font(FONT.bold).fontSize(8.5).fillColor(pendiente > 0 ? C.rojo : C.verde)
-    .text(formatCOP(pendiente), MARGIN + COL_F + COL_C, yf + 6.5,
-      { width: COL_V - 12, align: 'right', lineBreak: false });
+  filas.push({
+    alto: 22,
+    fondo: C.grisFondo,
+    dibujar: (d, yf) => {
+      hLine(d, yf, { color: C.grisBorde });
+      textoAcotado(d, etiquetaCierre, MARGIN + 12, yf + 7, COL_F + COL_C - 12,
+        { font: FONT.bold, size: 8, color: C.grisOscuro });
+      textoAcotado(d, formatCOP(pendiente), MARGIN + COL_F + COL_C, yf + 6.5, COL_V - 12,
+        { font: FONT.bold, size: 8.5, color: pendiente > 0 ? C.rojo : C.verde, align: 'right' });
+    },
+  });
 
-  return y + H + 20;
+  y = labelSeccion(doc, y, `${titulo}${movs.length ? ` (${movs.length})` : ''}`,
+    { reservar: HEAD_H + filas[0].alto });
+
+  return tablaPaginada(doc, y, {
+    cabeceraAlto:    HEAD_H,
+    dibujarCabecera: cabecera,
+    filas,
+    espacioDespues:  20,
+  });
 };
 
 // ─── Bloque: condiciones de pago pactadas ────────────────────────────────────
@@ -358,8 +377,6 @@ const bloqueCondiciones = (doc, resumen, y, { compacto = false } = {}) => {
   const descMora    = describirCondicion(resumen.condicion);
   const descInteres = describirPlanInteres(resumen.condicion_interes);
   if (!resumen.fecha_limite && !descInteres) return y;
-
-  y = labelSeccion(doc, y, 'Condiciones de pago');
 
   const filas = [['Saldo a pagar', formatCOP(resumen.saldo)]];
 
@@ -381,6 +398,11 @@ const bloqueCondiciones = (doc, resumen, y, { compacto = false } = {}) => {
     }
   }
 
+  // Las condiciones y la declaración que las acepta son un solo bloque: firmar
+  // una aceptación cuyo texto quedó en la página anterior no vale nada.
+  y = labelSeccion(doc, y, 'Condiciones de pago',
+    { reservar: filas.length * 16 + (compacto ? 0 : 40) });
+
   for (const [label, valor] of filas) y = fila(doc, y, label, valor);
 
   if (!compacto) {
@@ -397,12 +419,13 @@ const bloqueCondiciones = (doc, resumen, y, { compacto = false } = {}) => {
     ].filter(Boolean).join(' ');
 
     y += 6;
-    doc.font(FONT.normal).fontSize(7.5).fillColor(C.grisClaro)
-      .text(
-        `El cliente declara conocer y aceptar ${partes.join(' y ')} aquí pactado${partes.length > 1 ? 's' : ''}. ${detalle}`,
-        MARGIN, y, { width: CONTENT_W },
-      );
-    y += 22;
+    const declaracion = `El cliente declara conocer y aceptar ${partes.join(' y ')} aquí pactado${partes.length > 1 ? 's' : ''}. ${detalle}`;
+    doc.font(FONT.normal).fontSize(7.5);
+    const altoDecl = doc.heightOfString(declaracion, { width: CONTENT_W });
+    y = asegurarEspacio(doc, y, altoDecl + 8);
+    doc.fillColor(C.grisClaro)
+      .text(declaracion, MARGIN, y, { width: CONTENT_W, height: altoDecl + 1 });
+    y += Math.max(22, altoDecl + 6);
   }
 
   return y + 8;

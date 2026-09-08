@@ -15,6 +15,11 @@ const PAGE_H    = 841.89;
 const MARGIN    = 52;
 const CONTENT_W = PAGE_W - MARGIN * 2;
 
+// Última coordenada donde puede dibujarse contenido. Debajo va el pie con la
+// paginación (la línea vive en PAGE_H - 44), así que nada del cuerpo puede
+// invadir esa franja.
+const BODY_BOTTOM = PAGE_H - 58;
+
 const FONT = { normal: 'Helvetica', bold: 'Helvetica-Bold' };
 
 // ─── Paleta ───────────────────────────────────────────────────────────────────
@@ -101,10 +106,19 @@ const rectFillStroke = (doc, x, y, w, h, fillColor, strokeColor, radius = 6, lin
 const hLine = (doc, y, { x1 = MARGIN, x2 = PAGE_W - MARGIN, color = C.grisBorde, width = 0.5 } = {}) =>
   doc.moveTo(x1, y).lineTo(x2, y).strokeColor(color).lineWidth(width).stroke();
 
-/** Etiqueta pequeña de sección (CLIENTE, PRODUCTOS…). */
-const labelSeccion = (doc, y, texto) => {
+/**
+ * Etiqueta pequeña de sección (CLIENTE, PRODUCTOS…).
+ *
+ * `reservar` es el alto de lo que va DEBAJO de la etiqueta. Sin él, un título
+ * que cae justo al final de la página se queda huérfano: se imprime abajo y su
+ * contenido arranca en la página siguiente.
+ */
+const labelSeccion = (doc, y, texto, { reservar = 0, fondo = BODY_BOTTOM } = {}) => {
+  if (reservar > 0) y = asegurarEspacio(doc, y, 14 + reservar, { fondo });
   doc.font(FONT.bold).fontSize(7).fillColor(C.grisClaro)
-    .text(String(texto).toUpperCase(), MARGIN, y, { characterSpacing: 1.2, width: CONTENT_W });
+    .text(String(texto).toUpperCase(), MARGIN, y, {
+      characterSpacing: 1.2, width: CONTENT_W, height: 12, lineBreak: false,
+    });
   return y + 14;
 };
 
@@ -115,10 +129,15 @@ const fila = (doc, y, label, valor, {
   labelSize = 8.5, valorSize = 8.5,
   x = MARGIN, w = CONTENT_W, paddingLeft = 0, alto = 16,
 } = {}) => {
+  // `height` fija el alto y con eso PDFKit deja de poder abrir una página nueva
+  // por su cuenta: una fila que caiga al filo del papel se recorta, no se lleva
+  // una hoja entera para ella sola.
   doc.font(labelFont).fontSize(labelSize).fillColor(labelColor)
-    .text(label, x + paddingLeft, y, { width: w * 0.52, lineBreak: false });
+    .text(label, x + paddingLeft, y,
+      { width: w * 0.52, lineBreak: false, height: alto, ellipsis: true });
   doc.font(valorFont).fontSize(valorSize).fillColor(valorColor)
-    .text(valor, x + w * 0.52, y, { width: w * 0.48 - paddingLeft, align: 'right', lineBreak: false });
+    .text(valor, x + w * 0.52, y,
+      { width: w * 0.48 - paddingLeft, align: 'right', lineBreak: false, height: alto, ellipsis: true });
   return y + alto;
 };
 
@@ -231,32 +250,223 @@ const bloqueFirma = (doc, y, { titulo = 'Firma del cliente', identificacion = nu
   return y + 22;
 };
 
-/** Pie con paginación, aplicado a todas las páginas del buffer. */
-const pieDocumento = (doc, { texto = '' } = {}) => {
+/**
+ * Pie con paginación, aplicado a todas las páginas del buffer.
+ *
+ * `soloSiVarias` deja fuera el "Página 1 de 1" de un documento de una sola
+ * hoja: ahí el número no informa de nada. En cuanto hay dos o más, saber si
+ * falta una hoja es exactamente lo que hace falta al imprimir.
+ */
+const pieDocumento = (doc, { texto = '', soloSiVarias = false } = {}) => {
   const total = doc.bufferedPageRange().count;
+  const numerar = !soloSiVarias || total > 1;
   for (let i = 0; i < total; i++) {
     doc.switchToPage(i);
     hLine(doc, PAGE_H - 44, { color: C.grisBorde });
     if (texto) {
       doc.font(FONT.normal).fontSize(7).fillColor(C.grisClaro)
-        .text(texto, MARGIN, PAGE_H - 38, { width: CONTENT_W * 0.7, align: 'left' });
+        .text(texto, MARGIN, PAGE_H - 38,
+          { width: CONTENT_W * 0.7, align: 'left', height: 10, ellipsis: true });
     }
-    doc.font(FONT.normal).fontSize(7).fillColor(C.grisClaro)
-      .text(`Página ${i + 1} de ${total}`, MARGIN, PAGE_H - 38, { width: CONTENT_W, align: 'right' });
+    if (numerar) {
+      doc.font(FONT.normal).fontSize(7).fillColor(C.grisClaro)
+        .text(`Página ${i + 1} de ${total}`, MARGIN, PAGE_H - 38,
+          { width: CONTENT_W, align: 'right', height: 10 });
+    }
   }
 };
 
+/**
+ * Y donde empieza el cuerpo de una página nueva.
+ *
+ * Los documentos que dibujan un encabezado de continuación lo declaran como
+ * margen superior del PDFDocument, así que el salto automático de PDFKit y el
+ * nuestro aterrizan en el mismo sitio. Los que no lo hacen (margen 0) siguen
+ * empezando en MARGIN, exactamente como antes.
+ */
+const inicioCuerpo = (doc) => Math.max(doc?.page?.margins?.top || 0, MARGIN);
+
 /** Salta de página si no caben `alto` puntos; devuelve el y utilizable. */
-const asegurarEspacio = (doc, y, alto, { fondo = PAGE_H - 70 } = {}) => {
+const asegurarEspacio = (doc, y, alto, { fondo = BODY_BOTTOM } = {}) => {
   if (y + alto <= fondo) return y;
   doc.addPage();
-  return MARGIN;
+  return inicioCuerpo(doc);
+};
+
+/**
+ * Encabezado de continuación en TODAS las páginas a partir de la segunda.
+ *
+ * Se engancha al evento `pageAdded` en vez de dibujarse a mano en cada salto
+ * porque los saltos vienen de dos sitios: los nuestros (`asegurarEspacio`,
+ * `tablaPaginada`) y los que PDFKit hace por su cuenta cuando un párrafo largo
+ * desborda. Dibujarlo solo en los nuestros dejaba las páginas del segundo tipo
+ * sin encabezado y con el texto pegado al borde superior del papel.
+ *
+ * Exige que el documento se haya creado con `margins.top` = alto del encabezado
+ * y `margins.bottom` = PAGE_H - BODY_BOTTOM: eso es lo que hace que el salto
+ * automático de PDFKit aterrice bajo el encabezado y se detenga sobre el pie.
+ *
+ * @param {Function} dibujar (doc) => void
+ */
+const encabezadoContinuo = (doc, dibujar) => {
+  doc.on('pageAdded', () => {
+    dibujar(doc);
+    // Imprescindible: `addPage` deja el cursor en el margen superior, pero el
+    // encabezado que acabamos de dibujar lo movió. Sin esto, el texto que venía
+    // fluyendo se reanudaría ENCIMA del encabezado.
+    doc.x = MARGIN;
+    doc.y = inicioCuerpo(doc);
+  });
+  return doc;
+};
+
+/**
+ * Parte las palabras que no caben en `maxW`.
+ *
+ * PDFKit no parte una palabra: si no cabe, la pinta igual y se sale de su
+ * columna en silencio. Un código de referencia sin espacios («ABC1234567890…»)
+ * se comía la columna de al lado. El corte va con salto de línea real y no con
+ * un espacio de ancho cero, que Helvetica no tiene en su codificación.
+ */
+const partirPalabrasLargas = (doc, texto, maxW) => {
+  const original = String(texto ?? '');
+  const partes = original.split(/(\s+)/);
+  let cambio = false;
+  const salida = partes.map((token) => {
+    if (!token.trim() || doc.widthOfString(token) <= maxW) return token;
+    cambio = true;
+    let acumulado = '';
+    let linea = '';
+    for (const ch of token) {
+      if (linea && doc.widthOfString(linea + ch) > maxW) { acumulado += linea + '\n'; linea = ''; }
+      linea += ch;
+    }
+    return acumulado + linea;
+  });
+  return cambio ? salida.join('') : original;
+};
+
+/**
+ * Mide un texto limitado a `lineas` líneas, ya partido para que quepa.
+ * Devuelve el texto a dibujar y el alto exacto que va a ocupar, que es lo que
+ * necesita quien calcula el alto de una fila ANTES de dibujarla.
+ */
+const medirTexto = (doc, texto, w, {
+  lineas = 1, font = FONT.normal, size = 9, lineGap = 0,
+} = {}) => {
+  doc.font(font).fontSize(size);
+  const partido = partirPalabrasLargas(doc, texto, w);
+  const altoLinea = doc.currentLineHeight(true) + lineGap;
+  const natural = doc.heightOfString(partido, { width: w, lineGap });
+  const n = Math.max(1, Math.min(lineas, Math.round(natural / altoLinea) || 1));
+  return { texto: partido, lineas: n, altoLinea, alto: n * altoLinea };
+};
+
+/**
+ * Texto que NUNCA salta de página y NUNCA se sale de su caja: se recorta con
+ * puntos suspensivos al llegar al límite de líneas.
+ *
+ * El `height` explícito es lo que lo garantiza — con el alto fijado, el
+ * `LineWrapper` de PDFKit devuelve `false` en vez de crear una página nueva.
+ * Es la diferencia entre un nombre de producto largo y 40 páginas en blanco.
+ */
+const textoAcotado = (doc, texto, x, y, w, {
+  lineas = 1, font = FONT.normal, size = 9, color = C.negro,
+  align = 'left', lineGap = 0, characterSpacing,
+} = {}) => {
+  const m = medirTexto(doc, texto, w, { lineas, font, size, lineGap });
+  const opciones = { width: w, align, lineGap, height: m.alto + 0.5, ellipsis: true };
+  if (characterSpacing != null) opciones.characterSpacing = characterSpacing;
+  doc.font(font).fontSize(size).fillColor(color).text(m.texto, x, y, opciones);
+  return m.alto;
+};
+
+/**
+ * TABLA QUE SE PARTE ENTRE PÁGINAS REPITIENDO SU CABECERA.
+ *
+ * Es el corazón del arreglo. Antes cada tabla calculaba su alto total, dibujaba
+ * UN marco de ese alto y soltaba las filas hacia abajo: el marco se salía del
+ * papel y cada fila que caía por debajo del borde hacía que PDFKit abriera una
+ * página nueva para ella sola. De ahí salían las decenas de páginas casi vacías.
+ *
+ * Aquí el marco se dibuja por TRAMOS —uno por página—, y cada tramo solo se
+ * abre después de saber cuántas filas caben dentro. Las filas traen su alto
+ * calculado de antemano porque una fila no se puede partir por la mitad.
+ *
+ * @param {object} opts
+ * @param {number}   opts.cabeceraAlto    alto reservado arriba de cada tramo
+ * @param {Function} opts.dibujarCabecera (doc, y) => void, repetida en cada tramo
+ * @param {Array}    opts.filas           [{ alto, dibujar(doc, y, ctx), fondo? }]
+ * @returns {number} y libre debajo de la tabla
+ */
+const tablaPaginada = (doc, y, {
+  cabeceraAlto = 0,
+  dibujarCabecera = null,
+  filas = [],
+  radio = 8,
+  fondo = C.blanco,
+  borde = C.grisBorde,
+  alterna = C.filaAlterna,
+  separador = true,
+  espacioDespues = 24,
+  limiteInferior = BODY_BOTTOM,
+} = {}) => {
+  let i = 0;
+
+  // `do…while`: una tabla sin filas dibuja igual su cabecera. Decir que no hay
+  // nada es información; un hueco sin explicar, no.
+  do {
+    const altoPrimera = filas[i] ? filas[i].alto : 0;
+    y = asegurarEspacio(doc, y, cabeceraAlto + altoPrimera + 4, { fondo: limiteInferior });
+
+    let alto = cabeceraAlto;
+    let j = i;
+    while (j < filas.length && y + alto + filas[j].alto <= limiteInferior) {
+      alto += filas[j].alto;
+      j += 1;
+    }
+    // Una fila más alta que la página entera se dibuja igual: partirla dejaría
+    // media línea de texto colgando y un marco sin cerrar.
+    if (j === i && filas[i]) { alto += filas[i].alto; j += 1; }
+
+    rectFillStroke(doc, MARGIN, y, CONTENT_W, alto, fondo, borde, radio);
+    if (dibujarCabecera) dibujarCabecera(doc, y);
+
+    let yf = y + cabeceraAlto;
+    for (let k = i; k < j; k++) {
+      const f = filas[k];
+      const color = f.fondo || (alterna && k % 2 === 1 ? alterna : null);
+      if (color) {
+        if (k === j - 1) {
+          // Última fila del tramo: sigue la curva inferior del marco.
+          doc.roundedRect(MARGIN, yf, CONTENT_W, f.alto, radio).fill(color);
+          doc.rect(MARGIN, yf, CONTENT_W, Math.max(0, f.alto - radio)).fill(color);
+        } else {
+          doc.rect(MARGIN, yf, CONTENT_W, f.alto).fill(color);
+        }
+      }
+      if (separador && k > i) hLine(doc, yf, { color: borde, width: 0.4 });
+      if (f.dibujar) {
+        f.dibujar(doc, yf, {
+          indice: k, alto: f.alto, primeraDelTramo: k === i, ultimaDelTramo: k === j - 1,
+        });
+      }
+      yf += f.alto;
+    }
+
+    y += alto;
+    i = j;
+  } while (i < filas.length);
+
+  return y + espacioDespues;
 };
 
 module.exports = {
-  PAGE_W, PAGE_H, MARGIN, CONTENT_W, FONT, C, TONOS,
+  PAGE_W, PAGE_H, MARGIN, CONTENT_W, BODY_BOTTOM, FONT, C, TONOS,
   formatCOP, formatFecha, formatFechaHora,
   rectFill, rectStroke, rectFillStroke, hLine,
   labelSeccion, fila, textoUnaLinea, dibujarLogo,
   encabezado, badgeEstado, bloqueFirma, pieDocumento, asegurarEspacio,
+  inicioCuerpo, encabezadoContinuo, partirPalabrasLargas, medirTexto,
+  textoAcotado, tablaPaginada,
 };

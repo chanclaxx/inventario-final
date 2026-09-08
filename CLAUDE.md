@@ -1437,6 +1437,54 @@ CATALOGO_URL, CATALOGO_REVALIDATE_SECRET             # refresco inmediato del ca
 - **CORS**: Strict whitelist — `FRONTEND_URL` env var + `localhost:5173`.
 - **Excel**: Inventory/product imports handled via `multer` + `xlsx` on the backend; frontend also exports Excel directly.
 - **PDF**: Generated server-side with `pdfkit`.
+
+> **PDFKit pagina SOLO si no se lo impides — y lo hace mal**
+> (`utils/pdf.base.js`, `facturas.pdf.js`): `doc.text` con `width` llama por
+> dentro a `continueOnNewPage()` en cuanto la `y` cae por debajo del borde
+> inferior útil. Los documentos se creaban con `margin: 0`, así que ese borde
+> era el **filo del papel**: cada llamada que caía más abajo se llevaba **una
+> hoja para ella sola**. Una factura de 60 productos salía con **160 páginas**
+> casi vacías, la tabla partida por la mitad y las filas encaramadas sobre el
+> encabezado — porque los rectángulos NO paginan (se recortan) y el texto SÍ.
+> Reportado desde producción como «no se puede imprimir».
+> **La regla es una: nada se dibuja sin haber comprobado antes que cabe.**
+> Los bloques indivisibles (tarjetas, totales, firma) pasan por
+> `asegurarEspacio`; las listas por **`tablaPaginada`**, que dibuja el marco por
+> TRAMOS —uno por página— y **repite la cabecera** arriba de cada uno; y los
+> textos de celda por **`textoAcotado`**, cuyo `height` explícito es lo que
+> desactiva el salto automático (con el alto fijado, el `LineWrapper` devuelve
+> `false` en vez de crear una página).
+> **Las filas traen su alto CALCULADO antes de dibujarse** (`medirTexto`): sin
+> eso no se puede saber cuántas caben en lo que queda de hoja. Y
+> `partirPalabrasLargas` corta las palabras que no caben —PDFKit no parte
+> ninguna: la pinta entera y se come la columna de al lado— con salto de línea
+> real, **nunca con un espacio de ancho cero**, que Helvetica no tiene en su
+> codificación.
+> **Los márgenes del documento son parte del contrato, no decoración**: `top` =
+> alto del encabezado de continuación y `bottom` = `PAGE_H − BODY_BOTTOM`. Eso
+> es lo que hace que el único salto automático que queda —un párrafo más largo
+> que una página, que no cabe en ninguna tarjeta— aterrice **debajo** del
+> encabezado y se detenga **encima** del pie. Volver a `margin: 0` reabre el bug
+> entero.
+> El encabezado de continuación va enganchado a **`pageAdded`**
+> (`encabezadoContinuo`) y no dibujado a mano en cada salto: los saltos vienen
+> de dos sitios y pintarlo solo en los nuestros dejaba sin nada arriba justo a
+> las páginas del otro tipo. Ese handler **tiene que devolver el cursor** a
+> `inicioCuerpo(doc)`, o el texto que venía fluyendo se reanuda ENCIMA del
+> encabezado.
+> **`BODY_BOTTOM = PAGE_H − 58` no es conservador de más**: lo que antes se
+> dibujaba entre 790 y 830 caía en la franja donde buena parte de las impresoras
+> no imprime. Los 58 pt que el pie reserva en cada hoja se recuperaron
+> apretando el aire entre bloques, no recortando contenido — por eso una factura
+> de diez líneas **sigue cabiendo en una hoja**.
+> `tablaAbonos` y `tablaMovimientosMora` tenían el mismo defecto y lo arreglan
+> igual, así que se corrigen de paso el comprobante de préstamo, el aviso de
+> mora, el paz y salvo y el estado de cuenta.
+> Prueba: `43-pdf-factura` (106 verificaciones; renderiza el PDF de verdad e
+> instrumenta PDFKit para mirar dónde cae cada trazo. La sección 1 es la que hay
+> que mirar primero —la factura de todos los días sigue en una hoja—, y la
+> invariante que de verdad protege es **«ningún salto lo decide PDFKit»**:
+> cada uno de esos era una hoja que nadie midió).
 - **Email**: Multiple providers in use — Nodemailer (Gmail), Brevo SDK, and Resend — configured per environment.
 - **Backup**: Automated cron jobs via `node-cron` in the `backup` module.
 - **Superadmin JWT**: Uses a separate secret (`JWT_SA_SECRET`) and separate middleware from regular user auth.
