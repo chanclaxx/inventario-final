@@ -15,6 +15,7 @@ import { ModalPinEliminacion } from './ModalPinEliminacion';
 import { Button }     from '../../components/ui/Button';
 import { Input }      from '../../components/ui/Input';
 import { Spinner }    from '../../components/ui/Spinner';
+import { SearchInput } from '../../components/ui/SearchInput';
 import { Modal }      from '../../components/ui/Modal';
 import { formatCOP }      from '../../utils/formatters';
 import { InputMoneda }    from '../../components/ui/InputMoneda';
@@ -25,6 +26,22 @@ import { ModalEtiquetas } from './ModalEtiquetas';
 
 function labelNodo(nodo) {
   return nodo.tipo_nombre ? `${nodo.tipo_nombre}: ${nodo.valor}` : nodo.valor;
+}
+
+// ─── Buscador del árbol ──────────────────────────────────────────────────────
+// Un producto con variantes activas puede tener treinta tallas: la lista deja
+// de caber en la pantalla y encontrar la 38MM pasa a ser trabajo de vista. Con
+// pocos nodos el buscador estorba más de lo que ayuda, así que aparece solo
+// cuando la lista deja de verse de un vistazo.
+const MIN_NODOS_BUSCADOR = 6;
+
+// Se busca por lo mismo que en la lista de productos de afuera —valor, tipo y
+// código— para que el texto que sirve allá sirva también aquí adentro.
+function coincideNodo(nodo, q) {
+  if (!q) return true;
+  return (nodo.valor || '').toLowerCase().includes(q)
+    || (nodo.tipo_nombre || '').toLowerCase().includes(q)
+    || (nodo.codigo || '').toLowerCase().includes(q);
 }
 
 function colorTextStock(stock, minimo) {
@@ -216,6 +233,10 @@ function TarjetaNodo({
   // su clave de carrito distinto. La manda quien la usa, que es el único que
   // sabe en qué nivel está.
   itemKey,
+  // Con el buscador puesto, por qué esta tarjeta sigue en pantalla: el atributo
+  // no coincide, pero adentro tiene variantes que sí. Sin decirlo, el resultado
+  // de la búsqueda se ve como algo que no tiene nada que ver con lo buscado.
+  pista,
 }) {
   const sinStock  = nodo.stock === 0;
   const stockBajo = !sinStock && nodo.stock_minimo > 0 && nodo.stock <= nodo.stock_minimo;
@@ -250,6 +271,9 @@ function TarjetaNodo({
           </p>
           {nodo.codigo && (
             <p className="text-[11px] font-mono text-gray-400 mt-0.5 break-all">{nodo.codigo}</p>
+          )}
+          {pista && (
+            <p className="text-[11px] font-medium text-blue-600 mt-0.5">{pista}</p>
           )}
         </div>
         <div className="flex items-center gap-0.5 flex-shrink-0">
@@ -383,6 +407,8 @@ export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose,
   const [atributoSel, setAtributoSel] = useState(null);
   const [modalNodo,   setModalNodo]   = useState(null);
   const [errorM,      setErrorM]      = useState('');
+  const [busqueda,    setBusqueda]    = useState('');
+  const q = busqueda.trim().toLowerCase();
 
   const { data: arbol = [], isLoading } = useQuery({
     queryKey: ['arbol-producto', producto.id, sucursalId],
@@ -520,6 +546,28 @@ export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose,
     : null;
   const variantesActuales = atributoActualizado?.variantes || [];
 
+  // Entrar a un atributo es una pregunta nueva, pero el filtro que acaba de
+  // encontrar la variante SÍ tiene que bajar con ella: si 38 localizó el
+  // atributo por sus hijos, adentro se sigue buscando 38. Cuando lo que
+  // coincidió fue el atributo mismo, abajo no hay nada que ese texto responda
+  // y se limpia — dejarlo puesto abriría el nivel en blanco teniendo la lista
+  // completa detrás.
+  const entrarEnAtributo = (atributo) => {
+    const hijos = atributo.variantes || [];
+    if (q && !hijos.some((v) => coincideNodo(v, q))) setBusqueda('');
+    setAtributoSel(atributo);
+  };
+
+  // Volver sí limpia siempre: el filtro se escribió para encontrar algo de este
+  // atributo y arriba la pregunta es otra.
+  const volverAAtributos = () => { setBusqueda(''); setAtributoSel(null); };
+
+  // Un atributo se queda si coincide él o si esconde una variante que coincide:
+  // buscar la 38MM desde el primer nivel tiene que llevar hasta ella.
+  const atributosFiltrados = arbol.filter((a) =>
+    coincideNodo(a, q) || (a.variantes || []).some((v) => coincideNodo(v, q)));
+  const variantesFiltradas = variantesActuales.filter((v) => coincideNodo(v, q));
+
   // ─── NIVEL 2: variantes del atributo seleccionado ─────────────────────────
   if (atributoSel) {
     const tiposParaVar = tipos.filter((t) => t.id !== atributoActualizado?.tipo_id);
@@ -529,7 +577,7 @@ export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose,
         {/* Breadcrumb */}
         <div className="flex flex-col gap-0.5">
           <button
-            onClick={() => setAtributoSel(null)}
+            onClick={volverAAtributos}
             className="flex items-center gap-1 text-sm text-gray-400 hover:text-gray-700 transition-colors w-fit"
           >
             <ChevronLeft size={14} />
@@ -549,6 +597,19 @@ export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose,
           </div>
         </div>
 
+        {/* Buscador: solo cuando la lista deja de verse de un vistazo — o
+            cuando el filtro bajó desde el nivel de arriba, o la lista saldría
+            recortada sin nada en pantalla que explique por qué. */}
+        {(variantesActuales.length >= MIN_NODOS_BUSCADOR || q) && (
+          <SearchInput
+            value={busqueda}
+            onChange={setBusqueda}
+            placeholder={codigoActivo
+              ? 'Buscar variante por valor o código...'
+              : 'Buscar variante...'}
+          />
+        )}
+
         {/* Cards variantes */}
         {isLoading ? (
           <Spinner className="py-16" />
@@ -566,9 +627,21 @@ export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose,
               </button>
             )}
           </div>
+        ) : variantesFiltradas.length === 0 ? (
+          <div className="flex flex-col items-center gap-2 py-10">
+            <p className="text-sm text-gray-400 text-center">
+              Ninguna variante coincide con «{busqueda}»
+            </p>
+            <button
+              onClick={() => setBusqueda('')}
+              className="text-xs text-blue-600 hover:text-blue-800 font-medium transition-colors"
+            >
+              Ver las {variantesActuales.length} variantes
+            </button>
+          </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
-            {variantesActuales.map((v) => (
+            {variantesFiltradas.map((v) => (
               <TarjetaNodo
                 key={v.id}
                 nodo={v}
@@ -586,7 +659,7 @@ export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose,
                   : null}
               />
             ))}
-            {esAdmin && (
+            {esAdmin && !q && (
               <button
                 onClick={() => { setErrorM(''); setModalNodo({ modo: 'crear-var', atributoId: atributoSel.id }); }}
                 className="border-2 border-dashed border-gray-200 rounded-2xl p-4
@@ -700,6 +773,17 @@ export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose,
         </div>
       </div>
 
+      {/* Buscador: solo cuando la lista deja de verse de un vistazo */}
+      {(arbol.length >= MIN_NODOS_BUSCADOR || q) && (
+        <SearchInput
+          value={busqueda}
+          onChange={setBusqueda}
+          placeholder={codigoActivo
+            ? 'Buscar atributo, variante o código...'
+            : 'Buscar atributo o variante...'}
+        />
+      )}
+
       {/* Cards atributos */}
       {isLoading ? (
         <Spinner className="py-20" />
@@ -763,10 +847,30 @@ export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose,
             </button>
           )}
         </div>
+      ) : atributosFiltrados.length === 0 ? (
+        <div className="flex flex-col items-center gap-2 py-10">
+          <p className="text-sm text-gray-400 text-center">
+            Nada coincide con «{busqueda}» en este producto
+          </p>
+          <button
+            onClick={() => setBusqueda('')}
+            className="text-xs text-blue-600 hover:text-blue-800 font-medium transition-colors"
+          >
+            Ver los {arbol.length} atributos
+          </button>
+        </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
-          {arbol.map((atributo) => {
+          {atributosFiltrados.map((atributo) => {
             const tieneHijos = Array.isArray(atributo.variantes) && atributo.variantes.length > 0;
+            // El atributo entró por sus hijos: decir cuántos es lo que convierte
+            // una tarjeta que no coincide en el camino hacia la que sí.
+            const hijosCoinciden = q && !coincideNodo(atributo, q)
+              ? (atributo.variantes || []).filter((v) => coincideNodo(v, q)).length
+              : 0;
+            const pistaHijos = hijosCoinciden > 0
+              ? hijosCoinciden + (hijosCoinciden === 1 ? ' variante coincide' : ' variantes coinciden')
+              : null;
             return (
               <TarjetaNodo
                 key={atributo.id}
@@ -776,7 +880,8 @@ export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose,
                 esAdmin={esAdmin}
                 puedeVerCosto={puedeVerCosto}
                 precioPadre={producto.precio}
-                onDrillDown={() => setAtributoSel(atributo)}
+                pista={pistaHijos}
+                onDrillDown={() => entrarEnAtributo(atributo)}
                 onAgregar={() => handleAgregarAtributo(atributo)}
                 onEditar={() => { setErrorM(''); setModalNodo({ modo: 'editar-atr', dato: atributo }); }}
                 onReducir={() => abrirReducir(atributo, 'atributo')}
@@ -786,7 +891,7 @@ export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose,
               />
             );
           })}
-          {esAdmin && (
+          {esAdmin && !q && (
             <button
               onClick={() => { setErrorM(''); setModalNodo({ modo: 'crear-atr' }); }}
               className="border-2 border-dashed border-gray-200 rounded-2xl p-4
