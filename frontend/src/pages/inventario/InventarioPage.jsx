@@ -210,8 +210,13 @@ export default function InventarioPage() {
       {!soloLectura && !sinVenta && (
         <>
           {/* Desktop: columna fija derecha */}
+          {/* La columna se queda pegada a la pantalla Y acotada a su alto: sin
+              el tope, un carrito de 20 líneas crece hacia abajo y solo se
+              termina de ver scrolleando el inventario entero que tiene al lado.
+              8rem = los 7rem del `top-28` + 1rem de aire abajo. */}
           <div className="hidden lg:block w-72 flex-shrink-0">
-            <div className="sticky top-28 bg-white border border-gray-100 rounded-2xl p-4 shadow-sm">
+            <div className="sticky top-28 flex flex-col max-h-[calc(100vh-8rem)]
+              bg-white border border-gray-100 rounded-2xl p-4 shadow-sm">
               <Carrito
                 onFacturar={() => setModalFactura(true)}
                 onPrestar={() => setModalPrestamo(true)}
@@ -299,7 +304,9 @@ export default function InventarioPage() {
                     </button>
                   </div>
                 </div>
-                <div className="overflow-y-auto flex-1 px-5 py-4">
+                {/* El scroll lo maneja el propio carrito (ítems adentro, total
+                    y botones anclados abajo), no esta caja. */}
+                <div className="flex-1 min-h-0 flex flex-col px-5 py-4">
                   <Carrito
                     sinHeader
                     onFacturar={() => { setModalFactura(true);  setCarritoAbierto(false); }}

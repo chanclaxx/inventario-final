@@ -202,80 +202,92 @@ export function Carrito({ onFacturar, onPrestar, onBorradorCargado, sinHeader = 
 
   return (
     <>
-      <div className="flex flex-col h-full">
-        {/* Header */}
-        {!sinHeader && (
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2">
-              <ShoppingCart size={18} className="text-blue-600" />
-              <span className="font-semibold text-gray-900">Carrito</span>
-              <span className="bg-blue-100 text-blue-600 text-xs font-medium px-2 py-0.5 rounded-full">
-                {items.length}
-              </span>
+      <div className="flex flex-col h-full min-h-0">
+        {/* ── Zona fija de arriba ───────────────────────────────────────────
+            Nunca entra en el scroll: el escáner es la puerta de entrada al
+            carrito y perderlo de vista al bajar por los ítems obliga a subir
+            entre cada lectura. */}
+        <div className="flex-shrink-0">
+          {/* Header */}
+          {!sinHeader && (
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <ShoppingCart size={18} className="text-blue-600" />
+                <span className="font-semibold text-gray-900">Carrito</span>
+                <span className="bg-blue-100 text-blue-600 text-xs font-medium px-2 py-0.5 rounded-full">
+                  {items.length}
+                </span>
+              </div>
+              {items.length > 0 && (
+                <button onClick={limpiarCarrito}
+                  className="text-xs text-red-400 hover:text-red-600 transition-colors">
+                  Limpiar
+                </button>
+              )}
             </div>
-            {items.length > 0 && (
-              <button onClick={limpiarCarrito}
-                className="text-xs text-red-400 hover:text-red-600 transition-colors">
-                Limpiar
-              </button>
-            )}
-          </div>
-        )}
+          )}
 
-        {/* Escaneo directo al carrito: código único o IMEI */}
-        <div className="mb-3">
-          <BarraEscaneo
-            value={escaner.scan}
-            onChange={(v) => { escaner.setScan(v); if (escaner.scanMsg) escaner.setScanMsg(null); }}
-            onEnter={escaner.handleScan}
-            mensaje={escaner.scanMsg}
-            buscando={escaner.buscando}
-            placeholder={codigoActivo ? 'Escanear código o IMEI…' : 'Escanear IMEI…'}
-          />
+          {/* Escaneo directo al carrito: código único o IMEI */}
+          <div className="mb-3">
+            <BarraEscaneo
+              value={escaner.scan}
+              onChange={(v) => { escaner.setScan(v); if (escaner.scanMsg) escaner.setScanMsg(null); }}
+              onEnter={escaner.handleScan}
+              mensaje={escaner.scanMsg}
+              buscando={escaner.buscando}
+              placeholder={codigoActivo ? 'Escanear código o IMEI…' : 'Escanear IMEI…'}
+            />
+          </div>
+
+          {/* Ruta de recogida — el carrito es la lista, la bodega el recorrido.
+              En una bodega grande, juntar ocho productos en el orden en que se
+              escribieron significa cruzarla ocho veces. Opt-in con
+              `ubicacion_activa`, igual que el resto de la feature. */}
+          {ubicacionActiva && items.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setModalRuta(true)}
+              className="w-full mb-3 flex items-center justify-center gap-2 px-3 py-2 rounded-xl
+                border border-blue-200 bg-blue-50/60 text-sm text-blue-700
+                hover:bg-blue-100 transition-colors"
+            >
+              <Route size={15} />
+              Ver ruta de recogida
+            </button>
+          )}
+
+          {/* Tarifa aplicada a todo el carrito (feature opt-in) */}
+          {tarifasCfg.activo && items.length > 0 && (
+            <div className="mb-3 p-3 bg-gray-50 rounded-xl flex flex-col gap-1.5">
+              <SelectorTarifa
+                label="Tarifa para toda la venta"
+                tarifas={tarifasCfg.tarifas}
+                valor={tarifaComun}
+                verPorcentaje={tarifasCfg.verPorcentaje}
+                disabled={sinCosto}
+                motivoDisabled="Ningún producto del carrito admite tarifa"
+                onChange={(t) => aplicarTarifaATodos(t, {
+                  modo: tarifasCfg.modo, redondeo: tarifasCfg.redondeo,
+                })}
+              />
+              {!sinCosto && conTarifa.length < items.length && (
+                <span className="text-[11px] text-gray-400">
+                  {items.length - conTarifa.length} producto(s) no admiten tarifa y conservan
+                  su precio de lista — revísalos abajo uno por uno
+                </span>
+              )}
+            </div>
+          )}
         </div>
 
-        {/* Ruta de recogida — el carrito es la lista, la bodega el recorrido.
-            En una bodega grande, juntar ocho productos en el orden en que se
-            escribieron significa cruzarla ocho veces. Opt-in con
-            `ubicacion_activa`, igual que el resto de la feature. */}
-        {ubicacionActiva && items.length > 0 && (
-          <button
-            type="button"
-            onClick={() => setModalRuta(true)}
-            className="w-full mb-3 flex items-center justify-center gap-2 px-3 py-2 rounded-xl
-              border border-blue-200 bg-blue-50/60 text-sm text-blue-700
-              hover:bg-blue-100 transition-colors"
-          >
-            <Route size={15} />
-            Ver ruta de recogida
-          </button>
-        )}
-
-        {/* Tarifa aplicada a todo el carrito (feature opt-in) */}
-        {tarifasCfg.activo && items.length > 0 && (
-          <div className="mb-3 p-3 bg-gray-50 rounded-xl flex flex-col gap-1.5">
-            <SelectorTarifa
-              label="Tarifa para toda la venta"
-              tarifas={tarifasCfg.tarifas}
-              valor={tarifaComun}
-              verPorcentaje={tarifasCfg.verPorcentaje}
-              disabled={sinCosto}
-              motivoDisabled="Ningún producto del carrito admite tarifa"
-              onChange={(t) => aplicarTarifaATodos(t, {
-                modo: tarifasCfg.modo, redondeo: tarifasCfg.redondeo,
-              })}
-            />
-            {!sinCosto && conTarifa.length < items.length && (
-              <span className="text-[11px] text-gray-400">
-                {items.length - conTarifa.length} producto(s) no admiten tarifa y conservan
-                su precio de lista — revísalos abajo uno por uno
-              </span>
-            )}
-          </div>
-        )}
-
-        {/* Items */}
-        <div className="flex-1 overflow-y-auto flex flex-col gap-2.5">
+        {/* ── Ítems: el ÚNICO que scrollea ──────────────────────────────────
+            `min-h-0` es lo que hace que `flex-1` pueda encogerse por debajo de
+            su contenido; sin él la columna crece con los ítems, el panel se
+            estira más allá de la pantalla y para ver el final del carrito hay
+            que scrollear la página entera —o sea, los mil productos del
+            inventario que están al lado—. */}
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain
+          flex flex-col gap-2.5 pr-1 -mr-1">
           {items.length === 0 ? (
             <EmptyState icon={ShoppingCart} titulo="Carrito vacío"
               descripcion="Agrega productos desde el inventario" />
@@ -380,11 +392,20 @@ export function Carrito({ onFacturar, onPrestar, onBorradorCargado, sinHeader = 
               ))}
             </>
           )}
+
+          {/* Borradores guardados de esta sucursal. Van DENTRO del scroll y no
+              debajo del footer: la lista no tiene tope de alto y, fija abajo,
+              empujaría fuera de la pantalla justo el botón de facturar. Se
+              renderiza fuera del bloque de ítems a propósito: tiene que verse
+              también con el carrito vacío, que es cuando se va a cargar uno. */}
+          <ListaBorradores onCargado={onBorradorCargado} />
         </div>
 
-        {/* Footer con total y acciones */}
+        {/* ── Footer fijo: total y acciones ─────────────────────────────────
+            Anclado abajo del panel, nunca dentro del scroll: cerrar la venta no
+            puede depender de haber bajado hasta el último ítem. */}
         {items.length > 0 && (
-          <div className="border-t border-gray-100 pt-4 mt-4 flex flex-col gap-3">
+          <div className="flex-shrink-0 border-t border-gray-100 pt-4 mt-4 flex flex-col gap-3">
             <div className="flex items-center justify-between">
               <span className="text-sm text-gray-500">Total</span>
               <span className="text-xl font-bold text-gray-900">{formatCOP(total)}</span>
@@ -451,11 +472,6 @@ export function Carrito({ onFacturar, onPrestar, onBorradorCargado, sinHeader = 
             {errorRed && <p className="text-xs text-red-500 text-center">{errorRed}</p>}
           </div>
         )}
-
-        {/* Borradores guardados de esta sucursal. Se renderiza fuera del bloque
-            de arriba a propósito: la lista tiene que verse también con el
-            carrito vacío, que es justo cuando se va a cargar uno. */}
-        <ListaBorradores onCargado={onBorradorCargado} />
       </div>
 
       {modalTraslado && (
