@@ -70,6 +70,10 @@ const crearInforme = () => ({
   // repetir el mismo sitio en cientos de filas.
   ubicaciones_nuevas: [],
   hojas_ignoradas:    [],
+  // Productos y variantes nuevos que recibirán su código automático
+  // (`codigo_auto`). Es un número y no un aviso: no hay nada que corregir en
+  // el Excel, pero sí conviene saberlo antes de confirmar.
+  codigos_automaticos: 0,
 });
 
 /**

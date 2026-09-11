@@ -3,6 +3,7 @@ const repo                  = require('./productosCantidad.repository');
 const { calcularCostoPromedio } = require('../../utils/costoPromedio.util');
 const { normalizarUbicacion }   = require('../../utils/ubicacion.util');
 const { normalizarCodigo: _normalizarCodigo, exigirCodigoLibre } = require('../../utils/codigo.util');
+const { asignarAlCrear } = require('../../utils/codigoAuto.util');
 
 // ── Verifica que linea_id pertenece al negocio ────────────────────────────
 const _verificarLineaNegocio = async (lineaId, negocioId) => {
@@ -77,7 +78,18 @@ const crearProducto = async (negocioId, datos) => {
   const ubicacion = normalizarUbicacion(datos.ubicacion);
 
   const creado = await repo.create({ ...datos, codigo, ubicacion }).catch(_traducirCodigoDuplicado);
-  if (codigo) await repo.sincronizarCodigoPorNombre(negocioId, creado.nombre, codigo);
+  if (codigo) {
+    await repo.sincronizarCodigoPorNombre(negocioId, creado.nombre, codigo);
+  } else {
+    // Ni escrito ni heredado: con el código automático encendido nace con el
+    // siguiente del negocio (utils/codigoAuto.util.js). Después de crear y no
+    // antes, porque asignar el código nunca puede impedir que el producto
+    // exista: si falla, queda sin código y se le genera desde Etiquetas.
+    const automatico = await asignarAlCrear({
+      negocioId, sucursalId: creado.sucursal_id, nivel: 'producto', id: creado.id,
+    });
+    if (automatico) creado.codigo = automatico;
+  }
   return creado;
 };
 

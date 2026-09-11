@@ -1303,6 +1303,74 @@ await importar(libroApagado(), { sucursalId: 40, negocioId: 4 });
 check('con ubicacion_activa apagada no se crea ningún sitio',
   (await q(`SELECT COUNT(*)::int n FROM ubicaciones WHERE sucursal_id = 40 AND nombre = 'Estante Z'`))[0].n, 0);
 
+// ═════════════════════════════════════════════════════════════════════════════
+seccion('19. CÓDIGO AUTOMÁTICO — lo que NACE en la importación nace con código');
+// ═════════════════════════════════════════════════════════════════════════════
+// Con `codigo_auto` (encendido por defecto cuando el código único lo está), el
+// importador le da código a lo que crea, en UNA pasada al final y con el mismo
+// motor que el alta desde la app. Lo que la fila trae escrito manda; lo que ya
+// existía no se toca — su código, si alguna vez lo tuvo, puede estar impreso.
+await q(`INSERT INTO negocios (id, nombre) VALUES (5, 'Con codigo auto')`);
+await q(`INSERT INTO sucursales (id, negocio_id, nombre) VALUES (50, 5, 'Norte'), (51, 5, 'Sur')`);
+await setConfig(5, { codigo_producto_activo: '1', variantes_activo: '1' });
+await q(`INSERT INTO productos_cantidad (sucursal_id, nombre, stock) VALUES (50, 'Existente', 1)`);
+
+const libroAuto = () => libro([{
+  nombre: 'Productos Cantidad',
+  ws: hoja('Cantidad', CAB_CANT_FULL, [
+    ['Nuevo plano', '',              '', 'Accesorios', '',     '', 5, 0, 1000, 2000, 'unidad', '', '', ''],
+    ['Con fabrica', '7700000000017', '', 'Accesorios', '',     '', 2, 0, 1000, 2000, 'unidad', '', '', ''],
+    ['Correa',      '',              '', 'Accesorios', '38MM', '', 3, 0, 1000, 2000, 'unidad', '', '', ''],
+    ['Correa',      '',              '', 'Accesorios', '42MM', '', 2, 0, 1000, 2000, 'unidad', '', '', ''],
+    ['Existente',   '',              '', 'Accesorios', '',     '', 4, 0, 1000, 2000, 'unidad', '', '', ''],
+  ]),
+}]);
+const contadorDe = async (n) =>
+  (await q(`SELECT ultimo_numero FROM contadores_documento WHERE negocio_id = $1 AND tipo = 'codigo_producto'`, [n]))[0]?.ultimo_numero ?? null;
+
+const prevAuto = await analizar(libroAuto(), { sucursalId: 50, negocioId: 5 });
+check('★ el preview anuncia cuántos nodos nuevos recibirán código (producto plano + Correa + sus dos tallas)',
+  prevAuto.body.data.informe.codigos_automaticos, 4);
+check('y no gastó ningún número: el contador volvió atrás con el ROLLBACK', await contadorDe(5), null);
+
+await importar(libroAuto(), { sucursalId: 50, negocioId: 5 });
+const codigoProd = async (suc, nombre) =>
+  (await q(`SELECT codigo FROM productos_cantidad WHERE sucursal_id = $1 AND nombre = $2`, [suc, nombre]))[0]?.codigo ?? null;
+const codigoAtr = async (suc, nombre, valor) =>
+  (await q(`SELECT ap.codigo FROM atributos_producto ap JOIN productos_cantidad pc ON pc.id = ap.producto_id
+            WHERE pc.sucursal_id = $1 AND pc.nombre = $2 AND ap.valor = $3`, [suc, nombre, valor]))[0]?.codigo ?? null;
+
+check('★ el producto nuevo sin código en el Excel nace con uno', await codigoProd(50, 'Nuevo plano'), '000001');
+check('el que trae el suyo en el Excel lo conserva', await codigoProd(50, 'Con fabrica'), '7700000000017');
+check('★ con variantes, cada talla nace con su código',
+  [await codigoAtr(50, 'Correa', '38MM'), await codigoAtr(50, 'Correa', '42MM')], ['000003', '000004']);
+check('y el producto conserva el suyo como identidad', await codigoProd(50, 'Correa'), '000002');
+check('★ lo que YA existía no se toca', await codigoProd(50, 'Existente'), null);
+check('el contador queda en el último repartido', await contadorDe(5), 4);
+
+// La otra sede importa el mismo archivo: el mismo nodo lógico hereda.
+await importar(libroAuto(), { sucursalId: 51, negocioId: 5 });
+check('★ en la otra sede, cada nodo hereda el MISMO código',
+  [await codigoProd(51, 'Nuevo plano'), await codigoProd(51, 'Correa'),
+    await codigoAtr(51, 'Correa', '38MM'), await codigoAtr(51, 'Correa', '42MM')],
+  ['000001', '000002', '000003', '000004']);
+// «Existente» ya existía en Norte, pero en Sur es NUEVO: nace con código, y
+// como en Norte estaba vacío se le propaga. Un nodo sin código no puede tener
+// etiquetas impresas, así que llenarlo no pisa nada; y el mismo producto queda
+// con el mismo código en las dos sedes.
+check('en Sur «Existente» sí es nuevo: nace con el siguiente número', await codigoProd(51, 'Existente'), '000005');
+check('★ y llega a la de Norte, que estaba vacía', await codigoProd(50, 'Existente'), '000005');
+check('heredar no gastó números: solo avanzó por ese', await contadorDe(5), 5);
+
+await setConfig(5, { codigo_producto_activo: '1', variantes_activo: '1', codigo_auto: '0' });
+await importar(libro([{
+  nombre: 'Productos Cantidad',
+  ws: hoja('Cantidad', CAB_CANT_FULL, [
+    ['Apagado', '', '', 'Accesorios', '', '', 1, 0, 1000, 2000, 'unidad', '', '', ''],
+  ]),
+}]), { sucursalId: 50, negocioId: 5 });
+check('★ con codigo_auto = 0 el importador se comporta como siempre', await codigoProd(50, 'Apagado'), null);
+
 console.log(`\n${'═'.repeat(72)}`);
 console.log(`  ${pasados} verificaciones pasaron · ${fallos} fallaron`);
 console.log('═'.repeat(72));

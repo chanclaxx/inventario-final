@@ -1,6 +1,7 @@
 const repo = require('./variantes-producto.repository');
 const { calcularCostoPromedio } = require('../../utils/costoPromedio.util');
 const { normalizarCodigo, exigirCodigoLibre, propagarCodigo } = require('../../utils/codigo.util');
+const { asignarAlCrear } = require('../../utils/codigoAuto.util');
 
 // ── Código escaneable del nodo (feature opt-in `codigo_producto_activo`) ─────
 // El código identifica lo que se escanea. Con variantes activas eso es el
@@ -44,6 +45,14 @@ const crearAtributo = async (negocioId, productoId, datos) => {
   if (codigo) {
     const ctx = await repo.contextoAtributo(atributo.id);
     if (ctx) await propagarCodigo(null, { negocioId, identidad: { producto: ctx.producto_nombre, atributo: ctx.valor }, codigo });
+  } else {
+    // Con variantes activas lo que se escanea y se etiqueta es la talla, no el
+    // producto: nace con su propio código (o hereda el de la misma talla en
+    // otra sede). El producto conserva el suyo como identidad entre sedes.
+    const automatico = await asignarAlCrear({
+      negocioId, sucursalId: producto.sucursal_id, nivel: 'atributo', id: atributo.id,
+    });
+    if (automatico) atributo.codigo = automatico;
   }
   return atributo;
 };
@@ -93,6 +102,11 @@ const crearVariante = async (negocioId, atributoId, datos) => {
   if (codigo) {
     const ctx = await repo.contextoVariante(variante.id);
     if (ctx) await propagarCodigo(null, { negocioId, identidad: { producto: ctx.producto_nombre, atributo: ctx.atributo_valor, variante: ctx.valor }, codigo });
+  } else {
+    const automatico = await asignarAlCrear({
+      negocioId, sucursalId: atributo.sucursal_id, nivel: 'variante', id: variante.id,
+    });
+    if (automatico) variante.codigo = automatico;
   }
   return variante;
 };

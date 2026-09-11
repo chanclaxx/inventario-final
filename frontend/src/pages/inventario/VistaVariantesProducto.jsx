@@ -57,7 +57,7 @@ function colorBarra(stock, minimo) {
 }
 
 // ─── Modal crear/editar nodo ──────────────────────────────────────────────────
-function ModalNodo({ open, onClose, titulo, tipos = [], datoInicial, onGuardar, isPending, error, onEliminar, ocultarCosto = false, codigoActivo = false, puedeVerCosto = false }) {
+function ModalNodo({ open, onClose, titulo, tipos = [], datoInicial, onGuardar, isPending, error, onEliminar, ocultarCosto = false, codigoActivo = false, codigoAuto = false, puedeVerCosto = false }) {
   const [valor,         setValor]         = useState(datoInicial?.valor || '');
   const [stockMin,      setStockMin]      = useState(datoInicial?.stock_minimo ?? 0);
   const [precio,        setPrecio]        = useState(datoInicial?.precio || '');
@@ -139,12 +139,14 @@ function ModalNodo({ open, onClose, titulo, tipos = [], datoInicial, onGuardar, 
           <div className="flex flex-col gap-1">
             <Input
               label="Código de barras de esta variante"
-              placeholder="Ej: ACC-360-38M-001"
+              placeholder={codigoAuto && !datoInicial ? 'Vacío = se genera solo' : 'Ej: ACC-360-38M-001'}
               value={codigo}
               onChange={(e) => setCodigo(e.target.value.toUpperCase())}
             />
             <p className="text-xs text-gray-400">
-              Es el que lee el escáner. Déjalo vacío si esta variante no tiene código propio.
+              {codigoAuto && !datoInicial
+                ? 'Es el que lee el escáner. Déjalo vacío y el sistema le asigna uno (o el que ya tenga esta misma variante en otra sucursal).'
+                : 'Es el que lee el escáner. Déjalo vacío si esta variante no tiene código propio.'}
             </p>
           </div>
         )}
@@ -374,7 +376,7 @@ function TarjetaNodo({
 }
 
 // ─── Componente principal ─────────────────────────────────────────────────────
-export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose, ajusteStockSinVariantes = false, codigoActivo = false }) {
+export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose, ajusteStockSinVariantes = false, codigoActivo = false, codigoAuto = false }) {
   const queryClient = useQueryClient();
 
   // Etiqueta de UN nodo. `nodoInicial` viaja con la misma forma que devuelve
@@ -684,6 +686,7 @@ export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose,
             isPending={mutCrearVar.isPending}
             error={errorM}
             codigoActivo={codigoActivo}
+            codigoAuto={codigoAuto}
             puedeVerCosto={puedeVerCosto}
           />
         )}
@@ -698,6 +701,7 @@ export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose,
             isPending={mutEditarVar.isPending}
             error={errorM}
             codigoActivo={codigoActivo}
+            codigoAuto={codigoAuto}
             puedeVerCosto={puedeVerCosto}
             onEliminar={() => { mutEliminarVar.mutate(modalNodo.dato.id); cerrarModal(); }}
           />
@@ -916,6 +920,7 @@ export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose,
           isPending={mutCrearAtr.isPending}
           error={errorM}
           codigoActivo={codigoActivo}
+          codigoAuto={codigoAuto}
           puedeVerCosto={puedeVerCosto}
         />
       )}
@@ -930,6 +935,7 @@ export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose,
           isPending={mutEditarAtr.isPending}
           error={errorM}
           codigoActivo={codigoActivo}
+          codigoAuto={codigoAuto}
           puedeVerCosto={puedeVerCosto}
           onEliminar={() => { mutEliminarAtr.mutate(modalNodo.dato.id); cerrarModal(); }}
           ocultarCosto={modalNodo.dato.variantes?.length > 0}

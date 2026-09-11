@@ -37,9 +37,10 @@ const sqlNodos = () => `
       NULL::int        AS variante_id,
       pc.nombre,
       NULL::text       AS variante_label,
-      -- Identidad LOGICA del nodo, en columnas separadas. La usan heredarCodigo
-      -- y propagarCodigo para encontrar el mismo nodo en las otras sedes, donde
-      -- los ids son otros. Va aparte y no partiendo variante_label por " / ":
+      -- Identidad LOGICA del nodo, en columnas separadas: es lo que identifica
+      -- el mismo nodo en las otras sedes, donde los ids son otros (el motor de
+      -- codigos la relee de la base al asignar). Va aparte y no partiendo
+      -- variante_label por " / ":
       -- un atributo que se llame "Rojo / Azul" haria que ese parseo apuntara a
       -- un nodo inexistente, y el codigo se duplicaria entre sedes.
       -- (Sin acentos ni comillas invertidas: esto vive dentro de un template

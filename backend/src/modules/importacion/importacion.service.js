@@ -5,6 +5,7 @@ const {
   clavesCaracteristica,
 } = require('./importacion.informe');
 const { codigoTomadoPorOtroNodo, heredarCodigo, propagarCodigo } = require('../../utils/codigo.util');
+const { asignarCodigos, configCodigoAuto } = require('../../utils/codigoAuto.util');
 
 const MAX_FILAS = 2000;
 
@@ -1000,9 +1001,15 @@ const importarCantidad = async (filas, sucursalId, negocioId, config = {}, opcio
   const client = ctx.client;
   let exito = true;
 
+  // Nodos que NACEN en esta importación, para darles su código automático al
+  // final (ver más abajo). Solo entran los de filas que de verdad se escribieron:
+  // una fila que hizo ROLLBACK a su savepoint se llevó sus nodos con ella.
+  const nodosNuevos = [];
+
   try {
     for (const [i, fila] of filas.entries()) {
       const nFila = fila._fila ?? (i + 4);
+      const nuevosFila = [];
 
       const nombre = fila.nombre?.toString().trim();
       if (!nombre) {
@@ -1157,6 +1164,7 @@ const importarCantidad = async (filas, sucursalId, negocioId, config = {}, opcio
           });
           const productoId = base.id;
           productoDeLaFila = productoId;
+          if (base.nuevo) nuevosFila.push({ nivel: 'producto', id: productoId });
           await _avisarSobreNombre(client, 'productos_cantidad', {
             informe, hoja: 'Productos Cantidad', fila: nFila, nombre,
             sucursalId, coincidencias: base.coincidencias, vistosArchivo: nombresArchivo,
@@ -1167,12 +1175,14 @@ const importarCantidad = async (filas, sucursalId, negocioId, config = {}, opcio
           const { id: atributoId, nuevo: atrNuevo } = await _resolverAtributo(
             client, productoId, sucursalId, atributoValor, costoUnit
           );
+          if (atrNuevo) nuevosFila.push({ nivel: 'atributo', id: atributoId });
 
           if (varianteValor) {
             // Stock → variante (nivel 2); luego sincronizar hacia arriba
             const { id: varianteId, accion } = await _ajustarVariante(
               client, atributoId, varianteValor, stock, stockMinimo, precioVenta, costoUnit
             );
+            if (accion === 'insertado') nuevosFila.push({ nivel: 'variante', id: varianteId });
             nodoDelCodigo = { tabla: 'variantes_atributo', id: varianteId };
             await _recalcularStockProducto(client, productoId);
             if (accion === 'insertado') {
@@ -1266,6 +1276,7 @@ const importarCantidad = async (filas, sucursalId, negocioId, config = {}, opcio
             await _aplicarNota(client, 'productos_cantidad', creado[0]?.id, fila.nota);
             nodoDelCodigo = { tabla: 'productos_cantidad', id: creado[0]?.id };
             productoDeLaFila = creado[0]?.id;
+            if (creado[0]?.id) nuevosFila.push({ nivel: 'producto', id: creado[0].id });
             resultado.insertados++;
           }
         }
@@ -1328,6 +1339,7 @@ const importarCantidad = async (filas, sucursalId, negocioId, config = {}, opcio
           }
         }
         await client.query('RELEASE SAVEPOINT fila_sp');
+        nodosNuevos.push(...nuevosFila);
       } catch (err) {
         await client.query('ROLLBACK TO SAVEPOINT fila_sp');
         const msg = _mensajeSeguro(err);
@@ -1339,6 +1351,28 @@ const importarCantidad = async (filas, sucursalId, negocioId, config = {}, opcio
         resultado.errores.push({ fila: nFila, error: msg });
         resultado.omitidos++;
       }
+    }
+
+    // ── Código automático para lo que nació en esta importación ─────────────
+    //
+    // Al FINAL y no fila a fila, por dos razones. La primera es el costo: el
+    // motor resuelve herencia, contador, verificación y propagación en un
+    // puñado de consultas para todo el lote, y el importador corre contra una
+    // base a 145 ms por consulta. La segunda es que al final ya se sabe todo:
+    // lo que la fila trajo escrito en el Excel o heredó de otra sede ya está en
+    // su sitio, y el motor solo toca lo que siguió vacío (nunca pisa).
+    //
+    // El preview pasa por aquí igual —es el mismo código dentro de un ROLLBACK—,
+    // así que el informe dice cuántos códigos se van a asignar antes de
+    // confirmar, y el contador vuelve atrás con el resto de la transacción.
+    const auto = configCodigoAuto(config);
+    if (auto.activo && nodosNuevos.length) {
+      const { asignados } = await asignarCodigos(client, {
+        negocioId, sucursalId, nodos: nodosNuevos,
+        prefijo: auto.prefijo, digitos: auto.digitos, tolerante: true,
+      });
+      resultado.codigos_automaticos = asignados.length;
+      informe.codigos_automaticos = (informe.codigos_automaticos || 0) + asignados.length;
     }
   } catch (err) {
     exito = false;

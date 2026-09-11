@@ -11,6 +11,7 @@ const variantesRepo = require('../variantes-producto/variantes-producto.reposito
 const tesoreriaRepo = require('../tesoreria/tesoreria.repository');
 const { asignarNumeroDocumento } = require('../../utils/numeracion.util');
 const { calcularCostoPromedio }  = require('../../utils/costoPromedio.util');
+const { copiarCodigoSiLibre }    = require('../../utils/codigoAuto.util');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // RED INTERNA — lógica de negocio
@@ -355,7 +356,8 @@ const _resolverNodoOrigen = async (client, { productoId, atributoId, varianteId,
     const { rows } = await client.query(
       `SELECT v.id, v.valor, v.stock,
               COALESCE(v.costo_unitario, ap.costo_unitario, pc.costo_unitario, 0) AS costo,
-              ap.id AS atributo_id, ap.valor AS atributo_valor
+              ap.id AS atributo_id, ap.valor AS atributo_valor,
+              v.codigo AS variante_codigo, ap.codigo AS atributo_codigo
        FROM variantes_atributo v
        JOIN atributos_producto ap ON ap.id = v.atributo_id
        JOIN productos_cantidad pc ON pc.id = ap.producto_id
@@ -369,6 +371,7 @@ const _resolverNodoOrigen = async (client, { productoId, atributoId, varianteId,
     return {
       productoId, atributoId: v.atributo_id, varianteId: v.id,
       nombreProducto: p.nombre, atributoValor: v.atributo_valor, varianteValor: v.valor,
+      atributoCodigo: v.atributo_codigo, varianteCodigo: v.variante_codigo,
       stock: Number(v.stock), costo: Number(v.costo),
       etiqueta: _etiquetaNodo(p.nombre, v.atributo_valor, v.valor),
     };
@@ -376,7 +379,7 @@ const _resolverNodoOrigen = async (client, { productoId, atributoId, varianteId,
 
   if (atributoId) {
     const { rows } = await client.query(
-      `SELECT ap.id, ap.valor, ap.stock,
+      `SELECT ap.id, ap.valor, ap.stock, ap.codigo,
               COALESCE(ap.costo_unitario, pc.costo_unitario, 0) AS costo,
               (SELECT count(*)::int FROM variantes_atributo v
                WHERE v.atributo_id = ap.id AND v.activo = true) AS n_variantes
@@ -397,6 +400,7 @@ const _resolverNodoOrigen = async (client, { productoId, atributoId, varianteId,
     return {
       productoId, atributoId: a.id, varianteId: null,
       nombreProducto: p.nombre, atributoValor: a.valor, varianteValor: null,
+      atributoCodigo: a.codigo, varianteCodigo: null,
       stock: Number(a.stock), costo: Number(a.costo),
       etiqueta: _etiquetaNodo(p.nombre, a.valor),
     };
@@ -423,8 +427,18 @@ const _resolverNodoOrigen = async (client, { productoId, atributoId, varianteId,
  * entre sedes es el VALOR (el texto "38MM"), nunca el id: cada sucursal tiene
  * los suyos. Se crea con stock 0 y sin costo; el costo lo pone la recepción con
  * el valor interno, que es lo que el local debe.
+ *
+ * El nodo que se CREA nace con el código del nodo de origen (`atributoCodigo`,
+ * `varianteCodigo`), si en el destino está libre. Es el mismo nodo lógico, así
+ * que no hay nada que inventar: hasta ahora la referencia del producto sí se
+ * llevaba su código (`crearReferenciaCantidad`) pero la talla no, y el lector
+ * del local no encontraba justo lo que acababa de llegarle. Un nodo que YA
+ * existía en el destino no se toca: puede tener su propio código impreso.
  */
-const _resolverNodoDestino = async (client, { productoDestinoId, sucursalDestinoId, atributoValor, varianteValor }) => {
+const _resolverNodoDestino = async (client, {
+  productoDestinoId, sucursalDestinoId, atributoValor, varianteValor,
+  atributoCodigo = null, varianteCodigo = null,
+}) => {
   if (!atributoValor) return { atributoId: null, varianteId: null };
 
   const { rows: ex } = await client.query(
@@ -441,6 +455,9 @@ const _resolverNodoDestino = async (client, { productoDestinoId, sucursalDestino
       [productoDestinoId, sucursalDestinoId, String(atributoValor).trim()]
     );
     atributoId = rows[0].id;
+    await copiarCodigoSiLibre(client, {
+      nivel: 'atributo', id: atributoId, sucursalId: sucursalDestinoId, codigo: atributoCodigo,
+    });
   }
 
   if (!varianteValor) return { atributoId, varianteId: null };
@@ -459,6 +476,9 @@ const _resolverNodoDestino = async (client, { productoDestinoId, sucursalDestino
       [atributoId, String(varianteValor).trim()]
     );
     varianteId = rows[0].id;
+    await copiarCodigoSiLibre(client, {
+      nivel: 'variante', id: varianteId, sucursalId: sucursalDestinoId, codigo: varianteCodigo,
+    });
   }
   return { atributoId, varianteId };
 };
@@ -891,6 +911,7 @@ const _ejecutarRecepcion = async (client, {
         ...(await _resolverNodoDestino(client, {
           productoDestinoId, sucursalDestinoId: destinoId,
           atributoValor: nodoOrigen.atributoValor, varianteValor: nodoOrigen.varianteValor,
+          atributoCodigo: nodoOrigen.atributoCodigo, varianteCodigo: nodoOrigen.varianteCodigo,
         })),
       };
 
@@ -1463,6 +1484,7 @@ const confirmarDevolucion = async (req, remisionId, { lineas_recibidas } = {}) =
           ...(await _resolverNodoDestino(client, {
             productoDestinoId, sucursalDestinoId: bodegaId,
             atributoValor: nodoOrigen.atributoValor, varianteValor: nodoOrigen.varianteValor,
+            atributoCodigo: nodoOrigen.atributoCodigo, varianteCodigo: nodoOrigen.varianteCodigo,
           })),
         };
 

@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  Printer, Download, Barcode, QrCode, AlertTriangle, Wand2, Check,
-  ChevronDown, ChevronRight, Sliders, Package,
+  Printer, Download, AlertTriangle, Wand2, Check, ChevronRight, Package,
+  Ruler, Palette, Settings2, ExternalLink,
 } from 'lucide-react';
 import { Modal }       from '../../components/ui/Modal';
 import { Button }      from '../../components/ui/Button';
@@ -12,12 +12,18 @@ import { SearchInput } from '../../components/ui/SearchInput';
 import { EmptyState }  from '../../components/ui/EmptyState';
 import { getLineas }        from '../../api/productos.api';
 import { getUbicaciones }   from '../../api/ubicaciones.api';
+import api                  from '../../api/axios.config';
 import {
-  getFormatosEtiqueta, getNodosEtiqueta, planEtiquetas, generarCodigosEtiqueta,
+  getFormatosEtiqueta, getCatalogoEtiquetas, getNodosEtiqueta, planEtiquetas, generarCodigosEtiqueta,
 } from '../../api/etiquetas.api';
 import { useAuth }        from '../../context/useAuth';
 import { useSucursalKey } from '../../hooks/useSucursalKey';
-import useEtiquetas, { leerPreferencias, guardarPreferencias } from '../../hooks/useEtiquetas';
+import useEtiquetas, { leerPreferencias, guardarPreferencias, calibracionDe } from '../../hooks/useEtiquetas';
+import { Opcion, Seccion, Casilla } from './etiquetas/ui';
+import { SelectorFormato } from './etiquetas/SelectorFormato';
+import { PanelDiseno }     from './etiquetas/PanelDiseno';
+import { PanelImpresora }  from './etiquetas/PanelImpresora';
+import { resolverElegido, resumenCalibracion, mm } from './etiquetas/etiquetasUi';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // IMPRIMIR ETIQUETAS — masivo e individual en la misma pantalla
@@ -27,11 +33,17 @@ import useEtiquetas, { leerPreferencias, guardarPreferencias } from '../../hooks
 // desde la barra de Inventario empieza por elegir qué etiquetar. Dos pantallas
 // separadas acabarían con dos juegos de opciones que se contradicen.
 //
+// Tres secciones, en el orden en que se resuelve el problema de verdad:
+//   · PAPEL: qué rollo o plancha hay en la impresora (del catálogo, ajustado o
+//     a medida y guardado), con el diagrama de la retícula;
+//   · DISEÑO: qué lleva la etiqueta;
+//   · IMPRESORA: la calibración de ESTA impresora y la hoja de prueba.
+//
 // La VISTA PREVIA es el PDF de verdad recortado a una página, no un dibujo
 // hecho aquí: el reparto del espacio de la etiqueta vive en el backend
 // (`etiquetas.layout.js`) y reimplementarlo en el navegador es cómo las dos
-// copias acaban diciendo cosas distintas. Lo que se ve en el recuadro es
-// literalmente lo que sale por la impresora.
+// copias acaban diciendo cosas distintas. El diagrama del papel también sale
+// del backend (`plan.geometria`).
 // ─────────────────────────────────────────────────────────────────────────────
 
 const clave = (n) => `${n.nivel}:${n.producto_id}:${n.atributo_id ?? ''}:${n.variante_id ?? ''}`;
@@ -43,71 +55,51 @@ const idNodo = (n) => ({
 });
 
 const TEXTO_AVISO = {
-  modulo_estrecho:      'El código queda demasiado apretado para esta etiqueta: puede que el lector falle. Usa un formato más grande, códigos más cortos o cambia a QR.',
-  sin_espacio_precio:   'No cabe el precio y se quitó.',
-  sin_espacio_encabezado: 'No cabe el encabezado y se quitó.',
-  sin_espacio_variante: 'No cabe la variante y se quitó.',
-  sin_espacio_nombre:   'No cabe el nombre y se quitó.',
+  modulo_estrecho:         'El código queda demasiado apretado para esta etiqueta: puede que el lector falle. Usa un formato más grande, códigos más cortos o cambia a QR.',
+  resolucion_insuficiente: 'Con la resolución de tu impresora no cabe ni un punto por barra: el código no se podrá leer. Usa QR, una etiqueta más grande o un código más corto.',
+  sin_espacio_pie:         'No cabe el texto al pie y se quitó.',
+  sin_espacio_precio:      'No cabe el precio y se quitó.',
+  sin_espacio_encabezado:  'No cabe el encabezado y se quitó.',
+  sin_espacio_variante:    'No cabe la variante y se quitó.',
+  sin_espacio_nombre:      'No cabe el nombre y se quitó.',
+  rollo_ancho:             'El rollo mide más de 108 mm: las impresoras de etiquetas de 4 pulgadas no imprimen tan ancho y lo que quede por fuera no saldrá.',
+  calibracion_fuera:       'Con ese desvío o esa escala, parte de alguna etiqueta queda fuera de la página y no se imprimirá.',
 };
-
-// ── Tarjeta de opción (mismo patrón que Exportar inventario) ─────────────────
-function Opcion({ activo, onClick, icon: Icono, titulo, desc, className = '' }) {
-  return (
-    <button
-      type="button" onClick={onClick}
-      className={`flex flex-col gap-1 p-3 rounded-xl border-2 text-left transition-all
-        ${activo ? 'border-blue-500 bg-blue-50' : 'border-gray-200 bg-white hover:border-gray-300'} ${className}`}
-    >
-      <span className="flex items-center gap-2">
-        {Icono && <Icono size={15} className={activo ? 'text-blue-600' : 'text-gray-400'} />}
-        <span className={`text-sm font-semibold ${activo ? 'text-blue-700' : 'text-gray-700'}`}>{titulo}</span>
-      </span>
-      {desc && <span className="text-xs text-gray-400 leading-snug">{desc}</span>}
-    </button>
-  );
-}
-
-function Casilla({ activo, onClick, children }) {
-  return (
-    <button
-      type="button" onClick={onClick}
-      className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium border transition-colors
-        ${activo ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-200 hover:border-blue-300'}`}
-    >
-      {activo && <Check size={12} />}
-      {children}
-    </button>
-  );
-}
+const AVISOS_GRAVES = new Set(['modulo_estrecho', 'resolucion_insuficiente', 'calibracion_fuera']);
 
 // ── Panel: generar códigos a los que no tienen ───────────────────────────────
 //
-// Sin esto la impresión masiva no sirve de nada. Un negocio que acaba de
-// encender la feature tiene cientos de nodos sin código, y nadie va a abrirlos
-// uno por uno para escribirlo a mano.
-function PanelGenerar({ nodos, onListo, onCerrar }) {
-  const [prefijo,  setPrefijo]  = useState('');
-  const [longitud, setLongitud] = useState(6);
+// Con el código automático los productos nuevos ya nacen con el suyo; esto es
+// para lo que se creó ANTES de encenderlo. Usa el prefijo y los dígitos de
+// Ajustes por defecto, para que lo generado en masa se vea igual que lo que
+// nace solo.
+function PanelGenerar({ nodos, onListo, onCerrar, prefijoDefecto = '', digitosDefecto = 6 }) {
+  const [prefijo,  setPrefijo]  = useState(prefijoDefecto);
+  const [longitud, setLongitud] = useState(digitosDefecto);
   const [corriendo, setCorriendo] = useState(false);
   const [avance,   setAvance]   = useState(0);
   const [error,    setError]    = useState('');
+  const [bloqueados, setBloqueados] = useState([]);
 
   const TANDA = 200;
 
   const generar = async () => {
-    setCorriendo(true); setError(''); setAvance(0);
+    setCorriendo(true); setError(''); setAvance(0); setBloqueados([]);
     try {
       let hechos = 0;
-      // Por tandas: cada llamada escribe, hereda y propaga varias consultas por
-      // nodo, y una sola petición con 800 nodos se pasaría del tiempo de espera
-      // del navegador — que desde la pantalla se ve como "no se pudo", sobre una
+      const sinCodigo = [];
+      // Por tandas: cada llamada bloquea el contador del negocio mientras dura,
+      // y una sola petición con 800 nodos se pasaría del tiempo de espera del
+      // navegador — que desde la pantalla se ve como "no se pudo", sobre una
       // operación que en realidad iba por la mitad.
       for (let i = 0; i < nodos.length; i += TANDA) {
         const lote = nodos.slice(i, i + TANDA).map(idNodo);
         const { data } = await generarCodigosEtiqueta({ seleccion: lote, prefijo, longitud });
         hechos += data.data.asignados;
+        sinCodigo.push(...(data.data.bloqueados || []));
         setAvance(Math.min(i + TANDA, nodos.length));
       }
+      setBloqueados(sinCodigo);
       await onListo(hechos);
     } catch (err) {
       setError(err?.response?.data?.error || 'No se pudieron generar los códigos');
@@ -140,9 +132,22 @@ function PanelGenerar({ nodos, onListo, onCerrar }) {
       </div>
       <p className="text-xs text-amber-700">
         Se numeran de forma consecutiva y solo se tocan los que están vacíos: un código
-        ya impreso nunca se cambia. Sin prefijo salen puramente numéricos, que es lo
-        que hace el código de barras más angosto y más fácil de leer.
+        ya impreso nunca se cambia. Si el mismo producto ya tiene código en otra sucursal,
+        lleva ese mismo.
       </p>
+      {bloqueados.length > 0 && (
+        <div className="text-xs text-amber-800 bg-white/70 rounded-lg px-2.5 py-2">
+          <p className="font-semibold mb-1">
+            {bloqueados.length} no {bloqueados.length === 1 ? 'recibió' : 'recibieron'} código: en otra sucursal
+            ya tienen uno, pero aquí ese código lo usa otro producto.
+          </p>
+          {bloqueados.slice(0, 5).map((b) => (
+            <p key={`${b.nivel}:${b.id}`}>
+              {b.nombre}{b.variante_label ? ` · ${b.variante_label}` : ''} — {b.codigo} lo tiene «{b.bloqueadoPor}»
+            </p>
+          ))}
+        </div>
+      )}
       {error && <p className="text-xs text-red-600">{error}</p>}
     </div>
   );
@@ -195,7 +200,7 @@ export function ModalEtiquetas({ onClose, nodoInicial = null, ubicacionActiva = 
   const { esAdminNegocio } = useAuth();
   const { sucursalKey, sucursalLista } = useSucursalKey();
   const queryClient = useQueryClient();
-  const { generando, error, imprimir, descargar, previsualizar } = useEtiquetas();
+  const { generando, error, imprimir, descargar, previsualizar, abrir } = useEtiquetas();
 
   const individual = !!nodoInicial;
 
@@ -206,6 +211,14 @@ export function ModalEtiquetas({ onClose, nodoInicial = null, ubicacionActiva = 
     guardarPreferencias(nuevo);
   };
 
+  // «Empezar en la etiqueta N» NO se recuerda: sirve para la plancha a medio
+  // gastar de HOY. Recordado, la próxima impresión volvería a saltarse las
+  // mismas casillas en una plancha nueva.
+  const [desde, setDesde] = useState(1);
+
+  const [abiertas, setAbiertas] = useState({ papel: true, diseno: false, impresora: false });
+  const alternarSeccion = (k) => setAbiertas((a) => ({ ...a, [k]: !a[k] }));
+
   // ── Selección ──────────────────────────────────────────────────────────────
   const [busqueda,   setBusqueda]   = useState('');
   const [lineaId,    setLineaId]    = useState('');
@@ -214,13 +227,27 @@ export function ModalEtiquetas({ onClose, nodoInicial = null, ubicacionActiva = 
   const [soloSinCod, setSoloSinCod] = useState(false);
   const [marcados,   setMarcados]   = useState({});   // clave → cantidad
   const [mostrarGenerar, setMostrarGenerar] = useState(false);
-  const [avanzado,   setAvanzado]   = useState(false);
   const [cantidadIndividual, setCantidadIndividual] = useState(1);
 
-  const { data: formatos = [] } = useQuery({
-    queryKey: ['etiquetas-formatos'],
-    queryFn:  () => getFormatosEtiqueta().then((r) => r.data.data),
+  // El catálogo con papeles y topes; con un backend que aún no lo tiene
+  // (Vercel y Railway se despliegan por separado) se cae a la lista de siempre.
+  const { data: catalogo } = useQuery({
+    queryKey: ['etiquetas-catalogo'],
+    queryFn:  async () => {
+      try { return (await getCatalogoEtiquetas()).data.data; }
+      catch {
+        const r = await getFormatosEtiqueta();
+        return { formatos: r.data.data, papeles: [], limites: null };
+      }
+    },
     staleTime: Infinity,   // el catálogo no cambia mientras la app está abierta
+  });
+  const formatos = useMemo(() => catalogo?.formatos || [], [catalogo]);
+  const papeles  = useMemo(() => catalogo?.papeles  || [], [catalogo]);
+
+  const { data: config } = useQuery({
+    queryKey: ['config'],
+    queryFn:  () => api.get('/config').then((r) => r.data.data),
   });
 
   const { data: lineas = [] } = useQuery({
@@ -259,38 +286,62 @@ export function ModalEtiquetas({ onClose, nodoInicial = null, ubicacionActiva = 
       .map((n) => ({ ...idNodo(n), cantidad: marcados[clave(n)] }));
   }, [individual, nodoInicial, cantidadIndividual, nodos, marcados]);
 
-  // ── Cuerpo compartido por previa, plan y PDF ───────────────────────────────
-  const cuerpo = useMemo(() => ({
-    seleccion,
-    formato:      prefs.formato,
-    personalizado: prefs.formato === 'personalizado' ? prefs.personalizado : undefined,
-    simbologia:   prefs.simbologia,
-    mostrar:      prefs.mostrar,
-    marco:        prefs.marco,
-    ajuste:       prefs.ajuste,
-    desde:        prefs.desde || 1,
-    // En individual la cantidad la pone el input; en masivo manda el modo.
-    cantidadModo: individual ? 'manual' : prefs.cantidadModo,
-  }), [seleccion, prefs, individual]);
+  // ── Formato elegido y su calibración ───────────────────────────────────────
+  const elegido = useMemo(() => resolverElegido(prefs, formatos), [prefs, formatos]);
+  const cal     = useMemo(() => calibracionDe(prefs, elegido.clave), [prefs, elegido.clave]);
+  const cambiarCal = (parcial) => cambiar({
+    calibracion: { ...prefs.calibracion, [elegido.clave]: { ...cal, ...parcial } },
+  });
 
-  // ── Plan (cuántas etiquetas, cuántas hojas, qué puede salir mal) ───────────
+  // ── Cuerpo compartido por plan, previa y PDF ───────────────────────────────
   //
-  // Con retardo, no en cada tecla: marcar veinte productos seguidos dispararía
-  // veinte peticiones y el usuario vería parpadear cifras que ya no valen.
-  // Todo `setState` va DENTRO del temporizador — hacerlo en el cuerpo del efecto
-  // encadena renders (y lo prohíbe la regla del compilador de React).
+  // Depende solo de valores ESTABLES (el estado y la selección memoizada): si
+  // dependiera de un objeto derivado que se rehace en cada render, el efecto
+  // del plan pediría un plan nuevo en cada render, en bucle.
+  const cuerpo = useMemo(() => {
+    const el = resolverElegido(prefs, []);
+    const c  = calibracionDe(prefs, el.clave);
+    return {
+      seleccion,
+      formato:         el.formato,
+      personalizado:   el.personalizado,
+      simbologia:      prefs.simbologia,
+      mostrar:         prefs.mostrar,
+      encabezadoTexto: prefs.encabezadoTexto,
+      pieTexto:        prefs.pieTexto,
+      diseno:          prefs.diseno,
+      marco:           prefs.marco,
+      ajuste:          c.ajuste,
+      impresora:       { rotacion: c.rotacion, escala: c.escala, dpi: c.dpi },
+      desde,
+      // En individual la cantidad la pone el input; en masivo manda el modo.
+      cantidadModo: individual ? 'manual' : prefs.cantidadModo,
+    };
+  }, [prefs, seleccion, desde, individual]);
+
+  // ── Plan (cuántas etiquetas, la retícula, qué puede salir mal) ─────────────
+  //
+  // Se pide SIEMPRE, también sin productos marcados: el editor de formato
+  // necesita la geometría —y el «no caben en el rollo»— mientras el usuario
+  // mide. Con retardo, no en cada tecla; y todo `setState` va DENTRO del
+  // temporizador — hacerlo en el cuerpo del efecto encadena renders (y lo
+  // prohíbe la regla del compilador de React).
   const [plan, setPlan] = useState(null);
+  const [errorPlan, setErrorPlan] = useState('');
   const hayItems = seleccion.length > 0;
   useEffect(() => {
     let vivo = true;
     const t = setTimeout(() => {
-      if (!hayItems) { setPlan(null); return; }
       planEtiquetas(cuerpo)
-        .then((r) => { if (vivo) setPlan(r.data.data); })
-        .catch(() => { if (vivo) setPlan(null); });
+        .then((r) => { if (vivo) { setPlan(r.data.data); setErrorPlan(''); } })
+        .catch((e) => {
+          if (!vivo) return;
+          setPlan(null);
+          setErrorPlan(e?.response?.data?.error || 'No se pudo calcular el formato');
+        });
     }, 250);
     return () => { vivo = false; clearTimeout(t); };
-  }, [cuerpo, hayItems]);
+  }, [cuerpo]);
 
   // ── Vista previa: el PDF real, una página ─────────────────────────────────
   //
@@ -303,7 +354,7 @@ export function ModalEtiquetas({ onClose, nodoInicial = null, ubicacionActiva = 
   useEffect(() => {
     let vivo = true;
     const t = setTimeout(async () => {
-      if (!hayItems) { setPrevia(null); return; }
+      if (!hayItems || errorPlan) { setPrevia(null); return; }
       const url = await previsualizar({ ...cuerpo, limite: porPagina || 12 });
       if (!vivo) { if (url) URL.revokeObjectURL(url); return; }
       // Liberar la anterior recién ahora: revocarla antes deja el recuadro en
@@ -313,15 +364,11 @@ export function ModalEtiquetas({ onClose, nodoInicial = null, ubicacionActiva = 
       setPrevia(url);
     }, 600);
     return () => { vivo = false; clearTimeout(t); };
-  }, [cuerpo, hayItems, porPagina, previsualizar]);
+  }, [cuerpo, hayItems, porPagina, previsualizar, errorPlan]);
 
   useEffect(() => () => {
     if (previaAnterior.current) URL.revokeObjectURL(previaAnterior.current);
   }, []);
-
-  const formatoActual = formatos.find((f) => f.id === prefs.formato)
-    || (prefs.formato === 'personalizado' ? { medio: prefs.personalizado.medio, porHoja: null } : null);
-  const esHoja = formatoActual?.medio === 'hoja';
 
   const alternar = (n) => setMarcados((m) => {
     const k = clave(n);
@@ -337,6 +384,17 @@ export function ModalEtiquetas({ onClose, nodoInicial = null, ubicacionActiva = 
 
   const totalSeleccionado = seleccion.length;
   const avisosReales = (plan?.avisos || []).filter((a) => TEXTO_AVISO[a]);
+  const geometria = plan?.geometria;
+
+  const resumenDiseno = [
+    prefs.simbologia === 'qr' ? 'QR' : 'Código de barras',
+    ...['nombre', 'variante', 'precio', 'encabezado', 'pie'].filter((k) => prefs.mostrar[k]),
+  ].join(' · ');
+  // El nombre que da el backend describe el formato a medida con sus medidas
+  // («Rollo 3 columnas · 32 × 25 mm»); uno guardado se reconoce por el suyo.
+  const resumenPapel = elegido.guardado ? elegido.nombre : (plan?.formato?.nombre || elegido.nombre);
+
+  const cuerpoPrueba = { ...cuerpo, prueba: true, seleccion: [] };
 
   return (
     <Modal
@@ -382,18 +440,20 @@ export function ModalEtiquetas({ onClose, nodoInicial = null, ubicacionActiva = 
               <Casilla activo={soloSinCod} onClick={() => setSoloSinCod((v) => !v)}>Solo sin código</Casilla>
             </div>
 
-            {/* Generar códigos: la puerta de entrada real a la impresión masiva */}
+            {/* Generar códigos: para lo que se creó antes del código automático */}
             {sinCodigoFiltrados.length > 0 && esAdminNegocio() && (
               mostrarGenerar ? (
                 <PanelGenerar
                   nodos={sinCodigoFiltrados}
+                  prefijoDefecto={config?.codigo_auto_prefijo || ''}
+                  digitosDefecto={Number(config?.codigo_auto_digitos) || 6}
                   onCerrar={() => setMostrarGenerar(false)}
                   onListo={async () => {
-                    setMostrarGenerar(false);
                     await recargarNodos();
                     // El código nuevo cambia lo que ven el inventario y el escáner.
                     queryClient.invalidateQueries({ queryKey: ['productos-cantidad'], exact: false });
                     queryClient.invalidateQueries({ queryKey: ['arbol-variantes'],    exact: false });
+                    queryClient.invalidateQueries({ queryKey: ['arbol-producto'],     exact: false });
                   }}
                 />
               ) : (
@@ -454,8 +514,8 @@ export function ModalEtiquetas({ onClose, nodoInicial = null, ubicacionActiva = 
           </div>
         )}
 
-        {/* ══ Columna 2 — cómo se ve e impresión ════════════════════════════ */}
-        <div className="flex flex-col gap-4 min-w-0">
+        {/* ══ Columna 2 — papel, diseño, impresora y vista previa ═══════════ */}
+        <div className="flex flex-col gap-3 min-w-0">
 
           {individual && (
             <div className="flex items-end gap-3">
@@ -478,139 +538,45 @@ export function ModalEtiquetas({ onClose, nodoInicial = null, ubicacionActiva = 
             </div>
           )}
 
-          {/* Simbología */}
-          <div className="grid grid-cols-2 gap-2">
-            <Opcion
-              activo={prefs.simbologia === 'barras'} onClick={() => cambiar({ simbologia: 'barras' })}
-              icon={Barcode} titulo="Código de barras"
-              desc="Para el lector láser de siempre. Es el más rápido de escanear."
+          <Seccion icon={Ruler} titulo="Papel" resumen={resumenPapel}
+            abierta={abiertas.papel} onAlternar={() => alternarSeccion('papel')} alerta={!!errorPlan}>
+            <SelectorFormato
+              prefs={prefs} cambiar={cambiar}
+              formatos={formatos} papeles={papeles}
+              plan={plan} errorFormato={errorPlan}
             />
-            <Opcion
-              activo={prefs.simbologia === 'qr'} onClick={() => cambiar({ simbologia: 'qr' })}
-              icon={QrCode} titulo="QR"
-              desc="Se lee con la cámara del celular y aguanta códigos largos en etiquetas pequeñas."
+          </Seccion>
+
+          <Seccion icon={Palette} titulo="Diseño" resumen={resumenDiseno}
+            abierta={abiertas.diseno} onAlternar={() => alternarSeccion('diseno')}>
+            <PanelDiseno prefs={prefs} cambiar={cambiar} negocioNombre={config?.nombre_negocio} />
+          </Seccion>
+
+          <Seccion icon={Settings2} titulo="Impresora" resumen={resumenCalibracion(cal)}
+            abierta={abiertas.impresora} onAlternar={() => alternarSeccion('impresora')}
+            alerta={avisosReales.includes('calibracion_fuera')}>
+            <PanelImpresora
+              cal={cal} cambiarCal={cambiarCal} plan={plan}
+              desde={desde} setDesde={setDesde} porPagina={plan?.porPagina || 1}
+              generando={generando}
+              onImprimirPrueba={() => imprimir(cuerpoPrueba)}
+              onDescargarPrueba={() => descargar(cuerpoPrueba, 'prueba-alineacion.pdf')}
             />
-          </div>
-
-          {/* Formato */}
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Tamaño de etiqueta</label>
-            <select
-              value={prefs.formato} onChange={(e) => cambiar({ formato: e.target.value })}
-              className="w-full px-3 py-2.5 bg-gray-100 border-0 rounded-xl text-sm
-                focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white"
-            >
-              <optgroup label="Plancha adhesiva (impresora normal)">
-                {formatos.filter((f) => f.medio === 'hoja').map((f) => (
-                  <option key={f.id} value={f.id}>{f.nombre}</option>
-                ))}
-              </optgroup>
-              <optgroup label="Rollo (impresora térmica)">
-                {formatos.filter((f) => f.medio === 'rollo').map((f) => (
-                  <option key={f.id} value={f.id}>{f.nombre}</option>
-                ))}
-              </optgroup>
-              <option value="personalizado">A medida...</option>
-            </select>
-
-            {prefs.formato === 'personalizado' && (
-              <div className="flex flex-col gap-2 p-3 rounded-xl bg-gray-50 border border-gray-200">
-                <div className="grid grid-cols-2 gap-2">
-                  <Opcion activo={prefs.personalizado.medio === 'rollo'} titulo="Rollo" desc="Una por página"
-                    onClick={() => cambiar({ personalizado: { ...prefs.personalizado, medio: 'rollo' } })} />
-                  <Opcion activo={prefs.personalizado.medio === 'hoja'} titulo="Plancha" desc="Retícula en A4"
-                    onClick={() => cambiar({ personalizado: { ...prefs.personalizado, medio: 'hoja' } })} />
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  {['ancho', 'alto'].map((campo) => (
-                    <Input key={campo} label={`${campo === 'ancho' ? 'Ancho' : 'Alto'} (mm)`} type="number" min="10"
-                      value={prefs.personalizado[campo]}
-                      onChange={(e) => cambiar({ personalizado: { ...prefs.personalizado, [campo]: Number(e.target.value) } })} />
-                  ))}
-                </div>
-                {prefs.personalizado.medio === 'hoja' && (
-                  <div className="grid grid-cols-2 gap-2">
-                    {['columnas', 'filas'].map((campo) => (
-                      <Input key={campo} label={campo === 'columnas' ? 'Columnas' : 'Filas'} type="number" min="1"
-                        value={prefs.personalizado[campo]}
-                        onChange={(e) => cambiar({ personalizado: { ...prefs.personalizado, [campo]: Number(e.target.value) } })} />
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Qué lleva la etiqueta */}
-          <div className="flex flex-col gap-1.5">
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Qué lleva</p>
-            <div className="flex flex-wrap gap-1.5">
-              {[
-                ['nombre',     'Nombre'],
-                ['variante',   'Variante'],
-                ['precio',     'Precio'],
-                ['encabezado', 'Nombre del negocio'],
-              ].map(([k, etiqueta]) => (
-                <Casilla key={k} activo={prefs.mostrar[k]}
-                  onClick={() => cambiar({ mostrar: { ...prefs.mostrar, [k]: !prefs.mostrar[k] } })}>
-                  {etiqueta}
-                </Casilla>
-              ))}
-            </div>
-            <p className="text-[11px] text-gray-400">
-              El código escrito va siempre: si el símbolo se raya o el lector falla, alguien tiene que poder teclearlo.
-            </p>
-          </div>
-
-          {/* Ajustes finos */}
-          <div className="flex flex-col gap-2">
-            <button type="button" onClick={() => setAvanzado((v) => !v)}
-              className="flex items-center gap-1.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">
-              {avanzado ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-              <Sliders size={13} /> Ajuste de impresión
-            </button>
-            {avanzado && (
-              <div className="flex flex-col gap-3 p-3 rounded-xl bg-gray-50 border border-gray-200">
-                {esHoja && (
-                  <div className="flex items-end gap-2">
-                    <div className="w-28">
-                      <Input label="Empezar en la etiqueta" type="number" min="1"
-                        max={formatoActual?.porHoja || 999}
-                        value={prefs.desde || 1}
-                        onChange={(e) => cambiar({ desde: Math.max(1, Number(e.target.value) || 1) })} />
-                    </div>
-                    <p className="text-[11px] text-gray-500 pb-2 flex-1">
-                      Para aprovechar una plancha a medio gastar: salta las casillas ya despegadas.
-                    </p>
-                  </div>
-                )}
-                <div className="flex items-end gap-2">
-                  <div className="w-24">
-                    <Input label="Desviar → (mm)" type="number" step="0.5" value={prefs.ajuste.x}
-                      onChange={(e) => cambiar({ ajuste: { ...prefs.ajuste, x: Number(e.target.value) } })} />
-                  </div>
-                  <div className="w-24">
-                    <Input label="Desviar ↓ (mm)" type="number" step="0.5" value={prefs.ajuste.y}
-                      onChange={(e) => cambiar({ ajuste: { ...prefs.ajuste, y: Number(e.target.value) } })} />
-                  </div>
-                  <p className="text-[11px] text-gray-500 pb-2 flex-1">
-                    Si sale corrido, mide el desvío en la hoja impresa y ponlo aquí. Se recuerda para la próxima.
-                  </p>
-                </div>
-                <Casilla activo={prefs.marco} onClick={() => cambiar({ marco: !prefs.marco })}>
-                  Dibujar el borde de cada etiqueta
-                </Casilla>
-                <p className="text-[11px] text-gray-500">
-                  Útil para verificar la alineación antes de gastar una plancha, o para recortar
-                  cuando se imprime en papel normal.
-                </p>
-              </div>
-            )}
-          </div>
+          </Seccion>
 
           {/* Vista previa + resumen */}
           <div className="flex flex-col gap-2">
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Vista previa</p>
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Vista previa</p>
+              {previa && (
+                // Los navegadores de celular no pintan un PDF dentro de un
+                // iframe: el recuadro queda en blanco. Abrirlo aparte funciona.
+                <button type="button" onClick={() => abrir({ ...cuerpo, limite: porPagina || 12 })}
+                  className="flex items-center gap-1 text-xs text-blue-600 hover:underline">
+                  <ExternalLink size={12} /> Abrir aparte
+                </button>
+              )}
+            </div>
             <div className="relative rounded-xl border border-gray-200 bg-gray-100 overflow-hidden"
               style={{ height: '15rem' }}>
               {previa
@@ -621,17 +587,29 @@ export function ModalEtiquetas({ onClose, nodoInicial = null, ubicacionActiva = 
                     {generando
                       ? <Spinner />
                       : <p className="text-xs text-gray-400">
-                          {totalSeleccionado ? 'Preparando la previa...' : 'Marca al menos un producto para ver cómo queda.'}
+                          {errorPlan
+                            ? 'Corrige las medidas del papel para ver cómo queda.'
+                            : totalSeleccionado ? 'Preparando la previa...' : 'Marca al menos un producto para ver cómo queda.'}
                         </p>}
                   </div>
                 )}
             </div>
+            {geometria?.papel?.rotacion ? (
+              <p className="text-[11px] text-gray-400">
+                La página va girada {geometria.papel.rotacion}° hacia la impresora; la impresora la endereza al imprimir.
+              </p>
+            ) : null}
 
-            {plan && (
+            {plan && plan.total > 0 && (
               <p className="text-xs text-gray-500">
                 <strong className="text-gray-800">{plan.total}</strong> etiquetas
-                {esHoja && <> en <strong className="text-gray-800">{plan.paginas}</strong> {plan.paginas === 1 ? 'hoja' : 'hojas'}</>}
-                {plan.moduloMm != null && <> · barra fina {plan.moduloMm.toFixed(2)} mm</>}
+                {' en '}<strong className="text-gray-800">{plan.paginas}</strong>{' '}
+                {geometria?.medio === 'rollo'
+                  ? (plan.paginas === 1 ? 'fila del rollo' : 'filas del rollo')
+                  : (plan.paginas === 1 ? 'hoja' : 'hojas')}
+                {plan.moduloMm != null && (
+                  <> · barra fina {mm(plan.moduloMm)} mm{plan.puntosModulo ? ` (${plan.puntosModulo} puntos)` : ''}</>
+                )}
               </p>
             )}
 
@@ -664,7 +642,7 @@ export function ModalEtiquetas({ onClose, nodoInicial = null, ubicacionActiva = 
 
             {avisosReales.map((a) => (
               <p key={a} className={`flex items-start gap-1.5 text-xs
-                ${a === 'modulo_estrecho' ? 'text-red-600' : 'text-gray-500'}`}>
+                ${AVISOS_GRAVES.has(a) ? 'text-red-600' : 'text-gray-500'}`}>
                 <AlertTriangle size={13} className="flex-shrink-0 mt-0.5" />
                 {TEXTO_AVISO[a]}
               </p>
@@ -675,11 +653,11 @@ export function ModalEtiquetas({ onClose, nodoInicial = null, ubicacionActiva = 
 
           <div className="flex gap-2">
             <Button variant="secondary" onClick={onClose} disabled={generando}>Cerrar</Button>
-            <Button variant="secondary" className="flex-1" disabled={!plan?.total || generando}
+            <Button variant="secondary" className="flex-1" disabled={!plan?.total || generando || !!errorPlan}
               onClick={() => descargar(cuerpo)}>
               <Download size={15} /> Descargar
             </Button>
-            <Button className="flex-1" loading={generando} disabled={!plan?.total}
+            <Button className="flex-1" loading={generando} disabled={!plan?.total || !!errorPlan}
               onClick={() => imprimir(cuerpo)}>
               <Printer size={15} /> Imprimir
             </Button>

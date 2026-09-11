@@ -775,11 +775,14 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > no escanear. Por eso los códigos que genera la asignación masiva son
 > **numéricos puros**.
 > **La regla que manda: el símbolo tiene que escanear.** Cuando no cabe todo se
-> sacrifica el TEXTO —precio, encabezado, variante, nombre, en ese orden— y jamás
-> el símbolo; el código LEGIBLE tampoco se cae nunca, porque es la salida de
+> sacrifica el TEXTO —pie, encabezado, precio, variante, nombre, en ese orden— y
+> jamás el símbolo; el código LEGIBLE tampoco se cae nunca, porque es la salida de
 > emergencia cuando la etiqueta se raya. Todo lo sacrificado se devuelve como
 > aviso. Y si la barra fina baja de 0,25 mm (0,33 en QR), la pantalla lo dice
-> ANTES de imprimir — un aviso ahí ahorra la plancha entera.
+> ANTES de imprimir — un aviso ahí ahorra la plancha entera. (El encabezado cae
+> antes que el precio desde sep-2026: con el orden viejo, una tira de 32 × 25 con
+> los dos pedidos imprimía el nombre del negocio en cada etiqueta y ningún
+> precio.)
 > **`etiquetas.layout.js` es geometría pura y lo comparten el PDF y la vista
 > previa**; la previa del modal es además el PDF DE VERDAD recortado a una página
 > (`limite`), no un dibujo hecho en el navegador. Es el mismo criterio con el que
@@ -788,18 +791,14 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > de formatos se sirve desde el backend** (`GET /etiquetas/formatos`) en vez de
 > copiarse al frontend: las dos listas de módulos duplicadas a mano ya se
 > separaron una vez.
-> **La generación masiva de códigos es la puerta de entrada real**: un negocio
-> que acaba de encender la feature tiene cientos de nodos en NULL y nadie los va
-> a escribir a mano. **Nunca pisa un código existente** —uno ya impreso está
-> pegado a la mercancía y cambiarlo convierte esas etiquetas en basura
-> silenciosa—, **hereda antes de inventar** y **propaga** después, con los mismos
-> `heredarCodigo` / `propagarCodigo` que usan el importador y el módulo de
-> variantes. El consecutivo sale de `contadores_documento` con tipo
-> `'codigo_producto'` (columna TEXT libre: sin migración), reservando el bloque
-> entero en un `INSERT … ON CONFLICT … RETURNING`, y se siembra con `GREATEST`
-> contra el mayor código numérico que ya exista — así un negocio que importó
-> códigos por fuera no recibe números repetidos. Va por tandas de 200 desde el
-> frontend porque axios corta a los 30 s.
+> **La generación masiva de códigos** es para lo que se creó ANTES del código
+> automático (ver «Todo nodo nace con su código», abajo): usa el MISMO motor
+> (`utils/codigoAuto.util.js`) y ya no tiene algoritmo propio. El consecutivo sale
+> de `contadores_documento` con tipo `'codigo_producto'` (columna TEXT libre: sin
+> migración), reservado en un `INSERT … ON CONFLICT … RETURNING`, y se siembra con
+> `GREATEST` contra el mayor código numérico que ya exista — así un negocio que
+> importó códigos por fuera no recibe números repetidos. Va por tandas de 200
+> desde el frontend porque axios corta a los 30 s.
 > **Este módulo no selecciona NINGÚN costo**: una etiqueta lleva precio de venta
 > y nada más, así que queda fuera del alcance de `costos_solo_admin` sin
 > necesitar recorte propio. Imprimir hereda el permiso de `inventario` (el
@@ -809,10 +808,115 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > **Ojo con los template literals**: el SQL del repositorio vive dentro de uno, y
 > una comilla invertida en un comentario SQL lo cierra a media consulta — el
 > backend deja de arrancar entero. Ya pasó una vez.
-> Prueba: `35-etiquetas` (70 verificaciones; la sección 1 **decodifica** 974
+> Prueba: `35-etiquetas` (135 verificaciones; la sección 1 **decodifica** 974
 > códigos de barras generados y los compara contra el texto original — un código
 > mal generado no se ve mal, se ve perfecto y no escanea; las 11 y 12 corren el
-> SQL y la asignación de códigos contra un Postgres real).
+> SQL y la asignación de códigos contra un Postgres real; las 13-20 son las del
+> rediseño de sep-2026, abajo).
+>
+> **Cualquier papel en cualquier impresora — el rediseño de sep-2026**
+> (`etiquetas.formatos.js`, `etiquetas.layout.js`, `pages/inventario/etiquetas/`).
+> Reportado desde producción: **una tira de 3 columnas no había forma de
+> cuadrarla**. El motor ya sabía de retículas; lo que no existía era la forma de
+> DECIRLE el papel: «rollo» forzaba una columna (la página era la etiqueta) y el
+> formato a medida no dejaba escribir el ancho del rollo, los márgenes ni la
+> separación. Tres cambios lo resuelven:
+> **(1) UN solo modelo para todo papel**: una PÁGINA con `columnas × filas`,
+> margen hasta la primera y separación entre ellas. En una hoja la página es el
+> papel; en un **rollo la página es UNA FILA** —ancho del rollo × alto de la
+> etiqueta—, porque una tira de 3 columnas la impresora la trata como UN papel de
+> 104 mm. Los márgenes que no se escriben se CENTRAN (así vienen troquelados casi
+> todos los rollos). «Papel continuo» (impresoras de recibo, o térmicas sin
+> sensor de hueco) suma el hueco al alto de la página. Los ids y la geometría de
+> los formatos viejos NO cambiaron: las preferencias guardadas en cada navegador
+> los siguen usando.
+> **(2) La calibración es UNA transformación por página** (`matrizPagina`):
+> desvío en mm (entra corrida), escala en % (el driver achica aunque se pida
+> tamaño real — la hoja de prueba trae una regla y la pantalla convierte «midió
+> 48,5» en la escala), y **giro 0/90/180/270** (el driver de la térmica tiene el
+> papel de pie y la tira sale de lado, o sale al revés). Con 90/270 la página
+> física intercambia ancho y alto, y eso es lo que el plan le dice al usuario que
+> configure en el driver. OJO al medir en pruebas: el `_ctm` de pdfkit incluye el
+> volteo de la página (espacio nativo, origen ABAJO); la sección 15 lo convierte.
+> **(3) Resolución de la impresora (dpi)**: en una térmica de 203 dpi un módulo
+> de 0,28 mm son 2,24 puntos y el driver redondea cada barra a 2 o a 3 — barras
+> que deberían medir igual salen distintas y el lector falla de a ratos. Con la
+> resolución puesta, el módulo se lleva a un número ENTERO de puntos; si ni uno
+> cabe, se avisa (`resolucion_insuficiente`) en vez de fingir.
+> De paso: la **zona muda puede ocupar el margen interior** (es blanco, no tinta;
+> contarla dentro del área útil encogía el módulo un 10 % justo en las etiquetas
+> chicas), y hay un **techo de 0,6 mm por módulo** (sin él, en 100 mm un código
+> de seis cifras medía 10 cm y un lector de mano no lo barría entero).
+> La **hoja de prueba** (`prueba: true` en el mismo `/pdf`, sin productos) dibuja
+> el contorno exacto de cada etiqueta, su área segura, una cruz, el número de
+> casilla y la regla, y pasa por la MISMA transformación: muestra dónde van a
+> caer las etiquetas con la calibración puesta. Dos páginas en rollo (lo que se
+> mide es cómo avanza de una fila a otra), una en plancha.
+> La **calibración se guarda POR FORMATO** en `localStorage`: una oficina con
+> láser para planchas y térmica para rollo necesita dos, y la global de antes se
+> desacomodaba con cada cambio de papel. Los formatos a medida se guardan con
+> nombre («Mis formatos»). «Empezar en la etiqueta N» ya NO se recuerda: la
+> próxima impresión se saltaría las mismas casillas en una plancha nueva.
+> **`/formatos` conserva su forma (un arreglo)** y lo nuevo va en `/catalogo`:
+> Vercel y Railway se despliegan por separado, y un frontend viejo contra este
+> backend tiene que seguir pintando su selector (el nuevo cae a `/formatos` si
+> `/catalogo` no existe). Por la misma razón todo campo nuevo del cuerpo es
+> OPCIONAL: una petición vieja recibe el mismo PDF que siempre (sección 20).
+> El **plan responde también sin selección**: el editor necesita la geometría —y
+> el «no caben en el rollo: ocupan 102 mm y el rollo mide 90»— mientras el
+> usuario mide. El diagrama del modal se dibuja con esa geometría (`plan.geometria`,
+> las mismas funciones que arman el PDF); no calcula nada en el navegador.
+> Prueba: secciones 13-20 de `35-etiquetas` (la 15 mide el giro, la escala y el
+> desvío sobre el PDF de verdad instrumentando pdfkit; la 16, el módulo en
+> puntos enteros decodificando el símbolo; la 19, que la hoja de prueba sale en
+> los 20 formatos × 2 giros).
+>
+> **Todo nodo nace con su código** (`utils/codigoAuto.util.js`, `codigo_auto`):
+> antes un producto nacía sin código y había que acordarse de ir a Etiquetas →
+> «Generar códigos» antes de poder escanearlo. Ahora, con el código único
+> encendido, el producto sin variantes nace con el suyo, y cada atributo o
+> variante nace con el SUYO (lo que se escanea y se etiqueta es la hoja). **El
+> producto conserva el suyo aunque después le agreguen variantes**: la red
+> interna empareja el mismo producto entre sedes por `productos_cantidad.codigo`,
+> así que sigue siendo su identidad.
+> **`codigo_auto` ausente = ENCENDIDO**, al revés que casi todo, por la misma
+> razón que `red_interna_pedidos`: solo cuenta cuando el código único ya se
+> encendió a mano, y un código que nadie imprime no mueve un peso ni una unidad.
+> El interruptor existe para el negocio que usa los códigos de fábrica. Prefijo
+> y dígitos en `codigo_auto_prefijo` / `codigo_auto_digitos` (defecto: sin
+> prefijo, 6), validados con las MISMAS funciones del motor en `config.service`.
+> **UN solo motor** para los cuatro que asignan códigos: crear producto, crear
+> atributo/variante (después del INSERT, en su propia transacción: asignar el
+> código nunca puede impedir que el producto exista), el **importador** (UNA
+> pasada al final, en lote —a 145 ms por consulta, una por nodo sería inviable—,
+> que el preview también corre y por eso informa `codigos_automaticos` antes de
+> confirmar) y la generación masiva. Reglas, en orden: **nunca pisa** (el UPDATE
+> vuelve a exigir `codigo IS NULL`); **hereda antes de inventar** (mismo nodo
+> lógico, mismo nivel, en otra sede); **si el heredado está ocupado en la sede,
+> NO inventa otro** —queda vacío y se reporta como `bloqueado`—, porque un
+> segundo código partiría la identidad del producto entre sedes (la generación
+> masiva vieja lo hacía y además propagaba el nuevo ENCIMA del de la otra sede,
+> pisando la etiqueta ya impresa); y **propaga solo a lo vacío** (con `DISTINCT
+> ON (sede, código)`: una sede con «11PRO» y «11Pro» haría chocar el índice).
+> Corre en SAVEPOINT propio y el llamador decide si un fallo es error o aviso
+> (`tolerante`): crear, importar y recibir no se caen por un código.
+> **Ojo con la unicidad**: `codigosOcupados` mira cualquier fila ACTIVA del nivel
+> aunque su padre esté de baja, porque así la mira el índice
+> (`WHERE codigo IS NOT NULL AND activo`). Tratar como libre algo que el índice
+> rechaza hace fallar el UPDATE; lo contrario solo cuesta un número.
+> La **red interna solo COPIA** (`copiarCodigoSiLibre`): la talla que se crea en
+> el local al recibir nace con el código de la talla de la bodega. El producto ya
+> se lo llevaba (`crearReferenciaCantidad`); la talla NO, y el lector del local
+> no encontraba justo lo que acababa de llegarle. No se inventa nada: el nodo es
+> el mismo de la bodega.
+> `esquema-importacion.sql` no tenía `contadores_documento`: la pasada del
+> importador fallaba EN SILENCIO (es tolerante) y la suite 18 pasaba sin haber
+> asignado un solo código. Una suite que no puede fallar no prueba nada.
+> Prueba: `44-codigo-automatico` (52 verificaciones; la sección 1 es la que hay
+> que mirar primero —feature o automático apagados: nada cambia—, la 7 y la 8
+> sostienen que no se parte la identidad ni se pisa la otra sede, la 10 corre la
+> recepción de la red interna y la 11 que un contador roto no impide crear) y la
+> sección 19 de `18-importacion`.
 
 > **La UBICACIÓN es una fila, no un atributo del producto**
 > (`ubicaciones/`, `20260831_ubicaciones_estructura.sql`): 20260730 la puso como

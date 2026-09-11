@@ -224,8 +224,14 @@ console.log('\n6. Cuando no cabe todo, lo que se sacrifica es el TEXTO');
   check('★ el símbolo sigue ahí', !!plan.simbolo && plan.simbolo.barras.length > 0);
   check('★ el código legible NUNCA se cae', plan.bloques.some((b) => b.mono && b.texto === '100001'));
   check('se avisa de cada cosa que se quitó', plan.avisos.some((a) => a.startsWith('sin_espacio_')));
-  check('el precio es lo primero que se suelta',
-    !plan.avisos.includes('sin_espacio_precio') || !plan.bloques.some((b) => b.esPrecio));
+  // El encabezado es decoración; el precio es lo que el cliente busca. Con el
+  // orden anterior una tira de 32 × 25 con los dos pedidos salía sin precio.
+  checkEq('★ el encabezado es lo primero que se suelta, antes que el precio', plan.avisos[0], 'sin_espacio_encabezado');
+  const tira = layout.planear(32 * MM, 25 * MM,
+    { nombre: 'Correa silicona reloj', variante_label: '38MM', codigo: '000124', precio: 30000 },
+    { simbologia: 'barras', mostrar: { nombre: true, variante: true, precio: true, encabezado: true }, encabezado: 'MI TIENDA' });
+  check('★ en la tira de 3 columnas (32 × 25) el precio sobrevive y el encabezado se va',
+    tira.bloques.some((b) => b.esPrecio) && tira.avisos.includes('sin_espacio_encabezado'), JSON.stringify(tira.avisos));
 
   // Y al revés: en una etiqueta grande no se sacrifica nada.
   const grande = formatos.resolver('rollo-100x50');
@@ -353,6 +359,258 @@ console.log('\n10. El PDF se genera de verdad, en todos los formatos');
   const vacio = await generar(formatos.resolver('a4-5x13'), { simbologia: 'barras' }, 0);
   check('sin etiquetas sale una hoja que EXPLICA por qué, no un PDF en blanco',
     vacio.subarray(0, 5).toString('latin1') === '%PDF-' && vacio.length > 500);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Herramientas para medir el PDF DE VERDAD
+//
+// `trazos` instrumenta pdfkit y anota, de cada rectángulo que se dibuja, dónde
+// cae en la PÁGINA FÍSICA —aplicando la matriz de transformación vigente, que
+// es lo que hace el visor y lo que hace el driver de la impresora—. Así se
+// comprueba el giro, la escala y el desvío sobre el mismo código que imprime,
+// no sobre una copia de la aritmética.
+// ─────────────────────────────────────────────────────────────────────────────
+const PDFDocument = require('pdfkit');
+const { generarPdfPrueba, largoRegla } = require(path.join(RAIZ, 'src/modules/etiquetas/etiquetas.pdf'));
+
+const resFalso = (ok) => {
+  const trozos = [];
+  return {
+    setHeader: () => {},
+    write: (c) => { trozos.push(Buffer.from(c)); return true; },
+    end:   () => ok(Buffer.concat(trozos)),
+    on: () => {}, once: () => {}, emit: () => {}, removeListener: () => {},
+  };
+};
+const pdfEtiquetas = (formato, opciones, etiquetas) => new Promise((ok, ko) => {
+  try { generarPdfEtiquetas({ etiquetas, formato, opciones, res: resFalso(ok) }); } catch (e) { ko(e); }
+});
+const pdfPrueba = (formato, opciones) => new Promise((ok, ko) => {
+  try { generarPdfPrueba({ formato, opciones, res: resFalso(ok) }); } catch (e) { ko(e); }
+});
+const paginasDe = (buf) => (buf.toString('latin1').match(/\/Type \/Page\b(?!s)/g) || []).length;
+
+// `_ctm` de pdfkit incluye el volteo de la página: lleva al espacio NATIVO del
+// PDF, con el origen ABAJO. Aquí se devuelve a «desde arriba», que es como mide
+// una persona con la regla sobre el papel.
+const trazos = async (generador) => {
+  const original = PDFDocument.prototype.rect;
+  const lista = [];
+  PDFDocument.prototype.rect = function (x, y, w, h) {
+    const m = this._ctm;
+    const xs = [], ys = [];
+    for (const px of [x, x + w]) for (const py of [y, y + h]) {
+      xs.push(m[0] * px + m[2] * py + m[4]);
+      ys.push(this.page.height - (m[1] * px + m[3] * py + m[5]));
+    }
+    lista.push({
+      x1: Math.min(...xs) / MM, x2: Math.max(...xs) / MM,
+      y1: Math.min(...ys) / MM, y2: Math.max(...ys) / MM,
+      w: w / MM, h: h / MM,
+      pagW: this.page.width / MM, pagH: this.page.height / MM,
+    });
+    return original.call(this, x, y, w, h);
+  };
+  try { await generador(); } finally { PDFDocument.prototype.rect = original; }
+  return lista;
+};
+const cerca = (a, b, tol = 0.15) => Math.abs(a - b) <= tol;
+const ITEM = { nombre: 'Correa silicona', variante_label: '38MM', codigo: '100042', precio: '45000.00' };
+
+console.log('\n13. Rollos de VARIAS columnas: la página es una fila del rollo');
+// El caso que se reportó: una tira de 3 columnas no había forma de cuadrarla.
+// La versión anterior solo sabía hacer rollos de 1 columna y el formato a
+// medida no dejaba decir el ancho del rollo, los márgenes ni la separación.
+{
+  const r3 = formatos.resolver('rollo3-32x25');
+  checkEq('★ la página mide lo que el rollo: 104 × 25 mm', [r3.pagina.ancho, r3.pagina.alto], [104, 25]);
+  checkEq('tres etiquetas por página (una fila)', r3.porHoja, 3);
+  const xs = [0, 1, 2].map((i) => Number((layout.celda(r3, i).x / MM).toFixed(2)));
+  checkEq('★ centradas sobre el rollo, con 2 mm entre columnas', xs, [2, 36, 70]);
+  checkEq('la última termina a 2 mm del borde', Number((xs[2] + 32).toFixed(2)), 102);
+
+  const pers = (p) => formatos.construirPersonalizado({ medio: 'rollo', ancho: 32, alto: 25, columnas: 3, separacion: { x: 2, y: 3 }, ...p });
+  const centrado = pers({ anchoRollo: 106 });
+  checkEq('a medida: sin margen, se centra (106 − 100) / 2', centrado.margen.izquierda, 3);
+  checkEq('a medida: margen escrito a mano', pers({ anchoRollo: 106, margen: { izquierda: 1.5 } }).margen.izquierda, 1.5);
+  checkEq('sin ancho de rollo: retícula + margen a cada lado', pers({ margen: { izquierda: 1 } }).pagina.ancho, 102);
+
+  let msg = null;
+  try { pers({ anchoRollo: 90 }); } catch (e) { msg = e.message; }
+  check('★ si no caben, lo dice con las medidas', /no caben en el rollo/i.test(msg || '') && /90/.test(msg || ''), msg || 'no lanzó');
+
+  checkEq('papel continuo (sin sensor de hueco): la página incluye la separación',
+    pers({ anchoRollo: 104, incluirSeparacion: true }).pagina.alto, 28);
+  const tresFilas = pers({ anchoRollo: 104, filasPorPagina: 3 });
+  checkEq('varias filas por página: 3 × 25 + 2 × 3', tresFilas.pagina.alto, 81);
+  checkEq('y la fila 2 empieza después del hueco', Number((layout.celda(tresFilas, 3).y / MM).toFixed(2)), 28);
+  checkEq('con una columna la separación horizontal no cuenta',
+    formatos.construirPersonalizado({ medio: 'rollo', ancho: 50, alto: 25, separacion: { x: 9 } }).pagina.ancho, 50);
+}
+
+console.log('\n14. Hojas a medida: cualquier papel, márgenes centrados si no se miden');
+{
+  const hojaA = (p) => formatos.construirPersonalizado({ medio: 'hoja', ...p });
+  const a4 = hojaA({ papel: 'a4', ancho: 70, alto: 37, columnas: 3, filas: 8 });
+  checkEq('A4 3 × 8 de 70 × 37 centrado = el formato del catálogo',
+    [a4.margen.izquierda, a4.margen.arriba], [formatos.resolver('a4-3x8').margen.izquierda, formatos.resolver('a4-3x8').margen.arriba]);
+  const carta = hojaA({ papel: 'carta', ancho: 101.6, alto: 50.8, columnas: 2, filas: 5, separacion: { x: 4.76 } });
+  checkEq('Carta 2 × 5 centrada = la referencia de papelería', carta.margen.izquierda, 3.97);
+  checkEq('Oficio es de 330 mm', hojaA({ papel: 'oficio', ancho: 70, alto: 27, columnas: 3, filas: 12 }).pagina.alto, 330.2);
+  checkEq('papel de cualquier medida',
+    hojaA({ papel: 'personalizado', pagina: { ancho: 100, alto: 150 }, ancho: 45, alto: 35, columnas: 2, filas: 4 }).porHoja, 8);
+  const cat = formatos.catalogo();
+  checkEq('el catálogo trae formatos, papeles y topes',
+    [Array.isArray(cat.formatos), cat.papeles.map((p) => p.id), typeof cat.limites.maxColumnas],
+    [true, ['a4', 'carta', 'oficio', 'a5'], 'number']);
+}
+
+console.log('\n15. Calibración: giro, escala y desvío — medidos sobre el PDF de verdad');
+{
+  const r3 = formatos.resolver('rollo3-32x25');
+  const tres = [ITEM, ITEM, ITEM];
+  // El marco dibuja un rectángulo de (ancho − 0,5 pt) × (alto − 0,5 pt) por etiqueta:
+  // es la forma de encontrar cada etiqueta entre los cientos de barras.
+  const marcos = (lista) => lista.filter((t) =>
+    cerca(t.w, (32 * MM - 0.5) / MM, 0.01) && cerca(t.h, (25 * MM - 0.5) / MM, 0.01));
+  const medir = async (impresora, extra = {}) =>
+    trazos(() => pdfEtiquetas(r3, { simbologia: 'barras', marco: true, impresora, ...extra }, tres));
+
+  const g0 = await medir({ rotacion: 0 });
+  const m0 = marcos(g0);
+  checkEq('sin giro: página 104 × 25', [g0[0].pagW, g0[0].pagH].map((n) => Number(n.toFixed(2))), [104, 25]);
+  check('sin giro: la etiqueta 1 cae en x 2–34 mm', cerca(m0[0].x1, 2.09) && cerca(m0[0].x2, 33.91), JSON.stringify(m0[0]));
+
+  const g90 = await medir({ rotacion: 90 });
+  const m90 = marcos(g90);
+  checkEq('★ girada 90°: la página física es 25 × 104 (lo que va en el driver)',
+    [g90[0].pagW, g90[0].pagH].map((n) => Number(n.toFixed(2))), [25, 104]);
+  check('★ girada 90°: la etiqueta 1 queda de pie, en y 2–34 mm', cerca(m90[0].y1, 2.09) && cerca(m90[0].y2, 33.91)
+    && cerca(m90[0].x1, 0.09) && cerca(m90[0].x2, 24.91), JSON.stringify(m90[0]));
+  check('girada 90°: la etiqueta 3 en y 70–102 mm', cerca(m90[2].y1, 70.09) && cerca(m90[2].y2, 101.91), JSON.stringify(m90[2]));
+
+  const m180 = marcos(await medir({ rotacion: 180 }));
+  check('★ girada 180°: la etiqueta 1 pasa al extremo derecho (x 70–102)', cerca(m180[0].x1, 70.09) && cerca(m180[0].x2, 101.91), JSON.stringify(m180[0]));
+
+  const m270 = marcos(await medir({ rotacion: 270 }));
+  check('girada 270°: la etiqueta 1 queda de pie abajo (y 70–102)', cerca(m270[0].y1, 70.09) && cerca(m270[0].y2, 101.91), JSON.stringify(m270[0]));
+
+  let fuera = [];
+  for (const rotacion of [0, 90, 180, 270]) {
+    for (const t of await medir({ rotacion })) {
+      if (t.x1 < -0.01 || t.y1 < -0.01 || t.x2 > t.pagW + 0.01 || t.y2 > t.pagH + 0.01) fuera.push(`${rotacion}°`);
+    }
+  }
+  checkEq('★ en los cuatro giros, ni una barra cae fuera de la página física', [...new Set(fuera)], []);
+
+  const ms = marcos(await medir({ rotacion: 0, escala: 102 }, { ajuste: { x: 1, y: -0.5 } }));
+  check('★ escala 102 % y desvío (1, −0,5): la etiqueta 1 empieza en 2 × 1,02 + 1 mm',
+    cerca(ms[0].x1, 0.088 * 1.02 + 2 * 1.02 + 1, 0.05) && cerca(ms[0].x2 - ms[0].x1, (32 - 0.176) * 1.02, 0.05),
+    JSON.stringify(ms[0]));
+
+  // Con la página girada, "el borde" para pdfkit ya no es el de la etiqueta: si
+  // algún texto se saliera de su alto fijo, pdfkit abriría páginas de más.
+  const a4 = formatos.resolver('a4-3x8');
+  const buf = await pdfEtiquetas(a4, { simbologia: 'barras', impresora: { rotacion: 90 },
+    mostrar: { nombre: true, variante: true, precio: true } }, Array.from({ length: 30 }, () => ITEM));
+  checkEq('★ A4 girada: 30 etiquetas = 2 páginas, ni una más', paginasDe(buf), 2);
+}
+
+console.log('\n16. Resolución de la impresora: el módulo cae en puntos ENTEROS del cabezal');
+// Una térmica de 203 dpi pinta en pasos de 0,125 mm. Un módulo de 0,28 mm son
+// 2,24 puntos y el driver redondea cada barra a 2 o a 3: barras que deberían
+// medir igual salen distintas. Con el módulo en puntos enteros, todas iguales.
+{
+  const w = 32 * MM, h = 25 * MM;
+  for (const dpi of [203, 300]) {
+    const p = layout.planear(w, h, ITEM, { simbologia: 'barras', dpi });
+    const puntos = p.moduloMm * dpi / 25.4;
+    check(`${dpi} dpi: el módulo son ${p.puntosModulo} puntos exactos (${p.moduloMm.toFixed(4)} mm)`,
+      Number.isInteger(p.puntosModulo) && Math.abs(puntos - p.puntosModulo) < 1e-6);
+    check(`${dpi} dpi: y sigue leyéndose igual`, decodificar(p.simbolo.barras) === ITEM.codigo);
+    const q = layout.QUIET_BARRAS * p.simbolo.modulo;
+    check(`${dpi} dpi: con su zona muda dentro de la etiqueta`,
+      p.simbolo.x - q >= -0.01 && p.simbolo.x + p.simbolo.ancho + q <= w + 0.01);
+  }
+  check('sin resolución no se ajusta nada', layout.planear(w, h, ITEM, { simbologia: 'barras' }).puntosModulo === null);
+  const imposible = layout.planear(20 * MM, 12 * MM, { ...ITEM, codigo: 'SKU-ACCESORIOS-BOGOTA-0001' },
+    { simbologia: 'barras', dpi: 203 });
+  check('★ si ni un punto por módulo cabe, se AVISA en vez de fingir',
+    imposible.avisos.includes('resolucion_insuficiente') && imposible.avisos.includes('modulo_estrecho'));
+}
+
+console.log('\n17. La zona muda puede ocupar el margen interior');
+// La zona muda es blanco, no tinta. Contarla DENTRO del área útil encogía el
+// módulo un 10 % en las etiquetas pequeñas, que son las que están al límite.
+{
+  const f = formatos.resolver('a4-5x13');
+  const w = f.etiqueta.ancho * MM, h = f.etiqueta.alto * MM;
+  const p = layout.planear(w, h, { ...ITEM, codigo: '100001' }, { simbologia: 'barras' });
+  const util = (w - 2 * p.pad) / MM;
+  const modulos = code128.codificar('100001').modulos;
+  check(`★ módulo ${p.moduloMm.toFixed(3)} mm > ${(util / (modulos + 20)).toFixed(3)} mm de la regla anterior`,
+    p.moduloMm > util / (modulos + 20) + 0.01);
+  const q = layout.QUIET_BARRAS * p.simbolo.modulo;
+  check('y la zona muda sigue dentro de la etiqueta', p.simbolo.x - q >= -0.01 && p.simbolo.x + p.simbolo.ancho + q <= w + 0.01);
+  check('las barras, dentro del área útil', p.simbolo.x >= p.pad - 0.01 && p.simbolo.x + p.simbolo.ancho <= w - p.pad + 0.01);
+
+  // Y el techo: en una etiqueta de 100 mm el código ya no se estira a 10 cm,
+  // que un lector de mano no alcanza a barrer entero.
+  const ancha = layout.planear(100 * MM, 50 * MM, { ...ITEM, codigo: '100001' }, { simbologia: 'barras' });
+  check(`★ en 100 × 50 el módulo se queda en ${ancha.moduloMm.toFixed(2)} mm (techo ${layout.MODULO_MAX_MM})`,
+    ancha.moduloMm <= layout.MODULO_MAX_MM + 1e-9);
+  check('y el símbolo queda centrado', cerca((ancha.simbolo.x + ancha.simbolo.ancho / 2) / MM, 50, 0.01));
+}
+
+console.log('\n18. El diseño se ajusta: letra, renglones, alineación, alto del símbolo, pie');
+{
+  const w = 100 * MM, h = 50 * MM;
+  const base = { simbologia: 'barras', mostrar: { nombre: true, variante: true, precio: true } };
+  const nombreDe = (p) => p.bloques.find((b) => b.bold && !b.esPrecio);
+  const normal = layout.planear(w, h, ITEM, base);
+  const grande = layout.planear(w, h, ITEM, { ...base, diseno: { escalaTexto: 1.3 } });
+  check('letra al 130 %', cerca(nombreDe(grande).size, nombreDe(normal).size * 1.3, 0.01));
+  checkEq('tres renglones para el nombre', nombreDe(layout.planear(w, h, ITEM, { ...base, diseno: { lineasNombre: 3 } })).lineas, 3);
+
+  const izq = layout.planear(w, h, ITEM, { ...base, diseno: { alinear: 'izquierda' } });
+  check('alineado a la izquierda', izq.bloques.every((b) => b.align === 'left'));
+
+  const tope = layout.planear(w, h, ITEM, { ...base, diseno: { altoSimbolo: 8 } });
+  check('★ alto de barras a mano: 8 mm', cerca(tope.simbolo.alto / MM, 8, 0.01));
+  check('y el bloque queda centrado, no pegado arriba', tope.bloques[0].y > tope.pad + MM);
+
+  const conPie = layout.planear(38 * MM, 21 * MM, ITEM,
+    { ...base, mostrar: { ...base.mostrar, pie: true }, pie: 'Garantía 3 meses' });
+  checkEq('★ en una etiqueta chica el pie es lo PRIMERO que se suelta', conPie.avisos[0], 'sin_espacio_pie');
+  const pieHolgado = layout.planear(w, h, ITEM, { ...base, mostrar: { ...base.mostrar, pie: true }, pie: 'Garantía 3 meses' });
+  checkEq('en una grande el pie va al final', pieHolgado.bloques.at(-1).texto, 'Garantía 3 meses');
+
+  checkEq('margen interior a mano: 0', layout.planear(w, h, ITEM, { ...base, diseno: { margenInterior: 0 } }).pad, 0);
+  check('margen interior a mano: 5 mm', cerca(layout.planear(w, h, ITEM, { ...base, diseno: { margenInterior: 5 } }).pad / MM, 5, 0.001));
+  check('un margen absurdo no se come la etiqueta (tope: ¼ del lado corto)',
+    layout.planear(20 * MM, 12 * MM, ITEM, { ...base, diseno: { margenInterior: 8 } }).pad <= 3 * MM + 0.01);
+}
+
+console.log('\n19. La hoja de prueba de alineación');
+{
+  checkEq('la regla más larga que cabe', [largoRegla(32), largoRegla(50), largoRegla(100), largoRegla(11)], [30, 40, 80, null]);
+  let malos = [];
+  for (const f of formatos.FORMATOS) {
+    for (const rotacion of [0, 90]) {
+      const buf = await pdfPrueba(f, { impresora: { rotacion } });
+      const esperadas = f.medio === 'rollo' ? 2 : 1;
+      if (buf.subarray(0, 5).toString('latin1') !== '%PDF-' || paginasDe(buf) !== esperadas) {
+        malos.push(`${f.id}/${rotacion}° (${paginasDe(buf)} pág.)`);
+      }
+    }
+  }
+  checkEq(`★ ${formatos.FORMATOS.length * 2} hojas de prueba: una página por plancha, dos por rollo`, malos, []);
+
+  const r3 = formatos.resolver('rollo3-32x25');
+  const t = await trazos(() => pdfPrueba(r3, { impresora: { rotacion: 0 } }));
+  const contornos = t.filter((x) => cerca(x.w, 32, 0.01) && cerca(x.h, 25, 0.01));
+  checkEq('★ la prueba dibuja el contorno EXACTO de cada etiqueta (3 por fila × 2 filas)', contornos.length, 6);
+  check('en el mismo sitio donde caerán las etiquetas', cerca(contornos[0].x1, 2) && cerca(contornos[2].x1, 70));
 }
 
 
@@ -525,6 +783,47 @@ if (!PGlite) {
   try { await service.generarCodigos(1, 1, { seleccion: idsDe(await repo.listarNodos(1, 1, {})) }); }
   catch (e) { mensaje = e.message; }
   check('con la feature apagada se rechaza y dice qué activar', /Ajustes/.test(mensaje || ''), mensaje || 'no lanzó');
+
+  console.log('\n20. El plan de la pantalla: geometría, avisos y hoja de prueba');
+
+  // SIN selección: el editor de formato necesita la retícula mientras el
+  // usuario mide su rollo, antes de marcar un solo producto.
+  const g = await service.planear(1, 1, { formato: 'rollo3-32x25', seleccion: [] });
+  checkEq('★ sin productos marcados igual responde la geometría', [g.total, g.geometria.celdas.length], [0, 3]);
+  checkEq('papel que va en la impresora: 104 × 25', [g.geometria.papel.ancho, g.geometria.papel.alto], [104, 25]);
+  const g90 = await service.planear(1, 1, { formato: 'rollo3-32x25', impresora: { rotacion: 90 } });
+  checkEq('★ girada: el papel pasa a 25 × 104', [g90.geometria.papel.ancho, g90.geometria.papel.alto], [25, 104]);
+
+  const ancho = await service.planear(1, 1, { formato: 'personalizado',
+    personalizado: { medio: 'rollo', ancho: 40, alto: 25, columnas: 3, separacion: { x: 3 }, anchoRollo: 130 } });
+  check('un rollo de 130 mm avisa que una térmica de 4" no lo imprime entero', ancho.avisos.includes('rollo_ancho'));
+  const corrido = await service.planear(1, 1, { formato: 'rollo-50x25', ajuste: { x: 3 } });
+  check('★ un desvío que saca la etiqueta de la página se avisa', corrido.avisos.includes('calibracion_fuera'));
+  const quieto = await service.planear(1, 1, { formato: 'rollo-50x25' });
+  checkEq('sin calibración, ningún aviso de geometría', quieto.avisos, []);
+
+  // Un navegador con el bundle viejo manda solo los campos de antes: tiene que
+  // recibir el mismo resultado que siempre.
+  const viejo = await service.planear(1, 1, {
+    formato: 'a4-5x13', simbologia: 'barras', mostrar: { nombre: true, variante: true, precio: false },
+    marco: false, ajuste: { x: 0, y: 0 }, desde: 1, cantidadModo: 'uno',
+    seleccion: [{ nivel: 'producto', producto_id: 1 }],
+  });
+  checkEq('★ una petición vieja (sin diseño ni impresora) sigue funcionando', [viejo.total, viejo.avisos], [1, []]);
+
+  const pdfDe = (body) => new Promise((ok, ko) => {
+    service.construirPdf(1, 1, body, resFalso(ok)).catch(ko);
+  });
+  const prueba = await pdfDe({ prueba: true, formato: 'rollo3-32x25' });
+  checkEq('★ la hoja de prueba sale por el mismo endpoint y sin productos', [prueba.subarray(0, 5).toString('latin1'), paginasDe(prueba)], ['%PDF-', 2]);
+  const real = await pdfDe({ formato: 'rollo3-32x25', seleccion: [{ nivel: 'producto', producto_id: 1 }],
+    diseno: { escalaTexto: 1.2, alinear: 'izquierda' }, impresora: { rotacion: 180, escala: 101, dpi: 203 },
+    mostrar: { nombre: true, pie: true }, pieTexto: 'Garantía' });
+  check('y el PDF con todas las opciones nuevas se genera', real.subarray(0, 5).toString('latin1') === '%PDF-' && real.length > 500);
+
+  checkEq('los valores fuera de rango se acotan en vez de romper',
+    (await service.planear(1, 1, { formato: 'rollo-50x25', impresora: { rotacion: 45, escala: 999, dpi: 5 },
+      diseno: { escalaTexto: 9, lineasNombre: 0 } })).geometria.papel.rotacion, 0);
 }
 
 console.log('\n' + '─'.repeat(62));

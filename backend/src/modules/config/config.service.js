@@ -57,6 +57,7 @@ const _validarTarifasLista = (raw) => {
 // negocio crea que está cobrando mora cuando no).
 const { normalizarCondicion, MAX_CONDICIONES } = require('../../utils/mora.util');
 const { normalizarPlanInteres, MAX_PLANES }    = require('../../utils/interes.util');
+const codigoAuto = require('../../utils/codigoAuto.util');
 
 const _validarMoraLista = (raw) => {
   let lista;
@@ -235,6 +236,31 @@ const saveConfig = async (negocioId, datos) => {
   // limpia solo a mano). Mismo rango 0–365 que los demás plazos.
   if (datosProcesados.borradores_dias !== undefined) {
     _validarDiasAviso(datosProcesados.borradores_dias, 'La vigencia de los borradores');
+  }
+
+  // ── Código automático de producto ─────────────────────────────────────────
+  // Las reglas son las MISMAS funciones que aplica el motor al generar
+  // (utils/codigoAuto.util): si se separaran, aquí se guardaría un prefijo que
+  // el motor luego descarta en silencio y el negocio creería estar usándolo.
+  if (datosProcesados.codigo_auto !== undefined && !['0', '1'].includes(String(datosProcesados.codigo_auto))) {
+    throw { status: 400, message: 'El código automático solo puede estar encendido (1) o apagado (0)' };
+  }
+  const tocaPrefijo = datosProcesados.codigo_auto_prefijo !== undefined;
+  const tocaDigitos = datosProcesados.codigo_auto_digitos !== undefined && datosProcesados.codigo_auto_digitos !== '';
+  if (tocaPrefijo) {
+    datosProcesados.codigo_auto_prefijo = codigoAuto.validarPrefijo(datosProcesados.codigo_auto_prefijo);
+  }
+  if (tocaDigitos) {
+    datosProcesados.codigo_auto_digitos = String(codigoAuto.validarDigitos(datosProcesados.codigo_auto_digitos));
+  }
+  if (tocaPrefijo || tocaDigitos) {
+    const prefijo = tocaPrefijo
+      ? datosProcesados.codigo_auto_prefijo
+      : codigoAuto.configCodigoAuto(await repo.getMap(negocioId)).prefijo;
+    const digitos = tocaDigitos
+      ? Number(datosProcesados.codigo_auto_digitos)
+      : codigoAuto.configCodigoAuto(await repo.getMap(negocioId)).digitos;
+    codigoAuto.validarLargo(prefijo, digitos);
   }
 
   // Los códigos del proveedor resuelven contra el código interno del producto

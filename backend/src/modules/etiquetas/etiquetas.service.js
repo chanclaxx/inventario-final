@@ -3,9 +3,7 @@ const repo       = require('./etiquetas.repository');
 const formatos   = require('./etiquetas.formatos');
 const layout     = require('./etiquetas.layout');
 const configRepo = require('../config/config.repository');
-const {
-  normalizarCodigo, buscarCodigoEnUso, propagarCodigo, heredarCodigo, MAX_CODIGO,
-} = require('../../utils/codigo.util');
+const codigoAuto = require('../../utils/codigoAuto.util');
 
 // Tope de etiquetas por PDF. No es un límite de negocio: por encima de esto el
 // archivo pesa decenas de MB, el navegador que lo abre se atasca y la impresora
@@ -13,10 +11,10 @@ const {
 // verdad imprime por estante o por línea, no el inventario entero de un tirón.
 const MAX_ETIQUETAS = 3000;
 
-// Tope de códigos por llamada. Cada nodo cuesta varias consultas (heredar,
-// verificar, escribir, propagar) y axios corta a los 30 s: pasado ese punto el
-// usuario ve "no se pudo" sobre una operación que en realidad estaba a medias.
-// El frontend llama por tandas y muestra el avance.
+// Tope de códigos por llamada. El motor resuelve la tanda entera en un puñado
+// de consultas, pero la transacción bloquea el contador del negocio mientras
+// dura —y con él el alta de productos en todas las sedes—, y axios corta a los
+// 30 s. El frontend llama por tandas de 200 y muestra el avance.
 const MAX_CODIGOS_POR_TANDA = 500;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -86,12 +84,36 @@ const _expandir = (nodos, seleccion, modo) => {
 /** Encabezado opcional de la etiqueta: el nombre del negocio, o el de la sede. */
 const _encabezado = (ctx, op) => {
   if (!op?.mostrar?.encabezado) return null;
-  if (op.encabezadoTexto) return String(op.encabezadoTexto).slice(0, 60);
+  if (op.encabezadoTexto && String(op.encabezadoTexto).trim()) return String(op.encabezadoTexto).trim().slice(0, 60);
   return ctx?.negocio_nombre || ctx?.sucursal_nombre || null;
 };
 
+/** Número dentro de un rango, o null si no vino. Lo que no se entiende no se aplica. */
+const _enRango = (v, min, max) => {
+  if (v === '' || v === null || v === undefined) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : null;
+};
+
+// Resoluciones que se aceptan. No es una lista cerrada de modelos: son las
+// tres densidades que existen en impresoras de etiquetas y recibos (8, 12 y 24
+// puntos por milímetro), más los rangos de las de oficina.
+const DPI = { min: 100, max: 1200 };
+
+/**
+ * La petición → opciones saneadas. Todo campo nuevo es OPCIONAL y su ausencia
+ * se comporta como siempre: un navegador con el bundle viejo en caché sigue
+ * mandando `{ simbologia, mostrar, marco, ajuste, desde }` y recibe el mismo
+ * PDF de antes.
+ */
 const _opciones = (body, ctx) => {
   const mostrar = body.mostrar || {};
+  const d   = body.diseno || {};
+  const imp = body.impresora || {};
+  const D   = layout.DISENO;
+  const A   = layout.AJUSTE_MAX;
+
+  const dpi = _enRango(imp.dpi ?? body.dpi, DPI.min, DPI.max);
   const op = {
     simbologia: body.simbologia === 'qr' ? 'qr' : 'barras',
     mostrar: {
@@ -99,23 +121,43 @@ const _opciones = (body, ctx) => {
       variante:   mostrar.variante   !== false,
       precio:     mostrar.precio     === true,
       encabezado: mostrar.encabezado === true,
+      pie:        mostrar.pie        === true,
+    },
+    diseno: {
+      alinear:        d.alinear === 'izquierda' ? 'izquierda' : 'centro',
+      escalaTexto:    _enRango(d.escalaTexto, D.escalaTexto.min, D.escalaTexto.max) ?? D.escalaTexto.defecto,
+      lineasNombre:   Math.round(_enRango(d.lineasNombre, D.lineasNombre.min, D.lineasNombre.max) ?? D.lineasNombre.defecto),
+      margenInterior: _enRango(d.margenInterior, D.margenInterior.min, D.margenInterior.max),
+      altoSimbolo:    _enRango(d.altoSimbolo, D.altoSimbolo.min, D.altoSimbolo.max),
     },
     marco:  body.marco === true,
-    desde:  Number(body.desde) || 1,
-    ajuste: { x: Number(body.ajuste?.x) || 0, y: Number(body.ajuste?.y) || 0 },
+    desde:  Math.max(1, Math.floor(Number(body.desde) || 1)),
+    ajuste: { x: _enRango(body.ajuste?.x, -A, A) ?? 0, y: _enRango(body.ajuste?.y, -A, A) ?? 0 },
+    impresora: {
+      rotacion: layout.ROTACIONES.includes(Number(imp.rotacion)) ? Number(imp.rotacion) : 0,
+      escala:   _enRango(imp.escala, layout.ESCALA.min, layout.ESCALA.max) ?? 100,
+      dpi:      dpi === null ? null : Math.round(dpi),
+    },
   };
+  op.dpi = op.impresora.dpi;
   op.encabezado = _encabezado(ctx, { ...op, encabezadoTexto: body.encabezadoTexto });
+  op.pie = op.mostrar.pie ? String(body.pieTexto ?? '').trim().slice(0, 60) : '';
   return op;
+};
+
+/** Formato, contexto y opciones: lo que necesitan TODAS las salidas, incluida la hoja de prueba. */
+const _base = async (negocioId, sucursalId, body) => {
+  const formato = formatos.resolver(body.formato, body.personalizado);
+  const ctx     = await repo.contextoImpresion(negocioId, sucursalId);
+  if (!ctx) throw { status: 403, message: 'Sucursal no válida para este negocio' };
+  return { formato, ctx, op: _opciones(body, ctx) };
 };
 
 /** Resuelve todo lo que comparten la vista previa y el PDF. */
 const _preparar = async (negocioId, sucursalId, body) => {
   const seleccion = _sanearSeleccion(body.seleccion);
-  const formato   = formatos.resolver(body.formato, body.personalizado);
-  const ctx       = await repo.contextoImpresion(negocioId, sucursalId);
-  if (!ctx) throw { status: 403, message: 'Sucursal no válida para este negocio' };
+  const { formato, ctx, op } = await _base(negocioId, sucursalId, body);
 
-  const op    = _opciones(body, ctx);
   const nodos = await repo.nodosPorSeleccion(negocioId, sucursalId, seleccion);
   const { etiquetas, sinCodigo, recortado } = _expandir(nodos, seleccion, body.cantidadModo);
 
@@ -126,7 +168,11 @@ const _preparar = async (negocioId, sucursalId, body) => {
 // API del módulo
 // ─────────────────────────────────────────────────────────────────────────────
 
+// `/formatos` sigue devolviendo el ARREGLO de siempre: Vercel y Railway se
+// despliegan por separado, y un frontend viejo contra este backend tiene que
+// seguir pintando su selector. Lo nuevo (papeles, topes) va en `/catalogo`.
 const listarFormatos = () => formatos.FORMATOS;
+const catalogo = () => formatos.catalogo();
 
 const listar = async (negocioId, sucursalId, filtros) => {
   const nodos = await repo.listarNodos(negocioId, sucursalId, filtros);
@@ -141,18 +187,24 @@ const listar = async (negocioId, sucursalId, filtros) => {
 };
 
 /**
- * Vista previa: qué va a salir, cuántas hojas y qué puede salir mal.
+ * Vista previa: qué va a salir, cuántas hojas, cómo es la retícula y qué puede
+ * salir mal.
  *
  * Corre el MISMO `layout.planear` que el PDF —no una estimación— sobre el
  * código más largo de la selección, que es el caso peor: es el que da la barra
  * más estrecha y el que primero deja de escanear. Un aviso aquí le ahorra al
  * usuario la plancha entera.
+ *
+ * Responde también SIN selección: el editor de formato necesita la geometría
+ * (y los errores de «no cabe») mientras el usuario todavía está midiendo su
+ * rollo, antes de haber marcado un solo producto.
  */
 const planear = async (negocioId, sucursalId, body) => {
   const { formato, op, etiquetas, sinCodigo, recortado } = await _preparar(negocioId, sucursalId, body);
 
   const porPagina = formato.columnas * formato.filas;
   const saltar    = Math.max(0, Math.min(porPagina - 1, (Number(op.desde) || 1) - 1));
+  const geometria = layout.geometria(formato, op, { desde: op.desde });
 
   let muestra = null;
   const avisos = new Set();
@@ -165,6 +217,10 @@ const planear = async (negocioId, sucursalId, body) => {
     );
     for (const a of muestra.avisos) avisos.add(a);
   }
+  // Las térmicas de 4 pulgadas —casi todas— no imprimen más allá de 104–108
+  // mm: lo que caiga fuera del cabezal simplemente no sale.
+  if (formato.medio === 'rollo' && formato.pagina.ancho > formatos.LIMITES.anchoTermica4) avisos.add('rollo_ancho');
+  if (geometria.fuera) avisos.add('calibracion_fuera');
 
   return {
     formato,
@@ -180,6 +236,11 @@ const planear = async (negocioId, sucursalId, body) => {
     avisos:   [...avisos],
     moduloMm: muestra ? Number(muestra.moduloMm.toFixed(3)) : null,
     minimoMm: muestra ? muestra.minimoMm : null,
+    puntosModulo: muestra ? muestra.puntosModulo : null,
+    geometria,
+    // Cuánto mide la regla que trae la hoja de prueba: con la medida real, la
+    // pantalla calcula la escala que corrige la impresora.
+    reglaMm: layout.largoRegla(formato.etiqueta.ancho),
   };
 };
 
@@ -190,11 +251,20 @@ const planear = async (negocioId, sucursalId, body) => {
  * mismo endpoint. Es lo que permite que la previa sea el PDF de verdad y no un
  * dibujo aparte que se desincroniza: lo que el usuario ve en el recuadro es
  * literalmente lo que va a salir por la impresora.
+ *
+ * `prueba` imprime la hoja de alineación con el mismo formato y la misma
+ * calibración, sin necesitar productos: se imprime ANTES de gastar el rollo.
  */
 const construirPdf = async (negocioId, sucursalId, body, res) => {
-  const { formato, op, etiquetas } = await _preparar(negocioId, sucursalId, body);
-  const { generarPdfEtiquetas } = require('./etiquetas.pdf');
+  const { generarPdfEtiquetas, generarPdfPrueba } = require('./etiquetas.pdf');
 
+  if (body.prueba === true) {
+    const { formato, op } = await _base(negocioId, sucursalId, body);
+    generarPdfPrueba({ formato, opciones: op, res, nombreArchivo: 'prueba-alineacion.pdf' });
+    return;
+  }
+
+  const { formato, op, etiquetas } = await _preparar(negocioId, sucursalId, body);
   const limite = Number(body.limite) > 0 ? Math.floor(Number(body.limite)) : null;
 
   generarPdfEtiquetas({
@@ -208,91 +278,28 @@ const construirPdf = async (negocioId, sucursalId, body, res) => {
 // Generación masiva de códigos
 // ─────────────────────────────────────────────────────────────────────────────
 //
-// Sin esto la impresión masiva no sirve de nada: un negocio que acaba de
-// encender la feature tiene cientos de nodos con `codigo` en NULL, y asignarlos
-// a mano uno por uno en el modal de cada variante no lo va a hacer nadie.
+// Sin esto la impresión masiva no sirve de nada para lo que se creó ANTES de
+// encender el código automático: esos nodos siguen con `codigo` en NULL y
+// asignarlos a mano uno por uno no lo va a hacer nadie.
 //
-// Tres decisiones que no son negociables:
-//
-//  1. NUNCA se pisa un código existente. Un código ya impreso está pegado a la
-//     mercancía en el estante; cambiarlo en la base convierte esas etiquetas en
-//     basura silenciosa —siguen escaneando, pero contra nada—.
-//
-//  2. Se HEREDA antes de inventar. El mismo nodo lógico en otra sede lleva el
-//     mismo código a propósito (así el lector funciona en las dos), y después de
-//     asignar se PROPAGA. Es la regla que ya aplican el importador y el módulo
-//     de variantes, con sus mismos helpers: una tercera implementación se
-//     desincronizaría.
-//
-//  3. Los códigos generados son DÍGITOS. No es estética: Code 128 codifica los
-//     dígitos de dos en dos (juego C) y un código numérico de 6 cifras ocupa
-//     casi la mitad que uno alfanumérico. En una etiqueta de 38 mm eso es la
-//     diferencia entre escanear y no escanear.
+// El algoritmo NO vive aquí: es el mismo motor que asigna el código al crear un
+// producto y al importar (`utils/codigoAuto.util.js`). Esta pantalla tenía su
+// propia copia y ya se había separado en un punto que duele: cuando la herencia
+// estaba bloqueada inventaba un código nuevo y lo propagaba ENCIMA del que la
+// otra sede ya tenía impreso. Las reglas —no pisar, heredar antes de inventar,
+// no partir la identidad entre sedes, propagar solo a los vacíos, dígitos puros—
+// están documentadas allá, una sola vez.
 
-const PREFIJO_OK = /^[A-Z0-9-]{0,8}$/;
-
-/** El mayor código puramente numérico que ya usa el negocio. */
-const _semilla = async (client, negocioId, prefijo) => {
-  const patron = prefijo ? `^${prefijo}[0-9]{1,9}$` : '^[0-9]{1,9}$';
-  const corte  = prefijo ? prefijo.length + 1 : 1;
-
-  const { rows } = await client.query(
-    `SELECT COALESCE(MAX(SUBSTRING(codigo FROM $2::int)::bigint), 0) AS maximo
-     FROM (
-       SELECT pc.codigo FROM productos_cantidad pc
-         JOIN sucursales su ON su.id = pc.sucursal_id
-        WHERE su.negocio_id = $1 AND pc.codigo ~ $3
-       UNION ALL
-       SELECT ap.codigo FROM atributos_producto ap
-         JOIN sucursales su ON su.id = ap.sucursal_id
-        WHERE su.negocio_id = $1 AND ap.codigo ~ $3
-       UNION ALL
-       SELECT v.codigo FROM variantes_atributo v
-         JOIN atributos_producto ap ON ap.id = v.atributo_id
-         JOIN sucursales su ON su.id = ap.sucursal_id
-        WHERE su.negocio_id = $1 AND v.codigo ~ $3
-     ) t`,
-    [negocioId, corte, patron]
-  );
-  return Number(rows[0]?.maximo || 0);
-};
-
-/**
- * Reserva un bloque de `cuantos` números de una sola vez.
- *
- * Mismo mecanismo que `asignarNumeroDocumento`: un INSERT … ON CONFLICT DO
- * UPDATE … RETURNING es atómico, el lock de fila serializa a dos usuarios
- * generando a la vez, y si la transacción hace ROLLBACK el contador vuelve
- * atrás con ella. `contadores_documento.tipo` es TEXT libre, así que un tipo
- * nuevo no necesita migración.
- *
- * El `GREATEST` contra la semilla es lo que hace esto reparable: si alguien
- * importó códigos numéricos por fuera, el contador se pone por encima solo, en
- * vez de repartir números que ya existen y morir contra el índice único.
- */
-const _reservarBloque = async (client, negocioId, semilla, cuantos) => {
-  const { rows } = await client.query(
-    `INSERT INTO contadores_documento (negocio_id, tipo, ultimo_numero)
-     VALUES ($1, 'codigo_producto', GREATEST($2::int, 0) + $3)
-     ON CONFLICT (negocio_id, tipo)
-     DO UPDATE SET ultimo_numero = GREATEST(contadores_documento.ultimo_numero, $2::int) + $3
-     RETURNING ultimo_numero`,
-    [negocioId, semilla, cuantos]
-  );
-  const fin = Number(rows[0].ultimo_numero);
-  return fin - cuantos + 1;   // primer número del bloque
-};
-
-const TABLA_NIVEL = {
-  producto: { tabla: 'productos_cantidad', campo: 'producto_id' },
-  atributo: { tabla: 'atributos_producto', campo: 'atributo_id' },
-  variante: { tabla: 'variantes_atributo', campo: 'variante_id' },
-};
+const NIVEL_ID = { producto: 'producto_id', atributo: 'atributo_id', variante: 'variante_id' };
 
 /**
  * Asigna código a los nodos seleccionados que no tienen.
  *
- * @returns {{ asignados: number, omitidos: number, detalle: object[] }}
+ * Sin prefijo ni dígitos en la petición se usan los de Ajustes, que son los del
+ * código automático: los códigos que se generan en masa y los que nacen solos
+ * tienen que verse igual en el estante.
+ *
+ * @returns {{ asignados: number, omitidos: number, detalle: object[], bloqueados: object[] }}
  */
 const generarCodigos = async (negocioId, sucursalId, body) => {
   const config = await configRepo.getMap(negocioId);
@@ -300,14 +307,12 @@ const generarCodigos = async (negocioId, sucursalId, body) => {
     throw { status: 400, message: 'Activa el código único de producto en Ajustes antes de generar códigos.' };
   }
 
-  const prefijo = String(body.prefijo || '').trim().toUpperCase();
-  if (!PREFIJO_OK.test(prefijo)) {
-    throw { status: 400, message: 'El prefijo solo admite letras, números y guiones (máximo 8).' };
-  }
-  const longitud = Math.max(4, Math.min(10, Math.floor(Number(body.longitud) || 6)));
-  if (prefijo.length + longitud > MAX_CODIGO) {
-    throw { status: 400, message: `El código no puede superar ${MAX_CODIGO} caracteres` };
-  }
+  const auto = codigoAuto.configCodigoAuto(config);
+  const prefijo = body.prefijo !== undefined ? codigoAuto.validarPrefijo(body.prefijo) : auto.prefijo;
+  const longitud = body.longitud !== undefined && body.longitud !== ''
+    ? Math.max(4, Math.min(10, Math.floor(Number(body.longitud) || 6)))
+    : auto.digitos;
+  codigoAuto.validarLargo(prefijo, longitud);
 
   const seleccion = _sanearSeleccion(body.seleccion);
   if (!seleccion.length) throw { status: 400, message: 'No hay productos seleccionados' };
@@ -320,69 +325,33 @@ const generarCodigos = async (negocioId, sucursalId, body) => {
 
   const nodos = await repo.nodosPorSeleccion(negocioId, sucursalId, seleccion);
   const pendientes = nodos.filter((n) => !n.codigo || !String(n.codigo).trim());
-  if (!pendientes.length) return { asignados: 0, omitidos: nodos.length, detalle: [] };
+  if (!pendientes.length) return { asignados: 0, omitidos: nodos.length, detalle: [], bloqueados: [] };
 
-  // Con una sola sucursal no hay de quién heredar ni a quién propagar, y
-  // saltarse las dos consultas por nodo es lo que mantiene la tanda dentro del
-  // tiempo de espera del navegador. Es la situación de la mayoría de negocios.
-  const { rows: [{ n: sucursales }] } = await pool.query(
-    `SELECT COUNT(*)::int AS n FROM sucursales WHERE negocio_id = $1 AND activa = true`,
-    [negocioId]
-  );
-  const variasSedes = sucursales > 1;
+  const porClave = new Map(nodos.map((n) => [`${n.nivel}:${n[NIVEL_ID[n.nivel]]}`, n]));
+  const describir = (a) => {
+    const n = porClave.get(`${a.nivel}:${a.id}`);
+    return { nivel: a.nivel, id: a.id, nombre: n?.nombre, variante_label: n?.variante_label, codigo: a.codigo };
+  };
 
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-
-    const semilla  = await _semilla(client, negocioId, prefijo);
-    const bloque   = await _reservarBloque(client, negocioId, semilla, pendientes.length);
-
-    let siguiente = bloque;
-    const detalle = [];
-
-    for (const nodo of pendientes) {
-      // Identidad LÓGICA, tal como la esperan `heredarCodigo` y `propagarCodigo`:
-      // los ids son distintos en cada sede, el nombre y los valores no.
-      const identidad = {
-        producto: nodo.nombre,
-        atributo: nodo.atributo_valor || null,
-        variante: nodo.variante_valor || null,
-      };
-
-      // 1) ¿Ya existe este mismo nodo con código en otra sede?
-      let codigo = null;
-      if (variasSedes) {
-        const { codigo: heredado } = await heredarCodigo(client, { negocioId, sucursalId, identidad });
-        codigo = heredado;
-      }
-
-      // 2) Si no, se toma del bloque reservado. El bucle salta los números que
-      //    ya estuvieran ocupados por un código escrito a mano que la semilla no
-      //    reconoció (por ejemplo con otro prefijo).
-      if (!codigo) {
-        for (let intento = 0; intento < 50 && !codigo; intento += 1) {
-          const propuesto = normalizarCodigo(prefijo + String(siguiente).padStart(longitud, '0'));
-          siguiente += 1;
-          const [ocupado] = await buscarCodigoEnUso(client, { sucursalId, codigo: propuesto });
-          if (!ocupado) codigo = propuesto;
-        }
-      }
-      if (!codigo) continue;   // 50 intentos ocupados: se salta el nodo, no se rompe la tanda
-
-      const { tabla, campo } = TABLA_NIVEL[nodo.nivel];
-      await client.query(`UPDATE ${tabla} SET codigo = $1 WHERE id = $2`, [codigo, nodo[campo]]);
-
-      if (variasSedes) await propagarCodigo(client, { negocioId, identidad, codigo });
-
-      detalle.push({
-        nivel: nodo.nivel, id: nodo[campo],
-        nombre: nodo.nombre, variante_label: nodo.variante_label, codigo,
-      });
-    }
-
+    const r = await codigoAuto.asignarCodigos(client, {
+      negocioId, sucursalId,
+      nodos: pendientes.map((n) => ({ nivel: n.nivel, id: n[NIVEL_ID[n.nivel]] })),
+      prefijo, digitos: longitud,
+    });
     await client.query('COMMIT');
-    return { asignados: detalle.length, omitidos: nodos.length - pendientes.length, detalle };
+
+    return {
+      asignados: r.asignados.length,
+      omitidos:  nodos.length - pendientes.length,
+      detalle:   r.asignados.map((a) => ({ ...describir(a), origen: a.origen })),
+      // Heredaban un código que en esta sede ya tiene otro producto. No se les
+      // inventa uno distinto (partiría su identidad entre sedes): la pantalla
+      // dice cuáles son y quién tiene el código, para que alguien lo resuelva.
+      bloqueados: r.bloqueados.map((b) => ({ ...describir(b), bloqueadoPor: b.bloqueadoPor })),
+    };
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     throw err;
@@ -392,6 +361,6 @@ const generarCodigos = async (negocioId, sucursalId, body) => {
 };
 
 module.exports = {
-  listarFormatos, listar, planear, construirPdf, generarCodigos,
+  listarFormatos, catalogo, listar, planear, construirPdf, generarCodigos,
   MAX_ETIQUETAS, MAX_CODIGOS_POR_TANDA,
 };

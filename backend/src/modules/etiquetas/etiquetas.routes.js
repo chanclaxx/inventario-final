@@ -29,7 +29,10 @@ router.use(requireCodigoActivo);
 
 // El catálogo de formatos es la FUENTE ÚNICA: el frontend lo pide en vez de
 // llevar su propia copia. Ver el comentario de etiquetas.formatos.js.
+// `/formatos` conserva su forma (un arreglo) para el frontend que aún no se
+// actualizó; `/catalogo` trae además los papeles y los topes del editor.
 router.get('/formatos', ctrl.getFormatos);
+router.get('/catalogo', ctrl.getCatalogo);
 
 router.get('/nodos',  ctrl.getNodos);
 router.post('/plan',  ctrl.postPlan);

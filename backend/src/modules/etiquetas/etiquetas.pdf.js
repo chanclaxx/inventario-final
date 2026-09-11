@@ -8,11 +8,14 @@
 // pie, ni márgenes de documento; lo único que comparte es `formatCOP`, que sí
 // se importa para que el precio impreso se vea igual que en pantalla.
 //
-// Dos medios, y la diferencia es física:
-//   · `hoja`  → una plancha adhesiva. Muchas etiquetas por página, y hay que
-//               acertarle a la retícula troquelada.
-//   · `rollo` → impresora térmica. Cada etiqueta es UNA PÁGINA del tamaño
-//               exacto de la etiqueta; la impresora avanza el rollo sola.
+// Cada página del PDF mide EXACTAMENTE lo que el papel que la impresora tiene
+// que recibir: la plancha entera, o una fila del rollo. Ese es el contrato con
+// cualquier impresora —de oficina, térmica o de recibos—: si el tamaño de papel
+// del diálogo coincide con el de la página y la escala es 100 %, cada etiqueta
+// cae sobre su troquel. Lo que la impresora haga distinto (entrar corrida,
+// achicar, girar) se corrige con la calibración, que aquí se aplica como UNA
+// transformación por página (`layout.matrizPagina`), y la misma se aplica a la
+// hoja de prueba: lo que la prueba muestra es lo que van a hacer las etiquetas.
 //
 // Todo lo que se dibuja sale de `etiquetas.layout.js`. Aquí no se decide nada:
 // si el precio no cabe, ya lo decidió el plano — y el mismo plano es el que le
@@ -37,6 +40,10 @@ const F = { normal: 'Helvetica', bold: 'Helvetica-Bold', mono: 'Courier-Bold' };
  *
  * Sin esto, un nombre largo empuja al resto del contenido fuera de la etiqueta
  * y se lleva por delante el código de barras de la etiqueta de al lado.
+ *
+ * El `height` explícito no es decorativo: es lo que impide que pdfkit abra una
+ * página nueva por su cuenta cuando el texto cae cerca del borde (con la página
+ * girada, "el borde" para pdfkit ya no es el de la etiqueta).
  */
 const _texto = (doc, b) => {
   const fuente = b.mono ? F.mono : (b.bold ? F.bold : F.normal);
@@ -102,7 +109,7 @@ const _qr = (doc, s) => {
   doc.fillColor(NEGRO).fill();
 };
 
-/** Una etiqueta completa en la posición (x, y) de la página. */
+/** Una etiqueta completa en la posición lógica (x, y) de la página. */
 const _etiqueta = (doc, x, y, wPt, hPt, item, op) => {
   const plano = layout.planear(wPt, hPt, item, op);
 
@@ -124,24 +131,37 @@ const _etiqueta = (doc, x, y, wPt, hPt, item, op) => {
 };
 
 /**
+ * Documento con las páginas ya calibradas: cada página nueva nace con la
+ * transformación de la impresora puesta, así el resto del código dibuja en
+ * milímetros de la página lógica y nunca piensa en giros ni escalas.
+ */
+const _documento = (formato, op, res, nombreArchivo) => {
+  const { matriz, papel } = layout.matrizPagina(formato, op);
+  const doc = new PDFDocument({ size: [papel.ancho, papel.alto], margin: 0, autoFirstPage: false, bufferPages: false });
+
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `inline; filename="${nombreArchivo}"`);
+  doc.pipe(res);
+
+  const nuevaPagina = () => {
+    doc.addPage({ size: [papel.ancho, papel.alto], margin: 0 });
+    doc.transform(...matriz);
+  };
+  return { doc, nuevaPagina };
+};
+
+/**
  * Genera el PDF y lo escribe en `res`.
  *
  * @param {object[]} etiquetas ya EXPANDIDAS: una entrada por etiqueta física.
  *   La expansión (cuántas de cada nodo) la hace el service; aquí solo se pintan.
  * @param {object} formato del catálogo o a medida
- * @param {object} op { simbologia, mostrar, encabezado, marco, desde, ajuste }
+ * @param {object} op { simbologia, mostrar, encabezado, pie, diseno, marco, desde, ajuste, impresora, dpi }
  * @param {object} res respuesta de Express
  */
 const generarPdfEtiquetas = ({ etiquetas, formato, opciones: op = {}, res, nombreArchivo = 'etiquetas.pdf' }) => {
-  const pagW = formato.pagina.ancho * MM;
-  const pagH = formato.pagina.alto  * MM;
-  const etW  = formato.etiqueta.ancho * MM;
-  const etH  = formato.etiqueta.alto  * MM;
-
-  // La calibración de impresora (`op.ajuste`, en mm) la aplica
-  // `layout.posicionEnHoja`: ninguna impresora imprime exactamente donde dice el
-  // PDF, y en una plancha troquelada un desvío de 2 mm arruina la hoja entera.
-  // El usuario lo mide una vez y lo deja guardado.
+  const etW = formato.etiqueta.ancho * MM;
+  const etH = formato.etiqueta.alto  * MM;
 
   const porPagina = formato.columnas * formato.filas;
   // `desde` permite reusar una plancha a medio gastar: se salta las casillas ya
@@ -149,11 +169,7 @@ const generarPdfEtiquetas = ({ etiquetas, formato, opciones: op = {}, res, nombr
   // etiquetas, no índices.
   const saltar = Math.max(0, Math.min(porPagina - 1, (Number(op.desde) || 1) - 1));
 
-  const doc = new PDFDocument({ size: [pagW, pagH], margin: 0, autoFirstPage: false, bufferPages: false });
-
-  res.setHeader('Content-Type', 'application/pdf');
-  res.setHeader('Content-Disposition', `inline; filename="${nombreArchivo}"`);
-  doc.pipe(res);
+  const { doc, nuevaPagina } = _documento(formato, op, res, nombreArchivo);
 
   let celda = saltar;
   let hayPagina = false;
@@ -164,11 +180,11 @@ const generarPdfEtiquetas = ({ etiquetas, formato, opciones: op = {}, res, nombr
     // media plancha: con `indice === 0` a secas, empezar en la casilla 4 dejaba
     // el documento sin ninguna página y pdfkit reventaba al dibujar.
     if (indice === 0 || !hayPagina) {
-      doc.addPage({ size: [pagW, pagH], margin: 0 });
+      nuevaPagina();
       hayPagina = true;
     }
 
-    const { x, y } = layout.posicionEnHoja(formato, indice, op.ajuste);
+    const { x, y } = layout.celda(formato, indice);
     _etiqueta(doc, x, y, etW, etH, item, op);
     celda += 1;
   }
@@ -176,13 +192,121 @@ const generarPdfEtiquetas = ({ etiquetas, formato, opciones: op = {}, res, nombr
   // Ninguna etiqueta seleccionada: en vez de un PDF vacío —que el navegador
   // abre en blanco y parece un error del sistema— se imprime la razón.
   if (!etiquetas.length) {
-    doc.addPage({ size: [pagW, pagH], margin: 0 });
-    doc.font(F.normal).fontSize(10).fillColor(GRIS)
+    nuevaPagina();
+    const W = formato.pagina.ancho * MM;
+    const H = formato.pagina.alto * MM;
+    doc.font(F.normal).fontSize(Math.min(10, H / 5)).fillColor(GRIS)
       .text('No hay nada que imprimir: ningún producto de los seleccionados tiene código asignado.',
-        20, 20, { width: pagW - 40, align: 'center' });
+        4, 4, { width: Math.max(10, W - 8), height: Math.max(10, H - 8), align: 'center', ellipsis: true });
   }
 
   doc.end();
 };
 
-module.exports = { generarPdfEtiquetas };
+// ─────────────────────────────────────────────────────────────────────────────
+// Hoja de prueba de alineación
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Se imprime ANTES de gastar la plancha o el rollo, en papel normal o en una
+// etiqueta. Dibuja justo lo que hace falta para calibrar a ojo y con regla:
+//
+//   · el contorno de cada etiqueta (¿cae sobre el troquel?),
+//   · su área segura, punteada (lo que quede fuera se puede cortar),
+//   · una cruz en el centro y el número de la casilla,
+//   · una regla de largo conocido: si mide distinto, la impresora está
+//     escalando, y el valor medido es lo que se escribe en «Escala»,
+//   · el borde de la página, punteado: dónde empieza y termina el papel que la
+//     impresora cree tener.
+//
+// Pasa por la MISMA transformación que las etiquetas: con la calibración
+// puesta, la prueba muestra exactamente dónde van a caer.
+
+const { largoRegla } = layout;
+
+const _regla = (doc, x, y, largoMm) => {
+  const L = largoMm * MM;
+  doc.save().lineWidth(0.4).strokeColor(NEGRO);
+  doc.moveTo(x, y).lineTo(x + L, y).stroke();
+  for (let mm = 0; mm <= largoMm; mm += 1) {
+    const t = mm % 10 === 0 ? 2.2 * MM : (mm % 5 === 0 ? 1.4 * MM : 0.7 * MM);
+    doc.moveTo(x + mm * MM, y).lineTo(x + mm * MM, y - t).stroke();
+  }
+  doc.restore();
+};
+
+const _pruebaCelda = (doc, x, y, wPt, hPt, numero, formato, op, conRegla) => {
+  const plano = { pad: layout.planear(wPt, hPt, { codigo: '0', nombre: '' }, { ...op, simbologia: 'barras' }).pad };
+  doc.save();
+  doc.translate(x, y);
+
+  // Contorno exacto de la etiqueta.
+  doc.lineWidth(0.6).strokeColor(NEGRO).rect(0, 0, wPt, hPt).stroke();
+
+  // Área segura (margen interior).
+  const p = plano.pad;
+  if (p > 0.5) {
+    doc.lineWidth(0.4).strokeColor(GRIS).dash(1.5, { space: 1.5 })
+      .rect(p, p, wPt - 2 * p, hPt - 2 * p).stroke().undash();
+  }
+
+  // Cruz central.
+  const cx = wPt / 2;
+  const cy = hPt / 2;
+  const brazo = Math.min(wPt, hPt) * 0.12;
+  doc.lineWidth(0.5).strokeColor(NEGRO)
+    .moveTo(cx - brazo, cy).lineTo(cx + brazo, cy).stroke()
+    .moveTo(cx, cy - brazo).lineTo(cx, cy + brazo).stroke();
+
+  const tam = Math.max(4, Math.min(8, hPt / 7));
+  doc.font(F.bold).fontSize(tam).fillColor(NEGRO)
+    .text(`#${numero}`, p + 1, p + 1, { width: wPt / 2, height: tam * 1.3, lineBreak: false });
+
+  // La primera casilla lleva la regla y su rótulo en el lugar de la medida: las
+  // dos cosas juntas no caben en una etiqueta de 25 mm de alto, y la medida ya
+  // está en todas las demás casillas.
+  const L = conRegla ? largoRegla(formato.etiqueta.ancho) : null;
+  if (L) {
+    const xr = (wPt - L * MM) / 2;
+    const yr = cy + Math.min(hPt * 0.28, 6 * MM);
+    _regla(doc, xr, yr, L);
+    doc.font(F.normal).fontSize(tam * 0.85).fillColor(NEGRO)
+      .text(`${L} mm`, xr, yr + 0.8, { width: L * MM, height: tam * 1.2, align: 'center', lineBreak: false });
+  } else {
+    doc.font(F.normal).fontSize(tam * 0.85).fillColor(NEGRO)
+      .text(`${String(formato.etiqueta.ancho).replace('.', ',')} × ${String(formato.etiqueta.alto).replace('.', ',')} mm`,
+        p + 1, hPt - p - tam * 1.2, { width: wPt - 2 * p - 2, height: tam * 1.2, align: 'right', lineBreak: false });
+  }
+  doc.restore();
+};
+
+/**
+ * La hoja de prueba. Una página para las planchas; dos para los rollos, porque
+ * en un rollo lo que hay que ver es cómo avanza de una fila a la siguiente.
+ */
+const generarPdfPrueba = ({ formato, opciones: op = {}, res, nombreArchivo = 'prueba-alineacion.pdf' }) => {
+  const etW = formato.etiqueta.ancho * MM;
+  const etH = formato.etiqueta.alto  * MM;
+  const W = formato.pagina.ancho * MM;
+  const H = formato.pagina.alto  * MM;
+  const porPagina = formato.columnas * formato.filas;
+  const paginas = formato.medio === 'rollo' ? 2 : 1;
+
+  const { doc, nuevaPagina } = _documento(formato, op, res, nombreArchivo);
+
+  let numero = 1;
+  for (let pag = 0; pag < paginas; pag += 1) {
+    nuevaPagina();
+    // Borde de la página: dónde cree la impresora que empieza y termina el papel.
+    doc.save().lineWidth(0.4).strokeColor(GRIS).dash(3, { space: 2 })
+      .rect(0.3, 0.3, W - 0.6, H - 0.6).stroke().undash().restore();
+
+    for (let i = 0; i < porPagina; i += 1) {
+      const { x, y } = layout.celda(formato, i);
+      _pruebaCelda(doc, x, y, etW, etH, numero, formato, op, pag === 0 && i === 0);
+      numero += 1;
+    }
+  }
+  doc.end();
+};
+
+module.exports = { generarPdfEtiquetas, generarPdfPrueba, largoRegla };

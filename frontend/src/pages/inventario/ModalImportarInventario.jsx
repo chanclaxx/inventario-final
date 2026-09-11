@@ -156,7 +156,11 @@ function Creaciones({ informe }) {
   // confirmar, como los proveedores y las líneas — un estante mal escrito es
   // igual de fácil de corregir en el Excel y igual de molesto de deshacer.
   const ubis   = informe?.ubicaciones_nuevas || [];
-  if (!prov.length && !lineas.length && !ubis.length) return null;
+  // Con el código automático, lo que NACE en la importación recibe su código
+  // (o el que ya tenga el mismo producto en otra sede). No es un aviso —no hay
+  // nada que corregir en el Excel—, pero conviene saberlo antes de confirmar.
+  const codigos = Number(informe?.codigos_automaticos) || 0;
+  if (!prov.length && !lineas.length && !ubis.length && !codigos) return null;
 
   return (
     <div className="border border-blue-100 bg-blue-50 rounded-xl px-3 py-2.5 flex gap-2">
@@ -171,7 +175,15 @@ function Creaciones({ informe }) {
         {ubis.length > 0 && (
           <p><strong>Se crearán {ubis.length} ubicación(es):</strong> {ubis.join(', ')}</p>
         )}
-        <p className="text-blue-500">Si alguno es un error de escritura, corrígelo en el Excel antes de confirmar.</p>
+        {codigos > 0 && (
+          <p>
+            <strong>{codigos} producto(s) o variante(s) nuevos recibirán su código</strong> automáticamente
+            (los que en el Excel vienen sin código).
+          </p>
+        )}
+        {(prov.length > 0 || lineas.length > 0 || ubis.length > 0) && (
+          <p className="text-blue-500">Si alguno es un error de escritura, corrígelo en el Excel antes de confirmar.</p>
+        )}
       </div>
     </div>
   );

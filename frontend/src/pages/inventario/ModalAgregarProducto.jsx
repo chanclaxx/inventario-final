@@ -56,6 +56,15 @@ function parsearCaracteristicasConfig(configData) {
   }
 }
 
+// Con el código automático encendido, dejar el campo vacío es la forma normal
+// de crear: el backend le asigna el siguiente del negocio (o el que ya tenga el
+// mismo producto en otra sede). Lo escrito o escaneado a mano siempre manda.
+function placeholderCodigo(codigoAuto) {
+  return codigoAuto
+    ? 'Código de barras (opcional: vacío = se genera solo)'
+    : 'Código único / de barras (opcional, puedes escanearlo)';
+}
+
 function extraerCaracteristicas(item) {
   if (typeof item === 'string') return {};
   return (item.caracteristicas && typeof item.caracteristicas === 'object')
@@ -730,7 +739,7 @@ function FilaImei({ index, item, coloresActivo, coloresConfig, caracteristicasAc
 }
 
 // ─── Paso Compra a Cliente ─────────────────────────────────────────────────────
-function PasoCompraCliente({ sucursalKey, sucursalLista, onExito, onDuplicadosEncontrados, coloresActivo, coloresConfig, caracteristicasActivo, caracteristicasLista, codigoActivo, ubicacionActiva }) {
+function PasoCompraCliente({ sucursalKey, sucursalLista, onExito, onDuplicadosEncontrados, coloresActivo, coloresConfig, caracteristicasActivo, caracteristicasLista, codigoActivo, codigoAuto, ubicacionActiva }) {
   const queryClient        = useQueryClient();
   const puedeVerCosto      = usePuedeVerCostos();
 
@@ -1104,7 +1113,7 @@ function PasoCompraCliente({ sucursalKey, sucursalLista, onExito, onDuplicadosEn
                   <p className="text-xs font-semibold text-emerald-700">Nuevo producto</p>
                   <Input placeholder="Nombre del producto" value={nuevoProducto.nombre} onChange={(e) => setNuevoProducto({ ...nuevoProducto, nombre: e.target.value })} />
                   {codigoActivo && (
-                    <Input placeholder="Código único / de barras (opcional, puedes escanearlo)" value={nuevoProducto.codigo} onChange={(e) => setNuevoProducto({ ...nuevoProducto, codigo: e.target.value })} />
+                    <Input placeholder={placeholderCodigo(codigoAuto)} value={nuevoProducto.codigo} onChange={(e) => setNuevoProducto({ ...nuevoProducto, codigo: e.target.value })} />
                   )}
                   {ubicacionActiva && (
                     <InputUbicacion
@@ -1665,7 +1674,7 @@ function MiniSelectorVariante({ arbolData, nodoSel, onSeleccionar }) {
 }
 
 // ─── Paso Cantidad (proveedor) ─────────────────────────────────────────────────
-function PasoCantidad({ sucursalKey, onExito, variantesActivo, codigoActivo, ubicacionActiva }) {
+function PasoCantidad({ sucursalKey, onExito, variantesActivo, codigoActivo, codigoAuto, ubicacionActiva }) {
   const queryClient   = useQueryClient();
   const puedeVerCosto = usePuedeVerCostos();
 
@@ -1904,7 +1913,7 @@ function PasoCantidad({ sucursalKey, onExito, variantesActivo, codigoActivo, ubi
               <p className="text-xs font-semibold text-green-700">Nuevo producto</p>
               <Input placeholder="Nombre del producto" value={nuevoProducto.nombre} onChange={(e) => setNuevoProducto({ ...nuevoProducto, nombre: e.target.value })} />
               {codigoActivo && (
-                <Input placeholder="Código único / de barras (opcional, puedes escanearlo)" value={nuevoProducto.codigo} onChange={(e) => setNuevoProducto({ ...nuevoProducto, codigo: e.target.value })} />
+                <Input placeholder={placeholderCodigo(codigoAuto)} value={nuevoProducto.codigo} onChange={(e) => setNuevoProducto({ ...nuevoProducto, codigo: e.target.value })} />
               )}
               {ubicacionActiva && (
                 <InputUbicacion
@@ -2401,9 +2410,10 @@ export function ModalAgregarProducto({ onClose }) {
   const caracteristicasLista  = parsearCaracteristicasConfig(configData);
   const variantesActivo       = configData?.variantes_activo === '1';
   const codigoActivo          = configData?.codigo_producto_activo === '1';
+  const codigoAuto            = codigoActivo && configData?.codigo_auto !== '0';
   const ubicacionActiva       = configData?.ubicacion_activa       === '1';
 
-  const handleDuplicadosEncontrados = ({ disponibles, paraReactivar, prestados = [] }, confirmarFn) => {
+  const handleDuplicadosEncontrados =({ disponibles, paraReactivar, prestados = [] }, confirmarFn) => {
     confirmarReactivarRef.current = confirmarFn;
     // Prestados bloquean todo el ingreso: deben devolverse desde Préstamos
     if (prestados.length > 0) { setSerialesPrestados(prestados); setModalPrestados(true); return; }
@@ -2458,6 +2468,7 @@ export function ModalAgregarProducto({ onClose }) {
             sucursalLista={sucursalLista}
             variantesActivo={variantesActivo}
             codigoActivo={codigoActivo}
+            codigoAuto={codigoAuto}
             ubicacionActiva={ubicacionActiva}
             onExito={() => setExito(true)}
           />
@@ -2473,6 +2484,7 @@ export function ModalAgregarProducto({ onClose }) {
             caracteristicasActivo={caracteristicasActivo}
             caracteristicasLista={caracteristicasLista}
             codigoActivo={codigoActivo}
+            codigoAuto={codigoAuto}
             ubicacionActiva={ubicacionActiva}
           />
         )}

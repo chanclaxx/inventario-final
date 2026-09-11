@@ -645,6 +645,13 @@ function ColoresSerialConfig({ valores, set }) {
 // ─── Código único de producto (tipo supermercado) ────────────────────────────
 function CodigoProductoConfig({ valores, set }) {
   const activo = valores['codigo_producto_activo'] === '1';
+  // Ausente = encendido: solo cuenta cuando el código único ya se activó a mano
+  // (el backend lo lee igual, `utils/codigoAuto.util.configCodigoAuto`).
+  const autoActivo = valores['codigo_auto'] !== '0';
+  const prefijo = valores['codigo_auto_prefijo'] ?? '';
+  const digitosRaw = valores['codigo_auto_digitos'];
+  const digitos = digitosRaw === undefined || digitosRaw === '' ? '6' : String(digitosRaw);
+  const ejemplo = `${prefijo}${String(1).padStart(Number(digitos) || 6, '0')}`;
 
   return (
     <div className="flex flex-col gap-4">
@@ -665,11 +672,52 @@ function CodigoProductoConfig({ valores, set }) {
       />
 
       {activo && (
+        <div className="flex flex-col gap-3 pl-3 border-l-2 border-blue-100">
+          <Toggle
+            label="Generar el código automáticamente"
+            description="Cada producto nuevo nace con su código. Si tiene variantes, cada talla o color nace con el suyo."
+            enabled={autoActivo}
+            onChange={(val) => set('codigo_auto', val ? '1' : '0')}
+          />
+          {autoActivo && (
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="flex flex-col gap-1 w-28">
+                <label className="text-xs font-medium text-gray-600">Prefijo (opcional)</label>
+                <input
+                  type="text" value={prefijo} maxLength={8} placeholder="Ej: AC"
+                  onChange={(e) => set('codigo_auto_prefijo', e.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, ''))}
+                  className="w-full px-3 py-2 bg-gray-100 border-0 rounded-xl text-sm text-gray-900
+                    placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white"
+                />
+              </div>
+              <div className="flex flex-col gap-1 w-24">
+                <label className="text-xs font-medium text-gray-600">Dígitos</label>
+                <input
+                  type="number" min={4} max={10} value={digitos}
+                  onChange={(e) => set('codigo_auto_digitos', e.target.value)}
+                  className="w-full px-3 py-2 bg-gray-100 border-0 rounded-xl text-sm text-gray-900
+                    focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white"
+                />
+              </div>
+              <p className="text-xs text-gray-500 pb-2">
+                Se ven así: <span className="font-mono text-gray-700">{ejemplo}</span>, <span className="font-mono text-gray-700">{`${prefijo}${String(2).padStart(Number(digitos) || 6, '0')}`}</span>…
+              </p>
+            </div>
+          )}
+          <p className="text-[11px] text-gray-400 leading-snug">
+            Siguen la numeración que ya tengas (si tu código más alto es 000120, el siguiente es 000121). Un código
+            escrito o escaneado a mano siempre manda, y nunca se cambia uno que ya existe. Sin prefijo el código de
+            barras sale más angosto y más fácil de leer.
+          </p>
+        </div>
+      )}
+
+      {activo && (
         <div className="bg-blue-50 rounded-xl p-4 flex flex-col gap-1.5">
           <p className="text-xs font-medium text-blue-800">Cómo funciona</p>
           <p className="text-xs text-blue-700">
             • Usa el código de barras impreso del producto (escanéalo en el campo Código al crearlo)
-            o inventa un código interno corto para productos sin código de fábrica.
+            o deja que el sistema le asigne uno interno y luego imprime su etiqueta.
           </p>
           <p className="text-xs text-blue-700">
             • Un código apunta a un solo producto en todo el negocio; si el producto existe

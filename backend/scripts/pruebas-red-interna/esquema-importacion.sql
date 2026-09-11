@@ -25,6 +25,13 @@ CREATE TABLE sucursales (id SERIAL PRIMARY KEY, negocio_id INT REFERENCES negoci
 CREATE TABLE config_negocio (negocio_id INT, clave TEXT, valor TEXT,
                              PRIMARY KEY (negocio_id, clave));
 
+-- El contador del código automático (`codigo_auto`). Sin esta tabla la pasada
+-- final del importador falla —en silencio, porque es tolerante— y la suite
+-- pasaba sin haber asignado un solo código: la prueba no probaba nada.
+CREATE TABLE contadores_documento (
+  negocio_id INT, tipo TEXT, ultimo_numero INT, PRIMARY KEY (negocio_id, tipo)
+);
+
 -- Columnas copiadas de information_schema en producción (2026-08-06): los
 -- repositorios de líneas y proveedores piden `creado_en`, y sin ella la
 -- generación de la plantilla revienta con "column does not exist".

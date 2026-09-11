@@ -16,6 +16,10 @@ const getFormatos = (req, res) => {
   res.json({ ok: true, data: service.listarFormatos() });
 };
 
+const getCatalogo = (req, res) => {
+  res.json({ ok: true, data: service.catalogo() });
+};
+
 const getNodos = async (req, res, next) => {
   try {
     if (!_exigirSucursal(req, res)) return;
@@ -56,4 +60,4 @@ const postGenerarCodigos = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-module.exports = { getFormatos, getNodos, postPlan, postPdf, postGenerarCodigos };
+module.exports = { getFormatos, getCatalogo, getNodos, postPlan, postPdf, postGenerarCodigos };

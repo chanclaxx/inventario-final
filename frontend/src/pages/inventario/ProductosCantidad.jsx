@@ -263,6 +263,7 @@ export function ProductosCantidad() {
   const variantesActivo         = configData?.variantes_activo === '1';
   const ajusteStockSinVariantes = configData?.ajuste_stock_sin_variantes !== '0';
   const codigoActivo            = configData?.codigo_producto_activo === '1';
+  const codigoAuto              = codigoActivo && configData?.codigo_auto !== '0';
   // Solo decide si el panel de procedencia muestra el chip de garantía: el
   // listado de compras del producto sale igual con la feature apagada.
   const garantiaActiva          = configData?.garantia_proveedor_activa === '1';
@@ -379,6 +380,7 @@ export function ProductosCantidad() {
         onClose={() => setProductoArbol(null)}
         ajusteStockSinVariantes={ajusteStockSinVariantes}
         codigoActivo={codigoActivo}
+        codigoAuto={codigoAuto}
       />
     );
   }

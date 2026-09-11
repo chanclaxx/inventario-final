@@ -16,16 +16,28 @@ import api from './axios.config';
 export const getFormatosEtiqueta = () => api.get('/etiquetas/formatos');
 
 /**
+ * Formatos + papeles + topes del editor a medida. Si el backend todavía no lo
+ * tiene (Vercel y Railway se despliegan por separado), quien lo llama cae a
+ * `getFormatosEtiqueta`, que siempre existió.
+ */
+export const getCatalogoEtiquetas = () => api.get('/etiquetas/catalogo');
+
+/**
  * Nodos etiquetables de la sucursal activa (el nodo HOJA: la variante si la hay).
  * @param {object} params { q, linea_id, ubicacion, con_stock: '1', codigo: 'con'|'sin' }
  */
 export const getNodosEtiqueta = (params = {}) => api.get('/etiquetas/nodos', { params });
 
-/** Cuántas etiquetas, cuántas hojas y qué puede salir mal. No genera el PDF. */
+/**
+ * Cuántas etiquetas, cuántas hojas, cómo es la retícula y qué puede salir mal.
+ * No genera el PDF. Responde también sin selección: el editor de formato
+ * necesita la geometría antes de marcar productos.
+ */
 export const planEtiquetas = (body) => api.post('/etiquetas/plan', body);
 
 /**
- * El PDF. `limite` recorta a una página para la previa.
+ * El PDF. `limite` recorta a una página para la previa; `prueba: true` saca la
+ * hoja de alineación (sin productos) con el mismo formato y la misma calibración.
  *
  * Timeout propio: 3.000 etiquetas son varios miles de símbolos vectoriales y el
  * tope global de 30 s las corta a media generación — que es como se ve un

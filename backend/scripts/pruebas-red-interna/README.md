@@ -304,7 +304,7 @@ compras) y aplica `migrations/20260805_pago_total_acreedor.sql` y
 > una compra borra sus abonos, y un total guardado quedaría inflado contra un
 > saldo que ya bajó. Derivarlo con `SUM` lo hace imposible por construcción.
 
-### `18-importacion.mjs` — 231 verificaciones
+### `18-importacion.mjs` — 244 verificaciones
 
 Importación de inventario desde Excel, probada **como la usa una persona**: se
 generan bytes `.xlsx` de verdad y se entregan al controller real con un req/res
@@ -339,6 +339,13 @@ permisivo dejaría pasar justo lo que se quiere cazar.
 | 16b | Característica que se llama igual que una columna fija (`Color`) |
 | 17 | **Un negocio, tres sucursales**: aritmética de stock exacta |
 | 17b | **Mismo nombre en dos sedes con stock distinto** — cantidad Y serial |
+| 18 | La columna Ubicacion crea el sitio y asigna el producto |
+| 19 | **Código automático**: lo que NACE en la importación nace con código; el preview lo anuncia sin gastar números; la otra sede hereda |
+
+> `esquema-importacion.sql` trae desde sep-2026 `contadores_documento`. Sin ella
+> la pasada del código automático fallaba **en silencio** (es tolerante: una
+> importación no se cae por un código) y la suite seguía en verde sin haber
+> asignado un solo código — una prueba que no puede fallar no prueba nada.
 
 > El punto 14 es el que sostiene todo lo demás: el preview no es un validador
 > paralelo (esos se desincronizan y acaban mintiendo), es el importador de
@@ -582,7 +589,7 @@ puede pasar es que el ABONO la mueva por su cuenta.
 > producción. Ya están corregidas en `esquema-completo.sql`.
 
 
-### `35-etiquetas.mjs` — 70 verificaciones
+### `35-etiquetas.mjs` — 135 verificaciones
 
 Etiquetas imprimibles (código de barras y QR) de los productos por cantidad.
 
@@ -602,15 +609,56 @@ del módulo** (sección 5: por debajo de 0,25 mm el lector empieza a fallar de
 forma intermitente, que es peor que fallar siempre).
 
 La sección 6 sostiene la regla de diseño: cuando no cabe todo se sacrifica el
-TEXTO y jamás el símbolo, y el código legible no se cae nunca. La 10 genera los
-22 PDF de verdad (11 formatos × 2 simbologías); ahí se cazó que empezar en media
-plancha (`desde > 1`) dejaba el documento sin ninguna página.
+TEXTO y jamás el símbolo, y el código legible no se cae nunca (y el encabezado
+cae antes que el precio: en la tira de 32 × 25 el precio sobrevive). La 10 genera
+los PDF de verdad de los 20 formatos × 2 simbologías; ahí se cazó que empezar en
+media plancha (`desde > 1`) dejaba el documento sin ninguna página.
 
-Las secciones **11 y 12 corren contra Postgres** (PGlite) porque el SQL solo
+Las secciones **11, 12 y 20 corren contra Postgres** (PGlite) porque el SQL solo
 falla al ejecutarse: la regla del nodo HOJA, la herencia de precio, el
-aislamiento entre negocios, y la asignación masiva de códigos —que no puede
+aislamiento entre negocios, la asignación masiva de códigos —que no puede
 pisar uno existente, tiene que heredar de la otra sede en vez de inventar, y
-tiene que propagar—. Se omiten solas, con un aviso, si PGlite no está instalado.
+tiene que propagar—, y el plan de la pantalla (geometría sin selección, avisos
+de rollo ancho y de calibración, la hoja de prueba por el endpoint y que una
+petición vieja siga funcionando). Se omiten solas, con un aviso, si PGlite no
+está instalado.
+
+Las secciones **13-19** son del rediseño de sep-2026 («cualquier papel en
+cualquier impresora»):
+
+| # | Qué sostiene |
+|---|---|
+| 13 | Rollo de **varias columnas**: la página es UNA FILA; centrado sobre el rollo; «no caben» con las medidas; papel continuo y varias filas por página |
+| 14 | Hojas a medida: cualquier papel, márgenes centrados = las referencias de papelería |
+| 15 | **Giro, escala y desvío medidos sobre el PDF de verdad** (instrumentando pdfkit): en los 4 giros ninguna barra cae fuera de la página física, y una A4 girada no abre páginas de más |
+| 16 | Resolución: el módulo cae en **puntos enteros** del cabezal, y el símbolo se sigue leyendo |
+| 17 | La zona muda ocupa el margen interior (módulo más grande), con **techo** de 0,6 mm |
+| 18 | Diseño: letra, renglones, alineación, alto del símbolo, pie (lo primero que se suelta), margen interior |
+| 19 | La hoja de prueba: una página por plancha y dos por rollo, con el contorno EXACTO de cada etiqueta |
+
+> Ojo al medir en la 15: el `_ctm` de pdfkit incluye el volteo de la página
+> (espacio nativo del PDF, origen ABAJO). La prueba lo convierte a «desde
+> arriba»; sin eso, un giro correcto parece invertido.
+
+### `44-codigo-automatico.mjs` — 52 verificaciones
+
+Todo nodo nace con su código (`utils/codigoAuto.util.js`): el producto sin
+variantes con el suyo y cada talla con el propio. Un solo motor para crear
+producto, crear atributo/variante, la generación masiva y la recepción de la red
+interna (que solo COPIA el código de la bodega); el importador tiene su sección
+en la 18.
+
+**La sección 1 es la que hay que mirar primero**: con el código único apagado,
+o con `codigo_auto = '0'`, nada cambia — ni un número gastado. La 4 y la 6
+comprueban que heredar no gasta números; la 7 y la 8, que si el código heredado
+está ocupado en la sede NO se inventa otro (partiría la identidad del producto)
+y que la otra sede conserva el suyo — la generación masiva vieja lo pisaba. La 10
+corre una recepción real de la red interna: la talla que nace en el local lleva
+el código de la bodega, y si allá está ocupado nace sin código **sin que la
+recepción se caiga**. La 11 renombra el contador para que falle: el producto se
+crea igual. La 12 recorre todos los códigos: ninguno en dos nodos de la misma
+sede, en los tres niveles. Monta los índices únicos REALES de producción (el
+fixture solo traía el del producto).
 
 
 ### `36-ubicaciones.mjs` — 173 verificaciones
