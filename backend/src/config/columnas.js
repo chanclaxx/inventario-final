@@ -46,6 +46,7 @@ const detectarColumnas = async () => {
   await _detectarPedidosInternos();
   await _detectarCorreccionesEntrada();
   await _detectarRetomaReingreso();
+  await _detectarListasPrecios();
   return _ubicacionDisponible;
 };
 
@@ -311,6 +312,51 @@ const _detectarRetomaReingreso = async () => {
 
 const hayRetomaReingreso = () => _retomaReingresoDisponible;
 
+// ── Listas de precios ────────────────────────────────────────────────────────
+//
+// Ver migrations/20260912_listas_precios.sql. Mismo criterio que `ubicacion`,
+// y por el mismo motivo: la columna vive en `productos_cantidad`, que es la
+// tabla de la pantalla más usada del sistema. Si el ALTER no llegara a
+// aplicarse y los repositorios ya pidieran `pc.precios`, no se caería una
+// pantalla nueva — se caería EL INVENTARIO COMPLETO, para los 28 negocios,
+// incluidos los que jamás activaron esto.
+//
+// Se exigen las CUATRO: con el producto y sin el atributo, un catálogo por
+// variantes tendría precios en el nivel de arriba y ninguno en la talla, que es
+// donde de verdad se vende. Media feature es peor que ninguna.
+
+const TABLAS_LISTAS_PRECIOS = [
+  'productos_cantidad', 'atributos_producto', 'variantes_atributo', 'productos_serial',
+];
+
+let _listasPreciosDisponible = false;
+
+const _detectarListasPrecios = async () => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT table_name
+       FROM information_schema.columns
+       WHERE table_schema = 'public'
+         AND column_name  = 'precios'
+         AND table_name   = ANY($1::text[])`,
+      [TABLAS_LISTAS_PRECIOS]
+    );
+    const encontradas = new Set(rows.map((r) => r.table_name));
+    _listasPreciosDisponible = TABLAS_LISTAS_PRECIOS.every((t) => encontradas.has(t));
+
+    if (!_listasPreciosDisponible) {
+      console.warn('⚠️  Columna `precios` ausente: las listas de precios quedan desactivadas (el inventario sigue igual).');
+    }
+  } catch (err) {
+    // Ante la duda, apagada: es la opción que no puede romper nada.
+    _listasPreciosDisponible = false;
+    console.error('⚠️  No se pudo verificar `precios` (listas de precios desactivadas):', err.message);
+  }
+  return _listasPreciosDisponible;
+};
+
+const hayListasPrecios = () => _listasPreciosDisponible;
+
 // Solo para pruebas: permite simular una BD sin la columna sin tocar la BD real.
 const _setUbicacionDisponible  = (valor) => { _ubicacionDisponible  = !!valor; };
 const _setCatalogoDisponible   = (valor) => { _catalogoDisponible   = !!valor; };
@@ -319,6 +365,7 @@ const _setMovimientosUbicacionDisponible = (valor) => { _movimientosUbicacionDis
 const _setPedidosInternosDisponible = (valor) => { _pedidosInternosDisponible = !!valor; };
 const _setCorreccionesEntradaDisponible = (valor) => { _correccionesEntradaDisponible = !!valor; };
 const _setRetomaReingresoDisponible = (valor) => { _retomaReingresoDisponible = !!valor; };
+const _setListasPreciosDisponible = (valor) => { _listasPreciosDisponible = !!valor; };
 
 module.exports = {
   detectarColumnas, hayUbicacion, _setUbicacionDisponible,
@@ -328,4 +375,5 @@ module.exports = {
   hayPedidosInternos, _setPedidosInternosDisponible,
   hayCorreccionesEntrada, _setCorreccionesEntradaDisponible,
   hayRetomaReingreso, _setRetomaReingresoDisponible,
+  hayListasPrecios, _setListasPreciosDisponible,
 };

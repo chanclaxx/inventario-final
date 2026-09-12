@@ -1,5 +1,30 @@
 const { pool } = require('../../config/db');
 const costoRed = require('../../utils/costoRed.util');
+const { hayListasPrecios } = require('../../config/columnas');
+
+// ── Listas de precios en el escaneo (feature opt-in) ─────────────────────────
+//
+// El escáner mete el nodo DERECHO al carrito, así que aquí no hay un árbol
+// donde resolver la herencia después: la resuelve el SQL, como ya hace con
+// `precio` y `costo_unitario`.
+//
+// Pero no con COALESCE sino con el CONCATENADO de jsonb (`||`), y la diferencia
+// importa: COALESCE elige UN objeto entero, así que una talla con su propio
+// precio mayorista tiraría a la basura los otros dos precios que el producto sí
+// tenía. `||` mezcla CLAVE POR CLAVE y gana la derecha — o sea el nivel más
+// específico—, que es justo la regla: el producto pone los precios generales y
+// la talla sobrescribe los suyos.
+//
+// Se interpola solo si la columna existe. Ojo con el UNION: los tipos salen de
+// la PRIMERA rama, así que las tres tienen que traer la columna o ninguna.
+// No es entrada de usuario: es un literal SQL fijo.
+const HERENCIA_PRECIOS = {
+  producto: `pc.precios AS precios,`,
+  atributo: `COALESCE(pc.precios, '{}'::jsonb) || COALESCE(ap.precios, '{}'::jsonb) AS precios,`,
+  variante: `COALESCE(pc.precios, '{}'::jsonb) || COALESCE(ap.precios, '{}'::jsonb)
+               || COALESCE(v.precios, '{}'::jsonb) AS precios,`,
+};
+const selPreciosNodo = (nivel) => (hayListasPrecios() ? HERENCIA_PRECIOS[nivel] : '');
 
 // ─── Normalización de texto para búsquedas ────────────────────────────────────
 
@@ -244,6 +269,7 @@ const buscarCantidadPorCodigo = async (codigo, negocioId, sucursalId) => {
         pc.id, pc.nombre, pc.stock, pc.stock_minimo,
         pc.precio, pc.costo_unitario,
         pc.unidad_medida, pc.codigo, pc.linea_id,
+        ${selPreciosNodo('producto')}
         NULL::int  AS atributo_id, NULL::text AS atributo_valor,
         NULL::int  AS variante_id, NULL::text AS variante_valor,
         su.id AS sucursal_id, su.nombre AS sucursal_nombre
@@ -261,6 +287,7 @@ const buscarCantidadPorCodigo = async (codigo, negocioId, sucursalId) => {
         pc.id, pc.nombre, ap.stock, ap.stock_minimo,
         COALESCE(ap.precio, pc.precio), COALESCE(ap.costo_unitario, pc.costo_unitario),
         pc.unidad_medida, ap.codigo, pc.linea_id,
+        ${selPreciosNodo('atributo')}
         ap.id, COALESCE(tc.nombre || ': ', '') || ap.valor,
         NULL::int, NULL::text,
         su.id, su.nombre
@@ -281,6 +308,7 @@ const buscarCantidadPorCodigo = async (codigo, negocioId, sucursalId) => {
         COALESCE(v.precio, ap.precio, pc.precio),
         COALESCE(v.costo_unitario, ap.costo_unitario, pc.costo_unitario),
         pc.unidad_medida, v.codigo, pc.linea_id,
+        ${selPreciosNodo('variante')}
         ap.id, COALESCE(tca.nombre || ': ', '') || ap.valor,
         v.id, COALESCE(tcv.nombre || ': ', '') || v.valor,
         su.id, su.nombre
@@ -322,6 +350,7 @@ const buscarSerialPorCodigoExacto = async (codigo, negocioId, sucursalId) => {
       ps.id          AS producto_id,
       ps.nombre      AS producto_nombre,
       ps.marca, ps.modelo, ps.linea_id,
+      ${hayListasPrecios() ? 'ps.precios,' : ''}
       ps.precio      AS precio_producto,
       su.id          AS sucursal_id,
       su.nombre      AS sucursal_nombre,

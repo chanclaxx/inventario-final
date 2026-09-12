@@ -187,6 +187,38 @@ const requirePermisoVerCompras = (req, res, next) => {
   return res.status(403).json({ ok: false, error: 'No tienes permiso para ver el historial de compras' });
 };
 
+/**
+ * Editar los PRECIOS DE LISTA de un producto.
+ *
+ * Por defecto: solo `admin_negocio`. Es lo que pidió el negocio y es lo que
+ * corresponde — una lista de precios es la política comercial de la empresa,
+ * no un dato del producto: cambiar "Al por mayor" mueve el margen de todas las
+ * ventas mayoristas de todos los locales a la vez.
+ *
+ * NO se cuelga de `permisos_edicion_productos.campos` aunque ahí ya exista una
+ * casilla «Precio», y esa es la decisión importante: esa casilla la traen
+ * ENCENDIDA por defecto todos los usuarios con edición de inventario, así que
+ * colgarla de ahí le habría dado los precios de lista, el día del despliegue y
+ * sin que nadie lo pidiera, a todos los supervisores del sistema.
+ *
+ * Por eso la llave es NUEVA y explícita, y su ausencia significa "no puede".
+ * Eso no contradice la regla de que `null` = permisos base del rol: esa regla
+ * protege lo que el rol YA podía hacer antes de que existiera la columna, y
+ * aquí el permiso nace con la feature — nadie pierde nada, porque nadie lo
+ * tiene. Lo que sí se respeta es no mirar la columna entera con un `=== true`:
+ * se mira ESTA clave, y un usuario sin `permisos_edicion_productos` conserva
+ * intacto todo lo demás.
+ */
+const requirePermisoPreciosLista = (req, res, next) => {
+  if (!req.user) return res.status(401).json({ ok: false, error: 'No autenticado' });
+  if (req.user.rol === 'admin_negocio') return next();
+  if (req.user.permisos_edicion_productos?.puede_editar_precios_lista === true) return next();
+  return res.status(403).json({
+    ok: false,
+    error: 'No tienes permiso para cambiar las listas de precios. Pídeselo a un administrador.',
+  });
+};
+
 const requirePermisoExportarInventario = (req, res, next) => {
   if (!req.user) return res.status(401).json({ ok: false, error: 'No autenticado' });
   if (req.user.rol === 'admin_negocio') return next();
@@ -201,4 +233,4 @@ const requirePermisoExportarNegocio = (req, res, next) => {
   return res.status(403).json({ ok: false, error: 'Sin permiso para exportar el inventario global' });
 };
 
-module.exports = { requireRole, requireNivel, requireSucursal, assertBelongsToNegocio, requirePermisoProveedores, requirePermisoFacturas, requirePermisoVerCompras, requirePermisoExportarInventario, requirePermisoExportarNegocio };
+module.exports = { requireRole, requireNivel, requireSucursal, assertBelongsToNegocio, requirePermisoProveedores, requirePermisoFacturas, requirePermisoVerCompras, requirePermisoExportarInventario, requirePermisoExportarNegocio, requirePermisoPreciosLista };

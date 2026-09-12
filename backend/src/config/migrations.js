@@ -1587,6 +1587,29 @@ const aplicarMigraciones = async (client) => {
     console.error('⚠️  Borradores no aplicados (el resto del sistema sigue normal):', err.message);
   }
 
+  // Listas de precios — N precios de venta por nodo y el vendedor elige cual
+  // ver migrations/20260912_listas_precios.sql (ese archivo lleva el diseño
+  // completo; esto es la copia que corre de verdad en producción).
+  //
+  // Cuatro columnas JSONB, una por nivel del árbol de precios. Va en el NODO
+  // porque ahí ya vive `precio` y ahí ya está resuelto el alcance por sucursal:
+  // cada sede tiene su fila, así que "cada local tiene sus propios precios"
+  // sale gratis y no hay una sola pregunta nueva que hacerle al usuario.
+  //
+  // Bloque PROPIO: si esto fallara, el inventario tiene que seguir funcionando
+  // exactamente igual. La bandera `hayListasPrecios()` de src/config/columnas.js
+  // es la que decide si las consultas piden la columna.
+  //
+  // Sin backticks ni interpolaciones dentro del template literal.
+  await migrar(client, 'Listas de precios', `
+    ALTER TABLE IF EXISTS productos_cantidad ADD COLUMN IF NOT EXISTS precios JSONB;
+    ALTER TABLE IF EXISTS atributos_producto ADD COLUMN IF NOT EXISTS precios JSONB;
+    ALTER TABLE IF EXISTS variantes_atributo ADD COLUMN IF NOT EXISTS precios JSONB;
+    -- En la REFERENCIA, no en la unidad: un IMEI ya tiene su precio propio y
+    -- "a cuánto vendo este modelo según el cliente" es pregunta del modelo.
+    ALTER TABLE IF EXISTS productos_serial   ADD COLUMN IF NOT EXISTS precios JSONB;
+  `);
+
   // Aplicadas manualmente en producción:
   // - lineas_traslado: revertida_por_usuario_id, fecha_reversion
   // - traslados: revertido_por_usuario_id, fecha_reversion

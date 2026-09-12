@@ -25,6 +25,9 @@ import { ListaBorradores }      from './ListaBorradores';
 import { useBorradores }        from '../../hooks/useBorradores';
 import { unidadesLibres }       from '../../utils/reservas';
 import { filtrarCarrito, MINIMO_PARA_BUSCAR } from '../../utils/carritoBusqueda';
+import { useListasPrecios } from '../../hooks/useListasPrecios';
+import { SelectorListaPrecio, ListaPrecioItem } from '../../components/ui/SelectorListaPrecio';
+import { contarSinPrecio } from '../../utils/listasPrecios';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Aviso cuando la cantidad del carrito se come lo apartado en un borrador.
@@ -156,6 +159,7 @@ export function Carrito({ onFacturar, onPrestar, onBorradorCargado, sinHeader = 
   const {
     items, eliminarItem, actualizarPrecio, actualizarCantidad, limpiarCarrito, totalCarrito,
     aplicarTarifa, aplicarTarifaATodos,
+    listaPrecioActiva, aplicarListaPrecio, aplicarListaPreciosATodos,
   } = useCarritoStore();
   const total = totalCarrito();
   const queryClient = useQueryClient();
@@ -184,6 +188,19 @@ export function Carrito({ onFacturar, onPrestar, onBorradorCargado, sinHeader = 
     ? conTarifa[0].tarifa_id
     : null;
   const sinCosto     = items.length > 0 && conTarifa.length === 0;
+
+  // ── Listas de precios (feature opt-in) ────────────────────────────────────
+  // Excluyente con las tarifas: el backend no deja tener las dos encendidas
+  // (`saveConfig`), así que aquí nunca se pintan los dos selectores a la vez.
+  const listasCfg = useListasPrecios();
+
+  // De los ítems del carrito, cuántos NO están en la lista elegida. Se dice
+  // ARRIBA y con el número, porque es lo que hay que saber antes de cobrar: un
+  // producto que la lista no menciona se cobra a su precio normal, y en una
+  // venta al por mayor eso es cobrar de más sin que nada lo advierta.
+  const sinPrecioEnLista = listasCfg.activo && listaPrecioActiva
+    ? contarSinPrecio(items, listaPrecioActiva.id)
+    : 0;
 
   const [modalTraslado, setModalTraslado] = useState(false);
   const [despacho,      setDespacho]      = useState(null); // { items, descartados }
@@ -354,6 +371,32 @@ export function Carrito({ onFacturar, onPrestar, onBorradorCargado, sinHeader = 
             </button>
           )}
 
+          {/* Lista de precios para toda la venta (feature opt-in).
+              Se muestra aunque el carrito esté vacío: elegir la lista ANTES de
+              escanear es el flujo normal del mostrador, y la elección se pega a
+              todo lo que entre después. */}
+          {listasCfg.activo && (
+            <div className="mb-3 p-3 bg-gray-50 rounded-xl flex flex-col gap-1.5">
+              <SelectorListaPrecio
+                label="Lista de precios"
+                listas={listasCfg.listas}
+                valor={listaPrecioActiva?.id || null}
+                onChange={aplicarListaPreciosATodos}
+              />
+              {sinPrecioEnLista > 0 && (
+                <span className="text-[11px] text-amber-600">
+                  {sinPrecioEnLista} producto{sinPrecioEnLista !== 1 ? 's' : ''} sin precio en
+                  «{listaPrecioActiva.nombre}» — van a su precio normal, revísalos abajo
+                </span>
+              )}
+              {!listaPrecioActiva && (
+                <span className="text-[11px] text-gray-400">
+                  Sin elegir, cada producto va a su precio de siempre
+                </span>
+              )}
+            </div>
+          )}
+
           {/* Tarifa aplicada a todo el carrito (feature opt-in) */}
           {tarifasCfg.activo && items.length > 0 && (
             <div className="mb-3 p-3 bg-gray-50 rounded-xl flex flex-col gap-1.5">
@@ -465,6 +508,17 @@ export function Carrito({ onFacturar, onPrestar, onBorradorCargado, sinHeader = 
 
                   {/* La cantidad se comió lo que otro cliente tenía apartado */}
                   <AvisoApartado item={item} />
+
+                  {/* Lista de precios de este ítem (feature opt-in). Sirve
+                      para la excepción: casi toda la venta va al por mayor pero
+                      esta línea concreta va a precio de cliente final. */}
+                  {listasCfg.activo && (
+                    <ListaPrecioItem
+                      item={item}
+                      listas={listasCfg.listas}
+                      onAplicar={aplicarListaPrecio}
+                    />
+                  )}
 
                   {/* Tarifa de este ítem (feature opt-in) */}
                   {tarifasCfg.activo && (

@@ -14,6 +14,7 @@ import { Input }   from '../../components/ui/Input';
 import { Spinner } from '../../components/ui/Spinner';
 import { formatCOP } from '../../utils/formatters';
 import useCarritoStore from '../../store/carritoStore';
+import { preciosDeNodo } from '../../utils/listasPrecios';
 import { ChipApartado } from './ChipApartado';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -267,6 +268,7 @@ function FilaAtributo({ atributo, producto, sucursalId, tipos, esAdmin }) {
       cantidad:       1,
       linea_id:       producto.linea_id || null,
       codigo:         atributo.codigo || producto.codigo || null,
+      precios:        preciosDeNodo(producto, atributo),
     });
   };
 
@@ -286,6 +288,7 @@ function FilaAtributo({ atributo, producto, sucursalId, tipos, esAdmin }) {
       cantidad:       1,
       linea_id:       producto.linea_id || null,
       codigo:         variante.codigo || atr.codigo || producto.codigo || null,
+      precios:        preciosDeNodo(producto, atr, variante),
     });
   };
 
@@ -444,6 +447,7 @@ export function VistaArbolProducto({ producto, sucursalId, esAdmin, onClose }) {
       cantidad:    1,
       linea_id:    producto.linea_id || null,
       codigo:      producto.codigo || null,
+      precios:     preciosDeNodo(producto),
     });
   };
 

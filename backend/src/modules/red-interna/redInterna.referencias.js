@@ -18,6 +18,26 @@
 // a cuál fila YA EXISTENTE del destino apunta el movimiento.
 // ─────────────────────────────────────────────────────────────────────────────
 
+const { hayListasPrecios } = require('../../config/columnas');
+
+// ── Listas de precios: el local nace con los de la bodega ────────────────────
+//
+// La referencia que se crea en el local ya hereda `precio`, `codigo` y la línea.
+// Los precios de lista van con ellos: si no, la talla que acaba de llegar se
+// vendería al precio normal aunque el negocio tenga tarifado ese producto, y el
+// local tendría que volver a teclear los tres precios para algo que la bodega ya
+// tenía escrito. Es un PUNTO DE PARTIDA, no una atadura — el local los cambia
+// después, que es justo de lo que va la feature.
+//
+// Se interpola solo si la columna existe, y eso no es adorno: si la migración no
+// hubiera llegado y este INSERT ya nombrara `precios`, lo que se caería no sería
+// una pantalla nueva sino DESPACHAR, la operación diaria de un módulo que ya
+// está en producción. Es la misma precaución que toman las dos columnas de los
+// pedidos internos.
+// No es entrada de usuario: son literales SQL fijos.
+const COL_PRECIOS = () => (hayListasPrecios() ? ', precios' : '');
+const SEL_PRECIOS = () => (hayListasPrecios() ? ', precios' : '');
+
 // Normalización equivalente a `_norm` de traslados.repository.js, pero en SQL:
 // minúsculas, sin tildes, guiones y guiones bajos como espacio, espacios
 // internos colapsados y recortada.
@@ -63,6 +83,7 @@ const esSeguro = (nivel) => SEGUROS.has(nivel);
 const resolverCantidad = async (client, { productoOrigenId, sucursalDestinoId }) => {
   const { rows: orig } = await client.query(
     `SELECT id, nombre, codigo, linea_id, unidad_medida, precio, costo_unitario, stock_minimo
+       ${SEL_PRECIOS()}
      FROM productos_cantidad WHERE id = $1`,
     [productoOrigenId]
   );
@@ -152,14 +173,16 @@ const crearReferenciaCantidad = async (client, { origen, sucursalDestinoId, nego
     if (ocupado.length) codigo = null;
   }
 
+  const conPrecios = hayListasPrecios();
   const { rows: nuevo } = await client.query(`
     INSERT INTO productos_cantidad
       (nombre, stock, stock_minimo, unidad_medida, costo_unitario, precio,
-       sucursal_id, linea_id, codigo)
-    VALUES ($1, 0, $2, $3, $4, $5, $6, $7, $8)
+       sucursal_id, linea_id, codigo${COL_PRECIOS()})
+    VALUES ($1, 0, $2, $3, $4, $5, $6, $7, $8${conPrecios ? ', $9' : ''})
     RETURNING id, nombre, codigo
   `, [origen.nombre, origen.stock_minimo || 0, origen.unidad_medida || 'unidad',
-      origen.costo_unitario, origen.precio, sucursalDestinoId, origen.linea_id, codigo]);
+      origen.costo_unitario, origen.precio, sucursalDestinoId, origen.linea_id, codigo,
+      ...(conPrecios ? [origen.precios ?? null] : [])]);
 
   return nuevo[0];
 };
@@ -171,7 +194,7 @@ const crearReferenciaCantidad = async (client, { origen, sucursalDestinoId, nego
 
 const resolverSerial = async (client, { productoOrigenId, sucursalDestinoId }) => {
   const { rows: orig } = await client.query(
-    `SELECT id, nombre, marca, modelo, precio, linea_id
+    `SELECT id, nombre, marca, modelo, precio, linea_id ${SEL_PRECIOS()}
      FROM productos_serial WHERE id = $1`,
     [productoOrigenId]
   );
@@ -216,11 +239,14 @@ const resolverSerial = async (client, { productoOrigenId, sucursalDestinoId }) =
 };
 
 const crearReferenciaSerial = async (client, { origen, sucursalDestinoId }) => {
+  const conPrecios = hayListasPrecios();
   const { rows: nuevo } = await client.query(`
-    INSERT INTO productos_serial (nombre, marca, modelo, precio, sucursal_id, linea_id)
-    VALUES ($1, $2, $3, $4, $5, $6)
+    INSERT INTO productos_serial
+      (nombre, marca, modelo, precio, sucursal_id, linea_id${COL_PRECIOS()})
+    VALUES ($1, $2, $3, $4, $5, $6${conPrecios ? ', $7' : ''})
     RETURNING id, nombre, marca, modelo
-  `, [origen.nombre, origen.marca, origen.modelo, origen.precio, sucursalDestinoId, origen.linea_id]);
+  `, [origen.nombre, origen.marca, origen.modelo, origen.precio, sucursalDestinoId, origen.linea_id,
+      ...(conPrecios ? [origen.precios ?? null] : [])]);
   return nuevo[0];
 };
 

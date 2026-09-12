@@ -1,6 +1,6 @@
 import { useState }                                      from 'react';
 import { useQuery, useMutation, useQueryClient }         from '@tanstack/react-query';
-import { ShoppingBag, Plus, AlertTriangle, Trash2, ChevronDown, ChevronRight, Layers, Settings, Barcode, MapPin, Tags } from 'lucide-react';
+import { ShoppingBag, Plus, AlertTriangle, Trash2, ChevronDown, ChevronRight, Layers, Settings, Barcode, MapPin, Tags, Tag } from 'lucide-react';
 import { getProductosCantidad, ajustarStockCantidad, getLineas } from '../../api/productos.api';
 import { SearchInput }                                   from '../../components/ui/SearchInput';
 import { BarraEscaneo }                                  from '../../components/ui/BarraEscaneo';
@@ -10,10 +10,13 @@ import { Spinner }                                       from '../../components/
 import { EmptyState }                                    from '../../components/ui/EmptyState';
 import { formatCOP }                                     from '../../utils/formatters';
 import useCarritoStore                                   from '../../store/carritoStore';
+import { preciosDeNodo } from '../../utils/listasPrecios';
 import { ChipApartado }                                  from './ChipApartado';
 import { ModalPinEliminacion }                           from './ModalPinEliminacion';
 import { ModalEditarProductoCantidad }                   from './ModalEditarProductoCantidad';
 import { ModalEtiquetas }                                from './ModalEtiquetas';
+import { ModalPreciosLista }                            from './ModalPreciosLista';
+import { useListasPrecios }                             from '../../hooks/useListasPrecios';
 import { UltimaVentaBadge }                               from './AntiguedadInventario';
 import { NotaStrip }                                     from './PostItNota';
 import { UbicacionChip }                                 from '../../components/ui/InputUbicacion';
@@ -26,7 +29,7 @@ import useSucursalStore                                  from '../../store/sucur
 import api                                               from '../../api/axios.config';
 
 // ── Tarjeta de producto cantidad ──────────────────────────────────────────────
-function TarjetaProducto({ p, esAdmin, onAgregar, onReducir, onEditar, variantesActivo, onVerArbol, onEtiquetar }) {
+function TarjetaProducto({ p, esAdmin, onAgregar, onReducir, onEditar, variantesActivo, onVerArbol, onEtiquetar, onPrecios }) {
   const sinStock  = p.stock === 0;
   const stockBajo = !sinStock && p.stock_bajo;
 
@@ -101,6 +104,18 @@ function TarjetaProducto({ p, esAdmin, onAgregar, onReducir, onEditar, variantes
               <Tags size={15} />
             </button>
           )}
+          {/* Precios por lista. Solo aparece si el negocio tiene la feature y
+              este usuario puede cambiarlos: pintarlo para todos haría que el
+              vendedor descubriera el permiso con un 403. */}
+          {onPrecios && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onPrecios(p); }}
+              className="p-1.5 rounded-lg text-gray-300 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+              title="Precios por lista"
+            >
+              <Tag size={15} />
+            </button>
+          )}
           {!variantesActivo && (
             <button
               onClick={(e) => { e.stopPropagation(); onReducir(e, p); }}
@@ -169,7 +184,7 @@ function TarjetaProducto({ p, esAdmin, onAgregar, onReducir, onEditar, variantes
 }
 
 // ── Acordeón de línea ─────────────────────────────────────────────────────────
-function AcordeonLinea({ nombre, productos, esAdmin, onAgregar, onReducir, onEditar, variantesActivo, onVerArbol, onEtiquetar }) {
+function AcordeonLinea({ nombre, productos, esAdmin, onAgregar, onReducir, onEditar, variantesActivo, onVerArbol, onEtiquetar, onPrecios }) {
   const [abierto, setAbierto] = useState(true);
 
   const alertas    = productos.filter((p) => p.stock_bajo || p.stock === 0).length;
@@ -212,6 +227,7 @@ function AcordeonLinea({ nombre, productos, esAdmin, onAgregar, onReducir, onEdi
               onAgregar={onAgregar}
               onReducir={onReducir}
               onEditar={onEditar}
+              onPrecios={onPrecios}
               variantesActivo={variantesActivo}
               onVerArbol={onVerArbol}
               onEtiquetar={onEtiquetar}
@@ -238,6 +254,7 @@ export function ProductosCantidad() {
   const [productoAEditar,  setProductoAEditar]  = useState(null);
   const [productoArbol,    setProductoArbol]    = useState(null);
   const [productoEtiqueta, setProductoEtiqueta] = useState(null);
+  const [productoPrecios,  setProductoPrecios]  = useState(null);
   // Filtro por sitio: el bodeguero quiere ver de una vez todo lo del Estante A-3.
   const [filtroUbicacion,  setFiltroUbicacion]  = useState('');
 
@@ -277,6 +294,7 @@ export function ProductosCantidad() {
   });
 
   const agregarItem         = useCarritoStore((s) => s.agregarItem);
+  const listasCfg           = useListasPrecios();
 
   const mutReducir = useMutation({
     mutationFn: ({ productoId, cantidad }) =>
@@ -331,6 +349,9 @@ export function ProductosCantidad() {
       // Inerte para la venta: viaja solo para que el buscador del carrito
       // encuentre por lo que está impreso en la etiqueta.
       codigo:      producto.codigo || null,
+      // Listas de precios: el mapa completo viaja con el ítem para que elegir
+      // una lista en el carrito no cueste una petición por producto.
+      precios:     preciosDeNodo(producto),
     });
   };
 
@@ -356,6 +377,13 @@ export function ProductosCantidad() {
   // código de un contenedor, que al escanearse obliga a elegir a mano.
   const puedeEtiquetar = (codigoActivo && !variantesActivo)
     ? (p) => { if (p.codigo) setProductoEtiqueta(p); }
+    : null;
+
+  // Precios por lista. El botón solo existe si el negocio activó la feature Y
+  // este usuario puede cambiarlos — pintarlo para todos haría que el vendedor
+  // descubriera el permiso con un 403 en la cara.
+  const puedeVerPrecios = listasCfg.activo && listasCfg.puedeEditar
+    ? (p) => setProductoPrecios(p)
     : null;
 
   const handleAbrirReducir = (e, producto) => {
@@ -459,6 +487,7 @@ export function ProductosCantidad() {
                 variantesActivo={variantesActivo}
                 onVerArbol={setProductoArbol}
                 onEtiquetar={puedeEtiquetar}
+                onPrecios={puedeVerPrecios}
               />
             ))}
 
@@ -474,6 +503,7 @@ export function ProductosCantidad() {
                 variantesActivo={variantesActivo}
                 onVerArbol={setProductoArbol}
                 onEtiquetar={puedeEtiquetar}
+                onPrecios={puedeVerPrecios}
               />
             )}
           </div>
@@ -495,6 +525,17 @@ export function ProductosCantidad() {
               onChange={(e) => setCantidadReducir(e.target.value)}
             />
           }
+        />
+      )}
+
+      {productoPrecios && (
+        <ModalPreciosLista
+          producto={productoPrecios}
+          listas={listasCfg.listas}
+          tipo="cantidad"
+          variantesActivo={variantesActivo}
+          sucursalId={productosData?.sucursal_id || productoPrecios.sucursal_id}
+          onCerrar={() => setProductoPrecios(null)}
         />
       )}
 

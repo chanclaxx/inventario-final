@@ -1,11 +1,20 @@
 const { pool } = require('../../config/db');
-const { hayUbicacion } = require('../../config/columnas');
+const { hayUbicacion, hayListasPrecios } = require('../../config/columnas');
 
 // Ubicación espacial (feature opt-in). Se interpola solo si la columna existe
 // en la BD: si la migración no llegó a aplicarse, estas consultas quedan
 // exactamente como estaban en vez de reventar el inventario entero.
 // No es entrada de usuario — es un literal SQL fijo.
 const selUbicacion = (alias) => (hayUbicacion() ? `${alias}.ubicacion,` : '');
+
+// Listas de precios (feature opt-in): los N precios de venta del nodo, tal cual
+// se guardaron. La cascada variante > atributo > producto se resuelve en el
+// frontend, en el mismo sitio donde ya se resuelve la de `precio`. Se interpola
+// solo si la columna existe: sin la migración, esta consulta queda EXACTAMENTE
+// como estaba en vez de tumbar el inventario entero.
+// No es entrada de usuario — es un literal SQL fijo.
+const selPrecios = (alias) => (hayListasPrecios() ? `${alias}.precios,` : '');
+
 
 const findAll = async (sucursalId, negocioId, lineaId) => {
   if (sucursalId) {
@@ -16,6 +25,7 @@ const findAll = async (sucursalId, negocioId, lineaId) => {
         pc.cliente_origen, pc.activo, pc.sucursal_id, pc.proveedor_id,
         pc.linea_id, pc.creado_en, pc.nota, pc.codigo,
         ${selUbicacion('pc')}
+        ${selPrecios('pc')}
         lp.nombre AS linea_nombre,
         p.nombre  AS proveedor_nombre,
         su.nombre AS sucursal_nombre,

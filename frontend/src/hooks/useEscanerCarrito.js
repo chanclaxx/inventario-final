@@ -82,6 +82,7 @@ export function useEscanerCarrito({
       // agrega desde la lista de seriales.
       color:           serial.color           || null,
       caracteristicas: serial.caracteristicas || null,
+      precios:         serial.precios || null,
     });
 
     // Apalabrado en un borrador: el modal de conflicto ya está preguntando qué
@@ -125,6 +126,8 @@ export function useEscanerCarrito({
         cantidad:       1,
         linea_id:       nodo.linea_id || null,
         codigo:         nodo.codigo || null,
+        // Ya viene heredado de producto → atributo → variante desde el SQL.
+        precios:        nodo.precios || null,
       });
       if (res === 'reservado') { setScanMsg(null); return; }
       setScanMsg(res === 'sin_stock'
@@ -158,6 +161,7 @@ export function useEscanerCarrito({
       cantidad:    1,
       linea_id:    nodo.linea_id || null,
       codigo:      nodo.codigo || null,
+      precios:     nodo.precios || null,
     });
     // 'reservado' no es ni éxito ni error: el modal de conflicto ya está
     // preguntando qué hacer y el producto todavía no entró.

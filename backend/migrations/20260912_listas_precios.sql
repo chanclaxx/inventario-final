@@ -1,0 +1,101 @@
+-- ─────────────────────────────────────────────────────────────────────────────
+-- LISTAS DE PRECIOS — N precios de venta por nodo, y el vendedor elige cual.
+--
+-- 100% ADITIVA e IDEMPOTENTE. Se auto-aplica al arrancar el backend
+-- (src/config/migrations.js), dentro de su propio try/catch.
+--
+-- OJO: este archivo esta replicado inline en migrations.js dentro de un
+-- template literal de JavaScript. Por eso NO lleva ni una sola comilla
+-- invertida, ni siquiera en los comentarios: una sola cierra el literal a media
+-- consulta y el backend deja de arrancar entero. Ya paso dos veces.
+--
+-- ── El problema ─────────────────────────────────────────────────────────────
+-- Un negocio-bodega surte a sus locales. Cada producto no tiene UN precio de
+-- venta sino varios segun a quien se le venda: "1 Pasamano", "Al por mayor",
+-- "Cliente final". Hoy el sistema solo guarda uno (productos_cantidad.precio),
+-- asi que el vendedor tiene que acordarse del resto y teclearlos a mano en cada
+-- venta. Teclear un precio de memoria es teclearlo mal.
+--
+-- ── Por que NO sirven las tarifas porcentuales que ya existen ───────────────
+-- Ese mecanismo ya ofrece el mismo gesto (elegir un chip en el carrito) pero
+-- DERIVA el precio del costo. Medido sobre el catalogo real del cliente (473
+-- productos):
+--
+--   AL POR MAYOR    -> mediana 20,0% de markup .. una tarifa lo reproduce (70%)
+--   1 PASAMANO      -> p25 40% / mediana 58% / p75 67% .. no es una regla
+--   CLIENTE FINAL   -> p25 79% / mediana 94% / p75 100% .. tampoco
+--
+-- Son precios curados a mano y redondeados a numeros de mostrador (7.000,
+-- 9.000, 16.000). Una tarifa daria 7.013. Peor: 106 de los 473 productos (22%)
+-- NO tienen costo registrado, asi que una tarifa porcentual no puede calcularles
+-- nada y ese vendedor se queda sin precio. Y hay precios por debajo del costo
+-- (hasta -25%) que son decisiones reales del negocio y un calculo automatico
+-- borraria en silencio.
+--
+-- Hay una cuarta razon, estructural: saveConfig PROHIBE tener tarifas y
+-- "ocultar costos" a la vez, porque la tarifa calcula en el navegador del
+-- vendedor y necesita el costo alli. Una lista de precios FIJOS no mira el
+-- costo, asi que si convive con ese candado — que es justo lo que quiere un
+-- negocio que le esconde sus costos a los locales.
+--
+-- ── Por que una columna JSONB en el nodo, y no una tabla ────────────────────
+-- Porque el precio de un nodo YA vive en el nodo, y el alcance por sucursal YA
+-- esta resuelto: productos_cantidad, atributos_producto y productos_serial
+-- tienen sucursal_id, y cada sede tiene su propia fila con su propio precio.
+-- Poniendo los precios donde ya esta el precio, "cada local tiene los suyos"
+-- sale gratis y no hay una sola pregunta nueva sobre alcance.
+--
+-- Y porque nada de lo que va aqui dentro se consulta, se suma ni se filtra: se
+-- escribe entero al editar el producto y se lee entero al pintar la tarjeta.
+-- Es el mismo criterio de borradores.datos y de retomas.estado_anterior.
+--
+-- Una tabla precios_nodo (el patron de ubicaciones_items) obligaria a un JOIN o
+-- un agregado en CADA consulta del inventario — la pantalla mas caliente del
+-- sistema, la que ya se comio el 96% del CPU de la base compartida una vez por
+-- una subconsulta correlacionada. Y serian productos x listas x sucursales
+-- filas para un dato que siempre se lee completo y junto a su nodo.
+--
+-- ── La forma del JSONB ──────────────────────────────────────────────────────
+--   {"l1": 7000, "l2": 5800, "l3": 9000}
+--
+-- La clave es el ID de la lista, NUNCA su nombre. El catalogo de listas vive en
+-- config_negocio.listas_precios_lista como un arreglo de {id, nombre, color} —
+-- el mismo formato, el mismo tope y la misma validacion que tarifas_lista, y
+-- por la misma razon: el id es un slug estable, asi que renombrar "PASAMANO" no
+-- tiene que reescribir 473 filas ni romper lo que ya se guardo.
+--
+-- Que la cantidad de listas sea VARIABLE queda resuelto por diseno: es un
+-- arreglo. Tres hoy, siete manana, sin migracion.
+--
+-- Una clave AUSENTE significa "este producto no tiene precio en esa lista", y
+-- el sistema cae al precio de siempre. Nunca a cero: dejar al vendedor con un
+-- precio de 0 en el mostrador es peor que dejarlo con el precio de lista.
+--
+-- ── Que NO cambia ───────────────────────────────────────────────────────────
+-- Nada del circuito de venta. La linea de factura ya guarda el precio final
+-- (lineas_factura.precio = item.precioFinal) y le da igual de donde salio ese
+-- numero, asi que facturas, prestamos, PDF, utilidad, reportes, caja y la
+-- cuenta de la red interna no se tocan. Tampoco se guarda QUE lista se uso: se
+-- decidio a proposito, porque guardarla obligaria a tocar la emision, la
+-- edicion, la devolucion parcial y el PDF de la factura para un dato que hoy
+-- nadie reporta.
+--
+-- Sin esta migracion la feature se apaga sola (columnas.js: hayListasPrecios)
+-- y el inventario emite exactamente el SQL de siempre.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+-- Los tres niveles del arbol de cantidad. Se escribe en el nodo que el usuario
+-- edite y se resuelve HACIA ARRIBA al venderlo (variante > atributo > producto),
+-- exactamente con el mismo COALESCE que ya resuelve el precio y el costo: asi
+-- poner un precio en el producto sirve para sus 30 tallas sin repetirlo 30
+-- veces, y una talla concreta puede tener el suyo propio.
+ALTER TABLE IF EXISTS productos_cantidad ADD COLUMN IF NOT EXISTS precios JSONB;
+ALTER TABLE IF EXISTS atributos_producto ADD COLUMN IF NOT EXISTS precios JSONB;
+ALTER TABLE IF EXISTS variantes_atributo ADD COLUMN IF NOT EXISTS precios JSONB;
+
+-- Los seriales van en la REFERENCIA, no en la unidad. Un IMEI ya tiene su
+-- precio propio (seriales.precio) que gana sobre el del producto, y eso no
+-- cambia: las listas responden "a cuanto vendo este modelo segun el cliente",
+-- que es una pregunta del modelo y no de la unidad. Ponerlas en seriales
+-- obligaria a teclear tres precios por cada equipo que entra.
+ALTER TABLE IF EXISTS productos_serial ADD COLUMN IF NOT EXISTS precios JSONB;

@@ -20,6 +20,7 @@ import { Modal }      from '../../components/ui/Modal';
 import { formatCOP }      from '../../utils/formatters';
 import { InputMoneda }    from '../../components/ui/InputMoneda';
 import useCarritoStore from '../../store/carritoStore';
+import { preciosDeNodo } from '../../utils/listasPrecios';
 import { ChipApartado } from './ChipApartado';
 import { usePuedeVerCostos } from '../../hooks/usePuedeVerCostos';
 import { ModalEtiquetas } from './ModalEtiquetas';
@@ -523,6 +524,9 @@ export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose,
       // Inerte para la venta: viaja solo para que el buscador del carrito
       // encuentre por lo que está impreso en la etiqueta.
       codigo:         atributo.codigo || producto.codigo || null,
+      // Del más general al más específico: la talla puede tener su precio
+      // mayorista propio y heredar del producto los otros dos.
+      precios:        preciosDeNodo(producto, atributo),
     });
   };
 
@@ -543,6 +547,7 @@ export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose,
       cantidad:       1,
       linea_id:       producto.linea_id || null,
       codigo:         variante.codigo || atr?.codigo || producto.codigo || null,
+      precios:        preciosDeNodo(producto, atr, variante),
     });
   };
 
@@ -828,6 +833,7 @@ export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose,
                 cantidad:    1,
                 linea_id:    producto.linea_id || null,
                 codigo:      producto.codigo || null,
+                precios:     preciosDeNodo(producto),
               });
               onClose();
             }}

@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { calcularPrecioTarifa, ORIGEN_LISTA, ORIGEN_TARIFA, ORIGEN_MANUAL } from '../utils/tarifas';
 import { choca, mismasReservas } from '../utils/reservas';
+import { resolverPrecioItem, ORIGEN_LISTA_PRECIO } from '../utils/listasPrecios';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Carrito compartido por facturas, préstamos, traslados y despachos de red.
@@ -22,7 +23,7 @@ import { choca, mismasReservas } from '../utils/reservas';
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 /** Normaliza un ítem recién agregado. `costo` es opcional. */
-const _itemNuevo = (item) => ({
+const _itemNuevo = (item, listaActiva = null) => ({
   ...item,
   precioFinal:   item.precio,
   costo:         item.costo != null && Number.isFinite(Number(item.costo)) && Number(item.costo) > 0
@@ -30,6 +31,11 @@ const _itemNuevo = (item) => ({
     : null,
   tarifa_id:     null,
   origen_precio: ORIGEN_LISTA,
+  // La lista elegida es PEGAJOSA: se aplica sola a todo lo que entre después.
+  // Es lo que hace que el vendedor de un local mayorista elija una vez al día
+  // y no una vez por producto — que es justo la fricción que hace que la gente
+  // deje de usar la función y vuelva a teclear precios de memoria.
+  ...(listaActiva ? _conLista({ ...item, precioFinal: item.precio }, listaActiva) : null),
 });
 
 /**
@@ -45,6 +51,39 @@ const _conTarifa = (item, tarifa, opciones) => {
   const precio = calcularPrecioTarifa(item.costo, tarifa, opciones);
   if (precio == null) return item;
   return { ...item, precioFinal: precio, tarifa_id: tarifa.id, origen_precio: ORIGEN_TARIFA };
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LISTAS DE PRECIOS (feature opt-in, excluyente con las tarifas)
+//
+// Devuelve el ítem con la lista aplicada. `lista` null lo devuelve a su precio
+// de siempre.
+//
+// Un producto que la lista no menciona NO se queda en cero ni se salta: cae a
+// su `precio` de lista y se marca con `sin_precio_en_lista`, para que el
+// carrito pueda decir «3 productos no están en “Al por mayor”». Una lista a
+// medio llenar tiene que verse ANTES de cobrar, no después.
+// ─────────────────────────────────────────────────────────────────────────────
+const _conLista = (item, lista) => {
+  if (!lista) {
+    return {
+      ...item,
+      precioFinal: item.precio,
+      lista_precio_id: null,
+      sin_precio_en_lista: false,
+      origen_precio: ORIGEN_LISTA,
+    };
+  }
+  const { precio, deLista } = resolverPrecioItem(item, lista.id);
+  return {
+    ...item,
+    precioFinal: precio,
+    lista_precio_id: lista.id,
+    sin_precio_en_lista: !deLista,
+    // Si la lista no le puso precio, el número que se cobra es el de siempre:
+    // decir que viene de la lista sería mentir sobre de dónde salió.
+    origen_precio: deLista ? ORIGEN_LISTA_PRECIO : ORIGEN_LISTA,
+  };
 };
 
 // ── Store ────────────────────────────────────────────────────────────────────
@@ -118,7 +157,7 @@ const useCarritoStore = create(
         const reserva = get().reservas[item.key];
         if (choca(item, reserva, 1)) return set({ conflicto: { item, reserva } });
 
-        set({ items: [...items, _itemNuevo(item)] });
+        set({ items: [...items, _itemNuevo(item, get().listaPrecioActiva)] });
       },
 
       // Agrega saltándose el chequeo de reservas. Solo lo llama el modal de
@@ -133,7 +172,7 @@ const useCarritoStore = create(
             ? items.map((i) =>
                 i.key === item.key ? { ...i, cantidad: (i.cantidad || 1) + 1 } : i
               )
-            : [...items, _itemNuevo(item)],
+            : [...items, _itemNuevo(item, get().listaPrecioActiva)],
         });
       },
 
@@ -155,7 +194,7 @@ const useCarritoStore = create(
         }
 
         if (!existe) {
-          set({ items: [...items, _itemNuevo(item)] });
+          set({ items: [...items, _itemNuevo(item, get().listaPrecioActiva)] });
           return 'agregado';
         }
         const tope = existe.stock != null ? Number(existe.stock) : Infinity;
@@ -168,13 +207,46 @@ const useCarritoStore = create(
         return 'incrementado';
       },
 
+      // ── Listas de precios (feature opt-in, excluyente con las tarifas) ────
+      //
+      // La lista elegida vive AQUÍ y no en el componente, y se persiste: es lo
+      // que hace que se pegue a todo lo que entre después, incluso si el
+      // vendedor recarga la página a media venta.
+      //
+      // Es por DISPOSITIVO a propósito. El mostrador de un local mayorista y el
+      // de uno al detal son dos navegadores distintos, así que cada uno se queda
+      // en su lista sin que nadie tenga que configurar nada por sucursal. Y un
+      // dispositivo nuevo arranca en `null`, que es el precio de siempre: el
+      // caso sin configurar nunca cobra de menos.
+      listaPrecioActiva: null,
+
+      aplicarListaPrecio: (key, lista) => {
+        set({
+          items: get().items.map((i) => (i.key === key ? _conLista(i, lista) : i)),
+        });
+      },
+
+      // Aplica a todo el carrito Y se queda como lista activa. Las dos cosas
+      // juntas: elegir «Al por mayor» con el carrito lleno tiene que reprecificar
+      // lo que ya está y también lo que falte por escanear.
+      aplicarListaPreciosATodos: (lista) => {
+        set({
+          listaPrecioActiva: lista || null,
+          items: get().items.map((i) => _conLista(i, lista)),
+        });
+      },
+
       actualizarPrecio: (key, precioFinal) => {
         set({
           items: get().items.map((i) =>
             i.key === key
               // Editar a mano descarta la tarifa: el precio dejó de derivarse
               // del costo y el chip debe reflejarlo.
-              ? { ...i, precioFinal: Number(precioFinal), tarifa_id: null, origen_precio: ORIGEN_MANUAL }
+              // Editar a mano descarta la tarifa Y la lista: el precio dejó
+              // de venir de ninguna de las dos y el chip debe reflejarlo.
+              ? { ...i, precioFinal: Number(precioFinal), tarifa_id: null,
+                  lista_precio_id: null, sin_precio_en_lista: false,
+                  origen_precio: ORIGEN_MANUAL }
               : i
           ),
         });
@@ -217,6 +289,11 @@ const useCarritoStore = create(
       // `reservas` también se limpia: SucursalSelector llama aquí al cambiar de
       // sucursal, y las reservas de Sansur no pueden seguir bloqueando
       // productos de Principal durante el segundo que tarda el refetch.
+      // `listaPrecioActiva` NO se resetea aquí, y es deliberado: vaciar el
+      // carrito entre un cliente y el siguiente no significa que el mostrador
+      // haya dejado de ser mayorista. Volver al precio de siempre en cada venta
+      // obligaría a reelegir la lista veinte veces al día, que es la fricción
+      // que esto viene a quitar. Se cambia tocando otro chip, que es explícito.
       limpiarCarrito: () => set({
         items: [], borradorOrigenId: null, datosBorrador: null,
         reservas: {}, conflicto: null,
@@ -242,6 +319,10 @@ const useCarritoStore = create(
         items:            state.items,
         borradorOrigenId: state.borradorOrigenId,
         datosBorrador:    state.datosBorrador,
+        // Sí se persiste, al revés que las reservas: no es una foto del
+        // servidor sino una decisión del mostrador, y tiene que sobrevivir a
+        // cerrar la PWA igual que sobrevive el carrito.
+        listaPrecioActiva: state.listaPrecioActiva,
       }),
     }
   )

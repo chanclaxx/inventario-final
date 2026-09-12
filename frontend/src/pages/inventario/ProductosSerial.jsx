@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback }                   from 'reac
 import { useQuery, useMutation, useQueryClient }                     from '@tanstack/react-query';
 import {
   Package, Plus, ChevronRight, ChevronDown, Trash2, Lock,
-  Palette, Search, CheckCircle, X, SlidersHorizontal, Smartphone, StickyNote,
+  Palette, Search, CheckCircle, X, SlidersHorizontal, Smartphone, StickyNote, Tag,
 } from 'lucide-react';
 import { getProductosSerial, getSeriales, eliminarSerial, getLineas, buscarImei, actualizarSerial } from '../../api/productos.api';
 import { Badge }                     from '../../components/ui/Badge';
@@ -13,6 +13,9 @@ import { Spinner }                   from '../../components/ui/Spinner';
 import { EmptyState }                from '../../components/ui/EmptyState';
 import { formatCOP, formatFecha }     from '../../utils/formatters';
 import useCarritoStore               from '../../store/carritoStore';
+import { preciosDeNodo } from '../../utils/listasPrecios';
+import { ModalPreciosLista } from './ModalPreciosLista';
+import { useListasPrecios } from '../../hooks/useListasPrecios';
 import { ModalPinEliminacion }       from './ModalPinEliminacion';
 import { ModalEditarSerial }         from './ModalEditarSerial';
 import { ModalEditarProductoSerial } from './ModalEditarProductoSerial';
@@ -844,6 +847,8 @@ export function ProductosSerial({ onAgregarProducto }) {
   const ubicacionActiva         = configData?.ubicacion_activa === '1';
 
   const agregarItem = useCarritoStore((s) => s.agregarItem);
+  const listasCfg   = useListasPrecios();
+  const [productoPrecios, setProductoPrecios] = useState(null);
 
   const mutEliminar = useMutation({
     mutationFn: (serialId) => eliminarSerial(serialId),
@@ -938,6 +943,9 @@ export function ProductosSerial({ onAgregarProducto }) {
       // encuentre por lo que está impreso en la etiqueta / en la unidad.
       color:           serial.color           || null,
       caracteristicas: serial.caracteristicas || null,
+      // En serial las listas son de la REFERENCIA: "a cuánto vendo este modelo
+      // según el cliente" es pregunta del modelo, no de cada IMEI.
+      precios:         preciosDeNodo(productoSeleccionado),
     });
   };
 
@@ -968,13 +976,28 @@ export function ProductosSerial({ onAgregarProducto }) {
             <NotaStrip nota={productoSeleccionado.nota} className="mt-1.5" />
           )}
         </div>
-        {onAgregarProducto && (
-          <Button size="sm" className="flex-shrink-0"
-            onClick={() => onAgregarProducto(productoSeleccionado)}>
-            <Plus size={14} />
-            <span className="hidden sm:inline">Agregar IMEI</span>
-          </Button>
-        )}
+        <div className="flex items-center gap-1.5 flex-shrink-0">
+          {/* Precios por lista de la REFERENCIA: "a cuánto vendo este modelo
+              según el cliente" es pregunta del modelo, no de cada IMEI. Solo
+              sale si el negocio tiene la feature Y este usuario puede tocarla. */}
+          {listasCfg.activo && listasCfg.puedeEditar && (
+            <button
+              type="button"
+              onClick={() => setProductoPrecios(productoSeleccionado)}
+              className="p-1.5 rounded-lg text-gray-300 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+              title="Precios por lista"
+            >
+              <Tag size={16} />
+            </button>
+          )}
+          {onAgregarProducto && (
+            <Button size="sm"
+              onClick={() => onAgregarProducto(productoSeleccionado)}>
+              <Plus size={14} />
+              <span className="hidden sm:inline">Agregar IMEI</span>
+            </Button>
+          )}
+        </div>
       </div>
 
       <BuscadorConScope
@@ -1148,6 +1171,15 @@ export function ProductosSerial({ onAgregarProducto }) {
             </div>
           )}
       </div>
+
+      {productoPrecios && (
+        <ModalPreciosLista
+          producto={productoPrecios}
+          listas={listasCfg.listas}
+          tipo="serial"
+          onCerrar={() => setProductoPrecios(null)}
+        />
+      )}
 
       {serialAEliminar && (
         <ModalPinEliminacion

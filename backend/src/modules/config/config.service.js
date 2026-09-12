@@ -58,6 +58,7 @@ const _validarTarifasLista = (raw) => {
 const { normalizarCondicion, MAX_CONDICIONES } = require('../../utils/mora.util');
 const { normalizarPlanInteres, MAX_PLANES }    = require('../../utils/interes.util');
 const codigoAuto = require('../../utils/codigoAuto.util');
+const listasPrecios = require('../../utils/listasPrecios.util');
 
 const _validarMoraLista = (raw) => {
   let lista;
@@ -188,6 +189,12 @@ const saveConfig = async (negocioId, datos) => {
 
   if (datosProcesados.tarifas_lista !== undefined) {
     _validarTarifasLista(String(datosProcesados.tarifas_lista));
+  }
+  // Las listas de precios se validan con la MISMA función que las lee
+  // (listasPrecios.util), igual que la mora con `normalizarCondicion`: así no
+  // se puede guardar una lista que el carrito luego descarte en silencio.
+  if (datosProcesados.listas_precios_lista !== undefined) {
+    listasPrecios.validarListas(String(datosProcesados.listas_precios_lista));
   }
   if (datosProcesados.mora_lista !== undefined) {
     _validarMoraLista(String(datosProcesados.mora_lista));
@@ -333,6 +340,37 @@ const saveConfig = async (negocioId, datos) => {
       status: 400,
       message: 'No puedes activar las tarifas porcentuales con los costos ocultos: '
         + 'la tarifa se calcula desde el costo. Quita primero "Ocultar costos" en Seguridad.',
+    };
+  }
+
+  // ── Las tarifas porcentuales y las listas de precios son EXCLUYENTES ──────
+  //
+  // Las dos responden la misma pregunta —"¿a cuánto le vendo esto a este
+  // cliente?"— y las dos se contestan con el mismo gesto: un chip en el
+  // carrito. Encendidas a la vez, el vendedor tendría dos filas de chips
+  // compitiendo por el mismo número y ninguna forma de saber cuál manda; y un
+  // ítem con las dos aplicadas tendría que elegir a espaldas del usuario.
+  //
+  // No es una limitación técnica sino una decisión: el negocio decide si sus
+  // precios se CALCULAN desde el costo (tarifas) o si están ESCRITOS uno por
+  // uno (listas). Son dos formas de trabajar, no dos funciones que se sumen.
+  //
+  // Mismo patrón que el candado de costos de aquí arriba: se miran los dos
+  // extremos porque saveConfig recibe cambios parciales.
+  if (datosProcesados.listas_precios_activo === '1' && (await _guardado('tarifas_activo')) === '1') {
+    throw {
+      status: 400,
+      message: 'No puedes usar listas de precios con las tarifas porcentuales activas: '
+        + 'las dos deciden el precio de venta en el carrito y se estorbarían. '
+        + 'Apaga primero las tarifas porcentuales.',
+    };
+  }
+  if (datosProcesados.tarifas_activo === '1' && (await _guardado('listas_precios_activo')) === '1') {
+    throw {
+      status: 400,
+      message: 'No puedes activar las tarifas porcentuales con las listas de precios activas: '
+        + 'las dos deciden el precio de venta en el carrito. '
+        + 'Apaga primero las listas de precios.',
     };
   }
 

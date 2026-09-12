@@ -142,6 +142,7 @@ app.use('/api/ubicaciones',          protegida, require('./modules/ubicaciones/u
 app.use('/api/notificaciones',       protegida, require('./modules/notificaciones/notificaciones.routes'));
 app.use('/api/catalogo',             protegida, require('./modules/catalogo/catalogo.routes'));
 app.use('/api/borradores',           protegida, require('./modules/borradores/borradores.routes'));
+app.use('/api/listas-precios',       protegida, require('./modules/listas-precios/listasPrecios.routes'));
 
 // ── Rutas de superadmin (sin protegida) ───────────────
 app.use('/api/superadmin', require('./modules/superadmin/superadmin.routes'));

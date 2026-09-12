@@ -248,6 +248,12 @@ function SelectorPermisosEdicionProductos({ permisos, onChange }) {
   const puedeEditar        = permisos?.puede_editar        ?? false;
   const puedeExportar      = permisos?.puede_exportar      ?? false;
   const puedeExportarGlobal = permisos?.puede_exportar_global ?? false;
+  // Ausente = NO puede. Es la excepción a la regla de que `null` son los
+  // permisos base del rol, y se sostiene porque este permiso NACE con la
+  // feature: nadie lo tenía antes, así que nadie lo pierde. Si colgara de la
+  // casilla «Precio» de abajo —que viene encendida por defecto— le habría dado
+  // los precios de lista a todos los supervisores el día del despliegue.
+  const puedePreciosLista   = permisos?.puede_editar_precios_lista === true;
   const campos             = permisos?.campos ?? CAMPOS_DEFAULT;
 
   const update = (partial) => {
@@ -353,7 +359,25 @@ function SelectorPermisosEdicionProductos({ permisos, onChange }) {
         </label>
       )}
 
-      {!puedeEditar && !puedeExportar && (
+      {/* Listas de precios — independiente de puede_editar, y a propósito:
+          cambiar «Al por mayor» mueve el margen de todas las ventas mayoristas
+          de todos los locales a la vez. Es política comercial, no un campo del
+          producto. Por defecto solo el administrador. */}
+      <label className="flex items-center gap-2.5 cursor-pointer select-none">
+        <CheckboxCustom
+          checked={puedePreciosLista}
+          onChange={() => update({ puede_editar_precios_lista: !puedePreciosLista })}
+          color="indigo"
+        />
+        <div className="flex flex-col gap-0.5">
+          <span className="text-sm text-gray-700">Puede cambiar las listas de precios</span>
+          <span className="text-xs text-gray-400">
+            Los precios «Al por mayor», «Cliente final»… de cada producto
+          </span>
+        </div>
+      </label>
+
+      {!puedeEditar && !puedeExportar && !puedePreciosLista && (
         <p className="text-xs text-gray-400 bg-white rounded-lg px-3 py-1.5 border border-gray-100">
           Sin permisos de inventario — no podrá editar ni exportar.
         </p>

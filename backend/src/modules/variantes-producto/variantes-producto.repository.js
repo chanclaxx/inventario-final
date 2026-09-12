@@ -1,4 +1,11 @@
 const { pool } = require('../../config/db');
+const { hayListasPrecios } = require('../../config/columnas');
+
+// Listas de precios (feature opt-in): los N precios de venta del nodo. Se
+// interpola solo si la columna existe — sin la migración, el árbol de variantes
+// se sirve exactamente como siempre en vez de reventar.
+// No es entrada de usuario: es un literal SQL fijo.
+const selPrecios = (alias) => (hayListasPrecios() ? `${alias}.precios,` : '');
 
 // ── Árbol completo de un producto (atributos + variantes anidadas) ────────────
 
@@ -6,7 +13,8 @@ const getArbol = async (productoId, sucursalId) => {
   const { rows: atributos } = await pool.query(
     `SELECT
        ap.id, ap.tipo_id, tc.nombre AS tipo_nombre, ap.valor,
-       ap.stock, ap.stock_minimo, ap.precio, ap.costo_unitario, ap.codigo, ap.activo
+       ap.stock, ap.stock_minimo, ap.precio, ap.costo_unitario, ap.codigo,
+       ${selPrecios('ap')} ap.activo
      FROM atributos_producto ap
      LEFT JOIN tipos_caracteristica tc ON tc.id = ap.tipo_id
      WHERE ap.producto_id = $1 AND ap.sucursal_id = $2 AND ap.activo = true
@@ -19,7 +27,8 @@ const getArbol = async (productoId, sucursalId) => {
   const { rows: variantes } = await pool.query(
     `SELECT
        v.id, v.atributo_id, v.tipo_id, tc.nombre AS tipo_nombre, v.valor,
-       v.stock, v.stock_minimo, v.precio, v.costo_unitario, v.codigo, v.activo
+       v.stock, v.stock_minimo, v.precio, v.costo_unitario, v.codigo,
+       ${selPrecios('v')} v.activo
      FROM variantes_atributo v
      LEFT JOIN tipos_caracteristica tc ON tc.id = v.tipo_id
      WHERE v.atributo_id = ANY($1) AND v.activo = true

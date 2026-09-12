@@ -1,11 +1,20 @@
 const { pool } = require('../../config/db');
-const { hayUbicacion } = require('../../config/columnas');
+const { hayUbicacion, hayListasPrecios } = require('../../config/columnas');
 
 // Ubicación espacial (feature opt-in). En serial la ubicación pertenece a la
 // REFERENCIA, no a cada IMEI: un modelo vive en un estante, no cada unidad.
 // Solo se interpola si la columna existe — ver src/config/columnas.js.
 // No es entrada de usuario: es un literal SQL fijo.
 const selUbicacion = (alias) => (hayUbicacion() ? `${alias}.ubicacion,` : '');
+
+// Listas de precios (feature opt-in): los N precios de venta del nodo, tal cual
+// se guardaron. La cascada unidad > referencia se resuelve en el
+// frontend, en el mismo sitio donde ya se resuelve la de `precio`. Se interpola
+// solo si la columna existe: sin la migración, esta consulta queda EXACTAMENTE
+// como estaba en vez de tumbar el inventario entero.
+// No es entrada de usuario — es un literal SQL fijo.
+const selPrecios = (alias) => (hayListasPrecios() ? `${alias}.precios,` : '');
+
 
 // ── linea_id incluido en findAll con filtro opcional ─────────────────────
 const findAll = async (sucursalId, negocioId, lineaId) => {
@@ -14,6 +23,7 @@ const findAll = async (sucursalId, negocioId, lineaId) => {
       ps.id, ps.nombre, ps.marca, ps.modelo, ps.precio,
       ps.sucursal_id, ps.proveedor_id, ps.linea_id, ps.nota,
       ${selUbicacion('ps')}
+      ${selPrecios('ps')}
       su.nombre  AS sucursal_nombre,
       lp.nombre  AS linea_nombre,
       COUNT(s.id) FILTER (WHERE s.vendido = false AND s.prestado = false) AS disponibles,

@@ -13,6 +13,7 @@ import { VendedoresConfig }  from './VendedoresConfig';
 import { PasswordConfig }    from './PasswordConfig';
 import { MetodosPagoConfig } from './MetodosPagoConfig';
 import { TarifasConfig }    from './TarifasConfig';
+import { ListasPreciosConfig } from './ListasPreciosConfig';
 import { MoraConfig }       from './MoraConfig';
 import { InteresConfig }    from './InteresConfig';
 import { ComprasConfig }    from './ComprasConfig';
@@ -62,6 +63,7 @@ const TABS_CATALOGO = [
   { id: 'compras',   label: 'Compras',   Icn: ClipboardList },
   { id: 'ubicacion', label: 'Ubicación', Icn: MapPin     },
   { id: 'tarifas',   label: 'Tarifas',   Icn: Percent    },
+  { id: 'listas',    label: 'Listas de precios', Icn: Tag },
   { id: 'pagos',     label: 'Pagos',     Icn: Wallet     },
   { id: 'mora',      label: 'Mora',      Icn: CalendarClock },
   { id: 'interes',   label: 'Interés',   Icn: Percent    },
@@ -1565,6 +1567,12 @@ function SeccionCatalogo({ valores, set }) {
       {tab === 'tarifas' && (
         <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
           <TarifasConfig valores={valores} set={set} />
+        </div>
+      )}
+
+      {tab === 'listas' && (
+        <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
+          <ListasPreciosConfig valores={valores} set={set} />
         </div>
       )}
 
