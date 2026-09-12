@@ -1,6 +1,7 @@
-import { Tag } from 'lucide-react';
+import { useState } from 'react';
+import { Tag, ChevronDown, ChevronUp } from 'lucide-react';
 import { formatCOP } from '../../utils/formatters';
-import { precioEnLista } from '../../utils/listasPrecios';
+import { precioEnLista, buscarLista } from '../../utils/listasPrecios';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Chips de lista de precios.
@@ -84,14 +85,49 @@ export function SelectorListaPrecio({
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Chip de lista para UN ítem del carrito, con el aviso de cuándo el precio que
-// se está cobrando NO es el de la lista elegida.
+// La lista de UN ítem — COLAPSADA salvo que se toque.
 //
-// Ese aviso es la pieza que evita el error caro: con una lista a medio llenar,
-// el producto que nadie tarifó se cobraría a su precio normal sin que nada lo
-// diga, y en una venta al por mayor eso es cobrar de más y perder al cliente.
+// Antes esto pintaba los tres chips con su precio en cada producto. En una
+// columna de 288px, «Al por mayor $5.800» mide unos 116px, así que los tres se
+// partían en dos o tres renglones: ~50px permanentes POR PRODUCTO, y eso se
+// multiplica. Con el panel acotado a la pantalla, el carrito quedaba enseñando
+// un producto y medio y el resto era información.
+//
+// La proporción estaba al revés: la lista de la venta se elige ARRIBA y una
+// sola vez; cambiársela a UNA línea suelta es la excepción —«todo va al por
+// mayor menos este»—. Lo excepcional no puede cobrar alto en cada fila.
+//
+// Colapsado es un renglón que dice en qué lista está y se puede tocar. Lo que
+// NO se esconde nunca es el aviso de que el precio no vino de la lista elegida:
+// ese es justo el que hay que ver antes de cobrar.
 // ─────────────────────────────────────────────────────────────────────────────
 export function ListaPrecioItem({ item, listas, onAplicar }) {
+  const [abierto, setAbierto] = useState(false);
+  const activa = buscarLista(listas, item.lista_precio_id);
+
+  // Qué dice el renglón cuando está cerrado. «Precio normal» y no un hueco en
+  // blanco: sin lista elegida el producto SÍ se está cobrando a algo, y decirlo
+  // es lo que evita que alguien crea que falta configurar cada línea.
+  const etiqueta = activa ? activa.nombre : 'Precio normal';
+
+  if (!abierto) {
+    return (
+      <button
+        type="button"
+        onClick={() => setAbierto(true)}
+        className="flex items-center gap-1 text-[11px] text-gray-500
+          hover:text-gray-700 transition-colors w-full text-left"
+      >
+        <Tag size={10} className="text-gray-300 flex-shrink-0" />
+        <span className={`truncate ${activa ? 'text-gray-600 font-medium' : ''}`}>{etiqueta}</span>
+        {item.sin_precio_en_lista && (
+          <span className="text-amber-600 flex-shrink-0">· sin precio en esa lista</span>
+        )}
+        <ChevronDown size={11} className="text-gray-300 flex-shrink-0 ml-auto" />
+      </button>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-1">
       <SelectorListaPrecio
@@ -99,13 +135,20 @@ export function ListaPrecioItem({ item, listas, onAplicar }) {
         listas={listas}
         valor={item.lista_precio_id || null}
         precios={item.precios}
-        onChange={(l) => onAplicar(item.key, l)}
+        onChange={(l) => { onAplicar(item.key, l); setAbierto(false); }}
       />
       {item.sin_precio_en_lista && (
         <span className="text-[11px] text-amber-600">
           Sin precio en esa lista — va a su precio normal
         </span>
       )}
+      <button
+        type="button"
+        onClick={() => setAbierto(false)}
+        className="flex items-center gap-1 text-[11px] text-gray-400 hover:text-gray-600"
+      >
+        <ChevronUp size={11} /> Cerrar
+      </button>
     </div>
   );
 }

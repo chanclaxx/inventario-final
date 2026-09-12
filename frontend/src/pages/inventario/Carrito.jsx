@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   ShoppingCart, Trash2, Plus, Minus, FileText, Handshake, ArrowRightLeft,
-  Truck, Undo2, Bookmark, Route, Search, X,
+  Truck, Undo2, Bookmark, Route, Search, X, Info,
 } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
 import { EmptyState } from '../../components/ui/EmptyState';
@@ -64,61 +64,60 @@ function AvisoApartado({ item }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Buscar dentro del carrito.
 //
+// Comparte fila con el escáner en vez de ocupar una propia. En una columna de
+// 288px no caben dos campos de texto lado a lado —el escáner es el principal y
+// necesita todo el ancho—, así que la lupa INTERCAMBIA los dos: mientras se
+// busca, el escáner cede su sitio. Buscar dura tres segundos; escanear es todo
+// el día.
+//
 // Aparece solo desde `MINIMO_PARA_BUSCAR` ítems: con tres productos a la vista
 // un campo de búsqueda es ruido encima de justo lo que se quiere mirar.
 //
-// Va en la zona fija de arriba, como el escáner, y NO dentro del scroll: buscar
-// para poder dejar de scrollear y tener que scrollear para buscar sería el
-// chiste completo.
+// Cuando hay filtro puesto la lupa se queda MARCADA aunque el campo esté
+// cerrado: sin eso, esconder el buscador escondería también el hecho de que la
+// lista está recortada, y eso sí que sería una trampa.
 // ─────────────────────────────────────────────────────────────────────────────
-function BuscadorCarrito({ valor, onCambiar, mostrados, total }) {
+function BuscadorCarrito({ valor, onCambiar, onCerrar, mostrados, total }) {
   const filtrando = valor.trim().length > 0;
 
   return (
-    <div className="mb-3 flex flex-col gap-1">
+    <div className="flex flex-col gap-1">
       <div className="relative">
         <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
         <input
           type="text"
           inputMode="search"
           autoComplete="off"
+          autoFocus
           value={valor}
           onChange={(e) => onCambiar(e.target.value)}
-          // Escape limpia: es el gesto que ya espera cualquiera que haya usado
-          // un buscador, y aquí además devuelve el carrito completo de un toque.
-          onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); onCambiar(''); } }}
-          placeholder="Buscar en el carrito: nombre, talla, color, IMEI…"
-          className="w-full pl-9 pr-9 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm
+          // Escape cierra y devuelve el carrito completo de un toque: es el
+          // gesto que ya espera cualquiera que haya usado un buscador.
+          onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); onCambiar(''); onCerrar(); } }}
+          placeholder="Buscar: nombre, talla, color, IMEI…"
+          className="w-full pl-9 pr-8 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm
             text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500
             focus:bg-white transition-all"
         />
-        {filtrando && (
-          <button
-            type="button"
-            onClick={() => onCambiar('')}
-            aria-label="Quitar la búsqueda"
-            className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-lg
-              text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
-          >
-            <X size={14} />
-          </button>
-        )}
+        <button
+          type="button"
+          onClick={() => { onCambiar(''); onCerrar(); }}
+          aria-label="Cerrar la búsqueda"
+          className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-lg
+            text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
+        >
+          <X size={14} />
+        </button>
       </div>
 
-      {/* Mientras haya filtro, decir SIEMPRE cuántos se están escondiendo.
-          Es lo que evita el susto de ver tres líneas y creer que el carrito se
+      {/* Mientras haya filtro, decir SIEMPRE cuántos se están escondiendo. Es
+          lo que evita el susto de ver tres líneas y creer que el carrito se
           vació —o peor, agregar de nuevo algo que ya estaba abajo, oculto. */}
       {filtrando && (
         <p className="flex items-center justify-between gap-2 text-[11px] text-gray-500 px-1">
-          <span>
-            Mostrando <b className="text-gray-700">{mostrados}</b> de {total} · el total de
-            abajo sigue siendo el del carrito completo
-          </span>
-          <button
-            type="button"
-            onClick={() => onCambiar('')}
-            className="flex-shrink-0 text-blue-600 hover:text-blue-700 font-medium"
-          >
+          <span>Mostrando <b className="text-gray-700">{mostrados}</b> de {total}</span>
+          <button type="button" onClick={() => onCambiar('')}
+            className="flex-shrink-0 text-blue-600 hover:text-blue-700 font-medium">
             Ver todos
           </button>
         </p>
@@ -156,6 +155,8 @@ function CantidadInput({ valor, stock, onCambiar }) {
 export function Carrito({ onFacturar, onPrestar, onBorradorCargado, sinHeader = false }) {
   const [modalRuta, setModalRuta] = useState(false);
   const [busqueda,  setBusqueda]  = useState('');
+  const [buscando,  setBuscando]  = useState(false);
+  const [verAyuda,  setVerAyuda]  = useState(false);
   const {
     items, eliminarItem, actualizarPrecio, actualizarCantidad, limpiarCarrito, totalCarrito,
     aplicarTarifa, aplicarTarifaATodos,
@@ -286,6 +287,17 @@ export function Carrito({ onFacturar, onPrestar, onBorradorCargado, sinHeader = 
     onError: (err) => setErrorRed(err.response?.data?.error || 'No se pudo preparar el despacho'),
   });
 
+  // Las explicaciones que antes vivían fijas bajo los botones. Se arman aquí
+  // para que la ⓘ solo aparezca cuando de verdad hay algo que contar.
+  const ayudas = [
+    redLista && !esBodega && contextoRed?.bodega_nombre
+      ? `Para despachar a un local, entra con la sucursal ${contextoRed.bodega_nombre}.`
+      : null,
+    borradoresActivos
+      ? '¿El cliente vuelve luego? Guarda el borrador desde Factura o Préstamo, con sus datos incluidos.'
+      : null,
+  ].filter(Boolean);
+
   const cerrarYLimpiar = () => {
     setDespacho(null);
     setDevolucion(false);
@@ -326,33 +338,66 @@ export function Carrito({ onFacturar, onPrestar, onBorradorCargado, sinHeader = 
             </div>
           )}
 
-          {/* Escaneo directo al carrito: código único o IMEI */}
+          {/* Escaneo directo al carrito y búsqueda dentro de él, en UNA fila.
+              Los dos son campos de texto y la columna mide 288px: apilarlos
+              costaba 50px fijos que salían del espacio de los productos. */}
           <div className="mb-3">
-            <BarraEscaneo
-              value={escaner.scan}
-              onChange={(v) => { escaner.setScan(v); if (escaner.scanMsg) escaner.setScanMsg(null); }}
-              // Agregar con un filtro puesto escondería justo lo que acaba de
-              // entrar, y el vendedor lo escanearía otra vez. Se limpia aquí,
-              // en el manejador del evento, y no con un efecto que vigile
-              // `items.length` (el linter rechaza sincronizar estado en un
-              // efecto, y con razón: sería un render de más en cada toque).
-              onEnter={() => { setBusqueda(''); escaner.handleScan(); }}
-              mensaje={escaner.scanMsg}
-              buscando={escaner.buscando}
-              placeholder={codigoActivo ? 'Escanear código o IMEI…' : 'Escanear IMEI…'}
-            />
+            {buscando && hayBuscador ? (
+              <BuscadorCarrito
+                valor={busqueda}
+                onCambiar={setBusqueda}
+                onCerrar={() => setBuscando(false)}
+                mostrados={itemsVisibles.length}
+                total={items.length}
+              />
+            ) : (
+              <div className="flex items-center gap-2">
+                <div className="flex-1 min-w-0">
+                  <BarraEscaneo
+                    value={escaner.scan}
+                    onChange={(v) => { escaner.setScan(v); if (escaner.scanMsg) escaner.setScanMsg(null); }}
+                    // Agregar con un filtro puesto escondería justo lo que acaba
+                    // de entrar, y el vendedor lo escanearía otra vez. Se limpia
+                    // aquí, en el manejador del evento, y no con un efecto que
+                    // vigile `items.length` (el linter rechaza sincronizar estado
+                    // en un efecto, y con razón: sería un render de más en cada
+                    // toque).
+                    onEnter={() => { setBusqueda(''); escaner.handleScan(); }}
+                    mensaje={escaner.scanMsg}
+                    buscando={escaner.buscando}
+                    placeholder={codigoActivo ? 'Escanear código o IMEI…' : 'Escanear IMEI…'}
+                  />
+                </div>
+                {hayBuscador && (
+                  // La lupa se queda MARCADA con el filtro puesto: cerrar el
+                  // buscador no puede esconder que la lista está recortada.
+                  <button
+                    type="button"
+                    onClick={() => setBuscando(true)}
+                    aria-label="Buscar en el carrito"
+                    title="Buscar en el carrito"
+                    className={`flex-shrink-0 p-2 rounded-xl border transition-colors
+                      ${filtrando
+                        ? 'bg-blue-50 border-blue-300 text-blue-600'
+                        : 'bg-white border-gray-200 text-gray-400 hover:text-gray-600 hover:border-gray-300'}`}
+                  >
+                    <Search size={16} />
+                  </button>
+                )}
+              </div>
+            )}
+            {/* Con el buscador cerrado pero filtrando, el recorte se sigue
+                diciendo: si no, faltarían productos sin explicación. */}
+            {!buscando && filtrando && (
+              <p className="flex items-center justify-between gap-2 text-[11px] text-gray-500 px-1 mt-1">
+                <span>Mostrando <b className="text-gray-700">{itemsVisibles.length}</b> de {items.length}</span>
+                <button type="button" onClick={() => setBusqueda('')}
+                  className="flex-shrink-0 text-blue-600 hover:text-blue-700 font-medium">
+                  Ver todos
+                </button>
+              </p>
+            )}
           </div>
-
-          {/* Buscar entre lo que ya está en el carrito. Desde
-              `MINIMO_PARA_BUSCAR` ítems: antes de eso todo cabe en pantalla. */}
-          {hayBuscador && (
-            <BuscadorCarrito
-              valor={busqueda}
-              onCambiar={setBusqueda}
-              mostrados={itemsVisibles.length}
-              total={items.length}
-            />
-          )}
 
           {/* Ruta de recogida — el carrito es la lista, la bodega el recorrido.
               En una bodega grande, juntar ocho productos en el orden en que se
@@ -376,22 +421,19 @@ export function Carrito({ onFacturar, onPrestar, onBorradorCargado, sinHeader = 
               escanear es el flujo normal del mostrador, y la elección se pega a
               todo lo que entre después. */}
           {listasCfg.activo && (
-            <div className="mb-3 p-3 bg-gray-50 rounded-xl flex flex-col gap-1.5">
+            <div className="mb-3 flex flex-col gap-1">
+              {/* Sin caja gris, sin etiqueta y sin el texto de ayuda permanente:
+                  eran ~60px fijos para explicar algo que se entiende tocando un
+                  chip. El aviso que SÍ se queda es el único que cuesta dinero
+                  si no se lee — el de los productos que no están en la lista. */}
               <SelectorListaPrecio
-                label="Lista de precios"
                 listas={listasCfg.listas}
                 valor={listaPrecioActiva?.id || null}
                 onChange={aplicarListaPreciosATodos}
               />
               {sinPrecioEnLista > 0 && (
                 <span className="text-[11px] text-amber-600">
-                  {sinPrecioEnLista} producto{sinPrecioEnLista !== 1 ? 's' : ''} sin precio en
-                  «{listaPrecioActiva.nombre}» — van a su precio normal, revísalos abajo
-                </span>
-              )}
-              {!listaPrecioActiva && (
-                <span className="text-[11px] text-gray-400">
-                  Sin elegir, cada producto va a su precio de siempre
+                  {sinPrecioEnLista} sin precio en «{listaPrecioActiva.nombre}» — van a su precio normal
                 </span>
               )}
             </div>
@@ -575,67 +617,84 @@ export function Carrito({ onFacturar, onPrestar, onBorradorCargado, sinHeader = 
             Anclado abajo del panel, nunca dentro del scroll: cerrar la venta no
             puede depender de haber bajado hasta el último ítem. */}
         {items.length > 0 && (
-          <div className="flex-shrink-0 border-t border-gray-100 pt-4 mt-4 flex flex-col gap-3">
+          // pt-3/mt-3 en vez de pt-4/mt-4: ocho píxeles que salían del único
+          // sitio que de verdad los necesita, la lista de productos.
+          <div className="flex-shrink-0 border-t border-gray-100 pt-3 mt-3 flex flex-col gap-2.5">
             <div className="flex items-center justify-between">
               <span className="text-sm text-gray-500">Total</span>
               <span className="text-xl font-bold text-gray-900">{formatCOP(total)}</span>
             </div>
+
+            {/* Facturar es LA acción y conserva todo el ancho. Prestar y la
+                acción de red interna comparten fila porque son alternativas
+                entre sí, no pasos de lo mismo: apiladas cobraban 54px cada una
+                al espacio de los productos. */}
             <Button className="w-full" onClick={onFacturar}>
               <FileText size={16} /> Hacer Factura
             </Button>
-            <Button variant="secondary" className="w-full" onClick={onPrestar}>
-              <Handshake size={16} /> Prestar
-            </Button>
 
-            {/* Con la red interna activa el traslado libre no existe: la
-                mercancía se mueve por remisiones. El botón se adapta a dónde
-                estoy — despachar si soy la bodega, devolver si soy un local. */}
-            {redLista ? (
-              esBodega ? (
-                <Button variant="secondary" className="w-full"
-                  loading={prepararDespacho.isPending}
-                  onClick={() => prepararDespacho.mutate()}>
-                  <Truck size={16} /> Despachar a un local
-                </Button>
-              ) : (
-                <>
-                  <Button variant="secondary" className="w-full"
+            <div className="flex gap-2">
+              <Button variant="secondary" className="flex-1 min-w-0" onClick={onPrestar}>
+                <Handshake size={16} /> Prestar
+              </Button>
+
+              {/* Con la red interna activa el traslado libre no existe: la
+                  mercancía se mueve por remisiones. El botón se adapta a dónde
+                  estoy — despachar si soy la bodega, devolver si soy un local. */}
+              {redLista && (
+                esBodega ? (
+                  <Button variant="secondary" className="flex-1 min-w-0"
+                    loading={prepararDespacho.isPending}
+                    onClick={() => prepararDespacho.mutate()}>
+                    <Truck size={16} /> Despachar
+                  </Button>
+                ) : (
+                  <Button variant="secondary" className="flex-1 min-w-0"
                     onClick={() => { setErrorRed(''); setDevolucion(true); }}>
-                    <Undo2 size={16} /> Devolver a {contextoRed.bodega_nombre}
+                    <Undo2 size={16} /> Devolver
                   </Button>
-                  {/* Despachar es de la bodega. Decirlo evita la búsqueda de un
-                      botón que nunca va a estar en esta sucursal. */}
-                  <p className="text-[11px] text-gray-400 text-center leading-snug">
-                    Para despachar a un local, entra con la sucursal {contextoRed.bodega_nombre}.
-                  </p>
-                </>
-              )
-            ) : (
-              <>
-                {hayMultiSucursal && !redActiva && (
-                  <Button variant="secondary" className="w-full" onClick={() => setModalTraslado(true)}>
-                    <ArrowRightLeft size={16} /> Trasladar a otra sucursal
-                  </Button>
-                )}
-                {/* La red está encendida pero el contexto no llegó: sin esto la
-                    zona quedaba en blanco y parecía que el botón de despachar
-                    no existía. Casi siempre es una de dos cosas concretas. */}
-                {redActiva && !contextoRed && (
-                  <p className="text-[11px] text-amber-600 bg-amber-50 border border-amber-100
-                    rounded-lg px-2.5 py-2 leading-snug">
-                    No se pudo cargar la distribución desde bodega. Revisa que este
-                    usuario tenga el módulo <b>Bodega</b> en Ajustes → Equipo → Usuarios.
-                  </p>
-                )}
-              </>
-            )}
+                )
+              )}
+              {!redLista && hayMultiSucursal && !redActiva && (
+                <Button variant="secondary" className="flex-1 min-w-0" onClick={() => setModalTraslado(true)}>
+                  <ArrowRightLeft size={16} /> Trasladar
+                </Button>
+              )}
 
-            {/* "Guardar como borrador" NO va aquí: está dentro de los modales
-                de Factura y Préstamo, junto a los datos del cliente. */}
-            {borradoresActivos && (
-              <p className="text-[11px] text-gray-400 text-center leading-snug">
-                ¿El cliente vuelve luego? Guarda el borrador desde Factura o Préstamo,
-                con sus datos incluidos.
+              {/* Las dos ayudas que antes vivían fijas aquí abajo —«para
+                  despachar entra con la bodega» y «guarda el borrador desde
+                  Factura»— pesaban ~60px SIEMPRE para decir algo que se lee una
+                  vez en la vida. Ahora esperan detrás de la ⓘ. No es un
+                  `title`: en el celular no existe el hover. */}
+              {(ayudas.length > 0) && (
+                <button
+                  type="button"
+                  onClick={() => setVerAyuda((v) => !v)}
+                  aria-label="Ayuda"
+                  aria-expanded={verAyuda}
+                  className={`flex-shrink-0 px-2.5 rounded-xl border transition-colors
+                    ${verAyuda
+                      ? 'bg-gray-100 border-gray-300 text-gray-600'
+                      : 'bg-white border-gray-200 text-gray-300 hover:text-gray-500'}`}
+                >
+                  <Info size={15} />
+                </button>
+              )}
+            </div>
+
+            {verAyuda && ayudas.map((texto, i) => (
+              <p key={i} className="text-[11px] text-gray-400 leading-snug">{texto}</p>
+            ))}
+
+            {/* La red está encendida pero el contexto no llegó: sin esto la
+                zona quedaba en blanco y parecía que el botón de despachar no
+                existía. Este aviso NO se esconde tras la ⓘ: es un fallo que hay
+                que resolver, no una explicación. */}
+            {redActiva && !contextoRed && (
+              <p className="text-[11px] text-amber-600 bg-amber-50 border border-amber-100
+                rounded-lg px-2.5 py-2 leading-snug">
+                No se pudo cargar la distribución desde bodega. Revisa que este
+                usuario tenga el módulo <b>Bodega</b> en Ajustes → Equipo → Usuarios.
               </p>
             )}
 
