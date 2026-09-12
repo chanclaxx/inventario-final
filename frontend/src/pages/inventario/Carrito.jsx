@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   ShoppingCart, Trash2, Plus, Minus, FileText, Handshake, ArrowRightLeft,
-  Truck, Undo2, Bookmark, Route,
+  Truck, Undo2, Bookmark, Route, Search, X,
 } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
 import { EmptyState } from '../../components/ui/EmptyState';
@@ -24,6 +24,7 @@ import { ModalDevolver }  from '../red-interna/ModalDevolver';
 import { ListaBorradores }      from './ListaBorradores';
 import { useBorradores }        from '../../hooks/useBorradores';
 import { unidadesLibres }       from '../../utils/reservas';
+import { filtrarCarrito, MINIMO_PARA_BUSCAR } from '../../utils/carritoBusqueda';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Aviso cuando la cantidad del carrito se come lo apartado en un borrador.
@@ -57,6 +58,72 @@ function AvisoApartado({ item }) {
   );
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Buscar dentro del carrito.
+//
+// Aparece solo desde `MINIMO_PARA_BUSCAR` ítems: con tres productos a la vista
+// un campo de búsqueda es ruido encima de justo lo que se quiere mirar.
+//
+// Va en la zona fija de arriba, como el escáner, y NO dentro del scroll: buscar
+// para poder dejar de scrollear y tener que scrollear para buscar sería el
+// chiste completo.
+// ─────────────────────────────────────────────────────────────────────────────
+function BuscadorCarrito({ valor, onCambiar, mostrados, total }) {
+  const filtrando = valor.trim().length > 0;
+
+  return (
+    <div className="mb-3 flex flex-col gap-1">
+      <div className="relative">
+        <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+        <input
+          type="text"
+          inputMode="search"
+          autoComplete="off"
+          value={valor}
+          onChange={(e) => onCambiar(e.target.value)}
+          // Escape limpia: es el gesto que ya espera cualquiera que haya usado
+          // un buscador, y aquí además devuelve el carrito completo de un toque.
+          onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); onCambiar(''); } }}
+          placeholder="Buscar en el carrito: nombre, talla, color, IMEI…"
+          className="w-full pl-9 pr-9 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm
+            text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500
+            focus:bg-white transition-all"
+        />
+        {filtrando && (
+          <button
+            type="button"
+            onClick={() => onCambiar('')}
+            aria-label="Quitar la búsqueda"
+            className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-lg
+              text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
+          >
+            <X size={14} />
+          </button>
+        )}
+      </div>
+
+      {/* Mientras haya filtro, decir SIEMPRE cuántos se están escondiendo.
+          Es lo que evita el susto de ver tres líneas y creer que el carrito se
+          vació —o peor, agregar de nuevo algo que ya estaba abajo, oculto. */}
+      {filtrando && (
+        <p className="flex items-center justify-between gap-2 text-[11px] text-gray-500 px-1">
+          <span>
+            Mostrando <b className="text-gray-700">{mostrados}</b> de {total} · el total de
+            abajo sigue siendo el del carrito completo
+          </span>
+          <button
+            type="button"
+            onClick={() => onCambiar('')}
+            className="flex-shrink-0 text-blue-600 hover:text-blue-700 font-medium"
+          >
+            Ver todos
+          </button>
+        </p>
+      )}
+    </div>
+  );
+}
+
 function CantidadInput({ valor, stock, onCambiar }) {
   const [texto, setTexto] = useState(String(valor));
   useEffect(() => { setTexto(String(valor)); }, [valor]);
@@ -85,12 +152,23 @@ function CantidadInput({ valor, stock, onCambiar }) {
 
 export function Carrito({ onFacturar, onPrestar, onBorradorCargado, sinHeader = false }) {
   const [modalRuta, setModalRuta] = useState(false);
+  const [busqueda,  setBusqueda]  = useState('');
   const {
     items, eliminarItem, actualizarPrecio, actualizarCantidad, limpiarCarrito, totalCarrito,
     aplicarTarifa, aplicarTarifaATodos,
   } = useCarritoStore();
   const total = totalCarrito();
   const queryClient = useQueryClient();
+
+  // ── Buscar dentro del carrito ─────────────────────────────────────────────
+  // `itemsVisibles` es SOLO para pintar la lista. Todo lo demás —el total, el
+  // contador del header, la tarifa para toda la venta, facturar, prestar,
+  // despachar, devolver y la ruta de recogida— sigue trabajando sobre `items`,
+  // el carrito completo. Un buscador que además recortara lo que se vende sería
+  // la forma más rápida de facturar de menos sin que nadie se entere.
+  const hayBuscador  = items.length >= MINIMO_PARA_BUSCAR;
+  const itemsVisibles = hayBuscador ? filtrarCarrito(items, busqueda) : items;
+  const filtrando     = itemsVisibles.length !== items.length;
 
   // ── Tarifas porcentuales sobre el costo (feature opt-in) ──────────────────
   // Con la feature apagada `activo` es false y nada de esto se renderiza:
@@ -219,9 +297,13 @@ export function Carrito({ onFacturar, onPrestar, onBorradorCargado, sinHeader = 
                 </span>
               </div>
               {items.length > 0 && (
+                // Con un filtro puesto se ven tres líneas pero el botón borra
+                // las cuarenta. Decir el número es lo que evita ese vaciado sin
+                // querer; el contador azul de al lado ya es el del carrito
+                // completo por la misma razón.
                 <button onClick={limpiarCarrito}
                   className="text-xs text-red-400 hover:text-red-600 transition-colors">
-                  Limpiar
+                  {filtrando ? `Limpiar los ${items.length}` : 'Limpiar'}
                 </button>
               )}
             </div>
@@ -232,12 +314,28 @@ export function Carrito({ onFacturar, onPrestar, onBorradorCargado, sinHeader = 
             <BarraEscaneo
               value={escaner.scan}
               onChange={(v) => { escaner.setScan(v); if (escaner.scanMsg) escaner.setScanMsg(null); }}
-              onEnter={escaner.handleScan}
+              // Agregar con un filtro puesto escondería justo lo que acaba de
+              // entrar, y el vendedor lo escanearía otra vez. Se limpia aquí,
+              // en el manejador del evento, y no con un efecto que vigile
+              // `items.length` (el linter rechaza sincronizar estado en un
+              // efecto, y con razón: sería un render de más en cada toque).
+              onEnter={() => { setBusqueda(''); escaner.handleScan(); }}
               mensaje={escaner.scanMsg}
               buscando={escaner.buscando}
               placeholder={codigoActivo ? 'Escanear código o IMEI…' : 'Escanear IMEI…'}
             />
           </div>
+
+          {/* Buscar entre lo que ya está en el carrito. Desde
+              `MINIMO_PARA_BUSCAR` ítems: antes de eso todo cabe en pantalla. */}
+          {hayBuscador && (
+            <BuscadorCarrito
+              valor={busqueda}
+              onCambiar={setBusqueda}
+              mostrados={itemsVisibles.length}
+              total={items.length}
+            />
+          )}
 
           {/* Ruta de recogida — el carrito es la lista, la bodega el recorrido.
               En una bodega grande, juntar ocho productos en el orden en que se
@@ -297,11 +395,11 @@ export function Carrito({ onFacturar, onPrestar, onBorradorCargado, sinHeader = 
                 <div className="flex justify-end mb-1">
                   <button onClick={limpiarCarrito}
                     className="text-xs text-red-400 hover:text-red-600 transition-colors">
-                    Vaciar todo
+                    {filtrando ? `Vaciar los ${items.length} del carrito` : 'Vaciar todo'}
                   </button>
                 </div>
               )}
-              {items.map((item) => (
+              {itemsVisibles.map((item) => (
                 <div key={item.key} className="bg-gray-50 rounded-xl p-3.5 flex flex-col gap-2.5">
                   {/* Nombre + eliminar */}
                   <div className="flex items-start justify-between gap-2">
@@ -390,6 +488,24 @@ export function Carrito({ onFacturar, onPrestar, onBorradorCargado, sinHeader = 
                   )}
                 </div>
               ))}
+
+              {/* El carrito tiene cosas, pero ninguna coincide. Se dice cuántas
+                  hay para que quede claro que no se borró nada. */}
+              {itemsVisibles.length === 0 && (
+                <div className="text-center py-8 px-4">
+                  <Search size={22} className="mx-auto text-gray-300 mb-2" />
+                  <p className="text-sm text-gray-500">
+                    Ningún producto del carrito coincide con «{busqueda.trim()}»
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setBusqueda('')}
+                    className="mt-2 text-xs text-blue-600 hover:text-blue-700 font-medium"
+                  >
+                    Ver los {items.length} del carrito
+                  </button>
+                </div>
+              )}
             </>
           )}
 

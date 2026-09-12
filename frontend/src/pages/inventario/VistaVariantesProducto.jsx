@@ -520,6 +520,9 @@ export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose,
       stock:          atributo.stock,
       cantidad:       1,
       linea_id:       producto.linea_id || null,
+      // Inerte para la venta: viaja solo para que el buscador del carrito
+      // encuentre por lo que está impreso en la etiqueta.
+      codigo:         atributo.codigo || producto.codigo || null,
     });
   };
 
@@ -539,6 +542,7 @@ export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose,
       stock:          variante.stock,
       cantidad:       1,
       linea_id:       producto.linea_id || null,
+      codigo:         variante.codigo || atr?.codigo || producto.codigo || null,
     });
   };
 
@@ -823,6 +827,7 @@ export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose,
                 stock:       producto.stock,
                 cantidad:    1,
                 linea_id:    producto.linea_id || null,
+                codigo:      producto.codigo || null,
               });
               onClose();
             }}

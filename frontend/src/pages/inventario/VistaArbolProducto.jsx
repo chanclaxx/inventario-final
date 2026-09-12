@@ -266,6 +266,7 @@ function FilaAtributo({ atributo, producto, sucursalId, tipos, esAdmin }) {
       stock:          atributo.stock,
       cantidad:       1,
       linea_id:       producto.linea_id || null,
+      codigo:         atributo.codigo || producto.codigo || null,
     });
   };
 
@@ -284,6 +285,7 @@ function FilaAtributo({ atributo, producto, sucursalId, tipos, esAdmin }) {
       stock:          variante.stock,
       cantidad:       1,
       linea_id:       producto.linea_id || null,
+      codigo:         variante.codigo || atr.codigo || producto.codigo || null,
     });
   };
 
@@ -441,6 +443,7 @@ export function VistaArbolProducto({ producto, sucursalId, esAdmin, onClose }) {
       stock:       producto.stock,
       cantidad:    1,
       linea_id:    producto.linea_id || null,
+      codigo:      producto.codigo || null,
     });
   };
 

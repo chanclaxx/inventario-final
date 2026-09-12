@@ -934,6 +934,10 @@ export function ProductosSerial({ onAgregarProducto }) {
       marca:       productoSeleccionado.marca    || null,
       modelo:      productoSeleccionado.modelo   || null,
       linea_id:    productoSeleccionado.linea_id || null,
+      // Inerte para la venta: viaja solo para que el buscador del carrito
+      // encuentre por lo que está impreso en la etiqueta / en la unidad.
+      color:           serial.color           || null,
+      caracteristicas: serial.caracteristicas || null,
     });
   };
 

@@ -77,6 +77,11 @@ export function useEscanerCarrito({
       marca:       serial.marca    || null,
       modelo:      serial.modelo   || null,
       linea_id:    serial.linea_id || null,
+      // Inertes para la venta: viajan para que el buscador del carrito
+      // encuentre esta unidad por lo mismo por lo que la encuentra cuando se
+      // agrega desde la lista de seriales.
+      color:           serial.color           || null,
+      caracteristicas: serial.caracteristicas || null,
     });
 
     // Apalabrado en un borrador: el modal de conflicto ya está preguntando qué
@@ -119,6 +124,7 @@ export function useEscanerCarrito({
         stock:          nodo.stock,
         cantidad:       1,
         linea_id:       nodo.linea_id || null,
+        codigo:         nodo.codigo || null,
       });
       if (res === 'reservado') { setScanMsg(null); return; }
       setScanMsg(res === 'sin_stock'
@@ -151,6 +157,7 @@ export function useEscanerCarrito({
       stock:       nodo.stock,
       cantidad:    1,
       linea_id:    nodo.linea_id || null,
+      codigo:      nodo.codigo || null,
     });
     // 'reservado' no es ni éxito ni error: el modal de conflicto ya está
     // preguntando qué hacer y el producto todavía no entró.

@@ -315,6 +315,10 @@ const buscarSerialPorCodigoExacto = async (codigo, negocioId, sucursalId) => {
       s.id, s.imei, s.vendido, s.prestado,
       s.precio       AS precio_serial,
       s.costo_compra,
+      -- Inertes para el escaneo: viajan para que la unidad quede en el carrito
+      -- con lo mismo que trae cuando se agrega desde la lista de seriales, y el
+      -- buscador del carrito la encuentre igual por cualquiera de los dos lados.
+      s.color, s.caracteristicas,
       ps.id          AS producto_id,
       ps.nombre      AS producto_nombre,
       ps.marca, ps.modelo, ps.linea_id,

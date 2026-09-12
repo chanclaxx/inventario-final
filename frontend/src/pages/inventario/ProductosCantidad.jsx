@@ -328,6 +328,9 @@ export function ProductosCantidad() {
       stock:       producto.stock,
       cantidad:    1,
       linea_id:    producto.linea_id || null,
+      // Inerte para la venta: viaja solo para que el buscador del carrito
+      // encuentre por lo que está impreso en la etiqueta.
+      codigo:      producto.codigo || null,
     });
   };
 
