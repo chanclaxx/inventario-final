@@ -24,6 +24,8 @@ import { getPrestatarios } from '../../api/prestatarios.api';
 import api from '../../api/axios.config';
 import { getLineas } from '../../api/lineas.api';
 import { getArbol, ajustarStockAtributo, ajustarStockVariante } from '../../api/variantesProductoApi';
+import { EditorVariantesNuevas } from './EditorVariantesNuevas';
+import { estadoVariantesVacio, armarVariantesPayload, errorVariantes } from '../../utils/variantesNuevas';
 import { fechaHoyBogota, formatCOP } from '../../utils/formatters';
 import {
   Package, ShoppingBag, ChevronRight, ChevronLeft, ChevronDown, Trash2,
@@ -1692,6 +1694,7 @@ function PasoCantidad({ sucursalKey, onExito, variantesActivo, codigoActivo, cod
   const [error,     setError]     = useState('');
   const [nodoSel,   setNodoSel]   = useState(null);
   const [nodosData, setNodosData] = useState({});
+  const [variantesNuevas, setVariantesNuevas] = useState(estadoVariantesVacio);
 
   const { data: productosData } = useQuery({
     queryKey: ['productos-cantidad', ...sucursalKey],
@@ -1751,6 +1754,11 @@ function PasoCantidad({ sucursalKey, onExito, variantesActivo, codigoActivo, cod
     if (producto.costo_unitario) setCostoCompra(Number(producto.costo_unitario));
   };
 
+  // Las variantes nacen con el producto, en la misma petición. Solo el admin:
+  // crear una variante suelta ya lo exige, y el backend lo vuelve a verificar.
+  const puedeCrearVariantes = variantesActivo && esAdmin;
+  const errorVars = puedeCrearVariantes ? errorVariantes(variantesNuevas) : null;
+
   const mutCrear = useMutation({
     mutationFn: () => crearProductoCantidad({
       nombre:         nuevoProducto.nombre,
@@ -1761,12 +1769,20 @@ function PasoCantidad({ sucursalKey, onExito, variantesActivo, codigoActivo, cod
       linea_id:       nuevoProducto.linea_id       ? Number(nuevoProducto.linea_id)               : null,
       ...(codigoActivo && nuevoProducto.codigo.trim() ? { codigo: nuevoProducto.codigo.trim() } : {}),
       ...(ubicacionActiva && nuevoProducto.ubicacion.trim() ? { ubicacion: nuevoProducto.ubicacion.trim() } : {}),
+      ...(puedeCrearVariantes
+        ? { variantes: armarVariantesPayload(variantesNuevas, { conCosto: puedeVerCosto, conCodigo: codigoActivo }) }
+        : {}),
     }),
     onSuccess: (res) => {
+      const creado = res.data.data;
       queryClient.invalidateQueries({ queryKey: ['productos-cantidad'], exact: false });
       queryClient.invalidateQueries({ queryKey: ['ubicaciones'],        exact: false });
-      setProductoSel(res.data.data);
+      // El árbol ya viene en la respuesta: el paso de cantidad por variante
+      // aparece al instante, sin esperar una segunda petición.
+      if (creado.arbol) queryClient.setQueryData(['arbol-producto', creado.id, creado.sucursal_id], creado.arbol);
+      setProductoSel(creado);
       setCreandoNuevo(false);
+      setVariantesNuevas(estadoVariantesVacio());
     },
     onError: (e) => setError(e.response?.data?.error || 'Error'),
   });
@@ -1938,6 +1954,15 @@ function PasoCantidad({ sucursalKey, onExito, variantesActivo, codigoActivo, cod
                 </div>
               )}
               <SelectLinea value={nuevoProducto.linea_id} onChange={(val) => setNuevoProducto({ ...nuevoProducto, linea_id: val })} />
+              {puedeCrearVariantes && (
+                <EditorVariantesNuevas
+                  estado={variantesNuevas}
+                  onChange={setVariantesNuevas}
+                  puedeVerCosto={puedeVerCosto}
+                  codigoActivo={codigoActivo}
+                  codigoAuto={codigoAuto}
+                />
+              )}
               {listaProveedores.length > 0 && (
                 <div className="flex flex-col gap-1">
                   <label className="text-xs text-gray-600 font-medium">
@@ -1957,7 +1982,7 @@ function PasoCantidad({ sucursalKey, onExito, variantesActivo, codigoActivo, cod
               )}
               <div className="flex gap-2">
                 <Button variant="secondary" size="sm" className="flex-1" onClick={() => setCreandoNuevo(false)}>Cancelar</Button>
-                <Button size="sm" className="flex-1" loading={mutCrear.isPending} disabled={!nuevoProducto.linea_id} onClick={() => mutCrear.mutate()}>Crear y seleccionar</Button>
+                <Button size="sm" className="flex-1" loading={mutCrear.isPending} disabled={!nuevoProducto.linea_id || !!errorVars} onClick={() => mutCrear.mutate()}>Crear y seleccionar</Button>
               </div>
             </div>
           )}

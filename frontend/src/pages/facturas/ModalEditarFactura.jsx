@@ -86,9 +86,22 @@ function buildEstadoInicial(data) {
       nombre_producto: l.nombre_producto,
       imei:            l.imei || null,
       cantidad:        l.cantidad,
+      cantidad_devuelta: Number(l.cantidad_devuelta || 0),
       precio:          Number(l.precio || 0),
     })),
     pagos: pagosArrayAMapa(data.pagos),
+    // Factura a crédito: el backend ajusta el crédito por la DIFERENCIA que deja
+    // esta edición. La pantalla repite esa cuenta para mostrarla antes de guardar.
+    credito: data.estado === 'Credito' && data.credito && data.credito.estado !== 'Cancelado'
+      ? {
+          valor_total:   Number(data.credito.valor_total   || 0),
+          cuota_inicial: Number(data.credito.cuota_inicial || 0),
+          total_abonado: Number(data.credito.total_abonado || 0),
+          netoInicial:   (data.lineas || []).reduce((s, l) =>
+            s + Number(l.precio || 0) * Math.max(0, Number(l.cantidad || 0) - Number(l.cantidad_devuelta || 0)), 0),
+          pagosInicial:  (data.pagos || []).reduce((s, p) => s + Number(p.valor || 0), 0),
+        }
+      : null,
     vendedor_id:     data.vendedor_id     ?? '',
     vendedor_nombre: data.vendedor_nombre ?? '',
     // ← array de retomas existentes
@@ -435,6 +448,11 @@ export function ModalEditarFactura({ facturaId, onClose, onGuardado }) {
       queryClient.invalidateQueries({ queryKey: ['productos-serial'],  exact: false });
       queryClient.invalidateQueries({ queryKey: ['productos-cantidad'], exact: false });
       queryClient.invalidateQueries({ queryKey: ['clientes'],          exact: false });
+      // Editar una factura a crédito mueve el crédito: la cartera y el estado de
+      // cuenta tienen que volver a leerse o seguirían mostrando el valor viejo.
+      queryClient.invalidateQueries({ queryKey: ['creditos'],              exact: false });
+      queryClient.invalidateQueries({ queryKey: ['credito-detalle'],       exact: false });
+      queryClient.invalidateQueries({ queryKey: ['estado-cuenta-credito'], exact: false });
       onGuardado?.();
       onClose();
     },
@@ -460,6 +478,9 @@ export function ModalEditarFactura({ facturaId, onClose, onGuardado }) {
       if (retomaNueva.tipo_retoma === 'cantidad' && !retomaNueva.producto_cantidad_id)     return setError('Selecciona el producto para ingresar al inventario');
     }
     if (mostrarVendedor && vendedorDesbloqueado && !vendedorIdEfectivo)                     return setError('Selecciona el vendedor que realizó la venta');
+    if (creditoInicial && creditoSaldo < -0.5) {
+      return setError(`El cliente ya pagó ${formatCOP(creditoCuota + creditoInicial.total_abonado)} de este crédito y el nuevo total sería ${formatCOP(creditoValor)}. Anula primero el abono que sobra desde el estado de cuenta.`);
+    }
 
     if (tipoClienteEfectivo === 'cliente') {
       setVerificandoCedula(true);
@@ -486,6 +507,15 @@ export function ModalEditarFactura({ facturaId, onClose, onGuardado }) {
   const totalNeto             = totalLineas - valorRetoma;
   const totalPagado           = Object.values(pagosEfectivos).reduce((s, v) => s + Number(v || 0), 0);
   const diferencia            = totalPagado - totalNeto;
+
+  const creditoInicial   = estadoInicial?.credito ?? null;
+  const netoLineas       = lineasEfectivas.reduce((s, l) =>
+    s + Number(l.precio || 0) * Math.max(0, Number(l.cantidad || 0) - Number(l.cantidad_devuelta || 0)), 0);
+  const creditoValor     = creditoInicial ? creditoInicial.valor_total + (netoLineas - creditoInicial.netoInicial) : 0;
+  const creditoCuota     = creditoInicial ? creditoInicial.cuota_inicial + (totalPagado - creditoInicial.pagosInicial) : 0;
+  const creditoSaldo     = creditoInicial ? creditoValor - creditoCuota - creditoInicial.total_abonado : 0;
+  const creditoCambia    = creditoInicial
+    && (Math.abs(creditoValor - creditoInicial.valor_total) >= 1 || Math.abs(creditoCuota - creditoInicial.cuota_inicial) >= 1);
 
   if (isLoading || !estadoInicial) {
     return (
@@ -668,7 +698,9 @@ export function ModalEditarFactura({ facturaId, onClose, onGuardado }) {
 
           {/* Métodos de pago */}
           <div>
-            <p className="text-sm font-medium text-gray-700 mb-2">Métodos de pago</p>
+            <p className="text-sm font-medium text-gray-700 mb-2">
+              {creditoInicial ? 'Cuota inicial (métodos de pago)' : 'Métodos de pago'}
+            </p>
             <div className="flex flex-col gap-2">
               {METODOS_PAGO.map(({ id }) => (
                 <div key={id} className="flex items-center gap-3">
@@ -696,11 +728,38 @@ export function ModalEditarFactura({ facturaId, onClose, onGuardado }) {
               <span className="text-gray-600">Total a pagar</span>
               <span className="font-bold text-gray-900">{formatCOP(totalNeto)}</span>
             </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-600">Total pagado</span>
-              <span className="font-medium">{formatCOP(totalPagado)}</span>
-            </div>
-            {diferencia !== 0 && (
+            {creditoInicial ? (
+              <>
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-600">Cuota inicial</span>
+                  <span className="font-medium">{formatCOP(creditoCuota)}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-600">Abonado al crédito</span>
+                  <span className="font-medium">{formatCOP(creditoInicial.total_abonado)}</span>
+                </div>
+                <div className="flex justify-between text-sm border-t border-gray-200 pt-1.5 mt-1">
+                  <span className={creditoSaldo < -0.5 ? 'text-red-500' : 'text-gray-700 font-medium'}>
+                    Saldo del crédito
+                  </span>
+                  <Badge variant={creditoSaldo < -0.5 ? 'red' : 'blue'}>
+                    {creditoSaldo < -0.5 ? `Pagado de más ${formatCOP(-creditoSaldo)}` : formatCOP(creditoSaldo)}
+                  </Badge>
+                </div>
+                {creditoCambia && creditoSaldo >= -0.5 && (
+                  <p className="text-xs text-blue-600">
+                    Al guardar, el crédito pasa de {formatCOP(creditoInicial.valor_total)} a {formatCOP(creditoValor)} y
+                    el estado de cuenta del cliente se actualiza.
+                  </p>
+                )}
+              </>
+            ) : (
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-600">Total pagado</span>
+                <span className="font-medium">{formatCOP(totalPagado)}</span>
+              </div>
+            )}
+            {!creditoInicial && diferencia !== 0 && (
               <div className="flex justify-between text-sm border-t border-gray-200 pt-1.5 mt-1">
                 <span className={diferencia > 0 ? 'text-green-600' : 'text-red-500'}>
                   {diferencia > 0 ? 'Cambio' : 'Falta'}

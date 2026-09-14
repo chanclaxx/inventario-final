@@ -27,11 +27,14 @@ const crearProducto = async (req, res, next) => {
     if (!sucursal_id) {
       return res.status(400).json({ ok: false, error: 'Debes indicar la sucursal destino del producto' });
     }
-    const data = await service.crearProducto(req.user.negocio_id, { ...req.body, sucursal_id });
+    const data = await service.crearProducto(
+      req.user.negocio_id, { ...req.body, sucursal_id }, { rol: req.user.rol }
+    );
     audit.registrar(req.user.negocio_id, req.user.id, 'Producto cantidad creado', 'productos_cantidad', data.id, {
       sucursal_id,
       producto: data.nombre,
       precio:   Number(data.precio_venta ?? 0),
+      ...(data.arbol?.length ? { variantes: data.arbol.length } : {}),
     });
     res.status(201).json({ ok: true, data, message: 'Producto creado correctamente' });
   } catch (err) { next(err); }

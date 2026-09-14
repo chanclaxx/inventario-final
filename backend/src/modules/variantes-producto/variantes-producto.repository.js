@@ -83,8 +83,10 @@ const verificarVarianteNegocio = async (varianteId, negocioId) => {
 
 // ── CRUD de atributos ─────────────────────────────────────────────────────────
 
-const crearAtributo = async (productoId, sucursalId, { tipo_id, valor, stock = 0, stock_minimo = 0, precio, costo_unitario, codigo }) => {
-  const { rows } = await pool.query(
+// `db` opcional: crear un producto con sus variantes lo hace todo en UNA
+// transacción y pasa su `client`.
+const crearAtributo = async (productoId, sucursalId, { tipo_id, valor, stock = 0, stock_minimo = 0, precio, costo_unitario, codigo }, db = pool) => {
+  const { rows } = await db.query(
     `INSERT INTO atributos_producto (producto_id, sucursal_id, tipo_id, valor, stock, stock_minimo, precio, costo_unitario, codigo)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
      RETURNING id, tipo_id, valor, stock, stock_minimo, precio, costo_unitario, codigo, activo`,
@@ -119,8 +121,8 @@ const eliminarAtributo = async (id) => {
 
 // ── CRUD de variantes ─────────────────────────────────────────────────────────
 
-const crearVariante = async (atributoId, { tipo_id, valor, stock = 0, stock_minimo = 0, precio, costo_unitario, codigo }) => {
-  const { rows } = await pool.query(
+const crearVariante = async (atributoId, { tipo_id, valor, stock = 0, stock_minimo = 0, precio, costo_unitario, codigo }, db = pool) => {
+  const { rows } = await db.query(
     `INSERT INTO variantes_atributo (atributo_id, tipo_id, valor, stock, stock_minimo, precio, costo_unitario, codigo)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
      RETURNING id, tipo_id, valor, stock, stock_minimo, precio, costo_unitario, codigo, activo`,

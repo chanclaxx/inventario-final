@@ -44,6 +44,10 @@
 //   4. Lo que no hereda toma el siguiente número del contador del negocio
 //      (`contadores_documento`, tipo 'codigo_producto'), sembrado con el mayor
 //      código numérico que ya exista para no repartir números ocupados.
+//      Con `codigo_auto_formato = 'patron'` el código es CAT-PRO-VAR-número y
+//      hay un contador POR RAÍZ CAT-PRO (tipo 'codigo_patron:CAT-PRO'); las
+//      razones están en `codigoPatron.util.js`. Las reglas 1, 2, 3 y 5 son
+//      las mismas en los dos formatos.
 //
 //   5. Se PROPAGA a las demás sedes, pero solo a los nodos que están vacíos.
 //
@@ -56,6 +60,16 @@
 
 const { pool } = require('../config/db');
 const { normalizarCodigo, MAX_CODIGO } = require('./codigo.util');
+const {
+  raizPatron, componerPatron, tipoContadorPatron, regexRaiz,
+} = require('./codigoPatron.util');
+
+// Los dos formatos del código generado. `numero` es el de siempre y el valor
+// por defecto: los negocios que ya imprimieron etiquetas numéricas siguen
+// igual. `patron` = CATEGORÍA-PRODUCTO-VARIANTE-consecutivo
+// (`utils/codigoPatron.util.js`). Cambiar de formato NUNCA reescribe un código
+// existente (regla 1): solo decide cómo nacen los próximos.
+const FORMATOS = ['numero', 'patron'];
 
 // Mismas reglas que la generación masiva ha usado siempre: el prefijo es corto
 // y sin espacios porque va delante de CADA código, y los dígitos son dígitos
@@ -89,6 +103,14 @@ const validarDigitos = (raw) => {
   return n;
 };
 
+const validarFormato = (raw) => {
+  const f = String(raw ?? '').trim();
+  if (!FORMATOS.includes(f)) {
+    throw { status: 400, message: 'El formato del código debe ser «numero» o «patron».' };
+  }
+  return f;
+};
+
 const validarLargo = (prefijo, digitos) => {
   if (prefijo.length + digitos > MAX_CODIGO) {
     throw { status: 400, message: `El código no puede superar ${MAX_CODIGO} caracteres` };
@@ -113,7 +135,9 @@ const configCodigoAuto = (config = {}) => {
   const prefijo = PREFIJO_OK.test(p) ? p : '';
   const n = Number(config.codigo_auto_digitos);
   const digitos = Number.isInteger(n) && n >= DIGITOS.min && n <= DIGITOS.max ? n : DIGITOS.defecto;
-  return { activo, prefijo, digitos: Math.min(digitos, MAX_CODIGO - prefijo.length) };
+  // Ausente o desconocido = numérico: lo que no se entiende no cambia nada.
+  const formato = config.codigo_auto_formato === 'patron' ? 'patron' : 'numero';
+  return { activo, prefijo, digitos: Math.min(digitos, MAX_CODIGO - prefijo.length), formato };
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -156,16 +180,45 @@ const semilla = async (client, negocioId, prefijo) => {
  * reparable: si alguien importó códigos numéricos por fuera, el contador se
  * pone por encima solo, en vez de repartir números que ya existen.
  */
-const reservarBloque = async (client, negocioId, base, cuantos) => {
+const reservarBloque = async (client, negocioId, base, cuantos, tipo = 'codigo_producto') => {
   const { rows } = await client.query(
     `INSERT INTO contadores_documento (negocio_id, tipo, ultimo_numero)
-     VALUES ($1, 'codigo_producto', GREATEST($2::int, 0) + $3)
+     VALUES ($1, $4, GREATEST($2::int, 0) + $3)
      ON CONFLICT (negocio_id, tipo)
      DO UPDATE SET ultimo_numero = GREATEST(contadores_documento.ultimo_numero, $2::int) + $3
      RETURNING ultimo_numero`,
-    [negocioId, base, cuantos]
+    [negocioId, base, cuantos, tipo]
   );
   return Number(rows[0].ultimo_numero) - cuantos + 1;
+};
+
+/**
+ * El mayor consecutivo que ya usa una raíz CAT-PRO en el negocio, en los tres
+ * niveles. Es la semilla del contador de esa raíz: así un código escrito a mano
+ * con el mismo patrón («ACC-AUD-BLA-040») hace que el siguiente salga 041 en vez
+ * de chocar.
+ */
+const semillaPatron = async (client, negocioId, raiz) => {
+  const patron = regexRaiz(raiz);
+  const { rows } = await client.query(
+    `SELECT COALESCE(MAX(SUBSTRING(codigo FROM '([0-9]+)$')::bigint), 0) AS maximo
+     FROM (
+       SELECT pc.codigo FROM productos_cantidad pc
+         JOIN sucursales su ON su.id = pc.sucursal_id
+        WHERE su.negocio_id = $1 AND UPPER(pc.codigo) ~ $2
+       UNION ALL
+       SELECT ap.codigo FROM atributos_producto ap
+         JOIN sucursales su ON su.id = ap.sucursal_id
+        WHERE su.negocio_id = $1 AND UPPER(ap.codigo) ~ $2
+       UNION ALL
+       SELECT v.codigo FROM variantes_atributo v
+         JOIN atributos_producto ap ON ap.id = v.atributo_id
+         JOIN sucursales su ON su.id = ap.sucursal_id
+        WHERE su.negocio_id = $1 AND UPPER(v.codigo) ~ $2
+     ) t`,
+    [negocioId, patron]
+  );
+  return Number(rows[0]?.maximo || 0);
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -189,44 +242,47 @@ const _pendientes = async (client, sucursalId, nodos) => {
   const prod = ids('producto');
   if (prod.length) {
     const { rows } = await client.query(
-      `SELECT pc.id, pc.nombre AS producto
+      `SELECT pc.id, pc.nombre AS producto, lp.nombre AS categoria
        FROM productos_cantidad pc
+       LEFT JOIN lineas_producto lp ON lp.id = pc.linea_id
        WHERE pc.id = ANY($1::int[]) AND pc.sucursal_id = $2 AND pc.activo
          AND ${_vacio('pc.codigo')}
        ORDER BY pc.id
        FOR UPDATE OF pc`,
       [prod, sucursalId]
     );
-    for (const r of rows) out.push({ nivel: 'producto', id: r.id, producto: r.producto, atributo: null, variante: null });
+    for (const r of rows) out.push({ nivel: 'producto', id: r.id, producto: r.producto, categoria: r.categoria, atributo: null, variante: null });
   }
   const atr = ids('atributo');
   if (atr.length) {
     const { rows } = await client.query(
-      `SELECT ap.id, pc.nombre AS producto, ap.valor AS atributo
+      `SELECT ap.id, pc.nombre AS producto, lp.nombre AS categoria, ap.valor AS atributo
        FROM atributos_producto ap
        JOIN productos_cantidad pc ON pc.id = ap.producto_id
+       LEFT JOIN lineas_producto lp ON lp.id = pc.linea_id
        WHERE ap.id = ANY($1::int[]) AND ap.sucursal_id = $2 AND ap.activo
          AND ${_vacio('ap.codigo')}
        ORDER BY ap.id
        FOR UPDATE OF ap`,
       [atr, sucursalId]
     );
-    for (const r of rows) out.push({ nivel: 'atributo', id: r.id, producto: r.producto, atributo: r.atributo, variante: null });
+    for (const r of rows) out.push({ nivel: 'atributo', id: r.id, producto: r.producto, categoria: r.categoria, atributo: r.atributo, variante: null });
   }
   const vars = ids('variante');
   if (vars.length) {
     const { rows } = await client.query(
-      `SELECT v.id, pc.nombre AS producto, ap.valor AS atributo, v.valor AS variante
+      `SELECT v.id, pc.nombre AS producto, lp.nombre AS categoria, ap.valor AS atributo, v.valor AS variante
        FROM variantes_atributo v
        JOIN atributos_producto ap ON ap.id = v.atributo_id
        JOIN productos_cantidad pc ON pc.id = ap.producto_id
+       LEFT JOIN lineas_producto lp ON lp.id = pc.linea_id
        WHERE v.id = ANY($1::int[]) AND ap.sucursal_id = $2 AND v.activo
          AND ${_vacio('v.codigo')}
        ORDER BY v.id
        FOR UPDATE OF v`,
       [vars, sucursalId]
     );
-    for (const r of rows) out.push({ nivel: 'variante', id: r.id, producto: r.producto, atributo: r.atributo, variante: r.variante });
+    for (const r of rows) out.push({ nivel: 'variante', id: r.id, producto: r.producto, categoria: r.categoria, atributo: r.atributo, variante: r.variante });
   }
   return out;
 };
@@ -481,6 +537,45 @@ const _propagar = async (client, negocioId, asignados) => {
 const MAX_RONDAS = 5;
 
 /**
+ * Genera con PATRÓN (CAT-PRO-VAR-consecutivo). Un contador por raíz CAT-PRO,
+ * sembrado con lo que ya exista de esa raíz; los choques (un código escrito a
+ * mano justo con ese número) se saltan y piden otro, igual que en el numérico.
+ * Muta `asignados` y `usados`; lo que tras las rondas siga sin salir se queda
+ * sin código, igual que en el numérico.
+ */
+const _generarPatron = async (client, { negocioId, sucursalId, porGenerar, asignados, usados }) => {
+  const grupos = new Map();
+  for (const n of porGenerar) {
+    const raiz = raizPatron({ categoria: n.categoria, producto: n.producto });
+    if (!grupos.has(raiz)) grupos.set(raiz, []);
+    grupos.get(raiz).push(n);
+  }
+
+  // El segmento de variante es el valor del nodo que se etiqueta: el propio
+  // producto no lleva, la talla lleva el suyo, la sub-variante el suyo.
+  const segmento = (n) => (n.nivel === 'variante' ? n.variante : n.nivel === 'atributo' ? n.atributo : null);
+
+  for (const [raiz, lista] of grupos) {
+    const base = await semillaPatron(client, negocioId, raiz);
+    let pendientes = lista;
+    for (let ronda = 0; ronda < MAX_RONDAS && pendientes.length; ronda += 1) {
+      const primero = await reservarBloque(client, negocioId, base, pendientes.length, tipoContadorPatron(raiz));
+      const propuestos = pendientes.map((n, k) => normalizarCodigo(componerPatron(
+        { categoria: n.categoria, producto: n.producto, variante: segmento(n) }, primero + k)));
+      const ocupados = await codigosOcupados(client, sucursalId, propuestos);
+      const siguen = [];
+      pendientes.forEach((n, k) => {
+        const c = propuestos[k];
+        if (ocupados.has(c) || usados.has(c)) { siguen.push(n); return; }
+        usados.add(c);
+        asignados.push({ ...n, codigo: c, origen: 'generado' });
+      });
+      pendientes = siguen;
+    }
+  }
+};
+
+/**
  * El motor. Asigna código a los nodos de la lista que no tienen.
  *
  * @param {object} client  cliente DENTRO de una transacción (usa SAVEPOINT)
@@ -500,7 +595,7 @@ const MAX_RONDAS = 5;
  */
 const asignarCodigos = async (client, {
   negocioId, sucursalId, nodos, prefijo = '', digitos = DIGITOS.defecto,
-  generar = true, tolerante = false,
+  generar = true, tolerante = false, formato = 'numero',
 }) => {
   if (!Array.isArray(nodos) || !nodos.length) return { asignados: [], bloqueados: [] };
 
@@ -539,7 +634,9 @@ const asignarCodigos = async (client, {
       asignados.push({ ...n, codigo: c, origen: 'heredado' });
     });
 
-    if (generar && porGenerar.length) {
+    if (generar && porGenerar.length && formato === 'patron') {
+      await _generarPatron(client, { negocioId, sucursalId, porGenerar, asignados, usados });
+    } else if (generar && porGenerar.length) {
       const pref = _limpiarPrefijo(prefijo);
       const base = await semilla(client, negocioId, pref);
       for (let ronda = 0; ronda < MAX_RONDAS && porGenerar.length; ronda += 1) {
@@ -583,7 +680,8 @@ const leerConfig = async (ejecutor, negocioId) => {
   const { rows } = await (ejecutor || pool).query(
     `SELECT clave, valor FROM config_negocio
      WHERE negocio_id = $1
-       AND clave IN ('codigo_producto_activo', 'codigo_auto', 'codigo_auto_prefijo', 'codigo_auto_digitos')`,
+       AND clave IN ('codigo_producto_activo', 'codigo_auto', 'codigo_auto_prefijo',
+                     'codigo_auto_digitos', 'codigo_auto_formato')`,
     [negocioId]
   );
   return configCodigoAuto(Object.fromEntries(rows.map((r) => [r.clave, r.valor])));
@@ -607,7 +705,7 @@ const asignarAlCrear = async ({ negocioId, sucursalId, nivel, id }) => {
     await client.query('BEGIN');
     const { asignados } = await asignarCodigos(client, {
       negocioId, sucursalId, nodos: [{ nivel, id }],
-      prefijo: cfg.prefijo, digitos: cfg.digitos, tolerante: true,
+      prefijo: cfg.prefijo, digitos: cfg.digitos, formato: cfg.formato, tolerante: true,
     });
     await client.query('COMMIT');
     return asignados[0]?.codigo ?? null;
@@ -618,6 +716,27 @@ const asignarAlCrear = async ({ negocioId, sucursalId, nivel, id }) => {
   } finally {
     if (client) client.release();
   }
+};
+
+/**
+ * Lo mismo que `asignarAlCrear` pero DENTRO de una transacción que ya está
+ * abierta y para varios nodos: crear un producto con sus variantes de una vez,
+ * o recibir una compra que toca nodos que todavía no tienen código. Lee la
+ * configuración con el mismo `client` y es tolerante: el motor corre en su
+ * propio savepoint, así que un fallo deja los nodos sin código y la operación
+ * que lo disparó sigue.
+ *
+ * @returns {Promise<object[]>} los asignados
+ */
+const asignarEnTransaccion = async (client, { negocioId, sucursalId, nodos }) => {
+  if (!Array.isArray(nodos) || !nodos.length) return [];
+  const cfg = await leerConfig(client, negocioId);
+  if (!cfg.activo) return [];
+  const { asignados } = await asignarCodigos(client, {
+    negocioId, sucursalId, nodos,
+    prefijo: cfg.prefijo, digitos: cfg.digitos, formato: cfg.formato, tolerante: true,
+  });
+  return asignados;
 };
 
 /**
@@ -655,8 +774,8 @@ const copiarCodigoSiLibre = async (client, { nivel, id, sucursalId, codigo }) =>
 };
 
 module.exports = {
-  PREFIJO_OK, DIGITOS,
-  validarPrefijo, validarDigitos, validarLargo, configCodigoAuto, leerConfig,
-  semilla, reservarBloque, codigosOcupados,
-  asignarCodigos, asignarAlCrear, copiarCodigoSiLibre,
+  PREFIJO_OK, DIGITOS, FORMATOS,
+  validarPrefijo, validarDigitos, validarFormato, validarLargo, configCodigoAuto, leerConfig,
+  semilla, semillaPatron, reservarBloque, codigosOcupados,
+  asignarCodigos, asignarAlCrear, asignarEnTransaccion, copiarCodigoSiLibre,
 };

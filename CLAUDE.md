@@ -67,6 +67,22 @@ Three roles exist: `admin_negocio`, `supervisor`, `vendedor`. Role determines wh
 > **`puede_cancelar`**, no de `puede_editar`: quitarle líneas a una factura
 > devuelve stock y baja el crédito — es una cancelación parcial, y quien solo
 > corrige datos no debe poder revertir mercancía.
+>
+> **Editar una factura a CRÉDITO mueve el crédito** (`editarFactura`,
+> `_ajustarCreditoEditado`): el valor vive DOS veces —`lineas_factura` (la factura
+> y su «TOTAL A PAGAR») y `creditos.valor_total` (saldo, abono, estado de cuenta y
+> el bloque del crédito en el MISMO PDF)—. Editar solo cambiaba las líneas: una
+> venta de $3.940.000 rebajada a $3.790.000 seguía debiendo $3.940.000 y el abono
+> aceptó esa cifra (Caliwood, factura #6681, sep-2026). El ajuste es por
+> **DIFERENCIA**, nunca un recálculo: una edición que solo corrige la cédula no
+> toca el crédito, ni siquiera uno ya descuadrado. Se mide sobre la cantidad
+> VIGENTE (la devolución ya rebajó `valor_total`), y la cuota inicial sigue igual a
+> la diferencia de `pagos_factura`. Bajar por debajo de lo pagado responde **409
+> `CREDITO_PAGADO_DE_MAS`**: el sistema no sabe si esa plata se devuelve o queda a
+> favor, así que primero se anula el abono que sobra. Subir un Saldado lo reabre;
+> bajar hasta lo pagado lo cierra por `cerrarSiPagadoEnTx`.
+> Prueba: `46-editar-factura-credito` (39 verificaciones; falla 9 contra el código
+> anterior).
 
 > **«¿Puede ver los costos?» tiene UNA sola respuesta** (`utils/costos.util.js`,
 > `hooks/usePuedeVerCostos.js`): antes convivían cuatro reglas para la misma
@@ -930,6 +946,52 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > sostienen que no se parte la identidad ni se pisa la otra sede, la 10 corre la
 > recepción de la red interna y la 11 que un contador roto no impide crear) y la
 > sección 19 de `18-importacion`.
+>
+> **El código con PATRÓN: CATEGORÍA-PRODUCTO-VARIANTE-consecutivo**
+> (`utils/codigoPatron.util.js`, `codigo_auto_formato`): el número pelado
+> (000121) identifica pero no dice nada. Con `'patron'` nace `ACC-CAR-001`
+> (producto sin variantes) o `ACC-AUD-BLA-002` (la hoja Blanco). La categoría
+> es la **línea** —no hay otra agrupación y crear un producto ya la exige—; sin
+> línea sale `GEN`. Tres letras = los tres primeros caracteres alfanuméricos sin
+> tildes (`38MM` → `38M`; las cifras cuentan o 38MM y 42MM darían lo mismo),
+> relleno con `X`. El segmento de variante es el valor de la **hoja**; el
+> producto no lleva.
+> **El consecutivo es por raíz CAT-PRO, no por CAT-PRO-VAR**: tres letras chocan
+> («Audífonos BT» y «Audífonos cable» son AUD; «Blanco»/«Blanca» son BLA). Con
+> un contador por CAT-PRO (`contadores_documento.tipo = 'codigo_patron:CAT-PRO'`,
+> TEXT libre, sin migración) todo lo que empieza igual comparte numeración y la
+> unicidad sale por construcción. La semilla lee lo que ya siga la raíz, así que
+> un `ACC-FUN-050` escrito a mano hace que el siguiente sea 051.
+> **Opt-in: ausente = numérico**, y cambiar de formato no reescribe nada (regla 1
+> del motor). Prefijo y dígitos no aplican en patrón. Es el MISMO motor: crear,
+> importar, generación masiva y herencia entre sedes (que sigue ganando) pasan
+> el formato. Con letras el Code 128 sale más ancho: en etiquetas chicas, QR.
+> **Recibir mercancía también asigna**: `registrarCompra` (y por ella la Entrada
+> de bodega) llama `asignarEnTransaccion` con el producto y la hoja de cada línea
+> de cantidad — así lo creado antes de encender el código lo recibe al llegar.
+> Solo llena lo vacío, en su savepoint; nunca tumba la compra.
+>
+> **Crear el producto CON sus variantes, de una vez**
+> (`productosCantidad.service._crearConVariantes`, `EditorVariantesNuevas.jsx`,
+> `utils/variantesNuevas.js`): antes eran pasos inconexos —crear, cerrar, buscar,
+> abrir el árbol, talla por talla— y un fallo a mitad dejaba medio árbol.
+> `POST /productos-cantidad` acepta `variantes` (la forma de `getArbol` sin ids,
+> uno o dos niveles) y todo va en **UNA transacción** con los códigos incluidos.
+> **Sin `variantes` el camino es exactamente el de siempre.** Exige
+> `variantes_activo` y **`admin_negocio`** — la ruta de atributos ya lo exige, y
+> este endpoint lo puede llamar un vendedor, así que sin esa llave sería la puerta
+> de atrás. **No trae stock**, a propósito: las dos pantallas que lo usan
+> (ModalAgregarProducto → Agregar stock, y ModalCompra) ya piden la cantidad por
+> variante justo después, con su compra o ajuste y su historial; la respuesta trae
+> `arbol` y la pantalla lo siembra en el caché para que ese paso aparezca al
+> instante. Una talla con sub-variantes es contenedor y **no recibe código**.
+> «Compra a cliente» NO ofrece el editor: su confirmación ajusta el stock del
+> producto plano y dejaría el árbol descuadrado.
+> Prueba: `45-codigo-patron` (66 verificaciones; la sección 1 es la que protege a
+> los negocios —sin la clave, números; sin `variantes`, lo de siempre—, la 8 que
+> un fallo a mitad no deja nada, la 9 las llaves y la 12 que Ajustes promete los
+> mismos ejemplos que genera el motor) y `frontend/scripts/prueba-variantes-nuevas.mjs`
+> (14; la forma del payload y que el costo no viaje sin permiso).
 
 > **La UBICACIÓN es una fila, no un atributo del producto**
 > (`ubicaciones/`, `20260831_ubicaciones_estructura.sql`): 20260730 la puso como

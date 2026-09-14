@@ -95,11 +95,15 @@ const editarFactura = async (req, res, next) => {
       req.params.id,
       req.body,
     );
+    // `valor` salía siempre en 0 (la fila de facturas no trae total): la
+    // auditoría no permitía saber qué cambió una edición.
     audit.registrar(req.user.negocio_id, req.user.id, 'Venta editada', 'facturas', Number(req.params.id), {
-      sucursal_id: data?.sucursal_id ?? req.sucursal_id ?? null,
-      cliente:     data?.nombre_cliente ?? null,
-      valor:       Number(data?.total ?? 0),
-      estado:      data?.estado ?? null,
+      sucursal_id:    data?.sucursal_id ?? req.sucursal_id ?? null,
+      cliente:        data?.nombre_cliente ?? null,
+      valor:          Number(data?.total ?? 0),
+      valor_anterior: Number(data?.total_anterior ?? 0),
+      estado:         data?.estado ?? null,
+      credito:        data?.credito_ajuste ?? null,
     });
     res.json({ ok: true, data, message: 'Factura actualizada correctamente' });
   } catch (err) { next(err); }

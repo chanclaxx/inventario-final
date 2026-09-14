@@ -2,6 +2,7 @@ const { pool }                  = require('../../config/db');
 const comprasRepo               = require('./compras.repository');
 const { calcularCostoPromedio } = require('../../utils/costoPromedio.util');
 const variantesRepo             = require('../variantes-producto/variantes-producto.repository');
+const { asignarEnTransaccion }  = require('../../utils/codigoAuto.util');
 const { getConfigOrdenes }      = require('../../middlewares/ordenesCompra.middleware');
 const { resolverVencimiento }   = require('../../utils/vencimiento.util');
 // Una sola respuesta a "¿lo que llegó es lo que se pidió?", compartida con las
@@ -586,6 +587,23 @@ const registrarCompra = async ({
         }
       }
     }
+
+    // ── Código automático para lo que entra sin código ─────────────────────
+    // Un producto creado antes de encender el código (o antes de una falla del
+    // motor) no se puede escanear. Recibirlo —compra o Entrada de bodega, que
+    // pasan las dos por aquí— es el momento natural de dárselo: es cuando la
+    // mercancía llega y alguien va a imprimirle la etiqueta. El motor solo toca
+    // lo VACÍO (nunca pisa), corre en su savepoint y no puede tumbar la compra.
+    // Va el producto y la hoja: el producto conserva su código como identidad
+    // entre sedes aunque lo que se etiquete sea la talla.
+    const nodosCompra = [];
+    for (const l of lineas) {
+      if (l.imei || !l.producto_id) continue;
+      nodosCompra.push({ nivel: 'producto', id: l.producto_id });
+      if (l.variante_id)      nodosCompra.push({ nivel: 'variante', id: l.variante_id });
+      else if (l.atributo_id) nodosCompra.push({ nivel: 'atributo', id: l.atributo_id });
+    }
+    await asignarEnTransaccion(client, { negocioId: negocio_id, sucursalId: sucursal_id, nodos: nodosCompra });
 
     // ── Acreedor ───────────────────────────────────────────────────────────
     let acreedorIdCompra = null;

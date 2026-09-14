@@ -1375,7 +1375,7 @@ const importarCantidad = async (filas, sucursalId, negocioId, config = {}, opcio
     if (auto.activo && nodosNuevos.length) {
       const { asignados } = await asignarCodigos(client, {
         negocioId, sucursalId, nodos: nodosNuevos,
-        prefijo: auto.prefijo, digitos: auto.digitos, tolerante: true,
+        prefijo: auto.prefijo, digitos: auto.digitos, formato: auto.formato, tolerante: true,
       });
       resultado.codigos_automaticos = asignados.length;
       informe.codigos_automaticos = (informe.codigos_automaticos || 0) + asignados.length;

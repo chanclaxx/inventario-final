@@ -650,6 +650,8 @@ function CodigoProductoConfig({ valores, set }) {
   // Ausente = encendido: solo cuenta cuando el código único ya se activó a mano
   // (el backend lo lee igual, `utils/codigoAuto.util.configCodigoAuto`).
   const autoActivo = valores['codigo_auto'] !== '0';
+  // Ausente = numérico, igual que `configCodigoAuto` en el backend.
+  const formatoPatron = valores['codigo_auto_formato'] === 'patron';
   const prefijo = valores['codigo_auto_prefijo'] ?? '';
   const digitosRaw = valores['codigo_auto_digitos'];
   const digitos = digitosRaw === undefined || digitosRaw === '' ? '6' : String(digitosRaw);
@@ -682,6 +684,41 @@ function CodigoProductoConfig({ valores, set }) {
             onChange={(val) => set('codigo_auto', val ? '1' : '0')}
           />
           {autoActivo && (
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-medium text-gray-600">Formato del código</label>
+              <div className="flex flex-wrap gap-2">
+                {[
+                  { id: 'numero', titulo: 'Número consecutivo', muestra: ejemplo },
+                  // Los ejemplos salen de `EJEMPLOS_PATRON` en utils/codigoPatron.util.js;
+                  // la suite 45 falla si esta pantalla promete otra cosa.
+                  { id: 'patron', titulo: 'Categoría · Producto · Variante', muestra: 'ACC-AUD-BLA-002' },
+                ].map((op) => {
+                  const elegido = op.id === 'patron' ? formatoPatron : !formatoPatron;
+                  return (
+                    <button
+                      key={op.id} type="button"
+                      onClick={() => set('codigo_auto_formato', op.id)}
+                      className={`flex flex-col items-start px-3 py-2 rounded-xl border text-left transition-colors
+                        ${elegido ? 'border-blue-500 bg-blue-50' : 'border-gray-200 bg-white hover:border-blue-200'}`}
+                    >
+                      <span className={`text-xs font-medium ${elegido ? 'text-blue-800' : 'text-gray-700'}`}>{op.titulo}</span>
+                      <span className="text-[11px] font-mono text-gray-500">{op.muestra}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          {autoActivo && formatoPatron && (
+            <p className="text-[11px] text-gray-500 leading-snug">
+              Tres letras de la línea, tres del producto, tres de la variante y un consecutivo por producto:
+              {' '}<span className="font-mono text-gray-700">ACC-CAR-001</span> (Accesorios · Cargador),
+              {' '}<span className="font-mono text-gray-700">ACC-AUD-BLA-002</span> (Accesorios · Audífonos · Blanco).
+              Dos productos que empiezan igual comparten la numeración, así que nunca se repiten.
+              Con letras el código de barras sale más ancho: en etiquetas pequeñas usa el QR.
+            </p>
+          )}
+          {autoActivo && !formatoPatron && (
             <div className="flex flex-wrap items-end gap-3">
               <div className="flex flex-col gap-1 w-28">
                 <label className="text-xs font-medium text-gray-600">Prefijo (opcional)</label>

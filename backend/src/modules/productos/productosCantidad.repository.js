@@ -136,9 +136,9 @@ const perteneceAlNegocio = async (id, negocioId) => {
 const create = async ({
   nombre, stock, stock_minimo, unidad_medida,
   costo_unitario, precio, sucursal_id, proveedor_id, linea_id, codigo, ubicacion,
-}) => {
+}, db = pool) => {
   const conUbicacion = hayUbicacion();
-  const { rows } = await pool.query(`
+  const { rows } = await db.query(`
     INSERT INTO productos_cantidad
       (nombre, stock, stock_minimo, unidad_medida,
        costo_unitario, precio, sucursal_id, proveedor_id, linea_id, codigo${conUbicacion ? ', ubicacion' : ''})

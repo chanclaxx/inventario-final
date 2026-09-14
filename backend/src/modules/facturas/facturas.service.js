@@ -697,6 +697,82 @@ const cancelarFactura = async (negocioId, id, eliminarRetoma = false, _desdeDevo
 };
 
 // ── Editar factura ────────────────────────────────────────────────────────────
+//
+// Una factura a CRÉDITO tiene su valor escrito DOS veces: en `lineas_factura`
+// (lo que pinta la factura y su PDF) y en `creditos.valor_total` (lo que leen el
+// saldo, el abono, el estado de cuenta y el bloque del crédito en el PDF).
+// Editar solo cambiaba las líneas: una venta de $3.940.000 rebajada a
+// $3.790.000 seguía debiendo $3.940.000, el abono aceptaba esa cifra y el PDF
+// mostraba las dos a la vez.
+//
+// El ajuste es por DIFERENCIA (lo que ESTA edición cambió), no un recálculo:
+// así una edición que solo corrige la cédula no toca el crédito, y la cuota
+// inicial sigue la misma regla con los pagos. Se mide sobre la cantidad VIGENTE
+// (cantidad − devuelta) porque la devolución ya rebajó `valor_total` al precio
+// de ese momento: con eso, cargo del extracto = valor_total + devuelto sigue
+// dando el valor original con el precio nuevo.
+
+const _valorVigente = (lineas) => lineas.reduce((s, l) =>
+  s + Number(l.precio || 0) * Math.max(0, Number(l.cantidad || 0) - Number(l.cantidad_devuelta || 0)), 0);
+
+const _sumaPagos = async (client, facturaId) => {
+  const { rows } = await client.query(
+    `SELECT COALESCE(SUM(valor), 0) AS total FROM pagos_factura WHERE factura_id = $1`, [facturaId]);
+  return Number(rows[0].total);
+};
+
+const _ajustarCreditoEditado = async (client, negocioId, credito, { lineasAntes, pagosAntes }) => {
+  const lineasDespues = await facturasRepo.getLineasConDevolucion(client, credito.factura_id);
+  const deltaValor = _valorVigente(lineasDespues) - _valorVigente(lineasAntes);
+  const deltaCuota = (await _sumaPagos(client, credito.factura_id)) - pagosAntes;
+  if (Math.abs(deltaValor) < 0.01 && Math.abs(deltaCuota) < 0.01) return null;
+
+  const valorAntes = Number(credito.valor_total);
+  const cuotaAntes = Number(credito.cuota_inicial || 0);
+  const abonado    = Number(credito.total_abonado || 0);
+  const valorNuevo = valorAntes + deltaValor;
+  const cuotaNueva = cuotaAntes + deltaCuota;
+  const saldoNuevo = valorNuevo - cuotaNueva - abonado;
+
+  // Bajar por debajo de lo ya pagado dejaría plata sin nada a qué aplicarse, y
+  // el sistema no puede saber si se le devuelve al cliente o se le deja a favor.
+  // Lo decide una persona ANTES: anular el abono que sobra, o devolver producto.
+  if (saldoNuevo < -0.5) {
+    const fmt = (n) => `$${Math.round(n).toLocaleString('es-CO')}`;
+    throw {
+      status: 409,
+      code: 'CREDITO_PAGADO_DE_MAS',
+      message: `El cliente ya pagó ${fmt(cuotaNueva + abonado)} de este crédito y el nuevo total `
+        + `sería ${fmt(valorNuevo)}. Anula primero el abono que sobra desde el estado de cuenta, `
+        + `y después aplica el descuento.`,
+    };
+  }
+
+  await client.query(
+    `UPDATE creditos SET valor_total = $1, cuota_inicial = $2 WHERE id = $3`,
+    [valorNuevo, cuotaNueva, credito.id],
+  );
+
+  // Subir el precio de un crédito ya saldado lo vuelve a abrir; bajarlo hasta lo
+  // pagado lo cierra — por el mismo camino que un abono (mora e interés cuentan).
+  let estado = credito.estado;
+  if (credito.estado === 'Saldado' && saldoNuevo > 0.5) {
+    await client.query(`UPDATE creditos SET estado = 'Activo' WHERE id = $1`, [credito.id]);
+    estado = 'Activo';
+  } else if (credito.estado === 'Activo') {
+    const { cerrarSiPagadoEnTx } = require('../creditos/creditos.service');
+    const r = await cerrarSiPagadoEnTx(client, credito.id, negocioId);
+    if (r.saldado) estado = 'Saldado';
+  }
+
+  return {
+    credito_id:     credito.id,
+    valor_anterior: valorAntes, valor_nuevo: valorNuevo,
+    cuota_anterior: cuotaAntes, cuota_nueva: cuotaNueva,
+    saldo_nuevo:    Math.max(0, saldoNuevo),
+    estado,
+  };
+};
 
 const editarFactura = async (negocioId, id, {
   nombre_cliente, cedula, celular, email, direccion, notas,
@@ -722,6 +798,14 @@ const editarFactura = async (negocioId, id, {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+
+    // La foto de ANTES: el ajuste del crédito se calcula contra ella. FOR UPDATE
+    // para que un abono simultáneo no lea el valor viejo a mitad de la edición.
+    const lineasAntes = await facturasRepo.getLineasConDevolucion(client, id);
+    const pagosAntes  = await _sumaPagos(client, id);
+    const credito = facturaActual.estado === 'Credito'
+      ? (await client.query(`SELECT * FROM creditos WHERE factura_id = $1 FOR UPDATE`, [id])).rows[0] || null
+      : null;
 
     // Validar el vendedor contra la sucursal de la factura antes de asignarlo.
     if (vendedorFinal) {
@@ -764,6 +848,10 @@ const editarFactura = async (negocioId, id, {
       }
     }
 
+    const creditoAjuste = credito && credito.estado !== 'Cancelado'
+      ? await _ajustarCreditoEditado(client, negocioId, credito, { lineasAntes, pagosAntes })
+      : null;
+
     if (retoma) {
       const esSerial    = retoma.tipo_retoma === 'serial';
       const colorRetoma = esSerial ? (retoma.color_retoma || null) : null;
@@ -802,8 +890,16 @@ const editarFactura = async (negocioId, id, {
       });
     }
 
+    const lineasDespues = await facturasRepo.getLineasConDevolucion(client, id);
+
     await client.query('COMMIT');
-    return await facturasRepo.findByIdYNegocio(id, negocioId);
+    const factura = await facturasRepo.findByIdYNegocio(id, negocioId);
+    return {
+      ...factura,
+      total:          _valorVigente(lineasDespues),
+      total_anterior: _valorVigente(lineasAntes),
+      credito_ajuste: creditoAjuste,
+    };
   } catch (err) {
     await client.query('ROLLBACK');
     throw err;

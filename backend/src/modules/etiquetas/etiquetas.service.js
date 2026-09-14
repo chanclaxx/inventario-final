@@ -347,6 +347,9 @@ const generarCodigos = async (negocioId, sucursalId, body) => {
       negocioId, sucursalId,
       nodos: pendientes.map((n) => ({ nivel: n.nivel, id: n[NIVEL_ID[n.nivel]] })),
       prefijo, digitos: longitud,
+      // Con patrón, prefijo y dígitos no aplican: lo que se genera en masa y lo
+      // que nace solo tiene que verse igual en el estante.
+      formato: auto.formato,
     });
     await client.query('COMMIT');
 

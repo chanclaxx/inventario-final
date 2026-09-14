@@ -74,7 +74,9 @@ const AVISOS_GRAVES = new Set(['modulo_estrecho', 'resolucion_insuficiente', 'ca
 // para lo que se creó ANTES de encenderlo. Usa el prefijo y los dígitos de
 // Ajustes por defecto, para que lo generado en masa se vea igual que lo que
 // nace solo.
-function PanelGenerar({ nodos, onListo, onCerrar, prefijoDefecto = '', digitosDefecto = 6 }) {
+// `formatoPatron`: con el código CAT-PRO-VAR-número el backend ignora prefijo y
+// dígitos, así que ni se muestran — un campo que no hace nada solo confunde.
+function PanelGenerar({ nodos, onListo, onCerrar, prefijoDefecto = '', digitosDefecto = 6, formatoPatron = false }) {
   const [prefijo,  setPrefijo]  = useState(prefijoDefecto);
   const [longitud, setLongitud] = useState(digitosDefecto);
   const [corriendo, setCorriendo] = useState(false);
@@ -114,15 +116,23 @@ function PanelGenerar({ nodos, onListo, onCerrar, prefijoDefecto = '', digitosDe
         Sin código no hay nada que imprimir en ellos.
       </p>
       <div className="flex flex-wrap items-end gap-2">
-        <div className="w-28">
-          <Input label="Prefijo (opcional)" value={prefijo} maxLength={8}
-            placeholder="Ej: AC"
-            onChange={(e) => setPrefijo(e.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, ''))} />
-        </div>
-        <div className="w-24">
-          <Input label="Dígitos" type="number" min="4" max="10" value={longitud}
-            onChange={(e) => setLongitud(e.target.value)} />
-        </div>
+        {formatoPatron ? (
+          <p className="text-xs text-amber-700 mb-1.5">
+            Formato: categoría · producto · variante · consecutivo (ej. <span className="font-mono">ACC-AUD-BLA-002</span>).
+          </p>
+        ) : (
+          <>
+            <div className="w-28">
+              <Input label="Prefijo (opcional)" value={prefijo} maxLength={8}
+                placeholder="Ej: AC"
+                onChange={(e) => setPrefijo(e.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, ''))} />
+            </div>
+            <div className="w-24">
+              <Input label="Dígitos" type="number" min="4" max="10" value={longitud}
+                onChange={(e) => setLongitud(e.target.value)} />
+            </div>
+          </>
+        )}
         <Button size="sm" onClick={generar} loading={corriendo} className="mb-0.5">
           <Wand2 size={14} />
           {corriendo ? `${avance}/${nodos.length}...` : 'Generar códigos'}
@@ -448,6 +458,7 @@ export function ModalEtiquetas({ onClose, nodoInicial = null, ubicacionActiva = 
                   nodos={sinCodigoFiltrados}
                   prefijoDefecto={config?.codigo_auto_prefijo || ''}
                   digitosDefecto={Number(config?.codigo_auto_digitos) || 6}
+                  formatoPatron={config?.codigo_auto_formato === 'patron'}
                   onCerrar={() => setMostrarGenerar(false)}
                   onListo={async () => {
                     await recargarNodos();

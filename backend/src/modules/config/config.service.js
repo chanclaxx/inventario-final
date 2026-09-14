@@ -260,6 +260,9 @@ const saveConfig = async (negocioId, datos) => {
   if (tocaDigitos) {
     datosProcesados.codigo_auto_digitos = String(codigoAuto.validarDigitos(datosProcesados.codigo_auto_digitos));
   }
+  if (datosProcesados.codigo_auto_formato !== undefined) {
+    datosProcesados.codigo_auto_formato = codigoAuto.validarFormato(datosProcesados.codigo_auto_formato);
+  }
   if (tocaPrefijo || tocaDigitos) {
     const prefijo = tocaPrefijo
       ? datosProcesados.codigo_auto_prefijo

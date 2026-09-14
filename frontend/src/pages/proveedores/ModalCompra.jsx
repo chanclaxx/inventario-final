@@ -21,6 +21,10 @@ import { getLineas }     from '../../api/lineas.api';
 import { useSucursalKey } from '../../hooks/useSucursalKey';
 import api from '../../api/axios.config';
 import { getArbol } from '../../api/variantesProductoApi';
+import { useAuth } from '../../context/useAuth';
+import { usePuedeVerCostos } from '../../hooks/usePuedeVerCostos';
+import { EditorVariantesNuevas } from '../inventario/EditorVariantesNuevas';
+import { estadoVariantesVacio, armarVariantesPayload, errorVariantes } from '../../utils/variantesNuevas';
 import {
   Trash2, Package, ShoppingBag, ChevronRight, ChevronDown,
   RefreshCw, AlertTriangle, X, ChevronLeft, Layers, LayoutGrid, CalendarClock,
@@ -1007,7 +1011,15 @@ function PasoLineaSerial({
 function PasoCantidad({
   proveedorId, productosIniciales, factorInicial, traidaInicial,
   sucursalKey, sucursalLista, onProductosListos, onVolver, variantesActivo,
+  codigoActivo = false, codigoAuto = false,
 }) {
+  const { esAdminNegocio } = useAuth();
+  const puedeVerCosto = usePuedeVerCostos();
+  // Las variantes nacen con el producto, en la misma petición (solo el admin,
+  // igual que crear una variante suelta; el backend lo vuelve a verificar).
+  const puedeCrearVariantes = variantesActivo && esAdminNegocio();
+  const [variantesNuevas, setVariantesNuevas] = useState(estadoVariantesVacio);
+  const errorVars = puedeCrearVariantes ? errorVariantes(variantesNuevas) : null;
   const [busqueda,               setBusqueda]              = useState('');
   const [filtroLineaId,          setFiltroLineaId]         = useState('');
   const [creandoNuevo,           setCreandoNuevo]          = useState(false);
@@ -1036,12 +1048,20 @@ function PasoCantidad({
       precio:         nuevoProducto.precio         !== '' ? Number(nuevoProducto.precio)         : null,
       proveedor_id:   proveedorId,
       linea_id:       nuevoProducto.linea_id ? Number(nuevoProducto.linea_id) : null,
+      ...(puedeCrearVariantes
+        ? { variantes: armarVariantesPayload(variantesNuevas, { conCosto: puedeVerCosto, conCodigo: codigoActivo }) }
+        : {}),
     }),
     onSuccess: (res) => {
+      const creado = res.data.data;
       queryClient.invalidateQueries({ queryKey: ['productos-cantidad'], exact: false });
-      agregarProducto(res.data.data);
+      // El árbol ya viene en la respuesta: la fila pide la cantidad por variante
+      // al instante.
+      if (creado.arbol) queryClient.setQueryData(['arbol-producto', creado.id, creado.sucursal_id], creado.arbol);
+      agregarProducto(creado);
       setCreandoNuevo(false);
       setNuevoProducto({ nombre: '', unidad_medida: 'unidad', precio: '', costo_unitario: '', linea_id: '' });
+      setVariantesNuevas(estadoVariantesVacio());
     },
     onError: (e) => setError(e.response?.data?.error || 'Error'),
   });
@@ -1159,9 +1179,18 @@ function PasoCantidad({
             </div>
           </div>
           <SelectLinea value={nuevoProducto.linea_id} onChange={(val) => setNuevoProducto({ ...nuevoProducto, linea_id: val })} />
+          {puedeCrearVariantes && (
+            <EditorVariantesNuevas
+              estado={variantesNuevas}
+              onChange={setVariantesNuevas}
+              puedeVerCosto={puedeVerCosto}
+              codigoActivo={codigoActivo}
+              codigoAuto={codigoAuto}
+            />
+          )}
           <div className="flex gap-2">
             <Button variant="secondary" size="sm" className="flex-1" onClick={() => setCreandoNuevo(false)}>Cancelar</Button>
-            <Button size="sm" className="flex-1" loading={mutCrear.isPending} disabled={!nuevoProducto.linea_id} onClick={() => mutCrear.mutate()}>Crear y agregar</Button>
+            <Button size="sm" className="flex-1" loading={mutCrear.isPending} disabled={!nuevoProducto.linea_id || !!errorVars} onClick={() => mutCrear.mutate()}>Crear y agregar</Button>
           </div>
         </div>
       )}
@@ -1607,6 +1636,8 @@ export function ModalCompra({ proveedor, onClose }) {
   const caracteristicasActivo  = configData?.caracteristicas_serial_activo === '1';
   const caracteristicasLista   = parsearCaracteristicasConfig(configData);
   const variantesActivo        = configData?.variantes_activo === '1';
+  const codigoActivo           = configData?.codigo_producto_activo === '1';
+  const codigoAuto             = codigoActivo && configData?.codigo_auto !== '0';
   // Con las órdenes activas, una compra suelta también puede llevar plazo: que
   // se haya olvidado crear la orden no hace que la factura deje de vencer.
   const ordenesActivas         = configData?.ordenes_compra_activas === '1';
@@ -1800,6 +1831,8 @@ export function ModalCompra({ proveedor, onClose }) {
             onProductosListos={handleProductosListos}
             onVolver={handleVolverA1}
             variantesActivo={variantesActivo}
+            codigoActivo={codigoActivo}
+            codigoAuto={codigoAuto}
           />
         )}
 

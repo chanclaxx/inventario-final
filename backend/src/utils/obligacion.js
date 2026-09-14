@@ -138,16 +138,25 @@ const resumirObligacion = ({
   // El saldo arranca en lo financiado (el valor menos la cuota inicial, que ya
   // se pagó al momento de la venta) y baja con cada abono. Es exactamente la
   // columna "Saldo" que el cliente quiere ver en el recibo.
+  //
+  // Un abono ANULADO cuenta solo por lo que quedó vigente (`valor_anulado` puede
+  // ser una parte): `total_abonado` ya lo descuenta, y pintarlo entero hacía que
+  // el recibo dijera "abonó $3.940.000" junto a "total abonado $3.790.000". El
+  // anulado del todo no es un pago y sale del recibo; su rastro, con el motivo,
+  // sigue en el estado de cuenta.
   let corriendo = financiado;
   const historial = [...abonos]
-    .sort((a, b) => new Date(a.fecha) - new Date(b.fecha))
-    .map((ab) => {
-      const valor = num(ab.valor);
+    .map((ab) => ({ ab, vigente: Math.max(0, num(ab.valor) - num(ab.valor_anulado)) }))
+    .filter(({ ab, vigente }) => !ab.anulado && vigente > 0)
+    .sort((a, b) => new Date(a.ab.fecha) - new Date(b.ab.fecha))
+    .map(({ ab, vigente }) => {
+      const valor = vigente;
       corriendo = Math.max(0, corriendo - valor);
       return {
         id:            ab.id,
         fecha:         ab.fecha,
         valor,
+        valor_registrado: num(ab.valor),
         metodo:        ab.metodo || 'Efectivo',
         notas:         ab.notas || null,
         // Se conserva el nombre original del campo: esta lista ES la que
