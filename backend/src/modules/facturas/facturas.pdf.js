@@ -36,7 +36,7 @@ const PDFDocument = require('pdfkit');
 // en estadoCuenta.pdf: ahora un cambio de línea gráfica se aplica a los cinco.
 const {
   PAGE_W, PAGE_H, MARGIN, CONTENT_W, BODY_BOTTOM, FONT, C,
-  formatCOP, formatFechaHora,
+  formatCOP, formatFecha, formatFechaHora,
   rectFill, rectFillStroke, hLine,
   labelSeccion, fila, textoUnaLinea, dibujarLogo,
   badgeEstado, asegurarEspacio, inicioCuerpo, encabezadoContinuo,
@@ -569,6 +569,19 @@ function bloqueParrafo(doc, y, texto, {
   return doc.y + 24;
 }
 
+// ─── SECCIÓN: Ajustes a esta factura ──────────────────────────────────────────
+//
+// Si la factura se editó o se corrigió después de emitida, el cliente ve cifras
+// que no son las de la venta original. Esta sección cuenta lo que hizo el
+// programa (utils/ajustesFactura.js) para que no parezca un error.
+function seccionAjustes(doc, ajustes, y) {
+  if (!ajustes || ajustes.length === 0) return y;
+
+  y = labelSeccion(doc, y, 'Ajustes a esta factura', { reservar: 40 });
+  const texto = ajustes.map((a) => `${formatFecha(a.fecha)} — ${a.texto}`).join('\n\n');
+  return bloqueParrafo(doc, y, texto);
+}
+
 function seccionNotas(doc, notas, y) {
   if (!notas) return y;
 
@@ -716,7 +729,7 @@ function seccionPie(doc, y, { esCredito = false, factura = null } = {}) {
  *
  * @param {{ factura: object, config: object, garantias: Array, res: object }} params
  */
-function generarPdfFactura({ factura, config, garantias = [], credito = null, res }) {
+function generarPdfFactura({ factura, config, garantias = [], credito = null, ajustes = [], res }) {
   const numFactura = String(factura.numero ?? factura.id).padStart(6, '0');
 
   res.setHeader('Content-Type', 'application/pdf');
@@ -765,6 +778,7 @@ function generarPdfFactura({ factura, config, garantias = [], credito = null, re
   y = seccionRetomas(doc, factura.retomas || [], y);
   y = seccionTotalesYPagos(doc, factura, y);
   y = seccionCredito(doc, credito, y);
+  y = seccionAjustes(doc, ajustes, y);
   y = seccionNotas(doc, factura.notas, y);
   y = seccionGarantias(doc, garantias, y);
   // En una venta a crédito la firma es la prueba del pacto, así que se pide

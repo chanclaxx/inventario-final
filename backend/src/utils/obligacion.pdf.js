@@ -224,7 +224,12 @@ const tablaAbonos = (doc, resumen, y, { titulo = 'Historial de abonos' } = {}) =
     });
   } else {
     for (const ab of abonos) {
-      filas.push(filaAbono(formatFecha(ab.fecha), ab.metodo, ab.valor, ab.saldo_despues));
+      // Un abono con una parte anulada vale lo aplicado; lo que se registró se
+      // dice al lado, o no cuadraría con el recibo que tiene el cliente en la mano.
+      const metodo = Number(ab.valor_registrado) > Number(ab.valor) + 0.5
+        ? `${ab.metodo} · registrado ${formatCOP(ab.valor_registrado)}`
+        : ab.metodo;
+      filas.push(filaAbono(formatFecha(ab.fecha), metodo, ab.valor, ab.saldo_despues));
     }
   }
 

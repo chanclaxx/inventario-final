@@ -774,6 +774,65 @@ const _ajustarCreditoEditado = async (client, negocioId, credito, { lineasAntes,
   };
 };
 
+// ── Qué NO se puede editar en una factura a crédito ──────────────────────────
+//
+// El precio sí: `_ajustarCreditoEditado` lo lleva al crédito. Lo que se bloquea
+// es lo que descuadra la cuenta y no tiene cómo ajustarse solo:
+//   · CÉDULA (y cambiar a compañero, que la vuelve 'COMPANERO'): es la clave que
+//     agrupa el estado de cuenta (`COALESCE(cedula, nombre)`). Cambiarla muda el
+//     crédito a la cuenta de otra persona, y `creditos.cliente_id` —el que usa
+//     el pago total— se queda en la vieja. Sin cédula, el NOMBRE es la clave.
+//   · CUOTA INICIAL (los pagos): es plata que entró a la caja el día de la venta;
+//     reescribirla cambia una caja ya cerrada.
+//   · RETOMA: crear una venta a crédito no la admite, y el crédito no la resta.
+//   · CANTIDAD: no mueve stock; para quitar productos está la devolución.
+//   · PRECIO de una línea con unidades DEVUELTAS: la devolución quedó en la
+//     auditoría con el precio de ese día y el extracto la resta con ese valor;
+//     bajar el precio después baja el cargo y no la devolución.
+// Va en el backend y no solo en la pantalla: el bundle viejo en caché, o
+// cualquier llamada directa, siguen pudiendo mandarlos.
+const _texto = (v) => String(v ?? '').trim();
+
+const _exigirEditableEnCredito = async (client, facturaActual, lineasAntes, { cedula, nombre_cliente, lineas, pagos, retoma }) => {
+  const bloqueado = (message) => { throw { status: 409, code: 'CREDITO_CAMPO_BLOQUEADO', message }; };
+
+  if (_texto(cedula) !== _texto(facturaActual.cedula)) {
+    bloqueado('La cédula de una factura a crédito no se puede cambiar: es la que une el crédito con el estado '
+      + 'de cuenta del cliente. Si la venta quedó a nombre de otra persona, cancela la factura y vuelve a hacerla.');
+  }
+  if (!_texto(facturaActual.cedula) && _texto(nombre_cliente) !== _texto(facturaActual.nombre_cliente)) {
+    bloqueado('Esta factura a crédito no tiene cédula, así que el nombre es lo que identifica la cuenta del cliente: no se puede cambiar.');
+  }
+  if (retoma) {
+    bloqueado('Una factura a crédito no admite retoma: el crédito no la descuenta y el estado de cuenta quedaría descuadrado.');
+  }
+
+  for (const l of lineas || []) {
+    const actual = lineasAntes.find((x) => x.id === Number(l.id));
+    if (!actual) continue;
+    if (Number(l.cantidad) !== Number(actual.cantidad)) {
+      bloqueado(`La cantidad de "${actual.nombre_producto}" no se puede cambiar. Para quitar productos usa la devolución.`);
+    }
+    if (Number(actual.cantidad_devuelta || 0) > 0 && Math.abs(Number(l.precio) - Number(actual.precio)) >= 0.01) {
+      bloqueado(`El precio de "${actual.nombre_producto}" no se puede cambiar: ya tiene unidades devueltas y esa `
+        + 'devolución quedó registrada con este precio en el estado de cuenta.');
+    }
+  }
+
+  const porMetodo = (filas) => filas.reduce((m, p) => {
+    if (Number(p.valor) > 0) m[p.metodo] = (m[p.metodo] || 0) + Number(p.valor);
+    return m;
+  }, {});
+  const { rows: pagosActuales } = await client.query(
+    `SELECT metodo, valor FROM pagos_factura WHERE factura_id = $1`, [facturaActual.id]);
+  const antes = porMetodo(pagosActuales);
+  const despues = porMetodo(pagos || []);
+  const metodos = new Set([...Object.keys(antes), ...Object.keys(despues)]);
+  if ([...metodos].some((m) => Math.abs((antes[m] || 0) - (despues[m] || 0)) >= 0.5)) {
+    bloqueado('La cuota inicial de una factura a crédito no se puede editar: es plata que entró a la caja el día de la venta.');
+  }
+};
+
 const editarFactura = async (negocioId, id, {
   nombre_cliente, cedula, celular, email, direccion, notas,
   lineas, pagos, retoma, vendedor_id,
@@ -806,6 +865,11 @@ const editarFactura = async (negocioId, id, {
     const credito = facturaActual.estado === 'Credito'
       ? (await client.query(`SELECT * FROM creditos WHERE factura_id = $1 FOR UPDATE`, [id])).rows[0] || null
       : null;
+    if (credito) {
+      await _exigirEditableEnCredito(client, facturaActual, lineasAntes, {
+        cedula, nombre_cliente, lineas, pagos, retoma,
+      });
+    }
 
     // Validar el vendedor contra la sucursal de la factura antes de asignarlo.
     if (vendedorFinal) {

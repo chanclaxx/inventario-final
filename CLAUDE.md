@@ -81,8 +81,32 @@ Three roles exist: `admin_negocio`, `supervisor`, `vendedor`. Role determines wh
 > `CREDITO_PAGADO_DE_MAS`**: el sistema no sabe si esa plata se devuelve o queda a
 > favor, así que primero se anula el abono que sobra. Subir un Saldado lo reabre;
 > bajar hasta lo pagado lo cierra por `cerrarSiPagadoEnTx`.
-> Prueba: `46-editar-factura-credito` (39 verificaciones; falla 9 contra el código
-> anterior).
+> **En una factura a crédito solo se editan el PRECIO y los datos de contacto**
+> (`_exigirEditableEnCredito`, 409 `CREDITO_CAMPO_BLOQUEADO`, y bloqueados
+> también en `ModalEditarFactura`). Lo que se rechaza descuadra la cuenta y no
+> tiene cómo ajustarse solo: la **cédula** (y pasar a compañero) es la clave del
+> estado de cuenta —`COALESCE(cedula, nombre)`— y cambiarla muda el crédito a otra
+> persona mientras `creditos.cliente_id`, que usa el pago total, se queda en la
+> vieja; sin cédula el **nombre** es la clave; la **cuota inicial** entró a la caja
+> el día de la venta; la **retoma** no la admite crear a crédito y el crédito no la
+> resta; la **cantidad** no mueve stock (para eso está la devolución); y el
+> **precio de una línea con unidades devueltas**: la devolución quedó en auditoría
+> con el precio de ese día y el extracto la resta con ese valor. En contado todo
+> sigue editable.
+> **El PDF de una factura a crédito cuenta sus ajustes** (`utils/ajustesFactura.js`,
+> sección «Ajustes a esta factura»): una cifra distinta a la de la venta, sin
+> explicación, parece un error. Se lee de `auditoria` —`Venta editada` y
+> `Corrección manual de crédito`— y dice lo que hizo el PROGRAMA: qué valor se
+> editó, de cuánto a cuánto, y si lo aplicado de un abono subió o bajó. **Nunca
+> dice «descuento»** ni interpreta el porqué (decisión del usuario). Los
+> «Venta editada» anteriores al 14-sep-2026 guardaban `valor: 0` y se omiten en vez
+> de inventar un cambio. Por eso el controlador ahora guarda `valor_anterior` y
+> `credito`: sin eso la sección no tendría qué contar. Una corrección manual futura
+> tiene que escribir su fila con la misma forma de `detalle` que
+> `scripts/corregir-creditos-editados.js` o no aparecerá. La tabla de abonos marca
+> «registrado $X» cuando lo aplicado es menor.
+> Prueba: `46-editar-factura-credito` (85 verificaciones; la sección 10 es la de
+> los bloqueos, la 1 que el contado no cambió y la 11 renderiza el PDF de verdad).
 
 > **«¿Puede ver los costos?» tiene UNA sola respuesta** (`utils/costos.util.js`,
 > `hooks/usePuedeVerCostos.js`): antes convivían cuatro reglas para la misma

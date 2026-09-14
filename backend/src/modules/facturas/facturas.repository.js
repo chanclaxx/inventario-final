@@ -429,6 +429,20 @@ const getLineasConDevolucion = async (client, facturaId) => {
   return rows;
 };
 
+// Lo que cambió en la factura después de emitida, para contárselo al cliente en
+// el PDF (utils/ajustesFactura.js). Acotado al negocio: `registro_id` solo no
+// es único entre negocios.
+const getAjustesAuditoria = async (negocioId, facturaId) => {
+  const { rows } = await pool.query(`
+    SELECT id, fecha, accion, detalle
+      FROM auditoria
+     WHERE negocio_id = $1 AND tabla = 'facturas' AND registro_id = $2
+       AND accion IN ('Venta editada', 'Corrección manual de crédito')
+     ORDER BY fecha, id
+  `, [negocioId, facturaId]);
+  return rows;
+};
+
 const findByIdYNegocio = async (id, negocioId) => {
   const { rows } = await pool.query(`
     SELECT
@@ -473,4 +487,5 @@ module.exports = {
   ajustarStockCantidad, actualizarCostoPromedio,
   ajustarStockAtributoEnTx, ajustarStockVarianteEnTx, sincronizarStockArbolEnTx,
   getLineaPorId, marcarLineaDevuelta, getLineasConDevolucion,
+  getAjustesAuditoria,
 };

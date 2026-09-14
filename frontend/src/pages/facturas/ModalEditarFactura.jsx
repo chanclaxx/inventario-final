@@ -538,9 +538,12 @@ export function ModalEditarFactura({ facturaId, onClose, onGuardado }) {
             ].map((item) => {
               const ItemIcon = item.Icn;
               return (
-                <button key={item.id} onClick={() => setTipoCliente(item.id)}
+                <button key={item.id}
+                  disabled={!!creditoInicial}
+                  onClick={() => { if (!creditoInicial) setTipoCliente(item.id); }}
                   className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl
                     text-sm font-medium border transition-all
+                    ${creditoInicial ? 'cursor-not-allowed opacity-60' : ''}
                     ${tipoClienteEfectivo === item.id
                       ? 'bg-blue-50 border-blue-300 text-blue-700'
                       : 'bg-gray-50 border-gray-200 text-gray-600'}`}>
@@ -550,15 +553,33 @@ export function ModalEditarFactura({ facturaId, onClose, onGuardado }) {
             })}
           </div>
 
+          {/* Factura a crédito: lo que identifica la cuenta del cliente no se
+              edita. El backend lo rechaza igual (CREDITO_CAMPO_BLOQUEADO). */}
+          {creditoInicial && (
+            <div className="flex items-start gap-2 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2">
+              <Lock size={14} className="text-amber-500 mt-0.5 flex-shrink-0" />
+              <p className="text-xs text-amber-700">
+                Factura a crédito: la cédula, la cuota inicial y la retoma no se pueden editar porque
+                descuadrarían el estado de cuenta del cliente. Si la venta quedó a nombre de otra
+                persona, cancela la factura y vuelve a hacerla. Los precios sí se pueden ajustar.
+              </p>
+            </div>
+          )}
+
           {/* Datos del cliente */}
           <div className="flex flex-col gap-3">
             {tipoClienteEfectivo === 'cliente' && (
               <Input label="Cédula" placeholder="123456789"
                 value={formEfectivo.cedula}
+                disabled={!!creditoInicial}
+                className={creditoInicial ? 'cursor-not-allowed opacity-60' : ''}
                 onChange={(e) => setForm({ ...formEfectivo, cedula: e.target.value })} />
             )}
             <Input label="Nombre" placeholder="Nombre completo"
               value={formEfectivo.nombre}
+              // Sin cédula, el nombre es lo que agrupa la cuenta del crédito.
+              disabled={!!creditoInicial && !estadoInicial.form.cedula}
+              className={creditoInicial && !estadoInicial.form.cedula ? 'cursor-not-allowed opacity-60' : ''}
               onChange={(e) => setForm({ ...formEfectivo, nombre: e.target.value })} />
             {tipoClienteEfectivo === 'cliente' && (
               <Input label="Celular" placeholder="3001234567"
@@ -637,27 +658,40 @@ export function ModalEditarFactura({ facturaId, onClose, onGuardado }) {
             <p className="text-xs font-medium text-gray-500 mb-1">
               Productos <span className="text-gray-400 font-normal">(solo se puede editar el precio)</span>
             </p>
-            {lineasEfectivas.map((linea, index) => (
+            {lineasEfectivas.map((linea, index) => {
+              // Con unidades devueltas, la devolución quedó en el estado de cuenta
+              // con ESTE precio: cambiarlo descuadraría el extracto.
+              const precioBloqueado = !!creditoInicial && Number(linea.cantidad_devuelta || 0) > 0;
+              return (
               <div key={linea.id} className="flex items-center justify-between gap-2 text-sm">
                 <div className="flex-1 min-w-0">
                   <p className="font-medium text-gray-800 truncate">{linea.nombre_producto}</p>
                   {linea.imei && <p className="text-xs text-gray-400 font-mono">{linea.imei}</p>}
+                  {precioBloqueado && (
+                    <p className="text-xs text-amber-600">
+                      {linea.cantidad_devuelta} devuelta(s) · precio bloqueado
+                    </p>
+                  )}
                 </div>
                 <div className="flex items-center gap-1.5 flex-shrink-0">
                   <span className="text-xs text-gray-400">{linea.cantidad}x</span>
                   <input type="number" value={linea.precio}
+                    disabled={precioBloqueado}
+                    title={precioBloqueado ? 'Esta línea tiene unidades devueltas: su precio no se puede cambiar' : undefined}
                     onChange={(e) => {
                       const next = [...lineasEfectivas];
                       next[index] = { ...next[index], precio: Number(e.target.value) };
                       setLineas(next);
                     }}
                     onWheel={(e) => e.target.blur()}
-                    className="w-28 text-right text-sm font-semibold text-gray-900 bg-white
+                    className={`w-28 text-right text-sm font-semibold text-gray-900 bg-white
                       border border-gray-200 rounded-lg px-2 py-1 focus:outline-none
-                      focus:ring-2 focus:ring-blue-500" />
+                      focus:ring-2 focus:ring-blue-500
+                      ${precioBloqueado ? 'cursor-not-allowed opacity-60' : ''}`} />
                 </div>
               </div>
-            ))}
+              );
+            })}
             <div className="border-t border-gray-200 mt-1 pt-2 flex justify-between">
               <span className="text-sm font-medium text-gray-700">Subtotal</span>
               <span className="text-sm font-bold text-gray-900">{formatCOP(totalLineas)}</span>
@@ -680,13 +714,19 @@ export function ModalEditarFactura({ facturaId, onClose, onGuardado }) {
               </div>
             )}
 
-            {/* Agregar nueva retoma — siempre disponible */}
-            <button onClick={handleToggleAgregarRetoma}
+            {/* Agregar nueva retoma — no en crédito: crear una venta a crédito
+                tampoco la admite, y el crédito no la descuenta. */}
+            <button onClick={() => { if (!creditoInicial) handleToggleAgregarRetoma(); }}
+              disabled={!!creditoInicial}
               className={`w-full py-2.5 rounded-xl text-sm font-medium border transition-all
-                ${agregarRetoma
-                  ? 'bg-purple-50 border-purple-300 text-purple-700'
-                  : 'bg-gray-50 border-gray-200 text-gray-600'}`}>
-              {agregarRetoma ? '✓ Con retoma nueva' : '+ Agregar retoma'}
+                ${creditoInicial
+                  ? 'bg-gray-50 border-gray-200 text-gray-300 cursor-not-allowed'
+                  : agregarRetoma
+                    ? 'bg-purple-50 border-purple-300 text-purple-700'
+                    : 'bg-gray-50 border-gray-200 text-gray-600'}`}>
+              {creditoInicial
+                ? 'Retoma no disponible en factura a crédito'
+                : agregarRetoma ? '✓ Con retoma nueva' : '+ Agregar retoma'}
             </button>
             {agregarRetoma && retomaNueva && (
               <PanelRetomaNueva retoma={retomaNueva} setRetoma={setRetomaNueva}
@@ -699,7 +739,7 @@ export function ModalEditarFactura({ facturaId, onClose, onGuardado }) {
           {/* Métodos de pago */}
           <div>
             <p className="text-sm font-medium text-gray-700 mb-2">
-              {creditoInicial ? 'Cuota inicial (métodos de pago)' : 'Métodos de pago'}
+              {creditoInicial ? 'Cuota inicial (no editable)' : 'Métodos de pago'}
             </p>
             <div className="flex flex-col gap-2">
               {METODOS_PAGO.map(({ id }) => (
@@ -707,10 +747,13 @@ export function ModalEditarFactura({ facturaId, onClose, onGuardado }) {
                   <span className="text-sm text-gray-600 w-28">{id}</span>
                   <input type="number" placeholder="0"
                     value={pagosEfectivos[id] || ''}
+                    // La cuota inicial entró a la caja el día de la venta.
+                    disabled={!!creditoInicial}
                     onChange={(e) => setPagos({ ...pagosEfectivos, [id]: e.target.value })}
                     onWheel={(e) => e.target.blur()}
-                    className="flex-1 px-3 py-2 bg-gray-100 rounded-xl text-sm
-                      focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all" />
+                    className={`flex-1 px-3 py-2 bg-gray-100 rounded-xl text-sm
+                      focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all
+                      ${creditoInicial ? 'cursor-not-allowed opacity-60' : ''}`} />
                 </div>
               ))}
             </div>

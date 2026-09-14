@@ -162,15 +162,18 @@ const crearVenta = async ({ cedula, lineas, pagos = [], credito = true }) => {
 };
 
 // Arma el cuerpo como lo manda ModalEditarFactura: todas las líneas y todos los pagos.
-const editar = async (facturaId, { precios = {}, pagos = null, nombre = null } = {}) => {
+const editar = async (facturaId, {
+  precios = {}, cantidades = {}, pagos = null, nombre = null, cedula = null, celular = null, notas = null, retoma = null,
+} = {}) => {
   const [f] = await q(`SELECT * FROM facturas WHERE id = $1`, [facturaId]);
   const lineas = await q(`SELECT id, cantidad, precio FROM lineas_factura WHERE factura_id = $1 ORDER BY id`, [facturaId]);
   const pagosActuales = await q(`SELECT metodo, valor FROM pagos_factura WHERE factura_id = $1`, [facturaId]);
   return facturas.editarFactura(1, facturaId, {
-    nombre_cliente: nombre ?? f.nombre_cliente, cedula: f.cedula, celular: f.celular, notas: null,
-    lineas: lineas.map((l, i) => ({ id: l.id, cantidad: l.cantidad, precio: precios[i] ?? Number(l.precio) })),
+    nombre_cliente: nombre ?? f.nombre_cliente, cedula: cedula ?? f.cedula,
+    celular: celular ?? f.celular, notas,
+    lineas: lineas.map((l, i) => ({ id: l.id, cantidad: cantidades[i] ?? l.cantidad, precio: precios[i] ?? Number(l.precio) })),
     pagos: (pagos ?? pagosActuales.map((p) => [p.metodo, Number(p.valor)])).map(([metodo, valor]) => ({ metodo, valor })),
-    retoma: null,
+    retoma,
   });
 };
 
@@ -184,6 +187,9 @@ console.log('\n═══ 1. Factura de CONTADO: igual que antes ═══');
   checkEq('no reporta ajuste de crédito', r.credito_ajuste, null);
   check('la respuesta trae el total nuevo (la auditoría ya no guarda 0)', r.total, 80000);
   check('y el anterior', r.total_anterior, 100000);
+  // Los bloqueos son SOLO de crédito: en contado la cédula se sigue corrigiendo.
+  await editar(v.facturaId, { cedula: '101' });
+  checkEq('contado: la cédula se puede corregir', (await q(`SELECT cedula FROM facturas WHERE id=$1`, [v.facturaId]))[0].cedula, '101');
 }
 
 console.log('\n═══ 2. El caso real: $3.940.000 rebajada a $3.790.000 ═══');
@@ -252,20 +258,31 @@ console.log('\n═══ 6. Con devolución parcial ═══');
   const v = await crearVenta({ cedula: '600', lineas: [['Cable', 10, 25000], ['Forro', 2, 30000]] });
   const [cable] = await q(`SELECT id FROM lineas_factura WHERE factura_id=$1 ORDER BY id`, [v.facturaId]);
   await facturas.devolverLineasCredito(1, v.facturaId, [{ linea_id: cable.id, cantidad_devolver: 4 }]);
+  // Lo que escribe el controlador: la devolución queda con SU valor en auditoría.
+  await q(`INSERT INTO auditoria (negocio_id, usuario_id, accion, tabla, registro_id, detalle)
+           VALUES (1, 1, 'Devolución en venta a crédito', 'facturas', $1, '{"valor":100000}')`, [v.facturaId]);
   check('tras devolver 4 cables', (await cred(v.creditoId)).valor_total, 210000);
-  await editar(v.facturaId, { precios: { 0: 20000 } });
-  check('crédito = Σ precio × cantidad vigente', (await cred(v.creditoId)).valor_total, 6 * 20000 + 2 * 30000);
-  check('cargo del extracto = valor original con el precio nuevo', await cargoExtracto('600', v.creditoId), 10 * 20000 + 2 * 30000);
-  await invariante('devolución + edición', '600');
+  await invariante('tras la devolución', '600');
+  await debeFallar('el precio de la línea con devolución NO se edita',
+    () => editar(v.facturaId, { precios: { 0: 20000 } }), 'devueltas');
+  check('su precio sigue igual', (await q(`SELECT precio FROM lineas_factura WHERE id=$1`, [cable.id]))[0].precio, 25000);
+  await editar(v.facturaId, { precios: { 1: 28000 } });
+  check('la otra línea sí: crédito = Σ precio × cantidad vigente', (await cred(v.creditoId)).valor_total, 6 * 25000 + 2 * 28000);
+  check('cargo del extracto = valor original con el precio nuevo', await cargoExtracto('600', v.creditoId), 10 * 25000 + 2 * 28000);
+  await invariante('devolución + edición de otra línea', '600');
 }
 
-console.log('\n═══ 7. Editar los pagos mueve la cuota inicial ═══');
+console.log('\n═══ 7. La cuota inicial NO se edita ═══');
 {
   const v = await crearVenta({ cedula: '700', lineas: [['Equipo', 1, 1000000]], pagos: [['Efectivo', 100000]] });
-  await editar(v.facturaId, { pagos: [['Efectivo', 100000], ['Nequi', 50000]] });
-  check('cuota inicial', (await cred(v.creditoId)).cuota_inicial, 150000);
-  check('valor intacto', (await cred(v.creditoId)).valor_total, 1000000);
-  await invariante('tras cambiar la cuota', '700');
+  await debeFallar('agregar un pago', () => editar(v.facturaId, { pagos: [['Efectivo', 100000], ['Nequi', 50000]] }), 'cuota inicial');
+  await debeFallar('cambiar el método', () => editar(v.facturaId, { pagos: [['Nequi', 100000]] }), 'cuota inicial');
+  check('cuota inicial intacta', (await cred(v.creditoId)).cuota_inicial, 100000);
+  check('pagos intactos', (await q(`SELECT SUM(valor) s FROM pagos_factura WHERE factura_id=$1`, [v.facturaId]))[0].s, 100000);
+  // Reenviar los MISMOS pagos —lo que manda el modal siempre— no es un cambio.
+  await editar(v.facturaId, { precios: { 0: 950000 } });
+  check('con los mismos pagos, el precio se edita', (await cred(v.creditoId)).valor_total, 950000);
+  await invariante('tras editar el precio', '700');
 }
 
 console.log('\n═══ 8. Bajar justo hasta lo pagado lo salda ═══');
@@ -310,6 +327,146 @@ console.log('\n═══ 9. La corrección de producción: abono anulado en PART
   const rw = (await facturas.getFacturaById(1, w.facturaId)).credito.resumen;
   checkEq('anulado entero: fuera del recibo', rw.abonos.length, 0);
   check('anulado entero: saldo', rw.saldo, 1000000);
+}
+
+console.log('\n═══ 10. Campos bloqueados en una factura a crédito ═══');
+{
+  const v = await crearVenta({ cedula: '1000', lineas: [['Equipo', 1, 800000], ['Forro', 3, 20000]] });
+  const otro = await crearVenta({ cedula: '2000', lineas: [['Cable', 1, 50000]] });
+  await invariante('cuenta de 1000 antes', '1000');
+
+  await debeFallar('cambiar la cédula', () => editar(v.facturaId, { cedula: '2000' }), 'cédula');
+  await debeFallar('pasarla a compañero', () => editar(v.facturaId, { cedula: 'COMPANERO' }), 'cédula');
+  await debeFallar('agregar una retoma', () => editar(v.facturaId, {
+    retoma: { descripcion: 'equipo viejo', valor_retoma: 100000, tipo_retoma: 'serial', ingreso_inventario: false },
+  }), 'retoma');
+  await debeFallar('cambiar una cantidad', () => editar(v.facturaId, { cantidades: { 1: 1 } }), 'cantidad');
+  checkEq('la cédula no se movió', (await q(`SELECT cedula FROM facturas WHERE id=$1`, [v.facturaId]))[0].cedula, '1000');
+  checkEq('no se grabó retoma', (await q(`SELECT COUNT(*)::int n FROM retomas WHERE factura_id=$1`, [v.facturaId]))[0].n, 0);
+  check('la cuenta de 1000 sigue con su deuda', await deuda('1000'), 860000);
+  check('y la de 2000 no recibió nada', await deuda('2000'), 50000);
+
+  // Lo que no identifica la cuenta sí se corrige, y no toca el crédito.
+  const r = await editar(v.facturaId, { nombre: 'NOMBRE BIEN ESCRITO', celular: '3109998888', notas: 'corregido' });
+  checkEq('nombre, celular y notas: sin ajuste de crédito', r.credito_ajuste, null);
+  checkEq('nombre corregido', (await q(`SELECT nombre_cliente FROM facturas WHERE id=$1`, [v.facturaId]))[0].nombre_cliente, 'NOMBRE BIEN ESCRITO');
+  await invariante('cuenta de 1000 tras corregir datos', '1000');
+  await invariante('cuenta de 2000 intacta', '2000');
+  void otro;
+}
+
+console.log('\n═══ 11. El PDF cuenta lo que hizo el programa ═══');
+{
+  const { describirAjustes } = require(path.join(RAIZ, 'src/utils/ajustesFactura.js'));
+  const facturasRepo = require(path.join(RAIZ, 'src/modules/facturas/facturas.repository.js'));
+  const ctrl = require(path.join(RAIZ, 'src/modules/facturas/facturas.controller.js'));
+  const { generarPdfFactura } = require(path.join(RAIZ, 'src/modules/facturas/facturas.pdf.js'));
+  const PDFDocument = require('pdfkit');
+  const { Writable } = await import('node:stream');
+  const aud = (fid, accion, detalle) => q(
+    `INSERT INTO auditoria (negocio_id, usuario_id, accion, tabla, registro_id, detalle, fecha)
+     VALUES (1, NULL, $1, 'facturas', $2, $3, '2026-09-14 15:00')`, [accion, fid, JSON.stringify(detalle)]);
+  const ajustesDe = async (fid) => {
+    const det = await facturas.getFacturaById(1, fid);
+    return { det, aj: describirAjustes(await facturasRepo.getAjustesAuditoria(1, fid),
+      { abonos: det.credito?.abonos || [], lineas: det.lineas }) };
+  };
+  const tiene = (aj, ...frases) => frases.every((f) => aj.some((a) => a.texto.includes(f)));
+
+  // A. Electrocomfort: se corrigió el CRÉDITO y bajó lo aplicado del abono.
+  const a = await crearVenta({ cedula: '1100', lineas: [['Lote', 1, 3790000]] });
+  await q(`UPDATE creditos SET valor_total = 3940000 WHERE id = $1`, [a.creditoId]);
+  await creditos.registrarAbono(1, a.creditoId, { usuario_id: 1, valor: 3940000, metodo: 'Efectivo', sucursal_id: 1 });
+  const [abA] = await q(`SELECT id FROM abonos_credito WHERE credito_id = $1`, [a.creditoId]);
+  await q(`UPDATE creditos SET valor_total = 3790000, total_abonado = 3790000 WHERE id = $1`, [a.creditoId]);
+  await q(`UPDATE abonos_credito SET valor_anulado = 150000 WHERE id = $1`, [abA.id]);
+  await aud(a.facturaId, 'Venta editada', { cliente: 'X', valor: 0, estado: 'Credito' });
+  await aud(a.facturaId, 'Corrección manual de crédito', {
+    credito_id: a.creditoId,
+    credito_antes: { valor_total: 3940000, total_abonado: 3940000 },
+    credito_despues: { valor_total: 3790000, total_abonado: 3790000 },
+    abono_anulado: { abono: abA.id, valor: 150000 }, lineas: [], factura_antes: 3790000,
+  });
+  const { det: detA, aj: ajA } = await ajustesDe(a.facturaId);
+  checkEq('A: el registro viejo sin cifras se omite', ajA.length, 1);
+  checkEq('A: cuenta el ajuste del crédito', tiene(ajA, 'crédito de $3.940.000 a $3.790.000'), true);
+  checkEq('A: y que lo aplicado del abono bajó', tiene(ajA, 'bajó a $3.790.000', '$150.000 no se aplican'), true);
+
+  // B. Julián: se corrigió la FACTURA; el abono no cambió.
+  const b = await crearVenta({ cedula: '1200', lineas: [['iPhone 17 pro max', 1, 4200000], ['ACCESORIOS', 2, 15000]] });
+  await creditos.registrarAbono(1, b.creditoId, { usuario_id: 1, valor: 4230000, metodo: 'Efectivo', sucursal_id: 1 });
+  const lb = await q(`SELECT id FROM lineas_factura WHERE factura_id = $1 ORDER BY id`, [b.facturaId]);
+  await aud(b.facturaId, 'Corrección manual de crédito', {
+    credito_antes: { valor_total: 4230000, total_abonado: 4230000 }, credito_despues: null, abono_anulado: null,
+    lineas: [{ id: lb[0].id, cantidad: 1, antes: 4250000, despues: 4200000 }], factura_antes: 4280000,
+  });
+  const { aj: ajB } = await ajustesDe(b.facturaId);
+  checkEq('B: cuenta el ajuste de la factura y el producto', tiene(ajB,
+    'factura de $4.280.000 a $4.230.000', '«iPhone 17 pro max» pasó de $4.250.000 a $4.200.000'), true);
+  checkEq('B: y que lo abonado no cambió', tiene(ajB, 'Lo abonado ($4.230.000) no cambió'), true);
+
+  // C. Tesla #5: cambió a quién pertenece el crédito, no los valores.
+  const c = await crearVenta({ cedula: '1300', lineas: [['Cable', 1, 19000]] });
+  await aud(c.facturaId, 'Corrección manual de crédito', {
+    tipo: 'cliente', cliente_antes: { nombre: 'Cliente Generico', cedula: '0000' },
+    cliente_despues: { nombre: 'Kevin bodega 207 americas', cedula: '1300' },
+  });
+  const { aj: ajC } = await ajustesDe(c.facturaId);
+  checkEq('C: cuenta el cambio de cliente', tiene(ajC, 'a nombre de Kevin bodega 207 americas', 'Los valores no cambiaron'), true);
+
+  // D. Una edición de HOY, por el controlador real: el crédito saldado sube.
+  const d = await crearVenta({ cedula: '1400', lineas: [['Equipo', 1, 500000]] });
+  await creditos.registrarAbono(1, d.creditoId, { usuario_id: 1, valor: 500000, metodo: 'Efectivo', sucursal_id: 1 });
+  const [ld] = await q(`SELECT id FROM lineas_factura WHERE factura_id = $1`, [d.facturaId]);
+  const [fd] = await q(`SELECT * FROM facturas WHERE id = $1`, [d.facturaId]);
+  await new Promise((resolve, reject) => ctrl.editarFactura(
+    { user: { negocio_id: 1, id: 1 }, params: { id: d.facturaId },
+      body: { nombre_cliente: fd.nombre_cliente, cedula: fd.cedula, celular: fd.celular, notas: null,
+        lineas: [{ id: ld.id, cantidad: 1, precio: 560000 }], pagos: [], retoma: null } },
+    { json: resolve }, reject));
+  await new Promise((r) => setTimeout(r, 100)); // la auditoría es fire-and-forget
+  const { aj: ajD } = await ajustesDe(d.facturaId);
+  checkEq('D: la edición cuenta el valor nuevo', tiene(ajD, 'factura de $500.000 a $560.000'), true);
+  checkEq('D: y que el crédito subió', tiene(ajD, 'subió de $500.000 a $560.000', 'saldo quedó en $60.000'), true);
+
+  // Nada de interpretar el porqué.
+  checkEq('ninguna frase dice «descuento»', [...ajA, ...ajB, ...ajC, ...ajD].some((x) => /descuento/i.test(x.texto)), false);
+
+  // El PDF de verdad, con PDFKit instrumentado.
+  const textos = [];
+  let automaticos = 0;
+  const origFrag = PDFDocument.prototype._fragment;
+  const origCont = PDFDocument.prototype.continueOnNewPage;
+  PDFDocument.prototype._fragment = function (...args) { textos.push(String(args[0] ?? '')); return origFrag.apply(this, args); };
+  PDFDocument.prototype.continueOnNewPage = function (...args) { automaticos++; return origCont.apply(this, args); };
+  const trozos = [];
+  const res = new Writable({ write(ch, e, cb) { trozos.push(ch); cb(); } });
+  res.setHeader = () => {};
+  const fin = new Promise((r) => res.on('finish', r));
+  generarPdfFactura({ factura: detA, config: { nombre_negocio: 'Caliwood' }, garantias: [], credito: detA.credito, ajustes: ajA, res });
+  await fin;
+  PDFDocument.prototype._fragment = origFrag;
+  PDFDocument.prototype.continueOnNewPage = origCont;
+  // PDFKit pinta por línea y deja el espacio del corte al final del fragmento.
+  const pdf = textos.join(' ').replace(/\s+/g, ' ');
+  checkEq('PDF: sale la sección de ajustes', /ajustes a esta factura/i.test(pdf), true);
+  checkEq('PDF: con la explicación del abono', pdf.includes('no se aplican a la deuda'), true);
+  checkEq('PDF: la tabla de abonos dice lo registrado', pdf.includes('registrado'), true);
+  checkEq('PDF: ningún salto de página lo decide PDFKit', automaticos, 0);
+
+  // Sin ajustes, el PDF no cambia: no aparece la sección.
+  const e = await crearVenta({ cedula: '1500', lineas: [['Equipo', 1, 100000]] });
+  const { det: detE, aj: ajE } = await ajustesDe(e.facturaId);
+  checkEq('sin ajustes: lista vacía', ajE.length, 0);
+  textos.length = 0;
+  PDFDocument.prototype._fragment = function (...args) { textos.push(String(args[0] ?? '')); return origFrag.apply(this, args); };
+  const res2 = new Writable({ write(ch, e2, cb) { cb(); } });
+  res2.setHeader = () => {};
+  const fin2 = new Promise((r) => res2.on('finish', r));
+  generarPdfFactura({ factura: detE, config: {}, garantias: [], credito: detE.credito, ajustes: ajE, res: res2 });
+  await fin2;
+  PDFDocument.prototype._fragment = origFrag;
+  checkEq('sin ajustes: el PDF no trae la sección', /ajustes a esta factura/i.test(textos.join(' ')), false);
 }
 
 console.log(`\n${fallos === 0 ? '✓' : '✗'} ${pasados} verificaciones, ${fallos} fallos\n`);

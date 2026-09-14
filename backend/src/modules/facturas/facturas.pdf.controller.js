@@ -40,7 +40,24 @@ const getPdfFactura = async (req, res, next) => {
     // exactamente como antes.
     const credito = factura.credito?.resumen ? factura.credito : null;
 
-    generarPdfFactura({ factura, config, garantias, credito, res });
+    // Lo que se editó o corrigió después de emitida, contado en el PDF. Solo en
+    // crédito: es donde una cifra distinta a la de la venta confunde la cuenta.
+    // Leer la auditoría nunca puede impedir que el PDF salga.
+    let ajustes = [];
+    if (credito) {
+      try {
+        const facturasRepo = require('./facturas.repository');
+        const { describirAjustes } = require('../../utils/ajustesFactura');
+        ajustes = describirAjustes(
+          await facturasRepo.getAjustesAuditoria(req.user.negocio_id, factura.id),
+          { abonos: factura.credito.abonos || [], lineas: factura.lineas || [] },
+        );
+      } catch (err) {
+        console.warn('[facturas] Ajustes no incluidos en el PDF:', err.message);
+      }
+    }
+
+    generarPdfFactura({ factura, config, garantias, credito, ajustes, res });
   } catch (err) {
     next(err);
   }
