@@ -122,6 +122,7 @@ const FORMATOS = [
   rollo('rollo2-40x30', 'Rollo 2 columnas · 40 × 30 mm', { ancho: 40, alto: 30, columnas: 2, separacionX: 2, separacionY: 3, anchoRollo: 84 }),
   rollo('rollo3-32x25', 'Rollo 3 columnas · 32 × 25 mm', { ancho: 32, alto: 25, columnas: 3, separacionX: 2, separacionY: 3, anchoRollo: 104 }),
   rollo('rollo3-30x20', 'Rollo 3 columnas · 30 × 20 mm', { ancho: 30, alto: 20, columnas: 3, separacionX: 3, separacionY: 3, anchoRollo: 100 }),
+  rollo('rollo3-30x25', 'Rollo 3 columnas · 30 × 25 mm', { ancho: 30, alto: 25, columnas: 3, separacionX: 3, separacionY: 3, anchoRollo: 100 }),
 
   // ── Papel continuo de recibo (impresora POS) ────────────────────────────────
   // La impresora de recibos del mostrador también imprime etiquetas —en papel

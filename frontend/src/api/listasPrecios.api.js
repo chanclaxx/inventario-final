@@ -27,3 +27,36 @@ export const guardarPreciosNodos = (nodos) =>
 /** Los precios que hoy tiene cada nodo de un producto por cantidad. */
 export const getPreciosProducto = (productoId) =>
   api.get(`/listas-precios/producto/${productoId}`);
+
+// ── Excel: el mismo archivo de ida y de vuelta ───────────────────────────────
+//
+// No hay "exportar precios" por un lado y una plantilla vacía por el otro: se
+// descarga lo que hay hoy, se edita y se vuelve a subir. Por eso la descarga
+// exige el mismo permiso que escribir — ofrecerle el archivo a quien después va
+// a recibir un 403 al aplicarlo no le sirve a nadie.
+
+/** El .xlsx con los precios actuales. `responseType: blob` o llega corrupto. */
+export const descargarPlantillaPrecios = ({ sucursales = [], incluirVariantes = false } = {}) =>
+  api.get('/listas-precios/plantilla', {
+    params: {
+      sucursales: sucursales.join(','),
+      variantes:  incluirVariantes ? '1' : '0',
+    },
+    responseType: 'blob',
+  });
+
+/** Qué pasaría si se aplicara este archivo. NO escribe nada. */
+export const analizarPreciosExcel = (archivo, sucursales = []) => {
+  const fd = new FormData();
+  fd.append('archivo', archivo);
+  fd.append('sucursales', sucursales.join(','));
+  return api.post('/listas-precios/analizar', fd);
+};
+
+/** Aplica el archivo. Devuelve el mismo informe más cuántas filas se guardaron. */
+export const importarPreciosExcel = (archivo, sucursales = []) => {
+  const fd = new FormData();
+  fd.append('archivo', archivo);
+  fd.append('sucursales', sucursales.join(','));
+  return api.post('/listas-precios/importar', fd);
+};

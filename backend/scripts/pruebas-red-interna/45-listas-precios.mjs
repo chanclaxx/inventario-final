@@ -316,6 +316,94 @@ check('la lista no corrige un precio por debajo del costo',
   front.resolverPrecioItem(BAJO_COSTO, 'mayor').precio, 9000);
 
 // ─────────────────────────────────────────────────────────────────────────────
+seccion(12, 'EXCEL: leer un precio como lo escribe la gente');
+
+const excel = require(path.resolve(RAIZ, 'src/modules/listas-precios/listasPrecios.excel.js'));
+
+check('un número llano',            excel.leerPrecio(12500),          12500);
+check('con punto de miles',         excel.leerPrecio('12.500'),       12500);
+check('con signo y espacio',        excel.leerPrecio('$ 12.500'),     12500);
+check('con decimales por coma',     excel.leerPrecio('12500,40'),     12500);
+check('con miles Y decimales',      excel.leerPrecio('1.250.000,40'), 1250000);
+// Se redondea al peso, como todo el sistema: medio peso sube.
+check('medio peso sube',            excel.leerPrecio('1.250.000,50'), 1250001);
+// Vacío y cero son LO MISMO: "sin precio en esta lista". Un producto a $0 en el
+// mostrador es siempre un error de captura, nunca una decisión.
+check('vacío es null',              excel.leerPrecio(''),   null);
+check('cero también es null',       excel.leerPrecio(0),    null);
+check('null es null',               excel.leerPrecio(null), null);
+// `undefined` = "hay algo escrito que no entiendo". Se reporta, no se adivina.
+check('texto se reporta',           excel.leerPrecio('barato'), undefined);
+check('negativo se reporta',        excel.leerPrecio(-500),     undefined);
+check('absurdo se reporta',         excel.leerPrecio(1e12),     undefined);
+
+// ─────────────────────────────────────────────────────────────────────────────
+seccion(13, 'EXCEL: el token hace EXACTO el viaje de vuelta');
+
+check('token de producto',  excel.leerToken('p123'), { nivel: 'producto', id: 123 });
+check('token de atributo',  excel.leerToken('a45'),  { nivel: 'atributo', id: 45  });
+check('token de variante',  excel.leerToken('V9'),   { nivel: 'variante', id: 9   });
+check('token de serial',    excel.leerToken('s7'),   { nivel: 'serial',   id: 7   });
+check('vacío no es token',  excel.leerToken(''),     null);
+check('basura no es token', excel.leerToken('x12'),  null);
+check('sin número tampoco', excel.leerToken('p'),    null);
+
+// ─────────────────────────────────────────────────────────────────────────────
+seccion(14, 'EXCEL: comparar precios sin que el orden de claves mienta');
+
+// EL FALLO QUE CAZÓ ESTA PRUEBA. Postgres devuelve un jsonb con SUS claves en SU
+// orden (por longitud y luego bytes: {final, mayor, pasamano}) mientras que el
+// mapa nuevo se arma en el orden en que el negocio configuró las listas
+// ({pasamano, mayor, final}). Comparando con JSON.stringify a secas, el informe
+// decía «438 cambios» sobre un archivo con CUATRO precios tocados — y de paso
+// habría reescrito 1.300 filas que nadie pidió tocar.
+const DESDE_PG    = { final: 9000, mayor: 5800, pasamano: 7000 };
+const DESDE_EXCEL = { pasamano: 7000, mayor: 5800, final: 9000 };
+checkTrue('mismo contenido en otro orden = SIN cambio',
+  excel.canonico(DESDE_PG) === excel.canonico(DESDE_EXCEL));
+checkTrue('…y con JSON.stringify a secas habría dicho que cambió',
+  JSON.stringify(DESDE_PG) !== JSON.stringify(DESDE_EXCEL));
+checkTrue('un precio distinto SÍ es un cambio',
+  excel.canonico({ mayor: 5800 }) !== excel.canonico({ mayor: 5900 }));
+checkTrue('una lista de más SÍ es un cambio',
+  excel.canonico({ mayor: 5800 }) !== excel.canonico({ mayor: 5800, final: 9000 }));
+check('null y undefined se comparan sin reventar',
+  [excel.canonico(null), excel.canonico(undefined)], ['null', 'null']);
+// Un NUMERIC de Postgres llega como string: "5800" y 5800 son el mismo precio.
+checkTrue('string y número son el mismo precio',
+  excel.canonico({ mayor: '5800' }) === excel.canonico({ mayor: 5800 }));
+
+// ─────────────────────────────────────────────────────────────────────────────
+seccion(15, 'EXCEL: las columnas fijas son un contrato entre las dos puntas');
+
+const plantilla = require(path.resolve(RAIZ, 'src/modules/listas-precios/listasPrecios.plantilla.js'));
+check('las columnas fijas, en orden',
+  plantilla.COLUMNAS_FIJAS, ['ID', 'Producto', 'Detalle', 'Código', 'Precio actual']);
+// El lector las IMPORTA del generador en vez de repetirlas: copiadas, un archivo
+// se descargaría bien y no se podría volver a subir.
+const excelSrc = readFileSync(path.resolve(RAIZ, 'src/modules/listas-precios/listasPrecios.excel.js'), 'utf8');
+checkTrue('el lector importa las columnas del generador',
+  excelSrc.includes("COLUMNAS_FIJAS } = require('./listasPrecios.plantilla')"));
+
+const svcSrc = readFileSync(path.resolve(RAIZ, 'src/modules/listas-precios/listasPrecios.service.js'), 'utf8');
+// Analizar y aplicar salen de la MISMA resolución: un validador paralelo se
+// desincroniza del importador y acaba mintiendo (la regla de importacion/).
+checkTrue('analizar y aplicar comparten la resolución',
+  /const analizarExcel[\s\S]{0,200}_resolverArchivo/.test(svcSrc)
+  && /const importarExcel[\s\S]{0,200}_resolverArchivo/.test(svcSrc));
+checkTrue('aplicar va en UNA transacción',
+  /importarExcel[\s\S]{0,700}BEGIN[\s\S]{0,700}COMMIT/.test(svcSrc));
+// Quién puede escribir qué sucursal lo decide el service, no la pantalla.
+checkTrue('el alcance por sucursal se acota en el backend',
+  svcSrc.includes('_sucursalesPermitidas') && svcSrc.includes('No tienes acceso a las sucursales'));
+
+const rutasSrc = readFileSync(path.resolve(RAIZ, 'src/modules/listas-precios/listasPrecios.routes.js'), 'utf8');
+for (const ruta of ['plantilla', 'analizar', 'importar']) {
+  checkTrue(`/${ruta} exige el permiso de precios`,
+    new RegExp(`'/${ruta}',\\s*requirePermisoPreciosLista`).test(rutasSrc));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 console.log(`\n${'═'.repeat(64)}`);
 console.log(fallos === 0
   ? `✅ TODO BIEN — ${pasados} verificaciones`

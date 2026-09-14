@@ -131,7 +131,7 @@ export function SelectorFormato({ prefs, cambiar, formatos, papeles, plan, error
           <p className="text-[11px] text-gray-500 text-center leading-snug">
             {geometria.medio === 'rollo' && 'La franja punteada es una página. '}
             Papel en la impresora: <strong className="text-gray-700">{mm(geometria.papel.ancho)} × {mm(geometria.papel.alto)} mm</strong>
-            {geometria.papel.rotacion ? ` (página girada ${geometria.papel.rotacion}°)` : ''}
+            {geometria.papel.rotacion === 180 ? ' (de cabeza)' : ''}
           </p>
         </div>
       )}

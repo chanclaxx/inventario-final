@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import {
   Package, ShoppingBag, Plus, Download, Tags,
-  ShoppingCart, ChevronUp, Upload, AlertCircle, X, Globe, MapPin,
+  ShoppingCart, ChevronUp, Upload, AlertCircle, X, Globe, MapPin, DollarSign,
 } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ProductosSerial }         from './ProductosSerial';
@@ -22,6 +22,8 @@ import { formatCOP }               from '../../utils/formatters';
 import { useBorradores, useSincronizarReservas } from '../../hooks/useBorradores';
 import { ModalConflictoBorrador }  from './ModalConflictoBorrador';
 import { ModalEtiquetas }          from './ModalEtiquetas';
+import { ModalPreciosExcel }      from './ModalPreciosExcel';
+import { useListasPrecios }       from '../../hooks/useListasPrecios';
 import api                         from '../../api/axios.config';
 
 const TABS = [
@@ -54,8 +56,12 @@ export default function InventarioPage() {
   const [carritoAbierto, setCarritoAbierto] = useState(false);
   const [modalImportar,  setModalImportar]  = useState(false);
   const [modalEtiquetas, setModalEtiquetas] = useState(false);
+  const [modalPrecios,   setModalPrecios]   = useState(false);
 
   const { puedeExportarInventario, esSucursalVista } = useAuth();
+  // Mantener 450 productos × N listas a mano no lo hace nadie dos veces: el
+  // botón solo aparece si el negocio usa listas Y este usuario puede cambiarlas.
+  const listasCfg = useListasPrecios();
   const sucursalActiva = useSucursalStore((s) => s.sucursalActiva);
   const soloLectura    = esSucursalVista(sucursalActiva);
 
@@ -180,6 +186,14 @@ export default function InventarioPage() {
                   title="Imprimir códigos de barras o QR para etiquetar la mercancía">
                   <Tags size={16} />
                   <span className="hidden sm:inline">Etiquetas</span>
+                </Button>
+              )}
+
+              {listasCfg.activo && listasCfg.puedeEditar && (
+                <Button size="sm" variant="secondary" onClick={() => setModalPrecios(true)}
+                  title="Descargar y actualizar los precios por lista en Excel">
+                  <DollarSign size={16} />
+                  <span className="hidden sm:inline">Precios</span>
                 </Button>
               )}
 
@@ -337,6 +351,10 @@ export default function InventarioPage() {
       )}
       {/* Se monta solo cuando se abre: así vuelve limpio cada vez (filtros,
           marcados y vista previa) sin tener que reiniciarlo a mano. */}
+      {modalPrecios && (
+        <ModalPreciosExcel onCerrar={() => setModalPrecios(false)} />
+      )}
+
       {modalEtiquetas && (
         <ModalEtiquetas
           ubicacionActiva={ubicacionActiva}

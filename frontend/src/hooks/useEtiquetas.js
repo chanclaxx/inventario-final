@@ -91,6 +91,9 @@ export const calibracionDe = (prefs, claveFormato) => {
   return {
     ...CALIBRACION_DEFECTO, ...c,
     ajuste: { ...CALIBRACION_DEFECTO.ajuste, ..._objeto(c.ajuste) },
+    // Solo 0 o 180: un 90/270 guardado antes no hacía nada (el navegador lo
+    // deshacía al imprimir) y ya no tiene botón que lo muestre.
+    rotacion: Number(c.rotacion) === 180 ? 180 : 0,
   };
 };
 

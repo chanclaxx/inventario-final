@@ -220,6 +220,13 @@ const planear = async (negocioId, sucursalId, body) => {
   // Las térmicas de 4 pulgadas —casi todas— no imprimen más allá de 104–108
   // mm: lo que caiga fuera del cabezal simplemente no sale.
   if (formato.medio === 'rollo' && formato.pagina.ancho > formatos.LIMITES.anchoTermica4) avisos.add('rollo_ancho');
+  // Varias filas por página en un rollo con sensor de hueco: la impresora
+  // cuenta CADA fila troquelada como una etiqueta, así que una página de 3
+  // filas le llega como una etiqueta de 75 mm sobre un troquel de 25 — imprime
+  // corrido y después avanza filas en blanco. Reportado con una DIG T451B
+  // (3 × 3 de 30 × 25 en un rollo de 100). Varias filas solo sirven con papel
+  // continuo o con un rollo que no traiga hueco entre filas.
+  if (formato.medio === 'rollo' && formato.filas > 1 && !formato.rollo?.incluirSeparacion) avisos.add('rollo_varias_filas');
   if (geometria.fuera) avisos.add('calibracion_fuera');
 
   return {

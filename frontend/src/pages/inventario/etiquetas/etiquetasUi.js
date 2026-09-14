@@ -89,24 +89,30 @@ export const agruparFormatos = (formatos) => {
  */
 export const instruccionesImpresion = (geometria) => {
   if (!geometria) return [];
-  const { papel, medio, rollo, separacion } = geometria;
+  const { papel, medio, rollo, separacion, filas } = geometria;
   const tam = `${mm(papel.ancho)} × ${mm(papel.alto)} mm`;
-  const girada = papel.rotacion === 90 || papel.rotacion === 270;
+  // El navegador gira y achica la página por su cuenta cuando el papel elegido
+  // no calza con ella (Chrome/Edge lo hacen siempre con un PDF). La vista previa
+  // del diálogo ya lo muestra: es el último punto donde se ve antes de gastar.
+  const revisar = `Antes de imprimir, mira la vista previa del diálogo: la etiqueta tiene que verse derecha y a tamaño real. Si se ve de lado o pequeña, el papel no es el de ${tam}: corrígelo ahí, porque desde aquí no se puede.`;
+  const escala = 'Márgenes «Ninguno» y escala «Predeterminado» o «Personalizado» 100 —nunca «Ajustar al área de impresión».';
 
   if (medio === 'rollo') {
     const gap = Number(separacion?.y) || 0;
     return [
-      `En las preferencias de la impresora (Windows: Impresoras → tu impresora → Preferencias), crea o elige el papel de ${tam}${girada ? ' — de pie, porque la página va girada' : ''}.`,
+      `En Windows: Impresoras → tu impresora → Preferencias de impresión. Crea el papel de ${mm(papel.ancho)} mm de ANCHO × ${mm(papel.alto)} mm de ALTO, orientación Vertical, sin márgenes${filas === 1 ? '. Es UNA fila del rollo, no el rollo entero' : ''}.`,
       rollo?.incluirSeparacion
         ? 'Tipo de papel: continuo (sin marcas). Cada página ya incluye la separación entre etiquetas.'
-        : `Tipo de papel: etiquetas con separación («gap» o «espacio»)${gap ? ` de ${mm(gap)} mm` : ''}. Si la impresora tiene botón de calibrar, úsalo una vez con el rollo puesto.`,
-      'En el diálogo de impresión: escala 100 % o «Tamaño real» —nunca «Ajustar a la página»— y márgenes «Ninguno».',
-      'Imprime primero la hoja de prueba: si sale corrida, girada o más pequeña, corrígelo en Calibración.',
+        : `Tipo de papel: etiquetas con separación («gap»)${gap ? ` de ${mm(gap)} mm` : ''}. Con el rollo puesto, calibra la impresora una vez (opción de calibrar del driver, o manteniendo el botón FEED hasta que avance sola).`,
+      `En el diálogo de impresión, en «Más opciones de configuración»: tamaño del papel ${tam}. ${escala}`,
+      revisar,
+      'Imprime primero la hoja de prueba: si sale corrida o de cabeza, corrígelo en Calibración.',
     ];
   }
   return [
     `Carga la plancha en la bandeja y elige el papel ${tam} en el diálogo de impresión.`,
-    'Escala 100 % o «Tamaño real» —nunca «Ajustar a la página»— y márgenes «Ninguno».',
+    escala,
+    revisar,
     'Imprime la hoja de prueba en papel normal y ponla sobre la plancha a contraluz: así ves si cae sobre el troquel sin gastar etiquetas.',
   ];
 };

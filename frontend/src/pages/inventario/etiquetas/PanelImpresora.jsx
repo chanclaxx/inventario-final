@@ -14,8 +14,12 @@ import { DPI_OPCIONES, instruccionesImpresion, mm } from './etiquetasUi';
 //   · entra CORRIDA → desvío en milímetros;
 //   · ACHICA la página aunque se le pida tamaño real → escala, calculada con la
 //     regla de la hoja de prueba («midió 48,5 en vez de 50»);
-//   · la saca DE LADO o AL REVÉS (el driver de la térmica tiene el papel de
-//     pie, o el rollo sale al revés de como se lee) → girar la página.
+//   · la saca AL REVÉS (de cabeza) → voltear 180°.
+//
+// Lo que sale DE LADO no tiene arreglo aquí, y por eso ya no hay 90° ni 270°:
+// Chrome y Edge giran solos la página para que calce con el papel del driver,
+// así que girarla desde el PDF se deshacía al imprimir. De lado = el papel del
+// driver tiene ancho y alto cruzados (ver `etiquetas.layout.js`, ROTACIONES).
 //
 // Y una cuarta que no se ve pero hace fallar al lector: en una térmica el
 // código de barras sale limpio solo si cada barra mide un número entero de
@@ -25,10 +29,8 @@ import { DPI_OPCIONES, instruccionesImpresion, mm } from './etiquetasUi';
 // ─────────────────────────────────────────────────────────────────────────────
 
 const ROTACIONES = [
-  { valor: 0,   texto: '0°' },
-  { valor: 90,  texto: '90°' },
-  { valor: 180, texto: '180°' },
-  { valor: 270, texto: '270°' },
+  { valor: 0,   texto: 'Normal' },
+  { valor: 180, texto: 'De cabeza (180°)' },
 ];
 
 export function PanelImpresora({ cal, cambiarCal, plan, desde, setDesde, porPagina, onImprimirPrueba, onDescargarPrueba, generando }) {
@@ -81,10 +83,12 @@ export function PanelImpresora({ cal, cambiarCal, plan, desde, setDesde, porPagi
       </label>
 
       <div className="flex flex-col gap-1">
-        <Segmentado etiqueta={<span className="inline-flex items-center gap-1"><RotateCw size={12} /> Girar la página</span>}
-          opciones={ROTACIONES} valor={cal.rotacion ?? 0} onCambiar={(v) => cambiarCal({ rotacion: v })} />
+        <Segmentado etiqueta={<span className="inline-flex items-center gap-1"><RotateCw size={12} /> Orientación</span>}
+          opciones={ROTACIONES} valor={cal.rotacion === 180 ? 180 : 0} onCambiar={(v) => cambiarCal({ rotacion: v })} />
         <span className="text-[11px] text-gray-400 leading-snug">
-          Si en la prueba la etiqueta sale de lado, prueba 90° o 270°; si sale al revés, 180°.
+          Si en la prueba el texto sale de cabeza, elige 180°. Si sale <strong>de lado</strong> o más pequeña, no es
+          aquí: el papel creado en la impresora no mide {plan?.geometria ? `${mm(plan.geometria.papel.ancho)} × ${mm(plan.geometria.papel.alto)} mm` : 'lo mismo que la página'} (revisa
+          el paso 1). El navegador gira la página sola para que calce con ese papel.
         </span>
       </div>
 

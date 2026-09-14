@@ -2,6 +2,8 @@ const repo   = require('./listasPrecios.repository');
 const util   = require('../../utils/listasPrecios.util');
 const config = require('../config/config.repository');
 const { hayListasPrecios } = require('../../config/columnas');
+const { generarPlantillaBuffer } = require('./listasPrecios.plantilla');
+const { resolverLibro } = require('./listasPrecios.excel');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // LISTAS DE PRECIOS — guardar los N precios de venta de uno o varios nodos.
@@ -131,4 +133,110 @@ const getPreciosProducto = async (productoId, negocioId) => {
   return repo.leerPreciosProductoCantidad(id, negocioId);
 };
 
-module.exports = { guardarPrecios, getPreciosProducto, MAX_NODOS };
+// ── Excel: el mismo archivo de ida y de vuelta ───────────────────────────────
+
+/** Las listas configuradas, o un 400 que explica qué falta. Reusa la guarda. */
+const _listas = async (negocioId) => {
+  const ids = await _idsValidos(negocioId);
+  const cfg = await config.getMap(negocioId);
+  return util.parsearListas(cfg.listas_precios_lista).filter((l) => ids.includes(l.id));
+};
+
+/**
+ * Las sucursales sobre las que opera la plantilla.
+ *
+ * Un supervisor solo puede tocar la suya: la lista de sucursales sale de la BD,
+ * pero quién puede escribirlas lo decide esto, no la pantalla. Sin este filtro,
+ * bastaría con mandar otro `sucursales` en la petición para tarifar la sede de
+ * al lado.
+ */
+const _sucursalesPermitidas = async (usuario, pedidas) => {
+  const todas = await repo.leerSucursales(usuario.negocio_id);
+  const suyas = usuario.rol === 'admin_negocio'
+    ? todas
+    : todas.filter((s) => s.id === usuario.sucursal_id
+        || (usuario.sucursales_vista || []).includes(s.id));
+
+  if (!pedidas || !pedidas.length) return suyas;
+
+  const permitidas = new Set(suyas.map((s) => s.id));
+  const elegidas = pedidas.map(Number).filter((id) => permitidas.has(id));
+  if (!elegidas.length) {
+    throw { status: 403, message: 'No tienes acceso a las sucursales que pediste' };
+  }
+  return suyas.filter((s) => elegidas.includes(s.id));
+};
+
+/** El .xlsx con los precios de hoy, listo para editar y volver a subir. */
+const generarPlantilla = async (usuario, { sucursales, incluirVariantes = false } = {}) => {
+  if (!hayListasPrecios()) throw _sinInfra();
+  const listas = await _listas(usuario.negocio_id);
+  const sedes  = await _sucursalesPermitidas(usuario, sucursales);
+
+  const datos = [];
+  for (const sucursal of sedes) {
+    datos.push({
+      sucursal,
+      nodos: await repo.leerNodosSucursal(sucursal.id, usuario.negocio_id, { incluirVariantes }),
+    });
+  }
+  return { buffer: generarPlantillaBuffer(datos, listas), sedes };
+};
+
+/**
+ * Lee el archivo y devuelve qué pasaría. NO escribe.
+ *
+ * Devuelve también las escrituras ya resueltas, y `aplicar` usa ESAS mismas:
+ * un validador aparte se desincroniza del importador y acaba mintiendo.
+ */
+const _resolverArchivo = async (usuario, buffer, sucursales) => {
+  if (!hayListasPrecios()) throw _sinInfra();
+  if (!buffer || !buffer.length) throw { status: 400, message: 'No llegó ningún archivo' };
+
+  const listas = await _listas(usuario.negocio_id);
+  const sedes  = await _sucursalesPermitidas(usuario, sucursales);
+
+  const porSucursal = new Map();
+  for (const s of sedes) {
+    porSucursal.set(s.id, {
+      nombre: s.nombre,
+      // Se leen SIEMPRE los tres niveles, aunque la plantilla se haya bajado
+      // solo con productos: si el usuario agregó filas de talla a mano, tienen
+      // que poder resolverse.
+      nodos: await repo.leerNodosSucursal(s.id, usuario.negocio_id, { incluirVariantes: true }),
+    });
+  }
+  return resolverLibro(buffer, { listas, porSucursal });
+};
+
+const analizarExcel = async (usuario, buffer, sucursales) => {
+  const { informe } = await _resolverArchivo(usuario, buffer, sucursales);
+  return informe;
+};
+
+/** Aplica el archivo. Todo en UNA transacción: media tabla escrita es peor. */
+const importarExcel = async (usuario, buffer, sucursales) => {
+  const { informe, escrituras } = await _resolverArchivo(usuario, buffer, sucursales);
+
+  const client = await repo.pool.connect();
+  try {
+    await client.query('BEGIN');
+    let guardados = 0;
+    for (const e of escrituras) {
+      const ok = await repo.escribirPrecios(client, e, usuario.negocio_id);
+      if (ok) guardados++;
+    }
+    await client.query('COMMIT');
+    return { ...informe, guardados };
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+};
+
+module.exports = {
+  guardarPrecios, getPreciosProducto, MAX_NODOS,
+  generarPlantilla, analizarExcel, importarExcel,
+};

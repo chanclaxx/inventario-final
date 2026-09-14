@@ -715,7 +715,8 @@ const importarSerial = async (hojas, sucursalId, negocioId, config = {}, opcione
                  precio          = COALESCE($2, precio),
                  cliente_origen  = COALESCE($3, cliente_origen),
                  color           = COALESCE($4, color),
-                 caracteristicas = COALESCE($5::jsonb, caracteristicas)
+                 caracteristicas = COALESCE($5::jsonb, caracteristicas),
+                 proveedor_id    = COALESCE($7, proveedor_id)
                WHERE id = $6`,
               [
                 costoCompra,
@@ -724,6 +725,7 @@ const importarSerial = async (hojas, sucursalId, negocioId, config = {}, opcione
                 color,
                 caracteristicas ? JSON.stringify(caracteristicas) : null,
                 previo.id,
+                prov.id,
               ]
             );
             await _aplicarNota(client, 'seriales', previo.id, fila.nota);
@@ -736,13 +738,17 @@ const importarSerial = async (hojas, sucursalId, negocioId, config = {}, opcione
           } else {
             const { rows: creado } = await client.query(
               `INSERT INTO seriales
-                 (producto_id, imei, fecha_entrada, costo_compra, precio, cliente_origen, color, caracteristicas)
-               VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb) RETURNING id`,
+                 (producto_id, imei, fecha_entrada, costo_compra, precio, cliente_origen, color, caracteristicas, proveedor_id)
+               VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9) RETURNING id`,
               [
                 productoId, imei, fechaEntrada,
                 costoCompra, precio, clienteOrigen,
                 color,
                 caracteristicas ? JSON.stringify(caracteristicas) : null,
+                // El proveedor es de CADA unidad (así lo escribe compras): el de
+                // `productos_serial` se lo queda la última fila de la hoja, y la
+                // procedencia, la búsqueda por IMEI y el export leen este.
+                prov.id,
               ]
             );
             await _aplicarNota(client, 'seriales', creado[0]?.id, fila.nota);

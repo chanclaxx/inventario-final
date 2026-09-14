@@ -833,11 +833,23 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > **(2) La calibración es UNA transformación por página** (`matrizPagina`):
 > desvío en mm (entra corrida), escala en % (el driver achica aunque se pida
 > tamaño real — la hoja de prueba trae una regla y la pantalla convierte «midió
-> 48,5» en la escala), y **giro 0/90/180/270** (el driver de la térmica tiene el
-> papel de pie y la tira sale de lado, o sale al revés). Con 90/270 la página
-> física intercambia ancho y alto, y eso es lo que el plan le dice al usuario que
-> configure en el driver. OJO al medir en pruebas: el `_ctm` de pdfkit incluye el
-> volteo de la página (espacio nativo, origen ABAJO); la sección 15 lo convierte.
+> 48,5» en la escala), y **volteo 0/180** (el rollo sale de cabeza). OJO al medir
+> en pruebas: el `_ctm` de pdfkit incluye el volteo de la página (espacio nativo,
+> origen ABAJO); la sección 15 lo convierte.
+> **No hay giro de 90/270, y no debe volver** (reportado con una DIG T451B,
+> sep-2026): al imprimir un PDF, Chrome y Edge (PDFium) giran solos toda página
+> cuya orientación no coincide con el papel del driver (`rotate_dst_page =
+> rotated ^ page_orientation_mismatched`, `pdfium_print.cc`). Girar 90°
+> intercambiaba ancho y alto, el navegador la volvía a girar y **el control no
+> cambiaba nada**; peor, la pantalla mandaba a crear un papel «de pie» (25 × 104
+> para un rollo de 104) que en una térmica hace saltar etiquetas. Lo que sale DE
+> LADO se arregla en el **driver** (papel con ancho y alto cruzados, u
+> orientación Horizontal), y por eso las instrucciones mandan a mirar la vista
+> previa del diálogo antes de imprimir. Un 90/270 guardado cae a 0.
+> **Varias filas por página en un rollo con sensor de hueco** avisa
+> (`rollo_varias_filas`): la impresora cuenta cada fila troquelada como una
+> etiqueta, así que una página de 3 filas imprime corrido y avanza filas en
+> blanco. Solo sirve con papel continuo.
 > **(3) Resolución de la impresora (dpi)**: en una térmica de 203 dpi un módulo
 > de 0,28 mm son 2,24 puntos y el driver redondea cada barra a 2 o a 3 — barras
 > que deberían medir igual salen distintas y el lector falla de a ratos. Con la
@@ -866,10 +878,11 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > el «no caben en el rollo: ocupan 102 mm y el rollo mide 90»— mientras el
 > usuario mide. El diagrama del modal se dibuja con esa geometría (`plan.geometria`,
 > las mismas funciones que arman el PDF); no calcula nada en el navegador.
-> Prueba: secciones 13-20 de `35-etiquetas` (la 15 mide el giro, la escala y el
-> desvío sobre el PDF de verdad instrumentando pdfkit; la 16, el módulo en
-> puntos enteros decodificando el símbolo; la 19, que la hoja de prueba sale en
-> los 20 formatos × 2 giros).
+> Prueba: secciones 13-20 de `35-etiquetas` (la 15 mide el volteo, la escala y el
+> desvío sobre el PDF de verdad instrumentando pdfkit, y que un 90/270 viejo ya
+> no cruce la página; la 16, el módulo en puntos enteros decodificando el
+> símbolo; la 19, que la hoja de prueba sale en todos los formatos × 2
+> orientaciones; la 20, el aviso de varias filas por página).
 >
 > **Todo nodo nace con su código** (`utils/codigoAuto.util.js`, `codigo_auto`):
 > antes un producto nacía sin código y había que acordarse de ir a Etiquetas →

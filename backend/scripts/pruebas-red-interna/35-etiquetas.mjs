@@ -481,37 +481,41 @@ console.log('\n15. Calibración: giro, escala y desvío — medidos sobre el PDF
   checkEq('sin giro: página 104 × 25', [g0[0].pagW, g0[0].pagH].map((n) => Number(n.toFixed(2))), [104, 25]);
   check('sin giro: la etiqueta 1 cae en x 2–34 mm', cerca(m0[0].x1, 2.09) && cerca(m0[0].x2, 33.91), JSON.stringify(m0[0]));
 
-  const g90 = await medir({ rotacion: 90 });
-  const m90 = marcos(g90);
-  checkEq('★ girada 90°: la página física es 25 × 104 (lo que va en el driver)',
-    [g90[0].pagW, g90[0].pagH].map((n) => Number(n.toFixed(2))), [25, 104]);
-  check('★ girada 90°: la etiqueta 1 queda de pie, en y 2–34 mm', cerca(m90[0].y1, 2.09) && cerca(m90[0].y2, 33.91)
-    && cerca(m90[0].x1, 0.09) && cerca(m90[0].x2, 24.91), JSON.stringify(m90[0]));
-  check('girada 90°: la etiqueta 3 en y 70–102 mm', cerca(m90[2].y1, 70.09) && cerca(m90[2].y2, 101.91), JSON.stringify(m90[2]));
+  // 90 y 270 ya no existen: Chrome/Edge giran solos toda página cruzada con el
+  // papel del driver, así que intercambiar ancho y alto se deshacía al imprimir
+  // (y la pantalla mandaba a crear un papel de 25 × 104 que hace saltar
+  // etiquetas en una térmica). Un valor viejo guardado tiene que caer a 0.
+  for (const rotacion of [90, 270]) {
+    const g = await medir({ rotacion });
+    const m = marcos(g);
+    checkEq(`★ ${rotacion}° (valor viejo) se ignora: la página sigue siendo 104 × 25`,
+      [g[0].pagW, g[0].pagH].map((n) => Number(n.toFixed(2))), [104, 25]);
+    check(`${rotacion}° (valor viejo): la etiqueta 1 cae donde sin giro`, cerca(m[0].x1, 2.09) && cerca(m[0].x2, 33.91), JSON.stringify(m[0]));
+  }
 
-  const m180 = marcos(await medir({ rotacion: 180 }));
-  check('★ girada 180°: la etiqueta 1 pasa al extremo derecho (x 70–102)', cerca(m180[0].x1, 70.09) && cerca(m180[0].x2, 101.91), JSON.stringify(m180[0]));
-
-  const m270 = marcos(await medir({ rotacion: 270 }));
-  check('girada 270°: la etiqueta 1 queda de pie abajo (y 70–102)', cerca(m270[0].y1, 70.09) && cerca(m270[0].y2, 101.91), JSON.stringify(m270[0]));
+  const g180 = await medir({ rotacion: 180 });
+  const m180 = marcos(g180);
+  checkEq('180° conserva el tamaño de la página (no la cruza con el papel)',
+    [g180[0].pagW, g180[0].pagH].map((n) => Number(n.toFixed(2))), [104, 25]);
+  check('★ de cabeza (180°): la etiqueta 1 pasa al extremo derecho (x 70–102)', cerca(m180[0].x1, 70.09) && cerca(m180[0].x2, 101.91), JSON.stringify(m180[0]));
 
   let fuera = [];
-  for (const rotacion of [0, 90, 180, 270]) {
+  for (const rotacion of [0, 180]) {
     for (const t of await medir({ rotacion })) {
       if (t.x1 < -0.01 || t.y1 < -0.01 || t.x2 > t.pagW + 0.01 || t.y2 > t.pagH + 0.01) fuera.push(`${rotacion}°`);
     }
   }
-  checkEq('★ en los cuatro giros, ni una barra cae fuera de la página física', [...new Set(fuera)], []);
+  checkEq('★ normal y de cabeza, ni una barra cae fuera de la página física', [...new Set(fuera)], []);
 
   const ms = marcos(await medir({ rotacion: 0, escala: 102 }, { ajuste: { x: 1, y: -0.5 } }));
   check('★ escala 102 % y desvío (1, −0,5): la etiqueta 1 empieza en 2 × 1,02 + 1 mm',
     cerca(ms[0].x1, 0.088 * 1.02 + 2 * 1.02 + 1, 0.05) && cerca(ms[0].x2 - ms[0].x1, (32 - 0.176) * 1.02, 0.05),
     JSON.stringify(ms[0]));
 
-  // Con la página girada, "el borde" para pdfkit ya no es el de la etiqueta: si
+  // Con la página volteada, "el borde" para pdfkit ya no es el de la etiqueta: si
   // algún texto se saliera de su alto fijo, pdfkit abriría páginas de más.
   const a4 = formatos.resolver('a4-3x8');
-  const buf = await pdfEtiquetas(a4, { simbologia: 'barras', impresora: { rotacion: 90 },
+  const buf = await pdfEtiquetas(a4, { simbologia: 'barras', impresora: { rotacion: 180 },
     mostrar: { nombre: true, variante: true, precio: true } }, Array.from({ length: 30 }, () => ITEM));
   checkEq('★ A4 girada: 30 etiquetas = 2 páginas, ni una más', paginasDe(buf), 2);
 }
@@ -596,7 +600,7 @@ console.log('\n19. La hoja de prueba de alineación');
   checkEq('la regla más larga que cabe', [largoRegla(32), largoRegla(50), largoRegla(100), largoRegla(11)], [30, 40, 80, null]);
   let malos = [];
   for (const f of formatos.FORMATOS) {
-    for (const rotacion of [0, 90]) {
+    for (const rotacion of [0, 180]) {
       const buf = await pdfPrueba(f, { impresora: { rotacion } });
       const esperadas = f.medio === 'rollo' ? 2 : 1;
       if (buf.subarray(0, 5).toString('latin1') !== '%PDF-' || paginasDe(buf) !== esperadas) {
@@ -792,7 +796,23 @@ if (!PGlite) {
   checkEq('★ sin productos marcados igual responde la geometría', [g.total, g.geometria.celdas.length], [0, 3]);
   checkEq('papel que va en la impresora: 104 × 25', [g.geometria.papel.ancho, g.geometria.papel.alto], [104, 25]);
   const g90 = await service.planear(1, 1, { formato: 'rollo3-32x25', impresora: { rotacion: 90 } });
-  checkEq('★ girada: el papel pasa a 25 × 104', [g90.geometria.papel.ancho, g90.geometria.papel.alto], [25, 104]);
+  checkEq('★ un 90° guardado ya no cruza el papel: sigue 104 × 25 y sin giro',
+    [g90.geometria.papel.ancho, g90.geometria.papel.alto, g90.geometria.papel.rotacion], [104, 25, 0]);
+
+  // El caso reportado con la DIG T451B: 3 × 3 de 30 × 25 en un rollo de 100,
+  // armado como UNA página de 3 filas. Con sensor de hueco eso salta filas.
+  const tresFilas = { medio: 'rollo', ancho: 30, alto: 25, columnas: 3, separacion: { x: 3, y: 0 }, anchoRollo: 100 };
+  const mal = await service.planear(1, 1, { formato: 'personalizado', personalizado: { ...tresFilas, filasPorPagina: 3 } });
+  check('★ rollo con 3 filas por página y sensor de hueco: se avisa', mal.avisos.includes('rollo_varias_filas'), JSON.stringify(mal.avisos));
+  const bien = await service.planear(1, 1, { formato: 'personalizado', personalizado: { ...tresFilas, filasPorPagina: 1 } });
+  checkEq('con 1 fila por página no hay aviso y el papel es 100 × 25',
+    [bien.avisos, bien.geometria.papel.ancho, bien.geometria.papel.alto], [[], 100, 25]);
+  const continuo = await service.planear(1, 1, { formato: 'personalizado',
+    personalizado: { ...tresFilas, filasPorPagina: 3, incluirSeparacion: true } });
+  check('en papel continuo varias filas son legítimas: sin aviso', !continuo.avisos.includes('rollo_varias_filas'));
+  const preset = await service.planear(1, 1, { formato: 'rollo3-30x25' });
+  checkEq('el formato del catálogo para ese rollo: 100 × 25, 3 columnas, sin avisos',
+    [preset.geometria.papel.ancho, preset.geometria.papel.alto, preset.geometria.columnas, preset.avisos], [100, 25, 3, []]);
 
   const ancho = await service.planear(1, 1, { formato: 'personalizado',
     personalizado: { medio: 'rollo', ancho: 40, alto: 25, columnas: 3, separacion: { x: 3 }, anchoRollo: 130 } });

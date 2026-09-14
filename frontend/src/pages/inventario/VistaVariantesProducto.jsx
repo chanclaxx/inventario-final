@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   ChevronLeft, ChevronRight, Plus, ShoppingCart,
-  Settings, Trash2, Layers, Tags,
+  Settings, Trash2, Layers, Tags, DollarSign,
 } from 'lucide-react';
 import {
   getArbol,
@@ -21,6 +21,8 @@ import { formatCOP }      from '../../utils/formatters';
 import { InputMoneda }    from '../../components/ui/InputMoneda';
 import useCarritoStore from '../../store/carritoStore';
 import { preciosDeNodo } from '../../utils/listasPrecios';
+import { ModalPreciosLista } from './ModalPreciosLista';
+import { useListasPrecios } from '../../hooks/useListasPrecios';
 import { ChipApartado } from './ChipApartado';
 import { usePuedeVerCostos } from '../../hooks/usePuedeVerCostos';
 import { ModalEtiquetas } from './ModalEtiquetas';
@@ -394,6 +396,8 @@ export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose,
     stock:  nodo.stock,
   });
   const agregarItem = useCarritoStore((s) => s.agregarItem);
+  const listasCfg  = useListasPrecios();
+  const [verPrecios, setVerPrecios] = useState(false);
 
   // `esAdmin` aquí significa "puede administrar el catálogo", que NO es lo mismo
   // que "puede ver el costo": lo llena `puedeEditarProductos()`, verdadero para
@@ -757,15 +761,31 @@ export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose,
           <ChevronLeft size={14} />
           Inventario
         </button>
-        {esAdmin && arbol.length > 0 && (
-          <button
-            onClick={() => { setErrorM(''); setModalNodo({ modo: 'crear-atr' }); }}
-            className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 font-medium transition-colors"
-          >
-            <Plus size={13} />
-            Nuevo atributo
-          </button>
-        )}
+        <div className="flex items-center gap-3">
+          {/* Con variantes activas, ESTA es la pantalla donde se trabaja un
+              producto: entrar aquí y no encontrar los precios obligaba a salir
+              al inventario y buscar un icono de 15px. El modal abre el árbol
+              completo, así que desde aquí se tarifa el producto y sus tallas de
+              una sola vez. */}
+          {listasCfg.activo && listasCfg.puedeEditar && (
+            <button
+              onClick={() => setVerPrecios(true)}
+              className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-800 font-medium transition-colors"
+            >
+              <DollarSign size={13} />
+              Precios por lista
+            </button>
+          )}
+          {esAdmin && arbol.length > 0 && (
+            <button
+              onClick={() => { setErrorM(''); setModalNodo({ modo: 'crear-atr' }); }}
+              className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 font-medium transition-colors"
+            >
+              <Plus size={13} />
+              Nuevo atributo
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Título producto */}
@@ -997,6 +1017,17 @@ export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose,
 
       {nodoEtiqueta && (
         <ModalEtiquetas nodoInicial={nodoEtiqueta} onClose={() => setNodoEtiqueta(null)} />
+      )}
+
+      {verPrecios && (
+        <ModalPreciosLista
+          producto={producto}
+          listas={listasCfg.listas}
+          tipo="cantidad"
+          variantesActivo
+          sucursalId={sucursalId}
+          onCerrar={() => setVerPrecios(false)}
+        />
       )}
     </div>
   );

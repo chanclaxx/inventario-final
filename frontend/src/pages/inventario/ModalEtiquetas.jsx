@@ -64,8 +64,9 @@ const TEXTO_AVISO = {
   sin_espacio_nombre:      'No cabe el nombre y se quitó.',
   rollo_ancho:             'El rollo mide más de 108 mm: las impresoras de etiquetas de 4 pulgadas no imprimen tan ancho y lo que quede por fuera no saldrá.',
   calibracion_fuera:       'Con ese desvío o esa escala, parte de alguna etiqueta queda fuera de la página y no se imprimirá.',
+  rollo_varias_filas:      'Pusiste más de una fila por página. Si tu rollo trae hueco entre filas (casi todos), la impresora cuenta cada fila como una etiqueta: imprime corrido y avanza filas en blanco. Pon 1 fila por página.',
 };
-const AVISOS_GRAVES = new Set(['modulo_estrecho', 'resolucion_insuficiente', 'calibracion_fuera']);
+const AVISOS_GRAVES = new Set(['modulo_estrecho', 'resolucion_insuficiente', 'calibracion_fuera', 'rollo_varias_filas']);
 
 // ── Panel: generar códigos a los que no tienen ───────────────────────────────
 //
@@ -594,9 +595,9 @@ export function ModalEtiquetas({ onClose, nodoInicial = null, ubicacionActiva = 
                   </div>
                 )}
             </div>
-            {geometria?.papel?.rotacion ? (
+            {geometria?.papel?.rotacion === 180 ? (
               <p className="text-[11px] text-gray-400">
-                La página va girada {geometria.papel.rotacion}° hacia la impresora; la impresora la endereza al imprimir.
+                La página va de cabeza (180°) para que salga derecha en tu impresora.
               </p>
             ) : null}
 

@@ -323,7 +323,19 @@ const posicionEnHoja = (formato, indice, ajuste = { x: 0, y: 0 }) => {
   };
 };
 
-const ROTACIONES = [0, 90, 180, 270];
+// Solo 0 y 180. El giro de 90/270 existió y NO puede funcionar: al imprimir un
+// PDF, Chrome y Edge (PDFium) giran por su cuenta toda página cuya orientación
+// no coincide con la del papel del driver —`rotate_dst_page = rotated ^
+// page_orientation_mismatched`, en pdfium_print.cc—. Girar 90° intercambiaba
+// ancho y alto, el navegador veía la página cruzada con el papel y la volvía a
+// girar: el usuario movía el control y la etiqueta salía igual. Peor: la
+// pantalla le pedía crear en el driver un papel «de pie» (25 × 104 para un
+// rollo de 104), y una térmica con ese papel toma cada etiqueta como una tira
+// de 104 mm y avanza etiquetas en blanco. Reportado con una DIG T451B.
+// Lo que sale DE LADO se arregla en el driver (papel con ancho y alto cruzados,
+// u orientación Horizontal), nunca desde el PDF. 180 sí sobrevive al navegador:
+// no cambia la orientación de la página.
+const ROTACIONES = [0, 180];
 const ESCALA = { min: 50, max: 150 };      // %
 const AJUSTE_MAX = 30;                     // mm de desvío en cualquier sentido
 
@@ -351,34 +363,28 @@ const aplicar = (m, x, y) => ({ x: m[0] * x + m[2] * y + m[4], y: m[1] * x + m[3
  *     pida tamaño real (pasa con planchas en impresoras que no imprimen hasta el
  *     borde). La hoja de prueba trae una regla: si los 50 mm miden 48,5, la
  *     escala que lo corrige es 50 / 48,5.
- *   · GIRO (`impresora.rotacion`, 0/90/180/270): el driver de la térmica tiene
- *     el papel definido de pie y la tira sale de lado, o el rollo sale al revés
- *     de como se lee. Con 90 y 270 la página física intercambia ancho y alto:
- *     eso es lo que hay que poner en el tamaño de papel de la impresora.
+ *   · VOLTEO (`impresora.rotacion`, 0/180): el rollo sale de cabeza. La página
+ *     conserva su tamaño; ver ROTACIONES para por qué no hay 90 ni 270.
  *
  * El orden importa y es este: primero escala y desvío (en el espacio de la
- * etiqueta, donde el usuario los midió), después el giro de la página entera.
+ * etiqueta, donde el usuario los midió), después el volteo de la página entera.
  *
  * @returns {{ matriz: number[], papel: {ancho:number, alto:number}, rotacion: number, escala: number }}
- *   `papel` en puntos: el tamaño de la página FÍSICA del PDF
+ *   `papel` en puntos: el tamaño de la página FÍSICA del PDF, que es siempre el
+ *   del formato — lo que se crea en el driver
  */
 const matrizPagina = (formato, op = {}) => {
   const W = formato.pagina.ancho * MM;
   const H = formato.pagina.alto  * MM;
+  // Un 90/270 guardado en un navegador de antes cae a 0: el navegador lo
+  // deshacía igual, así que la etiqueta sale como salía.
   const rotacion = ROTACIONES.includes(Number(op.impresora?.rotacion)) ? Number(op.impresora.rotacion) : 0;
   const escala   = clamp(Number(op.impresora?.escala) || 100, ESCALA.min, ESCALA.max) / 100;
   const dx = clamp(Number(op.ajuste?.x) || 0, -AJUSTE_MAX, AJUSTE_MAX) * MM;
   const dy = clamp(Number(op.ajuste?.y) || 0, -AJUSTE_MAX, AJUSTE_MAX) * MM;
 
-  let giro;
-  let papel;
-  switch (rotacion) {
-    case 90:  giro = [0, 1, -1, 0, H, 0];  papel = { ancho: H, alto: W }; break;
-    case 180: giro = [-1, 0, 0, -1, W, H]; papel = { ancho: W, alto: H }; break;
-    case 270: giro = [0, -1, 1, 0, 0, W];  papel = { ancho: H, alto: W }; break;
-    default:  giro = [1, 0, 0, 1, 0, 0];   papel = { ancho: W, alto: H };
-  }
-  return { matriz: componer(giro, [escala, 0, 0, escala, dx, dy]), papel, rotacion, escala };
+  const giro = rotacion === 180 ? [-1, 0, 0, -1, W, H] : [1, 0, 0, 1, 0, 0];
+  return { matriz: componer(giro, [escala, 0, 0, escala, dx, dy]), papel: { ancho: W, alto: H }, rotacion, escala };
 };
 
 /**

@@ -1,6 +1,6 @@
 import { useState }                                      from 'react';
 import { useQuery, useMutation, useQueryClient }         from '@tanstack/react-query';
-import { ShoppingBag, Plus, AlertTriangle, Trash2, ChevronDown, ChevronRight, Layers, Settings, Barcode, MapPin, Tags, Tag } from 'lucide-react';
+import { ShoppingBag, Plus, AlertTriangle, Trash2, ChevronDown, ChevronRight, Layers, Settings, Barcode, MapPin, Tags, DollarSign } from 'lucide-react';
 import { getProductosCantidad, ajustarStockCantidad, getLineas } from '../../api/productos.api';
 import { SearchInput }                                   from '../../components/ui/SearchInput';
 import { BarraEscaneo }                                  from '../../components/ui/BarraEscaneo';
@@ -113,7 +113,7 @@ function TarjetaProducto({ p, esAdmin, onAgregar, onReducir, onEditar, variantes
               className="p-1.5 rounded-lg text-gray-300 hover:text-blue-600 hover:bg-blue-50 transition-colors"
               title="Precios por lista"
             >
-              <Tag size={15} />
+              <DollarSign size={15} />
             </button>
           )}
           {!variantesActivo && (

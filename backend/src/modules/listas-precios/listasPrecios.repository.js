@@ -103,4 +103,73 @@ const leerPreciosProductoCantidad = async (productoId, negocioId) => {
   return rows;
 };
 
-module.exports = { NIVELES, escribirPrecios, leerPreciosProductoCantidad, pool };
+/**
+ * Todos los nodos tarifables de una sucursal, para armar la plantilla de Excel.
+ *
+ * `incluirVariantes` es opcional y por defecto NO: un negocio con variantes
+ * tiene ~1.800 atributos por sede, y bajar 2.250 filas por hoja para tarifar
+ * 450 productos vuelve el archivo inmanejable justo para quien solo quería
+ * corregir unos precios. Quien de verdad tarifa por talla lo pide.
+ *
+ * El `token` es lo que hace EXACTO el viaje de ida y vuelta: al reimportar no
+ * hay que adivinar a qué fila corresponde cada línea del Excel. Si el usuario
+ * lo borra o agrega una fila a mano, el importador cae al nombre — pero eso ya
+ * es una conjetura, y se reporta como tal.
+ */
+const leerNodosSucursal = async (sucursalId, negocioId, { incluirVariantes = false } = {}) => {
+  const { rows } = await pool.query(`
+    SELECT * FROM (
+      SELECT
+        'p' || pc.id::text AS token, 'producto'::text AS nivel, pc.id,
+        pc.nombre, ''::text AS detalle, pc.codigo, pc.precio, pc.precios,
+        pc.nombre AS orden_nombre, 0 AS orden_nivel
+      FROM productos_cantidad pc
+      JOIN sucursales su ON su.id = pc.sucursal_id
+      WHERE pc.sucursal_id = $1 AND su.negocio_id = $2 AND pc.activo = true
+
+      UNION ALL
+
+      SELECT
+        'a' || ap.id::text, 'atributo', ap.id,
+        pc.nombre, COALESCE(tc.nombre || ': ', '') || ap.valor, ap.codigo, ap.precio, ap.precios,
+        pc.nombre, 1
+      FROM atributos_producto ap
+      JOIN productos_cantidad pc ON pc.id = ap.producto_id
+      JOIN sucursales su ON su.id = ap.sucursal_id
+      LEFT JOIN tipos_caracteristica tc ON tc.id = ap.tipo_id
+      WHERE ap.sucursal_id = $1 AND su.negocio_id = $2
+        AND ap.activo = true AND pc.activo = true AND $3::boolean
+
+      UNION ALL
+
+      SELECT
+        'v' || v.id::text, 'variante', v.id,
+        pc.nombre,
+        COALESCE(tca.nombre || ': ', '') || ap.valor || ' / ' || COALESCE(tcv.nombre || ': ', '') || v.valor,
+        v.codigo, v.precio, v.precios,
+        pc.nombre, 2
+      FROM variantes_atributo v
+      JOIN atributos_producto ap ON ap.id = v.atributo_id
+      JOIN productos_cantidad pc ON pc.id = ap.producto_id
+      JOIN sucursales su ON su.id = ap.sucursal_id
+      LEFT JOIN tipos_caracteristica tca ON tca.id = ap.tipo_id
+      LEFT JOIN tipos_caracteristica tcv ON tcv.id = v.tipo_id
+      WHERE ap.sucursal_id = $1 AND su.negocio_id = $2
+        AND v.activo = true AND ap.activo = true AND pc.activo = true AND $3::boolean
+    ) nodos
+    ORDER BY orden_nombre, orden_nivel, detalle
+  `, [sucursalId, negocioId, incluirVariantes]);
+  return rows;
+};
+
+/** Las sucursales del negocio, para elegir a cuáles aplica la plantilla. */
+const leerSucursales = async (negocioId) => {
+  const { rows } = await pool.query(
+    `SELECT id, nombre FROM sucursales WHERE negocio_id = $1 ORDER BY nombre`, [negocioId]);
+  return rows;
+};
+
+module.exports = {
+  NIVELES, escribirPrecios, leerPreciosProductoCantidad,
+  leerNodosSucursal, leerSucursales, pool,
+};

@@ -65,7 +65,7 @@ export function EditorFormato({ valor, onCambiar, papeles = [] }) {
               onChange={(x) => setSep('y', x)} ayuda="El espacio entre una fila y la siguiente." />
             <CampoMm label="Filas por página" value={v.filasPorPagina ?? 1} min="1" max="60" step="1" sufijo=""
               onChange={(x) => set({ filasPorPagina: x === '' ? '' : Math.max(1, Math.round(Number(x))) })}
-              ayuda="Déjalo en 1 con impresoras de etiquetas." />
+              ayuda="Déjalo en 1 con impresoras de etiquetas: si el rollo trae hueco entre filas, la impresora cuenta cada fila como una etiqueta y con más de 1 avanza filas en blanco." />
           </div>
           <label className="flex items-start gap-2 text-xs text-gray-600 cursor-pointer select-none">
             <input

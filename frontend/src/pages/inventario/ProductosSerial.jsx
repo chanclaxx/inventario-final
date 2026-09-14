@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback }                   from 'reac
 import { useQuery, useMutation, useQueryClient }                     from '@tanstack/react-query';
 import {
   Package, Plus, ChevronRight, ChevronDown, Trash2, Lock,
-  Palette, Search, CheckCircle, X, SlidersHorizontal, Smartphone, StickyNote, Tag,
+  Palette, Search, CheckCircle, X, SlidersHorizontal, Smartphone, StickyNote, DollarSign,
 } from 'lucide-react';
 import { getProductosSerial, getSeriales, eliminarSerial, getLineas, buscarImei, actualizarSerial } from '../../api/productos.api';
 import { Badge }                     from '../../components/ui/Badge';
@@ -987,7 +987,7 @@ export function ProductosSerial({ onAgregarProducto }) {
               className="p-1.5 rounded-lg text-gray-300 hover:text-blue-600 hover:bg-blue-50 transition-colors"
               title="Precios por lista"
             >
-              <Tag size={16} />
+              <DollarSign size={16} />
             </button>
           )}
           {onAgregarProducto && (
