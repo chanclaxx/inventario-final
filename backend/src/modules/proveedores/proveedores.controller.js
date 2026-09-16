@@ -56,4 +56,15 @@ const eliminarProveedor = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-module.exports = { getProveedores, getProveedorById, crearProveedor, actualizarProveedor, eliminarProveedor };
+const asignarCodigos = async (req, res, next) => {
+  try {
+    const data = await service.asignarCodigosPendientes(req.user.negocio_id);
+    const n = data.asignados.length;
+    res.json({
+      ok: true, data,
+      message: n ? `${n} código(s) asignado(s)` : 'No había proveedores listos para recibir código',
+    });
+  } catch (err) { next(err); }
+};
+
+module.exports = { getProveedores, getProveedorById, crearProveedor, actualizarProveedor, eliminarProveedor, asignarCodigos };

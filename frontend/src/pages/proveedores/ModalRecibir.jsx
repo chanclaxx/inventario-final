@@ -13,6 +13,8 @@ import {
   itemSerialVacio,
 } from './capturaMercancia.utils';
 import api from '../../api/axios.config';
+import { ModalEtiquetasCompra } from '../inventario/ModalEtiquetasCompra';
+import { etiquetasCompraActivas } from '../inventario/etiquetas/etiquetasUi';
 import {
   Package, Smartphone, Minus, Plus, PackageCheck, AlertTriangle, ShieldCheck, Layers,
   Replace, PackagePlus, Trash2,
@@ -559,6 +561,10 @@ export function ModalRecibir({ open, orden, garantiaActiva, onClose, onRecibida 
     caracteristicasLista:  parsearLista(configData?.caracteristicas_serial_lista),
     variantesActivo:       configData?.variantes_activo === '1',
   };
+  // Recibir es cuando la caja está abierta: con las etiquetas de compra activas,
+  // la ventana no se cierra al registrar sino que ofrece imprimirlas.
+  const etiquetasAlRecibir = etiquetasCompraActivas(configData);
+  const [recibida, setRecibida] = useState(null);
 
   const lineas = (orden?.lineas || []).filter((l) => Number(l.pendiente) > 0);
 
@@ -779,7 +785,7 @@ export function ModalRecibir({ open, orden, garantiaActiva, onClose, onRecibida 
         ? [{ metodo, valor: Number(valorPago) }]
         : [],
     }),
-    onSuccess: () => {
+    onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ['ordenes-compra'], exact: false });
       queryClient.invalidateQueries({ queryKey: ['compras'], exact: false });
       queryClient.invalidateQueries({ queryKey: ['productos-cantidad'], exact: false });
@@ -787,7 +793,9 @@ export function ModalRecibir({ open, orden, garantiaActiva, onClose, onRecibida 
       queryClient.invalidateQueries({ queryKey: ['arbol-producto'], exact: false });
       queryClient.invalidateQueries({ queryKey: ['acreedores'], exact: false });
       onRecibida?.();
-      onClose();
+      const compra = res?.data?.data;
+      if (etiquetasAlRecibir && compra?.id) setRecibida(compra);
+      else onClose();
     },
     onError: (e) => setError(e.response?.data?.error || 'No se pudo registrar la recepción'),
   });
@@ -818,6 +826,10 @@ export function ModalRecibir({ open, orden, garantiaActiva, onClose, onRecibida 
   };
 
   if (!orden) return null;
+
+  if (recibida) {
+    return <ModalEtiquetasCompra compraId={recibida.id} recienRegistrada onClose={onClose} />;
+  }
 
   return (
     <Modal open={open} onClose={onClose} size="xl"

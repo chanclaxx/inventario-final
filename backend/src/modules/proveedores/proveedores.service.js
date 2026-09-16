@@ -1,15 +1,57 @@
 const { pool } = require('../../config/db');
 const repo = require('./proveedores.repository');
 
-const getProveedores = (negocioId, tipo = null, ids = null) => {
-  if (ids !== null) return repo.findByIds(negocioId, ids, tipo);
-  return repo.findAll(negocioId, tipo);
+const configRepo = require('../config/config.repository');
+const codigoProveedor = require('../../utils/codigoProveedor.util');
+const { hayCodigoProveedor } = require('../../config/columnas');
+
+// ── Código del proveedor ─────────────────────────────────────────────────────
+//
+// Lo que le falta a un proveedor para recibir código se DERIVA al leer, nunca se
+// guarda: basta con que alguien complete la ciudad para que deje de faltar, y un
+// campo guardado se quedaría diciendo lo contrario. Solo se anota a quien no
+// tiene código — el que ya lo tiene no pierde nada si después le borran el NIT.
+const _anotarCodigo = (p) => {
+  if (!p || !hayCodigoProveedor()) return p;
+  return { ...p, codigo_faltantes: p.codigo ? [] : codigoProveedor.faltantes(p) };
+};
+
+const _codigoActivo = async (negocioId) =>
+  hayCodigoProveedor() && codigoProveedor.activo(await configRepo.getMap(negocioId));
+
+/**
+ * Después de guardar: si la feature está encendida y el proveedor no tiene
+ * código, intenta dárselo. Tolerante — el proveedor ya quedó guardado y un
+ * código que no se pudo asignar no puede convertir eso en un error.
+ */
+const _asignarSiToca = async (negocioId, proveedor) => {
+  if (proveedor.codigo || !(await _codigoActivo(negocioId))) return proveedor;
+  await codigoProveedor.asignarCodigos(negocioId, { ids: [proveedor.id], tolerante: true });
+  return (await repo.findById(negocioId, proveedor.id)) || proveedor;
+};
+
+const getProveedores = async (negocioId, tipo = null, ids = null) => {
+  const filas = ids !== null
+    ? await repo.findByIds(negocioId, ids, tipo)
+    : await repo.findAll(negocioId, tipo);
+  return filas.map(_anotarCodigo);
 };
 
 const getProveedorById = async (negocioId, id) => {
   const p = await repo.findById(negocioId, id);
   if (!p) throw { status: 404, message: 'Proveedor no encontrado' };
-  return p;
+  return _anotarCodigo(p);
+};
+
+/**
+ * «Asignar códigos pendientes» de la pantalla de proveedores. No es tolerante:
+ * aquí el usuario pidió exactamente esto, y el error es la respuesta.
+ */
+const asignarCodigosPendientes = async (negocioId) => {
+  if (!(await _codigoActivo(negocioId))) {
+    throw { status: 400, message: 'Activa el código de proveedor en Ajustes antes de asignar códigos.' };
+  }
+  return codigoProveedor.asignarCodigos(negocioId);
 };
 
 // ─── Crear proveedor + acreedor automático ────────────────────────────────────
@@ -30,7 +72,7 @@ const crearProveedor = async (negocioId, datos) => {
   // Crear acreedor vinculado automáticamente (si no existe ya)
   await vincularOCrearAcreedor(negocioId, proveedor);
 
-  return proveedor;
+  return _anotarCodigo(await _asignarSiToca(negocioId, proveedor));
 };
 
 const actualizarProveedor = async (negocioId, id, datos) => {
@@ -45,7 +87,9 @@ const actualizarProveedor = async (negocioId, id, datos) => {
   // Sincronizar datos del acreedor vinculado (si existe)
   await sincronizarAcreedor(negocioId, p);
 
-  return p;
+  // Completar la ciudad o el NIT de un proveedor sin código es justo lo que le
+  // faltaba para recibirlo. Uno que ya lo tiene no cambia: está impreso.
+  return _anotarCodigo(await _asignarSiToca(negocioId, p));
 };
 
 const eliminarProveedor = async (negocioId, id) => {
@@ -174,4 +218,5 @@ async function sincronizarAcreedor(negocioId, proveedor) {
 module.exports = {
   getProveedores, getProveedorById,
   crearProveedor, actualizarProveedor, eliminarProveedor,
+  asignarCodigosPendientes,
 };

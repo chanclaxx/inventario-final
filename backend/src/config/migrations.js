@@ -1610,6 +1610,21 @@ const aplicarMigraciones = async (client) => {
     ALTER TABLE IF EXISTS productos_serial   ADD COLUMN IF NOT EXISTS precios JSONB;
   `);
 
+  // Código del proveedor en las etiquetas (NOMBRE-NIT-CIUDAD-consecutivo)
+  // ver migrations/20260916_codigo_proveedor.sql
+  //
+  // Bloque PROPIO: si fallara, proveedores y compras siguen igual. La bandera
+  // `hayCodigoProveedor()` de src/config/columnas.js decide si las consultas
+  // nombran las columnas nuevas.
+  //
+  // Sin backticks ni interpolaciones dentro del template literal.
+  await migrar(client, 'Código de proveedor', `
+    ALTER TABLE IF EXISTS proveedores ADD COLUMN IF NOT EXISTS ciudad TEXT;
+    ALTER TABLE IF EXISTS proveedores ADD COLUMN IF NOT EXISTS codigo TEXT;
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_proveedores_codigo
+      ON proveedores (negocio_id, codigo) WHERE codigo IS NOT NULL;
+  `);
+
   // Aplicadas manualmente en producción:
   // - lineas_traslado: revertida_por_usuario_id, fecha_reversion
   // - traslados: revertido_por_usuario_id, fecha_reversion

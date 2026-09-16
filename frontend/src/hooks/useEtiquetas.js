@@ -138,17 +138,20 @@ const _imprimir = (url, alFallar) => {
  *   `previsualizar` devuelve una URL de blob para meter en un <iframe>; quien la
  *   usa es responsable de revocarla.
  */
-export const useEtiquetas = () => {
+export const useEtiquetas = (pedirPdf = pdfEtiquetas) => {
   const [generando, setGenerando] = useState(false);
   const [error,     setError]     = useState('');
 
+  // `pedirPdf` cambia DE DÓNDE sale el PDF (Inventario o una compra), no cómo se
+  // entrega: imprimir, descargar y la previa son los mismos. Quien lo pasa tiene
+  // que memorizarlo, o la previa se pediría otra vez en cada render.
   const _pedir = useCallback(async (body) => {
-    const { data } = await pdfEtiquetas(body);
+    const { data } = await pedirPdf(body);
     if (data.type === 'application/json') {
       throw new Error(await _mensajeDeBlob(data) || 'No se pudo generar el PDF');
     }
     return new Blob([data], { type: 'application/pdf' });
-  }, []);
+  }, [pedirPdf]);
 
   const _envolver = useCallback(async (accion) => {
     setGenerando(true);

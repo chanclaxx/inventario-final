@@ -174,7 +174,8 @@ const _validarDiasAviso = (raw, etiqueta) => {
   }
 };
 
-const { hayUbicacion } = require('../../config/columnas');
+const { hayUbicacion, hayCodigoProveedor } = require('../../config/columnas');
+const codigoProveedor = require('../../utils/codigoProveedor.util');
 
 // La ubicación de productos solo puede reportarse activa si la columna existe
 // realmente en la BD. Si la migración no llegó a aplicarse, el flag sale en '0'
@@ -182,6 +183,7 @@ const { hayUbicacion } = require('../../config/columnas');
 const getConfig = async (negocioId) => {
   const config = await repo.getMap(negocioId);
   if (!hayUbicacion()) config.ubicacion_activa = '0';
+  if (!hayCodigoProveedor()) config[codigoProveedor.CLAVE_CONFIG] = '0';
   return config;
 };
 
@@ -296,6 +298,35 @@ const saveConfig = async (negocioId, datos) => {
     }
   }
 
+  // ── Código del proveedor en las etiquetas ─────────────────────────────────
+  // Lo que se imprime al recibir es la etiqueta del PRODUCTO con el código del
+  // proveedor debajo: sin código único de producto no hay símbolo que imprimir
+  // (el módulo de etiquetas ni existe para ese negocio), y un código de
+  // proveedor que no llega a ninguna etiqueta no sirve para nada. Mismo
+  // prerrequisito que los códigos del proveedor, por la misma razón.
+  const claveProv = codigoProveedor.CLAVE_CONFIG;
+  if (datosProcesados[claveProv] !== undefined && !['0', '1'].includes(String(datosProcesados[claveProv]))) {
+    throw { status: 400, message: 'El código de proveedor solo puede estar encendido (1) o apagado (0)' };
+  }
+  if (datosProcesados[claveProv] === '1') {
+    if (!hayCodigoProveedor()) {
+      throw {
+        status: 400,
+        message: 'El código de proveedor todavía no está disponible en tu base de datos. Intenta de nuevo en unos minutos.',
+      };
+    }
+    const codigosInternos = datosProcesados.codigo_producto_activo !== undefined
+      ? datosProcesados.codigo_producto_activo
+      : (await repo.getMap(negocioId)).codigo_producto_activo;
+    if (codigosInternos !== '1') {
+      throw {
+        status: 400,
+        message: 'Para imprimir el código del proveedor en las etiquetas primero tienes que activar el '
+          + 'código único de producto: es el código que lleva la etiqueta.',
+      };
+    }
+  }
+
   // El pedido detallado pide la VARIANTE en vez del producto ("50 de 25W y 50
   // de 20W", no "100 cargadores"). Sin el árbol de variantes no hay nodo que
   // pedir y la feature resolvería a nada: sería un selector que no puede
@@ -397,6 +428,15 @@ const saveConfig = async (negocioId, datos) => {
   }
 
   const resultado = await repo.updateMany(negocioId, datosProcesados);
+
+  // Encender el código de proveedor asigna los códigos AHÍ MISMO, a todos los
+  // proveedores que tengan nombre, NIT y ciudad: esperar a que alguien edite
+  // cada uno sería dejar la pantalla llena de «sin código» el primer día.
+  // Tolerante, y DESPUÉS de guardar: el interruptor queda encendido pase lo que
+  // pase, y lo que no se pudo asignar se ve (y se reintenta) en Proveedores.
+  if (datosProcesados[claveProv] === '1') {
+    await codigoProveedor.asignarCodigos(negocioId, { tolerante: true });
+  }
 
   // La config de red interna se cachea 60s en su middleware; al guardarla desde
   // Ajustes hay que invalidar para que el cambio se sienta de inmediato.

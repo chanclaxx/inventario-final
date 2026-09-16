@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { buscarCompras as buscarComprasApi } from '../../api/busqueda.api';
-import { getProveedores, crearProveedor, actualizarProveedor } from '../../api/proveedores.api';
+import { getProveedores, crearProveedor, actualizarProveedor, asignarCodigosProveedores } from '../../api/proveedores.api';
+import { ModalEtiquetasCompra } from '../inventario/ModalEtiquetasCompra';
+import { etiquetasCompraActivas } from '../inventario/etiquetas/etiquetasUi';
 import { getComprasByProveedor, getCompraById, getComprasPaginadas, cancelarCompra as cancelarCompraApi, devolverCompra as devolverCompraApi, editarPreciosCompra as editarPreciosCompraApi } from '../../api/compras.api';
 import { getAcreedores, registrarMovimiento as registrarMovAcreedor, getComprasConSaldo, getAbonosPorCargo } from '../../api/acreedores.api';
 import { formatCOP, formatFechaHora } from '../../utils/formatters';
@@ -23,7 +25,7 @@ import { useAuth } from '../../context/useAuth';
 import {
   Truck, Plus, ShoppingCart, ChevronRight, ChevronLeft, ChevronDown, ChevronUp,
   Package, Hash, User, RefreshCw, ArrowLeftRight, ShoppingBag, Repeat,
-  Search, ScanLine, Calculator, Undo2, Pencil, ClipboardList,
+  Search, ScanLine, Calculator, Undo2, Pencil, ClipboardList, Tag, AlertTriangle, Wand2,
 } from 'lucide-react';
 
 // ─── API helpers ──────────────────────────────────────────────────────────────
@@ -508,6 +510,13 @@ function ModalDetalleCompra({ compraId, onClose }) {
     enabled:  !!compraId,
   });
 
+  const { data: config } = useQuery({
+    queryKey: ['config'],
+    queryFn:  () => api.get('/config').then((r) => r.data.data),
+  });
+  const etiquetasActivas = etiquetasCompraActivas(config);
+  const [imprimiendo, setImprimiendo] = useState(false);
+
   const invalidarCompras = () => {
     queryClient.invalidateQueries({ queryKey: ['compra-detalle', compraId] });
     queryClient.invalidateQueries({ queryKey: ['compras-paginadas'],   exact: false });
@@ -609,6 +618,10 @@ function ModalDetalleCompra({ compraId, onClose }) {
     if (!lineasSeleccionadas.length) return setErrorDevol('Selecciona al menos un producto a devolver');
     mutDevolver.mutate(lineasSeleccionadas);
   };
+
+  if (imprimiendo) {
+    return <ModalEtiquetasCompra compraId={compraId} onClose={() => setImprimiendo(false)} />;
+  }
 
   return (
     <Modal open onClose={onClose} title={`Compra #${String(data?.numero ?? compraId).padStart(5, '0')}`} size="lg">
@@ -890,6 +903,16 @@ function ModalDetalleCompra({ compraId, onClose }) {
                     hover:bg-red-100 transition-colors font-medium">
                   Cancelar compra
                 </button>
+                {/* Reimprimir: la compra es el registro. Si la ventana de
+                    etiquetas se cerró al registrarla, aquí sale lo mismo. */}
+                {etiquetasActivas && (
+                  <button
+                    onClick={() => setImprimiendo(true)}
+                    className="px-3 py-2 rounded-xl text-sm border border-blue-200 text-blue-700 bg-blue-50
+                      hover:bg-blue-100 transition-colors font-medium flex items-center gap-1.5">
+                    <Tag size={14} /> Etiquetas
+                  </button>
+                )}
               </>
             )}
             <Button variant="secondary" className="flex-1" onClick={onClose}>Cerrar</Button>
@@ -1498,7 +1521,7 @@ function CuentaCorrienteSection({ acreedorId, acreedorNombre }) {
 
 // ─── Vista historial proveedor ─────────────────────────────────────────────────
 
-function HistorialProveedor({ proveedor, sucursalKey, sucursalLista, onVolver, onNuevaCompra }) {
+function HistorialProveedor({ proveedor, sucursalKey, sucursalLista, onVolver, onNuevaCompra, conCodigo = false }) {
   const [compraDetalle, setCompraDetalle] = useState(null);
   const [tabVista,      setTabVista]      = useState('compras');
 
@@ -1558,9 +1581,10 @@ function HistorialProveedor({ proveedor, sucursalKey, sucursalLista, onVolver, o
           <div className="flex items-center gap-2 flex-wrap">
             <h2 className="text-base font-bold text-gray-900 truncate">{proveedor.nombre}</h2>
             <ProveedorTipoBadge tipo={proveedor.tipo} />
+            {conCodigo && <ChipCodigoProveedor proveedor={proveedor} />}
           </div>
           <p className="text-xs text-gray-400">
-            {[proveedor.nit && `NIT: ${proveedor.nit}`, proveedor.telefono].filter(Boolean).join(' · ')}
+            {[proveedor.nit && `NIT: ${proveedor.nit}`, conCodigo && proveedor.ciudad, proveedor.telefono].filter(Boolean).join(' · ')}
           </p>
         </div>
         <Button size="sm" onClick={onNuevaCompra} className="flex-shrink-0">
@@ -1733,6 +1757,61 @@ function HistorialProveedor({ proveedor, sucursalKey, sucursalLista, onVolver, o
   );
 }
 
+// ─── Código del proveedor ──────────────────────────────────────────────────────
+//
+// Los rótulos de lo que falta. El backend dice QUÉ falta (`codigo_faltantes`,
+// derivado con la misma regla que arma el código); aquí solo se pone en palabras.
+const NOMBRE_FALTANTE = { nombre: 'nombre', nit: 'NIT', ciudad: 'ciudad' };
+const textoFaltantes = (f = []) => f.map((k) => NOMBRE_FALTANTE[k] || k).join(' y ');
+
+// Qué falta para el código, mirando el formulario mientras se escribe. Solo
+// decide si se muestra «se asigna al guardar» o «falta X»: el código de verdad
+// lo arma el backend. Mismo criterio que `tresLetras` (lo que no tiene letras ni
+// cifras no cuenta).
+const faltaEnFormulario = (form) => ['nombre', 'nit', 'ciudad']
+  .filter((k) => !/[A-Za-z0-9ÁÉÍÓÚÜÑáéíóúüñ]/.test(form[k] || ''));
+
+function ChipCodigoProveedor({ proveedor }) {
+  if (proveedor.codigo) {
+    return (
+      <span className="text-xs font-mono text-blue-700 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-full">
+        {proveedor.codigo}
+      </span>
+    );
+  }
+  return (
+    <span className="text-xs text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">
+      Sin código{proveedor.codigo_faltantes?.length ? ` · falta ${textoFaltantes(proveedor.codigo_faltantes)}` : ''}
+    </span>
+  );
+}
+
+function CodigoProveedorVista({ proveedor, form }) {
+  if (proveedor?.codigo) {
+    return (
+      <div className="flex items-start gap-2 px-3 py-2 rounded-xl bg-blue-50 border border-blue-100">
+        <Tag size={14} className="text-blue-500 flex-shrink-0 mt-0.5" />
+        <div>
+          <p className="text-sm font-mono text-blue-800">{proveedor.codigo}</p>
+          <p className="text-xs text-blue-600">
+            Ya está impreso en mercancía: no cambia aunque edites el nombre, el NIT o la ciudad.
+          </p>
+        </div>
+      </div>
+    );
+  }
+  const faltan = faltaEnFormulario(form);
+  return (
+    <p className={`text-xs px-3 py-2 rounded-xl border ${faltan.length
+      ? 'text-amber-700 bg-amber-50 border-amber-100'
+      : 'text-gray-500 bg-gray-50 border-gray-100'}`}>
+      {faltan.length
+        ? `Sin ${textoFaltantes(faltan)} no se le puede asignar el código de proveedor que va en las etiquetas.`
+        : 'El código de proveedor (nombre-NIT-ciudad-consecutivo) se asigna al guardar.'}
+    </p>
+  );
+}
+
 // ─── Modal proveedor (crear/editar) ────────────────────────────────────────────
 // tipoForzado: si se pasa, el campo tipo se fija y no se puede cambiar
 // (ej: desde el tab Cruces se fuerza 'cruce')
@@ -1748,14 +1827,25 @@ function ModalProveedor({ proveedor, tipoForzado, onClose }) {
     email:     proveedor?.email     || '',
     contacto:  proveedor?.contacto  || '',
     direccion: proveedor?.direccion || '',
+    ciudad:    proveedor?.ciudad    || '',
     tipo:      tipoInicial,
   });
   const [error, setError] = useState('');
 
+  // Código del proveedor (opt-in). Con la feature apagada el campo ciudad ni se
+  // pinta ni se MANDA: el backend lo lee como «no tocar» y no borra la guardada.
+  const { data: config } = useQuery({
+    queryKey: ['config'],
+    queryFn:  () => api.get('/config').then((r) => r.data.data),
+  });
+  const conCodigo = config?.proveedor_codigo_activo === '1';
+
   const mutation = useMutation({
-    mutationFn: () => proveedor
-      ? actualizarProveedor(proveedor.id, form)
-      : crearProveedor(form),
+    mutationFn: () => {
+      const payload = { ...form };
+      if (!conCodigo) delete payload.ciudad;
+      return proveedor ? actualizarProveedor(proveedor.id, payload) : crearProveedor(payload);
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['proveedores'], exact: false });
       queryClient.invalidateQueries({ queryKey: ['cruces'],      exact: false });
@@ -1778,7 +1868,15 @@ function ModalProveedor({ proveedor, tipoForzado, onClose }) {
     <Modal open onClose={onClose} title={proveedor ? 'Editar Proveedor' : tipoForzado === 'cruce' ? 'Nuevo Cruce' : 'Nuevo Proveedor'} size="md">
       <div className="flex flex-col gap-3">
         <Input id="prov-nombre"   label="Nombre *"  value={form.nombre}   onChange={(e) => setForm({ ...form, nombre:   e.target.value })} onKeyDown={(e) => handleKeyDown(e, 'prov-nit')} />
-        <Input id="prov-nit"      label="NIT"        value={form.nit}      onChange={(e) => setForm({ ...form, nit:      e.target.value })} onKeyDown={(e) => handleKeyDown(e, 'prov-tel')} />
+        <Input id="prov-nit"      label={conCodigo ? 'NIT *' : 'NIT'} value={form.nit} onChange={(e) => setForm({ ...form, nit: e.target.value })} onKeyDown={(e) => handleKeyDown(e, conCodigo ? 'prov-ciudad' : 'prov-tel')} />
+        {conCodigo && (
+          <>
+            <Input id="prov-ciudad" label="Ciudad *" value={form.ciudad}
+              onChange={(e) => setForm({ ...form, ciudad: e.target.value })}
+              onKeyDown={(e) => handleKeyDown(e, 'prov-tel')} />
+            <CodigoProveedorVista proveedor={proveedor} form={form} />
+          </>
+        )}
         <Input id="prov-tel"      label="Teléfono"   value={form.telefono} onChange={(e) => setForm({ ...form, telefono: e.target.value })} onKeyDown={(e) => handleKeyDown(e, 'prov-email')} />
         <Input id="prov-email"    label="Email"       value={form.email}    onChange={(e) => setForm({ ...form, email:    e.target.value })} onKeyDown={(e) => handleKeyDown(e, 'prov-contacto')} />
         <Input id="prov-contacto" label="Contacto"    value={form.contacto} onChange={(e) => setForm({ ...form, contacto: e.target.value })} onKeyDown={(e) => handleKeyDown(e, null)} />
@@ -1850,8 +1948,34 @@ function TabProveedores({ sucursalKey, sucursalLista }) {
   });
   const acreedoresAll = Array.isArray(acreedoresRaw) ? acreedoresRaw : [];
 
-  const proveedores = (proveedoresData || []).filter((p) =>
+  // ── Código del proveedor (opt-in) ─────────────────────────────────────────
+  const queryClient = useQueryClient();
+  const { data: config } = useQuery({
+    queryKey: ['config'],
+    queryFn:  () => api.get('/config').then((r) => r.data.data),
+  });
+  const conCodigo = config?.proveedor_codigo_activo === '1';
+  const esAdmin   = usuario?.rol === 'admin_negocio';
+  const [soloSinCodigo, setSoloSinCodigo] = useState(false);
+  const [resultadoAsignar, setResultadoAsignar] = useState('');
+  const mutAsignar = useMutation({
+    mutationFn: () => asignarCodigosProveedores(),
+    onSuccess: (r) => {
+      setResultadoAsignar(r.data.message || 'Listo');
+      queryClient.invalidateQueries({ queryKey: ['proveedores'], exact: false });
+    },
+    onError: (e) => setResultadoAsignar(e.response?.data?.error || 'No se pudieron asignar los códigos'),
+  });
+
+  const todos      = proveedoresData || [];
+  const sinCodigo  = conCodigo ? todos.filter((p) => !p.codigo) : [];
+  // «Listos» = tienen los tres datos pero todavía no el código (p. ej. se
+  // cargaron por fuera, o falló la asignación): son los que el botón resuelve.
+  const listos     = sinCodigo.filter((p) => Array.isArray(p.codigo_faltantes) && p.codigo_faltantes.length === 0);
+
+  const proveedores = todos.filter((p) =>
     p.nombre.toLowerCase().includes(busqueda.toLowerCase())
+    && (!conCodigo || !soloSinCodigo || !p.codigo)
   );
 
   if (proveedorVer) {
@@ -1859,6 +1983,7 @@ function TabProveedores({ sucursalKey, sucursalLista }) {
       <>
         <HistorialProveedor
           proveedor={proveedorVer}
+          conCodigo={conCodigo}
           sucursalKey={sucursalKey}
           sucursalLista={sucursalLista}
           onVolver={() => setProveedorVer(null)}
@@ -1878,6 +2003,46 @@ function TabProveedores({ sucursalKey, sucursalLista }) {
         )}
       </div>
       <SearchInput value={busqueda} onChange={setBusqueda} placeholder="Buscar proveedor..." />
+
+      {/* Qué proveedores tienen código y cuáles no se pudieron asignar. Sin
+          código, la etiqueta de lo que se les compra sale sin su proveedor. */}
+      {conCodigo && !isLoading && todos.length > 0 && (
+        <div className={`flex flex-col gap-2 px-3 py-2.5 rounded-xl border
+          ${sinCodigo.length ? 'bg-amber-50 border-amber-200' : 'bg-blue-50 border-blue-100'}`}>
+          <div className="flex items-center gap-2 flex-wrap">
+            <Tag size={14} className={sinCodigo.length ? 'text-amber-600' : 'text-blue-600'} />
+            <p className="text-sm flex-1 min-w-0">
+              <strong>{todos.length - sinCodigo.length}</strong> con código
+              {sinCodigo.length > 0 && (
+                <> · <strong className="text-amber-800">{sinCodigo.length}</strong>
+                  <span className="text-amber-800"> sin código</span></>
+              )}
+            </p>
+            {sinCodigo.length > 0 && (
+              <button type="button" onClick={() => setSoloSinCodigo((v) => !v)}
+                className="text-xs font-medium text-amber-800 hover:underline">
+                {soloSinCodigo ? 'Ver todos' : 'Ver solo sin código'}
+              </button>
+            )}
+          </div>
+          {sinCodigo.length > listos.length && (
+            <p className="flex items-start gap-1.5 text-xs text-amber-700">
+              <AlertTriangle size={12} className="flex-shrink-0 mt-0.5" />
+              El código se arma con las 3 primeras letras del nombre, del NIT y de la ciudad. Edita
+              los que dicen qué les falta y el código se asigna al guardar.
+            </p>
+          )}
+          {esAdmin && listos.length > 0 && (
+            <div className="flex items-center gap-2">
+              <Button size="sm" loading={mutAsignar.isPending} onClick={() => { setResultadoAsignar(''); mutAsignar.mutate(); }}>
+                <Wand2 size={14} /> Asignar {listos.length} pendiente(s)
+              </Button>
+            </div>
+          )}
+          {resultadoAsignar && <p className="text-xs text-gray-600">{resultadoAsignar}</p>}
+        </div>
+      )}
+
       {isLoading ? <Spinner className="py-20" /> : proveedores.length === 0 ? (
         <EmptyState icon={Truck} titulo="Sin proveedores" />
       ) : (
@@ -1890,6 +2055,7 @@ function TabProveedores({ sucursalKey, sucursalLista }) {
                 <div className="flex items-center gap-2 flex-wrap">
                   <p className="font-semibold text-gray-900 truncate">{p.nombre}</p>
                   <ProveedorTipoBadge tipo={p.tipo} />
+                  {conCodigo && <ChipCodigoProveedor proveedor={p} />}
                   {saldo > 0 && (
                     <span className="text-xs text-red-600 font-semibold bg-red-50 border border-red-200 px-2 py-0.5 rounded-full">
                       Debe {formatCOP(saldo)}
@@ -1898,6 +2064,7 @@ function TabProveedores({ sucursalKey, sucursalLista }) {
                 </div>
                 <div className="flex items-center gap-3 mt-0.5 flex-wrap">
                   {p.nit      && <span className="text-xs text-gray-400">NIT: {p.nit}</span>}
+                  {conCodigo && p.ciudad && <span className="text-xs text-gray-400">{p.ciudad}</span>}
                   {p.telefono && <span className="text-xs text-gray-400">Tel: {p.telefono}</span>}
                   {p.contacto && <span className="text-xs text-gray-400">{p.contacto}</span>}
                 </div>

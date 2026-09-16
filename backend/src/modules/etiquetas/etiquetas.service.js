@@ -122,6 +122,9 @@ const _opciones = (body, ctx) => {
       precio:     mostrar.precio     === true,
       encabezado: mostrar.encabezado === true,
       pie:        mostrar.pie        === true,
+      // Solo pesa en las etiquetas de una compra (las únicas cuyos items traen
+      // `codigo_proveedor`): ausente = sí.
+      proveedor:  mostrar.proveedor  !== false,
     },
     diseno: {
       alinear:        d.alinear === 'izquierda' ? 'izquierda' : 'centro',
@@ -201,7 +204,21 @@ const listar = async (negocioId, sucursalId, filtros) => {
  */
 const planear = async (negocioId, sucursalId, body) => {
   const { formato, op, etiquetas, sinCodigo, recortado } = await _preparar(negocioId, sucursalId, body);
+  return {
+    ..._plan(formato, op, etiquetas, recortado),
+    sinCodigo: sinCodigo.map((n) => ({
+      nivel: n.nivel, producto_id: n.producto_id, atributo_id: n.atributo_id, variante_id: n.variante_id,
+      nombre: n.nombre, variante_label: n.variante_label,
+    })),
+  };
+};
 
+/**
+ * La parte del plan que no depende de DE DÓNDE salieron las etiquetas: la usan
+ * la impresión de Inventario y la de una compra. Dos copias de estos avisos
+ * acabarían avisando distinto sobre el mismo rollo.
+ */
+const _plan = (formato, op, etiquetas, recortado) => {
   const porPagina = formato.columnas * formato.filas;
   const saltar    = Math.max(0, Math.min(porPagina - 1, (Number(op.desde) || 1) - 1));
   const geometria = layout.geometria(formato, op, { desde: op.desde });
@@ -236,10 +253,6 @@ const planear = async (negocioId, sucursalId, body) => {
     porPagina,
     recortado,
     maximo:    MAX_ETIQUETAS,
-    sinCodigo: sinCodigo.map((n) => ({
-      nivel: n.nivel, producto_id: n.producto_id, atributo_id: n.atributo_id, variante_id: n.variante_id,
-      nombre: n.nombre, variante_label: n.variante_label,
-    })),
     avisos:   [...avisos],
     moduloMm: muestra ? Number(muestra.moduloMm.toFixed(3)) : null,
     minimoMm: muestra ? muestra.minimoMm : null,
@@ -370,7 +383,192 @@ const generarCodigos = async (negocioId, sucursalId, body) => {
   }
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Etiquetas de una COMPRA (o una Entrada de bodega, que es una compra)
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Al recibir mercancía se imprime ahí mismo: es cuando la caja está abierta y
+// alguien la va a poner en el estante. Y si la pantalla se cerró sin querer, la
+// compra sigue ahí y se reimprime igual — el registro ES la compra.
+//
+// No es un motor aparte: las etiquetas salen del mismo `_plan`, el mismo
+// `layout.planear` y el mismo PDF que las de Inventario, con el formato, el
+// diseño y la calibración que ese navegador ya tiene guardados. Lo único nuevo
+// es de dónde salen los items (las líneas de la compra) y que cada uno lleva el
+// código del proveedor.
+//
+// Qué lleva el SÍMBOLO no cambia: el código pelado del producto (o el IMEI de un
+// equipo), porque el lector es un teclado y `BarraEscaneo` resuelve exactamente
+// eso. El código del proveedor va como TEXTO debajo — metido en el símbolo, el
+// escáner del punto de venta dejaría de encontrar el producto.
+
+const NIVEL_DE_LINEA = (l) => {
+  if (l.variante_id) return { nivel: 'variante', variante_id: Number(l.variante_id) };
+  if (l.atributo_id) return { nivel: 'atributo', atributo_id: Number(l.atributo_id) };
+  return { nivel: 'producto', producto_id: Number(l.producto_id) };
+};
+
+/**
+ * La compra, si este usuario puede etiquetarla. Un supervisor solo etiqueta lo
+ * que entró en SU sucursal: es la misma frontera que tiene para ver compras.
+ */
+const _compraEtiquetable = async (negocioId, usuario, compraId) => {
+  const id = Number(compraId);
+  if (!Number.isInteger(id) || id <= 0) throw { status: 400, message: 'Compra inválida' };
+
+  const compra = await repo.compraParaEtiquetas(negocioId, id);
+  if (!compra) throw { status: 404, message: 'Compra no encontrada' };
+
+  if (usuario?.rol !== 'admin_negocio' && usuario?.sucursalId
+      && Number(compra.sucursal_id) !== Number(usuario.sucursalId)) {
+    throw { status: 403, message: 'Esta compra es de otra sucursal' };
+  }
+  // Cancelar devolvió el stock: etiquetar mercancía que ya no está en el
+  // inventario es pegar un código que el escáner no va a encontrar.
+  if (compra.estado === 'Cancelada') {
+    throw { status: 409, code: 'COMPRA_CANCELADA', message: 'Esta compra está cancelada: su mercancía ya no está en el inventario.' };
+  }
+  return compra;
+};
+
+/**
+ * Cada línea de la compra, lista para etiquetar.
+ *
+ * `cantidad` es lo que entró MENOS lo ya devuelto al proveedor: reimprimir no
+ * puede sacar etiquetas de unidades que se fueron. `problema` dice por qué una
+ * línea no puede salir, para que la pantalla lo muestre en vez de sacar un PDF
+ * con menos etiquetas sin explicación:
+ *   · sin_codigo  → el nodo existe pero no tiene código (se genera en Inventario)
+ *   · sin_nodo    → la talla ya no existe, o el producto ganó variantes después
+ *   · sin_unidad  → el equipo ya no está en esa sucursal
+ */
+const _lineasEtiquetables = async (negocioId, compra) => {
+  const lineas = await repo.lineasCompra(compra.id);
+
+  const deCantidad = lineas.filter((l) => !l.imei && l.producto_id);
+  const nodos = await repo.nodosPorSeleccion(negocioId, compra.sucursal_id,
+    _sanearSeleccion(deCantidad.map(NIVEL_DE_LINEA)));
+  const porNodo = new Map(nodos.map((n) => [`${n.nivel}:${n[NIVELES[n.nivel]]}`, n]));
+
+  const seriales = await repo.serialesDeCompra(compra.sucursal_id,
+    lineas.filter((l) => l.imei).map((l) => l.imei));
+  const porImei = new Map(seriales.map((s) => [s.clave, s]));
+
+  return lineas.map((l) => {
+    const base = {
+      linea_id: l.id,
+      nombre:   l.nombre_producto,
+      variante_label: null,
+      codigo:   null,
+      precio:   null,
+      cantidad: Math.max(0, Number(l.cantidad || 0) - Number(l.cantidad_devuelta || 0)),
+      problema: null,
+    };
+
+    if (l.imei) {
+      const s = porImei.get(String(l.imei).trim().toUpperCase());
+      if (!s) return { ...base, tipo: 'serial', codigo: String(l.imei).trim(), problema: 'sin_unidad' };
+      return {
+        ...base, tipo: 'serial',
+        nombre: s.nombre || l.nombre_producto,
+        variante_label: s.color || null,
+        codigo: String(s.imei).trim(),
+        precio: s.precio,
+        vendido: !!s.vendido,
+      };
+    }
+
+    const sel = NIVEL_DE_LINEA(l);
+    const n = l.producto_id ? porNodo.get(`${sel.nivel}:${sel[NIVELES[sel.nivel]]}`) : null;
+    if (!n) return { ...base, tipo: 'cantidad', problema: 'sin_nodo' };
+    const codigo = n.codigo && String(n.codigo).trim() ? String(n.codigo).trim() : null;
+    return {
+      ...base, tipo: 'cantidad',
+      nombre: n.nombre,
+      variante_label: n.variante_label,
+      codigo,
+      precio: n.precio,
+      problema: codigo ? null : 'sin_codigo',
+    };
+  });
+};
+
+/**
+ * Líneas → etiquetas físicas. `cantidades` es `{ [linea_id]: n }` y lo que no
+ * trae se imprime completo: la pantalla solo manda lo que el usuario cambió (una
+ * etiqueta rota se reimprime sola, sin sacar la caja entera otra vez).
+ */
+const _expandirCompra = (lineas, cantidades, codigoProveedor) => {
+  const pedidas = cantidades && typeof cantidades === 'object' ? cantidades : {};
+  const etiquetas = [];
+  let recortado = false;
+
+  for (const l of lineas) {
+    if (l.problema) continue;
+    const raw = pedidas[l.linea_id];
+    const n = raw === undefined || raw === null || raw === '' ? l.cantidad : Math.floor(Number(raw));
+    const cant = Math.max(0, Math.min(Number.isFinite(n) ? n : l.cantidad, MAX_ETIQUETAS));
+
+    const item = {
+      nombre: l.nombre, variante_label: l.variante_label, codigo: l.codigo, precio: l.precio,
+      codigo_proveedor: codigoProveedor || null,
+    };
+    for (let k = 0; k < cant; k += 1) {
+      if (etiquetas.length >= MAX_ETIQUETAS) { recortado = true; break; }
+      etiquetas.push(item);
+    }
+    if (recortado) break;
+  }
+  return { etiquetas, recortado };
+};
+
+const _cabecera = (compra) => ({
+  id: compra.id,
+  numero: compra.numero ?? compra.id,
+  sucursal_id: compra.sucursal_id,
+  proveedor_id: compra.proveedor_id,
+  proveedor_nombre: compra.proveedor_nombre || null,
+  codigo_proveedor: compra.codigo_proveedor || null,
+});
+
+/** Qué se puede etiquetar de esta compra. */
+const lineasDeCompra = async (negocioId, usuario, compraId) => {
+  const compra = await _compraEtiquetable(negocioId, usuario, compraId);
+  const lineas = await _lineasEtiquetables(negocioId, compra);
+  return { compra: _cabecera(compra), lineas };
+};
+
+const _prepararCompra = async (negocioId, usuario, compraId, body) => {
+  const compra = await _compraEtiquetable(negocioId, usuario, compraId);
+  const lineas = await _lineasEtiquetables(negocioId, compra);
+  const { formato, op } = await _base(negocioId, compra.sucursal_id, body);
+  const { etiquetas, recortado } = _expandirCompra(lineas, body.cantidades, compra.codigo_proveedor);
+  return { compra, lineas, formato, op, etiquetas, recortado };
+};
+
+const planearCompra = async (negocioId, usuario, compraId, body) => {
+  const { compra, lineas, formato, op, etiquetas, recortado } = await _prepararCompra(negocioId, usuario, compraId, body);
+  return {
+    ..._plan(formato, op, etiquetas, recortado),
+    compra: _cabecera(compra),
+    conProblema: lineas.filter((l) => l.problema)
+      .map((l) => ({ linea_id: l.linea_id, nombre: l.nombre, problema: l.problema })),
+  };
+};
+
+const construirPdfCompra = async (negocioId, usuario, compraId, body, res) => {
+  const { generarPdfEtiquetas } = require('./etiquetas.pdf');
+  const { compra, formato, op, etiquetas } = await _prepararCompra(negocioId, usuario, compraId, body);
+  const limite = Number(body.limite) > 0 ? Math.floor(Number(body.limite)) : null;
+  generarPdfEtiquetas({
+    etiquetas: limite ? etiquetas.slice(0, limite) : etiquetas,
+    formato, opciones: op, res,
+    nombreArchivo: `etiquetas-compra-${compra.numero ?? compra.id}.pdf`,
+  });
+};
+
 module.exports = {
   listarFormatos, catalogo, listar, planear, construirPdf, generarCodigos,
+  lineasDeCompra, planearCompra, construirPdfCompra,
   MAX_ETIQUETAS, MAX_CODIGOS_POR_TANDA,
 };

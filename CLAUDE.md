@@ -1032,6 +1032,53 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > un fallo a mitad no deja nada, la 9 las llaves y la 12 que Ajustes promete los
 > mismos ejemplos que genera el motor) y `frontend/scripts/prueba-variantes-nuevas.mjs`
 > (14; la forma del payload y que el costo no viaje sin permiso).
+>
+> **Etiquetas al RECIBIR, con el código del PROVEEDOR**
+> (`utils/codigoProveedor.util.js`, `etiquetas.service` → `lineasDeCompra`,
+> `ModalEtiquetasCompra.jsx`, `20260916_codigo_proveedor.sql`): opt-in
+> `proveedor_codigo_activo` (**ausente = apagado**; exige
+> `codigo_producto_activo`, igual que `codigos_proveedor_activos` — y NO es esa
+> clave: aquella traduce las referencias DEL proveedor, esta es el código que el
+> negocio le pone AL proveedor).
+> **El código es NOMBRE-NIT-CIUDAD-consecutivo** (`DIS-900-CAL-001`), con el
+> MISMO `tresLetras` del código con patrón (importado, no copiado). El
+> consecutivo es **del negocio**, no de la raíz: aquí cada raíz es un solo
+> proveedor, y el número hace la unicidad por construcción. Se siembra con
+> `GREATEST` contra lo ya escrito con ese formato, como el de producto.
+> **Nunca se reescribe** (el UPDATE exige `codigo IS NULL`): ya está impreso en
+> mercancía, así que editar nombre, NIT o ciudad no lo cambia, y apagar la
+> feature no lo borra. **Sin NIT o sin ciudad no se inventa** un `XXX`: queda
+> sin código y `codigo_faltantes` (derivado al leer, nunca guardado) dice qué
+> falta. Se asigna al **encender** la feature (a todos, tolerante y DESPUÉS de
+> guardar Ajustes), al **crear** y al **editar** uno que no tenía; el botón de
+> Proveedores («Asignar N pendientes», admin) cubre lo cargado por fuera. El
+> código nunca viene del cliente. La columna `ciudad` solo se escribe si llega
+> en el cuerpo: la pantalla con la feature apagada no la manda y no la borra.
+> Sin las columnas, `hayCodigoProveedor()` en falso deja el SQL de proveedores
+> exactamente como antes.
+> **Qué va en la etiqueta**: el SÍMBOLO sigue siendo el código pelado del
+> producto (o el IMEI de un equipo) —el lector es un teclado y `BarraEscaneo`
+> resuelve eso— y el del proveedor va como TEXTO debajo («Prov. DIS-…»). Es el
+> ÚLTIMO texto en caer cuando no cabe (`ORDEN_SACRIFICIO`); sin
+> `codigo_proveedor` en el item el plano es idéntico al de siempre.
+> **El registro que permite reimprimir ES la compra**: `GET/POST
+> /etiquetas/compra/:id[/plan|/pdf]` arma los items desde `lineas_compra`
+> (cantidad − devuelta; cantidad → el nodo HOJA vía `nodosPorSeleccion`;
+> serial → la fila de `seriales` de la sucursal de la compra, por el fan-out del
+> IMEI) y lee el código del proveedor EN VIVO, así una Entrada que llegó sin
+> proveedor lo trae al reimprimir después de confirmarse. No hay tabla de
+> impresiones que se desincronice de lo que entró. Cuelga del módulo
+> `inventario` (el bodeguero), un no-admin solo etiqueta compras de su sede, una
+> compra `Cancelada` responde 409, y no selecciona ningún costo.
+> **Mismo motor que Inventario**: `_plan`, `layout.planear` y el mismo PDF. El
+> modal NO trae editor: usa `leerPreferencias()` (formato, diseño y calibración
+> guardados en ese navegador). Se abre solo al registrar en `ModalCompra`,
+> `ModalRecibir` y `VistaEntrada`, y se reabre desde el detalle de compra y de
+> entrada; `etiquetasCompraActivas` es la única regla que las cinco consultan.
+> Prueba: `49-codigo-proveedor-etiquetas` (80 verificaciones; la sección 1 es la
+> que protege a los negocios —sin columnas y sin clave nada cambia—, la 4 que el
+> código impreso no se reescribe, la 7 las líneas y el PDF de verdad, y la 11
+> que las pantallas prometen lo mismo que el backend).
 
 > **La UBICACIÓN es una fila, no un atributo del producto**
 > (`ubicaciones/`, `20260831_ubicaciones_estructura.sql`): 20260730 la puso como

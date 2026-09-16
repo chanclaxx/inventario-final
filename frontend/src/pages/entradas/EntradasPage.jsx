@@ -1,8 +1,11 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  PackagePlus, Check, Clock, ClipboardList, FileCheck2, ShieldCheck, Wrench,
+  PackagePlus, Check, Clock, ClipboardList, FileCheck2, ShieldCheck, Wrench, Tag,
 } from 'lucide-react';
+import api from '../../api/axios.config';
+import { ModalEtiquetasCompra } from '../inventario/ModalEtiquetasCompra';
+import { etiquetasCompraActivas } from '../inventario/etiquetas/etiquetasUi';
 import {
   getEntradas, getOrdenesParaRecibir, getEntradaDetalle,
   getEntradasPorConfirmar, confirmarEntrada,
@@ -59,12 +62,30 @@ function ModalDetalleEntrada({ entradaId, onCerrar }) {
     retry: false,
   });
 
+  const { data: config } = useQuery({
+    queryKey: ['config'],
+    queryFn:  () => api.get('/config').then((r) => r.data.data),
+    staleTime: 60_000,
+  });
+  const etiquetasActivas = etiquetasCompraActivas(config);
+  const [imprimiendo, setImprimiendo] = useState(false);
+
   const etiquetaNodo = (l) => {
     const partes = [];
     if (l.atributo_valor) partes.push(l.atributo_tipo ? `${l.atributo_tipo}: ${l.atributo_valor}` : l.atributo_valor);
     if (l.variante_valor) partes.push(l.variante_tipo ? `${l.variante_tipo}: ${l.variante_valor}` : l.variante_valor);
     return partes.join(' · ');
   };
+
+  if (imprimiendo) {
+    return (
+      <ModalEtiquetasCompra
+        compraId={entradaId}
+        titulo={`Etiquetas · entrada #${String(data?.numero ?? entradaId).padStart(4, '0')}`}
+        onClose={() => setImprimiendo(false)}
+      />
+    );
+  }
 
   return (
     <Modal open onClose={onCerrar}
@@ -187,7 +208,16 @@ function ModalDetalleEntrada({ entradaId, onCerrar }) {
             </p>
           )}
 
-          <Button variant="secondary" onClick={onCerrar}>Cerrar</Button>
+          <div className="flex gap-2">
+            <Button variant="secondary" className="flex-1" onClick={onCerrar}>Cerrar</Button>
+            {/* Reimprimir: si la ventana de etiquetas se cerró al registrar, o
+                una etiqueta se rompió. Lo que sale es lo que entró. */}
+            {etiquetasActivas && (
+              <Button className="flex-1" onClick={() => setImprimiendo(true)}>
+                <Tag size={15} /> Etiquetas
+              </Button>
+            )}
+          </div>
         </div>
       )}
     </Modal>

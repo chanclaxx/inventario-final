@@ -60,4 +60,33 @@ const postGenerarCodigos = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-module.exports = { getFormatos, getCatalogo, getNodos, postPlan, postPdf, postGenerarCodigos };
+// ── Etiquetas de una compra ──────────────────────────────────────────────────
+// La sucursal NO sale de la petición sino de la compra: la mercancía entró en
+// una sede concreta y es ahí donde viven sus códigos. El service comprueba que
+// un no-admin solo etiquete compras de SU sucursal.
+const _usuario = (req) => ({ rol: req.user.rol, sucursalId: req.sucursal_id || null });
+
+const getCompra = async (req, res, next) => {
+  try {
+    const data = await service.lineasDeCompra(req.user.negocio_id, _usuario(req), req.params.id);
+    res.json({ ok: true, data });
+  } catch (err) { next(err); }
+};
+
+const postPlanCompra = async (req, res, next) => {
+  try {
+    const data = await service.planearCompra(req.user.negocio_id, _usuario(req), req.params.id, req.body || {});
+    res.json({ ok: true, data });
+  } catch (err) { next(err); }
+};
+
+const postPdfCompra = async (req, res, next) => {
+  try {
+    await service.construirPdfCompra(req.user.negocio_id, _usuario(req), req.params.id, req.body || {}, res);
+  } catch (err) { next(err); }
+};
+
+module.exports = {
+  getFormatos, getCatalogo, getNodos, postPlan, postPdf, postGenerarCodigos,
+  getCompra, postPlanCompra, postPdfCompra,
+};

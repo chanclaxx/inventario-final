@@ -3,6 +3,8 @@ const { requireNivel }  = require('../../middlewares/role.middleware');
 const { requireModulo } = require('../../middlewares/modulo.middleware');
 const configRepo = require('../config/config.repository');
 const ctrl = require('./etiquetas.controller');
+const codigoProveedor = require('../../utils/codigoProveedor.util');
+const { hayCodigoProveedor } = require('../../config/columnas');
 
 // ── Doble candado ────────────────────────────────────────────────────────────
 //
@@ -44,5 +46,29 @@ router.post('/pdf',   ctrl.postPdf);
 // `supervisor` se estaría dando por la puerta de atrás un permiso que la pantalla
 // de variantes niega.
 router.post('/codigos', requireNivel('admin_negocio'), ctrl.postGenerarCodigos);
+
+// ── Etiquetas de una compra, con el código del proveedor ─────────────────────
+//
+// Tercer candado, propio: `proveedor_codigo_activo`. Sin él estas rutas no
+// existen (404) y recibir mercancía sigue como siempre, sin ofrecer imprimir.
+//
+// Siguen colgando del módulo `inventario`, como todo lo de aquí: el bodeguero
+// que recibe en Entradas es supervisor con inventario y sin proveedores, y es
+// justo quien tiene la caja abierta. La etiqueta no lleva costo — solo el
+// precio de venta, igual que las de Inventario — así que no abre nada que
+// `costos_solo_admin` cierre.
+const requireCodigoProveedorActivo = async (req, res, next) => {
+  try {
+    const cfg = await configRepo.getMap(req.user.negocio_id);
+    if (!hayCodigoProveedor() || !codigoProveedor.activo(cfg)) {
+      return res.status(404).json({ ok: false, error: 'Recurso no encontrado' });
+    }
+    return next();
+  } catch (err) { return next(err); }
+};
+
+router.get ('/compra/:id',      requireCodigoProveedorActivo, ctrl.getCompra);
+router.post('/compra/:id/plan', requireCodigoProveedorActivo, ctrl.postPlanCompra);
+router.post('/compra/:id/pdf',  requireCodigoProveedorActivo, ctrl.postPdfCompra);
 
 module.exports = router;

@@ -1,5 +1,5 @@
 const { pool } = require('../../config/db');
-const { hayUbicacion } = require('../../config/columnas');
+const { hayUbicacion, hayCodigoProveedor } = require('../../config/columnas');
 
 // ── Qué se puede etiquetar ───────────────────────────────────────────────────
 //
@@ -183,4 +183,70 @@ const contextoImpresion = async (negocioId, sucursalId) => {
   return rows[0] || null;
 };
 
-module.exports = { listarNodos, nodosPorSeleccion, contextoImpresion };
+// ── Etiquetas de una COMPRA ──────────────────────────────────────────────────
+//
+// El registro que permite reimprimir es la compra misma: sus líneas dicen qué
+// entró y cuánto, y el proveedor de la compra dice qué código va debajo. No hay
+// tabla de "impresiones" que se pueda desincronizar de lo que de verdad entró —
+// si la entrada se corrige o se devuelve algo, la reimpresión ya lo refleja.
+
+/**
+ * Cabecera de la compra con el proveedor, solo si es de este negocio.
+ * El código del proveedor se lee EN VIVO: una entrada que llegó sin proveedor lo
+ * gana al confirmarse, y reimprimir después ya lo trae.
+ */
+const compraParaEtiquetas = async (negocioId, compraId) => {
+  const colCodigo = hayCodigoProveedor() ? 'p.codigo' : 'NULL::text';
+  const { rows } = await pool.query(
+    `SELECT c.id, c.numero, c.estado, c.sucursal_id, c.proveedor_id,
+            p.nombre AS proveedor_nombre, ${colCodigo} AS codigo_proveedor
+     FROM compras c
+     JOIN sucursales su        ON su.id = c.sucursal_id
+     LEFT JOIN proveedores p   ON p.id = c.proveedor_id AND p.negocio_id = su.negocio_id
+     WHERE c.id = $1 AND su.negocio_id = $2`,
+    [compraId, negocioId]
+  );
+  return rows[0] || null;
+};
+
+/** Las líneas tal como quedaron, con lo que ya se devolvió al proveedor. */
+const lineasCompra = async (compraId) => {
+  const { rows } = await pool.query(
+    `SELECT id, nombre_producto, imei, cantidad,
+            COALESCE(cantidad_devuelta, 0) AS cantidad_devuelta,
+            producto_id, atributo_id, variante_id
+     FROM lineas_compra
+     WHERE compra_id = $1
+     ORDER BY id`,
+    [compraId]
+  );
+  return rows;
+};
+
+/**
+ * Los equipos de una compra, en la sucursal donde entraron.
+ *
+ * El IMEI vive en VARIAS filas de `seriales` (un equipo retomado, movido de
+ * referencia o reimportado): se acota a la sucursal de la compra y se queda con
+ * la fila más nueva, igual que `getLineas` de compras. Sin ese acote el mismo
+ * IMEI saldría con el nombre de la referencia de otra sede.
+ */
+const serialesDeCompra = async (sucursalId, imeis) => {
+  if (!imeis.length) return [];
+  const { rows } = await pool.query(
+    `SELECT DISTINCT ON (UPPER(TRIM(s.imei)))
+            UPPER(TRIM(s.imei)) AS clave, s.imei, s.color, s.vendido,
+            COALESCE(s.precio, ps.precio) AS precio, ps.nombre
+     FROM seriales s
+     JOIN productos_serial ps ON ps.id = s.producto_id
+     WHERE ps.sucursal_id = $1 AND UPPER(TRIM(s.imei)) = ANY($2::text[])
+     ORDER BY UPPER(TRIM(s.imei)), s.id DESC`,
+    [sucursalId, imeis.map((i) => String(i).trim().toUpperCase())]
+  );
+  return rows;
+};
+
+module.exports = {
+  listarNodos, nodosPorSeleccion, contextoImpresion,
+  compraParaEtiquetas, lineasCompra, serialesDeCompra,
+};

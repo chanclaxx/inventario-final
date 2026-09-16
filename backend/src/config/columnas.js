@@ -47,6 +47,7 @@ const detectarColumnas = async () => {
   await _detectarCorreccionesEntrada();
   await _detectarRetomaReingreso();
   await _detectarListasPrecios();
+  await _detectarCodigoProveedor();
   return _ubicacionDisponible;
 };
 
@@ -357,6 +358,41 @@ const _detectarListasPrecios = async () => {
 
 const hayListasPrecios = () => _listasPreciosDisponible;
 
+// ── Código del proveedor ─────────────────────────────────────────────────────
+//
+// Ver migrations/20260916_codigo_proveedor.sql. Se exigen las DOS columnas: con
+// `codigo` y sin `ciudad` no hay forma de armar el código, y con `ciudad` sin
+// `codigo` no hay dónde guardarlo. La consulta de proveedores es la que usa
+// ModalCompra para elegir a quién se le compra: si nombrara una columna ausente
+// se caería la compra, no solo la feature.
+
+let _codigoProveedorDisponible = false;
+
+const _detectarCodigoProveedor = async () => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT column_name
+       FROM information_schema.columns
+       WHERE table_schema = 'public'
+         AND table_name   = 'proveedores'
+         AND column_name  = ANY($1::text[])`,
+      [['ciudad', 'codigo']]
+    );
+    const encontradas = new Set(rows.map((r) => r.column_name));
+    _codigoProveedorDisponible = encontradas.has('ciudad') && encontradas.has('codigo');
+
+    if (!_codigoProveedorDisponible) {
+      console.warn('⚠️  Columnas `ciudad`/`codigo` ausentes en proveedores: el código de proveedor queda desactivado.');
+    }
+  } catch (err) {
+    _codigoProveedorDisponible = false;
+    console.error('⚠️  No se pudo verificar el código de proveedor (feature desactivada):', err.message);
+  }
+  return _codigoProveedorDisponible;
+};
+
+const hayCodigoProveedor = () => _codigoProveedorDisponible;
+
 // Solo para pruebas: permite simular una BD sin la columna sin tocar la BD real.
 const _setUbicacionDisponible  = (valor) => { _ubicacionDisponible  = !!valor; };
 const _setCatalogoDisponible   = (valor) => { _catalogoDisponible   = !!valor; };
@@ -366,6 +402,7 @@ const _setPedidosInternosDisponible = (valor) => { _pedidosInternosDisponible = 
 const _setCorreccionesEntradaDisponible = (valor) => { _correccionesEntradaDisponible = !!valor; };
 const _setRetomaReingresoDisponible = (valor) => { _retomaReingresoDisponible = !!valor; };
 const _setListasPreciosDisponible = (valor) => { _listasPreciosDisponible = !!valor; };
+const _setCodigoProveedorDisponible = (valor) => { _codigoProveedorDisponible = !!valor; };
 
 module.exports = {
   detectarColumnas, hayUbicacion, _setUbicacionDisponible,
@@ -376,4 +413,5 @@ module.exports = {
   hayCorreccionesEntrada, _setCorreccionesEntradaDisponible,
   hayRetomaReingreso, _setRetomaReingresoDisponible,
   hayListasPrecios, _setListasPreciosDisponible,
+  hayCodigoProveedor, _setCodigoProveedorDisponible,
 };

@@ -14,6 +14,33 @@ export const mm = (n) => {
 
 export const PREFIJO_GUARDADO = 'guardado:';
 
+// Los avisos del plan, en palabras. Viven aquí y no en un modal porque los pintan
+// DOS: la impresión de Inventario y la de una compra. Sobre el mismo rollo tienen
+// que decir lo mismo.
+export const TEXTO_AVISO = {
+  modulo_estrecho:         'El código queda demasiado apretado para esta etiqueta: puede que el lector falle. Usa un formato más grande, códigos más cortos o cambia a QR.',
+  resolucion_insuficiente: 'Con la resolución de tu impresora no cabe ni un punto por barra: el código no se podrá leer. Usa QR, una etiqueta más grande o un código más corto.',
+  sin_espacio_pie:         'No cabe el texto al pie y se quitó.',
+  sin_espacio_precio:      'No cabe el precio y se quitó.',
+  sin_espacio_encabezado:  'No cabe el encabezado y se quitó.',
+  sin_espacio_variante:    'No cabe la variante y se quitó.',
+  sin_espacio_nombre:      'No cabe el nombre y se quitó.',
+  sin_espacio_proveedor:   'No cabe el código del proveedor y se quitó. Usa una etiqueta más alta.',
+  rollo_ancho:             'El rollo mide más de 108 mm: las impresoras de etiquetas de 4 pulgadas no imprimen tan ancho y lo que quede por fuera no saldrá.',
+  calibracion_fuera:       'Con ese desvío o esa escala, parte de alguna etiqueta queda fuera de la página y no se imprimirá.',
+  rollo_varias_filas:      'Pusiste más de una fila por página. Si tu rollo trae hueco entre filas (casi todos), la impresora cuenta cada fila como una etiqueta: imprime corrido y avanza filas en blanco. Pon 1 fila por página.',
+};
+/**
+ * ¿Se ofrecen las etiquetas al recibir mercancía? Una sola regla para las cinco
+ * pantallas que la preguntan (compra, recepción de orden, entrada, y el detalle
+ * de compra y de entrada para reimprimir). Exige el código único de producto
+ * igual que el backend: sin él no hay símbolo que imprimir.
+ */
+export const etiquetasCompraActivas = (config) =>
+  config?.codigo_producto_activo === '1' && config?.proveedor_codigo_activo === '1';
+
+export const AVISOS_GRAVES = new Set(['modulo_estrecho', 'resolucion_insuficiente', 'calibracion_fuera', 'rollo_varias_filas', 'sin_espacio_proveedor']);
+
 /**
  * Un formato del catálogo → la forma del editor a medida. Es lo que permite
  * «ajustar este formato»: partir del rollo que más se parece al que se compró

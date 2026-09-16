@@ -23,7 +23,7 @@ import { Opcion, Seccion, Casilla } from './etiquetas/ui';
 import { SelectorFormato } from './etiquetas/SelectorFormato';
 import { PanelDiseno }     from './etiquetas/PanelDiseno';
 import { PanelImpresora }  from './etiquetas/PanelImpresora';
-import { resolverElegido, resumenCalibracion, mm } from './etiquetas/etiquetasUi';
+import { resolverElegido, resumenCalibracion, mm, TEXTO_AVISO, AVISOS_GRAVES } from './etiquetas/etiquetasUi';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // IMPRIMIR ETIQUETAS — masivo e individual en la misma pantalla
@@ -54,19 +54,6 @@ const idNodo = (n) => ({
   variante_id: n.variante_id ?? null,
 });
 
-const TEXTO_AVISO = {
-  modulo_estrecho:         'El código queda demasiado apretado para esta etiqueta: puede que el lector falle. Usa un formato más grande, códigos más cortos o cambia a QR.',
-  resolucion_insuficiente: 'Con la resolución de tu impresora no cabe ni un punto por barra: el código no se podrá leer. Usa QR, una etiqueta más grande o un código más corto.',
-  sin_espacio_pie:         'No cabe el texto al pie y se quitó.',
-  sin_espacio_precio:      'No cabe el precio y se quitó.',
-  sin_espacio_encabezado:  'No cabe el encabezado y se quitó.',
-  sin_espacio_variante:    'No cabe la variante y se quitó.',
-  sin_espacio_nombre:      'No cabe el nombre y se quitó.',
-  rollo_ancho:             'El rollo mide más de 108 mm: las impresoras de etiquetas de 4 pulgadas no imprimen tan ancho y lo que quede por fuera no saldrá.',
-  calibracion_fuera:       'Con ese desvío o esa escala, parte de alguna etiqueta queda fuera de la página y no se imprimirá.',
-  rollo_varias_filas:      'Pusiste más de una fila por página. Si tu rollo trae hueco entre filas (casi todos), la impresora cuenta cada fila como una etiqueta: imprime corrido y avanza filas en blanco. Pon 1 fila por página.',
-};
-const AVISOS_GRAVES = new Set(['modulo_estrecho', 'resolucion_insuficiente', 'calibracion_fuera', 'rollo_varias_filas']);
 
 // ── Panel: generar códigos a los que no tienen ───────────────────────────────
 //

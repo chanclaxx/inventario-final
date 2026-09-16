@@ -21,6 +21,8 @@ import {
   parsearColoresConfig, parsearCaracteristicasConfig,
   itemSerialVacio, hojasDelArbol,
 } from '../proveedores/capturaMercancia.utils';
+import { ModalEtiquetasCompra } from '../inventario/ModalEtiquetasCompra';
+import { etiquetasCompraActivas } from '../inventario/etiquetas/etiquetasUi';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // REGISTRAR UNA ENTRADA — la única pantalla de trabajo del bodeguero
@@ -387,6 +389,10 @@ export function VistaEntrada({ orden, onVolver, onListo }) {
   const caracteristicasActivo = configData?.caracteristicas_serial_activo === '1';
   const coloresConfig         = parsearColoresConfig(configData);
   const caracteristicasLista  = parsearCaracteristicasConfig(configData);
+  // Con las etiquetas de compra activas, registrar ofrece imprimirlas antes de
+  // volver a la lista: es el momento en que la caja está abierta.
+  const etiquetasAlRecibir    = etiquetasCompraActivas(configData);
+  const [registrada, setRegistrada] = useState(null);
 
   const { data: cantData } = useQuery({
     queryKey: ['productos-cantidad', ...sucursalKey],
@@ -624,7 +630,10 @@ export function VistaEntrada({ orden, onVolver, onListo }) {
       for (const k of ['entradas', 'entradas-ordenes', 'productos-cantidad', 'productos-serial', 'arbol-producto']) {
         queryClient.invalidateQueries({ queryKey: [k], exact: false });
       }
-      onListo(res.data?.message || 'Entrada registrada');
+      const mensaje = res.data?.message || 'Entrada registrada';
+      const entrada = res.data?.data;
+      if (etiquetasAlRecibir && entrada?.id) setRegistrada({ ...entrada, mensaje });
+      else onListo(mensaje);
     },
     onError: (e) => setError(e.response?.data?.error || e.message || 'No se pudo registrar la entrada'),
   });
@@ -730,6 +739,18 @@ export function VistaEntrada({ orden, onVolver, onListo }) {
           <Check size={15} /> Registrar entrada
         </Button>
       </div>
+
+      {/* La entrada ya quedó registrada: cerrar las etiquetas es lo que vuelve a
+          la lista. Encima de la pantalla y no en su lugar, para que se vea qué
+          se acaba de recibir mientras se imprime. */}
+      {registrada && (
+        <ModalEtiquetasCompra
+          compraId={registrada.id}
+          titulo={`Etiquetas · entrada #${String(registrada.numero ?? registrada.id).padStart(4, '0')}`}
+          recienRegistrada
+          onClose={() => onListo(registrada.mensaje)}
+        />
+      )}
     </div>
   );
 }

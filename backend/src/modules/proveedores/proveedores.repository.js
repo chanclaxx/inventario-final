@@ -1,4 +1,11 @@
 const { pool } = require('../../config/db');
+const { hayCodigoProveedor } = require('../../config/columnas');
+
+// Ciudad y código del proveedor (feature opt-in). Se arman EN CADA LLAMADA: la
+// detección corre después de las migraciones y este archivo se carga antes. Sin
+// las columnas el SQL es exactamente el de siempre. Literal fijo, no entrada de
+// usuario.
+const colsCodigo = () => (hayCodigoProveedor() ? 'p.ciudad, p.codigo,' : '');
 
 // ─── Consultas ────────────────────────────────────────────────────────────────
 
@@ -13,7 +20,7 @@ const findAll = async (negocioId, tipo = null) => {
 
   const { rows } = await pool.query(`
     SELECT p.id, p.nombre, p.nit, p.telefono, p.email,
-           p.direccion, p.contacto, p.tipo, p.activo, p.creado_en,
+           p.direccion, p.contacto, p.tipo, p.activo, p.creado_en, ${colsCodigo()}
            COUNT(c.id) AS total_compras
     FROM proveedores p
     LEFT JOIN compras c ON c.proveedor_id = p.id
@@ -32,16 +39,23 @@ const findById = async (negocioId, id) => {
   return rows[0] || null;
 };
 
-const create = async (negocioId, { nombre, nit, telefono, email, direccion, contacto, tipo = 'proveedor' }) => {
+// La ciudad se limpia igual que el resto de textos cortos: vacía = NULL, para
+// que «falta la ciudad» sea una sola condición y no dos.
+const _ciudad = (v) => (v == null ? null : (String(v).trim().slice(0, 80) || null));
+
+const create = async (negocioId, { nombre, nit, telefono, email, direccion, contacto, tipo = 'proveedor', ciudad }) => {
+  // `ciudad` solo se nombra si la columna existe; el código NUNCA viene del
+  // cliente — lo asigna el service.
+  const conCiudad = hayCodigoProveedor();
   const { rows } = await pool.query(`
-    INSERT INTO proveedores(negocio_id, nombre, nit, telefono, email, direccion, contacto, tipo)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    INSERT INTO proveedores(negocio_id, nombre, nit, telefono, email, direccion, contacto, tipo${conCiudad ? ', ciudad' : ''})
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8${conCiudad ? ', $9' : ''})
     RETURNING *
-  `, [negocioId, nombre, nit, telefono, email, direccion, contacto, tipo]);
+  `, [negocioId, nombre, nit, telefono, email, direccion, contacto, tipo, ...(conCiudad ? [_ciudad(ciudad)] : [])]);
   return rows[0];
 };
 
-const update = async (negocioId, id, { nombre, nit, telefono, email, direccion, contacto, tipo }) => {
+const update = async (negocioId, id, { nombre, nit, telefono, email, direccion, contacto, tipo, ciudad }) => {
   // Si no viene tipo, no lo modificamos (mantiene el actual)
   const setClauses = [
     'nombre = $1', 'nit = $2', 'telefono = $3',
@@ -52,6 +66,13 @@ const update = async (negocioId, id, { nombre, nit, telefono, email, direccion, 
   if (tipo) {
     params.push(tipo);
     setClauses.push(`tipo = $${params.length}`);
+  }
+
+  // Igual que el tipo: ausente = no se toca. Con la feature apagada la pantalla
+  // no pinta el campo y no lo manda, y eso no puede borrar la ciudad guardada.
+  if (ciudad !== undefined && hayCodigoProveedor()) {
+    params.push(_ciudad(ciudad));
+    setClauses.push(`ciudad = $${params.length}`);
   }
 
   params.push(id, negocioId);
@@ -104,7 +125,7 @@ const findByIds = async (negocioId, ids, tipo = null) => {
   }
   const { rows } = await pool.query(`
     SELECT p.id, p.nombre, p.nit, p.telefono, p.email,
-           p.direccion, p.contacto, p.tipo, p.activo, p.creado_en,
+           p.direccion, p.contacto, p.tipo, p.activo, p.creado_en, ${colsCodigo()}
            COUNT(c.id) AS total_compras
     FROM proveedores p
     LEFT JOIN compras c ON c.proveedor_id = p.id

@@ -894,3 +894,23 @@ La suite protege que sean **exactamente eso: recortes**.
   El frontend lo detecta **por la forma de la respuesta** y agrupa en el
   navegador, como antes. Un respaldo que se separa del original no sirve, y no se
   notaría hasta el despliegue siguiente — que es cuando ya no sirve de nada.
+
+### `49-codigo-proveedor-etiquetas.mjs` — 80 verificaciones
+
+Código NOMBRE-NIT-CIUDAD-consecutivo del proveedor (opt-in
+`proveedor_codigo_activo`) y las etiquetas de una compra, que salen al recibir y
+se reimprimen desde la compra.
+
+| # | Propiedad |
+|---|---|
+| 1 | **Sin las columnas y sin la clave nada cambia**: SQL de proveedores y plano de la etiqueta idénticos |
+| 2 | Las tres letras (mismo `tresLetras` del código con patrón) y lo que falta |
+| 3 | Encender la feature numera a los existentes por antigüedad; sin ciudad o inactivo, no |
+| 4 | Crear y completar asignan; **editar no reescribe un código impreso**; el cliente no lo puede mandar |
+| 5 | El contador sigue a lo escrito a mano y es por negocio |
+| 6 | Asignar pendientes a mano; apagar no borra |
+| 7 | Líneas de la compra (nodo hoja, IMEI de su sede, devueltas, sin código), cantidades, permisos y el PDF real |
+| 8 | Una Entrada sin proveedor gana el código al confirmarse (se lee en vivo) |
+| 9 | En una etiqueta chica el proveedor es lo último que cae |
+| 10 | La copia del runner y el `.sql` dicen lo mismo |
+| 11 | Las cinco pantallas usan la misma regla y el mismo modal, con la configuración guardada |

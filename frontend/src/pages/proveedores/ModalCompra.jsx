@@ -30,6 +30,8 @@ import {
   RefreshCw, AlertTriangle, X, ChevronLeft, Layers, LayoutGrid, CalendarClock,
 } from 'lucide-react';
 import { CuadriculaImei } from './CuadriculaImei';
+import { ModalEtiquetasCompra } from '../inventario/ModalEtiquetasCompra';
+import { etiquetasCompraActivas } from '../inventario/etiquetas/etiquetasUi';
 // Compartidas con ModalRecibir: una sola implementación de la captura de un
 // IMEI (con su color y sus características) y del reparto por variante. Si cada
 // modal tuviera la suya, un equipo recibido contra una orden acabaría guardando
@@ -1623,6 +1625,9 @@ export function ModalCompra({ proveedor, onClose }) {
   const [productos,      setProductos]      = useState([]);
   const [factorGuardado, setFactorGuardado] = useState('');
   const [traidaGuardada, setTraidaGuardada] = useState('');
+  // Con las etiquetas de compra activas, registrar no cierra: la misma ventana
+  // pasa a ofrecer las etiquetas de lo que acaba de entrar.
+  const [compraRegistrada, setCompraRegistrada] = useState(null);
 
   // ── Config: colores de serial ─────────────────────────────────────────────
   const { data: configData } = useQuery({
@@ -1641,6 +1646,7 @@ export function ModalCompra({ proveedor, onClose }) {
   // Con las órdenes activas, una compra suelta también puede llevar plazo: que
   // se haya olvidado crear la orden no hace que la factura deje de vencer.
   const ordenesActivas         = configData?.ordenes_compra_activas === '1';
+  const etiquetasAlRecibir     = etiquetasCompraActivas(configData);
 
   const {
     verificando, verificarYProceder,
@@ -1651,12 +1657,14 @@ export function ModalCompra({ proveedor, onClose }) {
 
   const mutCompra = useMutation({
     mutationFn: (payload) => crearCompra(payload),
-    onSuccess: () => {
+    onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ['productos-serial'],  exact: false });
       queryClient.invalidateQueries({ queryKey: ['productos-cantidad'], exact: false });
       queryClient.invalidateQueries({ queryKey: ['compras'],            exact: false });
       queryClient.invalidateQueries({ queryKey: ['acreedores'],         exact: false });
-      onClose();
+      const compra = res?.data?.data;
+      if (etiquetasAlRecibir && compra?.id) setCompraRegistrada(compra);
+      else onClose();
     },
   });
 
@@ -1781,6 +1789,10 @@ export function ModalCompra({ proveedor, onClose }) {
       return i.valor || '';
     }),
   }));
+
+  if (compraRegistrada) {
+    return <ModalEtiquetasCompra compraId={compraRegistrada.id} recienRegistrada onClose={onClose} />;
+  }
 
   return (
     <>

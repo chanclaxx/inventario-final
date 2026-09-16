@@ -46,6 +46,21 @@ export const planEtiquetas = (body) => api.post('/etiquetas/plan', body);
 export const pdfEtiquetas = (body) =>
   api.post('/etiquetas/pdf', body, { responseType: 'blob', timeout: 180000 });
 
+// ── Etiquetas de una compra (opt-in `proveedor_codigo_activo`) ──────────────
+// Mismo motor y mismas opciones que las de Inventario; los items salen de las
+// líneas de la compra y llevan el código del proveedor. La compra es el registro
+// que permite reimprimir.
+
+/** Qué se puede etiquetar de la compra (o Entrada) y con qué código de proveedor. */
+export const getEtiquetasCompra = (compraId) => api.get(`/etiquetas/compra/${compraId}`);
+
+/** Plan de la compra. `cantidades` = `{ [linea_id]: n }`, solo lo que se cambió. */
+export const planEtiquetasCompra = (compraId, body) => api.post(`/etiquetas/compra/${compraId}/plan`, body);
+
+/** El PDF de la compra, con el mismo timeout largo que el de Inventario. */
+export const pdfEtiquetasCompra = (compraId, body) =>
+  api.post(`/etiquetas/compra/${compraId}/pdf`, body, { responseType: 'blob', timeout: 180000 });
+
 /** Asigna código a los nodos seleccionados que no tienen. Solo admin_negocio. */
 export const generarCodigosEtiqueta = (body) =>
   api.post('/etiquetas/codigos', body, { timeout: 120000 });

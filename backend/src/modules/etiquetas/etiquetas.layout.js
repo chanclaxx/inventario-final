@@ -73,17 +73,25 @@ const _numero = (v) => (v === null || v === undefined || v === '' ? null : Numbe
 // y el precio es lo que el cliente busca en la etiqueta. Con el orden anterior,
 // una tira de 3 columnas de 32 × 25 con encabezado y precio pedidos imprimía el
 // nombre del negocio en cada etiqueta y ningún precio.
-const ORDEN_SACRIFICIO = ['pie', 'encabezado', 'precio', 'variante', 'nombre'];
+//
+// El código del PROVEEDOR (solo en las etiquetas de una compra) es el ÚLTIMO
+// texto en caer: es la razón por la que se imprimió esa etiqueta al recibir, y
+// mide lo mismo que el código legible. Una etiqueta sin nombre pero con los dos
+// códigos todavía dice qué es y de quién vino; una con nombre y sin proveedor
+// no cumple lo que se pidió.
+const ORDEN_SACRIFICIO = ['pie', 'encabezado', 'precio', 'variante', 'nombre', 'proveedor'];
 
 /**
  * Plano de una etiqueta, en puntos y relativo a su esquina superior izquierda.
  *
  * @param {number} wPt  ancho de la etiqueta en puntos
  * @param {number} hPt  alto de la etiqueta en puntos
- * @param {object} item nodo a etiquetar: { nombre, variante_label, codigo, precio }
+ * @param {object} item nodo a etiquetar: { nombre, variante_label, codigo, precio, codigo_proveedor? }
+ *   `codigo_proveedor` solo lo traen las etiquetas de una compra; sin él la
+ *   etiqueta sale exactamente como siempre.
  * @param {object} op
  * @param {'barras'|'qr'} op.simbologia
- * @param {object} op.mostrar     { nombre, variante, precio, encabezado, pie }
+ * @param {object} op.mostrar     { nombre, variante, precio, encabezado, pie, proveedor }
  * @param {string} [op.encabezado] texto del encabezado (nombre del negocio)
  * @param {string} [op.pie]        texto libre al pie (garantía, sede…)
  * @param {object} [op.diseno]     { alinear, escalaTexto, lineasNombre, margenInterior, altoSimbolo }
@@ -137,6 +145,7 @@ const planear = (wPt, hPt, item, op = {}) => {
     nombre:     clamp(h * 0.15, 4.5, 9.5) * escala,
     variante:   clamp(h * 0.13, 4.0, 8.0) * escala,
     codigo:     clamp(h * 0.13, 4.5, 8.5) * escala,
+    proveedor:  clamp(h * 0.12, 4.0, 7.5) * escala,
     precio:     clamp(h * 0.18, 5.0, 12)  * escala,
     pie:        clamp(h * 0.10, 3.5, 6.5) * escala,
   };
@@ -150,6 +159,10 @@ const planear = (wPt, hPt, item, op = {}) => {
     variante:   mostrar.variante !== false && !!item.variante_label,
     precio:     !!mostrar.precio && item.precio != null && Number(item.precio) > 0,
     pie:        !!mostrar.pie && !!textoPie,
+    // Ausente = sí: quien imprime las etiquetas de una compra con esta feature
+    // encendida es porque quiere el proveedor. Sin `codigo_proveedor` en el item
+    // (toda etiqueta de Inventario) no hay nada que pedir.
+    proveedor:  mostrar.proveedor !== false && !!String(item.codigo_proveedor ?? '').trim(),
   };
   const activo = { ...pedido };
   const avisos = [];
@@ -161,6 +174,7 @@ const planear = (wPt, hPt, item, op = {}) => {
     + (activo.nombre   ? alto(S.nombre) * lineasNombre : 0)
     + (activo.variante ? alto(S.variante) : 0)
     + alto(S.codigo)
+    + (activo.proveedor ? alto(S.proveedor) : 0)
     + (activo.precio   ? alto(S.precio) : 0)
     + (activo.pie      ? alto(S.pie) : 0);
 
@@ -279,6 +293,9 @@ const planear = (wPt, hPt, item, op = {}) => {
   // Código legible, siempre. Debajo del símbolo (apilado) o en la columna de
   // texto (lateral).
   texto('codigo', item.codigo, { mono: true });
+  // Pegado al código del producto y con prefijo: dos códigos monoespaciados uno
+  // encima del otro, sin rótulo, no hay quien sepa cuál es cuál.
+  if (activo.proveedor) texto('proveedor', `Prov. ${String(item.codigo_proveedor).trim()}`, { mono: true });
   if (activo.precio) texto('precio', item.precio, { bold: true, esPrecio: true });
   if (activo.pie)    texto('pie', textoPie, { gris: true });
 

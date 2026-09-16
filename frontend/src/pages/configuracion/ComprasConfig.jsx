@@ -1,7 +1,12 @@
 import {
   ToggleLeft, ToggleRight, ClipboardList, Info, AlertTriangle,
-  ShieldCheck, Barcode, CheckCircle2,
+  ShieldCheck, Barcode, CheckCircle2, Tag,
 } from 'lucide-react';
+
+// El mismo ejemplo que `EJEMPLO` en backend/src/utils/codigoProveedor.util.js.
+// No se puede importar del backend; la suite 49 compara las dos cadenas para
+// que la ayuda no prometa un formato distinto del que se genera.
+const EJEMPLO_CODIGO_PROVEEDOR = 'DIS-900-CAL-001';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CONFIGURACIÓN DE LA COMPRA POR ÓRDENES
@@ -15,6 +20,9 @@ import {
 //   ordenes_compra_activas · ordenes_compra_modo_cargo · ordenes_compra_dias_aviso
 //   garantia_proveedor_activa · garantia_proveedor_dias_aviso
 //   codigos_proveedor_activos
+//   proveedor_codigo_activo   (código NOMBRE-NIT-CIUDAD del proveedor en las
+//                              etiquetas al recibir — no confundir con el de arriba,
+//                              que traduce las referencias DEL proveedor)
 //
 // Sin el primer flag el backend responde 404 y la pestaña Órdenes no aparece:
 // para ese negocio el módulo no existe y el flujo de compra sigue siendo el de
@@ -135,6 +143,7 @@ export function ComprasConfig({ valores, set }) {
   const codigos     = valores.codigos_proveedor_activos === '1';
   const codigoInterno = valores.codigo_producto_activo  === '1';
   const detalleNodo   = valores.ordenes_compra_detalle_nodo === '1';
+  const codigoProveedor = valores.proveedor_codigo_activo === '1';
   // Prerrequisito, igual que los códigos del proveedor exigen el código interno:
   // sin árbol de variantes no hay talla ni color que pedir, y el selector no
   // podría seleccionar nada. El backend lo vuelve a comprobar al guardar.
@@ -367,6 +376,63 @@ export function ComprasConfig({ valores, set }) {
             <p className="text-xs text-blue-700">
               • Las órdenes que le imprimas al proveedor salen con sus referencias,
               para que las lea sin traducir.
+            </p>
+          </div>
+        )}
+      </div>
+
+      <div className="border-t border-gray-100" />
+
+      {/* ── Código de proveedor en las etiquetas ──────────────────────────── */}
+      <div className="flex flex-col gap-4">
+        <div className="flex items-center gap-2">
+          <Tag size={18} className="text-gray-400" />
+          <div>
+            <h3 className="text-sm font-semibold text-gray-900">Etiquetas al recibir, con código de proveedor</h3>
+            <p className="text-xs text-gray-400">
+              Imprime las etiquetas de lo que entra en el momento de recibirlo, marcadas con de quién vino.
+            </p>
+          </div>
+        </div>
+
+        {!codigoInterno && (
+          <div className="bg-amber-50 rounded-xl px-4 py-3 flex items-start gap-2">
+            <AlertTriangle size={14} className="text-amber-500 flex-shrink-0 mt-0.5" />
+            <p className="text-xs text-amber-800">
+              Primero tienes que activar el <strong>código único de producto</strong> (en la
+              pestaña Códigos): es el código que lleva la etiqueta.
+            </p>
+          </div>
+        )}
+
+        <Toggle
+          label="Código de proveedor en las etiquetas"
+          description="Asigna un código a cada proveedor y ofrece imprimir etiquetas al registrar una compra o una entrada"
+          enabled={codigoProveedor}
+          disabled={!codigoInterno}
+          onChange={(val) => set('proveedor_codigo_activo', val ? '1' : '0')}
+        />
+
+        {codigoProveedor && codigoInterno && (
+          <div className="bg-blue-50 rounded-xl p-4 flex flex-col gap-1.5 border-l-2 border-blue-100">
+            <p className="text-xs font-medium text-blue-800">Cómo funciona</p>
+            <p className="text-xs text-blue-700">
+              • El código se arma con las 3 primeras letras del nombre, del NIT y de la ciudad,
+              más un consecutivo: <span className="font-mono">{EJEMPLO_CODIGO_PROVEEDOR}</span>.
+              Al guardar se asigna a todos los proveedores que tengan esos tres datos; a los que
+              les falte alguno, Proveedores te dice qué completar.
+            </p>
+            <p className="text-xs text-blue-700">
+              • Un código asignado no cambia aunque después edites el proveedor: ya está impreso.
+            </p>
+            <p className="text-xs text-blue-700">
+              • Al registrar una compra, recibir una orden o una entrada de bodega, se abren las
+              etiquetas con el formato que tengas guardado en Inventario → Etiquetas. Si la cierras,
+              las reimprimes desde el detalle de la compra o de la entrada.
+            </p>
+            <p className="text-xs text-blue-700">
+              • El código de barras sigue siendo el del producto (el que lee el escáner); el del
+              proveedor va escrito debajo.
             </p>
           </div>
         )}
