@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
-import { getRemision, recibirRemision } from '../../api/redInterna.api';
+import { getRemision, recibirRemision, mensajeErrorRecepcion } from '../../api/redInterna.api';
 import { formatCOP, formatFechaHora } from '../../utils/formatters';
 import { Modal }   from '../../components/ui/Modal';
 import { Button }  from '../../components/ui/Button';
@@ -21,6 +21,10 @@ export function ModalRecibir({ remisionId, onCerrar, onListo }) {
   // efecto cuando la remisión termina de cargar.
   const [desmarcadas, setDesmarcadas] = useState(() => new Set());
   const [error, setError] = useState('');
+  // Líneas que el backend rechazó porque el origen ya no tiene ese stock
+  // (`STOCK_ORIGEN_INSUFICIENTE`). Se señalan y se ofrecen desmarcar: recibir
+  // el resto no puede quedar bloqueado por un producto.
+  const [sinStock, setSinStock] = useState(() => new Set());
 
   const { data: remision, isLoading } = useQuery({
     queryKey: ['red-remision', remisionId],
@@ -36,7 +40,13 @@ export function ModalRecibir({ remisionId, onCerrar, onListo }) {
       lineas_recibidas: idsRecibidos(),
     }).then((r) => r.data),
     onSuccess: (res) => onListo(res.message),
-    onError: (err) => setError(err.response?.data?.error || 'No se pudo confirmar'),
+    onError: (err) => {
+      setError(mensajeErrorRecepcion(err, 'No se pudo confirmar'));
+      const detalle = err.response?.data?.code === 'STOCK_ORIGEN_INSUFICIENTE'
+        ? err.response.data.detalle || []
+        : [];
+      setSinStock(new Set(detalle.flatMap((d) => d.lineas || []).map(Number)));
+    },
   });
 
   if (isLoading || !remision) {
@@ -46,6 +56,12 @@ export function ModalRecibir({ remisionId, onCerrar, onListo }) {
       </Modal>
     );
   }
+
+  const desmarcarSinStock = () => {
+    setDesmarcadas((prev) => new Set([...prev, ...sinStock]));
+    setSinStock(new Set());
+    setError('');
+  };
 
   const toggle = (id) => setDesmarcadas((prev) => {
     const s = new Set(prev);
@@ -87,7 +103,7 @@ export function ModalRecibir({ remisionId, onCerrar, onListo }) {
                 <label
                   key={id}
                   className={`flex items-center gap-3 px-3 py-3 border-b border-gray-50 last:border-0
-                    cursor-pointer transition-colors ${ok ? '' : 'bg-amber-50'}`}
+                    cursor-pointer transition-colors ${ok ? (sinStock.has(id) ? 'bg-red-50' : '') : 'bg-amber-50'}`}
                 >
                   <input
                     type="checkbox"
@@ -128,11 +144,15 @@ export function ModalRecibir({ remisionId, onCerrar, onListo }) {
         )}
 
         <p className="text-xs text-gray-400 px-1">
-          Esta mercancía queda <strong>en consignación</strong>: no es una deuda.
-          Solo tendrás que liquidarla cuando la vendas.
+          Al confirmar, lo recibido entra a tu inventario y pasa a tu cuenta con la bodega.
         </p>
 
         {error && <p className="text-sm text-red-500">{error}</p>}
+        {sinStock.size > 0 && (
+          <Button variant="secondary" size="sm" onClick={desmarcarSinStock}>
+            Desmarcar {sinStock.size === 1 ? 'esa línea' : `esas ${sinStock.size} líneas`}
+          </Button>
+        )}
 
         <div className="flex gap-2">
           <Button variant="secondary" className="flex-1" onClick={onCerrar}>Cancelar</Button>

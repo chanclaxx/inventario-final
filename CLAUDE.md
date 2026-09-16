@@ -1518,6 +1518,27 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > `valor_interno`) queda en el precio de venta de la bodega, y su utilidad y
 > sus tarifas se calculan sobre eso. Prueba: `47-despacho-precio-venta` (28).
 
+> **Despachar resta lo que YA va en camino** (`_comprometidoSinRecibir`,
+> `_verificarStockRecepcion`): despachar no descuenta stock, y validaba solo
+> contra `stock`. Tesla (sep-2026): la bodega tenía 7 cases, mandó 7 en el #20
+> y 1 más en el #21 antes de que el local recibiera el #20; el #21 quedó
+> **imposible de recibir**. Los seriales nunca lo tuvieron («ya está en otra
+> remisión activa»); la cantidad sí. Ahora el despacho (y la devolución del
+> local) resta las líneas `Pendiente` de remisiones `En transito` del **mismo
+> nodo** que salieron de la misma sucursal — incluidas las del propio envío, así
+> que dos líneas de la misma talla se suman. Error `STOCK_COMPROMETIDO`; cuando
+> de verdad no hay stock sale el mensaje de siempre.
+> **La recepción revisa TODO antes de mover nada**: validaba sobre la marcha a
+> ~16 consultas por línea, y con la línea mala en la posición 75 pasaba del corte
+> de 30 s del navegador ANTES de llegar al error — la pantalla decía «No se pudo
+> recibir el envío» sin motivo. Ahora una sola consulta responde
+> `409 STOCK_ORIGEN_INSUFICIENTE` con `detalle[].lineas`, y `ModalRecibir`
+> ofrece desmarcarlas. No reemplaza la validación con `FOR UPDATE` del recorrido,
+> solo la adelanta. Despachar y recibir llevan tope de 180 s en el frontend, y
+> sin respuesta el mensaje manda a ACTUALIZAR, no a repetir (repetir es seguro:
+> `findRemisionById` bloquea la fila y el segundo intento ve el estado nuevo).
+> Prueba: `48-stock-comprometido` (39; contra el código anterior fallan 15).
+
 > **El local PIDE a la bodega — el sentido inverso** (`redInterna.pedidos.*`,
 > `20260904_pedidos_internos.sql`): el circuito nació en una sola dirección —la
 > bodega decide qué mandar, despacha, y el local confirma—, y eso funciona

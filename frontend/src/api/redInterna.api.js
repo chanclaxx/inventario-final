@@ -41,10 +41,26 @@ export const buscarReferencias = (sucursalId, { tipo, q } = {}) =>
 // vínculo línea a línea lo resuelve el backend: la pantalla no tiene que decir
 // qué línea contesta a cuál, y así el escáner, el carrito y el modal del pedido
 // atribuyen igual.
-export const despachar = (payload) => api.post('/red-interna/remisiones', payload);
+//
+// Despachar y recibir hacen ~25 consultas por línea en UNA transacción: un envío
+// de 100+ líneas pasa sin problema del corte general de 30 s, y entonces el
+// navegador abandona mientras el servidor sigue trabajando (y a veces termina
+// bien). Por eso llevan su propio tope, como las etiquetas.
+export const despachar = (payload) =>
+  api.post('/red-interna/remisiones', payload, { timeout: 180000 });
 
 export const recibirRemision = (id, payload = {}) =>
-  api.post(`/red-interna/remisiones/${id}/recibir`, payload);
+  api.post(`/red-interna/remisiones/${id}/recibir`, payload, { timeout: 180000 });
+
+// Sin respuesta (corte de tiempo o red caída) NO se sabe si la recepción quedó
+// guardada: decir «no se pudo» invita a tocar otra vez algo que quizá ya entró.
+// Repetir es seguro —el segundo intento responde que ya está recibido—, pero el
+// mensaje tiene que mandar a actualizar primero.
+export const mensajeErrorRecepcion = (err, porDefecto) =>
+  err?.response?.data?.error
+  || (err?.response
+    ? porDefecto
+    : 'El servidor tardó demasiado en responder. Actualiza la pantalla antes de volver a intentar: puede que el envío sí haya quedado recibido.');
 
 export const anularRemision = (id) => api.post(`/red-interna/remisiones/${id}/anular`);
 

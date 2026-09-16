@@ -529,6 +529,121 @@ const _stockYCostoNodo = async (client, { productoId, atributoId, varianteId }) 
 };
 
 /**
+ * Unidades de este NODO que ya van comprometidas en envíos SIN RECIBIR que
+ * salieron de esta misma sucursal.
+ *
+ * Despachar no descuenta stock (la mercancía es del que la manda hasta que el
+ * otro confirma), así que validar solo contra `stock` deja despachar dos veces
+ * la misma unidad: la bodega tenía 7 cases, mandó 7 en el envío #20 y —antes de
+ * que el local lo recibiera— 1 más en el #21. El #20 entró y el #21 quedó
+ * imposible de recibir (Tesla → Bunny Mobile, sep-2026). Los seriales nunca
+ * tuvieron el problema: ya se rechazan si están «en otra remisión activa».
+ *
+ * Cuenta también las líneas ya insertadas en la remisión que se está armando
+ * (misma transacción): así dos líneas del mismo nodo en un despacho se suman.
+ * El nodo se compara exacto, con `IS NOT DISTINCT FROM`: la línea guarda la
+ * hoja, y un NULL de atributo significa «el producto sin variantes».
+ */
+const _comprometidoSinRecibir = async (client, { sucursalOrigenId, nodo }) => {
+  const { rows } = await client.query(`
+    SELECT COALESCE(SUM(lr.cantidad), 0)::int AS unidades,
+           string_agg(DISTINCT '#' || r.numero, ', ') AS envios
+    FROM lineas_remision lr
+    JOIN remisiones r ON r.id = lr.remision_id
+    WHERE r.sucursal_origen_id = $1
+      AND r.estado = 'En transito'
+      AND lr.tipo = 'cantidad' AND lr.estado_linea = 'Pendiente'
+      AND lr.producto_origen_id = $2
+      AND lr.atributo_origen_id IS NOT DISTINCT FROM $3
+      AND lr.variante_origen_id IS NOT DISTINCT FROM $4
+  `, [sucursalOrigenId, nodo.productoId, nodo.atributoId ?? null, nodo.varianteId ?? null]);
+  return { unidades: Number(rows[0].unidades), envios: rows[0].envios || null };
+};
+
+/**
+ * Revisa TODA la recepción antes de mover una sola unidad.
+ *
+ * El recorrido de `_ejecutarRecepcion` hace ~25 consultas por línea y valida el
+ * stock sobre la marcha: con 111 líneas y la que falla en la posición 75, la
+ * petición pasaba del corte de 30 s del navegador ANTES de llegar al error, y
+ * la pantalla decía «No se pudo recibir el envío» sin ningún motivo — la gente
+ * volvía a tocar el botón y cada intento repetía el mismo minuto de trabajo.
+ *
+ * Aquí se contesta en UNA consulta y se nombran TODAS las líneas que fallan,
+ * sumando por nodo (dos líneas de la misma talla piden la suma). No bloquea
+ * nada: el recorrido vuelve a validar con `FOR UPDATE`, así que esto solo
+ * adelanta la respuesta, nunca la reemplaza.
+ */
+const _verificarStockRecepcion = async (client, { origenId, lineas, setRecibidas, cantidadesRecibidas }) => {
+  const porNodo = new Map();
+  for (const l of lineas) {
+    if (l.tipo !== 'cantidad' || !setRecibidas.has(Number(l.id))) continue;
+    const pedida = Number(l.cantidad);
+    const recibida = Math.min(pedida, Math.max(0, Number(cantidadesRecibidas?.[l.id] ?? pedida)));
+    if (recibida <= 0) continue;
+    const clave = [l.producto_origen_id, l.atributo_origen_id ?? '', l.variante_origen_id ?? ''].join('-');
+    const n = porNodo.get(clave) || {
+      producto: Number(l.producto_origen_id),
+      atributo: l.atributo_origen_id == null ? null : Number(l.atributo_origen_id),
+      variante: l.variante_origen_id == null ? null : Number(l.variante_origen_id),
+      unidades: 0, lineas: [], nombre: l.nombre_producto,
+    };
+    n.unidades += recibida;
+    n.lineas.push(Number(l.id));
+    porNodo.set(clave, n);
+  }
+  if (!porNodo.size) return;
+
+  const nodos = [...porNodo.values()];
+  // Mismo criterio de existencia que `_resolverNodoOrigen`: producto de la
+  // sucursal y activo, y el nodo activo bajo ese producto.
+  const { rows } = await client.query(`
+    SELECT x.i,
+           CASE
+             WHEN pc.id IS NULL THEN NULL
+             WHEN x.variante IS NOT NULL THEN v.stock
+             WHEN x.atributo IS NOT NULL THEN ap.stock
+             ELSE pc.stock
+           END AS stock
+    FROM unnest($2::int[], $3::int[], $4::int[], $5::int[]) AS x(i, producto, atributo, variante)
+    LEFT JOIN productos_cantidad pc
+      ON pc.id = x.producto AND pc.sucursal_id = $1 AND pc.activo = true
+    LEFT JOIN atributos_producto ap
+      ON ap.id = x.atributo AND ap.producto_id = x.producto AND ap.activo = true
+    LEFT JOIN variantes_atributo v
+      ON v.id = x.variante AND v.atributo_id = ap.id AND v.activo = true
+  `, [
+    origenId,
+    nodos.map((_, i) => i),
+    nodos.map((n) => n.producto),
+    nodos.map((n) => n.atributo),
+    nodos.map((n) => n.variante),
+  ]);
+
+  const faltan = [];
+  for (const r of rows) {
+    const n = nodos[Number(r.i)];
+    const hay = r.stock == null ? 0 : Number(r.stock);
+    if (r.stock == null || hay < n.unidades) {
+      faltan.push({ lineas: n.lineas, nombre: n.nombre, pide: n.unidades, hay, existe: r.stock != null });
+    }
+  }
+  if (!faltan.length) return;
+
+  const nombres = faltan.slice(0, 3)
+    .map((f) => (f.existe ? `"${f.nombre}" (llegan ${f.pide}, la bodega tiene ${f.hay})` : `"${f.nombre}" (ya no existe en la bodega)`))
+    .join(', ');
+  throw {
+    status: 409,
+    code: 'STOCK_ORIGEN_INSUFICIENTE',
+    message: `No se puede recibir: ${faltan.length === 1 ? 'a 1 producto' : `a ${faltan.length} productos`} `
+      + `le falta stock en la sucursal que lo envió — ${nombres}${faltan.length > 3 ? '…' : ''}. `
+      + 'Toca «Revisar», desmarca esa línea y recibe el resto; o pide que corrijan ese stock antes.',
+    detalle: faltan,
+  };
+};
+
+/**
  * Valor con el que sale una línea de la remisión.
  *
  * Por defecto es el COSTO real (modo "a costo"): es lo que el local tendrá que
@@ -715,6 +830,21 @@ const despachar = async (req, {
         if (nodo.stock < cant) {
           throw { status: 400, message: `Stock insuficiente de "${nodo.etiqueta}". Hay ${nodo.stock}, pides ${cant}` };
         }
+        // Lo que ya va en otros envíos sin recibir sigue contado en `stock`
+        // (despachar no descuenta). Va DESPUÉS del chequeo de arriba para que
+        // el mensaje de siempre no cambie cuando de verdad no hay.
+        const comprometido = await _comprometidoSinRecibir(client, { sucursalOrigenId: origenId, nodo });
+        if (nodo.stock - comprometido.unidades < cant) {
+          const libres = Math.max(0, nodo.stock - comprometido.unidades);
+          throw {
+            status: 400,
+            code: 'STOCK_COMPROMETIDO',
+            message: `Stock insuficiente de "${nodo.etiqueta}". Hay ${nodo.stock}, pero ${comprometido.unidades} `
+              + `ya ${comprometido.unidades === 1 ? 'va' : 'van'} en `
+              + (comprometido.envios ? `envíos sin recibir (${comprometido.envios})` : 'este mismo envío')
+              + `: quedan ${libres} para despachar y pides ${cant}`,
+          };
+        }
 
         const destinoCantidad = await _destinoElegido(client, {
           tipo: 'cantidad', productoOrigenId: nodo.productoId,
@@ -836,6 +966,8 @@ const _ejecutarRecepcion = async (client, {
   const setRecibidas = new Set(recibidasIds.map(Number));
   const origenId  = remision.sucursal_origen_id;
   const destinoId = remision.sucursal_destino_id;
+
+  await _verificarStockRecepcion(client, { origenId, lineas, setRecibidas, cantidadesRecibidas });
 
   const traslado = await trasladosRepo.crearTraslado(client, {
     negocio_id: negocioId,
@@ -1309,6 +1441,18 @@ const devolver = async (req, { lineas, notas, clave_idempotencia, motivo }) => {
         });
         if (nodo.stock < cant) {
           throw { status: 400, message: `Stock insuficiente de "${nodo.etiqueta}". Hay ${nodo.stock}` };
+        }
+        // Igual que en el despacho: una devolución en tránsito todavía no bajó
+        // el stock del local, así que dos seguidas podían devolver la misma unidad.
+        const comprometido = await _comprometidoSinRecibir(client, { sucursalOrigenId: origenId, nodo });
+        if (nodo.stock - comprometido.unidades < cant) {
+          throw {
+            status: 400,
+            code: 'STOCK_COMPROMETIDO',
+            message: `Stock insuficiente de "${nodo.etiqueta}". Hay ${nodo.stock}, pero ${comprometido.unidades} `
+              + `ya ${comprometido.unidades === 1 ? 'va' : 'van'} en `
+              + (comprometido.envios ? `devoluciones sin confirmar (${comprometido.envios})` : 'esta misma devolución'),
+          };
         }
         const rows = [{ id: nodo.productoId, nombre: nodo.etiqueta, costo_unitario: nodo.costo }];
 

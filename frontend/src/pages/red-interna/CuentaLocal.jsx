@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
-import { getEstadoCuenta, recibirRemision } from '../../api/redInterna.api';
+import { getEstadoCuenta, recibirRemision, mensajeErrorRecepcion } from '../../api/redInterna.api';
 import { formatCOP, formatFechaHora } from '../../utils/formatters';
 import { Button }     from '../../components/ui/Button';
 import { Spinner }    from '../../components/ui/Spinner';
@@ -62,7 +62,11 @@ function PorRecibir({ envios, onAviso, onRefrescar }) {
         : 'Envío recibido — ya está en tu inventario');
       onRefrescar();
     },
-    onError: (e) => onAviso(e?.response?.data?.error || 'No se pudo recibir el envío'),
+    onError: (e) => {
+      onAviso(mensajeErrorRecepcion(e, 'No se pudo recibir el envío'));
+      // Sin respuesta puede que sí haya entrado: refrescar muestra la verdad.
+      if (!e?.response) onRefrescar();
+    },
   });
 
   if (!envios.length) return null;
