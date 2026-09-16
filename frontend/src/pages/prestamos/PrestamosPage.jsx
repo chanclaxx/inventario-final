@@ -34,6 +34,7 @@ import { TabCreditos }                          from './TabCreditos';
 import { ModalRetomaDirecta }                   from './ModalRetomaDirecta';
 import { EstadoDeCuenta }                       from './EstadoDeCuenta';
 import { ModalAbonoTotal }                      from './ModalAbonoTotal';
+import { BadgeVencidosPersona }                 from './BadgeVencidosPersona';
 import { useMetodosPago }                       from '../../hooks/useMetodosPago';
 import { useMora }                              from '../../hooks/useMora';
 import { useInteres }                           from '../../hooks/useInteres';
@@ -1246,7 +1247,7 @@ const ABONO_CLASES = {
 // son las mismas —contar activos y cerrados, y sumar valor y abonado de los
 // activos— solo que ahora las hace la base: para pintar diez tarjetas no hacía
 // falta bajarse los 9.976 préstamos del negocio al navegador.
-function CardPersona({ nombre, tipo, nActivos, nCerrados, valorActivos, abonadoActivos, saldoTotal, ultimoAbono, onSeleccionar, onEditar }) {
+function CardPersona({ nombre, tipo, nActivos, nCerrados, valorActivos, abonadoActivos, saldoTotal, ultimoAbono, nVencidos = 0, diasVencidoMax = 0, onSeleccionar, onEditar }) {
   const pct = valorActivos > 0 ? Math.min(100, (abonadoActivos / valorActivos) * 100) : 0;
 
   const avatarClass = tipo === 'companero'
@@ -1298,6 +1299,7 @@ function CardPersona({ nombre, tipo, nActivos, nCerrados, valorActivos, abonadoA
               {abonoTexto}
             </span>
           )}
+          <BadgeVencidosPersona cuantos={nVencidos} diasMax={diasVencidoMax} />
         </div>
 
         {nActivos > 0 && (
@@ -2793,7 +2795,16 @@ function TabBusquedaPrestamos() {
 function adaptarResumenPersonas(data) {
   if (data && !Array.isArray(data)) return data;
 
-  const acumular = (filas, campoId, campoNombre, campoSaldo, campoAbono, campoCelular) => {
+  // Vencidos con la misma regla del SQL: activo y fecha límite antes de HOY EN
+  // BOGOTÁ. La fecha límite es DATE y llega como 'YYYY-MM-DD'.
+  const hoy = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
+  const diasDesde = (fecha) => {
+    const [ay, am, ad] = hoy.split('-').map(Number);
+    const [by, bm, bd] = fecha.split('-').map(Number);
+    return Math.round((Date.UTC(ay, am - 1, ad) - Date.UTC(by, bm - 1, bd)) / 86400000);
+  };
+
+  const acumular =(filas, campoId, campoNombre, campoSaldo, campoAbono, campoCelular) => {
     const mapa = new Map();
     for (const p of filas) {
       const id = p[campoId];
@@ -2809,6 +2820,8 @@ function adaptarResumenPersonas(data) {
         valor_activos:   0,
         abonado_activos: 0,
         saldo_total:     0,
+        n_vencidos:       0,
+        dias_vencido_max: 0,
       });
       const g = mapa.get(id);
       if (p.estado === 'Activo') {
@@ -2816,6 +2829,15 @@ function adaptarResumenPersonas(data) {
         g.valor_activos   += Number(p.valor_prestamo);
         g.abonado_activos += Number(p.total_abonado);
         g.saldo_total     += Number(p.valor_prestamo) - Number(p.total_abonado);
+        // Por HTTP llega como texto; un Date (sin serializar) daría «Wed Apr 01»
+        // con String() y nunca compararía como fecha.
+        const limite = !p.fecha_limite ? null
+          : p.fecha_limite instanceof Date ? p.fecha_limite.toISOString().slice(0, 10)
+          : String(p.fecha_limite).slice(0, 10);
+        if (limite && limite < hoy) {
+          g.n_vencidos      += 1;
+          g.dias_vencido_max = Math.max(g.dias_vencido_max, diasDesde(limite));
+        }
       } else {
         g.n_cerrados += 1;
       }
@@ -2894,9 +2916,15 @@ export default function PrestamosPage() {
   // Se lee SOLO en el primer render (inicializador perezoso de useState). Si se
   // leyera en cada render, cerrar la ficha volvería a abrirla sola y el usuario
   // quedaría atrapado en esa pantalla.
+  //
+  // Y el aviso «N cobros vencidos» trae a DÓNDE están y que se filtre a ellos:
+  //   /prestamos?tab=prestamos&sub=clientes&filtro=vencidos
+  //   /prestamos?tab=creditos&filtro=vencidos
   const [params] = useSearchParams();
   const paramTab     = params.get('tab');
   const paramPersona = params.get('persona');
+  const paramSub     = params.get('sub');
+  const paramFiltro  = params.get('filtro') === 'vencidos' ? 'vencidos' : null;
 
   const [tabPrincipal,         setTabPrincipal]         = useState(
     () => (paramTab === 'creditos' ? 'creditos' : 'prestamos'));
@@ -2904,18 +2932,21 @@ export default function PrestamosPage() {
     // La ficha se abre igual con cualquiera de los dos sub-tabs (el detalle
     // busca en los dos grupos), pero arrancar en el correcto evita que al
     // volver atrás la lista se vea vacía.
-    () => (String(paramPersona || '').startsWith('cliente_') ? 'clientes' : 'companeros'));
+    () => (String(paramPersona || '').startsWith('cliente_') || paramSub === 'clientes'
+      ? 'clientes' : 'companeros'));
   const [personaSeleccionadaKey, setPersonaSeleccionadaKey] = useState(
     () => (paramTab === 'creditos' ? null : (paramPersona || null)));
 
   // Cliente que debe quedar abierto en la pestaña de créditos, si el aviso venía
   // de una factura a crédito.
   const personaCreditoInicial = paramTab === 'creditos' ? paramPersona : null;
+  const filtroCreditoInicial  = paramTab === 'creditos' ? paramFiltro  : null;
   const [prestamoAbono,        setPrestamoAbono]        = useState(null);
   const [prestamoDevol,        setPrestamoDevol]        = useState(null);
   const [busquedaPersonas,     setBusquedaPersonas]     = useState('');
   const [sortPersonas,         setSortPersonas]         = useState('deuda_desc');
-  const [filtroEstadoP,        setFiltroEstadoP]        = useState('todos');
+  const [filtroEstadoP,        setFiltroEstadoP]        = useState(
+    () => (paramTab !== 'creditos' && paramFiltro ? paramFiltro : 'todos'));
   const [paginaPersonas,       setPaginaPersonas]       = useState(1);
 
   const [prestamoImprimir,    setPrestamoImprimir]    = useState(null);
@@ -3015,6 +3046,8 @@ export default function PrestamosPage() {
       nCerrados:      Number(r.n_cerrados),
       valorActivos:   Number(r.valor_activos),
       abonadoActivos: Number(r.abonado_activos),
+      nVencidos:      Number(r.n_vencidos ?? 0),
+      diasVencidoMax: Number(r.dias_vencido_max ?? 0),
     };
   }
 
@@ -3050,6 +3083,8 @@ export default function PrestamosPage() {
       nCerrados:      Number(r.n_cerrados),
       valorActivos:   Number(r.valor_activos),
       abonadoActivos: Number(r.abonado_activos),
+      nVencidos:      Number(r.n_vencidos ?? 0),
+      diasVencidoMax: Number(r.dias_vencido_max ?? 0),
     };
   }
 
@@ -3080,7 +3115,9 @@ export default function PrestamosPage() {
     setTabPrestamos(id);
     setPersonaSeleccionadaKey(null);
     setBusquedaPersonas('');
-    setFiltroEstadoP('todos');
+    // Mirando vencidos se sigue mirando vencidos: el botón de la otra pestaña
+    // dice que allá también hay, y se cambia justo para verlos.
+    setFiltroEstadoP((f) => (f === 'vencidos' ? 'vencidos' : 'todos'));
     setSortPersonas('deuda_desc');
     setPaginaPersonas(1);
   };
@@ -3094,13 +3131,25 @@ export default function PrestamosPage() {
     ? gruposEntries.filter(([, g]) => g.nombre.toLowerCase().includes(busquedaPersonas.trim().toLowerCase()))
     : gruposEntries;
 
-  const gruposFiltrados = filtroEstadoP === 'activos'
+  // Cuántas personas tienen algo vencido en cada sub-pestaña: va en el botón de
+  // la pestaña y en el filtro, para que se vea dónde están sin entrar a buscar.
+  const vencidosEn = (grupos) => Object.values(grupos).filter((g) => g.nVencidos > 0).length;
+  const nVencidosTab = vencidosEn(gruposRaw);
+
+  const gruposFiltrados = filtroEstadoP === 'vencidos'
+    ? gruposBuscados.filter(([, g]) => g.nVencidos > 0)
+    : filtroEstadoP === 'activos'
     ? gruposBuscados.filter(([, g]) => g.saldoTotal > 0)
     : filtroEstadoP === 'sin_deuda'
     ? gruposBuscados.filter(([, g]) => g.saldoTotal <= 0)
     : gruposBuscados;
 
   const gruposOrdenados = [...gruposFiltrados].sort(([, a], [, b]) => {
+    // Mirando los vencidos con el orden por defecto, arriba va a quien hay que
+    // llamar primero: el más atrasado.
+    if (filtroEstadoP === 'vencidos' && sortPersonas === 'deuda_desc') {
+      return (b.diasVencidoMax - a.diasVencidoMax) || (b.saldoTotal - a.saldoTotal);
+    }
     if (sortPersonas === 'deuda_asc')      return a.saldoTotal - b.saldoTotal;
     if (sortPersonas === 'nombre_asc')     return a.nombre.localeCompare(b.nombre, 'es');
     if (sortPersonas === 'nombre_desc')    return b.nombre.localeCompare(a.nombre, 'es');
@@ -3160,6 +3209,7 @@ export default function PrestamosPage() {
               const count = tab.id === 'companeros'
                 ? Object.keys(gruposCompaneros).length
                 : Object.keys(gruposClientes).length;
+              const vencidosTab = vencidosEn(tab.id === 'companeros' ? gruposCompaneros : gruposClientes);
               const TabIcon = tab.Icn;
               return (
                 <button key={tab.id} onClick={() => cambiarTabPrestamos(tab.id)}
@@ -3170,6 +3220,12 @@ export default function PrestamosPage() {
                     <span className={`text-xs px-1.5 py-0.5 rounded-full font-semibold
                       ${tabPrestamos === tab.id ? 'bg-blue-100 text-blue-600' : 'bg-gray-200 text-gray-500'}`}>
                       {count}
+                    </span>
+                  )}
+                  {vencidosTab > 0 && (
+                    <span title={`${vencidosTab} con cobros vencidos`}
+                      className="text-xs px-1.5 py-0.5 rounded-full font-semibold bg-red-600 text-white">
+                      {vencidosTab} vencido{vencidosTab !== 1 ? 's' : ''}
                     </span>
                   )}
                 </button>
@@ -3265,6 +3321,10 @@ export default function PrestamosPage() {
                 <div className="flex items-center gap-1 flex-wrap">
                   {[
                     { id: 'todos',    label: 'Todos' },
+                    // Solo si hay a quién mostrar (o si se llegó filtrando desde
+                    // el aviso): un «Vencidos (0)» fijo sería ruido.
+                    ...(nVencidosTab > 0 || filtroEstadoP === 'vencidos'
+                      ? [{ id: 'vencidos', label: `Vencidos (${nVencidosTab})` }] : []),
                     { id: 'activos',  label: 'Con deuda' },
                     { id: 'sin_deuda', label: 'Saldados' },
                   ].map((f) => (
@@ -3272,7 +3332,8 @@ export default function PrestamosPage() {
                       onClick={() => { setFiltroEstadoP(f.id); setPaginaPersonas(1); }}
                       className={`px-3 py-1 rounded-lg text-xs font-medium transition-all
                         ${filtroEstadoP === f.id
-                          ? 'bg-blue-100 text-blue-700'
+                          ? f.id === 'vencidos' ? 'bg-red-600 text-white' : 'bg-blue-100 text-blue-700'
+                          : f.id === 'vencidos' ? 'bg-red-50 text-red-600 hover:bg-red-100'
                           : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
                       {f.label}
                     </button>
@@ -3286,7 +3347,9 @@ export default function PrestamosPage() {
                 {gruposPagina.length === 0 ? (
                   <EmptyState
                     icon={tabPrestamos === 'companeros' ? User : Users}
-                    titulo={busquedaPersonas.trim() ? 'Sin resultados para tu búsqueda' : 'Sin préstamos registrados'}
+                    titulo={busquedaPersonas.trim() ? 'Sin resultados para tu búsqueda'
+                      : filtroEstadoP === 'vencidos' ? 'Nadie con cobros vencidos aquí'
+                      : 'Sin préstamos registrados'}
                   />
                 ) : (
                   <div className="flex flex-col gap-2.5">
@@ -3297,6 +3360,7 @@ export default function PrestamosPage() {
                         valorActivos={grupo.valorActivos} abonadoActivos={grupo.abonadoActivos}
                         saldoTotal={grupo.saldoTotal}
                         ultimoAbono={grupo.ultimoAbono}
+                        nVencidos={grupo.nVencidos} diasVencidoMax={grupo.diasVencidoMax}
                         onSeleccionar={() => setPersonaSeleccionadaKey(key)}
                         onEditar={tabPrestamos === 'companeros'
                           ? () => setModalEditarPrestatario({
@@ -3342,7 +3406,7 @@ export default function PrestamosPage() {
         </div>
       )}
 
-      {tabPrincipal === 'creditos'      && <TabCreditos personaInicial={personaCreditoInicial} />}
+      {tabPrincipal === 'creditos'      && <TabCreditos personaInicial={personaCreditoInicial} filtroInicial={filtroCreditoInicial} />}
       {tabPrincipal === 'domiciliarios' && <TabDomiciliarios />}
       {tabPrincipal === 'busqueda'      && <TabBusquedaPrestamos />}
 

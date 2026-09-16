@@ -253,6 +253,44 @@ const findAvanceOrdenes = async (ordenIds) => {
 };
 
 /**
+ * Cuántas facturas VENCIDAS tiene abiertas cada acreedor, y cuánto suman.
+ *
+ * El semáforo de la lista (`SQL_PROXIMO_VENCIMIENTO`) solo trae la que vence
+ * primero: dice «vencida hace 12 días» pero no que son tres. Va en una consulta
+ * aparte, por todos los acreedores de una vez, y no como otro LATERAL dentro de
+ * `findAll`: ahí el LATERAL corre por cada MOVIMIENTO antes del GROUP BY, y un
+ * conteo con su propia suma de abonos por fila no es el `LIMIT 1` indexado que
+ * ya está.
+ *
+ * «Vencida» es exactamente lo que `_estadoPago` llama 'vencida' (días < 0) y
+ * «abierta» lo mismo que en la pestaña Facturas: cargo − abonos por `cargo_id`
+ * > 0. Si la tarjeta contara distinto que esa pestaña, el usuario vería «3
+ * vencidas» y al entrar encontraría dos.
+ */
+const findVencidasPorAcreedor = async (negocioId, acreedorIds) => {
+  if (!acreedorIds || !acreedorIds.length) return [];
+  const { rows } = await pool.query(`
+    SELECT cg.acreedor_id,
+           COUNT(*)::int                          AS cuantas,
+           SUM(cg.valor - COALESCE(ab.abonado, 0)) AS saldo
+    FROM      movimientos_acreedor cg
+    JOIN      acreedores a ON a.id = cg.acreedor_id
+    LEFT JOIN LATERAL (
+      SELECT SUM(x.valor) AS abonado
+      FROM movimientos_acreedor x
+      WHERE x.cargo_id = cg.id AND x.tipo = 'Abono'
+    ) ab ON TRUE
+    WHERE a.negocio_id = $1
+      AND cg.acreedor_id = ANY($2::bigint[])
+      AND cg.tipo = 'Cargo'
+      AND cg.fecha_vencimiento < CURRENT_DATE
+      AND cg.valor > COALESCE(ab.abonado, 0)
+    GROUP BY cg.acreedor_id
+  `, [negocioId, acreedorIds]);
+  return rows;
+};
+
+/**
  * Pone (o corrige) el plazo de pago de un cargo ya registrado.
  *
  * Solo toca `fecha_vencimiento`: el valor de la deuda no se puede cambiar por
@@ -499,6 +537,9 @@ const getComprasConSaldo = async (negocioId, acreedorId) => {
     SELECT
       m.id, m.descripcion, m.fecha, m.compra_id,
       co.numero                                          AS compra_numero,
+      -- Para marcar en la ficha cuáles están vencidas. NULL = sin plazo.
+      m.fecha_vencimiento,
+      (m.fecha_vencimiento - CURRENT_DATE)::int          AS dias_para_vencer,
       m.valor                                             AS valor_original,
       COALESCE(SUM(a.valor), 0)                          AS total_abonado,
       GREATEST(m.valor - COALESCE(SUM(a.valor), 0), 0)  AS saldo_pendiente,
@@ -750,4 +791,5 @@ module.exports = {
   getMaxAbonoEditable, editarAbono, eliminarAbono,
   create, insertarMovimiento, eliminarSeguro,
   findFacturasPorVencer, findAvanceOrdenes, actualizarVencimientoCargo,
+  findVencidasPorAcreedor,
 };

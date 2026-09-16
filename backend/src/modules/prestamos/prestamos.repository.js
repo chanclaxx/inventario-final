@@ -2,6 +2,7 @@ const { pool } = require('../../config/db');
 const { asignarNumeroDocumento } = require('../../utils/numeracion.util');
 const { hayRetomaReingreso } = require('../../config/columnas');
 const { calcularCostoPromedio } = require('../../utils/costoPromedio.util');
+const { hoyBogota } = require('../../utils/mora.util');
 
 /**
  * Historial de préstamos.
@@ -158,6 +159,9 @@ const findResumenPersonas = async (sucursalId, negocioId) => {
   const alcanceNegocio = sucursalId
     ? '(SELECT negocio_id FROM sucursales WHERE id = $1)'
     : '$1';
+  // Hoy EN BOGOTÁ, como lo mide el aviso de cobros: CURRENT_DATE depende de la
+  // zona de la sesión y podría correr un día justo en la fecha límite.
+  const hoy = hoyBogota();
 
   // `IS DISTINCT FROM 'Activo'` y no `<> 'Activo'`: el JavaScript que esto
   // reemplaza es `p.estado !== 'Activo'`, que cuenta los NULL como cerrados.
@@ -169,7 +173,14 @@ const findResumenPersonas = async (sucursalId, negocioId) => {
       COALESCE(SUM(p.valor_prestamo) FILTER (WHERE p.estado = 'Activo'), 0) AS valor_activos,
       COALESCE(SUM(p.total_abonado)  FILTER (WHERE p.estado = 'Activo'), 0) AS abonado_activos,
       COALESCE(SUM(p.valor_prestamo - p.total_abonado)
-               FILTER (WHERE p.estado = 'Activo'), 0)              AS saldo_total`;
+               FILTER (WHERE p.estado = 'Activo'), 0)              AS saldo_total,
+      -- VENCIDOS, con la regla del aviso de cobros (notificaciones.alertas,
+      -- cartera): activo y con la fecha limite ya pasada. Sin plazo nunca
+      -- vence. Solo conteo y atraso del mas viejo: la mora y el interes los
+      -- calcula mora.service, y una cifra en plata aqui no daria la del aviso.
+      COUNT(*) FILTER (WHERE p.estado = 'Activo' AND p.fecha_limite < $2::date) AS n_vencidos,
+      COALESCE($2::date - MIN(p.fecha_limite)
+               FILTER (WHERE p.estado = 'Activo' AND p.fecha_limite < $2::date), 0) AS dias_vencido_max`;
 
   // El nombre se resuelve como en la pantalla: el de la ficha y, si falta, el
   // texto libre del préstamo que la agrupación veía PRIMERO — o sea el de arriba
@@ -207,7 +218,7 @@ const findResumenPersonas = async (sucursalId, negocioId) => {
       LEFT JOIN ult          u  ON u.pid  = p.prestatario_id
       WHERE ${filtro} AND p.prestatario_id IS NOT NULL
       GROUP BY p.prestatario_id, pr.nombre, pr.saldo_a_favor
-    `, [param]),
+    `, [param, hoy]),
     pool.query(`
       WITH ult AS (
         SELECT p2.cliente_id AS cid, MAX(ap.fecha) AS ultimo
@@ -231,7 +242,7 @@ const findResumenPersonas = async (sucursalId, negocioId) => {
       LEFT JOIN ult      u ON u.cid = p.cliente_id
       WHERE ${filtro} AND p.cliente_id IS NOT NULL
       GROUP BY p.cliente_id, c.nombre, c.celular, c.saldo_a_favor
-    `, [param]),
+    `, [param, hoy]),
   ]);
 
   return { prestatarios: prestatarios.rows, clientes: clientes.rows };

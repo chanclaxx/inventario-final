@@ -7,7 +7,7 @@ import { etiquetasCompraActivas } from '../inventario/etiquetas/etiquetasUi';
 import { getComprasByProveedor, getCompraById, getComprasPaginadas, cancelarCompra as cancelarCompraApi, devolverCompra as devolverCompraApi, editarPreciosCompra as editarPreciosCompraApi } from '../../api/compras.api';
 import { getAcreedores, registrarMovimiento as registrarMovAcreedor, getComprasConSaldo, getAbonosPorCargo } from '../../api/acreedores.api';
 import { formatCOP, formatFechaHora } from '../../utils/formatters';
-import { ChipPago, ChipGarantia } from './indicadoresOrden';
+import { ChipPago, ChipGarantia, AvisoFacturasVencidas } from './indicadoresOrden';
 import { Button }      from '../../components/ui/Button';
 import { Input }       from '../../components/ui/Input';
 import { InputMoneda } from '../../components/ui/InputMoneda';
@@ -2060,6 +2060,11 @@ function TabProveedores({ sucursalKey, sucursalLista }) {
                     <span className="text-xs text-red-600 font-semibold bg-red-50 border border-red-200 px-2 py-0.5 rounded-full">
                       Debe {formatCOP(saldo)}
                     </span>
+                  )}
+                  {acreedorVinculado && (
+                    <AvisoFacturasVencidas
+                      cuantas={acreedorVinculado.facturas_vencidas}
+                      saldo={acreedorVinculado.saldo_vencido} />
                   )}
                 </div>
                 <div className="flex items-center gap-3 mt-0.5 flex-wrap">

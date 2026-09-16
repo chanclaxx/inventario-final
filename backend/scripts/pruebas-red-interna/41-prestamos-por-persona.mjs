@@ -318,11 +318,20 @@ if (desde !== -1) {
     n_activos: Number(f.n_activos), n_cerrados: Number(f.n_cerrados),
     valor_activos: Number(f.valor_activos), abonado_activos: Number(f.abonado_activos),
     saldo_total: Number(f.saldo_total),
+    // Los vencidos de la tarjeta (aviso «N cobros vencidos»): el respaldo los
+    // cuenta en el navegador y tiene que dar lo mismo que el SQL.
+    n_vencidos: Number(f.n_vencidos ?? 0), dias_vencido_max: Number(f.dias_vencido_max ?? 0),
   });
   const porId = (a) => [...a].map(norm).sort((x, y) => x.persona_id - y.persona_id);
 
   const delBackend = await pedir({ vista: 'personas' });
   const delViejo   = adaptar(conCargos);
+  // Sin un vencido en los datos, la comparación de vencidos pasaría en vacío.
+  // Ana tiene el préstamo 1 con fecha límite 2026-04-01 (sección 4).
+  const anaVencidos = delBackend.prestatarios.find((r) => r.nombre === 'Ana');
+  check('el resumen cuenta el préstamo vencido de Ana',
+    Number(anaVencidos?.n_vencidos) >= 1 && Number(anaVencidos?.dias_vencido_max) > 0,
+    JSON.stringify(anaVencidos));
   for (const clave of ['prestatarios', 'clientes']) {
     checkEq(`respaldo == resumen del backend (${clave})`,
       porId(delViejo[clave]), porId(delBackend[clave]));

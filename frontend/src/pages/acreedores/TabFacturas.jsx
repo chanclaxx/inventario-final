@@ -187,8 +187,12 @@ function FilaFactura({ factura, onAbrir }) {
   );
 }
 
-export function TabFacturas({ onAbrirAcreedor }) {
-  const [filtro,   setFiltro]   = useState('pendientes');
+// El filtro lo guarda la página en la URL (`?filtro=vencidas`), que es a donde
+// lleva el aviso de facturas vencidas. Un valor que no sea de la lista cae en
+// «Por pagar» en vez de dejar la pantalla sin ningún botón marcado.
+export function TabFacturas({ filtro: filtroUrl, onFiltro, onAbrirAcreedor }) {
+  const filtro    = FILTROS.some((f) => f.id === filtroUrl) ? filtroUrl : 'pendientes';
+  const setFiltro = onFiltro;
   const [busqueda, setBusqueda] = useState('');
   const [ponerPlazo, setPonerPlazo] = useState(null);
 
@@ -220,9 +224,13 @@ export function TabFacturas({ onAbrirAcreedor }) {
     <div className="flex flex-col gap-3">
       {!sinPlazo && resumen && (resumen.vencidas.cuantas > 0 || resumen.por_vencer.cuantas > 0 || resumen.al_dia.cuantas > 0) && (
         <div className="flex gap-2">
+          {/* Tocarla filtra a las vencidas: es la tarjeta que más se mira. */}
           {resumen.vencidas.cuantas > 0 && (
-            <TarjetaResumen titulo="Vencidas" tono="rojo"
-              cuantas={resumen.vencidas.cuantas} valor={resumen.vencidas.valor} />
+            <button type="button" onClick={() => setFiltro('vencidas')}
+              className="flex-1 min-w-0 flex text-left">
+              <TarjetaResumen titulo="Vencidas" tono="rojo"
+                cuantas={resumen.vencidas.cuantas} valor={resumen.vencidas.valor} />
+            </button>
           )}
           {resumen.por_vencer.cuantas > 0 && (
             <TarjetaResumen titulo={`Vencen en ${data.dias_aviso} días o menos`} tono="ambar"
@@ -263,7 +271,7 @@ export function TabFacturas({ onAbrirAcreedor }) {
           <div className="flex flex-col gap-2">
             {items.map((f) => (
               <FilaFactura key={f.cargo_id} factura={f}
-                onAbrir={sinPlazo ? setPonerPlazo : onAbrirAcreedor} />
+                onAbrir={sinPlazo ? setPonerPlazo : (fa) => onAbrirAcreedor(fa, filtro)} />
             ))}
           </div>
           <div className="bg-gray-50 rounded-xl px-3 py-2 flex items-start gap-2">

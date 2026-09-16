@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   getAcreedores,
@@ -18,8 +19,8 @@ import {
 import { exportarCuentaAcreedorExcel } from '../../utils/exportarCuentaAcreedorExcel';
 import { getConfig, verificarPin } from '../../api/config.api';
 import { useMetodosPago } from '../../hooks/useMetodosPago';
-import { formatCOP, formatFechaHora } from '../../utils/formatters';
-import { ChipPago } from '../proveedores/indicadoresOrden';
+import { formatCOP, formatFecha, formatFechaHora } from '../../utils/formatters';
+import { ChipPago, AvisoFacturasVencidas } from '../proveedores/indicadoresOrden';
 import { useAuth }     from '../../context/useAuth';
 import { Button }      from '../../components/ui/Button';
 import { Input }       from '../../components/ui/Input';
@@ -68,6 +69,13 @@ function tiempoUltimoPago(fecha) {
   const nivel = dias <= 7 ? 'verde' : dias <= 30 ? 'amarillo' : dias <= 60 ? 'naranja' : 'rojo';
   return { texto, nivel };
 }
+
+// Un cargo con saldo cuya fecha de pago ya pasó. Mismo corte que el backend
+// (`_estadoPago`: días < 0), que es el que cuentan la tarjeta y el aviso.
+const esCargoVencido = (c) =>
+  c.estado_pago !== 'Saldada'
+  && c.dias_para_vencer != null
+  && Number(c.dias_para_vencer) < 0;
 
 const PAGO_CLASES = {
   verde:    'bg-green-50  text-green-600  border-green-200',
@@ -1065,10 +1073,11 @@ function CargoActivo({ cargo, acreedorId, esAdmin, saldoAFavor, onAbonar, onApli
   const pagado    = Number(cargo.total_abonado);
   const pendiente = Number(cargo.saldo_pendiente);
   const progreso  = original > 0 ? Math.min((pagado / original) * 100, 100) : 0;
+  const vencido   = esCargoVencido(cargo);
 
   return (
     <div
-      className={`border rounded-2xl overflow-hidden ${cfg.ring}`}
+      className={`border rounded-2xl overflow-hidden ${cfg.ring} ${vencido ? 'ring-2 ring-red-400' : ''}`}
       onDoubleClick={() => cargo.compra_id && setModalCompra(true)}
       title={cargo.compra_id ? 'Doble clic para ver detalle de la compra' : undefined}
     >
@@ -1077,6 +1086,12 @@ function CargoActivo({ cargo, acreedorId, esAdmin, saldoAFavor, onAbonar, onApli
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap mb-1.5">
               <Badge variant={cfg.variant}>{cargo.estado_pago}</Badge>
+              {vencido && <ChipPago estado="vencida" dias={cargo.dias_para_vencer} />}
+              {!vencido && cargo.fecha_vencimiento && (
+                <span className="text-xs text-gray-500">
+                  vence {formatFecha(cargo.fecha_vencimiento)}
+                </span>
+              )}
               {cargo.compra_id && (
                 <button
                   onClick={(e) => { e.stopPropagation(); setModalCompra(true); }}
@@ -1219,7 +1234,7 @@ const TABS_DETALLE = [
   { id: 'cuenta', label: 'Estado de cuenta' },
 ];
 
-function DetalleAcreedor({ acreedor, esAdmin, onVolver, onEliminar }) {
+function DetalleAcreedor({ acreedor, esAdmin, onVolver, onEliminar, filtroInicial = 'todos' }) {
   const [tabActivo,        setTabActivo]        = useState('cargos');
   const [cargoAbono,       setCargoAbono]       = useState(null);
   const [cargoAplicar,     setCargoAplicar]     = useState(null);
@@ -1229,7 +1244,8 @@ function DetalleAcreedor({ acreedor, esAdmin, onVolver, onEliminar }) {
   const [modalAbonoTotal,  setModalAbonoTotal]  = useState(false);
   const [saldadasAbiertas, setSaldadasAbiertas] = useState(false);
   const [busquedaCargo,    setBusquedaCargo]    = useState('');
-  const [filtroEstado,     setFiltroEstado]     = useState('todos');
+  // Abierta desde Facturas → Vencidas llega ya filtrada: se venía a ver esas.
+  const [filtroEstado,     setFiltroEstado]     = useState(filtroInicial);
   const [ordenCargos,      setOrdenCargos]      = useState('fecha_desc');
   const [exportandoPdf,    setExportandoPdf]    = useState(false);
   const [exportandoExcel,  setExportandoExcel]  = useState(false);
@@ -1299,6 +1315,7 @@ function DetalleAcreedor({ acreedor, esAdmin, onVolver, onEliminar }) {
   const activos  = cargos.filter((c) => c.estado_pago !== 'Saldada');
   const saldados = cargos.filter((c) => c.estado_pago === 'Saldada');
   const saldoTotal = activos.reduce((s, c) => s + Number(c.saldo_pendiente), 0);
+  const vencidos   = activos.filter(esCargoVencido);
 
   const cargosFiltrados = (() => {
     let lista = [...cargos];
@@ -1309,7 +1326,9 @@ function DetalleAcreedor({ acreedor, esAdmin, onVolver, onEliminar }) {
         (c.compra_id && String(c.compra_id).includes(q))
       );
     }
-    if (filtroEstado !== 'todos') {
+    if (filtroEstado === 'vencidas') {
+      lista = lista.filter(esCargoVencido);
+    } else if (filtroEstado !== 'todos') {
       lista = lista.filter((c) => c.estado_pago === filtroEstado);
     }
     lista.sort((a, b) => {
@@ -1515,6 +1534,10 @@ function DetalleAcreedor({ acreedor, esAdmin, onVolver, onEliminar }) {
               <div className="flex gap-1.5 flex-wrap">
                 {[
                   { key: 'todos',     label: 'Todos' },
+                  // Solo aparece si hay algo vencido (o si se llegó filtrando):
+                  // un «Vencidas (0)» permanente sería ruido en cada proveedor.
+                  ...(vencidos.length > 0 || filtroEstado === 'vencidas'
+                    ? [{ key: 'vencidas', label: `Vencidas (${vencidos.length})` }] : []),
                   { key: 'Pendiente', label: `Pendiente (${cargos.filter((c) => c.estado_pago === 'Pendiente').length})` },
                   { key: 'Parcial',   label: `Parcial (${cargos.filter((c) => c.estado_pago === 'Parcial').length})` },
                   { key: 'Saldada',   label: `Saldada (${saldados.length})` },
@@ -1522,7 +1545,8 @@ function DetalleAcreedor({ acreedor, esAdmin, onVolver, onEliminar }) {
                   <button key={key} type="button" onClick={() => setFiltroEstado(key)}
                     className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-all
                       ${filtroEstado === key
-                        ? key === 'Pendiente' ? 'bg-red-500 text-white border-red-500'
+                        ? key === 'vencidas'  ? 'bg-red-700 text-white border-red-700'
+                          : key === 'Pendiente' ? 'bg-red-500 text-white border-red-500'
                           : key === 'Parcial' ? 'bg-amber-500 text-white border-amber-500'
                           : key === 'Saldada' ? 'bg-green-600 text-white border-green-600'
                           : 'bg-gray-800 text-white border-gray-800'
@@ -1700,6 +1724,9 @@ function FilaAcreedor({ acreedor, onClick }) {
           {tieneDeuda && acreedor.estado_pago && acreedor.estado_pago !== 'sin_plazo' && (
             <ChipPago estado={acreedor.estado_pago} dias={acreedor.dias_para_vencer} />
           )}
+          {/* El chip de arriba habla de UNA factura; esto dice cuántas ya se
+              pasaron y cuánto suman — lo que lleva a abrir esta cuenta hoy. */}
+          <AvisoFacturasVencidas cuantas={acreedor.facturas_vencidas} saldo={acreedor.saldo_vencido} />
         </div>
         {tieneDeuda && totalCargado > 0 && (
           <div className="mt-2 w-full bg-gray-100 rounded-full h-1">
@@ -1890,13 +1917,22 @@ export default function AcreedoresPage() {
   const [acreedorSel, setAcreedorSel]  = useState(null);
   const [modalNuevo, setModalNuevo]    = useState(false);
   const [acreedorEliminar, setEliminar] = useState(null);
-  const [tab, setTab]                   = useState('acreedores');
   const queryClient                     = useQueryClient();
+
+  // La pestaña y el filtro de Facturas viven en la URL y no en un useState: así
+  // el aviso «N facturas vencidas» (`/acreedores?tab=facturas&filtro=vencidas`)
+  // abre justo esa lista, y si la notificación se toca con la pantalla ya
+  // abierta la vista cambia igual, sin un efecto que sincronice nada.
+  const [params, setParams] = useSearchParams();
+  const tab            = params.get('tab') === 'facturas' ? 'facturas' : 'acreedores';
+  const filtroFacturas = params.get('filtro') || undefined;
+  const cambiarTab     = (id) => setParams(id === 'facturas' ? { tab: 'facturas' } : {}, { replace: true });
+  const cambiarFiltro  = (f)  => setParams({ tab: 'facturas', filtro: f }, { replace: true });
 
   // El tab de Facturas solo aparece si el negocio activó las órdenes de compra:
   // sin esa feature ningún cargo lleva fecha de vencimiento y la pantalla
   // saldría siempre vacía.
-  const { data: configFacturas } = useQuery({
+  const { data: configFacturas, isLoading: cargandoConfig } = useQuery({
     queryKey: ['config'],
     queryFn:  () => api.get('/config').then((r) => r.data.data),
   });
@@ -1933,7 +1969,7 @@ export default function AcreedoresPage() {
               ].map((t) => {
                 const TabIcon = t.Icn;
                 return (
-                  <button key={t.id} onClick={() => setTab(t.id)}
+                  <button key={t.id} onClick={() => cambiarTab(t.id)}
                     className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg
                       text-sm font-medium transition-all
                       ${tab === t.id ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
@@ -1944,12 +1980,23 @@ export default function AcreedoresPage() {
             </div>
           )}
 
-          {facturasActivas && tab === 'facturas' ? (
-            <TabFacturas onAbrirAcreedor={(f) => {
-              // Se abre la ficha del acreedor con lo mínimo que necesita: la
-              // pantalla recarga sus datos completos por id.
-              setAcreedorSel({ id: f.acreedor_id, nombre: f.acreedor_nombre });
-            }} />
+          {/* Llegando desde el aviso, sin esto se pintaría la lista general
+              durante el instante que tarda la config y luego saltaría. */}
+          {tab === 'facturas' && cargandoConfig ? (
+            <Spinner className="py-20" />
+          ) : facturasActivas && tab === 'facturas' ? (
+            <TabFacturas
+              filtro={filtroFacturas}
+              onFiltro={cambiarFiltro}
+              onAbrirAcreedor={(f, filtro) => {
+                // Se abre la ficha del acreedor con lo mínimo que necesita: la
+                // pantalla recarga sus datos completos por id. Desde «Vencidas»
+                // llega filtrada a las vencidas de ese proveedor.
+                setAcreedorSel({
+                  id: f.acreedor_id, nombre: f.acreedor_nombre,
+                  filtroInicial: filtro === 'vencidas' ? 'vencidas' : 'todos',
+                });
+              }} />
           ) : (
           <>
           <div className="flex items-center gap-3">
@@ -1987,6 +2034,7 @@ export default function AcreedoresPage() {
           key={acreedorSel.id}
           acreedor={acreedorSel}
           esAdmin={esAdmin}
+          filtroInicial={acreedorSel.filtroInicial}
           onVolver={() => setAcreedorSel(null)}
           onEliminar={(a) => setEliminar(a)}
         />

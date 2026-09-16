@@ -513,7 +513,12 @@ const alertas = require(path.join(RAIZ, 'src/modules/notificaciones/notificacion
 
 // La orden B (modo 'orden') tiene factura con vencimiento el 5-sep y saldo vivo.
 // Se le corre el vencimiento al pasado para que caiga en "vencida".
+// Se corre en la orden Y en su cargo, como hace `ordenesCompra.service` al
+// editar la factura: el aviso sale de los CARGOS (la misma función que la
+// pestaña Facturas), así que mover solo la orden no movería nada.
 await db.query(`UPDATE ordenes_compra SET fecha_vencimiento = CURRENT_DATE - 4 WHERE id = $1`, [ordenB.id]);
+await db.query(`UPDATE movimientos_acreedor SET fecha_vencimiento = CURRENT_DATE - 4
+                WHERE orden_compra_id = $1 AND tipo = 'Cargo'`, [ordenB.id]);
 let cartProv = await alertas.carteraProveedores(1);
 ok('encuentra la factura vencida', cartProv.vencidas.length === 1,
   cartProv.vencidas.map((v) => `${v.proveedor} ${money(v.saldo)}`).join(' · '));

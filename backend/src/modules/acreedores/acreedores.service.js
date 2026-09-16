@@ -23,11 +23,30 @@ const _estadoPago = (dias, diasAviso) => {
 //
 // Un acreedor sin cargos con fecha sale en `sin_plazo` y el chip queda gris: no
 // es una alerta, es que nadie registró un plazo.
+//
+// `facturas_vencidas` / `saldo_vencido` son el aviso de la tarjeta: el chip dice
+// cómo está la que vence primero, y esto dice CUÁNTAS ya se pasaron. Se piden
+// solo para los acreedores con semáforo en 'vencida' — si la que vence primero
+// no está vencida, ninguna lo está.
 const _conSemaforo = async (negocioId, filas) => {
   const cfg = await getConfigOrdenes(negocioId);
-  return filas.map((a) => {
+  const conEstado = filas.map((a) => {
     const dias = a.dias_para_vencer == null ? null : Number(a.dias_para_vencer);
     return { ...a, dias_para_vencer: dias, estado_pago: _estadoPago(dias, cfg.dias_aviso) };
+  });
+
+  const ids = conEstado.filter((a) => a.estado_pago === 'vencida').map((a) => a.id);
+  const vencidas = new Map(
+    (await repo.findVencidasPorAcreedor(negocioId, ids)).map((v) => [Number(v.acreedor_id), v]),
+  );
+
+  return conEstado.map((a) => {
+    const v = vencidas.get(Number(a.id));
+    return {
+      ...a,
+      facturas_vencidas: v ? Number(v.cuantas) : 0,
+      saldo_vencido:     v ? Number(v.saldo)   : 0,
+    };
   });
 };
 

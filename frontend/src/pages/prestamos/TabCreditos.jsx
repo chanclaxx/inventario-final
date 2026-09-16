@@ -32,6 +32,7 @@ import { ModalDocumentosObligacion } from '../../components/documentos/ModalDocu
 import { EstadoCuentaCredito }   from './EstadoCuentaCredito';
 import { ModalAbonoTotalCredito } from './ModalAbonoTotalCredito';
 import { exportarCuentaCreditoExcel } from '../../utils/exportarCuentaCreditoExcel';
+import { BadgeVencidosPersona } from './BadgeVencidosPersona';
 import {
   CreditCard, Plus, CheckCircle, XCircle, AlertTriangle, LayoutList, FileDown,
   ChevronLeft, ChevronDown, ChevronUp, RotateCcw, ChevronRight, Loader2, Printer, Layers,
@@ -47,6 +48,25 @@ function iniciales(nombre) {
     .join('')
     .toUpperCase()
     .slice(0, 2);
+}
+
+// Créditos VENCIDOS de una persona, con la regla del aviso de cobros
+// (`notificaciones.alertas.cartera`): activo y con la fecha límite antes de HOY
+// EN BOGOTÁ. No se usa `mora.vencido`: ese solo existe si el crédito pactó mora,
+// y el aviso cuenta también los que tienen plazo sin mora. `fecha_limite` es
+// DATE y llega como 'YYYY-MM-DD', así que se compara como texto.
+function vencidosDe(creditos) {
+  const hoy = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
+  const [ay, am, ad] = hoy.split('-').map(Number);
+  let cuantos = 0, diasMax = 0;
+  for (const c of creditos) {
+    const limite = c.fecha_limite ? String(c.fecha_limite).slice(0, 10) : null;
+    if (c.estado !== 'Activo' || !limite || limite >= hoy) continue;
+    const [by, bm, bd] = limite.split('-').map(Number);
+    cuantos += 1;
+    diasMax = Math.max(diasMax, Math.round((Date.UTC(ay, am - 1, ad) - Date.UTC(by, bm - 1, bd)) / 86400000));
+  }
+  return { cuantos, diasMax };
 }
 
 // ─── Modal Abono ──────────────────────────────────────────────────────────────
@@ -1084,6 +1104,7 @@ function CardPersonaCredito({ persona, onSeleccionar }) {
         )}
 
         <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+          <BadgeVencidosPersona cuantos={persona.vencidos.cuantos} diasMax={persona.vencidos.diasMax} />
           {activos.length > 0 && (
             <span className="text-xs bg-yellow-50 text-yellow-700 px-2 py-0.5
               rounded-full font-medium border border-yellow-200">
@@ -1165,8 +1186,10 @@ function SeccionPersonasSinDeuda({ personas, onSeleccionar }) {
  *   abrir apenas entra. Lo manda la notificación de cobro: el vendedor no tiene
  *   que buscar a nadie, llega directo a la cuenta del cliente.
  */
-export function TabCreditos({ personaInicial = null }) {
+export function TabCreditos({ personaInicial = null, filtroInicial = null }) {
   const [personaSeleccionada, setPersonaSeleccionada] = useState(null);
+  // 'vencidos' cuando se llega desde el aviso de cobros vencidos.
+  const [filtro,              setFiltro]              = useState(filtroInicial === 'vencidos' ? 'vencidos' : 'todos');
   // Marca que el usuario ya cerró la ficha que abrió la notificación.
   const [cerroInicial,        setCerroInicial]        = useState(false);
   const [creditoAbono,        setCreditoAbono]        = useState(null);
@@ -1200,10 +1223,15 @@ export function TabCreditos({ personaInicial = null }) {
       }
       mapa.get(key).creditos.push(c);
     }
-    return Array.from(mapa.values());
+    return Array.from(mapa.values()).map((p) => ({ ...p, vencidos: vencidosDe(p.creditos) }));
   }, [creditosData]);
 
-  const personasActivas  = creditosPorPersona.filter((p) => p.creditos.some((c) => c.estado === 'Activo'));
+  const personasConDeuda = creditosPorPersona.filter((p) => p.creditos.some((c) => c.estado === 'Activo'));
+  const conVencidos      = personasConDeuda.filter((p) => p.vencidos.cuantos > 0);
+  // Mirando vencidos, el más atrasado arriba: es a quien hay que llamar primero.
+  const personasActivas  = filtro === 'vencidos'
+    ? [...conVencidos].sort((a, b) => b.vencidos.diasMax - a.vencidos.diasMax)
+    : personasConDeuda;
   const personasCerradas = creditosPorPersona.filter((p) => p.creditos.every((c) => c.estado !== 'Activo'));
 
   // Apertura automática desde una notificación de cobro.
@@ -1277,12 +1305,39 @@ export function TabCreditos({ personaInicial = null }) {
   return (
     <>
       <div className="flex flex-col gap-3">
+        {/* Solo aparece si hay algún crédito vencido (o si se llegó filtrando). */}
+        {(conVencidos.length > 0 || filtro === 'vencidos') && (
+          <div className="flex items-center gap-1 flex-wrap">
+            {[
+              { id: 'todos',    label: 'Todos' },
+              { id: 'vencidos', label: `Vencidos (${conVencidos.length})` },
+            ].map((f) => (
+              <button key={f.id} onClick={() => setFiltro(f.id)}
+                className={`px-3 py-1 rounded-lg text-xs font-medium transition-all
+                  ${filtro === f.id
+                    ? f.id === 'vencidos' ? 'bg-red-600 text-white' : 'bg-blue-100 text-blue-700'
+                    : f.id === 'vencidos' ? 'bg-red-50 text-red-600 hover:bg-red-100'
+                    : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
+                {f.label}
+              </button>
+            ))}
+          </div>
+        )}
+
         {personasActivas.length === 0 ? (
+          filtro === 'vencidos' ? (
+            <EmptyState
+              icon={CheckCircle}
+              titulo="Nadie con créditos vencidos"
+              descripcion="Todos los créditos activos están dentro de su plazo"
+            />
+          ) : (
           <EmptyState
             icon={CreditCard}
             titulo="Sin créditos activos"
             descripcion="Los créditos aparecen al crear facturas a crédito"
           />
+          )
         ) : (
           personasActivas.map((persona) => (
             <CardPersonaCredito
@@ -1293,7 +1348,7 @@ export function TabCreditos({ personaInicial = null }) {
           ))
         )}
 
-        {personasCerradas.length > 0 && (
+        {personasCerradas.length > 0 && filtro !== 'vencidos' && (
           <SeccionPersonasSinDeuda
             personas={personasCerradas}
             onSeleccionar={setPersonaSeleccionada}

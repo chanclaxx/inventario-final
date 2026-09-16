@@ -48,6 +48,36 @@ const _plural = (n, singular, plural) => `${n} ${n === 1 ? singular : plural}`;
  */
 const _senal = (s) => ({ prioridad: 'normal', valor: 0, n: 1, ...s });
 
+/**
+ * A dónde lleva «N cobros vencidos». Antes era `/prestamos` a secas: la pestaña
+ * general, sin decir cuáles eran.
+ *
+ * Los vencidos viven en TRES listas —compañeros, clientes (préstamos) y
+ * créditos— y cada ítem de la cartera ya trae el enlace a la ficha de su
+ * persona, con la clave que arma cada pantalla. De ahí se decide:
+ *
+ *   · una sola persona → directo a su ficha;
+ *   · varias → la lista donde hay MÁS personas vencidas, ya filtrada a
+ *     «Vencidos». Las otras dos pestañas muestran su propio contador rojo, y el
+ *     panel de Avisos despliega a todos con su enlace.
+ */
+const destinoCobrosVencidos = (items) => {
+  const urls = [...new Set((items || []).map((i) => i.url).filter(Boolean))];
+  if (urls.length === 1 && urls[0].includes('persona=')) return urls[0];
+
+  const cuenta = { companeros: 0, clientes: 0, creditos: 0 };
+  for (const u of urls) {
+    if (u.includes('tab=creditos'))            cuenta.creditos++;
+    else if (u.includes('persona=cliente_'))   cuenta.clientes++;
+    else if (u.includes('persona=prestatario_')) cuenta.companeros++;
+  }
+  const [lista, n] = Object.entries(cuenta).sort((a, b) => b[1] - a[1])[0];
+  if (!n) return '/prestamos';
+  return lista === 'creditos'
+    ? '/prestamos?tab=creditos&filtro=vencidos'
+    : `/prestamos?tab=prestamos&sub=${lista}&filtro=vencidos`;
+};
+
 // ── Umbrales ─────────────────────────────────────────────────────────────────
 //
 // Se leen de la config del negocio cuando existe, con un default sensato. No son
@@ -116,7 +146,7 @@ const recolectar = async (negocioId) => {
       clave: 'cobros_vencidos', prioridad: 'urgente', categoria: 'cobros',
       titulo: `${_plural(venc.total_clientes, 'cobro vencido', 'cobros vencidos')}`,
       cuerpo: `${_pesos(venc.total)} por recuperar. Toca para ver a quién llamar.`,
-      url: '/prestamos', valor: Number(venc.total || 0), n: venc.total_clientes,
+      url: destinoCobrosVencidos(venc.items), valor: Number(venc.total || 0), n: venc.total_clientes,
     }));
   }
 
@@ -143,7 +173,9 @@ const recolectar = async (negocioId) => {
       clave: 'proveedor_vencido', prioridad: 'urgente', categoria: 'proveedores',
       titulo: `${_plural(v.length, 'factura vencida', 'facturas vencidas')} por pagar`,
       cuerpo: `Le debes ${_pesos(_saldo(v))} a proveedores y ya se pasó la fecha.`,
-      url: '/proveedores?tab=compras', valor: _saldo(v), n: v.length,
+      // Directo a la lista filtrada: la pestaña general de Proveedores no dice
+      // cuáles son, y el número del aviso es el de ESA lista (misma función).
+      url: '/acreedores?tab=facturas&filtro=vencidas', valor: _saldo(v), n: v.length,
     }));
   }
   if (proveedores?.por_vencer?.length) {
@@ -152,7 +184,7 @@ const recolectar = async (negocioId) => {
       clave: 'proveedor_por_vencer', categoria: 'proveedores',
       titulo: `${_plural(v.length, 'factura', 'facturas')} de proveedor por vencer`,
       cuerpo: `${_pesos(_saldo(v))} con fecha próxima.`,
-      url: '/proveedores?tab=compras', valor: _saldo(v), n: v.length,
+      url: '/acreedores?tab=facturas', valor: _saldo(v), n: v.length,
     }));
   }
 
@@ -293,4 +325,4 @@ const resumenDiario = (normales) => {
   };
 };
 
-module.exports = { recolectar, resumenDiario, DEFAULTS };
+module.exports = { recolectar, resumenDiario, destinoCobrosVencidos, DEFAULTS };

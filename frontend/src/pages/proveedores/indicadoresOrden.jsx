@@ -9,6 +9,9 @@
 // orden vencida impida trabajar, el negocio apaga la feature.
 // ─────────────────────────────────────────────────────────────────────────────
 
+import { AlertTriangle } from 'lucide-react';
+import { formatCOP } from '../../utils/formatters';
+
 const ESTADOS_PAGO = {
   vencida:     { clase: 'bg-red-100 text-red-700',       punto: 'bg-red-500'    },
   por_vencer:  { clase: 'bg-amber-100 text-amber-700',   punto: 'bg-amber-500'  },
@@ -45,6 +48,26 @@ const ESTADOS_GARANTIA = {
   vigente:      { clase: 'bg-green-100 text-green-700', punto: 'bg-green-500' },
   sin_garantia: { clase: 'bg-gray-100 text-gray-500',   punto: 'bg-gray-300'  },
 };
+
+/**
+ * Cuántas facturas de ese proveedor YA se vencieron y cuánto suman. Va en la
+ * tarjeta del acreedor/proveedor al lado de `ChipPago`: el chip dice cómo está
+ * la que vence primero («vencida hace 12 días»), esto dice que son tres.
+ * Sale de `facturas_vencidas` / `saldo_vencido` de `GET /acreedores`, que cuenta
+ * igual que la pestaña Facturas → Vencidas.
+ */
+export function AvisoFacturasVencidas({ cuantas, saldo }) {
+  const n = Number(cuantas || 0);
+  if (n <= 0) return null;
+  return (
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold
+                     whitespace-nowrap bg-red-600 text-white">
+      <AlertTriangle size={11} className="flex-shrink-0" />
+      {n === 1 ? '1 factura vencida' : `${n} facturas vencidas`}
+      {Number(saldo) > 0 && <span className="font-normal opacity-90">· {formatCOP(saldo)}</span>}
+    </span>
+  );
+}
 
 export function ChipGarantia({ estado, dias }) {
   const cfg = ESTADOS_GARANTIA[estado] || ESTADOS_GARANTIA.sin_garantia;

@@ -518,6 +518,45 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > que mirar primero, la 2 comprueba que la MISMA garantía cambia de prioridad al
 > acercarse el vencimiento, y la 8 vigila que el cron y el panel sigan leyendo el
 > mismo motor).
+>
+> **«N facturas vencidas» lleva a CUÁLES son** (`carteraProveedores`,
+> `AcreedoresPage`, `AvisoFacturasVencidas`): el aviso apuntaba a
+> `/proveedores?tab=compras`, pero Proveedores ignora `?tab=` y abría la pestaña
+> general. Ahora va a `/acreedores?tab=facturas&filtro=vencidas`: pestaña y
+> filtro viven en la URL (`useSearchParams`, sin efecto que sincronice), y abrir
+> una factura desde «Vencidas» llega a la ficha ya filtrada a las vencidas.
+> **El aviso cuenta con `acreedores.service.getFacturasPorVencer`**, la misma
+> función de la pestaña: su consulta propia contaba por ORDEN y solo 'Emitida',
+> así que una compra suelta con plazo o una orden cerrada sin pagar no avisaban,
+> y en modo 'recepcion' una orden con dos entregas era 1 en el aviso y 2 en la
+> lista. Ojo: sale de `movimientos_acreedor.fecha_vencimiento` (el cargo), no de
+> la orden. La tarjeta del acreedor (y la del proveedor) muestra cuántas y cuánto
+> (`facturas_vencidas` / `saldo_vencido`, consulta aparte en `_conSemaforo`, no
+> otro LATERAL en `findAll`, que corre por movimiento).
+> Prueba: `50-facturas-vencidas` (32; la sección 1 es la que hay que mirar: aviso,
+> pestaña y tarjetas dan el mismo número).
+>
+> **«N cobros vencidos» dice A QUIÉN** (`AvisosPage.TarjetaCobros`,
+> `motor.destinoCobrosVencidos`, `BadgeVencidosPersona`): llevaba a `/prestamos`
+> a secas. Ahora (1) en el panel la tarjeta de cobros se DESPLIEGA con las
+> personas, sacadas de `detalle.cartera` —el mismo cálculo del aviso— y cada fila
+> va a su ficha con el `url` que ya arma la alerta; (2) el enlace va a la lista
+> con MÁS personas vencidas ya filtrada (`?tab=prestamos&sub=clientes&filtro=vencidos`
+> o `?tab=creditos&filtro=vencidos`; una sola persona → su ficha), y el push de
+> «y N más» también; (3) las tarjetas de compañeros, clientes y créditos dicen
+> «N vencidos · hace X días», hay filtro «Vencidos» y los botones de sub-pestaña
+> muestran el contador rojo.
+> **«Vencido» = activo y `fecha_limite` antes de HOY EN BOGOTÁ, con o sin mora
+> pactada** — la regla de `alertas.cartera`. NO usar `mora.vencido`: solo existe
+> si se pactó mora. Préstamos lo cuenta en SQL (`findResumenPersonas`, con `$2`
+> = `hoyBogota()`, no `CURRENT_DATE`) y `adaptarResumenPersonas` lo repite en el
+> navegador; créditos en `TabCreditos.vencidosDe`. Solo conteo y días, nunca
+> plata: mora e interés los calcula `mora.service` y una cifra aquí no daría la
+> del aviso. De paso, `dias_vencidos` de la alerta sale del calendario: sin mora
+> pactada daba 0 («Ana · 0 días de atraso» en el push).
+> Prueba: `51-cobros-vencidos` (34; secciones 1 y 2 comparan cada tarjeta contra
+> la alerta real, la 2 extrayendo `vencidosDe` del `.jsx`) y la 6 de
+> `41-prestamos-por-persona`, que ahora exige que el respaldo cuente igual.
 
 > **La sesión sobrevive a cerrar la PWA — y el refresh estaba ROTO en
 > producción** (`axios.config.js`, `AuthContext.jsx`): el access token vive en

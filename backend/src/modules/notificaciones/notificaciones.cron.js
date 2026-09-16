@@ -143,7 +143,8 @@ const _avisarCarteraVencida = async (negocioId, cartera) => {
         roles:       ['admin_negocio', 'supervisor'],
         titulo: `y ${sobran} cobro${sobran === 1 ? '' : 's'} más vencido${sobran === 1 ? '' : 's'}`,
         cuerpo: `Además de los anteriores. Toca para ver la lista completa.`,
-        url:  '/prestamos',
+        // A la lista ya filtrada a «Vencidos», no a la pestaña general.
+        url:  motor.destinoCobrosVencidos(destinos.slice(MAX_AVISOS_POR_SUCURSAL).flat()),
         tag:  `cartera-resto-${sucursalId}`,
         tipo: 'cartera_vencida_resto',
         referencia_id: String(sucursalId),
