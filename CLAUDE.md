@@ -108,6 +108,22 @@ Three roles exist: `admin_negocio`, `supervisor`, `vendedor`. Role determines wh
 > Prueba: `46-editar-factura-credito` (85 verificaciones; la sección 10 es la de
 > los bloqueos, la 1 que el contado no cambió y la 11 renderiza el PDF de verdad).
 
+> **El PIN de administrador lo usan otros roles SOLO si el admin los autoriza**
+> (`config.service.verificarPinDeUsuario`, `middlewares/pinAdmin.middleware.js`,
+> Ajustes → Seguridad → «Quién puede usar el PIN»): los modales de PIN (reducir
+> stock, eliminar serial, cambiar vendedor, cancelar factura) se muestran a
+> todos los roles, pero `/config/verificar-pin` exigía `admin_negocio`: a un
+> supervisor con el PIN correcto le respondía 403 y la pantalla decía «Error al
+> verificar el PIN» (reportado desde producción, sep-2026). Ahora la lista vive
+> en `config_negocio.pin_usuarios_autorizados` (arreglo JSON de ids, validado
+> contra `usuarios` del negocio). **Ausente = solo admin**, igual que antes.
+> Hay tope de 5 fallos por usuario en 15 min (en memoria; el admin no se
+> bloquea). El PIN autoriza, no concede: cada ruta sigue con su propio permiso.
+> La excepción es `DELETE /productos-serial/seriales/:id`, que pasó de
+> admin-only a `requireAdminOPin` — el no-admin manda `pin` en el body, se
+> **vuelve a verificar en el servidor** y solo borra equipos de SU sucursal.
+> Los modales muestran `err.response.data.error`: el genérico escondía la causa.
+
 > **«¿Puede ver los costos?» tiene UNA sola respuesta** (`utils/costos.util.js`,
 > `hooks/usePuedeVerCostos.js`): antes convivían cuatro reglas para la misma
 > pregunta —`rol === 'admin_negocio'` en búsqueda y export,

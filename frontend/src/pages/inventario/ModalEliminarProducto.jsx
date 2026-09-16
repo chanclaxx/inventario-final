@@ -79,8 +79,8 @@ export function ModalEliminarProducto({ producto, tipo, onClose, onSuccess }) {
       if (!res.data.valido) { setError('PIN incorrecto'); return; }
       // Primera llamada sin forzar — el backend dirá si hay seriales comprometidos
       mutation.mutate(false);
-    } catch {
-      setError('Error al verificar el PIN. Intenta de nuevo.');
+    } catch (err) {
+      setError(err.response?.data?.error || 'Error al verificar el PIN. Intenta de nuevo.');
     } finally {
       setVerificando(false);
     }

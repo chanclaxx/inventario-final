@@ -1,5 +1,6 @@
 const bcrypt = require('bcryptjs')
 const repo   = require('./config.repository');
+const { pool } = require('../../config/db');
 
 const SALT_ROUNDS = 10;
 
@@ -377,6 +378,13 @@ const saveConfig = async (negocioId, datos) => {
     };
   }
 
+  // Quién más puede usar el PIN: se valida que cada id sea un usuario de ESTE
+  // negocio, o un admin podría autorizar (sin saberlo) un id de otro negocio.
+  if (datosProcesados.pin_usuarios_autorizados !== undefined) {
+    datosProcesados.pin_usuarios_autorizados =
+      await _validarUsuariosPin(negocioId, datosProcesados.pin_usuarios_autorizados);
+  }
+
   // Hashear las claves privadas antes de persistir
   for (const clave of CLAVES_A_HASHEAR) {
     if (clave in datosProcesados && datosProcesados[clave] !== '') {
@@ -431,4 +439,94 @@ const verificarPin = async (negocioId, pinIngresado) => {
   return bcrypt.compare(String(pinIngresado), hashGuardado);
 };
 
-module.exports = { getConfig, saveConfig, verificarPin };
+// ── Quién puede usar el PIN de administrador ─────────────────────────────────
+//
+// El PIN existe para que alguien que NO es admin haga algo sensible con la
+// autorización del admin (reducir stock, eliminar un equipo, cambiar el
+// vendedor de una factura). Pero `/config/verificar-pin` solo dejaba entrar a
+// `admin_negocio`: a un supervisor con el PIN correcto le respondía 403 y la
+// pantalla lo pintaba como «Error al verificar el PIN».
+//
+// `admin_negocio` pasa siempre. Los demás, solo si el admin los marcó en
+// Ajustes → Seguridad (`pin_usuarios_autorizados`, arreglo JSON de ids).
+// Ausente = nadie más: es lo mismo que pasaba hasta hoy, así que ningún
+// negocio abre la puerta sin decidirlo.
+const _idsAutorizados = (raw) => {
+  try {
+    const lista = JSON.parse(raw ?? '[]');
+    return Array.isArray(lista) ? lista.map(Number).filter((n) => Number.isInteger(n) && n > 0) : [];
+  } catch {
+    return [];
+  }
+};
+
+const puedeUsarPin = async (negocioId, usuario) => {
+  if (usuario?.rol === 'admin_negocio') return true;
+  const config = await repo.getMap(negocioId);
+  return _idsAutorizados(config.pin_usuarios_autorizados).includes(Number(usuario?.id));
+};
+
+const _validarUsuariosPin = async (negocioId, raw) => {
+  let lista;
+  try { lista = JSON.parse(String(raw)); } catch { lista = null; }
+  if (!Array.isArray(lista)) {
+    throw { status: 400, message: 'La lista de usuarios autorizados para el PIN no es válida' };
+  }
+  const ids = [...new Set(lista.map(Number))];
+  if (ids.some((n) => !Number.isInteger(n) || n <= 0)) {
+    throw { status: 400, message: 'La lista de usuarios autorizados para el PIN no es válida' };
+  }
+  if (!ids.length) return '[]';
+
+  const { rows } = await pool.query(
+    'SELECT id FROM usuarios WHERE negocio_id = $1 AND id = ANY($2::int[])',
+    [negocioId, ids],
+  );
+  if (rows.length !== ids.length) {
+    throw { status: 400, message: 'Uno de los usuarios autorizados para el PIN no pertenece a este negocio' };
+  }
+  return JSON.stringify(ids.sort((a, b) => a - b));
+};
+
+// Fuerza bruta: el PIN suele ser de 4 dígitos, así que abrirle la verificación
+// a más usuarios exige un tope. Se cuentan solo los FALLOS, por usuario; un
+// acierto limpia el contador. En memoria a propósito: un reinicio lo borra,
+// pero en ese caso el atacante ya perdió minutos, y no merece una tabla.
+const MAX_FALLOS_PIN   = 5;
+const VENTANA_FALLOS_MS = 15 * 60 * 1000;
+const _fallosPin = new Map();
+
+const verificarPinDeUsuario = async (negocioId, usuario, pinIngresado) => {
+  if (!(await puedeUsarPin(negocioId, usuario))) {
+    throw {
+      status: 403,
+      code:   'PIN_NO_AUTORIZADO',
+      message: 'Tu usuario no está autorizado para usar el PIN de administrador. '
+        + 'Pídele a un administrador que te active en Ajustes → Seguridad.',
+    };
+  }
+
+  const clave = `${negocioId}:${usuario.id}`;
+  const ahora = Date.now();
+  const previo = _fallosPin.get(clave);
+  const fallos = previo && ahora - previo.desde < VENTANA_FALLOS_MS ? previo : { n: 0, desde: ahora };
+
+  if (fallos.n >= MAX_FALLOS_PIN) {
+    const minutos = Math.ceil((VENTANA_FALLOS_MS - (ahora - fallos.desde)) / 60000);
+    throw {
+      status: 429,
+      code:   'PIN_BLOQUEADO',
+      message: `Demasiados intentos con PIN incorrecto. Intenta de nuevo en ${minutos} min.`,
+    };
+  }
+
+  const valido = await verificarPin(negocioId, pinIngresado);
+  if (valido) {
+    _fallosPin.delete(clave);
+  } else if (usuario.rol !== 'admin_negocio') {
+    _fallosPin.set(clave, { n: fallos.n + 1, desde: fallos.desde });
+  }
+  return valido;
+};
+
+module.exports = { getConfig, saveConfig, verificarPin, puedeUsarPin, verificarPinDeUsuario };

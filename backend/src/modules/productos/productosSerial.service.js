@@ -192,9 +192,14 @@ const actualizarSerial = async (negocioId, serialId, { imei, costo_compra, preci
   };
 };
 
-const eliminarSerial = async (negocioId, serialId) => {
+// `sucursalId` solo llega cuando quien elimina no es admin (lo hace con el PIN):
+// ese usuario opera en su sucursal y no puede borrar un equipo de otra sede.
+const eliminarSerial = async (negocioId, serialId, sucursalId = null) => {
   const serial = await repo.findSerialByIdYNegocio(serialId, negocioId);
   if (!serial) throw { status: 404, message: 'Serial no encontrado' };
+  if (sucursalId && Number(serial.sucursal_id) !== Number(sucursalId)) {
+    throw { status: 403, message: 'Este equipo pertenece a otra sucursal' };
+  }
 
   if (serial.vendido) {
     throw { status: 400, message: 'No se puede eliminar un serial que ya fue vendido' };

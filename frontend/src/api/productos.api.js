@@ -16,7 +16,8 @@ export const getSeriales              = (productoId, vendido) =>
 export const agregarSerial            = (productoId, data) =>
   api.post(`/productos-serial/${productoId}/seriales`, data);
 export const actualizarSerial         = (id, data)    => api.put(`/productos-serial/seriales/${id}`, data);
-export const eliminarSerial           = (id)          => api.delete(`/productos-serial/seriales/${id}`);
+// `pin` solo lo exige el backend cuando quien elimina no es admin_negocio.
+export const eliminarSerial           = (id, pin)     => api.delete(`/productos-serial/seriales/${id}`, { data: { pin } });
 export const verificarImei            = (imei)        => api.get(`/productos-serial/verificar-imei/${imei}`);
 export const buscarImei               = (q)           => api.get('/productos-serial/buscar-imei', { params: { q } });
 

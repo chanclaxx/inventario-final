@@ -13,7 +13,8 @@ import { verificarPin } from '../../api/config.api';
  * Props:
  *  - titulo:       string       — título del modal
  *  - descripcion:  string       — texto de advertencia
- *  - onConfirm:    () => Promise<void>  — se llama solo cuando el PIN es correcto
+ *  - onConfirm:    (pin) => Promise<void> — se llama solo cuando el PIN es correcto;
+ *                  recibe el PIN para las acciones que el backend vuelve a verificar
  *  - onClose:      () => void
  *  - extraContent: ReactNode    — contenido adicional antes del PIN (ej: input cantidad)
  *  - loading:      boolean      — estado de carga de la acción posterior
@@ -39,8 +40,10 @@ export function ModalPinEliminacion({ titulo, descripcion, onConfirm, onClose, e
         setError('PIN incorrecto');
         return;
       }
-    } catch {
-      setError('Error al verificar el PIN. Intenta de nuevo.');
+    } catch (err) {
+      // 403 = el usuario no está autorizado para usar el PIN; 429 = demasiados
+      // intentos. El backend dice cuál: el mensaje genérico escondía la causa.
+      setError(err.response?.data?.error || 'Error al verificar el PIN. Intenta de nuevo.');
       return;
     } finally {
       setVerificando(false);
@@ -48,7 +51,7 @@ export function ModalPinEliminacion({ titulo, descripcion, onConfirm, onClose, e
 
     // ── PIN correcto — ejecutar la acción ──────────────────────────
     try {
-      await onConfirm();
+      await onConfirm(pin.trim());
     } catch (err) {
       setError(
         err.response?.data?.error ||

@@ -1671,6 +1671,10 @@ function SeccionSeguridad({ form, valores, set }) {
         </p>
       </div>
 
+      <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
+        <UsuariosPinConfig valores={valores} set={set} />
+      </div>
+
       {/* ── Ocultar costos ──────────────────────────────────────────────────
           Opt-in. Apagado (el default y lo que tienen todos los negocios hoy) no
           cambia absolutamente nada. Encendido, el costo de compra deja de VIAJAR
@@ -1710,6 +1714,97 @@ function SeccionSeguridad({ form, valores, set }) {
       <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
         <PasswordConfig />
       </div>
+    </div>
+  );
+}
+
+// ─── Quién puede usar el PIN ──────────────────────────────────────────────────
+//
+// Los administradores lo usan siempre. Al resto hay que activárselo: sin eso,
+// el backend responde 403 al verificar y la pantalla lo explica. Se guarda como
+// arreglo de ids en `pin_usuarios_autorizados`; ausente = nadie más.
+const ROL_LABEL = { admin_negocio: 'Administrador', supervisor: 'Supervisor', vendedor: 'Vendedor' };
+
+const _parsearIds = (raw) => {
+  try {
+    const lista = JSON.parse(raw || '[]');
+    return Array.isArray(lista) ? lista.map(Number) : [];
+  } catch {
+    return [];
+  }
+};
+
+function UsuariosPinConfig({ valores, set }) {
+  const { data: usuarios = [], isLoading } = useQuery({
+    queryKey: ['usuarios'],
+    queryFn:  () => api.get('/usuarios').then((r) => r.data.data),
+  });
+
+  const autorizados = _parsearIds(valores.pin_usuarios_autorizados);
+  const activos     = usuarios.filter((u) => u.activo);
+  const admins      = activos.filter((u) => u.rol === 'admin_negocio');
+  const otros       = activos.filter((u) => u.rol !== 'admin_negocio');
+
+  const toggle = (id, activar) => {
+    // Solo se guardan ids de usuarios activos que no son admin: un usuario
+    // desactivado sale de la lista la próxima vez que se guarde.
+    const idsOtros  = new Set(otros.map((u) => u.id));
+    const siguiente = autorizados.filter((x) => x !== id && idsOtros.has(x));
+    if (activar) siguiente.push(id);
+    set('pin_usuarios_autorizados', JSON.stringify(siguiente));
+  };
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div>
+        <p className="text-sm font-semibold text-gray-800">Quién puede usar el PIN</p>
+        <p className="text-xs text-gray-400 mt-0.5">
+          Reducir stock, eliminar un equipo, cancelar una factura o cambiar su vendedor piden el PIN.
+          Los administradores siempre pueden escribirlo; a los demás usuarios hay que activárselo aquí.
+        </p>
+      </div>
+
+      {isLoading ? <Spinner className="py-4" /> : (
+        <div className="flex flex-col divide-y divide-gray-100 border border-gray-100 rounded-xl">
+          {admins.map((u) => (
+            <div key={u.id} className="flex items-center justify-between gap-3 px-3 py-2.5">
+              <div className="min-w-0">
+                <p className="text-sm text-gray-700 truncate">{u.nombre}</p>
+                <p className="text-xs text-gray-400">{ROL_LABEL[u.rol]}</p>
+              </div>
+              <span className="text-xs text-gray-400 flex-shrink-0">Siempre</span>
+            </div>
+          ))}
+          {otros.map((u) => {
+            const activo = autorizados.includes(u.id);
+            return (
+              <div key={u.id} className="flex items-center justify-between gap-3 px-3 py-2.5">
+                <div className="min-w-0">
+                  <p className="text-sm text-gray-700 truncate">{u.nombre}</p>
+                  <p className="text-xs text-gray-400">
+                    {ROL_LABEL[u.rol] ?? u.rol}{u.sucursal_nombre ? ` · ${u.sucursal_nombre}` : ''}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => toggle(u.id, !activo)}
+                  className="flex-shrink-0"
+                  title={activo ? 'Quitar permiso' : 'Dar permiso'}
+                >
+                  {activo
+                    ? <ToggleRight size={28} className="text-blue-600" />
+                    : <ToggleLeft  size={28} className="text-gray-300" />}
+                </button>
+              </div>
+            );
+          })}
+          {!otros.length && (
+            <p className="text-xs text-gray-400 px-3 py-2.5">
+              No hay usuarios activos que no sean administradores.
+            </p>
+          )}
+        </div>
+      )}
     </div>
   );
 }

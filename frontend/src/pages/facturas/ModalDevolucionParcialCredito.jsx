@@ -208,8 +208,8 @@ export function ModalDevolucionParcialCredito({ credito, onClose }) {
       const res = await verificarPin(pin.trim());
       if (!res.data.valido) { setError('PIN incorrecto'); return; }
       mutation.mutate();
-    } catch {
-      setError('Error al verificar el PIN');
+    } catch (err) {
+      setError(err.response?.data?.error || 'Error al verificar el PIN');
     } finally {
       setVerificando(false);
     }

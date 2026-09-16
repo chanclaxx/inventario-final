@@ -1832,8 +1832,8 @@ function ModalEliminarAcreedor({ acreedor, onClose, onEliminar }) {
       const res = await verificarPin(pin.trim());
       if (!res.data.valido) { setError('PIN incorrecto'); return; }
       onEliminar();
-    } catch {
-      setError('Error al verificar el PIN. Intenta de nuevo.');
+    } catch (err) {
+      setError(err.response?.data?.error || 'Error al verificar el PIN. Intenta de nuevo.');
     } finally {
       setVerificando(false);
     }

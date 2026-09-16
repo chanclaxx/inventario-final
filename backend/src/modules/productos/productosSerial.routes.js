@@ -1,6 +1,7 @@
 const router = require('express').Router();
 const { requireNivel }  = require('../../middlewares/role.middleware');
 const { requireModulo } = require('../../middlewares/modulo.middleware');
+const { requireAdminOPin } = require('../../middlewares/pinAdmin.middleware');
 const ctrl = require('./productosSerial.controller');
 
 // Rutas estáticas primero
@@ -19,6 +20,6 @@ router.delete('/:id', requireModulo('inventario'), requireNivel('admin_negocio')
 router.get('/:id/seriales',    requireModulo('inventario'),                                ctrl.getSeriales);
 router.post('/:id/seriales',   requireModulo('inventario'), requireNivel('vendedor'),       ctrl.agregarSerial);
 router.put('/seriales/:id',    requireModulo('inventario'), requireNivel('supervisor'),     ctrl.actualizarSerial);
-router.delete('/seriales/:id', requireModulo('inventario'), requireNivel('admin_negocio'),  ctrl.eliminarSerial);
+router.delete('/seriales/:id', requireModulo('inventario'), requireAdminOPin,              ctrl.eliminarSerial);
 
 module.exports = router;

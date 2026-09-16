@@ -4,7 +4,9 @@ const ctrl = require('./config.controller');
 
 router.get('/',                                            ctrl.getConfig);
 router.put('/',    requireNivel('admin_negocio'),          ctrl.saveConfig);
-// Solo admin puede verificar el PIN — evita fuerza bruta desde roles inferiores
-router.post('/verificar-pin', requireNivel('admin_negocio'), ctrl.verificarPin);
+// El admin siempre puede verificar el PIN; los demás solo si el admin los
+// autorizó en Ajustes → Seguridad. Esa regla y el tope de intentos fallidos
+// viven en config.service.verificarPinDeUsuario, no aquí.
+router.post('/verificar-pin', ctrl.verificarPin);
 
 module.exports = router;

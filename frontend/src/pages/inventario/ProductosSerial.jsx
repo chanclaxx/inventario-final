@@ -851,7 +851,7 @@ export function ProductosSerial({ onAgregarProducto }) {
   const [productoPrecios, setProductoPrecios] = useState(null);
 
   const mutEliminar = useMutation({
-    mutationFn: (serialId) => eliminarSerial(serialId),
+    mutationFn: ({ serialId, pin }) => eliminarSerial(serialId, pin),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['seriales'],         exact: false });
       queryClient.invalidateQueries({ queryKey: ['productos-serial'], exact: false });
@@ -1186,7 +1186,7 @@ export function ProductosSerial({ onAgregarProducto }) {
           titulo="Eliminar serial"
           descripcion={`¿Eliminar el IMEI ${serialAEliminar.imei}? Esta acción no se puede deshacer.`}
           loading={mutEliminar.isPending}
-          onConfirm={() => mutEliminar.mutateAsync(serialAEliminar.id)}
+          onConfirm={(pin) => mutEliminar.mutateAsync({ serialId: serialAEliminar.id, pin })}
           onClose={() => setSerialAEliminar(null)}
         />
       )}

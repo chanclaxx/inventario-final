@@ -8,11 +8,11 @@ import { SearchInput }  from '../../components/ui/SearchInput';
 import { InputMoneda }  from '../../components/ui/InputMoneda';
 import { InputUbicacion } from '../../components/ui/InputUbicacion';
 import { useAuth }      from '../../context/useAuth';
+import { usePermisos }  from '../../hooks/usePermisos';
 import { usePuedeVerCostos } from '../../hooks/usePuedeVerCostos';
 import { useMetodosPago } from '../../hooks/useMetodosPago';
 import { useSucursalKey } from '../../hooks/useSucursalKey';
 import { crearCompra }  from '../../api/compras.api';
-import { getCruces, crearCruce } from '../../api/cruces.api';
 import { buscarPorCedula, crearCliente, getClientes } from '../../api/clientes.api';
 import {
   getProductosSerial,   crearProductoSerial,   agregarSerial,
@@ -222,11 +222,27 @@ function ModalImeisPrestados({ open, seriales, onCerrar }) {
   );
 }
 
+// ─── Permiso sobre proveedores ────────────────────────────────────────────────
+// Quien no es admin veía aquí «Cruce»: listaba solo cruces y creaba proveedores
+// de tipo cruce. Los cruces se quitaron de Proveedores el 20-may-2026 y este
+// modal se quedó con ellos. Ahora todos ven proveedores, con la MISMA regla del
+// backend (`requireModulo('proveedores')` + `requirePermisoProveedores`): sin
+// ella el selector pediría una lista que responde 403.
+function usePermisoProveedores() {
+  const { usuario }  = useAuth();
+  const { puedeVer } = usePermisos();
+  const esAdmin      = usuario?.rol === 'admin_negocio';
+  const conModulo    = puedeVer('proveedores');
+  return {
+    puedeVer:   esAdmin || (conModulo && usuario?.permisos_proveedores?.ver === true),
+    puedeCrear: esAdmin || (conModulo && usuario?.permisos_proveedores?.crear === true),
+  };
+}
+
 // ─── Panel info de compra ─────────────────────────────────────────────────────
 function InfoCompra({ proveedorId, setProveedorId, costoCompra, setCostoCompra, modoPago, setModoPago, onProveedorTipoChange, registrarEnCaja, setRegistrarEnCaja, metodoPagoContado, setMetodoPagoContado, sinCosto = false }) {
   const queryClient = useQueryClient();
-  const { esAdminNegocio } = useAuth();
-  const esAdmin = esAdminNegocio();
+  const { puedeVer: puedeVerProveedores, puedeCrear: puedeCrearProveedor } = usePermisoProveedores();
   const metodosPago = useMetodosPago();
 
   const [creandoProveedor, setCreandoProveedor] = useState(false);
@@ -234,10 +250,9 @@ function InfoCompra({ proveedorId, setProveedorId, costoCompra, setCostoCompra, 
   const [errorProveedor,   setErrorProveedor]   = useState('');
 
   const { data: proveedoresRaw } = useQuery({
-    queryKey: esAdmin ? ['proveedores'] : ['cruces'],
-    queryFn:  () => esAdmin
-      ? api.get('/proveedores').then((r) => r.data.data)
-      : getCruces().then((r) => r.data.data),
+    queryKey: ['proveedores'],
+    queryFn:  () => api.get('/proveedores').then((r) => r.data.data),
+    enabled:  puedeVerProveedores,
   });
   const { data: acreedoresRaw } = useQuery({
     queryKey: ['acreedores'],
@@ -262,15 +277,12 @@ function InfoCompra({ proveedorId, setProveedorId, costoCompra, setCostoCompra, 
         telefono:  nuevoProveedor.telefono.trim()  || null,
         direccion: nuevoProveedor.direccion.trim() || null,
       };
-      return esAdmin
-        ? api.post('/proveedores', payload)
-        : crearCruce(payload);
+      return api.post('/proveedores', payload);
     },
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ['proveedores'], exact: false });
-      queryClient.invalidateQueries({ queryKey: ['cruces'],      exact: false });
       setProveedorId(String(res.data.data.id));
-      onProveedorTipoChange?.(res.data.data.tipo || (esAdmin ? 'proveedor' : 'cruce'));
+      onProveedorTipoChange?.(res.data.data.tipo || 'proveedor');
       setNuevoProveedor({ nombre: '', nit: '', telefono: '', direccion: '' });
       setErrorProveedor('');
       setCreandoProveedor(false);
@@ -284,8 +296,6 @@ function InfoCompra({ proveedorId, setProveedorId, costoCompra, setCostoCompra, 
     mutCrearProveedor.mutate();
   };
 
-  const labelCrear = esAdmin ? '+ Crear nuevo proveedor' : '+ Crear nuevo cruce';
-
   return (
     <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 flex flex-col gap-2">
       <div className="flex items-center gap-1.5">
@@ -294,10 +304,9 @@ function InfoCompra({ proveedorId, setProveedorId, costoCompra, setCostoCompra, 
       </div>
 
       <div className="flex gap-2">
+        {puedeVerProveedores && (
         <div className="flex-1 flex flex-col gap-1">
-          <label className="text-xs text-amber-700 font-medium">
-            {esAdmin ? 'Proveedor' : 'Cruce'}
-          </label>
+          <label className="text-xs text-amber-700 font-medium">Proveedor</label>
           <select
             value={proveedorId}
             onChange={(e) => {
@@ -311,12 +320,13 @@ function InfoCompra({ proveedorId, setProveedorId, costoCompra, setCostoCompra, 
             className="w-full px-2.5 py-2 bg-white border border-amber-200 rounded-lg text-xs
               text-gray-700 focus:outline-none focus:ring-2 focus:ring-amber-400"
           >
-            <option value="">{esAdmin ? 'Sin proveedor' : 'Sin cruce'}</option>
+            <option value="">Sin proveedor</option>
             {proveedores.map((p) => (
               <option key={p.id} value={p.id}>{p.nombre}</option>
             ))}
           </select>
         </div>
+        )}
         {!sinCosto && (
           <div className="flex-1 flex flex-col gap-1">
             <label className="text-xs text-amber-700 font-medium">Precio compra</label>
@@ -331,18 +341,16 @@ function InfoCompra({ proveedorId, setProveedorId, costoCompra, setCostoCompra, 
         )}
       </div>
 
-      {!creandoProveedor ? (
+      {!puedeCrearProveedor ? null : !creandoProveedor ? (
         <button
           onClick={() => setCreandoProveedor(true)}
           className="text-xs text-amber-600 hover:text-amber-800 font-medium text-left w-fit"
         >
-          {labelCrear}
+          + Crear nuevo proveedor
         </button>
       ) : (
         <div className="bg-white border border-amber-200 rounded-xl p-3 flex flex-col gap-2">
-          <p className="text-xs font-semibold text-amber-700">
-            {esAdmin ? 'Nuevo proveedor' : 'Nuevo cruce'}
-          </p>
+          <p className="text-xs font-semibold text-amber-700">Nuevo proveedor</p>
           <Input placeholder="Nombre *" value={nuevoProveedor.nombre}
             onChange={(e) => setNuevoProveedor({ ...nuevoProveedor, nombre: e.target.value })} autoFocus />
           <div className="flex gap-2">
@@ -1728,15 +1736,14 @@ function PasoCantidad({ sucursalKey, onExito, variantesActivo, codigoActivo, cod
     return [{ key: `a-${atr.id}`, id: atr.id, tipo: 'atributo', label: labelNodoInline(atr), stock: atr.stock }];
   }) : [];
 
-  // Query de proveedores/cruces para el panel "crear nuevo producto"
+  // Query de proveedores para el panel "crear nuevo producto"
   const { esAdminNegocio } = useAuth();
   const esAdmin = esAdminNegocio();
+  const { puedeVer: puedeVerProveedores } = usePermisoProveedores();
   const { data: proveedoresNuevoData } = useQuery({
-    queryKey: esAdmin ? ['proveedores'] : ['cruces'],
-    queryFn:  () => esAdmin
-      ? api.get('/proveedores').then((r) => r.data.data)
-      : getCruces().then((r) => r.data.data),
-    enabled: creandoNuevo,
+    queryKey: ['proveedores'],
+    queryFn:  () => api.get('/proveedores').then((r) => r.data.data),
+    enabled:  creandoNuevo && puedeVerProveedores,
   });
   const listaProveedores = Array.isArray(proveedoresNuevoData) ? proveedoresNuevoData : [];
 
@@ -1966,14 +1973,14 @@ function PasoCantidad({ sucursalKey, onExito, variantesActivo, codigoActivo, cod
               {listaProveedores.length > 0 && (
                 <div className="flex flex-col gap-1">
                   <label className="text-xs text-gray-600 font-medium">
-                    {esAdmin ? 'Proveedor (opcional)' : 'Cruce (opcional)'}
+                    Proveedor (opcional)
                   </label>
                   <select
                     value={proveedorId}
                     onChange={(e) => setProveedorId(e.target.value)}
                     className="w-full px-2.5 py-2 bg-white border border-gray-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-green-400"
                   >
-                    <option value="">Sin {esAdmin ? 'proveedor' : 'cruce'}</option>
+                    <option value="">Sin proveedor</option>
                     {listaProveedores.map((p) => (
                       <option key={p.id} value={p.id}>{p.nombre}</option>
                     ))}

@@ -128,7 +128,8 @@ const actualizarSerial = async (req, res, next) => {
 
 const eliminarSerial = async (req, res, next) => {
   try {
-    const serial = await service.eliminarSerial(req.user.negocio_id, req.params.id);
+    const sucursalId = req.user.rol === 'admin_negocio' ? null : req.sucursal_id;
+    const serial = await service.eliminarSerial(req.user.negocio_id, req.params.id, sucursalId);
     audit.registrar(req.user.negocio_id, req.user.id, 'Equipo eliminado del inventario', 'productos_serial', Number(req.params.id), {
       sucursal_id: serial?.sucursal_id ?? null,
       producto:    serial?.producto_nombre ?? null,

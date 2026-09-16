@@ -22,7 +22,7 @@ const verificarPin = async (req, res, next) => {
     if (!pin) {
       return res.status(400).json({ ok: false, error: 'PIN requerido' });
     }
-    const valido = await service.verificarPin(req.user.negocio_id, pin);
+    const valido = await service.verificarPinDeUsuario(req.user.negocio_id, req.user, pin);
     res.json({ ok: true, valido });
   } catch (err) { next(err); }
 };
