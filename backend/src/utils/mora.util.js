@@ -77,8 +77,14 @@ const normalizarCondicion = (cruda, indice = 0) => {
 
   const tipo = cruda.tipo === TIPO_DIARIA_FIJA ? TIPO_DIARIA_FIJA : TIPO_MENSUAL;
 
+  // 0 es válido: una condición de SOLO AVISO (pedido del negocio, sep-2026). El
+  // documento tiene plazo, se marca vencido y dispara el aviso de cobro, pero no
+  // causa un peso de mora. Negativo sí es basura. Ver `esSoloAviso`.
+  // Ausente o vacío NO es 0: Number(null) y Number('') dan 0, y una condición
+  // sin valor se volvería de solo aviso sin que nadie lo decidiera.
+  if (cruda.valor == null || (typeof cruda.valor === 'string' && !cruda.valor.trim())) return null;
   const valor = Number(cruda.valor);
-  if (!Number.isFinite(valor) || valor <= 0) return null;
+  if (!Number.isFinite(valor) || valor < 0) return null;
   // Un % mensual por encima de 100 no es un error de dedo creíble; en pesos/día
   // el tope es alto a propósito (una deuda grande puede justificarlo).
   if (tipo === TIPO_MENSUAL && valor > 100) return null;
@@ -93,11 +99,18 @@ const normalizarCondicion = (cruda, indice = 0) => {
     tipo,
     valor,
     dias_gracia: Number.isFinite(gracia) && gracia >= 0 ? Math.floor(gracia) : 0,
-    // 0 o ausente = sin tope
-    tope_pct:    Number.isFinite(tope) && tope > 0 ? tope : null,
+    // 0 o ausente = sin tope. Sin cobro no hay nada que topar.
+    tope_pct:    valor > 0 && Number.isFinite(tope) && tope > 0 ? tope : null,
     color:       typeof cruda.color === 'string' ? cruda.color : 'amber',
   };
 };
+
+/**
+ * ¿La condición es de SOLO AVISO (valor 0)? Se DERIVA del valor en vez de
+ * guardarse como marca: la condición ya va congelada en cada documento, y una
+ * marca aparte podría contradecir al valor que de verdad se pactó.
+ */
+const esSoloAviso = (cond) => !!cond && Number(cond.valor) === 0;
 
 /**
  * Traduce una condición de mora a la regla del motor de devengo.
@@ -165,6 +178,7 @@ const leerConfigMora = (config) => {
 /** Etiqueta legible de una condición, para pantalla y documentos. */
 const describirCondicion = (c) => {
   if (!c) return '';
+  if (esSoloAviso(c)) return 'Sin cobro de mora (solo aviso de vencimiento)';
   return c.tipo === TIPO_DIARIA_FIJA
     ? `$${Math.round(c.valor).toLocaleString('es-CO')} por día de atraso`
     : `${c.valor}% mensual sobre el saldo`;
@@ -202,6 +216,8 @@ const diasDeAtraso = (fechaLimite, condicion, hoy = hoyBogota()) => {
 const calcularMoraCausada = ({ saldo, fecha_limite, condicion, hoy, abonos = [] } = {}) => {
   const cond = normalizarCondicion(condicion);
   if (!cond) return 0;
+  // Solo aviso: explícito, sin pasar por el motor (que rechaza reglas en 0).
+  if (esSoloAviso(cond)) return 0;
 
   const saldoHoy = Number(saldo);
   if (!Number.isFinite(saldoHoy) || saldoHoy < 0) return 0;
@@ -253,7 +269,7 @@ const resolverEstadoMora = ({ saldo, fecha_limite, condicion, movimientos = [], 
       aplica: false, fecha_limite: limite, condicion: cond,
       dias_vencidos: 0, dias_cobrables: 0,
       causada: 0, cobrada, condonada, pendiente: 0,
-      vencido: false, descripcion: '',
+      vencido: false, descripcion: '', solo_aviso: false,
       saldo_capital: capital, total_a_pagar: capital, solo_falta_mora: false,
     };
   }
@@ -279,6 +295,9 @@ const resolverEstadoMora = ({ saldo, fecha_limite, condicion, movimientos = [], 
     pendiente,
     vencido:       dias_vencidos > 0,
     descripcion:   describirCondicion(cond),
+    // Plazo con condición en 0: se ve vencido y se avisa, pero nunca hay mora
+    // que cobrar. Las pantallas lo usan para no mostrar cifras de mora en $0.
+    solo_aviso:    esSoloAviso(cond),
 
     // Capital y mora, separados y sumados. `solo_falta_mora` es el caso nuevo:
     // el cliente ya pagó todo el producto pero debe los intereses, así que el
@@ -356,7 +375,7 @@ const repartirAbono = ({
 
 module.exports = {
   ZONA, TIPO_MENSUAL, TIPO_DIARIA_FIJA, MAX_CONDICIONES,
-  hoyBogota,
+  hoyBogota, esSoloAviso,
   normalizarCondicion, parsearCondiciones, leerConfigMora, describirCondicion,
   diasDeAtraso, calcularMoraCausada, resolverEstadoMora, repartirAbono,
 };

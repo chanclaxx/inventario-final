@@ -106,11 +106,16 @@ const _resolverCargos = (cfg, documento, movimientos, abonos) => {
   // NO mira `fecha_inicio`, así que calcularlo era trabajo tirado. Se resuelve
   // solo cuando hay condición pactada — el resultado es idéntico, y la lista de
   // un negocio que no usa la feature deja de pagar por ella.
+  // Con una condición de mora de SOLO AVISO (valor 0) no hay mora que sustituya
+  // al interés: si el plan dice 'sustituye' y se le pasara la fecha límite, el
+  // interés se detendría al vencerse y el cliente atrasado dejaría de pagar
+  // interés SIN pagar mora — plata perdida en silencio. Sin la fecha, el interés
+  // sigue corriendo como si no hubiera plazo, que es lo que de verdad pasa.
   const interes = resolverEstadoInteres({
     saldo,
     valor_original: cfg.originalDe(documento),
     fecha_inicio:   documento.interes_condicion ? cfg.emisionDe(documento) : null,
-    fecha_limite:   documento.fecha_limite,
+    fecha_limite:   mora.solo_aviso ? null : documento.fecha_limite,
     condicion:      documento.interes_condicion,
     movimientos,
     abonos,

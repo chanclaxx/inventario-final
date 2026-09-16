@@ -23,6 +23,9 @@ export function AvisoMoraTermico({ persona, resumen, descripcion, config = {}, o
 
   const moraPendiente = Number(resumen.mora?.pendiente || 0);
   const totalHoy      = resumen.saldo + moraPendiente;
+  // Condición de solo aviso (valor 0): no hay intereses de mora que listar ni
+  // que explicar. Una línea en $0 haría creer que se cobra algo.
+  const soloAviso = resumen.condicion?.valor != null && Number(resumen.condicion.valor) === 0;
 
   return (
     <DocumentoTermico
@@ -73,7 +76,9 @@ export function AvisoMoraTermico({ persona, resumen, descripcion, config = {}, o
 
           <div className="negrita">DETALLE DE LA DEUDA</div>
           <Fila label="Saldo de capital:"  valor={formatCOP(resumen.saldo)} />
-          <Fila label="Intereses de mora:" valor={formatCOP(moraPendiente)} />
+          {(!soloAviso || moraPendiente > 0) && (
+            <Fila label="Intereses de mora:" valor={formatCOP(moraPendiente)} />
+          )}
           <div className="linea-punteada" />
           <Fila label="TOTAL A PAGAR:" valor={formatCOP(totalHoy)} negrita grande />
 
@@ -86,9 +91,9 @@ export function AvisoMoraTermico({ persona, resumen, descripcion, config = {}, o
           <div className="negrita">TÉRMINOS Y CONDICIONES</div>
           <div className="suave" style={{ fontSize: '10px', textAlign: 'justify' }}>
             Este documento constituye un requerimiento de pago por la obligación vencida
-            descrita arriba. Los intereses de mora se liquidan sobre el saldo de capital
+            descrita arriba.{soloAviso ? '' : ` Los intereses de mora se liquidan sobre el saldo de capital
             pendiente, por los días de atraso, conforme a la condición pactada al momento
-            de la venta. Se solicita ponerse al día o acercarse al establecimiento a
+            de la venta.`} Se solicita ponerse al día o acercarse al establecimiento a
             acordar un plan de pago.
           </div>
 

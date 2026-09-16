@@ -3,7 +3,7 @@ import {
   ToggleLeft, ToggleRight, CalendarClock, Trash2, Plus, AlertTriangle, Info,
 } from 'lucide-react';
 import {
-  parsearCondiciones, describirCondicion,
+  parsearCondiciones, describirCondicion, esSoloAviso,
   TIPO_MENSUAL, TIPO_DIARIA_FIJA, MAX_CONDICIONES,
 } from '../../utils/mora';
 import { formatCOP } from '../../utils/formatters';
@@ -97,6 +97,7 @@ export function MoraConfig({ valores, set }) {
   const [error,  setError]  = useState('');
 
   const setCondiciones = (lista) => set('mora_lista', JSON.stringify(lista));
+  const valorEsCero = String(valor).trim() !== '' && Number(String(valor).replace(',', '.')) === 0;
 
   const handleAgregar = () => {
     const limpio = nombre.trim();
@@ -105,13 +106,18 @@ export function MoraConfig({ valores, set }) {
     if (condiciones.some((c) => c.nombre.toLowerCase() === limpio.toLowerCase())) {
       return setError('Ya existe una condición con ese nombre');
     }
+    // Vacío NO es 0: poner 0 tiene que ser una decisión (solo aviso), no un olvido.
+    if (String(valor).trim() === '') return setError('Escribe el valor (0 si solo quieres el aviso, sin cobrar mora)');
     const v = Number(String(valor).replace(',', '.'));
-    if (!Number.isFinite(v) || v <= 0) return setError('El valor debe ser mayor a 0');
+    if (!Number.isFinite(v) || v < 0) return setError('El valor no puede ser negativo');
     if (tipo === TIPO_MENSUAL && v > 100) return setError('Un porcentaje mensual mayor a 100 no es válido');
+    const soloAviso = v === 0;
 
-    const g = gracia === '' ? 0 : Number(gracia);
+    // En solo aviso la gracia y el tope no significan nada: no hay cobro que
+    // retrasar ni que topar. Se guardan vacíos en vez de dejar números sueltos.
+    const g = soloAviso || gracia === '' ? 0 : Number(gracia);
     if (!Number.isFinite(g) || g < 0) return setError('Los días de gracia deben ser 0 o más');
-    const t = tope === '' ? null : Number(tope);
+    const t = soloAviso || tope === '' ? null : Number(tope);
     if (t !== null && (!Number.isFinite(t) || t <= 0)) return setError('El tope debe ser un porcentaje mayor a 0');
 
     const id = _generarId(limpio, new Set(condiciones.map((c) => c.id)));
@@ -186,10 +192,17 @@ export function MoraConfig({ valores, set }) {
                           )}
                         </div>
                         <p className="text-xs text-gray-400">{describirCondicion(c)}</p>
-                        <p className="text-[11px] text-gray-400 mt-0.5">
-                          Ejemplo: {formatCOP(SALDO_EJEMPLO)} con {DIAS_EJEMPLO} días de atraso
-                          {' → '}<span className="font-medium text-gray-600">{formatCOP(_moraEjemplo(c))}</span> de mora
-                        </p>
+                        {esSoloAviso(c) ? (
+                          <p className="text-[11px] text-gray-400 mt-0.5">
+                            Marca el crédito o préstamo como vencido y lo incluye en el aviso de
+                            cobros, sin sumarle nada a la deuda.
+                          </p>
+                        ) : (
+                          <p className="text-[11px] text-gray-400 mt-0.5">
+                            Ejemplo: {formatCOP(SALDO_EJEMPLO)} con {DIAS_EJEMPLO} días de atraso
+                            {' → '}<span className="font-medium text-gray-600">{formatCOP(_moraEjemplo(c))}</span> de mora
+                          </p>
+                        )}
                       </div>
                       <button
                         onClick={() => set('mora_default_id', esDefault ? '' : c.id)}
@@ -243,14 +256,23 @@ export function MoraConfig({ valores, set }) {
                 <input type="number" min="0" value={gracia}
                   onChange={(e) => { setGracia(e.target.value); setError(''); }}
                   placeholder="gracia (días)"
+                  disabled={valorEsCero}
                   className="flex-1 px-3 py-2 bg-white border-0 rounded-xl text-sm
-                    placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500
+                    disabled:opacity-40" />
                 <input type="number" min="0" value={tope}
                   onChange={(e) => { setTope(e.target.value); setError(''); }}
                   placeholder="tope %"
+                  disabled={valorEsCero}
                   className="flex-1 px-3 py-2 bg-white border-0 rounded-xl text-sm
-                    placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500
+                    disabled:opacity-40" />
               </div>
+              <p className="text-[11px] text-gray-400">
+                {valorEsCero
+                  ? 'Con valor 0 la condición es solo un aviso: marca el vencimiento y te avisa, pero no cobra mora.'
+                  : 'Pon 0 si solo quieres el aviso de vencimiento, sin cobrar mora.'}
+              </p>
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-gray-400">Color:</span>

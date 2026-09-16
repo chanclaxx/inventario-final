@@ -34,7 +34,10 @@ export const parsearCondiciones = (raw) => {
   if (!Array.isArray(lista)) return [];
   return lista
     .filter((c) => c && typeof c === 'object' && typeof c.nombre === 'string' && c.nombre.trim())
-    .filter((c) => Number.isFinite(Number(c.valor)) && Number(c.valor) > 0)
+    // 0 vale: condición de SOLO AVISO (marca el vencimiento, no cobra mora).
+    // `c.valor !== ''` porque Number('') también es 0 y eso no es una decisión.
+    .filter((c) => c.valor !== '' && c.valor != null
+                   && Number.isFinite(Number(c.valor)) && Number(c.valor) >= 0)
     .slice(0, MAX_CONDICIONES)
     .map((c, i) => ({
       id:          typeof c.id === 'string' && c.id.trim() ? c.id.trim() : `m${i + 1}`,
@@ -42,7 +45,8 @@ export const parsearCondiciones = (raw) => {
       tipo:        c.tipo === TIPO_DIARIA_FIJA ? TIPO_DIARIA_FIJA : TIPO_MENSUAL,
       valor:       Number(c.valor),
       dias_gracia: Number.isFinite(Number(c.dias_gracia)) && Number(c.dias_gracia) > 0 ? Math.floor(Number(c.dias_gracia)) : 0,
-      tope_pct:    Number.isFinite(Number(c.tope_pct)) && Number(c.tope_pct) > 0 ? Number(c.tope_pct) : null,
+      tope_pct:    Number(c.valor) > 0 && Number.isFinite(Number(c.tope_pct)) && Number(c.tope_pct) > 0
+        ? Number(c.tope_pct) : null,
       color:       typeof c.color === 'string' ? c.color : 'amber',
     }));
 };
@@ -66,9 +70,19 @@ export const leerConfigMora = (config) => {
   };
 };
 
+/**
+ * ¿Condición de SOLO AVISO? Valor 0: el documento tiene plazo, se marca vencido
+ * y dispara el aviso de cobro, pero nunca causa mora. Mismo criterio que
+ * `esSoloAviso` del backend (se deriva del valor, no se guarda).
+ */
+export const esSoloAviso = (c) => !!c && c.valor != null && Number(c.valor) === 0;
+
 /** Texto de la condición, para pantalla y para el resumen del documento. */
 export const describirCondicion = (c) => {
   if (!c) return '';
+  // Sin gracia ni tope en el texto: no cobra nada, y el aviso de cobros cuenta
+  // el vencimiento desde la fecha límite, no desde la gracia.
+  if (esSoloAviso(c)) return 'Sin cobro de mora · solo avisa del vencimiento';
   const base = c.tipo === TIPO_DIARIA_FIJA
     ? `$${Math.round(c.valor).toLocaleString('es-CO')} por día de atraso`
     : `${c.valor}% mensual sobre el saldo`;
@@ -109,6 +123,10 @@ export const estadoVisual = (mora) => {
   }
   if (mora.pendiente > 0) {
     return { tono: 'rojo', texto: `Vencido hace ${mora.dias_vencidos} día(s)` };
+  }
+  if (mora.vencido && (mora.solo_aviso || esSoloAviso(mora.condicion))) {
+    // Solo aviso: no hay mora que esté «al día»; lo que importa es el atraso.
+    return { tono: 'rojo', texto: `Vencido hace ${mora.dias_vencidos} día(s) · sin cobro de mora` };
   }
   if (mora.vencido) {
     // Vencido pero sin mora pendiente: ya se cobró o se condonó.

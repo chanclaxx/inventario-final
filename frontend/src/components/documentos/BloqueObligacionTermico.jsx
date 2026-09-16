@@ -15,6 +15,7 @@ import { describirPlanCompleto } from '../../utils/interes';
 /** Texto legible de la condición de mora pactada (espejo del backend). */
 function describirCondicion(cond) {
   if (!cond) return null;
+  if (cond.valor != null && Number(cond.valor) === 0) return 'Sin cobro de mora (solo aviso de vencimiento)';
   const base = cond.tipo === 'diaria_fija'
     ? `${formatCOP(cond.valor)} por día de atraso`
     : `${cond.valor}% mensual sobre el saldo`;

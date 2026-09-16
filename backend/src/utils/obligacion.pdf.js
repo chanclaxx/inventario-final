@@ -379,7 +379,11 @@ const tablaMovimientosMora = (doc, resumen, y, { titulo = null } = {}) => {
 // puede causar interés sin tener fecha límite, y en ese caso el pacto del
 // interés es justamente lo único que hay que dejar por escrito.
 const bloqueCondiciones = (doc, resumen, y, { compacto = false } = {}) => {
+  // Una condición en 0 es solo aviso: se imprime tal cual («Sin cobro de mora»),
+  // pero la declaración no puede hacer firmar un interés de mora que no existe.
+  const soloAviso   = resumen.condicion?.valor != null && Number(resumen.condicion.valor) === 0;
   const descMora    = describirCondicion(resumen.condicion);
+  const moraPactada = descMora && !soloAviso;
   const descInteres = describirPlanInteres(resumen.condicion_interes);
   if (!resumen.fecha_limite && !descInteres) return y;
 
@@ -396,7 +400,7 @@ const bloqueCondiciones = (doc, resumen, y, { compacto = false } = {}) => {
 
   if (resumen.fecha_limite) {
     filas.push(['Fecha límite de pago', resumen.fecha_limite_txt]);
-    if (descMora) filas.push(['Interés por mora', descMora]);
+    if (descMora) filas.push([soloAviso ? 'Mora' : 'Interés por mora', descMora]);
     if (resumen.vencido && resumen.mora?.pendiente > 0) {
       filas.push(['Días de atraso a la fecha', String(resumen.dias_atraso)]);
       filas.push(['Mora causada a la fecha',   formatCOP(resumen.mora.pendiente)]);
@@ -416,11 +420,11 @@ const bloqueCondiciones = (doc, resumen, y, { compacto = false } = {}) => {
     // el texto anterior si se usaba el plazo como excusa para cobrar interés.
     const partes = [];
     if (descInteres) partes.push('el interés de financiación');
-    if (resumen.fecha_limite) partes.push(descMora ? 'el plazo y el interés de mora' : 'el plazo de pago');
+    if (resumen.fecha_limite) partes.push(moraPactada ? 'el plazo y el interés de mora' : 'el plazo de pago');
 
     const detalle = [
       descInteres ? 'El interés de financiación se causa desde la entrega, según la periodicidad pactada.' : null,
-      descMora    ? 'La mora se liquida sobre el saldo de capital pendiente, por los días de atraso.'      : null,
+      moraPactada ? 'La mora se liquida sobre el saldo de capital pendiente, por los días de atraso.'      : null,
     ].filter(Boolean).join(' ');
 
     y += 6;
@@ -530,9 +534,12 @@ const generarAvisoMora = ({ config, persona, resumen, descripcion, terminos = []
 
   // ── Desglose de lo adeudado ───────────────────────────────────────────────
   y = labelSeccion(doc, y, 'Detalle de la deuda');
+  // Con una condición de solo aviso no hay intereses de mora: la línea en $0 y el
+  // párrafo que explica cómo se liquidan harían creer que se cobra algo.
+  const soloAviso = resumen.condicion?.valor != null && Number(resumen.condicion.valor) === 0;
   const detalle = [['Saldo de capital pendiente', formatCOP(resumen.saldo)]];
   if (interesPendiente > 0) detalle.push(['Interés de financiación pendiente', formatCOP(interesPendiente)]);
-  detalle.push(['Intereses de mora causados', formatCOP(moraPendiente)]);
+  if (!soloAviso || moraPendiente > 0) detalle.push(['Intereses de mora causados', formatCOP(moraPendiente)]);
   const H = detalle.length * 16 + 52;
   rectFillStroke(doc, MARGIN, y, CONTENT_W, H, C.blanco, C.grisBorde, 8);
   let yd = y + 12;
@@ -556,10 +563,11 @@ const generarAvisoMora = ({ config, persona, resumen, descripcion, terminos = []
 
   const textos = terminos.length ? terminos : [
     'Este documento constituye un requerimiento de pago por la obligación vencida descrita arriba.',
-    'Los intereses de mora se liquidan sobre el saldo de capital pendiente, por los días de atraso, '
-      + 'conforme a la condición pactada al momento de la venta.',
+    soloAviso ? null
+      : 'Los intereses de mora se liquidan sobre el saldo de capital pendiente, por los días de atraso, '
+        + 'conforme a la condición pactada al momento de la venta.',
     'Se solicita ponerse al día o acercarse al establecimiento a acordar un plan de pago.',
-  ];
+  ].filter(Boolean);
   for (const t of textos) {
     const alto = doc.font(FONT.normal).fontSize(8).heightOfString(t, { width: CONTENT_W, lineGap: 1.5 });
     y = asegurarEspacio(doc, y, alto + 8);

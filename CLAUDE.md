@@ -687,6 +687,22 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > Pruebas: `13-devengo-identidad` (el refactor del motor no cambió una cifra de
 > la mora — 12.566 corridas), `14-interes-corriente` (fórmula), `15-interes-integracion`
 > (cableado contra Postgres real). Las suites `09` y `10` siguen cubriendo la mora.
+> **Mora en 0 = SOLO AVISO** (`esSoloAviso`, en `mora.util` y `utils/mora.js`;
+> pedido del negocio, sep-2026): una condición con valor 0 es válida. El
+> documento tiene plazo, se marca vencido y entra en el aviso de cobros
+> vencidos, pero nunca causa mora. Se DERIVA del valor, no hay marca guardada.
+> **Vacío no es 0**: `Number(null)` y `Number('')` dan 0, así que el normalizador
+> rechaza el valor ausente antes de convertirlo, y el formulario pide escribir
+> el 0 a propósito. En 0 se descartan tope y gracia.
+> **El interés no se detiene con una mora de solo aviso**: con `al_vencer:
+> 'sustituye'` el interés se corta en la fecha límite para dejarle el lugar a la
+> mora; sin mora que lo sustituya, el cliente atrasado dejaría de pagar interés
+> sin pagar mora. `_resolverCargos` le pasa `fecha_limite: null` al interés en
+> ese caso. Los documentos (condiciones pactadas, aviso de mora PDF y térmico)
+> no imprimen «intereses de mora $0» ni hacen firmar un interés de mora que no
+> existe, y `PanelMora` no muestra las cifras en cero.
+> Prueba: `52-mora-solo-aviso` (38; la sección 1 comprueba que las condiciones
+> CON cobro no cambiaron, y la 4 el interés).
 > Cuidado con las fechas: `interes_desde`/`fecha_limite` son **DATE** (leer en UTC)
 > y `prestamos.fecha`/`creditos.creado_en` son **TIMESTAMP** (leer en Bogotá) —
 > confundirlos corre un día y ya mordió dos veces (`mora.service._inicioInteres`).

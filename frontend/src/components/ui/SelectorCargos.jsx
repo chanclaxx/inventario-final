@@ -1,5 +1,5 @@
 import { Percent, CalendarClock, Check } from 'lucide-react';
-import { describirCondicion, fechaLegible, hoyBogota, sumarDias } from '../../utils/mora';
+import { describirCondicion, esSoloAviso, fechaLegible, hoyBogota, sumarDias } from '../../utils/mora';
 import { describirPlanCompleto, proyectar, unidadPeriodo } from '../../utils/interes';
 import { formatCOP } from '../../utils/formatters';
 
@@ -222,19 +222,31 @@ export function SelectorCargos({
                 )}
               </li>
             )}
-            {conMora && condicion && (
+            {conMora && condicion && (esSoloAviso(condicion) ? (
+              <li className="text-[11px] text-blue-700">
+                • Tiene plazo hasta el <strong>{fechaLegible(fecha_limite)}</strong>. Si se pasa,
+                <strong> no se le cobra mora</strong>: solo queda marcado como vencido y te avisa.
+              </li>
+            ) : (
               <li className="text-[11px] text-blue-700">
                 • Tiene plazo hasta el <strong>{fechaLegible(fecha_limite)}</strong>. Si se pasa,
                 se le suma <strong>{describirCondicion(condicion)}</strong>.
               </li>
+            ))}
+            {/* Solo aviso: no hay mora que sustituya al interés, así que el
+                backend lo deja correr aunque el plan diga 'sustituye'. */}
+            {conInteres && conMora && condicion && esSoloAviso(condicion) && (
+              <li className="text-[11px] text-blue-600">
+                • Si se atrasa, el interés sigue corriendo. No se le suma mora.
+              </li>
             )}
-            {conInteres && conMora && plan?.al_vencer === 'sustituye' && (
+            {conInteres && conMora && !esSoloAviso(condicion) && plan?.al_vencer === 'sustituye' && (
               <li className="text-[11px] text-blue-600">
                 • Mientras esté al día paga el interés; si se atrasa, el interés se detiene y
                 empieza a correr la mora. Nunca las dos cosas a la vez.
               </li>
             )}
-            {conInteres && conMora && plan?.al_vencer === 'continua' && (
+            {conInteres && conMora && !esSoloAviso(condicion) && plan?.al_vencer === 'continua' && (
               <li className="text-[11px] text-amber-700">
                 • Ojo: con este plan, si se atrasa se le cobran <strong>las dos cosas</strong> al
                 mismo tiempo sobre la misma deuda.

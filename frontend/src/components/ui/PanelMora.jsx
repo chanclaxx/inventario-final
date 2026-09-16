@@ -5,7 +5,7 @@ import { Button }       from './Button';
 import { InputMoneda }  from './InputMoneda';
 import { SelectorPlazo } from './SelectorPlazo';
 import { formatCOP }    from '../../utils/formatters';
-import { describirCondicion, fechaLegible, estadoVisual } from '../../utils/mora';
+import { describirCondicion, fechaLegible, estadoVisual, esSoloAviso } from '../../utils/mora';
 import { useAuth }      from '../../context/useAuth';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -142,6 +142,10 @@ export function PanelMora({
   const est  = estadoVisual(mora);
   const tono = est?.tono || 'verde';
   const hayPendiente = mora.pendiente > 0;
+  // Condición en 0: el plazo sirve de aviso y no hay mora que mostrar. Las cifras
+  // vuelven solo si quedó algo de antes (se cambió de una condición con cobro).
+  const soloAviso = (mora.solo_aviso || esSoloAviso(mora.condicion))
+    && !(mora.causada > 0 || mora.cobrada > 0 || mora.condonada > 0);
 
   return (
     <div className={`rounded-xl border p-3 flex flex-col gap-2.5 ${TONOS[tono]}`}>
@@ -168,6 +172,15 @@ export function PanelMora({
         </button>
       </div>
 
+      {soloAviso ? (
+        <div className="bg-white/70 rounded-lg px-2.5 py-2">
+          <p className="text-[11px] text-gray-600">
+            {mora.vencido
+              ? 'Esta condición no cobra mora: el documento queda marcado como vencido y entra en el aviso de cobros.'
+              : 'Esta condición no cobra mora: si se pasa de la fecha, solo se marca como vencido y se avisa.'}
+          </p>
+        </div>
+      ) : (<>
       {/* Cifras */}
       <div className="grid grid-cols-3 gap-2 bg-white/70 rounded-lg p-2">
         {[
@@ -188,6 +201,7 @@ export function PanelMora({
           {formatCOP(mora.pendiente)}
         </span>
       </div>
+      </>)}
 
       {/* El producto ya está pagado y lo único que mantiene abierta la deuda son
           los intereses: decirlo evita que el vendedor crea que el sistema no

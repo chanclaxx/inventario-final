@@ -235,6 +235,8 @@ const resumirObligacion = ({
 /** Texto legible de la condición de mora pactada. */
 const describirCondicion = (cond) => {
   if (!cond) return null;
+  // Condición en 0: solo aviso. No hay tasa ni tope que describir.
+  if (cond.valor != null && Number(cond.valor) === 0) return 'Sin cobro de mora (solo aviso de vencimiento)';
   const base = cond.tipo === 'diaria_fija'
     ? `$${Math.round(num(cond.valor)).toLocaleString('es-CO')} por cada día de atraso`
     : `${cond.valor}% mensual sobre el saldo pendiente`;
