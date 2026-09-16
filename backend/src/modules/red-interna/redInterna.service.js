@@ -3204,12 +3204,18 @@ const listarRemesas = (req, { estado, limit } = {}) =>
 // luego producto de cantidad por código único.
 // ─────────────────────────────────────────────────────────────────────────────
 
+// `valor_interno` sigue siendo el COSTO y `precio_venta` viaja aparte: la
+// pantalla del despacho pregraba el precio de venta (decisión del negocio,
+// sep-2026) y cae al costo cuando no hay precio. Se mandan los dos, y no el
+// precio metido en `valor_interno`, porque Vercel y Railway se despliegan por
+// separado: un frontend viejo contra este backend sigue despachando igual.
 const _formatoSerial = (s) => ({
   tipo: 'serial',
   serial_id: s.serial_id,
   imei: s.imei,
   nombre: [s.nombre, s.marca, s.modelo].filter(Boolean).join(' '),
   valor_interno: _num(s.costo_compra),
+  precio_venta: _num(s.precio_venta),
   sin_costo: _num(s.costo_compra) === 0,
   cantidad: 1,
 });
@@ -3229,6 +3235,7 @@ const _formatoCantidad = (p) => ({
   unidad_medida: p.unidad_medida || 'unidad',
   stock: Number(p.stock || 0),
   valor_interno: _num(p.costo_unitario),
+  precio_venta: _num(p.precio_venta),
   sin_costo: _num(p.costo_unitario) === 0,
   cantidad: 1,
 });
@@ -3368,10 +3375,9 @@ const catalogoCantidad = async (req, q) => {
 // ─────────────────────────────────────────────────────────────────────────────
 // Resolver ítems que vienen del carrito de inventario.
 //
-// El carrito guarda el PRECIO DE VENTA, que no sirve aquí: el despacho va al
-// costo. Se re-resuelve todo contra la base (y de paso se valida propiedad,
-// stock y que nada esté vendido o ya remisionado) en vez de confiar en lo que
-// mande el navegador.
+// Se re-resuelve todo contra la base (y de paso se valida propiedad, stock y
+// que nada esté vendido o ya remisionado) en vez de confiar en lo que mande el
+// navegador: el precio de venta pregrabado sale de la BD, no del carrito.
 // ─────────────────────────────────────────────────────────────────────────────
 const resolverItems = async (req, items) => {
   _exigirBodega(req);
@@ -3384,10 +3390,9 @@ const resolverItems = async (req, items) => {
   const resueltos = [];
   const descartados = [];
 
-  // El precio que el usuario puso en el carrito es un PRECIO DE VENTA, no un
-  // costo: usarlo como valor de la remisión le cobraría de más al local. Se
-  // devuelve aparte, como sugerencia, para que la pantalla lo ofrezca con un
-  // toque si de verdad quiere despachar por ese valor.
+  // El precio que el usuario puso en el carrito puede no ser el de la ficha (lo
+  // cambió a mano). Se devuelve aparte, como sugerencia, para que la pantalla
+  // lo ofrezca con un toque en vez de pisar el precio de venta pregrabado.
   const sugerido = (it) => {
     const p = Number(it.precio_carrito ?? it.precio);
     return Number.isFinite(p) && p > 0 ? Math.round(p) : null;

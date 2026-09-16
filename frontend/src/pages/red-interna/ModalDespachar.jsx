@@ -30,12 +30,11 @@ import {
 //   2. LISTA DE ACCESORIOS: para los que no tienen código impreso. Se abre solo
 //      cuando se pide, para no llenar la pantalla de opciones.
 //
-// El VALOR de cada línea viene con el costo real puesto (modo "a costo") pero
-// es editable: es lo que el local tendrá que liquidar al vender, y hay casos
-// —equipos sin costo registrado, valores acordados— donde hay que ajustarlo.
-// Si el producto venía del carrito con un precio distinto, se ofrece aplicarlo
-// con un toque; nunca se aplica solo, porque un precio de VENTA usado como
-// valor de remisión le cobraría de más al local.
+// El VALOR de cada línea viene pregrabado con el PRECIO DE VENTA de la bodega
+// (decisión del negocio, sep-2026; antes era el costo) y es editable: es lo que
+// el local va a deber por esa mercancía. Si el producto no tiene precio de
+// venta, se pregraba el costo, como antes. Si venía del carrito con un precio
+// distinto, se ofrece aplicarlo con un toque.
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Identifica el NODO, no el producto: dos tallas del mismo producto son dos
@@ -44,10 +43,24 @@ const claveDe = (i) => (i.tipo === 'serial'
   ? `s-${i.serial_id}`
   : `c-${i.producto_id}-${i.atributo_id ?? ''}-${i.variante_id ?? ''}`);
 
+// ── Valor pregrabado de una línea ───────────────────────────────────────────
+// El backend manda `valor_interno` = COSTO y `precio_venta` aparte. Aquí se
+// elige el precio de venta y, sin él, el costo. `costo_real` se congela con el
+// costo: contra él se avisa un dedazo (un cero de más o de menos). Un ítem que
+// ya pasó por aquí trae `costo_real` y no se vuelve a tocar, o el precio
+// terminaría haciéndose pasar por costo.
+const conValorInicial = (item) => {
+  if (item.costo_real !== undefined) return item;
+  const costo  = Number(item.valor_interno || 0);
+  const precio = Number(item.precio_venta  || 0);
+  const valor  = precio > 0 ? precio : costo;
+  return { ...item, costo_real: costo, valor_interno: valor, sin_costo: valor === 0 };
+};
+
 // ── Valor de la línea: visible y editable ───────────────────────────────────
-// Es lo que el local tendrá que liquidar cuando venda. Viene con el costo real
-// puesto, pero se puede cambiar: hace falta cuando el equipo entró sin costo
-// (saldría en $0) o cuando se acuerda otro valor para esa entrega.
+// Es lo que el local va a deber por esa mercancía. Viene con el precio de venta
+// puesto (o el costo si no hay precio), pero se puede cambiar: hace falta
+// cuando saldría en $0 o cuando se acuerda otro valor para esa entrega.
 function ValorLinea({ item, onCambiar }) {
   const unitario = Number(item.valor_interno || 0);
   const cantidad = item.tipo === 'cantidad' ? (item.cantidad || 1) : 1;
@@ -72,7 +85,7 @@ function ValorLinea({ item, onCambiar }) {
             : dedazo ? 'border-red-300 bg-red-50' : 'border-transparent'}`}
       />
       {item.sin_costo && (
-        <span className="text-[11px] text-amber-600 font-medium">sin costo — escríbelo</span>
+        <span className="text-[11px] text-amber-600 font-medium">sin precio ni costo — escríbelo</span>
       )}
       {dedazo && !item.sin_costo && (
         <span className="text-[11px] text-red-500 font-medium">
@@ -155,7 +168,7 @@ function PanelAccesorios({ yaEnLista, onAgregar, onCerrar }) {
                   {a.stock} disponible(s){a.linea_nombre ? ` · ${a.linea_nombre}` : ''}
                 </p>
               </div>
-              <span className="text-sm text-gray-500 flex-shrink-0">{formatCOP(a.valor_interno)}</span>
+              <span className="text-sm text-gray-500 flex-shrink-0">{formatCOP(conValorInicial(a).valor_interno)}</span>
               {puesto
                 ? <Check size={15} className="text-green-500 flex-shrink-0" />
                 : <Plus  size={15} className="text-blue-500 flex-shrink-0" />}
@@ -176,7 +189,7 @@ export function ModalDespachar({
 }) {
   const [destino,     setDestino]     = useState(
     pedido ? Number(pedido.sucursal_id) : locales.length === 1 ? locales[0].id : null);
-  const [items,       setItems]       = useState(itemsIniciales || []);
+  const [items,       setItems]       = useState(() => (itemsIniciales || []).map(conValorInicial));
   const [texto,       setTexto]       = useState('');
   const [error,       setError]       = useState('');
   const [aviso,       setAviso]       = useState('');
@@ -209,13 +222,7 @@ export function ModalDespachar({
     const existente = items.find((i) => claveDe(i) === k);
 
     if (!existente) {
-      // `costo_real` se congela al agregar: es contra lo que se compara el
-      // valor que escriba el usuario para avisar de un dedazo (un 0 de más).
-      setItems((prev) => [...prev, {
-        ...nuevo,
-        cantidad: nuevo.cantidad || 1,
-        costo_real: Number(nuevo.valor_interno || 0),
-      }]);
+      setItems((prev) => [...prev, conValorInicial({ ...nuevo, cantidad: nuevo.cantidad || 1 })]);
       setAviso(`${nuevo.nombre} agregado`);
       return;
     }

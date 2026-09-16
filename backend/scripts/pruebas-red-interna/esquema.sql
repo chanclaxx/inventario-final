@@ -16,7 +16,7 @@ CREATE TABLE productos_serial (
 CREATE TABLE seriales (
   id SERIAL PRIMARY KEY, producto_id INT REFERENCES productos_serial(id),
   imei TEXT, vendido BOOLEAN DEFAULT FALSE, prestado BOOLEAN DEFAULT FALSE,
-  costo_compra NUMERIC, fecha_entrada DATE DEFAULT CURRENT_DATE, fecha_salida DATE,
+  costo_compra NUMERIC, precio NUMERIC, fecha_entrada DATE DEFAULT CURRENT_DATE, fecha_salida DATE,
   proveedor_id INT, color TEXT, caracteristicas JSONB, cliente_origen TEXT
 );
 CREATE TABLE productos_cantidad (

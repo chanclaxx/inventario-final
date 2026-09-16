@@ -1506,6 +1506,18 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > olvidar el runner deja el despliegue con el código nuevo contra una base vieja
 > — ya pasó con `abonos_remision`.
 
+> **El despacho PREGRABA el precio de venta** (decisión del negocio, sep-2026;
+> `ModalDespachar.conValorInicial`): el valor de cada línea sale con el precio
+> de venta de la bodega —variante > atributo > producto; en un serial el precio
+> de la unidad gana sobre el de la referencia— y cae al costo si no hay precio.
+> Sigue siendo editable. El backend NO cambió `valor_interno` (sigue siendo el
+> costo) y manda `precio_venta` aparte: con despliegues separados, un frontend
+> viejo despacha igual que antes. Lo elige la PANTALLA, y `_valorLinea` sigue
+> cayendo al costo cuando la línea llega sin valor. `costo_real` se congela con
+> el costo para el aviso de dedazo. Consecuencia: el costo del local (que ES el
+> `valor_interno`) queda en el precio de venta de la bodega, y su utilidad y
+> sus tarifas se calculan sobre eso. Prueba: `47-despacho-precio-venta` (28).
+
 > **El local PIDE a la bodega — el sentido inverso** (`redInterna.pedidos.*`,
 > `20260904_pedidos_internos.sql`): el circuito nació en una sola dirección —la
 > bodega decide qué mandar, despacha, y el local confirma—, y eso funciona
