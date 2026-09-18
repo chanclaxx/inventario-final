@@ -2735,7 +2735,21 @@ function TabBusquedaPrestamos({ onAbrirPersona }) {
   const [fechaHasta,     setFechaHasta]     = useState('');
   const [masFiltros,    setMasFiltros]     = useState(false);
   const [vista,          setVista]          = useState('personas'); // 'personas' | 'prestamos'
-  const [orden,          setOrden]          = useState('urgencia');
+  // null = el orden por defecto, que depende de lo que el negocio tenga activo.
+  const [ordenElegido,   setOrden]          = useState(null);
+
+  // Los atajos se muestran según los opt-in del negocio: sin mora ningún
+  // préstamo tiene fecha límite, así que «Vencidos», «Por vencer», «Al día» y
+  // «Con mora» siempre darían «Sin resultados», y sin interés pasa lo mismo con
+  // «Con interés». Lee el query ['config'] que ya está en caché: sin petición
+  // extra. Si el negocio los activa después, los botones aparecen solos.
+  const moraActiva    = useMora().activa;
+  const interesActivo = useInteres().activa;
+  const cargosVisibles = CARGOS_FILTRO.filter((o) =>
+    !o.v || (o.v === 'mora' ? moraActiva : interesActivo));
+  // «Más urgente» ordena por fechas de vencimiento; sin mora no hay ninguna.
+  const ordenesVisibles = ORDENES_BUSQUEDA.filter((o) => o.id !== 'urgencia' || moraActiva);
+  const orden = ordenElegido ?? (moraActiva ? 'urgencia' : 'deuda');
   // Grupos abiertos. Con UNA sola persona se abre sola (ver `abiertoDe`).
   const [abiertos,       setAbiertos]       = useState(() => new Set());
 
@@ -2808,32 +2822,37 @@ function TabBusquedaPrestamos({ onAbrirPersona }) {
         />
       </div>
 
-      {/* Atajos: situación y cargos. Funcionan solos, sin escribir nada. */}
-      <div className="flex flex-col gap-2">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-[11px] font-medium text-gray-400 w-16">Situación</span>
-          {SITUACIONES_FILTRO.map((opt) => (
-            <ChipFiltro key={opt.v || 'todas'} activo={situacion === opt.v}
-              tono={TONO_CHIP[opt.v]} onClick={() => setSituacion(opt.v)}>
-              {opt.label}
-            </ChipFiltro>
-          ))}
+      {/* Atajos: situación y cargos. Funcionan solos, sin escribir nada.
+          Solo los que el negocio puede usar (ver moraActiva / interesActivo). */}
+      {(moraActiva || interesActivo) && (
+        <div className="flex flex-col gap-2">
+          {moraActiva && (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[11px] font-medium text-gray-400 w-16">Situación</span>
+              {SITUACIONES_FILTRO.map((opt) => (
+                <ChipFiltro key={opt.v || 'todas'} activo={situacion === opt.v}
+                  tono={TONO_CHIP[opt.v]} onClick={() => setSituacion(opt.v)}>
+                  {opt.label}
+                </ChipFiltro>
+              ))}
+            </div>
+          )}
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[11px] font-medium text-gray-400 w-16">Cargos</span>
+            {cargosVisibles.map((opt) => (
+              <ChipFiltro key={opt.v || 'todos'} activo={cargo === opt.v}
+                tono={TONO_CHIP[opt.v]} onClick={() => setCargo(opt.v)}>
+                {opt.label}
+              </ChipFiltro>
+            ))}
+          </div>
+          {situacion === 'por_vencer' && diasAviso != null && (
+            <p className="text-[11px] text-gray-400">
+              «Por vencer» = vence en {_plural(diasAviso, 'día', 'días')} o menos (se cambia en Ajustes → Mora).
+            </p>
+          )}
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-[11px] font-medium text-gray-400 w-16">Cargos</span>
-          {CARGOS_FILTRO.map((opt) => (
-            <ChipFiltro key={opt.v || 'todos'} activo={cargo === opt.v}
-              tono={TONO_CHIP[opt.v]} onClick={() => setCargo(opt.v)}>
-              {opt.label}
-            </ChipFiltro>
-          ))}
-        </div>
-        {situacion === 'por_vencer' && diasAviso != null && (
-          <p className="text-[11px] text-gray-400">
-            «Por vencer» = vence en {_plural(diasAviso, 'día', 'días')} o menos (se cambia en Ajustes → Mora).
-          </p>
-        )}
-      </div>
+      )}
 
       {/* Más filtros: estado, tipo y fechas */}
       <button type="button" onClick={() => setMasFiltros((v) => !v)}
@@ -2895,7 +2914,9 @@ function TabBusquedaPrestamos({ onAbrirPersona }) {
       {/* Estado vacío inicial */}
       {!hasFilter && (
         <p className="text-sm text-gray-400 text-center py-10">
-          Escribe un nombre o toca un atajo —por ejemplo <strong>Vencidos</strong>— para ver a quién hay que cobrarle
+          {moraActiva
+            ? <>Escribe un nombre o toca un atajo —por ejemplo <strong>Vencidos</strong>— para ver a quién hay que cobrarle</>
+            : 'Escribe un nombre, cédula, teléfono o IMEI, o abre «Más filtros» para buscar por estado, tipo o fechas'}
         </p>
       )}
 
@@ -2962,7 +2983,7 @@ function TabBusquedaPrestamos({ onAbrirPersona }) {
               <select value={orden} onChange={(e) => setOrden(e.target.value)}
                 className="px-3 py-1.5 bg-white border border-gray-200 rounded-xl text-xs text-gray-700
                   focus:outline-none focus:ring-2 focus:ring-blue-400">
-                {ORDENES_BUSQUEDA.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
+                {ordenesVisibles.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
               </select>
               <Button size="sm" variant="secondary"
                 onClick={() => exportarPrestamosExcel({

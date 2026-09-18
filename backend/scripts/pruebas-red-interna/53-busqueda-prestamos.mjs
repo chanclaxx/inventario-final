@@ -245,6 +245,14 @@ check('la tarjeta pinta la situación que calcula el backend', pagina.includes('
 check('★ la pestaña manda situación y cargo', pagina.includes('...(situacion && { situacion })') && pagina.includes('...(cargo && { cargo })'), true);
 check('agrupa con la lógica probada arriba', pagina.includes('agruparPorPersona(resultados)'), true);
 check('y puede abrir la ficha de la persona', pagina.includes('<TabBusquedaPrestamos onAbrirPersona='), true);
+// Un negocio sin mora no tiene fechas límite: sus atajos de situación y «Con
+// mora» siempre darían «Sin resultados». Se esconden según sus opt-in.
+check('★ la fila de Situación solo sale con la mora activa',
+  /\{moraActiva && \(\s*<div[^>]*>\s*<span[^>]*>Situación<\/span>/.test(pagina), true);
+check('★ «Con mora» y «Con interés» dependen de su opt-in',
+  pagina.includes("(o.v === 'mora' ? moraActiva : interesActivo)"), true);
+check('sin mora, «Más urgente» no se ofrece y el orden por defecto es la deuda',
+  pagina.includes("o.id !== 'urgencia' || moraActiva") && pagina.includes("(moraActiva ? 'urgencia' : 'deuda')"), true);
 
 console.log(`\n${pasados} verificaciones pasaron · ${fallos} fallaron`);
 process.exit(fallos ? 1 : 0);

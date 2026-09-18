@@ -448,7 +448,15 @@ Three roles exist: `admin_negocio`, `supervisor`, `vendedor`. Role determines wh
 > por fila del IMEI — ahora es un LATERAL con `LIMIT 1`. El nombre se busca
 > también en la ficha (`pr.nombre`, `c.nombre`), la cédula del cliente y el
 > teléfono. La pantalla solo SUMA lo que calculó el backend.
-> Prueba: `53-busqueda-prestamos` (50; la sección 1 compara el filtro «Vencidos»
+> **Los atajos siguen los opt-in del negocio** (`useMora().activa`,
+> `useInteres().activa`, del query `['config']` ya en caché): sin mora no hay
+> fechas límite, así que la fila de Situación, «Con mora» y el orden «Más
+> urgente» se esconden (el orden por defecto pasa a «Mayor deuda»); sin interés,
+> «Con interés». Las tarjetas de resumen no dependen de eso: salen solo si hay
+> algo que contar, así que un negocio que apagó la mora con préstamos que aún
+> tienen fecha sigue viéndolos. Sin selector de sucursal: el admin busca en
+> todas, los demás en la suya (lo impone el backend).
+> Prueba: `53-busqueda-prestamos` (53; la sección 1 compara el filtro «Vencidos»
 > contra la alerta real y la 7 importa la lógica de agrupación del frontend).
 
 > **La lista de módulos está DUPLICADA a mano** (`backend/src/config/modulos.js`
