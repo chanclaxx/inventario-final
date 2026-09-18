@@ -35,6 +35,9 @@ import { ModalRetomaDirecta }                   from './ModalRetomaDirecta';
 import { EstadoDeCuenta }                       from './EstadoDeCuenta';
 import { ModalAbonoTotal }                      from './ModalAbonoTotal';
 import { BadgeVencidosPersona }                 from './BadgeVencidosPersona';
+import {
+  agruparPorPersona, resumenBusqueda, ordenarGrupos, ordenarPrestamos, ORDENES_BUSQUEDA,
+}                                               from '../../utils/busquedaPrestamos';
 import { useMetodosPago }                       from '../../hooks/useMetodosPago';
 import { useMora }                              from '../../hooks/useMora';
 import { useInteres }                           from '../../hooks/useInteres';
@@ -55,6 +58,7 @@ import {
   ChevronDown, ChevronUp, ChevronLeft, ChevronRight,
   Users, User, AlertTriangle, FileDown, Loader2, Printer, Search, Wallet,
   ArrowLeftRight, Package, ShoppingBag, XCircle, SlidersHorizontal, UserPlus, Pencil, Settings, Layers,
+  Clock,
 } from 'lucide-react';
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
@@ -2454,35 +2458,44 @@ function TipoPrestamoBadge({ prestatarioId }) {
 }
 
 /**
- * Aviso compacto de vencimiento, para las tarjetas donde no cabe el PanelMora.
- * Los números vienen calculados del backend; aquí solo se pintan.
+ * Situación de un préstamo en los resultados de búsqueda: vencido, por vencer,
+ * y lo que tiene de mora e interés. Todo llega calculado del backend
+ * (`situacion`, `dias_vencidos`, `mora_pendiente`, `interes_pendiente`); aquí
+ * solo se pinta. Reemplaza al aviso anterior, que leía `prestamo.mora` de una
+ * consulta que no la traía y por eso nunca aparecía.
  */
-function BadgeVencido({ mora }) {
-  if (!mora?.aplica || !mora.vencido) return null;
-  const hayPendiente = Number(mora.pendiente) > 0;
-
-  // Producto ya pagado y solo faltan los intereses: el préstamo sigue abierto
-  // por eso y no por el equipo, así que conviene decirlo con esas palabras.
-  if (mora.solo_falta_mora) {
-    return (
-      <span className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full
-        bg-amber-50 text-amber-700 border border-amber-200">
-        <AlertTriangle size={10} />
-        Solo falta la mora · {formatCOP(mora.pendiente)}
-      </span>
+function BadgeSituacion({ prestamo }) {
+  const chips = [];
+  if (prestamo.situacion === 'vencido') {
+    const d = Number(prestamo.dias_vencidos || 0);
+    chips.push(
+      <span key="v" className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-red-600 text-white">
+        <AlertTriangle size={10} /> Vencido{d > 0 ? ` hace ${d} día${d === 1 ? '' : 's'}` : ''}
+      </span>,
+    );
+  } else if (prestamo.situacion === 'por_vencer') {
+    const d = Number(prestamo.dias_para_vencer || 0);
+    chips.push(
+      <span key="p" className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
+        <Clock size={10} /> {d === 0 ? 'Vence hoy' : `Vence en ${d} día${d === 1 ? '' : 's'}`}
+      </span>,
     );
   }
-
-  return (
-    <span className={`inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full
-      ${hayPendiente ? 'bg-red-50 text-red-600 border border-red-200'
-                     : 'bg-amber-50 text-amber-700 border border-amber-200'}`}>
-      <AlertTriangle size={10} />
-      {hayPendiente
-        ? `Vencido · mora ${formatCOP(mora.pendiente)}`
-        : `Vencido hace ${mora.dias_vencidos} día(s)`}
-    </span>
-  );
+  if (Number(prestamo.mora_pendiente) > 0) {
+    chips.push(
+      <span key="m" className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-red-50 text-red-600 border border-red-200">
+        Mora {formatCOP(prestamo.mora_pendiente)}
+      </span>,
+    );
+  }
+  if (Number(prestamo.interes_pendiente) > 0) {
+    chips.push(
+      <span key="i" className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-teal-50 text-teal-700 border border-teal-200">
+        Interés {formatCOP(prestamo.interes_pendiente)}
+      </span>,
+    );
+  }
+  return chips.length ? <>{chips}</> : null;
 }
 
 function TarjetaResultadoPrestamo({ prestamo, onAbonar, onDevolver, onEditar }) {
@@ -2504,7 +2517,7 @@ function TarjetaResultadoPrestamo({ prestamo, onAbonar, onDevolver, onEditar }) 
             </Badge>
             {/* En los resultados de búsqueda no cabe el panel de mora, pero sí
                 el aviso: es donde el vendedor busca a un cliente que llega a pagar. */}
-            <BadgeVencido mora={prestamo.mora} />
+            <BadgeSituacion prestamo={prestamo} />
           </div>
           <p className="text-sm font-semibold text-gray-900 truncate">{nombre}</p>
           {prestamo.empleado_nombre && (
@@ -2573,7 +2586,147 @@ function TarjetaResultadoPrestamo({ prestamo, onAbonar, onDevolver, onEditar }) 
   );
 }
 
-function TabBusquedaPrestamos() {
+// ─── Búsqueda: situación, cargos y agrupación por persona ─────────────────────
+//
+// Atajos de SITUACIÓN y de CARGO que filtran en el backend (así «Vencidos» a
+// secas, sin escribir nada, trae todos los vencidos del negocio), tarjetas de
+// resumen que también filtran al tocarlas, y los resultados AGRUPADOS POR
+// PERSONA: quien busca en Préstamos casi siempre está buscando a alguien, y un
+// cliente con seis préstamos eran seis tarjetas sueltas.
+// La regla de «vencido» y «por vencer» es la del aviso de cobros; la mora y el
+// interés los calcula el backend con el mismo motor de la ficha.
+
+const SITUACIONES_FILTRO = [
+  { v: '',           label: 'Todas'      },
+  { v: 'vencido',    label: 'Vencidos'   },
+  { v: 'por_vencer', label: 'Por vencer' },
+  { v: 'al_dia',     label: 'Al día'     },
+  { v: 'sin_plazo',  label: 'Sin plazo'  },
+];
+
+const CARGOS_FILTRO = [
+  { v: '',        label: 'Todos'       },
+  { v: 'mora',    label: 'Con mora'    },
+  { v: 'interes', label: 'Con interés' },
+];
+
+const TONO_CHIP = {
+  vencido:    'bg-red-600 border-red-600 text-white',
+  por_vencer: 'bg-amber-500 border-amber-500 text-white',
+  mora:       'bg-red-50 border-red-300 text-red-700',
+  interes:    'bg-teal-50 border-teal-300 text-teal-700',
+};
+
+function ChipFiltro({ activo, tono, onClick, children }) {
+  return (
+    <button type="button" onClick={onClick}
+      className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition-all
+        ${activo
+          ? (tono || 'bg-blue-50 border-blue-300 text-blue-700')
+          : 'bg-gray-50 border-gray-200 text-gray-500 hover:border-gray-300'}`}>
+      {children}
+    </button>
+  );
+}
+
+/** Tarjeta del resumen: dice cuántos hay y, al tocarla, filtra a esos. */
+function TarjetaResumenBusqueda({ titulo, valor, detalle, tono, activa, onClick }) {
+  const tonos = {
+    rojo:  'bg-red-50 border-red-200 text-red-700',
+    ambar: 'bg-amber-50 border-amber-200 text-amber-700',
+    teal:  'bg-teal-50 border-teal-200 text-teal-700',
+    gris:  'bg-gray-50 border-gray-200 text-gray-600',
+  };
+  return (
+    <button type="button" onClick={onClick}
+      className={`flex-1 min-w-[8rem] text-left rounded-xl border px-3 py-2 transition-all
+        ${tonos[tono]} ${activa ? 'ring-2 ring-offset-1 ring-blue-400' : 'hover:shadow-sm'}`}>
+      <p className="text-[11px] opacity-80 truncate">{titulo}</p>
+      <p className="text-base font-bold tabular-nums truncate">{valor}</p>
+      {detalle && <p className="text-[11px] opacity-70 truncate">{detalle}</p>}
+    </button>
+  );
+}
+
+const _plural = (n, uno, varios) => `${n} ${n === 1 ? uno : varios}`;
+
+/** Una persona con todos sus préstamos encontrados. */
+function TarjetaGrupoPersona({ grupo, abierto, onAlternar, onAbrirPersona, renderPrestamo }) {
+  const tieneFicha = grupo.tipo !== 'libre' && !!onAbrirPersona;
+  const dMin = grupo.dias_para_vencer_min;
+  return (
+    <div className={`bg-white border rounded-2xl overflow-hidden
+      ${grupo.n_vencidos > 0 ? 'border-red-200' : 'border-gray-100'}`}>
+      <button type="button" onClick={onAlternar} aria-expanded={abierto}
+        className="w-full flex items-start gap-3 p-4 text-left hover:bg-gray-50/60 transition-colors">
+        <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 text-sm font-bold
+          ${grupo.tipo === 'companero' ? 'bg-blue-100 text-blue-700'
+            : grupo.tipo === 'cliente' ? 'bg-violet-100 text-violet-700' : 'bg-gray-100 text-gray-500'}`}>
+          {iniciales(grupo.nombre)}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-start justify-between gap-2">
+            <p className="font-semibold text-gray-900 truncate">{grupo.nombre}</p>
+            {grupo.total_a_pagar > 0 && (
+              <span className="text-sm font-bold text-red-500 flex-shrink-0 tabular-nums">
+                {formatCOP(grupo.total_a_pagar)}
+              </span>
+            )}
+          </div>
+          {grupo.cedula && grupo.cedula !== 'COMPANERO' && (
+            <p className="text-xs text-gray-400">CC: {grupo.cedula}</p>
+          )}
+          <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+            {grupo.tipo !== 'libre' && (
+              <TipoPrestamoBadge prestatarioId={grupo.tipo === 'companero' ? 1 : null} />
+            )}
+            <span className="text-xs bg-gray-50 text-gray-500 px-2 py-0.5 rounded-full">
+              {_plural(grupo.prestamos.length, 'préstamo', 'préstamos')}
+              {grupo.n_activos > 0 && grupo.n_cerrados > 0
+                ? ` · ${_plural(grupo.n_activos, 'activo', 'activos')}` : ''}
+            </span>
+            <BadgeVencidosPersona cuantos={grupo.n_vencidos} diasMax={grupo.dias_vencido_max} />
+            {grupo.n_por_vencer > 0 && (
+              <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
+                <Clock size={10} />
+                {grupo.n_por_vencer} por vencer
+                {dMin != null && (dMin === 0 ? ' · hoy' : ` · en ${_plural(dMin, 'día', 'días')}`)}
+              </span>
+            )}
+            {grupo.mora > 0 && (
+              <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-red-50 text-red-600 border border-red-200">
+                Mora {formatCOP(grupo.mora)}
+              </span>
+            )}
+            {grupo.interes > 0 && (
+              <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-teal-50 text-teal-700 border border-teal-200">
+                Interés {formatCOP(grupo.interes)}
+              </span>
+            )}
+          </div>
+        </div>
+        {abierto
+          ? <ChevronUp size={16} className="text-gray-400 flex-shrink-0 mt-1" />
+          : <ChevronDown size={16} className="text-gray-400 flex-shrink-0 mt-1" />}
+      </button>
+
+      {abierto && (
+        <div className="border-t border-gray-100 bg-gray-50/50 p-3 flex flex-col gap-2.5">
+          {tieneFicha && (
+            <button type="button" onClick={() => onAbrirPersona(grupo.clave)}
+              className="self-start flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium
+                border border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100 transition-colors">
+              <ChevronRight size={12} /> Abrir su cuenta completa
+            </button>
+          )}
+          {grupo.prestamos.map(renderPrestamo)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TabBusquedaPrestamos({ onAbrirPersona }) {
   const { usuario }         = useContext(AuthContext);
   const esAdmin             = usuario?.rol === 'admin_negocio';
   const sucursalesStore     = useSucursalStore((s) => s.sucursales);
@@ -2581,20 +2734,29 @@ function TabBusquedaPrestamos() {
   const [q,              setQ]              = useState('');
   const [estado,         setEstado]         = useState('');
   const [tipo,           setTipo]           = useState('');
+  const [situacion,      setSituacion]      = useState('');
+  const [cargo,          setCargo]          = useState('');
   const [fechaDesde,     setFechaDesde]     = useState('');
   const [fechaHasta,     setFechaHasta]     = useState('');
   const [sucursalFiltro, setSucursalFiltro] = useState('');
+  const [masFiltros,     setMasFiltros]     = useState(false);
+  const [vista,          setVista]          = useState('personas'); // 'personas' | 'prestamos'
+  const [orden,          setOrden]          = useState('urgencia');
+  // Grupos abiertos. Con UNA sola persona se abre sola (ver `abiertoDe`).
+  const [abiertos,       setAbiertos]       = useState(() => new Set());
 
   const [prestamoAbono,   setPrestamoAbono]   = useState(null);
   const [prestamoDevol,   setPrestamoDevol]   = useState(null);
   const [prestamoEditar,  setPrestamoEditar]  = useState(null);
 
-  const hasFilter = q.trim().length >= 2 || estado || tipo || fechaDesde || fechaHasta;
+  const hasFilter = q.trim().length >= 2 || estado || tipo || situacion || cargo || fechaDesde || fechaHasta;
 
   const { data: searchData, isLoading } = useQuery({
-    queryKey: ['busqueda-prestamos', q, estado, tipo, fechaDesde, fechaHasta, sucursalFiltro],
+    queryKey: ['busqueda-prestamos', q, estado, tipo, situacion, cargo, fechaDesde, fechaHasta, sucursalFiltro],
     queryFn:  () => buscarPrestamosApi({
       q: q.trim(), estado, tipo, fechaDesde, fechaHasta,
+      ...(situacion && { situacion }),
+      ...(cargo && { cargo }),
       ...(sucursalFiltro && { suc: sucursalFiltro }),
     }).then((r) => r.data.data),
     enabled: !!hasFilter,
@@ -2603,14 +2765,39 @@ function TabBusquedaPrestamos() {
 
   const resultados    = searchData?.prestamos    ?? [];
   const abonosTotales = searchData?.abonosTotales ?? [];
+  const diasAviso     = searchData?.dias_aviso;
 
-  const totalSaldo = resultados
-    .filter((p) => p.estado === 'Activo')
-    .reduce((s, p) => s + Number(p.saldo_pendiente || 0), 0);
+  const resumen = resumenBusqueda(resultados);
+  const grupos  = ordenarGrupos(agruparPorPersona(resultados), orden);
+  const sueltos = ordenarPrestamos(resultados, orden);
+
+  const abiertoDe = (clave) => abiertos.has(clave) || grupos.length === 1;
+  const alternar  = (clave) => setAbiertos((prev) => {
+    const sig = new Set(prev);
+    if (sig.has(clave)) sig.delete(clave); else sig.add(clave);
+    return sig;
+  });
+
+  // Tocar una tarjeta del resumen filtra a eso; tocarla otra vez lo quita.
+  const alternarSituacion = (v) => setSituacion((s) => (s === v ? '' : v));
+  const alternarCargo     = (v) => setCargo((c) => (c === v ? '' : v));
 
   const limpiar = () => {
-    setQ(''); setEstado(''); setTipo(''); setFechaDesde(''); setFechaHasta(''); setSucursalFiltro('');
+    setQ(''); setEstado(''); setTipo(''); setSituacion(''); setCargo('');
+    setFechaDesde(''); setFechaHasta(''); setSucursalFiltro('');
   };
+
+  const filtrosOcultosActivos = [estado, tipo, fechaDesde, fechaHasta, sucursalFiltro].filter(Boolean).length;
+
+  const renderPrestamo = (p) => (
+    <TarjetaResultadoPrestamo
+      key={p.id}
+      prestamo={p}
+      onAbonar={setPrestamoAbono}
+      onDevolver={setPrestamoDevol}
+      onEditar={setPrestamoEditar}
+    />
+  );
 
   return (
     <div className="flex flex-col gap-4">
@@ -2622,76 +2809,105 @@ function TabBusquedaPrestamos() {
           type="text"
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          placeholder="Buscar por nombre, IMEI, cédula, producto o línea…"
+          placeholder="Buscar por nombre, cédula, teléfono, IMEI, producto o línea…"
           className="w-full pl-9 pr-3 py-2.5 bg-gray-50 border border-gray-200 rounded-xl
             text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"
         />
       </div>
 
-      {/* Filtro estado */}
-      <div className="flex flex-wrap gap-2">
-        {ESTADOS_FILTRO.map((opt) => (
-          <button key={opt.v} type="button" onClick={() => setEstado(opt.v)}
-            className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition-all
-              ${estado === opt.v
-                ? 'bg-blue-50 border-blue-300 text-blue-700'
-                : 'bg-gray-50 border-gray-200 text-gray-500 hover:border-gray-300'}`}>
-            {opt.label}
-          </button>
-        ))}
-      </div>
-
-      {/* Filtro tipo */}
-      <div className="flex flex-wrap gap-2">
-        {TIPOS_FILTRO.map((opt) => {
-          const OptIcon = opt.Icn;
-          return (
-            <button key={opt.v} type="button" onClick={() => setTipo(opt.v)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium
-                border transition-all
-                ${tipo === opt.v
-                  ? 'bg-blue-50 border-blue-300 text-blue-700'
-                  : 'bg-gray-50 border-gray-200 text-gray-500 hover:border-gray-300'}`}>
-              <OptIcon size={11} />
+      {/* Atajos: situación y cargos. Funcionan solos, sin escribir nada. */}
+      <div className="flex flex-col gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[11px] font-medium text-gray-400 w-16">Situación</span>
+          {SITUACIONES_FILTRO.map((opt) => (
+            <ChipFiltro key={opt.v || 'todas'} activo={situacion === opt.v}
+              tono={TONO_CHIP[opt.v]} onClick={() => setSituacion(opt.v)}>
               {opt.label}
-            </button>
-          );
-        })}
+            </ChipFiltro>
+          ))}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[11px] font-medium text-gray-400 w-16">Cargos</span>
+          {CARGOS_FILTRO.map((opt) => (
+            <ChipFiltro key={opt.v || 'todos'} activo={cargo === opt.v}
+              tono={TONO_CHIP[opt.v]} onClick={() => setCargo(opt.v)}>
+              {opt.label}
+            </ChipFiltro>
+          ))}
+        </div>
+        {situacion === 'por_vencer' && diasAviso != null && (
+          <p className="text-[11px] text-gray-400">
+            «Por vencer» = vence en {_plural(diasAviso, 'día', 'días')} o menos (se cambia en Ajustes → Mora).
+          </p>
+        )}
       </div>
 
-      {/* Filtro sucursal — solo admin_negocio con múltiples sucursales */}
-      {esAdmin && sucursalesStore.length > 1 && (
-        <div className="flex flex-col gap-1">
-          <label className="text-xs font-medium text-gray-500">Sucursal</label>
-          <select
-            value={sucursalFiltro}
-            onChange={(e) => setSucursalFiltro(e.target.value)}
-            className="px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm text-gray-700
-              focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"
-          >
-            <option value="">Todas las sucursales</option>
-            {sucursalesStore.map((s) => (
-              <option key={s.id} value={String(s.id)}>{s.nombre}</option>
+      {/* Más filtros: estado, tipo, sucursal y fechas */}
+      <button type="button" onClick={() => setMasFiltros((v) => !v)}
+        className="flex items-center gap-1.5 text-xs font-medium text-gray-500 hover:text-gray-700 w-fit">
+        <SlidersHorizontal size={13} />
+        {masFiltros ? 'Menos filtros' : 'Más filtros'}
+        {!masFiltros && filtrosOcultosActivos > 0 && (
+          <span className="px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700 text-[10px] font-semibold">
+            {filtrosOcultosActivos}
+          </span>
+        )}
+      </button>
+
+      {masFiltros && (
+        <div className="flex flex-col gap-3 p-3 bg-gray-50 border border-gray-100 rounded-xl">
+          <div className="flex flex-wrap gap-2">
+            {ESTADOS_FILTRO.map((opt) => (
+              <ChipFiltro key={opt.v || 'todos'} activo={estado === opt.v} onClick={() => setEstado(opt.v)}>
+                {opt.label}
+              </ChipFiltro>
             ))}
-          </select>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {TIPOS_FILTRO.map((opt) => {
+              const OptIcon = opt.Icn;
+              return (
+                <ChipFiltro key={opt.v || 'todos'} activo={tipo === opt.v} onClick={() => setTipo(opt.v)}>
+                  <span className="flex items-center gap-1.5"><OptIcon size={11} />{opt.label}</span>
+                </ChipFiltro>
+              );
+            })}
+          </div>
+
+          {/* Filtro sucursal — solo admin_negocio con múltiples sucursales */}
+          {esAdmin && sucursalesStore.length > 1 && (
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-gray-500">Sucursal</label>
+              <select
+                value={sucursalFiltro}
+                onChange={(e) => setSucursalFiltro(e.target.value)}
+                className="px-3 py-2 bg-white border border-gray-200 rounded-xl text-sm text-gray-700
+                  focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+              >
+                <option value="">Todas las sucursales</option>
+                {sucursalesStore.map((s) => (
+                  <option key={s.id} value={String(s.id)}>{s.nombre}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 gap-2">
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-gray-500">Prestado desde</label>
+              <input type="date" value={fechaDesde} onChange={(e) => setFechaDesde(e.target.value)}
+                className="px-3 py-2 bg-white border border-gray-200 rounded-xl text-sm text-gray-700
+                  focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-gray-500">Hasta</label>
+              <input type="date" value={fechaHasta} onChange={(e) => setFechaHasta(e.target.value)}
+                className="px-3 py-2 bg-white border border-gray-200 rounded-xl text-sm text-gray-700
+                  focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
+            </div>
+          </div>
         </div>
       )}
-
-      {/* Rango de fechas */}
-      <div className="grid grid-cols-2 gap-2">
-        <div className="flex flex-col gap-1">
-          <label className="text-xs font-medium text-gray-500">Desde</label>
-          <input type="date" value={fechaDesde} onChange={(e) => setFechaDesde(e.target.value)}
-            className="px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm text-gray-700
-              focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all" />
-        </div>
-        <div className="flex flex-col gap-1">
-          <label className="text-xs font-medium text-gray-500">Hasta</label>
-          <input type="date" value={fechaHasta} onChange={(e) => setFechaHasta(e.target.value)}
-            className="px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm text-gray-700
-              focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all" />
-        </div>
-      </div>
 
       {/* Limpiar */}
       {hasFilter && (
@@ -2704,7 +2920,7 @@ function TabBusquedaPrestamos() {
       {/* Estado vacío inicial */}
       {!hasFilter && (
         <p className="text-sm text-gray-400 text-center py-10">
-          Filtra por texto, estado, tipo o rango de fechas para buscar préstamos
+          Escribe un nombre o toca un atajo —por ejemplo <strong>Vencidos</strong>— para ver a quién hay que cobrarle
         </p>
       )}
 
@@ -2715,38 +2931,87 @@ function TabBusquedaPrestamos() {
           descripcion="No se encontraron préstamos con esos filtros" />
       )}
 
-      {/* Resumen y resultados */}
       {resultados.length > 0 && (
         <div className="flex flex-col gap-3">
-          <div className="flex items-center justify-between flex-wrap gap-2">
-            <div className="flex items-center gap-3">
-              <p className="text-xs text-gray-400">
-                {resultados.length} resultado{resultados.length !== 1 ? 's' : ''}
-              </p>
-              {totalSaldo > 0 && (
-                <p className="text-xs font-semibold text-red-500">
-                  Saldo activo: {formatCOP(totalSaldo)}
-                </p>
-              )}
-            </div>
-            <Button size="sm" variant="secondary"
-              onClick={() => exportarPrestamosExcel({
-                prestamos: resultados, abonosTotales,
-                titulo:  'PRÉSTAMOS FILTRADOS',
-                archivo: 'prestamos-filtrados',
-              })}>
-              <FileDown size={14} /> Exportar Excel
-            </Button>
+
+          {/* Resumen de lo encontrado: cada tarjeta filtra a lo suyo */}
+          <div className="flex gap-2 flex-wrap">
+            {(resumen.vencido.n > 0 || situacion === 'vencido') && (
+              <TarjetaResumenBusqueda tono="rojo" titulo="Vencidos"
+                valor={_plural(resumen.vencido.personas, 'persona', 'personas')}
+                detalle={_plural(resumen.vencido.n, 'préstamo', 'préstamos')}
+                activa={situacion === 'vencido'} onClick={() => alternarSituacion('vencido')} />
+            )}
+            {(resumen.por_vencer.n > 0 || situacion === 'por_vencer') && (
+              <TarjetaResumenBusqueda tono="ambar" titulo="Por vencer"
+                valor={_plural(resumen.por_vencer.personas, 'persona', 'personas')}
+                detalle={_plural(resumen.por_vencer.n, 'préstamo', 'préstamos')}
+                activa={situacion === 'por_vencer'} onClick={() => alternarSituacion('por_vencer')} />
+            )}
+            {(resumen.con_mora.n > 0 || cargo === 'mora') && (
+              <TarjetaResumenBusqueda tono="rojo" titulo="Mora pendiente"
+                valor={formatCOP(resumen.con_mora.valor)}
+                detalle={_plural(resumen.con_mora.n, 'préstamo', 'préstamos')}
+                activa={cargo === 'mora'} onClick={() => alternarCargo('mora')} />
+            )}
+            {(resumen.con_interes.n > 0 || cargo === 'interes') && (
+              <TarjetaResumenBusqueda tono="teal" titulo="Interés pendiente"
+                valor={formatCOP(resumen.con_interes.valor)}
+                detalle={_plural(resumen.con_interes.n, 'préstamo', 'préstamos')}
+                activa={cargo === 'interes'} onClick={() => alternarCargo('interes')} />
+            )}
+            <TarjetaResumenBusqueda tono="gris" titulo="Saldo activo"
+              valor={formatCOP(resumen.saldo)}
+              detalle={`${_plural(resumen.personas, 'persona', 'personas')} · ${_plural(resumen.total, 'préstamo', 'préstamos')}`}
+              activa={false} onClick={() => { setSituacion(''); setCargo(''); }} />
           </div>
-          {resultados.map((p) => (
-            <TarjetaResultadoPrestamo
-              key={p.id}
-              prestamo={p}
-              onAbonar={setPrestamoAbono}
-              onDevolver={setPrestamoDevol}
-              onEditar={setPrestamoEditar}
-            />
-          ))}
+
+          {/* Vista, orden y exportar */}
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div className="flex gap-1 bg-gray-100 p-1 rounded-xl">
+              {[
+                { id: 'personas',  label: 'Por persona',  Icn: Users  },
+                { id: 'prestamos', label: 'Por préstamo', Icn: Layers },
+              ].map((v) => {
+                const VIcn = v.Icn;
+                return (
+                  <button key={v.id} type="button" onClick={() => setVista(v.id)}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all
+                      ${vista === v.id ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+                    <VIcn size={12} /> {v.label}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="flex items-center gap-2">
+              <select value={orden} onChange={(e) => setOrden(e.target.value)}
+                className="px-3 py-1.5 bg-white border border-gray-200 rounded-xl text-xs text-gray-700
+                  focus:outline-none focus:ring-2 focus:ring-blue-400">
+                {ORDENES_BUSQUEDA.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
+              </select>
+              <Button size="sm" variant="secondary"
+                onClick={() => exportarPrestamosExcel({
+                  prestamos: resultados, abonosTotales,
+                  titulo:  'PRÉSTAMOS FILTRADOS',
+                  archivo: 'prestamos-filtrados',
+                })}>
+                <FileDown size={14} /> Excel
+              </Button>
+            </div>
+          </div>
+
+          {vista === 'personas'
+            ? grupos.map((g) => (
+                <TarjetaGrupoPersona
+                  key={g.clave}
+                  grupo={g}
+                  abierto={abiertoDe(g.clave)}
+                  onAlternar={() => alternar(g.clave)}
+                  onAbrirPersona={onAbrirPersona}
+                  renderPrestamo={renderPrestamo}
+                />
+              ))
+            : sueltos.map(renderPrestamo)}
         </div>
       )}
 
@@ -3408,7 +3673,14 @@ export default function PrestamosPage() {
 
       {tabPrincipal === 'creditos'      && <TabCreditos personaInicial={personaCreditoInicial} filtroInicial={filtroCreditoInicial} />}
       {tabPrincipal === 'domiciliarios' && <TabDomiciliarios />}
-      {tabPrincipal === 'busqueda'      && <TabBusquedaPrestamos />}
+      {tabPrincipal === 'busqueda'      && (
+        <TabBusquedaPrestamos onAbrirPersona={(clave) => {
+          // La misma clave de la lista de personas: abre su ficha en Préstamos.
+          setTabPrincipal('prestamos');
+          setTabPrestamos(clave.startsWith('cliente_') ? 'clientes' : 'companeros');
+          setPersonaSeleccionadaKey(clave);
+        }} />
+      )}
 
       {prestamoAbono && (
         <ModalAbonoPrestamo prestamo={prestamoAbono}

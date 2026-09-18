@@ -221,17 +221,45 @@ const buscarCompras = async (q, modo, negocioId, sucursalId, rol, proveedorIds =
 
 // ─── Búsqueda de préstamos ────────────────────────────────────────────────────
 
+//
+// Cada préstamo sale con su SITUACIÓN (vencido / por vencer / al día / sin
+// plazo / cerrado, calculada en SQL) y con su mora e interés ya resueltos por
+// `mora.service.anotarLista` —el MISMO motor de la ficha y del aviso—. Antes la
+// consulta ni traía la fecha límite, así que el aviso de vencido de la tarjeta
+// (`BadgeVencido mora={prestamo.mora}`) nunca se pintaba.
+//
+// Los filtros de CARGO («con mora», «con interés») se aplican DESPUÉS de
+// calcular: lo pendiente se deriva y no hay columna que filtrar. El SQL ya
+// descartó lo que seguro no podía tenerlo.
 const buscarPrestamos = async (filtros, negocioId, sucursalId, rol) => {
   const admin = _esAdmin(rol);
   const { suc, ...filtrosSinSuc } = filtros;
   const filtroSucursal = admin ? (suc ? Number(suc) : null) : sucursalId;
 
-  const [prestamos, abonosTotales] = await Promise.all([
-    repo.buscarPrestamos(filtrosSinSuc, negocioId, filtroSucursal),
+  // «Por vencer» usa la ventana del aviso de cobros, configurable en Ajustes.
+  const { diasAvisoPrevio, hoyBogota } = require('../notificaciones/notificaciones.alertas');
+  const moraService = require('../mora/mora.service');
+  const diasAviso = await diasAvisoPrevio(negocioId);
+  const contexto  = { hoy: hoyBogota(), diasAviso };
+
+  const [filas, abonosTotales] = await Promise.all([
+    repo.buscarPrestamos(filtrosSinSuc, negocioId, filtroSucursal, contexto),
     repo.buscarAbonosTotales(filtrosSinSuc, negocioId, filtroSucursal),
   ]);
 
-  return { prestamos, abonosTotales };
+  const anotados = await moraService.anotarLista(filas, 'prestamo');
+  const prestamos = anotados
+    .map((p) => ({
+      ...p,
+      dias_vencidos:    Number(p.dias_vencidos || 0),
+      dias_para_vencer: p.dias_para_vencer == null ? null : Number(p.dias_para_vencer),
+      mora_pendiente:    Number(p.mora?.pendiente || 0),
+      interes_pendiente: Number(p.interes?.pendiente || 0),
+    }))
+    .filter((p) => (filtrosSinSuc.cargo === 'mora'    ? p.mora_pendiente    > 0 : true))
+    .filter((p) => (filtrosSinSuc.cargo === 'interes' ? p.interes_pendiente > 0 : true));
+
+  return { prestamos, abonosTotales, dias_aviso: diasAviso };
 };
 
 const getHistorialCantidad = async (productoId, negocioId) =>

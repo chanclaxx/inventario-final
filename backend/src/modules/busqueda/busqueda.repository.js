@@ -491,11 +491,58 @@ const buscarComprasPorTexto = async (q, negocioId, sucursalId, proveedorIds = nu
 };
 
 // ─── Búsqueda de préstamos con filtros ───────────────────────────────────────
+//
+// SITUACIÓN de cada préstamo, con la MISMA regla del aviso de cobros
+// (`notificaciones.alertas.cartera`) y de las tarjetas de persona: vencido =
+// activo y con la fecha límite ANTES de hoy en Bogotá; por vencer = dentro de
+// los `mora_aviso_previo_dias` del negocio. Si la búsqueda contara distinto, el
+// aviso diría «3 vencidos» y el filtro «Vencidos» mostraría otra cosa.
+// `hoy` llega como parámetro y no se usa CURRENT_DATE: depende de la zona de la
+// sesión y correría un día justo en la fecha límite. Las restas de fechas van
+// en SQL: node-postgres y los Date de JavaScript corren la zona.
+//
+// El estado se compara con IS DISTINCT FROM: un estado NULL es cerrado, igual
+// que en el resumen de personas.
+const SQL_SITUACION = (hoy, dias) => `
+  CASE
+    WHEN p.estado IS DISTINCT FROM 'Activo'            THEN 'cerrado'
+    WHEN p.fecha_limite IS NULL                         THEN 'sin_plazo'
+    WHEN p.fecha_limite <  ${hoy}::date                 THEN 'vencido'
+    WHEN p.fecha_limite <= ${hoy}::date + ${dias}::int  THEN 'por_vencer'
+    ELSE 'al_dia'
+  END`;
 
-const buscarPrestamos = async ({ q, estado, tipo, fechaDesde, fechaHasta }, negocioId, sucursalId) => {
-  const params     = [negocioId];
+// Lo que cada filtro de situación deja pasar, en SQL. Son los MISMOS cortes de
+// SQL_SITUACION escritos como condición, para que filtrar por «vencido» y leer
+// la situación de la fila nunca discrepen.
+const FILTRO_SITUACION = {
+  vencido:    (h)    => `p.estado = 'Activo' AND p.fecha_limite < ${h}::date`,
+  por_vencer: (h, d) => `p.estado = 'Activo' AND p.fecha_limite >= ${h}::date
+                          AND p.fecha_limite <= ${h}::date + ${d}::int`,
+  al_dia:     (h, d) => `p.estado = 'Activo' AND p.fecha_limite > ${h}::date + ${d}::int`,
+  sin_plazo:  ()     => `p.estado = 'Activo' AND p.fecha_limite IS NULL`,
+};
+
+// Precondición en SQL de los filtros de CARGO. La cifra pendiente la calcula
+// `mora.service` después (el motor de devengo no vive en SQL), así que aquí
+// solo se descarta lo que seguro NO puede tener el cargo: sin esto, «con
+// mora» a secas recorrería todo el historial del negocio —9.976 filas en
+// Cellsite— para quedarse con veinte.
+const PRECONDICION_CARGO = {
+  mora:    (h) => `p.estado = 'Activo' AND p.mora_condicion IS NOT NULL
+                   AND p.fecha_limite < ${h}::date`,
+  interes: ()  => `p.estado = 'Activo' AND p.interes_condicion IS NOT NULL`,
+};
+
+const buscarPrestamos = async (
+  { q, estado, tipo, fechaDesde, fechaHasta, situacion, cargo },
+  negocioId, sucursalId, { hoy, diasAviso },
+) => {
+  const params     = [negocioId, hoy, diasAviso];
   const conditions = ['su.negocio_id = $1'];
-  let   i          = 2;
+  const H = '$2';
+  const D = '$3';
+  let   i          = 4;
 
   if (sucursalId) {
     conditions.push(`p.sucursal_id = $${i}`);
@@ -504,11 +551,18 @@ const buscarPrestamos = async ({ q, estado, tipo, fechaDesde, fechaHasta }, nego
   }
 
   if (q && q.trim()) {
+    // El nombre también se busca en la FICHA de la persona (prestatario o
+    // cliente), no solo en el texto copiado al préstamo: si la renombraron, el
+    // nombre nuevo no estaba en ningún préstamo viejo y la búsqueda no la hallaba.
     conditions.push(`(
       ${sn('p.prestatario')}                        LIKE $${i}
+      OR ${sn("COALESCE(pr.nombre, '')")}           LIKE $${i}
+      OR ${sn("COALESCE(c.nombre, '')")}            LIKE $${i}
       OR ${sn('p.nombre_producto')}                 LIKE $${i}
       OR LOWER(COALESCE(p.imei,  ''))               LIKE $${i}
       OR LOWER(COALESCE(p.cedula,''))               LIKE $${i}
+      OR LOWER(COALESCE(c.cedula,''))               LIKE $${i}
+      OR LOWER(COALESCE(p.telefono,''))             LIKE $${i}
       OR ${sn("COALESCE(lps.nombre, lpc.nombre, '')")} LIKE $${i}
     )`);
     params.push(`%${normalizarBusqueda(q)}%`);
@@ -524,6 +578,9 @@ const buscarPrestamos = async ({ q, estado, tipo, fechaDesde, fechaHasta }, nego
   if (tipo === 'companero') conditions.push('p.prestatario_id IS NOT NULL');
   if (tipo === 'cliente')   conditions.push('p.cliente_id IS NOT NULL');
 
+  if (FILTRO_SITUACION[situacion]) conditions.push(`(${FILTRO_SITUACION[situacion](H, D)})`);
+  if (PRECONDICION_CARGO[cargo])   conditions.push(`(${PRECONDICION_CARGO[cargo](H)})`);
+
   if (fechaDesde) {
     conditions.push(`p.fecha::date >= $${i}`);
     params.push(fechaDesde);
@@ -536,30 +593,48 @@ const buscarPrestamos = async ({ q, estado, tipo, fechaDesde, fechaHasta }, nego
     i++;
   }
 
+  // La LÍNEA del producto sale de un LATERAL con LIMIT 1 y no de un JOIN a
+  // `seriales` por IMEI: un IMEI vive en varias filas de `seriales` (re-import,
+  // retoma, traslado), y con el JOIN el mismo préstamo salía repetido una vez
+  // por cada fila — en la lista, en el conteo y en el Excel.
   const { rows } = await pool.query(`
     SELECT
       p.id, p.fecha, p.prestatario, p.cedula, p.telefono,
       p.nombre_producto, p.imei, p.cantidad_prestada,
       p.valor_prestamo, p.total_abonado, p.estado,
       p.prestatario_id, p.empleado_id, p.cliente_id, p.sucursal_id,
+      -- Lo que necesita mora.service para calcular la mora y el interés.
+      p.fecha_limite, p.mora_condicion, p.interes_condicion, p.interes_desde,
       su.nombre AS sucursal_nombre,
       (p.valor_prestamo - p.total_abonado) AS saldo_pendiente,
       pr.nombre AS prestatario_nombre,
       e.nombre  AS empleado_nombre,
       c.nombre  AS cliente_nombre,
-      COALESCE(lps.nombre, lpc.nombre) AS linea_nombre
+      c.cedula  AS cliente_cedula,
+      COALESCE(lps.nombre, lpc.nombre) AS linea_nombre,
+      ${SQL_SITUACION(H, D)} AS situacion,
+      CASE WHEN p.estado = 'Activo' AND p.fecha_limite < ${H}::date
+           THEN (${H}::date - p.fecha_limite) ELSE 0 END           AS dias_vencidos,
+      CASE WHEN p.estado = 'Activo' AND p.fecha_limite >= ${H}::date
+           THEN (p.fecha_limite - ${H}::date) ELSE NULL END        AS dias_para_vencer
     FROM prestamos p
     JOIN  sucursales                su  ON su.id  = p.sucursal_id
     LEFT JOIN prestatarios          pr  ON pr.id  = p.prestatario_id
     LEFT JOIN empleados_prestatario e   ON e.id   = p.empleado_id
     LEFT JOIN clientes              c   ON c.id   = p.cliente_id
-    LEFT JOIN seriales              s   ON s.imei = p.imei
-    LEFT JOIN productos_serial      ps  ON ps.id  = s.producto_id AND ps.sucursal_id = p.sucursal_id
-    LEFT JOIN lineas_producto       lps ON lps.id = ps.linea_id
+    LEFT JOIN LATERAL (
+      SELECT lp.nombre
+      FROM seriales         s
+      JOIN productos_serial ps ON ps.id = s.producto_id AND ps.sucursal_id = p.sucursal_id
+      JOIN lineas_producto  lp ON lp.id = ps.linea_id
+      WHERE p.imei IS NOT NULL AND s.imei = p.imei
+      ORDER BY s.id DESC
+      LIMIT 1
+    ) lps ON TRUE
     LEFT JOIN productos_cantidad    pc  ON pc.id  = p.producto_id AND p.imei IS NULL
     LEFT JOIN lineas_producto       lpc ON lpc.id = pc.linea_id
     WHERE ${conditions.join(' AND ')}
-    ORDER BY p.fecha DESC
+    ORDER BY p.fecha DESC, p.id DESC
   `, params);
   return rows;
 };

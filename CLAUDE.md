@@ -429,6 +429,27 @@ Three roles exist: `admin_negocio`, `supervisor`, `vendedor`. Role determines wh
 > protege a los 28 negocios, la 2 compara contra la agrupación del navegador
 > copiada tal cual, la 5 comprueba que el recorte va ENCIMA del alcance de
 > negocio y nunca en su lugar, y la 6 vigila el respaldo de despliegue).
+>
+> **La BÚSQUEDA de Préstamos agrupa por persona y dice la situación**
+> (`GET /busqueda/prestamos`, `utils/busquedaPrestamos.js`, pedido del negocio
+> sep-2026): atajos de **situación** (`?situacion=vencido|por_vencer|al_dia|sin_plazo`)
+> y de **cargo** (`?cargo=mora|interes`) que funcionan sin escribir nada, tarjetas
+> de resumen que filtran al tocarlas, vista «Por persona» (con «Abrir su cuenta
+> completa», que lleva a la ficha) o «Por préstamo», y orden «Más urgente».
+> **La situación la calcula el SQL con la regla del aviso de cobros** (`hoy` y
+> `mora_aviso_previo_dias` como parámetros, `SQL_SITUACION` y `FILTRO_SITUACION`
+> son los mismos cortes): el filtro «Vencidos» y el aviso traen los mismos
+> préstamos. La mora y el interés los resuelve `mora.service.anotarLista`; el
+> filtro de cargo va DESPUÉS (lo pendiente se deriva) con una precondición en SQL
+> para no recorrer todo el historial. Valores de filtro desconocidos se ignoran.
+> Dos arreglos de paso: la consulta **no traía la fecha límite ni la mora**, así
+> que el aviso de vencido de la tarjeta nunca se pintaba (`BadgeVencido` →
+> `BadgeSituacion`); y el `JOIN seriales ON imei` **repetía el préstamo** una vez
+> por fila del IMEI — ahora es un LATERAL con `LIMIT 1`. El nombre se busca
+> también en la ficha (`pr.nombre`, `c.nombre`), la cédula del cliente y el
+> teléfono. La pantalla solo SUMA lo que calculó el backend.
+> Prueba: `53-busqueda-prestamos` (50; la sección 1 compara el filtro «Vencidos»
+> contra la alerta real y la 7 importa la lógica de agrupación del frontend).
 
 > **La lista de módulos está DUPLICADA a mano** (`backend/src/config/modulos.js`
 > y `MODULOS`/`PERMISOS_BASE` en `UsuariosConfig.jsx`): el frontend no puede

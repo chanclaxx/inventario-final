@@ -102,13 +102,17 @@ const buscarCompras = async (req, res, next) => {
 const buscarPrestamos = async (req, res, next) => {
   try {
     const { q = '', estado = '', tipo = '', fechaDesde = '', fechaHasta = '', suc = '' } = req.query;
+    // Solo valores conocidos: lo que no se entiende no filtra (y no llega al SQL).
+    const situacion = ['vencido', 'por_vencer', 'al_dia', 'sin_plazo'].includes(req.query.situacion)
+      ? req.query.situacion : '';
+    const cargo = ['mora', 'interes'].includes(req.query.cargo) ? req.query.cargo : '';
 
-    const tieneAlgunFiltro = q.trim() || estado || tipo || fechaDesde || fechaHasta;
+    const tieneAlgunFiltro = q.trim() || estado || tipo || fechaDesde || fechaHasta || situacion || cargo;
     if (!tieneAlgunFiltro) return res.json({ ok: true, data: [] });
 
     const { negocio_id, rol } = req.user;
     const data = await service.buscarPrestamos(
-      { q, estado, tipo, fechaDesde, fechaHasta, suc },
+      { q, estado, tipo, fechaDesde, fechaHasta, suc, situacion, cargo },
       negocio_id, req.sucursal_id, rol,
     );
     res.json({ ok: true, data });
