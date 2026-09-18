@@ -31,7 +31,7 @@ import {
   Printer, Palette, ListChecks, Wallet, Layers,
   ChevronUp, ChevronDown, RotateCcw, Navigation,
   Upload, X, Image as ImageIcon, Download, Barcode, Percent, CalendarClock, Bookmark,
-  MapPin, Bell, Globe, ClipboardList,
+  MapPin, Bell, Globe, ClipboardList, Wrench,
 } from 'lucide-react';
 
 // ─── Navegación principal ─────────────────────────────────────────────────────
@@ -68,6 +68,7 @@ const TABS_CATALOGO = [
   { id: 'mora',      label: 'Mora',      Icn: CalendarClock },
   { id: 'interes',   label: 'Interés',   Icn: Percent    },
   { id: 'borradores', label: 'Borradores', Icn: Bookmark },
+  { id: 'tecnicos',  label: 'Técnicos externos', Icn: Wrench },
 ];
 
 // ─── Campos del formulario de venta ──────────────────────────────────────────
@@ -774,6 +775,57 @@ function CodigoProductoConfig({ valores, set }) {
 }
 
 // ─── Borradores de venta (carritos guardados) ────────────────────────────────
+// ─── Técnicos externos ───────────────────────────────────────────────────────
+// Opt-in: ausente = apagado. Los rangos de los dos avisos son los MISMOS que
+// valida el backend (tecnicos.middleware → RANGOS): si se separan, se guardaría
+// un número que el motor de avisos descarta en silencio.
+function TecnicosConfig({ valores, set }) {
+  const activo = valores['tecnicos_externos_activo'] === '1';
+  const campo = (clave, def, min, max, etiqueta, ayuda) => (
+    <div className="flex flex-col gap-1">
+      <label className="text-sm font-medium text-gray-700">{etiqueta}</label>
+      <div className="flex items-center gap-2">
+        <input type="number" min={min} max={max}
+          value={valores[clave] ?? ''} placeholder={String(def)}
+          onChange={(e) => set(clave, e.target.value)}
+          className="w-24 px-3 py-2 bg-gray-100 border-0 rounded-xl text-gray-900
+            focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all text-sm" />
+        <span className="text-sm text-gray-500">días</span>
+      </div>
+      <p className="text-xs text-gray-400">{ayuda} Entre {min} y {max}; vacío = {def}.</p>
+    </div>
+  );
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex items-center gap-2">
+        <Wrench size={15} className="text-gray-400" />
+        <h3 className="text-sm font-semibold text-gray-700">Técnicos externos</h3>
+      </div>
+      <p className="text-xs text-gray-400 -mt-2">
+        Manda equipos del inventario (o de una orden de cliente) a un técnico de afuera.
+        Mientras lo tiene él, el equipo queda bloqueado; lo que cobra sube el costo del
+        equipo, y su cuenta (anticipos, crédito, devoluciones) vive en Servicios → Técnicos.
+        Los permisos de cada persona se ajustan en Equipo → Usuarios.
+      </p>
+      <Toggle
+        label="Activar técnicos externos"
+        description="Añade la pestaña Técnicos externos en Servicios"
+        enabled={activo}
+        onChange={(val) => set('tecnicos_externos_activo', val ? '1' : '0')}
+      />
+      {activo && (
+        <>
+          {campo('tecnicos_dias_demora', 7, 1, 90, 'Avisar de un equipo demorado donde el técnico después de',
+            'Entra en el resumen diario de avisos.')}
+          {campo('tecnicos_garantia_dias_aviso', 5, 1, 60, 'Avisar de una garantía del técnico que vence dentro de',
+            'Si vence hoy, el aviso es urgente.')}
+        </>
+      )}
+    </div>
+  );
+}
+
 function BorradoresConfig({ valores, set }) {
   const activo = valores['borradores_activo'] === '1';
   // 7 días si nunca se tocó. '0' es un valor legítimo (no vencen), así que no
@@ -1598,6 +1650,12 @@ function SeccionCatalogo({ valores, set }) {
       {tab === 'borradores' && (
         <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
           <BorradoresConfig valores={valores} set={set} />
+        </div>
+      )}
+
+      {tab === 'tecnicos' && (
+        <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
+          <TecnicosConfig valores={valores} set={set} />
         </div>
       )}
 

@@ -233,4 +233,49 @@ const requirePermisoExportarNegocio = (req, res, next) => {
   return res.status(403).json({ ok: false, error: 'Sin permiso para exportar el inventario global' });
 };
 
-module.exports = { requireRole, requireNivel, requireSucursal, assertBelongsToNegocio, requirePermisoProveedores, requirePermisoFacturas, requirePermisoVerCompras, requirePermisoExportarInventario, requirePermisoExportarNegocio, requirePermisoPreciosLista };
+/**
+ * Técnicos externos — cuatro llaves independientes.
+ *
+ *   mover     → mandar equipos al técnico y recibirlos de vuelta
+ *   pagar     → anticipos, pagos y devoluciones (mueven caja)
+ *   anular    → anular un pago (revierte caja)
+ *   gestionar → crear y editar técnicos
+ *
+ * `permisos_tecnicos` sigue la regla de las otras columnas de permisos:
+ * null / ausente = permisos BASE DEL ROL, nunca "no puede". La base la eligió
+ * el negocio: el supervisor mueve y paga, el vendedor solo mueve. Un token
+ * emitido antes del despliegue no trae la clave y cae en la base, igual que
+ * con `permisos_facturas`.
+ *
+ * Se mira CADA clave por separado: un objeto sin `anular` no le quita al
+ * usuario las otras tres.
+ */
+const BASE_TECNICOS = {
+  supervisor: { mover: true, pagar: true,  anular: false, gestionar: false },
+  vendedor:   { mover: true, pagar: false, anular: false, gestionar: false },
+};
+
+const MENSAJES_TECNICOS = {
+  mover:     'No tienes permiso para mandar o recibir equipos del técnico',
+  pagar:     'No tienes permiso para registrar pagos a técnicos',
+  anular:    'No tienes permiso para anular pagos a técnicos',
+  gestionar: 'No tienes permiso para crear o editar técnicos',
+};
+
+const puedeTecnicos = (user, accion) => {
+  if (!user) return false;
+  if (user.rol === 'admin_negocio') return true;
+  const permisos = user.permisos_tecnicos;
+  if (permisos && typeof permisos === 'object' && typeof permisos[accion] === 'boolean') {
+    return permisos[accion];
+  }
+  return BASE_TECNICOS[user.rol]?.[accion] === true;
+};
+
+const requirePermisoTecnicos = (accion) => (req, res, next) => {
+  if (!req.user) return res.status(401).json({ ok: false, error: 'No autenticado' });
+  if (puedeTecnicos(req.user, accion)) return next();
+  return res.status(403).json({ ok: false, error: MENSAJES_TECNICOS[accion] || 'Sin permiso' });
+};
+
+module.exports = { requireRole, requireNivel, requireSucursal, assertBelongsToNegocio, requirePermisoProveedores, requirePermisoFacturas, requirePermisoVerCompras, requirePermisoExportarInventario, requirePermisoExportarNegocio, requirePermisoPreciosLista, requirePermisoTecnicos, puedeTecnicos, BASE_TECNICOS };

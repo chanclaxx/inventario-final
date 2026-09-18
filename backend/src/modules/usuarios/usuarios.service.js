@@ -5,6 +5,24 @@ const { PERMISOS_BASE } = require('../../config/modulos');
 const crypto = require('crypto');
 const { enviarRecuperacionPassword } = require('../email/email.service');
 
+const { hayTecnicos } = require('../../config/columnas');
+
+// Solo las cuatro llaves conocidas y solo booleanos: lo demás se descarta, para
+// que un payload raro no termine guardado y leído como permiso.
+const LLAVES_TECNICOS = ['mover', 'pagar', 'anular', 'gestionar'];
+const _normalizarPermisosTecnicos = (p) => {
+  if (!p || typeof p !== 'object') return null;
+  const limpio = {};
+  for (const k of LLAVES_TECNICOS) if (typeof p[k] === 'boolean') limpio[k] = p[k];
+  return Object.keys(limpio).length ? limpio : null;
+};
+
+const _guardarPermisosTecnicos = async (negocioId, id, rol, permisos) => {
+  if (!hayTecnicos() || permisos === undefined) return;
+  await usuariosRepo.updatePermisosTecnicos(
+    negocioId, id, rol === 'admin_negocio' ? null : _normalizarPermisosTecnicos(permisos));
+};
+
 const getUsuarios = (negocioId) => usuariosRepo.findAll(negocioId);
 
 const getUsuarioById = async (negocioId, id) => {
@@ -15,7 +33,7 @@ const getUsuarioById = async (negocioId, id) => {
 
 const crearUsuario = async (negocioId, {
   nombre, email, password, rol, sucursal_id, modulos_permitidos, permisos_proveedores, permisos_edicion_productos,
-  permisos_facturas, sucursales_vista,
+  permisos_facturas, sucursales_vista, permisos_tecnicos,
 }) => {
   if (rol === 'admin_negocio' && sucursal_id) {
     throw { status: 400, message: 'El admin de negocio no puede tener sucursal asignada' };
@@ -76,7 +94,7 @@ const crearUsuario = async (negocioId, {
     : null;
 
   try {
-    return await usuariosRepo.create({
+    const creado = await usuariosRepo.create({
       negocio_id:                  negocioId,
       nombre, email, password_hash, rol, sucursal_id,
       password_temporal:           false,
@@ -86,6 +104,8 @@ const crearUsuario = async (negocioId, {
       permisos_facturas:           permisosFacturasAGuardar,
       sucursales_vista:            sucursalesVistaAGuardar,
     });
+    await _guardarPermisosTecnicos(negocioId, creado.id, rol, permisos_tecnicos);
+    return creado;
   } catch (err) {
     if (err.constraint === 'usuarios_email_key') {
       throw { status: 409, message: 'Ya existe un usuario con ese email' };
@@ -151,7 +171,7 @@ const actualizarUsuario = async (negocioId, id, datos) => {
         ? (Array.isArray(datos.sucursales_vista) && datos.sucursales_vista.length ? datos.sucursales_vista : null)
         : existe.sucursales_vista);
 
-  return usuariosRepo.update(negocioId, id, {
+  const actualizado = await usuariosRepo.update(negocioId, id, {
     ...datos,
     modulos_permitidos:          modulosAGuardar,
     permisos_proveedores:        permisosProveedoresAGuardar,
@@ -159,6 +179,8 @@ const actualizarUsuario = async (negocioId, id, datos) => {
     permisos_facturas:           permisosFacturasAGuardar,
     sucursales_vista:            sucursalesVistaAGuardar,
   });
+  await _guardarPermisosTecnicos(negocioId, id, rolFinal, datos.permisos_tecnicos);
+  return actualizado;
 };
 
 // Cambiar contraseña — usado por el propio usuario desde Config

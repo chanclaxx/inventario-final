@@ -1,4 +1,5 @@
 const { pool } = require('../../config/db');
+const { hayTecnicos } = require('../../config/columnas');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TESORERÍA — repositorio
@@ -36,7 +37,26 @@ const MATCH_METODO = (col) =>
 //   $5 inicio (texto timestamp o NULL)    $6 fin (texto timestamp o NULL=ahora)
 //   $7 usar_ancla (bool: inicio = fecha del último arqueo)
 //   $8 negocio_id
-const UNION_EVENTOS = `
+// Técnicos externos (≈ caja: _tecnicosDeCaja). Solo se nombra la tabla si
+// existe: la unión la usa el saldo de TODAS las cuentas, y una tabla ausente la
+// tumbaría entera. Anticipo y pago salen; la devolución del técnico entra.
+const _ramaTecnicos = () => (hayTecnicos() ? `
+    UNION ALL
+    -- Técnicos externos (≈ caja: pagos_tecnico)
+    SELECT pt.fecha,
+           CASE WHEN pt.tipo = 'Devolucion' THEN 'entrada' ELSE 'salida' END,
+           pt.valor, 'tecnico',
+           CASE WHEN pt.tipo = 'Devolucion' THEN 'Devolución de técnico — ' ELSE 'Pago a técnico — ' END
+             || t.nombre,
+           pt.metodo, NULL::bigint AS mov_id
+    FROM pagos_tecnico pt
+    JOIN tecnicos t ON t.id = pt.tecnico_id
+    WHERE pt.sucursal_id = $2
+      AND NOT pt.anulado
+      AND ${MATCH_METODO('pt.metodo')}
+` : '');
+
+const _unionEventos = () => `
   WITH lim AS (
     SELECT
       CASE WHEN $7::boolean THEN
@@ -194,6 +214,7 @@ const UNION_EVENTOS = `
     FROM movimientos_dinero md
     WHERE md.cuenta_id = $1
       AND md.activo IS NOT FALSE
+    ${_ramaTecnicos()}
   )
   SELECT ev.* FROM eventos ev, lim
   WHERE ev.fecha > lim.ini AND ev.fecha <= lim.fin
@@ -210,7 +231,7 @@ const getDeltaCuenta = async (params) => {
     SELECT
       COALESCE(SUM(CASE WHEN q.tipo = 'entrada' THEN q.valor ELSE 0 END), 0) AS entradas,
       COALESCE(SUM(CASE WHEN q.tipo = 'salida'  THEN q.valor ELSE 0 END), 0) AS salidas
-    FROM (${UNION_EVENTOS}) q
+    FROM (${_unionEventos()}) q
   `, _paramsEventos(params));
   return {
     entradas: Number(rows[0].entradas),
@@ -222,7 +243,7 @@ const getDeltaCuenta = async (params) => {
 // Eventos individuales de una cuenta en un rango. Para el extracto.
 const getEventosCuenta = async (params) => {
   const { rows } = await pool.query(`
-    SELECT q.* FROM (${UNION_EVENTOS}) q ORDER BY q.fecha ASC
+    SELECT q.* FROM (${_unionEventos()}) q ORDER BY q.fecha ASC
   `, _paramsEventos(params));
   return rows;
 };

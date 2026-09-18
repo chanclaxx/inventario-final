@@ -6,7 +6,8 @@ import { Modal }   from '../../components/ui/Modal';
 import { Button }  from '../../components/ui/Button';
 import { Input }   from '../../components/ui/Input';
 import { Badge }   from '../../components/ui/Badge';
-import { Plus, Pencil, UserX, UserCheck, Users, ShieldCheck, Truck, PackageSearch, FileDown, Eye, ReceiptText } from 'lucide-react';
+import { Plus, Pencil, UserX, UserCheck, Users, ShieldCheck, Truck, PackageSearch, FileDown, Eye, ReceiptText, Wrench } from 'lucide-react';
+import { LLAVES_TECNICOS, BASE_TECNICOS, permisosEfectivosTecnicos } from '../../utils/permisosTecnicos';
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
@@ -78,6 +79,7 @@ const FORM_INICIAL = {
   permisos_proveedores:        null,
   permisos_edicion_productos:  null,
   permisos_facturas:           null,
+  permisos_tecnicos:           null,
   sucursales_vista:            [],
 };
 
@@ -467,6 +469,56 @@ function SelectorPermisosFacturas({ permisos, onChange, rol }) {
   );
 }
 
+// ─── SelectorPermisosTecnicos ────────────────────────────────────────────────
+//
+// Técnicos externos (Servicios → Técnicos). Misma regla que facturas: `null` =
+// permisos base del rol (supervisor mueve y paga; vendedor solo mueve), y
+// personalizar congela lo que el rol ya daba antes de abrir las casillas.
+function SelectorPermisosTecnicos({ permisos, onChange, rol }) {
+  const personalizado = permisos !== null && permisos !== undefined;
+  const efectivos = permisosEfectivosTecnicos(rol, permisos);
+  const base = BASE_TECNICOS[rol] || {};
+  const textoBase = LLAVES_TECNICOS.filter((l) => base[l.id]).map((l) => l.label.toLowerCase()).join(', ');
+
+  return (
+    <div className="flex flex-col gap-3 bg-amber-50 border border-amber-100 rounded-xl p-3.5">
+      <div className="flex items-center gap-2">
+        <Wrench size={13} className="text-amber-600 flex-shrink-0" />
+        <p className="text-xs font-semibold text-amber-700 uppercase tracking-wide">Técnicos externos</p>
+      </div>
+      <label className="flex items-center gap-2.5 cursor-pointer select-none">
+        <CheckboxCustom
+          checked={personalizado}
+          onChange={() => onChange(personalizado ? null : permisosEfectivosTecnicos(rol, null))}
+          color="indigo"
+        />
+        <span className="text-sm text-gray-700">Definir permiso para este usuario</span>
+      </label>
+      {personalizado ? (
+        <div className="ml-6 flex flex-col gap-2">
+          {LLAVES_TECNICOS.map((l) => (
+            <label key={l.id} className="flex items-center gap-2.5 cursor-pointer select-none">
+              <CheckboxCustom
+                checked={efectivos[l.id]}
+                onChange={() => onChange({ ...efectivos, [l.id]: !efectivos[l.id] })}
+                color="indigo"
+              />
+              <div className="flex flex-col gap-0.5">
+                <span className="text-sm text-gray-700">{l.label}</span>
+                <span className="text-xs text-gray-400">{l.desc}</span>
+              </div>
+            </label>
+          ))}
+        </div>
+      ) : (
+        <p className="text-xs text-gray-400 bg-white rounded-lg px-3 py-1.5 border border-gray-100">
+          Permisos del rol: {textoBase || 'ninguno'}.
+        </p>
+      )}
+    </div>
+  );
+}
+
 // ─── SelectorSucursalesVista ──────────────────────────────────────────────────
 
 function SelectorSucursalesVista({ sucursalesVista, sucursalHomeId, onChange, sucursales }) {
@@ -742,6 +794,7 @@ function ModalUsuario({ open, onClose, editando, sucursales, onGuardar, cargando
           permisos_proveedores:        editando.permisos_proveedores        ?? null,
           permisos_edicion_productos:  editando.permisos_edicion_productos  ?? null,
           permisos_facturas:           editando.permisos_facturas           ?? null,
+          permisos_tecnicos:           editando.permisos_tecnicos           ?? null,
           sucursales_vista:            editando.sucursales_vista            ?? [],
         }
       : FORM_INICIAL
@@ -761,6 +814,8 @@ function ModalUsuario({ open, onClose, editando, sucursales, onGuardar, cargando
   const mostrarPermProv     = form.rol !== 'admin_negocio' && tieneModuloProveedores;
   const mostrarPermEditar   = form.rol !== 'admin_negocio' && tieneModuloInventario;
   const mostrarPermFacturas = form.rol !== 'admin_negocio' && tieneModuloFacturar;
+  const mostrarPermTecnicos = form.rol !== 'admin_negocio'
+    && (modulosEfectivos === null || modulosEfectivos.includes('servicios'));
 
   // Lista de proveedores para el selector "ver solo algunos"
   const { data: proveedoresLista = [] } = useQuery({
@@ -780,6 +835,7 @@ function ModalUsuario({ open, onClose, editando, sucursales, onGuardar, cargando
       // Vuelve a "base del rol": lo que permite un supervisor no es lo que
       // permite un vendedor, así que el objeto del rol anterior mentiría.
       permisos_facturas:    null,
+      permisos_tecnicos:    null,
       sucursales_vista:     [],
     }));
   };
@@ -793,6 +849,7 @@ function ModalUsuario({ open, onClose, editando, sucursales, onGuardar, cargando
     if (!tieneProveedores) set('permisos_proveedores', null);
     if (!tieneInv)         set('permisos_edicion_productos', null);
     if (!tieneFact)        set('permisos_facturas', null);
+    if (!(modulos === null || modulos.includes('servicios'))) set('permisos_tecnicos', null);
   };
 
   const handleGuardar = () => {
@@ -806,6 +863,7 @@ function ModalUsuario({ open, onClose, editando, sucursales, onGuardar, cargando
       payload.permisos_proveedores       = null;
       payload.permisos_edicion_productos = null;
       payload.permisos_facturas          = null;
+      payload.permisos_tecnicos          = null;
       payload.sucursales_vista           = [];
     }
     onGuardar(payload);
@@ -918,6 +976,15 @@ function ModalUsuario({ open, onClose, editando, sucursales, onGuardar, cargando
           <SelectorPermisosFacturas
             permisos={form.permisos_facturas}
             onChange={(p) => set('permisos_facturas', p)}
+            rol={form.rol}
+          />
+        )}
+
+        {/* Técnicos externos (solo si el módulo servicios está activo) */}
+        {mostrarPermTecnicos && (
+          <SelectorPermisosTecnicos
+            permisos={form.permisos_tecnicos}
+            onChange={(p) => set('permisos_tecnicos', p)}
             rol={form.rol}
           />
         )}

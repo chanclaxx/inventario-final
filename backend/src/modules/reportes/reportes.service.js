@@ -98,7 +98,7 @@ const getDashboard = async (sucursalId, negocioId = null) => {
             l.subtotal
             - CASE
                 WHEN l.imei IS NOT NULL THEN
-                  ${_costoPorImei('l.imei', 'f.sucursal_id', 'f.fecha')}
+                  ${_costoPorImei('l.imei', 'f.sucursal_id', 'f.fecha', 'f.id')}
                 ELSE
                   COALESCE(
                     (SELECT v.costo_unitario FROM variantes_atributo v WHERE v.id = l.variante_id),
@@ -147,7 +147,7 @@ const getDashboard = async (sucursalId, negocioId = null) => {
           SUM(
             CASE
               WHEN l.imei IS NOT NULL THEN
-                ${_costoPorImei('l.imei', 'f.sucursal_id', 'f.fecha')} * ${CANT_EFECTIVA}
+                ${_costoPorImei('l.imei', 'f.sucursal_id', 'f.fecha', 'f.id')} * ${CANT_EFECTIVA}
               ELSE
                 COALESCE(
                   (SELECT v.costo_unitario FROM variantes_atributo v WHERE v.id = l.variante_id),
@@ -716,7 +716,7 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
       l.variante_id,
       CASE
         WHEN l.imei IS NOT NULL THEN
-          ${_costoPorImei('l.imei', 'f.sucursal_id', 'f.fecha')}
+          ${_costoPorImei('l.imei', 'f.sucursal_id', 'f.fecha', 'f.id')}
         WHEN l.variante_id IS NOT NULL THEN
           (SELECT v.costo_unitario FROM variantes_atributo v WHERE v.id = l.variante_id)
         WHEN l.atributo_id IS NOT NULL THEN
@@ -926,7 +926,7 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
         SUM(
           CASE
             WHEN l.imei IS NOT NULL THEN
-              ${_costoPorImei('l.imei', 'f.sucursal_id', 'f.fecha')} * ${CANT_EFECTIVA}
+              ${_costoPorImei('l.imei', 'f.sucursal_id', 'f.fecha', 'f.id')} * ${CANT_EFECTIVA}
             ELSE
               COALESCE(
                 (SELECT v.costo_unitario FROM variantes_atributo v WHERE v.id = l.variante_id),
@@ -1333,7 +1333,7 @@ const getVentasPorVendedor = async (sucursalId, desde, hasta) => {
   const costoLineaCase = `
     CASE
       WHEN l.imei IS NOT NULL THEN
-        ${_costoPorImei('l.imei', 'f.sucursal_id', 'f.fecha')} * ${CANT_EFECTIVA}
+        ${_costoPorImei('l.imei', 'f.sucursal_id', 'f.fecha', 'f.id')} * ${CANT_EFECTIVA}
       ELSE
         COALESCE(
           (SELECT v.costo_unitario FROM variantes_atributo v WHERE v.id = l.variante_id),
@@ -1481,7 +1481,7 @@ const getAnalisis = async (sucursalId, desde, hasta, agrupacion) => {
   const costoLineaCase = `
     CASE
       WHEN l.imei IS NOT NULL THEN
-        ${_costoPorImei('l.imei', 'f.sucursal_id', 'f.fecha')} * ${CANT_EFECTIVA}
+        ${_costoPorImei('l.imei', 'f.sucursal_id', 'f.fecha', 'f.id')} * ${CANT_EFECTIVA}
       ELSE
         COALESCE(
           (SELECT v.costo_unitario FROM variantes_atributo v WHERE v.id = l.variante_id),

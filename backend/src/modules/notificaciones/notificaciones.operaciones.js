@@ -254,7 +254,79 @@ const cajasSinCerrar = async (negocioId, horas = 16) => {
   }
 };
 
+// ── 5. Técnicos externos: equipos demorados y garantías por vencer ──────────
+//
+// Ver migrations/20260918_tecnicos_externos.sql. Dos preguntas, una consulta
+// cada una, y solo si el negocio encendió la función: el middleware ya sabe
+// leer su config (con los mismos rangos que valida Ajustes).
+//
+//   · Demorado: un equipo que lleva más de N días donde el técnico. No hay
+//     fecha límite pactada, así que el aviso mide el tiempo afuera.
+//   · Garantía por vencer: un trabajo reparado cuya garantía se acaba dentro
+//     de N días. Solo lo que no se ha reclamado ya: un reclamo abierto es
+//     justamente lo que este aviso pide hacer.
+//
+// El vencimiento y los días se calculan en SQL, por lo mismo que las demás.
+const tecnicosPendientes = async (negocioId) => {
+  const vacio = { activo: false, demorados: { items: [], total: 0 }, garantias: { items: [], total: 0, vencen_hoy: 0 } };
+  if (!negocioId) return vacio;
+  try {
+    const { getConfigTecnicos } = require('../../middlewares/tecnicos.middleware');
+    const cfg = await getConfigTecnicos(negocioId);
+    if (!cfg.activo) return vacio;
+
+    const hoy = hoyBogota();
+    const [{ rows: demorados }, { rows: garantias }] = await Promise.all([
+      pool.query(`
+        SELECT e.id, e.imei, e.descripcion_equipo, e.trabajo, e.sucursal_id,
+               t.nombre AS tecnico_nombre, su.nombre AS sucursal_nombre,
+               COALESCE(s.numero, s.id) AS salida_numero,
+               ($2::date - s.fecha::date) AS dias_fuera
+        FROM equipos_tecnico e
+        JOIN salidas_tecnico s ON s.id = e.salida_id
+        JOIN tecnicos        t ON t.id = e.tecnico_id
+        JOIN sucursales     su ON su.id = e.sucursal_id
+        WHERE e.negocio_id = $1 AND e.estado = 'En_tecnico'
+          AND ($2::date - s.fecha::date) >= $3::int
+        ORDER BY s.fecha
+        LIMIT 50
+      `, [negocioId, hoy, cfg.dias_demora]),
+      pool.query(`
+        SELECT e.id, e.imei, e.descripcion_equipo, e.trabajo, e.sucursal_id,
+               t.nombre AS tecnico_nombre, su.nombre AS sucursal_nombre,
+               to_char(e.fecha_regreso::date + e.garantia_dias, 'YYYY-MM-DD') AS vence,
+               ((e.fecha_regreso::date + e.garantia_dias) - $2::date) AS dias_restantes
+        FROM equipos_tecnico e
+        JOIN tecnicos    t  ON t.id  = e.tecnico_id
+        JOIN sucursales  su ON su.id = e.sucursal_id
+        WHERE e.negocio_id = $1 AND e.estado = 'Reparado' AND e.garantia_dias IS NOT NULL
+          AND (e.fecha_regreso::date + e.garantia_dias) BETWEEN $2::date AND ($2::date + $3::int)
+          AND NOT EXISTS (SELECT 1 FROM equipos_tecnico r
+                          WHERE r.reclamo_de_id = e.id AND r.estado = 'En_tecnico')
+        ORDER BY vence, e.id
+        LIMIT 50
+      `, [negocioId, hoy, cfg.dias_garantia]),
+    ]);
+    const itemsG = garantias.map((r) => ({ ...r, dias_restantes: Number(r.dias_restantes) }));
+    return {
+      activo: true,
+      umbrales: { dias_demora: cfg.dias_demora, dias_garantia: cfg.dias_garantia },
+      demorados: {
+        items: demorados.map((r) => ({ ...r, dias_fuera: Number(r.dias_fuera) })),
+        total: demorados.length,
+      },
+      garantias: {
+        items: itemsG, total: itemsG.length,
+        vencen_hoy: itemsG.filter((i) => i.dias_restantes === 0).length,
+      },
+    };
+  } catch (err) {
+    return _fallo('tecnicosPendientes', negocioId, err, vacio);
+  }
+};
+
 module.exports = {
   garantiasPorVencer, pedidosAtrasados, entradasSinConfirmar, cajasSinCerrar,
+  tecnicosPendientes,
   hoyBogota,
 };

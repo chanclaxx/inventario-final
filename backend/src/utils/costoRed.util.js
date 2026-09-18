@@ -28,6 +28,42 @@
 // lectura aquí acoplaría el módulo y castigaría a los negocios sin red.
 // ─────────────────────────────────────────────────────────────────────────────
 
+const { hayTecnicos } = require('../config/columnas');
+
+// ── Lo que un TÉCNICO EXTERNO le sumó al costo de la unidad ─────────────────
+//
+// Ver migrations/20260918_tecnicos_externos.sql. Cuando un equipo propio vuelve
+// reparado, lo que cobró el técnico se suma a `costo_compra` y todo lo que lee
+// esa columna lo ve solo. Hay dos casos en los que eso no alcanza:
+//
+//   · 'valor_interno' — el equipo está CONSIGNADO en un local. Su costo es el
+//     valor de la remisión, y `costo_compra` es la verdad de la bodega: sumarlo
+//     ahí bajaría la utilidad que la BODEGA reporta por un gasto del LOCAL. Así
+//     que no se toca, y se suma aquí, encima del valor interno, solo lo que se
+//     reparó DESPUÉS de esa entrega y en esa sucursal.
+//   · 'venta' — el equipo ya estaba vendido y el usuario decidió cargarle la
+//     reparación a esa venta. Baja la utilidad de ESA factura, nada más.
+//
+// Sin las tablas (`hayTecnicos()` en falso) los fragmentos salen exactamente
+// como siempre: nombrar una tabla ausente tumbaría todos los reportes.
+const _extraTecnicoConsignado = (serialIdExpr, sucursalExpr, desdeExpr, hastaExpr) => (hayTecnicos() ? `
+        + COALESCE((
+            SELECT SUM(et.costo) FROM equipos_tecnico et
+            WHERE et.costo_aplicado_a = 'valor_interno'
+              AND et.serial_id   = ${serialIdExpr}
+              AND et.sucursal_id = ${sucursalExpr}
+              AND et.fecha_regreso >= ${desdeExpr}
+              ${hastaExpr ? `AND et.fecha_regreso <= ${hastaExpr}` : ''}
+          ), 0)` : '');
+
+const _extraTecnicoVenta = (imeiAlias, facturaAlias) => (hayTecnicos() && facturaAlias ? `
+  + COALESCE((
+      SELECT SUM(et.costo) FROM equipos_tecnico et
+      WHERE et.costo_aplicado_a = 'venta'
+        AND et.factura_cargo_id = ${facturaAlias}
+        AND UPPER(TRIM(et.imei)) = UPPER(TRIM(${imeiAlias}))
+    ), 0)` : '');
+
 // `r.tipo = 'entrega'` es lo que excluye a la BODEGA: las entregas van
 // bodega → local, y en una devolución el destino es ella, que debe seguir
 // usando su propio costo de compra. Perder ese filtro haría que la bodega se
@@ -55,7 +91,7 @@ const _ENTREGA_VIVA = `
  */
 const sqlValorInternoPorImei = (imeiAlias, sucursalAlias, fechaAlias = null) => `
     (
-      SELECT lr.valor_interno
+      SELECT lr.valor_interno${_extraTecnicoConsignado('lr.serial_id', 'r.sucursal_destino_id', 'r.fecha_emision', fechaAlias)}
       FROM lineas_remision lr
       JOIN remisiones r ON r.id = lr.remision_id
       WHERE r.sucursal_destino_id = ${sucursalAlias}
@@ -72,7 +108,7 @@ const sqlValorInternoPorImei = (imeiAlias, sucursalAlias, fechaAlias = null) => 
  *   valor interno de la remisión → costo de compra propio → promedio del
  *   producto en esa sucursal → 0.
  */
-const sqlCostoPorImei = (imeiAlias, sucursalAlias, fechaAlias = null) => `
+const sqlCostoPorImei = (imeiAlias, sucursalAlias, fechaAlias = null, facturaAlias = null) => `
   COALESCE(
     ${sqlValorInternoPorImei(imeiAlias, sucursalAlias, fechaAlias)},
     (
@@ -93,7 +129,7 @@ const sqlCostoPorImei = (imeiAlias, sucursalAlias, fechaAlias = null) => `
         AND s2.costo_compra IS NOT NULL
     ),
     0
-  )
+  )${_extraTecnicoVenta(imeiAlias, facturaAlias)}
 `;
 
 /**
@@ -113,7 +149,7 @@ const sqlCostoPorImei = (imeiAlias, sucursalAlias, fechaAlias = null) => `
  */
 const sqlValorInternoEnStock = (serialIdAlias, sucursalAlias) => `
     (
-      SELECT lr.valor_interno
+      SELECT lr.valor_interno${_extraTecnicoConsignado('lr.serial_id', 'r.sucursal_destino_id', 'r.fecha_emision', null)}
       FROM lineas_remision lr
       JOIN remisiones r ON r.id = lr.remision_id
       WHERE r.sucursal_destino_id = ${sucursalAlias}

@@ -41,6 +41,11 @@ export function useEscanerCarrito({
   const _agregarSerial = (serial) => {
     const etiqueta = [serial.producto_nombre, serial.imei].filter(Boolean).join(' · ');
 
+    if (serial.en_tecnico_nombre) {
+      setScanMsg({ tipo: 'error', texto: `${serial.imei} está donde el técnico ${serial.en_tecnico_nombre}` });
+      return;
+    }
+
     if (serial.prestado) {
       setScanMsg({
         tipo:  'error',

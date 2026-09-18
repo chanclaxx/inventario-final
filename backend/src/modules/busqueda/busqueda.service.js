@@ -27,11 +27,12 @@ const buscarPorIMEI = async (query, negocioId, rol) => {
     };
   }
 
-  const [ventas, retomas, prestamos, traslados] = await Promise.all([
+  const [ventas, retomas, prestamos, traslados, tecnicos] = await Promise.all([
     repo.getVentasPorIMEI(serial.imei, negocioId),
     repo.getRetomasPorIMEI(serial.imei, negocioId),
     repo.getPrestamosPorIMEI(serial.imei, negocioId),
     repo.getTrasladosPorIMEI(serial.imei, negocioId),
+    repo.getTecnicosPorIMEI(serial.imei, negocioId),
   ]);
 
   // Capturar info sensible antes de borrarla del objeto serial
@@ -112,6 +113,24 @@ const buscarPorIMEI = async (query, negocioId, rol) => {
         ingreso_inventario: r.ingreso_inventario,
         cliente:            r.nombre_cliente,
         sucursal:           r.sucursal_nombre,
+      },
+    })),
+    // Técnicos externos: quién tuvo el equipo, cuándo salió y volvió, y la
+    // garantía de ese trabajo. Lo cobrado es un costo: solo el admin lo ve.
+    ...tecnicos.map((t) => ({
+      tipo:           'tecnico',
+      fecha:          t.fecha_salida,
+      referencia_id:  t.id,
+      detalle: {
+        tecnico:        t.tecnico_nombre,
+        trabajo:        t.trabajo,
+        estado:         t.estado,
+        fecha_regreso:  t.fecha_regreso,
+        garantia_hasta: t.garantia_hasta,
+        reclamo:        !!t.reclamo_de_id,
+        salida:         t.salida_numero,
+        sucursal:       t.sucursal_nombre,
+        costo:          admin ? t.costo : undefined,
       },
     })),
     ...ventas.map((v) => ({

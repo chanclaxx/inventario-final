@@ -686,6 +686,62 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > restaura en vez de borrar, la 7 corre la aritmética del caso completo y la 9
 > que sin migración retomar sigue funcionando).
 
+> **Técnicos externos — un equipo NUESTRO sale a reparación**
+> (`tecnicos/`, `20260918_tecnicos_externos.sql`, Servicios → pestaña «Técnicos
+> externos»): la orden de servicio va en el sentido contrario (el cliente nos
+> trae su equipo y le cobramos). Aquí una retoma a la que hay que cambiarle la
+> batería sale a un técnico de afuera, él cobra, y **lo que cobró sube el costo
+> del equipo**. Opt-in: `tecnicos_externos_activo` (**ausente = apagado**).
+> Decisiones del negocio, tomadas por preguntas (18-sep-2026): los técnicos son
+> un apartado PROPIO de Servicios, no proveedores ni acreedores; son del negocio
+> y cada pago sale de la caja de la sucursal que paga.
+> **El candado es un TRIGGER** (`fn_serial_en_tecnico`, SQLSTATE `ST001` →
+> 409 en `error.middleware`): mientras un equipo está `En_tecnico` no se puede
+> vender, prestar, cambiar de `producto_id` ni borrar. Más de veinte sitios
+> escriben en `seriales`; ponerle la regla a cada uno dejaría fuera justo el
+> que nadie recuerde. Sin salidas abiertas no hace nada. El despacho de la red
+> interna NO escribe en `seriales` (lo hace la recepción), así que pregunta
+> aparte con `exigirNoEnTecnico`.
+> **Lo que se le debe al técnico se DERIVA** de los equipos que volvieron
+> (`equipos_tecnico.costo`); **lo que se le paga se ESCRIBE** (`pagos_tecnico`:
+> Anticipo / Pago / Devolucion, que se ANULAN con motivo, nunca se borran). El
+> saldo a favor es el saldo corrido cuando da negativo: el siguiente trabajo lo
+> consume por construcción. Toda la aritmética vive en `tecnicos.cuenta.js`
+> (funciones puras), que usan el service para validar y la pantalla para pintar.
+> Pago ≤ deuda (si no, es un anticipo); devolución ≤ saldo a favor.
+> **A dónde va el costo** (`costo_aplicado_a`, congelado al recibir):
+> `costo_compra` (equipo propio: se SUMA, con `costo_serial_anterior/nuevo`
+> de rastro); `valor_interno` (equipo CONSIGNADO en un local de la red: su
+> costo es el de la remisión y `costo_compra` es la verdad de la BODEGA, que no
+> se toca — `costoRed.util` lo suma encima del valor interno, solo lo reparado
+> después de la entrega y en esa sede); `venta` (equipo YA VENDIDO y el usuario
+> decidió cargárselo: `sqlCostoPorImei` recibe `f.id` y baja la utilidad de ESA
+> factura); `orden` (a la orden de servicio del cliente, `costo_real` o
+> `costo_garantia`). Un equipo vendido NUNCA sube su `costo_compra`: la venta ya
+> se reportó. Sale por la orden del cliente («Enviar a técnico»), que queda sin
+> poder marcarse lista ni entregarse mientras el equipo esté afuera; y
+> `ModalMarcarListo` arranca con el `costo_real` que ya tiene la orden, o
+> guardarla borraría lo que cobró el técnico.
+> **Garantía**: días por trabajo (precargados del técnico), vencimiento
+> DERIVADO en SQL. Un reclamo es otra salida al MISMO técnico, ligada por
+> `reclamo_de_id`. Cubierto ($0) hereda lo que quedaba de la garantía original;
+> si el técnico COBRA (la falla nueva no la cubría), el costo se aplica como en
+> cualquier trabajo y lleva garantía propia — decisión del usuario: un costo
+> escrito tiene que contar. Una garantía vencida no se reclama.
+> Caja (`_tecnicosDeCaja`: «Pagos a técnicos externos» egreso, «Devoluciones de
+> técnicos» ingreso) y tesorería (`_ramaTecnicos`) leen las mismas filas; los
+> dos solo nombran las tablas con `hayTecnicos()` en verdadero. Permisos:
+> `usuarios.permisos_tecnicos` (null = base del rol: supervisor mover+pagar,
+> vendedor mover; llaves `mover`/`pagar`/`anular`/`gestionar`), leído con
+> `to_jsonb(u) -> 'permisos_tecnicos'` para que el login no dependa de la
+> migración; copia del frontend en `utils/permisosTecnicos.js`. Avisos:
+> `tecnicos_demorados` y `tecnicos_garantia_por_vencer` en el motor. La
+> migración la corre el runner leyendo el MISMO `.sql` (lleva PL/pgSQL).
+> Prueba: `54-tecnicos-externos` (141 verificaciones; la sección 1 es la que
+> protege a los negocios —sin las tablas todo emite el SQL de siempre—, la 4 el
+> candado, la 6 la cuenta, la 7 que caja y tesorería cuadran, la 10 el equipo
+> consignado y la 16 que el frontend no se separe del backend).
+
 > **Cargos financieros — mora e interés** (`mora/`, `utils/devengo.util.js`,
 > `utils/mora.util.js`, `utils/interes.util.js`): dos cargos **independientes**
 > sobre créditos y préstamos. La **mora** sanciona el atraso (ancla: `fecha_limite`);

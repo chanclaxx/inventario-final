@@ -6,6 +6,10 @@ const findAll = async (negocioId) => {
            u.sucursal_id, u.creado_en, u.ultimo_acceso,
            u.modulos_permitidos, u.permisos_proveedores,
            u.permisos_edicion_productos, u.permisos_facturas, u.sucursales_vista,
+           -- Por to_jsonb y no por nombre: si la migración de técnicos no se
+           -- aplicó, la columna no existe y nombrarla tumbaría la lista de
+           -- usuarios entera. Así sale NULL (= permisos base del rol).
+           to_jsonb(u) -> 'permisos_tecnicos' AS permisos_tecnicos,
            s.nombre AS sucursal_nombre
     FROM usuarios u
     LEFT JOIN sucursales s ON s.id = u.sucursal_id
@@ -21,6 +25,10 @@ const findById = async (negocioId, id) => {
            u.sucursal_id, u.creado_en, u.ultimo_acceso,
            u.modulos_permitidos, u.permisos_proveedores,
            u.permisos_edicion_productos, u.permisos_facturas, u.sucursales_vista,
+           -- Por to_jsonb y no por nombre: si la migración de técnicos no se
+           -- aplicó, la columna no existe y nombrarla tumbaría la lista de
+           -- usuarios entera. Así sale NULL (= permisos base del rol).
+           to_jsonb(u) -> 'permisos_tecnicos' AS permisos_tecnicos,
            s.nombre AS sucursal_nombre
     FROM usuarios u
     LEFT JOIN sucursales s ON s.id = u.sucursal_id
@@ -130,6 +138,16 @@ const update = async (negocioId, id, datos) => {
 
   const { rows } = await pool.query(query, params);
   return rows[0] || null;
+};
+
+// Permisos de técnicos externos: escritura APARTE y solo con la columna
+// presente (`hayTecnicos()`), por la misma razón que la lectura va por
+// to_jsonb. `null` = volver a los permisos base del rol.
+const updatePermisosTecnicos = async (negocioId, id, permisos) => {
+  await pool.query(
+    'UPDATE usuarios SET permisos_tecnicos = $1::jsonb WHERE id = $2 AND negocio_id = $3',
+    [permisos ? JSON.stringify(permisos) : null, id, negocioId]
+  );
 };
 
 const updatePassword = async (negocioId, id, password_hash) => {
@@ -263,6 +281,7 @@ const getActividad = async (negocioId, { usuario_id, fecha_desde, fecha_hasta, t
 };
 
 module.exports = {
+  updatePermisosTecnicos,
   findAll, findById, findByEmail,
   create, update, updatePassword,
   crearTokenRecuperacion, findAdminByEmail,

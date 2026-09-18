@@ -5,6 +5,7 @@ import {
   AlertTriangle, Bell, CheckCircle2, ChevronRight, RefreshCw,
   Wallet, Truck, ShieldCheck, PackageSearch, ClipboardCheck, Banknote,
   CreditCard, Layers, FileClock, ChevronDown, Phone,
+  Wrench,
 } from 'lucide-react';
 import { getResumenAvisos } from '../../api/notificaciones.api';
 import { Spinner }    from '../../components/ui/Spinner';
@@ -47,6 +48,7 @@ const ICONOS = {
   plan:        FileClock,
   borradores:  Layers,
   inventario:  PackageSearch,
+  tecnicos:    Wrench,
 };
 const ICONO_POR_DEFECTO = Bell;
 

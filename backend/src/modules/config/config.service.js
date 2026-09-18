@@ -239,6 +239,22 @@ const saveConfig = async (negocioId, datos) => {
     }
   }
 
+  // Técnicos externos: interruptor y umbrales de sus dos avisos, con los
+  // MISMOS rangos que usa el middleware al leerlos (tecnicos.middleware).
+  if (datosProcesados.tecnicos_externos_activo !== undefined
+      && !['0', '1'].includes(String(datosProcesados.tecnicos_externos_activo))) {
+    throw { status: 400, message: 'Técnicos externos solo puede estar encendido (1) o apagado (0)' };
+  }
+  const { RANGOS: RANGOS_TECNICOS } = require('../../middlewares/tecnicos.middleware');
+  for (const [clave, r] of Object.entries(RANGOS_TECNICOS)) {
+    const raw = datosProcesados[clave];
+    if (raw === undefined || raw === '' || raw === null) continue;
+    const v = Number(raw);
+    if (!Number.isInteger(v) || v < r.min || v > r.max) {
+      throw { status: 400, message: `${r.etiqueta} debe ser un número entero entre ${r.min} y ${r.max}` };
+    }
+  }
+
   if (datosProcesados.garantia_proveedor_dias_aviso !== undefined) {
     _validarDiasAviso(datosProcesados.garantia_proveedor_dias_aviso, 'El aviso previo de garantía');
   }
@@ -456,6 +472,10 @@ const saveConfig = async (negocioId, datos) => {
   // Ajustes dejaría los costos escondidos hasta un minuto después.
   if ('costos_solo_admin' in datosProcesados) {
     require('../../utils/costos.util').invalidarCache(negocioId);
+  }
+
+  if (Object.keys(datosProcesados).some((k) => k.startsWith('tecnicos_'))) {
+    require('../../middlewares/tecnicos.middleware').invalidarCache(negocioId);
   }
 
   // Y lo mismo para los borradores de venta: su middleware cachea 60s, y apagar

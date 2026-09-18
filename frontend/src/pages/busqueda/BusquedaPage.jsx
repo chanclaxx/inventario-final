@@ -5,7 +5,7 @@ import {
   ShoppingCart, RotateCcw, CheckCircle2, XCircle,
   MapPin, User, Phone, CreditCard, Tag, Loader2,
   AlertCircle, Box, Layers, ScanLine, ChevronDown, ChevronUp,
-  TrendingUp, RefreshCw, Truck,
+  TrendingUp, RefreshCw, Truck, Wrench,
 } from 'lucide-react';
 import { buscarPorIMEI, buscarProductos, getHistorialCantidad } from '../../api/busqueda.api';
 import { ChipGarantia } from '../proveedores/indicadoresOrden';
@@ -46,7 +46,35 @@ const tipoConfig = {
   prestamo: { color: 'bg-orange-500', icon: Handshake,     label: 'Préstamo'              },
   retoma:   { color: 'bg-purple-500', icon: RotateCcw,     label: 'Retoma (entrada usada)'},
   venta:    { color: 'bg-green-500',  icon: ShoppingCart,  label: 'Venta'                 },
+  tecnico:  { color: 'bg-amber-600',  icon: Wrench,        label: 'Técnico externo'       },
 };
+
+const ESTADO_TECNICO = {
+  En_tecnico:  'Todavía con el técnico',
+  Reparado:    'Volvió reparado',
+  Sin_reparar: 'Volvió sin reparar',
+  Anulado:     'Envío anulado',
+};
+
+function EventoTecnico({ d }) {
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="font-semibold text-sm text-gray-800">{d.tecnico}</span>
+        <span className="text-xs text-gray-500">{ESTADO_TECNICO[d.estado] || d.estado}</span>
+        {d.reclamo && <span className="text-xs font-semibold bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full">Reclamo de garantía</span>}
+      </div>
+      {d.trabajo && <p className="text-sm text-gray-600">{d.trabajo}</p>}
+      <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-gray-500">
+        {d.salida && <span>Salida #{d.salida}</span>}
+        {d.fecha_regreso && <span>Volvió: {formatFecha(d.fecha_regreso)}</span>}
+        {d.garantia_hasta && <span>Garantía hasta {d.garantia_hasta}</span>}
+        {d.costo != null && Number(d.costo) > 0 && <span>Costo: <span className="font-medium text-gray-700">{formatCOP(d.costo)}</span></span>}
+        {d.sucursal && <span className="flex items-center gap-1"><MapPin size={11} />{d.sucursal}</span>}
+      </div>
+    </div>
+  );
+}
 
 function EventoEntrada({ d }) {
   return (
@@ -163,6 +191,7 @@ const detalleComponentes = {
   prestamo: EventoPrestamo,
   retoma:   EventoRetoma,
   venta:    EventoVenta,
+  tecnico:  EventoTecnico,
 };
 
 function LineaTiempo({ historial }) {

@@ -4,6 +4,14 @@ const errorHandler = (err, req, res, next) => {
   // Log completo siempre en servidor
   console.error(`[ERROR] ${req.method} ${req.url} →`, err);
 
+  // El candado de técnicos externos (trigger fn_serial_en_tecnico). Lo lanza
+  // la BASE, así que llega por cualquiera de los caminos que tocan `seriales`
+  // —vender, prestar, retomar, recibir una remisión—; su mensaje ya dice dónde
+  // está el equipo y qué hacer, y es lo que la pantalla tiene que mostrar.
+  if (err.code === 'ST001') {
+    return res.status(409).json({ ok: false, error: err.message, code: 'EQUIPO_EN_TECNICO' });
+  }
+
   if (err.code === '23505') {
     return res.status(409).json({ ok: false, error: 'Ya existe un registro con ese valor único' });
   }

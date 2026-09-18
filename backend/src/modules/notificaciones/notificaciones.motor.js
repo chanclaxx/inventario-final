@@ -123,7 +123,7 @@ const recolectar = async (negocioId) => {
   const u = await _umbrales(negocioId);
 
   const [cartera, proveedores, plan, stock, borradores,
-    garantias, pedidos, entradas, cajas] = await Promise.all([
+    garantias, pedidos, entradas, cajas, tecnicos] = await Promise.all([
     alertas.cartera(negocioId),
     alertas.carteraProveedores(negocioId),
     alertas.planPorVencer(negocioId),
@@ -133,6 +133,7 @@ const recolectar = async (negocioId) => {
     operaciones.pedidosAtrasados(negocioId),
     operaciones.entradasSinConfirmar(negocioId, u.entrada_dias),
     operaciones.cajasSinCerrar(negocioId, u.caja_horas),
+    operaciones.tecnicosPendientes(negocioId),
   ]);
 
   const senales = [];
@@ -241,6 +242,35 @@ const recolectar = async (negocioId) => {
     }));
   }
 
+  // ── Técnicos externos ─────────────────────────────────────────────────────
+  // Un equipo demorado es plata parada, no plata perdida: va en el resumen.
+  // Una garantía del técnico que vence HOY sí es urgente, por la misma razón
+  // que la del proveedor: mañana ya no se le puede reclamar.
+  if (tecnicos?.demorados?.total) {
+    const peor = tecnicos.demorados.items[0];
+    senales.push(_senal({
+      clave: 'tecnicos_demorados', categoria: 'tecnicos',
+      titulo: `${_plural(tecnicos.demorados.total, 'equipo lleva', 'equipos llevan')} días donde el técnico`,
+      cuerpo: `El más viejo lleva ${_plural(peor.dias_fuera, 'día', 'días')} afuera.`,
+      url: '/servicios?tab=tecnicos', n: tecnicos.demorados.total,
+    }));
+  }
+  if (tecnicos?.garantias?.total) {
+    const g = tecnicos.garantias;
+    senales.push(_senal({
+      clave: 'tecnicos_garantia_por_vencer',
+      prioridad: g.vencen_hoy > 0 ? 'urgente' : 'normal',
+      categoria: 'tecnicos',
+      titulo: g.vencen_hoy > 0
+        ? `${_plural(g.vencen_hoy, 'garantía de técnico vence', 'garantías de técnico vencen')} HOY`
+        : `${_plural(g.total, 'garantía de técnico', 'garantías de técnico')} por vencer`,
+      cuerpo: g.vencen_hoy > 0
+        ? 'Si el equipo falló, después de hoy el técnico ya no responde.'
+        : 'Revisa esos equipos antes de que se acabe la garantía de la reparación.',
+      url: '/servicios?tab=tecnicos', n: g.total,
+    }));
+  }
+
   // ── El plan ───────────────────────────────────────────────────────────────
   // Urgente cuando faltan 3 días o menos: pasado el vencimiento la app se
   // bloquea y no se puede ni facturar.
@@ -298,7 +328,7 @@ const recolectar = async (negocioId) => {
     normales: senales.filter((s) => s.prioridad === 'normal'),
     // El detalle crudo, para la pantalla de Avisos. El push nunca lo lleva: en
     // una pantalla bloqueada no van nombres de clientes con sus montos.
-    detalle: { cartera, proveedores, garantias, pedidos, entradas, cajas, stock, borradores, plan },
+    detalle: { cartera, proveedores, garantias, pedidos, entradas, cajas, stock, borradores, plan, tecnicos },
     umbrales: u,
   };
 };

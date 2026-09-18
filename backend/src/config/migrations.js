@@ -1625,6 +1625,27 @@ const aplicarMigraciones = async (client) => {
       ON proveedores (negocio_id, codigo) WHERE codigo IS NOT NULL;
   `);
 
+  // Técnicos externos — un equipo nuestro sale a que alguien de afuera lo
+  // repare. Ver migrations/20260918_tecnicos_externos.sql.
+  //
+  // Esta vez NO se replica el SQL aquí: se lee el mismo archivo. Lleva una
+  // función PL/pgSQL (el candado del serial) y una copia a mano de un cuerpo
+  // así es justo lo que se separa sin que nadie lo note. La carpeta
+  // `migrations/` viaja con el despliegue (no hay .dockerignore).
+  //
+  // Bloque PROPIO: si fallara, ventas, préstamos y remisiones siguen igual —
+  // el trigger no existiría y `hayTecnicos()` apaga la feature entera.
+  {
+    let sqlTecnicos = null;
+    try {
+      sqlTecnicos = require('fs').readFileSync(
+        require('path').join(__dirname, '../../migrations/20260918_tecnicos_externos.sql'), 'utf8');
+    } catch (err) {
+      console.error('⚠️  Técnicos externos: no se encontró el archivo de migración —', err.message);
+    }
+    if (sqlTecnicos) await migrar(client, 'Técnicos externos', sqlTecnicos);
+  }
+
   // Aplicadas manualmente en producción:
   // - lineas_traslado: revertida_por_usuario_id, fecha_reversion
   // - traslados: revertido_por_usuario_id, fecha_reversion

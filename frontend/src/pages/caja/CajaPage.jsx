@@ -159,6 +159,34 @@ const CONFIG_GRUPOS = {
     };
   },
 },
+  // Técnicos externos (Servicios → Técnicos): lo que se le paga a un técnico
+  // SALE; lo que él devuelve de un anticipo ENTRA.
+  pagosTecnico: {
+    icono:      Wrench,
+    color:      'red',
+    bgHeader:   'bg-rose-50',
+    textHeader: 'text-rose-700',
+    borderColor:'border-rose-100',
+    renderItem: (item) => ({
+      descripcion: `${item.tipo === 'Anticipo' ? 'Anticipo' : 'Pago'} a ${item.tecnico_nombre || 'técnico'}`,
+      detalle:     [item.salida_numero ? `Salida #${item.salida_numero}` : null, item.metodo || null]
+                     .filter(Boolean).join(' · ') || null,
+      fecha:       item.fecha,
+    }),
+  },
+  devolucionesTecnico: {
+    icono:      Wrench,
+    color:      'green',
+    bgHeader:   'bg-teal-50',
+    textHeader: 'text-teal-700',
+    borderColor:'border-teal-100',
+    renderItem: (item) => ({
+      descripcion: `Devolución de ${item.tecnico_nombre || 'técnico'}`,
+      detalle:     [item.salida_numero ? `Salida #${item.salida_numero}` : null, item.metodo || null]
+                     .filter(Boolean).join(' · ') || null,
+      fecha:       item.fecha,
+    }),
+  },
   abonosDomicilio: {
     icono:      Bike,
     color:      'orange',
@@ -722,6 +750,12 @@ function _buildItemsPorMetodo(grupos) {
   (grupos.abonosAcreedor?.items || []).forEach((item) =>
     add(item, `Abono a ${item.acreedor || 'Acreedor'}`, 'Egreso')
   );
+  (grupos.pagosTecnico?.items || []).forEach((item) =>
+    add(item, `${item.tipo === 'Anticipo' ? 'Anticipo' : 'Pago'} a ${item.tecnico_nombre || 'técnico'}`, 'Egreso')
+  );
+  (grupos.devolucionesTecnico?.items || []).forEach((item) =>
+    add(item, `Devolución de ${item.tecnico_nombre || 'técnico'}`, 'Ingreso')
+  );
   (grupos.manuales?.items || []).forEach((item) => {
     if (!item.metodo) return;
     if (!result[item.metodo]) result[item.metodo] = [];
@@ -864,9 +898,9 @@ function TabMetodos({ grupos, metodosPagoDetalle, cajaId }) {
 function ResumenGrupos({ grupos, cajaId, opciones, readOnly = false }) {
   const g = grupos || {};
   const has = (keys) => keys.some((k) => g[k]?.items?.length > 0);
-  const ingresoKeys = ['facturas', 'abonosCredito', 'abonosPrestamo', 'abonosServicio', 'abonosDomicilio'];
+  const ingresoKeys = ['facturas', 'abonosCredito', 'abonosPrestamo', 'abonosServicio', 'abonosDomicilio', 'devolucionesTecnico'];
   // Retomas NO van en egresos: los pagos de factura ya vienen netos de retoma
-  const egresoKeys  = ['devoluciones', 'compras', 'abonosAcreedor'];
+  const egresoKeys  = ['devoluciones', 'compras', 'abonosAcreedor', 'pagosTecnico'];
   const hayNada = Object.values(g).every((x) => !x?.items?.length);
 
   if (hayNada) return <EmptyState icon={Wallet} titulo="Sin movimientos" />;
@@ -1215,6 +1249,7 @@ export default function CajaPage() {
                 <GrupoMovimientos grupoKey="abonosPrestamo"  grupo={grupos.abonosPrestamo  || { items: [] }} cajaId={caja.id} opciones={opcionesGrupo} />
                 <GrupoMovimientos grupoKey="abonosServicio"  grupo={grupos.abonosServicio  || { items: [] }} cajaId={caja.id} opciones={opcionesGrupo} />
                 <GrupoMovimientos grupoKey="abonosDomicilio" grupo={grupos.abonosDomicilio || { items: [] }} cajaId={caja.id} opciones={opcionesGrupo} />
+                <GrupoMovimientos grupoKey="devolucionesTecnico" grupo={grupos.devolucionesTecnico || { items: [] }} cajaId={caja.id} opciones={opcionesGrupo} />
 
                 {grupos.facturasDomicilio?.items?.length > 0 && (
                   <>
@@ -1234,6 +1269,7 @@ export default function CajaPage() {
                 <GrupoMovimientos grupoKey="devoluciones"   grupo={grupos.devoluciones   || { items: [] }} cajaId={caja.id} opciones={opcionesGrupo} />
                 <GrupoMovimientos grupoKey="compras"        grupo={grupos.compras        || { items: [] }} cajaId={caja.id} opciones={opcionesGrupo} />
                 <GrupoMovimientos grupoKey="abonosAcreedor" grupo={grupos.abonosAcreedor || { items: [] }} cajaId={caja.id} opciones={opcionesGrupo} />
+                <GrupoMovimientos grupoKey="pagosTecnico"   grupo={grupos.pagosTecnico   || { items: [] }} cajaId={caja.id} opciones={opcionesGrupo} />
 
                 {grupos.manuales?.items?.length > 0 && (
                   <>

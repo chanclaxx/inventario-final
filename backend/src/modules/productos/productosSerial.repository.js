@@ -1,5 +1,5 @@
 const { pool } = require('../../config/db');
-const { hayUbicacion, hayListasPrecios } = require('../../config/columnas');
+const { hayUbicacion, hayListasPrecios, hayTecnicos } = require('../../config/columnas');
 
 // Ubicación espacial (feature opt-in). En serial la ubicación pertenece a la
 // REFERENCIA, no a cada IMEI: un modelo vive en un estante, no cada unidad.
@@ -157,7 +157,21 @@ const getSeriales = async (productoId, vendido) => {
       -- garantías viejas. Manda la compra más reciente.
       g.garantia_hasta,
       g.garantia_dias
+      ${hayTecnicos() ? `,
+      -- ¿Está donde un técnico externo? El trigger ya impide venderlo; esto es
+      -- para que la pantalla lo diga ANTES de que alguien lo intente.
+      tec.tecnico_nombre AS en_tecnico_nombre,
+      tec.fecha          AS en_tecnico_desde,
+      tec.salida_numero  AS en_tecnico_salida` : ''}
     FROM seriales s
+    ${hayTecnicos() ? `LEFT JOIN LATERAL (
+      SELECT t.nombre AS tecnico_nombre, st.fecha, COALESCE(st.numero, st.id) AS salida_numero
+      FROM equipos_tecnico et
+      JOIN tecnicos t         ON t.id  = et.tecnico_id
+      JOIN salidas_tecnico st ON st.id = et.salida_id
+      WHERE et.serial_id = s.id AND et.estado = 'En_tecnico'
+      LIMIT 1
+    ) tec ON TRUE` : ''}
     LEFT JOIN prestamos      p  ON p.imei  = s.imei AND p.estado = 'Activo'
     LEFT JOIN prestatarios   pr ON pr.id   = p.prestatario_id
     LEFT JOIN clientes       c  ON c.id    = p.cliente_id

@@ -24,6 +24,7 @@ const TABLAS = {
   // Un pedido del local a la bodega tampoco es una remisión: se numera aparte
   // porque un pedido puede responderse con varias remisiones (o con ninguna).
   pedido_interno: 'pedidos_internos',
+  salida_tecnico: 'salidas_tecnico',
 };
 
 // Cache: una vez detectada la infraestructura no se vuelve a consultar.

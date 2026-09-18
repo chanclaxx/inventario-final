@@ -123,10 +123,14 @@ function CabeceraGrupoColor({ color, cantidad }) {
 // ─── Tarjeta individual de serial ─────────────────────────────────────────────
 function TarjetaSerial({ serial, precio, onAgregar, onEliminar, onEditar, onGuardarNota, notaEditable }) {
   const prestado = serial.prestado && !serial.vendido;
+  // Donde un técnico externo (Servicios → Técnicos): no está en el local, así
+  // que no se vende. El backend lo impide igual (trigger); esto lo dice antes.
+  const enTecnico = !!serial.en_tecnico_nombre;
+  const bloqueado = prestado || enTecnico;
 
   // Un equipo ya vendido o prestado no puede estar apartado para nadie: el
   // chip sobraría y confundiría.
-  const puedeApartarse = !serial.vendido && !prestado;
+  const puedeApartarse = !serial.vendido && !bloqueado;
 
   const estiloContenedor = prestado
     ? 'bg-blue-50 border-blue-200 hover:border-blue-300'
@@ -149,6 +153,11 @@ function TarjetaSerial({ serial, precio, onAgregar, onEliminar, onEditar, onGuar
           {prestado && (
             <Badge variant="blue">
               <Lock size={10} className="inline mr-0.5" /> Prestado
+            </Badge>
+          )}
+          {enTecnico && (
+            <Badge variant="yellow">
+              <Lock size={10} className="inline mr-0.5" /> Donde el técnico
             </Badge>
           )}
           {puedeApartarse && <ChipApartado itemKey={serial.imei} tipo="serial" />}
@@ -192,6 +201,12 @@ function TarjetaSerial({ serial, precio, onAgregar, onEliminar, onEditar, onGuar
             Debe ser devuelto antes de poder venderse
           </p>
         )}
+        {enTecnico && (
+          <p className="text-xs text-amber-700 mt-0.5">
+            Con {serial.en_tecnico_nombre} (salida #{serial.en_tecnico_salida}) desde {formatFecha(serial.en_tecnico_desde)}.
+            Recíbelo en Servicios → Técnicos para poder venderlo.
+          </p>
+        )}
         {serial.nota && <NotaStrip nota={serial.nota} className="mt-1" />}
       </div>
 
@@ -214,13 +229,14 @@ function TarjetaSerial({ serial, precio, onAgregar, onEliminar, onEditar, onGuar
         </button>
         <Button
           size="sm"
-          disabled={prestado}
-          title={prestado ? 'No se puede vender — está prestado' : 'Agregar al carrito'}
+          disabled={bloqueado}
+          title={enTecnico ? 'No se puede vender — está donde el técnico'
+            : prestado ? 'No se puede vender — está prestado' : 'Agregar al carrito'}
           onClick={(e) => { e.stopPropagation(); onAgregar(serial); }}
-          className={prestado ? 'opacity-40 cursor-not-allowed' : ''}
+          className={bloqueado ? 'opacity-40 cursor-not-allowed' : ''}
         >
-          {prestado ? <Lock size={14} /> : <Plus size={14} />}
-          <span className="hidden sm:inline">{prestado ? 'Prestado' : 'Agregar'}</span>
+          {bloqueado ? <Lock size={14} /> : <Plus size={14} />}
+          <span className="hidden sm:inline">{enTecnico ? 'En técnico' : prestado ? 'Prestado' : 'Agregar'}</span>
         </Button>
       </div>
     </div>

@@ -1,4 +1,24 @@
 const repo = require('./servicios.repository');
+const { pool } = require('../../config/db');
+const { hayTecnicos } = require('../../config/columnas');
+
+// Una orden cuyo equipo está donde un técnico externo no puede darse por lista,
+// entregarse ni cerrarse: el equipo no está en el local. Sin las tablas de
+// técnicos no hay nada que mirar.
+const _exigirEquipoEnLocal = async (negocioId, ordenId) => {
+  if (!hayTecnicos()) return;
+  const { rows } = await pool.query(`
+    SELECT t.nombre FROM equipos_tecnico e JOIN tecnicos t ON t.id = e.tecnico_id
+    WHERE e.orden_servicio_id = $1 AND e.negocio_id = $2 AND e.estado = 'En_tecnico'
+    LIMIT 1
+  `, [ordenId, negocioId]);
+  if (rows.length) {
+    throw {
+      status: 409, code: 'EQUIPO_EN_TECNICO',
+      message: `El equipo de esta orden está donde el técnico ${rows[0].nombre}. Recíbelo primero en Servicios → Técnicos.`,
+    };
+  }
+};
 
 // ─── Lectura ──────────────────────────────────────────────────────────────────
 
@@ -32,6 +52,7 @@ const enReparacion = async (negocioId, id) => {
 };
 
 const marcarListo = async (negocioId, id, datos) => {
+  await _exigirEquipoEnLocal(negocioId, id);
   const esGarantia = datos.es_garantia === true;
 
   if (esGarantia) {
@@ -81,10 +102,13 @@ const registrarAbono = (negocioId, ordenId, datos) => {
 };
 
 // Entrega: sin forzar — el repo decide si va a Entregado o Pendiente_pago
-const entregar = (negocioId, id) =>
-  repo.marcarEntregado(negocioId, id);
+const entregar = async (negocioId, id) => {
+  await _exigirEquipoEnLocal(negocioId, id);
+  return repo.marcarEntregado(negocioId, id);
+};
 
-const sinReparar = (negocioId, id, datos) => {
+const sinReparar = async (negocioId, id, datos) => {
+  await _exigirEquipoEnLocal(negocioId, id);
   if (!datos.motivo) throw { status: 400, message: 'El motivo es requerido' };
   if (datos.precio_diagnostico != null && Number(datos.precio_diagnostico) < 0)
     throw { status: 400, message: 'El precio de diagnóstico no puede ser negativo' };

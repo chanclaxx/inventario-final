@@ -1,6 +1,6 @@
 const { pool } = require('../../config/db');
 const costoRed = require('../../utils/costoRed.util');
-const { hayListasPrecios } = require('../../config/columnas');
+const { hayListasPrecios, hayTecnicos } = require('../../config/columnas');
 
 // ── Listas de precios en el escaneo (feature opt-in) ─────────────────────────
 //
@@ -358,6 +358,9 @@ const buscarSerialPorCodigoExacto = async (codigo, negocioId, sucursalId) => {
         THEN COALESCE(pr.nombre, c.nombre, p.prestatario)
         ELSE NULL
       END AS prestado_a
+      -- Igual que prestado: viaja para que el escáner diga POR QUÉ no se agrega.
+      ${hayTecnicos() ? `, (SELECT t.nombre FROM equipos_tecnico et JOIN tecnicos t ON t.id = et.tecnico_id
+          WHERE et.serial_id = s.id AND et.estado = 'En_tecnico' LIMIT 1) AS en_tecnico_nombre` : ''}
     FROM seriales s
     JOIN productos_serial ps ON ps.id = s.producto_id
     JOIN sucursales       su ON su.id = ps.sucursal_id
@@ -372,6 +375,27 @@ const buscarSerialPorCodigoExacto = async (codigo, negocioId, sucursalId) => {
     LIMIT 1
   `, [negocioId, codigo, sucursalId ?? null]);
   return rows[0] || null;
+};
+
+// Trabajos de técnicos externos de un IMEI (ver migrations/20260918_tecnicos_externos.sql).
+// Por el IMEI congelado en la línea, no por serial_id: el mismo equipo pudo
+// cambiar de fila (retoma, reactivación) y su historia tiene que seguirlo.
+const getTecnicosPorIMEI = async (imei, negocioId) => {
+  if (!hayTecnicos()) return [];
+  const { rows } = await pool.query(`
+    SELECT e.id, e.trabajo, e.estado, e.costo, e.reclamo_de_id, e.fecha_regreso,
+           s.fecha AS fecha_salida, COALESCE(s.numero, s.id) AS salida_numero,
+           t.nombre AS tecnico_nombre, su.nombre AS sucursal_nombre,
+           CASE WHEN e.estado = 'Reparado' AND e.garantia_dias IS NOT NULL
+                THEN to_char(e.fecha_regreso::date + e.garantia_dias, 'YYYY-MM-DD') END AS garantia_hasta
+    FROM equipos_tecnico e
+    JOIN salidas_tecnico s ON s.id = e.salida_id
+    JOIN tecnicos        t ON t.id = e.tecnico_id
+    LEFT JOIN sucursales su ON su.id = e.sucursal_id
+    WHERE e.negocio_id = $1 AND UPPER(TRIM(e.imei)) = UPPER(TRIM($2))
+    ORDER BY s.fecha
+  `, [negocioId, imei]);
+  return rows;
 };
 
 const getHistorialCantidad = async (productoId, negocioId) => {
@@ -690,7 +714,7 @@ const buscarAbonosTotales = async ({ fechaDesde, fechaHasta, tipo }, negocioId, 
 
 module.exports = {
   buscarSerialPorIMEI, getVentasPorIMEI, getRetomasPorIMEI,
-  getPrestamosPorIMEI, getTrasladosPorIMEI,
+  getPrestamosPorIMEI, getTrasladosPorIMEI, getTecnicosPorIMEI,
   buscarSeriales, buscarCantidad, buscarCantidadPorCodigo, buscarSerialPorCodigoExacto,
   getHistorialCantidad,
   buscarComprasPorIMEI, buscarComprasPorTexto,

@@ -132,6 +132,7 @@ app.use('/api/lineas',             protegida, require('./modules/lineas/lineas.r
 app.use('/api/domiciliarios',      protegida, require('./modules/domiciliarios/domiciliarios.routes'));
 app.use('/api/vendedores',         protegida, require('./modules/vendedores/vendedores.routes'));
 app.use('/api/servicios',          protegida, require('./modules/servicios/servicios.routes'));
+app.use('/api/tecnicos',           protegida, require('./modules/tecnicos/tecnicos.routes'));
 app.use('/api/traslados',          protegida, require('./modules/traslados/traslados.routes'));
 app.use('/api/red-interna',        protegida, require('./modules/red-interna/redInterna.routes'));
 app.use('/api/busqueda',           protegida, require('./modules/busqueda/busqueda.routes'));

@@ -1,4 +1,5 @@
 import { useState }                               from 'react';
+import { useSearchParams }                        from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient }  from '@tanstack/react-query';
 import {
   getOrdenes, getOrdenById, getResumenHoy,
@@ -28,6 +29,9 @@ import { useAuth }     from '../../context/useAuth';
 import { useMetodosPago } from '../../hooks/useMetodosPago';
 import useSucursalStore from '../../store/sucursalStore';
 import api             from '../../api/axios.config';
+import { TabTecnicos }        from './tecnicos/TabTecnicos';
+import { ModalEnviarTecnico } from './tecnicos/ModalEnviarTecnico';
+import { puedeTecnicos }      from '../../utils/permisosTecnicos';
 import {
   Wrench, Plus, ChevronRight, ChevronLeft,
   AlertTriangle, CheckCircle, RefreshCw,
@@ -115,7 +119,7 @@ function BarraCobro({ abonado, total }) {
 
 // ─── Card de orden activa ────────────────────────────────────────────────────
 
-function CardOrden({ orden, onAccion, esAdmin = false }) {
+function CardOrden({ orden, onAccion, esAdmin = false, conTecnicos = false }) {
   const [expandida, setExpandida] = useState(false);
   const estado = cfg(orden.estado);
   const saldo  = Number(orden.saldo_pendiente) || 0;
@@ -164,7 +168,7 @@ function CardOrden({ orden, onAccion, esAdmin = false }) {
           className="text-xs text-blue-500 hover:text-blue-700 underline underline-offset-2">
           Ver detalle
         </button>
-        <AccionesOrden orden={orden} onAccion={onAccion} />
+        <AccionesOrden orden={orden} onAccion={onAccion} conTecnicos={conTecnicos} />
       </div>
 
       {expandida && (
@@ -198,10 +202,16 @@ function CardOrden({ orden, onAccion, esAdmin = false }) {
 
 // ─── Acciones por estado ──────────────────────────────────────────────────────
 
-function AccionesOrden({ orden, onAccion }) {
+function AccionesOrden({ orden, onAccion, conTecnicos = false }) {
   const estado = orden.estado;
   return (
     <>
+      {conTecnicos && ['Recibido', 'En_reparacion', 'Garantia'].includes(estado) && (
+        <Button size="sm" variant="secondary" onClick={() => onAccion('enviar-tecnico', orden)}
+          title="Mandar el equipo de esta orden a un técnico externo">
+          <Wrench size={13} /> Enviar a técnico
+        </Button>
+      )}
       {estado === 'Recibido' && (
         <>
           <Button size="sm" onClick={() => onAccion('en-reparacion', orden)}>En reparación</Button>
@@ -298,7 +308,7 @@ function AccionesOrden({ orden, onAccion }) {
 
 // ─── Grupo de órdenes por cliente ────────────────────────────────────────────
 
-function GrupoCliente({ nombre, items, onAccion, esAdmin = false }) {
+function GrupoCliente({ nombre, items, onAccion, esAdmin = false, conTecnicos = false }) {
   const [expandido, setExpandido] = useState(true);
   const tieneAlerta = items.some((o) => {
     const s = Number(o.saldo_pendiente) || 0;
@@ -332,7 +342,7 @@ function GrupoCliente({ nombre, items, onAccion, esAdmin = false }) {
             const oKey = o.id;
             return (
               <div key={oKey} className="bg-white">
-                <CardOrden orden={o} onAccion={onAccion} esAdmin={esAdmin} />
+                <CardOrden orden={o} onAccion={onAccion} esAdmin={esAdmin} conTecnicos={conTecnicos} />
               </div>
             );
           })}
@@ -952,11 +962,18 @@ function ModalMarcarListo({ orden, onClose, onExito }) {
   const esGarantiaCobr  = esGarantia && orden.garantia_cobrable;
   const esGarantiaGratis= esGarantia && !orden.garantia_cobrable;
 
-  const [costoReal,      setCostoReal]      = useState('');
+  // El costo arranca con lo que ya tenga la orden: si su equipo pasó por un
+  // técnico externo, lo que él cobró ya está sumado ahí, y empezar en blanco
+  // haría que guardar la orden lo borrara.
+  const [costoReal,      setCostoReal]      = useState(
+    !esGarantia && orden.costo_real != null ? Number(orden.costo_real) : ''
+  );
   const [precioFinal,    setPrecioFinal]    = useState(
     !esGarantia && orden.costo_estimado ? Number(orden.costo_estimado) : ''
   );
-  const [costoGarantia,  setCostoGarantia]  = useState('');
+  const [costoGarantia,  setCostoGarantia]  = useState(
+    esGarantia && orden.costo_garantia != null ? Number(orden.costo_garantia) : ''
+  );
   const [precioGarantia, setPrecioGarantia] = useState('');
   const [notas, setNotas] = useState(orden.notas_tecnico || '');
   const [error, setError] = useState('');
@@ -1823,8 +1840,16 @@ function ReimprimirComprobante({ orden, onClose }) {
 
 export default function ServiciosPage() {
   const queryClient = useQueryClient();
-  const { esAdminNegocio } = useAuth();
+  const { esAdminNegocio, usuario } = useAuth();
   const esAdmin = esAdminNegocio();
+  // Técnicos externos: pestaña propia, opt-in por negocio. La pestaña vive en
+  // la URL (?tab=tecnicos) porque a ella llevan los avisos.
+  const configNegocio = useConfig();
+  const conTecnicos = configNegocio.tecnicos_externos_activo === '1';
+  const puedeMoverTec = conTecnicos && puedeTecnicos(usuario, 'mover');
+  const [params, setParams] = useSearchParams();
+  const tab = conTecnicos && params.get('tab') === 'tecnicos' ? 'tecnicos' : 'ordenes';
+  const irATab = (t) => setParams(t === 'tecnicos' ? { tab: 'tecnicos' } : {}, { replace: true });
 
   const [busqueda,        setBusqueda]        = useState('');
   const [filtroEstado,    setFiltroEstado]    = useState('');
@@ -1882,6 +1907,19 @@ export default function ServiciosPage() {
     <>
       <div className="flex flex-col gap-5 max-w-5xl mx-auto">
 
+        {conTecnicos && (
+          <div className="flex gap-1.5 border-b border-gray-100">
+            {[['ordenes', 'Órdenes de clientes'], ['tecnicos', 'Técnicos externos']].map(([id, label]) => (
+              <button key={id} onClick={() => irATab(id)}
+                className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors
+                  ${tab === id ? 'border-blue-500 text-blue-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {tab === 'tecnicos' ? <TabTecnicos /> : (<>
         {loadingResumen ? (
           <div className="h-20 flex items-center"><Spinner /></div>
         ) : resumen && (
@@ -1953,7 +1991,7 @@ export default function ServiciosPage() {
                     const gKey = g.nombre;
                     return (
                       <GrupoCliente key={gKey} nombre={g.nombre}
-                        items={g.items} onAccion={handleAccion} esAdmin={esAdmin} />
+                        items={g.items} onAccion={handleAccion} esAdmin={esAdmin} conTecnicos={puedeMoverTec} />
                     );
                   })}
                 </div>
@@ -1986,8 +2024,18 @@ export default function ServiciosPage() {
             )}
           </div>
         )}
+        </>)}
       </div>
 
+      {accion?.tipo === 'enviar-tecnico' && (
+        <ModalEnviarTecnico orden={accion.orden} puedePagar={puedeTecnicos(usuario, 'pagar')}
+          onClose={cerrar}
+          onEnviado={() => {
+            invalidar();
+            queryClient.invalidateQueries({ queryKey: ['tecnicos'] });
+            queryClient.invalidateQueries({ queryKey: ['tecnicos-equipos'], exact: false });
+          }} />
+      )}
       {modalNueva && (
         <ModalNuevaOrden onClose={() => setModalNueva(false)} onCreada={invalidar} />
       )}

@@ -28,6 +28,8 @@ const _buildPayload = (usuario) => ({
   // emitidos —que no traen la clave— siguen funcionando igual durante el
   // despliegue.
   permisos_facturas:           usuario.rol === 'admin_negocio' ? null : (usuario.permisos_facturas ?? null),
+  // Técnicos externos. Misma regla: null = permisos base del rol.
+  permisos_tecnicos:           usuario.rol === 'admin_negocio' ? null : (usuario.permisos_tecnicos ?? null),
   // IDs de sucursales que el usuario puede ver en modo lectura (no admin)
   sucursales_vista:            usuario.rol === 'admin_negocio' ? null : (usuario.sucursales_vista ?? []),
 });
@@ -44,6 +46,9 @@ const QUERY_USUARIO_BASE = `
     u.permisos_proveedores,
     u.permisos_edicion_productos,
     u.permisos_facturas,
+    -- to_jsonb: si la migración de técnicos no se aplicó, nombrar la columna
+    -- tumbaría el LOGIN de todos. Así sale NULL (= permisos base del rol).
+    to_jsonb(u) -> 'permisos_tecnicos' AS permisos_tecnicos,
     u.sucursales_vista
   FROM usuarios u
   JOIN negocios n ON n.id = u.negocio_id

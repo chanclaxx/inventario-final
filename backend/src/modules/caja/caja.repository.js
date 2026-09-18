@@ -1,4 +1,5 @@
 const { pool } = require('../../config/db');
+const { hayTecnicos } = require('../../config/columnas');
 
 // Convierte un JS Date (UTC) al string de hora local Bogotá (UTC-5) sin zona horaria,
 // para usarlo como parámetro en queries contra columnas TIMESTAMP WITHOUT TIME ZONE.
@@ -189,7 +190,37 @@ const _moraDeCaja = async ({ sucursalId = null, negocioId = null, inicio, fin })
   }
 };
 
-const _buildResumen = ({ pf, ac, ap, cp, aa, mn, rt, dv, ad, sv, fd = [], mo = [] }) => {
+// ── Plata con técnicos externos ──────────────────────────────────────────────
+//
+// Ver migrations/20260918_tecnicos_externos.sql. Anticipos y pagos SALEN de la
+// caja de la sucursal que paga; una devolución del técnico ENTRA. Los anulados
+// no cuentan. Si cambian estas reglas, replicarlas en tesoreria.repository
+// (rama «Técnicos externos»): las dos pantallas tienen que cuadrar.
+//
+// Sin las tablas no se consulta nada: nombrarlas tumbaría la caja del día de
+// todos los negocios, no solo la función nueva.
+const _tecnicosDeCaja = async ({ sucursalId = null, negocioId = null, inicio, fin }) => {
+  if (!hayTecnicos()) return { rows: [] };
+  return pool.query(`
+    SELECT pt.id, pt.tipo, pt.valor, pt.metodo, pt.fecha, pt.notas,
+           t.nombre AS tecnico_nombre,
+           COALESCE(st.numero, st.id) AS salida_numero,
+           u.nombre  AS usuario_nombre,
+           su.nombre AS sucursal_nombre
+    FROM pagos_tecnico pt
+    JOIN tecnicos   t  ON t.id  = pt.tecnico_id
+    JOIN sucursales su ON su.id = pt.sucursal_id
+    LEFT JOIN salidas_tecnico st ON st.id = pt.salida_id
+    LEFT JOIN usuarios        u  ON u.id  = pt.usuario_id
+    WHERE NOT pt.anulado
+      AND ($1::int IS NULL OR pt.sucursal_id = $1)
+      AND ($2::int IS NULL OR su.negocio_id  = $2)
+      AND pt.fecha BETWEEN $3 AND $4
+    ORDER BY pt.fecha ASC
+  `, [sucursalId, negocioId, inicio, fin]);
+};
+
+const _buildResumen = ({ pf, ac, ap, cp, aa, mn, rt, dv, ad, sv, fd = [], mo = [], pt = [] }) => {
   const sum = (arr) => arr
     .filter((r) => r.activo !== false)
     .reduce((s, r) => s + Number(r.valor || 0), 0);
@@ -238,14 +269,21 @@ const _buildResumen = ({ pf, ac, ap, cp, aa, mn, rt, dv, ad, sv, fd = [], mo = [
   const totalPendienteDomicilios = fd
     .reduce((s, r) => s + Number(r.valor || 0), 0);
 
+  // Técnicos externos: lo que se les paga sale; lo que devuelven entra.
+  const pagosTecnico       = pt.filter((r) => r.tipo === 'Anticipo' || r.tipo === 'Pago');
+  const devolucionesTecnico = pt.filter((r) => r.tipo === 'Devolucion');
+  const totalPagosTecnico        = sum(pagosTecnico);
+  const totalDevolucionesTecnico = sum(devolucionesTecnico);
+
   const totalIngresosBruto = totalFacturas + totalAbonosCredito + totalAbonosPrestamo
     + totalAbonosDomicilio + totalAbonosServicio + totalManualesIngreso
-    + totalMoraCobrada + totalInteresCobrado;
+    + totalMoraCobrada + totalInteresCobrado + totalDevolucionesTecnico;
   // Las retomas NO se restan: los pagos de factura ya vienen NETOS de retoma
   // (el cliente paga total − retoma, y eso es lo que registra pagos_factura).
   // Restarlas aquí descontaba dos veces. El grupo queda solo informativo.
   const totalIngresos      = totalIngresosBruto;
-  const totalEgresos       = totalCompras + totalAbonosAcreedor + totalManualesEgreso + totalDevoluciones;
+  const totalEgresos       = totalCompras + totalAbonosAcreedor + totalManualesEgreso + totalDevoluciones
+    + totalPagosTecnico;
 
   // ── Resumen por método de pago (entradas + salidas) ────────────────────
   const metodoMap = {};
@@ -267,10 +305,12 @@ const _buildResumen = ({ pf, ac, ap, cp, aa, mn, rt, dv, ad, sv, fd = [], mo = [
   ad.filter((r) => r.activo !== false).forEach((r) => sumarAlMetodo(r.metodo, r.valor, 'ingreso'));
   moraCobros.forEach((r) => sumarAlMetodo(r.metodo, r.valor, 'ingreso'));
   interesCobros.forEach((r) => sumarAlMetodo(r.metodo, r.valor, 'ingreso'));
+  devolucionesTecnico.forEach((r) => sumarAlMetodo(r.metodo, r.valor, 'ingreso'));
 
   // Egresos por método
   cp.filter((r) => r.activo !== false).forEach((r) => sumarAlMetodo(r.metodo, r.valor, 'egreso'));
   aa.filter((r) => r.activo !== false).forEach((r) => sumarAlMetodo(r.metodo, r.valor, 'egreso'));
+  pagosTecnico.forEach((r) => sumarAlMetodo(r.metodo, r.valor, 'egreso'));
 
   // Compatibilidad: metodosPago plano (solo ingresos) para no romper nada existente
   const metodosPago = {};
@@ -335,6 +375,18 @@ const _buildResumen = ({ pf, ac, ap, cp, aa, mn, rt, dv, ad, sv, fd = [], mo = [
         label: 'Devoluciones por cancelación',
         items: dv,
         total: totalDevoluciones,
+      },
+      pagosTecnico: {
+        tipo:  'Egreso',
+        label: 'Pagos a técnicos externos',
+        items: pagosTecnico,
+        total: totalPagosTecnico,
+      },
+      devolucionesTecnico: {
+        tipo:  'Ingreso',
+        label: 'Devoluciones de técnicos externos',
+        items: devolucionesTecnico,
+        total: totalDevolucionesTecnico,
       },
       manuales: {
         tipo:         'Mixto',
@@ -434,7 +486,7 @@ const getResumenDia = async (cajaId, sucursalId, negocioId) => {
   if (!rango) return null;
   const { inicio, fin } = rango;
 
-  const [pf, ac, ap, cp, aa, mn, dv, rt, ad, sv, fd, mo] = await Promise.all([
+  const [pf, ac, ap, cp, aa, mn, dv, rt, ad, sv, fd, mo, pt] = await Promise.all([
 
     pool.query(`
       SELECT pf.id, pf.metodo, pf.valor, f.nombre_cliente, f.id AS factura_id,
@@ -602,12 +654,13 @@ const getResumenDia = async (cajaId, sucursalId, negocioId) => {
     // El LEFT JOIN a la tabla se hace con to_regclass para no reventar si la
     // migración de mora aún no se aplicó en una base vieja.
     _moraDeCaja({ sucursalId, inicio, fin }),
+    _tecnicosDeCaja({ sucursalId, inicio, fin }),
   ]);
 
   return _buildResumen({
     pf: pf.rows, ac: ac.rows, ap: ap.rows, cp: cp.rows,
     aa: aa.rows, mn: mn.rows, dv: dv.rows, rt: rt.rows,
-    ad: ad.rows, sv: sv.rows, fd: fd.rows, mo: mo.rows,
+    ad: ad.rows, sv: sv.rows, fd: fd.rows, mo: mo.rows, pt: pt.rows,
   });
 };
 
@@ -622,7 +675,7 @@ const getResumenGlobal = async (negocioId) => {
   const inicio = `${yyyy}-${mm}-${dd} 00:00:00.000`;
   const fin    = `${yyyy}-${mm}-${dd} 23:59:59.999`;
 
-  const [pf, ac, ap, cp, aa, mn, dv, rt, ad, sv, fd, mo] = await Promise.all([
+  const [pf, ac, ap, cp, aa, mn, dv, rt, ad, sv, fd, mo, pt] = await Promise.all([
 
     pool.query(`
       SELECT pf.id, pf.metodo, pf.valor, f.nombre_cliente,
@@ -813,12 +866,13 @@ const getResumenGlobal = async (negocioId) => {
     `, [negocioId]),
 
     _moraDeCaja({ negocioId, inicio, fin }),
+    _tecnicosDeCaja({ negocioId, inicio, fin }),
   ]);
 
   return _buildResumen({
     pf: pf.rows, ac: ac.rows, ap: ap.rows, cp: cp.rows,
     aa: aa.rows, mn: mn.rows, dv: dv.rows, rt: rt.rows,
-    ad: ad.rows, sv: sv.rows, fd: fd.rows, mo: mo.rows,
+    ad: ad.rows, sv: sv.rows, fd: fd.rows, mo: mo.rows, pt: pt.rows,
   });
 };
 

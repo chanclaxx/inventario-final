@@ -12,6 +12,7 @@ const tesoreriaRepo = require('../tesoreria/tesoreria.repository');
 const { asignarNumeroDocumento } = require('../../utils/numeracion.util');
 const { calcularCostoPromedio }  = require('../../utils/costoPromedio.util');
 const { copiarCodigoSiLibre }    = require('../../utils/codigoAuto.util');
+const { exigirNoEnTecnico }      = require('../../utils/serialEnTecnico.util');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // RED INTERNA — lógica de negocio
@@ -773,6 +774,10 @@ const despachar = async (req, {
         const s = rows[0];
         if (s.vendido)  throw { status: 400, message: `El equipo ${s.imei} ya fue vendido` };
         if (s.prestado) throw { status: 400, message: `El equipo ${s.imei} está prestado` };
+        // Despachar no escribe en `seriales` (lo hace la recepción), así que el
+        // trigger de técnicos no lo ve: sin esto el local descubriría al recibir
+        // que la bodega le mandó un equipo que está donde un técnico.
+        await exigirNoEnTecnico(client, s.id, s.imei);
 
         const { rows: dup } = await client.query(`
           SELECT lr.id FROM lineas_remision lr

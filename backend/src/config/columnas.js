@@ -48,6 +48,7 @@ const detectarColumnas = async () => {
   await _detectarRetomaReingreso();
   await _detectarListasPrecios();
   await _detectarCodigoProveedor();
+  await _detectarTecnicos();
   return _ubicacionDisponible;
 };
 
@@ -393,6 +394,38 @@ const _detectarCodigoProveedor = async () => {
 
 const hayCodigoProveedor = () => _codigoProveedorDisponible;
 
+// ── Técnicos externos ────────────────────────────────────────────────────────
+//
+// Ver migrations/20260918_tecnicos_externos.sql. Esta bandera no solo abre las
+// rutas: decide si caja, tesorería, reportes y el inventario NOMBRAN las tablas
+// nuevas. Esas consultas son de todos los negocios; si la migración fallara y
+// las nombraran igual, se caería la caja del día, no solo esta feature.
+// Se exigen las CUATRO tablas: con media estructura, media feature reventaría.
+
+const TABLAS_TECNICOS = ['tecnicos', 'salidas_tecnico', 'equipos_tecnico', 'pagos_tecnico'];
+let _tecnicosDisponible = false;
+
+const _detectarTecnicos = async () => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT table_name FROM information_schema.tables
+       WHERE table_schema = 'public' AND table_name = ANY($1::text[])`,
+      [TABLAS_TECNICOS]
+    );
+    const encontradas = new Set(rows.map((r) => r.table_name));
+    _tecnicosDisponible = TABLAS_TECNICOS.every((t) => encontradas.has(t));
+    if (!_tecnicosDisponible) {
+      console.warn('⚠️  Tablas de técnicos externos ausentes: la feature queda desactivada.');
+    }
+  } catch (err) {
+    _tecnicosDisponible = false;
+    console.error('⚠️  No se pudieron verificar las tablas de técnicos (feature desactivada):', err.message);
+  }
+  return _tecnicosDisponible;
+};
+
+const hayTecnicos = () => _tecnicosDisponible;
+
 // Solo para pruebas: permite simular una BD sin la columna sin tocar la BD real.
 const _setUbicacionDisponible  = (valor) => { _ubicacionDisponible  = !!valor; };
 const _setCatalogoDisponible   = (valor) => { _catalogoDisponible   = !!valor; };
@@ -403,6 +436,7 @@ const _setCorreccionesEntradaDisponible = (valor) => { _correccionesEntradaDispo
 const _setRetomaReingresoDisponible = (valor) => { _retomaReingresoDisponible = !!valor; };
 const _setListasPreciosDisponible = (valor) => { _listasPreciosDisponible = !!valor; };
 const _setCodigoProveedorDisponible = (valor) => { _codigoProveedorDisponible = !!valor; };
+const _setTecnicosDisponible = (valor) => { _tecnicosDisponible = !!valor; };
 
 module.exports = {
   detectarColumnas, hayUbicacion, _setUbicacionDisponible,
@@ -414,4 +448,5 @@ module.exports = {
   hayRetomaReingreso, _setRetomaReingresoDisponible,
   hayListasPrecios, _setListasPreciosDisponible,
   hayCodigoProveedor, _setCodigoProveedorDisponible,
+  hayTecnicos, _setTecnicosDisponible,
 };
