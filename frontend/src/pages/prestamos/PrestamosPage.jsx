@@ -1,4 +1,4 @@
-import { useState, useContext } from 'react';
+import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { buscarPrestamos as buscarPrestamosApi } from '../../api/busqueda.api';
@@ -49,7 +49,6 @@ import {
 import { ModalExportarPdfPrestamos }             from './ModalExportarPdfPrestamos';
 import api                                      from '../../api/axios.config';
 import useSucursalStore                         from '../../store/sucursalStore';
-import { AuthContext }                          from '../../context/AuthContext.js';
 import {
   getProductosSerial, getProductosCantidad,
 }                                               from '../../api/productos.api';
@@ -2727,10 +2726,6 @@ function TarjetaGrupoPersona({ grupo, abierto, onAlternar, onAbrirPersona, rende
 }
 
 function TabBusquedaPrestamos({ onAbrirPersona }) {
-  const { usuario }         = useContext(AuthContext);
-  const esAdmin             = usuario?.rol === 'admin_negocio';
-  const sucursalesStore     = useSucursalStore((s) => s.sucursales);
-
   const [q,              setQ]              = useState('');
   const [estado,         setEstado]         = useState('');
   const [tipo,           setTipo]           = useState('');
@@ -2738,8 +2733,7 @@ function TabBusquedaPrestamos({ onAbrirPersona }) {
   const [cargo,          setCargo]          = useState('');
   const [fechaDesde,     setFechaDesde]     = useState('');
   const [fechaHasta,     setFechaHasta]     = useState('');
-  const [sucursalFiltro, setSucursalFiltro] = useState('');
-  const [masFiltros,     setMasFiltros]     = useState(false);
+  const [masFiltros,    setMasFiltros]     = useState(false);
   const [vista,          setVista]          = useState('personas'); // 'personas' | 'prestamos'
   const [orden,          setOrden]          = useState('urgencia');
   // Grupos abiertos. Con UNA sola persona se abre sola (ver `abiertoDe`).
@@ -2752,12 +2746,11 @@ function TabBusquedaPrestamos({ onAbrirPersona }) {
   const hasFilter = q.trim().length >= 2 || estado || tipo || situacion || cargo || fechaDesde || fechaHasta;
 
   const { data: searchData, isLoading } = useQuery({
-    queryKey: ['busqueda-prestamos', q, estado, tipo, situacion, cargo, fechaDesde, fechaHasta, sucursalFiltro],
+    queryKey: ['busqueda-prestamos', q, estado, tipo, situacion, cargo, fechaDesde, fechaHasta],
     queryFn:  () => buscarPrestamosApi({
       q: q.trim(), estado, tipo, fechaDesde, fechaHasta,
       ...(situacion && { situacion }),
       ...(cargo && { cargo }),
-      ...(sucursalFiltro && { suc: sucursalFiltro }),
     }).then((r) => r.data.data),
     enabled: !!hasFilter,
     staleTime: 30 * 1000,
@@ -2784,10 +2777,10 @@ function TabBusquedaPrestamos({ onAbrirPersona }) {
 
   const limpiar = () => {
     setQ(''); setEstado(''); setTipo(''); setSituacion(''); setCargo('');
-    setFechaDesde(''); setFechaHasta(''); setSucursalFiltro('');
+    setFechaDesde(''); setFechaHasta('');
   };
 
-  const filtrosOcultosActivos = [estado, tipo, fechaDesde, fechaHasta, sucursalFiltro].filter(Boolean).length;
+  const filtrosOcultosActivos = [estado, tipo, fechaDesde, fechaHasta].filter(Boolean).length;
 
   const renderPrestamo = (p) => (
     <TarjetaResultadoPrestamo
@@ -2842,7 +2835,7 @@ function TabBusquedaPrestamos({ onAbrirPersona }) {
         )}
       </div>
 
-      {/* Más filtros: estado, tipo, sucursal y fechas */}
+      {/* Más filtros: estado, tipo y fechas */}
       <button type="button" onClick={() => setMasFiltros((v) => !v)}
         className="flex items-center gap-1.5 text-xs font-medium text-gray-500 hover:text-gray-700 w-fit">
         <SlidersHorizontal size={13} />
@@ -2873,24 +2866,6 @@ function TabBusquedaPrestamos({ onAbrirPersona }) {
               );
             })}
           </div>
-
-          {/* Filtro sucursal — solo admin_negocio con múltiples sucursales */}
-          {esAdmin && sucursalesStore.length > 1 && (
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-gray-500">Sucursal</label>
-              <select
-                value={sucursalFiltro}
-                onChange={(e) => setSucursalFiltro(e.target.value)}
-                className="px-3 py-2 bg-white border border-gray-200 rounded-xl text-sm text-gray-700
-                  focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
-              >
-                <option value="">Todas las sucursales</option>
-                {sucursalesStore.map((s) => (
-                  <option key={s.id} value={String(s.id)}>{s.nombre}</option>
-                ))}
-              </select>
-            </div>
-          )}
 
           <div className="grid grid-cols-2 gap-2">
             <div className="flex flex-col gap-1">
