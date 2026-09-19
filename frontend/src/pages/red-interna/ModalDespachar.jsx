@@ -12,6 +12,8 @@ import { Modal }   from '../../components/ui/Modal';
 import { Button }  from '../../components/ui/Button';
 import { Spinner } from '../../components/ui/Spinner';
 import { InputMoneda } from '../../components/ui/InputMoneda';
+import { usePrecioMinimo } from '../../hooks/usePrecioMinimo';
+import { bajoMinimo } from '../../utils/precioMinimo';
 import {
   Truck, Trash2, Check, AlertTriangle, Store, Package, ShoppingBag,
   Plus, Minus, Search, X, ClipboardList,
@@ -61,7 +63,16 @@ const conValorInicial = (item) => {
 // Es lo que el local va a deber por esa mercancía. Viene con el precio de venta
 // puesto (o el costo si no hay precio), pero se puede cambiar: hace falta
 // cuando saldría en $0 o cuando se acuerda otro valor para esa entrega.
-function ValorLinea({ item, onCambiar }) {
+// Precio mínimo (feature opt-in): el piso es el precio de venta de la bodega.
+// Con listas de precios activas el piso puede ser el de una lista, que estas
+// líneas no traen: ahí no se adivina en pantalla y responde el backend.
+const minimoDespacho = (item, regla) => {
+  if (!regla.activo || regla.listaIds.length > 0) return null;
+  const p = Number(item.precio_venta || 0);
+  return p > 0 ? p : null;
+};
+
+function ValorLinea({ item, onCambiar, minimo = null }) {
   const unitario = Number(item.valor_interno || 0);
   const cantidad = item.tipo === 'cantidad' ? (item.cantidad || 1) : 1;
   const sugerido = Number(item.precio_carrito || 0);
@@ -82,8 +93,16 @@ function ValorLinea({ item, onCambiar }) {
         className={`w-full px-2.5 py-1.5 bg-gray-100 border rounded-lg text-sm text-right
           tabular-nums focus:outline-none focus:ring-2 focus:ring-blue-500
           ${item.sin_costo ? 'border-amber-400 bg-amber-50'
-            : dedazo ? 'border-red-300 bg-red-50' : 'border-transparent'}`}
+            : (dedazo || bajoMinimo(unitario, minimo)) ? 'border-red-300 bg-red-50' : 'border-transparent'}`}
       />
+      {bajoMinimo(unitario, minimo) && (
+        <button
+          onClick={() => onCambiar(Math.round(minimo))}
+          className="text-[11px] text-red-600 hover:text-red-700 font-medium"
+        >
+          el mínimo es {formatCOP(minimo)} · usarlo
+        </button>
+      )}
       {item.sin_costo && (
         <span className="text-[11px] text-amber-600 font-medium">sin precio ni costo — escríbelo</span>
       )}
@@ -322,6 +341,10 @@ export function ModalDespachar({
   // pero tiene que ser una decisión y no un descuido.
   const enCero = items.filter((i) => Number(i.valor_interno || 0) === 0);
 
+  const reglaPrecio = usePrecioMinimo();
+  const bajoElMinimo = items.filter(
+    (i) => bajoMinimo(Number(i.valor_interno || 0), minimoDespacho(i, reglaPrecio)));
+
   const enviar = useMutation({
     mutationFn: (confirmadoSinCobro = false) => despachar({
       sucursal_destino_id: destino,
@@ -519,7 +542,8 @@ export function ModalDespachar({
                       </div>
                     )}
 
-                    <ValorLinea item={i} onCambiar={(v) => cambiarValor(k, v)} />
+                    <ValorLinea item={i} onCambiar={(v) => cambiarValor(k, v)}
+                      minimo={minimoDespacho(i, reglaPrecio)} />
                     <button
                       onClick={() => setItems((p) => p.filter((x) => claveDe(x) !== k))}
                       className="text-gray-300 hover:text-red-500 transition-colors flex-shrink-0"
@@ -576,11 +600,21 @@ export function ModalDespachar({
           </label>
         )}
 
+        {bajoElMinimo.length > 0 && (
+          <p className="text-xs text-red-600">
+            {bajoElMinimo.length === 1
+              ? '1 producto va por debajo de su precio de venta.'
+              : `${bajoElMinimo.length} productos van por debajo de su precio de venta.`}
+            {' '}Este negocio no permite despachar por menos.
+          </p>
+        )}
+
         <div className="flex gap-2 pt-1">
           <Button variant="secondary" className="flex-1" onClick={onCerrar}>Cancelar</Button>
           <Button
             className="flex-1"
-            disabled={!destino || items.length === 0 || (enCero.length > 0 && !sinCobro)}
+            disabled={!destino || items.length === 0 || (enCero.length > 0 && !sinCobro)
+              || bajoElMinimo.length > 0}
             loading={revisar.isPending || enviar.isPending}
             onClick={() => { setError(''); revisar.mutate(); }}
           >

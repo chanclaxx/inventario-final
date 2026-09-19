@@ -26,6 +26,8 @@ import { useBorradores }        from '../../hooks/useBorradores';
 import { unidadesLibres }       from '../../utils/reservas';
 import { filtrarCarrito, MINIMO_PARA_BUSCAR } from '../../utils/carritoBusqueda';
 import { useListasPrecios } from '../../hooks/useListasPrecios';
+import { usePrecioMinimo } from '../../hooks/usePrecioMinimo';
+import { pisoItemCarrito, bajoMinimo, itemsBajoMinimo } from '../../utils/precioMinimo';
 import { SelectorListaPrecio, ListaPrecioItem } from '../../components/ui/SelectorListaPrecio';
 import { contarSinPrecio } from '../../utils/listasPrecios';
 
@@ -202,6 +204,12 @@ export function Carrito({ onFacturar, onPrestar, onBorradorCargado, sinHeader = 
   const sinPrecioEnLista = listasCfg.activo && listaPrecioActiva
     ? contarSinPrecio(items, listaPrecioActiva.id)
     : 0;
+
+  // ── Precio mínimo (feature opt-in) ────────────────────────────────────────
+  // El backend rechaza la factura igual; esto lo dice ANTES, en la línea.
+  const reglaPrecio = usePrecioMinimo();
+  const bajoElMinimo = itemsBajoMinimo(items, reglaPrecio);
+  const pisoPorKey   = new Map(items.map((i) => [i.key, pisoItemCarrito(i, reglaPrecio)]));
 
   const [modalTraslado, setModalTraslado] = useState(false);
   const [despacho,      setDespacho]      = useState(null); // { items, descartados }
@@ -541,12 +549,24 @@ export function Carrito({ onFacturar, onPrestar, onBorradorCargado, sinHeader = 
                       <InputMoneda
                         value={item.precioFinal}
                         onChange={(val) => actualizarPrecio(item.key, val)}
-                        className="w-28 text-right text-sm font-semibold text-gray-800 bg-white
-                          border border-gray-200 rounded-lg px-2 py-1.5 focus:outline-none
-                          focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        className={`w-28 text-right text-sm font-semibold text-gray-800 bg-white
+                          border rounded-lg px-2 py-1.5 focus:outline-none
+                          focus:ring-2 focus:ring-blue-500 focus:border-transparent
+                          ${bajoMinimo(item.precioFinal, pisoPorKey.get(item.key))
+                            ? 'border-red-400' : 'border-gray-200'}`}
                       />
                     </div>
                   </div>
+
+                  {bajoMinimo(item.precioFinal, pisoPorKey.get(item.key)) && (
+                    <button
+                      type="button"
+                      onClick={() => actualizarPrecio(item.key, pisoPorKey.get(item.key))}
+                      className="self-end text-xs text-red-600 hover:text-red-700"
+                    >
+                      El precio mínimo es {formatCOP(pisoPorKey.get(item.key))} · usarlo
+                    </button>
+                  )}
 
                   {/* La cantidad se comió lo que otro cliente tenía apartado */}
                   <AvisoApartado item={item} />
@@ -629,7 +649,14 @@ export function Carrito({ onFacturar, onPrestar, onBorradorCargado, sinHeader = 
                 acción de red interna comparten fila porque son alternativas
                 entre sí, no pasos de lo mismo: apiladas cobraban 54px cada una
                 al espacio de los productos. */}
-            <Button className="w-full" onClick={onFacturar}>
+            {bajoElMinimo.length > 0 && (
+              <p className="text-xs text-red-600 text-center">
+                {bajoElMinimo.length === 1
+                  ? '1 producto está por debajo de su precio mínimo'
+                  : `${bajoElMinimo.length} productos están por debajo de su precio mínimo`}
+              </p>
+            )}
+            <Button className="w-full" onClick={onFacturar} disabled={bajoElMinimo.length > 0}>
               <FileText size={16} /> Hacer Factura
             </Button>
 

@@ -13,6 +13,7 @@ const { asignarNumeroDocumento } = require('../../utils/numeracion.util');
 const { calcularCostoPromedio }  = require('../../utils/costoPromedio.util');
 const { copiarCodigoSiLibre }    = require('../../utils/codigoAuto.util');
 const { exigirNoEnTecnico }      = require('../../utils/serialEnTecnico.util');
+const precioMinimo            = require('../../utils/precioMinimo.util');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // RED INTERNA — lógica de negocio
@@ -749,6 +750,11 @@ const despachar = async (req, {
         })
       : null;
 
+    // Precio mínimo (opt-in `precio_minimo_activo`): el valor de la línea no
+    // puede quedar por debajo del precio de venta de la BODEGA (el menor entre
+    // el predeterminado y sus listas). Apagado, `reglaPrecio` es null.
+    const reglaPrecio = await precioMinimo.leerRegla(client, negocioId);
+
     const remision = await repo.crearRemision(client, {
       negocio_id: negocioId, tipo: 'entrega',
       sucursal_origen_id: origenId, sucursal_destino_id: destinoId,
@@ -800,6 +806,14 @@ const despachar = async (req, {
         // `seriales.costo_compra` NUNCA se modifica — es la verdad del costo
         // para los reportes, aquí solo se fotografía.
         const valorSerial = _valorLinea(s.costo_compra, l.valor_interno);
+        if (reglaPrecio) {
+          precioMinimo.exigirNoBajoMinimo({
+            valor:  valorSerial,
+            piso:   await precioMinimo.pisoSerial(client, reglaPrecio, { serialId: s.id, sucursalId: origenId }),
+            nombre: s.imei ? `${s.nombre} (${s.imei})` : s.nombre,
+            accion: 'despachar',
+          });
+        }
         if (valorSerial === 0) enCero.push(s.imei || s.nombre);
         await repo.insertarLineaRemision(client, {
           remision_id: remision.id, tipo: 'serial',
@@ -857,6 +871,16 @@ const despachar = async (req, {
         });
 
         const valorCantidad = _valorLinea(nodo.costo, l.valor_interno);
+        if (reglaPrecio) {
+          precioMinimo.exigirNoBajoMinimo({
+            valor:  valorCantidad,
+            piso:   await precioMinimo.pisoCantidad(client, reglaPrecio, {
+              productoId: nodo.productoId, atributoId: nodo.atributoId, varianteId: nodo.varianteId,
+            }),
+            nombre: nodo.etiqueta,
+            accion: 'despachar',
+          });
+        }
         if (valorCantidad === 0) enCero.push(nodo.etiqueta);
         await repo.insertarLineaRemision(client, {
           remision_id: remision.id, tipo: 'cantidad',

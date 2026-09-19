@@ -25,6 +25,8 @@ import api                   from '../../api/axios.config';
 import useCarritoStore       from '../../store/carritoStore';
 import { useBorradores, useGuardarBorradorDesdeModal } from '../../hooks/useBorradores';
 import { useTarifas }        from '../../hooks/useTarifas';
+import { usePrecioMinimo }   from '../../hooks/usePrecioMinimo';
+import { itemsBajoMinimo }   from '../../utils/precioMinimo';
 import { useMora }           from '../../hooks/useMora';
 import { useInteres }        from '../../hooks/useInteres';
 import { TarifaItem }        from '../../components/ui/SelectorTarifa';
@@ -957,6 +959,8 @@ export function ModalFactura({ open, onClose }) {
   // Tarifas porcentuales: se repiten aquí para poder corregir el precio sin
   // volver al carrito. Con la feature apagada `activo` es false y no se pinta.
   const tarifasCfg = useTarifas();
+  // Precio mínimo (opt-in): aquí también se puede editar el precio.
+  const reglaPrecio = usePrecioMinimo();
 
   // Plazo de pago y mora. Apagada la feature, `activa` es false y el selector
   // de plazo no se renderiza.
@@ -1251,6 +1255,12 @@ export function ModalFactura({ open, onClose }) {
     if (tipoCliente === 'cliente' && !form.cedula.trim())   return setError('La cédula es requerida');
     if (tipoCliente === 'cliente' && !form.celular.trim())  return setError('El celular es requerido');
     if (mostrarVendedor && !vendedorId)                     return setError('Selecciona el vendedor que realizó la venta');
+
+    const bajos = itemsBajoMinimo(items, reglaPrecio);
+    if (bajos.length) {
+      const { item, piso } = bajos[0];
+      return setError(`"${item.nombre}" está por debajo de su precio mínimo (${formatCOP(piso)})`);
+    }
 
     // Validaciones de crédito
     if (credito.activo) {

@@ -425,6 +425,28 @@ const saveConfig = async (negocioId, datos) => {
     };
   }
 
+  // ── El precio mínimo y las tarifas porcentuales también son EXCLUYENTES ───
+  //
+  // El piso sale de los precios ESCRITOS (predeterminado y listas). Una tarifa
+  // calcula el precio desde el costo en el navegador del vendedor, así que el
+  // candado rechazaría justo el precio que la tarifa acaba de proponer — o
+  // habría que recalcular tarifas en el servidor con el costo de cada sede.
+  if (datosProcesados.precio_minimo_activo === '1' && (await _guardado('tarifas_activo')) === '1') {
+    throw {
+      status: 400,
+      message: 'No puedes exigir el precio mínimo con las tarifas porcentuales activas: '
+        + 'la tarifa calcula el precio desde el costo y el candado lo rechazaría. '
+        + 'Apaga primero las tarifas porcentuales.',
+    };
+  }
+  if (datosProcesados.tarifas_activo === '1' && (await _guardado('precio_minimo_activo')) === '1') {
+    throw {
+      status: 400,
+      message: 'No puedes activar las tarifas porcentuales con el precio mínimo activo. '
+        + 'Apaga primero «No vender por debajo del precio» en Precios de venta.',
+    };
+  }
+
   // Quién más puede usar el PIN: se valida que cada id sea un usuario de ESTE
   // negocio, o un admin podría autorizar (sin saberlo) un id de otro negocio.
   if (datosProcesados.pin_usuarios_autorizados !== undefined) {

@@ -8,6 +8,18 @@ const { enviarFactura }      = require('../email/email.service');
 const garantiasRepo          = require('../garantias/garantias.repository');
 const { calcularCostoPromedio } = require('../../utils/costoPromedio.util');
 const { ingresarSerialRetomado, revertirIngresoSerial, rastroParaRetoma } = require('../../utils/retomaSerial.util');
+const precioMinimo = require('../../utils/precioMinimo.util');
+
+// Piso de una línea de factura (feature opt-in `precio_minimo_activo`). La línea
+// solo guarda el IMEI de un serial, así que se busca por IMEI dentro de la sede.
+// Una línea sin producto (texto libre) no tiene precio escrito y no tiene piso.
+const _pisoLineaFactura = (client, regla, linea, sucursalId) => (
+  linea.imei
+    ? precioMinimo.pisoSerial(client, regla, { imei: linea.imei, sucursalId })
+    : precioMinimo.pisoCantidad(client, regla, {
+        productoId: linea.producto_id, atributoId: linea.atributo_id, varianteId: linea.variante_id,
+      })
+);
 
 const ES_COMPANERO = (cedula) => cedula === 'COMPANERO';
 
@@ -290,7 +302,18 @@ const crearFactura = async ({
 
     let totalLineas = 0;
 
+    // Precio mínimo (opt-in). Con la clave apagada `regla` es null y no corre
+    // una sola consulta más por línea.
+    const reglaPrecio = await precioMinimo.leerRegla(client, negocio_id);
+
     for (const linea of lineas) {
+      if (reglaPrecio) {
+        precioMinimo.exigirNoBajoMinimo({
+          valor:  linea.precio,
+          piso:   await _pisoLineaFactura(client, reglaPrecio, linea, sucursal_id),
+          nombre: linea.nombre_producto,
+        });
+      }
       const lineaInsertada = await facturasRepo.insertarLinea(client, {
         factura_id:      factura.id,
         nombre_producto: linea.nombre_producto,
@@ -892,6 +915,25 @@ const editarFactura = async (negocioId, id, {
        WHERE id = $7`,
       [nombre_cliente, cedula, celular, notas, cliente_id, vendedorFinal, id]
     );
+
+    // Precio mínimo (opt-in): sin esto bastaba con facturar al precio completo y
+    // bajarlo después editando. Solo se mira la línea cuyo precio BAJA: una
+    // factura vieja, hecha antes de encender el candado, se sigue pudiendo
+    // corregir en todo lo demás sin que la detenga un precio que ya tenía.
+    const reglaPrecio = await precioMinimo.leerRegla(client, negocioId);
+    if (reglaPrecio) {
+      const antesPorId = new Map(lineasAntes.map((l) => [Number(l.id), l]));
+      for (const linea of lineas) {
+        const antes = antesPorId.get(Number(linea.id));
+        if (!antes || Number(linea.precio) >= Number(antes.precio)) continue;
+        precioMinimo.exigirNoBajoMinimo({
+          valor:  linea.precio,
+          piso:   await _pisoLineaFactura(client, reglaPrecio, antes, facturaActual.sucursal_id),
+          nombre: antes.nombre_producto,
+          accion: 'dejar',
+        });
+      }
+    }
 
     for (const linea of lineas) {
       await client.query(
