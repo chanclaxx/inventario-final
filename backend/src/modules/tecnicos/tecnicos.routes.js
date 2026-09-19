@@ -29,5 +29,6 @@ router.post('/',                    requirePermisoTecnicos('gestionar'), ctrl.cr
 router.get('/:id',                  ctrl.detalleTecnico);
 router.put('/:id',                  requirePermisoTecnicos('gestionar'), ctrl.actualizarTecnico);
 router.post('/:id/pagos',           requirePermisoTecnicos('pagar'), ctrl.registrarPago);
+router.post('/:id/pagos-sucursales', requirePermisoTecnicos('pagar'), ctrl.pagarPorSucursales);
 
 module.exports = router;

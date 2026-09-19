@@ -220,7 +220,7 @@ function dibujarTabla(doc, movimientos, startY) {
   const cols = [
     { label: 'Fecha',         x: MARGIN,       w: 62,  align: 'left'  },
     { label: 'Justificación', x: MARGIN + 62,  w: 197, align: 'left'  },
-    { label: '−',             x: MARGIN + 259, w: 76,  align: 'right' },
+    { label: '-',             x: MARGIN + 259, w: 76,  align: 'right' },
     { label: '+',             x: MARGIN + 335, w: 76,  align: 'right' },
     { label: 'Saldo',         x: MARGIN + 411, w: 88,  align: 'right' },
   ];
@@ -233,7 +233,7 @@ function dibujarTabla(doc, movimientos, startY) {
   const dibujarCabecera = (yy) => {
     rectFill(doc, MARGIN, yy, CW, HEAD_H, C.negro, 6);
     cols.forEach((col) => {
-      const isNeg = col.label === '−';
+      const isNeg = col.label === '-';
       const isPos = col.label === '+';
       const color = isNeg ? C.verde : isPos ? C.naranja : C.blanco;
       doc.font(FONT.bold).fontSize(8).fillColor(color)

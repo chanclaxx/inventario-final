@@ -150,7 +150,7 @@ const _tabla = (doc, movimientos, tipoLabels, startY) => {
   const cols = [
     { label: 'Fecha',         x: MARGIN,       w: 62,  align: 'left'  },
     { label: 'Justificación', x: MARGIN + 62,  w: 199, align: 'left'  },
-    { label: '−',             x: MARGIN + 261, w: 76,  align: 'right' },
+    { label: '-',             x: MARGIN + 261, w: 76,  align: 'right' },
     { label: '+',             x: MARGIN + 337, w: 76,  align: 'right' },
     { label: 'Saldo',         x: MARGIN + 413, w: 86,  align: 'right' },
   ];
@@ -163,7 +163,7 @@ const _tabla = (doc, movimientos, tipoLabels, startY) => {
   const dibujarCabecera = (yy) => {
     rectFill(doc, MARGIN, yy, COL_WIDTH, HEAD_H, C.negro, 6);
     cols.forEach((col) => {
-      const color = col.label === '−' ? C.verde : col.label === '+' ? C.naranja : C.blanco;
+      const color = col.label === '-' ? C.verde : col.label === '+' ? C.naranja : C.blanco;
       doc.font(FONT.bold).fontSize(8).fillColor(color)
         .text(col.label, col.x + 4, yy + 9, { width: col.w - 8, align: col.align });
     });

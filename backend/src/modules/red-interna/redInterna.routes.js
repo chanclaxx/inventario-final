@@ -28,6 +28,11 @@ router.get('/sucursales',               ctrl.getSucursales);
 router.get('/contexto',                 ctrl.getContexto);
 router.get('/remisiones',               ctrl.listarRemisiones);
 router.get('/remisiones/:id',           ctrl.getRemision);
+// PDF: mismo control de acceso que la pantalla (la bodega y el local del
+// envío). Un local nunca imprime lo de otro: lo decide el service.
+router.get('/remisiones/:id/pdf',             ctrl.pdfEnvio);
+router.get('/estado-cuenta/:sucursalId/pdf',  ctrl.pdfEstadoCuenta);
+router.get('/envios-activos/:sucursalId/pdf', ctrl.pdfEnviosActivos);
 router.get('/remesas',                  ctrl.listarRemesas);
 router.get('/cuenta/movimientos',       ctrl.getMovimientosCuenta);
 router.get('/conciliacion/:sucursalId', ctrl.getConciliacion);

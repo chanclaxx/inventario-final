@@ -709,6 +709,32 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > consume por construcción. Toda la aritmética vive en `tecnicos.cuenta.js`
 > (funciones puras), que usan el service para validar y la pantalla para pintar.
 > Pago ≤ deuda (si no, es un anticipo); devolución ≤ saldo a favor.
+> **UNA CUENTA POR SUCURSAL** (decisión del negocio, 18-sep-2026): el técnico
+> es del negocio, pero cada sede tiene su propia cuenta con él. Un arreglo es de
+> la sede del EQUIPO; un pago, de la sede cuya CAJA lo pagó. Con una cuenta
+> única la caja de B pagaba arreglos de A y el anticipo de A se gastaba en un
+> trabajo de B: ninguna caja decía la verdad. `materiaCuenta` y toda validación
+> van por `(tecnico, sucursal)`; `cuentasPorSucursal` arma el desglose y un
+> TOTAL que suma `deuda` y `saldo_a_favor` por separado (no se compensan entre
+> sedes, así que los dos pueden ser > 0). Supervisor y vendedor solo ven y
+> pagan la de su sede, y la sede del cuerpo se ignora; el admin DEBE mandar
+> `sucursal_id` al pagar (`SUCURSAL_REQUERIDA`: antes caía en la primera sede
+> activa) y «Pagar todo» (`POST /tecnicos/:id/pagos-sucursales`) registra un
+> pago por sede, cada uno contra SU deuda, todos o ninguno.
+> **Doble clic** (la lección de préstamos): toda operación que toca la cuenta
+> toma `bloquearOperacion('tecnico:<id>')` como PRIMERA cosa de la transacción
+> —si llega con el id de un equipo o un pago, el técnico se lee SIN bloqueo
+> (`_tecnicoDe`, dato inmutable), se toma el candado y recién entonces se lee
+> con FOR UPDATE— y uno solo por transacción. La ventana de gemelos (90 s)
+> compara TAMBIÉN la sede (dos sedes pagan lo mismo en «Pagar todo») y NO se
+> aplica al pago dentro de «Recibir» (lo protege el estado del equipo; con la
+> ventana, pagar igual dos equipos de la misma salida parecía un duplicado).
+> Técnico activo con nombre repetido: índice único + 409 `TECNICO_DUPLICADO`.
+> De paso, `servicios.registrarAbono` (orden de CLIENTE) valida en el backend
+> que el abono quepa en el saldo y rechaza el mismo abono repetido en 90 s: el
+> tope vivía solo en la pantalla y un reintento tras el corte de 30 s pasaba.
+> La pantalla de abono usa ahora la misma base que el backend (en garantía
+> cobrable, `precio_garantia`).
 > **A dónde va el costo** (`costo_aplicado_a`, congelado al recibir):
 > `costo_compra` (equipo propio: se SUMA, con `costo_serial_anterior/nuevo`
 > de rastro); `valor_interno` (equipo CONSIGNADO en un local de la red: su
@@ -737,10 +763,12 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > migración; copia del frontend en `utils/permisosTecnicos.js`. Avisos:
 > `tecnicos_demorados` y `tecnicos_garantia_por_vencer` en el motor. La
 > migración la corre el runner leyendo el MISMO `.sql` (lleva PL/pgSQL).
-> Prueba: `54-tecnicos-externos` (141 verificaciones; la sección 1 es la que
+> Prueba: `54-tecnicos-externos` (196 verificaciones; la sección 1 es la que
 > protege a los negocios —sin las tablas todo emite el SQL de siempre—, la 4 el
 > candado, la 6 la cuenta, la 7 que caja y tesorería cuadran, la 10 el equipo
-> consignado y la 16 que el frontend no se separe del backend).
+> consignado, la 16 que el frontend no se separe del backend y la 18 la
+> independencia de las sucursales y la 19 el doble clic —estática en el orden
+> de los candados, porque PGlite no simula concurrencia—).
 
 > **Cargos financieros — mora e interés** (`mora/`, `utils/devengo.util.js`,
 > `utils/mora.util.js`, `utils/interes.util.js`): dos cargos **independientes**
@@ -1692,6 +1720,38 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > `src/config/migrations.js`, que corre en cada arranque. Escribir el `.sql` y
 > olvidar el runner deja el despliegue con el código nuevo contra una base vieja
 > — ya pasó con `abonos_remision`.
+
+> **PDF de la red interna — tres documentos, como préstamos** (`redInterna.pdf.js`,
+> `BotonPdfRed.jsx`, `useExportarPdfRedInterna.js`): (1) **un envío** o una
+> devolución, tipo factura: productos con IMEI, lo que no llegó y lo devuelto,
+> cargo, abonos (la remesa en camino se marca y no cuenta), saldo y firmas
+> entregó/recibió; (2) **envíos pendientes** de un local: cada envío con saldo,
+> los cargos, lo que va en camino y el total; (3) **estado de cuenta** del local:
+> el extracto completo con saldo corrido. Rutas `GET /red-interna/remisiones/:id/pdf`,
+> `/estado-cuenta/:sucursalId/pdf`, `/envios-activos/:sucursalId/pdf`.
+> **Solo dibuja**: los datos salen de `getRemision`/`getEstadoCuenta`/`repo.getExtracto`,
+> así que el PDF dice lo mismo que la pantalla y hereda el acceso (un local no
+> imprime lo de otro) y el recorte del vendedor. El estado de cuenta pide el
+> extracto SIN el tope de 300 de la pantalla. Dice «no es factura de venta».
+> **El vendedor y los valores por línea**: la clave `red_interna_ocultar_costos`
+> existía (ausente = ocultar) sin control en pantalla; ahora está en Ajustes →
+> Red interna como «el vendedor ve el valor de cada producto del envío» (pantalla
+> y PDF). El valor del envío es lo que el local DEBE; el costo de la BODEGA
+> (`costo_origen`) no lo ve nadie del local — **viajaba en el JSON de
+> `getRemision`** (`lr.*`) a supervisores y vendedores, y ya no: solo el admin.
+> `costos_solo_admin` sigue mandando por encima. Lo **acreditado** de una
+> devolución lo calcula `getRemision` (`resumen.acreditado`) antes del recorte:
+> es cuenta, y el vendedor la ve.
+> **`getAbonosDeEnvio` filtraba `remision_id = $2 OR cargo_id = $2`**: envíos y
+> cargos tienen numeraciones distintas, así que un cargo con el mismo id sumaba
+> sus abonos al envío y su detalle mostraba menos saldo. Ahora solo `remision_id`.
+> **Helvetica solo tiene WinAnsi**: el menos tipográfico `−` (U+2212) y `→` se
+> imprimen como COMILLAS. Pasaba también en el encabezado de la columna de abonos
+> de `estadoCuenta.pdf.js` (préstamos y créditos) y `acreedores.pdf.js`, ya
+> corregido. Se descubrió RENDERIZANDO el PDF: el texto extraído decía «−$».
+> Prueba: `55-pdf-red-interna` (49; la 2 quién ve valores, la 3 los abonos
+> ajenos, la 8 un envío de 70 líneas sin saltos de PDFKit, la 9 que ningún
+> carácter impreso quede fuera de WinAnsi).
 
 > **El despacho PREGRABA el precio de venta** (decisión del negocio, sep-2026;
 > `ModalDespachar.conValorInicial`): el valor de cada línea sale con el precio

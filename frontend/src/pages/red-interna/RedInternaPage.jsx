@@ -14,6 +14,7 @@ import { ModalDespachar } from './ModalDespachar';
 import { ModalPedido }    from './ModalPedido';
 import { BandejaPedidos } from './PedidosSecciones';
 import { CuentaLocal }   from './CuentaLocal';
+import { BotonPdfRed }   from './BotonPdfRed';
 import {
   Package, PackageCheck, Truck, Store, AlertTriangle, CheckCircle,
   Wallet, ShieldCheck, ChevronRight, X, Undo2, Receipt, XCircle,
@@ -312,6 +313,13 @@ function PanelBodega({ data, locales, onRefrescar, onAviso, onVerCuenta }) {
                     {r.total_items} producto(s) · {formatCOP(r.valor_total)} · {formatFechaHora(r.fecha_emision)}
                   </p>
                 </div>
+                {/* La guía para mandar con la mercancía: el mismo PDF del envío,
+                    que en tránsito sale sin deuda y con las firmas en blanco. */}
+                <BotonPdfRed compacto etiqueta="Guía PDF" pdf={{
+                  ruta: `/red-interna/remisiones/${r.id}/pdf`,
+                  nombreArchivo: `envio-${r.numero ?? r.id}.pdf`,
+                  titulo: `Envío #${r.numero ?? r.id} → ${r.sucursal_destino_nombre}`,
+                }} />
                 <Button size="sm" variant="ghost"
                   loading={anular.isPending && anular.variables === r.id}
                   onClick={() => anular.mutate(r.id)}

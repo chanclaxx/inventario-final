@@ -1135,7 +1135,11 @@ function ModalAbono({ orden, onClose, onExito }) {
   const [error,  setError]  = useState('');
   const metodosPago = useMetodosPago();
 
-  const saldo      = Number(orden.precio_final || 0) - Number(orden.total_abonado || 0);
+  // Misma regla que el backend (servicios.repository.registrarAbono): en una
+  // garantía cobrable se cobra el precio de la GARANTÍA, no el de la reparación.
+  const totalCobro = (orden.estado === 'Garantia' && orden.garantia_cobrable && orden.precio_garantia)
+    ? Number(orden.precio_garantia) : Number(orden.precio_final || 0);
+  const saldo      = totalCobro - Number(orden.total_abonado || 0);
   const valorNum   = Number(valor || 0);
   const excedeSaldo = valorNum > saldo;
 

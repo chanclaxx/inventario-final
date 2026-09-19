@@ -205,6 +205,41 @@ const getRemision = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+// ── PDF ──────────────────────────────────────────────────────────────────────
+// Los tres documentos (ver redInterna.pdf.js). Los datos y el control de acceso
+// salen de las mismas funciones de la pantalla; aquí solo se entrega el archivo.
+// Un error ANTES de empezar a escribir el PDF (403, 404) llega como JSON normal.
+const _enviarPdf = (res, doc, nombre) => {
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `inline; filename="${nombre}"`);
+  doc.pipe(res);
+};
+
+const pdfEnvio = async (req, res, next) => {
+  try {
+    const pdf = require('./redInterna.pdf');
+    const id = Number(req.params.id);
+    const doc = await pdf.generarPdfEnvio(req, id);
+    _enviarPdf(res, doc, `envio-${id}.pdf`);
+  } catch (err) { next(err); }
+};
+
+const pdfEnviosActivos = async (req, res, next) => {
+  try {
+    const pdf = require('./redInterna.pdf');
+    const doc = await pdf.generarPdfEnviosActivos(req, req.params.sucursalId);
+    _enviarPdf(res, doc, `envios-pendientes-${req.params.sucursalId}.pdf`);
+  } catch (err) { next(err); }
+};
+
+const pdfEstadoCuenta = async (req, res, next) => {
+  try {
+    const pdf = require('./redInterna.pdf');
+    const { doc } = await pdf.generarPdfEstadoCuentaLocal(req, req.params.sucursalId);
+    _enviarPdf(res, doc, `estado-cuenta-${req.params.sucursalId}.pdf`);
+  } catch (err) { next(err); }
+};
+
 // ── Remesas de efectivo ──────────────────────────────────────────────────────
 
 const enviarRemesa = async (req, res, next) => {
@@ -372,6 +407,7 @@ const getSalud = async (req, res, next) => {
 };
 
 module.exports = {
+  pdfEnvio, pdfEnviosActivos, pdfEstadoCuenta,
   getPanel, getSucursales, getContexto,
   buscarParaDespacho, catalogoCantidad, resolverItems,
   previsualizarDestino, catalogoReferencias,

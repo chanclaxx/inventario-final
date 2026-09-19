@@ -82,19 +82,20 @@ const actualizarTecnico = async (negocioId, id, d) => {
 
 // ── Equipos y pagos (la materia prima de la cuenta) ──────────────────────────
 
-const equiposDeTecnicos = async (negocioId, tecnicoIds = null) => {
+const equiposDeTecnicos = async (negocioId, tecnicoIds = null, sucursalId = null) => {
   const { rows } = await pool.query(`
     SELECT ${COLS_EQUIPO}
     ${FROM_EQUIPO}
     WHERE e.negocio_id = $1
       AND ($2::int[] IS NULL OR e.tecnico_id = ANY($2::int[]))
+      AND ($3::int IS NULL OR e.sucursal_id = $3)
     ORDER BY s.fecha DESC, e.id DESC
-  `, [negocioId, tecnicoIds]);
+  `, [negocioId, tecnicoIds, sucursalId]);
   return rows;
 };
 
-const pagosDeTecnicos = async (negocioId, tecnicoIds = null, client = pool) => {
-  const { rows } = await client.query(`
+const pagosDeTecnicos = async (negocioId, tecnicoIds = null, sucursalId = null) => {
+  const { rows } = await pool.query(`
     SELECT p.*, u.nombre AS usuario_nombre, su.nombre AS sucursal_nombre,
            COALESCE(s.numero, s.id) AS salida_numero,
            ua.nombre AS anulado_por_nombre
@@ -105,26 +106,34 @@ const pagosDeTecnicos = async (negocioId, tecnicoIds = null, client = pool) => {
     LEFT JOIN salidas_tecnico s  ON s.id  = p.salida_id
     WHERE p.negocio_id = $1
       AND ($2::int[] IS NULL OR p.tecnico_id = ANY($2::int[]))
+      AND ($3::int IS NULL OR p.sucursal_id = $3)
     ORDER BY p.fecha ASC, p.id ASC
-  `, [negocioId, tecnicoIds]);
+  `, [negocioId, tecnicoIds, sucursalId]);
   return rows;
 };
 
 // La versión mínima para VALIDAR dentro de la transacción: solo lo que entra
-// en el saldo, leído con el mismo client que va a escribir.
-const materiaCuenta = async (client, negocioId, tecnicoId) => {
+// en el saldo de UNA sede, leído con el mismo client que va a escribir. Cada
+// sucursal tiene su propia cuenta con el técnico (ver tecnicos.cuenta).
+const materiaCuenta = async (client, negocioId, tecnicoId, sucursalId) => {
   const [{ rows: equipos }, { rows: pagos }] = await Promise.all([
     client.query(`
-      SELECT id, salida_id, estado, costo, fecha_regreso
-      FROM equipos_tecnico WHERE negocio_id = $1 AND tecnico_id = $2
-    `, [negocioId, tecnicoId]),
+      SELECT id, salida_id, sucursal_id, estado, costo, fecha_regreso
+      FROM equipos_tecnico WHERE negocio_id = $1 AND tecnico_id = $2 AND sucursal_id = $3
+    `, [negocioId, tecnicoId, sucursalId]),
     client.query(`
-      SELECT id, tipo, valor, salida_id, anulado, fecha
-      FROM pagos_tecnico WHERE negocio_id = $1 AND tecnico_id = $2
+      SELECT id, sucursal_id, tipo, valor, salida_id, anulado, fecha
+      FROM pagos_tecnico WHERE negocio_id = $1 AND tecnico_id = $2 AND sucursal_id = $3
       ORDER BY fecha, id
-    `, [negocioId, tecnicoId]),
+    `, [negocioId, tecnicoId, sucursalId]),
   ]);
   return { equipos, pagos };
+};
+
+const nombresSucursales = async (negocioId) => {
+  const { rows } = await pool.query(
+    'SELECT id, nombre FROM sucursales WHERE negocio_id = $1', [negocioId]);
+  return new Map(rows.map((r) => [Number(r.id), r.nombre]));
 };
 
 const listarEquipos = async (negocioId, { sucursalId = null, estado = null, tecnicoId = null,
@@ -305,7 +314,7 @@ const resumenPeriodo = async (negocioId, sucursalId, desde, hasta) => {
 
 module.exports = {
   listarTecnicos, findTecnico, crearTecnico, actualizarTecnico,
-  equiposDeTecnicos, pagosDeTecnicos, materiaCuenta,
+  equiposDeTecnicos, pagosDeTecnicos, materiaCuenta, nombresSucursales,
   listarEquipos, findEquipo,
   serialParaEnviar, enRemisionActiva, buscarSerialesDisponibles, esConsignado,
   ultimaFacturaDeImei, serialVendidoPorImei,

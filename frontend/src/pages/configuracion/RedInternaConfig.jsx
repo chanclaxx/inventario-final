@@ -153,13 +153,28 @@ export function RedInternaConfig({ valores, set }) {
             />
           </div>
 
+          {/* `red_interna_ocultar_costos` existía en el backend desde julio
+              (ausente = ocultar) pero no tenía control en pantalla. Se muestra
+              al revés —«ve el valor»— porque así se entiende qué cambia. El
+              valor del envío es lo que el LOCAL le debe a la bodega, no lo que a
+              ella le costó: el costo de la bodega sigue oculto siempre. Y el
+              candado general `costos_solo_admin` sigue mandando por encima. */}
+          <div className="pl-4">
+            <Toggle
+              enabled={valores.red_interna_ocultar_costos === '0'}
+              onChange={(v) => set('red_interna_ocultar_costos', v ? '0' : '1')}
+              label="El vendedor del local ve el valor de cada producto del envío"
+              description="En la pestaña Envíos y en los PDF. Apagado, el vendedor ve los productos y la cuenta (cargo, abonos, saldo) pero no el valor de cada línea. Supervisores y administradores lo ven siempre. Lo que a la bodega le costó cada producto no se le muestra nunca al local."
+            />
+          </div>
+
           <div className="pl-4">
             <div className="bg-blue-50 rounded-xl px-4 py-3">
               <p className="text-xs text-blue-700 leading-relaxed">
-                <strong>Cómo funciona el dinero:</strong> la mercancía entregada
-                <strong> no es deuda</strong>. El local solo liquida lo que vende.
-                Si vende a crédito, va liquidando a medida que cobra — la bodega
-                recupera su valor primero y el margen le queda al local.
+                <strong>Cómo funciona el dinero:</strong> cada envío es una
+                <strong> cuenta</strong>, como una factura a crédito. El local
+                debe todo lo que recibe —lo venda o no— y va abonando; lo que
+                devuelve y la bodega confirma le baja la deuda.
               </p>
             </div>
           </div>

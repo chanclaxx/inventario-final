@@ -767,7 +767,13 @@ const getAbonosDeEnvio = async (negocioId, remisionId) => {
     LEFT JOIN remesas rm                    ON rm.id = a.remesa_id
     LEFT JOIN movimientos_cuenta_interna m  ON m.id  = a.movimiento_id
     LEFT JOIN usuarios u                    ON u.id  = a.usuario_id
-    WHERE a.negocio_id = $1 AND (a.remision_id = $2 OR a.cargo_id = $2)
+    -- SOLO por remision_id. Hubo un «OR a.cargo_id = $2»: los cargos y los
+    -- envíos tienen numeraciones DISTINTAS (un cargo es una fila de
+    -- movimientos_cuenta_interna), así que cuando el id de un cargo coincidía
+    -- con el de un envío, los abonos del cargo se sumaban a ese envío y su
+    -- detalle mostraba un saldo menor al real. Nadie abre un cargo por aquí:
+    -- getRemision exige que exista la remisión.
+    WHERE a.negocio_id = $1 AND a.remision_id = $2
     ORDER BY a.fecha, a.id
   `, [negocioId, remisionId]);
   return rows;

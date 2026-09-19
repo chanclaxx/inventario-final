@@ -141,8 +141,57 @@ const extracto = (equipos, pagos) => {
   return movs;
 };
 
+// ── Una cuenta POR SUCURSAL ──────────────────────────────────────────────────
+//
+// El técnico es del negocio, pero cada sede tiene su propia cuenta con él
+// (decisión del negocio, 18-sep-2026): un arreglo es de la sede del EQUIPO y un
+// pago es de la sede cuya CAJA lo pagó. Si la cuenta fuera una sola, la caja de
+// la sede B pagaría arreglos de la A, el anticipo que dio A se gastaría en un
+// trabajo de B, y ninguna de las dos cajas contaría la verdad. Todo lo de arriba
+// sigue igual: estas funciones solo parten las listas antes de llamarlo.
+const _suc = (x) => Number(x.sucursal_id);
+
+const sucursalesDe = (equipos, pagos) =>
+  [...new Set([...equipos.map(_suc), ...pagos.map(_suc)])].filter(Number.isFinite).sort((a, b) => a - b);
+
+const deSucursal = (equipos, pagos, sucursalId) => ({
+  equipos: equipos.filter((e) => _suc(e) === Number(sucursalId)),
+  pagos:   pagos.filter((p) => _suc(p) === Number(sucursalId)),
+});
+
+/**
+ * Las cuentas de un técnico, una por sede, más el TOTAL (la suma de cada campo).
+ * Ojo: el total NO es el saldo de una cuenta única: una sede con deuda y otra
+ * con saldo a favor no se compensan entre sí, así que `deuda` y
+ * `saldo_a_favor` del total se suman por separado y los dos pueden ser > 0.
+ */
+const cuentasPorSucursal = (equipos, pagos) => {
+  const cuentas = sucursalesDe(equipos, pagos).map((sucursalId) => {
+    const m = deSucursal(equipos, pagos, sucursalId);
+    return { sucursal_id: sucursalId, resumen: resumen(m.equipos, m.pagos) };
+  });
+  const campos = ['total_cargos', 'total_anticipos', 'total_pagos', 'total_devoluciones',
+    'deuda', 'saldo_a_favor', 'equipos_en_tecnico'];
+  const total = Object.fromEntries(campos.map((c) => [c, _r(cuentas.reduce((s, x) => s + x.resumen[c], 0))]));
+  total.saldo = _r(total.deuda - total.saldo_a_favor);
+  return { cuentas, total };
+};
+
+/** `imputar` por sede, unido en un solo Map (los ids de equipo no se repiten). */
+const imputarPorSucursal = (equipos, pagos) => {
+  const out = new Map();
+  for (const sucursalId of sucursalesDe(equipos, pagos)) {
+    const m = deSucursal(equipos, pagos, sucursalId);
+    for (const [k, v] of imputar(m.equipos, m.pagos)) out.set(k, v);
+  }
+  return out;
+};
+
 // El vencimiento de la garantía NO se calcula aquí: node-postgres devuelve un
 // TIMESTAMP como Date en la zona del servidor (UTC en Railway) y sumar días en
 // JavaScript corre la fecha. Lo resuelve el SQL (`garantia_hasta`).
 
-module.exports = { cargosDe, saldoDe, resumen, imputar, extracto };
+module.exports = {
+  cargosDe, saldoDe, resumen, imputar, extracto,
+  sucursalesDe, deSucursal, cuentasPorSucursal, imputarPorSucursal,
+};

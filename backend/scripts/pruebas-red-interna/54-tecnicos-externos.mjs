@@ -76,6 +76,7 @@ await db.exec(`
   ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS cliente_cedula TEXT;
   ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS cliente_telefono TEXT;
   ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS negocio_id INT;
+  ALTER TABLE abonos_servicio ADD COLUMN IF NOT EXISTS notas TEXT;
   CREATE TABLE IF NOT EXISTS auditoria (id SERIAL PRIMARY KEY, negocio_id INT, usuario_id INT,
     accion TEXT, tabla TEXT, registro_id INT, detalle JSONB, fecha TIMESTAMP DEFAULT NOW());
 `);
@@ -335,14 +336,15 @@ checkEq('la garantía escrita manda sobre la del técnico', rC.equipo.garantia_d
 det = await svc.detalleTecnico(admin, juan.id);
 checkSi('el anticipo de la salida #2 se ve en SU cargo (C)',
   det.equipos.find((e) => e.id === eqC.id).pago.pagado > 0);
-const ultimo = det.extracto[det.extracto.length - 1];
+const extractoSede1 = det.cuentas.find((c) => c.sucursal_id === 1).extracto;
+const ultimo = extractoSede1[extractoSede1.length - 1];
 check('el extracto termina en el mismo saldo que el resumen', ultimo.saldo, det.resumen.saldo);
 // Anular el pago de 70.000: vuelve la deuda.
 await svc.anularPago(admin, p70.pago.id, 'Se registró en el método equivocado');
 det = await svc.detalleTecnico(admin, juan.id);
 check('anulado el pago de 70.000, la deuda vuelve a 80.000', det.resumen.deuda, 80000);
 checkSi('el pago anulado sigue en el extracto, sin mover el saldo',
-  det.extracto.some((m) => m.anulado && m.valor === 70000 && m.signo === 0));
+  det.cuentas.find((c) => c.sucursal_id === 1).extracto.some((m) => m.anulado && m.valor === 70000 && m.signo === 0));
 await falla('anularlo dos veces', () => svc.anularPago(admin, p70.pago.id, 'x'), /ya estaba anulado/);
 await falla('anular sin motivo', () => svc.anularPago(admin, dev.pago.id, ''), /motivo/);
 
@@ -472,7 +474,7 @@ checkEq('un token viejo sin la clave cae en la base', puedeTecnicos({ rol: 'supe
 
 // ═════════════════════════════════════════════════════════════════════════════
 seccion('12. Aislamiento entre negocios');
-checkEq('el vecino no ve técnicos', (await svc.listarTecnicos(2)).length, 0);
+checkEq('el vecino no ve técnicos', (await svc.listarTecnicos(ajeno, 3)).length, 0);
 await falla('el vecino no abre la cuenta de Juan', () => svc.detalleTecnico(ajeno, juan.id), /no encontrado/);
 await falla('el vecino no recibe un equipo de Juan', () =>
   svc.recibir(ajeno, 3, eqB.id, { resultado: 'Reparado', costo: 1 }), /no encontrado/);
@@ -513,10 +515,10 @@ seccion('14. Anular un envío y el doble clic');
   checkSi('anulado el envío, el equipo queda libre', true);
   await q(`UPDATE seriales SET vendido = FALSE WHERE id = 7`);
   det = await svc.detalleTecnico(admin, pedro.id);
-  checkSi('un envío anulado no genera cargo', !det.extracto.some((m) => m.detalle?.imei === 'IMEI-D'));
-  await svc.registrarPago(admin, 1, pedro.id, { tipo: 'Anticipo', valor: 12345, metodo: 'Efectivo' });
+  checkSi('un envío anulado no genera cargo', !det.cuentas.some((c) => c.extracto.some((m) => m.detalle?.imei === 'IMEI-D')));
+  await svc.registrarPago(admin, 1, pedro.id, { tipo: 'Anticipo', valor: 12345, metodo: 'Efectivo', sucursal_id: 1 });
   await falla('el mismo anticipo dos veces seguidas', () =>
-    svc.registrarPago(admin, 1, pedro.id, { tipo: 'Anticipo', valor: 12345, metodo: 'Efectivo' }), /ya se registró/);
+    svc.registrarPago(admin, 1, pedro.id, { tipo: 'Anticipo', valor: 12345, metodo: 'Efectivo', sucursal_id: 1 }), /ya se registró/);
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -590,6 +592,205 @@ seccion('17. Trazabilidad: la línea de tiempo del IMEI');
   checkEq('el vendedor NO ve el costo', rv.historial.find((h) => h.tipo === 'tecnico').detalle.costo, undefined);
   const otro = await busqueda.buscarPorIMEI('IMEI-C', 2, 'admin_negocio');
   checkEq('el vecino no ve nada de ese IMEI', otro, null);
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+seccion('18. Independencia de las sucursales: una cuenta por sede');
+{
+  // Un técnico nuevo, limpio, que trabaja para las dos sedes.
+  const luis = await svc.crearTecnico(1, { nombre: 'Luis Multisede' });
+  const supLocal = { id: 2, negocio_id: 1, rol: 'supervisor', sucursal_id: 2 };
+  await q(`INSERT INTO seriales (id, producto_id, imei, costo_compra) VALUES
+    (30, 1, 'IMEI-S1', 100000), (31, 2, 'IMEI-S2', 100000), (32, 2, 'IMEI-S3', 100000)`);
+
+  // Bodega (1): anticipo de 50.000 y un arreglo de 120.000.
+  const a = await svc.enviar(superv, 1, { tecnico_id: luis.id, equipos: [{ serial_id: 30, trabajo: 'Batería' }],
+    anticipo: { valor: 50000, metodo: 'Efectivo' } });
+  await svc.recibir(superv, 1, a.equipos[0].id, { resultado: 'Reparado', costo: 120000 }, { puedePagar: true });
+  // Local (2): un arreglo de 80.000, sin anticipo.
+  const b = await svc.enviar(supLocal, 2, { tecnico_id: luis.id, equipos: [{ serial_id: 31, trabajo: 'Pantalla' }] });
+  await svc.recibir(supLocal, 2, b.equipos[0].id, { resultado: 'Reparado', costo: 80000 }, { puedePagar: true });
+
+  let d = await svc.detalleTecnico(admin, luis.id);
+  const cta = (x, suc) => x.cuentas.find((c) => c.sucursal_id === suc).resumen;
+  check('bodega le debe 120.000 − 50.000 de su anticipo', cta(d, 1).deuda, 70000);
+  check('el local le debe sus 80.000 enteros (el anticipo de la bodega NO lo cubre)', cta(d, 2).deuda, 80000);
+  check('el admin ve el total: 150.000', d.resumen.deuda, 150000);
+  checkEq('  con el nombre de cada sede', d.cuentas.map((c) => c.sucursal_nombre), ['Bodega', 'Local']);
+
+  // Lo que ve cada quién.
+  const dLocal = await svc.detalleTecnico(supLocal, luis.id, 2);
+  checkEq('el supervisor del local solo ve SU cuenta', dLocal.cuentas.map((c) => c.sucursal_id), [2]);
+  check('  y su deuda es la del local, no la del negocio', dLocal.resumen.deuda, 80000);
+  checkSi('  no ve los trabajos de la bodega', dLocal.equipos.every((e) => e.sucursal_id === 2));
+  const listaLocal = (await svc.listarTecnicos(supLocal, 2)).find((t) => t.id === luis.id);
+  check('  la tarjeta del técnico también dice 80.000', listaLocal.resumen.deuda, 80000);
+
+  // Pagar: cada caja solo lo suyo.
+  await falla('el local no puede pagar la deuda de la bodega (90.000 > sus 80.000)', () =>
+    svc.registrarPago(supLocal, 2, luis.id, { tipo: 'Pago', valor: 90000, metodo: 'Efectivo' }), /80\.000 en esta sucursal/);
+  await falla('un supervisor no escoge otra caja aunque la mande en el cuerpo', async () => {
+    const r = await svc.registrarPago(supLocal, 2, luis.id, { tipo: 'Pago', valor: 1000, metodo: 'Efectivo', sucursal_id: 1 });
+    if (Number(r.pago.sucursal_id) === 2) throw { message: 'SE_QUEDO_EN_SU_SEDE' };
+  }, /SE_QUEDO_EN_SU_SEDE/);
+  await falla('el admin tiene que decir de qué sucursal sale el pago', () =>
+    svc.registrarPago(admin, 1, luis.id, { tipo: 'Pago', valor: 1000, metodo: 'Efectivo' }), /SUCURSAL_REQUERIDA/);
+  await falla('ni pagar desde una sucursal de otro negocio', () =>
+    svc.registrarPago(admin, 1, luis.id, { tipo: 'Pago', valor: 1000, metodo: 'Efectivo', sucursal_id: 3 }), /no es de este negocio/);
+  await falla('una devolución no sale del saldo de otra sede', () =>
+    svc.registrarPago(supLocal, 2, luis.id, { tipo: 'Devolucion', valor: 1000, metodo: 'Efectivo' }), /no tiene plata en esta sucursal/);
+
+  // "Pagar todo" del admin: un pago por sede, cada uno de su caja.
+  await falla('pagar varias sedes: si una se pasa de su deuda no entra NINGUNO', () =>
+    svc.pagarPorSucursales(admin, luis.id, { pagos: [
+      { sucursal_id: 1, valor: 70000, metodo: 'Efectivo' },
+      { sucursal_id: 2, valor: 99999, metodo: 'Nequi' }] }), /79\.000 en Local/);
+  d = await svc.detalleTecnico(admin, luis.id);
+  check('  y la bodega sigue debiendo lo mismo (todo o nada)', cta(d, 1).deuda, 70000);
+  await falla('solo el admin paga varias sedes a la vez', () =>
+    svc.pagarPorSucursales(superv, luis.id, { pagos: [{ sucursal_id: 1, valor: 1, metodo: 'Efectivo' }] }), /administrador/);
+  const todo = await svc.pagarPorSucursales(admin, luis.id, { pagos: [
+    { sucursal_id: 1, valor: 70000, metodo: 'Efectivo' },
+    { sucursal_id: 2, valor: 79000, metodo: 'Nequi' }] });
+  checkEq('"pagar todo" crea un pago por sede', todo.pagos.map((p) => [Number(p.sucursal_id), Number(p.valor)]),
+    [[1, 70000], [2, 79000]]);
+  d = await svc.detalleTecnico(admin, luis.id);
+  checkEq('las dos cuentas quedan en cero', [cta(d, 1).deuda, cta(d, 2).deuda], [0, 0]);
+
+  // Cada caja muestra SOLO lo que salió de ella.
+  const suma = (c) => c.grupos.pagosTecnico.items.filter((i) => i.tecnico_nombre === 'Luis Multisede')
+    .reduce((t, i) => t + Number(i.valor), 0);
+  await q(`INSERT INTO aperturas_caja (id, sucursal_id, estado, fecha_apertura) VALUES (2, 2, 'Abierta', NOW() - INTERVAL '1 hour')`);
+  check('caja de la bodega: su anticipo 50.000 + su pago 70.000', suma(await cajaRepo.getResumenDia(1, 1, 1)), 120000);
+  check('caja del local: su pago de 1.000 + 79.000, nada de la bodega', suma(await cajaRepo.getResumenDia(2, 2, 1)), 80000);
+
+  // Saldo a favor tampoco cruza: la bodega da un anticipo, el local manda otro
+  // equipo; el anticipo de la bodega no toca la cuenta del local.
+  await svc.registrarPago(admin, 1, luis.id, { tipo: 'Anticipo', valor: 30000, metodo: 'Efectivo', sucursal_id: 1 });
+  const c2 = await svc.enviar(supLocal, 2, { tecnico_id: luis.id, equipos: [{ serial_id: 32, trabajo: 'Flex' }] });
+  const rc = await svc.recibir(supLocal, 2, c2.equipos[0].id, { resultado: 'Reparado', costo: 25000 }, { puedePagar: true });
+  check('el local debe sus 25.000 (el anticipo de la bodega no lo paga)', rc.resumen.deuda, 25000);
+  d = await svc.detalleTecnico(admin, luis.id);
+  check('la bodega conserva sus 30.000 a favor', cta(d, 1).saldo_a_favor, 30000);
+  checkEq('el total muestra las dos cosas a la vez, sin compensarlas',
+    [d.resumen.deuda, d.resumen.saldo_a_favor], [25000, 30000]);
+
+  // Anular: fuera del admin, solo lo de la propia sede.
+  const pagoBodega = d.pagos.find((p) => Number(p.sucursal_id) === 1 && p.tipo === 'Anticipo' && Number(p.valor) === 30000);
+  const anulador = { ...supLocal, permisos_tecnicos: { anular: true } };
+  await falla('un usuario del local no anula un pago de la bodega', () =>
+    svc.anularPago(anulador, pagoBodega.id, 'error', 2), /otra sucursal/);
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+seccion('19. Doble clic y cuentas delicadas (la lección de préstamos)');
+{
+  // ── 19.1 El ORDEN: el candado va antes de leer. ───────────────────────────
+  // PGlite no puede simular dos conexiones concurrentes, así que esto se
+  // verifica leyendo el código, como la sección 2 de 39-doble-clic: el fallo de
+  // préstamos no era un cálculo sino un SELECT en el sitio equivocado.
+  const src = readFileSync(path.join(RAIZ, 'src/modules/tecnicos/tecnicos.service.js'), 'utf8');
+  const cuerpo = (nombre) => {
+    const i = src.indexOf(`const ${nombre} = async`);
+    const j = src.indexOf('\nconst ', i + 10);
+    return src.slice(i, j === -1 ? undefined : j);
+  };
+  const LECTURAS = ['findEquipo(', 'FROM ordenes_servicio', 'FROM pagos_tecnico WHERE id', 'materiaCuenta(', '_registrarPagoEnTx(', '_validarSerialDisponible('];
+  for (const fn of ['enviar', 'enviarDesdeOrden', 'reclamarGarantia', 'recibir', 'anularEquipo',
+    'registrarPago', 'pagarPorSucursales', 'anularPago']) {
+    const c = cuerpo(fn);
+    const candado = c.indexOf('await bloquearOperacion(');
+    const primeraLectura = Math.min(...LECTURAS.map((l) => c.indexOf(l)).filter((x) => x >= 0));
+    checkSi(`${fn}: toma el candado del técnico ANTES de leer lo que decide`,
+      candado >= 0 && candado < primeraLectura);
+    const candados = c.split('await bloquearOperacion(').length - 1;
+    if (candados !== 1) fallos.push(`${fn}: ${candados} candados (debe ser UNO por transacción)`);
+  }
+  checkSi('cada operación toma UN solo candado (sin ciclos, sin interbloqueo)',
+    !fallos.some((f) => f.includes('candados (debe ser UNO')));
+
+  // ── 19.2 Reintentos: lo que llega dos veces no se registra dos veces. ─────
+  const ana = await svc.crearTecnico(1, { nombre: 'Ana Placas', garantia_dias_default: 10 });
+  await falla('doble clic en «Nuevo técnico»: no crea otra Ana', () =>
+    svc.crearTecnico(1, { nombre: '  ana placas ' }), /TECNICO_DUPLICADO/);
+  await falla('ni renombrando a otro igual', () =>
+    svc.actualizarTecnico(1, pedro.id, { nombre: 'ANA PLACAS' }), /TECNICO_DUPLICADO/);
+  const anaBaja = await svc.actualizarTecnico(1, ana.id, { activo: false });
+  const ana2 = await svc.crearTecnico(1, { nombre: 'Ana Placas' });
+  checkSi('dada de baja la primera, otra Ana sí se puede crear', !anaBaja.activo && ana2.id !== ana.id);
+  await falla('y reactivar la vieja choca con la nueva', () =>
+    svc.actualizarTecnico(1, ana.id, { activo: true }), /TECNICO_DUPLICADO/);
+
+  await q(`INSERT INTO seriales (id, producto_id, imei, costo_compra) VALUES
+    (40, 1, 'IMEI-P1', 100000), (41, 1, 'IMEI-P2', 100000)`);
+  const s = await svc.enviar(superv, 1, { tecnico_id: ana2.id, equipos: [
+    { serial_id: 40, trabajo: 'Batería' }, { serial_id: 41, trabajo: 'Batería' }] });
+  const [e1, e2] = s.equipos;
+  await falla('doble clic en «Enviar» con los mismos equipos: no sale otra vez', () =>
+    svc.enviar(superv, 1, { tecnico_id: ana2.id, equipos: [{ serial_id: 40, trabajo: 'Batería' }],
+      anticipo: { valor: 5000, metodo: 'Efectivo' } }), /está donde el técnico/);
+  const pagosAntes = (await q(`SELECT COUNT(*)::int AS n FROM pagos_tecnico WHERE tecnico_id = $1`, [ana2.id]))[0].n;
+  checkEq('  y el anticipo del segundo clic no quedó registrado', pagosAntes, 0);
+
+  // Los DOS equipos de la misma salida, pagando lo mismo por cada uno: son dos
+  // pagos reales, no un duplicado.
+  await svc.recibir(superv, 1, e1.id, { resultado: 'Reparado', costo: 50000, pago: { valor: 50000, metodo: 'Efectivo' } }, { puedePagar: true });
+  const r2 = await svc.recibir(superv, 1, e2.id, { resultado: 'Reparado', costo: 50000, pago: { valor: 50000, metodo: 'Efectivo' } }, { puedePagar: true });
+  check('dos equipos de la misma salida pagados igual: los dos pagos entran', r2.resumen.total_pagos, 100000);
+  const costoP1 = Number((await q('SELECT costo_compra FROM seriales WHERE id = 40'))[0].costo_compra);
+  await falla('doble clic en «Recibir»: no suma el costo otra vez', () =>
+    svc.recibir(superv, 1, e1.id, { resultado: 'Reparado', costo: 50000, pago: { valor: 50000, metodo: 'Efectivo' } }, { puedePagar: true }),
+    /ya se recibió/);
+  check('  el costo del equipo sigue igual', (await q('SELECT costo_compra FROM seriales WHERE id = 40'))[0].costo_compra, costoP1);
+  check('  y no hay un tercer pago', (await svc.detalleTecnico(admin, ana2.id)).resumen.total_pagos, 100000);
+
+  // «Pagar todo» con el MISMO valor en dos sedes: dos pagos reales.
+  await q(`INSERT INTO seriales (id, producto_id, imei, costo_compra) VALUES (42, 1, 'IMEI-P3', 1), (43, 2, 'IMEI-P4', 1)`);
+  const supLocal = { id: 2, negocio_id: 1, rol: 'supervisor', sucursal_id: 2 };
+  const sA = await svc.enviar(superv, 1, { tecnico_id: ana2.id, equipos: [{ serial_id: 42, trabajo: 'x' }] });
+  const sB = await svc.enviar(supLocal, 2, { tecnico_id: ana2.id, equipos: [{ serial_id: 43, trabajo: 'x' }] });
+  await svc.recibir(superv, 1, sA.equipos[0].id, { resultado: 'Reparado', costo: 40000 }, { puedePagar: true });
+  await svc.recibir(supLocal, 2, sB.equipos[0].id, { resultado: 'Reparado', costo: 40000 }, { puedePagar: true });
+  const pt = await svc.pagarPorSucursales(admin, ana2.id, { pagos: [
+    { sucursal_id: 1, valor: 40000, metodo: 'Efectivo' }, { sucursal_id: 2, valor: 40000, metodo: 'Efectivo' }] });
+  checkEq('«Pagar todo» con el mismo valor en dos sedes: entran los dos', pt.pagos.length, 2);
+  const nAntes = (await q(`SELECT COUNT(*)::int AS n FROM pagos_tecnico WHERE tecnico_id = $1`, [ana2.id]))[0].n;
+  await falla('doble clic en «Pagar todo»: el segundo no entra', () =>
+    svc.pagarPorSucursales(admin, ana2.id, { pagos: [
+      { sucursal_id: 1, valor: 40000, metodo: 'Efectivo' }, { sucursal_id: 2, valor: 40000, metodo: 'Efectivo' }] }),
+    /PAGO_DUPLICADO|PAGO_MAYOR_A_DEUDA/);
+  checkEq('  ni a medias: la cuenta de pagos no cambió', (await q(`SELECT COUNT(*)::int AS n FROM pagos_tecnico WHERE tecnico_id = $1`, [ana2.id]))[0].n, nAntes);
+  const ant = await svc.registrarPago(admin, 1, ana2.id, { tipo: 'Anticipo', valor: 7000, metodo: 'Nequi', sucursal_id: 1 });
+  await falla('doble clic en un anticipo manual', () =>
+    svc.registrarPago(admin, 1, ana2.id, { tipo: 'Anticipo', valor: 7000, metodo: 'Nequi', sucursal_id: 1 }), /PAGO_DUPLICADO/);
+  const otroSede = await svc.registrarPago(admin, 1, ana2.id, { tipo: 'Anticipo', valor: 7000, metodo: 'Nequi', sucursal_id: 2 });
+  checkSi('  el mismo anticipo en OTRA sede no es un duplicado', Number(otroSede.pago.sucursal_id) === 2);
+  await svc.anularPago(admin, ant.pago.id, 'prueba');
+  await falla('doble clic en «Anular»', () => svc.anularPago(admin, ant.pago.id, 'prueba'), /ya estaba anulado/);
+
+  // ── 19.3 Caja y cuenta cuentan la MISMA plata. ────────────────────────────
+  // Todo lo que salió o entró por la caja de la bodega para Ana es exactamente
+  // lo que la cuenta de la bodega dice que se le pagó.
+  const d = await svc.detalleTecnico(admin, ana2.id);
+  const r1 = d.cuentas.find((c) => c.sucursal_id === 1).resumen;
+  const caja = await cajaRepo.getResumenDia(1, 1, 1);
+  const deAna = (g) => caja.grupos[g].items.filter((i) => i.tecnico_nombre === 'Ana Placas')
+    .reduce((t, i) => t + Number(i.valor), 0);
+  check('caja de la bodega = anticipos + pagos de su cuenta (sin el anulado)',
+    deAna('pagosTecnico'), r1.total_anticipos + r1.total_pagos);
+  check('  y las devoluciones cuadran igual', deAna('devolucionesTecnico'), r1.total_devoluciones);
+
+  // ── 19.4 Abonos de la orden del cliente (Servicios) ──────────────────────
+  // La orden 2 quedó Lista por $220.000 en la sección 9.
+  await serviciosSvc.registrarAbono(1, 2, { valor: 100000, metodo: 'Efectivo' });
+  await falla('doble clic / reintento del mismo abono a la orden', () =>
+    serviciosSvc.registrarAbono(1, 2, { valor: 100000, metodo: 'Efectivo' }), /ABONO_DUPLICADO/);
+  await falla('un abono mayor que el saldo lo frena el BACKEND, no solo la pantalla', () =>
+    serviciosSvc.registrarAbono(1, 2, { valor: 150000, metodo: 'Nequi' }), /120\.000/);
+  await serviciosSvc.registrarAbono(1, 2, { valor: 120000, metodo: 'Nequi' });
+  await falla('con la orden pagada, un reintento ya no entra', () =>
+    serviciosSvc.registrarAbono(1, 2, { valor: 1000, metodo: 'Efectivo' }), /ya está pagada/);
+  check('la orden quedó con lo justo: $220.000', (await q('SELECT total_abonado FROM ordenes_servicio WHERE id = 2'))[0].total_abonado, 220000);
 }
 
 // ── Resultado ───────────────────────────────────────────────────────────────

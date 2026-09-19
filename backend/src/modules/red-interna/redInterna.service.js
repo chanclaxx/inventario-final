@@ -3181,10 +3181,18 @@ const getRemision = async (req, id) => {
     .filter((a) => !a.anulado && (a.origen !== 'remesa' || a.remesa_estado === 'Recibida'))
     .reduce((s, a) => s + _num(a.valor), 0);
 
+  // El costo de la BODEGA (lo que a ella le costó: `costo_origen`, congelado
+  // al despachar) solo lo ve el admin — la misma regla del export y de la
+  // búsqueda por IMEI. Las líneas se leen con `lr.*`, así que viajaba entero al
+  // local: el recorte del vendedor no lo nombraba y un supervisor del local no
+  // pasa por ese recorte. No es el valor del envío (eso es `valor_interno`, lo
+  // que el local debe); es el margen de la bodega.
+  const veCostoBodega = req.user?.rol === 'admin_negocio';
   const salida = {
     ...remision,
     lineas: lineas.map((l) => ({
       ...l,
+      ...(veCostoBodega ? {} : { costo_origen: null, costo_real: null }),
       etiqueta_estado: ETIQUETAS_ESTADO[l.estado_unidad] || l.estado_unidad || l.estado_linea,
       valor_interno: _num(l.valor_interno),
       liquidable:    _num(l.liquidable),
@@ -3205,6 +3213,19 @@ const getRemision = async (req, id) => {
       cargo:      Math.round(resumen.cargo),
       abonado:    Math.round(abonadoEfectivo),
       saldo:      Math.max(0, Math.round(resumen.cargo - abonadoEfectivo)),
+      // Solo en una DEVOLUCIÓN: lo que le bajó a la cuenta del local. Misma
+      // regla que el extracto (rama NOTA CRÉDITO): un serial acredita su valor
+      // interno si era mercancía de la bodega; la cantidad, el reparto FIFO.
+      // Se calcula AQUÍ, antes del recorte del vendedor, porque es cuenta —la
+      // tarjeta de la devolución ya se lo muestra— y el recorte deja las líneas
+      // sin valor.
+      acreditado: remision.tipo === 'devolucion'
+        ? Math.round(lineas.reduce((s, l) => {
+          if (l.estado_linea !== 'Devuelta') return s;
+          if (l.tipo === 'serial') return l.origen_unidad === 'bodega' ? s + _num(l.valor_interno) : s;
+          return s + _num(l.valor_acreditado);
+        }, 0))
+        : null,
       devuelto:   Math.round(resumen.devuelto),
       liquidable: Math.round(resumen.liquidable),
       en_vitrina: Math.round(resumen.en_vitrina),
@@ -3228,6 +3249,7 @@ const getRemision = async (req, id) => {
       cargo:      salida.resumen.cargo,
       abonado:    salida.resumen.abonado,
       saldo:      salida.resumen.saldo,
+      acreditado: salida.resumen.acreditado,
       enviado:    null, devuelto: null, liquidable: null,
       en_vitrina: null, no_llego: null,
     },

@@ -1,5 +1,6 @@
 const { pool } = require('../../config/db');
 const { asignarNumeroDocumento } = require('../../utils/numeracion.util');
+const { VENTANA_DUPLICADO_SEG } = require('../../utils/idempotencia.util');
 
 // ─── Helper: crear factura automática al entregar ─────────────────────────────
 
@@ -351,6 +352,35 @@ const registrarAbono = async (negocioId, ordenId, { valor, metodo, notas, usuari
     const totalCobro = (o.estado === 'Garantia' && o.garantia_cobrable && o.precio_garantia)
       ? Number(o.precio_garantia)
       : Number(o.precio_final || 0);
+
+    // ── Contra el abono registrado dos veces ────────────────────────────────
+    // El `FOR UPDATE` de arriba ya serializa dos peticiones simultáneas: la
+    // segunda espera y lee la orden con el abono de la primera. Lo que faltaba
+    // era RECHAZARLA. El tope del saldo vivía solo en la pantalla, así que un
+    // reintento tras el corte de 30 s del navegador pasaba entero y la orden
+    // quedaba cobrada de más (y la caja con plata que nunca entró). Es la misma
+    // lección de préstamos: la regla de la plata va en el backend.
+    const saldo = totalCobro - Number(o.total_abonado || 0);
+    if (valor > saldo + 0.005) {
+      throw {
+        status: 400, code: 'ABONO_MAYOR_A_SALDO',
+        message: saldo > 0
+          ? `El abono no puede superar el saldo pendiente de $${Math.round(saldo).toLocaleString('es-CO')}`
+          : 'Esta orden ya está pagada',
+      };
+    }
+    const { rows: gemelo } = await client.query(`
+      SELECT id FROM abonos_servicio
+      WHERE orden_id = $1 AND valor = $2 AND COALESCE(metodo, '') = COALESCE($3, '')
+        AND fecha > NOW() - ($4 || ' seconds')::interval
+      LIMIT 1
+    `, [ordenId, valor, metodo || 'Efectivo', String(VENTANA_DUPLICADO_SEG)]);
+    if (gemelo.length) {
+      throw {
+        status: 409, code: 'ABONO_DUPLICADO',
+        message: 'Este mismo abono ya se registró hace un momento. Revisa la orden antes de volver a intentarlo.',
+      };
+    }
 
     await client.query(`
       INSERT INTO abonos_servicio(orden_id, usuario_id, valor, metodo, notas)

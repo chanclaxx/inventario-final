@@ -3,6 +3,7 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { getEstadoCuenta, recibirRemision, mensajeErrorRecepcion } from '../../api/redInterna.api';
 import { formatCOP, formatFechaHora } from '../../utils/formatters';
 import { Button }     from '../../components/ui/Button';
+import { BotonPdfRed } from './BotonPdfRed';
 import { Spinner }    from '../../components/ui/Spinner';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { ModalRecibir } from './ModalRecibir';
@@ -231,6 +232,7 @@ export function CuentaLocal({
   const devolucionesPendientes = panel?.devoluciones_enviadas
     ?? (data?.devoluciones || []).filter((d) => d.estado === 'En transito');
 
+  const nombreLocal = data?.sucursal?.nombre || nombre || 'local';
   return (
     <div>
       {onVolver && (
@@ -328,6 +330,18 @@ export function CuentaLocal({
             <SlidersHorizontal size={14} /> Ajustar cuenta
           </Button>
         )}
+        {/* Los dos PDF de la cuenta. Los ven el local y la bodega; qué valores
+            trae cada uno lo decide el backend según quién lo pide. */}
+        <BotonPdfRed etiqueta="Estado de cuenta" pdf={{
+          ruta: `/red-interna/estado-cuenta/${sucursalId}/pdf`,
+          nombreArchivo: `estado-cuenta-${nombreLocal}.pdf`,
+          titulo: `Estado de cuenta · ${nombreLocal}`,
+        }} />
+        <BotonPdfRed etiqueta="Envíos pendientes" pdf={{
+          ruta: `/red-interna/envios-activos/${sucursalId}/pdf`,
+          nombreArchivo: `envios-pendientes-${nombreLocal}.pdf`,
+          titulo: `Envíos pendientes · ${nombreLocal}`,
+        }} />
       </div>
 
       {/* Pestañas */}

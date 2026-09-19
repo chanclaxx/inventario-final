@@ -119,10 +119,22 @@ export function TabTecnicos() {
                   )}
                 </div>
                 {t.especialidad && <p className="text-xs text-gray-400 truncate">{t.especialidad}</p>}
-                <p className={`text-sm mt-1 font-medium ${t.resumen.deuda > 0 ? 'text-red-600' : t.resumen.saldo_a_favor > 0 ? 'text-green-700' : 'text-gray-400'}`}>
-                  {t.resumen.deuda > 0 ? `Le debemos ${formatCOP(t.resumen.deuda)}`
-                    : t.resumen.saldo_a_favor > 0 ? `A favor ${formatCOP(t.resumen.saldo_a_favor)}` : 'En paz'}
-                </p>
+                {/* Cada sede lleva su propia cuenta: deuda en una y saldo a favor en
+                    otra NO se compensan, así que pueden salir las dos a la vez. */}
+                {t.resumen.deuda > 0 && (
+                  <p className="text-sm mt-1 font-medium text-red-600">Le debemos {formatCOP(t.resumen.deuda)}</p>
+                )}
+                {t.resumen.saldo_a_favor > 0 && (
+                  <p className={`text-sm font-medium text-green-700 ${t.resumen.deuda > 0 ? '' : 'mt-1'}`}>
+                    A favor {formatCOP(t.resumen.saldo_a_favor)}
+                  </p>
+                )}
+                {!(t.resumen.deuda > 0) && !(t.resumen.saldo_a_favor > 0) && (
+                  <p className="text-sm mt-1 font-medium text-gray-400">En paz</p>
+                )}
+                {esAdmin && t.cuentas?.length > 1 && (
+                  <p className="text-xs text-gray-400">Cuentas en {t.cuentas.length} sucursales</p>
+                )}
               </button>
             ))}
           </div>
@@ -232,7 +244,7 @@ export function TabTecnicos() {
           onClose={cerrar} onRecibido={refrescar} />
       )}
       {modal?.tipo === 'cuenta' && (
-        <ModalCuentaTecnico key={modal.tecnicoId} tecnicoId={modal.tecnicoId} permisos={permisos}
+        <ModalCuentaTecnico key={modal.tecnicoId} tecnicoId={modal.tecnicoId} permisos={permisos} esAdmin={esAdmin}
           onClose={cerrar}
           onEditar={(t) => setModal({ tipo: 'tecnico', tecnico: t })} />
       )}

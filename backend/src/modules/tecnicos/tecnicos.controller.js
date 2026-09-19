@@ -6,7 +6,7 @@ const _ok = (res, data, extra = {}) => res.json({ ok: true, data, ...extra });
 
 const listarTecnicos = async (req, res, next) => {
   try {
-    _ok(res, await service.listarTecnicos(req.user.negocio_id, {
+    _ok(res, await service.listarTecnicos(req.user, req.sucursal_id, {
       incluirInactivos: req.query.inactivos === '1',
     }));
   } catch (err) { next(err); }
@@ -29,7 +29,7 @@ const actualizarTecnico = async (req, res, next) => {
 };
 
 const detalleTecnico = async (req, res, next) => {
-  try { _ok(res, await service.detalleTecnico(req.user, req.params.id)); } catch (err) { next(err); }
+  try { _ok(res, await service.detalleTecnico(req.user, req.params.id, req.sucursal_id)); } catch (err) { next(err); }
 };
 
 const listarEquipos = async (req, res, next) => {
@@ -110,15 +110,27 @@ const registrarPago = async (req, res, next) => {
   try {
     const data = await service.registrarPago(req.user, req.sucursal_id, req.params.id, req.body);
     audit.registrar(req.user.negocio_id, req.user.id, `Técnico: ${data.pago.tipo}`, 'pagos_tecnico', data.pago.id, {
-      sucursal_id: req.sucursal_id, valor: Number(data.pago.valor), metodo: data.pago.metodo,
+      sucursal_id: data.pago.sucursal_id, valor: Number(data.pago.valor), metodo: data.pago.metodo,
     });
     res.status(201).json({ ok: true, data, message: 'Movimiento registrado' });
   } catch (err) { next(err); }
 };
 
+const pagarPorSucursales = async (req, res, next) => {
+  try {
+    const data = await service.pagarPorSucursales(req.user, req.params.id, req.body);
+    for (const p of data.pagos) {
+      audit.registrar(req.user.negocio_id, req.user.id, 'Técnico: Pago', 'pagos_tecnico', p.id, {
+        sucursal_id: p.sucursal_id, valor: Number(p.valor), metodo: p.metodo, varias_sucursales: true,
+      });
+    }
+    res.status(201).json({ ok: true, data, message: `${data.pagos.length} pago(s) registrados, uno por sucursal` });
+  } catch (err) { next(err); }
+};
+
 const anularPago = async (req, res, next) => {
   try {
-    const data = await service.anularPago(req.user, req.params.id, req.body.motivo);
+    const data = await service.anularPago(req.user, req.params.id, req.body.motivo, req.sucursal_id);
     audit.registrar(req.user.negocio_id, req.user.id, 'Pago a técnico anulado', 'pagos_tecnico', data.id, {
       valor: Number(data.valor), motivo: data.anulado_motivo,
     });
@@ -134,5 +146,5 @@ module.exports = {
   listarTecnicos, crearTecnico, actualizarTecnico, detalleTecnico,
   listarEquipos, buscarDisponibles,
   enviar, enviarDesdeOrden, reclamarGarantia, recibir, anularEquipo,
-  registrarPago, anularPago, resumenPeriodo,
+  registrarPago, pagarPorSucursales, anularPago, resumenPeriodo,
 };

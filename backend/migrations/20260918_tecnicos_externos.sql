@@ -6,9 +6,9 @@
 -- retoma a la que hay que cambiarle la batería sale del inventario hacia un
 -- técnico, él la repara, nos cobra, y lo que cobró SUBE EL COSTO del equipo.
 --
--- Cuatro tablas y un trigger. Esta es la copia legible; la que corre de verdad
--- en producción está replicada en src/config/migrations.js («Técnicos
--- externos»), y la prueba 54 compara las dos.
+-- Cuatro tablas y un trigger. El runner de arranque (src/config/migrations.js,
+-- bloque «Técnicos externos») lee ESTE MISMO archivo: no hay copia que se pueda
+-- separar. La prueba 54 verifica que siga siendo así.
 --
 -- ── Qué se escribe y qué se deriva ──────────────────────────────────────────
 --   · LO QUE SE LE DEBE al técnico NO se guarda: sale de los equipos que ya
@@ -51,6 +51,11 @@ CREATE TABLE IF NOT EXISTS tecnicos (
   creado_en             TIMESTAMP NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_tecnicos_negocio ON tecnicos (negocio_id);
+-- Dos técnicos activos con el mismo nombre partirían la cuenta en dos (el doble
+-- clic en «Nuevo técnico» los creaba). Solo entre ACTIVOS: uno dado de baja no
+-- le impide a otro llamarse igual.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_tecnicos_nombre_activo
+  ON tecnicos (negocio_id, LOWER(BTRIM(nombre))) WHERE activo;
 
 CREATE TABLE IF NOT EXISTS salidas_tecnico (
   id                SERIAL PRIMARY KEY,
@@ -91,7 +96,8 @@ CREATE TABLE IF NOT EXISTS equipos_tecnico (
   costo                 NUMERIC NOT NULL DEFAULT 0 CHECK (costo >= 0),
   garantia_dias         INTEGER CHECK (garantia_dias IS NULL OR garantia_dias >= 0),
   -- Un reclamo de garantía es OTRA salida del mismo equipo al mismo técnico,
-  -- sin costo, ligada al trabajo que falló.
+  -- ligada al trabajo que falló. Normalmente vuelve en $0; si el técnico cobra,
+  -- el costo se aplica como en cualquier trabajo.
   reclamo_de_id         INTEGER REFERENCES equipos_tecnico(id),
   -- A DÓNDE fue a parar lo que cobró el técnico. Congelado al recibir:
   --   'costo_compra'  → sumado a seriales.costo_compra (equipo propio)

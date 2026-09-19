@@ -44,7 +44,10 @@ export function ModalRecibirEquipo({ equipo, puedePagar = false, onClose, onReci
   // Reclamo en $0 = cubierto por la garantía: hereda lo que faltaba de ella.
   // Si el técnico cobró, es un trabajo pagado y lleva garantía propia.
   const reclamoGratis = esReclamo && costoNum === 0;
-  const saldoAntes = Number(cuenta?.resumen?.saldo ?? 0);
+  // La cuenta que importa es la de la SEDE del equipo: es su caja la que paga,
+  // y el anticipo o el saldo a favor de otra sede no cuenta aquí.
+  const cuentaSede = cuenta?.cuentas?.find((c) => Number(c.sucursal_id) === Number(equipo.sucursal_id));
+  const saldoAntes = Number(cuentaSede?.resumen?.saldo ?? 0);
   const saldoDespues = saldoAntes + costoNum - Number(pago || 0) + Number(devolucion || 0);
   const aFavorTrasCargo = Math.max(0, -(saldoAntes + costoNum));
 
@@ -147,7 +150,9 @@ export function ModalRecibirEquipo({ equipo, puedePagar = false, onClose, onReci
         {puedePagar && (
           <div className="flex flex-col gap-2 rounded-xl border border-gray-100 p-3">
             <div className="flex items-center justify-between text-sm">
-              <span className="text-gray-600">Cuenta de {equipo.tecnico_nombre} con este cargo</span>
+              <span className="text-gray-600">
+                Cuenta de {equipo.tecnico_nombre}{equipo.sucursal_nombre ? ` con ${equipo.sucursal_nombre}` : ''} con este cargo
+              </span>
               <span className={`font-semibold ${saldoAntes + costoNum > 0 ? 'text-red-600' : 'text-green-700'}`}>
                 {saldoAntes + costoNum >= 0
                   ? `Le debemos ${formatCOP(saldoAntes + costoNum)}`

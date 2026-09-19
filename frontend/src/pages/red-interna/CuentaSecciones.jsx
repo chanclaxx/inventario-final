@@ -12,6 +12,7 @@ import { Button }     from '../../components/ui/Button';
 import { Spinner }    from '../../components/ui/Spinner';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { CardEquipo } from './CardEquipo';
+import { BotonPdfRed } from './BotonPdfRed';
 import { CHIPS, contar, VENDIDOS } from './estados';
 import {
   ChevronDown, Search, X, TrendingUp, TrendingDown, Package, Truck,
@@ -730,6 +731,13 @@ function TarjetaDevolucion({ d }) {
 
       {abierto && (
         <div className="border-t border-gray-100 divide-y divide-gray-50">
+          <div className="px-4 py-2">
+            <BotonPdfRed compacto etiqueta="PDF de la devolución" pdf={{
+              ruta: `/red-interna/remisiones/${d.id}/pdf`,
+              nombreArchivo: `devolucion-${d.numero ?? d.id}.pdf`,
+              titulo: `Devolución #${d.numero ?? d.id}`,
+            }} />
+          </div>
           {(d.lineas || []).map((l) => (
             <div key={l.linea_id} className="flex items-center gap-2.5 px-4 py-2 text-sm">
               <span className="flex-1 min-w-0 truncate text-gray-800">
@@ -873,6 +881,11 @@ export function TabEnvios({
               <PackageX size={12} /> ¿Algo no llegó?
             </button>
           )}
+          <BotonPdfRed compacto etiqueta="PDF" pdf={{
+            ruta: `/red-interna/remisiones/${e.id}/pdf`,
+            nombreArchivo: `envio-${e.numero ?? e.id}.pdf`,
+            titulo: `Envío #${e.numero ?? e.id}`,
+          }} />
           {e.cargo > 0 && (
             <button
               onClick={() => setAbierto(abre ? null : e.id)}

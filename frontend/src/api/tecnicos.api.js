@@ -19,3 +19,5 @@ export const anularEnvio        = (equipoId, motivo) => api.patch(`/tecnicos/equ
 
 export const registrarPagoTecnico = (tecnicoId, datos) => api.post(`/tecnicos/${tecnicoId}/pagos`, datos);
 export const anularPagoTecnico    = (pagoId, motivo)   => api.patch(`/tecnicos/pagos/${pagoId}/anular`, { motivo });
+// Un pago por sede, cada uno de su caja, en una sola operación (solo admin).
+export const pagarTecnicoPorSucursales = (tecnicoId, datos) => api.post(`/tecnicos/${tecnicoId}/pagos-sucursales`, datos);

@@ -29,6 +29,24 @@ const _texto = (v, max = 500) => {
   return t ? t.slice(0, max) : null;
 };
 
+// ── El candado va PRIMERO ────────────────────────────────────────────────────
+//
+// La lección de préstamos (FACTURA JUANSHOP, 3 × $100.000.000 en 2,8 s): una
+// verificación de "¿ya existe?" que corre ANTES del candado no ve lo que la
+// petición gemela todavía no ha commiteado, y las dos pasan. Por eso toda
+// operación que toca la cuenta de un técnico toma `tecnico:<id>` como PRIMERA
+// cosa de la transacción, antes de leer nada con qué decidir, y uno solo por
+// transacción (sin ciclo posible, sin interbloqueo).
+//
+// Cuando la operación llega con el id de OTRA cosa (un equipo, un pago), el
+// técnico se averigua con una lectura SIN bloqueo —ese dato no cambia nunca—,
+// se toma el candado, y recién entonces se lee con FOR UPDATE lo que decide.
+const _tecnicoDe = async (client, tabla, id, negocioId) => {
+  const { rows } = await client.query(
+    `SELECT tecnico_id FROM ${tabla} WHERE id = $1 AND negocio_id = $2`, [id, negocioId]);
+  return rows[0]?.tecnico_id ?? null;
+};
+
 const _transaccion = async (fn) => {
   const client = await pool.connect();
   try {
@@ -95,54 +113,102 @@ const _datosTecnico = (d, previo = {}) => {
   };
 };
 
-const listarTecnicos = async (negocioId, { incluirInactivos } = {}) => {
+// Cada sede tiene su propia cuenta con el técnico. Un supervisor o vendedor
+// solo ve la de SU sede; el admin ve el total del negocio y el desglose.
+const _alcanceCuenta = (user, sucursalId) => (user.rol === 'admin_negocio' ? null : Number(sucursalId));
+
+const _conNombres = (cuentas, nombres) =>
+  cuentas.map((c) => ({ ...c, sucursal_nombre: nombres.get(c.sucursal_id) ?? `Sucursal ${c.sucursal_id}` }));
+
+const listarTecnicos = async (user, sucursalId, { incluirInactivos } = {}) => {
+  const negocioId = user.negocio_id;
   const tecnicos = await repo.listarTecnicos(negocioId, { incluirInactivos });
   if (!tecnicos.length) return [];
   const ids = tecnicos.map((t) => t.id);
-  const [equipos, pagos] = await Promise.all([
-    repo.equiposDeTecnicos(negocioId, ids),
-    repo.pagosDeTecnicos(negocioId, ids),
+  const alcance = _alcanceCuenta(user, sucursalId);
+  const [equipos, pagos, nombres] = await Promise.all([
+    repo.equiposDeTecnicos(negocioId, ids, alcance),
+    repo.pagosDeTecnicos(negocioId, ids, alcance),
+    repo.nombresSucursales(negocioId),
   ]);
-  return tecnicos.map((t) => ({
-    ...t,
-    resumen: cuenta.resumen(
+  return tecnicos.map((t) => {
+    const { cuentas, total } = cuenta.cuentasPorSucursal(
       equipos.filter((e) => e.tecnico_id === t.id),
-      pagos.filter((p) => p.tecnico_id === t.id)),
-  }));
+      pagos.filter((p) => p.tecnico_id === t.id));
+    return { ...t, resumen: total, cuentas: _conNombres(cuentas, nombres) };
+  });
 };
 
-const crearTecnico = (negocioId, d) => repo.crearTecnico(negocioId, _datosTecnico(d));
+// Dos «Juan» activos partirían la cuenta del mismo técnico en dos y harían
+// dudar de a quién se le dejó qué equipo — el error que esto existe para
+// evitar. El índice único lo garantiza aunque lleguen dos clics a la vez; la
+// consulta previa solo da el mensaje claro.
+const _mensajeDuplicado = (nombre) => ({
+  status: 409, code: 'TECNICO_DUPLICADO',
+  message: `Ya existe un técnico activo llamado «${nombre}». Usa ese o cámbiale el nombre a uno de los dos.`,
+});
+const _exigirNombreLibre = async (negocioId, nombre, excluirId = null) => {
+  const { rows } = await pool.query(`
+    SELECT id FROM tecnicos
+    WHERE negocio_id = $1 AND activo AND LOWER(BTRIM(nombre)) = LOWER(BTRIM($2))
+      AND ($3::int IS NULL OR id <> $3)
+    LIMIT 1
+  `, [negocioId, nombre, excluirId]);
+  if (rows.length) throw _mensajeDuplicado(nombre);
+};
+const _traducirDuplicado = (err, nombre) => {
+  if (err?.code === '23505') throw _mensajeDuplicado(nombre);
+  throw err;
+};
+
+const crearTecnico = async (negocioId, d) => {
+  const datos = _datosTecnico(d);
+  await _exigirNombreLibre(negocioId, datos.nombre);
+  return repo.crearTecnico(negocioId, datos).catch((err) => _traducirDuplicado(err, datos.nombre));
+};
 
 const actualizarTecnico = async (negocioId, id, d) => {
   const previo = await repo.findTecnico(negocioId, id);
   if (!previo) throw { status: 404, message: 'Técnico no encontrado' };
-  return repo.actualizarTecnico(negocioId, id, _datosTecnico(d, previo));
+  const datos = _datosTecnico(d, previo);
+  if (datos.activo) await _exigirNombreLibre(negocioId, datos.nombre, previo.id);
+  return repo.actualizarTecnico(negocioId, id, datos).catch((err) => _traducirDuplicado(err, datos.nombre));
 };
 
-const detalleTecnico = async (user, id) => {
+const _extractoLimpio = (equipos, pagos) => cuenta.extracto(equipos, pagos).map((m) => ({
+  ...m,
+  // El detalle de un cargo lleva el equipo entero; al extracto le basta con
+  // saber cuál fue.
+  detalle: m.clave.startsWith('c')
+    ? { imei: m.detalle.imei, descripcion_equipo: m.detalle.descripcion_equipo,
+        trabajo: m.detalle.trabajo, salida_numero: m.detalle.salida_numero }
+    : m.detalle,
+}));
+
+const detalleTecnico = async (user, id, sucursalId) => {
   const negocioId = user.negocio_id;
   const tecnico = await repo.findTecnico(negocioId, id);
   if (!tecnico) throw { status: 404, message: 'Técnico no encontrado' };
-  const [equipos, pagos] = await Promise.all([
-    repo.equiposDeTecnicos(negocioId, [tecnico.id]),
-    repo.pagosDeTecnicos(negocioId, [tecnico.id]),
+  const alcance = _alcanceCuenta(user, sucursalId);
+  const [equipos, pagos, nombres] = await Promise.all([
+    repo.equiposDeTecnicos(negocioId, [tecnico.id], alcance),
+    repo.pagosDeTecnicos(negocioId, [tecnico.id], alcance),
+    repo.nombresSucursales(negocioId),
   ]);
-  const imputacion = cuenta.imputar(equipos, pagos);
+  // Todo se imputa y se extracta POR SEDE: un saldo corrido que mezclara dos
+  // cajas no sería el de ninguna.
+  const imputacion = cuenta.imputarPorSucursal(equipos, pagos);
   const conPago = equipos.map((e) => ({ ...e, pago: imputacion.get(e.id) || null }));
+  const { cuentas, total } = cuenta.cuentasPorSucursal(equipos, pagos);
   return {
     tecnico,
-    resumen:  cuenta.resumen(equipos, pagos),
+    resumen:  total,
+    cuentas:  _conNombres(cuentas, nombres).map((c) => {
+      const m = cuenta.deSucursal(equipos, pagos, c.sucursal_id);
+      return { ...c, extracto: _extractoLimpio(m.equipos, m.pagos) };
+    }),
     equipos:  await _recortarEquipos(user, conPago),
     pagos,
-    extracto: cuenta.extracto(equipos, pagos).map((m) => ({
-      ...m,
-      // El detalle de un cargo lleva el equipo entero; al extracto le basta con
-      // saber cuál fue.
-      detalle: m.clave.startsWith('c')
-        ? { imei: m.detalle.imei, descripcion_equipo: m.detalle.descripcion_equipo,
-            trabajo: m.detalle.trabajo, salida_numero: m.detalle.salida_numero }
-        : m.detalle,
-    })),
   };
 };
 
@@ -284,6 +350,10 @@ const enviarDesdeOrden = async (user, ordenId, d) => {
   const anticipo = d.anticipo && _num(d.anticipo.valor) ? _validarPlata(d.anticipo, 'Anticipo') : null;
 
   return _transaccion(async (client) => {
+    const tecnico = await repo.findTecnico(negocioId, d.tecnico_id, client);
+    if (!tecnico || !tecnico.activo) throw { status: 404, message: 'Técnico no encontrado o inactivo' };
+    await bloquearOperacion(client, `tecnico:${tecnico.id}`);
+
     const { rows: [orden] } = await client.query(`
       SELECT id, numero, sucursal_id, estado, equipo_serial, equipo_nombre, equipo_tipo, cliente_nombre
       FROM ordenes_servicio WHERE id = $1 AND negocio_id = $2
@@ -299,10 +369,6 @@ const enviarDesdeOrden = async (user, ordenId, d) => {
     const { rows: abierto } = await client.query(
       `SELECT 1 FROM equipos_tecnico WHERE orden_servicio_id = $1 AND estado = 'En_tecnico' LIMIT 1`, [orden.id]);
     if (abierto.length) throw { status: 409, message: 'El equipo de esta orden ya está donde un técnico' };
-
-    const tecnico = await repo.findTecnico(negocioId, d.tecnico_id, client);
-    if (!tecnico || !tecnico.activo) throw { status: 404, message: 'Técnico no encontrado o inactivo' };
-    await bloquearOperacion(client, `tecnico:${tecnico.id}`);
 
     const imei = _texto(orden.equipo_serial, 60);
     const vendido = imei ? await repo.serialVendidoPorImei(client, negocioId, imei) : null;
@@ -341,6 +407,9 @@ const reclamarGarantia = async (user, sucursalId, equipoId, d) => {
   const negocioId = user.negocio_id;
   const trabajo = _texto(d.trabajo) || 'Reclamo de garantía';
   return _transaccion(async (client) => {
+    const tecnicoId = await _tecnicoDe(client, 'equipos_tecnico', equipoId, negocioId);
+    if (!tecnicoId) throw { status: 404, message: 'Trabajo no encontrado' };
+    await bloquearOperacion(client, `tecnico:${tecnicoId}`);
     const original = await repo.findEquipo(client, negocioId, equipoId, { bloquear: true });
     if (!original) throw { status: 404, message: 'Trabajo no encontrado' };
     _exigirSucursal(user, sucursalId, original.sucursal_id);
@@ -358,7 +427,6 @@ const reclamarGarantia = async (user, sucursalId, equipoId, d) => {
     if (ya.length) throw { status: 409, message: 'Ya hay un reclamo abierto de este trabajo' };
 
     const tecnico = await repo.findTecnico(negocioId, original.tecnico_id, client);
-    await bloquearOperacion(client, `tecnico:${tecnico.id}`);
 
     // El origen se vuelve a mirar: el equipo pudo venderse desde que volvió.
     let origen = original.origen;
@@ -462,11 +530,16 @@ const recibir = async (user, sucursalId, equipoId, d, { puedePagar = false } = {
   }
 
   return _transaccion(async (client) => {
+    const tecnicoId = await _tecnicoDe(client, 'equipos_tecnico', equipoId, negocioId);
+    if (!tecnicoId) throw { status: 404, message: 'Equipo no encontrado' };
+    await bloquearOperacion(client, `tecnico:${tecnicoId}`);
     const eq = await repo.findEquipo(client, negocioId, equipoId, { bloquear: true });
     if (!eq) throw { status: 404, message: 'Equipo no encontrado' };
     _exigirSucursal(user, sucursalId, eq.sucursal_id);
+    // El doble clic en «Recibir» termina aquí: la segunda petición esperó el
+    // candado, lee el equipo ya recibido y no vuelve a sumar el costo ni a
+    // registrar el pago.
     if (eq.estado !== 'En_tecnico') throw { status: 409, message: 'Este equipo ya se recibió' };
-    await bloquearOperacion(client, `tecnico:${eq.tecnico_id}`);
     const tecnico = await repo.findTecnico(negocioId, eq.tecnico_id, client);
 
     // Un reclamo de garantía normalmente vuelve en $0, pero si el técnico cobró
@@ -528,16 +601,19 @@ const recibir = async (user, sucursalId, equipoId, d, { puedePagar = false } = {
     // Plata en el mismo momento. Pago ≤ deuda; devolución ≤ saldo a favor —
     // medidos DESPUÉS de este cargo, que ya quedó escrito.
     const pagos = [];
+    // Sin la ventana de gemelos: aquí al pago lo protege el estado del EQUIPO
+    // (arriba), y la ventana haría daño — recibir los dos equipos de una misma
+    // salida pagando $50.000 por cada uno parecería "el mismo pago dos veces".
     if (pago) pagos.push(await _registrarPagoEnTx(client, {
       user, negocioId, tecnicoId: eq.tecnico_id, sucursalId: eq.sucursal_id,
-      tipo: 'Pago', ...pago, salidaId: eq.salida_id, notas: 'Pago al recibir',
+      tipo: 'Pago', ...pago, salidaId: eq.salida_id, notas: 'Pago al recibir', sinVentana: true,
     }));
     if (devolucion) pagos.push(await _registrarPagoEnTx(client, {
       user, negocioId, tecnicoId: eq.tecnico_id, sucursalId: eq.sucursal_id,
-      tipo: 'Devolucion', ...devolucion, salidaId: eq.salida_id, notas: 'Devolución del anticipo',
+      tipo: 'Devolucion', ...devolucion, salidaId: eq.salida_id, notas: 'Devolución del anticipo', sinVentana: true,
     }));
 
-    const materia = await repo.materiaCuenta(client, negocioId, eq.tecnico_id);
+    const materia = await repo.materiaCuenta(client, negocioId, eq.tecnico_id, eq.sucursal_id);
     return { equipo: actualizado, pagos, resumen: cuenta.resumen(materia.equipos, materia.pagos) };
   });
 };
@@ -547,6 +623,9 @@ const anularEquipo = async (user, sucursalId, equipoId, motivo) => {
   const m = _texto(motivo, 300);
   if (!m) throw { status: 400, message: 'Escribe el motivo de la anulación' };
   return _transaccion(async (client) => {
+    const tecnicoId = await _tecnicoDe(client, 'equipos_tecnico', equipoId, user.negocio_id);
+    if (!tecnicoId) throw { status: 404, message: 'Equipo no encontrado' };
+    await bloquearOperacion(client, `tecnico:${tecnicoId}`);
     const eq = await repo.findEquipo(client, user.negocio_id, equipoId, { bloquear: true });
     if (!eq) throw { status: 404, message: 'Equipo no encontrado' };
     _exigirSucursal(user, sucursalId, eq.sucursal_id);
@@ -564,48 +643,75 @@ const anularEquipo = async (user, sucursalId, equipoId, motivo) => {
 
 // ── Pagos ────────────────────────────────────────────────────────────────────
 
+// PRECONDICIÓN: quien llama ya tomó `bloquearOperacion(client, 'tecnico:<id>')`.
+// Sin el candado, la ventana de gemelos no ve el pago sin commitear de la
+// petición hermana y las dos pasan (es exactamente lo que pasó en préstamos).
 const _registrarPagoEnTx = async (client, { user, negocioId, tecnicoId, sucursalId, tipo,
-  valor, metodo, salidaId = null, notas = null }) => {
-  // Mismo pago, mismo técnico, mismo valor en la ventana = el formulario se
-  // envió dos veces, no un segundo pago.
-  const { rows: gemelo } = await client.query(`
-    SELECT id FROM pagos_tecnico
-    WHERE tecnico_id = $1 AND tipo = $2 AND valor = $3 AND metodo = $4 AND NOT anulado
-      AND COALESCE(salida_id, -1) = COALESCE($5, -1)
-      AND fecha > NOW() - ($6 || ' seconds')::interval
-    LIMIT 1
-  `, [tecnicoId, tipo, valor, metodo, salidaId, String(VENTANA_DUPLICADO_SEG)]);
-  if (gemelo.length) {
-    throw { status: 409, message: 'Este mismo pago ya se registró hace un momento. Revisa la cuenta del técnico antes de volver a intentarlo.' };
+  valor, metodo, salidaId = null, notas = null, sucursalNombre = null, sinVentana = false }) => {
+  // Mismo pago, mismo técnico, MISMA SEDE, mismo valor en la ventana = el
+  // formulario se envió dos veces, no un segundo pago. La sede cuenta: en
+  // «Pagar todo» dos sedes pueden pagar el mismo valor por el mismo método.
+  if (!sinVentana) {
+    const { rows: gemelo } = await client.query(`
+      SELECT id FROM pagos_tecnico
+      WHERE tecnico_id = $1 AND sucursal_id = $2 AND tipo = $3 AND valor = $4 AND metodo = $5
+        AND NOT anulado
+        AND COALESCE(salida_id, -1) = COALESCE($6, -1)
+        AND fecha > NOW() - ($7 || ' seconds')::interval
+      LIMIT 1
+    `, [tecnicoId, sucursalId, tipo, valor, metodo, salidaId, String(VENTANA_DUPLICADO_SEG)]);
+    if (gemelo.length) {
+      throw {
+        status: 409, code: 'PAGO_DUPLICADO',
+        message: 'Este mismo pago ya se registró hace un momento. Revisa la cuenta del técnico antes de volver a intentarlo.',
+      };
+    }
   }
 
-  const materia = await repo.materiaCuenta(client, negocioId, tecnicoId);
+  // Se valida contra la cuenta de ESTA sede: es su caja la que paga, así que
+  // solo puede pagar lo que ella debe y recibir lo que ella tiene a favor.
+  const materia = await repo.materiaCuenta(client, negocioId, tecnicoId, sucursalId);
   const { deuda, saldo_a_favor: aFavor } = cuenta.resumen(materia.equipos, materia.pagos);
+  const sede = sucursalNombre ? ` en ${sucursalNombre}` : ' en esta sucursal';
   if (tipo === 'Pago' && valor > deuda + 0.005) {
     throw {
       status: 400, code: 'PAGO_MAYOR_A_DEUDA',
       message: deuda > 0
-        ? `Al técnico se le deben ${_dinero(deuda)}. Si le vas a dar más plata, regístrala como anticipo.`
-        : 'Al técnico no se le debe nada. Si le vas a dar plata, regístrala como anticipo.',
+        ? `Al técnico se le deben ${_dinero(deuda)}${sede}. Si le vas a dar más plata, regístrala como anticipo.`
+        : `Al técnico no se le debe nada${sede}. Si le vas a dar plata, regístrala como anticipo.`,
     };
   }
   if (tipo === 'Devolucion' && valor > aFavor + 0.005) {
     throw {
       status: 400, code: 'DEVOLUCION_MAYOR_A_FAVOR',
       message: aFavor > 0
-        ? `El técnico solo tiene ${_dinero(aFavor)} a nuestro favor para devolver.`
-        : 'El técnico no tiene plata nuestra para devolver.',
+        ? `El técnico solo tiene ${_dinero(aFavor)} a favor${sede} para devolver.`
+        : `El técnico no tiene plata${sede} para devolver.`,
     };
   }
   if (salidaId) {
     const { rows } = await client.query(
-      'SELECT 1 FROM salidas_tecnico WHERE id = $1 AND tecnico_id = $2 AND negocio_id = $3',
-      [salidaId, tecnicoId, negocioId]);
-    if (!rows.length) throw { status: 400, message: 'La salida no es de este técnico' };
+      'SELECT 1 FROM salidas_tecnico WHERE id = $1 AND tecnico_id = $2 AND negocio_id = $3 AND sucursal_id = $4',
+      [salidaId, tecnicoId, negocioId, sucursalId]);
+    if (!rows.length) throw { status: 400, message: 'La salida no es de este técnico ni de esta sucursal' };
   }
   return _insertarPago(client, {
     negocioId, tecnicoId, sucursalId, usuarioId: user.id, tipo, valor, metodo, salidaId, notas,
   });
+};
+
+// ¿De qué caja sale (o a cuál entra)? Un supervisor o vendedor: siempre la de
+// SU sede, pase lo que pase en el cuerpo. El admin tiene que DECIRLO: sin eso
+// caía en la sucursal resuelta por defecto (la primera activa) y pagaba desde
+// una caja que nadie eligió.
+const _sucursalDelPago = async (client, user, sucursalReq, sucursalPedida) => {
+  if (user.rol !== 'admin_negocio') return Number(sucursalReq);
+  const id = _num(sucursalPedida);
+  if (!id) throw { status: 400, code: 'SUCURSAL_REQUERIDA', message: 'Elige de qué sucursal sale el pago' };
+  const { rows } = await client.query(
+    'SELECT id FROM sucursales WHERE id = $1 AND negocio_id = $2', [id, user.negocio_id]);
+  if (!rows.length) throw { status: 400, message: 'Esa sucursal no es de este negocio' };
+  return id;
 };
 
 const registrarPago = async (user, sucursalId, tecnicoId, d) => {
@@ -615,27 +721,71 @@ const registrarPago = async (user, sucursalId, tecnicoId, d) => {
   return _transaccion(async (client) => {
     const tecnico = await repo.findTecnico(user.negocio_id, tecnicoId, client);
     if (!tecnico) throw { status: 404, message: 'Técnico no encontrado' };
+    const suc = await _sucursalDelPago(client, user, sucursalId, d.sucursal_id);
     await bloquearOperacion(client, `tecnico:${tecnico.id}`);
     const pago = await _registrarPagoEnTx(client, {
-      user, negocioId: user.negocio_id, tecnicoId: tecnico.id, sucursalId,
+      user, negocioId: user.negocio_id, tecnicoId: tecnico.id, sucursalId: suc,
       tipo, valor, metodo, salidaId: _num(d.salida_id), notas: _texto(d.notas, 300),
     });
-    const materia = await repo.materiaCuenta(client, user.negocio_id, tecnico.id);
+    const materia = await repo.materiaCuenta(client, user.negocio_id, tecnico.id, suc);
     return { pago, resumen: cuenta.resumen(materia.equipos, materia.pagos) };
+  });
+};
+
+/**
+ * Pagarle al técnico lo de VARIAS sedes en un solo paso (solo el admin: es el
+ * único que ve más de una). No hay "un pago total": hay un pago por sede, cada
+ * uno de SU caja y validado contra SU deuda, todos en la misma transacción —o
+ * entran todos o ninguno—. Así cada caja muestra exactamente lo suyo.
+ * @param d { pagos: [{ sucursal_id, valor, metodo }], notas }
+ */
+const pagarPorSucursales = async (user, tecnicoId, d) => {
+  if (user.rol !== 'admin_negocio') {
+    throw { status: 403, message: 'Solo el administrador paga varias sucursales a la vez' };
+  }
+  const lista = (Array.isArray(d.pagos) ? d.pagos : []).filter((p) => _num(p?.valor) > 0);
+  if (!lista.length) throw { status: 400, message: 'Indica cuánto paga al menos una sucursal' };
+  const sucs = lista.map((p) => Number(p.sucursal_id));
+  if (new Set(sucs).size !== sucs.length) throw { status: 400, message: 'Una sucursal está repetida' };
+  const plata = lista.map((p) => ({ sucursal_id: p.sucursal_id, ..._validarPlata(p, 'Pago') }));
+
+  return _transaccion(async (client) => {
+    const tecnico = await repo.findTecnico(user.negocio_id, tecnicoId, client);
+    if (!tecnico) throw { status: 404, message: 'Técnico no encontrado' };
+    await bloquearOperacion(client, `tecnico:${tecnico.id}`);
+    const nombres = await repo.nombresSucursales(user.negocio_id);
+    const pagos = [];
+    for (const p of plata) {
+      const suc = await _sucursalDelPago(client, user, null, p.sucursal_id);
+      pagos.push(await _registrarPagoEnTx(client, {
+        user, negocioId: user.negocio_id, tecnicoId: tecnico.id, sucursalId: suc,
+        tipo: 'Pago', valor: p.valor, metodo: p.metodo,
+        notas: _texto(d.notas, 300) || 'Pago de varias sucursales',
+        sucursalNombre: nombres.get(suc),
+      }));
+    }
+    return { pagos };
   });
 };
 
 // Se anula, nunca se borra: el pago deja de contar para el saldo, la caja y la
 // tesorería, pero sigue en el estado de cuenta con su razón.
-const anularPago = async (user, pagoId, motivo) => {
+const anularPago = async (user, pagoId, motivo, sucursalId = null) => {
   const m = _texto(motivo, 300);
   if (!m) throw { status: 400, message: 'Escribe el motivo de la anulación' };
   return _transaccion(async (client) => {
+    const tecnicoId = await _tecnicoDe(client, 'pagos_tecnico', pagoId, user.negocio_id);
+    if (!tecnicoId) throw { status: 404, message: 'Pago no encontrado' };
+    await bloquearOperacion(client, `tecnico:${tecnicoId}`);
     const { rows: [p] } = await client.query(
       'SELECT * FROM pagos_tecnico WHERE id = $1 AND negocio_id = $2 FOR UPDATE', [pagoId, user.negocio_id]);
     if (!p) throw { status: 404, message: 'Pago no encontrado' };
     if (p.anulado) throw { status: 409, message: 'Ese pago ya estaba anulado' };
-    await bloquearOperacion(client, `tecnico:${p.tecnico_id}`);
+    // Anular un pago revierte la caja de SU sede: fuera del admin, solo se
+    // anula lo de la propia.
+    if (user.rol !== 'admin_negocio' && Number(p.sucursal_id) !== Number(sucursalId)) {
+      throw { status: 403, message: 'Ese pago es de otra sucursal' };
+    }
     const { rows: [r] } = await client.query(`
       UPDATE pagos_tecnico
       SET anulado = TRUE, anulado_motivo = $2, anulado_por = $3, anulado_en = NOW()
@@ -656,5 +806,5 @@ module.exports = {
   listarTecnicos, crearTecnico, actualizarTecnico, detalleTecnico,
   listarEquipos, buscarDisponibles,
   enviar, enviarDesdeOrden, reclamarGarantia, recibir, anularEquipo,
-  registrarPago, anularPago, resumenPeriodo,
+  registrarPago, pagarPorSucursales, anularPago, resumenPeriodo,
 };
