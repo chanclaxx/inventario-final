@@ -3,7 +3,7 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { getEstadoCuenta, recibirRemision, mensajeErrorRecepcion } from '../../api/redInterna.api';
 import { formatCOP, formatFechaHora } from '../../utils/formatters';
 import { Button }     from '../../components/ui/Button';
-import { BotonPdfRed } from './BotonPdfRed';
+import { ModalDocumentosLocal } from './documentos/ModalDocumentosLocal';
 import { Spinner }    from '../../components/ui/Spinner';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { ModalRecibir } from './ModalRecibir';
@@ -188,6 +188,7 @@ export function CuentaLocal({
   const [movim,  setMovim]  = useState(null);   // null | 'gasto' | 'ajuste'
   const [pedir,  setPedir]  = useState(false);
   const [pedido, setPedido] = useState(null);   // id del pedido abierto
+  const [documentos, setDocumentos] = useState(false);
   const [estado, setEstado] = useState('');
   const [q,      setQ]      = useState('');
 
@@ -332,16 +333,9 @@ export function CuentaLocal({
         )}
         {/* Los dos PDF de la cuenta. Los ven el local y la bodega; qué valores
             trae cada uno lo decide el backend según quién lo pide. */}
-        <BotonPdfRed etiqueta="Estado de cuenta" pdf={{
-          ruta: `/red-interna/estado-cuenta/${sucursalId}/pdf`,
-          nombreArchivo: `estado-cuenta-${nombreLocal}.pdf`,
-          titulo: `Estado de cuenta · ${nombreLocal}`,
-        }} />
-        <BotonPdfRed etiqueta="Envíos pendientes" pdf={{
-          ruta: `/red-interna/envios-activos/${sucursalId}/pdf`,
-          nombreArchivo: `envios-pendientes-${nombreLocal}.pdf`,
-          titulo: `Envíos pendientes · ${nombreLocal}`,
-        }} />
+        <Button variant="secondary" size="sm" onClick={() => setDocumentos(true)}>
+          <FileText size={14} /> Documentos
+        </Button>
       </div>
 
       {/* Pestañas */}
@@ -441,6 +435,15 @@ export function CuentaLocal({
 
       {/* La misma ficha que abre la bodega. Aquí sin sus acciones: el local ve
           en qué va lo suyo y puede anularlo mientras nada haya salido. */}
+      {documentos && (
+        <ModalDocumentosLocal
+          sucursalId={sucursalId}
+          nombreLocal={nombreLocal}
+          data={data}
+          onClose={() => setDocumentos(false)}
+        />
+      )}
+
       {pedido && (
         <ModalPedido
           pedidoId={pedido}

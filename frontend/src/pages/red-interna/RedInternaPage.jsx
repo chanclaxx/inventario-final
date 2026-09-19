@@ -14,10 +14,10 @@ import { ModalDespachar } from './ModalDespachar';
 import { ModalPedido }    from './ModalPedido';
 import { BandejaPedidos } from './PedidosSecciones';
 import { CuentaLocal }   from './CuentaLocal';
-import { BotonPdfRed }   from './BotonPdfRed';
+import { ModalDocumentoEnvio } from './documentos/ModalDocumentoEnvio';
 import {
   Package, PackageCheck, Truck, Store, AlertTriangle, CheckCircle,
-  Wallet, ShieldCheck, ChevronRight, X, Undo2, Receipt, XCircle,
+  Wallet, ShieldCheck, ChevronRight, X, Undo2, Receipt, XCircle, Printer,
 } from 'lucide-react';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -77,6 +77,7 @@ function PanelBodega({ data, locales, onRefrescar, onAviso, onVerCuenta }) {
     onSuccess: () => { onAviso('Pago anulado — los envíos vuelven a quedar abiertos'); onRefrescar(); },
     onError: (e) => onAviso(e?.response?.data?.error || 'No se pudo anular'),
   });
+  const [imprimiendo, setImprimiendo] = useState(null);   // guía de un envío en tránsito
   const anular = useMutation({
     mutationFn: (id) => anularRemision(id),
     onSuccess: () => { onAviso('Envío anulado'); onRefrescar(); },
@@ -315,11 +316,9 @@ function PanelBodega({ data, locales, onRefrescar, onAviso, onVerCuenta }) {
                 </div>
                 {/* La guía para mandar con la mercancía: el mismo PDF del envío,
                     que en tránsito sale sin deuda y con las firmas en blanco. */}
-                <BotonPdfRed compacto etiqueta="Guía PDF" pdf={{
-                  ruta: `/red-interna/remisiones/${r.id}/pdf`,
-                  nombreArchivo: `envio-${r.numero ?? r.id}.pdf`,
-                  titulo: `Envío #${r.numero ?? r.id} → ${r.sucursal_destino_nombre}`,
-                }} />
+                <Button size="sm" variant="secondary" onClick={() => setImprimiendo(r.id)}>
+                  <Printer size={14} /> Guía
+                </Button>
                 <Button size="sm" variant="ghost"
                   loading={anular.isPending && anular.variables === r.id}
                   onClick={() => anular.mutate(r.id)}
@@ -377,6 +376,9 @@ function PanelBodega({ data, locales, onRefrescar, onAviso, onVerCuenta }) {
         />
       )}
       {salud   && <ModalSalud onCerrar={() => setSalud(false)} />}
+      {imprimiendo && (
+        <ModalDocumentoEnvio remisionId={imprimiendo} onClose={() => setImprimiendo(null)} />
+      )}
     </>
   );
 }

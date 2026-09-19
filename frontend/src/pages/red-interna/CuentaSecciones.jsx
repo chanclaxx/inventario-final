@@ -12,13 +12,13 @@ import { Button }     from '../../components/ui/Button';
 import { Spinner }    from '../../components/ui/Spinner';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { CardEquipo } from './CardEquipo';
-import { BotonPdfRed } from './BotonPdfRed';
+import { ModalDocumentoEnvio } from './documentos/ModalDocumentoEnvio';
 import { CHIPS, contar, VENDIDOS } from './estados';
 import {
   ChevronDown, Search, X, TrendingUp, TrendingDown, Package, Truck,
   Wallet, FileText, Receipt, Filter, Info, HandCoins, ShoppingBag, Undo2,
   Store, AlertTriangle, CheckCircle2, Send, PiggyBank, Undo2 as Deshacer,
-  Clock, XCircle, ArrowRightLeft, PackageX, Pencil, SlidersHorizontal,
+  Clock, XCircle, ArrowRightLeft, PackageX, Pencil, SlidersHorizontal, Printer,
 } from 'lucide-react';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -697,6 +697,7 @@ function TarjetaCargo({ c, propia, onAbonar }) {
 // del propio local y la bodega nunca se la había vendido.
 function TarjetaDevolucion({ d }) {
   const [abierto, setAbierto] = useState(false);
+  const [imprimir, setImprimir] = useState(false);
   const pendiente = d.estado === 'En transito';
   return (
     <div className={`border rounded-2xl overflow-hidden ${pendiente
@@ -732,11 +733,11 @@ function TarjetaDevolucion({ d }) {
       {abierto && (
         <div className="border-t border-gray-100 divide-y divide-gray-50">
           <div className="px-4 py-2">
-            <BotonPdfRed compacto etiqueta="PDF de la devolución" pdf={{
-              ruta: `/red-interna/remisiones/${d.id}/pdf`,
-              nombreArchivo: `devolucion-${d.numero ?? d.id}.pdf`,
-              titulo: `Devolución #${d.numero ?? d.id}`,
-            }} />
+            <button type="button" onClick={() => setImprimir(true)}
+              className="inline-flex items-center gap-1 text-xs text-gray-500 hover:text-blue-600 transition-colors">
+              <Printer size={12} /> Imprimir devolución
+            </button>
+            {imprimir && <ModalDocumentoEnvio remisionId={d.id} onClose={() => setImprimir(false)} />}
           </div>
           {(d.lineas || []).map((l) => (
             <div key={l.linea_id} className="flex items-center gap-2.5 px-4 py-2 text-sm">
@@ -782,6 +783,7 @@ export function TabEnvios({
   // "Recibí todo" y faltaba una caja: el error más caro del día a día del local
   // desde que recibir genera la deuda.
   const [reclamando, setReclamando] = useState(null);
+  const [imprimiendo, setImprimiendo] = useState(null);   // id del envío a imprimir
 
   // Solo se sale temprano si no hay NADA que mostrar: un local puede no tener
   // envíos abiertos y sí devoluciones en curso, y esconderlas era justo el
@@ -881,11 +883,12 @@ export function TabEnvios({
               <PackageX size={12} /> ¿Algo no llegó?
             </button>
           )}
-          <BotonPdfRed compacto etiqueta="PDF" pdf={{
-            ruta: `/red-interna/remisiones/${e.id}/pdf`,
-            nombreArchivo: `envio-${e.numero ?? e.id}.pdf`,
-            titulo: `Envío #${e.numero ?? e.id}`,
-          }} />
+          <button
+            onClick={() => setImprimiendo(e.id)}
+            className="inline-flex items-center gap-1 text-xs text-gray-400 hover:text-blue-600 transition-colors"
+          >
+            <Printer size={12} /> Imprimir
+          </button>
           {e.cargo > 0 && (
             <button
               onClick={() => setAbierto(abre ? null : e.id)}
@@ -938,6 +941,10 @@ export function TabEnvios({
         <div className="bg-green-50 border border-green-100 rounded-xl px-4 py-3 text-center">
           <p className="text-green-700 text-sm font-medium">✓ Sin envíos por pagar</p>
         </div>
+      )}
+
+      {imprimiendo && (
+        <ModalDocumentoEnvio remisionId={imprimiendo} onClose={() => setImprimiendo(null)} />
       )}
 
       {reclamando && (

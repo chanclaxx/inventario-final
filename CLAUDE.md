@@ -1749,6 +1749,14 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > imprimen como COMILLAS. Pasaba también en el encabezado de la columna de abonos
 > de `estadoCuenta.pdf.js` (préstamos y créditos) y `acreedores.pdf.js`, ya
 > corregido. Se descubrió RENDERIZANDO el PDF: el texto extraído decía «−$».
+> **En pantalla van como en préstamos** (`documentos/ModalDocumentosLocal.jsx`,
+> `documentos/ModalDocumentoEnvio.jsx`): la cuenta del local tiene UN botón
+> «Documentos» con una tarjeta por PDF que ya dice la cifra que va a salir; cada
+> envío o devolución tiene «Imprimir», que muestra primero qué es (de dónde a
+> dónde, estado, productos, saldo) y ofrece impresora POS —la guía en ticket
+> para mandar con la mercancía, sobre `DocumentoTermico`—, PDF A4 o compartir.
+> El ticket usa el mismo `getRemision` (misma clave de React Query que el
+> desplegable del envío), así que respeta el recorte del vendedor.
 > Prueba: `55-pdf-red-interna` (49; la 2 quién ve valores, la 3 los abonos
 > ajenos, la 8 un envío de 70 líneas sin saltos de PDFKit, la 9 que ningún
 > carácter impreso quede fuera de WinAnsi).
