@@ -39,10 +39,14 @@ for (const m of [
   await db.exec(readFileSync(path.join(RAIZ, '../migrations', m), 'utf8'));
 }
 await db.exec(readFileSync(path.join(RAIZ, 'migrations/20260912_listas_precios.sql'), 'utf8'));
+await db.exec(readFileSync(path.join(RAIZ, 'migrations/20260730_mora_credito.sql'), 'utf8'));
+await db.exec(readFileSync(path.join(RAIZ, 'migrations/20260804_interes_corriente.sql'), 'utf8'));
 await db.exec(`
   ALTER TABLE clientes ADD COLUMN IF NOT EXISTS celular   TEXT;
   ALTER TABLE clientes ADD COLUMN IF NOT EXISTS email     TEXT;
   ALTER TABLE clientes ADD COLUMN IF NOT EXISTS direccion TEXT;
+  ALTER TABLE prestamos ADD COLUMN IF NOT EXISTS atributo_label TEXT;
+  ALTER TABLE prestamos ADD COLUMN IF NOT EXISTS variante_label TEXT;
   CREATE TABLE IF NOT EXISTS auditoria (
     id SERIAL PRIMARY KEY, negocio_id INT, usuario_id INT, fecha TIMESTAMP DEFAULT NOW(),
     accion VARCHAR, tabla VARCHAR, registro_id INT, detalle TEXT
@@ -63,6 +67,7 @@ require(path.join(RAIZ, 'src/config/columnas.js'))._setListasPreciosDisponible(t
 const back     = require(path.join(RAIZ, 'src/utils/precioMinimo.util.js'));
 const facturas = require(path.join(RAIZ, 'src/modules/facturas/facturas.service.js'));
 const red      = require(path.join(RAIZ, 'src/modules/red-interna/redInterna.service.js'));
+const prestamos = require(path.join(RAIZ, 'src/modules/prestamos/prestamos.service.js'));
 const front    = await import(
   'file://' + path.resolve(RAIZ, '../frontend/src/utils/precioMinimo.js').replace(/\\/g, '/'));
 
@@ -107,7 +112,9 @@ await db.exec(`
     (1, 'IMEI-A', 2000000, 2450000),
     (1, 'IMEI-B', 2000000, NULL),
     (1, 'IMEI-C', 2000000, NULL),
-    (1, 'IMEI-D', 2000000, NULL);
+    (1, 'IMEI-D', 2000000, NULL),
+    (1, 'IMEI-E', 2000000, NULL),
+    (1, 'IMEI-F', 2000000, NULL);
 `);
 
 const LISTAS = JSON.stringify([
@@ -233,7 +240,43 @@ seccion('5. Despacho a un local');
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-seccion('6. Backend y frontend calculan el mismo piso');
+seccion('6. Préstamos: valor_prestamo es el TOTAL');
+{
+  const prestar = (items) => prestamos.crearPrestamos({
+    sucursal_id: 1, usuario_id: 1, negocio_id: 1,
+    prestatario: 'Ana', cedula: '999', telefono: '300', items,
+  });
+  await rechaza('3 cables por 44.000 (14.667 c/u; mínimo 15.000)',
+    () => prestar([{ nombre_producto: 'Cable', producto_id: 1, cantidad_prestada: 3, valor_prestamo: 44000 }]));
+  await pasa('3 cables por 45.000 (15.000 c/u)',
+    () => prestar([{ nombre_producto: 'Cable', producto_id: 1, cantidad_prestada: 3, valor_prestamo: 45000 }]));
+  await rechaza('serial por debajo de la referencia',
+    () => prestar([{ nombre_producto: 'iPhone 13', imei: 'IMEI-E', valor_prestamo: 2500000 }]));
+  const antesSerial = await q(`SELECT prestado FROM seriales WHERE imei = 'IMEI-E'`);
+  ok('…y el equipo no quedó prestado (ROLLBACK)', antesSerial[0].prestado === false);
+  await pasa('protector sin precio registrado',
+    () => prestar([{ nombre_producto: 'Protector', producto_id: 2, cantidad_prestada: 1, valor_prestamo: 1 }]));
+  await rechaza('crearPrestamo (uno solo) también', () => prestamos.crearPrestamo({
+    sucursal_id: 1, usuario_id: 1, negocio_id: 1, prestatario: 'Ana', cedula: '999', telefono: '300',
+    nombre_producto: 'Correa', producto_id: 3, atributo_id: 2, cantidad_prestada: 1, valor_prestamo: 60000,
+  }));
+
+  const [p] = await prestar([{ nombre_producto: 'Cable', producto_id: 1, cantidad_prestada: 2, valor_prestamo: 40000 }])
+    .then((r) => r.prestamos ?? r);
+  const pid = p?.id ?? (await q(`SELECT max(id) AS id FROM prestamos`))[0].id;
+  await rechaza('editar el valor a 29.000 (2 cables, mínimo 30.000)',
+    () => prestamos.editarValorPrestamo(1, pid, 29000));
+  await pasa('editar el valor a 30.000', () => prestamos.editarValorPrestamo(1, pid, 30000));
+  await pasa('subir el valor siempre se puede', () => prestamos.editarValorPrestamo(1, pid, 50000));
+
+  await setCfg('precio_minimo_activo', '0');
+  await pasa('apagado: préstamo a $1', () =>
+    prestar([{ nombre_producto: 'Cable', producto_id: 1, cantidad_prestada: 1, valor_prestamo: 1 }]));
+  await setCfg('precio_minimo_activo', '1');
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+seccion('7. Backend y frontend calculan el mismo piso');
 {
   const casos = [
     { precio: 15000, precios: null, listaIds: [] },

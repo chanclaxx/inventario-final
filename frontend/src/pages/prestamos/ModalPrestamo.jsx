@@ -22,6 +22,8 @@ import { SelectorCargos } from '../../components/ui/SelectorCargos';
 import { User, Users, Plus, Minus, ChevronLeft, Search, Bookmark } from 'lucide-react';
 import { ChipsVariante }        from '../../components/ui/ChipsVariante';
 import { InputMoneda } from '../../components/ui/InputMoneda';
+import { usePrecioMinimo } from '../../hooks/usePrecioMinimo';
+import { pisoItemCarrito, bajoMinimo, itemsBajoMinimo } from '../../utils/precioMinimo';
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
@@ -233,7 +235,12 @@ function ChipSeleccionado({ nombre, onCambiar }) {
 
 // ─── ResumenCarrito ───────────────────────────────────────────────────────────
 
-function ResumenCarrito({ items, onActualizarPrecio, onActualizarCantidad, tarifasCfg, onAplicarTarifa }) {
+function ResumenCarrito({
+  items, onActualizarPrecio, onActualizarCantidad, tarifasCfg, onAplicarTarifa, reglaPrecio,
+}) {
+  // Precio mínimo (feature opt-in): el backend lo rechaza igual; aquí se dice
+  // en la línea, antes de enviar.
+  const pisoPorKey = new Map(items.map((i) => [i.key, pisoItemCarrito(i, reglaPrecio)]));
   return (
     <div className="bg-gray-50 rounded-xl p-3 flex flex-col gap-3">
       <p className="text-xs font-medium text-gray-500">
@@ -272,12 +279,23 @@ function ResumenCarrito({ items, onActualizarPrecio, onActualizarCantidad, tarif
               <InputMoneda
                 value={item.precioFinal}
                 onChange={(val) => onActualizarPrecio(item.key, val)}
-                className="w-28 text-right text-sm font-semibold text-gray-800 bg-white
-                  border border-gray-200 rounded-lg px-2 py-1 focus:outline-none
-                  focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className={`w-28 text-right text-sm font-semibold text-gray-800 bg-white
+                  border rounded-lg px-2 py-1 focus:outline-none
+                  focus:ring-2 focus:ring-blue-500 focus:border-transparent
+                  ${bajoMinimo(item.precioFinal, pisoPorKey.get(item.key))
+                    ? 'border-red-400' : 'border-gray-200'}`}
               />
             </div>
           </div>
+          {bajoMinimo(item.precioFinal, pisoPorKey.get(item.key)) && (
+            <button
+              type="button"
+              onClick={() => onActualizarPrecio(item.key, pisoPorKey.get(item.key))}
+              className="self-end text-xs text-red-600 hover:text-red-700"
+            >
+              El precio mínimo es {formatCOP(pisoPorKey.get(item.key))} · usarlo
+            </button>
+          )}
           {tarifasCfg?.activo && (
             <TarifaItem item={item} config={tarifasCfg} onAplicar={onAplicarTarifa} />
           )}
@@ -299,6 +317,7 @@ export function ModalPrestamo({ open, onClose }) {
   // carrito y por tanto las mismas tarifas. Apagada la feature, `activo` es
   // false y el resumen queda idéntico a como estaba.
   const tarifasCfg = useTarifas();
+  const reglaPrecio = usePrecioMinimo();
   const total = totalCarrito();
 
   // Borradores: de qué borrador salió este carrito, si salió de alguno. El
@@ -477,6 +496,11 @@ export function ModalPrestamo({ open, onClose }) {
   const handleSubmit = () => {
     setError('');
     if (items.length === 0) return setError('El carrito está vacío');
+    const bajos = itemsBajoMinimo(items, reglaPrecio);
+    if (bajos.length) {
+      const { item, piso } = bajos[0];
+      return setError(`"${item.nombre}" está por debajo de su precio mínimo (${formatCOP(piso)})`);
+    }
 
     if (tipoCliente === 'companero') {
       if (!prestatarioSel) return setError('Selecciona o crea un prestatario');
@@ -556,6 +580,7 @@ export function ModalPrestamo({ open, onClose }) {
             onActualizarCantidad={actualizarCantidad}
             tarifasCfg={tarifasCfg}
             onAplicarTarifa={aplicarTarifa}
+            reglaPrecio={reglaPrecio}
           />
         )}
 

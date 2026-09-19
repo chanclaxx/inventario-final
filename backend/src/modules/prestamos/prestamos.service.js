@@ -5,6 +5,26 @@ const { asignarNumeroDocumento } = require('../../utils/numeracion.util');
 const { repartirAbono } = require('../../utils/mora.util');
 const { bloquearOperacion } = require('../../utils/idempotencia.util');
 const { ingresarSerialRetomado, revertirIngresoSerial, rastroParaRetoma } = require('../../utils/retomaSerial.util');
+const precioMinimo = require('../../utils/precioMinimo.util');
+
+// Precio mínimo (feature opt-in `precio_minimo_activo`). Un préstamo es una
+// venta con pago diferido: la misma regla que la factura. OJO: `valor_prestamo`
+// es el TOTAL, así que el piso se multiplica por la cantidad y el mensaje habla
+// del unitario, que es el número que el usuario escribió en el carrito.
+const _exigirPrecioMinimoPrestamo = async (client, regla, {
+  imei, producto_id, atributo_id, variante_id, cantidad, valor_total, nombre_producto, sucursal_id,
+}, accion = 'prestar') => {
+  if (!regla) return;
+  const piso = imei
+    ? await precioMinimo.pisoSerial(client, regla, { imei, sucursalId: sucursal_id })
+    : await precioMinimo.pisoCantidad(client, regla, {
+        productoId: producto_id, atributoId: atributo_id, varianteId: variante_id,
+      });
+  const unidades = imei ? 1 : Math.max(1, Number(cantidad) || 1);
+  precioMinimo.exigirNoBajoMinimo({
+    valor: Number(valor_total) / unidades, piso, nombre: nombre_producto, accion,
+  });
+};
 
 // ─── Helpers privados ─────────────────────────────────────────────────────────
 
@@ -421,6 +441,12 @@ const crearPrestamo = async ({
   try {
     await client.query('BEGIN');
 
+    await _exigirPrecioMinimoPrestamo(client, await precioMinimo.leerRegla(client, negocio_id), {
+      imei, producto_id: productoId, atributo_id, variante_id,
+      cantidad: esSerial ? 1 : (cantidad_prestada || 1),
+      valor_total: valor_prestamo, nombre_producto, sucursal_id,
+    });
+
     const prestamo = await repo.create(client, {
       sucursal_id, usuario_id, prestatario, cedula, telefono,
       nombre_producto, imei: imei || null,
@@ -486,10 +512,18 @@ const crearPrestamos = async ({
     await client.query('BEGIN');
 
     const prestamosCreados = [];
+    const reglaPrecio = await precioMinimo.leerRegla(client, negocio_id);
 
     for (const item of items) {
       const esSerial   = !!item.imei;
       const productoId = esSerial ? null : (item.producto_id || null);
+
+      await _exigirPrecioMinimoPrestamo(client, reglaPrecio, {
+        imei: item.imei, producto_id: productoId,
+        atributo_id: item.atributo_id, variante_id: item.variante_id,
+        cantidad: esSerial ? 1 : (item.cantidad_prestada || 1),
+        valor_total: item.valor_prestamo, nombre_producto: item.nombre_producto, sucursal_id,
+      });
 
       const prestamo = await repo.create(client, {
         sucursal_id, usuario_id, prestatario, cedula, telefono,
@@ -1877,6 +1911,18 @@ const editarValorPrestamo = async (negocioId, prestamoId, nuevoValor) => {
       status: 400,
       message: `El nuevo valor no puede ser menor al total ya abonado (${Number(prestamo.total_abonado).toLocaleString('es-CO')})`,
     };
+  }
+
+  // Precio mínimo: solo cuando el valor BAJA, igual que al editar una factura
+  // (un préstamo de antes de encender el candado no queda congelado). La
+  // cantidad es la vigente: la devolución parcial ya rebajó `cantidad_prestada`.
+  if (Number(nuevoValor) < Number(prestamo.valor_prestamo)) {
+    await _exigirPrecioMinimoPrestamo(pool, await precioMinimo.leerRegla(pool, negocioId), {
+      imei: prestamo.imei, producto_id: prestamo.producto_id,
+      atributo_id: prestamo.atributo_id, variante_id: prestamo.variante_id,
+      cantidad: prestamo.cantidad_prestada, valor_total: nuevoValor,
+      nombre_producto: prestamo.nombre_producto, sucursal_id: prestamo.sucursal_id,
+    }, 'dejar');
   }
 
   return repo.updateValorPrestamo(prestamoId, nuevoValor);

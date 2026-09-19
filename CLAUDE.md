@@ -110,17 +110,19 @@ Three roles exist: `admin_negocio`, `supervisor`, `vendedor`. Role determines wh
 
 > **Precio mínimo de venta** (`utils/precioMinimo.util.js`, opt-in
 > `precio_minimo_activo`, **ausente = apagado**; Ajustes → Precios de venta):
-> ni la factura (crear y **editar**) ni el despacho de la red interna aceptan un
+> ni la factura (crear y **editar**), ni el préstamo (crear y editar el valor), ni
+> el despacho de la red interna aceptan un
 > precio por debajo del **menor** de los precios escritos del nodo —el
 > predeterminado (variante > atributo > producto; en serial la unidad gana) y,
 > con listas activas, cada lista vigente—. El menor y no el del chip porque la
 > factura no guarda qué lista se usó. Sin ningún precio escrito no hay piso.
 > Editar solo mira las líneas cuyo precio BAJA (una factura vieja se sigue
 > corrigiendo). Error 400 `PRECIO_BAJO_MINIMO`. Excluyente con las tarifas en
-> `saveConfig`. El traslado libre no lleva precio y no aplica. Sin tocar:
-> préstamos y «Corregir valor de la línea» de la red. `pisoDePrecios` está
-> duplicada en `frontend/src/utils/precioMinimo.js`.
-> Prueba: `56-precio-minimo` (45; la sección 1 es la de apagada).
+> `saveConfig`. El traslado libre no lleva precio y no aplica. En préstamos
+> `valor_prestamo` es el TOTAL: se compara `valor / cantidad_prestada` (la
+> vigente) contra el piso. Sin tocar: «Corregir valor de la línea» de la red.
+> `pisoDePrecios` está duplicada en `frontend/src/utils/precioMinimo.js`.
+> Prueba: `56-precio-minimo` (55; la sección 1 es la de apagada).
 
 > **El PIN de administrador lo usan otros roles SOLO si el admin los autoriza**
 > (`config.service.verificarPinDeUsuario`, `middlewares/pinAdmin.middleware.js`,

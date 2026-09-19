@@ -3,9 +3,9 @@ import { ToggleLeft, ToggleRight, ShieldCheck, AlertTriangle } from 'lucide-reac
 // ─────────────────────────────────────────────────────────────────────────────
 // PRECIO MÍNIMO DE VENTA (feature opt-in: `precio_minimo_activo`)
 //
-// Encendido, nadie factura ni despacha a un local por debajo del menor de los
-// precios escritos del producto: el predeterminado y, con listas de precios,
-// el de cada lista. Lo impone el backend (utils/precioMinimo.util.js); ausente
+// Encendido, nadie factura, presta ni despacha a un local por debajo del menor
+// de los precios escritos del producto: el predeterminado y, con listas de
+// precios, el de cada lista. Lo impone el backend (utils/precioMinimo.util.js); ausente
 // o en '0' todo sigue como siempre. Excluyente con las tarifas porcentuales.
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -36,8 +36,8 @@ export function PrecioMinimoConfig({ valores, set }) {
         <div className="flex flex-col gap-0.5">
           <span className="text-sm font-medium text-gray-700">No vender por debajo del precio</span>
           <span className="text-xs text-gray-400">
-            Al facturar o despachar a un local, el precio no puede quedar por debajo del
-            precio de venta del producto
+            Al facturar, prestar o despachar a un local, el precio no puede quedar por
+            debajo del precio de venta del producto
             {listasActivas ? ' ni del más bajo de sus listas de precios' : ''}.
             Un producto sin precio registrado no tiene mínimo.
           </span>
