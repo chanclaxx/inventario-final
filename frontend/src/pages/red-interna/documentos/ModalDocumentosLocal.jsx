@@ -1,7 +1,9 @@
-import { FileText, LayoutList, Download, Share2, Loader2 } from 'lucide-react';
+import { useState } from 'react';
+import { FileText, LayoutList, Download, Share2, Loader2, ChevronRight } from 'lucide-react';
 import { Modal } from '../../../components/ui/Modal';
 import { formatCOP } from '../../../utils/formatters';
 import useExportarPdfRedInterna from '../../../hooks/useExportarPdfRedInterna';
+import { ModalEnviosPendientes } from './ModalEnviosPendientes';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Los documentos de la CUENTA de un local, en un solo botón — como «Exportar
@@ -27,6 +29,7 @@ const COLOR = {
  */
 export function ModalDocumentosLocal({ sucursalId, nombreLocal, data, onClose }) {
   const { exportando, error, exportar, puedeCompartir } = useExportarPdfRedInterna();
+  const [pendientes, setPendientes] = useState(false);
 
   const t = data?.totales || {};
   const conSaldo = (data?.envios || []).filter((e) => Number(e.saldo) > 0).length;
@@ -43,6 +46,7 @@ export function ModalDocumentosLocal({ sucursalId, nombreLocal, data, onClose })
       cifra: deuda > 0
         ? `Debe ${formatCOP(deuda)} · ${conSaldo} envío(s)${cargos ? ` · ${cargos} cargo(s)` : ''}`
         : 'Al día: no debe nada',
+      abre: true,
       pdf: {
         ruta: `/red-interna/envios-activos/${sucursalId}/pdf`,
         nombreArchivo: `envios-pendientes-${nombreLocal}.pdf`,
@@ -64,6 +68,17 @@ export function ModalDocumentosLocal({ sucursalId, nombreLocal, data, onClose })
     },
   ];
 
+  if (pendientes) {
+    return (
+      <ModalEnviosPendientes
+        sucursalId={sucursalId} nombreLocal={nombreLocal}
+        envios={data?.envios || []} cargos={data?.cargos || []}
+        deuda={deuda} aFavor={aFavor}
+        onClose={onClose}
+      />
+    );
+  }
+
   return (
     <Modal open onClose={onClose} title="Documentos de la cuenta" size="sm">
       <div className="flex flex-col gap-3">
@@ -76,7 +91,8 @@ export function ModalDocumentosLocal({ sucursalId, nombreLocal, data, onClose })
           const c = COLOR[op.color];
           return (
             <div key={op.id} className={`rounded-xl border ${c.border} ${c.bg} overflow-hidden`}>
-              <button type="button" disabled={exportando} onClick={() => exportar(op.pdf, 'descargar')}
+              <button type="button" disabled={exportando}
+                onClick={() => (op.abre ? setPendientes(true) : exportar(op.pdf, 'descargar'))}
                 className="w-full flex items-start gap-3 p-4 text-left hover:brightness-[0.98] disabled:opacity-60 disabled:cursor-not-allowed">
                 <div className={`mt-0.5 flex-shrink-0 ${c.icon}`}>
                   {exportando ? <Loader2 size={20} className="animate-spin" /> : <Icn size={20} />}
@@ -86,9 +102,11 @@ export function ModalDocumentosLocal({ sucursalId, nombreLocal, data, onClose })
                   <p className="text-xs text-gray-500 mt-0.5 leading-snug">{op.descripcion}</p>
                   <p className={`text-xs font-medium mt-1.5 ${c.text}`}>{op.cifra}</p>
                 </div>
-                <Download size={14} className={`mt-1 flex-shrink-0 ${c.icon} opacity-60`} />
+                {op.abre
+                  ? <ChevronRight size={16} className={`mt-1 flex-shrink-0 ${c.icon} opacity-70`} />
+                  : <Download size={14} className={`mt-1 flex-shrink-0 ${c.icon} opacity-60`} />}
               </button>
-              {puedeCompartir && (
+              {puedeCompartir && !op.abre && (
                 <button type="button" disabled={exportando} onClick={() => exportar(op.pdf, 'compartir')}
                   className={`w-full flex items-center justify-center gap-1.5 py-2 text-xs font-medium border-t ${c.border}
                     ${c.text} bg-white/60 hover:bg-white disabled:opacity-60`}>

@@ -13,6 +13,7 @@ import { Spinner }    from '../../components/ui/Spinner';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { CardEquipo } from './CardEquipo';
 import { ModalDocumentoEnvio } from './documentos/ModalDocumentoEnvio';
+import { ModalEnviosPendientes } from './documentos/ModalEnviosPendientes';
 import { CHIPS, contar, VENDIDOS } from './estados';
 import {
   ChevronDown, Search, X, TrendingUp, TrendingDown, Package, Truck,
@@ -776,7 +777,7 @@ function TarjetaDevolucion({ d }) {
 
 export function TabEnvios({
   envios, cargos = [], resumen, ocultos, propia, onAbonar, onAbonarCargo, onCambio,
-  devoluciones = [],
+  devoluciones = [], sucursalId = null, nombreLocal = '',
 }) {
   const [abierto, setAbierto] = useState(null);
   const [verPagados, setVerPagados] = useState(false);
@@ -784,6 +785,7 @@ export function TabEnvios({
   // desde que recibir genera la deuda.
   const [reclamando, setReclamando] = useState(null);
   const [imprimiendo, setImprimiendo] = useState(null);   // id del envío a imprimir
+  const [verPendientes, setVerPendientes] = useState(false);
 
   // Solo se sale temprano si no hay NADA que mostrar: un local puede no tener
   // envíos abiertos y sí devoluciones en curso, y esconderlas era justo el
@@ -907,8 +909,26 @@ export function TabEnvios({
     );
   };
 
+  const nPendientes = (resumen?.abiertos || 0) + cargosAbiertos.length;
+
   return (
     <div className="flex flex-col gap-2">
+      {/* La puerta a «Envíos por pagar» (lista + imprimir): para todos, también
+          para el vendedor, que no ve el recuadro de abajo pero sí debe la plata. */}
+      {sucursalId && nPendientes > 0 && (
+        <button type="button" onClick={() => setVerPendientes(true)}
+          className="flex items-center gap-3 rounded-xl border border-red-100 bg-red-50/60 px-4 py-2.5 text-left
+            hover:bg-red-50 transition-colors">
+          <Wallet size={16} className="text-red-500 flex-shrink-0" />
+          <span className="flex-1 min-w-0 text-sm text-red-800">
+            <strong>{nPendientes}</strong> {nPendientes === 1 ? 'documento' : 'documentos'} por pagar ·{' '}
+            <strong>{formatCOP(Number(resumen?.saldo_total || 0) + Number(resumen?.cargos_sueltos || 0))}</strong>
+          </span>
+          <span className="text-xs font-medium text-red-700 flex items-center gap-1">
+            <Printer size={13} /> Ver e imprimir
+          </span>
+        </button>
+      )}
       {!ocultos && resumen && (
         <div className="bg-blue-50/60 border border-blue-100 rounded-xl px-4 py-2.5">
           <p className="text-xs text-blue-800">
@@ -945,6 +965,18 @@ export function TabEnvios({
 
       {imprimiendo && (
         <ModalDocumentoEnvio remisionId={imprimiendo} onClose={() => setImprimiendo(null)} />
+      )}
+
+      {verPendientes && sucursalId && (
+        <ModalEnviosPendientes
+          sucursalId={sucursalId} nombreLocal={nombreLocal}
+          envios={envios} cargos={cargos}
+          // La deuda sale de los totales del local (saldo de envíos + cargos),
+          // no de sumar la lista, que viene topada.
+          deuda={Number(resumen?.saldo_total || 0) + Number(resumen?.cargos_sueltos || 0)}
+          aFavor={Number(resumen?.saldo_a_favor || 0)}
+          onClose={() => setVerPendientes(false)}
+        />
       )}
 
       {reclamando && (

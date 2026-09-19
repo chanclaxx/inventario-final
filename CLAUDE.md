@@ -1757,6 +1757,12 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > para mandar con la mercancía, sobre `DocumentoTermico`—, PDF A4 o compartir.
 > El ticket usa el mismo `getRemision` (misma clave de React Query que el
 > desplegable del envío), así que respeta el recorte del vendedor.
+> **«Envíos por pagar»** (`documentos/ModalEnviosPendientes.jsx`) se abre desde
+> la tarjeta de Documentos y desde un botón arriba de la pestaña Envíos (visible
+> también al vendedor): lista cada envío con saldo —del más viejo al más nuevo,
+> con su barra de pago— y los cargos; tocar uno abre su modal; abajo, todos
+> juntos en ticket POS de cobro, PDF A4 o compartir. El total es `deuda_total`
+> (o `saldo_total + cargos_sueltos`), nunca la suma de la lista topada.
 > Prueba: `55-pdf-red-interna` (49; la 2 quién ve valores, la 3 los abonos
 > ajenos, la 8 un envío de 70 líneas sin saltos de PDFKit, la 9 que ningún
 > carácter impreso quede fuera de WinAnsi).

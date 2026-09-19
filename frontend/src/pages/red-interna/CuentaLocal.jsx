@@ -368,6 +368,7 @@ export function CuentaLocal({
           envios={data.envios || []} cargos={data.cargos || []}
           devoluciones={data.devoluciones || []}
           resumen={data.envios_resumen}
+          sucursalId={sucursalId} nombreLocal={nombreLocal}
           ocultos={ocultos} propia={propia}
           onAbonar={(envio) => setPago({ envio })}
           onAbonarCargo={(cargo) => setPago({ cargo })}
