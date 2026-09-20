@@ -11,6 +11,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // Con extensión: la prueba del backend importa este archivo con Node puro.
 import { parsearListas } from './listasPrecios.js';
+import { esObsequio } from './obsequios.js';
 
 const _positivo = (v) => {
   const n = Number(v);
@@ -62,10 +63,17 @@ export const pisoItemCarrito = (item, regla) => {
 export const bajoMinimo = (valor, piso) =>
   piso != null && !(Number(valor) + 0.5 >= piso);
 
-/** Ítems del carrito cuyo precio a cobrar quedó por debajo de su piso. */
+/**
+ * Ítems del carrito cuyo precio a cobrar quedó por debajo de su piso.
+ *
+ * Un OBSEQUIO no está nunca por debajo: vale 0 a propósito y el backend cuenta
+ * su costo igual. Es la única excepción al candado, y es explícita — por eso se
+ * pregunta por la marca y no por «precio === 0».
+ */
 export const itemsBajoMinimo = (items, regla) => {
   if (!regla?.activo) return [];
   return (items || [])
+    .filter((i) => !esObsequio(i))
     .map((i) => ({ item: i, piso: pisoItemCarrito(i, regla) }))
     .filter(({ item, piso }) => bajoMinimo(item.precioFinal, piso));
 };

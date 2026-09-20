@@ -9,6 +9,8 @@ const garantiasRepo          = require('../garantias/garantias.repository');
 const { calcularCostoPromedio } = require('../../utils/costoPromedio.util');
 const { ingresarSerialRetomado, revertirIngresoSerial, rastroParaRetoma } = require('../../utils/retomaSerial.util');
 const precioMinimo = require('../../utils/precioMinimo.util');
+const obsequios    = require('../../utils/obsequios.util');
+const { hayObsequios } = require('../../config/columnas');
 
 // Piso de una línea de factura (feature opt-in `precio_minimo_activo`). La línea
 // solo guarda el IMEI de un serial, así que se busca por IMEI dentro de la sede.
@@ -307,7 +309,14 @@ const crearFactura = async ({
     const reglaPrecio = await precioMinimo.leerRegla(client, negocio_id);
 
     for (const linea of lineas) {
-      if (reglaPrecio) {
+      // Un OBSEQUIO se salta el precio mínimo —es exactamente para lo que
+      // existe la marca— y su precio lo pone el servidor en 0: si se usara el
+      // número del navegador, «obsequio + precio 100» sería una venta de 100
+      // que se saltó el candado. Su costo sigue contando en la utilidad, que
+      // es lo que hace honesto dejarlo pasar.
+      const esRegalo = obsequios.esObsequio(linea);
+      if (esRegalo) obsequios.exigirProducto(linea);
+      if (reglaPrecio && !esRegalo) {
         precioMinimo.exigirNoBajoMinimo({
           valor:  linea.precio,
           piso:   await _pisoLineaFactura(client, reglaPrecio, linea, sucursal_id),
@@ -319,7 +328,8 @@ const crearFactura = async ({
         nombre_producto: linea.nombre_producto,
         imei:            linea.imei        || null,
         cantidad:        linea.cantidad,
-        precio:          linea.precio,
+        precio:          obsequios.precioDeLinea(linea),
+        obsequio:        esRegalo,
         producto_id:     linea.imei ? null : (linea.producto_id || null),
         atributo_id:     linea.atributo_id || null,
         variante_id:     linea.variante_id || null,
@@ -916,30 +926,58 @@ const editarFactura = async (negocioId, id, {
       [nombre_cliente, cedula, celular, notas, cliente_id, vendedorFinal, id]
     );
 
-    // Precio mínimo (opt-in): sin esto bastaba con facturar al precio completo y
-    // bajarlo después editando. Solo se mira la línea cuyo precio BAJA: una
-    // factura vieja, hecha antes de encender el candado, se sigue pudiendo
-    // corregir en todo lo demás sin que la detenga un precio que ya tenía.
+    // ── Precio mínimo y obsequios al editar ───────────────────────────────
+    //
+    // Sin esto bastaba con facturar al precio completo y bajarlo después
+    // editando. Solo se mira la línea cuyo precio BAJA: una factura vieja,
+    // hecha antes de encender el candado, se sigue pudiendo corregir en todo lo
+    // demás sin que la detenga un precio que ya tenía.
+    //
+    // Un OBSEQUIO se queda en 0 mientras siga siendo obsequio. Ponerle un
+    // precio es DEJAR DE REGALARLO: la marca se cae y ese precio pasa por el
+    // mínimo como cualquier otro — sin esa comprobación, «regalar y luego
+    // cobrar 5.000» sería la puerta de atrás del candado, porque comparado con
+    // 0 todo precio sube. Lo que la edición NO hace es convertir en obsequio
+    // una línea cobrada: eso regala mercancía ya facturada y se decide en el
+    // carrito, no corrigiendo una venta.
     const reglaPrecio = await precioMinimo.leerRegla(client, negocioId);
-    if (reglaPrecio) {
-      const antesPorId = new Map(lineasAntes.map((l) => [Number(l.id), l]));
-      for (const linea of lineas) {
-        const antes = antesPorId.get(Number(linea.id));
-        if (!antes || Number(linea.precio) >= Number(antes.precio)) continue;
+    const antesPorId  = new Map(lineasAntes.map((l) => [Number(l.id), l]));
+
+    const cambios = [];
+    for (const linea of lineas) {
+      const antes       = antesPorId.get(Number(linea.id));
+      const eraRegalo   = antes?.obsequio === true;
+      const precio      = Number(linea.precio);
+      const sigueRegalo = eraRegalo && !(precio > 0);
+
+      if (reglaPrecio && antes && !sigueRegalo
+          && (eraRegalo ? precio > 0 : precio < Number(antes.precio))) {
         precioMinimo.exigirNoBajoMinimo({
-          valor:  linea.precio,
+          valor:  precio,
           piso:   await _pisoLineaFactura(client, reglaPrecio, antes, facturaActual.sucursal_id),
           nombre: antes.nombre_producto,
-          accion: 'dejar',
+          accion: eraRegalo ? 'cobrar' : 'dejar',
         });
       }
+
+      cambios.push({
+        id:           linea.id,
+        cantidad:     linea.cantidad,
+        precio:       sigueRegalo ? 0 : precio,
+        obsequio:     sigueRegalo,   // solo se apaga; encenderlo no está permitido
+        tocaObsequio: eraRegalo,
+      });
     }
 
-    for (const linea of lineas) {
+    for (const c of cambios) {
+      // La columna solo se nombra si existe y si de verdad hay algo que cambiar
+      // en ella: este UPDATE corre en CADA edición de factura.
+      const conObsequio = hayObsequios() && c.tocaObsequio;
       await client.query(
         `UPDATE lineas_factura SET precio = $1, cantidad = $2
+         ${conObsequio ? ', obsequio = $5' : ''}
          WHERE id = $3 AND factura_id = $4`,
-        [linea.precio, linea.cantidad, linea.id, id]
+        [c.precio, c.cantidad, c.id, id, ...(conObsequio ? [c.obsequio] : [])]
       );
     }
 

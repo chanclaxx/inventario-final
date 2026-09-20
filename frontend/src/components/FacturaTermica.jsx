@@ -139,9 +139,11 @@ function ContenidoFactura({ factura, garantias, config, fuenteSize }) {
           <div key={i} style={{ marginBottom: '4px' }}>
             <div className="negrita">{l.nombre_producto}</div>
             {l.imei && <div style={{ fontSize: '9px' }}>IMEI: {l.imei}</div>}
+            {/* Un obsequio dice «Obsequio», no «$0»: la cifra es la misma,
+                pero un 0 en el ticket se lee como un error de la venta. */}
             <div className="fila">
-              <span>{cantNeta} x {formatCOP(l.precio)}</span>
-              <span>{formatCOP(subtotalNeto)}</span>
+              <span>{cantNeta} x {l.obsequio ? 'Obsequio' : formatCOP(l.precio)}</span>
+              <span>{l.obsequio ? 'Obsequio' : formatCOP(subtotalNeto)}</span>
             </div>
           </div>
         );

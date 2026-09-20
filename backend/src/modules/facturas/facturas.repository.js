@@ -1,6 +1,6 @@
 const { pool } = require('../../config/db');
 const { asignarNumeroDocumento } = require('../../utils/numeracion.util');
-const { hayRetomaReingreso } = require('../../config/columnas');
+const { hayRetomaReingreso, hayObsequios } = require('../../config/columnas');
 
 // ── Subconsulta de proveedores reutilizable ───────────────────────────────────
 //
@@ -293,18 +293,24 @@ const create = async (client, {
   return rows[0];
 };
 
+// `obsequio` se interpola solo si la columna existe (ver columnas.js): esta es
+// la consulta que corre en CADA venta de los 28 negocios, así que nombrar una
+// columna ausente no tumbaría una feature nueva sino la facturación entera.
 const insertarLinea = async (client, {
   factura_id, nombre_producto, imei, cantidad, precio, producto_id,
-  atributo_id, variante_id,
+  atributo_id, variante_id, obsequio = false,
 }) => {
+  const conObsequio = hayObsequios();
   const { rows } = await client.query(`
     INSERT INTO lineas_factura
-      (factura_id, nombre_producto, imei, cantidad, precio, producto_id, atributo_id, variante_id)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      (factura_id, nombre_producto, imei, cantidad, precio, producto_id, atributo_id, variante_id
+       ${conObsequio ? ', obsequio' : ''})
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8${conObsequio ? ', $9' : ''})
     RETURNING *
   `, [
     factura_id, nombre_producto, imei || null, cantidad, precio,
     producto_id || null, atributo_id || null, variante_id || null,
+    ...(conObsequio ? [obsequio === true] : []),
   ]);
   return rows[0];
 };

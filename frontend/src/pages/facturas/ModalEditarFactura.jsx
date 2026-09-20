@@ -88,6 +88,7 @@ function buildEstadoInicial(data) {
       cantidad:        l.cantidad,
       cantidad_devuelta: Number(l.cantidad_devuelta || 0),
       precio:          Number(l.precio || 0),
+      obsequio:        l.obsequio === true,
     })),
     pagos: pagosArrayAMapa(data.pagos),
     // Factura a crédito: el backend ajusta el crédito por la DIFERENCIA que deja
@@ -670,6 +671,15 @@ export function ModalEditarFactura({ facturaId, onClose, onGuardado }) {
                   {precioBloqueado && (
                     <p className="text-xs text-amber-600">
                       {linea.cantidad_devuelta} devuelta(s) · precio bloqueado
+                    </p>
+                  )}
+                  {/* Un obsequio se queda en $0 mientras siga siéndolo.
+                      Escribirle un precio es dejar de regalarlo, y ahí el
+                      backend le exige el precio mínimo como a cualquier otra
+                      línea (no se puede «regalar y luego cobrar 5.000»). */}
+                  {linea.obsequio && (
+                    <p className="text-xs text-emerald-700">
+                      Obsequio · su costo ya baja la utilidad. Ponle un precio si vas a cobrarlo.
                     </p>
                   )}
                 </div>

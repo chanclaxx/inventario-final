@@ -303,10 +303,20 @@ function seccionProductos(doc, lineas, y) {
 
         textoAcotado(d, String(linea._cantNeta), COL.cant.x, yTexto, COL.cant.w,
           { size: 9, color: C.grisOscuro, align: 'right' });
-        textoAcotado(d, formatCOP(linea.precio), COL.precio.x, yTexto, COL.precio.w,
-          { size: 9, color: C.grisOscuro, align: 'right' });
-        textoAcotado(d, formatCOP(linea._subtotalNeto), COL.sub.x, yTexto, COL.sub.w,
-          { font: FONT.bold, size: 9, color: C.negro, align: 'right' });
+        // Un obsequio dice «Obsequio», no «$0». Es la misma cifra, pero un 0 en
+        // la columna del precio se lee como un error de la factura y hace que
+        // el cliente pregunte; la palabra cuenta lo que pasó de verdad.
+        if (linea.obsequio) {
+          textoAcotado(d, 'Obsequio', COL.precio.x, yTexto, COL.precio.w,
+            { size: 9, color: C.grisOscuro, align: 'right' });
+          textoAcotado(d, 'Obsequio', COL.sub.x, yTexto, COL.sub.w,
+            { font: FONT.bold, size: 9, color: C.negro, align: 'right' });
+        } else {
+          textoAcotado(d, formatCOP(linea.precio), COL.precio.x, yTexto, COL.precio.w,
+            { size: 9, color: C.grisOscuro, align: 'right' });
+          textoAcotado(d, formatCOP(linea._subtotalNeto), COL.sub.x, yTexto, COL.sub.w,
+            { font: FONT.bold, size: 9, color: C.negro, align: 'right' });
+        }
       },
     };
   });

@@ -24,6 +24,7 @@ import { ChipsVariante }        from '../../components/ui/ChipsVariante';
 import { InputMoneda } from '../../components/ui/InputMoneda';
 import { usePrecioMinimo } from '../../hooks/usePrecioMinimo';
 import { pisoItemCarrito, bajoMinimo, itemsBajoMinimo } from '../../utils/precioMinimo';
+import { esObsequio } from '../../utils/obsequios';
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
@@ -496,6 +497,16 @@ export function ModalPrestamo({ open, onClose }) {
   const handleSubmit = () => {
     setError('');
     if (items.length === 0) return setError('El carrito está vacío');
+    // Un obsequio es de la VENTA: regalar algo y a la vez prestarlo no
+    // significa nada, y un préstamo en $0 no se puede cobrar ni saldar. El
+    // backend lo rechazaría por el precio mínimo con un mensaje que no explica
+    // esto, así que se dice aquí.
+    const regalo = items.find(esObsequio);
+    if (regalo) {
+      return setError(`"${regalo.nombre}" está marcado como obsequio: quítale la marca en el `
+        + 'carrito para poder prestarlo, o factúralo aparte.');
+    }
+
     const bajos = itemsBajoMinimo(items, reglaPrecio);
     if (bajos.length) {
       const { item, piso } = bajos[0];

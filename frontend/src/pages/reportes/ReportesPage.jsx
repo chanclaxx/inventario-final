@@ -19,6 +19,7 @@ import {
   BarChart2, TrendingUp, Package, AlertTriangle,
   ChevronDown, ChevronUp, Info, Pencil, Check, X,
   Warehouse, Handshake, Wrench, CreditCard, LineChart, Users, Target, Truck,
+  Gift,
 } from 'lucide-react';
 const PanelAnalisis   = lazy(() => import('./PanelAnalisis'));
 const PanelVendedores = lazy(() => import('./PanelVendedores'));
@@ -85,6 +86,14 @@ const MetricCard = ({ label, valor, colorClass, sub }) => (
     <p className="text-2xl font-bold mt-1">{valor}</p>
     {sub && <p className="text-xs opacity-60 mt-1">{sub}</p>}
   </div>
+);
+
+// Se fue de regalo con la venta: no cobró nada y su costo baja la utilidad.
+const ChipObsequio = () => (
+  <span className="inline-flex items-center gap-1 text-xs bg-emerald-50 text-emerald-700
+    border border-emerald-200 px-1.5 py-0.5 rounded-full leading-tight mt-0.5">
+    <Gift size={10} /> Obsequio
+  </span>
 );
 
 const UtilidadBadge = ({ valor, sinDato = false }) => {
@@ -301,6 +310,7 @@ const FilaFactura = ({ factura, esAdmin, onCostoActualizado }) => {
                         {linea.linea_nombre}
                       </span>
                     )}
+                    {linea.obsequio && <ChipObsequio />}
                     {linea.imei && <p className="text-xs text-gray-400 font-mono mt-0.5">{linea.imei}</p>}
                   </div>
                   <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
@@ -310,7 +320,9 @@ const FilaFactura = ({ factura, esAdmin, onCostoActualizado }) => {
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-400">Precio</span>
-                      <span className="font-medium text-gray-700">{formatCOP(linea.precio_venta)}</span>
+                      <span className="font-medium text-gray-700">
+                        {linea.obsequio ? 'Obsequio' : formatCOP(linea.precio_venta)}
+                      </span>
                     </div>
                     <div className="flex justify-between items-center col-span-2 pt-1 border-t border-gray-100">
                       <span className="text-gray-400 font-medium">
@@ -340,10 +352,13 @@ const FilaFactura = ({ factura, esAdmin, onCostoActualizado }) => {
                         {linea.linea_nombre}
                       </span>
                     )}
+                    {linea.obsequio && <ChipObsequio />}
                     {linea.imei && <p className="text-gray-400 font-mono truncate">{linea.imei}</p>}
                   </div>
                   <span className="col-span-2 text-center text-gray-600">{linea.cantidad}</span>
-                  <span className="col-span-2 text-right text-gray-700">{formatCOP(linea.precio_venta)}</span>
+                  <span className="col-span-2 text-right text-gray-700">
+                    {linea.obsequio ? 'Obsequio' : formatCOP(linea.precio_venta)}
+                  </span>
                   <span className="col-span-2 text-right">
                     {esAdmin ? (
                       <CeldaCostoEditable linea={linea} onGuardado={onCostoActualizado} />
@@ -399,6 +414,15 @@ const FilaProducto = ({ producto, posicion }) => {
         )}
         <div className="flex items-center gap-3 mt-0.5 flex-wrap">
           <span className="text-xs text-gray-400">{producto.cantidad_vendida} vendido(s)</span>
+          {/* Un accesorio que se entrega de regalo con cada equipo encabeza
+              «lo más vendido» sin haber dejado un peso: hay que decirlo, o su
+              margen hundido no tiene explicación. */}
+          {producto.unidades_obsequio > 0 && (
+            <span className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200
+              px-1.5 py-0.5 rounded-full">
+              {producto.unidades_obsequio} de obsequio
+            </span>
+          )}
           <span className="text-xs text-gray-400">
             Costo: {sinCosto
               ? <span className="italic text-gray-300">Sin costo</span>
@@ -1122,6 +1146,163 @@ const SeccionVentasLocales = ({ red }) => {
   );
 };
 
+// ── Obsequios del período ─────────────────────────────────────────────────────
+//
+// Un obsequio no aparece en ninguna cifra de ingresos —cobra 0— y su único
+// rastro en la utilidad es que baja. Sin este bloque, «¿este mes regalamos de
+// más?» solo se podría responder abriendo factura por factura.
+//
+// Llega en `null` cuando no hay un solo obsequio en el período (o la feature
+// está apagada), y entonces la sección no existe: un panel que dice «no
+// regalaste nada» enseña a ignorarlo.
+//
+// El costo que se muestra NO se resta de nada aquí: ya está dentro de la
+// utilidad de arriba. Este bloque solo le pone nombre a esa caída y dice a
+// quién preguntarle.
+const FilaObsequioFactura = ({ factura }) => {
+  const [abierto, setAbierto] = useState(false);
+
+  return (
+    <div className="bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden">
+      <button
+        onClick={() => setAbierto(!abierto)}
+        className="w-full px-3.5 py-2.5 flex items-center justify-between gap-3 hover:bg-gray-50 transition-colors text-left"
+      >
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-gray-800 truncate">
+            {factura.nombre_cliente}
+            <span className="text-gray-400 font-normal">
+              {' '}· #{factura.factura_numero ?? factura.factura_id}
+            </span>
+          </p>
+          <p className="text-xs text-gray-400">
+            {formatFecha(factura.fecha)} · {factura.unidades} unidad(es)
+            {factura.usuario_nombre && ` · lo dio ${factura.usuario_nombre}`}
+            {factura.vendedor_nombre && ` · vendedor ${factura.vendedor_nombre}`}
+          </p>
+        </div>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <span className="text-sm font-semibold text-emerald-700">{formatCOP(factura.costo_total)}</span>
+          {abierto ? <ChevronUp size={15} className="text-gray-400" /> : <ChevronDown size={15} className="text-gray-400" />}
+        </div>
+      </button>
+
+      {abierto && (
+        <div className="px-3.5 pb-3 pt-1 border-t border-gray-100 flex flex-col gap-1">
+          {factura.lineas.map((l, i) => (
+            <div key={i} className="flex items-center justify-between gap-2 text-xs">
+              <span className="text-gray-600 truncate">
+                {l.cantidad} × {l.nombre_producto}
+                {l.imei && <span className="text-gray-400 font-mono"> · {l.imei}</span>}
+              </span>
+              <span className="text-gray-500 flex-shrink-0">
+                {l.costo_total === null
+                  ? <span className="italic text-gray-300">sin costo</span>
+                  : `costo ${formatCOP(l.costo_total)}`}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+const SeccionObsequios = ({ obsequios, totalVentas }) => {
+  const [verTodas, setVerTodas] = useState(false);
+  if (!obsequios) return null;
+
+  const { resumen, productos, responsables, facturas } = obsequios;
+  // Cuánto de lo vendido se fue en regalos. Dice si «se está regalando de más»
+  // mejor que el monto suelto: $200.000 en un mes de $2.000.000 no es lo mismo
+  // que en uno de $60.000.000.
+  const porcentaje = totalVentas > 0 ? (resumen.costo_total / totalVentas) * 100 : null;
+  const visibles   = verTodas ? facturas : facturas.slice(0, 8);
+
+  return (
+    <div className="flex flex-col gap-3 border-t border-gray-100 pt-4">
+      <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+        <Gift size={15} className="text-emerald-600" />
+        Obsequios
+        <span className="text-xs font-normal text-gray-400">
+          lo que se regaló con las ventas del período
+        </span>
+      </h3>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="bg-emerald-50 text-emerald-700 rounded-xl p-3">
+          <p className="text-xs font-medium opacity-70">Costo de lo regalado</p>
+          <p className="text-lg font-bold mt-0.5">{formatCOP(resumen.costo_total)}</p>
+          <p className="text-xs opacity-60 mt-0.5">ya descontado de la utilidad</p>
+        </div>
+        <div className="bg-blue-50 text-blue-700 rounded-xl p-3">
+          <p className="text-xs font-medium opacity-70">Unidades</p>
+          <p className="text-lg font-bold mt-0.5">{resumen.unidades}</p>
+          <p className="text-xs opacity-60 mt-0.5">
+            en {resumen.facturas} factura(s)
+            {resumen.unidades_sin_costo > 0 && ` · ${resumen.unidades_sin_costo} sin costo`}
+          </p>
+        </div>
+        <div className="bg-gray-50 text-gray-700 rounded-xl p-3">
+          <p className="text-xs font-medium opacity-70">Por factura con obsequio</p>
+          <p className="text-lg font-bold mt-0.5">{formatCOP(resumen.costo_por_factura)}</p>
+          <p className="text-xs opacity-60 mt-0.5">costo promedio</p>
+        </div>
+        <div className="bg-amber-50 text-amber-700 rounded-xl p-3">
+          <p className="text-xs font-medium opacity-70">Sobre lo vendido</p>
+          <p className="text-lg font-bold mt-0.5">
+            {porcentaje === null ? '—' : `${porcentaje.toFixed(1)}%`}
+          </p>
+          <p className="text-xs opacity-60 mt-0.5">del total del período</p>
+        </div>
+      </div>
+
+      <div className="grid md:grid-cols-2 gap-3">
+        {/* Qué se regala */}
+        <div className="bg-white border border-gray-100 rounded-xl shadow-sm p-3 flex flex-col gap-1.5">
+          <p className="text-xs font-semibold text-gray-500 mb-0.5">Qué se regala</p>
+          {productos.map((p) => (
+            <div key={p.nombre_producto} className="flex items-center justify-between gap-2 text-xs">
+              <span className="text-gray-700 truncate">{p.nombre_producto}</span>
+              <span className="text-gray-500 flex-shrink-0">
+                {p.unidades} u. · <strong className="text-gray-700">{formatCOP(p.costo_total)}</strong>
+              </span>
+            </div>
+          ))}
+        </div>
+
+        {/* Quién los da. Es el corte de control: dos personas que venden
+            parecido y regalan muy distinto es justo lo que hay que ver. */}
+        <div className="bg-white border border-gray-100 rounded-xl shadow-sm p-3 flex flex-col gap-1.5">
+          <p className="text-xs font-semibold text-gray-500 mb-0.5">Quién los dio</p>
+          {responsables.map((r) => (
+            <div key={r.usuario_id ?? 'sin'} className="flex items-center justify-between gap-2 text-xs">
+              <span className="text-gray-700 truncate">{r.usuario_nombre}</span>
+              <span className="text-gray-500 flex-shrink-0">
+                {r.unidades} u. en {r.facturas} factura(s) ·{' '}
+                <strong className="text-gray-700">{formatCOP(r.costo_total)}</strong>
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-2">
+        {visibles.map((f) => <FilaObsequioFactura key={f.factura_id} factura={f} />)}
+        {facturas.length > visibles.length && (
+          <button
+            type="button"
+            onClick={() => setVerTodas(true)}
+            className="text-xs text-blue-600 hover:text-blue-700 self-center py-1"
+          >
+            Ver las {facturas.length} facturas con obsequios
+          </button>
+        )}
+      </div>
+    </div>
+  );
+};
+
 const PanelResumen = ({ dashboard, loading }) => {
   if (loading) return <Spinner className="py-20" />;
 
@@ -1207,12 +1388,15 @@ const PanelVentas = ({ desde, hasta, onDesde, onHasta, esAdmin }) => {
   const creditos  = ventasData?.creditos  ?? null;
   // Solo llega con datos en la bodega de un negocio con red interna.
   const redInterna = ventasData?.red_interna ?? null;
+  // Llega en null si el negocio no usa obsequios o no regaló nada en el rango.
+  const obsequiosRango = ventasData?.obsequios ?? null;
 
   const hayContenido = facturas.length > 0
     || (prestamos && (prestamos.saldados.length > 0 || prestamos.activos.length > 0))
     || (servicios && (servicios.cerrados.length > 0 || servicios.activos.total > 0))
     || (creditos && (creditos.saldados.length > 0 || creditos.activos.total > 0))
-    || (redInterna && redInterna.envios.length > 0);
+    || (redInterna && redInterna.envios.length > 0)
+    || !!obsequiosRango;
 
   return (
     <div className="flex flex-col gap-4">
@@ -1251,6 +1435,22 @@ const PanelVentas = ({ desde, hasta, onDesde, onHasta, esAdmin }) => {
                 />
               </div>
 
+              {/* Obsequios. El costo NO se resta aquí: ya está dentro de la
+                  utilidad de arriba (un obsequio cobra 0 y cuesta lo que
+                  cuesta). Esto solo le pone nombre a esa caída — sin la línea,
+                  la utilidad del mes se ve más baja y nadie sabe por qué. */}
+              {resumen.unidades_obsequio > 0 && (
+                <div className="flex items-start gap-2 bg-emerald-50 border border-emerald-100 rounded-xl px-4 py-2 text-sm text-emerald-700">
+                  <Gift size={14} className="flex-shrink-0 mt-0.5" />
+                  <span>
+                    Obsequios del período: <strong>{resumen.unidades_obsequio}</strong> unidad(es)
+                    en {resumen.facturas_con_obsequio} factura(s), con un costo de{' '}
+                    <strong>{formatCOP(resumen.costo_obsequios)}</strong>
+                    {' '}— ya descontado de la utilidad de arriba.
+                  </span>
+                </div>
+              )}
+
               {resumen.total_retomas > 0 && (
                 <div className="flex items-center gap-2 bg-orange-50 border border-orange-100 rounded-xl px-4 py-2 text-sm text-orange-700">
                   <Info size={14} />
@@ -1274,6 +1474,12 @@ const PanelVentas = ({ desde, hasta, onDesde, onHasta, esAdmin }) => {
               </div>
             </>
           )}
+
+          {/* Lo que se regaló con las ventas */}
+          <SeccionObsequios
+            obsequios={obsequiosRango}
+            totalVentas={resumen?.total_ventas ?? 0}
+          />
 
           {/* Lo que la bodega le vendió a sus locales */}
           <SeccionVentasLocales red={redInterna} />

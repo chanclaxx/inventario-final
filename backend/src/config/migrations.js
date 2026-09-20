@@ -1610,6 +1610,25 @@ const aplicarMigraciones = async (client) => {
     ALTER TABLE IF EXISTS productos_serial   ADD COLUMN IF NOT EXISTS precios JSONB;
   `);
 
+  // Obsequios — lo que se regala con la venta se factura en $0 y su COSTO
+  // sigue contando en la utilidad
+  // ver migrations/20260920_obsequios.sql (ese archivo lleva el diseño
+  // completo; esto es la copia que corre de verdad en producción).
+  //
+  // Una marca explícita, nunca deducida de que el precio quedó en cero: un 0
+  // tecleado por error se ve igual que un regalo, y el precio mínimo tiene que
+  // dejar pasar el segundo sin abrirle la puerta al primero.
+  //
+  // Bloque PROPIO: si esto fallara, facturar tiene que seguir funcionando
+  // exactamente igual. La bandera `hayObsequios()` de src/config/columnas.js es
+  // la que decide si las consultas piden la columna.
+  //
+  // Sin backticks ni interpolaciones dentro del template literal.
+  await migrar(client, 'Obsequios', `
+    ALTER TABLE IF EXISTS lineas_factura
+      ADD COLUMN IF NOT EXISTS obsequio BOOLEAN NOT NULL DEFAULT FALSE;
+  `);
+
   // Código del proveedor en las etiquetas (NOMBRE-NIT-CIUDAD-consecutivo)
   // ver migrations/20260916_codigo_proveedor.sql
   //

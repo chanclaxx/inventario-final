@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   ShoppingCart, Trash2, Plus, Minus, FileText, Handshake, ArrowRightLeft,
-  Truck, Undo2, Bookmark, Route, Search, X, Info,
+  Truck, Undo2, Bookmark, Route, Search, X, Info, Gift,
 } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
 import { EmptyState } from '../../components/ui/EmptyState';
@@ -28,6 +28,7 @@ import { filtrarCarrito, MINIMO_PARA_BUSCAR } from '../../utils/carritoBusqueda'
 import { useListasPrecios } from '../../hooks/useListasPrecios';
 import { usePrecioMinimo } from '../../hooks/usePrecioMinimo';
 import { pisoItemCarrito, bajoMinimo, itemsBajoMinimo } from '../../utils/precioMinimo';
+import { esObsequio, unidadesObsequio, costoObsequios } from '../../utils/obsequios';
 import { SelectorListaPrecio, ListaPrecioItem } from '../../components/ui/SelectorListaPrecio';
 import { contarSinPrecio } from '../../utils/listasPrecios';
 
@@ -210,6 +211,14 @@ export function Carrito({ onFacturar, onPrestar, onBorradorCargado, sinHeader = 
   const reglaPrecio = usePrecioMinimo();
   const bajoElMinimo = itemsBajoMinimo(items, reglaPrecio);
   const pisoPorKey   = new Map(items.map((i) => [i.key, pisoItemCarrito(i, reglaPrecio)]));
+
+  // ── Obsequios ─────────────────────────────────────────────────────────────
+  // Viven con el precio mínimo: son la única forma de facturar algo en $0 con
+  // el candado puesto, y dejan rastro (la factura, el PDF y los reportes dicen
+  // que fue un regalo, y su costo sigue bajando la utilidad de la venta).
+  const marcarObsequio  = useCarritoStore((s) => s.marcarObsequio);
+  const regalados       = unidadesObsequio(items);
+  const costoRegalado   = costoObsequios(items);
 
   const [modalTraslado, setModalTraslado] = useState(false);
   const [despacho,      setDespacho]      = useState(null); // { items, descartados }
@@ -545,6 +554,13 @@ export function Carrito({ onFacturar, onPrestar, onBorradorCargado, sinHeader = 
                       <div className="flex-1" />
                     )}
                     <div className="flex items-center gap-1 flex-shrink-0">
+                      {esObsequio(item) ? (
+                        <span className="w-28 text-right text-sm font-semibold text-emerald-700
+                          bg-emerald-50 border border-emerald-200 rounded-lg px-2 py-1.5">
+                          Obsequio
+                        </span>
+                      ) : (
+                      <>
                       <span className="text-xs text-gray-400">$</span>
                       <InputMoneda
                         value={item.precioFinal}
@@ -555,8 +571,26 @@ export function Carrito({ onFacturar, onPrestar, onBorradorCargado, sinHeader = 
                           ${bajoMinimo(item.precioFinal, pisoPorKey.get(item.key))
                             ? 'border-red-400' : 'border-gray-200'}`}
                       />
+                      </>
+                      )}
                     </div>
                   </div>
+
+                  {/* Regalar este producto. Solo con el precio mínimo activo:
+                      sin candado, poner 0 en el campo de arriba ya lo hace. */}
+                  {reglaPrecio.activo && (
+                    <button
+                      type="button"
+                      onClick={() => marcarObsequio(item.key, !esObsequio(item))}
+                      className={`self-start text-xs font-medium transition-colors
+                        ${esObsequio(item)
+                          ? 'text-emerald-700 hover:text-emerald-800'
+                          : 'text-gray-400 hover:text-gray-600'}`}
+                    >
+                      <Gift size={12} className="inline mr-1 -mt-0.5" />
+                      {esObsequio(item) ? 'Va de obsequio · cobrarlo' : 'Marcar como obsequio'}
+                    </button>
+                  )}
 
                   {bajoMinimo(item.precioFinal, pisoPorKey.get(item.key)) && (
                     <button
@@ -649,6 +683,17 @@ export function Carrito({ onFacturar, onPrestar, onBorradorCargado, sinHeader = 
                 acción de red interna comparten fila porque son alternativas
                 entre sí, no pasos de lo mismo: apiladas cobraban 54px cada una
                 al espacio de los productos. */}
+            {regalados > 0 && (
+              <p className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-100
+                rounded-lg px-2.5 py-2">
+                {regalados === 1 ? '1 producto va de obsequio' : `${regalados} productos van de obsequio`}
+                : se facturan en $0
+                {costoRegalado != null && costoRegalado > 0
+                  ? `, y su costo (${formatCOP(costoRegalado)}) se descuenta de la utilidad de la venta.`
+                  : ', y su costo se descuenta de la utilidad de la venta.'}
+              </p>
+            )}
+
             {bajoElMinimo.length > 0 && (
               <p className="text-xs text-red-600 text-center">
                 {bajoElMinimo.length === 1

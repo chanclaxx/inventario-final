@@ -122,7 +122,73 @@ Three roles exist: `admin_negocio`, `supervisor`, `vendedor`. Role determines wh
 > `valor_prestamo` es el TOTAL: se compara `valor / cantidad_prestada` (la
 > vigente) contra el piso. Sin tocar: «Corregir valor de la línea» de la red.
 > `pisoDePrecios` está duplicada en `frontend/src/utils/precioMinimo.js`.
+> La ÚNICA excepción al piso es un **obsequio** (abajo).
 > Prueba: `56-precio-minimo` (55; la sección 1 es la de apagada).
+
+> **Obsequios — se regala, se factura en $0 y el COSTO sigue contando**
+> (`utils/obsequios.util.js`, `lineas_factura.obsequio`,
+> `20260920_obsequios.sql`; botón «Marcar como obsequio» en el CARRITO, que es
+> el centro de control de productos). Se vende un celular y se entrega con
+> vidrio y estuche de regalo: los dos SALEN del inventario y COSTARON plata, así
+> que tienen que ir en la factura. Escribirlos en 0 ya hacía lo correcto con la
+> utilidad —el reporte suma el costo de cada línea y le resta su subtotal, que
+> aquí es 0—, pero con `precio_minimo_activo` esa línea se rechaza, y la salida
+> era cobrarlos al mínimo o inventar un descuento en el equipo.
+> **La marca es explícita, nunca deducida de «precio 0»**: un 0 tecleado por
+> error se ve idéntico a un regalo, y el candado tiene que dejar pasar el
+> segundo sin abrirle la puerta al primero (criterio de `es_entrada` y `esExtra`).
+> Es lo ÚNICO que se guarda: el costo se deriva del nodo como el de cualquier
+> línea, y «lo que se dejó de cobrar» no se congela — el precio vive en el nodo
+> y cambia.
+> **El precio lo pone el BACKEND en 0** (`precioDeLinea`): si se confiara en el
+> número del navegador, «obsequio + precio 100» sería una venta que se saltó el
+> mínimo. Exige producto (`OBSEQUIO_SIN_PRODUCTO`): sin unidad no hay costo que
+> contar, que es el punto. **Al editar**, un obsequio sigue en 0; ponerle precio
+> es dejar de regalarlo, la marca se cae y ese precio pasa por el mínimo —sin
+> eso, «regalar y cobrar 5.000» sería la puerta de atrás, porque contra 0 todo
+> precio sube—. La edición NO convierte en obsequio una línea cobrada.
+> Una línea de obsequio es una línea normal: descuenta stock, se devuelve, se
+> cancela con la factura, y no suma al total, al crédito ni a la caja. **No se
+> puede prestar** (lo bloquea `ModalPrestamo`). El PDF y el ticket dicen
+> «Obsequio», no «$0».
+> Reportes: la línea aporta `utilidad = −costo` (ya pasaba), y ahora viaja
+> `obsequio`, más `costo_obsequios`/`unidades_obsequio` por factura y en el
+> resumen. **Esas cifras NO se restan otra vez**: ya están dentro de la
+> utilidad; solo le ponen nombre a la caída.
+> Sin la columna (`hayObsequios()`) la marca se ignora y el mínimo vuelve a
+> mandar sobre todo: aceptar el $0 sin poder escribir por qué sería abrir el
+> candado sin rastro. `lineas_factura` es la tabla de la venta, así que el
+> INSERT y el UPDATE solo nombran la columna si existe.
+> **El control: qué se regala y QUIÉN lo regala** (`getObsequiosRango`, sección
+> «Obsequios» de la pestaña **Ventas**): un obsequio no aparece en ninguna cifra
+> de ingresos y su único rastro en la utilidad es que baja, así que «¿este mes
+> regalamos de más?» solo se podía responder abriendo factura por factura. El
+> bloque viaja DENTRO de `getVentasRango` (como `red_interna`: mismo período,
+> misma pestaña, sin una petición más) y trae cuatro cifras —costo, unidades,
+> costo por factura y **% sobre lo vendido**, que es la que dice si es mucho— y
+> tres cortes: por **producto** (qué se regala), por **responsable**
+> (`facturas.usuario_id`, quien tenía la sesión: el corte de control) y por
+> **factura** (desplegable, con sus líneas). Ordena por **costo**, no por
+> unidades: lo que hay que mirar primero es dónde se fue el dinero.
+> **Devuelve `null` si no hay un solo obsequio** en el rango (o falta la
+> columna) y la sección no existe — mismo criterio que el resumen de avisos.
+> Todo se DERIVA de las líneas: cancelar una factura o devolver un producto lo
+> corrige solo, y no hay contador que mantener.
+> De paso, **la pestaña Productos** marca cuántas de las unidades «vendidas»
+> fueron regalo (si no, un accesorio que se entrega con cada equipo encabeza el
+> top sin haber dejado un peso y su margen hundido no se explica) y **la de
+> Vendedores** dice cuánto regaló cada uno (`unidades_obsequio`,
+> `costo_obsequios`, con `FILTER` sobre la misma suma de costo). Ese costo YA
+> estaba dentro de su utilidad: se nombra, no se resta otra vez.
+> `COSTO_UNITARIO_LINEA` se extrajo a una constante compartida entre la lista de
+> ventas y este resumen: dos copias acabarían diciendo que un regalo costó una
+> cifra en una pantalla y otra en la de al lado.
+> El resto del reporte ya era coherente sin tocarlo —dashboard, análisis y
+> créditos suman `subtotal − costo` por línea, y un obsequio aporta `−costo`—,
+> y caja no se mueve porque no entra un peso.
+> Prueba: `57-obsequios` (76; la sección 1 es la de sin migración, la 5 corre el
+> caso del celular con vidrio y estuche contra el reporte real, y la 6 el
+> resumen de control y que cuadre con la cifra de la pestaña de ventas).
 
 > **El PIN de administrador lo usan otros roles SOLO si el admin los autoriza**
 > (`config.service.verificarPinDeUsuario`, `middlewares/pinAdmin.middleware.js`,

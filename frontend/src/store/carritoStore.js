@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware';
 import { calcularPrecioTarifa, ORIGEN_LISTA, ORIGEN_TARIFA, ORIGEN_MANUAL } from '../utils/tarifas';
 import { choca, mismasReservas } from '../utils/reservas';
 import { resolverPrecioItem, ORIGEN_LISTA_PRECIO } from '../utils/listasPrecios';
+import { ORIGEN_OBSEQUIO } from '../utils/obsequios';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Carrito compartido por facturas, préstamos, traslados y despachos de red.
@@ -236,6 +237,35 @@ const useCarritoStore = create(
         });
       },
 
+      // ── Obsequios (va de la mano del precio mínimo) ───────────────────────
+      //
+      // Marcar un ítem como obsequio es decir «esto va con la venta y no se
+      // cobra»: el precio se pone en 0 y ahí se queda. No es un precio
+      // escrito a mano —por eso descarta la tarifa y la lista— y es LO ÚNICO
+      // que deja pasar el candado del precio mínimo, porque el backend sabe
+      // que es un regalo y va a contar su costo igual en la utilidad.
+      //
+      // Quitar la marca lo devuelve al precio que le tocaba: el de la lista
+      // activa si hay una, y si no el suyo de siempre. Nunca se queda en 0:
+      // un ítem a $0 sin marca es justo lo que el precio mínimo existe para
+      // impedir.
+      marcarObsequio: (key, esObsequio) => {
+        set({
+          items: get().items.map((i) => {
+            if (i.key !== key) return i;
+            if (esObsequio) {
+              return {
+                ...i, obsequio: true, precioFinal: 0,
+                tarifa_id: null, lista_precio_id: null, sin_precio_en_lista: false,
+                origen_precio: ORIGEN_OBSEQUIO,
+              };
+            }
+            const { obsequio: _quitada, ...resto } = i;
+            return _conLista(resto, get().listaPrecioActiva);
+          }),
+        });
+      },
+
       actualizarPrecio: (key, precioFinal) => {
         set({
           items: get().items.map((i) =>
@@ -244,9 +274,11 @@ const useCarritoStore = create(
               // del costo y el chip debe reflejarlo.
               // Editar a mano descarta la tarifa Y la lista: el precio dejó
               // de venir de ninguna de las dos y el chip debe reflejarlo.
+              // Escribir un precio a mano deja de ser un obsequio: un regalo
+              // vale 0 y lo decide el botón, no el teclado.
               ? { ...i, precioFinal: Number(precioFinal), tarifa_id: null,
                   lista_precio_id: null, sin_precio_en_lista: false,
-                  origen_precio: ORIGEN_MANUAL }
+                  obsequio: false, origen_precio: ORIGEN_MANUAL }
               : i
           ),
         });

@@ -1,0 +1,55 @@
+-- ─────────────────────────────────────────────────────────────────────────────
+-- OBSEQUIOS — lo que se regala con la venta se FACTURA en $0, pero su COSTO
+-- sigue contando en la utilidad.
+--
+-- 100% ADITIVA e IDEMPOTENTE. Se auto-aplica al arrancar el backend
+-- (src/config/migrations.js), dentro de su propio try/catch.
+--
+-- OJO: este archivo esta replicado inline en migrations.js dentro de un
+-- template literal de JavaScript. Por eso NO lleva ni una sola comilla
+-- invertida, ni siquiera en los comentarios: una sola cierra el literal a media
+-- consulta y el backend deja de arrancar entero. Ya paso tres veces.
+--
+-- ── El problema ─────────────────────────────────────────────────────────────
+-- Se vende un celular y se entrega con vidrio templado y estuche de regalo. El
+-- vidrio y el estuche SALEN del inventario y COSTARON plata, asi que tienen que
+-- ir en la factura: si no se escriben, el stock queda mintiendo y la utilidad
+-- de esa venta sale inflada por el costo de dos productos que ya no estan.
+--
+-- Escribirlos a precio 0 ya hacia lo correcto con la utilidad (el reporte suma
+-- el costo de cada linea y le resta su subtotal, que aqui es 0). Pero desde que
+-- existe el precio minimo (precio_minimo_activo) una linea en 0 se rechaza, y
+-- la unica salida era facturar el vidrio y el estuche a su precio minimo —
+-- cobrandole al cliente algo que se le regalo, o inventando un descuento en el
+-- celular que descuadra el precio de venta del equipo.
+--
+-- ── Por que una columna y no "precio = 0" a secas ──────────────────────────
+-- Porque "vale 0" y "es un obsequio" son cosas distintas y solo una es una
+-- DECISION. Un 0 tecleado por error se ve exactamente igual que un regalo:
+-- sin la marca no hay forma de que el precio minimo deje pasar el segundo sin
+-- abrirle la puerta al primero, ni de que el reporte pueda decir cuanto se
+-- regalo en el mes. Es el mismo criterio de es_entrada y de esExtra: una marca
+-- explicita, nunca deducida de que un numero quedo en cero.
+--
+-- La marca es lo UNICO que se guarda. Lo demas se deriva de lo que ya hay:
+--   · el costo del obsequio  -> el costo del nodo, el mismo que ya usa el
+--     reporte para cualquier linea (variante > atributo > producto, o
+--     seriales.costo_compra por IMEI);
+--   · lo que se dejo de cobrar -> no se guarda tampoco: el precio de venta del
+--     producto esta en su nodo y cambia con el tiempo. Inventar un "valor
+--     regalado" congelado seria una cifra que nadie podria explicar despues.
+--
+-- ── Que NO cambia ───────────────────────────────────────────────────────────
+-- Una linea de obsequio es una linea normal de factura: descuenta stock, entra
+-- en la devolucion, se cancela con la factura y se imprime en el PDF. Su precio
+-- es 0, asi que no suma al total, no suma al credito y no suma a la caja.
+--
+-- DEFAULT FALSE y NOT NULL: las lineas que ya existen en los 28 negocios nacen
+-- todas en falso, o sea "no es obsequio", que es exactamente lo que son.
+--
+-- Sin esta migracion la feature se apaga sola (columnas.js: hayObsequios) y la
+-- facturacion emite exactamente el SQL de siempre.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+ALTER TABLE IF EXISTS lineas_factura
+  ADD COLUMN IF NOT EXISTS obsequio BOOLEAN NOT NULL DEFAULT FALSE;

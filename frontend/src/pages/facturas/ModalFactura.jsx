@@ -27,6 +27,7 @@ import { useBorradores, useGuardarBorradorDesdeModal } from '../../hooks/useBorr
 import { useTarifas }        from '../../hooks/useTarifas';
 import { usePrecioMinimo }   from '../../hooks/usePrecioMinimo';
 import { itemsBajoMinimo }   from '../../utils/precioMinimo';
+import { esObsequio, unidadesObsequio } from '../../utils/obsequios';
 import { useMora }           from '../../hooks/useMora';
 import { useInteres }        from '../../hooks/useInteres';
 import { TarifaItem }        from '../../components/ui/SelectorTarifa';
@@ -131,6 +132,10 @@ function buildPayloadFactura({ tipoCliente, form, items, totalNeto, metodosSelec
       variante_id:     item.variante_id || null,
       cantidad:        item.cantidad    || 1,
       precio:          item.precioFinal,
+      // Lo que va de regalo. El precio lo pone el BACKEND en 0: mandar la marca
+      // y un precio distinto no serviría de nada, y así «obsequio» no puede
+      // convertirse en una venta que se saltó el precio mínimo.
+      ...(esObsequio(item) ? { obsequio: true } : null),
     };
   });
 
@@ -1496,17 +1501,31 @@ export function ModalFactura({ open, onClose }) {
                       ×{item.cantidad}
                     </span>
                   )}
-                  <InputMoneda value={item.precioFinal}
-                    onChange={(val) => actualizarPrecio(item.key, val)}
-                    className="w-28 text-right text-sm font-semibold text-gray-900 bg-white
-                      border border-gray-200 rounded-lg px-2 py-1 focus:outline-none
-                      focus:ring-2 focus:ring-blue-500" />
+                  {esObsequio(item) ? (
+                    <span className="w-28 text-right text-sm font-semibold text-emerald-700
+                      bg-emerald-50 border border-emerald-200 rounded-lg px-2 py-1">
+                      Obsequio
+                    </span>
+                  ) : (
+                    <InputMoneda value={item.precioFinal}
+                      onChange={(val) => actualizarPrecio(item.key, val)}
+                      className="w-28 text-right text-sm font-semibold text-gray-900 bg-white
+                        border border-gray-200 rounded-lg px-2 py-1 focus:outline-none
+                        focus:ring-2 focus:ring-blue-500" />
+                  )}
                 </div>
                 {tarifasCfg.activo && (
                   <TarifaItem item={item} config={tarifasCfg} onAplicar={aplicarTarifa} />
                 )}
               </div>
             ))}
+            {unidadesObsequio(items) > 0 && (
+              <p className="text-xs text-emerald-700">
+                {unidadesObsequio(items) === 1
+                  ? '1 producto va de obsequio: se factura en $0 y su costo baja la utilidad de esta venta.'
+                  : `${unidadesObsequio(items)} productos van de obsequio: se facturan en $0 y su costo baja la utilidad de esta venta.`}
+              </p>
+            )}
             <div className="border-t border-gray-200 mt-2 pt-2 flex justify-between">
               <span className="text-sm font-medium text-gray-700">Subtotal</span>
               <span className="text-sm font-bold text-gray-900">{formatCOP(total)}</span>

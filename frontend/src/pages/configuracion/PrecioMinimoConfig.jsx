@@ -1,4 +1,4 @@
-import { ToggleLeft, ToggleRight, ShieldCheck, AlertTriangle } from 'lucide-react';
+import { ToggleLeft, ToggleRight, ShieldCheck, AlertTriangle, Gift } from 'lucide-react';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PRECIO MÍNIMO DE VENTA (feature opt-in: `precio_minimo_activo`)
@@ -54,6 +54,24 @@ export function PrecioMinimoConfig({ valores, set }) {
             : <ToggleLeft  size={28} className="text-gray-300" />}
         </button>
       </div>
+
+      {/* Los obsequios son la salida que el candado necesita: sin ellos, para
+          regalar un vidrio habría que cobrarlo al mínimo o inventar un
+          descuento en el equipo. Solo aparecen con el candado encendido, que es
+          cuando poner $0 a mano deja de ser posible. */}
+      {activo && (
+        <div className="flex items-start gap-2 text-xs text-emerald-800 bg-emerald-50
+          border border-emerald-100 rounded-xl px-3 py-2.5">
+          <Gift size={14} className="flex-shrink-0 mt-0.5" />
+          <span>
+            <b>Obsequios.</b> Con esto encendido, el carrito gana el botón «Marcar como
+            obsequio»: ese producto se factura en <b>$0</b> —la factura y el recibo dicen
+            «Obsequio»— y <b>su costo se sigue descontando de la utilidad</b>. Así, un
+            celular entregado con vidrio y estuche de regalo reporta el costo de los tres
+            productos y una utilidad menor, que es lo que de verdad pasó.
+          </span>
+        </div>
+      )}
     </div>
   );
 }

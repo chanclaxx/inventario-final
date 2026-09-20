@@ -49,6 +49,7 @@ const detectarColumnas = async () => {
   await _detectarListasPrecios();
   await _detectarCodigoProveedor();
   await _detectarTecnicos();
+  await _detectarObsequios();
   return _ubicacionDisponible;
 };
 
@@ -426,6 +427,42 @@ const _detectarTecnicos = async () => {
 
 const hayTecnicos = () => _tecnicosDisponible;
 
+// ── Obsequios ────────────────────────────────────────────────────────────────
+//
+// Ver migrations/20260920_obsequios.sql. `lineas_factura` es la tabla de la
+// operación más caliente del sistema: si la migración no llegara a aplicarse y
+// el INSERT de la venta ya nombrara la columna, no se caería una feature nueva
+// — se caería FACTURAR, para los 28 negocios.
+//
+// Apagada, la marca se ignora y el precio mínimo vuelve a mandar sobre todas
+// las líneas: sin dónde escribir «esto es un regalo», dejar pasar un $0 sería
+// abrir el candado sin dejar rastro.
+
+let _obsequiosDisponible = false;
+
+const _detectarObsequios = async () => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT 1
+       FROM information_schema.columns
+       WHERE table_schema = 'public'
+         AND table_name   = 'lineas_factura'
+         AND column_name  = 'obsequio'`
+    );
+    _obsequiosDisponible = rows.length > 0;
+    if (!_obsequiosDisponible) {
+      console.warn('⚠️  Columna `obsequio` ausente: los obsequios quedan desactivados (facturar sigue igual).');
+    }
+  } catch (err) {
+    // Ante la duda, apagada: es la opción que no puede romper nada.
+    _obsequiosDisponible = false;
+    console.error('⚠️  No se pudo verificar `obsequio` (obsequios desactivados):', err.message);
+  }
+  return _obsequiosDisponible;
+};
+
+const hayObsequios = () => _obsequiosDisponible;
+
 // Solo para pruebas: permite simular una BD sin la columna sin tocar la BD real.
 const _setUbicacionDisponible  = (valor) => { _ubicacionDisponible  = !!valor; };
 const _setCatalogoDisponible   = (valor) => { _catalogoDisponible   = !!valor; };
@@ -437,6 +474,7 @@ const _setRetomaReingresoDisponible = (valor) => { _retomaReingresoDisponible = 
 const _setListasPreciosDisponible = (valor) => { _listasPreciosDisponible = !!valor; };
 const _setCodigoProveedorDisponible = (valor) => { _codigoProveedorDisponible = !!valor; };
 const _setTecnicosDisponible = (valor) => { _tecnicosDisponible = !!valor; };
+const _setObsequiosDisponible = (valor) => { _obsequiosDisponible = !!valor; };
 
 module.exports = {
   detectarColumnas, hayUbicacion, _setUbicacionDisponible,
@@ -449,4 +487,5 @@ module.exports = {
   hayListasPrecios, _setListasPreciosDisponible,
   hayCodigoProveedor, _setCodigoProveedorDisponible,
   hayTecnicos, _setTecnicosDisponible,
+  hayObsequios, _setObsequiosDisponible,
 };
