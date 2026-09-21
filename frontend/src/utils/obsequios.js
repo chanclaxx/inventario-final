@@ -11,6 +11,11 @@
 // 0 y **lo pone el backend** (`backend/src/utils/obsequios.util.js`), nunca el
 // navegador. Lo de este archivo es el vocabulario que comparten el carrito, el
 // modal de factura y el de préstamo.
+//
+// **NUNCA se calcula ni se muestra un COSTO desde aquí.** Estas pantallas son
+// el punto de venta: las ven el vendedor y el cliente al otro lado del
+// mostrador. Lo que costó un regalo es un dato de Reportes, y allá pasa por la
+// regla única de costos del backend (`utils/costos.util.js`).
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Origen del precio de un ítem del carrito, cuando es un regalo. */
@@ -22,19 +27,3 @@ export const esObsequio = (item) => item?.obsequio === true;
 /** Cuántas unidades del carrito van de regalo. */
 export const unidadesObsequio = (items) =>
   (items || []).reduce((s, i) => (esObsequio(i) ? s + (i.cantidad || 1) : s), 0);
-
-/**
- * Lo que cuestan esos regalos, o `null` si no se puede saber.
- *
- * El ítem del carrito solo trae `costo` cuando este usuario puede ver costos
- * (`costos_solo_admin` lo recorta en el BACKEND). Si falta el costo de alguno,
- * se devuelve null en vez de una suma a medias: media cifra sobre dinero se
- * lee como la cifra completa. Esto es solo un aviso en pantalla — la utilidad
- * de verdad la calcula el reporte contra el costo real del inventario.
- */
-export const costoObsequios = (items) => {
-  const regalos = (items || []).filter(esObsequio);
-  if (!regalos.length) return 0;
-  if (regalos.some((i) => !Number.isFinite(Number(i.costo)) || Number(i.costo) <= 0)) return null;
-  return regalos.reduce((s, i) => s + Number(i.costo) * (i.cantidad || 1), 0);
-};

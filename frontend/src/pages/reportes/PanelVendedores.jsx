@@ -100,10 +100,9 @@ const FilaVendedor = ({ vendedor, posicion }) => {
     vendedor_nombre, vendedor_activo, num_facturas, unidades,
     total_vendido, utilidad, margen_porcentaje, ticket_promedio,
     participacion, top_productos,
-    // Lo que este vendedor regaló. Su costo YA está dentro de `utilidad` (un
-    // obsequio cobra 0 y cuesta lo que cuesta): esto le pone nombre, y es lo
-    // que hace comparables a dos personas que venden parecido.
-    unidades_obsequio = 0, costo_obsequios = 0,
+    // Cuántas unidades regaló este vendedor. Solo unidades: el apartado de
+    // obsequios no lleva costo para nadie (el backend no lo manda).
+    unidades_obsequio = 0,
   } = vendedor;
 
   const medalla = posicion === 1 ? 'bg-amber-100 text-amber-700'
@@ -132,7 +131,7 @@ const FilaVendedor = ({ vendedor, posicion }) => {
             {unidades_obsequio > 0 && (
               <p className="text-xs text-emerald-700">
                 <Gift size={11} className="inline -mt-0.5 mr-0.5" />
-                {unidades_obsequio} u. de obsequio · {formatCOP(costo_obsequios)} de costo
+                {unidades_obsequio} u. de obsequio
               </p>
             )}
           </div>
@@ -211,16 +210,10 @@ export default function PanelVendedores() {
   const totales     = data?.totales     ?? null;
   const activo      = data?.activo;
 
-  // Lo regalado por los vendedores del ranking. Se suma aquí y no en el
+  // Unidades regaladas por los vendedores del ranking. Se suma aquí y no en el
   // backend porque el panel ya tiene las filas: una cifra más en la respuesta
   // sería un segundo sitio donde el mismo número podría discrepar.
-  const totalObsequios = vendedores.reduce(
-    (acc, v) => ({
-      unidades: acc.unidades + (v.unidades_obsequio || 0),
-      costo:    acc.costo    + (v.costo_obsequios   || 0),
-    }),
-    { unidades: 0, costo: 0 },
-  );
+  const totalObsequios = vendedores.reduce((s, v) => s + (v.unidades_obsequio || 0), 0);
 
   return (
     <div className="flex flex-col gap-4">
@@ -278,15 +271,14 @@ export default function PanelVendedores() {
 
           {/* Obsequios. Solo aparece si de verdad se regaló algo: sin datos no
               hay tarjeta, igual que el resto de los avisos del sistema. */}
-          {totalObsequios.unidades > 0 && (
+          {totalObsequios > 0 && (
             <div className="flex items-start gap-2 bg-emerald-50 border border-emerald-100
               rounded-xl px-4 py-2 text-sm text-emerald-800">
               <Gift size={14} className="flex-shrink-0 mt-0.5" />
               <span>
-                Estos vendedores regalaron <strong>{totalObsequios.unidades}</strong> unidad(es)
-                por <strong>{formatCOP(totalObsequios.costo)}</strong> de costo — ya descontado
-                de la utilidad de arriba. El detalle de qué se regaló y en qué factura está en
-                la pestaña <b>Ventas</b>.
+                Estos vendedores regalaron <strong>{totalObsequios}</strong> unidad(es). El
+                detalle de qué se regaló, quién lo dio y en qué factura está en la pestaña{' '}
+                <b>Ventas</b>.
               </span>
             </div>
           )}

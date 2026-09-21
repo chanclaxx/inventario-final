@@ -28,7 +28,7 @@ import { filtrarCarrito, MINIMO_PARA_BUSCAR } from '../../utils/carritoBusqueda'
 import { useListasPrecios } from '../../hooks/useListasPrecios';
 import { usePrecioMinimo } from '../../hooks/usePrecioMinimo';
 import { pisoItemCarrito, bajoMinimo, itemsBajoMinimo } from '../../utils/precioMinimo';
-import { esObsequio, unidadesObsequio, costoObsequios } from '../../utils/obsequios';
+import { esObsequio, unidadesObsequio } from '../../utils/obsequios';
 import { SelectorListaPrecio, ListaPrecioItem } from '../../components/ui/SelectorListaPrecio';
 import { contarSinPrecio } from '../../utils/listasPrecios';
 
@@ -218,7 +218,6 @@ export function Carrito({ onFacturar, onPrestar, onBorradorCargado, sinHeader = 
   // que fue un regalo, y su costo sigue bajando la utilidad de la venta).
   const marcarObsequio  = useCarritoStore((s) => s.marcarObsequio);
   const regalados       = unidadesObsequio(items);
-  const costoRegalado   = costoObsequios(items);
 
   const [modalTraslado, setModalTraslado] = useState(false);
   const [despacho,      setDespacho]      = useState(null); // { items, descartados }
@@ -686,11 +685,13 @@ export function Carrito({ onFacturar, onPrestar, onBorradorCargado, sinHeader = 
             {regalados > 0 && (
               <p className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-100
                 rounded-lg px-2.5 py-2">
-                {regalados === 1 ? '1 producto va de obsequio' : `${regalados} productos van de obsequio`}
-                : se facturan en $0
-                {costoRegalado != null && costoRegalado > 0
-                  ? `, y su costo (${formatCOP(costoRegalado)}) se descuenta de la utilidad de la venta.`
-                  : ', y su costo se descuenta de la utilidad de la venta.'}
+                {regalados === 1
+                  ? '1 producto va de obsequio: se factura en $0'
+                  : `${regalados} productos van de obsequio: se facturan en $0`}
+                {' '}y la factura dirá «Obsequio».
+                {/* NUNCA el costo aquí: esta pantalla la ven el vendedor y el
+                    cliente que está al otro lado del mostrador. Lo que costó
+                    el regalo es un dato de Reportes, no del punto de venta. */}
               </p>
             )}
 

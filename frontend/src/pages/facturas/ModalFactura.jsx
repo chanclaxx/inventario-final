@@ -1522,8 +1522,8 @@ export function ModalFactura({ open, onClose }) {
             {unidadesObsequio(items) > 0 && (
               <p className="text-xs text-emerald-700">
                 {unidadesObsequio(items) === 1
-                  ? '1 producto va de obsequio: se factura en $0 y su costo baja la utilidad de esta venta.'
-                  : `${unidadesObsequio(items)} productos van de obsequio: se facturan en $0 y su costo baja la utilidad de esta venta.`}
+                  ? '1 producto va de obsequio: se factura en $0 y la factura dirá «Obsequio».'
+                  : `${unidadesObsequio(items)} productos van de obsequio: se facturan en $0 y la factura dirá «Obsequio».`}
               </p>
             )}
             <div className="border-t border-gray-200 mt-2 pt-2 flex justify-between">

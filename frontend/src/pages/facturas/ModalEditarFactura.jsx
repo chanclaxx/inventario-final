@@ -679,7 +679,7 @@ export function ModalEditarFactura({ facturaId, onClose, onGuardado }) {
                       línea (no se puede «regalar y luego cobrar 5.000»). */}
                   {linea.obsequio && (
                     <p className="text-xs text-emerald-700">
-                      Obsequio · su costo ya baja la utilidad. Ponle un precio si vas a cobrarlo.
+                      Obsequio · ponle un precio si vas a cobrarlo.
                     </p>
                   )}
                 </div>

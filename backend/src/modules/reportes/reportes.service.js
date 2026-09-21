@@ -33,32 +33,6 @@ const _costoPorImei       = costoRed.sqlCostoPorImei;
 const CANT_EFECTIVA     = `(l.cantidad - COALESCE(l.cantidad_devuelta, 0))`;
 const SUBTOTAL_EFECTIVO = `(${CANT_EFECTIVA} * l.precio)`;
 
-// ── El costo unitario de UNA línea de factura ────────────────────────────────
-//
-// La misma regla que ya usaba la consulta de líneas: por IMEI sale del serial
-// (y en un local, del valor interno de la remisión); por cantidad, del nodo más
-// específico que traiga la línea (variante > atributo > producto) y, para las
-// líneas viejas que no guardaban ids, por nombre dentro de la sucursal.
-//
-// Vive en una constante porque la comparten la lista de ventas y el resumen de
-// obsequios: dos copias acabarían diciendo que un regalo costó una cifra en una
-// pantalla y otra en la de al lado. Exige los alias `l` (lineas_factura) y `f`
-// (facturas). No es entrada de usuario: es un literal SQL fijo.
-const COSTO_UNITARIO_LINEA = `
-      CASE
-        WHEN l.imei IS NOT NULL THEN
-          ${_costoPorImei('l.imei', 'f.sucursal_id', 'f.fecha', 'f.id')}
-        WHEN l.variante_id IS NOT NULL THEN
-          (SELECT v.costo_unitario FROM variantes_atributo v WHERE v.id = l.variante_id)
-        WHEN l.atributo_id IS NOT NULL THEN
-          (SELECT ap.costo_unitario FROM atributos_producto ap WHERE ap.id = l.atributo_id)
-        WHEN l.producto_id IS NOT NULL THEN
-          (SELECT pc.costo_unitario FROM productos_cantidad pc WHERE pc.id = l.producto_id)
-        ELSE
-          (SELECT pc.costo_unitario FROM productos_cantidad pc
-           WHERE pc.nombre = l.nombre_producto AND pc.sucursal_id = f.sucursal_id LIMIT 1)
-      END`;
-
 const getDashboard = async (sucursalId, negocioId = null) => {
   const [
     ventasHoy,
@@ -748,7 +722,19 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
       -- que el obsequio baje la utilidad de la factura sin ningún cálculo
       -- aparte. Aquí solo viaja la MARCA, para poder decirlo en pantalla.
       ${obsequios.selObsequio('l')},
-      ${COSTO_UNITARIO_LINEA} AS costo_unitario_compra,
+      CASE
+        WHEN l.imei IS NOT NULL THEN
+          ${_costoPorImei('l.imei', 'f.sucursal_id', 'f.fecha', 'f.id')}
+        WHEN l.variante_id IS NOT NULL THEN
+          (SELECT v.costo_unitario FROM variantes_atributo v WHERE v.id = l.variante_id)
+        WHEN l.atributo_id IS NOT NULL THEN
+          (SELECT ap.costo_unitario FROM atributos_producto ap WHERE ap.id = l.atributo_id)
+        WHEN l.producto_id IS NOT NULL THEN
+          (SELECT pc.costo_unitario FROM productos_cantidad pc WHERE pc.id = l.producto_id)
+        ELSE
+          (SELECT pc.costo_unitario FROM productos_cantidad pc
+           WHERE pc.nombre = l.nombre_producto AND pc.sucursal_id = f.sucursal_id LIMIT 1)
+      END AS costo_unitario_compra,
       CASE WHEN l.imei IS NOT NULL THEN 'serial' ELSE 'cantidad' END AS tipo_producto,
       -- IMPORTANTE: se usan subconsultas con LIMIT 1 (no JOINs) para obtener el
       -- nombre de línea. Un mismo IMEI puede existir en varias filas de
@@ -821,12 +807,9 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
       notas:                  f.notas,
       total_venta:            Number(f.total_venta),
       total_retomas:          totalRetomas,
-      // Lo que costó lo que se regaló en esta factura. NO se resta aparte: ya
-      // está DENTRO de `utilidad_bruta` (su línea aporta −costo, porque cobró
-      // 0). Se informa para poder explicar por qué la utilidad es menor de lo
-      // que el precio del equipo haría pensar.
-      costo_obsequios:        items.reduce((s2, i) => (
-        i.obsequio && i.costo_total !== null ? s2 + i.costo_total : s2), 0),
+      // Cuántas unidades se regalaron en esta factura. Sin costo, a propósito:
+      // el apartado de obsequios no lleva cifras de costo para nadie. Lo que el
+      // regalo costó ya está DENTRO de `utilidad_bruta` (su línea cobró 0).
       unidades_obsequio:      items.reduce((s2, i) => (i.obsequio ? s2 + i.cantidad : s2), 0),
       utilidad_bruta:         utilidadBruta,
       // La retoma NO se resta: se informa aparte (total_retomas). utilidad_neta
@@ -1037,11 +1020,8 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
     facturas_activas:           soloActivas.length,
     facturas_credito:           soloCreditos.length,
     utilidad_pendiente:         0,
-    // Obsequios del período. `costo_obsequios` YA está descontado dentro de
-    // `utilidad_neta_total` (un obsequio cobra 0 y cuesta lo que cuesta): se
-    // reporta para que la caída de la utilidad tenga nombre, nunca para
-    // restarla otra vez.
-    costo_obsequios:            facturasCompletas.reduce((s2, f) => s2 + f.costo_obsequios, 0),
+    // Obsequios del período, en UNIDADES (el apartado no lleva costo para
+    // nadie). Su costo ya está dentro de `utilidad_neta_total`.
     unidades_obsequio:          facturasCompletas.reduce((s2, f) => s2 + f.unidades_obsequio, 0),
     facturas_con_obsequio:      facturasCompletas.filter((f) => f.unidades_obsequio > 0).length,
     utilidad_creditos_saldados: utilidadCreditosSaldados,
@@ -1075,10 +1055,18 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
 
 // ─── Obsequios del período (feature opt-in) ──────────────────────────────────
 //
-// «¿Qué se está regalando, quién lo regala y cuánto nos cuesta?» Un obsequio no
-// se ve en ninguna cifra de ingresos —cobra 0— y su único rastro en la utilidad
-// es que baja, así que sin este bloque la pregunta «¿este mes regalamos de
-// más?» no tiene respuesta: habría que abrir factura por factura.
+// «¿Qué se está regalando y quién lo regala?» Un obsequio cobra 0, así que no
+// aparece en ninguna cifra de ingresos: sin este bloque, «¿alguien está
+// regalando de más?» solo se podía responder abriendo factura por factura.
+//
+// **ESTE BLOQUE NO LLEVA NINGÚN COSTO, PARA NADIE** (decisión del negocio,
+// sep-2026). Ni se calcula ni viaja en el JSON: lo que no sale de la base no se
+// puede filtrar desde la consola del navegador. El control se hace con
+// UNIDADES —qué producto, cuántas veces, quién lo dio, en qué factura— que es
+// lo que de verdad dice si alguien regala de más. Lo que el regalo le costó al
+// negocio ya está dentro de la utilidad de la venta (su línea cobra 0 y cuesta
+// lo que cuesta), y ahí se queda. Si alguien agrega aquí un campo de costo,
+// tiene que volver a preguntar.
 //
 // Devuelve `null` cuando no hay nada que contar (feature apagada, columna
 // ausente, o un período sin un solo obsequio) y la pantalla no pinta nada. Es
@@ -1088,22 +1076,14 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
 // QUIÉN LO DIO: `facturas.usuario_id` — quién hizo la venta, que existe
 // siempre. `vendedor_id` (feature opt-in de vendedores) viaja aparte en cada
 // factura, para el negocio que además atribuye la venta a un vendedor: son dos
-// preguntas distintas y la de control es la primera, la del usuario que tenía
-// la sesión abierta.
+// preguntas distintas y la de control es la primera.
 //
 // TODO se deriva de las líneas: no hay un solo contador guardado que cancelar
 // una factura o devolver un producto tendría que ir a corregir. Las facturas
-// canceladas quedan fuera (no se regaló nada: la venta no existe) y la
-// devolución parcial descuenta con `CANT_EFECTIVA`, igual que en el resto del
-// reporte.
+// canceladas quedan fuera (la venta no existe) y la devolución parcial
+// descuenta con `CANT_EFECTIVA`, igual que en el resto del reporte.
 const getObsequiosRango = async (sucursalId, desde, hasta) => {
   if (!hayObsequios()) return null;
-
-  const RANGO = `f.sucursal_id = $1
-      AND DATE(f.fecha AT TIME ZONE 'UTC' AT TIME ZONE 'America/Bogota') BETWEEN $2 AND $3
-      AND f.estado != 'Cancelada'
-      AND l.obsequio = TRUE
-      AND ${CANT_EFECTIVA} > 0`;
 
   // Una sola pasada por las líneas regaladas: de ahí salen los tres cortes
   // (por producto, por responsable y por factura). Agruparlo tres veces en SQL
@@ -1114,60 +1094,49 @@ const getObsequiosRango = async (sucursalId, desde, hasta) => {
       f.numero            AS factura_numero,
       f.fecha,
       f.nombre_cliente,
-      f.estado,
       f.usuario_id,
       u.nombre            AS usuario_nombre,
       v.nombre            AS vendedor_nombre,
       l.nombre_producto,
       l.imei,
-      ${CANT_EFECTIVA}    AS cantidad,
-      ${COSTO_UNITARIO_LINEA} AS costo_unitario
+      ${CANT_EFECTIVA}    AS cantidad
     FROM lineas_factura l
     JOIN facturas   f ON f.id = l.factura_id
     LEFT JOIN usuarios   u ON u.id = f.usuario_id
     LEFT JOIN vendedores v ON v.id = f.vendedor_id
-    WHERE ${RANGO}
+    WHERE f.sucursal_id = $1
+      AND DATE(f.fecha AT TIME ZONE 'UTC' AT TIME ZONE 'America/Bogota') BETWEEN $2 AND $3
+      AND f.estado != 'Cancelada'
+      AND l.obsequio = TRUE
+      AND ${CANT_EFECTIVA} > 0
     ORDER BY f.fecha DESC, l.id ASC
   `, [sucursalId, desde, hasta]);
 
   if (!rows.length) return null;
 
-  // El costo puede faltar (un producto que entró sin costo registrado). Se
-  // cuenta aparte en vez de sumarlo como 0: decir «regalaste $0» de algo que
-  // costó plata es peor que decir que no se sabe.
-  let costoTotal = 0;
-  let unidades   = 0;
-  let sinCosto   = 0;
-
+  let unidades = 0;
   const porProducto    = new Map();
   const porResponsable = new Map();
   const porFactura     = new Map();
 
   for (const r of rows) {
     const cantidad = Number(r.cantidad);
-    const unitario = r.costo_unitario !== null ? Number(r.costo_unitario) : null;
-    const costo    = unitario !== null ? unitario * cantidad : 0;
-    if (unitario === null) sinCosto += cantidad;
-
-    unidades   += cantidad;
-    costoTotal += costo;
+    unidades += cantidad;
 
     const prod = porProducto.get(r.nombre_producto) || {
-      nombre_producto: r.nombre_producto, unidades: 0, costo_total: 0, veces: 0,
+      nombre_producto: r.nombre_producto, unidades: 0, facturas: new Set(),
     };
-    prod.unidades    += cantidad;
-    prod.costo_total += costo;
-    prod.veces       += 1;
+    prod.unidades += cantidad;
+    prod.facturas.add(r.factura_id);
     porProducto.set(r.nombre_producto, prod);
 
     const claveResp = r.usuario_id ?? 0;
     const resp = porResponsable.get(claveResp) || {
       usuario_id:     r.usuario_id ?? null,
       usuario_nombre: r.usuario_nombre || 'Sin usuario',
-      unidades: 0, costo_total: 0, facturas: new Set(),
+      unidades: 0, facturas: new Set(),
     };
-    resp.unidades    += cantidad;
-    resp.costo_total += costo;
+    resp.unidades += cantidad;
     resp.facturas.add(r.factura_id);
     porResponsable.set(claveResp, resp);
 
@@ -1176,42 +1145,32 @@ const getObsequiosRango = async (sucursalId, desde, hasta) => {
       factura_numero:  r.factura_numero,
       fecha:           r.fecha,
       nombre_cliente:  r.nombre_cliente,
-      estado:          r.estado,
       usuario_nombre:  r.usuario_nombre  || null,
       vendedor_nombre: r.vendedor_nombre || null,
-      unidades: 0, costo_total: 0, lineas: [],
+      unidades: 0, lineas: [],
     };
-    fac.unidades    += cantidad;
-    fac.costo_total += costo;
-    fac.lineas.push({
-      nombre_producto: r.nombre_producto,
-      imei:            r.imei || null,
-      cantidad,
-      costo_unitario:  unitario,
-      costo_total:     unitario !== null ? costo : null,
-    });
+    fac.unidades += cantidad;
+    fac.lineas.push({ nombre_producto: r.nombre_producto, imei: r.imei || null, cantidad });
     porFactura.set(r.factura_id, fac);
   }
 
-  const porCosto = (a, b) => b.costo_total - a.costo_total || b.unidades - a.unidades;
+  const conConteo = (x) => ({ ...x, facturas: x.facturas.size });
+  const porUnidades = (a, b) => b.unidades - a.unidades || b.facturas - a.facturas;
 
   return {
     resumen: {
       unidades,
-      costo_total:      costoTotal,
-      facturas:         porFactura.size,
-      unidades_sin_costo: sinCosto,
-      // Lo que cuesta el regalo promedio de una factura con obsequios. Sirve
-      // para comparar personas y semanas sin tener que dividir a mano.
-      costo_por_factura: porFactura.size > 0 ? costoTotal / porFactura.size : 0,
+      facturas:   porFactura.size,
+      productos:  porProducto.size,
+      // Cuánto se regala en una venta que lleva regalo. Sirve para comparar
+      // personas y semanas sin tener que dividir a mano.
+      unidades_por_factura: porFactura.size > 0 ? unidades / porFactura.size : 0,
     },
-    productos:    [...porProducto.values()].sort(porCosto),
-    responsables: [...porResponsable.values()]
-      .map((r) => ({ ...r, facturas: r.facturas.size }))
-      .sort(porCosto),
-    // Las facturas se listan de la más cara a la más barata en regalos: lo que
-    // hay que revisar primero es dónde se fue el dinero, no qué pasó ayer.
-    facturas: [...porFactura.values()].sort(porCosto),
+    productos:    [...porProducto.values()].map(conConteo).sort(porUnidades),
+    responsables: [...porResponsable.values()].map(conConteo).sort(porUnidades),
+    // Las facturas con más unidades regaladas primero: es por donde empieza la
+    // revisión, no por lo que pasó ayer.
+    facturas: [...porFactura.values()].sort((a, b) => b.unidades - a.unidades),
   };
 };
 
@@ -1546,16 +1505,13 @@ const getVentasPorVendedor = async (sucursalId, desde, hasta) => {
           COALESCE(SUM(${CANT_EFECTIVA}), 0)     AS unidades,
           COALESCE(SUM(${SUBTOTAL_EFECTIVO}), 0) AS total_vendido,
           COALESCE(SUM(${costoLineaCase}), 0)    AS costo_total,
-          -- Lo que este vendedor REGALO. Su costo ya esta dentro del costo
-          -- total (un obsequio cobra 0 y cuesta lo que cuesta), asi que su
-          -- utilidad ya salia mas baja; esto le pone nombre y hace comparable
-          -- a dos personas que venden parecido.
+          -- Cuantas unidades REGALO este vendedor. Solo unidades: el apartado
+          -- de obsequios no lleva costo para nadie. Lo que costaron ya esta
+          -- dentro de su costo total y por eso su utilidad sale mas baja.
           -- OJO: sin comillas invertidas aqui dentro — este SQL vive en un
           -- template literal y una sola lo cierra a media consulta.
           COALESCE(SUM(${CANT_EFECTIVA}) FILTER (WHERE ${obsequios.sqlEsObsequio('l')}), 0)
-            AS unidades_obsequio,
-          COALESCE(SUM(${costoLineaCase}) FILTER (WHERE ${obsequios.sqlEsObsequio('l')}), 0)
-            AS costo_obsequios
+            AS unidades_obsequio
         FROM lineas_factura l
         JOIN facturas f ON f.id = l.factura_id
         WHERE f.sucursal_id = $1
@@ -1570,7 +1526,6 @@ const getVentasPorVendedor = async (sucursalId, desde, hasta) => {
         a.total_vendido,
         a.costo_total,
         a.unidades_obsequio,
-        a.costo_obsequios,
         v.nombre AS vendedor_nombre,
         v.activo AS vendedor_activo
       FROM agg a
@@ -1639,7 +1594,6 @@ const getVentasPorVendedor = async (sucursalId, desde, hasta) => {
       margen_porcentaje: totalVendido > 0 ? (utilidad / totalVendido) * 100 : null,
       ticket_promedio:   numFacturas > 0 ? totalVendido / numFacturas : 0,
       unidades_obsequio: Number(r.unidades_obsequio || 0),
-      costo_obsequios:   Number(r.costo_obsequios   || 0),
       participacion:     totalVendedores > 0 ? (totalVendido / totalVendedores) * 100 : 0,
       top_productos:     topPorVendedor[r.vendedor_id] || [],
     };
@@ -1651,7 +1605,6 @@ const getVentasPorVendedor = async (sucursalId, desde, hasta) => {
     num_facturas:  Number(sinVendRow.num_facturas),
     unidades:      Number(sinVendRow.unidades),
     unidades_obsequio: Number(sinVendRow.unidades_obsequio || 0),
-    costo_obsequios:   Number(sinVendRow.costo_obsequios   || 0),
     total_vendido: Number(sinVendRow.total_vendido),
     utilidad:      Number(sinVendRow.total_vendido) - Number(sinVendRow.costo_total),
   } : null;

@@ -20,6 +20,10 @@
 //      edición sería la puerta de atrás del candado.
 //   4. La utilidad (sección 5): la del reporte cuadra al peso con
 //      ingresos − (costo del equipo + costo de los dos obsequios).
+//   5. EL APARTADO DE OBSEQUIOS NO LLEVA COSTO, PARA NADIE (secciones 6 y 7):
+//      ni el bloque de control, ni la línea por vendedor, ni el punto de venta
+//      (carrito y modales, que ve el cliente al otro lado del mostrador). La
+//      sección 6 recorre el JSON entero buscando cualquier clave de costo.
 //
 //   node scripts/pruebas-red-interna/57-obsequios.mjs
 // Requiere PGlite (no va en package.json a propósito):
@@ -88,6 +92,17 @@ const rechaza = async (nombre, fn, code) => {
   catch (e) { ok(nombre, e.code === code, `${e.code || ''} ${String(e.message || '').slice(0, 70)}`); }
 };
 const seccion = (t) => console.log(`\n── ${t}`);
+
+// Toda clave que mencione «costo», a cualquier profundidad. El apartado de
+// obsequios no puede llevar ninguna: lo que no viaja no se filtra desde la
+// consola del navegador.
+const clavesDeCosto = (obj, ruta = '') => {
+  if (!obj || typeof obj !== 'object') return [];
+  return Object.entries(obj).flatMap(([k, v]) => [
+    ...(/costo/i.test(k) ? [`${ruta}${k}`] : []),
+    ...clavesDeCosto(v, `${ruta}${k}.`),
+  ]);
+};
 const q = async (sql, p = []) => (await db.query(sql, p)).rows;
 
 await db.exec(`
@@ -254,13 +269,11 @@ seccion('5. EL CASO: celular con vidrio y estuche de regalo — la utilidad');
     factura.lineas.filter((l) => l.obsequio).reduce((s, l) => s + l.utilidad, 0),
     -(COSTO_VIDRIO + COSTO_ESTUCHE));
 
-  igual('la factura informa el costo de lo regalado', factura.costo_obsequios,
-    COSTO_VIDRIO + COSTO_ESTUCHE);
-  ok('…y cuántas unidades', factura.unidades_obsequio === 2);
+  ok('la factura dice cuántas unidades se regalaron', factura.unidades_obsequio === 2);
+  ok('…y NO trae una cifra de costo de obsequios', !('costo_obsequios' in factura));
 
-  igual('resumen: costo de obsequios del período', rep.resumen.costo_obsequios,
-    COSTO_VIDRIO + COSTO_ESTUCHE);
   ok('resumen: unidades', rep.resumen.unidades_obsequio === 2);
+  ok('resumen: sin cifra de costo de obsequios', !('costo_obsequios' in rep.resumen));
   ok('resumen: facturas con obsequio', rep.resumen.facturas_con_obsequio === 1);
   igual('resumen: utilidad del período', rep.resumen.utilidad_neta_total, 2600000 - costoTotal);
 
@@ -288,44 +301,45 @@ seccion('6. El resumen de control: qué se regaló y QUIÉN lo dio');
   ok('el bloque existe', !!rep);
 
   // Lo de la sección 5 (1 vidrio + 1 estuche de Andrés) más los 2 de Ana.
-  ok('unidades del período', rep.resumen.unidades === 4, `${rep.resumen.unidades}`);
-  igual('costo del período', rep.resumen.costo_total, 6000 + 9000 + 6000 * 2);
-  ok('facturas con obsequio', rep.resumen.facturas === 2, `${rep.resumen.facturas}`);
-  igual('costo promedio por factura', rep.resumen.costo_por_factura, (6000 + 9000 + 12000) / 2);
+  // LA REGLA: ni una sola clave de costo en todo el bloque, a ninguna
+  // profundidad (resumen, productos, responsables, facturas y sus líneas).
+  const fugas = clavesDeCosto(rep);
+  ok('★ el bloque de obsequios NO trae ninguna clave de costo', fugas.length === 0,
+    fugas.join(', ') || 'limpio');
 
-  // Qué se regala, de lo más caro a lo más barato.
+  ok('unidades del período', rep.resumen.unidades === 4, `${rep.resumen.unidades}`);
+  ok('facturas con obsequio', rep.resumen.facturas === 2, `${rep.resumen.facturas}`);
+  ok('productos distintos', rep.resumen.productos === 2, `${rep.resumen.productos}`);
+  ok('unidades por factura con obsequio', rep.resumen.unidades_por_factura === 2);
+
+  // Qué se regala: lo que más unidades suma, primero.
   ok('el producto más regalado encabeza',
     rep.productos[0].nombre_producto === 'Vidrio templado', rep.productos[0].nombre_producto);
   ok('…con sus 3 unidades', rep.productos[0].unidades === 3, `${rep.productos[0].unidades}`);
-  igual('…y su costo', rep.productos[0].costo_total, 6000 * 3);
-  igual('el estuche va después', rep.productos[1].costo_total, 9000);
+  ok('…en 2 facturas', rep.productos[0].facturas === 2, `${rep.productos[0].facturas}`);
+  ok('el estuche va después con 1', rep.productos[1].unidades === 1);
 
   // Quién lo dio: el corte de control.
   const ana    = rep.responsables.find((r) => r.usuario_nombre === 'Ana');
   const andres = rep.responsables.find((r) => r.usuario_nombre === 'Andrés');
   ok('Ana aparece con sus 2 unidades', ana?.unidades === 2, `${ana?.unidades}`);
-  igual('…y su costo', ana.costo_total, 12000);
   ok('…en 1 factura', ana.facturas === 1);
   ok('Andrés aparece con sus 2 unidades', andres?.unidades === 2);
-  // Ordena por COSTO, no por unidades: Ana regaló 2 vidrios ($12.000) y Andrés
-  // un vidrio y un estuche ($15.000). Lo que hay que mirar primero es dónde se
-  // fue el dinero, no quién entregó más cosas.
-  ok('encabeza quien más COSTO regaló, no quien más unidades',
-    rep.responsables[0].usuario_nombre === 'Andrés' && rep.responsables[0].unidades === 2,
-    `${rep.responsables[0].usuario_nombre} · ${rep.responsables[0].costo_total}`);
+  ok('…en 1 factura', andres.facturas === 1);
 
-  // Las facturas, de la más cara a la más barata en regalos.
+  // Las facturas: la que más unidades regaló, primero.
   ok('se listan las 2 facturas', rep.facturas.length === 2);
-  ok('la más cara primero', rep.facturas[0].costo_total >= rep.facturas[1].costo_total);
+  ok('la de más unidades primero', rep.facturas[0].unidades >= rep.facturas[1].unidades);
   ok('cada factura trae sus líneas', rep.facturas[0].lineas.length > 0);
   ok('…y dice quién lo dio', !!rep.facturas[0].usuario_nombre);
 
   // Cuadra con lo que dice la pestaña de ventas: si las dos cifras se
-  // separaran, el panel de control contradiría al de utilidad.
+  // separaran, el panel de control contradiría al resumen de arriba.
   const ventas = await reportes.getVentasRango(1, hoy, hoy);
-  igual('el bloque cuadra con el resumen de ventas',
-    ventas.obsequios.resumen.costo_total, ventas.resumen.costo_obsequios);
-  ok('…y con las unidades', ventas.obsequios.resumen.unidades === ventas.resumen.unidades_obsequio);
+  ok('el bloque cuadra con el resumen de ventas',
+    ventas.obsequios.resumen.unidades === ventas.resumen.unidades_obsequio);
+  ok('…y con las facturas', ventas.obsequios.resumen.facturas === ventas.resumen.facturas_con_obsequio);
+  ok('el bloque dentro de ventas tampoco trae costo', clavesDeCosto(ventas.obsequios).length === 0);
 
   // Un período sin obsequios no pinta nada.
   ok('un rango sin obsequios devuelve null',
@@ -354,9 +368,9 @@ seccion('6. El resumen de control: qué se regaló y QUIÉN lo dio');
   const porVendedor = await reportes.getVentasPorVendedor(1, hoy, hoy);
   const v1 = porVendedor.vendedores[0];
   ok('el vendedor reporta sus obsequios', v1.unidades_obsequio === 4, `${v1.unidades_obsequio}`);
-  igual('…y su costo', v1.costo_obsequios, 6000 * 3 + 9000);
-  ok('el costo del regalo ya estaba dentro de su costo total',
-    v1.costo_total >= v1.costo_obsequios);
+  ok('…sin cifra de costo de obsequios', !('costo_obsequios' in v1));
+  ok('…tampoco en «sin vendedor»',
+    !porVendedor.sin_vendedor || !('costo_obsequios' in porVendedor.sin_vendedor));
   await q(`DELETE FROM config_negocio WHERE clave = 'vendedores_activo'`);
 }
 
@@ -369,8 +383,20 @@ seccion('7. Las pantallas prometen lo mismo que el backend');
   ok('el carrito solo ofrece obsequiar con el precio mínimo activo',
     /reglaPrecio\.activo &&[\s\S]{0,400}marcarObsequio/.test(carrito));
 
+  // El punto de venta lo ve el cliente al otro lado del mostrador: ni una cifra
+  // ni una mención de costo junto a los obsequios.
+  ok('★ el carrito no calcula costo de obsequios', !/costoObsequios|costoRegalado/.test(carrito));
+  const obsequiosUtil = leer('frontend/src/utils/obsequios.js');
+  ok('★ el util del frontend no exporta ninguna cifra de costo',
+    !/export const costo/i.test(obsequiosUtil));
+
   const modal = leer('frontend/src/pages/facturas/ModalFactura.jsx');
   ok('ModalFactura manda la marca al backend', /obsequio: true/.test(modal));
+  ok('★ ModalFactura no habla de costo junto al obsequio',
+    !/obsequio[^\n]{0,120}costo/i.test(modal));
+  const editar = leer('frontend/src/pages/facturas/ModalEditarFactura.jsx');
+  ok('★ ModalEditarFactura no habla de costo junto al obsequio',
+    !/Obsequio ·[^\n]{0,80}costo/i.test(editar));
   ok('…y no manda un precio propio para el regalo',
     !/precio:\s*0,\s*\n\s*obsequio/.test(modal));
 
@@ -393,13 +419,20 @@ seccion('7. Las pantallas prometen lo mismo que el backend');
   const reportesUI = leer('frontend/src/pages/reportes/ReportesPage.jsx');
   ok('la pestaña Ventas pinta la sección solo si el backend la manda',
     /if \(!obsequios\) return null/.test(reportesUI));
+  // La sección entera, desde su cabecera hasta el componente siguiente.
+  const seccionUI = reportesUI.slice(
+    reportesUI.indexOf('const FilaObsequioFactura'),
+    reportesUI.indexOf('const PanelResumen'));
+  ok('★ la sección de obsequios no pinta ninguna cifra de dinero',
+    seccionUI.length > 0 && !/formatCOP|costo/.test(seccionUI));
   ok('…y la cuelga de los datos del período', /<SeccionObsequios/.test(reportesUI));
   ok('la pestaña Productos marca lo regalado',
     /producto\.unidades_obsequio > 0/.test(reportesUI));
 
   const vendedoresUI = leer('frontend/src/pages/reportes/PanelVendedores.jsx');
-  ok('la pestaña Vendedores dice cuánto regaló cada uno',
-    /unidades_obsequio/.test(vendedoresUI) && /costo_obsequios/.test(vendedoresUI));
+  ok('la pestaña Vendedores dice cuántas unidades regaló cada uno',
+    /unidades_obsequio/.test(vendedoresUI));
+  ok('★ …y no pinta costo de obsequios', !/costo_obsequios/.test(vendedoresUI));
 }
 
 console.log(`\n${pasados} verificaciones OK, ${fallos} fallidas`);

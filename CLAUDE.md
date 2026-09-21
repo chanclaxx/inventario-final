@@ -151,10 +151,17 @@ Three roles exist: `admin_negocio`, `supervisor`, `vendedor`. Role determines wh
 > cancela con la factura, y no suma al total, al crédito ni a la caja. **No se
 > puede prestar** (lo bloquea `ModalPrestamo`). El PDF y el ticket dicen
 > «Obsequio», no «$0».
-> Reportes: la línea aporta `utilidad = −costo` (ya pasaba), y ahora viaja
-> `obsequio`, más `costo_obsequios`/`unidades_obsequio` por factura y en el
-> resumen. **Esas cifras NO se restan otra vez**: ya están dentro de la
-> utilidad; solo le ponen nombre a la caída.
+> Reportes: la línea aporta `utilidad = −costo` (ya pasaba) y ahora viaja
+> `obsequio`, más `unidades_obsequio` por factura y en el resumen.
+> **EL APARTADO DE OBSEQUIOS NO LLEVA COSTO, PARA NADIE** (decisión del
+> negocio, 21-sep-2026, reportado como error grave de seguridad): ni el punto
+> de venta —carrito, `ModalFactura` y `ModalEditarFactura` los ve el cliente al
+> otro lado del mostrador, y la primera versión pintaba «su costo ($15.000)»
+> desde `item.costo`—, ni el bloque de control, ni la línea por vendedor. El
+> backend ni lo calcula ni lo manda: lo que no viaja no se filtra desde la
+> consola. El control se hace con UNIDADES. Lo que el regalo costó sigue
+> dentro de la utilidad de la venta, que es donde tiene que estar. Agregar un
+> campo de costo a cualquiera de esas piezas exige volver a preguntar.
 > Sin la columna (`hayObsequios()`) la marca se ignora y el mínimo vuelve a
 > mandar sobre todo: aceptar el $0 sin poder escribir por qué sería abrir el
 > candado sin rastro. `lineas_factura` es la tabla de la venta, así que el
@@ -164,12 +171,12 @@ Three roles exist: `admin_negocio`, `supervisor`, `vendedor`. Role determines wh
 > de ingresos y su único rastro en la utilidad es que baja, así que «¿este mes
 > regalamos de más?» solo se podía responder abriendo factura por factura. El
 > bloque viaja DENTRO de `getVentasRango` (como `red_interna`: mismo período,
-> misma pestaña, sin una petición más) y trae cuatro cifras —costo, unidades,
-> costo por factura y **% sobre lo vendido**, que es la que dice si es mucho— y
-> tres cortes: por **producto** (qué se regala), por **responsable**
+> misma pestaña, sin una petición más) y trae cuatro cifras —unidades,
+> facturas con obsequio, **% de las ventas que llevaron obsequio** (la que dice
+> si es mucho) y unidades por factura— y tres cortes: por **producto** (qué se regala), por **responsable**
 > (`facturas.usuario_id`, quien tenía la sesión: el corte de control) y por
-> **factura** (desplegable, con sus líneas). Ordena por **costo**, no por
-> unidades: lo que hay que mirar primero es dónde se fue el dinero.
+> **factura** (desplegable, con sus líneas). Todo en unidades, y ordena por
+> unidades.
 > **Devuelve `null` si no hay un solo obsequio** en el rango (o falta la
 > columna) y la sección no existe — mismo criterio que el resumen de avisos.
 > Todo se DERIVA de las líneas: cancelar una factura o devolver un producto lo
@@ -177,18 +184,16 @@ Three roles exist: `admin_negocio`, `supervisor`, `vendedor`. Role determines wh
 > De paso, **la pestaña Productos** marca cuántas de las unidades «vendidas»
 > fueron regalo (si no, un accesorio que se entrega con cada equipo encabeza el
 > top sin haber dejado un peso y su margen hundido no se explica) y **la de
-> Vendedores** dice cuánto regaló cada uno (`unidades_obsequio`,
-> `costo_obsequios`, con `FILTER` sobre la misma suma de costo). Ese costo YA
-> estaba dentro de su utilidad: se nombra, no se resta otra vez.
-> `COSTO_UNITARIO_LINEA` se extrajo a una constante compartida entre la lista de
-> ventas y este resumen: dos copias acabarían diciendo que un regalo costó una
-> cifra en una pantalla y otra en la de al lado.
+> Vendedores** dice cuántas unidades regaló cada uno (`unidades_obsequio`, con
+> `FILTER`). Lo que costaron ya estaba dentro de su utilidad.
 > El resto del reporte ya era coherente sin tocarlo —dashboard, análisis y
 > créditos suman `subtotal − costo` por línea, y un obsequio aporta `−costo`—,
 > y caja no se mueve porque no entra un peso.
-> Prueba: `57-obsequios` (76; la sección 1 es la de sin migración, la 5 corre el
-> caso del celular con vidrio y estuche contra el reporte real, y la 6 el
-> resumen de control y que cuadre con la cifra de la pestaña de ventas).
+> Prueba: `57-obsequios` (83; la sección 1 es la de sin migración, la 5 corre el
+> caso del celular con vidrio y estuche contra el reporte real, la 6 recorre el
+> JSON del bloque ENTERO buscando cualquier clave de costo, y la 7 revisa que ni
+> el punto de venta ni las pestañas de Reportes pinten costo de obsequios — las
+> seis barandas marcadas con ★ fallan contra la versión con la fuga).
 
 > **El PIN de administrador lo usan otros roles SOLO si el admin los autoriza**
 > (`config.service.verificarPinDeUsuario`, `middlewares/pinAdmin.middleware.js`,
